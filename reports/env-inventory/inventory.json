@@ -1,0 +1,1162 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-06-30T14:53:55.4465863+08:00",
+  "readOnly": true,
+  "host": {
+    "computerName": "BAKER",
+    "userName": "14224",
+    "osVersion": "Microsoft Windows NT 10.0.26200.0",
+    "is64BitOperatingSystem": true,
+    "powershellVersion": "7.6.3",
+    "currentDirectory": "D:\\Codex\\projects\\统一环境"
+  },
+  "outputDir": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory",
+  "projectRoots": [
+    "D:\\Codex\\projects",
+    "D:\\Codex\\.gsd\\projects"
+  ],
+  "excludedRoots": [
+    {
+      "path": "C:\\Windows",
+      "reason": "系统目录，绝不自动迁移"
+    },
+    {
+      "path": "C:\\Program Files",
+      "reason": "MSI/系统级安装目录，绝不直接搬迁"
+    },
+    {
+      "path": "C:\\Program Files (x86)",
+      "reason": "MSI/系统级安装目录，绝不直接搬迁"
+    },
+    {
+      "path": "C:\\ProgramData",
+      "reason": "服务和机器级状态常驻位置，仅按官方迁移流程处理"
+    },
+    {
+      "path": "C:\\Users",
+      "reason": "不批量迁移用户目录或 AppData"
+    }
+  ],
+  "versionProbeTimeoutSeconds": 12,
+  "includeSizes": false,
+  "skipVersionProbe": false,
+  "tools": [
+    {
+      "name": "python",
+      "found": true,
+      "path": "D:\\Codex\\tools\\python313-official\\python.exe",
+      "version": "Python 3.13.14",
+      "evidence": "Python 3.13.14",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "py",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "uv",
+      "found": true,
+      "path": "C:\\Users\\14224\\.local\\bin\\uv.exe",
+      "version": "uv 0.11.7 (9d177269e 2026-04-15 x86_64-pc-windows-msvc)",
+      "evidence": "uv 0.11.7 (9d177269e 2026-04-15 x86_64-pc-windows-msvc)",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "pipx",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "poetry",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "conda",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "mamba",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "node",
+      "found": true,
+      "path": "C:\\Program Files\\nodejs\\node.exe",
+      "version": "v24.15.0",
+      "evidence": "v24.15.0",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "npm",
+      "found": true,
+      "path": "C:\\Program Files\\nodejs\\npm.ps1",
+      "version": "11.12.1",
+      "evidence": "11.12.1",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "pnpm",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "yarn",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "nvm",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "fnm",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "mise",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "scoop",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "winget",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "choco",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "git",
+      "found": true,
+      "path": "d:\\Program Files\\Git\\cmd\\git.exe",
+      "version": "git version 2.54.0.windows.1",
+      "evidence": "git version 2.54.0.windows.1",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "cargo",
+      "found": true,
+      "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin\\cargo.exe",
+      "version": "cargo 1.96.0 (30a34c682 2026-05-25)",
+      "evidence": "cargo 1.96.0 (30a34c682 2026-05-25)",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "rustc",
+      "found": true,
+      "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin\\rustc.exe",
+      "version": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+      "evidence": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "go",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "dotnet",
+      "found": true,
+      "path": "C:\\Program Files\\dotnet\\dotnet.exe",
+      "version": null,
+      "evidence": "The command could not be loaded, possibly because:   * You intended to execute a .NET application:       The application '--version' does not exist.   * You intended to execute a .NET SDK command:",
+      "exitCode": -2147450735,
+      "probeSucceeded": false,
+      "error": "Version probe exited with code -2147450735"
+    },
+    {
+      "name": "java",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "javac",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "mvn",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "gradle",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "cmake",
+      "found": true,
+      "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\cmake.exe",
+      "version": "cmake version 4.3.2  CMake suite maintained and supported by Kitware (kitware.com/cmake).",
+      "evidence": "cmake version 4.3.2  CMake suite maintained and supported by Kitware (kitware.com/cmake).",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "ninja",
+      "found": true,
+      "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\ninja.exe",
+      "version": "1.13.2",
+      "evidence": "1.13.2",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "docker",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "wsl",
+      "found": true,
+      "path": "C:\\WINDOWS\\system32\\wsl.exe",
+      "version": null,
+      "evidence": "*g塠艌\u0002?u嶯 \u0000L\u0000i\u0000n\u0000u\u0000x\u0000 \u0000剉 \u0000W\u0000i\u0000n\u0000d\u0000o\u0000w\u0000s\u0000 \u0000P[鹼邁\u00020颯\u001a惽徯廘?\u0000\u001c w\u0000s\u0000l\u0000.\u0000e\u0000x\u0000e\u0000 \u0000-\u0000-\u0000i\u0000n\u0000s\u0000t\u0000a\u0000l\u0000l\u0000\u001d  \u0000蹚L垑[艌\u00020 \u0000 \u0000 \u0000\tgsQ鎷苸酧o`\f鲖繈顣 \u0000h\u0000t\u0000t\u0000p\u0000s\u0000:\u0000/\u0000/\u0000a\u0000k\u0000a\u0000.\u0000m\u0000s\u0000/\u0000w\u0000s\u0000l\u0000i\u0000n\u0000s\u0000t\u0000a\u0000l\u0000l\u0000",
+      "exitCode": 1,
+      "probeSucceeded": false,
+      "error": "Version probe exited with code 1"
+    },
+    {
+      "name": "code",
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null
+    },
+    {
+      "name": "pwsh",
+      "found": true,
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+      "version": "PowerShell 7.6.3",
+      "evidence": "PowerShell 7.6.3",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    },
+    {
+      "name": "powershell",
+      "found": true,
+      "path": "",
+      "version": "7.6.3",
+      "evidence": "7.6.3",
+      "exitCode": 0,
+      "probeSucceeded": true,
+      "error": null
+    }
+  ],
+  "selectedEnvironmentVariables": [
+    {
+      "name": "Path",
+      "value": "D:\\Codex\\tools\\PowerShell\\7.6.3;D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0DV5SNM;D:\\Codex\\tools\\PowerShell\\7.6.3;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\dotnet\\;C:\\Program Files\\nodejs\\;d:\\Program Files\\Git\\cmd;C:\\Program Files (x86)\\ZeroTier\\One\\;C:\\Program Files\\Tailscale\\;C:\\Program Files\\Rust stable GNU 1.96\\bin;D:\\Codex\\.cargo\\bin;D:\\Codex\\tools\\codegraph\\current\\bin;D:\\Codex\\tools\\PowerShell\\7.6.3;D:\\Codex\\tools\\python313-official;D:\\Codex\\tools\\python313-shims;D:\\Codex\\tools\\dotnet;D:\\Codex\\tools\\uv\\bin;D:\\Codex\\_tools;D:\\hermes-data\\bin;D:\\hermes-agent\\.venv\\Scripts;C:\\Users\\14224\\.local\\bin;C:\\Users\\14224\\AppData\\Roaming\\Programs\\Zero Install;C:\\Users\\14224\\AppData\\Roaming\\npm;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin;D:\\Program Files\\Git\\bin;D:\\Program Files\\Git\\usr\\bin;C:\\Users\\14224\\AppData\\Local\\.luckin\\bin;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\\bin;D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools;C:\\Users\\14224\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd;C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.616.6631.0_x64__2p2nqsd0c76g0\\app\\resources",
+      "isSet": true
+    },
+    {
+      "name": "UV_CACHE_DIR",
+      "value": "D:\\uv\\cache",
+      "isSet": true
+    },
+    {
+      "name": "UV_TOOL_DIR",
+      "value": "D:\\Codex\\tools\\uv\\tools",
+      "isSet": true
+    },
+    {
+      "name": "PIP_CACHE_DIR",
+      "value": "D:\\Codex\\.pip-cache",
+      "isSet": true
+    },
+    {
+      "name": "PIPX_HOME",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "PIPX_BIN_DIR",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "POETRY_HOME",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "POETRY_CACHE_DIR",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "CONDA_ENVS_PATH",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "CONDA_PKGS_DIRS",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "NPM_CONFIG_CACHE",
+      "value": "D:\\Codex\\tools\\npm-cache",
+      "isSet": true
+    },
+    {
+      "name": "PNPM_HOME",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "CARGO_HOME",
+      "value": "D:\\Codex\\.cargo",
+      "isSet": true
+    },
+    {
+      "name": "RUSTUP_HOME",
+      "value": "D:\\Codex\\.rustup",
+      "isSet": true
+    },
+    {
+      "name": "NUGET_PACKAGES",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "MAVEN_USER_HOME",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "GRADLE_USER_HOME",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "GOPATH",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "GOMODCACHE",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "SCOOP",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "SCOOP_GLOBAL",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "MISE_DATA_DIR",
+      "value": null,
+      "isSet": false
+    },
+    {
+      "name": "MISE_CACHE_DIR",
+      "value": null,
+      "isSet": false
+    }
+  ],
+  "pathEntries": [
+    {
+      "index": 0,
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 1,
+      "path": "D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0DV5SNM",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 2,
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 3,
+      "path": "C:\\WINDOWS\\system32",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 4,
+      "path": "C:\\WINDOWS",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 5,
+      "path": "C:\\WINDOWS\\System32\\Wbem",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 6,
+      "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 7,
+      "path": "C:\\WINDOWS\\System32\\OpenSSH\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 8,
+      "path": "C:\\Program Files\\dotnet\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 9,
+      "path": "C:\\Program Files\\nodejs\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 10,
+      "path": "d:\\Program Files\\Git\\cmd",
+      "exists": true,
+      "drive": "d:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 11,
+      "path": "C:\\Program Files (x86)\\ZeroTier\\One\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 12,
+      "path": "C:\\Program Files\\Tailscale\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 13,
+      "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 14,
+      "path": "D:\\Codex\\.cargo\\bin",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 15,
+      "path": "D:\\Codex\\tools\\codegraph\\current\\bin",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 16,
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 17,
+      "path": "D:\\Codex\\tools\\python313-official",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 18,
+      "path": "D:\\Codex\\tools\\python313-shims",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 19,
+      "path": "D:\\Codex\\tools\\dotnet",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 20,
+      "path": "D:\\Codex\\tools\\uv\\bin",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 21,
+      "path": "D:\\Codex\\_tools",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 22,
+      "path": "D:\\hermes-data\\bin",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 23,
+      "path": "D:\\hermes-agent\\.venv\\Scripts",
+      "exists": false,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 24,
+      "path": "C:\\Users\\14224\\.local\\bin",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 25,
+      "path": "C:\\Users\\14224\\AppData\\Roaming\\Programs\\Zero Install",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 26,
+      "path": "C:\\Users\\14224\\AppData\\Roaming\\npm",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 27,
+      "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 28,
+      "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 29,
+      "path": "D:\\Program Files\\Git\\bin",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 30,
+      "path": "D:\\Program Files\\Git\\usr\\bin",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 31,
+      "path": "C:\\Users\\14224\\AppData\\Local\\.luckin\\bin",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 32,
+      "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 33,
+      "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\\bin",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 34,
+      "path": "D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools",
+      "exists": false,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 35,
+      "path": "C:\\Users\\14224\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 36,
+      "path": "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.616.6631.0_x64__2p2nqsd0c76g0\\app\\resources",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    }
+  ],
+  "directories": [
+    {
+      "name": "Codex tools root",
+      "path": "D:\\Codex\\tools",
+      "category": "d-target",
+      "owner": "host",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "推荐工具根目录"
+    },
+    {
+      "name": "Codex envs root",
+      "path": "D:\\Codex\\envs",
+      "category": "d-target",
+      "owner": "host",
+      "exists": false,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "推荐共享环境根目录"
+    },
+    {
+      "name": "Codex cache root",
+      "path": "D:\\Codex\\.cache",
+      "category": "d-target",
+      "owner": "host",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "推荐共享缓存根目录"
+    },
+    {
+      "name": "uv cache env",
+      "path": "D:\\uv\\cache",
+      "category": "cache",
+      "owner": "python",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "显式 UV_CACHE_DIR"
+    },
+    {
+      "name": "uv tools env",
+      "path": "D:\\Codex\\tools\\uv\\tools",
+      "category": "tool-env",
+      "owner": "python",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "显式 UV_TOOL_DIR"
+    },
+    {
+      "name": "pip cache env",
+      "path": "D:\\Codex\\.pip-cache",
+      "category": "cache",
+      "owner": "python",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "显式 PIP_CACHE_DIR"
+    },
+    {
+      "name": "pip cache default",
+      "path": "C:\\Users\\14224\\AppData\\Local\\pip\\Cache",
+      "category": "cache",
+      "owner": "python",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "pip 默认用户缓存候选"
+    },
+    {
+      "name": "pipx default home",
+      "path": "C:\\Users\\14224\\.local\\pipx",
+      "category": "tool-env",
+      "owner": "python",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "pipx 常见默认位置"
+    },
+    {
+      "name": "poetry cache default",
+      "path": "C:\\Users\\14224\\AppData\\Local\\pypoetry\\Cache",
+      "category": "cache",
+      "owner": "python",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Poetry 常见缓存位置"
+    },
+    {
+      "name": "conda user root",
+      "path": "C:\\Users\\14224\\.conda",
+      "category": "tool-env",
+      "owner": "conda",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Conda 用户目录"
+    },
+    {
+      "name": "npm cache env",
+      "path": "D:\\Codex\\tools\\npm-cache",
+      "category": "cache",
+      "owner": "node",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "显式 NPM_CONFIG_CACHE"
+    },
+    {
+      "name": "npm cache default",
+      "path": "C:\\Users\\14224\\AppData\\Local\\npm-cache",
+      "category": "cache",
+      "owner": "node",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "npm 常见缓存位置"
+    },
+    {
+      "name": "pnpm store default",
+      "path": "C:\\Users\\14224\\AppData\\Local\\pnpm\\store",
+      "category": "cache",
+      "owner": "node",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "pnpm 常见 store 位置"
+    },
+    {
+      "name": "cargo home",
+      "path": "D:\\Codex\\.cargo",
+      "category": "tool-env",
+      "owner": "rust",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Cargo 工具和缓存根"
+    },
+    {
+      "name": "rustup home",
+      "path": "D:\\Codex\\.rustup",
+      "category": "tool-env",
+      "owner": "rust",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Rustup 工具链根"
+    },
+    {
+      "name": "go path",
+      "path": "C:\\Users\\14224\\go",
+      "category": "tool-env",
+      "owner": "go",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Go GOPATH"
+    },
+    {
+      "name": "scoop user",
+      "path": "C:\\Users\\14224\\scoop",
+      "category": "tool-env",
+      "owner": "windows",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Scoop 用户安装根"
+    },
+    {
+      "name": "scoop global",
+      "path": "C:\\ProgramData\\scoop",
+      "category": "tool-env",
+      "owner": "windows",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Scoop 全局安装根"
+    },
+    {
+      "name": "nuget packages",
+      "path": "C:\\Users\\14224\\.nuget\\packages",
+      "category": "cache",
+      "owner": "dotnet",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "NuGet 包缓存"
+    },
+    {
+      "name": "maven repository",
+      "path": "C:\\Users\\14224\\.m2\\repository",
+      "category": "cache",
+      "owner": "java",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Maven 本地仓库常见位置"
+    },
+    {
+      "name": "gradle user home",
+      "path": "C:\\Users\\14224\\.gradle",
+      "category": "cache",
+      "owner": "java",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Gradle 用户缓存和 wrapper 根"
+    },
+    {
+      "name": "docker user config",
+      "path": "C:\\Users\\14224\\.docker",
+      "category": "manual-only",
+      "owner": "container",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "Docker 用户配置，可能包含上下文和凭据引用"
+    },
+    {
+      "name": "vscode extensions",
+      "path": "C:\\Users\\14224\\.vscode\\extensions",
+      "category": "tool-env",
+      "owner": "editor",
+      "exists": false,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "sizeBytes": null,
+      "notes": "VS Code 用户扩展目录"
+    }
+  ],
+  "projectEnvironmentMarkers": [
+    {
+      "project": "D:\\Codex\\projects\\歌单转换",
+      "marker": ".venv",
+      "path": "D:\\Codex\\projects\\歌单转换\\.venv",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\codex-account-switch",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
+      "marker": ".venv",
+      "path": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\.venv",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+    },
+    {
+      "project": "D:\\Codex\\.gsd\\projects\\hermes-agent",
+      "marker": ".venv",
+      "path": "D:\\Codex\\.gsd\\projects\\hermes-agent\\.venv",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+    },
+    {
+      "project": "D:\\Codex\\.gsd\\projects\\new-chat-4",
+      "marker": ".venv",
+      "path": "D:\\Codex\\.gsd\\projects\\new-chat-4\\.venv",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+    }
+  ],
+  "migrationCandidates": [
+    {
+      "source": "C:\\Users\\14224\\AppData\\Local\\pip\\Cache",
+      "kind": "cache",
+      "owner": "python",
+      "risk": "low",
+      "action": "可考虑迁移到 D:\\Codex\\.cache",
+      "reason": "pip 默认用户缓存候选"
+    }
+  ],
+  "manualReviewItems": [
+    {
+      "source": "D:\\Codex\\projects\\歌单转换\\.venv",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\.venv",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\.gsd\\projects\\hermes-agent\\.venv",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\.gsd\\projects\\new-chat-4\\.venv",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    }
+  ]
+}
