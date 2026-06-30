@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "validatedAt": "2026-06-30T17:00:00+08:00",
+  "userPipCache": "D:\\Codex\\.cache\\pip",
+  "initialProcessPipCache": "D:\\Codex\\.pip-cache",
+  "verificationProcessPipCache": "D:\\Codex\\.cache\\pip",
+  "pipCommandCount": 0,
+  "python": "D:\\Codex\\tools\\python313-official\\python.exe",
+  "pythonPipCacheDirExitCode": 1,
+  "pythonPipCacheDirOutput": "D:\\Codex\\tools\\python313-official\\python.exe: No module named pip",
+  "runtimeVerificationAvailable": false,
+  "runtimeVerificationNote": "当前 Python 没有 pip 模块，且 PATH 中没有 pip/pip3 命令，因此不能用 pip cache dir 作为运行时验证信号；已验证 User scope PIP_CACHE_DIR 和 post inventory/plan。",
+  "inventoryCandidates": 0,
+  "pipDefaultCandidate": 0,
+  "planItems": 0,
+  "manualReviewItems": 5,
+  "processRefreshRequired": true,
+  "processRefreshNote": "Codex 当前长生命周期进程仍可能继承旧 Process PIP_CACHE_DIR；新 shell、刷新环境或重启相关进程后会读取 User scope 策略。"
+}

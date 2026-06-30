@@ -30,6 +30,7 @@ $scriptPath = Join-Path $ProjectRoot "scripts\Invoke-EnvInventory.ps1"
 $testRoot = Join-Path $ProjectRoot "reports\env-inventory-test"
 $quickOutput = Join-Path $testRoot "quick"
 $fullOutput = Join-Path $testRoot "full"
+$canonicalPipOutput = Join-Path $testRoot "canonical-pip"
 
 Assert-True -Condition (Test-Path -Path $scriptPath -PathType Leaf) -Message "Inventory script not found: $scriptPath"
 
@@ -39,6 +40,7 @@ if (Test-Path -Path $testRoot) {
 
 New-Item -ItemType Directory -Force -Path $quickOutput | Out-Null
 New-Item -ItemType Directory -Force -Path $fullOutput | Out-Null
+New-Item -ItemType Directory -Force -Path $canonicalPipOutput | Out-Null
 
 $quickResult = & $scriptPath -OutputDir $quickOutput -SkipVersionProbe
 Assert-True -Condition ([bool]$quickResult.readOnly) -Message "Quick run did not report readOnly=true"
@@ -104,6 +106,18 @@ try {
 }
 Assert-True -Condition $blocked -Message "Inventory 脚本没有阻止 C 盘 OutputDir"
 Assert-True -Condition (-not (Test-Path -Path $blockedOutput)) -Message "测试不应在 C 盘创建输出目录"
+
+$previousProcessPipCache = $env:PIP_CACHE_DIR
+try {
+    $env:PIP_CACHE_DIR = "D:\Codex\.cache\pip"
+    & $scriptPath -OutputDir $canonicalPipOutput -SkipVersionProbe | Out-Null
+    $canonicalInventory = Get-Content -Path (Join-Path $canonicalPipOutput "inventory.json") -Raw | ConvertFrom-Json
+    $pipDefaultPath = Join-Path $env:LOCALAPPDATA "pip\Cache"
+    $pipDefaultCandidate = @($canonicalInventory.migrationCandidates | Where-Object { $_.source -eq $pipDefaultPath })
+    Assert-True -Condition ($pipDefaultCandidate.Count -eq 0) -Message "PIP_CACHE_DIR 指向 canonical D 盘缓存后，不应继续把旧默认 pip cache 作为迁移候选"
+} finally {
+    $env:PIP_CACHE_DIR = $previousProcessPipCache
+}
 
 if (-not $KeepOutputs) {
     Remove-Item -Path $testRoot -Recurse -Force

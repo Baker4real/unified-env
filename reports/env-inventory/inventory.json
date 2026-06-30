@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-30T15:20:24.2556931+08:00",
+  "generatedAt": "2026-06-30T16:52:45.7495004+08:00",
   "readOnly": true,
   "host": {
     "computerName": "BAKER",
@@ -390,7 +390,7 @@
     },
     {
       "name": "PIP_CACHE_DIR",
-      "value": "D:\\Codex\\.pip-cache",
+      "value": "D:\\Codex\\.cache\\pip",
       "isSet": true
     },
     {
@@ -850,7 +850,7 @@
     },
     {
       "name": "pip cache env",
-      "path": "D:\\Codex\\.pip-cache",
+      "path": "D:\\Codex\\.cache\\pip",
       "category": "cache",
       "owner": "python",
       "exists": true,
@@ -1107,16 +1107,7 @@
       "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
     }
   ],
-  "migrationCandidates": [
-    {
-      "source": "C:\\Users\\14224\\AppData\\Local\\pip\\Cache",
-      "kind": "cache",
-      "owner": "python",
-      "risk": "low",
-      "action": "可考虑迁移到 D:\\Codex\\.cache",
-      "reason": "pip 默认用户缓存候选"
-    }
-  ],
+  "migrationCandidates": [],
   "manualReviewItems": [
     {
       "source": "D:\\Codex\\projects\\歌单转换\\.venv",

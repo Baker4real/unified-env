@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "migrationId": "migration-01-python-cache",
+  "executedAt": "2026-06-30T16:52:15.5475142+08:00",
+  "scriptPath": "D:\\Codex\\projects\\统一环境\\scripts\\Invoke-PipCacheMigration.ps1",
+  "migrationPlanPath": "D:\\Codex\\projects\\统一环境\\reports\\env-migration-plan\\plan.json",
+  "preExecutionPlanMigrationCount": 1,
+  "preExecutionPlanIds": [
+    "migration-01-python-cache"
+  ],
+  "preExecutionManualReviewCount": 5,
+  "preExecutionPlanEntry": {
+    "id": "migration-01-python-cache",
+    "status": "dry-run-only",
+    "source": "C:\\Users\\14224\\AppData\\Local\\pip\\Cache",
+    "target": "D:\\Codex\\.cache\\pip",
+    "kind": "cache",
+    "owner": "python",
+    "risk": "low",
+    "reason": "pip 默认用户缓存候选",
+    "executionAllowed": false,
+    "requiresExplicitUserApproval": true,
+    "rootPolicy": {
+      "matchedExcludedRoot": "C:\\Users",
+      "excludedRootReason": "不批量迁移用户目录或 AppData",
+      "allowDryRunPlan": true,
+      "executionAllowed": false,
+      "requiresExplicitUserApproval": true,
+      "decision": "targeted-cache-under-excluded-user-root",
+      "note": "来源位于不批量迁移的用户根目录下；仅允许生成具体缓存子目录 dry-run 计划，真实执行必须另行显式授权。"
+    }
+  },
+  "source": "C:\\Users\\14224\\AppData\\Local\\pip\\Cache",
+  "target": "D:\\Codex\\.cache\\pip",
+  "evidenceDir": "D:\\Codex\\projects\\统一环境\\reports\\env-migration-execution\\pip-cache",
+  "environmentVariableName": "PIP_CACHE_DIR",
+  "environmentScope": "User",
+  "previousScopedValue": "D:\\Codex\\.pip-cache",
+  "currentScopedValue": "D:\\Codex\\.cache\\pip",
+  "sourceStateBefore": {
+    "path": "C:\\Users\\14224\\AppData\\Local\\pip\\Cache",
+    "exists": true,
+    "isReparsePoint": false,
+    "fileCount": 275,
+    "directoryCount": 516,
+    "totalBytes": 95025293
+  },
+  "targetStateBefore": {
+    "path": "D:\\Codex\\.cache\\pip",
+    "exists": true,
+    "isReparsePoint": false,
+    "fileCount": 154,
+    "directoryCount": 312,
+    "totalBytes": 42037932
+  },
+  "sourceStateAfter": {
+    "path": "C:\\Users\\14224\\AppData\\Local\\pip\\Cache",
+    "exists": true,
+    "isReparsePoint": false,
+    "fileCount": 275,
+    "directoryCount": 516,
+    "totalBytes": 95025293
+  },
+  "targetStateAfter": {
+    "path": "D:\\Codex\\.cache\\pip",
+    "exists": true,
+    "isReparsePoint": false,
+    "fileCount": 420,
+    "directoryCount": 770,
+    "totalBytes": 136793355
+  },
+  "copySummary": {
+    "copiedFiles": 266,
+    "skippedExistingFiles": 9,
+    "createdDirectories": 458
+  },
+  "sourceRetained": true,
+  "sourceDeleted": false,
+  "targetDeleted": false,
+  "rollbackStatePath": "D:\\Codex\\projects\\统一环境\\reports\\env-migration-execution\\pip-cache\\rollback-state.json"
+}

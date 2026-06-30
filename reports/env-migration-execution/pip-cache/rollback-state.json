@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "migrationId": "migration-01-python-cache",
+  "generatedAt": "2026-06-30T16:52:15.5439051+08:00",
+  "environmentVariableName": "PIP_CACHE_DIR",
+  "environmentScope": "User",
+  "previousScopedValue": "D:\\Codex\\.pip-cache",
+  "previousProcessValue": "D:\\Codex\\.pip-cache",
+  "migratedValue": "D:\\Codex\\.cache\\pip",
+  "source": "C:\\Users\\14224\\AppData\\Local\\pip\\Cache",
+  "target": "D:\\Codex\\.cache\\pip",
+  "sourceRetained": true
+}

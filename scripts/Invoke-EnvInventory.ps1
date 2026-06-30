@@ -118,6 +118,26 @@ function New-DirectoryRecord {
     }
 }
 
+function Test-IsResolvedPipDefaultCache {
+    param([object]$Directory)
+
+    if ($Directory.name -ne "pip cache default") {
+        return $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($env:PIP_CACHE_DIR)) {
+        return $false
+    }
+
+    try {
+        $configured = [System.IO.Path]::GetFullPath($env:PIP_CACHE_DIR).TrimEnd("\", "/")
+        $canonical = [System.IO.Path]::GetFullPath("D:\Codex\.cache\pip").TrimEnd("\", "/")
+        return $configured -ieq $canonical
+    } catch {
+        return $false
+    }
+}
+
 function Invoke-CommandWithTimeout {
     param(
         [string]$Executable,
@@ -404,6 +424,10 @@ function Get-MigrationCandidates {
         }
 
         if ($dir.category -eq "manual-only") {
+            continue
+        }
+
+        if (Test-IsResolvedPipDefaultCache -Directory $dir) {
             continue
         }
 

@@ -1,6 +1,6 @@
 # 本机环境资产盘点报告
 
-生成时间：2026-06-30T15:20:24.2556931+08:00
+生成时间：2026-06-30T16:52:45.7495004+08:00
 
 > 本报告由只读盘点脚本生成。脚本未移动文件、未修改环境变量、未执行软件更新。
 
@@ -9,7 +9,7 @@
 - 工具探测数量：33
 - 已存在目录数量：9
 - 项目本地环境标记数量：5
-- 迁移候选数量：1
+- 迁移候选数量：0
 - 人工审查项数量：5
 
 ## 绝不自动迁移
@@ -111,7 +111,7 @@
 | Codex cache root | d-target | True | D:\Codex\.cache | 推荐共享缓存根目录 |
 | uv cache env | cache | True | D:\uv\cache | 显式 UV_CACHE_DIR |
 | uv tools env | tool-env | True | D:\Codex\tools\uv\tools | 显式 UV_TOOL_DIR |
-| pip cache env | cache | True | D:\Codex\.pip-cache | 显式 PIP_CACHE_DIR |
+| pip cache env | cache | True | D:\Codex\.cache\pip | 显式 PIP_CACHE_DIR |
 | pip cache default | cache | True | C:\Users\14224\AppData\Local\pip\Cache | pip 默认用户缓存候选 |
 | pipx default home | tool-env | False | C:\Users\14224\.local\pipx | pipx 常见默认位置 |
 | poetry cache default | cache | False | C:\Users\14224\AppData\Local\pypoetry\Cache | Poetry 常见缓存位置 |
@@ -142,9 +142,7 @@
 
 ## 迁移候选
 
-| 来源 | 类型 | 风险 | 建议动作 | 原因 |
-| --- | --- | --- | --- | --- |
-| C:\Users\14224\AppData\Local\pip\Cache | cache | low | 可考虑迁移到 D:\Codex\.cache | pip 默认用户缓存候选 |
+当前未发现明确迁移候选。
 
 ## 人工审查项
 
