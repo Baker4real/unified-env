@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-06-30T15:20:32.0885651+08:00",
+  "readOnly": true,
+  "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
+  "inventoryGeneratedAt": "2026-06-30T15:20:24.2556931+08:00",
+  "migrationPlans": [
+    {
+      "id": "migration-01-python-cache",
+      "status": "dry-run-only",
+      "source": "C:\\Users\\14224\\AppData\\Local\\pip\\Cache",
+      "target": "D:\\Codex\\.cache\\pip",
+      "kind": "cache",
+      "owner": "python",
+      "risk": "low",
+      "reason": "pip 默认用户缓存候选",
+      "executionAllowed": false,
+      "requiresExplicitUserApproval": true,
+      "rootPolicy": {
+        "matchedExcludedRoot": "C:\\Users",
+        "excludedRootReason": "不批量迁移用户目录或 AppData",
+        "allowDryRunPlan": true,
+        "executionAllowed": false,
+        "requiresExplicitUserApproval": true,
+        "decision": "targeted-cache-under-excluded-user-root",
+        "note": "来源位于不批量迁移的用户根目录下；仅允许生成具体缓存子目录 dry-run 计划，真实执行必须另行显式授权。"
+      },
+      "preChecks": [
+        "确认 inventory 是最新生成的基线。",
+        "确认来源路径存在且不是 reparse point、junction 或 symlink。",
+        "确认目标路径位于 D 盘，并且不会覆盖已有非空目录。",
+        "确认没有正在运行的进程写入来源路径。",
+        "确认 root policy 允许继续；若命中不批量迁移根，必须取得显式授权。"
+      ],
+      "executionSteps": [
+        "创建目标目录：D:\\Codex\\.cache\\pip。",
+        "复制来源内容到目标目录，保留原来源目录不删除。",
+        "按工具官方方式切换配置或环境变量，指向目标目录。",
+        "重新运行只读 inventory，确认新配置生效。"
+      ],
+      "validationSteps": [
+        "验证工具命令仍可运行。",
+        "验证 inventory 不再把来源路径列为待处理迁移候选。",
+        "验证报告中没有新增人工审查风险。",
+        "保留迁移证据和前后对比。"
+      ],
+      "rollbackSteps": [
+        "撤销新增配置或环境变量，恢复到迁移前值。",
+        "重新运行只读 inventory，确认工具回到迁移前策略。",
+        "确认目标目录不再被工具使用后，再人工决定是否删除目标副本。",
+        "保留回滚证据。"
+      ]
+    }
+  ],
+  "blockedByRootPolicy": [],
+  "blockedByManualReview": [],
+  "excludedManualReviewItems": [
+    {
+      "source": "D:\\Codex\\projects\\歌单转换\\.venv",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\.venv",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\.gsd\\projects\\hermes-agent\\.venv",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\.gsd\\projects\\new-chat-4\\.venv",
+      "kind": "project-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    }
+  ],
+  "excludedRoots": [
+    {
+      "path": "C:\\Windows",
+      "reason": "系统目录，绝不自动迁移"
+    },
+    {
+      "path": "C:\\Program Files",
+      "reason": "MSI/系统级安装目录，绝不直接搬迁"
+    },
+    {
+      "path": "C:\\Program Files (x86)",
+      "reason": "MSI/系统级安装目录，绝不直接搬迁"
+    },
+    {
+      "path": "C:\\ProgramData",
+      "reason": "服务和机器级状态常驻位置，仅按官方迁移流程处理"
+    },
+    {
+      "path": "C:\\Users",
+      "reason": "不批量迁移用户目录或 AppData"
+    }
+  ]
+}

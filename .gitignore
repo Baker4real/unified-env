@@ -1,3 +1,4 @@
 reports/env-inventory-test/
+reports/env-migration-plan-test/
 *.tmp
 *.temp

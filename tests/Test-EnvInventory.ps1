@@ -95,6 +95,16 @@ if ($pythonProbe -and $pythonProbe.found) {
     Assert-True -Condition ($pythonProbe.version -like "Python *") -Message "python version probe did not receive --version"
 }
 
+$blockedOutput = "C:\Codex-should-not-be-created"
+$blocked = $false
+try {
+    & $scriptPath -OutputDir $blockedOutput -SkipVersionProbe | Out-Null
+} catch {
+    $blocked = $_.Exception.Message -like "*必须位于 D:\*"
+}
+Assert-True -Condition $blocked -Message "Inventory 脚本没有阻止 C 盘 OutputDir"
+Assert-True -Condition (-not (Test-Path -Path $blockedOutput)) -Message "测试不应在 C 盘创建输出目录"
+
 if (-not $KeepOutputs) {
     Remove-Item -Path $testRoot -Recurse -Force
 }

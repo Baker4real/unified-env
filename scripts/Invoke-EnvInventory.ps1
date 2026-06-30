@@ -22,6 +22,22 @@ function Get-RootDrive {
     }
 }
 
+function Assert-DDrivePath {
+    param(
+        [string]$Path,
+        [string]$ParameterName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "$ParameterName 不能为空。"
+    }
+
+    $root = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($Path))
+    if ($root -ine "D:\") {
+        throw "$ParameterName 必须位于 D:\ 下，当前值：$Path"
+    }
+}
+
 function Get-ReparsePointInfo {
     param([string]$Path)
 
@@ -587,6 +603,8 @@ function Write-MarkdownReport {
 
     Set-Content -Path $Path -Value $lines -Encoding UTF8
 }
+
+Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
