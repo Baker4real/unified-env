@@ -13,5 +13,8 @@
 - 只读盘点报告：`reports/env-inventory/REPORT.md`
 - dry-run 迁移计划：`reports/env-migration-plan/PLAN.md`
 - 统一更新准备报告：`reports/env-update-readiness/REPORT.md`
+- 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
+- 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
+- 最新交接：`docs/handoffs/2026-06-30-project-local-env-handoff.md`
 
 这些报告是事实快照，不是执行授权。真实迁移前必须重新生成最新基线。
