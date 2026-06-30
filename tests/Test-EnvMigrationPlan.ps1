@@ -92,8 +92,16 @@ try {
     }
 
     $markdown = Get-Content -Path $planMarkdownPath -Raw
-    foreach ($expected in @("DRY-RUN", "只读", "前置检查", "执行步骤", "验证步骤", "回滚步骤", "排除项", "Root policy")) {
+    foreach ($expected in @("DRY-RUN", "只读", "排除项")) {
         Assert-True -Condition $markdown.Contains($expected) -Message "PLAN.md 缺少预期文本：$expected"
+    }
+
+    if ($plan.migrationPlans.Count -gt 0) {
+        foreach ($expected in @("前置检查", "执行步骤", "验证步骤", "回滚步骤", "Root policy")) {
+            Assert-True -Condition $markdown.Contains($expected) -Message "PLAN.md 缺少预期文本：$expected"
+        }
+    } else {
+        Assert-True -Condition $markdown.Contains("当前没有可生成 dry-run 计划的迁移候选") -Message "PLAN.md 缺少无候选说明"
     }
 
     $blockedOutput = "C:\Codex-should-not-be-created"
