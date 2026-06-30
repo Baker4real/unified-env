@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-01T07:45:13.9817825+08:00",
+  "dryRun": true,
+  "readOnly": true,
+  "targetProject": {
+    "path": "D:\\Codex\\projects\\codex-account-switch",
+    "packageJsonPath": "D:\\Codex\\projects\\codex-account-switch\\package.json",
+    "packageLockPath": "D:\\Codex\\projects\\codex-account-switch\\package-lock.json",
+    "projectRootIsReparsePoint": false,
+    "nodeModulesPath": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
+    "nodeModulesIsReparsePoint": false
+  },
+  "runtime": {
+    "nodeVersion": "v24.15.0",
+    "npmVersion": "11.12.1",
+    "npmCache": "D:\\Codex\\tools\\npm-cache"
+  },
+  "package": {
+    "name": "codex_switch",
+    "version": "1.5.12",
+    "lockfileVersion": "3",
+    "lockPackageEntries": 78,
+    "declaredDependencies": [
+      {
+        "name": "@tauri-apps/api",
+        "version": "2.10.1",
+        "section": "dependencies"
+      },
+      {
+        "name": "@tauri-apps/cli",
+        "version": "2.10.1",
+        "section": "devDependencies"
+      },
+      {
+        "name": "typescript",
+        "version": "5.9.2",
+        "section": "devDependencies"
+      },
+      {
+        "name": "vite",
+        "version": "7.1.4",
+        "section": "devDependencies"
+      }
+    ],
+    "installedTopLevel": [
+      {
+        "name": "@tauri-apps/api",
+        "version": "2.10.1",
+        "resolved": "https://registry.npmjs.org/@tauri-apps/api/-/api-2.10.1.tgz"
+      },
+      {
+        "name": "@tauri-apps/cli",
+        "version": "2.10.1",
+        "resolved": "https://registry.npmjs.org/@tauri-apps/cli/-/cli-2.10.1.tgz"
+      },
+      {
+        "name": "typescript",
+        "version": "5.9.2",
+        "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.2.tgz"
+      },
+      {
+        "name": "vite",
+        "version": "7.1.4",
+        "resolved": "https://registry.npmjs.org/vite/-/vite-7.1.4.tgz"
+      }
+    ]
+  },
+  "projectState": {
+    "branchLine": "## codex/clean-codex-switch-local-patches",
+    "isClean": true,
+    "dirtyEntries": [],
+    "statusLines": [
+      "## codex/clean-codex-switch-local-patches"
+    ]
+  },
+  "npmState": {
+    "outdated": [
+      {
+        "name": "@tauri-apps/api",
+        "current": "2.10.1",
+        "wanted": "2.10.1",
+        "latest": "2.11.1",
+        "dependent": "codex-account-switch"
+      },
+      {
+        "name": "@tauri-apps/cli",
+        "current": "2.10.1",
+        "wanted": "2.10.1",
+        "latest": "2.11.4",
+        "dependent": "codex-account-switch"
+      },
+      {
+        "name": "typescript",
+        "current": "5.9.2",
+        "wanted": "5.9.2",
+        "latest": "6.0.3",
+        "dependent": "codex-account-switch"
+      },
+      {
+        "name": "vite",
+        "current": "7.1.4",
+        "wanted": "7.1.4",
+        "latest": "8.1.2",
+        "dependent": "codex-account-switch"
+      }
+    ],
+    "vulnerabilities": [
+      {
+        "name": "postcss",
+        "severity": "moderate",
+        "isDirect": false,
+        "range": "<8.5.10",
+        "fixAvailable": true,
+        "fixPackage": "",
+        "fixVersion": "",
+        "fixIsSemVerMajor": false,
+        "via": [
+          "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output [moderate] <8.5.10"
+        ]
+      },
+      {
+        "name": "vite",
+        "severity": "high",
+        "isDirect": true,
+        "range": "7.0.0 - 7.3.3",
+        "fixAvailable": true,
+        "fixPackage": "vite",
+        "fixVersion": "7.3.6",
+        "fixIsSemVerMajor": false,
+        "via": [
+          "Vite middleware may serve files starting with the same name with the public directory [low] >=7.1.0 <=7.1.4",
+          "Vite's `server.fs` settings were not applied to HTML files [low] >=7.1.0 <=7.1.4",
+          "vite allows server.fs.deny bypass via backslash on Windows [moderate] >=7.1.0 <=7.1.10",
+          "Vite Vulnerable to Path Traversal in Optimized Deps `.map` Handling [moderate] >=7.0.0 <=7.3.1",
+          "Vite: `server.fs.deny` bypassed with queries [high] >=7.1.0 <=7.3.1",
+          "Vite Vulnerable to Arbitrary File Read via Vite Dev Server WebSocket [high] >=7.0.0 <=7.3.1",
+          "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows [moderate] >=7.0.0 <=7.3.4",
+          "vite: `server.fs.deny` bypass on Windows alternate paths [high] >=7.0.0 <=7.3.4"
+        ]
+      }
+    ],
+    "auditSummary": {
+      "info": 0,
+      "low": 0,
+      "moderate": 1,
+      "high": 1,
+      "critical": 0,
+      "total": 2
+    },
+    "commandResults": {
+      "nodeVersion": {
+        "command": "node --version",
+        "workingDirectory": "D:\\Codex\\projects\\codex-account-switch",
+        "exitCode": 0,
+        "output": "v24.15.0",
+        "source": "command"
+      },
+      "npmVersion": {
+        "command": "npm --version",
+        "workingDirectory": "D:\\Codex\\projects\\codex-account-switch",
+        "exitCode": 0,
+        "output": "11.12.1",
+        "source": "command"
+      },
+      "npmCache": {
+        "command": "npm config get cache",
+        "workingDirectory": "D:\\Codex\\projects\\codex-account-switch",
+        "exitCode": 0,
+        "output": "D:\\Codex\\tools\\npm-cache",
+        "source": "command"
+      },
+      "gitStatus": {
+        "command": "git status --short --branch",
+        "workingDirectory": "D:\\Codex\\projects\\codex-account-switch",
+        "exitCode": 0,
+        "output": "## codex/clean-codex-switch-local-patches",
+        "source": "command"
+      },
+      "npmLs": {
+        "command": "npm ls --depth=0 --json",
+        "workingDirectory": "D:\\Codex\\projects\\codex-account-switch",
+        "exitCode": 0,
+        "output": "{\n  \"version\": \"1.5.12\",\n  \"name\": \"codex_switch\",\n  \"dependencies\": {\n    \"@tauri-apps/api\": {\n      \"version\": \"2.10.1\",\n      \"resolved\": \"https://registry.npmjs.org/@tauri-apps/api/-/api-2.10.1.tgz\",\n      \"overridden\": false\n    },\n    \"@tauri-apps/cli\": {\n      \"version\": \"2.10.1\",\n      \"resolved\": \"https://registry.npmjs.org/@tauri-apps/cli/-/cli-2.10.1.tgz\",\n      \"overridden\": false\n    },\n    \"typescript\": {\n      \"version\": \"5.9.2\",\n      \"resolved\": \"https://registry.npmjs.org/typescript/-/typescript-5.9.2.tgz\",\n      \"overridden\": false\n    },\n    \"vite\": {\n      \"version\": \"7.1.4\",\n      \"resolved\": \"https://registry.npmjs.org/vite/-/vite-7.1.4.tgz\",\n      \"overridden\": false\n    }\n  }\n}",
+        "source": "command"
+      },
+      "npmOutdated": {
+        "command": "npm outdated --json --depth=0",
+        "workingDirectory": "D:\\Codex\\projects\\codex-account-switch",
+        "exitCode": 1,
+        "output": "{\n  \"@tauri-apps/api\": {\n    \"current\": \"2.10.1\",\n    \"wanted\": \"2.10.1\",\n    \"latest\": \"2.11.1\",\n    \"dependent\": \"codex-account-switch\",\n    \"location\": \"D:\\\\Codex\\\\projects\\\\codex-account-switch\\\\node_modules\\\\@tauri-apps\\\\api\"\n  },\n  \"@tauri-apps/cli\": {\n    \"current\": \"2.10.1\",\n    \"wanted\": \"2.10.1\",\n    \"latest\": \"2.11.4\",\n    \"dependent\": \"codex-account-switch\",\n    \"location\": \"D:\\\\Codex\\\\projects\\\\codex-account-switch\\\\node_modules\\\\@tauri-apps\\\\cli\"\n  },\n  \"typescript\": {\n    \"current\": \"5.9.2\",\n    \"wanted\": \"5.9.2\",\n    \"latest\": \"6.0.3\",\n    \"dependent\": \"codex-account-switch\",\n    \"location\": \"D:\\\\Codex\\\\projects\\\\codex-account-switch\\\\node_modules\\\\typescript\"\n  },\n  \"vite\": {\n    \"current\": \"7.1.4\",\n    \"wanted\": \"7.1.4\",\n    \"latest\": \"8.1.2\",\n    \"dependent\": \"codex-account-switch\",\n    \"location\": \"D:\\\\Codex\\\\projects\\\\codex-account-switch\\\\node_modules\\\\vite\"\n  }\n}",
+        "source": "command"
+      },
+      "npmAudit": {
+        "command": "npm audit --json",
+        "workingDirectory": "D:\\Codex\\projects\\codex-account-switch",
+        "exitCode": 1,
+        "output": "{\n  \"auditReportVersion\": 2,\n  \"vulnerabilities\": {\n    \"postcss\": {\n      \"name\": \"postcss\",\n      \"severity\": \"moderate\",\n      \"isDirect\": false,\n      \"via\": [\n        {\n          \"source\": 1117015,\n          \"name\": \"postcss\",\n          \"dependency\": \"postcss\",\n          \"title\": \"PostCSS has XSS via Unescaped </style> in its CSS Stringify Output\",\n          \"url\": \"https://github.com/advisories/GHSA-qx2v-qp2m-jg93\",\n          \"severity\": \"moderate\",\n          \"cwe\": [\n            \"CWE-79\"\n          ],\n          \"cvss\": {\n            \"score\": 6.1,\n            \"vectorString\": \"CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N\"\n          },\n          \"range\": \"<8.5.10\"\n        }\n      ],\n      \"effects\": [],\n      \"range\": \"<8.5.10\",\n      \"nodes\": [\n        \"node_modules/postcss\"\n      ],\n      \"fixAvailable\": true\n    },\n    \"vite\": {\n      \"name\": \"vite\",\n      \"severity\": \"high\",\n      \"isDirect\": true,\n      \"via\": [\n        {\n          \"source\": 1107326,\n          \"name\": \"vite\",\n          \"dependency\": \"vite\",\n          \"title\": \"Vite middleware may serve files starting with the same name with the public directory\",\n          \"url\": \"https://github.com/advisories/GHSA-g4jq-h2w9-997c\",\n          \"severity\": \"low\",\n          \"cwe\": [\n            \"CWE-22\",\n            \"CWE-200\",\n            \"CWE-284\"\n          ],\n          \"cvss\": {\n            \"score\": 0,\n            \"vectorString\": null\n          },\n          \"range\": \">=7.1.0 <=7.1.4\"\n        },\n        {\n          \"source\": 1107330,\n          \"name\": \"vite\",\n          \"dependency\": \"vite\",\n          \"title\": \"Vite's `server.fs` settings were not applied to HTML files\",\n          \"url\": \"https://github.com/advisories/GHSA-jqfw-vq24-v9c3\",\n          \"severity\": \"low\",\n          \"cwe\": [\n            \"CWE-23\",\n            \"CWE-200\",\n            \"CWE-284\"\n          ],\n          \"cvss\": {\n            \"score\": 0,\n            \"vectorString\": null\n          },\n          \"range\": \">=7.1.0 <=7.1.4\"\n        },\n        {\n          \"source\": 1109137,\n          \"name\": \"vite\",\n          \"dependency\": \"vite\",\n          \"title\": \"vite allows server.fs.deny bypass via backslash on Windows\",\n          \"url\": \"https://github.com/advisories/GHSA-93m4-6634-74q7\",\n          \"severity\": \"moderate\",\n          \"cwe\": [\n            \"CWE-22\"\n          ],\n          \"cvss\": {\n            \"score\": 0,\n            \"vectorString\": null\n          },\n          \"range\": \">=7.1.0 <=7.1.10\"\n        },\n        {\n          \"source\": 1116230,\n          \"name\": \"vite\",\n          \"dependency\": \"vite\",\n          \"title\": \"Vite Vulnerable to Path Traversal in Optimized Deps `.map` Handling\",\n          \"url\": \"https://github.com/advisories/GHSA-4w7w-66w2-5vf9\",\n          \"severity\": \"moderate\",\n          \"cwe\": [\n            \"CWE-22\",\n            \"CWE-200\"\n          ],\n          \"cvss\": {\n            \"score\": 0,\n            \"vectorString\": null\n          },\n          \"range\": \">=7.0.0 <=7.3.1\"\n        },\n        {\n          \"source\": 1116232,\n          \"name\": \"vite\",\n          \"dependency\": \"vite\",\n          \"title\": \"Vite: `server.fs.deny` bypassed with queries\",\n          \"url\": \"https://github.com/advisories/GHSA-v2wj-q39q-566r\",\n          \"severity\": \"high\",\n          \"cwe\": [\n            \"CWE-180\",\n            \"CWE-284\"\n          ],\n          \"cvss\": {\n            \"score\": 0,\n            \"vectorString\": null\n          },\n          \"range\": \">=7.1.0 <=7.3.1\"\n        },\n        {\n          \"source\": 1116235,\n          \"name\": \"vite\",\n          \"dependency\": \"vite\",\n          \"title\": \"Vite Vulnerable to Arbitrary File Read via Vite Dev Server WebSocket\",\n          \"url\": \"https://github.com/advisories/GHSA-p9ff-h696-f583\",\n          \"severity\": \"high\",\n          \"cwe\": [\n            \"CWE-200\",\n            \"CWE-306\"\n          ],\n          \"cvss\": {\n            \"score\": 0,\n            \"vectorString\": null\n          },\n          \"range\": \">=7.0.0 <=7.3.1\"\n        },\n        {\n          \"source\": 1120785,\n          \"name\": \"vite\",\n          \"dependency\": \"vite\",\n          \"title\": \"launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows\",\n          \"url\": \"https://github.com/advisories/GHSA-v6wh-96g9-6wx3\",\n          \"severity\": \"moderate\",\n          \"cwe\": [\n            \"CWE-73\",\n            \"CWE-522\"\n          ],\n          \"cvss\": {\n            \"score\": 0,\n            \"vectorString\": null\n          },\n          \"range\": \">=7.0.0 <=7.3.4\"\n        },\n        {\n          \"source\": 1120790,\n          \"name\": \"vite\",\n          \"dependency\": \"vite\",\n          \"title\": \"vite: `server.fs.deny` bypass on Windows alternate paths\",\n          \"url\": \"https://github.com/advisories/GHSA-fx2h-pf6j-xcff\",\n          \"severity\": \"high\",\n          \"cwe\": [\n            \"CWE-22\",\n            \"CWE-200\"\n          ],\n          \"cvss\": {\n            \"score\": 0,\n            \"vectorString\": null\n          },\n          \"range\": \">=7.0.0 <=7.3.4\"\n        }\n      ],\n      \"effects\": [],\n      \"range\": \"7.0.0 - 7.3.3\",\n      \"nodes\": [\n        \"node_modules/vite\"\n      ],\n      \"fixAvailable\": {\n        \"name\": \"vite\",\n        \"version\": \"7.3.6\",\n        \"isSemVerMajor\": false\n      }\n    }\n  },\n  \"metadata\": {\n    \"vulnerabilities\": {\n      \"info\": 0,\n      \"low\": 0,\n      \"moderate\": 1,\n      \"high\": 1,\n      \"critical\": 0,\n      \"total\": 2\n    },\n    \"dependencies\": {\n      \"prod\": 2,\n      \"dev\": 76,\n      \"optional\": 63,\n      \"peer\": 0,\n      \"peerOptional\": 0,\n      \"total\": 77\n    }\n  }\n}",
+        "source": "command"
+      }
+    }
+  },
+  "recommendation": {
+    "strategy": "安全补丁优先；先处理 Vite audit fix，再单独评估大版本或框架 minor 更新。",
+    "status": "ready-for-owner-review",
+    "blockedByDirtyWorktree": false,
+    "primaryCandidate": {
+      "package": "vite",
+      "current": "7.1.4",
+      "auditFixVersion": "7.3.6",
+      "latest": "8.1.2",
+      "currentMajor": 7,
+      "latestMajor": 8
+    },
+    "reasons": [
+      "当前建议只做安全补丁 dry-run，优先处理 npm audit 指向的 Vite 漏洞。",
+      "目标项目当前 git status clean；真实执行前仍必须重新检查 dirty 状态。",
+      "npm audit 当前给出的 Vite 修复版本是 7.3.6，属于本次 dry-run 的首选候选。"
+    ],
+    "candidateCommands": [
+      "npm install vite@7.3.6 --save-dev --package-lock-only --ignore-scripts",
+      "git diff -- package.json package-lock.json"
+    ],
+    "deferReasons": [
+      "不执行 `npm ci` 作为更新手段：它只会按当前 lockfile 重建旧依赖，不能让依赖保持最新。",
+      "暂不直接跳到 `vite 8.1.2`：当前项目声明为 `vite 7.1.4`，latest 是潜在大版本升级，应单独评估构建和 Tauri 开发服务器兼容性。",
+      "暂不直接跳到 `typescript 6.0.3`：当前项目声明为 `typescript 5.9.2`，latest 是潜在大版本升级，应单独评估类型检查变化。",
+      "暂不合并 Tauri minor 更新：`@tauri-apps/api` 和 `@tauri-apps/cli` 可后续独立评估，避免把安全补丁和框架更新混在一次变更里。",
+      "不删除、不重建现有 `node_modules`；真实更新前先只改锁文件和声明文件，再通过项目验证确认。"
+    ],
+    "humanGates": [
+      "用户明确授权真实依赖更新范围，且确认目标项目当前不是 dirty。",
+      "真实执行前重新运行 `git status --short --branch`、`npm outdated --json --depth=0` 和 `npm audit --json`。",
+      "先审查 `package.json` / `package-lock.json` diff，再决定是否重建 `node_modules`。",
+      "若目标项目出现未提交业务改动，必须先由 owner 决定保留、提交或搁置这些改动。"
+    ],
+    "validationCommands": [
+      "npm ls --depth=0",
+      "npm audit",
+      "npm run version:check",
+      "npm run build",
+      "npm run check:rust:windows"
+    ],
+    "rollbackBoundaries": [
+      "回滚只恢复 `package.json` 和 `package-lock.json` 到更新前版本。",
+      "不得删除现有 `node_modules` 作为回滚手段。",
+      "如果后续真实执行曾重建依赖，先用 git diff 和 npm 验证确认影响，再按目标项目自己的流程恢复。",
+      "本 dry-run 不生成可直接 apply 的删除、迁移或重装步骤。"
+    ]
+  },
+  "policy": {
+    "executionAllowed": false,
+    "deleteAllowed": false,
+    "migrationAllowed": false,
+    "targetProjectWriteAllowed": false,
+    "rules": [
+      "本计划只读查询目标项目状态，不执行 npm install、npm ci、npm audit fix 或依赖更新。",
+      "候选命令只是后续真实授权 issue 的预览，不代表当前可以执行。",
+      "真实更新前必须重新确认目标项目 dirty 状态和 npm audit 输出。",
+      "输出只能位于 D 盘允许报告目录。",
+      "回滚边界限定在 package.json 和 package-lock.json；不得删除现有 node_modules。"
+    ]
+  }
+}
