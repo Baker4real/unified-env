@@ -85,16 +85,11 @@
   - `vite@7.1.4`
 - `node_modules` 和项目根不是 reparse point。
 
-但目标项目当前 dirty：
+此处原先记录的 `codex-account-switch` dirty 状态已在 2026-06-30 后续修复中收口：
 
-- `src-tauri/mac/runtime/refresh_runtime.rs`
-- `src-tauri/shared/runtime/fs_ops.rs`
-- `src-tauri/shared/runtime/models.rs`
-- `src-tauri/shared/runtime/runtime_isolation.rs`
-- `src-tauri/shared/runtime/session_usage.rs`
-- `src-tauri/win/runtime/refresh_runtime.rs`
-
-不要覆盖、回滚或混入这些现有改动。
+- 修复提交：`a31d9a4 fix: harden runtime cleanup without pruning auth backups`
+- 最新交接：`D:\Codex\projects\统一环境\docs\handoffs\2026-06-30-backup-retention-runtime-cleanup-handoff.md`
+- 当前事实以最新交接为准；不要再按本文件旧段落假设 `codex-account-switch` 仍有未提交 runtime 改动。
 
 ## 依赖更新发现
 
