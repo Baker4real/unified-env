@@ -9,7 +9,7 @@
 - 已迁移低风险 `pip cache` 到 `D:\Codex\.cache\pip`。
 - 当前没有新的明确安全迁移候选。
 - 项目本地环境已完成分类刷新、审查和重建 dry-run 计划；当前区分项目根环境、嵌套 app、插件 runtime/cache、repair backup 和归档缓存，真实重建仍需 owner 决策。
-- 更新准备报告已标出 1 个失效项目本地环境 PATH 入口；这只是清理建议，不修改用户 PATH。
+- 更新准备报告已标出 1 个失效项目本地环境 PATH 入口；已生成独立清理 dry-run，真实 PATH 修改仍需单独显式授权。
 - 已新增备份膨胀治理 dry-run 脚本，当前只读报告把严格保留规则候选和人工审查项分开；真实清理仍需显式授权。
 - 已生成备份清理 apply manifest：只固化和二次校验候选路径，不执行删除；真实删除仍需再次显式授权。
 - 已完成 `codex-account-switch` 依赖更新 dry-run；当前安全补丁已满足，后续框架 minor 或大版本更新仍需在目标项目中显式授权。
@@ -27,6 +27,7 @@
 - 迁移 dry-run：`reports/env-migration-plan/PLAN.md`
 - pip cache 迁移证据：`reports/env-migration-execution/pip-cache/`
 - 更新准备：`reports/env-update-readiness/REPORT.md`
+- 失效 PATH 入口清理 dry-run：`reports/stale-path-entry-cleanup-dry-run/PLAN.md`
 - 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
 - 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
 - 备份膨胀治理 dry-run 证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-080621\BACKUP-RETENTION-DRY-RUN.md`
@@ -41,6 +42,7 @@
 & 'D:\Codex\projects\统一环境\tests\Test-EnvMigrationPlan.ps1'
 & 'D:\Codex\projects\统一环境\tests\Test-PipCacheMigration.ps1'
 & 'D:\Codex\projects\统一环境\tests\Test-EnvUpdateReadiness.ps1'
+& 'D:\Codex\projects\统一环境\tests\Test-StalePathEntryCleanupDryRun.ps1'
 & 'D:\Codex\projects\统一环境\tests\Test-DDrivePolicyDocs.ps1'
 & 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvReviewPack.ps1'
 & 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvRebuildDryRunPlan.ps1'

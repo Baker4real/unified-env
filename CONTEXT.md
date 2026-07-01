@@ -13,6 +13,8 @@
 - 只读盘点报告：`reports/env-inventory/REPORT.md`
 - dry-run 迁移计划：`reports/env-migration-plan/PLAN.md`
 - 统一更新准备报告：`reports/env-update-readiness/REPORT.md`
+- 失效 PATH 入口清理 dry-run：`reports/stale-path-entry-cleanup-dry-run/PLAN.md`
+- 失效 PATH 入口清理 issue：`.scratch/unified-env/issues/13-stale-path-entry-cleanup-dry-run.md`
 - 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
 - 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
 - 项目本地环境分类刷新：`.scratch/unified-env/issues/12-project-local-env-classification-refresh.md`
