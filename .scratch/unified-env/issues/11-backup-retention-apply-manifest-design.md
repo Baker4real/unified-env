@@ -43,11 +43,24 @@ Status: done
   - `reports/backup-retention-apply-manifest/backup-retention-apply-manifest.json`
   - `reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
 - 正式 manifest 摘要：
-  - manifest id：`backup-retention-apply-20260701-104007-72e012e1`
-  - source dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-080621\backup-retention-dry-run.json`
-  - 选中路径：30 个，33.2 MB
-  - 通过二次校验：30 个，33.2 MB
+  - manifest id：`backup-retention-apply-20260701-155200-57ae1622`
+  - source dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-154928\backup-retention-dry-run.json`
+  - 选中路径：36 个，234.11 MB
+  - 通过二次校验：36 个，234.11 MB
   - 阻塞路径：0 个
   - `deleteAllowed=false`
   - `executionReady=false`
 - 本 issue 仍不包含真实删除。下一阶段如要执行，必须再次重新生成 dry-run 和 manifest，并要求用户确认 manifest id、路径数量和预计释放体积。
+
+## Refresh 2026-07-01 15:52
+
+已基于纳入 `codex_switch` 安装回滚备份后的最新 dry-run 重新生成 apply manifest。
+
+- 最新 manifest：`reports/backup-retention-apply-manifest/backup-retention-apply-manifest.json`
+- 中文报告：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
+- manifest id：`backup-retention-apply-20260701-155200-57ae1622`
+- source dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-154928\backup-retention-dry-run.json`
+- 通过二次校验：36 个，234.11 MB
+- 阻塞路径：0 个
+- `deleteAllowed=false`
+- `executionReady=false`

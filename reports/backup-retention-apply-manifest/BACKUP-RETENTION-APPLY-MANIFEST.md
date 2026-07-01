@@ -1,17 +1,17 @@
 # 备份清理 apply manifest 设计
 
-生成时间：2026-07-01 10:40:07 +08:00
+生成时间：2026-07-01 15:52:00 +08:00
 
 本文件是删除前 manifest 设计和二次校验结果，不删除、不移动、不迁移任何文件。即使所有路径验证通过，真实删除仍需要用户再次明确确认 manifest id、路径数量和预计释放体积。
 
 ## 汇总
 
-- manifest id：backup-retention-apply-20260701-104007-72e012e1
-- source dry-run：D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-080621\backup-retention-dry-run.json
-- dry-run 年龄：2.54 小时
+- manifest id：backup-retention-apply-20260701-155200-57ae1622
+- source dry-run：D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-154928\backup-retention-dry-run.json
+- dry-run 年龄：0 小时
 - 选择模式：all-dry-run-candidates
-- 选中路径：30 个，33.2 MB
-- 通过二次校验：30 个，33.2 MB
+- 选中路径：36 个，234.11 MB
+- 通过二次校验：36 个，234.11 MB
 - 阻塞路径：0 个
 - deleteAllowed=false
 - executionReady=false
@@ -26,13 +26,19 @@
 ## 最终授权短语
 
 ```text
-我确认删除 manifest backup-retention-apply-20260701-104007-72e012e1 中的 30 个已验证路径，预计释放 33.2 MB
+我确认删除 manifest backup-retention-apply-20260701-155200-57ae1622 中的 36 个已验证路径，预计释放 234.11 MB
 ```
 
 ## 已验证路径
 
 | id | 风险 | 组 | 排名 | 体积 MB | 路径 |
 | --- | --- | --- | ---: | ---: | --- |
+| db8fbca3138accb5 | 中 | apps/codex_switch/backups::codex-switch-installed-binary | 9 | 33.51 | D:\Codex\apps\codex_switch\backups\20260629-102645 |
+| 7aeb76e698e8c88d | 中 | apps/codex_switch/backups::codex-switch-installed-binary | 8 | 33.51 | D:\Codex\apps\codex_switch\backups\20260629-162215 |
+| 0fe03263c435fcc3 | 中 | apps/codex_switch/backups::codex-switch-installed-binary | 10 | 33.48 | D:\Codex\apps\codex_switch\backups\20260629-100650 |
+| 32169df8d9acedc7 | 中 | apps/codex_switch/backups::codex-switch-installed-binary | 7 | 33.48 | D:\Codex\apps\codex_switch\backups\before-quota-provenance-20260629-184908 |
+| ec99d6f82e68ef07 | 中 | apps/codex_switch/backups::codex-switch-installed-binary | 11 | 33.47 | D:\Codex\apps\codex_switch\backups\pre-runtime-autodetect-20260626-155927 |
+| 04ec99e851eded1a | 中 | apps/codex_switch/backups::codex-switch-installed-binary | 6 | 33.45 | D:\Codex\apps\codex_switch\backups\before-msvc-replacement-20260629-202144 |
 | f375721b16e8357a | 低 | .codex/backups_state/provider-sync::provider-sync | 6 | 32.59 | D:\Codex\.codex\backups_state\provider-sync\20260630T015140652Z |
 | ef161706e9334128 | 中 | projects/codex-gsd-codex-c-skill/docs/gsd-archive/tmp/replicator::phase5 | 16 | 0.1 | D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase5-live-core-sync-fixed-20260623T152032Z |
 | 077fc685bf29d423 | 中 | projects/codex-gsd-codex-c-skill/docs/gsd-archive/tmp/replicator::phase5 | 15 | 0.1 | D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase5-live-core-sync-fixed2-20260623T152452Z |
