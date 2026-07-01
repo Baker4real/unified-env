@@ -9,6 +9,7 @@
 - 已迁移低风险 `pip cache` 到 `D:\Codex\.cache\pip`。
 - 当前没有新的明确安全迁移候选。
 - 项目本地环境已完成审查和重建 dry-run 计划；真实重建仍需 owner 决策。
+- 已新增备份膨胀治理 dry-run 脚本，当前只读报告把严格保留规则候选和人工审查项分开；真实清理仍需显式授权。
 - 下一步建议从 `codex-account-switch` 的依赖更新 dry-run 开始，而不是直接运行 `npm ci`。
 
 ## 关键入口
@@ -26,6 +27,7 @@
 - 更新准备：`reports/env-update-readiness/REPORT.md`
 - 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
 - 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
+- 备份膨胀治理 dry-run 证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-080621\BACKUP-RETENTION-DRY-RUN.md`
 
 ## 验证命令
 
@@ -37,6 +39,7 @@
 & 'D:\Codex\projects\统一环境\tests\Test-DDrivePolicyDocs.ps1'
 & 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvReviewPack.ps1'
 & 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvRebuildDryRunPlan.ps1'
+& 'D:\Codex\projects\统一环境\tests\Test-BackupRetentionDryRun.ps1'
 ```
 
 ## 安全边界
