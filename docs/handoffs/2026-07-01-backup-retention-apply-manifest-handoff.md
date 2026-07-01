@@ -2,6 +2,8 @@
 
 生成时间：2026-07-01 10:55 +08:00
 
+> Superseded：本文件是删除执行前的历史交接。2026-07-01 16:50 后的当前状态见 `docs/handoffs/2026-07-01-env-governance-cleanout-closeout-handoff.md`、`README.md` 和 `CONTEXT.md`。不要按本文件的旧 manifest、候选数量或“下一步”直接执行。
+
 ## 当前结论
 
 本轮只完成备份清理 apply manifest 设计和收尾同步，没有执行任何删除、移动或迁移。

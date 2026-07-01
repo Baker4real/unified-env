@@ -2,6 +2,8 @@
 
 生成时间：2026-06-30 23:14:03 +08:00
 
+> Superseded：本文件是项目本地环境阶段的历史交接。后续已经完成 PATH 清理、备份保留 apply、`codex_switch` 备份保留 dry-run 扩展和多批人工授权删除。当前状态见 `docs/handoffs/2026-07-01-env-governance-cleanout-closeout-handoff.md`、`README.md` 和 `CONTEXT.md`。
+
 ## 当前目标
 
 用户要继续推进“本机环境尽量统一、保持最新、能复用则复用、不能复用则隔离”的治理工作。当前已经进入“项目本地环境”阶段，但仍必须遵守项目政策：项目本地 `.venv`、`node_modules`、`.conda` 默认不自动迁移、不自动合并、不自动删除、不自动重建。

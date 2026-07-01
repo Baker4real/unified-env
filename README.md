@@ -22,6 +22,7 @@
 - 迁移政策：`docs/env-governance/d-drive-layout-and-migration-policy.md`
 - 本地 issue：`.scratch/unified-env/issues/`
 - 交接文档：`docs/handoffs/`
+- 最新清理收尾交接：`docs/handoffs/2026-07-01-env-governance-cleanout-closeout-handoff.md`
 
 ## 主要报告
 

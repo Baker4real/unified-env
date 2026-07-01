@@ -2,6 +2,8 @@
 
 生成时间：2026-06-30 23:24:05 +08:00
 
+> Superseded：本文件是备份保留工具实现前后的历史交接。2026-07-01 已在用户授权下执行备份保留 apply、`codex_switch` 平铺备份删除和三类人工审查项删除。当前状态见 `docs/handoffs/2026-07-01-env-governance-cleanout-closeout-handoff.md`、`README.md` 和 `CONTEXT.md`。
+
 ## 当前结论
 
 本轮目标来自用户反馈：本机似乎有五千多个 skill 备份，同一个项目同一种备份反复生成，期望从第一性原理出发梳理并最终做到“同一种备份按时间倒序最多保留 5 个”。

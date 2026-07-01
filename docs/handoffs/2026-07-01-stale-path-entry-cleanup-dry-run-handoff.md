@@ -2,6 +2,8 @@
 
 生成时间：2026-07-01 13:45 +08:00
 
+> Superseded：本文件是 PATH 真实清理前的 dry-run 交接。2026-07-01 已按用户授权从 User scope PATH 移除 `D:\hermes-agent\.venv\Scripts`。当前状态见 `docs/handoffs/2026-07-01-env-governance-cleanout-closeout-handoff.md`、`README.md` 和 `CONTEXT.md`。
+
 ## 当前结论
 
 本轮只完成失效 PATH 入口清理 dry-run，没有修改用户 PATH、没有写注册表或系统配置，也没有删除、移动或重建任何 `.venv`、`node_modules` 或项目目录。
