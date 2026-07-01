@@ -64,3 +64,16 @@ Status: done
 - 阻塞路径：0 个
 - `deleteAllowed=false`
 - `executionReady=false`
+
+## Post-apply refresh 2026-07-01 16:12
+
+已在用户最终授权后执行 manifest `backup-retention-apply-20260701-155200-57ae1622`。随后重新生成 dry-run 和 apply manifest，当前没有新的保留规则候选。
+
+- 执行证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-apply-20260701-160956\EXECUTION.md`
+- 最新 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-161022\backup-retention-dry-run.json`
+- 最新 manifest：`reports/backup-retention-apply-manifest/backup-retention-apply-manifest.json`
+- manifest id：`backup-retention-apply-20260701-161209-032bc2ef`
+- 通过二次校验：0 个，0 MB
+- 阻塞路径：0 个
+- `deleteAllowed=false`
+- `executionReady=false`

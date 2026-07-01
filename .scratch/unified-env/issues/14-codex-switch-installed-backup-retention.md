@@ -54,3 +54,13 @@ Status: done
 - 阻塞路径：0 个
 - `deleteAllowed=false`
 - `executionReady=false`
+
+## Post-apply 2026-07-01 16:12
+
+用户已授权并执行 manifest `backup-retention-apply-20260701-155200-57ae1622`。
+
+- 执行证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-apply-20260701-160956\EXECUTION.md`
+- 删除的 `codex_switch` 安装回滚备份：6 个，200.91 MB
+- 最新 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-161022\BACKUP-RETENTION-DRY-RUN.md`
+- 最新保留规则候选：0 个，0 MB
+- 旧式平铺文件仍只作为人工审查项保留，未自动删除
