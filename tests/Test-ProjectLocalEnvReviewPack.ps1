@@ -79,7 +79,7 @@ try {
     }
 
     foreach ($item in $review.items) {
-        foreach ($property in @("project", "marker", "path", "recommendedAction", "automationAllowed", "rebuildAssessment", "verificationPrerequisites", "riskLevel")) {
+        foreach ($property in @("project", "parentProject", "classification", "marker", "path", "recommendedAction", "automationAllowed", "rebuildAssessment", "verificationPrerequisites", "riskLevel")) {
             Assert-Property -Object $item -Name $property
         }
 
@@ -97,6 +97,19 @@ try {
     $nodeModules = $review.items | Where-Object { $_.marker -eq "node_modules" } | Select-Object -First 1
     Assert-True -Condition ($nodeModules.rebuildAssessment -like "*package-lock.json*") -Message "node_modules 审查项应识别 package-lock.json 重建线索"
 
+    $nestedAppPath = "D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager\node_modules"
+    if (Test-Path -LiteralPath $nestedAppPath -PathType Container) {
+        $nestedApp = $review.items | Where-Object { $_.path -ieq $nestedAppPath } | Select-Object -First 1
+        Assert-True -Condition ($null -ne $nestedApp) -Message "审查包应包含嵌套 app node_modules：$nestedAppPath"
+        Assert-True -Condition ($nestedApp.classification -eq "nested-app-local-env") -Message "嵌套 app 审查分类错误"
+        Assert-True -Condition ($nestedApp.riskLevel -eq "high") -Message "GSD 下嵌套 app 应保持 high 风险"
+    }
+
+    foreach ($excludedClassification in @("plugin-runtime-cache", "plugin-cache-backup", "archived-project-cache")) {
+        $excludedItems = @($review.items | Where-Object { $_.classification -eq $excludedClassification })
+        Assert-True -Condition ($excludedItems.Count -eq 0) -Message "$excludedClassification 不应进入项目本地环境审查包"
+    }
+
     $serviceItems = @($review.items | Where-Object { $_.isLongRunningOrStateful })
     Assert-True -Condition ($serviceItems.Count -gt 0) -Message "应标出长期服务或状态敏感项目"
     foreach ($expectedProject in @("D:\Codex\projects\yangyangzi-direct-qqbot", "D:\Codex\.gsd\projects\hermes-agent", "D:\Codex\.gsd\projects\new-chat-4")) {
@@ -108,7 +121,7 @@ try {
     }
 
     $markdown = Get-Content -LiteralPath $markdownPath -Raw
-    foreach ($expected in @("只读", "默认不自动迁移", "不移动、不删除、不合并", ".venv", "node_modules", "验证前置条件", "项目 owner 决策", "长期服务")) {
+    foreach ($expected in @("只读", "默认不自动迁移", "不移动、不删除、不合并", ".venv", "node_modules", "验证前置条件", "项目 owner 决策", "长期服务", "嵌套 app", "插件 runtime/cache")) {
         Assert-True -Condition $markdown.Contains($expected) -Message "REPORT.md 缺少预期文本：$expected"
     }
     foreach ($unexpected in @("ode_modules、", "| medium |", "| high |", "| low |")) {

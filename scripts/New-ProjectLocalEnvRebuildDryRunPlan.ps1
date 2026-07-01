@@ -291,13 +291,13 @@ function Write-PlanMarkdown {
     $lines.Add("")
     $lines.Add("## 计划清单")
     $lines.Add("")
-    $lines.Add("| 项目 | 标记 | 风险 | 状态 | 执行允许 | 需 owner | 说明 |")
-    $lines.Add("| --- | --- | --- | --- | --- | --- | --- |")
+    $lines.Add("| 项目或 app | 分类 | 标记 | 风险 | 状态 | 执行允许 | 需 owner | 说明 |")
+    $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- |")
     foreach ($item in $Plan.plans) {
         $risk = Convert-RiskLevelToDisplay -RiskLevel $item.riskLevel
         $execution = if ($item.executionAllowed) { "是" } else { "否" }
         $owner = if ($item.requiresOwnerDecision) { "是" } else { "否" }
-        $lines.Add("| $(Escape-MarkdownCell $item.project) | $(Escape-MarkdownCell $item.marker) | $(Escape-MarkdownCell $risk) | $(Escape-MarkdownCell $item.planStatus) | $execution | $owner | $(Escape-MarkdownCell $item.reason) |")
+        $lines.Add("| $(Escape-MarkdownCell $item.project) | $(Escape-MarkdownCell $item.classification) | $(Escape-MarkdownCell $item.marker) | $(Escape-MarkdownCell $risk) | $(Escape-MarkdownCell $item.planStatus) | $execution | $owner | $(Escape-MarkdownCell $item.reason) |")
     }
     $lines.Add("")
     $lines.Add("## 逐项目计划")
@@ -306,6 +306,8 @@ function Write-PlanMarkdown {
         $lines.Add("### $(Escape-MarkdownCell $item.project) / $(Escape-MarkdownCell $item.marker)")
         $lines.Add("")
         $lines.Add(('- 路径：`{0}`' -f $item.path))
+        $lines.Add(('- 父项目：`{0}`' -f $item.parentProject))
+        $lines.Add(('- 分类：`{0}`' -f $item.classification))
         $lines.Add(('- 计划状态：`{0}`' -f $item.planStatus))
         $lines.Add("- 允许执行：否")
         $lines.Add("")
@@ -365,8 +367,11 @@ $plans = @(
 
         [pscustomobject]@{
             project = $item.project
+            parentProject = $item.parentProject
             marker = $item.marker
             path = $item.path
+            classification = if ($item.PSObject.Properties.Name -contains "classification") { $item.classification } else { "project-root-local-env" }
+            scope = if ($item.PSObject.Properties.Name -contains "scope") { $item.scope } else { "project-root" }
             riskLevel = $item.riskLevel
             planStatus = $status
             executionAllowed = $false
@@ -384,7 +389,7 @@ $plans = @(
 )
 
 $plan = [pscustomobject]@{
-    schemaVersion = 1
+    schemaVersion = 2
     generatedAt = (Get-Date).ToString("o")
     dryRun = $true
     readOnly = $true
@@ -405,6 +410,8 @@ $plan = [pscustomobject]@{
         rules = @(
             "本计划是 dry-run，只生成说明和候选命令预览。",
             "本计划不执行、不删除、不迁移、不合并任何项目本地环境。",
+            "嵌套 app 环境必须按所在 app 单独审查，不能并入父项目统一重建。",
+            "插件 runtime/cache 和 repair backup 缓存不进入项目依赖重建计划。",
             "候选命令必须在独立项目级 issue、明确授权和项目验证计划下执行。",
             "高风险、长期服务或状态敏感项目必须先通过人工决策门。",
             "缺少锁文件或重建说明的项目不得输出可直接执行的重建命令。"

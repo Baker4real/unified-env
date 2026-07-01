@@ -1,20 +1,24 @@
 {
-  "schemaVersion": 1,
-  "generatedAt": "2026-06-30T18:44:20.8583683+08:00",
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-01T11:11:39.7050495+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
-  "inventoryGeneratedAt": "06/30/2026 16:52:45",
+  "inventoryGeneratedAt": "07/01/2026 11:11:22",
   "summary": {
-    "totalItems": 5,
-    "longRunningOrStatefulItems": 3,
-    "rebuildableItems": 3,
-    "ownerDecisionItems": 4
+    "totalItems": 6,
+    "longRunningOrStatefulItems": 4,
+    "rebuildableItems": 4,
+    "ownerDecisionItems": 5,
+    "nestedAppItems": 1
   },
   "items": [
     {
       "project": "D:\\Codex\\projects\\歌单转换",
+      "parentProject": "D:\\Codex\\projects\\歌单转换",
       "marker": ".venv",
       "path": "D:\\Codex\\projects\\歌单转换\\.venv",
+      "classification": "project-root-local-env",
+      "scope": "project-root",
       "existingProjectFiles": [
         "pyproject.toml",
         "README.md",
@@ -38,8 +42,11 @@
     },
     {
       "project": "D:\\Codex\\projects\\codex-account-switch",
+      "parentProject": "D:\\Codex\\projects\\codex-account-switch",
       "marker": "node_modules",
       "path": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
+      "classification": "project-root-local-env",
+      "scope": "project-root",
       "existingProjectFiles": [
         "package.json",
         "package-lock.json",
@@ -64,8 +71,11 @@
     },
     {
       "project": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
+      "parentProject": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
       "marker": ".venv",
       "path": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\.venv",
+      "classification": "project-root-local-env",
+      "scope": "project-root",
       "existingProjectFiles": [
         "requirements.txt",
         "README.md",
@@ -90,8 +100,11 @@
     },
     {
       "project": "D:\\Codex\\.gsd\\projects\\hermes-agent",
+      "parentProject": "D:\\Codex\\.gsd\\projects\\hermes-agent",
       "marker": ".venv",
       "path": "D:\\Codex\\.gsd\\projects\\hermes-agent\\.venv",
+      "classification": "project-root-local-env",
+      "scope": "project-root",
       "existingProjectFiles": [
         "pyproject.toml",
         "uv.lock",
@@ -119,8 +132,11 @@
     },
     {
       "project": "D:\\Codex\\.gsd\\projects\\new-chat-4",
+      "parentProject": "D:\\Codex\\.gsd\\projects\\new-chat-4",
       "marker": ".venv",
       "path": "D:\\Codex\\.gsd\\projects\\new-chat-4\\.venv",
+      "classification": "project-root-local-env",
+      "scope": "project-root",
       "existingProjectFiles": [
         "AGENTS.md"
       ],
@@ -140,6 +156,34 @@
       "requiresOwnerDecision": true,
       "futureIssueRecommendation": "先由项目 owner 补充重建和验证说明。",
       "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
+    },
+    {
+      "project": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager",
+      "parentProject": "D:\\Codex\\.gsd\\projects\\codex-plus-plus",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager\\node_modules",
+      "classification": "nested-app-local-env",
+      "scope": "nested-app",
+      "existingProjectFiles": [
+        "package.json",
+        "package-lock.json"
+      ],
+      "riskLevel": "high",
+      "recommendedAction": "保留；需项目 owner 决策；真实重建前必须确认服务停启、状态恢复和项目级验证。",
+      "automationAllowed": false,
+      "rebuildAssessment": "可重建：发现 package-lock.json；可在独立 issue 中用 npm ci 重建并运行项目测试。",
+      "verificationPrerequisites": [
+        "读取项目 README/AGENTS 或等效项目说明。",
+        "确认项目自己的依赖安装命令、锁文件和测试命令。",
+        "确认当前环境不是正在运行的服务或恢复链路的一部分。",
+        "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。",
+        "确认 package manager 与锁文件一致，例如 npm/package-lock、pnpm/pnpm-lock 或 yarn/yarn.lock。",
+        "长期服务或状态敏感项目必须先确认停机窗口、启动命令、健康检查、回滚步骤和 owner 决策。"
+      ],
+      "isLongRunningOrStateful": true,
+      "requiresOwnerDecision": true,
+      "futureIssueRecommendation": "可单独开项目级重建 issue。",
+      "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
     }
   ],
   "policy": {
@@ -147,6 +191,8 @@
     "rules": [
       "项目本地环境默认不自动迁移。",
       "本审查包不移动、不删除、不合并任何项目本地环境。",
+      "嵌套 app 的本地环境只能按所在 app 的项目级流程审查，不能并入父项目或共享环境。",
+      "插件 runtime/cache 和 repair backup 缓存不属于本审查包的可重建项目依赖。",
       "长期服务或状态敏感项目必须先有项目 owner 决策和项目级验证。",
       "可重建只表示存在锁文件或配置线索，不等于允许自动重建。",
       "任何重建都必须作为独立项目级 issue 执行。"

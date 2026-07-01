@@ -215,6 +215,25 @@ function Get-PathSummary {
     $cDrive = @($existing | Where-Object { $_.drive -like "C:\*" })
     $dDrive = @($existing | Where-Object { $_.drive -like "D:\*" })
     $missing = @($PathEntries | Where-Object { -not $_.exists })
+    $missingEntries = @(
+        foreach ($entry in $missing) {
+            $isProjectLocalEnvEntry = "$($entry.path)" -match "\\(\.venv|venv)\\Scripts\\?$" -or
+                "$($entry.path)" -match "\\node_modules(\\\.bin)?\\?$"
+            [pscustomobject]@{
+                index = $entry.index
+                path = $entry.path
+                drive = $entry.drive
+                isProjectLocalEnvEntry = $isProjectLocalEnvEntry
+                riskLevel = if ($isProjectLocalEnvEntry) { "medium" } else { "low" }
+                recommendedAction = if ($isProjectLocalEnvEntry) {
+                    "先确认是否仍有项目依赖；若确认失效，再单独清理 PATH，不重建或删除环境目录。"
+                } else {
+                    "先确认工具是否仍需要该入口；不得作为迁移副作用直接删除。"
+                }
+            }
+        }
+    )
+    $staleLocalEnvironmentEntries = @($missingEntries | Where-Object { $_.isProjectLocalEnvEntry })
     $duplicates = @(
         $PathEntries |
             Group-Object -Property path |
@@ -233,12 +252,15 @@ function Get-PathSummary {
         cDrive = $cDrive.Count
         dDrive = $dDrive.Count
         missing = $missing.Count
+        missingEntries = $missingEntries
+        staleLocalEnvironmentEntries = $staleLocalEnvironmentEntries
         duplicates = $duplicates
         recommendations = @(
             "保留系统目录和官方安装器目录，不直接搬迁。",
             "对重复 PATH 入口单独建立清理 issue。",
             "对 C 盘工具入口先生成更新/重装方案，再决定是否切到 D 盘。",
             "对 D 盘 PATH 入口优先保留已验证工具根；如同一工具有多个 D 盘入口，再单独去重。",
+            '对失效 `.venv`、`venv` 或 `node_modules` PATH 入口先确认项目归属，再单独清理 PATH，不重建依赖目录。',
             "对缺失 PATH 入口先确认是否仍有工具依赖，再决定删除。"
         )
     }
@@ -300,6 +322,8 @@ function Write-ReadinessMarkdown {
     $lines.Add("- PATH 总入口：$($Readiness.pathSummary.total)")
     $lines.Add("- PATH C 盘入口：$($Readiness.pathSummary.cDrive)")
     $lines.Add("- PATH D 盘入口：$($Readiness.pathSummary.dDrive)")
+    $lines.Add("- PATH 缺失入口：$($Readiness.pathSummary.missing)")
+    $lines.Add("- 失效项目本地环境 PATH 入口：$($Readiness.pathSummary.staleLocalEnvironmentEntries.Count)")
     $lines.Add("")
     $lines.Add("## 工具更新准备")
     $lines.Add("")
@@ -325,6 +349,17 @@ function Write-ReadinessMarkdown {
         $lines.Add("| --- | --- |")
         foreach ($duplicate in $Readiness.pathSummary.duplicates) {
             $lines.Add("| $(Escape-MarkdownCell $duplicate.path) | $(Escape-MarkdownCell $duplicate.count) |")
+        }
+        $lines.Add("")
+    }
+    if ($Readiness.pathSummary.missingEntries.Count -gt 0) {
+        $lines.Add("### 缺失 PATH 入口")
+        $lines.Add("")
+        $lines.Add("| 序号 | 路径 | 项目本地环境入口 | 建议动作 |")
+        $lines.Add("| --- | --- | --- | --- |")
+        foreach ($entry in $Readiness.pathSummary.missingEntries) {
+            $localEnvDisplay = if ($entry.isProjectLocalEnvEntry) { "是" } else { "否" }
+            $lines.Add("| $(Escape-MarkdownCell $entry.index) | $(Escape-MarkdownCell $entry.path) | $localEnvDisplay | $(Escape-MarkdownCell $entry.recommendedAction) |")
         }
         $lines.Add("")
     }
@@ -361,7 +396,7 @@ $pathSummary = Get-PathSummary -PathEntries @($inventory.pathEntries)
 $highRiskItems = @($toolReadiness | Where-Object { $_.riskLevel -eq "high" })
 
 $readiness = [pscustomobject]@{
-    schemaVersion = 1
+    schemaVersion = 2
     generatedAt = (Get-Date).ToString("o")
     readOnly = $true
     inventoryPath = $InventoryPath
@@ -375,6 +410,7 @@ $readiness = [pscustomobject]@{
             "本项目只生成更新准备报告，不执行任何更新命令。",
             "系统组件、MSI/官方安装器、WinGet 包目录和 Windows 功能不直接搬迁。",
             "D 盘工具入口优先保持现有策略，更新前需单独确认。",
+            '失效项目本地环境 PATH 入口只生成清理建议，不代表可以删除或重建对应 `.venv`、`node_modules`。',
             "高风险对象必须进入人工审查，不能进入自动更新候选。"
         )
     }

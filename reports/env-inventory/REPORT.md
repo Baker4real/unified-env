@@ -1,6 +1,6 @@
 # 本机环境资产盘点报告
 
-生成时间：2026-06-30T16:52:45.7495004+08:00
+生成时间：2026-07-01T11:11:22.1489050+08:00
 
 > 本报告由只读盘点脚本生成。脚本未移动文件、未修改环境变量、未执行软件更新。
 
@@ -8,9 +8,10 @@
 
 - 工具探测数量：33
 - 已存在目录数量：9
-- 项目本地环境标记数量：5
+- 项目级审查环境数量：6
+- 本地环境相关发现数量：11
 - 迁移候选数量：0
-- 人工审查项数量：5
+- 人工审查项数量：11
 
 ## 绝不自动迁移
 
@@ -44,8 +45,8 @@
 | winget | False | False |  |  |  |
 | choco | False | False |  |  |  |
 | git | True | True | d:\Program Files\Git\cmd\git.exe | git version 2.54.0.windows.1 |  |
-| cargo | True | True | C:\Program Files\Rust stable GNU 1.96\bin\cargo.exe | cargo 1.96.0 (30a34c682 2026-05-25) |  |
-| rustc | True | True | C:\Program Files\Rust stable GNU 1.96\bin\rustc.exe | rustc 1.96.0 (ac68faa20 2026-05-25) |  |
+| cargo | True | True | D:\Codex\.cargo\bin\cargo.exe | cargo 1.96.0 (30a34c682 2026-05-25) |  |
+| rustc | True | True | D:\Codex\.cargo\bin\rustc.exe | rustc 1.96.0 (ac68faa20 2026-05-25) |  |
 | go | False | False |  |  |  |
 | dotnet | True | False | C:\Program Files\dotnet\dotnet.exe |  | Version probe exited with code -2147450735 |
 | java | False | False |  |  |  |
@@ -65,7 +66,7 @@
 | 序号 | 是否存在 | 路径 | Reparse Point |
 | --- | --- | --- | --- |
 | 0 | True | D:\Codex\tools\PowerShell\7.6.3 | False |
-| 1 | True | D:\Codex\.codex\tmp\arg0\codex-arg0DV5SNM | False |
+| 1 | True | D:\Codex\.codex\tmp\arg0\codex-arg0lZlz0U | False |
 | 2 | True | D:\Codex\tools\PowerShell\7.6.3 | False |
 | 3 | True | C:\WINDOWS\system32 | False |
 | 4 | True | C:\WINDOWS | False |
@@ -77,7 +78,7 @@
 | 10 | True | d:\Program Files\Git\cmd | False |
 | 11 | True | C:\Program Files (x86)\ZeroTier\One\ | False |
 | 12 | True | C:\Program Files\Tailscale\ | False |
-| 13 | True | C:\Program Files\Rust stable GNU 1.96\bin | False |
+| 13 | False | C:\Program Files\Rust stable GNU 1.96\bin | False |
 | 14 | True | D:\Codex\.cargo\bin | False |
 | 15 | True | D:\Codex\tools\codegraph\current\bin | False |
 | 16 | True | D:\Codex\tools\PowerShell\7.6.3 | False |
@@ -132,13 +133,30 @@
 
 ## 项目本地环境
 
-| 项目 | 标记 | 路径 | 建议 |
-| --- | --- | --- | --- |
-| D:\Codex\projects\歌单转换 | .venv | D:\Codex\projects\歌单转换\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
-| D:\Codex\projects\codex-account-switch | node_modules | D:\Codex\projects\codex-account-switch\node_modules | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
-| D:\Codex\projects\yangyangzi-direct-qqbot | .venv | D:\Codex\projects\yangyangzi-direct-qqbot\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
-| D:\Codex\.gsd\projects\hermes-agent | .venv | D:\Codex\.gsd\projects\hermes-agent\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
-| D:\Codex\.gsd\projects\new-chat-4 | .venv | D:\Codex\.gsd\projects\new-chat-4\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| 项目或 app | 父项目 | 分类 | 标记 | 路径 | 建议 |
+| --- | --- | --- | --- | --- | --- |
+| D:\Codex\projects\歌单转换 | D:\Codex\projects\歌单转换 | project-root-local-env | .venv | D:\Codex\projects\歌单转换\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| D:\Codex\projects\codex-account-switch | D:\Codex\projects\codex-account-switch | project-root-local-env | node_modules | D:\Codex\projects\codex-account-switch\node_modules | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| D:\Codex\projects\yangyangzi-direct-qqbot | D:\Codex\projects\yangyangzi-direct-qqbot | project-root-local-env | .venv | D:\Codex\projects\yangyangzi-direct-qqbot\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| D:\Codex\.gsd\projects\hermes-agent | D:\Codex\.gsd\projects\hermes-agent | project-root-local-env | .venv | D:\Codex\.gsd\projects\hermes-agent\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| D:\Codex\.gsd\projects\new-chat-4 | D:\Codex\.gsd\projects\new-chat-4 | project-root-local-env | .venv | D:\Codex\.gsd\projects\new-chat-4\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager | D:\Codex\.gsd\projects\codex-plus-plus | nested-app-local-env | node_modules | D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager\node_modules | 不自动迁移；纳入项目级审查，但不得跨项目复用。 |
+
+## 本地环境分类发现
+
+| 分类 | 纳入项目级审查 | 所属项目或容器 | 标记 | 路径 | 建议 |
+| --- | --- | --- | --- | --- | --- |
+| project-root-local-env | 是 | D:\Codex\projects\歌单转换 | .venv | D:\Codex\projects\歌单转换\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| project-root-local-env | 是 | D:\Codex\projects\codex-account-switch | node_modules | D:\Codex\projects\codex-account-switch\node_modules | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| project-root-local-env | 是 | D:\Codex\projects\yangyangzi-direct-qqbot | .venv | D:\Codex\projects\yangyangzi-direct-qqbot\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| archived-project-cache | 否 | D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase6-skills\source-skills\shared-skill | node_modules | D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase6-skills\source-skills\shared-skill\node_modules | 不按当前项目依赖重建；如需处理，进入归档或产物清理 dry-run。 |
+| plugin-cache-backup | 否 | D:\Codex\projects\yangyangzi-direct-qqbot\data\repair_backups\plugin-cache-20260610-123718\openai-bundled\chrome\26.602.71036\scripts | node_modules | D:\Codex\projects\yangyangzi-direct-qqbot\data\repair_backups\plugin-cache-20260610-123718\openai-bundled\chrome\26.602.71036\scripts\node_modules | 不按项目依赖重建；如需处理，进入备份治理 dry-run。 |
+| archived-project-cache | 否 | D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase6-skills\source-codex\skills\shared-skill | node_modules | D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase6-skills\source-codex\skills\shared-skill\node_modules | 不按当前项目依赖重建；如需处理，进入归档或产物清理 dry-run。 |
+| plugin-runtime-cache | 否 | D:\Codex\projects\yangyangzi-direct-qqbot\data\codex_home_yangyangzi\plugins\cache\openai-bundled\browser\26.616.51431\scripts | node_modules | D:\Codex\projects\yangyangzi-direct-qqbot\data\codex_home_yangyangzi\plugins\cache\openai-bundled\browser\26.616.51431\scripts\node_modules | 不按项目依赖重建；如需处理，进入插件 runtime/cache 治理。 |
+| plugin-runtime-cache | 否 | D:\Codex\projects\yangyangzi-direct-qqbot\data\codex_home_yangyangzi\plugins\cache\openai-bundled\chrome\26.616.51431\scripts | node_modules | D:\Codex\projects\yangyangzi-direct-qqbot\data\codex_home_yangyangzi\plugins\cache\openai-bundled\chrome\26.616.51431\scripts\node_modules | 不按项目依赖重建；如需处理，进入插件 runtime/cache 治理。 |
+| project-root-local-env | 是 | D:\Codex\.gsd\projects\hermes-agent | .venv | D:\Codex\.gsd\projects\hermes-agent\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| project-root-local-env | 是 | D:\Codex\.gsd\projects\new-chat-4 | .venv | D:\Codex\.gsd\projects\new-chat-4\.venv | 不自动迁移；这是项目本地依赖环境，需逐项目评估。 |
+| nested-app-local-env | 是 | D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager | node_modules | D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager\node_modules | 不自动迁移；纳入项目级审查，但不得跨项目复用。 |
 
 ## 迁移候选
 
@@ -148,11 +166,17 @@
 
 | 来源 | 类型 | 风险 | 建议动作 | 原因 |
 | --- | --- | --- | --- | --- |
-| D:\Codex\projects\歌单转换\.venv | project-local-env | high | 不自动迁移 | 项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
-| D:\Codex\projects\codex-account-switch\node_modules | project-local-env | high | 不自动迁移 | 项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
-| D:\Codex\projects\yangyangzi-direct-qqbot\.venv | project-local-env | high | 不自动迁移 | 项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
-| D:\Codex\.gsd\projects\hermes-agent\.venv | project-local-env | high | 不自动迁移 | 项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
-| D:\Codex\.gsd\projects\new-chat-4\.venv | project-local-env | high | 不自动迁移 | 项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
+| D:\Codex\projects\歌单转换\.venv | project-root-local-env | high | 不自动迁移 | 项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
+| D:\Codex\projects\codex-account-switch\node_modules | project-root-local-env | high | 不自动迁移 | 项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
+| D:\Codex\projects\yangyangzi-direct-qqbot\.venv | project-root-local-env | high | 不自动迁移 | 项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
+| D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase6-skills\source-skills\shared-skill\node_modules | archived-project-cache | high | 不自动迁移 | 项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。 |
+| D:\Codex\projects\yangyangzi-direct-qqbot\data\repair_backups\plugin-cache-20260610-123718\openai-bundled\chrome\26.602.71036\scripts\node_modules | plugin-cache-backup | high | 不自动迁移 | repair backup 内的插件缓存副本，不属于项目依赖重建；只能走备份保留或清理治理。 |
+| D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase6-skills\source-codex\skills\shared-skill\node_modules | archived-project-cache | high | 不自动迁移 | 项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。 |
+| D:\Codex\projects\yangyangzi-direct-qqbot\data\codex_home_yangyangzi\plugins\cache\openai-bundled\browser\26.616.51431\scripts\node_modules | plugin-runtime-cache | high | 不自动迁移 | 插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。 |
+| D:\Codex\projects\yangyangzi-direct-qqbot\data\codex_home_yangyangzi\plugins\cache\openai-bundled\chrome\26.616.51431\scripts\node_modules | plugin-runtime-cache | high | 不自动迁移 | 插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。 |
+| D:\Codex\.gsd\projects\hermes-agent\.venv | project-root-local-env | high | 不自动迁移 | 项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
+| D:\Codex\.gsd\projects\new-chat-4\.venv | project-root-local-env | high | 不自动迁移 | 项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。 |
+| D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager\node_modules | nested-app-local-env | high | 不自动迁移 | 嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。 |
 
 ## 下一步
 

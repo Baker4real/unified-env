@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 1,
-  "generatedAt": "2026-06-30T15:39:26.6537431+08:00",
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-01T11:28:12.6562911+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
-  "inventoryGeneratedAt": "06/30/2026 15:20:24",
+  "inventoryGeneratedAt": "07/01/2026 11:11:22",
   "toolReadiness": [
     {
       "name": "python",
@@ -88,13 +88,13 @@
     {
       "name": "cargo",
       "found": true,
-      "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin\\cargo.exe",
-      "pathDisplay": "C:\\Program Files\\Rust stable GNU 1.96\\bin\\cargo.exe",
+      "path": "D:\\Codex\\.cargo\\bin\\cargo.exe",
+      "pathDisplay": "D:\\Codex\\.cargo\\bin\\cargo.exe",
       "pathStatus": "resolved",
       "version": "cargo 1.96.0 (30a34c682 2026-05-25)",
       "probeSucceeded": true,
-      "locationClass": "system-installer",
-      "drive": "C:\\",
+      "locationClass": "d-drive",
+      "drive": "D:\\",
       "recommendedUpdateEntry": "rustup 或官方 Rust 安装方式",
       "recommendedAction": "当前入口在系统安装目录；不要直接搬目录。",
       "autoUpdateAllowed": false,
@@ -104,13 +104,13 @@
     {
       "name": "rustc",
       "found": true,
-      "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin\\rustc.exe",
-      "pathDisplay": "C:\\Program Files\\Rust stable GNU 1.96\\bin\\rustc.exe",
+      "path": "D:\\Codex\\.cargo\\bin\\rustc.exe",
+      "pathDisplay": "D:\\Codex\\.cargo\\bin\\rustc.exe",
       "pathStatus": "resolved",
       "version": "rustc 1.96.0 (ac68faa20 2026-05-25)",
       "probeSucceeded": true,
-      "locationClass": "system-installer",
-      "drive": "C:\\",
+      "locationClass": "d-drive",
+      "drive": "D:\\",
       "recommendedUpdateEntry": "rustup 或官方 Rust 安装方式",
       "recommendedAction": "当前入口在系统安装目录；不要直接搬目录。",
       "autoUpdateAllowed": false,
@@ -216,10 +216,46 @@
   ],
   "pathSummary": {
     "total": 37,
-    "existing": 35,
-    "cDrive": 20,
+    "existing": 34,
+    "cDrive": 19,
     "dDrive": 15,
-    "missing": 2,
+    "missing": 3,
+    "missingEntries": [
+      {
+        "index": 13,
+        "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin",
+        "drive": "C:\\",
+        "isProjectLocalEnvEntry": false,
+        "riskLevel": "low",
+        "recommendedAction": "先确认工具是否仍需要该入口；不得作为迁移副作用直接删除。"
+      },
+      {
+        "index": 23,
+        "path": "D:\\hermes-agent\\.venv\\Scripts",
+        "drive": "D:\\",
+        "isProjectLocalEnvEntry": true,
+        "riskLevel": "medium",
+        "recommendedAction": "先确认是否仍有项目依赖；若确认失效，再单独清理 PATH，不重建或删除环境目录。"
+      },
+      {
+        "index": 34,
+        "path": "D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools",
+        "drive": "D:\\",
+        "isProjectLocalEnvEntry": false,
+        "riskLevel": "low",
+        "recommendedAction": "先确认工具是否仍需要该入口；不得作为迁移副作用直接删除。"
+      }
+    ],
+    "staleLocalEnvironmentEntries": [
+      {
+        "index": 23,
+        "path": "D:\\hermes-agent\\.venv\\Scripts",
+        "drive": "D:\\",
+        "isProjectLocalEnvEntry": true,
+        "riskLevel": "medium",
+        "recommendedAction": "先确认是否仍有项目依赖；若确认失效，再单独清理 PATH，不重建或删除环境目录。"
+      }
+    ],
     "duplicates": [
       {
         "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
@@ -231,6 +267,7 @@
       "对重复 PATH 入口单独建立清理 issue。",
       "对 C 盘工具入口先生成更新/重装方案，再决定是否切到 D 盘。",
       "对 D 盘 PATH 入口优先保留已验证工具根；如同一工具有多个 D 盘入口，再单独去重。",
+      "对失效 `.venv`、`venv` 或 `node_modules` PATH 入口先确认项目归属，再单独清理 PATH，不重建依赖目录。",
       "对缺失 PATH 入口先确认是否仍有工具依赖，再决定删除。"
     ]
   },
@@ -274,6 +311,7 @@
       "本项目只生成更新准备报告，不执行任何更新命令。",
       "系统组件、MSI/官方安装器、WinGet 包目录和 Windows 功能不直接搬迁。",
       "D 盘工具入口优先保持现有策略，更新前需单独确认。",
+      "失效项目本地环境 PATH 入口只生成清理建议，不代表可以删除或重建对应 `.venv`、`node_modules`。",
       "高风险对象必须进入人工审查，不能进入自动更新候选。"
     ]
   }

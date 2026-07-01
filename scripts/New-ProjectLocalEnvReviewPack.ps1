@@ -278,15 +278,16 @@ function Write-ReviewMarkdown {
     $lines.Add("- 长期服务或状态敏感项目：$($Review.summary.longRunningOrStatefulItems)")
     $lines.Add("- 可重建线索项：$($Review.summary.rebuildableItems)")
     $lines.Add("- 需项目 owner 决策项：$($Review.summary.ownerDecisionItems)")
+    $lines.Add("- 嵌套 app 环境项：$($Review.summary.nestedAppItems)")
     $lines.Add("")
     $lines.Add("## 审查清单")
     $lines.Add("")
-    $lines.Add("| 项目 | 标记 | 路径 | 风险 | 建议动作 | 重建判断 | 长期服务 |")
-    $lines.Add("| --- | --- | --- | --- | --- | --- | --- |")
+    $lines.Add("| 项目或 app | 父项目 | 分类 | 标记 | 路径 | 风险 | 建议动作 | 重建判断 | 长期服务 |")
+    $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     foreach ($item in $Review.items) {
         $longRunning = if ($item.isLongRunningOrStateful) { "是" } else { "否" }
         $riskDisplay = Convert-RiskLevelToDisplay -RiskLevel $item.riskLevel
-        $lines.Add("| $(Escape-MarkdownCell $item.project) | $(Escape-MarkdownCell $item.marker) | $(Escape-MarkdownCell $item.path) | $(Escape-MarkdownCell $riskDisplay) | $(Escape-MarkdownCell $item.recommendedAction) | $(Escape-MarkdownCell $item.rebuildAssessment) | $longRunning |")
+        $lines.Add("| $(Escape-MarkdownCell $item.project) | $(Escape-MarkdownCell $item.parentProject) | $(Escape-MarkdownCell $item.classification) | $(Escape-MarkdownCell $item.marker) | $(Escape-MarkdownCell $item.path) | $(Escape-MarkdownCell $riskDisplay) | $(Escape-MarkdownCell $item.recommendedAction) | $(Escape-MarkdownCell $item.rebuildAssessment) | $longRunning |")
     }
     $lines.Add("")
     $lines.Add("## 验证前置条件")
@@ -325,8 +326,11 @@ $items = @(
 
         [pscustomobject]@{
             project = $marker.project
+            parentProject = $marker.parentProject
             marker = $marker.marker
             path = $marker.path
+            classification = if ($marker.PSObject.Properties.Name -contains "classification") { $marker.classification } else { "project-root-local-env" }
+            scope = if ($marker.PSObject.Properties.Name -contains "scope") { $marker.scope } else { "project-root" }
             existingProjectFiles = $files
             riskLevel = if ($isLongRunning) { "high" } else { "medium" }
             recommendedAction = $recommendedAction
@@ -342,7 +346,7 @@ $items = @(
 )
 
 $review = [pscustomobject]@{
-    schemaVersion = 1
+    schemaVersion = 2
     generatedAt = (Get-Date).ToString("o")
     readOnly = $true
     inventoryPath = $InventoryPath
@@ -352,6 +356,7 @@ $review = [pscustomobject]@{
         longRunningOrStatefulItems = @($items | Where-Object { $_.isLongRunningOrStateful }).Count
         rebuildableItems = @($items | Where-Object { $_.rebuildAssessment -like "可重建*" }).Count
         ownerDecisionItems = @($items | Where-Object { $_.requiresOwnerDecision }).Count
+        nestedAppItems = @($items | Where-Object { $_.classification -eq "nested-app-local-env" }).Count
     }
     items = $items
     policy = [pscustomobject]@{
@@ -359,6 +364,8 @@ $review = [pscustomobject]@{
         rules = @(
             "项目本地环境默认不自动迁移。",
             "本审查包不移动、不删除、不合并任何项目本地环境。",
+            "嵌套 app 的本地环境只能按所在 app 的项目级流程审查，不能并入父项目或共享环境。",
+            "插件 runtime/cache 和 repair backup 缓存不属于本审查包的可重建项目依赖。",
             "长期服务或状态敏感项目必须先有项目 owner 决策和项目级验证。",
             "可重建只表示存在锁文件或配置线索，不等于允许自动重建。",
             "任何重建都必须作为独立项目级 issue 执行。"

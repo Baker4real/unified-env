@@ -63,6 +63,9 @@ try {
     foreach ($property in @("readOnly", "inventoryPath", "toolReadiness", "pathSummary", "highRiskItems", "policy")) {
         Assert-Property -Object $readiness -Name $property
     }
+    foreach ($property in @("missingEntries", "staleLocalEnvironmentEntries", "duplicates", "recommendations")) {
+        Assert-Property -Object $readiness.pathSummary -Name $property
+    }
 
     Assert-True -Condition ([bool]$readiness.readOnly) -Message "readiness JSON 的 readOnly 不是 true"
     Assert-True -Condition ($readiness.inventoryPath -eq $inventoryPath) -Message "readiness 没有记录 inventory 路径"
@@ -79,8 +82,15 @@ try {
     }
 
     $markdown = Get-Content -Path $markdownPath -Raw
-    foreach ($expected in @("只读", "不会执行", "工具更新准备", "当前入口", "PATH 整理建议", "D 盘 PATH 入口", "高风险对象", "不自动更新")) {
+    foreach ($expected in @("只读", "不会执行", "工具更新准备", "当前入口", "PATH 整理建议", "D 盘 PATH 入口", "PATH 缺失入口", "缺失 PATH 入口", "高风险对象", "不自动更新")) {
         Assert-True -Condition $markdown.Contains($expected) -Message "REPORT.md 缺少预期文本：$expected"
+    }
+
+    $staleVenvPath = "D:\hermes-agent\.venv\Scripts"
+    if (-not (Test-Path -LiteralPath $staleVenvPath)) {
+        $staleVenvEntry = @($readiness.pathSummary.staleLocalEnvironmentEntries | Where-Object { $_.path -ieq $staleVenvPath }) | Select-Object -First 1
+        Assert-True -Condition ($null -ne $staleVenvEntry) -Message "应标出失效项目本地环境 PATH 入口：$staleVenvPath"
+        Assert-True -Condition ($staleVenvEntry.recommendedAction -like "*不重建或删除环境目录*") -Message "失效 .venv PATH 入口不得建议重建或删除环境目录"
     }
 
     $blockedOutput = "C:\Codex-should-not-be-created"
@@ -128,6 +138,12 @@ try {
                 path = "D:\Codex\tools"
                 exists = $true
                 drive = "D:\"
+            },
+            [pscustomobject]@{
+                index = 1
+                path = "D:\missing-project\.venv\Scripts"
+                exists = $false
+                drive = "D:\"
             }
         )
     }
@@ -140,8 +156,12 @@ try {
     Assert-True -Condition ($resolvedEntry.pathDisplay -eq $resolvedEntry.path) -Message "有路径工具的 pathDisplay 应等于原始路径"
     Assert-True -Condition ($unresolvedEntry.pathStatus -eq "unresolved") -Message "空路径工具应标记为 unresolved"
     Assert-True -Condition ($unresolvedEntry.pathDisplay -eq "未解析（inventory 未返回路径）") -Message "空路径工具应显示未解析说明"
+    $fixtureStaleEnvEntry = $fixtureReadiness.pathSummary.staleLocalEnvironmentEntries | Where-Object { $_.path -eq "D:\missing-project\.venv\Scripts" } | Select-Object -First 1
+    Assert-True -Condition ($null -ne $fixtureStaleEnvEntry) -Message "fixture 中失效 .venv PATH 入口应被分类"
+    Assert-True -Condition ($fixtureStaleEnvEntry.recommendedAction -like "*不重建或删除环境目录*") -Message "fixture 失效 .venv PATH 入口建议动作错误"
 
     $fixtureMarkdown = Get-Content -Path (Join-Path $fixtureOutput "REPORT.md") -Raw
+    Assert-True -Condition $fixtureMarkdown.Contains("D:\missing-project\.venv\Scripts") -Message "fixture REPORT.md 应列出缺失 .venv PATH 入口"
     foreach ($unexpected in @("| d-drive |", "| user-profile |", "| low |", "| medium |", "| high |", "| True |")) {
         Assert-True -Condition (-not $fixtureMarkdown.Contains($unexpected)) -Message "REPORT.md 不应直接展示内部枚举或布尔值：$unexpected"
     }

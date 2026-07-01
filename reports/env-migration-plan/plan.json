@@ -1,52 +1,100 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-30T16:53:02.8721139+08:00",
+  "generatedAt": "2026-07-01T11:11:39.1877983+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
-  "inventoryGeneratedAt": "2026-06-30T16:52:45.7495004+08:00",
+  "inventoryGeneratedAt": "2026-07-01T11:11:22.1489050+08:00",
   "migrationPlans": [],
   "blockedByRootPolicy": [],
   "blockedByManualReview": [],
   "excludedManualReviewItems": [
     {
       "source": "D:\\Codex\\projects\\歌单转换\\.venv",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "source": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\.venv",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\codex-gsd-codex-c-skill\\docs\\gsd-archive\\tmp\\replicator\\phase6-skills\\source-skills\\shared-skill\\node_modules",
+      "kind": "archived-project-cache",
+      "owner": "archive",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\repair_backups\\plugin-cache-20260610-123718\\openai-bundled\\chrome\\26.602.71036\\scripts\\node_modules",
+      "kind": "plugin-cache-backup",
+      "owner": "backup",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "repair backup 内的插件缓存副本，不属于项目依赖重建；只能走备份保留或清理治理。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\codex-gsd-codex-c-skill\\docs\\gsd-archive\\tmp\\replicator\\phase6-skills\\source-codex\\skills\\shared-skill\\node_modules",
+      "kind": "archived-project-cache",
+      "owner": "archive",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\codex_home_yangyangzi\\plugins\\cache\\openai-bundled\\browser\\26.616.51431\\scripts\\node_modules",
+      "kind": "plugin-runtime-cache",
+      "owner": "plugin-runtime",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\codex_home_yangyangzi\\plugins\\cache\\openai-bundled\\chrome\\26.616.51431\\scripts\\node_modules",
+      "kind": "plugin-runtime-cache",
+      "owner": "plugin-runtime",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。"
     },
     {
       "source": "D:\\Codex\\.gsd\\projects\\hermes-agent\\.venv",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "source": "D:\\Codex\\.gsd\\projects\\new-chat-4\\.venv",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager\\node_modules",
+      "kind": "nested-app-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
     }
   ],
   "excludedRoots": [

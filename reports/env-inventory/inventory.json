@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "generatedAt": "2026-06-30T16:52:45.7495004+08:00",
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-01T11:11:22.1489050+08:00",
   "readOnly": true,
   "host": {
     "computerName": "BAKER",
@@ -224,7 +224,7 @@
     {
       "name": "cargo",
       "found": true,
-      "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin\\cargo.exe",
+      "path": "D:\\Codex\\.cargo\\bin\\cargo.exe",
       "version": "cargo 1.96.0 (30a34c682 2026-05-25)",
       "evidence": "cargo 1.96.0 (30a34c682 2026-05-25)",
       "exitCode": 0,
@@ -234,7 +234,7 @@
     {
       "name": "rustc",
       "found": true,
-      "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin\\rustc.exe",
+      "path": "D:\\Codex\\.cargo\\bin\\rustc.exe",
       "version": "rustc 1.96.0 (ac68faa20 2026-05-25)",
       "evidence": "rustc 1.96.0 (ac68faa20 2026-05-25)",
       "exitCode": 0,
@@ -375,7 +375,7 @@
   "selectedEnvironmentVariables": [
     {
       "name": "Path",
-      "value": "D:\\Codex\\tools\\PowerShell\\7.6.3;D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0DV5SNM;D:\\Codex\\tools\\PowerShell\\7.6.3;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\dotnet\\;C:\\Program Files\\nodejs\\;d:\\Program Files\\Git\\cmd;C:\\Program Files (x86)\\ZeroTier\\One\\;C:\\Program Files\\Tailscale\\;C:\\Program Files\\Rust stable GNU 1.96\\bin;D:\\Codex\\.cargo\\bin;D:\\Codex\\tools\\codegraph\\current\\bin;D:\\Codex\\tools\\PowerShell\\7.6.3;D:\\Codex\\tools\\python313-official;D:\\Codex\\tools\\python313-shims;D:\\Codex\\tools\\dotnet;D:\\Codex\\tools\\uv\\bin;D:\\Codex\\_tools;D:\\hermes-data\\bin;D:\\hermes-agent\\.venv\\Scripts;C:\\Users\\14224\\.local\\bin;C:\\Users\\14224\\AppData\\Roaming\\Programs\\Zero Install;C:\\Users\\14224\\AppData\\Roaming\\npm;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin;D:\\Program Files\\Git\\bin;D:\\Program Files\\Git\\usr\\bin;C:\\Users\\14224\\AppData\\Local\\.luckin\\bin;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\\bin;D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools;C:\\Users\\14224\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd;C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.616.6631.0_x64__2p2nqsd0c76g0\\app\\resources",
+      "value": "D:\\Codex\\tools\\PowerShell\\7.6.3;D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0lZlz0U;D:\\Codex\\tools\\PowerShell\\7.6.3;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\dotnet\\;C:\\Program Files\\nodejs\\;d:\\Program Files\\Git\\cmd;C:\\Program Files (x86)\\ZeroTier\\One\\;C:\\Program Files\\Tailscale\\;C:\\Program Files\\Rust stable GNU 1.96\\bin;D:\\Codex\\.cargo\\bin;D:\\Codex\\tools\\codegraph\\current\\bin;D:\\Codex\\tools\\PowerShell\\7.6.3;D:\\Codex\\tools\\python313-official;D:\\Codex\\tools\\python313-shims;D:\\Codex\\tools\\dotnet;D:\\Codex\\tools\\uv\\bin;D:\\Codex\\_tools;D:\\hermes-data\\bin;D:\\hermes-agent\\.venv\\Scripts;C:\\Users\\14224\\.local\\bin;C:\\Users\\14224\\AppData\\Roaming\\Programs\\Zero Install;C:\\Users\\14224\\AppData\\Roaming\\npm;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin;D:\\Program Files\\Git\\bin;D:\\Program Files\\Git\\usr\\bin;C:\\Users\\14224\\AppData\\Local\\.luckin\\bin;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\\bin;D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools;C:\\Users\\14224\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd;C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.616.6631.0_x64__2p2nqsd0c76g0\\app\\resources",
       "isSet": true
     },
     {
@@ -500,7 +500,7 @@
     },
     {
       "index": 1,
-      "path": "D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0DV5SNM",
+      "path": "D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0lZlz0U",
       "exists": true,
       "drive": "D:\\",
       "isReparsePoint": false,
@@ -597,7 +597,7 @@
     {
       "index": 13,
       "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin",
-      "exists": true,
+      "exists": false,
       "drive": "C:\\",
       "isReparsePoint": false,
       "reparseTarget": null
@@ -1068,86 +1068,351 @@
   "projectEnvironmentMarkers": [
     {
       "project": "D:\\Codex\\projects\\歌单转换",
+      "parentProject": "D:\\Codex\\projects\\歌单转换",
       "marker": ".venv",
       "path": "D:\\Codex\\projects\\歌单转换\\.venv",
       "drive": "D:\\",
       "sizeBytes": null,
-      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "project": "D:\\Codex\\projects\\codex-account-switch",
+      "parentProject": "D:\\Codex\\projects\\codex-account-switch",
       "marker": "node_modules",
       "path": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
       "drive": "D:\\",
       "sizeBytes": null,
-      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "project": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
+      "parentProject": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
       "marker": ".venv",
       "path": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\.venv",
       "drive": "D:\\",
       "sizeBytes": null,
-      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "project": "D:\\Codex\\.gsd\\projects\\hermes-agent",
+      "parentProject": "D:\\Codex\\.gsd\\projects\\hermes-agent",
       "marker": ".venv",
       "path": "D:\\Codex\\.gsd\\projects\\hermes-agent\\.venv",
       "drive": "D:\\",
       "sizeBytes": null,
-      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "project": "D:\\Codex\\.gsd\\projects\\new-chat-4",
+      "parentProject": "D:\\Codex\\.gsd\\projects\\new-chat-4",
       "marker": ".venv",
       "path": "D:\\Codex\\.gsd\\projects\\new-chat-4\\.venv",
       "drive": "D:\\",
       "sizeBytes": null,
-      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "project": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager",
+      "parentProject": "D:\\Codex\\.gsd\\projects\\codex-plus-plus",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager\\node_modules",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "nested-app-local-env",
+      "scope": "nested-app",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
+      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
+    }
+  ],
+  "localEnvironmentFindings": [
+    {
+      "project": "D:\\Codex\\projects\\歌单转换",
+      "parentProject": "D:\\Codex\\projects\\歌单转换",
+      "marker": ".venv",
+      "path": "D:\\Codex\\projects\\歌单转换\\.venv",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\codex-account-switch",
+      "parentProject": "D:\\Codex\\projects\\codex-account-switch",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
+      "parentProject": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
+      "marker": ".venv",
+      "path": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\.venv",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\codex-gsd-codex-c-skill\\docs\\gsd-archive\\tmp\\replicator\\phase6-skills\\source-skills\\shared-skill",
+      "parentProject": "D:\\Codex\\projects\\codex-gsd-codex-c-skill",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\codex-gsd-codex-c-skill\\docs\\gsd-archive\\tmp\\replicator\\phase6-skills\\source-skills\\shared-skill\\node_modules",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "archived-project-cache",
+      "scope": "archive-cache",
+      "owner": "archive",
+      "risk": "high",
+      "includeInReviewPack": false,
+      "recommendation": "不按当前项目依赖重建；如需处理，进入归档或产物清理 dry-run。",
+      "reason": "项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\repair_backups\\plugin-cache-20260610-123718\\openai-bundled\\chrome\\26.602.71036\\scripts",
+      "parentProject": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\repair_backups\\plugin-cache-20260610-123718\\openai-bundled\\chrome\\26.602.71036\\scripts\\node_modules",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "plugin-cache-backup",
+      "scope": "backup-cache",
+      "owner": "backup",
+      "risk": "high",
+      "includeInReviewPack": false,
+      "recommendation": "不按项目依赖重建；如需处理，进入备份治理 dry-run。",
+      "reason": "repair backup 内的插件缓存副本，不属于项目依赖重建；只能走备份保留或清理治理。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\codex-gsd-codex-c-skill\\docs\\gsd-archive\\tmp\\replicator\\phase6-skills\\source-codex\\skills\\shared-skill",
+      "parentProject": "D:\\Codex\\projects\\codex-gsd-codex-c-skill",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\codex-gsd-codex-c-skill\\docs\\gsd-archive\\tmp\\replicator\\phase6-skills\\source-codex\\skills\\shared-skill\\node_modules",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "archived-project-cache",
+      "scope": "archive-cache",
+      "owner": "archive",
+      "risk": "high",
+      "includeInReviewPack": false,
+      "recommendation": "不按当前项目依赖重建；如需处理，进入归档或产物清理 dry-run。",
+      "reason": "项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\codex_home_yangyangzi\\plugins\\cache\\openai-bundled\\browser\\26.616.51431\\scripts",
+      "parentProject": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\codex_home_yangyangzi\\plugins\\cache\\openai-bundled\\browser\\26.616.51431\\scripts\\node_modules",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "plugin-runtime-cache",
+      "scope": "plugin-runtime-cache",
+      "owner": "plugin-runtime",
+      "risk": "high",
+      "includeInReviewPack": false,
+      "recommendation": "不按项目依赖重建；如需处理，进入插件 runtime/cache 治理。",
+      "reason": "插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\codex_home_yangyangzi\\plugins\\cache\\openai-bundled\\chrome\\26.616.51431\\scripts",
+      "parentProject": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\codex_home_yangyangzi\\plugins\\cache\\openai-bundled\\chrome\\26.616.51431\\scripts\\node_modules",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "plugin-runtime-cache",
+      "scope": "plugin-runtime-cache",
+      "owner": "plugin-runtime",
+      "risk": "high",
+      "includeInReviewPack": false,
+      "recommendation": "不按项目依赖重建；如需处理，进入插件 runtime/cache 治理。",
+      "reason": "插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。"
+    },
+    {
+      "project": "D:\\Codex\\.gsd\\projects\\hermes-agent",
+      "parentProject": "D:\\Codex\\.gsd\\projects\\hermes-agent",
+      "marker": ".venv",
+      "path": "D:\\Codex\\.gsd\\projects\\hermes-agent\\.venv",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "project": "D:\\Codex\\.gsd\\projects\\new-chat-4",
+      "parentProject": "D:\\Codex\\.gsd\\projects\\new-chat-4",
+      "marker": ".venv",
+      "path": "D:\\Codex\\.gsd\\projects\\new-chat-4\\.venv",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "project-root-local-env",
+      "scope": "project-root",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；这是项目本地依赖环境，需逐项目评估。",
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "project": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager",
+      "parentProject": "D:\\Codex\\.gsd\\projects\\codex-plus-plus",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager\\node_modules",
+      "drive": "D:\\",
+      "sizeBytes": null,
+      "classification": "nested-app-local-env",
+      "scope": "nested-app",
+      "owner": "project",
+      "risk": "high",
+      "includeInReviewPack": true,
+      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
+      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
     }
   ],
   "migrationCandidates": [],
   "manualReviewItems": [
     {
       "source": "D:\\Codex\\projects\\歌单转换\\.venv",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "source": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\.venv",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\codex-gsd-codex-c-skill\\docs\\gsd-archive\\tmp\\replicator\\phase6-skills\\source-skills\\shared-skill\\node_modules",
+      "kind": "archived-project-cache",
+      "owner": "archive",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\repair_backups\\plugin-cache-20260610-123718\\openai-bundled\\chrome\\26.602.71036\\scripts\\node_modules",
+      "kind": "plugin-cache-backup",
+      "owner": "backup",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "repair backup 内的插件缓存副本，不属于项目依赖重建；只能走备份保留或清理治理。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\codex-gsd-codex-c-skill\\docs\\gsd-archive\\tmp\\replicator\\phase6-skills\\source-codex\\skills\\shared-skill\\node_modules",
+      "kind": "archived-project-cache",
+      "owner": "archive",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\codex_home_yangyangzi\\plugins\\cache\\openai-bundled\\browser\\26.616.51431\\scripts\\node_modules",
+      "kind": "plugin-runtime-cache",
+      "owner": "plugin-runtime",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。"
+    },
+    {
+      "source": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\data\\codex_home_yangyangzi\\plugins\\cache\\openai-bundled\\chrome\\26.616.51431\\scripts\\node_modules",
+      "kind": "plugin-runtime-cache",
+      "owner": "plugin-runtime",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。"
     },
     {
       "source": "D:\\Codex\\.gsd\\projects\\hermes-agent\\.venv",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
     },
     {
       "source": "D:\\Codex\\.gsd\\projects\\new-chat-4\\.venv",
-      "kind": "project-local-env",
+      "kind": "project-root-local-env",
       "owner": "project",
       "risk": "high",
       "action": "不自动迁移",
-      "reason": "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+      "reason": "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+    },
+    {
+      "source": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager\\node_modules",
+      "kind": "nested-app-local-env",
+      "owner": "project",
+      "risk": "high",
+      "action": "不自动迁移",
+      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
     }
   ]
 }

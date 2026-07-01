@@ -112,7 +112,7 @@ try {
 
     $planKeyOrder = @()
     foreach ($item in $plan.plans) {
-        foreach ($property in @("project", "marker", "path", "planStatus", "executionAllowed", "requiresOwnerDecision", "riskLevel", "candidateCommands", "preflightChecks", "validationSteps", "rollbackPrerequisites", "humanGates")) {
+        foreach ($property in @("project", "parentProject", "classification", "marker", "path", "planStatus", "executionAllowed", "requiresOwnerDecision", "riskLevel", "candidateCommands", "preflightChecks", "validationSteps", "rollbackPrerequisites", "humanGates")) {
             Assert-Property -Object $item -Name $property
         }
 
@@ -145,6 +145,20 @@ try {
     Assert-True -Condition ($blockedPlan.planStatus -eq "blocked-no-rebuild-source") -Message "缺锁文件项目应阻塞"
     Assert-True -Condition ($blockedPlan.candidateCommands.Count -eq 0) -Message "缺锁文件项目不得输出候选重建命令"
 
+    $nestedAppPath = "D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager\node_modules"
+    if (Test-Path -LiteralPath $nestedAppPath -PathType Container) {
+        $nestedAppPlan = $plan.plans | Where-Object { $_.path -ieq $nestedAppPath } | Select-Object -First 1
+        Assert-True -Condition ($null -ne $nestedAppPlan) -Message "计划应包含嵌套 app node_modules：$nestedAppPath"
+        Assert-True -Condition ($nestedAppPlan.classification -eq "nested-app-local-env") -Message "嵌套 app 计划分类错误"
+        Assert-True -Condition ($nestedAppPlan.planStatus -eq "owner-decision-required") -Message "GSD 嵌套 app 应先进入 owner 决策"
+        Assert-True -Condition ($nestedAppPlan.candidateCommands.Count -eq 0) -Message "高风险嵌套 app 不应输出可直接执行的候选命令"
+    }
+
+    foreach ($excludedClassification in @("plugin-runtime-cache", "plugin-cache-backup", "archived-project-cache")) {
+        $excludedItems = @($plan.plans | Where-Object { $_.classification -eq $excludedClassification })
+        Assert-True -Condition ($excludedItems.Count -eq 0) -Message "$excludedClassification 不应进入项目本地环境重建计划"
+    }
+
     foreach ($reviewItem in $reviewItems) {
         $recognizedLockFiles = @("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "uv.lock", "poetry.lock", "Pipfile.lock", "environment.yml")
         $hasRecognizedLock = @($reviewItem.existingProjectFiles | Where-Object { $recognizedLockFiles -contains $_ }).Count -gt 0
@@ -155,7 +169,7 @@ try {
     }
 
     $markdown = Get-Content -LiteralPath $markdownPath -Raw
-    foreach ($expected in @("DRY-RUN", "不执行", "不删除", "不迁移", "候选命令预览", "人工决策门", "停机窗口", "健康检查", "回滚")) {
+    foreach ($expected in @("DRY-RUN", "不执行", "不删除", "不迁移", "候选命令预览", "人工决策门", "停机窗口", "健康检查", "回滚", "嵌套 app", "插件 runtime/cache")) {
         Assert-True -Condition $markdown.Contains($expected) -Message "PLAN.md 缺少预期文本：$expected"
     }
 

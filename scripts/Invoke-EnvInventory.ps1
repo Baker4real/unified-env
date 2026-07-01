@@ -332,6 +332,41 @@ function Get-PathEntries {
     }
 }
 
+function Test-IsSubPath {
+    param(
+        [string]$Path,
+        [string]$BasePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($BasePath)) {
+        return $false
+    }
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
+    $fullBasePath = [System.IO.Path]::GetFullPath($BasePath).TrimEnd("\", "/")
+    return $fullPath.Equals($fullBasePath, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $fullPath.StartsWith("$fullBasePath\", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-RelativePath {
+    param(
+        [string]$Path,
+        [string]$BasePath
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
+    $fullBasePath = [System.IO.Path]::GetFullPath($BasePath).TrimEnd("\", "/")
+    if ($fullPath.Equals($fullBasePath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return ""
+    }
+
+    if (-not $fullPath.StartsWith("$fullBasePath\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $fullPath
+    }
+
+    return $fullPath.Substring($fullBasePath.Length + 1)
+}
+
 function Get-KnownDirectories {
     $userHome = $env:USERPROFILE
     $local = $env:LOCALAPPDATA
@@ -380,31 +415,138 @@ function Get-KnownDirectories {
     }
 }
 
-function Get-ProjectEnvironmentMarkers {
-    param([string[]]$Roots)
-
-    $markerNames = @(".venv", "venv", "node_modules", ".conda")
+function Get-TopProjectRoot {
+    param(
+        [string]$Path,
+        [string[]]$Roots
+    )
 
     foreach ($root in $Roots) {
-        if (-not (Test-Path -Path $root -PathType Container)) {
+        if (-not (Test-IsSubPath -Path $Path -BasePath $root)) {
             continue
         }
 
-        $projects = Get-ChildItem -Path $root -Directory -Force -ErrorAction SilentlyContinue
-        foreach ($project in $projects) {
-            foreach ($marker in $markerNames) {
-                $markerPath = Join-Path $project.FullName $marker
-                if (Test-Path -Path $markerPath -PathType Container) {
-                    [pscustomobject]@{
-                        project = $project.FullName
-                        marker = $marker
-                        path = $markerPath
-                        drive = Get-RootDrive -Path $markerPath
-                        sizeBytes = Get-DirectorySize -Path $markerPath
-                        recommendation = "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
-                    }
+        $relative = Get-RelativePath -Path $Path -BasePath $root
+        $segments = @($relative -split "[\\/]" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($segments.Count -eq 0) {
+            return $null
+        }
+
+        return (Join-Path $root $segments[0])
+    }
+
+    return $null
+}
+
+function New-LocalEnvironmentFinding {
+    param(
+        [string]$MarkerPath,
+        [string[]]$Roots
+    )
+
+    $item = Get-Item -LiteralPath $MarkerPath -Force
+    $marker = $item.Name
+    $container = [System.IO.Directory]::GetParent($item.FullName).FullName
+    $topProjectRoot = Get-TopProjectRoot -Path $item.FullName -Roots $Roots
+    $normalized = $item.FullName.ToLowerInvariant()
+
+    $classification = "nested-app-local-env"
+    $scope = "nested-app"
+    $owner = "project"
+    $risk = "high"
+    $includeInReviewPack = $true
+    $reason = "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
+    $recommendation = "不自动迁移；纳入项目级审查，但不得跨项目复用。"
+
+    if ($topProjectRoot -and $container.Equals($topProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $classification = "project-root-local-env"
+        $scope = "project-root"
+        $risk = "high"
+        $reason = "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+        $recommendation = "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
+    } elseif ($normalized.Contains("\docs\gsd-archive\") -or $normalized.Contains("\docs\archive\") -or $normalized.Contains("\docs\archived\")) {
+        $classification = "archived-project-cache"
+        $scope = "archive-cache"
+        $owner = "archive"
+        $risk = "high"
+        $includeInReviewPack = $false
+        $reason = "项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。"
+        $recommendation = "不按当前项目依赖重建；如需处理，进入归档或产物清理 dry-run。"
+    } elseif ($normalized.Contains("\data\repair_backups\") -or $normalized.Contains("\repair_backups\")) {
+        $classification = "plugin-cache-backup"
+        $scope = "backup-cache"
+        $owner = "backup"
+        $risk = "high"
+        $includeInReviewPack = $false
+        $reason = "repair backup 内的插件缓存副本，不属于项目依赖重建；只能走备份保留或清理治理。"
+        $recommendation = "不按项目依赖重建；如需处理，进入备份治理 dry-run。"
+    } elseif ($normalized.Contains("\plugins\cache\")) {
+        $classification = "plugin-runtime-cache"
+        $scope = "plugin-runtime-cache"
+        $owner = "plugin-runtime"
+        $risk = "high"
+        $includeInReviewPack = $false
+        $reason = "插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。"
+        $recommendation = "不按项目依赖重建；如需处理，进入插件 runtime/cache 治理。"
+    }
+
+    [pscustomobject]@{
+        project = $container
+        parentProject = $topProjectRoot
+        marker = $marker
+        path = $item.FullName
+        drive = Get-RootDrive -Path $item.FullName
+        sizeBytes = Get-DirectorySize -Path $item.FullName
+        classification = $classification
+        scope = $scope
+        owner = $owner
+        risk = $risk
+        includeInReviewPack = $includeInReviewPack
+        recommendation = $recommendation
+        reason = $reason
+    }
+}
+
+function Get-LocalEnvironmentFindings {
+    param([string[]]$Roots)
+
+    $markerNames = @(".venv", "venv", "node_modules", ".conda")
+    $skipDirectoryNames = @(".git", ".codegraph", ".scratch", "reports", "target", "dist", "build")
+
+    foreach ($root in $Roots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+            continue
+        }
+
+        $queue = [System.Collections.Queue]::new()
+        $queue.Enqueue((Get-Item -LiteralPath $root -Force))
+
+        while ($queue.Count -gt 0) {
+            $dir = $queue.Dequeue()
+            if ($skipDirectoryNames -contains $dir.Name) {
+                continue
+            }
+
+            if ($markerNames -contains $dir.Name) {
+                New-LocalEnvironmentFinding -MarkerPath $dir.FullName -Roots $Roots
+                continue
+            }
+
+            Get-ChildItem -LiteralPath $dir.FullName -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                if (($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
+                    $queue.Enqueue($_)
                 }
             }
+        }
+    }
+}
+
+function Get-ProjectEnvironmentMarkers {
+    param([object[]]$LocalEnvironmentFindings)
+
+    foreach ($finding in $LocalEnvironmentFindings) {
+        if ([bool]$finding.includeInReviewPack) {
+            $finding
         }
     }
 }
@@ -458,7 +600,7 @@ function Get-MigrationCandidates {
 function Get-ManualReviewItems {
     param(
         [object[]]$Directories,
-        [object[]]$ProjectMarkers
+        [object[]]$LocalEnvironmentFindings
     )
 
     foreach ($dir in $Directories) {
@@ -487,14 +629,14 @@ function Get-ManualReviewItems {
         }
     }
 
-    foreach ($marker in $ProjectMarkers) {
+    foreach ($marker in $LocalEnvironmentFindings) {
         [pscustomobject]@{
             source = $marker.path
-            kind = "project-local-env"
-            owner = "project"
-            risk = "high"
+            kind = $marker.classification
+            owner = $marker.owner
+            risk = $marker.risk
             action = "不自动迁移"
-            reason = "项目本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
+            reason = $marker.reason
         }
     }
 }
@@ -547,7 +689,8 @@ function Write-MarkdownReport {
     $lines.Add("")
     $lines.Add("- 工具探测数量：$($Inventory.tools.Count)")
     $lines.Add("- 已存在目录数量：$(($Inventory.directories | Where-Object { $_.exists }).Count)")
-    $lines.Add("- 项目本地环境标记数量：$($Inventory.projectEnvironmentMarkers.Count)")
+    $lines.Add("- 项目级审查环境数量：$($Inventory.projectEnvironmentMarkers.Count)")
+    $lines.Add("- 本地环境相关发现数量：$($Inventory.localEnvironmentFindings.Count)")
     $lines.Add("- 迁移候选数量：$($Inventory.migrationCandidates.Count)")
     $lines.Add("- 人工审查项数量：$($Inventory.manualReviewItems.Count)")
     $lines.Add("")
@@ -586,12 +729,25 @@ function Write-MarkdownReport {
     $lines.Add("## 项目本地环境")
     $lines.Add("")
     if ($Inventory.projectEnvironmentMarkers.Count -eq 0) {
-        $lines.Add("未发现项目根目录下一层的 `.venv`、`venv`、`node_modules` 或 `.conda`。")
+        $lines.Add("未发现需要纳入项目级审查的 `.venv`、`venv`、`node_modules` 或 `.conda`。")
     } else {
-        $lines.Add("| 项目 | 标记 | 路径 | 建议 |")
-        $lines.Add("| --- | --- | --- | --- |")
+        $lines.Add("| 项目或 app | 父项目 | 分类 | 标记 | 路径 | 建议 |")
+        $lines.Add("| --- | --- | --- | --- | --- | --- |")
         foreach ($marker in $Inventory.projectEnvironmentMarkers) {
-            $lines.Add("| $(Escape-MarkdownCell $marker.project) | $(Escape-MarkdownCell $marker.marker) | $(Escape-MarkdownCell $marker.path) | $(Escape-MarkdownCell $marker.recommendation) |")
+            $lines.Add("| $(Escape-MarkdownCell $marker.project) | $(Escape-MarkdownCell $marker.parentProject) | $(Escape-MarkdownCell $marker.classification) | $(Escape-MarkdownCell $marker.marker) | $(Escape-MarkdownCell $marker.path) | $(Escape-MarkdownCell $marker.recommendation) |")
+        }
+    }
+    $lines.Add("")
+    $lines.Add("## 本地环境分类发现")
+    $lines.Add("")
+    if ($Inventory.localEnvironmentFindings.Count -eq 0) {
+        $lines.Add("未发现本地环境相关目录。")
+    } else {
+        $lines.Add("| 分类 | 纳入项目级审查 | 所属项目或容器 | 标记 | 路径 | 建议 |")
+        $lines.Add("| --- | --- | --- | --- | --- | --- |")
+        foreach ($finding in $Inventory.localEnvironmentFindings) {
+            $reviewDisplay = if ($finding.includeInReviewPack) { "是" } else { "否" }
+            $lines.Add("| $(Escape-MarkdownCell $finding.classification) | $reviewDisplay | $(Escape-MarkdownCell $finding.project) | $(Escape-MarkdownCell $finding.marker) | $(Escape-MarkdownCell $finding.path) | $(Escape-MarkdownCell $finding.recommendation) |")
         }
     }
     $lines.Add("")
@@ -669,14 +825,15 @@ $tools = @(
 )
 
 $directories = @(Get-KnownDirectories)
-$projectMarkers = @(Get-ProjectEnvironmentMarkers -Roots $ProjectRoots)
+$localEnvironmentFindings = @(Get-LocalEnvironmentFindings -Roots $ProjectRoots)
+$projectMarkers = @(Get-ProjectEnvironmentMarkers -LocalEnvironmentFindings $localEnvironmentFindings)
 $candidates = @(Get-MigrationCandidates -Directories $directories)
-$manualReviewItems = @(Get-ManualReviewItems -Directories $directories -ProjectMarkers $projectMarkers)
+$manualReviewItems = @(Get-ManualReviewItems -Directories $directories -LocalEnvironmentFindings $localEnvironmentFindings)
 $envVars = @(Get-SelectedEnvironmentVariables)
 $pathEntries = @(Get-PathEntries)
 
 $inventory = [pscustomobject]@{
-    schemaVersion = 1
+    schemaVersion = 2
     generatedAt = (Get-Date).ToString("o")
     readOnly = $true
     host = Get-HostSummary
@@ -691,6 +848,7 @@ $inventory = [pscustomobject]@{
     pathEntries = $pathEntries
     directories = $directories
     projectEnvironmentMarkers = $projectMarkers
+    localEnvironmentFindings = $localEnvironmentFindings
     migrationCandidates = $candidates
     manualReviewItems = $manualReviewItems
 }

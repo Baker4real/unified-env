@@ -8,7 +8,8 @@
 
 - 已迁移低风险 `pip cache` 到 `D:\Codex\.cache\pip`。
 - 当前没有新的明确安全迁移候选。
-- 项目本地环境已完成审查和重建 dry-run 计划；真实重建仍需 owner 决策。
+- 项目本地环境已完成分类刷新、审查和重建 dry-run 计划；当前区分项目根环境、嵌套 app、插件 runtime/cache、repair backup 和归档缓存，真实重建仍需 owner 决策。
+- 更新准备报告已标出 1 个失效项目本地环境 PATH 入口；这只是清理建议，不修改用户 PATH。
 - 已新增备份膨胀治理 dry-run 脚本，当前只读报告把严格保留规则候选和人工审查项分开；真实清理仍需显式授权。
 - 已生成备份清理 apply manifest：只固化和二次校验候选路径，不执行删除；真实删除仍需再次显式授权。
 - 已完成 `codex-account-switch` 依赖更新 dry-run；当前安全补丁已满足，后续框架 minor 或大版本更新仍需在目标项目中显式授权。
@@ -31,6 +32,7 @@
 - 备份膨胀治理 dry-run 证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-080621\BACKUP-RETENTION-DRY-RUN.md`
 - 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
+- 项目本地环境分类刷新：`.scratch/unified-env/issues/12-project-local-env-classification-refresh.md`
 
 ## 验证命令
 
