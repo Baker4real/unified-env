@@ -64,3 +64,14 @@ Status: done
 - 最新 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-161022\BACKUP-RETENTION-DRY-RUN.md`
 - 最新保留规则候选：0 个，0 MB
 - 旧式平铺文件仍只作为人工审查项保留，未自动删除
+
+## Manual flat-file cleanup 2026-07-01 16:27
+
+用户已单独授权删除 3 个旧式平铺备份文件。
+
+- 执行证据：`D:\Codex\.codex\run-evidence\env-governance\codex-switch-flat-backup-delete-20260701-162530\EXECUTION.md`
+- 删除文件：3 个，54.78 MB
+- 删除后剩余命中路径：0 个
+- 最新 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-162612\BACKUP-RETENTION-DRY-RUN.md`
+- 最新保留规则候选：0 个，0 MB
+- 最新人工审查项：263 个，5166.21 MB

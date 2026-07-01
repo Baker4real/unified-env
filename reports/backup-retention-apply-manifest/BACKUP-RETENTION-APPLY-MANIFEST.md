@@ -1,13 +1,13 @@
 # 备份清理 apply manifest 设计
 
-生成时间：2026-07-01 16:12:09 +08:00
+生成时间：2026-07-01 16:27:40 +08:00
 
 本文件是删除前 manifest 设计和二次校验结果，不删除、不移动、不迁移任何文件。即使所有路径验证通过，真实删除仍需要用户再次明确确认 manifest id、路径数量和预计释放体积。
 
 ## 汇总
 
-- manifest id：backup-retention-apply-20260701-161209-032bc2ef
-- source dry-run：D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-161022\backup-retention-dry-run.json
+- manifest id：backup-retention-apply-20260701-162739-ee2d4c61
+- source dry-run：D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-162612\backup-retention-dry-run.json
 - dry-run 年龄：0 小时
 - 选择模式：all-dry-run-candidates
 - 选中路径：0 个，0 MB
@@ -26,7 +26,7 @@
 ## 最终授权短语
 
 ```text
-我确认删除 manifest backup-retention-apply-20260701-161209-032bc2ef 中的 0 个已验证路径，预计释放 0 MB
+我确认删除 manifest backup-retention-apply-20260701-162739-ee2d4c61 中的 0 个已验证路径，预计释放 0 MB
 ```
 
 ## 已验证路径
