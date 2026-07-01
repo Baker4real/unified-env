@@ -24,5 +24,6 @@
 - apply manifest 交接：`docs/handoffs/2026-07-01-backup-retention-apply-manifest-handoff.md`
 - 备份清理交接：`docs/handoffs/2026-06-30-backup-retention-runtime-cleanup-handoff.md`
 - 项目本地环境交接：`docs/handoffs/2026-06-30-project-local-env-handoff.md`
+- 失效 PATH 入口清理交接：`docs/handoffs/2026-07-01-stale-path-entry-cleanup-dry-run-handoff.md`
 
 这些报告是事实快照，不是执行授权。真实迁移前必须重新生成最新基线。
