@@ -499,6 +499,80 @@ function Add-RetentionCandidates {
     }
 }
 
+function Add-CodexSwitchInstalledBackupCandidates {
+    param(
+        [System.Collections.Generic.List[object]]$Candidates,
+        [System.Collections.Generic.List[object]]$ManualReview,
+        [string]$Root,
+        [string]$ProjectRootLabel,
+        [string]$Risk,
+        [string]$Reason
+    )
+
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        return
+    }
+
+    $rootReparse = Get-ReparseInfo -Path $Root
+    if ($rootReparse.hasReparsePoint) {
+        $ManualReview.Add((New-ReviewItem -Bucket "codex_switch 安装回滚备份" -GroupKey $ProjectRootLabel -Path $Root -Risk "高" -Reason (Get-ReparseReviewReason -Path $Root) -Rule "人工审查。"))
+        return
+    }
+
+    foreach ($file in Get-ChildItem -LiteralPath $Root -Force -File) {
+        if ($file.Name -notmatch "^(codex_switch|WebView2Loader).*\.(exe|dll)$") {
+            continue
+        }
+
+        $ManualReview.Add((New-ReviewItem -Bucket "codex_switch 安装回滚旧平铺文件" -GroupKey "$ProjectRootLabel::legacy-flat-files" -Path $file.FullName -Risk "中" -Reason "旧式平铺安装回滚文件缺少一次替换的目录边界，不能和目录型回滚点混入自动保留规则。" -Rule "人工确认；必要时先迁成目录型回滚点后再纳入保留治理。"))
+    }
+
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($child in Get-ChildItem -LiteralPath $Root -Force -Directory) {
+        $childReparse = Get-ReparseInfo -Path $child.FullName
+        if ($childReparse.hasReparsePoint) {
+            $ManualReview.Add((New-ReviewItem -Bucket "codex_switch 安装回滚备份" -GroupKey $ProjectRootLabel -Path $child.FullName -Risk "高" -Reason (Get-ReparseReviewReason -Path $child.FullName) -Rule "人工审查。"))
+            continue
+        }
+
+        $timestamp = Get-StrictBackupTimestamp -Name $child.Name
+        if (-not [bool]$timestamp.ok) {
+            $ManualReview.Add((New-ReviewItem -Bucket "codex_switch 安装回滚备份" -GroupKey "$ProjectRootLabel::codex-switch-installed-binary" -Path $child.FullName -Risk "中" -Reason "无法严格解析目录名时间戳，不能用 mtime 兜底进入保留删除候选。" -Rule "人工审查。"))
+            continue
+        }
+
+        $exePath = Join-Path $child.FullName "codex_switch.exe"
+        $loaderPath = Join-Path $child.FullName "WebView2Loader.dll"
+        if (-not (Test-Path -LiteralPath $exePath -PathType Leaf) -or -not (Test-Path -LiteralPath $loaderPath -PathType Leaf)) {
+            $ManualReview.Add((New-ReviewItem -Bucket "codex_switch 安装回滚备份" -GroupKey "$ProjectRootLabel::codex-switch-installed-binary" -Path $child.FullName -Risk "中" -Reason "目录型回滚点缺少 codex_switch.exe 或 WebView2Loader.dll，不能自动按安装版完整回滚点处理。" -Rule "人工审查。"))
+            continue
+        }
+
+        $records.Add([pscustomobject]@{
+            item = $child
+            groupKey = "$ProjectRootLabel::codex-switch-installed-binary"
+            projectRoot = $ProjectRootLabel
+            backupType = "codex-switch-installed-binary"
+            timestampUtc = $timestamp.timestampUtc
+            timestampSource = $timestamp.source
+        })
+    }
+
+    foreach ($group in ($records | Group-Object groupKey)) {
+        $ordered = @($group.Group | Sort-Object @{ Expression = { $_.timestampUtc }; Descending = $true }, @{ Expression = { $_.item.Name }; Descending = $true })
+        for ($index = $RetainCount; $index -lt $ordered.Count; $index++) {
+            $record = $ordered[$index]
+            $candidate = New-Candidate -Bucket "codex_switch 安装回滚备份" -GroupKey $record.groupKey -ProjectRoot $record.projectRoot -BackupType $record.backupType -Path $record.item.FullName -Risk $Risk -Reason $Reason -TimestampUtc $record.timestampUtc -TimestampSource $record.timestampSource -RetainRank ($index + 1)
+            if ($candidate.reparse.hasReparsePoint -or [int]$candidate.stats.reparsePointsSkipped -gt 0 -or [int]$candidate.stats.inaccessibleItems -gt 0) {
+                $ManualReview.Add((New-ReviewItem -Bucket "codex_switch 安装回滚备份" -GroupKey $record.groupKey -Path $record.item.FullName -Risk "高" -Reason "候选目录内部存在 reparse point 或不可访问项，不能作为 apply 候选。" -Rule "人工审查。"))
+                continue
+            }
+
+            $Candidates.Add($candidate)
+        }
+    }
+}
+
 Assert-DDrivePath -Path $CodexRoot -ParameterName "CodexRoot"
 Assert-DDrivePath -Path $DDriveRoot -ParameterName "DDriveRoot"
 if ($RetainCount -lt 1) {
@@ -551,6 +625,7 @@ Add-RetentionCandidates -Candidates $candidates -ManualReview $manualReview -Roo
     if ($Name -like ".codex-global-state.json*") { return ".codex-global-state.json sidecars" }
     return "__skip__"
 } -Risk "低" -Reason "backups_state 根侧车备份超过保留数。"
+Add-CodexSwitchInstalledBackupCandidates -Candidates $candidates -ManualReview $manualReview -Root (Join-Path $DDriveRoot "apps\codex_switch\backups") -ProjectRootLabel "apps/codex_switch/backups" -Risk "中" -Reason "codex_switch 安装版回滚备份超过保留数。"
 
 $candidateBytes = [int64]0
 $candidateSkillMd = 0

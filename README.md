@@ -9,8 +9,8 @@
 - 已迁移低风险 `pip cache` 到 `D:\Codex\.cache\pip`。
 - 当前没有新的明确安全迁移候选。
 - 项目本地环境已完成分类刷新、审查和重建 dry-run 计划；当前区分项目根环境、嵌套 app、插件 runtime/cache、repair backup 和归档缓存，真实重建仍需 owner 决策。
-- 更新准备报告已标出 1 个失效项目本地环境 PATH 入口；已生成独立清理 dry-run，真实 PATH 修改仍需单独显式授权。
-- 已新增备份膨胀治理 dry-run 脚本，当前只读报告把严格保留规则候选和人工审查项分开；真实清理仍需显式授权。
+- 已按授权从 User scope PATH 移除失效项目本地环境入口 `D:\hermes-agent\.venv\Scripts`；最新 PATH 清理 dry-run 候选为 0。
+- 已新增备份膨胀治理 dry-run 脚本，当前只读报告把严格保留规则候选和人工审查项分开，并已纳入 `codex_switch` 安装回滚备份；真实清理仍需显式授权。
 - 已生成备份清理 apply manifest：只固化和二次校验候选路径，不执行删除；真实删除仍需再次显式授权。
 - 已完成 `codex-account-switch` 依赖更新 dry-run；当前安全补丁已满足，后续框架 minor 或大版本更新仍需在目标项目中显式授权。
 
@@ -30,10 +30,11 @@
 - 失效 PATH 入口清理 dry-run：`reports/stale-path-entry-cleanup-dry-run/PLAN.md`
 - 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
 - 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
-- 备份膨胀治理 dry-run 证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-080621\BACKUP-RETENTION-DRY-RUN.md`
+- 备份膨胀治理 dry-run 证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-152420\BACKUP-RETENTION-DRY-RUN.md`
 - 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
 - 项目本地环境分类刷新：`.scratch/unified-env/issues/12-project-local-env-classification-refresh.md`
+- `codex_switch` 安装回滚备份保留 dry-run：`.scratch/unified-env/issues/14-codex-switch-installed-backup-retention.md`
 
 ## 验证命令
 

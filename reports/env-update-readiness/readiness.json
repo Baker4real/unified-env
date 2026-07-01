@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-01T11:28:12.6562911+08:00",
+  "generatedAt": "2026-07-01T15:12:40.0109602+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
-  "inventoryGeneratedAt": "07/01/2026 11:11:22",
+  "inventoryGeneratedAt": "07/01/2026 15:12:39",
   "toolReadiness": [
     {
       "name": "python",
@@ -215,30 +215,14 @@
     }
   ],
   "pathSummary": {
-    "total": 37,
-    "existing": 34,
-    "cDrive": 19,
-    "dDrive": 15,
-    "missing": 3,
+    "total": 31,
+    "existing": 30,
+    "cDrive": 17,
+    "dDrive": 13,
+    "missing": 1,
     "missingEntries": [
       {
-        "index": 13,
-        "path": "C:\\Program Files\\Rust stable GNU 1.96\\bin",
-        "drive": "C:\\",
-        "isProjectLocalEnvEntry": false,
-        "riskLevel": "low",
-        "recommendedAction": "先确认工具是否仍需要该入口；不得作为迁移副作用直接删除。"
-      },
-      {
-        "index": 23,
-        "path": "D:\\hermes-agent\\.venv\\Scripts",
-        "drive": "D:\\",
-        "isProjectLocalEnvEntry": true,
-        "riskLevel": "medium",
-        "recommendedAction": "先确认是否仍有项目依赖；若确认失效，再单独清理 PATH，不重建或删除环境目录。"
-      },
-      {
-        "index": 34,
+        "index": 30,
         "path": "D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools",
         "drive": "D:\\",
         "isProjectLocalEnvEntry": false,
@@ -246,20 +230,11 @@
         "recommendedAction": "先确认工具是否仍需要该入口；不得作为迁移副作用直接删除。"
       }
     ],
-    "staleLocalEnvironmentEntries": [
-      {
-        "index": 23,
-        "path": "D:\\hermes-agent\\.venv\\Scripts",
-        "drive": "D:\\",
-        "isProjectLocalEnvEntry": true,
-        "riskLevel": "medium",
-        "recommendedAction": "先确认是否仍有项目依赖；若确认失效，再单独清理 PATH，不重建或删除环境目录。"
-      }
-    ],
+    "staleLocalEnvironmentEntries": [],
     "duplicates": [
       {
-        "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
-        "count": 3
+        "path": "D:\\Codex\\.cargo\\bin",
+        "count": 2
       }
     ],
     "recommendations": [

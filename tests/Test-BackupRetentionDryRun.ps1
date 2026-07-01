@@ -210,6 +210,31 @@ try {
         New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "backups\$name") | Out-Null
     }
 
+    $codexSwitchBackupRoot = Join-Path $fixtureRoot "apps\codex_switch\backups"
+    New-Item -ItemType Directory -Force -Path $codexSwitchBackupRoot | Out-Null
+    foreach ($name in @(
+        "20260701-010007",
+        "20260701-010006",
+        "20260701-010005",
+        "20260701-010004",
+        "20260701-010003",
+        "20260701-010002",
+        "20260701-010001"
+    )) {
+        $dir = Join-Path $codexSwitchBackupRoot $name
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir "codex_switch.exe") -Value "fixture exe $name" -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $dir "WebView2Loader.dll") -Value "fixture loader $name" -Encoding UTF8
+    }
+    Set-Content -LiteralPath (Join-Path $codexSwitchBackupRoot "codex_switch-before-local-patch-20260625-154636.exe") -Value "legacy flat exe" -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $codexSwitchBackupRoot "WebView2Loader-before-local-patch-20260625-154636.dll") -Value "legacy flat loader" -Encoding UTF8
+    $incompleteBackup = Join-Path $codexSwitchBackupRoot "before-incomplete-20260701-010008"
+    New-Item -ItemType Directory -Force -Path $incompleteBackup | Out-Null
+    Set-Content -LiteralPath (Join-Path $incompleteBackup "codex_switch.exe") -Value "missing loader" -Encoding UTF8
+    $buildCacheDir = Join-Path $fixtureRoot "projects\codex-account-switch\src-tauri\target\release"
+    New-Item -ItemType Directory -Force -Path $buildCacheDir | Out-Null
+    Set-Content -LiteralPath (Join-Path $buildCacheDir "codex_switch.exe") -Value "build cache exe" -Encoding UTF8
+
     $junctionTarget = Join-Path $fixtureRoot "junction-target"
     $junctionPath = Join-Path $fixtureCodexRoot "backups_state\provider-sync\20260701T000003Z\nested-junction"
     New-Item -ItemType Directory -Force -Path $junctionTarget | Out-Null
@@ -226,7 +251,7 @@ try {
     $fixtureCandidatePaths = @($fixturePlan.candidates | ForEach-Object { $_.path }) -join "`n"
     $fixtureManualPaths = @($fixturePlan.manualReview | ForEach-Object { $_.path }) -join "`n"
 
-    $expectedFixtureCandidateCount = if ($junctionCreated) { 1 } else { 2 }
+    $expectedFixtureCandidateCount = if ($junctionCreated) { 3 } else { 4 }
     Assert-True -Condition ($fixturePlan.candidates.Count -eq $expectedFixtureCandidateCount) -Message "fixture 候选数不符合严格保留规则，实际：$($fixturePlan.candidates.Count)"
     Assert-True -Condition $fixtureCandidatePaths.Contains("20260701T000002Z") -Message "严格保留最近 5 个后，应只把第 7 个有效时间戳列为候选"
     Assert-True -Condition (-not $fixtureCandidatePaths.Contains("provider-sync-20260701T000009Z-extra")) -Message "模糊时间戳目录不得进入候选"
@@ -234,6 +259,13 @@ try {
     Assert-True -Condition (-not $fixtureCandidatePaths.Contains((Join-Path $fixtureCodexRoot "backups\"))) -Message ".codex backups 混合根不得进入候选"
     Assert-True -Condition $fixtureManualPaths.Contains((Join-Path $fixtureCodexRoot "backups")) -Message ".codex backups 混合根应进入人工审查"
     Assert-True -Condition $fixtureManualPaths.Contains((Join-Path $fixtureCodexRoot "run-evidence")) -Message "run-evidence 根应进入人工审查"
+    Assert-True -Condition $fixtureCandidatePaths.Contains((Join-Path $codexSwitchBackupRoot "20260701-010002")) -Message "codex_switch 安装回滚备份超过最近 5 个后应进入候选"
+    Assert-True -Condition $fixtureCandidatePaths.Contains((Join-Path $codexSwitchBackupRoot "20260701-010001")) -Message "codex_switch 安装回滚备份第 7 个应进入候选"
+    Assert-True -Condition (-not $fixtureCandidatePaths.Contains((Join-Path $codexSwitchBackupRoot "20260701-010003"))) -Message "codex_switch 安装回滚备份最近 5 个不得进入候选"
+    Assert-True -Condition $fixtureManualPaths.Contains("codex_switch-before-local-patch-20260625-154636.exe") -Message "codex_switch 旧平铺 exe 应进入人工审查"
+    Assert-True -Condition $fixtureManualPaths.Contains("WebView2Loader-before-local-patch-20260625-154636.dll") -Message "codex_switch 旧平铺 dll 应进入人工审查"
+    Assert-True -Condition $fixtureManualPaths.Contains("before-incomplete-20260701-010008") -Message "缺少 loader 的 codex_switch 回滚目录应进入人工审查"
+    Assert-True -Condition (-not $fixtureCandidatePaths.Contains((Join-Path $buildCacheDir "codex_switch.exe"))) -Message "codex-account-switch 构建缓存 exe 不得混入安装回滚候选"
 
     if ($junctionCreated) {
         Assert-True -Condition (-not $fixtureCandidatePaths.Contains("20260701T000003Z")) -Message "含嵌套 junction 的目录不得进入候选"

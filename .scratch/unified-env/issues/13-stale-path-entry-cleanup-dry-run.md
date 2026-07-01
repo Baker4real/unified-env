@@ -38,3 +38,16 @@ Status: done
 ## Follow-up
 
 如后续要真实清理 PATH，必须先重新生成 `env-update-readiness` 和本 dry-run，确认候选仍然存在且数量不变，再由用户逐项授权。真实清理应作为独立步骤执行，并保留清理前完整 User scope PATH 字符串用于回滚。
+
+## Follow-up execution 2026-07-01
+
+用户已逐项授权从 User scope PATH 移除 candidate `stale-path-23-97cda33deb43`，对应路径 `D:\hermes-agent\.venv\Scripts`。
+
+- 执行证据：`D:\Codex\.codex\run-evidence\env-governance\path-cleanup-20260701-151054\EXECUTION.md`
+- 清理前 User PATH 备份：`D:\Codex\.codex\run-evidence\env-governance\path-cleanup-20260701-151054\before-user-path.txt`
+- 最新更新准备报告：`reports/env-update-readiness/REPORT.md`
+- 最新 PATH 清理 dry-run：`reports/stale-path-entry-cleanup-dry-run/PLAN.md`
+- 最新失效项目本地环境 PATH 入口：0
+- 最新清理候选数量：0
+
+当前 Codex 进程可能仍继承旧 PATH；新开的 shell 应按更新后的 User scope PATH 生效。
