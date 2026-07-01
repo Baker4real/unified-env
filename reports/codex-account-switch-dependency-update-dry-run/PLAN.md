@@ -1,6 +1,6 @@
 # codex-account-switch 依赖更新 DRY-RUN 计划
 
-生成时间：2026-07-01T07:45:13.9817825+08:00
+生成时间：2026-07-01T09:10:04.4436244+08:00
 
 > DRY-RUN：本计划只读取目标项目状态并生成候选方案，不执行依赖更新、不修改 `package.json` / `package-lock.json`、不重建或删除 `node_modules`。
 
@@ -28,32 +28,28 @@
 | @tauri-apps/api | dependencies | 2.10.1 | 2.10.1 | 2.11.1 |
 | @tauri-apps/cli | devDependencies | 2.10.1 | 2.10.1 | 2.11.4 |
 | typescript | devDependencies | 5.9.2 | 5.9.2 | 6.0.3 |
-| vite | devDependencies | 7.1.4 | 7.1.4 | 8.1.2 |
+| vite | devDependencies | 7.3.6 | 7.3.6 | 8.1.2 |
 
 ### npm audit
 
 | 包 | 严重级别 | 直接依赖 | 范围 | fixAvailable | fix 版本 |
 | --- | --- | --- | --- | --- | --- |
-| postcss | moderate | False | <8.5.10 | True |  |
-| vite | high | True | 7.0.0 - 7.3.3 | True | 7.3.6 |
 
 ## 建议
 
-- 更新策略：安全补丁优先；先处理 Vite audit fix，再单独评估大版本或框架 minor 更新。
-- 当前状态：`ready-for-owner-review`
-- 当前建议只做安全补丁 dry-run，优先处理 npm audit 指向的 Vite 漏洞。
+- 更新策略：当前安全补丁已满足；后续只单独评估大版本或框架 minor 更新。
+- 当前状态：`no-action-required`
+- 当前 npm audit 未发现漏洞，安全补丁候选已经不需要继续执行。
 - 目标项目当前 git status clean；真实执行前仍必须重新检查 dirty 状态。
-- npm audit 当前给出的 Vite 修复版本是 7.3.6，属于本次 dry-run 的首选候选。
 
 ### 候选命令预览
 
-- `npm install vite@7.3.6 --save-dev --package-lock-only --ignore-scripts`
-- `git diff -- package.json package-lock.json`
+- `无自动候选命令。当前 npm audit 未发现漏洞。`
 
 ### 暂不执行的动作
 
 - 不执行 `npm ci` 作为更新手段：它只会按当前 lockfile 重建旧依赖，不能让依赖保持最新。
-- 暂不直接跳到 `vite 8.1.2`：当前项目声明为 `vite 7.1.4`，latest 是潜在大版本升级，应单独评估构建和 Tauri 开发服务器兼容性。
+- 暂不直接跳到 `vite 8.1.2`：当前项目声明为 `vite 7.3.6`，latest 是潜在大版本升级，应单独评估构建和 Tauri 开发服务器兼容性。
 - 暂不直接跳到 `typescript 6.0.3`：当前项目声明为 `typescript 5.9.2`，latest 是潜在大版本升级，应单独评估类型检查变化。
 - 暂不合并 Tauri minor 更新：`@tauri-apps/api` 和 `@tauri-apps/cli` 可后续独立评估，避免把安全补丁和框架更新混在一次变更里。
 - 不删除、不重建现有 `node_modules`；真实更新前先只改锁文件和声明文件，再通过项目验证确认。

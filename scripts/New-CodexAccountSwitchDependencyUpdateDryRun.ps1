@@ -549,16 +549,24 @@ if ($null -ne $viteAudit -and -not [string]::IsNullOrWhiteSpace($viteAudit.fixVe
     $viteFixVersion = $viteAudit.fixVersion
 }
 
+$hasVulnerabilities = $vulnerabilities.Count -gt 0
+
 $candidateCommands = New-Object System.Collections.Generic.List[string]
 if (-not [string]::IsNullOrWhiteSpace($viteFixVersion)) {
     $candidateCommands.Add("npm install vite@$viteFixVersion --save-dev --package-lock-only --ignore-scripts")
     $candidateCommands.Add("git diff -- package.json package-lock.json")
+} elseif (-not $hasVulnerabilities) {
+    $candidateCommands.Add("无自动候选命令。当前 npm audit 未发现漏洞。")
 } else {
     $candidateCommands.Add("无自动候选命令。当前 npm audit 未返回可用的 vite 安全补丁版本。")
 }
 
 $reasons = New-Object System.Collections.Generic.List[string]
-$reasons.Add("当前建议只做安全补丁 dry-run，优先处理 npm audit 指向的 Vite 漏洞。")
+if (-not $hasVulnerabilities) {
+    $reasons.Add("当前 npm audit 未发现漏洞，安全补丁候选已经不需要继续执行。")
+} else {
+    $reasons.Add("当前建议只做安全补丁 dry-run，优先处理 npm audit 指向的 Vite 漏洞。")
+}
 if (-not $isClean) {
     $reasons.Add("目标项目当前 dirty，真实更新必须阻塞，避免覆盖或混入既有改动。")
 } else {
@@ -606,7 +614,8 @@ if ($packageLock.ContainsKey("packages") -and $null -ne $packageLock["packages"]
     $lockPackageEntries = $packageLock["packages"].Count
 }
 
-$status = if (-not $isClean) { "blocked-target-dirty" } elseif ([string]::IsNullOrWhiteSpace($viteFixVersion)) { "needs-manual-review" } else { "ready-for-owner-review" }
+$status = if (-not $isClean) { "blocked-target-dirty" } elseif (-not $hasVulnerabilities) { "no-action-required" } elseif ([string]::IsNullOrWhiteSpace($viteFixVersion)) { "needs-manual-review" } else { "ready-for-owner-review" }
+$strategy = if (-not $hasVulnerabilities) { "当前安全补丁已满足；后续只单独评估大版本或框架 minor 更新。" } else { "安全补丁优先；先处理 Vite audit fix，再单独评估大版本或框架 minor 更新。" }
 
 $plan = [pscustomobject]@{
     schemaVersion = 1
@@ -655,7 +664,7 @@ $plan = [pscustomobject]@{
         }
     }
     recommendation = [pscustomobject]@{
-        strategy = "安全补丁优先；先处理 Vite audit fix，再单独评估大版本或框架 minor 更新。"
+        strategy = $strategy
         status = $status
         blockedByDirtyWorktree = -not $isClean
         primaryCandidate = [pscustomobject]@{

@@ -57,3 +57,19 @@ Status: done
   - `tests/Test-EnvUpdateReadiness.ps1`
   - `tests/Test-DDrivePolicyDocs.ps1`
   - `tests/Test-EnvInventory.ps1`
+
+## Follow-up verification 2026-07-01
+
+- 目标项目当前提交：`f707d28 fix: pin windows rust scripts to d drive toolchain`。
+- `package.json` 和 `package-lock.json` 当前已是 `vite@7.3.6`。
+- `npm audit` 当前为 0 vulnerabilities。
+- 重新生成正式报告：
+  - `reports/codex-account-switch-dependency-update-dry-run/plan.json`
+  - `reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
+- 目标项目验证通过：
+  - `npm ls --depth=0`
+  - `npm audit`
+  - `npm run version:check`
+  - `npm run build`
+  - `npm run check:rust:windows`
+- `D:\Codex\projects\codex-account-switch` 验证后仍为 clean。
