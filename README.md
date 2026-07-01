@@ -10,6 +10,7 @@
 - 当前没有新的明确安全迁移候选。
 - 项目本地环境已完成审查和重建 dry-run 计划；真实重建仍需 owner 决策。
 - 已新增备份膨胀治理 dry-run 脚本，当前只读报告把严格保留规则候选和人工审查项分开；真实清理仍需显式授权。
+- 已生成备份清理 apply manifest：只固化和二次校验候选路径，不执行删除；真实删除仍需再次显式授权。
 - 已完成 `codex-account-switch` 依赖更新 dry-run，并把后续真实处理交接到对应项目；真实更新仍需在目标项目中显式授权。
 
 ## 关键入口
@@ -28,6 +29,7 @@
 - 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
 - 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
 - 备份膨胀治理 dry-run 证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-080621\BACKUP-RETENTION-DRY-RUN.md`
+- 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
 
 ## 验证命令
@@ -41,6 +43,7 @@
 & 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvReviewPack.ps1'
 & 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvRebuildDryRunPlan.ps1'
 & 'D:\Codex\projects\统一环境\tests\Test-BackupRetentionDryRun.ps1'
+& 'D:\Codex\projects\统一环境\tests\Test-BackupRetentionApplyManifest.ps1'
 ```
 
 ## 安全边界
