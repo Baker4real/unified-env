@@ -18,6 +18,7 @@
 - 备份膨胀治理 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-080621\BACKUP-RETENTION-DRY-RUN.md`
 - 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
+- apply manifest 交接：`docs/handoffs/2026-07-01-backup-retention-apply-manifest-handoff.md`
 - 备份清理交接：`docs/handoffs/2026-06-30-backup-retention-runtime-cleanup-handoff.md`
 - 项目本地环境交接：`docs/handoffs/2026-06-30-project-local-env-handoff.md`
 

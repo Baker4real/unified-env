@@ -88,8 +88,8 @@
 此处原先记录的 `codex-account-switch` dirty 状态已在 2026-06-30 后续修复中收口：
 
 - 修复提交：`a31d9a4 fix: harden runtime cleanup without pruning auth backups`
-- 最新交接：`D:\Codex\projects\统一环境\docs\handoffs\2026-06-30-backup-retention-runtime-cleanup-handoff.md`
-- 当前事实以最新交接为准；不要再按本文件旧段落假设 `codex-account-switch` 仍有未提交 runtime 改动。
+- 后续备份/runtime 交接：`D:\Codex\projects\统一环境\docs\handoffs\2026-06-30-backup-retention-runtime-cleanup-handoff.md`
+- 当前 `codex-account-switch` runtime 事实以后续备份/runtime 交接为准；不要再按本文件旧段落假设目标项目仍有未提交 runtime 改动。
 
 ## 依赖更新发现
 
