@@ -16,6 +16,7 @@
 - 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
 - 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
 - 备份膨胀治理 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-080621\BACKUP-RETENTION-DRY-RUN.md`
+- `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
 - 最新交接：`docs/handoffs/2026-06-30-project-local-env-handoff.md`
 
 这些报告是事实快照，不是执行授权。真实迁移前必须重新生成最新基线。
