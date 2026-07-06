@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-01T15:12:40.0109602+08:00",
+  "generatedAt": "2026-07-06T16:00:43.0511977+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
-  "inventoryGeneratedAt": "07/01/2026 15:12:39",
+  "inventoryGeneratedAt": "07/06/2026 16:00:06",
   "toolReadiness": [
     {
       "name": "python",
@@ -24,29 +24,29 @@
     {
       "name": "uv",
       "found": true,
-      "path": "C:\\Users\\14224\\.local\\bin\\uv.exe",
-      "pathDisplay": "C:\\Users\\14224\\.local\\bin\\uv.exe",
+      "path": "D:\\Codex\\tools\\uv\\bin\\uv.exe",
+      "pathDisplay": "D:\\Codex\\tools\\uv\\bin\\uv.exe",
       "pathStatus": "resolved",
-      "version": "uv 0.11.7 (9d177269e 2026-04-15 x86_64-pc-windows-msvc)",
+      "version": "uv 0.11.26 (396ef7ce4 2026-06-30 x86_64-pc-windows-msvc)",
       "probeSucceeded": true,
-      "locationClass": "user-profile",
-      "drive": "C:\\",
+      "locationClass": "d-drive",
+      "drive": "D:\\",
       "recommendedUpdateEntry": "uv self update 或重装到 D 盘工具根",
       "recommendedAction": "先确认当前入口是否应迁到 D 盘；本项目只生成建议，不执行 uv 更新。",
       "autoUpdateAllowed": false,
-      "riskLevel": "medium",
+      "riskLevel": "low",
       "reason": "本报告只做更新准备分类，不执行任何更新命令。"
     },
     {
       "name": "node",
       "found": true,
-      "path": "C:\\Program Files\\nodejs\\node.exe",
-      "pathDisplay": "C:\\Program Files\\nodejs\\node.exe",
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\node.cmd",
+      "pathDisplay": "D:\\Codex\\tools\\PowerShell\\7.6.3\\node.cmd",
       "pathStatus": "resolved",
-      "version": "v24.15.0",
+      "version": "v26.4.0",
       "probeSucceeded": true,
-      "locationClass": "system-installer",
-      "drive": "C:\\",
+      "locationClass": "d-drive",
+      "drive": "D:\\",
       "recommendedUpdateEntry": "官方 Node 安装器、mise/fnm/nvm-windows 迁移方案或 winget",
       "recommendedAction": "不要直接搬 C 盘安装目录；后续用独立 issue 选择 Node 管理器。",
       "autoUpdateAllowed": false,
@@ -56,13 +56,13 @@
     {
       "name": "npm",
       "found": true,
-      "path": "C:\\Program Files\\nodejs\\npm.ps1",
-      "pathDisplay": "C:\\Program Files\\nodejs\\npm.ps1",
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\npm.cmd",
+      "pathDisplay": "D:\\Codex\\tools\\PowerShell\\7.6.3\\npm.cmd",
       "pathStatus": "resolved",
-      "version": "11.12.1",
+      "version": "11.18.0",
       "probeSucceeded": true,
-      "locationClass": "system-installer",
-      "drive": "C:\\",
+      "locationClass": "d-drive",
+      "drive": "D:\\",
       "recommendedUpdateEntry": "随 Node 一起管理",
       "recommendedAction": "跟随 Node 管理策略；不要单独改 npm 入口。",
       "autoUpdateAllowed": false,
@@ -72,13 +72,13 @@
     {
       "name": "git",
       "found": true,
-      "path": "d:\\Program Files\\Git\\cmd\\git.exe",
-      "pathDisplay": "d:\\Program Files\\Git\\cmd\\git.exe",
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\git.cmd",
+      "pathDisplay": "D:\\Codex\\tools\\PowerShell\\7.6.3\\git.cmd",
       "pathStatus": "resolved",
-      "version": "git version 2.54.0.windows.1",
+      "version": "git version 2.55.0.windows.2",
       "probeSucceeded": true,
       "locationClass": "d-drive",
-      "drive": "d:\\",
+      "drive": "D:\\",
       "recommendedUpdateEntry": "Git for Windows 安装器或现有 D 盘安装策略",
       "recommendedAction": "当前已在 D 盘；后续可单独确认 Git 更新入口。",
       "autoUpdateAllowed": false,
@@ -215,14 +215,14 @@
     }
   ],
   "pathSummary": {
-    "total": 31,
-    "existing": 30,
-    "cDrive": 17,
-    "dDrive": 13,
+    "total": 35,
+    "existing": 34,
+    "cDrive": 19,
+    "dDrive": 15,
     "missing": 1,
     "missingEntries": [
       {
-        "index": 30,
+        "index": 32,
         "path": "D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools",
         "drive": "D:\\",
         "isProjectLocalEnvEntry": false,
@@ -233,8 +233,8 @@
     "staleLocalEnvironmentEntries": [],
     "duplicates": [
       {
-        "path": "D:\\Codex\\.cargo\\bin",
-        "count": 2
+        "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
+        "count": 3
       }
     ],
     "recommendations": [

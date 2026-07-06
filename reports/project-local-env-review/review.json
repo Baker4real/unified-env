@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-01T11:11:39.7050495+08:00",
+  "generatedAt": "2026-07-06T16:10:28.2894465+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
-  "inventoryGeneratedAt": "07/01/2026 11:11:22",
+  "inventoryGeneratedAt": "07/06/2026 16:00:06",
   "summary": {
     "totalItems": 6,
     "longRunningOrStatefulItems": 4,

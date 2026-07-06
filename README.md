@@ -16,6 +16,8 @@
 - 已按用户授权删除三类人工审查项 5 个路径，估算释放 1215.85 MB；最新人工审查项为 258 个，3950.71 MB。
 - 已完成 `codex-account-switch` 依赖更新 dry-run；当前安全补丁已满足，后续框架 minor 或大版本更新仍需在目标项目中显式授权。
 - 已完成 2026-07-06 Codex 主机更新收尾：Codex CLI、Node、npm、Git、gh、uv、sqlite3、CodeGraph 和 Serena 主链路已验证；Serena 运行在官方 Python 3.14.6 上，并通过 uv override 使用 `anthropic==0.116.0`。
+- 已完成 2026-07-06 环境更新执行：`planning-with-files` 已更新并保留本地 overlay，skill ledger coverage 为 `missing=0` / `duplicates=0`；CMake 默认入口为 D 盘 `4.3.3`，Rust 默认 toolchain 为 `1.96.1`。
+- 已按用户授权修复默认入口：`.NET` 默认命中 D 盘 SDK `10.0.301`，Python 默认切到官方 `3.14.6`；WSL 当前判断为“不确实需要”，未安装、未启用、未初始化；CodeGraph 已确认 latest 仍为 `1.2.0`。
 
 ## 关键入口
 
@@ -25,6 +27,7 @@
 - 交接文档：`docs/handoffs/`
 - 最新清理收尾交接：`docs/handoffs/2026-07-01-env-governance-cleanout-closeout-handoff.md`
 - Codex 主机更新收尾交接：`docs/handoffs/2026-07-06-codex-host-update-closeout-handoff.md`
+- 环境更新执行报告：`reports/env-update-execution-20260706/REPORT.md`
 
 ## 主要报告
 
@@ -42,6 +45,8 @@
 - 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
 - Codex 主机更新证据：`D:\Codex\.codex\run-evidence\codex-update-20260706-104516`
+- 环境更新执行证据：`D:\Codex\.codex\run-evidence\env-governance\update-20260706`
+- .NET/Python/WSL 修复证据：`D:\Codex\.codex\run-evidence\env-governance\fix-net-python-wsl-20260706`
 - 项目本地环境分类刷新：`.scratch/unified-env/issues/12-project-local-env-classification-refresh.md`
 - `codex_switch` 安装回滚备份保留 dry-run：`.scratch/unified-env/issues/14-codex-switch-installed-backup-retention.md`
 - 备份保留 apply 执行：`.scratch/unified-env/issues/15-backup-retention-apply-execution.md`

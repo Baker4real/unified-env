@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-01T15:12:39.8280663+08:00",
+  "generatedAt": "2026-07-06T16:00:06.4212152+08:00",
   "readOnly": true,
   "host": {
     "computerName": "BAKER",
@@ -64,9 +64,9 @@
     {
       "name": "uv",
       "found": true,
-      "path": "C:\\Users\\14224\\.local\\bin\\uv.exe",
-      "version": "uv 0.11.7 (9d177269e 2026-04-15 x86_64-pc-windows-msvc)",
-      "evidence": "uv 0.11.7 (9d177269e 2026-04-15 x86_64-pc-windows-msvc)",
+      "path": "D:\\Codex\\tools\\uv\\bin\\uv.exe",
+      "version": "uv 0.11.26 (396ef7ce4 2026-06-30 x86_64-pc-windows-msvc)",
+      "evidence": "uv 0.11.26 (396ef7ce4 2026-06-30 x86_64-pc-windows-msvc)",
       "exitCode": 0,
       "probeSucceeded": true,
       "error": null
@@ -114,9 +114,9 @@
     {
       "name": "node",
       "found": true,
-      "path": "C:\\Program Files\\nodejs\\node.exe",
-      "version": "v24.15.0",
-      "evidence": "v24.15.0",
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\node.cmd",
+      "version": "v26.4.0",
+      "evidence": "v26.4.0",
       "exitCode": 0,
       "probeSucceeded": true,
       "error": null
@@ -124,9 +124,9 @@
     {
       "name": "npm",
       "found": true,
-      "path": "C:\\Program Files\\nodejs\\npm.ps1",
-      "version": "11.12.1",
-      "evidence": "11.12.1",
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\npm.cmd",
+      "version": "11.18.0",
+      "evidence": "11.18.0",
       "exitCode": 0,
       "probeSucceeded": true,
       "error": null
@@ -214,9 +214,9 @@
     {
       "name": "git",
       "found": true,
-      "path": "d:\\Program Files\\Git\\cmd\\git.exe",
-      "version": "git version 2.54.0.windows.1",
-      "evidence": "git version 2.54.0.windows.1",
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\git.cmd",
+      "version": "git version 2.55.0.windows.2",
+      "evidence": "git version 2.55.0.windows.2",
       "exitCode": 0,
       "probeSucceeded": true,
       "error": null
@@ -375,7 +375,7 @@
   "selectedEnvironmentVariables": [
     {
       "name": "Path",
-      "value": "C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\dotnet\\;C:\\Program Files\\nodejs\\;d:\\Program Files\\Git\\cmd;C:\\Program Files (x86)\\ZeroTier\\One\\;C:\\Program Files\\Tailscale\\;D:\\Codex\\.cargo\\bin;D:\\Codex\\.cargo\\bin;D:\\Codex\\tools\\codegraph\\current\\bin;D:\\Codex\\tools\\PowerShell\\7.6.3;D:\\Codex\\tools\\python313-official;D:\\Codex\\tools\\python313-shims;D:\\Codex\\tools\\dotnet;D:\\Codex\\tools\\uv\\bin;D:\\Codex\\_tools;D:\\hermes-data\\bin;C:\\Users\\14224\\.local\\bin;C:\\Users\\14224\\AppData\\Roaming\\Programs\\Zero Install;C:\\Users\\14224\\AppData\\Roaming\\npm;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin;D:\\Program Files\\Git\\bin;D:\\Program Files\\Git\\usr\\bin;C:\\Users\\14224\\AppData\\Local\\.luckin\\bin;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\\bin;D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools",
+      "value": "D:\\Codex\\tools\\PowerShell\\7.6.3;D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0mL0vaI;D:\\Codex\\tools\\PowerShell\\7.6.3;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\dotnet\\;C:\\Program Files\\nodejs\\;d:\\Program Files\\Git\\cmd;C:\\Program Files (x86)\\ZeroTier\\One\\;C:\\Program Files\\Tailscale\\;D:\\Codex\\.cargo\\bin;D:\\Codex\\tools\\codegraph\\current\\bin;D:\\Codex\\tools\\PowerShell\\7.6.3;D:\\Codex\\tools\\python313-official;D:\\Codex\\tools\\python313-shims;D:\\Codex\\tools\\dotnet;D:\\Codex\\tools\\uv\\bin;D:\\Codex\\_tools;D:\\hermes-data\\bin;C:\\Users\\14224\\.local\\bin;C:\\Users\\14224\\AppData\\Roaming\\Programs\\Zero Install;C:\\Users\\14224\\AppData\\Roaming\\npm;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin;D:\\Program Files\\Git\\bin;D:\\Program Files\\Git\\usr\\bin;C:\\Users\\14224\\AppData\\Local\\.luckin\\bin;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\\bin;D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools;C:\\Users\\14224\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd;C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.616.6631.0_x64__2p2nqsd0c76g0\\app\\resources",
       "isSet": true
     },
     {
@@ -492,110 +492,6 @@
   "pathEntries": [
     {
       "index": 0,
-      "path": "C:\\WINDOWS\\system32",
-      "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 1,
-      "path": "C:\\WINDOWS",
-      "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 2,
-      "path": "C:\\WINDOWS\\System32\\Wbem",
-      "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 3,
-      "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\",
-      "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 4,
-      "path": "C:\\WINDOWS\\System32\\OpenSSH\\",
-      "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 5,
-      "path": "C:\\Program Files\\dotnet\\",
-      "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 6,
-      "path": "C:\\Program Files\\nodejs\\",
-      "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 7,
-      "path": "d:\\Program Files\\Git\\cmd",
-      "exists": true,
-      "drive": "d:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 8,
-      "path": "C:\\Program Files (x86)\\ZeroTier\\One\\",
-      "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 9,
-      "path": "C:\\Program Files\\Tailscale\\",
-      "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 10,
-      "path": "D:\\Codex\\.cargo\\bin",
-      "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 11,
-      "path": "D:\\Codex\\.cargo\\bin",
-      "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 12,
-      "path": "D:\\Codex\\tools\\codegraph\\current\\bin",
-      "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
-    },
-    {
-      "index": 13,
       "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
       "exists": true,
       "drive": "D:\\",
@@ -603,8 +499,112 @@
       "reparseTarget": null
     },
     {
+      "index": 1,
+      "path": "D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0mL0vaI",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 2,
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 3,
+      "path": "C:\\WINDOWS\\system32",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 4,
+      "path": "C:\\WINDOWS",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 5,
+      "path": "C:\\WINDOWS\\System32\\Wbem",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 6,
+      "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 7,
+      "path": "C:\\WINDOWS\\System32\\OpenSSH\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 8,
+      "path": "C:\\Program Files\\dotnet\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 9,
+      "path": "C:\\Program Files\\nodejs\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 10,
+      "path": "d:\\Program Files\\Git\\cmd",
+      "exists": true,
+      "drive": "d:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 11,
+      "path": "C:\\Program Files (x86)\\ZeroTier\\One\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 12,
+      "path": "C:\\Program Files\\Tailscale\\",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 13,
+      "path": "D:\\Codex\\.cargo\\bin",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
       "index": 14,
-      "path": "D:\\Codex\\tools\\python313-official",
+      "path": "D:\\Codex\\tools\\codegraph\\current\\bin",
       "exists": true,
       "drive": "D:\\",
       "isReparsePoint": false,
@@ -612,7 +612,7 @@
     },
     {
       "index": 15,
-      "path": "D:\\Codex\\tools\\python313-shims",
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
       "exists": true,
       "drive": "D:\\",
       "isReparsePoint": false,
@@ -620,7 +620,7 @@
     },
     {
       "index": 16,
-      "path": "D:\\Codex\\tools\\dotnet",
+      "path": "D:\\Codex\\tools\\python313-official",
       "exists": true,
       "drive": "D:\\",
       "isReparsePoint": false,
@@ -628,7 +628,7 @@
     },
     {
       "index": 17,
-      "path": "D:\\Codex\\tools\\uv\\bin",
+      "path": "D:\\Codex\\tools\\python313-shims",
       "exists": true,
       "drive": "D:\\",
       "isReparsePoint": false,
@@ -636,7 +636,7 @@
     },
     {
       "index": 18,
-      "path": "D:\\Codex\\_tools",
+      "path": "D:\\Codex\\tools\\dotnet",
       "exists": true,
       "drive": "D:\\",
       "isReparsePoint": false,
@@ -644,7 +644,7 @@
     },
     {
       "index": 19,
-      "path": "D:\\hermes-data\\bin",
+      "path": "D:\\Codex\\tools\\uv\\bin",
       "exists": true,
       "drive": "D:\\",
       "isReparsePoint": false,
@@ -652,6 +652,22 @@
     },
     {
       "index": 20,
+      "path": "D:\\Codex\\_tools",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 21,
+      "path": "D:\\hermes-data\\bin",
+      "exists": true,
+      "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 22,
       "path": "C:\\Users\\14224\\.local\\bin",
       "exists": true,
       "drive": "C:\\",
@@ -659,7 +675,7 @@
       "reparseTarget": null
     },
     {
-      "index": 21,
+      "index": 23,
       "path": "C:\\Users\\14224\\AppData\\Roaming\\Programs\\Zero Install",
       "exists": true,
       "drive": "C:\\",
@@ -667,7 +683,7 @@
       "reparseTarget": null
     },
     {
-      "index": 22,
+      "index": 24,
       "path": "C:\\Users\\14224\\AppData\\Roaming\\npm",
       "exists": true,
       "drive": "C:\\",
@@ -675,7 +691,7 @@
       "reparseTarget": null
     },
     {
-      "index": 23,
+      "index": 25,
       "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe",
       "exists": true,
       "drive": "C:\\",
@@ -683,7 +699,7 @@
       "reparseTarget": null
     },
     {
-      "index": 24,
+      "index": 26,
       "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin",
       "exists": true,
       "drive": "C:\\",
@@ -691,7 +707,7 @@
       "reparseTarget": null
     },
     {
-      "index": 25,
+      "index": 27,
       "path": "D:\\Program Files\\Git\\bin",
       "exists": true,
       "drive": "D:\\",
@@ -699,7 +715,7 @@
       "reparseTarget": null
     },
     {
-      "index": 26,
+      "index": 28,
       "path": "D:\\Program Files\\Git\\usr\\bin",
       "exists": true,
       "drive": "D:\\",
@@ -707,7 +723,7 @@
       "reparseTarget": null
     },
     {
-      "index": 27,
+      "index": 29,
       "path": "C:\\Users\\14224\\AppData\\Local\\.luckin\\bin",
       "exists": true,
       "drive": "C:\\",
@@ -715,7 +731,7 @@
       "reparseTarget": null
     },
     {
-      "index": 28,
+      "index": 30,
       "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe",
       "exists": true,
       "drive": "C:\\",
@@ -723,7 +739,7 @@
       "reparseTarget": null
     },
     {
-      "index": 29,
+      "index": 31,
       "path": "C:\\Users\\14224\\AppData\\Local\\Microsoft\\WinGet\\Packages\\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\\bin",
       "exists": true,
       "drive": "C:\\",
@@ -731,10 +747,26 @@
       "reparseTarget": null
     },
     {
-      "index": 30,
+      "index": 32,
       "path": "D:\\Codex\\tools\\dotnet-home\\.dotnet\\tools",
       "exists": false,
       "drive": "D:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 33,
+      "path": "C:\\Users\\14224\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd",
+      "exists": true,
+      "drive": "C:\\",
+      "isReparsePoint": false,
+      "reparseTarget": null
+    },
+    {
+      "index": 34,
+      "path": "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.616.6631.0_x64__2p2nqsd0c76g0\\app\\resources",
+      "exists": true,
+      "drive": "C:\\",
       "isReparsePoint": false,
       "reparseTarget": null
     }

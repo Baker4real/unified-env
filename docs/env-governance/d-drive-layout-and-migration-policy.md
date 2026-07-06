@@ -21,7 +21,7 @@
 
 ### 共享运行时
 
-共享运行时是能被多个项目安全调用的解释器、编译器或运行时，例如 D 盘 Python、PowerShell、Rust 工具链、未来可能纳入的 Node 或 .NET 运行时。
+共享运行时是能被多个项目安全调用的解释器、编译器或运行时，例如 D 盘 Python、PowerShell、Rust 工具链、.NET 运行时，以及未来可能纳入的 Node 运行时。
 
 迁移或更新原则：
 
@@ -49,7 +49,7 @@
 
 - D 盘已有 CLI 优先保持现有策略。
 - C 盘或用户目录 CLI 先判断来源：官方安装器、WinGet、pipx、npm global、Cargo install 或手工放置。
-- WinGet、Scoop、npm、Cargo、Rustup、uv 等命令不得由本项目自动执行；只能在报告中给出建议。
+- WinGet、Scoop、npm、Cargo、Rustup、uv 等命令不得由本项目自动执行；默认只能在报告中给出建议。只有用户明确授权具体项，且已准备验证证据和回滚路径时，才可执行对应管理器命令。
 - 同一 CLI 的多个 PATH 入口要单独清理，不能作为迁移副作用处理。
 
 ### 项目本地环境
@@ -97,6 +97,8 @@
 6. 来源、目标、输出路径及其所有已存在父级都不能穿过 junction、symlink 或 reparse point；命中时必须停在人工审查。
 7. 输出路径必须位于 D 盘。
 8. 迁移证据写入 `D:\Codex\.codex\run-evidence\env-governance\` 或本项目 `reports\`，不得写到 C 盘。
+
+同样的门槛适用于全局管理器更新、Machine/User PATH 改写、默认解释器切换和工具 shim 调整；这些操作即使不移动目录，也会改变后续进程的默认行为。
 
 ## 后续执行顺序
 

@@ -2,6 +2,8 @@
 
 生成时间：2026-07-06 14:55 +08:00
 
+> 状态说明：本文是 2026-07-06 14:55 的主机更新快照，仍可作为 Serena/Codex 主链路证据使用；后续环境默认入口、CMake、Rust、.NET、Python、WSL 和 CodeGraph 的最终状态以 `reports/env-update-execution-20260706/REPORT.md`、`D:\Codex\.codex\run-evidence\env-governance\update-20260706` 和 `D:\Codex\.codex\run-evidence\env-governance\fix-net-python-wsl-20260706` 为准。
+
 ## 当前结论
 
 本轮 Codex 主机相关可安全更新项已完成到可用状态。Serena/uv 主链路保持标准入口 `D:\Codex\tools\uv\bin\serena.exe`，运行在官方 Python 3.14.6 上；Serena 仍为 `serena-agent==1.5.3`，但通过 uv override 将上游 `anthropic==0.59.0` pin 放宽为 `anthropic>=0.59.0`，当前解析为 `anthropic==0.116.0`。

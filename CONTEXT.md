@@ -28,6 +28,9 @@
 - 三类人工审查项删除证据：`D:\Codex\.codex\run-evidence\env-governance\manual-review-cleanup-20260701-164124\EXECUTION.md`
 - Codex 主机更新收尾交接：`docs/handoffs/2026-07-06-codex-host-update-closeout-handoff.md`
 - Codex 主机更新证据：`D:\Codex\.codex\run-evidence\codex-update-20260706-104516`
+- 环境更新执行报告：`reports/env-update-execution-20260706/REPORT.md`
+- 环境更新执行证据：`D:\Codex\.codex\run-evidence\env-governance\update-20260706`
+- .NET/Python/WSL 修复证据：`D:\Codex\.codex\run-evidence\env-governance\fix-net-python-wsl-20260706`
 - PATH 清理执行证据：`D:\Codex\.codex\run-evidence\env-governance\path-cleanup-20260701-151054\EXECUTION.md`
 - 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
@@ -37,4 +40,4 @@
 - 项目本地环境交接：`docs/handoffs/2026-06-30-project-local-env-handoff.md`
 - 失效 PATH 入口清理交接：`docs/handoffs/2026-07-01-stale-path-entry-cleanup-dry-run-handoff.md`
 
-这些报告是事实快照，不是执行授权。真实迁移前必须重新生成最新基线。
+这些报告是事实快照，不是执行授权。真实迁移、PATH 修改、全局管理器更新或删除前必须重新生成最新基线，并取得具体项授权。

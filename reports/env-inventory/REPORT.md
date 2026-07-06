@@ -1,6 +1,6 @@
 # 本机环境资产盘点报告
 
-生成时间：2026-07-01T15:12:39.8280663+08:00
+生成时间：2026-07-06T16:00:06.4212152+08:00
 
 > 本报告由只读盘点脚本生成。脚本未移动文件、未修改环境变量、未执行软件更新。
 
@@ -29,13 +29,13 @@
 | --- | --- | --- | --- | --- | --- |
 | python | True | True | D:\Codex\tools\python313-official\python.exe | Python 3.13.14 |  |
 | py | False | False |  |  |  |
-| uv | True | True | C:\Users\14224\.local\bin\uv.exe | uv 0.11.7 (9d177269e 2026-04-15 x86_64-pc-windows-msvc) |  |
+| uv | True | True | D:\Codex\tools\uv\bin\uv.exe | uv 0.11.26 (396ef7ce4 2026-06-30 x86_64-pc-windows-msvc) |  |
 | pipx | False | False |  |  |  |
 | poetry | False | False |  |  |  |
 | conda | False | False |  |  |  |
 | mamba | False | False |  |  |  |
-| node | True | True | C:\Program Files\nodejs\node.exe | v24.15.0 |  |
-| npm | True | True | C:\Program Files\nodejs\npm.ps1 | 11.12.1 |  |
+| node | True | True | D:\Codex\tools\PowerShell\7.6.3\node.cmd | v26.4.0 |  |
+| npm | True | True | D:\Codex\tools\PowerShell\7.6.3\npm.cmd | 11.18.0 |  |
 | pnpm | False | False |  |  |  |
 | yarn | False | False |  |  |  |
 | nvm | False | False |  |  |  |
@@ -44,7 +44,7 @@
 | scoop | False | False |  |  |  |
 | winget | False | False |  |  |  |
 | choco | False | False |  |  |  |
-| git | True | True | d:\Program Files\Git\cmd\git.exe | git version 2.54.0.windows.1 |  |
+| git | True | True | D:\Codex\tools\PowerShell\7.6.3\git.cmd | git version 2.55.0.windows.2 |  |
 | cargo | True | True | D:\Codex\.cargo\bin\cargo.exe | cargo 1.96.0 (30a34c682 2026-05-25) |  |
 | rustc | True | True | D:\Codex\.cargo\bin\rustc.exe | rustc 1.96.0 (ac68faa20 2026-05-25) |  |
 | go | False | False |  |  |  |
@@ -65,37 +65,41 @@
 
 | 序号 | 是否存在 | 路径 | Reparse Point |
 | --- | --- | --- | --- |
-| 0 | True | C:\WINDOWS\system32 | False |
-| 1 | True | C:\WINDOWS | False |
-| 2 | True | C:\WINDOWS\System32\Wbem | False |
-| 3 | True | C:\WINDOWS\System32\WindowsPowerShell\v1.0\ | False |
-| 4 | True | C:\WINDOWS\System32\OpenSSH\ | False |
-| 5 | True | C:\Program Files\dotnet\ | False |
-| 6 | True | C:\Program Files\nodejs\ | False |
-| 7 | True | d:\Program Files\Git\cmd | False |
-| 8 | True | C:\Program Files (x86)\ZeroTier\One\ | False |
-| 9 | True | C:\Program Files\Tailscale\ | False |
-| 10 | True | D:\Codex\.cargo\bin | False |
-| 11 | True | D:\Codex\.cargo\bin | False |
-| 12 | True | D:\Codex\tools\codegraph\current\bin | False |
-| 13 | True | D:\Codex\tools\PowerShell\7.6.3 | False |
-| 14 | True | D:\Codex\tools\python313-official | False |
-| 15 | True | D:\Codex\tools\python313-shims | False |
-| 16 | True | D:\Codex\tools\dotnet | False |
-| 17 | True | D:\Codex\tools\uv\bin | False |
-| 18 | True | D:\Codex\_tools | False |
-| 19 | True | D:\hermes-data\bin | False |
-| 20 | True | C:\Users\14224\.local\bin | False |
-| 21 | True | C:\Users\14224\AppData\Roaming\Programs\Zero Install | False |
-| 22 | True | C:\Users\14224\AppData\Roaming\npm | False |
-| 23 | True | C:\Users\14224\AppData\Local\Microsoft\WinGet\Packages\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe | False |
-| 24 | True | C:\Users\14224\AppData\Local\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin | False |
-| 25 | True | D:\Program Files\Git\bin | False |
-| 26 | True | D:\Program Files\Git\usr\bin | False |
-| 27 | True | C:\Users\14224\AppData\Local\.luckin\bin | False |
-| 28 | True | C:\Users\14224\AppData\Local\Microsoft\WinGet\Packages\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe | False |
-| 29 | True | C:\Users\14224\AppData\Local\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin | False |
-| 30 | False | D:\Codex\tools\dotnet-home\.dotnet\tools | False |
+| 0 | True | D:\Codex\tools\PowerShell\7.6.3 | False |
+| 1 | True | D:\Codex\.codex\tmp\arg0\codex-arg0mL0vaI | False |
+| 2 | True | D:\Codex\tools\PowerShell\7.6.3 | False |
+| 3 | True | C:\WINDOWS\system32 | False |
+| 4 | True | C:\WINDOWS | False |
+| 5 | True | C:\WINDOWS\System32\Wbem | False |
+| 6 | True | C:\WINDOWS\System32\WindowsPowerShell\v1.0\ | False |
+| 7 | True | C:\WINDOWS\System32\OpenSSH\ | False |
+| 8 | True | C:\Program Files\dotnet\ | False |
+| 9 | True | C:\Program Files\nodejs\ | False |
+| 10 | True | d:\Program Files\Git\cmd | False |
+| 11 | True | C:\Program Files (x86)\ZeroTier\One\ | False |
+| 12 | True | C:\Program Files\Tailscale\ | False |
+| 13 | True | D:\Codex\.cargo\bin | False |
+| 14 | True | D:\Codex\tools\codegraph\current\bin | False |
+| 15 | True | D:\Codex\tools\PowerShell\7.6.3 | False |
+| 16 | True | D:\Codex\tools\python313-official | False |
+| 17 | True | D:\Codex\tools\python313-shims | False |
+| 18 | True | D:\Codex\tools\dotnet | False |
+| 19 | True | D:\Codex\tools\uv\bin | False |
+| 20 | True | D:\Codex\_tools | False |
+| 21 | True | D:\hermes-data\bin | False |
+| 22 | True | C:\Users\14224\.local\bin | False |
+| 23 | True | C:\Users\14224\AppData\Roaming\Programs\Zero Install | False |
+| 24 | True | C:\Users\14224\AppData\Roaming\npm | False |
+| 25 | True | C:\Users\14224\AppData\Local\Microsoft\WinGet\Packages\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe | False |
+| 26 | True | C:\Users\14224\AppData\Local\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin | False |
+| 27 | True | D:\Program Files\Git\bin | False |
+| 28 | True | D:\Program Files\Git\usr\bin | False |
+| 29 | True | C:\Users\14224\AppData\Local\.luckin\bin | False |
+| 30 | True | C:\Users\14224\AppData\Local\Microsoft\WinGet\Packages\jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe | False |
+| 31 | True | C:\Users\14224\AppData\Local\Microsoft\WinGet\Packages\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\bin | False |
+| 32 | False | D:\Codex\tools\dotnet-home\.dotnet\tools | False |
+| 33 | True | C:\Users\14224\AppData\Local\OpenAI\Codex\bin\ada252862d154cdd | False |
+| 34 | True | C:\Program Files\WindowsApps\OpenAI.Codex_26.616.6631.0_x64__2p2nqsd0c76g0\app\resources | False |
 
 ## 目录探测
 

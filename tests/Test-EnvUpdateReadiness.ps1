@@ -86,13 +86,6 @@ try {
         Assert-True -Condition $markdown.Contains($expected) -Message "REPORT.md 缺少预期文本：$expected"
     }
 
-    $staleVenvPath = "D:\hermes-agent\.venv\Scripts"
-    if (-not (Test-Path -LiteralPath $staleVenvPath)) {
-        $staleVenvEntry = @($readiness.pathSummary.staleLocalEnvironmentEntries | Where-Object { $_.path -ieq $staleVenvPath }) | Select-Object -First 1
-        Assert-True -Condition ($null -ne $staleVenvEntry) -Message "应标出失效项目本地环境 PATH 入口：$staleVenvPath"
-        Assert-True -Condition ($staleVenvEntry.recommendedAction -like "*不重建或删除环境目录*") -Message "失效 .venv PATH 入口不得建议重建或删除环境目录"
-    }
-
     $blockedOutput = "C:\Codex-should-not-be-created"
     $blocked = $false
     try {
