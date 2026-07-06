@@ -26,6 +26,8 @@
 - `codex_switch` 旧式平铺备份文件删除证据：`D:\Codex\.codex\run-evidence\env-governance\codex-switch-flat-backup-delete-20260701-162530\EXECUTION.md`
 - 三类人工审查项删除 issue：`.scratch/unified-env/issues/17-manual-review-cache-staging-backup-delete.md`
 - 三类人工审查项删除证据：`D:\Codex\.codex\run-evidence\env-governance\manual-review-cleanup-20260701-164124\EXECUTION.md`
+- Codex 主机更新收尾交接：`docs/handoffs/2026-07-06-codex-host-update-closeout-handoff.md`
+- Codex 主机更新证据：`D:\Codex\.codex\run-evidence\codex-update-20260706-104516`
 - PATH 清理执行证据：`D:\Codex\.codex\run-evidence\env-governance\path-cleanup-20260701-151054\EXECUTION.md`
 - 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`

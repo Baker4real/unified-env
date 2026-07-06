@@ -15,6 +15,7 @@
 - 已按用户单独授权删除 `codex_switch` 旧式平铺备份文件 3 个，估算释放 54.78 MB；其他人工审查项仍未自动处理。
 - 已按用户授权删除三类人工审查项 5 个路径，估算释放 1215.85 MB；最新人工审查项为 258 个，3950.71 MB。
 - 已完成 `codex-account-switch` 依赖更新 dry-run；当前安全补丁已满足，后续框架 minor 或大版本更新仍需在目标项目中显式授权。
+- 已完成 2026-07-06 Codex 主机更新收尾：Codex CLI、Node、npm、Git、gh、uv、sqlite3、CodeGraph 和 Serena 主链路已验证；Serena 运行在官方 Python 3.14.6 上，并通过 uv override 使用 `anthropic==0.116.0`。
 
 ## 关键入口
 
@@ -23,6 +24,7 @@
 - 本地 issue：`.scratch/unified-env/issues/`
 - 交接文档：`docs/handoffs/`
 - 最新清理收尾交接：`docs/handoffs/2026-07-01-env-governance-cleanout-closeout-handoff.md`
+- Codex 主机更新收尾交接：`docs/handoffs/2026-07-06-codex-host-update-closeout-handoff.md`
 
 ## 主要报告
 
@@ -39,6 +41,7 @@
 - 三类人工审查项删除证据：`D:\Codex\.codex\run-evidence\env-governance\manual-review-cleanup-20260701-164124\EXECUTION.md`
 - 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
+- Codex 主机更新证据：`D:\Codex\.codex\run-evidence\codex-update-20260706-104516`
 - 项目本地环境分类刷新：`.scratch/unified-env/issues/12-project-local-env-classification-refresh.md`
 - `codex_switch` 安装回滚备份保留 dry-run：`.scratch/unified-env/issues/14-codex-switch-installed-backup-retention.md`
 - 备份保留 apply 执行：`.scratch/unified-env/issues/15-backup-retention-apply-execution.md`
