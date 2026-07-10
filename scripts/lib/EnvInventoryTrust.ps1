@@ -615,9 +615,7 @@ function New-InventoryV3Document {
         "pathScopes",
         "directories",
         "projectEnvironmentMarkers",
-        "localEnvironmentFindings",
-        "migrationCandidates",
-        "manualReviewItems"
+        "localEnvironmentFindings"
     )
     foreach ($name in $requiredFacts) {
         if (-not $Facts.Contains($name)) {
@@ -663,7 +661,5 @@ function New-InventoryV3Document {
         directories = @($Facts.directories)
         projectEnvironmentMarkers = @($Facts.projectEnvironmentMarkers)
         localEnvironmentFindings = @($Facts.localEnvironmentFindings)
-        migrationCandidates = @($Facts.migrationCandidates)
-        manualReviewItems = @($Facts.manualReviewItems)
     }
 }

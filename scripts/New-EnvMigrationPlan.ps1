@@ -5,6 +5,62 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
+. (Join-Path $PSScriptRoot "lib\EnvMigrationPolicy.ps1")
+
+function Test-EnvMigrationInteger {
+    param([AllowNull()][object]$Value)
+
+    return $Value -is [byte] -or $Value -is [sbyte] -or
+        $Value -is [int16] -or $Value -is [uint16] -or
+        $Value -is [int32] -or $Value -is [uint32] -or
+        $Value -is [int64] -or $Value -is [uint64]
+}
+
+function Assert-EnvMigrationInventoryV3 {
+    param([Parameter(Mandatory)][psobject]$Inventory)
+
+    if (-not ($Inventory.PSObject.Properties.Name -contains "artifactType") -or $Inventory.artifactType -cne "env-governance.inventory") {
+        throw "Inventory artifactType 必须为 env-governance.inventory。"
+    }
+    if (-not ($Inventory.PSObject.Properties.Name -contains "schemaVersion") -or
+        -not (Test-EnvMigrationInteger -Value $Inventory.schemaVersion) -or
+        $Inventory.schemaVersion -ne 3) {
+        throw "Inventory schemaVersion 必须是整数 3。"
+    }
+
+    foreach ($name in @("generatedAt", "directories", "localEnvironmentFindings", "excludedRoots")) {
+        if (-not ($Inventory.PSObject.Properties.Name -contains $name)) {
+            throw "Inventory 缺少迁移计划所需事实字段：$name"
+        }
+    }
+    foreach ($name in @("directories", "localEnvironmentFindings", "excludedRoots")) {
+        if ($Inventory.$name -isnot [array]) {
+            throw "Inventory 事实字段必须是数组：$name"
+        }
+    }
+
+    foreach ($directory in @($Inventory.directories)) {
+        foreach ($name in @("name", "path", "category", "owner", "exists", "drive", "isReparsePoint", "notes")) {
+            if (-not ($directory.PSObject.Properties.Name -contains $name)) {
+                throw "Inventory directory fact 缺少字段：$name"
+            }
+        }
+        foreach ($name in @("exists", "isReparsePoint")) {
+            if ($directory.$name -isnot [bool]) {
+                throw "Inventory directory fact 字段必须是 boolean：$name"
+            }
+        }
+    }
+    foreach ($finding in @($Inventory.localEnvironmentFindings)) {
+        foreach ($name in @("classification", "owner", "marker", "path")) {
+            if (-not ($finding.PSObject.Properties.Name -contains $name)) {
+                throw "Inventory localEnvironmentFinding fact 缺少字段：$name"
+            }
+        }
+    }
+}
+
 function Get-SafeSlug {
     param([string]$Value)
 
@@ -192,10 +248,9 @@ function Escape-MarkdownCell {
     return ("$Value" -replace "\|", "\|" -replace "`r", " " -replace "`n", " ").Trim()
 }
 
-function Write-MigrationPlanMarkdown {
+function ConvertTo-MigrationPlanMarkdown {
     param(
-        [object]$Plan,
-        [string]$Path
+        [object]$Plan
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -309,30 +364,31 @@ function Write-MigrationPlanMarkdown {
     $lines.Add("2. 只对通过审查的低风险项执行真实迁移 issue。")
     $lines.Add("3. 执行前再次运行 inventory，避免基线过期。")
 
-    Set-Content -Path $Path -Value $lines -Encoding UTF8
+    return $lines -join [Environment]::NewLine
 }
 
-if (-not (Test-Path -Path $InventoryPath -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $InventoryPath -PathType Leaf)) {
     throw "Inventory not found: $InventoryPath"
 }
 
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 
-$inventory = Get-Content -Path $InventoryPath -Raw | ConvertFrom-Json
+$inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+Assert-EnvMigrationInventoryV3 -Inventory $inventory
 $inventoryGeneratedAt = if ($inventory.generatedAt -is [datetime]) {
     $inventory.generatedAt.ToString("o")
 } else {
     "$($inventory.generatedAt)"
 }
 
-New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-
-$manualReviewSources = @(@($inventory.manualReviewItems) | ForEach-Object { $_.source })
+$migrationCandidates = @(Get-EnvMigrationCandidates -Directories @($inventory.directories))
+$manualReviewItems = @(Get-EnvManualReviewItems -Directories @($inventory.directories) -LocalEnvironmentFindings @($inventory.localEnvironmentFindings))
+$manualReviewSources = @($manualReviewItems | ForEach-Object { $_.source })
 $migrationPlans = @()
 $blockedByRootPolicy = @()
 $blockedByManualReview = @()
 $index = 1
-foreach ($candidate in @($inventory.migrationCandidates)) {
+foreach ($candidate in $migrationCandidates) {
     if ($null -eq $candidate -or [string]::IsNullOrWhiteSpace($candidate.source)) {
         continue
     }
@@ -373,18 +429,18 @@ $plan = [pscustomobject]@{
     migrationPlans = $migrationPlans
     blockedByRootPolicy = $blockedByRootPolicy
     blockedByManualReview = $blockedByManualReview
-    excludedManualReviewItems = @($inventory.manualReviewItems)
+    excludedManualReviewItems = $manualReviewItems
     excludedRoots = @($inventory.excludedRoots)
 }
 
-$jsonPath = Join-Path $OutputDir "plan.json"
-$markdownPath = Join-Path $OutputDir "PLAN.md"
-
-$plan | ConvertTo-Json -Depth 10 | Set-Content -Path $jsonPath -Encoding UTF8
-Write-MigrationPlanMarkdown -Plan $plan -Path $markdownPath
+$published = Publish-JsonMarkdownArtifactPair -Document $plan -OutputDir $OutputDir -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown {
+    param($Document, $SourceJsonSha256)
+    ConvertTo-MigrationPlanMarkdown -Plan $Document
+}
 
 [pscustomobject]@{
-    planJson = $jsonPath
-    planMarkdown = $markdownPath
+    planJson = $published.jsonPath
+    planMarkdown = $published.markdownPath
+    generationId = $published.generationId
     readOnly = $true
 }

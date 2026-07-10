@@ -5,6 +5,36 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
+
+function Assert-ProjectLocalEnvInventoryFacts {
+    param([Parameter(Mandatory)][psobject]$Inventory)
+
+    if (-not ($Inventory.PSObject.Properties.Name -contains "artifactType") -or $Inventory.artifactType -cne "env-governance.inventory") {
+        throw "Inventory artifactType 必须为 env-governance.inventory。"
+    }
+    if (-not ($Inventory.PSObject.Properties.Name -contains "schemaVersion") -or
+        $Inventory.schemaVersion -isnot [int64] -or
+        $Inventory.schemaVersion -ne 3) {
+        throw "Inventory schemaVersion 必须是整数 3。"
+    }
+    if (-not ($Inventory.PSObject.Properties.Name -contains "localEnvironmentFindings") -or
+        $Inventory.localEnvironmentFindings -isnot [array]) {
+        throw "Inventory localEnvironmentFindings 必须是事实数组。"
+    }
+
+    foreach ($finding in @($Inventory.localEnvironmentFindings)) {
+        foreach ($name in @("project", "parentProject", "classification", "scope", "owner", "marker", "path", "includeInReviewPack")) {
+            if (-not ($finding.PSObject.Properties.Name -contains $name)) {
+                throw "Inventory localEnvironmentFinding fact 缺少字段：$name"
+            }
+        }
+        if ($finding.includeInReviewPack -isnot [bool]) {
+            throw "Inventory localEnvironmentFinding includeInReviewPack 必须是 boolean。"
+        }
+    }
+}
+
 function Assert-DDrivePath {
     param(
         [string]$Path,
@@ -259,10 +289,9 @@ function Convert-RiskLevelToDisplay {
     }
 }
 
-function Write-ReviewMarkdown {
+function ConvertTo-ReviewMarkdown {
     param(
-        [object]$Review,
-        [string]$Path
+        [object]$Review
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -304,7 +333,7 @@ function Write-ReviewMarkdown {
         $lines.Add("- $rule")
     }
 
-    Set-Content -LiteralPath $Path -Value $lines -Encoding UTF8
+    return $lines -join [Environment]::NewLine
 }
 
 if (-not (Test-Path -LiteralPath $InventoryPath -PathType Leaf)) {
@@ -314,9 +343,10 @@ if (-not (Test-Path -LiteralPath $InventoryPath -PathType Leaf)) {
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 Assert-AllowedOutputDir -Path $OutputDir
 
-$inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json
+$inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+Assert-ProjectLocalEnvInventoryFacts -Inventory $inventory
 $items = @(
-    foreach ($marker in @($inventory.projectEnvironmentMarkers)) {
+    foreach ($marker in @($inventory.localEnvironmentFindings | Where-Object { $_.includeInReviewPack -eq $true })) {
         $files = @(Get-ExistingProjectFiles -Project $marker.project)
         $isLongRunning = Test-IsLongRunningOrStatefulProject -Project $marker.project -Marker $marker.marker
         $rebuildAssessment = Get-RebuildAssessment -Marker $marker.marker -Files $files
@@ -373,19 +403,18 @@ $review = [pscustomobject]@{
     }
 }
 
-New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
-Assert-AllowedOutputDir -Path $OutputDir
-
 $jsonPath = Join-Path $OutputDir "review.json"
 $markdownPath = Join-Path $OutputDir "REPORT.md"
 Assert-ExistingLeafIsNotReparsePoint -Path $jsonPath -ParameterName "review.json"
 Assert-ExistingLeafIsNotReparsePoint -Path $markdownPath -ParameterName "REPORT.md"
-$review | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
-Write-ReviewMarkdown -Review $review -Path $markdownPath
+$published = Publish-JsonMarkdownArtifactPair -Document $review -OutputDir $OutputDir -JsonFileName "review.json" -MarkdownFileName "REPORT.md" -RenderMarkdown {
+    param($Document, $SourceJsonSha256)
+    ConvertTo-ReviewMarkdown -Review $Document
+}
 
 [pscustomobject]@{
-    reviewJson = $jsonPath
-    reviewMarkdown = $markdownPath
+    reviewJson = $published.jsonPath
+    reviewMarkdown = $published.markdownPath
+    generationId = $published.generationId
     readOnly = $true
 }

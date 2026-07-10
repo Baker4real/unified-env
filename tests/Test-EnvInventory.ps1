@@ -32,7 +32,6 @@ $publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1
 $testRoot = Join-Path $ProjectRoot "reports\env-inventory-test"
 $quickOutput = Join-Path $testRoot "quick"
 $fullOutput = Join-Path $testRoot "full"
-$canonicalPipOutput = Join-Path $testRoot "canonical-pip"
 $pathReparseOutput = Join-Path $testRoot "path-reparse"
 
 Assert-True -Condition (Test-Path -Path $scriptPath -PathType Leaf) -Message "Inventory script not found: $scriptPath"
@@ -45,7 +44,6 @@ if (Test-Path -Path $testRoot) {
 
 New-Item -ItemType Directory -Force -Path $quickOutput | Out-Null
 New-Item -ItemType Directory -Force -Path $fullOutput | Out-Null
-New-Item -ItemType Directory -Force -Path $canonicalPipOutput | Out-Null
 New-Item -ItemType Directory -Force -Path $pathReparseOutput | Out-Null
 
 $quickResult = & $scriptPath -OutputDir $quickOutput -SkipVersionProbe
@@ -57,8 +55,11 @@ Assert-True -Condition (Test-Path -Path $quickJsonPath -PathType Leaf) -Message 
 Assert-True -Condition (Test-Path -Path $quickReportPath -PathType Leaf) -Message "Quick REPORT.md missing"
 
 $quickInventory = Get-Content -Path $quickJsonPath -Raw | ConvertFrom-Json
-foreach ($property in @("artifactType", "schemaVersion", "executionAllowed", "generationId", "readOnly", "tools", "directories", "pathScopes", "pathEntries", "toolOwnerRoots", "migrationCandidates", "manualReviewItems", "excludedRoots", "projectEnvironmentMarkers", "localEnvironmentFindings")) {
+foreach ($property in @("artifactType", "schemaVersion", "executionAllowed", "generationId", "readOnly", "tools", "directories", "pathScopes", "pathEntries", "toolOwnerRoots", "excludedRoots", "projectEnvironmentMarkers", "localEnvironmentFindings")) {
     Assert-Property -Object $quickInventory -Name $property
+}
+foreach ($policyProperty in @("migrationCandidates", "manualReviewItems")) {
+    Assert-True -Condition (-not ($quickInventory.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 事实层不应包含策略字段：$policyProperty"
 }
 
 Assert-True -Condition ($quickInventory.artifactType -eq "env-governance.inventory") -Message "Quick inventory artifactType 错误"
@@ -103,8 +104,11 @@ foreach ($tool in $quickInventory.tools) {
 }
 
 $quickReport = Get-Content -Path $quickReportPath -Raw
-foreach ($expected in @("本报告由只读盘点脚本生成", "工具解析作用域：process", "## 绝不自动迁移", "## 迁移候选", "## 人工审查项")) {
+foreach ($expected in @("本报告由只读盘点脚本生成", "工具解析作用域：process", "## 绝不自动迁移")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing expected text: $expected"
+}
+foreach ($policySection in @("## 迁移候选", "## 人工审查项")) {
+    Assert-True -Condition (-not $quickReport.Contains($policySection)) -Message "Inventory Markdown 不应展示策略章节：$policySection"
 }
 foreach ($expected in @("Launcher originClass", "Launcher matchedRule", "Launcher matchedRoot", "Launcher reparse", "Runtime originClass", "Runtime matchedRule", "Runtime matchedRoot", "Runtime reparse")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing tool audit column: $expected"
@@ -121,6 +125,11 @@ foreach ($scopeName in @("process", "user", "machine")) {
 
 $quickFindings = @($quickInventory.localEnvironmentFindings)
 $quickProjectMarkers = @($quickInventory.projectEnvironmentMarkers)
+foreach ($finding in $quickFindings) {
+    foreach ($policyProperty in @("risk", "recommendation", "reason")) {
+        Assert-True -Condition (-not ($finding.PSObject.Properties.Name -contains $policyProperty)) -Message "本地环境事实不应包含策略字段 $policyProperty：$($finding.path)"
+    }
+}
 foreach ($classification in @($quickFindings | ForEach-Object { $_.classification } | Sort-Object -Unique)) {
     Assert-True -Condition $quickReport.Contains($classification) -Message "Quick report missing discovered local env classification: $classification"
 }
@@ -283,18 +292,6 @@ try {
     Assert-True -Condition $reparseBlocked -Message "Inventory 脚本没有阻止 reparse OutputDir"
 } finally {
     Remove-Item -LiteralPath $reparseOutput -Force
-}
-
-$previousProcessPipCache = $env:PIP_CACHE_DIR
-try {
-    $env:PIP_CACHE_DIR = "D:\Codex\.cache\pip"
-    & $scriptPath -OutputDir $canonicalPipOutput -SkipVersionProbe | Out-Null
-    $canonicalInventory = Get-Content -Path (Join-Path $canonicalPipOutput "inventory.json") -Raw | ConvertFrom-Json
-    $pipDefaultPath = Join-Path $env:LOCALAPPDATA "pip\Cache"
-    $pipDefaultCandidate = @($canonicalInventory.migrationCandidates | Where-Object { $_.source -eq $pipDefaultPath })
-    Assert-True -Condition ($pipDefaultCandidate.Count -eq 0) -Message "PIP_CACHE_DIR 指向 canonical D 盘缓存后，不应继续把旧默认 pip cache 作为迁移候选"
-} finally {
-    $env:PIP_CACHE_DIR = $previousProcessPipCache
 }
 
 if (-not $KeepOutputs) {

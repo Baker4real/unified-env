@@ -33,40 +33,62 @@ function New-MarkerKey {
 }
 
 $scriptPath = Join-Path $ProjectRoot "scripts\New-ProjectLocalEnvReviewPack.ps1"
-$inventoryPath = Join-Path $ProjectRoot "reports\env-inventory\inventory.json"
+$inventoryScript = Join-Path $ProjectRoot "scripts\Invoke-EnvInventory.ps1"
+$publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
 $testRoot = Join-Path $ProjectRoot "reports\project-local-env-review-test"
+$inventoryOutput = Join-Path $testRoot "inventory"
+$reviewOutput = Join-Path $testRoot "review"
+$inventoryPath = Join-Path $inventoryOutput "inventory.json"
 
 Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Message "找不到项目本地环境审查包脚本"
-Assert-True -Condition (Test-Path -LiteralPath $inventoryPath -PathType Leaf) -Message "找不到 inventory.json"
+Assert-True -Condition (Test-Path -LiteralPath $inventoryScript -PathType Leaf) -Message "找不到 inventory 脚本"
+Assert-True -Condition (Test-Path -LiteralPath $publisherPath -PathType Leaf) -Message "找不到共享报告发布器"
+. $publisherPath
 
 try {
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 
-    $result = & $scriptPath -InventoryPath $inventoryPath -OutputDir $testRoot
-    Assert-True -Condition ([bool]$result.readOnly) -Message "审查包脚本没有返回 readOnly=true"
+    & $inventoryScript -OutputDir $inventoryOutput -SkipVersionProbe | Out-Null
+    Assert-True -Condition (Test-Path -LiteralPath $inventoryPath -PathType Leaf) -Message "测试 inventory 未生成"
 
-    $jsonPath = Join-Path $testRoot "review.json"
-    $markdownPath = Join-Path $testRoot "REPORT.md"
+    $result = & $scriptPath -InventoryPath $inventoryPath -OutputDir $reviewOutput
+    Assert-True -Condition ([bool]$result.readOnly) -Message "审查包脚本没有返回 readOnly=true"
+    Assert-True -Condition ($result.generationId -match '^[0-9a-f-]{36}$') -Message "审查包未通过共享发布器生成 generationId"
+
+    $jsonPath = Join-Path $reviewOutput "review.json"
+    $markdownPath = Join-Path $reviewOutput "REPORT.md"
     Assert-True -Condition (Test-Path -LiteralPath $jsonPath -PathType Leaf) -Message "缺少 review.json"
     Assert-True -Condition (Test-Path -LiteralPath $markdownPath -PathType Leaf) -Message "缺少 REPORT.md"
+    $pair = Test-JsonMarkdownArtifactPair -JsonPath $jsonPath -MarkdownPath $markdownPath
+    Assert-True -Condition ([bool]$pair.ok) -Message "审查包 JSON/Markdown pair 校验失败：$($pair.error)"
 
     $review = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
-    $inventoryMarkers = @($inventory.projectEnvironmentMarkers)
+    $inventoryMarkers = @($inventory.localEnvironmentFindings | Where-Object { [bool]$_.includeInReviewPack })
+    foreach ($finding in @($inventory.localEnvironmentFindings)) {
+        foreach ($policyProperty in @("risk", "recommendation", "reason")) {
+            Assert-True -Condition (-not ($finding.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 本地环境事实不应包含策略字段 $policyProperty：$($finding.path)"
+        }
+    }
+    foreach ($marker in @($inventory.projectEnvironmentMarkers)) {
+        foreach ($policyProperty in @("risk", "recommendation", "reason")) {
+            Assert-True -Condition (-not ($marker.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 项目标记事实不应包含策略字段 $policyProperty：$($marker.path)"
+        }
+    }
     foreach ($property in @("readOnly", "inventoryPath", "items", "policy", "summary")) {
         Assert-Property -Object $review -Name $property
     }
 
     Assert-True -Condition ([bool]$review.readOnly) -Message "review JSON 的 readOnly 不是 true"
     Assert-True -Condition (-not [bool]$review.policy.autoMigrationAllowed) -Message "项目本地环境不应允许自动迁移"
-    Assert-True -Condition ($review.items.Count -eq $inventoryMarkers.Count) -Message "审查项数量必须与 inventory.projectEnvironmentMarkers 精确一致"
+    Assert-True -Condition ($review.items.Count -eq $inventoryMarkers.Count) -Message "审查项数量必须与纳入审查的 inventory.localEnvironmentFindings 精确一致"
 
     $inventoryKeys = @{}
     foreach ($marker in $inventoryMarkers) {
         $key = New-MarkerKey -Item $marker
-        Assert-True -Condition (-not $inventoryKeys.ContainsKey($key)) -Message "inventory 中存在重复项目本地环境标记：$key"
+        Assert-True -Condition (-not $inventoryKeys.ContainsKey($key)) -Message "inventory facts 中存在重复项目本地环境标记：$key"
         $inventoryKeys[$key] = $true
     }
 
@@ -124,6 +146,31 @@ try {
     }
     foreach ($unexpected in @("ode_modules、", "| medium |", "| high |", "| low |")) {
         Assert-True -Condition (-not $markdown.Contains($unexpected)) -Message "REPORT.md 不应包含未转义或未本地化文本：$unexpected"
+    }
+
+    $localFactsOnlyInventory = ($inventory | ConvertTo-Json -Depth 30 | ConvertFrom-Json)
+    $localFactsOnlyInventory.projectEnvironmentMarkers = @()
+    $localFactsOnlyPath = Join-Path $testRoot "local-findings-only-inventory.json"
+    $localFactsOnlyInventory | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $localFactsOnlyPath -Encoding UTF8
+    $localFactsOnlyOutput = Join-Path $testRoot "local-findings-only-review"
+    & $scriptPath -InventoryPath $localFactsOnlyPath -OutputDir $localFactsOnlyOutput | Out-Null
+    $localFactsOnlyReview = Get-Content -LiteralPath (Join-Path $localFactsOnlyOutput "review.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($localFactsOnlyReview.items.Count -eq $inventoryMarkers.Count) -Message "审查包必须直接消费 localEnvironmentFindings facts，不能依赖 projectEnvironmentMarkers"
+
+    if (@($inventory.localEnvironmentFindings).Count -gt 0) {
+        $invalidInventory = ($inventory | ConvertTo-Json -Depth 30 | ConvertFrom-Json)
+        $invalidInventory.localEnvironmentFindings[0].includeInReviewPack = "false"
+        $invalidInventoryPath = Join-Path $testRoot "invalid-string-review-flag.json"
+        $invalidInventory | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $invalidInventoryPath -Encoding UTF8
+        $invalidOutput = Join-Path $testRoot "invalid-string-review-flag"
+        $failed = $false
+        try {
+            & $scriptPath -InventoryPath $invalidInventoryPath -OutputDir $invalidOutput | Out-Null
+        } catch {
+            $failed = $true
+        }
+        Assert-True -Condition $failed -Message "审查包必须拒绝字符串 includeInReviewPack"
+        Assert-True -Condition (-not (Test-Path -LiteralPath $invalidOutput)) -Message "非法 review facts 不得创建输出目录"
     }
 
     $blockedOutput = "C:\Codex-should-not-be-created"

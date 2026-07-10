@@ -122,26 +122,6 @@ function New-DirectoryRecord {
     }
 }
 
-function Test-IsResolvedPipDefaultCache {
-    param([object]$Directory)
-
-    if ($Directory.name -ne "pip cache default") {
-        return $false
-    }
-
-    if ([string]::IsNullOrWhiteSpace($env:PIP_CACHE_DIR)) {
-        return $false
-    }
-
-    try {
-        $configured = [System.IO.Path]::GetFullPath($env:PIP_CACHE_DIR).TrimEnd("\", "/")
-        $canonical = [System.IO.Path]::GetFullPath("D:\Codex\.cache\pip").TrimEnd("\", "/")
-        return $configured -ieq $canonical
-    } catch {
-        return $false
-    }
-}
-
 function Invoke-CommandWithTimeout {
     param(
         [string]$Executable,
@@ -639,41 +619,26 @@ function New-LocalEnvironmentFinding {
     $classification = "nested-app-local-env"
     $scope = "nested-app"
     $owner = "project"
-    $risk = "high"
     $includeInReviewPack = $true
-    $reason = "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    $recommendation = "不自动迁移；纳入项目级审查，但不得跨项目复用。"
 
     if ($topProjectRoot -and $container.Equals($topProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         $classification = "project-root-local-env"
         $scope = "project-root"
-        $risk = "high"
-        $reason = "项目根本地依赖环境可能绑定解释器、绝对路径、构建产物或服务运行状态。"
-        $recommendation = "不自动迁移；这是项目本地依赖环境，需逐项目评估。"
     } elseif ($normalized.Contains("\docs\gsd-archive\") -or $normalized.Contains("\docs\archive\") -or $normalized.Contains("\docs\archived\")) {
         $classification = "archived-project-cache"
         $scope = "archive-cache"
         $owner = "archive"
-        $risk = "high"
         $includeInReviewPack = $false
-        $reason = "项目文档或历史归档中的依赖缓存副本，不属于当前项目依赖重建。"
-        $recommendation = "不按当前项目依赖重建；如需处理，进入归档或产物清理 dry-run。"
     } elseif ($normalized.Contains("\data\repair_backups\") -or $normalized.Contains("\repair_backups\")) {
         $classification = "plugin-cache-backup"
         $scope = "backup-cache"
         $owner = "backup"
-        $risk = "high"
         $includeInReviewPack = $false
-        $reason = "repair backup 内的插件缓存副本，不属于项目依赖重建；只能走备份保留或清理治理。"
-        $recommendation = "不按项目依赖重建；如需处理，进入备份治理 dry-run。"
     } elseif ($normalized.Contains("\plugins\cache\")) {
         $classification = "plugin-runtime-cache"
         $scope = "plugin-runtime-cache"
         $owner = "plugin-runtime"
-        $risk = "high"
         $includeInReviewPack = $false
-        $reason = "插件 runtime/cache 内的依赖目录，不属于项目本地依赖重建；可能由插件安装或运行时管理。"
-        $recommendation = "不按项目依赖重建；如需处理，进入插件 runtime/cache 治理。"
     }
 
     [pscustomobject]@{
@@ -686,10 +651,7 @@ function New-LocalEnvironmentFinding {
         classification = $classification
         scope = $scope
         owner = $owner
-        risk = $risk
         includeInReviewPack = $includeInReviewPack
-        recommendation = $recommendation
-        reason = $reason
     }
 }
 
@@ -733,96 +695,6 @@ function Get-ProjectEnvironmentMarkers {
     foreach ($finding in $LocalEnvironmentFindings) {
         if ([bool]$finding.includeInReviewPack) {
             $finding
-        }
-    }
-}
-
-function Get-MigrationCandidates {
-    param(
-        [object[]]$Directories
-    )
-
-    foreach ($dir in $Directories) {
-        if (-not $dir.exists) {
-            continue
-        }
-
-        if ($dir.isReparsePoint) {
-            continue
-        }
-
-        if ($dir.category -eq "manual-only") {
-            continue
-        }
-
-        if (Test-IsResolvedPipDefaultCache -Directory $dir) {
-            continue
-        }
-
-        if ($dir.drive -like "C:\*") {
-            $risk = "medium"
-            $action = "需要人工确认"
-
-            if ($dir.category -eq "cache") {
-                $risk = "low"
-                $action = "可考虑迁移到 D:\Codex\.cache"
-            } elseif ($dir.category -eq "tool-env") {
-                $risk = "medium"
-                $action = "可考虑迁移到 D:\Codex\tools 或 D:\Codex\envs，但需按工具官方方式切换"
-            }
-
-            [pscustomobject]@{
-                source = $dir.path
-                kind = $dir.category
-                owner = $dir.owner
-                risk = $risk
-                action = $action
-                reason = $dir.notes
-            }
-        }
-    }
-}
-
-function Get-ManualReviewItems {
-    param(
-        [object[]]$Directories,
-        [object[]]$LocalEnvironmentFindings
-    )
-
-    foreach ($dir in $Directories) {
-        if (-not $dir.exists) {
-            continue
-        }
-
-        if ($dir.isReparsePoint) {
-            [pscustomobject]@{
-                source = $dir.path
-                kind = $dir.category
-                owner = $dir.owner
-                risk = "high"
-                action = "不自动迁移"
-                reason = "该目录是 reparse point/junction/symlink，需先确认目标和循环风险。"
-            }
-        } elseif ($dir.category -eq "manual-only") {
-            [pscustomobject]@{
-                source = $dir.path
-                kind = $dir.category
-                owner = $dir.owner
-                risk = "high"
-                action = "仅人工处理"
-                reason = $dir.notes
-            }
-        }
-    }
-
-    foreach ($marker in $LocalEnvironmentFindings) {
-        [pscustomobject]@{
-            source = $marker.path
-            kind = $marker.classification
-            owner = $marker.owner
-            risk = $marker.risk
-            action = "不自动迁移"
-            reason = $marker.reason
         }
     }
 }
@@ -876,8 +748,6 @@ function ConvertTo-MarkdownReport {
     $lines.Add("- 已存在目录数量：$(($Inventory.directories | Where-Object { $_.exists }).Count)")
     $lines.Add("- 项目级审查环境数量：$($Inventory.projectEnvironmentMarkers.Count)")
     $lines.Add("- 本地环境相关发现数量：$($Inventory.localEnvironmentFindings.Count)")
-    $lines.Add("- 迁移候选数量：$($Inventory.migrationCandidates.Count)")
-    $lines.Add("- 人工审查项数量：$($Inventory.manualReviewItems.Count)")
     $lines.Add("")
     $lines.Add("## 绝不自动迁移")
     $lines.Add("")
@@ -949,10 +819,10 @@ function ConvertTo-MarkdownReport {
     if ($Inventory.projectEnvironmentMarkers.Count -eq 0) {
         $lines.Add("未发现需要纳入项目级审查的 `.venv`、`venv`、`node_modules` 或 `.conda`。")
     } else {
-        $lines.Add("| 项目或 app | 父项目 | 分类 | 标记 | 路径 | 建议 |")
-        $lines.Add("| --- | --- | --- | --- | --- | --- |")
+        $lines.Add("| 项目或 app | 父项目 | 分类 | 标记 | 路径 | Owner | Scope |")
+        $lines.Add("| --- | --- | --- | --- | --- | --- | --- |")
         foreach ($marker in $Inventory.projectEnvironmentMarkers) {
-            $lines.Add("| $(Escape-MarkdownCell $marker.project) | $(Escape-MarkdownCell $marker.parentProject) | $(Escape-MarkdownCell $marker.classification) | $(Escape-MarkdownCell $marker.marker) | $(Escape-MarkdownCell $marker.path) | $(Escape-MarkdownCell $marker.recommendation) |")
+            $lines.Add("| $(Escape-MarkdownCell $marker.project) | $(Escape-MarkdownCell $marker.parentProject) | $(Escape-MarkdownCell $marker.classification) | $(Escape-MarkdownCell $marker.marker) | $(Escape-MarkdownCell $marker.path) | $(Escape-MarkdownCell $marker.owner) | $(Escape-MarkdownCell $marker.scope) |")
         }
     }
     $lines.Add("")
@@ -961,43 +831,13 @@ function ConvertTo-MarkdownReport {
     if ($Inventory.localEnvironmentFindings.Count -eq 0) {
         $lines.Add("未发现本地环境相关目录。")
     } else {
-        $lines.Add("| 分类 | 纳入项目级审查 | 所属项目或容器 | 标记 | 路径 | 建议 |")
-        $lines.Add("| --- | --- | --- | --- | --- | --- |")
+        $lines.Add("| 分类 | 纳入项目级审查 | 所属项目或容器 | 标记 | 路径 | Owner | Scope |")
+        $lines.Add("| --- | --- | --- | --- | --- | --- | --- |")
         foreach ($finding in $Inventory.localEnvironmentFindings) {
             $reviewDisplay = if ($finding.includeInReviewPack) { "是" } else { "否" }
-            $lines.Add("| $(Escape-MarkdownCell $finding.classification) | $reviewDisplay | $(Escape-MarkdownCell $finding.project) | $(Escape-MarkdownCell $finding.marker) | $(Escape-MarkdownCell $finding.path) | $(Escape-MarkdownCell $finding.recommendation) |")
+            $lines.Add("| $(Escape-MarkdownCell $finding.classification) | $reviewDisplay | $(Escape-MarkdownCell $finding.project) | $(Escape-MarkdownCell $finding.marker) | $(Escape-MarkdownCell $finding.path) | $(Escape-MarkdownCell $finding.owner) | $(Escape-MarkdownCell $finding.scope) |")
         }
     }
-    $lines.Add("")
-    $lines.Add("## 迁移候选")
-    $lines.Add("")
-    if ($Inventory.migrationCandidates.Count -eq 0) {
-        $lines.Add("当前未发现明确迁移候选。")
-    } else {
-        $lines.Add("| 来源 | 类型 | 风险 | 建议动作 | 原因 |")
-        $lines.Add("| --- | --- | --- | --- | --- |")
-        foreach ($candidate in $Inventory.migrationCandidates) {
-            $lines.Add("| $(Escape-MarkdownCell $candidate.source) | $(Escape-MarkdownCell $candidate.kind) | $(Escape-MarkdownCell $candidate.risk) | $(Escape-MarkdownCell $candidate.action) | $(Escape-MarkdownCell $candidate.reason) |")
-        }
-    }
-    $lines.Add("")
-    $lines.Add("## 人工审查项")
-    $lines.Add("")
-    if ($Inventory.manualReviewItems.Count -eq 0) {
-        $lines.Add("当前未发现需要单独人工审查的项目。")
-    } else {
-        $lines.Add("| 来源 | 类型 | 风险 | 建议动作 | 原因 |")
-        $lines.Add("| --- | --- | --- | --- | --- |")
-        foreach ($item in $Inventory.manualReviewItems) {
-            $lines.Add("| $(Escape-MarkdownCell $item.source) | $(Escape-MarkdownCell $item.kind) | $(Escape-MarkdownCell $item.risk) | $(Escape-MarkdownCell $item.action) | $(Escape-MarkdownCell $item.reason) |")
-        }
-    }
-    $lines.Add("")
-    $lines.Add("## 下一步")
-    $lines.Add("")
-    $lines.Add("1. 人工审查 risk=medium 和 risk=high 的候选项。")
-    $lines.Add("2. 为低风险缓存迁移单独建立迁移 issue。")
-    $lines.Add("3. 对任何工具根目录迁移，优先使用工具官方配置或重装方式，不直接搬目录。")
 
     return $lines -join [Environment]::NewLine
 }
@@ -1134,8 +974,6 @@ $tools = @(
 $directories = @(Get-KnownDirectories)
 $localEnvironmentFindings = @(Get-LocalEnvironmentFindings -Roots $ProjectRoots)
 $projectMarkers = @(Get-ProjectEnvironmentMarkers -LocalEnvironmentFindings $localEnvironmentFindings)
-$candidates = @(Get-MigrationCandidates -Directories $directories)
-$manualReviewItems = @(Get-ManualReviewItems -Directories $directories -LocalEnvironmentFindings $localEnvironmentFindings)
 $envVars = @(Get-SelectedEnvironmentVariables)
 $pathScopes = Get-PathScopeRecords
 
@@ -1155,8 +993,6 @@ $inventory = New-InventoryV3Document -Facts @{
     directories = $directories
     projectEnvironmentMarkers = $projectMarkers
     localEnvironmentFindings = $localEnvironmentFindings
-    migrationCandidates = $candidates
-    manualReviewItems = $manualReviewItems
 }
 
 $published = Publish-JsonMarkdownArtifactPair -Document $inventory -OutputDir $OutputDir -JsonFileName "inventory.json" -MarkdownFileName "REPORT.md" -RenderMarkdown {
