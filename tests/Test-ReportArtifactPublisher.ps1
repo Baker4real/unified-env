@@ -25,6 +25,7 @@ function Assert-CanRemoveTestRoot {
 
     $fullReportsRoot = [IO.Path]::GetFullPath((Join-Path $fullProjectRoot "reports")).TrimEnd("\", "/")
     $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
+    $driveRoot = [IO.Path]::GetPathRoot($fullPath)
     $isUnderReports = $fullPath.StartsWith("$fullReportsRoot\", [StringComparison]::OrdinalIgnoreCase)
     Assert-True -Condition $isUnderReports -Message "测试输出目录必须位于项目 reports 下：$Path"
 
@@ -36,11 +37,19 @@ function Assert-CanRemoveTestRoot {
             Assert-True -Condition (-not $isReparse) -Message "测试输出路径不能穿过 junction、symlink 或 reparse point：$currentPath"
         }
 
+        if ($currentPath.TrimEnd("\", "/") -ieq $driveRoot.TrimEnd("\", "/")) {
+            break
+        }
+
         $parentPath = [IO.Directory]::GetParent($currentPath)
         if ($null -eq $parentPath) {
             break
         }
-        $currentPath = $parentPath.FullName.TrimEnd("\", "/")
+        $nextPath = $parentPath.FullName
+        if ($nextPath.TrimEnd("\", "/") -ieq $currentPath.TrimEnd("\", "/")) {
+            break
+        }
+        $currentPath = $nextPath
     }
 }
 
