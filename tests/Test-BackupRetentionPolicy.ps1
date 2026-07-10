@@ -148,6 +148,12 @@ try {
     $digestReparse = Get-BackupRetentionSafeStats -Path $digestRoot -IncludeTreeDigest
     Assert-True ($digestReparse.reparsePointsSkipped -gt 0 -and $null -eq $digestReparse.treeSha256) 'tree 内任一 reparse 必须令 treeSha256 失败关闭'
     Remove-Item -LiteralPath $digestJunction -Force
+    Set-Content -LiteralPath "${digestA}:audit" -Value 'named-stream' -NoNewline
+    $digestAds = Get-BackupRetentionSafeStats -Path $digestRoot -IncludeTreeDigest
+    Assert-True ($digestAds.inaccessibleItems -gt 0 -and $null -eq $digestAds.treeSha256) 'candidate 任一 NTFS named stream 必须令 treeSha256 失败关闭'
+    Remove-Item -LiteralPath $digestA -Stream 'audit' -Force
+    $digestStreamFailure = Get-BackupRetentionSafeStats -Path $digestRoot -IncludeTreeDigest -StreamResolver { param($Path) throw 'fixture stream enumeration failure' }
+    Assert-True ($digestStreamFailure.inaccessibleItems -gt 0 -and $null -eq $digestStreamFailure.treeSha256) 'stream resolver/枚举失败必须令 treeSha256 失败关闭'
 
     $evaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context
     $roundTrippedEvaluation = $evaluation | ConvertTo-Json -Depth 100 | ConvertFrom-Json -DateKind String
@@ -191,7 +197,7 @@ try {
 
     $rootSnapshots = @($evaluation.evaluatedRoots)
     foreach ($root in $rootSnapshots) {
-        Assert-True ($null -ne $root.enumerationStarted) '根快照必须记录 enumerationStarted'
+        Assert-True ($root.enumerationStarted -is [bool] -and $root.enumerationStarted) '根快照 enumerationStarted 必须是原生 true boolean'
         Assert-True ($null -ne $root.enumerationCompleted) '根快照必须记录 enumerationCompleted'
         Assert-True ($root.errors -is [array]) '根快照 errors 必须是数组'
         Assert-True ($root.snapshotSha256 -match '^[0-9a-f]{64}$') '根快照必须有 SHA-256'
@@ -214,6 +220,14 @@ try {
     $candidate = @($evaluation.candidates | Where-Object { $_.scanRoot -ieq $providerRoot })
     Assert-True ($retained.Count -eq 5) '最新 5 个 provider-sync 必须为 retained'
     Assert-True ($candidate.Count -eq 1) '第 6 个 provider-sync 必须为 candidate'
+
+    $adsScopeRoot=Join-Path $testRoot 'ads-scope';$adsProvider=Join-Path $adsScopeRoot '.codex\backups_state\provider-sync';New-Item -ItemType Directory -Force -Path $adsProvider|Out-Null
+    foreach($name in @('20260701T000006Z','20260701T000005Z','20260701T000004Z','20260701T000003Z','20260701T000002Z','20260701T000001Z')){New-Item -ItemType Directory -Path (Join-Path $adsProvider $name)|Out-Null}
+    $adsCandidateFile=Join-Path $adsProvider '20260701T000001Z\state.bin';[IO.File]::WriteAllText($adsCandidateFile,'AAAA',[Text.UTF8Encoding]::new($false));Set-Content -LiteralPath "${adsCandidateFile}:audit" -Value 'named-stream' -NoNewline
+    $adsContext=New-BackupRetentionPolicyContext -ArtifactMode test -CodexRoot (Join-Path $adsScopeRoot '.codex') -DDriveRoot $adsScopeRoot
+    $adsEvaluation=Invoke-BackupRetentionEvaluation -PolicyContext $adsContext
+    $adsGap=@($adsEvaluation.coverageItems|Where-Object path -ieq (Split-Path -Parent $adsCandidateFile))[0]
+    Assert-True(@($adsEvaluation.candidates).Count-eq0-and$adsGap.coverageDisposition-ceq'gap'-and$adsGap.requiresManualReview-and$adsGap.blocksCoverage-and$null-eq$adsGap.stats.treeSha256)'静态 ADS 必须令 candidate 降级为 gap+manual+blocks'
 
     $lateScopeRoot = Join-Path $testRoot 'late-scope'
     $lateProviderRoot = Join-Path $lateScopeRoot '.codex\backups_state\provider-sync'

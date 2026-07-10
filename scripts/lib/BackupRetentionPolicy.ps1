@@ -177,6 +177,25 @@ function Get-BackupRetentionDeclaredScanRoots {
     )
 }
 
+function Get-BackupRetentionPolicyDocument {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][psobject]$PolicyContext)
+    if($PolicyContext.policyId-cne'env-governance.backup-retention'-or$PolicyContext.policyVersion-ne2){throw 'PolicyContext 不能生成 canonical policy document。'}
+    return [pscustomobject][ordered]@{
+        policyId=$PolicyContext.policyId
+        policyVersion=$PolicyContext.policyVersion
+        summary='只读 dry-run；不删除、不移动、不迁移；真实清理必须另行显式授权。'
+        protectedRootsCannotBeDeleted=$true
+        explicitAuthorizationRequired=$true
+        applyMustRegenerateDryRun=$true
+        applyMustCheckReparsePoints=$true
+        applyMustUseAllowlist=$true
+        strictTimestampRequired=$true
+        runtimeSharedDirsExcluded=$true
+        authAutosaveExcludedByDefault=$true
+    }
+}
+
 function Get-BackupRetentionSha256 {
     param([Parameter(Mandatory)][string]$Value)
     $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
@@ -204,7 +223,7 @@ function Get-BackupRetentionRootSnapshot {
     )
 
     $path = Get-BackupRetentionCanonicalPath -Path ([string]$DeclaredScanRoot.path)
-    $started = (Get-Date).ToUniversalTime().ToString('o')
+    $started = $true
     $errors = [Collections.Generic.List[string]]::new()
     $items = [Collections.Generic.List[object]]::new()
     $exists = $false
@@ -312,11 +331,25 @@ function Get-BackupRetentionStrictTimestamp {
 }
 
 function Get-BackupRetentionSafeStats {
-    param([Parameter(Mandatory)][string]$Path,[switch]$IncludeTreeDigest)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$IncludeTreeDigest,
+        [scriptblock]$StreamResolver = { param($TargetPath) if($IsWindows){@(Get-Item -LiteralPath $TargetPath -Stream * -ErrorAction Stop)}else{@()} }
+    )
 
     $result = [ordered]@{ exists = $false; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = 0; inaccessibleItems = 0; treeSha256 = $null }
     $treeRecords = [Collections.Generic.List[string]]::new()
     $rootPath = Get-BackupRetentionCanonicalPath -Path $Path
+    $assertNoNamedStreams = {
+        param([string]$TargetPath)
+        if(-not$IncludeTreeDigest){return $true}
+        try{$streams=@(& $StreamResolver $TargetPath)}catch{$result.inaccessibleItems++;return $false}
+        foreach($stream in $streams){
+            if($null-eq$stream-or$stream.PSObject.Properties.Name-notcontains'Stream'-or$stream.Stream-isnot[string]){$result.inaccessibleItems++;return $false}
+            if($stream.Stream-cne':$DATA'){$result.inaccessibleItems++;return $false}
+        }
+        return $true
+    }
     $addDirectoryRecord = {
         param([string]$RelativePath)
         if (-not $IncludeTreeDigest) { return }
@@ -339,6 +372,7 @@ function Get-BackupRetentionSafeStats {
         $rootItem = Get-Item -LiteralPath $rootPath -Force -ErrorAction Stop
         $result.exists = $true
         if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $result.reparsePointsSkipped++; return [pscustomobject]$result }
+        if(-not(& $assertNoNamedStreams $rootPath)){return [pscustomobject]$result}
         $stack = [Collections.Generic.Stack[string]]::new()
         if ($rootItem.PSIsContainer) { & $addDirectoryRecord '.'; $stack.Push($rootItem.FullName) } else {
             $result.files = 1; $result.bytes = [int64]$rootItem.Length
@@ -359,6 +393,7 @@ function Get-BackupRetentionSafeStats {
             } catch { $result.inaccessibleItems++; continue }
             foreach ($child in $children) {
                 if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $result.reparsePointsSkipped++; continue }
+                if(-not(& $assertNoNamedStreams $child.FullName)){continue}
                 $relativePath = [IO.Path]::GetRelativePath($rootPath, $child.FullName).Replace('/', '\')
                 if ([IO.Path]::IsPathFullyQualified($relativePath) -or $relativePath -eq '..' -or $relativePath.StartsWith('..\', [StringComparison]::Ordinal)) { $result.inaccessibleItems++; continue }
                 $last = $child.LastWriteTimeUtc

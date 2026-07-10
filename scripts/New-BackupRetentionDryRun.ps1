@@ -55,19 +55,7 @@ $evaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context
 $candidateBytes = [int64](($evaluation.candidates | ForEach-Object { if ($null -ne $_.stats) { [int64]$_.stats.bytes } else { 0 } } | Measure-Object -Sum).Sum)
 $manualBytes = [int64](($evaluation.manualReview | ForEach-Object { if ($null -ne $_.stats) { [int64]$_.stats.bytes } else { 0 } } | Measure-Object -Sum).Sum)
 
-$policy = [pscustomobject][ordered]@{
-    policyId = $context.policyId
-    policyVersion = $context.policyVersion
-    summary = '只读 dry-run；不删除、不移动、不迁移；真实清理必须另行显式授权。'
-    protectedRootsCannotBeDeleted = $true
-    explicitAuthorizationRequired = $true
-    applyMustRegenerateDryRun = $true
-    applyMustCheckReparsePoints = $true
-    applyMustUseAllowlist = $true
-    strictTimestampRequired = $true
-    runtimeSharedDirsExcluded = $true
-    authAutosaveExcludedByDefault = $true
-}
+$policy = Get-BackupRetentionPolicyDocument -PolicyContext $context
 
 $summary = [pscustomobject][ordered]@{
     declaredScanRootCount = @($evaluation.declaredScanRoots).Count
