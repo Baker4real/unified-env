@@ -89,6 +89,23 @@ try {
     Assert-True (@($incomplete.pathSummary.missingEntries).Count -eq 0) "不完整 process scope 不得生成 missing 建议"
     Assert-True (@($incomplete.pathSummary.staleLocalEnvironmentEntries).Count -eq 0) "不完整 process scope 不得生成 stale 建议"
 
+    # Task2 producer-compatible shared facts：归属可信，但 reparse 或 launcher probe failure 必须进入 high/manual，而不是被 strict gate 判伪。
+    $producerCompatible = Copy-JsonObject $inventory
+    $reparseLauncher = [pscustomobject]@{ path="D:\Codex\tools\fixture\tool.exe"; originClass="shared-tool"; matchedRule="explicit-shared-root"; matchedRoot="D:\Codex\tools"; metadataStatus="ok"; metadataError=$null; isReparsePoint=$true; reparseAncestor="D:\Codex\tools\fixture"; reparseTarget="D:\target\fixture" }
+    $producerCompatible.tools[0].path=$reparseLauncher.path; $producerCompatible.tools[0].found=$true; $producerCompatible.tools[0].probeSucceeded=$true; $producerCompatible.tools[0].error=$null; $producerCompatible.tools[0].launcher=$reparseLauncher; $producerCompatible.tools[0].runtime=$null; $producerCompatible.tools[0].originClass="shared-tool"; $producerCompatible.tools[0].originEvidence=@([pscustomobject]@{role="launcher";evidence=$reparseLauncher}); $producerCompatible.tools[0].requiresManualReview=$true
+    $probeFailedLauncher = [pscustomobject]@{ path="D:\Codex\tools\python-shim\python.exe"; originClass="unknown"; matchedRule="shared-root-probe-not-succeeded"; matchedRoot="D:\Codex\tools"; metadataStatus="ok"; metadataError=$null; isReparsePoint=$false; reparseAncestor=$null; reparseTarget=$null }
+    $sharedRuntime = [pscustomobject]@{ path="D:\Codex\tools\python\python.exe"; originClass="shared-tool"; matchedRule="explicit-shared-root"; matchedRoot="D:\Codex\tools"; metadataStatus="ok"; metadataError=$null; isReparsePoint=$false; reparseAncestor=$null; reparseTarget=$null }
+    $producerCompatible.tools[1].path=$probeFailedLauncher.path; $producerCompatible.tools[1].found=$true; $producerCompatible.tools[1].probeSucceeded=$false; $producerCompatible.tools[1].error="fixture probe failed"; $producerCompatible.tools[1].launcher=$probeFailedLauncher; $producerCompatible.tools[1].runtime=$sharedRuntime; $producerCompatible.tools[1].originClass="shared-tool"; $producerCompatible.tools[1].originEvidence=@([pscustomobject]@{role="launcher";evidence=$probeFailedLauncher},[pscustomobject]@{role="runtime";evidence=$sharedRuntime}); $producerCompatible.tools[1].requiresManualReview=$true
+    $producerPair = Publish-InventoryFixture -Document $producerCompatible -OutputDir (Join-Path $testRoot "input-producer-compatible")
+    $producerOutput = Join-Path $testRoot "readiness-producer-compatible"
+    & $readinessScript -InventoryPath $producerPair.jsonPath -InventoryMarkdownPath $producerPair.markdownPath -OutputDir $producerOutput | Out-Null
+    $producerReadiness = Get-Content -LiteralPath (Join-Path $producerOutput "readiness.json") -Raw | ConvertFrom-Json -DateKind String
+    foreach ($item in @($producerReadiness.toolReadiness | Select-Object -First 2)) {
+        Assert-True ($item.originClass -ceq "shared-tool" -and $item.riskLevel -ceq "high" -and $item.requiresManualReview) "producer-compatible shared 风险事实必须保留 shared + high/manual"
+    }
+    Assert-True $producerReadiness.toolReadiness[0].recommendedAction.Contains("reparse") "shared reparse 必须输出诊断"
+    Assert-True $producerReadiness.toolReadiness[1].recommendedAction.Contains("探测未成功") "runtime shared + launcher probe failure 必须输出诊断"
+
     # 所有 inventory contract 错误必须在创建 OutputDir 之前失败。
     $invalidCases = @(
         @{ name = "schema2"; mutate = { param($d) $d.schemaVersion = 2 } },

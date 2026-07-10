@@ -99,6 +99,31 @@ $spoofRejected = $false
 try { Get-UpdatePolicy -Tool $spoof | Out-Null } catch { $spoofRejected = $true }
 Assert-True $spoofRejected "Get-UpdatePolicy 直接调用也必须拒绝 project venv 伪报 shared-tool"
 
+# Task2 producer 合法事实：canonical shared 归属仍可带 reparse 风险，策略必须 high/manual 而不是拒绝事实。
+$sharedReparse = New-ToolFact -Name "shared-reparse" -Path "D:\Codex\tools\fixture\tool.exe" -OriginClass "shared-tool" -ProbeSucceeded $true -RequiresManualReview $true
+$sharedReparse.launcher.isReparsePoint = $true
+$sharedReparse.launcher.reparseAncestor = "D:\Codex\tools\fixture"
+$sharedReparse.launcher.reparseTarget = "D:\target\fixture"
+$sharedReparse.originEvidence[0].evidence = $sharedReparse.launcher
+$sharedReparsePolicy = Get-UpdatePolicy -Tool $sharedReparse
+Assert-True ($sharedReparsePolicy.riskLevel -eq "high" -and $sharedReparsePolicy.requiresManualReview) "shared reparse 必须 high/manual"
+Assert-True ($sharedReparsePolicy.recommendedAction.Contains("D 盘共享") -and $sharedReparsePolicy.recommendedAction.Contains("reparse")) "shared reparse 必须同时保留归属与风险诊断"
+
+# Task2 producer 合法事实：launcher 版本 probe 失败，但 Python runtime probe 成功并命中 canonical shared root。
+$runtimeShared = New-ToolFact -Name "python" -Path "D:\Codex\tools\python-shim\python.exe" -OriginClass "unknown" -ProbeSucceeded $false -RequiresManualReview $true
+$runtimeShared.launcher.matchedRule = "shared-root-probe-not-succeeded"
+$runtimeShared.launcher.matchedRoot = "D:\Codex\tools"
+$runtimeEvidence = New-OriginEvidence -Path "D:\Codex\tools\python\python.exe" -OriginClass "shared-tool"
+$runtimeShared.runtime = $runtimeEvidence
+$runtimeShared.originClass = "shared-tool"
+$runtimeShared.originEvidence = @(
+    [pscustomobject]@{ role = "launcher"; evidence = $runtimeShared.launcher },
+    [pscustomobject]@{ role = "runtime"; evidence = $runtimeEvidence }
+)
+$runtimeSharedPolicy = Get-UpdatePolicy -Tool $runtimeShared
+Assert-True ($runtimeSharedPolicy.riskLevel -eq "high" -and $runtimeSharedPolicy.requiresManualReview) "launcher probe 失败但 runtime shared 必须 high/manual"
+Assert-True ($runtimeSharedPolicy.recommendedAction.Contains("D 盘共享") -and $runtimeSharedPolicy.recommendedAction.Contains("探测未成功")) "runtime shared 必须同时保留归属与 probe 诊断"
+
 foreach ($origin in @("project-local-env", "vendor-runtime", "unknown")) {
     $tool = New-ToolFact -Name "probe-$origin" -Path "D:\fixture\tool.exe" -OriginClass $origin -ProbeSucceeded $false -RequiresManualReview $true
     $policy = Get-UpdatePolicy -Tool $tool

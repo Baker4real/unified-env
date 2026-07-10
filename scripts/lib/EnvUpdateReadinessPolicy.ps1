@@ -56,9 +56,6 @@ function Assert-ReadinessOriginEvidence {
         if ($matchedCanonical.Count -ne 1 -or -not (Test-InventorySubPath -Path $Evidence.path -Root $matchedCanonical[0])) {
             throw "$FactName shared-tool path/matchedRoot 不属于 canonical shared roots。"
         }
-        if ($Evidence.metadataStatus -cne "ok" -or $Evidence.isReparsePoint -ne $false) {
-            throw "$FactName shared-tool 必须有成功 metadata 且无 reparse。"
-        }
     }
 }
 
@@ -265,15 +262,22 @@ function Get-ToolDecisionInputs {
     $roles = @($Tool.launcher)
     if ($null -ne $Tool.runtime) { $roles += $Tool.runtime }
     $riskOrigins = @("project-local-env", "vendor-runtime", "system-installer", "windows-system", "user-profile", "unknown")
-    $mustReview = @($roles | Where-Object { $_.originClass -in $riskOrigins -or $_.metadataStatus -cne "ok" -or $_.isReparsePoint -ne $false }).Count -gt 0
+    [string[]]$roleOriginClasses = @($roles | ForEach-Object { $_.originClass })
+    [string[]]$riskRoleOriginClasses = @($roleOriginClasses | Where-Object { $_ -in $riskOrigins } | Sort-Object -Unique)
+    $hasReparseEvidence = @($roles | Where-Object { $_.isReparsePoint -eq $true }).Count -gt 0
+    $hasMetadataFailure = @($roles | Where-Object { $_.metadataStatus -cne "ok" }).Count -gt 0
+    $mustReview = $riskRoleOriginClasses.Count -gt 0 -or $hasMetadataFailure -or @($roles | Where-Object { $_.isReparsePoint -ne $false }).Count -gt 0
     if ($mustReview -and -not $Tool.requiresManualReview) { throw "Tool requiresManualReview 与 origin/reparse/metadata 风险证据矛盾。" }
-    if ($Tool.originClass -ceq "shared-tool" -and -not $Tool.probeSucceeded) { throw "shared-tool 必须有成功 probe。" }
     [pscustomobject][ordered]@{
         locationClass = Get-ReadinessLocationClass -Path $Tool.path
         originClass = $Tool.originClass
         probeSucceeded = $Tool.probeSucceeded
         requiresManualReview = $Tool.requiresManualReview
         resolutionScope = $Tool.resolutionScope
+        roleOriginClasses = $roleOriginClasses
+        riskRoleOriginClasses = $riskRoleOriginClasses
+        hasReparseEvidence = $hasReparseEvidence
+        hasMetadataFailure = $hasMetadataFailure
     }
 }
 
@@ -285,7 +289,10 @@ function Get-BaseUpdateDecision {
     $location = [string]$DecisionInputs.locationClass
     $probeSucceeded = $DecisionInputs.probeSucceeded
     $inventoryManual = $DecisionInputs.requiresManualReview
-    if ($probeSucceeded -isnot [bool] -or $inventoryManual -isnot [bool]) { throw "DecisionInputs Boolean 字段类型无效。" }
+    $hasReparseEvidence = $DecisionInputs.hasReparseEvidence
+    $hasMetadataFailure = $DecisionInputs.hasMetadataFailure
+    $riskRoleOriginClasses = @($DecisionInputs.riskRoleOriginClasses)
+    if ($probeSucceeded -isnot [bool] -or $inventoryManual -isnot [bool] -or $hasReparseEvidence -isnot [bool] -or $hasMetadataFailure -isnot [bool]) { throw "DecisionInputs Boolean 字段类型无效。" }
 
     if ($origin -eq "project-local-env") {
         $risk = "high"; $manual = $true
@@ -314,6 +321,22 @@ function Get-BaseUpdateDecision {
         $risk = "high"
         $manual = $true
         $action = "$action 工具探测未成功；必须先诊断探测错误，再决定后续更新入口。"
+    }
+
+    if ($riskRoleOriginClasses.Count -gt 0 -and -not ($riskRoleOriginClasses.Count -eq 1 -and $riskRoleOriginClasses[0] -ceq $origin)) {
+        $risk = "high"
+        $manual = $true
+        $action = "$action Launcher/runtime 还包含高风险归属：$($riskRoleOriginClasses -join ', ')；必须分别核对。"
+    }
+    if ($hasReparseEvidence) {
+        $risk = "high"
+        $manual = $true
+        $action = "$action 存在 reparse 证据；必须确认祖先、目标与 owner。"
+    }
+    if ($hasMetadataFailure) {
+        $risk = "high"
+        $manual = $true
+        $action = "$action Launcher/runtime metadata 未完整成功；必须先诊断。"
     }
 
     if ($inventoryManual -and -not $manual) {
