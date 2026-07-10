@@ -1,250 +1,82 @@
-param(
-    [string]$ProjectRoot = "D:\Codex\projects\统一环境",
-    [switch]$KeepOutputs
-)
-
-$ErrorActionPreference = "Stop"
-
-function Assert-True {
-    param(
-        [bool]$Condition,
-        [string]$Message
-    )
-
-    if (-not $Condition) {
-        throw $Message
-    }
+param([string]$ProjectRoot='D:\Codex\projects\统一环境',[switch]$KeepOutputs)
+$ErrorActionPreference='Stop'
+function Assert-True{param([bool]$Condition,[string]$Message)if(-not$Condition){throw $Message}}
+function Assert-RejectedWithoutOutput{param([scriptblock]$Action,[string]$OutputDir,[string]$Label)
+    $blocked=$false;try{&$Action|Out-Null}catch{$blocked=$true};Assert-True $blocked "$Label 必须失败关闭";Assert-True(-not(Test-Path -LiteralPath $OutputDir))"$Label 不得创建 OutputDir"
+}
+function Assert-RejectedWithMessageWithoutOutput{param([scriptblock]$Action,[string]$OutputDir,[string]$Pattern,[string]$Label)
+    $message=$null;try{&$Action|Out-Null}catch{$message=$_.Exception.Message}
+    Assert-True ($message -like $Pattern) "$Label 必须由目标安全门拒绝，期望 $Pattern，实际：$message"
+    Assert-True(-not(Test-Path -LiteralPath $OutputDir))"$Label 不得创建 OutputDir"
+}
+function Assert-PairRejectedWithoutOutput{param([scriptblock]$Action,[string]$OutputDir,[string]$Label)
+    $message=$null;try{&$Action|Out-Null}catch{$message=$_.Exception.Message}
+    Assert-True (-not [string]::IsNullOrWhiteSpace($message)) "$Label 必须失败关闭"
+    Assert-True ($message -like '*报告对*') "$Label 必须由 JSON/Markdown 报告对门拒绝，实际：$message"
+    Assert-True(-not(Test-Path -LiteralPath $OutputDir))"$Label 不得创建 OutputDir"
+}
+function Assert-CanRemoveTestRoot{param([string]$Path)
+    $full=[IO.Path]::GetFullPath($Path);$reports=[IO.Path]::GetFullPath((Join-Path $ProjectRoot 'reports'))
+    Assert-True($full.StartsWith("$($reports.TrimEnd('\'))\",[StringComparison]::OrdinalIgnoreCase))'测试根必须位于 reports 子树'
+    $current=$full;while($current.StartsWith($reports,[StringComparison]::OrdinalIgnoreCase)){if(Test-Path -LiteralPath $current){Assert-True(((Get-Item -LiteralPath $current -Force).Attributes-band[IO.FileAttributes]::ReparsePoint)-eq0)'测试根父链不得有 reparse point'};if($current-ieq$reports){break};$current=[IO.Directory]::GetParent($current).FullName}
+}
+function Write-TestJsonPair{param($Document,[string]$Path)
+    $jsonText=$Document|ConvertTo-Json -Depth 100
+    [IO.File]::WriteAllText($Path,$jsonText,[Text.UTF8Encoding]::new($false))
+    $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($jsonText))).ToLowerInvariant()
+    $markdown="---`ngenerationId: $($Document.generationId)`nsourceJsonSha256: $hash`n---`nfixture"
+    [IO.File]::WriteAllText((Join-Path (Split-Path -Parent $Path) 'BACKUP-RETENTION-DRY-RUN.md'),$markdown,[Text.UTF8Encoding]::new($false))
 }
 
-function Assert-Property {
-    param(
-        [object]$Object,
-        [string]$Name
-    )
+$dryRunScript=Join-Path $ProjectRoot 'scripts\New-BackupRetentionDryRun.ps1';$applyScript=Join-Path $ProjectRoot 'scripts\New-BackupRetentionApplyManifest.ps1'
+$testRoot=Join-Path $ProjectRoot 'reports\backup-retention-apply-manifest-test';$fixture=Join-Path $testRoot 'fixture';$codex=Join-Path $fixture '.codex';$provider=Join-Path $codex 'backups_state\provider-sync';$dryOutput=Join-Path $testRoot 'dry-run'
+try{
+    Assert-CanRemoveTestRoot $testRoot;if(Test-Path -LiteralPath $testRoot){Remove-Item -LiteralPath $testRoot -Recurse -Force}
+    New-Item -ItemType Directory -Force -Path $provider|Out-Null
+    foreach($name in @('20260701T000006Z','20260701T000005Z','20260701T000004Z','20260701T000003Z','20260701T000002Z','20260701T000001Z')){New-Item -ItemType Directory -Path(Join-Path $provider $name)|Out-Null}
+    &$dryRunScript -ArtifactMode test -CodexRoot $codex -DDriveRoot $fixture -OutputDir $dryOutput|Out-Null
+    $jsonPath=Join-Path $dryOutput 'backup-retention-dry-run.json';$markdownPath=Join-Path $dryOutput 'BACKUP-RETENTION-DRY-RUN.md';$doc=Get-Content -Raw -LiteralPath $jsonPath|ConvertFrom-Json -DateKind String
+    $originalMarkdown=[IO.File]::ReadAllText($markdownPath)
 
-    $hasProperty = $Object.PSObject.Properties.Name -contains $Name
-    Assert-True -Condition $hasProperty -Message "缺少属性：$Name"
-}
+    $source=Get-Content -Raw -LiteralPath $applyScript
+    Assert-True(-not($source-match'\bRemove-Item\b'))'apply manifest 入口不得包含删除实现'
+    Assert-True(-not($source-match'\bMove-Item\b'))'apply manifest 入口不得包含移动实现'
+    foreach($needle in @('BackupRetentionValidation.ps1','ReportArtifactPublisher.ps1','env-governance.backup-retention-apply-manifest','schemaVersion=2','sourceJsonSha256','Test-JsonMarkdownArtifactPair','Test-BackupRetentionDryRunDocument','Assert-BackupRetentionCandidateLiveState','Publish-JsonMarkdownArtifactPair')){Assert-True $source.Contains($needle)"apply 入口缺少必需安全链：$needle"}
+    $readIndex=$source.IndexOf('[IO.File]::ReadAllBytes');$parseIndex=$source.IndexOf('ConvertFrom-Json -DateKind String');$pairIndex=$source.IndexOf('Test-JsonMarkdownArtifactPair');$freshIndex=$source.IndexOf('freshness gate');$contextIndex=$source.IndexOf('New-BackupRetentionPolicyContext -ArtifactMode production');$validateIndex=$source.IndexOf('Test-BackupRetentionDryRunDocument');$selectIndex=$source.IndexOf('Resolve-BackupRetentionCandidateSelection');$statsIndex=$source.IndexOf('Assert-BackupRetentionCandidateLiveState');$publishIndex=$source.IndexOf('Publish-JsonMarkdownArtifactPair')
+    Assert-True($readIndex-lt$parseIndex-and$parseIndex-lt$pairIndex-and$pairIndex-lt$freshIndex-and$freshIndex-lt$contextIndex-and$contextIndex-lt$validateIndex-and$validateIndex-lt$selectIndex-and$selectIndex-lt$statsIndex-and$statsIndex-lt$publishIndex)'apply 安全门顺序必须固定'
 
-function Assert-CanRemoveTestRoot {
-    param([string]$Path)
+    $heldMarkdown="$markdownPath.held";Move-Item -LiteralPath $markdownPath -Destination $heldMarkdown
+    try{$out=Join-Path $testRoot 'missing-pair-output';Assert-PairRejectedWithoutOutput {&$applyScript -DryRunJson $jsonPath -UseAllDryRunCandidates -OutputDir $out} $out '缺失 dry-run Markdown'}finally{Move-Item -LiteralPath $heldMarkdown -Destination $markdownPath}
 
-    $projectReportsRoot = Join-Path $ProjectRoot "reports"
-    $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
-    $fullReportsRoot = [System.IO.Path]::GetFullPath($projectReportsRoot).TrimEnd("\", "/")
-    Assert-True -Condition ($fullPath.StartsWith("$fullReportsRoot\", [System.StringComparison]::OrdinalIgnoreCase)) -Message "测试输出目录必须位于项目 reports 下：$Path"
+    $tamperedMarkdown=[regex]::Replace($originalMarkdown,'(?m)^sourceJsonSha256:\s*[0-9a-f]{64}$','sourceJsonSha256: '+('0'*64))
+    [IO.File]::WriteAllText($markdownPath,$tamperedMarkdown,[Text.UTF8Encoding]::new($false))
+    try{$out=Join-Path $testRoot 'tampered-pair-output';Assert-PairRejectedWithoutOutput {&$applyScript -DryRunJson $jsonPath -UseAllDryRunCandidates -OutputDir $out} $out '篡改 dry-run Markdown'}finally{[IO.File]::WriteAllText($markdownPath,$originalMarkdown,[Text.UTF8Encoding]::new($false))}
 
-    $current = $fullPath
-    while ($current.StartsWith($fullReportsRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-        if (Test-Path -LiteralPath $current) {
-            $item = Get-Item -LiteralPath $current -Force
-            Assert-True -Condition ((($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0)) -Message "测试输出路径不能穿过 junction、symlink 或 reparse point：$current"
-        }
+    $mismatchedMarkdown=[regex]::Replace($originalMarkdown,'(?m)^generationId:\s*[^\r\n]+$',"generationId: $([guid]::NewGuid())")
+    [IO.File]::WriteAllText($markdownPath,$mismatchedMarkdown,[Text.UTF8Encoding]::new($false))
+    try{$out=Join-Path $testRoot 'mismatched-pair-output';Assert-PairRejectedWithoutOutput {&$applyScript -DryRunJson $jsonPath -UseAllDryRunCandidates -OutputDir $out} $out '错配 dry-run generationId'}finally{[IO.File]::WriteAllText($markdownPath,$originalMarkdown,[Text.UTF8Encoding]::new($false))}
 
-        if ($current.Equals($fullReportsRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-            break
-        }
+    $oldOutput=Join-Path $testRoot 'preserve-old-manifest';New-Item -ItemType Directory -Path $oldOutput|Out-Null
+    $oldJson=Join-Path $oldOutput 'backup-retention-apply-manifest.json';$oldMarkdown=Join-Path $oldOutput 'BACKUP-RETENTION-APPLY-MANIFEST.md'
+    [IO.File]::WriteAllText($oldJson,'old-json',[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText($oldMarkdown,'old-markdown',[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($markdownPath,$tamperedMarkdown,[Text.UTF8Encoding]::new($false))
+    try{
+        $message=$null;try{&$applyScript -DryRunJson $jsonPath -UseAllDryRunCandidates -OutputDir $oldOutput|Out-Null}catch{$message=$_.Exception.Message}
+        Assert-True($message -like '*报告对*')"报告对失败必须在发布前拒绝，实际：$message"
+        Assert-True(([IO.File]::ReadAllText($oldJson))-ceq'old-json')'报告对失败不得覆盖旧 manifest JSON'
+        Assert-True(([IO.File]::ReadAllText($oldMarkdown))-ceq'old-markdown')'报告对失败不得覆盖旧 manifest Markdown'
+    }finally{[IO.File]::WriteAllText($markdownPath,$originalMarkdown,[Text.UTF8Encoding]::new($false))}
 
-        $parent = [System.IO.Directory]::GetParent($current)
-        Assert-True -Condition ($null -ne $parent) -Message "无法解析测试输出目录父级：$current"
-        $current = $parent.FullName.TrimEnd("\", "/")
-    }
-}
+    $out=Join-Path $testRoot 'test-artifact-rejected';Assert-RejectedWithMessageWithoutOutput {&$applyScript -DryRunJson $jsonPath -UseAllDryRunCandidates -OutputDir $out} $out '*artifactMode*' '正式入口 test artifact'
+    $forged=$doc|ConvertTo-Json -Depth 100|ConvertFrom-Json -DateKind String;$forged.artifactMode='production';$p=Join-Path $testRoot 'forged-production.json';Write-TestJsonPair $forged $p;$out=Join-Path $testRoot 'forged-production-output';Assert-RejectedWithMessageWithoutOutput {&$applyScript -DryRunJson $p -UseAllDryRunCandidates -OutputDir $out} $out '*CodexRoot*' '伪造 production roots'
 
-$dryRunScriptPath = Join-Path $ProjectRoot "scripts\New-BackupRetentionDryRun.ps1"
-$manifestScriptPath = Join-Path $ProjectRoot "scripts\New-BackupRetentionApplyManifest.ps1"
-$testRoot = Join-Path $ProjectRoot "reports\backup-retention-apply-manifest-test"
-$fixtureRoot = Join-Path $testRoot "fixture"
-$fixtureCodexRoot = Join-Path $fixtureRoot ".codex"
-$dryRunOutput = Join-Path $testRoot "dry-run"
-$manifestOutput = Join-Path $testRoot "manifest"
+    $future=$doc|ConvertTo-Json -Depth 100|ConvertFrom-Json -DateKind String;$future.generatedAtUtc=(Get-Date).ToUniversalTime().AddHours(1).ToString('o');$p=Join-Path $testRoot 'future.json';Write-TestJsonPair $future $p;$out=Join-Path $testRoot 'future-output';Assert-RejectedWithMessageWithoutOutput {&$applyScript -DryRunJson $p -UseAllDryRunCandidates -OutputDir $out} $out '*来自未来*' '未来时间'
+    $old=$doc|ConvertTo-Json -Depth 100|ConvertFrom-Json -DateKind String;$old.generatedAtUtc=(Get-Date).ToUniversalTime().AddHours(-25).ToString('o');$p=Join-Path $testRoot 'old.json';Write-TestJsonPair $old $p;$out=Join-Path $testRoot 'old-output';Assert-RejectedWithMessageWithoutOutput {&$applyScript -DryRunJson $p -UseAllDryRunCandidates -OutputDir $out} $out '*已超过*' '过期 dry-run'
+    $out=Join-Path $testRoot 'wide-age-output';Assert-RejectedWithMessageWithoutOutput {&$applyScript -DryRunJson $jsonPath -UseAllDryRunCandidates -MaxDryRunAgeHours 72 -OutputDir $out} $out '*1..24*' '超过 24 小时 freshness 配置'
 
-Assert-True -Condition (Test-Path -LiteralPath $dryRunScriptPath -PathType Leaf) -Message "找不到备份保留 dry-run 脚本"
-Assert-True -Condition (Test-Path -LiteralPath $manifestScriptPath -PathType Leaf) -Message "找不到 apply manifest 脚本"
+    $badBool=$doc|ConvertTo-Json -Depth 100|ConvertFrom-Json -DateKind String;$badBool.coverageComplete='false';$p=Join-Path $testRoot 'bad-bool.json';Write-TestJsonPair $badBool $p;$out=Join-Path $testRoot 'bad-bool-output';Assert-RejectedWithMessageWithoutOutput {&$applyScript -DryRunJson $p -UseAllDryRunCandidates -OutputDir $out} $out '*JSON boolean*' '字符串 boolean'
+    $badSchema=$doc|ConvertTo-Json -Depth 100|ConvertFrom-Json -DateKind String;$badSchema.schemaVersion=1;$p=Join-Path $testRoot 'bad-schema.json';Write-TestJsonPair $badSchema $p;$out=Join-Path $testRoot 'bad-schema-output';Assert-RejectedWithMessageWithoutOutput {&$applyScript -DryRunJson $p -UseAllDryRunCandidates -OutputDir $out} $out '*严格等于 2*' '旧 schema'
 
-try {
-    Assert-CanRemoveTestRoot -Path $testRoot
-    if (Test-Path -LiteralPath $testRoot) {
-        Remove-Item -LiteralPath $testRoot -Recurse -Force
-    }
-
-    $scriptSource = Get-Content -LiteralPath $manifestScriptPath -Raw
-    Assert-True -Condition (-not ($scriptSource -match "\bRemove-Item\b")) -Message "apply manifest 脚本不得包含 Remove-Item"
-    Assert-True -Condition (-not ($scriptSource -match "\bMove-Item\b")) -Message "apply manifest 脚本不得包含 Move-Item"
-
-    New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "backups_state\provider-sync") | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "backups") | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "run-evidence\sample-evidence") | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "account_backup\windows") | Out-Null
-    New-Item -ItemType File -Force -Path (Join-Path $fixtureCodexRoot "account_backup\windows\install_state.json") | Out-Null
-    New-Item -ItemType File -Force -Path (Join-Path $fixtureCodexRoot "account_backup\windows\quota_cache.json") | Out-Null
-
-    foreach ($name in @(
-        "20260701T000008Z",
-        "20260701T000007Z",
-        "20260701T000006Z",
-        "20260701T000005Z",
-        "20260701T000004Z",
-        "20260701T000003Z",
-        "20260701T000002Z"
-    )) {
-        New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "backups_state\provider-sync\$name") | Out-Null
-    }
-
-    & $dryRunScriptPath -ArtifactMode test -CodexRoot $fixtureCodexRoot -DDriveRoot $fixtureRoot -OutputDir $dryRunOutput | Out-Null
-    $dryRunJson = Join-Path $dryRunOutput "backup-retention-dry-run.json"
-    $dryRunPlan = Get-Content -LiteralPath $dryRunJson -Raw | ConvertFrom-Json
-    Assert-True -Condition (@($dryRunPlan.candidates).Count -eq 2) -Message "fixture 应生成 2 个保留规则候选"
-
-    $result = & $manifestScriptPath -DryRunJson $dryRunJson -UseAllDryRunCandidates -OutputDir $manifestOutput
-    Assert-True -Condition ([bool]$result.applyManifestOnly) -Message "脚本没有返回 applyManifestOnly=true"
-    Assert-True -Condition ([bool]$result.readOnly) -Message "脚本没有返回 readOnly=true"
-    Assert-True -Condition (-not [bool]$result.deleteAllowed) -Message "脚本不应允许删除"
-    Assert-True -Condition (-not [bool]$result.executionReady) -Message "manifest 不应直接进入执行态"
-    Assert-True -Condition ([int]$result.readyForFinalAuthorizationCount -eq 2) -Message "fixture manifest 应有 2 个通过二次校验的路径"
-
-    $manifestPath = Join-Path $manifestOutput "backup-retention-apply-manifest.json"
-    $reportPath = Join-Path $manifestOutput "BACKUP-RETENTION-APPLY-MANIFEST.md"
-    Assert-True -Condition (Test-Path -LiteralPath $manifestPath -PathType Leaf) -Message "缺少 backup-retention-apply-manifest.json"
-    Assert-True -Condition (Test-Path -LiteralPath $reportPath -PathType Leaf) -Message "缺少 BACKUP-RETENTION-APPLY-MANIFEST.md"
-
-    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    foreach ($property in @("schemaVersion", "manifestId", "applyManifestOnly", "readOnly", "deleteAllowed", "executionReady", "selectionMode", "sourceDryRun", "policy", "summary", "items", "blockedItems")) {
-        Assert-Property -Object $manifest -Name $property
-    }
-
-    Assert-True -Condition ([bool]$manifest.applyManifestOnly) -Message "JSON applyManifestOnly 不是 true"
-    Assert-True -Condition ([bool]$manifest.readOnly) -Message "JSON readOnly 不是 true"
-    Assert-True -Condition (-not [bool]$manifest.deleteAllowed) -Message "JSON deleteAllowed 应为 false"
-    Assert-True -Condition (-not [bool]$manifest.executionReady) -Message "JSON executionReady 应为 false"
-    Assert-True -Condition ([bool]$manifest.policy.requiresFinalUserAuthorization) -Message "策略必须要求最终授权"
-    Assert-True -Condition ([bool]$manifest.policy.stateFingerprintRequired) -Message "策略必须要求状态指纹"
-    Assert-True -Condition ([bool]$manifest.policy.reparsePointCheckRequired) -Message "策略必须要求 reparse point 检查"
-
-    foreach ($item in @($manifest.items)) {
-        foreach ($property in @("candidateId", "selected", "validationStatus", "blockers", "path", "risk", "retainRank", "timestampUtc", "timestampSource", "plannedOperation", "originalStats", "currentStats", "reparse")) {
-            Assert-Property -Object $item -Name $property
-        }
-
-        Assert-True -Condition ([bool]$item.selected) -Message "manifest item 必须显式 selected"
-        Assert-True -Condition ($item.validationStatus -eq "ready-for-final-authorization") -Message "fixture item 应通过二次校验：$($item.path)"
-        Assert-True -Condition ($item.plannedOperation -eq "recursive-delete-directory-after-final-confirmation") -Message "plannedOperation 不符合预期"
-        Assert-True -Condition (-not [bool]$item.reparse.hasReparsePoint) -Message "fixture item 不应命中 reparse point"
-    }
-
-    $report = Get-Content -LiteralPath $reportPath -Raw
-    foreach ($expected in @("deleteAllowed=false", "executionReady=false", "最终授权", "二次校验", "manifest id", "不删除")) {
-        Assert-True -Condition $report.Contains($expected) -Message "报告缺少预期文本：$expected"
-    }
-
-    $blocked = $false
-    try {
-        & $manifestScriptPath -DryRunJson $dryRunJson -OutputDir (Join-Path $testRoot "missing-selection") | Out-Null
-    } catch {
-        $blocked = $_.Exception.Message -like "*必须指定 -UseAllDryRunCandidates*"
-    }
-    Assert-True -Condition $blocked -Message "脚本没有阻止缺少选择模式的 manifest 生成"
-
-    $manualReviewPath = Join-Path $fixtureCodexRoot "run-evidence"
-    $blocked = $false
-    try {
-        & $manifestScriptPath -DryRunJson $dryRunJson -AllowPath $manualReviewPath -OutputDir (Join-Path $testRoot "manual-review-blocked") | Out-Null
-    } catch {
-        $blocked = $_.Exception.Message -like "*不在 dry-run candidates 中*"
-    }
-    Assert-True -Condition $blocked -Message "脚本没有阻止人工审查路径进入 manifest"
-
-    $candidatePath = @($dryRunPlan.candidates | Select-Object -First 1)[0].path
-    $blocked = $false
-    try {
-        & $manifestScriptPath -DryRunJson $dryRunJson -AllowPath @($candidatePath, $candidatePath) -OutputDir (Join-Path $testRoot "duplicate-allowpath-blocked") | Out-Null
-    } catch {
-        $blocked = $_.Exception.Message -like "*AllowPath 重复*"
-    }
-    Assert-True -Condition $blocked -Message "脚本没有阻止重复 AllowPath"
-
-    $forgedCDrivePlan = $dryRunPlan | ConvertTo-Json -Depth 18 | ConvertFrom-Json
-    $forgedCDrivePlan.candidates[0].path = "C:\Codex-forged-candidate"
-    $forgedCDriveJson = Join-Path $testRoot "forged-c-drive-dry-run.json"
-    $forgedCDrivePlan | ConvertTo-Json -Depth 18 | Set-Content -LiteralPath $forgedCDriveJson -Encoding UTF8
-    $blocked = $false
-    try {
-        & $manifestScriptPath -DryRunJson $forgedCDriveJson -UseAllDryRunCandidates -OutputDir (Join-Path $testRoot "forged-c-drive-blocked") | Out-Null
-    } catch {
-        $blocked = $_.Exception.Message -like "*Candidate.path 必须位于 D:\*"
-    }
-    Assert-True -Condition $blocked -Message "脚本没有阻止伪造 C 盘 candidate"
-
-    $forgedAncestorPlan = $dryRunPlan | ConvertTo-Json -Depth 18 | ConvertFrom-Json
-    $forgedAncestorPlan.candidates[0].path = $fixtureCodexRoot
-    $forgedAncestorJson = Join-Path $testRoot "forged-ancestor-dry-run.json"
-    $forgedAncestorPlan | ConvertTo-Json -Depth 18 | Set-Content -LiteralPath $forgedAncestorJson -Encoding UTF8
-    $forgedAncestorOutput = Join-Path $testRoot "forged-ancestor-manifest"
-    & $manifestScriptPath -DryRunJson $forgedAncestorJson -UseAllDryRunCandidates -OutputDir $forgedAncestorOutput | Out-Null
-    $forgedAncestorManifest = Get-Content -LiteralPath (Join-Path $forgedAncestorOutput "backup-retention-apply-manifest.json") -Raw | ConvertFrom-Json
-    $ancestorBlockers = @($forgedAncestorManifest.blockedItems | ForEach-Object { @($_.blockers) -join "`n" }) -join "`n"
-    Assert-True -Condition $ancestorBlockers.Contains("候选路径是保护路径的祖先") -Message "脚本没有阻止保护路径祖先 candidate"
-    Assert-True -Condition $ancestorBlockers.Contains("候选路径是人工审查路径的祖先") -Message "脚本没有阻止人工审查路径祖先 candidate"
-
-    $futurePlan = $dryRunPlan | ConvertTo-Json -Depth 18 | ConvertFrom-Json
-    $futurePlan.generatedAtUtc = (Get-Date).ToUniversalTime().AddHours(1).ToString("o")
-    $futureJson = Join-Path $testRoot "future-dry-run.json"
-    $futurePlan | ConvertTo-Json -Depth 18 | Set-Content -LiteralPath $futureJson -Encoding UTF8
-    $blocked = $false
-    try {
-        & $manifestScriptPath -DryRunJson $futureJson -UseAllDryRunCandidates -OutputDir (Join-Path $testRoot "future-blocked") | Out-Null
-    } catch {
-        $blocked = $_.Exception.Message -like "*生成时间来自未来*"
-    }
-    Assert-True -Condition $blocked -Message "脚本没有阻止未来 dry-run"
-
-    $oldPlan = $dryRunPlan | ConvertTo-Json -Depth 18 | ConvertFrom-Json
-    $oldPlan.generatedAtUtc = (Get-Date).ToUniversalTime().AddHours(-25).ToString("o")
-    $oldJson = Join-Path $testRoot "old-dry-run.json"
-    $oldPlan | ConvertTo-Json -Depth 18 | Set-Content -LiteralPath $oldJson -Encoding UTF8
-    $blocked = $false
-    try {
-        & $manifestScriptPath -DryRunJson $oldJson -UseAllDryRunCandidates -OutputDir (Join-Path $testRoot "old-blocked") | Out-Null
-    } catch {
-        $blocked = $_.Exception.Message -like "*已超过*"
-    }
-    Assert-True -Condition $blocked -Message "脚本没有阻止过期 dry-run"
-
-    $blocked = $false
-    try {
-        & $manifestScriptPath -DryRunJson $dryRunJson -UseAllDryRunCandidates -MaxDryRunAgeHours 72 -OutputDir (Join-Path $testRoot "too-wide-age-blocked") | Out-Null
-    } catch {
-        $blocked = $_.Exception.Message -like "*不能超过 24*"
-    }
-    Assert-True -Condition $blocked -Message "脚本没有阻止过大的 MaxDryRunAgeHours"
-
-    $blockedOutput = "C:\Codex-apply-manifest-should-not-be-created"
-    $blocked = $false
-    try {
-        & $manifestScriptPath -DryRunJson $dryRunJson -UseAllDryRunCandidates -OutputDir $blockedOutput | Out-Null
-    } catch {
-        $blocked = $_.Exception.Message -like "*必须位于 D:\*"
-    }
-    Assert-True -Condition $blocked -Message "脚本没有阻止 C 盘 OutputDir"
-    Assert-True -Condition (-not (Test-Path -LiteralPath $blockedOutput)) -Message "测试不应在 C 盘创建输出目录"
-
-    $driftCandidate = @($dryRunPlan.candidates | Select-Object -First 1)[0]
-    New-Item -ItemType File -Force -Path (Join-Path $driftCandidate.path "state-drift.txt") | Out-Null
-    $driftOutput = Join-Path $testRoot "manifest-drift"
-    & $manifestScriptPath -DryRunJson $dryRunJson -UseAllDryRunCandidates -OutputDir $driftOutput | Out-Null
-    $driftManifest = Get-Content -LiteralPath (Join-Path $driftOutput "backup-retention-apply-manifest.json") -Raw | ConvertFrom-Json
-    Assert-True -Condition ([int]$driftManifest.summary.blockedCount -ge 1) -Message "当前状态漂移后应产生阻塞项"
-    $driftText = @($driftManifest.blockedItems | ForEach-Object { @($_.blockers) -join "`n" }) -join "`n"
-    Assert-True -Condition $driftText.Contains("dry-run 快照不一致") -Message "状态漂移阻塞原因应说明快照不一致"
-} finally {
-    if (-not $KeepOutputs -and (Test-Path -LiteralPath $testRoot)) {
-        Assert-CanRemoveTestRoot -Path $testRoot
-        Remove-Item -LiteralPath $testRoot -Recurse -Force
-    }
-}
-
-[pscustomobject]@{
-    ok = $true
-    manifestPath = $manifestPath
-    reportPath = $reportPath
-}
+    $cDrive='C:\Codex-apply-manifest-should-not-be-created';$blocked=$false;try{&$applyScript -DryRunJson 'C:\forged-dry-run.json' -UseAllDryRunCandidates -OutputDir $cDrive|Out-Null}catch{$blocked=$true};Assert-True $blocked 'C 盘 DryRunJson 必须拒绝';Assert-True(-not(Test-Path -LiteralPath $cDrive))'测试不得创建 C 盘输出'
+}finally{if(-not$KeepOutputs-and(Test-Path -LiteralPath $testRoot)){Assert-CanRemoveTestRoot $testRoot;Remove-Item -LiteralPath $testRoot -Recurse -Force}}
+[pscustomobject]@{ok=$true}
