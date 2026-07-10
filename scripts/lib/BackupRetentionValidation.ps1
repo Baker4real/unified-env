@@ -112,7 +112,7 @@ function Get-BackupRetentionRootSemanticProjection {
     param([object]$Root)
     return [pscustomobject][ordered]@{
         rootId=$Root.rootId;path=$Root.path;rule=$Root.rule;metadataStatus=$Root.metadataStatus;exists=$Root.exists
-        rootIsReparsePoint=$Root.rootIsReparsePoint;reparseAncestor=$Root.reparseAncestor;reparseTarget=$Root.reparseTarget
+        rootIsReparsePoint=$Root.rootIsReparsePoint;reparseAncestor=$Root.reparseAncestor;reparseTarget=$Root.reparseTarget;enumerationStarted=$Root.enumerationStarted
         enumerationCompleted=$Root.enumerationCompleted;errors=[object[]]@($Root.errors);directChildCount=$Root.directChildCount
         directChildren=[object[]]@($Root.directChildren);snapshotSha256=$Root.snapshotSha256;classificationCount=$Root.classificationCount
         classificationCounts=$Root.classificationCounts
@@ -161,6 +161,8 @@ function Compare-BackupRetentionEvaluation {
         @{name='protected';expected=@($LiveEvaluation.protected)},@{name='manualReview';expected=@($LiveEvaluation.manualReview)}
     )) { Compare-BackupRetentionPathCollection -Expected $pair.expected -Actual @($Document.($pair.name)) -Name $pair.name -Projection {param($x)Get-BackupRetentionItemSemanticProjection $x} }
     if((ConvertTo-BackupRetentionSemanticJson @($LiveEvaluation.unclassifiedCoverageGaps))-cne(ConvertTo-BackupRetentionSemanticJson @($Document.unclassifiedCoverageGaps))){throw 'unclassifiedCoverageGaps 与现场复算不一致。'}
+    if((ConvertTo-BackupRetentionSemanticJson @($LiveEvaluation.coverageNotes))-cne(ConvertTo-BackupRetentionSemanticJson @($Document.coverageNotes))){throw 'coverageNotes 与现场复算不一致。'}
+    if((ConvertTo-BackupRetentionSemanticJson @($LiveEvaluation.errors))-cne(ConvertTo-BackupRetentionSemanticJson @($Document.errors))){throw 'errors 与现场复算不一致。'}
     if($Document.coverageAccounted-cne$LiveEvaluation.coverageAccounted-or$Document.coverageComplete-cne$LiveEvaluation.coverageComplete){throw 'coverage 状态与现场复算不一致。'}
     return $true
 }
@@ -191,11 +193,13 @@ function Test-BackupRetentionDryRunDocument {
     Assert-BackupRetentionString $Document.policy.policyId 'policy.policyId';Assert-BackupRetentionInteger $Document.policy.policyVersion 'policy.policyVersion';Assert-BackupRetentionString $Document.policy.summary 'policy.summary'
     foreach($name in @('protectedRootsCannotBeDeleted','explicitAuthorizationRequired','applyMustRegenerateDryRun','applyMustCheckReparsePoints','applyMustUseAllowlist','strictTimestampRequired','runtimeSharedDirsExcluded','authAutosaveExcludedByDefault')){Assert-BackupRetentionBoolean $Document.policy.$name "policy.$name";if(-not$Document.policy.$name){throw "policy.$name 必须为 true。"}}
     if($Document.policy.policyId-cne$trusted.policyId-or$Document.policy.policyVersion-cne$trusted.policyVersion){throw 'policy 身份不受信任。'}
+    $canonicalPolicy=Get-BackupRetentionPolicyDocument -PolicyContext $trusted
+    if((ConvertTo-BackupRetentionSemanticJson $Document.policy)-cne(ConvertTo-BackupRetentionSemanticJson $canonicalPolicy)){throw 'policy 与 canonical policy document 不一致。'}
     foreach($declared in @($Document.declaredScanRoots)){Assert-BackupRetentionExactProperties $declared @('rootId','path','rule') 'declaredScanRoot';foreach($name in @('rootId','path','rule')){Assert-BackupRetentionString $declared.$name "declaredScanRoot.$name"}}
     foreach($root in @($Document.evaluatedRoots)){
         Assert-BackupRetentionExactProperties $root @('rootId','path','rule','metadataStatus','exists','rootIsReparsePoint','reparseAncestor','reparseTarget','enumerationStarted','enumerationCompleted','errors','directChildCount','directChildren','snapshotSha256','classificationCount','classificationCounts') 'evaluatedRoot'
-        foreach($name in @('rootId','path','rule','metadataStatus','enumerationStarted','snapshotSha256')){Assert-BackupRetentionString $root.$name "evaluatedRoot.$name"}
-        Assert-BackupRetentionNullableBoolean $root.exists 'evaluatedRoot.exists';Assert-BackupRetentionBoolean $root.rootIsReparsePoint 'evaluatedRoot.rootIsReparsePoint';Assert-BackupRetentionBoolean $root.enumerationCompleted 'evaluatedRoot.enumerationCompleted'
+        foreach($name in @('rootId','path','rule','metadataStatus','snapshotSha256')){Assert-BackupRetentionString $root.$name "evaluatedRoot.$name"}
+        Assert-BackupRetentionNullableBoolean $root.exists 'evaluatedRoot.exists';Assert-BackupRetentionBoolean $root.rootIsReparsePoint 'evaluatedRoot.rootIsReparsePoint';Assert-BackupRetentionBoolean $root.enumerationStarted 'evaluatedRoot.enumerationStarted';Assert-BackupRetentionBoolean $root.enumerationCompleted 'evaluatedRoot.enumerationCompleted'
         Assert-BackupRetentionNullableString $root.reparseAncestor 'evaluatedRoot.reparseAncestor';Assert-BackupRetentionNullableString $root.reparseTarget 'evaluatedRoot.reparseTarget';Assert-BackupRetentionStringArray ([object]$root.errors) 'evaluatedRoot.errors'
         foreach($name in @('directChildCount','classificationCount')){Assert-BackupRetentionInteger $root.$name "evaluatedRoot.$name"}
         Assert-BackupRetentionArray ([object]$root.directChildren) 'evaluatedRoot.directChildren'
@@ -265,6 +269,24 @@ function Read-BackupRetentionApplyGateSource {
     return [pscustomobject]@{jsonPath=$jsonPath;markdownPath=$markdownPath;sourceJsonSha256=$sha256;document=$document}
 }
 
+function Test-BackupRetentionDryRunFreshness {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][psobject]$Document,
+        [ValidateRange(1,24)][int]$MaxDryRunAgeHours=24,
+        [scriptblock]$NowProvider={ [datetimeoffset]::UtcNow }
+    )
+    Assert-BackupRetentionString (Assert-BackupRetentionProperty $Document 'generatedAtUtc') 'generatedAtUtc'
+    $generated=[datetimeoffset]::MinValue
+    if(-not[datetimeoffset]::TryParseExact($Document.generatedAtUtc,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal,[ref]$generated)){throw 'generatedAtUtc 必须是严格 ISO 8601 round-trip 字符串。'}
+    try{$nowValue=& $NowProvider}catch{throw "NowProvider 读取失败：$($_.Exception.Message)"}
+    if($nowValue-is[datetimeoffset]){$now=$nowValue.ToUniversalTime()}elseif($nowValue-is[datetime]){$now=[datetimeoffset]::new($nowValue.ToUniversalTime())}else{throw 'NowProvider 必须返回 DateTimeOffset 或 DateTime。'}
+    if($generated.UtcDateTime-gt$now.UtcDateTime){throw 'DryRunJson 生成时间来自未来。'}
+    $ageHours=($now.UtcDateTime-$generated.UtcDateTime).TotalHours
+    if($ageHours-gt$MaxDryRunAgeHours){throw "DryRunJson 已超过 $MaxDryRunAgeHours 小时。"}
+    return [pscustomobject]@{ageHours=$ageHours;validatedAtUtc=$now.ToString('o')}
+}
+
 function Invoke-BackupRetentionApplyFinalGate {
     [CmdletBinding()]
     param(
@@ -273,9 +295,11 @@ function Invoke-BackupRetentionApplyFinalGate {
         [Parameter(Mandatory)][string]$DryRunMarkdown,
         [Parameter(Mandatory)][string]$InitialSourceSha256,
         [Parameter(Mandatory)][string]$OutputDir,
+        [ValidateRange(1,24)][int]$MaxDryRunAgeHours=24,
         [switch]$UseAllDryRunCandidates,
         [AllowEmptyCollection()][string[]]$AllowPath=@(),
-        [scriptblock]$AfterCandidateCheckHook
+        [scriptblock]$AfterCandidateCheckHook,
+        [scriptblock]$NowProvider={ [datetimeoffset]::UtcNow }
     )
     if($InitialSourceSha256-notmatch'^[0-9a-f]{64}$'){throw 'InitialSourceSha256 必须是 lowercase SHA-256。'}
     $initialOutput=Assert-BackupRetentionDPath -Path $OutputDir -Name 'OutputDir'
@@ -287,9 +311,11 @@ function Invoke-BackupRetentionApplyFinalGate {
     foreach($candidate in $initialSelected){$stats=Assert-BackupRetentionCandidateLiveState -Candidate $candidate -TrustedPolicyContext $TrustedPolicyContext -LiveEvaluation $initialLive;$initialValidated.Add([pscustomobject]@{candidate=$candidate;currentStats=$stats})}
 
     if($null-eq$AfterCandidateCheckHook){
-        return [pscustomobject]@{sourceDocument=$initialSource.document;sourceJsonSha256=$initialSource.sourceJsonSha256;liveEvaluation=$initialLive;selectedCandidates=[object[]]$initialSelected;validatedCandidates=[object[]]$initialValidated.ToArray();outputDir=$initialOutput}
+        $freshness=Test-BackupRetentionDryRunFreshness -Document $initialSource.document -MaxDryRunAgeHours $MaxDryRunAgeHours -NowProvider $NowProvider
+        return [pscustomobject]@{sourceDocument=$initialSource.document;sourceJsonSha256=$initialSource.sourceJsonSha256;liveEvaluation=$initialLive;selectedCandidates=[object[]]$initialSelected;validatedCandidates=[object[]]$initialValidated.ToArray();outputDir=$initialOutput;finalAgeHours=$freshness.ageHours;validatedAtUtc=$freshness.validatedAtUtc}
     }
 
+    Test-BackupRetentionDryRunFreshness -Document $initialSource.document -MaxDryRunAgeHours $MaxDryRunAgeHours -NowProvider $NowProvider|Out-Null
     & $AfterCandidateCheckHook ([pscustomobject]@{dryRunJson=$initialSource.jsonPath;dryRunMarkdown=$initialSource.markdownPath;outputDir=$initialOutput;liveEvaluation=$initialLive;selectedCandidates=[object[]]$initialSelected})|Out-Null
 
     $finalOutput=Assert-BackupRetentionDPath -Path $initialOutput -Name 'OutputDir'
@@ -302,5 +328,6 @@ function Invoke-BackupRetentionApplyFinalGate {
     if($initialKeys.Count-ne$finalKeys.Count-or(Compare-Object -ReferenceObject $initialKeys -DifferenceObject $finalKeys).Count-ne0){throw 'candidate selection 在最终 gate 发生漂移。'}
     $validated=[Collections.Generic.List[object]]::new()
     foreach($candidate in $finalSelected){$stats=Assert-BackupRetentionCandidateLiveState -Candidate $candidate -TrustedPolicyContext $TrustedPolicyContext -LiveEvaluation $finalLive;$validated.Add([pscustomobject]@{candidate=$candidate;currentStats=$stats})}
-    return [pscustomobject]@{sourceDocument=$finalSource.document;sourceJsonSha256=$finalSource.sourceJsonSha256;liveEvaluation=$finalLive;selectedCandidates=[object[]]$finalSelected;validatedCandidates=[object[]]$validated.ToArray();outputDir=$finalOutput}
+    $freshness=Test-BackupRetentionDryRunFreshness -Document $finalSource.document -MaxDryRunAgeHours $MaxDryRunAgeHours -NowProvider $NowProvider
+    return [pscustomobject]@{sourceDocument=$finalSource.document;sourceJsonSha256=$finalSource.sourceJsonSha256;liveEvaluation=$finalLive;selectedCandidates=[object[]]$finalSelected;validatedCandidates=[object[]]$validated.ToArray();outputDir=$finalOutput;finalAgeHours=$freshness.ageHours;validatedAtUtc=$freshness.validatedAtUtc}
 }

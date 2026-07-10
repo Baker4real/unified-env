@@ -46,15 +46,10 @@ if(-not$pairValidation.ok){throw "DryRunJson 报告对校验失败：$($pairVali
 if($pairValidation.sourceJsonSha256-cne$sourceSha256){throw 'DryRunJson 报告对校验期间 JSON 发生漂移。'}
 if($dryRun.PSObject.Properties.Name-notcontains'generationId'-or$dryRun.generationId-cne$pairValidation.generationId){throw 'DryRunJson 报告对 generationId 不一致。'}
 
-# 4. freshness gate（严格不超过 24 小时且不得来自未来）。
+# 4. 固定 freshness policy 上限；此处只做快速失败，最终授权依据由 final gate 重新读取时钟。
 if($MaxDryRunAgeHours-lt1-or$MaxDryRunAgeHours-gt24){throw 'MaxDryRunAgeHours 必须在 1..24。'}
-Assert-BackupRetentionProperty $dryRun 'generatedAtUtc'|Out-Null;Assert-BackupRetentionString $dryRun.generatedAtUtc 'generatedAtUtc'
-$generated=[datetimeoffset]::MinValue
-if(-not[datetimeoffset]::TryParseExact($dryRun.generatedAtUtc,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal,[ref]$generated)){throw 'generatedAtUtc 必须是严格 ISO 8601 round-trip 字符串。'}
-$validationNow=(Get-Date).ToUniversalTime()
-if($generated.UtcDateTime-gt$validationNow){throw 'DryRunJson 生成时间来自未来。'}
-$age=($validationNow-$generated.UtcDateTime).TotalHours
-if($age-gt$MaxDryRunAgeHours){throw "DryRunJson 已超过 $MaxDryRunAgeHours 小时。"}
+# 早期 preflight 仅用于快速失败；manifest 年龄与授权依据仍只消费 final gate 的最终时钟读数。
+Test-BackupRetentionDryRunFreshness -Document $dryRun -MaxDryRunAgeHours $MaxDryRunAgeHours|Out-Null
 
 # 5. 正式入口只构造固定 production context。
 $context=New-BackupRetentionPolicyContext -ArtifactMode production -CodexRoot 'D:\Codex\.codex' -DDriveRoot 'D:\Codex' -RetainCount 5
@@ -64,7 +59,7 @@ if([string]::IsNullOrWhiteSpace($OutputDir)){$OutputDir="D:\Codex\projects\统�
 $OutputDir=Assert-BackupRetentionApplyEvidencePath -Path $OutputDir -Name 'OutputDir'
 
 # 7. 完整初检、candidate 当前校验与最终全门复算；正式入口不暴露 phase hook。
-$finalGate=Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $context -DryRunJson $DryRunJson -DryRunMarkdown $dryRunMarkdown -InitialSourceSha256 $sourceSha256 -OutputDir $OutputDir -UseAllDryRunCandidates:$UseAllDryRunCandidates -AllowPath $AllowPath
+$finalGate=Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $context -DryRunJson $DryRunJson -DryRunMarkdown $dryRunMarkdown -InitialSourceSha256 $sourceSha256 -OutputDir $OutputDir -MaxDryRunAgeHours $MaxDryRunAgeHours -UseAllDryRunCandidates:$UseAllDryRunCandidates -AllowPath $AllowPath
 $dryRun=$finalGate.sourceDocument;$sourceSha256=$finalGate.sourceJsonSha256;$live=$finalGate.liveEvaluation;$selected=@($finalGate.selectedCandidates);$OutputDir=$finalGate.outputDir
 
 # 8. manifest item 只消费最终 gate 返回的 candidate 与内容树指纹。
@@ -82,11 +77,11 @@ $manifest=[pscustomobject][ordered]@{
     generatedAtLocal=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz');generatedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
     applyManifestOnly=$true;readOnly=$true;deleteAllowed=$false;executionReady=$false
     selectionMode=if($UseAllDryRunCandidates){'all-dry-run-candidates'}else{'explicit-allow-paths'}
-    sourceDryRun=[pscustomobject][ordered]@{jsonPath=$DryRunJson;sourceJsonSha256=$sourceSha256;generatedAtUtc=$dryRun.generatedAtUtc;artifactType=$dryRun.artifactType;schemaVersion=$dryRun.schemaVersion;candidateCount=@($live.candidates).Count}
+    sourceDryRun=[pscustomobject][ordered]@{jsonPath=$DryRunJson;sourceJsonSha256=$sourceSha256;generatedAtUtc=$dryRun.generatedAtUtc;validatedAtUtc=$finalGate.validatedAtUtc;artifactType=$dryRun.artifactType;schemaVersion=$dryRun.schemaVersion;candidateCount=@($live.candidates).Count}
     trustedPolicyContext=$context
     rootSnapshots=[object[]]@($live.evaluatedRoots|ForEach-Object{[pscustomobject]@{rootId=$_.rootId;path=$_.path;exists=$_.exists;enumerationCompleted=$_.enumerationCompleted;directChildCount=$_.directChildCount;snapshotSha256=$_.snapshotSha256}})
     policy=[pscustomobject][ordered]@{summary='只读 apply manifest；不删除任何内容。';requiresFinalUserAuthorization=$true;stateFingerprintRequired=$true;reparsePointCheckRequired=$true;finalExecutionMustRevalidate=$true;futureApplyConfirmationPhrase="我确认删除 manifest $manifestId 中的 $($items.Count) 个已验证路径，预计释放 $([math]::Round($readyBytes/1MB,2)) MB"}
-    summary=[pscustomobject][ordered]@{sourceCandidateCount=@($live.candidates).Count;selectedCount=$items.Count;readyForFinalAuthorizationCount=$items.Count;blockedCount=0;readyBytes=$readyBytes;readyMb=[math]::Round($readyBytes/1MB,2);dryRunAgeHours=[math]::Round($age,2)}
+    summary=[pscustomobject][ordered]@{sourceCandidateCount=@($live.candidates).Count;selectedCount=$items.Count;readyForFinalAuthorizationCount=$items.Count;blockedCount=0;readyBytes=$readyBytes;readyMb=[math]::Round($readyBytes/1MB,2);dryRunAgeHours=[math]::Round($finalGate.finalAgeHours,2)}
     items=[object[]]@($items.ToArray()|Sort-Object groupKey,retainRank,path);blockedItems=[object[]]@()
 }
 

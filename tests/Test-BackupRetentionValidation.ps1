@@ -23,7 +23,7 @@ function New-TestDocument { param($Context,$Evaluation)
         generatedAtLocal=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'); generatedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
         dryRun=$true; readOnly=$true; deleteAllowed=$false; applySupported=$false; executionAllowed=$false
         CodexRoot=$Context.CodexRoot; DDriveRoot=$Context.DDriveRoot; retainCount=$Context.retainCount; policyId=$Context.policyId; policyVersion=$Context.policyVersion
-        policy=[pscustomobject][ordered]@{policyId=$Context.policyId;policyVersion=$Context.policyVersion;summary='fixture';protectedRootsCannotBeDeleted=$true;explicitAuthorizationRequired=$true;applyMustRegenerateDryRun=$true;applyMustCheckReparsePoints=$true;applyMustUseAllowlist=$true;strictTimestampRequired=$true;runtimeSharedDirsExcluded=$true;authAutosaveExcludedByDefault=$true}
+        policy=Get-BackupRetentionPolicyDocument -PolicyContext $Context
         declaredScanRoots=[object[]]$Evaluation.declaredScanRoots; evaluatedRoots=[object[]]$Evaluation.evaluatedRoots; coverageItems=[object[]]$Evaluation.coverageItems
         candidates=[object[]]$Evaluation.candidates; retainedItems=[object[]]$Evaluation.retainedItems; protected=[object[]]$Evaluation.protected; manualReview=[object[]]$Evaluation.manualReview
         unclassifiedCoverageGaps=[object[]]$Evaluation.unclassifiedCoverageGaps; coverageAccounted=[bool]$Evaluation.coverageAccounted; coverageComplete=[bool]$Evaluation.coverageComplete
@@ -62,7 +62,23 @@ try {
     $oldManifestJson=Join-Path $finalOutput 'backup-retention-apply-manifest.json';$oldManifestMarkdown=Join-Path $finalOutput 'BACKUP-RETENTION-APPLY-MANIFEST.md'
     [IO.File]::WriteAllText($oldManifestJson,'old-json',[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText($oldManifestMarkdown,'old-markdown',[Text.UTF8Encoding]::new($false))
     $noHookFinal=Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $context -DryRunJson $published.jsonPath -DryRunMarkdown $published.markdownPath -InitialSourceSha256 $initialSourceSha -OutputDir $finalOutput -UseAllDryRunCandidates
-    Assert-True(@($noHookFinal.validatedCandidates).Count-eq1-and$noHookFinal.validatedCandidates[0].currentStats.treeSha256-match'^[0-9a-f]{64}$')'无 hook 正式路径必须执行一次完整 gate 并返回 candidate tree digest'
+    Assert-True(@($noHookFinal.validatedCandidates).Count-eq1-and$noHookFinal.validatedCandidates[0].currentStats.treeSha256-match'^[0-9a-f]{64}$'-and$noHookFinal.finalAgeHours-ge0-and$noHookFinal.validatedAtUtc-is[string])'无 hook 正式路径必须执行一次完整 gate 并返回最终 freshness/tree digest'
+
+    $generatedAt=[datetimeoffset]::Parse($sourceDocument.generatedAtUtc,[Globalization.CultureInfo]::InvariantCulture)
+    $script:crossBoundaryClockCalls=0
+    $crossBoundaryClock={
+        $script:crossBoundaryClockCalls++
+        if($script:crossBoundaryClockCalls-eq1){return $script:generatedAt.AddHours(24).AddMinutes(-1)}
+        return $script:generatedAt.AddHours(24).AddSeconds(1)
+    }
+    $message=$null;try{Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $context -DryRunJson $published.jsonPath -DryRunMarkdown $published.markdownPath -InitialSourceSha256 $initialSourceSha -OutputDir $finalOutput -UseAllDryRunCandidates -AfterCandidateCheckHook {param($phase)} -NowProvider $crossBoundaryClock|Out-Null}catch{$message=$_.Exception.Message}
+    Assert-True($script:crossBoundaryClockCalls-eq2-and$message-like'*已超过*')'临界前开始、hook 后跨过 24h 必须由最终 freshness 拒绝'
+    Assert-True(([IO.File]::ReadAllText($oldManifestJson))-ceq'old-json'-and([IO.File]::ReadAllText($oldManifestMarkdown))-ceq'old-markdown')'freshness 跨界不得覆盖旧 manifest pair'
+
+    $rollbackClock={return $script:generatedAt.AddSeconds(-1)};$message=$null
+    try{Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $context -DryRunJson $published.jsonPath -DryRunMarkdown $published.markdownPath -InitialSourceSha256 $initialSourceSha -OutputDir $finalOutput -UseAllDryRunCandidates -NowProvider $rollbackClock|Out-Null}catch{$message=$_.Exception.Message}
+    Assert-True($message-like'*来自未来*')'时钟回拨到 generatedAt 之前必须由最终 freshness 拒绝'
+    Assert-True(([IO.File]::ReadAllText($oldManifestJson))-ceq'old-json'-and([IO.File]::ReadAllText($oldManifestMarkdown))-ceq'old-markdown')'时钟回拨不得覆盖旧 manifest pair'
     $runFinalHookCase={param([scriptblock]$Hook,[string]$Label)
         $message=$null;try{Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $context -DryRunJson $published.jsonPath -DryRunMarkdown $published.markdownPath -InitialSourceSha256 $initialSourceSha -OutputDir $finalOutput -UseAllDryRunCandidates -AfterCandidateCheckHook $Hook|Out-Null}catch{$message=$_.Exception.Message}
         Assert-True(-not[string]::IsNullOrWhiteSpace($message))"$Label 必须在最终 gate 失败关闭"
@@ -72,6 +88,8 @@ try {
     try {
         & $runFinalHookCase {param($phase)[IO.File]::WriteAllText($script:candidateContentPath,'EVIL',[Text.UTF8Encoding]::new($false));[IO.File]::SetLastWriteTimeUtc($script:candidateContentPath,$script:candidateContentMtime);[pscustomobject]@{skipValidation=$true}} 'final gate candidate 同尺寸同mtime内容漂移且 hook 请求 skip'
     } finally {[IO.File]::WriteAllText($candidateContentPath,'AAAA',[Text.UTF8Encoding]::new($false));[IO.File]::SetLastWriteTimeUtc($candidateContentPath,$candidateContentMtime)}
+
+    try{&$runFinalHookCase {param($phase)Set-Content -LiteralPath "${script:candidateContentPath}:audit" -Value 'named-stream' -NoNewline} 'hook 后 candidate 新增 ADS'}finally{Remove-Item -LiteralPath $candidateContentPath -Stream 'audit' -Force -ErrorAction SilentlyContinue;[IO.File]::SetLastWriteTimeUtc($candidateContentPath,$candidateContentMtime)}
 
     $hookSibling=Join-Path $provider 'hook-sibling'
     try{&$runFinalHookCase {param($phase)New-Item -ItemType Directory -Path $script:hookSibling|Out-Null} 'hook 后新增 sibling'}finally{if(Test-Path -LiteralPath $hookSibling){Remove-Item -LiteralPath $hookSibling -Recurse -Force}}
@@ -128,7 +146,10 @@ try {
         @{n='blocksCoverage';m={param($d)$d.candidates[0].blocksCoverage=$true}},
         @{n='顶层 extra property';m={param($d)$d|Add-Member -NotePropertyName smuggled -NotePropertyValue $true}},
         @{n='policy extra property';m={param($d)$d.policy|Add-Member -NotePropertyName smuggled -NotePropertyValue $true}},
+        @{n='policy summary 伪造';m={param($d)$d.policy.summary='forged human text'}},
         @{n='缺失 nullable reparseTarget';m={param($d)$d.candidates[0].PSObject.Properties.Remove('reparseTarget')}},
+        @{n='coverageNotes 伪造';m={param($d)$d.coverageNotes[0]='forged coverage note'}},
+        @{n='evaluatedRoot enumerationStarted 伪造';m={param($d)$d.evaluatedRoots[0].enumerationStarted='2000-01-01T00:00:00.0000000Z'}},
         @{n='summary candidateCount 篡改';m={param($d)$d.summary.candidateCount=999}},
         @{n='summary candidateBytes 篡改';m={param($d)$d.summary.candidateBytes=999999999}}
     )){
