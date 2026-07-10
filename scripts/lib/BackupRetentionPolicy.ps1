@@ -352,11 +352,16 @@ function New-BackupRetentionCoverageItem {
         [string]$ProjectRoot = '', [string]$BackupType = '',
         [AllowNull()][object]$Timestamp = $null, [int]$RetainRank = 0,
         [string]$Risk = '低', [AllowNull()][string]$DelegatedScanRoot = $null,
-        [bool]$IsReparsePoint = $false, [AllowNull()][string]$ReparseTarget = $null,
+        [AllowNull()][object]$IsReparsePoint = $false, [AllowNull()][string]$ReparseTarget = $null,
         [AllowNull()][string]$ReparseAncestor = $null,
-        [AllowNull()][object]$Stats = $null, [string]$CoverageOrigin = 'scan'
+        [AllowNull()][object]$Stats = $null, [string]$CoverageOrigin = 'scan',
+        [ValidateSet('ok','reparse','error')][string]$MetadataStatus = 'ok',
+        [AllowEmptyCollection()][object[]]$Errors = @()
     )
 
+    $canonicalReparseAncestor = if ([string]::IsNullOrWhiteSpace($ReparseAncestor)) { $null } else { $ReparseAncestor }
+    $canonicalReparseTarget = if ([string]::IsNullOrWhiteSpace($ReparseTarget)) { $null } else { $ReparseTarget }
+    $blockedBy = if ($Disposition -ceq 'candidate') { @('必须重新生成最新 dry-run', '必须由用户确认 manifest 和路径集合', 'apply 阶段必须二次检查状态指纹') } elseif ($Manual) { @('必须人工确认路径用途和 owner') } else { @() }
     return [pscustomobject][ordered]@{
         path = Get-BackupRetentionCanonicalPath -Path $Path
         scanRoot = if ([string]::IsNullOrWhiteSpace($ScanRoot)) { $null } else { Get-BackupRetentionCanonicalPath -Path $ScanRoot }
@@ -376,21 +381,23 @@ function New-BackupRetentionCoverageItem {
         timestampSource = if ($null -eq $Timestamp) { $null } else { $Timestamp.source }
         retainRank = if ($RetainRank -gt 0) { $RetainRank } else { $null }
         risk = $Risk
+        metadataStatus = $MetadataStatus
+        errors = [object[]]$Errors
         delegatedScanRoot = if ([string]::IsNullOrWhiteSpace($DelegatedScanRoot)) { $null } else { Get-BackupRetentionCanonicalPath -Path $DelegatedScanRoot }
         isReparsePoint = $IsReparsePoint
-        reparseTarget = $ReparseTarget
-        reparseAncestor = $ReparseAncestor
+        reparseTarget = $canonicalReparseTarget
+        reparseAncestor = $canonicalReparseAncestor
         reparse = [pscustomobject]@{
             isReparsePoint = $IsReparsePoint
-            hasReparsePoint = $IsReparsePoint
-            firstReparsePoint = if (-not [string]::IsNullOrWhiteSpace($ReparseAncestor)) { $ReparseAncestor } elseif ($IsReparsePoint) { Get-BackupRetentionCanonicalPath -Path $Path } else { $null }
-            target = $ReparseTarget
+            hasReparsePoint = $IsReparsePoint -is [bool] -and $IsReparsePoint
+            firstReparsePoint = if ($null -ne $canonicalReparseAncestor) { $canonicalReparseAncestor } elseif ($IsReparsePoint) { Get-BackupRetentionCanonicalPath -Path $Path } else { $null }
+            target = $canonicalReparseTarget
         }
         automaticCandidate = $Disposition -ceq 'candidate'
         selectedByRetention = $Disposition -ceq 'candidate'
         applyEligible = $false
         requiresExplicitAuthorization = $Disposition -ceq 'candidate' -or $Manual
-        blockedBy = if ($Disposition -ceq 'candidate') { @('必须重新生成最新 dry-run', '必须由用户确认 manifest 和路径集合', 'apply 阶段必须二次检查状态指纹') } elseif ($Manual) { @('必须人工确认路径用途和 owner') } else { @() }
+        blockedBy = [object[]]$blockedBy
         stats = $Stats
     }
 }
@@ -495,13 +502,21 @@ function Get-BackupRetentionGuardrailItems {
         } else {
             [pscustomobject]@{ exists = if ($chain.exists -is [bool]) { $chain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($chain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($chain.status -ceq 'error') { 1 } else { 0 } }
         }
-        $risk = if ($definition.Manual) { '高' } else { '低' }
-        $items.Add((New-BackupRetentionCoverageItem -Path $path -ScanRoot $null -ItemType 'policy-path' -Disposition 'protected' -Reason $definition.Reason -Manual $definition.Manual -Blocks $false -Risk $risk -Stats $stats -CoverageOrigin 'policy-guardrail'))
+        $metadataFailed = $chain.status -cne 'ok'
+        $manual = [bool]$definition.Manual -or $metadataFailed
+        $risk = if ($manual) { '高' } else { '低' }
+        $errors = if ($chain.status -ceq 'reparse') { @("protected path ancestor is reparse point: $($chain.reparseAncestor)") } elseif ($chain.status -ceq 'error') { @([string]$chain.error) } else { @() }
+        $reason = if ($metadataFailed) { "$($definition.Reason) reparse metadata 不可信，失败关闭。" } else { $definition.Reason }
+        $isReparse = if ($chain.status -ceq 'reparse') { $true } elseif ($chain.status -ceq 'error') { $null } else { $false }
+        $items.Add((New-BackupRetentionCoverageItem -Path $path -ScanRoot $null -ItemType 'policy-path' -Disposition 'protected' -Reason $reason -Manual $manual -Blocks $metadataFailed -Risk $risk -Stats $stats -CoverageOrigin 'policy-guardrail' -MetadataStatus $chain.status -IsReparsePoint $isReparse -ReparseAncestor $chain.reparseAncestor -ReparseTarget $chain.reparseTarget -Errors $errors))
     }
     $legacy = Join-Path $PolicyContext.DDriveRoot '.codex-c-backups'
     $legacyChain = Resolve-BackupRetentionPathChainState -Path $legacy -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver
     $legacyStats = if ($legacyChain.status -ceq 'ok') { Get-BackupRetentionSafeStats $legacy } else { [pscustomobject]@{ exists = if ($legacyChain.exists -is [bool]) { $legacyChain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($legacyChain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($legacyChain.status -ceq 'error') { 1 } else { 0 } } }
-    $items.Add((New-BackupRetentionCoverageItem -Path $legacy -ScanRoot $null -ItemType 'policy-path' -Disposition 'protected' -Reason '历史迁移备份可能有审计价值，仅人工审查。' -Manual $true -Blocks $false -Risk '高' -Stats $legacyStats -CoverageOrigin 'policy-guardrail'))
+    $legacyFailed = $legacyChain.status -cne 'ok'
+    $legacyErrors = if ($legacyChain.status -ceq 'reparse') { @("protected path ancestor is reparse point: $($legacyChain.reparseAncestor)") } elseif ($legacyChain.status -ceq 'error') { @([string]$legacyChain.error) } else { @() }
+    $legacyIsReparse = if ($legacyChain.status -ceq 'reparse') { $true } elseif ($legacyChain.status -ceq 'error') { $null } else { $false }
+    $items.Add((New-BackupRetentionCoverageItem -Path $legacy -ScanRoot $null -ItemType 'policy-path' -Disposition 'protected' -Reason '历史迁移备份可能有审计价值，仅人工审查。' -Manual $true -Blocks $legacyFailed -Risk '高' -Stats $legacyStats -CoverageOrigin 'policy-guardrail' -MetadataStatus $legacyChain.status -IsReparsePoint $legacyIsReparse -ReparseAncestor $legacyChain.reparseAncestor -ReparseTarget $legacyChain.reparseTarget -Errors $legacyErrors))
     return [object[]]$items.ToArray()
 }
 
@@ -528,11 +543,12 @@ function Invoke-BackupRetentionEvaluation {
     foreach ($root in $evaluated) {
         if (-not $root.enumerationCompleted -or @($root.errors).Count -gt 0) {
             $rootReason = if ($root.rootIsReparsePoint) { '声明扫描根是 reparse point，覆盖失败关闭。' } else { '声明扫描根枚举未完成，覆盖失败关闭。' }
-            $items.Add((New-BackupRetentionCoverageItem -Path $root.path -ScanRoot $null -ItemType 'scan-root' -Disposition 'gap' -Reason $rootReason -Manual $true -Blocks $true -Risk '高' -IsReparsePoint ([bool]$root.rootIsReparsePoint) -ReparseAncestor $root.reparseAncestor -ReparseTarget $root.reparseTarget -CoverageOrigin 'scan-root-error'))
+            $rootItemIsReparse = if ($root.metadataStatus -ceq 'error') { $null } else { [bool]$root.rootIsReparsePoint }
+            $items.Add((New-BackupRetentionCoverageItem -Path $root.path -ScanRoot $null -ItemType 'scan-root' -Disposition 'gap' -Reason $rootReason -Manual $true -Blocks $true -Risk '高' -IsReparsePoint $rootItemIsReparse -ReparseAncestor $root.reparseAncestor -ReparseTarget $root.reparseTarget -CoverageOrigin 'scan-root-error' -MetadataStatus $root.metadataStatus -Errors @($root.errors)))
         }
         foreach ($child in @($root.directChildren)) {
             if ($child.isReparsePoint) {
-                $items.Add((New-BackupRetentionCoverageItem -Path $child.path -ScanRoot $root.path -ItemType $child.itemType -Disposition 'gap' -Reason '直接子项是 reparse point，不能进入保留规则。' -Manual $true -Blocks $true -Risk '高' -IsReparsePoint $true -ReparseAncestor $child.path -ReparseTarget $child.reparseTarget))
+                $items.Add((New-BackupRetentionCoverageItem -Path $child.path -ScanRoot $root.path -ItemType $child.itemType -Disposition 'gap' -Reason '直接子项是 reparse point，不能进入保留规则。' -Manual $true -Blocks $true -Risk '高' -IsReparsePoint $true -ReparseAncestor $child.path -ReparseTarget $child.reparseTarget -MetadataStatus 'reparse' -Errors @("direct child is reparse point: $($child.path)")))
                 continue
             }
 
@@ -594,7 +610,8 @@ function Invoke-BackupRetentionEvaluation {
             $chain = Resolve-BackupRetentionPathChainState -Path $record.child.path -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver
             if ($chain.status -cne 'ok') {
                 $reason = if ($chain.status -ceq 'reparse') { '候选/保留路径在统计前的完整父链命中 reparse point。' } else { "候选/保留路径 reparse metadata 读取失败：$($chain.error)" }
-                $items.Add((New-BackupRetentionCoverageItem -Path $record.child.path -ScanRoot $record.root.path -ItemType $record.child.itemType -Disposition 'gap' -Reason $reason -Manual $true -Blocks $true -Risk '高' -GroupKey $record.groupKey -ProjectRoot $record.projectRoot -BackupType $record.backupType -Timestamp $record.timestamp -RetainRank $rank -IsReparsePoint ($chain.status -ceq 'reparse') -ReparseAncestor $chain.reparseAncestor -ReparseTarget $chain.reparseTarget))
+                $candidateIsReparse = if ($chain.status -ceq 'reparse') { $true } else { $null }
+                $items.Add((New-BackupRetentionCoverageItem -Path $record.child.path -ScanRoot $record.root.path -ItemType $record.child.itemType -Disposition 'gap' -Reason $reason -Manual $true -Blocks $true -Risk '高' -GroupKey $record.groupKey -ProjectRoot $record.projectRoot -BackupType $record.backupType -Timestamp $record.timestamp -RetainRank $rank -IsReparsePoint $candidateIsReparse -ReparseAncestor $chain.reparseAncestor -ReparseTarget $chain.reparseTarget -MetadataStatus $chain.status -Errors @($reason)))
                 continue
             }
             $stats = Get-BackupRetentionSafeStats -Path $record.child.path

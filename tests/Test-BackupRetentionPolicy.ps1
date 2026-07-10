@@ -34,12 +34,17 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $libraryPath = Join-Path $projectRoot 'scripts\lib\BackupRetentionPolicy.ps1'
 $testRoot = Join-Path $projectRoot 'reports\backup-retention-policy-test'
 $gsdJunction = Join-Path $testRoot '.gsd'
+$skillsJunction = Join-Path $testRoot '.codex\skills'
 
 if (Test-Path -LiteralPath $testRoot) {
     Assert-CanRemoveBackupRetentionPolicyTestRoot -Path $testRoot
     if (Test-Path -LiteralPath $gsdJunction) {
         $staleGsd = Get-Item -LiteralPath $gsdJunction -Force
         if (($staleGsd.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Remove-Item -LiteralPath $gsdJunction -Force }
+    }
+    if (Test-Path -LiteralPath $skillsJunction) {
+        $staleSkills = Get-Item -LiteralPath $skillsJunction -Force
+        if (($staleSkills.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Remove-Item -LiteralPath $skillsJunction -Force }
     }
     Remove-Item -LiteralPath $testRoot -Recurse -Force
 }
@@ -85,6 +90,9 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $junctionReplicator $name) | Out-Null
     }
     New-Item -ItemType Junction -Path $gsdJunction -Target $junctionTarget | Out-Null
+    $skillsTarget = Join-Path $testRoot 'skills-junction-target'
+    New-Item -ItemType Directory -Force -Path $skillsTarget | Out-Null
+    New-Item -ItemType Junction -Path $skillsJunction -Target $skillsTarget | Out-Null
 
     $context = New-BackupRetentionPolicyContext `
         -ArtifactMode test `
@@ -129,6 +137,10 @@ try {
     Assert-True (@($evaluation.coverageItems | Where-Object { $_.path -ieq $gsdRoot -and $_.coverageOrigin -ceq 'scan-root-error' -and $_.blocksCoverage }).Count -eq 1) '中间 junction 必须 root gap+manual+blocks'
     Assert-True (@($evaluation.candidates | Where-Object scanRoot -ieq $gsdRoot).Count -eq 0) '中间 junction 扫描根必须 0 candidate'
 
+    $protectedReparse = @($evaluation.protected | Where-Object path -ieq $skillsJunction)[0]
+    Assert-True ($protectedReparse.metadataStatus -ceq 'reparse' -and $protectedReparse.isReparsePoint -and $protectedReparse.reparseAncestor -ieq $skillsJunction -and -not [string]::IsNullOrWhiteSpace([string]$protectedReparse.reparseTarget)) 'protected reparse 必须投影 canonical metadata'
+    Assert-True ($protectedReparse.requiresManualReview -and $protectedReparse.risk -ceq '高' -and $protectedReparse.blocksCoverage -and @($protectedReparse.errors).Count -gt 0 -and $protectedReparse.stats.reparsePointsSkipped -eq 1) 'protected reparse 必须 manual+高风险+blocks+errors，且与 stats 一致'
+
     $rootSnapshots = @($evaluation.evaluatedRoots)
     foreach ($root in $rootSnapshots) {
         Assert-True ($null -ne $root.enumerationStarted) '根快照必须记录 enumerationStarted'
@@ -155,43 +167,70 @@ try {
     Assert-True ($retained.Count -eq 5) '最新 5 个 provider-sync 必须为 retained'
     Assert-True ($candidate.Count -eq 1) '第 6 个 provider-sync 必须为 candidate'
 
-    $lateCandidatePath = $candidate[0].path
+    $lateScopeRoot = Join-Path $testRoot 'late-scope'
+    $lateProviderRoot = Join-Path $lateScopeRoot '.codex\backups_state\provider-sync'
+    New-Item -ItemType Directory -Force -Path $lateProviderRoot | Out-Null
+    foreach ($name in @('20260701T000006Z','20260701T000005Z','20260701T000004Z','20260701T000003Z','20260701T000002Z','20260701T000001Z')) {
+        New-Item -ItemType Directory -Path (Join-Path $lateProviderRoot $name) | Out-Null
+    }
+    $lateContext = New-BackupRetentionPolicyContext -ArtifactMode test -CodexRoot (Join-Path $lateScopeRoot '.codex') -DDriveRoot $lateScopeRoot
+    $script:LateCandidatePath = Join-Path $lateProviderRoot '20260701T000001Z'
     $lateReparseResolver = {
         param([string]$Path, [string]$TrustedRoot)
-        if ($Path -ieq $lateCandidatePath) {
+        if ($Path -ieq $script:LateCandidatePath) {
             return [pscustomobject]@{ status = 'reparse'; error = $null; exists = $true; isReparsePoint = $true; reparseAncestor = (Split-Path -Parent $Path); reparseTarget = 'D:\Elsewhere' }
         }
         Get-BackupRetentionPathChainState -Path $Path -TrustedRoot $TrustedRoot
-    }.GetNewClosure()
-    $lateEvaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context -PathChainResolver $lateReparseResolver
-    Assert-True (@($lateEvaluation.candidates | Where-Object path -ieq $lateCandidatePath).Count -eq 0) '候选在根枚举后出现祖先 junction 时必须从 candidate 移除'
-    Assert-True (@($lateEvaluation.coverageItems | Where-Object { $_.path -ieq $lateCandidatePath -and $_.coverageDisposition -ceq 'gap' -and $_.blocksCoverage }).Count -eq 1) '候选祖先 junction 必须 gap+blocks'
+    }
+    $lateEvaluation = Invoke-BackupRetentionEvaluation -PolicyContext $lateContext -PathChainResolver $lateReparseResolver
+    $lateProviderState = @($lateEvaluation.evaluatedRoots | Where-Object path -ieq $lateProviderRoot)[0]
+    Assert-True ($lateProviderState.enumerationCompleted -and $lateProviderState.directChildCount -eq 6) 'late resolver 不得让 providerRoot snapshot 失败'
+    Assert-True (@($lateEvaluation.evaluatedRoots | Where-Object { $_.path -ine $lateProviderRoot -and -not $_.enumerationCompleted }).Count -eq 0) 'late resolver 的非目标 roots 必须全部成功'
+    Assert-True (@($lateEvaluation.coverageItems | Where-Object scanRoot -ieq $lateProviderRoot).Count -eq 6) 'providerRoot 必须保留恰好 6 个 coverageItems'
+    Assert-True (@($lateEvaluation.candidates).Count -eq 0 -and @($lateEvaluation.retainedItems | Where-Object scanRoot -ieq $lateProviderRoot).Count -eq 5) '应只把最旧 candidate 降级，其余 5 项保留'
+    Assert-True (@($lateEvaluation.coverageItems | Where-Object { $_.path -ieq $script:LateCandidatePath -and $_.coverageDisposition -ceq 'gap' -and $_.blocksCoverage }).Count -eq 1 -and -not $lateEvaluation.coverageComplete) '候选祖先 junction 必须成为唯一目标 gap 并令 coverageComplete=false'
+    Assert-True (@($lateEvaluation.coverageItems | Where-Object coverageDisposition -ceq 'gap').Count -eq 1) 'late evaluation 中必须恰好只有目标旧 candidate 一个 gap'
 
     $metadataFailureResolver = {
         param([string]$Path, [string]$TrustedRoot)
-        if ($Path -ieq $lateCandidatePath) { return [pscustomobject]@{ status = 'error'; error = 'fixture metadata failure'; exists = $true; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null } }
+        if ($Path -ieq $script:LateCandidatePath) { return [pscustomobject]@{ status = 'error'; error = 'fixture metadata failure'; exists = $true; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null } }
         Get-BackupRetentionPathChainState -Path $Path -TrustedRoot $TrustedRoot
-    }.GetNewClosure()
-    $metadataFailureEvaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context -PathChainResolver $metadataFailureResolver
-    Assert-True (@($metadataFailureEvaluation.candidates | Where-Object path -ieq $lateCandidatePath).Count -eq 0) '候选路径 reparse metadata 失败必须失败关闭'
+    }
+    $metadataFailureEvaluation = Invoke-BackupRetentionEvaluation -PolicyContext $lateContext -PathChainResolver $metadataFailureResolver
+    Assert-True (@($metadataFailureEvaluation.candidates | Where-Object path -ieq $script:LateCandidatePath).Count -eq 0) '候选路径 reparse metadata 失败必须失败关闭'
 
     $invalidMetadataResolver = {
         param([string]$Path, [string]$TrustedRoot)
-        if ($Path -ieq $lateCandidatePath) { return [pscustomobject]@{ status = 'ok'; error = $null; exists = 'false'; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null } }
+        if ($Path -ieq $script:LateCandidatePath) { return [pscustomobject]@{ status = 'ok'; error = $null; exists = 'false'; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null } }
         Get-BackupRetentionPathChainState -Path $Path -TrustedRoot $TrustedRoot
-    }.GetNewClosure()
-    $invalidMetadataEvaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context -PathChainResolver $invalidMetadataResolver
-    Assert-True (@($invalidMetadataEvaluation.candidates | Where-Object path -ieq $lateCandidatePath).Count -eq 0) '候选路径 metadata 宽松类型不得绕过 fail-closed 门'
+    }
+    $invalidMetadataEvaluation = Invoke-BackupRetentionEvaluation -PolicyContext $lateContext -PathChainResolver $invalidMetadataResolver
+    Assert-True (@($invalidMetadataEvaluation.candidates | Where-Object path -ieq $script:LateCandidatePath).Count -eq 0) '候选路径 metadata 宽松类型不得绕过 fail-closed 门'
 
     $rootMetadataFailureResolver = {
         param([string]$Path, [string]$TrustedRoot)
-        if ($Path -ieq $providerRoot) { return [pscustomobject]@{ status = 'error'; error = 'fixture root metadata failure'; exists = $null; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null } }
+        if ($Path -ieq $lateProviderRoot) { return [pscustomobject]@{ status = 'error'; error = 'fixture root metadata failure'; exists = $null; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null } }
         Get-BackupRetentionPathChainState -Path $Path -TrustedRoot $TrustedRoot
-    }.GetNewClosure()
-    $rootMetadataFailureEvaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context -PathChainResolver $rootMetadataFailureResolver
-    $failedProviderRoot = @($rootMetadataFailureEvaluation.evaluatedRoots | Where-Object path -ieq $providerRoot)[0]
+    }
+    $rootMetadataFailureEvaluation = Invoke-BackupRetentionEvaluation -PolicyContext $lateContext -PathChainResolver $rootMetadataFailureResolver
+    $failedProviderRoot = @($rootMetadataFailureEvaluation.evaluatedRoots | Where-Object path -ieq $lateProviderRoot)[0]
     Assert-True ($failedProviderRoot.metadataStatus -ceq 'error' -and -not $failedProviderRoot.enumerationCompleted -and $null -eq $failedProviderRoot.exists) '声明根 reparse metadata 失败时必须保留 unknown exists 并停止枚举'
-    Assert-True (@($rootMetadataFailureEvaluation.candidates | Where-Object scanRoot -ieq $providerRoot).Count -eq 0) '声明根 metadata 失败后必须 0 candidate'
+    Assert-True (@($rootMetadataFailureEvaluation.candidates | Where-Object scanRoot -ieq $lateProviderRoot).Count -eq 0) '声明根 metadata 失败后必须 0 candidate'
+
+    $script:GuardrailErrorPath = Join-Path $fixtureCodexRoot 'plugins\cache'
+    $script:GuardrailNullPath = Join-Path $fixtureCodexRoot 'account_backup'
+    $guardrailFailureResolver = {
+        param([string]$Path, [string]$TrustedRoot)
+        if ($Path -ieq $script:GuardrailErrorPath) { return [pscustomobject]@{ status = 'error'; error = 'fixture protected metadata failure'; exists = $null; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null } }
+        if ($Path -ieq $script:GuardrailNullPath) { return $null }
+        Get-BackupRetentionPathChainState -Path $Path -TrustedRoot $TrustedRoot
+    }
+    $guardrailFailureEvaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context -PathChainResolver $guardrailFailureResolver
+    foreach ($guardrailPath in @($script:GuardrailErrorPath, $script:GuardrailNullPath)) {
+        $protectedFailure = @($guardrailFailureEvaluation.protected | Where-Object path -ieq $guardrailPath)[0]
+        Assert-True ($protectedFailure.metadataStatus -ceq 'error' -and $null -eq $protectedFailure.isReparsePoint -and $null -eq $protectedFailure.reparseAncestor -and $null -eq $protectedFailure.reparseTarget -and @($protectedFailure.errors).Count -gt 0) "protected metadata error/null 必须 canonical 投影：$guardrailPath"
+        Assert-True ($protectedFailure.requiresManualReview -and $protectedFailure.risk -ceq '高' -and $protectedFailure.blocksCoverage -and $protectedFailure.stats.inaccessibleItems -eq 1) "protected metadata error/null 必须 manual+高风险+blocks，且与 stats 一致：$guardrailPath"
+    }
 
     $parentRoot = Join-Path $fixtureCodexRoot 'backups_state'
     $delegated = @($evaluation.coverageItems | Where-Object {
@@ -252,6 +291,10 @@ try {
         if (Test-Path -LiteralPath $gsdJunction) {
             $gsdItem = Get-Item -LiteralPath $gsdJunction -Force
             if (($gsdItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Remove-Item -LiteralPath $gsdJunction -Force }
+        }
+        if (Test-Path -LiteralPath $skillsJunction) {
+            $skillsItem = Get-Item -LiteralPath $skillsJunction -Force
+            if (($skillsItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Remove-Item -LiteralPath $skillsJunction -Force }
         }
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
