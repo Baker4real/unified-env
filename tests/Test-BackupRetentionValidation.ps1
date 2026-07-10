@@ -18,9 +18,10 @@ function Assert-CanRemoveFixture { param([string]$Path)
 }
 function New-TestDocument { param($Context,$Evaluation)
     $candidateBytes=[int64](($Evaluation.candidates|ForEach-Object { if ($null-ne$_.stats){[int64]$_.stats.bytes}else{0}}|Measure-Object -Sum).Sum)
+    $generatedAt=[datetimeoffset]::Now
     $doc=[pscustomobject][ordered]@{
         artifactType='env-governance.backup-retention-dry-run'; schemaVersion=2; artifactMode=$Context.artifactMode
-        generatedAtLocal=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'); generatedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
+        generatedAtLocal=$generatedAt.ToString('o',[Globalization.CultureInfo]::InvariantCulture); generatedAtUtc=$generatedAt.ToUniversalTime().ToString('o',[Globalization.CultureInfo]::InvariantCulture)
         dryRun=$true; readOnly=$true; deleteAllowed=$false; applySupported=$false; executionAllowed=$false
         CodexRoot=$Context.CodexRoot; DDriveRoot=$Context.DDriveRoot; retainCount=$Context.retainCount; policyId=$Context.policyId; policyVersion=$Context.policyVersion
         policy=Get-BackupRetentionPolicyDocument -PolicyContext $Context

@@ -79,12 +79,13 @@ $summary = [pscustomobject][ordered]@{
     manualByBucket = @($evaluation.manualReview | Group-Object bucket | ForEach-Object { [pscustomobject]@{ bucket = $_.Name; count = $_.Count } })
 }
 
+$generatedAt = [datetimeoffset]::Now
 $document = [pscustomobject][ordered]@{
     artifactType = 'env-governance.backup-retention-dry-run'
     schemaVersion = 2
     artifactMode = $context.artifactMode
-    generatedAtLocal = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
-    generatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    generatedAtLocal = $generatedAt.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    generatedAtUtc = $generatedAt.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture)
     dryRun = $true
     readOnly = $true
     deleteAllowed = $false

@@ -107,6 +107,17 @@ function Assert-BackupRetentionSummarySchema {
     foreach($name in @('candidateMb','manualReviewMb')){Assert-BackupRetentionNumber $Summary.$name "$Scope.$name"}
     foreach($name in @('byBucket','manualByBucket')){Assert-BackupRetentionArray ([object]$Summary.$name) "$Scope.$name";foreach($entry in @($Summary.$name)){Assert-BackupRetentionExactProperties $entry @('bucket','count') "$Scope.$name[]";Assert-BackupRetentionString $entry.bucket "$Scope.$name[].bucket" -AllowEmpty;Assert-BackupRetentionInteger $entry.count "$Scope.$name[].count"}}
 }
+function Assert-BackupRetentionGeneratedAtConsistency {
+    param([Parameter(Mandatory)][psobject]$Document)
+    foreach($name in @('generatedAtLocal','generatedAtUtc')){Assert-BackupRetentionString (Assert-BackupRetentionProperty $Document $name) $name}
+    if($Document.generatedAtLocal-notmatch'(?:Z|[+-]\d{2}:\d{2})$'){throw 'generatedAtLocal 必须包含明确 UTC offset。'}
+    if($Document.generatedAtUtc-notmatch'(?:Z|[+-]\d{2}:\d{2})$'){throw 'generatedAtUtc 必须包含明确 UTC offset。'}
+    $local=[datetimeoffset]::MinValue;$utc=[datetimeoffset]::MinValue
+    if(-not[datetimeoffset]::TryParseExact($Document.generatedAtLocal,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$local)){throw 'generatedAtLocal 必须是严格 round-trip DateTimeOffset。'}
+    if(-not[datetimeoffset]::TryParseExact($Document.generatedAtUtc,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$utc)){throw 'generatedAtUtc 必须是严格 round-trip DateTimeOffset。'}
+    if($utc.Offset-ne[TimeSpan]::Zero){throw 'generatedAtUtc 必须使用零 UTC offset。'}
+    if($local.UtcDateTime.Ticks-ne$utc.UtcDateTime.Ticks){throw 'generatedAtLocal 与 generatedAtUtc 必须表示同一 instant。'}
+}
 
 function Get-BackupRetentionRootSemanticProjection {
     param([object]$Root)
@@ -176,6 +187,7 @@ function Test-BackupRetentionDryRunDocument {
     Assert-BackupRetentionString $Document.artifactType 'artifactType'; if($Document.artifactType-cne'env-governance.backup-retention-dry-run'){throw 'artifactType 不受支持。'}
     Assert-BackupRetentionInteger $Document.schemaVersion 'schemaVersion';if([int64]$Document.schemaVersion-ne2){throw 'schemaVersion 必须严格等于 2。'}
     foreach($name in @('artifactMode','generatedAtLocal','generatedAtUtc','CodexRoot','DDriveRoot','policyId','generationId')){Assert-BackupRetentionString $Document.$name $name}
+    Assert-BackupRetentionGeneratedAtConsistency -Document $Document
     $parsedGenerationId=[guid]::Empty;if(-not[guid]::TryParse($Document.generationId,[ref]$parsedGenerationId)){throw 'generationId 必须是 GUID string。'}
     foreach($name in @('dryRun','readOnly','deleteAllowed','applySupported','executionAllowed','coverageAccounted','coverageComplete')){Assert-BackupRetentionBoolean $Document.$name $name}
     if(-not$Document.dryRun-or-not$Document.readOnly-or$Document.deleteAllowed-or$Document.applySupported-or$Document.executionAllowed){throw 'dry-run 安全标志不受信任。'}
