@@ -605,6 +605,7 @@ function New-InventoryV3Document {
         "host",
         "outputDir",
         "projectRoots",
+        "projectRootFacts",
         "toolOwnerRoots",
         "excludedRoots",
         "versionProbeTimeoutSeconds",
@@ -648,6 +649,7 @@ function New-InventoryV3Document {
         host = $Facts.host
         outputDir = $Facts.outputDir
         projectRoots = @($Facts.projectRoots)
+        projectRootFacts = @($Facts.projectRootFacts)
         toolOwnerRoots = @($Facts.toolOwnerRoots)
         excludedRoots = @($Facts.excludedRoots)
         versionProbeTimeoutSeconds = $Facts.versionProbeTimeoutSeconds

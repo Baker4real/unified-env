@@ -265,7 +265,7 @@ $inventoryGeneratedAt = if ($inventory.generatedAt -is [datetime]) {
 }
 
 $migrationCandidates = @(Get-EnvMigrationCandidates -Directories @($inventory.directories))
-$manualReviewItems = @(Get-EnvManualReviewItems -Directories @($inventory.directories) -LocalEnvironmentFindings @($inventory.localEnvironmentFindings) -ProjectRoots @($inventory.projectRoots))
+$manualReviewItems = @(Get-EnvManualReviewItems -Directories @($inventory.directories) -LocalEnvironmentFindings @($inventory.localEnvironmentFindings) -ProjectRootFacts @($inventory.projectRootFacts))
 $manualReviewSources = @($manualReviewItems | ForEach-Object { $_.source })
 $migrationPlans = @()
 $blockedByRootPolicy = @()

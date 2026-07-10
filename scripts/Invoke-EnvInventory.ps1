@@ -1,6 +1,7 @@
 param(
     [string]$OutputDir = "D:\Codex\projects\统一环境\reports\env-inventory",
     [string[]]$ProjectRoots = @("D:\Codex\projects"),
+    [object[]]$ProjectRootFacts,
     [string[]]$ToolOwnerRoots = @("D:\Codex\projects", "D:\hermes-data\hermes-agent"),
     [int]$VersionProbeTimeoutSeconds = 12,
     [switch]$IncludeSizes,
@@ -13,12 +14,33 @@ $ErrorActionPreference = "Continue"
 . (Join-Path $PSScriptRoot "lib\EnvInventoryTrust.ps1")
 . (Join-Path $PSScriptRoot "lib\EnvMigrationPolicy.ps1")
 
+if ($PSBoundParameters.ContainsKey("ProjectRoots") -and $PSBoundParameters.ContainsKey("ProjectRootFacts")) {
+    throw "ProjectRoots 与 ProjectRootFacts 不能同时显式传入。"
+}
+$effectiveProjectRootFacts = [object[]]@()
+if ($PSBoundParameters.ContainsKey("ProjectRootFacts")) {
+    $effectiveProjectRootFacts = [object[]]@($ProjectRootFacts)
+} elseif ($PSBoundParameters.ContainsKey("ProjectRoots")) {
+    if (@($ProjectRoots).Count -gt 0) {
+        $effectiveProjectRootFacts = [object[]]@(ConvertTo-EnvProjectRootFacts -ProjectRoots $ProjectRoots -Kind "project")
+    }
+} elseif (@($ProjectRoots).Count -gt 0) {
+    $effectiveProjectRootFacts = [object[]]@(ConvertTo-EnvProjectRootFacts -ProjectRoots $ProjectRoots -Kind "collection")
+}
+Assert-EnvProjectRootFacts -ProjectRootFacts $effectiveProjectRootFacts
+$ProjectRoots = [string[]]@($effectiveProjectRootFacts | ForEach-Object { $_.path })
+foreach ($toolOwnerRoot in @($ToolOwnerRoots)) {
+    Assert-EnvAbsolutePathValue -Path $toolOwnerRoot -FactName "ToolOwnerRoot"
+}
+Assert-EnvNotWindowsDeviceNamespace -Path $OutputDir -FactName "OutputDir"
+
 function Get-RootDrive {
     param([string]$Path)
 
     if ([string]::IsNullOrWhiteSpace($Path)) {
         return $null
     }
+    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName "Directory path"
 
     try {
         return [System.IO.Path]::GetPathRoot($Path)
@@ -46,7 +68,11 @@ function Assert-DDrivePath {
 function Get-ReparsePointInfo {
     param([string]$Path)
 
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -Path $Path)) {
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return [pscustomobject]@{ isReparsePoint = $false; target = $null }
+    }
+    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName "Directory path"
+    if (-not (Test-Path -Path $Path)) {
         return [pscustomobject]@{
             isReparsePoint = $false
             target = $null
@@ -76,6 +102,7 @@ function Get-ReparsePointInfo {
 function Get-DirectorySize {
     param([string]$Path)
 
+    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName "Directory path"
     if (-not $IncludeSizes) {
         return $null
     }
@@ -103,6 +130,7 @@ function New-DirectoryRecord {
         [string]$Notes
     )
 
+    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName "Directory fact.path"
     $exists = $false
     if (-not [string]::IsNullOrWhiteSpace($Path)) {
         $exists = Test-Path -Path $Path -PathType Container
@@ -499,41 +527,6 @@ function Invoke-PythonRuntimeProbe {
     return ConvertFrom-PythonRuntimeProbe -Json $json
 }
 
-function Test-IsSubPath {
-    param(
-        [string]$Path,
-        [string]$BasePath
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($BasePath)) {
-        return $false
-    }
-
-    $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
-    $fullBasePath = [System.IO.Path]::GetFullPath($BasePath).TrimEnd("\", "/")
-    return $fullPath.Equals($fullBasePath, [System.StringComparison]::OrdinalIgnoreCase) -or
-        $fullPath.StartsWith("$fullBasePath\", [System.StringComparison]::OrdinalIgnoreCase)
-}
-
-function Get-RelativePath {
-    param(
-        [string]$Path,
-        [string]$BasePath
-    )
-
-    $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
-    $fullBasePath = [System.IO.Path]::GetFullPath($BasePath).TrimEnd("\", "/")
-    if ($fullPath.Equals($fullBasePath, [System.StringComparison]::OrdinalIgnoreCase)) {
-        return ""
-    }
-
-    if (-not $fullPath.StartsWith("$fullBasePath\", [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $fullPath
-    }
-
-    return $fullPath.Substring($fullBasePath.Length + 1)
-}
-
 function Get-KnownDirectories {
     $userHome = $env:USERPROFILE
     $local = $env:LOCALAPPDATA
@@ -585,10 +578,10 @@ function Get-KnownDirectories {
 function Get-TopProjectRoot {
     param(
         [string]$Path,
-        [string[]]$Roots
+        [object[]]$RootFacts
     )
 
-    return Get-EnvMostSpecificProjectRoot -Path $Path -ProjectRoots $Roots
+    return Get-EnvTopProjectRootForMarker -Path $Path -ProjectRootFacts $RootFacts
 }
 
 function Get-ProjectRebuildEvidence {
@@ -597,6 +590,7 @@ function Get-ProjectRebuildEvidence {
         [Parameter(Mandatory)][string]$Marker
     )
 
+    Assert-EnvNotWindowsDeviceNamespace -Path $Project -FactName "Local environment project path"
     $candidateFiles = @(Get-EnvRebuildEvidenceFileNames)
     $projectFiles = @(
         foreach ($candidate in $candidateFiles) {
@@ -615,35 +609,15 @@ function Get-ProjectRebuildEvidence {
 function New-LocalEnvironmentFinding {
     param(
         [string]$MarkerPath,
-        [string[]]$Roots
+        [object[]]$RootFacts
     )
 
+    Assert-EnvNotWindowsDeviceNamespace -Path $MarkerPath -FactName "Local environment marker path"
     $item = Get-Item -LiteralPath $MarkerPath -Force
     $marker = $item.Name
     $container = [System.IO.Directory]::GetParent($item.FullName).FullName
-    $topProjectRoot = Get-TopProjectRoot -Path $item.FullName -Roots $Roots
-    $normalized = $item.FullName.ToLowerInvariant()
-
-    $classification = "nested-app-local-env"
-    $scope = "nested-app"
-    $owner = "project"
-
-    if ($topProjectRoot -and $container.Equals($topProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-        $classification = "project-root-local-env"
-        $scope = "project-root"
-    } elseif ($normalized.Contains("\docs\gsd-archive\") -or $normalized.Contains("\docs\archive\") -or $normalized.Contains("\docs\archived\")) {
-        $classification = "archived-project-cache"
-        $scope = "archive-cache"
-        $owner = "archive"
-    } elseif ($normalized.Contains("\data\repair_backups\") -or $normalized.Contains("\repair_backups\")) {
-        $classification = "plugin-cache-backup"
-        $scope = "backup-cache"
-        $owner = "backup"
-    } elseif ($normalized.Contains("\plugins\cache\")) {
-        $classification = "plugin-runtime-cache"
-        $scope = "plugin-runtime-cache"
-        $owner = "plugin-runtime"
-    }
+    $topProjectRoot = Get-TopProjectRoot -Path $item.FullName -RootFacts $RootFacts
+    $classificationDecision = Get-EnvLocalEnvironmentClassification -Path $item.FullName -Project $container -ParentProject $topProjectRoot
 
     [pscustomobject]@{
         project = $container
@@ -652,16 +626,18 @@ function New-LocalEnvironmentFinding {
         path = $item.FullName
         drive = Get-RootDrive -Path $item.FullName
         sizeBytes = Get-DirectorySize -Path $item.FullName
-        classification = $classification
-        scope = $scope
-        owner = $owner
+        classification = $classificationDecision.classification
+        scope = $classificationDecision.scope
+        owner = $classificationDecision.owner
         rebuildEvidence = Get-ProjectRebuildEvidence -Project $container -Marker $marker
     }
 }
 
 function Get-LocalEnvironmentFindings {
-    param([string[]]$Roots)
+    param([object[]]$RootFacts)
 
+    Assert-EnvProjectRootFacts -ProjectRootFacts $RootFacts
+    $roots = @($RootFacts | ForEach-Object { $_.path })
     $markerNames = @(".venv", "venv", "node_modules", ".conda")
     $skipDirectoryNames = @(".git", ".codegraph", ".scratch", "reports", "target", "dist", "build")
     $emittedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -683,7 +659,7 @@ function Get-LocalEnvironmentFindings {
             if ($markerNames -contains $dir.Name) {
                 $canonicalMarkerPath = [IO.Path]::GetFullPath($dir.FullName).TrimEnd('\', '/')
                 if ($emittedPaths.Add($canonicalMarkerPath)) {
-                    New-LocalEnvironmentFinding -MarkerPath $canonicalMarkerPath -Roots $Roots
+                    New-LocalEnvironmentFinding -MarkerPath $canonicalMarkerPath -RootFacts $RootFacts
                 }
                 continue
             }
@@ -938,11 +914,10 @@ $tools = @(
     }
 )
 
-Assert-EnvProjectRootFacts -ProjectRoots $ProjectRoots
 $directories = @(Get-KnownDirectories)
 Assert-EnvMigrationDirectoryFacts -Directories $directories
-$localEnvironmentFindings = @(Get-LocalEnvironmentFindings -Roots $ProjectRoots)
-Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $localEnvironmentFindings -ProjectRoots $ProjectRoots
+$localEnvironmentFindings = @(Get-LocalEnvironmentFindings -RootFacts $effectiveProjectRootFacts)
+Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $localEnvironmentFindings -ProjectRootFacts $effectiveProjectRootFacts
 $envVars = @(Get-SelectedEnvironmentVariables)
 $pathScopes = Get-PathScopeRecords
 
@@ -951,6 +926,7 @@ $inventory = New-InventoryV3Document -Facts @{
     host = Get-HostSummary
     outputDir = $OutputDir
     projectRoots = $ProjectRoots
+    projectRootFacts = $effectiveProjectRootFacts
     toolOwnerRoots = $ToolOwnerRoots
     excludedRoots = @(Get-EnvExcludedRootFacts)
     versionProbeTimeoutSeconds = $VersionProbeTimeoutSeconds

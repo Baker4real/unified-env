@@ -266,6 +266,7 @@ $document = New-InventoryV3Document -Facts @{
     host = [pscustomobject]@{ computerName = "fixture" }
     outputDir = "D:\Reports"
     projectRoots = @("D:\Projects")
+    projectRootFacts = @([pscustomobject]@{ path = "D:\Projects"; kind = "collection" })
     toolOwnerRoots = @("D:\Projects", "D:\hermes-data\hermes-agent")
     excludedRoots = @()
     versionProbeTimeoutSeconds = 12
@@ -282,6 +283,7 @@ $document = New-InventoryV3Document -Facts @{
 }
 Assert-True -Condition ($document.artifactType -eq "env-governance.inventory") -Message "inventory artifactType 错误"
 Assert-True -Condition ($document.schemaVersion -eq 3) -Message "inventory schemaVersion 必须为 3"
+Assert-True -Condition ($document.projectRootFacts[0].kind -eq "collection") -Message "inventory 必须保留 typed projectRootFacts"
 Assert-True -Condition (-not [bool]$document.executionAllowed) -Message "inventory 不得授权执行"
 Assert-True -Condition ($document.pathEntries[0].PSObject.Properties.Name.Count -eq 4) -Message "兼容 pathEntries 只能投影四个旧字段"
 Assert-True -Condition ($document.pathEntries[0].path -eq $processScope.entries[0].expandedPath) -Message "兼容 pathEntries.path 必须投影 process expandedPath"

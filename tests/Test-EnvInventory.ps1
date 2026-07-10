@@ -33,6 +33,7 @@ $testRoot = Join-Path $ProjectRoot "reports\env-inventory-test"
 $quickOutput = Join-Path $testRoot "quick"
 $fullOutput = Join-Path $testRoot "full"
 $pathReparseOutput = Join-Path $testRoot "path-reparse"
+$deviceNamespaceOutput = Join-Path $testRoot "device-namespace"
 
 Assert-True -Condition (Test-Path -Path $scriptPath -PathType Leaf) -Message "Inventory script not found: $scriptPath"
 Assert-True -Condition (Test-Path -LiteralPath $publisherPath -PathType Leaf) -Message "Report publisher not found: $publisherPath"
@@ -55,9 +56,12 @@ Assert-True -Condition (Test-Path -Path $quickJsonPath -PathType Leaf) -Message 
 Assert-True -Condition (Test-Path -Path $quickReportPath -PathType Leaf) -Message "Quick REPORT.md missing"
 
 $quickInventory = Get-Content -Path $quickJsonPath -Raw | ConvertFrom-Json
-foreach ($property in @("artifactType", "schemaVersion", "executionAllowed", "generationId", "readOnly", "tools", "directories", "pathScopes", "pathEntries", "toolOwnerRoots", "excludedRoots", "localEnvironmentFindings")) {
+foreach ($property in @("artifactType", "schemaVersion", "executionAllowed", "generationId", "readOnly", "tools", "directories", "pathScopes", "pathEntries", "toolOwnerRoots", "projectRoots", "projectRootFacts", "excludedRoots", "localEnvironmentFindings")) {
     Assert-Property -Object $quickInventory -Name $property
 }
+Assert-True -Condition (@($quickInventory.projectRootFacts).Count -eq @($quickInventory.projectRoots).Count) -Message "projectRootFacts 必须与兼容 projectRoots 一一对应"
+$defaultCollectionRoot = $quickInventory.projectRootFacts | Where-Object { $_.path -ieq "D:\Codex\projects" } | Select-Object -First 1
+Assert-True -Condition ($defaultCollectionRoot.kind -eq "collection") -Message "默认 D:\Codex\projects 必须声明为 collection root"
 foreach ($policyProperty in @("migrationCandidates", "manualReviewItems", "projectEnvironmentMarkers")) {
     Assert-True -Condition (-not ($quickInventory.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 事实层不应包含策略字段：$policyProperty"
 }
@@ -67,6 +71,25 @@ foreach ($rootFact in @($quickInventory.excludedRoots)) {
 foreach ($directory in @($quickInventory.directories)) {
     Assert-True -Condition ($directory.notes -notmatch "推荐|候选|可考虑|应迁移") -Message "Directory notes 必须是中性观察事实：$($directory.name) => $($directory.notes)"
 }
+
+$previousNpmCache = $env:NPM_CONFIG_CACHE
+$deviceRejected = $false
+try {
+    $env:NPM_CONFIG_CACHE = '\\?\C:\Users\fixture\npm-cache'
+    & $scriptPath -OutputDir $deviceNamespaceOutput -ProjectRoots @() -ToolOwnerRoots @() -IncludeSizes -SkipVersionProbe | Out-Null
+} catch {
+    $deviceRejected = $_.Exception.Message -like "*device namespace*"
+} finally {
+    $env:NPM_CONFIG_CACHE = $previousNpmCache
+}
+Assert-True -Condition $deviceRejected -Message "producer 必须在任何文件系统访问前拒绝 env device namespace"
+Assert-True -Condition (-not (Test-Path -LiteralPath $deviceNamespaceOutput)) -Message "device namespace 失败不得创建 inventory 输出目录"
+$inventoryScriptText = Get-Content -LiteralPath $scriptPath -Raw
+$directoryRecordStart = $inventoryScriptText.IndexOf("function New-DirectoryRecord")
+$directoryRecordEnd = $inventoryScriptText.IndexOf("function Invoke-CommandWithTimeout", $directoryRecordStart)
+$directoryRecordText = $inventoryScriptText.Substring($directoryRecordStart, $directoryRecordEnd - $directoryRecordStart)
+Assert-True -Condition ($directoryRecordText.IndexOf("Assert-EnvNotWindowsDeviceNamespace") -lt $directoryRecordText.IndexOf("Test-Path")) -Message "New-DirectoryRecord namespace guard 必须位于 Test-Path 前"
+Assert-True -Condition ($directoryRecordText.IndexOf("Assert-EnvNotWindowsDeviceNamespace") -lt $directoryRecordText.IndexOf("Get-DirectorySize")) -Message "New-DirectoryRecord namespace guard 必须位于 IncludeSizes 递归前"
 
 Assert-True -Condition ($quickInventory.artifactType -eq "env-governance.inventory") -Message "Quick inventory artifactType 错误"
 Assert-True -Condition ($quickInventory.schemaVersion -eq 3) -Message "Quick inventory schemaVersion 必须为 3"

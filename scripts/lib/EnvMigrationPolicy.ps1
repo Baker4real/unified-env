@@ -64,7 +64,12 @@ function Assert-EnvNotWindowsDeviceNamespace {
     )
 
     $normalized = $Path.Replace('/', '\')
-    foreach ($prefix in @('\\?\', '\\.\', '\??\')) {
+    foreach ($prefix in @(
+        '\\?\', '\\.\', '\??\', '\\??\',
+        '\Device\', '\\Device\',
+        '\GLOBAL??\', '\\GLOBAL??\',
+        '\DosDevices\', '\\DosDevices\'
+    )) {
         if ($normalized.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw "$FactName 不得使用 Windows device namespace：$Path"
         }
@@ -124,21 +129,85 @@ function Test-EnvMigrationSubPath {
     }
 }
 
-function Assert-EnvProjectRootFacts {
+function ConvertTo-EnvProjectRootFacts {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots)
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots,
+        [Parameter(Mandatory)][ValidateSet("collection", "project")][string]$Kind
+    )
 
-    $canonicalRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($root in @($ProjectRoots)) {
-        if ($root -isnot [string] -or [string]::IsNullOrWhiteSpace($root)) {
-            throw "ProjectRoot fact 必须是非空字符串。"
-        }
-        Assert-EnvAbsolutePathValue -Path $root -FactName "ProjectRoot fact"
-        $canonicalRoot = [IO.Path]::GetFullPath($root).TrimEnd('\', '/')
-        if (-not $canonicalRoots.Add($canonicalRoot)) {
-            throw "ProjectRoot facts 包含重复 canonical path：$root"
+        [pscustomobject][ordered]@{
+            path = $root
+            kind = $Kind
         }
     }
+}
+
+function Assert-EnvProjectRootFacts {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRootFacts)
+
+    $canonicalRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($fact in @($ProjectRootFacts)) {
+        Assert-EnvFactObject -Value $fact -FactName "ProjectRoot fact"
+        Assert-EnvFactPropertySet -Value $fact -ExpectedProperties @("path", "kind") -FactName "ProjectRoot fact"
+        Assert-EnvNonEmptyStringProperty -Value $fact -PropertyName "path" -FactName "ProjectRoot fact"
+        Assert-EnvNonEmptyStringProperty -Value $fact -PropertyName "kind" -FactName "ProjectRoot fact"
+        if ($fact.kind -cnotin @("collection", "project")) {
+            throw "ProjectRoot fact.kind 必须是 collection 或 project。"
+        }
+        Assert-EnvAbsolutePathValue -Path $fact.path -FactName "ProjectRoot fact.path"
+        $canonicalRoot = [IO.Path]::GetFullPath($fact.path).TrimEnd('\', '/')
+        if (-not $canonicalRoots.Add($canonicalRoot)) {
+            throw "ProjectRoot facts 包含重复 canonical path：$($fact.path)"
+        }
+    }
+}
+
+function Assert-EnvProjectRootCompatibility {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRootFacts
+    )
+
+    Assert-EnvProjectRootFacts -ProjectRootFacts $ProjectRootFacts
+    $compatibilityPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($root in @($ProjectRoots)) {
+        if ($root -isnot [string] -or [string]::IsNullOrWhiteSpace($root)) {
+            throw "projectRoots compatibility fact 必须是非空字符串。"
+        }
+        Assert-EnvAbsolutePathValue -Path $root -FactName "projectRoots compatibility fact"
+        $canonicalRoot = [IO.Path]::GetFullPath($root).TrimEnd('\', '/')
+        if (-not $compatibilityPaths.Add($canonicalRoot)) {
+            throw "projectRoots compatibility facts 包含重复 canonical path：$root"
+        }
+    }
+    $typedPaths = @($ProjectRootFacts | ForEach-Object { [IO.Path]::GetFullPath($_.path).TrimEnd('\', '/') } | Sort-Object)
+    $compatPaths = @($compatibilityPaths | Sort-Object)
+    if (($typedPaths -join "`n") -cne ($compatPaths -join "`n")) {
+        throw "projectRoots 必须与 projectRootFacts path 集合完全一致。"
+    }
+}
+
+function Get-EnvMostSpecificProjectRootFact {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRootFacts
+    )
+
+    Assert-EnvAbsolutePathValue -Path $Path -FactName "ProjectRoot match path"
+    Assert-EnvProjectRootFacts -ProjectRootFacts $ProjectRootFacts
+    $bestMatch = $null
+    foreach ($fact in @($ProjectRootFacts)) {
+        $canonicalRoot = [IO.Path]::GetFullPath($fact.path).TrimEnd('\', '/')
+        if ((Test-EnvMigrationSubPath -Path $Path -Root $canonicalRoot) -and
+            ($null -eq $bestMatch -or $canonicalRoot.Length -gt $bestMatch.path.Length)) {
+            $bestMatch = [pscustomobject][ordered]@{ path = $canonicalRoot; kind = $fact.kind }
+        }
+    }
+    return $bestMatch
 }
 
 function Get-EnvMostSpecificProjectRoot {
@@ -148,17 +217,65 @@ function Get-EnvMostSpecificProjectRoot {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots
     )
 
-    Assert-EnvAbsolutePathValue -Path $Path -FactName "ProjectRoot match path"
-    Assert-EnvProjectRootFacts -ProjectRoots $ProjectRoots
-    $bestMatch = $null
-    foreach ($root in @($ProjectRoots)) {
-        $canonicalRoot = [IO.Path]::GetFullPath([string]$root).TrimEnd('\', '/')
-        if ((Test-EnvMigrationSubPath -Path $Path -Root $canonicalRoot) -and
-            ($null -eq $bestMatch -or $canonicalRoot.Length -gt $bestMatch.Length)) {
-            $bestMatch = $canonicalRoot
+    $facts = @(ConvertTo-EnvProjectRootFacts -ProjectRoots $ProjectRoots -Kind "project")
+    $match = Get-EnvMostSpecificProjectRootFact -Path $Path -ProjectRootFacts $facts
+    if ($null -eq $match) {
+        return $null
+    }
+    return $match.path
+}
+
+function Get-EnvTopProjectRootForMarker {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRootFacts
+    )
+
+    $match = Get-EnvMostSpecificProjectRootFact -Path $Path -ProjectRootFacts $ProjectRootFacts
+    if ($null -eq $match) {
+        return $null
+    }
+    if ($match.kind -eq "project") {
+        return $match.path
+    }
+
+    $canonicalPath = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $relative = [IO.Path]::GetRelativePath($match.path, $canonicalPath)
+    $segments = @($relative -split '[\\/]' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($segments.Count -le 1) {
+        return $match.path
+    }
+    return [IO.Path]::GetFullPath((Join-Path $match.path $segments[0])).TrimEnd('\', '/')
+}
+
+function Get-EnvLocalEnvironmentClassification {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Project,
+        [Parameter(Mandatory)][string]$ParentProject
+    )
+
+    Assert-EnvAbsolutePathValue -Path $Path -FactName "Local environment classification path"
+    Assert-EnvAbsolutePathValue -Path $Project -FactName "Local environment classification project"
+    Assert-EnvAbsolutePathValue -Path $ParentProject -FactName "Local environment classification parentProject"
+    foreach ($entry in @(
+        @{ tokens = @('\docs\gsd-archive\', '\docs\archive\', '\docs\archived\'); classification = 'archived-project-cache'; scope = 'archive-cache'; owner = 'archive' },
+        @{ tokens = @('\data\repair_backups\', '\repair_backups\'); classification = 'plugin-cache-backup'; scope = 'backup-cache'; owner = 'backup' },
+        @{ tokens = @('\plugins\cache\'); classification = 'plugin-runtime-cache'; scope = 'plugin-runtime-cache'; owner = 'plugin-runtime' }
+    )) {
+        $normalizedPath = [IO.Path]::GetFullPath($Path).ToLowerInvariant()
+        if (@($entry.tokens | Where-Object { $normalizedPath.Contains($_) }).Count -gt 0) {
+            return [pscustomobject][ordered]@{ classification = $entry.classification; scope = $entry.scope; owner = $entry.owner }
         }
     }
-    return $bestMatch
+    $canonicalProject = [IO.Path]::GetFullPath($Project).TrimEnd('\', '/')
+    $canonicalParent = [IO.Path]::GetFullPath($ParentProject).TrimEnd('\', '/')
+    if ($canonicalProject.Equals($canonicalParent, [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject][ordered]@{ classification = 'project-root-local-env'; scope = 'project-root'; owner = 'project' }
+    }
+    return [pscustomobject][ordered]@{ classification = 'nested-app-local-env'; scope = 'nested-app'; owner = 'project' }
 }
 
 function Test-EnvApprovedUserCachePath {
@@ -322,24 +439,17 @@ function Assert-EnvLocalEnvironmentFindingFacts {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LocalEnvironmentFindings,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRootFacts,
         [switch]$AllowLegacyReviewFlag
     )
 
-    $classificationPolicies = @{
-        "project-root-local-env" = @{ scope = "project-root"; owner = "project" }
-        "nested-app-local-env" = @{ scope = "nested-app"; owner = "project" }
-        "archived-project-cache" = @{ scope = "archive-cache"; owner = "archive" }
-        "plugin-cache-backup" = @{ scope = "backup-cache"; owner = "backup" }
-        "plugin-runtime-cache" = @{ scope = "plugin-runtime-cache"; owner = "plugin-runtime" }
-    }
     $baseProperties = @(
         "project", "parentProject", "marker", "path", "drive", "sizeBytes",
         "classification", "scope", "owner", "rebuildEvidence"
     )
     $allowedProjectFiles = @(Get-EnvRebuildEvidenceFileNames)
     $canonicalPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    Assert-EnvProjectRootFacts -ProjectRoots $ProjectRoots
+    Assert-EnvProjectRootFacts -ProjectRootFacts $ProjectRootFacts
 
     foreach ($finding in @($LocalEnvironmentFindings)) {
         Assert-EnvFactObject -Value $finding -FactName "LocalEnvironmentFinding fact"
@@ -372,44 +482,24 @@ function Assert-EnvLocalEnvironmentFindingFacts {
         }
         $canonicalProject = [IO.Path]::GetFullPath($finding.project).TrimEnd('\', '/')
         $canonicalParentProject = [IO.Path]::GetFullPath($finding.parentProject).TrimEnd('\', '/')
-        $matchedProjectRoot = Get-EnvMostSpecificProjectRoot -Path $canonicalPath -ProjectRoots $ProjectRoots
-        if ($null -eq $matchedProjectRoot -or
-            -not $canonicalParentProject.Equals($matchedProjectRoot, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "LocalEnvironmentFinding fact.parentProject 必须等于包含 marker 的最具体显式 ProjectRoot。"
+        $expectedParentProject = Get-EnvTopProjectRootForMarker -Path $canonicalPath -ProjectRootFacts $ProjectRootFacts
+        if ($null -eq $expectedParentProject -or
+            -not $canonicalParentProject.Equals($expectedParentProject, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "LocalEnvironmentFinding fact.parentProject 必须符合最具体 typed ProjectRoot 的 top-project 规则。"
         }
         $expectedPath = [IO.Path]::GetFullPath((Join-Path $canonicalProject $finding.marker)).TrimEnd('\', '/')
         if (-not $canonicalPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
             throw "LocalEnvironmentFinding fact.path 必须是 project 下的 marker 直接子目录。"
         }
 
-        $expectedClassification = $null
-        if ($canonicalProject.Equals($canonicalParentProject, [StringComparison]::OrdinalIgnoreCase)) {
-            $expectedClassification = "project-root-local-env"
-        } elseif (Test-EnvMigrationSubPath -Path $canonicalProject -Root $canonicalParentProject) {
-            $normalizedPath = $canonicalPath.ToLowerInvariant()
-            if ($normalizedPath.Contains("\docs\gsd-archive\") -or
-                $normalizedPath.Contains("\docs\archive\") -or
-                $normalizedPath.Contains("\docs\archived\")) {
-                $expectedClassification = "archived-project-cache"
-            } elseif ($normalizedPath.Contains("\data\repair_backups\") -or
-                $normalizedPath.Contains("\repair_backups\")) {
-                $expectedClassification = "plugin-cache-backup"
-            } elseif ($normalizedPath.Contains("\plugins\cache\")) {
-                $expectedClassification = "plugin-runtime-cache"
-            } else {
-                $expectedClassification = "nested-app-local-env"
-            }
-        } else {
+        if (-not (Test-EnvMigrationSubPath -Path $canonicalProject -Root $canonicalParentProject)) {
             throw "LocalEnvironmentFinding fact.project 必须等于或位于 parentProject 下。"
         }
-        if ($finding.classification -cne $expectedClassification) {
-            throw "LocalEnvironmentFinding fact.classification 与 path/project/parentProject 事实不一致：Expected=$expectedClassification; Actual=$($finding.classification)"
+        $classificationDecision = Get-EnvLocalEnvironmentClassification -Path $canonicalPath -Project $canonicalProject -ParentProject $canonicalParentProject
+        if ($finding.classification -cne $classificationDecision.classification) {
+            throw "LocalEnvironmentFinding fact.classification 与 path/project/parentProject 事实不一致：Expected=$($classificationDecision.classification); Actual=$($finding.classification)"
         }
-        if (-not $classificationPolicies.ContainsKey($finding.classification)) {
-            throw "LocalEnvironmentFinding fact.classification 枚举无效：$($finding.classification)"
-        }
-        $policy = $classificationPolicies[$finding.classification]
-        if ($finding.scope -cne $policy.scope -or $finding.owner -cne $policy.owner) {
+        if ($finding.scope -cne $classificationDecision.scope -or $finding.owner -cne $classificationDecision.owner) {
             throw "LocalEnvironmentFinding fact classification/scope/owner 不一致：$($finding.classification)"
         }
         if ($null -ne $finding.sizeBytes -and
@@ -495,7 +585,7 @@ function Assert-EnvMigrationInventoryFacts {
         $Inventory.schemaVersion -ne 3) {
         throw "Inventory schemaVersion 必须是整数 3。"
     }
-    foreach ($name in @("generatedAt", "directories", "excludedRoots", "localEnvironmentFindings", "projectRoots")) {
+    foreach ($name in @("generatedAt", "directories", "excludedRoots", "localEnvironmentFindings", "projectRoots", "projectRootFacts")) {
         if (-not ($Inventory.PSObject.Properties.Name -contains $name)) {
             throw "Inventory 缺少迁移计划所需事实字段：$name"
         }
@@ -503,7 +593,7 @@ function Assert-EnvMigrationInventoryFacts {
     if ($Inventory.generatedAt -isnot [string] -or [string]::IsNullOrWhiteSpace($Inventory.generatedAt)) {
         throw "Inventory generatedAt 必须是非空字符串。"
     }
-    foreach ($name in @("directories", "excludedRoots", "localEnvironmentFindings", "projectRoots")) {
+    foreach ($name in @("directories", "excludedRoots", "localEnvironmentFindings", "projectRoots", "projectRootFacts")) {
         if ($Inventory.$name -isnot [array]) {
             throw "Inventory 事实字段必须是数组：$name"
         }
@@ -516,8 +606,8 @@ function Assert-EnvMigrationInventoryFacts {
 
     Assert-EnvMigrationDirectoryFacts -Directories @($Inventory.directories)
     Assert-EnvExcludedRootFacts -ExcludedRoots @($Inventory.excludedRoots)
-    Assert-EnvProjectRootFacts -ProjectRoots @($Inventory.projectRoots)
-    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($Inventory.localEnvironmentFindings) -ProjectRoots @($Inventory.projectRoots)
+    Assert-EnvProjectRootCompatibility -ProjectRoots @($Inventory.projectRoots) -ProjectRootFacts @($Inventory.projectRootFacts)
+    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($Inventory.localEnvironmentFindings) -ProjectRootFacts @($Inventory.projectRootFacts)
 }
 
 function Get-EnvMigrationCandidates {
@@ -611,11 +701,11 @@ function Get-EnvManualReviewItems {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Directories,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LocalEnvironmentFindings,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRootFacts
     )
 
     Assert-EnvMigrationDirectoryFacts -Directories $Directories
-    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $LocalEnvironmentFindings -ProjectRoots $ProjectRoots
+    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $LocalEnvironmentFindings -ProjectRootFacts $ProjectRootFacts
     foreach ($directory in @($Directories)) {
         if (-not $directory.exists) {
             continue

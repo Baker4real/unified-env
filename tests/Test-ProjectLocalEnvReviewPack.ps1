@@ -42,9 +42,13 @@ $reviewAfterMutationOutput = Join-Path $testRoot "review-after-mutation"
 $inventoryPath = Join-Path $inventoryOutput "inventory.json"
 $fixtureWorkspace = Join-Path $testRoot "fixture-workspace"
 $fixtureProject = Join-Path $fixtureWorkspace "app"
+$fixtureFooProject = Join-Path $fixtureWorkspace "foo"
 $fixtureWebProject = Join-Path $fixtureWorkspace "apps\web"
+$fixturePluginProject = Join-Path $fixtureWorkspace "plugins\cache\fixture-plugin"
 $fixtureNodeModules = Join-Path $fixtureProject "node_modules"
+$fixtureFooNodeModules = Join-Path $fixtureFooProject "node_modules"
 $fixtureWebNodeModules = Join-Path $fixtureWebProject "node_modules"
+$fixturePluginNodeModules = Join-Path $fixturePluginProject "node_modules"
 $fixturePackageJson = Join-Path $fixtureProject "package.json"
 $fixturePackageLock = Join-Path $fixtureProject "package-lock.json"
 $fixtureWebPackageJson = Join-Path $fixtureWebProject "package.json"
@@ -61,13 +65,20 @@ try {
     }
 
     New-Item -ItemType Directory -Path $fixtureNodeModules -Force | Out-Null
+    New-Item -ItemType Directory -Path $fixtureFooNodeModules -Force | Out-Null
     New-Item -ItemType Directory -Path $fixtureWebNodeModules -Force | Out-Null
+    New-Item -ItemType Directory -Path $fixturePluginNodeModules -Force | Out-Null
     Set-Content -LiteralPath $fixturePackageJson -Value '{"name":"fixture-project"}' -Encoding UTF8
     Set-Content -LiteralPath $fixturePackageLock -Value '{"lockfileVersion":3}' -Encoding UTF8
     Set-Content -LiteralPath $fixtureWebPackageJson -Value '{"name":"fixture-web-project"}' -Encoding UTF8
     Set-Content -LiteralPath $fixtureWebPackageLock -Value '{"lockfileVersion":3}' -Encoding UTF8
 
-    & $inventoryScript -OutputDir $inventoryOutput -ProjectRoots @($fixtureWorkspace, $fixtureProject) -SkipVersionProbe | Out-Null
+    $projectRootFacts = [object[]]@(
+        [pscustomobject]@{ path = $fixtureWorkspace; kind = "collection" },
+        [pscustomobject]@{ path = $fixtureProject; kind = "project" },
+        [pscustomobject]@{ path = $fixturePluginProject; kind = "project" }
+    )
+    & $inventoryScript -OutputDir $inventoryOutput -ProjectRootFacts $projectRootFacts -SkipVersionProbe | Out-Null
     Assert-True -Condition (Test-Path -LiteralPath $inventoryPath -PathType Leaf) -Message "测试 inventory 未生成"
 
     $result = & $scriptPath -InventoryPath $inventoryPath -OutputDir $reviewOutput
@@ -88,10 +99,17 @@ try {
     Assert-True -Condition ($null -ne $appFinding) -Message "overlapping roots 下缺少 app node_modules finding"
     Assert-True -Condition ($appFinding.parentProject -ieq $fixtureProject -and $appFinding.project -ieq $fixtureProject) -Message "app marker 必须选择最具体显式 app root"
     Assert-True -Condition ($appFinding.classification -eq "project-root-local-env" -and $appFinding.scope -eq "project-root") -Message "app marker 分类必须与最具体显式 root 一致"
+    $fooFinding = $inventoryMarkers | Where-Object { $_.path -ieq $fixtureFooNodeModules } | Select-Object -First 1
+    Assert-True -Condition ($null -ne $fooFinding) -Message "collection root 下缺少直接子项目 finding"
+    Assert-True -Condition ($fooFinding.parentProject -ieq $fixtureFooProject -and $fooFinding.project -ieq $fixtureFooProject) -Message "collection root 不得直接绑定其子项目 marker；top project 应为 foo"
+    Assert-True -Condition ($fooFinding.classification -eq "project-root-local-env" -and $fooFinding.scope -eq "project-root") -Message "collection root 直接子项目必须分类为 project-root"
     $webFinding = $inventoryMarkers | Where-Object { $_.path -ieq $fixtureWebNodeModules } | Select-Object -First 1
     Assert-True -Condition ($null -ne $webFinding) -Message "workspace 深层 web node_modules finding 缺失"
-    Assert-True -Condition ($webFinding.parentProject -ieq $fixtureWorkspace -and $webFinding.project -ieq $fixtureWebProject) -Message "web marker 必须绑定包含它的最近显式 workspace root"
+    Assert-True -Condition ($webFinding.parentProject -ieq (Join-Path $fixtureWorkspace "apps") -and $webFinding.project -ieq $fixtureWebProject) -Message "collection root 深层 web marker 必须归属于第一层 top project"
     Assert-True -Condition ($webFinding.classification -eq "nested-app-local-env" -and $webFinding.scope -eq "nested-app") -Message "web marker 分类必须与 workspace root 一致"
+    $pluginFinding = $inventory.localEnvironmentFindings | Where-Object { $_.path -ieq $fixturePluginNodeModules } | Select-Object -First 1
+    Assert-True -Condition ($null -ne $pluginFinding) -Message "特殊 plugin cache finding 缺失"
+    Assert-True -Condition ($pluginFinding.classification -eq "plugin-runtime-cache" -and $pluginFinding.owner -eq "plugin-runtime") -Message "特殊路径分类必须优先于更窄显式 project root"
     foreach ($finding in @($inventory.localEnvironmentFindings)) {
         foreach ($policyProperty in @("risk", "recommendation", "reason", "includeInReviewPack")) {
             Assert-True -Condition (-not ($finding.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 本地环境事实不应包含策略字段 $policyProperty：$($finding.path)"
@@ -108,7 +126,7 @@ try {
     Assert-True -Condition ([bool]$review.readOnly) -Message "review JSON 的 readOnly 不是 true"
     Assert-True -Condition (-not [bool]$review.policy.autoMigrationAllowed) -Message "项目本地环境不应允许自动迁移"
     Assert-True -Condition ($review.items.Count -eq $inventoryMarkers.Count) -Message "审查项数量必须与纳入审查的 inventory.localEnvironmentFindings 精确一致"
-    Assert-True -Condition ($review.summary.totalItems -eq 2 -and $review.summary.nestedAppItems -eq 1) -Message "review summary 必须与最具体 root 分类一致"
+    Assert-True -Condition ($review.summary.totalItems -eq 3 -and $review.summary.nestedAppItems -eq 1) -Message "review summary 必须与 collection/project root 分类一致且排除 plugin cache"
 
     $inventoryKeys = @{}
     foreach ($marker in $inventoryMarkers) {

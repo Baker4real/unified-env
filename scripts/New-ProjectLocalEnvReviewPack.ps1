@@ -22,15 +22,15 @@ function Assert-ProjectLocalEnvInventoryFacts {
         $Inventory.schemaVersion -ne 3) {
         throw "Inventory schemaVersion 必须是整数 3。"
     }
-    foreach ($name in @("localEnvironmentFindings", "projectRoots")) {
+    foreach ($name in @("localEnvironmentFindings", "projectRoots", "projectRootFacts")) {
         if (-not ($Inventory.PSObject.Properties.Name -contains $name) -or
             $Inventory.$name -isnot [array]) {
             throw "Inventory $name 必须是事实数组。"
         }
     }
 
-    Assert-EnvProjectRootFacts -ProjectRoots @($Inventory.projectRoots)
-    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($Inventory.localEnvironmentFindings) -ProjectRoots @($Inventory.projectRoots) -AllowLegacyReviewFlag
+    Assert-EnvProjectRootCompatibility -ProjectRoots @($Inventory.projectRoots) -ProjectRootFacts @($Inventory.projectRootFacts)
+    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($Inventory.localEnvironmentFindings) -ProjectRootFacts @($Inventory.projectRootFacts) -AllowLegacyReviewFlag
 }
 
 function Assert-DDrivePath {
