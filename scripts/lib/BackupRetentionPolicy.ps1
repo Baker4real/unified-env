@@ -312,35 +312,74 @@ function Get-BackupRetentionStrictTimestamp {
 }
 
 function Get-BackupRetentionSafeStats {
-    param([Parameter(Mandatory)][string]$Path)
+    param([Parameter(Mandatory)][string]$Path,[switch]$IncludeTreeDigest)
 
-    $result = [ordered]@{ exists = $false; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = 0; inaccessibleItems = 0 }
+    $result = [ordered]@{ exists = $false; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = 0; inaccessibleItems = 0; treeSha256 = $null }
+    $treeRecords = [Collections.Generic.List[string]]::new()
+    $rootPath = Get-BackupRetentionCanonicalPath -Path $Path
+    $addDirectoryRecord = {
+        param([string]$RelativePath)
+        if (-not $IncludeTreeDigest) { return }
+        $treeRecords.Add((ConvertTo-Json -InputObject ([pscustomobject][ordered]@{ relativePath = $RelativePath; itemType = 'directory' }) -Compress))
+    }
+    $addFileRecord = {
+        param([string]$RelativePath,[IO.FileInfo]$File)
+        if (-not $IncludeTreeDigest) { return }
+        $beforeLength = [int64]$File.Length
+        $beforeMtime = $File.LastWriteTimeUtc.ToString('o')
+        $stream = [IO.File]::Open($File.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try { $contentSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)).ToLowerInvariant() } finally { $stream.Dispose() }
+        $after = Get-Item -LiteralPath $File.FullName -Force -ErrorAction Stop
+        if (($after.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $after.PSIsContainer -or [int64]$after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.ToString('o') -cne $beforeMtime) {
+            throw "文件在 tree digest 期间发生变化：$($File.FullName)"
+        }
+        $treeRecords.Add((ConvertTo-Json -InputObject ([pscustomobject][ordered]@{ relativePath = $RelativePath; itemType = 'file'; length = $beforeLength; lastWriteUtc = $beforeMtime; contentSha256 = $contentSha256 }) -Compress))
+    }
     try {
-        $rootItem = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        $rootItem = Get-Item -LiteralPath $rootPath -Force -ErrorAction Stop
         $result.exists = $true
         if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $result.reparsePointsSkipped++; return [pscustomobject]$result }
         $stack = [Collections.Generic.Stack[string]]::new()
-        if ($rootItem.PSIsContainer) { $stack.Push($rootItem.FullName) } else {
+        if ($rootItem.PSIsContainer) { & $addDirectoryRecord '.'; $stack.Push($rootItem.FullName) } else {
             $result.files = 1; $result.bytes = [int64]$rootItem.Length
             $result.skillMd = if ($rootItem.Name -ieq 'SKILL.md') { 1 } else { 0 }
             $result.newestUtc = $rootItem.LastWriteTimeUtc.ToString('o'); $result.oldestUtc = $result.newestUtc
+            & $addFileRecord '.' $rootItem
         }
         while ($stack.Count -gt 0) {
             $current = $stack.Pop()
-            try { $children = @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop) } catch { $result.inaccessibleItems++; continue }
+            $currentState = Get-BackupRetentionPathChainState -Path $current -TrustedRoot $rootPath
+            if ($currentState.status -ceq 'reparse') { $result.reparsePointsSkipped++; continue }
+            if ($currentState.status -cne 'ok' -or -not $currentState.exists) { $result.inaccessibleItems++; continue }
+            try {
+                $currentItem = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $result.reparsePointsSkipped++; continue }
+                if (-not $currentItem.PSIsContainer) { $result.inaccessibleItems++; continue }
+                $children = @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)
+            } catch { $result.inaccessibleItems++; continue }
             foreach ($child in $children) {
                 if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $result.reparsePointsSkipped++; continue }
+                $relativePath = [IO.Path]::GetRelativePath($rootPath, $child.FullName).Replace('/', '\')
+                if ([IO.Path]::IsPathFullyQualified($relativePath) -or $relativePath -eq '..' -or $relativePath.StartsWith('..\', [StringComparison]::Ordinal)) { $result.inaccessibleItems++; continue }
                 $last = $child.LastWriteTimeUtc
                 if ($null -eq $result.newestUtc -or $last -gt [datetime]$result.newestUtc) { $result.newestUtc = $last.ToString('o') }
                 if ($null -eq $result.oldestUtc -or $last -lt [datetime]$result.oldestUtc) { $result.oldestUtc = $last.ToString('o') }
-                if ($child.PSIsContainer) { $result.dirs++; $stack.Push($child.FullName) } else {
-                    $result.files++; $result.bytes += [int64]$child.Length
-                    if ($child.Name -ieq 'SKILL.md') { $result.skillMd++ }
+                if ($child.PSIsContainer) { $result.dirs++; & $addDirectoryRecord $relativePath; $stack.Push($child.FullName) } else {
+                    try {
+                        & $addFileRecord $relativePath $child
+                        $result.files++; $result.bytes += [int64]$child.Length
+                        if ($child.Name -ieq 'SKILL.md') { $result.skillMd++ }
+                    } catch { $result.inaccessibleItems++ }
                 }
             }
         }
     } catch { $result.inaccessibleItems++ }
     $result.mb = [math]::Round(($result.bytes / 1MB), 2)
+    if ($IncludeTreeDigest -and $result.exists -and $result.reparsePointsSkipped -eq 0 -and $result.inaccessibleItems -eq 0) {
+        $records = [string[]]$treeRecords.ToArray()
+        [Array]::Sort($records, [StringComparer]::Ordinal)
+        $result.treeSha256 = Get-BackupRetentionSha256 -Value ($records -join "`n")
+    }
     return [pscustomobject]$result
 }
 
@@ -500,7 +539,7 @@ function Get-BackupRetentionGuardrailItems {
         $stats = if ($chain.status -ceq 'ok') {
             Get-BackupRetentionSafeStats -Path $path
         } else {
-            [pscustomobject]@{ exists = if ($chain.exists -is [bool]) { $chain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($chain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($chain.status -ceq 'error') { 1 } else { 0 } }
+            [pscustomobject]@{ exists = if ($chain.exists -is [bool]) { $chain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($chain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($chain.status -ceq 'error') { 1 } else { 0 }; treeSha256 = $null }
         }
         $metadataFailed = $chain.status -cne 'ok'
         $manual = [bool]$definition.Manual -or $metadataFailed
@@ -512,7 +551,7 @@ function Get-BackupRetentionGuardrailItems {
     }
     $legacy = Join-Path $PolicyContext.DDriveRoot '.codex-c-backups'
     $legacyChain = Resolve-BackupRetentionPathChainState -Path $legacy -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver
-    $legacyStats = if ($legacyChain.status -ceq 'ok') { Get-BackupRetentionSafeStats $legacy } else { [pscustomobject]@{ exists = if ($legacyChain.exists -is [bool]) { $legacyChain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($legacyChain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($legacyChain.status -ceq 'error') { 1 } else { 0 } } }
+    $legacyStats = if ($legacyChain.status -ceq 'ok') { Get-BackupRetentionSafeStats $legacy } else { [pscustomobject]@{ exists = if ($legacyChain.exists -is [bool]) { $legacyChain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($legacyChain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($legacyChain.status -ceq 'error') { 1 } else { 0 }; treeSha256 = $null } }
     $legacyFailed = $legacyChain.status -cne 'ok'
     $legacyErrors = if ($legacyChain.status -ceq 'reparse') { @("protected path ancestor is reparse point: $($legacyChain.reparseAncestor)") } elseif ($legacyChain.status -ceq 'error') { @([string]$legacyChain.error) } else { @() }
     $legacyIsReparse = if ($legacyChain.status -ceq 'reparse') { $true } elseif ($legacyChain.status -ceq 'error') { $null } else { $false }
@@ -614,12 +653,12 @@ function Invoke-BackupRetentionEvaluation {
                 $items.Add((New-BackupRetentionCoverageItem -Path $record.child.path -ScanRoot $record.root.path -ItemType $record.child.itemType -Disposition 'gap' -Reason $reason -Manual $true -Blocks $true -Risk '高' -GroupKey $record.groupKey -ProjectRoot $record.projectRoot -BackupType $record.backupType -Timestamp $record.timestamp -RetainRank $rank -IsReparsePoint $candidateIsReparse -ReparseAncestor $chain.reparseAncestor -ReparseTarget $chain.reparseTarget -MetadataStatus $chain.status -Errors @($reason)))
                 continue
             }
-            $stats = Get-BackupRetentionSafeStats -Path $record.child.path
-            if ($stats.reparsePointsSkipped -gt 0 -or $stats.inaccessibleItems -gt 0) {
+            $disposition = if ($rank -le [int]$PolicyContext.retainCount) { 'retained' } else { 'candidate' }
+            $stats = Get-BackupRetentionSafeStats -Path $record.child.path -IncludeTreeDigest:($disposition -ceq 'candidate')
+            if ($stats.reparsePointsSkipped -gt 0 -or $stats.inaccessibleItems -gt 0 -or ($disposition -ceq 'candidate' -and $stats.treeSha256 -notmatch '^[0-9a-f]{64}$')) {
                 $items.Add((New-BackupRetentionCoverageItem -Path $record.child.path -ScanRoot $record.root.path -ItemType $record.child.itemType -Disposition 'gap' -Reason '目录内部存在 reparse point 或不可访问项。' -Manual $true -Blocks $true -Risk '高' -GroupKey $record.groupKey -ProjectRoot $record.projectRoot -BackupType $record.backupType -Timestamp $record.timestamp -RetainRank $rank -Stats $stats))
                 continue
             }
-            $disposition = if ($rank -le [int]$PolicyContext.retainCount) { 'retained' } else { 'candidate' }
             $items.Add((New-BackupRetentionCoverageItem -Path $record.child.path -ScanRoot $record.root.path -ItemType $record.child.itemType -Disposition $disposition -Reason $record.reason -Manual $false -Blocks $false -Bucket $record.bucket -GroupKey $record.groupKey -ProjectRoot $record.projectRoot -BackupType $record.backupType -Timestamp $record.timestamp -RetainRank $rank -Risk $record.risk -Stats $stats))
         }
     }

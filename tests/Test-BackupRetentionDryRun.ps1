@@ -133,6 +133,7 @@ try {
         Assert-True -Condition ((@($candidate.blockedBy) -join "`n").Contains("重新生成最新 dry-run")) -Message "候选项缺少重新 dry-run 阻塞：$($candidate.path)"
         Assert-True -Condition ([bool]$candidate.selectedByRetention) -Message "候选项必须来自保留规则：$($candidate.path)"
         Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($candidate.timestampSource)) -Message "候选项必须有严格解析的时间戳来源：$($candidate.path)"
+        Assert-True -Condition ($candidate.stats.treeSha256 -match '^[0-9a-f]{64}$') -Message "候选项必须发布确定性 treeSha256：$($candidate.path)"
     }
 
     $candidatePaths = @($plan.candidates | ForEach-Object { $_.path })

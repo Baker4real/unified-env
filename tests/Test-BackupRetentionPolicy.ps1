@@ -107,6 +107,48 @@ try {
     try { New-BackupRetentionPolicyContext -ArtifactMode Production -CodexRoot $fixtureCodexRoot -DDriveRoot $testRoot | Out-Null } catch { $upperProductionRejected = $true }
     Assert-True $upperProductionRejected 'ArtifactMode Production 不得绕过 production 固定常量门'
 
+    $digestRoot = Join-Path $testRoot 'tree-digest-fixture'
+    $digestEmpty = Join-Path $digestRoot 'empty-a'
+    New-Item -ItemType Directory -Force -Path $digestEmpty | Out-Null
+    $digestA = Join-Path $digestRoot 'a.bin'
+    $digestB = Join-Path $digestRoot 'b.bin'
+    [IO.File]::WriteAllText($digestA, 'AAAA', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($digestB, 'BBBB', [Text.UTF8Encoding]::new($false))
+    $fixedMtime = [datetime]::SpecifyKind([datetime]'2026-07-01T00:00:00', [DateTimeKind]::Utc)
+    [IO.File]::SetLastWriteTimeUtc($digestA, $fixedMtime)
+    [IO.File]::SetLastWriteTimeUtc($digestB, $fixedMtime)
+    $digestBaseline = Get-BackupRetentionSafeStats -Path $digestRoot -IncludeTreeDigest
+    Assert-True ($digestBaseline.PSObject.Properties.Name -contains 'treeSha256' -and $digestBaseline.treeSha256 -match '^[0-9a-f]{64}$') 'stats 必须包含确定性 treeSha256'
+
+    [IO.File]::WriteAllText($digestA, 'EVIL', [Text.UTF8Encoding]::new($false))
+    [IO.File]::SetLastWriteTimeUtc($digestA, $fixedMtime)
+    $digestContentChanged = Get-BackupRetentionSafeStats -Path $digestRoot -IncludeTreeDigest
+    Assert-True ($digestContentChanged.bytes -eq $digestBaseline.bytes -and $digestContentChanged.files -eq $digestBaseline.files -and $digestContentChanged.newestUtc -ceq $digestBaseline.newestUtc -and $digestContentChanged.oldestUtc -ceq $digestBaseline.oldestUtc) 'fixture 必须保持旧 stats 可碰撞'
+    Assert-True ($digestContentChanged.treeSha256 -cne $digestBaseline.treeSha256) '同尺寸同 mtime 内容 AAAA→EVIL 必须改变 treeSha256'
+
+    [IO.File]::WriteAllText($digestA, 'AAAA', [Text.UTF8Encoding]::new($false)); [IO.File]::SetLastWriteTimeUtc($digestA, $fixedMtime)
+    $swapTemp = Join-Path $digestRoot 'swap.tmp'
+    Move-Item -LiteralPath $digestA -Destination $swapTemp
+    Move-Item -LiteralPath $digestB -Destination $digestA
+    Move-Item -LiteralPath $swapTemp -Destination $digestB
+    $digestNamesSwapped = Get-BackupRetentionSafeStats -Path $digestRoot -IncludeTreeDigest
+    Assert-True ($digestNamesSwapped.treeSha256 -cne $digestBaseline.treeSha256) '文件名互换必须改变 treeSha256'
+
+    Move-Item -LiteralPath $digestA -Destination $swapTemp
+    Move-Item -LiteralPath $digestB -Destination $digestA
+    Move-Item -LiteralPath $swapTemp -Destination $digestB
+    $digestBeforeEmptyChange = Get-BackupRetentionSafeStats -Path $digestRoot -IncludeTreeDigest
+    New-Item -ItemType Directory -Path (Join-Path $digestRoot 'empty-b') | Out-Null
+    $digestEmptyChanged = Get-BackupRetentionSafeStats -Path $digestRoot -IncludeTreeDigest
+    Assert-True ($digestEmptyChanged.treeSha256 -cne $digestBeforeEmptyChange.treeSha256) '新增空目录必须改变 treeSha256'
+    $digestJunctionTarget = Join-Path $testRoot 'tree-digest-junction-target'
+    $digestJunction = Join-Path $digestRoot 'junction-child'
+    New-Item -ItemType Directory -Path $digestJunctionTarget | Out-Null
+    New-Item -ItemType Junction -Path $digestJunction -Target $digestJunctionTarget | Out-Null
+    $digestReparse = Get-BackupRetentionSafeStats -Path $digestRoot -IncludeTreeDigest
+    Assert-True ($digestReparse.reparsePointsSkipped -gt 0 -and $null -eq $digestReparse.treeSha256) 'tree 内任一 reparse 必须令 treeSha256 失败关闭'
+    Remove-Item -LiteralPath $digestJunction -Force
+
     $evaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context
     $roundTrippedEvaluation = $evaluation | ConvertTo-Json -Depth 100 | ConvertFrom-Json -DateKind String
     foreach ($coverageItem in @($roundTrippedEvaluation.coverageItems)) {
