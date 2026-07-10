@@ -8,59 +8,6 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
 . (Join-Path $PSScriptRoot "lib\EnvMigrationPolicy.ps1")
 
-function Test-EnvMigrationInteger {
-    param([AllowNull()][object]$Value)
-
-    return $Value -is [byte] -or $Value -is [sbyte] -or
-        $Value -is [int16] -or $Value -is [uint16] -or
-        $Value -is [int32] -or $Value -is [uint32] -or
-        $Value -is [int64] -or $Value -is [uint64]
-}
-
-function Assert-EnvMigrationInventoryV3 {
-    param([Parameter(Mandatory)][psobject]$Inventory)
-
-    if (-not ($Inventory.PSObject.Properties.Name -contains "artifactType") -or $Inventory.artifactType -cne "env-governance.inventory") {
-        throw "Inventory artifactType 必须为 env-governance.inventory。"
-    }
-    if (-not ($Inventory.PSObject.Properties.Name -contains "schemaVersion") -or
-        -not (Test-EnvMigrationInteger -Value $Inventory.schemaVersion) -or
-        $Inventory.schemaVersion -ne 3) {
-        throw "Inventory schemaVersion 必须是整数 3。"
-    }
-
-    foreach ($name in @("generatedAt", "directories", "localEnvironmentFindings", "excludedRoots")) {
-        if (-not ($Inventory.PSObject.Properties.Name -contains $name)) {
-            throw "Inventory 缺少迁移计划所需事实字段：$name"
-        }
-    }
-    foreach ($name in @("directories", "localEnvironmentFindings", "excludedRoots")) {
-        if ($Inventory.$name -isnot [array]) {
-            throw "Inventory 事实字段必须是数组：$name"
-        }
-    }
-
-    foreach ($directory in @($Inventory.directories)) {
-        foreach ($name in @("name", "path", "category", "owner", "exists", "drive", "isReparsePoint", "notes")) {
-            if (-not ($directory.PSObject.Properties.Name -contains $name)) {
-                throw "Inventory directory fact 缺少字段：$name"
-            }
-        }
-        foreach ($name in @("exists", "isReparsePoint")) {
-            if ($directory.$name -isnot [bool]) {
-                throw "Inventory directory fact 字段必须是 boolean：$name"
-            }
-        }
-    }
-    foreach ($finding in @($Inventory.localEnvironmentFindings)) {
-        foreach ($name in @("classification", "owner", "marker", "path")) {
-            if (-not ($finding.PSObject.Properties.Name -contains $name)) {
-                throw "Inventory localEnvironmentFinding fact 缺少字段：$name"
-            }
-        }
-    }
-}
-
 function Get-SafeSlug {
     param([string]$Value)
 
@@ -122,72 +69,6 @@ function Get-TargetPath {
     return Join-Path $envsRoot $kind
 }
 
-function Test-IsSubPath {
-    param(
-        [string]$Path,
-        [string]$Root
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) {
-        return $false
-    }
-
-    try {
-        $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
-        $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\')
-        return $fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
-            $fullPath.StartsWith("$fullRoot\", [System.StringComparison]::OrdinalIgnoreCase)
-    } catch {
-        return $false
-    }
-}
-
-function Get-RootPolicyDecision {
-    param(
-        [object]$Candidate,
-        [object[]]$ExcludedRoots
-    )
-
-    foreach ($root in $ExcludedRoots) {
-        if (-not (Test-IsSubPath -Path $Candidate.source -Root $root.path)) {
-            continue
-        }
-
-        $isTargetedUserCache = ($root.path -ieq "C:\Users") -and ($Candidate.kind -eq "cache")
-        if ($isTargetedUserCache) {
-            return [pscustomobject]@{
-                matchedExcludedRoot = $root.path
-                excludedRootReason = $root.reason
-                allowDryRunPlan = $true
-                executionAllowed = $false
-                requiresExplicitUserApproval = $true
-                decision = "targeted-cache-under-excluded-user-root"
-                note = "来源位于不批量迁移的用户根目录下；仅允许生成具体缓存子目录 dry-run 计划，真实执行必须另行显式授权。"
-            }
-        }
-
-        return [pscustomobject]@{
-            matchedExcludedRoot = $root.path
-            excludedRootReason = $root.reason
-            allowDryRunPlan = $false
-            executionAllowed = $false
-            requiresExplicitUserApproval = $true
-            decision = "blocked-by-excluded-root"
-            note = "来源命中绝不自动迁移根，不能进入迁移执行计划。"
-        }
-    }
-
-    return [pscustomobject]@{
-        matchedExcludedRoot = $null
-        excludedRootReason = $null
-        allowDryRunPlan = $true
-        executionAllowed = $false
-        requiresExplicitUserApproval = $true
-        decision = "dry-run-candidate"
-        note = "dry-run 计划仅供审查；真实执行必须另行显式授权。"
-    }
-}
-
 function New-MigrationPlanEntry {
     param(
         [object]$Candidate,
@@ -225,7 +106,7 @@ function New-MigrationPlanEntry {
         )
         validationSteps = @(
             "验证工具命令仍可运行。",
-            "验证 inventory 不再把来源路径列为待处理迁移候选。",
+            "重新生成 migration plan，确认来源路径不再列为待处理迁移候选。",
             "验证报告中没有新增人工审查风险。",
             "保留迁移证据和前后对比。"
         )
@@ -373,8 +254,8 @@ if (-not (Test-Path -LiteralPath $InventoryPath -PathType Leaf)) {
 
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 
-$inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json -ErrorAction Stop
-Assert-EnvMigrationInventoryV3 -Inventory $inventory
+$inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
+Assert-EnvMigrationInventoryFacts -Inventory $inventory
 $inventoryGeneratedAt = if ($inventory.generatedAt -is [datetime]) {
     $inventory.generatedAt.ToString("o")
 } else {
@@ -404,7 +285,7 @@ foreach ($candidate in $migrationCandidates) {
         continue
     }
 
-    $rootPolicy = Get-RootPolicyDecision -Candidate $candidate -ExcludedRoots @($inventory.excludedRoots)
+    $rootPolicy = Get-EnvRootPolicyDecision -Candidate $candidate
     if ($rootPolicy.allowDryRunPlan) {
         $migrationPlans += New-MigrationPlanEntry -Candidate $candidate -Index $index -RootPolicy $rootPolicy
         $index++
@@ -430,7 +311,7 @@ $plan = [pscustomobject]@{
     blockedByRootPolicy = $blockedByRootPolicy
     blockedByManualReview = $blockedByManualReview
     excludedManualReviewItems = $manualReviewItems
-    excludedRoots = @($inventory.excludedRoots)
+    excludedRoots = @(Get-EnvCanonicalExcludedRoots)
 }
 
 $published = Publish-JsonMarkdownArtifactPair -Document $plan -OutputDir $OutputDir -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown {

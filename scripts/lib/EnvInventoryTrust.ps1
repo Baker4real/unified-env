@@ -614,7 +614,6 @@ function New-InventoryV3Document {
         "selectedEnvironmentVariables",
         "pathScopes",
         "directories",
-        "projectEnvironmentMarkers",
         "localEnvironmentFindings"
     )
     foreach ($name in $requiredFacts) {
@@ -659,7 +658,6 @@ function New-InventoryV3Document {
         pathScopes = $Facts.pathScopes
         pathEntries = $pathEntries
         directories = @($Facts.directories)
-        projectEnvironmentMarkers = @($Facts.projectEnvironmentMarkers)
         localEnvironmentFindings = @($Facts.localEnvironmentFindings)
     }
 }

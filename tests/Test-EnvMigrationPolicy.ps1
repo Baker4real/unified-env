@@ -35,6 +35,30 @@ $policyPath = Join-Path $ProjectRoot "scripts\lib\EnvMigrationPolicy.ps1"
 Assert-True -Condition (Test-Path -LiteralPath $policyPath -PathType Leaf) -Message "找不到迁移策略库：$policyPath"
 . $policyPath
 
+$canonicalExcludedRoots = @(Get-EnvCanonicalExcludedRoots)
+$excludedRootFacts = @(Get-EnvExcludedRootFacts)
+Assert-True -Condition ($canonicalExcludedRoots.Count -eq 5) -Message "canonical excluded-root 规则数量发生变化"
+Assert-True -Condition (@($canonicalExcludedRoots | Where-Object { $_.path -eq "C:\ProgramData" }).Count -eq 1) -Message "canonical excluded-root 必须包含 C:\ProgramData"
+Assert-True -Condition ($excludedRootFacts.Count -eq $canonicalExcludedRoots.Count) -Message "excluded-root facts 必须完整投影 canonical roots"
+foreach ($rootFact in $excludedRootFacts) {
+    Assert-True -Condition ((@($rootFact.PSObject.Properties.Name) -join ",") -ceq "path") -Message "Inventory excluded-root fact 只能包含 path"
+}
+
+$programDataDecision = Get-EnvRootPolicyDecision -Candidate ([pscustomobject]@{
+    source = "C:\ProgramData\fixture-cache"
+    kind = "cache"
+    owner = "fixture"
+})
+Assert-True -Condition ($programDataDecision.decision -eq "blocked-by-excluded-root") -Message "C:\ProgramData 必须由单一 root policy 阻止"
+Assert-True -Condition (-not [bool]$programDataDecision.allowDryRunPlan) -Message "C:\ProgramData 不得进入 dry-run 迁移计划"
+
+$userCacheDecision = Get-EnvRootPolicyDecision -Candidate ([pscustomobject]@{
+    source = "C:\Users\fixture\AppData\Local\npm-cache"
+    kind = "cache"
+    owner = "node"
+})
+Assert-True -Condition ($userCacheDecision.decision -eq "targeted-cache-under-excluded-user-root") -Message "C 用户缓存应保留 targeted cache 旧语义"
+
 $directories = @(
     [pscustomobject]@{
         name = "pip cache env"
@@ -44,6 +68,8 @@ $directories = @(
         exists = $true
         drive = "D:\"
         isReparsePoint = $false
+        reparseTarget = $null
+        sizeBytes = $null
         notes = "显式 PIP_CACHE_DIR"
     }
     [pscustomobject]@{
@@ -54,6 +80,8 @@ $directories = @(
         exists = $true
         drive = "C:\"
         isReparsePoint = $false
+        reparseTarget = $null
+        sizeBytes = $null
         notes = "pip 默认用户缓存候选"
     }
     [pscustomobject]@{
@@ -64,6 +92,8 @@ $directories = @(
         exists = $true
         drive = "C:\"
         isReparsePoint = $false
+        reparseTarget = $null
+        sizeBytes = $null
         notes = "npm 常见缓存位置"
     }
     [pscustomobject]@{
@@ -74,6 +104,8 @@ $directories = @(
         exists = $true
         drive = "C:\"
         isReparsePoint = $true
+        reparseTarget = "D:\fixture-target"
+        sizeBytes = $null
         notes = "reparse fixture"
     }
     [pscustomobject]@{
@@ -84,6 +116,8 @@ $directories = @(
         exists = $true
         drive = "C:\"
         isReparsePoint = $false
+        reparseTarget = $null
+        sizeBytes = $null
         notes = "Docker 用户配置，可能包含上下文和凭据引用"
     }
 )
@@ -99,7 +133,6 @@ $localEnvironmentFindings = @(
         classification = "project-root-local-env"
         scope = "project-root"
         owner = "project"
-        includeInReviewPack = $true
     }
 )
 
@@ -118,6 +151,8 @@ $invalidBooleanDirectory = [pscustomobject]@{
     exists = "false"
     drive = "C:\"
     isReparsePoint = $false
+    reparseTarget = $null
+    sizeBytes = $null
     notes = "invalid boolean fixture"
 }
 Assert-Throws -Action { Get-EnvMigrationCandidates -Directories @($invalidBooleanDirectory) | Out-Null } -Message "纯策略必须拒绝字符串 exists，不能宽松强转"

@@ -66,17 +66,13 @@ try {
 
     $review = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
-    $inventoryMarkers = @($inventory.localEnvironmentFindings | Where-Object { [bool]$_.includeInReviewPack })
+    $inventoryMarkers = @($inventory.localEnvironmentFindings | Where-Object { $_.classification -in @("project-root-local-env", "nested-app-local-env") -and $_.owner -eq "project" })
     foreach ($finding in @($inventory.localEnvironmentFindings)) {
-        foreach ($policyProperty in @("risk", "recommendation", "reason")) {
+        foreach ($policyProperty in @("risk", "recommendation", "reason", "includeInReviewPack")) {
             Assert-True -Condition (-not ($finding.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 本地环境事实不应包含策略字段 $policyProperty：$($finding.path)"
         }
     }
-    foreach ($marker in @($inventory.projectEnvironmentMarkers)) {
-        foreach ($policyProperty in @("risk", "recommendation", "reason")) {
-            Assert-True -Condition (-not ($marker.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 项目标记事实不应包含策略字段 $policyProperty：$($marker.path)"
-        }
-    }
+    Assert-True -Condition (-not ($inventory.PSObject.Properties.Name -contains "projectEnvironmentMarkers")) -Message "Inventory 不应输出 projectEnvironmentMarkers 策略投影"
     foreach ($property in @("readOnly", "inventoryPath", "items", "policy", "summary")) {
         Assert-Property -Object $review -Name $property
     }
@@ -149,29 +145,23 @@ try {
     }
 
     $localFactsOnlyInventory = ($inventory | ConvertTo-Json -Depth 30 | ConvertFrom-Json)
-    $localFactsOnlyInventory.projectEnvironmentMarkers = @()
+    $legacyFalseIndex = -1
+    for ($index = 0; $index -lt @($localFactsOnlyInventory.localEnvironmentFindings).Count; $index++) {
+        $finding = $localFactsOnlyInventory.localEnvironmentFindings[$index]
+        if ($finding.classification -in @("project-root-local-env", "nested-app-local-env") -and $finding.owner -eq "project") {
+            $legacyFalseIndex = $index
+            break
+        }
+    }
+    Assert-True -Condition ($legacyFalseIndex -ge 0) -Message "测试 inventory 缺少可审查本地环境 fact"
+    $localFactsOnlyInventory.localEnvironmentFindings[$legacyFalseIndex] | Add-Member -MemberType NoteProperty -Name includeInReviewPack -Value $false -Force
+    $localFactsOnlyInventory.PSObject.Properties.Remove("projectEnvironmentMarkers")
     $localFactsOnlyPath = Join-Path $testRoot "local-findings-only-inventory.json"
     $localFactsOnlyInventory | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $localFactsOnlyPath -Encoding UTF8
     $localFactsOnlyOutput = Join-Path $testRoot "local-findings-only-review"
     & $scriptPath -InventoryPath $localFactsOnlyPath -OutputDir $localFactsOnlyOutput | Out-Null
     $localFactsOnlyReview = Get-Content -LiteralPath (Join-Path $localFactsOnlyOutput "review.json") -Raw | ConvertFrom-Json
-    Assert-True -Condition ($localFactsOnlyReview.items.Count -eq $inventoryMarkers.Count) -Message "审查包必须直接消费 localEnvironmentFindings facts，不能依赖 projectEnvironmentMarkers"
-
-    if (@($inventory.localEnvironmentFindings).Count -gt 0) {
-        $invalidInventory = ($inventory | ConvertTo-Json -Depth 30 | ConvertFrom-Json)
-        $invalidInventory.localEnvironmentFindings[0].includeInReviewPack = "false"
-        $invalidInventoryPath = Join-Path $testRoot "invalid-string-review-flag.json"
-        $invalidInventory | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $invalidInventoryPath -Encoding UTF8
-        $invalidOutput = Join-Path $testRoot "invalid-string-review-flag"
-        $failed = $false
-        try {
-            & $scriptPath -InventoryPath $invalidInventoryPath -OutputDir $invalidOutput | Out-Null
-        } catch {
-            $failed = $true
-        }
-        Assert-True -Condition $failed -Message "审查包必须拒绝字符串 includeInReviewPack"
-        Assert-True -Condition (-not (Test-Path -LiteralPath $invalidOutput)) -Message "非法 review facts 不得创建输出目录"
-    }
+    Assert-True -Condition ($localFactsOnlyReview.items.Count -eq $inventoryMarkers.Count) -Message "审查包必须按裸 facts 派生纳入；legacy includeInReviewPack=false 不得导致遗漏"
 
     $blockedOutput = "C:\Codex-should-not-be-created"
     $blocked = $false

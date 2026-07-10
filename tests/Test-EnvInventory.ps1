@@ -55,11 +55,14 @@ Assert-True -Condition (Test-Path -Path $quickJsonPath -PathType Leaf) -Message 
 Assert-True -Condition (Test-Path -Path $quickReportPath -PathType Leaf) -Message "Quick REPORT.md missing"
 
 $quickInventory = Get-Content -Path $quickJsonPath -Raw | ConvertFrom-Json
-foreach ($property in @("artifactType", "schemaVersion", "executionAllowed", "generationId", "readOnly", "tools", "directories", "pathScopes", "pathEntries", "toolOwnerRoots", "excludedRoots", "projectEnvironmentMarkers", "localEnvironmentFindings")) {
+foreach ($property in @("artifactType", "schemaVersion", "executionAllowed", "generationId", "readOnly", "tools", "directories", "pathScopes", "pathEntries", "toolOwnerRoots", "excludedRoots", "localEnvironmentFindings")) {
     Assert-Property -Object $quickInventory -Name $property
 }
-foreach ($policyProperty in @("migrationCandidates", "manualReviewItems")) {
+foreach ($policyProperty in @("migrationCandidates", "manualReviewItems", "projectEnvironmentMarkers")) {
     Assert-True -Condition (-not ($quickInventory.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 事实层不应包含策略字段：$policyProperty"
+}
+foreach ($rootFact in @($quickInventory.excludedRoots)) {
+    Assert-True -Condition ((@($rootFact.PSObject.Properties.Name) -join ",") -ceq "path") -Message "Inventory excludedRoots 只能输出裸 path fact"
 }
 
 Assert-True -Condition ($quickInventory.artifactType -eq "env-governance.inventory") -Message "Quick inventory artifactType 错误"
@@ -104,10 +107,10 @@ foreach ($tool in $quickInventory.tools) {
 }
 
 $quickReport = Get-Content -Path $quickReportPath -Raw
-foreach ($expected in @("本报告由只读盘点脚本生成", "工具解析作用域：process", "## 绝不自动迁移")) {
+foreach ($expected in @("本报告由只读盘点脚本生成", "工具解析作用域：process")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing expected text: $expected"
 }
-foreach ($policySection in @("## 迁移候选", "## 人工审查项")) {
+foreach ($policySection in @("## 绝不自动迁移", "## 迁移候选", "## 人工审查项")) {
     Assert-True -Condition (-not $quickReport.Contains($policySection)) -Message "Inventory Markdown 不应展示策略章节：$policySection"
 }
 foreach ($expected in @("Launcher originClass", "Launcher matchedRule", "Launcher matchedRoot", "Launcher reparse", "Runtime originClass", "Runtime matchedRule", "Runtime matchedRoot", "Runtime reparse")) {
@@ -124,19 +127,17 @@ foreach ($scopeName in @("process", "user", "machine")) {
 }
 
 $quickFindings = @($quickInventory.localEnvironmentFindings)
-$quickProjectMarkers = @($quickInventory.projectEnvironmentMarkers)
+$quickProjectMarkers = @($quickFindings | Where-Object { $_.classification -in @("project-root-local-env", "nested-app-local-env") -and $_.owner -eq "project" })
 foreach ($finding in $quickFindings) {
-    foreach ($policyProperty in @("risk", "recommendation", "reason")) {
+    foreach ($policyProperty in @("risk", "recommendation", "reason", "includeInReviewPack")) {
         Assert-True -Condition (-not ($finding.PSObject.Properties.Name -contains $policyProperty)) -Message "本地环境事实不应包含策略字段 $policyProperty：$($finding.path)"
     }
 }
 foreach ($classification in @($quickFindings | ForEach-Object { $_.classification } | Sort-Object -Unique)) {
     Assert-True -Condition $quickReport.Contains($classification) -Message "Quick report missing discovered local env classification: $classification"
 }
-Assert-True -Condition ($quickFindings.Count -ge $quickProjectMarkers.Count) -Message "localEnvironmentFindings 不应少于 projectEnvironmentMarkers"
 foreach ($marker in $quickProjectMarkers) {
-    Assert-True -Condition ([bool]$marker.includeInReviewPack) -Message "projectEnvironmentMarkers 只能包含纳入项目级审查的项：$($marker.path)"
-    Assert-True -Condition (@("project-root-local-env", "nested-app-local-env") -contains $marker.classification) -Message "projectEnvironmentMarkers 不应包含缓存或归档分类：$($marker.path)"
+    Assert-True -Condition (@("project-root-local-env", "nested-app-local-env") -contains $marker.classification) -Message "reviewable facts 不应包含缓存或归档分类：$($marker.path)"
 }
 
 $nestedAppMarker = $quickProjectMarkers | Where-Object { $_.classification -eq "nested-app-local-env" -and $_.marker -eq "node_modules" } | Select-Object -First 1
@@ -144,7 +145,6 @@ if ($nestedAppMarker) {
     $nestedApp = $quickFindings | Where-Object { $_.path -ieq $nestedAppMarker.path } | Select-Object -First 1
     Assert-True -Condition ($null -ne $nestedApp) -Message "递归扫描应发现嵌套 app node_modules：$($nestedAppMarker.path)"
     Assert-True -Condition ($nestedApp.classification -eq "nested-app-local-env") -Message "嵌套 app node_modules 分类错误"
-    Assert-True -Condition ([bool]$nestedApp.includeInReviewPack) -Message "嵌套 app node_modules 应纳入项目级审查"
 }
 
 $pluginCachePath = "D:\Codex\projects\yangyangzi-direct-qqbot\data\codex_home_yangyangzi\plugins\cache\openai-bundled\browser\26.616.51431\scripts\node_modules"
@@ -152,7 +152,6 @@ if (Test-Path -LiteralPath $pluginCachePath -PathType Container) {
     $pluginCache = $quickFindings | Where-Object { $_.path -ieq $pluginCachePath } | Select-Object -First 1
     Assert-True -Condition ($null -ne $pluginCache) -Message "递归扫描应发现插件 runtime cache node_modules：$pluginCachePath"
     Assert-True -Condition ($pluginCache.classification -eq "plugin-runtime-cache") -Message "插件 runtime cache 分类错误"
-    Assert-True -Condition (-not [bool]$pluginCache.includeInReviewPack) -Message "插件 runtime cache 不应纳入项目级重建审查"
 }
 
 $repairBackupPath = "D:\Codex\projects\yangyangzi-direct-qqbot\data\repair_backups\plugin-cache-20260610-123718\openai-bundled\chrome\26.602.71036\scripts\node_modules"
@@ -160,7 +159,6 @@ if (Test-Path -LiteralPath $repairBackupPath -PathType Container) {
     $repairBackup = $quickFindings | Where-Object { $_.path -ieq $repairBackupPath } | Select-Object -First 1
     Assert-True -Condition ($null -ne $repairBackup) -Message "递归扫描应发现 repair backup node_modules：$repairBackupPath"
     Assert-True -Condition ($repairBackup.classification -eq "plugin-cache-backup") -Message "repair backup 分类错误"
-    Assert-True -Condition (-not [bool]$repairBackup.includeInReviewPack) -Message "repair backup 不应纳入项目级重建审查"
 }
 
 $archiveCachePath = "D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase6-skills\source-skills\shared-skill\node_modules"
@@ -168,7 +166,6 @@ if (Test-Path -LiteralPath $archiveCachePath -PathType Container) {
     $archiveCache = $quickFindings | Where-Object { $_.path -ieq $archiveCachePath } | Select-Object -First 1
     Assert-True -Condition ($null -ne $archiveCache) -Message "递归扫描应发现归档缓存 node_modules：$archiveCachePath"
     Assert-True -Condition ($archiveCache.classification -eq "archived-project-cache") -Message "归档缓存分类错误"
-    Assert-True -Condition (-not [bool]$archiveCache.includeInReviewPack) -Message "归档缓存不应纳入项目级重建审查"
 }
 
 $fullResult = & $scriptPath -OutputDir $fullOutput

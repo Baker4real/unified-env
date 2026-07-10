@@ -11,6 +11,7 @@ $ErrorActionPreference = "Continue"
 
 . (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
 . (Join-Path $PSScriptRoot "lib\EnvInventoryTrust.ps1")
+. (Join-Path $PSScriptRoot "lib\EnvMigrationPolicy.ps1")
 
 function Get-RootDrive {
     param([string]$Path)
@@ -619,7 +620,6 @@ function New-LocalEnvironmentFinding {
     $classification = "nested-app-local-env"
     $scope = "nested-app"
     $owner = "project"
-    $includeInReviewPack = $true
 
     if ($topProjectRoot -and $container.Equals($topProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         $classification = "project-root-local-env"
@@ -628,17 +628,14 @@ function New-LocalEnvironmentFinding {
         $classification = "archived-project-cache"
         $scope = "archive-cache"
         $owner = "archive"
-        $includeInReviewPack = $false
     } elseif ($normalized.Contains("\data\repair_backups\") -or $normalized.Contains("\repair_backups\")) {
         $classification = "plugin-cache-backup"
         $scope = "backup-cache"
         $owner = "backup"
-        $includeInReviewPack = $false
     } elseif ($normalized.Contains("\plugins\cache\")) {
         $classification = "plugin-runtime-cache"
         $scope = "plugin-runtime-cache"
         $owner = "plugin-runtime"
-        $includeInReviewPack = $false
     }
 
     [pscustomobject]@{
@@ -651,7 +648,6 @@ function New-LocalEnvironmentFinding {
         classification = $classification
         scope = $scope
         owner = $owner
-        includeInReviewPack = $includeInReviewPack
     }
 }
 
@@ -689,16 +685,6 @@ function Get-LocalEnvironmentFindings {
     }
 }
 
-function Get-ProjectEnvironmentMarkers {
-    param([object[]]$LocalEnvironmentFindings)
-
-    foreach ($finding in $LocalEnvironmentFindings) {
-        if ([bool]$finding.includeInReviewPack) {
-            $finding
-        }
-    }
-}
-
 function Escape-MarkdownCell {
     param([object]$Value)
 
@@ -720,16 +706,6 @@ function Get-HostSummary {
     }
 }
 
-function Get-ExcludedRoots {
-    @(
-        [pscustomobject]@{ path = "C:\Windows"; reason = "系统目录，绝不自动迁移" }
-        [pscustomobject]@{ path = "C:\Program Files"; reason = "MSI/系统级安装目录，绝不直接搬迁" }
-        [pscustomobject]@{ path = "C:\Program Files (x86)"; reason = "MSI/系统级安装目录，绝不直接搬迁" }
-        [pscustomobject]@{ path = "C:\ProgramData"; reason = "服务和机器级状态常驻位置，仅按官方迁移流程处理" }
-        [pscustomobject]@{ path = "C:\Users"; reason = "不批量迁移用户目录或 AppData" }
-    )
-}
-
 function ConvertTo-MarkdownReport {
     param(
         [object]$Inventory
@@ -746,16 +722,7 @@ function ConvertTo-MarkdownReport {
     $lines.Add("")
     $lines.Add("- 工具探测数量：$($Inventory.tools.Count)")
     $lines.Add("- 已存在目录数量：$(($Inventory.directories | Where-Object { $_.exists }).Count)")
-    $lines.Add("- 项目级审查环境数量：$($Inventory.projectEnvironmentMarkers.Count)")
     $lines.Add("- 本地环境相关发现数量：$($Inventory.localEnvironmentFindings.Count)")
-    $lines.Add("")
-    $lines.Add("## 绝不自动迁移")
-    $lines.Add("")
-    $lines.Add("| 路径 | 原因 |")
-    $lines.Add("| --- | --- |")
-    foreach ($root in $Inventory.excludedRoots) {
-        $lines.Add("| $(Escape-MarkdownCell $root.path) | $(Escape-MarkdownCell $root.reason) |")
-    }
     $lines.Add("")
     $lines.Add("## 工具探测")
     $lines.Add("")
@@ -814,28 +781,15 @@ function ConvertTo-MarkdownReport {
         $lines.Add("| $(Escape-MarkdownCell $dir.name) | $(Escape-MarkdownCell $dir.category) | $(Escape-MarkdownCell $dir.exists) | $(Escape-MarkdownCell $dir.path) | $(Escape-MarkdownCell $dir.notes) |")
     }
     $lines.Add("")
-    $lines.Add("## 项目本地环境")
-    $lines.Add("")
-    if ($Inventory.projectEnvironmentMarkers.Count -eq 0) {
-        $lines.Add("未发现需要纳入项目级审查的 `.venv`、`venv`、`node_modules` 或 `.conda`。")
-    } else {
-        $lines.Add("| 项目或 app | 父项目 | 分类 | 标记 | 路径 | Owner | Scope |")
-        $lines.Add("| --- | --- | --- | --- | --- | --- | --- |")
-        foreach ($marker in $Inventory.projectEnvironmentMarkers) {
-            $lines.Add("| $(Escape-MarkdownCell $marker.project) | $(Escape-MarkdownCell $marker.parentProject) | $(Escape-MarkdownCell $marker.classification) | $(Escape-MarkdownCell $marker.marker) | $(Escape-MarkdownCell $marker.path) | $(Escape-MarkdownCell $marker.owner) | $(Escape-MarkdownCell $marker.scope) |")
-        }
-    }
-    $lines.Add("")
     $lines.Add("## 本地环境分类发现")
     $lines.Add("")
     if ($Inventory.localEnvironmentFindings.Count -eq 0) {
         $lines.Add("未发现本地环境相关目录。")
     } else {
-        $lines.Add("| 分类 | 纳入项目级审查 | 所属项目或容器 | 标记 | 路径 | Owner | Scope |")
-        $lines.Add("| --- | --- | --- | --- | --- | --- | --- |")
+        $lines.Add("| 分类 | 所属项目或容器 | 标记 | 路径 | Owner | Scope |")
+        $lines.Add("| --- | --- | --- | --- | --- | --- |")
         foreach ($finding in $Inventory.localEnvironmentFindings) {
-            $reviewDisplay = if ($finding.includeInReviewPack) { "是" } else { "否" }
-            $lines.Add("| $(Escape-MarkdownCell $finding.classification) | $reviewDisplay | $(Escape-MarkdownCell $finding.project) | $(Escape-MarkdownCell $finding.marker) | $(Escape-MarkdownCell $finding.path) | $(Escape-MarkdownCell $finding.owner) | $(Escape-MarkdownCell $finding.scope) |")
+            $lines.Add("| $(Escape-MarkdownCell $finding.classification) | $(Escape-MarkdownCell $finding.project) | $(Escape-MarkdownCell $finding.marker) | $(Escape-MarkdownCell $finding.path) | $(Escape-MarkdownCell $finding.owner) | $(Escape-MarkdownCell $finding.scope) |")
         }
     }
 
@@ -973,7 +927,6 @@ $tools = @(
 
 $directories = @(Get-KnownDirectories)
 $localEnvironmentFindings = @(Get-LocalEnvironmentFindings -Roots $ProjectRoots)
-$projectMarkers = @(Get-ProjectEnvironmentMarkers -LocalEnvironmentFindings $localEnvironmentFindings)
 $envVars = @(Get-SelectedEnvironmentVariables)
 $pathScopes = Get-PathScopeRecords
 
@@ -983,7 +936,7 @@ $inventory = New-InventoryV3Document -Facts @{
     outputDir = $OutputDir
     projectRoots = $ProjectRoots
     toolOwnerRoots = $ToolOwnerRoots
-    excludedRoots = @(Get-ExcludedRoots)
+    excludedRoots = @(Get-EnvExcludedRootFacts)
     versionProbeTimeoutSeconds = $VersionProbeTimeoutSeconds
     includeSizes = [bool]$IncludeSizes
     skipVersionProbe = [bool]$SkipVersionProbe
@@ -991,7 +944,6 @@ $inventory = New-InventoryV3Document -Facts @{
     selectedEnvironmentVariables = $envVars
     pathScopes = $pathScopes
     directories = $directories
-    projectEnvironmentMarkers = $projectMarkers
     localEnvironmentFindings = $localEnvironmentFindings
 }
 

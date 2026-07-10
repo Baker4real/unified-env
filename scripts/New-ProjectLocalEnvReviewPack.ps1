@@ -6,15 +6,19 @@ param(
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
+. (Join-Path $PSScriptRoot "lib\EnvMigrationPolicy.ps1")
 
 function Assert-ProjectLocalEnvInventoryFacts {
     param([Parameter(Mandatory)][psobject]$Inventory)
 
-    if (-not ($Inventory.PSObject.Properties.Name -contains "artifactType") -or $Inventory.artifactType -cne "env-governance.inventory") {
+    if ($Inventory -isnot [pscustomobject] -or
+        -not ($Inventory.PSObject.Properties.Name -contains "artifactType") -or
+        $Inventory.artifactType -isnot [string] -or
+        $Inventory.artifactType -cne "env-governance.inventory") {
         throw "Inventory artifactType 必须为 env-governance.inventory。"
     }
     if (-not ($Inventory.PSObject.Properties.Name -contains "schemaVersion") -or
-        $Inventory.schemaVersion -isnot [int64] -or
+        -not (Test-EnvMigrationInteger -Value $Inventory.schemaVersion) -or
         $Inventory.schemaVersion -ne 3) {
         throw "Inventory schemaVersion 必须是整数 3。"
     }
@@ -23,16 +27,7 @@ function Assert-ProjectLocalEnvInventoryFacts {
         throw "Inventory localEnvironmentFindings 必须是事实数组。"
     }
 
-    foreach ($finding in @($Inventory.localEnvironmentFindings)) {
-        foreach ($name in @("project", "parentProject", "classification", "scope", "owner", "marker", "path", "includeInReviewPack")) {
-            if (-not ($finding.PSObject.Properties.Name -contains $name)) {
-                throw "Inventory localEnvironmentFinding fact 缺少字段：$name"
-            }
-        }
-        if ($finding.includeInReviewPack -isnot [bool]) {
-            throw "Inventory localEnvironmentFinding includeInReviewPack 必须是 boolean。"
-        }
-    }
+    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($Inventory.localEnvironmentFindings) -AllowLegacyReviewFlag
 }
 
 function Assert-DDrivePath {
@@ -343,10 +338,10 @@ if (-not (Test-Path -LiteralPath $InventoryPath -PathType Leaf)) {
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 Assert-AllowedOutputDir -Path $OutputDir
 
-$inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
 Assert-ProjectLocalEnvInventoryFacts -Inventory $inventory
 $items = @(
-    foreach ($marker in @($inventory.localEnvironmentFindings | Where-Object { $_.includeInReviewPack -eq $true })) {
+    foreach ($marker in @($inventory.localEnvironmentFindings | Where-Object { Test-EnvLocalEnvironmentFindingReviewEligible -Finding $_ })) {
         $files = @(Get-ExistingProjectFiles -Project $marker.project)
         $isLongRunning = Test-IsLongRunningOrStatefulProject -Project $marker.project -Marker $marker.marker
         $rebuildAssessment = Get-RebuildAssessment -Marker $marker.marker -Files $files

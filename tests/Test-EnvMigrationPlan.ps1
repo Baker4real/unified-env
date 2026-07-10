@@ -83,6 +83,8 @@ try {
         Assert-True -Condition ($entry.preChecks.Count -gt 0) -Message "迁移计划缺少前置检查"
         Assert-True -Condition ($entry.executionSteps.Count -gt 0) -Message "迁移计划缺少执行步骤"
         Assert-True -Condition ($entry.validationSteps.Count -gt 0) -Message "迁移计划缺少验证步骤"
+        Assert-True -Condition ((@($entry.validationSteps) -join "`n").Contains("重新生成 migration plan")) -Message "验证步骤应重新生成 migration plan"
+        Assert-True -Condition (-not ((@($entry.validationSteps) -join "`n").Contains("inventory 不再把来源路径列为待处理迁移候选"))) -Message "验证步骤不得再依赖 inventory candidate"
         Assert-True -Condition ($entry.rollbackSteps.Count -gt 0) -Message "迁移计划缺少回滚步骤"
         Assert-True -Condition (-not [bool]$entry.executionAllowed) -Message "dry-run 计划不应允许直接执行"
         Assert-True -Condition ([bool]$entry.requiresExplicitUserApproval) -Message "迁移计划未要求显式授权"
@@ -131,7 +133,18 @@ try {
         @{ name = "missing-directories"; mutate = { param($document) $document.PSObject.Properties.Remove("directories") } },
         @{ name = "missing-local-findings"; mutate = { param($document) $document.PSObject.Properties.Remove("localEnvironmentFindings") } },
         @{ name = "string-exists"; mutate = { param($document) $document.directories[0].exists = "false" } },
-        @{ name = "string-reparse"; mutate = { param($document) $document.directories[0].isReparsePoint = "false" } }
+        @{ name = "string-reparse"; mutate = { param($document) $document.directories[0].isReparsePoint = "false" } },
+        @{ name = "directory-null-element"; mutate = { param($document) $document.directories = [object[]]@($null) } },
+        @{ name = "directory-null-path"; mutate = { param($document) $document.directories[0].path = $null } },
+        @{ name = "directory-scalar-category"; mutate = { param($document) $document.directories[0].category = 42 } },
+        @{ name = "roots-not-array"; mutate = { param($document) $document.excludedRoots = "C:\Windows" } },
+        @{ name = "root-scalar-element"; preserve = $true; mutate = { param($document) $document.excludedRoots = [object[]]@("C:\Windows") } },
+        @{ name = "root-null-path"; preserve = $true; mutate = { param($document) $document.excludedRoots[0].path = $null } },
+        @{ name = "root-missing-programdata"; preserve = $true; mutate = { param($document) $document.excludedRoots = @($document.excludedRoots | Where-Object { $_.path -ne "C:\ProgramData" }) } },
+        @{ name = "finding-scalar-element"; mutate = { param($document) $document.localEnvironmentFindings = [object[]]@("bad-finding") } },
+        @{ name = "finding-null-path"; mutate = { param($document) $document.localEnvironmentFindings[0].path = $null } },
+        @{ name = "finding-scalar-owner"; mutate = { param($document) $document.localEnvironmentFindings[0].owner = 42 } },
+        @{ name = "finding-bad-classification"; mutate = { param($document) $document.localEnvironmentFindings[0].classification = "unknown" } }
     )
     foreach ($case in $invalidCases) {
         $fixture = ($inventory | ConvertTo-Json -Depth 30 | ConvertFrom-Json)
@@ -139,6 +152,13 @@ try {
         $fixturePath = Join-Path $testRoot "$($case.name).json"
         $fixture | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $fixturePath -Encoding UTF8
         $invalidOutput = Join-Path $testRoot "invalid-$($case.name)"
+        $sentinelJson = "old-json-$($case.name)"
+        $sentinelMarkdown = "old-markdown-$($case.name)"
+        if ([bool]$case.preserve) {
+            New-Item -ItemType Directory -Path $invalidOutput -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $invalidOutput "plan.json") -Value $sentinelJson -NoNewline -Encoding UTF8
+            Set-Content -LiteralPath (Join-Path $invalidOutput "PLAN.md") -Value $sentinelMarkdown -NoNewline -Encoding UTF8
+        }
         $failed = $false
         try {
             & $planScript -InventoryPath $fixturePath -OutputDir $invalidOutput | Out-Null
@@ -146,7 +166,12 @@ try {
             $failed = $true
         }
         Assert-True -Condition $failed -Message "迁移计划未拒绝非法 inventory：$($case.name)"
-        Assert-True -Condition (-not (Test-Path -LiteralPath $invalidOutput)) -Message "非法 inventory 不得创建输出目录：$($case.name)"
+        if ([bool]$case.preserve) {
+            Assert-True -Condition ((Get-Content -LiteralPath (Join-Path $invalidOutput "plan.json") -Raw) -ceq $sentinelJson) -Message "非法 inventory 覆盖了旧 plan.json：$($case.name)"
+            Assert-True -Condition ((Get-Content -LiteralPath (Join-Path $invalidOutput "PLAN.md") -Raw) -ceq $sentinelMarkdown) -Message "非法 inventory 覆盖了旧 PLAN.md：$($case.name)"
+        } else {
+            Assert-True -Condition (-not (Test-Path -LiteralPath $invalidOutput)) -Message "非法 inventory 不得创建输出目录：$($case.name)"
+        }
     }
 } finally {
     if (-not $KeepOutputs -and (Test-Path -Path $testRoot)) {
