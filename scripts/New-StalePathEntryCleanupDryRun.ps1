@@ -4,6 +4,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib\EnvPathSafety.ps1")
+. (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
 
 function Test-IsSubPath {
     param(
@@ -23,9 +25,7 @@ function Assert-DDrivePath {
         [string]$ParameterName
     )
 
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        throw "$ParameterName 不能为空。"
-    }
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName $ParameterName
 
     $fullPath = [System.IO.Path]::GetFullPath($Path)
     $root = [System.IO.Path]::GetPathRoot($fullPath)
@@ -146,6 +146,7 @@ function New-CleanupCandidate {
     param([object]$Entry)
 
     $path = "$($Entry.path)"
+    Assert-EnvSafeAbsolutePath -Path $path -FactName "Stale PATH candidate.path"
     $existsNow = Test-Path -LiteralPath $path
     $isReparsePoint = Test-ReparsePoint -Path $path
     $isProjectLocalEnvEntry = [bool]$Entry.isProjectLocalEnvEntry
@@ -202,8 +203,7 @@ function New-CleanupCandidate {
 
 function Write-PlanMarkdown {
     param(
-        [object]$Plan,
-        [string]$Path
+        [object]$Plan
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -277,14 +277,50 @@ function Write-PlanMarkdown {
         $lines.Add("- $rule")
     }
 
-    Set-Content -LiteralPath $Path -Value $lines -Encoding UTF8
+    return @($lines) -join "`n"
+}
+
+function Test-StalePathInteger {
+    param([AllowNull()][object]$Value)
+    return $Value -is [byte] -or $Value -is [sbyte] -or $Value -is [int16] -or $Value -is [uint16] -or $Value -is [int32] -or $Value -is [uint32] -or $Value -is [int64] -or $Value -is [uint64]
+}
+
+function Assert-StalePathReadinessV3 {
+    param([Parameter(Mandatory)][object]$Readiness)
+    if ($Readiness -isnot [pscustomobject]) { throw "Readiness 必须是 JSON object。" }
+    foreach ($name in @("artifactType", "schemaVersion", "generatedAt", "pathSummary")) {
+        if (-not ($Readiness.PSObject.Properties.Name -contains $name)) { throw "Readiness 缺少字段：$name" }
+    }
+    if ($Readiness.artifactType -isnot [string] -or $Readiness.artifactType -cne "env-governance.update-readiness") { throw "Readiness artifactType 必须为 env-governance.update-readiness。" }
+    if (-not (Test-StalePathInteger $Readiness.schemaVersion) -or $Readiness.schemaVersion -ne 3) { throw "Readiness schemaVersion 必须是整数 3。" }
+    if ($Readiness.generatedAt -isnot [string] -or [string]::IsNullOrWhiteSpace($Readiness.generatedAt)) { throw "Readiness generatedAt 必须是非空字符串。" }
+    if ($Readiness.pathSummary -isnot [pscustomobject]) { throw "Readiness pathSummary 必须是 object。" }
+    foreach ($name in @("sourceScope", "complete", "cleanupAdviceAllowed", "staleLocalEnvironmentEntries")) {
+        if (-not ($Readiness.pathSummary.PSObject.Properties.Name -contains $name)) { throw "Readiness pathSummary 缺少字段：$name" }
+    }
+    if ($Readiness.pathSummary.sourceScope -isnot [string] -or $Readiness.pathSummary.sourceScope -cne "process") { throw "Readiness pathSummary.sourceScope 必须为 process。" }
+    if ($Readiness.pathSummary.complete -isnot [bool]) { throw "Readiness pathSummary.complete 必须是 Boolean。" }
+    if (-not $Readiness.pathSummary.complete) { throw "Readiness Process PATH scope 不完整，拒绝生成 stale PATH dry-run。" }
+    if ($Readiness.pathSummary.cleanupAdviceAllowed -isnot [bool] -or -not $Readiness.pathSummary.cleanupAdviceAllowed) { throw "Readiness 未授权基于完整 Process PATH scope 生成 cleanup advice。" }
+    if ($Readiness.pathSummary.staleLocalEnvironmentEntries -isnot [array]) { throw "Readiness staleLocalEnvironmentEntries 必须是数组。" }
+    foreach ($entry in @($Readiness.pathSummary.staleLocalEnvironmentEntries)) {
+        if ($entry -isnot [pscustomobject]) { throw "Stale PATH entry 必须是 object。" }
+        foreach ($name in @("index", "path", "drive", "isProjectLocalEnvEntry", "riskLevel", "recommendedAction")) {
+            if (-not ($entry.PSObject.Properties.Name -contains $name)) { throw "Stale PATH entry 缺少字段：$name" }
+        }
+        if (-not (Test-StalePathInteger $entry.index)) { throw "Stale PATH entry.index 必须是整数。" }
+        Assert-EnvSafeAbsolutePath -Path $entry.path -FactName "Stale PATH entry.path"
+        if ($entry.isProjectLocalEnvEntry -isnot [bool]) { throw "Stale PATH entry.isProjectLocalEnvEntry 必须是 Boolean。" }
+        if ($entry.riskLevel -isnot [string] -or $entry.recommendedAction -isnot [string]) { throw "Stale PATH entry 文本字段类型无效。" }
+    }
 }
 
 Assert-ReadableDFile -Path $ReadinessPath -ParameterName "ReadinessPath"
+$readiness = Get-Content -LiteralPath $ReadinessPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
+Assert-StalePathReadinessV3 -Readiness $readiness
+# readiness contract 通过后才校验/发布 OutputDir；失败不得创建或覆盖旧产物。
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 Assert-AllowedOutputDir -Path $OutputDir
-
-$readiness = Get-Content -LiteralPath $ReadinessPath -Raw | ConvertFrom-Json
 $readinessGeneratedAt = if ($readiness.generatedAt -is [datetime]) {
     $readiness.generatedAt.ToString("o")
 } else {
@@ -298,6 +334,7 @@ $candidates = @(
 )
 
 $plan = [pscustomobject]@{
+    artifactType = "env-governance.stale-path-entry-cleanup-dry-run"
     schemaVersion = 1
     generatedAt = (Get-Date).ToString("o")
     dryRun = $true
@@ -329,20 +366,15 @@ $plan = [pscustomobject]@{
     }
 }
 
-New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-$jsonPath = Join-Path $OutputDir "plan.json"
-$markdownPath = Join-Path $OutputDir "PLAN.md"
-Assert-DDrivePath -Path $jsonPath -ParameterName "plan.json"
-Assert-DDrivePath -Path $markdownPath -ParameterName "PLAN.md"
-Assert-ExistingLeafIsNotReparsePoint -Path $jsonPath -ParameterName "plan.json"
-Assert-ExistingLeafIsNotReparsePoint -Path $markdownPath -ParameterName "PLAN.md"
-
-$plan | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
-Write-PlanMarkdown -Plan $plan -Path $markdownPath
+$published = Publish-JsonMarkdownArtifactPair -Document $plan -OutputDir $OutputDir -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown {
+    param($Document, $JsonSha256)
+    Write-PlanMarkdown -Plan $Document
+}
 
 [pscustomobject]@{
-    planJson = $jsonPath
-    planMarkdown = $markdownPath
+    planJson = $published.jsonPath
+    planMarkdown = $published.markdownPath
+    generationId = $published.generationId
     dryRun = $true
     readOnly = $true
     executionAllowed = $false

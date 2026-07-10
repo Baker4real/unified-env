@@ -54,12 +54,14 @@ function Assert-CanRemoveTestRoot {
 }
 
 $scriptPath = Join-Path $ProjectRoot "scripts\New-StalePathEntryCleanupDryRun.ps1"
+$publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
 $testRoot = Join-Path $ProjectRoot "reports\stale-path-entry-cleanup-dry-run-test"
 $fixtureRoot = Join-Path $testRoot "fixture"
 $fixtureReadiness = Join-Path $fixtureRoot "readiness.json"
 $outputDir = Join-Path $testRoot "out"
 
 Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Message "找不到失效 PATH 清理 dry-run 脚本"
+. $publisherPath
 
 try {
     Assert-CanRemoveTestRoot -Path $testRoot
@@ -74,8 +76,13 @@ try {
     New-Item -ItemType Directory -Force -Path $existingPath | Out-Null
 
     $fixture = [pscustomobject]@{
+        artifactType = "env-governance.update-readiness"
+        schemaVersion = 3
         generatedAt = (Get-Date).ToString("o")
         pathSummary = [pscustomobject]@{
+            sourceScope = "process"
+            complete = $true
+            cleanupAdviceAllowed = $true
             staleLocalEnvironmentEntries = @(
                 [pscustomobject]@{
                     index = 1
@@ -116,9 +123,11 @@ try {
     $planJsonText = Get-Content -LiteralPath $jsonPath -Raw
     Assert-True -Condition ($planJsonText -match '"readinessGeneratedAt"\s*:\s*"[^"]*T[^"]*"') -Message "readinessGeneratedAt 应保持 ISO 可读格式"
     $plan = $planJsonText | ConvertFrom-Json
-    foreach ($property in @("schemaVersion", "generatedAt", "dryRun", "readOnly", "readinessPath", "readinessGeneratedAt", "summary", "candidates", "policy")) {
+    foreach ($property in @("artifactType", "schemaVersion", "generationId", "generatedAt", "dryRun", "readOnly", "readinessPath", "readinessGeneratedAt", "summary", "candidates", "policy")) {
         Assert-Property -Object $plan -Name $property
     }
+    $pair = Test-JsonMarkdownArtifactPair -JsonPath $jsonPath -MarkdownPath $markdownPath
+    Assert-True -Condition ([bool]$pair.ok) -Message "stale PATH JSON/Markdown pair 校验失败：$($pair.error)"
 
     Assert-True -Condition ([bool]$plan.dryRun) -Message "plan JSON 的 dryRun 不是 true"
     Assert-True -Condition ([bool]$plan.readOnly) -Message "plan JSON 的 readOnly 不是 true"
@@ -143,6 +152,34 @@ try {
     $blockedCandidate = $plan.candidates | Where-Object { $_.path -eq $existingPath } | Select-Object -First 1
     Assert-True -Condition ($blockedCandidate.status -eq "blocked") -Message "已存在路径应阻塞"
     Assert-True -Condition ((@($blockedCandidate.blockedReasons) -join "`n").Contains("当前已经存在")) -Message "已存在路径缺少阻塞原因"
+
+    foreach ($case in @(
+        @{ name = "schema2"; artifactType = "env-governance.update-readiness"; schemaVersion = 2; sourceScope = "process"; complete = $true },
+        @{ name = "wrong-artifact"; artifactType = "wrong"; schemaVersion = 3; sourceScope = "process"; complete = $true },
+        @{ name = "wrong-scope"; artifactType = "env-governance.update-readiness"; schemaVersion = 3; sourceScope = "user"; complete = $true },
+        @{ name = "incomplete"; artifactType = "env-governance.update-readiness"; schemaVersion = 3; sourceScope = "process"; complete = $false; cleanupAdviceAllowed = $true },
+        @{ name = "advice-disabled"; artifactType = "env-governance.update-readiness"; schemaVersion = 3; sourceScope = "process"; complete = $true; cleanupAdviceAllowed = $false }
+    )) {
+        $invalid = $fixture | ConvertTo-Json -Depth 100 | ConvertFrom-Json
+        $invalid.artifactType = $case.artifactType
+        $invalid.schemaVersion = $case.schemaVersion
+        $invalid.pathSummary.sourceScope = $case.sourceScope
+        $invalid.pathSummary.complete = $case.complete
+        if ($case.ContainsKey("cleanupAdviceAllowed")) { $invalid.pathSummary.cleanupAdviceAllowed = $case.cleanupAdviceAllowed }
+        $invalidPath = Join-Path $fixtureRoot "$($case.name).json"
+        $invalid | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $invalidPath -Encoding utf8
+        $invalidOutput = Join-Path $testRoot "reject-$($case.name)"
+        New-Item -ItemType Directory -Force -Path $invalidOutput | Out-Null
+        $sentinelJson = Join-Path $invalidOutput "plan.json"
+        $sentinelMarkdown = Join-Path $invalidOutput "PLAN.md"
+        Set-Content -LiteralPath $sentinelJson -Value "old-json" -NoNewline
+        Set-Content -LiteralPath $sentinelMarkdown -Value "old-markdown" -NoNewline
+        $rejected = $false
+        try { & $scriptPath -ReadinessPath $invalidPath -OutputDir $invalidOutput | Out-Null } catch { $rejected = $true }
+        Assert-True -Condition $rejected -Message "stale PATH 未拒绝不可信 readiness：$($case.name)"
+        Assert-True -Condition ((Get-Content -LiteralPath $sentinelJson -Raw) -ceq "old-json") -Message "失败关闭不得覆盖旧 plan.json：$($case.name)"
+        Assert-True -Condition ((Get-Content -LiteralPath $sentinelMarkdown -Raw) -ceq "old-markdown") -Message "失败关闭不得覆盖旧 PLAN.md：$($case.name)"
+    }
 
     $markdown = Get-Content -LiteralPath $markdownPath -Raw
     foreach ($expected in @("DRY-RUN", "执行允许：否", "不修改用户 PATH", "不删除或重建", "人工授权门", "回滚步骤", $missingVenvPath)) {
