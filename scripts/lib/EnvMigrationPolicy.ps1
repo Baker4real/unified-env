@@ -57,12 +57,27 @@ function Assert-EnvNonEmptyStringProperty {
     }
 }
 
+function Assert-EnvNotWindowsDeviceNamespace {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$FactName
+    )
+
+    $normalized = $Path.Replace('/', '\')
+    foreach ($prefix in @('\\?\', '\\.\', '\??\')) {
+        if ($normalized.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "$FactName 不得使用 Windows device namespace：$Path"
+        }
+    }
+}
+
 function Assert-EnvAbsolutePathValue {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$FactName
     )
 
+    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName $FactName
     if (-not [IO.Path]::IsPathFullyQualified($Path)) {
         throw "$FactName 必须是绝对路径：$Path"
     }
@@ -107,6 +122,43 @@ function Test-EnvMigrationSubPath {
     } catch {
         return $false
     }
+}
+
+function Assert-EnvProjectRootFacts {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots)
+
+    $canonicalRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($root in @($ProjectRoots)) {
+        if ($root -isnot [string] -or [string]::IsNullOrWhiteSpace($root)) {
+            throw "ProjectRoot fact 必须是非空字符串。"
+        }
+        Assert-EnvAbsolutePathValue -Path $root -FactName "ProjectRoot fact"
+        $canonicalRoot = [IO.Path]::GetFullPath($root).TrimEnd('\', '/')
+        if (-not $canonicalRoots.Add($canonicalRoot)) {
+            throw "ProjectRoot facts 包含重复 canonical path：$root"
+        }
+    }
+}
+
+function Get-EnvMostSpecificProjectRoot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots
+    )
+
+    Assert-EnvAbsolutePathValue -Path $Path -FactName "ProjectRoot match path"
+    Assert-EnvProjectRootFacts -ProjectRoots $ProjectRoots
+    $bestMatch = $null
+    foreach ($root in @($ProjectRoots)) {
+        $canonicalRoot = [IO.Path]::GetFullPath([string]$root).TrimEnd('\', '/')
+        if ((Test-EnvMigrationSubPath -Path $Path -Root $canonicalRoot) -and
+            ($null -eq $bestMatch -or $canonicalRoot.Length -gt $bestMatch.Length)) {
+            $bestMatch = $canonicalRoot
+        }
+    }
+    return $bestMatch
 }
 
 function Test-EnvApprovedUserCachePath {
@@ -225,6 +277,7 @@ function Assert-EnvMigrationDirectoryFacts {
             Assert-EnvNonEmptyStringProperty -Value $directory -PropertyName $name -FactName "Directory fact"
         }
         Assert-EnvAbsolutePathValue -Path $directory.path -FactName "Directory fact.path"
+        Assert-EnvAbsolutePathValue -Path $directory.drive -FactName "Directory fact.drive"
         $canonicalPath = [IO.Path]::GetFullPath($directory.path).TrimEnd('\', '/')
         if (-not $canonicalPaths.Add($canonicalPath)) {
             throw "Directory facts 包含重复 canonical path：$($directory.path)"
@@ -250,11 +303,13 @@ function Assert-EnvMigrationDirectoryFacts {
                 if ([string]::IsNullOrWhiteSpace($directory.reparseTarget)) {
                     throw "Directory fact.reparseTarget 字符串不能为空。"
                 }
+                Assert-EnvNotWindowsDeviceNamespace -Path $directory.reparseTarget -FactName "Directory fact.reparseTarget"
             } elseif ($directory.reparseTarget -is [array]) {
                 foreach ($target in $directory.reparseTarget) {
                     if ($target -isnot [string] -or [string]::IsNullOrWhiteSpace($target)) {
                         throw "Directory fact.reparseTarget 数组只能包含非空字符串。"
                     }
+                    Assert-EnvNotWindowsDeviceNamespace -Path $target -FactName "Directory fact.reparseTarget"
                 }
             } else {
                 throw "Directory fact.reparseTarget 必须是 null、字符串或字符串数组。"
@@ -267,6 +322,7 @@ function Assert-EnvLocalEnvironmentFindingFacts {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LocalEnvironmentFindings,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots,
         [switch]$AllowLegacyReviewFlag
     )
 
@@ -283,6 +339,7 @@ function Assert-EnvLocalEnvironmentFindingFacts {
     )
     $allowedProjectFiles = @(Get-EnvRebuildEvidenceFileNames)
     $canonicalPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    Assert-EnvProjectRootFacts -ProjectRoots $ProjectRoots
 
     foreach ($finding in @($LocalEnvironmentFindings)) {
         Assert-EnvFactObject -Value $finding -FactName "LocalEnvironmentFinding fact"
@@ -297,6 +354,7 @@ function Assert-EnvLocalEnvironmentFindingFacts {
         Assert-EnvNonEmptyStringProperty -Value $finding -PropertyName "parentProject" -FactName "LocalEnvironmentFinding fact" -AllowNull
         Assert-EnvAbsolutePathValue -Path $finding.project -FactName "LocalEnvironmentFinding fact.project"
         Assert-EnvAbsolutePathValue -Path $finding.path -FactName "LocalEnvironmentFinding fact.path"
+        Assert-EnvAbsolutePathValue -Path $finding.drive -FactName "LocalEnvironmentFinding fact.drive"
         if ($null -eq $finding.parentProject) {
             throw "LocalEnvironmentFinding fact.parentProject 不能为空。"
         }
@@ -314,6 +372,11 @@ function Assert-EnvLocalEnvironmentFindingFacts {
         }
         $canonicalProject = [IO.Path]::GetFullPath($finding.project).TrimEnd('\', '/')
         $canonicalParentProject = [IO.Path]::GetFullPath($finding.parentProject).TrimEnd('\', '/')
+        $matchedProjectRoot = Get-EnvMostSpecificProjectRoot -Path $canonicalPath -ProjectRoots $ProjectRoots
+        if ($null -eq $matchedProjectRoot -or
+            -not $canonicalParentProject.Equals($matchedProjectRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "LocalEnvironmentFinding fact.parentProject 必须等于包含 marker 的最具体显式 ProjectRoot。"
+        }
         $expectedPath = [IO.Path]::GetFullPath((Join-Path $canonicalProject $finding.marker)).TrimEnd('\', '/')
         if (-not $canonicalPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
             throw "LocalEnvironmentFinding fact.path 必须是 project 下的 marker 直接子目录。"
@@ -432,7 +495,7 @@ function Assert-EnvMigrationInventoryFacts {
         $Inventory.schemaVersion -ne 3) {
         throw "Inventory schemaVersion 必须是整数 3。"
     }
-    foreach ($name in @("generatedAt", "directories", "excludedRoots", "localEnvironmentFindings")) {
+    foreach ($name in @("generatedAt", "directories", "excludedRoots", "localEnvironmentFindings", "projectRoots")) {
         if (-not ($Inventory.PSObject.Properties.Name -contains $name)) {
             throw "Inventory 缺少迁移计划所需事实字段：$name"
         }
@@ -440,7 +503,7 @@ function Assert-EnvMigrationInventoryFacts {
     if ($Inventory.generatedAt -isnot [string] -or [string]::IsNullOrWhiteSpace($Inventory.generatedAt)) {
         throw "Inventory generatedAt 必须是非空字符串。"
     }
-    foreach ($name in @("directories", "excludedRoots", "localEnvironmentFindings")) {
+    foreach ($name in @("directories", "excludedRoots", "localEnvironmentFindings", "projectRoots")) {
         if ($Inventory.$name -isnot [array]) {
             throw "Inventory 事实字段必须是数组：$name"
         }
@@ -453,7 +516,8 @@ function Assert-EnvMigrationInventoryFacts {
 
     Assert-EnvMigrationDirectoryFacts -Directories @($Inventory.directories)
     Assert-EnvExcludedRootFacts -ExcludedRoots @($Inventory.excludedRoots)
-    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($Inventory.localEnvironmentFindings)
+    Assert-EnvProjectRootFacts -ProjectRoots @($Inventory.projectRoots)
+    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($Inventory.localEnvironmentFindings) -ProjectRoots @($Inventory.projectRoots)
 }
 
 function Get-EnvMigrationCandidates {
@@ -546,11 +610,12 @@ function Get-EnvManualReviewItems {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Directories,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LocalEnvironmentFindings
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LocalEnvironmentFindings,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProjectRoots
     )
 
     Assert-EnvMigrationDirectoryFacts -Directories $Directories
-    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $LocalEnvironmentFindings
+    Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $LocalEnvironmentFindings -ProjectRoots $ProjectRoots
     foreach ($directory in @($Directories)) {
         if (-not $directory.exists) {
             continue

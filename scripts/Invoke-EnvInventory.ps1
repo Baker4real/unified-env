@@ -588,27 +588,7 @@ function Get-TopProjectRoot {
         [string[]]$Roots
     )
 
-    foreach ($root in $Roots) {
-        if (-not (Test-IsSubPath -Path $Path -BasePath $root)) {
-            continue
-        }
-
-        $container = [IO.Directory]::GetParent([IO.Path]::GetFullPath($Path)).FullName
-        $canonicalRoot = [IO.Path]::GetFullPath($root).TrimEnd('\', '/')
-        if ($container.Equals($canonicalRoot, [StringComparison]::OrdinalIgnoreCase)) {
-            return $canonicalRoot
-        }
-
-        $relative = Get-RelativePath -Path $Path -BasePath $root
-        $segments = @($relative -split "[\\/]" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        if ($segments.Count -eq 0) {
-            return $null
-        }
-
-        return (Join-Path $root $segments[0])
-    }
-
-    return $null
+    return Get-EnvMostSpecificProjectRoot -Path $Path -ProjectRoots $Roots
 }
 
 function Get-ProjectRebuildEvidence {
@@ -684,6 +664,7 @@ function Get-LocalEnvironmentFindings {
 
     $markerNames = @(".venv", "venv", "node_modules", ".conda")
     $skipDirectoryNames = @(".git", ".codegraph", ".scratch", "reports", "target", "dist", "build")
+    $emittedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 
     foreach ($root in $Roots) {
         if (-not (Test-Path -LiteralPath $root -PathType Container)) {
@@ -700,7 +681,10 @@ function Get-LocalEnvironmentFindings {
             }
 
             if ($markerNames -contains $dir.Name) {
-                New-LocalEnvironmentFinding -MarkerPath $dir.FullName -Roots $Roots
+                $canonicalMarkerPath = [IO.Path]::GetFullPath($dir.FullName).TrimEnd('\', '/')
+                if ($emittedPaths.Add($canonicalMarkerPath)) {
+                    New-LocalEnvironmentFinding -MarkerPath $canonicalMarkerPath -Roots $Roots
+                }
                 continue
             }
 
@@ -954,10 +938,11 @@ $tools = @(
     }
 )
 
+Assert-EnvProjectRootFacts -ProjectRoots $ProjectRoots
 $directories = @(Get-KnownDirectories)
 Assert-EnvMigrationDirectoryFacts -Directories $directories
 $localEnvironmentFindings = @(Get-LocalEnvironmentFindings -Roots $ProjectRoots)
-Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $localEnvironmentFindings
+Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $localEnvironmentFindings -ProjectRoots $ProjectRoots
 $envVars = @(Get-SelectedEnvironmentVariables)
 $pathScopes = Get-PathScopeRecords
 

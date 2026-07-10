@@ -39,6 +39,17 @@ $rebuildEvidenceFileNames = @(Get-EnvRebuildEvidenceFileNames)
 Assert-True -Condition ($rebuildEvidenceFileNames -contains "package-lock.json") -Message "canonical rebuild evidence 文件表缺少 package-lock.json"
 Assert-True -Condition (@($rebuildEvidenceFileNames | Sort-Object -Unique).Count -eq $rebuildEvidenceFileNames.Count) -Message "canonical rebuild evidence 文件表不得重复"
 
+$workspaceRoot = "D:\fixture-workspace"
+$specificAppRoot = "D:\fixture-workspace\app"
+$nearestRoot = Get-EnvMostSpecificProjectRoot -Path "D:\fixture-workspace\app\node_modules" -ProjectRoots @($workspaceRoot, $specificAppRoot)
+Assert-True -Condition ($nearestRoot -eq $specificAppRoot) -Message "marker 必须选择最近/最具体的显式 ProjectRoot"
+$nestedRoot = Get-EnvMostSpecificProjectRoot -Path "D:\fixture-workspace\apps\web\node_modules" -ProjectRoots @($workspaceRoot, $specificAppRoot)
+Assert-True -Condition ($nestedRoot -eq $workspaceRoot) -Message "深层 marker 必须选择实际包含它的最近显式 ProjectRoot"
+
+foreach ($devicePath in @('\\?\C:\Users\fixture\.cargo', '\\.\C:\Users\fixture\.cargo', '//?/C:/Users/fixture/.cargo', '//./C:/Users/fixture/.cargo')) {
+    Assert-Throws -Action { Assert-EnvAbsolutePathValue -Path $devicePath -FactName "device path fixture" } -Message "必须在 canonical/drive 判断前拒绝 Windows device namespace：$devicePath"
+}
+
 $canonicalExcludedRoots = @(Get-EnvCanonicalExcludedRoots)
 $excludedRootFacts = @(Get-EnvExcludedRootFacts)
 Assert-True -Condition ($canonicalExcludedRoots.Count -eq 5) -Message "canonical excluded-root 规则数量发生变化"
@@ -193,6 +204,7 @@ $localEnvironmentFindings = @(
         }
     }
 )
+$fixtureProjectRoots = [object[]]@("D:\Codex\projects\fixture-app")
 
 $missingRebuildEvidence = [pscustomobject]@{
     project = "D:\Codex\projects\fixture-app"
@@ -205,7 +217,7 @@ $missingRebuildEvidence = [pscustomobject]@{
     scope = "project-root"
     owner = "project"
 }
-Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($missingRebuildEvidence) } -Message "本地环境 fact 必须包含严格 rebuildEvidence"
+Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($missingRebuildEvidence) -ProjectRoots $fixtureProjectRoots } -Message "本地环境 fact 必须包含严格 rebuildEvidence"
 
 $duplicateDirectories = [object[]]@(
     $directories[0],
@@ -217,18 +229,28 @@ $duplicateFindings = [object[]]@(
     $localEnvironmentFindings[0],
     ($localEnvironmentFindings[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
 )
-Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $duplicateFindings } -Message "LocalEnvironmentFinding facts 必须拒绝重复 canonical path"
+Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $duplicateFindings -ProjectRoots $fixtureProjectRoots } -Message "LocalEnvironmentFinding facts 必须拒绝重复 canonical path"
 
 $masqueradeFinding = ($localEnvironmentFindings[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
 $masqueradeFinding.classification = "plugin-runtime-cache"
 $masqueradeFinding.scope = "plugin-runtime-cache"
 $masqueradeFinding.owner = "plugin-runtime"
-Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($masqueradeFinding) } -Message "普通项目 node_modules 不得协调伪装为 plugin-runtime-cache"
+Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($masqueradeFinding) -ProjectRoots $fixtureProjectRoots } -Message "普通项目 node_modules 不得协调伪装为 plugin-runtime-cache"
+
+$wrongExplicitRootFinding = ($localEnvironmentFindings[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
+Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($wrongExplicitRootFinding) -ProjectRoots @("D:\Codex\projects") } -Message "strict validator 必须拒绝不等于最具体显式 root 的 parentProject"
+
+$deviceDirectory = ($directories[5] | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
+$deviceDirectory.path = '\\?\C:\Users\fixture\.cargo'
+$deviceDirectory.drive = '\\?\C:\'
+Assert-Throws -Action { Assert-EnvMigrationDirectoryFacts -Directories @($deviceDirectory) } -Message "device namespace directory 单独出现时必须失败"
+Assert-Throws -Action { Assert-EnvMigrationDirectoryFacts -Directories @($directories[5], $deviceDirectory) } -Message "device namespace 与普通路径并存时也必须失败，不能绕过去重"
+Assert-Throws -Action { Assert-EnvProjectRootFacts -ProjectRoots @('\\?\D:\fixture-workspace') } -Message "device namespace ProjectRoot 必须失败"
 
 $candidates = @(Get-EnvMigrationCandidates -Directories $directories)
-$manualReviewItems = @(Get-EnvManualReviewItems -Directories $directories -LocalEnvironmentFindings $localEnvironmentFindings)
+$manualReviewItems = @(Get-EnvManualReviewItems -Directories $directories -LocalEnvironmentFindings $localEnvironmentFindings -ProjectRoots $fixtureProjectRoots)
 $emptyCandidates = @(Get-EnvMigrationCandidates -Directories @())
-$emptyManualReviewItems = @(Get-EnvManualReviewItems -Directories @() -LocalEnvironmentFindings @())
+$emptyManualReviewItems = @(Get-EnvManualReviewItems -Directories @() -LocalEnvironmentFindings @() -ProjectRoots @())
 Assert-True -Condition ($emptyCandidates.Count -eq 0) -Message "空目录事实应得到空迁移候选"
 Assert-True -Condition ($emptyManualReviewItems.Count -eq 0) -Message "空事实应得到空人工审查项"
 

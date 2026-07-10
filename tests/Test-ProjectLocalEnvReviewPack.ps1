@@ -40,10 +40,15 @@ $inventoryOutput = Join-Path $testRoot "inventory"
 $reviewOutput = Join-Path $testRoot "review"
 $reviewAfterMutationOutput = Join-Path $testRoot "review-after-mutation"
 $inventoryPath = Join-Path $inventoryOutput "inventory.json"
-$fixtureProject = Join-Path $testRoot "fixture-project"
+$fixtureWorkspace = Join-Path $testRoot "fixture-workspace"
+$fixtureProject = Join-Path $fixtureWorkspace "app"
+$fixtureWebProject = Join-Path $fixtureWorkspace "apps\web"
 $fixtureNodeModules = Join-Path $fixtureProject "node_modules"
+$fixtureWebNodeModules = Join-Path $fixtureWebProject "node_modules"
 $fixturePackageJson = Join-Path $fixtureProject "package.json"
 $fixturePackageLock = Join-Path $fixtureProject "package-lock.json"
+$fixtureWebPackageJson = Join-Path $fixtureWebProject "package.json"
+$fixtureWebPackageLock = Join-Path $fixtureWebProject "package-lock.json"
 
 Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Message "找不到项目本地环境审查包脚本"
 Assert-True -Condition (Test-Path -LiteralPath $inventoryScript -PathType Leaf) -Message "找不到 inventory 脚本"
@@ -56,10 +61,13 @@ try {
     }
 
     New-Item -ItemType Directory -Path $fixtureNodeModules -Force | Out-Null
+    New-Item -ItemType Directory -Path $fixtureWebNodeModules -Force | Out-Null
     Set-Content -LiteralPath $fixturePackageJson -Value '{"name":"fixture-project"}' -Encoding UTF8
     Set-Content -LiteralPath $fixturePackageLock -Value '{"lockfileVersion":3}' -Encoding UTF8
+    Set-Content -LiteralPath $fixtureWebPackageJson -Value '{"name":"fixture-web-project"}' -Encoding UTF8
+    Set-Content -LiteralPath $fixtureWebPackageLock -Value '{"lockfileVersion":3}' -Encoding UTF8
 
-    & $inventoryScript -OutputDir $inventoryOutput -ProjectRoots @($fixtureProject) -SkipVersionProbe | Out-Null
+    & $inventoryScript -OutputDir $inventoryOutput -ProjectRoots @($fixtureWorkspace, $fixtureProject) -SkipVersionProbe | Out-Null
     Assert-True -Condition (Test-Path -LiteralPath $inventoryPath -PathType Leaf) -Message "测试 inventory 未生成"
 
     $result = & $scriptPath -InventoryPath $inventoryPath -OutputDir $reviewOutput
@@ -76,6 +84,14 @@ try {
     $review = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
     $inventoryMarkers = @($inventory.localEnvironmentFindings | Where-Object { $_.classification -in @("project-root-local-env", "nested-app-local-env") -and $_.owner -eq "project" })
+    $appFinding = $inventoryMarkers | Where-Object { $_.path -ieq $fixtureNodeModules } | Select-Object -First 1
+    Assert-True -Condition ($null -ne $appFinding) -Message "overlapping roots 下缺少 app node_modules finding"
+    Assert-True -Condition ($appFinding.parentProject -ieq $fixtureProject -and $appFinding.project -ieq $fixtureProject) -Message "app marker 必须选择最具体显式 app root"
+    Assert-True -Condition ($appFinding.classification -eq "project-root-local-env" -and $appFinding.scope -eq "project-root") -Message "app marker 分类必须与最具体显式 root 一致"
+    $webFinding = $inventoryMarkers | Where-Object { $_.path -ieq $fixtureWebNodeModules } | Select-Object -First 1
+    Assert-True -Condition ($null -ne $webFinding) -Message "workspace 深层 web node_modules finding 缺失"
+    Assert-True -Condition ($webFinding.parentProject -ieq $fixtureWorkspace -and $webFinding.project -ieq $fixtureWebProject) -Message "web marker 必须绑定包含它的最近显式 workspace root"
+    Assert-True -Condition ($webFinding.classification -eq "nested-app-local-env" -and $webFinding.scope -eq "nested-app") -Message "web marker 分类必须与 workspace root 一致"
     foreach ($finding in @($inventory.localEnvironmentFindings)) {
         foreach ($policyProperty in @("risk", "recommendation", "reason", "includeInReviewPack")) {
             Assert-True -Condition (-not ($finding.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 本地环境事实不应包含策略字段 $policyProperty：$($finding.path)"
@@ -92,6 +108,7 @@ try {
     Assert-True -Condition ([bool]$review.readOnly) -Message "review JSON 的 readOnly 不是 true"
     Assert-True -Condition (-not [bool]$review.policy.autoMigrationAllowed) -Message "项目本地环境不应允许自动迁移"
     Assert-True -Condition ($review.items.Count -eq $inventoryMarkers.Count) -Message "审查项数量必须与纳入审查的 inventory.localEnvironmentFindings 精确一致"
+    Assert-True -Condition ($review.summary.totalItems -eq 2 -and $review.summary.nestedAppItems -eq 1) -Message "review summary 必须与最具体 root 分类一致"
 
     $inventoryKeys = @{}
     foreach ($marker in $inventoryMarkers) {

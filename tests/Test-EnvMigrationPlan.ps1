@@ -141,6 +141,8 @@ try {
         @{ name = "directory-null-path"; mutate = { param($document) $document.directories[0].path = $null } },
         @{ name = "directory-scalar-category"; mutate = { param($document) $document.directories[0].category = 42 } },
         @{ name = "directory-duplicate-canonical-path"; mutate = { param($document) $duplicate = ($document.directories[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json); $duplicate.path = $document.directories[0].path.ToUpperInvariant().TrimEnd('\') + '\'; $document.directories = [object[]]@($document.directories + $duplicate) } },
+        @{ name = "directory-device-namespace"; mutate = { param($document) $document.directories[0].path = '\\?\C:\Users\fixture\.cargo'; $document.directories[0].drive = '\\?\C:\' } },
+        @{ name = "project-root-device-namespace"; mutate = { param($document) $document.projectRoots = [object[]]@('\\?\D:\Codex\projects') } },
         @{ name = "roots-not-array"; mutate = { param($document) $document.excludedRoots = "C:\Windows" } },
         @{ name = "root-scalar-element"; preserve = $true; mutate = { param($document) $document.excludedRoots = [object[]]@("C:\Windows") } },
         @{ name = "root-null-path"; preserve = $true; mutate = { param($document) $document.excludedRoots[0].path = $null } },
