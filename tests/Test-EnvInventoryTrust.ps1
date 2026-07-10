@@ -48,7 +48,7 @@ try {
     Assert-True -Condition ($scope.errors.Count -eq 0) -Message "完整 PATH scope 的 errors 必须为空"
     foreach ($entry in $scope.entries) {
         $actualFields = @($entry.PSObject.Properties.Name)
-        $expectedFields = @("index", "rawPath", "expandedPath", "expansionStatus", "exists", "drive", "isReparsePoint", "reparseAncestor", "reparseTarget")
+        $expectedFields = @("index", "rawPath", "expandedPath", "expansionStatus", "exists", "drive", "isReparsePoint", "reparseTarget")
         Assert-True -Condition (($actualFields -join ",") -ceq ($expectedFields -join ",")) -Message "PATH entry 字段必须固定"
     }
 
@@ -115,6 +115,9 @@ try {
     Assert-True -Condition ($junctionChain.reparseAncestor -eq "D:\Fixture\link") -Message "junction 父链必须保留 ancestor"
     Assert-True -Condition ($junctionChain.reparseTarget -eq "D:\Fixture\target") -Message "junction 父链必须保留 target"
     $junctionScope = New-PathScopeRecord -Source process -RawValue "D:\Fixture\link\missing" -DotNetValue "D:\Fixture\link\missing" -ReadErrors @() -MetadataResolver { param([string]$Path) $junctionChain }.GetNewClosure()
+    Assert-True -Condition (-not [bool]$junctionScope.complete) -Message "junction 父链证据必须使 scope fail-closed"
+    Assert-True -Condition (-not ($junctionScope.entries[0].PSObject.Properties.Name -contains "reparseAncestor")) -Message "PATH entry schema 3 不得公开第 9 个 reparseAncestor 字段"
+    Assert-True -Condition (@($junctionScope.errors | Where-Object { $_ -ceq "ReparseAncestor[0]: D:\Fixture\link" }).Count -eq 1) -Message "junction ancestor 必须通过 scope errors 保留稳定证据"
     Assert-True -Condition ($junctionScope.missingPathCleanupCandidates.Count -eq 0) -Message "junction 父链下的缺失 PATH 不得生成 cleanup 建议"
 
     $failingChainResolver = {

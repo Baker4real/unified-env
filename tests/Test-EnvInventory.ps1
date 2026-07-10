@@ -114,7 +114,7 @@ foreach ($expected in @("## 本地环境分类发现")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing local env classification text: $expected"
 }
 foreach ($scopeName in @("process", "user", "machine")) {
-    foreach ($expected in @("### PATH scope: $scopeName", "readStatus", "complete", "errors", "rawPath", "expandedPath", "expansionStatus", "reparseAncestor")) {
+    foreach ($expected in @("### PATH scope: $scopeName", "readStatus", "complete", "errors", "rawPath", "expandedPath", "expansionStatus")) {
         Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing $scopeName PATH detail: $expected"
     }
 }
@@ -247,9 +247,13 @@ try {
     $junctionEntry = @($pathReparseInventory.pathScopes.process.entries)[0]
     Assert-True -Condition (-not [bool]$junctionEntry.exists) -Message "junction 下不存在 PATH 叶子必须保留 exists=false"
     Assert-True -Condition ([bool]$junctionEntry.isReparsePoint) -Message "PATH adapter 必须检测父链 junction"
-    Assert-True -Condition ($junctionEntry.reparseAncestor -ieq $pathFixtureJunction) -Message "PATH adapter 必须保留 reparse ancestor"
     Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($junctionEntry.reparseTarget)) -Message "PATH adapter 必须保留 reparse target"
+    Assert-True -Condition (-not ($junctionEntry.PSObject.Properties.Name -contains "reparseAncestor")) -Message "PATH entry schema 3 必须保持 8 字段"
+    $expectedAncestorEvidence = "ReparseAncestor[0]: $pathFixtureJunction"
+    Assert-True -Condition (@($pathReparseInventory.pathScopes.process.errors | Where-Object { $_ -ceq $expectedAncestorEvidence }).Count -eq 1) -Message "PATH scope errors 必须保留 junction ancestor 证据"
     Assert-True -Condition (@($pathReparseInventory.pathScopes.process.missingPathCleanupCandidates).Count -eq 0) -Message "junction 父链下缺失 PATH 不得生成 cleanup 建议"
+    $pathReparseReport = Get-Content -LiteralPath (Join-Path $pathReparseOutput "REPORT.md") -Raw
+    Assert-True -Condition $pathReparseReport.Contains($expectedAncestorEvidence) -Message "Markdown 必须通过 errors 展示 junction ancestor 证据"
 } finally {
     $env:Path = $previousProcessPath
     Remove-Item -LiteralPath $pathFixtureJunction -Force

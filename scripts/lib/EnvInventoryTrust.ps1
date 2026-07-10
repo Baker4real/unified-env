@@ -204,6 +204,7 @@ function New-PathScopeRecord {
     $entries = [Collections.Generic.List[object]]::new()
     $duplicates = [Collections.Generic.List[object]]::new()
     $metadataErrors = [Collections.Generic.List[string]]::new()
+    $reparseEvidence = [Collections.Generic.List[string]]::new()
     $seen = [Collections.Generic.Dictionary[string, int]]::new([StringComparer]::OrdinalIgnoreCase)
     $complete = (@($ReadErrors).Count -eq 0) -and ($RawValue -ceq $DotNetValue)
     $rawEntries = @(if ([string]::IsNullOrWhiteSpace($RawValue)) {
@@ -241,6 +242,10 @@ function New-PathScopeRecord {
                 $isReparsePoint = [bool]$metadata.isReparsePoint
                 $reparseAncestor = $metadata.reparseAncestor
                 $reparseTarget = $metadata.reparseTarget
+                if ($isReparsePoint) {
+                    $complete = $false
+                    $reparseEvidence.Add("ReparseAncestor[$index]: $reparseAncestor")
+                }
             } catch {
                 $complete = $false
                 $metadataErrors.Add("[$index] $($_.Exception.Message)")
@@ -255,7 +260,6 @@ function New-PathScopeRecord {
             exists = $exists
             drive = if ($containsUnexpandedVariable) { $null } else { Get-InventoryPathRoot -Path $expandedPath }
             isReparsePoint = $isReparsePoint
-            reparseAncestor = $reparseAncestor
             reparseTarget = $reparseTarget
         })
 
@@ -290,6 +294,9 @@ function New-PathScopeRecord {
     }
     foreach ($metadataError in @($metadataErrors)) {
         $errors.Add("Metadata $metadataError")
+    }
+    foreach ($evidence in @($reparseEvidence)) {
+        $errors.Add($evidence)
     }
 
     return [pscustomobject][ordered]@{

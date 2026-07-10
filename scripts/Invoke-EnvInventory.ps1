@@ -920,10 +920,10 @@ function ConvertTo-MarkdownReport {
         if (@($scope.entries).Count -eq 0) {
             $lines.Add("无 PATH 条目。")
         } else {
-            $lines.Add("| index | rawPath | expandedPath | expansionStatus | exists | drive | isReparsePoint | reparseAncestor | reparseTarget |")
-            $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+            $lines.Add("| index | rawPath | expandedPath | expansionStatus | exists | drive | isReparsePoint | reparseTarget |")
+            $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- |")
             foreach ($entry in $scope.entries) {
-                $lines.Add("| $(Escape-MarkdownCell $entry.index) | $(Escape-MarkdownCell $entry.rawPath) | $(Escape-MarkdownCell $entry.expandedPath) | $(Escape-MarkdownCell $entry.expansionStatus) | $(Escape-MarkdownCell $entry.exists) | $(Escape-MarkdownCell $entry.drive) | $(Escape-MarkdownCell $entry.isReparsePoint) | $(Escape-MarkdownCell $entry.reparseAncestor) | $(Escape-MarkdownCell $entry.reparseTarget) |")
+                $lines.Add("| $(Escape-MarkdownCell $entry.index) | $(Escape-MarkdownCell $entry.rawPath) | $(Escape-MarkdownCell $entry.expandedPath) | $(Escape-MarkdownCell $entry.expansionStatus) | $(Escape-MarkdownCell $entry.exists) | $(Escape-MarkdownCell $entry.drive) | $(Escape-MarkdownCell $entry.isReparsePoint) | $(Escape-MarkdownCell $entry.reparseTarget) |")
             }
         }
         $lines.Add("")
