@@ -38,7 +38,12 @@ $publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1
 $testRoot = Join-Path $ProjectRoot "reports\project-local-env-review-test"
 $inventoryOutput = Join-Path $testRoot "inventory"
 $reviewOutput = Join-Path $testRoot "review"
+$reviewAfterMutationOutput = Join-Path $testRoot "review-after-mutation"
 $inventoryPath = Join-Path $inventoryOutput "inventory.json"
+$fixtureProject = Join-Path $testRoot "fixture-project"
+$fixtureNodeModules = Join-Path $fixtureProject "node_modules"
+$fixturePackageJson = Join-Path $fixtureProject "package.json"
+$fixturePackageLock = Join-Path $fixtureProject "package-lock.json"
 
 Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Message "找不到项目本地环境审查包脚本"
 Assert-True -Condition (Test-Path -LiteralPath $inventoryScript -PathType Leaf) -Message "找不到 inventory 脚本"
@@ -50,7 +55,11 @@ try {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 
-    & $inventoryScript -OutputDir $inventoryOutput -SkipVersionProbe | Out-Null
+    New-Item -ItemType Directory -Path $fixtureNodeModules -Force | Out-Null
+    Set-Content -LiteralPath $fixturePackageJson -Value '{"name":"fixture-project"}' -Encoding UTF8
+    Set-Content -LiteralPath $fixturePackageLock -Value '{"lockfileVersion":3}' -Encoding UTF8
+
+    & $inventoryScript -OutputDir $inventoryOutput -ProjectRoots @($fixtureProject) -SkipVersionProbe | Out-Null
     Assert-True -Condition (Test-Path -LiteralPath $inventoryPath -PathType Leaf) -Message "测试 inventory 未生成"
 
     $result = & $scriptPath -InventoryPath $inventoryPath -OutputDir $reviewOutput
@@ -71,6 +80,9 @@ try {
         foreach ($policyProperty in @("risk", "recommendation", "reason", "includeInReviewPack")) {
             Assert-True -Condition (-not ($finding.PSObject.Properties.Name -contains $policyProperty)) -Message "Inventory 本地环境事实不应包含策略字段 $policyProperty：$($finding.path)"
         }
+        Assert-Property -Object $finding -Name "rebuildEvidence"
+        Assert-True -Condition ($finding.rebuildEvidence.marker -ceq $finding.marker) -Message "rebuildEvidence.marker 必须与 finding.marker 一致：$($finding.path)"
+        Assert-True -Condition ($finding.rebuildEvidence.projectFiles -is [array]) -Message "rebuildEvidence.projectFiles 必须是数组：$($finding.path)"
     }
     Assert-True -Condition (-not ($inventory.PSObject.Properties.Name -contains "projectEnvironmentMarkers")) -Message "Inventory 不应输出 projectEnvironmentMarkers 策略投影"
     foreach ($property in @("readOnly", "inventoryPath", "items", "policy", "summary")) {
@@ -114,6 +126,15 @@ try {
 
     $nodeModules = $review.items | Where-Object { $_.marker -eq "node_modules" } | Select-Object -First 1
     Assert-True -Condition ($nodeModules.rebuildAssessment -like "*package-lock.json*") -Message "node_modules 审查项应识别 package-lock.json 重建线索"
+
+    Remove-Item -LiteralPath $fixturePackageLock -Force
+    Set-Content -LiteralPath $fixturePackageJson -Value '{"name":"fixture-project","changed":true}' -Encoding UTF8
+    & $scriptPath -InventoryPath $inventoryPath -OutputDir $reviewAfterMutationOutput | Out-Null
+    $reviewAfterMutation = Get-Content -LiteralPath (Join-Path $reviewAfterMutationOutput "review.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition (($review.items | ConvertTo-Json -Depth 30) -ceq ($reviewAfterMutation.items | ConvertTo-Json -Depth 30)) -Message "同一 inventory 在项目文件变化后必须生成相同 review items"
+    Assert-True -Condition (($review.summary | ConvertTo-Json -Depth 10) -ceq ($reviewAfterMutation.summary | ConvertTo-Json -Depth 10)) -Message "同一 inventory 在项目文件变化后必须生成相同 review summary"
+    $reviewScriptText = Get-Content -LiteralPath $scriptPath -Raw
+    Assert-True -Condition (-not $reviewScriptText.Contains("Get-ExistingProjectFiles")) -Message "review consumer 不得在 inventory 后实时探测项目文件"
 
     $gsdItems = @($review.items | Where-Object { ([string] $_.path).StartsWith("D:\Codex\.gsd\", [System.StringComparison]::OrdinalIgnoreCase) })
     Assert-True -Condition ($gsdItems.Count -eq 0) -Message "审查包不应把 .gsd 下内容当作普通 Codex 项目本地环境"

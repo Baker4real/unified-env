@@ -101,16 +101,52 @@ function Test-EnvMigrationSubPath {
     }
 }
 
+function Test-EnvApprovedUserCachePath {
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        $canonicalPath = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    } catch {
+        return $false
+    }
+
+    $approvedPatterns = @(
+        '^C:\\Users\\[^\\]+\\AppData\\Local\\pip\\Cache$',
+        '^C:\\Users\\[^\\]+\\AppData\\Local\\npm-cache$',
+        '^C:\\Users\\[^\\]+\\AppData\\Local\\pnpm\\store$',
+        '^C:\\Users\\[^\\]+\\AppData\\Local\\pypoetry\\Cache$',
+        '^C:\\Users\\[^\\]+\\AppData\\Local\\uv\\cache$',
+        '^C:\\Users\\[^\\]+\\\.nuget\\packages$',
+        '^C:\\Users\\[^\\]+\\\.m2\\repository$',
+        '^C:\\Users\\[^\\]+\\\.gradle$'
+    )
+    foreach ($pattern in $approvedPatterns) {
+        if ($canonicalPath -imatch $pattern) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Get-EnvRootPolicyDecision {
     [CmdletBinding()]
     param([Parameter(Mandatory)][psobject]$Candidate)
+
+    Assert-EnvFactObject -Value $Candidate -FactName "Migration candidate"
+    foreach ($name in @("source", "kind")) {
+        Assert-EnvNonEmptyStringProperty -Value $Candidate -PropertyName $name -FactName "Migration candidate"
+    }
+    Assert-EnvAbsolutePathValue -Path $Candidate.source -FactName "Migration candidate.source"
 
     foreach ($root in @(Get-EnvCanonicalExcludedRoots)) {
         if (-not (Test-EnvMigrationSubPath -Path $Candidate.source -Root $root.path)) {
             continue
         }
 
-        if ($root.path -ieq "C:\Users" -and $Candidate.kind -eq "cache") {
+        if ($root.path -ieq "C:\Users" -and
+            $Candidate.kind -eq "cache" -and
+            (Test-EnvApprovedUserCachePath -Path $Candidate.source)) {
             return [pscustomobject]@{
                 matchedExcludedRoot = $root.path
                 excludedRootReason = $root.reason
@@ -230,7 +266,12 @@ function Assert-EnvLocalEnvironmentFindingFacts {
     }
     $baseProperties = @(
         "project", "parentProject", "marker", "path", "drive", "sizeBytes",
-        "classification", "scope", "owner"
+        "classification", "scope", "owner", "rebuildEvidence"
+    )
+    $allowedProjectFiles = @(
+        "pyproject.toml", "uv.lock", "requirements.txt", "requirements-dev.txt",
+        "Pipfile.lock", "poetry.lock", "environment.yml", "package.json",
+        "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "README.md", "AGENTS.md"
     )
 
     foreach ($finding in @($LocalEnvironmentFindings)) {
@@ -269,6 +310,29 @@ function Assert-EnvLocalEnvironmentFindingFacts {
         }
         if ($finding.PSObject.Properties.Name -contains "includeInReviewPack" -and $finding.includeInReviewPack -isnot [bool]) {
             throw "Legacy includeInReviewPack 必须是 boolean。"
+        }
+
+        Assert-EnvFactObject -Value $finding.rebuildEvidence -FactName "LocalEnvironmentFinding fact.rebuildEvidence"
+        Assert-EnvFactPropertySet -Value $finding.rebuildEvidence -ExpectedProperties @("marker", "projectFiles") -FactName "LocalEnvironmentFinding fact.rebuildEvidence"
+        Assert-EnvNonEmptyStringProperty -Value $finding.rebuildEvidence -PropertyName "marker" -FactName "LocalEnvironmentFinding fact.rebuildEvidence"
+        if ($finding.rebuildEvidence.marker -cne $finding.marker) {
+            throw "LocalEnvironmentFinding fact.rebuildEvidence.marker 必须与 marker 一致。"
+        }
+        if ($finding.rebuildEvidence.projectFiles -isnot [array]) {
+            throw "LocalEnvironmentFinding fact.rebuildEvidence.projectFiles 必须是数组。"
+        }
+        $projectFileKeys = @()
+        foreach ($projectFile in @($finding.rebuildEvidence.projectFiles)) {
+            if ($projectFile -isnot [string] -or [string]::IsNullOrWhiteSpace($projectFile)) {
+                throw "LocalEnvironmentFinding fact.rebuildEvidence.projectFiles 只能包含非空字符串。"
+            }
+            if ($projectFile -cnotin $allowedProjectFiles) {
+                throw "LocalEnvironmentFinding fact.rebuildEvidence.projectFiles 包含未知文件：$projectFile"
+            }
+            $projectFileKeys += $projectFile.ToLowerInvariant()
+        }
+        if (@($projectFileKeys | Sort-Object -Unique).Count -ne $projectFileKeys.Count) {
+            throw "LocalEnvironmentFinding fact.rebuildEvidence.projectFiles 包含重复项。"
         }
     }
 }
@@ -365,6 +429,11 @@ function Get-EnvMigrationCandidates {
         }
 
         if ($directory.drive -notlike "C:\*") {
+            continue
+        }
+
+        if ((Test-EnvMigrationSubPath -Path $directory.path -Root "C:\Users") -and
+            -not (Test-EnvApprovedUserCachePath -Path $directory.path)) {
             continue
         }
 

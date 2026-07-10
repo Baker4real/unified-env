@@ -113,35 +113,6 @@ function Assert-ExistingLeafIsNotReparsePoint {
     }
 }
 
-function Get-ExistingProjectFiles {
-    param([string]$Project)
-
-    $candidates = @(
-        "pyproject.toml",
-        "uv.lock",
-        "requirements.txt",
-        "requirements-dev.txt",
-        "Pipfile.lock",
-        "poetry.lock",
-        "environment.yml",
-        "package.json",
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "yarn.lock",
-        "README.md",
-        "AGENTS.md"
-    )
-
-    @(
-        foreach ($candidate in $candidates) {
-            $path = Join-Path $Project $candidate
-            if (Test-Path -LiteralPath $path -PathType Leaf) {
-                $candidate
-            }
-        }
-    )
-}
-
 function Test-IsLongRunningOrStatefulProject {
     param(
         [string]$Project,
@@ -342,7 +313,7 @@ $inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json -Da
 Assert-ProjectLocalEnvInventoryFacts -Inventory $inventory
 $items = @(
     foreach ($marker in @($inventory.localEnvironmentFindings | Where-Object { Test-EnvLocalEnvironmentFindingReviewEligible -Finding $_ })) {
-        $files = @(Get-ExistingProjectFiles -Project $marker.project)
+        $files = @($marker.rebuildEvidence.projectFiles)
         $isLongRunning = Test-IsLongRunningOrStatefulProject -Project $marker.project -Marker $marker.marker
         $rebuildAssessment = Get-RebuildAssessment -Marker $marker.marker -Files $files
         $recommendedAction = Get-RecommendedAction -IsLongRunningOrStateful $isLongRunning -RebuildAssessment $rebuildAssessment

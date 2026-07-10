@@ -132,6 +132,9 @@ foreach ($finding in $quickFindings) {
     foreach ($policyProperty in @("risk", "recommendation", "reason", "includeInReviewPack")) {
         Assert-True -Condition (-not ($finding.PSObject.Properties.Name -contains $policyProperty)) -Message "本地环境事实不应包含策略字段 $policyProperty：$($finding.path)"
     }
+    Assert-True -Condition ($finding.PSObject.Properties.Name -contains "rebuildEvidence") -Message "本地环境事实缺少 rebuildEvidence：$($finding.path)"
+    Assert-True -Condition ($finding.rebuildEvidence.marker -ceq $finding.marker) -Message "rebuildEvidence.marker 与 marker 不一致：$($finding.path)"
+    Assert-True -Condition ($finding.rebuildEvidence.projectFiles -is [array]) -Message "rebuildEvidence.projectFiles 必须是数组：$($finding.path)"
 }
 foreach ($classification in @($quickFindings | ForEach-Object { $_.classification } | Sort-Object -Unique)) {
     Assert-True -Condition $quickReport.Contains($classification) -Message "Quick report missing discovered local env classification: $classification"

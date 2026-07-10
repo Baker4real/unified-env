@@ -144,7 +144,12 @@ try {
         @{ name = "finding-scalar-element"; mutate = { param($document) $document.localEnvironmentFindings = [object[]]@("bad-finding") } },
         @{ name = "finding-null-path"; mutate = { param($document) $document.localEnvironmentFindings[0].path = $null } },
         @{ name = "finding-scalar-owner"; mutate = { param($document) $document.localEnvironmentFindings[0].owner = 42 } },
-        @{ name = "finding-bad-classification"; mutate = { param($document) $document.localEnvironmentFindings[0].classification = "unknown" } }
+        @{ name = "finding-bad-classification"; mutate = { param($document) $document.localEnvironmentFindings[0].classification = "unknown" } },
+        @{ name = "finding-missing-rebuild-evidence"; mutate = { param($document) $document.localEnvironmentFindings[0].PSObject.Properties.Remove("rebuildEvidence") } },
+        @{ name = "finding-scalar-rebuild-evidence"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence = "package-lock.json" } },
+        @{ name = "finding-rebuild-marker-mismatch"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.marker = ".venv" } },
+        @{ name = "finding-project-files-not-array"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.projectFiles = "package-lock.json" } },
+        @{ name = "finding-project-files-unknown"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.projectFiles = [object[]]@("secrets.txt") } }
     )
     foreach ($case in $invalidCases) {
         $fixture = ($inventory | ConvertTo-Json -Depth 30 | ConvertFrom-Json)

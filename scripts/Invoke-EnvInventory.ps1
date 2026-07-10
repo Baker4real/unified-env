@@ -605,6 +605,41 @@ function Get-TopProjectRoot {
     return $null
 }
 
+function Get-ProjectRebuildEvidence {
+    param(
+        [Parameter(Mandatory)][string]$Project,
+        [Parameter(Mandatory)][string]$Marker
+    )
+
+    $candidateFiles = @(
+        "pyproject.toml",
+        "uv.lock",
+        "requirements.txt",
+        "requirements-dev.txt",
+        "Pipfile.lock",
+        "poetry.lock",
+        "environment.yml",
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "README.md",
+        "AGENTS.md"
+    )
+    $projectFiles = @(
+        foreach ($candidate in $candidateFiles) {
+            if (Test-Path -LiteralPath (Join-Path $Project $candidate) -PathType Leaf) {
+                $candidate
+            }
+        }
+    )
+
+    [pscustomobject][ordered]@{
+        marker = $Marker
+        projectFiles = [object[]]$projectFiles
+    }
+}
+
 function New-LocalEnvironmentFinding {
     param(
         [string]$MarkerPath,
@@ -648,6 +683,7 @@ function New-LocalEnvironmentFinding {
         classification = $classification
         scope = $scope
         owner = $owner
+        rebuildEvidence = Get-ProjectRebuildEvidence -Project $container -Marker $marker
     }
 }
 
@@ -786,10 +822,11 @@ function ConvertTo-MarkdownReport {
     if ($Inventory.localEnvironmentFindings.Count -eq 0) {
         $lines.Add("未发现本地环境相关目录。")
     } else {
-        $lines.Add("| 分类 | 所属项目或容器 | 标记 | 路径 | Owner | Scope |")
-        $lines.Add("| --- | --- | --- | --- | --- | --- |")
+        $lines.Add("| 分类 | 所属项目或容器 | 标记 | 重建证据文件 | 路径 | Owner | Scope |")
+        $lines.Add("| --- | --- | --- | --- | --- | --- | --- |")
         foreach ($finding in $Inventory.localEnvironmentFindings) {
-            $lines.Add("| $(Escape-MarkdownCell $finding.classification) | $(Escape-MarkdownCell $finding.project) | $(Escape-MarkdownCell $finding.marker) | $(Escape-MarkdownCell $finding.path) | $(Escape-MarkdownCell $finding.owner) | $(Escape-MarkdownCell $finding.scope) |")
+            $projectFiles = @($finding.rebuildEvidence.projectFiles) -join ", "
+            $lines.Add("| $(Escape-MarkdownCell $finding.classification) | $(Escape-MarkdownCell $finding.project) | $(Escape-MarkdownCell $finding.marker) | $(Escape-MarkdownCell $projectFiles) | $(Escape-MarkdownCell $finding.path) | $(Escape-MarkdownCell $finding.owner) | $(Escape-MarkdownCell $finding.scope) |")
         }
     }
 
@@ -927,6 +964,7 @@ $tools = @(
 
 $directories = @(Get-KnownDirectories)
 $localEnvironmentFindings = @(Get-LocalEnvironmentFindings -Roots $ProjectRoots)
+Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $localEnvironmentFindings
 $envVars = @(Get-SelectedEnvironmentVariables)
 $pathScopes = Get-PathScopeRecords
 

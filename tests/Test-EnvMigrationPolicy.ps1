@@ -59,6 +59,20 @@ $userCacheDecision = Get-EnvRootPolicyDecision -Candidate ([pscustomobject]@{
 })
 Assert-True -Condition ($userCacheDecision.decision -eq "targeted-cache-under-excluded-user-root") -Message "C 用户缓存应保留 targeted cache 旧语义"
 
+foreach ($masqueradeSource in @(
+    "C:\Users",
+    "C:\Users\fixture",
+    "C:\Users\fixture\Documents\cache"
+)) {
+    $decision = Get-EnvRootPolicyDecision -Candidate ([pscustomobject]@{
+        source = $masqueradeSource
+        kind = "cache"
+        owner = "fixture"
+    })
+    Assert-True -Condition ($decision.decision -eq "blocked-by-excluded-root") -Message "非 canonical 用户缓存不得绕过 C:\Users root policy：$masqueradeSource"
+    Assert-True -Condition (-not [bool]$decision.allowDryRunPlan) -Message "非 canonical 用户缓存不得进入 dry-run：$masqueradeSource"
+}
+
 $directories = @(
     [pscustomobject]@{
         name = "pip cache env"
@@ -133,8 +147,25 @@ $localEnvironmentFindings = @(
         classification = "project-root-local-env"
         scope = "project-root"
         owner = "project"
+        rebuildEvidence = [pscustomobject]@{
+            marker = "node_modules"
+            projectFiles = [object[]]@("package.json", "package-lock.json")
+        }
     }
 )
+
+$missingRebuildEvidence = [pscustomobject]@{
+    project = "D:\Codex\projects\fixture-app"
+    parentProject = "D:\Codex\projects\fixture-app"
+    marker = "node_modules"
+    path = "D:\Codex\projects\fixture-app\node_modules"
+    drive = "D:\"
+    sizeBytes = 42
+    classification = "project-root-local-env"
+    scope = "project-root"
+    owner = "project"
+}
+Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($missingRebuildEvidence) } -Message "本地环境 fact 必须包含严格 rebuildEvidence"
 
 $candidates = @(Get-EnvMigrationCandidates -Directories $directories)
 $manualReviewItems = @(Get-EnvManualReviewItems -Directories $directories -LocalEnvironmentFindings $localEnvironmentFindings)
@@ -164,6 +195,25 @@ $npmCache = @($candidates | Where-Object { $_.source -eq "C:\Users\fixture\AppDa
 Assert-True -Condition ($npmCache.Count -eq 1) -Message "C 用户缓存应保留旧迁移候选语义"
 Assert-True -Condition ($npmCache[0].risk -eq "low") -Message "C 用户缓存风险应为 low"
 Assert-True -Condition ($npmCache[0].action -eq "可考虑迁移到 D:\Codex\.cache") -Message "C 用户缓存建议动作发生变化"
+
+$masqueradeDirectories = @(
+    foreach ($source in @("C:\Users", "C:\Users\fixture", "C:\Users\fixture\Documents\cache")) {
+        [pscustomobject]@{
+            name = "masquerade cache"
+            path = $source
+            category = "cache"
+            owner = "fixture"
+            exists = $true
+            drive = "C:\"
+            isReparsePoint = $false
+            reparseTarget = $null
+            sizeBytes = $null
+            notes = "不得只因 category=cache 进入候选"
+        }
+    }
+)
+$masqueradeCandidates = @(Get-EnvMigrationCandidates -Directories $masqueradeDirectories)
+Assert-True -Condition ($masqueradeCandidates.Count -eq 0) -Message "C:\Users、用户根或 Documents 伪装 cache 不得生成迁移候选"
 
 $reparseCandidate = @($candidates | Where-Object { $_.source -eq "C:\Users\fixture\AppData\Local\linked-cache" })
 Assert-True -Condition ($reparseCandidate.Count -eq 0) -Message "reparse 目录不得进入迁移候选"
