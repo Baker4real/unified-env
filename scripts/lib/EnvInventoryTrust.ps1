@@ -1,5 +1,16 @@
 . (Join-Path $PSScriptRoot "EnvPathSafety.ps1")
 
+function Get-InventoryCanonicalSharedRoots {
+    [CmdletBinding()]
+    param()
+    return [string[]]@(
+        "D:\Codex\tools",
+        "D:\Codex\envs",
+        "D:\hermes-data\.local",
+        "D:\hermes-data\.npm-global"
+    )
+}
+
 function Get-InventorySha256 {
     param([AllowNull()][string]$Value)
 

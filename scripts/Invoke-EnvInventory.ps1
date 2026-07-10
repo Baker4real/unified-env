@@ -852,12 +852,7 @@ $toolMetadataResolver = {
     param([string]$Path)
     Get-InventoryToolMetadata -Path $Path
 }
-$sharedRoots = @(
-    "D:\Codex\tools"
-    "D:\Codex\envs"
-    "D:\hermes-data\.local"
-    "D:\hermes-data\.npm-global"
-)
+$sharedRoots = @(Get-InventoryCanonicalSharedRoots)
 $vendorRoots = @(
     "D:\Codex\.codex\plugins"
     "D:\Codex\.codex\vendor"

@@ -1,5 +1,6 @@
 param(
     [string]$InventoryPath = "D:\Codex\projects\统一环境\reports\env-inventory\inventory.json",
+    [string]$InventoryMarkdownPath,
     [string]$OutputDir = "D:\Codex\projects\统一环境\reports\env-update-readiness"
 )
 
@@ -111,6 +112,14 @@ function Convert-ReadinessToMarkdown {
 
 # 输入事实必须在任何 OutputDir 创建或覆盖之前完成严格校验。
 $trustedInventoryPath = Assert-ReadinessInputFile -Path $InventoryPath
+$effectiveInventoryMarkdownPath = if ([string]::IsNullOrWhiteSpace($InventoryMarkdownPath)) {
+    Join-Path ([IO.Path]::GetDirectoryName($trustedInventoryPath)) "REPORT.md"
+} else {
+    $InventoryMarkdownPath
+}
+$trustedInventoryMarkdownPath = Assert-ReadinessInputFile -Path $effectiveInventoryMarkdownPath
+$inventoryPair = Test-JsonMarkdownArtifactPair -JsonPath $trustedInventoryPath -MarkdownPath $trustedInventoryMarkdownPath
+if (-not $inventoryPair.ok) { throw "Inventory JSON/Markdown pair 校验失败：$($inventoryPair.error)" }
 $inventoryText = [IO.File]::ReadAllText($trustedInventoryPath)
 $inventory = $inventoryText | ConvertFrom-Json -DateKind String -ErrorAction Stop
 Assert-InventoryV3Document -Document $inventory

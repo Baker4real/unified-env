@@ -13,13 +13,19 @@ $policyPath = Join-Path $ProjectRoot "scripts\lib\EnvUpdateReadinessPolicy.ps1"
 Assert-True (Test-Path -LiteralPath $policyPath -PathType Leaf) "找不到 EnvUpdateReadinessPolicy.ps1"
 . $policyPath
 
+$canonicalSharedRoots = @(Get-InventoryCanonicalSharedRoots)
+Assert-True (($canonicalSharedRoots -join "|") -ceq "D:\Codex\tools|D:\Codex\envs|D:\hermes-data\.local|D:\hermes-data\.npm-global") "canonical shared roots 漂移或函数缺失"
+
 function New-OriginEvidence {
     param([string]$Path, [string]$OriginClass)
+    $matchedRoot = if ($OriginClass -eq "shared-tool") {
+        @(Get-InventoryCanonicalSharedRoots | Where-Object { Test-InventorySubPath -Path $Path -Root $_ } | Select-Object -First 1)[0]
+    } elseif ($OriginClass -eq "unknown") { $null } else { [IO.Path]::GetDirectoryName($Path) }
     [pscustomobject]@{
         path = $Path
         originClass = $OriginClass
-        matchedRule = "fixture"
-        matchedRoot = if ($OriginClass -eq "unknown") { $null } else { [IO.Path]::GetDirectoryName($Path) }
+        matchedRule = if ($OriginClass -eq "shared-tool") { "explicit-shared-root" } else { "fixture" }
+        matchedRoot = $matchedRoot
         metadataStatus = "ok"
         metadataError = $null
         isReparsePoint = $false
@@ -58,8 +64,8 @@ $cases = @(
     @{ name = "uv"; path = "D:\Codex\tools\uv\uv.exe"; origin = "shared-tool"; probe = $true; manual = $false; risk = "low"; entry = "uv"; forbidden = @("迁到 D 盘", "系统安装目录") }
     @{ name = "node"; path = "C:\Program Files\nodejs\node.exe"; origin = "system-installer"; probe = $true; manual = $true; risk = "medium"; entry = "Node.js"; forbidden = @("当前已在 D 盘") }
     @{ name = "npm"; path = "C:\Program Files\nodejs\npm.cmd"; origin = "system-installer"; probe = $true; manual = $true; risk = "medium"; entry = "Node.js"; forbidden = @("当前已在 D 盘") }
-    @{ name = "cargo"; path = "D:\Codex\.cargo\bin\cargo.exe"; origin = "shared-tool"; probe = $true; manual = $false; risk = "low"; entry = "rustup"; forbidden = @("系统安装目录", "迁到 D 盘") }
-    @{ name = "rustc"; path = "D:\Codex\.cargo\bin\rustc.exe"; origin = "shared-tool"; probe = $true; manual = $false; risk = "low"; entry = "rustup"; forbidden = @("系统安装目录", "迁到 D 盘") }
+    @{ name = "cargo"; path = "D:\Codex\tools\rust\bin\cargo.exe"; origin = "shared-tool"; probe = $true; manual = $false; risk = "low"; entry = "rustup"; forbidden = @("系统安装目录", "迁到 D 盘") }
+    @{ name = "rustc"; path = "D:\Codex\tools\rust\bin\rustc.exe"; origin = "shared-tool"; probe = $true; manual = $false; risk = "low"; entry = "rustup"; forbidden = @("系统安装目录", "迁到 D 盘") }
     @{ name = "dotnet"; path = "C:\Program Files\dotnet\dotnet.exe"; origin = "system-installer"; probe = $false; manual = $true; risk = "high"; entry = ".NET"; forbidden = @("当前已健康", "当前已在 D 盘") }
     @{ name = "cmake"; path = "C:\Users\tester\AppData\Local\Microsoft\WinGet\Packages\cmake.exe"; origin = "user-profile"; probe = $true; manual = $true; risk = "high"; entry = "CMake"; forbidden = @("当前已在 D 盘") }
     @{ name = "ninja"; path = "C:\Users\tester\AppData\Local\Microsoft\WinGet\Packages\ninja.exe"; origin = "user-profile"; probe = $true; manual = $true; risk = "high"; entry = "Ninja"; forbidden = @("当前已在 D 盘") }
@@ -83,6 +89,23 @@ foreach ($case in $cases) {
         Assert-True (-not $policy.recommendedUpdateEntry.Contains($forbidden)) "$($case.name) 工具专属入口包含位置断言：$forbidden"
         Assert-True (-not $policy.recommendedAction.Contains($forbidden)) "$($case.name) 建议与事实矛盾：$forbidden"
     }
+}
+
+$spoof = New-ToolFact -Name "spoof" -Path "D:\projects\app\.venv\Scripts\python.exe" -OriginClass "shared-tool" -ProbeSucceeded $true -RequiresManualReview $false
+$spoof.launcher.matchedRule = "explicit-shared-root"
+$spoof.launcher.matchedRoot = "D:\Codex\tools"
+$spoof.originEvidence[0].evidence = $spoof.launcher
+$spoofRejected = $false
+try { Get-UpdatePolicy -Tool $spoof | Out-Null } catch { $spoofRejected = $true }
+Assert-True $spoofRejected "Get-UpdatePolicy 直接调用也必须拒绝 project venv 伪报 shared-tool"
+
+foreach ($origin in @("project-local-env", "vendor-runtime", "unknown")) {
+    $tool = New-ToolFact -Name "probe-$origin" -Path "D:\fixture\tool.exe" -OriginClass $origin -ProbeSucceeded $false -RequiresManualReview $true
+    $policy = Get-UpdatePolicy -Tool $tool
+    Assert-True ($policy.riskLevel -eq "high" -and $policy.requiresManualReview) "$origin + probe failure 必须 high/manual"
+    $originText = switch ($origin) { "project-local-env" { "项目本地环境" }; "vendor-runtime" { "vendor runtime" }; default { "归属未知" } }
+    Assert-True $policy.recommendedAction.Contains($originText) "$origin + probe failure 必须保留高风险归属文案"
+    Assert-True $policy.recommendedAction.Contains("探测未成功") "$origin + probe failure 必须叠加诊断文案"
 }
 
 $processScope = [pscustomobject]@{

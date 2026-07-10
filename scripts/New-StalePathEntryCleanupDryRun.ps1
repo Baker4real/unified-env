@@ -1,10 +1,11 @@
 param(
     [string]$ReadinessPath = "D:\Codex\projects\统一环境\reports\env-update-readiness\readiness.json",
+    [string]$ReadinessMarkdownPath,
     [string]$OutputDir = "D:\Codex\projects\统一环境\reports\stale-path-entry-cleanup-dry-run"
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "lib\EnvPathSafety.ps1")
+. (Join-Path $PSScriptRoot "lib\EnvInventoryTrust.ps1")
 . (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
 
 function Test-IsSubPath {
@@ -147,19 +148,22 @@ function New-CleanupCandidate {
 
     $path = "$($Entry.path)"
     Assert-EnvSafeAbsolutePath -Path $path -FactName "Stale PATH candidate.path"
-    $existsNow = Test-Path -LiteralPath $path
-    $isReparsePoint = Test-ReparsePoint -Path $path
+    $metadata = Get-StalePathChainMetadata -Path $path
+    $existsNow = if ($metadata.exists -is [bool]) { $metadata.exists } else { $null }
+    $isReparsePoint = $metadata.status -eq "ok" -and $metadata.isReparsePoint -eq $true
     $isProjectLocalEnvEntry = [bool]$Entry.isProjectLocalEnvEntry
     $blockedReasons = New-Object System.Collections.Generic.List[string]
 
     if (-not $isProjectLocalEnvEntry) {
         $blockedReasons.Add("该入口不是项目本地环境 PATH 入口，本 dry-run 不处理。")
     }
-    if ($existsNow) {
+    if ($metadata.status -ne "ok") {
+        $blockedReasons.Add("候选路径或祖先 metadata 探测失败：$($metadata.error)")
+    } elseif ($existsNow) {
         $blockedReasons.Add("该路径当前已经存在，不能继续按失效入口处理。")
     }
     if ($isReparsePoint) {
-        $blockedReasons.Add("该路径当前是 reparse point，必须先人工确认目标。")
+        $blockedReasons.Add("该路径或祖先当前是 reparse point，必须先人工确认目标。")
     }
 
     $status = if ($blockedReasons.Count -gt 0) { "blocked" } else { "cleanup-candidate" }
@@ -171,31 +175,35 @@ function New-CleanupCandidate {
         drive = $Entry.drive
         currentExists = $existsNow
         isReparsePoint = $isReparsePoint
+        metadataStatus = $metadata.status
+        metadataError = $metadata.error
+        reparseAncestor = $metadata.reparseAncestor
+        reparseTarget = $metadata.reparseTarget
         isProjectLocalEnvEntry = $isProjectLocalEnvEntry
         riskLevel = if ([string]::IsNullOrWhiteSpace($Entry.riskLevel)) { "medium" } else { "$($Entry.riskLevel)" }
         status = $status
         executionAllowed = $false
-        proposedAction = "真实授权后只从用户 PATH 中移除该失效入口；不删除、不重建对应环境目录。"
+        proposedAction = "先定位持久来源（User、Machine、启动器配置或进程注入）；该条目仅来自 Process PATH 观察，本 dry-run 不推断也不修改任何 scope，且不删除、不重建对应环境目录。"
         sourceRecommendedAction = "$($Entry.recommendedAction)"
         blockedReasons = @($blockedReasons)
         preflightChecks = @(
             "重新生成 env-update-readiness 报告，确认该 PATH 入口仍缺失。",
-            "读取当前 User scope 和 Process scope PATH，确认该入口来自用户 PATH 还是当前进程继承。",
+            "对比 Process、User、Machine PATH 及启动器配置，记录明确的 persistenceScope；不得从 Process 观察结果推断持久来源。",
             "确认没有项目、服务或快捷方式仍依赖该失效入口。",
-            "确认真实清理范围只包含列出的 PATH 字符串，不触碰 .venv、node_modules 或项目文件。"
+            "未来范围必须绑定已确认的 persistenceScope 与列出的 PATH 字符串，且不触碰 .venv、node_modules 或项目文件。"
         )
         validationSteps = @(
-            "真实清理后打开新 shell，确认 PATH 中不再包含该入口。",
+            "未来只有确认 persistenceScope 并获得独立授权后，才可由对应 scope 的执行计划定义验证步骤。",
             "确认相关项目和常用工具命令仍能按现有入口启动。",
             "重新运行 env-update-readiness 报告，确认该失效项目本地环境 PATH 入口数量下降。"
         )
         rollbackSteps = @(
-            "保留清理前的完整 User scope PATH 字符串。",
-            "如发现依赖缺失，将该 PATH 入口按原顺序加回 User scope PATH。",
-            "打开新 shell 重新验证 PATH 和相关命令。"
+            "本 dry-run 不预设要修改的持久 scope，因此不伪造具体 scope 的回滚动作。",
+            "未来执行计划必须针对已确认的 persistenceScope 保存原始值、顺序和来源证据。",
+            "若无法确认 persistenceScope，保持 executionAllowed=false 并停止。"
         )
         humanGates = @(
-            "用户逐项确认 candidateId、路径数量和具体 PATH 字符串后，才能进入真实清理。",
+            "用户逐项确认 candidateId、路径数量、具体 PATH 字符串及 persistenceScope 后，才能另建真实清理计划。",
             "真实清理必须作为独立执行步骤，不得和依赖重建、目录删除或环境迁移合并。"
         )
     }
@@ -211,7 +219,7 @@ function Write-PlanMarkdown {
     $lines.Add("")
     $lines.Add("生成时间：$($Plan.generatedAt)")
     $lines.Add("")
-    $lines.Add('> DRY-RUN：本计划只读取 readiness 报告并生成 PATH 清理候选，不修改用户 PATH、不写系统配置、不删除或重建任何 `.venv`、`node_modules`。')
+    $lines.Add('> DRY-RUN：本计划只读取 Process scope 的 readiness 观察并生成待定位项，不推断持久来源、不修改任何 PATH scope、不写系统配置、不删除或重建任何 `.venv`、`node_modules`。')
     $lines.Add("")
     $lines.Add("## 摘要")
     $lines.Add("")
@@ -280,6 +288,28 @@ function Write-PlanMarkdown {
     return @($lines) -join "`n"
 }
 
+function Get-StalePathFileSystemItemMetadata {
+    param([Parameter(Mandatory)][string]$Path)
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Stale PATH metadata path"
+    try {
+        if (-not (Test-Path -LiteralPath $Path -ErrorAction Stop)) {
+            return [pscustomobject]@{ status = "missing"; path = $Path }
+        }
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        $isReparse = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+        $target = if ($isReparse -and $item.PSObject.Properties.Name -contains "Target") { $item.Target } else { $null }
+        return [pscustomobject]@{ status = "ok"; path = $item.FullName; isReparsePoint = $isReparse; reparseTarget = $target }
+    } catch {
+        return [pscustomobject]@{ status = "error"; error = $_.Exception.Message }
+    }
+}
+
+function Get-StalePathChainMetadata {
+    param([Parameter(Mandatory)][string]$Path)
+    $resolver = { param([string]$CandidatePath) Get-StalePathFileSystemItemMetadata -Path $CandidatePath }
+    return Get-InventoryReparseChainMetadata -Path $Path -ItemMetadataResolver $resolver
+}
+
 function Test-StalePathInteger {
     param([AllowNull()][object]$Value)
     return $Value -is [byte] -or $Value -is [sbyte] -or $Value -is [int16] -or $Value -is [uint16] -or $Value -is [int32] -or $Value -is [uint32] -or $Value -is [int64] -or $Value -is [uint64]
@@ -316,6 +346,14 @@ function Assert-StalePathReadinessV3 {
 }
 
 Assert-ReadableDFile -Path $ReadinessPath -ParameterName "ReadinessPath"
+$effectiveReadinessMarkdownPath = if ([string]::IsNullOrWhiteSpace($ReadinessMarkdownPath)) {
+    Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReadinessPath))) "REPORT.md"
+} else {
+    $ReadinessMarkdownPath
+}
+Assert-ReadableDFile -Path $effectiveReadinessMarkdownPath -ParameterName "ReadinessMarkdownPath"
+$readinessPair = Test-JsonMarkdownArtifactPair -JsonPath $ReadinessPath -MarkdownPath $effectiveReadinessMarkdownPath
+if (-not $readinessPair.ok) { throw "Readiness JSON/Markdown pair 校验失败：$($readinessPair.error)" }
 $readiness = Get-Content -LiteralPath $ReadinessPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
 Assert-StalePathReadinessV3 -Readiness $readiness
 # readiness contract 通过后才校验/发布 OutputDir；失败不得创建或覆盖旧产物。
@@ -332,6 +370,10 @@ $candidates = @(
         New-CleanupCandidate -Entry $entry
     }
 )
+$candidateIds = @($candidates | ForEach-Object { $_.candidateId })
+if (@($candidateIds | Sort-Object -Unique).Count -ne $candidateIds.Count) {
+    throw "Stale PATH candidates 包含重复 candidateId，拒绝发布。"
+}
 
 $plan = [pscustomobject]@{
     artifactType = "env-governance.stale-path-entry-cleanup-dry-run"
@@ -357,10 +399,10 @@ $plan = [pscustomobject]@{
         deleteAllowed = $false
         environmentDirectoryWriteAllowed = $false
         rules = @(
-            "本计划只生成 PATH 清理 dry-run，不修改用户 PATH、机器 PATH 或当前进程环境。",
+            "本计划只记录 Process PATH 观察，不推断持久来源，不修改任何 PATH scope。",
             "本计划不删除、不移动、不重建任何 .venv、node_modules 或项目目录。",
-            "真实清理前必须重新生成 readiness 和本 dry-run，并逐项确认 candidateId、路径数量和 PATH 字符串。",
-            "真实清理必须保留清理前完整 PATH 字符串作为回滚依据。",
+            "未来真实清理前必须重新生成 readiness 和本 dry-run，并逐项确认 candidateId、路径数量、PATH 字符串与 persistenceScope。",
+            "未来执行计划必须按已确认 persistenceScope 保存原始值与顺序作为回滚依据。",
             "输出只能位于 D 盘允许报告目录。"
         )
     }

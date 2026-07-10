@@ -1,4 +1,4 @@
-. (Join-Path $PSScriptRoot "EnvPathSafety.ps1")
+. (Join-Path $PSScriptRoot "EnvInventoryTrust.ps1")
 
 function Test-ReadinessInteger {
     param([AllowNull()][object]$Value)
@@ -45,6 +45,45 @@ function Assert-ReadinessOriginEvidence {
             Assert-EnvSafeAbsolutePath -Path $Evidence.$pathField -FactName "$FactName.$pathField"
         }
     }
+    if ($Evidence.originClass -ceq "shared-tool") {
+        if ($Evidence.matchedRule -isnot [string] -or $Evidence.matchedRule -cne "explicit-shared-root") {
+            throw "$FactName shared-tool 必须来自 explicit-shared-root。"
+        }
+        $canonicalRoots = @(Get-InventoryCanonicalSharedRoots)
+        $matchedCanonical = @($canonicalRoots | Where-Object {
+            [IO.Path]::GetFullPath($_).TrimEnd('\','/').Equals([IO.Path]::GetFullPath([string]$Evidence.matchedRoot).TrimEnd('\','/'), [StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($matchedCanonical.Count -ne 1 -or -not (Test-InventorySubPath -Path $Evidence.path -Root $matchedCanonical[0])) {
+            throw "$FactName shared-tool path/matchedRoot 不属于 canonical shared roots。"
+        }
+        if ($Evidence.metadataStatus -cne "ok" -or $Evidence.isReparsePoint -ne $false) {
+            throw "$FactName shared-tool 必须有成功 metadata 且无 reparse。"
+        }
+    }
+}
+
+function Test-ReadinessObjectEqual {
+    param([AllowNull()][object]$Left, [AllowNull()][object]$Right)
+    if ($null -eq $Left -or $null -eq $Right) { return $null -eq $Left -and $null -eq $Right }
+    if ($Left -isnot [pscustomobject] -or $Right -isnot [pscustomobject]) { return $false }
+    $leftNames = @($Left.PSObject.Properties.Name | Sort-Object)
+    $rightNames = @($Right.PSObject.Properties.Name | Sort-Object)
+    if (($leftNames -join "`n") -cne ($rightNames -join "`n")) { return $false }
+    foreach ($name in $leftNames) {
+        $leftJson = $Left.$name | ConvertTo-Json -Depth 20 -Compress
+        $rightJson = $Right.$name | ConvertTo-Json -Depth 20 -Compress
+        if ($leftJson -cne $rightJson) { return $false }
+    }
+    return $true
+}
+
+function Get-ReadinessCanonicalPathKey {
+    param([Parameter(Mandatory)][string]$Path)
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "PATH canonicalization"
+    $full = [IO.Path]::GetFullPath($Path)
+    $root = [IO.Path]::GetPathRoot($full)
+    if ($full.Equals($root, [StringComparison]::OrdinalIgnoreCase)) { return $root.ToLowerInvariant() }
+    return $full.TrimEnd('\','/').ToLowerInvariant()
 }
 
 function Assert-ReadinessPathScope {
@@ -86,11 +125,38 @@ function Assert-ReadinessPathScope {
             throw "$factName.complete=true 与 entry 的未知/失败/reparse 事实矛盾。"
         }
     }
+    for ($position = 0; $position -lt @($Scope.entries).Count; $position++) {
+        if ($Scope.entries[$position].index -ne $position) { throw "$factName entries.index 必须按 0..N-1 连续且保持顺序。" }
+    }
+
+    $expectedDuplicateKeys = [Collections.Generic.List[string]]::new()
+    $seenPaths = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @($Scope.entries | Where-Object { $_.expansionStatus -ne "failed" })) {
+        $canonicalKey = Get-ReadinessCanonicalPathKey -Path $entry.expandedPath
+        if ($seenPaths.ContainsKey($canonicalKey)) {
+            $expectedDuplicateKeys.Add("$($seenPaths[$canonicalKey])|$($entry.index)|$canonicalKey")
+        } else {
+            $seenPaths.Add($canonicalKey, [int]$entry.index)
+        }
+    }
+    $actualDuplicateKeys = [Collections.Generic.List[string]]::new()
     foreach ($duplicate in @($Scope.duplicates)) {
         if ($duplicate -isnot [pscustomobject]) { throw "$factName duplicate 必须是 object。" }
         foreach ($name in @("firstIndex", "duplicateIndex", "expandedPath")) { Assert-ReadinessProperty -Value $duplicate -Name $name -FactName "$factName duplicate" }
         if (-not (Test-ReadinessInteger $duplicate.firstIndex) -or -not (Test-ReadinessInteger $duplicate.duplicateIndex)) { throw "$factName duplicate index 必须是整数。" }
         Assert-EnvSafeAbsolutePath -Path $duplicate.expandedPath -FactName "$factName duplicate.expandedPath"
+        if ($duplicate.firstIndex -lt 0 -or $duplicate.duplicateIndex -lt 0 -or $duplicate.firstIndex -ge @($Scope.entries).Count -or $duplicate.duplicateIndex -ge @($Scope.entries).Count -or $duplicate.firstIndex -ge $duplicate.duplicateIndex) {
+            throw "$factName duplicate indices 超出范围或顺序无效。"
+        }
+        $firstKey = Get-ReadinessCanonicalPathKey -Path $Scope.entries[$duplicate.firstIndex].expandedPath
+        $duplicateKey = Get-ReadinessCanonicalPathKey -Path $Scope.entries[$duplicate.duplicateIndex].expandedPath
+        $recordKey = Get-ReadinessCanonicalPathKey -Path $duplicate.expandedPath
+        if ($firstKey -cne $duplicateKey -or $recordKey -cne $duplicateKey) { throw "$factName duplicate 与 entries canonical path 不一致。" }
+        $actualDuplicateKeys.Add("$($duplicate.firstIndex)|$($duplicate.duplicateIndex)|$duplicateKey")
+    }
+    if (@($actualDuplicateKeys | Sort-Object -Unique).Count -ne $actualDuplicateKeys.Count -or
+        ((@($actualDuplicateKeys | Sort-Object) -join "`n") -cne (@($expectedDuplicateKeys | Sort-Object) -join "`n"))) {
+        throw "$factName duplicates 必须与 entries 规范化分组完整且唯一地一致。"
     }
     if ($Scope.complete -and ($Scope.readStatus -cne "ok" -or @($Scope.errors).Count -gt 0)) {
         throw "$factName.complete=true 与 readStatus/errors 矛盾。"
@@ -150,6 +216,10 @@ function Assert-InventoryV3Document {
         if ($launcherItems.Count -ne 1 -or (($null -eq $tool.runtime) -and $runtimeItems.Count -ne 0) -or (($null -ne $tool.runtime) -and $runtimeItems.Count -ne 1)) {
             throw "Inventory tool.originEvidence 必须与 launcher/runtime 角色一一对应。"
         }
+        if (-not (Test-ReadinessObjectEqual -Left $launcherItems[0].evidence -Right $tool.launcher) -or
+            ($null -ne $tool.runtime -and -not (Test-ReadinessObjectEqual -Left $runtimeItems[0].evidence -Right $tool.runtime))) {
+            throw "Inventory tool.originEvidence 必须与顶层 launcher/runtime 字段逐一一致。"
+        }
         $expectedFinalOrigin = if ($null -ne $tool.runtime) { $tool.runtime.originClass } else { $tool.launcher.originClass }
         if ($tool.originClass -cne $expectedFinalOrigin) { throw "Inventory tool.originClass 与 launcher/runtime 最终归属不一致。" }
         $roleEvidence = @($tool.launcher)
@@ -179,7 +249,7 @@ function Get-ToolDecisionInputs {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Tool)
 
-    foreach ($name in @("path", "originClass", "probeSucceeded", "requiresManualReview", "resolutionScope")) {
+    foreach ($name in @("path", "originClass", "probeSucceeded", "requiresManualReview", "resolutionScope", "launcher", "runtime")) {
         Assert-ReadinessProperty -Value $Tool -Name $name -FactName "Tool"
     }
     if ($Tool.probeSucceeded -isnot [bool] -or $Tool.requiresManualReview -isnot [bool]) {
@@ -188,6 +258,16 @@ function Get-ToolDecisionInputs {
     if ($Tool.originClass -isnot [string] -or $Tool.resolutionScope -isnot [string] -or $Tool.resolutionScope -cne "process") {
         throw "Tool originClass/resolutionScope 无效。"
     }
+    Assert-ReadinessOriginEvidence -Evidence $Tool.launcher -FactName "Tool.launcher"
+    if ($null -ne $Tool.runtime) { Assert-ReadinessOriginEvidence -Evidence $Tool.runtime -FactName "Tool.runtime" }
+    $expectedOrigin = if ($null -ne $Tool.runtime) { $Tool.runtime.originClass } else { $Tool.launcher.originClass }
+    if ($Tool.originClass -cne $expectedOrigin) { throw "Tool originClass 与 launcher/runtime 不一致。" }
+    $roles = @($Tool.launcher)
+    if ($null -ne $Tool.runtime) { $roles += $Tool.runtime }
+    $riskOrigins = @("project-local-env", "vendor-runtime", "system-installer", "windows-system", "user-profile", "unknown")
+    $mustReview = @($roles | Where-Object { $_.originClass -in $riskOrigins -or $_.metadataStatus -cne "ok" -or $_.isReparsePoint -ne $false }).Count -gt 0
+    if ($mustReview -and -not $Tool.requiresManualReview) { throw "Tool requiresManualReview 与 origin/reparse/metadata 风险证据矛盾。" }
+    if ($Tool.originClass -ceq "shared-tool" -and -not $Tool.probeSucceeded) { throw "shared-tool 必须有成功 probe。" }
     [pscustomobject][ordered]@{
         locationClass = Get-ReadinessLocationClass -Path $Tool.path
         originClass = $Tool.originClass
@@ -207,10 +287,7 @@ function Get-BaseUpdateDecision {
     $inventoryManual = $DecisionInputs.requiresManualReview
     if ($probeSucceeded -isnot [bool] -or $inventoryManual -isnot [bool]) { throw "DecisionInputs Boolean 字段类型无效。" }
 
-    if (-not $probeSucceeded) {
-        $risk = "high"; $manual = $true
-        $action = "工具探测未成功；先诊断探测错误，再决定是否通过官方机制更新。"
-    } elseif ($origin -eq "project-local-env") {
+    if ($origin -eq "project-local-env") {
         $risk = "high"; $manual = $true
         $action = "归属项目本地环境；保持项目隔离，按项目重建流程人工审查，不作为共享默认入口。"
     } elseif ($origin -eq "vendor-runtime") {
@@ -231,6 +308,12 @@ function Get-BaseUpdateDecision {
     } else {
         $risk = "medium"; $manual = $true
         $action = "位置或归属未满足共享工具信任条件；先人工确认管理机制。"
+    }
+
+    if (-not $probeSucceeded) {
+        $risk = "high"
+        $manual = $true
+        $action = "$action 工具探测未成功；必须先诊断探测错误，再决定后续更新入口。"
     }
 
     if ($inventoryManual -and -not $manual) {
