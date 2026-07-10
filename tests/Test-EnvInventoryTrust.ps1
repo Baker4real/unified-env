@@ -21,9 +21,9 @@ if (Test-Path -LiteralPath $libraryPath -PathType Leaf) {
 }
 
 $metadata = @{
-    "C:\Windows\System32" = [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseTarget = $null }
-    "D:\Tools" = [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseTarget = $null }
-    "D:\Missing" = [pscustomobject]@{ status = "ok"; exists = $false; isReparsePoint = $false; reparseTarget = $null }
+    "C:\Windows\System32" = [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
+    "D:\Tools" = [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
+    "D:\Missing" = [pscustomobject]@{ status = "ok"; exists = $false; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
 }
 $resolver = {
     param([string]$Path)
@@ -48,7 +48,7 @@ try {
     Assert-True -Condition ($scope.errors.Count -eq 0) -Message "完整 PATH scope 的 errors 必须为空"
     foreach ($entry in $scope.entries) {
         $actualFields = @($entry.PSObject.Properties.Name)
-        $expectedFields = @("index", "rawPath", "expandedPath", "expansionStatus", "exists", "drive", "isReparsePoint", "reparseTarget")
+        $expectedFields = @("index", "rawPath", "expandedPath", "expansionStatus", "exists", "drive", "isReparsePoint", "reparseAncestor", "reparseTarget")
         Assert-True -Condition (($actualFields -join ",") -ceq ($expectedFields -join ",")) -Message "PATH entry 字段必须固定"
     }
 
@@ -72,7 +72,7 @@ try {
 
     $rootResolver = {
         param([string]$Path)
-        [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseTarget = $null }
+        [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
     }
     $driveRoots = New-PathScopeRecord -Source process -RawValue "C:\;C:" -DotNetValue "C:\;C:" -ReadErrors @() -MetadataResolver $rootResolver
     Assert-True -Condition ($driveRoots.duplicates.Count -eq 0) -Message "驱动器根 C:\ 与驱动器相对路径 C: 不得误判为重复"
@@ -99,6 +99,36 @@ try {
         Assert-True -Condition ($invalidScope.missingPathCleanupCandidates.Count -eq 0) -Message "$($invalidCase.name) PATH metadata 不得生成 cleanup 建议"
         Assert-True -Condition (@($invalidScope.errors | Where-Object { $_ -like "Metadata*" }).Count -eq 1) -Message "$($invalidCase.name) PATH metadata 必须保留 error 摘要"
     }
+
+    $junctionItemResolver = {
+        param([string]$Path)
+        switch ($Path) {
+            "D:\Fixture\link\missing" { return [pscustomobject]@{ status = "missing"; path = $Path } }
+            "D:\Fixture\link" { return [pscustomobject]@{ status = "ok"; path = $Path; isReparsePoint = $true; reparseTarget = "D:\Fixture\target" } }
+            default { return [pscustomobject]@{ status = "ok"; path = $Path; isReparsePoint = $false; reparseTarget = $null } }
+        }
+    }
+    $junctionChain = Get-InventoryReparseChainMetadata -Path "D:\Fixture\link\missing" -ItemMetadataResolver $junctionItemResolver
+    Assert-True -Condition ($junctionChain.status -eq "ok") -Message "junction 父链 metadata 应成功"
+    Assert-True -Condition (-not [bool]$junctionChain.exists) -Message "junction 下不存在叶子必须保留 exists=false"
+    Assert-True -Condition ([bool]$junctionChain.isReparsePoint) -Message "junction 父链必须识别 reparse"
+    Assert-True -Condition ($junctionChain.reparseAncestor -eq "D:\Fixture\link") -Message "junction 父链必须保留 ancestor"
+    Assert-True -Condition ($junctionChain.reparseTarget -eq "D:\Fixture\target") -Message "junction 父链必须保留 target"
+    $junctionScope = New-PathScopeRecord -Source process -RawValue "D:\Fixture\link\missing" -DotNetValue "D:\Fixture\link\missing" -ReadErrors @() -MetadataResolver { param([string]$Path) $junctionChain }.GetNewClosure()
+    Assert-True -Condition ($junctionScope.missingPathCleanupCandidates.Count -eq 0) -Message "junction 父链下的缺失 PATH 不得生成 cleanup 建议"
+
+    $failingChainResolver = {
+        param([string]$Path)
+        if ($Path -eq "D:\Fixture\link\missing") {
+            return [pscustomobject]@{ status = "missing"; path = $Path }
+        }
+        throw "fixture ancestor read failed"
+    }
+    $failedChain = Get-InventoryReparseChainMetadata -Path "D:\Fixture\link\missing" -ItemMetadataResolver $failingChainResolver
+    Assert-True -Condition ($failedChain.status -eq "error") -Message "父链读取失败必须返回 status=error"
+    $failedChainScope = New-PathScopeRecord -Source process -RawValue "D:\Fixture\link\missing" -DotNetValue "D:\Fixture\link\missing" -ReadErrors @() -MetadataResolver { param([string]$Path) $failedChain }.GetNewClosure()
+    Assert-True -Condition (-not [bool]$failedChainScope.complete) -Message "父链读取失败必须使 scope 不完整"
+    Assert-True -Condition ($failedChainScope.missingPathCleanupCandidates.Count -eq 0) -Message "父链读取失败不得生成 cleanup 建议"
 } finally {
     $env:SystemRoot = $previousSystemRoot
 }
@@ -111,9 +141,9 @@ $originMetadata = {
     param([string]$Path)
 
     if ($Path -ieq "D:\Reparse\tool.exe") {
-        return [pscustomobject]@{ status = "ok"; isReparsePoint = $true; reparseTarget = "D:\Vendor\tool.exe" }
+        return [pscustomobject]@{ status = "ok"; isReparsePoint = $true; reparseAncestor = $Path; reparseTarget = "D:\Vendor\tool.exe" }
     }
-    return [pscustomobject]@{ status = "ok"; isReparsePoint = $false; reparseTarget = $null }
+    return [pscustomobject]@{ status = "ok"; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
 }
 $decisionArgs = @{
     ProjectRoots = @("D:\hermes-data\hermes-agent")
@@ -157,7 +187,7 @@ Assert-True -Condition ($ordinaryProjectTool.originClass -eq "unknown") -Message
 
 $projectReparseMetadata = {
     param([string]$Path)
-    [pscustomobject]@{ status = "ok"; isReparsePoint = $true; reparseTarget = "D:\Shared\tool.exe" }
+    [pscustomobject]@{ status = "ok"; isReparsePoint = $true; reparseAncestor = $Path; reparseTarget = "D:\Shared\tool.exe" }
 }
 $projectReparse = Get-ToolOriginDecision -LauncherPath "D:\hermes-data\hermes-agent\venv-new\Scripts\python.exe" -RuntimePath $null -ProjectRoots @("D:\hermes-data\hermes-agent") -SharedRoots @("D:\Shared") -VendorRoots @() -SystemInstallerRoots @() -MetadataResolver $projectReparseMetadata
 Assert-True -Condition ($projectReparse.originClass -eq "project-local-env") -Message "reparse 风险证据不得丢失项目 owner 事实"

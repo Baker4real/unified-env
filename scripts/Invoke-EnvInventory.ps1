@@ -403,17 +403,14 @@ function Get-PathScopeSourceValues {
     }
 }
 
-function Get-InventoryPathMetadata {
+function Get-InventoryFileSystemItemMetadata {
     param([string]$Path)
 
     try {
-        $exists = Test-Path -LiteralPath $Path -PathType Container -ErrorAction Stop
-        if (-not $exists) {
+        if (-not (Test-Path -LiteralPath $Path -ErrorAction Stop)) {
             return [pscustomobject]@{
-                status = "ok"
-                exists = $false
-                isReparsePoint = $false
-                reparseTarget = $null
+                status = "missing"
+                path = $Path
             }
         }
 
@@ -422,7 +419,7 @@ function Get-InventoryPathMetadata {
         $target = if ($isReparsePoint -and $item.PSObject.Properties.Name -contains "Target") { $item.Target } else { $null }
         return [pscustomobject]@{
             status = "ok"
-            exists = $true
+            path = $item.FullName
             isReparsePoint = $isReparsePoint
             reparseTarget = $target
         }
@@ -430,53 +427,56 @@ function Get-InventoryPathMetadata {
         return [pscustomobject]@{
             status = "error"
             error = $_.Exception.Message
-            exists = $null
-            isReparsePoint = $null
-            reparseTarget = $null
         }
     }
+}
+
+function Get-InventoryPathChainMetadata {
+    param([string]$Path)
+
+    $itemResolver = {
+        param([string]$CandidatePath)
+        Get-InventoryFileSystemItemMetadata -Path $CandidatePath
+    }
+    return Get-InventoryReparseChainMetadata -Path $Path -ItemMetadataResolver $itemResolver
+}
+
+function Get-InventoryPathMetadata {
+    param([string]$Path)
+
+    $metadata = Get-InventoryPathChainMetadata -Path $Path
+    if ($metadata.status -eq "ok" -and [bool]$metadata.exists) {
+        try {
+            $metadata.exists = Test-Path -LiteralPath $Path -PathType Container -ErrorAction Stop
+        } catch {
+            return [pscustomobject]@{
+                status = "error"
+                error = $_.Exception.Message
+                exists = $null
+                isReparsePoint = $null
+                reparseAncestor = $null
+                reparseTarget = $null
+            }
+        }
+    }
+    return $metadata
 }
 
 function Get-InventoryToolMetadata {
     param([string]$Path)
 
-    try {
-        if (-not (Test-Path -LiteralPath $Path -PathType Leaf -ErrorAction Stop)) {
-            throw "Tool path does not exist: $Path"
-        }
-
-        $currentPath = $Path
-        while (-not [string]::IsNullOrWhiteSpace($currentPath)) {
-            $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                $target = if ($item.PSObject.Properties.Name -contains "Target") { $item.Target } else { $null }
-                return [pscustomobject]@{
-                    status = "ok"
-                    isReparsePoint = $true
-                    reparseTarget = $target
-                }
-            }
-
-            $parent = [IO.Directory]::GetParent($currentPath)
-            if ($null -eq $parent) {
-                break
-            }
-            $currentPath = $parent.FullName
-        }
-
-        return [pscustomobject]@{
-            status = "ok"
-            isReparsePoint = $false
-            reparseTarget = $null
-        }
-    } catch {
+    $metadata = Get-InventoryPathChainMetadata -Path $Path
+    if ($metadata.status -eq "ok" -and -not [bool]$metadata.exists) {
         return [pscustomobject]@{
             status = "error"
-            error = $_.Exception.Message
+            error = "Tool path does not exist: $Path"
+            exists = $false
             isReparsePoint = $null
+            reparseAncestor = $null
             reparseTarget = $null
         }
     }
+    return $metadata
 }
 
 function Get-PathScopeRecords {
@@ -894,8 +894,8 @@ function ConvertTo-MarkdownReport {
     $lines.Add("| 工具 | 是否存在 | 探测成功 | Launcher | Launcher originClass | Launcher matchedRule | Launcher matchedRoot | Launcher reparse | Runtime | Runtime originClass | Runtime matchedRule | Runtime matchedRoot | Runtime reparse | 最终归属 | 需人工审查 | 版本输出 | 错误 |")
     $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     foreach ($tool in $Inventory.tools) {
-        $launcherReparse = "isReparsePoint=$($tool.launcher.isReparsePoint); target=$($tool.launcher.reparseTarget); metadataStatus=$($tool.launcher.metadataStatus)"
-        $runtimeReparse = if ($null -eq $tool.runtime) { "" } else { "isReparsePoint=$($tool.runtime.isReparsePoint); target=$($tool.runtime.reparseTarget); metadataStatus=$($tool.runtime.metadataStatus)" }
+        $launcherReparse = "isReparsePoint=$($tool.launcher.isReparsePoint); ancestor=$($tool.launcher.reparseAncestor); target=$($tool.launcher.reparseTarget); metadataStatus=$($tool.launcher.metadataStatus)"
+        $runtimeReparse = if ($null -eq $tool.runtime) { "" } else { "isReparsePoint=$($tool.runtime.isReparsePoint); ancestor=$($tool.runtime.reparseAncestor); target=$($tool.runtime.reparseTarget); metadataStatus=$($tool.runtime.metadataStatus)" }
         $lines.Add("| $(Escape-MarkdownCell $tool.name) | $(Escape-MarkdownCell $tool.found) | $(Escape-MarkdownCell $tool.probeSucceeded) | $(Escape-MarkdownCell $tool.launcher.path) | $(Escape-MarkdownCell $tool.launcher.originClass) | $(Escape-MarkdownCell $tool.launcher.matchedRule) | $(Escape-MarkdownCell $tool.launcher.matchedRoot) | $(Escape-MarkdownCell $launcherReparse) | $(Escape-MarkdownCell $tool.runtime.path) | $(Escape-MarkdownCell $tool.runtime.originClass) | $(Escape-MarkdownCell $tool.runtime.matchedRule) | $(Escape-MarkdownCell $tool.runtime.matchedRoot) | $(Escape-MarkdownCell $runtimeReparse) | $(Escape-MarkdownCell $tool.originClass) | $(Escape-MarkdownCell $tool.requiresManualReview) | $(Escape-MarkdownCell $tool.version) | $(Escape-MarkdownCell $tool.error) |")
     }
     $lines.Add("")
@@ -920,10 +920,10 @@ function ConvertTo-MarkdownReport {
         if (@($scope.entries).Count -eq 0) {
             $lines.Add("无 PATH 条目。")
         } else {
-            $lines.Add("| index | rawPath | expandedPath | expansionStatus | exists | drive | isReparsePoint | reparseTarget |")
-            $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- |")
+            $lines.Add("| index | rawPath | expandedPath | expansionStatus | exists | drive | isReparsePoint | reparseAncestor | reparseTarget |")
+            $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
             foreach ($entry in $scope.entries) {
-                $lines.Add("| $(Escape-MarkdownCell $entry.index) | $(Escape-MarkdownCell $entry.rawPath) | $(Escape-MarkdownCell $entry.expandedPath) | $(Escape-MarkdownCell $entry.expansionStatus) | $(Escape-MarkdownCell $entry.exists) | $(Escape-MarkdownCell $entry.drive) | $(Escape-MarkdownCell $entry.isReparsePoint) | $(Escape-MarkdownCell $entry.reparseTarget) |")
+                $lines.Add("| $(Escape-MarkdownCell $entry.index) | $(Escape-MarkdownCell $entry.rawPath) | $(Escape-MarkdownCell $entry.expandedPath) | $(Escape-MarkdownCell $entry.expansionStatus) | $(Escape-MarkdownCell $entry.exists) | $(Escape-MarkdownCell $entry.drive) | $(Escape-MarkdownCell $entry.isReparsePoint) | $(Escape-MarkdownCell $entry.reparseAncestor) | $(Escape-MarkdownCell $entry.reparseTarget) |")
             }
         }
         $lines.Add("")

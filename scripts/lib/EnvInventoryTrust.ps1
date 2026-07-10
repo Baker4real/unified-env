@@ -75,6 +75,122 @@ function Get-InventoryMetadataContractError {
     return $null
 }
 
+function Get-InventoryReparseChainMetadata {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][scriptblock]$ItemMetadataResolver
+    )
+
+    try {
+        $currentPath = [IO.Path]::GetFullPath($Path)
+    } catch {
+        return [pscustomobject]@{
+            status = "error"
+            error = $_.Exception.Message
+            exists = $null
+            isReparsePoint = $null
+            reparseAncestor = $null
+            reparseTarget = $null
+        }
+    }
+
+    $leafExists = $null
+    $isLeaf = $true
+    while (-not [string]::IsNullOrWhiteSpace($currentPath)) {
+        try {
+            $itemMetadata = & $ItemMetadataResolver $currentPath
+        } catch {
+            return [pscustomobject]@{
+                status = "error"
+                error = $_.Exception.Message
+                exists = $leafExists
+                isReparsePoint = $null
+                reparseAncestor = $null
+                reparseTarget = $null
+            }
+        }
+
+        if ($null -eq $itemMetadata -or -not ($itemMetadata.PSObject.Properties.Name -contains "status")) {
+            return [pscustomobject]@{
+                status = "error"
+                error = "item metadata omitted status"
+                exists = $leafExists
+                isReparsePoint = $null
+                reparseAncestor = $null
+                reparseTarget = $null
+            }
+        }
+
+        if ($itemMetadata.status -eq "error") {
+            return [pscustomobject]@{
+                status = "error"
+                error = [string]$itemMetadata.error
+                exists = $leafExists
+                isReparsePoint = $null
+                reparseAncestor = $null
+                reparseTarget = $null
+            }
+        }
+
+        if ($itemMetadata.status -eq "missing") {
+            if ($isLeaf) {
+                $leafExists = $false
+            }
+        } elseif ($itemMetadata.status -eq "ok") {
+            $contractError = Get-InventoryMetadataContractError -Metadata $itemMetadata -RequiredFields @("path", "isReparsePoint", "reparseTarget")
+            if (-not [string]::IsNullOrWhiteSpace($contractError)) {
+                return [pscustomobject]@{
+                    status = "error"
+                    error = $contractError
+                    exists = $leafExists
+                    isReparsePoint = $null
+                    reparseAncestor = $null
+                    reparseTarget = $null
+                }
+            }
+            if ($isLeaf) {
+                $leafExists = $true
+            }
+            if ([bool]$itemMetadata.isReparsePoint) {
+                return [pscustomobject]@{
+                    status = "ok"
+                    error = $null
+                    exists = $leafExists
+                    isReparsePoint = $true
+                    reparseAncestor = [string]$itemMetadata.path
+                    reparseTarget = $itemMetadata.reparseTarget
+                }
+            }
+        } else {
+            return [pscustomobject]@{
+                status = "error"
+                error = "unsupported item metadata status '$($itemMetadata.status)'"
+                exists = $leafExists
+                isReparsePoint = $null
+                reparseAncestor = $null
+                reparseTarget = $null
+            }
+        }
+
+        $parent = [IO.Directory]::GetParent($currentPath)
+        if ($null -eq $parent) {
+            break
+        }
+        $currentPath = $parent.FullName
+        $isLeaf = $false
+    }
+
+    return [pscustomobject]@{
+        status = "ok"
+        error = $null
+        exists = $leafExists
+        isReparsePoint = $false
+        reparseAncestor = $null
+        reparseTarget = $null
+    }
+}
+
 function New-PathScopeRecord {
     [CmdletBinding()]
     param(
@@ -110,18 +226,20 @@ function New-PathScopeRecord {
 
         $exists = $null
         $isReparsePoint = $null
+        $reparseAncestor = $null
         $reparseTarget = $null
         if ($containsUnexpandedVariable) {
             $complete = $false
         } else {
             try {
                 $metadata = & $MetadataResolver $expandedPath
-                $contractError = Get-InventoryMetadataContractError -Metadata $metadata -RequiredFields @("exists", "isReparsePoint", "reparseTarget")
+                $contractError = Get-InventoryMetadataContractError -Metadata $metadata -RequiredFields @("exists", "isReparsePoint", "reparseAncestor", "reparseTarget")
                 if (-not [string]::IsNullOrWhiteSpace($contractError)) {
                     throw $contractError
                 }
                 $exists = [bool]$metadata.exists
                 $isReparsePoint = [bool]$metadata.isReparsePoint
+                $reparseAncestor = $metadata.reparseAncestor
                 $reparseTarget = $metadata.reparseTarget
             } catch {
                 $complete = $false
@@ -137,6 +255,7 @@ function New-PathScopeRecord {
             exists = $exists
             drive = if ($containsUnexpandedVariable) { $null } else { Get-InventoryPathRoot -Path $expandedPath }
             isReparsePoint = $isReparsePoint
+            reparseAncestor = $reparseAncestor
             reparseTarget = $reparseTarget
         })
 
@@ -155,7 +274,7 @@ function New-PathScopeRecord {
     }
 
     $missingPathCleanupCandidates = if ($complete) {
-        @($entries | Where-Object { $_.exists -eq $false })
+        @($entries | Where-Object { $_.exists -eq $false -and -not [bool]$_.isReparsePoint })
     } else {
         @()
     }
@@ -232,6 +351,7 @@ function Get-InventoryPathOrigin {
             metadataStatus = "not-run"
             metadataError = "absolute path unavailable"
             isReparsePoint = $null
+            reparseAncestor = $null
             reparseTarget = $null
         }
     }
@@ -239,7 +359,7 @@ function Get-InventoryPathOrigin {
     $metadata = $null
     try {
         $metadata = & $MetadataResolver $Path
-        $contractError = Get-InventoryMetadataContractError -Metadata $metadata -RequiredFields @("isReparsePoint", "reparseTarget")
+        $contractError = Get-InventoryMetadataContractError -Metadata $metadata -RequiredFields @("isReparsePoint", "reparseAncestor", "reparseTarget")
         if (-not [string]::IsNullOrWhiteSpace($contractError)) {
             throw $contractError
         }
@@ -252,6 +372,7 @@ function Get-InventoryPathOrigin {
             metadataStatus = "error"
             metadataError = $_.Exception.Message
             isReparsePoint = $null
+            reparseAncestor = $null
             reparseTarget = $null
         }
     }
@@ -270,6 +391,7 @@ function Get-InventoryPathOrigin {
                 metadataStatus = "ok"
                 metadataError = $null
                 isReparsePoint = [bool]$metadata.isReparsePoint
+                reparseAncestor = $metadata.reparseAncestor
                 reparseTarget = $metadata.reparseTarget
             }
         }
@@ -299,6 +421,7 @@ function Get-InventoryPathOrigin {
                     metadataStatus = "ok"
                     metadataError = $null
                     isReparsePoint = [bool]$metadata.isReparsePoint
+                    reparseAncestor = $metadata.reparseAncestor
                     reparseTarget = $metadata.reparseTarget
                 }
             }
@@ -313,6 +436,7 @@ function Get-InventoryPathOrigin {
         metadataStatus = "ok"
         metadataError = $null
         isReparsePoint = [bool]$metadata.isReparsePoint
+        reparseAncestor = $metadata.reparseAncestor
         reparseTarget = $metadata.reparseTarget
     }
 }
@@ -354,6 +478,7 @@ function Get-ToolOriginDecision {
             metadataStatus = "not-run"
             metadataError = "runtime probe failed"
             isReparsePoint = $null
+            reparseAncestor = $null
             reparseTarget = $null
         }
     } elseif (-not [string]::IsNullOrWhiteSpace($RuntimePath)) {

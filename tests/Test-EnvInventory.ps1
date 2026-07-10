@@ -33,6 +33,7 @@ $testRoot = Join-Path $ProjectRoot "reports\env-inventory-test"
 $quickOutput = Join-Path $testRoot "quick"
 $fullOutput = Join-Path $testRoot "full"
 $canonicalPipOutput = Join-Path $testRoot "canonical-pip"
+$pathReparseOutput = Join-Path $testRoot "path-reparse"
 
 Assert-True -Condition (Test-Path -Path $scriptPath -PathType Leaf) -Message "Inventory script not found: $scriptPath"
 Assert-True -Condition (Test-Path -LiteralPath $publisherPath -PathType Leaf) -Message "Report publisher not found: $publisherPath"
@@ -45,6 +46,7 @@ if (Test-Path -Path $testRoot) {
 New-Item -ItemType Directory -Force -Path $quickOutput | Out-Null
 New-Item -ItemType Directory -Force -Path $fullOutput | Out-Null
 New-Item -ItemType Directory -Force -Path $canonicalPipOutput | Out-Null
+New-Item -ItemType Directory -Force -Path $pathReparseOutput | Out-Null
 
 $quickResult = & $scriptPath -OutputDir $quickOutput -SkipVersionProbe
 Assert-True -Condition ([bool]$quickResult.readOnly) -Message "Quick run did not report readOnly=true"
@@ -107,11 +109,12 @@ foreach ($expected in @("本报告由只读盘点脚本生成", "工具解析作
 foreach ($expected in @("Launcher originClass", "Launcher matchedRule", "Launcher matchedRoot", "Launcher reparse", "Runtime originClass", "Runtime matchedRule", "Runtime matchedRoot", "Runtime reparse")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing tool audit column: $expected"
 }
+Assert-True -Condition $quickReport.Contains("ancestor=") -Message "Quick report missing tool reparse ancestor evidence"
 foreach ($expected in @("## 本地环境分类发现")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing local env classification text: $expected"
 }
 foreach ($scopeName in @("process", "user", "machine")) {
-    foreach ($expected in @("### PATH scope: $scopeName", "readStatus", "complete", "errors", "rawPath", "expandedPath", "expansionStatus")) {
+    foreach ($expected in @("### PATH scope: $scopeName", "readStatus", "complete", "errors", "rawPath", "expandedPath", "expansionStatus", "reparseAncestor")) {
         Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing $scopeName PATH detail: $expected"
     }
 }
@@ -229,6 +232,27 @@ if ($pythonProbe -and $pythonProbe.found) {
         Assert-True -Condition ($pythonProbe.originClass -eq "project-local-env") -Message "Hermes Python 最终归属必须为 project-local-env"
         Assert-True -Condition ([bool]$pythonProbe.requiresManualReview) -Message "Hermes project-local Python 必须人工审查"
     }
+}
+
+$pathFixtureTarget = Join-Path $testRoot "path-fixture-target"
+$pathFixtureJunction = Join-Path $testRoot "path-fixture-junction"
+New-Item -ItemType Directory -Path $pathFixtureTarget -Force | Out-Null
+New-Item -ItemType Junction -Path $pathFixtureJunction -Target $pathFixtureTarget | Out-Null
+$missingUnderJunction = Join-Path $pathFixtureJunction "missing-child"
+$previousProcessPath = $env:Path
+try {
+    $env:Path = $missingUnderJunction
+    & $scriptPath -OutputDir $pathReparseOutput -ProjectRoots @() -ToolOwnerRoots @() -SkipVersionProbe | Out-Null
+    $pathReparseInventory = Get-Content -LiteralPath (Join-Path $pathReparseOutput "inventory.json") -Raw | ConvertFrom-Json
+    $junctionEntry = @($pathReparseInventory.pathScopes.process.entries)[0]
+    Assert-True -Condition (-not [bool]$junctionEntry.exists) -Message "junction 下不存在 PATH 叶子必须保留 exists=false"
+    Assert-True -Condition ([bool]$junctionEntry.isReparsePoint) -Message "PATH adapter 必须检测父链 junction"
+    Assert-True -Condition ($junctionEntry.reparseAncestor -ieq $pathFixtureJunction) -Message "PATH adapter 必须保留 reparse ancestor"
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($junctionEntry.reparseTarget)) -Message "PATH adapter 必须保留 reparse target"
+    Assert-True -Condition (@($pathReparseInventory.pathScopes.process.missingPathCleanupCandidates).Count -eq 0) -Message "junction 父链下缺失 PATH 不得生成 cleanup 建议"
+} finally {
+    $env:Path = $previousProcessPath
+    Remove-Item -LiteralPath $pathFixtureJunction -Force
 }
 
 $blockedOutput = "C:\Codex-should-not-be-created"
