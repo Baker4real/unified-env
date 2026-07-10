@@ -16,20 +16,122 @@ function Assert-True {
     }
 }
 
+function Assert-CanRemoveTestRoot {
+    param([Parameter(Mandatory)][string]$Path)
+
+    Assert-True -Condition ([IO.Path]::IsPathFullyQualified($script:ProjectRoot)) -Message "ProjectRoot 必须是 D 盘绝对路径：$script:ProjectRoot"
+    $fullProjectRoot = [IO.Path]::GetFullPath($script:ProjectRoot).TrimEnd("\", "/")
+    Assert-True -Condition ([IO.Path]::GetPathRoot($fullProjectRoot) -ieq "D:\") -Message "ProjectRoot 必须位于 D:\：$fullProjectRoot"
+
+    $fullReportsRoot = [IO.Path]::GetFullPath((Join-Path $fullProjectRoot "reports")).TrimEnd("\", "/")
+    $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
+    $isUnderReports = $fullPath.StartsWith("$fullReportsRoot\", [StringComparison]::OrdinalIgnoreCase)
+    Assert-True -Condition $isUnderReports -Message "测试输出目录必须位于项目 reports 下：$Path"
+
+    $currentPath = $fullPath
+    while ($null -ne $currentPath) {
+        if (Test-Path -LiteralPath $currentPath) {
+            $item = Get-Item -LiteralPath $currentPath -Force
+            $isReparse = ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+            Assert-True -Condition (-not $isReparse) -Message "测试输出路径不能穿过 junction、symlink 或 reparse point：$currentPath"
+        }
+
+        $parentPath = [IO.Directory]::GetParent($currentPath)
+        if ($null -eq $parentPath) {
+            break
+        }
+        $currentPath = $parentPath.FullName.TrimEnd("\", "/")
+    }
+}
+
+function Assert-ProjectRootRejected {
+    param(
+        [Parameter(Mandatory)][string]$Candidate,
+        [Parameter(Mandatory)][string]$ExpectedUntouchedPath,
+        [Parameter(Mandatory)][string]$Message
+    )
+
+    $savedProjectRoot = $script:ProjectRoot
+    try {
+        $script:ProjectRoot = $Candidate
+        $candidateTestRoot = Join-Path $Candidate "reports\report-artifact-publisher-test"
+        $blocked = $false
+        try {
+            Assert-CanRemoveTestRoot -Path $candidateTestRoot
+        } catch {
+            $blocked = $true
+        }
+
+        Assert-True -Condition $blocked -Message $Message
+        Assert-True -Condition (-not (Test-Path -LiteralPath $ExpectedUntouchedPath)) -Message "拒绝 ProjectRoot 时不得创建或删除越界内容：$ExpectedUntouchedPath"
+    } finally {
+        $script:ProjectRoot = $savedProjectRoot
+    }
+}
+
 $publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
 $testRoot = Join-Path $ProjectRoot "reports\report-artifact-publisher-test"
 $outputDir = Join-Path $testRoot "success"
 $failureOutputDir = Join-Path $testRoot "render-failure"
 
+$blockedCProjectRoot = "C:\Codex-report-artifact-project-root-$([guid]::NewGuid().ToString())"
+Assert-ProjectRootRejected `
+    -Candidate $blockedCProjectRoot `
+    -ExpectedUntouchedPath $blockedCProjectRoot `
+    -Message "测试没有拒绝 C 盘 ProjectRoot"
+
+$blockedRelativeProjectRoot = "report-artifact-relative-$([guid]::NewGuid().ToString())"
+$blockedRelativeFullPath = [IO.Path]::GetFullPath($blockedRelativeProjectRoot)
+Assert-ProjectRootRejected `
+    -Candidate $blockedRelativeProjectRoot `
+    -ExpectedUntouchedPath $blockedRelativeFullPath `
+    -Message "测试没有拒绝相对 ProjectRoot"
+
 try {
+    Assert-CanRemoveTestRoot -Path $testRoot
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 
     New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 
+    $junctionProjectTarget = Join-Path $testRoot "project-root-target"
+    $junctionProjectRoot = Join-Path $testRoot "project-root-link"
+    $junctionProjectReports = Join-Path $junctionProjectTarget "reports"
+    $junctionSentinel = Join-Path $junctionProjectTarget "sentinel.txt"
+    New-Item -ItemType Directory -Path $junctionProjectReports -Force | Out-Null
+    [IO.File]::WriteAllText($junctionSentinel, "untouched", [Text.UTF8Encoding]::new($false))
+    New-Item -ItemType Junction -Path $junctionProjectRoot -Target $junctionProjectTarget | Out-Null
+    $savedProjectRoot = $script:ProjectRoot
+    try {
+        $script:ProjectRoot = $junctionProjectRoot
+        $junctionProjectTestRoot = Join-Path $junctionProjectRoot "reports\report-artifact-publisher-test"
+        $junctionProjectBlocked = $false
+        try {
+            Assert-CanRemoveTestRoot -Path $junctionProjectTestRoot
+        } catch {
+            $junctionProjectBlocked = $_.Exception.Message -like "*reparse point*"
+        }
+        Assert-True $junctionProjectBlocked "测试没有拒绝穿过 junction 的 ProjectRoot"
+        Assert-True (Test-Path -LiteralPath $junctionSentinel -PathType Leaf) "拒绝 junction ProjectRoot 时不得删除越界内容"
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $junctionProjectReports "report-artifact-publisher-test"))) "拒绝 junction ProjectRoot 时不得创建越界内容"
+    } finally {
+        $script:ProjectRoot = $savedProjectRoot
+        if (Test-Path -LiteralPath $junctionProjectRoot) {
+            Remove-Item -LiteralPath $junctionProjectRoot -Force
+        }
+    }
+
     if (Test-Path -LiteralPath $publisherPath -PathType Leaf) {
-        . $publisherPath
+        $savedErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            . $publisherPath
+            $errorActionPreferenceAfterDotSource = [string]$ErrorActionPreference
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+        Assert-True ($errorActionPreferenceAfterDotSource -ceq "Continue") "dot-source 发布器不得污染调用者 ErrorActionPreference"
     }
 
     $published = Publish-JsonMarkdownArtifactPair `
@@ -127,6 +229,7 @@ try {
     }
 } finally {
     if (-not $KeepOutputs -and (Test-Path -LiteralPath $testRoot)) {
+        Assert-CanRemoveTestRoot -Path $testRoot
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 }

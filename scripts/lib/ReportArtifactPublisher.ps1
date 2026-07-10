@@ -1,5 +1,3 @@
-$ErrorActionPreference = "Stop"
-
 function Get-ReportSha256 {
     param([Parameter(Mandatory)][string]$Value)
     $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
@@ -20,7 +18,7 @@ function Assert-TrustedReportOutputDirectory {
     }
 
     $currentPath = $fullPath
-    while (-not (Test-Path -LiteralPath $currentPath)) {
+    while (-not (Test-Path -LiteralPath $currentPath -ErrorAction Stop)) {
         $parentPath = [IO.Directory]::GetParent($currentPath)
         if ($null -eq $parentPath) {
             break
@@ -29,7 +27,7 @@ function Assert-TrustedReportOutputDirectory {
     }
 
     while ($null -ne $currentPath) {
-        $item = Get-Item -LiteralPath $currentPath -Force
+        $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "OutputDir 父链不得包含 reparse point：$($item.FullName)"
         }
@@ -66,7 +64,7 @@ function Test-JsonMarkdownArtifactPair {
 
     try {
         $jsonText = [IO.File]::ReadAllText($JsonPath)
-        $document = $jsonText | ConvertFrom-Json
+        $document = $jsonText | ConvertFrom-Json -ErrorAction Stop
         $generationId = [string]$document.generationId
         $jsonSha256 = Get-ReportSha256 -Value $jsonText
         $markdownText = [IO.File]::ReadAllText($MarkdownPath)
@@ -126,19 +124,19 @@ function Publish-JsonMarkdownArtifactPair {
     }
 
     $outputPath = Assert-TrustedReportOutputDirectory -OutputDir $OutputDir
-    New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
+    New-Item -ItemType Directory -Path $outputPath -Force -ErrorAction Stop | Out-Null
     $outputPath = Assert-TrustedReportOutputDirectory -OutputDir $outputPath
 
     $generationId = [guid]::NewGuid().ToString()
-    $Document | Add-Member -MemberType NoteProperty -Name generationId -Value $generationId -Force
+    $Document | Add-Member -MemberType NoteProperty -Name generationId -Value $generationId -Force -ErrorAction Stop
 
-    $jsonText = $Document | ConvertTo-Json -Depth 100
+    $jsonText = $Document | ConvertTo-Json -Depth 100 -ErrorAction Stop
     $jsonSha256 = Get-ReportSha256 -Value $jsonText
     $stagingPath = Join-Path $outputPath ".staging-$([guid]::NewGuid().ToString())"
     $stagingCreated = $false
 
     try {
-        New-Item -ItemType Directory -Path $stagingPath | Out-Null
+        New-Item -ItemType Directory -Path $stagingPath -ErrorAction Stop | Out-Null
         $stagingCreated = $true
 
         $stagingJsonPath = Join-Path $stagingPath $JsonFileName
@@ -174,8 +172,8 @@ function Publish-JsonMarkdownArtifactPair {
             markdownPath = $markdownPath
         }
     } finally {
-        if ($stagingCreated -and (Test-Path -LiteralPath $stagingPath)) {
-            Remove-Item -LiteralPath $stagingPath -Recurse -Force
+        if ($stagingCreated -and (Test-Path -LiteralPath $stagingPath -ErrorAction Stop)) {
+            Remove-Item -LiteralPath $stagingPath -Recurse -Force -ErrorAction Stop
         }
     }
 }
