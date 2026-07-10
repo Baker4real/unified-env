@@ -71,6 +71,28 @@ foreach ($safePath in @('C:\Windows', 'D:/Codex/tools', '\\server\share', '\\ser
     Assert-EnvSafeAbsolutePath -Path $safePath -FactName "safe absolute fixture"
 }
 
+$unsafeWin32Paths = @(
+    'C:\CON', 'C:\con.txt', 'C:\dir\PRN.log', 'C:\AUX', 'C:\NUL.data', 'C:\CLOCK$',
+    'C:\COM1', 'C:\com9.log', 'C:\LPT1', 'C:\lpt9.txt',
+    '\\server\CON\file', '\\NUL\share\file',
+    'C:\safe:file', 'C:\dir\file:stream',
+    'C:\bad<name', 'C:\bad>name', 'C:\bad"name', 'C:\bad|name', 'C:\bad?name', 'C:\bad*name',
+    "C:\bad$([char]1)name", 'C:\taildot.', 'C:\tailspace ',
+    'C:\foo\\bar', '\\server\share\\bar'
+)
+foreach ($unsafeWin32Path in $unsafeWin32Paths) {
+    Assert-Throws -Action { Assert-EnvSafeAbsolutePath -Path $unsafeWin32Path -FactName "unsafe Win32 segment fixture" } -Message "Win32 segment allowlist 必须拒绝：$unsafeWin32Path"
+}
+Assert-Throws -Action { Assert-EnvSafeReparseTarget -Path 'D:\links\NUL.txt' -FactName "unsafe reparse target fixture" } -Message "reparseTarget 必须应用相同 Win32 segment 规则"
+
+foreach ($safeWin32Path in @(
+    'C:\', 'C:\normal\', 'C:\console', 'C:\com10', 'C:\nulldata',
+    'D:\项目\缓存', 'D:\Program Files\Tool Name',
+    '\\server\share\', '\\server-name\共享 空间\folder'
+)) {
+    Assert-EnvSafeAbsolutePath -Path $safeWin32Path -FactName "safe Win32 segment fixture"
+}
+
 $canonicalExcludedRoots = @(Get-EnvCanonicalExcludedRoots)
 $excludedRootFacts = @(Get-EnvExcludedRootFacts)
 Assert-True -Condition ($canonicalExcludedRoots.Count -eq 5) -Message "canonical excluded-root 规则数量发生变化"

@@ -1,3 +1,34 @@
+function Test-EnvSafeWin32PathSegments {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Segments)
+
+    for ($index = 0; $index -lt $Segments.Count; $index++) {
+        $segment = $Segments[$index]
+        if ($segment.Length -eq 0) {
+            if ($index -eq $Segments.Count - 1) {
+                continue
+            }
+            return $false
+        }
+        if ($segment.EndsWith(' ', [StringComparison]::Ordinal) -or
+            $segment.EndsWith('.', [StringComparison]::Ordinal) -or
+            $segment -match '[<>:"|?*]') {
+            return $false
+        }
+        foreach ($character in $segment.ToCharArray()) {
+            if ([int]$character -lt 32) {
+                return $false
+            }
+        }
+
+        $deviceStem = ($segment -split '\.', 2)[0].TrimEnd(' ', '.')
+        if ($deviceStem -imatch '^(?:CON|PRN|AUX|NUL|CLOCK\$|COM[1-9]|LPT[1-9])$') {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Test-EnvSafeAbsolutePathSyntax {
     [CmdletBinding()]
     param([AllowNull()][object]$Path)
@@ -6,22 +37,23 @@ function Test-EnvSafeAbsolutePathSyntax {
         return $false
     }
 
-    if ($Path -match '^[A-Za-z]:[\\/]') {
-        return $true
+    $normalized = $Path.Replace('/', '\')
+    if ($normalized -match '^[A-Za-z]:\\') {
+        $remainder = $normalized.Substring(3)
+        if ($remainder.Length -eq 0) {
+            return $true
+        }
+        return Test-EnvSafeWin32PathSegments -Segments ([string[]]$remainder.Split([char]'\'))
     }
 
-    $normalized = $Path.Replace('/', '\')
     if (-not $normalized.StartsWith('\\', [StringComparison]::Ordinal)) {
         return $false
     }
-    $segments = @($normalized.Substring(2) -split '\\')
+    $segments = [string[]]$normalized.Substring(2).Split([char]'\')
     if ($segments.Count -lt 2 -or
         [string]::IsNullOrWhiteSpace($segments[0]) -or
         [string]::IsNullOrWhiteSpace($segments[1]) -or
-        $segments[0] -notmatch '^[^\\/:*?"<>|]+$' -or
-        $segments[1] -notmatch '^[^\\/:*?"<>|]+$' -or
-        $segments[0] -in @('.', '..', '?') -or
-        $segments[1] -in @('.', '..')) {
+        -not (Test-EnvSafeWin32PathSegments -Segments $segments)) {
         return $false
     }
     return $true
