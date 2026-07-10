@@ -15,23 +15,104 @@ function Test-BackupRetentionReparseAncestor {
     param([Parameter(Mandatory)][string]$Path)
 
     $fullPath = Get-BackupRetentionCanonicalPath -Path $Path
-    $current = $fullPath
-    while (-not (Test-Path -LiteralPath $current -ErrorAction Stop)) {
-        $parent = [IO.Directory]::GetParent($current)
-        if ($null -eq $parent) { break }
-        $current = $parent.FullName
+    $trustedRoot = [IO.Path]::GetPathRoot($fullPath)
+    $state = Get-BackupRetentionPathChainState -Path $fullPath -TrustedRoot $trustedRoot
+    if ($state.status -ceq 'error') {
+        throw "reparse metadata 读取失败：$($state.error)"
+    }
+    return [pscustomobject]@{
+        ok = $state.status -ceq 'ok'
+        firstReparsePoint = $state.reparseAncestor
+    }
+}
+
+function Test-BackupRetentionPathWithinRoot {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Root)
+    $fullPath = Get-BackupRetentionCanonicalPath -Path $Path
+    $fullRoot = Get-BackupRetentionCanonicalPath -Path $Root
+    return $fullPath -ieq $fullRoot -or $fullPath.StartsWith("$($fullRoot.TrimEnd('\'))\", [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-BackupRetentionPathChainState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$TrustedRoot
+    )
+
+    $fullPath = Get-BackupRetentionCanonicalPath -Path $Path
+    $fullTrustedRoot = Get-BackupRetentionCanonicalPath -Path $TrustedRoot
+    if (-not (Test-BackupRetentionPathWithinRoot -Path $fullPath -Root $fullTrustedRoot)) {
+        return [pscustomobject]@{ status = 'error'; error = "路径不在受信根内：$fullPath"; exists = $null; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null }
     }
 
+    $leafExists = $null
+    $current = $fullPath
     while (-not [string]::IsNullOrWhiteSpace($current)) {
-        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            return [pscustomobject]@{ ok = $false; firstReparsePoint = $item.FullName }
+        try {
+            $exists = Test-Path -LiteralPath $current -ErrorAction Stop
+            if ($current -ieq $fullPath) { $leafExists = [bool]$exists }
+            if ($exists) {
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                $isReparse = ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+                if ($isReparse) {
+                    $target = $null
+                    if ($item.PSObject.Properties.Name -contains 'Target') {
+                        $targetValue = $item.Target
+                        $target = if ($targetValue -is [array]) { @($targetValue) -join ';' } else { [string]$targetValue }
+                    }
+                    return [pscustomobject]@{ status = 'reparse'; error = $null; exists = $leafExists; isReparsePoint = $true; reparseAncestor = $current; reparseTarget = $target }
+                }
+            }
+        } catch {
+            return [pscustomobject]@{ status = 'error'; error = $_.Exception.Message; exists = $leafExists; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null }
         }
-        $parent = [IO.Directory]::GetParent($item.FullName)
-        if ($null -eq $parent) { break }
-        $current = $parent.FullName
+
+        if ($current -ieq $fullTrustedRoot) {
+            return [pscustomobject]@{ status = 'ok'; error = $null; exists = $leafExists; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
+        }
+        $parent = [IO.Directory]::GetParent($current)
+        if ($null -eq $parent -or $parent.FullName.TrimEnd('\') -ieq $current.TrimEnd('\')) {
+            return [pscustomobject]@{ status = 'error'; error = "未能到达受信根：$fullTrustedRoot"; exists = $leafExists; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null }
+        }
+        $current = Get-BackupRetentionCanonicalPath -Path $parent.FullName
     }
-    return [pscustomobject]@{ ok = $true; firstReparsePoint = $null }
+    return [pscustomobject]@{ status = 'error'; error = "路径父链意外终止：$fullPath"; exists = $leafExists; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null }
+}
+
+function Resolve-BackupRetentionPathChainState {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$TrustedRoot,
+        [Parameter(Mandatory)][scriptblock]$PathChainResolver
+    )
+    try { $state = & $PathChainResolver $Path $TrustedRoot } catch {
+        return [pscustomobject]@{ status = 'error'; error = $_.Exception.Message; exists = $null; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null }
+    }
+    if ($null -eq $state) {
+        return [pscustomobject]@{ status = 'error'; error = 'path chain resolver returned null'; exists = $null; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null }
+    }
+    foreach ($field in @('status','exists','isReparsePoint','reparseAncestor','reparseTarget')) {
+        if ($state.PSObject.Properties.Name -notcontains $field) {
+            return [pscustomobject]@{ status = 'error'; error = "path chain metadata omitted $field"; exists = $null; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null }
+        }
+    }
+    if ($state.status -isnot [string] -or -not (@('ok','reparse','error') -ccontains $state.status) -or
+        ($state.status -in @('ok','reparse') -and $state.exists -isnot [bool]) -or
+        ($state.status -ceq 'ok' -and ($state.isReparsePoint -isnot [bool] -or $state.isReparsePoint -or $null -ne $state.reparseAncestor -or $null -ne $state.reparseTarget)) -or
+        ($state.status -ceq 'reparse' -and ($state.isReparsePoint -isnot [bool] -or -not $state.isReparsePoint -or [string]::IsNullOrWhiteSpace([string]$state.reparseAncestor) -or ($null -ne $state.reparseTarget -and $state.reparseTarget -isnot [string]))) -or
+        ($state.status -ceq 'error' -and [string]::IsNullOrWhiteSpace([string]$state.error))) {
+        return [pscustomobject]@{ status = 'error'; error = 'invalid path chain metadata contract'; exists = $null; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null }
+    }
+    if ($state.status -ceq 'reparse') {
+        try {
+            $ancestor = Get-BackupRetentionCanonicalPath -Path ([string]$state.reparseAncestor)
+            if (-not (Test-BackupRetentionPathWithinRoot -Path $ancestor -Root $TrustedRoot) -or -not (Test-BackupRetentionPathWithinRoot -Path $Path -Root $ancestor)) { throw 'reparse ancestor is outside the trusted path chain' }
+        } catch {
+            return [pscustomobject]@{ status = 'error'; error = $_.Exception.Message; exists = $null; isReparsePoint = $null; reparseAncestor = $null; reparseTarget = $null }
+        }
+    }
+    return $state
 }
 
 function Assert-BackupRetentionDPath {
@@ -60,11 +141,12 @@ function New-BackupRetentionPolicyContext {
         [int]$RetainCount = 5
     )
 
+    $canonicalArtifactMode = $ArtifactMode.ToLowerInvariant()
     $canonicalCodexRoot = Assert-BackupRetentionDPath -Path $CodexRoot -Name 'CodexRoot'
     $canonicalDDriveRoot = Assert-BackupRetentionDPath -Path $DDriveRoot -Name 'DDriveRoot'
     if ($RetainCount -lt 1) { throw 'RetainCount 必须大于等于 1。' }
 
-    if ($ArtifactMode -ceq 'production') {
+    if ($canonicalArtifactMode -ceq 'production') {
         if ($canonicalCodexRoot -cne 'D:\Codex\.codex' -or
             $canonicalDDriveRoot -cne 'D:\Codex' -or
             $RetainCount -ne 5) {
@@ -73,7 +155,7 @@ function New-BackupRetentionPolicyContext {
     }
 
     return [pscustomobject][ordered]@{
-        artifactMode = $ArtifactMode
+        artifactMode = $canonicalArtifactMode
         CodexRoot = $canonicalCodexRoot
         DDriveRoot = $canonicalDDriveRoot
         retainCount = $RetainCount
@@ -115,7 +197,11 @@ function Get-BackupRetentionReparseMetadata {
 
 function Get-BackupRetentionRootSnapshot {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][psobject]$DeclaredScanRoot)
+    param(
+        [Parameter(Mandatory)][psobject]$DeclaredScanRoot,
+        [string]$TrustedRoot = '',
+        [scriptblock]$PathChainResolver = { param($Path, $Root) Get-BackupRetentionPathChainState -Path $Path -TrustedRoot $Root }
+    )
 
     $path = Get-BackupRetentionCanonicalPath -Path ([string]$DeclaredScanRoot.path)
     $started = (Get-Date).ToUniversalTime().ToString('o')
@@ -123,18 +209,38 @@ function Get-BackupRetentionRootSnapshot {
     $items = [Collections.Generic.List[object]]::new()
     $exists = $false
     $rootIsReparse = $false
+    $reparseAncestor = $null
+    $reparseTarget = $null
+    $metadataStatus = 'error'
     $completed = $false
 
     try {
-        $exists = Test-Path -LiteralPath $path -ErrorAction Stop
-        if (-not $exists) {
+        if ([string]::IsNullOrWhiteSpace($TrustedRoot)) { $TrustedRoot = [IO.Path]::GetPathRoot($path) }
+        $chain = Resolve-BackupRetentionPathChainState -Path $path -TrustedRoot $TrustedRoot -PathChainResolver $PathChainResolver
+        $metadataStatus = [string]$chain.status
+        $exists = if ($chain.exists -is [bool]) { [bool]$chain.exists } else { $null }
+        if ($chain.status -ceq 'error') {
+            $errors.Add("reparse metadata 读取失败：$($chain.error)")
+        } elseif ($chain.status -ceq 'reparse') {
+            $rootIsReparse = $true
+            $reparseAncestor = [string]$chain.reparseAncestor
+            $reparseTarget = $chain.reparseTarget
+            $errors.Add("声明扫描根父链命中 reparse point：$reparseAncestor")
+        }
+        if ($chain.status -ceq 'ok' -and -not $exists) {
             $completed = $true
-        } else {
+        } elseif ($chain.status -ceq 'ok') {
             $rootItem = Get-Item -LiteralPath $path -Force -ErrorAction Stop
             if (-not $rootItem.PSIsContainer) {
                 $errors.Add("声明扫描根已被非目录项占用：$path")
             } else {
-                $rootIsReparse = ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+                $rootReparseMetadata = Get-BackupRetentionReparseMetadata -Item $rootItem
+                $rootIsReparse = [bool]$rootReparseMetadata.isReparsePoint
+                if ($rootIsReparse) {
+                    $metadataStatus = 'reparse'
+                    $reparseAncestor = $path
+                    $reparseTarget = $rootReparseMetadata.reparseTarget
+                }
             }
             if ($rootIsReparse) {
                 $errors.Add("声明扫描根是 reparse point：$path")
@@ -153,6 +259,7 @@ function Get-BackupRetentionRootSnapshot {
             }
         }
     } catch {
+        $metadataStatus = 'error'
         $errors.Add($_.Exception.Message)
     }
 
@@ -163,8 +270,11 @@ function Get-BackupRetentionRootSnapshot {
         rootId = [string]$DeclaredScanRoot.rootId
         path = $path
         rule = [string]$DeclaredScanRoot.rule
+        metadataStatus = $metadataStatus
         exists = $exists
         rootIsReparsePoint = $rootIsReparse
+        reparseAncestor = $reparseAncestor
+        reparseTarget = $reparseTarget
         enumerationStarted = $started
         enumerationCompleted = $completed
         errors = [object[]]$errors.ToArray()
@@ -243,6 +353,7 @@ function New-BackupRetentionCoverageItem {
         [AllowNull()][object]$Timestamp = $null, [int]$RetainRank = 0,
         [string]$Risk = '低', [AllowNull()][string]$DelegatedScanRoot = $null,
         [bool]$IsReparsePoint = $false, [AllowNull()][string]$ReparseTarget = $null,
+        [AllowNull()][string]$ReparseAncestor = $null,
         [AllowNull()][object]$Stats = $null, [string]$CoverageOrigin = 'scan'
     )
 
@@ -268,10 +379,11 @@ function New-BackupRetentionCoverageItem {
         delegatedScanRoot = if ([string]::IsNullOrWhiteSpace($DelegatedScanRoot)) { $null } else { Get-BackupRetentionCanonicalPath -Path $DelegatedScanRoot }
         isReparsePoint = $IsReparsePoint
         reparseTarget = $ReparseTarget
+        reparseAncestor = $ReparseAncestor
         reparse = [pscustomobject]@{
             isReparsePoint = $IsReparsePoint
             hasReparsePoint = $IsReparsePoint
-            firstReparsePoint = if ($IsReparsePoint) { Get-BackupRetentionCanonicalPath -Path $Path } else { $null }
+            firstReparsePoint = if (-not [string]::IsNullOrWhiteSpace($ReparseAncestor)) { $ReparseAncestor } elseif ($IsReparsePoint) { Get-BackupRetentionCanonicalPath -Path $Path } else { $null }
             target = $ReparseTarget
         }
         automaticCandidate = $Disposition -ceq 'candidate'
@@ -347,7 +459,10 @@ function Test-BackupRetentionDelegationGraph {
 }
 
 function Get-BackupRetentionGuardrailItems {
-    param([Parameter(Mandatory)][psobject]$PolicyContext)
+    param(
+        [Parameter(Mandatory)][psobject]$PolicyContext,
+        [Parameter(Mandatory)][scriptblock]$PathChainResolver
+    )
 
     $definitions = @(
         @{ Relative = 'skills'; Reason = '当前用户 skill 活跃层，不能按备份清理。'; Manual = $false },
@@ -374,18 +489,28 @@ function Get-BackupRetentionGuardrailItems {
     $items = [Collections.Generic.List[object]]::new()
     foreach ($definition in $definitions) {
         $path = Join-Path $PolicyContext.CodexRoot $definition.Relative
-        $stats = Get-BackupRetentionSafeStats -Path $path
+        $chain = Resolve-BackupRetentionPathChainState -Path $path -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver
+        $stats = if ($chain.status -ceq 'ok') {
+            Get-BackupRetentionSafeStats -Path $path
+        } else {
+            [pscustomobject]@{ exists = if ($chain.exists -is [bool]) { $chain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($chain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($chain.status -ceq 'error') { 1 } else { 0 } }
+        }
         $risk = if ($definition.Manual) { '高' } else { '低' }
         $items.Add((New-BackupRetentionCoverageItem -Path $path -ScanRoot $null -ItemType 'policy-path' -Disposition 'protected' -Reason $definition.Reason -Manual $definition.Manual -Blocks $false -Risk $risk -Stats $stats -CoverageOrigin 'policy-guardrail'))
     }
     $legacy = Join-Path $PolicyContext.DDriveRoot '.codex-c-backups'
-    $items.Add((New-BackupRetentionCoverageItem -Path $legacy -ScanRoot $null -ItemType 'policy-path' -Disposition 'protected' -Reason '历史迁移备份可能有审计价值，仅人工审查。' -Manual $true -Blocks $false -Risk '高' -Stats (Get-BackupRetentionSafeStats $legacy) -CoverageOrigin 'policy-guardrail'))
+    $legacyChain = Resolve-BackupRetentionPathChainState -Path $legacy -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver
+    $legacyStats = if ($legacyChain.status -ceq 'ok') { Get-BackupRetentionSafeStats $legacy } else { [pscustomobject]@{ exists = if ($legacyChain.exists -is [bool]) { $legacyChain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($legacyChain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($legacyChain.status -ceq 'error') { 1 } else { 0 } } }
+    $items.Add((New-BackupRetentionCoverageItem -Path $legacy -ScanRoot $null -ItemType 'policy-path' -Disposition 'protected' -Reason '历史迁移备份可能有审计价值，仅人工审查。' -Manual $true -Blocks $false -Risk '高' -Stats $legacyStats -CoverageOrigin 'policy-guardrail'))
     return [object[]]$items.ToArray()
 }
 
 function Invoke-BackupRetentionEvaluation {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][psobject]$PolicyContext)
+    param(
+        [Parameter(Mandatory)][psobject]$PolicyContext,
+        [scriptblock]$PathChainResolver = { param($Path, $Root) Get-BackupRetentionPathChainState -Path $Path -TrustedRoot $Root }
+    )
 
     foreach ($required in @('artifactMode', 'CodexRoot', 'DDriveRoot', 'retainCount', 'policyId', 'policyVersion')) {
         if ($PolicyContext.PSObject.Properties.Name -notcontains $required) { throw "PolicyContext 缺少必需字段：$required" }
@@ -396,18 +521,18 @@ function Invoke-BackupRetentionEvaluation {
     $PolicyContext = New-BackupRetentionPolicyContext -ArtifactMode ([string]$PolicyContext.artifactMode) -CodexRoot ([string]$PolicyContext.CodexRoot) -DDriveRoot ([string]$PolicyContext.DDriveRoot) -RetainCount ([int]$PolicyContext.retainCount)
 
     $declared = @(Get-BackupRetentionDeclaredScanRoots -PolicyContext $PolicyContext)
-    $evaluated = @($declared | ForEach-Object { Get-BackupRetentionRootSnapshot -DeclaredScanRoot $_ })
+    $evaluated = @($declared | ForEach-Object { Get-BackupRetentionRootSnapshot -DeclaredScanRoot $_ -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver })
     $items = [Collections.Generic.List[object]]::new()
     $pending = [Collections.Generic.List[object]]::new()
 
     foreach ($root in $evaluated) {
         if (-not $root.enumerationCompleted -or @($root.errors).Count -gt 0) {
             $rootReason = if ($root.rootIsReparsePoint) { '声明扫描根是 reparse point，覆盖失败关闭。' } else { '声明扫描根枚举未完成，覆盖失败关闭。' }
-            $items.Add((New-BackupRetentionCoverageItem -Path $root.path -ScanRoot $null -ItemType 'scan-root' -Disposition 'gap' -Reason $rootReason -Manual $true -Blocks $true -Risk '高' -IsReparsePoint ([bool]$root.rootIsReparsePoint) -CoverageOrigin 'scan-root-error'))
+            $items.Add((New-BackupRetentionCoverageItem -Path $root.path -ScanRoot $null -ItemType 'scan-root' -Disposition 'gap' -Reason $rootReason -Manual $true -Blocks $true -Risk '高' -IsReparsePoint ([bool]$root.rootIsReparsePoint) -ReparseAncestor $root.reparseAncestor -ReparseTarget $root.reparseTarget -CoverageOrigin 'scan-root-error'))
         }
         foreach ($child in @($root.directChildren)) {
             if ($child.isReparsePoint) {
-                $items.Add((New-BackupRetentionCoverageItem -Path $child.path -ScanRoot $root.path -ItemType $child.itemType -Disposition 'gap' -Reason '直接子项是 reparse point，不能进入保留规则。' -Manual $true -Blocks $true -Risk '高' -IsReparsePoint $true -ReparseTarget $child.reparseTarget))
+                $items.Add((New-BackupRetentionCoverageItem -Path $child.path -ScanRoot $root.path -ItemType $child.itemType -Disposition 'gap' -Reason '直接子项是 reparse point，不能进入保留规则。' -Manual $true -Blocks $true -Risk '高' -IsReparsePoint $true -ReparseAncestor $child.path -ReparseTarget $child.reparseTarget))
                 continue
             }
 
@@ -416,8 +541,9 @@ function Invoke-BackupRetentionEvaluation {
                     $items.Add((New-BackupRetentionCoverageItem -Path $child.path -ScanRoot $root.path -ItemType $child.itemType -Disposition 'delegated-root' -Reason '由更窄的 provider-sync 扫描根负责分类。' -Manual $false -Blocks $false -DelegatedScanRoot $child.path))
                     continue
                 }
-                $backupType = if ($child.name -like 'config.toml*') { 'config.toml-sidecar' } elseif ($child.name -like '.codex-global-state.json*') { 'global-state-sidecar' } else { $null }
-                if ($null -eq $backupType) {
+                $sidecarMatch = [regex]::Match($child.name, '^(?<base>config\.toml|\.codex-global-state\.json)-(?<ts>20\d{6}T\d{6}(?:\d{3,7})?Z)$')
+                $backupType = if ($sidecarMatch.Success -and $sidecarMatch.Groups['base'].Value -ceq 'config.toml') { 'config.toml-sidecar' } elseif ($sidecarMatch.Success) { 'global-state-sidecar' } else { $null }
+                if ($child.itemType -cne 'file' -or $null -eq $backupType) {
                     $items.Add((New-BackupRetentionCoverageItem -Path $child.path -ScanRoot $root.path -ItemType $child.itemType -Disposition 'gap' -Reason '未知 backups_state 直接子项。' -Manual $true -Blocks $true -Risk '中'))
                     continue
                 }
@@ -465,6 +591,12 @@ function Invoke-BackupRetentionEvaluation {
         for ($index = 0; $index -lt $ordered.Count; $index++) {
             $record = $ordered[$index]
             $rank = $index + 1
+            $chain = Resolve-BackupRetentionPathChainState -Path $record.child.path -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver
+            if ($chain.status -cne 'ok') {
+                $reason = if ($chain.status -ceq 'reparse') { '候选/保留路径在统计前的完整父链命中 reparse point。' } else { "候选/保留路径 reparse metadata 读取失败：$($chain.error)" }
+                $items.Add((New-BackupRetentionCoverageItem -Path $record.child.path -ScanRoot $record.root.path -ItemType $record.child.itemType -Disposition 'gap' -Reason $reason -Manual $true -Blocks $true -Risk '高' -GroupKey $record.groupKey -ProjectRoot $record.projectRoot -BackupType $record.backupType -Timestamp $record.timestamp -RetainRank $rank -IsReparsePoint ($chain.status -ceq 'reparse') -ReparseAncestor $chain.reparseAncestor -ReparseTarget $chain.reparseTarget))
+                continue
+            }
             $stats = Get-BackupRetentionSafeStats -Path $record.child.path
             if ($stats.reparsePointsSkipped -gt 0 -or $stats.inaccessibleItems -gt 0) {
                 $items.Add((New-BackupRetentionCoverageItem -Path $record.child.path -ScanRoot $record.root.path -ItemType $record.child.itemType -Disposition 'gap' -Reason '目录内部存在 reparse point 或不可访问项。' -Manual $true -Blocks $true -Risk '高' -GroupKey $record.groupKey -ProjectRoot $record.projectRoot -BackupType $record.backupType -Timestamp $record.timestamp -RetainRank $rank -Stats $stats))
@@ -475,7 +607,7 @@ function Invoke-BackupRetentionEvaluation {
         }
     }
 
-    foreach ($guardrail in @(Get-BackupRetentionGuardrailItems -PolicyContext $PolicyContext)) { $items.Add($guardrail) }
+    foreach ($guardrail in @(Get-BackupRetentionGuardrailItems -PolicyContext $PolicyContext -PathChainResolver $PathChainResolver)) { $items.Add($guardrail) }
     $coverageItems = @($items.ToArray() | Sort-Object @{ Expression = { if ($null -eq $_.scanRoot) { '~' } else { $_.scanRoot } } }, path)
 
     foreach ($root in $evaluated) {

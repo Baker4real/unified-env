@@ -265,7 +265,7 @@ try {
         Write-Warning "无法创建 junction fixture，跳过嵌套 reparse 降级断言：$($_.Exception.Message)"
     }
 
-    & $scriptPath -ArtifactMode test -CodexRoot $fixtureCodexRoot -DDriveRoot $fixtureRoot -OutputDir $fixtureOutput | Out-Null
+    & $scriptPath -ArtifactMode TEST -CodexRoot $fixtureCodexRoot -DDriveRoot $fixtureRoot -OutputDir $fixtureOutput | Out-Null
     $fixturePlan = Get-Content -LiteralPath (Join-Path $fixtureOutput "backup-retention-dry-run.json") -Raw | ConvertFrom-Json
     Assert-True -Condition ($fixturePlan.artifactMode -ceq 'test') -Message "fixture 产物必须标记 artifactMode=test"
     Assert-True -Condition ([bool]$fixturePlan.coverageAccounted) -Message "fixture 已枚举直接子项必须计数守恒"
