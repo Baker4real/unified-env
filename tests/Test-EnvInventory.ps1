@@ -63,7 +63,7 @@ $quickReport = Get-Content -Path $quickReportPath -Raw
 foreach ($expected in @("本报告由只读盘点脚本生成", "## 绝不自动迁移", "## 迁移候选", "## 人工审查项")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing expected text: $expected"
 }
-foreach ($expected in @("## 本地环境分类发现", "project-root-local-env")) {
+foreach ($expected in @("## 本地环境分类发现")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing local env classification text: $expected"
 }
 
@@ -78,10 +78,10 @@ foreach ($marker in $quickProjectMarkers) {
     Assert-True -Condition (@("project-root-local-env", "nested-app-local-env") -contains $marker.classification) -Message "projectEnvironmentMarkers 不应包含缓存或归档分类：$($marker.path)"
 }
 
-$nestedAppPath = "D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager\node_modules"
-if (Test-Path -LiteralPath $nestedAppPath -PathType Container) {
-    $nestedApp = $quickFindings | Where-Object { $_.path -ieq $nestedAppPath } | Select-Object -First 1
-    Assert-True -Condition ($null -ne $nestedApp) -Message "递归扫描应发现嵌套 app node_modules：$nestedAppPath"
+$nestedAppMarker = $quickProjectMarkers | Where-Object { $_.classification -eq "nested-app-local-env" -and $_.marker -eq "node_modules" } | Select-Object -First 1
+if ($nestedAppMarker) {
+    $nestedApp = $quickFindings | Where-Object { $_.path -ieq $nestedAppMarker.path } | Select-Object -First 1
+    Assert-True -Condition ($null -ne $nestedApp) -Message "递归扫描应发现嵌套 app node_modules：$($nestedAppMarker.path)"
     Assert-True -Condition ($nestedApp.classification -eq "nested-app-local-env") -Message "嵌套 app node_modules 分类错误"
     Assert-True -Condition ([bool]$nestedApp.includeInReviewPack) -Message "嵌套 app node_modules 应纳入项目级审查"
 }

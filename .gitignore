@@ -4,5 +4,6 @@ reports/env-migration-execution-test/
 reports/env-update-readiness-test/
 reports/project-local-env-review-test/
 reports/project-local-env-rebuild-plan-test/
+.serena/
 *.tmp
 *.temp

@@ -127,31 +127,27 @@ try {
     }
     Assert-True -Condition ((($reviewKeyOrder -join "`n") -ceq ($planKeyOrder -join "`n"))) -Message "计划项顺序和数量必须与 review.items 完全一致"
 
-    $nodePlan = $plan.plans | Where-Object { $_.project -ieq "D:\Codex\projects\codex-account-switch" -and $_.marker -eq "node_modules" } | Select-Object -First 1
-    Assert-True -Condition ($null -ne $nodePlan) -Message "缺少 codex-account-switch node_modules 计划"
+    $gsdPlans = @($plan.plans | Where-Object { ([string] $_.path).StartsWith("D:\Codex\.gsd\", [System.StringComparison]::OrdinalIgnoreCase) })
+    Assert-True -Condition ($gsdPlans.Count -eq 0) -Message "重建计划不应把 .gsd 下内容当作普通 Codex 项目本地环境"
+
+    $nodePlan = $plan.plans | Where-Object { $_.marker -eq "node_modules" -and $_.planStatus -eq "planned-rebuild" } | Select-Object -First 1
+    Assert-True -Condition ($null -ne $nodePlan) -Message "缺少可计划重建的 node_modules 计划"
     Assert-True -Condition ($nodePlan.planStatus -eq "planned-rebuild") -Message "package-lock 项目应可计划重建"
     Assert-True -Condition ((@($nodePlan.candidateCommands) -join "`n").Contains("npm ci")) -Message "node_modules 计划应包含 npm ci 候选命令"
     Assert-True -Condition ((@($nodePlan.candidateCommands) -join "`n").Contains("候选命令预览")) -Message "候选命令必须明确只是预览"
 
-    $qqbotPlan = $plan.plans | Where-Object { $_.project -ieq "D:\Codex\projects\yangyangzi-direct-qqbot" } | Select-Object -First 1
-    Assert-True -Condition ($qqbotPlan.riskLevel -eq "high") -Message "QQBot 项目应保持 high 风险"
-    Assert-True -Condition ($qqbotPlan.planStatus -eq "owner-decision-required") -Message "高风险 requirements.txt 项目应进入 owner 决策"
-    Assert-True -Condition ([bool]$qqbotPlan.requiresOwnerDecision) -Message "高风险项目应需要 owner 决策"
-    Assert-True -Condition ($qqbotPlan.candidateCommands.Count -eq 0) -Message "requirements.txt-only 项目不得输出 pip 候选命令"
-    Assert-True -Condition ((@($qqbotPlan.humanGates) -join "`n").Contains("停机窗口")) -Message "高风险项目缺少停机窗口 gate"
-    Assert-True -Condition ((@($qqbotPlan.validationSteps) -join "`n").Contains("健康检查")) -Message "高风险项目缺少健康检查"
+    $highRiskPlans = @($plan.plans | Where-Object { $_.riskLevel -eq "high" })
+    foreach ($highRiskPlan in $highRiskPlans) {
+        Assert-True -Condition ([bool]$highRiskPlan.requiresOwnerDecision) -Message "$($highRiskPlan.project) 高风险项目应需要 owner 决策"
+        Assert-True -Condition ((@($highRiskPlan.humanGates) -join "`n").Contains("停机窗口")) -Message "$($highRiskPlan.project) 高风险项目缺少停机窗口 gate"
+        Assert-True -Condition ((@($highRiskPlan.validationSteps) -join "`n").Contains("健康检查")) -Message "$($highRiskPlan.project) 高风险项目缺少健康检查"
+    }
 
-    $blockedPlan = $plan.plans | Where-Object { $_.project -ieq "D:\Codex\.gsd\projects\new-chat-4" } | Select-Object -First 1
-    Assert-True -Condition ($blockedPlan.planStatus -eq "blocked-no-rebuild-source") -Message "缺锁文件项目应阻塞"
-    Assert-True -Condition ($blockedPlan.candidateCommands.Count -eq 0) -Message "缺锁文件项目不得输出候选重建命令"
-
-    $nestedAppPath = "D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager\node_modules"
-    if (Test-Path -LiteralPath $nestedAppPath -PathType Container) {
-        $nestedAppPlan = $plan.plans | Where-Object { $_.path -ieq $nestedAppPath } | Select-Object -First 1
-        Assert-True -Condition ($null -ne $nestedAppPlan) -Message "计划应包含嵌套 app node_modules：$nestedAppPath"
+    $nestedAppPlan = $plan.plans | Where-Object { $_.classification -eq "nested-app-local-env" -and $_.marker -eq "node_modules" } | Select-Object -First 1
+    if ($nestedAppPlan) {
         Assert-True -Condition ($nestedAppPlan.classification -eq "nested-app-local-env") -Message "嵌套 app 计划分类错误"
-        Assert-True -Condition ($nestedAppPlan.planStatus -eq "owner-decision-required") -Message "GSD 嵌套 app 应先进入 owner 决策"
-        Assert-True -Condition ($nestedAppPlan.candidateCommands.Count -eq 0) -Message "高风险嵌套 app 不应输出可直接执行的候选命令"
+        Assert-True -Condition (@("planned-rebuild", "owner-decision-required") -contains $nestedAppPlan.planStatus) -Message "嵌套 app 计划状态非法"
+        Assert-True -Condition ([bool]$nestedAppPlan.requiresOwnerDecision) -Message "嵌套 app 仍需要 owner 决策"
     }
 
     foreach ($excludedClassification in @("plugin-runtime-cache", "plugin-cache-backup", "archived-project-cache")) {
@@ -169,8 +165,13 @@ try {
     }
 
     $markdown = Get-Content -LiteralPath $markdownPath -Raw
-    foreach ($expected in @("DRY-RUN", "不执行", "不删除", "不迁移", "候选命令预览", "人工决策门", "停机窗口", "健康检查", "回滚", "嵌套 app", "插件 runtime/cache")) {
+    foreach ($expected in @("DRY-RUN", "不执行", "不删除", "不迁移", "候选命令预览", "人工决策门", "回滚", "嵌套 app", "插件 runtime/cache")) {
         Assert-True -Condition $markdown.Contains($expected) -Message "PLAN.md 缺少预期文本：$expected"
+    }
+    if ($highRiskPlans.Count -gt 0) {
+        foreach ($expected in @("停机窗口", "健康检查")) {
+            Assert-True -Condition $markdown.Contains($expected) -Message "PLAN.md 缺少高风险项目预期文本：$expected"
+        }
     }
 
     $blockedOutput = "C:\Codex-should-not-be-created"

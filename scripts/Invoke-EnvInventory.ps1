@@ -1,6 +1,6 @@
 param(
     [string]$OutputDir = "D:\Codex\projects\统一环境\reports\env-inventory",
-    [string[]]$ProjectRoots = @("D:\Codex\projects", "D:\Codex\.gsd\projects"),
+    [string[]]$ProjectRoots = @("D:\Codex\projects"),
     [int]$VersionProbeTimeoutSeconds = 12,
     [switch]$IncludeSizes,
     [switch]$SkipVersionProbe

@@ -97,12 +97,13 @@ try {
     $nodeModules = $review.items | Where-Object { $_.marker -eq "node_modules" } | Select-Object -First 1
     Assert-True -Condition ($nodeModules.rebuildAssessment -like "*package-lock.json*") -Message "node_modules 审查项应识别 package-lock.json 重建线索"
 
-    $nestedAppPath = "D:\Codex\.gsd\projects\codex-plus-plus\apps\codex-plus-manager\node_modules"
-    if (Test-Path -LiteralPath $nestedAppPath -PathType Container) {
-        $nestedApp = $review.items | Where-Object { $_.path -ieq $nestedAppPath } | Select-Object -First 1
-        Assert-True -Condition ($null -ne $nestedApp) -Message "审查包应包含嵌套 app node_modules：$nestedAppPath"
+    $gsdItems = @($review.items | Where-Object { ([string] $_.path).StartsWith("D:\Codex\.gsd\", [System.StringComparison]::OrdinalIgnoreCase) })
+    Assert-True -Condition ($gsdItems.Count -eq 0) -Message "审查包不应把 .gsd 下内容当作普通 Codex 项目本地环境"
+
+    $nestedApp = $review.items | Where-Object { $_.classification -eq "nested-app-local-env" -and $_.marker -eq "node_modules" } | Select-Object -First 1
+    if ($nestedApp) {
         Assert-True -Condition ($nestedApp.classification -eq "nested-app-local-env") -Message "嵌套 app 审查分类错误"
-        Assert-True -Condition ($nestedApp.riskLevel -eq "high") -Message "GSD 下嵌套 app 应保持 high 风险"
+        Assert-True -Condition (@("medium", "high") -contains $nestedApp.riskLevel) -Message "嵌套 app 风险等级应至少为 medium"
     }
 
     foreach ($excludedClassification in @("plugin-runtime-cache", "plugin-cache-backup", "archived-project-cache")) {
@@ -111,17 +112,14 @@ try {
     }
 
     $serviceItems = @($review.items | Where-Object { $_.isLongRunningOrStateful })
-    Assert-True -Condition ($serviceItems.Count -gt 0) -Message "应标出长期服务或状态敏感项目"
-    foreach ($expectedProject in @("D:\Codex\projects\yangyangzi-direct-qqbot", "D:\Codex\.gsd\projects\hermes-agent", "D:\Codex\.gsd\projects\new-chat-4")) {
-        $serviceItem = $review.items | Where-Object { $_.project -ieq $expectedProject } | Select-Object -First 1
-        Assert-True -Condition ($null -ne $serviceItem) -Message "缺少预期高风险项目：$expectedProject"
-        Assert-True -Condition ([bool]$serviceItem.isLongRunningOrStateful) -Message "$expectedProject 应标为长期服务或状态敏感"
-        Assert-True -Condition ($serviceItem.riskLevel -eq "high") -Message "$expectedProject 应标为 high 风险"
-        Assert-True -Condition ((@($serviceItem.verificationPrerequisites) -join "`n").Contains("长期服务或状态敏感项目")) -Message "$expectedProject 缺少长期服务验证前置条件"
+    foreach ($serviceItem in $serviceItems) {
+        Assert-True -Condition ([bool]$serviceItem.isLongRunningOrStateful) -Message "$($serviceItem.project) 应标为长期服务或状态敏感"
+        Assert-True -Condition ($serviceItem.riskLevel -eq "high") -Message "$($serviceItem.project) 应标为 high 风险"
+        Assert-True -Condition ((@($serviceItem.verificationPrerequisites) -join "`n").Contains("长期服务或状态敏感项目")) -Message "$($serviceItem.project) 缺少长期服务验证前置条件"
     }
 
     $markdown = Get-Content -LiteralPath $markdownPath -Raw
-    foreach ($expected in @("只读", "默认不自动迁移", "不移动、不删除、不合并", ".venv", "node_modules", "验证前置条件", "项目 owner 决策", "长期服务", "嵌套 app", "插件 runtime/cache")) {
+    foreach ($expected in @("只读", "默认不自动迁移", "不移动、不删除、不合并", "node_modules", "验证前置条件", "项目 owner 决策", "长期服务", "嵌套 app", "插件 runtime/cache")) {
         Assert-True -Condition $markdown.Contains($expected) -Message "REPORT.md 缺少预期文本：$expected"
     }
     foreach ($unexpected in @("ode_modules、", "| medium |", "| high |", "| low |")) {

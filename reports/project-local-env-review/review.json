@@ -1,57 +1,27 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-06T16:10:28.2894465+08:00",
+  "generatedAt": "2026-07-09T16:07:23.5933337+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
-  "inventoryGeneratedAt": "07/06/2026 16:00:06",
+  "inventoryGeneratedAt": "07/09/2026 16:07:14",
   "summary": {
-    "totalItems": 6,
-    "longRunningOrStatefulItems": 4,
-    "rebuildableItems": 4,
-    "ownerDecisionItems": 5,
-    "nestedAppItems": 1
+    "totalItems": 5,
+    "longRunningOrStatefulItems": 0,
+    "rebuildableItems": 5,
+    "ownerDecisionItems": 0,
+    "nestedAppItems": 5
   },
   "items": [
     {
-      "project": "D:\\Codex\\projects\\歌单转换",
-      "parentProject": "D:\\Codex\\projects\\歌单转换",
-      "marker": ".venv",
-      "path": "D:\\Codex\\projects\\歌单转换\\.venv",
-      "classification": "project-root-local-env",
-      "scope": "project-root",
-      "existingProjectFiles": [
-        "pyproject.toml",
-        "README.md",
-        "AGENTS.md"
-      ],
-      "riskLevel": "medium",
-      "recommendedAction": "保留；需项目 owner 决策；禁止自动处理。",
-      "automationAllowed": false,
-      "rebuildAssessment": "可能可重建：发现 pyproject.toml；需确认锁文件、Python 版本和项目测试命令。",
-      "verificationPrerequisites": [
-        "读取项目 README/AGENTS 或等效项目说明。",
-        "确认项目自己的依赖安装命令、锁文件和测试命令。",
-        "确认当前环境不是正在运行的服务或恢复链路的一部分。",
-        "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。",
-        "确认 Python/Conda 版本、解释器路径、原环境变量和项目测试命令。"
-      ],
-      "isLongRunningOrStateful": false,
-      "requiresOwnerDecision": true,
-      "futureIssueRecommendation": "先由项目 owner 补充重建和验证说明。",
-      "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
-    },
-    {
-      "project": "D:\\Codex\\projects\\codex-account-switch",
-      "parentProject": "D:\\Codex\\projects\\codex-account-switch",
+      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\createRoom",
+      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
       "marker": "node_modules",
-      "path": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
-      "classification": "project-root-local-env",
-      "scope": "project-root",
+      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\createRoom\\node_modules",
+      "classification": "nested-app-local-env",
+      "scope": "nested-app",
       "existingProjectFiles": [
         "package.json",
-        "package-lock.json",
-        "README.md",
-        "AGENTS.md"
+        "package-lock.json"
       ],
       "riskLevel": "medium",
       "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
@@ -70,106 +40,18 @@
       "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
     },
     {
-      "project": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
-      "parentProject": "D:\\Codex\\projects\\yangyangzi-direct-qqbot",
-      "marker": ".venv",
-      "path": "D:\\Codex\\projects\\yangyangzi-direct-qqbot\\.venv",
-      "classification": "project-root-local-env",
-      "scope": "project-root",
-      "existingProjectFiles": [
-        "requirements.txt",
-        "README.md",
-        "AGENTS.md"
-      ],
-      "riskLevel": "high",
-      "recommendedAction": "保留；需项目 owner 决策；真实重建前必须确认服务停启、状态恢复和项目级验证。",
-      "automationAllowed": false,
-      "rebuildAssessment": "可重建：发现 requirements.txt；可在独立 issue 中重建虚拟环境并运行项目测试。",
-      "verificationPrerequisites": [
-        "读取项目 README/AGENTS 或等效项目说明。",
-        "确认项目自己的依赖安装命令、锁文件和测试命令。",
-        "确认当前环境不是正在运行的服务或恢复链路的一部分。",
-        "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。",
-        "确认 Python/Conda 版本、解释器路径、原环境变量和项目测试命令。",
-        "长期服务或状态敏感项目必须先确认停机窗口、启动命令、健康检查、回滚步骤和 owner 决策。"
-      ],
-      "isLongRunningOrStateful": true,
-      "requiresOwnerDecision": true,
-      "futureIssueRecommendation": "可单独开项目级重建 issue。",
-      "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
-    },
-    {
-      "project": "D:\\Codex\\.gsd\\projects\\hermes-agent",
-      "parentProject": "D:\\Codex\\.gsd\\projects\\hermes-agent",
-      "marker": ".venv",
-      "path": "D:\\Codex\\.gsd\\projects\\hermes-agent\\.venv",
-      "classification": "project-root-local-env",
-      "scope": "project-root",
-      "existingProjectFiles": [
-        "pyproject.toml",
-        "uv.lock",
-        "package.json",
-        "package-lock.json",
-        "README.md",
-        "AGENTS.md"
-      ],
-      "riskLevel": "high",
-      "recommendedAction": "保留；需项目 owner 决策；真实重建前必须确认服务停启、状态恢复和项目级验证。",
-      "automationAllowed": false,
-      "rebuildAssessment": "可重建：发现 uv.lock；可在独立 issue 中按项目文档重建虚拟环境并运行测试。",
-      "verificationPrerequisites": [
-        "读取项目 README/AGENTS 或等效项目说明。",
-        "确认项目自己的依赖安装命令、锁文件和测试命令。",
-        "确认当前环境不是正在运行的服务或恢复链路的一部分。",
-        "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。",
-        "确认 Python/Conda 版本、解释器路径、原环境变量和项目测试命令。",
-        "长期服务或状态敏感项目必须先确认停机窗口、启动命令、健康检查、回滚步骤和 owner 决策。"
-      ],
-      "isLongRunningOrStateful": true,
-      "requiresOwnerDecision": true,
-      "futureIssueRecommendation": "可单独开项目级重建 issue。",
-      "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
-    },
-    {
-      "project": "D:\\Codex\\.gsd\\projects\\new-chat-4",
-      "parentProject": "D:\\Codex\\.gsd\\projects\\new-chat-4",
-      "marker": ".venv",
-      "path": "D:\\Codex\\.gsd\\projects\\new-chat-4\\.venv",
-      "classification": "project-root-local-env",
-      "scope": "project-root",
-      "existingProjectFiles": [
-        "AGENTS.md"
-      ],
-      "riskLevel": "high",
-      "recommendedAction": "保留；需项目 owner 决策；真实重建前必须确认服务停启、状态恢复和项目级验证。",
-      "automationAllowed": false,
-      "rebuildAssessment": "需项目 owner 决策：缺少足够的锁文件或重建说明，不能自动处理。",
-      "verificationPrerequisites": [
-        "读取项目 README/AGENTS 或等效项目说明。",
-        "确认项目自己的依赖安装命令、锁文件和测试命令。",
-        "确认当前环境不是正在运行的服务或恢复链路的一部分。",
-        "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。",
-        "确认 Python/Conda 版本、解释器路径、原环境变量和项目测试命令。",
-        "长期服务或状态敏感项目必须先确认停机窗口、启动命令、健康检查、回滚步骤和 owner 决策。"
-      ],
-      "isLongRunningOrStateful": true,
-      "requiresOwnerDecision": true,
-      "futureIssueRecommendation": "先由项目 owner 补充重建和验证说明。",
-      "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
-    },
-    {
-      "project": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager",
-      "parentProject": "D:\\Codex\\.gsd\\projects\\codex-plus-plus",
+      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\dataOp",
+      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
       "marker": "node_modules",
-      "path": "D:\\Codex\\.gsd\\projects\\codex-plus-plus\\apps\\codex-plus-manager\\node_modules",
+      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\dataOp\\node_modules",
       "classification": "nested-app-local-env",
       "scope": "nested-app",
       "existingProjectFiles": [
         "package.json",
         "package-lock.json"
       ],
-      "riskLevel": "high",
-      "recommendedAction": "保留；需项目 owner 决策；真实重建前必须确认服务停启、状态恢复和项目级验证。",
+      "riskLevel": "medium",
+      "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
       "automationAllowed": false,
       "rebuildAssessment": "可重建：发现 package-lock.json；可在独立 issue 中用 npm ci 重建并运行项目测试。",
       "verificationPrerequisites": [
@@ -177,11 +59,91 @@
         "确认项目自己的依赖安装命令、锁文件和测试命令。",
         "确认当前环境不是正在运行的服务或恢复链路的一部分。",
         "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。",
-        "确认 package manager 与锁文件一致，例如 npm/package-lock、pnpm/pnpm-lock 或 yarn/yarn.lock。",
-        "长期服务或状态敏感项目必须先确认停机窗口、启动命令、健康检查、回滚步骤和 owner 决策。"
+        "确认 package manager 与锁文件一致，例如 npm/package-lock、pnpm/pnpm-lock 或 yarn/yarn.lock。"
       ],
-      "isLongRunningOrStateful": true,
-      "requiresOwnerDecision": true,
+      "isLongRunningOrStateful": false,
+      "requiresOwnerDecision": false,
+      "futureIssueRecommendation": "可单独开项目级重建 issue。",
+      "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\getMyRoom",
+      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\getMyRoom\\node_modules",
+      "classification": "nested-app-local-env",
+      "scope": "nested-app",
+      "existingProjectFiles": [
+        "package.json",
+        "package-lock.json"
+      ],
+      "riskLevel": "medium",
+      "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
+      "automationAllowed": false,
+      "rebuildAssessment": "可重建：发现 package-lock.json；可在独立 issue 中用 npm ci 重建并运行项目测试。",
+      "verificationPrerequisites": [
+        "读取项目 README/AGENTS 或等效项目说明。",
+        "确认项目自己的依赖安装命令、锁文件和测试命令。",
+        "确认当前环境不是正在运行的服务或恢复链路的一部分。",
+        "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。",
+        "确认 package manager 与锁文件一致，例如 npm/package-lock、pnpm/pnpm-lock 或 yarn/yarn.lock。"
+      ],
+      "isLongRunningOrStateful": false,
+      "requiresOwnerDecision": false,
+      "futureIssueRecommendation": "可单独开项目级重建 issue。",
+      "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\joinRoom",
+      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\joinRoom\\node_modules",
+      "classification": "nested-app-local-env",
+      "scope": "nested-app",
+      "existingProjectFiles": [
+        "package.json",
+        "package-lock.json"
+      ],
+      "riskLevel": "medium",
+      "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
+      "automationAllowed": false,
+      "rebuildAssessment": "可重建：发现 package-lock.json；可在独立 issue 中用 npm ci 重建并运行项目测试。",
+      "verificationPrerequisites": [
+        "读取项目 README/AGENTS 或等效项目说明。",
+        "确认项目自己的依赖安装命令、锁文件和测试命令。",
+        "确认当前环境不是正在运行的服务或恢复链路的一部分。",
+        "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。",
+        "确认 package manager 与锁文件一致，例如 npm/package-lock、pnpm/pnpm-lock 或 yarn/yarn.lock。"
+      ],
+      "isLongRunningOrStateful": false,
+      "requiresOwnerDecision": false,
+      "futureIssueRecommendation": "可单独开项目级重建 issue。",
+      "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
+    },
+    {
+      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\login",
+      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
+      "marker": "node_modules",
+      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\login\\node_modules",
+      "classification": "nested-app-local-env",
+      "scope": "nested-app",
+      "existingProjectFiles": [
+        "package.json",
+        "package-lock.json"
+      ],
+      "riskLevel": "medium",
+      "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
+      "automationAllowed": false,
+      "rebuildAssessment": "可重建：发现 package-lock.json；可在独立 issue 中用 npm ci 重建并运行项目测试。",
+      "verificationPrerequisites": [
+        "读取项目 README/AGENTS 或等效项目说明。",
+        "确认项目自己的依赖安装命令、锁文件和测试命令。",
+        "确认当前环境不是正在运行的服务或恢复链路的一部分。",
+        "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。",
+        "确认 package manager 与锁文件一致，例如 npm/package-lock、pnpm/pnpm-lock 或 yarn/yarn.lock。"
+      ],
+      "isLongRunningOrStateful": false,
+      "requiresOwnerDecision": false,
       "futureIssueRecommendation": "可单独开项目级重建 issue。",
       "reason": "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
     }
