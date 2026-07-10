@@ -64,6 +64,12 @@ Assert-True -Condition ($specialDecision.classification -eq "plugin-runtime-cach
 foreach ($devicePath in @('\\?\C:\Users\fixture\.cargo', '\\.\C:\Users\fixture\.cargo', '//?/C:/Users/fixture/.cargo', '//./C:/Users/fixture/.cargo', '\\??\C:\Users\fixture\.cargo', '\Device\HarddiskVolume1\Users\fixture', '\GLOBAL??\C:\Users\fixture', '\DosDevices\C:\Users\fixture', '/device/harddiskvolume1/users/fixture')) {
     Assert-Throws -Action { Assert-EnvAbsolutePathValue -Path $devicePath -FactName "device path fixture" } -Message "必须在 canonical/drive 判断前拒绝 Windows device namespace：$devicePath"
 }
+foreach ($unsafeRootedPath in @('\SystemRoot\System32', '\GLOBALROOT\Device\HarddiskVolume1', '\ObjectTypes', '\UnknownNamespace\value', 'C:relative\path')) {
+    Assert-Throws -Action { Assert-EnvSafeAbsolutePath -Path $unsafeRootedPath -FactName "unsafe rooted fixture" } -Message "正向 allowlist 必须拒绝 root-relative/NT/drive-relative 路径：$unsafeRootedPath"
+}
+foreach ($safePath in @('C:\Windows', 'D:/Codex/tools', '\\server\share', '\\server\share\folder', '//server/share/folder')) {
+    Assert-EnvSafeAbsolutePath -Path $safePath -FactName "safe absolute fixture"
+}
 
 $canonicalExcludedRoots = @(Get-EnvCanonicalExcludedRoots)
 $excludedRootFacts = @(Get-EnvExcludedRootFacts)

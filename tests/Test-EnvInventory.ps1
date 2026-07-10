@@ -34,6 +34,7 @@ $quickOutput = Join-Path $testRoot "quick"
 $fullOutput = Join-Path $testRoot "full"
 $pathReparseOutput = Join-Path $testRoot "path-reparse"
 $deviceNamespaceOutput = Join-Path $testRoot "device-namespace"
+$unsafeEnvBaseOutput = Join-Path $testRoot "unsafe-env-base"
 
 Assert-True -Condition (Test-Path -Path $scriptPath -PathType Leaf) -Message "Inventory script not found: $scriptPath"
 Assert-True -Condition (Test-Path -LiteralPath $publisherPath -PathType Leaf) -Message "Report publisher not found: $publisherPath"
@@ -78,7 +79,7 @@ try {
     $env:NPM_CONFIG_CACHE = '\\?\C:\Users\fixture\npm-cache'
     & $scriptPath -OutputDir $deviceNamespaceOutput -ProjectRoots @() -ToolOwnerRoots @() -IncludeSizes -SkipVersionProbe | Out-Null
 } catch {
-    $deviceRejected = $_.Exception.Message -like "*device namespace*"
+    $deviceRejected = $_.Exception.Message -like "*不得使用*namespace*"
 } finally {
     $env:NPM_CONFIG_CACHE = $previousNpmCache
 }
@@ -88,8 +89,25 @@ $inventoryScriptText = Get-Content -LiteralPath $scriptPath -Raw
 $directoryRecordStart = $inventoryScriptText.IndexOf("function New-DirectoryRecord")
 $directoryRecordEnd = $inventoryScriptText.IndexOf("function Invoke-CommandWithTimeout", $directoryRecordStart)
 $directoryRecordText = $inventoryScriptText.Substring($directoryRecordStart, $directoryRecordEnd - $directoryRecordStart)
-Assert-True -Condition ($directoryRecordText.IndexOf("Assert-EnvNotWindowsDeviceNamespace") -lt $directoryRecordText.IndexOf("Test-Path")) -Message "New-DirectoryRecord namespace guard 必须位于 Test-Path 前"
-Assert-True -Condition ($directoryRecordText.IndexOf("Assert-EnvNotWindowsDeviceNamespace") -lt $directoryRecordText.IndexOf("Get-DirectorySize")) -Message "New-DirectoryRecord namespace guard 必须位于 IncludeSizes 递归前"
+Assert-True -Condition ($directoryRecordText.IndexOf("Assert-EnvSafeAbsolutePath") -lt $directoryRecordText.IndexOf("Test-Path")) -Message "New-DirectoryRecord namespace guard 必须位于 Test-Path 前"
+Assert-True -Condition ($directoryRecordText.IndexOf("Assert-EnvSafeAbsolutePath") -lt $directoryRecordText.IndexOf("Get-DirectorySize")) -Message "New-DirectoryRecord namespace guard 必须位于 IncludeSizes 递归前"
+
+$previousUserProfile = $env:USERPROFILE
+$unsafeEnvBaseRejected = $false
+try {
+    $env:USERPROFILE = '\SystemRoot\Users\fixture'
+    & $scriptPath -OutputDir $unsafeEnvBaseOutput -ProjectRoots @() -ToolOwnerRoots @() -IncludeSizes -SkipVersionProbe | Out-Null
+} catch {
+    $unsafeEnvBaseRejected = $_.Exception.Message -like "*USERPROFILE*普通 DOS drive absolute path 或合法 UNC path*"
+} finally {
+    $env:USERPROFILE = $previousUserProfile
+}
+Assert-True -Condition $unsafeEnvBaseRejected -Message "USERPROFILE 必须在 Join-Path/文件系统访问前通过正向 allowlist"
+Assert-True -Condition (-not (Test-Path -LiteralPath $unsafeEnvBaseOutput)) -Message "unsafe env base 失败不得创建输出目录"
+$knownDirectoriesStart = $inventoryScriptText.IndexOf("function Get-KnownDirectories")
+$knownDirectoriesEnd = $inventoryScriptText.IndexOf("function Get-TopProjectRoot", $knownDirectoriesStart)
+$knownDirectoriesText = $inventoryScriptText.Substring($knownDirectoriesStart, $knownDirectoriesEnd - $knownDirectoriesStart)
+Assert-True -Condition ($knownDirectoriesText.IndexOf('Get-EnvSafeEnvironmentPath -Name "USERPROFILE"') -lt $knownDirectoriesText.IndexOf('Join-Path $userHome')) -Message "USERPROFILE guard 必须位于 Join-Path 前"
 
 Assert-True -Condition ($quickInventory.artifactType -eq "env-governance.inventory") -Message "Quick inventory artifactType 错误"
 Assert-True -Condition ($quickInventory.schemaVersion -eq 3) -Message "Quick inventory schemaVersion 必须为 3"

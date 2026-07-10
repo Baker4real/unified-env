@@ -32,7 +32,7 @@ $ProjectRoots = [string[]]@($effectiveProjectRootFacts | ForEach-Object { $_.pat
 foreach ($toolOwnerRoot in @($ToolOwnerRoots)) {
     Assert-EnvAbsolutePathValue -Path $toolOwnerRoot -FactName "ToolOwnerRoot"
 }
-Assert-EnvNotWindowsDeviceNamespace -Path $OutputDir -FactName "OutputDir"
+Assert-EnvSafeAbsolutePath -Path $OutputDir -FactName "OutputDir"
 
 function Get-RootDrive {
     param([string]$Path)
@@ -40,7 +40,7 @@ function Get-RootDrive {
     if ([string]::IsNullOrWhiteSpace($Path)) {
         return $null
     }
-    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName "Directory path"
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Directory path"
 
     try {
         return [System.IO.Path]::GetPathRoot($Path)
@@ -71,7 +71,7 @@ function Get-ReparsePointInfo {
     if ([string]::IsNullOrWhiteSpace($Path)) {
         return [pscustomobject]@{ isReparsePoint = $false; target = $null }
     }
-    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName "Directory path"
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Directory path"
     if (-not (Test-Path -Path $Path)) {
         return [pscustomobject]@{
             isReparsePoint = $false
@@ -102,7 +102,7 @@ function Get-ReparsePointInfo {
 function Get-DirectorySize {
     param([string]$Path)
 
-    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName "Directory path"
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Directory path"
     if (-not $IncludeSizes) {
         return $null
     }
@@ -130,7 +130,7 @@ function New-DirectoryRecord {
         [string]$Notes
     )
 
-    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName "Directory fact.path"
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Directory fact.path"
     $exists = $false
     if (-not [string]::IsNullOrWhiteSpace($Path)) {
         $exists = Test-Path -Path $Path -PathType Container
@@ -227,8 +227,7 @@ function Invoke-VersionProbe {
         Where-Object {
             $_.CommandType -eq [Management.Automation.CommandTypes]::Application -and
             -not [string]::IsNullOrWhiteSpace($_.Path) -and
-            [IO.Path]::IsPathFullyQualified($_.Path) -and
-            (Test-Path -LiteralPath $_.Path -PathType Leaf)
+            [IO.Path]::IsPathFullyQualified($_.Path)
         } |
         Select-Object -First 1
     if (-not $command) {
@@ -245,6 +244,10 @@ function Invoke-VersionProbe {
     }
 
     $path = $command.Path
+    Assert-EnvSafeAbsolutePath -Path $path -FactName "Tool launcher path"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Tool launcher path does not exist: $path"
+    }
 
     if ($SkipVersionProbe) {
         return [pscustomobject]@{
@@ -347,6 +350,17 @@ function Get-PathEntries {
     }
 }
 
+function Get-EnvSafeEnvironmentPath {
+    param([Parameter(Mandatory)][string]$Name)
+
+    $value = [Environment]::GetEnvironmentVariable($Name, "Process")
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $null
+    }
+    Assert-EnvSafeAbsolutePath -Path $value -FactName "Environment path $Name"
+    return $value
+}
+
 function Get-PathScopeSourceValues {
     param(
         [ValidateSet("process", "user", "machine")][string]$Source
@@ -443,6 +457,8 @@ function Get-InventoryFileSystemItemMetadata {
 function Get-InventoryPathChainMetadata {
     param([string]$Path)
 
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Inventory metadata path"
+
     $itemResolver = {
         param([string]$CandidatePath)
         Get-InventoryFileSystemItemMetadata -Path $CandidatePath
@@ -452,6 +468,8 @@ function Get-InventoryPathChainMetadata {
 
 function Get-InventoryPathMetadata {
     param([string]$Path)
+
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "PATH metadata path"
 
     $metadata = Get-InventoryPathChainMetadata -Path $Path
     if ($metadata.status -eq "ok" -and [bool]$metadata.exists) {
@@ -473,6 +491,8 @@ function Get-InventoryPathMetadata {
 
 function Get-InventoryToolMetadata {
     param([string]$Path)
+
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Tool metadata path"
 
     $metadata = Get-InventoryPathChainMetadata -Path $Path
     if ($metadata.status -eq "ok" -and -not [bool]$metadata.exists) {
@@ -504,6 +524,8 @@ function Get-PathScopeRecords {
 function Invoke-PythonRuntimeProbe {
     param([Parameter(Mandatory)][string]$PythonPath)
 
+    Assert-EnvSafeAbsolutePath -Path $PythonPath -FactName "Python runtime probe path"
+
     $arguments = @(
         "-I",
         "-S",
@@ -528,10 +550,11 @@ function Invoke-PythonRuntimeProbe {
 }
 
 function Get-KnownDirectories {
-    $userHome = $env:USERPROFILE
-    $local = $env:LOCALAPPDATA
-    $roaming = $env:APPDATA
-    $programData = $env:ProgramData
+    $userHome = Get-EnvSafeEnvironmentPath -Name "USERPROFILE"
+    $local = Get-EnvSafeEnvironmentPath -Name "LOCALAPPDATA"
+    $roaming = Get-EnvSafeEnvironmentPath -Name "APPDATA"
+    $programData = Get-EnvSafeEnvironmentPath -Name "ProgramData"
+    $mavenUserHome = Get-EnvSafeEnvironmentPath -Name "MAVEN_USER_HOME"
 
     $items = @(
         @{ Name = "Codex tools root"; Path = "D:\Codex\tools"; Category = "d-target"; Owner = "host"; Notes = "D 盘工具根目录观察值" },
@@ -562,7 +585,7 @@ function Get-KnownDirectories {
         @{ Name = "mise data"; Path = $env:MISE_DATA_DIR; Category = "tool-env"; Owner = "multi-runtime"; Notes = "显式 MISE_DATA_DIR" },
         @{ Name = "mise cache"; Path = $env:MISE_CACHE_DIR; Category = "cache"; Owner = "multi-runtime"; Notes = "显式 MISE_CACHE_DIR" },
         @{ Name = "nuget packages"; Path = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $userHome ".nuget\packages" }; Category = "cache"; Owner = "dotnet"; Notes = "NuGet 包缓存" },
-        @{ Name = "maven repository"; Path = if ($env:MAVEN_USER_HOME) { Join-Path $env:MAVEN_USER_HOME "repository" } else { Join-Path $userHome ".m2\repository" }; Category = "cache"; Owner = "java"; Notes = "Maven 本地仓库常见位置" },
+        @{ Name = "maven repository"; Path = if ($mavenUserHome) { Join-Path $mavenUserHome "repository" } else { Join-Path $userHome ".m2\repository" }; Category = "cache"; Owner = "java"; Notes = "Maven 本地仓库常见位置" },
         @{ Name = "gradle user home"; Path = if ($env:GRADLE_USER_HOME) { $env:GRADLE_USER_HOME } else { Join-Path $userHome ".gradle" }; Category = "cache"; Owner = "java"; Notes = "Gradle 用户缓存和 wrapper 根" },
         @{ Name = "docker user config"; Path = (Join-Path $userHome ".docker"); Category = "manual-only"; Owner = "container"; Notes = "Docker 用户配置，可能包含上下文和凭据引用" },
         @{ Name = "vscode extensions"; Path = (Join-Path $userHome ".vscode\extensions"); Category = "tool-env"; Owner = "editor"; Notes = "VS Code 用户扩展目录" }
@@ -590,7 +613,7 @@ function Get-ProjectRebuildEvidence {
         [Parameter(Mandatory)][string]$Marker
     )
 
-    Assert-EnvNotWindowsDeviceNamespace -Path $Project -FactName "Local environment project path"
+    Assert-EnvSafeAbsolutePath -Path $Project -FactName "Local environment project path"
     $candidateFiles = @(Get-EnvRebuildEvidenceFileNames)
     $projectFiles = @(
         foreach ($candidate in $candidateFiles) {
@@ -612,7 +635,7 @@ function New-LocalEnvironmentFinding {
         [object[]]$RootFacts
     )
 
-    Assert-EnvNotWindowsDeviceNamespace -Path $MarkerPath -FactName "Local environment marker path"
+    Assert-EnvSafeAbsolutePath -Path $MarkerPath -FactName "Local environment marker path"
     $item = Get-Item -LiteralPath $MarkerPath -Force
     $marker = $item.Name
     $container = [System.IO.Directory]::GetParent($item.FullName).FullName
@@ -787,6 +810,8 @@ function ConvertTo-MarkdownReport {
 
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 
+$pathScopes = Get-PathScopeRecords
+
 $rawTools = @(
     Invoke-VersionProbe -Name "python" -Arguments @("--version")
     Invoke-VersionProbe -Name "py" -Arguments @("--version")
@@ -837,24 +862,29 @@ $vendorRoots = @(
     "D:\Codex\.codex\plugins"
     "D:\Codex\.codex\vendor"
 )
+$safeSystemRoot = Get-EnvSafeEnvironmentPath -Name "SystemRoot"
+$safeProgramFiles = Get-EnvSafeEnvironmentPath -Name "ProgramFiles"
+$safeProgramFilesX86 = Get-EnvSafeEnvironmentPath -Name "ProgramFiles(x86)"
+$safeLocalAppData = Get-EnvSafeEnvironmentPath -Name "LOCALAPPDATA"
+$safeUserProfile = Get-EnvSafeEnvironmentPath -Name "USERPROFILE"
 $windowsSystemRoots = @(
-    $env:SystemRoot
-    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
-        Join-Path $env:ProgramFiles "WindowsApps"
+    $safeSystemRoot
+    if ($safeProgramFiles) {
+        Join-Path $safeProgramFiles "WindowsApps"
     }
-    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-        Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
+    if ($safeLocalAppData) {
+        Join-Path $safeLocalAppData "Microsoft\WindowsApps"
     }
 ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 $systemInstallerRoots = @(
-    $env:ProgramFiles
-    ${env:ProgramFiles(x86)}
-    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-        Join-Path $env:LOCALAPPDATA "Microsoft\WinGet"
+    $safeProgramFiles
+    $safeProgramFilesX86
+    if ($safeLocalAppData) {
+        Join-Path $safeLocalAppData "Microsoft\WinGet"
     }
 ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 $userProfileRoots = @(
-    $env:USERPROFILE
+    $safeUserProfile
 ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 
 $tools = @(
@@ -919,7 +949,6 @@ Assert-EnvMigrationDirectoryFacts -Directories $directories
 $localEnvironmentFindings = @(Get-LocalEnvironmentFindings -RootFacts $effectiveProjectRootFacts)
 Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $localEnvironmentFindings -ProjectRootFacts $effectiveProjectRootFacts
 $envVars = @(Get-SelectedEnvironmentVariables)
-$pathScopes = Get-PathScopeRecords
 
 $inventory = New-InventoryV3Document -Facts @{
     generatedAt = (Get-Date).ToString("o")

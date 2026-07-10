@@ -20,6 +20,43 @@ if (Test-Path -LiteralPath $libraryPath -PathType Leaf) {
     . $libraryPath
 }
 
+$unsafePathResolverCalls = 0
+$unsafePathResolver = {
+    param([string]$Path)
+    $script:unsafePathResolverCalls++
+    throw "resolver must not be called"
+}
+$unsafePathRejected = $false
+try {
+    New-PathScopeRecord -Source process -RawValue '\SystemRoot\System32' -DotNetValue '\SystemRoot\System32' -ReadErrors @() -MetadataResolver $unsafePathResolver | Out-Null
+} catch {
+    $unsafePathRejected = $true
+}
+Assert-True -Condition $unsafePathRejected -Message "PATH root-relative entry 必须在 metadata/filesystem resolver 前失败"
+Assert-True -Condition ($unsafePathResolverCalls -eq 0) -Message "unsafe PATH 不得调用 metadata/filesystem resolver"
+
+$unsafeToolResolverCalls = 0
+$unsafeToolResolver = {
+    param([string]$Path)
+    $script:unsafeToolResolverCalls++
+    throw "tool resolver must not be called"
+}
+$unsafeToolRejected = $false
+try {
+    Get-ToolOriginDecision -LauncherPath '\GLOBALROOT\Device\HarddiskVolume1\tool.exe' -RuntimePath $null -ProjectRoots @() -SharedRoots @('D:\Shared') -VendorRoots @() -SystemInstallerRoots @() -MetadataResolver $unsafeToolResolver | Out-Null
+} catch {
+    $unsafeToolRejected = $true
+}
+Assert-True -Condition $unsafeToolRejected -Message "tool launcher NT path 必须在 metadata/filesystem resolver 前失败"
+Assert-True -Condition ($unsafeToolResolverCalls -eq 0) -Message "unsafe tool path 不得调用 metadata/filesystem resolver"
+
+$uncResolver = {
+    param([string]$Path)
+    [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
+}
+$uncScope = New-PathScopeRecord -Source process -RawValue '\\server\share\tools' -DotNetValue '\\server\share\tools' -ReadErrors @() -MetadataResolver $uncResolver
+Assert-True -Condition ([bool]$uncScope.complete -and $uncScope.entries[0].expandedPath -eq '\\server\share\tools') -Message "合法 UNC PATH 必须保留并通过"
+
 $metadata = @{
     "C:\Windows\System32" = [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
     "D:\Tools" = [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
@@ -74,11 +111,16 @@ try {
         param([string]$Path)
         [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseAncestor = $null; reparseTarget = $null }
     }
-    $driveRoots = New-PathScopeRecord -Source process -RawValue "C:\;C:" -DotNetValue "C:\;C:" -ReadErrors @() -MetadataResolver $rootResolver
-    Assert-True -Condition ($driveRoots.duplicates.Count -eq 0) -Message "驱动器根 C:\ 与驱动器相对路径 C: 不得误判为重复"
+    $driveRelativeRejected = $false
+    try {
+        New-PathScopeRecord -Source process -RawValue "C:\;C:" -DotNetValue "C:\;C:" -ReadErrors @() -MetadataResolver $rootResolver | Out-Null
+    } catch {
+        $driveRelativeRejected = $true
+    }
+    Assert-True -Condition $driveRelativeRejected -Message "驱动器相对 PATH C: 必须被正向 allowlist 拒绝"
 
-    $hashScope = New-PathScopeRecord -Source process -RawValue "abc" -DotNetValue "abc" -ReadErrors @() -MetadataResolver $rootResolver
-    Assert-True -Condition ($hashScope.rawValueSha256 -ceq "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") -Message "rawValueSha256 必须是 raw PATH 的真实 SHA-256"
+    $hashScope = New-PathScopeRecord -Source process -RawValue "D:\abc" -DotNetValue "D:\abc" -ReadErrors @() -MetadataResolver $rootResolver
+    Assert-True -Condition ($hashScope.rawValueSha256 -ceq "d7a3d07d779e5323c33c085a6eee317d9b0cd64026594d3632442be3a194da98") -Message "rawValueSha256 必须是 raw PATH 的真实 SHA-256"
 
     $metadataFailureResolver = {
         param([string]$Path)

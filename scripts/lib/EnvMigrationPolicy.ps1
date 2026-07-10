@@ -1,3 +1,5 @@
+. (Join-Path $PSScriptRoot "EnvPathSafety.ps1")
+
 function Test-EnvMigrationInteger {
     param([AllowNull()][object]$Value)
 
@@ -57,35 +59,13 @@ function Assert-EnvNonEmptyStringProperty {
     }
 }
 
-function Assert-EnvNotWindowsDeviceNamespace {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$FactName
-    )
-
-    $normalized = $Path.Replace('/', '\')
-    foreach ($prefix in @(
-        '\\?\', '\\.\', '\??\', '\\??\',
-        '\Device\', '\\Device\',
-        '\GLOBAL??\', '\\GLOBAL??\',
-        '\DosDevices\', '\\DosDevices\'
-    )) {
-        if ($normalized.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "$FactName 不得使用 Windows device namespace：$Path"
-        }
-    }
-}
-
 function Assert-EnvAbsolutePathValue {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$FactName
     )
 
-    Assert-EnvNotWindowsDeviceNamespace -Path $Path -FactName $FactName
-    if (-not [IO.Path]::IsPathFullyQualified($Path)) {
-        throw "$FactName 必须是绝对路径：$Path"
-    }
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName $FactName
     try {
         [void][IO.Path]::GetFullPath($Path)
     } catch {
@@ -420,13 +400,13 @@ function Assert-EnvMigrationDirectoryFacts {
                 if ([string]::IsNullOrWhiteSpace($directory.reparseTarget)) {
                     throw "Directory fact.reparseTarget 字符串不能为空。"
                 }
-                Assert-EnvNotWindowsDeviceNamespace -Path $directory.reparseTarget -FactName "Directory fact.reparseTarget"
+                Assert-EnvSafeReparseTarget -Path $directory.reparseTarget -FactName "Directory fact.reparseTarget"
             } elseif ($directory.reparseTarget -is [array]) {
                 foreach ($target in $directory.reparseTarget) {
                     if ($target -isnot [string] -or [string]::IsNullOrWhiteSpace($target)) {
                         throw "Directory fact.reparseTarget 数组只能包含非空字符串。"
                     }
-                    Assert-EnvNotWindowsDeviceNamespace -Path $target -FactName "Directory fact.reparseTarget"
+                    Assert-EnvSafeReparseTarget -Path $target -FactName "Directory fact.reparseTarget"
                 }
             } else {
                 throw "Directory fact.reparseTarget 必须是 null、字符串或字符串数组。"

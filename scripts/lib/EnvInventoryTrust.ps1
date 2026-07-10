@@ -1,3 +1,5 @@
+. (Join-Path $PSScriptRoot "EnvPathSafety.ps1")
+
 function Get-InventorySha256 {
     param([AllowNull()][string]$Value)
 
@@ -13,6 +15,7 @@ function Get-InventoryPathRoot {
     if ([string]::IsNullOrWhiteSpace($Path)) {
         return $null
     }
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Inventory path"
 
     try {
         return [IO.Path]::GetPathRoot($Path)
@@ -24,6 +27,7 @@ function Get-InventoryPathRoot {
 function Get-InventoryPathComparisonKey {
     param([Parameter(Mandatory)][string]$Path)
 
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Inventory comparison path"
     try {
         if ([IO.Path]::IsPathFullyQualified($Path)) {
             $fullPath = [IO.Path]::GetFullPath($Path)
@@ -72,6 +76,24 @@ function Get-InventoryMetadataContractError {
         }
     }
 
+    foreach ($pathField in @("reparseAncestor", "reparseTarget") | Where-Object { $RequiredFields -contains $_ }) {
+        $pathValue = $Metadata.$pathField
+        if ($null -eq $pathValue) {
+            continue
+        }
+        try {
+            if ($pathValue -is [array]) {
+                foreach ($item in $pathValue) {
+                    Assert-EnvSafeReparseTarget -Path $item -FactName "metadata.$pathField"
+                }
+            } else {
+                Assert-EnvSafeReparseTarget -Path $pathValue -FactName "metadata.$pathField"
+            }
+        } catch {
+            return $_.Exception.Message
+        }
+    }
+
     return $null
 }
 
@@ -82,6 +104,7 @@ function Get-InventoryReparseChainMetadata {
         [Parameter(Mandatory)][scriptblock]$ItemMetadataResolver
     )
 
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Inventory reparse path"
     try {
         $currentPath = [IO.Path]::GetFullPath($Path)
     } catch {
@@ -232,6 +255,7 @@ function New-PathScopeRecord {
         if ($containsUnexpandedVariable) {
             $complete = $false
         } else {
+            Assert-EnvSafeAbsolutePath -Path $expandedPath -FactName "PATH $Source entry[$index]"
             try {
                 $metadata = & $MetadataResolver $expandedPath
                 $contractError = Get-InventoryMetadataContractError -Metadata $metadata -RequiredFields @("exists", "isReparsePoint", "reparseAncestor", "reparseTarget")
@@ -324,6 +348,8 @@ function Test-InventorySubPath {
     if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) {
         return $false
     }
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Inventory subpath path"
+    Assert-EnvSafeAbsolutePath -Path $Root -FactName "Inventory subpath root"
 
     try {
         $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
@@ -349,7 +375,7 @@ function Get-InventoryPathOrigin {
         [switch]$ProjectEnvironmentEvidence
     )
 
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathFullyQualified($Path)) {
+    if ([string]::IsNullOrWhiteSpace($Path)) {
         return [pscustomobject]@{
             path = $Path
             originClass = "unknown"
@@ -361,6 +387,10 @@ function Get-InventoryPathOrigin {
             reparseAncestor = $null
             reparseTarget = $null
         }
+    }
+    Assert-EnvSafeAbsolutePath -Path $Path -FactName "Tool path"
+    foreach ($root in @($ProjectRoots) + @($SharedRoots) + @($VendorRoots) + @($WindowsSystemRoots) + @($SystemInstallerRoots) + @($UserProfileRoots)) {
+        Assert-EnvSafeAbsolutePath -Path $root -FactName "Tool classification root"
     }
 
     $metadata = $null
@@ -466,6 +496,13 @@ function Get-ToolOriginDecision {
         [switch]$RuntimeProbeSucceeded,
         [switch]$RuntimeProbeFailed
     )
+
+    foreach ($pathValue in @($LauncherPath, $RuntimePath, $RuntimePrefix, $RuntimeBasePrefix) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) {
+        Assert-EnvSafeAbsolutePath -Path $pathValue -FactName "Tool launcher/runtime path"
+    }
+    foreach ($root in @($ProjectRoots) + @($SharedRoots) + @($VendorRoots) + @($WindowsSystemRoots) + @($SystemInstallerRoots) + @($UserProfileRoots)) {
+        Assert-EnvSafeAbsolutePath -Path $root -FactName "Tool origin root"
+    }
 
     $launcher = Get-InventoryPathOrigin -Path $LauncherPath -ProjectRoots $ProjectRoots -SharedRoots $SharedRoots -VendorRoots $VendorRoots -WindowsSystemRoots $WindowsSystemRoots -SystemInstallerRoots $SystemInstallerRoots -UserProfileRoots $UserProfileRoots -MetadataResolver $MetadataResolver -ProbeSucceeded:$LauncherProbeSucceeded
     $runtimeHasEnvironmentEvidence = $false
