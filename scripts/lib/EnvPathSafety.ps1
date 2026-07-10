@@ -22,7 +22,7 @@ function Test-EnvSafeWin32PathSegments {
         }
 
         $deviceStem = ($segment -split '\.', 2)[0].TrimEnd(' ', '.')
-        if ($deviceStem -imatch '^(?:CON|PRN|AUX|NUL|CLOCK\$|COM[1-9]|LPT[1-9])$') {
+        if ($deviceStem -imatch '^(?:CON|PRN|AUX|NUL|CLOCK\$|COM(?:[1-9]|[¹²³])|LPT(?:[1-9]|[¹²³]))$') {
             return $false
         }
     }

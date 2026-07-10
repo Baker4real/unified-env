@@ -74,7 +74,9 @@ foreach ($safePath in @('C:\Windows', 'D:/Codex/tools', '\\server\share', '\\ser
 $unsafeWin32Paths = @(
     'C:\CON', 'C:\con.txt', 'C:\dir\PRN.log', 'C:\AUX', 'C:\NUL.data', 'C:\CLOCK$',
     'C:\COM1', 'C:\com9.log', 'C:\LPT1', 'C:\lpt9.txt',
+    'C:\COM¹', 'C:\com².txt', 'C:\Com³.log', 'C:\LPT¹', 'C:\lpt².txt', 'C:\Lpt³.log',
     '\\server\CON\file', '\\NUL\share\file',
+    '\\server\COM¹\file', '\\LPT²\share\file',
     'C:\safe:file', 'C:\dir\file:stream',
     'C:\bad<name', 'C:\bad>name', 'C:\bad"name', 'C:\bad|name', 'C:\bad?name', 'C:\bad*name',
     "C:\bad$([char]1)name", 'C:\taildot.', 'C:\tailspace ',
@@ -84,9 +86,10 @@ foreach ($unsafeWin32Path in $unsafeWin32Paths) {
     Assert-Throws -Action { Assert-EnvSafeAbsolutePath -Path $unsafeWin32Path -FactName "unsafe Win32 segment fixture" } -Message "Win32 segment allowlist 必须拒绝：$unsafeWin32Path"
 }
 Assert-Throws -Action { Assert-EnvSafeReparseTarget -Path 'D:\links\NUL.txt' -FactName "unsafe reparse target fixture" } -Message "reparseTarget 必须应用相同 Win32 segment 规则"
+Assert-Throws -Action { Assert-EnvSafeReparseTarget -Path 'D:\links\COM³.txt' -FactName "unsafe superscript reparse target fixture" } -Message "reparseTarget 必须拒绝 superscript DOS device name"
 
 foreach ($safeWin32Path in @(
-    'C:\', 'C:\normal\', 'C:\console', 'C:\com10', 'C:\nulldata',
+    'C:\', 'C:\normal\', 'C:\console', 'C:\com10', 'C:\nulldata', 'C:\COM⁴', 'C:\LPT₁',
     'D:\项目\缓存', 'D:\Program Files\Tool Name',
     '\\server\share\', '\\server-name\共享 空间\folder'
 )) {
