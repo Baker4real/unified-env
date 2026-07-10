@@ -2,6 +2,7 @@ reports/env-inventory-test/
 reports/env-migration-plan-test/
 reports/env-migration-execution-test/
 reports/env-update-readiness-test/
+reports/report-artifact-publisher-test/
 reports/project-local-env-review-test/
 reports/project-local-env-rebuild-plan-test/
 .serena/
