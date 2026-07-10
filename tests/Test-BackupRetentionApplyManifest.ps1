@@ -91,7 +91,7 @@ try {
         New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "backups_state\provider-sync\$name") | Out-Null
     }
 
-    & $dryRunScriptPath -CodexRoot $fixtureCodexRoot -DDriveRoot $fixtureRoot -OutputDir $dryRunOutput | Out-Null
+    & $dryRunScriptPath -ArtifactMode test -CodexRoot $fixtureCodexRoot -DDriveRoot $fixtureRoot -OutputDir $dryRunOutput | Out-Null
     $dryRunJson = Join-Path $dryRunOutput "backup-retention-dry-run.json"
     $dryRunPlan = Get-Content -LiteralPath $dryRunJson -Raw | ConvertFrom-Json
     Assert-True -Condition (@($dryRunPlan.candidates).Count -eq 2) -Message "fixture 应生成 2 个保留规则候选"
