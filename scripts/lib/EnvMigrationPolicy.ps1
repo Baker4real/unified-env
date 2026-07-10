@@ -7,6 +7,14 @@ function Test-EnvMigrationInteger {
         $Value -is [int64] -or $Value -is [uint64]
 }
 
+function Get-EnvRebuildEvidenceFileNames {
+    @(
+        "pyproject.toml", "uv.lock", "requirements.txt", "requirements-dev.txt",
+        "Pipfile.lock", "poetry.lock", "environment.yml", "package.json",
+        "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "README.md", "AGENTS.md"
+    )
+}
+
 function Assert-EnvFactObject {
     param(
         [AllowNull()][object]$Value,
@@ -118,7 +126,7 @@ function Test-EnvApprovedUserCachePath {
         '^C:\\Users\\[^\\]+\\AppData\\Local\\uv\\cache$',
         '^C:\\Users\\[^\\]+\\\.nuget\\packages$',
         '^C:\\Users\\[^\\]+\\\.m2\\repository$',
-        '^C:\\Users\\[^\\]+\\\.gradle$'
+        '^C:\\Users\\[^\\]+\\\.gradle\\caches$'
     )
     foreach ($pattern in $approvedPatterns) {
         if ($canonicalPath -imatch $pattern) {
@@ -205,6 +213,7 @@ function Test-EnvCanonicalPipCacheConfigured {
 function Assert-EnvMigrationDirectoryFacts {
     param([AllowEmptyCollection()][object[]]$Directories)
 
+    $canonicalPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($directory in @($Directories)) {
         Assert-EnvFactObject -Value $directory -FactName "Directory fact"
         $expectedProperties = @(
@@ -216,6 +225,10 @@ function Assert-EnvMigrationDirectoryFacts {
             Assert-EnvNonEmptyStringProperty -Value $directory -PropertyName $name -FactName "Directory fact"
         }
         Assert-EnvAbsolutePathValue -Path $directory.path -FactName "Directory fact.path"
+        $canonicalPath = [IO.Path]::GetFullPath($directory.path).TrimEnd('\', '/')
+        if (-not $canonicalPaths.Add($canonicalPath)) {
+            throw "Directory facts 包含重复 canonical path：$($directory.path)"
+        }
         $expectedDrive = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($directory.path))
         if (-not $directory.drive.Equals($expectedDrive, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Directory fact.drive 与 path 根不一致：$($directory.path)"
@@ -268,11 +281,8 @@ function Assert-EnvLocalEnvironmentFindingFacts {
         "project", "parentProject", "marker", "path", "drive", "sizeBytes",
         "classification", "scope", "owner", "rebuildEvidence"
     )
-    $allowedProjectFiles = @(
-        "pyproject.toml", "uv.lock", "requirements.txt", "requirements-dev.txt",
-        "Pipfile.lock", "poetry.lock", "environment.yml", "package.json",
-        "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "README.md", "AGENTS.md"
-    )
+    $allowedProjectFiles = @(Get-EnvRebuildEvidenceFileNames)
+    $canonicalPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 
     foreach ($finding in @($LocalEnvironmentFindings)) {
         Assert-EnvFactObject -Value $finding -FactName "LocalEnvironmentFinding fact"
@@ -287,8 +297,13 @@ function Assert-EnvLocalEnvironmentFindingFacts {
         Assert-EnvNonEmptyStringProperty -Value $finding -PropertyName "parentProject" -FactName "LocalEnvironmentFinding fact" -AllowNull
         Assert-EnvAbsolutePathValue -Path $finding.project -FactName "LocalEnvironmentFinding fact.project"
         Assert-EnvAbsolutePathValue -Path $finding.path -FactName "LocalEnvironmentFinding fact.path"
-        if ($null -ne $finding.parentProject) {
-            Assert-EnvAbsolutePathValue -Path $finding.parentProject -FactName "LocalEnvironmentFinding fact.parentProject"
+        if ($null -eq $finding.parentProject) {
+            throw "LocalEnvironmentFinding fact.parentProject 不能为空。"
+        }
+        Assert-EnvAbsolutePathValue -Path $finding.parentProject -FactName "LocalEnvironmentFinding fact.parentProject"
+        $canonicalPath = [IO.Path]::GetFullPath($finding.path).TrimEnd('\', '/')
+        if (-not $canonicalPaths.Add($canonicalPath)) {
+            throw "LocalEnvironmentFinding facts 包含重复 canonical path：$($finding.path)"
         }
         $expectedDrive = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($finding.path))
         if (-not $finding.drive.Equals($expectedDrive, [StringComparison]::OrdinalIgnoreCase)) {
@@ -296,6 +311,36 @@ function Assert-EnvLocalEnvironmentFindingFacts {
         }
         if ($finding.marker -notin @(".venv", "venv", "node_modules", ".conda")) {
             throw "LocalEnvironmentFinding fact.marker 枚举无效：$($finding.marker)"
+        }
+        $canonicalProject = [IO.Path]::GetFullPath($finding.project).TrimEnd('\', '/')
+        $canonicalParentProject = [IO.Path]::GetFullPath($finding.parentProject).TrimEnd('\', '/')
+        $expectedPath = [IO.Path]::GetFullPath((Join-Path $canonicalProject $finding.marker)).TrimEnd('\', '/')
+        if (-not $canonicalPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "LocalEnvironmentFinding fact.path 必须是 project 下的 marker 直接子目录。"
+        }
+
+        $expectedClassification = $null
+        if ($canonicalProject.Equals($canonicalParentProject, [StringComparison]::OrdinalIgnoreCase)) {
+            $expectedClassification = "project-root-local-env"
+        } elseif (Test-EnvMigrationSubPath -Path $canonicalProject -Root $canonicalParentProject) {
+            $normalizedPath = $canonicalPath.ToLowerInvariant()
+            if ($normalizedPath.Contains("\docs\gsd-archive\") -or
+                $normalizedPath.Contains("\docs\archive\") -or
+                $normalizedPath.Contains("\docs\archived\")) {
+                $expectedClassification = "archived-project-cache"
+            } elseif ($normalizedPath.Contains("\data\repair_backups\") -or
+                $normalizedPath.Contains("\repair_backups\")) {
+                $expectedClassification = "plugin-cache-backup"
+            } elseif ($normalizedPath.Contains("\plugins\cache\")) {
+                $expectedClassification = "plugin-runtime-cache"
+            } else {
+                $expectedClassification = "nested-app-local-env"
+            }
+        } else {
+            throw "LocalEnvironmentFinding fact.project 必须等于或位于 parentProject 下。"
+        }
+        if ($finding.classification -cne $expectedClassification) {
+            throw "LocalEnvironmentFinding fact.classification 与 path/project/parentProject 事实不一致：Expected=$expectedClassification; Actual=$($finding.classification)"
         }
         if (-not $classificationPolicies.ContainsKey($finding.classification)) {
             throw "LocalEnvironmentFinding fact.classification 枚举无效：$($finding.classification)"
@@ -452,8 +497,35 @@ function Get-EnvMigrationCandidates {
             owner = $directory.owner
             risk = $risk
             action = $action
-            reason = $directory.notes
+            reason = Get-EnvDirectoryPolicyReason -Directory $directory -Disposition "candidate"
         }
+    }
+}
+
+function Get-EnvDirectoryPolicyReason {
+    param(
+        [Parameter(Mandatory)][psobject]$Directory,
+        [Parameter(Mandatory)][ValidateSet("candidate", "manual")][string]$Disposition
+    )
+
+    $location = if (Test-EnvMigrationSubPath -Path $Directory.path -Root "C:\Users") {
+        "C 盘用户目录"
+    } else {
+        "C 盘目录"
+    }
+    if ($Disposition -eq "manual") {
+        switch ($Directory.category) {
+            "cache" { return "$location 下的路径未被证明为纯缓存 allowlist 根，必须人工确认内容和归属。" }
+            "tool-env" { return "$location 下的工具或环境根可能包含可执行文件、配置或状态，必须按官方机制人工处理。" }
+            "manual-only" { return "$location 属于明确人工治理类别，可能包含配置、状态或敏感材料。" }
+            default { return "$location 的用途和迁移边界不足以支持自动建议，必须人工确认。" }
+        }
+    }
+
+    switch ($Directory.category) {
+        "cache" { return "$location 已被识别为明确缓存目录；仅允许生成保留源目录的 dry-run 建议。" }
+        "tool-env" { return "$location 已被识别为工具或环境根；只能按工具官方机制生成 dry-run 建议。" }
+        default { return "$location 已通过目录事实与 root policy 检查；仍只允许生成 dry-run 建议。" }
     }
 }
 
@@ -500,7 +572,17 @@ function Get-EnvManualReviewItems {
                 owner = $directory.owner
                 risk = "high"
                 action = "仅人工处理"
-                reason = $directory.notes
+                reason = Get-EnvDirectoryPolicyReason -Directory $directory -Disposition "manual"
+            }
+        } elseif ((Test-EnvMigrationSubPath -Path $directory.path -Root "C:\Users") -and
+            -not ($directory.category -eq "cache" -and (Test-EnvApprovedUserCachePath -Path $directory.path))) {
+            [pscustomobject]@{
+                source = $directory.path
+                kind = $directory.category
+                owner = $directory.owner
+                risk = "high"
+                action = "不自动迁移"
+                reason = Get-EnvDirectoryPolicyReason -Directory $directory -Disposition "manual"
             }
         }
     }

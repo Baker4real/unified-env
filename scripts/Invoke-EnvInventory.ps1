@@ -541,13 +541,13 @@ function Get-KnownDirectories {
     $programData = $env:ProgramData
 
     $items = @(
-        @{ Name = "Codex tools root"; Path = "D:\Codex\tools"; Category = "d-target"; Owner = "host"; Notes = "推荐工具根目录" },
-        @{ Name = "Codex envs root"; Path = "D:\Codex\envs"; Category = "d-target"; Owner = "host"; Notes = "推荐共享环境根目录" },
-        @{ Name = "Codex cache root"; Path = "D:\Codex\.cache"; Category = "d-target"; Owner = "host"; Notes = "推荐共享缓存根目录" },
+        @{ Name = "Codex tools root"; Path = "D:\Codex\tools"; Category = "d-target"; Owner = "host"; Notes = "D 盘工具根目录观察值" },
+        @{ Name = "Codex envs root"; Path = "D:\Codex\envs"; Category = "d-target"; Owner = "host"; Notes = "D 盘共享环境根目录观察值" },
+        @{ Name = "Codex cache root"; Path = "D:\Codex\.cache"; Category = "d-target"; Owner = "host"; Notes = "D 盘共享缓存根目录观察值" },
         @{ Name = "uv cache env"; Path = $env:UV_CACHE_DIR; Category = "cache"; Owner = "python"; Notes = "显式 UV_CACHE_DIR" },
         @{ Name = "uv tools env"; Path = $env:UV_TOOL_DIR; Category = "tool-env"; Owner = "python"; Notes = "显式 UV_TOOL_DIR" },
         @{ Name = "pip cache env"; Path = $env:PIP_CACHE_DIR; Category = "cache"; Owner = "python"; Notes = "显式 PIP_CACHE_DIR" },
-        @{ Name = "pip cache default"; Path = (Join-Path $local "pip\Cache"); Category = "cache"; Owner = "python"; Notes = "pip 默认用户缓存候选" },
+        @{ Name = "pip cache default"; Path = (Join-Path $local "pip\Cache"); Category = "cache"; Owner = "python"; Notes = "pip 默认用户缓存路径观察值" },
         @{ Name = "pipx home"; Path = $env:PIPX_HOME; Category = "tool-env"; Owner = "python"; Notes = "显式 PIPX_HOME" },
         @{ Name = "pipx default home"; Path = (Join-Path $userHome ".local\pipx"); Category = "tool-env"; Owner = "python"; Notes = "pipx 常见默认位置" },
         @{ Name = "poetry home"; Path = $env:POETRY_HOME; Category = "tool-env"; Owner = "python"; Notes = "显式 POETRY_HOME" },
@@ -593,6 +593,12 @@ function Get-TopProjectRoot {
             continue
         }
 
+        $container = [IO.Directory]::GetParent([IO.Path]::GetFullPath($Path)).FullName
+        $canonicalRoot = [IO.Path]::GetFullPath($root).TrimEnd('\', '/')
+        if ($container.Equals($canonicalRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            return $canonicalRoot
+        }
+
         $relative = Get-RelativePath -Path $Path -BasePath $root
         $segments = @($relative -split "[\\/]" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         if ($segments.Count -eq 0) {
@@ -611,21 +617,7 @@ function Get-ProjectRebuildEvidence {
         [Parameter(Mandatory)][string]$Marker
     )
 
-    $candidateFiles = @(
-        "pyproject.toml",
-        "uv.lock",
-        "requirements.txt",
-        "requirements-dev.txt",
-        "Pipfile.lock",
-        "poetry.lock",
-        "environment.yml",
-        "package.json",
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "yarn.lock",
-        "README.md",
-        "AGENTS.md"
-    )
+    $candidateFiles = @(Get-EnvRebuildEvidenceFileNames)
     $projectFiles = @(
         foreach ($candidate in $candidateFiles) {
             if (Test-Path -LiteralPath (Join-Path $Project $candidate) -PathType Leaf) {
@@ -963,6 +955,7 @@ $tools = @(
 )
 
 $directories = @(Get-KnownDirectories)
+Assert-EnvMigrationDirectoryFacts -Directories $directories
 $localEnvironmentFindings = @(Get-LocalEnvironmentFindings -Roots $ProjectRoots)
 Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $localEnvironmentFindings
 $envVars = @(Get-SelectedEnvironmentVariables)

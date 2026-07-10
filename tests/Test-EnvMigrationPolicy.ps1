@@ -35,6 +35,10 @@ $policyPath = Join-Path $ProjectRoot "scripts\lib\EnvMigrationPolicy.ps1"
 Assert-True -Condition (Test-Path -LiteralPath $policyPath -PathType Leaf) -Message "找不到迁移策略库：$policyPath"
 . $policyPath
 
+$rebuildEvidenceFileNames = @(Get-EnvRebuildEvidenceFileNames)
+Assert-True -Condition ($rebuildEvidenceFileNames -contains "package-lock.json") -Message "canonical rebuild evidence 文件表缺少 package-lock.json"
+Assert-True -Condition (@($rebuildEvidenceFileNames | Sort-Object -Unique).Count -eq $rebuildEvidenceFileNames.Count) -Message "canonical rebuild evidence 文件表不得重复"
+
 $canonicalExcludedRoots = @(Get-EnvCanonicalExcludedRoots)
 $excludedRootFacts = @(Get-EnvExcludedRootFacts)
 Assert-True -Condition ($canonicalExcludedRoots.Count -eq 5) -Message "canonical excluded-root 规则数量发生变化"
@@ -108,7 +112,7 @@ $directories = @(
         isReparsePoint = $false
         reparseTarget = $null
         sizeBytes = $null
-        notes = "npm 常见缓存位置"
+        notes = "NOTES-ATTACK 推荐候选"
     }
     [pscustomobject]@{
         name = "reparse cache"
@@ -133,6 +137,42 @@ $directories = @(
         reparseTarget = $null
         sizeBytes = $null
         notes = "Docker 用户配置，可能包含上下文和凭据引用"
+    }
+    [pscustomobject]@{
+        name = "cargo home"
+        path = "C:\Users\fixture\.cargo"
+        category = "tool-env"
+        owner = "rust"
+        exists = $true
+        drive = "C:\"
+        isReparsePoint = $false
+        reparseTarget = $null
+        sizeBytes = $null
+        notes = "Cargo 用户工具根观察值"
+    }
+    [pscustomobject]@{
+        name = "gradle user home"
+        path = "C:\Users\fixture\.gradle"
+        category = "cache"
+        owner = "java"
+        exists = $true
+        drive = "C:\"
+        isReparsePoint = $false
+        reparseTarget = $null
+        sizeBytes = $null
+        notes = "Gradle 用户根观察值"
+    }
+    [pscustomobject]@{
+        name = "gradle caches"
+        path = "C:\Users\fixture\.gradle\caches"
+        category = "cache"
+        owner = "java"
+        exists = $true
+        drive = "C:\"
+        isReparsePoint = $false
+        reparseTarget = $null
+        sizeBytes = $null
+        notes = "Gradle 纯缓存子目录观察值"
     }
 )
 
@@ -167,6 +207,24 @@ $missingRebuildEvidence = [pscustomobject]@{
 }
 Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($missingRebuildEvidence) } -Message "本地环境 fact 必须包含严格 rebuildEvidence"
 
+$duplicateDirectories = [object[]]@(
+    $directories[0],
+    ($directories[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
+)
+Assert-Throws -Action { Assert-EnvMigrationDirectoryFacts -Directories $duplicateDirectories } -Message "Directory facts 必须拒绝重复 canonical path"
+
+$duplicateFindings = [object[]]@(
+    $localEnvironmentFindings[0],
+    ($localEnvironmentFindings[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
+)
+Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings $duplicateFindings } -Message "LocalEnvironmentFinding facts 必须拒绝重复 canonical path"
+
+$masqueradeFinding = ($localEnvironmentFindings[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
+$masqueradeFinding.classification = "plugin-runtime-cache"
+$masqueradeFinding.scope = "plugin-runtime-cache"
+$masqueradeFinding.owner = "plugin-runtime"
+Assert-Throws -Action { Assert-EnvLocalEnvironmentFindingFacts -LocalEnvironmentFindings @($masqueradeFinding) } -Message "普通项目 node_modules 不得协调伪装为 plugin-runtime-cache"
+
 $candidates = @(Get-EnvMigrationCandidates -Directories $directories)
 $manualReviewItems = @(Get-EnvManualReviewItems -Directories $directories -LocalEnvironmentFindings $localEnvironmentFindings)
 $emptyCandidates = @(Get-EnvMigrationCandidates -Directories @())
@@ -195,6 +253,12 @@ $npmCache = @($candidates | Where-Object { $_.source -eq "C:\Users\fixture\AppDa
 Assert-True -Condition ($npmCache.Count -eq 1) -Message "C 用户缓存应保留旧迁移候选语义"
 Assert-True -Condition ($npmCache[0].risk -eq "low") -Message "C 用户缓存风险应为 low"
 Assert-True -Condition ($npmCache[0].action -eq "可考虑迁移到 D:\Codex\.cache") -Message "C 用户缓存建议动作发生变化"
+Assert-True -Condition ($npmCache[0].reason -notmatch "NOTES-ATTACK|候选|推荐") -Message "迁移 reason 不得直接信任 directory.notes"
+
+$gradleRootCandidate = @($candidates | Where-Object { $_.source -eq "C:\Users\fixture\.gradle" })
+Assert-True -Condition ($gradleRootCandidate.Count -eq 0) -Message "整个 .gradle 根不得作为低风险 cache 候选"
+$gradleCachesCandidate = @($candidates | Where-Object { $_.source -eq "C:\Users\fixture\.gradle\caches" })
+Assert-True -Condition ($gradleCachesCandidate.Count -eq 1) -Message "明确 .gradle\caches 纯缓存子目录应保留为候选"
 
 $masqueradeDirectories = @(
     foreach ($source in @("C:\Users", "C:\Users\fixture", "C:\Users\fixture\Documents\cache")) {
@@ -224,6 +288,13 @@ Assert-True -Condition ($reparseReview[0].risk -eq "high" -and $reparseReview[0]
 $dockerReview = @($manualReviewItems | Where-Object { $_.source -eq "C:\Users\fixture\.docker" })
 Assert-True -Condition ($dockerReview.Count -eq 1) -Message "manual-only 目录必须进入人工审查"
 Assert-True -Condition ($dockerReview[0].action -eq "仅人工处理") -Message "manual-only 目录动作发生变化"
+Assert-True -Condition ($dockerReview[0].reason -cne $directories[4].notes) -Message "manual review reason 不得直接信任 directory.notes"
+
+$cargoReview = @($manualReviewItems | Where-Object { $_.source -eq "C:\Users\fixture\.cargo" })
+Assert-True -Condition ($cargoReview.Count -eq 1) -Message "C:\Users 下非 allowlist tool-env 必须进入人工审查"
+Assert-True -Condition ($cargoReview[0].action -eq "不自动迁移") -Message "Cargo 用户工具根必须失败关闭"
+$gradleRootReview = @($manualReviewItems | Where-Object { $_.source -eq "C:\Users\fixture\.gradle" })
+Assert-True -Condition ($gradleRootReview.Count -eq 1) -Message "整个 .gradle 根必须进入人工审查"
 
 $nodeModulesReview = @($manualReviewItems | Where-Object { $_.source -eq "D:\Codex\projects\fixture-app\node_modules" })
 Assert-True -Condition ($nodeModulesReview.Count -eq 1) -Message "项目 node_modules 必须进入人工审查"

@@ -85,6 +85,9 @@ try {
         Assert-True -Condition ($entry.validationSteps.Count -gt 0) -Message "迁移计划缺少验证步骤"
         Assert-True -Condition ((@($entry.validationSteps) -join "`n").Contains("重新生成 migration plan")) -Message "验证步骤应重新生成 migration plan"
         Assert-True -Condition (-not ((@($entry.validationSteps) -join "`n").Contains("inventory 不再把来源路径列为待处理迁移候选"))) -Message "验证步骤不得再依赖 inventory candidate"
+        Assert-True -Condition ((@($entry.validationSteps) -join "`n").Contains("版本探测")) -Message "验证步骤必须包含工具版本探测"
+        Assert-True -Condition ((@($entry.validationSteps) -join "`n").Contains("迁移前后 inventory 事实")) -Message "验证步骤必须包含迁移前后 inventory 事实对比"
+        Assert-True -Condition ((@($entry.validationSteps) -join "`n").Contains("报告对比")) -Message "验证步骤必须包含报告对比"
         Assert-True -Condition ($entry.rollbackSteps.Count -gt 0) -Message "迁移计划缺少回滚步骤"
         Assert-True -Condition (-not [bool]$entry.executionAllowed) -Message "dry-run 计划不应允许直接执行"
         Assert-True -Condition ([bool]$entry.requiresExplicitUserApproval) -Message "迁移计划未要求显式授权"
@@ -137,6 +140,7 @@ try {
         @{ name = "directory-null-element"; mutate = { param($document) $document.directories = [object[]]@($null) } },
         @{ name = "directory-null-path"; mutate = { param($document) $document.directories[0].path = $null } },
         @{ name = "directory-scalar-category"; mutate = { param($document) $document.directories[0].category = 42 } },
+        @{ name = "directory-duplicate-canonical-path"; mutate = { param($document) $duplicate = ($document.directories[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json); $duplicate.path = $document.directories[0].path.ToUpperInvariant().TrimEnd('\') + '\'; $document.directories = [object[]]@($document.directories + $duplicate) } },
         @{ name = "roots-not-array"; mutate = { param($document) $document.excludedRoots = "C:\Windows" } },
         @{ name = "root-scalar-element"; preserve = $true; mutate = { param($document) $document.excludedRoots = [object[]]@("C:\Windows") } },
         @{ name = "root-null-path"; preserve = $true; mutate = { param($document) $document.excludedRoots[0].path = $null } },
@@ -149,7 +153,9 @@ try {
         @{ name = "finding-scalar-rebuild-evidence"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence = "package-lock.json" } },
         @{ name = "finding-rebuild-marker-mismatch"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.marker = ".venv" } },
         @{ name = "finding-project-files-not-array"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.projectFiles = "package-lock.json" } },
-        @{ name = "finding-project-files-unknown"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.projectFiles = [object[]]@("secrets.txt") } }
+        @{ name = "finding-project-files-unknown"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.projectFiles = [object[]]@("secrets.txt") } },
+        @{ name = "finding-duplicate-canonical-path"; mutate = { param($document) $duplicate = ($document.localEnvironmentFindings[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json); $document.localEnvironmentFindings = [object[]]@($document.localEnvironmentFindings + $duplicate) } },
+        @{ name = "finding-node-modules-plugin-masquerade"; mutate = { param($document) $finding = $document.localEnvironmentFindings | Where-Object { $_.marker -eq "node_modules" -and $_.classification -in @("project-root-local-env", "nested-app-local-env") } | Select-Object -First 1; $finding.classification = "plugin-runtime-cache"; $finding.scope = "plugin-runtime-cache"; $finding.owner = "plugin-runtime" } }
     )
     foreach ($case in $invalidCases) {
         $fixture = ($inventory | ConvertTo-Json -Depth 30 | ConvertFrom-Json)

@@ -64,6 +64,9 @@ foreach ($policyProperty in @("migrationCandidates", "manualReviewItems", "proje
 foreach ($rootFact in @($quickInventory.excludedRoots)) {
     Assert-True -Condition ((@($rootFact.PSObject.Properties.Name) -join ",") -ceq "path") -Message "Inventory excludedRoots 只能输出裸 path fact"
 }
+foreach ($directory in @($quickInventory.directories)) {
+    Assert-True -Condition ($directory.notes -notmatch "推荐|候选|可考虑|应迁移") -Message "Directory notes 必须是中性观察事实：$($directory.name) => $($directory.notes)"
+}
 
 Assert-True -Condition ($quickInventory.artifactType -eq "env-governance.inventory") -Message "Quick inventory artifactType 错误"
 Assert-True -Condition ($quickInventory.schemaVersion -eq 3) -Message "Quick inventory schemaVersion 必须为 3"
