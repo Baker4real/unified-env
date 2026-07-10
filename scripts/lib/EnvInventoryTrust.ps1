@@ -40,6 +40,41 @@ function Get-InventoryPathComparisonKey {
     return $Path.TrimEnd("\", "/")
 }
 
+function Get-InventoryMetadataContractError {
+    param(
+        [AllowNull()][object]$Metadata,
+        [Parameter(Mandatory)][string[]]$RequiredFields
+    )
+
+    if ($null -eq $Metadata) {
+        return "metadata resolver returned null"
+    }
+
+    $propertyNames = @($Metadata.PSObject.Properties.Name)
+    foreach ($field in @("status") + $RequiredFields) {
+        if (-not ($propertyNames -contains $field)) {
+            return "metadata resolver omitted required field '$field'"
+        }
+    }
+
+    if ($Metadata.status -cne "ok") {
+        $detail = if ($propertyNames -contains "error" -and -not [string]::IsNullOrWhiteSpace([string]$Metadata.error)) {
+            [string]$Metadata.error
+        } else {
+            "no error detail"
+        }
+        return "metadata status '$($Metadata.status)': $detail"
+    }
+
+    foreach ($booleanField in @("exists", "isReparsePoint") | Where-Object { $RequiredFields -contains $_ }) {
+        if ($Metadata.$booleanField -isnot [bool]) {
+            return "metadata field '$booleanField' must be Boolean"
+        }
+    }
+
+    return $null
+}
+
 function New-PathScopeRecord {
     [CmdletBinding()]
     param(
@@ -81,6 +116,10 @@ function New-PathScopeRecord {
         } else {
             try {
                 $metadata = & $MetadataResolver $expandedPath
+                $contractError = Get-InventoryMetadataContractError -Metadata $metadata -RequiredFields @("exists", "isReparsePoint", "reparseTarget")
+                if (-not [string]::IsNullOrWhiteSpace($contractError)) {
+                    throw $contractError
+                }
                 $exists = [bool]$metadata.exists
                 $isReparsePoint = [bool]$metadata.isReparsePoint
                 $reparseTarget = $metadata.reparseTarget
@@ -190,6 +229,8 @@ function Get-InventoryPathOrigin {
             originClass = "unknown"
             matchedRule = "no-absolute-path"
             matchedRoot = $null
+            metadataStatus = "not-run"
+            metadataError = "absolute path unavailable"
             isReparsePoint = $null
             reparseTarget = $null
         }
@@ -198,12 +239,18 @@ function Get-InventoryPathOrigin {
     $metadata = $null
     try {
         $metadata = & $MetadataResolver $Path
+        $contractError = Get-InventoryMetadataContractError -Metadata $metadata -RequiredFields @("isReparsePoint", "reparseTarget")
+        if (-not [string]::IsNullOrWhiteSpace($contractError)) {
+            throw $contractError
+        }
     } catch {
         return [pscustomobject]@{
             path = $Path
             originClass = "unknown"
-            matchedRule = "metadata-read-failed"
+            matchedRule = "metadata-unavailable"
             matchedRoot = $null
+            metadataStatus = "error"
+            metadataError = $_.Exception.Message
             isReparsePoint = $null
             reparseTarget = $null
         }
@@ -220,6 +267,8 @@ function Get-InventoryPathOrigin {
                 originClass = "project-local-env"
                 matchedRule = "explicit-project-root"
                 matchedRoot = $root
+                metadataStatus = "ok"
+                metadataError = $null
                 isReparsePoint = [bool]$metadata.isReparsePoint
                 reparseTarget = $metadata.reparseTarget
             }
@@ -247,6 +296,8 @@ function Get-InventoryPathOrigin {
                     originClass = $originClass
                     matchedRule = $matchedRule
                     matchedRoot = $root
+                    metadataStatus = "ok"
+                    metadataError = $null
                     isReparsePoint = [bool]$metadata.isReparsePoint
                     reparseTarget = $metadata.reparseTarget
                 }
@@ -259,6 +310,8 @@ function Get-InventoryPathOrigin {
         originClass = "unknown"
         matchedRule = "no-origin-rule-matched"
         matchedRoot = $null
+        metadataStatus = "ok"
+        metadataError = $null
         isReparsePoint = [bool]$metadata.isReparsePoint
         reparseTarget = $metadata.reparseTarget
     }
@@ -298,6 +351,8 @@ function Get-ToolOriginDecision {
             originClass = "unknown"
             matchedRule = "runtime-probe-failed"
             matchedRoot = $null
+            metadataStatus = "not-run"
+            metadataError = "runtime probe failed"
             isReparsePoint = $null
             reparseTarget = $null
         }

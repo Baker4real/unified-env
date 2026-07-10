@@ -94,11 +94,18 @@ foreach ($tool in $quickInventory.tools) {
         Assert-Property -Object $tool -Name $property
     }
     Assert-True -Condition ($tool.resolutionScope -eq "process") -Message "$($tool.name) resolutionScope 必须为 process"
+    Assert-Property -Object $tool.launcher -Name "metadataStatus"
+    if ($null -ne $tool.runtime) {
+        Assert-Property -Object $tool.runtime -Name "metadataStatus"
+    }
 }
 
 $quickReport = Get-Content -Path $quickReportPath -Raw
 foreach ($expected in @("本报告由只读盘点脚本生成", "工具解析作用域：process", "## 绝不自动迁移", "## 迁移候选", "## 人工审查项")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing expected text: $expected"
+}
+foreach ($expected in @("Launcher originClass", "Launcher matchedRule", "Launcher matchedRoot", "Launcher reparse", "Runtime originClass", "Runtime matchedRule", "Runtime matchedRoot", "Runtime reparse")) {
+    Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing tool audit column: $expected"
 }
 foreach ($expected in @("## 本地环境分类发现")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing local env classification text: $expected"
@@ -202,8 +209,17 @@ if ($pythonProbe -and $pythonProbe.found) {
     foreach ($property in @("launcher", "runtime", "originClass", "originEvidence", "resolutionScope", "requiresManualReview")) {
         Assert-Property -Object $pythonProbe -Name $property
     }
-    if ($pythonProbe.originClass -eq "shared-tool") {
-        Assert-True -Condition (-not [bool]$pythonProbe.requiresManualReview) -Message "成功探测且命中显式 shared root 才可免人工审查"
+    $pythonRolesTrustedShared = $pythonProbe.launcher.originClass -eq "shared-tool" -and
+        $null -ne $pythonProbe.runtime -and
+        $pythonProbe.runtime.originClass -eq "shared-tool" -and
+        $pythonProbe.launcher.metadataStatus -eq "ok" -and
+        $pythonProbe.runtime.metadataStatus -eq "ok" -and
+        -not [bool]$pythonProbe.launcher.isReparsePoint -and
+        -not [bool]$pythonProbe.runtime.isReparsePoint
+    if ($pythonProbe.originClass -eq "shared-tool" -and $pythonRolesTrustedShared) {
+        Assert-True -Condition (-not [bool]$pythonProbe.requiresManualReview) -Message "launcher/runtime 都是可信 shared 且无 reparse 时才可免人工审查"
+    } elseif ($pythonProbe.originClass -eq "shared-tool") {
+        Assert-True -Condition ([bool]$pythonProbe.requiresManualReview) -Message "最终 shared-tool 不能覆盖 launcher/runtime 风险证据"
     } else {
         Assert-True -Condition ([bool]$pythonProbe.requiresManualReview) -Message "非 shared-tool Python 归属必须人工审查"
     }

@@ -21,9 +21,9 @@ if (Test-Path -LiteralPath $libraryPath -PathType Leaf) {
 }
 
 $metadata = @{
-    "C:\Windows\System32" = [pscustomobject]@{ exists = $true; isReparsePoint = $false; reparseTarget = $null }
-    "D:\Tools" = [pscustomobject]@{ exists = $true; isReparsePoint = $false; reparseTarget = $null }
-    "D:\Missing" = [pscustomobject]@{ exists = $false; isReparsePoint = $false; reparseTarget = $null }
+    "C:\Windows\System32" = [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseTarget = $null }
+    "D:\Tools" = [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseTarget = $null }
+    "D:\Missing" = [pscustomobject]@{ status = "ok"; exists = $false; isReparsePoint = $false; reparseTarget = $null }
 }
 $resolver = {
     param([string]$Path)
@@ -72,7 +72,7 @@ try {
 
     $rootResolver = {
         param([string]$Path)
-        [pscustomobject]@{ exists = $true; isReparsePoint = $false; reparseTarget = $null }
+        [pscustomobject]@{ status = "ok"; exists = $true; isReparsePoint = $false; reparseTarget = $null }
     }
     $driveRoots = New-PathScopeRecord -Source process -RawValue "C:\;C:" -DotNetValue "C:\;C:" -ReadErrors @() -MetadataResolver $rootResolver
     Assert-True -Condition ($driveRoots.duplicates.Count -eq 0) -Message "驱动器根 C:\ 与驱动器相对路径 C: 不得误判为重复"
@@ -86,6 +86,19 @@ try {
     }
     $metadataFailure = New-PathScopeRecord -Source process -RawValue "D:\MetadataFailure" -DotNetValue "D:\MetadataFailure" -ReadErrors @() -MetadataResolver $metadataFailureResolver
     Assert-True -Condition (@($metadataFailure.errors | Where-Object { $_ -like "*Metadata*fixture metadata failed*" }).Count -eq 1) -Message "PATH metadata 失败必须进入统一 errors"
+
+    $invalidPathMetadataResolvers = @(
+        @{ name = "null"; resolver = { param([string]$Path) $null } }
+        @{ name = "missing-fields"; resolver = { param([string]$Path) [pscustomobject]@{ status = "ok"; exists = $false } } }
+        @{ name = "status-error"; resolver = { param([string]$Path) [pscustomobject]@{ status = "error"; error = "fixture status error" } } }
+        @{ name = "throws"; resolver = { param([string]$Path) throw "fixture resolver throws" } }
+    )
+    foreach ($invalidCase in $invalidPathMetadataResolvers) {
+        $invalidScope = New-PathScopeRecord -Source process -RawValue "D:\UntrustedMetadata" -DotNetValue "D:\UntrustedMetadata" -ReadErrors @() -MetadataResolver $invalidCase.resolver
+        Assert-True -Condition (-not [bool]$invalidScope.complete) -Message "$($invalidCase.name) PATH metadata 必须使 scope 不完整"
+        Assert-True -Condition ($invalidScope.missingPathCleanupCandidates.Count -eq 0) -Message "$($invalidCase.name) PATH metadata 不得生成 cleanup 建议"
+        Assert-True -Condition (@($invalidScope.errors | Where-Object { $_ -like "Metadata*" }).Count -eq 1) -Message "$($invalidCase.name) PATH metadata 必须保留 error 摘要"
+    }
 } finally {
     $env:SystemRoot = $previousSystemRoot
 }
@@ -98,9 +111,9 @@ $originMetadata = {
     param([string]$Path)
 
     if ($Path -ieq "D:\Reparse\tool.exe") {
-        return [pscustomobject]@{ isReparsePoint = $true; reparseTarget = "D:\Vendor\tool.exe" }
+        return [pscustomobject]@{ status = "ok"; isReparsePoint = $true; reparseTarget = "D:\Vendor\tool.exe" }
     }
-    return [pscustomobject]@{ isReparsePoint = $false; reparseTarget = $null }
+    return [pscustomobject]@{ status = "ok"; isReparsePoint = $false; reparseTarget = $null }
 }
 $decisionArgs = @{
     ProjectRoots = @("D:\hermes-data\hermes-agent")
@@ -144,7 +157,7 @@ Assert-True -Condition ($ordinaryProjectTool.originClass -eq "unknown") -Message
 
 $projectReparseMetadata = {
     param([string]$Path)
-    [pscustomobject]@{ isReparsePoint = $true; reparseTarget = "D:\Shared\tool.exe" }
+    [pscustomobject]@{ status = "ok"; isReparsePoint = $true; reparseTarget = "D:\Shared\tool.exe" }
 }
 $projectReparse = Get-ToolOriginDecision -LauncherPath "D:\hermes-data\hermes-agent\venv-new\Scripts\python.exe" -RuntimePath $null -ProjectRoots @("D:\hermes-data\hermes-agent") -SharedRoots @("D:\Shared") -VendorRoots @() -SystemInstallerRoots @() -MetadataResolver $projectReparseMetadata
 Assert-True -Condition ($projectReparse.originClass -eq "project-local-env") -Message "reparse 风险证据不得丢失项目 owner 事实"
@@ -188,6 +201,19 @@ foreach ($taxonomyCase in $taxonomyCases) {
 $failedSharedProbe = Get-ToolOriginDecision -LauncherPath "D:\Shared\tool.exe" -RuntimePath $null -ProjectRoots @() -SharedRoots @("D:\Shared") -VendorRoots @() -SystemInstallerRoots @() -MetadataResolver $originMetadata
 Assert-True -Condition ($failedSharedProbe.originClass -eq "unknown") -Message "shared allowlist 没有成功 probe 时归属必须降级为 unknown"
 Assert-True -Condition ([bool]$failedSharedProbe.requiresManualReview) -Message "shared allowlist probe 失败时必须人工审查"
+
+$invalidToolMetadataResolvers = @(
+    @{ name = "null"; resolver = { param([string]$Path) $null } }
+    @{ name = "missing-fields"; resolver = { param([string]$Path) [pscustomobject]@{ status = "ok" } } }
+    @{ name = "status-error"; resolver = { param([string]$Path) [pscustomobject]@{ status = "error"; error = "fixture status error" } } }
+    @{ name = "throws"; resolver = { param([string]$Path) throw "fixture resolver throws" } }
+)
+foreach ($invalidCase in $invalidToolMetadataResolvers) {
+    $invalidToolDecision = Get-ToolOriginDecision -LauncherPath "D:\Shared\tool.exe" -RuntimePath $null -LauncherProbeSucceeded -ProjectRoots @() -SharedRoots @("D:\Shared") -VendorRoots @() -SystemInstallerRoots @() -MetadataResolver $invalidCase.resolver
+    Assert-True -Condition ($invalidToolDecision.originClass -eq "unknown") -Message "$($invalidCase.name) tool metadata 必须降级为 unknown"
+    Assert-True -Condition ([bool]$invalidToolDecision.requiresManualReview) -Message "$($invalidCase.name) tool metadata 必须人工审查"
+    Assert-True -Condition ($invalidToolDecision.launcher.matchedRule -eq "metadata-unavailable") -Message "$($invalidCase.name) tool metadata 必须保留不可信规则证据"
+}
 
 $invalidProbe = ConvertFrom-PythonRuntimeProbe -Json "$pythonProbeJson`nnoise"
 $invalidDecision = Get-ToolOriginDecision -LauncherPath "D:\hermes-data\.npm-global\python.exe" -RuntimePath $null -RuntimeProbeFailed @decisionArgs
