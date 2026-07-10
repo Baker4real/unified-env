@@ -108,6 +108,11 @@ try {
     Assert-True $upperProductionRejected 'ArtifactMode Production 不得绕过 production 固定常量门'
 
     $evaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context
+    $roundTrippedEvaluation = $evaluation | ConvertTo-Json -Depth 100 | ConvertFrom-Json -DateKind String
+    foreach ($coverageItem in @($roundTrippedEvaluation.coverageItems)) {
+        Assert-True ($coverageItem.errors -is [array]) "coverageItem.errors 必须始终序列化为 JSON array：$($coverageItem.path)"
+        Assert-True ($coverageItem.blockedBy -is [array]) "coverageItem.blockedBy 必须始终序列化为 JSON array：$($coverageItem.path)"
+    }
     $unknownDirectory = @($evaluation.coverageItems | Where-Object { $_.path -ieq (Join-Path $providerRoot 'unknown-directory') })
     $unknownFile = @($evaluation.coverageItems | Where-Object { $_.path -ieq (Join-Path $providerRoot 'unknown-file.bin') })
     foreach ($items in @($unknownDirectory, $unknownFile)) {

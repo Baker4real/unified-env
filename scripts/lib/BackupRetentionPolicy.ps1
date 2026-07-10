@@ -382,7 +382,7 @@ function New-BackupRetentionCoverageItem {
         retainRank = if ($RetainRank -gt 0) { $RetainRank } else { $null }
         risk = $Risk
         metadataStatus = $MetadataStatus
-        errors = [object[]]$Errors
+        errors = [object[]]@($Errors)
         delegatedScanRoot = if ([string]::IsNullOrWhiteSpace($DelegatedScanRoot)) { $null } else { Get-BackupRetentionCanonicalPath -Path $DelegatedScanRoot }
         isReparsePoint = $IsReparsePoint
         reparseTarget = $canonicalReparseTarget
@@ -397,7 +397,7 @@ function New-BackupRetentionCoverageItem {
         selectedByRetention = $Disposition -ceq 'candidate'
         applyEligible = $false
         requiresExplicitAuthorization = $Disposition -ceq 'candidate' -or $Manual
-        blockedBy = [object[]]$blockedBy
+        blockedBy = [object[]]@($blockedBy)
         stats = $Stats
     }
 }
