@@ -120,11 +120,25 @@ function New-PathScopeRecord {
     } else {
         @()
     }
+    $errors = [Collections.Generic.List[string]]::new()
+    foreach ($readError in @($ReadErrors)) {
+        $errors.Add("Read: $readError")
+    }
+    if ($RawValue -cne $DotNetValue) {
+        $errors.Add("Registry/.NET PATH values differ")
+    }
+    foreach ($entry in @($entries | Where-Object { $_.expansionStatus -eq "failed" })) {
+        $errors.Add("Expansion [$($entry.index)]: unresolved environment variable")
+    }
+    foreach ($metadataError in @($metadataErrors)) {
+        $errors.Add("Metadata $metadataError")
+    }
 
     return [pscustomobject][ordered]@{
         source = $Source
         readStatus = if (@($ReadErrors).Count -eq 0) { "ok" } else { "error" }
         complete = $complete
+        errors = @($errors)
         rawValueSha256 = Get-InventorySha256 -Value $RawValue
         dotNetValueSha256 = Get-InventorySha256 -Value $DotNetValue
         valuesMatch = ($RawValue -ceq $DotNetValue)
@@ -162,7 +176,9 @@ function Get-InventoryPathOrigin {
         [string[]]$ProjectRoots,
         [string[]]$SharedRoots,
         [string[]]$VendorRoots,
+        [string[]]$WindowsSystemRoots,
         [string[]]$SystemInstallerRoots,
+        [string[]]$UserProfileRoots,
         [Parameter(Mandatory)][scriptblock]$MetadataResolver,
         [switch]$ProbeSucceeded,
         [switch]$ProjectEnvironmentEvidence
@@ -212,7 +228,9 @@ function Get-InventoryPathOrigin {
 
     $rootClasses = @(
         [pscustomobject]@{ roots = @($VendorRoots); originClass = "vendor-runtime"; matchedRule = "explicit-vendor-root" }
+        [pscustomobject]@{ roots = @($WindowsSystemRoots); originClass = "windows-system"; matchedRule = "windows-system-root" }
         [pscustomobject]@{ roots = @($SystemInstallerRoots); originClass = "system-installer"; matchedRule = "system-installer-root" }
+        [pscustomobject]@{ roots = @($UserProfileRoots); originClass = "user-profile"; matchedRule = "user-profile-root" }
         [pscustomobject]@{ roots = @($SharedRoots); originClass = "shared-tool"; matchedRule = "explicit-shared-root" }
     )
     foreach ($rootClass in $rootClasses) {
@@ -256,14 +274,16 @@ function Get-ToolOriginDecision {
         [string[]]$ProjectRoots = @(),
         [string[]]$SharedRoots = @(),
         [string[]]$VendorRoots = @(),
+        [string[]]$WindowsSystemRoots = @(),
         [string[]]$SystemInstallerRoots = @(),
+        [string[]]$UserProfileRoots = @(),
         [Parameter(Mandatory)][scriptblock]$MetadataResolver,
         [switch]$LauncherProbeSucceeded,
         [switch]$RuntimeProbeSucceeded,
         [switch]$RuntimeProbeFailed
     )
 
-    $launcher = Get-InventoryPathOrigin -Path $LauncherPath -ProjectRoots $ProjectRoots -SharedRoots $SharedRoots -VendorRoots $VendorRoots -SystemInstallerRoots $SystemInstallerRoots -MetadataResolver $MetadataResolver -ProbeSucceeded:$LauncherProbeSucceeded
+    $launcher = Get-InventoryPathOrigin -Path $LauncherPath -ProjectRoots $ProjectRoots -SharedRoots $SharedRoots -VendorRoots $VendorRoots -WindowsSystemRoots $WindowsSystemRoots -SystemInstallerRoots $SystemInstallerRoots -UserProfileRoots $UserProfileRoots -MetadataResolver $MetadataResolver -ProbeSucceeded:$LauncherProbeSucceeded
     $runtimeHasEnvironmentEvidence = $false
     if (-not [string]::IsNullOrWhiteSpace($RuntimePath) -and
         -not [string]::IsNullOrWhiteSpace($RuntimePrefix) -and
@@ -282,7 +302,7 @@ function Get-ToolOriginDecision {
             reparseTarget = $null
         }
     } elseif (-not [string]::IsNullOrWhiteSpace($RuntimePath)) {
-        Get-InventoryPathOrigin -Path $RuntimePath -ProjectRoots $ProjectRoots -SharedRoots $SharedRoots -VendorRoots $VendorRoots -SystemInstallerRoots $SystemInstallerRoots -MetadataResolver $MetadataResolver -ProbeSucceeded:$RuntimeProbeSucceeded -ProjectEnvironmentEvidence:$runtimeHasEnvironmentEvidence
+        Get-InventoryPathOrigin -Path $RuntimePath -ProjectRoots $ProjectRoots -SharedRoots $SharedRoots -VendorRoots $VendorRoots -WindowsSystemRoots $WindowsSystemRoots -SystemInstallerRoots $SystemInstallerRoots -UserProfileRoots $UserProfileRoots -MetadataResolver $MetadataResolver -ProbeSucceeded:$RuntimeProbeSucceeded -ProjectEnvironmentEvidence:$runtimeHasEnvironmentEvidence
     } else {
         $null
     }
@@ -295,7 +315,13 @@ function Get-ToolOriginDecision {
         $launcher.originClass
     }
     $hasReparseEvidence = [bool]$launcher.isReparsePoint -or ($null -ne $runtime -and [bool]$runtime.isReparsePoint)
-    $requiresManualReview = $hasReparseEvidence -or (@("project-local-env", "vendor-runtime", "system-installer", "unknown") -contains $finalOrigin)
+    $riskOriginClasses = @("project-local-env", "vendor-runtime", "system-installer", "windows-system", "user-profile", "unknown")
+    $roleOriginClasses = @($launcher.originClass)
+    if ($null -ne $runtime) {
+        $roleOriginClasses += $runtime.originClass
+    }
+    $hasRiskOrigin = @($roleOriginClasses | Where-Object { $riskOriginClasses -contains $_ }).Count -gt 0
+    $requiresManualReview = $hasReparseEvidence -or $hasRiskOrigin
 
     return [pscustomobject][ordered]@{
         launcher = $launcher
@@ -392,6 +418,7 @@ function New-InventoryV3Document {
         "host",
         "outputDir",
         "projectRoots",
+        "toolOwnerRoots",
         "excludedRoots",
         "versionProbeTimeoutSeconds",
         "includeSizes",
@@ -437,6 +464,7 @@ function New-InventoryV3Document {
         host = $Facts.host
         outputDir = $Facts.outputDir
         projectRoots = @($Facts.projectRoots)
+        toolOwnerRoots = @($Facts.toolOwnerRoots)
         excludedRoots = @($Facts.excludedRoots)
         versionProbeTimeoutSeconds = $Facts.versionProbeTimeoutSeconds
         includeSizes = [bool]$Facts.includeSizes

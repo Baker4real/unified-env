@@ -45,6 +45,7 @@ try {
     Assert-True -Condition ($scope.duplicates.Count -eq 1) -Message "比较必须忽略大小写和尾分隔符"
     Assert-True -Condition ($scope.rawValueSha256 -cmatch "^[0-9a-f]{64}$") -Message "raw PATH 只能保存 SHA-256"
     Assert-True -Condition (-not ($scope.PSObject.Properties.Name -contains "rawValue")) -Message "scope 不得暴露 raw PATH"
+    Assert-True -Condition ($scope.errors.Count -eq 0) -Message "完整 PATH scope 的 errors 必须为空"
     foreach ($entry in $scope.entries) {
         $actualFields = @($entry.PSObject.Properties.Name)
         $expectedFields = @("index", "rawPath", "expandedPath", "expansionStatus", "exists", "drive", "isReparsePoint", "reparseTarget")
@@ -53,17 +54,20 @@ try {
 
     $mismatch = New-PathScopeRecord -Source machine -RawValue "D:\Tools" -DotNetValue "D:\Missing" -ReadErrors @() -MetadataResolver $resolver
     Assert-True -Condition (-not [bool]$mismatch.complete) -Message "注册表/.NET PATH 不一致时 scope 必须不完整"
+    Assert-True -Condition (@($mismatch.errors | Where-Object { $_ -like "*Registry/.NET*" }).Count -eq 1) -Message "Registry/.NET 不一致必须进入统一 errors"
     Assert-True -Condition ($mismatch.missingPathCleanupCandidates.Count -eq 0) -Message "不完整 scope 不得给出 missing cleanup 建议"
 
     $expansionFailure = New-PathScopeRecord -Source user -RawValue "%CODEX_TEST_UNDEFINED_ROOT%\bin" -DotNetValue "%CODEX_TEST_UNDEFINED_ROOT%\bin" -ReadErrors @() -MetadataResolver $resolver
     Assert-True -Condition (-not [bool]$expansionFailure.complete) -Message "PATH 展开失败时 scope 必须不完整"
     Assert-True -Condition ($expansionFailure.entries[0].expansionStatus -eq "failed") -Message "PATH 展开失败必须显式记录"
     Assert-True -Condition ($null -eq $expansionFailure.entries[0].drive) -Message "PATH 展开失败时 drive 必须为 null"
+    Assert-True -Condition (@($expansionFailure.errors | Where-Object { $_ -like "*Expansion*" }).Count -eq 1) -Message "PATH 展开失败必须进入统一 errors"
     Assert-True -Condition ($expansionFailure.missingPathCleanupCandidates.Count -eq 0) -Message "展开失败时不得给出 missing cleanup 建议"
 
     $readFailure = New-PathScopeRecord -Source user -RawValue "D:\Missing" -DotNetValue "D:\Missing" -ReadErrors @("HKCU PATH read failed") -MetadataResolver $resolver
     Assert-True -Condition (-not [bool]$readFailure.complete) -Message "PATH 读取失败时 scope 必须不完整"
     Assert-True -Condition ($readFailure.readStatus -eq "error") -Message "PATH 读取失败必须显式标记 readStatus=error"
+    Assert-True -Condition (@($readFailure.errors | Where-Object { $_ -like "*HKCU PATH read failed*" }).Count -eq 1) -Message "PATH 读取失败必须进入统一 errors"
     Assert-True -Condition ($readFailure.missingPathCleanupCandidates.Count -eq 0) -Message "读取失败时不得给出 missing cleanup 建议"
 
     $rootResolver = {
@@ -75,6 +79,13 @@ try {
 
     $hashScope = New-PathScopeRecord -Source process -RawValue "abc" -DotNetValue "abc" -ReadErrors @() -MetadataResolver $rootResolver
     Assert-True -Condition ($hashScope.rawValueSha256 -ceq "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") -Message "rawValueSha256 必须是 raw PATH 的真实 SHA-256"
+
+    $metadataFailureResolver = {
+        param([string]$Path)
+        throw "fixture metadata failed"
+    }
+    $metadataFailure = New-PathScopeRecord -Source process -RawValue "D:\MetadataFailure" -DotNetValue "D:\MetadataFailure" -ReadErrors @() -MetadataResolver $metadataFailureResolver
+    Assert-True -Condition (@($metadataFailure.errors | Where-Object { $_ -like "*Metadata*fixture metadata failed*" }).Count -eq 1) -Message "PATH metadata 失败必须进入统一 errors"
 } finally {
     $env:SystemRoot = $previousSystemRoot
 }
@@ -143,9 +154,35 @@ $launcherReparseRuntimeShared = Get-ToolOriginDecision -LauncherPath "D:\Reparse
 Assert-True -Condition ($launcherReparseRuntimeShared.originClass -eq "shared-tool") -Message "最终归属仍应反映 runtime owner"
 Assert-True -Condition ([bool]$launcherReparseRuntimeShared.requiresManualReview) -Message "launcher/runtime 任一 reparse 都必须人工审查"
 
+$riskyLauncherPaths = @(
+    @{ path = "D:\Vendor\launcher.exe"; expected = "vendor-runtime" }
+    @{ path = "C:\Program Files\Vendor\launcher.exe"; expected = "system-installer" }
+    @{ path = "D:\hermes-data\hermes-agent\venv-new\Scripts\launcher.exe"; expected = "project-local-env" }
+    @{ path = "D:\Unclassified\launcher.exe"; expected = "unknown" }
+)
+foreach ($riskCase in $riskyLauncherPaths) {
+    $crossOwnerDecision = Get-ToolOriginDecision -LauncherPath $riskCase.path -RuntimePath "D:\Shared\runtime.exe" -RuntimeProbeSucceeded @decisionArgs
+    Assert-True -Condition ($crossOwnerDecision.launcher.originClass -eq $riskCase.expected) -Message "launcher 风险归属错误: $($riskCase.path)"
+    Assert-True -Condition ($crossOwnerDecision.originClass -eq "shared-tool") -Message "最终 origin 应保留 runtime owner"
+    Assert-True -Condition ([bool]$crossOwnerDecision.requiresManualReview) -Message "$($riskCase.expected) launcher + shared runtime 仍必须人工审查"
+}
+
 foreach ($manualClassPath in @("D:\Vendor\tool.exe", "C:\Program Files\Vendor\tool.exe")) {
     $manualDecision = Get-ToolOriginDecision -LauncherPath $manualClassPath -RuntimePath $null @decisionArgs
     Assert-True -Condition ([bool]$manualDecision.requiresManualReview) -Message "$($manualDecision.originClass) 必须人工审查"
+}
+
+$taxonomyCases = @(
+    @{ path = "C:\Windows\System32\cmd.exe"; expected = "windows-system" }
+    @{ path = "C:\Program Files\WindowsApps\Vendor.App_1.0\app.exe"; expected = "windows-system" }
+    @{ path = "C:\Users\Fixture\AppData\Local\Microsoft\WinGet\Packages\Vendor.Tool\tool.exe"; expected = "system-installer" }
+    @{ path = "C:\Users\Fixture\bin\tool.exe"; expected = "user-profile" }
+)
+foreach ($taxonomyCase in $taxonomyCases) {
+    $taxonomyDecision = Get-ToolOriginDecision -LauncherPath $taxonomyCase.path -RuntimePath "D:\Shared\runtime.exe" -LauncherProbeSucceeded -RuntimeProbeSucceeded -ProjectRoots @() -SharedRoots @("D:\Shared") -VendorRoots @() -WindowsSystemRoots @("C:\Windows", "C:\Program Files\WindowsApps") -SystemInstallerRoots @("C:\Program Files", "C:\Users\Fixture\AppData\Local\Microsoft\WinGet") -UserProfileRoots @("C:\Users\Fixture") -MetadataResolver $originMetadata
+    Assert-True -Condition ($taxonomyDecision.launcher.originClass -eq $taxonomyCase.expected) -Message "taxonomy 分类错误: $($taxonomyCase.path) => $($taxonomyDecision.launcher.originClass)"
+    Assert-True -Condition ($taxonomyDecision.originClass -eq "shared-tool") -Message "taxonomy 交叉组合应保留 runtime owner"
+    Assert-True -Condition ([bool]$taxonomyDecision.requiresManualReview) -Message "$($taxonomyCase.expected) launcher + shared runtime 必须人工审查"
 }
 
 $failedSharedProbe = Get-ToolOriginDecision -LauncherPath "D:\Shared\tool.exe" -RuntimePath $null -ProjectRoots @() -SharedRoots @("D:\Shared") -VendorRoots @() -SystemInstallerRoots @() -MetadataResolver $originMetadata
@@ -170,6 +207,7 @@ $document = New-InventoryV3Document -Facts @{
     host = [pscustomobject]@{ computerName = "fixture" }
     outputDir = "D:\Reports"
     projectRoots = @("D:\Projects")
+    toolOwnerRoots = @("D:\Projects", "D:\hermes-data\hermes-agent")
     excludedRoots = @()
     versionProbeTimeoutSeconds = 12
     includeSizes = $false

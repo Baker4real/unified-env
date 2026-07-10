@@ -1,6 +1,7 @@
 param(
     [string]$OutputDir = "D:\Codex\projects\统一环境\reports\env-inventory",
     [string[]]$ProjectRoots = @("D:\Codex\projects"),
+    [string[]]$ToolOwnerRoots = @("D:\Codex\projects", "D:\hermes-data\hermes-agent"),
     [int]$VersionProbeTimeoutSeconds = 12,
     [switch]$IncludeSizes,
     [switch]$SkipVersionProbe
@@ -869,6 +870,26 @@ function ConvertTo-MarkdownReport {
         $lines.Add("| $scopeName | $(Escape-MarkdownCell $scope.complete) | $($scope.entries.Count) | $($scope.duplicates.Count) | $(Escape-MarkdownCell $scope.rawValueSha256) |")
     }
     $lines.Add("")
+    foreach ($scopeName in @("process", "user", "machine")) {
+        $scope = $Inventory.pathScopes.$scopeName
+        $lines.Add("### PATH scope: $scopeName")
+        $lines.Add("")
+        $lines.Add("- readStatus: $(Escape-MarkdownCell $scope.readStatus)")
+        $lines.Add("- complete: $(Escape-MarkdownCell $scope.complete)")
+        $errorSummary = if (@($scope.errors).Count -eq 0) { "none" } else { @($scope.errors | ForEach-Object { Escape-MarkdownCell $_ }) -join "; " }
+        $lines.Add("- errors: $errorSummary")
+        $lines.Add("")
+        if (@($scope.entries).Count -eq 0) {
+            $lines.Add("无 PATH 条目。")
+        } else {
+            $lines.Add("| index | rawPath | expandedPath | expansionStatus | exists | drive | isReparsePoint | reparseTarget |")
+            $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- |")
+            foreach ($entry in $scope.entries) {
+                $lines.Add("| $(Escape-MarkdownCell $entry.index) | $(Escape-MarkdownCell $entry.rawPath) | $(Escape-MarkdownCell $entry.expandedPath) | $(Escape-MarkdownCell $entry.expansionStatus) | $(Escape-MarkdownCell $entry.exists) | $(Escape-MarkdownCell $entry.drive) | $(Escape-MarkdownCell $entry.isReparsePoint) | $(Escape-MarkdownCell $entry.reparseTarget) |")
+            }
+        }
+        $lines.Add("")
+    }
     $lines.Add("## PATH 入口（process 兼容投影）")
     $lines.Add("")
     $lines.Add("| 序号 | 是否存在 | 路径 |")
@@ -995,10 +1016,24 @@ $vendorRoots = @(
     "D:\Codex\.codex\plugins"
     "D:\Codex\.codex\vendor"
 )
+$windowsSystemRoots = @(
+    $env:SystemRoot
+    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+        Join-Path $env:ProgramFiles "WindowsApps"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
+    }
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 $systemInstallerRoots = @(
     $env:ProgramFiles
     ${env:ProgramFiles(x86)}
-    $env:SystemRoot
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        Join-Path $env:LOCALAPPDATA "Microsoft\WinGet"
+    }
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+$userProfileRoots = @(
+    $env:USERPROFILE
 ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 
 $tools = @(
@@ -1019,10 +1054,12 @@ $tools = @(
             RuntimePath = if ($null -ne $pythonRuntime -and $pythonRuntime.succeeded) { $pythonRuntime.executable } else { $null }
             RuntimePrefix = if ($null -ne $pythonRuntime -and $pythonRuntime.succeeded) { $pythonRuntime.prefix } else { $null }
             RuntimeBasePrefix = if ($null -ne $pythonRuntime -and $pythonRuntime.succeeded) { $pythonRuntime.basePrefix } else { $null }
-            ProjectRoots = $ProjectRoots
+            ProjectRoots = $ToolOwnerRoots
             SharedRoots = $sharedRoots
             VendorRoots = $vendorRoots
+            WindowsSystemRoots = $windowsSystemRoots
             SystemInstallerRoots = $systemInstallerRoots
+            UserProfileRoots = $userProfileRoots
             MetadataResolver = $toolMetadataResolver
             LauncherProbeSucceeded = [bool]$tool.probeSucceeded
             RuntimeProbeSucceeded = [bool]($null -ne $pythonRuntime -and $pythonRuntime.succeeded)
@@ -1069,6 +1106,7 @@ $inventory = New-InventoryV3Document -Facts @{
     host = Get-HostSummary
     outputDir = $OutputDir
     projectRoots = $ProjectRoots
+    toolOwnerRoots = $ToolOwnerRoots
     excludedRoots = @(Get-ExcludedRoots)
     versionProbeTimeoutSeconds = $VersionProbeTimeoutSeconds
     includeSizes = [bool]$IncludeSizes

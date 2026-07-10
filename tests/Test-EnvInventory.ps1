@@ -55,7 +55,7 @@ Assert-True -Condition (Test-Path -Path $quickJsonPath -PathType Leaf) -Message 
 Assert-True -Condition (Test-Path -Path $quickReportPath -PathType Leaf) -Message "Quick REPORT.md missing"
 
 $quickInventory = Get-Content -Path $quickJsonPath -Raw | ConvertFrom-Json
-foreach ($property in @("artifactType", "schemaVersion", "executionAllowed", "generationId", "readOnly", "tools", "directories", "pathScopes", "pathEntries", "migrationCandidates", "manualReviewItems", "excludedRoots", "projectEnvironmentMarkers", "localEnvironmentFindings")) {
+foreach ($property in @("artifactType", "schemaVersion", "executionAllowed", "generationId", "readOnly", "tools", "directories", "pathScopes", "pathEntries", "toolOwnerRoots", "migrationCandidates", "manualReviewItems", "excludedRoots", "projectEnvironmentMarkers", "localEnvironmentFindings")) {
     Assert-Property -Object $quickInventory -Name $property
 }
 
@@ -65,13 +65,14 @@ Assert-True -Condition (-not [bool]$quickInventory.executionAllowed) -Message "Q
 Assert-True -Condition ([bool]$quickInventory.readOnly) -Message "Quick inventory readOnly was not true"
 Assert-True -Condition ([bool]$quickInventory.skipVersionProbe) -Message "Quick inventory did not record skipVersionProbe=true"
 Assert-True -Condition ($quickInventory.tools.Count -gt 0) -Message "Quick inventory has no tools"
+Assert-True -Condition (@($quickInventory.toolOwnerRoots | Where-Object { $_ -ieq "D:\hermes-data\hermes-agent" }).Count -eq 1) -Message "默认显式 tool owner roots 必须包含 Hermes owner 根"
 $quickPair = Test-JsonMarkdownArtifactPair -JsonPath $quickJsonPath -MarkdownPath $quickReportPath
 Assert-True -Condition ([bool]$quickPair.ok) -Message "Quick JSON/Markdown pair 校验失败: $($quickPair.error)"
 
 foreach ($scopeName in @("process", "user", "machine")) {
     Assert-Property -Object $quickInventory.pathScopes -Name $scopeName
     $scopeRecord = $quickInventory.pathScopes.$scopeName
-    foreach ($property in @("readStatus", "complete", "rawValueSha256", "entries", "duplicates", "missingPathCleanupCandidates")) {
+    foreach ($property in @("readStatus", "complete", "errors", "rawValueSha256", "entries", "duplicates", "missingPathCleanupCandidates")) {
         Assert-Property -Object $scopeRecord -Name $property
     }
     Assert-True -Condition ($scopeRecord.source -eq $scopeName) -Message "$scopeName PATH scope 不得与其他 scope 串联"
@@ -101,6 +102,11 @@ foreach ($expected in @("本报告由只读盘点脚本生成", "工具解析作
 }
 foreach ($expected in @("## 本地环境分类发现")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing local env classification text: $expected"
+}
+foreach ($scopeName in @("process", "user", "machine")) {
+    foreach ($expected in @("### PATH scope: $scopeName", "readStatus", "complete", "errors", "rawPath", "expandedPath", "expansionStatus")) {
+        Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing $scopeName PATH detail: $expected"
+    }
 }
 
 $quickFindings = @($quickInventory.localEnvironmentFindings)
@@ -172,6 +178,19 @@ foreach ($tool in $fullInventory.tools | Where-Object { $_.found }) {
     }
 }
 
+$riskOrigins = @("vendor-runtime", "system-installer", "windows-system", "user-profile", "project-local-env", "unknown")
+foreach ($tool in $fullInventory.tools) {
+    $roleOrigins = @($tool.launcher.originClass)
+    if ($null -ne $tool.runtime) {
+        $roleOrigins += $tool.runtime.originClass
+    }
+    $hasRiskOrigin = @($roleOrigins | Where-Object { $riskOrigins -contains $_ }).Count -gt 0
+    $hasReparse = [bool]$tool.launcher.isReparsePoint -or ($null -ne $tool.runtime -and [bool]$tool.runtime.isReparsePoint)
+    if ($hasRiskOrigin -or $hasReparse) {
+        Assert-True -Condition ([bool]$tool.requiresManualReview) -Message "$($tool.name) launcher/runtime 风险未聚合到人工审查门"
+    }
+}
+
 $gitProbe = $fullInventory.tools | Where-Object { $_.name -eq "git" } | Select-Object -First 1
 if ($gitProbe -and $gitProbe.found) {
     Assert-True -Condition ($gitProbe.version -like "git version*") -Message "git version probe did not receive --version"
@@ -187,6 +206,12 @@ if ($pythonProbe -and $pythonProbe.found) {
         Assert-True -Condition (-not [bool]$pythonProbe.requiresManualReview) -Message "成功探测且命中显式 shared root 才可免人工审查"
     } else {
         Assert-True -Condition ([bool]$pythonProbe.requiresManualReview) -Message "非 shared-tool Python 归属必须人工审查"
+    }
+    if ($pythonProbe.launcher.path -ieq "D:\hermes-data\.npm-global\python.exe") {
+        Assert-True -Condition ($pythonProbe.runtime.path -like "D:\hermes-data\hermes-agent\*") -Message "Hermes launcher 存在时应探测到 Hermes 项目 runtime"
+        Assert-True -Condition ($pythonProbe.runtime.originClass -eq "project-local-env") -Message "Hermes runtime 必须分类为 project-local-env"
+        Assert-True -Condition ($pythonProbe.originClass -eq "project-local-env") -Message "Hermes Python 最终归属必须为 project-local-env"
+        Assert-True -Condition ([bool]$pythonProbe.requiresManualReview) -Message "Hermes project-local Python 必须人工审查"
     }
 }
 
