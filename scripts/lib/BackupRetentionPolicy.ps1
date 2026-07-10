@@ -421,7 +421,7 @@ function New-BackupRetentionCoverageItem {
         retainRank = if ($RetainRank -gt 0) { $RetainRank } else { $null }
         risk = $Risk
         metadataStatus = $MetadataStatus
-        errors = [object[]]@($Errors)
+        errors = [object[]]@($Errors | Where-Object { $null -ne $_ })
         delegatedScanRoot = if ([string]::IsNullOrWhiteSpace($DelegatedScanRoot)) { $null } else { Get-BackupRetentionCanonicalPath -Path $DelegatedScanRoot }
         isReparsePoint = $IsReparsePoint
         reparseTarget = $canonicalReparseTarget

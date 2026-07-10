@@ -23,7 +23,7 @@ function Assert-BackupRetentionApplyEvidencePath { param([string]$Path,[string]$
 }
 function Get-BackupRetentionRawFileSha256 { param([byte[]]$Bytes) return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant() }
 function Get-BackupRetentionCandidateId { param($Candidate)
-    $text=@($Candidate.groupKey,$Candidate.path,$Candidate.timestampUtc,$Candidate.timestampSource,$Candidate.stats.bytes,$Candidate.stats.files,$Candidate.stats.dirs,$Candidate.stats.newestUtc,$Candidate.stats.oldestUtc)-join"`n"
+    $text=@($Candidate.groupKey,$Candidate.path,$Candidate.timestampUtc,$Candidate.timestampSource,$Candidate.stats.bytes,$Candidate.stats.files,$Candidate.stats.dirs,$Candidate.stats.newestUtc,$Candidate.stats.oldestUtc,$Candidate.stats.treeSha256)-join"`n"
     return (Get-BackupRetentionSha256 $text).Substring(0,16)
 }
 function Escape-BackupRetentionApplyMarkdown { param([object]$Value) if($null-eq$Value){return''};return("$Value"-replace'\|','\|'-replace"`r",' '-replace"`n",' ').Trim() }
@@ -34,11 +34,13 @@ if(-not(Test-Path -LiteralPath $DryRunJson -PathType Leaf)){throw "DryRunJson �
 $rawBytes=[IO.File]::ReadAllBytes($DryRunJson)
 $sourceSha256=Get-BackupRetentionRawFileSha256 $rawBytes
 
-# 2. 严格 JSON 解析，保留日期字符串的 JSON 原生类型。
-try{$jsonText=[Text.UTF8Encoding]::new($false,$true).GetString($rawBytes);$dryRun=$jsonText|ConvertFrom-Json -DateKind String -ErrorAction Stop}catch{throw "DryRunJson 不是严格 UTF-8 JSON：$($_.Exception.Message)"}
+# 2. 严格 UTF-8 与 JSON 词法解析；在 PowerShell 对象转换前拒绝尾随逗号、注释和重复属性。
+try{$jsonText=[Text.UTF8Encoding]::new($false,$true).GetString($rawBytes)}catch{throw "DryRunJson 不是严格 UTF-8：$($_.Exception.Message)"}
+Assert-BackupRetentionStrictJsonText -JsonText $jsonText
+try{$dryRun=$jsonText|ConvertFrom-Json -DateKind String -ErrorAction Stop}catch{throw "DryRunJson 无法转换为对象：$($_.Exception.Message)"}
 
 # 3. 输入必须是共享发布器生成且仍然匹配的 JSON/Markdown 报告对。
-$dryRunMarkdown=Join-Path (Split-Path -Parent $DryRunJson) 'BACKUP-RETENTION-DRY-RUN.md'
+$dryRunMarkdown=Assert-BackupRetentionApplyEvidencePath -Path (Join-Path (Split-Path -Parent $DryRunJson) 'BACKUP-RETENTION-DRY-RUN.md') -Name 'DryRunMarkdown'
 $pairValidation=Test-JsonMarkdownArtifactPair -JsonPath $DryRunJson -MarkdownPath $dryRunMarkdown
 if(-not$pairValidation.ok){throw "DryRunJson 报告对校验失败：$($pairValidation.error)"}
 if($pairValidation.sourceJsonSha256-cne$sourceSha256){throw 'DryRunJson 报告对校验期间 JSON 发生漂移。'}
@@ -49,23 +51,27 @@ if($MaxDryRunAgeHours-lt1-or$MaxDryRunAgeHours-gt24){throw 'MaxDryRunAgeHours �
 Assert-BackupRetentionProperty $dryRun 'generatedAtUtc'|Out-Null;Assert-BackupRetentionString $dryRun.generatedAtUtc 'generatedAtUtc'
 $generated=[datetimeoffset]::MinValue
 if(-not[datetimeoffset]::TryParseExact($dryRun.generatedAtUtc,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AssumeUniversal,[ref]$generated)){throw 'generatedAtUtc 必须是严格 ISO 8601 round-trip 字符串。'}
-$age=((Get-Date).ToUniversalTime()-$generated.UtcDateTime).TotalHours
-if($age-lt-0.05){throw 'DryRunJson 生成时间来自未来。'};if($age-gt$MaxDryRunAgeHours){throw "DryRunJson 已超过 $MaxDryRunAgeHours 小时。"}
+$validationNow=(Get-Date).ToUniversalTime()
+if($generated.UtcDateTime-gt$validationNow){throw 'DryRunJson 生成时间来自未来。'}
+$age=($validationNow-$generated.UtcDateTime).TotalHours
+if($age-gt$MaxDryRunAgeHours){throw "DryRunJson 已超过 $MaxDryRunAgeHours 小时。"}
 
 # 5. 正式入口只构造固定 production context。
 $context=New-BackupRetentionPolicyContext -ArtifactMode production -CodexRoot 'D:\Codex\.codex' -DDriveRoot 'D:\Codex' -RetainCount 5
 
-# 6. 无写入纯验证器现场复算所有声明根并做全语义/快照比较。
-$live=Test-BackupRetentionDryRunDocument -Document $dryRun -TrustedPolicyContext $context
+# 6. 先确定但不创建 OutputDir；final gate 会在最终复算前后检查完整父链。
+if([string]::IsNullOrWhiteSpace($OutputDir)){$OutputDir="D:\Codex\projects\统一环境\reports\backup-retention-apply-manifest-$(Get-Date -Format 'yyyyMMdd-HHmmss')"}
+$OutputDir=Assert-BackupRetentionApplyEvidencePath -Path $OutputDir -Name 'OutputDir'
 
-# 7. selection allowlist gate。
-$selected=@(Resolve-BackupRetentionCandidateSelection -Candidates @($live.candidates) -UseAllDryRunCandidates:$UseAllDryRunCandidates -AllowPath $AllowPath)
+# 7. 完整初检、candidate 当前校验与最终全门复算；正式入口不暴露 phase hook。
+$finalGate=Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $context -DryRunJson $DryRunJson -DryRunMarkdown $dryRunMarkdown -InitialSourceSha256 $sourceSha256 -OutputDir $OutputDir -UseAllDryRunCandidates:$UseAllDryRunCandidates -AllowPath $AllowPath
+$dryRun=$finalGate.sourceDocument;$sourceSha256=$finalGate.sourceJsonSha256;$live=$finalGate.liveEvaluation;$selected=@($finalGate.selectedCandidates);$OutputDir=$finalGate.outputDir
 
-# 8. 每个已选 candidate 在发布前再做一次路径 metadata 与 stats 校验。
+# 8. manifest item 只消费最终 gate 返回的 candidate 与内容树指纹。
 $items=[Collections.Generic.List[object]]::new()
-foreach($candidate in $selected){
-    $current=Assert-BackupRetentionCandidateLiveState -Candidate $candidate -TrustedPolicyContext $context -LiveEvaluation $live
-    $items.Add([pscustomobject][ordered]@{candidateId=Get-BackupRetentionCandidateId $candidate;selected=$true;validationStatus='ready-for-final-authorization';blockers=[object[]]@();path=$candidate.path;bucket=$candidate.bucket;groupKey=$candidate.groupKey;projectRoot=$candidate.projectRoot;backupType=$candidate.backupType;risk=$candidate.risk;reason=$candidate.reason;retainRank=$candidate.retainRank;timestampUtc=$candidate.timestampUtc;timestampSource=$candidate.timestampSource;plannedOperation='recursive-delete-directory-after-final-confirmation';originalStats=$candidate.stats;currentStats=$current;reparse=[pscustomobject]@{isReparsePoint=$false;hasReparsePoint=$false;firstReparsePoint=$null;target=$null}})
+foreach($validatedCandidate in @($finalGate.validatedCandidates)){
+    $candidate=$validatedCandidate.candidate;$current=$validatedCandidate.currentStats
+    $items.Add([pscustomobject][ordered]@{candidateId=Get-BackupRetentionCandidateId $candidate;selected=$true;validationStatus='ready-for-final-authorization';blockers=[object[]]@();path=$candidate.path;bucket=$candidate.bucket;groupKey=$candidate.groupKey;projectRoot=$candidate.projectRoot;backupType=$candidate.backupType;risk=$candidate.risk;reason=$candidate.reason;retainRank=$candidate.retainRank;timestampUtc=$candidate.timestampUtc;timestampSource=$candidate.timestampSource;plannedOperation='recursive-delete-directory-after-final-confirmation';stateFingerprint=[pscustomobject][ordered]@{algorithm='sha256-tree-v1';treeSha256=$current.treeSha256;sourceJsonSha256=$sourceSha256};originalStats=$candidate.stats;currentStats=$current;reparse=[pscustomobject]@{isReparsePoint=$false;hasReparsePoint=$false;firstReparsePoint=$null;target=$null}})
 }
 
 # 9. schema 2 manifest model。
@@ -79,16 +85,15 @@ $manifest=[pscustomobject][ordered]@{
     sourceDryRun=[pscustomobject][ordered]@{jsonPath=$DryRunJson;sourceJsonSha256=$sourceSha256;generatedAtUtc=$dryRun.generatedAtUtc;artifactType=$dryRun.artifactType;schemaVersion=$dryRun.schemaVersion;candidateCount=@($live.candidates).Count}
     trustedPolicyContext=$context
     rootSnapshots=[object[]]@($live.evaluatedRoots|ForEach-Object{[pscustomobject]@{rootId=$_.rootId;path=$_.path;exists=$_.exists;enumerationCompleted=$_.enumerationCompleted;directChildCount=$_.directChildCount;snapshotSha256=$_.snapshotSha256}})
-    policy=[pscustomobject][ordered]@{summary='只读 apply manifest；不删除任何内容。';requiresFinalUserAuthorization=$true;stateFingerprintRequired=$true;reparsePointCheckRequired=$true;futureApplyConfirmationPhrase="我确认删除 manifest $manifestId 中的 $($items.Count) 个已验证路径，预计释放 $([math]::Round($readyBytes/1MB,2)) MB"}
+    policy=[pscustomobject][ordered]@{summary='只读 apply manifest；不删除任何内容。';requiresFinalUserAuthorization=$true;stateFingerprintRequired=$true;reparsePointCheckRequired=$true;finalExecutionMustRevalidate=$true;futureApplyConfirmationPhrase="我确认删除 manifest $manifestId 中的 $($items.Count) 个已验证路径，预计释放 $([math]::Round($readyBytes/1MB,2)) MB"}
     summary=[pscustomobject][ordered]@{sourceCandidateCount=@($live.candidates).Count;selectedCount=$items.Count;readyForFinalAuthorizationCount=$items.Count;blockedCount=0;readyBytes=$readyBytes;readyMb=[math]::Round($readyBytes/1MB,2);dryRunAgeHours=[math]::Round($age,2)}
     items=[object[]]@($items.ToArray()|Sort-Object groupKey,retainRank,path);blockedItems=[object[]]@()
 }
 
-# 10. 仅全部前置门成功后校验 OutputDir 并通过共享发布器写入。
-if([string]::IsNullOrWhiteSpace($OutputDir)){$OutputDir="D:\Codex\projects\统一环境\reports\backup-retention-apply-manifest-$(Get-Date -Format 'yyyyMMdd-HHmmss')"}
+# 10. 仅全部前置门成功后再次校验 OutputDir 并通过共享发布器写入。
 $OutputDir=Assert-BackupRetentionApplyEvidencePath -Path $OutputDir -Name 'OutputDir'
 $published=Publish-JsonMarkdownArtifactPair -Document $manifest -OutputDir $OutputDir -JsonFileName 'backup-retention-apply-manifest.json' -MarkdownFileName 'BACKUP-RETENTION-APPLY-MANIFEST.md' -RenderMarkdown {
     param($Document,$JsonSha256)
-    $lines=[Collections.Generic.List[string]]::new();$lines.Add('# 备份清理 apply manifest');$lines.Add('');$lines.Add("manifest id：$($Document.manifestId)");$lines.Add('');$lines.Add("源 dry-run SHA-256：$($Document.sourceDryRun.sourceJsonSha256)");$lines.Add("manifest JSON SHA-256：$JsonSha256");$lines.Add("deleteAllowed=false；executionReady=false；通过二次校验：$($Document.summary.readyForFinalAuthorizationCount) 个。");$lines.Add('');$lines.Add('真实删除仍需用户最终授权；本脚本不删除、不移动任何文件。');$lines.Add('');$lines.Add('| id | 组 | 排名 | 路径 |');$lines.Add('| --- | --- | ---: | --- |');foreach($item in @($Document.items)){$lines.Add("| $($item.candidateId) | $(Escape-BackupRetentionApplyMarkdown $item.groupKey) | $($item.retainRank) | $(Escape-BackupRetentionApplyMarkdown $item.path) |")};return $lines.ToArray()-join"`n"
+    $lines=[Collections.Generic.List[string]]::new();$lines.Add('# 备份清理 apply manifest');$lines.Add('');$lines.Add("manifest id：$($Document.manifestId)");$lines.Add('');$lines.Add("源 dry-run SHA-256：$($Document.sourceDryRun.sourceJsonSha256)");$lines.Add("manifest JSON SHA-256：$JsonSha256");$lines.Add("deleteAllowed=false；executionReady=false；通过二次校验：$($Document.summary.readyForFinalAuthorizationCount) 个。");$lines.Add('');$lines.Add('真实删除仍需用户最终授权；真正执行删除前必须再次完整复算源报告、根快照、reparse 链和 candidate treeSha256。本脚本不删除、不移动任何文件。');$lines.Add('');$lines.Add('| id | 组 | 排名 | tree SHA-256 | 路径 |');$lines.Add('| --- | --- | ---: | --- | --- |');foreach($item in @($Document.items)){$lines.Add("| $($item.candidateId) | $(Escape-BackupRetentionApplyMarkdown $item.groupKey) | $($item.retainRank) | $($item.stateFingerprint.treeSha256) | $(Escape-BackupRetentionApplyMarkdown $item.path) |")};return $lines.ToArray()-join"`n"
 }
 [pscustomobject]@{ok=$true;applyManifestOnly=$true;readOnly=$true;deleteAllowed=$false;executionReady=$false;manifestId=$manifestId;outputDir=$OutputDir;manifestPath=$published.jsonPath;reportPath=$published.markdownPath;selectedCount=$items.Count;readyForFinalAuthorizationCount=$items.Count;blockedCount=0;readyMb=$manifest.summary.readyMb}
