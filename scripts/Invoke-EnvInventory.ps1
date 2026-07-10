@@ -8,6 +8,9 @@ param(
 
 $ErrorActionPreference = "Continue"
 
+. (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
+. (Join-Path $PSScriptRoot "lib\EnvInventoryTrust.ps1")
+
 function Get-RootDrive {
     param([string]$Path)
 
@@ -210,7 +213,14 @@ function Invoke-VersionProbe {
         [string[]]$Arguments
     )
 
-    $command = Get-Command -Name $Name -ErrorAction SilentlyContinue | Select-Object -First 1
+    $command = Get-Command -Name $Name -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.CommandType -eq [Management.Automation.CommandTypes]::Application -and
+            -not [string]::IsNullOrWhiteSpace($_.Path) -and
+            [IO.Path]::IsPathFullyQualified($_.Path) -and
+            (Test-Path -LiteralPath $_.Path -PathType Leaf)
+        } |
+        Select-Object -First 1
     if (-not $command) {
         return [pscustomobject]@{
             name = $Name
@@ -224,10 +234,7 @@ function Invoke-VersionProbe {
         }
     }
 
-    $path = $command.Source
-    if ($command.Path) {
-        $path = $command.Path
-    }
+    $path = $command.Path
 
     if ($SkipVersionProbe) {
         return [pscustomobject]@{
@@ -243,8 +250,7 @@ function Invoke-VersionProbe {
     }
 
     try {
-        $executable = if (-not [string]::IsNullOrWhiteSpace($path)) { $path } else { $Name }
-        $probe = Invoke-CommandWithTimeout -Executable $executable -Arguments $Arguments -TimeoutSeconds $VersionProbeTimeoutSeconds
+        $probe = Invoke-CommandWithTimeout -Executable $path -Arguments $Arguments -TimeoutSeconds $VersionProbeTimeoutSeconds
         $output = $probe.output | Select-Object -First 4
         $exitCode = $probe.exitCode
         $evidence = (($output | ForEach-Object { "$_" }) -join " ").Trim()
@@ -276,7 +282,6 @@ function Invoke-VersionProbe {
 
 function Get-SelectedEnvironmentVariables {
     $names = @(
-        "Path",
         "UV_CACHE_DIR",
         "UV_TOOL_DIR",
         "PIP_CACHE_DIR",
@@ -330,6 +335,150 @@ function Get-PathEntries {
             reparseTarget = $reparse.target
         }
     }
+}
+
+function Get-PathScopeSourceValues {
+    param(
+        [ValidateSet("process", "user", "machine")][string]$Source
+    )
+
+    $readErrors = [Collections.Generic.List[string]]::new()
+    $rawValue = $null
+    $dotNetValue = $null
+
+    try {
+        $target = switch ($Source) {
+            "process" { [EnvironmentVariableTarget]::Process }
+            "user" { [EnvironmentVariableTarget]::User }
+            "machine" { [EnvironmentVariableTarget]::Machine }
+        }
+        $dotNetValue = [Environment]::GetEnvironmentVariable("Path", $target)
+    } catch {
+        $readErrors.Add(".NET $Source PATH read failed: $($_.Exception.Message)")
+    }
+
+    if ($Source -eq "process") {
+        try {
+            $rawValue = $env:Path
+        } catch {
+            $readErrors.Add("Process PATH read failed: $($_.Exception.Message)")
+        }
+    } else {
+        $baseKey = $null
+        $environmentKey = $null
+        try {
+            $hive = if ($Source -eq "user") {
+                [Microsoft.Win32.RegistryHive]::CurrentUser
+            } else {
+                [Microsoft.Win32.RegistryHive]::LocalMachine
+            }
+            $subKey = if ($Source -eq "user") {
+                "Environment"
+            } else {
+                "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+            }
+            $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, [Microsoft.Win32.RegistryView]::Default)
+            $environmentKey = $baseKey.OpenSubKey($subKey, $false)
+            if ($null -eq $environmentKey) {
+                throw "Registry key not found: $subKey"
+            }
+            $rawValue = $environmentKey.GetValue("Path", $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        } catch {
+            $readErrors.Add("Registry $Source PATH read failed: $($_.Exception.Message)")
+        } finally {
+            if ($null -ne $environmentKey) {
+                $environmentKey.Dispose()
+            }
+            if ($null -ne $baseKey) {
+                $baseKey.Dispose()
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        rawValue = $rawValue
+        dotNetValue = $dotNetValue
+        readErrors = @($readErrors)
+    }
+}
+
+function Get-InventoryPathMetadata {
+    param([string]$Path)
+
+    $reparse = Get-ReparsePointInfo -Path $Path
+    return [pscustomobject]@{
+        exists = Test-Path -LiteralPath $Path -PathType Container
+        isReparsePoint = $reparse.isReparsePoint
+        reparseTarget = $reparse.target
+    }
+}
+
+function Get-InventoryToolMetadata {
+    param([string]$Path)
+
+    $currentPath = $Path
+    while (-not [string]::IsNullOrWhiteSpace($currentPath)) {
+        if (Test-Path -LiteralPath $currentPath) {
+            $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                $target = if ($item.PSObject.Properties.Name -contains "Target") { $item.Target } else { $null }
+                return [pscustomobject]@{
+                    isReparsePoint = $true
+                    reparseTarget = $target
+                }
+            }
+        }
+
+        $parent = [IO.Directory]::GetParent($currentPath)
+        if ($null -eq $parent) {
+            break
+        }
+        $currentPath = $parent.FullName
+    }
+
+    return [pscustomobject]@{
+        isReparsePoint = $false
+        reparseTarget = $null
+    }
+}
+
+function Get-PathScopeRecords {
+    $resolver = {
+        param([string]$Path)
+        Get-InventoryPathMetadata -Path $Path
+    }
+    $records = [ordered]@{}
+    foreach ($source in @("process", "user", "machine")) {
+        $values = Get-PathScopeSourceValues -Source $source
+        $records[$source] = New-PathScopeRecord -Source $source -RawValue $values.rawValue -DotNetValue $values.dotNetValue -ReadErrors $values.readErrors -MetadataResolver $resolver
+    }
+    return [pscustomobject]$records
+}
+
+function Invoke-PythonRuntimeProbe {
+    param([Parameter(Mandatory)][string]$PythonPath)
+
+    $arguments = @(
+        "-I",
+        "-S",
+        "-c",
+        'import json,sys; print(json.dumps({"executable":sys.executable,"prefix":sys.prefix,"basePrefix":sys.base_prefix}))'
+    )
+    $probe = Invoke-CommandWithTimeout -Executable $PythonPath -Arguments $arguments -TimeoutSeconds $VersionProbeTimeoutSeconds
+    if ($probe.timedOut) {
+        return ConvertFrom-PythonRuntimeProbe -Json $null -TimedOut
+    }
+    if ($probe.exitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($probe.error)) {
+        $errorMessage = if (-not [string]::IsNullOrWhiteSpace($probe.error)) {
+            $probe.error
+        } else {
+            "Python runtime probe exited with code $($probe.exitCode)"
+        }
+        return ConvertFrom-PythonRuntimeProbe -Json $null -ErrorMessage $errorMessage
+    }
+
+    $json = (@($probe.output | ForEach-Object { "$_" }) -join [Environment]::NewLine)
+    return ConvertFrom-PythonRuntimeProbe -Json $json
 }
 
 function Test-IsSubPath {
@@ -672,10 +821,9 @@ function Get-ExcludedRoots {
     )
 }
 
-function Write-MarkdownReport {
+function ConvertTo-MarkdownReport {
     param(
-        [object]$Inventory,
-        [string]$Path
+        [object]$Inventory
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -704,18 +852,29 @@ function Write-MarkdownReport {
     $lines.Add("")
     $lines.Add("## 工具探测")
     $lines.Add("")
-    $lines.Add("| 工具 | 是否存在 | 探测成功 | 路径 | 版本输出 | 错误 |")
-    $lines.Add("| --- | --- | --- | --- | --- | --- |")
+    $lines.Add("工具解析作用域：process。")
+    $lines.Add("")
+    $lines.Add("| 工具 | 是否存在 | 探测成功 | Launcher | Runtime | 归属 | 需人工审查 | 版本输出 | 错误 |")
+    $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     foreach ($tool in $Inventory.tools) {
-        $lines.Add("| $(Escape-MarkdownCell $tool.name) | $(Escape-MarkdownCell $tool.found) | $(Escape-MarkdownCell $tool.probeSucceeded) | $(Escape-MarkdownCell $tool.path) | $(Escape-MarkdownCell $tool.version) | $(Escape-MarkdownCell $tool.error) |")
+        $lines.Add("| $(Escape-MarkdownCell $tool.name) | $(Escape-MarkdownCell $tool.found) | $(Escape-MarkdownCell $tool.probeSucceeded) | $(Escape-MarkdownCell $tool.launcher.path) | $(Escape-MarkdownCell $tool.runtime.path) | $(Escape-MarkdownCell $tool.originClass) | $(Escape-MarkdownCell $tool.requiresManualReview) | $(Escape-MarkdownCell $tool.version) | $(Escape-MarkdownCell $tool.error) |")
     }
     $lines.Add("")
-    $lines.Add("## PATH 入口")
+    $lines.Add("## PATH 作用域")
     $lines.Add("")
-    $lines.Add("| 序号 | 是否存在 | 路径 | Reparse Point |")
-    $lines.Add("| --- | --- | --- | --- |")
+    $lines.Add("| 作用域 | 完整 | 条目数 | 重复数 | Raw SHA-256 |")
+    $lines.Add("| --- | --- | --- | --- | --- |")
+    foreach ($scopeName in @("process", "user", "machine")) {
+        $scope = $Inventory.pathScopes.$scopeName
+        $lines.Add("| $scopeName | $(Escape-MarkdownCell $scope.complete) | $($scope.entries.Count) | $($scope.duplicates.Count) | $(Escape-MarkdownCell $scope.rawValueSha256) |")
+    }
+    $lines.Add("")
+    $lines.Add("## PATH 入口（process 兼容投影）")
+    $lines.Add("")
+    $lines.Add("| 序号 | 是否存在 | 路径 |")
+    $lines.Add("| --- | --- | --- |")
     foreach ($entry in $Inventory.pathEntries) {
-        $lines.Add("| $(Escape-MarkdownCell $entry.index) | $(Escape-MarkdownCell $entry.exists) | $(Escape-MarkdownCell $entry.path) | $(Escape-MarkdownCell $entry.isReparsePoint) |")
+        $lines.Add("| $(Escape-MarkdownCell $entry.index) | $(Escape-MarkdownCell $entry.exists) | $(Escape-MarkdownCell $entry.path) |")
     }
     $lines.Add("")
     $lines.Add("## 目录探测")
@@ -781,14 +940,12 @@ function Write-MarkdownReport {
     $lines.Add("2. 为低风险缓存迁移单独建立迁移 issue。")
     $lines.Add("3. 对任何工具根目录迁移，优先使用工具官方配置或重装方式，不直接搬目录。")
 
-    Set-Content -Path $Path -Value $lines -Encoding UTF8
+    return $lines -join [Environment]::NewLine
 }
 
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 
-New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-
-$tools = @(
+$rawTools = @(
     Invoke-VersionProbe -Name "python" -Arguments @("--version")
     Invoke-VersionProbe -Name "py" -Arguments @("--version")
     Invoke-VersionProbe -Name "uv" -Arguments @("--version")
@@ -824,18 +981,91 @@ $tools = @(
     Invoke-VersionProbe -Name "powershell" -Arguments @("-NoProfile", "-Command", "`$PSVersionTable.PSVersion.ToString()")
 )
 
+$toolMetadataResolver = {
+    param([string]$Path)
+    Get-InventoryToolMetadata -Path $Path
+}
+$sharedRoots = @(
+    "D:\Codex\tools"
+    "D:\Codex\envs"
+    "D:\hermes-data\.local"
+    "D:\hermes-data\.npm-global"
+)
+$vendorRoots = @(
+    "D:\Codex\.codex\plugins"
+    "D:\Codex\.codex\vendor"
+)
+$systemInstallerRoots = @(
+    $env:ProgramFiles
+    ${env:ProgramFiles(x86)}
+    $env:SystemRoot
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+$tools = @(
+    foreach ($tool in $rawTools) {
+        $pythonRuntime = $null
+        $runtimeProbeFailed = $false
+        if ($tool.name -eq "python") {
+            if ($tool.found -and -not $SkipVersionProbe) {
+                $pythonRuntime = Invoke-PythonRuntimeProbe -PythonPath $tool.path
+            } else {
+                $pythonRuntime = ConvertFrom-PythonRuntimeProbe -Json $null -ErrorMessage $(if ($SkipVersionProbe) { "Skipped" } else { "Python launcher not found" })
+            }
+            $runtimeProbeFailed = -not [bool]$pythonRuntime.succeeded
+        }
+
+        $decisionArguments = @{
+            LauncherPath = $tool.path
+            RuntimePath = if ($null -ne $pythonRuntime -and $pythonRuntime.succeeded) { $pythonRuntime.executable } else { $null }
+            RuntimePrefix = if ($null -ne $pythonRuntime -and $pythonRuntime.succeeded) { $pythonRuntime.prefix } else { $null }
+            RuntimeBasePrefix = if ($null -ne $pythonRuntime -and $pythonRuntime.succeeded) { $pythonRuntime.basePrefix } else { $null }
+            ProjectRoots = $ProjectRoots
+            SharedRoots = $sharedRoots
+            VendorRoots = $vendorRoots
+            SystemInstallerRoots = $systemInstallerRoots
+            MetadataResolver = $toolMetadataResolver
+            LauncherProbeSucceeded = [bool]$tool.probeSucceeded
+            RuntimeProbeSucceeded = [bool]($null -ne $pythonRuntime -and $pythonRuntime.succeeded)
+        }
+        if ($runtimeProbeFailed) {
+            $decisionArguments.RuntimeProbeFailed = $true
+        }
+        $origin = Get-ToolOriginDecision @decisionArguments
+        if ($null -ne $pythonRuntime -and $null -ne $origin.runtime) {
+            $origin.runtime | Add-Member -MemberType NoteProperty -Name prefix -Value $pythonRuntime.prefix -Force
+            $origin.runtime | Add-Member -MemberType NoteProperty -Name basePrefix -Value $pythonRuntime.basePrefix -Force
+            $origin.runtime | Add-Member -MemberType NoteProperty -Name probeError -Value $pythonRuntime.error -Force
+        }
+
+        [pscustomobject][ordered]@{
+            name = $tool.name
+            found = $tool.found
+            path = $tool.path
+            version = $tool.version
+            evidence = $tool.evidence
+            exitCode = $tool.exitCode
+            probeSucceeded = $tool.probeSucceeded
+            error = $tool.error
+            launcher = $origin.launcher
+            runtime = $origin.runtime
+            originClass = $origin.originClass
+            originEvidence = $origin.originEvidence
+            resolutionScope = $origin.resolutionScope
+            requiresManualReview = $origin.requiresManualReview
+        }
+    }
+)
+
 $directories = @(Get-KnownDirectories)
 $localEnvironmentFindings = @(Get-LocalEnvironmentFindings -Roots $ProjectRoots)
 $projectMarkers = @(Get-ProjectEnvironmentMarkers -LocalEnvironmentFindings $localEnvironmentFindings)
 $candidates = @(Get-MigrationCandidates -Directories $directories)
 $manualReviewItems = @(Get-ManualReviewItems -Directories $directories -LocalEnvironmentFindings $localEnvironmentFindings)
 $envVars = @(Get-SelectedEnvironmentVariables)
-$pathEntries = @(Get-PathEntries)
+$pathScopes = Get-PathScopeRecords
 
-$inventory = [pscustomobject]@{
-    schemaVersion = 2
+$inventory = New-InventoryV3Document -Facts @{
     generatedAt = (Get-Date).ToString("o")
-    readOnly = $true
     host = Get-HostSummary
     outputDir = $OutputDir
     projectRoots = $ProjectRoots
@@ -845,7 +1075,7 @@ $inventory = [pscustomobject]@{
     skipVersionProbe = [bool]$SkipVersionProbe
     tools = $tools
     selectedEnvironmentVariables = $envVars
-    pathEntries = $pathEntries
+    pathScopes = $pathScopes
     directories = $directories
     projectEnvironmentMarkers = $projectMarkers
     localEnvironmentFindings = $localEnvironmentFindings
@@ -853,14 +1083,14 @@ $inventory = [pscustomobject]@{
     manualReviewItems = $manualReviewItems
 }
 
-$jsonPath = Join-Path $OutputDir "inventory.json"
-$reportPath = Join-Path $OutputDir "REPORT.md"
-
-$inventory | ConvertTo-Json -Depth 8 | Set-Content -Path $jsonPath -Encoding UTF8
-Write-MarkdownReport -Inventory $inventory -Path $reportPath
+$published = Publish-JsonMarkdownArtifactPair -Document $inventory -OutputDir $OutputDir -JsonFileName "inventory.json" -MarkdownFileName "REPORT.md" -RenderMarkdown {
+    param($Document, $SourceJsonSha256)
+    ConvertTo-MarkdownReport -Inventory $Document
+}
 
 [pscustomobject]@{
-    inventory = $jsonPath
-    report = $reportPath
+    inventory = $published.jsonPath
+    report = $published.markdownPath
+    generationId = $published.generationId
     readOnly = $true
 }

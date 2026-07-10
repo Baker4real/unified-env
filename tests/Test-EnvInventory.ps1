@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$WarningPreference = "Stop"
 
 function Assert-True {
     param(
@@ -27,12 +28,15 @@ function Assert-Property {
 }
 
 $scriptPath = Join-Path $ProjectRoot "scripts\Invoke-EnvInventory.ps1"
+$publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
 $testRoot = Join-Path $ProjectRoot "reports\env-inventory-test"
 $quickOutput = Join-Path $testRoot "quick"
 $fullOutput = Join-Path $testRoot "full"
 $canonicalPipOutput = Join-Path $testRoot "canonical-pip"
 
 Assert-True -Condition (Test-Path -Path $scriptPath -PathType Leaf) -Message "Inventory script not found: $scriptPath"
+Assert-True -Condition (Test-Path -LiteralPath $publisherPath -PathType Leaf) -Message "Report publisher not found: $publisherPath"
+. $publisherPath
 
 if (Test-Path -Path $testRoot) {
     Remove-Item -Path $testRoot -Recurse -Force
@@ -51,16 +55,48 @@ Assert-True -Condition (Test-Path -Path $quickJsonPath -PathType Leaf) -Message 
 Assert-True -Condition (Test-Path -Path $quickReportPath -PathType Leaf) -Message "Quick REPORT.md missing"
 
 $quickInventory = Get-Content -Path $quickJsonPath -Raw | ConvertFrom-Json
-foreach ($property in @("readOnly", "tools", "directories", "pathEntries", "migrationCandidates", "manualReviewItems", "excludedRoots", "projectEnvironmentMarkers", "localEnvironmentFindings")) {
+foreach ($property in @("artifactType", "schemaVersion", "executionAllowed", "generationId", "readOnly", "tools", "directories", "pathScopes", "pathEntries", "migrationCandidates", "manualReviewItems", "excludedRoots", "projectEnvironmentMarkers", "localEnvironmentFindings")) {
     Assert-Property -Object $quickInventory -Name $property
 }
 
+Assert-True -Condition ($quickInventory.artifactType -eq "env-governance.inventory") -Message "Quick inventory artifactType 错误"
+Assert-True -Condition ($quickInventory.schemaVersion -eq 3) -Message "Quick inventory schemaVersion 必须为 3"
+Assert-True -Condition (-not [bool]$quickInventory.executionAllowed) -Message "Quick inventory 不得授权执行"
 Assert-True -Condition ([bool]$quickInventory.readOnly) -Message "Quick inventory readOnly was not true"
 Assert-True -Condition ([bool]$quickInventory.skipVersionProbe) -Message "Quick inventory did not record skipVersionProbe=true"
 Assert-True -Condition ($quickInventory.tools.Count -gt 0) -Message "Quick inventory has no tools"
+$quickPair = Test-JsonMarkdownArtifactPair -JsonPath $quickJsonPath -MarkdownPath $quickReportPath
+Assert-True -Condition ([bool]$quickPair.ok) -Message "Quick JSON/Markdown pair 校验失败: $($quickPair.error)"
+
+foreach ($scopeName in @("process", "user", "machine")) {
+    Assert-Property -Object $quickInventory.pathScopes -Name $scopeName
+    $scopeRecord = $quickInventory.pathScopes.$scopeName
+    foreach ($property in @("readStatus", "complete", "rawValueSha256", "entries", "duplicates", "missingPathCleanupCandidates")) {
+        Assert-Property -Object $scopeRecord -Name $property
+    }
+    Assert-True -Condition ($scopeRecord.source -eq $scopeName) -Message "$scopeName PATH scope 不得与其他 scope 串联"
+    if (-not [bool]$scopeRecord.complete) {
+        Assert-True -Condition (@($scopeRecord.missingPathCleanupCandidates).Count -eq 0) -Message "$scopeName PATH scope 不完整时不得生成 cleanup 建议"
+    }
+}
+
+$processEntries = @($quickInventory.pathScopes.process.entries)
+Assert-True -Condition ($quickInventory.pathEntries.Count -eq $processEntries.Count) -Message "兼容 pathEntries 必须投影 process PATH"
+for ($index = 0; $index -lt $processEntries.Count; $index++) {
+    $compatEntry = $quickInventory.pathEntries[$index]
+    Assert-True -Condition ((@($compatEntry.PSObject.Properties.Name) -join ",") -ceq "index,path,exists,drive") -Message "兼容 pathEntries 只能包含四个旧字段"
+    Assert-True -Condition ($compatEntry.path -ceq $processEntries[$index].expandedPath) -Message "兼容 pathEntries.path 必须投影 expandedPath"
+}
+Assert-True -Condition (@($quickInventory.selectedEnvironmentVariables | Where-Object { $_.name -eq "Path" }).Count -eq 0) -Message "selectedEnvironmentVariables 不得输出完整 Path"
+foreach ($tool in $quickInventory.tools) {
+    foreach ($property in @("launcher", "runtime", "originClass", "originEvidence", "resolutionScope", "requiresManualReview")) {
+        Assert-Property -Object $tool -Name $property
+    }
+    Assert-True -Condition ($tool.resolutionScope -eq "process") -Message "$($tool.name) resolutionScope 必须为 process"
+}
 
 $quickReport = Get-Content -Path $quickReportPath -Raw
-foreach ($expected in @("本报告由只读盘点脚本生成", "## 绝不自动迁移", "## 迁移候选", "## 人工审查项")) {
+foreach ($expected in @("本报告由只读盘点脚本生成", "工具解析作用域：process", "## 绝不自动迁移", "## 迁移候选", "## 人工审查项")) {
     Assert-True -Condition $quickReport.Contains($expected) -Message "Quick report missing expected text: $expected"
 }
 foreach ($expected in @("## 本地环境分类发现")) {
@@ -119,8 +155,11 @@ Assert-True -Condition (Test-Path -Path $fullJsonPath -PathType Leaf) -Message "
 Assert-True -Condition (Test-Path -Path $fullReportPath -PathType Leaf) -Message "Full REPORT.md missing"
 
 $fullInventory = Get-Content -Path $fullJsonPath -Raw | ConvertFrom-Json
+Assert-True -Condition ($fullInventory.schemaVersion -eq 3) -Message "Full inventory schemaVersion 必须为 3"
 Assert-True -Condition ([bool]$fullInventory.readOnly) -Message "Full inventory readOnly was not true"
 Assert-True -Condition (-not [bool]$fullInventory.skipVersionProbe) -Message "Full inventory recorded skipVersionProbe=true"
+$fullPair = Test-JsonMarkdownArtifactPair -JsonPath $fullJsonPath -MarkdownPath $fullReportPath
+Assert-True -Condition ([bool]$fullPair.ok) -Message "Full JSON/Markdown pair 校验失败: $($fullPair.error)"
 
 foreach ($tool in $fullInventory.tools | Where-Object { $_.found }) {
     Assert-Property -Object $tool -Name "probeSucceeded"
@@ -141,6 +180,14 @@ if ($gitProbe -and $gitProbe.found) {
 $pythonProbe = $fullInventory.tools | Where-Object { $_.name -eq "python" } | Select-Object -First 1
 if ($pythonProbe -and $pythonProbe.found) {
     Assert-True -Condition ($pythonProbe.version -like "Python *") -Message "python version probe did not receive --version"
+    foreach ($property in @("launcher", "runtime", "originClass", "originEvidence", "resolutionScope", "requiresManualReview")) {
+        Assert-Property -Object $pythonProbe -Name $property
+    }
+    if ($pythonProbe.originClass -eq "shared-tool") {
+        Assert-True -Condition (-not [bool]$pythonProbe.requiresManualReview) -Message "成功探测且命中显式 shared root 才可免人工审查"
+    } else {
+        Assert-True -Condition ([bool]$pythonProbe.requiresManualReview) -Message "非 shared-tool Python 归属必须人工审查"
+    }
 }
 
 $blockedOutput = "C:\Codex-should-not-be-created"
@@ -152,6 +199,22 @@ try {
 }
 Assert-True -Condition $blocked -Message "Inventory 脚本没有阻止 C 盘 OutputDir"
 Assert-True -Condition (-not (Test-Path -Path $blockedOutput)) -Message "测试不应在 C 盘创建输出目录"
+
+$reparseTarget = Join-Path $testRoot "reparse-target"
+$reparseOutput = Join-Path $testRoot "reparse-output"
+New-Item -ItemType Directory -Path $reparseTarget -Force | Out-Null
+New-Item -ItemType Junction -Path $reparseOutput -Target $reparseTarget | Out-Null
+try {
+    $reparseBlocked = $false
+    try {
+        & $scriptPath -OutputDir $reparseOutput -SkipVersionProbe | Out-Null
+    } catch {
+        $reparseBlocked = $_.Exception.Message -like "*reparse point*"
+    }
+    Assert-True -Condition $reparseBlocked -Message "Inventory 脚本没有阻止 reparse OutputDir"
+} finally {
+    Remove-Item -LiteralPath $reparseOutput -Force
+}
 
 $previousProcessPipCache = $env:PIP_CACHE_DIR
 try {
