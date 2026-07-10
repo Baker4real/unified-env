@@ -52,6 +52,7 @@ function Assert-CanRemoveTestRoot {
 }
 
 $scriptPath = Join-Path $ProjectRoot "scripts\New-BackupRetentionDryRun.ps1"
+$publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
 $testRoot = Join-Path $ProjectRoot "reports\backup-retention-dry-run-test"
 $fixtureRoot = Join-Path $testRoot "fixture"
 $fixtureCodexRoot = Join-Path $fixtureRoot ".codex"
@@ -76,6 +77,14 @@ try {
     Assert-True -Condition (Test-Path -LiteralPath $reportPath -PathType Leaf) -Message "缺少 BACKUP-RETENTION-DRY-RUN.md"
 
     $plan = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+    . $publisherPath
+    Assert-True -Condition ($plan.artifactType -ceq 'env-governance.backup-retention-dry-run') -Message "artifactType 不正确"
+    Assert-True -Condition ($plan.schemaVersion -eq 2) -Message "schemaVersion 必须为 2"
+    Assert-True -Condition ($plan.artifactMode -ceq 'production') -Message "默认产物必须是 production"
+    foreach ($property in @('declaredScanRoots', 'evaluatedRoots', 'coverageItems', 'retainedItems', 'coverageAccounted', 'coverageComplete', 'coverageNotes', 'unclassifiedCoverageGaps', 'errors')) {
+        Assert-Property -Object $plan -Name $property
+    }
+    Assert-True -Condition ((Test-JsonMarkdownArtifactPair -JsonPath $jsonPath -MarkdownPath $reportPath).ok) -Message "JSON/Markdown 可信报告对校验失败"
     foreach ($property in @("schemaVersion", "generatedAtLocal", "dryRun", "readOnly", "deleteAllowed", "applySupported", "retainCount", "policy", "protected", "manualReview", "candidates", "summary")) {
         Assert-Property -Object $plan -Name $property
     }
@@ -183,6 +192,16 @@ try {
     Assert-True -Condition $blocked -Message "脚本没有阻止非授权 D 盘 OutputDir"
     Assert-True -Condition (-not (Test-Path -LiteralPath $blockedDOutput)) -Message "测试不应在非授权 D 盘目录创建输出目录"
 
+    $unmarkedFixtureOutput = Join-Path $testRoot 'unmarked-fixture-output'
+    $blocked = $false
+    try {
+        & $scriptPath -CodexRoot $fixtureCodexRoot -DDriveRoot $fixtureRoot -OutputDir $unmarkedFixtureOutput | Out-Null
+    } catch {
+        $blocked = $_.Exception.Message -like '*production context 必须精确使用*'
+    }
+    Assert-True -Condition $blocked -Message "fixture 根未显式 artifactMode=test 时必须失败"
+    Assert-True -Condition (-not (Test-Path -LiteralPath $unmarkedFixtureOutput)) -Message "context 失败时不得创建输出目录"
+
     New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "backups_state\provider-sync") | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "backups") | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $fixtureCodexRoot "run-evidence\sample-evidence") | Out-Null
@@ -246,8 +265,15 @@ try {
         Write-Warning "无法创建 junction fixture，跳过嵌套 reparse 降级断言：$($_.Exception.Message)"
     }
 
-    & $scriptPath -CodexRoot $fixtureCodexRoot -DDriveRoot $fixtureRoot -OutputDir $fixtureOutput | Out-Null
+    & $scriptPath -ArtifactMode test -CodexRoot $fixtureCodexRoot -DDriveRoot $fixtureRoot -OutputDir $fixtureOutput | Out-Null
     $fixturePlan = Get-Content -LiteralPath (Join-Path $fixtureOutput "backup-retention-dry-run.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($fixturePlan.artifactMode -ceq 'test') -Message "fixture 产物必须标记 artifactMode=test"
+    Assert-True -Condition ([bool]$fixturePlan.coverageAccounted) -Message "fixture 已枚举直接子项必须计数守恒"
+    Assert-True -Condition (-not [bool]$fixturePlan.coverageComplete) -Message "fixture 存在 gap/reparse 时必须 coverageComplete=false"
+    foreach ($root in @($fixturePlan.evaluatedRoots)) {
+        Assert-True -Condition ($root.directChildCount -eq $root.classificationCount) -Message "根分类数与直接子项数不守恒：$($root.path)"
+        Assert-True -Condition ($root.snapshotSha256 -match '^[0-9a-f]{64}$') -Message "根快照缺少 SHA-256：$($root.path)"
+    }
     $fixtureCandidatePaths = @($fixturePlan.candidates | ForEach-Object { $_.path }) -join "`n"
     $fixtureManualPaths = @($fixturePlan.manualReview | ForEach-Object { $_.path }) -join "`n"
 
