@@ -91,9 +91,10 @@ reports/codex-hook-inventory/
 - Produces: `Assert-CodexHookStrictJsonText -JsonText <string>`。
 - Produces: `Assert-CodexHookManifest -Manifest <object>`。
 - Produces: `Read-CodexHookManifest -Path <D path>`，返回严格验证的 schema 1 对象。
-- Produces: `Get-CodexHookRegistryFacts -RegistryPath <path>`，只返回事件、索引、matcher、command、timeout、targetExists 和 commandSha256。
+- Produces: `Get-CodexHookRegistryFacts -RegistryPath <path> -Manifest <object>`，按 manifest 的完整路径、事件、matcher 与精确参数识别受管 identity；不返回 raw command、raw arguments 或未知 matcher/target。
 - Produces: `Get-CodexHookFileFacts -Manifest <object> -ManagedRoot <path> -LiveHooksRoot <path>`。
-- Produces: `New-CodexHookInventoryDocument -Manifest <object> -Registry <object> -FileFacts <array> -TrustObservation <array>`。
+- Produces: `Get-CodexHookDependencyFacts -Manifest <object>`，只读验证 wrapper、implementation 与 runtime 的存在性、hash 和引用关系。
+- Produces: `New-CodexHookInventoryDocument -Manifest <object> -Registry <object> -FileFacts <array> -DependencyFacts <array> -TrustObservation <array>`。
 
 - [ ] **Step 1：写 strict JSON 与 schema 红灯测试**
 
@@ -155,11 +156,11 @@ manifest 顶层精确属性固定为：
 }
 ```
 
-每个 active hook 精确字段为 `id,event,order,matcher,timeoutSeconds,commandPath,arguments,criticality,lifecycle,healthCheck`；每个文件精确字段为 `relativePath,liveRelativePath,sha256,lifecycle,ownerHookIds`。
+每个 hook 精确字段为 `id,event,order,matcher,timeoutSeconds,commandPath,arguments,wrapperPath,implementationPath,runtimeId,readResources,writeResources,criticality,lifecycle,lifecycleReason,quickHealthCheck,fullAcceptanceCommand`。`wrapperPath=null` 仅表示 direct vendor entry；其余 hook 必须显式声明 wrapper。read/write resource 每项精确为 `{kind,value}`：`kind=path` 时只能是 D 盘绝对路径，`kind=abstract` 时只能使用受控的 stdin/stdout/env/network/state 枚举。quick/full command 每项精确为 `{commandPath,arguments}`，仅声明、不在 inventory 中执行。manifest 是 desired contract；inventory 单独报告 observed wrapper/runtime/implementation gap，desired 文件尚未导入不使 schema 失败。retired hook 必须填写 `lifecycleReason`，其他 lifecycle 必须为 null。每个文件精确字段为 `relativePath,liveRelativePath,sha256,lifecycle,ownerHookIds`；`environment` 项现在即精确验证 `{name,scope,desired,restartRequired}`。
 
 - [ ] **Step 4：加入当前受管注册与 runtime manifest**
 
-SessionStart 顺序固定为 provider 0、projectless/state 1、Serena activate 2、Serena dashboard 3、GitHub 4；Stop cleanup 与 PreToolUse Bash reminder 保留；Serena auto-approve 先声明为 `lifecycle="compatibility"`，Task 6 再 retirement。runtime 固定：
+SessionStart 顺序固定为 provider 0、projectless/state 1、Serena activate 2、Serena dashboard 3、GitHub 4；Stop cleanup 与 PreToolUse Bash reminder 保留；Serena auto-approve 现在即声明为 `lifecycle="retired"`。registration-repair 模式只修 SessionStart，不执行 retirement，并把仍注册项报告为 `retired-but-registered`；只有 full 模式（Task 7）才精确取消该 identity。runtime 固定：
 
 ```json
 {
@@ -176,10 +177,10 @@ manifest schema 错误。Task 3 导入后该缺口必须归零。
 
 - [ ] **Step 5：写 inventory 红灯测试**
 
-fixture registry 覆盖：正确注册、GitHub 插入索引 1、缺 target、未知 event/group、重复受管 command、缺 trust observation。断言 inventory 是纯事实、不会输出完整 trust hash：
+fixture registry 覆盖：正确注册、GitHub 插入索引 1、allowlist 内缺 target、未知 event/group、重复受管 identity、同文件名错误父目录、精确 vendor 参数、verb 前后缀、额外敏感参数、非 command type、歧义候选、UNC/C/device target 和缺 trust observation。未知 target 不做 exists/hash 探测；inventory 是纯事实，不输出 raw command/arguments/matcher、秘密、线程 ID 或完整 trust hash：
 
 ```powershell
-$facts = Get-CodexHookRegistryFacts -RegistryPath $fixtureRegistry
+$facts = Get-CodexHookRegistryFacts -RegistryPath $fixtureRegistry -Manifest $manifest
 Assert-True ($facts.events.SessionStart.Count -eq 5) '必须看到全部 SessionStart'
 Assert-True ($facts.events.SessionStart[1].idMatch -eq 'github-cli') '必须观察索引错位'
 Assert-True (-not ($facts | ConvertTo-Json -Depth 20).Contains('trusted_hash')) '不得泄露完整 trust hash'
@@ -197,7 +198,7 @@ param(
 )
 ```
 
-入口只读 `hooks.json`、受管/live 文件元数据、runtime 存在性、`config.toml` 中 trust key 名称、User/Process `SERENA_HOME` 和 reparse 祖先；使用 `ReportArtifactPublisher.ps1` 生成 JSON/Markdown，顶层固定 `artifactType="env-governance.codex-hook-inventory"`、`schemaVersion=1`、`readOnly=true`、`executionAllowed=false`。
+入口只读 `hooks.json`、受管/live 文件元数据、runtime 存在性、`config.toml` 中 trust key 的脱敏类别/摘要、User/Process `SERENA_HOME` 和 reparse 祖先；使用 `ReportArtifactPublisher.ps1` 生成 JSON/Markdown，顶层固定 `artifactType="env-governance.codex-hook-inventory"`、`schemaVersion=1`、`readOnly=true`、`executionAllowed=false`。OutputDir 只允许仓库内两个显式报告根，拒绝 ADS 与任一 reparse ancestor。
 
 - [ ] **Step 7：运行绿灯与空白检查**
 
@@ -700,9 +701,9 @@ manifest 增加唯一 environment policy：
 
 fixture apply/restore 证明 before 可恢复；脚本不得接受其他变量名、Machine scope 或 C 盘值。
 
-- [ ] **Step 4：retire Codex no-op auto-approve**
+- [ ] **Step 4：验证 Codex no-op auto-approve retirement**
 
-把 `PreToolUse` Serena auto-approve entry 从 desired active registry 移除，在 manifest retirement 记录原因 `Codex payload does not expose acceptEdits/auto permission modes`。Bash reminder 和 Stop cleanup 保持原 command identity；部署器保留未知 vendor entries。
+验证 manifest 已把 `PreToolUse` Serena auto-approve 标记为 retired，并记录原因 `Codex payload does not expose acceptEdits/auto permission modes`。registration-repair 模式仍不得改变 PreToolUse；full 模式把该精确 identity 从 desired active registry 排除。Bash reminder 和 Stop cleanup 保持原 command identity；部署器保留未知 vendor entries。
 
 - [ ] **Step 5：合成 Serena hook 协议测试**
 

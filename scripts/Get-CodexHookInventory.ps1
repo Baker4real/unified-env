@@ -33,9 +33,11 @@ function Get-CodexHookTrustKeyObservations {
 
         $keyMatch = [regex]::Match($line, '^\s*(?<key>[A-Za-z0-9_.-]+)\s*=')
         if ($keyMatch.Success) {
+            $keyName = $keyMatch.Groups['key'].Value
             $observations.Add([pscustomobject][ordered]@{
                 section = 'hooks.state'
-                keyName = $keyMatch.Groups['key'].Value
+                keyKind = if ($keyName -match '(?i)^trusted[_-]?hash') { 'trusted-hash' } else { 'other' }
+                keyNameSha256 = Get-CodexHookTextSha256 -Text $keyName
                 present = $true
             })
         }
@@ -84,20 +86,6 @@ function Get-CodexHookReparseAncestorFacts {
     }
 }
 
-function Test-CodexHookPathWithin {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$ParentPath
-    )
-
-    $candidate = [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    $parent = [IO.Path]::GetFullPath($ParentPath).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    return (
-        $candidate.Equals($parent, [StringComparison]::OrdinalIgnoreCase) -or
-        $candidate.StartsWith($parent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
-    )
-}
-
 $manifest = Read-CodexHookManifest -Path $ManifestPath
 $codexHomePath = Assert-CodexHookDPath -Value $CodexHome -Name 'CodexHome'
 $outputPath = Assert-CodexHookDPath -Value $OutputDir -Name 'OutputDir'
@@ -110,18 +98,36 @@ if ($codexHomePath -ine $manifestCodexHome) {
     throw "CodexHome 与 manifest.codexHome 不一致：$codexHomePath"
 }
 
+$projectReportsRoot = 'D:\Codex\projects\统一环境\reports'
+$allowedOutputRoots = @(
+    Join-Path $projectReportsRoot 'codex-hook-inventory'
+    Join-Path $projectReportsRoot 'codex-hook-inventory-test'
+)
+if (-not @($allowedOutputRoots | Where-Object { Test-CodexHookPathWithin -Path $outputPath -ParentPath $_ }).Count) {
+    throw "OutputDir 必须位于受控 hook inventory 报告根：$outputPath"
+}
+if ($outputPath.Substring(2).Contains(':')) {
+    throw "OutputDir 不得包含 NTFS alternate data stream：$outputPath"
+}
+$outputReparse = Get-CodexHookReparseAncestorFacts -Path $outputPath -Scope 'outputDir'
+if ($outputReparse.hasReparsePoint) {
+    throw "OutputDir 祖先包含 reparse point：$outputPath"
+}
+
 $managedRoot = [IO.Path]::GetFullPath([string]$manifest.managedRoot)
 $liveHooksRoot = Join-Path $codexHomePath 'hooks'
 $registryPath = Join-Path $codexHomePath 'hooks.json'
 $configPath = Join-Path $codexHomePath 'config.toml'
 
-$registry = Get-CodexHookRegistryFacts -RegistryPath $registryPath
+$registry = Get-CodexHookRegistryFacts -RegistryPath $registryPath -Manifest $manifest
 $fileFacts = @(Get-CodexHookFileFacts -Manifest $manifest -ManagedRoot $managedRoot -LiveHooksRoot $liveHooksRoot)
+$dependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $manifest)
 $trustObservation = @(Get-CodexHookTrustKeyObservations -ConfigPath $configPath)
 $document = New-CodexHookInventoryDocument `
     -Manifest $manifest `
     -Registry $registry `
     -FileFacts $fileFacts `
+    -DependencyFacts $dependencyFacts `
     -TrustObservation $trustObservation
 
 $runtimeFacts = @(
@@ -174,8 +180,11 @@ $published = Publish-JsonMarkdownArtifactPair `
             "- Registry 事件数：$($Document.summary.eventCount)"
             "- Registry 条目数：$($Document.summary.registryEntryCount)"
             "- 缺失 command target：$($Document.summary.missingTargetCount)"
+            "- 未探测 unknown target：$($Document.summary.unprobedTargetCount)"
             "- 缺失 managed 文件：$($Document.summary.managedMissingCount)"
             "- 缺失 live 文件：$($Document.summary.liveMissingCount)"
+            "- Wrapper/runtime/implementation 缺口：$($Document.summary.dependencyGapCount)"
+            "- 已 retirement 但仍注册：$($Document.summary.retiredButRegisteredCount)"
             "- Trust key 观察数：$($Document.summary.trustObservationCount)"
             ''
             '本报告仅采集注册、路径、存在性和 SHA-256 事实；未执行任何 hook。'

@@ -125,13 +125,56 @@ function Assert-CodexHookDPath {
     if (-not [IO.Path]::IsPathFullyQualified($Value)) {
         throw "$Name 必须是 D 盘绝对路径：$Value"
     }
+    if ($Value.Length -gt 2 -and ($Value.Substring(2) -match '[:*?<>"|]' -or $Value.Substring(2) -match '[\x00-\x1f]')) {
+        throw "$Name 包含 ADS、通配符或非法字符：$Value"
+    }
 
     $fullPath = [IO.Path]::GetFullPath($Value)
     if ([IO.Path]::GetPathRoot($fullPath) -ine 'D:\') {
         throw "$Name 必须位于 D:\：$fullPath"
     }
 
+    foreach ($segment in @($fullPath.Substring(3) -split '[\\/]' | Where-Object { $_ -ne '' })) {
+        if (
+            $segment.EndsWith('.', [StringComparison]::Ordinal) -or
+            $segment.EndsWith(' ', [StringComparison]::Ordinal) -or
+            [IO.Path]::GetFileNameWithoutExtension($segment) -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$'
+        ) {
+            throw "$Name 包含 Windows 保留路径片段：$segment"
+        }
+    }
+
     return $fullPath
+}
+
+function Assert-CodexHookExactPath {
+    param(
+        [object]$Value,
+        [Parameter(Mandatory)][string]$Expected,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $fullPath = Assert-CodexHookDPath -Value $Value -Name $Name
+    $expectedPath = [IO.Path]::GetFullPath($Expected)
+    if (-not $fullPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Name 必须严格等于 $expectedPath：$fullPath"
+    }
+
+    return $fullPath
+}
+
+function Test-CodexHookPathWithin {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ParentPath
+    )
+
+    $candidate = [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $parent = [IO.Path]::GetFullPath($ParentPath).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    return (
+        $candidate.Equals($parent, [StringComparison]::OrdinalIgnoreCase) -or
+        $candidate.StartsWith($parent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+    )
 }
 
 function Assert-CodexHookRelativePath {
@@ -141,13 +184,23 @@ function Assert-CodexHookRelativePath {
     )
 
     Assert-CodexHookString -Value $Value -Name $Name
-    if ([IO.Path]::IsPathFullyQualified($Value)) {
+    if ([IO.Path]::IsPathRooted($Value) -or $Value -match '[:*?<>"|]' -or $Value -match '[\x00-\x1f]') {
         throw "$Name 必须是相对路径：$Value"
     }
 
     $segments = @($Value -split '[\\/]')
     if ($segments.Count -eq 0 -or $segments -contains '' -or $segments -contains '.' -or $segments -contains '..') {
         throw "$Name 必须是规范的相对路径：$Value"
+    }
+
+    foreach ($segment in $segments) {
+        if (
+            $segment.EndsWith('.', [StringComparison]::Ordinal) -or
+            $segment.EndsWith(' ', [StringComparison]::Ordinal) -or
+            [IO.Path]::GetFileNameWithoutExtension($segment) -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$'
+        ) {
+            throw "$Name 包含 Windows 保留路径片段：$segment"
+        }
     }
 }
 
@@ -156,7 +209,67 @@ function Get-CodexHookCommandIdentity {
 
     $path = [IO.Path]::GetFullPath([string]$Hook.commandPath).ToLowerInvariant()
     $arguments = @($Hook.arguments | ForEach-Object { [string]$_ })
-    return "$path`0$($arguments -join "`0")"
+    $matcher = if ($null -eq $Hook.matcher) { '<null>' } else { [string]$Hook.matcher }
+    return "$($Hook.event)`0$matcher`0$path`0$($arguments -join "`0")"
+}
+
+function Assert-CodexHookSafeArguments {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Arguments,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    foreach ($argument in $Arguments) {
+        Assert-CodexHookString -Value $argument -Name "$Name[]" -AllowEmpty
+        if (
+            $argument -match '[\x00-\x1f\x7f]' -or
+            $argument -match '(?i)\b(?:token|password|passwd|secret|credential|api[_-]?key)\s*=' -or
+            $argument -match '(?i)\b[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@'
+        ) {
+            throw "$Name 包含控制字符或敏感值模式。"
+        }
+    }
+}
+
+function Assert-CodexHookResourceList {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Resources,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $abstractValues = @(
+        'hook-stdin', 'hook-stdout', 'process-environment', 'windows-user-environment',
+        'network', 'github-credential-store', 'codex-thread-state', 'serena-hook-state'
+    )
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($resource in $Resources) {
+        Assert-CodexHookExactProperties -Value $resource -Names @('kind', 'value') -Scope "$Name[]"
+        Assert-CodexHookString -Value $resource.kind -Name "$Name[].kind"
+        Assert-CodexHookString -Value $resource.value -Name "$Name[].value"
+        if ($resource.kind -ceq 'path') {
+            $normalized = Assert-CodexHookDPath -Value $resource.value -Name "$Name[].value"
+        } elseif ($resource.kind -ceq 'abstract' -and $resource.value -cin $abstractValues) {
+            $normalized = [string]$resource.value
+        } else {
+            throw "$Name 资源 grammar 非法：$($resource.kind):$($resource.value)"
+        }
+
+        if (-not $seen.Add("$($resource.kind)`0$normalized")) {
+            throw "$Name 包含重复资源：$($resource.value)"
+        }
+    }
+}
+
+function Assert-CodexHookDeclaredCommand {
+    param(
+        [Parameter(Mandatory)][object]$Command,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    Assert-CodexHookExactProperties -Value $Command -Names @('commandPath', 'arguments') -Scope $Name
+    [void](Assert-CodexHookDPath -Value $Command.commandPath -Name "$Name.commandPath")
+    Assert-CodexHookArray -Value ([object]$Command.arguments) -Name "$Name.arguments"
+    Assert-CodexHookSafeArguments -Arguments @($Command.arguments) -Name "$Name.arguments"
 }
 
 function Assert-CodexHookManifest {
@@ -176,13 +289,19 @@ function Assert-CodexHookManifest {
         throw 'schemaVersion 必须严格等于 1。'
     }
 
-    [void](Assert-CodexHookDPath -Value $Manifest.codexHome -Name 'codexHome')
-    [void](Assert-CodexHookDPath -Value $Manifest.managedRoot -Name 'managedRoot')
+    $codexHome = Assert-CodexHookExactPath -Value $Manifest.codexHome -Expected 'D:\Codex\.codex' -Name 'codexHome'
+    [void](Assert-CodexHookExactPath -Value $Manifest.managedRoot -Expected 'D:\Codex\projects\统一环境\managed\codex-hooks' -Name 'managedRoot')
 
     $runtimeNames = @('pwsh', 'python', 'serenaPython', 'serenaHooks')
+    $expectedRuntimes = [ordered]@{
+        pwsh = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+        python = 'D:\Codex\tools\python314-official\python.exe'
+        serenaPython = 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
+        serenaHooks = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
+    }
     Assert-CodexHookExactProperties -Value $Manifest.runtimes -Names $runtimeNames -Scope 'runtimes'
     foreach ($name in $runtimeNames) {
-        $runtimePath = Assert-CodexHookDPath -Value $Manifest.runtimes.$name -Name "runtimes.$name"
+        $runtimePath = Assert-CodexHookExactPath -Value $Manifest.runtimes.$name -Expected $expectedRuntimes[$name] -Name "runtimes.$name"
         if (-not [IO.File]::Exists($runtimePath)) {
             throw "runtimes.$name 不存在：$runtimePath"
         }
@@ -192,7 +311,11 @@ function Assert-CodexHookManifest {
     Assert-CodexHookArray -Value ([object]$Manifest.files) -Name 'files'
     Assert-CodexHookArray -Value ([object]$Manifest.environment) -Name 'environment'
 
-    $hookNames = @('id', 'event', 'order', 'matcher', 'timeoutSeconds', 'commandPath', 'arguments', 'criticality', 'lifecycle', 'healthCheck')
+    $hookNames = @(
+        'id', 'event', 'order', 'matcher', 'timeoutSeconds', 'commandPath', 'arguments',
+        'wrapperPath', 'implementationPath', 'runtimeId', 'readResources', 'writeResources',
+        'criticality', 'lifecycle', 'lifecycleReason', 'quickHealthCheck', 'fullAcceptanceCommand'
+    )
     $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $activeCommands = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $activeOrders = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -222,11 +345,58 @@ function Assert-CodexHookManifest {
             throw "hook timeoutSeconds 必须大于 0 且小于 30：$($hook.id)"
         }
 
-        [void](Assert-CodexHookDPath -Value $hook.commandPath -Name "hooks[$($hook.id)].commandPath")
+        $commandPath = Assert-CodexHookDPath -Value $hook.commandPath -Name "hooks[$($hook.id)].commandPath"
         Assert-CodexHookArray -Value ([object]$hook.arguments) -Name "hooks[$($hook.id)].arguments"
-        foreach ($argument in @($hook.arguments)) {
-            Assert-CodexHookString -Value $argument -Name "hooks[$($hook.id)].arguments[]" -AllowEmpty
+        Assert-CodexHookSafeArguments -Arguments @($hook.arguments) -Name "hooks[$($hook.id)].arguments"
+
+        if ($null -ne $hook.wrapperPath) {
+            $wrapperPath = Assert-CodexHookDPath -Value $hook.wrapperPath -Name "hooks[$($hook.id)].wrapperPath"
+            if (-not $wrapperPath.Equals($commandPath, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "hooks[$($hook.id)] custom wrapperPath 必须等于 commandPath。"
+            }
+        } else {
+            $wrapperPath = $null
         }
+
+        $implementationPath = Assert-CodexHookDPath -Value $hook.implementationPath -Name "hooks[$($hook.id)].implementationPath"
+        Assert-CodexHookString -Value $hook.runtimeId -Name "hooks[$($hook.id)].runtimeId"
+        if ($hook.runtimeId -cnotin $runtimeNames) {
+            throw "hooks[$($hook.id)].runtimeId 非法：$($hook.runtimeId)"
+        }
+
+        $runtimePath = [IO.Path]::GetFullPath([string]$Manifest.runtimes.PSObject.Properties[$hook.runtimeId].Value)
+        if ($null -eq $wrapperPath) {
+            if (
+                -not $commandPath.Equals($implementationPath, [StringComparison]::OrdinalIgnoreCase) -or
+                -not $commandPath.Equals($runtimePath, [StringComparison]::OrdinalIgnoreCase)
+            ) {
+                throw "hooks[$($hook.id)] direct vendor entry 必须令 commandPath=implementationPath=runtime。"
+            }
+        } else {
+            $expectedExtension = switch ($hook.runtimeId) {
+                'pwsh' { '.ps1' }
+                'python' { '.py' }
+                'serenaPython' { '.py' }
+                default { $null }
+            }
+            if ($null -eq $expectedExtension -or [IO.Path]::GetExtension($implementationPath) -ine $expectedExtension) {
+                throw "hooks[$($hook.id)] implementation 与 runtimeId 类型不匹配。"
+            }
+            if (-not (Test-CodexHookPathWithin -Path $wrapperPath -ParentPath (Join-Path $codexHome 'hooks'))) {
+                throw "hooks[$($hook.id)].wrapperPath 必须位于固定 live hooks 根。"
+            }
+            if ([IO.Path]::GetExtension($wrapperPath) -ine '.cmd') {
+                throw "hooks[$($hook.id)].wrapperPath 必须是 .cmd wrapper。"
+            }
+            if (-not (Test-CodexHookPathWithin -Path $implementationPath -ParentPath (Join-Path $codexHome 'hooks'))) {
+                throw "hooks[$($hook.id)].implementationPath 必须位于固定 live hooks 根。"
+            }
+        }
+
+        Assert-CodexHookArray -Value ([object]$hook.readResources) -Name "hooks[$($hook.id)].readResources"
+        Assert-CodexHookArray -Value ([object]$hook.writeResources) -Name "hooks[$($hook.id)].writeResources"
+        Assert-CodexHookResourceList -Resources @($hook.readResources) -Name "hooks[$($hook.id)].readResources"
+        Assert-CodexHookResourceList -Resources @($hook.writeResources) -Name "hooks[$($hook.id)].writeResources"
 
         Assert-CodexHookString -Value $hook.criticality -Name "hooks[$($hook.id)].criticality"
         if ($hook.criticality -notin @('critical', 'degraded', 'optional')) {
@@ -237,9 +407,22 @@ function Assert-CodexHookManifest {
         if ($hook.lifecycle -notin @('active', 'compatibility', 'retired')) {
             throw "hook lifecycle 非法：$($hook.lifecycle)"
         }
+        if ($hook.lifecycle -ceq 'retired') {
+            Assert-CodexHookString -Value $hook.lifecycleReason -Name "hooks[$($hook.id)].lifecycleReason"
+        } elseif ($null -ne $hook.lifecycleReason) {
+            throw "hooks[$($hook.id)].lifecycleReason 仅允许 retired hook 使用。"
+        }
 
-        Assert-CodexHookString -Value $hook.healthCheck -Name "hooks[$($hook.id)].healthCheck"
-        if ($hook.lifecycle -ceq 'active') {
+        Assert-CodexHookDeclaredCommand -Command $hook.quickHealthCheck -Name "hooks[$($hook.id)].quickHealthCheck"
+        Assert-CodexHookDeclaredCommand -Command $hook.fullAcceptanceCommand -Name "hooks[$($hook.id)].fullAcceptanceCommand"
+        $allowedAcceptanceCommands = @($commandPath) + @($expectedRuntimes.Values | ForEach-Object { [IO.Path]::GetFullPath([string]$_) })
+        foreach ($declaredCommand in @($hook.quickHealthCheck, $hook.fullAcceptanceCommand)) {
+            $declaredPath = [IO.Path]::GetFullPath([string]$declaredCommand.commandPath)
+            if (-not @($allowedAcceptanceCommands | Where-Object { $declaredPath.Equals($_, [StringComparison]::OrdinalIgnoreCase) }).Count) {
+                throw "hooks[$($hook.id)] health/acceptance commandPath 不在受管 wrapper/runtime allowlist。"
+            }
+        }
+        if ($hook.lifecycle -cin @('active', 'compatibility')) {
             $identity = Get-CodexHookCommandIdentity -Hook $hook
             if (-not $activeCommands.Add($identity)) {
                 throw "active hook command 重复：$($hook.id)"
@@ -249,6 +432,24 @@ function Assert-CodexHookManifest {
             if (-not $activeOrders.Add($orderIdentity)) {
                 throw "active hook event/order 重复：$($hook.event)[$($hook.order)]"
             }
+        }
+    }
+
+    $environmentNames = @('name', 'scope', 'desired', 'restartRequired')
+    $environmentNamesSeen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($Manifest.environment)) {
+        Assert-CodexHookExactProperties -Value $item -Names $environmentNames -Scope 'environment[]'
+        Assert-CodexHookString -Value $item.name -Name 'environment[].name'
+        Assert-CodexHookString -Value $item.scope -Name 'environment[].scope'
+        if ($item.scope -cnotin @('User', 'Process')) {
+            throw "environment[].scope 非法：$($item.scope)"
+        }
+        Assert-CodexHookString -Value $item.desired -Name 'environment[].desired' -AllowEmpty
+        if ($item.restartRequired -isnot [bool]) {
+            throw 'environment[].restartRequired 必须是 JSON boolean。'
+        }
+        if (-not $environmentNamesSeen.Add("$($item.name)`0$($item.scope)")) {
+            throw "environment name/scope 重复：$($item.name)/$($item.scope)"
         }
     }
 
@@ -302,57 +503,100 @@ function Read-CodexHookManifest {
     return $manifest
 }
 
-function Resolve-CodexHookCommandTarget {
-    param([Parameter(Mandatory)][string]$Command)
+function Get-CodexHookTextSha256 {
+    param([Parameter(Mandatory)][string]$Text)
 
-    $match = [regex]::Match($Command, '^\s*"(?<target>[^"]+)"(?<arguments>.*)$')
-    if (-not $match.Success) {
-        $match = [regex]::Match($Command, '^\s*(?<target>\S+)(?<arguments>.*)$')
-    }
-
-    if (-not $match.Success) {
-        return [pscustomobject]@{
-            path = $null
-            argumentsText = ''
-        }
-    }
-
-    $target = $match.Groups['target'].Value.Replace('/', '\')
-    return [pscustomobject]@{
-        path = $target
-        argumentsText = $match.Groups['arguments'].Value.Trim()
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return [Convert]::ToHexString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))).ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
     }
 }
 
-function Get-CodexHookIdMatch {
+function Split-CodexHookCommandLine {
+    param([Parameter(Mandatory)][string]$Command)
+
+    $tokens = [Collections.Generic.List[string]]::new()
+    $index = 0
+    while ($index -lt $Command.Length) {
+        while ($index -lt $Command.Length -and [char]::IsWhiteSpace($Command[$index])) { $index++ }
+        if ($index -ge $Command.Length) { break }
+
+        $value = [Text.StringBuilder]::new()
+        $inQuotes = $false
+        while ($index -lt $Command.Length) {
+            $character = $Command[$index]
+            if ($character -eq '"') {
+                $inQuotes = -not $inQuotes
+                $index++
+                continue
+            }
+            if (-not $inQuotes -and [char]::IsWhiteSpace($character)) { break }
+            [void]$value.Append($character)
+            $index++
+        }
+        if ($inQuotes) {
+            return [pscustomobject]@{ parsed = $false; tokens = @() }
+        }
+        $tokens.Add($value.ToString())
+    }
+
+    return [pscustomobject]@{ parsed = ($tokens.Count -gt 0); tokens = [string[]]$tokens.ToArray() }
+}
+
+function Get-CodexHookManifestMatches {
     param(
-        [string]$TargetPath,
-        [Parameter(Mandatory)][string]$Command
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][string]$Event,
+        [AllowNull()][object]$Matcher,
+        [Parameter(Mandatory)][string[]]$Tokens,
+        [Parameter(Mandatory)][bool]$IsCommandEntry
     )
 
-    if ([string]::IsNullOrWhiteSpace($TargetPath)) {
-        return $null
+    if (-not $IsCommandEntry -or $Tokens.Count -eq 0 -or $Tokens[0] -notmatch '^[dD]:[\\/]') {
+        return
+    }
+    try {
+        $targetPath = [IO.Path]::GetFullPath($Tokens[0].Replace('/', '\'))
+    } catch {
+        return
+    }
+    [string[]]$arguments = @()
+    if ($Tokens.Count -gt 1) {
+        $arguments = [string[]]@($Tokens | Select-Object -Skip 1)
     }
 
-    switch ([IO.Path]::GetFileName($TargetPath).ToLowerInvariant()) {
-        'codex-provider-stability-guard.cmd' { return 'provider-stability' }
-        'codex-github-cli-guard.cmd' { return 'github-cli' }
-        'codex-projectless-root-d.cmd' { return 'codex-state-policy' }
-        'serena-activate-guarded.cmd' { return 'serena-activate' }
-        'serena-dashboard-guard.cmd' { return 'serena-dashboard' }
-        'serena-hooks.exe' {
-            if ($Command -match '(?i)(?:^|\s)cleanup(?:\s|$)') { return 'serena-cleanup' }
-            if ($Command -match '(?i)(?:^|\s)remind(?:\s|$)') { return 'serena-reminder' }
-            if ($Command -match '(?i)(?:^|\s)auto-approve(?:\s|$)') { return 'serena-auto-approve' }
+    return @(
+        foreach ($hook in @($Manifest.hooks)) {
+            $matcherMatches = (
+                ($null -eq $Matcher -and $null -eq $hook.matcher) -or
+                ($null -ne $Matcher -and $null -ne $hook.matcher -and [string]::Equals([string]$Matcher, [string]$hook.matcher, [StringComparison]::Ordinal))
+            )
+            if (-not $matcherMatches -or -not [string]::Equals($Event, [string]$hook.event, [StringComparison]::Ordinal)) { continue }
+            if (-not $targetPath.Equals([IO.Path]::GetFullPath([string]$hook.commandPath), [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $expectedArguments = [string[]]@($hook.arguments)
+            if ($arguments.Count -ne $expectedArguments.Count) { continue }
+            $argumentsMatch = $true
+            for ($i = 0; $i -lt $arguments.Count; $i++) {
+                if (-not [string]::Equals($arguments[$i], $expectedArguments[$i], [StringComparison]::Ordinal)) {
+                    $argumentsMatch = $false
+                    break
+                }
+            }
+            if ($argumentsMatch) { $hook }
         }
-    }
-
-    return $null
+    )
 }
 
 function Get-CodexHookRegistryFacts {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$RegistryPath)
+    param(
+        [Parameter(Mandatory)][string]$RegistryPath,
+        [Parameter(Mandatory)][object]$Manifest
+    )
+
+    [void](Assert-CodexHookManifest -Manifest $Manifest)
 
     $fullPath = Assert-CodexHookDPath -Value $RegistryPath -Name 'RegistryPath'
     if (-not [IO.File]::Exists($fullPath)) {
@@ -366,7 +610,7 @@ function Get-CodexHookRegistryFacts {
         throw 'hook registry 缺少 hooks object。'
     }
 
-    $events = [ordered]@{}
+    $events = [ordered]@{ SessionStart = @(); Stop = @(); PreToolUse = @(); Unknown = @() }
     foreach ($eventProperty in $registry.hooks.PSObject.Properties) {
         $eventName = [string]$eventProperty.Name
         $eventFacts = [Collections.Generic.List[object]]::new()
@@ -378,41 +622,121 @@ function Get-CodexHookRegistryFacts {
             }
 
             $matcher = if ($group.PSObject.Properties.Name -contains 'matcher') { $group.matcher } else { $null }
+            $entryIndex = 0
             foreach ($entry in @($group.hooks)) {
                 if ($null -eq $entry -or $entry.PSObject.Properties.Name -notcontains 'command') {
+                    $entryIndex++
                     continue
                 }
 
                 $command = [string]$entry.command
                 $timeout = if ($entry.PSObject.Properties.Name -contains 'timeout') { $entry.timeout } else { $null }
-                $target = Resolve-CodexHookCommandTarget -Command $command
-                $targetExists = $false
+                $parsed = Split-CodexHookCommandLine -Command $command
+                $entryType = if ($entry.PSObject.Properties.Name -contains 'type') { [string]$entry.type } else { $null }
+                $timeoutIsInteger = $timeout -is [sbyte] -or $timeout -is [byte] -or $timeout -is [int16] -or $timeout -is [uint16] -or $timeout -is [int32] -or $timeout -is [uint32] -or $timeout -is [int64] -or $timeout -is [uint64]
+                [object[]]$manifestMatches = @()
+                if ($parsed.parsed) {
+                    $manifestMatches = [object[]]@(Get-CodexHookManifestMatches -Manifest $Manifest -Event $eventName -Matcher $matcher -Tokens $parsed.tokens -IsCommandEntry ($entryType -ceq 'command') | Where-Object { $null -ne $_ })
+                }
+                $matchedHook = if ($manifestMatches.Count -eq 1) { $manifestMatches[0] } else { $null }
+                $targetExists = $null
                 $commandSha256 = $null
-                if (-not [string]::IsNullOrWhiteSpace($target.path) -and [IO.Path]::IsPathFullyQualified($target.path)) {
-                    $targetExists = [IO.File]::Exists($target.path)
+                $targetPath = $null
+                if ($null -ne $matchedHook) {
+                    $targetPath = [IO.Path]::GetFullPath([string]$matchedHook.commandPath)
+                    $targetExists = [IO.File]::Exists($targetPath)
                     if ($targetExists) {
-                        $commandSha256 = (Get-FileHash -LiteralPath $target.path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                        $commandSha256 = (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
                     }
                 }
 
+                $pathPolicy = if ($null -ne $matchedHook) { 'manifest-allowlisted' } elseif (-not $parsed.parsed) {
+                    'unparsed'
+                } elseif ($parsed.tokens[0] -match '^(?:\\\\|\\\?|\\\.)') {
+                    'forbidden-unc-or-device'
+                } elseif ($parsed.tokens[0] -match '^[dD]:[\\/]') {
+                    'unmatched-d-path'
+                } elseif ([IO.Path]::IsPathRooted($parsed.tokens[0])) {
+                    'outside-d-path'
+                } else {
+                    'relative-path'
+                }
+
                 $eventFacts.Add([pscustomobject][ordered]@{
-                    event = $eventName
-                    index = $groupIndex
-                    matcher = $matcher
-                    command = $command
-                    timeout = $timeout
+                    event = if ($eventName -cin @('SessionStart', 'Stop', 'PreToolUse')) { $eventName } else { 'Unknown' }
+                    groupIndex = $groupIndex
+                    entryIndex = $entryIndex
+                    matcher = if ($null -ne $matchedHook) { $matchedHook.matcher } else { $null }
+                    matcherPresent = $null -ne $matcher
+                    timeout = if ($timeoutIsInteger) { $timeout } else { $null }
+                    timeoutPresent = $null -ne $timeout
+                    entryType = if ($entryType -ceq 'command') { 'command' } elseif ([string]::IsNullOrWhiteSpace($entryType)) { 'missing' } else { 'other' }
+                    pathPolicy = $pathPolicy
+                    targetPath = $targetPath
                     targetExists = $targetExists
                     commandSha256 = $commandSha256
-                    idMatch = Get-CodexHookIdMatch -TargetPath $target.path -Command $command
+                    commandIdentitySha256 = Get-CodexHookTextSha256 -Text $command
+                    argumentCount = if ($parsed.parsed) { [Math]::Max(0, $parsed.tokens.Count - 1) } else { $null }
+                    idMatch = if ($null -ne $matchedHook) { $matchedHook.id } else { $null }
+                    idMatchStatus = if (-not $parsed.parsed) { 'unparsed' } elseif ($manifestMatches.Count -gt 1) { 'ambiguous' } elseif ($manifestMatches.Count -eq 1) { 'matched' } else { 'unmatched' }
+                    lifecycleMatch = if ($null -ne $matchedHook) { $matchedHook.lifecycle } else { $null }
+                    registrationState = if ($null -ne $matchedHook -and $matchedHook.lifecycle -ceq 'retired') { 'retired-but-registered' } elseif ($null -ne $matchedHook) { 'declared' } else { 'unknown' }
                 })
+                $entryIndex++
             }
         }
 
-        $events[$eventName] = [object[]]$eventFacts.ToArray()
+        $bucket = if ($eventName -cin @('SessionStart', 'Stop', 'PreToolUse')) { $eventName } else { 'Unknown' }
+        $events[$bucket] = [object[]]@($events[$bucket]) + [object[]]$eventFacts.ToArray()
     }
 
     return [pscustomobject][ordered]@{
         events = [pscustomobject]$events
+    }
+}
+
+function Get-CodexHookDependencyFacts {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Manifest)
+
+    [void](Assert-CodexHookManifest -Manifest $Manifest)
+    foreach ($hook in @($Manifest.hooks)) {
+        $wrapperPath = if ($null -ne $hook.wrapperPath) { [IO.Path]::GetFullPath([string]$hook.wrapperPath) } else { $null }
+        $implementationPath = [IO.Path]::GetFullPath([string]$hook.implementationPath)
+        $runtimePath = [IO.Path]::GetFullPath([string]$Manifest.runtimes.PSObject.Properties[$hook.runtimeId].Value)
+        $wrapperExists = if ($null -ne $wrapperPath) { [IO.File]::Exists($wrapperPath) } else { $null }
+        $implementationExists = [IO.File]::Exists($implementationPath)
+        $runtimeExists = [IO.File]::Exists($runtimePath)
+        $wrapperText = if ($wrapperExists) { [IO.File]::ReadAllText($wrapperPath) } else { $null }
+        $normalizedWrapperText = if ($null -ne $wrapperText) { $wrapperText.Replace('/', '\') } else { $null }
+
+        [pscustomobject][ordered]@{
+            id = $hook.id
+            entrypointKind = if ($null -eq $wrapperPath) { 'direct-vendor' } else { 'wrapper' }
+            wrapperPath = $wrapperPath
+            wrapperExists = $wrapperExists
+            wrapperSha256 = if ($wrapperExists) { (Get-FileHash -LiteralPath $wrapperPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+            implementationPath = $implementationPath
+            implementationExists = $implementationExists
+            implementationSha256 = if ($implementationExists) { (Get-FileHash -LiteralPath $implementationPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+            runtimeId = $hook.runtimeId
+            runtimePath = $runtimePath
+            runtimeExists = $runtimeExists
+            runtimeSha256 = if ($runtimeExists) { (Get-FileHash -LiteralPath $runtimePath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+            wrapperReferencesImplementation = if ($null -eq $wrapperPath) { $null } elseif ($wrapperExists) { $normalizedWrapperText.IndexOf($implementationPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 } else { $false }
+            wrapperReferencesRuntime = if ($null -eq $wrapperPath) { $null } elseif ($wrapperExists) { $normalizedWrapperText.IndexOf($runtimePath, [StringComparison]::OrdinalIgnoreCase) -ge 0 } else { $false }
+            readResourceCount = @($hook.readResources).Count
+            writeResourceCount = @($hook.writeResources).Count
+            dependencyState = if ($null -eq $wrapperPath) {
+                if ($implementationExists -and $runtimeExists) { 'ready' } else { 'pending' }
+            } elseif ($wrapperExists -and $implementationExists -and $runtimeExists -and
+                $normalizedWrapperText.IndexOf($implementationPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+                $normalizedWrapperText.IndexOf($runtimePath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                'ready'
+            } else {
+                'pending-or-mismatched'
+            }
+        }
     }
 }
 
@@ -431,6 +755,12 @@ function Get-CodexHookFileFacts {
     foreach ($file in @($Manifest.files)) {
         $managedPath = [IO.Path]::GetFullPath((Join-Path $managedRootPath $file.relativePath))
         $livePath = [IO.Path]::GetFullPath((Join-Path $liveHooksRootPath $file.liveRelativePath))
+        if (-not (Test-CodexHookPathWithin -Path $managedPath -ParentPath $managedRootPath)) {
+            throw "managed file 逃逸固定根：$($file.relativePath)"
+        }
+        if (-not (Test-CodexHookPathWithin -Path $livePath -ParentPath $liveHooksRootPath)) {
+            throw "live file 逃逸固定根：$($file.liveRelativePath)"
+        }
         $managedExists = [IO.File]::Exists($managedPath)
         $liveExists = [IO.File]::Exists($livePath)
         $managedSha256 = if ($managedExists) {
@@ -465,6 +795,7 @@ function New-CodexHookInventoryDocument {
         [Parameter(Mandatory)][object]$Manifest,
         [Parameter(Mandatory)][object]$Registry,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$FileFacts,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$DependencyFacts,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$TrustObservation
     )
 
@@ -480,11 +811,11 @@ function New-CodexHookInventoryDocument {
     )
     $commandCounts = @{}
     foreach ($entry in $entries) {
-        if ([string]::IsNullOrWhiteSpace([string]$entry.command)) {
+        if ([string]::IsNullOrWhiteSpace([string]$entry.commandIdentitySha256)) {
             continue
         }
 
-        $key = ([string]$entry.command).ToLowerInvariant()
+        $key = [string]$entry.commandIdentitySha256
         if (-not $commandCounts.ContainsKey($key)) {
             $commandCounts[$key] = 0
         }
@@ -495,7 +826,8 @@ function New-CodexHookInventoryDocument {
         foreach ($observation in @($TrustObservation)) {
             [pscustomobject][ordered]@{
                 section = if ($observation.PSObject.Properties.Name -contains 'section') { [string]$observation.section } else { $null }
-                keyName = if ($observation.PSObject.Properties.Name -contains 'keyName') { [string]$observation.keyName } else { $null }
+                keyKind = if ($observation.PSObject.Properties.Name -contains 'keyKind') { [string]$observation.keyKind } else { 'unknown' }
+                keyNameSha256 = if ($observation.PSObject.Properties.Name -contains 'keyNameSha256') { [string]$observation.keyNameSha256 } else { $null }
                 present = if ($observation.PSObject.Properties.Name -contains 'present') { [bool]$observation.present } else { $true }
             }
         }
@@ -518,14 +850,18 @@ function New-CodexHookInventoryDocument {
         }
         registry = $Registry
         fileFacts = [object[]]@($FileFacts)
+        dependencyFacts = [object[]]@($DependencyFacts)
         trustObservation = [object[]]$sanitizedTrust
         summary = [pscustomobject][ordered]@{
             eventCount = @($Registry.events.PSObject.Properties).Count
             registryEntryCount = $entries.Count
-            missingTargetCount = @($entries | Where-Object { -not $_.targetExists }).Count
+            missingTargetCount = @($entries | Where-Object { $null -ne $_.targetExists -and -not $_.targetExists }).Count
+            unprobedTargetCount = @($entries | Where-Object { $null -eq $_.targetExists }).Count
             duplicateCommandCount = $duplicateCommandCount
             managedMissingCount = @($FileFacts | Where-Object { -not $_.managedExists }).Count
             liveMissingCount = @($FileFacts | Where-Object { -not $_.liveExists }).Count
+            dependencyGapCount = @($DependencyFacts | Where-Object { $_.dependencyState -cne 'ready' }).Count
+            retiredButRegisteredCount = @($entries | Where-Object registrationState -ceq 'retired-but-registered').Count
             trustObservationCount = $sanitizedTrust.Count
         }
     }
