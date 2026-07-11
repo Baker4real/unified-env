@@ -1,6 +1,8 @@
 {
-  "schemaVersion": 2,
-  "generatedAt": "2026-07-09T16:07:14.5042681+08:00",
+  "artifactType": "env-governance.inventory",
+  "schemaVersion": 3,
+  "executionAllowed": false,
+  "generatedAt": "2026-07-11T08:03:37.5369016+08:00",
   "readOnly": true,
   "host": {
     "computerName": "BAKER",
@@ -8,32 +10,37 @@
     "osVersion": "Microsoft Windows NT 10.0.26200.0",
     "is64BitOperatingSystem": true,
     "powershellVersion": "7.6.3",
-    "currentDirectory": "D:\\"
+    "currentDirectory": "D:\\Codex\\projects\\统一环境"
   },
   "outputDir": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory",
   "projectRoots": [
     "D:\\Codex\\projects"
   ],
+  "projectRootFacts": [
+    {
+      "path": "D:\\Codex\\projects",
+      "kind": "collection"
+    }
+  ],
+  "toolOwnerRoots": [
+    "D:\\Codex\\projects",
+    "D:\\hermes-data\\hermes-agent"
+  ],
   "excludedRoots": [
     {
-      "path": "C:\\Windows",
-      "reason": "系统目录，绝不自动迁移"
+      "path": "C:\\Windows"
     },
     {
-      "path": "C:\\Program Files",
-      "reason": "MSI/系统级安装目录，绝不直接搬迁"
+      "path": "C:\\Program Files"
     },
     {
-      "path": "C:\\Program Files (x86)",
-      "reason": "MSI/系统级安装目录，绝不直接搬迁"
+      "path": "C:\\Program Files (x86)"
     },
     {
-      "path": "C:\\ProgramData",
-      "reason": "服务和机器级状态常驻位置，仅按官方迁移流程处理"
+      "path": "C:\\ProgramData"
     },
     {
-      "path": "C:\\Users",
-      "reason": "不批量迁移用户目录或 AppData"
+      "path": "C:\\Users"
     }
   ],
   "versionProbeTimeoutSeconds": 12,
@@ -48,7 +55,68 @@
       "evidence": "Python 3.14.5",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "D:\\hermes-data\\.npm-global\\python.exe",
+        "originClass": "shared-tool",
+        "matchedRule": "explicit-shared-root",
+        "matchedRoot": "D:\\hermes-data\\.npm-global",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": {
+        "path": "D:\\hermes-data\\hermes-agent\\venv-new\\Scripts\\python.exe",
+        "originClass": "project-local-env",
+        "matchedRule": "explicit-project-root",
+        "matchedRoot": "D:\\hermes-data\\hermes-agent",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null,
+        "prefix": "D:\\hermes-data\\hermes-agent\\venv-new",
+        "basePrefix": "D:\\hermes-data\\.local\\python\\pythoncore-3.14-64",
+        "probeError": null
+      },
+      "originClass": "project-local-env",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "D:\\hermes-data\\.npm-global\\python.exe",
+            "originClass": "shared-tool",
+            "matchedRule": "explicit-shared-root",
+            "matchedRoot": "D:\\hermes-data\\.npm-global",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        },
+        {
+          "role": "runtime",
+          "evidence": {
+            "path": "D:\\hermes-data\\hermes-agent\\venv-new\\Scripts\\python.exe",
+            "originClass": "project-local-env",
+            "matchedRule": "explicit-project-root",
+            "matchedRoot": "D:\\hermes-data\\hermes-agent",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null,
+            "prefix": "D:\\hermes-data\\hermes-agent\\venv-new",
+            "basePrefix": "D:\\hermes-data\\.local\\python\\pythoncore-3.14-64",
+            "probeError": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "py",
@@ -58,7 +126,38 @@
       "evidence": "Python 3.14.5",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "D:\\hermes-data\\.npm-global\\py.exe",
+        "originClass": "shared-tool",
+        "matchedRule": "explicit-shared-root",
+        "matchedRoot": "D:\\hermes-data\\.npm-global",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "shared-tool",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "D:\\hermes-data\\.npm-global\\py.exe",
+            "originClass": "shared-tool",
+            "matchedRule": "explicit-shared-root",
+            "matchedRoot": "D:\\hermes-data\\.npm-global",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": false
     },
     {
       "name": "uv",
@@ -68,7 +167,38 @@
       "evidence": "uv 0.11.7 (9d177269e 2026-04-15 x86_64-pc-windows-msvc)",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "D:\\hermes-data\\.local\\bin\\uv.exe",
+        "originClass": "shared-tool",
+        "matchedRule": "explicit-shared-root",
+        "matchedRoot": "D:\\hermes-data\\.local",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "shared-tool",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "D:\\hermes-data\\.local\\bin\\uv.exe",
+            "originClass": "shared-tool",
+            "matchedRule": "explicit-shared-root",
+            "matchedRoot": "D:\\hermes-data\\.local",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": false
     },
     {
       "name": "pipx",
@@ -78,7 +208,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "poetry",
@@ -88,7 +249,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "conda",
@@ -98,7 +290,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "mamba",
@@ -108,7 +331,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "node",
@@ -118,27 +372,120 @@
       "evidence": "v24.15.0",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "C:\\Program Files\\nodejs\\node.exe",
+        "originClass": "system-installer",
+        "matchedRule": "system-installer-root",
+        "matchedRoot": "C:\\Program Files",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "system-installer",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "C:\\Program Files\\nodejs\\node.exe",
+            "originClass": "system-installer",
+            "matchedRule": "system-installer-root",
+            "matchedRoot": "C:\\Program Files",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "npm",
-      "found": true,
-      "path": "C:\\Program Files\\nodejs\\npm.ps1",
-      "version": "11.12.1",
-      "evidence": "11.12.1",
-      "exitCode": 0,
-      "probeSucceeded": true,
-      "error": null
+      "found": false,
+      "path": null,
+      "version": null,
+      "evidence": null,
+      "exitCode": null,
+      "probeSucceeded": false,
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "pnpm",
       "found": true,
-      "path": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\pnpm.cmd",
+      "path": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback\\pnpm.cmd",
       "version": "11.7.0",
       "evidence": "11.7.0",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback\\pnpm.cmd",
+        "originClass": "user-profile",
+        "matchedRule": "user-profile-root",
+        "matchedRoot": "C:\\Users\\WINDOWS",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "user-profile",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback\\pnpm.cmd",
+            "originClass": "user-profile",
+            "matchedRule": "user-profile-root",
+            "matchedRoot": "C:\\Users\\WINDOWS",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "yarn",
@@ -148,7 +495,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "nvm",
@@ -158,7 +536,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "fnm",
@@ -168,7 +577,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "mise",
@@ -178,7 +618,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "scoop",
@@ -188,7 +659,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "winget",
@@ -198,7 +700,38 @@
       "evidence": "v1.29.280",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe",
+        "originClass": "windows-system",
+        "matchedRule": "windows-system-root",
+        "matchedRoot": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": true,
+        "reparseAncestor": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe",
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "windows-system",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe",
+            "originClass": "windows-system",
+            "matchedRule": "windows-system-root",
+            "matchedRoot": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": true,
+            "reparseAncestor": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe",
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "choco",
@@ -208,7 +741,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "git",
@@ -218,7 +782,38 @@
       "evidence": "git version 2.55.0.windows.1",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "C:\\Program Files\\Git\\cmd\\git.exe",
+        "originClass": "system-installer",
+        "matchedRule": "system-installer-root",
+        "matchedRoot": "C:\\Program Files",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "system-installer",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "C:\\Program Files\\Git\\cmd\\git.exe",
+            "originClass": "system-installer",
+            "matchedRule": "system-installer-root",
+            "matchedRoot": "C:\\Program Files",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "cargo",
@@ -228,7 +823,38 @@
       "evidence": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "D:\\Dev\\.cargo\\bin\\cargo.exe",
+        "originClass": "unknown",
+        "matchedRule": "no-origin-rule-matched",
+        "matchedRoot": null,
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "D:\\Dev\\.cargo\\bin\\cargo.exe",
+            "originClass": "unknown",
+            "matchedRule": "no-origin-rule-matched",
+            "matchedRoot": null,
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "rustc",
@@ -238,7 +864,38 @@
       "evidence": "rustc 1.95.0 (59807616e 2026-04-14)",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "D:\\Dev\\.cargo\\bin\\rustc.exe",
+        "originClass": "unknown",
+        "matchedRule": "no-origin-rule-matched",
+        "matchedRoot": null,
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "D:\\Dev\\.cargo\\bin\\rustc.exe",
+            "originClass": "unknown",
+            "matchedRule": "no-origin-rule-matched",
+            "matchedRoot": null,
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "go",
@@ -248,7 +905,38 @@
       "evidence": "go version go1.26.3 windows/amd64",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "C:\\Program Files\\Go\\bin\\go.exe",
+        "originClass": "system-installer",
+        "matchedRule": "system-installer-root",
+        "matchedRoot": "C:\\Program Files",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "system-installer",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "C:\\Program Files\\Go\\bin\\go.exe",
+            "originClass": "system-installer",
+            "matchedRule": "system-installer-root",
+            "matchedRoot": "C:\\Program Files",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "dotnet",
@@ -258,7 +946,38 @@
       "evidence": "6.0.428",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "C:\\Program Files\\dotnet\\dotnet.exe",
+        "originClass": "system-installer",
+        "matchedRule": "system-installer-root",
+        "matchedRoot": "C:\\Program Files",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "system-installer",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "C:\\Program Files\\dotnet\\dotnet.exe",
+            "originClass": "system-installer",
+            "matchedRule": "system-installer-root",
+            "matchedRoot": "C:\\Program Files",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "java",
@@ -268,7 +987,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "javac",
@@ -278,7 +1028,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "mvn",
@@ -288,7 +1069,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "gradle",
@@ -298,7 +1110,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "cmake",
@@ -308,7 +1151,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "ninja",
@@ -318,7 +1192,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "docker",
@@ -328,7 +1233,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "wsl",
@@ -338,7 +1274,38 @@
       "evidence": "W\u0000S\u0000L\u0000 \u0000Hr,g:\u0000 \u00002\u0000.\u00007\u0000.\u00003\u0000.\u00000\u0000 \u0000 \u0000匭8hHr,g:\u0000 \u00006\u0000.\u00006\u0000.\u00001\u00001\u00004\u0000.\u00001\u0000-\u00001\u0000 \u0000",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "C:\\WINDOWS\\system32\\wsl.exe",
+        "originClass": "windows-system",
+        "matchedRule": "windows-system-root",
+        "matchedRoot": "C:\\WINDOWS",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "windows-system",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "C:\\WINDOWS\\system32\\wsl.exe",
+            "originClass": "windows-system",
+            "matchedRule": "windows-system-root",
+            "matchedRoot": "C:\\WINDOWS",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "code",
@@ -348,7 +1315,38 @@
       "evidence": null,
       "exitCode": null,
       "probeSucceeded": false,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "",
+        "originClass": "unknown",
+        "matchedRule": "no-absolute-path",
+        "matchedRoot": null,
+        "metadataStatus": "not-run",
+        "metadataError": "absolute path unavailable",
+        "isReparsePoint": null,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "unknown",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "",
+            "originClass": "unknown",
+            "matchedRule": "no-absolute-path",
+            "matchedRoot": null,
+            "metadataStatus": "not-run",
+            "metadataError": "absolute path unavailable",
+            "isReparsePoint": null,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     },
     {
       "name": "pwsh",
@@ -358,7 +1356,38 @@
       "evidence": "PowerShell 7.6.3",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "originClass": "shared-tool",
+        "matchedRule": "explicit-shared-root",
+        "matchedRoot": "D:\\Codex\\tools",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "shared-tool",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+            "originClass": "shared-tool",
+            "matchedRule": "explicit-shared-root",
+            "matchedRoot": "D:\\Codex\\tools",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": false
     },
     {
       "name": "powershell",
@@ -368,15 +1397,41 @@
       "evidence": "5.1.26100.8737",
       "exitCode": 0,
       "probeSucceeded": true,
-      "error": null
+      "error": null,
+      "launcher": {
+        "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "originClass": "windows-system",
+        "matchedRule": "windows-system-root",
+        "matchedRoot": "C:\\WINDOWS",
+        "metadataStatus": "ok",
+        "metadataError": null,
+        "isReparsePoint": false,
+        "reparseAncestor": null,
+        "reparseTarget": null
+      },
+      "runtime": null,
+      "originClass": "windows-system",
+      "originEvidence": [
+        {
+          "role": "launcher",
+          "evidence": {
+            "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "originClass": "windows-system",
+            "matchedRule": "windows-system-root",
+            "matchedRoot": "C:\\WINDOWS",
+            "metadataStatus": "ok",
+            "metadataError": null,
+            "isReparsePoint": false,
+            "reparseAncestor": null,
+            "reparseTarget": null
+          }
+        }
+      ],
+      "resolutionScope": "process",
+      "requiresManualReview": true
     }
   ],
   "selectedEnvironmentVariables": [
-    {
-      "name": "Path",
-      "value": "D:\\Codex\\tools\\PowerShell\\7.6.3;C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7;D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0Pp2RRI;C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\Program Files\\dotnet\\;C:\\Program Files\\Zero Install;D:\\Program Files (x86)\\XFTP7\\;C:\\Program Files\\nodejs\\;C:\\Program Files (x86)\\ZeroTier\\One\\;C:\\Program Files\\Tailscale\\;D:\\Codex\\tools\\bin;D:\\hermes-data\\.npm-global;C:\\Program Files\\Go\\bin;C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Program Files\\Git\\cmd;C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR;D:\\hermes-data\\.local\\bin;C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7;C:\\Program Files\\Git\\bin;C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\SQLite.SQLite_Microsoft.Winget.Source_8wekyb3d8bbwe;D:\\Dev\\go\\bin;D:\\Dev\\.cargo\\bin;C:\\Users\\WINDOWS\\.dotnet\\tools;D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools;C:\\Users\\WINDOWS\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd;C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.623.19656.0_x64__2p2nqsd0c76g0\\app\\resources",
-      "isSet": true
-    },
     {
       "name": "UV_CACHE_DIR",
       "value": "D:\\hermes-data\\.uv-cache",
@@ -488,270 +1543,945 @@
       "isSet": false
     }
   ],
+  "pathScopes": {
+    "process": {
+      "source": "process",
+      "readStatus": "ok",
+      "complete": true,
+      "errors": [],
+      "rawValueSha256": "af258724447f32451b538698176a17a53923c3a0708d2ca3600ea99744a178fe",
+      "dotNetValueSha256": "af258724447f32451b538698176a17a53923c3a0708d2ca3600ea99744a178fe",
+      "valuesMatch": true,
+      "readErrors": [],
+      "metadataErrors": [],
+      "entries": [
+        {
+          "index": 0,
+          "rawPath": "D:\\Codex\\tools\\PowerShell\\7.6.3",
+          "expandedPath": "D:\\Codex\\tools\\PowerShell\\7.6.3",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 1,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 2,
+          "rawPath": "D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0t6htsF",
+          "expandedPath": "D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0t6htsF",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 3,
+          "rawPath": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\override",
+          "expandedPath": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\override",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 4,
+          "rawPath": "C:\\WINDOWS\\system32",
+          "expandedPath": "C:\\WINDOWS\\system32",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 5,
+          "rawPath": "C:\\WINDOWS",
+          "expandedPath": "C:\\WINDOWS",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 6,
+          "rawPath": "C:\\WINDOWS\\System32\\Wbem",
+          "expandedPath": "C:\\WINDOWS\\System32\\Wbem",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 7,
+          "rawPath": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\",
+          "expandedPath": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 8,
+          "rawPath": "C:\\WINDOWS\\System32\\OpenSSH\\",
+          "expandedPath": "C:\\WINDOWS\\System32\\OpenSSH\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 9,
+          "rawPath": "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common",
+          "expandedPath": "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 10,
+          "rawPath": "C:\\Program Files\\dotnet\\",
+          "expandedPath": "C:\\Program Files\\dotnet\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 11,
+          "rawPath": "C:\\Program Files\\Zero Install",
+          "expandedPath": "C:\\Program Files\\Zero Install",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 12,
+          "rawPath": "D:\\Program Files (x86)\\XFTP7\\",
+          "expandedPath": "D:\\Program Files (x86)\\XFTP7\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 13,
+          "rawPath": "C:\\Program Files\\nodejs\\",
+          "expandedPath": "C:\\Program Files\\nodejs\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 14,
+          "rawPath": "C:\\Program Files (x86)\\ZeroTier\\One\\",
+          "expandedPath": "C:\\Program Files (x86)\\ZeroTier\\One\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 15,
+          "rawPath": "C:\\Program Files\\Tailscale\\",
+          "expandedPath": "C:\\Program Files\\Tailscale\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 16,
+          "rawPath": "D:\\Codex\\tools\\bin",
+          "expandedPath": "D:\\Codex\\tools\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 17,
+          "rawPath": "D:\\hermes-data\\.npm-global",
+          "expandedPath": "D:\\hermes-data\\.npm-global",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 18,
+          "rawPath": "C:\\Program Files\\Go\\bin",
+          "expandedPath": "C:\\Program Files\\Go\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 19,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 20,
+          "rawPath": "C:\\Program Files\\Git\\cmd",
+          "expandedPath": "C:\\Program Files\\Git\\cmd",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 21,
+          "rawPath": "C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR",
+          "expandedPath": "C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 22,
+          "rawPath": "D:\\hermes-data\\.local\\bin",
+          "expandedPath": "D:\\hermes-data\\.local\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 23,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 24,
+          "rawPath": "C:\\Program Files\\Git\\bin",
+          "expandedPath": "C:\\Program Files\\Git\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 25,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 26,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\SQLite.SQLite_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\SQLite.SQLite_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 27,
+          "rawPath": "D:\\Dev\\go\\bin",
+          "expandedPath": "D:\\Dev\\go\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 28,
+          "rawPath": "D:\\Dev\\.cargo\\bin",
+          "expandedPath": "D:\\Dev\\.cargo\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 29,
+          "rawPath": "C:\\Users\\WINDOWS\\.dotnet\\tools",
+          "expandedPath": "C:\\Users\\WINDOWS\\.dotnet\\tools",
+          "expansionStatus": "not-required",
+          "exists": false,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 30,
+          "rawPath": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
+          "expandedPath": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
+          "expansionStatus": "not-required",
+          "exists": false,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 31,
+          "rawPath": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback",
+          "expandedPath": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 32,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 33,
+          "rawPath": "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.3748.0_x64__2p2nqsd0c76g0\\app\\resources",
+          "expandedPath": "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.3748.0_x64__2p2nqsd0c76g0\\app\\resources",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        }
+      ],
+      "duplicates": [
+        {
+          "firstIndex": 1,
+          "duplicateIndex": 23,
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7"
+        }
+      ],
+      "missingPathCleanupCandidates": [
+        {
+          "index": 29,
+          "rawPath": "C:\\Users\\WINDOWS\\.dotnet\\tools",
+          "expandedPath": "C:\\Users\\WINDOWS\\.dotnet\\tools",
+          "expansionStatus": "not-required",
+          "exists": false,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 30,
+          "rawPath": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
+          "expandedPath": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
+          "expansionStatus": "not-required",
+          "exists": false,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        }
+      ]
+    },
+    "user": {
+      "source": "user",
+      "readStatus": "ok",
+      "complete": true,
+      "errors": [],
+      "rawValueSha256": "08affd417f779c53ef576bbb6c481e20b4f4d18a68a7c804c2922aec38d63337",
+      "dotNetValueSha256": "08affd417f779c53ef576bbb6c481e20b4f4d18a68a7c804c2922aec38d63337",
+      "valuesMatch": true,
+      "readErrors": [],
+      "metadataErrors": [],
+      "entries": [
+        {
+          "index": 0,
+          "rawPath": "D:\\Codex\\tools\\bin",
+          "expandedPath": "D:\\Codex\\tools\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 1,
+          "rawPath": "D:\\hermes-data\\.local\\bin",
+          "expandedPath": "D:\\hermes-data\\.local\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 2,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 3,
+          "rawPath": "C:\\Program Files\\Git\\bin",
+          "expandedPath": "C:\\Program Files\\Git\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 4,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 5,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 6,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\SQLite.SQLite_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\SQLite.SQLite_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 7,
+          "rawPath": "D:\\Dev\\go\\bin",
+          "expandedPath": "D:\\Dev\\go\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 8,
+          "rawPath": "D:\\hermes-data\\.npm-global",
+          "expandedPath": "D:\\hermes-data\\.npm-global",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 9,
+          "rawPath": "D:\\Dev\\.cargo\\bin",
+          "expandedPath": "D:\\Dev\\.cargo\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 10,
+          "rawPath": "C:\\Users\\WINDOWS\\.dotnet\\tools",
+          "expandedPath": "C:\\Users\\WINDOWS\\.dotnet\\tools",
+          "expansionStatus": "not-required",
+          "exists": false,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 11,
+          "rawPath": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
+          "expandedPath": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
+          "expansionStatus": "not-required",
+          "exists": false,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        }
+      ],
+      "duplicates": [],
+      "missingPathCleanupCandidates": [
+        {
+          "index": 10,
+          "rawPath": "C:\\Users\\WINDOWS\\.dotnet\\tools",
+          "expandedPath": "C:\\Users\\WINDOWS\\.dotnet\\tools",
+          "expansionStatus": "not-required",
+          "exists": false,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 11,
+          "rawPath": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
+          "expandedPath": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
+          "expansionStatus": "not-required",
+          "exists": false,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        }
+      ]
+    },
+    "machine": {
+      "source": "machine",
+      "readStatus": "ok",
+      "complete": true,
+      "errors": [],
+      "rawValueSha256": "749ea2470727683c6e87df3e540720d71b77416971cbcc7bc900047f666945d8",
+      "dotNetValueSha256": "749ea2470727683c6e87df3e540720d71b77416971cbcc7bc900047f666945d8",
+      "valuesMatch": true,
+      "readErrors": [],
+      "metadataErrors": [],
+      "entries": [
+        {
+          "index": 0,
+          "rawPath": "C:\\WINDOWS\\system32",
+          "expandedPath": "C:\\WINDOWS\\system32",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 1,
+          "rawPath": "C:\\WINDOWS",
+          "expandedPath": "C:\\WINDOWS",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 2,
+          "rawPath": "C:\\WINDOWS\\System32\\Wbem",
+          "expandedPath": "C:\\WINDOWS\\System32\\Wbem",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 3,
+          "rawPath": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\",
+          "expandedPath": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 4,
+          "rawPath": "C:\\WINDOWS\\System32\\OpenSSH\\",
+          "expandedPath": "C:\\WINDOWS\\System32\\OpenSSH\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 5,
+          "rawPath": "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common",
+          "expandedPath": "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 6,
+          "rawPath": "C:\\Program Files\\dotnet\\",
+          "expandedPath": "C:\\Program Files\\dotnet\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 7,
+          "rawPath": "C:\\Program Files\\Zero Install",
+          "expandedPath": "C:\\Program Files\\Zero Install",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 8,
+          "rawPath": "D:\\Program Files (x86)\\XFTP7\\",
+          "expandedPath": "D:\\Program Files (x86)\\XFTP7\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 9,
+          "rawPath": "C:\\Program Files\\nodejs\\",
+          "expandedPath": "C:\\Program Files\\nodejs\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 10,
+          "rawPath": "C:\\Program Files (x86)\\ZeroTier\\One\\",
+          "expandedPath": "C:\\Program Files (x86)\\ZeroTier\\One\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 11,
+          "rawPath": "C:\\Program Files\\Tailscale\\",
+          "expandedPath": "C:\\Program Files\\Tailscale\\",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 12,
+          "rawPath": "D:\\Codex\\tools\\bin",
+          "expandedPath": "D:\\Codex\\tools\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 13,
+          "rawPath": "D:\\hermes-data\\.npm-global",
+          "expandedPath": "D:\\hermes-data\\.npm-global",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "D:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 14,
+          "rawPath": "C:\\Program Files\\Go\\bin",
+          "expandedPath": "C:\\Program Files\\Go\\bin",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 15,
+          "rawPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 16,
+          "rawPath": "C:\\Program Files\\Git\\cmd",
+          "expandedPath": "C:\\Program Files\\Git\\cmd",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "index": 17,
+          "rawPath": "C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR",
+          "expandedPath": "C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR",
+          "expansionStatus": "not-required",
+          "exists": true,
+          "drive": "C:\\",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        }
+      ],
+      "duplicates": [],
+      "missingPathCleanupCandidates": []
+    }
+  },
   "pathEntries": [
     {
       "index": 0,
       "path": "D:\\Codex\\tools\\PowerShell\\7.6.3",
       "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "D:\\"
     },
     {
       "index": 1,
       "path": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 2,
-      "path": "D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0Pp2RRI",
+      "path": "D:\\Codex\\.codex\\tmp\\arg0\\codex-arg0t6htsF",
       "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "D:\\"
     },
     {
       "index": 3,
-      "path": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin",
+      "path": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\override",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 4,
       "path": "C:\\WINDOWS\\system32",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 5,
       "path": "C:\\WINDOWS",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 6,
       "path": "C:\\WINDOWS\\System32\\Wbem",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 7,
       "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 8,
       "path": "C:\\WINDOWS\\System32\\OpenSSH\\",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 9,
       "path": "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 10,
       "path": "C:\\Program Files\\dotnet\\",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 11,
       "path": "C:\\Program Files\\Zero Install",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 12,
       "path": "D:\\Program Files (x86)\\XFTP7\\",
       "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "D:\\"
     },
     {
       "index": 13,
       "path": "C:\\Program Files\\nodejs\\",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 14,
       "path": "C:\\Program Files (x86)\\ZeroTier\\One\\",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 15,
       "path": "C:\\Program Files\\Tailscale\\",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 16,
       "path": "D:\\Codex\\tools\\bin",
       "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "D:\\"
     },
     {
       "index": 17,
       "path": "D:\\hermes-data\\.npm-global",
       "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "D:\\"
     },
     {
       "index": 18,
       "path": "C:\\Program Files\\Go\\bin",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 19,
       "path": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\voidtools.Everything.Cli_Microsoft.Winget.Source_8wekyb3d8bbwe",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 20,
       "path": "C:\\Program Files\\Git\\cmd",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 21,
       "path": "C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 22,
       "path": "D:\\hermes-data\\.local\\bin",
       "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "D:\\"
     },
     {
       "index": 23,
       "path": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 24,
       "path": "C:\\Program Files\\Git\\bin",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 25,
       "path": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WindowsApps",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 26,
       "path": "C:\\Users\\WINDOWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\SQLite.SQLite_Microsoft.Winget.Source_8wekyb3d8bbwe",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 27,
       "path": "D:\\Dev\\go\\bin",
       "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "D:\\"
     },
     {
       "index": 28,
       "path": "D:\\Dev\\.cargo\\bin",
       "exists": true,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "D:\\"
     },
     {
       "index": 29,
       "path": "C:\\Users\\WINDOWS\\.dotnet\\tools",
       "exists": false,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 30,
       "path": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
       "exists": false,
-      "drive": "D:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "D:\\"
     },
     {
       "index": 31,
-      "path": "C:\\Users\\WINDOWS\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd",
+      "path": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
     },
     {
       "index": 32,
-      "path": "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.623.19656.0_x64__2p2nqsd0c76g0\\app\\resources",
+      "path": "C:\\Users\\WINDOWS\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd",
       "exists": true,
-      "drive": "C:\\",
-      "isReparsePoint": false,
-      "reparseTarget": null
+      "drive": "C:\\"
+    },
+    {
+      "index": 33,
+      "path": "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.3748.0_x64__2p2nqsd0c76g0\\app\\resources",
+      "exists": true,
+      "drive": "C:\\"
     }
   ],
   "directories": [
@@ -765,7 +2495,7 @@
       "isReparsePoint": false,
       "reparseTarget": null,
       "sizeBytes": null,
-      "notes": "推荐工具根目录"
+      "notes": "D 盘工具根目录观察值"
     },
     {
       "name": "Codex envs root",
@@ -777,7 +2507,7 @@
       "isReparsePoint": false,
       "reparseTarget": null,
       "sizeBytes": null,
-      "notes": "推荐共享环境根目录"
+      "notes": "D 盘共享环境根目录观察值"
     },
     {
       "name": "Codex cache root",
@@ -789,7 +2519,7 @@
       "isReparsePoint": false,
       "reparseTarget": null,
       "sizeBytes": null,
-      "notes": "推荐共享缓存根目录"
+      "notes": "D 盘共享缓存根目录观察值"
     },
     {
       "name": "uv cache env",
@@ -825,7 +2555,7 @@
       "isReparsePoint": false,
       "reparseTarget": null,
       "sizeBytes": null,
-      "notes": "pip 默认用户缓存候选"
+      "notes": "pip 默认用户缓存路径观察值"
     },
     {
       "name": "pipx default home",
@@ -1020,83 +2750,6 @@
       "notes": "VS Code 用户扩展目录"
     }
   ],
-  "projectEnvironmentMarkers": [
-    {
-      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\createRoom",
-      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
-      "marker": "node_modules",
-      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\createRoom\\node_modules",
-      "drive": "D:\\",
-      "sizeBytes": null,
-      "classification": "nested-app-local-env",
-      "scope": "nested-app",
-      "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    },
-    {
-      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\dataOp",
-      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
-      "marker": "node_modules",
-      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\dataOp\\node_modules",
-      "drive": "D:\\",
-      "sizeBytes": null,
-      "classification": "nested-app-local-env",
-      "scope": "nested-app",
-      "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    },
-    {
-      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\getMyRoom",
-      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
-      "marker": "node_modules",
-      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\getMyRoom\\node_modules",
-      "drive": "D:\\",
-      "sizeBytes": null,
-      "classification": "nested-app-local-env",
-      "scope": "nested-app",
-      "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    },
-    {
-      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\joinRoom",
-      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
-      "marker": "node_modules",
-      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\joinRoom\\node_modules",
-      "drive": "D:\\",
-      "sizeBytes": null,
-      "classification": "nested-app-local-env",
-      "scope": "nested-app",
-      "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    },
-    {
-      "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\login",
-      "parentProject": "D:\\Codex\\projects\\minmin-calendar",
-      "marker": "node_modules",
-      "path": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\login\\node_modules",
-      "drive": "D:\\",
-      "sizeBytes": null,
-      "classification": "nested-app-local-env",
-      "scope": "nested-app",
-      "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    }
-  ],
   "localEnvironmentFindings": [
     {
       "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\createRoom",
@@ -1108,10 +2761,13 @@
       "classification": "nested-app-local-env",
       "scope": "nested-app",
       "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      }
     },
     {
       "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\dataOp",
@@ -1123,10 +2779,13 @@
       "classification": "nested-app-local-env",
       "scope": "nested-app",
       "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      }
     },
     {
       "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\getMyRoom",
@@ -1138,10 +2797,13 @@
       "classification": "nested-app-local-env",
       "scope": "nested-app",
       "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      }
     },
     {
       "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\joinRoom",
@@ -1153,10 +2815,13 @@
       "classification": "nested-app-local-env",
       "scope": "nested-app",
       "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      }
     },
     {
       "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\login",
@@ -1168,53 +2833,14 @@
       "classification": "nested-app-local-env",
       "scope": "nested-app",
       "owner": "project",
-      "risk": "high",
-      "includeInReviewPack": true,
-      "recommendation": "不自动迁移；纳入项目级审查，但不得跨项目复用。",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      }
     }
   ],
-  "migrationCandidates": [],
-  "manualReviewItems": [
-    {
-      "source": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\createRoom\\node_modules",
-      "kind": "nested-app-local-env",
-      "owner": "project",
-      "risk": "high",
-      "action": "不自动迁移",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    },
-    {
-      "source": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\dataOp\\node_modules",
-      "kind": "nested-app-local-env",
-      "owner": "project",
-      "risk": "high",
-      "action": "不自动迁移",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    },
-    {
-      "source": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\getMyRoom\\node_modules",
-      "kind": "nested-app-local-env",
-      "owner": "project",
-      "risk": "high",
-      "action": "不自动迁移",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    },
-    {
-      "source": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\joinRoom\\node_modules",
-      "kind": "nested-app-local-env",
-      "owner": "project",
-      "risk": "high",
-      "action": "不自动迁移",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    },
-    {
-      "source": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\login\\node_modules",
-      "kind": "nested-app-local-env",
-      "owner": "project",
-      "risk": "high",
-      "action": "不自动迁移",
-      "reason": "嵌套 app 的项目本地依赖环境，需按所在 app 的锁文件、验证命令和 owner 决策单独处理。"
-    }
-  ]
+  "generationId": "0304b52d-dc80-4b05-9b3e-54db9e973f43"
 }

@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-09T16:08:28.3073508+08:00",
+  "generatedAt": "2026-07-11T08:04:05.9476378+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
-  "inventoryGeneratedAt": "2026-07-09T16:07:14.5042681+08:00",
+  "inventoryGeneratedAt": "2026-07-11T08:03:37.5369016+08:00",
   "migrationPlans": [],
   "blockedByRootPolicy": [],
   "blockedByManualReview": [],
@@ -70,5 +70,6 @@
       "path": "C:\\Users",
       "reason": "不批量迁移用户目录或 AppData"
     }
-  ]
+  ],
+  "generationId": "7d4f721c-bbfa-4b5b-b1bc-94efb2ed309d"
 }

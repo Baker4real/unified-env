@@ -1,13 +1,17 @@
+---
+generationId: 7d4f721c-bbfa-4b5b-b1bc-94efb2ed309d
+sourceJsonSha256: a7524e2a538414518aa9c9799006a7474d7f692a411b3bf6e56e31364a457d59
+---
 # 环境迁移 dry-run 计划
 
-生成时间：2026-07-09T16:08:28.3073508+08:00
+生成时间：2026-07-11T08:04:05.9476378+08:00
 
 > DRY-RUN：本计划为只读迁移计划。生成过程没有移动文件、没有修改环境变量、没有执行更新。
 
 ## 来源
 
 - inventory：D:\Codex\projects\统一环境\reports\env-inventory\inventory.json
-- inventory 生成时间：2026-07-09T16:07:14.5042681+08:00
+- inventory 生成时间：2026-07-11T08:03:37.5369016+08:00
 
 ## 摘要
 

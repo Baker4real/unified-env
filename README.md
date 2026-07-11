@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+- 已重建可信环境治理报告链：inventory 为 schema 3，分别记录 Process、User、Machine PATH；readiness 为 schema 3；本次重建的当前 JSON/Markdown 报告对均带 `generationId` 和源 JSON SHA-256 校验信息。
+- 当前生产备份保留 dry-run 为 schema 2，覆盖已计账但不完整（`coverageComplete=false`），真实候选为 0；apply 安全门已验证拒绝，因此当前没有可发布的 schema 2 apply manifest。仓库中的旧 schema 1 manifest 快照已移除；这不涉及删除任何备份源数据。
 - 已迁移低风险 `pip cache` 到 `D:\Codex\.cache\pip`。
 - 当前没有新的明确安全迁移候选。
 - 项目本地环境已完成分类刷新、审查和重建 dry-run 计划；当前区分项目根环境、嵌套 app、插件 runtime/cache、repair backup 和归档缓存，真实重建仍需 owner 决策。
@@ -38,11 +40,11 @@
 - 失效 PATH 入口清理 dry-run：`reports/stale-path-entry-cleanup-dry-run/PLAN.md`
 - 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
 - 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
-- 备份膨胀治理 dry-run 证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-164920\BACKUP-RETENTION-DRY-RUN.md`
+- 当前备份膨胀治理 dry-run：`reports/backup-retention-dry-run-current/BACKUP-RETENTION-DRY-RUN.md`
 - 备份保留 apply 执行证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-apply-20260701-160956\EXECUTION.md`
 - `codex_switch` 旧式平铺备份文件删除证据：`D:\Codex\.codex\run-evidence\env-governance\codex-switch-flat-backup-delete-20260701-162530\EXECUTION.md`
 - 三类人工审查项删除证据：`D:\Codex\.codex\run-evidence\env-governance\manual-review-cleanup-20260701-164124\EXECUTION.md`
-- 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
+- 备份清理 apply manifest：当前没有可发布的 schema 2 manifest；生产 dry-run 覆盖不完整，安全门已拒绝生成。
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
 - Codex 主机更新证据：`D:\Codex\.codex\run-evidence\codex-update-20260706-104516`
 - 环境更新执行证据：`D:\Codex\.codex\run-evidence\env-governance\update-20260706`
@@ -56,16 +58,23 @@
 ## 验证命令
 
 ```powershell
-& 'D:\Codex\projects\统一环境\tests\Test-EnvInventory.ps1'
-& 'D:\Codex\projects\统一环境\tests\Test-EnvMigrationPlan.ps1'
-& 'D:\Codex\projects\统一环境\tests\Test-PipCacheMigration.ps1'
-& 'D:\Codex\projects\统一环境\tests\Test-EnvUpdateReadiness.ps1'
-& 'D:\Codex\projects\统一环境\tests\Test-StalePathEntryCleanupDryRun.ps1'
-& 'D:\Codex\projects\统一环境\tests\Test-DDrivePolicyDocs.ps1'
-& 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvReviewPack.ps1'
-& 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvRebuildDryRunPlan.ps1'
-& 'D:\Codex\projects\统一环境\tests\Test-BackupRetentionDryRun.ps1'
-& 'D:\Codex\projects\统一环境\tests\Test-BackupRetentionApplyManifest.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-ReportArtifactPublisher.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-EnvInventoryTrust.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-EnvInventory.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-EnvMigrationPolicy.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-EnvMigrationPlan.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-PipCacheMigration.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-EnvUpdateReadinessPolicy.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-EnvUpdateReadiness.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-StalePathEntryCleanupDryRun.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-DDrivePolicyDocs.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvReviewPack.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-ProjectLocalEnvRebuildDryRunPlan.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-BackupRetentionPolicy.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-BackupRetentionDryRun.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-BackupRetentionValidation.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-BackupRetentionApplyManifest.ps1'
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\tests\Test-CodexAccountSwitchDependencyUpdateDryRun.ps1'
 ```
 
 ## 安全边界

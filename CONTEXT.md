@@ -10,6 +10,8 @@
 
 ## 当前事实基线
 
+- 当前可信报告链已重建：inventory schema 3、readiness schema 3、backup retention dry-run schema 2；本次重建的当前 JSON/Markdown 报告对使用 `generationId` 与源 JSON SHA-256 配对校验。
+- 当前生产 backup retention dry-run 的覆盖已计账但不完整（`coverageComplete=false`），真实候选为 0；apply 安全门已拒绝生成，因此当前没有可发布的 schema 2 apply manifest。旧 schema 1 manifest 快照已从项目报告中移除，但没有删除任何备份源数据。
 - 只读盘点报告：`reports/env-inventory/REPORT.md`
 - dry-run 迁移计划：`reports/env-migration-plan/PLAN.md`
 - 统一更新准备报告：`reports/env-update-readiness/REPORT.md`
@@ -18,7 +20,7 @@
 - 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
 - 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
 - 项目本地环境分类刷新：`.scratch/unified-env/issues/12-project-local-env-classification-refresh.md`
-- 备份膨胀治理 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-164920\BACKUP-RETENTION-DRY-RUN.md`
+- 当前备份膨胀治理 dry-run：`reports/backup-retention-dry-run-current/BACKUP-RETENTION-DRY-RUN.md`
 - `codex_switch` 安装回滚备份保留 issue：`.scratch/unified-env/issues/14-codex-switch-installed-backup-retention.md`
 - 备份保留 apply 执行 issue：`.scratch/unified-env/issues/15-backup-retention-apply-execution.md`
 - 备份保留 apply 执行证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-apply-20260701-160956\EXECUTION.md`
@@ -32,7 +34,7 @@
 - 环境更新执行证据：`D:\Codex\.codex\run-evidence\env-governance\update-20260706`
 - .NET/Python/WSL 修复证据：`D:\Codex\.codex\run-evidence\env-governance\fix-net-python-wsl-20260706`
 - PATH 清理执行证据：`D:\Codex\.codex\run-evidence\env-governance\path-cleanup-20260701-151054\EXECUTION.md`
-- 备份清理 apply manifest 设计：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
+- 备份清理 apply manifest：当前没有可发布的 schema 2 manifest；生产 dry-run 覆盖不完整，安全门已拒绝生成。
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
 - apply manifest 交接：`docs/handoffs/2026-07-01-backup-retention-apply-manifest-handoff.md`
 - 最新清理收尾交接：`docs/handoffs/2026-07-01-env-governance-cleanout-closeout-handoff.md`
