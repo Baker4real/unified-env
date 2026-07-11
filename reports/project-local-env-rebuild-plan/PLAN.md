@@ -1,10 +1,10 @@
 ---
-generationId: 900b9ffd-cf8c-4ffb-870b-5d2bc47d251d
-sourceJsonSha256: 5c0defd2bc7850b38e8a32378c2570e9aa6bf0bb5e758a8e2cc393dc0929783c
+generationId: 90b3eef2-e315-4b47-957e-c41a4ca87f93
+sourceJsonSha256: 77a39581ef44eb894b0535e308b46ed553eef27d11b815cb4ec9a54b788cc9fe
 ---
 # 项目本地环境重建 DRY-RUN 计划
 
-生成时间：2026-07-11T08:55:06.1740821+08:00
+生成时间：2026-07-11T09:09:33.3344399+08:00
 
 > DRY-RUN：本计划不执行命令、不删除目录、不迁移环境、不合并项目本地环境。候选命令预览只用于后续独立项目级 issue。
 
