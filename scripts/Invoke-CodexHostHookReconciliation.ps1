@@ -459,19 +459,14 @@ function Get-DesiredConfig {
     [array]::Fill($keep, $true)
     $headers = @($document.headers | Sort-Object index)
     $seenHookSections = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    foreach ($header in $headers) {
+    for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
+        $header = $headers[$headerIndex]
         if (@($header.segments).Count -eq 0 -or $header.segments[0] -cne "hooks") {
             continue
         }
         $semanticName = ConvertTo-Json -InputObject ([object[]]@($header.segments)) -Compress
         if (-not $seenHookSections.Add($semanticName)) {
             throw "重复的 TOML hook section：$semanticName"
-        }
-    }
-    for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
-        $header = $headers[$headerIndex]
-        if (@($header.segments).Count -eq 0 -or $header.segments[0] -cne "hooks") {
-            continue
         }
         $end = if ($headerIndex + 1 -lt $headers.Count) { $headers[$headerIndex + 1].index } else { $document.lines.Count }
         for ($lineIndex = $header.index; $lineIndex -lt $end; $lineIndex++) {
@@ -502,6 +497,7 @@ function Get-DesiredHooksJson {
         throw "hooks.json 无法解析：$($_.Exception.Message)"
     }
 
+    $desired = $null
     try {
         if ($document.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) {
             throw "hooks.json 顶层必须是 JSON 对象"
@@ -521,6 +517,30 @@ function Get-DesiredHooksJson {
             throw "hooks.json 的 hooks 必须是 JSON 对象"
         }
         $alreadyEmpty = -not $hookProperties[0].Value.EnumerateObject().MoveNext()
+        if (-not $alreadyEmpty) {
+            $stream = [System.IO.MemoryStream]::new()
+            $options = [System.Text.Json.JsonWriterOptions]::new()
+            $options.Indented = $true
+            $writer = [System.Text.Json.Utf8JsonWriter]::new($stream, $options)
+            try {
+                $writer.WriteStartObject()
+                foreach ($property in $properties) {
+                    $writer.WritePropertyName($property.Name)
+                    if ($property.Name -ceq "hooks") {
+                        $writer.WriteStartObject()
+                        $writer.WriteEndObject()
+                    } else {
+                        $writer.WriteRawValue($property.Value.GetRawText(), $true)
+                    }
+                }
+                $writer.WriteEndObject()
+                $writer.Flush()
+                $desired = [System.Text.UTF8Encoding]::new($false).GetString($stream.ToArray()) + "`n"
+            } finally {
+                $writer.Dispose()
+                $stream.Dispose()
+            }
+        }
     } finally {
         $document.Dispose()
     }
@@ -532,9 +552,6 @@ function Get-DesiredHooksJson {
         }
     }
 
-    $data = ConvertFrom-Json -InputObject $Content -AsHashtable -NoEnumerate
-    $data["hooks"] = [ordered]@{}
-    $desired = (ConvertTo-Json -InputObject $data -Depth 100) + "`n"
     [pscustomobject]@{
         content = $desired
         changed = -not $Content.Equals($desired, [System.StringComparison]::Ordinal)

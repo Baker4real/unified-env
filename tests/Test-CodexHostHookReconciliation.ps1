@@ -240,6 +240,7 @@ multiline-body-must-survive
         $hooks = [ordered]@{
             schemaVersion = 7
             owner = "fixture-owner"
+            hugeNumber = "HUGE_NUMBER_SENTINEL"
             hooks = [ordered]@{
                 SessionStart = @(
                     [ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/codex-provider-stability-guard.cmd"' }) },
@@ -254,7 +255,7 @@ multiline-body-must-survive
                 Stop = @([ordered]@{ hooks = @([ordered]@{ type = "command"; command = "serena-hooks cleanup --client=codex" }) })
             }
         }
-        $hooks | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $Root "hooks.json") -Encoding UTF8
+        ($hooks | ConvertTo-Json -Depth 12).Replace('"HUGE_NUMBER_SENTINEL"', '1e400') | Set-Content -LiteralPath (Join-Path $Root "hooks.json") -Encoding UTF8
     }
 
     foreach ($name in $legacyNames) {
@@ -345,8 +346,10 @@ try {
     Assert-True -Condition (Test-Path -LiteralPath $repair.evidencePath -PathType Container) -Message "Repair 未生成 evidence 目录"
 
     $hooks = Get-Content -LiteralPath (Join-Path $healthyHome "hooks.json") -Raw | ConvertFrom-Json -AsHashtable
+    $hooksRaw = Get-Content -LiteralPath (Join-Path $healthyHome "hooks.json") -Raw
     Assert-True -Condition ([int]$hooks.schemaVersion -eq 7) -Message "hooks.json 未保留未知 schemaVersion"
     Assert-True -Condition ($hooks.owner -eq "fixture-owner") -Message "hooks.json 未保留未知 owner"
+    Assert-True -Condition ($hooksRaw -match '"hugeNumber"\s*:\s*1e400') -Message "hooks.json 改写了未知大数值"
     Assert-True -Condition ($hooks.hooks -is [System.Collections.IDictionary]) -Message "hooks 必须是 JSON 空对象，不能是数组或 null"
     Assert-True -Condition ($hooks.hooks.Count -eq 0) -Message "hooks.json 的 hooks 不是空对象"
 
