@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
+
 function Assert-DDrivePath {
     param(
         [string]$Path,
@@ -268,11 +270,8 @@ function Get-HumanGates {
     $items
 }
 
-function Write-PlanMarkdown {
-    param(
-        [object]$Plan,
-        [string]$Path
-    )
+function ConvertTo-PlanMarkdown {
+    param([object]$Plan)
 
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add("# 项目本地环境重建 DRY-RUN 计划")
@@ -346,7 +345,7 @@ function Write-PlanMarkdown {
         $lines.Add("- $rule")
     }
 
-    Set-Content -LiteralPath $Path -Value $lines -Encoding UTF8
+    return ($lines -join "`n")
 }
 
 if (-not (Test-Path -LiteralPath $ReviewPath -PathType Leaf)) {
@@ -419,20 +418,19 @@ $plan = [pscustomobject]@{
     }
 }
 
-New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
-Assert-AllowedOutputDir -Path $OutputDir
-
-$jsonPath = Join-Path $OutputDir "plan.json"
-$markdownPath = Join-Path $OutputDir "PLAN.md"
-Assert-ExistingLeafIsNotReparsePoint -Path $jsonPath -ParameterName "plan.json"
-Assert-ExistingLeafIsNotReparsePoint -Path $markdownPath -ParameterName "PLAN.md"
-$plan | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
-Write-PlanMarkdown -Plan $plan -Path $markdownPath
+$published = Publish-JsonMarkdownArtifactPair `
+    -Document $plan `
+    -OutputDir $OutputDir `
+    -JsonFileName "plan.json" `
+    -MarkdownFileName "PLAN.md" `
+    -RenderMarkdown {
+        param($Document, $JsonSha256)
+        ConvertTo-PlanMarkdown -Plan $Document
+    }
 
 [pscustomobject]@{
-    planJson = $jsonPath
-    planMarkdown = $markdownPath
+    planJson = $published.jsonPath
+    planMarkdown = $published.markdownPath
     dryRun = $true
     readOnly = $true
 }

@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1")
+
 function Assert-True {
     param(
         [bool]$Condition,
@@ -86,6 +88,9 @@ try {
     $markdownPath = Join-Path $testRoot "PLAN.md"
     Assert-True -Condition (Test-Path -LiteralPath $jsonPath -PathType Leaf) -Message "缺少 plan.json"
     Assert-True -Condition (Test-Path -LiteralPath $markdownPath -PathType Leaf) -Message "缺少 PLAN.md"
+
+    $pair = Test-JsonMarkdownArtifactPair -JsonPath $jsonPath -MarkdownPath $markdownPath
+    Assert-True -Condition $pair.ok -Message "重建计划 JSON/Markdown 报告对校验失败：$(@($pair.errors) -join '; ')"
 
     $plan = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     $review = Get-Content -LiteralPath $reviewPath -Raw | ConvertFrom-Json
