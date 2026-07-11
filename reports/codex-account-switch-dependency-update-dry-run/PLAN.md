@@ -1,6 +1,6 @@
 # codex-account-switch 依赖更新 DRY-RUN 计划
 
-生成时间：2026-07-01T09:10:04.4436244+08:00
+生成时间：2026-07-11T10:10:40.4388872+08:00
 
 > DRY-RUN：本计划只读取目标项目状态并生成候选方案，不执行依赖更新、不修改 `package.json` / `package-lock.json`、不重建或删除 `node_modules`。
 
@@ -10,14 +10,14 @@
 - 项目版本：`codex_switch@1.5.12`
 - 当前 Node：`v24.15.0`
 - 当前 npm：`11.12.1`
-- npm cache：`D:\Codex\tools\npm-cache`
-- 目标项目 dirty：否
+- npm cache：`D:\hermes-data\.xdg\npm-cache`
+- 目标项目 dirty：是
 - 执行允许：否
 
 ## 当前事实
 
 - `package-lock.json` lockfileVersion：`3`
-- `package-lock.json` package entries：`78`
+- `package-lock.json` package entries：`106`
 - 项目根 reparse point：否
 - `node_modules` reparse point：否
 
@@ -27,8 +27,9 @@
 | --- | --- | --- | --- | --- |
 | @tauri-apps/api | dependencies | 2.10.1 | 2.10.1 | 2.11.1 |
 | @tauri-apps/cli | devDependencies | 2.10.1 | 2.10.1 | 2.11.4 |
-| typescript | devDependencies | 5.9.2 | 5.9.2 | 6.0.3 |
-| vite | devDependencies | 7.3.6 | 7.3.6 | 8.1.2 |
+| typescript | devDependencies | 5.9.2 | 5.9.2 | 7.0.2 |
+| vite | devDependencies | 7.3.6 | 7.3.6 | 8.1.4 |
+| vitest | devDependencies | 4.1.10 | 4.1.10 |  |
 
 ### npm audit
 
@@ -38,9 +39,9 @@
 ## 建议
 
 - 更新策略：当前安全补丁已满足；后续只单独评估大版本或框架 minor 更新。
-- 当前状态：`no-action-required`
+- 当前状态：`blocked-target-dirty`
 - 当前 npm audit 未发现漏洞，安全补丁候选已经不需要继续执行。
-- 目标项目当前 git status clean；真实执行前仍必须重新检查 dirty 状态。
+- 目标项目当前 dirty，真实更新必须阻塞，避免覆盖或混入既有改动。
 
 ### 候选命令预览
 
@@ -49,8 +50,8 @@
 ### 暂不执行的动作
 
 - 不执行 `npm ci` 作为更新手段：它只会按当前 lockfile 重建旧依赖，不能让依赖保持最新。
-- 暂不直接跳到 `vite 8.1.2`：当前项目声明为 `vite 7.3.6`，latest 是潜在大版本升级，应单独评估构建和 Tauri 开发服务器兼容性。
-- 暂不直接跳到 `typescript 6.0.3`：当前项目声明为 `typescript 5.9.2`，latest 是潜在大版本升级，应单独评估类型检查变化。
+- 暂不直接跳到 `vite 8.1.4`：当前项目声明为 `vite 7.3.6`，latest 是潜在大版本升级，应单独评估构建和 Tauri 开发服务器兼容性。
+- 暂不直接跳到 `typescript 7.0.2`：当前项目声明为 `typescript 5.9.2`，latest 是潜在大版本升级，应单独评估类型检查变化。
 - 暂不合并 Tauri minor 更新：`@tauri-apps/api` 和 `@tauri-apps/cli` 可后续独立评估，避免把安全补丁和框架更新混在一次变更里。
 - 不删除、不重建现有 `node_modules`；真实更新前先只改锁文件和声明文件，再通过项目验证确认。
 
