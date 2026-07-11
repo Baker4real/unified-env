@@ -1,11 +1,11 @@
 {
   "artifactType": "env-governance.project-local-env-rebuild-plan",
   "schemaVersion": 2,
-  "generatedAt": "2026-07-11T08:37:57.4098626+08:00",
+  "generatedAt": "2026-07-11T08:55:06.1740821+08:00",
   "dryRun": true,
   "readOnly": true,
   "reviewPath": "D:\\Codex\\projects\\统一环境\\reports\\project-local-env-review\\review.json",
-  "reviewGeneratedAt": "2026-07-11T08:37:56.8447642+08:00",
+  "reviewGeneratedAt": "2026-07-11T08:55:05.4966180+08:00",
   "summary": {
     "totalPlans": 5,
     "plannedRebuilds": 5,
@@ -50,7 +50,7 @@
         "项目 owner 明确授权后才能进入真实重建 issue。"
       ],
       "reason": "存在锁文件或重建来源，但仍只能作为后续独立 issue 的候选计划。",
-      "sourceReviewGeneratedAt": "2026-07-11T08:37:56.8447642+08:00"
+      "sourceReviewGeneratedAt": "2026-07-11T08:55:05.4966180+08:00"
     },
     {
       "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\dataOp",
@@ -88,7 +88,7 @@
         "项目 owner 明确授权后才能进入真实重建 issue。"
       ],
       "reason": "存在锁文件或重建来源，但仍只能作为后续独立 issue 的候选计划。",
-      "sourceReviewGeneratedAt": "2026-07-11T08:37:56.8447642+08:00"
+      "sourceReviewGeneratedAt": "2026-07-11T08:55:05.4966180+08:00"
     },
     {
       "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\getMyRoom",
@@ -126,7 +126,7 @@
         "项目 owner 明确授权后才能进入真实重建 issue。"
       ],
       "reason": "存在锁文件或重建来源，但仍只能作为后续独立 issue 的候选计划。",
-      "sourceReviewGeneratedAt": "2026-07-11T08:37:56.8447642+08:00"
+      "sourceReviewGeneratedAt": "2026-07-11T08:55:05.4966180+08:00"
     },
     {
       "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\joinRoom",
@@ -164,7 +164,7 @@
         "项目 owner 明确授权后才能进入真实重建 issue。"
       ],
       "reason": "存在锁文件或重建来源，但仍只能作为后续独立 issue 的候选计划。",
-      "sourceReviewGeneratedAt": "2026-07-11T08:37:56.8447642+08:00"
+      "sourceReviewGeneratedAt": "2026-07-11T08:55:05.4966180+08:00"
     },
     {
       "project": "D:\\Codex\\projects\\minmin-calendar\\cloudfunctions\\login",
@@ -202,7 +202,7 @@
         "项目 owner 明确授权后才能进入真实重建 issue。"
       ],
       "reason": "存在锁文件或重建来源，但仍只能作为后续独立 issue 的候选计划。",
-      "sourceReviewGeneratedAt": "2026-07-11T08:37:56.8447642+08:00"
+      "sourceReviewGeneratedAt": "2026-07-11T08:55:05.4966180+08:00"
     }
   ],
   "policy": {
@@ -219,5 +219,5 @@
       "缺少锁文件或重建说明的项目不得输出可直接执行的重建命令。"
     ]
   },
-  "generationId": "b44aaf92-f19b-40fe-bd6c-d0545fef7a75"
+  "generationId": "900b9ffd-cf8c-4ffb-870b-5d2bc47d251d"
 }

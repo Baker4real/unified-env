@@ -1,7 +1,7 @@
 {
   "artifactType": "env-governance.project-local-env-review",
   "schemaVersion": 2,
-  "generatedAt": "2026-07-11T08:37:56.8447642+08:00",
+  "generatedAt": "2026-07-11T08:55:05.4966180+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
   "inventoryGeneratedAt": "2026-07-11T08:03:37.5369016+08:00",
@@ -196,5 +196,5 @@
       "任何重建都必须作为独立项目级 issue 执行。"
     ]
   },
-  "generationId": "fab2913e-b1e3-4188-b975-e136780b9c69"
+  "generationId": "7f19ef36-e18e-4e99-8748-0cecbf6067ab"
 }
