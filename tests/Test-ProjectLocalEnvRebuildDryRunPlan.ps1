@@ -82,7 +82,7 @@ $reviewProducerPath = Join-Path $ProjectRoot "scripts\New-ProjectLocalEnvReviewP
 $inventorySourcePath = Join-Path $ProjectRoot "reports\env-inventory\inventory.json"
 $inventoryMarkdownPath = Join-Path $ProjectRoot "reports\env-inventory\REPORT.md"
 $reviewPath = $null
-$testRoot = Join-Path $ProjectRoot "reports\project-local-env-rebuild-plan-test"
+$testRoot = Join-Path $ProjectRoot ("reports\project-local-env-rebuild-plan-test-{0}" -f ([guid]::NewGuid().ToString('N')))
 
 Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Message "找不到项目本地环境重建 dry-run 计划脚本"
 Assert-True -Condition (Test-Path -LiteralPath $reviewProducerPath -PathType Leaf) -Message "找不到项目本地环境审查包 producer"
