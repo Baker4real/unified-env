@@ -145,7 +145,7 @@ $legacyNames = @(
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingApproval", "MultilineToml")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContextValue", "MissingSerenaProjectValue", "MissingApproval", "MultilineToml")]
         [string]$Variant = "Drift"
     )
 
@@ -162,7 +162,7 @@ sandbox_mode = "workspace-write"
 [mcp_servers.serena]
 startup_timeout_sec = 60
 command = "D:\\Codex\\tools\\uv\\bin\\serena.exe"
-args = [ "start-mcp-server", "--context=D:\\Codex\\.serena\\contexts\\codex-file-tools.yml", "--project", "D:\\Codex\\projects\\yangyangzi-direct-qqbot", "--enable-web-dashboard=true", "--open-web-dashboard=false" ]
+args = [ "start-mcp-server", "--context=D:\\Codex\\.serena\\contexts\\codex-file-tools.yml", "--project-from-cwd", "--project", "D:\\Codex\\projects\\yangyangzi-direct-qqbot", "--enable-web-dashboard=true", "--open-web-dashboard=false" ]
 
 [mcp_servers.serena.env]
 SERENA_HOME = "D:\\Codex\\.serena"
@@ -200,6 +200,10 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
         $config = $config -replace '(?m)^(args\s*=.*)$', ('$1' + "`n" + '$1')
     } elseif ($Variant -eq "MalformedSerenaArgs") {
         $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", '
+    } elseif ($Variant -eq "MissingSerenaContextValue") {
+        $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", "--context" ]'
+    } elseif ($Variant -eq "MissingSerenaProjectValue") {
+        $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", "--project", "--enable-web-dashboard=true" ]'
     } elseif ($Variant -eq "MissingApproval") {
         $config = $config -replace '(?m)^approval_policy\s*=.*\r?\n', ''
     } elseif ($Variant -eq "MultilineToml") {
@@ -331,7 +335,7 @@ try {
     Assert-True -Condition ($hooks.hooks.Count -eq 0) -Message "hooks.json 的 hooks 不是空对象"
 
     $config = Get-Content -LiteralPath (Join-Path $healthyHome "config.toml") -Raw
-    Assert-True -Condition (([regex]::Matches($config, [regex]::Escape('"--project-from-cwd"'))).Count -eq 1) -Message "Serena 必须恰好包含一个 --project-from-cwd"
+    Assert-True -Condition (-not ($config -match '"--project-from-cwd(?:=|"\s*,)')) -Message "Serena 仍包含不可靠的 --project-from-cwd"
     Assert-True -Condition (-not ($config -match '"--project"\s*,')) -Message "Serena 仍包含固定 --project"
     Assert-True -Condition (-not ($config -match '"--project-file(?:=|"\s*,)')) -Message "Serena 仍包含 --project-file"
     Assert-True -Condition $config.Contains("codex-file-tools.yml") -Message "Serena custom context 被误删"
@@ -430,6 +434,8 @@ try {
         @{ Name = "missing-serena-args"; Variant = "MissingSerenaArgs" },
         @{ Name = "duplicate-serena-args"; Variant = "DuplicateSerenaArgs" },
         @{ Name = "malformed-serena-args"; Variant = "MalformedSerenaArgs" },
+        @{ Name = "missing-serena-context-value"; Variant = "MissingSerenaContextValue" },
+        @{ Name = "missing-serena-project-value"; Variant = "MissingSerenaProjectValue" },
         @{ Name = "missing-approval"; Variant = "MissingApproval" },
         @{ Name = "multiline-toml"; Variant = "MultilineToml" }
     )) {

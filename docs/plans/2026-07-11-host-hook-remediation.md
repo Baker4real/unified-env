@@ -2,7 +2,7 @@
 
 > 执行方式：在 `codex/host-hook-remediation` 分支上采用测试先行和逐任务审查；不得暂存或覆盖用户已有的 `.gitignore`、`AGENTS.md` 改动。
 
-**目标：** 把本机用户级 Codex lifecycle hooks 收敛为 0，以 Serena 原生 cwd 项目选择和一个显式冷路径修复器替代热路径补丁，并完成真实主机切换、回滚证据和 fresh canary。
+**目标：** 把本机用户级 Codex lifecycle hooks 收敛为 0，以 Serena 中性启动、任务显式项目激活和一个冷路径修复器替代热路径补丁，并完成真实主机切换、回滚证据和 fresh canary。
 
 **架构：** 一个 PowerShell deep module 负责检查/修复它真正拥有的两个配置文件和 live hook surface；Projectless、mobile 权限与其他 Windows guards 继续由各自 owner 管理。修复器只在人工、安装或升级后调用，不新增常驻 watcher 或计划任务。
 
@@ -29,7 +29,7 @@
 
 1. 用 D 盘 fixture 建立包含固定 Serena 项目、7 个 lifecycle hooks、旧 trust state、九个旧源码/入口文件及一个派生 `.pyc` 的输入。
 2. 测试 `Check` 只读、准确报告 drift，不改变任一哈希。
-3. 测试 `Repair` 清空 hooks、将固定项目替换为唯一 `--project-from-cwd`、删除旧 trust state，同时保留 custom context、无关 TOML section 和 JSON 顶层字段。
+3. 测试 `Repair` 清空 hooks、移除固定项目和 `--project-from-cwd`、删除旧 trust state，同时保留 custom context、无关 TOML section 和 JSON 顶层字段。
 4. 测试十个 legacy 文件被复制到 evidence 后才从 live 目录退役，并仅在 `__pycache__` 为空时精确删除该目录。
 5. 测试第二次 `Repair` 不再改变文件或新建无意义 evidence。
 6. 测试 malformed JSON、重复 Serena section、缺失关键 key 时拒绝写入并保持原哈希。
@@ -78,7 +78,9 @@
 2. 运行 live `Repair`；不得手工并行编辑同一文件。
 3. 运行第二次 `Check` 和第二次 `Repair`，证明终态与幂等性。
 4. 运行 `codex features list` 验证配置仍被当前 CLI 接受。
-5. 从当前项目启动新的 Serena 进程/子代理，确认参数包含 `--project-from-cwd` 且不再固定 QQBot。
+5. 启动独立 Serena canary，确认无项目参数时可以中性启动、仍暴露
+   `activate_project`；完整重启桌面端后，再用全新任务确认初始无项目并能
+   显式激活当前 workspace。不得用继承旧任务配置快照的子代理冒充 fresh canary。
 6. 验证 C/D Projectless 路径 File ID 一致，且 `Documents` Junction 仍指向 D。
 7. 只读检查最新权限记录；不修改历史错误行。
 

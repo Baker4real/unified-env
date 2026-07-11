@@ -7,7 +7,9 @@
 从第一性原理出发，钩子只应承载必须发生在对应生命周期、且该生命周期真正拥有的行为。当前静态配置、Projectless 路径兼容和权限持久化都不属于每个任务的 `SessionStart`，因此最终状态为：
 
 - 用户级自定义 lifecycle hooks 数量为 0；`[features].hooks = true` 保留，供真正的项目或 skill hooks 使用。
-- Serena 使用 `--project-from-cwd`，不再把所有任务固定到 QQBot 项目。
+- Serena 以无项目参数的中性状态启动；仓库任务在首次使用项目级 Serena
+  工具前，以 `environment_context` 的绝对 workspace root 显式调用
+  `activate_project`，不再依赖固定项目或不可靠的 MCP 进程 cwd。
 - Projectless 保留 Codex 原生的 `C:\Users\<user>\Documents\Codex` 逻辑路径；本机 `Documents` Junction 已保证实际数据落在 D 盘，不再改写应用私有全局状态。
 - mobile/desktop 权限由正式的 `approval_policy`、`sandbox_mode` 和 App Server 请求参数拥有；不再扫描或改写 SQLite、heartbeat 私有状态。
 - 静态配置只通过显式、可测试、可回滚的冷路径命令维护，不注册新的计划任务或启动 guard。
@@ -51,7 +53,10 @@
 ## 成功标准
 
 - `hooks.json` 可解析，`hooks` 是空对象。
-- `config.toml` 中 Serena 恰好包含一个 `--project-from-cwd`，不存在固定 `--project` / `--project-file`。
+- `config.toml` 中 Serena 不包含 `--project`、`--project-file` 或
+  `--project-from-cwd`；中性启动仍暴露 `activate_project`。
+- `codex-file-tools.yml` 明确要求按当前 workspace 显式激活并复验，禁止从
+  Serena 初始项目或进程 cwd 推断任务项目。
 - 正式权限默认值仍为 `never + danger-full-access`，`hooks` 和 `unified_exec` feature 仍开启。
 - 不存在 `[hooks]` / `[hooks.state...]` 旧 trust state。
 - 九个旧源码/入口文件及一个派生 `.pyc` 已归档并退役；确认空目录后再精确删除 `__pycache__`，不做递归删除。

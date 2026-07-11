@@ -280,35 +280,35 @@ function Convert-SerenaArgs {
         if ($token.StartsWith("--project-from-cwd=", [System.StringComparison]::Ordinal)) {
             throw "--project-from-cwd 不接受值"
         }
+        if ($token -ceq "--context") {
+            if ($index + 1 -ge $tokens.Count -or
+                [string]::IsNullOrWhiteSpace([string]$tokens[$index + 1]) -or
+                ([string]$tokens[$index + 1]).StartsWith("--", [System.StringComparison]::Ordinal)) {
+                throw "--context 缺少参数值"
+            }
+        }
+        if ($token.StartsWith("--context=", [System.StringComparison]::Ordinal) -and
+            [string]::IsNullOrWhiteSpace($token.Substring("--context=".Length))) {
+            throw "--context 缺少参数值"
+        }
         if ($token -ceq "--project" -or $token -ceq "--project-file") {
-            if ($index + 1 -ge $tokens.Count) {
+            if ($index + 1 -ge $tokens.Count -or
+                [string]::IsNullOrWhiteSpace([string]$tokens[$index + 1]) -or
+                ([string]$tokens[$index + 1]).StartsWith("--", [System.StringComparison]::Ordinal)) {
                 throw "$token 缺少参数值"
             }
             $index++
             continue
         }
         if ($token.StartsWith("--project=", [System.StringComparison]::Ordinal) -or $token.StartsWith("--project-file=", [System.StringComparison]::Ordinal)) {
+            if ([string]::IsNullOrWhiteSpace($token.Substring($token.IndexOf('=') + 1))) {
+                throw "$($token.Substring(0, $token.IndexOf('='))) 缺少参数值"
+            }
             continue
         }
 
         $result.Add($token)
     }
-
-    $insertAt = 1
-    for ($index = 0; $index -lt $result.Count; $index++) {
-        if ($result[$index] -ceq "--context") {
-            if ($index + 1 -ge $result.Count) {
-                throw "--context 缺少参数值"
-            }
-            $insertAt = $index + 2
-            break
-        }
-        if ($result[$index].StartsWith("--context=", [System.StringComparison]::Ordinal)) {
-            $insertAt = $index + 1
-            break
-        }
-    }
-    $result.Insert($insertAt, "--project-from-cwd")
 
     ConvertTo-Json -InputObject $result.ToArray() -Compress
 }
