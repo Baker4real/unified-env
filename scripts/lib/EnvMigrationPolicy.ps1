@@ -17,6 +17,99 @@ function Get-EnvRebuildEvidenceFileNames {
     )
 }
 
+function Test-EnvProjectLongRunningOrStateful {
+    param([Parameter(Mandatory)][string]$Project, [Parameter(Mandatory)][string]$Marker)
+    $normalized = $Project.ToLowerInvariant()
+    if ($normalized.Contains("\.gsd\projects\")) { return $true }
+    foreach ($token in @("bot", "qqbot", "agent", "service", "daemon", "worker", "hermes")) {
+        if ($normalized.Contains($token)) { return $true }
+    }
+    return $Marker -ceq ".venv" -and $normalized.Contains("direct")
+}
+
+function Get-EnvProjectReviewRebuildAssessment {
+    param([Parameter(Mandatory)][string]$Marker, [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Files)
+    if ($Marker -ceq "node_modules") {
+        if ($Files -ccontains "package-lock.json") { return "可重建：发现 package-lock.json；可在独立 issue 中用 npm ci 重建并运行项目测试。" }
+        if ($Files -ccontains "pnpm-lock.yaml") { return "可重建：发现 pnpm-lock.yaml；可在独立 issue 中用 pnpm install --frozen-lockfile 重建并运行项目测试。" }
+        if ($Files -ccontains "yarn.lock") { return "可重建：发现 yarn.lock；可在独立 issue 中用 yarn install --frozen-lockfile 重建并运行项目测试。" }
+        if ($Files -ccontains "package.json") { return "需项目 owner 决策：只有 package.json，缺少锁文件，不能自动重建。" }
+    }
+    if ($Marker -in @(".venv", "venv")) {
+        if ($Files -ccontains "uv.lock") { return "可重建：发现 uv.lock；可在独立 issue 中按项目文档重建虚拟环境并运行测试。" }
+        if ($Files -ccontains "requirements.txt") { return "可重建：发现 requirements.txt；可在独立 issue 中重建虚拟环境并运行项目测试。" }
+        if ($Files -ccontains "pyproject.toml") { return "可能可重建：发现 pyproject.toml；需确认锁文件、Python 版本和项目测试命令。" }
+    }
+    if ($Marker -ceq ".conda" -and $Files -ccontains "environment.yml") { return "可重建：发现 environment.yml；需用项目级 Conda 流程单独验证。" }
+    return "需项目 owner 决策：缺少足够的锁文件或重建说明，不能自动处理。"
+}
+
+function Get-EnvProjectReviewRecommendedAction {
+    param([Parameter(Mandatory)][bool]$IsLongRunningOrStateful, [Parameter(Mandatory)][string]$RebuildAssessment)
+    if ($IsLongRunningOrStateful) { return "保留；需项目 owner 决策；真实重建前必须确认服务停启、状态恢复和项目级验证。" }
+    if ($RebuildAssessment.StartsWith("可重建", [StringComparison]::Ordinal)) { return "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。" }
+    return "保留；需项目 owner 决策；禁止自动处理。"
+}
+
+function Get-EnvProjectReviewVerificationPrerequisites {
+    param([Parameter(Mandatory)][string]$Marker, [Parameter(Mandatory)][bool]$IsLongRunningOrStateful, [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Files)
+    $items = @("读取项目 README/AGENTS 或等效项目说明。", "确认项目自己的依赖安装命令、锁文件和测试命令。", "确认当前环境不是正在运行的服务或恢复链路的一部分。", "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。")
+    if ($Marker -ceq "node_modules") { $items += "确认 package manager 与锁文件一致，例如 npm/package-lock、pnpm/pnpm-lock 或 yarn/yarn.lock。" }
+    if ($Marker -in @(".venv", "venv", ".conda")) { $items += "确认 Python/Conda 版本、解释器路径、原环境变量和项目测试命令。" }
+    if ($IsLongRunningOrStateful) { $items += "长期服务或状态敏感项目必须先确认停机窗口、启动命令、健康检查、回滚步骤和 owner 决策。" }
+    if ($Files.Count -eq 0) { $items += "缺少项目配置线索时，必须先由项目 owner 补充重建说明。" }
+    return [object[]]$items
+}
+
+function Assert-ProjectLocalReviewDocument {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Review)
+    Assert-EnvFactObject -Value $Review -FactName "Review"
+    if ($Review.artifactType -isnot [string] -or $Review.artifactType -cne "env-governance.project-local-env-review") { throw "Review artifactType 不正确。" }
+    if (-not (Test-EnvMigrationInteger $Review.schemaVersion) -or $Review.schemaVersion -ne 2) { throw "Review schemaVersion 必须是原生整数 2。" }
+    foreach ($name in @("generationId", "generatedAt", "inventoryPath", "inventoryGeneratedAt")) {
+        if (-not ($Review.PSObject.Properties.Name -contains $name) -or $Review.$name -isnot [string] -or [string]::IsNullOrWhiteSpace($Review.$name)) { throw "Review $name 必须是非空字符串。" }
+    }
+    if ($Review.generationId -notmatch '^[0-9a-f-]{36}$') { throw "Review generationId 非法。" }
+    if ($Review.readOnly -isnot [bool] -or -not $Review.readOnly) { throw "Review readOnly 必须是 true boolean。" }
+    if ($Review.items -isnot [array]) { throw "Review items 必须是数组。" }
+    $allowedFiles = @(Get-EnvRebuildEvidenceFileNames)
+    foreach ($item in @($Review.items)) {
+        Assert-EnvFactObject -Value $item -FactName "Review item"
+        foreach ($name in @("project", "parentProject", "marker", "path", "classification", "scope", "riskLevel", "recommendedAction", "rebuildAssessment", "futureIssueRecommendation", "reason")) {
+            Assert-EnvNonEmptyStringProperty -Value $item -PropertyName $name -FactName "Review item"
+        }
+        foreach ($pathName in @("project", "parentProject", "path")) { Assert-EnvAbsolutePathValue -Path $item.$pathName -FactName "Review item.$pathName" }
+        if ($item.marker -notin @(".venv", "venv", "node_modules", ".conda")) { throw "Review item.marker 枚举无效。" }
+        $project = [IO.Path]::GetFullPath($item.project).TrimEnd('\', '/'); $parent = [IO.Path]::GetFullPath($item.parentProject).TrimEnd('\', '/'); $path = [IO.Path]::GetFullPath($item.path).TrimEnd('\', '/')
+        if (-not (Test-EnvMigrationSubPath -Path $project -Root $parent)) { throw "Review item.project 必须等于或位于 parentProject 下。" }
+        $expectedPath = [IO.Path]::GetFullPath((Join-Path $project $item.marker)).TrimEnd('\', '/')
+        if (-not $path.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) { throw "Review item.path 必须是 project 下的 marker 直接子目录。" }
+        $decision = Get-EnvLocalEnvironmentClassification -Path $path -Project $project -ParentProject $parent
+        if ($decision.owner -cne "project" -or $item.classification -cne $decision.classification -or $item.scope -cne $decision.scope) { throw "Review item classification/scope 与路径事实不一致。" }
+        foreach ($boolName in @("automationAllowed", "isLongRunningOrStateful", "requiresOwnerDecision")) { if ($item.$boolName -isnot [bool]) { throw "Review item.$boolName 必须是 boolean。" } }
+        if ($item.automationAllowed) { throw "Review item.automationAllowed 必须为 false。" }
+        $expectedLongRunning = Test-EnvProjectLongRunningOrStateful -Project $project -Marker $item.marker
+        if ($item.isLongRunningOrStateful -ne $expectedLongRunning) { throw "Review item.isLongRunningOrStateful 与项目事实不一致。" }
+        $expectedRisk = if ($expectedLongRunning) { "high" } else { "medium" }
+        if ($item.riskLevel -cne $expectedRisk) { throw "Review item.riskLevel 必须与状态敏感性一致。" }
+        Assert-EnvFactObject -Value $item.rebuildEvidence -FactName "Review item.rebuildEvidence"
+        if ($item.rebuildEvidence.marker -isnot [string] -or $item.rebuildEvidence.marker -cne $item.marker -or $item.rebuildEvidence.projectFiles -isnot [array] -or $item.existingProjectFiles -isnot [array]) { throw "Review item.rebuildEvidence 合同非法。" }
+        $files = @($item.rebuildEvidence.projectFiles)
+        foreach ($file in $files) { if ($file -isnot [string] -or [string]::IsNullOrWhiteSpace($file) -or $file -cnotin $allowedFiles) { throw "Review item.rebuildEvidence 包含非法文件。" } }
+        if (@($files | Sort-Object -Unique).Count -ne $files.Count -or (@($item.existingProjectFiles) -join "`n") -cne ($files -join "`n")) { throw "Review item rebuild evidence 数组不一致或重复。" }
+        $assessment = Get-EnvProjectReviewRebuildAssessment -Marker $item.marker -Files $files
+        $action = Get-EnvProjectReviewRecommendedAction -IsLongRunningOrStateful $expectedLongRunning -RebuildAssessment $assessment
+        $requiresOwner = $action -like "*owner 决策*" -or $assessment -like "*owner 决策*"
+        $future = if ($assessment.StartsWith("可重建", [StringComparison]::Ordinal)) { "可单独开项目级重建 issue。" } else { "先由项目 owner 补充重建和验证说明。" }
+        if ($item.rebuildAssessment -cne $assessment -or $item.recommendedAction -cne $action -or $item.requiresOwnerDecision -ne $requiresOwner -or $item.futureIssueRecommendation -cne $future -or $item.reason -cne "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。") { throw "Review item 派生策略字段与 canonical producer 规则不一致。" }
+        if ($item.verificationPrerequisites -isnot [array]) { throw "Review item.verificationPrerequisites 必须是数组。" }
+        $expectedPrerequisites = @(Get-EnvProjectReviewVerificationPrerequisites -Marker $item.marker -IsLongRunningOrStateful $expectedLongRunning -Files $files)
+        foreach ($entry in @($item.verificationPrerequisites)) { if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) { throw "Review item.verificationPrerequisites 必须是非空字符串数组。" } }
+        if ((@($item.verificationPrerequisites) -join "`n") -cne ($expectedPrerequisites -join "`n")) { throw "Review item.verificationPrerequisites 与 canonical producer 规则不一致。" }
+    }
+}
+
 function Assert-EnvFactObject {
     param(
         [AllowNull()][object]$Value,

@@ -55,7 +55,7 @@ function Get-TrustedReportInputPair {
     $trustedMarkdownPath = Assert-TrustedReportInputFile -Path $effectiveMarkdownPath -ParameterName $MarkdownParameterName
     $pair = Test-JsonMarkdownArtifactPair -JsonPath $trustedJsonPath -MarkdownPath $trustedMarkdownPath
     if (-not $pair.ok) {
-        throw "$JsonParameterName/$MarkdownParameterName 报告对校验失败：$(@($pair.errors) -join '; ')"
+        throw "$JsonParameterName/$MarkdownParameterName 报告对校验失败：$($pair.error)"
     }
     [pscustomobject]@{ jsonPath = $trustedJsonPath; markdownPath = $trustedMarkdownPath; generationId = $pair.generationId }
 }

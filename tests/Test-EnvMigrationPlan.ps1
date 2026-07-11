@@ -27,11 +27,12 @@ function Assert-Property {
 }
 
 function Assert-RejectedPreservingMigrationPair {
-    param([string]$Label, [string]$OutputDir, [scriptblock]$Action)
+    param([string]$Label, [string]$OutputDir, [scriptblock]$Action, [string]$ExpectedPattern)
     $old = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $OutputDir -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown { "old-plan" }
     $oldJson = [IO.File]::ReadAllText($old.jsonPath); $oldMarkdown = [IO.File]::ReadAllText($old.markdownPath)
-    $rejected = $false; try { & $Action | Out-Null } catch { $rejected = $true }
+    $rejected = $false; $message = $null; try { & $Action | Out-Null } catch { $rejected = $true; $message = $_.Exception.Message }
     Assert-True $rejected "$Label 必须拒绝"
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedPattern)) { Assert-True ($message -like $ExpectedPattern) "$Label 必须保留具体根因，期望 $ExpectedPattern，实际：$message" }
     Assert-True (([IO.File]::ReadAllText($old.jsonPath)) -ceq $oldJson -and ([IO.File]::ReadAllText($old.markdownPath)) -ceq $oldMarkdown) "$Label 不得覆盖旧下游 pair"
 }
 
@@ -149,11 +150,11 @@ try {
     $originalInventoryMarkdown = [IO.File]::ReadAllText($inventoryMarkdownPath)
     $tamperedInventoryMarkdown = [regex]::Replace($originalInventoryMarkdown, '(?m)^sourceJsonSha256: .+$', 'sourceJsonSha256: 0000000000000000000000000000000000000000000000000000000000000000')
     [IO.File]::WriteAllText($inventoryMarkdownPath, $tamperedInventoryMarkdown, [Text.UTF8Encoding]::new($false))
-    Assert-RejectedPreservingMigrationPair "inventory Markdown hash 篡改" (Join-Path $testRoot "hash-tamper-output") { & $planScript -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "hash-tamper-output") }
+    Assert-RejectedPreservingMigrationPair "inventory Markdown hash 篡改" (Join-Path $testRoot "hash-tamper-output") { & $planScript -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "hash-tamper-output") } '*sourceJsonSha256*'
     [IO.File]::WriteAllText($inventoryMarkdownPath, $originalInventoryMarkdown, [Text.UTF8Encoding]::new($false))
     $mismatchedMarkdown = [regex]::Replace($originalInventoryMarkdown, '(?m)^generationId: .+$', 'generationId: 00000000-0000-0000-0000-000000000000')
     [IO.File]::WriteAllText($inventoryMarkdownPath, $mismatchedMarkdown, [Text.UTF8Encoding]::new($false))
-    Assert-RejectedPreservingMigrationPair "inventory generationId 错配" (Join-Path $testRoot "generation-mismatch-output") { & $planScript -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "generation-mismatch-output") }
+    Assert-RejectedPreservingMigrationPair "inventory generationId 错配" (Join-Path $testRoot "generation-mismatch-output") { & $planScript -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "generation-mismatch-output") } '*generationId*'
     [IO.File]::WriteAllText($inventoryMarkdownPath, $originalInventoryMarkdown, [Text.UTF8Encoding]::new($false))
 
     foreach ($leaf in @(@{ path = $inventoryPath; label = 'JSON' }, @{ path = $inventoryMarkdownPath; label = 'Markdown' })) {

@@ -8,41 +8,8 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
 . (Join-Path $PSScriptRoot "lib\EnvPathSafety.ps1")
+. (Join-Path $PSScriptRoot "lib\EnvMigrationPolicy.ps1")
 . (Join-Path $PSScriptRoot "lib\TrustedReportInput.ps1")
-
-function Test-RebuildNativeInteger {
-    param([AllowNull()][object]$Value)
-    return $Value -is [byte] -or $Value -is [sbyte] -or $Value -is [int16] -or $Value -is [uint16] -or $Value -is [int32] -or $Value -is [uint32] -or $Value -is [int64] -or $Value -is [uint64]
-}
-
-function Assert-ProjectLocalEnvReviewDocument {
-    param([Parameter(Mandatory)][object]$Review)
-    if ($Review -isnot [pscustomobject]) { throw "Review 必须是 JSON object。" }
-    if ($Review.artifactType -isnot [string] -or $Review.artifactType -cne "env-governance.project-local-env-review") { throw "Review artifactType 不正确。" }
-    if (-not (Test-RebuildNativeInteger $Review.schemaVersion) -or $Review.schemaVersion -ne 2) { throw "Review schemaVersion 必须是原生整数 2。" }
-    foreach ($name in @("generationId", "generatedAt", "inventoryPath", "inventoryGeneratedAt")) {
-        if (-not ($Review.PSObject.Properties.Name -contains $name) -or $Review.$name -isnot [string] -or [string]::IsNullOrWhiteSpace($Review.$name)) { throw "Review $name 必须是非空字符串。" }
-    }
-    if ($Review.generationId -notmatch '^[0-9a-f-]{36}$') { throw "Review generationId 非法。" }
-    if ($Review.readOnly -isnot [bool] -or -not $Review.readOnly) { throw "Review readOnly 必须是 true boolean。" }
-    if ($Review.items -isnot [array]) { throw "Review items 必须是数组。" }
-    foreach ($item in $Review.items) {
-        if ($item -isnot [pscustomobject]) { throw "Review item 必须是 object。" }
-        foreach ($name in @("project", "parentProject", "marker", "path", "classification", "scope", "riskLevel", "rebuildAssessment")) {
-            if (-not ($item.PSObject.Properties.Name -contains $name) -or $item.$name -isnot [string] -or [string]::IsNullOrWhiteSpace($item.$name)) { throw "Review item.$name 必须是非空字符串。" }
-        }
-        Assert-EnvSafeAbsolutePath -Path $item.project -FactName "Review item.project"
-        Assert-EnvSafeAbsolutePath -Path $item.parentProject -FactName "Review item.parentProject"
-        Assert-EnvSafeAbsolutePath -Path $item.path -FactName "Review item.path"
-        if ($item.isLongRunningOrStateful -isnot [bool]) { throw "Review item.isLongRunningOrStateful 必须是 boolean。" }
-        if ($item.existingProjectFiles -isnot [array]) { throw "Review item.existingProjectFiles 必须是数组。" }
-        if ($item.rebuildEvidence -isnot [pscustomobject] -or $item.rebuildEvidence.marker -isnot [string] -or $item.rebuildEvidence.marker -cne $item.marker -or $item.rebuildEvidence.projectFiles -isnot [array]) { throw "Review item.rebuildEvidence 合同非法。" }
-        foreach ($file in @($item.existingProjectFiles) + @($item.rebuildEvidence.projectFiles)) {
-            if ($file -isnot [string] -or [string]::IsNullOrWhiteSpace($file)) { throw "Review rebuild evidence 文件名必须是非空字符串。" }
-        }
-        if ((@($item.existingProjectFiles) -join "`n") -cne (@($item.rebuildEvidence.projectFiles) -join "`n")) { throw "Review rebuildEvidence 与 existingProjectFiles 不一致。" }
-    }
-}
 
 function Assert-DDrivePath {
     param(
@@ -387,7 +354,7 @@ function ConvertTo-PlanMarkdown {
 
 $trustedInput = Get-TrustedReportInputPair -JsonPath $ReviewPath -MarkdownPath $ReviewMarkdownPath -DefaultMarkdownFileName "REPORT.md" -JsonParameterName "ReviewPath" -MarkdownParameterName "ReviewMarkdownPath"
 $review = Get-Content -LiteralPath $trustedInput.jsonPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
-Assert-ProjectLocalEnvReviewDocument -Review $review
+Assert-ProjectLocalReviewDocument -Review $review
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 Assert-AllowedOutputDir -Path $OutputDir
 $plans = @(

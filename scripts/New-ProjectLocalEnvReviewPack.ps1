@@ -124,22 +124,7 @@ function Test-IsLongRunningOrStatefulProject {
         [string]$Marker
     )
 
-    $normalized = $Project.ToLowerInvariant()
-    if ($normalized.Contains("\.gsd\projects\")) {
-        return $true
-    }
-
-    foreach ($token in @("bot", "qqbot", "agent", "service", "daemon", "worker", "hermes")) {
-        if ($normalized.Contains($token)) {
-            return $true
-        }
-    }
-
-    if ($Marker -eq ".venv" -and $normalized.Contains("direct")) {
-        return $true
-    }
-
-    return $false
+    return Test-EnvProjectLongRunningOrStateful -Project $Project -Marker $Marker
 }
 
 function Get-RebuildAssessment {
@@ -148,45 +133,7 @@ function Get-RebuildAssessment {
         [string[]]$Files
     )
 
-    if ($Marker -eq "node_modules") {
-        if ($Files -contains "package-lock.json") {
-            return "可重建：发现 package-lock.json；可在独立 issue 中用 npm ci 重建并运行项目测试。"
-        }
-
-        if ($Files -contains "pnpm-lock.yaml") {
-            return "可重建：发现 pnpm-lock.yaml；可在独立 issue 中用 pnpm install --frozen-lockfile 重建并运行项目测试。"
-        }
-
-        if ($Files -contains "yarn.lock") {
-            return "可重建：发现 yarn.lock；可在独立 issue 中用 yarn install --frozen-lockfile 重建并运行项目测试。"
-        }
-
-        if ($Files -contains "package.json") {
-            return "需项目 owner 决策：只有 package.json，缺少锁文件，不能自动重建。"
-        }
-    }
-
-    if ($Marker -in @(".venv", "venv")) {
-        if ($Files -contains "uv.lock") {
-            return "可重建：发现 uv.lock；可在独立 issue 中按项目文档重建虚拟环境并运行测试。"
-        }
-
-        if ($Files -contains "requirements.txt") {
-            return "可重建：发现 requirements.txt；可在独立 issue 中重建虚拟环境并运行项目测试。"
-        }
-
-        if ($Files -contains "pyproject.toml") {
-            return "可能可重建：发现 pyproject.toml；需确认锁文件、Python 版本和项目测试命令。"
-        }
-    }
-
-    if ($Marker -eq ".conda") {
-        if ($Files -contains "environment.yml") {
-            return "可重建：发现 environment.yml；需用项目级 Conda 流程单独验证。"
-        }
-    }
-
-    return "需项目 owner 决策：缺少足够的锁文件或重建说明，不能自动处理。"
+    return Get-EnvProjectReviewRebuildAssessment -Marker $Marker -Files $Files
 }
 
 function Get-RecommendedAction {
@@ -195,15 +142,7 @@ function Get-RecommendedAction {
         [string]$RebuildAssessment
     )
 
-    if ($IsLongRunningOrStateful) {
-        return "保留；需项目 owner 决策；真实重建前必须确认服务停启、状态恢复和项目级验证。"
-    }
-
-    if ($RebuildAssessment.StartsWith("可重建")) {
-        return "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。"
-    }
-
-    return "保留；需项目 owner 决策；禁止自动处理。"
+    return Get-EnvProjectReviewRecommendedAction -IsLongRunningOrStateful $IsLongRunningOrStateful -RebuildAssessment $RebuildAssessment
 }
 
 function Get-VerificationPrerequisites {
@@ -213,30 +152,7 @@ function Get-VerificationPrerequisites {
         [string[]]$Files
     )
 
-    $items = @(
-        "读取项目 README/AGENTS 或等效项目说明。",
-        "确认项目自己的依赖安装命令、锁文件和测试命令。",
-        "确认当前环境不是正在运行的服务或恢复链路的一部分。",
-        "先在项目内生成独立 dry-run 或重建计划，不跨项目复用该目录。"
-    )
-
-    if ($Marker -eq "node_modules") {
-        $items += "确认 package manager 与锁文件一致，例如 npm/package-lock、pnpm/pnpm-lock 或 yarn/yarn.lock。"
-    }
-
-    if ($Marker -in @(".venv", "venv", ".conda")) {
-        $items += "确认 Python/Conda 版本、解释器路径、原环境变量和项目测试命令。"
-    }
-
-    if ($IsLongRunningOrStateful) {
-        $items += "长期服务或状态敏感项目必须先确认停机窗口、启动命令、健康检查、回滚步骤和 owner 决策。"
-    }
-
-    if ($Files.Count -eq 0) {
-        $items += "缺少项目配置线索时，必须先由项目 owner 补充重建说明。"
-    }
-
-    $items
+    return Get-EnvProjectReviewVerificationPrerequisites -Marker $Marker -IsLongRunningOrStateful $IsLongRunningOrStateful -Files $Files
 }
 
 function Escape-MarkdownCell {
@@ -315,10 +231,10 @@ Assert-AllowedOutputDir -Path $OutputDir
 $items = @(
     foreach ($marker in @($inventory.localEnvironmentFindings | Where-Object { Test-EnvLocalEnvironmentFindingReviewEligible -Finding $_ })) {
         $files = @($marker.rebuildEvidence.projectFiles)
-        $isLongRunning = Test-IsLongRunningOrStatefulProject -Project $marker.project -Marker $marker.marker
-        $rebuildAssessment = Get-RebuildAssessment -Marker $marker.marker -Files $files
-        $recommendedAction = Get-RecommendedAction -IsLongRunningOrStateful $isLongRunning -RebuildAssessment $rebuildAssessment
-        $verificationPrerequisites = @(Get-VerificationPrerequisites -Marker $marker.marker -IsLongRunningOrStateful $isLongRunning -Files $files)
+        $isLongRunning = Test-EnvProjectLongRunningOrStateful -Project $marker.project -Marker $marker.marker
+        $rebuildAssessment = Get-EnvProjectReviewRebuildAssessment -Marker $marker.marker -Files $files
+        $recommendedAction = Get-EnvProjectReviewRecommendedAction -IsLongRunningOrStateful $isLongRunning -RebuildAssessment $rebuildAssessment
+        $verificationPrerequisites = @(Get-EnvProjectReviewVerificationPrerequisites -Marker $marker.marker -IsLongRunningOrStateful $isLongRunning -Files $files)
         $needsOwnerDecision = $recommendedAction -like "*owner 决策*" -or $rebuildAssessment -like "*owner 决策*"
 
         [pscustomobject]@{

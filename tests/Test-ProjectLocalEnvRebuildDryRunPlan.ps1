@@ -29,11 +29,12 @@ function Assert-Property {
 }
 
 function Assert-RejectedPreservingRebuildPair {
-    param([string]$Label, [string]$OutputDir, [scriptblock]$Action)
+    param([string]$Label, [string]$OutputDir, [scriptblock]$Action, [string]$ExpectedPattern)
     $old = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $OutputDir -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown { "old-rebuild" }
     $oldJson = [IO.File]::ReadAllText($old.jsonPath); $oldMarkdown = [IO.File]::ReadAllText($old.markdownPath)
-    $rejected = $false; try { & $Action | Out-Null } catch { $rejected = $true }
+    $rejected = $false; $message = $null; try { & $Action | Out-Null } catch { $rejected = $true; $message = $_.Exception.Message }
     Assert-True $rejected "$Label 必须拒绝"
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedPattern)) { Assert-True ($message -like $ExpectedPattern) "$Label 必须保留具体根因，期望 $ExpectedPattern，实际：$message" }
     Assert-True (([IO.File]::ReadAllText($old.jsonPath)) -ceq $oldJson -and ([IO.File]::ReadAllText($old.markdownPath)) -ceq $oldMarkdown) "$Label 不得覆盖旧下游 pair"
 }
 
@@ -219,11 +220,11 @@ try {
     $originalReviewMarkdown = [IO.File]::ReadAllText($reviewMarkdownPath)
     $tamperedReviewMarkdown = [regex]::Replace($originalReviewMarkdown, '(?m)^sourceJsonSha256: .+$', 'sourceJsonSha256: 0000000000000000000000000000000000000000000000000000000000000000')
     [IO.File]::WriteAllText($reviewMarkdownPath, $tamperedReviewMarkdown, [Text.UTF8Encoding]::new($false))
-    Assert-RejectedPreservingRebuildPair "review Markdown hash 篡改" (Join-Path $testRoot "rebuild-hash-output") { & $scriptPath -ReviewPath $reviewPath -ReviewMarkdownPath $reviewMarkdownPath -OutputDir (Join-Path $testRoot "rebuild-hash-output") }
+    Assert-RejectedPreservingRebuildPair "review Markdown hash 篡改" (Join-Path $testRoot "rebuild-hash-output") { & $scriptPath -ReviewPath $reviewPath -ReviewMarkdownPath $reviewMarkdownPath -OutputDir (Join-Path $testRoot "rebuild-hash-output") } '*sourceJsonSha256*'
     [IO.File]::WriteAllText($reviewMarkdownPath, $originalReviewMarkdown, [Text.UTF8Encoding]::new($false))
     $mismatchedMarkdown = [regex]::Replace($originalReviewMarkdown, '(?m)^generationId: .+$', 'generationId: 00000000-0000-0000-0000-000000000000')
     [IO.File]::WriteAllText($reviewMarkdownPath, $mismatchedMarkdown, [Text.UTF8Encoding]::new($false))
-    Assert-RejectedPreservingRebuildPair "review generationId 错配" (Join-Path $testRoot "rebuild-generation-output") { & $scriptPath -ReviewPath $reviewPath -ReviewMarkdownPath $reviewMarkdownPath -OutputDir (Join-Path $testRoot "rebuild-generation-output") }
+    Assert-RejectedPreservingRebuildPair "review generationId 错配" (Join-Path $testRoot "rebuild-generation-output") { & $scriptPath -ReviewPath $reviewPath -ReviewMarkdownPath $reviewMarkdownPath -OutputDir (Join-Path $testRoot "rebuild-generation-output") } '*generationId*'
     [IO.File]::WriteAllText($reviewMarkdownPath, $originalReviewMarkdown, [Text.UTF8Encoding]::new($false))
     foreach ($leaf in @(@{ path = $reviewPath; label = 'JSON' }, @{ path = $reviewMarkdownPath; label = 'Markdown' })) {
         $held = "$($leaf.path).held"; $target = Join-Path $testRoot "rebuild-junction-target-$($leaf.label)"; New-Item -ItemType Directory -Path $target -Force | Out-Null
@@ -243,6 +244,13 @@ try {
         @{ name = "items-scalar"; mutate = { param($d) $d.items = "bad" } },
         @{ name = "path-scalar"; mutate = { param($d) $d.items[0].path = 42 } },
         @{ name = "classification-scalar"; mutate = { param($d) $d.items[0].classification = 42 } },
+        @{ name = "classification-banana"; mutate = { param($d) $d.items[0].classification = "banana" } },
+        @{ name = "coordination-disguise"; mutate = { param($d) $d.items[0].parentProject = $d.items[0].project } },
+        @{ name = "marker-path-mismatch"; mutate = { param($d) $d.items[0].marker = ".venv"; $d.items[0].rebuildEvidence.marker = ".venv" } },
+        @{ name = "risk-boolean-inconsistent"; mutate = { param($d) $d.items[0].isLongRunningOrStateful = $true; $d.items[0].riskLevel = "medium" } },
+        @{ name = "owner-boolean-inconsistent"; mutate = { param($d) $d.items[0].requiresOwnerDecision = -not [bool]$d.items[0].requiresOwnerDecision } },
+        @{ name = "automation-true"; mutate = { param($d) $d.items[0].automationAllowed = $true } },
+        @{ name = "assessment-tamper"; mutate = { param($d) $d.items[0].rebuildAssessment = "可重建：banana" } },
         @{ name = "missing-rebuild-evidence"; mutate = { param($d) $d.items[0].PSObject.Properties.Remove("rebuildEvidence") } },
         @{ name = "rebuild-files-scalar"; mutate = { param($d) $d.items[0].rebuildEvidence.projectFiles = "package-lock.json" } }
     )
@@ -251,10 +259,12 @@ try {
         & $case.mutate $invalid
         $input = Publish-JsonMarkdownArtifactPair -Document $invalid -OutputDir (Join-Path $testRoot "invalid-input-$($case.name)") -JsonFileName "review.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "invalid but paired" }
         $output = Join-Path $testRoot "invalid-output-$($case.name)"
+        $sentinel = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $output -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown { "old-rebuild" }
+        $sentinelJson = [IO.File]::ReadAllText($sentinel.jsonPath); $sentinelMarkdown = [IO.File]::ReadAllText($sentinel.markdownPath)
         $rejected = $false
         try { & $scriptPath -ReviewPath $input.jsonPath -ReviewMarkdownPath $input.markdownPath -OutputDir $output | Out-Null } catch { $rejected = $true }
         Assert-True -Condition $rejected -Message "rebuild 未拒绝严格合同反例：$($case.name)"
-        Assert-True -Condition (-not (Test-Path -LiteralPath $output)) -Message "严格合同失败不得创建输出：$($case.name)"
+        Assert-True -Condition (([IO.File]::ReadAllText($sentinel.jsonPath)) -ceq $sentinelJson -and ([IO.File]::ReadAllText($sentinel.markdownPath)) -ceq $sentinelMarkdown) -Message "严格合同失败不得覆盖旧pair：$($case.name)"
     }
 
     $blockedOutput = "C:\Codex-should-not-be-created"

@@ -27,11 +27,12 @@ function Assert-Property {
 }
 
 function Assert-RejectedPreservingReviewPair {
-    param([string]$Label, [string]$OutputDir, [scriptblock]$Action)
+    param([string]$Label, [string]$OutputDir, [scriptblock]$Action, [string]$ExpectedPattern)
     $old = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $OutputDir -JsonFileName "review.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "old-review" }
     $oldJson = [IO.File]::ReadAllText($old.jsonPath); $oldMarkdown = [IO.File]::ReadAllText($old.markdownPath)
-    $rejected = $false; try { & $Action | Out-Null } catch { $rejected = $true }
+    $rejected = $false; $message = $null; try { & $Action | Out-Null } catch { $rejected = $true; $message = $_.Exception.Message }
     Assert-True $rejected "$Label 必须拒绝"
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedPattern)) { Assert-True ($message -like $ExpectedPattern) "$Label 必须保留具体根因，期望 $ExpectedPattern，实际：$message" }
     Assert-True (([IO.File]::ReadAllText($old.jsonPath)) -ceq $oldJson -and ([IO.File]::ReadAllText($old.markdownPath)) -ceq $oldMarkdown) "$Label 不得覆盖旧下游 pair"
 }
 
@@ -44,6 +45,7 @@ function New-MarkerKey {
 $scriptPath = Join-Path $ProjectRoot "scripts\New-ProjectLocalEnvReviewPack.ps1"
 $inventoryScript = Join-Path $ProjectRoot "scripts\Invoke-EnvInventory.ps1"
 $publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
+$migrationPolicyPath = Join-Path $ProjectRoot "scripts\lib\EnvMigrationPolicy.ps1"
 $testRoot = Join-Path $ProjectRoot "reports\project-local-env-review-test"
 $inventoryOutput = Join-Path $testRoot "inventory"
 $reviewOutput = Join-Path $testRoot "review"
@@ -67,6 +69,7 @@ Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Mess
 Assert-True -Condition (Test-Path -LiteralPath $inventoryScript -PathType Leaf) -Message "找不到 inventory 脚本"
 Assert-True -Condition (Test-Path -LiteralPath $publisherPath -PathType Leaf) -Message "找不到共享报告发布器"
 . $publisherPath
+. $migrationPolicyPath
 
 try {
     if (Test-Path -LiteralPath $testRoot) {
@@ -101,7 +104,8 @@ try {
     $pair = Test-JsonMarkdownArtifactPair -JsonPath $jsonPath -MarkdownPath $markdownPath
     Assert-True -Condition ([bool]$pair.ok) -Message "审查包 JSON/Markdown pair 校验失败：$($pair.error)"
 
-    $review = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
+    $review = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json -DateKind String
+    Assert-ProjectLocalReviewDocument -Review $review
     $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
     $inventoryMarkers = @($inventory.localEnvironmentFindings | Where-Object { $_.classification -in @("project-root-local-env", "nested-app-local-env") -and $_.owner -eq "project" })
     Assert-True -Condition ($review.artifactType -ceq "env-governance.project-local-env-review") -Message "review artifactType 不正确"
@@ -231,11 +235,11 @@ try {
     $originalInventoryMarkdown = [IO.File]::ReadAllText($inventoryMarkdownPath)
     $tamperedInventoryMarkdown = [regex]::Replace($originalInventoryMarkdown, '(?m)^sourceJsonSha256: .+$', 'sourceJsonSha256: 0000000000000000000000000000000000000000000000000000000000000000')
     [IO.File]::WriteAllText($inventoryMarkdownPath, $tamperedInventoryMarkdown, [Text.UTF8Encoding]::new($false))
-    Assert-RejectedPreservingReviewPair "review inventory Markdown hash 篡改" (Join-Path $testRoot "review-hash-output") { & $scriptPath -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "review-hash-output") }
+    Assert-RejectedPreservingReviewPair "review inventory Markdown hash 篡改" (Join-Path $testRoot "review-hash-output") { & $scriptPath -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "review-hash-output") } '*sourceJsonSha256*'
     [IO.File]::WriteAllText($inventoryMarkdownPath, $originalInventoryMarkdown, [Text.UTF8Encoding]::new($false))
     $mismatchedMarkdown = [regex]::Replace($originalInventoryMarkdown, '(?m)^generationId: .+$', 'generationId: 00000000-0000-0000-0000-000000000000')
     [IO.File]::WriteAllText($inventoryMarkdownPath, $mismatchedMarkdown, [Text.UTF8Encoding]::new($false))
-    Assert-RejectedPreservingReviewPair "review inventory generationId 错配" (Join-Path $testRoot "review-generation-output") { & $scriptPath -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "review-generation-output") }
+    Assert-RejectedPreservingReviewPair "review inventory generationId 错配" (Join-Path $testRoot "review-generation-output") { & $scriptPath -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "review-generation-output") } '*generationId*'
     [IO.File]::WriteAllText($inventoryMarkdownPath, $originalInventoryMarkdown, [Text.UTF8Encoding]::new($false))
     foreach ($leaf in @(@{ path = $inventoryPath; label = 'JSON' }, @{ path = $inventoryMarkdownPath; label = 'Markdown' })) {
         $held = "$($leaf.path).held"; $target = Join-Path $testRoot "review-junction-target-$($leaf.label)"; New-Item -ItemType Directory -Path $target -Force | Out-Null
