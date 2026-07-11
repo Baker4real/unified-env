@@ -14,13 +14,20 @@ $ErrorActionPreference = 'Stop'
 function Get-CodexHookTrustKeyObservations {
     param([Parameter(Mandatory)][string]$ConfigPath)
 
-    if (-not [IO.File]::Exists($ConfigPath)) {
-        return @()
+    $configObservation = Get-CodexHookSafeFileProbe -Path $ConfigPath -Name 'config.toml' -AllowedExactPaths @($ConfigPath)
+    if (-not $configObservation.safeToRead) {
+        return @([pscustomobject][ordered]@{
+            section = 'hooks.state'
+            keyKind = "config-$($configObservation.state)"
+            keyNameSha256 = $null
+            present = $false
+        })
     }
 
     $section = $null
     $observations = [Collections.Generic.List[object]]::new()
-    foreach ($line in [IO.File]::ReadAllLines($ConfigPath)) {
+    $configText = Read-CodexHookSafeTextFile -Path $ConfigPath -Name 'config.toml' -AllowedExactPaths @($ConfigPath)
+    foreach ($line in @($configText -split '\r?\n')) {
         $sectionMatch = [regex]::Match($line, '^\s*\[(?<section>[^\]]+)\]\s*(?:#.*)?$')
         if ($sectionMatch.Success) {
             $section = $sectionMatch.Groups['section'].Value.Trim()
@@ -53,34 +60,36 @@ function Get-CodexHookReparseAncestorFacts {
     )
 
     $fullPath = Assert-CodexHookDPath -Value $Path -Name $Scope
-    $currentPath = $fullPath
-    while (-not (Test-Path -LiteralPath $currentPath -ErrorAction Stop)) {
-        $parent = [IO.Directory]::GetParent($currentPath)
-        if ($null -eq $parent) {
+    $root = [IO.Path]::GetPathRoot($fullPath)
+    $segments = @($fullPath.Substring($root.Length) -split '[\\/]' | Where-Object { $_ -ne '' })
+    $currentPath = $root
+    $ancestors = [Collections.Generic.List[object]]::new()
+    $state = 'complete'
+    foreach ($segment in @('__ROOT__') + $segments) {
+        if ($segment -cne '__ROOT__') {
+            $currentPath = Join-Path $currentPath $segment
+        }
+        try {
+            $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
+        } catch [System.Management.Automation.ItemNotFoundException] {
+            $state = 'missing-tail'
             break
         }
-        $currentPath = $parent.FullName
-    }
-
-    $ancestors = [Collections.Generic.List[object]]::new()
-    while (-not [string]::IsNullOrWhiteSpace($currentPath)) {
-        $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
         $isReparsePoint = ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
         $ancestors.Add([pscustomobject][ordered]@{
             path = $item.FullName
             isReparsePoint = $isReparsePoint
         })
-
-        $parent = [IO.Directory]::GetParent($item.FullName)
-        if ($null -eq $parent) {
+        if ($isReparsePoint) {
+            $state = 'reparse-blocked'
             break
         }
-        $currentPath = $parent.FullName
     }
 
     return [pscustomobject][ordered]@{
         scope = $Scope
         path = $fullPath
+        state = $state
         hasReparsePoint = @($ancestors | Where-Object isReparsePoint).Count -gt 0
         ancestors = [object[]]$ancestors.ToArray()
     }
@@ -130,16 +139,7 @@ $document = New-CodexHookInventoryDocument `
     -DependencyFacts $dependencyFacts `
     -TrustObservation $trustObservation
 
-$runtimeFacts = @(
-    foreach ($property in $manifest.runtimes.PSObject.Properties) {
-        $runtimePath = [IO.Path]::GetFullPath([string]$property.Value)
-        [pscustomobject][ordered]@{
-            name = $property.Name
-            path = $runtimePath
-            exists = [IO.File]::Exists($runtimePath)
-        }
-    }
-)
+$runtimeFacts = @(Get-CodexHookRuntimeFacts -Manifest $manifest)
 
 $serenaHomeTarget = 'D:\Codex\.serena'
 $serenaHomeObservation = @(
@@ -179,6 +179,7 @@ $published = Publish-JsonMarkdownArtifactPair `
             "- 允许执行：$($Document.executionAllowed)"
             "- Registry 事件数：$($Document.summary.eventCount)"
             "- Registry 条目数：$($Document.summary.registryEntryCount)"
+            "- 重复规范 identity 数：$($Document.summary.duplicateIdentityCount)"
             "- 缺失 command target：$($Document.summary.missingTargetCount)"
             "- 未探测 unknown target：$($Document.summary.unprobedTargetCount)"
             "- 缺失 managed 文件：$($Document.summary.managedMissingCount)"

@@ -21,6 +21,7 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.ps1",
       "runtimeId": "pwsh",
+      "sourceState": "managed",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\config.toml" },
         { "kind": "abstract", "value": "process-environment" },
@@ -55,6 +56,7 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-state-policy-guard.py",
       "runtimeId": "python",
+      "sourceState": "planned",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\.codex-global-state.json" },
         { "kind": "path", "value": "D:\\Codex\\.codex\\state_5.sqlite" },
@@ -91,6 +93,7 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-activate-guarded.ps1",
       "runtimeId": "pwsh",
+      "sourceState": "managed",
       "readResources": [
         { "kind": "abstract", "value": "hook-stdin" },
         { "kind": "abstract", "value": "process-environment" },
@@ -123,6 +126,7 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.ps1",
       "runtimeId": "pwsh",
+      "sourceState": "managed",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\config.toml" },
         { "kind": "path", "value": "D:\\Codex\\.serena\\serena_config.yml" }
@@ -155,6 +159,7 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1",
       "runtimeId": "pwsh",
+      "sourceState": "managed",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\tools\\bin" },
         { "kind": "path", "value": "D:\\Codex\\.config\\gh" },
@@ -195,6 +200,7 @@
       "wrapperPath": null,
       "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
       "runtimeId": "serenaHooks",
+      "sourceState": "vendor",
       "readResources": [
         { "kind": "abstract", "value": "hook-stdin" },
         { "kind": "abstract", "value": "serena-hook-state" }
@@ -229,6 +235,7 @@
       "wrapperPath": null,
       "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
       "runtimeId": "serenaHooks",
+      "sourceState": "vendor",
       "readResources": [
         { "kind": "abstract", "value": "hook-stdin" },
         { "kind": "abstract", "value": "serena-hook-state" }
@@ -263,6 +270,7 @@
       "wrapperPath": null,
       "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
       "runtimeId": "serenaHooks",
+      "sourceState": "vendor",
       "readResources": [
         { "kind": "abstract", "value": "hook-stdin" },
         { "kind": "abstract", "value": "serena-hook-state" }
@@ -279,7 +287,17 @@
       },
       "fullAcceptanceCommand": {
         "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
-        "arguments": ["-NoProfile", "-Command", "-not ((Get-Content -LiteralPath 'D:\\Codex\\.codex\\hooks.json' -Raw) -match 'auto-approve')"]
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "D:\\Codex\\projects\\统一环境\\scripts\\Get-CodexHookInventory.ps1",
+          "-ManifestPath",
+          "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\manifest.json",
+          "-CodexHome",
+          "D:\\Codex\\.codex",
+          "-OutputDir",
+          "D:\\Codex\\projects\\统一环境\\reports\\codex-hook-inventory"
+        ]
       }
     }
   ],

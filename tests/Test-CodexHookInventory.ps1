@@ -84,6 +84,10 @@ $missingActivate = @($missingTargetManifest.hooks | Where-Object id -ceq 'serena
 $missingActivate.commandPath = 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'
 $missingActivate.wrapperPath = 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'
 $missingActivate.implementationPath = 'D:\Codex\.codex\hooks\missing-serena-activate.ps1'
+$missingActivate.quickHealthCheck.arguments[2] = "Test-Path -LiteralPath 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'"
+$missingActivate.fullAcceptanceCommand.arguments[2] = "'{}' | & 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'"
+@($missingTargetManifest.files | Where-Object liveRelativePath -ceq 'serena-activate-guarded.cmd')[0].liveRelativePath = 'missing-serena-activate.cmd'
+@($missingTargetManifest.files | Where-Object liveRelativePath -ceq 'serena-activate-guarded.ps1')[0].liveRelativePath = 'missing-serena-activate.ps1'
 [void](Assert-CodexHookManifest -Manifest $missingTargetManifest)
 
 function Get-HookById {
@@ -128,11 +132,16 @@ $registry = [pscustomobject][ordered]@{
             [pscustomobject][ordered]@{ customGroupField = 'preserve-me'; hooks = @([pscustomobject][ordered]@{ type = 'command'; command = ConvertTo-TestCommand $dashboard.commandPath; timeout = 10 }) }
             [pscustomobject][ordered]@{ matcher = 'SECRET_MATCHER_DO_NOT_LEAK'; hooks = @([pscustomobject][ordered]@{ type = 'command'; command = (ConvertTo-TestCommand $unknownPath @('--token=SECRET_TOKEN_DO_NOT_LEAK', 'https://user:pass@example.invalid/', '019f0000-0000-7000-8000-000000000001')); timeout = 10 }) }
             [pscustomobject][ordered]@{ hooks = @([pscustomobject][ordered]@{ type = 'http'; command = ConvertTo-TestCommand $provider.commandPath; timeout = 10 }) }
+            [pscustomobject][ordered]@{ hooks = @(
+                [pscustomobject][ordered]@{ type = 'command'; timeout = 10; secretField = 'MISSING_COMMAND_SECRET_DO_NOT_LEAK' }
+                [pscustomobject][ordered]@{ type = 'command'; command = [pscustomobject]@{ secret = 'NON_STRING_COMMAND_SECRET_DO_NOT_LEAK' }; timeout = 10 }
+                [pscustomobject][ordered]@{ type = 'command'; command = ConvertTo-TestCommand $cleanup.commandPath $cleanup.arguments; timeout = 10 }
+            ) }
         )
         Stop = @(
             [pscustomobject][ordered]@{
                 hooks = @(
-                    [pscustomobject][ordered]@{ type = 'command'; command = ConvertTo-TestCommand $cleanup.commandPath $cleanup.arguments; timeout = 10 }
+                    [pscustomobject][ordered]@{ type = 'command'; command = '"d:\codex\TOOLS\uv\bin\serena-hooks.exe" cleanup --client=codex'; timeout = 10 }
                     [pscustomobject][ordered]@{ type = 'command'; command = ConvertTo-TestCommand $cleanup.commandPath $cleanup.arguments; timeout = 10 }
                     [pscustomobject][ordered]@{ type = 'command'; command = ConvertTo-TestCommand $cleanup.commandPath @('cleanup-now', '--client=codex'); timeout = 10 }
                     [pscustomobject][ordered]@{ type = 'command'; command = ConvertTo-TestCommand $cleanup.commandPath @('precleanup', '--client=codex'); timeout = 10 }
@@ -158,22 +167,28 @@ Write-TestText -Path $RegistryPath -Value ($registry | ConvertTo-Json -Depth 100
 
 $facts = Get-CodexHookRegistryFacts -RegistryPath $RegistryPath -Manifest $missingTargetManifest
 $factsJson = $facts | ConvertTo-Json -Depth 100
-Assert-True ($facts.events.SessionStart.Count -eq 7) '必须看到全部 SessionStart entries'
+Assert-True ($facts.events.SessionStart.Count -eq 10) '必须看到全部 SessionStart entries，包括缺 command/non-string entry'
 Assert-True ($facts.events.SessionStart[1].idMatch -eq 'github-cli') '必须观察 GitHub 插入索引 1'
 Assert-True ($facts.events.SessionStart[3].targetExists -eq $false) 'manifest allowlist 内缺失 target 必须被观察'
 Assert-True ($facts.events.SessionStart[5].idMatch -eq $null -and $null -eq $facts.events.SessionStart[5].targetExists) '同文件名错误父目录不得识别或探测'
-Assert-True ($facts.events.SessionStart[6].idMatchStatus -ceq 'unmatched') 'entry.type 非 command 不得识别'
+Assert-True ($facts.events.SessionStart[6].idMatchStatus -ceq 'not-command') 'entry.type 非 command 不得识别'
+Assert-True ($facts.events.SessionStart[7].groupIndex -eq 7 -and $facts.events.SessionStart[7].entryIndex -eq 0 -and $facts.events.SessionStart[7].idMatchStatus -ceq 'missing-command') '缺 command entry 必须保留安全位置事实'
+Assert-True ($facts.events.SessionStart[8].groupIndex -eq 7 -and $facts.events.SessionStart[8].entryIndex -eq 1 -and $facts.events.SessionStart[8].idMatchStatus -ceq 'non-string-command') '非 string command entry 必须保留安全位置事实'
 Assert-True (@($facts.events.Unknown).Count -eq 3) '未知 event 必须聚合为脱敏计数事实'
 Assert-True (@($facts.events.Unknown | Where-Object { $null -ne $_.targetExists }).Count -eq 0) 'UNC/C/device unknown target 不得探测'
 Assert-True (@($facts.events.Stop | Where-Object idMatch -ceq 'serena-cleanup').Count -eq 2) '精确 vendor args 必须识别'
+Assert-True ($facts.events.Stop[0].commandIdentitySha256 -ceq $facts.events.Stop[1].commandIdentitySha256) 'slash/case/quote command 变体必须归一为同一 identity digest'
+Assert-True ($facts.events.SessionStart[9].commandIdentitySha256 -cne $facts.events.Stop[0].commandIdentitySha256) '相同 path/args 在不同 event 中不得误算重复 identity'
 Assert-True (@($facts.events.Stop | Where-Object idMatchStatus -ceq 'unmatched').Count -eq 2) 'verb 前后缀不得误识别'
 Assert-True ($facts.events.PreToolUse[0].idMatch -eq $null) '额外敏感参数不得匹配'
 Assert-True ($facts.events.PreToolUse[1].registrationState -ceq 'retired-but-registered') 'retired identity 仍注册必须显式观察'
-foreach ($secret in @('SECRET_MATCHER_DO_NOT_LEAK', 'SECRET_TOKEN_DO_NOT_LEAK', 'user:pass', '019f0000-0000-7000-8000-000000000001', 'SECRET_EXTRA_DO_NOT_LEAK', 'UNC_SECRET_DO_NOT_LEAK', 'C_SECRET_DO_NOT_LEAK', 'DEVICE_SECRET_DO_NOT_LEAK', 'future-secret')) {
+foreach ($secret in @('SECRET_MATCHER_DO_NOT_LEAK', 'SECRET_TOKEN_DO_NOT_LEAK', 'user:pass', '019f0000-0000-7000-8000-000000000001', 'SECRET_EXTRA_DO_NOT_LEAK', 'UNC_SECRET_DO_NOT_LEAK', 'C_SECRET_DO_NOT_LEAK', 'DEVICE_SECRET_DO_NOT_LEAK', 'future-secret', 'MISSING_COMMAND_SECRET_DO_NOT_LEAK', 'NON_STRING_COMMAND_SECRET_DO_NOT_LEAK')) {
     Assert-True (-not $factsJson.Contains($secret)) "registry facts 泄露敏感未知值：$secret"
 }
 Assert-True ($factsJson -notmatch '"command"\s*:') 'registry facts 不得包含 raw command 字段'
 Assert-True (-not $factsJson.Contains('trusted_hash')) 'registry facts 不得泄露 trust hash'
+Assert-True ($facts.registryFileSha256 -ceq (Get-FileHash -LiteralPath $RegistryPath -Algorithm SHA256).Hash.ToLowerInvariant()) 'registry facts 必须提供原始整文件 SHA-256'
+Assert-True ($facts.registryByteLength -eq (Get-Item -LiteralPath $RegistryPath).Length) 'registry facts 必须提供原始整文件字节长度'
 Assert-True (-not (Test-Path -LiteralPath $probeMarker)) 'registry inventory 不得执行 hook'
 
 $ambiguousManifest = Copy-TestDocument $missingTargetManifest
@@ -183,22 +198,20 @@ $duplicateCleanup.lifecycle = 'retired'
 $duplicateCleanup.lifecycleReason = 'ambiguity fixture'
 $duplicateCleanup.order = 99
 $ambiguousManifest.hooks = @($ambiguousManifest.hooks) + @($duplicateCleanup)
-[void](Assert-CodexHookManifest -Manifest $ambiguousManifest)
-$ambiguousFacts = Get-CodexHookRegistryFacts -RegistryPath $RegistryPath -Manifest $ambiguousManifest
-Assert-True ($ambiguousFacts.events.Stop[0].idMatchStatus -ceq 'ambiguous' -and $null -eq $ambiguousFacts.events.Stop[0].targetExists) '多候选不得猜测或探测'
+Assert-Throws { Assert-CodexHookManifest -Manifest $ambiguousManifest } 'retired 在内的所有 manifest identity 必须唯一'
 
 $fixtureManifest = Copy-TestDocument $manifest
-$fixtureManifest.files = @(
+$fixtureManifest.files = @($fixtureManifest.files) + @(
     [pscustomobject][ordered]@{
-        relativePath = 'hooks/present.cmd'
-        liveRelativePath = 'present.cmd'
+        relativePath = 'hooks/test-present.cmd'
+        liveRelativePath = 'test-present.cmd'
         sha256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
         lifecycle = 'active'
         ownerHookIds = @('provider-stability')
     }
     [pscustomobject][ordered]@{
-        relativePath = 'hooks/missing.cmd'
-        liveRelativePath = 'missing.cmd'
+        relativePath = 'hooks/test-missing.cmd'
+        liveRelativePath = 'test-missing.cmd'
         sha256 = ('0' * 64)
         lifecycle = 'active'
         ownerHookIds = @('provider-stability')
@@ -206,20 +219,64 @@ $fixtureManifest.files = @(
 )
 [void](Assert-CodexHookManifest -Manifest $fixtureManifest)
 
-Write-TestText -Path (Join-Path $ManagedRoot 'hooks\present.cmd') -Value 'abc'
-Write-TestText -Path (Join-Path $FixtureLiveHooksRoot 'present.cmd') -Value 'abc'
+Write-TestText -Path (Join-Path $ManagedRoot 'hooks\test-present.cmd') -Value 'abc'
+Write-TestText -Path (Join-Path $FixtureLiveHooksRoot 'test-present.cmd') -Value 'abc'
 $fileFacts = @(Get-CodexHookFileFacts -Manifest $fixtureManifest -ManagedRoot $ManagedRoot -LiveHooksRoot $FixtureLiveHooksRoot)
-Assert-True ($fileFacts.Count -eq 2) '必须逐项输出 manifest file facts'
-Assert-True ($fileFacts[0].managedExists -and $fileFacts[0].liveExists) '存在文件必须被观察'
-Assert-True ($fileFacts[0].managedMatchesManifest -and $fileFacts[0].liveMatchesManifest) '匹配 SHA-256 必须被观察'
-Assert-True (-not $fileFacts[1].managedExists) 'managed 缺文件必须作为事实缺口输出'
-Assert-True (-not $fileFacts[1].liveExists) 'live 缺文件必须作为事实缺口输出'
+Assert-True ($fileFacts.Count -eq @($fixtureManifest.files).Count) '必须逐项输出 manifest file facts'
+$presentFileFact = @($fileFacts | Where-Object relativePath -ceq 'hooks/test-present.cmd')[0]
+$missingFileFact = @($fileFacts | Where-Object relativePath -ceq 'hooks/test-missing.cmd')[0]
+Assert-True ($presentFileFact.managedExists -and $presentFileFact.liveExists) '存在文件必须被观察'
+Assert-True ($presentFileFact.managedMatchesManifest -and $presentFileFact.liveMatchesManifest) '匹配 SHA-256 必须被观察'
+Assert-True (-not $missingFileFact.managedExists) 'managed 缺文件必须作为事实缺口输出'
+Assert-True (-not $missingFileFact.liveExists) 'live 缺文件必须作为事实缺口输出'
+
+$probeTarget = Join-Path $FixtureRoot 'safe-probe-target'
+$probeLink = Join-Path $FixtureRoot 'safe-probe-link'
+New-Item -ItemType Directory -Path $probeTarget -Force | Out-Null
+Write-TestText -Path (Join-Path $probeTarget 'secret.txt') -Value 'REPARSE_TARGET_SECRET_DO_NOT_READ'
+New-Item -ItemType Junction -Path $probeLink -Target $probeTarget | Out-Null
+try {
+    $blockedObservation = Get-CodexHookSafeFileHash -Path (Join-Path $probeLink 'secret.txt') -Name 'reparse fixture' -AllowedRoots @($FixtureRoot)
+    Assert-True ($blockedObservation.probe.state -ceq 'reparse-blocked' -and $null -eq $blockedObservation.sha256) '安全 probe 遇祖先 reparse 必须停止且不得 hash target'
+    Assert-Throws { Get-CodexHookRegistryFacts -RegistryPath (Join-Path $probeLink 'secret.txt') -Manifest $manifest } 'registry 读取不得穿过 reparse ancestor'
+} finally {
+    Remove-Item -LiteralPath $probeLink -Force
+}
+
+$missingRuntimeProbe = Get-CodexHookSafeFileProbe -Path (Join-Path $FixtureRoot 'missing-runtime.exe') -Name 'missing runtime fixture' -AllowedRoots @($FixtureRoot)
+Assert-True ($missingRuntimeProbe.state -ceq 'missing' -and -not $missingRuntimeProbe.exists) '缺 runtime 应作为 inventory gap，而不是 manifest schema 错误'
+
+$providerWrapperReference = Get-CodexHookWrapperReferenceFacts `
+    -WrapperText "@echo off`r`nREM D:\Codex\tools\PowerShell\7.6.3\pwsh.exe D:\Codex\.codex\hooks\wrong.ps1`r`n`"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe`" -NoProfile -File `"D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`" %*`r`nexit /b %ERRORLEVEL%" `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
+    -RuntimeId 'pwsh'
+Assert-True ($providerWrapperReference.parseState -ceq 'matched') '有效 .cmd command line 必须精确识别 runtime/implementation'
+
+$commentOnlyReference = Get-CodexHookWrapperReferenceFacts `
+    -WrapperText "@echo off`r`nREM D:\Codex\tools\PowerShell\7.6.3\pwsh.exe D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`r`n:: same fake reference" `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
+    -RuntimeId 'pwsh'
+Assert-True ($commentOnlyReference.parseState -ceq 'no-effective-command' -and $null -eq $commentOnlyReference.referencesImplementation) 'REM/:: comment substring 不得构成 dependency 引用'
+
+$wrongCommandReference = Get-CodexHookWrapperReferenceFacts `
+    -WrapperText "REM D:\Codex\tools\PowerShell\7.6.3\pwsh.exe D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`r`n`"D:\Codex\tools\python314-official\python.exe`" `"D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`"" `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
+    -RuntimeId 'pwsh'
+Assert-True ($wrongCommandReference.parseState -ceq 'runtime-mismatch' -and -not $wrongCommandReference.referencesRuntime) 'comment 中的正确 path 不得掩盖实际错误 command line'
 
 $dependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $manifest)
 $directFact = @($dependencyFacts | Where-Object id -ceq 'serena-cleanup')[0]
 $stateFact = @($dependencyFacts | Where-Object id -ceq 'codex-state-policy')[0]
+$providerFact = @($dependencyFacts | Where-Object id -ceq 'provider-stability')[0]
 Assert-True ($directFact.entrypointKind -ceq 'direct-vendor' -and $null -eq $directFact.wrapperPath) 'direct vendor 必须显式无 wrapper'
 Assert-True ($stateFact.dependencyState -ceq 'pending-or-mismatched') 'desired Python state policy 与 observed legacy Node/JS 必须报告缺口'
+Assert-True ($providerFact.dependencyState -ceq 'ready' -and $providerFact.wrapperParseState -ceq 'matched') '已存在 wrapper 必须通过精确有效命令行解析'
+
+$runtimeFacts = @(Get-CodexHookRuntimeFacts -Manifest $manifest)
+Assert-True ($runtimeFacts.Count -eq 4 -and @($runtimeFacts | Where-Object probeState -ceq 'regular-file').Count -eq 4) 'runtime existence/hash 必须由安全 inventory probe 观察'
 
 $trustSecret = 'DO_NOT_LEAK_FULL_TRUST_HASH_0123456789'
 $document = New-CodexHookInventoryDocument -Manifest $fixtureManifest -Registry $facts -FileFacts $fileFacts -DependencyFacts $dependencyFacts -TrustObservation @([pscustomobject]@{ section = 'hooks.state'; keyName = 'trusted_hash_0'; present = $true; value = $trustSecret })
@@ -228,6 +285,9 @@ Assert-True ($document.schemaVersion -eq 1) 'inventory schemaVersion 必须固�
 Assert-True ($document.readOnly -and -not $document.executionAllowed) 'inventory 必须明确只读且禁止执行'
 Assert-True (-not (($document | ConvertTo-Json -Depth 100).Contains($trustSecret))) 'inventory document 不得泄露 trust value'
 Assert-True ($document.summary.unprobedTargetCount -gt 0) 'unknown target 必须单列 unprobed'
+Assert-True ($document.summary.duplicateIdentityCount -eq 1) '重复计数必须基于规范 event/matcher/path/args identity'
+Assert-True ($document.summary.duplicateCommandCount -eq $document.summary.duplicateIdentityCount) '旧 duplicateCommandCount 必须保持兼容别名'
+Assert-True ($document.registry.registryFileSha256 -ceq $facts.registryFileSha256 -and $document.registry.registryByteLength -eq $facts.registryByteLength) 'inventory document 必须保留 registry final-gate hash/length'
 
 Assert-Throws {
     & $InventoryScript `

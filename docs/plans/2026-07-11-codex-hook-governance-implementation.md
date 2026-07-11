@@ -156,7 +156,7 @@ manifest 顶层精确属性固定为：
 }
 ```
 
-每个 hook 精确字段为 `id,event,order,matcher,timeoutSeconds,commandPath,arguments,wrapperPath,implementationPath,runtimeId,readResources,writeResources,criticality,lifecycle,lifecycleReason,quickHealthCheck,fullAcceptanceCommand`。`wrapperPath=null` 仅表示 direct vendor entry；其余 hook 必须显式声明 wrapper。read/write resource 每项精确为 `{kind,value}`：`kind=path` 时只能是 D 盘绝对路径，`kind=abstract` 时只能使用受控的 stdin/stdout/env/network/state 枚举。quick/full command 每项精确为 `{commandPath,arguments}`，仅声明、不在 inventory 中执行。manifest 是 desired contract；inventory 单独报告 observed wrapper/runtime/implementation gap，desired 文件尚未导入不使 schema 失败。retired hook 必须填写 `lifecycleReason`，其他 lifecycle 必须为 null。每个文件精确字段为 `relativePath,liveRelativePath,sha256,lifecycle,ownerHookIds`；`environment` 项现在即精确验证 `{name,scope,desired,restartRequired}`。
+每个 hook 精确字段为 `id,event,order,matcher,timeoutSeconds,commandPath,arguments,wrapperPath,implementationPath,runtimeId,sourceState,readResources,writeResources,criticality,lifecycle,lifecycleReason,quickHealthCheck,fullAcceptanceCommand`。`sourceState` 精确枚举为 `managed|planned|vendor`：direct vendor 必须为 `vendor` 且 `wrapperPath=null`；普通 custom 必须为 `managed` 并具备 wrapper/implementation 双闭包；尚待 Task 5 实现的 state policy 为 `planned`，只要求现有 wrapper 闭包，implementation 保持 dependency gap 且不得伪造 file SHA-256。read/write resource 每项精确为 `{kind,value}`：`kind=path` 时只能是 D 盘绝对路径，`kind=abstract` 时只能使用受控的 stdin/stdout/env/network/state 枚举。quick/full command 每项精确为 `{commandPath,arguments}`，仅声明、不在 inventory 中执行。manifest 是 desired contract；inventory 单独报告 observed wrapper/runtime/implementation gap。retired hook 必须填写 `lifecycleReason`，其他 lifecycle 必须为 null。每个文件精确字段为 `relativePath,liveRelativePath,sha256,lifecycle,ownerHookIds`；`environment` 项精确为 `{name,scope,desired,restartRequired}`，且唯一允许值为 `SERENA_HOME/User/D:\Codex\.serena/true`（Task 6 才加入实际项）。
 
 - [ ] **Step 4：加入当前受管注册与 runtime manifest**
 
@@ -171,7 +171,8 @@ SessionStart 顺序固定为 provider 0、projectless/state 1、Serena activate 
 }
 ```
 
-`files` 同时声明 Task 3 将导入的 12 个审计快照文件和其当前 live SHA-256；在 managed 源尚未建立时，
+`files` 声明 Task 3 将导入的 12 个真实审计快照文件和其当前 live SHA-256；尚待 Task 5 实现的
+`codex-state-policy-guard.py` 由 hook 的 `sourceState=planned` 诚实表达，不进入 `files[]`、不伪造 SHA-256。在 managed 源尚未建立时，
 manifest 仍是合法声明，inventory 必须把 `managedExists=false` 作为事实缺口输出，不能把缺文件误报为
 manifest schema 错误。Task 3 导入后该缺口必须归零。
 
@@ -199,6 +200,8 @@ param(
 ```
 
 入口只读 `hooks.json`、受管/live 文件元数据、runtime 存在性、`config.toml` 中 trust key 的脱敏类别/摘要、User/Process `SERENA_HOME` 和 reparse 祖先；使用 `ReportArtifactPublisher.ps1` 生成 JSON/Markdown，顶层固定 `artifactType="env-governance.codex-hook-inventory"`、`schemaVersion=1`、`readOnly=true`、`executionAllowed=false`。OutputDir 只允许仓库内两个显式报告根，拒绝 ADS 与任一 reparse ancestor。
+
+registry facts 额外记录原始 `hooks.json` 整文件的 SHA-256 与字节长度，供 Task 2 final gate 使用；不输出原文。重复项按 `event + matcher + normalized path + exact arguments` 的脱敏 identity SHA-256 计数，规范化 slash/case/quote 变体；兼容字段 `duplicateCommandCount` 暂时与 `duplicateIdentityCount` 同值，后续消费者应迁移到后者。
 
 - [ ] **Step 7：运行绿灯与空白检查**
 
@@ -238,7 +241,7 @@ git commit -m "feat: add codex hook manifest and inventory"
 
 **接口：**
 
-- Produces: `Merge-CodexHookRegistry -Manifest <object> -LiveRegistry <object>`，只替换受管 command entries。
+- Produces: `Merge-CodexHookRegistry -Manifest <object> -LiveRegistry <object> -Mode <registration-repair|full>`；所有权只按完整 `event + matcher + normalized command path + exact arguments` identity 判断，禁止只看 command path 或索引。
 - Produces: `New-CodexHookDeploymentPlanDocument -Manifest -Inventory -DesiredRegistry -Mode <registration-repair|full>`。
 - Produces plan schema 1：`artifactType,schemaVersion,generationId,generatedAtUtc,manifestSha256,mode,applyEligible,sourceFacts,liveFacts,registryBeforeSha256,registryAfterSha256,actions,environmentActions,postChecks,rollbackRequired`。
 - `Invoke-CodexHookDeployment.ps1 -PlanPath <path> -Apply -ApprovedScope codex-hook-governance-2026-07-11 -EvidenceRoot <D path>`。
@@ -249,7 +252,7 @@ git commit -m "feat: add codex hook manifest and inventory"
 fixture 在 SessionStart 前后放置未知 group，并给未知 group 增加自定义字段。断言受管 0–4 恢复固定顺序、未知项原样保留、新项只追加：
 
 ```powershell
-$merged = Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $live
+$merged = Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $live -Mode registration-repair
 Assert-Sequence ($merged.hooks.SessionStart | Get-ManagedCommandName) @(
     'codex-provider-stability-guard.cmd',
     'codex-projectless-root-d.cmd',
@@ -262,7 +265,7 @@ Assert-True ($merged.hooks.SessionStart[-1].customOwner -eq 'fixture') '未知 g
 
 - [ ] **Step 2：运行红灯并实现纯合并器**
 
-Expected: FAIL，`Merge-CodexHookRegistry` 未定义。实现时用 command path allowlist 识别所有权，不按索引盲删；未知字段通过原对象深拷贝保留。`registration-repair` 模式禁止产生文件覆盖和环境动作。
+Expected: FAIL，`Merge-CodexHookRegistry` 未定义。实现时用完整 `event + matcher + normalized command path + exact arguments` identity 识别所有权，不按索引或 command path alone 盲删；未知字段通过原对象深拷贝保留。`registration-repair` 只修复 `SessionStart` 受管 identity 的顺序与缺项，不修改 `Stop` / `PreToolUse`、不执行 retirement，并禁止产生文件覆盖和环境动作；`full` 才按 retired hook 的完整精确 identity 取消注册。
 
 - [ ] **Step 3：写 apply/rollback 故障注入红灯**
 
