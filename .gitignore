@@ -5,6 +5,12 @@ reports/env-update-readiness-test/
 reports/report-artifact-publisher-test/
 reports/project-local-env-review-test/
 reports/project-local-env-rebuild-plan-test/
+reports/codex-hook-policy-test/
+reports/codex-hook-inventory-test/
+reports/codex-hook-deployment-test/
+reports/codex-hook-runtime-test/
+reports/codex-hook-config-test/
+reports/codex-state-policy-test/
 .serena/
 .codex/skill-state/
 .local/
