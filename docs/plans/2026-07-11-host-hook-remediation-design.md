@@ -19,7 +19,12 @@
 ```powershell
 ./scripts/Invoke-CodexHostHookReconciliation.ps1 -Mode Check -Json
 ./scripts/Invoke-CodexHostHookReconciliation.ps1 -Mode Repair -Json
+./scripts/Invoke-CodexHostHookReconciliation.ps1 -Mode Check -CodexHome <D盘绝对路径> -Json
 ```
+
+`-CodexHome` 是真实的部署/fixture seam：省略时使用进程 `CODEX_HOME`，仍为空时才回落到 `D:\Codex\.codex`。它只接受 D 盘绝对目录，且从 D 盘根到目标目录之间不得穿过 reparse point。该参数不能放宽修复边界；脚本仍只处理固定文件名和 legacy allowlist。
+
+结构化结果固定包含 `schemaVersion`、`mode`、`ok`、`changed`、`driftCount`、`checks`、`evidencePath`。`checks` 是带 `name` 与 `ok` 的数组，至少覆盖 `config`、`registrations`、`legacyImplementations` 和 `acl`；详细诊断可以扩展，但不得输出配置内容或私有线程数据。
 
 该接口只拥有以下状态：
 
@@ -37,9 +42,9 @@
 1. 严格解析并验证输入；未知或重复关键 section/key 时拒绝写入。
 2. 在 `D:\Codex\.codex\run-evidence\host-hook-remediation\<run-id>` 保存原文件、旧 implementation、哈希与 ACL。
 3. 同卷临时文件写入，原子替换 `config.toml` 与 `hooks.json`，随后重新解析验证。
-4. 失败时用内存快照原子恢复已修改文件。
-5. 注册清空后，才退役明确 allowlist 中的旧脚本。
-6. 将 `hooks.json` 和 hooks 目录收紧为仅当前用户、SYSTEM、Administrators 可写。
+4. 两个配置文件尚未全部验证通过时，任何失败都用内存快照原子恢复已修改文件。
+5. 注册清空并验证后，才退役明确 allowlist 中的旧脚本；未知文件、未知子目录的路径和内容哈希必须保持不变，其 ACL 可以随 live hook surface 一起收紧。
+6. 将 `config.toml`、`hooks.json` 和 hooks 目录收紧为仅当前用户、SYSTEM、Administrators 可写。ACL 或退役阶段失败时保持已验证的“零注册”安全状态并返回失败，下一次 Repair 从该状态继续收敛；不得为了回滚附属步骤而恢复危险的活动 hooks。
 7. 再运行 `Check`；第二次 `Repair` 必须幂等。
 
 ## 成功标准
@@ -56,3 +61,5 @@
 ## 回滚
 
 每次真实修复只使用当次 evidence 目录。回滚时先恢复 `config.toml`、`hooks.json` 和旧 implementation，再恢复记录的 ACL；不得从更早的“一次性备份”猜测当前前置状态。
+
+`manifest.json` 至少记录原始哈希、已进入提交阶段的资源和最终 `status`。两文件提交中途失败并成功恢复时，`status` 必须为 `rolled-back`，便于证明不是“失败后碰巧看起来没变”。

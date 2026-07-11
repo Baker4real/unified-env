@@ -57,18 +57,73 @@ function Get-Sha256 {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 
-function Get-CoreFingerprint {
-    param([string]$CodexHome)
+function Get-TreeFingerprint {
+    param(
+        [string]$CodexHome,
+        [switch]$ExcludeEvidence
+    )
 
-    [ordered]@{
-        config = Get-Sha256 -Path (Join-Path $CodexHome "config.toml")
-        hooks = Get-Sha256 -Path (Join-Path $CodexHome "hooks.json")
-        legacy = @(
-            Get-ChildItem -LiteralPath (Join-Path $CodexHome "hooks") -File -Force |
-                Sort-Object Name |
-                ForEach-Object { "$($_.Name):$(Get-Sha256 -Path $_.FullName)" }
-        ) -join "|"
-    } | ConvertTo-Json -Compress
+    $root = [System.IO.Path]::GetFullPath($CodexHome).TrimEnd("\", "/")
+    $items = @(Get-Item -LiteralPath $root -Force) + @(Get-ChildItem -LiteralPath $root -Recurse -Force)
+    $entries = foreach ($item in $items) {
+        Assert-True -Condition (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) -Message "fixture 树中出现 reparse point：$($item.FullName)"
+        $relativePath = [System.IO.Path]::GetRelativePath($root, $item.FullName)
+        if ($ExcludeEvidence -and ($relativePath -eq "run-evidence" -or $relativePath.StartsWith("run-evidence\", [System.StringComparison]::OrdinalIgnoreCase))) {
+            continue
+        }
+        $acl = Get-Acl -LiteralPath $item.FullName
+        [ordered]@{
+            path = $relativePath
+            kind = if ($item.PSIsContainer) { "directory" } else { "file" }
+            hash = if ($item.PSIsContainer) { $null } else { Get-Sha256 -Path $item.FullName }
+            attributes = [string]$item.Attributes
+            sddl = $acl.Sddl
+        }
+    }
+
+    @($entries | Sort-Object path | ConvertTo-Json -Depth 5 -Compress) -join ""
+}
+
+function Assert-OnlyAllowedWriters {
+    param([string]$Path)
+
+    $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $allowed = @($currentSid, "S-1-5-18", "S-1-5-32-544")
+    $acl = Get-Acl -LiteralPath $Path
+    Assert-True -Condition $acl.AreAccessRulesProtected -Message "ACL 仍继承宽泛权限：$Path"
+
+    $writeMask = [System.Security.AccessControl.FileSystemRights]::Write -bor
+        [System.Security.AccessControl.FileSystemRights]::Modify -bor
+        [System.Security.AccessControl.FileSystemRights]::FullControl -bor
+        [System.Security.AccessControl.FileSystemRights]::Delete -bor
+        [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [System.Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [System.Security.AccessControl.FileSystemRights]::TakeOwnership
+    $writers = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or ($rule.FileSystemRights -band $writeMask) -eq 0) {
+            continue
+        }
+
+        $sid = $rule.IdentityReference.Value
+        Assert-True -Condition ($allowed -contains $sid) -Message "ACL 仍允许非白名单主体写入：$Path / $sid"
+        $writers.Add($sid) | Out-Null
+    }
+
+    foreach ($sid in $allowed) {
+        Assert-True -Condition $writers.Contains($sid) -Message "ACL 缺少白名单写主体：$Path / $sid"
+    }
+}
+
+function Get-CheckResult {
+    param(
+        [object]$Result,
+        [string]$Name
+    )
+
+    $matches = @($Result.checks | Where-Object { $_.name -eq $Name })
+    Assert-True -Condition ($matches.Count -eq 1) -Message "检查项必须恰好出现一次：$Name"
+    $matches[0]
 }
 
 $legacyNames = @(
@@ -86,7 +141,7 @@ $legacyNames = @(
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingApproval")]
         [string]$Variant = "Drift"
     )
 
@@ -95,7 +150,7 @@ function New-FixtureCodexHome {
     New-Item -ItemType Directory -Force -Path $hookDirectory | Out-Null
 
     $config = @'
-model = "gpt-5.4"
+model = "fixture-model-must-survive"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 
@@ -106,11 +161,13 @@ args = [ "start-mcp-server", "--context=D:\\Codex\\.serena\\contexts\\codex-file
 
 [mcp_servers.serena.env]
 SERENA_HOME = "D:\\Codex\\.serena"
+FIXTURE_ENV_SENTINEL = "must-survive"
 
 [features]
 hooks = false
 unified_exec = false
 apps = true
+fixture_feature_sentinel = true
 
 [hooks]
 [hooks.state]
@@ -120,6 +177,7 @@ hash = "fixture-trust-hash"
 
 [network]
 enabled = true
+fixture_network_sentinel = "must-survive"
 '@
 
     if ($Variant -eq "DuplicateSerena") {
@@ -130,6 +188,12 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
 '@
     } elseif ($Variant -eq "MissingSerenaArgs") {
         $config = $config -replace '(?m)^args\s*=.*\r?\n', ''
+    } elseif ($Variant -eq "DuplicateSerenaArgs") {
+        $config = $config -replace '(?m)^(args\s*=.*)$', ('$1' + "`n" + '$1')
+    } elseif ($Variant -eq "MalformedSerenaArgs") {
+        $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", '
+    } elseif ($Variant -eq "MissingApproval") {
+        $config = $config -replace '(?m)^approval_policy\s*=.*\r?\n', ''
     }
 
     Set-Content -LiteralPath (Join-Path $Root "config.toml") -Value $config -Encoding UTF8
@@ -141,8 +205,16 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
             schemaVersion = 7
             owner = "fixture-owner"
             hooks = [ordered]@{
-                SessionStart = @([ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/codex-provider-stability-guard.cmd"' }) })
-                PreToolUse = @([ordered]@{ matcher = "Bash"; hooks = @([ordered]@{ type = "command"; command = "serena-hooks remind --client=codex" }) })
+                SessionStart = @(
+                    [ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/codex-provider-stability-guard.cmd"' }) },
+                    [ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/codex-projectless-root-d.cmd"' }) },
+                    [ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/serena-activate-guarded.cmd"' }) },
+                    [ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/serena-dashboard-guard.cmd"' }) }
+                )
+                PreToolUse = @(
+                    [ordered]@{ matcher = "Bash"; hooks = @([ordered]@{ type = "command"; command = "serena-hooks remind --client=codex" }) },
+                    [ordered]@{ matcher = "mcp__serena__*"; hooks = @([ordered]@{ type = "command"; command = "serena-hooks auto-approve --client=codex" }) }
+                )
                 Stop = @([ordered]@{ hooks = @([ordered]@{ type = "command"; command = "serena-hooks cleanup --client=codex" }) })
             }
         }
@@ -152,6 +224,9 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
     foreach ($name in $legacyNames) {
         Set-Content -LiteralPath (Join-Path $hookDirectory $name) -Value "fixture:$name" -Encoding UTF8
     }
+    Set-Content -LiteralPath (Join-Path $hookDirectory "keep-me.txt") -Value "unknown-file-must-survive" -Encoding UTF8
+    New-Item -ItemType Directory -Force -Path (Join-Path $hookDirectory "unknown-nested") | Out-Null
+    Set-Content -LiteralPath (Join-Path $hookDirectory "unknown-nested\keep.bin") -Value "unknown-nested-must-survive" -Encoding UTF8
 }
 
 function Invoke-Reconciler {
@@ -174,36 +249,37 @@ function Assert-RepairWasRejectedWithoutMutation {
         [string]$CaseName
     )
 
-    $before = Get-CoreFingerprint -CodexHome $CodexHome
+    $before = Get-TreeFingerprint -CodexHome $CodexHome
     $threw = $false
     try {
         Invoke-Reconciler -ScriptPath $ScriptPath -Mode Repair -CodexHome $CodexHome | Out-Null
     } catch {
         $threw = $true
     }
-    $after = Get-CoreFingerprint -CodexHome $CodexHome
+    $after = Get-TreeFingerprint -CodexHome $CodexHome
     Assert-True -Condition $threw -Message "$CaseName 没有拒绝 Repair"
     Assert-True -Condition ($before -eq $after) -Message "$CaseName 被拒绝后仍修改了核心文件"
 }
 
 $scriptPath = Join-Path $ProjectRoot "scripts\Invoke-CodexHostHookReconciliation.ps1"
-$testRoot = Join-Path $ProjectRoot "reports\codex-host-hook-reconciliation-test"
+$testRunId = [guid]::NewGuid().ToString("N")
+$testRoot = Join-Path $ProjectRoot "reports\codex-host-hook-reconciliation-test-$testRunId"
+$ownershipMarker = Join-Path $testRoot ".owned-by-test-$testRunId"
 
 Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Message "找不到待实现的冷路径修复器：$scriptPath"
 
 try {
     Assert-SafeTestRoot -Path $testRoot
-    if (Test-Path -LiteralPath $testRoot) {
-        Remove-Item -LiteralPath $testRoot -Recurse -Force
-    }
+    Assert-True -Condition (-not (Test-Path -LiteralPath $testRoot)) -Message "唯一测试目录意外已存在：$testRoot"
     New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
+    Set-Content -LiteralPath $ownershipMarker -Value $testRunId -Encoding UTF8
 
     $healthyHome = Join-Path $testRoot "drift\.codex"
     New-FixtureCodexHome -Root $healthyHome
 
-    $beforeCheck = Get-CoreFingerprint -CodexHome $healthyHome
+    $beforeCheck = Get-TreeFingerprint -CodexHome $healthyHome
     $check = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
-    $afterCheck = Get-CoreFingerprint -CodexHome $healthyHome
+    $afterCheck = Get-TreeFingerprint -CodexHome $healthyHome
     foreach ($property in @("schemaVersion", "mode", "ok", "changed", "driftCount", "checks", "evidencePath")) {
         Assert-Property -Object $check -Name $property
     }
@@ -212,7 +288,18 @@ try {
     Assert-True -Condition (-not [bool]$check.changed) -Message "Check 不得报告 changed=true"
     Assert-True -Condition ([int]$check.driftCount -gt 0) -Message "Check 未报告 drift"
     Assert-True -Condition ($beforeCheck -eq $afterCheck) -Message "Check 修改了 fixture"
+    foreach ($name in @("config", "registrations", "legacyImplementations", "acl")) {
+        Assert-True -Condition (-not [bool](Get-CheckResult -Result $check -Name $name).ok) -Message "漂移 fixture 的检查项不应健康：$name"
+    }
 
+    $originalConfigHash = Get-Sha256 -Path (Join-Path $healthyHome "config.toml")
+    $originalHooksHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks.json")
+    $legacyHashes = @{}
+    foreach ($name in $legacyNames) {
+        $legacyHashes[$name] = Get-Sha256 -Path (Join-Path $healthyHome "hooks\$name")
+    }
+    $unknownFileHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks\keep-me.txt")
+    $unknownNestedHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks\unknown-nested\keep.bin")
     $repair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
     Assert-True -Condition ($repair.mode -eq "Repair") -Message "Repair 结果 mode 错误"
     Assert-True -Condition ([bool]$repair.ok) -Message "Repair 未形成健康终态"
@@ -222,6 +309,7 @@ try {
     $hooks = Get-Content -LiteralPath (Join-Path $healthyHome "hooks.json") -Raw | ConvertFrom-Json -AsHashtable
     Assert-True -Condition ([int]$hooks.schemaVersion -eq 7) -Message "hooks.json 未保留未知 schemaVersion"
     Assert-True -Condition ($hooks.owner -eq "fixture-owner") -Message "hooks.json 未保留未知 owner"
+    Assert-True -Condition ($hooks.hooks -is [System.Collections.IDictionary]) -Message "hooks 必须是 JSON 空对象，不能是数组或 null"
     Assert-True -Condition ($hooks.hooks.Count -eq 0) -Message "hooks.json 的 hooks 不是空对象"
 
     $config = Get-Content -LiteralPath (Join-Path $healthyHome "config.toml") -Raw
@@ -229,7 +317,9 @@ try {
     Assert-True -Condition (-not ($config -match '"--project"\s*,')) -Message "Serena 仍包含固定 --project"
     Assert-True -Condition (-not ($config -match '"--project-file(?:=|"\s*,)')) -Message "Serena 仍包含 --project-file"
     Assert-True -Condition $config.Contains("codex-file-tools.yml") -Message "Serena custom context 被误删"
-    Assert-True -Condition $config.Contains("[network]") -Message "无关 TOML section 被误删"
+    foreach ($sentinel in @('fixture-model-must-survive', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true', 'fixture_network_sentinel = "must-survive"')) {
+        Assert-True -Condition $config.Contains($sentinel) -Message "无关 TOML 内容被误删或改写：$sentinel"
+    }
     Assert-True -Condition ($config -match '(?m)^approval_policy\s*=\s*"never"\s*$') -Message "approval_policy 未归一化"
     Assert-True -Condition ($config -match '(?m)^sandbox_mode\s*=\s*"danger-full-access"\s*$') -Message "sandbox_mode 未归一化"
     Assert-True -Condition ($config -match '(?m)^hooks\s*=\s*true\s*$') -Message "features.hooks 未保持开启"
@@ -238,31 +328,76 @@ try {
 
     foreach ($name in $legacyNames) {
         Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $healthyHome "hooks\$name"))) -Message "legacy 文件仍在 live 目录：$name"
-        Assert-True -Condition (Test-Path -LiteralPath (Join-Path $repair.evidencePath "legacy-hooks\$name") -PathType Leaf) -Message "legacy 文件未先归档：$name"
+        $archivedPath = Join-Path $repair.evidencePath "legacy-hooks\$name"
+        Assert-True -Condition (Test-Path -LiteralPath $archivedPath -PathType Leaf) -Message "legacy 文件未先归档：$name"
+        Assert-True -Condition ((Get-Sha256 -Path $archivedPath) -eq $legacyHashes[$name]) -Message "legacy evidence 内容不真实：$name"
     }
     foreach ($relative in @("config.toml", "hooks.json", "manifest.json")) {
         Assert-True -Condition (Test-Path -LiteralPath (Join-Path $repair.evidencePath $relative) -PathType Leaf) -Message "evidence 缺少：$relative"
     }
+    Assert-True -Condition ((Get-Sha256 -Path (Join-Path $repair.evidencePath "config.toml")) -eq $originalConfigHash) -Message "config evidence 不是修复前快照"
+    Assert-True -Condition ((Get-Sha256 -Path (Join-Path $repair.evidencePath "hooks.json")) -eq $originalHooksHash) -Message "hooks evidence 不是修复前快照"
+    Assert-True -Condition ((Get-Sha256 -Path (Join-Path $healthyHome "hooks\keep-me.txt")) -eq $unknownFileHash) -Message "未知 hook 文件被删除或改写"
+    Assert-True -Condition ((Get-Sha256 -Path (Join-Path $healthyHome "hooks\unknown-nested\keep.bin")) -eq $unknownNestedHash) -Message "未知嵌套 hook 文件被删除或改写"
 
     foreach ($path in @((Join-Path $healthyHome "config.toml"), (Join-Path $healthyHome "hooks.json"), (Join-Path $healthyHome "hooks"))) {
-        $acl = Get-Acl -LiteralPath $path
-        Assert-True -Condition $acl.AreAccessRulesProtected -Message "ACL 仍继承宽泛写权限：$path"
-        Assert-True -Condition (-not $acl.Sddl.Contains(";;;AU)")) -Message "ACL 仍包含 Authenticated Users：$path"
+        Assert-OnlyAllowedWriters -Path $path
     }
 
-    $stableFingerprint = Get-CoreFingerprint -CodexHome $healthyHome
+    $healthyCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
+    Assert-True -Condition ([bool]$healthyCheck.ok -and [int]$healthyCheck.driftCount -eq 0) -Message "Repair 后的直接 Check 不健康"
+    foreach ($name in @("config", "registrations", "legacyImplementations", "acl")) {
+        Assert-True -Condition ([bool](Get-CheckResult -Result $healthyCheck -Name $name).ok) -Message "Repair 后检查项不健康：$name"
+    }
+
+    $stableFingerprint = Get-TreeFingerprint -CodexHome $healthyHome
     $evidenceRoot = Join-Path $healthyHome "run-evidence\host-hook-remediation"
     $evidenceCount = @(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count
     $secondRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
     Assert-True -Condition ([bool]$secondRepair.ok) -Message "第二次 Repair 未通过"
     Assert-True -Condition (-not [bool]$secondRepair.changed) -Message "第二次 Repair 不幂等"
-    Assert-True -Condition ((Get-CoreFingerprint -CodexHome $healthyHome) -eq $stableFingerprint) -Message "第二次 Repair 改变了核心文件"
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $healthyHome) -eq $stableFingerprint) -Message "第二次 Repair 改变了核心文件"
     Assert-True -Condition (@(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count -eq $evidenceCount) -Message "幂等 Repair 创建了无意义 evidence"
+
+    $rollbackHome = Join-Path $testRoot "rollback\.codex"
+    New-FixtureCodexHome -Root $rollbackHome
+    $rollbackConfigHash = Get-Sha256 -Path (Join-Path $rollbackHome "config.toml")
+    $rollbackHooksHash = Get-Sha256 -Path (Join-Path $rollbackHome "hooks.json")
+    $rollbackBefore = Get-TreeFingerprint -CodexHome $rollbackHome -ExcludeEvidence
+    $lockedHooksPath = Join-Path $rollbackHome "hooks.json"
+    $lockStream = [System.IO.File]::Open(
+        $lockedHooksPath,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::Read
+    )
+    $rollbackThrew = $false
+    try {
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $rollbackHome | Out-Null
+    } catch {
+        $rollbackThrew = $true
+    } finally {
+        $lockStream.Dispose()
+    }
+    Assert-True -Condition $rollbackThrew -Message "hooks 原子替换被阻止时 Repair 未失败"
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $rollbackHome -ExcludeEvidence) -eq $rollbackBefore) -Message "两文件半提交失败后未恢复原始状态"
+
+    $rollbackEvidenceRoot = Join-Path $rollbackHome "run-evidence\host-hook-remediation"
+    $rollbackEvidence = @(Get-ChildItem -LiteralPath $rollbackEvidenceRoot -Directory -Force)
+    Assert-True -Condition ($rollbackEvidence.Count -eq 1) -Message "回滚 canary 必须恰好生成一份 evidence"
+    $rollbackManifest = Get-Content -LiteralPath (Join-Path $rollbackEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($rollbackManifest.status -eq "rolled-back") -Message "回滚 evidence 未标记 rolled-back"
+    Assert-True -Condition (@($rollbackManifest.committedResources) -contains "config.toml") -Message "回滚 canary 未证明 config.toml 曾进入提交阶段"
+    Assert-True -Condition ((Get-Sha256 -Path (Join-Path $rollbackEvidence[0].FullName "config.toml")) -eq $rollbackConfigHash) -Message "回滚 evidence 的 config 快照不真实"
+    Assert-True -Condition ((Get-Sha256 -Path (Join-Path $rollbackEvidence[0].FullName "hooks.json")) -eq $rollbackHooksHash) -Message "回滚 evidence 的 hooks 快照不真实"
 
     foreach ($case in @(
         @{ Name = "malformed-hooks"; Variant = "MalformedHooks" },
         @{ Name = "duplicate-serena"; Variant = "DuplicateSerena" },
-        @{ Name = "missing-serena-args"; Variant = "MissingSerenaArgs" }
+        @{ Name = "missing-serena-args"; Variant = "MissingSerenaArgs" },
+        @{ Name = "duplicate-serena-args"; Variant = "DuplicateSerenaArgs" },
+        @{ Name = "malformed-serena-args"; Variant = "MalformedSerenaArgs" },
+        @{ Name = "missing-approval"; Variant = "MissingApproval" }
     )) {
         $caseHome = Join-Path $testRoot "$($case.Name)\.codex"
         New-FixtureCodexHome -Root $caseHome -Variant $case.Variant
@@ -273,6 +408,8 @@ try {
 } finally {
     if (-not $KeepOutputs -and (Test-Path -LiteralPath $testRoot)) {
         Assert-SafeTestRoot -Path $testRoot
+        Assert-True -Condition (Test-Path -LiteralPath $ownershipMarker -PathType Leaf) -Message "拒绝清理缺少 ownership marker 的测试目录"
+        Assert-True -Condition ((Get-Content -LiteralPath $ownershipMarker -Raw).Trim() -eq $testRunId) -Message "拒绝清理 ownership marker 不匹配的测试目录"
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 }
