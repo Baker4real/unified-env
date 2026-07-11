@@ -27,10 +27,10 @@
 
 **步骤：**
 
-1. 用 D 盘 fixture 建立包含固定 Serena 项目、7 个 lifecycle hooks、旧 trust state 和九个 legacy 文件的输入。
+1. 用 D 盘 fixture 建立包含固定 Serena 项目、7 个 lifecycle hooks、旧 trust state、九个旧源码/入口文件及一个派生 `.pyc` 的输入。
 2. 测试 `Check` 只读、准确报告 drift，不改变任一哈希。
 3. 测试 `Repair` 清空 hooks、将固定项目替换为唯一 `--project-from-cwd`、删除旧 trust state，同时保留 custom context、无关 TOML section 和 JSON 顶层字段。
-4. 测试九个 legacy 文件被复制到 evidence 后才从 live 目录退役。
+4. 测试十个 legacy 文件被复制到 evidence 后才从 live 目录退役，并仅在 `__pycache__` 为空时精确删除该目录。
 5. 测试第二次 `Repair` 不再改变文件或新建无意义 evidence。
 6. 测试 malformed JSON、重复 Serena section、缺失关键 key 时拒绝写入并保持原哈希。
 7. 先运行测试确认因实现缺失或行为缺失而失败。
@@ -69,7 +69,7 @@
 
 - 修改：`D:\Codex\.codex\config.toml`
 - 修改：`D:\Codex\.codex\hooks.json`
-- 退役：`D:\Codex\.codex\hooks\` 下九个明确 legacy 文件
+- 退役：`D:\Codex\.codex\hooks\` 下十个明确 legacy 文件和一个确认为空的派生 cache 目录
 - 新建：`D:\Codex\.codex\run-evidence\host-hook-remediation\<run-id>\`
 
 **步骤：**

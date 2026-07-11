@@ -22,7 +22,7 @@
 ./scripts/Invoke-CodexHostHookReconciliation.ps1 -Mode Check -CodexHome <D盘绝对路径> -Json
 ```
 
-`-CodexHome` 是真实的部署/fixture seam：省略时使用进程 `CODEX_HOME`，仍为空时才回落到 `D:\Codex\.codex`。它只接受 D 盘绝对目录，且从 D 盘根到目标目录之间不得穿过 reparse point。该参数不能放宽修复边界；脚本仍只处理固定文件名和 legacy allowlist。
+`-CodexHome` 是 read-only Check 和受控 fixture seam：省略时使用进程 `CODEX_HOME`，仍为空时才回落到 `D:\Codex\.codex`。真实 Repair 只允许本机唯一 live home `D:\Codex\.codex`；其他 D 盘目录必须带内容固定的 fixture marker。所有路径从 D 盘根到目标叶子都不得穿过 reparse point。该参数不能放宽修复边界；脚本仍只处理固定文件名和 legacy allowlist。
 
 结构化结果固定包含 `schemaVersion`、`mode`、`ok`、`changed`、`driftCount`、`checks`、`evidencePath`。`checks` 是带 `name` 与 `ok` 的数组，至少覆盖 `config`、`registrations`、`legacyImplementations` 和 `acl`；详细诊断可以扩展，但不得输出配置内容或私有线程数据。
 
@@ -40,7 +40,8 @@
 `Repair` 必须遵守以下顺序：
 
 1. 严格解析并验证输入；未知或重复关键 section/key 时拒绝写入。
-2. 在 `D:\Codex\.codex\run-evidence\host-hook-remediation\<run-id>` 保存原文件、旧 implementation、哈希与 ACL。
+   行级 TOML parser 遇到三引号多行字符串时 fail closed，避免把正文中的 `[hooks]` 等文本误判为 section。
+2. 在 `D:\Codex\.codex\run-evidence\host-hook-remediation\<run-id>` 保存原文件、旧 implementation、哈希与完整 hooks tree ACL；evidence 根、run 目录和文件同步收紧写 ACL。
 3. 同卷临时文件写入，原子替换 `config.toml` 与 `hooks.json`，随后重新解析验证。
 4. 两个配置文件尚未全部验证通过时，任何失败都用内存快照原子恢复已修改文件。
 5. 注册清空并验证后，才退役明确 allowlist 中的旧脚本；未知文件、未知子目录的路径和内容哈希必须保持不变，其 ACL 可以随 live hook surface 一起收紧。
@@ -53,7 +54,7 @@
 - `config.toml` 中 Serena 恰好包含一个 `--project-from-cwd`，不存在固定 `--project` / `--project-file`。
 - 正式权限默认值仍为 `never + danger-full-access`，`hooks` 和 `unified_exec` feature 仍开启。
 - 不存在 `[hooks]` / `[hooks.state...]` 旧 trust state。
-- 九个旧自定义 hook 文件已归档并从 live hooks 目录退役。
+- 九个旧源码/入口文件及一个派生 `.pyc` 已归档并退役；确认空目录后再精确删除 `__pycache__`，不做递归删除。
 - hooks 目录与 `hooks.json` 不再允许 `Authenticated Users` 等宽泛主体写入。
 - Projectless 的 C/D 别名 File ID 一致，证明逻辑 C 路径实际落盘 D。
 - 最新 mobile/desktop 线程无新增权限漂移；全新 mobile canary 的首个 turn 仍为 `never + danger-full-access`。

@@ -92,14 +92,17 @@ function Assert-OnlyAllowedWriters {
     $acl = Get-Acl -LiteralPath $Path
     Assert-True -Condition $acl.AreAccessRulesProtected -Message "ACL 仍继承宽泛权限：$Path"
 
-    $writeMask = [System.Security.AccessControl.FileSystemRights]::Write -bor
-        [System.Security.AccessControl.FileSystemRights]::Modify -bor
-        [System.Security.AccessControl.FileSystemRights]::FullControl -bor
+    $writeMask = [System.Security.AccessControl.FileSystemRights]::WriteData -bor
+        [System.Security.AccessControl.FileSystemRights]::CreateFiles -bor
+        [System.Security.AccessControl.FileSystemRights]::AppendData -bor
+        [System.Security.AccessControl.FileSystemRights]::CreateDirectories -bor
+        [System.Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [System.Security.AccessControl.FileSystemRights]::WriteAttributes -bor
         [System.Security.AccessControl.FileSystemRights]::Delete -bor
         [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
         [System.Security.AccessControl.FileSystemRights]::ChangePermissions -bor
         [System.Security.AccessControl.FileSystemRights]::TakeOwnership
-    $writers = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $writers = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
         if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or ($rule.FileSystemRights -band $writeMask) -eq 0) {
             continue
@@ -135,17 +138,19 @@ $legacyNames = @(
     "serena-activate-guarded.cmd",
     "serena-activate-guarded.ps1",
     "serena-dashboard-guard.cmd",
-    "serena-dashboard-guard.ps1"
+    "serena-dashboard-guard.ps1",
+    "__pycache__\codex-mobile-permission-guard.cpython-313.pyc"
 )
 
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingApproval")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingApproval", "MultilineToml")]
         [string]$Variant = "Drift"
     )
 
     New-Item -ItemType Directory -Force -Path $Root | Out-Null
+    Set-Content -LiteralPath (Join-Path $Root ".codex-host-hook-reconciliation-fixture") -Value "codex-host-hook-reconciliation-fixture-v1" -Encoding UTF8
     $hookDirectory = Join-Path $Root "hooks"
     New-Item -ItemType Directory -Force -Path $hookDirectory | Out-Null
 
@@ -175,6 +180,9 @@ fixture_feature_sentinel = true
 enabled = true
 hash = "fixture-trust-hash"
 
+[[fixture.array]] # 合法 array-of-tables 不能随 hooks section 被删除
+name = "array-table-must-survive"
+
 [network]
 enabled = true
 fixture_network_sentinel = "must-survive"
@@ -194,6 +202,14 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
         $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", '
     } elseif ($Variant -eq "MissingApproval") {
         $config = $config -replace '(?m)^approval_policy\s*=.*\r?\n', ''
+    } elseif ($Variant -eq "MultilineToml") {
+        $config += @'
+
+note = '''
+[hooks]
+multiline-body-must-survive
+'''
+'@
     }
 
     Set-Content -LiteralPath (Join-Path $Root "config.toml") -Value $config -Encoding UTF8
@@ -222,7 +238,9 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
     }
 
     foreach ($name in $legacyNames) {
-        Set-Content -LiteralPath (Join-Path $hookDirectory $name) -Value "fixture:$name" -Encoding UTF8
+        $legacyPath = Join-Path $hookDirectory $name
+        New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($legacyPath)) | Out-Null
+        Set-Content -LiteralPath $legacyPath -Value "fixture:$name" -Encoding UTF8
     }
     Set-Content -LiteralPath (Join-Path $hookDirectory "keep-me.txt") -Value "unknown-file-must-survive" -Encoding UTF8
     New-Item -ItemType Directory -Force -Path (Join-Path $hookDirectory "unknown-nested") | Out-Null
@@ -317,7 +335,7 @@ try {
     Assert-True -Condition (-not ($config -match '"--project"\s*,')) -Message "Serena 仍包含固定 --project"
     Assert-True -Condition (-not ($config -match '"--project-file(?:=|"\s*,)')) -Message "Serena 仍包含 --project-file"
     Assert-True -Condition $config.Contains("codex-file-tools.yml") -Message "Serena custom context 被误删"
-    foreach ($sentinel in @('fixture-model-must-survive', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true', 'fixture_network_sentinel = "must-survive"')) {
+    foreach ($sentinel in @('fixture-model-must-survive', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true', 'array-table-must-survive', 'fixture_network_sentinel = "must-survive"')) {
         Assert-True -Condition $config.Contains($sentinel) -Message "无关 TOML 内容被误删或改写：$sentinel"
     }
     Assert-True -Condition ($config -match '(?m)^approval_policy\s*=\s*"never"\s*$') -Message "approval_policy 未归一化"
@@ -332,11 +350,26 @@ try {
         Assert-True -Condition (Test-Path -LiteralPath $archivedPath -PathType Leaf) -Message "legacy 文件未先归档：$name"
         Assert-True -Condition ((Get-Sha256 -Path $archivedPath) -eq $legacyHashes[$name]) -Message "legacy evidence 内容不真实：$name"
     }
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $healthyHome "hooks\__pycache__"))) -Message "空 legacy __pycache__ 目录未退役"
     foreach ($relative in @("config.toml", "hooks.json", "manifest.json")) {
         Assert-True -Condition (Test-Path -LiteralPath (Join-Path $repair.evidencePath $relative) -PathType Leaf) -Message "evidence 缺少：$relative"
     }
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $repair.evidencePath "config.toml")) -eq $originalConfigHash) -Message "config evidence 不是修复前快照"
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $repair.evidencePath "hooks.json")) -eq $originalHooksHash) -Message "hooks evidence 不是修复前快照"
+    $aclBefore = Get-Content -LiteralPath (Join-Path $repair.evidencePath "acl-before.json") -Raw | ConvertFrom-Json -AsHashtable
+    foreach ($path in @(
+        (Join-Path $healthyHome "config.toml"),
+        (Join-Path $healthyHome "hooks.json"),
+        (Join-Path $healthyHome "hooks"),
+        (Join-Path $healthyHome "hooks\keep-me.txt"),
+        (Join-Path $healthyHome "hooks\unknown-nested"),
+        (Join-Path $healthyHome "hooks\unknown-nested\keep.bin")
+    )) {
+        Assert-True -Condition $aclBefore.Contains($path) -Message "acl-before 未覆盖完整 hooks tree：$path"
+    }
+    foreach ($item in @(Get-Item -LiteralPath $repair.evidencePath -Force) + @(Get-ChildItem -LiteralPath $repair.evidencePath -Recurse -Force)) {
+        Assert-OnlyAllowedWriters -Path $item.FullName
+    }
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $healthyHome "hooks\keep-me.txt")) -eq $unknownFileHash) -Message "未知 hook 文件被删除或改写"
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $healthyHome "hooks\unknown-nested\keep.bin")) -eq $unknownNestedHash) -Message "未知嵌套 hook 文件被删除或改写"
 
@@ -397,7 +430,8 @@ try {
         @{ Name = "missing-serena-args"; Variant = "MissingSerenaArgs" },
         @{ Name = "duplicate-serena-args"; Variant = "DuplicateSerenaArgs" },
         @{ Name = "malformed-serena-args"; Variant = "MalformedSerenaArgs" },
-        @{ Name = "missing-approval"; Variant = "MissingApproval" }
+        @{ Name = "missing-approval"; Variant = "MissingApproval" },
+        @{ Name = "multiline-toml"; Variant = "MultilineToml" }
     )) {
         $caseHome = Join-Path $testRoot "$($case.Name)\.codex"
         New-FixtureCodexHome -Root $caseHome -Variant $case.Variant
