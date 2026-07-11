@@ -23,6 +23,7 @@ $script:LegacyHookNames = @(
     "__pycache__\codex-mobile-permission-guard.cpython-313.pyc"
 )
 $script:LegacyHookDirectoryNames = @("__pycache__")
+$script:TomlKeyPattern = '(?:[A-Za-z0-9_-]+|"(?:\\.|[^"\\])*"|''[^'']*'')'
 
 function Get-Sha256 {
     param([string]$Path)
@@ -193,10 +194,9 @@ function Write-AtomicText {
 function ConvertFrom-TomlHeaderName {
     param([string]$Name)
 
-    $keyPattern = '(?:[A-Za-z0-9_-]+|"(?:\\.|[^"\\])*"|''[^'']*'')'
     $match = [regex]::Match(
         $Name,
-        '^\s*(?<key>' + $keyPattern + ')\s*(?:\.\s*(?<key>' + $keyPattern + ')\s*)*$'
+        '^\s*(?<key>' + $script:TomlKeyPattern + ')\s*(?:\.\s*(?<key>' + $script:TomlKeyPattern + ')\s*)*$'
     )
     if (-not $match.Success) {
         throw "当前安全 parser 无法解析 TOML section header：[$Name]"
@@ -239,6 +239,19 @@ function Test-TomlHeaderSegmentsEqual {
         }
     }
     $true
+}
+
+function Get-TomlAssignmentKeySegments {
+    param([string]$Line)
+
+    $match = [regex]::Match(
+        $Line,
+        '^\s*(?<name>' + $script:TomlKeyPattern + '(?:\s*\.\s*' + $script:TomlKeyPattern + ')*)\s*='
+    )
+    if (-not $match.Success) {
+        return
+    }
+    ConvertFrom-TomlHeaderName -Name $match.Groups['name'].Value
 }
 
 function Get-TomlDocument {
@@ -312,10 +325,11 @@ function Get-UniqueKeyIndex {
         [int]$End
     )
 
-    $pattern = '^\s*' + [regex]::Escape($Key) + '\s*='
+    $expectedSegments = @($Key)
     $keyIndices = [System.Collections.Generic.List[int]]::new()
     for ($index = $Start; $index -lt $End; $index++) {
-        if ([regex]::IsMatch($Document.lines[$index], $pattern)) {
+        $segments = @(Get-TomlAssignmentKeySegments -Line $Document.lines[$index])
+        if (Test-TomlHeaderSegmentsEqual -Left $segments -Right $expectedSegments) {
             $keyIndices.Add($index)
         }
     }
@@ -334,7 +348,7 @@ function Set-TomlKeyLiteral {
         [string]$Literal
     )
 
-    $match = [regex]::Match($Document.lines[$Index], '^(?<indent>\s*)' + [regex]::Escape($Key) + '\s*=')
+    $match = [regex]::Match($Document.lines[$Index], '^(?<indent>\s*)')
     if (-not $match.Success) {
         throw "无法定位 TOML key：$Key"
     }
@@ -433,6 +447,12 @@ function Get-DesiredConfig {
 
     $document = Get-TomlDocument -Content $Content
     $firstSectionIndex = if ($document.headers.Count -gt 0) { ($document.headers | Sort-Object index | Select-Object -First 1).index } else { $document.lines.Count }
+    for ($index = 0; $index -lt $firstSectionIndex; $index++) {
+        $segments = @(Get-TomlAssignmentKeySegments -Line $document.lines[$index])
+        if ($segments.Count -gt 0 -and $segments[0] -ceq "hooks") {
+            throw "根级 TOML dotted hook key 不受支持，拒绝写入"
+        }
+    }
 
     $approvalIndex = Get-UniqueKeyIndex -Document $document -Key "approval_policy" -Start 0 -End $firstSectionIndex
     $sandboxIndex = Get-UniqueKeyIndex -Document $document -Key "sandbox_mode" -Start 0 -End $firstSectionIndex
@@ -684,6 +704,39 @@ function Set-ProtectedAcl {
     Set-Acl -LiteralPath $Path -AclObject $security
 }
 
+function Test-SerenaContextPolicy {
+    param([string]$Content)
+
+    $lines = [regex]::Split($Content, "\r?\n")
+    $promptHeaders = @(
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            if ($lines[$index] -match '^prompt\s*:\s*\|\s*(?:#.*)?$') {
+                $index
+            }
+        }
+    )
+    if ($promptHeaders.Count -ne 1) {
+        return $false
+    }
+
+    $promptLines = [System.Collections.Generic.List[string]]::new()
+    for ($index = $promptHeaders[0] + 1; $index -lt $lines.Count; $index++) {
+        $line = $lines[$index]
+        if (-not [string]::IsNullOrWhiteSpace($line) -and -not $line.StartsWith("  ", [System.StringComparison]::Ordinal)) {
+            break
+        }
+        if ($line.StartsWith("  ", [System.StringComparison]::Ordinal)) {
+            $promptLines.Add($line.Substring(2))
+        } else {
+            $promptLines.Add("")
+        }
+    }
+
+    $normalizedPrompt = [regex]::Replace(($promptLines -join "`n"), '\s+', ' ').Trim()
+    $requiredPolicy = "Before using any project-scoped Serena tool in a repository task, explicitly call activate_project with the absolute current workspace or repository root from Codex's environment_context, then verify the result with get_current_config. Never infer the task project from Serena's initial active project or from the Serena process working directory."
+    $normalizedPrompt.Contains($requiredPolicy, [System.StringComparison]::Ordinal)
+}
+
 function Get-ReconciliationState {
     param([string]$ResolvedCodexHome)
 
@@ -699,8 +752,8 @@ function Get-ReconciliationState {
     $configContent = Read-Text -Path $configPath
     $hooksContent = Read-Text -Path $hooksPath
     $serenaContextContent = Read-Text -Path $serenaContextPath
-    if (-not $serenaContextContent.Contains("activate_project") -or -not $serenaContextContent.Contains("environment_context")) {
-        throw "Serena context 缺少按 environment_context 显式 activate_project 的安全约束"
+    if (-not (Test-SerenaContextPolicy -Content $serenaContextContent)) {
+        throw "Serena context 缺少受控的显式项目激活与复验契约"
     }
     $desiredConfig = Get-DesiredConfig -Content $configContent -ExpectedSerenaContextPath $serenaContextPath
     $desiredHooks = Get-DesiredHooksJson -Content $hooksContent
@@ -1100,9 +1153,10 @@ try {
             evidencePath = $script:CurrentEvidencePath
             error = [pscustomobject]@{
                 code = "reconciliation-failed"
-                message = $_.Exception.Message
+                message = "检查或修复失败；JSON 输出已脱敏，请在受保护 evidence 中查看详细诊断（如有）"
             }
         } | ConvertTo-Json -Depth 6 -Compress | Write-Output
+        throw "reconciliation-failed"
     }
     throw
 }

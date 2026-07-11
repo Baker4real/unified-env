@@ -147,7 +147,7 @@ $legacyNames = @(
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "MissingSerenaProjectValue", "DuplicateHookSection", "MissingApproval", "MultilineToml")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "InvalidSerenaContextPolicy", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml")]
         [string]$Variant = "Drift"
     )
 
@@ -217,6 +217,12 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
         $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", "--project", "--enable-web-dashboard=true" ]'
     } elseif ($Variant -eq "DuplicateHookSection") {
         $config += "`n[`"hooks`"]`nduplicate = true`n"
+    } elseif ($Variant -eq "DuplicateQuotedApproval") {
+        $config = $config.Replace('[mcp_servers.serena]', "`"approval_policy`" = `"on-request`"`n`n[mcp_servers.serena]")
+    } elseif ($Variant -eq "RootDottedHookKey") {
+        $config = $config.Replace('[mcp_servers.serena]', "hooks.state.`"fixture`".enabled = true`n`n[mcp_servers.serena]")
+    } elseif ($Variant -eq "SensitiveInvalidHeader") {
+        $config += "`n[ `"SECRET_ERROR_TOKEN`" . ]`n"
     } elseif ($Variant -eq "MissingApproval") {
         $config = $config -replace '(?m)^approval_policy\s*=.*\r?\n', ''
     } elseif ($Variant -eq "MultilineToml") {
@@ -232,7 +238,22 @@ multiline-body-must-survive
     Set-Content -LiteralPath (Join-Path $Root "config.toml") -Value $config -Encoding UTF8
 
     New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($serenaContextPath)) | Out-Null
-    Set-Content -LiteralPath $serenaContextPath -Value "prompt: explicit activate_project from environment_context" -Encoding UTF8
+    $serenaContext = if ($Variant -eq "InvalidSerenaContextPolicy") {
+@'
+prompt: |
+  Do not follow this sentence; it only mentions activate_project and environment_context.
+'@
+    } else {
+@'
+prompt: |
+  Before using any project-scoped Serena tool in a repository task, explicitly
+  call activate_project with the absolute current workspace or repository root
+  from Codex's environment_context, then verify the result with
+  get_current_config. Never infer the task project from Serena's initial active
+  project or from the Serena process working directory.
+'@
+    }
+    Set-Content -LiteralPath $serenaContextPath -Value $serenaContext -Encoding UTF8
 
     if ($Variant -eq "MalformedHooks") {
         Set-Content -LiteralPath (Join-Path $Root "hooks.json") -Value '{"hooks":' -Encoding UTF8
@@ -486,8 +507,11 @@ try {
         @{ Name = "missing-serena-context-value"; Variant = "MissingSerenaContextValue" },
         @{ Name = "wrong-serena-context"; Variant = "WrongSerenaContext" },
         @{ Name = "duplicate-serena-context"; Variant = "DuplicateSerenaContext" },
+        @{ Name = "invalid-serena-context-policy"; Variant = "InvalidSerenaContextPolicy" },
         @{ Name = "missing-serena-project-value"; Variant = "MissingSerenaProjectValue" },
         @{ Name = "duplicate-hook-section"; Variant = "DuplicateHookSection" },
+        @{ Name = "duplicate-quoted-approval"; Variant = "DuplicateQuotedApproval" },
+        @{ Name = "root-dotted-hook-key"; Variant = "RootDottedHookKey" },
         @{ Name = "missing-approval"; Variant = "MissingApproval" },
         @{ Name = "multiline-toml"; Variant = "MultilineToml" }
     )) {
@@ -495,6 +519,21 @@ try {
         New-FixtureCodexHome -Root $caseHome -Variant $case.Variant
         Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $caseHome -CaseName $case.Name
     }
+
+    $sensitiveErrorHome = Join-Path $testRoot "sensitive-error\.codex"
+    New-FixtureCodexHome -Root $sensitiveErrorHome -Variant SensitiveInvalidHeader
+    $captured = [System.Collections.Generic.List[string]]::new()
+    try {
+        & $scriptPath -Mode Repair -CodexHome $sensitiveErrorHome -Json 2>&1 | ForEach-Object { $captured.Add([string]$_) }
+    } catch {
+        $captured.Add($_.ToString())
+    }
+    $capturedText = $captured -join "`n"
+    Assert-True -Condition (-not $capturedText.Contains('SECRET_ERROR_TOKEN')) -Message "-Json 错误输出泄露了配置原文"
+    $errorJsonLine = @($captured | Where-Object { $_.TrimStart().StartsWith('{') } | Select-Object -First 1)
+    Assert-True -Condition ($errorJsonLine.Count -eq 1) -Message "-Json 失败未返回结构化 JSON"
+    $errorJson = $errorJsonLine[0] | ConvertFrom-Json
+    Assert-True -Condition (-not [bool]$errorJson.ok -and $errorJson.error.code -eq 'reconciliation-failed') -Message "-Json 失败结构不稳定"
 
     Write-Host "PASS: Codex host hook reconciliation"
 } finally {
