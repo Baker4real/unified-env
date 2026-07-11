@@ -1,10 +1,10 @@
 ---
-generationId: 7d4f721c-bbfa-4b5b-b1bc-94efb2ed309d
-sourceJsonSha256: a7524e2a538414518aa9c9799006a7474d7f692a411b3bf6e56e31364a457d59
+generationId: a8f3c286-f42e-4f93-b575-d3f7ddc7a30c
+sourceJsonSha256: d06fe338451838c9d4ecf968854588c0371c94d9e2cd71a9a182c5833d0a7f52
 ---
 # 环境迁移 dry-run 计划
 
-生成时间：2026-07-11T08:04:05.9476378+08:00
+生成时间：2026-07-11T08:37:56.2271666+08:00
 
 > DRY-RUN：本计划为只读迁移计划。生成过程没有移动文件、没有修改环境变量、没有执行更新。
 

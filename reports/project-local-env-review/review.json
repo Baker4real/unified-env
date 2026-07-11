@@ -1,6 +1,7 @@
 {
+  "artifactType": "env-governance.project-local-env-review",
   "schemaVersion": 2,
-  "generatedAt": "2026-07-11T08:04:06.6734456+08:00",
+  "generatedAt": "2026-07-11T08:37:56.8447642+08:00",
   "readOnly": true,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
   "inventoryGeneratedAt": "2026-07-11T08:03:37.5369016+08:00",
@@ -23,6 +24,13 @@
         "package.json",
         "package-lock.json"
       ],
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      },
       "riskLevel": "medium",
       "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
       "automationAllowed": false,
@@ -50,6 +58,13 @@
         "package.json",
         "package-lock.json"
       ],
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      },
       "riskLevel": "medium",
       "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
       "automationAllowed": false,
@@ -77,6 +92,13 @@
         "package.json",
         "package-lock.json"
       ],
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      },
       "riskLevel": "medium",
       "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
       "automationAllowed": false,
@@ -104,6 +126,13 @@
         "package.json",
         "package-lock.json"
       ],
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      },
       "riskLevel": "medium",
       "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
       "automationAllowed": false,
@@ -131,6 +160,13 @@
         "package.json",
         "package-lock.json"
       ],
+      "rebuildEvidence": {
+        "marker": "node_modules",
+        "projectFiles": [
+          "package.json",
+          "package-lock.json"
+        ]
+      },
       "riskLevel": "medium",
       "recommendedAction": "默认保留；可单独开重建 issue，但不得在本项目中自动迁移或合并。",
       "automationAllowed": false,
@@ -160,5 +196,5 @@
       "任何重建都必须作为独立项目级 issue 执行。"
     ]
   },
-  "generationId": "df0acc78-6315-4ea7-9d1c-6d3b97e7d0af"
+  "generationId": "fab2913e-b1e3-4188-b975-e136780b9c69"
 }

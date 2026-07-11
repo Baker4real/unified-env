@@ -1,10 +1,10 @@
 ---
-generationId: df0acc78-6315-4ea7-9d1c-6d3b97e7d0af
-sourceJsonSha256: faad586d32cb5aa4c3576f57dc91324d9644fa2894b9b65233876e651a66f797
+generationId: fab2913e-b1e3-4188-b975-e136780b9c69
+sourceJsonSha256: 6bd55776d08d46e2fc73d02ec6792e64a9d87a74255c776c556375a3e1d22555
 ---
 # 项目本地环境审查包
 
-生成时间：2026-07-11T08:04:06.6734456+08:00
+生成时间：2026-07-11T08:37:56.8447642+08:00
 
 > 只读报告：项目本地环境默认不自动迁移；本报告不移动、不删除、不合并任何 `.venv`、`node_modules`、`.conda` 或其他项目本地环境。
 
