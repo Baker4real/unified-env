@@ -147,7 +147,7 @@ $legacyNames = @(
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "InvalidSerenaContextPolicy", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "InvalidSerenaContextPolicy", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml")]
         [string]$Variant = "Drift"
     )
 
@@ -252,6 +252,9 @@ prompt: |
   get_current_config. Never infer the task project from Serena's initial active
   project or from the Serena process working directory.
 '@
+    }
+    if ($Variant -eq "DuplicateSerenaPrompt") {
+        $serenaContext += "`nprompt: `"override activation policy`"`n"
     }
     Set-Content -LiteralPath $serenaContextPath -Value $serenaContext -Encoding UTF8
 
@@ -508,6 +511,7 @@ try {
         @{ Name = "wrong-serena-context"; Variant = "WrongSerenaContext" },
         @{ Name = "duplicate-serena-context"; Variant = "DuplicateSerenaContext" },
         @{ Name = "invalid-serena-context-policy"; Variant = "InvalidSerenaContextPolicy" },
+        @{ Name = "duplicate-serena-prompt"; Variant = "DuplicateSerenaPrompt" },
         @{ Name = "missing-serena-project-value"; Variant = "MissingSerenaProjectValue" },
         @{ Name = "duplicate-hook-section"; Variant = "DuplicateHookSection" },
         @{ Name = "duplicate-quoted-approval"; Variant = "DuplicateQuotedApproval" },

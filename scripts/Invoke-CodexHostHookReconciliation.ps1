@@ -191,7 +191,7 @@ function Write-AtomicText {
     }
 }
 
-function ConvertFrom-TomlHeaderName {
+function ConvertFrom-TomlDottedKeyName {
     param([string]$Name)
 
     $match = [regex]::Match(
@@ -199,7 +199,7 @@ function ConvertFrom-TomlHeaderName {
         '^\s*(?<key>' + $script:TomlKeyPattern + ')\s*(?:\.\s*(?<key>' + $script:TomlKeyPattern + ')\s*)*$'
     )
     if (-not $match.Success) {
-        throw "当前安全 parser 无法解析 TOML section header：[$Name]"
+        throw "当前安全 parser 无法解析 TOML dotted key：$Name"
     }
 
     $segments = [System.Collections.Generic.List[string]]::new()
@@ -224,7 +224,7 @@ function ConvertFrom-TomlHeaderName {
     $segments.ToArray()
 }
 
-function Test-TomlHeaderSegmentsEqual {
+function Test-TomlKeySegmentsEqual {
     param(
         [string[]]$Left,
         [string[]]$Right
@@ -251,7 +251,7 @@ function Get-TomlAssignmentKeySegments {
     if (-not $match.Success) {
         return
     }
-    ConvertFrom-TomlHeaderName -Name $match.Groups['name'].Value
+    ConvertFrom-TomlDottedKeyName -Name $match.Groups['name'].Value
 }
 
 function Get-TomlDocument {
@@ -267,7 +267,7 @@ function Get-TomlDocument {
     for ($index = 0; $index -lt $lines.Count; $index++) {
         $match = [regex]::Match($lines[$index], '^\s*\[(?<name>[^\[\]]+)\]\s*(?:#.*)?$')
         if ($match.Success) {
-            $segments = @(ConvertFrom-TomlHeaderName -Name $match.Groups['name'].Value)
+            $segments = @(ConvertFrom-TomlDottedKeyName -Name $match.Groups['name'].Value)
             $headers.Add([pscustomobject]@{
                 index = $index
                 name = $match.Groups['name'].Value
@@ -278,7 +278,7 @@ function Get-TomlDocument {
         }
         $arrayMatch = [regex]::Match($lines[$index], '^\s*\[\[(?<name>[^\[\]]+)\]\]\s*(?:#.*)?$')
         if ($arrayMatch.Success) {
-            $segments = @(ConvertFrom-TomlHeaderName -Name $arrayMatch.Groups['name'].Value)
+            $segments = @(ConvertFrom-TomlDottedKeyName -Name $arrayMatch.Groups['name'].Value)
             $headers.Add([pscustomobject]@{
                 index = $index
                 name = $arrayMatch.Groups['name'].Value
@@ -303,7 +303,7 @@ function Get-UniqueSectionRange {
 
     $expectedSegments = @($Name.Split('.'))
     $matches = @($Document.headers | Where-Object {
-        $_.kind -ceq "table" -and (Test-TomlHeaderSegmentsEqual -Left @($_.segments) -Right $expectedSegments)
+        $_.kind -ceq "table" -and (Test-TomlKeySegmentsEqual -Left @($_.segments) -Right $expectedSegments)
     })
     if ($matches.Count -ne 1) {
         throw "TOML section 必须恰好出现一次：[$Name]；实际 $($matches.Count)"
@@ -329,7 +329,7 @@ function Get-UniqueKeyIndex {
     $keyIndices = [System.Collections.Generic.List[int]]::new()
     for ($index = $Start; $index -lt $End; $index++) {
         $segments = @(Get-TomlAssignmentKeySegments -Line $Document.lines[$index])
-        if (Test-TomlHeaderSegmentsEqual -Left $segments -Right $expectedSegments) {
+        if (Test-TomlKeySegmentsEqual -Left $segments -Right $expectedSegments) {
             $keyIndices.Add($index)
         }
     }
@@ -708,6 +708,13 @@ function Test-SerenaContextPolicy {
     param([string]$Content)
 
     $lines = [regex]::Split($Content, "\r?\n")
+    $promptKeys = @(
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            if ($lines[$index] -match '^(?:prompt|"prompt"|''prompt'')\s*:') {
+                $index
+            }
+        }
+    )
     $promptHeaders = @(
         for ($index = 0; $index -lt $lines.Count; $index++) {
             if ($lines[$index] -match '^prompt\s*:\s*\|\s*(?:#.*)?$') {
@@ -715,7 +722,7 @@ function Test-SerenaContextPolicy {
             }
         }
     )
-    if ($promptHeaders.Count -ne 1) {
+    if ($promptKeys.Count -ne 1 -or $promptHeaders.Count -ne 1 -or $promptKeys[0] -ne $promptHeaders[0]) {
         return $false
     }
 
