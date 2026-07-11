@@ -53,7 +53,7 @@ function Assert-CanRemoveTestRoot {
 
 $scriptPath = Join-Path $ProjectRoot "scripts\New-BackupRetentionDryRun.ps1"
 $publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
-$testRoot = Join-Path $ProjectRoot "reports\backup-retention-dry-run-test"
+$testRoot = Join-Path $ProjectRoot ("reports\backup-retention-dry-run-test-{0}" -f ([guid]::NewGuid().ToString('N')))
 $fixtureRoot = Join-Path $testRoot "fixture"
 $fixtureCodexRoot = Join-Path $fixtureRoot ".codex"
 $fixtureOutput = Join-Path $testRoot "fixture-output"

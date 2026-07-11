@@ -28,6 +28,15 @@ function Assert-Property {
     Assert-True -Condition $hasProperty -Message "缺少属性：$Name"
 }
 
+function Assert-RejectedPreservingRebuildPair {
+    param([string]$Label, [string]$OutputDir, [scriptblock]$Action)
+    $old = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $OutputDir -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown { "old-rebuild" }
+    $oldJson = [IO.File]::ReadAllText($old.jsonPath); $oldMarkdown = [IO.File]::ReadAllText($old.markdownPath)
+    $rejected = $false; try { & $Action | Out-Null } catch { $rejected = $true }
+    Assert-True $rejected "$Label 必须拒绝"
+    Assert-True (([IO.File]::ReadAllText($old.jsonPath)) -ceq $oldJson -and ([IO.File]::ReadAllText($old.markdownPath)) -ceq $oldMarkdown) "$Label 不得覆盖旧下游 pair"
+}
+
 function New-ReviewKey {
     param([object]$Item)
 
@@ -68,17 +77,26 @@ function Assert-CanRemoveTestRoot {
 }
 
 $scriptPath = Join-Path $ProjectRoot "scripts\New-ProjectLocalEnvRebuildDryRunPlan.ps1"
-$reviewPath = Join-Path $ProjectRoot "reports\project-local-env-review\review.json"
+$reviewSourcePath = Join-Path $ProjectRoot "reports\project-local-env-review\review.json"
+$reviewPath = $null
 $testRoot = Join-Path $ProjectRoot "reports\project-local-env-rebuild-plan-test"
 
 Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Message "找不到项目本地环境重建 dry-run 计划脚本"
-Assert-True -Condition (Test-Path -LiteralPath $reviewPath -PathType Leaf) -Message "找不到项目本地环境审查包"
+Assert-True -Condition (Test-Path -LiteralPath $reviewSourcePath -PathType Leaf) -Message "找不到项目本地环境审查包"
 
 try {
     Assert-CanRemoveTestRoot -Path $testRoot
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
+
+    $reviewFixture = Get-Content -LiteralPath $reviewSourcePath -Raw | ConvertFrom-Json -DateKind String
+    $reviewFixture | Add-Member -MemberType NoteProperty -Name artifactType -Value "env-governance.project-local-env-review" -Force
+    foreach ($item in @($reviewFixture.items)) {
+        $item | Add-Member -MemberType NoteProperty -Name rebuildEvidence -Value ([pscustomobject]@{ marker = $item.marker; projectFiles = [object[]]@($item.existingProjectFiles) }) -Force
+    }
+    $reviewInput = Publish-JsonMarkdownArtifactPair -Document $reviewFixture -OutputDir (Join-Path $testRoot "review-input") -JsonFileName "review.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "review fixture" }
+    $reviewPath = $reviewInput.jsonPath
 
     $result = & $scriptPath -ReviewPath $reviewPath -OutputDir $testRoot
     Assert-True -Condition ([bool]$result.dryRun) -Message "脚本没有返回 dryRun=true"
@@ -95,6 +113,7 @@ try {
     $plan = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     $review = Get-Content -LiteralPath $reviewPath -Raw | ConvertFrom-Json
     $reviewItems = @($review.items)
+    Assert-True -Condition ($review.artifactType -ceq "env-governance.project-local-env-review") -Message "测试 review artifactType 非法"
 
     foreach ($property in @("schemaVersion", "generatedAt", "dryRun", "readOnly", "reviewPath", "summary", "plans", "policy")) {
         Assert-Property -Object $plan -Name $property
@@ -177,6 +196,65 @@ try {
         foreach ($expected in @("停机窗口", "健康检查")) {
             Assert-True -Condition $markdown.Contains($expected) -Message "PLAN.md 缺少高风险项目预期文本：$expected"
         }
+    }
+
+    $reviewMarkdownPath = Join-Path ([IO.Path]::GetDirectoryName($reviewPath)) "REPORT.md"
+    $heldReviewMarkdownPath = Join-Path $testRoot "held-review-report.md"
+    $missingPairOutput = Join-Path $testRoot "missing-review-pair-output"
+    $oldPair = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $missingPairOutput -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown { "old-rebuild-plan" }
+    $oldJson = [IO.File]::ReadAllText($oldPair.jsonPath)
+    $oldMarkdown = [IO.File]::ReadAllText($oldPair.markdownPath)
+    Move-Item -LiteralPath $reviewMarkdownPath -Destination $heldReviewMarkdownPath
+    $missingPairRejected = $false
+    try {
+        & $scriptPath -ReviewPath $reviewPath -OutputDir $missingPairOutput | Out-Null
+    } catch {
+        $missingPairRejected = $true
+    } finally {
+        Move-Item -LiteralPath $heldReviewMarkdownPath -Destination $reviewMarkdownPath
+    }
+    Assert-True -Condition $missingPairRejected -Message "缺失 review Markdown 必须拒绝 rebuild 生成"
+    Assert-True -Condition (([IO.File]::ReadAllText($oldPair.jsonPath)) -ceq $oldJson -and ([IO.File]::ReadAllText($oldPair.markdownPath)) -ceq $oldMarkdown) -Message "缺失 review Markdown 不得覆盖旧 rebuild pair"
+
+    $originalReviewMarkdown = [IO.File]::ReadAllText($reviewMarkdownPath)
+    $tamperedReviewMarkdown = [regex]::Replace($originalReviewMarkdown, '(?m)^sourceJsonSha256: .+$', 'sourceJsonSha256: 0000000000000000000000000000000000000000000000000000000000000000')
+    [IO.File]::WriteAllText($reviewMarkdownPath, $tamperedReviewMarkdown, [Text.UTF8Encoding]::new($false))
+    Assert-RejectedPreservingRebuildPair "review Markdown hash 篡改" (Join-Path $testRoot "rebuild-hash-output") { & $scriptPath -ReviewPath $reviewPath -ReviewMarkdownPath $reviewMarkdownPath -OutputDir (Join-Path $testRoot "rebuild-hash-output") }
+    [IO.File]::WriteAllText($reviewMarkdownPath, $originalReviewMarkdown, [Text.UTF8Encoding]::new($false))
+    $mismatchedMarkdown = [regex]::Replace($originalReviewMarkdown, '(?m)^generationId: .+$', 'generationId: 00000000-0000-0000-0000-000000000000')
+    [IO.File]::WriteAllText($reviewMarkdownPath, $mismatchedMarkdown, [Text.UTF8Encoding]::new($false))
+    Assert-RejectedPreservingRebuildPair "review generationId 错配" (Join-Path $testRoot "rebuild-generation-output") { & $scriptPath -ReviewPath $reviewPath -ReviewMarkdownPath $reviewMarkdownPath -OutputDir (Join-Path $testRoot "rebuild-generation-output") }
+    [IO.File]::WriteAllText($reviewMarkdownPath, $originalReviewMarkdown, [Text.UTF8Encoding]::new($false))
+    foreach ($leaf in @(@{ path = $reviewPath; label = 'JSON' }, @{ path = $reviewMarkdownPath; label = 'Markdown' })) {
+        $held = "$($leaf.path).held"; $target = Join-Path $testRoot "rebuild-junction-target-$($leaf.label)"; New-Item -ItemType Directory -Path $target -Force | Out-Null
+        Move-Item -LiteralPath $leaf.path -Destination $held
+        try {
+            New-Item -ItemType Junction -Path $leaf.path -Target $target | Out-Null
+            Assert-RejectedPreservingRebuildPair "review $($leaf.label) junction" (Join-Path $testRoot "rebuild-junction-output-$($leaf.label)") { & $scriptPath -ReviewPath $reviewPath -ReviewMarkdownPath $reviewMarkdownPath -OutputDir (Join-Path $testRoot "rebuild-junction-output-$($leaf.label)") }
+        } finally {
+            if (Test-Path -LiteralPath $leaf.path) { Remove-Item -LiteralPath $leaf.path -Force }
+            Move-Item -LiteralPath $held -Destination $leaf.path
+        }
+    }
+
+    $invalidReviewCases = @(
+        @{ name = "wrong-artifact"; mutate = { param($d) $d.artifactType = "forged" } },
+        @{ name = "string-schema"; mutate = { param($d) $d.schemaVersion = "2" } },
+        @{ name = "items-scalar"; mutate = { param($d) $d.items = "bad" } },
+        @{ name = "path-scalar"; mutate = { param($d) $d.items[0].path = 42 } },
+        @{ name = "classification-scalar"; mutate = { param($d) $d.items[0].classification = 42 } },
+        @{ name = "missing-rebuild-evidence"; mutate = { param($d) $d.items[0].PSObject.Properties.Remove("rebuildEvidence") } },
+        @{ name = "rebuild-files-scalar"; mutate = { param($d) $d.items[0].rebuildEvidence.projectFiles = "package-lock.json" } }
+    )
+    foreach ($case in $invalidReviewCases) {
+        $invalid = $review | ConvertTo-Json -Depth 30 | ConvertFrom-Json -DateKind String
+        & $case.mutate $invalid
+        $input = Publish-JsonMarkdownArtifactPair -Document $invalid -OutputDir (Join-Path $testRoot "invalid-input-$($case.name)") -JsonFileName "review.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "invalid but paired" }
+        $output = Join-Path $testRoot "invalid-output-$($case.name)"
+        $rejected = $false
+        try { & $scriptPath -ReviewPath $input.jsonPath -ReviewMarkdownPath $input.markdownPath -OutputDir $output | Out-Null } catch { $rejected = $true }
+        Assert-True -Condition $rejected -Message "rebuild 未拒绝严格合同反例：$($case.name)"
+        Assert-True -Condition (-not (Test-Path -LiteralPath $output)) -Message "严格合同失败不得创建输出：$($case.name)"
     }
 
     $blockedOutput = "C:\Codex-should-not-be-created"

@@ -32,7 +32,7 @@ function Assert-CanRemoveBackupRetentionPolicyTestRoot {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $libraryPath = Join-Path $projectRoot 'scripts\lib\BackupRetentionPolicy.ps1'
-$testRoot = Join-Path $projectRoot 'reports\backup-retention-policy-test'
+$testRoot = Join-Path $projectRoot ("reports\backup-retention-policy-test-{0}" -f ([guid]::NewGuid().ToString('N')))
 $gsdJunction = Join-Path $testRoot '.gsd'
 $skillsJunction = Join-Path $testRoot '.codex\skills'
 

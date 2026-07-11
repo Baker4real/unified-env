@@ -26,6 +26,15 @@ function Assert-Property {
     Assert-True -Condition $hasProperty -Message "缺少属性：$Name"
 }
 
+function Assert-RejectedPreservingMigrationPair {
+    param([string]$Label, [string]$OutputDir, [scriptblock]$Action)
+    $old = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $OutputDir -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown { "old-plan" }
+    $oldJson = [IO.File]::ReadAllText($old.jsonPath); $oldMarkdown = [IO.File]::ReadAllText($old.markdownPath)
+    $rejected = $false; try { & $Action | Out-Null } catch { $rejected = $true }
+    Assert-True $rejected "$Label 必须拒绝"
+    Assert-True (([IO.File]::ReadAllText($old.jsonPath)) -ceq $oldJson -and ([IO.File]::ReadAllText($old.markdownPath)) -ceq $oldMarkdown) "$Label 不得覆盖旧下游 pair"
+}
+
 $inventoryScript = Join-Path $ProjectRoot "scripts\Invoke-EnvInventory.ps1"
 $planScript = Join-Path $ProjectRoot "scripts\New-EnvMigrationPlan.ps1"
 $publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
@@ -119,6 +128,46 @@ try {
         Assert-True -Condition $markdown.Contains("当前没有可生成 dry-run 计划的迁移候选") -Message "PLAN.md 缺少无候选说明"
     }
 
+    $inventoryMarkdownPath = Join-Path $inventoryOutput "REPORT.md"
+    $heldInventoryMarkdownPath = Join-Path $testRoot "held-inventory-report.md"
+    $missingPairOutput = Join-Path $testRoot "missing-inventory-pair-output"
+    $oldPair = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $missingPairOutput -JsonFileName "plan.json" -MarkdownFileName "PLAN.md" -RenderMarkdown { "old-plan" }
+    $oldJson = [IO.File]::ReadAllText($oldPair.jsonPath)
+    $oldMarkdown = [IO.File]::ReadAllText($oldPair.markdownPath)
+    Move-Item -LiteralPath $inventoryMarkdownPath -Destination $heldInventoryMarkdownPath
+    $missingPairRejected = $false
+    try {
+        & $planScript -InventoryPath $inventoryPath -OutputDir $missingPairOutput | Out-Null
+    } catch {
+        $missingPairRejected = $true
+    } finally {
+        Move-Item -LiteralPath $heldInventoryMarkdownPath -Destination $inventoryMarkdownPath
+    }
+    Assert-True -Condition $missingPairRejected -Message "缺失 inventory Markdown 必须拒绝"
+    Assert-True -Condition (([IO.File]::ReadAllText($oldPair.jsonPath)) -ceq $oldJson -and ([IO.File]::ReadAllText($oldPair.markdownPath)) -ceq $oldMarkdown) -Message "缺失 inventory Markdown 不得覆盖旧迁移计划 pair"
+
+    $originalInventoryMarkdown = [IO.File]::ReadAllText($inventoryMarkdownPath)
+    $tamperedInventoryMarkdown = [regex]::Replace($originalInventoryMarkdown, '(?m)^sourceJsonSha256: .+$', 'sourceJsonSha256: 0000000000000000000000000000000000000000000000000000000000000000')
+    [IO.File]::WriteAllText($inventoryMarkdownPath, $tamperedInventoryMarkdown, [Text.UTF8Encoding]::new($false))
+    Assert-RejectedPreservingMigrationPair "inventory Markdown hash 篡改" (Join-Path $testRoot "hash-tamper-output") { & $planScript -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "hash-tamper-output") }
+    [IO.File]::WriteAllText($inventoryMarkdownPath, $originalInventoryMarkdown, [Text.UTF8Encoding]::new($false))
+    $mismatchedMarkdown = [regex]::Replace($originalInventoryMarkdown, '(?m)^generationId: .+$', 'generationId: 00000000-0000-0000-0000-000000000000')
+    [IO.File]::WriteAllText($inventoryMarkdownPath, $mismatchedMarkdown, [Text.UTF8Encoding]::new($false))
+    Assert-RejectedPreservingMigrationPair "inventory generationId 错配" (Join-Path $testRoot "generation-mismatch-output") { & $planScript -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "generation-mismatch-output") }
+    [IO.File]::WriteAllText($inventoryMarkdownPath, $originalInventoryMarkdown, [Text.UTF8Encoding]::new($false))
+
+    foreach ($leaf in @(@{ path = $inventoryPath; label = 'JSON' }, @{ path = $inventoryMarkdownPath; label = 'Markdown' })) {
+        $held = "$($leaf.path).held"; $target = Join-Path $testRoot "junction-target-$($leaf.label)"; New-Item -ItemType Directory -Path $target -Force | Out-Null
+        Move-Item -LiteralPath $leaf.path -Destination $held
+        try {
+            New-Item -ItemType Junction -Path $leaf.path -Target $target | Out-Null
+            Assert-RejectedPreservingMigrationPair "inventory $($leaf.label) junction" (Join-Path $testRoot "junction-output-$($leaf.label)") { & $planScript -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "junction-output-$($leaf.label)") }
+        } finally {
+            if (Test-Path -LiteralPath $leaf.path) { Remove-Item -LiteralPath $leaf.path -Force }
+            Move-Item -LiteralPath $held -Destination $leaf.path
+        }
+    }
+
     $blockedOutput = "C:\Codex-should-not-be-created"
     $blocked = $false
     try {
@@ -166,8 +215,8 @@ try {
     foreach ($case in $invalidCases) {
         $fixture = ($inventory | ConvertTo-Json -Depth 30 | ConvertFrom-Json)
         & $case.mutate $fixture
-        $fixturePath = Join-Path $testRoot "$($case.name).json"
-        $fixture | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $fixturePath -Encoding UTF8
+        $fixtureInput = Publish-JsonMarkdownArtifactPair -Document $fixture -OutputDir (Join-Path $testRoot "input-$($case.name)") -JsonFileName "inventory.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "fixture inventory" }
+        $fixturePath = $fixtureInput.jsonPath
         $invalidOutput = Join-Path $testRoot "invalid-$($case.name)"
         $sentinelJson = "old-json-$($case.name)"
         $sentinelMarkdown = "old-markdown-$($case.name)"
@@ -178,7 +227,7 @@ try {
         }
         $failed = $false
         try {
-            & $planScript -InventoryPath $fixturePath -OutputDir $invalidOutput | Out-Null
+            & $planScript -InventoryPath $fixturePath -InventoryMarkdownPath $fixtureInput.markdownPath -OutputDir $invalidOutput | Out-Null
         } catch {
             $failed = $true
         }

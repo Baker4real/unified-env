@@ -37,7 +37,7 @@ function New-TestDocument { param($Context,$Evaluation)
 function Copy-Document { param($Document) return ($Document|ConvertTo-Json -Depth 100|ConvertFrom-Json -DateKind String) }
 
 $projectRoot=Split-Path -Parent $PSScriptRoot
-$fixtureRoot=Join-Path $projectRoot 'reports\backup-retention-validation-test'
+$fixtureRoot=Join-Path $projectRoot ("reports\backup-retention-validation-test-{0}" -f ([guid]::NewGuid().ToString('N')))
 Assert-CanRemoveFixture $fixtureRoot
 if(Test-Path -LiteralPath $fixtureRoot){Remove-Item -LiteralPath $fixtureRoot -Recurse -Force}
 try {

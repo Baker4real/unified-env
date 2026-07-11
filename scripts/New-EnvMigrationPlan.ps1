@@ -1,5 +1,6 @@
 param(
     [string]$InventoryPath = "D:\Codex\projects\统一环境\reports\env-inventory\inventory.json",
+    [string]$InventoryMarkdownPath,
     [string]$OutputDir = "D:\Codex\projects\统一环境\reports\env-migration-plan"
 )
 
@@ -7,6 +8,7 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
 . (Join-Path $PSScriptRoot "lib\EnvMigrationPolicy.ps1")
+. (Join-Path $PSScriptRoot "lib\TrustedReportInput.ps1")
 
 function Get-SafeSlug {
     param([string]$Value)
@@ -250,14 +252,10 @@ function ConvertTo-MigrationPlanMarkdown {
     return $lines -join [Environment]::NewLine
 }
 
-if (-not (Test-Path -LiteralPath $InventoryPath -PathType Leaf)) {
-    throw "Inventory not found: $InventoryPath"
-}
-
-Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
-
-$inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
+$trustedInput = Get-TrustedReportInputPair -JsonPath $InventoryPath -MarkdownPath $InventoryMarkdownPath -DefaultMarkdownFileName "REPORT.md" -JsonParameterName "InventoryPath" -MarkdownParameterName "InventoryMarkdownPath"
+$inventory = Get-Content -LiteralPath $trustedInput.jsonPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
 Assert-EnvMigrationInventoryFacts -Inventory $inventory
+Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 $inventoryGeneratedAt = if ($inventory.generatedAt -is [datetime]) {
     $inventory.generatedAt.ToString("o")
 } else {
@@ -307,7 +305,7 @@ $plan = [pscustomobject]@{
     schemaVersion = 1
     generatedAt = (Get-Date).ToString("o")
     readOnly = $true
-    inventoryPath = $InventoryPath
+    inventoryPath = $trustedInput.jsonPath
     inventoryGeneratedAt = $inventoryGeneratedAt
     migrationPlans = $migrationPlans
     blockedByRootPolicy = $blockedByRootPolicy

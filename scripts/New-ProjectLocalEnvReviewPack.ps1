@@ -1,5 +1,6 @@
 param(
     [string]$InventoryPath = "D:\Codex\projects\统一环境\reports\env-inventory\inventory.json",
+    [string]$InventoryMarkdownPath,
     [string]$OutputDir = "D:\Codex\projects\统一环境\reports\project-local-env-review"
 )
 
@@ -7,6 +8,7 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "lib\ReportArtifactPublisher.ps1")
 . (Join-Path $PSScriptRoot "lib\EnvMigrationPolicy.ps1")
+. (Join-Path $PSScriptRoot "lib\TrustedReportInput.ps1")
 
 function Assert-ProjectLocalEnvInventoryFacts {
     param([Parameter(Mandatory)][psobject]$Inventory)
@@ -305,15 +307,11 @@ function ConvertTo-ReviewMarkdown {
     return $lines -join [Environment]::NewLine
 }
 
-if (-not (Test-Path -LiteralPath $InventoryPath -PathType Leaf)) {
-    throw "Inventory not found: $InventoryPath"
-}
-
+$trustedInput = Get-TrustedReportInputPair -JsonPath $InventoryPath -MarkdownPath $InventoryMarkdownPath -DefaultMarkdownFileName "REPORT.md" -JsonParameterName "InventoryPath" -MarkdownParameterName "InventoryMarkdownPath"
+$inventory = Get-Content -LiteralPath $trustedInput.jsonPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
+Assert-ProjectLocalEnvInventoryFacts -Inventory $inventory
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 Assert-AllowedOutputDir -Path $OutputDir
-
-$inventory = Get-Content -LiteralPath $InventoryPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
-Assert-ProjectLocalEnvInventoryFacts -Inventory $inventory
 $items = @(
     foreach ($marker in @($inventory.localEnvironmentFindings | Where-Object { Test-EnvLocalEnvironmentFindingReviewEligible -Finding $_ })) {
         $files = @($marker.rebuildEvidence.projectFiles)
@@ -331,6 +329,7 @@ $items = @(
             classification = if ($marker.PSObject.Properties.Name -contains "classification") { $marker.classification } else { "project-root-local-env" }
             scope = if ($marker.PSObject.Properties.Name -contains "scope") { $marker.scope } else { "project-root" }
             existingProjectFiles = $files
+            rebuildEvidence = [pscustomobject]@{ marker = $marker.rebuildEvidence.marker; projectFiles = [object[]]@($files) }
             riskLevel = if ($isLongRunning) { "high" } else { "medium" }
             recommendedAction = $recommendedAction
             automationAllowed = $false
@@ -345,10 +344,11 @@ $items = @(
 )
 
 $review = [pscustomobject]@{
+    artifactType = "env-governance.project-local-env-review"
     schemaVersion = 2
     generatedAt = (Get-Date).ToString("o")
     readOnly = $true
-    inventoryPath = $InventoryPath
+    inventoryPath = $trustedInput.jsonPath
     inventoryGeneratedAt = "$($inventory.generatedAt)"
     summary = [pscustomobject]@{
         totalItems = $items.Count

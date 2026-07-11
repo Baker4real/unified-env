@@ -32,7 +32,7 @@ function Write-RawTestJsonPair{param([string]$JsonText,[string]$GenerationId,[st
 }
 
 $dryRunScript=Join-Path $ProjectRoot 'scripts\New-BackupRetentionDryRun.ps1';$applyScript=Join-Path $ProjectRoot 'scripts\New-BackupRetentionApplyManifest.ps1'
-$testRoot=Join-Path $ProjectRoot 'reports\backup-retention-apply-manifest-test';$fixture=Join-Path $testRoot 'fixture';$codex=Join-Path $fixture '.codex';$provider=Join-Path $codex 'backups_state\provider-sync';$dryOutput=Join-Path $testRoot 'dry-run'
+$testRoot=Join-Path $ProjectRoot ("reports\backup-retention-apply-manifest-test-{0}" -f ([guid]::NewGuid().ToString('N')));$fixture=Join-Path $testRoot 'fixture';$codex=Join-Path $fixture '.codex';$provider=Join-Path $codex 'backups_state\provider-sync';$dryOutput=Join-Path $testRoot 'dry-run'
 try{
     Assert-CanRemoveTestRoot $testRoot;if(Test-Path -LiteralPath $testRoot){Remove-Item -LiteralPath $testRoot -Recurse -Force}
     New-Item -ItemType Directory -Force -Path $provider|Out-Null

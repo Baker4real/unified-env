@@ -26,6 +26,15 @@ function Assert-Property {
     Assert-True -Condition $hasProperty -Message "缺少属性：$Name"
 }
 
+function Assert-RejectedPreservingReviewPair {
+    param([string]$Label, [string]$OutputDir, [scriptblock]$Action)
+    $old = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $OutputDir -JsonFileName "review.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "old-review" }
+    $oldJson = [IO.File]::ReadAllText($old.jsonPath); $oldMarkdown = [IO.File]::ReadAllText($old.markdownPath)
+    $rejected = $false; try { & $Action | Out-Null } catch { $rejected = $true }
+    Assert-True $rejected "$Label 必须拒绝"
+    Assert-True (([IO.File]::ReadAllText($old.jsonPath)) -ceq $oldJson -and ([IO.File]::ReadAllText($old.markdownPath)) -ceq $oldMarkdown) "$Label 不得覆盖旧下游 pair"
+}
+
 function New-MarkerKey {
     param([object]$Item)
 
@@ -95,6 +104,7 @@ try {
     $review = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
     $inventoryMarkers = @($inventory.localEnvironmentFindings | Where-Object { $_.classification -in @("project-root-local-env", "nested-app-local-env") -and $_.owner -eq "project" })
+    Assert-True -Condition ($review.artifactType -ceq "env-governance.project-local-env-review") -Message "review artifactType 不正确"
     $appFinding = $inventoryMarkers | Where-Object { $_.path -ieq $fixtureNodeModules } | Select-Object -First 1
     Assert-True -Condition ($null -ne $appFinding) -Message "overlapping roots 下缺少 app node_modules finding"
     Assert-True -Condition ($appFinding.parentProject -ieq $fixtureProject -and $appFinding.project -ieq $fixtureProject) -Message "app marker 必须选择最具体显式 app root"
@@ -200,6 +210,45 @@ try {
         Assert-True -Condition (-not $markdown.Contains($unexpected)) -Message "REPORT.md 不应包含未转义或未本地化文本：$unexpected"
     }
 
+    $inventoryMarkdownPath = Join-Path $inventoryOutput "REPORT.md"
+    $heldInventoryMarkdownPath = Join-Path $testRoot "held-review-inventory-report.md"
+    $missingPairOutput = Join-Path $testRoot "missing-review-input-pair-output"
+    $oldPair = Publish-JsonMarkdownArtifactPair -Document ([pscustomobject]@{ schemaVersion = 1; artifactType = "sentinel" }) -OutputDir $missingPairOutput -JsonFileName "review.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "old-review" }
+    $oldJson = [IO.File]::ReadAllText($oldPair.jsonPath)
+    $oldMarkdown = [IO.File]::ReadAllText($oldPair.markdownPath)
+    Move-Item -LiteralPath $inventoryMarkdownPath -Destination $heldInventoryMarkdownPath
+    $missingPairRejected = $false
+    try {
+        & $scriptPath -InventoryPath $inventoryPath -OutputDir $missingPairOutput | Out-Null
+    } catch {
+        $missingPairRejected = $true
+    } finally {
+        Move-Item -LiteralPath $heldInventoryMarkdownPath -Destination $inventoryMarkdownPath
+    }
+    Assert-True -Condition $missingPairRejected -Message "缺失 inventory Markdown 必须拒绝 review 生成"
+    Assert-True -Condition (([IO.File]::ReadAllText($oldPair.jsonPath)) -ceq $oldJson -and ([IO.File]::ReadAllText($oldPair.markdownPath)) -ceq $oldMarkdown) -Message "缺失 inventory Markdown 不得覆盖旧 review pair"
+
+    $originalInventoryMarkdown = [IO.File]::ReadAllText($inventoryMarkdownPath)
+    $tamperedInventoryMarkdown = [regex]::Replace($originalInventoryMarkdown, '(?m)^sourceJsonSha256: .+$', 'sourceJsonSha256: 0000000000000000000000000000000000000000000000000000000000000000')
+    [IO.File]::WriteAllText($inventoryMarkdownPath, $tamperedInventoryMarkdown, [Text.UTF8Encoding]::new($false))
+    Assert-RejectedPreservingReviewPair "review inventory Markdown hash 篡改" (Join-Path $testRoot "review-hash-output") { & $scriptPath -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "review-hash-output") }
+    [IO.File]::WriteAllText($inventoryMarkdownPath, $originalInventoryMarkdown, [Text.UTF8Encoding]::new($false))
+    $mismatchedMarkdown = [regex]::Replace($originalInventoryMarkdown, '(?m)^generationId: .+$', 'generationId: 00000000-0000-0000-0000-000000000000')
+    [IO.File]::WriteAllText($inventoryMarkdownPath, $mismatchedMarkdown, [Text.UTF8Encoding]::new($false))
+    Assert-RejectedPreservingReviewPair "review inventory generationId 错配" (Join-Path $testRoot "review-generation-output") { & $scriptPath -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "review-generation-output") }
+    [IO.File]::WriteAllText($inventoryMarkdownPath, $originalInventoryMarkdown, [Text.UTF8Encoding]::new($false))
+    foreach ($leaf in @(@{ path = $inventoryPath; label = 'JSON' }, @{ path = $inventoryMarkdownPath; label = 'Markdown' })) {
+        $held = "$($leaf.path).held"; $target = Join-Path $testRoot "review-junction-target-$($leaf.label)"; New-Item -ItemType Directory -Path $target -Force | Out-Null
+        Move-Item -LiteralPath $leaf.path -Destination $held
+        try {
+            New-Item -ItemType Junction -Path $leaf.path -Target $target | Out-Null
+            Assert-RejectedPreservingReviewPair "review inventory $($leaf.label) junction" (Join-Path $testRoot "review-junction-output-$($leaf.label)") { & $scriptPath -InventoryPath $inventoryPath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir (Join-Path $testRoot "review-junction-output-$($leaf.label)") }
+        } finally {
+            if (Test-Path -LiteralPath $leaf.path) { Remove-Item -LiteralPath $leaf.path -Force }
+            Move-Item -LiteralPath $held -Destination $leaf.path
+        }
+    }
+
     $localFactsOnlyInventory = ($inventory | ConvertTo-Json -Depth 30 | ConvertFrom-Json)
     $legacyFalseIndex = -1
     for ($index = 0; $index -lt @($localFactsOnlyInventory.localEnvironmentFindings).Count; $index++) {
@@ -212,10 +261,10 @@ try {
     Assert-True -Condition ($legacyFalseIndex -ge 0) -Message "测试 inventory 缺少可审查本地环境 fact"
     $localFactsOnlyInventory.localEnvironmentFindings[$legacyFalseIndex] | Add-Member -MemberType NoteProperty -Name includeInReviewPack -Value $false -Force
     $localFactsOnlyInventory.PSObject.Properties.Remove("projectEnvironmentMarkers")
-    $localFactsOnlyPath = Join-Path $testRoot "local-findings-only-inventory.json"
-    $localFactsOnlyInventory | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $localFactsOnlyPath -Encoding UTF8
+    $localFactsOnlyPair = Publish-JsonMarkdownArtifactPair -Document $localFactsOnlyInventory -OutputDir (Join-Path $testRoot "local-findings-only-input") -JsonFileName "inventory.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "fixture inventory" }
+    $localFactsOnlyPath = $localFactsOnlyPair.jsonPath
     $localFactsOnlyOutput = Join-Path $testRoot "local-findings-only-review"
-    & $scriptPath -InventoryPath $localFactsOnlyPath -OutputDir $localFactsOnlyOutput | Out-Null
+    & $scriptPath -InventoryPath $localFactsOnlyPath -InventoryMarkdownPath $localFactsOnlyPair.markdownPath -OutputDir $localFactsOnlyOutput | Out-Null
     $localFactsOnlyReview = Get-Content -LiteralPath (Join-Path $localFactsOnlyOutput "review.json") -Raw | ConvertFrom-Json
     Assert-True -Condition ($localFactsOnlyReview.items.Count -eq $inventoryMarkers.Count) -Message "审查包必须按裸 facts 派生纳入；legacy includeInReviewPack=false 不得导致遗漏"
 
