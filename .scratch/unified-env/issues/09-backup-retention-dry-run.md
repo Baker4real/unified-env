@@ -2,6 +2,8 @@
 
 Status: done
 
+> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，当前目录已退役；现行事实以仓库 `reports/` 和最新 schema 2 报告为准。
+
 ## Parent
 
 `.scratch/unified-env/PRD.md`
@@ -14,7 +16,7 @@ Status: done
 
 ## Acceptance criteria
 
-- [x] 读取并遵守 `docs/env-governance/d-drive-layout-and-migration-policy.md` 和 `docs/handoffs/2026-06-30-backup-retention-runtime-cleanup-handoff.md`。
+- [x] 读取并遵守 `docs/env-governance/d-drive-layout-and-migration-policy.md` 和本 issue 的历史决策记录。
 - [x] 新增备份膨胀治理脚本，只执行只读扫描和 dry-run 计算，不删除、不移动、不重命名任何目录。
 - [x] 重新生成最新 dry-run JSON 和中文 Markdown 报告，不复用旧 handoff 里的候选清单作为当前事实或执行依据。
 - [x] 明确 `dryRun=true`、`readOnly=true`、`deleteAllowed=false`，且脚本不包含删除或移动逻辑。
@@ -30,14 +32,13 @@ Status: done
 
 ## Blocked by
 
-- `docs/handoffs/2026-06-30-backup-retention-runtime-cleanup-handoff.md`
 - `docs/env-governance/d-drive-layout-and-migration-policy.md`
 
 ## Comments
 
 本 issue 不包含真实清理授权。后续若要执行删除，必须新建 apply issue 或让用户在当前上下文中明确确认具体路径和类别；笼统的“继续”不等于删除授权。
 
-上一轮 handoff 中关于“修改 runtime 复制策略避免复制插件缓存”的建议已经被推翻。后续工作不能再把 `plugins`、`cache`、`sqlite` 从 runtime 共享列表移除，也不能把 `plugins` 或 `.tmp` 整体加入自动删除范围。
+历史方案中关于“修改 runtime 复制策略避免复制插件缓存”的建议已经被推翻。后续工作不能再把 `plugins`、`cache`、`sqlite` 从 runtime 共享列表移除，也不能把 `plugins` 或 `.tmp` 整体加入自动删除范围。
 
 旧 dry-run 只能作为历史线索，不能作为 apply manifest。Issue 09 的目标是先证明哪些才是真备份、哪些必须保护或人工审查。
 

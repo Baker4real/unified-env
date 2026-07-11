@@ -2,6 +2,8 @@
 
 Status: done
 
+> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，当前目录已退役；现行 apply 门以最新 production dry-run 与 schema 2 验证器为准。
+
 ## Parent
 
 `.scratch/unified-env/PRD.md`
@@ -14,7 +16,7 @@ Status: done
 
 ## Acceptance criteria
 
-- [x] 读取并遵守 `docs/env-governance/d-drive-layout-and-migration-policy.md`、`docs/handoffs/2026-06-30-backup-retention-runtime-cleanup-handoff.md` 和 Issue 09 的 completion notes。
+- [x] 读取并遵守 `docs/env-governance/d-drive-layout-and-migration-policy.md` 和 Issue 09 的 completion notes。
 - [x] 新增 apply manifest 脚本，只读取最新 dry-run JSON 并生成 manifest，不包含 `Remove-Item` / `Move-Item`。
 - [x] manifest 必须明确 `applyManifestOnly=true`、`readOnly=true`、`deleteAllowed=false`、`executionReady=false`。
 - [x] 生成 manifest 时必须显式选择路径：要么 `-UseAllDryRunCandidates`，要么传入一个或多个 `-AllowPath`；缺省不得自动选择。
@@ -28,7 +30,6 @@ Status: done
 ## Blocked by
 
 - `.scratch/unified-env/issues/09-backup-retention-dry-run.md`
-- `docs/handoffs/2026-06-30-backup-retention-runtime-cleanup-handoff.md`
 - `docs/env-governance/d-drive-layout-and-migration-policy.md`
 
 ## Comments

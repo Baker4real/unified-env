@@ -23,23 +23,12 @@
 - 当前备份膨胀治理 dry-run：`reports/backup-retention-dry-run-current/BACKUP-RETENTION-DRY-RUN.md`
 - `codex_switch` 安装回滚备份保留 issue：`.scratch/unified-env/issues/14-codex-switch-installed-backup-retention.md`
 - 备份保留 apply 执行 issue：`.scratch/unified-env/issues/15-backup-retention-apply-execution.md`
-- 备份保留 apply 执行证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-apply-20260701-160956\EXECUTION.md`
 - `codex_switch` 旧式平铺备份文件删除 issue：`.scratch/unified-env/issues/16-codex-switch-flat-backup-delete.md`
-- `codex_switch` 旧式平铺备份文件删除证据：`D:\Codex\.codex\run-evidence\env-governance\codex-switch-flat-backup-delete-20260701-162530\EXECUTION.md`
 - 三类人工审查项删除 issue：`.scratch/unified-env/issues/17-manual-review-cache-staging-backup-delete.md`
-- 三类人工审查项删除证据：`D:\Codex\.codex\run-evidence\env-governance\manual-review-cleanup-20260701-164124\EXECUTION.md`
-- Codex 主机更新收尾交接：`docs/handoffs/2026-07-06-codex-host-update-closeout-handoff.md`
-- Codex 主机更新证据：`D:\Codex\.codex\run-evidence\codex-update-20260706-104516`
 - 环境更新执行报告：`reports/env-update-execution-20260706/REPORT.md`
-- 环境更新执行证据：`D:\Codex\.codex\run-evidence\env-governance\update-20260706`
-- .NET/Python/WSL 修复证据：`D:\Codex\.codex\run-evidence\env-governance\fix-net-python-wsl-20260706`
-- PATH 清理执行证据：`D:\Codex\.codex\run-evidence\env-governance\path-cleanup-20260701-151054\EXECUTION.md`
 - 备份清理 apply manifest：当前没有可发布的 schema 2 manifest；生产 dry-run 覆盖不完整，安全门已拒绝生成。
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
-- apply manifest 交接：`docs/handoffs/2026-07-01-backup-retention-apply-manifest-handoff.md`
-- 最新清理收尾交接：`docs/handoffs/2026-07-01-env-governance-cleanout-closeout-handoff.md`
-- 备份清理交接：`docs/handoffs/2026-06-30-backup-retention-runtime-cleanup-handoff.md`
-- 项目本地环境交接：`docs/handoffs/2026-06-30-project-local-env-handoff.md`
-- 失效 PATH 入口清理交接：`docs/handoffs/2026-07-01-stale-path-entry-cleanup-dry-run-handoff.md`
+- 可信盘点设计：`docs/specs/2026-07-10-environment-inventory-trust-design.md`
+- 可信盘点实施计划：`docs/plans/2026-07-10-environment-inventory-trust-implementation.md`
 
 这些报告是事实快照，不是执行授权。真实迁移、PATH 修改、全局管理器更新或删除前必须重新生成最新基线，并取得具体项授权。

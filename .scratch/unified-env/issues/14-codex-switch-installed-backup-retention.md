@@ -2,6 +2,8 @@
 
 Status: done
 
+> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，当前目录已退役；现行备份事实以 production schema 2 dry-run 为准。
+
 ## Parent
 
 `.scratch/unified-env/PRD.md`

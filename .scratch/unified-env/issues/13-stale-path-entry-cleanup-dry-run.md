@@ -2,6 +2,8 @@
 
 Status: done
 
+> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，当前目录已退役；现行 PATH 事实以 schema 3 inventory/readiness/stale 报告为准。
+
 ## Parent
 
 `.scratch/unified-env/PRD.md`

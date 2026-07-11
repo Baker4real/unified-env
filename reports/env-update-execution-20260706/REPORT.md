@@ -1,5 +1,7 @@
 # 环境更新执行记录
 
+> 历史说明：本文记录 2026-07-06 的执行快照；其中 `D:\Codex\.codex\run-evidence` 路径当前已退役。当前环境事实以最新 inventory/readiness 报告为准。
+
 生成时间：2026-07-06 17:30 Asia/Shanghai
 
 ## 执行边界

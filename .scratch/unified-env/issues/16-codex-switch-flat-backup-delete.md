@@ -2,6 +2,8 @@
 
 Status: done
 
+> 历史说明：下列 `D:\Codex\.codex\run-evidence` 路径记录当时执行位置，当前证据目录已退役；本 issue 与 Git 历史仅作为历史记录，不构成新的删除授权。
+
 ## Parent
 
 `.scratch/unified-env/PRD.md`
