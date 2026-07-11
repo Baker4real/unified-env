@@ -61,21 +61,77 @@ function Get-EnvProjectReviewVerificationPrerequisites {
     return [object[]]$items
 }
 
+function Get-ProjectLocalReviewItems {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][psobject]$Inventory,
+        [AllowNull()][object[]]$LocalEnvironmentFindings
+    )
+    $findings = if ($null -ne $Inventory) { @($Inventory.localEnvironmentFindings) } else { @($LocalEnvironmentFindings) }
+    $items = foreach ($marker in @($findings | Where-Object { Test-EnvLocalEnvironmentFindingReviewEligible -Finding $_ })) {
+        $files = [object[]]@($marker.rebuildEvidence.projectFiles)
+        $isLongRunning = Test-EnvProjectLongRunningOrStateful -Project $marker.project -Marker $marker.marker
+        $assessment = Get-EnvProjectReviewRebuildAssessment -Marker $marker.marker -Files $files
+        $action = Get-EnvProjectReviewRecommendedAction -IsLongRunningOrStateful $isLongRunning -RebuildAssessment $assessment
+        [pscustomobject][ordered]@{
+            project = $marker.project; parentProject = $marker.parentProject; marker = $marker.marker; path = $marker.path
+            classification = $marker.classification; scope = $marker.scope; existingProjectFiles = $files
+            rebuildEvidence = [pscustomobject][ordered]@{ marker = $marker.rebuildEvidence.marker; projectFiles = $files }
+            riskLevel = if ($isLongRunning) { "high" } else { "medium" }
+            recommendedAction = $action; automationAllowed = $false; rebuildAssessment = $assessment
+            verificationPrerequisites = [object[]]@(Get-EnvProjectReviewVerificationPrerequisites -Marker $marker.marker -IsLongRunningOrStateful $isLongRunning -Files $files)
+            isLongRunningOrStateful = $isLongRunning
+            requiresOwnerDecision = ($action -like "*owner 决策*" -or $assessment -like "*owner 决策*")
+            futureIssueRecommendation = if ($assessment.StartsWith("可重建", [StringComparison]::Ordinal)) { "可单独开项目级重建 issue。" } else { "先由项目 owner 补充重建和验证说明。" }
+            reason = "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
+        }
+    }
+    return [object[]]@($items)
+}
+
+function Get-ProjectLocalReviewSummary {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items)
+    [pscustomobject][ordered]@{
+        totalItems = [int64]$Items.Count
+        longRunningOrStatefulItems = [int64]@($Items | Where-Object { $_.isLongRunningOrStateful }).Count
+        rebuildableItems = [int64]@($Items | Where-Object { $_.rebuildAssessment -like "可重建*" }).Count
+        ownerDecisionItems = [int64]@($Items | Where-Object { $_.requiresOwnerDecision }).Count
+        nestedAppItems = [int64]@($Items | Where-Object { $_.classification -ceq "nested-app-local-env" }).Count
+    }
+}
+
+function Get-ProjectLocalReviewPolicy {
+    [pscustomobject][ordered]@{
+        autoMigrationAllowed = $false
+        rules = [object[]]@(
+            "项目本地环境默认不自动迁移。", "本审查包不移动、不删除、不合并任何项目本地环境。",
+            "嵌套 app 的本地环境只能按所在 app 的项目级流程审查，不能并入父项目或共享环境。",
+            "插件 runtime/cache 和 repair backup 缓存不属于本审查包的可重建项目依赖。",
+            "长期服务或状态敏感项目必须先有项目 owner 决策和项目级验证。",
+            "可重建只表示存在锁文件或配置线索，不等于允许自动重建。", "任何重建都必须作为独立项目级 issue 执行。"
+        )
+    }
+}
+
 function Assert-ProjectLocalReviewDocument {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Review)
     Assert-EnvFactObject -Value $Review -FactName "Review"
+    Assert-EnvFactPropertySet -Value $Review -ExpectedProperties @("artifactType", "schemaVersion", "generatedAt", "readOnly", "inventoryPath", "inventoryGeneratedAt", "sourceInventoryGenerationId", "sourceInventoryJsonSha256", "summary", "items", "policy", "generationId") -FactName "Review"
     if ($Review.artifactType -isnot [string] -or $Review.artifactType -cne "env-governance.project-local-env-review") { throw "Review artifactType 不正确。" }
     if (-not (Test-EnvMigrationInteger $Review.schemaVersion) -or $Review.schemaVersion -ne 2) { throw "Review schemaVersion 必须是原生整数 2。" }
-    foreach ($name in @("generationId", "generatedAt", "inventoryPath", "inventoryGeneratedAt")) {
+    foreach ($name in @("generationId", "generatedAt", "inventoryPath", "inventoryGeneratedAt", "sourceInventoryGenerationId", "sourceInventoryJsonSha256")) {
         if (-not ($Review.PSObject.Properties.Name -contains $name) -or $Review.$name -isnot [string] -or [string]::IsNullOrWhiteSpace($Review.$name)) { throw "Review $name 必须是非空字符串。" }
     }
     if ($Review.generationId -notmatch '^[0-9a-f-]{36}$') { throw "Review generationId 非法。" }
+    if ($Review.sourceInventoryGenerationId -notmatch '^[0-9a-f-]{36}$' -or $Review.sourceInventoryJsonSha256 -notmatch '^[0-9a-f]{64}$') { throw "Review source inventory identity 非法。" }
     if ($Review.readOnly -isnot [bool] -or -not $Review.readOnly) { throw "Review readOnly 必须是 true boolean。" }
     if ($Review.items -isnot [array]) { throw "Review items 必须是数组。" }
     $allowedFiles = @(Get-EnvRebuildEvidenceFileNames)
     foreach ($item in @($Review.items)) {
         Assert-EnvFactObject -Value $item -FactName "Review item"
+        Assert-EnvFactPropertySet -Value $item -ExpectedProperties @("project", "parentProject", "marker", "path", "classification", "scope", "existingProjectFiles", "rebuildEvidence", "riskLevel", "recommendedAction", "automationAllowed", "rebuildAssessment", "verificationPrerequisites", "isLongRunningOrStateful", "requiresOwnerDecision", "futureIssueRecommendation", "reason") -FactName "Review item"
         foreach ($name in @("project", "parentProject", "marker", "path", "classification", "scope", "riskLevel", "recommendedAction", "rebuildAssessment", "futureIssueRecommendation", "reason")) {
             Assert-EnvNonEmptyStringProperty -Value $item -PropertyName $name -FactName "Review item"
         }
@@ -108,6 +164,18 @@ function Assert-ProjectLocalReviewDocument {
         foreach ($entry in @($item.verificationPrerequisites)) { if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) { throw "Review item.verificationPrerequisites 必须是非空字符串数组。" } }
         if ((@($item.verificationPrerequisites) -join "`n") -cne ($expectedPrerequisites -join "`n")) { throw "Review item.verificationPrerequisites 与 canonical producer 规则不一致。" }
     }
+    Assert-EnvFactObject -Value $Review.summary -FactName "Review summary"
+    Assert-EnvFactPropertySet -Value $Review.summary -ExpectedProperties @("totalItems", "longRunningOrStatefulItems", "rebuildableItems", "ownerDecisionItems", "nestedAppItems") -FactName "Review summary"
+    $expectedSummary = Get-ProjectLocalReviewSummary -Items @($Review.items)
+    foreach ($name in @($expectedSummary.PSObject.Properties.Name)) {
+        if (-not (Test-EnvMigrationInteger $Review.summary.$name) -or [int64]$Review.summary.$name -ne [int64]$expectedSummary.$name) { throw "Review summary.$name 与 items 不一致。" }
+    }
+    Assert-EnvFactObject -Value $Review.policy -FactName "Review policy"
+    Assert-EnvFactPropertySet -Value $Review.policy -ExpectedProperties @("autoMigrationAllowed", "rules") -FactName "Review policy"
+    $expectedPolicy = Get-ProjectLocalReviewPolicy
+    if ($Review.policy.autoMigrationAllowed -isnot [bool] -or $Review.policy.autoMigrationAllowed -or $Review.policy.rules -isnot [array]) { throw "Review policy 类型或安全门非法。" }
+    foreach ($rule in @($Review.policy.rules)) { if ($rule -isnot [string] -or [string]::IsNullOrWhiteSpace($rule)) { throw "Review policy.rules 必须是非空字符串数组。" } }
+    if ((@($Review.policy.rules) -join "`n") -cne (@($expectedPolicy.rules) -join "`n")) { throw "Review policy 与 canonical producer policy 不一致。" }
 }
 
 function Assert-EnvFactObject {

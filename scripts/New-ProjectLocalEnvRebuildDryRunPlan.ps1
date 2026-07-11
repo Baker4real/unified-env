@@ -355,6 +355,18 @@ function ConvertTo-PlanMarkdown {
 $trustedInput = Get-TrustedReportInputPair -JsonPath $ReviewPath -MarkdownPath $ReviewMarkdownPath -DefaultMarkdownFileName "REPORT.md" -JsonParameterName "ReviewPath" -MarkdownParameterName "ReviewMarkdownPath"
 $review = Get-Content -LiteralPath $trustedInput.jsonPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
 Assert-ProjectLocalReviewDocument -Review $review
+$sourceInventoryInput = Get-TrustedReportInputPair -JsonPath $review.inventoryPath -MarkdownPath "" -DefaultMarkdownFileName "REPORT.md" -JsonParameterName "Review.inventoryPath" -MarkdownParameterName "Review inventory Markdown"
+$sourceInventory = Get-Content -LiteralPath $sourceInventoryInput.jsonPath -Raw | ConvertFrom-Json -DateKind String -ErrorAction Stop
+Assert-EnvMigrationInventoryFacts -Inventory $sourceInventory
+if ($review.sourceInventoryGenerationId -cne $sourceInventoryInput.generationId -or
+    $review.sourceInventoryJsonSha256 -cne $sourceInventoryInput.sourceJsonSha256 -or
+    $review.inventoryGeneratedAt -cne $sourceInventory.generatedAt) {
+    throw "Review source inventory identity 与当前可信 inventory 报告对不一致。"
+}
+$expectedReviewItems = [object[]]@(Get-ProjectLocalReviewItems -Inventory $sourceInventory)
+if ((@($review.items) | ConvertTo-Json -Depth 30) -cne ($expectedReviewItems | ConvertTo-Json -Depth 30)) {
+    throw "Review items 必须与 source inventory 的 canonical 完整投影精确一致。"
+}
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 Assert-AllowedOutputDir -Path $OutputDir
 $plans = @(

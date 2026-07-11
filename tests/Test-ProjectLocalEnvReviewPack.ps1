@@ -107,6 +107,9 @@ try {
     $review = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json -DateKind String
     Assert-ProjectLocalReviewDocument -Review $review
     $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
+    $inventoryPair = Test-JsonMarkdownArtifactPair -JsonPath $inventoryPath -MarkdownPath (Join-Path $inventoryOutput "REPORT.md")
+    Assert-True -Condition ($review.sourceInventoryGenerationId -ceq $inventoryPair.generationId) -Message "review 未绑定 source inventory generationId"
+    Assert-True -Condition ($review.sourceInventoryJsonSha256 -ceq $inventoryPair.sourceJsonSha256) -Message "review 未绑定 source inventory JSON SHA-256"
     $inventoryMarkers = @($inventory.localEnvironmentFindings | Where-Object { $_.classification -in @("project-root-local-env", "nested-app-local-env") -and $_.owner -eq "project" })
     Assert-True -Condition ($review.artifactType -ceq "env-governance.project-local-env-review") -Message "review artifactType 不正确"
     $appFinding = $inventoryMarkers | Where-Object { $_.path -ieq $fixtureNodeModules } | Select-Object -First 1

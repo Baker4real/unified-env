@@ -57,5 +57,5 @@ function Get-TrustedReportInputPair {
     if (-not $pair.ok) {
         throw "$JsonParameterName/$MarkdownParameterName 报告对校验失败：$($pair.error)"
     }
-    [pscustomobject]@{ jsonPath = $trustedJsonPath; markdownPath = $trustedMarkdownPath; generationId = $pair.generationId }
+    [pscustomobject]@{ jsonPath = $trustedJsonPath; markdownPath = $trustedMarkdownPath; generationId = $pair.generationId; sourceJsonSha256 = $pair.sourceJsonSha256 }
 }

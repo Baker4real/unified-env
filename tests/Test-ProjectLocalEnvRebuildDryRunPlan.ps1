@@ -78,12 +78,14 @@ function Assert-CanRemoveTestRoot {
 }
 
 $scriptPath = Join-Path $ProjectRoot "scripts\New-ProjectLocalEnvRebuildDryRunPlan.ps1"
-$reviewSourcePath = Join-Path $ProjectRoot "reports\project-local-env-review\review.json"
+$reviewProducerPath = Join-Path $ProjectRoot "scripts\New-ProjectLocalEnvReviewPack.ps1"
+$inventorySourcePath = Join-Path $ProjectRoot "reports\env-inventory\inventory.json"
+$inventoryMarkdownPath = Join-Path $ProjectRoot "reports\env-inventory\REPORT.md"
 $reviewPath = $null
 $testRoot = Join-Path $ProjectRoot "reports\project-local-env-rebuild-plan-test"
 
 Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Message "找不到项目本地环境重建 dry-run 计划脚本"
-Assert-True -Condition (Test-Path -LiteralPath $reviewSourcePath -PathType Leaf) -Message "找不到项目本地环境审查包"
+Assert-True -Condition (Test-Path -LiteralPath $reviewProducerPath -PathType Leaf) -Message "找不到项目本地环境审查包 producer"
 
 try {
     Assert-CanRemoveTestRoot -Path $testRoot
@@ -91,13 +93,9 @@ try {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 
-    $reviewFixture = Get-Content -LiteralPath $reviewSourcePath -Raw | ConvertFrom-Json -DateKind String
-    $reviewFixture | Add-Member -MemberType NoteProperty -Name artifactType -Value "env-governance.project-local-env-review" -Force
-    foreach ($item in @($reviewFixture.items)) {
-        $item | Add-Member -MemberType NoteProperty -Name rebuildEvidence -Value ([pscustomobject]@{ marker = $item.marker; projectFiles = [object[]]@($item.existingProjectFiles) }) -Force
-    }
-    $reviewInput = Publish-JsonMarkdownArtifactPair -Document $reviewFixture -OutputDir (Join-Path $testRoot "review-input") -JsonFileName "review.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "review fixture" }
-    $reviewPath = $reviewInput.jsonPath
+    $reviewInputDir = Join-Path $testRoot "review-input"
+    & $reviewProducerPath -InventoryPath $inventorySourcePath -InventoryMarkdownPath $inventoryMarkdownPath -OutputDir $reviewInputDir | Out-Null
+    $reviewPath = Join-Path $reviewInputDir "review.json"
 
     $result = & $scriptPath -ReviewPath $reviewPath -OutputDir $testRoot
     Assert-True -Condition ([bool]$result.dryRun) -Message "脚本没有返回 dryRun=true"
@@ -239,6 +237,16 @@ try {
     }
 
     $invalidReviewCases = @(
+        @{ name = "items-empty-old-summary"; mutate = { param($d) $d.items = [object[]]@() } },
+        @{ name = "items-empty-updated-summary"; mutate = { param($d) $d.items = [object[]]@(); foreach ($p in $d.summary.PSObject.Properties) { $p.Value = 0 } } },
+        @{ name = "summary-count-tamper"; mutate = { param($d) $d.summary.totalItems = [int64]($d.summary.totalItems + 1) } },
+        @{ name = "policy-rule-tamper"; mutate = { param($d) $d.policy.rules[0] = "banana" } },
+        @{ name = "policy-boolean-tamper"; mutate = { param($d) $d.policy.autoMigrationAllowed = $true } },
+        @{ name = "source-generation-tamper"; mutate = { param($d) $d.sourceInventoryGenerationId = "00000000-0000-0000-0000-000000000000" } },
+        @{ name = "source-hash-tamper"; mutate = { param($d) $d.sourceInventoryJsonSha256 = "0" * 64 } },
+        @{ name = "source-path-tamper"; mutate = { param($d) $d.inventoryPath = (Join-Path $testRoot "missing-source-inventory.json") } },
+        @{ name = "review-item-omitted-with-summary"; mutate = { param($d) $d.items = [object[]]@($d.items | Select-Object -Skip 1); $d.summary.totalItems--; if ($d.summary.rebuildableItems -gt 0) { $d.summary.rebuildableItems-- }; if ($d.summary.nestedAppItems -gt 0) { $d.summary.nestedAppItems-- } } },
+        @{ name = "review-item-duplicated-with-summary"; mutate = { param($d) $copy = $d.items[0] | ConvertTo-Json -Depth 20 | ConvertFrom-Json -DateKind String; $d.items = [object[]]@($d.items + $copy); $d.summary.totalItems++; if ($copy.rebuildAssessment -like "可重建*") { $d.summary.rebuildableItems++ }; if ($copy.requiresOwnerDecision) { $d.summary.ownerDecisionItems++ }; if ($copy.isLongRunningOrStateful) { $d.summary.longRunningOrStatefulItems++ }; if ($copy.classification -ceq "nested-app-local-env") { $d.summary.nestedAppItems++ } } },
         @{ name = "wrong-artifact"; mutate = { param($d) $d.artifactType = "forged" } },
         @{ name = "string-schema"; mutate = { param($d) $d.schemaVersion = "2" } },
         @{ name = "items-scalar"; mutate = { param($d) $d.items = "bad" } },
@@ -265,6 +273,25 @@ try {
         try { & $scriptPath -ReviewPath $input.jsonPath -ReviewMarkdownPath $input.markdownPath -OutputDir $output | Out-Null } catch { $rejected = $true }
         Assert-True -Condition $rejected -Message "rebuild 未拒绝严格合同反例：$($case.name)"
         Assert-True -Condition (([IO.File]::ReadAllText($sentinel.jsonPath)) -ceq $sentinelJson -and ([IO.File]::ReadAllText($sentinel.markdownPath)) -ceq $sentinelMarkdown) -Message "严格合同失败不得覆盖旧pair：$($case.name)"
+    }
+
+    $sourceInventoryDocument = Get-Content -LiteralPath $inventorySourcePath -Raw | ConvertFrom-Json -DateKind String
+    foreach ($sourceCase in @("finding-deleted", "finding-added-duplicate")) {
+        $changedInventory = $sourceInventoryDocument | ConvertTo-Json -Depth 40 | ConvertFrom-Json -DateKind String
+        if ($sourceCase -ceq "finding-deleted") {
+            $changedInventory.localEnvironmentFindings = [object[]]@($changedInventory.localEnvironmentFindings | Select-Object -Skip 1)
+        } else {
+            $duplicate = $changedInventory.localEnvironmentFindings[0] | ConvertTo-Json -Depth 20 | ConvertFrom-Json -DateKind String
+            $changedInventory.localEnvironmentFindings = [object[]]@($changedInventory.localEnvironmentFindings + $duplicate)
+        }
+        $changedInventoryPair = Publish-JsonMarkdownArtifactPair -Document $changedInventory -OutputDir (Join-Path $testRoot "source-$sourceCase") -JsonFileName "inventory.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "changed source inventory" }
+        $boundReview = $review | ConvertTo-Json -Depth 40 | ConvertFrom-Json -DateKind String
+        $boundReview.inventoryPath = $changedInventoryPair.jsonPath
+        $boundReview.sourceInventoryGenerationId = $changedInventoryPair.generationId
+        $boundReview.sourceInventoryJsonSha256 = $changedInventoryPair.sourceJsonSha256
+        $boundReviewPair = Publish-JsonMarkdownArtifactPair -Document $boundReview -OutputDir (Join-Path $testRoot "review-$sourceCase") -JsonFileName "review.json" -MarkdownFileName "REPORT.md" -RenderMarkdown { "review bound to changed source" }
+        $out = Join-Path $testRoot "source-change-output-$sourceCase"
+        Assert-RejectedPreservingRebuildPair "source inventory $sourceCase" $out { & $scriptPath -ReviewPath $boundReviewPair.jsonPath -ReviewMarkdownPath $boundReviewPair.markdownPath -OutputDir $out }
     }
 
     $blockedOutput = "C:\Codex-should-not-be-created"

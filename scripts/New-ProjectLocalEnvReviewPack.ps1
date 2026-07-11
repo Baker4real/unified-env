@@ -228,36 +228,7 @@ $inventory = Get-Content -LiteralPath $trustedInput.jsonPath -Raw | ConvertFrom-
 Assert-ProjectLocalEnvInventoryFacts -Inventory $inventory
 Assert-DDrivePath -Path $OutputDir -ParameterName "OutputDir"
 Assert-AllowedOutputDir -Path $OutputDir
-$items = @(
-    foreach ($marker in @($inventory.localEnvironmentFindings | Where-Object { Test-EnvLocalEnvironmentFindingReviewEligible -Finding $_ })) {
-        $files = @($marker.rebuildEvidence.projectFiles)
-        $isLongRunning = Test-EnvProjectLongRunningOrStateful -Project $marker.project -Marker $marker.marker
-        $rebuildAssessment = Get-EnvProjectReviewRebuildAssessment -Marker $marker.marker -Files $files
-        $recommendedAction = Get-EnvProjectReviewRecommendedAction -IsLongRunningOrStateful $isLongRunning -RebuildAssessment $rebuildAssessment
-        $verificationPrerequisites = @(Get-EnvProjectReviewVerificationPrerequisites -Marker $marker.marker -IsLongRunningOrStateful $isLongRunning -Files $files)
-        $needsOwnerDecision = $recommendedAction -like "*owner 决策*" -or $rebuildAssessment -like "*owner 决策*"
-
-        [pscustomobject]@{
-            project = $marker.project
-            parentProject = $marker.parentProject
-            marker = $marker.marker
-            path = $marker.path
-            classification = if ($marker.PSObject.Properties.Name -contains "classification") { $marker.classification } else { "project-root-local-env" }
-            scope = if ($marker.PSObject.Properties.Name -contains "scope") { $marker.scope } else { "project-root" }
-            existingProjectFiles = $files
-            rebuildEvidence = [pscustomobject]@{ marker = $marker.rebuildEvidence.marker; projectFiles = [object[]]@($files) }
-            riskLevel = if ($isLongRunning) { "high" } else { "medium" }
-            recommendedAction = $recommendedAction
-            automationAllowed = $false
-            rebuildAssessment = $rebuildAssessment
-            verificationPrerequisites = $verificationPrerequisites
-            isLongRunningOrStateful = $isLongRunning
-            requiresOwnerDecision = $needsOwnerDecision
-            futureIssueRecommendation = if ($rebuildAssessment.StartsWith("可重建")) { "可单独开项目级重建 issue。" } else { "先由项目 owner 补充重建和验证说明。" }
-            reason = "项目本地环境可能绑定解释器、绝对路径、构建产物、平台依赖或服务状态。"
-        }
-    }
-)
+$items = [object[]]@(Get-ProjectLocalReviewItems -Inventory $inventory)
 
 $review = [pscustomobject]@{
     artifactType = "env-governance.project-local-env-review"
@@ -266,26 +237,11 @@ $review = [pscustomobject]@{
     readOnly = $true
     inventoryPath = $trustedInput.jsonPath
     inventoryGeneratedAt = "$($inventory.generatedAt)"
-    summary = [pscustomobject]@{
-        totalItems = $items.Count
-        longRunningOrStatefulItems = @($items | Where-Object { $_.isLongRunningOrStateful }).Count
-        rebuildableItems = @($items | Where-Object { $_.rebuildAssessment -like "可重建*" }).Count
-        ownerDecisionItems = @($items | Where-Object { $_.requiresOwnerDecision }).Count
-        nestedAppItems = @($items | Where-Object { $_.classification -eq "nested-app-local-env" }).Count
-    }
+    sourceInventoryGenerationId = $trustedInput.generationId
+    sourceInventoryJsonSha256 = $trustedInput.sourceJsonSha256
+    summary = Get-ProjectLocalReviewSummary -Items $items
     items = $items
-    policy = [pscustomobject]@{
-        autoMigrationAllowed = $false
-        rules = @(
-            "项目本地环境默认不自动迁移。",
-            "本审查包不移动、不删除、不合并任何项目本地环境。",
-            "嵌套 app 的本地环境只能按所在 app 的项目级流程审查，不能并入父项目或共享环境。",
-            "插件 runtime/cache 和 repair backup 缓存不属于本审查包的可重建项目依赖。",
-            "长期服务或状态敏感项目必须先有项目 owner 决策和项目级验证。",
-            "可重建只表示存在锁文件或配置线索，不等于允许自动重建。",
-            "任何重建都必须作为独立项目级 issue 执行。"
-        )
-    }
+    policy = Get-ProjectLocalReviewPolicy
 }
 
 $jsonPath = Join-Path $OutputDir "review.json"
