@@ -7,5 +7,8 @@ reports/project-local-env-review-test/
 reports/project-local-env-rebuild-plan-test/
 .serena/
 .codex/skill-state/
+.local/
+*.local.md
+.env.local
 *.tmp
 *.temp

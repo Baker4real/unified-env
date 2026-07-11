@@ -1,5 +1,7 @@
 # 环境盘点可信度实施计划
 
+> 状态：已于 2026-07-11 完成。下列复选框保留为实施过程记录，不再表示当前待办；当前结果以 `README.md`、`CONTEXT.md` 和 `reports/` 下的最新报告为准。
+
 > **供 agent worker 使用：** 按任务逐项实施。优先使用 `subagent-driven-development`；每个任务必须走红灯、绿灯、任务级 spec/质量评审，高风险任务再追加独立对抗性审查。所有步骤使用复选框跟踪。
 
 **目标：** 把环境 inventory、readiness、备份 dry-run 和 apply manifest 升级为可审计、失败关闭且不会改动真实环境的可信报告链路。
