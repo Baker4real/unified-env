@@ -147,7 +147,7 @@ $legacyNames = @(
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContextValue", "MissingSerenaProjectValue", "MissingApproval", "MultilineToml")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "MissingSerenaProjectValue", "DuplicateHookSection", "MissingApproval", "MultilineToml")]
         [string]$Variant = "Drift"
     )
 
@@ -185,10 +185,13 @@ hash = "fixture-trust-hash"
 [[fixture.array]] # 合法 array-of-tables 不能随 hooks section 被删除
 name = "array-table-must-survive"
 
-[network]
+    [network]
 enabled = true
 fixture_network_sentinel = "must-survive"
 '@
+
+    $serenaContextPath = Join-Path ([System.IO.Directory]::GetParent($Root).FullName) ".serena\contexts\codex-file-tools.yml"
+    $config = $config.Replace('D:\\Codex\\.serena\\contexts\\codex-file-tools.yml', $serenaContextPath.Replace('\', '\\'))
 
     if ($Variant -eq "DuplicateSerena") {
         $config += @'
@@ -202,10 +205,18 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
         $config = $config -replace '(?m)^(args\s*=.*)$', ('$1' + "`n" + '$1')
     } elseif ($Variant -eq "MalformedSerenaArgs") {
         $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", '
+    } elseif ($Variant -eq "MissingSerenaContext") {
+        $config = $config -replace '"--context=[^"]+",\s*', ''
     } elseif ($Variant -eq "MissingSerenaContextValue") {
         $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", "--context" ]'
+    } elseif ($Variant -eq "WrongSerenaContext") {
+        $config = $config.Replace('codex-file-tools.yml', 'other-context.yml')
+    } elseif ($Variant -eq "DuplicateSerenaContext") {
+        $config = $config -replace '("--context=[^"]+")', '$1, $1'
     } elseif ($Variant -eq "MissingSerenaProjectValue") {
         $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", "--project", "--enable-web-dashboard=true" ]'
+    } elseif ($Variant -eq "DuplicateHookSection") {
+        $config += "`n[`"hooks`"]`nduplicate = true`n"
     } elseif ($Variant -eq "MissingApproval") {
         $config = $config -replace '(?m)^approval_policy\s*=.*\r?\n', ''
     } elseif ($Variant -eq "MultilineToml") {
@@ -220,7 +231,6 @@ multiline-body-must-survive
 
     Set-Content -LiteralPath (Join-Path $Root "config.toml") -Value $config -Encoding UTF8
 
-    $serenaContextPath = Join-Path ([System.IO.Directory]::GetParent($Root).FullName) ".serena\contexts\codex-file-tools.yml"
     New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($serenaContextPath)) | Out-Null
     Set-Content -LiteralPath $serenaContextPath -Value "prompt: explicit activate_project from environment_context" -Encoding UTF8
 
@@ -444,14 +454,37 @@ try {
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $rollbackEvidence[0].FullName "config.toml")) -eq $rollbackConfigHash) -Message "回滚 evidence 的 config 快照不真实"
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $rollbackEvidence[0].FullName "hooks.json")) -eq $rollbackHooksHash) -Message "回滚 evidence 的 hooks 快照不真实"
 
+    $legacyUnknownHome = Join-Path $testRoot "legacy-directory-unknown\.codex"
+    New-FixtureCodexHome -Root $legacyUnknownHome
+    $unknownCachePath = Join-Path $legacyUnknownHome "hooks\__pycache__\keep-me.pyc"
+    Set-Content -LiteralPath $unknownCachePath -Value "unknown-cache-must-survive" -Encoding UTF8
+    $unknownCacheHash = Get-Sha256 -Path $unknownCachePath
+    $legacyUnknownThrew = $false
+    try {
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $legacyUnknownHome | Out-Null
+    } catch {
+        $legacyUnknownThrew = $true
+    }
+    Assert-True -Condition $legacyUnknownThrew -Message "非空 legacy 目录应安全失败"
+    Assert-True -Condition ((Get-Sha256 -Path $unknownCachePath) -eq $unknownCacheHash) -Message "legacy 目录中的未知文件被删除或改写"
+    $legacyUnknownEvidence = @(Get-ChildItem -LiteralPath (Join-Path $legacyUnknownHome "run-evidence\host-hook-remediation") -Directory -Force)
+    Assert-True -Condition ($legacyUnknownEvidence.Count -eq 1) -Message "legacy 目录未知文件 canary 必须恰好生成一份 evidence"
+    $legacyUnknownManifest = Get-Content -LiteralPath (Join-Path $legacyUnknownEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
+    $unknownCacheEvidence = @($legacyUnknownManifest.preservedHookTree | Where-Object { $_.path -eq '__pycache__\keep-me.pyc' })
+    Assert-True -Condition ($unknownCacheEvidence.Count -eq 1 -and $unknownCacheEvidence[0].sha256 -eq $unknownCacheHash) -Message "manifest 漏记 legacy 目录中的未知文件"
+
     foreach ($case in @(
         @{ Name = "malformed-hooks"; Variant = "MalformedHooks" },
         @{ Name = "duplicate-serena"; Variant = "DuplicateSerena" },
         @{ Name = "missing-serena-args"; Variant = "MissingSerenaArgs" },
         @{ Name = "duplicate-serena-args"; Variant = "DuplicateSerenaArgs" },
         @{ Name = "malformed-serena-args"; Variant = "MalformedSerenaArgs" },
+        @{ Name = "missing-serena-context"; Variant = "MissingSerenaContext" },
         @{ Name = "missing-serena-context-value"; Variant = "MissingSerenaContextValue" },
+        @{ Name = "wrong-serena-context"; Variant = "WrongSerenaContext" },
+        @{ Name = "duplicate-serena-context"; Variant = "DuplicateSerenaContext" },
         @{ Name = "missing-serena-project-value"; Variant = "MissingSerenaProjectValue" },
+        @{ Name = "duplicate-hook-section"; Variant = "DuplicateHookSection" },
         @{ Name = "missing-approval"; Variant = "MissingApproval" },
         @{ Name = "multiline-toml"; Variant = "MultilineToml" }
     )) {

@@ -45,8 +45,7 @@ function Test-IsLegacyHookRelativePath {
         return $true
     }
     foreach ($directoryName in $script:LegacyHookDirectoryNames) {
-        if ($normalized.Equals($directoryName, [System.StringComparison]::OrdinalIgnoreCase) -or
-            $normalized.StartsWith("$directoryName\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($normalized.Equals($directoryName, [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
     }
@@ -343,7 +342,10 @@ function Set-TomlKeyLiteral {
 }
 
 function Convert-SerenaArgs {
-    param([string]$RightHandSide)
+    param(
+        [string]$RightHandSide,
+        [string]$ExpectedContextPath
+    )
 
     try {
         $parsed = ConvertFrom-Json -InputObject $RightHandSide -NoEnumerate
@@ -365,6 +367,7 @@ function Convert-SerenaArgs {
     }
 
     $result = [System.Collections.Generic.List[string]]::new()
+    $contextValues = [System.Collections.Generic.List[string]]::new()
     for ($index = 0; $index -lt $tokens.Count; $index++) {
         $token = [string]$tokens[$index]
         if ($token -ceq "--project-from-cwd") {
@@ -379,10 +382,14 @@ function Convert-SerenaArgs {
                 ([string]$tokens[$index + 1]).StartsWith("--", [System.StringComparison]::Ordinal)) {
                 throw "--context 缺少参数值"
             }
+            $contextValues.Add([string]$tokens[$index + 1])
         }
-        if ($token.StartsWith("--context=", [System.StringComparison]::Ordinal) -and
-            [string]::IsNullOrWhiteSpace($token.Substring("--context=".Length))) {
-            throw "--context 缺少参数值"
+        if ($token.StartsWith("--context=", [System.StringComparison]::Ordinal)) {
+            $contextValue = $token.Substring("--context=".Length)
+            if ([string]::IsNullOrWhiteSpace($contextValue)) {
+                throw "--context 缺少参数值"
+            }
+            $contextValues.Add($contextValue)
         }
         if ($token -ceq "--project" -or $token -ceq "--project-file") {
             if ($index + 1 -ge $tokens.Count -or
@@ -403,11 +410,26 @@ function Convert-SerenaArgs {
         $result.Add($token)
     }
 
+    if ($contextValues.Count -ne 1) {
+        throw "Serena args 必须恰好包含一个 --context；实际 $($contextValues.Count)"
+    }
+    if (-not [System.IO.Path]::IsPathFullyQualified($contextValues[0])) {
+        throw "Serena --context 必须是绝对路径：$($contextValues[0])"
+    }
+    $resolvedContext = [System.IO.Path]::GetFullPath($contextValues[0]).TrimEnd('\', '/')
+    $resolvedExpected = [System.IO.Path]::GetFullPath($ExpectedContextPath).TrimEnd('\', '/')
+    if (-not $resolvedContext.Equals($resolvedExpected, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Serena --context 未指向受保护的 codex-file-tools.yml"
+    }
+
     ConvertTo-Json -InputObject $result.ToArray() -Compress
 }
 
 function Get-DesiredConfig {
-    param([string]$Content)
+    param(
+        [string]$Content,
+        [string]$ExpectedSerenaContextPath
+    )
 
     $document = Get-TomlDocument -Content $Content
     $firstSectionIndex = if ($document.headers.Count -gt 0) { ($document.headers | Sort-Object index | Select-Object -First 1).index } else { $document.lines.Count }
@@ -430,12 +452,22 @@ function Get-DesiredConfig {
     if ($equalsIndex -lt 0) {
         throw "无法解析 Serena args"
     }
-    $argsLiteral = Convert-SerenaArgs -RightHandSide $argsLine.Substring($equalsIndex + 1).Trim()
+    $argsLiteral = Convert-SerenaArgs -RightHandSide $argsLine.Substring($equalsIndex + 1).Trim() -ExpectedContextPath $ExpectedSerenaContextPath
     Set-TomlKeyLiteral -Document $document -Index $argsIndex -Key "args" -Literal $argsLiteral
 
     $keep = [bool[]]::new($document.lines.Count)
     [array]::Fill($keep, $true)
     $headers = @($document.headers | Sort-Object index)
+    $seenHookSections = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($header in $headers) {
+        if (@($header.segments).Count -eq 0 -or $header.segments[0] -cne "hooks") {
+            continue
+        }
+        $semanticName = ConvertTo-Json -InputObject ([object[]]@($header.segments)) -Compress
+        if (-not $seenHookSections.Add($semanticName)) {
+            throw "重复的 TOML hook section：$semanticName"
+        }
+    }
     for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
         $header = $headers[$headerIndex]
         if (@($header.segments).Count -eq 0 -or $header.segments[0] -cne "hooks") {
@@ -653,7 +685,7 @@ function Get-ReconciliationState {
     if (-not $serenaContextContent.Contains("activate_project") -or -not $serenaContextContent.Contains("environment_context")) {
         throw "Serena context 缺少按 environment_context 显式 activate_project 的安全约束"
     }
-    $desiredConfig = Get-DesiredConfig -Content $configContent
+    $desiredConfig = Get-DesiredConfig -Content $configContent -ExpectedSerenaContextPath $serenaContextPath
     $desiredHooks = Get-DesiredHooksJson -Content $hooksContent
     $legacyPresent = @($script:LegacyHookNames | Where-Object {
         $candidate = Join-Path $hookDirectory $_
@@ -862,7 +894,7 @@ function Invoke-Repair {
             $manifest.attemptedResources = @($attempted)
             Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
             Write-AtomicText -Path $InitialState.configPath -Content $InitialState.desiredConfig.content
-            $validatedConfig = Get-DesiredConfig -Content (Read-Text -Path $InitialState.configPath)
+            $validatedConfig = Get-DesiredConfig -Content (Read-Text -Path $InitialState.configPath) -ExpectedSerenaContextPath $InitialState.serenaContextPath
             if ($validatedConfig.changed) {
                 throw "config.toml 原子替换后未通过自验证"
             }
@@ -930,7 +962,7 @@ function Invoke-Repair {
     }
 
     try {
-        $postCommitConfig = Get-DesiredConfig -Content (Read-Text -Path $InitialState.configPath)
+        $postCommitConfig = Get-DesiredConfig -Content (Read-Text -Path $InitialState.configPath) -ExpectedSerenaContextPath $InitialState.serenaContextPath
         $postCommitHooks = Get-DesiredHooksJson -Content (Read-Text -Path $InitialState.hooksPath)
         if ($postCommitConfig.changed -or $postCommitHooks.changed) {
             throw "两文件提交完成后目标状态被并发改写"
