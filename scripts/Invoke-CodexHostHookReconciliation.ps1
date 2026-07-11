@@ -37,6 +37,41 @@ function Get-TextSha256 {
     [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes))
 }
 
+function Test-IsLegacyHookRelativePath {
+    param([string]$RelativePath)
+
+    $normalized = $RelativePath.Replace('/', '\')
+    if (@($script:LegacyHookNames | Where-Object { $_.Equals($normalized, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
+        return $true
+    }
+    foreach ($directoryName in $script:LegacyHookDirectoryNames) {
+        if ($normalized.Equals($directoryName, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $normalized.StartsWith("$directoryName\", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    $false
+}
+
+function Get-PreservedHookTreeInventory {
+    param(
+        [string]$HookDirectory,
+        [object[]]$HookTree
+    )
+
+    @($HookTree | ForEach-Object {
+        $relativePath = [System.IO.Path]::GetRelativePath($HookDirectory, $_.FullName).Replace('/', '\')
+        if (Test-IsLegacyHookRelativePath -RelativePath $relativePath) {
+            return
+        }
+        [pscustomobject]@{
+            path = $relativePath
+            kind = if ($_.PSIsContainer) { "directory" } else { "file" }
+            sha256 = if ($_.PSIsContainer) { $null } else { Get-Sha256 -Path $_.FullName }
+        }
+    } | Sort-Object path)
+}
+
 function Get-RepairMutexName {
     param([string]$ResolvedCodexHome)
 
@@ -156,6 +191,57 @@ function Write-AtomicText {
     }
 }
 
+function ConvertFrom-TomlHeaderName {
+    param([string]$Name)
+
+    $keyPattern = '(?:[A-Za-z0-9_-]+|"(?:\\.|[^"\\])*"|''[^'']*'')'
+    $match = [regex]::Match(
+        $Name,
+        '^\s*(?<key>' + $keyPattern + ')\s*(?:\.\s*(?<key>' + $keyPattern + ')\s*)*$'
+    )
+    if (-not $match.Success) {
+        throw "当前安全 parser 无法解析 TOML section header：[$Name]"
+    }
+
+    $segments = [System.Collections.Generic.List[string]]::new()
+    foreach ($capture in $match.Groups['key'].Captures) {
+        $token = $capture.Value
+        if ($token.StartsWith('"', [System.StringComparison]::Ordinal)) {
+            try {
+                $decoded = ConvertFrom-Json -InputObject $token -NoEnumerate
+            } catch {
+                throw "当前安全 parser 无法解析 TOML quoted key：$token"
+            }
+            if ($decoded -isnot [string]) {
+                throw "TOML quoted key 必须解析为字符串：$token"
+            }
+            $segments.Add($decoded)
+        } elseif ($token.StartsWith("'", [System.StringComparison]::Ordinal)) {
+            $segments.Add($token.Substring(1, $token.Length - 2))
+        } else {
+            $segments.Add($token)
+        }
+    }
+    $segments.ToArray()
+}
+
+function Test-TomlHeaderSegmentsEqual {
+    param(
+        [string[]]$Left,
+        [string[]]$Right
+    )
+
+    if ($Left.Count -ne $Right.Count) {
+        return $false
+    }
+    for ($index = 0; $index -lt $Left.Count; $index++) {
+        if ($Left[$index] -cne $Right[$index]) {
+            return $false
+        }
+    }
+    $true
+}
+
 function Get-TomlDocument {
     param([string]$Content)
 
@@ -169,18 +255,22 @@ function Get-TomlDocument {
     for ($index = 0; $index -lt $lines.Count; $index++) {
         $match = [regex]::Match($lines[$index], '^\s*\[(?<name>[^\[\]]+)\]\s*(?:#.*)?$')
         if ($match.Success) {
+            $segments = @(ConvertFrom-TomlHeaderName -Name $match.Groups['name'].Value)
             $headers.Add([pscustomobject]@{
                 index = $index
                 name = $match.Groups['name'].Value
+                segments = $segments
                 kind = "table"
             })
             continue
         }
         $arrayMatch = [regex]::Match($lines[$index], '^\s*\[\[(?<name>[^\[\]]+)\]\]\s*(?:#.*)?$')
         if ($arrayMatch.Success) {
+            $segments = @(ConvertFrom-TomlHeaderName -Name $arrayMatch.Groups['name'].Value)
             $headers.Add([pscustomobject]@{
                 index = $index
                 name = $arrayMatch.Groups['name'].Value
+                segments = $segments
                 kind = "array-table"
             })
         }
@@ -199,7 +289,10 @@ function Get-UniqueSectionRange {
         [string]$Name
     )
 
-    $matches = @($Document.headers | Where-Object { $_.kind -ceq "table" -and $_.name -ceq $Name })
+    $expectedSegments = @($Name.Split('.'))
+    $matches = @($Document.headers | Where-Object {
+        $_.kind -ceq "table" -and (Test-TomlHeaderSegmentsEqual -Left @($_.segments) -Right $expectedSegments)
+    })
     if ($matches.Count -ne 1) {
         throw "TOML section 必须恰好出现一次：[$Name]；实际 $($matches.Count)"
     }
@@ -345,7 +438,7 @@ function Get-DesiredConfig {
     $headers = @($document.headers | Sort-Object index)
     for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
         $header = $headers[$headerIndex]
-        if ($header.kind -cne "table" -or ($header.name -cne "hooks" -and -not $header.name.StartsWith("hooks.", [System.StringComparison]::Ordinal))) {
+        if (@($header.segments).Count -eq 0 -or $header.segments[0] -cne "hooks") {
             continue
         }
         $end = if ($headerIndex + 1 -lt $headers.Count) { $headers[$headerIndex + 1].index } else { $document.lines.Count }
@@ -429,6 +522,8 @@ function Test-ProtectedAcl {
 
     $allowed = @(Get-AllowedWriterSids)
     $acl = Get-Acl -LiteralPath $Path
+    $ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    $ownerAllowed = $allowed -contains $ownerSid
     $writeMask = [System.Security.AccessControl.FileSystemRights]::WriteData -bor
         [System.Security.AccessControl.FileSystemRights]::CreateFiles -bor
         [System.Security.AccessControl.FileSystemRights]::AppendData -bor
@@ -466,7 +561,8 @@ function Test-ProtectedAcl {
     $missing = @($allowed | Where-Object { -not $writers.Contains($_) })
 
     [pscustomobject]@{
-        ok = $acl.AreAccessRulesProtected -and $unexpected.Count -eq 0 -and $missing.Count -eq 0 -and $missingInheritance.Count -eq 0 -and $denyCount -eq 0
+        ok = $ownerAllowed -and $acl.AreAccessRulesProtected -and $unexpected.Count -eq 0 -and $missing.Count -eq 0 -and $missingInheritance.Count -eq 0 -and $denyCount -eq 0
+        ownerAllowed = $ownerAllowed
         protected = $acl.AreAccessRulesProtected
         unexpectedWriterCount = $unexpected.Count
         missingRequiredWriterCount = $missing.Count
@@ -545,11 +641,18 @@ function Get-ReconciliationState {
     $configPath = Join-Path $ResolvedCodexHome "config.toml"
     $hooksPath = Join-Path $ResolvedCodexHome "hooks.json"
     $hookDirectory = Join-Path $ResolvedCodexHome "hooks"
-    foreach ($path in @($configPath, $hooksPath, $hookDirectory)) {
+    $hostRoot = [System.IO.Directory]::GetParent($ResolvedCodexHome).FullName
+    $serenaContextDirectory = Join-Path $hostRoot ".serena\contexts"
+    $serenaContextPath = Join-Path $serenaContextDirectory "codex-file-tools.yml"
+    foreach ($path in @($configPath, $hooksPath, $hookDirectory, $serenaContextDirectory, $serenaContextPath)) {
         Assert-NoReparsePath -Path $path -RequireLeaf | Out-Null
     }
     $configContent = Read-Text -Path $configPath
     $hooksContent = Read-Text -Path $hooksPath
+    $serenaContextContent = Read-Text -Path $serenaContextPath
+    if (-not $serenaContextContent.Contains("activate_project") -or -not $serenaContextContent.Contains("environment_context")) {
+        throw "Serena context 缺少按 environment_context 显式 activate_project 的安全约束"
+    }
     $desiredConfig = Get-DesiredConfig -Content $configContent
     $desiredHooks = Get-DesiredHooksJson -Content $hooksContent
     $legacyPresent = @($script:LegacyHookNames | Where-Object {
@@ -574,9 +677,12 @@ function Get-ReconciliationState {
             throw "hooks tree 不得包含 reparse point：$($item.FullName)"
         }
     }
+    $preservedHookTree = @(Get-PreservedHookTreeInventory -HookDirectory $hookDirectory -HookTree $hookTree)
     $aclStates = @(
         Test-ProtectedAcl -Path $configPath
         Test-ProtectedAcl -Path $hooksPath
+        Test-ProtectedAcl -Path $serenaContextDirectory
+        Test-ProtectedAcl -Path $serenaContextPath
         $hookTree | ForEach-Object { Test-ProtectedAcl -Path $_.FullName }
     )
 
@@ -592,7 +698,11 @@ function Get-ReconciliationState {
         configPath = $configPath
         hooksPath = $hooksPath
         hookDirectory = $hookDirectory
+        serenaContextDirectory = $serenaContextDirectory
+        serenaContextPath = $serenaContextPath
+        serenaContextContent = $serenaContextContent
         hookTreePaths = @($hookTree | ForEach-Object { $_.FullName })
+        preservedHookTree = $preservedHookTree
         configContent = $configContent
         hooksContent = $hooksContent
         desiredConfig = $desiredConfig
@@ -659,10 +769,13 @@ function New-EvidenceSnapshot {
     Set-ProtectedAcl -Path $evidencePath
     $configEvidencePath = Join-Path $evidencePath "config.toml"
     $hooksEvidencePath = Join-Path $evidencePath "hooks.json"
+    $serenaContextEvidencePath = Join-Path $evidencePath "codex-file-tools.yml"
     [System.IO.File]::WriteAllText($configEvidencePath, $State.configContent, [System.Text.UTF8Encoding]::new($false))
     [System.IO.File]::WriteAllText($hooksEvidencePath, $State.hooksContent, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText($serenaContextEvidencePath, $State.serenaContextContent, [System.Text.UTF8Encoding]::new($false))
     Set-ProtectedAcl -Path $configEvidencePath
     Set-ProtectedAcl -Path $hooksEvidencePath
+    Set-ProtectedAcl -Path $serenaContextEvidencePath
 
     $legacyEvidence = Join-Path $evidencePath "legacy-hooks"
     New-Item -ItemType Directory -Path $legacyEvidence | Out-Null
@@ -681,7 +794,7 @@ function New-EvidenceSnapshot {
     }
 
     $aclBefore = [ordered]@{}
-    foreach ($path in @($State.configPath, $State.hooksPath) + @($State.hookTreePaths)) {
+    foreach ($path in @($State.configPath, $State.hooksPath, $State.serenaContextDirectory, $State.serenaContextPath) + @($State.hookTreePaths)) {
         $aclBefore[$path] = (Get-Acl -LiteralPath $path).Sddl
     }
     $aclBeforePath = Join-Path $evidencePath "acl-before.json"
@@ -697,12 +810,15 @@ function New-EvidenceSnapshot {
         originalHashes = [ordered]@{
             "config.toml" = Get-Sha256 -Path $configEvidencePath
             "hooks.json" = Get-Sha256 -Path $hooksEvidencePath
+            "codex-file-tools.yml" = Get-Sha256 -Path $serenaContextEvidencePath
             legacyHooks = $legacyHashes
         }
+        preservedHookTree = @($State.preservedHookTree)
         intendedResources = [ordered]@{
             "config.toml" = if ($State.desiredConfig.changed) { Get-TextSha256 -Content $State.desiredConfig.content } else { $null }
             "hooks.json" = if ($State.desiredHooks.changed) { Get-TextSha256 -Content $State.desiredHooks.content } else { $null }
         }
+        attemptedResources = @()
         committedResources = @()
         retiredResources = @()
         aclTargets = @()
@@ -743,6 +859,8 @@ function Invoke-Repair {
                 throw "config.toml 在修复前置校验后发生并发变化"
             }
             $attempted.Add("config.toml") | Out-Null
+            $manifest.attemptedResources = @($attempted)
+            Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
             Write-AtomicText -Path $InitialState.configPath -Content $InitialState.desiredConfig.content
             $validatedConfig = Get-DesiredConfig -Content (Read-Text -Path $InitialState.configPath)
             if ($validatedConfig.changed) {
@@ -758,6 +876,8 @@ function Invoke-Repair {
                 throw "hooks.json 在修复前置校验后发生并发变化"
             }
             $attempted.Add("hooks.json") | Out-Null
+            $manifest.attemptedResources = @($attempted)
+            Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
             Write-AtomicText -Path $InitialState.hooksPath -Content $InitialState.desiredHooks.content
             $validatedHooks = Get-DesiredHooksJson -Content (Read-Text -Path $InitialState.hooksPath)
             if ($validatedHooks.changed) {
@@ -816,7 +936,13 @@ function Invoke-Repair {
             throw "两文件提交完成后目标状态被并发改写"
         }
 
-        $aclTargets = @($InitialState.configPath, $InitialState.hooksPath, $InitialState.hookDirectory) + @(
+        $aclTargets = @(
+            $InitialState.configPath,
+            $InitialState.hooksPath,
+            $InitialState.serenaContextDirectory,
+            $InitialState.serenaContextPath,
+            $InitialState.hookDirectory
+        ) + @(
             Get-ChildItem -LiteralPath $InitialState.hookDirectory -Recurse -Force | ForEach-Object { $_.FullName }
         )
         $aclApplied = [System.Collections.Generic.List[string]]::new()
@@ -839,9 +965,6 @@ function Invoke-Repair {
             if ((Get-Sha256 -Path $livePath) -ne (Get-Sha256 -Path $evidencePath)) {
                 throw "退役前 legacy evidence 哈希不一致：$name"
             }
-            if ((Get-Sha256 -Path $livePath) -ne (Get-Sha256 -Path $evidencePath)) {
-                throw "legacy 文件在 ACL 收敛期间发生并发变化：$name"
-            }
             Remove-Item -LiteralPath $livePath -Force
             $retired.Add($name)
             $manifest.retiredResources = $retired.ToArray()
@@ -863,6 +986,11 @@ function Invoke-Repair {
         $finalState = Get-ReconciliationState -ResolvedCodexHome $ResolvedCodexHome
         if (-not $finalState.ok) {
             throw "Repair 完成后仍有 $($finalState.driftCount) 类 drift"
+        }
+        $initialPreservedTree = @($InitialState.preservedHookTree) | ConvertTo-Json -Depth 4 -Compress
+        $finalPreservedTree = @($finalState.preservedHookTree) | ConvertTo-Json -Depth 4 -Compress
+        if ($initialPreservedTree -cne $finalPreservedTree) {
+            throw "未知 hooks tree 的路径或内容在 Repair 期间发生变化"
         }
 
         $manifest.status = "completed"
