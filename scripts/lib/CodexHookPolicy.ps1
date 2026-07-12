@@ -483,6 +483,7 @@ function Read-CodexHookSafeUtf8FileSnapshot {
         byteLength = [int64]$bytes.Length
         sha256 = $sha256
         text = $text
+        bytes = $bytes
     }
 }
 
@@ -1069,6 +1070,270 @@ function Get-CodexHookManifestMatches {
     )
 }
 
+function Copy-CodexHookJsonValue {
+    param([Parameter(Mandatory)][AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return $null }
+    $jsonText = $Value | ConvertTo-Json -Depth 100 -Compress -ErrorAction Stop
+    Assert-CodexHookStrictJsonText -JsonText $jsonText
+    return ($jsonText | ConvertFrom-Json -Depth 100 -ErrorAction Stop)
+}
+
+function Get-CodexHookRegistryEntryAnalysis {
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][string]$Event,
+        [AllowNull()][object]$Matcher,
+        [AllowNull()][object]$Entry
+    )
+
+    $propertyNames = if ($null -eq $Entry) { @() } else { @($Entry.PSObject.Properties.Name) }
+    $entryType = if ($propertyNames -contains 'type' -and $Entry.type -is [string]) { [string]$Entry.type } else { $null }
+    $command = if ($propertyNames -contains 'command') { $Entry.command } else { $null }
+    $parsed = if ($command -is [string]) {
+        Split-CodexHookCommandLine -Command ([string]$command)
+    } else {
+        [pscustomobject]@{ parsed = $false; tokens = @() }
+    }
+
+    [object[]]$exactMatches = @()
+    if ($entryType -ceq 'command' -and $parsed.parsed) {
+        $exactMatches = [object[]]@(
+            Get-CodexHookManifestMatches `
+                -Manifest $Manifest `
+                -Event $Event `
+                -Matcher $Matcher `
+                -Tokens ([string[]]$parsed.tokens) `
+                -IsCommandEntry $true |
+                Where-Object { $null -ne $_ }
+        )
+    }
+    if ($exactMatches.Count -gt 1) {
+        throw "registry identity 命中多个 manifest hook：event=$Event"
+    }
+
+    $customPathMatches = @()
+    if ($parsed.parsed -and $parsed.tokens.Count -gt 0 -and [string]$parsed.tokens[0] -match '^[dD]:[\\/]') {
+        try {
+            $targetPath = [IO.Path]::GetFullPath(([string]$parsed.tokens[0]).Replace('/', '\'))
+            $customPathMatches = @(
+                $Manifest.hooks | Where-Object {
+                    $null -ne $_.wrapperPath -and
+                    $targetPath.Equals([IO.Path]::GetFullPath([string]$_.commandPath), [StringComparison]::OrdinalIgnoreCase)
+                }
+            )
+        } catch {
+            $customPathMatches = @()
+        }
+    }
+    if ($customPathMatches.Count -gt 0 -and $exactMatches.Count -eq 0) {
+        throw "受管 custom wrapper identity 漂移：event=$Event"
+    }
+
+    return [pscustomobject][ordered]@{
+        matchedHook = if ($exactMatches.Count -eq 1) { $exactMatches[0] } else { $null }
+        exactMatchCount = $exactMatches.Count
+    }
+}
+
+function Get-CodexHookRegistryOwnershipMap {
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][object]$Registry
+    )
+
+    if ($null -eq $Registry -or $Registry.PSObject.Properties.Name -notcontains 'hooks' -or $null -eq $Registry.hooks) {
+        throw 'hook registry 缺少 hooks object。'
+    }
+
+    $seenHookIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $groupsByEvent = [ordered]@{}
+    foreach ($eventProperty in $Registry.hooks.PSObject.Properties) {
+        $eventName = [string]$eventProperty.Name
+        $groupAnalyses = [Collections.Generic.List[object]]::new()
+        $groups = @($eventProperty.Value)
+        for ($groupIndex = 0; $groupIndex -lt $groups.Count; $groupIndex++) {
+            $group = $groups[$groupIndex]
+            $groupProperties = if ($null -eq $group) { @() } else { @($group.PSObject.Properties.Name) }
+            if ($groupProperties -notcontains 'hooks') {
+                $groupAnalyses.Add([pscustomobject][ordered]@{
+                    index = $groupIndex
+                    matchedHook = $null
+                    isManaged = $false
+                })
+                continue
+            }
+
+            $matcher = if ($groupProperties -contains 'matcher') { $group.matcher } else { $null }
+            $entries = @($group.hooks)
+            $entryMatches = [Collections.Generic.List[object]]::new()
+            foreach ($entry in $entries) {
+                $entryMatches.Add((Get-CodexHookRegistryEntryAnalysis -Manifest $Manifest -Event $eventName -Matcher $matcher -Entry $entry))
+            }
+            $matchedEntries = @($entryMatches | Where-Object { $null -ne $_.matchedHook })
+            if ($entries.Count -ne 1 -and $matchedEntries.Count -gt 0) {
+                throw "包含受管 identity 的 multi-entry group 拒绝自动合并：event=$eventName,index=$groupIndex"
+            }
+
+            $matchedHook = if ($entries.Count -eq 1 -and $matchedEntries.Count -eq 1) { $matchedEntries[0].matchedHook } else { $null }
+            if ($null -ne $matchedHook -and -not $seenHookIds.Add([string]$matchedHook.id)) {
+                throw "registry 受管 identity 重复：id=$($matchedHook.id)"
+            }
+            $groupAnalyses.Add([pscustomobject][ordered]@{
+                index = $groupIndex
+                matchedHook = $matchedHook
+                isManaged = $null -ne $matchedHook
+            })
+        }
+        $groupsByEvent[$eventName] = [object[]]$groupAnalyses.ToArray()
+    }
+
+    return [pscustomobject][ordered]@{
+        groupsByEvent = [pscustomobject]$groupsByEvent
+    }
+}
+
+function ConvertTo-CodexHookCommandToken {
+    param([Parameter(Mandatory)][string]$Value)
+
+    if ($Value.Contains('"')) {
+        throw 'manifest 注册 token 不得包含双引号。'
+    }
+    if ($Value -match '\s') {
+        return '"' + $Value + '"'
+    }
+    return $Value
+}
+
+function New-CodexHookCanonicalRegistryGroup {
+    param([Parameter(Mandatory)][object]$Hook)
+
+    $tokens = @(
+        ConvertTo-CodexHookCommandToken -Value ([string]$Hook.commandPath)
+        foreach ($argument in @($Hook.arguments)) {
+            ConvertTo-CodexHookCommandToken -Value ([string]$argument)
+        }
+    )
+    $group = [pscustomobject][ordered]@{}
+    if ($null -ne $Hook.matcher) {
+        $group | Add-Member -NotePropertyName matcher -NotePropertyValue ([string]$Hook.matcher)
+    }
+    $group | Add-Member -NotePropertyName hooks -NotePropertyValue @(
+        [pscustomobject][ordered]@{
+            type = 'command'
+            command = $tokens -join ' '
+            timeout = [int]$Hook.timeoutSeconds
+        }
+    )
+    return $group
+}
+
+function Merge-CodexHookRegistryEventGroups {
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][string]$Event,
+        [AllowEmptyCollection()][object[]]$Groups = @(),
+        [AllowEmptyCollection()][object[]]$Analyses = @(),
+        [Parameter(Mandatory)][bool]$RemoveRetired
+    )
+
+    $desiredHooks = @(
+        $Manifest.hooks |
+        Where-Object { $_.event -ceq $Event -and $_.lifecycle -cne 'retired' } |
+        Sort-Object { [int]$_.order }
+    )
+    $desiredIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($hook in $desiredHooks) { [void]$desiredIds.Add([string]$hook.id) }
+
+    $baseGroups = [Collections.Generic.List[object]]::new()
+    $managedSlotIndexes = [Collections.Generic.List[int]]::new()
+    $existingById = @{}
+    for ($groupIndex = 0; $groupIndex -lt $Groups.Count; $groupIndex++) {
+        $analysis = if ($groupIndex -lt $Analyses.Count) { $Analyses[$groupIndex] } else { $null }
+        $matchedHook = if ($null -eq $analysis) { $null } else { $analysis.matchedHook }
+        if ($RemoveRetired -and $null -ne $matchedHook -and $matchedHook.lifecycle -ceq 'retired') {
+            continue
+        }
+
+        $newIndex = $baseGroups.Count
+        $baseGroups.Add($Groups[$groupIndex])
+        if ($null -ne $matchedHook -and $desiredIds.Contains([string]$matchedHook.id)) {
+            $existingById[[string]$matchedHook.id] = $Groups[$groupIndex]
+            $managedSlotIndexes.Add($newIndex)
+        }
+    }
+
+    $orderedExisting = [Collections.Generic.List[object]]::new()
+    $missing = [Collections.Generic.List[object]]::new()
+    $missingSeen = $false
+    foreach ($hook in $desiredHooks) {
+        if ($existingById.ContainsKey([string]$hook.id)) {
+            if ($missingSeen) {
+                throw "受管 event 缺失非尾部 identity，拒绝在已存在 identity 后补插：event=$Event"
+            }
+            $existingGroup = $existingById[[string]$hook.id]
+            $existingEntry = @($existingGroup.hooks)[0]
+            if ($existingEntry.PSObject.Properties.Name -contains 'timeout') {
+                $existingEntry.timeout = [int]$hook.timeoutSeconds
+            } else {
+                $existingEntry | Add-Member -NotePropertyName timeout -NotePropertyValue ([int]$hook.timeoutSeconds)
+            }
+            $orderedExisting.Add($existingGroup)
+        } else {
+            $missingSeen = $true
+            $missing.Add((New-CodexHookCanonicalRegistryGroup -Hook $hook))
+        }
+    }
+    if ($orderedExisting.Count -ne $managedSlotIndexes.Count) {
+        throw "registry event 合并内部计数不一致：event=$Event"
+    }
+    for ($slot = 0; $slot -lt $managedSlotIndexes.Count; $slot++) {
+        $baseGroups[$managedSlotIndexes[$slot]] = $orderedExisting[$slot]
+    }
+    foreach ($missingGroup in $missing) { $baseGroups.Add($missingGroup) }
+    return [object[]]$baseGroups.ToArray()
+}
+
+function Merge-CodexHookRegistry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][object]$LiveRegistry,
+        [Parameter(Mandatory)][ValidateSet('registration-repair', 'full')][string]$Mode
+    )
+
+    [void](Assert-CodexHookManifest -Manifest $Manifest)
+    $registry = Copy-CodexHookJsonValue -Value $LiveRegistry
+    $ownership = Get-CodexHookRegistryOwnershipMap -Manifest $Manifest -Registry $registry
+
+    $eventsToMerge = if ($Mode -ceq 'registration-repair') {
+        @('SessionStart')
+    } else {
+        @($Manifest.hooks | ForEach-Object { [string]$_.event } | Select-Object -Unique)
+    }
+    foreach ($eventName in $eventsToMerge) {
+        $eventProperty = $registry.hooks.PSObject.Properties[$eventName]
+        [object[]]$groups = @()
+        if ($null -ne $eventProperty) { $groups = [object[]]@($eventProperty.Value) }
+        $analysisProperty = $ownership.groupsByEvent.PSObject.Properties[$eventName]
+        [object[]]$analyses = @()
+        if ($null -ne $analysisProperty) { $analyses = [object[]]@($analysisProperty.Value) }
+        $mergedGroups = Merge-CodexHookRegistryEventGroups `
+            -Manifest $Manifest `
+            -Event $eventName `
+            -Groups $groups `
+            -Analyses $analyses `
+            -RemoveRetired ($Mode -ceq 'full')
+        if ($null -eq $eventProperty) {
+            $registry.hooks | Add-Member -NotePropertyName $eventName -NotePropertyValue $mergedGroups
+        } else {
+            $registry.hooks.$eventName = $mergedGroups
+        }
+    }
+
+    return $registry
+}
+
 function Get-CodexHookWrapperReferenceFacts {
     param(
         [Parameter(Mandatory)][string]$WrapperText,
@@ -1561,5 +1826,707 @@ function New-CodexHookInventoryDocument {
             retiredButRegisteredCount = @($entries | Where-Object registrationState -ceq 'retired-but-registered').Count
             trustObservationCount = $sanitizedTrust.Count
         }
+    }
+}
+
+function Get-CodexHookBytesSha256 {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+}
+
+function ConvertTo-CodexHookRegistryBytes {
+    param([Parameter(Mandatory)][object]$Registry)
+
+    $text = $Registry | ConvertTo-Json -Depth 100 -ErrorAction Stop
+    return [Text.UTF8Encoding]::new($false).GetBytes($text)
+}
+
+function Get-CodexHookFixtureMappingIdentity {
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][string]$SourceRoot,
+        [Parameter(Mandatory)][string]$CodexHome
+    )
+
+    $source = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\').ToLowerInvariant()
+    $normalizedHome = [IO.Path]::GetFullPath($CodexHome).TrimEnd('\').ToLowerInvariant()
+    $managed = [IO.Path]::GetFullPath([string]$Manifest.managedRoot).TrimEnd('\').ToLowerInvariant()
+    $productionHome = [IO.Path]::GetFullPath([string]$Manifest.codexHome).TrimEnd('\').ToLowerInvariant()
+    return Get-CodexHookTextSha256 -Text "codex-hook-fixture-v1`0$source`0$normalizedHome`0$managed`0$productionHome"
+}
+
+function Assert-CodexHookFixturePath {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $fullPath = Assert-CodexHookDPath -Value $Path -Name $Name
+    $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+    if (-not (Test-CodexHookPathWithin -Path $fullPath -ParentPath $fixtureRoot)) {
+        throw "$Name 必须位于固定 deployment fixture 根：$fullPath"
+    }
+    if ($fullPath.Substring(2).Contains(':')) {
+        throw "$Name 不得包含 NTFS alternate data stream。"
+    }
+    Assert-CodexHookNoReparseAncestor -Path $fullPath -Name $Name
+    return $fullPath
+}
+
+function Assert-CodexHookNoReparseAncestor {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $fullPath = Assert-CodexHookDPath -Value $Path -Name $Name
+    $root = [IO.Path]::GetPathRoot($fullPath)
+    $currentPath = $root
+    $rootItem = Get-Item -LiteralPath $root -Force -ErrorAction Stop
+    if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "$Name 祖先包含 reparse point。"
+    }
+    foreach ($segment in @($fullPath.Substring($root.Length) -split '[\\/]' | Where-Object { $_ -ne '' })) {
+        $currentPath = Join-Path $currentPath $segment
+        if (-not (Test-Path -LiteralPath $currentPath -ErrorAction Stop)) { break }
+        $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "$Name 祖先或 final path 包含 reparse point。"
+        }
+    }
+}
+
+function New-CodexHookDeploymentPlanDocument {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][object]$Inventory,
+        [Parameter(Mandatory)][object]$DesiredRegistry,
+        [Parameter(Mandatory)][ValidateSet('registration-repair', 'full')][string]$Mode
+    )
+
+    [void](Assert-CodexHookManifest -Manifest $Manifest)
+    $requiredInventoryProperties = @(
+        'targetProfile', 'mappingIdentity', 'manifestPath', 'manifestSha256',
+        'sourceRoot', 'codexHome', 'hooksRoot', 'registryPath', 'registryBeforeSha256',
+        'sourceFiles', 'liveFiles', 'environmentFacts', 'blockers'
+    )
+    Assert-CodexHookExactProperties -Value $Inventory -Names $requiredInventoryProperties -Scope 'deployment inventory'
+    if ($Inventory.targetProfile -cne 'codex-hook-fixture-v1') {
+        throw 'deployment inventory targetProfile 非法。'
+    }
+
+    $mappingIdentity = Get-CodexHookFixtureMappingIdentity `
+        -Manifest $Manifest `
+        -SourceRoot ([string]$Inventory.sourceRoot) `
+        -CodexHome ([string]$Inventory.codexHome)
+    if ($mappingIdentity -cne [string]$Inventory.mappingIdentity) {
+        throw 'deployment inventory mapping identity 不一致。'
+    }
+
+    $sourceByRelative = @{}
+    foreach ($fact in @($Inventory.sourceFiles)) { $sourceByRelative[[string]$fact.relativePath] = $fact }
+    $liveByRelative = @{}
+    foreach ($fact in @($Inventory.liveFiles)) { $liveByRelative[[string]$fact.liveRelativePath] = $fact }
+    $blockerCodes = [Collections.Generic.List[string]]::new()
+    foreach ($blocker in @($Inventory.blockers)) {
+        $code = if ($blocker -is [string]) { [string]$blocker } elseif ($blocker.PSObject.Properties.Name -contains 'code') { [string]$blocker.code } else { 'invalid-blocker' }
+        if (-not [string]::IsNullOrWhiteSpace($code)) { $blockerCodes.Add($code) }
+    }
+
+    $actions = [Collections.Generic.List[object]]::new()
+    $postChecks = [Collections.Generic.List[object]]::new()
+    $restoreOrder = 0
+    if ($Mode -ceq 'full') {
+        $publishFiles = @($Manifest.files | Where-Object { $_.lifecycle -cne 'retired' })
+        foreach ($phase in @('implementation', 'wrapper')) {
+            foreach ($file in $publishFiles) {
+                $isWrapper = [IO.Path]::GetExtension([string]$file.liveRelativePath) -ieq '.cmd'
+                if (($phase -ceq 'wrapper') -ne $isWrapper) { continue }
+                $sourceFact = $sourceByRelative[[string]$file.relativePath]
+                $liveFact = $liveByRelative[[string]$file.liveRelativePath]
+                if ($null -eq $sourceFact -or -not $sourceFact.exists -or $sourceFact.probeState -cne 'regular-file' -or $sourceFact.sha256 -cne $file.sha256) {
+                    $blockerCodes.Add('source-fact-mismatch')
+                    continue
+                }
+                if ($null -eq $liveFact -or $liveFact.probeState -cnotin @('regular-file', 'missing')) {
+                    $blockerCodes.Add('live-target-unsafe')
+                    continue
+                }
+                $restoreOrder++
+                $actionId = "file:$($file.relativePath.Replace('\','/'))"
+                $action = [pscustomobject][ordered]@{
+                    actionId = $actionId
+                    phase = $phase
+                    kind = 'file'
+                    sourceRef = [string]$file.relativePath
+                    sourceSha256 = [string]$sourceFact.sha256
+                    logicalTarget = [string]$file.liveRelativePath
+                    targetPath = [string]$liveFact.path
+                    beforeExists = [bool]$liveFact.exists
+                    beforeSha256 = if ($liveFact.exists) { [string]$liveFact.sha256 } else { $null }
+                    afterSha256 = [string]$file.sha256
+                    restoreOrder = $restoreOrder
+                }
+                $actions.Add($action)
+                $postChecks.Add([pscustomobject][ordered]@{ actionId = $actionId; kind = 'sha256'; expectedSha256 = [string]$file.sha256 })
+            }
+        }
+    }
+
+    $environmentActions = [Collections.Generic.List[object]]::new()
+    if ($Mode -ceq 'full') {
+        foreach ($environment in @($Manifest.environment)) {
+            $fact = @($Inventory.environmentFacts | Where-Object { $_.name -ceq $environment.name -and $_.scope -ceq $environment.scope })
+            if ($fact.Count -ne 1) {
+                $blockerCodes.Add('environment-fact-missing')
+                continue
+            }
+            $restoreOrder++
+            $afterHash = Get-CodexHookTextSha256 -Text "present`0$($environment.desired)"
+            $environmentActions.Add([pscustomobject][ordered]@{
+                actionId = "environment:$($environment.scope):$($environment.name)"
+                phase = 'environment'
+                kind = 'environment'
+                name = [string]$environment.name
+                scope = [string]$environment.scope
+                after = [string]$environment.desired
+                beforePresent = [bool]$fact[0].present
+                beforeMatchesTarget = [bool]$fact[0].matchesTarget
+                beforeValueSha256 = [string]$fact[0].valueSha256
+                afterValueSha256 = $afterHash
+                restoreOrder = $restoreOrder
+            })
+        }
+    }
+
+    $desiredRegistryBytes = ConvertTo-CodexHookRegistryBytes -Registry $DesiredRegistry
+    $registryAfterSha256 = Get-CodexHookBytesSha256 -Bytes $desiredRegistryBytes
+    $restoreOrder++
+    $registryAction = [pscustomobject][ordered]@{
+        actionId = 'registry:hooks.json'
+        phase = 'registry'
+        kind = 'registry'
+        sourceRef = $null
+        sourceSha256 = $null
+        logicalTarget = 'hooks.json'
+        targetPath = [string]$Inventory.registryPath
+        beforeExists = $true
+        beforeSha256 = [string]$Inventory.registryBeforeSha256
+        afterSha256 = $registryAfterSha256
+        restoreOrder = $restoreOrder
+    }
+    $actions.Add($registryAction)
+    $postChecks.Add([pscustomobject][ordered]@{ actionId = $registryAction.actionId; kind = 'sha256'; expectedSha256 = $registryAfterSha256 })
+
+    $distinctBlockers = @($blockerCodes | Select-Object -Unique)
+    return [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-hook-deployment-plan'
+        schemaVersion = 1
+        generationId = [guid]::NewGuid().ToString()
+        generatedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+        manifestSha256 = [string]$Inventory.manifestSha256
+        mode = $Mode
+        applyEligible = $distinctBlockers.Count -eq 0
+        sourceFacts = [pscustomobject][ordered]@{
+            targetProfile = 'codex-hook-fixture-v1'
+            mappingIdentity = $mappingIdentity
+            manifestPath = [string]$Inventory.manifestPath
+            manifestSha256 = [string]$Inventory.manifestSha256
+            sourceRoot = [string]$Inventory.sourceRoot
+            files = [object[]]@($Inventory.sourceFiles)
+            blockerReasonCodes = [string[]]$distinctBlockers
+        }
+        liveFacts = [pscustomobject][ordered]@{
+            targetProfile = 'codex-hook-fixture-v1'
+            mappingIdentity = $mappingIdentity
+            codexHome = [string]$Inventory.codexHome
+            hooksRoot = [string]$Inventory.hooksRoot
+            registryPath = [string]$Inventory.registryPath
+            files = [object[]]@($Inventory.liveFiles)
+            blockerReasonCodes = [string[]]$distinctBlockers
+        }
+        registryBeforeSha256 = [string]$Inventory.registryBeforeSha256
+        registryAfterSha256 = $registryAfterSha256
+        actions = [object[]]$actions.ToArray()
+        environmentActions = [object[]]$environmentActions.ToArray()
+        postChecks = [object[]]$postChecks.ToArray()
+        rollbackRequired = ($actions.Count + $environmentActions.Count) -gt 0
+    }
+}
+
+function Assert-CodexHookDeploymentPlanFresh {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [datetimeoffset]$Now = [datetimeoffset]::UtcNow
+    )
+
+    $topNames = @(
+        'artifactType', 'schemaVersion', 'generationId', 'generatedAtUtc', 'manifestSha256',
+        'mode', 'applyEligible', 'sourceFacts', 'liveFacts', 'registryBeforeSha256',
+        'registryAfterSha256', 'actions', 'environmentActions', 'postChecks', 'rollbackRequired'
+    )
+    Assert-CodexHookExactProperties -Value $Plan -Names $topNames -Scope 'deployment plan'
+    Assert-CodexHookString -Value $Plan.artifactType -Name 'deployment plan artifactType'
+    Assert-CodexHookInteger -Value $Plan.schemaVersion -Name 'deployment plan schemaVersion'
+    Assert-CodexHookString -Value $Plan.generationId -Name 'deployment plan generationId'
+    Assert-CodexHookString -Value $Plan.generatedAtUtc -Name 'deployment plan generatedAtUtc'
+    Assert-CodexHookString -Value $Plan.manifestSha256 -Name 'deployment plan manifestSha256'
+    Assert-CodexHookString -Value $Plan.mode -Name 'deployment plan mode'
+    if ($Plan.artifactType -cne 'env-governance.codex-hook-deployment-plan' -or [int]$Plan.schemaVersion -ne 1) {
+        throw 'deployment plan artifact/schema 非法。'
+    }
+    $generationGuid = [guid]::Empty
+    if (-not [guid]::TryParse([string]$Plan.generationId, [ref]$generationGuid) -or $generationGuid -eq [guid]::Empty) {
+        throw 'deployment plan generationId 非法。'
+    }
+    $generated = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse([string]$Plan.generatedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$generated)) {
+        throw 'deployment plan generatedAtUtc 非法。'
+    }
+    if ($generated -gt $Now.AddMinutes(5) -or $generated -lt $Now.AddHours(-1)) {
+        throw 'deployment plan 已过期或来自未来。'
+    }
+    if ($Plan.mode -cnotin @('registration-repair', 'full')) { throw 'deployment plan mode 非法。' }
+    if ($Plan.applyEligible -isnot [bool] -or -not $Plan.applyEligible) { throw 'deployment plan 不可 apply。' }
+    if ($Plan.rollbackRequired -isnot [bool] -or -not $Plan.rollbackRequired) { throw 'deployment plan 必须声明 rollbackRequired。' }
+    foreach ($hashName in @('manifestSha256', 'registryBeforeSha256', 'registryAfterSha256')) {
+        if ([string]$Plan.$hashName -cnotmatch '^[0-9a-f]{64}$') { throw "deployment plan $hashName 非法。" }
+    }
+    if ($Plan.sourceFacts.targetProfile -cne 'codex-hook-fixture-v1' -or $Plan.liveFacts.targetProfile -cne 'codex-hook-fixture-v1') {
+        throw 'deployment plan targetProfile 非法。'
+    }
+    Assert-CodexHookExactProperties -Value $Plan.sourceFacts -Names @(
+        'targetProfile', 'mappingIdentity', 'manifestPath', 'manifestSha256', 'sourceRoot', 'files', 'blockerReasonCodes'
+    ) -Scope 'deployment plan sourceFacts'
+    Assert-CodexHookExactProperties -Value $Plan.liveFacts -Names @(
+        'targetProfile', 'mappingIdentity', 'codexHome', 'hooksRoot', 'registryPath', 'files', 'blockerReasonCodes'
+    ) -Scope 'deployment plan liveFacts'
+    foreach ($stringProperty in @('targetProfile', 'mappingIdentity', 'manifestPath', 'manifestSha256', 'sourceRoot')) {
+        Assert-CodexHookString -Value $Plan.sourceFacts.$stringProperty -Name "plan sourceFacts.$stringProperty"
+    }
+    foreach ($stringProperty in @('targetProfile', 'mappingIdentity', 'codexHome', 'hooksRoot', 'registryPath')) {
+        Assert-CodexHookString -Value $Plan.liveFacts.$stringProperty -Name "plan liveFacts.$stringProperty"
+    }
+    if ($Plan.sourceFacts.mappingIdentity -cne $Plan.liveFacts.mappingIdentity) { throw 'deployment plan mapping identity 不一致。' }
+    if ([string]$Plan.sourceFacts.mappingIdentity -cnotmatch '^[0-9a-f]{64}$') { throw 'deployment plan mappingIdentity 非法。' }
+    if ($Plan.sourceFacts.manifestSha256 -cne $Plan.manifestSha256) { throw 'deployment plan manifest hash 不一致。' }
+    [void](Assert-CodexHookDPath -Value ([string]$Plan.sourceFacts.manifestPath) -Name 'plan manifestPath')
+    [void](Assert-CodexHookFixturePath -Path ([string]$Plan.sourceFacts.sourceRoot) -Name 'plan sourceRoot')
+    [void](Assert-CodexHookFixturePath -Path ([string]$Plan.liveFacts.codexHome) -Name 'plan codexHome')
+    [void](Assert-CodexHookFixturePath -Path ([string]$Plan.liveFacts.hooksRoot) -Name 'plan hooksRoot')
+    [void](Assert-CodexHookFixturePath -Path ([string]$Plan.liveFacts.registryPath) -Name 'plan registryPath')
+    if ([IO.Path]::GetFullPath([string]$Plan.liveFacts.registryPath) -ine [IO.Path]::GetFullPath((Join-Path ([string]$Plan.liveFacts.codexHome) 'hooks.json'))) {
+        throw 'deployment plan registryPath 与 codexHome 映射不一致。'
+    }
+    if ([IO.Path]::GetFullPath([string]$Plan.liveFacts.hooksRoot) -ine [IO.Path]::GetFullPath((Join-Path ([string]$Plan.liveFacts.codexHome) 'hooks'))) {
+        throw 'deployment plan hooksRoot 与 codexHome 映射不一致。'
+    }
+
+    Assert-CodexHookArray -Value ([object]$Plan.sourceFacts.files) -Name 'plan sourceFacts.files'
+    Assert-CodexHookArray -Value ([object]$Plan.liveFacts.files) -Name 'plan liveFacts.files'
+    Assert-CodexHookArray -Value ([object]$Plan.sourceFacts.blockerReasonCodes) -Name 'plan sourceFacts.blockerReasonCodes'
+    Assert-CodexHookArray -Value ([object]$Plan.liveFacts.blockerReasonCodes) -Name 'plan liveFacts.blockerReasonCodes'
+    $allowedBlockers = @('registry-ownership-ambiguous', 'source-fact-mismatch', 'live-target-unsafe', 'environment-fact-missing')
+    $sourceBlockers = @($Plan.sourceFacts.blockerReasonCodes)
+    $liveBlockers = @($Plan.liveFacts.blockerReasonCodes)
+    if (-not (Test-CodexHookExactStringSequence -Actual $sourceBlockers -Expected $liveBlockers)) { throw 'plan blocker reason codes 不一致。' }
+    foreach ($code in $sourceBlockers) {
+        if ($code -isnot [string] -or $allowedBlockers -cnotcontains [string]$code) { throw 'plan blocker reason code 非法。' }
+    }
+    if ($sourceBlockers.Count -ne 0) { throw 'applyEligible plan 不得包含 blocker。' }
+
+    $sourcePathSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($fact in @($Plan.sourceFacts.files)) {
+        Assert-CodexHookExactProperties -Value $fact -Names @('relativePath', 'path', 'exists', 'probeState', 'sha256') -Scope 'plan source file fact'
+        Assert-CodexHookRelativePath -Value $fact.relativePath -Name 'plan source file relativePath'
+        $factPath = Assert-CodexHookFixturePath -Path ([string]$fact.path) -Name 'plan source file path'
+        if (-not (Test-CodexHookPathWithin -Path $factPath -ParentPath ([string]$Plan.sourceFacts.sourceRoot)) -or -not $sourcePathSet.Add([string]$fact.relativePath)) {
+            throw 'plan source file mapping 重复或越界。'
+        }
+        if ($fact.exists -isnot [bool] -or $fact.probeState -cnotin @('regular-file', 'missing')) { throw 'plan source file state 非法。' }
+        if ($fact.exists -and [string]$fact.sha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'plan source file hash 非法。' }
+        if (-not $fact.exists -and $null -ne $fact.sha256) { throw 'missing source file 不得有 hash。' }
+    }
+    $livePathSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($fact in @($Plan.liveFacts.files)) {
+        Assert-CodexHookExactProperties -Value $fact -Names @('liveRelativePath', 'path', 'exists', 'probeState', 'sha256') -Scope 'plan live file fact'
+        Assert-CodexHookRelativePath -Value $fact.liveRelativePath -Name 'plan live file relativePath'
+        $factPath = Assert-CodexHookFixturePath -Path ([string]$fact.path) -Name 'plan live file path'
+        if (-not (Test-CodexHookPathWithin -Path $factPath -ParentPath ([string]$Plan.liveFacts.hooksRoot)) -or -not $livePathSet.Add([string]$fact.liveRelativePath)) {
+            throw 'plan live file mapping 重复或越界。'
+        }
+        if ($fact.exists -isnot [bool] -or $fact.probeState -cnotin @('regular-file', 'missing')) { throw 'plan live file state 非法。' }
+        if ($fact.exists -and [string]$fact.sha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'plan live file hash 非法。' }
+        if (-not $fact.exists -and $null -ne $fact.sha256) { throw 'missing live file 不得有 hash。' }
+    }
+
+    Assert-CodexHookArray -Value ([object]$Plan.actions) -Name 'plan actions'
+    Assert-CodexHookArray -Value ([object]$Plan.environmentActions) -Name 'plan environmentActions'
+    Assert-CodexHookArray -Value ([object]$Plan.postChecks) -Name 'plan postChecks'
+    $actionIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $restoreOrders = [Collections.Generic.HashSet[int]]::new()
+    foreach ($action in @($Plan.actions)) {
+        Assert-CodexHookExactProperties -Value $action -Names @(
+            'actionId', 'phase', 'kind', 'sourceRef', 'sourceSha256', 'logicalTarget', 'targetPath',
+            'beforeExists', 'beforeSha256', 'afterSha256', 'restoreOrder'
+        ) -Scope 'plan action'
+        Assert-CodexHookString -Value $action.actionId -Name 'plan actionId'
+        Assert-CodexHookString -Value $action.phase -Name 'plan action phase'
+        Assert-CodexHookString -Value $action.kind -Name 'plan action kind'
+        Assert-CodexHookString -Value $action.logicalTarget -Name 'plan action logicalTarget'
+        Assert-CodexHookString -Value $action.targetPath -Name 'plan action targetPath'
+        if (-not $actionIds.Add([string]$action.actionId)) { throw 'plan actionId 重复。' }
+        if ($action.kind -cnotin @('file', 'registry') -or $action.phase -cnotin @('implementation', 'wrapper', 'registry')) { throw 'plan action kind/phase 非法。' }
+        if (($action.kind -ceq 'registry') -ne ($action.phase -ceq 'registry')) { throw 'plan registry action kind/phase 不一致。' }
+        if ($action.beforeExists -isnot [bool]) { throw 'plan action beforeExists 必须是 boolean。' }
+        Assert-CodexHookInteger -Value $action.restoreOrder -Name 'plan action restoreOrder'
+        if ([int]$action.restoreOrder -le 0 -or -not $restoreOrders.Add([int]$action.restoreOrder)) { throw 'plan restoreOrder 非法或重复。' }
+        if ([string]$action.afterSha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'plan action after hash 非法。' }
+        if ($action.beforeExists -and [string]$action.beforeSha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'plan action before hash 非法。' }
+        if (-not $action.beforeExists -and $null -ne $action.beforeSha256) { throw 'missing action target 不得有 before hash。' }
+        $targetPath = Assert-CodexHookFixturePath -Path ([string]$action.targetPath) -Name 'plan action targetPath'
+        if ($action.kind -ceq 'file') {
+            Assert-CodexHookRelativePath -Value $action.sourceRef -Name 'plan action sourceRef'
+            Assert-CodexHookRelativePath -Value $action.logicalTarget -Name 'plan action logicalTarget'
+            if ([string]$action.sourceSha256 -cnotmatch '^[0-9a-f]{64}$' -or -not (Test-CodexHookPathWithin -Path $targetPath -ParentPath ([string]$Plan.liveFacts.hooksRoot))) {
+                throw 'plan file action source/hash/target 非法。'
+            }
+        } else {
+            if ($null -ne $action.sourceRef -or $null -ne $action.sourceSha256 -or $action.logicalTarget -cne 'hooks.json' -or $targetPath -ine [string]$Plan.liveFacts.registryPath) {
+                throw 'plan registry action contract 非法。'
+            }
+        }
+    }
+    foreach ($action in @($Plan.environmentActions)) {
+        Assert-CodexHookExactProperties -Value $action -Names @(
+            'actionId', 'phase', 'kind', 'name', 'scope', 'after', 'beforePresent', 'beforeMatchesTarget',
+            'beforeValueSha256', 'afterValueSha256', 'restoreOrder'
+        ) -Scope 'plan environment action'
+        foreach ($stringProperty in @('actionId', 'phase', 'kind', 'name', 'scope', 'after', 'beforeValueSha256', 'afterValueSha256')) {
+            Assert-CodexHookString -Value $action.$stringProperty -Name "plan environment action $stringProperty"
+        }
+        if (
+            $action.phase -cne 'environment' -or $action.kind -cne 'environment' -or
+            $action.name -cne 'SERENA_HOME' -or $action.scope -cne 'User' -or $action.after -cne 'D:\Codex\.serena'
+        ) { throw 'plan environment action 未授权。' }
+        if (-not $actionIds.Add([string]$action.actionId)) { throw 'plan environment actionId 重复。' }
+        Assert-CodexHookInteger -Value $action.restoreOrder -Name 'plan environment restoreOrder'
+        if ([int]$action.restoreOrder -le 0 -or -not $restoreOrders.Add([int]$action.restoreOrder)) { throw 'plan environment restoreOrder 重复。' }
+        if ($action.beforePresent -isnot [bool] -or $action.beforeMatchesTarget -isnot [bool]) { throw 'plan environment before flags 非法。' }
+        if ([string]$action.beforeValueSha256 -cnotmatch '^[0-9a-f]{64}$' -or [string]$action.afterValueSha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'plan environment freshness hash 非法。' }
+    }
+    $postCheckIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($postCheck in @($Plan.postChecks)) {
+        Assert-CodexHookExactProperties -Value $postCheck -Names @('actionId', 'kind', 'expectedSha256') -Scope 'plan postCheck'
+        Assert-CodexHookString -Value $postCheck.actionId -Name 'plan postCheck actionId'
+        Assert-CodexHookString -Value $postCheck.kind -Name 'plan postCheck kind'
+        Assert-CodexHookString -Value $postCheck.expectedSha256 -Name 'plan postCheck expectedSha256'
+        if ($postCheck.kind -cne 'sha256' -or -not $actionIds.Contains([string]$postCheck.actionId) -or -not $postCheckIds.Add([string]$postCheck.actionId)) { throw 'plan postCheck 非 allowlisted action。' }
+        if ([string]$postCheck.expectedSha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'plan postCheck hash 非法。' }
+    }
+    return $true
+}
+
+function Get-CodexHookEnvironmentValueFact {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Scope,
+        [Parameter(Mandatory)][scriptblock]$ReadValue,
+        [Parameter(Mandatory)][string]$Desired
+    )
+
+    $readResult = & $ReadValue $Name $Scope
+    if ($null -ne $readResult -and $readResult.PSObject.Properties.Name -contains 'present' -and $readResult.PSObject.Properties.Name -contains 'value') {
+        $present = [bool]$readResult.present
+        $value = if ($present) { [string]$readResult.value } else { $null }
+    } else {
+        $present = $null -ne $readResult
+        $value = if ($present) { [string]$readResult } else { $null }
+    }
+    return [pscustomobject][ordered]@{
+        name = $Name
+        scope = $Scope
+        present = $present
+        matchesTarget = $present -and [string]::Equals($value, $Desired, [StringComparison]::Ordinal)
+        valueSha256 = Get-CodexHookTextSha256 -Text ($(if ($present) { "present`0$value" } else { 'absent' }))
+        value = $value
+    }
+}
+
+function Invoke-CodexHookEnvironmentAction {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Action,
+        [Parameter(Mandatory)][scriptblock]$ReadValue,
+        [Parameter(Mandatory)][scriptblock]$WriteValue,
+        [switch]$Restore,
+        [AllowNull()][object]$RestoreValue
+    )
+
+    if ($Action.name -cne 'SERENA_HOME' -or $Action.scope -cne 'User' -or $Action.after -cne 'D:\Codex\.serena') {
+        throw '拒绝未授权的环境动作。'
+    }
+    if ($Restore) {
+        if ($null -eq $RestoreValue -or $RestoreValue.PSObject.Properties.Name -notcontains 'present' -or $RestoreValue.PSObject.Properties.Name -notcontains 'value') {
+            throw '环境 restore value 形状非法。'
+        }
+        & $WriteValue $Action.name $Action.scope $(if ($RestoreValue.present) { [string]$RestoreValue.value } else { $null })
+    } else {
+        & $WriteValue $Action.name $Action.scope $Action.after
+    }
+}
+
+function Get-CodexHookFixtureFileSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Name
+    $snapshot = Get-CodexHookHandleBoundFileSnapshot -Path $fullPath -Name $Name -AllowedExactPaths @($fullPath)
+    return [pscustomobject][ordered]@{
+        path = $fullPath
+        exists = $snapshot.probe.exists -eq $true
+        state = [string]$snapshot.probe.state
+        sha256 = if ($snapshot.probe.safeToRead) { Get-CodexHookBytesSha256 -Bytes ([byte[]]$snapshot.bytes) } else { $null }
+        bytes = if ($snapshot.probe.safeToRead) { [byte[]]$snapshot.bytes } else { $null }
+    }
+}
+
+function Assert-CodexHookSnapshotExpectedState {
+    param(
+        [Parameter(Mandatory)][object]$Snapshot,
+        [Parameter(Mandatory)][bool]$ExpectedExists,
+        [AllowNull()][string]$ExpectedSha256,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    if ($ExpectedExists) {
+        if (-not $Snapshot.exists -or $Snapshot.state -cne 'regular-file' -or $Snapshot.sha256 -cne $ExpectedSha256) {
+            throw "$Scope 临写前状态漂移。"
+        }
+    } elseif ($Snapshot.exists -or $Snapshot.state -cne 'missing') {
+        throw "$Scope 临写前 missing 状态漂移。"
+    }
+}
+
+function Set-CodexHookAtomicFileBytes {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][byte[]]$Bytes,
+        [Parameter(Mandatory)][bool]$ExpectedExists,
+        [AllowNull()][string]$ExpectedSha256,
+        [Parameter(Mandatory)][string]$AfterSha256,
+        [string]$Scope = 'atomic publish',
+        [scriptblock]$BeforeMove
+    )
+
+    $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Scope
+    $before = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope prewrite"
+    Assert-CodexHookSnapshotExpectedState -Snapshot $before -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope $Scope
+    if ((Get-CodexHookBytesSha256 -Bytes $Bytes) -cne $AfterSha256) {
+        throw "$Scope 待发布 bytes 与 after SHA-256 不一致。"
+    }
+
+    $parent = Split-Path -Parent $fullPath
+    $parentItem = Get-Item -LiteralPath $parent -Force -ErrorAction Stop
+    if (-not $parentItem.PSIsContainer -or ($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "$Scope target parent 非安全普通目录。"
+    }
+    $tempPath = Join-Path $parent ".codex-hook-$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $stream = [IO.FileStream]::new($tempPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $stream.Write($Bytes, 0, $Bytes.Length)
+            $stream.Flush($true)
+        } finally {
+            $stream.Dispose()
+        }
+        if ($null -ne $BeforeMove) { & $BeforeMove $fullPath }
+        $preMove = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope premove"
+        Assert-CodexHookSnapshotExpectedState -Snapshot $preMove -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope "$Scope premove"
+        [void](Assert-CodexHookFixturePath -Path $parent -Name "$Scope parent premove")
+        [IO.File]::Move($tempPath, $fullPath, $ExpectedExists)
+    } finally {
+        if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
+    }
+
+    $after = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope postwrite"
+    Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $true -ExpectedSha256 $AfterSha256 -Scope "$Scope postcheck"
+}
+
+function Remove-CodexHookFixtureFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExpectedSha256,
+        [string]$Scope = 'fixture delete'
+    )
+
+    $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Scope
+    $current = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope predelete"
+    Assert-CodexHookSnapshotExpectedState -Snapshot $current -ExpectedExists $true -ExpectedSha256 $ExpectedSha256 -Scope $Scope
+    [IO.File]::Delete($fullPath)
+    $after = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope postdelete"
+    Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $false -ExpectedSha256 $null -Scope "$Scope postcheck"
+}
+
+function Set-CodexHookEvidenceJson {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][object]$Document
+    )
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($Document | ConvertTo-Json -Depth 100))
+    $existing = Get-CodexHookFixtureFileSnapshot -Path $Path -Name 'evidence json'
+    Set-CodexHookAtomicFileBytes `
+        -Path $Path `
+        -Bytes $bytes `
+        -ExpectedExists $existing.exists `
+        -ExpectedSha256 $existing.sha256 `
+        -AfterSha256 (Get-CodexHookBytesSha256 -Bytes $bytes) `
+        -Scope 'evidence json'
+}
+
+function Restore-CodexHookDeploymentCore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$EvidenceDirectory,
+        [Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,
+        [Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,
+        [ValidateSet('restored', 'rolled-back')][string]$FinalStatus = 'restored'
+    )
+
+    $evidencePath = Assert-CodexHookFixturePath -Path $EvidenceDirectory -Name 'EvidenceDirectory'
+    $restoreManifestPath = Join-Path $evidencePath 'restore-manifest.json'
+    $restoreSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $restoreManifestPath -Name 'restore manifest' -AllowedExactPaths @($restoreManifestPath)
+    Assert-CodexHookStrictJsonText -JsonText $restoreSnapshot.text
+    $restore = $restoreSnapshot.text | ConvertFrom-Json -Depth 128 -ErrorAction Stop
+    Assert-CodexHookExactProperties -Value $restore -Names @(
+        'artifactType', 'schemaVersion', 'generationId', 'planSha256', 'mappingIdentity', 'actions'
+    ) -Scope 'restore manifest'
+    if ($restore.artifactType -cne 'env-governance.codex-hook-restore-manifest' -or [int]$restore.schemaVersion -ne 1) {
+        throw 'restore manifest artifact/schema 非法。'
+    }
+
+    $evidenceRoot = Split-Path -Parent $evidencePath
+    $claimPath = Join-Path (Join-Path $evidenceRoot '.claims') "$($restore.generationId).json"
+    $claimSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $claimPath -Name 'deployment claim' -AllowedExactPaths @($claimPath)
+    Assert-CodexHookStrictJsonText -JsonText $claimSnapshot.text
+    $claim = $claimSnapshot.text | ConvertFrom-Json -Depth 32 -ErrorAction Stop
+    Assert-CodexHookExactProperties -Value $claim -Names @(
+        'artifactType', 'schemaVersion', 'generationId', 'mappingIdentity', 'planSha256', 'evidenceDirectory', 'restoreManifestSha256'
+    ) -Scope 'deployment claim'
+    if (
+        $claim.artifactType -cne 'env-governance.codex-hook-deployment-claim' -or
+        [int]$claim.schemaVersion -ne 1 -or
+        $claim.generationId -cne $restore.generationId -or
+        $claim.mappingIdentity -cne $restore.mappingIdentity -or
+        $claim.planSha256 -cne $restore.planSha256 -or
+        [IO.Path]::GetFullPath([string]$claim.evidenceDirectory) -ine $evidencePath -or
+        $claim.restoreManifestSha256 -cne $restoreSnapshot.sha256
+    ) {
+        throw 'deployment claim 与 restore manifest 不一致。'
+    }
+
+    $preflight = [Collections.Generic.List[object]]::new()
+    foreach ($action in @($restore.actions)) {
+        Assert-CodexHookExactProperties -Value $action -Names @(
+            'actionId', 'kind', 'path', 'beforeExists', 'beforeSha256', 'backupRelativePath',
+            'backupSha256', 'deployedExists', 'deployedSha256', 'restoreOrder',
+            'environmentName', 'environmentScope', 'environmentAfter', 'environmentBeforeBackupRelativePath',
+            'environmentBeforeBackupSha256'
+        ) -Scope 'restore action'
+        if ($action.kind -ceq 'environment') {
+            if ($action.environmentName -cne 'SERENA_HOME' -or $action.environmentScope -cne 'User' -or $action.environmentAfter -cne 'D:\Codex\.serena') {
+                throw 'restore environment action 未授权。'
+            }
+            $backupPath = Join-Path $evidencePath ([string]$action.environmentBeforeBackupRelativePath)
+            if (-not (Test-CodexHookPathWithin -Path $backupPath -ParentPath (Join-Path $evidencePath 'backups'))) { throw 'environment backup 路径越界。' }
+            $backupSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $backupPath -Name 'environment backup' -AllowedExactPaths @($backupPath)
+            if ($backupSnapshot.sha256 -cne $action.environmentBeforeBackupSha256) { throw 'environment backup SHA-256 不一致。' }
+            Assert-CodexHookStrictJsonText -JsonText $backupSnapshot.text
+            $beforeValue = $backupSnapshot.text | ConvertFrom-Json -Depth 10 -ErrorAction Stop
+            Assert-CodexHookExactProperties -Value $beforeValue -Names @('present', 'value') -Scope 'environment backup value'
+            $current = Get-CodexHookEnvironmentValueFact -Name 'SERENA_HOME' -Scope 'User' -ReadValue $EnvironmentReadValue -Desired 'D:\Codex\.serena'
+            $beforeHash = Get-CodexHookTextSha256 -Text ($(if ($beforeValue.present) { "present`0$($beforeValue.value)" } else { 'absent' }))
+            $state = if ($current.valueSha256 -ceq $beforeHash) { 'already-before' } elseif ($current.valueSha256 -ceq $action.deployedSha256) { 'deployed' } else { 'drifted' }
+            if ($state -ceq 'drifted') { throw 'environment restore preflight 检测到漂移。' }
+            $preflight.Add([pscustomobject]@{ action = $action; state = $state; backup = $beforeValue })
+            continue
+        }
+
+        $targetPath = Assert-CodexHookFixturePath -Path ([string]$action.path) -Name 'restore target'
+        $backupBytes = $null
+        if ($action.beforeExists) {
+            $backupPath = Join-Path $evidencePath ([string]$action.backupRelativePath)
+            if (-not (Test-CodexHookPathWithin -Path $backupPath -ParentPath (Join-Path $evidencePath 'backups'))) { throw 'backup 路径越界。' }
+            $backup = Get-CodexHookFixtureFileSnapshot -Path $backupPath -Name 'restore backup'
+            if (-not $backup.exists -or $backup.sha256 -cne $action.backupSha256 -or $backup.sha256 -cne $action.beforeSha256) {
+                throw 'restore backup SHA-256 不一致。'
+            }
+            $backupBytes = [byte[]]$backup.bytes
+        } elseif ($null -ne $action.backupRelativePath -or $null -ne $action.backupSha256) {
+            throw 'missing-before action 不得声明 backup。'
+        }
+
+        $current = Get-CodexHookFixtureFileSnapshot -Path $targetPath -Name 'restore current target'
+        $isBefore = if ($action.beforeExists) { $current.exists -and $current.sha256 -ceq $action.beforeSha256 } else { -not $current.exists -and $current.state -ceq 'missing' }
+        $isDeployed = if ($action.deployedExists) { $current.exists -and $current.sha256 -ceq $action.deployedSha256 } else { -not $current.exists -and $current.state -ceq 'missing' }
+        $state = if ($isBefore) { 'already-before' } elseif ($isDeployed) { 'deployed' } else { 'drifted' }
+        if ($state -ceq 'drifted') { throw 'restore preflight 检测到 target 漂移。' }
+        $preflight.Add([pscustomobject]@{ action = $action; state = $state; backup = $backupBytes })
+    }
+
+    $changed = $false
+    foreach ($item in @($preflight | Sort-Object { -[int]$_.action.restoreOrder })) {
+        if ($item.state -ceq 'already-before') { continue }
+        $action = $item.action
+        if ($action.kind -ceq 'environment') {
+            Invoke-CodexHookEnvironmentAction `
+                -Action ([pscustomobject]@{ name = $action.environmentName; scope = $action.environmentScope; after = $action.environmentAfter }) `
+                -ReadValue $EnvironmentReadValue `
+                -WriteValue $EnvironmentWriteValue `
+                -Restore `
+                -RestoreValue $item.backup
+        } elseif ($action.beforeExists) {
+            Set-CodexHookAtomicFileBytes `
+                -Path ([string]$action.path) `
+                -Bytes ([byte[]]$item.backup) `
+                -ExpectedExists ([bool]$action.deployedExists) `
+                -ExpectedSha256 ([string]$action.deployedSha256) `
+                -AfterSha256 ([string]$action.beforeSha256) `
+                -Scope 'restore publish'
+        } else {
+            Remove-CodexHookFixtureFile -Path ([string]$action.path) -ExpectedSha256 ([string]$action.deployedSha256) -Scope 'restore remove'
+        }
+        $changed = $true
+    }
+
+    $statusPath = Join-Path $evidencePath 'status.json'
+    $completedActionIds = @()
+    if ([IO.File]::Exists($statusPath)) {
+        $statusSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $statusPath -Name 'deployment status' -AllowedExactPaths @($statusPath)
+        Assert-CodexHookStrictJsonText -JsonText $statusSnapshot.text
+        $oldStatus = $statusSnapshot.text | ConvertFrom-Json -Depth 32
+        if ($oldStatus.PSObject.Properties.Name -contains 'completedActionIds') { $completedActionIds = @($oldStatus.completedActionIds) }
+    }
+    Set-CodexHookEvidenceJson -Path $statusPath -Document ([pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-hook-deployment-status'
+        schemaVersion = 1
+        generationId = [string]$restore.generationId
+        status = $FinalStatus
+        completedActionIds = [string[]]$completedActionIds
+    })
+
+    return [pscustomobject][ordered]@{
+        restored = $true
+        idempotent = -not $changed
+        evidenceDirectory = $evidencePath
+        status = $FinalStatus
     }
 }

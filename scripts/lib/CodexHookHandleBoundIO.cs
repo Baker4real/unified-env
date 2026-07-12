@@ -45,7 +45,7 @@ namespace CodexHookGovernance
             uint filePathLength,
             uint flags);
 
-        public static HandleBoundFileSnapshot ReadAllBytes(string expectedPath)
+        public static SafeFileHandle OpenVerifiedReadHandle(string expectedPath)
         {
             if (expectedPath == null)
             {
@@ -57,9 +57,8 @@ namespace CodexHookGovernance
                 lexicalPath,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.Read | FileShare.Delete,
+                FileShare.Read,
                 FileOptions.SequentialScan);
-            SafeFileHandle handleToDispose = handle;
 
             try
             {
@@ -68,22 +67,24 @@ namespace CodexHookGovernance
                 {
                     throw new HandlePathMismatchException(lexicalPath, finalPath);
                 }
-
-                FileStream stream = new FileStream(handle, FileAccess.Read);
-                handleToDispose = null;
-                using (stream)
-                using (MemoryStream buffer = new MemoryStream())
-                {
-                    stream.CopyTo(buffer);
-                    return new HandleBoundFileSnapshot(finalPath, buffer.ToArray());
-                }
+                return handle;
             }
-            finally
+            catch
             {
-                if (handleToDispose != null)
-                {
-                    handleToDispose.Dispose();
-                }
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        public static HandleBoundFileSnapshot ReadAllBytes(string expectedPath)
+        {
+            string lexicalPath = Path.GetFullPath(expectedPath);
+            SafeFileHandle handle = OpenVerifiedReadHandle(lexicalPath);
+            using (FileStream stream = new FileStream(handle, FileAccess.Read))
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                stream.CopyTo(buffer);
+                return new HandleBoundFileSnapshot(lexicalPath, buffer.ToArray());
             }
         }
 
