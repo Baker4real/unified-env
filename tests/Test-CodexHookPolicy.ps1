@@ -264,7 +264,13 @@ $managedManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json
 $managedManifest = Read-CodexHookManifest -Path $managedManifestPath
 Assert-True (@($managedManifest.hooks).Count -eq 8) '受管 manifest 必须声明 8 个当前 hook'
 Assert-True (@($managedManifest.files).Count -eq 15) '受管 manifest 必须声明冻结 12 文件、state writer 与 2 个共享库文件'
-Assert-True (@($managedManifest.environment).Count -eq 0) 'Task 1 不得提前声明环境写入'
+Assert-True (
+    @($managedManifest.environment).Count -eq 1 -and
+    $managedManifest.environment[0].name -ceq 'SERENA_HOME' -and
+    $managedManifest.environment[0].scope -ceq 'User' -and
+    $managedManifest.environment[0].desired -ceq 'D:\Codex\.serena' -and
+    $managedManifest.environment[0].restartRequired -eq $true
+) 'manifest 必须只声明受管 User SERENA_HOME 环境动作'
 
 $normalizedDuplicate = Copy-TestDocument $managedManifest
 $duplicateFile = Copy-TestDocument $normalizedDuplicate.files[0]
@@ -340,8 +346,10 @@ Assert-True (
 
 $autoApprove = @($managedManifest.hooks | Where-Object id -ceq 'serena-auto-approve')
 Assert-True (
-    $autoApprove.Count -eq 1 -and $autoApprove[0].lifecycle -ceq 'retired'
-) 'Serena auto-approve 在 Task 1 必须声明为 retired'
+    $autoApprove.Count -eq 1 -and
+    $autoApprove[0].lifecycle -ceq 'retired' -and
+    $autoApprove[0].lifecycleReason -ceq 'Codex payload does not expose acceptEdits/auto permission modes'
+) 'Serena auto-approve 必须以精确原因声明为 retired'
 Assert-True (
     $autoApprove[0].fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -and
     @($autoApprove[0].fullAcceptanceCommand.arguments) -ccontains 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1' -and
@@ -362,6 +370,14 @@ Assert-True (
     $managedManifest.runtimes.serenaPython -ceq 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe' -and
     $managedManifest.runtimes.serenaHooks -ceq 'D:\Codex\tools\uv\bin\serena-hooks.exe'
 ) 'runtime manifest 必须使用 brief 固定路径'
+
+$runtimeFile=@($managedManifest.files|Where-Object relativePath -ceq 'hooks/lib/CodexHookRuntime.ps1')
+Assert-True ($runtimeFile.Count -eq 1 -and (@($runtimeFile[0].ownerHookIds) -join ',') -ceq 'provider-stability,serena-activate,serena-dashboard,github-cli') 'shared runtime owners 必须覆盖所有 PowerShell active hooks'
+$serenaActivate=@($managedManifest.hooks|Where-Object id -ceq 'serena-activate')[0]
+Assert-True (@($serenaActivate.writeResources|Where-Object{$_.kind -ceq 'path' -and $_.value -ceq 'D:\Codex\.codex\run-evidence\codex-hook-health\serena-activate.json'}).Count -eq 1) 'Serena activate manifest 必须声明独立 health 写资源'
+$github=@($managedManifest.hooks|Where-Object id -ceq 'github-cli')[0]
+Assert-True (($github.quickHealthCheck.arguments -join ',') -ceq '-CheckOnly,-Json') 'GitHub quick health 接口必须固定且不请求 auth'
+Assert-True (($github.fullAcceptanceCommand.arguments -join ',') -ceq '-Json,-CheckAuth,-Strict') 'GitHub full health 接口必须固定为 auth strict'
 
 [pscustomobject]@{
     ok = $true

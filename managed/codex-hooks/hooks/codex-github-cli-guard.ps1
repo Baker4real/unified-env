@@ -6,6 +6,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. 'D:\Codex\.codex\hooks\lib\CodexHookRuntime.ps1'
+$GuardStarted = [DateTime]::UtcNow
+$GuardStopwatch = [Diagnostics.Stopwatch]::StartNew()
+$script:GitHubHealthWritten = $false
 $GhSourcePath = "D:\Codex\tools\gh\bin\gh.exe"
 $ToolsBinPath = "D:\Codex\tools\bin"
 $GhNativePath = Join-Path $ToolsBinPath "gh.exe"
@@ -50,7 +54,7 @@ function Protect-GhPersistentEnvironment {
 
   try {
     try {
-      $acquired = $mutex.WaitOne(5000)
+      $acquired = $mutex.WaitOne(1500)
     }
     catch [Threading.AbandonedMutexException] {
       $acquired = $true
@@ -186,7 +190,7 @@ function Repair-GhHardLink {
 
   try {
     try {
-      $acquired = $mutex.WaitOne(5000)
+      $acquired = $mutex.WaitOne(1500)
     }
     catch [Threading.AbandonedMutexException] {
       $acquired = $true
@@ -421,6 +425,21 @@ function Invoke-CodexGitHubCliGuard {
     restartRequired = $restartRequired
   }
 
+  $GuardStopwatch.Stop()
+  $healthPayload = [pscustomobject][ordered]@{
+    hookId = 'github-cli'
+    runId = [guid]::NewGuid().ToString('N')
+    startedAtUtc = $GuardStarted.ToString('o')
+    completedAtUtc = [DateTime]::UtcNow.ToString('o')
+    durationMs = [long]$GuardStopwatch.ElapsedMilliseconds
+    ok = [bool]$payload['ok']
+    changed = @($repairs).Count -gt 0
+    restartRequired = [bool]$restartRequired
+    errors = [string[]]$(if ([bool]$payload['ok']) { @() } else { @('github-cli health check failed') })
+  }
+  Write-CodexHookLatestHealth -HookId 'github-cli' -Payload $healthPayload
+  $script:GitHubHealthWritten = $true
+
   if ($Json) {
     $payload | ConvertTo-Json -Depth 8
   }
@@ -452,6 +471,21 @@ try {
   Invoke-CodexGitHubCliGuard
 }
 catch {
+  if (-not $script:GitHubHealthWritten) {
+    $GuardStopwatch.Stop()
+    $failedHealthPayload = [pscustomobject][ordered]@{
+      hookId = 'github-cli'
+      runId = [guid]::NewGuid().ToString('N')
+      startedAtUtc = $GuardStarted.ToString('o')
+      completedAtUtc = [DateTime]::UtcNow.ToString('o')
+      durationMs = [long]$GuardStopwatch.ElapsedMilliseconds
+      ok = $false
+      changed = $false
+      restartRequired = $false
+      errors = [string[]]@('github-cli guard failed')
+    }
+    try { Write-CodexHookLatestHealth -HookId 'github-cli' -Payload $failedHealthPayload } catch {}
+  }
   if ($Strict) {
     throw
   }

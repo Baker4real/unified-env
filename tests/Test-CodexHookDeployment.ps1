@@ -309,6 +309,26 @@ Assert-True (@($fullFacts | Where-Object { $_ -like '* remind --client=codex' })
 Assert-True (@($fullFacts | Where-Object { $_ -like '* auto-approve --client=codex' }).Count -eq 0) 'full 必须精确移除 retired identity'
 Assert-True (@($fullMerged.hooks.PreToolUse | Where-Object { $_.PSObject.Properties.Name -contains 'customVendorSibling' -and $_.customVendorSibling -ceq 'preserve' }).Count -eq 1) 'vendor shared executable 只有完整 identity 才归属，未知 sibling 必须保留'
 
+$identityPreservingRegistry = Copy-CodexHookJsonValue -Value $live
+$cleanupGroup = New-RegistryGroup -Hook ($manifest.hooks | Where-Object id -ceq 'serena-cleanup')
+$cleanupGroup | Add-Member -NotePropertyName customManagedStop -NotePropertyValue 'preserve'
+$reminderGroup = New-RegistryGroup -Hook ($manifest.hooks | Where-Object id -ceq 'serena-reminder')
+$reminderGroup | Add-Member -NotePropertyName customManagedReminder -NotePropertyValue 'preserve'
+$unknownStopGroup = [pscustomobject][ordered]@{ customUnknownStop = 'preserve'; hooks = @([pscustomobject][ordered]@{ type = 'command'; command = 'D:\Fixture\unknown-stop.cmd'; timeout = 6 }) }
+$identityPreservingRegistry.hooks.Stop = @($cleanupGroup, $unknownStopGroup)
+$identityPreservingRegistry.hooks.PreToolUse = @(
+    $reminderGroup,
+    (New-RegistryGroup -Hook ($manifest.hooks | Where-Object id -ceq 'serena-auto-approve')),
+    [pscustomobject][ordered]@{ matcher = 'Vendor'; customUnknownPreTool = 'preserve'; hooks = @([pscustomobject][ordered]@{ type = 'command'; command = 'D:\Fixture\vendor-pretool.cmd'; timeout = 6 }) }
+)
+$identityPreservingMerged = Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $identityPreservingRegistry -Mode full
+Assert-True (@($identityPreservingMerged.hooks.Stop | Where-Object { $_.PSObject.Properties.Name -contains 'customManagedStop' -and $_.customManagedStop -ceq 'preserve' }).Count -eq 1) 'full 必须保留既有 Stop cleanup command identity 与扩展字段'
+Assert-True (@($identityPreservingMerged.hooks.Stop | Where-Object { $_.PSObject.Properties.Name -contains 'customUnknownStop' -and $_.customUnknownStop -ceq 'preserve' }).Count -eq 1) 'full 必须保留未知 Stop vendor entry'
+Assert-True (@($identityPreservingMerged.hooks.PreToolUse | Where-Object { $_.PSObject.Properties.Name -contains 'customManagedReminder' -and $_.customManagedReminder -ceq 'preserve' }).Count -eq 1) 'full 必须保留既有 Bash reminder command identity 与扩展字段'
+Assert-True (@($identityPreservingMerged.hooks.PreToolUse | Where-Object { $_.PSObject.Properties.Name -contains 'customUnknownPreTool' -and $_.customUnknownPreTool -ceq 'preserve' }).Count -eq 1) 'full 必须保留未知 PreToolUse vendor entry'
+$identityPreservingCommands = @($identityPreservingMerged.hooks.PreToolUse | ForEach-Object { @($_.hooks) } | ForEach-Object command)
+Assert-True (@($identityPreservingCommands | Where-Object { $_ -like '* auto-approve --client=codex' }).Count -eq 0) 'full 必须只排除 retired auto-approve exact identity'
+
 $fixtureRoot = Join-Path $ProjectRoot 'reports\codex-hook-deployment-test'
 Assert-True (Test-CodexHookPathWithin -Path $fixtureRoot -ParentPath (Join-Path $ProjectRoot 'reports')) 'fixture root 必须位于项目 reports'
 if ([IO.Directory]::Exists($fixtureRoot)) {

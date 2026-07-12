@@ -102,7 +102,8 @@
       ],
       "writeResources": [
         { "kind": "abstract", "value": "hook-stdout" },
-        { "kind": "abstract", "value": "serena-hook-state" }
+        { "kind": "abstract", "value": "serena-hook-state" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-activate.json" }
       ],
       "criticality": "degraded",
       "lifecycle": "active",
@@ -281,7 +282,7 @@
       ],
       "criticality": "optional",
       "lifecycle": "retired",
-      "lifecycleReason": "Codex payload does not expose acceptEdits or auto permission modes",
+      "lifecycleReason": "Codex payload does not expose acceptEdits/auto permission modes",
       "quickHealthCheck": {
         "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
         "arguments": ["-NoProfile", "-Command", "Test-Path -LiteralPath 'D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe'"]
@@ -316,7 +317,7 @@
     {
       "relativePath": "hooks/codex-github-cli-guard.ps1",
       "liveRelativePath": "codex-github-cli-guard.ps1",
-      "sha256": "e953359767c3eed033aa9ad1ceb52793287d7b27bc531399c642167f14eb0f3d",
+      "sha256": "0a1bf4ccf1c575f14e8b6b0c3e5b2b827f82351c6530d19fc96f11b1a66df5be",
       "lifecycle": "active",
       "ownerHookIds": [
         "github-cli"
@@ -400,7 +401,7 @@
     {
       "relativePath": "hooks/serena-activate-guarded.ps1",
       "liveRelativePath": "serena-activate-guarded.ps1",
-      "sha256": "87855f0e8d239737461b79207fa9486650d756f3a8af69f98a4279f6c690eb97",
+      "sha256": "7a68ffc903bf5fd6abd115be941ea8f82e4fbc6044921a99984d9d450a21b831",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -431,7 +432,9 @@
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",
-        "serena-dashboard"
+        "serena-activate",
+        "serena-dashboard",
+        "github-cli"
       ]
     },
     {
@@ -445,5 +448,12 @@
       ]
     }
   ],
-  "environment": []
+  "environment": [
+    {
+      "name": "SERENA_HOME",
+      "scope": "User",
+      "desired": "D:\\Codex\\.serena",
+      "restartRequired": true
+    }
+  ]
 }
