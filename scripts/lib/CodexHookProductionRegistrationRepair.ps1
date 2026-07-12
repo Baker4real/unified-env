@@ -1,60 +1,56 @@
 Set-StrictMode -Version Latest
 
-function Get-CodexHookProductionRegistrationRepairFrozenRelativePaths {
+function Get-CodexHookProductionRegistrationRepairFrozenFileMappings {
     [CmdletBinding()]
     param()
 
-    return [string[]]@(
-        'hooks/codex-github-cli-guard.cmd',
-        'hooks/codex-github-cli-guard.ps1',
-        'hooks/codex-mobile-permission-guard.cmd',
-        'hooks/codex-mobile-permission-guard.py',
-        'hooks/codex-projectless-root-d.cmd',
-        'hooks/codex-projectless-root-d.js',
-        'hooks/codex-provider-stability-guard.cmd',
-        'hooks/codex-provider-stability-guard.ps1',
-        'hooks/serena-activate-guarded.cmd',
-        'hooks/serena-activate-guarded.ps1',
-        'hooks/serena-dashboard-guard.cmd',
-        'hooks/serena-dashboard-guard.ps1'
+    return [object[]]@(
+        [pscustomobject]@{ liveRelativePath='codex-github-cli-guard.cmd'; sourceRelativePath='hooks/codex-github-cli-guard.cmd' },
+        [pscustomobject]@{ liveRelativePath='codex-github-cli-guard.ps1'; sourceRelativePath='hooks/codex-github-cli-guard.ps1' },
+        [pscustomobject]@{ liveRelativePath='codex-mobile-permission-guard.cmd'; sourceRelativePath='retired/codex-mobile-permission-guard.cmd' },
+        [pscustomobject]@{ liveRelativePath='codex-mobile-permission-guard.py'; sourceRelativePath='retired/codex-mobile-permission-guard.py' },
+        [pscustomobject]@{ liveRelativePath='codex-projectless-root-d.cmd'; sourceRelativePath='hooks/codex-projectless-root-d.cmd' },
+        [pscustomobject]@{ liveRelativePath='codex-projectless-root-d.js'; sourceRelativePath='retired/codex-projectless-root-d.js' },
+        [pscustomobject]@{ liveRelativePath='codex-provider-stability-guard.cmd'; sourceRelativePath='hooks/codex-provider-stability-guard.cmd' },
+        [pscustomobject]@{ liveRelativePath='codex-provider-stability-guard.ps1'; sourceRelativePath='hooks/codex-provider-stability-guard.ps1' },
+        [pscustomobject]@{ liveRelativePath='serena-activate-guarded.cmd'; sourceRelativePath='hooks/serena-activate-guarded.cmd' },
+        [pscustomobject]@{ liveRelativePath='serena-activate-guarded.ps1'; sourceRelativePath='hooks/serena-activate-guarded.ps1' },
+        [pscustomobject]@{ liveRelativePath='serena-dashboard-guard.cmd'; sourceRelativePath='hooks/serena-dashboard-guard.cmd' },
+        [pscustomobject]@{ liveRelativePath='serena-dashboard-guard.ps1'; sourceRelativePath='hooks/serena-dashboard-guard.ps1' }
     )
+}
+
+function Get-CodexHookProductionRegistrationRepairFrozenRelativePaths {
+    [CmdletBinding()]
+    param()
+    return [string[]]@(Get-CodexHookProductionRegistrationRepairFrozenFileMappings | ForEach-Object { [string]$_.sourceRelativePath })
 }
 
 function Get-CodexHookProductionRegistrationRepairFrozenLiveRelativePaths {
     [CmdletBinding()]
     param()
 
-    return [string[]]@(
-        'codex-github-cli-guard.cmd',
-        'codex-github-cli-guard.ps1',
-        'codex-mobile-permission-guard.cmd',
-        'codex-mobile-permission-guard.py',
-        'codex-projectless-root-d.cmd',
-        'codex-projectless-root-d.js',
-        'codex-provider-stability-guard.cmd',
-        'codex-provider-stability-guard.ps1',
-        'serena-activate-guarded.cmd',
-        'serena-activate-guarded.ps1',
-        'serena-dashboard-guard.cmd',
-        'serena-dashboard-guard.ps1'
-    )
+    return [string[]]@(Get-CodexHookProductionRegistrationRepairFrozenFileMappings | ForEach-Object { [string]$_.liveRelativePath })
 }
 
 function Select-CodexHookProductionRegistrationRepairFiles {
     param([Parameter(Mandatory)][object]$Manifest)
 
-    $byRelativePath = @{}
+    $byLiveRelativePath = @{}
     foreach ($file in @($Manifest.files)) {
-        $key = ([string]$file.relativePath).Replace('\', '/').ToLowerInvariant()
-        if ($byRelativePath.ContainsKey($key)) { throw 'production manifest 存在重复 relativePath。' }
-        $byRelativePath[$key] = $file
+        $key = ([string]$file.liveRelativePath).Replace('\', '/').ToLowerInvariant()
+        if ($byLiveRelativePath.ContainsKey($key)) { throw 'production manifest 存在重复 liveRelativePath。' }
+        $byLiveRelativePath[$key] = $file
     }
     $selected = [Collections.Generic.List[object]]::new()
-    foreach ($relativePath in Get-CodexHookProductionRegistrationRepairFrozenRelativePaths) {
-        $key = $relativePath.ToLowerInvariant()
-        if (-not $byRelativePath.ContainsKey($key)) { throw "production registration-repair 缺少冻结文件：$relativePath" }
-        $file = $byRelativePath[$key]
-        if ($file.lifecycle -cnotin @('active', 'compatibility')) { throw "production registration-repair 冻结文件生命周期非法：$relativePath" }
+    foreach ($mapping in Get-CodexHookProductionRegistrationRepairFrozenFileMappings) {
+        $key = ([string]$mapping.liveRelativePath).ToLowerInvariant()
+        if (-not $byLiveRelativePath.ContainsKey($key)) { throw "production registration-repair 缺少冻结 live 文件：$($mapping.liveRelativePath)" }
+        $file = $byLiveRelativePath[$key]
+        if ([string]$file.relativePath -cne [string]$mapping.sourceRelativePath) {
+            throw "production registration-repair 冻结 source/live 映射非法：$($mapping.liveRelativePath)"
+        }
+        if ($file.lifecycle -cnotin @('active', 'compatibility', 'retired')) { throw "production registration-repair 冻结文件生命周期非法：$($mapping.liveRelativePath)" }
         $selected.Add($file)
     }
     return [object[]]$selected.ToArray()

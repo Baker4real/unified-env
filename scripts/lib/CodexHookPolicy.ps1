@@ -860,7 +860,8 @@ function Assert-CodexHookManifest {
     $liveRelativePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $filesByLivePath = @{}
     foreach ($file in @($Manifest.files)) {
-        Assert-CodexHookExactProperties -Value $file -Names $fileNames -Scope 'files[]'
+        $expectedFileNames = if ($file.lifecycle -ceq 'retired') { @($fileNames + 'deleteLive') } else { $fileNames }
+        Assert-CodexHookExactProperties -Value $file -Names $expectedFileNames -Scope 'files[]'
         $normalizedRelativePath = Get-CodexHookNormalizedRelativePath -Path $file.relativePath -Name 'files[].relativePath'
         $normalizedLiveRelativePath = Get-CodexHookNormalizedRelativePath -Path $file.liveRelativePath -Name 'files[].liveRelativePath'
         if ($normalizedRelativePath -cnotmatch '^(?:hooks|retired)\\') {
@@ -878,6 +879,9 @@ function Assert-CodexHookManifest {
         Assert-CodexHookString -Value $file.lifecycle -Name "files[$($file.relativePath)].lifecycle"
         if ($file.lifecycle -cnotin @('active', 'compatibility', 'retired')) {
             throw "file lifecycle 非法：$($file.lifecycle)"
+        }
+        if ($file.lifecycle -ceq 'retired' -and ($file.deleteLive -isnot [bool] -or $file.deleteLive)) {
+            throw "retired file 必须显式声明 deleteLive=false：$($file.relativePath)"
         }
 
         Assert-CodexHookArray -Value ([object]$file.ownerHookIds) -Name "files[$($file.relativePath)].ownerHookIds"

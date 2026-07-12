@@ -1,3 +1,3 @@
-@ECHO OFF
-@SETLOCAL
-@"C:\Program Files\nodejs\node.exe" "D:/Codex/.codex/hooks/codex-projectless-root-d.js" %*
+@echo off
+"D:\Codex\tools\python314-official\python.exe" "D:\Codex\.codex\hooks\codex-state-policy-guard.py" %*
+exit /b %ERRORLEVEL%

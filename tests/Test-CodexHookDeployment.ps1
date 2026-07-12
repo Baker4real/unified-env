@@ -406,6 +406,7 @@ $fixtureManifest.environment = @(
 )
 $expectedOldFileBytes = @{}
 $expectedNewFileBytes = @{}
+$expectedRetiredFileBytes = @{}
 foreach ($file in @($fixtureManifest.files)) {
     $sourcePath = Join-Path $fixtureSourceRoot ([string]$file.relativePath)
     $targetPath = Join-Path $fixtureHooksRoot ([string]$file.liveRelativePath)
@@ -417,7 +418,11 @@ foreach ($file in @($fixtureManifest.files)) {
     [IO.File]::WriteAllBytes($targetPath, $targetBytes)
     $file.sha256 = Get-ByteSha256 -Bytes $sourceBytes
     $expectedOldFileBytes[[IO.Path]::GetFullPath($targetPath)] = $targetBytes
-    $expectedNewFileBytes[[IO.Path]::GetFullPath($targetPath)] = $sourceBytes
+    if ($file.lifecycle -cin @('active','compatibility')) {
+        $expectedNewFileBytes[[IO.Path]::GetFullPath($targetPath)] = $sourceBytes
+    } else {
+        $expectedRetiredFileBytes[[IO.Path]::GetFullPath($targetPath)] = $targetBytes
+    }
 }
 [void](Assert-CodexHookManifest -Manifest $fixtureManifest)
 $fixtureManifestPath = Join-Path $fixtureRoot 'fixture-manifest.json'
@@ -649,6 +654,9 @@ $plan3Claim = Get-Content -LiteralPath ([string]$plan3LifecyclePaths.claimPath) 
 Assert-True ($plan3Claim.state -ceq 'prepared' -and $plan3Claim.mappingIdentity -ceq $plan3.sourceFacts.mappingIdentity) 'claim lifecycle 必须从 reserved 进入 prepared 并绑定 mapping identity'
 foreach ($targetPath in $expectedNewFileBytes.Keys) {
     Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($targetPath))) -ceq (Get-ByteSha256 -Bytes $expectedNewFileBytes[$targetPath])) 'apply 后 file 必须等于 gated source bytes'
+}
+foreach ($targetPath in $expectedRetiredFileBytes.Keys) {
+    Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($targetPath))) -ceq (Get-ByteSha256 -Bytes $expectedRetiredFileBytes[$targetPath])) 'apply 不得删除或覆盖 retired live file'
 }
 Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($fixtureRegistryPath))) -ceq $plan3.registryAfterSha256) 'apply 后 registry 必须等于 deterministic after hash'
 Assert-True ($environmentStore['User|SERENA_HOME'] -ceq 'D:\Codex\.serena') 'full apply 必须只通过内存 adapter 设置 SERENA_HOME'

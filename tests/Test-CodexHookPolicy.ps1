@@ -228,6 +228,17 @@ $case.files = @([pscustomobject][ordered]@{
 Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'file lifecycle 必须大小写敏感'
 
 $case = Copy-TestDocument $valid
+$retiredFile = Copy-TestDocument $case.files[0]
+$retiredFile.relativePath = 'retired/provider-legacy.cmd'
+$retiredFile.liveRelativePath = 'provider-legacy.cmd'
+$retiredFile.lifecycle = 'retired'
+$retiredFile | Add-Member -NotePropertyName deleteLive -NotePropertyValue $false
+$case.files = @($case.files) + $retiredFile
+[void](Assert-CodexHookManifest -Manifest $case)
+$case.files[-1].deleteLive = $true
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'retired file 不得默认删除 live 文件'
+
+$case = Copy-TestDocument $valid
 $case.environment = @([pscustomobject][ordered]@{ name = 'SERENA_HOME'; scope = 'Machine'; desired = 'D:\Codex\.serena'; restartRequired = $true })
 Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'environment scope 必须精确'
 
@@ -252,7 +263,7 @@ foreach ($invalidTimeout in @(0, 30)) {
 $managedManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
 $managedManifest = Read-CodexHookManifest -Path $managedManifestPath
 Assert-True (@($managedManifest.hooks).Count -eq 8) '受管 manifest 必须声明 8 个当前 hook'
-Assert-True (@($managedManifest.files).Count -eq 14) '受管 manifest 必须声明 12 个真实审计快照文件及 2 个共享库文件'
+Assert-True (@($managedManifest.files).Count -eq 15) '受管 manifest 必须声明冻结 12 文件、state writer 与 2 个共享库文件'
 Assert-True (@($managedManifest.environment).Count -eq 0) 'Task 1 不得提前声明环境写入'
 
 $normalizedDuplicate = Copy-TestDocument $managedManifest
@@ -340,9 +351,9 @@ Assert-True (
 
 $sourceStates = @($managedManifest.hooks | Group-Object sourceState -AsHashTable -AsString)
 Assert-True (
-    @($managedManifest.hooks | Where-Object sourceState -ceq 'planned').Count -eq 1 -and
+    @($managedManifest.hooks | Where-Object sourceState -ceq 'planned').Count -eq 0 -and
     @($managedManifest.hooks | Where-Object sourceState -ceq 'vendor').Count -eq 3 -and
-    @($managedManifest.hooks | Where-Object sourceState -ceq 'managed').Count -eq 4
+    @($managedManifest.hooks | Where-Object sourceState -ceq 'managed').Count -eq 5
 ) 'sourceState 必须诚实区分 managed/planned/vendor'
 
 Assert-True (

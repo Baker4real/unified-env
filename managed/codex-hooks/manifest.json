@@ -56,7 +56,7 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-state-policy-guard.py",
       "runtimeId": "python",
-      "sourceState": "planned",
+      "sourceState": "managed",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\.codex-global-state.json" },
         { "kind": "path", "value": "D:\\Codex\\.codex\\state_5.sqlite" },
@@ -322,19 +322,21 @@
       ]
     },
     {
-      "relativePath": "hooks/codex-mobile-permission-guard.cmd",
+      "relativePath": "retired/codex-mobile-permission-guard.cmd",
       "liveRelativePath": "codex-mobile-permission-guard.cmd",
       "sha256": "b86b9c3e743998b41324f868b15594d979fe6bcecd079be5a3cb4e44e6c8e7ec",
-      "lifecycle": "compatibility",
+      "lifecycle": "retired",
+      "deleteLive": false,
       "ownerHookIds": [
         "codex-state-policy"
       ]
     },
     {
-      "relativePath": "hooks/codex-mobile-permission-guard.py",
+      "relativePath": "retired/codex-mobile-permission-guard.py",
       "liveRelativePath": "codex-mobile-permission-guard.py",
       "sha256": "efb7c3838f9085e5ebe1a452352149fb8843db64d6560e552e009b8de71aac64",
-      "lifecycle": "compatibility",
+      "lifecycle": "retired",
+      "deleteLive": false,
       "ownerHookIds": [
         "codex-state-policy"
       ]
@@ -342,16 +344,26 @@
     {
       "relativePath": "hooks/codex-projectless-root-d.cmd",
       "liveRelativePath": "codex-projectless-root-d.cmd",
-      "sha256": "19fafb8c1c59b4f967a0e60597fb76d7db443c9e7ba04ef31ab53e04cd723b23",
+      "sha256": "5cf8bcfae4907df658f887d36f34ac518641bed12f70ad8ff4c391069d5a3a0b",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
       ]
     },
     {
-      "relativePath": "hooks/codex-projectless-root-d.js",
+      "relativePath": "retired/codex-projectless-root-d.js",
       "liveRelativePath": "codex-projectless-root-d.js",
       "sha256": "f32046560a34c035e28a58bf3c7dee9e770e424de87a313f6fd336c01eacca21",
+      "lifecycle": "retired",
+      "deleteLive": false,
+      "ownerHookIds": [
+        "codex-state-policy"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-state-policy-guard.py",
+      "liveRelativePath": "codex-state-policy-guard.py",
+      "sha256": "e002135484cb426b5ea3ff8daae96e2bba902856b94b168a9da08a86f089a454",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
