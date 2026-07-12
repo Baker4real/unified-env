@@ -201,6 +201,29 @@ $identityDriftProvider = @($identityDriftRegistry.hooks.SessionStart | Where-Obj
 $identityDriftProvider.hooks[0].command += ' --identity-drift'
 [void](Assert-Throws { Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $identityDriftRegistry -Mode registration-repair | Out-Null } '同 custom wrapper path 的 identity drift 必须 fail closed')
 
+$unclosedManagedRegistry = Copy-CodexHookJsonValue -Value $live
+$unclosedManagedGithub = @($unclosedManagedRegistry.hooks.SessionStart | Where-Object { @($_.hooks)[0].command -like '*codex-github-cli-guard.cmd*' })[0]
+$unclosedManagedGithub.hooks[0].command = '"D:\Codex\.codex\hooks\codex-github-cli-guard.cmd --token fixture-secret'
+$unclosedManagedError = Assert-Throws -Message '未闭合引号中的完整受管 wrapper path 必须 fail closed' -Action {
+    Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $unclosedManagedRegistry -Mode registration-repair | Out-Null
+}
+Assert-True ($unclosedManagedError -match '无法安全解析|identity') '不可解析受管 wrapper 必须输出脱敏 ownership reason'
+Assert-True ($unclosedManagedError -notmatch 'fixture-secret') '不可解析受管 wrapper 错误不得回显 raw command/secret'
+
+$wrongParentRegistry = Copy-CodexHookJsonValue -Value $missingTailRegistry
+$wrongParentRegistry.hooks.SessionStart += [pscustomobject][ordered]@{
+    customMalformedUnknown = 'preserve'
+    hooks = @([pscustomobject][ordered]@{
+        type = 'command'
+        command = '"D:\Fixture\elsewhere\codex-github-cli-guard.cmd --opaque'
+    })
+}
+$wrongParentMerged = Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $wrongParentRegistry -Mode registration-repair
+Assert-True (@($wrongParentMerged.hooks.SessionStart | Where-Object {
+    $_.PSObject.Properties.Name -contains 'customMalformedUnknown' -and $_.customMalformedUnknown -ceq 'preserve'
+}).Count -eq 1) '同文件名错误父目录的不可解析 command 必须保持 unknown'
+Assert-True (@(Get-ManagedCommandNames -Groups @($wrongParentMerged.hooks.SessionStart))[-1] -ceq 'codex-github-cli-guard.cmd') '错误父目录 unknown 不得阻止缺失尾部 identity append'
+
 $fullRegistry = Copy-CodexHookJsonValue -Value $live
 $fullRegistry.hooks.Stop = @()
 $fullRegistry.hooks.PreToolUse = @(
@@ -510,11 +533,47 @@ $applyResult = & $invokeScript `
     -EnvironmentReadValue $readEnvironment `
     -EnvironmentWriteValue $writeEnvironment
 Assert-True ($applyResult.applied) '无漂移 full fixture 必须 apply 成功'
+$plan3LifecyclePaths = Get-CodexHookFixtureLifecyclePaths `
+    -MappingIdentity ([string]$plan3.sourceFacts.mappingIdentity) `
+    -GenerationId ([string]$plan3.generationId)
+Assert-True ([IO.File]::Exists([string]$plan3LifecyclePaths.claimPath)) 'generation claim 必须写入固定 mapping-scoped lifecycle 根'
+Assert-True (-not [IO.Directory]::Exists((Join-Path $evidenceRoot '.claims'))) '调用者 EvidenceRoot 内不得保存 replay claim'
+$plan3Claim = Get-Content -LiteralPath ([string]$plan3LifecyclePaths.claimPath) -Raw | ConvertFrom-Json -Depth 20
+Assert-True ($plan3Claim.state -ceq 'prepared' -and $plan3Claim.mappingIdentity -ceq $plan3.sourceFacts.mappingIdentity) 'claim lifecycle 必须从 reserved 进入 prepared 并绑定 mapping identity'
 foreach ($targetPath in $expectedNewFileBytes.Keys) {
     Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($targetPath))) -ceq (Get-ByteSha256 -Bytes $expectedNewFileBytes[$targetPath])) 'apply 后 file 必须等于 gated source bytes'
 }
 Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($fixtureRegistryPath))) -ceq $plan3.registryAfterSha256) 'apply 后 registry 必须等于 deterministic after hash'
 Assert-True ($environmentStore['User|SERENA_HOME'] -ceq 'D:\Codex\.serena') 'full apply 必须只通过内存 adapter 设置 SERENA_HOME'
+
+$mappingMutexName = Get-CodexHookFixtureDeploymentMutexName -MappingIdentity ([string]$plan3.sourceFacts.mappingIdentity)
+$heldMappingMutex = [Threading.Mutex]::new($false, $mappingMutexName)
+$heldMappingMutexAcquired = $false
+try {
+    $heldMappingMutexAcquired = $heldMappingMutex.WaitOne(0)
+    Assert-True $heldMappingMutexAcquired '测试进程必须先占有 mapping lifecycle mutex'
+    $restoreWhileApplyStdout = Join-Path $fixtureRoot 'restore-while-apply.stdout.txt'
+    $restoreWhileApplyStderr = Join-Path $fixtureRoot 'restore-while-apply.stderr.txt'
+    $restoreWhileApplyProcess = Start-Process `
+        -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+        -ArgumentList @('-NoProfile', '-File', $restoreScript, '-EvidenceDirectory', $applyResult.evidenceDirectory, '-Apply') `
+        -RedirectStandardOutput $restoreWhileApplyStdout `
+        -RedirectStandardError $restoreWhileApplyStderr `
+        -WindowStyle Hidden `
+        -PassThru
+    Assert-True ($restoreWhileApplyProcess.WaitForExit(120000)) '锁占用期间 restore 子进程必须在 120 秒内退出'
+    Assert-True ($restoreWhileApplyProcess.ExitCode -ne 0) 'restore 不得与持有同 mapping mutex 的 apply 生命周期并发'
+    $restoreWhileApplyError = [IO.File]::ReadAllText($restoreWhileApplyStderr)
+    Assert-True ($restoreWhileApplyError -match 'mutex busy') '并发 restore 必须由同一 mapping mutex 明确拒绝'
+    foreach ($targetPath in $expectedNewFileBytes.Keys) {
+        Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($targetPath))) -ceq (Get-ByteSha256 -Bytes $expectedNewFileBytes[$targetPath])) 'mutex 拒绝后 deployed file 不得出现混合状态'
+    }
+    Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($fixtureRegistryPath))) -ceq $plan3.registryAfterSha256) 'mutex 拒绝后 registry 必须仍为 deployed 状态'
+    Assert-True ($environmentStore['User|SERENA_HOME'] -ceq 'D:\Codex\.serena') 'mutex 拒绝后 environment 必须仍为 deployed 状态'
+} finally {
+    if ($heldMappingMutexAcquired) { [void]$heldMappingMutex.ReleaseMutex() }
+    $heldMappingMutex.Dispose()
+}
 
 $restoreResult = & $restoreScript `
     -EvidenceDirectory $applyResult.evidenceDirectory `
@@ -546,6 +605,20 @@ $replayError = Assert-Throws -Message '已 claim generationId 的旧 plan 在 ro
 }
 Assert-True ($replayError -match 'claim|重放|generationId') '旧 plan 重放必须由 generation claim 拒绝'
 
+$alternateEvidenceRoot = Join-Path $fixtureRoot 'alternate-evidence'
+$crossEvidenceReplayError = Assert-Throws -Message '换用另一个合法 EvidenceRoot 也不得重放同 generationId' -Action {
+    & $invokeScript `
+        -PlanPath $publishedPlan3.jsonPath `
+        -Apply `
+        -ApprovedScope 'codex-hook-governance-2026-07-11' `
+        -EvidenceRoot $alternateEvidenceRoot `
+        -EnvironmentReadValue $readEnvironment `
+        -EnvironmentWriteValue $writeEnvironment |
+        Out-Null
+}
+Assert-True ($crossEvidenceReplayError -match 'mapping-scoped claim|重放|generationId') '跨 EvidenceRoot 重放必须由固定 mapping claim 拒绝'
+Assert-True (-not [IO.Directory]::Exists($alternateEvidenceRoot)) '跨 EvidenceRoot 重放拒绝前不得创建调用者 evidence 根'
+
 $publishedPlan4 = & $newPlanScript `
     -ManifestPath $fixtureManifestPath `
     -FixtureSourceRoot $fixtureSourceRoot `
@@ -563,6 +636,26 @@ $apply4 = & $invokeScript `
     -EnvironmentWriteValue $writeEnvironment
 $restoreManifestPath = Join-Path $apply4.evidenceDirectory 'restore-manifest.json'
 [byte[]]$restoreManifestBytes = [IO.File]::ReadAllBytes($restoreManifestPath)
+$pathTraversalRestore = [Text.UTF8Encoding]::new($false).GetString($restoreManifestBytes) | ConvertFrom-Json -Depth 100
+$pathTraversalRestore.generationId = '..\..\claim-path-traversal-sentinel'
+$pathTraversalEscapePath = Join-Path $fixtureRoot 'claim-path-traversal-sentinel.json'
+Assert-True (-not [IO.File]::Exists($pathTraversalEscapePath)) 'path traversal sentinel 必须预先不存在'
+Write-Utf8NoBom -Path $restoreManifestPath -Text ($pathTraversalRestore | ConvertTo-Json -Depth 100)
+$pathTraversalRestoreError = Assert-Throws -Message 'restore generationId path traversal 必须在 claim path 构造前拒绝' -Action {
+    & $restoreScript `
+        -EvidenceDirectory $apply4.evidenceDirectory `
+        -Apply `
+        -EnvironmentReadValue $readEnvironment `
+        -EnvironmentWriteValue $writeEnvironment |
+        Out-Null
+}
+Assert-True ($pathTraversalRestoreError -match 'generationId|非法') '恶意 restore generationId 必须输出脱敏字段验证原因'
+Assert-True (-not [IO.File]::Exists($pathTraversalEscapePath)) '恶意 generationId 不得在固定 claim root 外创建文件'
+foreach ($targetPath in $expectedNewFileBytes.Keys) {
+    Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($targetPath))) -ceq (Get-ByteSha256 -Bytes $expectedNewFileBytes[$targetPath])) '恶意 generationId 拒绝后 deployed file 必须不变'
+}
+[IO.File]::WriteAllBytes($restoreManifestPath, $restoreManifestBytes)
+
 $tamperedRestore = [Text.UTF8Encoding]::new($false).GetString($restoreManifestBytes) | ConvertFrom-Json -Depth 100
 $tamperedRestore | Add-Member -NotePropertyName secret -NotePropertyValue 'fixture-secret'
 Write-Utf8NoBom -Path $restoreManifestPath -Text ($tamperedRestore | ConvertTo-Json -Depth 100)
@@ -602,12 +695,90 @@ foreach ($targetPath in $expectedNewFileBytes.Keys) {
 Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($fixtureRegistryPath))) -ceq $plan4.registryAfterSha256) 'backup 篡改预检失败后 registry 必须不变'
 Assert-True ($environmentStore['User|SERENA_HOME'] -ceq 'D:\Codex\.serena') 'backup 篡改预检失败后 environment 必须不变'
 [IO.File]::WriteAllBytes($backupPath, $backupBytes)
+
+$strictStatusPath = Join-Path $apply4.evidenceDirectory 'status.json'
+[byte[]]$strictStatusBytes = [IO.File]::ReadAllBytes($strictStatusPath)
+$tamperedStatus = [Text.UTF8Encoding]::new($false).GetString($strictStatusBytes) | ConvertFrom-Json -Depth 30
+$tamperedStatus | Add-Member -NotePropertyName secret -NotePropertyValue 'fixture-secret'
+Write-Utf8NoBom -Path $strictStatusPath -Text ($tamperedStatus | ConvertTo-Json -Depth 30)
+$statusTamperError = Assert-Throws -Message 'status.json 篡改必须在任何 restore 写入前拒绝' -Action {
+    & $restoreScript `
+        -EvidenceDirectory $apply4.evidenceDirectory `
+        -Apply `
+        -EnvironmentReadValue $readEnvironment `
+        -EnvironmentWriteValue $writeEnvironment |
+        Out-Null
+}
+Assert-True ($statusTamperError -notmatch 'fixture-secret') 'status 篡改错误不得回显 secret sentinel'
+foreach ($targetPath in $expectedNewFileBytes.Keys) {
+    Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($targetPath))) -ceq (Get-ByteSha256 -Bytes $expectedNewFileBytes[$targetPath])) 'status 篡改预检失败后 deployed file 必须不变'
+}
+Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($fixtureRegistryPath))) -ceq $plan4.registryAfterSha256) 'status 篡改预检失败后 registry 必须不变'
+Assert-True ($environmentStore['User|SERENA_HOME'] -ceq 'D:\Codex\.serena') 'status 篡改预检失败后 environment 必须不变'
+[IO.File]::WriteAllBytes($strictStatusPath, $strictStatusBytes)
+
 $restore4 = & $restoreScript `
     -EvidenceDirectory $apply4.evidenceDirectory `
     -Apply `
     -EnvironmentReadValue $readEnvironment `
     -EnvironmentWriteValue $writeEnvironment
 Assert-True ($restore4.restored) '恢复未篡改 evidence 后 restore 必须成功'
+
+$environmentPostcheckPlan = & $newPlanScript `
+    -ManifestPath $fixtureManifestPath `
+    -FixtureSourceRoot $fixtureSourceRoot `
+    -FixtureCodexHome $fixtureCodexHome `
+    -Mode full `
+    -OutputDir $planOutput `
+    -EnvironmentReadValue $readEnvironment
+$environmentPostcheckApply = & $invokeScript `
+    -PlanPath $environmentPostcheckPlan.jsonPath `
+    -Apply `
+    -ApprovedScope 'codex-hook-governance-2026-07-11' `
+    -EvidenceRoot $evidenceRoot `
+    -EnvironmentReadValue $readEnvironment `
+    -EnvironmentWriteValue $writeEnvironment
+$wrongEnvironmentWriter = {
+    param($Name, $Scope, $Value)
+    $environmentStore["$Scope|$Name"] = 'D:\Fixture\wrong-restore-value'
+}.GetNewClosure()
+$wrongEnvironmentRestoreError = Assert-Throws -Message '写入错误 environment before 值的 adapter 必须由 postcheck 拒绝' -Action {
+    & $restoreScript `
+        -EvidenceDirectory $environmentPostcheckApply.evidenceDirectory `
+        -Apply `
+        -EnvironmentReadValue $readEnvironment `
+        -EnvironmentWriteValue $wrongEnvironmentWriter |
+        Out-Null
+}
+Assert-True ($wrongEnvironmentRestoreError -match 'environment restore postcheck') '错误 environment restore 值必须明确 postcheck 失败'
+$environmentFailureStatusPath = Join-Path $environmentPostcheckApply.evidenceDirectory 'status.json'
+$environmentFailureStatus = Get-Content -LiteralPath $environmentFailureStatusPath -Raw | ConvertFrom-Json -Depth 30
+Assert-True ($environmentFailureStatus.status -ceq 'applied') 'environment postcheck 失败后不得宣称 restored'
+
+$environmentStore['User|SERENA_HOME'] = 'D:\Codex\.serena'
+$noopEnvironmentWriter = { param($Name, $Scope, $Value) }.GetNewClosure()
+$noopEnvironmentRestoreError = Assert-Throws -Message 'silent no-op environment adapter 必须由 postcheck 拒绝' -Action {
+    & $restoreScript `
+        -EvidenceDirectory $environmentPostcheckApply.evidenceDirectory `
+        -Apply `
+        -EnvironmentReadValue $readEnvironment `
+        -EnvironmentWriteValue $noopEnvironmentWriter |
+        Out-Null
+}
+Assert-True ($noopEnvironmentRestoreError -match 'environment restore postcheck') 'silent no-op environment restore 必须明确 postcheck 失败'
+$noopFailureStatus = Get-Content -LiteralPath $environmentFailureStatusPath -Raw | ConvertFrom-Json -Depth 30
+Assert-True ($noopFailureStatus.status -ceq 'applied') 'silent no-op postcheck 失败后不得宣称 restored'
+
+$environmentPostcheckRestore = & $restoreScript `
+    -EvidenceDirectory $environmentPostcheckApply.evidenceDirectory `
+    -Apply `
+    -EnvironmentReadValue $readEnvironment `
+    -EnvironmentWriteValue $writeEnvironment
+Assert-True ($environmentPostcheckRestore.restored) 'postcheck 失败后使用正确 adapter 必须可继续恢复'
+Assert-True ($environmentStore['User|SERENA_HOME'] -ceq 'D:\Fixture\serena-before') '正确 adapter 必须恢复 environment before 值'
+foreach ($targetPath in $expectedOldFileBytes.Keys) {
+    Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($targetPath))) -ceq (Get-ByteSha256 -Bytes $expectedOldFileBytes[$targetPath])) 'environment postcheck 恢复重试后 file 必须回到 before 状态'
+}
 
 $absentFact = Get-CodexHookEnvironmentValueFact `
     -Name 'SERENA_HOME' `

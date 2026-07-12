@@ -47,6 +47,16 @@ $mappingIdentity = Get-CodexHookFixtureMappingIdentity -Manifest $manifest -Sour
 if ($mappingIdentity -cne $plan.sourceFacts.mappingIdentity -or $mappingIdentity -cne $plan.liveFacts.mappingIdentity) {
     throw 'target mapper final gate 失败。'
 }
+$lifecyclePaths = Get-CodexHookFixtureLifecyclePaths -MappingIdentity $mappingIdentity -GenerationId ([string]$plan.generationId)
+foreach ($callerRoot in @(
+    @{ Path = $sourceRoot; Name = 'sourceRoot' },
+    @{ Path = $codexHome; Name = 'codexHome' },
+    @{ Path = $evidenceRootPath; Name = 'EvidenceRoot' }
+)) {
+    if (Test-CodexHookPathWithin -Path ([string]$callerRoot.Path) -ParentPath ([string]$lifecyclePaths.lifecycleRoot)) {
+        throw "$($callerRoot.Name) 不得位于固定 lifecycle state 根内。"
+    }
+}
 
 $sourceFacts = [Collections.Generic.List[object]]::new()
 $liveFacts = [Collections.Generic.List[object]]::new()
@@ -139,54 +149,66 @@ foreach ($propertyName in @('actions', 'environmentActions', 'postChecks')) {
     }
 }
 
-# Gate 后、任何 evidence/live 写入前做一次全量临界复核。发布仍只使用上面同一批 handle-bound bytes。
-foreach ($fact in @($sourceFacts)) {
-    $current = Get-CodexHookFixtureFileSnapshot -Path ([string]$fact.path) -Name 'source critical recheck'
-    Assert-CodexHookSnapshotExpectedState -Snapshot $current -ExpectedExists ([bool]$fact.exists) -ExpectedSha256 ([string]$fact.sha256) -Scope 'source critical recheck'
-}
-foreach ($fact in @($liveFacts)) {
-    $current = Get-CodexHookFixtureFileSnapshot -Path ([string]$fact.path) -Name 'target critical recheck'
-    Assert-CodexHookSnapshotExpectedState -Snapshot $current -ExpectedExists ([bool]$fact.exists) -ExpectedSha256 ([string]$fact.sha256) -Scope 'target critical recheck'
-}
-$registryCritical = Get-CodexHookFixtureFileSnapshot -Path $registryPath -Name 'registry critical recheck'
-Assert-CodexHookSnapshotExpectedState -Snapshot $registryCritical -ExpectedExists $true -ExpectedSha256 ([string]$registrySnapshot.sha256) -Scope 'registry critical recheck'
-foreach ($fact in @($environmentFacts)) {
-    $current = Get-CodexHookEnvironmentValueFact -Name ([string]$fact.name) -Scope ([string]$fact.scope) -ReadValue $EnvironmentReadValue -Desired 'D:\Codex\.serena'
-    if ($current.valueSha256 -cne $fact.valueSha256) { throw 'environment critical recheck 检测到漂移。' }
-}
-
 if ($null -eq $EnvironmentReadValue) { $EnvironmentReadValue = { param($Name, $Scope) return $null } }
 if ($null -eq $EnvironmentWriteValue) { $EnvironmentWriteValue = { param($Name, $Scope, $Value) throw 'environment adapter 未授权' } }
 
-$mutexName = 'Local\CodexHookDeploymentFixture-' + $mappingIdentity.Substring(0, 24)
+$mutexName = Get-CodexHookFixtureDeploymentMutexName -MappingIdentity $mappingIdentity
 $deploymentMutex = [Threading.Mutex]::new($false, $mutexName)
 $mutexHeld = $false
 try {
     $mutexHeld = $deploymentMutex.WaitOne(0)
     if (-not $mutexHeld) { throw 'deployment mutex busy。' }
 
-    [void][IO.Directory]::CreateDirectory($evidenceRootPath)
-    [void](Assert-CodexHookFixturePath -Path $evidenceRootPath -Name 'EvidenceRoot after create')
-    $claimsRoot = Join-Path $evidenceRootPath '.claims'
-    [void](Assert-CodexHookFixturePath -Path $claimsRoot -Name 'claims root before create')
-    [void][IO.Directory]::CreateDirectory($claimsRoot)
-    [void](Assert-CodexHookFixturePath -Path $claimsRoot -Name 'claims root after create')
-    $claimPath = Join-Path $claimsRoot "$($plan.generationId).json"
-    $claimStream = $null
-    try {
-        $claimStream = [IO.FileStream]::new($claimPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-        [byte[]]$reservationBytes = [Text.UTF8Encoding]::new($false).GetBytes('{"state":"reserved"}')
-        $claimStream.Write($reservationBytes, 0, $reservationBytes.Length)
-        $claimStream.Flush($true)
-    } catch {
-        throw 'deployment generationId 已被 claim；拒绝重放。'
-    } finally {
-        if ($null -ne $claimStream) { $claimStream.Dispose() }
+    # The lifecycle mutex covers the final state gate, claim/status lifecycle, and every
+    # fixture mutation. Restore uses this exact mapping-scoped mutex as well.
+    foreach ($fact in @($sourceFacts)) {
+        $current = Get-CodexHookFixtureFileSnapshot -Path ([string]$fact.path) -Name 'source critical recheck'
+        Assert-CodexHookSnapshotExpectedState -Snapshot $current -ExpectedExists ([bool]$fact.exists) -ExpectedSha256 ([string]$fact.sha256) -Scope 'source critical recheck'
+    }
+    foreach ($fact in @($liveFacts)) {
+        $current = Get-CodexHookFixtureFileSnapshot -Path ([string]$fact.path) -Name 'target critical recheck'
+        Assert-CodexHookSnapshotExpectedState -Snapshot $current -ExpectedExists ([bool]$fact.exists) -ExpectedSha256 ([string]$fact.sha256) -Scope 'target critical recheck'
+    }
+    $registryCritical = Get-CodexHookFixtureFileSnapshot -Path $registryPath -Name 'registry critical recheck'
+    Assert-CodexHookSnapshotExpectedState -Snapshot $registryCritical -ExpectedExists $true -ExpectedSha256 ([string]$registrySnapshot.sha256) -Scope 'registry critical recheck'
+    foreach ($fact in @($environmentFacts)) {
+        $current = Get-CodexHookEnvironmentValueFact -Name ([string]$fact.name) -Scope ([string]$fact.scope) -ReadValue $EnvironmentReadValue -Desired 'D:\Codex\.serena'
+        if ($current.valueSha256 -cne $fact.valueSha256) { throw 'environment critical recheck 检测到漂移。' }
     }
 
     $evidenceDirectory = Join-Path $evidenceRootPath "deployment-$($plan.generationId)"
     [void](Assert-CodexHookFixturePath -Path $evidenceDirectory -Name 'evidence directory before create')
-    if ([IO.Directory]::Exists($evidenceDirectory)) { throw 'deployment evidence directory 已存在；拒绝重放。' }
+    if (Test-Path -LiteralPath $evidenceDirectory) { throw 'deployment evidence directory 已存在；拒绝重放。' }
+
+    foreach ($stateDirectory in @($lifecyclePaths.lifecycleRoot, $lifecyclePaths.mappingRoot, $lifecyclePaths.claimsRoot)) {
+        [void][IO.Directory]::CreateDirectory([string]$stateDirectory)
+        [void](Assert-CodexHookFixturePath -Path ([string]$stateDirectory) -Name 'fixed lifecycle state directory after create')
+    }
+    $claimPath = [string]$lifecyclePaths.claimPath
+    $reservationDocument = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-hook-deployment-claim'
+        schemaVersion = 1
+        state = 'reserved'
+        generationId = [string]$plan.generationId
+        mappingIdentity = $mappingIdentity
+        planSha256 = [string]$planSnapshot.sha256
+        evidenceDirectory = $evidenceDirectory
+        restoreManifestSha256 = $null
+    }
+    [byte[]]$reservationBytes = [Text.UTF8Encoding]::new($false).GetBytes(($reservationDocument | ConvertTo-Json -Depth 10))
+    $claimStream = $null
+    try {
+        $claimStream = [IO.FileStream]::new($claimPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $claimStream.Write($reservationBytes, 0, $reservationBytes.Length)
+        $claimStream.Flush($true)
+    } catch {
+        throw 'deployment generationId 已被 mapping-scoped claim；拒绝重放。'
+    } finally {
+        if ($null -ne $claimStream) { $claimStream.Dispose() }
+    }
+
+    [void][IO.Directory]::CreateDirectory($evidenceRootPath)
+    [void](Assert-CodexHookFixturePath -Path $evidenceRootPath -Name 'EvidenceRoot after create')
     [void][IO.Directory]::CreateDirectory($evidenceDirectory)
     [void](Assert-CodexHookFixturePath -Path $evidenceDirectory -Name 'evidence directory after create')
     $backupsRoot = Join-Path $evidenceDirectory 'backups'
@@ -268,6 +290,7 @@ try {
     $claimDocument = [pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-hook-deployment-claim'
         schemaVersion = 1
+        state = 'prepared'
         generationId = [string]$plan.generationId
         mappingIdentity = $mappingIdentity
         planSha256 = [string]$planSnapshot.sha256

@@ -1070,6 +1070,33 @@ function Get-CodexHookManifestMatches {
     )
 }
 
+function Test-CodexHookRawCommandContainsManagedWrapperPath {
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][string]$Command
+    )
+
+    # This is intentionally a conservative, read-free ambiguity check. If tokenization
+    # failed, an exact managed wrapper path anywhere in the opaque command could still
+    # be the command target. Do not attempt to repair or echo the opaque value.
+    $normalizedCommand = $Command.Replace('/', '\')
+    $opaqueCandidates = @($normalizedCommand, $normalizedCommand.Replace('"', ''))
+    foreach ($hook in @($Manifest.hooks)) {
+        if ($null -eq $hook.wrapperPath -or $hook.wrapperPath -isnot [string]) { continue }
+        try {
+            $managedWrapperPath = [IO.Path]::GetFullPath(([string]$hook.wrapperPath).Replace('/', '\'))
+        } catch {
+            continue
+        }
+        foreach ($opaqueCandidate in $opaqueCandidates) {
+            if ($opaqueCandidate.IndexOf($managedWrapperPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
 function Copy-CodexHookJsonValue {
     param([Parameter(Mandatory)][AllowNull()][object]$Value)
 
@@ -1128,6 +1155,13 @@ function Get-CodexHookRegistryEntryAnalysis {
     }
     if ($customPathMatches.Count -gt 0 -and $exactMatches.Count -eq 0) {
         throw "受管 custom wrapper identity 漂移：event=$Event"
+    }
+    if (
+        -not $parsed.parsed -and
+        $command -is [string] -and
+        (Test-CodexHookRawCommandContainsManagedWrapperPath -Manifest $Manifest -Command ([string]$command))
+    ) {
+        throw "受管 custom wrapper command 无法安全解析：event=$Event"
     }
 
     return [pscustomobject][ordered]@{
@@ -1897,6 +1931,71 @@ function Assert-CodexHookNoReparseAncestor {
     }
 }
 
+function Assert-CodexHookMappingIdentity {
+    param(
+        [Parameter(Mandatory)][string]$Value,
+        [string]$Name = 'mappingIdentity'
+    )
+
+    if ($Value -cnotmatch '^[0-9a-f]{64}$') {
+        throw "$Name 非法。"
+    }
+    return $Value
+}
+
+function Assert-CodexHookGenerationId {
+    param(
+        [Parameter(Mandatory)][string]$Value,
+        [string]$Name = 'generationId'
+    )
+
+    $generationGuid = [guid]::Empty
+    if (
+        -not [guid]::TryParse($Value, [ref]$generationGuid) -or
+        $generationGuid -eq [guid]::Empty -or
+        $Value -cne $generationGuid.ToString()
+    ) {
+        throw "$Name 非法。"
+    }
+    return $Value
+}
+
+function Get-CodexHookFixtureDeploymentMutexName {
+    param([Parameter(Mandatory)][string]$MappingIdentity)
+
+    $identity = Assert-CodexHookMappingIdentity -Value $MappingIdentity
+    return "Local\CodexHookDeploymentFixture-$identity"
+}
+
+function Get-CodexHookFixtureLifecyclePaths {
+    param(
+        [Parameter(Mandatory)][string]$MappingIdentity,
+        [Parameter(Mandatory)][string]$GenerationId
+    )
+
+    $identity = Assert-CodexHookMappingIdentity -Value $MappingIdentity
+    $generation = Assert-CodexHookGenerationId -Value $GenerationId
+    $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+    $lifecycleRoot = Join-Path $fixtureRoot '.deployment-state'
+    $mappingRoot = Join-Path (Join-Path $lifecycleRoot 'mappings') $identity
+    $claimsRoot = Join-Path $mappingRoot 'claims'
+    $claimPath = Join-Path $claimsRoot "$generation.json"
+    foreach ($pathFact in @(
+        @{ Path = $lifecycleRoot; Name = 'fixed lifecycle root' },
+        @{ Path = $mappingRoot; Name = 'mapping lifecycle root' },
+        @{ Path = $claimsRoot; Name = 'mapping claims root' },
+        @{ Path = $claimPath; Name = 'mapping generation claim' }
+    )) {
+        [void](Assert-CodexHookFixturePath -Path ([string]$pathFact.Path) -Name ([string]$pathFact.Name))
+    }
+    return [pscustomobject][ordered]@{
+        lifecycleRoot = [IO.Path]::GetFullPath($lifecycleRoot)
+        mappingRoot = [IO.Path]::GetFullPath($mappingRoot)
+        claimsRoot = [IO.Path]::GetFullPath($claimsRoot)
+        claimPath = [IO.Path]::GetFullPath($claimPath)
+    }
+}
+
 function New-CodexHookDeploymentPlanDocument {
     [CmdletBinding()]
     param(
@@ -2078,10 +2177,7 @@ function Assert-CodexHookDeploymentPlanFresh {
     if ($Plan.artifactType -cne 'env-governance.codex-hook-deployment-plan' -or [int]$Plan.schemaVersion -ne 1) {
         throw 'deployment plan artifact/schema 非法。'
     }
-    $generationGuid = [guid]::Empty
-    if (-not [guid]::TryParse([string]$Plan.generationId, [ref]$generationGuid) -or $generationGuid -eq [guid]::Empty) {
-        throw 'deployment plan generationId 非法。'
-    }
+    [void](Assert-CodexHookGenerationId -Value ([string]$Plan.generationId) -Name 'deployment plan generationId')
     $generated = [datetimeoffset]::MinValue
     if (-not [datetimeoffset]::TryParse([string]$Plan.generatedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$generated)) {
         throw 'deployment plan generatedAtUtc 非法。'
@@ -2111,7 +2207,7 @@ function Assert-CodexHookDeploymentPlanFresh {
         Assert-CodexHookString -Value $Plan.liveFacts.$stringProperty -Name "plan liveFacts.$stringProperty"
     }
     if ($Plan.sourceFacts.mappingIdentity -cne $Plan.liveFacts.mappingIdentity) { throw 'deployment plan mapping identity 不一致。' }
-    if ([string]$Plan.sourceFacts.mappingIdentity -cnotmatch '^[0-9a-f]{64}$') { throw 'deployment plan mappingIdentity 非法。' }
+    [void](Assert-CodexHookMappingIdentity -Value ([string]$Plan.sourceFacts.mappingIdentity) -Name 'deployment plan mappingIdentity')
     if ($Plan.sourceFacts.manifestSha256 -cne $Plan.manifestSha256) { throw 'deployment plan manifest hash 不一致。' }
     [void](Assert-CodexHookDPath -Value ([string]$Plan.sourceFacts.manifestPath) -Name 'plan manifestPath')
     [void](Assert-CodexHookFixturePath -Path ([string]$Plan.sourceFacts.sourceRoot) -Name 'plan sourceRoot')
@@ -2403,27 +2499,60 @@ function Restore-CodexHookDeploymentCore {
 
     $evidencePath = Assert-CodexHookFixturePath -Path $EvidenceDirectory -Name 'EvidenceDirectory'
     $restoreManifestPath = Join-Path $evidencePath 'restore-manifest.json'
-    $restoreSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $restoreManifestPath -Name 'restore manifest' -AllowedExactPaths @($restoreManifestPath)
-    Assert-CodexHookStrictJsonText -JsonText $restoreSnapshot.text
-    $restore = $restoreSnapshot.text | ConvertFrom-Json -Depth 128 -ErrorAction Stop
-    Assert-CodexHookExactProperties -Value $restore -Names @(
+
+    # Read only enough identity to select the mapping-scoped mutex. The authoritative
+    # manifest is re-read and fully validated after the mutex is held.
+    $identitySnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $restoreManifestPath -Name 'restore manifest identity' -AllowedExactPaths @($restoreManifestPath)
+    Assert-CodexHookStrictJsonText -JsonText $identitySnapshot.text
+    $identityRestore = $identitySnapshot.text | ConvertFrom-Json -Depth 128 -ErrorAction Stop
+    Assert-CodexHookExactProperties -Value $identityRestore -Names @(
         'artifactType', 'schemaVersion', 'generationId', 'planSha256', 'mappingIdentity', 'actions'
-    ) -Scope 'restore manifest'
-    if ($restore.artifactType -cne 'env-governance.codex-hook-restore-manifest' -or [int]$restore.schemaVersion -ne 1) {
+    ) -Scope 'restore manifest identity'
+    if ($identityRestore.artifactType -cne 'env-governance.codex-hook-restore-manifest' -or [int]$identityRestore.schemaVersion -ne 1) {
         throw 'restore manifest artifact/schema 非法。'
     }
+    [void](Assert-CodexHookGenerationId -Value ([string]$identityRestore.generationId) -Name 'restore generationId')
+    [void](Assert-CodexHookMappingIdentity -Value ([string]$identityRestore.mappingIdentity) -Name 'restore mappingIdentity')
 
-    $evidenceRoot = Split-Path -Parent $evidencePath
-    $claimPath = Join-Path (Join-Path $evidenceRoot '.claims') "$($restore.generationId).json"
+    $mutexName = Get-CodexHookFixtureDeploymentMutexName -MappingIdentity ([string]$identityRestore.mappingIdentity)
+    $deploymentMutex = [Threading.Mutex]::new($false, $mutexName)
+    $mutexHeld = $false
+    try {
+        $mutexHeld = $deploymentMutex.WaitOne(0)
+        if (-not $mutexHeld) { throw 'deployment mutex busy；restore 已拒绝。' }
+
+        $restoreSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $restoreManifestPath -Name 'restore manifest' -AllowedExactPaths @($restoreManifestPath)
+        Assert-CodexHookStrictJsonText -JsonText $restoreSnapshot.text
+        $restore = $restoreSnapshot.text | ConvertFrom-Json -Depth 128 -ErrorAction Stop
+        Assert-CodexHookExactProperties -Value $restore -Names @(
+            'artifactType', 'schemaVersion', 'generationId', 'planSha256', 'mappingIdentity', 'actions'
+        ) -Scope 'restore manifest'
+        if (
+            $restore.artifactType -cne 'env-governance.codex-hook-restore-manifest' -or
+            [int]$restore.schemaVersion -ne 1 -or
+            $restore.generationId -cne $identityRestore.generationId -or
+            $restore.mappingIdentity -cne $identityRestore.mappingIdentity
+        ) {
+            throw 'restore manifest identity 在 mutex 获取前后不一致。'
+        }
+        [void](Assert-CodexHookGenerationId -Value ([string]$restore.generationId) -Name 'restore generationId')
+        [void](Assert-CodexHookMappingIdentity -Value ([string]$restore.mappingIdentity) -Name 'restore mappingIdentity')
+        if ([string]$restore.planSha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'restore planSha256 非法。' }
+
+        $lifecyclePaths = Get-CodexHookFixtureLifecyclePaths `
+            -MappingIdentity ([string]$restore.mappingIdentity) `
+            -GenerationId ([string]$restore.generationId)
+        $claimPath = [string]$lifecyclePaths.claimPath
     $claimSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $claimPath -Name 'deployment claim' -AllowedExactPaths @($claimPath)
     Assert-CodexHookStrictJsonText -JsonText $claimSnapshot.text
     $claim = $claimSnapshot.text | ConvertFrom-Json -Depth 32 -ErrorAction Stop
     Assert-CodexHookExactProperties -Value $claim -Names @(
-        'artifactType', 'schemaVersion', 'generationId', 'mappingIdentity', 'planSha256', 'evidenceDirectory', 'restoreManifestSha256'
+        'artifactType', 'schemaVersion', 'state', 'generationId', 'mappingIdentity', 'planSha256', 'evidenceDirectory', 'restoreManifestSha256'
     ) -Scope 'deployment claim'
     if (
         $claim.artifactType -cne 'env-governance.codex-hook-deployment-claim' -or
         [int]$claim.schemaVersion -ne 1 -or
+        $claim.state -cne 'prepared' -or
         $claim.generationId -cne $restore.generationId -or
         $claim.mappingIdentity -cne $restore.mappingIdentity -or
         $claim.planSha256 -cne $restore.planSha256 -or
@@ -2432,6 +2561,34 @@ function Restore-CodexHookDeploymentCore {
     ) {
         throw 'deployment claim 与 restore manifest 不一致。'
     }
+
+        $statusPath = Join-Path $evidencePath 'status.json'
+        $statusSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $statusPath -Name 'deployment status' -AllowedExactPaths @($statusPath)
+        Assert-CodexHookStrictJsonText -JsonText $statusSnapshot.text
+        $oldStatus = $statusSnapshot.text | ConvertFrom-Json -Depth 32 -ErrorAction Stop
+        Assert-CodexHookExactProperties -Value $oldStatus -Names @(
+            'artifactType', 'schemaVersion', 'generationId', 'status', 'completedActionIds'
+        ) -Scope 'deployment status'
+        if (
+            $oldStatus.artifactType -cne 'env-governance.codex-hook-deployment-status' -or
+            [int]$oldStatus.schemaVersion -ne 1 -or
+            $oldStatus.generationId -cne $restore.generationId -or
+            $oldStatus.status -cnotin @('applying', 'rollback-pending', 'applied', 'rolled-back', 'restored')
+        ) {
+            throw 'deployment status schema/generation/状态非法。'
+        }
+        Assert-CodexHookArray -Value ([object]$oldStatus.completedActionIds) -Name 'deployment status completedActionIds'
+        foreach ($completedActionId in @($oldStatus.completedActionIds)) {
+            if ($completedActionId -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$completedActionId)) {
+                throw 'deployment status completedActionIds 非法。'
+            }
+        }
+        if ($FinalStatus -ceq 'rolled-back' -and $oldStatus.status -cnotin @('rollback-pending', 'rolled-back')) {
+            throw 'deployment status 不允许转为 rolled-back。'
+        }
+        if ($FinalStatus -ceq 'restored' -and $oldStatus.status -ceq 'rolled-back') {
+            throw '已 rolled-back deployment 不得改写为 restored。'
+        }
 
     $preflight = [Collections.Generic.List[object]]::new()
     foreach ($action in @($restore.actions)) {
@@ -2456,7 +2613,12 @@ function Restore-CodexHookDeploymentCore {
             $beforeHash = Get-CodexHookTextSha256 -Text ($(if ($beforeValue.present) { "present`0$($beforeValue.value)" } else { 'absent' }))
             $state = if ($current.valueSha256 -ceq $beforeHash) { 'already-before' } elseif ($current.valueSha256 -ceq $action.deployedSha256) { 'deployed' } else { 'drifted' }
             if ($state -ceq 'drifted') { throw 'environment restore preflight 检测到漂移。' }
-            $preflight.Add([pscustomobject]@{ action = $action; state = $state; backup = $beforeValue })
+            $preflight.Add([pscustomobject]@{
+                action = $action
+                state = $state
+                backup = $beforeValue
+                expectedBeforeValueSha256 = $beforeHash
+            })
             continue
         }
 
@@ -2482,6 +2644,19 @@ function Restore-CodexHookDeploymentCore {
         $preflight.Add([pscustomobject]@{ action = $action; state = $state; backup = $backupBytes })
     }
 
+    if ($oldStatus.status -cin @('rolled-back', 'restored') -and @($preflight | Where-Object state -cne 'already-before').Count -ne 0) {
+        throw 'deployment terminal status 与 restore target 状态不一致。'
+    }
+
+    $knownActionIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($item in @($preflight)) { [void]$knownActionIds.Add([string]$item.action.actionId) }
+    $seenCompletedActionIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($completedActionId in @($oldStatus.completedActionIds)) {
+        if (-not $knownActionIds.Contains([string]$completedActionId) -or -not $seenCompletedActionIds.Add([string]$completedActionId)) {
+            throw 'deployment status completedActionIds 与 restore manifest 不一致。'
+        }
+    }
+
     $changed = $false
     foreach ($item in @($preflight | Sort-Object { -[int]$_.action.restoreOrder })) {
         if ($item.state -ceq 'already-before') { continue }
@@ -2493,6 +2668,14 @@ function Restore-CodexHookDeploymentCore {
                 -WriteValue $EnvironmentWriteValue `
                 -Restore `
                 -RestoreValue $item.backup
+            $restoredEnvironment = Get-CodexHookEnvironmentValueFact `
+                -Name ([string]$action.environmentName) `
+                -Scope ([string]$action.environmentScope) `
+                -ReadValue $EnvironmentReadValue `
+                -Desired ([string]$action.environmentAfter)
+            if ($restoredEnvironment.valueSha256 -cne [string]$item.expectedBeforeValueSha256) {
+                throw 'environment restore postcheck 失败。'
+            }
         } elseif ($action.beforeExists) {
             Set-CodexHookAtomicFileBytes `
                 -Path ([string]$action.path) `
@@ -2507,26 +2690,22 @@ function Restore-CodexHookDeploymentCore {
         $changed = $true
     }
 
-    $statusPath = Join-Path $evidencePath 'status.json'
-    $completedActionIds = @()
-    if ([IO.File]::Exists($statusPath)) {
-        $statusSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $statusPath -Name 'deployment status' -AllowedExactPaths @($statusPath)
-        Assert-CodexHookStrictJsonText -JsonText $statusSnapshot.text
-        $oldStatus = $statusSnapshot.text | ConvertFrom-Json -Depth 32
-        if ($oldStatus.PSObject.Properties.Name -contains 'completedActionIds') { $completedActionIds = @($oldStatus.completedActionIds) }
-    }
     Set-CodexHookEvidenceJson -Path $statusPath -Document ([pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-hook-deployment-status'
         schemaVersion = 1
         generationId = [string]$restore.generationId
         status = $FinalStatus
-        completedActionIds = [string[]]$completedActionIds
+        completedActionIds = [string[]]@($oldStatus.completedActionIds)
     })
 
-    return [pscustomobject][ordered]@{
+        return [pscustomobject][ordered]@{
         restored = $true
         idempotent = -not $changed
         evidenceDirectory = $evidencePath
         status = $FinalStatus
+    }
+    } finally {
+        if ($mutexHeld) { [void]$deploymentMutex.ReleaseMutex() }
+        $deploymentMutex.Dispose()
     }
 }
