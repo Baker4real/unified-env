@@ -757,13 +757,14 @@ function Invoke-CodexHookProductionRegistrationRepairApplyCore {
         [Parameter(Mandatory)][object]$Profile,
         [scriptblock]$TestAfterRegistryPublish,
         [scriptblock]$TestBeforeRollbackMove,
+        [scriptblock]$TestAfterRollbackSnapshot,
         [ValidateSet('none', 'crash-after-registry-publish')]
         [string]$TestFaultInjection = 'none'
     )
 
     [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $Profile -AllowFixtureAdapter)
     if (
-        ($null -ne $TestAfterRegistryPublish -or $null -ne $TestBeforeRollbackMove -or $TestFaultInjection -cne 'none') -and
+        ($null -ne $TestAfterRegistryPublish -or $null -ne $TestBeforeRollbackMove -or $null -ne $TestAfterRollbackSnapshot -or $TestFaultInjection -cne 'none') -and
         -not $Profile.isFixtureAdapter
     ) {
         throw 'test-only production apply fault injection 仅允许 fixed fixture adapter。'
@@ -932,10 +933,12 @@ function Invoke-CodexHookProductionRegistrationRepairApplyCore {
                         -CapabilityRoot ([string]$Profile.codexHome) `
                         -AllowedExactPaths @([string]$Profile.registryPath) `
                         -Scope 'production automatic registry rollback' `
-                        -BeforeMove $TestBeforeRollbackMove
+                        -BeforeMove $TestBeforeRollbackMove `
+                        -TestAfterPremoveSnapshot $TestAfterRollbackSnapshot
                 } catch {
-                    # A competing writer may win between the first snapshot and the guarded
-                    # rename. Re-read below; never retry over an unrecognized state.
+                    # An uncoordinated external delete/replace can still alter the pathname
+                    # around the final syscall. Re-read below; never retry over an
+                    # unrecognized state or describe this as an absolute CAS.
                 }
             }
             $afterRollbackAttempt = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.registryPath) -CapabilityRoot ([string]$Profile.codexHome) -AllowedExactPaths @([string]$Profile.registryPath) -Name 'production rollback outcome registry'

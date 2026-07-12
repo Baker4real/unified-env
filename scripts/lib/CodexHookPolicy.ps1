@@ -2556,7 +2556,8 @@ function Set-CodexHookAtomicFileBytesWithCapability {
         [Parameter(Mandatory)][string]$CapabilityRoot,
         [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
         [string]$Scope = 'atomic publish',
-        [scriptblock]$BeforeMove
+        [scriptblock]$BeforeMove,
+        [scriptblock]$TestAfterPremoveSnapshot
     )
 
     $fullPath = Assert-CodexHookCapabilityPath `
@@ -2587,21 +2588,39 @@ function Set-CodexHookAtomicFileBytesWithCapability {
         }
         $tempPath = Join-Path $parent ".codex-hook-$([guid]::NewGuid().ToString('N')).tmp"
         $tempFile = $null
+        $targetLease = $null
         try {
             $tempFile = $directoryGuard.CreateTempFile($tempPath)
             $tempFile.WriteAndFlush($Bytes)
             if ($null -ne $BeforeMove) { & $BeforeMove $fullPath }
-            $preMove = Get-CodexHookCapabilityFileSnapshot `
-                -Path $fullPath `
-                -CapabilityRoot $capabilityRootPath `
-                -AllowedExactPaths $AllowedExactPaths `
-                -Name "$Scope premove"
+            if ($ExpectedExists) {
+                $targetLease = $directoryGuard.AcquireTargetFileLease($fullPath)
+                [byte[]]$leasedBytes = $targetLease.SnapshotBytes
+                $preMove = [pscustomobject][ordered]@{
+                    path = $fullPath
+                    exists = $true
+                    state = 'regular-file'
+                    sha256 = Get-CodexHookBytesSha256 -Bytes $leasedBytes
+                    bytes = $leasedBytes
+                }
+            } else {
+                $preMove = Get-CodexHookCapabilityFileSnapshot `
+                    -Path $fullPath `
+                    -CapabilityRoot $capabilityRootPath `
+                    -AllowedExactPaths $AllowedExactPaths `
+                    -Name "$Scope premove"
+            }
             Assert-CodexHookSnapshotExpectedState -Snapshot $preMove -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope "$Scope premove"
+            if ($null -ne $TestAfterPremoveSnapshot) { & $TestAfterPremoveSnapshot $fullPath }
             [void](Assert-CodexHookCapabilityPath -Path $parent -CapabilityRoot $capabilityRootPath -Name "$Scope parent premove")
             $tempFile.RenameTo($fullPath, $ExpectedExists)
         } finally {
             try {
-                if ($null -ne $tempFile) { $tempFile.Dispose() }
+                try {
+                    if ($null -ne $tempFile) { $tempFile.Dispose() }
+                } finally {
+                    if ($null -ne $targetLease) { $targetLease.Dispose() }
+                }
             } finally {
                 if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
             }
@@ -2627,7 +2646,8 @@ function Set-CodexHookAtomicFileBytes {
         [AllowNull()][string]$ExpectedSha256,
         [Parameter(Mandatory)][string]$AfterSha256,
         [string]$Scope = 'atomic publish',
-        [scriptblock]$BeforeMove
+        [scriptblock]$BeforeMove,
+        [scriptblock]$TestAfterPremoveSnapshot
     )
 
     $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Scope
@@ -2640,7 +2660,8 @@ function Set-CodexHookAtomicFileBytes {
         -CapabilityRoot 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test' `
         -AllowedExactPaths @($fullPath) `
         -Scope $Scope `
-        -BeforeMove $BeforeMove
+        -BeforeMove $BeforeMove `
+        -TestAfterPremoveSnapshot $TestAfterPremoveSnapshot
 }
 
 function Set-CodexHookCapabilityJson {

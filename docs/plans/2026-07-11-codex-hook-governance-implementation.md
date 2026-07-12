@@ -27,6 +27,8 @@
 - `Bash` matcher 暂时保留，只有合成 payload 与 fresh live 证据都否定时才能改 matcher。
 - User `SERENA_HOME` 的唯一目标值是 `D:\Codex\.serena`；变更必须记录 before/after 和 restartRequired，不输出其他用户环境值。
 - 每个任务先写稳定红灯，再写最小实现；每个任务独立提交。Tasks 2、3、4、5、7、8 需要风险/对抗审查。
+- existing-target 原子发布使用 write-excluding target lease：`FileShare.Read | FileShare.Delete` 明确不共享 `WRITE`，同一 verified handle 完成最终 bytes/hash 并持有到 `FileRenameInformationEx(65)` rename 结束；不支持 class 65 时失败关闭，不回退 class 10。
+- 完整性并发保证不得表述为绝对 CAS：普通用户态 Windows API 无法同时让 target handle 不共享 `DELETE`，又允许另一 handle 在其存活期间原子替换。当前保证由同进程 mutex、fresh rederive、两次 snapshot、write-excluding lease、同目录原子 rename、handle/path postcheck 与 blocked rollback 组成；不合作外部 delete/replace 在最终 syscall 前的残余窗口必须写入 production PLAN。
 
 ---
 
@@ -302,7 +304,13 @@ Invoke-CodexHookPostChecks -Plan $plan
 Complete-CodexHookEvidence -EvidenceDirectory $evidence -Status 'applied'
 ```
 
-每个发布函数只能写 plan actions 声明的绝对目标；临时文件必须位于目标同目录，使用 `[IO.File]::Move($temp,$target,$true)`。异常 catch 中调用共享 restore 核心；restore manifest 记录 `path,beforeExists,beforeSha256,backupRelativePath,restoreOrder`。
+每个发布函数只能写 plan actions 声明的绝对目标；临时文件必须位于目标同目录。existing-target 使用同一
+write-excluding target lease 完成最终 bytes/hash，lease 持有到
+`NtSetInformationFile(FileRenameInformationEx=65, REPLACE|POSIX)` 原子 rename 完成；missing-target 使用
+flags=0 并让竞争创建 collision-safe。Windows/filesystem 不支持 class 65 时失败关闭，禁止回退 class 10。
+异常 catch 中调用共享 restore 核心；restore manifest 记录
+`path,beforeExists,beforeSha256,backupRelativePath,restoreOrder`。该合同不声称阻止不合作外部 delete/replace
+恰在最终 syscall 前发生，production PLAN 必须持久记录此完整性并发边界。
 
 plan 使用 `ReportArtifactPublisher.ps1` 发布到 `reports/codex-hook-deployment-plan/plan.json` 与 `PLAN.md`。
 apply 严格要求 `artifactType="env-governance.codex-hook-deployment-plan"`、`schemaVersion=1`、
@@ -420,6 +428,10 @@ Run:
 ```
 
 Expected plan：唯一 registry 变化是 SessionStart 从 `provider,github,projectless,activate,dashboard` 变为 `provider,projectless,activate,dashboard,github`；文件 actions 和 environmentActions 均为 0；`[hooks.state]` 无 action。
+
+production `PLAN.md` 还必须记录 60 分钟 freshness gate、`restartRequired=true` 与“完整性并发边界”：
+部署器排除最终采样后的内容 writer 并使用 crash-atomic rename，但普通用户态 Windows API 不保证阻止
+不合作外部 delete/replace 恰在最终系统调用前发生；不得使用“绝对 CAS”措辞。
 
 `-ProductionRegistrationRepair` 只选择固定 `codex-hook-production-registration-repair-v1` profile；调用者不能覆盖 manifest/source/home/registry/plan/evidence 路径，也不能注入环境 adapter 或 fault injection。该命令只读 live 并发布项目内 plan，**不得在本步骤执行 apply/restore**。
 

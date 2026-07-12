@@ -188,6 +188,39 @@ namespace CodexHookGovernance
             }
         }
 
+        public GuardedTargetFileLease AcquireTargetFileLease(string targetPath)
+        {
+            ThrowIfDisposed();
+            string lexicalPath = ValidateChildPath(targetPath, "targetPath");
+            SafeFileHandle handle = CreateFileW(
+                lexicalPath,
+                GenericRead,
+                // NTFS requires existing target handles to share DELETE for a
+                // FileRenameInformationEx POSIX replacement. WRITE remains excluded.
+                FileShare.Read | FileShare.Delete,
+                IntPtr.Zero,
+                OpenExisting,
+                FileAttributeNormal | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, "Unable to acquire a guarded target file lease.");
+            }
+
+            try
+            {
+                VerifyRegularFileHandle(handle, lexicalPath);
+                return new GuardedTargetFileLease(this, lexicalPath, handle);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern SafeFileHandle CreateFileW(
             string fileName,
@@ -523,9 +556,87 @@ namespace CodexHookGovernance
         }
     }
 
+    public sealed class GuardedTargetFileLease : IDisposable
+    {
+        private readonly VerifiedDirectoryChainGuard owner;
+        private readonly SafeFileHandle handle;
+        private readonly FileStream stream;
+        private readonly byte[] snapshotBytes;
+        private bool disposed;
+
+        internal GuardedTargetFileLease(
+            VerifiedDirectoryChainGuard owner,
+            string originalPath,
+            SafeFileHandle handle)
+        {
+            this.owner = owner;
+            OriginalPath = originalPath;
+            this.handle = handle;
+            stream = new FileStream(handle, FileAccess.Read);
+            try
+            {
+                snapshotBytes = ReadAllBytesFromHandleCore();
+            }
+            catch
+            {
+                stream.Dispose();
+                throw;
+            }
+        }
+
+        public string OriginalPath { get; }
+
+        public byte[] SnapshotBytes
+        {
+            get
+            {
+                ThrowIfDisposed();
+                owner.ThrowIfDisposed();
+                return (byte[])snapshotBytes.Clone();
+            }
+        }
+
+        public byte[] ReadAllBytesFromHandle()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            return ReadAllBytesFromHandleCore();
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            stream.Dispose();
+        }
+
+        private byte[] ReadAllBytesFromHandleCore()
+        {
+            stream.Position = 0;
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                stream.CopyTo(buffer);
+                return buffer.ToArray();
+            }
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (disposed)
+            {
+                throw new ObjectDisposedException(nameof(GuardedTargetFileLease));
+            }
+        }
+    }
+
     public sealed class GuardedTempFile : IDisposable
     {
-        private const int FileRenameInformation = 10;
+        private const int FileRenameInformationEx = 65;
+        private const uint FileRenameReplaceIfExists = 0x00000001;
+        private const uint FileRenamePosixSemantics = 0x00000002;
 
         private readonly VerifiedDirectoryChainGuard owner;
         private readonly SafeFileHandle handle;
@@ -616,7 +727,10 @@ namespace CodexHookGovernance
                 {
                     Marshal.WriteByte(buffer, index, 0);
                 }
-                Marshal.WriteByte(buffer, 0, replaceIfExists ? (byte)1 : (byte)0);
+                uint renameFlags = replaceIfExists
+                    ? FileRenameReplaceIfExists | FileRenamePosixSemantics
+                    : 0;
+                Marshal.WriteInt32(buffer, 0, unchecked((int)renameFlags));
                 Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
                 Marshal.WriteInt32(buffer, fileNameLengthOffset, targetNameBytes.Length);
                 Marshal.Copy(targetNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), targetNameBytes.Length);
@@ -627,7 +741,9 @@ namespace CodexHookGovernance
                     out ioStatusBlock,
                     buffer,
                     checked((uint)bufferLength),
-                    FileRenameInformation);
+                    FileRenameInformationEx);
+                // This deliberately has no FileRenameInformation(10) fallback:
+                // unsupported class-65 semantics must fail closed.
                 if (status != 0)
                 {
                     uint dosError = RtlNtStatusToDosError(status);

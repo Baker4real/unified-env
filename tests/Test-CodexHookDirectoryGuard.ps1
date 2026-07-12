@@ -260,6 +260,51 @@ Assert-True ($script:atomicTempDeleteWin32 -eq 32) 'atomic writer 必须让同�
 Assert-True ((Get-CodexHookBytesSha256 -Bytes ([IO.File]::ReadAllBytes($atomicTarget))) -ceq (Get-CodexHookBytesSha256 -Bytes $atomicAfter)) 'guarded atomic writer 必须发布目标 bytes'
 Assert-True (@(Get-ChildItem -LiteralPath $externalRoot -Force).Count -eq 0) 'atomic writer 的 rename+junction 攻击不得写入外部 root'
 
+$leaseTarget = Join-Path $atomicParent 'lease-target.bin'
+$leaseTempPath = Join-Path $atomicParent '.lease-target.tmp'
+[byte[]]$leaseBefore = [Text.UTF8Encoding]::new($false).GetBytes('lease-before')
+[byte[]]$leaseAfter = [Text.UTF8Encoding]::new($false).GetBytes('lease-after')
+[IO.File]::WriteAllBytes($leaseTarget, $leaseBefore)
+$leaseGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath $atomicParent
+$targetLease = $null
+$leaseTemp = $null
+try {
+    $leaseTemp = $leaseGuard.CreateTempFile($leaseTempPath)
+    $leaseTemp.WriteAndFlush($leaseAfter)
+    $targetLease = $leaseGuard.AcquireTargetFileLease($leaseTarget)
+    Assert-True ((Get-CodexHookBytesSha256 -Bytes ([byte[]]$targetLease.SnapshotBytes)) -ceq (Get-CodexHookBytesSha256 -Bytes $leaseBefore)) 'target lease snapshot 必须来自同一 verified handle'
+    $leaseTemp.RenameTo($leaseTarget, $true)
+    Assert-True ((Get-CodexHookBytesSha256 -Bytes ([byte[]]$targetLease.ReadAllBytesFromHandle())) -ceq (Get-CodexHookBytesSha256 -Bytes $leaseBefore)) '被替换 target 的旧 lease handle 跨 rename 后仍必须读取旧 bytes'
+    $leaseTemp.Dispose()
+    $leaseTemp = $null
+    Assert-True ((Get-CodexHookBytesSha256 -Bytes ([IO.File]::ReadAllBytes($leaseTarget))) -ceq (Get-CodexHookBytesSha256 -Bytes $leaseAfter)) 'rename 后重新打开 target path 必须读取 approved new bytes'
+} finally {
+    if ($null -ne $leaseTemp) { $leaseTemp.Dispose() }
+    if ($null -ne $targetLease) { $targetLease.Dispose() }
+    if ([IO.File]::Exists($leaseTempPath)) { [IO.File]::Delete($leaseTempPath) }
+    $leaseGuard.Dispose()
+}
+
+$writerConflictTarget = Join-Path $atomicParent 'writer-conflict.bin'
+[IO.File]::WriteAllBytes($writerConflictTarget, $leaseBefore)
+$writerConflict = [IO.File]::Open(
+    $writerConflictTarget,
+    [IO.FileMode]::Open,
+    [IO.FileAccess]::Write,
+    ([IO.FileShare]::Read -bor [IO.FileShare]::Write -bor [IO.FileShare]::Delete))
+$writerConflictGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath $atomicParent
+try {
+    $writerConflictError = Assert-Throws -Message '已有内容 writer 时 target lease acquisition 必须失败关闭' -Action {
+        $unexpectedLease = $null
+        $unexpectedLease = $writerConflictGuard.AcquireTargetFileLease($writerConflictTarget)
+        try { } finally { if ($null -ne $unexpectedLease) { $unexpectedLease.Dispose() } }
+    }
+    Assert-True ($writerConflictError -match 'lease|access|used|另一个进程') '已有 writer 冲突必须返回稳定的 sharing/access 类失败'
+} finally {
+    $writerConflictGuard.Dispose()
+    $writerConflict.Dispose()
+}
+
 $deleteTarget = Join-Path $atomicParent 'delete-target.bin'
 [byte[]]$deleteBytes = [Text.UTF8Encoding]::new($false).GetBytes('delete-me')
 [IO.File]::WriteAllBytes($deleteTarget, $deleteBytes)
@@ -331,8 +376,12 @@ foreach ($engineScriptPath in $engineScriptPaths) {
 
 $policyPath = Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1'
 $policyText = [IO.File]::ReadAllText($policyPath)
+$handleBoundSource = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'scripts\lib\CodexHookHandleBoundIO.cs'))
 Assert-True ($policyText -notmatch '\[IO\.File\]::Move\s*\(') 'guarded atomic writer 不得回退到 path-based File.Move'
 Assert-True ($policyText -notmatch '\[IO\.FileStream\]::new\s*\(') 'guarded atomic writer 必须由 C# same-handle temp 对象持有 CreateNew handle'
+Assert-True ($handleBoundSource -match 'FileRenameInformationEx\s*=\s*65') 'guarded rename 必须固定使用 FileRenameInformationEx=65'
+Assert-True ($handleBoundSource -match 'FileRenameReplaceIfExists\s*\|\s*FileRenamePosixSemantics') 'existing-target rename 必须组合 REPLACE 与 POSIX flags'
+Assert-True ($handleBoundSource -notmatch 'FileRenameInformation\s*=\s*10') 'guarded rename 不得回退到 class 10'
 $atomicWriterStart = $policyText.IndexOf('function Set-CodexHookAtomicFileBytes', [StringComparison]::Ordinal)
 $guardedDeleteStart = $policyText.IndexOf('function Remove-CodexHookFixtureFile', [StringComparison]::Ordinal)
 $evidenceWriterStart = $policyText.IndexOf('function Set-CodexHookEvidenceJson', [StringComparison]::Ordinal)

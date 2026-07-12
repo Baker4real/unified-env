@@ -1,7 +1,7 @@
 {
   "artifactType": "env-governance.codex-hook-deployment-plan",
   "schemaVersion": 1,
-  "generatedAtUtc": "2026-07-12T04:51:11.2334861+00:00",
+  "generatedAtUtc": "2026-07-12T08:14:15.7954581+00:00",
   "manifestSha256": "21185762791b263499a39ca164935b23ec1db88263a89c4c35e079547cfc2378",
   "mode": "registration-repair",
   "applyEligible": true,
@@ -244,5 +244,5 @@
     }
   ],
   "rollbackRequired": true,
-  "generationId": "9d2ad44b-debc-4b8d-bd82-f00e3f459143"
+  "generationId": "991cafff-4575-4182-8af1-225ad6ed7c2b"
 }

@@ -177,6 +177,25 @@ fail-open 模式；完整签名/认证检查保留为显式 strict 验收。内�
 7. 任一步 postcheck 失败，按反序恢复备份并再次验证 hash、JSON/TOML/YAML 语法和 wrapper 可用性。
 8. retirement 文件先取消注册；本轮默认备份后保留，不把删除作为迁移副作用。
 
+## 完整性并发边界
+
+Windows 普通用户态文件 API 存在一个必须显式记录的约束：如果目标 handle 不共享 `DELETE`，另一个
+handle 就不能在该 handle 存活期间原子替换目标；即使使用
+`FileRenameInformationEx(65) + FILE_RENAME_REPLACE_IF_EXISTS + FILE_RENAME_POSIX_SEMANTICS` 也会因
+sharing violation 失败。因此部署器不声称提供对所有不合作外部进程的绝对 compare-and-swap。
+
+existing-target 发布采用可实现的完整性合同：在 production mutex 内 fresh rederive；由同一 verified
+target handle 完成最终路径、普通文件、bytes 和 SHA-256 采样；该 lease 使用
+`FileShare.Read | FileShare.Delete`，明确不共享 `WRITE`，并持有到同目录 class 65 原子 rename 完成。
+随后继续做 handle/path postcheck；rollback 只有在 registry/status 双重回读确认后才报告成功，其他状态
+进入 blocked 语义。missing-target 发布使用 flags=0，若最终 missing snapshot 后出现竞争创建则 collision
+并失败关闭，不覆盖新文件。
+
+这套合同保证不合作的内容 writer 不能在最终采样后写入 third bytes，同时保留 crash-atomic replacement；
+它不保证阻止不合作外部进程恰好在最终系统调用前删除或替换目标名称。此残余边界由 fresh rederive、两次
+snapshot、write-excluding lease、原子 rename、handle/path postcheck 与 blocked rollback 共同缩小并显式
+暴露，不以“绝对 CAS”描述。
+
 ## Timeout 与 Failure Semantics
 
 - 外层 hook timeout 初始保持 10 秒，内部任一锁等待最多 1–2 秒，为运行、验证与清理留出预算。

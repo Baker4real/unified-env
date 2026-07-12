@@ -12,6 +12,7 @@ param(
         'postpublish-live-drift',
         'postpublish-static-and-registry-third',
         'rollback-cas-race',
+        'rollback-write-excluding-lease',
         'forged-evidence',
         'projection-summary'
     )]
@@ -44,6 +45,26 @@ function Assert-Throws {
 function Write-Utf8NoBom {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Text)
     [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false))
+}
+
+function Invoke-HiddenPowerShellFileWrite {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][byte[]]$Bytes
+    )
+
+    $pwshPath = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+    $targetLiteral = "'" + $TargetPath.Replace("'", "''") + "'"
+    $payload = [Convert]::ToBase64String($Bytes)
+    $command = "try { [IO.File]::WriteAllBytes($targetLiteral, [Convert]::FromBase64String('$payload')); exit 0 } catch [IO.IOException] { exit (`$_.Exception.HResult -band 0xffff) } catch { exit 254 }"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    $process = Start-Process `
+        -FilePath $pwshPath `
+        -ArgumentList @('-NoProfile', '-EncodedCommand', $encoded) `
+        -WindowStyle Hidden `
+        -Wait `
+        -PassThru
+    return [int]$process.ExitCode
 }
 
 function Initialize-HardeningFixture {
@@ -353,6 +374,38 @@ switch ($Case) {
         } 'rollback CAS race restore 必须不相容拒绝'
         Assert-True ($restoreFailure -match 'binding|rollback-blocked|不相容') "rollback CAS race restore 原因非法：$restoreFailure"
         Assert-True (((Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash.ToLowerInvariant()) -ceq $beforeRestoreSha256) 'rollback CAS race restore 必须 registry 零写'
+    }
+    'rollback-write-excluding-lease' {
+        $fixture = Initialize-HardeningFixture -ManagedOrder before
+        $state = New-CodexHookProductionRegistrationRepairState -Profile $fixture.profile
+        Write-Utf8NoBom -Path ([string]$fixture.profile.planPath) -Text ($state.plan | ConvertTo-Json -Depth 100)
+        $sourcePath = [string]$state.sourceFacts[0].path
+        $registryPath = [string]$fixture.profile.registryPath
+        [byte[]]$thirdBytes = [Text.UTF8Encoding]::new($false).GetBytes('{"external":"third"}')
+        $injectStaticDrift = {
+            [IO.File]::WriteAllText($sourcePath, 'source-drift', [Text.UTF8Encoding]::new($false))
+        }.GetNewClosure()
+        $rollbackLeaseAttempts = [ordered]@{ writeExit = $null }
+        $attackAfterSnapshot = {
+            param($Target)
+            Assert-True ($Target -ceq $registryPath) 'rollback target lease seam 必须命中 fixture registry'
+            $rollbackLeaseAttempts.writeExit = Invoke-HiddenPowerShellFileWrite `
+                -TargetPath $Target `
+                -Bytes $thirdBytes
+        }.GetNewClosure()
+        $failureMessage = Assert-Throws {
+            Invoke-CodexHookProductionRegistrationRepairApplyCore `
+                -Profile $fixture.profile `
+                -TestAfterRegistryPublish $injectStaticDrift `
+                -TestAfterRollbackSnapshot $attackAfterSnapshot |
+                Out-Null
+        } 'post-publish static drift 必须触发自动 rollback'
+        Assert-True ($failureMessage -match 'rollback-confirmed') "target lease rollback 必须完成受保护回滚；actual=$failureMessage"
+        Assert-True ($rollbackLeaseAttempts.writeExit -eq 32) "rollback write-excluding lease 必须跨进程阻止内容写入；actual=$($rollbackLeaseAttempts.writeExit)"
+        Assert-True (((Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash.ToLowerInvariant()) -ceq $fixture.registrySha256) 'target lease 保护下 rollback 必须恢复 before hash'
+        $paths = Get-CodexHookProductionRegistrationRepairLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$state.plan.generationId)
+        $status = Get-Content -LiteralPath ([string]$paths.statusPath) -Raw | ConvertFrom-Json -Depth 100
+        Assert-True ($status.status -ceq 'rolled-back') 'target lease 保护下 rollback status 必须 rolled-back'
     }
     'forged-evidence' {
         $applied = New-ActionableFixtureApply

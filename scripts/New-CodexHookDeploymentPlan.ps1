@@ -49,6 +49,9 @@ if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
                 "- restartRequired：$($Document.projectionSummary.restartRequired)"
                 "- fileActions：$($Document.projectionSummary.fileActions)"
                 "- environmentActions：$($Document.projectionSummary.environmentActions)"
+                '- freshness gate：生成后 60 分钟内执行，并在 production mutex 内 fresh rederive'
+                '- 完整性并发边界：最终 verified target handle 排除内容写入并持有到同目录 crash-atomic rename 完成'
+                '- 残余边界：普通用户态 Windows API 不保证阻止不合作外部 delete/replace 恰在最终系统调用前发生；本计划不声称绝对 CAS'
                 ''
                 '此计划只读生成；必须先通过独立审查，才能由主 agent 显式执行 production apply。'
                 '本报告不包含 desired registry、raw registry command 或环境变量原值。'

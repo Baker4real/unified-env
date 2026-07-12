@@ -67,6 +67,26 @@ function Write-Utf8NoBom {
     [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false))
 }
 
+function Invoke-HiddenPowerShellFileWrite {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][byte[]]$Bytes
+    )
+
+    $pwshPath = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+    $targetLiteral = "'" + $TargetPath.Replace("'", "''") + "'"
+    $payload = [Convert]::ToBase64String($Bytes)
+    $command = "try { [IO.File]::WriteAllBytes($targetLiteral, [Convert]::FromBase64String('$payload')); exit 0 } catch [IO.IOException] { exit (`$_.Exception.HResult -band 0xffff) } catch { exit 254 }"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    $process = Start-Process `
+        -FilePath $pwshPath `
+        -ArgumentList @('-NoProfile', '-EncodedCommand', $encoded) `
+        -WindowStyle Hidden `
+        -Wait `
+        -PassThru
+    return [int]$process.ExitCode
+}
+
 function New-RegistryGroup {
     param(
         [Parameter(Mandatory)][object]$Hook,
@@ -314,6 +334,29 @@ try {
 }
 [IO.File]::Delete($handleLockPath)
 
+$existingRacePath = Join-Path $fixtureRoot 'existing-race.bin'
+[byte[]]$existingRaceBefore = [Text.UTF8Encoding]::new($false).GetBytes('approved-before')
+[byte[]]$existingRaceAfter = [Text.UTF8Encoding]::new($false).GetBytes('approved-after')
+[byte[]]$existingRaceThird = [Text.UTF8Encoding]::new($false).GetBytes('external-third')
+[IO.File]::WriteAllBytes($existingRacePath, $existingRaceBefore)
+$script:existingRaceWriteExit = $null
+Set-CodexHookAtomicFileBytes `
+    -Path $existingRacePath `
+    -Bytes $existingRaceAfter `
+    -ExpectedExists $true `
+    -ExpectedSha256 (Get-ByteSha256 -Bytes $existingRaceBefore) `
+    -AfterSha256 (Get-ByteSha256 -Bytes $existingRaceAfter) `
+    -Scope 'existing target lease race fixture' `
+    -TestAfterPremoveSnapshot {
+        param($Target)
+        $script:existingRaceWriteExit = Invoke-HiddenPowerShellFileWrite `
+            -TargetPath $Target `
+            -Bytes $existingRaceThird
+    }
+Assert-True ($script:existingRaceWriteExit -eq 32) "write-excluding target lease 必须跨进程阻止最终 snapshot 后的内容写入；actual=$script:existingRaceWriteExit"
+Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($existingRacePath))) -ceq (Get-ByteSha256 -Bytes $existingRaceAfter)) 'approved initial publish 必须原子成功'
+[IO.File]::Delete($existingRacePath)
+
 $missingRacePath = Join-Path $fixtureRoot 'missing-race.bin'
 [byte[]]$managedRaceBytes = [Text.UTF8Encoding]::new($false).GetBytes('managed')
 $missingRaceError = Assert-Throws -Message 'missing target 在 temp 后竞争创建时不得覆盖' -Action {
@@ -329,6 +372,28 @@ $missingRaceError = Assert-Throws -Message 'missing target 在 temp 后竞争创
 Assert-True ($missingRaceError -match 'premove|状态漂移|missing') 'missing target race 必须由 move 前 CAS 拒绝'
 Assert-True ([IO.File]::ReadAllText($missingRacePath) -ceq 'competitor') 'missing target race 不得覆盖竞争者 bytes'
 [IO.File]::Delete($missingRacePath)
+
+$missingLateRacePath = Join-Path $fixtureRoot 'missing-late-race.bin'
+$script:missingLateRaceWriteExit = $null
+$missingLateRaceError = Assert-Throws -Message 'missing target 在最终 missing snapshot 后竞争创建时必须 collision-safe' -Action {
+    Set-CodexHookAtomicFileBytes `
+        -Path $missingLateRacePath `
+        -Bytes $managedRaceBytes `
+        -ExpectedExists $false `
+        -ExpectedSha256 $null `
+        -AfterSha256 (Get-ByteSha256 -Bytes $managedRaceBytes) `
+        -Scope 'missing late race fixture' `
+        -TestAfterPremoveSnapshot {
+            param($Target)
+            $script:missingLateRaceWriteExit = Invoke-HiddenPowerShellFileWrite `
+                -TargetPath $Target `
+                -Bytes ([Text.UTF8Encoding]::new($false).GetBytes('late-competitor'))
+        }
+}
+Assert-True ($script:missingLateRaceWriteExit -eq 0) 'missing target 的竞争创建必须真实发生在最终 snapshot 后'
+Assert-True ($missingLateRaceError -match 'rename|already exists|已存在|存在') "missing target late race 必须由 flags=0 rename collision 拒绝；actual=$missingLateRaceError"
+Assert-True ([IO.File]::ReadAllText($missingLateRacePath) -ceq 'late-competitor') 'missing target late race 不得覆盖竞争者 bytes'
+[IO.File]::Delete($missingLateRacePath)
 
 $fixtureManifest = Copy-CodexHookJsonValue -Value $manifest
 $fixtureManifest.environment = @(
