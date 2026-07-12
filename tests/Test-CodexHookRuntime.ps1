@@ -51,12 +51,23 @@ try{for($i=0;$i -lt 40 -and -not(Test-Path $abandonedMarker);$i++){Start-Sleep -
 $process=Invoke-CodexHookProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -ArgumentList @('-NoProfile','-Command','[Console]::Out.Write("ok")')
 Assert-True ($process.exitCode -eq 0 -and $process.stdout -ceq 'ok') 'process helper 必须捕获输出与退出码'
 
-$healthRoot='D:\Codex\projects\统一环境\reports\codex-hook-health-test';if(Test-Path $healthRoot){Remove-Item $healthRoot -Recurse -Force};[IO.Directory]::CreateDirectory($healthRoot)|Out-Null
-function New-Health([string]$Id){[pscustomobject][ordered]@{hookId=$Id;runId=[guid]::NewGuid().ToString('N');startedAtUtc=[DateTime]::UtcNow.ToString('o');completedAtUtc=[DateTime]::UtcNow.ToString('o');durationMs=1;ok=$true;changed=$false;restartRequired=$false;errors=[string[]]@()}}
-$badHealth=New-Health 'provider-stability';$badHealth|Add-Member extra $true;Assert-Throws { Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $badHealth -HealthRoot $healthRoot -AllowFixtureRoot } 'schema'
-$jobs=@();foreach($id in @('provider-stability','serena-dashboard')){$jobs+=Start-Job -ScriptBlock {param($runtime,$root,$hookId). $runtime;$p=[pscustomobject][ordered]@{hookId=$hookId;runId=[guid]::NewGuid().ToString('N');startedAtUtc=[DateTime]::UtcNow.ToString('o');completedAtUtc=[DateTime]::UtcNow.ToString('o');durationMs=1;ok=$true;changed=$false;restartRequired=$false;errors=[string[]]@()};Write-CodexHookLatestHealthCore -HookId $hookId -Payload $p -HealthRoot $root -AllowFixtureRoot} -ArgumentList $runtimePath,$healthRoot,$id}
-try{$jobs|Wait-Job|Out-Null;$jobOutput=@($jobs|Receive-Job);Assert-True ($jobOutput.Count -eq 0) 'health writer 不得污染 stdout';foreach($job in $jobs){Assert-True ($job.State -ceq 'Completed') "health 并发 job 必须完成：$($job.State)"}}finally{$jobs|Remove-Job -Force}
-foreach($id in @('provider-stability','serena-dashboard')){$path=Join-Path $healthRoot "$id.json";Assert-True (Test-Path $path) "health writer 必须隔离写入 $id.json";$doc=Get-Content -Raw $path|ConvertFrom-Json;Assert-True ($doc.hookId -ceq $id) 'health 文件不得交叉覆盖'}
-
-$astErrors=$null;$tokens=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'),[ref]$tokens,[ref]$astErrors);Assert-True ($astErrors.Count -eq 0) 'runtime AST 必须合法'
+$healthRoot=[IO.Path]::GetFullPath('D:\Codex\projects\统一环境\reports\codex-hook-health-test')
+$reportsRoot=[IO.Path]::GetFullPath((Join-Path $projectRoot 'reports') + '\')
+Assert-True ($healthRoot.StartsWith($reportsRoot,[StringComparison]::OrdinalIgnoreCase) -and $healthRoot -ieq (Join-Path $reportsRoot 'codex-hook-health-test')) 'health fixture 必须严格位于项目 reports 固定目录'
+try{
+    if(Test-Path $healthRoot){Remove-Item $healthRoot -Recurse -Force}
+    [IO.Directory]::CreateDirectory($healthRoot)|Out-Null
+    function New-Health([string]$Id){[pscustomobject][ordered]@{hookId=$Id;runId=[guid]::NewGuid().ToString('N');startedAtUtc=[DateTime]::UtcNow.ToString('o');completedAtUtc=[DateTime]::UtcNow.ToString('o');durationMs=1;ok=$true;changed=$false;restartRequired=$false;errors=[string[]]@()}}
+    $badHealth=New-Health 'provider-stability';$badHealth|Add-Member extra $true;Assert-Throws { Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $badHealth -HealthRoot $healthRoot -AllowFixtureRoot } 'schema'
+    foreach($invalidErrors in @('scalar',$null,1,[pscustomobject]@{bad=$true},[object[]]@('ok',1))){$invalid=New-Health 'provider-stability';$invalid.errors=$invalidErrors;Assert-Throws { Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $invalid -HealthRoot $healthRoot -AllowFixtureRoot } 'errors 类型'}
+    $jobs=@();foreach($id in @('provider-stability','serena-dashboard')){$jobs+=Start-Job -ScriptBlock {param($runtime,$root,$hookId). $runtime;$p=[pscustomobject][ordered]@{hookId=$hookId;runId=[guid]::NewGuid().ToString('N');startedAtUtc=[DateTime]::UtcNow.ToString('o');completedAtUtc=[DateTime]::UtcNow.ToString('o');durationMs=1;ok=$true;changed=$false;restartRequired=$false;errors=[string[]]@()};Write-CodexHookLatestHealthCore -HookId $hookId -Payload $p -HealthRoot $root -AllowFixtureRoot} -ArgumentList $runtimePath,$healthRoot,$id}
+    try{$jobs|Wait-Job|Out-Null;$jobOutput=@($jobs|Receive-Job);Assert-True ($jobOutput.Count -eq 0) 'health writer 不得污染 stdout';foreach($job in $jobs){Assert-True ($job.State -ceq 'Completed') "health 并发 job 必须完成：$($job.State)"}}finally{$jobs|Remove-Job -Force}
+    foreach($id in @('provider-stability','serena-dashboard')){$path=Join-Path $healthRoot "$id.json";Assert-True (Test-Path $path) "health writer 必须隔离写入 $id.json";$doc=Get-Content -Raw $path|ConvertFrom-Json;Assert-True ($doc.hookId -ceq $id) 'health 文件不得交叉覆盖'}
+    $single=New-Health 'provider-stability';$single.errors=[string[]]@('one');$healthOutput=@(Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $single -HealthRoot $healthRoot -AllowFixtureRoot);Assert-True ($healthOutput.Count -eq 0) 'single-error health 写入不得污染 stdout'
+    foreach($id in @('provider-stability','serena-dashboard')){$raw=Get-Content -Raw (Join-Path $healthRoot "$id.json");$json=[Text.Json.JsonDocument]::Parse($raw);try{Assert-True ($json.RootElement.GetProperty('errors').ValueKind -eq [Text.Json.JsonValueKind]::Array) 'health errors JSON token 必须稳定为 array'}finally{$json.Dispose()}}
+    $astErrors=$null;$tokens=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'),[ref]$tokens,[ref]$astErrors);Assert-True ($astErrors.Count -eq 0) 'runtime AST 必须合法'
+}finally{
+    if(Test-Path $healthRoot){Remove-Item $healthRoot -Recurse -Force}
+}
+Assert-True (-not(Test-Path $healthRoot)) 'health fixture 必须在测试结束时清理'
 'ok=True'

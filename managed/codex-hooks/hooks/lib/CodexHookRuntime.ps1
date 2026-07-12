@@ -143,9 +143,13 @@ function Assert-CodexHookHealthPayload {
     if($Payload.durationMs -isnot [long] -and $Payload.durationMs -isnot [int]){throw 'health durationMs 类型非法。'}
     if([long]$Payload.durationMs -lt 0){throw 'health durationMs 非法。'}
     foreach($name in @('ok','changed','restartRequired')){if($Payload.$name -isnot [bool]){throw "health $name 类型非法。"}}
-    if($null -eq $Payload.errors){throw 'health errors 非法。'}
+    if($null -eq $Payload.errors -or $Payload.errors -is [string] -or $Payload.errors -isnot [array]){throw 'health errors 类型非法。'}
     foreach($errorText in @($Payload.errors)){if($errorText -isnot [string]){throw 'health errors 类型非法。'}}
-    $json = $Payload | ConvertTo-Json -Depth 8
+    $normalized=[pscustomobject][ordered]@{
+        hookId=[string]$Payload.hookId;runId=[string]$Payload.runId;startedAtUtc=[string]$Payload.startedAtUtc;completedAtUtc=[string]$Payload.completedAtUtc
+        durationMs=[long]$Payload.durationMs;ok=[bool]$Payload.ok;changed=[bool]$Payload.changed;restartRequired=[bool]$Payload.restartRequired;errors=[string[]]@($Payload.errors)
+    }
+    $json = $normalized | ConvertTo-Json -Depth 8
     if ($json -match '(?i)(thread|session)[-_ ]?id|://[^/\s]*@|[?&][^\s=]+=') { throw 'health payload 含敏感标识或 URI 凭据。' }
     return $json
 }
