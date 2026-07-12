@@ -320,21 +320,6 @@ function Assert-CodexHookProductionFullAttestedLineage {
     throw 'production full attested lineage 超过最大步数。'
 }
 
-function Assert-CodexHookProductionFullLineageGraph {
-    param([Parameter(Mandatory)][object]$Start,[Parameter(Mandatory)][scriptblock]$ReadPrevious,[ValidateRange(1,128)][int]$MaxSteps=128)
-    $seenGenerations=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    $seenEvidence=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $current=$Start
-    foreach($step in 1..$MaxSteps){
-        if(-not $seenGenerations.Add([string]$current.generationId)-or-not $seenEvidence.Add([string]$current.evidenceDirectory)){throw 'production full lineage graph cycle。'}
-        if($null -eq $current.previousGenerationId){return $true}
-        $previous=& $ReadPrevious $current
-        if($null -eq $previous -or $previous.generationId -cne $current.previousGenerationId -or $previous.evidenceDirectory -cne $current.previousEvidenceDirectory){throw 'production full lineage graph inherited pointer 非法。'}
-        $current=$previous
-    }
-    throw 'production full lineage graph 超过最大步数。'
-}
-
 function Invoke-CodexHookProductionFullApplyEngine {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot)
@@ -432,6 +417,12 @@ function Remove-CodexHookProductionFullFile {
     Remove-CodexHookCapabilityFile -Path $Path -ExpectedSha256 $ExpectedSha256 -CapabilityRoot ([string]$Profile.hooksRoot) -AllowedExactPaths @($Path) -Scope 'production full restore remove'
 }
 
+function Assert-CodexHookProductionFullRestoreSeamGuard {
+    param([Parameter(Mandatory)][object]$Profile,[scriptblock]$TestAfterRestoreAction,[scriptblock]$TestBeforeEnvironmentRestoreWrite,[scriptblock]$TestAfterActiveConverged)
+    if(($null -ne $TestAfterRestoreAction -or $null -ne $TestBeforeEnvironmentRestoreWrite -or $null -ne $TestAfterActiveConverged) -and -not $Profile.isFixtureAdapter){throw 'production full restore seam 仅允许 fixture adapter。'}
+    return $true
+}
+
 function Restore-CodexHookProductionFullEngine {
     [CmdletBinding()]
     param(
@@ -444,7 +435,7 @@ function Restore-CodexHookProductionFullEngine {
         [scriptblock]$TestBeforeEnvironmentRestoreWrite,
         [scriptblock]$TestAfterActiveConverged
     )
-    if(($null -ne $TestAfterRestoreAction -or $null -ne $TestBeforeEnvironmentRestoreWrite) -and -not $Profile.isFixtureAdapter){throw 'production full restore fault seam 仅允许 fixture adapter。'}
+    [void](Assert-CodexHookProductionFullRestoreSeamGuard -Profile $Profile -TestAfterRestoreAction $TestAfterRestoreAction -TestBeforeEnvironmentRestoreWrite $TestBeforeEnvironmentRestoreWrite -TestAfterActiveConverged $TestAfterActiveConverged)
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     $evidence=Assert-CodexHookCapabilityPath $EvidenceDirectory ([string]$Profile.evidenceRoot) @() 'production full evidence'
     $restorePath=Join-Path $evidence 'restore-manifest.json'

@@ -8,6 +8,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookProductionFull.ps1')
 . (Join-Path $PSScriptRoot 'lib\CodexHookProductionFixtureTestSupport.ps1')
+. (Join-Path $PSScriptRoot 'lib\CodexHookProductionFullEvidenceTestSupport.ps1')
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -272,10 +273,19 @@ try {
     $activeCasError=Assert-Throws {Invoke-CodexHookProductionFullApplyCore -Profile $fixture.profile -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment -TestAfterPredecessorSnapshot $driftActive|Out-Null} 'snapshot 后 active 漂移必须被条件 CAS 拒绝'
     Assert-True ($activeCasError -match '漂移|CAS|临写前') 'active snapshot CAS 必须拒绝第二次路径状态'
 
-    $lineageNodes=@{A=[pscustomobject]@{generationId='A';evidenceDirectory='EA';previousGenerationId='B';previousEvidenceDirectory='EB'};B=[pscustomobject]@{generationId='B';evidenceDirectory='EB';previousGenerationId='C';previousEvidenceDirectory='EC'};C=[pscustomobject]@{generationId='C';evidenceDirectory='EC';previousGenerationId='A';previousEvidenceDirectory='EA'}}
-    Assert-True ((Assert-Throws {Assert-CodexHookProductionFullLineageGraph -Start $lineageNodes.A -ReadPrevious {param($n)$lineageNodes[[string]$n.previousGenerationId]} -MaxSteps 8|Out-Null} '三环必须拒绝') -match 'cycle') '三环必须命中 visited gate'
-    $longNodes=@{};foreach($i in 1..5){$longNodes[[string]$i]=[pscustomobject]@{generationId=[string]$i;evidenceDirectory="E$i";previousGenerationId=if($i-lt 5){[string]($i+1)}else{$null};previousEvidenceDirectory=if($i-lt 5){"E$($i+1)"}else{$null}}}
-    Assert-True ((Assert-Throws {Assert-CodexHookProductionFullLineageGraph -Start $longNodes['1'] -ReadPrevious {param($n)$longNodes[[string]$n.previousGenerationId]} -MaxSteps 3|Out-Null} 'lineage 上限必须拒绝') -match '最大|maximum') 'lineage 上限必须 fail closed'
+    $cycleStart=New-TestCodexHookProductionFullAttestedLineage -Profile $fixture.profile -PredecessorIndexes @(1,2,0)
+    Assert-True ((Assert-Throws {Assert-CodexHookProductionFullAttestedLineage -Profile $fixture.profile -Active $cycleStart|Out-Null} '真实 attested 三环必须拒绝') -match 'cycle') '真实 attested 三环必须命中 visited gate'
+    [object[]]$longIndexes=New-Object object[] 129
+    foreach($index in 0..127){$longIndexes[$index]=$index+1}
+    $longIndexes[128]=$null
+    $longStart=New-TestCodexHookProductionFullAttestedLineage -Profile $fixture.profile -PredecessorIndexes $longIndexes
+    Assert-True ((Assert-Throws {Assert-CodexHookProductionFullAttestedLineage -Profile $fixture.profile -Active $longStart|Out-Null} '129 节点 lineage 必须拒绝') -match '最大|maximum') '真实 attested lineage 上限必须 fail closed'
+
+    $productionProfile=Get-CodexHookProductionFullProfile
+    foreach($seam in @('after-action','before-environment','after-active')){
+        $seamError=Assert-Throws {Assert-CodexHookProductionFullRestoreSeamGuard -Profile $productionProfile -TestAfterRestoreAction $(if($seam-ceq'after-action'){{}}else{$null}) -TestBeforeEnvironmentRestoreWrite $(if($seam-ceq'before-environment'){{}}else{$null}) -TestAfterActiveConverged $(if($seam-ceq'after-active'){{}}else{$null})} 'production profile seam 必须入口拒绝'
+        Assert-True ($seamError -match 'fixture|seam') "production seam guard 必须在读取前拒绝：$seam"
+    }
 
     [pscustomobject][ordered]@{ ok=$true; test='CodexHookProductionFull'; fileActions=@($state.plan.actions | Where-Object kind -ceq 'file').Count }
 } finally {
