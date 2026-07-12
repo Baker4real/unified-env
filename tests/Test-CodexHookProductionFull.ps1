@@ -238,6 +238,45 @@ try {
     } 'active pointer 二环必须拒绝'
     Assert-True ($cycleError -match 'cycle') 'active pointer 二环必须命中 cycle gate'
 
+    $fixture = Initialize-ProductionFullFixture
+    $environment.present=$true;$environment.value='D:\Private\serena-secret'
+    $generationOne=New-CodexHookProductionFullState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment
+    Write-Utf8NoBom ([string]$fixture.profile.planPath) ($generationOne.plan|ConvertTo-Json -Depth 100)
+    $applyOne=Invoke-CodexHookProductionFullApplyCore -Profile $fixture.profile -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment
+    $firstManaged=@($fixture.manifest.files|Where-Object lifecycle -cne 'retired')[0]
+    $sourcePath=Join-Path ([string]$fixture.profile.sourceRoot) ([string]$firstManaged.relativePath)
+    [byte[]]$generationTwoBytes=[Text.UTF8Encoding]::new($false).GetBytes('generation-two-source')
+    [IO.File]::WriteAllBytes($sourcePath,$generationTwoBytes);$firstManaged.sha256=Get-CodexHookBytesSha256 $generationTwoBytes
+    Write-Utf8NoBom ([string]$fixture.profile.manifestPath) ($fixture.manifest|ConvertTo-Json -Depth 100)
+    $generationTwo=New-CodexHookProductionFullState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment
+    Write-Utf8NoBom ([string]$fixture.profile.planPath) ($generationTwo.plan|ConvertTo-Json -Depth 100)
+    $applyTwo=Invoke-CodexHookProductionFullApplyCore -Profile $fixture.profile -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment
+    $restoreTwo=Get-Content (Join-Path ([string]$applyTwo.evidenceDirectory) 'restore-manifest.json') -Raw|ConvertFrom-Json -Depth 100
+    $previousBackup=Join-Path ([string]$applyTwo.evidenceDirectory) ([string]$restoreTwo.previousActiveBackupRelativePath)
+    Assert-True (((Get-FileHash $previousBackup -Algorithm SHA256).Hash.ToLowerInvariant()) -ceq $restoreTwo.previousActiveBackupSha256) '第二代 attested predecessor backup/hash 必须一致'
+    $activeCrash={throw 'test-crash-after-active-converged' }
+    $activeCrashError=Assert-Throws {Restore-CodexHookProductionFullCore -Profile $fixture.profile -EvidenceDirectory ([string]$applyTwo.evidenceDirectory) -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment -TestAfterActiveConverged $activeCrash|Out-Null} 'active 收敛后 terminal 前 crash 必须触发'
+    Assert-True ($activeCrashError -match 'active-converged') 'active/terminal crash seam 原因非法'
+    $activeAfterCrash=(Get-FileHash ([string](Get-CodexHookProductionFullLifecyclePaths $fixture.profile $generationTwo.plan.generationId).activePath) -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-True ($activeAfterCrash -ceq $restoreTwo.previousActiveBackupSha256) 'crash 时 active 必须已先收敛 predecessor'
+    $retryTwo=Restore-CodexHookProductionFullCore -Profile $fixture.profile -EvidenceDirectory ([string]$applyTwo.evidenceDirectory) -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment
+    $retryTwoAgain=Restore-CodexHookProductionFullCore -Profile $fixture.profile -EvidenceDirectory ([string]$applyTwo.evidenceDirectory) -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment
+    Assert-True ($retryTwo.terminalStatus -ceq 'restored' -and $retryTwoAgain.noOp) '第二代 restore retry/幂等必须收敛'
+    [byte[]]$generationThreeBytes=[Text.UTF8Encoding]::new($false).GetBytes('generation-three-source')
+    [IO.File]::WriteAllBytes($sourcePath,$generationThreeBytes);$firstManaged.sha256=Get-CodexHookBytesSha256 $generationThreeBytes
+    Write-Utf8NoBom ([string]$fixture.profile.manifestPath) ($fixture.manifest|ConvertTo-Json -Depth 100)
+    $generationThree=New-CodexHookProductionFullState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment
+    Write-Utf8NoBom ([string]$fixture.profile.planPath) ($generationThree.plan|ConvertTo-Json -Depth 100)
+    $activePath=[string](Get-CodexHookProductionFullLifecyclePaths $fixture.profile $generationThree.plan.generationId).activePath
+    $driftActive={param($Snapshot)[IO.File]::WriteAllText($activePath,'{"external":"active-drift"}',[Text.UTF8Encoding]::new($false))}.GetNewClosure()
+    $activeCasError=Assert-Throws {Invoke-CodexHookProductionFullApplyCore -Profile $fixture.profile -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment -TestAfterPredecessorSnapshot $driftActive|Out-Null} 'snapshot 后 active 漂移必须被条件 CAS 拒绝'
+    Assert-True ($activeCasError -match '漂移|CAS|临写前') 'active snapshot CAS 必须拒绝第二次路径状态'
+
+    $lineageNodes=@{A=[pscustomobject]@{generationId='A';evidenceDirectory='EA';previousGenerationId='B';previousEvidenceDirectory='EB'};B=[pscustomobject]@{generationId='B';evidenceDirectory='EB';previousGenerationId='C';previousEvidenceDirectory='EC'};C=[pscustomobject]@{generationId='C';evidenceDirectory='EC';previousGenerationId='A';previousEvidenceDirectory='EA'}}
+    Assert-True ((Assert-Throws {Assert-CodexHookProductionFullLineageGraph -Start $lineageNodes.A -ReadPrevious {param($n)$lineageNodes[[string]$n.previousGenerationId]} -MaxSteps 8|Out-Null} '三环必须拒绝') -match 'cycle') '三环必须命中 visited gate'
+    $longNodes=@{};foreach($i in 1..5){$longNodes[[string]$i]=[pscustomobject]@{generationId=[string]$i;evidenceDirectory="E$i";previousGenerationId=if($i-lt 5){[string]($i+1)}else{$null};previousEvidenceDirectory=if($i-lt 5){"E$($i+1)"}else{$null}}}
+    Assert-True ((Assert-Throws {Assert-CodexHookProductionFullLineageGraph -Start $longNodes['1'] -ReadPrevious {param($n)$longNodes[[string]$n.previousGenerationId]} -MaxSteps 3|Out-Null} 'lineage 上限必须拒绝') -match '最大|maximum') 'lineage 上限必须 fail closed'
+
     [pscustomobject][ordered]@{ ok=$true; test='CodexHookProductionFull'; fileActions=@($state.plan.actions | Where-Object kind -ceq 'file').Count }
 } finally {
     try {
