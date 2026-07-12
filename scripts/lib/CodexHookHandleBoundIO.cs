@@ -194,7 +194,7 @@ namespace CodexHookGovernance
             string lexicalPath = ValidateChildPath(targetPath, "targetPath");
             SafeFileHandle handle = CreateFileW(
                 lexicalPath,
-                GenericRead,
+                GenericRead | DeleteAccess,
                 // NTFS requires existing target handles to share DELETE for a
                 // FileRenameInformationEx POSIX replacement. WRITE remains excluded.
                 FileShare.Read | FileShare.Delete,
@@ -558,6 +558,28 @@ namespace CodexHookGovernance
 
     public sealed class GuardedTargetFileLease : IDisposable
     {
+        private const int FileDispositionInformationEx = 64;
+        private const uint FileDispositionDelete = 0x00000001;
+        private const uint FileDispositionPosixSemantics = 0x00000002;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoStatusBlock
+        {
+            public IntPtr Status;
+            public UIntPtr Information;
+        }
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtSetInformationFile(
+            SafeFileHandle fileHandle,
+            out IoStatusBlock ioStatusBlock,
+            IntPtr fileInformation,
+            uint length,
+            int fileInformationClass);
+
+        [DllImport("ntdll.dll")]
+        private static extern uint RtlNtStatusToDosError(int status);
+
         private readonly VerifiedDirectoryChainGuard owner;
         private readonly SafeFileHandle handle;
         private readonly FileStream stream;
@@ -601,6 +623,34 @@ namespace CodexHookGovernance
             ThrowIfDisposed();
             owner.ThrowIfDisposed();
             return ReadAllBytesFromHandleCore();
+        }
+
+        public void DeleteWithPosixSemantics()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, OriginalPath);
+            IntPtr buffer = Marshal.AllocHGlobal(sizeof(uint));
+            try
+            {
+                Marshal.WriteInt32(buffer, unchecked((int)(FileDispositionDelete | FileDispositionPosixSemantics)));
+                IoStatusBlock ioStatusBlock;
+                int status = NtSetInformationFile(
+                    handle,
+                    out ioStatusBlock,
+                    buffer,
+                    sizeof(uint),
+                    FileDispositionInformationEx);
+                if (status != 0)
+                {
+                    uint dosError = RtlNtStatusToDosError(status);
+                    throw new Win32Exception(checked((int)dosError), "Unable to delete a guarded target file.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
         }
 
         public void Dispose()

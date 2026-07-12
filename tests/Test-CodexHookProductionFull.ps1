@@ -25,6 +25,15 @@ function Write-Utf8NoBom {
     [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false))
 }
 
+function Invoke-CompetingFileWrite {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][byte[]]$Bytes)
+    $literal="'"+$Path.Replace("'","''")+"'";$payload=[Convert]::ToBase64String($Bytes)
+    $command="try { [IO.File]::WriteAllBytes($literal,[Convert]::FromBase64String('$payload')); exit 0 } catch [IO.IOException] { exit (`$_.Exception.HResult -band 0xffff) } catch { exit 254 }"
+    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    $process=Start-Process -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -ArgumentList @('-NoProfile','-EncodedCommand',$encoded) -WindowStyle Hidden -Wait -PassThru
+    return [int]$process.ExitCode
+}
+
 function Initialize-ProductionFullFixture {
     $profile = Get-CodexHookProductionFullFixtureProfile
     $root = Split-Path -Parent ([string]$profile.sourceRoot)
@@ -134,6 +143,21 @@ try {
 
     $restoreManifestPath = Join-Path ([string]$result.evidenceDirectory) 'restore-manifest.json'
     [byte[]]$validRestoreManifestBytes = [IO.File]::ReadAllBytes($restoreManifestPath)
+    $claimPath = Join-Path ([string]$fixture.profile.evidenceRoot) ".claims\$($state.plan.generationId).json"
+    [byte[]]$validClaimBytes = [IO.File]::ReadAllBytes($claimPath)
+    $coordinatedRestore = Get-Content -LiteralPath $restoreManifestPath -Raw | ConvertFrom-Json -Depth 100
+    $coordinatedRestore.planSha256 = ('a' * 64)
+    Write-Utf8NoBom -Path $restoreManifestPath -Text ($coordinatedRestore | ConvertTo-Json -Depth 100)
+    $coordinatedClaim = Get-Content -LiteralPath $claimPath -Raw | ConvertFrom-Json -Depth 100
+    $coordinatedClaim.planSha256 = ('a' * 64)
+    $coordinatedClaim.restoreManifestSha256 = (Get-FileHash -LiteralPath $restoreManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Utf8NoBom -Path $claimPath -Text ($coordinatedClaim | ConvertTo-Json -Depth 100)
+    $coordinatedError = Assert-Throws {
+        Restore-CodexHookProductionFullCore -Profile $fixture.profile -EvidenceDirectory ([string]$result.evidenceDirectory) -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment | Out-Null
+    } '协调伪造 claim/restore/hash 必须被 DPAPI attestation 拒绝'
+    Assert-True ($coordinatedError -match 'attestation|认证|authentication') '协调伪造必须命中 DPAPI evidence authentication gate'
+    [IO.File]::WriteAllBytes($restoreManifestPath,$validRestoreManifestBytes)
+    [IO.File]::WriteAllBytes($claimPath,$validClaimBytes)
     $forgedRestore = Get-Content -LiteralPath $restoreManifestPath -Raw | ConvertFrom-Json -Depth 100
     $forgedRestore | Add-Member -NotePropertyName forged -NotePropertyValue $true
     Write-Utf8NoBom -Path $restoreManifestPath -Text ($forgedRestore | ConvertTo-Json -Depth 100)
@@ -150,6 +174,20 @@ try {
     $noOpClaim = Join-Path ([string]$fixture.profile.evidenceRoot) ".claims\$($noOpState.plan.generationId).json"
     Assert-True (-not [IO.File]::Exists($noOpClaim)) 'no-op 不得创建永久 claim 或 evidence'
 
+    $restoreProgress=[ordered]@{count=0}
+    $crashAfterFirstRestoreAction={param($ActionId)$restoreProgress.count++;if($restoreProgress.count -eq 1){throw 'test-crash-after-first-restore-action'}}.GetNewClosure()
+    $restoreCrash=Assert-Throws {
+        Restore-CodexHookProductionFullCore -Profile $fixture.profile -EvidenceDirectory ([string]$result.evidenceDirectory) -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment -TestAfterRestoreAction $crashAfterFirstRestoreAction | Out-Null
+    } 'restore 第一项后 crash seam 必须触发'
+    Assert-True ($restoreCrash -match 'test-crash-after-first-restore-action') 'restore crash seam 原因非法'
+    $progressStatus=Get-Content -LiteralPath (Join-Path ([string]$result.evidenceDirectory) 'status.json') -Raw | ConvertFrom-Json -Depth 32
+    Assert-True ($progressStatus.status -ceq 'restoring' -and @($progressStatus.restoredActionIds).Count -eq 1) 'restore 每项后必须 crash-safe 持久化 progress'
+    $environmentRace={param($ActionId)$environment.value='D:\Concurrent\third-value'}.GetNewClosure()
+    $environmentRaceError=Assert-Throws {
+        Restore-CodexHookProductionFullCore -Profile $fixture.profile -EvidenceDirectory ([string]$result.evidenceDirectory) -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment -TestBeforeEnvironmentRestoreWrite $environmentRace | Out-Null
+    } 'environment restore 临写前 race 必须被 CAS 拒绝'
+    Assert-True ($environmentRaceError -match 'environment restore CAS') 'environment race 必须命中临写前 CAS gate'
+    $environment.value='D:\Codex\.serena'
     $restore = Restore-CodexHookProductionFullCore -Profile $fixture.profile -EvidenceDirectory ([string]$result.evidenceDirectory) -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment
     Assert-True ($restore.restored -and -not $restore.noOp) 'external restore 必须恢复完整状态'
     Assert-True ($environment.value -ceq 'D:\Private\serena-secret') 'restore 必须恢复 User SERENA_HOME 原值'
@@ -175,6 +213,30 @@ try {
         $livePath = Join-Path ([string]$fixture.profile.hooksRoot) ([string]$file.liveRelativePath)
         Assert-True ((Get-CodexHookBytesSha256 -Bytes ([IO.File]::ReadAllBytes($livePath))) -ceq (Get-CodexHookBytesSha256 -Bytes ([byte[]]$fixture.before[[string]$file.liveRelativePath]))) '自动 rollback 必须恢复所有 live file bytes'
     }
+
+    $conditionalDeletePath=Join-Path ([string]$fixture.profile.hooksRoot) 'conditional-delete.tmp'
+    [byte[]]$conditionalDeleteBytes=[Text.UTF8Encoding]::new($false).GetBytes('deployed-delete-target')
+    [IO.File]::WriteAllBytes($conditionalDeletePath,$conditionalDeleteBytes)
+    $deleteRace=[ordered]@{exit=$null}
+    $deleteAttack={param($Target)$deleteRace.exit=Invoke-CompetingFileWrite -Path $Target -Bytes ([Text.UTF8Encoding]::new($false).GetBytes('attacker-replacement'))}.GetNewClosure()
+    Remove-CodexHookCapabilityFile -Path $conditionalDeletePath -ExpectedSha256 (Get-CodexHookBytesSha256 $conditionalDeleteBytes) -CapabilityRoot ([string]$fixture.profile.hooksRoot) -AllowedExactPaths @($conditionalDeletePath) -TestAfterSnapshot $deleteAttack
+    Assert-True (-not [IO.File]::Exists($conditionalDeletePath)) 'handle-bound conditional delete 必须删除已验证 identity'
+    Assert-True ($deleteRace.exit -eq 32) "target lease 必须阻止并发 writer；actual=$($deleteRace.exit)"
+
+    $activeLineage=$null
+    foreach($generation in 1..40){
+        $lineageGenerationId=[guid]::NewGuid().ToString()
+        $lineageEvidenceDirectory=Join-Path ([string]$fixture.profile.evidenceRoot) "deployment-$lineageGenerationId"
+        $activeLineage=New-CodexHookProductionFullActiveDocument -Profile $fixture.profile -GenerationId $lineageGenerationId -EvidenceDirectory $lineageEvidenceDirectory -State applied -PreviousActive $activeLineage
+        Assert-True (@($activeLineage.PSObject.Properties.Name).Count -eq 8) 'active pointer 必须保持固定 schema 深度'
+    }
+    Assert-True (($activeLineage|ConvertTo-Json -Depth 10) -notmatch 'previousActive\s*":\s*\{') 'active lineage 不得递归嵌入 previousActive object'
+    $cycleGeneration=[string]$activeLineage.previousGenerationId
+    $cycleEvidence=(Get-CodexHookProductionFullLifecyclePaths -Profile $fixture.profile -GenerationId $cycleGeneration).evidenceDirectory
+    $cycleError=Assert-Throws {
+        New-CodexHookProductionFullActiveDocument -Profile $fixture.profile -GenerationId $cycleGeneration -EvidenceDirectory $cycleEvidence -State applied -PreviousActive $activeLineage | Out-Null
+    } 'active pointer 二环必须拒绝'
+    Assert-True ($cycleError -match 'cycle') 'active pointer 二环必须命中 cycle gate'
 
     [pscustomobject][ordered]@{ ok=$true; test='CodexHookProductionFull'; fileActions=@($state.plan.actions | Where-Object kind -ceq 'file').Count }
 } finally {

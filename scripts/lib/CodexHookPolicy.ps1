@@ -2641,6 +2641,39 @@ function Set-CodexHookAtomicFileBytesWithCapability {
     }
 }
 
+function Remove-CodexHookCapabilityFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExpectedSha256,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [string]$Scope = 'capability conditional delete',
+        [scriptblock]$TestAfterSnapshot
+    )
+
+    $fullPath = Assert-CodexHookCapabilityPath -Path $Path -CapabilityRoot $CapabilityRoot -AllowedExactPaths $AllowedExactPaths -Name $Scope
+    $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Scope capability root"
+    $parent = Split-Path -Parent $fullPath
+    $directoryGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire($capabilityRootPath, $parent, $false)
+    $targetLease = $null
+    try {
+        $targetLease = $directoryGuard.AcquireTargetFileLease($fullPath)
+        [byte[]]$leasedBytes = $targetLease.ReadAllBytesFromHandle()
+        $leasedSha256 = Get-CodexHookBytesSha256 -Bytes $leasedBytes
+        if ($leasedSha256 -cne $ExpectedSha256) { throw "$Scope 临删前状态漂移。" }
+        if ($null -ne $TestAfterSnapshot) { & $TestAfterSnapshot $fullPath }
+        [byte[]]$confirmedBytes = $targetLease.ReadAllBytesFromHandle()
+        if ((Get-CodexHookBytesSha256 -Bytes $confirmedBytes) -cne $ExpectedSha256) { throw "$Scope handle identity 内容漂移。" }
+        $targetLease.DeleteWithPosixSemantics()
+    } finally {
+        if ($null -ne $targetLease) { $targetLease.Dispose() }
+        $directoryGuard.Dispose()
+    }
+    $after = Get-CodexHookCapabilityFileSnapshot -Path $fullPath -CapabilityRoot $capabilityRootPath -AllowedExactPaths $AllowedExactPaths -Name "$Scope postdelete"
+    Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $false -ExpectedSha256 $null -Scope "$Scope postcheck"
+}
+
 function Set-CodexHookAtomicFileBytes {
     [CmdletBinding()]
     param(
