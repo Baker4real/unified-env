@@ -10,5 +10,6 @@ reports/project-local-env-rebuild-plan-test/
 .local/
 *.local.md
 .env.local
+.env.*.local
 *.tmp
 *.temp
