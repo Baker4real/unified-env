@@ -19,7 +19,7 @@ foreach($command in @($new,$invoke,$restore)){
     $set = @($command.ParameterSets | Where-Object Name -ceq 'ProductionFull')
     Assert-True ($set.Count -eq 1) "$($command.Name) 必须有唯一 ProductionFull 参数集"
     $names = @($set[0].Parameters.Name)
-    foreach($forbidden in @('ManifestPath','FixtureSourceRoot','FixtureCodexHome','EnvironmentReadValue','EnvironmentWriteValue','FaultInjection','PlanPath','EvidenceRoot')){
+    foreach($forbidden in @('ManifestPath','FixtureSourceRoot','FixtureCodexHome','EnvironmentReadValue','EnvironmentWriteValue','FaultInjection','TestFaultInjection','TestAfterPredecessorSnapshot','TestAfterRestoreAction','TestBeforeEnvironmentRestoreWrite','TestAfterActiveConverged','PlanPath','EvidenceRoot')){
         Assert-True ($names -cnotcontains $forbidden) "$($command.Name) ProductionFull 不得接受 $forbidden"
     }
 }

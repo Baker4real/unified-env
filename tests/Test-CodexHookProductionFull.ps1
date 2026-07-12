@@ -286,6 +286,10 @@ try {
         $seamError=Assert-Throws {Assert-CodexHookProductionFullRestoreSeamGuard -Profile $productionProfile -TestAfterRestoreAction $(if($seam-ceq'after-action'){{}}else{$null}) -TestBeforeEnvironmentRestoreWrite $(if($seam-ceq'before-environment'){{}}else{$null}) -TestAfterActiveConverged $(if($seam-ceq'after-active'){{}}else{$null})} 'production profile seam 必须入口拒绝'
         Assert-True ($seamError -match 'fixture|seam') "production seam guard 必须在读取前拒绝：$seam"
     }
+    foreach($applySeam in @('fault','after-predecessor')){
+        $applySeamError=Assert-Throws {Assert-CodexHookProductionFullApplySeamGuard -Profile $productionProfile -TestFaultInjection $(if($applySeam-ceq'fault'){'before-registry'}else{'none'}) -TestAfterPredecessorSnapshot $(if($applySeam-ceq'after-predecessor'){{}}else{$null})} 'production apply seam 必须入口拒绝'
+        Assert-True ($applySeamError -match 'fixture|seam') "production apply seam guard 必须在读取前拒绝：$applySeam"
+    }
 
     [pscustomobject][ordered]@{ ok=$true; test='CodexHookProductionFull'; fileActions=@($state.plan.actions | Where-Object kind -ceq 'file').Count }
 } finally {

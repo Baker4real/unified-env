@@ -320,11 +320,17 @@ function Assert-CodexHookProductionFullAttestedLineage {
     throw 'production full attested lineage 超过最大步数。'
 }
 
+function Assert-CodexHookProductionFullApplySeamGuard {
+    param([Parameter(Mandatory)][object]$Profile,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot)
+    if(($TestFaultInjection -cne 'none' -or $null -ne $TestAfterPredecessorSnapshot) -and -not $Profile.isFixtureAdapter){throw 'production full apply seam 仅允许 fixture adapter。'}
+    return $true
+}
+
 function Invoke-CodexHookProductionFullApplyEngine {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot)
+    [void](Assert-CodexHookProductionFullApplySeamGuard -Profile $Profile -TestFaultInjection $TestFaultInjection -TestAfterPredecessorSnapshot $TestAfterPredecessorSnapshot)
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
-    if ($TestFaultInjection -cne 'none' -and -not $Profile.isFixtureAdapter) { throw 'production full fault seam 仅允许 fixture adapter。' }
     $planSnapshot = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.planPath) -CapabilityRoot ([string]$Profile.planOutputDir) -AllowedExactPaths @([string]$Profile.planPath) -Name 'production full plan'
     $planText=[Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$planSnapshot.bytes); Assert-CodexHookStrictJsonText $planText; $plan=$planText|ConvertFrom-Json -Depth 128 -DateKind String
     [void](Assert-CodexHookProductionFullPlan -Plan $plan -Profile $Profile)
