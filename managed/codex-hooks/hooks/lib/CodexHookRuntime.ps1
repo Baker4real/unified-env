@@ -131,6 +131,27 @@ function ConvertTo-CodexHookRedactedUri {
     return "$($uri.Scheme)://$($uri.IdnHost)$port"
 }
 
+function Assert-CodexSerenaSessionStartOutputBytes {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+    if ($Bytes.Length -eq 0) { throw 'Serena activate vendor stdout 为空。' }
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $text = $utf8.GetString($Bytes)
+    $document = [Text.Json.JsonDocument]::Parse($text)
+    try {
+        $root = $document.RootElement
+        if ($root.ValueKind -ne [Text.Json.JsonValueKind]::Object) { throw 'Serena activate vendor JSON 根必须是 object。' }
+        $rootNames = @($root.EnumerateObject() | ForEach-Object Name)
+        if ($rootNames.Count -ne 1 -or $rootNames[0] -cne 'hookSpecificOutput') { throw 'Serena activate vendor JSON 顶层 schema 非法。' }
+        $hookOutput = $root.GetProperty('hookSpecificOutput')
+        if ($hookOutput.ValueKind -ne [Text.Json.JsonValueKind]::Object) { throw 'Serena activate hookSpecificOutput 必须是 object。' }
+        $hookNames = @($hookOutput.EnumerateObject() | ForEach-Object Name)
+        if (($hookNames -join "`0") -cne ('hookEventName','additionalContext' -join "`0")) { throw 'Serena activate hookSpecificOutput schema 非法。' }
+        if ($hookOutput.GetProperty('hookEventName').ValueKind -ne [Text.Json.JsonValueKind]::String -or $hookOutput.GetProperty('hookEventName').GetString() -cne 'SessionStart') { throw 'Serena activate hookEventName 非法。' }
+        if ($hookOutput.GetProperty('additionalContext').ValueKind -ne [Text.Json.JsonValueKind]::String -or [string]::IsNullOrWhiteSpace($hookOutput.GetProperty('additionalContext').GetString())) { throw 'Serena activate additionalContext 非法。' }
+    }
+    finally { $document.Dispose() }
+}
+
 function Assert-CodexHookHealthPayload {
     param([Parameter(Mandatory)][string]$HookId, [Parameter(Mandatory)][object]$Payload)
     if ($HookId -cnotmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') { throw 'health hookId 非法。' }

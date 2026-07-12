@@ -7,9 +7,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 . 'D:\Codex\.codex\hooks\lib\CodexHookRuntime.ps1'
+. 'D:\Codex\.codex\hooks\lib\CodexGitHubCliGuardEntry.ps1'
 $GuardStarted = [DateTime]::UtcNow
 $GuardStopwatch = [Diagnostics.Stopwatch]::StartNew()
-$script:GitHubHealthWritten = $false
+$script:ActiveGitHubGuardState = $null
 $GhSourcePath = "D:\Codex\tools\gh\bin\gh.exe"
 $ToolsBinPath = "D:\Codex\tools\bin"
 $GhNativePath = Join-Path $ToolsBinPath "gh.exe"
@@ -71,6 +72,7 @@ function Protect-GhPersistentEnvironment {
     if (-not $persistentPathOk -and -not $CheckOnly) {
       $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $ToolsBinPath } else { "$ToolsBinPath;$userPath" }
       [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+      $script:ActiveGitHubGuardState.changed = $true
       $repairs += 'userPath'
       $persistentPathOk = $true
     }
@@ -79,6 +81,7 @@ function Protect-GhPersistentEnvironment {
     $persistentConfigOk = [string]::Equals((Normalize-PathEntry $userConfig), (Normalize-PathEntry $ExpectedGhConfigDir), [StringComparison]::OrdinalIgnoreCase)
     if (-not $persistentConfigOk -and -not $CheckOnly) {
       [Environment]::SetEnvironmentVariable('GH_CONFIG_DIR', $ExpectedGhConfigDir, 'User')
+      $script:ActiveGitHubGuardState.changed = $true
       $repairs += 'userGhConfigDir'
       $persistentConfigOk = $true
     }
@@ -248,6 +251,7 @@ function Repair-GhHardLink {
     }
 
     [IO.File]::Move($temporaryLinkPath, $GhNativePath, $true)
+    $script:ActiveGitHubGuardState.changed = $true
     $temporaryLinkPath = $null
     $finalState = Get-HardLinkState -SourcePath $GhSourcePath -LinkPath $GhNativePath
     if ($finalState['status'] -ne 'valid') {
@@ -352,12 +356,15 @@ function Invoke-NativeProbe {
 }
 
 function Invoke-CodexGitHubCliGuard {
+  param([Parameter(Mandatory)][object]$State)
   $repairs = @()
   $sourceExists = Test-Path -LiteralPath $GhSourcePath -PathType Leaf
   $processPathOk = Test-EnvironmentPathEntry -PathValue ([Environment]::GetEnvironmentVariable('Path', 'Process')) -Expected $ToolsBinPath
+  $processConfig = [Environment]::GetEnvironmentVariable('GH_CONFIG_DIR', 'Process')
+  $processConfigOk = [string]::Equals((Normalize-PathEntry $processConfig), (Normalize-PathEntry $ExpectedGhConfigDir), [StringComparison]::OrdinalIgnoreCase)
+  $State.restartRequired = (-not $processPathOk) -or (-not $processConfigOk)
   $persistentEnvironment = Protect-GhPersistentEnvironment
   $repairs += @($persistentEnvironment['repairs'])
-  $processConfig = [Environment]::GetEnvironmentVariable('GH_CONFIG_DIR', 'Process')
 
   $linkRepair = Repair-GhHardLink
   if ($linkRepair['changed']) {
@@ -367,7 +374,6 @@ function Invoke-CodexGitHubCliGuard {
   $hardLinkState = Get-HardLinkState -SourcePath $GhSourcePath -LinkPath $GhNativePath
   $nativeLinkOk = $hardLinkState['status'] -eq 'valid'
   $signatureState = Get-GhSignatureState
-  $processConfigOk = [string]::Equals((Normalize-PathEntry $processConfig), (Normalize-PathEntry $ExpectedGhConfigDir), [StringComparison]::OrdinalIgnoreCase)
   $hostsExists = Test-Path -LiteralPath $ExpectedHostsPath -PathType Leaf
   $resolvedExecutablePath = Get-ResolvedGhExecutablePath
   $managedResolutionOk = Test-GhExecutableIsManaged -Path $resolvedExecutablePath
@@ -399,7 +405,7 @@ function Invoke-CodexGitHubCliGuard {
   }
   $authExecutablePath = if ($null -ne $authProbe['executablePath']) { $authProbe['executablePath'] } else { $resolvedExecutablePath }
   $authExecutableManaged = (-not $CheckAuth) -or (Test-GhExecutableIsManaged -Path $authExecutablePath)
-  $restartRequired = (-not $processPathOk) -or (-not $processConfigOk)
+  $restartRequired = [bool]$State.restartRequired
   $authOk = (-not $CheckAuth) -or ([bool]$authProbe['success'] -and $authExecutableManaged)
 
   $payload = [ordered]@{
@@ -423,71 +429,28 @@ function Invoke-CodexGitHubCliGuard {
     repairs = @($repairs)
     backupPath = $linkRepair['backupPath']
     restartRequired = $restartRequired
+    changed = [bool]$State.changed
+    errors = [string[]]$(if ($sourceExists -and [bool]$signatureState['valid'] -and $nativeLinkOk -and $processPathOk -and [bool]$persistentEnvironment['pathOk'] -and $processConfigOk -and [bool]$persistentEnvironment['ghConfigDirOk'] -and $managedResolutionOk -and $versionExecutableManaged -and [bool]$versionProbe['success'] -and $authOk) { @() } else { @('github-cli health check failed') })
   }
+  return $payload
+}
 
+$operation = {
+  param($state)
+  $script:ActiveGitHubGuardState = $state
+  try { Invoke-CodexGitHubCliGuard -State $state }
+  finally { $script:ActiveGitHubGuardState = $null }
+}
+$healthWriter = {
+  param($state, $payload)
   $GuardStopwatch.Stop()
+  $healthErrors = if ([bool]$payload['ok']) { [string[]]@() } else { [string[]]@($payload['errors']) }
   $healthPayload = [pscustomobject][ordered]@{
-    hookId = 'github-cli'
-    runId = [guid]::NewGuid().ToString('N')
-    startedAtUtc = $GuardStarted.ToString('o')
-    completedAtUtc = [DateTime]::UtcNow.ToString('o')
-    durationMs = [long]$GuardStopwatch.ElapsedMilliseconds
-    ok = [bool]$payload['ok']
-    changed = @($repairs).Count -gt 0
-    restartRequired = [bool]$restartRequired
-    errors = [string[]]$(if ([bool]$payload['ok']) { @() } else { @('github-cli health check failed') })
+    hookId = 'github-cli'; runId = [guid]::NewGuid().ToString('N')
+    startedAtUtc = $GuardStarted.ToString('o'); completedAtUtc = [DateTime]::UtcNow.ToString('o')
+    durationMs = [long]$GuardStopwatch.ElapsedMilliseconds; ok = [bool]$payload['ok']
+    changed = [bool]$state.changed; restartRequired = [bool]$state.restartRequired; errors = [string[]]$healthErrors
   }
   Write-CodexHookLatestHealth -HookId 'github-cli' -Payload $healthPayload
-  $script:GitHubHealthWritten = $true
-
-  if ($Json) {
-    $payload | ConvertTo-Json -Depth 8
-  }
-  elseif ($repairs.Count -gt 0 -or -not $payload['ok']) {
-    Write-Output ("ok={0}; repairs={1}; restartRequired={2}" -f $payload['ok'], ($repairs -join ','), $restartRequired)
-  }
-
-  if ($Strict -and -not $sourceExists) {
-    throw "Official GitHub CLI binary not found: $GhSourcePath"
-  }
-  if ($Strict -and -not [bool]$signatureState['valid']) {
-    throw "GitHub CLI source failed Authenticode publisher verification."
-  }
-  if ($Strict -and $restartRequired) {
-    throw "Codex inherited stale PATH or GH_CONFIG_DIR values. Persistent user state was repaired; restart Codex to refresh the parent process environment."
-  }
-  if ($Strict -and (-not [bool]$persistentEnvironment['pathOk'] -or -not [bool]$persistentEnvironment['ghConfigDirOk'])) {
-    throw "GitHub CLI persistent PATH or GH_CONFIG_DIR state is not durable."
-  }
-  if ($Strict -and (-not $nativeLinkOk -or -not $managedResolutionOk -or -not $versionExecutableManaged -or -not [bool]$versionProbe['success'])) {
-    throw "Codex-compatible native GitHub CLI launch failed."
-  }
-  if ($Strict -and $CheckAuth -and (-not [bool]$authProbe['success'] -or -not $authExecutableManaged)) {
-    throw "GitHub CLI is installed but not authenticated through $ExpectedGhConfigDir."
-  }
 }
-
-try {
-  Invoke-CodexGitHubCliGuard
-}
-catch {
-  if (-not $script:GitHubHealthWritten) {
-    $GuardStopwatch.Stop()
-    $failedHealthPayload = [pscustomobject][ordered]@{
-      hookId = 'github-cli'
-      runId = [guid]::NewGuid().ToString('N')
-      startedAtUtc = $GuardStarted.ToString('o')
-      completedAtUtc = [DateTime]::UtcNow.ToString('o')
-      durationMs = [long]$GuardStopwatch.ElapsedMilliseconds
-      ok = $false
-      changed = $false
-      restartRequired = $false
-      errors = [string[]]@('github-cli guard failed')
-    }
-    try { Write-CodexHookLatestHealth -HookId 'github-cli' -Payload $failedHealthPayload } catch {}
-  }
-  if ($Strict) {
-    throw
-  }
-  Write-Warning "Codex GitHub CLI guard could not complete: $($_.Exception.Message)"
-}
+Invoke-CodexGitHubCliGuardEntry -Operation $operation -HealthWriter $healthWriter -Json:$Json -Strict:$Strict

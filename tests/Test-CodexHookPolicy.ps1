@@ -263,7 +263,7 @@ foreach ($invalidTimeout in @(0, 30)) {
 $managedManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
 $managedManifest = Read-CodexHookManifest -Path $managedManifestPath
 Assert-True (@($managedManifest.hooks).Count -eq 8) '受管 manifest 必须声明 8 个当前 hook'
-Assert-True (@($managedManifest.files).Count -eq 15) '受管 manifest 必须声明冻结 12 文件、state writer 与 2 个共享库文件'
+Assert-True (@($managedManifest.files).Count -eq 16) '受管 manifest 必须声明冻结 12 文件、state writer 与 3 个共享库文件'
 Assert-True (
     @($managedManifest.environment).Count -eq 1 -and
     $managedManifest.environment[0].name -ceq 'SERENA_HOME' -and

@@ -36,11 +36,44 @@ Assert-True ($githubSource.Contains(". 'D:\Codex\.codex\hooks\lib\CodexHookRunti
 Assert-True ($githubSource.Contains("Write-CodexHookLatestHealth -HookId 'github-cli'")) 'GitHub guard 必须写独立 latest health'
 Assert-True ($githubSource.Contains('$GuardStopwatch.ElapsedMilliseconds')) 'GitHub health 必须记录真实 duration 而非常量'
 Assert-True ([regex]::Matches($githubSource,"@\('auth', 'status'\)").Count -eq 1 -and $githubSource.Contains('$authProbe = if (-not $CheckAuth)')) 'GitHub quick 路径不得执行 auth/network probe'
+$githubEntryPath=Join-Path $managedRoot 'hooks\lib\CodexGitHubCliGuardEntry.ps1'
+Assert-True (Test-Path -LiteralPath $githubEntryPath -PathType Leaf) 'GitHub guard 必须使用可独立验证的 published internal entry state machine'
+Assert-True ($githubSource.Contains(". 'D:\Codex\.codex\hooks\lib\CodexGitHubCliGuardEntry.ps1'") -and $githubSource.Contains('Invoke-CodexGitHubCliGuardEntry -Operation')) 'GitHub production guard 必须调用 fixed-path internal entry state machine'
+$githubHarness=Join-Path $projectRoot 'tests\lib\Invoke-GitHubGuardEntryFixture.ps1'
+Assert-True (Test-Path -LiteralPath $githubHarness -PathType Leaf) 'GitHub entry fixture harness 必须留在 tests/lib'
+function Invoke-GitHubEntryFixture([string]$Case,[bool]$Json,[bool]$Strict){
+    $args=@('-NoProfile','-File',$githubHarness,'-Case',$Case)
+    if($Json){$args+='-Json'};if($Strict){$args+='-Strict'}
+    Invoke-CodexHookProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -ArgumentList $args
+}
+$preFailure=Invoke-GitHubEntryFixture 'pre-payload' $true $false
+Assert-True ($preFailure.exitCode -eq 0) '非 Strict JSON pre-payload failure 必须 fail-open'
+$preJson=$preFailure.stdout|ConvertFrom-Json
+Assert-True ($preJson.ok -eq $false -and $preJson.changed -eq $false -and $preJson.restartRequired -eq $false -and @($preJson.errors).Count -eq 1) 'pre-payload failure JSON 必须稳定且脱敏'
+Assert-True (@($preFailure.stdout.Trim() -split "`r?`n").Count -eq 1) 'JSON failure stdout 必须严格一个对象'
+$postFailure=Invoke-GitHubEntryFixture 'post-mutation' $true $false
+$postJson=$postFailure.stdout|ConvertFrom-Json
+Assert-True ($postJson.ok -eq $false -and $postJson.changed -eq $true -and $postJson.restartRequired -eq $true) 'post-mutation failure 必须保留真实 changed/restartRequired'
+Assert-True (@($postJson.errors)[0] -ceq 'github-cli guard failed') 'post-mutation health 必须接收真实 state 且保留 generic guard error'
+$healthFailure=Invoke-GitHubEntryFixture 'health-writer' $true $false
+$healthJson=$healthFailure.stdout|ConvertFrom-Json
+Assert-True ($healthFailure.exitCode -eq 0 -and $healthJson.ok -eq $false -and @($healthJson.errors)[0] -ceq 'health write failed') 'health writer failure 不得吞 JSON'
+$strictFailure=Invoke-GitHubEntryFixture 'pre-payload' $true $true
+Assert-True ($strictFailure.exitCode -ne 0 -and @($strictFailure.stdout.Trim() -split "`r?`n").Count -eq 1 -and ($strictFailure.stdout|ConvertFrom-Json).ok -eq $false) 'Strict failure 必须先输出一个失败 JSON 再非零退出'
+$sessionFailure=Invoke-GitHubEntryFixture 'pre-payload' $false $false
+Assert-True ($sessionFailure.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($sessionFailure.stdout)) '非 JSON SessionStart failure 必须 fail-open 且 stdout 不污染'
+$successEntry=Invoke-GitHubEntryFixture 'success' $true $false
+$successJson=$successEntry.stdout|ConvertFrom-Json
+Assert-True ($successEntry.exitCode -eq 0 -and $successJson.ok -eq $true -and @($successJson.errors).Count -eq 0 -and @($successEntry.stdout.Trim() -split "`r?`n").Count -eq 1) 'JSON success stdout 必须严格一个对象且 errors 为稳定 array'
 
+$runtimeSource=Get-Content -Raw -LiteralPath $runtimePath
 $serenaSource=Get-Content -Raw -LiteralPath (Join-Path $managedRoot 'hooks\serena-activate-guarded.ps1')
 Assert-True ($serenaSource.Contains("Write-CodexHookLatestHealth -HookId 'serena-activate'")) 'Serena activate 必须写独立 latest health'
-Assert-True ($serenaSource.Contains('hookEventName') -and $serenaSource.Contains('SessionStart')) 'Serena activate 必须严格验证 SessionStart hook JSON'
+Assert-True ($serenaSource.Contains('Assert-CodexSerenaSessionStartOutputBytes') -and $runtimeSource.Contains('function Assert-CodexSerenaSessionStartOutputBytes')) 'Serena activate 必须复用 shared strict SessionStart bytes validator'
 Assert-True ($serenaSource.Contains('StandardOutput.BaseStream')) 'Serena activate 必须以 bytes 捕获 vendor stdout'
+$serenaTokens=$null;$serenaErrors=$null;$serenaAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $managedRoot 'hooks\serena-activate-guarded.ps1'),[ref]$serenaTokens,[ref]$serenaErrors)
+Assert-True ($serenaErrors.Count -eq 0 -and $null -eq $serenaAst.ParamBlock) 'Serena production CLI 不得暴露 public param table'
+foreach($forbiddenCapability in @('AllowFixture','VendorPath','FixtureVendorScriptPath','RuntimePath','HealthRoot','codex-hook-serena-fixture','codex-hook-health-test')){Assert-True (-not $serenaSource.Contains($forbiddenCapability)) "Serena production CLI 不得包含 fixture/path override：$forbiddenCapability"}
 Assert-Throws { Assert-CodexHookDPath 'C:\fixture\x' } '路径|D 盘'
 Assert-True ((ConvertTo-CodexHookRedactedUri 'http://user:secret@example.com:8080/a?q=token#x') -ceq 'http://example.com:8080') 'URI 必须移除 user-info/path/query/fragment'
 
@@ -95,7 +128,7 @@ $bytes=[Text.UTF8Encoding]::new($false).GetBytes($output)
 [Console]::OpenStandardOutput().Write($bytes,0,$bytes.Length)
 '@
 [IO.File]::WriteAllText($serenaFixtureScript,$fixtureSource,[Text.UTF8Encoding]::new($false))
-$serenaScript=Join-Path $managedRoot 'hooks\serena-activate-guarded.ps1'
+$serenaScript=Join-Path $projectRoot 'tests\lib\Invoke-SerenaActivateFixture.ps1'
 $serenaHealthRoot='D:\Codex\projects\统一环境\reports\codex-hook-health-test'
 function Invoke-SerenaActivateFixture([string]$Mode){
     if(Test-Path -LiteralPath $serenaHealthRoot){Remove-Item -LiteralPath $serenaHealthRoot -Recurse -Force}

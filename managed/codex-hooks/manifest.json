@@ -317,7 +317,7 @@
     {
       "relativePath": "hooks/codex-github-cli-guard.ps1",
       "liveRelativePath": "codex-github-cli-guard.ps1",
-      "sha256": "0a1bf4ccf1c575f14e8b6b0c3e5b2b827f82351c6530d19fc96f11b1a66df5be",
+      "sha256": "345ed8beb366d33ab87fe936e1c8c8ec3eb3cc3741741a3976901e9a39a5ac30",
       "lifecycle": "active",
       "ownerHookIds": [
         "github-cli"
@@ -401,7 +401,7 @@
     {
       "relativePath": "hooks/serena-activate-guarded.ps1",
       "liveRelativePath": "serena-activate-guarded.ps1",
-      "sha256": "7a68ffc903bf5fd6abd115be941ea8f82e4fbc6044921a99984d9d450a21b831",
+      "sha256": "4705112efaa3393fbc4b3860f1d1ca6fb8de8635b21fe044b72178d2aa692751",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -428,12 +428,21 @@
     {
       "relativePath": "hooks/lib/CodexHookRuntime.ps1",
       "liveRelativePath": "lib/CodexHookRuntime.ps1",
-      "sha256": "bb94f1477c69146a50552e5a99c2f9bbd28d6072df7adb638e49ff17276b229c",
+      "sha256": "8481a2ed076fd7b44ba15b35d5995707537df32a7145fe856b42504394d152b6",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",
         "serena-activate",
         "serena-dashboard",
+        "github-cli"
+      ]
+    },
+    {
+      "relativePath": "hooks/lib/CodexGitHubCliGuardEntry.ps1",
+      "liveRelativePath": "lib/CodexGitHubCliGuardEntry.ps1",
+      "sha256": "5ac93906775563eb6a94d6bce9c22e57c6243432598cd05037f1242992577b64",
+      "lifecycle": "active",
+      "ownerHookIds": [
         "github-cli"
       ]
     },
