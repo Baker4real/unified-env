@@ -43,9 +43,9 @@ reconciler 只维护以下状态：
 ## 修复保证
 
 - 所有路径必须位于 D 盘，且受管路径不得穿过 reparse point；受管文件不得是 NTFS hard link。
-- TOML 与 JSON 在写入前严格解析；Serena context 定向验证唯一根级 prompt 及完整激活契约。重复或语义等价的关键 section/key、歧义 prompt、越界 context 会 fail closed。
+- TOML 固定由 `D:\Codex\tools\python314-official\python.exe`（ProductVersion 3.14、PSF 签名）及其标准库 `tomllib` 做完整语法验证，再由定向 parser 识别受管 section/key，生成结果也必须在写前复验；输入、输出与进程退出共用 5 秒截止时间。runtime 根、必要 DLL 与 `Lib\tomllib` 源文件不得经过 reparse point 或 hard link；`-B` 配合唯一且确认不存在的 D 盘 `pycache_prefix`，强制从已检查源码加载且不生成 bytecode cache。启动器签名不是标准库内容证明，验证器继承现有 `D:\Codex\tools` runtime 的主机信任边界。JSON 在写入前严格解析。Serena context 定向验证唯一根级 prompt 及完整激活契约。验证器缺失、重复或语义等价的关键 section/key、歧义 prompt、越界 context 都会 fail closed。
 - 写入前保存受保护 evidence，随后使用同卷临时文件、原子替换、内容与 ACL 的 CAS 校验完成提交。
-- 并发替换或不安全的部分提交不会用旧 snapshot 覆盖较新 active state；可定位 backup 和 manifest 会被保留，状态按 `unsafe-partial` 报告。
+- 并发替换或文件提交、ACL 加固、legacy 退役中的不安全部分提交不会用旧 snapshot 覆盖较新 active state；可定位 backup 和 manifest 会被保留，状态按 `unsafe-partial` 报告。
 - 只有固定 allowlist 内的旧实现可以退役；未知路径与文件内容必须保持不变，其 ACL 可随稳定 hook surface 收紧。
 - `Repair` 按 Codex home 获取互斥锁；健康状态再次执行必须返回 `changed = false`。
 

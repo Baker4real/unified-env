@@ -165,7 +165,7 @@ $legacyNames = @(
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "InvalidSerenaContextPolicy", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "InvalidSerenaContextPolicy", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml", "InvalidUnmanagedToml", "InvalidUtf8Toml", "BomToml")]
         [string]$Variant = "Drift"
     )
 
@@ -176,6 +176,7 @@ function New-FixtureCodexHome {
 
     $config = @'
 model = "fixture-model-must-survive"
+fixture_unicode = "中文必须通过"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 
@@ -251,9 +252,26 @@ note = '''
 multiline-body-must-survive
 '''
 '@
+    } elseif ($Variant -eq "InvalidUnmanagedToml") {
+        $config += "`n[fixture.invalid]`nunmanaged = [`n"
     }
 
-    Set-Content -LiteralPath (Join-Path $Root "config.toml") -Value $config -Encoding UTF8
+    $configPath = Join-Path $Root "config.toml"
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    if ($Variant -eq "InvalidUtf8Toml") {
+        $prefix = $utf8.GetBytes('fixture_invalid_utf8 = "')
+        $suffix = $utf8.GetBytes("`"`n$config")
+        $bytes = [byte[]]::new($prefix.Length + 1 + $suffix.Length)
+        [array]::Copy($prefix, 0, $bytes, 0, $prefix.Length)
+        $bytes[$prefix.Length] = 0xFF
+        [array]::Copy($suffix, 0, $bytes, $prefix.Length + 1, $suffix.Length)
+        [System.IO.File]::WriteAllBytes($configPath, $bytes)
+    } elseif ($Variant -eq "BomToml") {
+        [byte[]]$bytes = @([byte]0xEF, [byte]0xBB, [byte]0xBF) + @($utf8.GetBytes($config))
+        [System.IO.File]::WriteAllBytes($configPath, $bytes)
+    } else {
+        [System.IO.File]::WriteAllText($configPath, $config, $utf8)
+    }
 
     New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($serenaContextPath)) | Out-Null
     $serenaContext = if ($Variant -eq "InvalidSerenaContextPolicy") {
@@ -419,7 +437,7 @@ try {
     Assert-True -Condition (-not ($config -match '"--project"\s*,')) -Message "Serena 仍包含固定 --project"
     Assert-True -Condition (-not ($config -match '"--project-file(?:=|"\s*,)')) -Message "Serena 仍包含 --project-file"
     Assert-True -Condition $config.Contains("codex-file-tools.yml") -Message "Serena custom context 被误删"
-    foreach ($sentinel in @('fixture-model-must-survive', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true', 'array-table-must-survive', 'fixture_network_sentinel = "must-survive"')) {
+    foreach ($sentinel in @('fixture-model-must-survive', 'fixture_unicode = "中文必须通过"', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true', 'array-table-must-survive', 'fixture_network_sentinel = "must-survive"')) {
         Assert-True -Condition $config.Contains($sentinel) -Message "无关 TOML 内容被误删或改写：$sentinel"
     }
     Assert-True -Condition ($config -match '(?m)^approval_policy\s*=\s*"never"\s*$') -Message "approval_policy 未归一化"
@@ -689,6 +707,40 @@ try {
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $rollbackEvidence[0].FullName "config.toml")) -eq $rollbackConfigHash) -Message "回滚 evidence 的 config 快照不真实"
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $rollbackEvidence[0].FullName "hooks.json")) -eq $rollbackHooksHash) -Message "回滚 evidence 的 hooks 快照不真实"
 
+    foreach ($phase in @("acl", "legacy")) {
+        $postCommitHome = Join-Path $testRoot "post-commit-$phase-failure\.codex"
+        New-FixtureCodexHome -Root $postCommitHome
+        $firstAclPath = Join-Path $postCommitHome "hooks.json"
+        $firstAclBefore = (Get-Acl -LiteralPath $firstAclPath).Sddl
+        $postCommitThrew = $false
+        try {
+            $env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE = $phase
+            Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $postCommitHome | Out-Null
+        } catch {
+            $postCommitThrew = $true
+        } finally {
+            Remove-Item Env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE -ErrorAction SilentlyContinue
+        }
+        Assert-True -Condition $postCommitThrew -Message "post-commit $phase fixture 未触发失败"
+        $postCommitEvidence = @(Get-ChildItem -LiteralPath (Join-Path $postCommitHome "run-evidence\host-hook-remediation") -Directory -Force)
+        Assert-True -Condition ($postCommitEvidence.Count -eq 1) -Message "post-commit $phase failure 必须恰好生成一份 evidence"
+        $postCommitManifest = Get-Content -LiteralPath (Join-Path $postCommitEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
+        Assert-True -Condition ($postCommitManifest.status -eq "unsafe-partial") -Message "post-commit $phase failure 未标记 unsafe-partial"
+        foreach ($resource in @("config.toml", "hooks.json")) {
+            Assert-True -Condition (@($postCommitManifest.committedResources) -contains $resource) -Message "post-commit $phase failure 漏记已提交资源：$resource"
+        }
+        if ($phase -eq "acl") {
+            Assert-True -Condition (@($postCommitManifest.aclTargets).Count -eq 1 -and $postCommitManifest.aclTargets[0] -eq $firstAclPath) -Message "ACL failure seam 未精确记录首个 ACL mutation"
+            Assert-True -Condition ((Get-Acl -LiteralPath $firstAclPath).Sddl -cne $firstAclBefore) -Message "ACL failure seam 未实际改变首个 ACL"
+            Assert-OnlyAllowedWriters -Path $firstAclPath
+            Assert-True -Condition (Test-Path -LiteralPath (Join-Path $postCommitHome "hooks\$($legacyNames[0])") -PathType Leaf) -Message "ACL failure seam 不应提前退役 legacy 文件"
+        } else {
+            Assert-True -Condition (@($postCommitManifest.retiredResources).Count -eq 1 -and $postCommitManifest.retiredResources[0] -eq $legacyNames[0]) -Message "legacy failure seam 未精确记录首个退役 mutation"
+            Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $postCommitHome "hooks\$($legacyNames[0])"))) -Message "legacy failure seam 未实际删除首个 legacy 文件"
+            Assert-True -Condition (Test-Path -LiteralPath (Join-Path $postCommitHome "hooks\$($legacyNames[1])") -PathType Leaf) -Message "legacy failure seam 多删了后续 legacy 文件"
+        }
+    }
+
     $legacyUnknownHome = Join-Path $testRoot "legacy-directory-unknown\.codex"
     New-FixtureCodexHome -Root $legacyUnknownHome
     $unknownCachePath = Join-Path $legacyUnknownHome "hooks\__pycache__\keep-me.pyc"
@@ -725,12 +777,35 @@ try {
         @{ Name = "duplicate-quoted-approval"; Variant = "DuplicateQuotedApproval" },
         @{ Name = "root-dotted-hook-key"; Variant = "RootDottedHookKey" },
         @{ Name = "missing-approval"; Variant = "MissingApproval" },
-        @{ Name = "multiline-toml"; Variant = "MultilineToml" }
+        @{ Name = "multiline-toml"; Variant = "MultilineToml" },
+        @{ Name = "invalid-unmanaged-toml"; Variant = "InvalidUnmanagedToml" },
+        @{ Name = "invalid-utf8-toml"; Variant = "InvalidUtf8Toml" },
+        @{ Name = "bom-toml"; Variant = "BomToml" }
     )) {
         $caseHome = Join-Path $testRoot "$($case.Name)\.codex"
         New-FixtureCodexHome -Root $caseHome -Variant $case.Variant
         Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $caseHome -CaseName $case.Name
     }
+
+    $headerLikeArrayHome = Join-Path $testRoot "header-like-array-toml\.codex"
+    New-FixtureCodexHome -Root $headerLikeArrayHome
+    $headerLikeBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $headerLikeArrayHome
+    Assert-True -Condition ([bool]$headerLikeBaselineRepair.ok) -Message "header-like-array 基准 Repair 未形成健康状态"
+    $headerLikeConfigPath = Join-Path $headerLikeArrayHome "config.toml"
+    $headerLikeConfig = Get-Content -LiteralPath $headerLikeConfigPath -Raw
+    Assert-True -Condition (-not ($headerLikeConfig -match '(?m)^\s*\[\s*["'']?hooks["'']?(?:\.|\s*\])')) -Message "header-like-array 基准仍包含真实 hook section"
+    $headerLikeConfig += @'
+
+[fixture.header_like_array]
+values = [
+  ["keep"],
+  ["hooks"]
+]
+'@
+    [System.IO.File]::WriteAllText($headerLikeConfigPath, $headerLikeConfig, [System.Text.UTF8Encoding]::new($false))
+    & "D:\Codex\tools\python314-official\python.exe" -B -I -S -X utf8 -c 'import pathlib, sys, tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $headerLikeConfigPath
+    Assert-True -Condition ($LASTEXITCODE -eq 0) -Message "header-like-array 输入本身不是合法 TOML"
+    Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $headerLikeArrayHome -CaseName "header-like-array-toml"
 
     $hardLinkHome = Join-Path $testRoot "hard-link\.codex"
     New-FixtureCodexHome -Root $hardLinkHome

@@ -13,6 +13,7 @@ $script:FixtureConcurrentReplacePath = $null
 $script:FixtureConcurrentReplaceKind = "content"
 $script:FixtureConcurrentReplaceRemaining = 0
 $script:FixtureCasFailureMode = $null
+$script:FixturePostCommitFailurePhase = $null
 
 $script:LegacyHookNames = @(
     "codex-mobile-permission-guard.py",
@@ -169,13 +170,28 @@ function Initialize-FixtureTestSeams {
     param([string]$ResolvedCodexHome)
 
     $requestedPath = $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE
-    if ([string]::IsNullOrWhiteSpace($requestedPath)) {
+    $postCommitFailurePhase = $env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE
+    if (
+        [string]::IsNullOrWhiteSpace($requestedPath) -and
+        [string]::IsNullOrWhiteSpace($postCommitFailurePhase)
+    ) {
         return
     }
 
     $liveHome = [System.IO.Path]::GetFullPath("D:\Codex\.codex").TrimEnd("\", "/")
     if ($ResolvedCodexHome.Equals($liveHome, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "fixture-only test seam 不得用于 live CodexHome"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($postCommitFailurePhase)) {
+        if ($postCommitFailurePhase -notin @("acl", "legacy")) {
+            throw "fixture-only post-commit failure phase 无效"
+        }
+        $script:FixturePostCommitFailurePhase = $postCommitFailurePhase
+    }
+
+    if ([string]::IsNullOrWhiteSpace($requestedPath)) {
+        return
     }
 
     $fullPath = Assert-NoReparsePath -Path $requestedPath -RequireLeaf
@@ -243,7 +259,20 @@ function Get-ConcurrentReplaceRecord {
 function Read-Text {
     param([string]$Path)
 
-    [System.IO.File]::ReadAllText($Path)
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if (
+        $bytes.Length -ge 3 -and
+        $bytes[0] -eq 0xEF -and
+        $bytes[1] -eq 0xBB -and
+        $bytes[2] -eq 0xBF
+    ) {
+        throw "受管文本文件不得包含 UTF-8 BOM：$Path"
+    }
+    try {
+        [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    } catch [System.Text.DecoderFallbackException] {
+        throw "受管文本文件不是严格 UTF-8：$Path"
+    }
 }
 
 function Write-AtomicText {
@@ -406,9 +435,158 @@ function Get-TomlAssignmentKeySegments {
     ConvertFrom-TomlDottedKeyName -Name $match.Groups['name'].Value
 }
 
+function Resolve-TomlParserPython {
+    $runtimeRoot = Assert-NoReparsePath -Path "D:\Codex\tools\python314-official" -RequireLeaf
+    foreach ($relativePath in @("Lib", "Lib\tomllib")) {
+        $directoryPath = Assert-NoReparsePath -Path (Join-Path $runtimeRoot $relativePath) -RequireLeaf
+        if (-not (Test-Path -LiteralPath $directoryPath -PathType Container)) {
+            throw "TOML parser Python runtime 目录缺失"
+        }
+    }
+    foreach ($relativePath in @(
+        "python.exe",
+        "python3.dll",
+        "python314.dll",
+        "Lib\tomllib\__init__.py",
+        "Lib\tomllib\_parser.py",
+        "Lib\tomllib\_re.py",
+        "Lib\tomllib\_types.py"
+    )) {
+        $filePath = Assert-NoReparsePath -Path (Join-Path $runtimeRoot $relativePath) -RequireLeaf
+        if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+            throw "TOML parser Python runtime 文件缺失"
+        }
+    }
+
+    $pythonPath = Join-Path $runtimeRoot "python.exe"
+    $python = Get-Item -LiteralPath $pythonPath -Force
+    if ($python.VersionInfo.ProductVersion -notmatch '^3\.14\.') {
+        throw "TOML parser Python 版本不符合固定的 3.14 runtime 边界"
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $pythonPath
+    if (
+        $signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+        $null -eq $signature.SignerCertificate -or
+        $signature.SignerCertificate.Subject -notmatch '(^|,\s*)CN=Python Software Foundation(,|$)'
+    ) {
+        throw "TOML parser Python 未通过 Python Software Foundation 签名验证"
+    }
+    $pythonPath
+}
+
+function Wait-TomlParserTask {
+    param(
+        [System.Threading.Tasks.Task]$Task,
+        [System.Diagnostics.Stopwatch]$Clock,
+        [int]$TimeoutMilliseconds
+    )
+
+    while (-not $Task.IsCompleted) {
+        $remaining = $TimeoutMilliseconds - [int]$Clock.ElapsedMilliseconds
+        if ($remaining -le 0) {
+            throw "TOML parser Python 超时"
+        }
+        Start-Sleep -Milliseconds ([Math]::Min(10, $remaining))
+    }
+    $Task.GetAwaiter().GetResult()
+}
+
+function Assert-ValidToml {
+    param([string]$Content)
+
+    $pythonPath = Resolve-TomlParserPython
+    $pycacheRoot = Assert-NoReparsePath -Path "D:\Codex\.codex\run-evidence" -RequireLeaf
+    if (-not (Test-Path -LiteralPath $pycacheRoot -PathType Container)) {
+        throw "TOML parser pycache 隔离根不存在"
+    }
+    $pycachePrefix = Assert-NoReparsePath -Path (Join-Path $pycacheRoot (".toml-parser-pycache-{0}" -f ([guid]::NewGuid().ToString("N"))))
+    if (Test-Path -LiteralPath $pycachePrefix) {
+        throw "TOML parser pycache 隔离路径必须不存在"
+    }
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $pythonPath
+    foreach ($argument in @(
+        "-B",
+        "-I",
+        "-S",
+        "-X",
+        "utf8",
+        "-X",
+        "pycache_prefix=$pycachePrefix",
+        "-c",
+        'import sys, tomllib; tomllib.loads(sys.stdin.read())'
+    )) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+    $startInfo.WorkingDirectory = "D:\Codex"
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+    $startInfo.StandardInputEncoding = $utf8
+    $startInfo.StandardOutputEncoding = $utf8
+    $startInfo.StandardErrorEncoding = $utf8
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $started = $false
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    $timeoutMilliseconds = 5000
+    try {
+        $started = $process.Start()
+        if (-not $started) {
+            throw "TOML parser Python 未启动"
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $writeTask = $process.StandardInput.WriteAsync($Content)
+        Wait-TomlParserTask -Task $writeTask -Clock $clock -TimeoutMilliseconds $timeoutMilliseconds | Out-Null
+        $flushTask = $process.StandardInput.FlushAsync()
+        Wait-TomlParserTask -Task $flushTask -Clock $clock -TimeoutMilliseconds $timeoutMilliseconds | Out-Null
+        $process.StandardInput.Close()
+        $remaining = $timeoutMilliseconds - [int]$clock.ElapsedMilliseconds
+        if ($remaining -le 0 -or -not $process.WaitForExit($remaining)) {
+            throw "TOML parser Python 超时"
+        }
+        Wait-TomlParserTask -Task $stdoutTask -Clock $clock -TimeoutMilliseconds $timeoutMilliseconds | Out-Null
+        Wait-TomlParserTask -Task $stderrTask -Clock $clock -TimeoutMilliseconds $timeoutMilliseconds | Out-Null
+        if ($process.ExitCode -ne 0) {
+            throw "config.toml 未通过完整 TOML 语法验证"
+        }
+    } catch {
+        throw "完整 TOML 语法验证失败"
+    } finally {
+        if ($started -and -not $process.HasExited) {
+            try {
+                $process.StandardInput.BaseStream.Dispose()
+            } catch {
+            }
+            try {
+                $process.Kill($true)
+            } catch {
+            }
+            $process.WaitForExit(1000) | Out-Null
+        }
+        $process.Dispose()
+    }
+}
+
+function Invoke-FixturePostCommitFailure {
+    param([ValidateSet("acl", "legacy")][string]$Phase)
+
+    if ($script:FixturePostCommitFailurePhase -ceq $Phase) {
+        $script:FixturePostCommitFailurePhase = $null
+        throw "fixture-only post-commit $Phase failure"
+    }
+}
+
 function Get-TomlDocument {
     param([string]$Content)
 
+    Assert-ValidToml -Content $Content
     if ($Content.Contains("'''") -or $Content.Contains('"""')) {
         throw "当前安全 parser 不处理 TOML 多行字符串；为避免把正文误判为 section，拒绝写入"
     }
@@ -653,6 +831,7 @@ function Get-DesiredConfig {
         }
     }
     $desired = [string]::Join($document.newLine, $keptLines)
+    Assert-ValidToml -Content $desired
 
     [pscustomobject]@{
         content = $desired
@@ -1245,6 +1424,7 @@ function Invoke-Repair {
             $aclApplied.Add($path)
             $manifest.aclTargets = $aclApplied.ToArray()
             Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
+            Invoke-FixturePostCommitFailure -Phase "acl"
         }
 
         $retired = [System.Collections.Generic.List[string]]::new()
@@ -1262,6 +1442,7 @@ function Invoke-Repair {
             $retired.Add($name)
             $manifest.retiredResources = $retired.ToArray()
             Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
+            Invoke-FixturePostCommitFailure -Phase "legacy"
         }
         foreach ($directoryName in $InitialState.legacyDirectoriesPresent) {
             $legacyDirectoryPath = Join-Path $InitialState.hookDirectory $directoryName
@@ -1273,6 +1454,7 @@ function Invoke-Repair {
             $retired.Add("$directoryName\")
             $manifest.retiredResources = $retired.ToArray()
             Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
+            Invoke-FixturePostCommitFailure -Phase "legacy"
         }
         $manifest.retiredResources = $retired.ToArray()
 
@@ -1291,7 +1473,7 @@ function Invoke-Repair {
         Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
         New-Result -ResultMode "Repair" -State $finalState -Changed $true -EvidencePath $snapshot.path
     } catch {
-        $manifest.status = "post-commit-failed"
+        $manifest.status = "unsafe-partial"
         $manifest.error = $_.Exception.Message
         Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
         throw
