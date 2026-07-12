@@ -307,6 +307,16 @@ $duplicateHook.order = 99
 $duplicateRetiredIdentity.hooks = @($duplicateRetiredIdentity.hooks) + @($duplicateHook)
 Assert-Throws { Assert-CodexHookManifest -Manifest $duplicateRetiredIdentity } 'retired 在内的全部 manifest identity 必须唯一'
 
+$retiredReplacementOrder = Copy-TestDocument $managedManifest
+$retiredReplacement = Copy-TestDocument @($retiredReplacementOrder.hooks | Where-Object id -ceq 'serena-cleanup')[0]
+$retiredReplacement.id = 'serena-cleanup-retired-replacement'
+$retiredReplacement.lifecycle = 'retired'
+$retiredReplacement.lifecycleReason = 'retired replacement may retain the active order'
+$retiredReplacement.arguments = @('cleanup-retired', '--client=codex')
+$retiredReplacement.fullAcceptanceCommand.arguments = @('cleanup-retired', '--client=codex')
+$retiredReplacementOrder.hooks = @($retiredReplacementOrder.hooks) + @($retiredReplacement)
+Assert-True (Assert-CodexHookManifest -Manifest $retiredReplacementOrder) 'event/order 唯一性只约束 active+compatibility；retired replacement 可保留同 order'
+
 $sessionStartIds = @(
     $managedManifest.hooks |
         Where-Object event -ceq 'SessionStart' |
@@ -324,8 +334,9 @@ Assert-True (
 Assert-True (
     $autoApprove[0].fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -and
     @($autoApprove[0].fullAcceptanceCommand.arguments) -ccontains 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1' -and
+    $autoApprove[0].fullAcceptanceCommand.arguments[-1] -ceq '-RequireNoRetiredRegistrations' -and
     -not (($autoApprove[0].fullAcceptanceCommand.arguments -join ' ').Contains('Get-Content'))
-) 'auto-approve full acceptance 必须走结构化 inventory 入口而非 grep registry 原文'
+) 'auto-approve full acceptance 必须走带 retirement 断言的结构化 inventory 入口而非 grep registry 原文'
 
 $sourceStates = @($managedManifest.hooks | Group-Object sourceState -AsHashTable -AsString)
 Assert-True (

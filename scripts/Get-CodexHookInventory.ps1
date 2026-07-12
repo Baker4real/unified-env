@@ -2,7 +2,8 @@
 param(
     [string]$ManifestPath = 'D:\Codex\projects\统一环境\managed\codex-hooks\manifest.json',
     [string]$CodexHome = 'D:\Codex\.codex',
-    [string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-inventory'
+    [string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-inventory',
+    [switch]$RequireNoRetiredRegistrations
 )
 
 Set-StrictMode -Version Latest
@@ -191,5 +192,9 @@ $published = Publish-JsonMarkdownArtifactPair `
             '本报告仅采集注册、路径、存在性和 SHA-256 事实；未执行任何 hook。'
         ) -join "`n"
     }
+
+if ($RequireNoRetiredRegistrations -and $document.summary.retiredButRegisteredCount -ne 0) {
+    throw "retired hook 仍被注册：count=$($document.summary.retiredButRegisteredCount)；inventory artifacts 已保留。"
+}
 
 $published

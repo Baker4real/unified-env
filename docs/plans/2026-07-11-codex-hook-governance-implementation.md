@@ -80,6 +80,7 @@ reports/codex-hook-inventory/
 **文件：**
 
 - Create: `managed/codex-hooks/manifest.json`
+- Create: `scripts/lib/CodexHookHandleBoundIO.cs`
 - Create: `scripts/lib/CodexHookPolicy.ps1`
 - Create: `scripts/Get-CodexHookInventory.ps1`
 - Create: `tests/Test-CodexHookPolicy.ps1`
@@ -91,6 +92,7 @@ reports/codex-hook-inventory/
 - Produces: `Assert-CodexHookStrictJsonText -JsonText <string>`。
 - Produces: `Assert-CodexHookManifest -Manifest <object>`。
 - Produces: `Read-CodexHookManifest -Path <D path>`，返回严格验证的 schema 1 对象。
+- Produces: `Get-CodexHookHandleBoundFileSnapshot`，在同一个只读 handle 上核对最终解析路径并读取 bytes；text/hash 必须从该 snapshot 派生。
 - Produces: `Get-CodexHookRegistryFacts -RegistryPath <path> -Manifest <object>`，按 manifest 的完整路径、事件、matcher 与精确参数识别受管 identity；不返回 raw command、raw arguments 或未知 matcher/target。
 - Produces: `Get-CodexHookFileFacts -Manifest <object> -ManagedRoot <path> -LiveHooksRoot <path>`。
 - Produces: `Get-CodexHookDependencyFacts -Manifest <object>`，只读验证 wrapper、implementation 与 runtime 的存在性、hash 和引用关系。
@@ -195,11 +197,14 @@ Assert-True (-not ($facts | ConvertTo-Json -Depth 20).Contains('trusted_hash')) 
 param(
     [string]$ManifestPath = 'D:\Codex\projects\统一环境\managed\codex-hooks\manifest.json',
     [string]$CodexHome = 'D:\Codex\.codex',
-    [string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-inventory'
+    [string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-inventory',
+    [switch]$RequireNoRetiredRegistrations
 )
 ```
 
 入口只读 `hooks.json`、受管/live 文件元数据、runtime 存在性、`config.toml` 中 trust key 的脱敏类别/摘要、User/Process `SERENA_HOME` 和 reparse 祖先；使用 `ReportArtifactPublisher.ps1` 生成 JSON/Markdown，顶层固定 `artifactType="env-governance.codex-hook-inventory"`、`schemaVersion=1`、`readOnly=true`、`executionAllowed=false`。OutputDir 只允许仓库内两个显式报告根，拒绝 ADS 与任一 reparse ancestor。
+
+所有内容读取与 SHA-256 都必须通过 tracked `CodexHookHandleBoundIO.cs`：一次打开只读 handle，使用 `GetFinalPathNameByHandleW` 将最终路径与 lexical expected path 做 `OrdinalIgnoreCase` 比较，然后从同一 handle 读取 bytes；parent/final reparse 重定向必须拒绝。`Get-CodexHookSafeFileProbe` 只保留观察用途，不得作为 Task 2 final gate。`-RequireNoRetiredRegistrations` 在 artifact 发布后检查结构化 summary，存在 retired registration 时必须以非零退出；manifest 中 retired auto-approve 的 full acceptance 必须使用该参数。
 
 registry facts 额外记录原始 `hooks.json` 整文件的 SHA-256 与字节长度，供 Task 2 final gate 使用；不输出原文。重复项按 `event + matcher + normalized path + exact arguments` 的脱敏 identity SHA-256 计数，规范化 slash/case/quote 变体；兼容字段 `duplicateCommandCount` 暂时与 `duplicateIdentityCount` 同值，后续消费者应迁移到后者。
 
@@ -221,7 +226,7 @@ Expected: 两个测试都输出 `ok=True`，`git diff --check` 无输出，fixtu
 - [ ] **Step 8：提交**
 
 ```powershell
-git add -- .gitignore managed/codex-hooks/manifest.json scripts/lib/CodexHookPolicy.ps1 scripts/Get-CodexHookInventory.ps1 tests/Test-CodexHookPolicy.ps1 tests/Test-CodexHookInventory.ps1
+git add -- .gitignore managed/codex-hooks/manifest.json scripts/lib/CodexHookHandleBoundIO.cs scripts/lib/CodexHookPolicy.ps1 scripts/Get-CodexHookInventory.ps1 tests/Test-CodexHookPolicy.ps1 tests/Test-CodexHookInventory.ps1
 git commit -m "feat: add codex hook manifest and inventory"
 ```
 
@@ -279,6 +284,8 @@ Expected: FAIL，`Merge-CodexHookRegistry` 未定义。实现时用完整 `event
 - restore 重复执行。
 
 断言任何 final gate 失败时 evidence 只有只读诊断、live 字节不变；中途失败时全部字节恢复。
+
+final gate 禁止单独复用 `Get-CodexHookSafeFileProbe` 或 path 后再开一次文件；source、plan、registry 与 live config/file 的 text/hash 必须来自 `Get-CodexHookHandleBoundFileSnapshot` 的同一 handle-bound bytes。fixture 必须覆盖 junction/final-path redirect 和路径在 gate 前后被替换，证明 gate 拒绝重定向且不会混用两次读取的 hash/text。
 
 - [ ] **Step 4：实现部署 evidence 与原子单文件替换**
 

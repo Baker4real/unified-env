@@ -237,11 +237,40 @@ Write-TestText -Path (Join-Path $probeTarget 'secret.txt') -Value 'REPARSE_TARGE
 New-Item -ItemType Junction -Path $probeLink -Target $probeTarget | Out-Null
 try {
     $blockedObservation = Get-CodexHookSafeFileHash -Path (Join-Path $probeLink 'secret.txt') -Name 'reparse fixture' -AllowedRoots @($FixtureRoot)
-    Assert-True ($blockedObservation.probe.state -ceq 'reparse-blocked' -and $null -eq $blockedObservation.sha256) '安全 probe 遇祖先 reparse 必须停止且不得 hash target'
+    Assert-True ($blockedObservation.probe.state -ceq 'reparse-blocked' -and -not $blockedObservation.probe.finalPathVerified -and $null -eq $blockedObservation.sha256) '稳定 junction 必须在 open 前停止且不得 hash target'
+    Assert-Throws {
+        Read-CodexHookSafeUtf8FileSnapshot -Path (Join-Path $probeLink 'secret.txt') -Name 'reparse fixture text' -AllowedRoots @($FixtureRoot)
+    } 'UTF-8 读取必须拒绝 junction 最终路径'
+    $directFinalPathRejected = $false
+    try {
+        [void][CodexHookGovernance.HandleBoundFileReader]::ReadAllBytes((Join-Path $probeLink 'secret.txt'))
+    } catch {
+        $directFinalPathRejected = (Get-CodexHookInnermostException -Exception $_.Exception) -is [CodexHookGovernance.HandlePathMismatchException]
+    }
+    Assert-True $directFinalPathRejected 'handle helper 自身必须用 final path 拒绝经 junction 打开的 target'
     Assert-Throws { Get-CodexHookRegistryFacts -RegistryPath (Join-Path $probeLink 'secret.txt') -Manifest $manifest } 'registry 读取不得穿过 reparse ancestor'
 } finally {
     Remove-Item -LiteralPath $probeLink -Force
 }
+
+$replaceablePath = Join-Path $FixtureRoot 'replaceable-snapshot.txt'
+$replacementPath = Join-Path $FixtureRoot 'replacement-snapshot.txt'
+Write-TestText -Path $replaceablePath -Value 'snapshot-before-replacement'
+$beforeReplacement = Read-CodexHookSafeUtf8FileSnapshot -Path $replaceablePath -Name 'replaceable fixture' -AllowedRoots @($FixtureRoot)
+Write-TestText -Path $replacementPath -Value 'snapshot-after-replacement'
+[IO.File]::Move($replacementPath, $replaceablePath, $true)
+$afterReplacement = Read-CodexHookSafeUtf8FileSnapshot -Path $replaceablePath -Name 'replaced fixture' -AllowedRoots @($FixtureRoot)
+Assert-True (
+    $beforeReplacement.probe.finalPathVerified -and
+    $beforeReplacement.text -ceq 'snapshot-before-replacement' -and
+    $beforeReplacement.sha256 -ceq (Get-CodexHookTextSha256 -Text $beforeReplacement.text)
+) '替换前 text/hash 必须来自同一 handle-bound bytes snapshot'
+Assert-True (
+    $afterReplacement.probe.finalPathVerified -and
+    $afterReplacement.text -ceq 'snapshot-after-replacement' -and
+    $afterReplacement.sha256 -ceq (Get-CodexHookTextSha256 -Text $afterReplacement.text) -and
+    $afterReplacement.sha256 -cne $beforeReplacement.sha256
+) '路径目标替换后必须建立独立 snapshot，不能混用旧 hash/text'
 
 $missingRuntimeProbe = Get-CodexHookSafeFileProbe -Path (Join-Path $FixtureRoot 'missing-runtime.exe') -Name 'missing runtime fixture' -AllowedRoots @($FixtureRoot)
 Assert-True ($missingRuntimeProbe.state -ceq 'missing' -and -not $missingRuntimeProbe.exists) '缺 runtime 应作为 inventory gap，而不是 manifest schema 错误'
@@ -266,6 +295,41 @@ $wrongCommandReference = Get-CodexHookWrapperReferenceFacts `
     -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
     -RuntimeId 'pwsh'
 Assert-True ($wrongCommandReference.parseState -ceq 'runtime-mismatch' -and -not $wrongCommandReference.referencesRuntime) 'comment 中的正确 path 不得掩盖实际错误 command line'
+
+$injectedPwshReference = Get-CodexHookWrapperReferenceFacts `
+    -WrapperText '"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -Command injected -File "D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1" & whoami' `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
+    -RuntimeId 'pwsh'
+Assert-True ($injectedPwshReference.parseState -ceq 'unsafe-cmd-metacharacter' -and $injectedPwshReference.referencesImplementation -ne $true) 'reviewer 注入反例不得 matched/ready'
+
+$commandModeReference = Get-CodexHookWrapperReferenceFacts `
+    -WrapperText '"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -Command injected -File "D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1"' `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
+    -RuntimeId 'pwsh'
+Assert-True ($commandModeReference.parseState -ceq 'forbidden-pwsh-command-mode' -and $commandModeReference.referencesImplementation -ne $true) '-Command/-EncodedCommand 不得伪装为 -File wrapper'
+
+$extraEffectiveCommandReference = Get-CodexHookWrapperReferenceFacts `
+    -WrapperText "`"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe`" -NoProfile -File `"D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`"`r`nwhoami" `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
+    -RuntimeId 'pwsh'
+Assert-True ($extraEffectiveCommandReference.parseState -ceq 'ambiguous-effective-command' -and $extraEffectiveCommandReference.referencesImplementation -ne $true) '额外有效命令必须保持 pending'
+
+$validPythonReference = Get-CodexHookWrapperReferenceFacts `
+    -WrapperText '"D:\Codex\tools\python314-official\python.exe" "D:\Codex\.codex\hooks\codex-state-policy-guard.py" %*' `
+    -RuntimePath 'D:\Codex\tools\python314-official\python.exe' `
+    -ImplementationPath 'D:\Codex\.codex\hooks\codex-state-policy-guard.py' `
+    -RuntimeId 'python'
+Assert-True ($validPythonReference.parseState -ceq 'matched') 'Python wrapper 只允许 runtime + implementation + 可选末尾 %*'
+
+$invalidPythonReference = Get-CodexHookWrapperReferenceFacts `
+    -WrapperText '"D:\Codex\tools\python314-official\python.exe" -I "D:\Codex\.codex\hooks\codex-state-policy-guard.py" %*' `
+    -RuntimePath 'D:\Codex\tools\python314-official\python.exe' `
+    -ImplementationPath 'D:\Codex\.codex\hooks\codex-state-policy-guard.py' `
+    -RuntimeId 'python'
+Assert-True ($invalidPythonReference.parseState -cne 'matched' -and $invalidPythonReference.referencesImplementation -ne $true) 'Python wrapper 不得接受额外 token/flag'
 
 $dependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $manifest)
 $directFact = @($dependencyFacts | Where-Object id -ceq 'serena-cleanup')[0]
@@ -319,6 +383,15 @@ Assert-True ($publishedJson -notmatch '"command"\s*:') '入口不得输出 raw c
 Assert-True (-not (Test-Path -LiteralPath $probeMarker)) 'inventory 入口不得执行 hook'
 Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'REPORT.md'))) '入口必须发布 Markdown 配对报告'
 Assert-True ($published.jsonPath -ceq (Join-Path $OutputDir 'inventory.json')) '入口返回值必须指向已发布 JSON'
+Assert-Throws {
+    & $InventoryScript `
+        -ManifestPath $manifestPath `
+        -CodexHome $CodexHome `
+        -OutputDir $OutputDir `
+        -RequireNoRetiredRegistrations |
+        Out-Null
+} '结构化 full acceptance 必须在 retired registration 仍存在时非零退出'
+Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'inventory.json'))) 'full acceptance 失败后允许保留已发布 inventory artifact'
 
 $gitIgnoreLines = @([IO.File]::ReadAllLines((Join-Path $ProjectRoot '.gitignore')))
 foreach ($requiredIgnore in @(

@@ -1,5 +1,10 @@
 Set-StrictMode -Version Latest
 
+$codexHookHandleBoundSource = Join-Path $PSScriptRoot 'CodexHookHandleBoundIO.cs'
+if (-not ('CodexHookGovernance.HandleBoundFileReader' -as [type])) {
+    Add-Type -Path $codexHookHandleBoundSource -ErrorAction Stop
+}
+
 function Assert-CodexHookJsonElementUniqueProperties {
     param(
         [Parameter(Mandatory)][System.Text.Json.JsonElement]$Element,
@@ -177,8 +182,7 @@ function Test-CodexHookPathWithin {
     )
 }
 
-function Get-CodexHookSafeFileProbe {
-    [CmdletBinding()]
+function Resolve-CodexHookAllowedReadPath {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Name,
@@ -205,8 +209,28 @@ function Get-CodexHookSafeFileProbe {
         }
     }
     if (-not $isAllowlisted) {
-        throw "$Name 不在固定 probe allowlist：$fullPath"
+        throw "$Name 不在固定读取 allowlist：$fullPath"
     }
+
+    return $fullPath
+}
+
+function Get-CodexHookSafeFileProbe {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name,
+        [string[]]$AllowedExactPaths = @(),
+        [string[]]$AllowedRoots = @()
+    )
+
+    # 该函数只提供路径树观察事实，不能作为 plan/apply 的最终门槛。
+    # 最终读取与 hash 必须使用 Get-CodexHookHandleBoundFileSnapshot。
+    $fullPath = Resolve-CodexHookAllowedReadPath `
+        -Path $Path `
+        -Name $Name `
+        -AllowedExactPaths $AllowedExactPaths `
+        -AllowedRoots $AllowedRoots
 
     $root = [IO.Path]::GetPathRoot($fullPath)
     $rootItem = Get-Item -LiteralPath $root -Force -ErrorAction Stop
@@ -283,6 +307,102 @@ function Get-CodexHookSafeFileProbe {
     }
 }
 
+function Get-CodexHookInnermostException {
+    param([Parameter(Mandatory)][Exception]$Exception)
+
+    $current = $Exception
+    while ($null -ne $current.InnerException) {
+        $current = $current.InnerException
+    }
+    return $current
+}
+
+function Get-CodexHookHandleBoundFileSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name,
+        [string[]]$AllowedExactPaths = @(),
+        [string[]]$AllowedRoots = @()
+    )
+
+    $fullPath = Resolve-CodexHookAllowedReadPath `
+        -Path $Path `
+        -Name $Name `
+        -AllowedExactPaths $AllowedExactPaths `
+        -AllowedRoots $AllowedRoots
+
+    # 稳定可见的 reparse/missing 先在逐段观察阶段失败，避免主动打开外部 target。
+    # 该观察不是最终门槛；probe 与 open 之间的替换仍由下面的 handle final-path 比较封住。
+    $preOpenProbe = Get-CodexHookSafeFileProbe `
+        -Path $fullPath `
+        -Name $Name `
+        -AllowedExactPaths @($fullPath)
+    if (-not $preOpenProbe.safeToRead) {
+        return [pscustomobject][ordered]@{
+            probe = [pscustomobject][ordered]@{
+                path = $preOpenProbe.path
+                exists = $preOpenProbe.exists
+                safeToRead = $false
+                state = $preOpenProbe.state
+                byteLength = $preOpenProbe.byteLength
+                blockedAtSha256 = $preOpenProbe.blockedAtSha256
+                finalPathVerified = $false
+            }
+            bytes = $null
+        }
+    }
+
+    try {
+        $nativeSnapshot = [CodexHookGovernance.HandleBoundFileReader]::ReadAllBytes($fullPath)
+    } catch {
+        $leaf = Get-CodexHookInnermostException -Exception $_.Exception
+        if ($leaf -is [IO.FileNotFoundException] -or $leaf -is [IO.DirectoryNotFoundException]) {
+            return [pscustomobject][ordered]@{
+                probe = [pscustomobject][ordered]@{
+                    path = $fullPath
+                    exists = $false
+                    safeToRead = $false
+                    state = 'missing'
+                    byteLength = $null
+                    blockedAtSha256 = $null
+                    finalPathVerified = $false
+                }
+                bytes = $null
+            }
+        }
+        if ($leaf -is [CodexHookGovernance.HandlePathMismatchException]) {
+            return [pscustomobject][ordered]@{
+                probe = [pscustomobject][ordered]@{
+                    path = $fullPath
+                    exists = $true
+                    safeToRead = $false
+                    state = 'final-path-mismatch'
+                    byteLength = $null
+                    blockedAtSha256 = Get-CodexHookTextSha256 -Text $leaf.FinalPath
+                    finalPathVerified = $false
+                }
+                bytes = $null
+            }
+        }
+        throw
+    }
+
+    [byte[]]$bytes = $nativeSnapshot.Bytes
+    return [pscustomobject][ordered]@{
+        probe = [pscustomobject][ordered]@{
+            path = $fullPath
+            exists = $true
+            safeToRead = $true
+            state = 'regular-file'
+            byteLength = [int64]$bytes.Length
+            blockedAtSha256 = $null
+            finalPathVerified = $true
+        }
+        bytes = $bytes
+    }
+}
+
 function Read-CodexHookSafeTextFile {
     [CmdletBinding()]
     param(
@@ -292,12 +412,11 @@ function Read-CodexHookSafeTextFile {
         [string[]]$AllowedRoots = @()
     )
 
-    $probe = Get-CodexHookSafeFileProbe -Path $Path -Name $Name -AllowedExactPaths $AllowedExactPaths -AllowedRoots $AllowedRoots
-    if (-not $probe.safeToRead) {
-        throw "$Name 无法安全读取：state=$($probe.state)"
-    }
-
-    return [IO.File]::ReadAllText($probe.path)
+    return (Read-CodexHookSafeUtf8FileSnapshot `
+        -Path $Path `
+        -Name $Name `
+        -AllowedExactPaths $AllowedExactPaths `
+        -AllowedRoots $AllowedRoots).text
 }
 
 function Get-CodexHookSafeFileHash {
@@ -309,17 +428,24 @@ function Get-CodexHookSafeFileHash {
         [string[]]$AllowedRoots = @()
     )
 
-    $probe = Get-CodexHookSafeFileProbe -Path $Path -Name $Name -AllowedExactPaths $AllowedExactPaths -AllowedRoots $AllowedRoots
-    if (-not $probe.safeToRead) {
+    $snapshot = Get-CodexHookHandleBoundFileSnapshot -Path $Path -Name $Name -AllowedExactPaths $AllowedExactPaths -AllowedRoots $AllowedRoots
+    if (-not $snapshot.probe.safeToRead) {
         return [pscustomobject][ordered]@{
-            probe = $probe
+            probe = $snapshot.probe
             sha256 = $null
         }
     }
 
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $sha256 = [Convert]::ToHexString($sha.ComputeHash([byte[]]$snapshot.bytes)).ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+
     return [pscustomobject][ordered]@{
-        probe = $probe
-        sha256 = (Get-FileHash -LiteralPath $probe.path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        probe = $snapshot.probe
+        sha256 = $sha256
     }
 }
 
@@ -332,12 +458,12 @@ function Read-CodexHookSafeUtf8FileSnapshot {
         [string[]]$AllowedRoots = @()
     )
 
-    $probe = Get-CodexHookSafeFileProbe -Path $Path -Name $Name -AllowedExactPaths $AllowedExactPaths -AllowedRoots $AllowedRoots
-    if (-not $probe.safeToRead) {
-        throw "$Name 无法安全读取 snapshot：state=$($probe.state)"
+    $snapshot = Get-CodexHookHandleBoundFileSnapshot -Path $Path -Name $Name -AllowedExactPaths $AllowedExactPaths -AllowedRoots $AllowedRoots
+    if (-not $snapshot.probe.safeToRead) {
+        throw "$Name 无法安全读取 snapshot：state=$($snapshot.probe.state)"
     }
 
-    $bytes = [IO.File]::ReadAllBytes($probe.path)
+    [byte[]]$bytes = $snapshot.bytes
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
         $sha256 = [Convert]::ToHexString($sha.ComputeHash($bytes)).ToLowerInvariant()
@@ -353,7 +479,7 @@ function Read-CodexHookSafeUtf8FileSnapshot {
     }
 
     return [pscustomobject][ordered]@{
-        probe = $probe
+        probe = $snapshot.probe
         byteLength = [int64]$bytes.Length
         sha256 = $sha256
         text = $text
@@ -643,7 +769,8 @@ function Assert-CodexHookManifest {
             '-NoProfile', '-File', 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1',
             '-ManifestPath', 'D:\Codex\projects\统一环境\managed\codex-hooks\manifest.json',
             '-CodexHome', 'D:\Codex\.codex',
-            '-OutputDir', 'D:\Codex\projects\统一环境\reports\codex-hook-inventory'
+            '-OutputDir', 'D:\Codex\projects\统一环境\reports\codex-hook-inventory',
+            '-RequireNoRetiredRegistrations'
         )
         foreach ($declaredCommand in @($hook.quickHealthCheck, $hook.fullAcceptanceCommand)) {
             $declaredPath = [IO.Path]::GetFullPath([string]$declaredCommand.commandPath)
@@ -696,9 +823,11 @@ function Assert-CodexHookManifest {
             throw "hook identity 重复（包括 retired）：$($hook.id)"
         }
 
-        $orderIdentity = "$($hook.event)`0$($hook.order)"
-        if (-not $eventOrders.Add($orderIdentity)) {
-            throw "hook event/order 重复（包括 retired）：$($hook.event)[$($hook.order)]"
+        if ($hook.lifecycle -cne 'retired') {
+            $orderIdentity = "$($hook.event)`0$($hook.order)"
+            if (-not $eventOrders.Add($orderIdentity)) {
+                throw "active/compatibility hook event/order 重复：$($hook.event)[$($hook.order)]"
+            }
         }
     }
 
@@ -957,7 +1086,18 @@ function Get-CodexHookWrapperReferenceFacts {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         if ($line.StartsWith('::', [StringComparison]::Ordinal)) { continue }
         if ($line -match '^(?i:rem)(?:\s|$)') { continue }
-        if ($line -match '^(?i:echo)(?:\s|$)' -or $line -match '^(?i:setlocal|endlocal)(?:\s|$)' -or $line -match '^(?i:exit)(?:\s|$)') { continue }
+        if ($line -match '[&|<>^]') {
+            return [pscustomobject][ordered]@{
+                parseState = 'unsafe-cmd-metacharacter'
+                referencesRuntime = $null
+                referencesImplementation = $null
+            }
+        }
+        if (
+            $line -match '^(?i:echo\s+off)$' -or
+            $line -match '^(?i:setlocal|endlocal)$' -or
+            $line -match '^(?i:exit\s+/b\s+%ERRORLEVEL%)$'
+        ) { continue }
         $effectiveLines.Add($line)
     }
 
@@ -1006,21 +1146,57 @@ function Get-CodexHookWrapperReferenceFacts {
 
     $implementationToken = $null
     if ($RuntimeId -ceq 'pwsh') {
-        $fileIndexes = @(
-            for ($tokenIndex = 1; $tokenIndex -lt $tokens.Count; $tokenIndex++) {
-                if ($tokens[$tokenIndex] -ieq '-File') { $tokenIndex }
+        $seenFlags = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $tokenIndex = 1
+        while ($tokenIndex -lt $tokens.Count -and $tokens[$tokenIndex] -ine '-File') {
+            $token = $tokens[$tokenIndex]
+            if ($token -ieq '-NoLogo' -or $token -ieq '-NoProfile') {
+                if (-not $seenFlags.Add($token)) {
+                    return [pscustomobject][ordered]@{
+                        parseState = 'duplicate-startup-flag'
+                        referencesRuntime = $true
+                        referencesImplementation = $null
+                    }
+                }
+                $tokenIndex++
+                continue
             }
-        )
-        if ($fileIndexes.Count -ne 1 -or $fileIndexes[0] + 1 -ge $tokens.Count) {
+            if ($token -ieq '-ExecutionPolicy') {
+                if (-not $seenFlags.Add('-ExecutionPolicy') -or $tokenIndex + 1 -ge $tokens.Count -or $tokens[$tokenIndex + 1] -ine 'Bypass') {
+                    return [pscustomobject][ordered]@{
+                        parseState = 'invalid-execution-policy'
+                        referencesRuntime = $true
+                        referencesImplementation = $null
+                    }
+                }
+                $tokenIndex += 2
+                continue
+            }
+            return [pscustomobject][ordered]@{
+                parseState = if ($token -ieq '-Command' -or $token -ieq '-EncodedCommand') { 'forbidden-pwsh-command-mode' } else { 'invalid-startup-token' }
+                referencesRuntime = $true
+                referencesImplementation = $null
+            }
+        }
+
+        if ($tokenIndex -ge $tokens.Count -or $tokens[$tokenIndex] -ine '-File' -or $tokenIndex + 1 -ge $tokens.Count) {
             return [pscustomobject][ordered]@{
                 parseState = 'implementation-token-unreliable'
                 referencesRuntime = $true
                 referencesImplementation = $null
             }
         }
-        $implementationToken = $tokens[$fileIndexes[0] + 1]
+        $implementationToken = $tokens[$tokenIndex + 1]
+        $remainingTokens = [string[]]@($tokens | Select-Object -Skip ($tokenIndex + 2))
+        if ($remainingTokens.Count -gt 1 -or ($remainingTokens.Count -eq 1 -and $remainingTokens[0] -cne '%*')) {
+            return [pscustomobject][ordered]@{
+                parseState = 'unexpected-trailing-token'
+                referencesRuntime = $true
+                referencesImplementation = $null
+            }
+        }
     } elseif (@('python', 'serenaPython') -ccontains $RuntimeId) {
-        if ($tokens.Count -lt 2) {
+        if ($tokens.Count -lt 2 -or $tokens.Count -gt 3 -or ($tokens.Count -eq 3 -and $tokens[2] -cne '%*')) {
             return [pscustomobject][ordered]@{
                 parseState = 'implementation-token-unreliable'
                 referencesRuntime = $true

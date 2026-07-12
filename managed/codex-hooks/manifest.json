@@ -296,7 +296,8 @@
           "-CodexHome",
           "D:\\Codex\\.codex",
           "-OutputDir",
-          "D:\\Codex\\projects\\统一环境\\reports\\codex-hook-inventory"
+          "D:\\Codex\\projects\\统一环境\\reports\\codex-hook-inventory",
+          "-RequireNoRetiredRegistrations"
         ]
       }
     }
