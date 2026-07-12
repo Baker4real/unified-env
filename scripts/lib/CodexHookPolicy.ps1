@@ -2497,21 +2497,21 @@ function Set-CodexHookAtomicFileBytes {
             throw "$Scope target parent 非安全普通目录。"
         }
         $tempPath = Join-Path $parent ".codex-hook-$([guid]::NewGuid().ToString('N')).tmp"
+        $tempFile = $null
         try {
-            $stream = [IO.FileStream]::new($tempPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-            try {
-                $stream.Write($Bytes, 0, $Bytes.Length)
-                $stream.Flush($true)
-            } finally {
-                $stream.Dispose()
-            }
+            $tempFile = $directoryGuard.CreateTempFile($tempPath)
+            $tempFile.WriteAndFlush($Bytes)
             if ($null -ne $BeforeMove) { & $BeforeMove $fullPath }
             $preMove = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope premove"
             Assert-CodexHookSnapshotExpectedState -Snapshot $preMove -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope "$Scope premove"
             [void](Assert-CodexHookFixturePath -Path $parent -Name "$Scope parent premove")
-            [IO.File]::Move($tempPath, $fullPath, $ExpectedExists)
+            $tempFile.RenameTo($fullPath, $ExpectedExists)
         } finally {
-            if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
+            try {
+                if ($null -ne $tempFile) { $tempFile.Dispose() }
+            } finally {
+                if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
+            }
         }
 
         $after = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope postwrite"

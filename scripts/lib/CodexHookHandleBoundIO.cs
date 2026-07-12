@@ -132,9 +132,14 @@ namespace CodexHookGovernance
     public sealed class VerifiedDirectoryChainGuard : IDisposable
     {
         private const uint GenericRead = 0x80000000;
+        private const uint GenericWrite = 0x40000000;
+        private const uint DeleteAccess = 0x00010000;
+        private const uint SynchronizeAccess = 0x00100000;
+        private const uint CreateNew = 1;
         private const uint OpenExisting = 3;
         private const uint FileFlagBackupSemantics = 0x02000000;
         private const uint FileFlagOpenReparsePoint = 0x00200000;
+        private const uint FileAttributeNormal = 0x00000080;
         private const uint FileAttributeDirectory = 0x00000010;
         private const uint FileAttributeReparsePoint = 0x00000400;
         private const int ErrorFileNotFound = 2;
@@ -151,6 +156,37 @@ namespace CodexHookGovernance
         }
 
         public string DirectoryPath { get; }
+
+        public GuardedTempFile CreateTempFile(string tempPath)
+        {
+            ThrowIfDisposed();
+            string lexicalPath = ValidateChildPath(tempPath, "tempPath");
+            SafeFileHandle handle = CreateFileW(
+                lexicalPath,
+                GenericWrite | DeleteAccess | SynchronizeAccess,
+                FileShare.None,
+                IntPtr.Zero,
+                CreateNew,
+                FileAttributeNormal | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, "Unable to create a guarded temporary file.");
+            }
+
+            try
+            {
+                VerifyRegularFileHandle(handle, lexicalPath);
+                return new GuardedTempFile(this, lexicalPath, handle);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern SafeFileHandle CreateFileW(
@@ -329,7 +365,7 @@ namespace CodexHookGovernance
             handle = CreateFileW(
                 lexicalPath,
                 GenericRead,
-                FileShare.Read | FileShare.Write,
+                FileShare.Read,
                 IntPtr.Zero,
                 OpenExisting,
                 FileFlagBackupSemantics | FileFlagOpenReparsePoint,
@@ -383,6 +419,90 @@ namespace CodexHookGovernance
                 candidate.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
 
+        internal void ThrowIfDisposed()
+        {
+            if (disposed)
+            {
+                throw new ObjectDisposedException(nameof(VerifiedDirectoryChainGuard));
+            }
+        }
+
+        internal string ValidateChildPath(string childPath, string parameterName)
+        {
+            ThrowIfDisposed();
+            if (childPath == null)
+            {
+                throw new ArgumentNullException(parameterName);
+            }
+
+            string lexicalPath = Path.GetFullPath(childPath);
+            string parent = TrimDirectoryEnding(Path.GetDirectoryName(lexicalPath));
+            if (!string.Equals(parent, DirectoryPath, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("The guarded file must be an immediate child of the guarded directory.");
+            }
+
+            string leaf = Path.GetFileName(lexicalPath);
+            if (string.IsNullOrWhiteSpace(leaf) || leaf == "." || leaf == ".." ||
+                leaf.Length > 255 || leaf.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                leaf.EndsWith(" ", StringComparison.Ordinal) || leaf.EndsWith(".", StringComparison.Ordinal))
+            {
+                throw new IOException("The guarded file name is an invalid file name or non-ADS leaf.");
+            }
+            if (IsReservedDeviceLeaf(leaf))
+            {
+                throw new IOException("The guarded file name is a reserved Windows device leaf.");
+            }
+            return lexicalPath;
+        }
+
+        private static bool IsReservedDeviceLeaf(string leaf)
+        {
+            int extensionIndex = leaf.IndexOf('.');
+            string baseName = extensionIndex >= 0 ? leaf.Substring(0, extensionIndex) : leaf;
+            string normalized = baseName.TrimEnd(' ').ToUpperInvariant();
+            if (normalized == "CON" || normalized == "PRN" || normalized == "AUX" || normalized == "NUL")
+            {
+                return true;
+            }
+            if (normalized.Length == 4 &&
+                (normalized.StartsWith("COM", StringComparison.Ordinal) ||
+                 normalized.StartsWith("LPT", StringComparison.Ordinal)) &&
+                normalized[3] >= '1' && normalized[3] <= '9')
+            {
+                return true;
+            }
+            return normalized == "COM¹" || normalized == "COM²" || normalized == "COM³" ||
+                normalized == "LPT¹" || normalized == "LPT²" || normalized == "LPT³";
+        }
+
+        internal static void VerifyRegularFileHandle(SafeFileHandle handle, string expectedPath)
+        {
+            ByHandleFileInformation fileInformation;
+            if (!GetFileInformationByHandle(handle, out fileInformation))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if ((fileInformation.FileAttributes & FileAttributeReparsePoint) != 0)
+            {
+                throw new IOException("The guarded file is a reparse point.");
+            }
+            if ((fileInformation.FileAttributes & FileAttributeDirectory) != 0)
+            {
+                throw new IOException("The guarded file is not a regular file.");
+            }
+
+            string finalPath = HandleBoundFileReader.NormalizeFinalPath(
+                HandleBoundFileReader.GetFinalPath(handle));
+            if (!string.Equals(
+                Path.GetFullPath(expectedPath),
+                Path.GetFullPath(finalPath),
+                StringComparison.OrdinalIgnoreCase))
+            {
+                throw new HandlePathMismatchException(expectedPath, finalPath);
+            }
+        }
+
         private static string TrimDirectoryEnding(string path)
         {
             string root = Path.GetPathRoot(path);
@@ -400,6 +520,146 @@ namespace CodexHookGovernance
                 openedHandles[index].Dispose();
             }
             openedHandles.Clear();
+        }
+    }
+
+    public sealed class GuardedTempFile : IDisposable
+    {
+        private const int FileRenameInformation = 10;
+
+        private readonly VerifiedDirectoryChainGuard owner;
+        private readonly SafeFileHandle handle;
+        private readonly FileStream stream;
+        private string currentPath;
+        private bool flushed;
+        private bool renamed;
+        private bool disposed;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoStatusBlock
+        {
+            public IntPtr Status;
+            public UIntPtr Information;
+        }
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtSetInformationFile(
+            SafeFileHandle fileHandle,
+            out IoStatusBlock ioStatusBlock,
+            IntPtr fileInformation,
+            uint length,
+            int fileInformationClass);
+
+        [DllImport("ntdll.dll")]
+        private static extern uint RtlNtStatusToDosError(int status);
+
+        internal GuardedTempFile(
+            VerifiedDirectoryChainGuard owner,
+            string currentPath,
+            SafeFileHandle handle)
+        {
+            this.owner = owner;
+            this.currentPath = currentPath;
+            this.handle = handle;
+            stream = new FileStream(handle, FileAccess.Write);
+        }
+
+        public string CurrentPath { get { return currentPath; } }
+
+        public void WriteAndFlush(byte[] bytes)
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            if (bytes == null)
+            {
+                throw new ArgumentNullException(nameof(bytes));
+            }
+            if (flushed)
+            {
+                throw new InvalidOperationException("The guarded temporary file was already written.");
+            }
+
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush(true);
+            flushed = true;
+        }
+
+        public void RenameTo(string targetPath, bool replaceIfExists)
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            if (!flushed)
+            {
+                throw new InvalidOperationException("The guarded temporary file must be flushed before rename.");
+            }
+            if (renamed)
+            {
+                throw new InvalidOperationException("The guarded temporary file was already renamed.");
+            }
+
+            string lexicalTarget = owner.ValidateChildPath(targetPath, nameof(targetPath));
+            VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, currentPath);
+            string targetLeaf = Path.GetFileName(lexicalTarget);
+            byte[] targetNameBytes = Encoding.Unicode.GetBytes(targetLeaf);
+            if (targetNameBytes.Length == 0)
+            {
+                throw new IOException("The guarded target leaf is empty.");
+            }
+            int rootDirectoryOffset = IntPtr.Size;
+            int fileNameLengthOffset = checked(rootDirectoryOffset + IntPtr.Size);
+            int fileNameOffset = checked(fileNameLengthOffset + sizeof(uint));
+            int bufferLength = checked(fileNameOffset + targetNameBytes.Length);
+            IntPtr buffer = Marshal.AllocHGlobal(bufferLength);
+            try
+            {
+                for (int index = 0; index < bufferLength; index++)
+                {
+                    Marshal.WriteByte(buffer, index, 0);
+                }
+                Marshal.WriteByte(buffer, 0, replaceIfExists ? (byte)1 : (byte)0);
+                Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
+                Marshal.WriteInt32(buffer, fileNameLengthOffset, targetNameBytes.Length);
+                Marshal.Copy(targetNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), targetNameBytes.Length);
+
+                IoStatusBlock ioStatusBlock;
+                int status = NtSetInformationFile(
+                    handle,
+                    out ioStatusBlock,
+                    buffer,
+                    checked((uint)bufferLength),
+                    FileRenameInformation);
+                if (status != 0)
+                {
+                    uint dosError = RtlNtStatusToDosError(status);
+                    throw new Win32Exception(checked((int)dosError), "Unable to rename a guarded temporary file.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+
+            currentPath = lexicalTarget;
+            renamed = true;
+            VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, currentPath);
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            stream.Dispose();
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (disposed)
+            {
+                throw new ObjectDisposedException(nameof(GuardedTempFile));
+            }
         }
     }
 }
