@@ -306,7 +306,7 @@
     {
       "relativePath": "hooks/codex-github-cli-guard.cmd",
       "liveRelativePath": "codex-github-cli-guard.cmd",
-      "sha256": "f15bd903e9198d6865d50df1ad156c3a895e90f6b03a8a36fe24adecf54349c8",
+      "sha256": "bea37dd5bcd8a9cafff2a405b459e6b0242de952926c518054b5764ab94c570c",
       "lifecycle": "active",
       "ownerHookIds": [
         "github-cli"
@@ -324,7 +324,7 @@
     {
       "relativePath": "hooks/codex-mobile-permission-guard.cmd",
       "liveRelativePath": "codex-mobile-permission-guard.cmd",
-      "sha256": "86ffe069008611c2d2854132efd34e1b61b398da43719ddf3e4c3635a23cd621",
+      "sha256": "b86b9c3e743998b41324f868b15594d979fe6bcecd079be5a3cb4e44e6c8e7ec",
       "lifecycle": "compatibility",
       "ownerHookIds": [
         "codex-state-policy"
@@ -360,7 +360,7 @@
     {
       "relativePath": "hooks/codex-provider-stability-guard.cmd",
       "liveRelativePath": "codex-provider-stability-guard.cmd",
-      "sha256": "9bec3b9681c2b255acfc801bd05898f735029a7e9e414bae9b7517627afeedaa",
+      "sha256": "b13ece637046af65cd3b619453f9b9d6a93b4c40cfcbc6409bb9b38112cdad83",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability"
@@ -378,7 +378,7 @@
     {
       "relativePath": "hooks/serena-activate-guarded.cmd",
       "liveRelativePath": "serena-activate-guarded.cmd",
-      "sha256": "e6beb44294b1c32bec6741ac417f38030e8fb099b20d47c22b85a5e160c7d4d3",
+      "sha256": "e29b5e67e7566eb0561ca72bc0cfa3daed9e01f2cf36b38fa0d6be8e127a9fd2",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -396,7 +396,7 @@
     {
       "relativePath": "hooks/serena-dashboard-guard.cmd",
       "liveRelativePath": "serena-dashboard-guard.cmd",
-      "sha256": "784e4f55b174b8a32172f1eae351418328d47ea5a15929d04e6fd1d302a4d096",
+      "sha256": "8d9c435c21495f1999f8e1d19e9ac770c67c56fa21842c772e7bf09021825d9c",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-dashboard"

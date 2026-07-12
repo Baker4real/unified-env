@@ -1,0 +1,223 @@
+{
+  "artifactType": "env-governance.codex-hook-deployment-plan",
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-07-12T03:26:29.3607051+00:00",
+  "manifestSha256": "21185762791b263499a39ca164935b23ec1db88263a89c4c35e079547cfc2378",
+  "mode": "registration-repair",
+  "applyEligible": true,
+  "sourceFacts": {
+    "targetProfile": "codex-hook-production-registration-repair-v1",
+    "mappingIdentity": "b055a27b32d5749e046c263389c3d530476f0ae34511420b30f4bbc23d7b34ce",
+    "manifestPath": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\manifest.json",
+    "manifestSha256": "21185762791b263499a39ca164935b23ec1db88263a89c4c35e079547cfc2378",
+    "sourceRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks",
+    "files": [
+      {
+        "relativePath": "hooks/codex-github-cli-guard.cmd",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\codex-github-cli-guard.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "bea37dd5bcd8a9cafff2a405b459e6b0242de952926c518054b5764ab94c570c"
+      },
+      {
+        "relativePath": "hooks/codex-github-cli-guard.ps1",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\codex-github-cli-guard.ps1",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "e953359767c3eed033aa9ad1ceb52793287d7b27bc531399c642167f14eb0f3d"
+      },
+      {
+        "relativePath": "hooks/codex-mobile-permission-guard.cmd",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\codex-mobile-permission-guard.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "b86b9c3e743998b41324f868b15594d979fe6bcecd079be5a3cb4e44e6c8e7ec"
+      },
+      {
+        "relativePath": "hooks/codex-mobile-permission-guard.py",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\codex-mobile-permission-guard.py",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "efb7c3838f9085e5ebe1a452352149fb8843db64d6560e552e009b8de71aac64"
+      },
+      {
+        "relativePath": "hooks/codex-projectless-root-d.cmd",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\codex-projectless-root-d.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "19fafb8c1c59b4f967a0e60597fb76d7db443c9e7ba04ef31ab53e04cd723b23"
+      },
+      {
+        "relativePath": "hooks/codex-projectless-root-d.js",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\codex-projectless-root-d.js",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "f32046560a34c035e28a58bf3c7dee9e770e424de87a313f6fd336c01eacca21"
+      },
+      {
+        "relativePath": "hooks/codex-provider-stability-guard.cmd",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\codex-provider-stability-guard.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "b13ece637046af65cd3b619453f9b9d6a93b4c40cfcbc6409bb9b38112cdad83"
+      },
+      {
+        "relativePath": "hooks/codex-provider-stability-guard.ps1",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\codex-provider-stability-guard.ps1",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "24e2aa35bb07bf962b7b081a3de7b8f9b48b8b6817ebfadcf052686bc054ccf6"
+      },
+      {
+        "relativePath": "hooks/serena-activate-guarded.cmd",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\serena-activate-guarded.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "e29b5e67e7566eb0561ca72bc0cfa3daed9e01f2cf36b38fa0d6be8e127a9fd2"
+      },
+      {
+        "relativePath": "hooks/serena-activate-guarded.ps1",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\serena-activate-guarded.ps1",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "87855f0e8d239737461b79207fa9486650d756f3a8af69f98a4279f6c690eb97"
+      },
+      {
+        "relativePath": "hooks/serena-dashboard-guard.cmd",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\serena-dashboard-guard.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "8d9c435c21495f1999f8e1d19e9ac770c67c56fa21842c772e7bf09021825d9c"
+      },
+      {
+        "relativePath": "hooks/serena-dashboard-guard.ps1",
+        "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\serena-dashboard-guard.ps1",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "ab6f29732ef350adc4c038451a3fdad3b1fe0a57f0b02fa774c9c280d1f26bb1"
+      }
+    ],
+    "blockerReasonCodes": []
+  },
+  "liveFacts": {
+    "targetProfile": "codex-hook-production-registration-repair-v1",
+    "mappingIdentity": "b055a27b32d5749e046c263389c3d530476f0ae34511420b30f4bbc23d7b34ce",
+    "codexHome": "D:\\Codex\\.codex",
+    "hooksRoot": "D:\\Codex\\.codex\\hooks",
+    "registryPath": "D:\\Codex\\.codex\\hooks.json",
+    "files": [
+      {
+        "liveRelativePath": "codex-github-cli-guard.cmd",
+        "path": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "f15bd903e9198d6865d50df1ad156c3a895e90f6b03a8a36fe24adecf54349c8"
+      },
+      {
+        "liveRelativePath": "codex-github-cli-guard.ps1",
+        "path": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "e953359767c3eed033aa9ad1ceb52793287d7b27bc531399c642167f14eb0f3d"
+      },
+      {
+        "liveRelativePath": "codex-mobile-permission-guard.cmd",
+        "path": "D:\\Codex\\.codex\\hooks\\codex-mobile-permission-guard.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "86ffe069008611c2d2854132efd34e1b61b398da43719ddf3e4c3635a23cd621"
+      },
+      {
+        "liveRelativePath": "codex-mobile-permission-guard.py",
+        "path": "D:\\Codex\\.codex\\hooks\\codex-mobile-permission-guard.py",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "efb7c3838f9085e5ebe1a452352149fb8843db64d6560e552e009b8de71aac64"
+      },
+      {
+        "liveRelativePath": "codex-projectless-root-d.cmd",
+        "path": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "19fafb8c1c59b4f967a0e60597fb76d7db443c9e7ba04ef31ab53e04cd723b23"
+      },
+      {
+        "liveRelativePath": "codex-projectless-root-d.js",
+        "path": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.js",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "f32046560a34c035e28a58bf3c7dee9e770e424de87a313f6fd336c01eacca21"
+      },
+      {
+        "liveRelativePath": "codex-provider-stability-guard.cmd",
+        "path": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "9bec3b9681c2b255acfc801bd05898f735029a7e9e414bae9b7517627afeedaa"
+      },
+      {
+        "liveRelativePath": "codex-provider-stability-guard.ps1",
+        "path": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.ps1",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "24e2aa35bb07bf962b7b081a3de7b8f9b48b8b6817ebfadcf052686bc054ccf6"
+      },
+      {
+        "liveRelativePath": "serena-activate-guarded.cmd",
+        "path": "D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "e6beb44294b1c32bec6741ac417f38030e8fb099b20d47c22b85a5e160c7d4d3"
+      },
+      {
+        "liveRelativePath": "serena-activate-guarded.ps1",
+        "path": "D:\\Codex\\.codex\\hooks\\serena-activate-guarded.ps1",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "87855f0e8d239737461b79207fa9486650d756f3a8af69f98a4279f6c690eb97"
+      },
+      {
+        "liveRelativePath": "serena-dashboard-guard.cmd",
+        "path": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "784e4f55b174b8a32172f1eae351418328d47ea5a15929d04e6fd1d302a4d096"
+      },
+      {
+        "liveRelativePath": "serena-dashboard-guard.ps1",
+        "path": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.ps1",
+        "exists": true,
+        "probeState": "regular-file",
+        "sha256": "ab6f29732ef350adc4c038451a3fdad3b1fe0a57f0b02fa774c9c280d1f26bb1"
+      }
+    ],
+    "blockerReasonCodes": []
+  },
+  "registryBeforeSha256": "b342a2e2700cbeddf7cdc56fdc494224d07e5c7a98d7105d9e3d308ac72ca106",
+  "registryAfterSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f",
+  "actions": [
+    {
+      "actionId": "registry:hooks.json",
+      "phase": "registry",
+      "kind": "registry",
+      "sourceRef": null,
+      "sourceSha256": null,
+      "logicalTarget": "hooks.json",
+      "targetPath": "D:\\Codex\\.codex\\hooks.json",
+      "beforeExists": true,
+      "beforeSha256": "b342a2e2700cbeddf7cdc56fdc494224d07e5c7a98d7105d9e3d308ac72ca106",
+      "afterSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f",
+      "restoreOrder": 1
+    }
+  ],
+  "environmentActions": [],
+  "postChecks": [
+    {
+      "actionId": "registry:hooks.json",
+      "kind": "sha256",
+      "expectedSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f"
+    }
+  ],
+  "rollbackRequired": true,
+  "generationId": "b79c75d9-9dda-49a0-86f6-0ba2d57fe5cb"
+}

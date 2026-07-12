@@ -2453,6 +2453,81 @@ function Get-CodexHookFixtureFileSnapshot {
     }
 }
 
+function Assert-CodexHookCapabilityPath {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $fullPath = Assert-CodexHookDPath -Value $Path -Name $Name
+    $fullRoot = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Name capability root"
+    if (-not (Test-CodexHookPathWithin -Path $fullPath -ParentPath $fullRoot)) {
+        throw "$Name 超出 capability root。"
+    }
+    if ($fullPath.Substring(2).Contains(':')) {
+        throw "$Name 不得包含 NTFS alternate data stream。"
+    }
+    if ($AllowedExactPaths.Count -gt 0) {
+        $allowed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($candidate in $AllowedExactPaths) {
+            [void]$allowed.Add((Assert-CodexHookDPath -Value $candidate -Name "$Name allowed exact path"))
+        }
+        if (-not $allowed.Contains($fullPath)) {
+            throw "$Name 不在 exact-path capability allowlist。"
+        }
+    }
+    Assert-CodexHookNoReparseAncestor -Path $fullPath -Name $Name
+    return $fullPath
+}
+
+function Get-CodexHookCapabilityFileSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $fullPath = Assert-CodexHookCapabilityPath `
+        -Path $Path `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name $Name
+    $snapshot = Get-CodexHookHandleBoundFileSnapshot -Path $fullPath -Name $Name -AllowedExactPaths @($fullPath)
+    return [pscustomobject][ordered]@{
+        path = $fullPath
+        exists = $snapshot.probe.exists -eq $true
+        state = [string]$snapshot.probe.state
+        sha256 = if ($snapshot.probe.safeToRead) { Get-CodexHookBytesSha256 -Bytes ([byte[]]$snapshot.bytes) } else { $null }
+        bytes = if ($snapshot.probe.safeToRead) { [byte[]]$snapshot.bytes } else { $null }
+    }
+}
+
+function New-CodexHookCapabilityDirectory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [string]$Name = 'capability directory',
+        [switch]$RequireMissing
+    )
+
+    $fullPath = Assert-CodexHookCapabilityPath -Path $Path -CapabilityRoot $CapabilityRoot -Name $Name
+    $fullRoot = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Name capability root"
+    $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+        $fullRoot,
+        $fullPath,
+        $true,
+        $RequireMissing.IsPresent)
+    try {
+        return $fullPath
+    } finally {
+        $guard.Dispose()
+    }
+}
+
 function Assert-CodexHookSnapshotExpectedState {
     param(
         [Parameter(Mandatory)][object]$Snapshot,
@@ -2470,6 +2545,79 @@ function Assert-CodexHookSnapshotExpectedState {
     }
 }
 
+function Set-CodexHookAtomicFileBytesWithCapability {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][byte[]]$Bytes,
+        [Parameter(Mandatory)][bool]$ExpectedExists,
+        [AllowNull()][string]$ExpectedSha256,
+        [Parameter(Mandatory)][string]$AfterSha256,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [string]$Scope = 'atomic publish',
+        [scriptblock]$BeforeMove
+    )
+
+    $fullPath = Assert-CodexHookCapabilityPath `
+        -Path $Path `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name $Scope
+    if ((Get-CodexHookBytesSha256 -Bytes $Bytes) -cne $AfterSha256) {
+        throw "$Scope 待发布 bytes 与 after SHA-256 不一致。"
+    }
+
+    $parent = Split-Path -Parent $fullPath
+    $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Scope capability root"
+    $directoryGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+        $capabilityRootPath,
+        $parent,
+        $false)
+    try {
+        $before = Get-CodexHookCapabilityFileSnapshot `
+            -Path $fullPath `
+            -CapabilityRoot $capabilityRootPath `
+            -AllowedExactPaths $AllowedExactPaths `
+            -Name "$Scope prewrite"
+        Assert-CodexHookSnapshotExpectedState -Snapshot $before -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope $Scope
+        $parentItem = Get-Item -LiteralPath $parent -Force -ErrorAction Stop
+        if (-not $parentItem.PSIsContainer -or ($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "$Scope target parent 非安全普通目录。"
+        }
+        $tempPath = Join-Path $parent ".codex-hook-$([guid]::NewGuid().ToString('N')).tmp"
+        $tempFile = $null
+        try {
+            $tempFile = $directoryGuard.CreateTempFile($tempPath)
+            $tempFile.WriteAndFlush($Bytes)
+            if ($null -ne $BeforeMove) { & $BeforeMove $fullPath }
+            $preMove = Get-CodexHookCapabilityFileSnapshot `
+                -Path $fullPath `
+                -CapabilityRoot $capabilityRootPath `
+                -AllowedExactPaths $AllowedExactPaths `
+                -Name "$Scope premove"
+            Assert-CodexHookSnapshotExpectedState -Snapshot $preMove -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope "$Scope premove"
+            [void](Assert-CodexHookCapabilityPath -Path $parent -CapabilityRoot $capabilityRootPath -Name "$Scope parent premove")
+            $tempFile.RenameTo($fullPath, $ExpectedExists)
+        } finally {
+            try {
+                if ($null -ne $tempFile) { $tempFile.Dispose() }
+            } finally {
+                if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
+            }
+        }
+
+        $after = Get-CodexHookCapabilityFileSnapshot `
+            -Path $fullPath `
+            -CapabilityRoot $capabilityRootPath `
+            -AllowedExactPaths $AllowedExactPaths `
+            -Name "$Scope postwrite"
+        Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $true -ExpectedSha256 $AfterSha256 -Scope "$Scope postcheck"
+    } finally {
+        $directoryGuard.Dispose()
+    }
+}
+
 function Set-CodexHookAtomicFileBytes {
     [CmdletBinding()]
     param(
@@ -2483,42 +2631,42 @@ function Set-CodexHookAtomicFileBytes {
     )
 
     $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Scope
-    if ((Get-CodexHookBytesSha256 -Bytes $Bytes) -cne $AfterSha256) {
-        throw "$Scope 待发布 bytes 与 after SHA-256 不一致。"
-    }
+    Set-CodexHookAtomicFileBytesWithCapability `
+        -Path $fullPath `
+        -Bytes $Bytes `
+        -ExpectedExists $ExpectedExists `
+        -ExpectedSha256 $ExpectedSha256 `
+        -AfterSha256 $AfterSha256 `
+        -CapabilityRoot 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test' `
+        -AllowedExactPaths @($fullPath) `
+        -Scope $Scope `
+        -BeforeMove $BeforeMove
+}
 
-    $parent = Split-Path -Parent $fullPath
-    $directoryGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath $parent
-    try {
-        $before = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope prewrite"
-        Assert-CodexHookSnapshotExpectedState -Snapshot $before -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope $Scope
-        $parentItem = Get-Item -LiteralPath $parent -Force -ErrorAction Stop
-        if (-not $parentItem.PSIsContainer -or ($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "$Scope target parent 非安全普通目录。"
-        }
-        $tempPath = Join-Path $parent ".codex-hook-$([guid]::NewGuid().ToString('N')).tmp"
-        $tempFile = $null
-        try {
-            $tempFile = $directoryGuard.CreateTempFile($tempPath)
-            $tempFile.WriteAndFlush($Bytes)
-            if ($null -ne $BeforeMove) { & $BeforeMove $fullPath }
-            $preMove = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope premove"
-            Assert-CodexHookSnapshotExpectedState -Snapshot $preMove -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope "$Scope premove"
-            [void](Assert-CodexHookFixturePath -Path $parent -Name "$Scope parent premove")
-            $tempFile.RenameTo($fullPath, $ExpectedExists)
-        } finally {
-            try {
-                if ($null -ne $tempFile) { $tempFile.Dispose() }
-            } finally {
-                if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
-            }
-        }
+function Set-CodexHookCapabilityJson {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][object]$Document,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [string]$Scope = 'capability json'
+    )
 
-        $after = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope postwrite"
-        Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $true -ExpectedSha256 $AfterSha256 -Scope "$Scope postcheck"
-    } finally {
-        $directoryGuard.Dispose()
-    }
+    [byte[]]$bytes = [Text.UTF8Encoding]::new($false).GetBytes(($Document | ConvertTo-Json -Depth 100))
+    $existing = Get-CodexHookCapabilityFileSnapshot `
+        -Path $Path `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name "$Scope before"
+    Set-CodexHookAtomicFileBytesWithCapability `
+        -Path $Path `
+        -Bytes $bytes `
+        -ExpectedExists $existing.exists `
+        -ExpectedSha256 $existing.sha256 `
+        -AfterSha256 (Get-CodexHookBytesSha256 -Bytes $bytes) `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Scope $Scope
 }
 
 function Remove-CodexHookFixtureFile {

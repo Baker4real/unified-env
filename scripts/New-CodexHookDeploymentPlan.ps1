@@ -1,18 +1,53 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Fixture')]
 param(
-    [Parameter(Mandatory)][string]$ManifestPath,
-    [Parameter(Mandatory)][string]$FixtureSourceRoot,
-    [Parameter(Mandatory)][string]$FixtureCodexHome,
-    [Parameter(Mandatory)][ValidateSet('registration-repair', 'full')][string]$Mode,
-    [string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan',
-    [scriptblock]$EnvironmentReadValue
+    [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$ManifestPath,
+    [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$FixtureSourceRoot,
+    [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$FixtureCodexHome,
+    [Parameter(Mandatory, ParameterSetName = 'Fixture')][ValidateSet('registration-repair', 'full')][string]$Mode,
+    [Parameter(ParameterSetName = 'Fixture')][string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan',
+    [Parameter(ParameterSetName = 'Fixture')][scriptblock]$EnvironmentReadValue,
+    [Parameter(Mandatory, ParameterSetName = 'ProductionRegistrationRepair')][switch]$ProductionRegistrationRepair
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'lib\CodexHookPolicy.ps1')
+. (Join-Path $PSScriptRoot 'lib\CodexHookProductionRegistrationRepair.ps1')
 . (Join-Path $PSScriptRoot 'lib\ReportArtifactPublisher.ps1')
+
+if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
+    $profile = Get-CodexHookProductionRegistrationRepairProfile
+    [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $profile)
+    [void](Assert-CodexHookNoReparseAncestor -Path ([string]$profile.planOutputDir) -Name 'production plan output')
+    $state = New-CodexHookProductionRegistrationRepairState -Profile $profile
+    [void](Assert-CodexHookProductionRegistrationRepairPlan -Plan $state.plan -Profile $profile)
+    Publish-JsonMarkdownArtifactPair `
+        -Document $state.plan `
+        -OutputDir ([string]$profile.planOutputDir) `
+        -JsonFileName 'plan.json' `
+        -MarkdownFileName 'PLAN.md' `
+        -RenderMarkdown {
+            param($Document, $JsonSha256)
+            @(
+                '# Codex Hook production registration-repair 计划'
+                ''
+                "- profile：$($Document.sourceFacts.targetProfile)"
+                "- 生成时间（UTC）：$($Document.generatedAtUtc)"
+                "- 模式：$($Document.mode)"
+                "- 可执行：$($Document.applyEligible)"
+                "- registry 动作数：$(@($Document.actions).Count)"
+                "- 文件动作数：$(@($Document.actions | Where-Object kind -ceq 'file').Count)"
+                "- 环境动作数：$(@($Document.environmentActions).Count)"
+                "- registry before SHA-256：$($Document.registryBeforeSha256)"
+                "- registry after SHA-256：$($Document.registryAfterSha256)"
+                ''
+                '此计划只读生成；必须先通过独立审查，才能由主 agent 显式执行 production apply。'
+                '本报告不包含 desired registry、raw registry command 或环境变量原值。'
+            ) -join "`n"
+        }
+    return
+}
 
 $manifestFullPath = Assert-CodexHookDPath -Value $ManifestPath -Name 'ManifestPath'
 $sourceRoot = Assert-CodexHookFixturePath -Path $FixtureSourceRoot -Name 'FixtureSourceRoot'

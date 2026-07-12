@@ -416,14 +416,16 @@ Run:
 
 ```powershell
 & 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1'
-& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\New-CodexHookDeploymentPlan.ps1' -Mode registration-repair
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\New-CodexHookDeploymentPlan.ps1' -ProductionRegistrationRepair
 ```
 
 Expected plan：唯一 registry 变化是 SessionStart 从 `provider,github,projectless,activate,dashboard` 变为 `provider,projectless,activate,dashboard,github`；文件 actions 和 environmentActions 均为 0；`[hooks.state]` 无 action。
 
+`-ProductionRegistrationRepair` 只选择固定 `codex-hook-production-registration-repair-v1` profile；调用者不能覆盖 manifest/source/home/registry/plan/evidence 路径，也不能注入环境 adapter 或 fault injection。该命令只读 live 并发布项目内 plan，**不得在本步骤执行 apply/restore**。
+
 - [ ] **Step 4：对抗审查 production plan**
 
-独立 reviewers 逐项检查 source/live hash、unknown group 保留、Stop/PreToolUse 不变、GitHub 只追加、证据/回滚路径位于 D 盘、没有文件删除或 trust state 修改。
+独立 reviewers 逐项检查 source/live hash、unknown group 保留、Stop/PreToolUse 不变、GitHub 只追加、证据/回滚路径位于 D 盘、没有文件删除或 trust state 修改。只有 production plan 的独立审查明确通过后，主 agent 才能进入下一步；implementer 在本轮只提交 plan，不执行 live apply。
 
 - [ ] **Step 5：执行 registry repair 并验证**
 
@@ -431,12 +433,20 @@ Run:
 
 ```powershell
 & 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\Invoke-CodexHookDeployment.ps1' `
-  -PlanPath 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan\plan.json' `
-  -Apply -ApprovedScope 'codex-hook-governance-2026-07-11' `
-  -EvidenceRoot 'D:\Codex\.codex\run-evidence\env-governance'
+  -ProductionRegistrationRepair `
+  -Apply -ApprovedScope 'codex-hook-governance-2026-07-11'
 ```
 
 Expected：evidence status=`applied`；hooks.json 严格 JSON 通过；旧 0–3 命令顺序恢复；GitHub 为 4；live 其他文件 hash 不变。当前 Codex 进程可能仍使用旧加载状态，记录 `restartRequired=true`，本任务不重启 app。
+
+外部恢复也必须使用固定 profile 与 scope：
+
+```powershell
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\Restore-CodexHookDeployment.ps1' `
+  -ProductionRegistrationRepair `
+  -EvidenceDirectory 'D:\Codex\.codex\run-evidence\env-governance\deployment-<generation-guid>' `
+  -Apply -ApprovedScope 'codex-hook-governance-2026-07-11'
+```
 
 - [ ] **Step 6：提交受管基线与当前 inventory**
 
