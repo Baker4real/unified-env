@@ -716,17 +716,56 @@ function Get-CodexHookProductionRegistrationRepairLifecyclePaths {
     }
 }
 
+function Set-CodexHookProductionApplyTerminalStatus {
+    param(
+        [Parameter(Mandatory)][object]$Profile,
+        [Parameter(Mandatory)][string]$StatusPath,
+        [Parameter(Mandatory)][object]$StatusDocument,
+        [Parameter(Mandatory)]
+        [ValidateSet('rolled-back', 'rollback-blocked')]
+        [string]$TerminalStatus
+    )
+
+    $StatusDocument.status = $TerminalStatus
+    $StatusDocument.completedActionIds = @()
+    Set-CodexHookCapabilityJson `
+        -Path $StatusPath `
+        -Document $StatusDocument `
+        -CapabilityRoot ([string]$Profile.evidenceRoot) `
+        -AllowedExactPaths @($StatusPath) `
+        -Scope 'production apply terminal status'
+    $snapshot = Get-CodexHookCapabilityFileSnapshot `
+        -Path $StatusPath `
+        -CapabilityRoot ([string]$Profile.evidenceRoot) `
+        -AllowedExactPaths @($StatusPath) `
+        -Name 'production apply terminal status confirm'
+    $confirmed = ConvertFrom-CodexHookProductionJsonSnapshot -Snapshot $snapshot -Name 'production apply terminal status confirm'
+    if (
+        $confirmed.status -cne $TerminalStatus -or
+        @($confirmed.completedActionIds).Count -ne 0 -or
+        $confirmed.generationId -cne $StatusDocument.generationId -or
+        $confirmed.profileId -cne $StatusDocument.profileId
+    ) {
+        throw 'production apply terminal status 回读确认失败。'
+    }
+    return $confirmed
+}
+
 function Invoke-CodexHookProductionRegistrationRepairApplyCore {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][object]$Profile,
         [scriptblock]$TestAfterRegistryPublish,
+        [scriptblock]$TestBeforeRollbackMove,
         [ValidateSet('none', 'crash-after-registry-publish')]
         [string]$TestFaultInjection = 'none'
     )
 
     [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $Profile -AllowFixtureAdapter)
-    if (($null -ne $TestAfterRegistryPublish -or $TestFaultInjection -cne 'none') -and -not $Profile.isFixtureAdapter) {
+    if (
+        ($null -ne $TestAfterRegistryPublish -or $null -ne $TestBeforeRollbackMove -or $TestFaultInjection -cne 'none') -and
+        -not $Profile.isFixtureAdapter
+    ) {
         throw 'test-only production apply fault injection 仅允许 fixed fixture adapter。'
     }
     $planSnapshot = Get-CodexHookCapabilityFileSnapshot `
@@ -876,25 +915,80 @@ function Invoke-CodexHookProductionRegistrationRepairApplyCore {
             if ($failureMessage -ceq 'test-fault:crash-after-registry-publish') {
                 throw
             }
+            $rollbackConfirmed = $false
+            $blockedStatusConfirmed = $false
+            $rollbackAttempted = $false
+            $blockedReason = 'external-registry-drift / rollback-not-attempted'
             $current = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.registryPath) -CapabilityRoot ([string]$Profile.codexHome) -AllowedExactPaths @([string]$Profile.registryPath) -Name 'production rollback current registry'
             if ($current.sha256 -ceq [string]$plan.registryAfterSha256) {
-                Set-CodexHookAtomicFileBytesWithCapability `
-                    -Path ([string]$Profile.registryPath) `
-                    -Bytes ([byte[]]$state.registrySnapshot.bytes) `
-                    -ExpectedExists $true `
-                    -ExpectedSha256 ([string]$plan.registryAfterSha256) `
-                    -AfterSha256 ([string]$state.registrySnapshot.sha256) `
-                    -CapabilityRoot ([string]$Profile.codexHome) `
-                    -AllowedExactPaths @([string]$Profile.registryPath) `
-                    -Scope 'production automatic registry rollback'
-                $status.status = 'rolled-back'
-                $status.completedActionIds = @()
-                Set-CodexHookCapabilityJson -Path ([string]$paths.statusPath) -Document $status -CapabilityRoot ([string]$Profile.evidenceRoot) -AllowedExactPaths @([string]$paths.statusPath) -Scope 'production status'
+                $rollbackAttempted = $true
+                try {
+                    Set-CodexHookAtomicFileBytesWithCapability `
+                        -Path ([string]$Profile.registryPath) `
+                        -Bytes ([byte[]]$state.registrySnapshot.bytes) `
+                        -ExpectedExists $true `
+                        -ExpectedSha256 ([string]$plan.registryAfterSha256) `
+                        -AfterSha256 ([string]$state.registrySnapshot.sha256) `
+                        -CapabilityRoot ([string]$Profile.codexHome) `
+                        -AllowedExactPaths @([string]$Profile.registryPath) `
+                        -Scope 'production automatic registry rollback' `
+                        -BeforeMove $TestBeforeRollbackMove
+                } catch {
+                    # A competing writer may win between the first snapshot and the guarded
+                    # rename. Re-read below; never retry over an unrecognized state.
+                }
             }
+            $afterRollbackAttempt = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.registryPath) -CapabilityRoot ([string]$Profile.codexHome) -AllowedExactPaths @([string]$Profile.registryPath) -Name 'production rollback outcome registry'
+            if (
+                $rollbackAttempted -and
+                $afterRollbackAttempt.sha256 -cne [string]$state.registrySnapshot.sha256
+            ) {
+                $blockedReason = if ($afterRollbackAttempt.sha256 -cne [string]$plan.registryAfterSha256) {
+                    'external-registry-drift / rollback-cas-lost'
+                } else {
+                    'rollback-attempt-failed'
+                }
+            }
+            if ($afterRollbackAttempt.sha256 -ceq [string]$state.registrySnapshot.sha256) {
+                try {
+                    [void](Set-CodexHookProductionApplyTerminalStatus `
+                        -Profile $Profile `
+                        -StatusPath ([string]$paths.statusPath) `
+                        -StatusDocument $status `
+                        -TerminalStatus 'rolled-back')
+                    $finalRegistry = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.registryPath) -CapabilityRoot ([string]$Profile.codexHome) -AllowedExactPaths @([string]$Profile.registryPath) -Name 'production rollback final registry confirm'
+                    $rollbackConfirmed = $finalRegistry.sha256 -ceq [string]$state.registrySnapshot.sha256
+                    if (-not $rollbackConfirmed) {
+                        $blockedReason = 'external-registry-drift / rollback-confirmation-lost'
+                    }
+                } catch {
+                    $rollbackConfirmed = $false
+                    $blockedReason = 'rollback-state-confirmation-failed'
+                }
+            }
+            if (-not $rollbackConfirmed) {
+                try {
+                    [void](Set-CodexHookProductionApplyTerminalStatus `
+                        -Profile $Profile `
+                        -StatusPath ([string]$paths.statusPath) `
+                        -StatusDocument $status `
+                        -TerminalStatus 'rollback-blocked')
+                    $blockedStatusConfirmed = $true
+                } catch {
+                    $blockedReason = "$blockedReason / status-confirmation-failed"
+                }
+            }
+            $blockedStatusLabel = if ($blockedStatusConfirmed) { 'rollback-blocked' } else { 'unconfirmed' }
             if ($failureMessage -like 'production post-publish static facts*') {
-                throw 'production post-publish static facts 失败；registry 已回滚且状态为 rolled-back。'
+                if ($rollbackConfirmed) {
+                    throw 'production post-publish static facts 失败；rollback-confirmed；status=rolled-back。'
+                }
+                throw "production post-publish static facts 失败；$blockedReason；status=$blockedStatusLabel。"
             }
-            throw 'production registry apply 失败；已按可验证状态尝试回滚。'
+            if ($rollbackConfirmed) {
+                throw 'production registry apply 失败；rollback-confirmed；status=rolled-back。'
+            }
+            throw "production registry apply 失败；$blockedReason；status=$blockedStatusLabel。"
         }
         return [pscustomobject][ordered]@{
             applied = $true

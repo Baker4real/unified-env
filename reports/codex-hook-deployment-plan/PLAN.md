@@ -1,11 +1,11 @@
 ---
-generationId: 8d82c71a-1574-4177-a548-86983e39ef76
-sourceJsonSha256: 194b588955c7d0cec1e42a580261f42f923d55c2cfb904fdb9fb2b0828d96b1d
+generationId: 9d2ad44b-debc-4b8d-bd82-f00e3f459143
+sourceJsonSha256: fed6357e71d728e41dfdd2bbd8a109928c32f930e03c90ee8c18348b72a4efa2
 ---
 # Codex Hook production registration-repair 计划
 
 - profile：codex-hook-production-registration-repair-v1
-- 生成时间（UTC）：2026-07-12T04:17:58.3613529+00:00
+- 生成时间（UTC）：2026-07-12T04:51:11.2334861+00:00
 - 模式：registration-repair
 - 可执行：True
 - registry 动作数：1

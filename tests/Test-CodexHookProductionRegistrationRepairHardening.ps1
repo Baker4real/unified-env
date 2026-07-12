@@ -10,6 +10,8 @@ param(
         'third-hash-rejected',
         'postpublish-source-drift',
         'postpublish-live-drift',
+        'postpublish-static-and-registry-third',
+        'rollback-cas-race',
         'forged-evidence',
         'projection-summary'
     )]
@@ -22,6 +24,7 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookProductionRegistrationRepair.ps1')
+. (Join-Path $PSScriptRoot 'lib\CodexHookProductionFixtureTestSupport.ps1')
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -139,6 +142,9 @@ function New-ActionableFixtureApply {
     return [pscustomobject][ordered]@{ fixture = $fixture; state = $state; result = $result }
 }
 
+$hardeningFixtureRoot = Split-Path -Parent ([string](Get-CodexHookProductionRegistrationRepairFixtureProfile).sourceRoot)
+$fixtureLifecycleLease = Enter-CodexHookProductionFixtureLifecycle
+try {
 switch ($Case) {
     'semantic-noop' {
         $fixture = Initialize-HardeningFixture -ManagedOrder after
@@ -281,6 +287,73 @@ switch ($Case) {
         $status = Get-Content -LiteralPath ([string]$paths.statusPath) -Raw | ConvertFrom-Json -Depth 100
         Assert-True ($status.status -ceq 'rolled-back' -and @($status.completedActionIds).Count -eq 0) 'live drift rollback 必须留下 non-applied terminal status'
     }
+    'postpublish-static-and-registry-third' {
+        $fixture = Initialize-HardeningFixture -ManagedOrder before
+        $state = New-CodexHookProductionRegistrationRepairState -Profile $fixture.profile
+        Write-Utf8NoBom -Path ([string]$fixture.profile.planPath) -Text ($state.plan | ConvertTo-Json -Depth 100)
+        $sourcePath = [string]$state.sourceFacts[0].path
+        $registryPath = [string]$fixture.profile.registryPath
+        $thirdRegistry = Copy-CodexHookJsonValue -Value $state.desiredRegistry
+        $thirdRegistry | Add-Member -NotePropertyName externalRegistryDrift -NotePropertyValue 'preserve-third'
+        [byte[]]$thirdBytes = [Text.UTF8Encoding]::new($false).GetBytes(($thirdRegistry | ConvertTo-Json -Depth 100))
+        $thirdSha256 = Get-CodexHookBytesSha256 -Bytes $thirdBytes
+        $inject = {
+            [IO.File]::WriteAllText($sourcePath, 'source-drift', [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllBytes($registryPath, $thirdBytes)
+        }.GetNewClosure()
+        $failureMessage = Assert-Throws {
+            Invoke-CodexHookProductionRegistrationRepairApplyCore -Profile $fixture.profile -TestAfterRegistryPublish $inject | Out-Null
+        } 'static+registry third drift 必须失败'
+        Assert-True ($failureMessage -match 'external-registry-drift / rollback-not-attempted') "third drift 错误不得声称 rolled-back；actual=$failureMessage"
+        Assert-True (((Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash.ToLowerInvariant()) -ceq $thirdSha256) 'third drift 必须零覆盖'
+        $paths = Get-CodexHookProductionRegistrationRepairLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$state.plan.generationId)
+        $status = Get-Content -LiteralPath ([string]$paths.statusPath) -Raw | ConvertFrom-Json -Depth 100
+        Assert-True ($status.status -ceq 'rollback-blocked' -and @($status.completedActionIds).Count -eq 0) "third drift status 必须 rollback-blocked；actual=$($status.status)"
+        $beforeRestoreSha256 = (Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $restoreFailure = Assert-Throws {
+            Restore-CodexHookProductionRegistrationRepairCore -Profile $fixture.profile -EvidenceDirectory ([string]$paths.evidenceDirectory) | Out-Null
+        } 'rollback-blocked restore 必须不相容拒绝'
+        Assert-True ($restoreFailure -match 'binding|rollback-blocked|不相容') "rollback-blocked restore 原因非法：$restoreFailure"
+        Assert-True (((Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash.ToLowerInvariant()) -ceq $beforeRestoreSha256) 'rollback-blocked restore 必须 registry 零写'
+    }
+    'rollback-cas-race' {
+        $fixture = Initialize-HardeningFixture -ManagedOrder before
+        $state = New-CodexHookProductionRegistrationRepairState -Profile $fixture.profile
+        Write-Utf8NoBom -Path ([string]$fixture.profile.planPath) -Text ($state.plan | ConvertTo-Json -Depth 100)
+        $sourcePath = [string]$state.sourceFacts[0].path
+        $registryPath = [string]$fixture.profile.registryPath
+        $thirdRegistry = Copy-CodexHookJsonValue -Value $state.desiredRegistry
+        $thirdRegistry | Add-Member -NotePropertyName rollbackRaceWinner -NotePropertyValue 'preserve-third'
+        [byte[]]$thirdBytes = [Text.UTF8Encoding]::new($false).GetBytes(($thirdRegistry | ConvertTo-Json -Depth 100))
+        $thirdSha256 = Get-CodexHookBytesSha256 -Bytes $thirdBytes
+        $injectStaticDrift = {
+            [IO.File]::WriteAllText($sourcePath, 'source-drift', [Text.UTF8Encoding]::new($false))
+        }.GetNewClosure()
+        $winRollbackRace = {
+            param($Target)
+            Assert-True ($Target -ceq $registryPath) 'rollback race seam target 必须是 fixture registry'
+            [IO.File]::WriteAllBytes($Target, $thirdBytes)
+        }.GetNewClosure()
+        $failureMessage = Assert-Throws {
+            Invoke-CodexHookProductionRegistrationRepairApplyCore `
+                -Profile $fixture.profile `
+                -TestAfterRegistryPublish $injectStaticDrift `
+                -TestBeforeRollbackMove $winRollbackRace |
+                Out-Null
+        } 'rollback CAS race 必须失败'
+        Assert-True ($failureMessage -match 'external-registry-drift / rollback-cas-lost') "rollback CAS race 必须报告 CAS lost；actual=$failureMessage"
+        Assert-True ($failureMessage -notmatch 'rollback-confirmed|status=rolled-back') "rollback CAS race 不得声称 rolled-back；actual=$failureMessage"
+        Assert-True (((Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash.ToLowerInvariant()) -ceq $thirdSha256) 'rollback CAS race winner 必须零覆盖保留'
+        $paths = Get-CodexHookProductionRegistrationRepairLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$state.plan.generationId)
+        $status = Get-Content -LiteralPath ([string]$paths.statusPath) -Raw | ConvertFrom-Json -Depth 100
+        Assert-True ($status.status -ceq 'rollback-blocked' -and @($status.completedActionIds).Count -eq 0) "rollback CAS race status 必须 rollback-blocked；actual=$($status.status)"
+        $beforeRestoreSha256 = (Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $restoreFailure = Assert-Throws {
+            Restore-CodexHookProductionRegistrationRepairCore -Profile $fixture.profile -EvidenceDirectory ([string]$paths.evidenceDirectory) | Out-Null
+        } 'rollback CAS race restore 必须不相容拒绝'
+        Assert-True ($restoreFailure -match 'binding|rollback-blocked|不相容') "rollback CAS race restore 原因非法：$restoreFailure"
+        Assert-True (((Get-FileHash -LiteralPath $registryPath -Algorithm SHA256).Hash.ToLowerInvariant()) -ceq $beforeRestoreSha256) 'rollback CAS race restore 必须 registry 零写'
+    }
     'forged-evidence' {
         $applied = New-ActionableFixtureApply
         $evidence = [string]$applied.result.evidenceDirectory
@@ -325,3 +398,12 @@ switch ($Case) {
 }
 
 [pscustomobject][ordered]@{ ok = $true; case = $Case }
+} finally {
+    try {
+        if ([IO.Directory]::Exists($hardeningFixtureRoot)) {
+            Remove-Item -LiteralPath $hardeningFixtureRoot -Recurse -Force
+        }
+    } finally {
+        Exit-CodexHookProductionFixtureLifecycle -Lease $fixtureLifecycleLease
+    }
+}

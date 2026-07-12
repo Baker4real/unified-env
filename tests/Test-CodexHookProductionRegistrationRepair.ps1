@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookProductionRegistrationRepair.ps1')
+. (Join-Path $PSScriptRoot 'lib\CodexHookProductionFixtureTestSupport.ps1')
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -54,7 +55,7 @@ foreach ($fixtureOnlyName in @('ManifestPath', 'FixtureSourceRoot', 'FixtureCode
     Assert-True (-not $newPlanCommand.Parameters[$fixtureOnlyName].ParameterSets.ContainsKey('ProductionRegistrationRepair')) "production plan 参数集不得接受 $fixtureOnlyName"
 }
 $invokeCommand = Get-Command -Name (Join-Path $ProjectRoot 'scripts\Invoke-CodexHookDeployment.ps1')
-foreach ($testOnlyName in @('TestAfterRegistryPublish', 'TestFaultInjection')) {
+foreach ($testOnlyName in @('TestAfterRegistryPublish', 'TestBeforeRollbackMove', 'TestFaultInjection')) {
     Assert-True (-not $invokeCommand.Parameters.ContainsKey($testOnlyName)) "production CLI 不得暴露 test-only apply seam：$testOnlyName"
 }
 foreach ($fixtureOnlyName in @('PlanPath', 'EvidenceRoot', 'EnvironmentReadValue', 'EnvironmentWriteValue', 'FaultInjection')) {
@@ -72,6 +73,8 @@ $profileTamper.registryPath = 'D:\Codex\.codex\other.json'
 $fixtureProfile = Get-CodexHookProductionRegistrationRepairFixtureProfile
 [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $fixtureProfile -AllowFixtureAdapter)
 $fixtureRoot = Split-Path -Parent ([string]$fixtureProfile.sourceRoot)
+$fixtureLifecycleLease = Enter-CodexHookProductionFixtureLifecycle
+try {
 if ([IO.Directory]::Exists($fixtureRoot)) {
     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
 }
@@ -247,4 +250,13 @@ Assert-True ($replayError -match 'claim|重放') 'production replay 必须给出
 [pscustomobject][ordered]@{
     ok = $true
     test = 'CodexHookProductionRegistrationRepair'
+}
+} finally {
+    try {
+        if ([IO.Directory]::Exists($fixtureRoot)) {
+            Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+        }
+    } finally {
+        Exit-CodexHookProductionFixtureLifecycle -Lease $fixtureLifecycleLease
+    }
 }
