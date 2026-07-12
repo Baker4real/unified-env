@@ -29,7 +29,7 @@
       ],
       "writeResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\config.toml" },
-        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\provider.json" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\provider-stability.json" },
         { "kind": "abstract", "value": "process-environment" },
         { "kind": "abstract", "value": "windows-user-environment" }
       ],
@@ -414,7 +414,7 @@
     {
       "relativePath": "hooks/lib/CodexHookRuntime.ps1",
       "liveRelativePath": "lib/CodexHookRuntime.ps1",
-      "sha256": "4c612f60facae656e8dbd19c0d7b29f0b5ffb2b68812e6bfc4500361109d028c",
+      "sha256": "672002450c0ed69c84e626856c29b86df8571d264725578ea8d62ab4377ab0bb",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",
@@ -424,7 +424,7 @@
     {
       "relativePath": "hooks/lib/CodexConfigFile.ps1",
       "liveRelativePath": "lib/CodexConfigFile.ps1",
-      "sha256": "72ba8e2e4f748160ab8053d140989ca540be70ccd54dc81f50560c958455f688",
+      "sha256": "d2f8b2bedd555c8eb4bf6ec785699fbcb84ffb133ec26647ecd2fe9e271df25c",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",

@@ -52,7 +52,8 @@ function Write-CodexHookAtomicText {
         [Parameter(Mandatory)][string]$BackupRoot,
         [Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedBeforeSha256,
         [scriptblock]$TestBeforeFinalHash,
-        [scriptblock]$TestBeforeReplace
+        [scriptblock]$TestBeforeReplace,
+        [scriptblock]$TestBeforeRollback
     )
     $full = Assert-CodexHookDPath -Path $Path
     $backupFull = Assert-CodexHookDPath -Path $BackupRoot -AllowMissingLeaf
@@ -67,6 +68,7 @@ function Write-CodexHookAtomicText {
     $backup = Join-Path $backupFull ('{0}-{1}.bak' -f [IO.Path]::GetFileName($full), [guid]::NewGuid().ToString('N'))
     $encoding = [Text.UTF8Encoding]::new($false)
     $replaced = $false
+    $restoreTemp = $null
     try {
         [IO.File]::WriteAllText($temp, $Text, $encoding)
         & $Validator $temp
@@ -86,10 +88,24 @@ function Write-CodexHookAtomicText {
         if ((Get-CodexHookSha256 -Path $full) -cne $expectedAfter) { throw '写后 SHA-256 不一致。' }
         return [pscustomobject][ordered]@{ changed = ($before -cne $expectedAfter); beforeSha256 = $before; afterSha256 = $expectedAfter; backupPath = $backup }
     } catch {
-        if ($replaced -and [IO.File]::Exists($backup)) { [IO.File]::Copy($backup, $full, $true) }
-        throw
+        $originalError=$_
+        if ($replaced -and [IO.File]::Exists($backup)) {
+            try {
+                if($TestBeforeRollback){&$TestBeforeRollback $full}
+                if((Get-CodexHookSha256 $backup) -cne $before){throw 'rollback backup SHA-256 漂移。'}
+                $restoreTemp=Join-Path $parent ('.codex-hook-restore-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+                [IO.File]::WriteAllBytes($restoreTemp,[IO.File]::ReadAllBytes($backup))
+                &$Validator $restoreTemp
+                [IO.File]::Move($restoreTemp,$full,$true);$restoreTemp=$null
+                if((Get-CodexHookSha256 $full) -cne $before){throw 'rollback 写后 SHA-256 不一致。'}
+            }catch{
+                throw "atomic write rollback-blocked; original=$($originalError.Exception.Message); rollback=$($_.Exception.Message)"
+            }
+        }
+        throw $originalError
     } finally {
         if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) }
+        if($null -ne $restoreTemp -and [IO.File]::Exists($restoreTemp)){[IO.File]::Delete($restoreTemp)}
     }
 }
 
@@ -115,19 +131,42 @@ function ConvertTo-CodexHookRedactedUri {
     return "$($uri.Scheme)://$($uri.IdnHost)$port"
 }
 
-function Write-CodexHookLatestHealth {
+function Assert-CodexHookHealthPayload {
     param([Parameter(Mandatory)][string]$HookId, [Parameter(Mandatory)][object]$Payload)
     if ($HookId -cnotmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') { throw 'health hookId 非法。' }
     $allowed = @('hookId','runId','startedAtUtc','completedAtUtc','durationMs','ok','changed','restartRequired','errors')
     $names = @($Payload.PSObject.Properties.Name)
     if (($names -join "`0") -cne ($allowed -join "`0")) { throw 'health payload schema 非法。' }
     if ([string]$Payload.hookId -cne $HookId) { throw 'health hookId 不一致。' }
+    if ([string]$Payload.runId -cnotmatch '^[0-9a-f]{32}$') { throw 'health runId 非法。' }
+    foreach($name in @('startedAtUtc','completedAtUtc')){$parsed=[datetimeoffset]::MinValue;if(-not[datetimeoffset]::TryParse([string]$Payload.$name,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind,[ref]$parsed)){throw "health $name 非法。"}}
+    if($Payload.durationMs -isnot [long] -and $Payload.durationMs -isnot [int]){throw 'health durationMs 类型非法。'}
+    if([long]$Payload.durationMs -lt 0){throw 'health durationMs 非法。'}
+    foreach($name in @('ok','changed','restartRequired')){if($Payload.$name -isnot [bool]){throw "health $name 类型非法。"}}
+    if($null -eq $Payload.errors){throw 'health errors 非法。'}
+    foreach($errorText in @($Payload.errors)){if($errorText -isnot [string]){throw 'health errors 类型非法。'}}
     $json = $Payload | ConvertTo-Json -Depth 8
     if ($json -match '(?i)(thread|session)[-_ ]?id|://[^/\s]*@|[?&][^\s=]+=') { throw 'health payload 含敏感标识或 URI 凭据。' }
-    $root = 'D:\Codex\.codex\run-evidence\codex-hook-health'
+    return $json
+}
+
+function Write-CodexHookLatestHealthCore {
+    param(
+        [Parameter(Mandatory)][string]$HookId,
+        [Parameter(Mandatory)][object]$Payload,
+        [Parameter(Mandatory)][string]$HealthRoot,
+        [switch]$AllowFixtureRoot
+    )
+    $json=Assert-CodexHookHealthPayload -HookId $HookId -Payload $Payload
+    $fixedRoot='D:\Codex\.codex\run-evidence\codex-hook-health'
+    $fixtureRoot='D:\Codex\projects\统一环境\reports\codex-hook-health-test'
+    $root=[IO.Path]::GetFullPath($HealthRoot)
+    if($AllowFixtureRoot){if($root -ine $fixtureRoot){throw 'health fixture root 非法。'}}elseif($root -ine $fixedRoot){throw 'health root 必须使用固定路径。'}
+    [void](Assert-CodexHookDPath -Path $root -AllowMissingLeaf)
     if (-not [IO.Directory]::Exists($root)) { [IO.Directory]::CreateDirectory($root) | Out-Null }
+    [void](Assert-CodexHookDPath -Path $root)
     $path = Join-Path $root "$HookId.json"
-    return Invoke-CodexHookMutex -Name "Local\CodexHookHealth-$HookId" -ScriptBlock {
+    [void](Invoke-CodexHookMutex -Name "Local\CodexHookHealth-$HookId" -ScriptBlock {
         if ([IO.File]::Exists($path)) {
             $before = Get-CodexHookSha256 $path
             return Write-CodexHookAtomicText -Path $path -Text $json -Validator { param($p) $null = Get-Content -Raw -LiteralPath $p | ConvertFrom-Json } -BackupRoot (Join-Path $root '.backups') -ExpectedBeforeSha256 $before
@@ -143,5 +182,10 @@ function Write-CodexHookLatestHealth {
         } finally {
             if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) }
         }
-    }
+    })
+}
+
+function Write-CodexHookLatestHealth {
+    param([Parameter(Mandatory)][string]$HookId, [Parameter(Mandatory)][object]$Payload)
+    Write-CodexHookLatestHealthCore -HookId $HookId -Payload $Payload -HealthRoot 'D:\Codex\.codex\run-evidence\codex-hook-health'
 }

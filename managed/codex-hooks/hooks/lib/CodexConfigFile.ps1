@@ -19,17 +19,26 @@ function Get-CodexTomlSectionRange {
     return @{ found=$true; start=$found[0]; end=$end }
 }
 
-function Get-CodexTomlValueEnd {
+function Get-CodexTomlCurrentValueEnd {
     param([Collections.ArrayList]$Lines,[int]$Start)
-    $depth=0; $started=$false; $quote=[char]0; $escaped=$false
-    for($i=$Start;$i -lt $Lines.Count;$i++) { $line=[string]$Lines[$i]
-        for($j=0;$j -lt $line.Length;$j++){ $c=$line[$j]
+    $squareDepth=0;$braceDepth=0;$startedContainer=$false
+    for($i=$Start;$i -lt $Lines.Count;$i++) { $line=[string]$Lines[$i];$quote=[char]0;$escaped=$false;$offset=0
+        if($i -eq $Start){$offset=$line.IndexOf('=');if($offset -lt 0){throw 'TOML assignment 缺少等号。'};$offset++}
+        for($j=$offset;$j -lt $line.Length;$j++){ $c=$line[$j]
             if($quote -ne [char]0){ if($quote -eq '"' -and $escaped){$escaped=$false;continue}; if($quote -eq '"' -and $c -eq '\'){$escaped=$true;continue}; if($c -eq $quote){$quote=[char]0}; continue }
-            if($c -eq '#'){break}; if($c -eq '"' -or $c -eq "'"){ if($j+2 -lt $line.Length -and $line.Substring($j,3) -in @('"""',"'''")){throw '拒绝处理 TOML multiline string。'}; $quote=$c;continue }
-            if($c -eq '['){$depth++;$started=$true}; if($c -eq ']'){$depth--;if($started -and $depth -eq 0){return $i}}
+            if($c -eq '#'){break}
+            if($c -eq '"' -or $c -eq "'"){ if($j+2 -lt $line.Length -and $line.Substring($j,3) -in @('"""',"'''")){throw '拒绝处理 TOML multiline string。'}; $quote=$c;continue }
+            if($c -eq '['){$squareDepth++;$startedContainer=$true;continue}
+            if($c -eq ']'){$squareDepth--;if($squareDepth -lt 0){throw 'TOML array 括号不平衡。'}}
+            if($c -eq '{'){$braceDepth++;$startedContainer=$true;continue}
+            if($c -eq '}'){$braceDepth--;if($braceDepth -lt 0){throw 'TOML inline table 括号不平衡。'}}
+            if($startedContainer -and $squareDepth -eq 0 -and $braceDepth -eq 0){return $i}
         }
+        if($quote -ne [char]0){throw '拒绝处理跨行或未终止 TOML string。'}
+        if(-not $startedContainer){return $Start}
     }
-    if($started){throw 'TOML array 未闭合。'}; return $Start
+    if($squareDepth -ne 0 -or $braceDepth -ne 0){throw 'TOML container 未闭合。'}
+    return $Start
 }
 
 function Set-CodexTomlSectionValue {
@@ -41,7 +50,7 @@ function Set-CodexTomlSectionValue {
     else { $indexes=@();for($i=$range.start+1;$i -lt $range.end;$i++){if([string]$lines[$i] -match "^\s*$([regex]::Escape($Key))\s*="){$indexes+=$i}}
         if($indexes.Count -gt 1){throw "Duplicate TOML key $Section.$Key."}
         if($indexes.Count -eq 0){$insert=$range.end;while($insert -gt $range.start+1 -and [string]::IsNullOrWhiteSpace([string]$lines[$insert-1])){$insert--};$lines.Insert($insert,$desired)}
-        else{$start=$indexes[0];$end=if($ValueKind -eq 'array'){Get-CodexTomlValueEnd $lines $start}else{$start};for($i=$end;$i -gt $start;$i--){$lines.RemoveAt($i)};$lines[$start]=$desired}
+        else{$start=$indexes[0];$end=Get-CodexTomlCurrentValueEnd $lines $start;for($i=$end;$i -gt $start;$i--){$lines.RemoveAt($i)};$lines[$start]=$desired}
     }
     $result=([string[]]$lines -join $nl);if($hadFinal){$result+=$nl};return $result
 }
@@ -57,6 +66,6 @@ function Update-CodexTomlPolicyText {
 function Update-SerenaYamlPolicyText {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text,[Parameter(Mandatory)][Collections.IDictionary]$Values)
     $nl=Get-CodexConfigNewline $Text;$hadFinal=$Text.EndsWith("`n");$lines=[Collections.ArrayList]::new();[void]$lines.AddRange([string[]][regex]::Split($Text,'\r?\n'));if($hadFinal){$lines.RemoveAt($lines.Count-1)}
-    foreach($key in $Values.Keys){$indexes=@();for($i=0;$i -lt $lines.Count;$i++){if([string]$lines[$i] -match "^$([regex]::Escape([string]$key))\s*:"){$indexes+=$i}};if($indexes.Count -gt 1){throw "Duplicate YAML top-level key $key."};$desired="${key}: $($Values[$key])";if($indexes.Count){$lines[$indexes[0]]=$desired}else{[void]$lines.Add($desired)}}
+    foreach($key in $Values.Keys){$indexes=@();for($i=0;$i -lt $lines.Count;$i++){if([string]$lines[$i] -match "^$([regex]::Escape([string]$key))\s*:"){$indexes+=$i}};if($indexes.Count -gt 1){throw "Duplicate YAML top-level key $key."};$desired="${key}: $($Values[$key])";if($indexes.Count){$old=[string]$lines[$indexes[0]];$quote=[char]0;$escaped=$false;$comment=$null;for($j=0;$j -lt $old.Length;$j++){$c=$old[$j];if($quote -ne [char]0){if($quote -eq '"' -and $escaped){$escaped=$false;continue};if($quote -eq '"' -and $c -eq '\'){$escaped=$true;continue};if($c -eq $quote){$quote=[char]0};continue};if($c -eq '"' -or $c -eq "'"){$quote=$c;continue};if($c -eq '#' -and $j -gt 0 -and [char]::IsWhiteSpace($old[$j-1])){$comment=$old.Substring($j).TrimEnd();break}};if($comment){$desired="$desired $comment"};$lines[$indexes[0]]=$desired}else{[void]$lines.Add($desired)}}
     $result=([string[]]$lines -join $nl);if($hadFinal){$result+=$nl};return $result
 }
