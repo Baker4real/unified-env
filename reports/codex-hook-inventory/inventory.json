@@ -1,7 +1,7 @@
 {
   "artifactType": "env-governance.codex-hook-inventory",
   "schemaVersion": 1,
-  "generatedAtUtc": "2026-07-12T08:14:14.1726182+00:00",
+  "generatedAtUtc": "2026-07-12T09:50:56.1021224+00:00",
   "readOnly": true,
   "executionAllowed": false,
   "manifest": {
@@ -13,8 +13,8 @@
     "fileCount": 12
   },
   "registry": {
-    "registryFileSha256": "b342a2e2700cbeddf7cdc56fdc494224d07e5c7a98d7105d9e3d308ac72ca106",
-    "registryByteLength": 2424,
+    "registryFileSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f",
+    "registryByteLength": 2444,
     "events": {
       "SessionStart": [
         {
@@ -52,29 +52,6 @@
           "commandPresent": true,
           "commandIsString": true,
           "pathPolicy": "manifest-allowlisted",
-          "targetPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
-          "targetExists": true,
-          "targetProbeState": "regular-file",
-          "commandSha256": "f15bd903e9198d6865d50df1ad156c3a895e90f6b03a8a36fe24adecf54349c8",
-          "commandIdentitySha256": "5ec4a910196a0c5395fe0845ce3b43cb4d9dea9dbeef00a752c6ae1147a08da8",
-          "argumentCount": 0,
-          "idMatch": "github-cli",
-          "idMatchStatus": "matched",
-          "lifecycleMatch": "active",
-          "registrationState": "declared"
-        },
-        {
-          "event": "SessionStart",
-          "groupIndex": 2,
-          "entryIndex": 0,
-          "matcher": null,
-          "matcherPresent": false,
-          "timeout": 10,
-          "timeoutPresent": true,
-          "entryType": "command",
-          "commandPresent": true,
-          "commandIsString": true,
-          "pathPolicy": "manifest-allowlisted",
           "targetPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
           "targetExists": true,
           "targetProbeState": "regular-file",
@@ -88,7 +65,7 @@
         },
         {
           "event": "SessionStart",
-          "groupIndex": 3,
+          "groupIndex": 2,
           "entryIndex": 0,
           "matcher": "startup|resume",
           "matcherPresent": true,
@@ -111,7 +88,7 @@
         },
         {
           "event": "SessionStart",
-          "groupIndex": 4,
+          "groupIndex": 3,
           "entryIndex": 0,
           "matcher": null,
           "matcherPresent": false,
@@ -128,6 +105,29 @@
           "commandIdentitySha256": "1d9fa5eeb871e8cde9f9c47b21e5c6237e015d4aa16f35cea83ac8ba17680414",
           "argumentCount": 0,
           "idMatch": "serena-dashboard",
+          "idMatchStatus": "matched",
+          "lifecycleMatch": "active",
+          "registrationState": "declared"
+        },
+        {
+          "event": "SessionStart",
+          "groupIndex": 4,
+          "entryIndex": 0,
+          "matcher": null,
+          "matcherPresent": false,
+          "timeout": 10,
+          "timeoutPresent": true,
+          "entryType": "command",
+          "commandPresent": true,
+          "commandIsString": true,
+          "pathPolicy": "manifest-allowlisted",
+          "targetPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
+          "targetExists": true,
+          "targetProbeState": "regular-file",
+          "commandSha256": "f15bd903e9198d6865d50df1ad156c3a895e90f6b03a8a36fe24adecf54349c8",
+          "commandIdentitySha256": "5ec4a910196a0c5395fe0845ce3b43cb4d9dea9dbeef00a752c6ae1147a08da8",
+          "argumentCount": 0,
+          "idMatch": "github-cli",
           "idMatchStatus": "matched",
           "lifecycleMatch": "active",
           "registrationState": "declared"
@@ -708,5 +708,5 @@
       ]
     }
   ],
-  "generationId": "b89477ee-7374-46dd-a86f-673cecdc137f"
+  "generationId": "3bc25a61-0a99-4bfc-8460-02d80718a0df"
 }

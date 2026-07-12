@@ -1,7 +1,7 @@
 {
   "artifactType": "env-governance.codex-hook-deployment-plan",
   "schemaVersion": 1,
-  "generatedAtUtc": "2026-07-12T08:14:15.7954581+00:00",
+  "generatedAtUtc": "2026-07-12T09:50:57.7135484+00:00",
   "manifestSha256": "21185762791b263499a39ca164935b23ec1db88263a89c4c35e079547cfc2378",
   "mode": "registration-repair",
   "applyEligible": true,
@@ -193,15 +193,15 @@
     ],
     "blockerReasonCodes": []
   },
-  "registryBeforeSha256": "b342a2e2700cbeddf7cdc56fdc494224d07e5c7a98d7105d9e3d308ac72ca106",
+  "registryBeforeSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f",
   "registryAfterSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f",
   "projectionSummary": {
     "managedBeforeOrder": [
       "provider-stability",
-      "github-cli",
       "codex-state-policy",
       "serena-activate",
-      "serena-dashboard"
+      "serena-dashboard",
+      "github-cli"
     ],
     "managedAfterOrder": [
       "provider-stability",
@@ -220,29 +220,9 @@
     "fileActions": 0,
     "environmentActions": 0
   },
-  "actions": [
-    {
-      "actionId": "registry:hooks.json",
-      "phase": "registry",
-      "kind": "registry",
-      "sourceRef": null,
-      "sourceSha256": null,
-      "logicalTarget": "hooks.json",
-      "targetPath": "D:\\Codex\\.codex\\hooks.json",
-      "beforeExists": true,
-      "beforeSha256": "b342a2e2700cbeddf7cdc56fdc494224d07e5c7a98d7105d9e3d308ac72ca106",
-      "afterSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f",
-      "restoreOrder": 1
-    }
-  ],
+  "actions": [],
   "environmentActions": [],
-  "postChecks": [
-    {
-      "actionId": "registry:hooks.json",
-      "kind": "sha256",
-      "expectedSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f"
-    }
-  ],
-  "rollbackRequired": true,
-  "generationId": "991cafff-4575-4182-8af1-225ad6ed7c2b"
+  "postChecks": [],
+  "rollbackRequired": false,
+  "generationId": "e61038e8-2fb9-40fb-ad3c-5a852b0bb77d"
 }

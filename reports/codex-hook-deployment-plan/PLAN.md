@@ -1,19 +1,19 @@
 ---
-generationId: 991cafff-4575-4182-8af1-225ad6ed7c2b
-sourceJsonSha256: dc59fe8d4509f8178aa56b6cca28601af54fb3a8716479f4e7e4fd0ce55cb097
+generationId: e61038e8-2fb9-40fb-ad3c-5a852b0bb77d
+sourceJsonSha256: 796b8ed10e3c44ef992523bbd5db7e1186886624df20daf187a5e749e305f72e
 ---
 # Codex Hook production registration-repair 计划
 
 - profile：codex-hook-production-registration-repair-v1
-- 生成时间（UTC）：2026-07-12T08:14:15.7954581+00:00
+- 生成时间（UTC）：2026-07-12T09:50:57.7135484+00:00
 - 模式：registration-repair
 - 可执行：True
-- registry 动作数：1
+- registry 动作数：0
 - 文件动作数：0
 - 环境动作数：0
-- registry before SHA-256：b342a2e2700cbeddf7cdc56fdc494224d07e5c7a98d7105d9e3d308ac72ca106
+- registry before SHA-256：eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f
 - registry after SHA-256：eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f
-- managed before order：provider-stability,github-cli,codex-state-policy,serena-activate,serena-dashboard
+- managed before order：provider-stability,codex-state-policy,serena-activate,serena-dashboard,github-cli
 - managed after order：provider-stability,codex-state-policy,serena-activate,serena-dashboard,github-cli
 - Stop projection：count=1, sha256=8f2bdfeafb701192ddbcee576082e8d0ebbca401406dcbd87104731e6fa7d073
 - PreToolUse projection：count=2, sha256=80437e4279edb794e42055a0928fe2b55bcd6c9c3b8abdfa21697295c496a373

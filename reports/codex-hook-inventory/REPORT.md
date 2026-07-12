@@ -1,10 +1,10 @@
 ---
-generationId: b89477ee-7374-46dd-a86f-673cecdc137f
-sourceJsonSha256: a694a593d59d3a35bb97d22f94230bcba70a6c6acf4aefd987ba660d469a5706
+generationId: 3bc25a61-0a99-4bfc-8460-02d80718a0df
+sourceJsonSha256: a7ad39f4d0a611d5b4542354be3c777ebb04f0d9e51d5ae3e212b871dda7f71b
 ---
 # Codex Hook 只读盘点
 
-- 生成时间（UTC）：2026-07-12T08:14:14.1726182+00:00
+- 生成时间（UTC）：2026-07-12T09:50:56.1021224+00:00
 - 只读：True
 - 允许执行：False
 - Registry 事件数：4
