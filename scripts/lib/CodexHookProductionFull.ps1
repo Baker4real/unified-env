@@ -289,6 +289,37 @@ function New-CodexHookProductionFullActiveDocument {
     }
 }
 
+function Assert-CodexHookProductionFullAttestedLineage {
+    param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][object]$Active,[int]$MaxSteps=128)
+    $seenGenerations=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $seenEvidence=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $current=$Active
+    foreach($step in 1..$MaxSteps){
+        if(-not $seenGenerations.Add([string]$current.generationId)-or-not $seenEvidence.Add([string]$current.evidenceDirectory)){throw 'production full attested lineage cycle。'}
+        if($null -eq $current.previousGenerationId){return $true}
+        $paths=Get-CodexHookProductionFullLifecyclePaths $Profile ([string]$current.generationId)
+        if($paths.evidenceDirectory -cne $current.evidenceDirectory){throw 'production full attested lineage evidence binding 非法。'}
+        $restoreSnapshot=Get-CodexHookCapabilityFileSnapshot ([string]$paths.restoreManifestPath) ([string]$Profile.evidenceRoot) @([string]$paths.restoreManifestPath) 'production full lineage restore'
+        $restore=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$restoreSnapshot.bytes))|ConvertFrom-Json -Depth 128
+        $claimSnapshot=Get-CodexHookCapabilityFileSnapshot ([string]$paths.claimPath) ([string]$Profile.evidenceRoot) @([string]$paths.claimPath) 'production full lineage claim'
+        $claim=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$claimSnapshot.bytes))|ConvertFrom-Json -Depth 32
+        $attestationSnapshot=Get-CodexHookCapabilityFileSnapshot ([string]$paths.attestationPath) ([string]$Profile.evidenceRoot) @([string]$paths.attestationPath) 'production full lineage attestation'
+        if($claim.restoreManifestSha256 -cne $restoreSnapshot.sha256 -or $claim.attestationSha256 -cne $attestationSnapshot.sha256){throw 'production full lineage claim hash binding 非法。'}
+        $envelope=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$attestationSnapshot.bytes))|ConvertFrom-Json -Depth 20
+        $attestation=Unprotect-CodexHookProductionFullAttestation $envelope
+        if($attestation.generationId -cne $current.generationId -or $attestation.restoreManifestSha256 -cne $restoreSnapshot.sha256 -or $attestation.previousActiveBackupSha256 -cne $restore.previousActiveBackupSha256){throw 'production full lineage attestation binding 非法。'}
+        $expectedPreviousGeneration=[string]$current.previousGenerationId
+        $expectedPreviousEvidence=[string]$current.previousEvidenceDirectory
+        $backupPath=Join-Path ([string]$paths.evidenceDirectory) ([string]$restore.previousActiveBackupRelativePath)
+        if(-not(Test-CodexHookPathWithin $backupPath ([string]$paths.backupsRoot))){throw 'production full lineage predecessor backup 越界。'}
+        $backup=Get-CodexHookCapabilityFileSnapshot $backupPath ([string]$Profile.evidenceRoot) @($backupPath) 'production full lineage predecessor'
+        if($backup.sha256 -cne $restore.previousActiveBackupSha256){throw 'production full lineage predecessor hash 非法。'}
+        $current=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$backup.bytes))|ConvertFrom-Json -Depth 16
+        if($current.generationId -cne $expectedPreviousGeneration -or $current.evidenceDirectory -cne $expectedPreviousEvidence){throw 'production full lineage predecessor pointer 非法。'}
+    }
+    throw 'production full attested lineage 超过最大步数。'
+}
+
 function Invoke-CodexHookProductionFullApplyEngine {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none')
@@ -306,7 +337,7 @@ function Invoke-CodexHookProductionFullApplyEngine {
         $lease=Enter-CodexHookProductionFullMutex -Name ([string]$Profile.mutexName)
         if(Test-Path -LiteralPath ([string]$paths.claimPath)){throw 'production full generation 已被永久 claim；拒绝重放。'}
         $existingActiveSnapshot=Get-CodexHookCapabilityFileSnapshot ([string]$paths.activePath) ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full existing active generation'
-        if($existingActiveSnapshot.exists){$existingActive=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$existingActiveSnapshot.bytes))|ConvertFrom-Json -Depth 32;Assert-CodexHookExactProperties $existingActive @('artifactType','schemaVersion','profileId','generationId','evidenceDirectory','state','previousGenerationId','previousEvidenceDirectory') 'production full existing active generation';if($existingActive.state -ceq 'applying'){throw "production full recovery-required：$($existingActive.evidenceDirectory)"}}
+        if($existingActiveSnapshot.exists){$existingActive=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$existingActiveSnapshot.bytes))|ConvertFrom-Json -Depth 32;Assert-CodexHookExactProperties $existingActive @('artifactType','schemaVersion','profileId','generationId','evidenceDirectory','state','previousGenerationId','previousEvidenceDirectory') 'production full existing active generation';if($existingActive.state -ceq 'applying'){throw "production full recovery-required：$($existingActive.evidenceDirectory)"};[void](Assert-CodexHookProductionFullAttestedLineage -Profile $Profile -Active $existingActive)}
         $state=New-CodexHookProductionFullState -Profile $Profile -EnvironmentReadValue $EnvironmentReadValue
         foreach($name in @('manifestSha256','applyEligible','sourceFacts','liveFacts','registryBeforeSha256','registryAfterSha256','actions','environmentActions','postChecks','rollbackRequired','projectionSummary')) { if (($plan.$name|ConvertTo-Json -Depth 100 -Compress)-cne($state.plan.$name|ConvertTo-Json -Depth 100 -Compress)){throw "production full critical rederive 失败：$name"} }
         $allActions=@(@($plan.actions)+@($plan.environmentActions)|Sort-Object restoreOrder)
@@ -354,11 +385,11 @@ function Invoke-CodexHookProductionFullApplyEngine {
             restoredActionIds=@()
         }
         Set-CodexHookProductionFullJson ([string]$paths.statusPath) $status $Profile
-        $previousActive=$null
-        $activeBefore=Get-CodexHookCapabilityFileSnapshot ([string]$paths.activePath) ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full previous active generation'
-        if($activeBefore.exists){$previousActive=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$activeBefore.bytes))|ConvertFrom-Json -Depth 32;Assert-CodexHookExactProperties $previousActive @('artifactType','schemaVersion','profileId','generationId','evidenceDirectory','state','previousGenerationId','previousEvidenceDirectory') 'production full previous active generation';if($previousActive.artifactType -cne 'env-governance.codex-hook-production-full-active' -or [int]$previousActive.schemaVersion -ne 1 -or $previousActive.profileId -cne $Profile.profileId -or $previousActive.state -ceq 'applying'){throw 'production full previous active generation 未收敛。'}}
+        $previousActive=if($existingActiveSnapshot.exists){$existingActive}else{$null}
         $active=New-CodexHookProductionFullActiveDocument -Profile $Profile -GenerationId ([string]$plan.generationId) -EvidenceDirectory ([string]$paths.evidenceDirectory) -State applying -PreviousActive $previousActive
-        Set-CodexHookProductionFullJson ([string]$paths.activePath) $active $Profile
+        [byte[]]$activeBytes=[Text.UTF8Encoding]::new($false).GetBytes(($active|ConvertTo-Json -Depth 20))
+        $activeSha256=Get-CodexHookBytesSha256 $activeBytes
+        Set-CodexHookAtomicFileBytesWithCapability ([string]$paths.activePath) $activeBytes ([bool]$existingActiveSnapshot.exists) ([string]$existingActiveSnapshot.sha256) $activeSha256 ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full active generation publish'
         $completed=[Collections.Generic.List[string]]::new()
         try {
             foreach($action in $allActions){
@@ -430,9 +461,11 @@ function Restore-CodexHookProductionFullEngine {
         if($st.artifactType -cne 'env-governance.codex-hook-production-full-status' -or [int]$st.schemaVersion -ne 1 -or $st.profileId -cne $Profile.profileId -or $st.generationId -cne $restore.generationId -or $st.status -cnotin @('applying','rollback-pending','applied','restoring','rolled-back','restored')){throw 'production full status binding 非法。'}
         $as=Get-CodexHookCapabilityFileSnapshot ([string]$paths.activePath) ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full active generation';$active=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$as.bytes))|ConvertFrom-Json -Depth 16
         Assert-CodexHookExactProperties $active @('artifactType','schemaVersion','profileId','generationId','evidenceDirectory','state','previousGenerationId','previousEvidenceDirectory') 'production full active generation'
-        if($active.artifactType -cne 'env-governance.codex-hook-production-full-active' -or [int]$active.schemaVersion -ne 1 -or $active.profileId -cne $Profile.profileId -or $active.generationId -cne $restore.generationId -or $active.evidenceDirectory -cne $evidence -or $active.state -cnotin @('applying','applied','restored','rolled-back')){throw 'production full active generation binding 非法。'}
+        $activeIsCurrent=$active.generationId -ceq $restore.generationId -and $active.evidenceDirectory -ceq $evidence
+        $activeIsAttestedPredecessor=$null -ne $restore.previousActiveBackupSha256 -and $as.sha256 -ceq $restore.previousActiveBackupSha256
+        if($active.artifactType -cne 'env-governance.codex-hook-production-full-active' -or [int]$active.schemaVersion -ne 1 -or $active.profileId -cne $Profile.profileId -or (-not $activeIsCurrent -and -not $activeIsAttestedPredecessor) -or $active.state -cnotin @('applying','applied','restored','rolled-back')){throw 'production full active generation binding 非法。'}
         $previousActiveBackup=$null
-        if($null -ne $active.previousGenerationId){
+        if($null -ne $restore.previousActiveBackupRelativePath){
             if($null -eq $restore.previousActiveBackupRelativePath -or $null -eq $restore.previousActiveBackupSha256){throw 'production full predecessor backup 缺失。'}
             $previousActiveBackupPath=Join-Path $evidence ([string]$restore.previousActiveBackupRelativePath)
             if(-not(Test-CodexHookPathWithin $previousActiveBackupPath ([string]$paths.backupsRoot))){throw 'production full predecessor backup 越界。'}
@@ -440,7 +473,7 @@ function Restore-CodexHookProductionFullEngine {
             if($previousActiveBackup.sha256 -cne $restore.previousActiveBackupSha256){throw 'production full predecessor backup hash 非法。'}
             $previousPointer=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$previousActiveBackup.bytes))|ConvertFrom-Json -Depth 16
             Assert-CodexHookExactProperties $previousPointer @('artifactType','schemaVersion','profileId','generationId','evidenceDirectory','state','previousGenerationId','previousEvidenceDirectory') 'production full predecessor pointer'
-            if($previousPointer.generationId -cne $active.previousGenerationId -or $previousPointer.evidenceDirectory -cne $active.previousEvidenceDirectory){throw 'production full predecessor pointer binding 非法。'}
+            if($activeIsCurrent -and ($previousPointer.generationId -cne $active.previousGenerationId -or $previousPointer.evidenceDirectory -cne $active.previousEvidenceDirectory)){throw 'production full predecessor pointer binding 非法。'}
         }elseif($null -ne $restore.previousActiveBackupRelativePath -or $null -ne $restore.previousActiveBackupSha256){throw 'production full unexpected predecessor backup。'}
         $manifestBackupPath=Join-Path $evidence ([string]$restore.manifestBackupRelativePath)
         if(-not(Test-CodexHookPathWithin $manifestBackupPath ([string]$paths.backupsRoot))){throw 'production full manifest backup 越界。'}
@@ -522,7 +555,7 @@ function Restore-CodexHookProductionFullEngine {
             Set-CodexHookProductionFullJson $statusPath $st $Profile
             if($null -ne $TestAfterRestoreAction){& $TestAfterRestoreAction ([string]$a.actionId)}
         }
-        $terminal=if($FinalStatus -ceq 'rolled-back'){'rolled-back'}else{'restored'};$st.status=$terminal;Set-CodexHookProductionFullJson $statusPath $st $Profile
+        $terminal=if($FinalStatus -ceq 'rolled-back'){'rolled-back'}else{'restored'}
         if($null -ne $previousActiveBackup){
             $currentActiveSnapshot=Get-CodexHookCapabilityFileSnapshot ([string]$paths.activePath) ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full active predecessor publish'
             Set-CodexHookAtomicFileBytesWithCapability ([string]$paths.activePath) ([byte[]]$previousActiveBackup.bytes) $true ([string]$currentActiveSnapshot.sha256) ([string]$previousActiveBackup.sha256) ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full active predecessor publish'
@@ -530,6 +563,8 @@ function Restore-CodexHookProductionFullEngine {
             $active.state=$terminal
             Set-CodexHookProductionFullJson ([string]$paths.activePath) $active $Profile
         }
+        $st.status=$terminal
+        Set-CodexHookProductionFullJson $statusPath $st $Profile
         return [pscustomobject][ordered]@{restored=$changed;noOp=-not $changed;terminalStatus=$terminal;evidenceDirectory=$evidence}
     }finally{if($null -ne $lease){Exit-CodexHookProductionFullMutex -Lease $lease}}
 }
