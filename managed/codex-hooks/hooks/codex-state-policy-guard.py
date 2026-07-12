@@ -9,6 +9,8 @@ import hashlib
 import json
 import os
 from pathlib import Path, PureWindowsPath
+import re
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -43,9 +45,16 @@ def _sha256(data: bytes) -> str:
 def rewrite_projectless_path(value: object) -> object:
     if not isinstance(value, str):
         return value
+    if value.startswith(("\\\\", "//")):
+        return value
+    raw_parts = re.split(r"[\\/]+", value)
+    if any(part in (".", "..") for part in raw_parts):
+        return value
     try:
         path = PureWindowsPath(value)
     except (TypeError, ValueError):
+        return value
+    if not path.is_absolute() or path.drive.casefold() != "c:" or path.root != "\\":
         return value
     parts = path.parts
     if len(parts) < len(SOURCE_PARTS):
@@ -107,7 +116,14 @@ def _strict_json_loads(data: bytes) -> dict[str, object]:
                 result[key] = value
             return result
 
-        value = json.loads(text, object_pairs_hook=reject_duplicates)
+        def reject_constant(_token: str) -> object:
+            raise StatePolicyError("global state JSON is malformed")
+
+        value = json.loads(
+            text,
+            object_pairs_hook=reject_duplicates,
+            parse_constant=reject_constant,
+        )
     except StatePolicyError:
         raise
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -118,7 +134,15 @@ def _strict_json_loads(data: bytes) -> dict[str, object]:
 
 
 def _json_bytes(value: dict[str, object]) -> bytes:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise StatePolicyError("global state JSON serialization failed") from exc
 
 
 def _fsync_parent(path: Path) -> None:
@@ -259,33 +283,107 @@ def select_thread_updates(conn: sqlite3.Connection) -> list[str]:
     return [str(row[0]) for row in conn.execute(THREAD_DRIFT_SQL)]
 
 
+def _capture_sqlite_source(path: Path) -> tuple[bytes | None, bytes | None, bytes | None, bytes | None]:
+    paths = (
+        path,
+        Path(str(path) + "-wal"),
+        Path(str(path) + "-shm"),
+        Path(str(path) + "-journal"),
+    )
+    try:
+        return tuple(candidate.read_bytes() if candidate.exists() else None for candidate in paths)
+    except OSError as exc:
+        raise StatePolicyError("thread state source snapshot is busy") from exc
+
+
+def _select_thread_updates_from_snapshot(
+    path: Path,
+    snapshot_root: Path,
+    after_first_capture: Callable[[int], None] | None = None,
+) -> list[str]:
+    snapshot_windows_path = PureWindowsPath(str(snapshot_root))
+    if not snapshot_windows_path.is_absolute() or snapshot_windows_path.drive.casefold() != "d:":
+        raise StatePolicyError("thread state snapshot root must be an absolute D drive path")
+    snapshot_root.mkdir(parents=True, exist_ok=True)
+    for attempt in range(1, MAX_GLOBAL_ATTEMPTS + 1):
+        try:
+            first = _capture_sqlite_source(path)
+            if after_first_capture is not None:
+                after_first_capture(attempt)
+            second = _capture_sqlite_source(path)
+        except StatePolicyError:
+            continue
+        if first != second:
+            continue
+        database_bytes, wal_bytes, _shm_bytes, journal_bytes = first
+        if database_bytes is None:
+            raise StatePolicyError("thread state database disappeared during check")
+        if journal_bytes is not None:
+            # A rollback-journal writer can have uncommitted pages in the main
+            # database. Refuse that snapshot rather than read or repair source.
+            raise StatePolicyError("thread state rollback journal is active")
+        snapshot_dir = Path(tempfile.mkdtemp(prefix="sqlite-check-", dir=snapshot_root))
+        snapshot_db = snapshot_dir / "state.sqlite"
+        try:
+            snapshot_db.write_bytes(database_bytes)
+            if wal_bytes is not None:
+                Path(str(snapshot_db) + "-wal").write_bytes(wal_bytes)
+            # Deliberately omit the source SHM. SQLite may build/change SHM and
+            # checkpoint only inside this D-drive disposable copy. The stable
+            # DB+WAL pair retains committed, uncheckpointed rows without ever
+            # opening the source database through SQLite.
+            conn = sqlite3.connect(snapshot_db, timeout=1.5)
+            try:
+                conn.execute("pragma busy_timeout=1500")
+                conn.execute("pragma query_only=on")
+                identities = select_thread_updates(conn)
+            finally:
+                conn.close()
+            try:
+                after_query = _capture_sqlite_source(path)
+            except StatePolicyError:
+                continue
+            if after_query != second:
+                continue
+            return identities
+        except sqlite3.Error as exc:
+            raise StatePolicyError("thread state snapshot check failed") from exc
+        finally:
+            try:
+                shutil.rmtree(snapshot_dir)
+            except OSError as exc:
+                raise StatePolicyError("thread state snapshot cleanup failed") from exc
+            if snapshot_dir.exists():
+                raise StatePolicyError("thread state snapshot cleanup failed")
+    raise StatePolicyError("thread state source did not stabilize for check")
+
+
 def update_thread_state(
     path: Path,
     *,
     check_only: bool = False,
     before_commit: Callable[[], None] | None = None,
+    snapshot_root: Path | None = None,
+    after_first_snapshot_capture: Callable[[int], None] | None = None,
 ) -> dict[str, object]:
     if not path.is_file():
         return {"status": "missing", "changedCount": 0, "wouldChangeCount": 0, "driftCount": 0}
     if not isinstance(DISABLED_SANDBOX, str):
         raise StatePolicyError("thread state policy constant is invalid")
     if check_only:
-        try:
-            read_only_uri = f"file:{path.as_posix()}?mode=ro"
-            conn = sqlite3.connect(read_only_uri, uri=True, timeout=1.5)
-            try:
-                conn.execute("pragma busy_timeout=1500")
-                identities = select_thread_updates(conn)
-                return {
-                    "status": "drift" if identities else "converged",
-                    "changedCount": 0,
-                    "wouldChangeCount": len(identities),
-                    "driftCount": len(identities),
-                }
-            finally:
-                conn.close()
-        except sqlite3.OperationalError as exc:
-            raise StatePolicyError("thread state read-only check failed") from exc
+        if snapshot_root is None:
+            raise StatePolicyError("thread state check snapshot root is required")
+        identities = _select_thread_updates_from_snapshot(
+            path,
+            snapshot_root,
+            after_first_capture=after_first_snapshot_capture,
+        )
+        return {
+            "status": "drift" if identities else "converged",
+            "changedCount": 0,
+            "wouldChangeCount": len(identities),
+            "driftCount": len(identities),
+        }
     conn = sqlite3.connect(path, timeout=1.5)
     try:
         conn.execute("pragma busy_timeout=1500")
@@ -428,7 +526,17 @@ def run_policy(
                 codex_home / "backups_state" / "codex-state-policy",
                 check_only=check_only,
             )
-            thread_result = update_thread_state(codex_home / "state_5.sqlite", check_only=check_only)
+            production_home = _resolved_casefold(codex_home) == _resolved_casefold(PRODUCTION_CODEX_HOME)
+            snapshot_root = (
+                codex_home / "tmp" / "codex-state-policy-check"
+                if production_home
+                else health_root / "sqlite-snapshots"
+            )
+            thread_result = update_thread_state(
+                codex_home / "state_5.sqlite",
+                check_only=check_only,
+                snapshot_root=snapshot_root if check_only else None,
+            )
         ok = True
     except BaseException as exc:
         ok = False

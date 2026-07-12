@@ -66,6 +66,7 @@
       "writeResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\.codex-global-state.json" },
         { "kind": "path", "value": "D:\\Codex\\.codex\\state_5.sqlite" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\tmp\\codex-state-policy-check" },
         { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\state-policy.json" },
         { "kind": "abstract", "value": "hook-stdout" },
         { "kind": "abstract", "value": "codex-thread-state" }
@@ -363,7 +364,7 @@
     {
       "relativePath": "hooks/codex-state-policy-guard.py",
       "liveRelativePath": "codex-state-policy-guard.py",
-      "sha256": "e002135484cb426b5ea3ff8daae96e2bba902856b94b168a9da08a86f089a454",
+      "sha256": "1b1e85c128ffa2a1f4936bea3743c2980ff77e9f5f055af3c0648f9e597f4461",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"

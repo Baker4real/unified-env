@@ -58,6 +58,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.global_path = self.codex_home / ".codex-global-state.json"
         self.db_path = self.codex_home / "state_5.sqlite"
         self.backup_root = self.root / "backups"
+        self.sqlite_snapshot_root = self.root / "sqlite-snapshots"
 
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -98,6 +99,22 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertEqual(
             rewrite(r"C:\Users\WINDOWS\Documents\CodexBackup"),
             r"C:\Users\WINDOWS\Documents\CodexBackup",
+        )
+        unsafe = (
+            r"C:\Users\WINDOWS\Documents\Codex\..\CodexBackup",
+            r"C:\Users\WINDOWS\Documents\Codex\.\output",
+            r"\\server\share\Users\WINDOWS\Documents\Codex\output",
+            r"\\?\C:\Users\WINDOWS\Documents\Codex\output",
+            r"\\.\C:\Users\WINDOWS\Documents\Codex\output",
+            r"C:Users\WINDOWS\Documents\Codex\output",
+            r"Users\WINDOWS\Documents\Codex\output",
+        )
+        for value in unsafe:
+            with self.subTest(value=value):
+                self.assertEqual(rewrite(value), value)
+        self.assertEqual(
+            rewrite(r"c:/Users\WINDOWS/Documents\Codex/mixed"),
+            r"D:\Users\WINDOWS\Documents\Codex\mixed",
         )
         sentinel = {"not": "a path"}
         self.assertIs(rewrite(sentinel), sentinel)
@@ -193,6 +210,21 @@ class CodexStatePolicyTests(unittest.TestCase):
                 self.module.update_global_state(self.global_path, self.backup_root)
         self.assertEqual(self.global_path.read_bytes(), original)
 
+    def test_nonfinite_json_constants_fail_closed_without_artifacts(self) -> None:
+        health_root = self.root / "health"
+        for token in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(token=token):
+                raw = ('{"unknown":' + token + '}').encode()
+                self.global_path.write_bytes(raw)
+                with self.assertRaisesRegex(self.module.StatePolicyError, "malformed"):
+                    self.module.update_global_state(self.global_path, self.backup_root)
+                self.assertEqual(self.global_path.read_bytes(), raw)
+                self.assertFalse(self.backup_root.exists())
+                self.assertFalse(health_root.exists())
+                self.assertEqual(list(self.codex_home.glob(".*.tmp")), [])
+        with self.assertRaisesRegex(self.module.StatePolicyError, "serialization"):
+            self.module._json_bytes({"unknown": float("nan")})
+
     def test_check_only_and_idempotence(self) -> None:
         original = self.write_global({"thread-workspace-root-hints": {"x": r"C:\Users\WINDOWS\Documents\Codex\a"}})
         check = self.module.update_global_state(self.global_path, self.backup_root, check_only=True)
@@ -207,7 +239,9 @@ class CodexStatePolicyTests(unittest.TestCase):
         conn = self.create_db()
         conn.close()
         db_before = self.db_path.read_bytes()
-        checked = self.module.update_thread_state(self.db_path, check_only=True)
+        checked = self.module.update_thread_state(
+            self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
+        )
         self.assertEqual(checked["wouldChangeCount"], 2)
         self.assertEqual(self.db_path.read_bytes(), db_before)
         self.assertFalse((self.db_path.parent / f"{self.db_path.name}-journal").exists())
@@ -233,6 +267,111 @@ class CodexStatePolicyTests(unittest.TestCase):
         finally:
             lock.rollback()
             lock.close()
+
+    def test_wal_check_only_observes_latest_commits_without_sidecar_writes(self) -> None:
+        keeper = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
+            keeper.execute("pragma wal_autocheckpoint=0")
+            keeper.execute(
+                "create table threads (id text primary key, source text, thread_source text, "
+                "approval_mode text, sandbox_policy text, sentinel text)"
+            )
+            keeper.commit()
+            keeper.execute(
+                "insert into threads values (?,?,?,?,?,?)",
+                ("wal-latest", "vscode", "user", "on-request", '{"type":"workspace-write"}', "keep"),
+            )
+            keeper.commit()
+
+            paths = [
+                self.db_path,
+                Path(str(self.db_path) + "-wal"),
+                Path(str(self.db_path) + "-shm"),
+                Path(str(self.db_path) + "-journal"),
+            ]
+
+            def snapshot() -> list[tuple[bool, bytes | None]]:
+                return [(path.exists(), path.read_bytes() if path.exists() else None) for path in paths]
+
+            self.assertTrue(paths[1].exists())
+            self.assertTrue(paths[2].exists())
+            before = snapshot()
+            first = self.module.update_thread_state(
+                self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
+            )
+            self.assertEqual(first["wouldChangeCount"], 1)
+            self.assertEqual(snapshot(), before)
+            self.assertEqual(list(self.sqlite_snapshot_root.iterdir()), [])
+            second = self.module.update_thread_state(
+                self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
+            )
+            self.assertEqual(second["wouldChangeCount"], 1)
+            self.assertEqual(snapshot(), before)
+
+            keeper.execute(
+                "insert into threads values (?,?,?,?,?,?)",
+                ("wal-newer", "vscode", "user", "on-request", '{"type":"workspace-write"}', "keep-new"),
+            )
+            keeper.commit()
+            latest = snapshot()
+            third = self.module.update_thread_state(
+                self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
+            )
+            self.assertEqual(third["wouldChangeCount"], 2)
+            self.assertEqual(snapshot(), latest)
+
+            injected = False
+
+            def commit_between_samples(attempt: int) -> None:
+                nonlocal injected
+                if attempt == 1 and not injected:
+                    keeper.execute(
+                        "insert into threads values (?,?,?,?,?,?)",
+                        ("wal-raced", "vscode", "user", "on-request", '{"type":"workspace-write"}', "keep-r"),
+                    )
+                    keeper.commit()
+                    injected = True
+
+            raced = self.module.update_thread_state(
+                self.db_path,
+                check_only=True,
+                snapshot_root=self.sqlite_snapshot_root,
+                after_first_snapshot_capture=commit_between_samples,
+            )
+            self.assertTrue(injected)
+            self.assertEqual(raced["wouldChangeCount"], 3)
+            stable_after_race = snapshot()
+            self.assertEqual(self.module.update_thread_state(
+                self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
+            )["wouldChangeCount"], 3)
+            self.assertEqual(snapshot(), stable_after_race)
+            self.assertEqual(list(self.sqlite_snapshot_root.iterdir()), [])
+
+            checkpointed = False
+
+            def checkpoint_between_samples(attempt: int) -> None:
+                nonlocal checkpointed
+                if attempt == 1 and not checkpointed:
+                    keeper.execute("pragma wal_checkpoint(passive)").fetchone()
+                    checkpointed = True
+
+            after_checkpoint = self.module.update_thread_state(
+                self.db_path,
+                check_only=True,
+                snapshot_root=self.sqlite_snapshot_root,
+                after_first_snapshot_capture=checkpoint_between_samples,
+            )
+            self.assertTrue(checkpointed)
+            self.assertEqual(after_checkpoint["wouldChangeCount"], 3)
+            checkpoint_stable = snapshot()
+            self.assertEqual(self.module.update_thread_state(
+                self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
+            )["wouldChangeCount"], 3)
+            self.assertEqual(snapshot(), checkpoint_stable)
+            self.assertEqual(list(self.sqlite_snapshot_root.iterdir()), [])
+        finally:
+            keeper.close()
 
     def test_rollback_on_sqlite_failure(self) -> None:
         conn = self.create_db()
