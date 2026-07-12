@@ -54,10 +54,14 @@ foreach ($fixtureOnlyName in @('ManifestPath', 'FixtureSourceRoot', 'FixtureCode
     Assert-True (-not $newPlanCommand.Parameters[$fixtureOnlyName].ParameterSets.ContainsKey('ProductionRegistrationRepair')) "production plan 参数集不得接受 $fixtureOnlyName"
 }
 $invokeCommand = Get-Command -Name (Join-Path $ProjectRoot 'scripts\Invoke-CodexHookDeployment.ps1')
+foreach ($testOnlyName in @('TestAfterRegistryPublish', 'TestFaultInjection')) {
+    Assert-True (-not $invokeCommand.Parameters.ContainsKey($testOnlyName)) "production CLI 不得暴露 test-only apply seam：$testOnlyName"
+}
 foreach ($fixtureOnlyName in @('PlanPath', 'EvidenceRoot', 'EnvironmentReadValue', 'EnvironmentWriteValue', 'FaultInjection')) {
     Assert-True (-not $invokeCommand.Parameters[$fixtureOnlyName].ParameterSets.ContainsKey('ProductionRegistrationRepair')) "production apply 参数集不得接受 $fixtureOnlyName"
 }
 $restoreCommand = Get-Command -Name (Join-Path $ProjectRoot 'scripts\Restore-CodexHookDeployment.ps1')
+Assert-True (-not $restoreCommand.Parameters.ContainsKey('TestFaultInjection')) 'production CLI 不得暴露 test-only restore seam'
 foreach ($fixtureOnlyName in @('EnvironmentReadValue', 'EnvironmentWriteValue')) {
     Assert-True (-not $restoreCommand.Parameters[$fixtureOnlyName].ParameterSets.ContainsKey('ProductionRegistrationRepair')) "production restore 参数集不得接受 $fixtureOnlyName"
 }

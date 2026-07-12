@@ -1,7 +1,7 @@
 {
   "artifactType": "env-governance.codex-hook-deployment-plan",
   "schemaVersion": 1,
-  "generatedAtUtc": "2026-07-12T03:26:29.3607051+00:00",
+  "generatedAtUtc": "2026-07-12T04:17:58.3613529+00:00",
   "manifestSha256": "21185762791b263499a39ca164935b23ec1db88263a89c4c35e079547cfc2378",
   "mode": "registration-repair",
   "applyEligible": true,
@@ -195,6 +195,31 @@
   },
   "registryBeforeSha256": "b342a2e2700cbeddf7cdc56fdc494224d07e5c7a98d7105d9e3d308ac72ca106",
   "registryAfterSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f",
+  "projectionSummary": {
+    "managedBeforeOrder": [
+      "provider-stability",
+      "github-cli",
+      "codex-state-policy",
+      "serena-activate",
+      "serena-dashboard"
+    ],
+    "managedAfterOrder": [
+      "provider-stability",
+      "codex-state-policy",
+      "serena-activate",
+      "serena-dashboard",
+      "github-cli"
+    ],
+    "stopProjectionCount": 1,
+    "stopProjectionSha256": "8f2bdfeafb701192ddbcee576082e8d0ebbca401406dcbd87104731e6fa7d073",
+    "preToolUseProjectionCount": 2,
+    "preToolUseProjectionSha256": "80437e4279edb794e42055a0928fe2b55bcd6c9c3b8abdfa21697295c496a373",
+    "unknownProjectionCount": 0,
+    "unknownProjectionSha256": "74b2c6b8ea18d639e3b3c3019ffdc3c586f5fca5a411b4e0fb98098ecea50397",
+    "restartRequired": true,
+    "fileActions": 0,
+    "environmentActions": 0
+  },
   "actions": [
     {
       "actionId": "registry:hooks.json",
@@ -219,5 +244,5 @@
     }
   ],
   "rollbackRequired": true,
-  "generationId": "b79c75d9-9dda-49a0-86f6-0ba2d57fe5cb"
+  "generationId": "8d82c71a-1574-4177-a548-86983e39ef76"
 }

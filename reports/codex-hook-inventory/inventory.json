@@ -1,7 +1,7 @@
 {
   "artifactType": "env-governance.codex-hook-inventory",
   "schemaVersion": 1,
-  "generatedAtUtc": "2026-07-12T03:26:26.7930412+00:00",
+  "generatedAtUtc": "2026-07-12T04:17:55.8367615+00:00",
   "readOnly": true,
   "executionAllowed": false,
   "manifest": {
@@ -708,5 +708,5 @@
       ]
     }
   ],
-  "generationId": "ac7c3c94-5662-4699-8e48-cc21b17351ae"
+  "generationId": "6371ee52-ad89-4eec-aeef-062e0e3eba6c"
 }

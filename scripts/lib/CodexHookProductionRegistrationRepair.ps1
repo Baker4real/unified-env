@@ -189,6 +189,70 @@ function Get-CodexHookProductionManagedOrder {
     )
 }
 
+function Test-CodexHookJsonSemanticEquivalent {
+    param(
+        [AllowNull()][object]$Left,
+        [AllowNull()][object]$Right
+    )
+
+    return (
+        ($Left | ConvertTo-Json -Depth 100 -Compress) -ceq
+        ($Right | ConvertTo-Json -Depth 100 -Compress)
+    )
+}
+
+function Get-CodexHookProductionProjectionSummary {
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][object]$Before,
+        [Parameter(Mandatory)][object]$After
+    )
+
+    $beforeOwnership = Get-CodexHookRegistryOwnershipMap -Manifest $Manifest -Registry $Before
+    $sessionGroups = @($Before.hooks.SessionStart)
+    $sessionAnalyses = @($beforeOwnership.groupsByEvent.SessionStart)
+    $unknownSessionGroups = @(
+        for ($index = 0; $index -lt $sessionGroups.Count; $index++) {
+            if (-not $sessionAnalyses[$index].isManaged) {
+                $sessionGroups[$index]
+            }
+        }
+    )
+    $knownEvents = @('SessionStart', 'Stop', 'PreToolUse')
+    $unknownEvents = [ordered]@{}
+    foreach ($property in $Before.hooks.PSObject.Properties) {
+        if ($knownEvents -cnotcontains [string]$property.Name) {
+            $unknownEvents[[string]$property.Name] = $property.Value
+        }
+    }
+    $unknownTopLevel = [ordered]@{}
+    foreach ($property in $Before.PSObject.Properties) {
+        if ($property.Name -cne 'hooks') {
+            $unknownTopLevel[[string]$property.Name] = $property.Value
+        }
+    }
+    $stopProjection = @($Before.hooks.Stop)
+    $preToolUseProjection = @($Before.hooks.PreToolUse)
+    $unknownProjection = [pscustomobject][ordered]@{
+        sessionStartGroups = $unknownSessionGroups
+        events = [pscustomobject]$unknownEvents
+        topLevel = [pscustomobject]$unknownTopLevel
+    }
+    return [pscustomobject][ordered]@{
+        managedBeforeOrder = [string[]]@(Get-CodexHookProductionManagedOrder -Manifest $Manifest -Registry $Before)
+        managedAfterOrder = [string[]]@(Get-CodexHookProductionManagedOrder -Manifest $Manifest -Registry $After)
+        stopProjectionCount = $stopProjection.Count
+        stopProjectionSha256 = Get-CodexHookTextSha256 -Text ($stopProjection | ConvertTo-Json -Depth 100 -Compress)
+        preToolUseProjectionCount = $preToolUseProjection.Count
+        preToolUseProjectionSha256 = Get-CodexHookTextSha256 -Text ($preToolUseProjection | ConvertTo-Json -Depth 100 -Compress)
+        unknownProjectionCount = $unknownSessionGroups.Count + $unknownEvents.Count + $unknownTopLevel.Count
+        unknownProjectionSha256 = Get-CodexHookTextSha256 -Text ($unknownProjection | ConvertTo-Json -Depth 100 -Compress)
+        restartRequired = $true
+        fileActions = 0
+        environmentActions = 0
+    }
+}
+
 function Assert-CodexHookProductionRegistrationRepairRegistryDelta {
     param(
         [Parameter(Mandatory)][object]$Manifest,
@@ -337,10 +401,15 @@ function New-CodexHookProductionRegistrationRepairState {
     $registry = ConvertFrom-CodexHookProductionJsonSnapshot -Snapshot $registrySnapshot -Name 'production hook registry'
     $desiredRegistry = Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $registry -Mode 'registration-repair'
     [void](Assert-CodexHookProductionRegistrationRepairRegistryDelta -Manifest $manifest -Before $registry -After $desiredRegistry)
-    [byte[]]$desiredBytes = ConvertTo-CodexHookRegistryBytes -Registry $desiredRegistry
+    $isNoOp = Test-CodexHookJsonSemanticEquivalent -Left $registry -Right $desiredRegistry
+    [byte[]]$desiredBytes = if ($isNoOp) {
+        [byte[]]$registrySnapshot.bytes
+    } else {
+        ConvertTo-CodexHookRegistryBytes -Registry $desiredRegistry
+    }
     $registryAfterSha256 = Get-CodexHookBytesSha256 -Bytes $desiredBytes
     $mappingIdentity = Get-CodexHookProductionRegistrationRepairMappingIdentity -Profile $Profile
-    $isNoOp = $registrySnapshot.sha256 -ceq $registryAfterSha256
+    $projectionSummary = Get-CodexHookProductionProjectionSummary -Manifest $manifest -Before $registry -After $desiredRegistry
     [object[]]$actions = @()
     [object[]]$postChecks = @()
     if (-not $isNoOp) {
@@ -391,6 +460,7 @@ function New-CodexHookProductionRegistrationRepairState {
         }
         registryBeforeSha256 = [string]$registrySnapshot.sha256
         registryAfterSha256 = $registryAfterSha256
+        projectionSummary = $projectionSummary
         actions = $actions
         environmentActions = @()
         postChecks = $postChecks
@@ -422,7 +492,8 @@ function Assert-CodexHookProductionRegistrationRepairPlan {
     Assert-CodexHookExactProperties -Value $Plan -Names @(
         'artifactType', 'schemaVersion', 'generationId', 'generatedAtUtc', 'manifestSha256',
         'mode', 'applyEligible', 'sourceFacts', 'liveFacts', 'registryBeforeSha256',
-        'registryAfterSha256', 'actions', 'environmentActions', 'postChecks', 'rollbackRequired'
+        'registryAfterSha256', 'projectionSummary', 'actions', 'environmentActions',
+        'postChecks', 'rollbackRequired'
     ) -Scope 'production deployment plan'
     if (
         $Plan.artifactType -cne 'env-governance.codex-hook-deployment-plan' -or
@@ -509,6 +580,41 @@ function Assert-CodexHookProductionRegistrationRepairPlan {
     if (@($Plan.environmentActions).Count -ne 0) {
         throw 'production registration-repair 禁止 environment action。'
     }
+    Assert-CodexHookExactProperties -Value $Plan.projectionSummary -Names @(
+        'managedBeforeOrder', 'managedAfterOrder', 'stopProjectionCount',
+        'stopProjectionSha256', 'preToolUseProjectionCount',
+        'preToolUseProjectionSha256', 'unknownProjectionCount',
+        'unknownProjectionSha256', 'restartRequired', 'fileActions',
+        'environmentActions'
+    ) -Scope 'production plan projectionSummary'
+    $expectedBeforeOrder = if ($Plan.registryBeforeSha256 -ceq $Plan.registryAfterSha256) {
+        @('provider-stability','codex-state-policy','serena-activate','serena-dashboard','github-cli')
+    } else {
+        @('provider-stability','github-cli','codex-state-policy','serena-activate','serena-dashboard')
+    }
+    $expectedAfterOrder = @('provider-stability','codex-state-policy','serena-activate','serena-dashboard','github-cli')
+    if (
+        -not (Test-CodexHookExactStringSequence -Actual @($Plan.projectionSummary.managedBeforeOrder) -Expected $expectedBeforeOrder) -or
+        -not (Test-CodexHookExactStringSequence -Actual @($Plan.projectionSummary.managedAfterOrder) -Expected $expectedAfterOrder)
+    ) {
+        throw 'production plan managed projection order 非法。'
+    }
+    foreach ($countName in @('stopProjectionCount','preToolUseProjectionCount','unknownProjectionCount','fileActions','environmentActions')) {
+        Assert-CodexHookInteger -Value $Plan.projectionSummary.$countName -Name "production projection $countName"
+        if ([int]$Plan.projectionSummary.$countName -lt 0) { throw "production projection $countName 非法。" }
+    }
+    foreach ($hashName in @('stopProjectionSha256','preToolUseProjectionSha256','unknownProjectionSha256')) {
+        if ([string]$Plan.projectionSummary.$hashName -cnotmatch '^[0-9a-f]{64}$') {
+            throw "production projection $hashName 非法。"
+        }
+    }
+    if (
+        $Plan.projectionSummary.restartRequired -ne $true -or
+        [int]$Plan.projectionSummary.fileActions -ne 0 -or
+        [int]$Plan.projectionSummary.environmentActions -ne 0
+    ) {
+        throw 'production projection restart/action contract 非法。'
+    }
     $actions = @($Plan.actions)
     $postChecks = @($Plan.postChecks)
     if ($Plan.registryBeforeSha256 -ceq $Plan.registryAfterSha256) {
@@ -559,7 +665,8 @@ function Test-CodexHookProductionPlanProjectionEqual {
 
     foreach ($property in @(
         'manifestSha256', 'mode', 'sourceFacts', 'liveFacts', 'registryBeforeSha256',
-        'registryAfterSha256', 'actions', 'environmentActions', 'postChecks', 'rollbackRequired'
+        'registryAfterSha256', 'projectionSummary', 'actions', 'environmentActions',
+        'postChecks', 'rollbackRequired'
     )) {
         if (
             ($Planned.$property | ConvertTo-Json -Depth 100 -Compress) -cne
@@ -611,9 +718,17 @@ function Get-CodexHookProductionRegistrationRepairLifecyclePaths {
 
 function Invoke-CodexHookProductionRegistrationRepairApplyCore {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][object]$Profile)
+    param(
+        [Parameter(Mandatory)][object]$Profile,
+        [scriptblock]$TestAfterRegistryPublish,
+        [ValidateSet('none', 'crash-after-registry-publish')]
+        [string]$TestFaultInjection = 'none'
+    )
 
     [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $Profile -AllowFixtureAdapter)
+    if (($null -ne $TestAfterRegistryPublish -or $TestFaultInjection -cne 'none') -and -not $Profile.isFixtureAdapter) {
+        throw 'test-only production apply fault injection 仅允许 fixed fixture adapter。'
+    }
     $planSnapshot = Get-CodexHookCapabilityFileSnapshot `
         -Path ([string]$Profile.planPath) `
         -CapabilityRoot ([string]$Profile.planOutputDir) `
@@ -735,10 +850,32 @@ function Invoke-CodexHookProductionRegistrationRepairApplyCore {
                 -CapabilityRoot ([string]$Profile.codexHome) `
                 -AllowedExactPaths @([string]$Profile.registryPath) `
                 -Scope 'production registry publish'
+            if ($null -ne $TestAfterRegistryPublish) {
+                & $TestAfterRegistryPublish
+            }
+            if ($TestFaultInjection -ceq 'crash-after-registry-publish') {
+                throw 'test-fault:crash-after-registry-publish'
+            }
+            try {
+                $postPublishState = New-CodexHookProductionRegistrationRepairState -Profile $Profile
+                if (
+                    -not $postPublishState.isNoOp -or
+                    $postPublishState.registrySnapshot.sha256 -cne [string]$plan.registryAfterSha256 -or
+                    -not (Test-CodexHookProductionStaticFactsEqual -Planned $plan -Derived $postPublishState.plan)
+                ) {
+                    throw 'static fact projection mismatch'
+                }
+            } catch {
+                throw 'production post-publish static facts final gate 失败。'
+            }
             $status.status = 'applied'
             $status.completedActionIds = @('registry:hooks.json')
             Set-CodexHookCapabilityJson -Path ([string]$paths.statusPath) -Document $status -CapabilityRoot ([string]$Profile.evidenceRoot) -AllowedExactPaths @([string]$paths.statusPath) -Scope 'production status'
         } catch {
+            $failureMessage = $_.Exception.Message
+            if ($failureMessage -ceq 'test-fault:crash-after-registry-publish') {
+                throw
+            }
             $current = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.registryPath) -CapabilityRoot ([string]$Profile.codexHome) -AllowedExactPaths @([string]$Profile.registryPath) -Name 'production rollback current registry'
             if ($current.sha256 -ceq [string]$plan.registryAfterSha256) {
                 Set-CodexHookAtomicFileBytesWithCapability `
@@ -753,6 +890,9 @@ function Invoke-CodexHookProductionRegistrationRepairApplyCore {
                 $status.status = 'rolled-back'
                 $status.completedActionIds = @()
                 Set-CodexHookCapabilityJson -Path ([string]$paths.statusPath) -Document $status -CapabilityRoot ([string]$Profile.evidenceRoot) -AllowedExactPaths @([string]$paths.statusPath) -Scope 'production status'
+            }
+            if ($failureMessage -like 'production post-publish static facts*') {
+                throw 'production post-publish static facts 失败；registry 已回滚且状态为 rolled-back。'
             }
             throw 'production registry apply 失败；已按可验证状态尝试回滚。'
         }
@@ -772,10 +912,15 @@ function Restore-CodexHookProductionRegistrationRepairCore {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][object]$Profile,
-        [Parameter(Mandatory)][string]$EvidenceDirectory
+        [Parameter(Mandatory)][string]$EvidenceDirectory,
+        [ValidateSet('none', 'crash-after-registry-restore')]
+        [string]$TestFaultInjection = 'none'
     )
 
     [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $Profile -AllowFixtureAdapter)
+    if ($TestFaultInjection -cne 'none' -and -not $Profile.isFixtureAdapter) {
+        throw 'test-only production restore fault injection 仅允许 fixed fixture adapter。'
+    }
     $evidencePath = Assert-CodexHookCapabilityPath -Path $EvidenceDirectory -CapabilityRoot ([string]$Profile.evidenceRoot) -Name 'production restore evidence directory'
     if (
         [IO.Path]::GetDirectoryName($evidencePath) -ine [IO.Path]::GetFullPath([string]$Profile.evidenceRoot) -or
@@ -804,6 +949,8 @@ function Restore-CodexHookProductionRegistrationRepairCore {
         Assert-CodexHookExactProperties -Value $claim -Names @('artifactType','schemaVersion','profileId','state','generationId','mappingIdentity','planSha256','evidenceDirectory','restoreManifestSha256') -Scope 'production restore claim'
         Assert-CodexHookExactProperties -Value $restore -Names @('artifactType','schemaVersion','profileId','generationId','planSha256','mappingIdentity','actions') -Scope 'production restore manifest'
         Assert-CodexHookExactProperties -Value $status -Names @('artifactType','schemaVersion','profileId','generationId','status','completedActionIds') -Scope 'production restore status'
+        Assert-CodexHookArray -Value ([object]$restore.actions) -Name 'production restore actions'
+        Assert-CodexHookArray -Value ([object]$status.completedActionIds) -Name 'production restore completedActionIds'
         $actions = @($restore.actions)
         if (
             $claim.artifactType -cne 'env-governance.codex-hook-deployment-claim' -or
@@ -814,6 +961,7 @@ function Restore-CodexHookProductionRegistrationRepairCore {
             $claim.evidenceDirectory -cne $evidencePath -or
             $claim.restoreManifestSha256 -cne $restoreSnapshot.sha256 -or
             $claim.mappingIdentity -cne (Get-CodexHookProductionRegistrationRepairMappingIdentity -Profile $Profile) -or
+            [string]$claim.planSha256 -cnotmatch '^[0-9a-f]{64}$' -or
             $restore.artifactType -cne 'env-governance.codex-hook-production-registration-repair-restore' -or
             [int]$restore.schemaVersion -ne 1 -or
             $restore.profileId -cne [string]$Profile.profileId -or
@@ -824,7 +972,7 @@ function Restore-CodexHookProductionRegistrationRepairCore {
             [int]$status.schemaVersion -ne 1 -or
             $status.profileId -cne [string]$Profile.profileId -or
             $status.generationId -cne $generationId -or
-            $status.status -cnotin @('applied', 'restored') -or
+            $status.status -cnotin @('applying', 'applied', 'restored', 'rolled-back') -or
             $actions.Count -ne 1
         ) {
             throw 'production restore claim/manifest binding 非法。'
@@ -835,21 +983,90 @@ function Restore-CodexHookProductionRegistrationRepairCore {
             $action.actionId -cne 'registry:hooks.json' -or
             $action.kind -cne 'registry' -or
             $action.path -cne [string]$Profile.registryPath -or
+            $action.beforeExists -isnot [bool] -or
             $action.beforeExists -ne $true -or
+            $action.deployedExists -isnot [bool] -or
             $action.deployedExists -ne $true -or
             $action.backupRelativePath -cne 'backups/registry.bin' -or
+            [string]$action.beforeSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]$action.deployedSha256 -cnotmatch '^[0-9a-f]{64}$' -or
             $action.backupSha256 -cne $action.beforeSha256 -or
             $backupSnapshot.sha256 -cne $action.backupSha256 -or
-            [int]$action.restoreOrder -ne 1
+            $action.beforeSha256 -ceq $action.deployedSha256
         ) {
             throw 'production restore 只允许 fixed registry action。'
         }
-        $current = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.registryPath) -CapabilityRoot ([string]$Profile.codexHome) -AllowedExactPaths @([string]$Profile.registryPath) -Name 'production restore current registry'
-        if ($current.sha256 -ceq [string]$action.beforeSha256 -and $status.status -ceq 'restored') {
-            return [pscustomobject][ordered]@{ restored = $false; noOp = $true; generationId = $generationId }
+        Assert-CodexHookInteger -Value $action.restoreOrder -Name 'production restore order'
+        if ([int]$action.restoreOrder -ne 1) {
+            throw 'production restore order 非法。'
         }
-        if ($current.sha256 -cne [string]$action.deployedSha256) {
-            throw 'production restore current registry 不等于 deployed CAS hash。'
+        $completedActionIdsValid = if ($status.status -ceq 'applied') {
+            @($status.completedActionIds).Count -eq 1 -and
+            [string]@($status.completedActionIds)[0] -ceq 'registry:hooks.json'
+        } else {
+            @($status.completedActionIds).Count -eq 0
+        }
+        if (-not $completedActionIdsValid) {
+            throw 'production restore status/completedActionIds binding 非法。'
+        }
+
+        $manifestSnapshot = Get-CodexHookCapabilityFileSnapshot `
+            -Path ([string]$Profile.manifestPath) `
+            -CapabilityRoot ([string]$Profile.sourceRoot) `
+            -AllowedExactPaths @([string]$Profile.manifestPath) `
+            -Name 'production restore profile manifest'
+        $manifest = ConvertFrom-CodexHookProductionJsonSnapshot -Snapshot $manifestSnapshot -Name 'production restore profile manifest'
+        Assert-CodexHookProductionManifestBinding -Manifest $manifest -Profile $Profile
+        $backupRegistry = ConvertFrom-CodexHookProductionJsonSnapshot -Snapshot $backupSnapshot -Name 'production restore backup registry'
+        $current = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.registryPath) -CapabilityRoot ([string]$Profile.codexHome) -AllowedExactPaths @([string]$Profile.registryPath) -Name 'production restore current registry'
+        $currentRegistry = ConvertFrom-CodexHookProductionJsonSnapshot -Snapshot $current -Name 'production restore current registry'
+        try {
+            $expectedDeployedRegistry = Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $backupRegistry -Mode 'registration-repair'
+            [void](Assert-CodexHookProductionRegistrationRepairRegistryDelta -Manifest $manifest -Before $backupRegistry -After $expectedDeployedRegistry)
+            [byte[]]$expectedDeployedBytes = ConvertTo-CodexHookRegistryBytes -Registry $expectedDeployedRegistry
+            $expectedDeployedSha256 = Get-CodexHookBytesSha256 -Bytes $expectedDeployedBytes
+            if ($expectedDeployedSha256 -cne [string]$action.deployedSha256) {
+                throw 'deployed fingerprint mismatch'
+            }
+            if ($current.sha256 -ceq [string]$action.deployedSha256) {
+                [void](Assert-CodexHookProductionRegistrationRepairRegistryDelta -Manifest $manifest -Before $backupRegistry -After $currentRegistry)
+            } elseif ($current.sha256 -ceq [string]$action.beforeSha256) {
+                if (-not (Test-CodexHookJsonSemanticEquivalent -Left $backupRegistry -Right $currentRegistry)) {
+                    throw 'before fingerprint semantic mismatch'
+                }
+            } else {
+                throw 'current registry third hash'
+            }
+        } catch {
+            throw 'production restore forged/semantic registry evidence 拒绝。'
+        }
+
+        $currentIsBefore = $current.sha256 -ceq [string]$action.beforeSha256
+        $currentIsDeployed = $current.sha256 -ceq [string]$action.deployedSha256
+        if ($status.status -cin @('restored', 'rolled-back')) {
+            if (-not $currentIsBefore) {
+                throw 'production restore terminal status 与 current registry 不相容。'
+            }
+            return [pscustomobject][ordered]@{
+                restored = $false
+                noOp = $true
+                generationId = $generationId
+                terminalStatus = [string]$status.status
+            }
+        }
+        if ($currentIsBefore) {
+            $status.status = if ($status.status -ceq 'applying') { 'rolled-back' } else { 'restored' }
+            $status.completedActionIds = @()
+            Set-CodexHookCapabilityJson -Path ([string]$paths.statusPath) -Document $status -CapabilityRoot ([string]$Profile.evidenceRoot) -AllowedExactPaths @([string]$paths.statusPath) -Scope 'production restore terminal status'
+            return [pscustomobject][ordered]@{
+                restored = $false
+                noOp = $true
+                generationId = $generationId
+                terminalStatus = [string]$status.status
+            }
+        }
+        if (-not $currentIsDeployed -or $status.status -cnotin @('applying', 'applied')) {
+            throw 'production restore status/hash matrix 不相容。'
         }
         Set-CodexHookAtomicFileBytesWithCapability `
             -Path ([string]$Profile.registryPath) `
@@ -860,10 +1077,18 @@ function Restore-CodexHookProductionRegistrationRepairCore {
             -CapabilityRoot ([string]$Profile.codexHome) `
             -AllowedExactPaths @([string]$Profile.registryPath) `
             -Scope 'production external registry restore'
+        if ($TestFaultInjection -ceq 'crash-after-registry-restore') {
+            throw 'test-fault:crash-after-registry-restore'
+        }
         $status.status = 'restored'
         $status.completedActionIds = @()
         Set-CodexHookCapabilityJson -Path ([string]$paths.statusPath) -Document $status -CapabilityRoot ([string]$Profile.evidenceRoot) -AllowedExactPaths @([string]$paths.statusPath) -Scope 'production restore status'
-        return [pscustomobject][ordered]@{ restored = $true; noOp = $false; generationId = $generationId }
+        return [pscustomobject][ordered]@{
+            restored = $true
+            noOp = $false
+            generationId = $generationId
+            terminalStatus = 'restored'
+        }
     } finally {
         if ($held) { [void]$mutex.ReleaseMutex() }
         $mutex.Dispose()

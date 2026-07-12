@@ -41,6 +41,14 @@ if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
                 "- 环境动作数：$(@($Document.environmentActions).Count)"
                 "- registry before SHA-256：$($Document.registryBeforeSha256)"
                 "- registry after SHA-256：$($Document.registryAfterSha256)"
+                "- managed before order：$(@($Document.projectionSummary.managedBeforeOrder) -join ',')"
+                "- managed after order：$(@($Document.projectionSummary.managedAfterOrder) -join ',')"
+                "- Stop projection：count=$($Document.projectionSummary.stopProjectionCount), sha256=$($Document.projectionSummary.stopProjectionSha256)"
+                "- PreToolUse projection：count=$($Document.projectionSummary.preToolUseProjectionCount), sha256=$($Document.projectionSummary.preToolUseProjectionSha256)"
+                "- unknown projection：count=$($Document.projectionSummary.unknownProjectionCount), sha256=$($Document.projectionSummary.unknownProjectionSha256)"
+                "- restartRequired：$($Document.projectionSummary.restartRequired)"
+                "- fileActions：$($Document.projectionSummary.fileActions)"
+                "- environmentActions：$($Document.projectionSummary.environmentActions)"
                 ''
                 '此计划只读生成；必须先通过独立审查，才能由主 agent 显式执行 production apply。'
                 '本报告不包含 desired registry、raw registry command 或环境变量原值。'
