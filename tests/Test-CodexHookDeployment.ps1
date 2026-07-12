@@ -210,6 +210,48 @@ $unclosedManagedError = Assert-Throws -Message '未闭合引号中的完整受�
 Assert-True ($unclosedManagedError -match '无法安全解析|identity') '不可解析受管 wrapper 必须输出脱敏 ownership reason'
 Assert-True ($unclosedManagedError -notmatch 'fixture-secret') '不可解析受管 wrapper 错误不得回显 raw command/secret'
 
+$dotSegmentManagedRegistry = Copy-CodexHookJsonValue -Value $live
+$dotSegmentManagedGithub = @($dotSegmentManagedRegistry.hooks.SessionStart | Where-Object { @($_.hooks)[0].command -like '*codex-github-cli-guard.cmd*' })[0]
+$dotSegmentManagedGithub.hooks[0].command = '"D:\Codex\.codex\hooks\.\codex-github-cli-guard.cmd --token fixture-secret'
+$dotSegmentManagedError = Assert-Throws -Message '不可解析 command target 的 dot segment 规范化后命中 managed wrapper 必须 fail closed' -Action {
+    Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $dotSegmentManagedRegistry -Mode registration-repair | Out-Null
+}
+Assert-True ($dotSegmentManagedError -notmatch 'fixture-secret') 'dot segment ownership 错误不得回显 raw command/secret'
+
+$parentSegmentManagedRegistry = Copy-CodexHookJsonValue -Value $live
+$parentSegmentManagedGithub = @($parentSegmentManagedRegistry.hooks.SessionStart | Where-Object { @($_.hooks)[0].command -like '*codex-github-cli-guard.cmd*' })[0]
+$parentSegmentManagedGithub.hooks[0].command = '  "D:/Codex/.codex/hooks/sub/../codex-github-cli-guard.cmd --token fixture-secret'
+$parentSegmentManagedError = Assert-Throws -Message '不可解析 command target 的 parent segment 规范化后命中 managed wrapper 必须 fail closed' -Action {
+    Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $parentSegmentManagedRegistry -Mode registration-repair | Out-Null
+}
+Assert-True ($parentSegmentManagedError -notmatch 'fixture-secret') 'parent segment ownership 错误不得回显 raw command/secret'
+
+$backupSuffixRegistry = Copy-CodexHookJsonValue -Value $missingTailRegistry
+$backupSuffixRegistry.hooks.SessionStart += [pscustomobject][ordered]@{
+    customBackupSuffixUnknown = 'preserve'
+    hooks = @([pscustomobject][ordered]@{
+        type = 'command'
+        command = '"D:\Codex\.codex\hooks\codex-github-cli-guard.cmd.backup --opaque'
+    })
+}
+$backupSuffixMerged = Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $backupSuffixRegistry -Mode registration-repair
+Assert-True (@($backupSuffixMerged.hooks.SessionStart | Where-Object {
+    $_.PSObject.Properties.Name -contains 'customBackupSuffixUnknown' -and $_.customBackupSuffixUnknown -ceq 'preserve'
+}).Count -eq 1) 'managed wrapper 文件名加 .backup 后缀必须保持 unknown'
+
+$managedLaterArgumentRegistry = Copy-CodexHookJsonValue -Value $missingTailRegistry
+$managedLaterArgumentRegistry.hooks.SessionStart += [pscustomobject][ordered]@{
+    customManagedLaterArgument = 'preserve'
+    hooks = @([pscustomobject][ordered]@{
+        type = 'command'
+        command = 'D:\Fixture\unknown-target.cmd --opaque "D:\Codex\.codex\hooks\codex-github-cli-guard.cmd'
+    })
+}
+$managedLaterArgumentMerged = Merge-CodexHookRegistry -Manifest $manifest -LiveRegistry $managedLaterArgumentRegistry -Mode registration-repair
+Assert-True (@($managedLaterArgumentMerged.hooks.SessionStart | Where-Object {
+    $_.PSObject.Properties.Name -contains 'customManagedLaterArgument' -and $_.customManagedLaterArgument -ceq 'preserve'
+}).Count -eq 1) '受管 path 只出现在后续参数时必须保持 unknown，不得 substring 误报'
+
 $wrongParentRegistry = Copy-CodexHookJsonValue -Value $missingTailRegistry
 $wrongParentRegistry.hooks.SessionStart += [pscustomobject][ordered]@{
     customMalformedUnknown = 'preserve'

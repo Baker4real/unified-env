@@ -181,8 +181,7 @@ try {
     if (Test-Path -LiteralPath $evidenceDirectory) { throw 'deployment evidence directory 已存在；拒绝重放。' }
 
     foreach ($stateDirectory in @($lifecyclePaths.lifecycleRoot, $lifecyclePaths.mappingRoot, $lifecyclePaths.claimsRoot)) {
-        [void][IO.Directory]::CreateDirectory([string]$stateDirectory)
-        [void](Assert-CodexHookFixturePath -Path ([string]$stateDirectory) -Name 'fixed lifecycle state directory after create')
+        [void](New-CodexHookFixtureDirectory -Path ([string]$stateDirectory) -Name 'fixed lifecycle state directory')
     }
     $claimPath = [string]$lifecyclePaths.claimPath
     $reservationDocument = [pscustomobject][ordered]@{
@@ -196,25 +195,24 @@ try {
         restoreManifestSha256 = $null
     }
     [byte[]]$reservationBytes = [Text.UTF8Encoding]::new($false).GetBytes(($reservationDocument | ConvertTo-Json -Depth 10))
-    $claimStream = $null
-    try {
-        $claimStream = [IO.FileStream]::new($claimPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-        $claimStream.Write($reservationBytes, 0, $reservationBytes.Length)
-        $claimStream.Flush($true)
-    } catch {
+    $claimBefore = Get-CodexHookFixtureFileSnapshot -Path $claimPath -Name 'mapping-scoped claim before reserve'
+    if ($claimBefore.exists) {
         throw 'deployment generationId 已被 mapping-scoped claim；拒绝重放。'
-    } finally {
-        if ($null -ne $claimStream) { $claimStream.Dispose() }
     }
+    Assert-CodexHookSnapshotExpectedState -Snapshot $claimBefore -ExpectedExists $false -ExpectedSha256 $null -Scope 'mapping-scoped claim before reserve'
+    $reservationSha256 = Get-CodexHookBytesSha256 -Bytes $reservationBytes
+    Set-CodexHookAtomicFileBytes `
+        -Path $claimPath `
+        -Bytes $reservationBytes `
+        -ExpectedExists $false `
+        -ExpectedSha256 $null `
+        -AfterSha256 $reservationSha256 `
+        -Scope 'mapping-scoped claim reserve'
 
-    [void][IO.Directory]::CreateDirectory($evidenceRootPath)
-    [void](Assert-CodexHookFixturePath -Path $evidenceRootPath -Name 'EvidenceRoot after create')
-    [void][IO.Directory]::CreateDirectory($evidenceDirectory)
-    [void](Assert-CodexHookFixturePath -Path $evidenceDirectory -Name 'evidence directory after create')
+    [void](New-CodexHookFixtureDirectory -Path $evidenceRootPath -Name 'EvidenceRoot')
+    [void](New-CodexHookFixtureDirectory -Path $evidenceDirectory -Name 'evidence directory' -RequireMissing)
     $backupsRoot = Join-Path $evidenceDirectory 'backups'
-    [void](Assert-CodexHookFixturePath -Path $backupsRoot -Name 'backups root before create')
-    [void][IO.Directory]::CreateDirectory($backupsRoot)
-    [void](Assert-CodexHookFixturePath -Path $backupsRoot -Name 'backups root after create')
+    [void](New-CodexHookFixtureDirectory -Path $backupsRoot -Name 'backups root' -RequireMissing)
 
     $restoreActions = [Collections.Generic.List[object]]::new()
     foreach ($action in @($plan.actions)) {

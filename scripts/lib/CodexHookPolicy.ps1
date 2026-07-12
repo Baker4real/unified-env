@@ -1070,31 +1070,55 @@ function Get-CodexHookManifestMatches {
     )
 }
 
-function Test-CodexHookRawCommandContainsManagedWrapperPath {
+function Get-CodexHookOpaqueCommandTargetPath {
+    param(
+        [Parameter(Mandatory)][string]$Command
+    )
+
+    $index = 0
+    while ($index -lt $Command.Length -and [char]::IsWhiteSpace($Command[$index])) { $index++ }
+    if ($index -ge $Command.Length) { return $null }
+
+    # Managed hook targets do not contain whitespace. Stop at the first whitespace even
+    # when a leading quote is unclosed, and never scan later arguments for managed paths.
+    $target = [Text.StringBuilder]::new()
+    while ($index -lt $Command.Length -and -not [char]::IsWhiteSpace($Command[$index])) {
+        if ($Command[$index] -ne '"') { [void]$target.Append($Command[$index]) }
+        $index++
+    }
+    if ($target.Length -eq 0) { return $null }
+
+    $candidate = $target.ToString().Replace('/', '\')
+    if ($candidate -notmatch '^[dD]:\\') { return $null }
+    try {
+        return [IO.Path]::GetFullPath($candidate)
+    } catch {
+        return $null
+    }
+}
+
+function Test-CodexHookOpaqueCommandTargetsManagedPath {
     param(
         [Parameter(Mandatory)][object]$Manifest,
         [Parameter(Mandatory)][string]$Command
     )
 
-    # This is intentionally a conservative, read-free ambiguity check. If tokenization
-    # failed, an exact managed wrapper path anywhere in the opaque command could still
-    # be the command target. Do not attempt to repair or echo the opaque value.
-    $normalizedCommand = $Command.Replace('/', '\')
-    $opaqueCandidates = @($normalizedCommand, $normalizedCommand.Replace('"', ''))
+    $targetPath = Get-CodexHookOpaqueCommandTargetPath -Command $Command
+    if ($null -eq $targetPath) { return $false }
+
+    $managedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($hook in @($Manifest.hooks)) {
-        if ($null -eq $hook.wrapperPath -or $hook.wrapperPath -isnot [string]) { continue }
-        try {
-            $managedWrapperPath = [IO.Path]::GetFullPath(([string]$hook.wrapperPath).Replace('/', '\'))
-        } catch {
-            continue
-        }
-        foreach ($opaqueCandidate in $opaqueCandidates) {
-            if ($opaqueCandidate.IndexOf($managedWrapperPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                return $true
+        foreach ($propertyName in @('wrapperPath', 'commandPath')) {
+            $managedPath = $hook.$propertyName
+            if ($null -eq $managedPath -or $managedPath -isnot [string]) { continue }
+            try {
+                [void]$managedPaths.Add([IO.Path]::GetFullPath(([string]$managedPath).Replace('/', '\')))
+            } catch {
+                continue
             }
         }
     }
-    return $false
+    return $managedPaths.Contains([string]$targetPath)
 }
 
 function Copy-CodexHookJsonValue {
@@ -1159,7 +1183,7 @@ function Get-CodexHookRegistryEntryAnalysis {
     if (
         -not $parsed.parsed -and
         $command -is [string] -and
-        (Test-CodexHookRawCommandContainsManagedWrapperPath -Manifest $Manifest -Command ([string]$command))
+        (Test-CodexHookOpaqueCommandTargetsManagedPath -Manifest $Manifest -Command ([string]$command))
     ) {
         throw "受管 custom wrapper command 无法安全解析：event=$Event"
     }
@@ -1931,6 +1955,43 @@ function Assert-CodexHookNoReparseAncestor {
     }
 }
 
+function Enter-CodexHookFixtureDirectoryChainGuard {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DirectoryPath,
+        [switch]$CreateMissing
+    )
+
+    $fullPath = Assert-CodexHookFixturePath -Path $DirectoryPath -Name 'fixture directory chain guard'
+    $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+    return [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+        $fixtureRoot,
+        $fullPath,
+        $CreateMissing.IsPresent)
+}
+
+function New-CodexHookFixtureDirectory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Name = 'fixture directory',
+        [switch]$RequireMissing
+    )
+
+    $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Name
+    $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+    $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+        $fixtureRoot,
+        $fullPath,
+        $true,
+        $RequireMissing.IsPresent)
+    try {
+        return $fullPath
+    } finally {
+        $guard.Dispose()
+    }
+}
+
 function Assert-CodexHookMappingIdentity {
     param(
         [Parameter(Mandatory)][string]$Value,
@@ -2422,37 +2483,42 @@ function Set-CodexHookAtomicFileBytes {
     )
 
     $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Scope
-    $before = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope prewrite"
-    Assert-CodexHookSnapshotExpectedState -Snapshot $before -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope $Scope
     if ((Get-CodexHookBytesSha256 -Bytes $Bytes) -cne $AfterSha256) {
         throw "$Scope 待发布 bytes 与 after SHA-256 不一致。"
     }
 
     $parent = Split-Path -Parent $fullPath
-    $parentItem = Get-Item -LiteralPath $parent -Force -ErrorAction Stop
-    if (-not $parentItem.PSIsContainer -or ($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "$Scope target parent 非安全普通目录。"
-    }
-    $tempPath = Join-Path $parent ".codex-hook-$([guid]::NewGuid().ToString('N')).tmp"
+    $directoryGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath $parent
     try {
-        $stream = [IO.FileStream]::new($tempPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-        try {
-            $stream.Write($Bytes, 0, $Bytes.Length)
-            $stream.Flush($true)
-        } finally {
-            $stream.Dispose()
+        $before = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope prewrite"
+        Assert-CodexHookSnapshotExpectedState -Snapshot $before -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope $Scope
+        $parentItem = Get-Item -LiteralPath $parent -Force -ErrorAction Stop
+        if (-not $parentItem.PSIsContainer -or ($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "$Scope target parent 非安全普通目录。"
         }
-        if ($null -ne $BeforeMove) { & $BeforeMove $fullPath }
-        $preMove = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope premove"
-        Assert-CodexHookSnapshotExpectedState -Snapshot $preMove -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope "$Scope premove"
-        [void](Assert-CodexHookFixturePath -Path $parent -Name "$Scope parent premove")
-        [IO.File]::Move($tempPath, $fullPath, $ExpectedExists)
-    } finally {
-        if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
-    }
+        $tempPath = Join-Path $parent ".codex-hook-$([guid]::NewGuid().ToString('N')).tmp"
+        try {
+            $stream = [IO.FileStream]::new($tempPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try {
+                $stream.Write($Bytes, 0, $Bytes.Length)
+                $stream.Flush($true)
+            } finally {
+                $stream.Dispose()
+            }
+            if ($null -ne $BeforeMove) { & $BeforeMove $fullPath }
+            $preMove = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope premove"
+            Assert-CodexHookSnapshotExpectedState -Snapshot $preMove -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope "$Scope premove"
+            [void](Assert-CodexHookFixturePath -Path $parent -Name "$Scope parent premove")
+            [IO.File]::Move($tempPath, $fullPath, $ExpectedExists)
+        } finally {
+            if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
+        }
 
-    $after = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope postwrite"
-    Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $true -ExpectedSha256 $AfterSha256 -Scope "$Scope postcheck"
+        $after = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope postwrite"
+        Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $true -ExpectedSha256 $AfterSha256 -Scope "$Scope postcheck"
+    } finally {
+        $directoryGuard.Dispose()
+    }
 }
 
 function Remove-CodexHookFixtureFile {
@@ -2464,11 +2530,16 @@ function Remove-CodexHookFixtureFile {
     )
 
     $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Scope
-    $current = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope predelete"
-    Assert-CodexHookSnapshotExpectedState -Snapshot $current -ExpectedExists $true -ExpectedSha256 $ExpectedSha256 -Scope $Scope
-    [IO.File]::Delete($fullPath)
-    $after = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope postdelete"
-    Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $false -ExpectedSha256 $null -Scope "$Scope postcheck"
+    $directoryGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath (Split-Path -Parent $fullPath)
+    try {
+        $current = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope predelete"
+        Assert-CodexHookSnapshotExpectedState -Snapshot $current -ExpectedExists $true -ExpectedSha256 $ExpectedSha256 -Scope $Scope
+        [IO.File]::Delete($fullPath)
+        $after = Get-CodexHookFixtureFileSnapshot -Path $fullPath -Name "$Scope postdelete"
+        Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $false -ExpectedSha256 $null -Scope "$Scope postcheck"
+    } finally {
+        $directoryGuard.Dispose()
+    }
 }
 
 function Set-CodexHookEvidenceJson {
