@@ -1,0 +1,60 @@
+# Codex 主机钩子 reconciler 设计
+
+本项目用 `scripts/Invoke-CodexHostHookReconciliation.ps1` 检查并收敛 Codex 主机钩子状态。它是显式调用的冷路径维护工具，不注册 watcher、计划任务或新的启动 hook，也不占用每个任务的生命周期热路径。
+
+## 目标状态
+
+- `hooks.json` 中的用户级自定义 lifecycle hook 注册为空；`features.hooks` 仍保持开启，供真正需要的项目级或 skill 级 hook 使用。
+- Serena 不固定项目，也不根据 MCP 进程 cwd 推断项目。任务需要语义工具时，按当前 `environment_context` 的绝对 workspace root 显式激活。
+- 正式权限默认值保持 `approval_policy = "never"`、`sandbox_mode = "danger-full-access"`，并保持 `features.unified_exec` 开启。
+- Projectless 路径、线程数据库、heartbeat、Store、IFEO、代理和其他 Windows guard 不由本 reconciler 接管。
+
+## 公共接口
+
+只读检查：
+
+从仓库根目录使用 PowerShell 7.6+ 运行：
+
+```powershell
+& .\scripts\Invoke-CodexHostHookReconciliation.ps1 -Mode Check -Json
+```
+
+显式修复：
+
+```powershell
+& .\scripts\Invoke-CodexHostHookReconciliation.ps1 -Mode Repair -Json
+```
+
+结构化结果包含 `schemaVersion`、`mode`、`ok`、`changed`、`driftCount`、`checks` 和 `evidencePath`。`Check` 发现 drift 时仍可能正常退出，因此自动化必须同时判断 `ok` 和 `driftCount`，不能只看进程退出码。
+
+`-CodexHome` 可为只读检查指定 D 盘绝对路径。真实 `Repair` 只允许受管 live home；其他目录必须是带固定 marker 的测试 fixture，不能借此放宽写入范围。
+
+## 状态所有权
+
+reconciler 只维护以下状态：
+
+- `config.toml` 中的 Serena 项目选择参数、正式权限默认值、`hooks` 与 `unified_exec` feature，以及失效的用户级 hook trust state；
+- `hooks.json` 中的用户级 lifecycle hook 注册；
+- 明确 allowlist 内的旧 hook implementation；
+- 稳定 hook surface 与目标 `codex-file-tools.yml` 文件的写权限。
+
+`config.toml` 是 Codex Desktop 可原子替换的 vendor-owned 文件。工具维护其列明字段的语义，但不把该文件或整个 Codex home 的 ACL 当作持久安全边界，也不改写无关 vendor state、Serena sibling context 或其他主机 guard。
+
+## 修复保证
+
+- 所有路径必须位于 D 盘，且受管路径不得穿过 reparse point；受管文件不得是 NTFS hard link。
+- TOML 与 JSON 在写入前严格解析；Serena context 定向验证唯一根级 prompt 及完整激活契约。重复或语义等价的关键 section/key、歧义 prompt、越界 context 会 fail closed。
+- 写入前保存受保护 evidence，随后使用同卷临时文件、原子替换、内容与 ACL 的 CAS 校验完成提交。
+- 并发替换或不安全的部分提交不会用旧 snapshot 覆盖较新 active state；可定位 backup 和 manifest 会被保留，状态按 `unsafe-partial` 报告。
+- 只有固定 allowlist 内的旧实现可以退役；未知路径与文件内容必须保持不变，其 ACL 可随稳定 hook surface 收紧。
+- `Repair` 按 Codex home 获取互斥锁；健康状态再次执行必须返回 `changed = false`。
+
+## 验证
+
+回归测试：
+
+```powershell
+& .\tests\Test-CodexHostHookReconciliation.ps1
+```
+
+live 终态以 `Check` 返回 `ok = true`、`driftCount = 0` 为准。执行过 `Repair` 后必须立即再次 `Check`，并复跑 `Repair` 验证幂等。Serena 的端到端验收还必须使用 fresh 任务证明激活前为中性状态、显式激活后可以解析当前项目符号；旧任务或仅观察进程日志不能替代这项 canary。
