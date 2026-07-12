@@ -153,5 +153,13 @@ Assert-True (-not $summary.complete) "不完整 process scope 必须保持 compl
 Assert-True (-not $summary.cleanupAdviceAllowed) "不完整 process scope 不得允许清理建议"
 Assert-True (@($summary.missingEntries).Count -eq 0) "不完整 process scope 不得生成 missing 建议"
 Assert-True (@($summary.staleLocalEnvironmentEntries).Count -eq 0) "不完整 process scope 不得生成 stale 建议"
+Assert-True ($summary.duplicates -is [array] -and $summary.duplicates.Count -eq 0) "不完整 process scope 的 duplicates 必须保持空数组"
+
+$completeProcessScope = $processScope | ConvertTo-Json -Depth 20 | ConvertFrom-Json -DateKind String
+$completeProcessScope.complete = $true
+$completeProcessScope.errors = @()
+$completeProcessScope.metadataErrors = @()
+$completeSummary = Get-ReadinessPathSummary -ProcessScope $completeProcessScope
+Assert-True ($completeSummary.duplicates -is [array] -and $completeSummary.duplicates.Count -eq 0) "完整 process scope 的空 duplicates 必须保持数组"
 
 [pscustomobject]@{ ok = $true; cases = $cases.Count }

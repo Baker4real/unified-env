@@ -428,7 +428,10 @@ function Get-ReadinessPathSummary {
             }
         }
     )
-    [object[]]$duplicateItems = if ($cleanupAllowed) { @($ProcessScope.duplicates) } else { @() }
+    [object[]]$duplicateItems = @()
+    if ($cleanupAllowed) {
+        $duplicateItems = [object[]]@($ProcessScope.duplicates)
+    }
     [string[]]$summaryErrors = @($ProcessScope.errors)
     [string[]]$recommendations = if ($cleanupAllowed) {
         @(

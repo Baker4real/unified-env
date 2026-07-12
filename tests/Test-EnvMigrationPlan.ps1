@@ -207,7 +207,12 @@ try {
         @{ name = "finding-bad-classification"; mutate = { param($document) $document.localEnvironmentFindings[0].classification = "unknown" } },
         @{ name = "finding-missing-rebuild-evidence"; mutate = { param($document) $document.localEnvironmentFindings[0].PSObject.Properties.Remove("rebuildEvidence") } },
         @{ name = "finding-scalar-rebuild-evidence"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence = "package-lock.json" } },
-        @{ name = "finding-rebuild-marker-mismatch"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.marker = ".venv" } },
+        @{ name = "finding-rebuild-marker-mismatch"; mutate = {
+            param($document)
+            $finding = $document.localEnvironmentFindings[0]
+            $finding.rebuildEvidence.marker = if ($finding.marker -ceq ".venv") { "node_modules" } else { ".venv" }
+            Assert-True -Condition ($finding.rebuildEvidence.marker -cne $finding.marker) -Message "marker mismatch fixture 必须实际改变值"
+        } },
         @{ name = "finding-project-files-not-array"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.projectFiles = "package-lock.json" } },
         @{ name = "finding-project-files-unknown"; mutate = { param($document) $document.localEnvironmentFindings[0].rebuildEvidence.projectFiles = [object[]]@("secrets.txt") } },
         @{ name = "finding-duplicate-canonical-path"; mutate = { param($document) $duplicate = ($document.localEnvironmentFindings[0] | ConvertTo-Json -Depth 10 | ConvertFrom-Json); $document.localEnvironmentFindings = [object[]]@($document.localEnvironmentFindings + $duplicate) } },
