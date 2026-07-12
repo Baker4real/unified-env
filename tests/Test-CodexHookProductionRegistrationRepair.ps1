@@ -95,6 +95,7 @@ foreach ($file in @($fixtureManifest.files)) {
     [void][IO.Directory]::CreateDirectory((Split-Path -Parent $sourcePath))
     [byte[]]$sourceBytes = [Text.UTF8Encoding]::new($false).GetBytes("production-fixture-source:$($file.relativePath)`n")
     [byte[]]$liveBytes = [Text.UTF8Encoding]::new($false).GetBytes("production-fixture-live:$($file.liveRelativePath)`n")
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $livePath)) | Out-Null
     [IO.File]::WriteAllBytes($sourcePath, $sourceBytes)
     [IO.File]::WriteAllBytes($livePath, $liveBytes)
     $file.sha256 = Get-CodexHookBytesSha256 -Bytes $sourceBytes

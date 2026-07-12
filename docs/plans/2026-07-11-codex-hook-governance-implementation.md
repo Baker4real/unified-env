@@ -471,6 +471,10 @@ git commit -m "feat: manage codex hook baseline"
 
 ### Task 4：共享安全配置写入与 Provider/Serena 重构
 
+> 兼容边界：Task 3 的 `codex-hook-production-registration-repair-v1` 永久只读取其原始 12 文件 allowlist，
+> 保持既有 profile、mapping identity 与 restore evidence 可重放；Task 4 新增的共享库及后续完整受管闭包
+> 由 Task 7 的 full deployment profile 发布，不扩张 registration-repair capability。
+
 **风险：** 最高。错误实现会破坏 `config.toml` 或 Serena YAML；任务只改 managed 源，在 Task 7 前不得发布 live。
 
 **文件：**

@@ -1,5 +1,6 @@
 managed/codex-hooks/hooks/*.cmd text eol=crlf
 managed/codex-hooks/hooks/*.ps1 text eol=lf
+managed/codex-hooks/hooks/**/*.ps1 text eol=lf
 managed/codex-hooks/hooks/*.py text eol=lf
 managed/codex-hooks/hooks/*.js text eol=lf
 managed/codex-hooks/*.json text eol=lf

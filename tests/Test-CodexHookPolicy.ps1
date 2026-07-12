@@ -252,7 +252,7 @@ foreach ($invalidTimeout in @(0, 30)) {
 $managedManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
 $managedManifest = Read-CodexHookManifest -Path $managedManifestPath
 Assert-True (@($managedManifest.hooks).Count -eq 8) '受管 manifest 必须声明 8 个当前 hook'
-Assert-True (@($managedManifest.files).Count -eq 12) '受管 manifest 必须声明 12 个真实审计快照文件'
+Assert-True (@($managedManifest.files).Count -eq 14) '受管 manifest 必须声明 12 个真实审计快照文件及 2 个共享库文件'
 Assert-True (@($managedManifest.environment).Count -eq 0) 'Task 1 不得提前声明环境写入'
 
 $normalizedDuplicate = Copy-TestDocument $managedManifest

@@ -369,7 +369,7 @@
     {
       "relativePath": "hooks/codex-provider-stability-guard.ps1",
       "liveRelativePath": "codex-provider-stability-guard.ps1",
-      "sha256": "24e2aa35bb07bf962b7b081a3de7b8f9b48b8b6817ebfadcf052686bc054ccf6",
+      "sha256": "13c34b48dce8fb0bc1f8a00703ee84fa9ce9137ed4a47ded93d2130a621f1205",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability"
@@ -405,9 +405,29 @@
     {
       "relativePath": "hooks/serena-dashboard-guard.ps1",
       "liveRelativePath": "serena-dashboard-guard.ps1",
-      "sha256": "ab6f29732ef350adc4c038451a3fdad3b1fe0a57f0b02fa774c9c280d1f26bb1",
+      "sha256": "53f471d49cb10b044666fed40fcf8bdd42995b6dbfe79ef8600f38ca5afc5684",
       "lifecycle": "active",
       "ownerHookIds": [
+        "serena-dashboard"
+      ]
+    },
+    {
+      "relativePath": "hooks/lib/CodexHookRuntime.ps1",
+      "liveRelativePath": "lib/CodexHookRuntime.ps1",
+      "sha256": "4c612f60facae656e8dbd19c0d7b29f0b5ffb2b68812e6bfc4500361109d028c",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "provider-stability",
+        "serena-dashboard"
+      ]
+    },
+    {
+      "relativePath": "hooks/lib/CodexConfigFile.ps1",
+      "liveRelativePath": "lib/CodexConfigFile.ps1",
+      "sha256": "72ba8e2e4f748160ab8053d140989ca540be70ccd54dc81f50560c958455f688",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "provider-stability",
         "serena-dashboard"
       ]
     }

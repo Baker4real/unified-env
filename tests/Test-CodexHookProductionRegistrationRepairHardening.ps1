@@ -85,6 +85,7 @@ function Initialize-HardeningFixture {
         $sourcePath = Join-Path ([string]$profile.sourceRoot) ([string]$file.relativePath)
         $livePath = Join-Path ([string]$profile.hooksRoot) ([string]$file.liveRelativePath)
         [void][IO.Directory]::CreateDirectory((Split-Path -Parent $sourcePath))
+        [void][IO.Directory]::CreateDirectory((Split-Path -Parent $livePath))
         [byte[]]$sourceBytes = [Text.UTF8Encoding]::new($false).GetBytes("hardening-source:$($file.relativePath)`n")
         [byte[]]$liveBytes = [Text.UTF8Encoding]::new($false).GetBytes("hardening-live:$($file.liveRelativePath)`n")
         [IO.File]::WriteAllBytes($sourcePath, $sourceBytes)

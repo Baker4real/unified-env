@@ -1,5 +1,65 @@
 Set-StrictMode -Version Latest
 
+function Get-CodexHookProductionRegistrationRepairFrozenRelativePaths {
+    [CmdletBinding()]
+    param()
+
+    return [string[]]@(
+        'hooks/codex-github-cli-guard.cmd',
+        'hooks/codex-github-cli-guard.ps1',
+        'hooks/codex-mobile-permission-guard.cmd',
+        'hooks/codex-mobile-permission-guard.py',
+        'hooks/codex-projectless-root-d.cmd',
+        'hooks/codex-projectless-root-d.js',
+        'hooks/codex-provider-stability-guard.cmd',
+        'hooks/codex-provider-stability-guard.ps1',
+        'hooks/serena-activate-guarded.cmd',
+        'hooks/serena-activate-guarded.ps1',
+        'hooks/serena-dashboard-guard.cmd',
+        'hooks/serena-dashboard-guard.ps1'
+    )
+}
+
+function Get-CodexHookProductionRegistrationRepairFrozenLiveRelativePaths {
+    [CmdletBinding()]
+    param()
+
+    return [string[]]@(
+        'codex-github-cli-guard.cmd',
+        'codex-github-cli-guard.ps1',
+        'codex-mobile-permission-guard.cmd',
+        'codex-mobile-permission-guard.py',
+        'codex-projectless-root-d.cmd',
+        'codex-projectless-root-d.js',
+        'codex-provider-stability-guard.cmd',
+        'codex-provider-stability-guard.ps1',
+        'serena-activate-guarded.cmd',
+        'serena-activate-guarded.ps1',
+        'serena-dashboard-guard.cmd',
+        'serena-dashboard-guard.ps1'
+    )
+}
+
+function Select-CodexHookProductionRegistrationRepairFiles {
+    param([Parameter(Mandatory)][object]$Manifest)
+
+    $byRelativePath = @{}
+    foreach ($file in @($Manifest.files)) {
+        $key = ([string]$file.relativePath).Replace('\', '/').ToLowerInvariant()
+        if ($byRelativePath.ContainsKey($key)) { throw 'production manifest 存在重复 relativePath。' }
+        $byRelativePath[$key] = $file
+    }
+    $selected = [Collections.Generic.List[object]]::new()
+    foreach ($relativePath in Get-CodexHookProductionRegistrationRepairFrozenRelativePaths) {
+        $key = $relativePath.ToLowerInvariant()
+        if (-not $byRelativePath.ContainsKey($key)) { throw "production registration-repair 缺少冻结文件：$relativePath" }
+        $file = $byRelativePath[$key]
+        if ($file.lifecycle -cnotin @('active', 'compatibility')) { throw "production registration-repair 冻结文件生命周期非法：$relativePath" }
+        $selected.Add($file)
+    }
+    return [object[]]$selected.ToArray()
+}
+
 function Get-CodexHookProductionRegistrationRepairProfile {
     [CmdletBinding()]
     param()
@@ -160,15 +220,8 @@ function Assert-CodexHookProductionManifestBinding {
     ) {
         throw 'production manifest managedRoot/codexHome 未绑定固定 profile。'
     }
-    $deployableFiles = @($Manifest.files | Where-Object { $_.lifecycle -cin @('active', 'compatibility') })
-    if ($deployableFiles.Count -ne 12 -or @($Manifest.files).Count -ne 12) {
-        throw 'production registration-repair 必须绑定恰好 12 个 active/compatibility 文件。'
-    }
-    foreach ($file in $deployableFiles) {
-        if ($file.lifecycle -cnotin @('active', 'compatibility')) {
-            throw 'production registration-repair 不接受 retired file capability。'
-        }
-    }
+    $frozenFiles = @(Select-CodexHookProductionRegistrationRepairFiles -Manifest $Manifest)
+    if ($frozenFiles.Count -ne 12) { throw 'production registration-repair 冻结闭包必须恰好 12 个文件。' }
 }
 
 function Get-CodexHookProductionManagedOrder {
@@ -358,7 +411,7 @@ function New-CodexHookProductionRegistrationRepairState {
 
     $sourceFacts = [Collections.Generic.List[object]]::new()
     $liveFacts = [Collections.Generic.List[object]]::new()
-    foreach ($file in @($manifest.files)) {
+    foreach ($file in @(Select-CodexHookProductionRegistrationRepairFiles -Manifest $manifest)) {
         $sourcePath = [IO.Path]::GetFullPath((Join-Path ([string]$Profile.sourceRoot) ([string]$file.relativePath)))
         $livePath = [IO.Path]::GetFullPath((Join-Path ([string]$Profile.hooksRoot) ([string]$file.liveRelativePath)))
         $source = Get-CodexHookCapabilityFileSnapshot `
@@ -547,6 +600,7 @@ function Assert-CodexHookProductionRegistrationRepairPlan {
     if (@($Plan.sourceFacts.files).Count -ne 12 -or @($Plan.liveFacts.files).Count -ne 12) {
         throw 'production plan source/live closure 必须恰好 12 个文件。'
     }
+    $expectedFrozenRelative = [string[]](Get-CodexHookProductionRegistrationRepairFrozenRelativePaths)
     $sourceRelative = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($fact in @($Plan.sourceFacts.files)) {
         Assert-CodexHookExactProperties -Value $fact -Names @('relativePath', 'path', 'exists', 'probeState', 'sha256') -Scope 'production source fact'
@@ -562,6 +616,9 @@ function Assert-CodexHookProductionRegistrationRepairPlan {
         }
         [void](Assert-CodexHookCapabilityPath -Path $expectedPath -CapabilityRoot ([string]$Profile.sourceRoot) -AllowedExactPaths @($expectedPath) -Name 'production plan source fact')
     }
+    if (-not (Test-CodexHookExactStringSequence -Actual ([string[]]@($Plan.sourceFacts.files | ForEach-Object { [string]$_.relativePath })) -Expected $expectedFrozenRelative)) {
+        throw 'production source facts 未严格绑定冻结 12 文件 allowlist。'
+    }
     $liveRelative = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($fact in @($Plan.liveFacts.files)) {
         Assert-CodexHookExactProperties -Value $fact -Names @('liveRelativePath', 'path', 'exists', 'probeState', 'sha256') -Scope 'production live fact'
@@ -576,6 +633,10 @@ function Assert-CodexHookProductionRegistrationRepairPlan {
             throw 'production live fact mapping/state 非法。'
         }
         [void](Assert-CodexHookCapabilityPath -Path $expectedPath -CapabilityRoot ([string]$Profile.hooksRoot) -AllowedExactPaths @($expectedPath) -Name 'production plan live fact')
+    }
+    $expectedFrozenLive = [string[]](Get-CodexHookProductionRegistrationRepairFrozenLiveRelativePaths)
+    if (-not (Test-CodexHookExactStringSequence -Actual ([string[]]@($Plan.liveFacts.files | ForEach-Object { [string]$_.liveRelativePath })) -Expected $expectedFrozenLive)) {
+        throw 'production live facts 未严格绑定冻结 12 文件 allowlist。'
     }
     if (@($Plan.environmentActions).Count -ne 0) {
         throw 'production registration-repair 禁止 environment action。'
