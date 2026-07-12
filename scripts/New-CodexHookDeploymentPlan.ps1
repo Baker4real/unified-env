@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Fixture')][ValidateSet('registration-repair', 'full')][string]$Mode,
     [Parameter(ParameterSetName = 'Fixture')][string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan',
     [Parameter(ParameterSetName = 'Fixture')][scriptblock]$EnvironmentReadValue,
-    [Parameter(Mandatory, ParameterSetName = 'ProductionRegistrationRepair')][switch]$ProductionRegistrationRepair
+    [Parameter(Mandatory, ParameterSetName = 'ProductionRegistrationRepair')][switch]$ProductionRegistrationRepair,
+    [Parameter(Mandatory, ParameterSetName = 'ProductionFull')][switch]$ProductionFull
 )
 
 Set-StrictMode -Version Latest
@@ -14,6 +15,7 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'lib\CodexHookPolicy.ps1')
 . (Join-Path $PSScriptRoot 'lib\CodexHookProductionRegistrationRepair.ps1')
+. (Join-Path $PSScriptRoot 'lib\CodexHookProductionFull.ps1')
 . (Join-Path $PSScriptRoot 'lib\ReportArtifactPublisher.ps1')
 
 if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
@@ -57,6 +59,32 @@ if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
                 '本报告不包含 desired registry、raw registry command 或环境变量原值。'
             ) -join "`n"
         }
+    return
+}
+
+if ($PSCmdlet.ParameterSetName -ceq 'ProductionFull') {
+    $profile = Get-CodexHookProductionFullProfile
+    [void](Assert-CodexHookProductionFullProfile -Profile $profile)
+    $readUserEnvironment = { param($Name,$Scope) [Environment]::GetEnvironmentVariable($Name,[EnvironmentVariableTarget]::$Scope) }
+    $state = New-CodexHookProductionFullState -Profile $profile -EnvironmentReadValue $readUserEnvironment
+    Publish-JsonMarkdownArtifactPair -Document $state.plan -OutputDir ([string]$profile.planOutputDir) -JsonFileName 'plan.json' -MarkdownFileName 'PLAN.md' -RenderMarkdown {
+        param($Document,$JsonSha256)
+        @(
+            '# Codex Hook production full 计划','',
+            "- profile：$($Document.sourceFacts.targetProfile)",
+            "- 生成时间（UTC）：$($Document.generatedAtUtc)",
+            "- 可执行：$($Document.applyEligible)",
+            "- file actions：$(@($Document.actions | Where-Object kind -ceq 'file').Count)",
+            "- environment actions：$(@($Document.environmentActions).Count)",
+            "- registry 最后发布：$(@($Document.actions)[-1].kind -ceq 'registry')",
+            "- restartRequired：$($Document.projectionSummary.restartRequired)",'',
+            '- freshness gate：生成后 60 分钟内执行，并在 production mutex 内 fresh rederive',
+            '- 完整性并发边界：最终 verified target handle 排除内容写入并持有到同目录 crash-atomic rename 完成',
+            '- 残余边界：普通用户态 Windows API 不保证阻止不合作外部 delete/replace 恰在最终系统调用前发生；本计划不声称绝对 CAS',
+            '本报告不包含 desired registry、raw registry command 或环境变量原值。',
+            '计划生成不会执行任何 wrapper；wrapper 仅属于部署后的人工 postcheck。'
+        ) -join "`n"
+    }
     return
 }
 

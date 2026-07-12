@@ -806,7 +806,7 @@ Run:
 
 ```powershell
 & 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1'
-& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\New-CodexHookDeploymentPlan.ps1' -Mode full
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\New-CodexHookDeploymentPlan.ps1' -ProductionFull
 ```
 
 - [ ] **Step 3：多子代理对抗性 pre-apply review**
@@ -825,9 +825,7 @@ Run:
 
 ```powershell
 & 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\Invoke-CodexHookDeployment.ps1' `
-  -PlanPath 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan\plan.json' `
-  -Apply -ApprovedScope 'codex-hook-governance-2026-07-11' `
-  -EvidenceRoot 'D:\Codex\.codex\run-evidence\env-governance'
+  -ProductionFull -Apply -ApprovedScope 'codex-hook-governance-2026-07-11'
 ```
 
 Expected: evidence `status=applied`、所有 source/live hashes 与 plan 一致、registry 顺序为 0–4、auto-approve 已取消、retired live 文件仍存在且未注册、User `SERENA_HOME` 已持久化为 D 盘。
@@ -847,7 +845,15 @@ Expected：provider/GitHub/state `ok=true`；TOML/YAML/JSON 均可解析；SQLit
 
 - [ ] **Step 6：失败处理与暂停点**
 
-任一 postcheck 失败立即执行 `Restore-CodexHookDeployment.ps1 -Apply`，再验证旧 hash、registry、User `SERENA_HOME` 和语法。全部通过时保留新状态，但不在当前进程中伪称 SessionStart 已验收；记录必须完整重启 Codex。
+任一 postcheck 失败立即执行固定 production full restore（`EvidenceDirectory` 使用本次 apply 返回的固定 evidence 目录）：
+
+```powershell
+& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\Restore-CodexHookDeployment.ps1' `
+  -ProductionFull -EvidenceDirectory '<本次 apply 返回的 evidenceDirectory>' `
+  -Apply -ApprovedScope 'codex-hook-governance-2026-07-11'
+```
+
+再验证旧 hash、registry、User `SERENA_HOME` 和语法。完整部署 engine 只发布受管文件、User 环境变量和 registry；不会在 plan 或 apply core 中主动运行 wrapper，也不会主动写 config/global-state/SQLite。全部 wrapper postcheck 通过时保留新状态，但不在当前进程中伪称 SessionStart 已验收；记录必须完整重启 Codex。
 
 - [ ] **Step 7：提交 production inventory 与部署摘要**
 

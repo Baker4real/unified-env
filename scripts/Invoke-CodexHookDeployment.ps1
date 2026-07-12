@@ -4,12 +4,14 @@ param(
     [switch]$Apply,
     [Parameter(ParameterSetName = 'Fixture')]
     [Parameter(Mandatory, ParameterSetName = 'ProductionRegistrationRepair')]
+    [Parameter(Mandatory, ParameterSetName = 'ProductionFull')]
     [string]$ApprovedScope,
     [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$EvidenceRoot,
     [Parameter(ParameterSetName = 'Fixture')][scriptblock]$EnvironmentReadValue,
     [Parameter(ParameterSetName = 'Fixture')][scriptblock]$EnvironmentWriteValue,
     [Parameter(ParameterSetName = 'Fixture')][ValidateSet('none', 'before-wrapper', 'registry-postcheck')][string]$FaultInjection = 'none',
-    [Parameter(Mandatory, ParameterSetName = 'ProductionRegistrationRepair')][switch]$ProductionRegistrationRepair
+    [Parameter(Mandatory, ParameterSetName = 'ProductionRegistrationRepair')][switch]$ProductionRegistrationRepair,
+    [Parameter(Mandatory, ParameterSetName = 'ProductionFull')][switch]$ProductionFull
 )
 
 Set-StrictMode -Version Latest
@@ -17,6 +19,7 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'lib\CodexHookPolicy.ps1')
 . (Join-Path $PSScriptRoot 'lib\CodexHookProductionRegistrationRepair.ps1')
+. (Join-Path $PSScriptRoot 'lib\CodexHookProductionFull.ps1')
 
 if (-not $Apply) {
     [pscustomobject][ordered]@{ applied = $false; refusalReason = 'apply-switch-required' }
@@ -30,6 +33,10 @@ if ($ApprovedScope -cne 'codex-hook-governance-2026-07-11') {
 if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
     $profile = Get-CodexHookProductionRegistrationRepairProfile
     return Invoke-CodexHookProductionRegistrationRepairApplyCore -Profile $profile
+}
+
+if ($PSCmdlet.ParameterSetName -ceq 'ProductionFull') {
+    return Invoke-CodexHookProductionFullApply
 }
 
 $planFullPath = Assert-CodexHookDPath -Value $PlanPath -Name 'PlanPath'
