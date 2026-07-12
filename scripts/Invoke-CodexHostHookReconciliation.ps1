@@ -9,6 +9,10 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $script:CurrentEvidencePath = $null
+$script:FixtureConcurrentReplacePath = $null
+$script:FixtureConcurrentReplaceKind = "content"
+$script:FixtureConcurrentReplaceRemaining = 0
+$script:FixtureCasFailureMode = $null
 
 $script:LegacyHookNames = @(
     "codex-mobile-permission-guard.py",
@@ -105,6 +109,9 @@ function Assert-NoReparsePath {
         if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "路径不得穿过 reparse point：$current"
         }
+        if (-not $item.PSIsContainer -and $item.LinkType -eq "HardLink") {
+            throw "文件不得是 hard link：$current"
+        }
     }
 
     if ($RequireLeaf -and -not (Test-Path -LiteralPath $fullPath)) {
@@ -158,6 +165,81 @@ function Assert-RepairHomeAuthorized {
     }
 }
 
+function Initialize-FixtureTestSeams {
+    param([string]$ResolvedCodexHome)
+
+    $requestedPath = $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE
+    if ([string]::IsNullOrWhiteSpace($requestedPath)) {
+        return
+    }
+
+    $liveHome = [System.IO.Path]::GetFullPath("D:\Codex\.codex").TrimEnd("\", "/")
+    if ($ResolvedCodexHome.Equals($liveHome, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "fixture-only test seam 不得用于 live CodexHome"
+    }
+
+    $fullPath = Assert-NoReparsePath -Path $requestedPath -RequireLeaf
+    if (-not $fullPath.StartsWith("$ResolvedCodexHome\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "fixture-only test seam 必须位于当前 CodexHome 内"
+    }
+    $script:FixtureConcurrentReplacePath = $fullPath
+    $replaceKind = $env:CODEX_HOST_HOOK_TEST_CONCURRENT_KIND
+    if (-not [string]::IsNullOrWhiteSpace($replaceKind)) {
+        if ($replaceKind -notin @("content", "acl")) {
+            throw "fixture-only concurrent replacement kind 无效"
+        }
+        $script:FixtureConcurrentReplaceKind = $replaceKind
+    }
+    $occurrenceText = $env:CODEX_HOST_HOOK_TEST_CONCURRENT_OCCURRENCE
+    $occurrence = 1
+    if (
+        -not [string]::IsNullOrWhiteSpace($occurrenceText) -and
+        (-not [int]::TryParse($occurrenceText, [ref]$occurrence) -or $occurrence -lt 1 -or $occurrence -gt 10)
+    ) {
+        throw "fixture-only concurrent replacement occurrence 无效"
+    }
+    $script:FixtureConcurrentReplaceRemaining = $occurrence
+    $failureMode = $env:CODEX_HOST_HOOK_TEST_CAS_FAILURE_MODE
+    if (-not [string]::IsNullOrWhiteSpace($failureMode)) {
+        if ($failureMode -notin @("replace", "hash")) {
+            throw "fixture-only CAS failure mode 无效"
+        }
+        $script:FixtureCasFailureMode = $failureMode
+    }
+}
+
+function Get-ExceptionDataValue {
+    param(
+        [System.Exception]$Exception,
+        [string]$Key
+    )
+
+    $cursor = $Exception
+    while ($null -ne $cursor) {
+        if ($cursor.Data.Contains($Key)) {
+            return $cursor.Data[$Key]
+        }
+        $cursor = $cursor.InnerException
+    }
+    $null
+}
+
+function Get-ConcurrentReplaceRecord {
+    param([System.Exception]$Exception)
+
+    $path = [string](Get-ExceptionDataValue -Exception $Exception -Key "CodexConcurrentReplacePath")
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        return $null
+    }
+
+    $backupPath = [string](Get-ExceptionDataValue -Exception $Exception -Key "CodexConcurrentBackupPath")
+    [pscustomobject]@{
+        path = $path
+        backupRestored = [bool](Get-ExceptionDataValue -Exception $Exception -Key "CodexConcurrentBackupRestored")
+        backupPath = if ([string]::IsNullOrWhiteSpace($backupPath)) { $null } else { $backupPath }
+    }
+}
+
 function Read-Text {
     param([string]$Path)
 
@@ -167,17 +249,87 @@ function Read-Text {
 function Write-AtomicText {
     param(
         [string]$Path,
-        [string]$Content
+        [string]$Content,
+        [string]$ExpectedCurrentSha256,
+        [string]$ExpectedCurrentSddl
     )
 
     $directory = [System.IO.Path]::GetDirectoryName($Path)
     $fileName = [System.IO.Path]::GetFileName($Path)
     $tempPath = Join-Path $directory (".$fileName.tmp." + [guid]::NewGuid().ToString("N"))
     $replaceBackupPath = Join-Path $directory (".$fileName.replace-backup." + [guid]::NewGuid().ToString("N"))
+    $preserveBackup = $false
     try {
         [System.IO.File]::WriteAllText($tempPath, $Content, [System.Text.UTF8Encoding]::new($false))
         if (Test-Path -LiteralPath $Path -PathType Leaf) {
-            [System.IO.File]::Replace($tempPath, $Path, $replaceBackupPath, $true)
+            if (
+                $null -ne $script:FixtureConcurrentReplacePath -and
+                $Path.Equals($script:FixtureConcurrentReplacePath, [System.StringComparison]::OrdinalIgnoreCase)
+            ) {
+                $script:FixtureConcurrentReplaceRemaining--
+                if ($script:FixtureConcurrentReplaceRemaining -le 0) {
+                    if ($script:FixtureConcurrentReplaceKind -eq "acl") {
+                        Set-ProtectedAcl -Path $Path
+                    } else {
+                        [System.IO.File]::WriteAllText(
+                            $Path,
+                            "# fixture concurrent replacement`n",
+                            [System.Text.UTF8Encoding]::new($false)
+                        )
+                    }
+                    $script:FixtureConcurrentReplacePath = $null
+                }
+            }
+            $preserveBackup = $true
+            try {
+                [System.IO.File]::Replace($tempPath, $Path, $replaceBackupPath, $false)
+                if (
+                    $script:FixtureCasFailureMode -eq "replace" -and
+                    $null -eq $script:FixtureConcurrentReplacePath
+                ) {
+                    $script:FixtureCasFailureMode = $null
+                    throw "fixture File.Replace partial failure"
+                }
+            } catch {
+                if (Test-Path -LiteralPath $replaceBackupPath -PathType Leaf) {
+                    $exception = [System.InvalidOperationException]::new("File.Replace 失败且已产生 backup", $_.Exception)
+                    $exception.Data["CodexConcurrentReplacePath"] = $Path
+                    $exception.Data["CodexConcurrentBackupPath"] = $replaceBackupPath
+                    throw $exception
+                }
+                $preserveBackup = $false
+                throw
+            }
+            if (-not [string]::IsNullOrWhiteSpace($ExpectedCurrentSha256)) {
+                $backupHash = $null
+                $backupSddl = $null
+                $validationError = $null
+                try {
+                    if (
+                        $script:FixtureCasFailureMode -eq "hash" -and
+                        $null -eq $script:FixtureConcurrentReplacePath
+                    ) {
+                        $script:FixtureCasFailureMode = $null
+                        throw "fixture CAS backup hash failure"
+                    }
+                    $backupHash = Get-Sha256 -Path $replaceBackupPath
+                    $backupSddl = (Get-Acl -LiteralPath $replaceBackupPath).Sddl
+                } catch {
+                    $validationError = "无法验证原子替换 backup：$($_.Exception.Message)"
+                }
+                $metadataMismatch = (
+                    -not [string]::IsNullOrWhiteSpace($ExpectedCurrentSddl) -and
+                    $backupSddl -cne $ExpectedCurrentSddl
+                )
+                if ($null -ne $validationError -or $backupHash -ne $ExpectedCurrentSha256 -or $metadataMismatch) {
+                    $message = if ($null -ne $validationError) { $validationError } else { "目标文件在原子替换提交窗口发生内容或 ACL 并发变化" }
+                    $exception = [System.InvalidOperationException]::new($message)
+                    $exception.Data["CodexConcurrentReplacePath"] = $Path
+                    $exception.Data["CodexConcurrentBackupPath"] = $replaceBackupPath
+                    throw $exception
+                }
+            }
+            $preserveBackup = $false
         } else {
             [System.IO.File]::Move($tempPath, $Path)
         }
@@ -185,7 +337,7 @@ function Write-AtomicText {
         if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
             Remove-Item -LiteralPath $tempPath -Force
         }
-        if (Test-Path -LiteralPath $replaceBackupPath -PathType Leaf) {
+        if (-not $preserveBackup -and (Test-Path -LiteralPath $replaceBackupPath -PathType Leaf)) {
             Remove-Item -LiteralPath $replaceBackupPath -Force
         }
     }
@@ -782,15 +934,15 @@ function Get-ReconciliationState {
     })
     $hookTree = @(Get-Item -LiteralPath $hookDirectory -Force) + @(Get-ChildItem -LiteralPath $hookDirectory -Recurse -Force)
     foreach ($item in $hookTree) {
-        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "hooks tree 不得包含 reparse point：$($item.FullName)"
-        }
+        Assert-NoReparsePath -Path $item.FullName -RequireLeaf | Out-Null
     }
     $preservedHookTree = @(Get-PreservedHookTreeInventory -HookDirectory $hookDirectory -HookTree $hookTree)
+    # config.toml is a vendor-owned volatile artifact: Codex Desktop may replace
+    # the file atomically, so its leaf ACL is not a durable policy boundary.
+    # Keep its contents under semantic reconciliation, and reserve ACL health
+    # for the stable hook and Serena surfaces owned by this reconciler.
     $aclStates = @(
-        Test-ProtectedAcl -Path $configPath
         Test-ProtectedAcl -Path $hooksPath
-        Test-ProtectedAcl -Path $serenaContextDirectory
         Test-ProtectedAcl -Path $serenaContextPath
         $hookTree | ForEach-Object { Test-ProtectedAcl -Path $_.FullName }
     )
@@ -903,7 +1055,7 @@ function New-EvidenceSnapshot {
     }
 
     $aclBefore = [ordered]@{}
-    foreach ($path in @($State.configPath, $State.hooksPath, $State.serenaContextDirectory, $State.serenaContextPath) + @($State.hookTreePaths)) {
+    foreach ($path in @($State.configPath, $State.hooksPath, $State.serenaContextPath) + @($State.hookTreePaths)) {
         $aclBefore[$path] = (Get-Acl -LiteralPath $path).Sddl
     }
     $aclBeforePath = Join-Path $evidencePath "acl-before.json"
@@ -931,6 +1083,8 @@ function New-EvidenceSnapshot {
         committedResources = @()
         retiredResources = @()
         aclTargets = @()
+        concurrentReplace = $null
+        rollbackConcurrentReplaces = @()
         error = $null
     }
     $manifestPath = Join-Path $evidencePath "manifest.json"
@@ -953,12 +1107,12 @@ function Invoke-Repair {
         return New-Result -ResultMode "Repair" -State $InitialState -Changed $false -EvidencePath $null
     }
 
+    $originalConfigAcl = Get-Acl -LiteralPath $InitialState.configPath
+    $originalHooksAcl = Get-Acl -LiteralPath $InitialState.hooksPath
     $snapshot = New-EvidenceSnapshot -ResolvedCodexHome $ResolvedCodexHome -State $InitialState
     $manifest = $snapshot.manifest
     $committed = [System.Collections.Generic.List[string]]::new()
     $attempted = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $originalConfigAcl = Get-Acl -LiteralPath $InitialState.configPath
-    $originalHooksAcl = Get-Acl -LiteralPath $InitialState.hooksPath
 
     try {
         $manifest.status = "applying"
@@ -970,11 +1124,18 @@ function Invoke-Repair {
             $attempted.Add("config.toml") | Out-Null
             $manifest.attemptedResources = @($attempted)
             Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
-            Write-AtomicText -Path $InitialState.configPath -Content $InitialState.desiredConfig.content
+            Write-AtomicText `
+                -Path $InitialState.configPath `
+                -Content $InitialState.desiredConfig.content `
+                -ExpectedCurrentSha256 $manifest.originalHashes["config.toml"] `
+                -ExpectedCurrentSddl $originalConfigAcl.Sddl
             $validatedConfig = Get-DesiredConfig -Content (Read-Text -Path $InitialState.configPath) -ExpectedSerenaContextPath $InitialState.serenaContextPath
             if ($validatedConfig.changed) {
                 throw "config.toml 原子替换后未通过自验证"
             }
+            # The reconciler owns selected config semantics, not the vendor
+            # file's long-term ACL policy. Preserve the metadata observed at
+            # transaction start instead of silently widening or hardening it.
             $committed.Add("config.toml")
             $manifest.committedResources = $committed.ToArray()
             Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
@@ -987,7 +1148,11 @@ function Invoke-Repair {
             $attempted.Add("hooks.json") | Out-Null
             $manifest.attemptedResources = @($attempted)
             Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
-            Write-AtomicText -Path $InitialState.hooksPath -Content $InitialState.desiredHooks.content
+            Write-AtomicText `
+                -Path $InitialState.hooksPath `
+                -Content $InitialState.desiredHooks.content `
+                -ExpectedCurrentSha256 $manifest.originalHashes["hooks.json"] `
+                -ExpectedCurrentSddl $originalHooksAcl.Sddl
             $validatedHooks = Get-DesiredHooksJson -Content (Read-Text -Path $InitialState.hooksPath)
             if ($validatedHooks.changed) {
                 throw "hooks.json 原子替换后未通过自验证"
@@ -999,31 +1164,52 @@ function Invoke-Repair {
     } catch {
         $failure = $_
         $rollbackErrors = [System.Collections.Generic.List[string]]::new()
-        if ($attempted.Contains("config.toml")) {
+        $concurrentReplace = Get-ConcurrentReplaceRecord -Exception $failure.Exception
+        $concurrentReplacePath = if ($null -eq $concurrentReplace) { "" } else { $concurrentReplace.path }
+        $manifest.concurrentReplace = $concurrentReplace
+        if ($attempted.Contains("config.toml") -and -not $concurrentReplacePath.Equals($InitialState.configPath, [System.StringComparison]::OrdinalIgnoreCase)) {
             try {
                 $currentConfig = Read-Text -Path $InitialState.configPath
                 if ($currentConfig.Equals($InitialState.desiredConfig.content, [System.StringComparison]::Ordinal)) {
-                    Write-AtomicText -Path $InitialState.configPath -Content $InitialState.configContent
-                    Set-Acl -LiteralPath $InitialState.configPath -AclObject $originalConfigAcl
+                    Write-AtomicText `
+                        -Path $InitialState.configPath `
+                        -Content $InitialState.configContent `
+                        -ExpectedCurrentSha256 $manifest.intendedResources["config.toml"] `
+                        -ExpectedCurrentSddl $originalConfigAcl.Sddl
                 } elseif (-not $currentConfig.Equals($InitialState.configContent, [System.StringComparison]::Ordinal)) {
                     throw "检测到非本次 Repair 写入的并发内容，拒绝覆盖"
                 }
             } catch {
+                $rollbackConcurrent = Get-ConcurrentReplaceRecord -Exception $_.Exception
+                if ($null -ne $rollbackConcurrent) {
+                    $manifest.rollbackConcurrentReplaces = @($manifest.rollbackConcurrentReplaces) + @($rollbackConcurrent)
+                }
                 $rollbackErrors.Add("config.toml: $($_.Exception.Message)")
             }
+        } elseif ($attempted.Contains("config.toml")) {
+            $rollbackErrors.Add("config.toml: 并发版本已保留，拒绝用旧快照覆盖")
         }
-        if ($attempted.Contains("hooks.json")) {
+        if ($attempted.Contains("hooks.json") -and -not $concurrentReplacePath.Equals($InitialState.hooksPath, [System.StringComparison]::OrdinalIgnoreCase)) {
             try {
                 $currentHooks = Read-Text -Path $InitialState.hooksPath
                 if ($currentHooks.Equals($InitialState.desiredHooks.content, [System.StringComparison]::Ordinal)) {
-                    Write-AtomicText -Path $InitialState.hooksPath -Content $InitialState.hooksContent
-                    Set-Acl -LiteralPath $InitialState.hooksPath -AclObject $originalHooksAcl
+                    Write-AtomicText `
+                        -Path $InitialState.hooksPath `
+                        -Content $InitialState.hooksContent `
+                        -ExpectedCurrentSha256 $manifest.intendedResources["hooks.json"] `
+                        -ExpectedCurrentSddl $originalHooksAcl.Sddl
                 } elseif (-not $currentHooks.Equals($InitialState.hooksContent, [System.StringComparison]::Ordinal)) {
                     throw "检测到非本次 Repair 写入的并发内容，拒绝覆盖"
                 }
             } catch {
+                $rollbackConcurrent = Get-ConcurrentReplaceRecord -Exception $_.Exception
+                if ($null -ne $rollbackConcurrent) {
+                    $manifest.rollbackConcurrentReplaces = @($manifest.rollbackConcurrentReplaces) + @($rollbackConcurrent)
+                }
                 $rollbackErrors.Add("hooks.json: $($_.Exception.Message)")
             }
+        } elseif ($attempted.Contains("hooks.json")) {
+            $rollbackErrors.Add("hooks.json: 并发版本已保留，拒绝用旧快照覆盖")
         }
 
         $manifest.status = if ($rollbackErrors.Count -eq 0) { "rolled-back" } else { "unsafe-partial" }
@@ -1046,9 +1232,7 @@ function Invoke-Repair {
         }
 
         $aclTargets = @(
-            $InitialState.configPath,
             $InitialState.hooksPath,
-            $InitialState.serenaContextDirectory,
             $InitialState.serenaContextPath,
             $InitialState.hookDirectory
         ) + @(
@@ -1121,6 +1305,7 @@ try {
         $result = New-Result -ResultMode "Check" -State $state -Changed $false -EvidencePath $null
     } else {
         Assert-RepairHomeAuthorized -ResolvedCodexHome $resolvedHome
+        Initialize-FixtureTestSeams -ResolvedCodexHome $resolvedHome
         $mutex = [System.Threading.Mutex]::new($false, (Get-RepairMutexName -ResolvedCodexHome $resolvedHome))
         $lockTaken = $false
         try {

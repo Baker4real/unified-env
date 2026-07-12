@@ -120,6 +120,24 @@ function Assert-OnlyAllowedWriters {
     }
 }
 
+function Set-TestProtectedFileAcl {
+    param([string]$Path)
+
+    $security = [System.Security.AccessControl.FileSecurity]::new()
+    $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $security.SetOwner($currentSid)
+    $security.SetAccessRuleProtection($true, $false)
+    foreach ($sidValue in @($currentSid.Value, "S-1-5-18", "S-1-5-32-544")) {
+        $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new($sidValue),
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        )
+        $security.AddAccessRule($rule) | Out-Null
+    }
+    Set-Acl -LiteralPath $Path -AclObject $security
+}
+
 function Get-CheckResult {
     param(
         [object]$Result,
@@ -339,6 +357,24 @@ try {
 
     $healthyHome = Join-Path $testRoot "drift\.codex"
     New-FixtureCodexHome -Root $healthyHome
+    $serenaContextDirectory = Join-Path ([System.IO.Directory]::GetParent($healthyHome).FullName) ".serena\contexts"
+    $serenaSiblingPath = Join-Path $serenaContextDirectory "other-context.yml"
+    Set-Content -LiteralPath $serenaSiblingPath -Value "prompt: sibling-context-must-survive" -Encoding UTF8
+    $serenaContextDirectoryAclBefore = (Get-Acl -LiteralPath $serenaContextDirectory).Sddl
+    $serenaSiblingAclBefore = (Get-Acl -LiteralPath $serenaSiblingPath).Sddl
+    $serenaSiblingHashBefore = Get-Sha256 -Path $serenaSiblingPath
+    $configPath = Join-Path $healthyHome "config.toml"
+    Set-TestProtectedFileAcl -Path $configPath
+    $originalConfigAclSddl = (Get-Acl -LiteralPath $configPath).Sddl
+    $unmanagedDirectory = Join-Path $healthyHome "unmanaged"
+    $unmanagedDeepDirectory = Join-Path $unmanagedDirectory "deep"
+    $unmanagedSentinel = Join-Path $unmanagedDeepDirectory "sentinel.txt"
+    New-Item -ItemType Directory -Force -Path $unmanagedDeepDirectory | Out-Null
+    Set-Content -LiteralPath $unmanagedSentinel -Value "unmanaged-sentinel" -Encoding UTF8
+    $unmanagedAclBefore = [ordered]@{}
+    foreach ($path in @($healthyHome, $unmanagedDirectory, $unmanagedDeepDirectory, $unmanagedSentinel)) {
+        $unmanagedAclBefore[$path] = (Get-Acl -LiteralPath $path).Sddl
+    }
 
     $beforeCheck = Get-TreeFingerprint -CodexHome $healthyHome
     $check = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
@@ -368,6 +404,7 @@ try {
     Assert-True -Condition ([bool]$repair.ok) -Message "Repair 未形成健康终态"
     Assert-True -Condition ([bool]$repair.changed) -Message "首次 Repair 应报告 changed=true"
     Assert-True -Condition (Test-Path -LiteralPath $repair.evidencePath -PathType Container) -Message "Repair 未生成 evidence 目录"
+    Assert-True -Condition ((Get-Acl -LiteralPath $configPath).Sddl -ceq $originalConfigAclSddl) -Message "语义 Repair 未保持 config.toml 修复前 ACL"
 
     $hooks = Get-Content -LiteralPath (Join-Path $healthyHome "hooks.json") -Raw | ConvertFrom-Json -AsHashtable
     $hooksRaw = Get-Content -LiteralPath (Join-Path $healthyHome "hooks.json") -Raw
@@ -409,6 +446,16 @@ try {
     $unknownNestedEvidence = @($manifest.preservedHookTree | Where-Object { $_.path -eq 'unknown-nested\keep.bin' })
     Assert-True -Condition ($unknownFileEvidence.Count -eq 1 -and $unknownFileEvidence[0].sha256 -eq $unknownFileHash) -Message "manifest 未记录未知 hook 文件及哈希"
     Assert-True -Condition ($unknownNestedEvidence.Count -eq 1 -and $unknownNestedEvidence[0].sha256 -eq $unknownNestedHash) -Message "manifest 未记录未知嵌套 hook 文件及哈希"
+    foreach ($path in @($healthyHome, $configPath)) {
+        Assert-True -Condition (@($manifest.aclTargets) -notcontains $path) -Message "manifest.aclTargets 不应包含非托管 ACL：$path"
+    }
+    foreach ($path in @(
+        (Join-Path $healthyHome "hooks.json"),
+        (Join-Path $healthyHome "hooks"),
+        (Join-Path ([System.IO.Directory]::GetParent($healthyHome).FullName) ".serena\contexts\codex-file-tools.yml")
+    )) {
+        Assert-True -Condition (@($manifest.aclTargets) -contains $path) -Message "manifest.aclTargets 漏记托管 ACL：$path"
+    }
     $aclBefore = Get-Content -LiteralPath (Join-Path $repair.evidencePath "acl-before.json") -Raw | ConvertFrom-Json -AsHashtable
     foreach ($path in @(
         (Join-Path $healthyHome "config.toml"),
@@ -421,17 +468,39 @@ try {
     )) {
         Assert-True -Condition $aclBefore.Contains($path) -Message "acl-before 未覆盖完整 hooks tree：$path"
     }
+    foreach ($path in @($healthyHome, $unmanagedDirectory, $unmanagedDeepDirectory, $unmanagedSentinel)) {
+        Assert-True -Condition (-not $aclBefore.Contains($path)) -Message "acl-before 不应把非托管 CodexHome 路径纳入 ACL 边界：$path"
+        Assert-True -Condition ((Get-Acl -LiteralPath $path).Sddl -ceq $unmanagedAclBefore[$path]) -Message "Repair 改写了非托管 CodexHome ACL：$path"
+    }
+    foreach ($path in @($serenaContextDirectory, $serenaSiblingPath)) {
+        Assert-True -Condition (-not $aclBefore.Contains($path)) -Message "acl-before 不应纳入未托管 Serena context 路径：$path"
+        Assert-True -Condition (@($manifest.aclTargets) -notcontains $path) -Message "manifest.aclTargets 不应纳入未托管 Serena context 路径：$path"
+    }
+    Assert-True -Condition ((Get-Acl -LiteralPath $serenaContextDirectory).Sddl -ceq $serenaContextDirectoryAclBefore) -Message "Repair 改写了 Serena contexts 目录 ACL"
+    Assert-True -Condition ((Get-Acl -LiteralPath $serenaSiblingPath).Sddl -ceq $serenaSiblingAclBefore) -Message "Repair 改写了 sibling Serena context ACL"
+    Assert-True -Condition ((Get-Sha256 -Path $serenaSiblingPath) -eq $serenaSiblingHashBefore) -Message "Repair 改写了 sibling Serena context 内容"
     foreach ($item in @(Get-Item -LiteralPath $repair.evidencePath -Force) + @(Get-ChildItem -LiteralPath $repair.evidencePath -Recurse -Force)) {
         Assert-OnlyAllowedWriters -Path $item.FullName
     }
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $healthyHome "hooks\keep-me.txt")) -eq $unknownFileHash) -Message "未知 hook 文件被删除或改写"
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $healthyHome "hooks\unknown-nested\keep.bin")) -eq $unknownNestedHash) -Message "未知嵌套 hook 文件被删除或改写"
 
-    foreach ($path in @((Join-Path $healthyHome "config.toml"), (Join-Path $healthyHome "hooks.json"), (Join-Path $healthyHome "hooks"))) {
+    foreach ($path in @((Join-Path $healthyHome "hooks.json"), (Join-Path $healthyHome "hooks"))) {
         Assert-OnlyAllowedWriters -Path $path
     }
     Assert-OnlyAllowedWriters -Path (Join-Path ([System.IO.Directory]::GetParent($healthyHome).FullName) ".serena\contexts\codex-file-tools.yml")
 
+    $replacementPath = Join-Path $healthyHome ".config.toml.desktop-replacement"
+    try {
+        [System.IO.File]::WriteAllText($replacementPath, [System.IO.File]::ReadAllText($configPath), [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::Move($replacementPath, $configPath, $true)
+    } finally {
+        if (Test-Path -LiteralPath $replacementPath -PathType Leaf) {
+            Remove-Item -LiteralPath $replacementPath -Force
+        }
+    }
+    Assert-True -Condition ((Get-Acl -LiteralPath $configPath).Sddl -cne $originalConfigAclSddl) -Message "vendor 原子替换 canary 未实际改变 config.toml ACL"
+    Assert-True -Condition (-not (Get-Acl -LiteralPath $configPath).AreAccessRulesProtected) -Message "vendor 原子替换 canary 未恢复父目录继承 ACL"
     $healthyCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
     Assert-True -Condition ([bool]$healthyCheck.ok -and [int]$healthyCheck.driftCount -eq 0) -Message "Repair 后的直接 Check 不健康"
     foreach ($name in @("config", "registrations", "legacyImplementations", "acl")) {
@@ -447,9 +516,147 @@ try {
     Assert-True -Condition ((Get-TreeFingerprint -CodexHome $healthyHome) -eq $stableFingerprint) -Message "第二次 Repair 改变了核心文件"
     Assert-True -Condition (@(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count -eq $evidenceCount) -Message "幂等 Repair 创建了无意义 evidence"
 
+    $vendorAclSddl = (Get-Acl -LiteralPath $configPath).Sddl
+    $vendorDriftedConfig = [System.IO.File]::ReadAllText($configPath).Replace('approval_policy = "never"', 'approval_policy = "on-request"')
+    [System.IO.File]::WriteAllText($configPath, $vendorDriftedConfig, [System.Text.UTF8Encoding]::new($false))
+    $vendorDriftCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
+    Assert-True -Condition (-not [bool](Get-CheckResult -Result $vendorDriftCheck -Name "config").ok) -Message "vendor 语义漂移未让 config 检查变红"
+    foreach ($name in @("registrations", "legacyImplementations", "acl")) {
+        Assert-True -Condition ([bool](Get-CheckResult -Result $vendorDriftCheck -Name $name).ok) -Message "vendor 语义漂移误伤无关检查项：$name"
+    }
+    $vendorRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
+    Assert-True -Condition ([bool]$vendorRepair.ok -and [bool]$vendorRepair.changed) -Message "vendor 语义漂移未被 Repair 修复"
+    Assert-True -Condition ((Get-Acl -LiteralPath $configPath).Sddl -ceq $vendorAclSddl) -Message "vendor 语义 Repair 改变了 config.toml 既有 ACL"
+
+    $hooksPath = Join-Path $healthyHome "hooks.json"
+    $weakenedHooksAcl = [System.Security.AccessControl.FileSecurity]::new()
+    $weakenedHooksAcl.SetSecurityDescriptorBinaryForm(
+        (Get-Acl -LiteralPath $hooksPath).GetSecurityDescriptorBinaryForm(),
+        [System.Security.AccessControl.AccessControlSections]::Access
+    )
+    $weakenedHooksAcl.SetAccessRuleProtection($false, $true)
+    [System.IO.FileSystemAclExtensions]::SetAccessControl(
+        [System.IO.FileInfo]::new($hooksPath),
+        $weakenedHooksAcl
+    )
+    $hooksAclDriftCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
+    Assert-True -Condition (-not [bool](Get-CheckResult -Result $hooksAclDriftCheck -Name "acl").ok) -Message "hooks.json ACL 放宽后 acl 检查未变红"
+    $hooksAclRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
+    Assert-True -Condition ([bool]$hooksAclRepair.ok -and [bool]$hooksAclRepair.changed) -Message "hooks.json ACL drift 未被 Repair 修复"
+    Assert-OnlyAllowedWriters -Path $hooksPath
+
+    $inheritedAclHome = Join-Path $testRoot "inherited-config-acl\.codex"
+    New-FixtureCodexHome -Root $inheritedAclHome
+    $inheritedConfigPath = Join-Path $inheritedAclHome "config.toml"
+    $inheritedConfigAclBefore = (Get-Acl -LiteralPath $inheritedConfigPath).Sddl
+    Assert-True -Condition (-not (Get-Acl -LiteralPath $inheritedConfigPath).AreAccessRulesProtected) -Message "继承型 config ACL canary 前置条件不成立"
+    $inheritedAclRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $inheritedAclHome
+    Assert-True -Condition ([bool]$inheritedAclRepair.ok -and [bool]$inheritedAclRepair.changed) -Message "继承型 config ACL fixture 未成功 Repair"
+    Assert-True -Condition ((Get-Acl -LiteralPath $inheritedConfigPath).Sddl -ceq $inheritedConfigAclBefore) -Message "Repair 改写了普通继承型 config ACL control flags"
+
+    $concurrentHome = Join-Path $testRoot "concurrent-config\.codex"
+    New-FixtureCodexHome -Root $concurrentHome
+    $concurrentConfigPath = Join-Path $concurrentHome "config.toml"
+    $concurrentConfigAclBefore = (Get-Acl -LiteralPath $concurrentConfigPath).Sddl
+    $concurrentThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE = $concurrentConfigPath
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $concurrentHome | Out-Null
+    } catch {
+        $concurrentThrew = $true
+    } finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition $concurrentThrew -Message "config 提交窗口并发写入未让 Repair 失败"
+    $concurrentEvidence = @(Get-ChildItem -LiteralPath (Join-Path $concurrentHome "run-evidence\host-hook-remediation") -Directory -Force)
+    Assert-True -Condition ($concurrentEvidence.Count -eq 1) -Message "config 并发 canary 必须生成一份 evidence"
+    $concurrentManifest = Get-Content -LiteralPath (Join-Path $concurrentEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($concurrentManifest.status -eq "unsafe-partial") -Message "config 并发 manifest 未标记 unsafe-partial"
+    Assert-True -Condition (-not [bool]$concurrentManifest.concurrentReplace.backupRestored) -Message "config 并发 backup 不应覆盖 active path"
+    Assert-True -Condition (Test-Path -LiteralPath $concurrentManifest.concurrentReplace.backupPath -PathType Leaf) -Message "config 并发 canary 未保留 backup"
+    Assert-True -Condition ([System.IO.File]::ReadAllText($concurrentManifest.concurrentReplace.backupPath) -ceq "# fixture concurrent replacement`n") -Message "config 并发 backup 未保留提交窗口版本"
+    Assert-True -Condition ((Get-Acl -LiteralPath $concurrentManifest.concurrentReplace.backupPath).Sddl -ceq $concurrentConfigAclBefore) -Message "config 并发 backup 未保留提交窗口 ACL"
+
+    foreach ($failureMode in @("replace", "hash")) {
+        $casFailureHome = Join-Path $testRoot "cas-$failureMode\.codex"
+        New-FixtureCodexHome -Root $casFailureHome
+        $casFailureConfigPath = Join-Path $casFailureHome "config.toml"
+        $casFailureThrew = $false
+        try {
+            $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE = $casFailureConfigPath
+            $env:CODEX_HOST_HOOK_TEST_CAS_FAILURE_MODE = $failureMode
+            Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $casFailureHome | Out-Null
+        } catch {
+            $casFailureThrew = $true
+        } finally {
+            Remove-Item Env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE -ErrorAction SilentlyContinue
+            Remove-Item Env:CODEX_HOST_HOOK_TEST_CAS_FAILURE_MODE -ErrorAction SilentlyContinue
+        }
+        Assert-True -Condition $casFailureThrew -Message "CAS $failureMode failure seam 未让 Repair 失败"
+        $casFailureEvidence = @(Get-ChildItem -LiteralPath (Join-Path $casFailureHome "run-evidence\host-hook-remediation") -Directory -Force)
+        $casFailureManifest = Get-Content -LiteralPath (Join-Path $casFailureEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
+        Assert-True -Condition ($casFailureManifest.status -eq "unsafe-partial") -Message "CAS $failureMode failure manifest 未标记 unsafe-partial"
+        Assert-True -Condition (-not [string]::IsNullOrWhiteSpace([string]$casFailureManifest.concurrentReplace.backupPath)) -Message "CAS $failureMode failure 未记录保留的 backup path"
+        Assert-True -Condition (Test-Path -LiteralPath $casFailureManifest.concurrentReplace.backupPath -PathType Leaf) -Message "CAS $failureMode failure 未保留 backup 文件"
+        Assert-True -Condition ([System.IO.File]::ReadAllText($casFailureManifest.concurrentReplace.backupPath) -ceq "# fixture concurrent replacement`n") -Message "CAS $failureMode failure backup 不含并发版本"
+    }
+
+    $aclConcurrentHome = Join-Path $testRoot "concurrent-config-acl\.codex"
+    New-FixtureCodexHome -Root $aclConcurrentHome
+    $aclConcurrentConfigPath = Join-Path $aclConcurrentHome "config.toml"
+    $aclConcurrentSddlBefore = (Get-Acl -LiteralPath $aclConcurrentConfigPath).Sddl
+    $aclConcurrentThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE = $aclConcurrentConfigPath
+        $env:CODEX_HOST_HOOK_TEST_CONCURRENT_KIND = "acl"
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $aclConcurrentHome | Out-Null
+    } catch {
+        $aclConcurrentThrew = $true
+    } finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE -ErrorAction SilentlyContinue
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_CONCURRENT_KIND -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition $aclConcurrentThrew -Message "ACL-only 并发未让 Repair 失败"
+    $aclConcurrentEvidence = @(Get-ChildItem -LiteralPath (Join-Path $aclConcurrentHome "run-evidence\host-hook-remediation") -Directory -Force)
+    $aclConcurrentManifest = Get-Content -LiteralPath (Join-Path $aclConcurrentEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($aclConcurrentManifest.status -eq "unsafe-partial") -Message "ACL-only 并发未标记 unsafe-partial"
+    Assert-True -Condition (Test-Path -LiteralPath $aclConcurrentManifest.concurrentReplace.backupPath -PathType Leaf) -Message "ACL-only 并发未保留 backup"
+    Assert-True -Condition ((Get-Acl -LiteralPath $aclConcurrentManifest.concurrentReplace.backupPath).Sddl -cne $aclConcurrentSddlBefore) -Message "ACL-only 并发 canary 未实际改变 backup ACL"
+
+    $rollbackCasHome = Join-Path $testRoot "rollback-cas\.codex"
+    New-FixtureCodexHome -Root $rollbackCasHome
+    $rollbackCasConfigPath = Join-Path $rollbackCasHome "config.toml"
+    $rollbackCasHooksPath = Join-Path $rollbackCasHome "hooks.json"
+    $rollbackCasLock = [System.IO.File]::Open($rollbackCasHooksPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    $rollbackCasThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE = $rollbackCasConfigPath
+        $env:CODEX_HOST_HOOK_TEST_CONCURRENT_OCCURRENCE = "2"
+        try {
+            Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $rollbackCasHome | Out-Null
+        } catch {
+            $rollbackCasThrew = $true
+        }
+    } finally {
+        $rollbackCasLock.Dispose()
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE -ErrorAction SilentlyContinue
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_CONCURRENT_OCCURRENCE -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition $rollbackCasThrew -Message "rollback CAS conflict 未让 Repair 失败"
+    $rollbackCasEvidence = @(Get-ChildItem -LiteralPath (Join-Path $rollbackCasHome "run-evidence\host-hook-remediation") -Directory -Force)
+    $rollbackCasManifest = Get-Content -LiteralPath (Join-Path $rollbackCasEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
+    Assert-True -Condition ($rollbackCasManifest.status -eq "unsafe-partial") -Message "rollback CAS conflict 未标记 unsafe-partial"
+    Assert-True -Condition (@($rollbackCasManifest.rollbackConcurrentReplaces).Count -eq 1) -Message "rollback CAS conflict 未写入 per-resource manifest"
+    $rollbackCasBackup = $rollbackCasManifest.rollbackConcurrentReplaces[0].backupPath
+    Assert-True -Condition (Test-Path -LiteralPath $rollbackCasBackup -PathType Leaf) -Message "rollback CAS conflict 未保留 backup"
+    Assert-True -Condition ([System.IO.File]::ReadAllText($rollbackCasBackup) -ceq "# fixture concurrent replacement`n") -Message "rollback CAS backup 未保留并发版本"
+
     $rollbackHome = Join-Path $testRoot "rollback\.codex"
     New-FixtureCodexHome -Root $rollbackHome
-    $rollbackConfigHash = Get-Sha256 -Path (Join-Path $rollbackHome "config.toml")
+    $rollbackConfigPath = Join-Path $rollbackHome "config.toml"
+    Set-TestProtectedFileAcl -Path $rollbackConfigPath
+    $rollbackConfigAclSddl = (Get-Acl -LiteralPath $rollbackConfigPath).Sddl
+    $rollbackConfigHash = Get-Sha256 -Path $rollbackConfigPath
     $rollbackHooksHash = Get-Sha256 -Path (Join-Path $rollbackHome "hooks.json")
     $rollbackBefore = Get-TreeFingerprint -CodexHome $rollbackHome -ExcludeEvidence
     $lockedHooksPath = Join-Path $rollbackHome "hooks.json"
@@ -469,6 +676,7 @@ try {
     }
     Assert-True -Condition $rollbackThrew -Message "hooks 原子替换被阻止时 Repair 未失败"
     Assert-True -Condition ((Get-TreeFingerprint -CodexHome $rollbackHome -ExcludeEvidence) -eq $rollbackBefore) -Message "两文件半提交失败后未恢复原始状态"
+    Assert-True -Condition ((Get-Acl -LiteralPath $rollbackConfigPath).Sddl -ceq $rollbackConfigAclSddl) -Message "两文件半提交回滚未精确恢复 config.toml ACL"
 
     $rollbackEvidenceRoot = Join-Path $rollbackHome "run-evidence\host-hook-remediation"
     $rollbackEvidence = @(Get-ChildItem -LiteralPath $rollbackEvidenceRoot -Directory -Force)
@@ -523,6 +731,18 @@ try {
         New-FixtureCodexHome -Root $caseHome -Variant $case.Variant
         Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $caseHome -CaseName $case.Name
     }
+
+    $hardLinkHome = Join-Path $testRoot "hard-link\.codex"
+    New-FixtureCodexHome -Root $hardLinkHome
+    $externalSentinelPath = Join-Path $testRoot "hard-link-external-sentinel.txt"
+    Set-Content -LiteralPath $externalSentinelPath -Value "external-hard-link-sentinel" -Encoding UTF8
+    $hardLinkPath = Join-Path $hardLinkHome "hooks\linked-sentinel.txt"
+    New-Item -ItemType HardLink -Path $hardLinkPath -Target $externalSentinelPath | Out-Null
+    $externalSentinelHashBefore = Get-Sha256 -Path $externalSentinelPath
+    $externalSentinelAclBefore = (Get-Acl -LiteralPath $externalSentinelPath).Sddl
+    Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $hardLinkHome -CaseName "hard-link"
+    Assert-True -Condition ((Get-Sha256 -Path $externalSentinelPath) -eq $externalSentinelHashBefore) -Message "hard-link 拒绝路径改写了外部 sentinel 内容"
+    Assert-True -Condition ((Get-Acl -LiteralPath $externalSentinelPath).Sddl -ceq $externalSentinelAclBefore) -Message "hard-link 拒绝路径改写了外部 sentinel ACL"
 
     $sensitiveErrorHome = Join-Path $testRoot "sensitive-error\.codex"
     New-FixtureCodexHome -Root $sensitiveErrorHome -Variant SensitiveInvalidHeader
