@@ -342,6 +342,7 @@ skill-operations.md 只添加一条简短指针：GitHub 插件刷新后，必�
 
 - Create: D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\verification-summary.json
 - Create: D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\VERIFICATION.md
+- Create: D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\writing-great-skills-acceptance.md
 - Review: 本计划、设计文档、覆盖器 manifest、所有受影响 active skill、plugin source/cache 目标和来源账本。
 
 **Interfaces:**
@@ -363,6 +364,10 @@ git -C 'D:\Codex\projects\unified-env-github-default-branch-skill-policy' status
 
 预期：所有 Node 测试零失败、资源闭包零硬失败、Git 格式检查无输出，临时分支已追踪远端同名分支。
 
+自动验证使用已解析的 Codex primary runtime；不得改用 PATH 中无法证明来源的 Node 入口。
+在生成最终证据前，必须完整读取 `D:\Codex\.codex\skills\writing-great-skills\SKILL.md`，
+并把 acceptance gate 的逐项结果写入本 Task 的 evidence 根。
+
 - [ ] **Step 2：执行对抗性审查**
 
 使用独立 agent 对以下攻击面做只读审查：
@@ -379,7 +384,16 @@ git -C 'D:\Codex\projects\unified-env-github-default-branch-skill-policy' status
 
 - [ ] **Step 3：生成验证证据**
 
-verification-summary.json 包含：时间、active skill/插件 target 哈希、测试命令及退出码、资源闭包摘要、overlay manifest 路径、对抗性审查结论和已知未验证项。VERIFICATION.md 用简体中文解释结果，不复制敏感远端 URL、token 或 credential 输出。
+先完成 writing-great-skills acceptance gate：记录已完整读取
+`D:\Codex\.codex\skills\writing-great-skills\SKILL.md`，并逐项审查本次改动的单一职责、
+清晰描述与 leading vocabulary、最小范围与剪枝、单一真源/渐进披露、可检查完成标准、
+测试与资源闭包、正向行为与失败关闭；只有结论 `approved` 且无未决项时才可继续。
+
+生成 `writing-great-skills-acceptance.md`，并在 `verification-summary.json` 中记录 gate
+路径、源 skill SHA-256、审查项目和状态。`verification-summary.json` 还包含：时间、active
+skill/插件 target 哈希、测试命令及退出码、资源闭包摘要、overlay manifest 路径、对抗性审查
+结论和已知未验证项。`VERIFICATION.md` 用简体中文解释结果，不复制敏感远端 URL、token 或
+credential 输出。
 
 - [ ] **Step 4：提交并同步所有版本化实现**
 
