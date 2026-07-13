@@ -106,6 +106,7 @@ class PermissionPolicy:
     source_hashes: tuple[tuple[str, str], ...] = ()
     codex_home: str | None = None
     source_identities: tuple[tuple[str, tuple[int, int]], ...] = ()
+    source_values: tuple[tuple[str, str | None, str | None], ...] = ()
 
     def __post_init__(self) -> None:
         if (
@@ -160,6 +161,7 @@ class PermissionPolicy:
             ):
                 raise StatePolicyError("permission policy source hash is malformed")
             seen.add(source)
+        identity_sources: set[str] = set()
         for item in self.source_identities:
             if not isinstance(item, tuple) or len(item) != 2:
                 raise StatePolicyError("permission policy source identity is malformed")
@@ -170,8 +172,38 @@ class PermissionPolicy:
                 or len(identity) != 2
                 or not all(isinstance(value, int) and value >= 0 for value in identity)
                 or source not in seen
+                or source in identity_sources
             ):
                 raise StatePolicyError("permission policy source identity is malformed")
+            identity_sources.add(source)
+        if identity_sources != seen:
+            raise StatePolicyError("permission policy source identity is missing")
+        if not isinstance(self.source_values, tuple) or len(self.source_values) != len(self.source_hashes):
+            raise StatePolicyError("permission policy source values are missing")
+        value_sources: set[str] = set()
+        for item in self.source_values:
+            if not isinstance(item, tuple) or len(item) != 3:
+                raise StatePolicyError("permission policy source values are malformed")
+            source, approval, sandbox = item
+            if (
+                not isinstance(source, str)
+                or source not in seen
+                or source in value_sources
+                or (approval is not None and approval not in SUPPORTED_APPROVAL_POLICIES)
+                or (sandbox is not None and sandbox not in SUPPORTED_SANDBOX_MODES)
+            ):
+                raise StatePolicyError("permission policy source values are malformed")
+            value_sources.add(source)
+        if value_sources != seen:
+            raise StatePolicyError("permission policy source values are missing")
+        if {
+            approval for _source, approval, _sandbox in self.source_values if approval is not None
+        } != {self.approval_policy}:
+            raise StatePolicyError("permission policy source values conflict")
+        if {
+            sandbox for _source, _approval, sandbox in self.source_values if sandbox is not None
+        } != {self.sandbox_mode}:
+            raise StatePolicyError("permission policy source values conflict")
 
     @property
     def heartbeat_sandbox_type(self) -> str:
@@ -971,6 +1003,7 @@ def resolve_permission_policy(codex_home: Path | str) -> PermissionPolicy:
     sandboxes: list[tuple[str, str]] = []
     source_hashes: list[tuple[str, str]] = []
     source_identities: list[tuple[str, tuple[int, int]]] = []
+    source_values: list[tuple[str, str | None, str | None]] = []
     for source, document, source_hash in sources:
         source_hashes.append((source, source_hash))
         approval, sandbox = _permission_fields_from_mapping(document)
@@ -986,21 +1019,29 @@ def resolve_permission_policy(codex_home: Path | str) -> PermissionPolicy:
         source_identity = _file_handle_identity(Path(source))
         if source_identity is None:
             raise StatePolicyError("permission policy source disappeared")
+        try:
+            if _sha256(Path(source).read_bytes()) != source_hash:
+                raise StatePolicyError("permission policy source changed during resolution")
+        except OSError as exc:
+            raise StatePolicyError("permission policy source is unreadable") from exc
+        if _file_handle_identity(Path(source)) != source_identity:
+            raise StatePolicyError("permission policy source changed during resolution")
         source_identities.append((source, source_identity))
-        if approval is not None:
-            approvals.append(
-                (
-                    source,
-                    _validate_permission_value("approval", approval, SUPPORTED_APPROVAL_POLICIES),
-                )
-            )
-        if sandbox is not None:
-            sandboxes.append(
-                (
-                    source,
-                    _validate_permission_value("sandbox", sandbox, SUPPORTED_SANDBOX_MODES),
-                )
-            )
+        approval_value = (
+            _validate_permission_value("approval", approval, SUPPORTED_APPROVAL_POLICIES)
+            if approval is not None
+            else None
+        )
+        sandbox_value = (
+            _validate_permission_value("sandbox", sandbox, SUPPORTED_SANDBOX_MODES)
+            if sandbox is not None
+            else None
+        )
+        source_values.append((source, approval_value, sandbox_value))
+        if approval_value is not None:
+            approvals.append((source, approval_value))
+        if sandbox_value is not None:
+            sandboxes.append((source, sandbox_value))
     if not approvals or not sandboxes:
         raise StatePolicyError("permission policy is missing approval or sandbox")
     approval_values = {value for _source, value in approvals}
@@ -1015,30 +1056,16 @@ def resolve_permission_policy(codex_home: Path | str) -> PermissionPolicy:
         source_hashes=tuple(source_hashes),
         codex_home=str(home),
         source_identities=tuple(source_identities),
+        source_values=tuple(source_values),
     )
 
 
 def _assert_permission_policy_unchanged(permission_policy: PermissionPolicy) -> None:
     if not isinstance(permission_policy.codex_home, str) or not permission_policy.codex_home:
         raise StatePolicyError("permission policy home is missing")
-    identity_by_source = {
-        source: identity for source, identity in permission_policy.source_identities
-    }
-    for source, expected_hash in permission_policy.source_hashes:
-        source_path = Path(source)
-        _assert_check_only_d_path_without_reparse(
-            source_path,
-            name="permission policy source",
-        )
-        try:
-            actual_hash = _sha256(source_path.read_bytes())
-        except OSError as exc:
-            raise StatePolicyError("permission policy source is unreadable") from exc
-        if actual_hash != expected_hash:
-            raise StatePolicyError("permission policy changed concurrently")
-        actual_identity = _file_handle_identity(source_path)
-        if actual_identity is None or actual_identity != identity_by_source.get(source):
-            raise StatePolicyError("permission policy source changed concurrently")
+    current = resolve_permission_policy(Path(permission_policy.codex_home))
+    if current != permission_policy:
+        raise StatePolicyError("permission policy changed concurrently")
 
 
 def _resolve_policy_for_path(path: Path, permission_policy: PermissionPolicy | None) -> PermissionPolicy:
@@ -1604,6 +1631,39 @@ def _move_path_by_name(source: Path, target: Path, *, replace_if_exists: bool) -
         raise StatePolicyError(f"state publish path move failed ({error})")
 
 
+def _restore_bytes_no_replace(path: Path, data: bytes) -> bool:
+    """Restore a lease snapshot without overwriting a competitor."""
+    if path.exists():
+        return False
+    temporary = _write_same_directory_temp(path, data)
+    kernel32: object | None = None
+    handle: wintypes.HANDLE | None = None
+    try:
+        if os.name != "nt":
+            if path.exists():
+                return False
+            os.link(temporary, path)
+            return path.is_file() and path.read_bytes() == data
+        kernel32, handle = _open_publish_handle(
+            temporary,
+            desired_access=GENERIC_READ | DELETE_ACCESS | SYNCHRONIZE_ACCESS,
+            share_mode=0,
+        )
+        identity = _publish_handle_info(kernel32, handle, temporary)
+        if _sha256(_read_publish_handle_bytes(kernel32, handle)) != _sha256(data):
+            return False
+        _rename_temp_by_handle(kernel32, handle, path, replace_if_exists=False)
+        return _publish_handle_info(kernel32, handle, path) == identity and _read_publish_handle_bytes(
+            kernel32, handle
+        ) == data
+    except (OSError, StatePolicyError):
+        return False
+    finally:
+        if kernel32 is not None and handle is not None:
+            _close_publish_handle(kernel32, handle)
+        temporary.unlink(missing_ok=True)
+
+
 def _publish_temp_file(
     path: Path,
     temp_path: Path,
@@ -1637,7 +1697,16 @@ def _publish_temp_file(
     temp_kernel32: object | None = None
     temp_handle: wintypes.HANDLE | None = None
     lease_backup_path: Path | None = None
+    lease_snapshot_path: Path | None = None
+    lease_snapshot_identity: tuple[int, int] | None = None
+    lease_snapshot_kernel32: object | None = None
+    lease_snapshot_handle: wintypes.HANDLE | None = None
+    snapshot_temporary: Path | None = None
+    lease_handoff = False
     lease_published = False
+    lease_snapshot_keep = False
+    lease_expected_identity: tuple[int, int] | None = None
+    target_snapshot_bytes: bytes | None = None
     try:
         target_exists = path.exists()
         if target_exists:
@@ -1649,11 +1718,8 @@ def _publish_temp_file(
             target_identity = _publish_handle_info(target_kernel32, target_handle, path)
             if expected_identity is not None and target_identity != expected_identity:
                 raise StatePolicyError("state publish target changed concurrently")
-            if (
-                expected_hash is not None
-                and _sha256(_read_publish_handle_bytes(target_kernel32, target_handle))
-                != expected_hash
-            ):
+            target_snapshot_bytes = _read_publish_handle_bytes(target_kernel32, target_handle)
+            if expected_hash is not None and _sha256(target_snapshot_bytes) != expected_hash:
                 raise StatePolicyError("state publish target changed concurrently")
         elif not replace_if_exists:
             # A missing target is intentionally published with a no-replace
@@ -1705,19 +1771,48 @@ def _publish_temp_file(
                 )
                 if lease_backup_path.exists():
                     raise StatePolicyError("state publish lease backup already exists")
+                if target_snapshot_bytes is None:
+                    raise StatePolicyError("state publish target snapshot is missing")
+                lease_snapshot_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.snapshot"
+                _assert_check_only_d_path_without_reparse(
+                    lease_snapshot_path,
+                    name="state publish lease snapshot",
+                )
+                snapshot_temporary = _write_same_directory_temp(path, target_snapshot_bytes)
+                lease_snapshot_kernel32, lease_snapshot_handle = _open_publish_handle(
+                    snapshot_temporary,
+                    desired_access=GENERIC_READ | DELETE_ACCESS | SYNCHRONIZE_ACCESS,
+                    share_mode=0,
+                )
+                lease_snapshot_identity = _publish_handle_info(
+                    lease_snapshot_kernel32,
+                    lease_snapshot_handle,
+                    snapshot_temporary,
+                )
+                if _sha256(
+                    _read_publish_handle_bytes(lease_snapshot_kernel32, lease_snapshot_handle)
+                ) != _sha256(target_snapshot_bytes):
+                    raise StatePolicyError("state publish lease snapshot changed concurrently")
+                _rename_temp_by_handle(
+                    lease_snapshot_kernel32,
+                    lease_snapshot_handle,
+                    lease_snapshot_path,
+                    replace_if_exists=False,
+                )
+                lease_snapshot_identity = _publish_handle_info(
+                    lease_snapshot_kernel32,
+                    lease_snapshot_handle,
+                    lease_snapshot_path,
+                )
+                if _sha256(_read_publish_handle_bytes(lease_snapshot_kernel32, lease_snapshot_handle)) != _sha256(
+                    target_snapshot_bytes
+                ):
+                    raise StatePolicyError("state publish lease snapshot changed concurrently")
+                lease_expected_identity = expected_identity if expected_identity is not None else target_identity
+                lease_handoff = True
                 _move_path_by_name(path, lease_backup_path, replace_if_exists=False)
                 lease_identity = _file_handle_identity(lease_backup_path)
-                lease_expected_identity = expected_identity if expected_identity is not None else target_identity
                 if lease_identity != lease_expected_identity:
-                    if target_kernel32 is not None and target_handle is not None:
-                        _close_publish_handle(target_kernel32, target_handle)
-                        target_kernel32 = None
-                        target_handle = None
-                    if not path.exists() and lease_backup_path.exists():
-                        try:
-                            _move_path_by_name(lease_backup_path, path, replace_if_exists=False)
-                        except StatePolicyError:
-                            pass
                     raise StatePolicyError("state publish target changed concurrently")
                 if target_kernel32 is not None and target_handle is not None:
                     _close_publish_handle(target_kernel32, target_handle)
@@ -1725,14 +1820,10 @@ def _publish_temp_file(
                     target_handle = None
                 if path.exists():
                     raise StatePolicyError("state publish target appeared concurrently")
-                if _file_handle_identity(temp_path) != replacement_identity:
+                if _publish_handle_info(temp_kernel32, temp_handle, temp_path) != replacement_identity:
                     raise StatePolicyError("state publish temporary changed concurrently")
-                if temp_kernel32 is not None and temp_handle is not None:
-                    _close_publish_handle(temp_kernel32, temp_handle)
-                    temp_kernel32 = None
-                    temp_handle = None
-                _move_path_by_name(temp_path, path, replace_if_exists=False)
-                published_identity = _file_handle_identity(path)
+                _rename_temp_by_handle(temp_kernel32, temp_handle, path, replace_if_exists=False)
+                published_identity = _publish_handle_info(temp_kernel32, temp_handle, path)
                 if published_identity != replacement_identity:
                     raise StatePolicyError("state publish postwrite identity mismatch")
                 lease_published = True
@@ -1747,14 +1838,53 @@ def _publish_temp_file(
         if published_identity != replacement_identity:
             raise StatePolicyError("state publish postwrite identity mismatch")
         return published_identity
+    except BaseException:
+        if lease_handoff and not lease_published:
+            if target_kernel32 is not None and target_handle is not None:
+                _close_publish_handle(target_kernel32, target_handle)
+                target_kernel32 = None
+                target_handle = None
+            try:
+                lease_identity = _file_handle_identity(lease_backup_path) if lease_backup_path is not None else None
+            except (OSError, StatePolicyError):
+                lease_identity = None
+            if lease_backup_path is not None and lease_identity is not None:
+                try:
+                    _move_path_by_name(lease_backup_path, path, replace_if_exists=False)
+                except (OSError, StatePolicyError):
+                    pass
+            restored_original = False
+            if target_snapshot_bytes is not None:
+                try:
+                    restored_original = (
+                        path.exists()
+                        and lease_expected_identity is not None
+                        and _file_handle_identity(path) == lease_expected_identity
+                    )
+                except (OSError, StatePolicyError):
+                    restored_original = False
+                if not restored_original and not path.exists():
+                    restored_original = _restore_bytes_no_replace(path, target_snapshot_bytes)
+            lease_snapshot_keep = not restored_original
+        raise
     finally:
         if temp_kernel32 is not None and temp_handle is not None:
             _close_publish_handle(temp_kernel32, temp_handle)
         if target_kernel32 is not None and target_handle is not None:
             _close_publish_handle(target_kernel32, target_handle)
+        if lease_snapshot_kernel32 is not None and lease_snapshot_handle is not None:
+            _close_publish_handle(lease_snapshot_kernel32, lease_snapshot_handle)
+        if snapshot_temporary is not None:
+            snapshot_temporary.unlink(missing_ok=True)
+        if lease_snapshot_path is not None and not lease_snapshot_keep:
+            try:
+                if lease_snapshot_identity is not None and _file_handle_identity(lease_snapshot_path) == lease_snapshot_identity:
+                    lease_snapshot_path.unlink(missing_ok=True)
+            except (OSError, StatePolicyError):
+                pass
         if lease_published and lease_backup_path is not None:
             try:
-                if _file_handle_identity(lease_backup_path) == expected_identity:
+                if _file_handle_identity(lease_backup_path) == lease_expected_identity:
                     lease_backup_path.unlink(missing_ok=True)
             except (OSError, StatePolicyError):
                 # The new state is already published; leave an auditable lease
@@ -2052,6 +2182,7 @@ def _assert_sqlite_snapshot_identity(
     *,
     allow_new_sidecars: bool,
     check_main_metadata: bool = True,
+    check_sidecar_content: bool = False,
 ) -> SqliteSourceSnapshot:
     """Reject path/identity replay between a checked snapshot and SQLite I/O."""
     after = _capture_sqlite_source(path)
@@ -2062,10 +2193,17 @@ def _assert_sqlite_snapshot_identity(
     for index in range(1, 4):
         expected = before.identities[index]
         actual = after.identities[index]
+        if before.metadata[index][3] != after.metadata[index][3]:
+            raise StatePolicyError("thread state sidecar parent changed concurrently")
         if expected is not None and actual != expected:
             raise StatePolicyError("thread state sidecar concurrent replacement")
         if expected is None and actual is not None and not allow_new_sidecars:
             raise StatePolicyError("thread state sidecar appeared during check")
+        if expected is not None and check_sidecar_content:
+            if before.metadata[index] != after.metadata[index]:
+                raise StatePolicyError("thread state sidecar metadata changed concurrently")
+            if before.payload[index] != after.payload[index]:
+                raise StatePolicyError("thread state sidecar bytes changed concurrently")
     return after
 
 
@@ -2219,7 +2357,12 @@ def update_thread_state(
     conn = sqlite3.connect(path, timeout=1.5)
     try:
         conn.execute("pragma busy_timeout=1500")
-        _assert_sqlite_snapshot_identity(initial_snapshot, path, allow_new_sidecars=False)
+        _assert_sqlite_snapshot_identity(
+            initial_snapshot,
+            path,
+            allow_new_sidecars=False,
+            check_sidecar_content=True,
+        )
         try:
             conn.execute("begin immediate")
         except sqlite3.OperationalError as exc:
@@ -2276,12 +2419,21 @@ def update_thread_state(
                 raise StatePolicyError("thread state concurrent replacement")
             if _sha256(path.read_bytes()) != source_bytes_hash:
                 raise StatePolicyError("thread state concurrent update")
+            callback_snapshot = _capture_sqlite_source(path) if before_commit is not None else None
             if before_commit is not None:
                 before_commit()
             if _file_handle_identity(path) != source_identity:
                 raise StatePolicyError("thread state concurrent replacement")
             if _sha256(path.read_bytes()) != source_bytes_hash:
                 raise StatePolicyError("thread state concurrent update")
+            if callback_snapshot is not None:
+                _assert_sqlite_snapshot_identity(
+                    callback_snapshot,
+                    path,
+                    allow_new_sidecars=True,
+                    check_main_metadata=False,
+                    check_sidecar_content=True,
+                )
             _assert_sqlite_snapshot_identity(
                 initial_snapshot,
                 path,

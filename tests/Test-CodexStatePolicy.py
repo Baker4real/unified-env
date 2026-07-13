@@ -420,6 +420,33 @@ class CodexStatePolicyTests(unittest.TestCase):
             )
         self.assertEqual(self.global_path.read_bytes(), original)
 
+    def test_permission_policy_rejects_new_supplemental_source_after_resolution(self) -> None:
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        (self.codex_home / "policy.json").write_text(
+            json.dumps(
+                {
+                    "approvalPolicy": "never",
+                    "sandboxPolicy": {"type": "dangerFullAccess"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(self.module.StatePolicyError, "changed|source"):
+            self.module._assert_permission_policy_unchanged(policy)
+
+    def test_permission_policy_rejects_forged_values_even_with_source_hashes(self) -> None:
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        with self.assertRaises(self.module.StatePolicyError):
+            self.module.PermissionPolicy(
+                "on-request",
+                policy.sandbox_mode,
+                policy.source,
+                policy.source_hashes,
+                policy.codex_home,
+                policy.source_identities,
+                policy.source_values,
+            )
+
     def test_repair_modes_distinguish_safe_only_from_all_approved(self) -> None:
         candidate_root = self.root / "mode-canonical"
         safe_candidate = candidate_root / "safe"
@@ -809,6 +836,68 @@ class CodexStatePolicyTests(unittest.TestCase):
             temporary.unlink(missing_ok=True)
         self.assertEqual(self.global_path.read_bytes(), b"competitor")
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows handle-bound publish")
+    def test_global_publish_restores_original_when_hostile_deletes_lease_backup(self) -> None:
+        original = self.write_global(self.permission_drift())
+        target_identity = self.module._file_handle_identity(self.global_path)
+        self.assertIsNotNone(target_identity)
+        temporary = self.module._write_same_directory_temp(self.global_path, b"replacement")
+        original_move = self.module._move_path_by_name
+
+        def delete_lease_after_move(source: Path, target: Path, *, replace_if_exists: bool) -> None:
+            original_move(source, target, replace_if_exists=replace_if_exists)
+            if target.name.endswith(".lease"):
+                target.unlink(missing_ok=True)
+
+        try:
+            with mock.patch.object(self.module, "_move_path_by_name", side_effect=delete_lease_after_move):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "concurrent|lease"):
+                    self.module._publish_temp_file(
+                        self.global_path,
+                        temporary,
+                        expected_hash=hashlib.sha256(original).hexdigest(),
+                        expected_identity=target_identity,
+                    )
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows handle-bound publish")
+    def test_global_publish_keeps_snapshot_when_competitor_replaces_target_during_recovery(self) -> None:
+        original = self.write_global(self.permission_drift())
+        target_identity = self.module._file_handle_identity(self.global_path)
+        self.assertIsNotNone(target_identity)
+        temporary = self.module._write_same_directory_temp(self.global_path, b"replacement")
+        original_move = self.module._move_path_by_name
+
+        def delete_lease_and_create_competitor(source: Path, target: Path, *, replace_if_exists: bool) -> None:
+            original_move(source, target, replace_if_exists=replace_if_exists)
+            if target.name.endswith(".lease"):
+                target.unlink(missing_ok=True)
+                self.global_path.write_bytes(b"competitor")
+
+        try:
+            with mock.patch.object(
+                self.module,
+                "_move_path_by_name",
+                side_effect=delete_lease_and_create_competitor,
+            ):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "concurrent|lease"):
+                    self.module._publish_temp_file(
+                        self.global_path,
+                        temporary,
+                        expected_hash=hashlib.sha256(original).hexdigest(),
+                        expected_identity=target_identity,
+                    )
+            self.assertEqual(self.global_path.read_bytes(), b"competitor")
+            snapshots = list(self.global_path.parent.glob(f".{self.global_path.name}.*.snapshot"))
+            self.assertTrue(snapshots)
+            self.assertIn(original, [snapshot.read_bytes() for snapshot in snapshots])
+        finally:
+            temporary.unlink(missing_ok=True)
+            for snapshot in self.global_path.parent.glob(f".{self.global_path.name}.*.snapshot"):
+                snapshot.unlink(missing_ok=True)
+
     def test_sqlite_snapshot_binds_identity_for_same_bytes_replay(self) -> None:
         connection = self.create_db()
         connection.close()
@@ -849,6 +938,28 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertEqual(tuple(before), tuple(after))
         self.assertTrue(replaced)
         self.assertNotEqual(before, after)
+
+    def test_sqlite_snapshot_rejects_same_inode_sidecar_byte_mutation(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        sidecar = Path(str(self.db_path) + "-wal")
+        sidecar.write_bytes(b"sidecar-original")
+        try:
+            before = self.module._capture_sqlite_source(self.db_path)
+            identity = self.module._file_handle_identity(sidecar)
+            sidecar.write_bytes(b"sidecar-mutated")
+            after = self.module._capture_sqlite_source(self.db_path)
+            self.assertEqual(before.identities[1], identity)
+            self.assertNotEqual(before.payload[1], after.payload[1])
+            with self.assertRaisesRegex(self.module.StatePolicyError, "sidecar|concurrent"):
+                self.module._assert_sqlite_snapshot_identity(
+                    before,
+                    self.db_path,
+                    allow_new_sidecars=False,
+                    check_sidecar_content=True,
+                )
+        finally:
+            sidecar.unlink(missing_ok=True)
 
     def test_malformed_and_backup_failure_preserve_original_bytes(self) -> None:
         malformed = b'{"broken":'
