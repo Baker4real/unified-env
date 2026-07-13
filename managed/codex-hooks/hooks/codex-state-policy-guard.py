@@ -35,6 +35,32 @@ TARGET_MAPS = (
 )
 FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 LEGACY_DESTINATION_ROOT = PureWindowsPath(r"D:\Users\WINDOWS\Documents\Codex")
+FILE_ATTRIBUTE_DIRECTORY = 0x0010
+FILE_READ_ATTRIBUTES = 0x0080
+FILE_SHARE_READ = 0x00000001
+FILE_SHARE_WRITE = 0x00000002
+FILE_SHARE_DELETE = 0x00000004
+OPEN_EXISTING = 3
+FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+ERROR_FILE_NOT_FOUND = 2
+ERROR_PATH_NOT_FOUND = 3
+SHORT_LEXICAL_SEGMENT = re.compile(r"^[^\\/]{1,8}~[0-9](?:\.[^\\/]+)?$", re.IGNORECASE)
+
+
+class _ByHandleFileInformation(ctypes.Structure):
+    _fields_ = [
+        ("file_attributes", wintypes.DWORD),
+        ("creation_time", wintypes.FILETIME),
+        ("last_access_time", wintypes.FILETIME),
+        ("last_write_time", wintypes.FILETIME),
+        ("volume_serial_number", wintypes.DWORD),
+        ("file_size_high", wintypes.DWORD),
+        ("file_size_low", wintypes.DWORD),
+        ("number_of_links", wintypes.DWORD),
+        ("file_index_high", wintypes.DWORD),
+        ("file_index_low", wintypes.DWORD),
+    ]
 
 
 class StatePolicyError(RuntimeError):
@@ -100,40 +126,260 @@ def _windows_relative_path(
     return tuple(source_path.parts[len(root_parts) :])
 
 
-def _candidate_reparse(candidate: Path) -> bool:
-    """Return whether an existing ancestor or the candidate is a reparse point."""
-    lexical_chain: list[Path] = []
-    current = candidate
-    while True:
-        lexical_chain.append(current)
-        if current.parent == current:
-            break
-        current = current.parent
-    for item in reversed(lexical_chain):
-        try:
-            metadata = item.lstat()
-        except FileNotFoundError:
+def _path_lexical_issue(value: str, path: PureWindowsPath) -> str | None:
+    """Return a conservative reason for a non-canonical Windows spelling."""
+    if "\x00" in value:
+        return "invalid"
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        return "invalid"
+    if value.startswith(("\\\\?\\", "\\\\.\\")):
+        return "alternate"
+    raw_parts = re.split(r"[\\/]+", value)
+    for raw_index, raw_part in enumerate(raw_parts):
+        if not raw_part:
             continue
-        except OSError:
-            # An unreadable path cannot be treated as a safe canonical target.
-            return True
-        if item.is_symlink() or bool(
-            getattr(metadata, "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT
-        ):
-            return True
-    return False
+        if raw_part in (".", ".."):
+            return "alternate"
+        if SHORT_LEXICAL_SEGMENT.fullmatch(raw_part):
+            return "alternate"
+        if raw_index > 0 and ":" in raw_part:
+            return "alternate"
+        if raw_part.endswith((".", " ")):
+            return "alternate"
+    for index, part in enumerate(path.parts):
+        if index == 0:
+            continue
+        if part in (".", ".."):
+            return "alternate"
+        if SHORT_LEXICAL_SEGMENT.fullmatch(part):
+            return "alternate"
+        if ":" in part or part.endswith((".", " ")):
+            return "alternate"
+    return None
+
+
+def _validate_inventory_root(
+    value: Path | str,
+    *,
+    name: str,
+    required_drive: str | None = None,
+) -> PureWindowsPath:
+    try:
+        raw = os.fspath(value)
+    except TypeError as exc:
+        raise StatePolicyError(f"{name} must be a path string") from exc
+    if not isinstance(raw, str):
+        raise StatePolicyError(f"{name} must be a path string")
+    try:
+        path = PureWindowsPath(raw)
+    except (TypeError, ValueError) as exc:
+        raise StatePolicyError(f"{name} is invalid") from exc
+    issue = _path_lexical_issue(raw, path)
+    if issue is not None:
+        raise StatePolicyError(f"{name} uses a non-canonical lexical path")
+    if not path.is_absolute():
+        raise StatePolicyError(f"{name} must be absolute")
+    if required_drive is not None and path.drive.casefold() != required_drive.casefold():
+        raise StatePolicyError(f"{name} must use the {required_drive} drive")
+    return path
+
+
+def _normalise_handle_path(value: str) -> str:
+    unc_prefix = "\\\\?\\UNC\\"
+    device_prefix = "\\\\?\\"
+    if value.startswith(unc_prefix):
+        return "\\\\" + value[len(unc_prefix) :]
+    if value.startswith(device_prefix):
+        return value[len(device_prefix) :]
+    return value
+
+
+def _path_compare_key(value: str) -> str:
+    normalised = _normalise_handle_path(value)
+    if len(normalised) == 3 and normalised[1:] == ":\\":
+        return normalised.casefold()
+    return normalised.rstrip("\\/").casefold()
+
+
+def _probe_candidate(candidate: Path) -> dict[str, object]:
+    """Open every candidate segment with OPEN_REPARSE_POINT and verify its handle."""
+    default: dict[str, object] = {
+        "state": "probe-error",
+        "reparse": False,
+        "finalPathVerified": False,
+        "identity": None,
+    }
+    if os.name != "nt":
+        default["error"] = "Windows handle probe is unavailable"
+        return default
+    try:
+        candidate_windows = PureWindowsPath(str(candidate))
+        if not candidate_windows.is_absolute() or candidate_windows.drive.casefold() != "d:":
+            default["state"] = "invalid"
+            return default
+        if _path_lexical_issue(str(candidate), candidate_windows) is not None:
+            default["state"] = "invalid"
+            return default
+    except (TypeError, ValueError):
+        default["state"] = "invalid"
+        return default
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.GetFileInformationByHandle.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(_ByHandleFileInformation),
+    )
+    kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+    kernel32.GetFinalPathNameByHandleW.argtypes = (
+        wintypes.HANDLE,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    )
+    kernel32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    invalid_handle = ctypes.c_void_p(-1).value
+    share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+    flags = FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT
+    handles: list[wintypes.HANDLE] = []
+
+    def get_final_path(handle: wintypes.HANDLE) -> str | None:
+        capacity = 512
+        while capacity <= 32768:
+            buffer = ctypes.create_unicode_buffer(capacity)
+            length = kernel32.GetFinalPathNameByHandleW(handle, buffer, capacity, 0)
+            if length == 0:
+                return None
+            if length < capacity:
+                return buffer.value
+            capacity = int(length) + 1
+        return None
+
+    def result(
+        state: str,
+        *,
+        reparse: bool = False,
+        final_path_verified: bool = False,
+        identity: tuple[int, int] | None = None,
+        path: str | None = None,
+        error: int | str | None = None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "state": state,
+            "reparse": reparse,
+            "finalPathVerified": final_path_verified,
+            "identity": list(identity) if identity is not None else None,
+        }
+        if path is not None:
+            payload["path"] = path
+        if error is not None:
+            payload["error"] = error
+        return payload
+
+    try:
+        parts = candidate_windows.parts
+        current = PureWindowsPath(parts[0])
+        segments = list(parts[1:])
+        for segment_index, segment in enumerate(segments):
+            current = PureWindowsPath(current, segment)
+            lexical = str(current)
+            handle = kernel32.CreateFileW(
+                lexical,
+                FILE_READ_ATTRIBUTES,
+                share_mode,
+                None,
+                OPEN_EXISTING,
+                flags,
+                None,
+            )
+            if not handle or handle == invalid_handle:
+                error = int(ctypes.get_last_error())
+                if error in (ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND):
+                    return result("missing", path=lexical, error=error)
+                return result("probe-error", path=lexical, error=error)
+            handles.append(handle)
+            info = _ByHandleFileInformation()
+            if not kernel32.GetFileInformationByHandle(handle, ctypes.byref(info)):
+                return result("probe-error", path=lexical, error=int(ctypes.get_last_error()))
+            if info.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT:
+                return result("reparse", reparse=True, path=lexical)
+            final_path = get_final_path(handle)
+            if final_path is None:
+                return result("probe-error", path=lexical, error="final path unavailable")
+            if _path_compare_key(final_path) != _path_compare_key(lexical):
+                return result("final-path-mismatch", path=lexical)
+            is_final = segment_index == len(segments) - 1
+            if not is_final and not (info.file_attributes & FILE_ATTRIBUTE_DIRECTORY):
+                return result("non-directory-ancestor", final_path_verified=True, path=lexical)
+            if is_final:
+                identity = (
+                    int(info.volume_serial_number),
+                    (int(info.file_index_high) << 32) | int(info.file_index_low),
+                )
+                if identity == (0, 0):
+                    return result("identity-unavailable", final_path_verified=True, path=lexical)
+                return result(
+                    "verified",
+                    final_path_verified=True,
+                    identity=identity,
+                    path=lexical,
+                )
+        # A drive root has no child segment but is still a valid final target.
+        root_lexical = str(current)
+        handle = kernel32.CreateFileW(
+            root_lexical,
+            FILE_READ_ATTRIBUTES,
+            share_mode,
+            None,
+            OPEN_EXISTING,
+            flags,
+            None,
+        )
+        if not handle or handle == invalid_handle:
+            return result("probe-error", path=root_lexical, error=int(ctypes.get_last_error()))
+        handles.append(handle)
+        info = _ByHandleFileInformation()
+        if not kernel32.GetFileInformationByHandle(handle, ctypes.byref(info)):
+            return result("probe-error", path=root_lexical, error=int(ctypes.get_last_error()))
+        if info.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT:
+            return result("reparse", reparse=True, path=root_lexical)
+        final_path = get_final_path(handle)
+        if final_path is None or _path_compare_key(final_path) != _path_compare_key(root_lexical):
+            return result("final-path-mismatch", path=root_lexical)
+        identity = (
+            int(info.volume_serial_number),
+            (int(info.file_index_high) << 32) | int(info.file_index_low),
+        )
+        if identity == (0, 0):
+            return result("identity-unavailable", final_path_verified=True, path=root_lexical)
+        return result("verified", final_path_verified=True, identity=identity, path=root_lexical)
+    finally:
+        for handle in reversed(handles):
+            kernel32.CloseHandle(handle)
+
+
+def _candidate_reparse(candidate: Path) -> bool:
+    return bool(_probe_candidate(candidate).get("reparse"))
 
 
 def _candidate_identity(candidate: Path) -> tuple[int, int] | None:
-    try:
-        metadata = candidate.stat()
-    except OSError:
+    identity = _probe_candidate(candidate).get("identity")
+    if not isinstance(identity, list) or len(identity) != 2:
         return None
-    device = int(getattr(metadata, "st_dev", 0))
-    inode = int(getattr(metadata, "st_ino", 0))
-    if device == 0 and inode == 0:
-        return None
-    return device, inode
+    return int(identity[0]), int(identity[1])
 
 
 def _path_inventory_entry(
@@ -142,9 +388,12 @@ def _path_inventory_entry(
     candidate_root: Path,
     candidate_root_windows: PureWindowsPath,
 ) -> tuple[dict[str, object], tuple[int, int] | None]:
-    source_hash = (
-        hashlib.sha256(value.encode("utf-8")).hexdigest() if isinstance(value, str) else None
-    )
+    source_hash: str | None = None
+    if isinstance(value, str):
+        try:
+            source_hash = hashlib.sha256(value.encode("utf-8")).hexdigest()
+        except UnicodeError:
+            source_hash = None
     base: dict[str, object] = {
         "value": copy.deepcopy(value),
         "safe": False,
@@ -152,6 +401,13 @@ def _path_inventory_entry(
         "reason": "unresolved-unknown-value",
         "reparse": False,
         "sourceSha256": source_hash,
+        "finalIdentity": None,
+        "probe": {
+            "state": "not-probed",
+            "reparse": False,
+            "finalPathVerified": False,
+            "identity": None,
+        },
     }
     if not isinstance(value, str):
         return base, None
@@ -160,6 +416,15 @@ def _path_inventory_entry(
         source_path = PureWindowsPath(value)
     except (TypeError, ValueError):
         base["reason"] = "unresolved-invalid-path"
+        return base, None
+
+    lexical_issue = _path_lexical_issue(value, source_path)
+    if lexical_issue == "invalid":
+        base["reason"] = "unresolved-invalid-path"
+        base["sourceSha256"] = None
+        return base, None
+    if lexical_issue == "alternate":
+        base["reason"] = "unresolved-alternate-lexical"
         return base, None
 
     if _windows_is_same_or_child(source_path, LEGACY_DESTINATION_ROOT):
@@ -179,19 +444,36 @@ def _path_inventory_entry(
 
     candidate = candidate_root.joinpath(*relative_parts)
     base["candidate"] = str(candidate)
-    if _candidate_reparse(candidate):
+    probe = _probe_candidate(candidate)
+    base["probe"] = copy.deepcopy(probe)
+    probe_state = str(probe.get("state"))
+    base["reparse"] = bool(probe.get("reparse"))
+    if probe_state == "reparse":
         base["reason"] = "unresolved-reparse"
-        base["reparse"] = True
         return base, None
-    if not candidate.exists():
+    if probe_state == "missing":
         base["reason"] = "unresolved-missing"
         return base, None
-    identity = _candidate_identity(candidate)
-    if identity is None:
+    if probe_state == "identity-unavailable":
         base["reason"] = "unresolved-identity"
         return base, None
+    if probe_state == "final-path-mismatch":
+        base["reason"] = "unresolved-final-path-mismatch"
+        return base, None
+    if probe_state == "non-directory-ancestor":
+        base["reason"] = "unresolved-non-directory"
+        return base, None
+    if probe_state != "verified":
+        base["reason"] = "unresolved-probe-error"
+        return base, None
+    identity_value = probe.get("identity")
+    if not isinstance(identity_value, list) or len(identity_value) != 2:
+        base["reason"] = "unresolved-identity"
+        return base, None
+    identity = (int(identity_value[0]), int(identity_value[1]))
     base["safe"] = True
     base["reason"] = "safe"
+    base["finalIdentity"] = list(identity)
     return base, identity
 
 
@@ -208,15 +490,12 @@ def build_path_inventory(
     """
     if not isinstance(state, dict):
         raise StatePolicyError("global state root must be an object")
-    try:
-        source_root_windows = PureWindowsPath(str(source_root))
-        candidate_root_windows = PureWindowsPath(str(candidate_root))
-    except (TypeError, ValueError) as exc:
-        raise StatePolicyError("path inventory roots are invalid") from exc
-    if not source_root_windows.is_absolute():
-        raise StatePolicyError("path inventory source root must be absolute")
-    if not candidate_root_windows.is_absolute() or candidate_root_windows.drive.casefold() != "d:":
-        raise StatePolicyError("path inventory candidate root must be an absolute D drive path")
+    source_root_windows = _validate_inventory_root(source_root, name="path inventory source root")
+    candidate_root_windows = _validate_inventory_root(
+        candidate_root,
+        name="path inventory candidate root",
+        required_drive="D:",
+    )
 
     candidate_root_path = Path(candidate_root)
     maps: dict[str, dict[object, dict[str, object]]] = {}
