@@ -778,6 +778,37 @@ class CodexStatePolicyTests(unittest.TestCase):
             temporary.unlink(missing_ok=True)
         self.assertEqual(self.global_path.read_bytes(), original)
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows handle-bound publish")
+    def test_global_publish_preserves_delete_recreate_competitor_after_final_read(self) -> None:
+        original = self.write_global(self.permission_drift())
+        target_identity = self.module._file_handle_identity(self.global_path)
+        self.assertIsNotNone(target_identity)
+        temporary = self.module._write_same_directory_temp(self.global_path, b"replacement")
+        original_read = self.module._read_publish_handle_bytes
+        calls = 0
+
+        def delete_and_recreate(kernel32: object, handle: object) -> bytes:
+            nonlocal calls
+            calls += 1
+            data = original_read(kernel32, handle)
+            if calls == 3:
+                self.global_path.unlink()
+                self.global_path.write_bytes(b"competitor")
+            return data
+
+        try:
+            with mock.patch.object(self.module, "_read_publish_handle_bytes", side_effect=delete_and_recreate):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "concurrent"):
+                    self.module._publish_temp_file(
+                        self.global_path,
+                        temporary,
+                        expected_hash=hashlib.sha256(original).hexdigest(),
+                        expected_identity=target_identity,
+                    )
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.assertEqual(self.global_path.read_bytes(), b"competitor")
+
     def test_sqlite_snapshot_binds_identity_for_same_bytes_replay(self) -> None:
         connection = self.create_db()
         connection.close()

@@ -66,6 +66,8 @@ SHORT_LEXICAL_SEGMENT = re.compile(r"^[^\\/]{1,8}~[0-9]+(?:\.[^\\/]+)?$", re.IGN
 FILE_RENAME_INFORMATION_EX = 65
 FILE_RENAME_REPLACE_IF_EXISTS = 0x00000001
 FILE_RENAME_POSIX_SEMANTICS = 0x00000002
+MOVEFILE_REPLACE_EXISTING = 0x00000001
+MOVEFILE_WRITE_THROUGH = 0x00000008
 
 
 class _ByHandleFileInformation(ctypes.Structure):
@@ -1582,6 +1584,26 @@ def _rename_temp_by_handle(
         raise StatePolicyError(f"state publish rename failed ({error})")
 
 
+def _move_path_by_name(source: Path, target: Path, *, replace_if_exists: bool) -> None:
+    """Use native no-replace name publication for the lease hand-off."""
+    if os.name != "nt":
+        if target.exists() and not replace_if_exists:
+            raise StatePolicyError("state publish target appeared concurrently")
+        os.replace(source, target)
+        return
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.MoveFileExW.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD)
+    kernel32.MoveFileExW.restype = wintypes.BOOL
+    flags = MOVEFILE_WRITE_THROUGH
+    if replace_if_exists:
+        flags |= MOVEFILE_REPLACE_EXISTING
+    if not kernel32.MoveFileExW(str(source), str(target), flags):
+        error = int(ctypes.get_last_error())
+        if not replace_if_exists and target.exists():
+            raise StatePolicyError("state publish target appeared concurrently")
+        raise StatePolicyError(f"state publish path move failed ({error})")
+
+
 def _publish_temp_file(
     path: Path,
     temp_path: Path,
@@ -1614,6 +1636,8 @@ def _publish_temp_file(
     target_handle: wintypes.HANDLE | None = None
     temp_kernel32: object | None = None
     temp_handle: wintypes.HANDLE | None = None
+    lease_backup_path: Path | None = None
+    lease_published = False
     try:
         target_exists = path.exists()
         if target_exists:
@@ -1668,6 +1692,51 @@ def _publish_temp_file(
                 raise StatePolicyError("state publish target changed concurrently")
             if expected_hash is not None and _sha256(_read_publish_handle_bytes(target_kernel32, target_handle)) != expected_hash:
                 raise StatePolicyError("state publish target changed concurrently")
+            if replace_if_exists:
+                # There is no kernel compare-and-swap rename on Windows. Move
+                # the verified old name away first, then publish the new name
+                # with a native *no-replace* operation. Any competitor that
+                # recreates the target in this hand-off window is preserved and
+                # causes publication to fail closed instead of being replaced.
+                lease_backup_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.lease"
+                _assert_check_only_d_path_without_reparse(
+                    lease_backup_path,
+                    name="state publish lease backup",
+                )
+                if lease_backup_path.exists():
+                    raise StatePolicyError("state publish lease backup already exists")
+                _move_path_by_name(path, lease_backup_path, replace_if_exists=False)
+                lease_identity = _file_handle_identity(lease_backup_path)
+                lease_expected_identity = expected_identity if expected_identity is not None else target_identity
+                if lease_identity != lease_expected_identity:
+                    if target_kernel32 is not None and target_handle is not None:
+                        _close_publish_handle(target_kernel32, target_handle)
+                        target_kernel32 = None
+                        target_handle = None
+                    if not path.exists() and lease_backup_path.exists():
+                        try:
+                            _move_path_by_name(lease_backup_path, path, replace_if_exists=False)
+                        except StatePolicyError:
+                            pass
+                    raise StatePolicyError("state publish target changed concurrently")
+                if target_kernel32 is not None and target_handle is not None:
+                    _close_publish_handle(target_kernel32, target_handle)
+                    target_kernel32 = None
+                    target_handle = None
+                if path.exists():
+                    raise StatePolicyError("state publish target appeared concurrently")
+                if _file_handle_identity(temp_path) != replacement_identity:
+                    raise StatePolicyError("state publish temporary changed concurrently")
+                if temp_kernel32 is not None and temp_handle is not None:
+                    _close_publish_handle(temp_kernel32, temp_handle)
+                    temp_kernel32 = None
+                    temp_handle = None
+                _move_path_by_name(temp_path, path, replace_if_exists=False)
+                published_identity = _file_handle_identity(path)
+                if published_identity != replacement_identity:
+                    raise StatePolicyError("state publish postwrite identity mismatch")
+                lease_published = True
+                return published_identity
         _rename_temp_by_handle(
             temp_kernel32,
             temp_handle,
@@ -1683,6 +1752,14 @@ def _publish_temp_file(
             _close_publish_handle(temp_kernel32, temp_handle)
         if target_kernel32 is not None and target_handle is not None:
             _close_publish_handle(target_kernel32, target_handle)
+        if lease_published and lease_backup_path is not None:
+            try:
+                if _file_handle_identity(lease_backup_path) == expected_identity:
+                    lease_backup_path.unlink(missing_ok=True)
+            except (OSError, StatePolicyError):
+                # The new state is already published; leave an auditable lease
+                # backup when cleanup itself cannot be verified.
+                pass
 
 
 def _write_same_directory_temp(path: Path, data: bytes) -> Path:
