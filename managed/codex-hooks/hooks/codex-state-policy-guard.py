@@ -883,7 +883,10 @@ def normalize_global_state(
             entry = inventory_map.get(identity)
             if not isinstance(entry, dict):
                 continue
-            if isinstance(value, str) and rewrite_projectless_path(value) != value:
+            if isinstance(value, str) and (
+                rewrite_projectless_path(value) != value
+                or entry.get("reason") == "unresolved-legacy-destination"
+            ):
                 path_drift += 1
             if _should_repair_path(
                 path_mode=path_mode,
