@@ -1669,8 +1669,41 @@ class CodexStatePolicyTests(unittest.TestCase):
             )
             self.assertFalse(result["ok"])
             self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
         finally:
             keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_run_policy_rejects_main_sqlite_mutation_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+
+        class MainOutput(io.StringIO):
+            mutated = False
+
+            def write(self, value: str) -> int:
+                if not self.mutated:
+                    self.mutated = True
+                    self.db_path.write_bytes(b"corrupted-main")
+                return super().write(value)
+
+        output = MainOutput()
+        output.db_path = self.db_path
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=output,
+            )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+        finally:
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
@@ -1690,14 +1723,17 @@ class CodexStatePolicyTests(unittest.TestCase):
                 return super().write(value)
 
         try:
+            output = SidecarOutput()
             result = self.module.run_policy(
                 self.codex_home,
                 check_only=False,
                 health_root=self.root / "health",
-                output=SidecarOutput(),
+                output=output,
             )
             self.assertFalse(result["ok"])
             self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
         finally:
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
@@ -1721,16 +1757,129 @@ class CodexStatePolicyTests(unittest.TestCase):
                 return super().write(value)
 
         try:
+            output = PolicyOutput()
             result = self.module.run_policy(
                 self.codex_home,
                 check_only=False,
                 health_root=self.root / "health",
-                output=PolicyOutput(),
+                output=output,
             )
             self.assertFalse(result["ok"])
             self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
         finally:
             policy_path.unlink(missing_ok=True)
+
+    def test_run_policy_rejects_sidecar_created_after_first_return_gate(self) -> None:
+        self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        journal_path = Path(str(self.db_path) + "-journal")
+        original_assert = self.module.SqliteTargetLease.assert_unchanged
+        calls = 0
+
+        def assert_then_create(lease: object, *args: object, **kwargs: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_assert(lease, *args, **kwargs)
+            if calls == 2:
+                journal_path.write_bytes(b"after-gate-journal")
+
+        try:
+            with mock.patch.object(
+                self.module.SqliteTargetLease,
+                "assert_unchanged",
+                new=assert_then_create,
+            ):
+                output = io.StringIO()
+                result = self.module.run_policy(
+                    self.codex_home,
+                    check_only=False,
+                    health_root=self.root / "health",
+                    output=output,
+                )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+            self.assertGreaterEqual(calls, 3)
+        finally:
+            journal_path.unlink(missing_ok=True)
+
+    def test_run_policy_rejects_policy_supplemental_after_first_return_gate(self) -> None:
+        self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        policy_path = self.codex_home / "policy.json"
+        original_assert = self.module.PermissionPolicySourceLease.assert_unchanged
+        calls = 0
+
+        def assert_then_create(lease: object, *args: object, **kwargs: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_assert(lease, *args, **kwargs)
+            if calls == 2:
+                policy_path.write_text(
+                    '{"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite"}}',
+                    encoding="utf-8",
+                )
+
+        try:
+            with mock.patch.object(
+                self.module.PermissionPolicySourceLease,
+                "assert_unchanged",
+                new=assert_then_create,
+            ):
+                output = io.StringIO()
+                result = self.module.run_policy(
+                    self.codex_home,
+                    check_only=False,
+                    health_root=self.root / "health",
+                    output=output,
+                )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertGreaterEqual(calls, 3)
+        finally:
+            policy_path.unlink(missing_ok=True)
+
+    def test_run_policy_nonseekable_failure_avoids_success_stdout(self) -> None:
+        self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+
+        class NonSeekableOutput(io.StringIO):
+            def seekable(self) -> bool:
+                return False
+
+        def fail_return_gate(lease: object, *args: object, **kwargs: object) -> None:
+            raise self.module.StatePolicyError("return gate fixture failure")
+
+        output = NonSeekableOutput()
+        diagnostics = io.StringIO()
+        try:
+            with mock.patch.object(
+                self.module.SqliteTargetLease,
+                "assert_unchanged",
+                new=fail_return_gate,
+            ):
+                with mock.patch.object(sys, "stderr", diagnostics):
+                    result = self.module.run_policy(
+                        self.codex_home,
+                        check_only=False,
+                        health_root=self.root / "health",
+                        output=output,
+                    )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(output.getvalue(), "")
+            self.assertEqual(len(diagnostics.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(diagnostics.getvalue())["ok"])
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     def test_sqlite_return_lease_unavailable_reports_unsafe_partial(self) -> None:
         connection = self.create_db()

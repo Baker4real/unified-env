@@ -1740,6 +1740,15 @@ class SqliteTargetLease:
                 check_sidecar_content=strict_sidecar_content,
             )
             if strict_sidecar_content:
+                if (
+                    self.expected_snapshot.content_known[0]
+                    and current_snapshot.content_known[0]
+                    and self.expected_snapshot.payload[0] != current_snapshot.payload[0]
+                ):
+                    raise StatePolicyError("thread state database bytes changed during return gate")
+                if self.expected_snapshot.content_known[0] != current_snapshot.content_known[0]:
+                    raise StatePolicyError("thread state database bytes unavailable during return gate")
+            if strict_sidecar_content:
                 for index in range(1, 4):
                     if (
                         self.expected_snapshot.content_known[index]
@@ -3685,34 +3694,97 @@ def run_policy(
             errors.append("state policy health write failed")
             payload["ok"] = False
             payload["errors"] = errors
-    try:
-        output.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+    def run_return_gates() -> None:
+        if sqlite_return_lease is not None:
+            sqlite_return_lease.assert_unchanged(strict_sidecar_content=True)
+        if global_return_lease is not None:
+            global_return_lease.assert_unchanged()
+        if policy_return_lease is not None:
+            policy_return_lease.assert_unchanged()
+
+    def mark_return_gate_failure(exc: BaseException) -> None:
+        if "unsafe-partial" not in errors:
+            errors.append("unsafe-partial")
+        errors.append(_safe_error(exc))
+        payload["ok"] = False
+        payload["converged"] = False
+        payload["errors"] = errors
+        health["ok"] = False
+        health["errors"] = errors
+        if write_health:
+            try:
+                _write_health(health_root / "codex-state-policy.json", health)
+            except (OSError, StatePolicyError):
+                errors.append("state policy health write failed")
+                payload["errors"] = errors
+
+    def output_is_seekable() -> bool:
         try:
-            if sqlite_return_lease is not None:
-                sqlite_return_lease.assert_unchanged(strict_sidecar_content=True)
-            if global_return_lease is not None:
-                global_return_lease.assert_unchanged()
-            if policy_return_lease is not None:
-                policy_return_lease.assert_unchanged()
+            return bool(output.seekable())
+        except (AttributeError, OSError, io.UnsupportedOperation):
+            return False
+
+    def emit_controlled_failure() -> None:
+        # A pipe/real stdout cannot retract a provisional line.  Keep that
+        # channel free of a misleading success envelope and send the single
+        # fail-closed result to the controlled diagnostic channel instead.
+        try:
+            sys.stderr.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+        except (AttributeError, OSError, io.UnsupportedOperation):
+            pass
+
+    try:
+        return_gate_failed = False
+        try:
+            run_return_gates()
         except BaseException as exc:
-            if "unsafe-partial" not in errors:
-                errors.append("unsafe-partial")
-            errors.append(_safe_error(exc))
-            payload["ok"] = False
-            payload["converged"] = False
-            payload["errors"] = errors
-            health["ok"] = False
-            health["errors"] = errors
-            if write_health:
+            return_gate_failed = True
+            mark_return_gate_failure(exc)
+        rendered = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+        seekable_output = output_is_seekable()
+        if return_gate_failed:
+            if seekable_output:
+                output.write(rendered)
+            else:
+                emit_controlled_failure()
+            return payload
+        if seekable_output:
+            output.write(rendered)
+            try:
+                # A sink can run arbitrary code from write().  A second,
+                # consecutive assertion closes the gap where that callback
+                # creates a sidecar or policy source immediately after the
+                # first post-write assertion returns.
+                run_return_gates()
+                run_return_gates()
+            except BaseException as exc:
+                mark_return_gate_failure(exc)
+                rewritten = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
                 try:
-                    _write_health(health_root / "codex-state-policy.json", health)
-                except (OSError, StatePolicyError):
-                    errors.append("state policy health write failed")
-                    payload["errors"] = errors
-            # The first line may already contain a success envelope. Emit the
-            # fail-closed result after the post-output gate so stream consumers
-            # can use the final line and callers receive the unsafe status.
-            output.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+                    output.seek(0)
+                    output.truncate(0)
+                    output.write(rewritten)
+                except (AttributeError, OSError, io.UnsupportedOperation):
+                    # Non-seekable streams cannot retract a prior write; keep
+                    # the returned payload fail-closed and do not emit a third
+                    # line.
+                    pass
+        else:
+            try:
+                # A non-seekable protocol sink cannot retract a line.  Run
+                # two final gates before its first write; any failure is
+                # reported only through the controlled diagnostic channel.
+                run_return_gates()
+                run_return_gates()
+            except BaseException as exc:
+                mark_return_gate_failure(exc)
+                emit_controlled_failure()
+                return payload
+            try:
+                output.write(rendered)
+            except BaseException as exc:
+                mark_return_gate_failure(exc)
+                emit_controlled_failure()
         return payload
     finally:
         if sqlite_return_lease is not None:
@@ -3746,7 +3818,11 @@ def main(argv: list[str] | None = None) -> int:
         if not is_production or args.health_root is not None:
             raise StatePolicyError("write mode is restricted to the fixed production entry")
         health_root = PRODUCTION_HEALTH_ROOT
-    output = sys.stdout if args.json else io.StringIO()
+    # Keep the protocol sink outside the lease-bound policy run.  The run
+    # writes into a seekable buffer so a late return-gate failure can replace
+    # the provisional envelope instead of exposing an earlier ``ok=true``
+    # line to the hook consumer.
+    output = io.StringIO()
     payload = run_policy(
         codex_home,
         check_only=args.check_only,
@@ -3754,6 +3830,8 @@ def main(argv: list[str] | None = None) -> int:
         output=output,
         write_health=not args.check_only,
     )
+    if args.json:
+        sys.stdout.write(output.getvalue())
     return 0 if payload["ok"] else 1
 
 
