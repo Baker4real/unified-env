@@ -336,8 +336,16 @@ $directFact = @($dependencyFacts | Where-Object id -ceq 'serena-cleanup')[0]
 $stateFact = @($dependencyFacts | Where-Object id -ceq 'codex-state-policy')[0]
 $providerFact = @($dependencyFacts | Where-Object id -ceq 'provider-stability')[0]
 Assert-True ($directFact.entrypointKind -ceq 'direct-vendor' -and $null -eq $directFact.wrapperPath) 'direct vendor 必须显式无 wrapper'
-Assert-True ($stateFact.dependencyState -ceq 'pending-or-mismatched') 'desired Python state policy 与 observed legacy Node/JS 必须报告缺口'
-Assert-True ($providerFact.dependencyState -ceq 'ready' -and $providerFact.wrapperParseState -ceq 'matched') '已存在 wrapper 必须通过精确有效命令行解析'
+Assert-True (
+    $stateFact.dependencyState -ceq 'pending-or-mismatched' -and
+    $stateFact.wrapperExists -eq $false -and
+    $stateFact.wrapperParseState -ceq 'not-read'
+) '已退役 state policy wrapper 必须作为缺失依赖观察，不得假定仍在线'
+Assert-True (
+    $providerFact.dependencyState -ceq 'pending-or-mismatched' -and
+    $providerFact.wrapperExists -eq $false -and
+    $providerFact.wrapperParseState -ceq 'not-read'
+) '已退役 provider wrapper 必须作为缺失依赖观察，不得假定仍在线'
 
 $runtimeFacts = @(Get-CodexHookRuntimeFacts -Manifest $manifest)
 Assert-True ($runtimeFacts.Count -eq 4 -and @($runtimeFacts | Where-Object probeState -ceq 'regular-file').Count -eq 4) 'runtime existence/hash 必须由安全 inventory probe 观察'
@@ -383,15 +391,14 @@ Assert-True ($publishedJson -notmatch '"command"\s*:') '入口不得输出 raw c
 Assert-True (-not (Test-Path -LiteralPath $probeMarker)) 'inventory 入口不得执行 hook'
 Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'REPORT.md'))) '入口必须发布 Markdown 配对报告'
 Assert-True ($published.jsonPath -ceq (Join-Path $OutputDir 'inventory.json')) '入口返回值必须指向已发布 JSON'
-Assert-Throws {
-    & $InventoryScript `
-        -ManifestPath $manifestPath `
-        -CodexHome $CodexHome `
-        -OutputDir $OutputDir `
-        -RequireNoRetiredRegistrations |
-        Out-Null
-} '结构化 full acceptance 必须在 retired registration 仍存在时非零退出'
-Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'inventory.json'))) 'full acceptance 失败后允许保留已发布 inventory artifact'
+$accepted = & $InventoryScript `
+    -ManifestPath $manifestPath `
+    -CodexHome $CodexHome `
+    -OutputDir $OutputDir `
+    -RequireNoRetiredRegistrations
+$acceptedDocument = [IO.File]::ReadAllText([string]$accepted.jsonPath) | ConvertFrom-Json -Depth 100
+Assert-True ($acceptedDocument.summary.retiredButRegisteredCount -eq 0) '当前终态必须通过 retired registration 硬门槛'
+Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'inventory.json'))) 'full acceptance 通过后必须保留已发布 inventory artifact'
 
 $gitIgnoreLines = @([IO.File]::ReadAllLines((Join-Path $ProjectRoot '.gitignore')))
 foreach ($requiredIgnore in @(

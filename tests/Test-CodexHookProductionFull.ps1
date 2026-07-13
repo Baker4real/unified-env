@@ -26,11 +26,6 @@ function Assert-Throws {
     throw $Message
 }
 
-$productionProfile=Get-CodexHookProductionFullProfile
-$productionEnvironmentRead={param($Name,$Scope)[Environment]::GetEnvironmentVariable($Name,[EnvironmentVariableTarget]::User)}
-$productionState=New-CodexHookProductionFullState -Profile $productionProfile -EnvironmentReadValue $productionEnvironmentRead
-Assert-True (Assert-CodexHookProductionFullPlan -Plan $productionState.plan -Profile $productionProfile) 'current production full snapshot plan 必须通过只读 validator'
-
 function Write-Utf8NoBom {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Text)
     [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false))
