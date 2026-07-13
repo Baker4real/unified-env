@@ -181,6 +181,8 @@ def _validate_inventory_root(
         raise StatePolicyError(f"{name} uses a non-canonical lexical path")
     if not path.is_absolute():
         raise StatePolicyError(f"{name} must be absolute")
+    if path.drive.startswith("\\\\"):
+        raise StatePolicyError(f"{name} must not use a UNC path")
     if required_drive is not None and path.drive.casefold() != required_drive.casefold():
         raise StatePolicyError(f"{name} must use the {required_drive} drive")
     return path

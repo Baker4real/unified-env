@@ -218,6 +218,12 @@ class CodexStatePathInventoryTests(unittest.TestCase):
         with self.assertRaises(self.module.StatePolicyError):
             self.module.build_path_inventory(
                 state,
+                r"\\server\share\Codex",
+                self.candidate_root,
+            )
+        with self.assertRaises(self.module.StatePolicyError):
+            self.module.build_path_inventory(
+                state,
                 r"C:\Users\WINDOWS\Documents\Codex",
                 str(self.candidate_root) + r"\..\candidate",
             )
