@@ -94,6 +94,12 @@ removeTree(evidenceRoot);
 fs.mkdirSync(fixtureRoot, { recursive: true });
 const fixtureCatalogPath = path.join(evidenceRoot, 'fixture-catalog.json');
 fs.writeFileSync(fixtureCatalogPath, `${JSON.stringify(fixtureCatalog, null, 2)}\n`, 'utf8');
+const fixtureApplyOptions = (overrides = {}) => ({
+  evidenceRoot,
+  allowTestCatalog: true,
+  testOnlyCatalog: fixtureCatalog,
+  ...overrides,
+});
 
 for (const surface of surfaces) {
   for (const role of ['yeet', 'github']) {
@@ -110,16 +116,16 @@ assert.equal(discovered.errors?.length ?? 0, 0);
 const targets = discovered.targets ?? discovered;
 assert.equal(targets.length, 6);
 
-const plan = overlay.buildChangePlan(discovered, fixtureCatalogPath);
+const plan = overlay.buildChangePlan(discovered, fixtureCatalog);
 assert.equal(plan.errors.length, 0);
 assert.equal(plan.changes.length, 6);
 
-const dryRun = overlay.applyChangePlan(plan, { dryRun: true, evidenceRoot });
+const dryRun = overlay.applyChangePlan(plan, fixtureApplyOptions({ dryRun: true }));
 assert.equal(dryRun.changed, 0);
 assert.equal(dryRun.failed, 0);
 assert.equal(dryRun.skipped, 0);
 
-const applied = overlay.applyChangePlan(plan, { dryRun: false, evidenceRoot });
+const applied = overlay.applyChangePlan(plan, fixtureApplyOptions({ dryRun: false }));
 assert.equal(applied.changed, 6);
 assert.equal(applied.failed, 0);
 assert.ok(applied.evidencePaths?.length >= 6);
@@ -130,7 +136,7 @@ const secondPlan = overlay.buildChangePlan(
 );
 assert.equal(secondPlan.errors.length, 0);
 assert.equal(secondPlan.changes.length, 0);
-const idempotent = overlay.applyChangePlan(secondPlan, { dryRun: false, evidenceRoot });
+const idempotent = overlay.applyChangePlan(secondPlan, fixtureApplyOptions({ dryRun: false }));
 assert.equal(idempotent.changed, 0);
 assert.equal(idempotent.failed, 0);
 assert.equal(idempotent.skipped, 6);
@@ -145,13 +151,13 @@ const externalPlan = overlay.buildChangePlan(
   fixtureCatalog,
 );
 assert.ok(externalPlan.errors.some((error) => error.reason === 'unsupported-plugin-surface'));
-assert.equal(overlay.applyChangePlan(externalPlan, { dryRun: false, evidenceRoot }).changed, 0);
+assert.equal(overlay.applyChangePlan(externalPlan, fixtureApplyOptions({ dryRun: false })).changed, 0);
 const forgedChange = JSON.parse(JSON.stringify(plan.changes[0]));
 forgedChange.path = externalTarget;
 forgedChange.codexRoot = codexRoot;
 const forgedApplyPlan = overlay.applyChangePlan(
   { changes: [forgedChange], skipped: [], errors: [] },
-  { dryRun: true, evidenceRoot },
+  fixtureApplyOptions({ dryRun: true }),
 );
 assert.equal(forgedApplyPlan.changed, 0);
 assert.equal(forgedApplyPlan.blocked, true);
@@ -250,17 +256,27 @@ for (const surface of surfaces) {
 }
 const postWriteDiscovery = overlay.discoverTargets(postWriteRoot);
 const postWritePlan = overlay.buildChangePlan(postWriteDiscovery, fixtureCatalogPath);
-const outsideEvidenceResult = overlay.applyChangePlan(postWritePlan, {
+const objectProductionPlan = overlay.buildChangePlan(postWriteDiscovery, fixtureCatalog);
+const objectProductionResult = overlay.applyChangePlan(objectProductionPlan, { dryRun: true, evidenceRoot });
+assert.equal(objectProductionResult.blocked, true);
+assert.ok(objectProductionResult.errors.some((error) => /canonical catalog normalized fingerprint drift/.test(error.message)));
+const productionEvidenceCatalogResult = overlay.applyChangePlan(postWritePlan, {
+  dryRun: true,
+  evidenceRoot,
+});
+assert.equal(productionEvidenceCatalogResult.blocked, true);
+assert.ok(productionEvidenceCatalogResult.errors.some((error) => /production canonical catalog/.test(error.message)));
+const outsideEvidenceResult = overlay.applyChangePlan(postWritePlan, fixtureApplyOptions({
   dryRun: true,
   evidenceRoot: 'D:\\Codex\\.codex\\run-evidence-outside-policy',
-});
+}));
 assert.equal(outsideEvidenceResult.blocked, true);
 assert.ok(outsideEvidenceResult.errors.some((error) => /evidenceRoot must stay under/.test(error.message)));
 const replacementTamper = JSON.parse(JSON.stringify(postWritePlan.changes[0]));
 replacementTamper.replacement = 'tampered replacement';
 const replacementTamperResult = overlay.applyChangePlan(
   { changes: [replacementTamper], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
-  { dryRun: false, evidenceRoot },
+  fixtureApplyOptions({ dryRun: false }),
 );
 assert.equal(replacementTamperResult.changed, 0);
 assert.ok(replacementTamperResult.errors.some((error) => error.reason === 'replacement-plan-fingerprint-mismatch'));
@@ -274,7 +290,7 @@ forgedCanonicalChange.catalogEntry = {
 };
 const forgedCanonicalResult = overlay.applyChangePlan(
   { changes: [forgedCanonicalChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
-  { dryRun: false, evidenceRoot },
+  fixtureApplyOptions({ dryRun: false }),
 );
 assert.equal(forgedCanonicalResult.changed, 0);
 assert.ok(forgedCanonicalResult.errors.some((error) => error.reason === 'canonical-replacement-mismatch'));
@@ -285,7 +301,7 @@ const pairOriginal = fs.readFileSync(pairPath);
 fs.writeFileSync(pairPath, 'unknown pair fingerprint\n', 'utf8');
 const pairFingerprintResult = overlay.applyChangePlan(
   { changes: [pairChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
-  { dryRun: false, evidenceRoot },
+  fixtureApplyOptions({ dryRun: false }),
 );
 assert.equal(pairFingerprintResult.changed, 0);
 assert.ok(pairFingerprintResult.errors.some((error) => error.reason === 'canonical-pair-fingerprint-mismatch'));
@@ -294,16 +310,15 @@ const casTarget = postWritePlan.changes[0].path;
 fs.writeFileSync(casTarget, 'user changed before apply\n', 'utf8');
 const casResult = overlay.applyChangePlan(
   { changes: [postWritePlan.changes[0]], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
-  { dryRun: false, evidenceRoot },
+  fixtureApplyOptions({ dryRun: false }),
 );
 assert.equal(casResult.changed, 0);
 assert.ok(casResult.errors.some((error) => error.reason === 'original-cas-conflict'));
 fs.writeFileSync(casTarget, postWritePlan.changes[0].original, 'utf8');
-const postWriteFailure = overlay.applyChangePlan(postWritePlan, {
+const postWriteFailure = overlay.applyChangePlan(postWritePlan, fixtureApplyOptions({
   dryRun: false,
-  evidenceRoot,
   onAfterWrite: () => { throw new Error('injected post-write verification failure'); },
-});
+}));
 assert.equal(postWriteFailure.status, 'rolled-back');
 for (const target of postWriteDiscovery.targets) {
   const variant = target.surfaceDirectory.includes('0.1.8-') ? 'remote' : 'local';
@@ -313,11 +328,10 @@ for (const target of postWriteDiscovery.targets) {
     `post-write failure left a changed target: ${target.path}`,
   );
 }
-const manifestFailure = overlay.applyChangePlan(postWritePlan, {
+const manifestFailure = overlay.applyChangePlan(postWritePlan, fixtureApplyOptions({
   dryRun: false,
-  evidenceRoot,
   failManifestUpdateAt: 3,
-});
+}));
 assert.equal(manifestFailure.status, 'rolled-back');
 for (const target of postWriteDiscovery.targets) {
   const variant = target.surfaceDirectory.includes('0.1.8-') ? 'remote' : 'local';
@@ -355,7 +369,7 @@ let unknownDiscovery = overlay.discoverTargets(fixtureRoot);
 let unknownPlan = overlay.buildChangePlan(unknownDiscovery, fixtureCatalogPath);
 assert.ok(unknownPlan.errors.some((error) => error.reason === 'unknown-input-fingerprint'));
 const unknownSnapshot = snapshotFiles();
-const unknownApply = overlay.applyChangePlan(unknownPlan, { dryRun: false, evidenceRoot });
+const unknownApply = overlay.applyChangePlan(unknownPlan, fixtureApplyOptions({ dryRun: false }));
 assert.equal(unknownApply.changed, 0);
 assert.equal(unknownApply.failed, 0);
 assertUnchanged(unknownSnapshot);
@@ -366,7 +380,7 @@ fs.writeFileSync(unknownTarget, '<!-- codex-github-default-branch-overlay: v1 --
 let forgedPlan = overlay.buildChangePlan(overlay.discoverTargets(fixtureRoot), fixtureCatalogPath);
 assert.ok(forgedPlan.errors.some((error) => error.reason === 'unknown-input-fingerprint'));
 const forgedSnapshot = snapshotFiles();
-const forgedApply = overlay.applyChangePlan(forgedPlan, { dryRun: false, evidenceRoot });
+const forgedApply = overlay.applyChangePlan(forgedPlan, fixtureApplyOptions({ dryRun: false }));
 assert.equal(forgedApply.changed, 0);
 assert.equal(forgedApply.failed, 0);
 assertUnchanged(forgedSnapshot);
@@ -390,7 +404,7 @@ assert.ok(
   '缺少 github/yeet 配对 skill 时必须失败关闭',
 );
 const missingSnapshot = snapshotFiles();
-const missingApply = overlay.applyChangePlan(missingPlan, { dryRun: false, evidenceRoot });
+const missingApply = overlay.applyChangePlan(missingPlan, fixtureApplyOptions({ dryRun: false }));
 assert.equal(missingApply.changed, 0);
 assert.equal(missingApply.failed, 0);
 assertUnchanged(missingSnapshot);

@@ -222,17 +222,44 @@ function validateCatalog(catalogOrPath) {
   return { ...catalog, roles };
 }
 
+function normalizedCatalogPayload(catalog) {
+  const metadata = {};
+  for (const key of Object.keys(catalog).filter((key) => key !== 'roles').sort()) {
+    metadata[key] = catalog[key];
+  }
+  return {
+    ...metadata,
+    roles: Object.fromEntries(EXPECTED_ROLES.map((role) => [
+      role,
+      catalog.roles[role].map((entry) => ({
+        upstreamSha256: entry.upstreamSha256,
+        patchedSha256: entry.patchedSha256,
+        patchedDocument: entry.patchedDocument,
+      })),
+    ])),
+  };
+}
+
+function normalizedCatalogDigest(catalog) {
+  return sha256(JSON.stringify(normalizedCatalogPayload(catalog)));
+}
+
 function catalogReference(catalogOrPath, validatedCatalog) {
   if (typeof catalogOrPath === 'string') {
     const catalogPath = resolveAbsolute(catalogOrPath);
+    const rawSha256 = sha256(fs.readFileSync(catalogPath));
     return {
       path: catalogPath,
-      sha256: sha256(fs.readFileSync(catalogPath)),
+      rawSha256,
+      normalizedSha256: normalizedCatalogDigest(validatedCatalog),
+      sha256: rawSha256,
     };
   }
   return {
-    path: path.join(__dirname, 'github-default-branch-skill-overlay-catalog.json'),
-    sha256: sha256(JSON.stringify(validatedCatalog)),
+    path: null,
+    rawSha256: null,
+    normalizedSha256: normalizedCatalogDigest(validatedCatalog),
+    sha256: normalizedCatalogDigest(validatedCatalog),
   };
 }
 
@@ -536,22 +563,52 @@ function rollbackManifest(manifestPath, options = {}) {
 }
 
 function resolveCanonicalCatalog(plan, options = {}) {
-  const requestedPath = options.catalogPath || plan.catalogRef?.path || path.join(__dirname, 'github-default-branch-skill-overlay-catalog.json');
-  const catalogPath = resolveAbsolute(requestedPath);
   const defaultCatalogPath = resolveAbsolute(path.join(__dirname, 'github-default-branch-skill-overlay-catalog.json'));
-  if (catalogPath.toLowerCase() !== defaultCatalogPath.toLowerCase()
-    && !isControlledEvidencePath(catalogPath)) {
-    throw new Error(`canonical catalog path is outside the allowed roots: ${catalogPath}`);
+  const hasTestCatalog = options.allowTestCatalog === true
+    && (typeof options.testOnlyCatalogPath === 'string' || options.testOnlyCatalog !== undefined);
+  if (hasTestCatalog) {
+    let testCatalog;
+    let testCatalogPath = null;
+    let rawSha256 = null;
+    if (typeof options.testOnlyCatalogPath === 'string') {
+      testCatalogPath = resolveAbsolute(options.testOnlyCatalogPath);
+      assertControlledEvidencePath(testCatalogPath, 'testOnlyCatalogPath');
+      const bytes = fs.readFileSync(testCatalogPath);
+      rawSha256 = sha256(bytes);
+      testCatalog = validateCatalog(testCatalogPath);
+    } else {
+      testCatalog = validateCatalog(options.testOnlyCatalog);
+    }
+    const normalizedSha256 = normalizedCatalogDigest(testCatalog);
+    if (plan.catalogRef?.normalizedSha256
+      && normalizedSha256 !== String(plan.catalogRef.normalizedSha256).toUpperCase()) {
+      throw new Error(`test-only catalog normalized fingerprint drift: expected ${plan.catalogRef.normalizedSha256}, got ${normalizedSha256}`);
+    }
+    return { path: testCatalogPath, rawSha256, normalizedSha256, catalog: testCatalog };
   }
-  const catalogBytes = fs.readFileSync(catalogPath);
-  const catalogSha256 = sha256(catalogBytes);
-  if (plan.catalogRef?.sha256 && catalogSha256 !== String(plan.catalogRef.sha256).toUpperCase()) {
-    throw new Error(`canonical catalog fingerprint drift: expected ${plan.catalogRef.sha256}, got ${catalogSha256}`);
+
+  if (options.testOnlyCatalogPath !== undefined || options.testOnlyCatalog !== undefined) {
+    throw new Error('test-only catalog injection requires allowTestCatalog=true');
+  }
+  if (plan.catalogRef?.path && resolveAbsolute(plan.catalogRef.path).toLowerCase() !== defaultCatalogPath.toLowerCase()) {
+    throw new Error(`production canonical catalog must be the script-local file: ${plan.catalogRef.path}`);
+  }
+  const catalogBytes = fs.readFileSync(defaultCatalogPath);
+  const rawSha256 = sha256(catalogBytes);
+  const canonicalCatalog = validateCatalog(defaultCatalogPath);
+  const normalizedSha256 = normalizedCatalogDigest(canonicalCatalog);
+  if (plan.catalogRef?.rawSha256 && rawSha256 !== String(plan.catalogRef.rawSha256).toUpperCase()) {
+    throw new Error(`canonical catalog byte fingerprint drift: expected ${plan.catalogRef.rawSha256}, got ${rawSha256}`);
+  }
+  if (plan.catalogRef?.normalizedSha256
+    && normalizedSha256 !== String(plan.catalogRef.normalizedSha256).toUpperCase()) {
+    throw new Error(`canonical catalog normalized fingerprint drift: expected ${plan.catalogRef.normalizedSha256}, got ${normalizedSha256}`);
   }
   return {
-    path: catalogPath,
-    sha256: catalogSha256,
-    catalog: validateCatalog(catalogPath),
+    path: defaultCatalogPath,
+    rawSha256,
+    normalizedSha256,
+    catalog: canonicalCatalog,
   };
 }
 
