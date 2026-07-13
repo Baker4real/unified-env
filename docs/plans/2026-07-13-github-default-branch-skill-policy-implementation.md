@@ -10,7 +10,7 @@
 
 ## 全局约束
 
-- 目标 remote 默认是 origin；私有上游保护流程只允许已验证的 private remote。每次推送前必须证明 remote 属于用户或已获明确授权。
+- 目标 remote 不从名称猜测，而是由用户授权的仓库上下文解析；私有上游保护流程只允许已验证的 private remote。每次推送前必须证明 remote 属于用户或已获明确授权。
 - 默认分支同时读取目标 remote 的 HEAD 符号引用与 GitHub defaultBranchRef；双证据必须一致，只有一个证据时才可使用，均缺失或冲突即停止。
 - 不得创建、推送、追踪或保留 patch-stack 分支。已存在的本地/远端 patch-stack 引用只报告，绝不自动删除。
 - 临时分支只能在 agent 说明必要性后使用；首个可发布提交必须同步远端；用户确认后必须合入并推送默认分支，再删除远端和本地临时分支。
@@ -71,7 +71,7 @@ assert.equal(overlay.applyChangePlan(
 运行：
 
 ~~~powershell
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitHubDefaultBranchSkillOverlay.cjs'
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitHubDefaultBranchSkillOverlay.cjs'
 ~~~
 
 预期：失败，错误明确说明 Apply-GitHubDefaultBranchSkillOverlay.cjs 和 catalog 尚不存在。
@@ -135,7 +135,7 @@ Deploy-GitHubDefaultBranchSkillOverlay.ps1 使用 CmdletBinding(SupportsShouldPr
 运行：
 
 ~~~powershell
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitHubDefaultBranchSkillOverlay.cjs'
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitHubDefaultBranchSkillOverlay.cjs'
 & 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\scripts\Deploy-GitHubDefaultBranchSkillOverlay.ps1' -SourceRoot 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\scripts' -CodexRoot 'D:\Codex\.codex' -EvidenceRoot 'D:\Codex\.codex\run-evidence\github-default-branch-skill-policy' -WhatIf
 ~~~
 
@@ -201,7 +201,7 @@ assert.doesNotMatch(handoff, /temporary directory of the user's OS/i);
 运行：
 
 ~~~powershell
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitDefaultBranchSkillPolicy.cjs' --codex-root 'D:\Codex\.codex'
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitDefaultBranchSkillPolicy.cjs' --codex-root 'D:\Codex\.codex'
 ~~~
 
 预期：失败并精确指出当前 main/master 猜测、patch-stack 推送、旧 PR 默认和 handoff 临时目录漂移。
@@ -240,7 +240,7 @@ handoff 当前内容与 SOURCE.md 记录的 D-hosted overlay 不一致。先恢�
 运行：
 
 ~~~powershell
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitDefaultBranchSkillPolicy.cjs' --codex-root 'D:\Codex\.codex'
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitDefaultBranchSkillPolicy.cjs' --codex-root 'D:\Codex\.codex'
 & 'D:\Codex\tools\python314-official\python.exe' 'D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py' --root 'D:\Codex\.codex\skills' --strict --format markdown
 ~~~
 
@@ -294,7 +294,7 @@ git -C 'D:\Codex\projects\unified-env-github-default-branch-skill-policy' push
 运行：
 
 ~~~powershell
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\.codex\scripts\Apply-GitHubDefaultBranchSkillOverlay.cjs' --codex-root 'D:\Codex\.codex' --evidence-root 'D:\Codex\.codex\run-evidence\github-default-branch-skill-policy' --dry-run --json
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\.codex\scripts\Apply-GitHubDefaultBranchSkillOverlay.cjs' --codex-root 'D:\Codex\.codex' --evidence-root 'D:\Codex\.codex\run-evidence\github-default-branch-skill-policy' --dry-run --json
 ~~~
 
 预期：当前六个 github/yeet target 全部被识别，全部属于 catalog 已知指纹；输出 changedCount=6、errorCount=0，且不修改文件。
@@ -304,8 +304,8 @@ git -C 'D:\Codex\projects\unified-env-github-default-branch-skill-policy' push
 运行：
 
 ~~~powershell
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\.codex\scripts\Apply-GitHubDefaultBranchSkillOverlay.cjs' --codex-root 'D:\Codex\.codex' --evidence-root 'D:\Codex\.codex\run-evidence\github-default-branch-skill-policy' --json
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\.codex\scripts\Apply-GitHubDefaultBranchSkillOverlay.cjs' --codex-root 'D:\Codex\.codex' --evidence-root 'D:\Codex\.codex\run-evidence\github-default-branch-skill-policy' --dry-run --json
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\.codex\scripts\Apply-GitHubDefaultBranchSkillOverlay.cjs' --codex-root 'D:\Codex\.codex' --evidence-root 'D:\Codex\.codex\run-evidence\github-default-branch-skill-policy' --json
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\.codex\scripts\Apply-GitHubDefaultBranchSkillOverlay.cjs' --codex-root 'D:\Codex\.codex' --evidence-root 'D:\Codex\.codex\run-evidence\github-default-branch-skill-policy' --dry-run --json
 ~~~
 
 预期：首次输出 changedCount=6 并生成 backup/manifest；第二次输出 changedCount=0、errorCount=0。
@@ -327,7 +327,7 @@ skill-operations.md 只添加一条简短指针：GitHub 插件刷新后，必�
 运行：
 
 ~~~powershell
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitDefaultBranchSkillPolicy.cjs' --codex-root 'D:\Codex\.codex'
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitDefaultBranchSkillPolicy.cjs' --codex-root 'D:\Codex\.codex'
 ~~~
 
 预期：它同时验证本地收尾 skill、marketplace source 与两份 GitHub plugin cache 都没有默认 PR、patch-stack 或 main/master 猜测，并包含临时分支双端收尾规则。
@@ -354,8 +354,8 @@ skill-operations.md 只添加一条简短指针：GitHub 插件刷新后，必�
 运行：
 
 ~~~powershell
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitHubDefaultBranchSkillOverlay.cjs'
-& 'C:\Program Files\nodejs\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitDefaultBranchSkillPolicy.cjs' --codex-root 'D:\Codex\.codex'
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitHubDefaultBranchSkillOverlay.cjs'
+& 'D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' 'D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitDefaultBranchSkillPolicy.cjs' --codex-root 'D:\Codex\.codex'
 & 'D:\Codex\tools\python314-official\python.exe' 'D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py' --root 'D:\Codex\.codex\skills' --strict --format markdown
 git -C 'D:\Codex\projects\unified-env-github-default-branch-skill-policy' diff --check
 git -C 'D:\Codex\projects\unified-env-github-default-branch-skill-policy' status --short --branch
@@ -397,31 +397,31 @@ git -C 'D:\Codex\projects\unified-env-github-default-branch-skill-policy' push
 
 **Files:**
 
-- Modify through Git only: origin/main
-- Delete through Git only after main push succeeds: origin/codex/github-default-branch-skill-policy 和本地 codex/github-default-branch-skill-policy
+- Modify through Git only: `<TARGET_REMOTE>/<RESOLVED_DEFAULT_BRANCH>`（两个变量必须由目标仓库授权上下文和双证据解析得到）
+- Delete through Git only after the resolved default branch push succeeds: `<TARGET_REMOTE>/<TEMPORARY_BRANCH>` 和本地 `<TEMPORARY_BRANCH>`
 - Remove only this workflow 创建的 worktree: D:\Codex\projects\unified-env-github-default-branch-skill-policy
 
 **Interfaces:**
 
-- Consumes: 用户明确确认、Task 4 全通过、origin/main 的最新状态。
-- Produces: 已推送的 main、删除完成的双端临时分支和 worktree、最终 fetch --prune 镜像证明。
+- Consumes: 用户明确确认、Task 4 全通过、`<TARGET_REMOTE>/<RESOLVED_DEFAULT_BRANCH>` 的最新状态，以及已记录的默认分支双证据。
+- Produces: 已推送的 `<TARGET_REMOTE>/<RESOLVED_DEFAULT_BRANCH>`、删除完成的双端临时分支和 worktree、最终 fetch --prune 镜像证明。
 
-- [ ] **Step 1：创建干净的 main 集成 worktree**
+- [ ] **Step 1：创建干净的默认分支集成 worktree**
 
-不触碰 D:\Codex\projects\统一环境 的用户脏 worktree。先 fetch --prune，然后从 origin/main 创建唯一的新 worktree，验证其中没有未提交改动。
+不触碰 D:\Codex\projects\统一环境 的用户脏 worktree。先把 `<TARGET_REMOTE>` 和 `<RESOLVED_DEFAULT_BRANCH>` 固定为已验证变量，再执行 `git fetch <TARGET_REMOTE> --prune`，从 `<TARGET_REMOTE>/<RESOLVED_DEFAULT_BRANCH>` 创建唯一的新 worktree，验证其中没有未提交改动。
 
 - [ ] **Step 2：合入并验证**
 
-在新的 main worktree 中执行普通非强制 merge；发生冲突、非快进或测试失败立即停止，不删除临时分支。合入成功后重跑 Task 4 的全部自动验证。
+在新的默认分支 worktree 中执行普通非强制 merge；发生冲突、非快进或测试失败立即停止，不删除临时分支。合入成功后重跑 Task 4 的全部自动验证。
 
-- [ ] **Step 3：推送 main**
+- [ ] **Step 3：推送已解析默认分支**
 
-只在验证通过后执行 git push origin main。推送后 fetch --prune，确认本地 main HEAD 与 origin/main 相同。
+只在验证通过后执行 `git push <TARGET_REMOTE> <RESOLVED_DEFAULT_BRANCH>`。推送后执行 `git fetch <TARGET_REMOTE> --prune`，确认本地默认分支 HEAD 与 `<TARGET_REMOTE>/<RESOLVED_DEFAULT_BRANCH>` 相同。
 
 - [ ] **Step 4：删除临时分支与 worktree**
 
-先删除远端临时分支，再删除本地临时分支，最后移除本 workflow 创建的两个 worktree。每一步都检查上一步成功；若远端或本地删除失败，保留另一端并如实报告不一致。
+仅在默认分支推送成功后，按顺序执行 `git push --delete <TARGET_REMOTE> <TEMPORARY_BRANCH>`、`git branch --delete <TEMPORARY_BRANCH>`、`git fetch <TARGET_REMOTE> --prune`，并只移除 `ownedByThisWorkflow` 创建的 worktree。每一步都检查上一步成功；若远端或本地删除失败，保留另一端并如实报告不一致。用户明确要求保留临时分支或创建 PR 时不得执行删除例外。
 
 - [ ] **Step 5：最终证明**
 
-运行 git branch -vv、git ls-remote --heads origin、git worktree list --porcelain 和 git status --short --branch，证明 main 已推送、workflow 临时分支没有单边残留、原用户 worktree 未被修改。
+运行 `git branch -vv`、`git ls-remote --heads <TARGET_REMOTE>`、`git worktree list --porcelain` 和 `git status --short --branch`，证明已解析默认分支推送成功、workflow 临时分支没有单边残留、原用户 worktree 未被修改。

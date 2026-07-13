@@ -628,6 +628,28 @@ function validateRollbackManifest(resolvedManifest, manifest) {
   if (!isWithin(evidenceDirectory, resolvedManifest)) {
     throw new Error(`manifestPath must stay inside its evidenceDirectory: ${resolvedManifest}`);
   }
+  if (manifest.catalogPath !== undefined || manifest.catalogSha256 !== undefined || manifest.catalogBackupPath !== undefined) {
+    if (typeof manifest.catalogPath !== 'string' || typeof manifest.catalogSha256 !== 'string'
+      || typeof manifest.catalogBackupPath !== 'string') {
+      throw new Error('manifest catalog evidence must include catalogPath, catalogSha256, and catalogBackupPath');
+    }
+    const catalogPath = resolveAbsolute(manifest.catalogPath);
+    const catalogBackupPath = resolveAbsolute(manifest.catalogBackupPath);
+    assertDDrivePath(catalogPath, 'manifest catalogPath');
+    assertDDrivePath(catalogBackupPath, 'manifest catalogBackupPath');
+    if (!isWithin(evidenceDirectory, catalogBackupPath)) {
+      throw new Error(`manifest catalogBackupPath is outside its evidenceDirectory: ${catalogBackupPath}`);
+    }
+    if (!/^[A-F0-9]{64}$/i.test(manifest.catalogSha256)) {
+      throw new Error(`manifest catalogSha256 is invalid: ${manifest.catalogSha256}`);
+    }
+    if (!fs.existsSync(catalogBackupPath) || sha256File(catalogBackupPath) !== String(manifest.catalogSha256).toUpperCase()) {
+      throw new Error(`manifest catalog backup fingerprint mismatch: ${catalogBackupPath}`);
+    }
+    manifest.catalogPath = catalogPath;
+    manifest.catalogBackupPath = catalogBackupPath;
+    manifest.catalogSha256 = String(manifest.catalogSha256).toUpperCase();
+  }
   const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
   for (const entry of entries) {
     if (!entry || typeof entry.path !== 'string' || typeof entry.backupPath !== 'string' || typeof entry.codexRoot !== 'string') {
@@ -1049,9 +1071,11 @@ function applyChangePlan(plan, options = {}) {
       evidencePaths: [],
     };
   }
+  let canonicalResolution;
   let canonicalCatalog;
   try {
-    canonicalCatalog = resolveCanonicalCatalog(safePlan, options).catalog;
+    canonicalResolution = resolveCanonicalCatalog(safePlan, options);
+    canonicalCatalog = canonicalResolution.catalog;
     assertControlledEvidencePath(options.evidenceRoot || DEFAULT_EVIDENCE_ROOT, 'evidenceRoot');
   } catch (error) {
     return {
@@ -1104,6 +1128,53 @@ function applyChangePlan(plan, options = {}) {
     entries: [],
   };
 
+  const sourceCatalogPath = canonicalResolution.path && resolveAbsolute(canonicalResolution.path);
+  const sourceCatalogSha256 = canonicalResolution.rawSha256 || (sourceCatalogPath && sha256File(sourceCatalogPath));
+  const inventory = safePlan.inventory;
+  if (!sourceCatalogPath || !sourceCatalogSha256 || !inventory || !Array.isArray(inventory.targets)) {
+    return {
+      ok: false,
+      blocked: true,
+      changed: 0,
+      skipped: alreadySkipped,
+      failed: 0,
+      errors: [{ reason: 'missing-evidence-inputs', message: 'apply requires a file-backed catalog and complete inventory for evidence closure' }],
+      evidencePaths: [],
+    };
+  }
+  assertDDrivePath(sourceCatalogPath, 'canonical catalog path');
+  const catalogBackupPath = path.join(evidenceDirectory, 'catalog-backup.json');
+  manifest.catalogPath = sourceCatalogPath;
+  manifest.catalogSha256 = String(sourceCatalogSha256).toUpperCase();
+  manifest.catalogBackupPath = catalogBackupPath;
+  manifest.inventory = {
+    codexRoot: inventory.codexRoot,
+    digest: inventory.digest,
+    targets: inventory.targets.map((target) => ({ ...target })),
+  };
+  manifest.sourceInputs = {
+    catalog: {
+      path: sourceCatalogPath,
+      sha256: String(sourceCatalogSha256).toUpperCase(),
+      backupPath: catalogBackupPath,
+    },
+    targets: inventory.targets.map((target) => ({ ...target })),
+    changes: planned.map((change) => ({
+      path: change.path,
+      role: change.role,
+      originalSha256: change.originalSha256,
+      originalMtimeMs: change.originalMtimeMs,
+      replacementSha256: change.replacementSha256,
+    })),
+    skipped: (safePlan.skipped || []).map((entry) => ({
+      path: entry.path,
+      role: entry.role,
+      sha256: entry.sha256,
+      patchedSha256: entry.patchedSha256,
+      mtimeMs: entry.mtimeMs,
+    })),
+  };
+
   let manifestWrites = 0;
   const persistManifest = () => {
     manifestWrites += 1;
@@ -1114,6 +1185,10 @@ function applyChangePlan(plan, options = {}) {
   };
 
   try {
+    fs.copyFileSync(sourceCatalogPath, catalogBackupPath);
+    if (sha256File(catalogBackupPath) !== manifest.catalogSha256) {
+      throw new Error(`catalog backup fingerprint mismatch at ${catalogBackupPath}`);
+    }
     // The complete backup set is committed before any target is changed.
     for (const [index, change] of planned.entries()) {
       assertDDrivePath(change.path, 'target path');
@@ -1181,7 +1256,7 @@ function applyChangePlan(plan, options = {}) {
       failed: 0,
       errors: [],
       manifestPath,
-      evidencePaths: [manifestPath, ...manifest.entries.map((entry) => entry.backupPath)],
+      evidencePaths: [manifestPath, manifest.catalogBackupPath, ...manifest.entries.map((entry) => entry.backupPath)],
     };
   } catch (error) {
     manifest.status = 'apply-failed';
@@ -1207,7 +1282,7 @@ function applyChangePlan(plan, options = {}) {
       failed: 1,
       errors: [{ reason: 'apply-failed', message: error.message }, ...rollback.errors],
       manifestPath,
-      evidencePaths: [manifestPath, ...manifest.entries.map((entry) => entry.backupPath)],
+      evidencePaths: [manifestPath, manifest.catalogBackupPath, ...manifest.entries.map((entry) => entry.backupPath)],
     };
   }
 }

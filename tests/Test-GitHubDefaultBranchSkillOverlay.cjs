@@ -129,6 +129,7 @@ fs.writeFileSync(fixtureCatalogPath, `${JSON.stringify(fixtureCatalog, null, 2)}
 const fixtureApplyOptions = (overrides = {}) => ({
   evidenceRoot,
   allowTestCatalog: true,
+  testOnlyCatalogPath: fixtureCatalogPath,
   testOnlyCatalog: fixtureCatalog,
   ...overrides,
 });
@@ -161,6 +162,20 @@ const applied = overlay.applyChangePlan(plan, fixtureApplyOptions({ dryRun: fals
 assert.equal(applied.changed, 6);
 assert.equal(applied.failed, 0);
 assert.ok(applied.evidencePaths?.length >= 6);
+const appliedManifest = JSON.parse(fs.readFileSync(applied.manifestPath, 'utf8'));
+assert.equal(appliedManifest.catalogPath, fixtureCatalogPath);
+assert.equal(appliedManifest.catalogSha256, sha256(fs.readFileSync(fixtureCatalogPath)));
+assert.equal(
+  sha256(fs.readFileSync(appliedManifest.catalogBackupPath)),
+  appliedManifest.catalogSha256,
+);
+assert.equal(appliedManifest.inventory.digest, plan.inventory.digest);
+assert.equal(appliedManifest.inventory.targets.length, 6);
+assert.equal(appliedManifest.sourceInputs.catalog.path, fixtureCatalogPath);
+assert.equal(appliedManifest.sourceInputs.catalog.sha256, appliedManifest.catalogSha256);
+assert.equal(appliedManifest.sourceInputs.targets.length, 6);
+assert.equal(appliedManifest.sourceInputs.changes.length, 6);
+assert.equal(appliedManifest.sourceInputs.skipped.length, 0);
 
 const secondPlan = overlay.buildChangePlan(
   overlay.discoverTargets(fixtureRoot),
@@ -185,6 +200,11 @@ assert.equal(mixedPlan.skipped.length, 5);
 const mixedApply = overlay.applyChangePlan(mixedPlan, fixtureApplyOptions({ dryRun: false }));
 assert.equal(mixedApply.changed, 1);
 assert.equal(mixedApply.failed, 0);
+const mixedManifest = JSON.parse(fs.readFileSync(mixedApply.manifestPath, 'utf8'));
+assert.equal(mixedManifest.inventory.digest, mixedPlan.inventory.digest);
+assert.equal(mixedManifest.sourceInputs.targets.length, 6);
+assert.equal(mixedManifest.sourceInputs.changes.length, 1);
+assert.equal(mixedManifest.sourceInputs.skipped.length, 5);
 
 // A skipped entry is not trusted merely because it is marked skipped.
 const forgedSkippedPlan = JSON.parse(JSON.stringify(secondPlan));
