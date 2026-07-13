@@ -1495,6 +1495,96 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
+    def test_run_policy_rejects_global_competitor_before_success_envelope(self) -> None:
+        original = self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        original_update = self.module.update_global_state
+
+        def update_then_replace(*args: object, **kwargs: object):
+            result = original_update(*args, **kwargs)
+            competitor = self.root / "run-policy-global-competitor.json"
+            competitor.write_bytes(b'{"competitor":true}')
+            os.replace(competitor, self.global_path)
+            return result
+
+        with mock.patch.object(self.module, "update_global_state", side_effect=update_then_replace):
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=io.StringIO(),
+            )
+        self.assertFalse(result["ok"])
+        self.assertIn("unsafe-partial", result["errors"])
+        self.assertEqual(result["threadState"]["status"], "not-run")
+        self.assertNotEqual(self.global_path.read_bytes(), original)
+
+    def test_run_policy_rejects_sqlite_competitor_before_success_envelope(self) -> None:
+        self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        original_update = self.module.update_thread_state
+
+        def update_then_mutate(*args: object, **kwargs: object):
+            result = original_update(*args, **kwargs)
+            competitor = sqlite3.connect(self.db_path)
+            try:
+                competitor.execute(
+                    "update threads set approval_mode='on-request' where id='target-a'"
+                )
+                competitor.commit()
+            finally:
+                competitor.close()
+            return result
+
+        try:
+            with mock.patch.object(self.module, "update_thread_state", side_effect=update_then_mutate):
+                result = self.module.run_policy(
+                    self.codex_home,
+                    check_only=False,
+                    health_root=self.root / "health",
+                    output=io.StringIO(),
+                )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_sqlite_return_lease_unavailable_reports_unsafe_partial(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original_fingerprint = self.module._assert_permission_policy_fingerprint
+        locker: sqlite3.Connection | None = None
+        calls = 0
+
+        def lock_after_commit(current_policy: object) -> None:
+            nonlocal calls, locker
+            calls += 1
+            original_fingerprint(current_policy)
+            if calls == 4:
+                locker = sqlite3.connect(self.db_path, timeout=0)
+                locker.execute("begin immediate")
+
+        try:
+            with mock.patch.object(
+                self.module,
+                "_assert_permission_policy_fingerprint",
+                side_effect=lock_after_commit,
+            ):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "unsafe-partial"):
+                    self.module.update_thread_state(
+                        self.db_path,
+                        permission_policy=policy,
+                    )
+            self.assertGreaterEqual(calls, 4)
+        finally:
+            if locker is not None:
+                locker.rollback()
+                locker.close()
+
     def test_malformed_and_backup_failure_preserve_original_bytes(self) -> None:
         malformed = b'{"broken":'
         self.global_path.write_bytes(malformed)
