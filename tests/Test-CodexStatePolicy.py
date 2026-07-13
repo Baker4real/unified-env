@@ -1943,6 +1943,122 @@ class CodexStatePolicyTests(unittest.TestCase):
         finally:
             journal_path.unlink(missing_ok=True)
 
+    def test_run_policy_wal_missing_journal_created_after_last_return_gate_fails_closed(self) -> None:
+        """A legal WAL cold-start must not leave an unguarded journal gap."""
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        journal_path = Path(str(self.db_path) + "-journal")
+        keeper.execute("update threads set sentinel='wal-gap' where id='target-a'")
+        keeper.commit()
+        self.assertTrue(Path(str(self.db_path) + "-wal").exists())
+        self.assertFalse(journal_path.exists())
+        original_assert = self.module.SqliteTargetLease.assert_unchanged
+        calls = 0
+
+        def assert_then_create(lease: object, *args: object, **kwargs: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_assert(lease, *args, **kwargs)
+            # The current implementation has four return-gate calls.  Creating
+            # the missing sidecar after the last one reproduces the unbounded
+            # generation that the final envelope must not report as success.
+            if calls == 4:
+                journal_path.write_bytes(b"late-journal")
+
+        try:
+            with mock.patch.object(
+                self.module.SqliteTargetLease,
+                "assert_unchanged",
+                new=assert_then_create,
+            ):
+                output = io.StringIO()
+                result = self.module.run_policy(
+                    self.codex_home,
+                    check_only=False,
+                    health_root=self.root / "health",
+                    output=output,
+                )
+            self.assertFalse(result["ok"])
+            self.assertIn(
+                "generation-unbounded",
+                result["errors"],
+                (calls, result, output.getvalue(), journal_path.exists()),
+            )
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows reparse-point semantics")
+    def test_run_policy_wal_missing_journal_reparse_after_last_return_gate_fails_closed(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='wal-reparse' where id='target-a'")
+        keeper.commit()
+        journal_path = Path(str(self.db_path) + "-journal")
+        outside = self.root / "journal-reparse-target"
+        outside.mkdir()
+        journal_literal = str(journal_path).replace("'", "''")
+        outside_literal = str(outside).replace("'", "''")
+        command = (
+            "$ErrorActionPreference='Stop';"
+            f"New-Item -ItemType Junction -Path '{journal_literal}' "
+            f"-Target '{outside_literal}' | Out-Null"
+        )
+        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
+        journal_path.unlink(missing_ok=True)
+        original_assert = self.module.SqliteTargetLease.assert_unchanged
+        calls = 0
+
+        def assert_then_create_reparse(lease: object, *args: object, **kwargs: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_assert(lease, *args, **kwargs)
+            if calls == 4:
+                created = subprocess.run(
+                    [
+                        r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe",
+                        "-NoProfile",
+                        "-EncodedCommand",
+                        encoded,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if created.returncode != 0:
+                    raise self.module.StatePolicyError(
+                        "fixture journal reparse creation failed"
+                    )
+
+        try:
+            with mock.patch.object(
+                self.module.SqliteTargetLease,
+                "assert_unchanged",
+                new=assert_then_create_reparse,
+            ):
+                output = io.StringIO()
+                result = self.module.run_policy(
+                    self.codex_home,
+                    check_only=False,
+                    health_root=self.root / "health",
+                    output=output,
+                )
+            self.assertFalse(result["ok"])
+            self.assertIn("generation-unbounded", result["errors"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+        finally:
+            keeper.close()
+            if journal_path.exists() or journal_path.is_symlink():
+                journal_path.rmdir()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
     def test_run_policy_rejects_policy_supplemental_after_first_return_gate(self) -> None:
         self.write_global(self.permission_drift())
         connection = self.create_db()
@@ -2114,6 +2230,36 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertFalse(payload["converged"])
         self.assertIn("generation-unbounded", payload["errors"])
         self.assertIn("unsafe-partial", payload["errors"])
+
+    def test_sqlite_generation_unbounded_requires_wal_and_shm_but_allows_wal_journal_cold_start(
+        self,
+    ) -> None:
+        payload = (b"db", b"wal", b"shm", None)
+        identities = ((1, 1), (1, 2), (1, 3), None)
+        metadata = (
+            (True, 2, 1, (1, 0)),
+            (True, 3, 1, (1, 0)),
+            (True, 3, 1, (1, 0)),
+            (False, None, None, (1, 0)),
+        )
+        cold_start = self.module.SqliteSourceSnapshot(
+            payload=payload,
+            identities=identities,
+            metadata=metadata,
+        )
+        self.assertFalse(self.module._sqlite_generation_unbounded(cold_start, cold_start))
+        for missing_index in (1, 2):
+            missing_identities = list(identities)
+            missing_identities[missing_index] = None
+            missing = self.module.SqliteSourceSnapshot(
+                payload=payload,
+                identities=tuple(missing_identities),
+                metadata=metadata,
+            )
+            self.assertTrue(
+                self.module._sqlite_generation_unbounded(missing, cold_start),
+                f"missing sidecar index {missing_index} must fail closed",
+            )
 
     def test_check_only_removes_new_snapshot_root_and_empty_ancestors(self) -> None:
         conn = self.create_db()

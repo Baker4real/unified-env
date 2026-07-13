@@ -1979,6 +1979,42 @@ class SqliteTargetLease:
         if select_thread_updates(self._connection, self.permission_policy):
             raise StatePolicyError("thread state target changed concurrently")
 
+    def assert_no_create(self) -> None:
+        """Keep an initially absent WAL journal under a no-create monitor.
+
+        SQLite WAL mode legitimately starts with a database/WAL/SHM set and no
+        rollback journal.  The absent journal cannot be byte-range leased, so
+        every envelope gate also re-probes that name.  A journal appearing after
+        the normal lease assertion is an unbounded generation and must fail
+        closed instead of being silently accepted.
+        """
+        if self._closed or self._connection is None:
+            raise StatePolicyError("sqlite target lease is closed")
+        snapshot = self.expected_snapshot
+        if snapshot is None or snapshot.identities[1] is None or snapshot.identities[3] is not None:
+            return
+        journal_path = Path(str(self.path) + "-journal")
+        try:
+            journal_path.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise StatePolicyError(
+                "thread state source generation is unbounded"
+            ) from exc
+        try:
+            _assert_check_only_d_path_without_reparse(
+                journal_path,
+                name="thread state generation monitor",
+            )
+        except StatePolicyError as exc:
+            if "reparse" in str(exc).casefold():
+                raise StatePolicyError(
+                    "thread state source generation is unbounded (reparse)"
+                ) from exc
+            raise
+        raise StatePolicyError("thread state source generation is unbounded")
+
     def close(self) -> None:
         if self._closed:
             return
@@ -3003,12 +3039,18 @@ def _sqlite_generation_unbounded(
     initial: SqliteSourceSnapshot,
     final: SqliteSourceSnapshot,
 ) -> bool:
-    """Return whether a missing initial sidecar remains unleased at return.
+    """Return whether the initial SQLite source-set cannot be leased safely.
 
     A WAL database may legitimately have no rollback journal; that name is
-    not a source-set gap while the initial WAL generation is present.  Any
-    other missing name has no Windows no-create primitive, so a write-mode
-    caller must not publish a success envelope.
+    not a required source-set member while the initial WAL generation is
+    present.  WAL and SHM, however, are the live generation pair: if either is
+    absent at the first capture, no return lease can bind the complete source
+    set even when SQLite creates it before the final snapshot.  The write-mode
+    caller must therefore fail closed rather than publish a success envelope.
+
+    ``final`` is retained in the signature for the existing call contract and
+    to make the invariant explicit: a later sidecar appearance never repairs
+    an unleased initial generation.
     """
     missing_initial = {
         index
@@ -3017,7 +3059,7 @@ def _sqlite_generation_unbounded(
     }
     if initial.identities[1] is not None and initial.identities[3] is None:
         missing_initial.discard(3)
-    return any(final.identities[index] is None for index in missing_initial)
+    return bool(missing_initial)
 
 
 def _connect_sqlite_bound(path: Path, expected_identity: tuple[int, int]) -> sqlite3.Connection:
@@ -3524,6 +3566,8 @@ def _write_health(path: Path, envelope: dict[str, object]) -> None:
 
 def _safe_error(exc: BaseException) -> str:
     known = str(exc).lower()
+    if "generation-unbounded" in known or ("generation" in known and "unbounded" in known):
+        return "state policy generation is unbounded"
     if "busy" in known:
         return "state policy resource busy"
     if "malformed" in known or "json" in known:
@@ -3981,6 +4025,7 @@ def run_policy(
     def run_return_gates() -> None:
         if sqlite_return_lease is not None:
             sqlite_return_lease.assert_unchanged(strict_sidecar_content=True)
+            sqlite_return_lease.assert_no_create()
         if global_return_lease is not None:
             global_return_lease.assert_unchanged()
         if policy_return_lease is not None:
@@ -3989,6 +4034,13 @@ def run_policy(
     def mark_return_gate_failure(exc: BaseException) -> None:
         if "unsafe-partial" not in errors:
             errors.append("unsafe-partial")
+        known = str(exc).casefold()
+        if (
+            "generation-unbounded" in known
+            or ("generation" in known and "unbounded" in known)
+            or ("sidecar" in known and "appeared" in known)
+        ) and "generation-unbounded" not in errors:
+            errors.append("generation-unbounded")
         errors.append(_safe_error(exc))
         payload["ok"] = False
         payload["converged"] = False
