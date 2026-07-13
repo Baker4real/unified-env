@@ -446,6 +446,9 @@ function Assert-CodexHookProductionFullApplyFinalState {
 function Invoke-CodexHookProductionFullApplyEngine {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[string]$ApprovedGenerationId,[string]$ApprovedPlanSha256,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot,[scriptblock]$TestBeforeRegistryPublish,[scriptblock]$TestBeforeAppliedActivePublish,[scriptblock]$TestBeforeRollbackPendingStatus,[scriptblock]$TestBeforeAutomaticRollback,[scriptblock]$TestAfterAutomaticRollbackAction)
+    if ($Profile.PSObject.Properties.Name -contains 'isFixtureAdapter' -and -not [bool]$Profile.isFixtureAdapter) {
+        throw 'superseded-by-host-hook-reconciler'
+    }
     [void](Assert-CodexHookProductionFullApplySeamGuard -Profile $Profile -TestFaultInjection $TestFaultInjection -TestAfterPredecessorSnapshot $TestAfterPredecessorSnapshot -TestBeforeRegistryPublish $TestBeforeRegistryPublish -TestBeforeAppliedActivePublish $TestBeforeAppliedActivePublish -TestBeforeRollbackPendingStatus $TestBeforeRollbackPendingStatus -TestBeforeAutomaticRollback $TestBeforeAutomaticRollback -TestAfterAutomaticRollbackAction $TestAfterAutomaticRollbackAction)
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     if(-not $Profile.isFixtureAdapter){
@@ -634,6 +637,9 @@ function Restore-CodexHookProductionFullEngine {
         [scriptblock]$TestBeforeActiveRestorePublish,
         [scriptblock]$TestAfterActiveConverged
     )
+    if ($Profile.PSObject.Properties.Name -contains 'isFixtureAdapter' -and -not [bool]$Profile.isFixtureAdapter) {
+        throw 'superseded-by-host-hook-reconciler'
+    }
     [void](Assert-CodexHookProductionFullRestoreSeamGuard -Profile $Profile -TestAfterRestoreAction $TestAfterRestoreAction -TestBeforeEnvironmentRestoreWrite $TestBeforeEnvironmentRestoreWrite -TestBeforeActiveRestorePublish $TestBeforeActiveRestorePublish -TestAfterActiveConverged $TestAfterActiveConverged)
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     $evidence=Assert-CodexHookCapabilityPath $EvidenceDirectory ([string]$Profile.evidenceRoot) @() 'production full evidence'
@@ -804,6 +810,7 @@ function Restore-CodexHookProductionFullEngine {
 function Invoke-CodexHookProductionFullApplyCore {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot,[scriptblock]$TestBeforeRegistryPublish,[scriptblock]$TestBeforeAppliedActivePublish,[scriptblock]$TestBeforeRollbackPendingStatus,[scriptblock]$TestBeforeAutomaticRollback,[scriptblock]$TestAfterAutomaticRollbackAction)
+    if ($Profile.PSObject.Properties.Name -contains 'isFixtureAdapter' -and -not [bool]$Profile.isFixtureAdapter) { throw 'superseded-by-host-hook-reconciler' }
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     if(-not $Profile.isFixtureAdapter){throw 'production full core adapters 仅允许 fixed fixture；真实 production 必须使用固定 façade。'}
     return Invoke-CodexHookProductionFullApplyEngine -Profile $Profile -EnvironmentReadValue $EnvironmentReadValue -EnvironmentWriteValue $EnvironmentWriteValue -TestFaultInjection $TestFaultInjection -TestAfterPredecessorSnapshot $TestAfterPredecessorSnapshot -TestBeforeRegistryPublish $TestBeforeRegistryPublish -TestBeforeAppliedActivePublish $TestBeforeAppliedActivePublish -TestBeforeRollbackPendingStatus $TestBeforeRollbackPendingStatus -TestBeforeAutomaticRollback $TestBeforeAutomaticRollback -TestAfterAutomaticRollbackAction $TestAfterAutomaticRollbackAction
@@ -812,6 +819,7 @@ function Invoke-CodexHookProductionFullApplyCore {
 function Restore-CodexHookProductionFullCore {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][string]$EvidenceDirectory,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('restored','rolled-back')][string]$FinalStatus='restored',[scriptblock]$TestAfterRestoreAction,[scriptblock]$TestBeforeEnvironmentRestoreWrite,[scriptblock]$TestBeforeActiveRestorePublish,[scriptblock]$TestAfterActiveConverged)
+    if ($Profile.PSObject.Properties.Name -contains 'isFixtureAdapter' -and -not [bool]$Profile.isFixtureAdapter) { throw 'superseded-by-host-hook-reconciler' }
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     if(-not $Profile.isFixtureAdapter){throw 'production full restore core adapters 仅允许 fixed fixture；真实 production 必须使用固定 façade。'}
     return Restore-CodexHookProductionFullEngine -Profile $Profile -EvidenceDirectory $EvidenceDirectory -EnvironmentReadValue $EnvironmentReadValue -EnvironmentWriteValue $EnvironmentWriteValue -FinalStatus $FinalStatus -TestAfterRestoreAction $TestAfterRestoreAction -TestBeforeEnvironmentRestoreWrite $TestBeforeEnvironmentRestoreWrite -TestBeforeActiveRestorePublish $TestBeforeActiveRestorePublish -TestAfterActiveConverged $TestAfterActiveConverged
@@ -820,17 +828,11 @@ function Restore-CodexHookProductionFullCore {
 function Invoke-CodexHookProductionFullApply {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ApprovedGenerationId,[Parameter(Mandatory)][string]$ApprovedPlanSha256)
-    $profile=Get-CodexHookProductionFullProfile
-    $read={param($Name,$Scope)[Environment]::GetEnvironmentVariable($Name,[EnvironmentVariableTarget]::User)}
-    $write={param($Name,$Scope,$Value)[Environment]::SetEnvironmentVariable($Name,$Value,[EnvironmentVariableTarget]::User)}
-    return Invoke-CodexHookProductionFullApplyEngine -Profile $profile -EnvironmentReadValue $read -EnvironmentWriteValue $write -ApprovedGenerationId $ApprovedGenerationId -ApprovedPlanSha256 $ApprovedPlanSha256
+    throw 'superseded-by-host-hook-reconciler'
 }
 
 function Restore-CodexHookProductionFull {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$EvidenceDirectory)
-    $profile=Get-CodexHookProductionFullProfile
-    $read={param($Name,$Scope)[Environment]::GetEnvironmentVariable($Name,[EnvironmentVariableTarget]::User)}
-    $write={param($Name,$Scope,$Value)[Environment]::SetEnvironmentVariable($Name,$Value,[EnvironmentVariableTarget]::User)}
-    return Restore-CodexHookProductionFullEngine -Profile $profile -EvidenceDirectory $EvidenceDirectory -EnvironmentReadValue $read -EnvironmentWriteValue $write
+    throw 'superseded-by-host-hook-reconciler'
 }

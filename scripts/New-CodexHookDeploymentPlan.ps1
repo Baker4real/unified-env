@@ -10,6 +10,14 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'ProductionFull')][switch]$ProductionFull
 )
 
+if ($PSCmdlet.ParameterSetName -in @('ProductionRegistrationRepair', 'ProductionFull')) {
+    [pscustomobject][ordered]@{
+        generated = $false
+        refusalReason = 'superseded-by-host-hook-reconciler'
+    }
+    return
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -17,76 +25,6 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\CodexHookProductionRegistrationRepair.ps1')
 . (Join-Path $PSScriptRoot 'lib\CodexHookProductionFull.ps1')
 . (Join-Path $PSScriptRoot 'lib\ReportArtifactPublisher.ps1')
-
-if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
-    $profile = Get-CodexHookProductionRegistrationRepairProfile
-    [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $profile)
-    [void](Assert-CodexHookNoReparseAncestor -Path ([string]$profile.planOutputDir) -Name 'production plan output')
-    $state = New-CodexHookProductionRegistrationRepairState -Profile $profile
-    [void](Assert-CodexHookProductionRegistrationRepairPlan -Plan $state.plan -Profile $profile)
-    Publish-JsonMarkdownArtifactPair `
-        -Document $state.plan `
-        -OutputDir ([string]$profile.planOutputDir) `
-        -JsonFileName 'plan.json' `
-        -MarkdownFileName 'PLAN.md' `
-        -RenderMarkdown {
-            param($Document, $JsonSha256)
-            @(
-                '# Codex Hook production registration-repair 计划'
-                ''
-                "- profile：$($Document.sourceFacts.targetProfile)"
-                "- 生成时间（UTC）：$($Document.generatedAtUtc)"
-                "- 模式：$($Document.mode)"
-                "- 可执行：$($Document.applyEligible)"
-                "- registry 动作数：$(@($Document.actions).Count)"
-                "- 文件动作数：$(@($Document.actions | Where-Object kind -ceq 'file').Count)"
-                "- 环境动作数：$(@($Document.environmentActions).Count)"
-                "- registry before SHA-256：$($Document.registryBeforeSha256)"
-                "- registry after SHA-256：$($Document.registryAfterSha256)"
-                "- managed before order：$(@($Document.projectionSummary.managedBeforeOrder) -join ',')"
-                "- managed after order：$(@($Document.projectionSummary.managedAfterOrder) -join ',')"
-                "- Stop projection：count=$($Document.projectionSummary.stopProjectionCount), sha256=$($Document.projectionSummary.stopProjectionSha256)"
-                "- PreToolUse projection：count=$($Document.projectionSummary.preToolUseProjectionCount), sha256=$($Document.projectionSummary.preToolUseProjectionSha256)"
-                "- unknown projection：count=$($Document.projectionSummary.unknownProjectionCount), sha256=$($Document.projectionSummary.unknownProjectionSha256)"
-                "- restartRequired：$($Document.projectionSummary.restartRequired)"
-                "- fileActions：$($Document.projectionSummary.fileActions)"
-                "- environmentActions：$($Document.projectionSummary.environmentActions)"
-                '- freshness gate：生成后 60 分钟内执行，并在 production mutex 内 fresh rederive'
-                '- 完整性并发边界：最终 verified target handle 排除内容写入并持有到同目录 crash-atomic rename 完成'
-                '- 残余边界：普通用户态 Windows API 不保证阻止不合作外部 delete/replace 恰在最终系统调用前发生；本计划不声称绝对 CAS'
-                ''
-                '此计划只读生成；必须先通过独立审查，才能由主 agent 显式执行 production apply。'
-                '本报告不包含 desired registry、raw registry command 或环境变量原值。'
-            ) -join "`n"
-        }
-    return
-}
-
-if ($PSCmdlet.ParameterSetName -ceq 'ProductionFull') {
-    $profile = Get-CodexHookProductionFullProfile
-    [void](Assert-CodexHookProductionFullProfile -Profile $profile)
-    $readUserEnvironment = { param($Name,$Scope) [Environment]::GetEnvironmentVariable($Name,[EnvironmentVariableTarget]::$Scope) }
-    $state = New-CodexHookProductionFullValidatedState -Profile $profile -EnvironmentReadValue $readUserEnvironment
-    Publish-JsonMarkdownArtifactPair -Document $state.plan -OutputDir ([string]$profile.planOutputDir) -JsonFileName 'plan.json' -MarkdownFileName 'PLAN.md' -RenderMarkdown {
-        param($Document,$JsonSha256)
-        @(
-            '# Codex Hook production full 计划','',
-            "- profile：$($Document.sourceFacts.targetProfile)",
-            "- 生成时间（UTC）：$($Document.generatedAtUtc)",
-            "- 可执行：$($Document.applyEligible)",
-            "- file actions：$(@($Document.actions | Where-Object kind -ceq 'file').Count)",
-            "- environment actions：$(@($Document.environmentActions).Count)",
-            "- registry 最后发布：$(@($Document.actions)[-1].kind -ceq 'registry')",
-            "- restartRequired：$($Document.projectionSummary.restartRequired)",'',
-            '- freshness gate：生成后 60 分钟内执行，并在 production mutex 内 fresh rederive',
-            '- 完整性并发边界：最终 verified target handle 排除内容写入并持有到同目录 crash-atomic rename 完成',
-            '- 残余边界：普通用户态 Windows API 不保证阻止不合作外部 delete/replace 恰在最终系统调用前发生；本计划不声称绝对 CAS',
-            '本报告不包含 desired registry、raw registry command 或环境变量原值。',
-            '计划生成不会执行任何 wrapper；wrapper 仅属于部署后的人工 postcheck。'
-        ) -join "`n"
-    }
-    return
-}
 
 $manifestFullPath = Assert-CodexHookDPath -Value $ManifestPath -Name 'ManifestPath'
 $sourceRoot = Assert-CodexHookFixturePath -Path $FixtureSourceRoot -Name 'FixtureSourceRoot'

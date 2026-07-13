@@ -12,6 +12,14 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'ProductionFull')][switch]$ProductionFull
 )
 
+if ($PSCmdlet.ParameterSetName -in @('ProductionRegistrationRepair', 'ProductionFull')) {
+    [pscustomobject][ordered]@{
+        restored = $false
+        refusalReason = 'superseded-by-host-hook-reconciler'
+    }
+    return
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -22,21 +30,6 @@ $ErrorActionPreference = 'Stop'
 if (-not $Apply) {
     [pscustomobject][ordered]@{ restored = $false; refusalReason = 'apply-switch-required' }
     return
-}
-if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
-    if ($ApprovedScope -cne 'codex-hook-governance-2026-07-11') {
-        [pscustomobject][ordered]@{ restored = $false; refusalReason = 'approved-scope-mismatch' }
-        return
-    }
-    $profile = Get-CodexHookProductionRegistrationRepairProfile
-    return Restore-CodexHookProductionRegistrationRepairCore -Profile $profile -EvidenceDirectory $EvidenceDirectory
-}
-if ($PSCmdlet.ParameterSetName -ceq 'ProductionFull') {
-    if ($ApprovedScope -cne 'codex-hook-governance-2026-07-11') {
-        [pscustomobject][ordered]@{ restored = $false; refusalReason = 'approved-scope-mismatch' }
-        return
-    }
-    return Restore-CodexHookProductionFull -EvidenceDirectory $EvidenceDirectory
 }
 if ($null -eq $EnvironmentReadValue) { $EnvironmentReadValue = { param($Name, $Scope) return $null } }
 if ($null -eq $EnvironmentWriteValue) { $EnvironmentWriteValue = { param($Name, $Scope, $Value) throw 'environment adapter 未授权' } }

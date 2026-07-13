@@ -819,6 +819,9 @@ function Invoke-CodexHookProductionRegistrationRepairApplyCore {
         [string]$TestFaultInjection = 'none'
     )
 
+    if ($Profile.PSObject.Properties.Name -contains 'isFixtureAdapter' -and -not [bool]$Profile.isFixtureAdapter) {
+        throw 'superseded-by-host-hook-reconciler'
+    }
     [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $Profile -AllowFixtureAdapter)
     if (
         ($null -ne $TestAfterRegistryPublish -or $null -ne $TestBeforeRollbackMove -or $null -ne $TestAfterRollbackSnapshot -or $TestFaultInjection -cne 'none') -and
@@ -1071,6 +1074,9 @@ function Restore-CodexHookProductionRegistrationRepairCore {
         [string]$TestFaultInjection = 'none'
     )
 
+    if ($Profile.PSObject.Properties.Name -contains 'isFixtureAdapter' -and -not [bool]$Profile.isFixtureAdapter) {
+        throw 'superseded-by-host-hook-reconciler'
+    }
     [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $Profile -AllowFixtureAdapter)
     if ($TestFaultInjection -cne 'none' -and -not $Profile.isFixtureAdapter) {
         throw 'test-only production restore fault injection 仅允许 fixed fixture adapter。'

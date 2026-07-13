@@ -1,6 +1,8 @@
 # Codex 主机钩子 reconciler 设计
 
-本项目用 `scripts/Invoke-CodexHostHookReconciliation.ps1` 检查并收敛 Codex 主机钩子状态。它是显式调用的冷路径维护工具，不注册 watcher、计划任务或新的启动 hook，也不占用每个任务的生命周期热路径。
+本项目用 `scripts/Invoke-CodexHostHookReconciliation.ps1` 检查并收敛 Codex 主机钩子状态。它是唯一当前生产权威，也是显式调用的冷路径维护工具；不注册 watcher、计划任务或新的启动 hook，也不占用每个任务的生命周期热路径。
+
+旧 `New-CodexHookDeploymentPlan.ps1`、`Invoke-CodexHookDeployment.ps1`、`Restore-CodexHookDeployment.ps1` 的 ProductionFull / registration-repair 参数集只为兼容调用者而保留，参数绑定后立即返回 `superseded-by-host-hook-reconciler`，不会加载旧 production runtime、读取 live 状态、生成报告或写入文件。对应 fixture/core 只作为历史算法测试材料，不是生产入口。
 
 ## 目标状态
 
