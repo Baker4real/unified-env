@@ -150,6 +150,7 @@ function Get-CheckResult {
 }
 
 $legacyNames = @(
+    "codex-mobile-permission-guard.cmd",
     "codex-mobile-permission-guard.py",
     "codex-projectless-root-d.cmd",
     "codex-projectless-root-d.js",
@@ -161,6 +162,11 @@ $legacyNames = @(
     "serena-dashboard-guard.ps1",
     "__pycache__\codex-mobile-permission-guard.cpython-313.pyc"
 )
+
+$reconcilerSource = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\Invoke-CodexHostHookReconciliation.ps1")
+foreach ($mobileRetiredClosure in @("codex-mobile-permission-guard.cmd", "codex-mobile-permission-guard.py")) {
+    Assert-True -Condition ([regex]::Matches($reconcilerSource, [regex]::Escape('"' + $mobileRetiredClosure + '"')).Count -eq 1) -Message "mobile permission retired wrapper/implementation 必须各在 exact legacy allowlist 出现一次：$mobileRetiredClosure"
+}
 
 function New-FixtureCodexHome {
     param(

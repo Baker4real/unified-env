@@ -17,6 +17,7 @@ $script:FixturePostCommitFailurePhase = $null
 $script:FixtureForbiddenAclPath = $null
 
 $script:LegacyHookNames = @(
+    "codex-mobile-permission-guard.cmd",
     "codex-mobile-permission-guard.py",
     "codex-projectless-root-d.cmd",
     "codex-projectless-root-d.js",
