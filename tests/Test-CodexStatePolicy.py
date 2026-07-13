@@ -1748,6 +1748,7 @@ class CodexStatePolicyTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "requires Windows byte-range leases")
     def test_run_policy_rejects_shm_lock_byte_mutation_during_output(self) -> None:
+        """Keep SQLite's writer lock across output; never use a close-to-lock handoff."""
         for offset in (120, 122, 127):
             with self.subTest(offset=offset):
                 self.write_global(self.permission_drift())
@@ -1788,10 +1789,43 @@ class CodexStatePolicyTests(unittest.TestCase):
                         Path(str(self.db_path) + suffix).unlink(missing_ok=True)
                     self.db_path.unlink(missing_ok=True)
                 self.assertTrue(output.mutated or output.blocked)
-                self.assertTrue(output.blocked, (offset, result, output.getvalue(), output.mutated))
-                self.assertFalse(output.mutated, (offset, result, output.getvalue(), output.mutated))
-                self.assertTrue(result["ok"], (offset, result, output.getvalue(), output.mutated))
-                self.assertTrue(json.loads(output.getvalue())["ok"])
+                if output.mutated:
+                    # SQLite owns byte 120; the other WAL-index lock bytes
+                    # may accept a raw callback write.  The metadata return
+                    # gate must still reject the generation and rewrite a
+                    # fail-closed envelope rather than report success.
+                    self.assertFalse(result["ok"], (offset, result, output.getvalue()))
+                    self.assertFalse(json.loads(output.getvalue())["ok"])
+                else:
+                    self.assertTrue(output.blocked, (offset, result, output.getvalue()))
+                    self.assertTrue(result["ok"], (offset, result, output.getvalue()))
+                    self.assertTrue(json.loads(output.getvalue())["ok"])
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows byte-range leases")
+    def test_sqlite_writer_return_lease_keeps_connection_during_wal_shm_output(self) -> None:
+        keeper = self.create_wal_db()
+        try:
+            keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
+            keeper.commit()
+            policy = self.module.resolve_permission_policy(self.codex_home)
+            result = self.module.update_thread_state(
+                self.db_path,
+                permission_policy=policy,
+                retain_return_lease=True,
+            )
+            lease = result.get("_returnLease")
+            self.assertIsInstance(lease, self.module.SqliteTargetLease)
+            self.assertIsNotNone(lease._connection)
+            self.assertIsNotNone(lease.expected_snapshot)
+            self.assertIsNotNone(lease.expected_snapshot.identities[1])
+            self.assertIsNotNone(lease.expected_snapshot.identities[2])
+            lease.assert_unchanged(strict_sidecar_content=True)
+        finally:
+            if isinstance(locals().get("lease"), self.module.SqliteTargetLease):
+                lease.close()
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     def test_run_policy_missing_source_set_emits_single_line_fail_closed(self) -> None:
         self.write_global(self.permission_drift())

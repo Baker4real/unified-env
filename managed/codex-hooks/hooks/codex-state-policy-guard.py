@@ -1523,42 +1523,6 @@ def _close_publish_handle(kernel32: object, handle: wintypes.HANDLE) -> None:
         pass
 
 
-def _lock_publish_range(
-    kernel32: object,
-    handle: wintypes.HANDLE,
-    offset: int,
-    length: int,
-    *,
-    exclusive: bool,
-) -> _LockedRange:
-    if offset < 0 or length <= 0:
-        raise StatePolicyError("state generation byte lease range is invalid")
-    kernel32.LockFileEx.argtypes = (
-        wintypes.HANDLE,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.POINTER(_Overlapped),
-    )
-    kernel32.LockFileEx.restype = wintypes.BOOL
-    overlap = _Overlapped()
-    overlap.offset = offset & 0xFFFFFFFF
-    overlap.offset_high = (offset >> 32) & 0xFFFFFFFF
-    lock_flags = LOCKFILE_EXCLUSIVE_LOCK if exclusive else 0
-    if not kernel32.LockFileEx(  # type: ignore[attr-defined]
-        handle,
-        lock_flags | LOCKFILE_FAIL_IMMEDIATELY,
-        0,
-        length & 0xFFFFFFFF,
-        (length >> 32) & 0xFFFFFFFF,
-        ctypes.byref(overlap),
-    ):
-        error = int(ctypes.get_last_error())
-        raise StatePolicyError(f"state generation byte lease unavailable ({error})")
-    return _LockedRange(overlap=overlap, offset=offset, length=length)
-
-
 def _open_publish_byte_lock(
     path: Path,
     *,
@@ -1596,27 +1560,46 @@ def _open_publish_byte_lock(
         # that window so they coexist with SQLite's own writer lock.
         end = max(1, int(size.value) + 1)
         if shared:
-            ranges_to_lock = []
+            ranges_to_lock: list[tuple[int, int, bool]] = []
             prefix_end = min(end, SQLITE_SHM_LOCK_OFFSET)
             if prefix_end:
-                ranges_to_lock.append((0, prefix_end))
+                ranges_to_lock.append((0, prefix_end, False))
             suffix_start = SQLITE_SHM_LOCK_OFFSET + SQLITE_SHM_LOCK_LENGTH
             if end > suffix_start:
-                ranges_to_lock.append((suffix_start, end - suffix_start))
+                ranges_to_lock.append((suffix_start, end - suffix_start, False))
         else:
-            ranges_to_lock = [(0, end)]
+            ranges_to_lock = [(0, end, True)]
         if not ranges_to_lock:
             raise StatePolicyError("state generation byte lease range is empty")
+        kernel32.LockFileEx.argtypes = (
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(_Overlapped),
+        )
+        kernel32.LockFileEx.restype = wintypes.BOOL
         locked_ranges: list[_LockedRange] = []
-        for offset, lock_length in ranges_to_lock:
+        for offset, lock_length, exclusive in ranges_to_lock:
+            if lock_length <= 0:
+                continue
+            overlap = _Overlapped()
+            overlap.offset = offset & 0xFFFFFFFF
+            overlap.offset_high = (offset >> 32) & 0xFFFFFFFF
+            lock_flags = LOCKFILE_EXCLUSIVE_LOCK if exclusive else 0
+            if not kernel32.LockFileEx(  # type: ignore[attr-defined]
+                handle,
+                lock_flags | LOCKFILE_FAIL_IMMEDIATELY,
+                0,
+                lock_length & 0xFFFFFFFF,
+                (lock_length >> 32) & 0xFFFFFFFF,
+                ctypes.byref(overlap),
+            ):
+                error = int(ctypes.get_last_error())
+                raise StatePolicyError(f"state generation byte lease unavailable ({error})")
             locked_ranges.append(
-                _lock_publish_range(
-                    kernel32,
-                    handle,
-                    offset,
-                    lock_length,
-                    exclusive=not shared,
-                )
+                _LockedRange(overlap=overlap, offset=offset, length=lock_length)
             )
         byte_lease = _ByteRangeLease(ranges=tuple(locked_ranges))
         after_size = ctypes.c_longlong()
@@ -1975,14 +1958,12 @@ class SqliteTargetLease:
         permission_policy: PermissionPolicy,
         expected_snapshot: SqliteSourceSnapshot | None = None,
         read_only: bool = False,
-        detached: bool = False,
     ) -> None:
         self.path = path
         self.expected_identity = expected_identity
         self.permission_policy = permission_policy
         self.expected_snapshot = expected_snapshot
         self.read_only = read_only
-        self.detached = detached
         self._connection: sqlite3.Connection | None = None
         self._windows_byte_locks: list[tuple[int, object, wintypes.HANDLE, _ByteRangeLease]] = []
         self._closed = False
@@ -2042,11 +2023,9 @@ class SqliteTargetLease:
                     # reader or writer transaction can coexist.
                     # The read-only transaction materializes its WAL pages
                     # before this call, so the complete WAL range can remain
-                    # exclusive.  A detached writer has no SQLite-owned SHM
-                    # lock bytes either, so it also takes the complete SHM
-                    # range exclusively; only an active SQLite connection
-                    # retains the split SHM lease.
-                    shared=index == 2 and not self.detached,
+                    # exclusive.  An active writer or reader connection owns
+                    # SQLite's SHM lock window; retain the split SHM lease.
+                    shared=index == 2,
                 )
                 try:
                     actual_identity = _publish_handle_info(kernel32, handle, candidate)
@@ -2066,70 +2045,8 @@ class SqliteTargetLease:
             _close_publish_byte_lock(kernel32, handle, byte_lease)
         self._windows_byte_locks.clear()
 
-    def detach_writer_connection(self) -> None:
-        """Close SQLite's writer handle and take the complete SHM range lock."""
-        if self.read_only or self.detached:
-            return
-        if self._connection is None or self.expected_snapshot is None:
-            raise StatePolicyError("sqlite writer lease connection is inactive")
-        if (
-            self.expected_snapshot.identities[1] is None
-            or self.expected_snapshot.identities[2] is None
-        ):
-            return
-        try:
-            # The transaction is a no-op RESERVED lease after commit. Closing
-            # it releases SQLite's ownership of SHM offsets 120..127 while
-            # our split byte lease keeps the generation file alive.
-            self._connection.rollback()
-            self._connection.close()
-            self._connection = None
-            self.detached = True
-            for position, (index, kernel32, handle, byte_lease) in enumerate(
-                self._windows_byte_locks
-            ):
-                if index != 2:
-                    continue
-                middle = _lock_publish_range(
-                    kernel32,
-                    handle,
-                    SQLITE_SHM_LOCK_OFFSET,
-                    SQLITE_SHM_LOCK_LENGTH,
-                    exclusive=True,
-                )
-                self._windows_byte_locks[position] = (
-                    index,
-                    kernel32,
-                    handle,
-                    _ByteRangeLease(ranges=byte_lease.ranges + (middle,)),
-                )
-                break
-            else:
-                raise StatePolicyError("sqlite SHM generation lease is incomplete")
-            handle_sources = {
-                index: (kernel32, handle)
-                for index, kernel32, handle, _byte_lease in self._windows_byte_locks
-            }
-            detached_snapshot = _capture_sqlite_source(
-                self.path,
-                handle_sources=handle_sources,
-            )
-            if self.expected_snapshot is None:
-                raise StatePolicyError("sqlite writer lease snapshot is missing")
-            _assert_sqlite_snapshot_after_writer_close(
-                self.expected_snapshot,
-                detached_snapshot,
-            )
-            self.expected_snapshot = detached_snapshot
-            self.assert_unchanged(strict_sidecar_content=True)
-        except BaseException:
-            self.close()
-            raise
-
     def __enter__(self) -> "SqliteTargetLease":
         try:
-            if self.detached:
-                raise StatePolicyError("detached sqlite lease must use its snapshot constructor")
             self._connection = _connect_sqlite_bound(self.path, self.expected_identity)
             self._connection.execute("pragma busy_timeout=0")
             if self.read_only:
@@ -2174,7 +2091,7 @@ class SqliteTargetLease:
         return self
 
     def assert_unchanged(self, *, strict_sidecar_content: bool = False) -> None:
-        if self._closed or (self._connection is None and not self.detached):
+        if self._closed or self._connection is None:
             raise StatePolicyError("sqlite target lease is closed")
         if os.name == "nt" and self.expected_snapshot is not None:
             expected_lock_count = sum(identity is not None for identity in self.expected_snapshot.identities)
@@ -2186,18 +2103,17 @@ class SqliteTargetLease:
             handle_sources = {
                 index: (kernel32, handle)
                 for index, kernel32, handle, _byte_lease in self._windows_byte_locks
+                # SQLite may deny a second read of WAL/SHM while the active
+                # transaction owns those handles.  The identity and
+                # byte-range leases remain authoritative for those files;
+                # use the verified main handle for the strict row gate.
+                if index == 0
             }
             locked_sidecar_indices = {
                 index
                 for index, _kernel32, _handle, _byte_lease in self._windows_byte_locks
-                if index > 0 and not self.detached and (not self.read_only or index != 2)
+                if index > 0 and (not self.read_only or index != 2)
             }
-            if self.detached:
-                strict_sidecar_content_indices = {1, 2, 3}
-            elif not self.read_only:
-                strict_sidecar_content_indices = {2}
-            else:
-                strict_sidecar_content_indices = set()
             current_snapshot = _assert_sqlite_snapshot_identity(
                 self.expected_snapshot,
                 self.path,
@@ -2207,7 +2123,6 @@ class SqliteTargetLease:
                 check_sidecar_content=strict_sidecar_content,
                 handle_sources=handle_sources or None,
                 locked_sidecar_indices=locked_sidecar_indices,
-                strict_sidecar_content_indices=strict_sidecar_content_indices,
             )
             if strict_sidecar_content:
                 if (
@@ -2222,7 +2137,7 @@ class SqliteTargetLease:
                 locked_sidecars = {
                     index
                     for index, _kernel32, _handle, _byte_lease in self._windows_byte_locks
-                    if index > 0 and not self.detached and (not self.read_only or index != 2)
+                    if index > 0 and (not self.read_only or index != 2)
                 }
                 for index in range(1, 4):
                     if index in locked_sidecars:
@@ -2236,7 +2151,7 @@ class SqliteTargetLease:
                         != current_snapshot.content_known[index]
                     ):
                         raise StatePolicyError("thread state sidecar bytes unavailable during return gate")
-        if not self.read_only and not self.detached and self._connection is not None and select_thread_updates(self._connection, self.permission_policy):
+        if not self.read_only and select_thread_updates(self._connection, self.permission_policy):
             raise StatePolicyError("thread state target changed concurrently")
 
     def assert_no_create(self) -> None:
@@ -2249,7 +2164,7 @@ class SqliteTargetLease:
         after the normal lease assertion is an unbounded generation and must
         never be silently accepted.
         """
-        if self._closed or (self._connection is None and not self.detached):
+        if self._closed or self._connection is None:
             raise StatePolicyError("sqlite target lease is closed")
         snapshot = self.expected_snapshot
         if snapshot is None or snapshot.identities[1] is None or snapshot.identities[3] is not None:
@@ -3373,7 +3288,6 @@ def _assert_sqlite_snapshot_identity(
     check_sidecar_content: bool = False,
     handle_sources: dict[int, tuple[object, wintypes.HANDLE]] | None = None,
     locked_sidecar_indices: set[int] | None = None,
-    strict_sidecar_content_indices: set[int] | None = None,
 ) -> SqliteSourceSnapshot:
     """Reject path/identity replay between a checked snapshot and SQLite I/O."""
     if handle_sources:
@@ -3381,7 +3295,6 @@ def _assert_sqlite_snapshot_identity(
     else:
         after = _capture_sqlite_source(path)
     locked_indices = set(locked_sidecar_indices or {})
-    strict_indices = set(strict_sidecar_content_indices or {})
     if before.identities[0] != after.identities[0] or (
         check_main_metadata and before.metadata[0] != after.metadata[0]
     ):
@@ -3398,26 +3311,16 @@ def _assert_sqlite_snapshot_identity(
         if expected is None and actual is not None and not allow_new_sidecars:
             raise StatePolicyError("thread state sidecar appeared during check")
         if expected is not None and check_sidecar_content:
-            if index in locked_indices and index not in strict_indices:
+            if index in locked_indices:
                 # A leased WAL/SHM/journal may legitimately change SQLite's
                 # lock bytes while the identity/range lease prevents an
-                # outsider from replacing or writing the generation.
-                continue
-            if index in strict_indices:
-                if (
-                    before.metadata[index][0] != after.metadata[index][0]
-                    or before.metadata[index][1] != after.metadata[index][1]
-                    or before.metadata[index][3] != after.metadata[index][3]
-                ):
-                    raise StatePolicyError("thread state sidecar metadata changed concurrently")
-                if before.content_known[index] != after.content_known[index]:
-                    raise StatePolicyError("thread state sidecar bytes unavailable during return gate")
-                if (
-                    before.content_known[index]
-                    and after.content_known[index]
-                    and before.payload[index] != after.payload[index]
-                ):
-                    raise StatePolicyError("thread state sidecar bytes changed during return gate")
+                # outsider from replacing or writing the generation.  SQLite
+                # may also deny a second byte reader while this lease is
+                # active; identity plus the byte-range lease is the stable
+                # contract for content.  Metadata remains observable and
+                # catches an output callback that writes the lock window.
+                if before.metadata[index] != after.metadata[index]:
+                    raise StatePolicyError("thread state sidecar metadata changed during return gate")
                 continue
             if before.metadata[index] != after.metadata[index]:
                 raise StatePolicyError("thread state sidecar metadata changed concurrently")
@@ -3428,52 +3331,6 @@ def _assert_sqlite_snapshot_identity(
             ):
                 raise StatePolicyError("thread state sidecar bytes changed concurrently")
     return after
-
-
-def _assert_sqlite_snapshot_after_writer_close(
-    before: SqliteSourceSnapshot,
-    after: SqliteSourceSnapshot,
-) -> None:
-    """Validate the generation handoff after releasing SQLite's SHM locks.
-
-    Closing the committed SQLite connection can legitimately rewrite the
-    WAL-index lock window.  Every other byte, identity, size, and parent
-    identity must remain unchanged before a detached lease takes the complete
-    generation lock; otherwise a competitor could win the close-to-lock gap.
-    """
-    for index in range(4):
-        if before.identities[index] != after.identities[index]:
-            raise StatePolicyError("thread state generation changed while releasing writer lease")
-        if after.content_known[index] is not True:
-            raise StatePolicyError("thread state generation bytes unavailable while releasing writer lease")
-        if index != 2 and before.content_known[index] is not True:
-            raise StatePolicyError("thread state generation bytes unavailable while releasing writer lease")
-        before_metadata = before.metadata[index]
-        after_metadata = after.metadata[index]
-        if before_metadata[0] != after_metadata[0] or before_metadata[1] != after_metadata[1]:
-            raise StatePolicyError("thread state generation metadata changed while releasing writer lease")
-        if before_metadata[3] != after_metadata[3]:
-            raise StatePolicyError("thread state generation parent changed while releasing writer lease")
-        before_payload = before.payload[index]
-        after_payload = after.payload[index]
-        if index != 2:
-            if before_payload != after_payload:
-                raise StatePolicyError("thread state generation bytes changed while releasing writer lease")
-            continue
-        if before.content_known[index] is not True:
-            # SQLite may deny a second SHM byte reader while its writer
-            # transaction is active. The post-close capture is the first
-            # complete baseline; the detached lease locks it before output.
-            continue
-        if before_payload is None or after_payload is None:
-            raise StatePolicyError("thread state SHM bytes unavailable while releasing writer lease")
-        lock_start = SQLITE_SHM_LOCK_OFFSET
-        lock_end = lock_start + SQLITE_SHM_LOCK_LENGTH
-        if (
-            before_payload[:lock_start] != after_payload[:lock_start]
-            or before_payload[lock_end:] != after_payload[lock_end:]
-        ):
-            raise StatePolicyError("thread state SHM bytes changed while releasing writer lease")
 
 
 def _assert_check_only_d_path_without_reparse(path: Path, *, name: str) -> None:
@@ -3630,6 +3487,7 @@ def _update_thread_state_impl(
     source_bytes_hash = _sha256(initial_snapshot.payload[0] or b"")
     conn = _connect_sqlite_bound(path, source_identity)
     policy_lease: PermissionPolicySourceLease | None = None
+    return_lease: SqliteTargetLease | None = None
     return_lease_active = False
     return_lease_handoff = False
     try:
@@ -3803,20 +3661,21 @@ def _update_thread_state_impl(
                     expected_snapshot=final_snapshot,
                     connection=conn,
                 )
-                if final_snapshot.identities[1] is not None and final_snapshot.identities[2] is not None:
-                    # A writer connection owns SHM offsets 120..127. Transfer
-                    # the generation to a detached lease before any output so
-                    # the entire SHM file, including that lock-byte window,
-                    # is protected and compared strictly.
-                    return_lease_active = False
-                    return_lease_handoff = True
-                    return_lease.detach_writer_connection()
-                else:
-                    return_lease_handoff = True
+                # Keep the same SQLite connection (and its SHM lock bytes)
+                # alive through the caller's output envelope.  Closing it and
+                # reacquiring a complete SHM byte lock would create an
+                # unobservable close-to-lock window at offsets 120..127.
+                # Retaining the connection makes that handoff unnecessary:
+                # SQLite itself owns the lock window while our leases cover
+                # every other byte and sidecar name.
+                return_lease_handoff = True
                 result["_returnLease"] = return_lease
             return result
         except StatePolicyError as policy_exc:
             if return_lease_handoff:
+                if return_lease is not None:
+                    return_lease.close()
+                return_lease_handoff = False
                 raise
             if return_lease_active:
                 conn.rollback()
@@ -3934,6 +3793,8 @@ def _safe_error(exc: BaseException) -> str:
         return "state policy generation is unbounded"
     if "busy" in known:
         return "state policy resource busy"
+    if "sidecar bytes unavailable" in known:
+        return "state policy sidecar bytes unavailable"
     if "malformed" in known or "json" in known:
         return "global state validation failed"
     if "backup" in known:
