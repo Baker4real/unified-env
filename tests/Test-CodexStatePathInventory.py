@@ -200,6 +200,8 @@ class CodexStatePathInventoryTests(unittest.TestCase):
         self.assertEqual(entry["reason"], "unresolved-unknown-value")
         self.assertFalse(entry["reparse"])
         self.assertIsNone(entry["sourceSha256"])
+        inventory["unknown"]["unknown-map"]["unknown"] = "mutated"
+        self.assertEqual(state["unknown-map"]["unknown"], "preserve")
 
     def test_rejects_dot_dotdot_and_8dot3_roots(self) -> None:
         state = {
@@ -286,6 +288,24 @@ class CodexStatePathInventoryTests(unittest.TestCase):
                 self.assertFalse(entry["safe"])
                 self.assertEqual(entry["reason"], "unresolved-ambiguous")
                 self.assertEqual(entry["value"], source_value)
+
+    def test_casefolded_candidate_aliases_are_also_ambiguous(self) -> None:
+        state = {
+            "thread-workspace-root-hints": {
+                "lower": r"C:\Users\WINDOWS\Documents\Codex\project-a",
+                "upper": r"C:\Users\WINDOWS\Documents\Codex\PROJECT-A",
+            }
+        }
+        inventory = self.module.build_path_inventory(
+            state,
+            r"C:\Users\WINDOWS\Documents\Codex",
+            self.candidate_root,
+        )
+        for identity in ("lower", "upper"):
+            with self.subTest(identity=identity):
+                entry = self._entry(inventory, "thread-workspace-root-hints", identity)
+                self.assertFalse(entry["safe"])
+                self.assertEqual(entry["reason"], "unresolved-ambiguous")
 
     def test_safe_entry_contains_handle_bound_probe_identity(self) -> None:
         state = {
