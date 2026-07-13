@@ -35,6 +35,8 @@ TARGET_MAPS = (
 )
 FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 LEGACY_DESTINATION_ROOT = PureWindowsPath(r"D:\Users\WINDOWS\Documents\Codex")
+PROJECTLESS_SOURCE_ROOT = PureWindowsPath(r"C:\Users\WINDOWS\Documents\Codex")
+INVENTORY_REPAIR_CONTRACT = "generation-hash-mutex-cas-reprobe"
 FILE_ATTRIBUTE_DIRECTORY = 0x0010
 FILE_READ_ATTRIBUTES = 0x0080
 FILE_SHARE_READ = 0x00000001
@@ -45,7 +47,7 @@ FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 ERROR_FILE_NOT_FOUND = 2
 ERROR_PATH_NOT_FOUND = 3
-SHORT_LEXICAL_SEGMENT = re.compile(r"^[^\\/]{1,8}~[0-9](?:\.[^\\/]+)?$", re.IGNORECASE)
+SHORT_LEXICAL_SEGMENT = re.compile(r"^[^\\/]{1,8}~[0-9]+(?:\.[^\\/]+)?$", re.IGNORECASE)
 
 
 class _ByHandleFileInformation(ctypes.Structure):
@@ -126,6 +128,16 @@ def _windows_relative_path(
     return tuple(source_path.parts[len(root_parts) :])
 
 
+def _is_reserved_device_component(value: str) -> bool:
+    normalized = value.rstrip(" .")
+    base = normalized.split(".", 1)[0].upper()
+    if base in {"CON", "PRN", "AUX", "NUL"}:
+        return True
+    if len(base) == 4 and base[:3] in {"COM", "LPT"} and base[3] in "123456789":
+        return True
+    return base in {"COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"}
+
+
 def _path_lexical_issue(value: str, path: PureWindowsPath) -> str | None:
     """Return a conservative reason for a non-canonical Windows spelling."""
     if "\x00" in value:
@@ -142,6 +154,8 @@ def _path_lexical_issue(value: str, path: PureWindowsPath) -> str | None:
             continue
         if raw_part in (".", ".."):
             return "alternate"
+        if _is_reserved_device_component(raw_part):
+            return "device"
         if SHORT_LEXICAL_SEGMENT.fullmatch(raw_part):
             return "alternate"
         if raw_index > 0 and ":" in raw_part:
@@ -153,6 +167,8 @@ def _path_lexical_issue(value: str, path: PureWindowsPath) -> str | None:
             continue
         if part in (".", ".."):
             return "alternate"
+        if _is_reserved_device_component(part):
+            return "device"
         if SHORT_LEXICAL_SEGMENT.fullmatch(part):
             return "alternate"
         if ":" in part or part.endswith((".", " ")):
@@ -212,6 +228,7 @@ def _probe_candidate(candidate: Path) -> dict[str, object]:
         "reparse": False,
         "finalPathVerified": False,
         "identity": None,
+        "advisoryOnly": True,
     }
     if os.name != "nt":
         default["error"] = "Windows handle probe is unavailable"
@@ -284,6 +301,7 @@ def _probe_candidate(candidate: Path) -> dict[str, object]:
             "reparse": reparse,
             "finalPathVerified": final_path_verified,
             "identity": list(identity) if identity is not None else None,
+            "advisoryOnly": True,
         }
         if path is not None:
             payload["path"] = path
@@ -389,6 +407,7 @@ def _path_inventory_entry(
     source_root: PureWindowsPath,
     candidate_root: Path,
     candidate_root_windows: PureWindowsPath,
+    source_root_allowed: bool,
 ) -> tuple[dict[str, object], tuple[int, int] | None]:
     source_hash: str | None = None
     if isinstance(value, str):
@@ -409,9 +428,13 @@ def _path_inventory_entry(
             "reparse": False,
             "finalPathVerified": False,
             "identity": None,
+            "advisoryOnly": True,
         },
     }
     if not isinstance(value, str):
+        return base, None
+    if not source_root_allowed:
+        base["reason"] = "unresolved-source-root-not-allowed"
         return base, None
 
     try:
@@ -424,6 +447,9 @@ def _path_inventory_entry(
     if lexical_issue == "invalid":
         base["reason"] = "unresolved-invalid-path"
         base["sourceSha256"] = None
+        return base, None
+    if lexical_issue == "device":
+        base["reason"] = "unresolved-device-name"
         return base, None
     if lexical_issue == "alternate":
         base["reason"] = "unresolved-alternate-lexical"
@@ -489,6 +515,9 @@ def build_path_inventory(
     The function deliberately does not mutate *state* or touch any state file. It
     computes candidates only for the two known projectless maps. Unknown maps and
     values remain verbatim in the returned inventory for a later, explicit review.
+    A ``safe`` result is an advisory point-in-time probe only. Task 2/7 repair code
+    must bind the state generation/hash and repeat the handle-bound probe while
+    holding the state mutex, then publish with a CAS/postcheck contract.
     """
     if not isinstance(state, dict):
         raise StatePolicyError("global state root must be an object")
@@ -497,6 +526,9 @@ def build_path_inventory(
         candidate_root,
         name="path inventory candidate root",
         required_drive="D:",
+    )
+    source_root_allowed = _windows_parts_casefold(source_root_windows) == _windows_parts_casefold(
+        PROJECTLESS_SOURCE_ROOT
     )
 
     candidate_root_path = Path(candidate_root)
@@ -516,6 +548,7 @@ def build_path_inventory(
                 source_root_windows,
                 candidate_root_path,
                 candidate_root_windows,
+                source_root_allowed,
             )
             inventory_map[identity] = entry
             if final_identity is not None:
@@ -534,7 +567,10 @@ def build_path_inventory(
 
     return {
         "sourceRoot": str(source_root_windows),
+        "sourceRootAllowed": source_root_allowed,
         "candidateRoot": str(candidate_root_windows),
+        "safeAdvisory": True,
+        "repairContract": INVENTORY_REPAIR_CONTRACT,
         "maps": maps,
         "unknown": unknown,
     }

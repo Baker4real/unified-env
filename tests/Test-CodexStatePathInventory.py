@@ -254,6 +254,66 @@ class CodexStatePathInventoryTests(unittest.TestCase):
                 self.assertEqual(entry["reason"], "unresolved-alternate-lexical")
                 self.assertEqual(entry["value"], state["thread-workspace-root-hints"][identity])
 
+    def test_rejects_multi_digit_8dot3_and_dos_device_segments(self) -> None:
+        state = {
+            "thread-workspace-root-hints": {
+                "short-many": r"C:\Users\WINDOWS\Documents\Codex\DOCUME~10\project-a",
+                "con": r"C:\Users\WINDOWS\Documents\Codex\CON\project-a",
+                "nul": r"C:\Users\WINDOWS\Documents\Codex\NUL\project-a",
+                "com": r"C:\Users\WINDOWS\Documents\Codex\COM1.txt\project-a",
+            }
+        }
+        inventory = self.module.build_path_inventory(
+            state,
+            r"C:\Users\WINDOWS\Documents\Codex",
+            self.candidate_root,
+        )
+        self.assertEqual(
+            self._entry(inventory, "thread-workspace-root-hints", "short-many")["reason"],
+            "unresolved-alternate-lexical",
+        )
+        for identity in ("con", "nul", "com"):
+            with self.subTest(identity=identity):
+                entry = self._entry(inventory, "thread-workspace-root-hints", identity)
+                self.assertFalse(entry["safe"])
+                self.assertIsNone(entry["candidate"])
+                self.assertEqual(entry["reason"], "unresolved-device-name")
+
+    def test_uncontrolled_source_root_is_structured_unresolved(self) -> None:
+        state = {
+            "thread-workspace-root-hints": {
+                "project-a": r"C:\Users\WINDOWS\Documents\Codex\project-a",
+            }
+        }
+        inventory = self.module.build_path_inventory(
+            state,
+            r"D:\Documents\Codex",
+            self.candidate_root,
+        )
+        self.assertFalse(inventory["sourceRootAllowed"])
+        entry = self._entry(inventory, "thread-workspace-root-hints", "project-a")
+        self.assertFalse(entry["safe"])
+        self.assertIsNone(entry["candidate"])
+        self.assertEqual(entry["reason"], "unresolved-source-root-not-allowed")
+        self.assertEqual(entry["value"], state["thread-workspace-root-hints"]["project-a"])
+
+    def test_safe_result_is_explicitly_advisory_for_repair(self) -> None:
+        state = {
+            "thread-workspace-root-hints": {
+                "project-a": r"C:\Users\WINDOWS\Documents\Codex\project-a",
+            }
+        }
+        inventory = self.module.build_path_inventory(
+            state,
+            r"C:\Users\WINDOWS\Documents\Codex",
+            self.candidate_root,
+        )
+        self.assertTrue(inventory["safeAdvisory"])
+        self.assertEqual(inventory["repairContract"], "generation-hash-mutex-cas-reprobe")
+        entry = self._entry(inventory, "thread-workspace-root-hints", "project-a")
+        self.assertTrue(entry["safe"])
+        self.assertTrue(entry["probe"]["advisoryOnly"])
+
     def test_invalid_string_values_are_structured_unresolved(self) -> None:
         state = {
             "thread-workspace-root-hints": {
