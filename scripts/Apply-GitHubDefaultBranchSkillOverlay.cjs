@@ -14,6 +14,8 @@ const path = require('node:path');
 const EXPECTED_ROLES = Object.freeze(['github', 'yeet']);
 const STABLE_MARKER = '<!-- codex-github-default-branch-overlay: v1 -->';
 const DEFAULT_EVIDENCE_ROOT = 'D:\\Codex\\.codex\\run-evidence\\github-default-branch-skill-policy';
+const CODEX_ROOT = 'D:\\Codex\\.codex';
+const CONTROLLED_EVIDENCE_ROOT = DEFAULT_EVIDENCE_ROOT;
 const CATALOG_VERSION = 1;
 
 class CatalogValidationError extends Error {
@@ -54,6 +56,50 @@ function assertDDrivePath(filePath, label) {
   }
 }
 
+function isControlledEvidencePath(filePath) {
+  return isWithin(CONTROLLED_EVIDENCE_ROOT, filePath);
+}
+
+function assertControlledEvidencePath(filePath, label) {
+  assertDDrivePath(filePath, label);
+  if (!isControlledEvidencePath(filePath)) {
+    throw new Error(`${label} must stay under ${CONTROLLED_EVIDENCE_ROOT}: ${filePath}`);
+  }
+}
+
+function supportedPluginSurface(filePath, codexRoot = CODEX_ROOT) {
+  const resolved = resolveAbsolute(filePath);
+  const rootBase = resolveAbsolute(codexRoot);
+  const roots = [
+    {
+      root: path.join(rootBase, '.tmp', 'plugins', 'plugins', 'github'),
+      relativePattern: /^skills\\(github|yeet)\\SKILL\.md$/i,
+    },
+    {
+      root: path.join(rootBase, 'plugins', 'cache', 'openai-curated', 'github'),
+      relativePattern: /^[^\\/]+\\skills\\(github|yeet)\\SKILL\.md$/i,
+    },
+    {
+      root: path.join(rootBase, 'plugins', 'cache', 'openai-curated-remote', 'github'),
+      relativePattern: /^[^\\/]+\\skills\\(github|yeet)\\SKILL\.md$/i,
+    },
+  ];
+  for (const descriptor of roots) {
+    if (!isWithin(descriptor.root, resolved)) continue;
+    const relative = path.relative(descriptor.root, resolved).replace(/\//g, '\\');
+    const match = relative.match(descriptor.relativePattern);
+    if (match) {
+      const role = match[1].toLowerCase();
+      return {
+        root: descriptor.root,
+        role,
+        surfaceDirectory: path.dirname(path.dirname(path.dirname(resolved))),
+      };
+    }
+  }
+  return null;
+}
+
 function unique(items) {
   return [...new Set(items)];
 }
@@ -80,6 +126,7 @@ function roleEntries(catalog, role) {
 
 function validateCatalog(catalogOrPath) {
   let catalog;
+
   try {
     catalog = readJson(catalogOrPath);
   } catch (error) {
@@ -143,7 +190,9 @@ function validateCatalog(catalogOrPath) {
       const forbidden = [
         /git\s+push[^\r\n]*patch-stack/i,
         /git\s+(?:merge-base|merge|rebase)[^\r\n]*(?:\bmain\b|\bmaster\b)/i,
-        /git\s+push[^\r\n]*(?:--force|-f)(?:\s|$)/i,
+        /git\s+push[^\r\n]*(?:--force(?:-[A-Za-z0-9-]+)?|-f)(?:\s|$)/i,
+        /git\s+(?:switch|checkout)\s+-(?:b|c)\s+patch-stack\b/i,
+        /git\s+update-ref\s+refs\/heads\/patch-stack\b/i,
         /(?:^|\s)--draft(?:\s|$)/i,
       ];
       for (const pattern of forbidden) {
@@ -206,7 +255,7 @@ function discoverTargets(codexRoot) {
       if (group.roles.has(roleDirectory)) {
         errors.push({ path: filePath, reason: 'duplicate-role-surface' });
       } else {
-        group.roles.set(roleDirectory, { path: filePath, role: roleDirectory, surfaceDirectory });
+        group.roles.set(roleDirectory, { path: filePath, role: roleDirectory, surfaceDirectory, codexRoot: root });
       }
     }
   }
@@ -265,6 +314,17 @@ function buildChangePlan(targetInput, catalogOrPath) {
       assertDDrivePath(filePath, 'target path');
     } catch (error) {
       errors.push({ path: target.path, reason: 'unsafe-target-path', message: error.message });
+      continue;
+    }
+    const surface = supportedPluginSurface(filePath, target.codexRoot || CODEX_ROOT);
+    if (!surface || surface.role !== target.role) {
+      errors.push({ path: filePath, role: target.role, reason: 'unsupported-plugin-surface' });
+      continue;
+    }
+    const pairedRole = target.role === 'yeet' ? 'github' : 'yeet';
+    const pairedPath = path.join(surface.surfaceDirectory, 'skills', pairedRole, 'SKILL.md');
+    if (!fs.existsSync(pairedPath)) {
+      errors.push({ path: pairedPath, role: pairedRole, reason: 'missing-paired-skill' });
       continue;
     }
     if (seenPaths.has(filePath.toLowerCase())) {
@@ -340,7 +400,7 @@ function writeAtomic(filePath, contents) {
 
 function createEvidenceDirectory(evidenceRoot) {
   const root = resolveAbsolute(evidenceRoot || DEFAULT_EVIDENCE_ROOT);
-  assertDDrivePath(root, 'evidenceRoot');
+  assertControlledEvidencePath(root, 'evidenceRoot');
   ensureDirectory(root);
   const directory = path.join(root, `run-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
   ensureDirectory(directory);
@@ -351,17 +411,43 @@ function updateManifest(manifestPath, manifest) {
   writeAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+function validateRollbackManifest(resolvedManifest, manifest) {
+  assertControlledEvidencePath(resolvedManifest, 'manifestPath');
+  const evidenceDirectory = resolveAbsolute(manifest.evidenceDirectory || path.dirname(resolvedManifest));
+  assertControlledEvidencePath(evidenceDirectory, 'manifest evidenceDirectory');
+  if (!isWithin(evidenceDirectory, resolvedManifest)) {
+    throw new Error(`manifestPath must stay inside its evidenceDirectory: ${resolvedManifest}`);
+  }
+  const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
+  for (const entry of entries) {
+    if (!entry || typeof entry.path !== 'string' || typeof entry.backupPath !== 'string') {
+      throw new Error('manifest entry must include path and backupPath');
+    }
+    const target = resolveAbsolute(entry.path);
+    const backup = resolveAbsolute(entry.backupPath);
+    if (!supportedPluginSurface(target, entry.codexRoot || CODEX_ROOT)) {
+      throw new Error(`manifest target is outside a supported GitHub plugin surface: ${target}`);
+    }
+    if (!isWithin(evidenceDirectory, backup)) {
+      throw new Error(`manifest backupPath is outside its evidenceDirectory: ${backup}`);
+    }
+    entry.path = target;
+    entry.backupPath = backup;
+    entry.evidenceDirectory = evidenceDirectory;
+  }
+}
+
 function rollbackManifest(manifestPath, options = {}) {
   const resolvedManifest = resolveAbsolute(manifestPath);
-  assertDDrivePath(resolvedManifest, 'manifestPath');
-  const manifest = JSON.parse(fs.readFileSync(resolvedManifest, 'utf8'));
+  const manifest = options.manifest || JSON.parse(fs.readFileSync(resolvedManifest, 'utf8'));
+  validateRollbackManifest(resolvedManifest, manifest);
   const errors = [];
   let restored = 0;
   let skipped = 0;
   const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
 
   for (const entry of entries) {
-    if (entry.status !== 'committed') {
+    if (!['write-attempted', 'committed'].includes(entry.status)) {
       skipped += 1;
       continue;
     }
@@ -460,6 +546,15 @@ function applyChangePlan(plan, options = {}) {
     entries: [],
   };
 
+  let manifestWrites = 0;
+  const persistManifest = () => {
+    manifestWrites += 1;
+    if (Number.isInteger(options.failManifestUpdateAt) && manifestWrites === options.failManifestUpdateAt) {
+      throw new Error(`injected manifest update failure at write ${manifestWrites}`);
+    }
+    updateManifest(manifestPath, manifest);
+  };
+
   try {
     // The complete backup set is committed before any target is changed.
     for (const [index, change] of planned.entries()) {
@@ -474,15 +569,16 @@ function applyChangePlan(plan, options = {}) {
       manifest.entries.push({
         path: change.path,
         role: change.role,
+        codexRoot: change.codexRoot || CODEX_ROOT,
         originalSha256: change.originalSha256,
         replacementSha256: change.replacementSha256,
         backupPath,
         status: 'prepared',
       });
     }
-    updateManifest(manifestPath, manifest);
+    persistManifest();
     manifest.status = 'applying';
-    updateManifest(manifestPath, manifest);
+    persistManifest();
 
     let changed = 0;
     for (const [index, change] of planned.entries()) {
@@ -495,18 +591,21 @@ function applyChangePlan(plan, options = {}) {
       if (Number.isInteger(options.failAfter) && changed >= options.failAfter) {
         throw new Error(`injected failure after ${changed} writes`);
       }
+      entry.status = 'write-attempted';
+      entry.writeStartedAt = new Date().toISOString();
       writeAtomic(change.path, Buffer.from(change.replacement, 'utf8'));
+      entry.status = 'committed';
+      entry.committedAt = new Date().toISOString();
+      if (typeof options.onAfterWrite === 'function') options.onAfterWrite(change, index);
       if (sha256File(change.path) !== change.replacementSha256) {
         throw new Error(`replacement fingerprint mismatch at ${change.path}`);
       }
-      entry.status = 'committed';
-      entry.committedAt = new Date().toISOString();
       changed += 1;
-      updateManifest(manifestPath, manifest);
+      persistManifest();
     }
     manifest.status = 'succeeded';
     manifest.completedAt = new Date().toISOString();
-    updateManifest(manifestPath, manifest);
+    persistManifest();
     return {
       ok: true,
       changed,
@@ -519,15 +618,18 @@ function applyChangePlan(plan, options = {}) {
   } catch (error) {
     manifest.status = 'apply-failed';
     manifest.error = error.message;
-    try { updateManifest(manifestPath, manifest); } catch { /* rollback result remains authoritative */ }
+    try { updateManifest(manifestPath, manifest); } catch { /* rollback uses the in-memory manifest */ }
     let rollback = {
       status: 'unsafe-partial',
       errors: [{ reason: 'manifest-unavailable', message: 'rollback manifest was not created before the failure' }],
     };
-    if (fs.existsSync(manifestPath)) {
-      rollback = rollbackManifest(manifestPath, { reason: error.message });
-    } else if (manifest.entries.length === 0) {
-      rollback = { status: 'rolled-back', errors: [] };
+    try {
+      rollback = rollbackManifest(manifestPath, { reason: error.message, manifest });
+    } catch (rollbackError) {
+      rollback = {
+        status: 'unsafe-partial',
+        errors: [{ reason: 'rollback-validation-failed', message: rollbackError.message }],
+      };
     }
     return {
       ok: false,

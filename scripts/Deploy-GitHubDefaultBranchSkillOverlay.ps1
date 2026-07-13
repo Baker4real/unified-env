@@ -1,4 +1,4 @@
-[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
@@ -10,7 +10,10 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string] $EvidenceRoot
+    [string] $EvidenceRoot,
+
+    [Parameter(Mandatory = $false)]
+    [int] $InjectFailureAfter = -1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +23,27 @@ function Resolve-DPath {
     $resolved = [System.IO.Path]::GetFullPath($PathValue)
     if ($resolved -notmatch '^(?i)D:[\\/]') {
         throw "目标必须位于 D: 盘：$PathValue"
+    }
+    return $resolved
+}
+
+function Test-PathWithin {
+    param(
+        [Parameter(Mandatory = $true)][string] $RootPath,
+        [Parameter(Mandatory = $true)][string] $CandidatePath
+    )
+    $root = ([System.IO.Path]::GetFullPath($RootPath)).TrimEnd('\') + '\'
+    $candidate = [System.IO.Path]::GetFullPath($CandidatePath)
+    return $candidate.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $candidate.TrimEnd('\').Equals($root.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Resolve-ControlledEvidencePath {
+    param([Parameter(Mandatory = $true)][string] $PathValue)
+    $resolved = Resolve-DPath -PathValue $PathValue
+    $controlledRoot = Resolve-DPath -PathValue 'D:\Codex\.codex\run-evidence\github-default-branch-skill-policy'
+    if (-not (Test-PathWithin -RootPath $controlledRoot -CandidatePath $resolved)) {
+        throw "EvidenceRoot 必须位于 $controlledRoot：$PathValue"
     }
     return $resolved
 }
@@ -49,13 +73,14 @@ function Write-JsonAtomic {
 
 $sourceRootResolved = Resolve-DPath -PathValue $SourceRoot
 $codexRootResolved = Resolve-DPath -PathValue $CodexRoot
-$evidenceRootResolved = Resolve-DPath -PathValue $EvidenceRoot
+$evidenceRootResolved = Resolve-ControlledEvidencePath -PathValue $EvidenceRoot
 $sourceFiles = @(
     'Apply-GitHubDefaultBranchSkillOverlay.cjs',
     'github-default-branch-skill-overlay-catalog.json'
 )
 $runtimeDirectory = Join-Path $codexRootResolved 'scripts'
 $deployment = @()
+$replacedFiles = @()
 $evidenceDirectory = Join-Path $evidenceRootResolved ('deploy-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N'))
 $manifestPath = Join-Path $evidenceDirectory 'manifest.json'
 $manifest = [ordered]@{
@@ -112,10 +137,14 @@ try {
         }
 
         if ($PSCmdlet.ShouldProcess($target, 'deploy byte-identical GitHub default-branch overlay file')) {
-            if (Test-Path -LiteralPath $target -PathType Leaf) {
+            $hadTarget = Test-Path -LiteralPath $target -PathType Leaf
+            if ($hadTarget) {
                 $backup = Join-Path $evidenceDirectory ('before-' + [System.IO.Path]::GetFileName($target))
                 Copy-Item -LiteralPath $target -Destination $backup -Force
                 $file.backup = $backup
+            }
+            if ($InjectFailureAfter -ge 0 -and $replacedFiles.Count -ge $InjectFailureAfter) {
+                throw "injected deployment failure before $($file.relative)"
             }
             $temp = Join-Path $targetDirectory ('.' + [System.IO.Path]::GetFileName($target) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
             try {
@@ -124,6 +153,13 @@ try {
                     throw "临时部署文件指纹不匹配：$temp"
                 }
                 Move-Item -LiteralPath $temp -Destination $target -Force
+                $replacedFiles += [pscustomobject]@{
+                    target = $target
+                    backup = if ($hadTarget) { [string] $file.backup } else { $null }
+                    hadTarget = $hadTarget
+                    originalSha256 = [string] $file.existingSha256
+                    file = $file
+                }
                 if ((Get-HashUpper -PathValue $target) -ne [string] $file.sourceSha256) {
                     throw "runtime 文件指纹不匹配：$target"
                 }
@@ -161,12 +197,87 @@ try {
     } | ConvertTo-Json -Depth 8
 }
 catch {
+    $failureMessage = $_.Exception.Message
+    $rollbackErrors = @()
+    $rollbackStatus = 'unsafe-partial'
+    try {
+        $manifest.status = 'rollback-in-progress'
+        $manifest.error = $failureMessage
+        if (Test-Path -LiteralPath $evidenceDirectory -PathType Container) {
+            Write-JsonAtomic -PathValue $manifestPath -Value $manifest
+        }
+    }
+    catch {
+        $rollbackErrors += [ordered]@{ reason = 'manifest-pre-rollback-write-failed'; message = $_.Exception.Message }
+    }
+
+    for ($replacedIndex = $replacedFiles.Count - 1; $replacedIndex -ge 0; $replacedIndex--) {
+        $replaced = $replacedFiles[$replacedIndex]
+        try {
+            $target = [string] $replaced.target
+            if ([string]::IsNullOrWhiteSpace([string] $replaced.backup)) {
+                if (Test-Path -LiteralPath $target -PathType Leaf) {
+                    Remove-Item -LiteralPath $target -Force
+                }
+                if (Test-Path -LiteralPath $target -PathType Leaf) {
+                    throw "无法删除本次创建的 runtime 文件：$target"
+                }
+            }
+            else {
+                $targetDirectory = Split-Path -Parent $target
+                $restoreTemp = Join-Path $targetDirectory ('.restore-' + [System.IO.Path]::GetFileName($target) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+                try {
+                    Copy-Item -LiteralPath ([string] $replaced.backup) -Destination $restoreTemp -Force
+                    if ((Get-HashUpper -PathValue $restoreTemp) -ne [string] $replaced.originalSha256) {
+                        throw "回滚 backup 指纹不匹配：$($replaced.backup)"
+                    }
+                    Move-Item -LiteralPath $restoreTemp -Destination $target -Force
+                    if ((Get-HashUpper -PathValue $target) -ne [string] $replaced.originalSha256) {
+                        throw "回滚后 runtime 指纹不匹配：$target"
+                    }
+                }
+                finally {
+                    if (Test-Path -LiteralPath $restoreTemp) {
+                        Remove-Item -LiteralPath $restoreTemp -Force -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+            $replaced.file.status = 'restored'
+        }
+        catch {
+            $rollbackErrors += [ordered]@{
+                path = [string] $replaced.target
+                reason = 'rollback-failed'
+                message = $_.Exception.Message
+            }
+            $replaced.file.status = 'rollback-failed'
+        }
+    }
+
+    $rollbackStatus = if ($rollbackErrors.Count -eq 0) { 'rolled-back' } else { 'unsafe-partial' }
+    try {
+        $manifest.status = $rollbackStatus
+        $manifest.rollbackCompletedAt = (Get-Date).ToUniversalTime().ToString('o')
+        $manifest.rollbackErrors = $rollbackErrors
+        if (Test-Path -LiteralPath $evidenceDirectory -PathType Container) {
+            Write-JsonAtomic -PathValue $manifestPath -Value $manifest
+        }
+    }
+    catch {
+        $rollbackErrors += [ordered]@{ reason = 'manifest-post-rollback-write-failed'; message = $_.Exception.Message }
+        $rollbackStatus = 'unsafe-partial'
+    }
+
     [pscustomobject]@{
         ok = $false
+        status = $rollbackStatus
+        rolledBack = ($rollbackStatus -eq 'rolled-back')
         sourceRoot = $sourceRootResolved
         codexRoot = $codexRootResolved
         evidenceDir = $evidenceDirectory
-        error = $_.Exception.Message
+        manifestPath = $manifestPath
+        rollbackErrors = $rollbackErrors
+        error = $failureMessage
     } | ConvertTo-Json -Depth 8
     exit 1
 }

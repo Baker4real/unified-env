@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -36,7 +37,8 @@ const codexRoot = 'D:\\Codex\\.codex';
 const evidenceRoot = path.join(
   codexRoot,
   'run-evidence',
-  'github-default-branch-skill-overlay-test',
+  'github-default-branch-skill-policy',
+  'overlay-test',
 );
 const fixtureRoot = path.join(evidenceRoot, 'fixture-codex-root');
 
@@ -131,6 +133,120 @@ assert.equal(idempotent.changed, 0);
 assert.equal(idempotent.failed, 0);
 assert.equal(idempotent.skipped, 6);
 
+// Only the three supported plugin surfaces may be changed, even when an
+// external D: file happens to carry a known upstream fingerprint.
+const externalTarget = path.join(evidenceRoot, 'external', 'SKILL.md');
+fs.mkdirSync(path.dirname(externalTarget), { recursive: true });
+fs.writeFileSync(externalTarget, fixtureUpstream.yeet.local, 'utf8');
+const externalPlan = overlay.buildChangePlan(
+  [{ path: externalTarget, role: 'yeet' }],
+  fixtureCatalog,
+);
+assert.ok(externalPlan.errors.some((error) => error.reason === 'unsupported-plugin-surface'));
+assert.equal(overlay.applyChangePlan(externalPlan, { dryRun: false, evidenceRoot }).changed, 0);
+assert.throws(
+  () => overlay.applyChangePlan(plan, {
+    dryRun: false,
+    evidenceRoot: 'D:\\Codex\\.codex\\run-evidence-outside-policy',
+  }),
+  /evidenceRoot must stay under/,
+);
+
+// A patched marker is not sufficient when the catalog document contains a
+// forbidden force/patch-stack operation.
+const forgedCatalog = JSON.parse(JSON.stringify(fixtureCatalog));
+forgedCatalog.roles.yeet[0].patchedDocument += [
+  '`git push --force-with-lease origin feature`',
+  '`git push -f origin feature`',
+  '`git switch -c patch-stack`',
+  '`git checkout -b patch-stack`',
+  '`git update-ref refs/heads/patch-stack deadbeef`',
+].join('\n');
+const forgedCatalogPlan = overlay.buildChangePlan(
+  overlay.discoverTargets(fixtureRoot),
+  forgedCatalog,
+);
+assert.ok(forgedCatalogPlan.errors.filter((error) => error.reason === 'forbidden-publish-pattern').length >= 3);
+
+// Rollback refuses a manifest that attempts to address a non-plugin path.
+const maliciousManifestDirectory = path.join(evidenceRoot, 'malicious-manifest');
+const maliciousManifestPath = path.join(maliciousManifestDirectory, 'manifest.json');
+const maliciousBackupPath = path.join(maliciousManifestDirectory, 'backup-SKILL.md');
+fs.mkdirSync(maliciousManifestDirectory, { recursive: true });
+fs.writeFileSync(maliciousBackupPath, fixtureUpstream.yeet.local, 'utf8');
+fs.writeFileSync(maliciousManifestPath, JSON.stringify({
+  evidenceDirectory: maliciousManifestDirectory,
+  entries: [{
+    path: externalTarget,
+    backupPath: maliciousBackupPath,
+    status: 'committed',
+    originalSha256: sha256(fixtureUpstream.yeet.local),
+    replacementSha256: sha256(fixtureUpstream.yeet.local),
+  }],
+}), 'utf8');
+assert.throws(
+  () => overlay.rollbackManifest(maliciousManifestPath),
+  /manifest target is outside a supported GitHub plugin surface/,
+);
+const maliciousBackupManifestPath = path.join(maliciousManifestDirectory, 'manifest-external-backup.json');
+fs.writeFileSync(maliciousBackupManifestPath, JSON.stringify({
+  evidenceDirectory: maliciousManifestDirectory,
+  entries: [{
+    path: targets[0].path,
+    backupPath: 'D:\\Codex\\outside-overlay-backup.bin',
+    status: 'committed',
+    originalSha256: sha256(fixtureUpstream.yeet.local),
+    replacementSha256: fixtureCatalog.roles[targets[0].role][0].patchedSha256,
+    codexRoot: fixtureRoot,
+  }],
+}), 'utf8');
+assert.throws(
+  () => overlay.rollbackManifest(maliciousBackupManifestPath),
+  /manifest backupPath is outside its evidenceDirectory/,
+);
+
+// A failure after the target rename must restore every already-written target.
+const postWriteRoot = path.join(evidenceRoot, 'post-write-fixture');
+fs.rmSync(postWriteRoot, { recursive: true, force: true });
+for (const surface of surfaces) {
+  for (const role of ['yeet', 'github']) {
+    const document = fixtureUpstream[role][surface.variant];
+    const independentTarget = path.join(postWriteRoot, surface.root, 'skills', role, 'SKILL.md');
+    fs.mkdirSync(path.dirname(independentTarget), { recursive: true });
+    fs.writeFileSync(independentTarget, document, 'utf8');
+  }
+}
+const postWriteDiscovery = overlay.discoverTargets(postWriteRoot);
+const postWritePlan = overlay.buildChangePlan(postWriteDiscovery, fixtureCatalog);
+const postWriteFailure = overlay.applyChangePlan(postWritePlan, {
+  dryRun: false,
+  evidenceRoot,
+  onAfterWrite: () => { throw new Error('injected post-write verification failure'); },
+});
+assert.equal(postWriteFailure.status, 'rolled-back');
+for (const target of postWriteDiscovery.targets) {
+  const variant = target.surfaceDirectory.includes('0.1.8-') ? 'remote' : 'local';
+  assert.equal(
+    sha256(fs.readFileSync(target.path)),
+    sha256(fixtureUpstream[target.role][variant]),
+    `post-write failure left a changed target: ${target.path}`,
+  );
+}
+const manifestFailure = overlay.applyChangePlan(postWritePlan, {
+  dryRun: false,
+  evidenceRoot,
+  failManifestUpdateAt: 3,
+});
+assert.equal(manifestFailure.status, 'rolled-back');
+for (const target of postWriteDiscovery.targets) {
+  const variant = target.surfaceDirectory.includes('0.1.8-') ? 'remote' : 'local';
+  assert.equal(
+    sha256(fs.readFileSync(target.path)),
+    sha256(fixtureUpstream[target.role][variant]),
+    `manifest failure left a changed target: ${target.path}`,
+  );
+}
+
 function snapshotFiles() {
   return targets.reduce((snapshot, target) => {
     snapshot[target.path] = fs.existsSync(target.path)
@@ -200,5 +316,64 @@ assertUnchanged(missingSnapshot);
 
 // The fixture was deliberately changed in the negative cases; all other files remain intact.
 fs.writeFileSync(missingPair.path, patchedDocuments[missingPair.path], 'utf8');
+
+// The deployment script must roll back the first runtime file when the
+// second file fails. This uses an isolated D: fixture, never the live runtime.
+const deploymentFixtureRoot = path.join(evidenceRoot, 'deployment-fixture');
+const deploymentSourceRoot = path.join(deploymentFixtureRoot, 'source');
+const deploymentCodexRoot = path.join(deploymentFixtureRoot, 'codex');
+const deploymentEvidenceRoot = path.join(evidenceRoot, 'deployment-evidence');
+fs.rmSync(deploymentFixtureRoot, { recursive: true, force: true });
+fs.mkdirSync(path.join(deploymentSourceRoot, 'scripts'), { recursive: true });
+fs.copyFileSync(
+  path.join(repoRoot, 'scripts', 'Apply-GitHubDefaultBranchSkillOverlay.cjs'),
+  path.join(deploymentSourceRoot, 'scripts', 'Apply-GitHubDefaultBranchSkillOverlay.cjs'),
+);
+fs.copyFileSync(
+  path.join(repoRoot, 'scripts', 'github-default-branch-skill-overlay-catalog.json'),
+  path.join(deploymentSourceRoot, 'scripts', 'github-default-branch-skill-overlay-catalog.json'),
+);
+const deploymentProcess = childProcess.spawnSync(
+  'D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe',
+  [
+    '-NoProfile',
+    '-File',
+    path.join(repoRoot, 'scripts', 'Deploy-GitHubDefaultBranchSkillOverlay.ps1'),
+    '-SourceRoot', path.join(deploymentSourceRoot, 'scripts'),
+    '-CodexRoot', deploymentCodexRoot,
+    '-EvidenceRoot', deploymentEvidenceRoot,
+    '-InjectFailureAfter', '1',
+  ],
+  { encoding: 'utf8' },
+);
+assert.notEqual(deploymentProcess.status, 0, deploymentProcess.stdout || deploymentProcess.stderr);
+const deploymentReport = JSON.parse(deploymentProcess.stdout.trim());
+assert.equal(deploymentReport.status, 'rolled-back');
+assert.equal(deploymentReport.rolledBack, true);
+assert.ok(deploymentReport.manifestPath.startsWith(
+  path.join(codexRoot, 'run-evidence', 'github-default-branch-skill-policy'),
+));
+assert.equal(
+  fs.existsSync(path.join(deploymentCodexRoot, 'scripts', 'Apply-GitHubDefaultBranchSkillOverlay.cjs')),
+  false,
+);
+assert.equal(
+  fs.existsSync(path.join(deploymentCodexRoot, 'scripts', 'github-default-branch-skill-overlay-catalog.json')),
+  false,
+);
+const outsideDeployment = childProcess.spawnSync(
+  'D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe',
+  [
+    '-NoProfile',
+    '-File',
+    path.join(repoRoot, 'scripts', 'Deploy-GitHubDefaultBranchSkillOverlay.ps1'),
+    '-SourceRoot', deploymentSourceRoot,
+    '-CodexRoot', deploymentCodexRoot,
+    '-EvidenceRoot', 'D:\\Codex\\.codex\\run-evidence-outside-policy',
+  ],
+  { encoding: 'utf8' },
+);
+assert.notEqual(outsideDeployment.status, 0);
+assert.match(outsideDeployment.stderr, /EvidenceRoot 必须位于/);
 
 console.log(JSON.stringify({ ok: true, changed: applied.changed, idempotent: idempotent.skipped, evidenceRoot }));
