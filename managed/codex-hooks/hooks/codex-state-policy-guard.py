@@ -2018,11 +2018,10 @@ class SqliteTargetLease:
                     # rejecting direct writes; the main/journal ranges remain
                     # exclusive and the read-only WAL range is shared only
                     # with another lease, not with file writes.
-                    # A read-only SQLite transaction also needs to retain its
-                    # WAL read handle, so share the WAL range only for that
-                    # mode.  Windows byte-range locks still reject direct
-                    # writes even when another lock holder may share it.
-                    shared=index == 2 or (self.read_only and index == 1),
+                    # The read-only transaction materializes its WAL pages
+                    # before this call, so the complete WAL range can remain
+                    # exclusive; only SQLite's SHM lock-byte window is split.
+                    shared=index == 2,
                 )
                 try:
                     actual_identity = _publish_handle_info(kernel32, handle, candidate)

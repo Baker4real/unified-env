@@ -1949,6 +1949,51 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(json.loads(output.getvalue())["ok"])
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows read-only generation leases")
+    def test_check_only_blocks_wal_lock_byte_mutation_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
+        keeper.commit()
+        wal_path = Path(str(self.db_path) + "-wal")
+        original_wal = wal_path.read_bytes()
+
+        class CheckOnlyWalLockByteOutput(io.StringIO):
+            attempted = False
+            blocked = False
+            mutated = False
+
+            def write(self, value: str) -> int:
+                if not self.attempted:
+                    self.attempted = True
+                    try:
+                        with wal_path.open("r+b") as stream:
+                            stream.seek(122)
+                            stream.write(b"X")
+                        self.mutated = True
+                    except OSError:
+                        self.blocked = True
+                return super().write(value)
+
+        output = CheckOnlyWalLockByteOutput()
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=True,
+                health_root=self.root / "health",
+                output=output,
+            )
+        finally:
+            keeper.close()
+            if output.mutated:
+                wal_path.write_bytes(original_wal)
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        self.assertTrue(output.attempted)
+        self.assertTrue(output.blocked or not result["ok"])
+        if output.mutated:
+            self.assertFalse(result["ok"])
+
     def test_run_policy_rejects_new_sidecar_during_output(self) -> None:
         self.write_global(self.permission_drift())
         keeper = self.create_wal_db()
