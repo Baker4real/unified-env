@@ -670,7 +670,8 @@ class CodexStatePolicyTests(unittest.TestCase):
             )
         self.assertFalse(result["ok"])
         self.assertIn("unsafe-partial", result["errors"])
-        self.assertNotEqual(self.global_path.read_bytes(), original)
+        self.assertFalse(result["changed"])
+        self.assertEqual(self.global_path.read_bytes(), original)
 
     def test_run_policy_marks_unknown_wal_snapshot_unsafe_partial(self) -> None:
         original = self.write_global(self.permission_drift())
@@ -717,10 +718,10 @@ class CodexStatePolicyTests(unittest.TestCase):
                         output=io.StringIO(),
                     )
             self.assertFalse(result["ok"])
-            self.assertTrue(result["changed"])
+            self.assertFalse(result["changed"])
             self.assertIn("unsafe-partial", result["errors"])
-            self.assertNotEqual(result["globalState"]["status"], "rolled-back")
-            self.assertNotEqual(self.global_path.read_bytes(), original)
+            self.assertEqual(result["globalState"]["status"], "not-run")
+            self.assertEqual(self.global_path.read_bytes(), original)
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
@@ -749,10 +750,10 @@ class CodexStatePolicyTests(unittest.TestCase):
             )
 
         self.assertFalse(result["ok"])
-        self.assertTrue(result["changed"])
-        self.assertNotEqual(result["globalState"]["status"], "not-run")
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["globalState"]["status"], "not-run")
         self.assertIn("unsafe-partial", result["errors"])
-        self.assertNotEqual(self.global_path.read_bytes(), original)
+        self.assertEqual(self.global_path.read_bytes(), original)
 
     def test_run_policy_missing_state_domain_fails_closed(self) -> None:
         output = io.StringIO()
@@ -1546,7 +1547,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("unsafe-partial", result["errors"])
         self.assertEqual(result["threadState"]["status"], "not-run")
-        self.assertNotEqual(self.global_path.read_bytes(), original)
+        self.assertEqual(self.global_path.read_bytes(), original)
 
     def test_run_policy_rejects_sqlite_competitor_before_success_envelope(self) -> None:
         self.write_global(self.permission_drift())
@@ -1626,8 +1627,9 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
-    def test_run_policy_wal_cold_start_succeeds_with_return_handoff(self) -> None:
+    def test_run_policy_wal_cold_start_fails_closed_before_global_publish(self) -> None:
         self.write_global(self.permission_drift())
+        original_global = self.global_path.read_bytes()
         keeper = sqlite3.connect(self.db_path)
         try:
             self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
@@ -1650,12 +1652,14 @@ class CodexStatePolicyTests(unittest.TestCase):
                 health_root=self.root / "health",
                 output=io.StringIO(),
             )
-            self.assertTrue(result["ok"])
-            self.assertNotIn("unsafe-partial", result["errors"])
-            self.assertEqual(result["threadState"]["status"], "updated")
+            self.assertFalse(result["ok"])
+            self.assertIn("generation-unbounded", result["errors"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(result["threadState"]["status"], "not-run")
+            self.assertEqual(self.global_path.read_bytes(), original_global)
             self.assertEqual(
                 keeper.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
-                "never",
+                "on-request",
             )
         finally:
             keeper.close()
@@ -1735,33 +1739,20 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
-    @unittest.skipUnless(os.name == "nt", "requires Windows byte-range leases")
-    def test_run_policy_blocks_nonzero_offset_sqlite_write_during_output(self) -> None:
+    def test_run_policy_wal_cold_start_emits_single_line_fail_closed(self) -> None:
         self.write_global(self.permission_drift())
         keeper = self.create_wal_db()
         keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
         keeper.commit()
-        original_main = self.db_path.read_bytes()
 
-        class NonzeroOffsetOutput(io.StringIO):
-            attempted = False
-            blocked = False
-            mutated = False
+        class FailureOutput(io.StringIO):
+            writes = 0
 
             def write(self, value: str) -> int:
-                if not self.attempted:
-                    self.attempted = True
-                    try:
-                        with self.db_path.open("r+b") as stream:
-                            stream.seek(1)
-                            stream.write(b"X")
-                            self.mutated = True
-                    except OSError:
-                        self.blocked = True
+                self.writes += 1
                 return super().write(value)
 
-        output = NonzeroOffsetOutput()
-        output.db_path = self.db_path
+        output = FailureOutput()
         try:
             result = self.module.run_policy(
                 self.codex_home,
@@ -1771,14 +1762,12 @@ class CodexStatePolicyTests(unittest.TestCase):
             )
         finally:
             keeper.close()
-            if output.mutated:
-                self.db_path.write_bytes(original_main)
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
-        self.assertTrue(output.attempted)
-        self.assertTrue(output.blocked)
-        self.assertTrue(result["ok"])
-        self.assertTrue(json.loads(output.getvalue())["ok"])
+        self.assertEqual(output.writes, 1)
+        self.assertFalse(result["ok"])
+        self.assertIn("generation-unbounded", result["errors"])
+        self.assertFalse(json.loads(output.getvalue())["ok"])
 
     def test_run_policy_rejects_new_sidecar_during_output(self) -> None:
         self.write_global(self.permission_drift())
@@ -1946,6 +1935,7 @@ class CodexStatePolicyTests(unittest.TestCase):
     def test_run_policy_wal_missing_journal_created_after_last_return_gate_fails_closed(self) -> None:
         """A legal WAL cold-start must not leave an unguarded journal gap."""
         self.write_global(self.permission_drift())
+        original_global = self.global_path.read_bytes()
         keeper = self.create_wal_db()
         journal_path = Path(str(self.db_path) + "-journal")
         keeper.execute("update threads set sentinel='wal-gap' where id='target-a'")
@@ -1987,6 +1977,7 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.assertIn("unsafe-partial", result["errors"])
             self.assertEqual(len(output.getvalue().splitlines()), 1)
             self.assertFalse(json.loads(output.getvalue())["ok"])
+            self.assertEqual(self.global_path.read_bytes(), original_global)
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
@@ -2215,6 +2206,7 @@ class CodexStatePolicyTests(unittest.TestCase):
 
     def test_write_mode_fails_closed_on_unbounded_sqlite_generation(self) -> None:
         self.write_global(self.permission_drift())
+        original_global = self.global_path.read_bytes()
         connection = self.create_db()
         connection.close()
         output = io.StringIO()
@@ -2230,6 +2222,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertFalse(payload["converged"])
         self.assertIn("generation-unbounded", payload["errors"])
         self.assertIn("unsafe-partial", payload["errors"])
+        self.assertEqual(self.global_path.read_bytes(), original_global)
 
     def test_sqlite_generation_unbounded_requires_wal_and_shm_but_allows_wal_journal_cold_start(
         self,
@@ -2247,7 +2240,7 @@ class CodexStatePolicyTests(unittest.TestCase):
             identities=identities,
             metadata=metadata,
         )
-        self.assertFalse(self.module._sqlite_generation_unbounded(cold_start, cold_start))
+        self.assertTrue(self.module._sqlite_generation_unbounded(cold_start, cold_start))
         for missing_index in (1, 2):
             missing_identities = list(identities)
             missing_identities[missing_index] = None

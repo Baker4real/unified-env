@@ -3039,26 +3039,17 @@ def _sqlite_generation_unbounded(
     initial: SqliteSourceSnapshot,
     final: SqliteSourceSnapshot,
 ) -> bool:
-    """Return whether the initial SQLite source-set cannot be leased safely.
-
-    A WAL database may legitimately have no rollback journal; that name is
-    not a required source-set member while the initial WAL generation is
-    present.  WAL and SHM, however, are the live generation pair: if either is
-    absent at the first capture, no return lease can bind the complete source
-    set even when SQLite creates it before the final snapshot.  The write-mode
-    caller must therefore fail closed rather than publish a success envelope.
-
-    ``final`` is retained in the signature for the existing call contract and
-    to make the invariant explicit: a later sidecar appearance never repairs
-    an unleased initial generation.
-    """
+    """Return whether the initial SQLite source-set cannot be leased safely."""
     missing_initial = {
         index
         for index in range(1, 4)
         if initial.identities[index] is None
     }
-    if initial.identities[1] is not None and initial.identities[3] is None:
-        missing_initial.discard(3)
+    # Keep the final snapshot in the contract for callers that compare the
+    # source generation, but never let a later sidecar appearance repair an
+    # initial gap: the missing name had no handle-bound lease during the
+    # mutation envelope.
+    del final
     return bool(missing_initial)
 
 
@@ -3818,6 +3809,12 @@ def run_policy(
             ):
                 _assert_check_only_d_path_without_reparse(sidecar, name="thread state sidecar")
             sqlite_snapshot = _capture_sqlite_source(db_path)
+            if not check_only and _sqlite_generation_unbounded(sqlite_snapshot, sqlite_snapshot):
+                # A missing source name cannot carry a handle-bound/no-create
+                # lease.  Reject before the global JSON publisher runs so a
+                # repair never leaves cross-domain partial state behind.
+                errors.extend(("generation-unbounded", "unsafe-partial"))
+                raise StatePolicyError("thread state source generation is unbounded")
             try:
                 global_result = update_global_state(
                     global_path,
