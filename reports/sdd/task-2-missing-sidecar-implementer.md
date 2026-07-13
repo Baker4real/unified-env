@@ -6,21 +6,22 @@ DONE
 
 ## 实施内容
 
-- 写入/修复 `run_policy` 在任何 global JSON 发布前预检 SQLite 的 WAL/SHM/journal source-set；任一 sidecar 缺失即返回 `generation-unbounded` + `unsafe-partial`，不产生跨域 partial。
-- `SqliteTargetLease.assert_no_create()` 与 `run_return_gates()` 仍保留对完整 source-set 的晚到 journal/reparse 防线；缺失 source-set 不再依赖不可靠的 no-create primitive。
-- `_sqlite_generation_unbounded()` 对初始缺失的 WAL、SHM、journal 一律 fail-closed；check-only/inventory 路径仍可读取和报告合法 cold-start。
-- 新增真实 WAL fixture、late journal、journal reparse、WAL/SHM/journal source-set 判定、跨域不发布和单行 fail-closed 输出测试；WAL 写入 cold-start 明确验证为拒绝，不声称修复成功。
+- `run_policy` 在任何 global JSON 发布前先检查 SQLite source-set；缺失 WAL 或 SHM、或已有 sidecar 字节不可观测时，返回 `generation-unbounded`/`unsafe-partial` 或不可写错误，不产生跨域 partial。
+- 对合法生产 WAL+SHM、无 rollback-journal 的 generation，新增 Windows 缺失名称 lease：`OPEN_ALWAYS` + no-share + `FILE_FLAG_DELETE_ON_CLOSE`。占位文件只用于阻止创建/替换，逻辑快照仍将 journal 视为缺失；预留后立即重新快照，覆盖捕获到占位之间的竞态。
+- `SqliteTargetLease.assert_no_create()` 与两次连续 `run_return_gates()` 复用该 lease，并逐次验证句柄身份；外部普通写入、journal 创建和 junction/reparse 替换均在最后 gate 被真实阻断。
+- `_sqlite_generation_unbounded()` 允许仅缺失 journal 的 WAL generation；缺失 WAL/SHM 仍 fail-closed。check-only/inventory 不创建占位、不写 live state，继续读取合法 cold-start。
+- 恢复 nonzero-offset main SQLite byte-range regression，并补充真实 WAL 写入成功、late journal/reparse 阻断、source-set 判定、跨域不发布和单行 fail-closed 输出测试。
 
 ## 验证
 
-- `D:\Codex\tools\python314-official\python.exe -W error::ResourceWarning -m unittest tests/Test-CodexStatePolicy.py -q`：95 tests，全部通过。
+- `D:\Codex\tools\python314-official\python.exe -W error::ResourceWarning -m unittest tests/Test-CodexStatePolicy.py -q`：96 tests，全部通过。
 - `D:\Codex\tools\python314-official\python.exe -W error::ResourceWarning -m unittest tests/Test-CodexStatePathInventory.py -q`：17 tests，全部通过；`Test-SkillCatalog.py`：16 tests，全部通过。
 - `D:\Codex\tools\python314-official\python.exe -W error::ResourceWarning -m unittest tests/Test-SkillCatalog.py -q`：16 tests，全部通过。
 - `D:\Codex\tools\PowerShell\7.6.3\pwsh.exe -NoProfile -File tests\Test-CodexHookPolicy.ps1`：通过。
 - `D:\Codex\tools\python314-official\python.exe -m py_compile managed\codex-hooks\hooks\codex-state-policy-guard.py`：通过。
 - `git diff --check`（本任务文件）：通过；测试生成的临时目录、SQLite probe 和 `__pycache__` 已清理。
-- live check-only：`codex-state-policy-guard.py --codex-home D:\Codex\.codex --check-only --json` 退出码 0，`ok=true`、`changed=false`、`threadState.integrityOk=true`；仅报告现有 drift，不写 live state。
+- live check-only：`codex-state-policy-guard.py --codex-home D:\Codex\.codex --check-only --json` 退出码 0，`ok=true`、`changed=false`、`threadState.integrityOk=true`；只读路径不创建缺失 journal 占位，仅报告现有 drift，不写 live state。
 
 ## 边界
 
-- 未触碰 live `D:\Codex\.codex` 状态、网络、代理或生产 hook 注册；只修改受管 state guard、测试和本报告。
+- 未触碰 live `D:\Codex\.codex` 状态、网络、代理或生产 hook 注册；只修改受管 state guard、测试和本报告。写模式的缺失 journal lease 仅在受控 `run_policy` fixture/生产入口中建立并在 finally 删除占位。

@@ -58,8 +58,10 @@ FILE_SHARE_READ = 0x00000001
 FILE_SHARE_WRITE = 0x00000002
 FILE_SHARE_DELETE = 0x00000004
 OPEN_EXISTING = 3
+OPEN_ALWAYS = 4
 FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+FILE_FLAG_DELETE_ON_CLOSE = 0x04000000
 LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
 LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
 # SQLite's WAL-index reserves eight bytes at this offset for its writer,
@@ -69,6 +71,7 @@ SQLITE_SHM_LOCK_OFFSET = 120
 SQLITE_SHM_LOCK_LENGTH = 8
 ERROR_FILE_NOT_FOUND = 2
 ERROR_PATH_NOT_FOUND = 3
+ERROR_ALREADY_EXISTS = 183
 SHORT_LEXICAL_SEGMENT = re.compile(r"^[^\\/]{1,8}~[0-9]+(?:\.[^\\/]+)?$", re.IGNORECASE)
 FILE_RENAME_INFORMATION_EX = 65
 FILE_RENAME_REPLACE_IF_EXISTS = 0x00000001
@@ -76,6 +79,7 @@ FILE_RENAME_POSIX_SEMANTICS = 0x00000002
 MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
 _ACTIVE_POLICY_SOURCE_LEASE: object | None = None
+_ACTIVE_SQLITE_MISSING_SIDECAR_LEASE: object | None = None
 
 
 class _ByHandleFileInformation(ctypes.Structure):
@@ -1677,6 +1681,122 @@ def _publish_handle_info(
     return identity
 
 
+def _open_missing_sidecar_handle(
+    path: Path,
+) -> tuple[object, wintypes.HANDLE]:
+    """Reserve an absent sidecar name without allowing a later replacement.
+
+    A missing SQLite WAL journal cannot carry a byte-range lease.  On Windows
+    the directory itself has no useful child-creation lock, so reserve the
+    exact name with a delete-on-close handle and no sharing.  Any writer,
+    replacement, or reparse-point creation attempt then fails with a sharing
+    violation while the lease is held.  ``OPEN_ALWAYS`` lets us distinguish a
+    genuine cold-start from a journal that appeared in the race immediately
+    before reservation.
+    """
+    if os.name != "nt":
+        raise StatePolicyError("missing sidecar no-create lease is unavailable")
+    _assert_check_only_d_path_without_reparse(path, name="missing sidecar lease")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.CreateFileW(
+        str(path),
+        GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS,
+        0,
+        None,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_DELETE_ON_CLOSE,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if not handle or handle == invalid_handle:
+        error = int(ctypes.get_last_error())
+        if handle and handle != invalid_handle:
+            kernel32.CloseHandle(handle)
+        raise StatePolicyError(f"missing sidecar lease unavailable ({error})")
+    if int(ctypes.get_last_error()) == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
+        raise StatePolicyError("missing sidecar appeared before lease")
+    return kernel32, handle
+
+
+class SqliteMissingSidecarLease:
+    """Hold a cold-start WAL journal name against creation or replacement."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._windows_handle: tuple[object, wintypes.HANDLE] | None = None
+        self._expected_identity: tuple[int, int] | None = None
+        self._previous_lease: object | None = None
+        self._closed = False
+
+    def __enter__(self) -> "SqliteMissingSidecarLease":
+        global _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
+        try:
+            if self.path.exists():
+                raise StatePolicyError("missing sidecar appeared before lease")
+            kernel32, handle = _open_missing_sidecar_handle(self.path)
+            try:
+                actual_identity = _publish_handle_info(kernel32, handle, self.path)
+            except BaseException:
+                _close_publish_handle(kernel32, handle)
+                raise
+            self._windows_handle = (kernel32, handle)
+            self._expected_identity = actual_identity
+            self._previous_lease = _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
+            _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE = self
+        except BaseException:
+            self.close()
+            raise
+        return self
+
+    def reserves(self, path: Path) -> bool:
+        return not self._closed and _path_compare_key(str(self.path)) == _path_compare_key(str(path))
+
+    def assert_unchanged(self) -> None:
+        if self._closed or self._windows_handle is None or self._expected_identity is None:
+            raise StatePolicyError("missing sidecar lease is closed")
+        _assert_check_only_d_path_without_reparse(
+            self.path,
+            name="missing sidecar lease",
+        )
+        kernel32, handle = self._windows_handle
+        if _publish_handle_info(kernel32, handle, self.path) != self._expected_identity:
+            raise StatePolicyError("missing sidecar lease changed concurrently")
+
+    def close(self) -> None:
+        global _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
+        if self._closed:
+            return
+        if _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE is self:
+            _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE = self._previous_lease
+        if self._windows_handle is not None:
+            kernel32, handle = self._windows_handle
+            _close_publish_handle(kernel32, handle)
+            self._windows_handle = None
+        self._closed = True
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except BaseException:
+            pass
+
+
 def _read_publish_handle_bytes(kernel32: object, handle: wintypes.HANDLE) -> bytes:
     kernel32.GetFileSizeEx.argtypes = (wintypes.HANDLE, ctypes.POINTER(ctypes.c_longlong))  # type: ignore[attr-defined]
     kernel32.GetFileSizeEx.restype = wintypes.BOOL  # type: ignore[attr-defined]
@@ -1983,10 +2103,11 @@ class SqliteTargetLease:
         """Keep an initially absent WAL journal under a no-create monitor.
 
         SQLite WAL mode legitimately starts with a database/WAL/SHM set and no
-        rollback journal.  The absent journal cannot be byte-range leased, so
-        every envelope gate also re-probes that name.  A journal appearing after
-        the normal lease assertion is an unbounded generation and must fail
-        closed instead of being silently accepted.
+        rollback journal.  The write path reserves that name with
+        ``SqliteMissingSidecarLease``; callers that hold no reservation retain
+        the legacy re-probe as a fail-closed fallback.  A journal appearing
+        after the normal lease assertion is an unbounded generation and must
+        never be silently accepted.
         """
         if self._closed or self._connection is None:
             raise StatePolicyError("sqlite target lease is closed")
@@ -1994,6 +2115,13 @@ class SqliteTargetLease:
         if snapshot is None or snapshot.identities[1] is None or snapshot.identities[3] is not None:
             return
         journal_path = Path(str(self.path) + "-journal")
+        missing_sidecar_lease = _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
+        if (
+            isinstance(missing_sidecar_lease, SqliteMissingSidecarLease)
+            and missing_sidecar_lease.reserves(journal_path)
+        ):
+            missing_sidecar_lease.assert_unchanged()
+            return
         try:
             journal_path.lstat()
         except FileNotFoundError:
@@ -2977,6 +3105,21 @@ def _capture_sqlite_source(
     try:
         for index, candidate in enumerate(paths):
             _assert_check_only_d_path_without_reparse(candidate, name="thread state source")
+            missing_sidecar_lease = _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
+            if (
+                index == 3
+                and isinstance(missing_sidecar_lease, SqliteMissingSidecarLease)
+                and missing_sidecar_lease.reserves(candidate)
+            ):
+                # The lease intentionally creates a zero-byte placeholder so
+                # Windows can deny later child creation.  Keep that physical
+                # file out of the logical SQLite source tuple.
+                missing_sidecar_lease.assert_unchanged()
+                payload.append(None)
+                identities.append(None)
+                metadata.append((False, None, None, _file_handle_identity(candidate.parent)))
+                content_known.append(True)
+                continue
             exists = candidate.exists()
             if not exists:
                 payload.append(None)
@@ -3045,10 +3188,18 @@ def _sqlite_generation_unbounded(
         for index in range(1, 4)
         if initial.identities[index] is None
     }
+    if (
+        missing_initial == {3}
+        and initial.identities[1] is not None
+        and initial.identities[2] is not None
+    ):
+        # A WAL database may legitimately have no rollback journal.  The
+        # write path must first acquire SqliteMissingSidecarLease; this helper
+        # only classifies the generation after that no-create proof exists.
+        return False
     # Keep the final snapshot in the contract for callers that compare the
-    # source generation, but never let a later sidecar appearance repair an
-    # initial gap: the missing name had no handle-bound lease during the
-    # mutation envelope.
+    # source generation, but never let a later required sidecar appearance
+    # repair an initial gap.
     del final
     return bool(missing_initial)
 
@@ -3763,6 +3914,7 @@ def run_policy(
     global_return_lease: StateTargetLease | None = None
     sqlite_return_lease: SqliteTargetLease | None = None
     pending_sqlite_return_lease: SqliteTargetLease | None = None
+    missing_journal_lease: SqliteMissingSidecarLease | None = None
     sqlite_changed = False
     try:
         if permission_policy is None:
@@ -3809,12 +3961,50 @@ def run_policy(
             ):
                 _assert_check_only_d_path_without_reparse(sidecar, name="thread state sidecar")
             sqlite_snapshot = _capture_sqlite_source(db_path)
-            if not check_only and _sqlite_generation_unbounded(sqlite_snapshot, sqlite_snapshot):
-                # A missing source name cannot carry a handle-bound/no-create
-                # lease.  Reject before the global JSON publisher runs so a
-                # repair never leaves cross-domain partial state behind.
-                errors.extend(("generation-unbounded", "unsafe-partial"))
-                raise StatePolicyError("thread state source generation is unbounded")
+            if not check_only:
+                if _sqlite_snapshot_has_unknown_sidecars(sqlite_snapshot):
+                    # A valid WAL generation is writable only when every
+                    # existing sidecar is identity- and byte-observable.  Do
+                    # this before global publication so an unreadable WAL or
+                    # SHM cannot turn into a cross-domain partial result.
+                    errors.append("unsafe-partial")
+                    raise StatePolicyError("thread state sidecar bytes unavailable for write")
+                missing_sidecars = {
+                    index
+                    for index in range(1, 4)
+                    if sqlite_snapshot.identities[index] is None
+                }
+                if (
+                    missing_sidecars == {3}
+                    and sqlite_snapshot.identities[1] is not None
+                    and sqlite_snapshot.identities[2] is not None
+                ):
+                    # WAL+SHM with no rollback journal is a legal production
+                    # generation.  Reserve the absent name before publishing
+                    # global state, then recapture to close the snapshot-to-
+                    # reservation race.  The lease masks its placeholder from
+                    # all logical SQLite snapshots.
+                    try:
+                        missing_journal_lease = SqliteMissingSidecarLease(
+                            Path(str(db_path) + "-journal")
+                        )
+                        missing_journal_lease.__enter__()
+                        reserved_snapshot = _capture_sqlite_source(db_path)
+                        if reserved_snapshot != sqlite_snapshot:
+                            raise StatePolicyError(
+                                "thread state source changed before missing sidecar lease"
+                            )
+                        sqlite_snapshot = reserved_snapshot
+                    except BaseException:
+                        errors.extend(("generation-unbounded", "unsafe-partial"))
+                        raise
+                elif _sqlite_generation_unbounded(sqlite_snapshot, sqlite_snapshot):
+                    # A missing required source name cannot carry a
+                    # handle-bound/no-create lease.  Reject before the global
+                    # JSON publisher runs so a repair never leaves cross-domain
+                    # partial state behind.
+                    errors.extend(("generation-unbounded", "unsafe-partial"))
+                    raise StatePolicyError("thread state source generation is unbounded")
             try:
                 global_result = update_global_state(
                     global_path,
@@ -4125,6 +4315,8 @@ def run_policy(
             sqlite_return_lease.close()
         if pending_sqlite_return_lease is not None:
             pending_sqlite_return_lease.close()
+        if missing_journal_lease is not None:
+            missing_journal_lease.close()
         if global_return_lease is not None:
             global_return_lease.close()
         if policy_return_lease is not None:

@@ -1627,9 +1627,8 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
-    def test_run_policy_wal_cold_start_fails_closed_before_global_publish(self) -> None:
+    def test_run_policy_wal_cold_start_succeeds_with_reserved_journal_lease(self) -> None:
         self.write_global(self.permission_drift())
-        original_global = self.global_path.read_bytes()
         keeper = sqlite3.connect(self.db_path)
         try:
             self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
@@ -1652,14 +1651,13 @@ class CodexStatePolicyTests(unittest.TestCase):
                 health_root=self.root / "health",
                 output=io.StringIO(),
             )
-            self.assertFalse(result["ok"])
-            self.assertIn("generation-unbounded", result["errors"])
-            self.assertIn("unsafe-partial", result["errors"])
-            self.assertEqual(result["threadState"]["status"], "not-run")
-            self.assertEqual(self.global_path.read_bytes(), original_global)
+            self.assertTrue(result["ok"])
+            self.assertNotIn("generation-unbounded", result["errors"])
+            self.assertNotIn("unsafe-partial", result["errors"])
+            self.assertEqual(result["threadState"]["status"], "updated")
             self.assertEqual(
                 keeper.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
-                "on-request",
+                "never",
             )
         finally:
             keeper.close()
@@ -1739,11 +1737,9 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
-    def test_run_policy_wal_cold_start_emits_single_line_fail_closed(self) -> None:
+    def test_run_policy_missing_source_set_emits_single_line_fail_closed(self) -> None:
         self.write_global(self.permission_drift())
-        keeper = self.create_wal_db()
-        keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
-        keeper.commit()
+        keeper = self.create_db()
 
         class FailureOutput(io.StringIO):
             writes = 0
@@ -1768,6 +1764,51 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("generation-unbounded", result["errors"])
         self.assertFalse(json.loads(output.getvalue())["ok"])
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows byte-range leases")
+    def test_run_policy_blocks_nonzero_offset_sqlite_write_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
+        keeper.commit()
+        original_main = self.db_path.read_bytes()
+
+        class NonzeroOffsetOutput(io.StringIO):
+            attempted = False
+            blocked = False
+            mutated = False
+
+            def write(self, value: str) -> int:
+                if not self.attempted:
+                    self.attempted = True
+                    try:
+                        with self.db_path.open("r+b") as stream:
+                            stream.seek(1)
+                            stream.write(b"X")
+                            self.mutated = True
+                    except OSError:
+                        self.blocked = True
+                return super().write(value)
+
+        output = NonzeroOffsetOutput()
+        output.db_path = self.db_path
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=output,
+            )
+        finally:
+            keeper.close()
+            if output.mutated:
+                self.db_path.write_bytes(original_main)
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        self.assertTrue(output.attempted)
+        self.assertTrue(output.blocked)
+        self.assertTrue(result["ok"])
+        self.assertTrue(json.loads(output.getvalue())["ok"])
 
     def test_run_policy_rejects_new_sidecar_during_output(self) -> None:
         self.write_global(self.permission_drift())
@@ -1932,10 +1973,9 @@ class CodexStatePolicyTests(unittest.TestCase):
         finally:
             journal_path.unlink(missing_ok=True)
 
-    def test_run_policy_wal_missing_journal_created_after_last_return_gate_fails_closed(self) -> None:
-        """A legal WAL cold-start must not leave an unguarded journal gap."""
+    def test_run_policy_wal_missing_journal_created_after_last_return_gate_is_blocked(self) -> None:
+        """A legal WAL cold-start reserves the absent journal name."""
         self.write_global(self.permission_drift())
-        original_global = self.global_path.read_bytes()
         keeper = self.create_wal_db()
         journal_path = Path(str(self.db_path) + "-journal")
         keeper.execute("update threads set sentinel='wal-gap' where id='target-a'")
@@ -1945,7 +1985,10 @@ class CodexStatePolicyTests(unittest.TestCase):
         original_assert = self.module.SqliteTargetLease.assert_unchanged
         calls = 0
 
+        blocked = False
+
         def assert_then_create(lease: object, *args: object, **kwargs: object) -> None:
+            nonlocal blocked
             nonlocal calls
             calls += 1
             original_assert(lease, *args, **kwargs)
@@ -1953,7 +1996,10 @@ class CodexStatePolicyTests(unittest.TestCase):
             # the missing sidecar after the last one reproduces the unbounded
             # generation that the final envelope must not report as success.
             if calls == 4:
-                journal_path.write_bytes(b"late-journal")
+                try:
+                    journal_path.write_bytes(b"late-journal")
+                except OSError:
+                    blocked = True
 
         try:
             with mock.patch.object(
@@ -1968,23 +2014,17 @@ class CodexStatePolicyTests(unittest.TestCase):
                     health_root=self.root / "health",
                     output=output,
                 )
-            self.assertFalse(result["ok"])
-            self.assertIn(
-                "generation-unbounded",
-                result["errors"],
-                (calls, result, output.getvalue(), journal_path.exists()),
-            )
-            self.assertIn("unsafe-partial", result["errors"])
+            self.assertTrue(result["ok"], (calls, result, output.getvalue(), journal_path.exists()))
+            self.assertTrue(blocked, (calls, result, output.getvalue(), journal_path.exists()))
             self.assertEqual(len(output.getvalue().splitlines()), 1)
-            self.assertFalse(json.loads(output.getvalue())["ok"])
-            self.assertEqual(self.global_path.read_bytes(), original_global)
+            self.assertTrue(json.loads(output.getvalue())["ok"])
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     @unittest.skipUnless(os.name == "nt", "requires Windows reparse-point semantics")
-    def test_run_policy_wal_missing_journal_reparse_after_last_return_gate_fails_closed(self) -> None:
+    def test_run_policy_wal_missing_journal_reparse_after_last_return_gate_is_blocked(self) -> None:
         self.write_global(self.permission_drift())
         keeper = self.create_wal_db()
         keeper.execute("update threads set sentinel='wal-reparse' where id='target-a'")
@@ -2004,7 +2044,10 @@ class CodexStatePolicyTests(unittest.TestCase):
         original_assert = self.module.SqliteTargetLease.assert_unchanged
         calls = 0
 
+        blocked = False
+
         def assert_then_create_reparse(lease: object, *args: object, **kwargs: object) -> None:
+            nonlocal blocked
             nonlocal calls
             calls += 1
             original_assert(lease, *args, **kwargs)
@@ -2020,10 +2063,7 @@ class CodexStatePolicyTests(unittest.TestCase):
                     text=True,
                     check=False,
                 )
-                if created.returncode != 0:
-                    raise self.module.StatePolicyError(
-                        "fixture journal reparse creation failed"
-                    )
+                blocked = created.returncode != 0
 
         try:
             with mock.patch.object(
@@ -2038,11 +2078,10 @@ class CodexStatePolicyTests(unittest.TestCase):
                     health_root=self.root / "health",
                     output=output,
                 )
-            self.assertFalse(result["ok"])
-            self.assertIn("generation-unbounded", result["errors"])
-            self.assertIn("unsafe-partial", result["errors"])
+            self.assertTrue(result["ok"])
+            self.assertTrue(blocked)
             self.assertEqual(len(output.getvalue().splitlines()), 1)
-            self.assertFalse(json.loads(output.getvalue())["ok"])
+            self.assertTrue(json.loads(output.getvalue())["ok"])
         finally:
             keeper.close()
             if journal_path.exists() or journal_path.is_symlink():
@@ -2240,7 +2279,7 @@ class CodexStatePolicyTests(unittest.TestCase):
             identities=identities,
             metadata=metadata,
         )
-        self.assertTrue(self.module._sqlite_generation_unbounded(cold_start, cold_start))
+        self.assertFalse(self.module._sqlite_generation_unbounded(cold_start, cold_start))
         for missing_index in (1, 2):
             missing_identities = list(identities)
             missing_identities[missing_index] = None
