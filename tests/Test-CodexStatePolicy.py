@@ -235,6 +235,21 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertTrue(first["changed"])
         self.assertFalse(second["changed"])
 
+    def test_check_only_removes_new_snapshot_root_and_empty_ancestors(self) -> None:
+        conn = self.create_db()
+        conn.close()
+        snapshot_parent = self.root / "new-check-only-parent"
+        snapshot_root = snapshot_parent / "sqlite-snapshots"
+        self.assertFalse(snapshot_parent.exists())
+
+        checked = self.module.update_thread_state(
+            self.db_path, check_only=True, snapshot_root=snapshot_root
+        )
+
+        self.assertEqual(checked["wouldChangeCount"], 2)
+        self.assertFalse(snapshot_root.exists())
+        self.assertFalse(snapshot_parent.exists())
+
     def test_sqlite_transaction_busy_check_only_and_drift_zero(self) -> None:
         conn = self.create_db()
         conn.close()
@@ -302,12 +317,13 @@ class CodexStatePolicyTests(unittest.TestCase):
             )
             self.assertEqual(first["wouldChangeCount"], 1)
             self.assertEqual(snapshot(), before)
-            self.assertEqual(list(self.sqlite_snapshot_root.iterdir()), [])
+            self.assertFalse(self.sqlite_snapshot_root.exists())
             second = self.module.update_thread_state(
                 self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
             )
             self.assertEqual(second["wouldChangeCount"], 1)
             self.assertEqual(snapshot(), before)
+            self.assertFalse(self.sqlite_snapshot_root.exists())
 
             keeper.execute(
                 "insert into threads values (?,?,?,?,?,?)",
@@ -346,7 +362,7 @@ class CodexStatePolicyTests(unittest.TestCase):
                 self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
             )["wouldChangeCount"], 3)
             self.assertEqual(snapshot(), stable_after_race)
-            self.assertEqual(list(self.sqlite_snapshot_root.iterdir()), [])
+            self.assertFalse(self.sqlite_snapshot_root.exists())
 
             checkpointed = False
 
@@ -369,9 +385,26 @@ class CodexStatePolicyTests(unittest.TestCase):
                 self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
             )["wouldChangeCount"], 3)
             self.assertEqual(snapshot(), checkpoint_stable)
-            self.assertEqual(list(self.sqlite_snapshot_root.iterdir()), [])
+            self.assertFalse(self.sqlite_snapshot_root.exists())
         finally:
             keeper.close()
+
+    def test_check_only_runs_quick_check_on_snapshot_and_uses_manifest_identity(self) -> None:
+        conn = self.create_db()
+        conn.close()
+        result = self.module.update_thread_state(
+            self.db_path, check_only=True, snapshot_root=self.sqlite_snapshot_root
+        )
+        self.assertTrue(result["integrityOk"])
+        self.assertGreaterEqual(result["integrityResultCount"], 1)
+        self.assertNotIn("rows", result)
+
+        output = io.StringIO()
+        payload = self.module.run_policy(
+            self.codex_home, check_only=True, health_root=self.root / "health", output=output
+        )
+        self.assertEqual(payload["hookId"], "codex-state-policy")
+        self.assertTrue((self.root / "health" / "codex-state-policy.json").is_file())
 
     def test_rollback_on_sqlite_failure(self) -> None:
         conn = self.create_db()
@@ -400,15 +433,15 @@ class CodexStatePolicyTests(unittest.TestCase):
             output=output,
         )
         payload = json.loads(output.getvalue())
-        self.assertEqual(set(payload), {"ok", "changed", "globalState", "threadState", "restartRequired", "errors"})
+        self.assertEqual(set(payload), {"hookId", "ok", "changed", "globalState", "threadState", "restartRequired", "errors"})
         text = output.getvalue()
         self.assertNotRegex(text, r"target-a|redacted|codex-home|\\Users\\|thread[_ -]?id")
-        health = json.loads((health_root / "state-policy.json").read_text(encoding="utf-8"))
+        health = json.loads((health_root / "codex-state-policy.json").read_text(encoding="utf-8"))
         self.assertEqual(
             list(health),
             ["hookId", "runId", "startedAtUtc", "completedAtUtc", "durationMs", "ok", "changed", "restartRequired", "errors"],
         )
-        self.assertEqual(health["hookId"], "state-policy")
+        self.assertEqual(health["hookId"], "codex-state-policy")
         self.assertEqual(result["errors"], [])
 
     def test_health_failure_is_structured_and_redacted(self) -> None:

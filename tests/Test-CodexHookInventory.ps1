@@ -85,7 +85,7 @@ $missingActivate.commandPath = 'D:\Codex\.codex\hooks\missing-serena-activate.cm
 $missingActivate.wrapperPath = 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'
 $missingActivate.implementationPath = 'D:\Codex\.codex\hooks\missing-serena-activate.ps1'
 $missingActivate.quickHealthCheck.arguments[2] = "Test-Path -LiteralPath 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'"
-$missingActivate.fullAcceptanceCommand.arguments[2] = "'{}' | & 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'"
+$missingActivate.fullAcceptanceCommand.arguments[2] = '''{"session_id":"00000000-0000-0000-0000-000000000000"}'' | & ''D:\Codex\.codex\hooks\missing-serena-activate.cmd'' -CheckOnly -Json'
 @($missingTargetManifest.files | Where-Object liveRelativePath -ceq 'serena-activate-guarded.cmd')[0].liveRelativePath = 'missing-serena-activate.cmd'
 @($missingTargetManifest.files | Where-Object liveRelativePath -ceq 'serena-activate-guarded.ps1')[0].liveRelativePath = 'missing-serena-activate.ps1'
 [void](Assert-CodexHookManifest -Manifest $missingTargetManifest)

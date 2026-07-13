@@ -375,6 +375,12 @@ $runtimeFile=@($managedManifest.files|Where-Object relativePath -ceq 'hooks/lib/
 Assert-True ($runtimeFile.Count -eq 1 -and (@($runtimeFile[0].ownerHookIds) -join ',') -ceq 'provider-stability,serena-activate,serena-dashboard,github-cli') 'shared runtime owners 必须覆盖所有 PowerShell active hooks'
 $serenaActivate=@($managedManifest.hooks|Where-Object id -ceq 'serena-activate')[0]
 Assert-True (@($serenaActivate.writeResources|Where-Object{$_.kind -ceq 'path' -and $_.value -ceq 'D:\Codex\.codex\run-evidence\codex-hook-health\serena-activate.json'}).Count -eq 1) 'Serena activate manifest 必须声明独立 health 写资源'
+$expectedSerenaActivateAcceptance = "'{`"session_id`":`"00000000-0000-0000-0000-000000000000`"}' | & 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd' -CheckOnly -Json"
+Assert-True ($serenaActivate.fullAcceptanceCommand.arguments[2] -ceq $expectedSerenaActivateAcceptance) 'Serena activate full acceptance 必须固定为脱敏 session_id check-only JSON'
+$legacySerenaActivateAcceptance = Copy-TestDocument $managedManifest
+$legacySerenaActivateHook = @($legacySerenaActivateAcceptance.hooks | Where-Object id -ceq 'serena-activate')[0]
+$legacySerenaActivateHook.fullAcceptanceCommand.arguments[2] = "'{}' | & '$($legacySerenaActivateHook.commandPath)'"
+Assert-Throws { Assert-CodexHookManifest -Manifest $legacySerenaActivateAcceptance } 'Serena activate 旧 stdout vendor acceptance 形状不得绕过只读 allowlist'
 $github=@($managedManifest.hooks|Where-Object id -ceq 'github-cli')[0]
 Assert-True (($github.quickHealthCheck.arguments -join ',') -ceq '-CheckOnly,-Json') 'GitHub quick health 接口必须固定且不请求 auth'
 Assert-True (($github.fullAcceptanceCommand.arguments -join ',') -ceq '-Json,-CheckAuth,-Strict') 'GitHub full health 接口必须固定为 auth strict'

@@ -38,11 +38,11 @@
       "lifecycleReason": null,
       "quickHealthCheck": {
         "commandPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
-        "arguments": ["-Json"]
+        "arguments": ["-CheckOnly", "-Json"]
       },
       "fullAcceptanceCommand": {
         "commandPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
-        "arguments": ["-Json", "-CheckNetwork"]
+        "arguments": ["-CheckOnly", "-Json"]
       }
     },
     {
@@ -67,8 +67,7 @@
         { "kind": "path", "value": "D:\\Codex\\.codex\\.codex-global-state.json" },
         { "kind": "path", "value": "D:\\Codex\\.codex\\state_5.sqlite" },
         { "kind": "path", "value": "D:\\Codex\\.codex\\tmp\\codex-state-policy-check" },
-        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\state-policy.json" },
-        { "kind": "abstract", "value": "hook-stdout" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\codex-state-policy.json" },
         { "kind": "abstract", "value": "codex-thread-state" }
       ],
       "criticality": "critical",
@@ -114,7 +113,7 @@
       },
       "fullAcceptanceCommand": {
         "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
-        "arguments": ["-NoProfile", "-Command", "'{}' | & 'D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd'"]
+        "arguments": ["-NoProfile", "-Command", "'{\"session_id\":\"00000000-0000-0000-0000-000000000000\"}' | & 'D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd' -CheckOnly -Json"]
       }
     },
     {
@@ -122,7 +121,7 @@
       "event": "SessionStart",
       "order": 3,
       "matcher": null,
-      "timeoutSeconds": 10,
+      "timeoutSeconds": 15,
       "commandPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
       "arguments": [],
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
@@ -147,7 +146,7 @@
       },
       "fullAcceptanceCommand": {
         "commandPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
-        "arguments": []
+        "arguments": ["-CheckOnly", "-Json"]
       }
     },
     {
@@ -317,7 +316,7 @@
     {
       "relativePath": "hooks/codex-github-cli-guard.ps1",
       "liveRelativePath": "codex-github-cli-guard.ps1",
-      "sha256": "345ed8beb366d33ab87fe936e1c8c8ec3eb3cc3741741a3976901e9a39a5ac30",
+      "sha256": "0430d38abfbc7ec679dd0af31e8d9d700708b71af2a8c1dd18d60da8f8f08051",
       "lifecycle": "active",
       "ownerHookIds": [
         "github-cli"
@@ -365,7 +364,7 @@
     {
       "relativePath": "hooks/codex-state-policy-guard.py",
       "liveRelativePath": "codex-state-policy-guard.py",
-      "sha256": "1b1e85c128ffa2a1f4936bea3743c2980ff77e9f5f055af3c0648f9e597f4461",
+      "sha256": "7aadbf92df0de87f5d261df54e36413b962dfb3a3523ca5d535a143247be0f8d",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
@@ -383,7 +382,7 @@
     {
       "relativePath": "hooks/codex-provider-stability-guard.ps1",
       "liveRelativePath": "codex-provider-stability-guard.ps1",
-      "sha256": "13c34b48dce8fb0bc1f8a00703ee84fa9ce9137ed4a47ded93d2130a621f1205",
+      "sha256": "e2e7c570bd3db78f75491558605bc8d4c932226fec345cfab58aa23f1a387f1a",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability"
@@ -401,7 +400,7 @@
     {
       "relativePath": "hooks/serena-activate-guarded.ps1",
       "liveRelativePath": "serena-activate-guarded.ps1",
-      "sha256": "4705112efaa3393fbc4b3860f1d1ca6fb8de8635b21fe044b72178d2aa692751",
+      "sha256": "7cd2eb2c5484631958084b3ad653aff5858a11e59f342e70049e936354679f79",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -419,7 +418,7 @@
     {
       "relativePath": "hooks/serena-dashboard-guard.ps1",
       "liveRelativePath": "serena-dashboard-guard.ps1",
-      "sha256": "53f471d49cb10b044666fed40fcf8bdd42995b6dbfe79ef8600f38ca5afc5684",
+      "sha256": "820b49e97fc77aeda865ee2eca4d06de642be43f7ed3d671f47d4d9270ffac84",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-dashboard"
@@ -428,7 +427,7 @@
     {
       "relativePath": "hooks/lib/CodexHookRuntime.ps1",
       "liveRelativePath": "lib/CodexHookRuntime.ps1",
-      "sha256": "8481a2ed076fd7b44ba15b35d5995707537df32a7145fe856b42504394d152b6",
+      "sha256": "f41070eb794b5900d2e2f3582d6c5a248571e2949ef31e1b496807890c3b3f64",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",

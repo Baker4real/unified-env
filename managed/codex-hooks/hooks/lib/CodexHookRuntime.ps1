@@ -53,7 +53,8 @@ function Write-CodexHookAtomicText {
         [Parameter(Mandatory)][AllowEmptyString()][string]$ExpectedBeforeSha256,
         [scriptblock]$TestBeforeFinalHash,
         [scriptblock]$TestBeforeReplace,
-        [scriptblock]$TestBeforeRollback
+        [scriptblock]$TestBeforeRollback,
+        [scriptblock]$TestBeforeRollbackReplace
     )
     $full = Assert-CodexHookDPath -Path $Path
     $backupFull = Assert-CodexHookDPath -Path $BackupRoot -AllowMissingLeaf
@@ -69,6 +70,8 @@ function Write-CodexHookAtomicText {
     $encoding = [Text.UTF8Encoding]::new($false)
     $replaced = $false
     $restoreTemp = $null
+    $rollbackLease = $null
+    $replaceBackup = $null
     try {
         [IO.File]::WriteAllText($temp, $Text, $encoding)
         & $Validator $temp
@@ -93,10 +96,18 @@ function Write-CodexHookAtomicText {
             try {
                 if($TestBeforeRollback){&$TestBeforeRollback $full}
                 if((Get-CodexHookSha256 $backup) -cne $before){throw 'rollback backup SHA-256 漂移。'}
+                # Keep WRITE excluded from the verified deployed target through replacement.
+                $rollbackLease=[IO.File]::Open($full,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::Read -bor [IO.FileShare]::Delete))
+                $rollbackLease.Position=0
+                $rollbackLeaseSha256=([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($rollbackLease))).ToLowerInvariant()
+                if($rollbackLeaseSha256 -cne $expectedAfter){throw 'rollback live SHA-256 不再匹配本 writer 发布值。'}
+                if($TestBeforeRollbackReplace){&$TestBeforeRollbackReplace $full}
                 $restoreTemp=Join-Path $parent ('.codex-hook-restore-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+                $replaceBackup=Join-Path $parent ('.codex-hook-replace-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
                 [IO.File]::WriteAllBytes($restoreTemp,[IO.File]::ReadAllBytes($backup))
                 &$Validator $restoreTemp
-                [IO.File]::Move($restoreTemp,$full,$true);$restoreTemp=$null
+                [IO.File]::Replace($restoreTemp,$full,$replaceBackup,$true);$restoreTemp=$null
+                $rollbackLease.Dispose();$rollbackLease=$null
                 if((Get-CodexHookSha256 $full) -cne $before){throw 'rollback 写后 SHA-256 不一致。'}
             }catch{
                 throw "atomic write rollback-blocked; original=$($originalError.Exception.Message); rollback=$($_.Exception.Message)"
@@ -106,6 +117,8 @@ function Write-CodexHookAtomicText {
     } finally {
         if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) }
         if($null -ne $restoreTemp -and [IO.File]::Exists($restoreTemp)){[IO.File]::Delete($restoreTemp)}
+        if($null -ne $replaceBackup -and [IO.File]::Exists($replaceBackup)){[IO.File]::Delete($replaceBackup)}
+        if($null -ne $rollbackLease){$rollbackLease.Dispose()}
     }
 }
 

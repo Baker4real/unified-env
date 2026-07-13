@@ -313,11 +313,17 @@ function Invoke-NativeProbe {
     }
 
     $executablePath = try { $process.MainModule.FileName } catch { $null }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
 
     if (-not $process.WaitForExit($TimeoutMs)) {
       try { $process.Kill($true) } catch {}
+      try { [void]$stdoutTask.GetAwaiter().GetResult() } catch {}
+      try { [void]$stderrTask.GetAwaiter().GetResult() } catch {}
       return [ordered]@{ success = $false; exitCode = $null; durationMs = $stopwatch.ElapsedMilliseconds; timedOut = $true; error = 'timeout'; executablePath = $executablePath }
     }
+    [void]$stdoutTask.GetAwaiter().GetResult()
+    [void]$stderrTask.GetAwaiter().GetResult()
 
     return [ordered]@{
       success = ($process.ExitCode -eq 0)

@@ -3,6 +3,19 @@ $ErrorActionPreference = 'Stop'
 
 . 'D:\Codex\.codex\hooks\lib\CodexHookRuntime.ps1'
 
+$checkOnly=$false
+$json=$false
+$seenArguments=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+foreach($argument in @($args)){
+    $token=[string]$argument
+    if(-not $seenArguments.Add($token)){throw "Serena activate 参数重复：$token"}
+    switch -CaseSensitive ($token){
+        '-CheckOnly' {$checkOnly=$true}
+        '-Json' {$json=$true}
+        default {throw "Serena activate 参数不支持：$token"}
+    }
+}
+
 $started = [DateTime]::UtcNow
 $stopwatch = [Diagnostics.Stopwatch]::StartNew()
 $inputBuffer = [IO.MemoryStream]::new()
@@ -10,6 +23,16 @@ $inputBuffer = [IO.MemoryStream]::new()
 [byte[]]$inputBytes = $inputBuffer.ToArray()
 $inputBuffer.Dispose()
 if ($inputBytes.Length -eq 0) { throw 'Serena activate hook stdin 为空。' }
+
+if($checkOnly){
+    $text=[Text.UTF8Encoding]::new($false,$true).GetString($inputBytes)
+    $document=[Text.Json.JsonDocument]::Parse($text)
+    try{$root=$document.RootElement;$id=[Text.Json.JsonElement]::new();$hasId=$root.TryGetProperty('session_id',[ref]$id) -or $root.TryGetProperty('sessionId',[ref]$id);if(-not $hasId -or $id.ValueKind -ne [Text.Json.JsonValueKind]::String -or [string]::IsNullOrWhiteSpace($id.GetString())){throw 'Serena activate SessionStart id 缺失。'}}finally{$document.Dispose()}
+    $ok=[IO.File]::Exists('D:\Codex\tools\uv\bin\serena-hooks.exe')
+    if($json){[pscustomobject][ordered]@{ok=$ok;changed=$false;restartRequired=$false;errors=if($ok){[string[]]@()}else{[string[]]@('serena vendor missing')}}|ConvertTo-Json -Compress}
+    if(-not $ok){throw 'Serena activate vendor 不存在。'}
+    return
+}
 
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = 'D:\Codex\tools\uv\bin\serena-hooks.exe'

@@ -41,10 +41,40 @@ $badYaml=Join-Path $fixture 'malformed.yml';[IO.File]::WriteAllText($badYaml,"we
 $astErrors=$null;$tokens=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexConfigFile.ps1'),[ref]$tokens,[ref]$astErrors);Assert-True ($astErrors.Count -eq 0) 'config AST 必须合法'
 $providerText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\codex-provider-stability-guard.ps1'))
 $dashboardText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\serena-dashboard-guard.ps1'))
+$activateText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\serena-activate-guarded.ps1'))
+Assert-True ($providerText -match '\[switch\]\$CheckOnly' -and $providerText.Contains('if(-not $CheckOnly)')) 'provider 必须提供明确只读 check-only 分支'
+Assert-True ($dashboardText -match '\[switch\]\$CheckOnly' -and $dashboardText.Contains('if(-not $CheckOnly)')) 'dashboard 必须提供明确只读 check-only 分支'
+Assert-True ($activateText.Contains("'-CheckOnly'") -and $activateText.Contains("'-Json'") -and $activateText.Contains('session_id') -and $activateText.Contains('sessionId')) 'activate 必须以无 public param table 的显式 token 解析提供合法 SessionStart id 的只读 static acceptance'
+Assert-True ($providerText -match '(?s)\$network\s*=\s*if\(\$CheckNetwork\)\s*\{\s*Test-ProviderNetwork') 'provider check-only/static acceptance 不得隐式联网；network probe 必须显式受 CheckNetwork 控制'
+Assert-True (-not $providerText.Contains('elseif($changed -or $CheckNetwork)')) 'provider 默认 SessionStart 必须 zero stdout'
+Assert-True (-not $dashboardText.Contains("if($changed){'Serena dashboard settings normalized for Codex.'}")) 'dashboard 默认 SessionStart 必须 zero stdout'
+Assert-True ($providerText.Contains('beforeSha256') -and $providerText.Contains('afterSha256') -and -not $providerText.Contains('before=ConvertTo-SafeEnvironmentValue')) 'provider JSON 必须只发布 hash/category，不得发布 raw NO_PROXY'
 Assert-True (-not $providerText.Contains('$Watch') -and -not $providerText.Contains('Repair-CodexMobilePermissionDrift')) 'provider 不得保留 watcher 或 state/mobile 职责'
 Assert-True ($providerText.Contains("Local\CodexConfigTomlGuard") -and $dashboardText.Contains("Local\CodexConfigTomlGuard")) '两者必须共享固定 TOML mutex'
 Assert-True ($providerText.Contains('Update-CodexTomlPolicyText') -and $dashboardText.Contains('Update-CodexTomlPolicyText') -and $dashboardText.Contains('Update-SerenaYamlPolicyText')) 'hook 必须只声明 desired 并复用纯变换'
 $manifest=Get-Content -Raw (Join-Path $projectRoot 'managed\codex-hooks\manifest.json')|ConvertFrom-Json
+foreach($file in @($manifest.files)){
+    $sourcePath=Join-Path $projectRoot ('managed\codex-hooks\'+[string]$file.relativePath)
+    $actualSha256=(Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-True ($actualSha256 -ceq [string]$file.sha256) "manifest source SHA-256 必须匹配：$($file.relativePath)"
+}
+$providerHook=@($manifest.hooks|Where-Object id -ceq 'provider-stability')[0]
+$stateHook=@($manifest.hooks|Where-Object id -ceq 'codex-state-policy')[0]
+$activateHook=@($manifest.hooks|Where-Object id -ceq 'serena-activate')[0]
+$dashboardHook=@($manifest.hooks|Where-Object id -ceq 'serena-dashboard')[0]
+Assert-True (($providerHook.quickHealthCheck.arguments -join ',') -ceq '-CheckOnly,-Json') 'provider quick check 必须只读'
+Assert-True (($providerHook.fullAcceptanceCommand.arguments -join ',') -ceq '-CheckOnly,-Json') 'provider full acceptance 必须只读'
+Assert-True (($stateHook.quickHealthCheck.arguments -join ',') -ceq '--check-only,--json') 'state quick check 必须只读'
+Assert-True (($stateHook.fullAcceptanceCommand.arguments -join ',') -ceq '--check-only,--json') 'state postcheck 必须只读'
+Assert-True ($dashboardHook.quickHealthCheck.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -and ($dashboardHook.quickHealthCheck.arguments -join ' ') -ceq "-NoProfile -Command Test-Path -LiteralPath 'D:\Codex\.codex\hooks\serena-dashboard-guard.cmd'") 'dashboard quick check 必须为固定 wrapper 存在性 static acceptance'
+Assert-True (($dashboardHook.fullAcceptanceCommand.arguments -join ',') -ceq '-CheckOnly,-Json') 'dashboard acceptance 必须只读'
+Assert-True (($activateHook.fullAcceptanceCommand.arguments -join ' ').Contains('session_id') -and ($activateHook.fullAcceptanceCommand.arguments -join ' ') -match '-CheckOnly\s+-Json') 'activate acceptance 必须使用合法脱敏 SessionStart JSON 且只读'
+foreach($hook in @($providerHook,$stateHook,$dashboardHook)){
+    Assert-True (@($hook.writeResources|Where-Object{$_.kind -ceq 'abstract' -and $_.value -ceq 'hook-stdout'}).Count -eq 0) "$($hook.id) SessionStart 默认不得声明 stdout"
+}
+Assert-True (@($activateHook.writeResources|Where-Object{$_.kind -ceq 'abstract' -and $_.value -ceq 'hook-stdout'}).Count -eq 1) 'activate vendor SessionStart bytes 必须精确声明 stdout'
+$stateHealthPaths=@($stateHook.writeResources|Where-Object kind -ceq path|ForEach-Object value)
+Assert-True ($stateHealthPaths -ccontains 'D:\Codex\.codex\run-evidence\codex-hook-health\codex-state-policy.json') 'state manifest health path 必须匹配 hook id'
 foreach($hookFile in @('codex-provider-stability-guard.ps1','serena-dashboard-guard.ps1')){$source=[IO.File]::ReadAllText((Join-Path $projectRoot "managed\codex-hooks\hooks\$hookFile"));$match=[regex]::Match($source,"Write-CodexHookLatestHealth\s+-HookId\s+'([^']+)'");Assert-True $match.Success "$hookFile 必须调用 health writer";$id=$match.Groups[1].Value;$hook=$manifest.hooks|Where-Object id -CEQ $id;Assert-True ($null -ne $hook) "$hookFile health hookId 必须等于 manifest id";$expected="D:\Codex\.codex\run-evidence\codex-hook-health\$id.json";$healthPaths=@($hook.writeResources|Where-Object kind -CEQ path|ForEach-Object value);Assert-True ($healthPaths -ccontains $expected) "$id writeResources 必须精确包含派生 health path"}
 Assert-True (-not((Get-Content -Raw (Join-Path $projectRoot 'managed\codex-hooks\manifest.json')).Contains('codex-hook-health\\provider.json'))) 'manifest 不得保留旧 provider.json alias'
 'ok=True'

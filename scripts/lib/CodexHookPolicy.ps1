@@ -800,7 +800,8 @@ function Assert-CodexHookManifest {
                     continue
                 }
 
-                $invokeMatch = [regex]::Match($scriptText, "^'\{\}' \| & '(?<path>[^']+)'$")
+                $invokePattern = '^''\{"session_(?:id|Id)":"[0-9a-f-]{36}"\}'' \| & ''(?<path>[^'']+)'' -CheckOnly -Json$'
+                $invokeMatch = [regex]::Match($scriptText, $invokePattern)
                 if ($invokeMatch.Success) {
                     $invokedPath = Assert-CodexHookDPath -Value $invokeMatch.Groups['path'].Value -Name "hooks[$($hook.id)] acceptance invoke"
                     if ($invokedPath.Equals($commandPath, [StringComparison]::OrdinalIgnoreCase)) {

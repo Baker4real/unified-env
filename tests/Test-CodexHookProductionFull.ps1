@@ -15,11 +15,21 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
+function Assert-Bytes {
+    param([Parameter(Mandatory)][byte[]]$Actual, [Parameter(Mandatory)][byte[]]$Expected, [Parameter(Mandatory)][string]$Message)
+    Assert-True (([Convert]::ToHexString($Actual)) -ceq ([Convert]::ToHexString($Expected))) $Message
+}
+
 function Assert-Throws {
     param([Parameter(Mandatory)][scriptblock]$Action, [Parameter(Mandatory)][string]$Message)
     try { & $Action } catch { return $_.Exception.Message }
     throw $Message
 }
+
+$productionProfile=Get-CodexHookProductionFullProfile
+$productionEnvironmentRead={param($Name,$Scope)[Environment]::GetEnvironmentVariable($Name,[EnvironmentVariableTarget]::User)}
+$productionState=New-CodexHookProductionFullState -Profile $productionProfile -EnvironmentReadValue $productionEnvironmentRead
+Assert-True (Assert-CodexHookProductionFullPlan -Plan $productionState.plan -Profile $productionProfile) 'current production full snapshot plan 必须通过只读 validator'
 
 function Write-Utf8NoBom {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Text)
@@ -105,6 +115,7 @@ try {
     Assert-True (@($state.plan.actions | Where-Object kind -ceq 'file').Count -eq @($fixture.manifest.files | Where-Object lifecycle -cne 'retired').Count) '只能发布 non-retired 文件'
     Assert-True (@($state.plan.environmentActions).Count -eq 1) '必须只有唯一 User SERENA_HOME 环境动作'
     Assert-True (@($state.plan.actions)[-1].kind -ceq 'registry') 'registry 必须最后发布'
+    Assert-True ((@($state.plan.actions).Count + @($state.plan.environmentActions).Count) -eq 15) 'Task 7 production rollback 只能覆盖 15 个 deployment actions'
     $planJson = $state.plan | ConvertTo-Json -Depth 100
     Assert-True ($planJson -notmatch 'registry-secret|keep-secret|serena-secret|D:\\Private') 'plan 不得泄露 registry command 或环境原值'
     $blockedPlan = Copy-CodexHookJsonValue -Value $state.plan
@@ -215,6 +226,36 @@ try {
         Assert-True ((Get-CodexHookBytesSha256 -Bytes ([IO.File]::ReadAllBytes($livePath))) -ceq (Get-CodexHookBytesSha256 -Bytes ([byte[]]$fixture.before[[string]$file.liveRelativePath]))) '自动 rollback 必须恢复所有 live file bytes'
     }
 
+    $fixture = Initialize-ProductionFullFixture
+    $environment.present = $true
+    $environment.value = 'D:\Private\serena-secret'
+    $statusFaultState = New-CodexHookProductionFullState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment
+    Write-Utf8NoBom -Path ([string]$fixture.profile.planPath) -Text ($statusFaultState.plan | ConvertTo-Json -Depth 100)
+    $statusFault = Assert-Throws {
+        Invoke-CodexHookProductionFullApplyCore -Profile $fixture.profile -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment -TestFaultInjection before-registry -TestBeforeRollbackPendingStatus { throw 'status-evidence-fault' } | Out-Null
+    } 'rollback-pending status 写失败仍必须 restore'
+    Assert-True ($statusFault -match 'rollback-confirmed') 'status evidence 写失败且 restore 成功必须报告 rollback-confirmed'
+    $statusFaultPath=[string](Get-CodexHookProductionFullLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$statusFaultState.plan.generationId)).statusPath
+    $statusFaultEvidence=Get-Content -Raw -LiteralPath $statusFaultPath|ConvertFrom-Json
+    Assert-True ($statusFaultEvidence.status -ceq 'rolled-back') 'status evidence 写失败后 restore 终态必须 rolled-back'
+
+    $fixture = Initialize-ProductionFullFixture
+    $environment.present = $true
+    $environment.value = 'D:\Private\serena-secret'
+    $rollbackBlockedState = New-CodexHookProductionFullState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment
+    Write-Utf8NoBom -Path ([string]$fixture.profile.planPath) -Text ($rollbackBlockedState.plan | ConvertTo-Json -Depth 100)
+    $rollbackBlockedFile = @($fixture.manifest.files | Where-Object lifecycle -cne 'retired')[0]
+    $rollbackBlockedPath = Join-Path ([string]$fixture.profile.hooksRoot) ([string]$rollbackBlockedFile.liveRelativePath)
+    [byte[]]$thirdPartyBytes = [Text.UTF8Encoding]::new($false).GetBytes('third-party-concurrent-change')
+    $rollbackBlocked = Assert-Throws {
+        Invoke-CodexHookProductionFullApplyCore -Profile $fixture.profile -EnvironmentReadValue $readEnvironment -EnvironmentWriteValue $writeEnvironment -TestFaultInjection before-registry -TestBeforeAutomaticRollback { [IO.File]::WriteAllBytes($rollbackBlockedPath, $thirdPartyBytes) } | Out-Null
+    } '自动 restore 失败必须进入 blocked recovery 状态'
+    Assert-True ($rollbackBlocked -match 'rollback-blocked|recovery-required') '自动 restore 失败不得声称 rollback-confirmed'
+    $rollbackBlockedStatusPath=[string](Get-CodexHookProductionFullLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$rollbackBlockedState.plan.generationId)).statusPath
+    $rollbackBlockedStatus=Get-Content -Raw -LiteralPath $rollbackBlockedStatusPath|ConvertFrom-Json
+    Assert-True ($rollbackBlockedStatus.status -ceq 'rollback-blocked') '自动 restore 失败必须保留 rollback-blocked 状态证据'
+    Assert-Bytes ([IO.File]::ReadAllBytes($rollbackBlockedPath)) $thirdPartyBytes '自动 restore 失败不得覆盖第三方并发 bytes'
+
     $conditionalDeletePath=Join-Path ([string]$fixture.profile.hooksRoot) 'conditional-delete.tmp'
     [byte[]]$conditionalDeleteBytes=[Text.UTF8Encoding]::new($false).GetBytes('deployed-delete-target')
     [IO.File]::WriteAllBytes($conditionalDeletePath,$conditionalDeleteBytes)
@@ -286,8 +327,8 @@ try {
         $seamError=Assert-Throws {Assert-CodexHookProductionFullRestoreSeamGuard -Profile $productionProfile -TestAfterRestoreAction $(if($seam-ceq'after-action'){{}}else{$null}) -TestBeforeEnvironmentRestoreWrite $(if($seam-ceq'before-environment'){{}}else{$null}) -TestAfterActiveConverged $(if($seam-ceq'after-active'){{}}else{$null})} 'production profile seam 必须入口拒绝'
         Assert-True ($seamError -match 'fixture|seam') "production seam guard 必须在读取前拒绝：$seam"
     }
-    foreach($applySeam in @('fault','after-predecessor')){
-        $applySeamError=Assert-Throws {Assert-CodexHookProductionFullApplySeamGuard -Profile $productionProfile -TestFaultInjection $(if($applySeam-ceq'fault'){'before-registry'}else{'none'}) -TestAfterPredecessorSnapshot $(if($applySeam-ceq'after-predecessor'){{}}else{$null})} 'production apply seam 必须入口拒绝'
+    foreach($applySeam in @('fault','after-predecessor','rollback-status','before-automatic-rollback')){
+        $applySeamError=Assert-Throws {Assert-CodexHookProductionFullApplySeamGuard -Profile $productionProfile -TestFaultInjection $(if($applySeam-ceq'fault'){'before-registry'}else{'none'}) -TestAfterPredecessorSnapshot $(if($applySeam-ceq'after-predecessor'){{}}else{$null}) -TestBeforeRollbackPendingStatus $(if($applySeam-ceq'rollback-status'){{}}else{$null}) -TestBeforeAutomaticRollback $(if($applySeam-ceq'before-automatic-rollback'){{}}else{$null})} 'production apply seam 必须入口拒绝'
         Assert-True ($applySeamError -match 'fixture|seam') "production apply seam guard 必须在读取前拒绝：$applySeam"
     }
 

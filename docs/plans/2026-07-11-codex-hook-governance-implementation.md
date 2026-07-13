@@ -787,9 +787,21 @@ Run:
 
 ```powershell
 $pwsh = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
-Get-ChildItem -LiteralPath 'D:\Codex\projects\统一环境\tests' -Filter 'Test-*.ps1' | Sort-Object Name | ForEach-Object {
+Get-ChildItem -LiteralPath 'D:\Codex\projects\统一环境\tests' -Filter 'Test-*.ps1' |
+    Where-Object Name -ne 'Test-CodexHookProductionRegistrationRepairHardening.ps1' |
+    Sort-Object Name | ForEach-Object {
     & $pwsh -NoProfile -File $_.FullName
     if ($LASTEXITCODE -ne 0) { throw "测试失败：$($_.FullName)" }
+}
+$hardening = 'D:\Codex\projects\统一环境\tests\Test-CodexHookProductionRegistrationRepairHardening.ps1'
+@(
+    'semantic-noop','crash-applying-deployed','crash-applied-before','crash-applying-before',
+    'terminal-incompatible','third-hash-rejected','postpublish-source-drift',
+    'postpublish-live-drift','postpublish-static-and-registry-third','rollback-cas-race',
+    'rollback-write-excluding-lease','forged-evidence','projection-summary'
+) | ForEach-Object {
+    & $pwsh -NoProfile -File $hardening -Case $_
+    if ($LASTEXITCODE -ne 0) { throw "hardening 测试失败：$_" }
 }
 & 'D:\Codex\tools\python314-official\python.exe' 'D:\Codex\projects\统一环境\tests\Test-CodexStatePolicy.py'
 if ($LASTEXITCODE -ne 0) { throw 'Test-CodexStatePolicy.py 失败' }
@@ -830,18 +842,20 @@ Run:
 
 Expected: evidence `status=applied`、所有 source/live hashes 与 plan 一致、registry 顺序为 0–4、auto-approve 已取消、retired live 文件仍存在且未注册、User `SERENA_HOME` 已持久化为 D 盘。
 
-- [ ] **Step 5：运行真实 wrapper 级 postcheck**
+- [ ] **Step 5：运行真实入口的只读 wrapper 级 postcheck**
 
-按真实入口执行：
+按真实入口的 `CheckOnly` 分支执行；此步骤只验证当前配置、SQLite 快照和 vendor/runtime 可用性，不得写 `config.toml`、proxy 环境、YAML、global-state、SQLite 或 health evidence：
 
 ```powershell
-& 'D:\Codex\.codex\hooks\codex-provider-stability-guard.cmd' -Json -CheckNetwork
+& 'D:\Codex\.codex\hooks\codex-provider-stability-guard.cmd' -CheckOnly -Json
 & 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd' -CheckOnly -Json
-& 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd' -Json -CheckAuth -Strict
-& 'D:\Codex\.codex\hooks\codex-projectless-root-d.cmd' --json
+& 'D:\Codex\.codex\hooks\codex-projectless-root-d.cmd' --check-only --json
+'{"session_id":"00000000-0000-0000-0000-000000000000"}' |
+  & 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd' -CheckOnly -Json
+& 'D:\Codex\.codex\hooks\serena-dashboard-guard.cmd' -CheckOnly -Json
 ```
 
-Expected：provider/GitHub/state `ok=true`；TOML/YAML/JSON 均可解析；SQLite `pragma quick_check=ok`；projectless C-prefix=0，D-prefix 与 total 一致；heartbeat/mobile drift=0；输出无 thread IDs/credentials/user-info。
+Expected：所有结果 `ok=true`；provider/state/Serena 的 TOML、YAML、JSON 均可解析；SQLite `PRAGMA quick_check=ok`；projectless C-prefix=0，D-prefix 与 total 一致；heartbeat/mobile drift=0；activate 的 check-only 输入为合法 SessionStart JSON；输出无 thread IDs、credentials、user-info、raw proxy/NO_PROXY 值。
 
 - [ ] **Step 6：失败处理与暂停点**
 
@@ -853,7 +867,7 @@ Expected：provider/GitHub/state `ok=true`；TOML/YAML/JSON 均可解析；SQLit
   -Apply -ApprovedScope 'codex-hook-governance-2026-07-11'
 ```
 
-再验证旧 hash、registry、User `SERENA_HOME` 和语法。完整部署 engine 只发布受管文件、User 环境变量和 registry；不会在 plan 或 apply core 中主动运行 wrapper，也不会主动写 config/global-state/SQLite。全部 wrapper postcheck 通过时保留新状态，但不在当前进程中伪称 SessionStart 已验收；记录必须完整重启 Codex。
+再验证旧 hash、registry、User `SERENA_HOME` 和语法。完整部署 engine 只发布受管文件、User 环境变量和 registry；不会在 plan 或 apply core 中主动运行 wrapper，也不会主动写 config/global-state/SQLite。Step 5 也不产生这些副作用，因此固定 restore 覆盖完整的 Task 7 写集合。全部 wrapper postcheck 通过时保留新状态，但不在当前进程中伪称 SessionStart 已验收；记录必须完整重启 Codex。
 
 - [ ] **Step 7：提交 production inventory 与部署摘要**
 

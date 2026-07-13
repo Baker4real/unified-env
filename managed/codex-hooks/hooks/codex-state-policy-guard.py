@@ -6,6 +6,7 @@ import ctypes
 from ctypes import wintypes
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PureWindowsPath
@@ -300,62 +301,77 @@ def _select_thread_updates_from_snapshot(
     path: Path,
     snapshot_root: Path,
     after_first_capture: Callable[[int], None] | None = None,
-) -> list[str]:
+) -> tuple[list[str], int]:
     snapshot_windows_path = PureWindowsPath(str(snapshot_root))
     if not snapshot_windows_path.is_absolute() or snapshot_windows_path.drive.casefold() != "d:":
         raise StatePolicyError("thread state snapshot root must be an absolute D drive path")
+    created_roots: list[Path] = []
+    candidate = snapshot_root
+    while not candidate.exists():
+        created_roots.append(candidate)
+        candidate = candidate.parent
     snapshot_root.mkdir(parents=True, exist_ok=True)
-    for attempt in range(1, MAX_GLOBAL_ATTEMPTS + 1):
-        try:
-            first = _capture_sqlite_source(path)
-            if after_first_capture is not None:
-                after_first_capture(attempt)
-            second = _capture_sqlite_source(path)
-        except StatePolicyError:
-            continue
-        if first != second:
-            continue
-        database_bytes, wal_bytes, _shm_bytes, journal_bytes = first
-        if database_bytes is None:
-            raise StatePolicyError("thread state database disappeared during check")
-        if journal_bytes is not None:
-            # A rollback-journal writer can have uncommitted pages in the main
-            # database. Refuse that snapshot rather than read or repair source.
-            raise StatePolicyError("thread state rollback journal is active")
-        snapshot_dir = Path(tempfile.mkdtemp(prefix="sqlite-check-", dir=snapshot_root))
-        snapshot_db = snapshot_dir / "state.sqlite"
-        try:
-            snapshot_db.write_bytes(database_bytes)
-            if wal_bytes is not None:
-                Path(str(snapshot_db) + "-wal").write_bytes(wal_bytes)
-            # Deliberately omit the source SHM. SQLite may build/change SHM and
-            # checkpoint only inside this D-drive disposable copy. The stable
-            # DB+WAL pair retains committed, uncheckpointed rows without ever
-            # opening the source database through SQLite.
-            conn = sqlite3.connect(snapshot_db, timeout=1.5)
+    try:
+        for attempt in range(1, MAX_GLOBAL_ATTEMPTS + 1):
             try:
-                conn.execute("pragma busy_timeout=1500")
-                conn.execute("pragma query_only=on")
-                identities = select_thread_updates(conn)
-            finally:
-                conn.close()
-            try:
-                after_query = _capture_sqlite_source(path)
+                first = _capture_sqlite_source(path)
+                if after_first_capture is not None:
+                    after_first_capture(attempt)
+                second = _capture_sqlite_source(path)
             except StatePolicyError:
                 continue
-            if after_query != second:
+            if first != second:
                 continue
-            return identities
-        except sqlite3.Error as exc:
-            raise StatePolicyError("thread state snapshot check failed") from exc
-        finally:
+            database_bytes, wal_bytes, _shm_bytes, journal_bytes = first
+            if database_bytes is None:
+                raise StatePolicyError("thread state database disappeared during check")
+            if journal_bytes is not None:
+                # A rollback-journal writer can have uncommitted pages in the main
+                # database. Refuse that snapshot rather than read or repair source.
+                raise StatePolicyError("thread state rollback journal is active")
+            snapshot_dir = Path(tempfile.mkdtemp(prefix="sqlite-check-", dir=snapshot_root))
+            snapshot_db = snapshot_dir / "state.sqlite"
             try:
-                shutil.rmtree(snapshot_dir)
-            except OSError as exc:
-                raise StatePolicyError("thread state snapshot cleanup failed") from exc
-            if snapshot_dir.exists():
-                raise StatePolicyError("thread state snapshot cleanup failed")
-    raise StatePolicyError("thread state source did not stabilize for check")
+                snapshot_db.write_bytes(database_bytes)
+                if wal_bytes is not None:
+                    Path(str(snapshot_db) + "-wal").write_bytes(wal_bytes)
+                # Deliberately omit the source SHM. SQLite may build/change SHM and
+                # checkpoint only inside this D-drive disposable copy. The stable
+                # DB+WAL pair retains committed, uncheckpointed rows without ever
+                # opening the source database through SQLite.
+                conn = sqlite3.connect(snapshot_db, timeout=1.5)
+                try:
+                    conn.execute("pragma busy_timeout=1500")
+                    conn.execute("pragma query_only=on")
+                    integrity_rows = [str(row[0]) for row in conn.execute("pragma quick_check")]
+                    if not integrity_rows or any(value.casefold() != "ok" for value in integrity_rows):
+                        raise StatePolicyError("thread state snapshot integrity check failed")
+                    identities = select_thread_updates(conn)
+                finally:
+                    conn.close()
+                try:
+                    after_query = _capture_sqlite_source(path)
+                except StatePolicyError:
+                    continue
+                if after_query != second:
+                    continue
+                return identities, len(integrity_rows)
+            except sqlite3.Error as exc:
+                raise StatePolicyError("thread state snapshot check failed") from exc
+            finally:
+                try:
+                    shutil.rmtree(snapshot_dir)
+                except OSError as exc:
+                    raise StatePolicyError("thread state snapshot cleanup failed") from exc
+                if snapshot_dir.exists():
+                    raise StatePolicyError("thread state snapshot cleanup failed")
+        raise StatePolicyError("thread state source did not stabilize for check")
+    finally:
+        for created_root in created_roots:
+            try:
+                created_root.rmdir()
+            except OSError:
+                break
 
 
 def update_thread_state(
@@ -373,7 +389,7 @@ def update_thread_state(
     if check_only:
         if snapshot_root is None:
             raise StatePolicyError("thread state check snapshot root is required")
-        identities = _select_thread_updates_from_snapshot(
+        identities, integrity_result_count = _select_thread_updates_from_snapshot(
             path,
             snapshot_root,
             after_first_capture=after_first_snapshot_capture,
@@ -383,6 +399,8 @@ def update_thread_state(
             "changedCount": 0,
             "wouldChangeCount": len(identities),
             "driftCount": len(identities),
+            "integrityOk": True,
+            "integrityResultCount": integrity_result_count,
         }
     conn = sqlite3.connect(path, timeout=1.5)
     try:
@@ -512,6 +530,7 @@ def run_policy(
     check_only: bool,
     health_root: Path,
     output: TextIO = sys.stdout,
+    write_health: bool = True,
 ) -> dict[str, object]:
     started = datetime.now(timezone.utc)
     started_clock = time.monotonic()
@@ -544,6 +563,7 @@ def run_policy(
     changed = bool(global_result.get("changed")) or int(thread_result.get("changedCount", 0)) > 0
     restart_required = changed
     payload: dict[str, object] = {
+        "hookId": "codex-state-policy",
         "ok": ok,
         "changed": changed,
         "globalState": {
@@ -556,13 +576,15 @@ def run_policy(
             "status": thread_result.get("status"),
             "changedCount": int(thread_result.get("changedCount", 0)),
             "driftCount": int(thread_result.get("driftCount", 0)),
+            "integrityOk": bool(thread_result.get("integrityOk", False)),
+            "integrityResultCount": int(thread_result.get("integrityResultCount", 0)),
         },
         "restartRequired": restart_required,
         "errors": errors,
     }
     completed = datetime.now(timezone.utc)
     health: dict[str, object] = {
-        "hookId": "state-policy",
+        "hookId": "codex-state-policy",
         "runId": run_id,
         "startedAtUtc": started.isoformat(),
         "completedAtUtc": completed.isoformat(),
@@ -572,12 +594,13 @@ def run_policy(
         "restartRequired": restart_required,
         "errors": errors,
     }
-    try:
-        _write_health(health_root / "state-policy.json", health)
-    except OSError:
-        errors.append("state policy health write failed")
-        payload["ok"] = False
-        payload["errors"] = errors
+    if write_health:
+        try:
+            _write_health(health_root / "codex-state-policy.json", health)
+        except OSError:
+            errors.append("state policy health write failed")
+            payload["ok"] = False
+            payload["errors"] = errors
     output.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
     return payload
 
@@ -603,7 +626,14 @@ def main(argv: list[str] | None = None) -> int:
         if not is_production or args.health_root is not None:
             raise StatePolicyError("write mode is restricted to the fixed production entry")
         health_root = PRODUCTION_HEALTH_ROOT
-    payload = run_policy(codex_home, check_only=args.check_only, health_root=health_root)
+    output = sys.stdout if args.json else io.StringIO()
+    payload = run_policy(
+        codex_home,
+        check_only=args.check_only,
+        health_root=health_root,
+        output=output,
+        write_health=not args.check_only,
+    )
     return 0 if payload["ok"] else 1
 
 

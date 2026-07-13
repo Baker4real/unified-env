@@ -36,6 +36,15 @@ Assert-True ($githubSource.Contains(". 'D:\Codex\.codex\hooks\lib\CodexHookRunti
 Assert-True ($githubSource.Contains("Write-CodexHookLatestHealth -HookId 'github-cli'")) 'GitHub guard 必须写独立 latest health'
 Assert-True ($githubSource.Contains('$GuardStopwatch.ElapsedMilliseconds')) 'GitHub health 必须记录真实 duration 而非常量'
 Assert-True ([regex]::Matches($githubSource,"@\('auth', 'status'\)").Count -eq 1 -and $githubSource.Contains('$authProbe = if (-not $CheckAuth)')) 'GitHub quick 路径不得执行 auth/network probe'
+Assert-True ($githubSource.Contains('$stdoutTask = $process.StandardOutput.ReadToEndAsync()') -and $githubSource.Contains('$stderrTask = $process.StandardError.ReadToEndAsync()')) 'Invoke-NativeProbe 必须在等待前持续 drain stdout/stderr'
+$providerHook=@($manifest.hooks|Where-Object id -ceq 'provider-stability')[0]
+$dashboardHook=@($manifest.hooks|Where-Object id -ceq 'serena-dashboard')[0]
+$mutexBudgetMs=1500
+$validatorBudgetMs=1000
+$providerBudget=$mutexBudgetMs+(3*$validatorBudgetMs)+2000
+$dashboardBudget=$mutexBudgetMs+(7*$validatorBudgetMs)+2000
+Assert-True ([int]$providerHook.timeoutSeconds*1000 -ge $providerBudget) 'provider manifest timeout 必须覆盖 mutex、validator 与余量'
+Assert-True ([int]$dashboardHook.timeoutSeconds*1000 -ge $dashboardBudget) 'dashboard manifest timeout 必须覆盖 mutex、7 次 validator（含 rollback）与 I/O 余量'
 $githubEntryPath=Join-Path $managedRoot 'hooks\lib\CodexGitHubCliGuardEntry.ps1'
 Assert-True (Test-Path -LiteralPath $githubEntryPath -PathType Leaf) 'GitHub guard 必须使用可独立验证的 published internal entry state machine'
 Assert-True ($githubSource.Contains(". 'D:\Codex\.codex\hooks\lib\CodexGitHubCliGuardEntry.ps1'") -and $githubSource.Contains('Invoke-CodexGitHubCliGuardEntry -Operation')) 'GitHub production guard 必须调用 fixed-path internal entry state machine'
@@ -96,7 +105,39 @@ Assert-Throws { Write-CodexHookAtomicText -Path $target -Text 'new' -Validator {
 Assert-Bytes ([IO.File]::ReadAllBytes($target)) $old 'post-read validator 失败必须从已验证 backup 恢复旧 bytes'
 $script:blockedValidatorCalls=0
 Assert-Throws { Write-CodexHookAtomicText -Path $target -Text 'new' -Validator {param($p)$script:blockedValidatorCalls++;if($script:blockedValidatorCalls -eq 2){throw 'post-read invalid'}} -BackupRoot $backups -ExpectedBeforeSha256 $oldHash -TestBeforeRollback {throw 'rollback injected'} } 'rollback-blocked'
+
+[IO.File]::WriteAllText($target,'old',[Text.UTF8Encoding]::new($false))
+$oldHash=Get-CodexHookSha256 $target
+$script:concurrentValidatorCalls=0
+Assert-Throws {
+    Write-CodexHookAtomicText -Path $target -Text 'new' -Validator {
+        param($p)
+        $script:concurrentValidatorCalls++
+        if($script:concurrentValidatorCalls -eq 2){throw 'postwrite invalid'}
+    } -BackupRoot $backups -ExpectedBeforeSha256 $oldHash -TestBeforeRollback {
+        param($p)
+        [IO.File]::WriteAllText($p,'third-party',[Text.UTF8Encoding]::new($false))
+    }
+} 'rollback-blocked'
+Assert-True ([IO.File]::ReadAllText($target) -ceq 'third-party') 'rollback CAS 必须保留第三方并发 bytes'
+[IO.File]::WriteAllText($target,'old',[Text.UTF8Encoding]::new($false))
+$oldHash=Get-CodexHookSha256 $target
+$script:rollbackLeaseValidatorCalls=0
+$rollbackLeaseWriter=[ordered]@{blocked=$false}
+Assert-Throws {
+    Write-CodexHookAtomicText -Path $target -Text 'new' -Validator {
+        param($p)
+        $script:rollbackLeaseValidatorCalls++
+        if($script:rollbackLeaseValidatorCalls -eq 2){throw 'postwrite invalid'}
+    } -BackupRoot $backups -ExpectedBeforeSha256 $oldHash -TestBeforeRollbackReplace {
+        param($p)
+        try {[IO.File]::WriteAllText($p,'third-party-after-rollback-hash',[Text.UTF8Encoding]::new($false))}catch{$rollbackLeaseWriter.blocked=$true}
+    }
+} 'postwrite invalid'
+Assert-True $rollbackLeaseWriter.blocked 'rollback hash 后 target lease 必须阻止独立 writer'
+Assert-True ([IO.File]::ReadAllText($target) -ceq 'old') 'rollback target lease 释放后必须恢复原 bytes'
 [IO.File]::WriteAllBytes($target,$old)
+$oldHash=Get-CodexHookSha256 $target
 $outside=Join-Path $fixtureRoot 'outside';[IO.Directory]::CreateDirectory($outside)|Out-Null;$junction=Join-Path $fixtureRoot 'junction'
 try{$null=New-Item -ItemType Junction -Path $junction -Target $outside;Assert-Throws { Assert-CodexHookDPath (Join-Path $junction 'target.toml') -AllowMissingLeaf } 'reparse'}finally{if(Test-Path $junction){Remove-Item $junction -Force}}
 $result=Write-CodexHookAtomicText -Path $target -Text "new=true`n" -Validator {param($p)if(-not(Get-Content -Raw $p)){throw 'empty'}} -BackupRoot $backups -ExpectedBeforeSha256 $oldHash
