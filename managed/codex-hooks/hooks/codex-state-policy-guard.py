@@ -34,6 +34,7 @@ TARGET_MAPS = (
     "thread-projectless-output-directories",
 )
 FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
+LEGACY_DESTINATION_ROOT = PureWindowsPath(r"D:\Users\WINDOWS\Documents\Codex")
 
 
 class StatePolicyError(RuntimeError):
@@ -66,6 +67,196 @@ def rewrite_projectless_path(value: object) -> object:
     ):
         return value
     return str(PureWindowsPath(*DESTINATION_PARTS, *parts[len(SOURCE_PARTS) :]))
+
+
+def _windows_parts_casefold(path: PureWindowsPath) -> tuple[str, ...]:
+    return tuple(part.casefold() for part in path.parts)
+
+
+def _windows_is_same_or_child(path: PureWindowsPath, root: PureWindowsPath) -> bool:
+    path_parts = _windows_parts_casefold(path)
+    root_parts = _windows_parts_casefold(root)
+    return len(path_parts) >= len(root_parts) and path_parts[: len(root_parts)] == root_parts
+
+
+def _windows_relative_path(
+    value: str,
+    source_root: PureWindowsPath,
+) -> tuple[str, ...] | None:
+    try:
+        source_path = PureWindowsPath(value)
+    except (TypeError, ValueError):
+        return None
+    if not source_path.is_absolute() or not source_root.is_absolute():
+        return None
+    if source_path.drive.casefold() != source_root.drive.casefold():
+        return None
+    if any(part in (".", "..") for part in source_path.parts):
+        return None
+    source_parts = _windows_parts_casefold(source_path)
+    root_parts = _windows_parts_casefold(source_root)
+    if len(source_parts) < len(root_parts) or source_parts[: len(root_parts)] != root_parts:
+        return None
+    return tuple(source_path.parts[len(root_parts) :])
+
+
+def _candidate_reparse(candidate: Path) -> bool:
+    """Return whether an existing ancestor or the candidate is a reparse point."""
+    lexical_chain: list[Path] = []
+    current = candidate
+    while True:
+        lexical_chain.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for item in reversed(lexical_chain):
+        try:
+            metadata = item.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            # An unreadable path cannot be treated as a safe canonical target.
+            return True
+        if item.is_symlink() or bool(
+            getattr(metadata, "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT
+        ):
+            return True
+    return False
+
+
+def _candidate_identity(candidate: Path) -> tuple[int, int] | None:
+    try:
+        metadata = candidate.stat()
+    except OSError:
+        return None
+    device = int(getattr(metadata, "st_dev", 0))
+    inode = int(getattr(metadata, "st_ino", 0))
+    if device == 0 and inode == 0:
+        return None
+    return device, inode
+
+
+def _path_inventory_entry(
+    value: object,
+    source_root: PureWindowsPath,
+    candidate_root: Path,
+    candidate_root_windows: PureWindowsPath,
+) -> tuple[dict[str, object], tuple[int, int] | None]:
+    source_hash = (
+        hashlib.sha256(value.encode("utf-8")).hexdigest() if isinstance(value, str) else None
+    )
+    base: dict[str, object] = {
+        "value": copy.deepcopy(value),
+        "safe": False,
+        "candidate": None,
+        "reason": "unresolved-unknown-value",
+        "reparse": False,
+        "sourceSha256": source_hash,
+    }
+    if not isinstance(value, str):
+        return base, None
+
+    try:
+        source_path = PureWindowsPath(value)
+    except (TypeError, ValueError):
+        base["reason"] = "unresolved-invalid-path"
+        return base, None
+
+    if _windows_is_same_or_child(source_path, LEGACY_DESTINATION_ROOT):
+        base["reason"] = "unresolved-legacy-destination"
+        return base, None
+
+    relative_parts = _windows_relative_path(value, source_root)
+    if relative_parts is None:
+        base["reason"] = "unresolved-outside-source-root"
+        return base, None
+
+    # The historical destination is not a valid candidate, even when supplied
+    # accidentally as the caller's candidate root.
+    if _windows_is_same_or_child(candidate_root_windows, LEGACY_DESTINATION_ROOT):
+        base["reason"] = "unresolved-legacy-destination"
+        return base, None
+
+    candidate = candidate_root.joinpath(*relative_parts)
+    base["candidate"] = str(candidate)
+    if _candidate_reparse(candidate):
+        base["reason"] = "unresolved-reparse"
+        base["reparse"] = True
+        return base, None
+    if not candidate.exists():
+        base["reason"] = "unresolved-missing"
+        return base, None
+    identity = _candidate_identity(candidate)
+    if identity is None:
+        base["reason"] = "unresolved-identity"
+        return base, None
+    base["safe"] = True
+    base["reason"] = "safe"
+    return base, identity
+
+
+def build_path_inventory(
+    state: object,
+    source_root: Path | str,
+    candidate_root: Path | str,
+) -> dict[str, object]:
+    """Build a read-only, per-entry canonical path inventory.
+
+    The function deliberately does not mutate *state* or touch any state file. It
+    computes candidates only for the two known projectless maps. Unknown maps and
+    values remain verbatim in the returned inventory for a later, explicit review.
+    """
+    if not isinstance(state, dict):
+        raise StatePolicyError("global state root must be an object")
+    try:
+        source_root_windows = PureWindowsPath(str(source_root))
+        candidate_root_windows = PureWindowsPath(str(candidate_root))
+    except (TypeError, ValueError) as exc:
+        raise StatePolicyError("path inventory roots are invalid") from exc
+    if not source_root_windows.is_absolute():
+        raise StatePolicyError("path inventory source root must be absolute")
+    if not candidate_root_windows.is_absolute() or candidate_root_windows.drive.casefold() != "d:":
+        raise StatePolicyError("path inventory candidate root must be an absolute D drive path")
+
+    candidate_root_path = Path(candidate_root)
+    maps: dict[str, dict[object, dict[str, object]]] = {}
+    unknown: dict[object, object] = {}
+    identities: dict[tuple[int, int], list[tuple[str, object]]] = {}
+
+    for map_name, mapping in state.items():
+        if map_name not in TARGET_MAPS or not isinstance(mapping, dict):
+            unknown[map_name] = copy.deepcopy(mapping)
+            continue
+        inventory_map: dict[object, dict[str, object]] = {}
+        maps[map_name] = inventory_map
+        for identity, value in mapping.items():
+            entry, final_identity = _path_inventory_entry(
+                value,
+                source_root_windows,
+                candidate_root_path,
+                candidate_root_windows,
+            )
+            inventory_map[identity] = entry
+            if final_identity is not None:
+                identities.setdefault(final_identity, []).append((map_name, identity))
+
+    # A candidate that resolves to the same final filesystem identity as another
+    # entry is not safe for an unreviewed one-to-one mapping. Keep both original
+    # values and expose the ambiguity instead of choosing a winner.
+    for final_identity, keys in identities.items():
+        if len(keys) < 2:
+            continue
+        for map_name, identity in keys:
+            entry = maps[map_name][identity]
+            entry["safe"] = False
+            entry["reason"] = "unresolved-ambiguous"
+
+    return {
+        "sourceRoot": str(source_root_windows),
+        "candidateRoot": str(candidate_root_windows),
+        "maps": maps,
+        "unknown": unknown,
+    }
 
 
 def normalize_global_state(state: object) -> tuple[dict[str, object], dict[str, int]]:

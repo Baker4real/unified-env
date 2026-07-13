@@ -16,6 +16,14 @@ param(
     [Parameter(ParameterSetName = 'ProductionFull')][string]$ApprovedPlanSha256
 )
 
+if ($PSCmdlet.ParameterSetName -in @('ProductionRegistrationRepair', 'ProductionFull')) {
+    [pscustomobject][ordered]@{
+        applied = $false
+        refusalReason = 'superseded-by-host-hook-reconciler'
+    }
+    return
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -30,19 +38,6 @@ if (-not $Apply) {
 if ($ApprovedScope -cne 'codex-hook-governance-2026-07-11') {
     [pscustomobject][ordered]@{ applied = $false; refusalReason = 'approved-scope-mismatch' }
     return
-}
-
-if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
-    $profile = Get-CodexHookProductionRegistrationRepairProfile
-    return Invoke-CodexHookProductionRegistrationRepairApplyCore -Profile $profile
-}
-
-if ($PSCmdlet.ParameterSetName -ceq 'ProductionFull') {
-    if ([string]::IsNullOrWhiteSpace($ApprovedGenerationId) -or [string]::IsNullOrWhiteSpace($ApprovedPlanSha256)) {
-        [pscustomobject][ordered]@{ applied = $false; refusalReason = 'approved-plan-binding-required' }
-        return
-    }
-    return Invoke-CodexHookProductionFullApply -ApprovedGenerationId $ApprovedGenerationId -ApprovedPlanSha256 $ApprovedPlanSha256
 }
 
 $planFullPath = Assert-CodexHookDPath -Value $PlanPath -Name 'PlanPath'

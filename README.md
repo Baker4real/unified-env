@@ -9,7 +9,7 @@
 - 可信环境治理报告链分别记录 Process、User、Machine PATH，并用 `generationId` 和源 JSON SHA-256 配对校验当前 JSON/Markdown 产物。
 - 环境迁移、项目本地环境重建、备份保留和依赖更新均先生成 dry-run；真实迁移、更新或删除仍需对具体项显式授权。
 - 备份保留 apply 受 schema、覆盖完整性、候选一致性和 manifest 安全门约束，不从过期报告推断可执行动作。
-- Codex 主机钩子治理以“用户级自定义 lifecycle hook 为 0”为目标；静态状态由显式冷路径 reconciler 维护，Serena 中性启动并按当前 workspace 显式激活。
+- Codex 主机钩子治理以“用户级自定义 lifecycle hook 为 0”为目标；`scripts/Invoke-CodexHostHookReconciliation.ps1` 是唯一当前生产权威，只允许显式冷路径 `Check` / `Repair`。旧 ProductionFull 与 registration-repair façade 已稳定拒绝，历史 fixture/core 仅保留测试价值；`features.hooks=true` 继续支持项目/skill hooks。
 - Codex CLI、Node、npm、Git、gh、uv、sqlite3、CodeGraph 和 Serena 主链路已验证；Serena 运行在官方 Python 3.14.6 上，并通过 uv override 使用 `anthropic==0.116.0`。
 - 共享环境入口已验证：`planning-with-files`、CMake `4.3.3`、Rust toolchain `1.96.1` 等均保持可用；skill ledger coverage 为 `missing=0` / `duplicates=0`。
 - 已按用户授权修复默认入口：`.NET` 默认命中 D 盘 SDK `10.0.301`，Python 默认切到官方 `3.14.6`；WSL 当前判断为“不确实需要”，未安装、未启用、未初始化；CodeGraph 活动版本仍为 `1.2.0`，已验证 `1.4.1` staging，待 Codex 完整重启后切换。

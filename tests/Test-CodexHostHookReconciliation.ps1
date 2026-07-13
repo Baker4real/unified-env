@@ -29,9 +29,9 @@ function Assert-Property {
 function Assert-SafeTestRoot {
     param([string]$Path)
 
-    $reportsRoot = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot "reports")).TrimEnd("\", "/")
+    $reportsRoot = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot ".scratch")).TrimEnd("\", "/")
     $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
-    Assert-True -Condition ($fullPath.StartsWith("$reportsRoot\", [System.StringComparison]::OrdinalIgnoreCase)) -Message "测试目录必须位于项目 reports 下：$fullPath"
+    Assert-True -Condition ($fullPath.StartsWith("$reportsRoot\host-hook-reconciliation-tests-", [System.StringComparison]::OrdinalIgnoreCase)) -Message "测试目录必须位于项目 .scratch 专用前缀下：$fullPath"
     Assert-True -Condition ([System.IO.Path]::GetPathRoot($fullPath) -eq "D:\") -Message "测试目录必须位于 D 盘：$fullPath"
 
     $cursor = $fullPath
@@ -150,6 +150,7 @@ function Get-CheckResult {
 }
 
 $legacyNames = @(
+    "codex-mobile-permission-guard.cmd",
     "codex-mobile-permission-guard.py",
     "codex-projectless-root-d.cmd",
     "codex-projectless-root-d.js",
@@ -162,10 +163,15 @@ $legacyNames = @(
     "__pycache__\codex-mobile-permission-guard.cpython-313.pyc"
 )
 
+$reconcilerSource = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\Invoke-CodexHostHookReconciliation.ps1")
+foreach ($mobileRetiredClosure in @("codex-mobile-permission-guard.cmd", "codex-mobile-permission-guard.py")) {
+    Assert-True -Condition ([regex]::Matches($reconcilerSource, [regex]::Escape('"' + $mobileRetiredClosure + '"')).Count -eq 1) -Message "mobile permission retired wrapper/implementation 必须各在 exact legacy allowlist 出现一次：$mobileRetiredClosure"
+}
+
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "InvalidSerenaContextPolicy", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml", "InvalidUnmanagedToml", "InvalidUtf8Toml", "BomToml")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "MissingSerenaCommand", "HermesCommandDrift", "EmptySerenaSectionAtEof", "DuplicateSerenaArgs", "DuplicateSerenaCommand", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "LegacySerenaContext", "NegatedSerenaPolicy", "InvalidSerenaContextPolicy", "MalformedSerenaIndent", "BareCrSerenaContext", "NullSerenaScalar", "DuplicateSerenaMarker", "ExternalSerenaMarker", "QuotedSerenaScalar", "QuotedSerenaListScalar", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml", "InvalidUnmanagedToml", "InvalidUtf8Toml", "BomToml")]
         [string]$Variant = "Drift"
     )
 
@@ -220,8 +226,14 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
 '@
     } elseif ($Variant -eq "MissingSerenaArgs") {
         $config = $config -replace '(?m)^args\s*=.*\r?\n', ''
+    } elseif ($Variant -eq "MissingSerenaCommand") {
+        $config = $config -replace '(?m)^command\s*=.*\r?\n', ''
+    } elseif ($Variant -eq "HermesCommandDrift") {
+        $config = $config -replace '(?m)^command\s*=.*$', 'command = "D:\\hermes-data\\serena-wrapper.cmd"'
     } elseif ($Variant -eq "DuplicateSerenaArgs") {
         $config = $config -replace '(?m)^(args\s*=.*)$', ('$1' + "`n" + '$1')
+    } elseif ($Variant -eq "DuplicateSerenaCommand") {
+        $config = $config -replace '(?m)^(command\s*=.*)$', ('$1' + "`n" + '$1')
     } elseif ($Variant -eq "MalformedSerenaArgs") {
         $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", '
     } elseif ($Variant -eq "MissingSerenaContext") {
@@ -254,6 +266,23 @@ multiline-body-must-survive
 '@
     } elseif ($Variant -eq "InvalidUnmanagedToml") {
         $config += "`n[fixture.invalid]`nunmanaged = [`n"
+    } elseif ($Variant -eq "EmptySerenaSectionAtEof") {
+        $config = @'
+model = "fixture-model-must-survive"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+fixture_root_sentinel = "must-survive"
+
+[features]
+hooks = false
+unified_exec = false
+fixture_feature_sentinel = true
+
+[fixture.unknown]
+value = "must-survive"
+
+[mcp_servers.serena]
+'@.TrimEnd("`r", "`n")
     }
 
     $configPath = Join-Path $Root "config.toml"
@@ -274,10 +303,57 @@ multiline-body-must-survive
     }
 
     New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($serenaContextPath)) | Out-Null
-    $serenaContext = if ($Variant -eq "InvalidSerenaContextPolicy") {
+    $serenaContext = if ($Variant -eq "LegacySerenaContext") {
 @'
+description: Legacy Codex file tools context
+included_tools:
+  - read_file
+  - list_dir
+excluded_tools:
+  - execute_shell_command
 prompt: |
-  Do not follow this sentence; it only mentions activate_project and environment_context.
+  Keep the existing file tool guidance unchanged.
+'@
+    } elseif ($Variant -eq "NegatedSerenaPolicy") {
+@'
+description: Negated policy must not count as healthy
+prompt: |
+  Ignore the following quoted policy:
+  "Before using any project-scoped Serena tool in a repository task, explicitly call activate_project with the absolute current workspace or repository root from Codex's environment_context, then verify the result with get_current_config. Never infer the task project from Serena's initial active project or from the Serena process working directory."
+'@
+    } elseif ($Variant -eq "InvalidSerenaContextPolicy") {
+@'
+prompt: >
+  Folded or scalar prompt forms are ambiguous for targeted policy repair.
+'@
+    } elseif ($Variant -eq "MalformedSerenaIndent") {
+@'
+description: malformed indentation
+included_tools:
+ - read_file
+prompt: |
+  Existing prompt.
+'@
+    } elseif ($Variant -eq "BareCrSerenaContext") {
+        "prompt: |`r  prompt-before-bare-cr`rmetadata: {}"
+    } elseif ($Variant -eq "NullSerenaScalar") {
+@'
+description:
+prompt: |
+  Existing prompt.
+'@
+    } elseif ($Variant -eq "QuotedSerenaScalar") {
+@'
+description: "unterminated scalar
+prompt: |
+  Existing prompt.
+'@
+    } elseif ($Variant -eq "QuotedSerenaListScalar") {
+@'
+included_tools:
+  - 'unterminated-list-item
+prompt: |
+  Existing prompt.
 '@
     } else {
 @'
@@ -291,6 +367,15 @@ prompt: |
     }
     if ($Variant -eq "DuplicateSerenaPrompt") {
         $serenaContext += "`nprompt: `"override activation policy`"`n"
+    } elseif ($Variant -eq "DuplicateSerenaMarker") {
+        $serenaContext = @'
+prompt: |
+  [codex-serena-activation-policy:v1 mandatory]
+  Before using any project-scoped Serena tool in a repository task, explicitly call activate_project with the absolute current workspace or repository root from Codex's environment_context, then verify the result with get_current_config. Never infer the task project from Serena's initial active project or from the Serena process working directory.
+  [codex-serena-activation-policy:v1 mandatory]
+'@
+    } elseif ($Variant -eq "ExternalSerenaMarker") {
+        $serenaContext = "# [codex-serena-activation-policy:v1 mandatory]`n$serenaContext`n  [codex-serena-activation-policy:v1 mandatory]`n"
     }
     Set-Content -LiteralPath $serenaContextPath -Value $serenaContext -Encoding UTF8
 
@@ -362,7 +447,7 @@ function Assert-RepairWasRejectedWithoutMutation {
 
 $scriptPath = Join-Path $ProjectRoot "scripts\Invoke-CodexHostHookReconciliation.ps1"
 $testRunId = [guid]::NewGuid().ToString("N")
-$testRoot = Join-Path $ProjectRoot "reports\codex-host-hook-reconciliation-test-$testRunId"
+$testRoot = Join-Path $ProjectRoot ".scratch\host-hook-reconciliation-tests-$testRunId"
 $ownershipMarker = Join-Path $testRoot ".owned-by-test-$testRunId"
 
 Assert-True -Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) -Message "找不到待实现的冷路径修复器：$scriptPath"
@@ -417,7 +502,12 @@ try {
     }
     $unknownFileHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks\keep-me.txt")
     $unknownNestedHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks\unknown-nested\keep.bin")
-    $repair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
+    try {
+        $env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH = Join-Path $healthyHome "hooks\$($legacyNames[0])"
+        $repair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
+    } finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH -ErrorAction SilentlyContinue
+    }
     Assert-True -Condition ($repair.mode -eq "Repair") -Message "Repair 结果 mode 错误"
     Assert-True -Condition ([bool]$repair.ok) -Message "Repair 未形成健康终态"
     Assert-True -Condition ([bool]$repair.changed) -Message "首次 Repair 应报告 changed=true"
@@ -474,6 +564,10 @@ try {
     )) {
         Assert-True -Condition (@($manifest.aclTargets) -contains $path) -Message "manifest.aclTargets 漏记托管 ACL：$path"
     }
+    foreach ($name in $legacyNames) {
+        $retiredPath = Join-Path $healthyHome "hooks\$name"
+        Assert-True -Condition (@($manifest.aclTargets) -notcontains $retiredPath) -Message "manifest.aclTargets 不得包含待退役路径：$retiredPath"
+    }
     $aclBefore = Get-Content -LiteralPath (Join-Path $repair.evidencePath "acl-before.json") -Raw | ConvertFrom-Json -AsHashtable
     foreach ($path in @(
         (Join-Path $healthyHome "config.toml"),
@@ -507,6 +601,117 @@ try {
         Assert-OnlyAllowedWriters -Path $path
     }
     Assert-OnlyAllowedWriters -Path (Join-Path ([System.IO.Directory]::GetParent($healthyHome).FullName) ".serena\contexts\codex-file-tools.yml")
+
+    $legacyContextHome = Join-Path $testRoot "legacy-serena-context\.codex"
+    New-FixtureCodexHome -Root $legacyContextHome -Variant "LegacySerenaContext"
+    $legacyContextPath = Join-Path ([System.IO.Directory]::GetParent($legacyContextHome).FullName) ".serena\contexts\codex-file-tools.yml"
+    $legacyContextSiblingPath = Join-Path ([System.IO.Path]::GetDirectoryName($legacyContextPath)) "legacy-sibling.yml"
+    [System.IO.File]::WriteAllText($legacyContextSiblingPath, "description: sibling-must-survive`n", [System.Text.UTF8Encoding]::new($false))
+    $legacyContextSiblingHash = Get-Sha256 -Path $legacyContextSiblingPath
+    $legacyContextSiblingAcl = (Get-Acl -LiteralPath $legacyContextSiblingPath).Sddl
+    $legacyContextBefore = [System.IO.File]::ReadAllText($legacyContextPath)
+    $legacyContextBeforeHash = Get-Sha256 -Path $legacyContextPath
+    $legacyContextCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $legacyContextHome
+    Assert-True -Condition (-not [bool]$legacyContextCheck.ok -and -not [bool](Get-CheckResult -Result $legacyContextCheck -Name "serenaContext").ok) -Message "合法旧 Serena context 的 Check 应报告可修复 drift，而不是 fatal"
+    $legacyContextRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $legacyContextHome
+    Assert-True -Condition ([bool]$legacyContextRepair.ok -and [bool]$legacyContextRepair.changed) -Message "合法旧 Serena context 未被 Repair 收敛"
+    $legacyContextAfter = [System.IO.File]::ReadAllText($legacyContextPath)
+    foreach ($sentinel in @("description: Legacy Codex file tools context", "  - read_file", "  - list_dir", "  - execute_shell_command")) {
+        Assert-True -Condition $legacyContextAfter.Contains($sentinel) -Message "Serena context Repair 未保留旧 YAML 内容：$sentinel"
+    }
+    Assert-True -Condition (-not $legacyContextAfter.Contains("Keep the existing file tool guidance unchanged.")) -Message "协调器完整拥有 prompt，不得保留旧 prompt 文本"
+    Assert-True -Condition $legacyContextAfter.Contains("Before using any project-scoped Serena tool") -Message "Serena context Repair 未追加规范激活契约"
+    Assert-True -Condition ([regex]::Matches($legacyContextAfter, '\[codex-serena-activation-policy:v1 mandatory\]').Count -eq 1) -Message "Serena context Repair 未追加唯一 mandatory marker"
+    Assert-True -Condition ((Get-Sha256 -Path $legacyContextSiblingPath) -eq $legacyContextSiblingHash -and (Get-Acl -LiteralPath $legacyContextSiblingPath).Sddl -ceq $legacyContextSiblingAcl) -Message "Serena context Repair 改写了 sibling context 内容或 ACL"
+    Assert-True -Condition ((Get-Sha256 -Path (Join-Path $legacyContextRepair.evidencePath "codex-file-tools.yml")) -eq $legacyContextBeforeHash) -Message "Serena context evidence 不是修复前快照"
+    $legacyContextManifest = Get-Content -Raw -LiteralPath (Join-Path $legacyContextRepair.evidencePath "manifest.json") | ConvertFrom-Json
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace([string]$legacyContextManifest.intendedResources.'codex-file-tools.yml')) -Message "manifest intendedResources 漏记 Serena context"
+    Assert-True -Condition (@($legacyContextManifest.attemptedResources) -contains "codex-file-tools.yml" -and @($legacyContextManifest.committedResources) -contains "codex-file-tools.yml") -Message "manifest 未记录 Serena context 事务"
+    $legacyContextSecondRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $legacyContextHome
+    Assert-True -Condition ([bool]$legacyContextSecondRepair.ok -and -not [bool]$legacyContextSecondRepair.changed -and $null -eq $legacyContextSecondRepair.evidencePath) -Message "Serena context 第二次 Repair 不是 no-op"
+
+    $contextRollbackHome = Join-Path $testRoot "context-rollback\.codex"
+    New-FixtureCodexHome -Root $contextRollbackHome -Variant "LegacySerenaContext"
+    $contextRollbackPath = Join-Path ([System.IO.Directory]::GetParent($contextRollbackHome).FullName) ".serena\contexts\codex-file-tools.yml"
+    $contextRollbackContentBefore = [System.IO.File]::ReadAllText($contextRollbackPath)
+    $contextRollbackAclBefore = (Get-Acl -LiteralPath $contextRollbackPath).Sddl
+    $contextRollbackConfigPath = Join-Path $contextRollbackHome "config.toml"
+    $contextRollbackLock = [System.IO.File]::Open($contextRollbackConfigPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    $contextRollbackThrew = $false
+    try {
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $contextRollbackHome | Out-Null
+    } catch {
+        $contextRollbackThrew = $true
+    } finally {
+        $contextRollbackLock.Dispose()
+    }
+    Assert-True -Condition $contextRollbackThrew -Message "Serena context 后续 config 失败未触发事务回滚"
+    Assert-True -Condition ([System.IO.File]::ReadAllText($contextRollbackPath) -ceq $contextRollbackContentBefore) -Message "三资源失败未精确回滚 Serena context 内容"
+    Assert-True -Condition ((Get-Acl -LiteralPath $contextRollbackPath).Sddl -ceq $contextRollbackAclBefore) -Message "三资源失败未精确回滚 Serena context ACL"
+    $contextRollbackEvidence = @(Get-ChildItem -LiteralPath (Join-Path $contextRollbackHome "run-evidence\host-hook-remediation") -Directory -Force)
+    $contextRollbackManifest = Get-Content -Raw -LiteralPath (Join-Path $contextRollbackEvidence[0].FullName "manifest.json") | ConvertFrom-Json
+    Assert-True -Condition ($contextRollbackManifest.status -eq "rolled-back" -and @($contextRollbackManifest.attemptedResources) -contains "codex-file-tools.yml" -and @($contextRollbackManifest.committedResources) -contains "codex-file-tools.yml") -Message "三资源失败 manifest 未记录 Serena context 提交与完整回滚"
+
+    $contextConcurrentHome = Join-Path $testRoot "context-concurrent\.codex"
+    New-FixtureCodexHome -Root $contextConcurrentHome -Variant "LegacySerenaContext"
+    $contextConcurrentPath = Join-Path ([System.IO.Directory]::GetParent($contextConcurrentHome).FullName) ".serena\contexts\codex-file-tools.yml"
+    $contextConcurrentThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE = $contextConcurrentPath
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $contextConcurrentHome | Out-Null
+    } catch {
+        $contextConcurrentThrew = $true
+    } finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition $contextConcurrentThrew -Message "Serena context 并发替换未 fail closed"
+    $contextConcurrentEvidence = @(Get-ChildItem -LiteralPath (Join-Path $contextConcurrentHome "run-evidence\host-hook-remediation") -Directory -Force)
+    $contextConcurrentManifest = Get-Content -Raw -LiteralPath (Join-Path $contextConcurrentEvidence[0].FullName "manifest.json") | ConvertFrom-Json
+    Assert-True -Condition ($contextConcurrentManifest.status -eq "unsafe-partial" -and $contextConcurrentManifest.concurrentReplace.path -eq $contextConcurrentPath) -Message "Serena context 并发替换未标记 unsafe-partial"
+    Assert-True -Condition ([System.IO.File]::ReadAllText($contextConcurrentManifest.concurrentReplace.backupPath) -ceq "# fixture concurrent replacement`n") -Message "Serena context 并发版本未保存在 replacement backup"
+
+    $unauthorizedHome = Join-Path $testRoot "unauthorized-marker\nested\.codex"
+    New-FixtureCodexHome -Root $unauthorizedHome -Variant "LegacySerenaContext"
+    $unauthorizedSiblingPath = Join-Path ([System.IO.Directory]::GetParent($unauthorizedHome).FullName) ".serena\contexts\codex-file-tools.yml"
+    $unauthorizedSiblingBefore = [System.IO.File]::ReadAllText($unauthorizedSiblingPath)
+    $unauthorizedBefore = Get-TreeFingerprint -CodexHome $unauthorizedHome
+    $unauthorizedThrew = $false
+    try { Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $unauthorizedHome | Out-Null } catch { $unauthorizedThrew = $true }
+    Assert-True -Condition $unauthorizedThrew -Message "fixture marker 绕过了 .scratch 专用测试根授权"
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $unauthorizedHome) -eq $unauthorizedBefore) -Message "未授权 marker home 被 Repair 修改"
+    Assert-True -Condition ([System.IO.File]::ReadAllText($unauthorizedSiblingPath) -ceq $unauthorizedSiblingBefore) -Message "未授权 marker home 导致 sibling context 被读取后改写"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $unauthorizedHome "run-evidence"))) -Message "未授权 marker home 在授权前产生 evidence"
+
+    $trailingChildHome = Join-Path $testRoot "trailing-child\.codex\child"
+    New-FixtureCodexHome -Root $trailingChildHome -Variant "LegacySerenaContext"
+    $trailingChildBefore = Get-TreeFingerprint -CodexHome $trailingChildHome
+    $trailingChildThrew = $false
+    try { Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $trailingChildHome | Out-Null } catch { $trailingChildThrew = $true }
+    Assert-True -Condition $trailingChildThrew -Message "fixture auth 接受了 .codex\\child trailing path"
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $trailingChildHome) -eq $trailingChildBefore -and -not (Test-Path -LiteralPath (Join-Path $trailingChildHome "run-evidence"))) -Message "trailing child 越权 fixture 被修改或产生 evidence"
+    $scriptText = Get-Content -Raw -LiteralPath $scriptPath
+    $repairAuthorizationIndex = $scriptText.IndexOf('Assert-RepairHomeAuthorized -ResolvedCodexHome $resolvedHome', [System.StringComparison]::Ordinal)
+    $repairStateIndex = $scriptText.IndexOf('$state = Get-ReconciliationState -ResolvedCodexHome $resolvedHome', $repairAuthorizationIndex, [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($repairAuthorizationIndex -ge 0 -and $repairStateIndex -gt $repairAuthorizationIndex) -Message "Repair 授权必须发生在任何 sibling context 状态读取前"
+    Assert-True -Condition $scriptText.Contains('^host-hook-reconciliation-tests-[0-9a-f]{32}') -Message "静态授权门未固定 .scratch 专用测试根，D:\Codex\fake-home 可能被 marker 绕过"
+
+    $negatedContextHome = Join-Path $testRoot "negated-serena-policy\.codex"
+    New-FixtureCodexHome -Root $negatedContextHome -Variant "NegatedSerenaPolicy"
+    $negatedContextPath = Join-Path ([System.IO.Directory]::GetParent($negatedContextHome).FullName) ".serena\contexts\codex-file-tools.yml"
+    $negatedRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $negatedContextHome
+    $negatedAfter = [System.IO.File]::ReadAllText($negatedContextPath)
+    Assert-True -Condition ([bool]$negatedRepair.ok -and [regex]::Matches($negatedAfter, '\[codex-serena-activation-policy:v1 mandatory\]').Count -eq 1) -Message "否定/引用契约未被视为 drift 并追加 canonical marker"
+    Assert-True -Condition (-not $negatedAfter.Contains('Ignore the following quoted policy:')) -Message "否定/引用旧 prompt 应被 canonical block 完整替换"
+
+    $mixedContextHome = Join-Path $testRoot "mixed-newline-serena-context\.codex"
+    New-FixtureCodexHome -Root $mixedContextHome -Variant "LegacySerenaContext"
+    $mixedContextPath = Join-Path ([System.IO.Directory]::GetParent($mixedContextHome).FullName) ".serena\contexts\codex-file-tools.yml"
+    $mixedPrefix = "description: mixed-newlines-must-survive`r`nincluded_tools:`r`n  - read_file`r`nprompt: |`n"
+    $mixedSuffix = "metadata: {}`r`n"
+    [System.IO.File]::WriteAllText($mixedContextPath, $mixedPrefix + "  old-guidance-must-be-replaced`n" + $mixedSuffix, [System.Text.UTF8Encoding]::new($false))
+    $mixedRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $mixedContextHome
+    $mixedAfter = [System.IO.File]::ReadAllText($mixedContextPath)
+    Assert-True -Condition ([bool]$mixedRepair.ok -and $mixedAfter.StartsWith($mixedPrefix, [System.StringComparison]::Ordinal) -and $mixedAfter.EndsWith($mixedSuffix, [System.StringComparison]::Ordinal) -and -not $mixedAfter.Contains('old-guidance-must-be-replaced')) -Message "Serena context 替换改写了 prompt 外混合换行或未移除旧 prompt"
 
     $replacementPath = Join-Path $healthyHome ".config.toml.desktop-replacement"
     try {
@@ -759,18 +964,83 @@ try {
     $legacyUnknownManifest = Get-Content -LiteralPath (Join-Path $legacyUnknownEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
     $unknownCacheEvidence = @($legacyUnknownManifest.preservedHookTree | Where-Object { $_.path -eq '__pycache__\keep-me.pyc' })
     Assert-True -Condition ($unknownCacheEvidence.Count -eq 1 -and $unknownCacheEvidence[0].sha256 -eq $unknownCacheHash) -Message "manifest 漏记 legacy 目录中的未知文件"
+    Assert-True -Condition (@($legacyUnknownManifest.aclTargets) -contains $unknownCachePath) -Message "未知 legacy 目录后代必须作为 preserved path 进入 aclTargets"
+    Assert-True -Condition (@($legacyUnknownManifest.aclTargets) -notcontains (Join-Path $legacyUnknownHome "hooks\__pycache__")) -Message "exact retired legacy 目录不得进入 aclTargets"
+    Assert-True -Condition (@($legacyUnknownManifest.aclTargets) -notcontains (Join-Path $legacyUnknownHome "hooks\__pycache__\codex-mobile-permission-guard.cpython-313.pyc")) -Message "known retired pyc 不得进入 aclTargets"
+
+    $forbidOnlyHome = Join-Path $testRoot "forbid-only-seam\.codex"
+    New-FixtureCodexHome -Root $forbidOnlyHome
+    $forbidOnlyThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH = Join-Path $forbidOnlyHome "hooks\keep-me.txt"
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $forbidOnlyHome | Out-Null
+    } catch {
+        $forbidOnlyThrew = $true
+    } finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition $forbidOnlyThrew -Message "仅设置 forbidden ACL env 时 seam 未在 early return 前解析/授权"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $forbidOnlyHome "run-evidence"))) -Message "非法 forbid-only seam 在拒绝前产生 evidence"
+
+    foreach ($serenaConfigCase in @(
+        @{ Name = "missing-serena-args-repair"; Variant = "MissingSerenaArgs" },
+        @{ Name = "missing-serena-command-repair"; Variant = "MissingSerenaCommand" },
+        @{ Name = "hermes-command-drift-repair"; Variant = "HermesCommandDrift" }
+    )) {
+        $serenaConfigHome = Join-Path $testRoot "$($serenaConfigCase.Name)\.codex"
+        New-FixtureCodexHome -Root $serenaConfigHome -Variant $serenaConfigCase.Variant
+        $serenaConfigContextPath = Join-Path ([System.IO.Directory]::GetParent($serenaConfigHome).FullName) ".serena\contexts\codex-file-tools.yml"
+        $serenaConfigRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $serenaConfigHome
+        Assert-True -Condition ([bool]$serenaConfigRepair.ok -and [bool]$serenaConfigRepair.changed) -Message "$($serenaConfigCase.Name) 未被 Repair 收敛"
+        $serenaConfigText = Get-Content -Raw -LiteralPath (Join-Path $serenaConfigHome "config.toml")
+        Assert-True -Condition ($serenaConfigText -match '(?m)^command\s*=\s*"D:\\\\Codex\\\\\.codex\\\\scripts\\\\start-serena-mcp\.cmd"\s*$') -Message "$($serenaConfigCase.Name) command 未规范为固定 wrapper"
+        $argsMatch = [regex]::Match($serenaConfigText, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$')
+        Assert-True -Condition $argsMatch.Success -Message "$($serenaConfigCase.Name) 缺少 canonical args"
+        $argsTokens = @((ConvertFrom-Json -InputObject $argsMatch.Groups['rhs'].Value -NoEnumerate))
+        $expectedArgs = @("start-mcp-server", "--context=$serenaConfigContextPath", "--enable-web-dashboard=true", "--open-web-dashboard=false")
+        Assert-True -Condition (($argsTokens -join "`n") -ceq ($expectedArgs -join "`n")) -Message "$($serenaConfigCase.Name) args 目标不精确"
+        foreach ($sentinel in @('startup_timeout_sec = 60', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true')) {
+            Assert-True -Condition $serenaConfigText.Contains($sentinel) -Message "$($serenaConfigCase.Name) 未保留 Serena/全文件未知 key：$sentinel"
+        }
+        $serenaConfigSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $serenaConfigHome
+        Assert-True -Condition ([bool]$serenaConfigSecond.ok -and -not [bool]$serenaConfigSecond.changed) -Message "$($serenaConfigCase.Name) 第二次 Repair 不是 no-op"
+    }
+
+    $emptySerenaHome = Join-Path $testRoot "empty-serena-section-eof\.codex"
+    New-FixtureCodexHome -Root $emptySerenaHome -Variant "EmptySerenaSectionAtEof"
+    $emptySerenaContextPath = Join-Path ([System.IO.Directory]::GetParent($emptySerenaHome).FullName) ".serena\contexts\codex-file-tools.yml"
+    $emptySerenaRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $emptySerenaHome
+    Assert-True -Condition ([bool]$emptySerenaRepair.ok -and [bool]$emptySerenaRepair.changed) -Message "EOF 空 Serena section 未被 Repair 收敛"
+    $emptySerenaConfig = Get-Content -Raw -LiteralPath (Join-Path $emptySerenaHome "config.toml")
+    $emptyCommandCount = [regex]::Matches($emptySerenaConfig, '(?m)^command\s*=').Count
+    $emptyArgsCount = [regex]::Matches($emptySerenaConfig, '(?m)^args\s*=').Count
+    Assert-True -Condition ($emptyCommandCount -eq 1 -and $emptyArgsCount -eq 1) -Message "EOF 空 Serena section Repair 后 command/args 不是各1：command=$emptyCommandCount args=$emptyArgsCount config=$emptySerenaConfig"
+    foreach ($sentinel in @('model = "fixture-model-must-survive"', 'fixture_root_sentinel = "must-survive"', 'fixture_feature_sentinel = true', 'value = "must-survive"')) {
+        Assert-True -Condition $emptySerenaConfig.Contains($sentinel) -Message "EOF 插入改写了无关/root 状态：$sentinel"
+    }
+    $emptySerenaArgs = [regex]::Match($emptySerenaConfig, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$').Groups['rhs'].Value | ConvertFrom-Json -NoEnumerate
+    Assert-True -Condition (@($emptySerenaArgs).Count -eq 4 -and @($emptySerenaArgs)[1] -ceq "--context=$emptySerenaContextPath") -Message "EOF 空 Serena section canonical args 不精确"
+    $emptySerenaSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $emptySerenaHome
+    Assert-True -Condition ([bool]$emptySerenaSecond.ok -and -not [bool]$emptySerenaSecond.changed) -Message "EOF 空 Serena section 第二次 Repair 不是 no-op"
 
     foreach ($case in @(
         @{ Name = "malformed-hooks"; Variant = "MalformedHooks" },
         @{ Name = "duplicate-serena"; Variant = "DuplicateSerena" },
-        @{ Name = "missing-serena-args"; Variant = "MissingSerenaArgs" },
         @{ Name = "duplicate-serena-args"; Variant = "DuplicateSerenaArgs" },
+        @{ Name = "duplicate-serena-command"; Variant = "DuplicateSerenaCommand" },
         @{ Name = "malformed-serena-args"; Variant = "MalformedSerenaArgs" },
         @{ Name = "missing-serena-context"; Variant = "MissingSerenaContext" },
         @{ Name = "missing-serena-context-value"; Variant = "MissingSerenaContextValue" },
         @{ Name = "wrong-serena-context"; Variant = "WrongSerenaContext" },
         @{ Name = "duplicate-serena-context"; Variant = "DuplicateSerenaContext" },
         @{ Name = "invalid-serena-context-policy"; Variant = "InvalidSerenaContextPolicy" },
+        @{ Name = "malformed-serena-indent"; Variant = "MalformedSerenaIndent" },
+        @{ Name = "bare-cr-serena-context"; Variant = "BareCrSerenaContext" },
+        @{ Name = "null-serena-scalar"; Variant = "NullSerenaScalar" },
+        @{ Name = "duplicate-serena-marker"; Variant = "DuplicateSerenaMarker" },
+        @{ Name = "external-serena-marker"; Variant = "ExternalSerenaMarker" },
+        @{ Name = "quoted-serena-scalar"; Variant = "QuotedSerenaScalar" },
+        @{ Name = "quoted-serena-list-scalar"; Variant = "QuotedSerenaListScalar" },
         @{ Name = "duplicate-serena-prompt"; Variant = "DuplicateSerenaPrompt" },
         @{ Name = "missing-serena-project-value"; Variant = "MissingSerenaProjectValue" },
         @{ Name = "duplicate-hook-section"; Variant = "DuplicateHookSection" },

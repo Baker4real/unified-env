@@ -29,6 +29,6 @@
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
 - 可信盘点设计：`docs/specs/2026-07-10-environment-inventory-trust-design.md`
 - 可信盘点实施计划：`docs/plans/2026-07-10-environment-inventory-trust-implementation.md`
-- Codex 主机钩子采用显式冷路径 reconciler；用户级自定义 lifecycle hook 目标为 0，Serena 中性启动并在任务内按绝对 workspace root 显式激活。接口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`。
+- Codex 主机钩子采用显式冷路径 reconciler；`scripts/Invoke-CodexHostHookReconciliation.ps1` 是唯一当前生产入口，用户级自定义 lifecycle hook 目标为 0，同时保留 `features.hooks=true`。旧 ProductionFull / registration-repair 生产 façade 已退役，只保留 fixture/core 历史测试价值。Serena 中性启动并在任务内按绝对 workspace root 显式激活。接口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`。
 
 这些报告是事实快照，不是执行授权。真实迁移、PATH 修改、全局管理器更新或删除前必须重新生成最新基线，并取得具体项授权。

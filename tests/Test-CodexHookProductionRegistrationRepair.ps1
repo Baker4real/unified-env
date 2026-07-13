@@ -55,9 +55,7 @@ Assert-True (@($productionParameter.ParameterSets.Keys) -contains 'ProductionReg
 foreach ($fixtureOnlyName in @('ManifestPath', 'FixtureSourceRoot', 'FixtureCodexHome', 'Mode', 'OutputDir', 'EnvironmentReadValue')) {
     Assert-True (-not $newPlanCommand.Parameters[$fixtureOnlyName].ParameterSets.ContainsKey('ProductionRegistrationRepair')) "production plan 参数集不得接受 $fixtureOnlyName"
 }
-Assert-True ($newPlanScriptText.Contains('完整性并发边界')) 'production PLAN 必须持久记录完整性并发边界'
-Assert-True ($newPlanScriptText.Contains('不声称绝对 CAS')) 'production PLAN 不得把 write-excluding lease 误称为绝对 CAS'
-Assert-True ($newPlanScriptText.Contains('60 分钟')) 'production PLAN 必须持久记录 freshness gate'
+Assert-True ($newPlanScriptText.Contains('superseded-by-host-hook-reconciler')) 'production registration-repair plan façade 必须稳定退役'
 $invokeCommand = Get-Command -Name (Join-Path $ProjectRoot 'scripts\Invoke-CodexHookDeployment.ps1')
 foreach ($testOnlyName in @('TestAfterRegistryPublish', 'TestBeforeRollbackMove', 'TestAfterRollbackSnapshot', 'TestAfterPremoveSnapshot', 'TestFaultInjection')) {
     Assert-True (-not $invokeCommand.Parameters.ContainsKey($testOnlyName)) "production CLI 不得暴露 test-only apply seam：$testOnlyName"

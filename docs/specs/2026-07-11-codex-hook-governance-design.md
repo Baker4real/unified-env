@@ -1,5 +1,7 @@
 # 本机 Codex Hook 治理与安全重构设计
 
+> **历史设计（已取代）：** 本文描述的五个 SessionStart 与 ProductionFull 部署架构不再是当前生产方案。`scripts/Invoke-CodexHostHookReconciliation.ps1` 是唯一当前生产权威；旧 production façade 固定返回 `superseded-by-host-hook-reconciler`，本文其余内容只用于解释历史约束和 fixture/core 测试来源，不构成 live 执行授权。
+
 ## 背景
 
 本机 Codex 的真实 hook 注册位于 `D:\Codex\.codex\hooks.json`，实现位于

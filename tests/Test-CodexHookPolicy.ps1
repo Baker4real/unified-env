@@ -397,10 +397,9 @@ Assert-True (($github.quickHealthCheck.arguments -join ',') -ceq '-CheckOnly,-Js
 Assert-True (($github.fullAcceptanceCommand.arguments -join ',') -ceq '-Json,-CheckAuth,-Strict') 'GitHub full health 接口必须固定为 auth strict'
 
 $implementationPlan=Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'docs\plans\2026-07-11-codex-hook-governance-implementation.md')
-Assert-True ($implementationPlan -match 'git -C .+ diff --check\s*\r?\nif \(\$LASTEXITCODE -ne 0\)') 'Task 7 Step 1 diff check 必须检查 $LASTEXITCODE'
-Assert-True ($implementationPlan.Contains('1500ms + 4 x (1000ms + 250ms) + 2000ms = 8500ms') -and $implementationPlan.Contains('1500ms + 7 x (1000ms + 250ms) + 2000ms = 12250ms')) 'provider/dashboard timeout 预算公式必须与有界 drain 一致'
-Assert-True ($implementationPlan.Contains('CheckOnly 成功仅说明安全验证可执行，不等同于收敛') -and $implementationPlan.Contains('Task 8')) 'Task 7 文档必须区分 CheckOnly 安全验证与 Task 8 收敛验收'
-Assert-True ($implementationPlan.Contains('activate 的 CheckOnly 仅验证合法输入与 runtime binary，不验证 vendor protocol')) 'Task 7 文档不得把 Serena activate CheckOnly 误称为 vendor protocol 验收'
+Assert-True ($implementationPlan.Contains('历史实施计划：已被主机钩子协调器取代')) '旧 Task 7 实施计划必须明确标记为历史不可执行'
+Assert-True ($implementationPlan.Contains('Invoke-CodexHostHookReconciliation.ps1') -and $implementationPlan.Contains('唯一生产权威')) '旧 Task 7 实施计划必须指向唯一生产协调器'
+Assert-True ($implementationPlan -notmatch '(?m)^\s*&.*(?:Invoke|Restore)-CodexHookDeployment\.ps1') '旧 Task 7 实施计划不得保留可复制的 live apply/restore 命令'
 
 [pscustomobject]@{
     ok = $true

@@ -14,8 +14,10 @@ $script:FixtureConcurrentReplaceKind = "content"
 $script:FixtureConcurrentReplaceRemaining = 0
 $script:FixtureCasFailureMode = $null
 $script:FixturePostCommitFailurePhase = $null
+$script:FixtureForbiddenAclPath = $null
 
 $script:LegacyHookNames = @(
+    "codex-mobile-permission-guard.cmd",
     "codex-mobile-permission-guard.py",
     "codex-projectless-root-d.cmd",
     "codex-projectless-root-d.js",
@@ -156,6 +158,13 @@ function Assert-RepairHomeAuthorized {
         return
     }
 
+    $projectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd("\", "/")
+    $fixtureRoot = Assert-NoReparsePath -Path (Join-Path $projectRoot ".scratch") -RequireLeaf
+    $relative = [System.IO.Path]::GetRelativePath($fixtureRoot, $ResolvedCodexHome).Replace('/', '\')
+    if ($relative -notmatch '^host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\z') {
+        throw "非默认 CodexHome 必须位于项目 .scratch 的专用 host-hook-reconciliation-tests 根内"
+    }
+
     $markerPath = Join-Path $ResolvedCodexHome ".codex-host-hook-reconciliation-fixture"
     if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) {
         throw "非默认 CodexHome 只允许带受控 fixture marker 的 Repair"
@@ -171,9 +180,11 @@ function Initialize-FixtureTestSeams {
 
     $requestedPath = $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE
     $postCommitFailurePhase = $env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE
+    $forbiddenAclPath = $env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH
     if (
         [string]::IsNullOrWhiteSpace($requestedPath) -and
-        [string]::IsNullOrWhiteSpace($postCommitFailurePhase)
+        [string]::IsNullOrWhiteSpace($postCommitFailurePhase) -and
+        [string]::IsNullOrWhiteSpace($forbiddenAclPath)
     ) {
         return
     }
@@ -190,13 +201,31 @@ function Initialize-FixtureTestSeams {
         $script:FixturePostCommitFailurePhase = $postCommitFailurePhase
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($forbiddenAclPath)) {
+        $fullForbiddenAclPath = Assert-NoReparsePath -Path $forbiddenAclPath -RequireLeaf
+        $hookRoot = [System.IO.Path]::GetFullPath((Join-Path $ResolvedCodexHome "hooks"))
+        if (-not $fullForbiddenAclPath.StartsWith("$hookRoot\", [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "fixture-only forbidden ACL path 必须位于当前 hooks 内"
+        }
+        $relativeForbiddenAclPath = [System.IO.Path]::GetRelativePath($hookRoot, $fullForbiddenAclPath).Replace('/', '\')
+        if (-not (Test-IsLegacyHookRelativePath -RelativePath $relativeForbiddenAclPath)) {
+            throw "fixture-only forbidden ACL path 必须是待退役 allowlist 路径"
+        }
+        $script:FixtureForbiddenAclPath = $fullForbiddenAclPath
+    }
+
     if ([string]::IsNullOrWhiteSpace($requestedPath)) {
         return
     }
 
     $fullPath = Assert-NoReparsePath -Path $requestedPath -RequireLeaf
-    if (-not $fullPath.StartsWith("$ResolvedCodexHome\", [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "fixture-only test seam 必须位于当前 CodexHome 内"
+    $fixtureHostRoot = [System.IO.Directory]::GetParent($ResolvedCodexHome).FullName
+    $fixtureSerenaContextPath = [System.IO.Path]::GetFullPath((Join-Path $fixtureHostRoot ".serena\contexts\codex-file-tools.yml"))
+    if (
+        -not $fullPath.StartsWith("$ResolvedCodexHome\", [System.StringComparison]::OrdinalIgnoreCase) -and
+        -not $fullPath.Equals($fixtureSerenaContextPath, [System.StringComparison]::OrdinalIgnoreCase)
+    ) {
+        throw "fixture-only test seam 必须位于当前 CodexHome 内或精确目标 Serena context"
     }
     $script:FixtureConcurrentReplacePath = $fullPath
     $replaceKind = $env:CODEX_HOST_HOOK_TEST_CONCURRENT_KIND
@@ -655,19 +684,23 @@ function Get-UniqueKeyIndex {
         [int]$End
     )
 
-    $expectedSegments = @($Key)
-    $keyIndices = [System.Collections.Generic.List[int]]::new()
-    for ($index = $Start; $index -lt $End; $index++) {
-        $segments = @(Get-TomlAssignmentKeySegments -Line $Document.lines[$index])
-        if (Test-TomlKeySegmentsEqual -Left $segments -Right $expectedSegments) {
-            $keyIndices.Add($index)
-        }
-    }
+    $keyIndices = @(Get-TomlKeyIndices -Document $Document -Key $Key -Start $Start -End $End)
     if ($keyIndices.Count -ne 1) {
         throw "TOML key 必须在目标作用域恰好出现一次：$Key；实际 $($keyIndices.Count)"
     }
 
     $keyIndices[0]
+}
+
+function Get-TomlKeyIndices {
+    param([object]$Document,[string]$Key,[int]$Start,[int]$End)
+    $expectedSegments = @($Key)
+    @(
+        for ($index = $Start; $index -lt $End; $index++) {
+            $segments = @(Get-TomlAssignmentKeySegments -Line $Document.lines[$index])
+            if (Test-TomlKeySegmentsEqual -Left $segments -Right $expectedSegments) { $index }
+        }
+    )
 }
 
 function Set-TomlKeyLiteral {
@@ -796,7 +829,39 @@ function Get-DesiredConfig {
     Set-TomlKeyLiteral -Document $document -Index $unifiedExecIndex -Key "unified_exec" -Literal "true"
 
     $serena = Get-UniqueSectionRange -Document $document -Name "mcp_servers.serena"
-    $argsIndex = Get-UniqueKeyIndex -Document $document -Key "args" -Start $serena.start -End $serena.end
+    $commandIndices = @(Get-TomlKeyIndices -Document $document -Key "command" -Start $serena.start -End $serena.end)
+    $argsIndices = @(Get-TomlKeyIndices -Document $document -Key "args" -Start $serena.start -End $serena.end)
+    if ($commandIndices.Count -gt 1) { throw "Serena command 最多出现一次；实际 $($commandIndices.Count)" }
+    if ($argsIndices.Count -gt 1) { throw "Serena args 最多出现一次；实际 $($argsIndices.Count)" }
+    $canonicalCommandLiteral = '"D:\\Codex\\.codex\\scripts\\start-serena-mcp.cmd"'
+    $canonicalArgsLiteral = ConvertTo-Json -InputObject @("start-mcp-server", "--context=$ExpectedSerenaContextPath", "--enable-web-dashboard=true", "--open-web-dashboard=false") -Compress
+    if ($commandIndices.Count -eq 0 -or $argsIndices.Count -eq 0) {
+        $insertLines = [System.Collections.Generic.List[string]]::new()
+        if ($commandIndices.Count -eq 0) { [void]$insertLines.Add("command = $canonicalCommandLiteral") }
+        if ($argsIndices.Count -eq 0) { [void]$insertLines.Add("args = $canonicalArgsLiteral") }
+        $rebuilt = [System.Collections.Generic.List[string]]::new()
+        for ($index = 0; $index -lt $document.lines.Count; $index++) {
+            if ($index -eq $serena.start) { foreach ($line in $insertLines) { [void]$rebuilt.Add($line) } }
+            [void]$rebuilt.Add($document.lines[$index])
+        }
+        if ($serena.start -eq $document.lines.Count) {
+            foreach ($line in $insertLines) { [void]$rebuilt.Add($line) }
+        }
+        $insertedContent = [string]::Join($document.newLine, $rebuilt)
+        if ($insertedContent.Equals($Content, [System.StringComparison]::Ordinal)) {
+            throw "Serena command/args 缺失插入未取得进展"
+        }
+        Assert-ValidToml -Content $insertedContent
+        $normalizedAfterInsert = Get-DesiredConfig -Content $insertedContent -ExpectedSerenaContextPath $ExpectedSerenaContextPath
+        return [pscustomobject]@{
+            content = [string]$normalizedAfterInsert.content
+            changed = -not $Content.Equals([string]$normalizedAfterInsert.content, [System.StringComparison]::Ordinal)
+        }
+    }
+
+    $commandIndex = $commandIndices[0]
+    Set-TomlKeyLiteral -Document $document -Index $commandIndex -Key "command" -Literal $canonicalCommandLiteral
+    $argsIndex = $argsIndices[0]
     $argsLine = $document.lines[$argsIndex]
     $equalsIndex = $argsLine.IndexOf('=')
     if ($equalsIndex -lt 0) {
@@ -974,6 +1039,10 @@ function Test-ProtectedAcl {
 function Set-ProtectedAcl {
     param([string]$Path)
 
+    if ($null -ne $script:FixtureForbiddenAclPath -and $Path.Equals($script:FixtureForbiddenAclPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "fixture-only retired path ACL mutation forbidden"
+    }
+
     if ((Test-ProtectedAcl -Path $Path).ok) {
         return
     }
@@ -1035,44 +1104,97 @@ function Set-ProtectedAcl {
     Set-Acl -LiteralPath $Path -AclObject $security
 }
 
-function Test-SerenaContextPolicy {
+function Get-DesiredSerenaContext {
     param([string]$Content)
 
-    $lines = [regex]::Split($Content, "\r?\n")
-    $promptKeys = @(
-        for ($index = 0; $index -lt $lines.Count; $index++) {
-            if ($lines[$index] -match '^(?:prompt|"prompt"|''prompt'')\s*:') {
-                $index
-            }
+    if ($Content.Contains("`t", [System.StringComparison]::Ordinal)) { throw "Serena context 不允许 tab" }
+    if ($Content -match "`r(?!`n)") { throw "Serena context 不允许非 CRLF 的裸 CR" }
+    $lineMatches = @([regex]::Matches($Content, '(?m)^(?<text>[^\r\n]*)(?<eol>\r\n|\n|\r|$)') | Where-Object { $_.Length -gt 0 })
+    if ($lineMatches.Count -eq 0) { throw "Serena context 不能为空" }
+    $coveredOffset = 0
+    foreach ($lineMatch in $lineMatches) {
+        if ($lineMatch.Index -ne $coveredOffset) { throw "Serena context 行扫描存在未覆盖字符" }
+        $coveredOffset += $lineMatch.Length
+    }
+    if ($coveredOffset -ne $Content.Length) { throw "Serena context 行扫描未覆盖输入全长" }
+    $keys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $promptHeaderIndex = -1
+    $collectionKey = $null
+    $collectionItemCount = 0
+    $inPrompt = $false
+    for ($index = 0; $index -lt $lineMatches.Count; $index++) {
+        $line = $lineMatches[$index].Groups['text'].Value
+        if ($inPrompt) {
+            if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith("  ", [System.StringComparison]::Ordinal)) { continue }
+            $inPrompt = $false
         }
-    )
-    $promptHeaders = @(
-        for ($index = 0; $index -lt $lines.Count; $index++) {
-            if ($lines[$index] -match '^prompt\s*:\s*\|\s*(?:#.*)?$') {
-                $index
-            }
+        if ([string]::IsNullOrWhiteSpace($line) -or $line -match '^\s*#') { continue }
+        if ($line -match '^(?:%|---\s*$|\.\.\.\s*$)' -or $line -match '(^|\s)(?:&|\*|!|<<:)') {
+            throw "Serena context 包含不受支持的 YAML directive、document marker、anchor、alias 或 tag"
         }
+        if ($line.StartsWith("  - ", [System.StringComparison]::Ordinal)) {
+            if ($null -eq $collectionKey) { throw "Serena context 顶层外出现孤立 list item" }
+            $item = $line.Substring(4).Trim()
+            if ($item -notmatch '^[A-Za-z0-9_.-]+$') { throw "Serena context list 只允许无引号 allowlist scalar" }
+            $collectionItemCount++
+            continue
+        }
+        if ($line.StartsWith(" ", [System.StringComparison]::Ordinal)) { throw "Serena context 包含未知或错误缩进" }
+        if ($null -ne $collectionKey -and $collectionItemCount -eq 0) { throw "Serena context 空 value 必须至少包含一个 list item：$collectionKey" }
+        $collectionKey = $null
+        $collectionItemCount = 0
+        $match = [regex]::Match($line, '^(?<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(?<value>.*)$')
+        if (-not $match.Success) { throw "Serena context 只允许顶层唯一 mapping" }
+        $key = $match.Groups['key'].Value
+        if (-not $keys.Add($key)) { throw "Serena context 顶层 key 重复：$key" }
+        $value = $match.Groups['value'].Value
+        if ($key -ceq 'prompt') {
+            if ($value -notmatch '^\|\s*(?:#.*)?$') { throw "Serena prompt 必须是 literal block" }
+            $promptHeaderIndex = $index
+            $inPrompt = $true
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace($value)) { $collectionKey = $key; $collectionItemCount = 0; continue }
+        if ($value.Trim() -ceq '{}') { continue }
+        if ($value -notmatch '^[A-Za-z0-9_./ -]+$') { throw "Serena context scalar 必须属于无引号 allowlist 子集" }
+    }
+    if ($null -ne $collectionKey -and $collectionItemCount -eq 0) { throw "Serena context 空 value 必须至少包含一个 list item：$collectionKey" }
+    if ($promptHeaderIndex -lt 0) { throw "Serena context 缺少唯一根级 prompt literal block" }
+
+    $promptEndIndex = $lineMatches.Count
+    $promptLogicalLines = [System.Collections.Generic.List[string]]::new()
+    for ($index = $promptHeaderIndex + 1; $index -lt $lineMatches.Count; $index++) {
+        $line = $lineMatches[$index].Groups['text'].Value
+        if (-not [string]::IsNullOrWhiteSpace($line) -and -not $line.StartsWith("  ", [System.StringComparison]::Ordinal)) { $promptEndIndex = $index; break }
+        if ($line.StartsWith("  ", [System.StringComparison]::Ordinal)) { $promptLogicalLines.Add($line.Substring(2)) } else { $promptLogicalLines.Add("") }
+    }
+    $marker = '[codex-serena-activation-policy:v1 mandatory]'
+    $globalMarkerCount = [regex]::Matches($Content, [regex]::Escape($marker)).Count
+    $promptMarkerCount = [regex]::Matches(($promptLogicalLines -join "`n"), [regex]::Escape($marker)).Count
+    if ($globalMarkerCount -gt 1) { throw "Serena context canonical mandatory marker 重复" }
+    if ($globalMarkerCount -ne $promptMarkerCount) { throw "Serena context canonical mandatory marker 不得出现在 prompt 外" }
+    $canonicalLogicalLines = @(
+        $marker,
+        "Codex owns shell execution; Serena provides project-scoped semantic tools.",
+        "Before using any project-scoped Serena tool in a repository task, explicitly",
+        "call activate_project with the absolute current workspace or repository root",
+        "from Codex's environment_context, then verify the result with",
+        "get_current_config. Never infer the task project from Serena's initial active",
+        "project or from the Serena process working directory."
     )
-    if ($promptKeys.Count -ne 1 -or $promptHeaders.Count -ne 1 -or $promptKeys[0] -ne $promptHeaders[0]) {
-        return $false
+    if (($promptLogicalLines -join "`n") -ceq ($canonicalLogicalLines -join "`n")) {
+        return [pscustomobject]@{ content = $Content; changed = $false }
     }
 
-    $promptLines = [System.Collections.Generic.List[string]]::new()
-    for ($index = $promptHeaders[0] + 1; $index -lt $lines.Count; $index++) {
-        $line = $lines[$index]
-        if (-not [string]::IsNullOrWhiteSpace($line) -and -not $line.StartsWith("  ", [System.StringComparison]::Ordinal)) {
-            break
-        }
-        if ($line.StartsWith("  ", [System.StringComparison]::Ordinal)) {
-            $promptLines.Add($line.Substring(2))
-        } else {
-            $promptLines.Add("")
-        }
-    }
-
-    $normalizedPrompt = [regex]::Replace(($promptLines -join "`n"), '\s+', ' ').Trim()
-    $requiredPolicy = "Before using any project-scoped Serena tool in a repository task, explicitly call activate_project with the absolute current workspace or repository root from Codex's environment_context, then verify the result with get_current_config. Never infer the task project from Serena's initial active project or from the Serena process working directory."
-    $normalizedPrompt.Contains($requiredPolicy, [System.StringComparison]::Ordinal)
+    $promptBodyStartOffset = $lineMatches[$promptHeaderIndex].Index + $lineMatches[$promptHeaderIndex].Length
+    $promptEndOffset = if ($promptEndIndex -lt $lineMatches.Count) { $lineMatches[$promptEndIndex].Index } else { $Content.Length }
+    $newLine = $lineMatches[$promptHeaderIndex].Groups['eol'].Value
+    if ([string]::IsNullOrEmpty($newLine)) { $newLine = "`n" }
+    $replacement = (@($canonicalLogicalLines | ForEach-Object { "  $_" }) -join $newLine)
+    $promptBodyHadTrailingNewLine = $promptEndOffset -gt $promptBodyStartOffset -and $Content[$promptEndOffset - 1] -in @("`n", "`r")
+    if ($promptBodyHadTrailingNewLine -or $promptEndOffset -lt $Content.Length) { $replacement += $newLine }
+    $desired = $Content.Remove($promptBodyStartOffset, $promptEndOffset - $promptBodyStartOffset).Insert($promptBodyStartOffset, $replacement)
+    [pscustomobject]@{ content = $desired; changed = $true }
 }
 
 function Get-ReconciliationState {
@@ -1090,9 +1212,7 @@ function Get-ReconciliationState {
     $configContent = Read-Text -Path $configPath
     $hooksContent = Read-Text -Path $hooksPath
     $serenaContextContent = Read-Text -Path $serenaContextPath
-    if (-not (Test-SerenaContextPolicy -Content $serenaContextContent)) {
-        throw "Serena context 缺少受控的显式项目激活与复验契约"
-    }
+    $desiredSerenaContext = Get-DesiredSerenaContext -Content $serenaContextContent
     $desiredConfig = Get-DesiredConfig -Content $configContent -ExpectedSerenaContextPath $serenaContextPath
     $desiredHooks = Get-DesiredHooksJson -Content $hooksContent
     $legacyPresent = @($script:LegacyHookNames | Where-Object {
@@ -1127,6 +1247,7 @@ function Get-ReconciliationState {
     )
 
     $checks = @(
+        [pscustomobject]@{ name = "serenaContext"; ok = -not $desiredSerenaContext.changed },
         [pscustomobject]@{ name = "config"; ok = -not $desiredConfig.changed },
         [pscustomobject]@{ name = "registrations"; ok = -not $desiredHooks.changed },
         [pscustomobject]@{ name = "legacyImplementations"; ok = $legacyPresent.Count -eq 0 -and $legacyDirectoriesPresent.Count -eq 0; presentCount = $legacyPresent.Count + $legacyDirectoriesPresent.Count },
@@ -1141,6 +1262,7 @@ function Get-ReconciliationState {
         serenaContextDirectory = $serenaContextDirectory
         serenaContextPath = $serenaContextPath
         serenaContextContent = $serenaContextContent
+        desiredSerenaContext = $desiredSerenaContext
         hookTreePaths = @($hookTree | ForEach-Object { $_.FullName })
         preservedHookTree = $preservedHookTree
         configContent = $configContent
@@ -1255,6 +1377,7 @@ function New-EvidenceSnapshot {
         }
         preservedHookTree = @($State.preservedHookTree)
         intendedResources = [ordered]@{
+            "codex-file-tools.yml" = if ($State.desiredSerenaContext.changed) { Get-TextSha256 -Content $State.desiredSerenaContext.content } else { $null }
             "config.toml" = if ($State.desiredConfig.changed) { Get-TextSha256 -Content $State.desiredConfig.content } else { $null }
             "hooks.json" = if ($State.desiredHooks.changed) { Get-TextSha256 -Content $State.desiredHooks.content } else { $null }
         }
@@ -1288,6 +1411,7 @@ function Invoke-Repair {
 
     $originalConfigAcl = Get-Acl -LiteralPath $InitialState.configPath
     $originalHooksAcl = Get-Acl -LiteralPath $InitialState.hooksPath
+    $originalSerenaContextAcl = Get-Acl -LiteralPath $InitialState.serenaContextPath
     $snapshot = New-EvidenceSnapshot -ResolvedCodexHome $ResolvedCodexHome -State $InitialState
     $manifest = $snapshot.manifest
     $committed = [System.Collections.Generic.List[string]]::new()
@@ -1296,6 +1420,24 @@ function Invoke-Repair {
     try {
         $manifest.status = "applying"
         Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
+        if ($InitialState.desiredSerenaContext.changed) {
+            if ((Get-Sha256 -Path $InitialState.serenaContextPath) -ne $manifest.originalHashes["codex-file-tools.yml"]) {
+                throw "codex-file-tools.yml 在修复前置校验后发生并发变化"
+            }
+            $attempted.Add("codex-file-tools.yml") | Out-Null
+            $manifest.attemptedResources = @($attempted)
+            Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
+            Write-AtomicText `
+                -Path $InitialState.serenaContextPath `
+                -Content $InitialState.desiredSerenaContext.content `
+                -ExpectedCurrentSha256 $manifest.originalHashes["codex-file-tools.yml"] `
+                -ExpectedCurrentSddl $originalSerenaContextAcl.Sddl
+            $validatedSerenaContext = Get-DesiredSerenaContext -Content (Read-Text -Path $InitialState.serenaContextPath)
+            if ($validatedSerenaContext.changed) { throw "codex-file-tools.yml 原子替换后未通过自验证" }
+            $committed.Add("codex-file-tools.yml")
+            $manifest.committedResources = $committed.ToArray()
+            Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
+        }
         if ($InitialState.desiredConfig.changed) {
             if ((Get-Sha256 -Path $InitialState.configPath) -ne $manifest.originalHashes["config.toml"]) {
                 throw "config.toml 在修复前置校验后发生并发变化"
@@ -1346,6 +1488,26 @@ function Invoke-Repair {
         $concurrentReplace = Get-ConcurrentReplaceRecord -Exception $failure.Exception
         $concurrentReplacePath = if ($null -eq $concurrentReplace) { "" } else { $concurrentReplace.path }
         $manifest.concurrentReplace = $concurrentReplace
+        if ($attempted.Contains("codex-file-tools.yml") -and -not $concurrentReplacePath.Equals($InitialState.serenaContextPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            try {
+                $currentSerenaContext = Read-Text -Path $InitialState.serenaContextPath
+                if ($currentSerenaContext.Equals($InitialState.desiredSerenaContext.content, [System.StringComparison]::Ordinal)) {
+                    Write-AtomicText `
+                        -Path $InitialState.serenaContextPath `
+                        -Content $InitialState.serenaContextContent `
+                        -ExpectedCurrentSha256 $manifest.intendedResources["codex-file-tools.yml"] `
+                        -ExpectedCurrentSddl $originalSerenaContextAcl.Sddl
+                } elseif (-not $currentSerenaContext.Equals($InitialState.serenaContextContent, [System.StringComparison]::Ordinal)) {
+                    throw "检测到非本次 Repair 写入的并发内容，拒绝覆盖"
+                }
+            } catch {
+                $rollbackConcurrent = Get-ConcurrentReplaceRecord -Exception $_.Exception
+                if ($null -ne $rollbackConcurrent) { $manifest.rollbackConcurrentReplaces = @($manifest.rollbackConcurrentReplaces) + @($rollbackConcurrent) }
+                $rollbackErrors.Add("codex-file-tools.yml: $($_.Exception.Message)")
+            }
+        } elseif ($attempted.Contains("codex-file-tools.yml")) {
+            $rollbackErrors.Add("codex-file-tools.yml: 并发版本已保留，拒绝用旧快照覆盖")
+        }
         if ($attempted.Contains("config.toml") -and -not $concurrentReplacePath.Equals($InitialState.configPath, [System.StringComparison]::OrdinalIgnoreCase)) {
             try {
                 $currentConfig = Read-Text -Path $InitialState.configPath
@@ -1404,18 +1566,25 @@ function Invoke-Repair {
     }
 
     try {
+        $postCommitSerenaContext = Get-DesiredSerenaContext -Content (Read-Text -Path $InitialState.serenaContextPath)
         $postCommitConfig = Get-DesiredConfig -Content (Read-Text -Path $InitialState.configPath) -ExpectedSerenaContextPath $InitialState.serenaContextPath
         $postCommitHooks = Get-DesiredHooksJson -Content (Read-Text -Path $InitialState.hooksPath)
-        if ($postCommitConfig.changed -or $postCommitHooks.changed) {
-            throw "两文件提交完成后目标状态被并发改写"
+        if ($postCommitSerenaContext.changed -or $postCommitConfig.changed -or $postCommitHooks.changed) {
+            throw "三资源提交完成后目标状态被并发改写"
         }
 
+        $retiredPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($name in $InitialState.legacyPresent) { [void]$retiredPathSet.Add((Join-Path $InitialState.hookDirectory $name)) }
+        foreach ($name in $InitialState.legacyDirectoriesPresent) { [void]$retiredPathSet.Add((Join-Path $InitialState.hookDirectory $name)) }
         $aclTargets = @(
             $InitialState.hooksPath,
             $InitialState.serenaContextPath,
             $InitialState.hookDirectory
         ) + @(
-            Get-ChildItem -LiteralPath $InitialState.hookDirectory -Recurse -Force | ForEach-Object { $_.FullName }
+            Get-ChildItem -LiteralPath $InitialState.hookDirectory -Recurse -Force | Where-Object {
+                $candidate = $_.FullName
+                -not $retiredPathSet.Contains($candidate)
+            } | ForEach-Object { $_.FullName }
         )
         $aclApplied = [System.Collections.Generic.List[string]]::new()
         foreach ($path in $aclTargets) {

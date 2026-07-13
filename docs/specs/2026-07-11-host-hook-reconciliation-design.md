@@ -1,6 +1,8 @@
 # Codex 主机钩子 reconciler 设计
 
-本项目用 `scripts/Invoke-CodexHostHookReconciliation.ps1` 检查并收敛 Codex 主机钩子状态。它是显式调用的冷路径维护工具，不注册 watcher、计划任务或新的启动 hook，也不占用每个任务的生命周期热路径。
+本项目用 `scripts/Invoke-CodexHostHookReconciliation.ps1` 检查并收敛 Codex 主机钩子状态。它是唯一当前生产权威，也是显式调用的冷路径维护工具；不注册 watcher、计划任务或新的启动 hook，也不占用每个任务的生命周期热路径。
+
+旧 `New-CodexHookDeploymentPlan.ps1`、`Invoke-CodexHookDeployment.ps1`、`Restore-CodexHookDeployment.ps1` 的 ProductionFull / registration-repair 参数集只为兼容调用者而保留，参数绑定后立即返回 `superseded-by-host-hook-reconciler`，不会加载旧 production runtime、读取 live 状态、生成报告或写入文件。对应 fixture/core 只作为历史算法测试材料，不是生产入口。
 
 ## 目标状态
 
@@ -36,15 +38,15 @@ reconciler 只维护以下状态：
 - `config.toml` 中的 Serena 项目选择参数、正式权限默认值、`hooks` 与 `unified_exec` feature，以及失效的用户级 hook trust state；
 - `hooks.json` 中的用户级 lifecycle hook 注册；
 - 明确 allowlist 内的旧 hook implementation；
-- 稳定 hook surface 与目标 `codex-file-tools.yml` 文件的写权限。
+- 稳定 hook surface；目标 `codex-file-tools.yml` 的写权限，以及其唯一根级 prompt。协调器完整拥有该 prompt block：健康状态必须逐行精确等于唯一 canonical block（mandatory marker、Codex/Serena shell ownership、按当前绝对 workspace 执行 `activate_project` 并以 `get_current_config` 复验）；不健康时只按原始字符偏移替换 prompt body。description、tool lists、其他顶层字段、prompt 外原始字节、混合换行和 sibling context 保持不变；重复/外部 marker、引号或转义 scalar、错误缩进、folded/重复/歧义 prompt 继续 fail closed。
 
 `config.toml` 是 Codex Desktop 可原子替换的 vendor-owned 文件。工具维护其列明字段的语义，但不把该文件或整个 Codex home 的 ACL 当作持久安全边界，也不改写无关 vendor state、Serena sibling context 或其他主机 guard。
 
 ## 修复保证
 
 - 所有路径必须位于 D 盘，且受管路径不得穿过 reparse point；受管文件不得是 NTFS hard link。
-- TOML 固定由 `D:\Codex\tools\python314-official\python.exe`（ProductVersion 3.14、PSF 签名）及其标准库 `tomllib` 做完整语法验证，再由定向 parser 识别受管 section/key，生成结果也必须在写前复验；输入、输出与进程退出共用 5 秒截止时间。runtime 根、必要 DLL 与 `Lib\tomllib` 源文件不得经过 reparse point 或 hard link；`-B` 配合唯一且确认不存在的 D 盘 `pycache_prefix`，强制从已检查源码加载且不生成 bytecode cache。启动器签名不是标准库内容证明，验证器继承现有 `D:\Codex\tools` runtime 的主机信任边界。JSON 在写入前严格解析。Serena context 定向验证唯一根级 prompt 及完整激活契约。验证器缺失、重复或语义等价的关键 section/key、歧义 prompt、越界 context 都会 fail closed。
-- 写入前保存受保护 evidence，随后使用同卷临时文件、原子替换、内容与 ACL 的 CAS 校验完成提交。
+- TOML 固定由 `D:\Codex\tools\python314-official\python.exe`（ProductVersion 3.14、PSF 签名）及其标准库 `tomllib` 做完整语法验证，再由定向 parser 识别受管 section/key，生成结果也必须在写前复验；输入、输出与进程退出共用 5 秒截止时间。runtime 根、必要 DLL 与 `Lib\tomllib` 源文件不得经过 reparse point 或 hard link；`-B` 配合唯一且确认不存在的 D 盘 `pycache_prefix`，强制从已检查源码加载且不生成 bytecode cache。启动器签名不是标准库内容证明，验证器继承现有 `D:\Codex\tools` runtime 的主机信任边界。JSON 在写入前严格解析。Serena context 使用仓库内可审计的受限 YAML 验证器，只接受唯一顶层 mapping、无引号简单 scalar/list、`{}` 空 mapping 和唯一 literal prompt；tab、重复 key、引号、反斜杠转义、未知标点/缩进、anchor/alias/tag/directive/document marker 均 fail closed。生成结果必须再次通过同一验证器与 canonical prompt 精确比较。
+- 写入前保存受保护 evidence，随后按 Serena context → `config.toml` → `hooks.json` 的顺序，使用同卷临时文件、原子替换、内容与 ACL 的 CAS 校验完成三资源提交。
 - 并发替换或文件提交、ACL 加固、legacy 退役中的不安全部分提交不会用旧 snapshot 覆盖较新 active state；可定位 backup 和 manifest 会被保留，状态按 `unsafe-partial` 报告。
 - 只有固定 allowlist 内的旧实现可以退役；未知路径与文件内容必须保持不变，其 ACL 可随稳定 hook surface 收紧。
 - `Repair` 按 Codex home 获取互斥锁；健康状态再次执行必须返回 `changed = false`。
