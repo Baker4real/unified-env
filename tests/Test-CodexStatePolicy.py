@@ -62,6 +62,18 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.backup_root = self.root / "backups"
         self.sqlite_snapshot_root = self.root / "sqlite-snapshots"
 
+    def write_permission_config(
+        self,
+        *,
+        approval_policy: str = "never",
+        sandbox_mode: str = "danger-full-access",
+    ) -> None:
+        (self.codex_home / "config.toml").write_text(
+            f'approval_policy = "{approval_policy}"\n'
+            f'sandbox_mode = "{sandbox_mode}"\n',
+            encoding="utf-8",
+        )
+
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
 
@@ -145,6 +157,135 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertEqual(summary["pathChangedCount"], 2)
         self.assertEqual(summary["heartbeatChangedCount"], 1)
         self.assertNotIn("redacted-a", json.dumps(summary))
+
+    def test_permission_policy_resolves_from_controlled_config(self) -> None:
+        self.write_permission_config(approval_policy="on-request", sandbox_mode="workspace-write")
+
+        policy = self.module.resolve_permission_policy(self.codex_home)
+
+        self.assertEqual(policy.approval_policy, "on-request")
+        self.assertEqual(policy.sandbox_mode, "workspace-write")
+        self.assertEqual(policy.heartbeat_sandbox_type, "workspaceWrite")
+        self.assertEqual(policy.sqlite_sandbox_policy, '{"type":"workspace-write"}')
+
+    def test_permission_policy_missing_fails_closed(self) -> None:
+        with self.assertRaisesRegex(self.module.StatePolicyError, "permission policy"):
+            self.module.resolve_permission_policy(self.codex_home)
+
+    def test_permission_policy_conflict_fails_closed(self) -> None:
+        self.write_permission_config()
+        (self.codex_home / "policy.json").write_text(
+            json.dumps(
+                {
+                    "approvalPolicy": "on-request",
+                    "sandboxPolicy": {"type": "workspaceWrite"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(self.module.StatePolicyError, "conflict"):
+            self.module.resolve_permission_policy(self.codex_home)
+
+    def test_heartbeat_and_sqlite_use_resolved_permission_policy(self) -> None:
+        self.write_permission_config(approval_policy="on-request", sandbox_mode="workspace-write")
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        state = {
+            "electron-persisted-atom-state": {
+                "heartbeat-thread-permissions-by-id": {
+                    "target": {
+                        "approvalPolicy": "never",
+                        "sandboxPolicy": {"type": "dangerFullAccess"},
+                    }
+                }
+            }
+        }
+
+        normalized, summary = self.module.normalize_global_state(
+            state,
+            permission_policy=policy,
+            path_mode="inventory",
+        )
+
+        heartbeat = normalized["electron-persisted-atom-state"][
+            "heartbeat-thread-permissions-by-id"
+        ]["target"]
+        self.assertEqual(heartbeat["approvalPolicy"], "on-request")
+        self.assertEqual(heartbeat["sandboxPolicy"], {"type": "workspaceWrite"})
+        self.assertEqual(summary["heartbeatChangedCount"], 1)
+
+        connection = self.create_db()
+        connection.close()
+        result = self.module.update_thread_state(
+            self.db_path,
+            permission_policy=policy,
+        )
+        self.assertEqual(result["changedCount"], 2)
+        verify = sqlite3.connect(self.db_path)
+        row = verify.execute(
+            "select approval_mode,sandbox_policy from threads where id='target-a'"
+        ).fetchone()
+        verify.close()
+        self.assertEqual(row, ("on-request", '{"type":"workspace-write"}'))
+
+    def test_unresolved_path_preserves_bytes_and_remains_drift(self) -> None:
+        self.write_permission_config()
+        original = self.write_global(
+            {
+                "thread-workspace-root-hints": {
+                    "missing": r"C:\Users\WINDOWS\Documents\Codex\missing"
+                }
+            }
+        )
+        policy = self.module.resolve_permission_policy(self.codex_home)
+
+        result = self.module.update_global_state(
+            self.global_path,
+            self.backup_root,
+            permission_policy=policy,
+            path_mode="repair-safe-only",
+            approved_map={"thread-workspace-root-hints": {"missing": r"D:\Documents\Codex\missing"}},
+        )
+
+        self.assertFalse(result["changed"])
+        self.assertGreater(result["driftCount"], 0)
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_safe_path_requires_explicit_approved_map(self) -> None:
+        self.write_permission_config()
+        candidate_root = self.root / "canonical"
+        candidate = candidate_root / "safe"
+        candidate.mkdir(parents=True)
+        state = {
+            "thread-workspace-root-hints": {
+                "safe": r"C:\Users\WINDOWS\Documents\Codex\safe"
+            }
+        }
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        with mock.patch.object(self.module, "CANONICAL_CANDIDATE_ROOT", self.module.PureWindowsPath(str(candidate_root))):
+            self.write_global(state)
+            no_approval = self.module.update_global_state(
+                self.global_path,
+                self.backup_root,
+                permission_policy=policy,
+                path_mode="repair-safe-only",
+            )
+            self.assertFalse(no_approval["changed"])
+            self.assertGreater(no_approval["driftCount"], 0)
+            approved = self.module.update_global_state(
+                self.global_path,
+                self.backup_root,
+                permission_policy=policy,
+                path_mode="repair-safe-only",
+                approved_map={
+                    "thread-workspace-root-hints": {"safe": str(candidate)}
+                },
+            )
+        self.assertTrue(approved["changed"])
+        self.assertEqual(
+            json.loads(self.global_path.read_text(encoding="utf-8"))["thread-workspace-root-hints"]["safe"],
+            str(candidate),
+        )
 
     def test_select_thread_updates_preserves_unknown_rows(self) -> None:
         conn = self.create_db()
