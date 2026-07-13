@@ -76,8 +76,9 @@ check('canonical flows must own worktrees and remove them in a safe order', () =
     assert.match(text, /(?:其他|other).*(?:worktree).*(?:报告|停止|stop|保留)/is);
     assert.match(text, /remote deletion failed|远端删除失败/i);
     assert.match(text, /(?:保留|preserve).*(?:local|本地).*(?:worktree|工作树)/is);
+    const lifecycle = sectionBetween(text, /受控临时分支|历史引用和回滚/i, /完成门槛|阶段性完成证明/i);
     assertOrdered(
-      text,
+      lifecycle,
       [
         /git\s+push[^\n]*--delete/i,
         /git\s+worktree\s+remove/i,
@@ -88,6 +89,27 @@ check('canonical flows must own worktrees and remove them in a safe order', () =
     );
     const direct = sectionBetween(text, /直接 default branch 发布|默认发布路径/i, /受控临时分支|受控临时 worktree|临时分支生命周期|临时分支清理/i);
     assert.doesNotMatch(direct, /git\s+worktree\s+(?:add|remove)/i);
+    const directPushIndex = direct.search(/git\s+push(?![^\n]*--delete)/i);
+    const directFetchIndex = direct.search(/git\s+fetch\s+--prune/i);
+    assert.ok(directPushIndex >= 0, `${name}: direct path must push default branch`);
+    assert.ok(directFetchIndex > directPushIndex, `${name}: direct fetch --prune must follow push`);
+    assert.match(direct, /git\s+rev-parse\s+HEAD/i);
+    assert.match(direct, /git\s+rev-parse\s+(?:<targetRemote>|private)\/<defaultBranch>/i);
+    assert.match(direct, /git\s+branch\s+-vv/i);
+  }
+});
+
+check('canonical temporary branches must publish with tracking before confirmation cleanup', () => {
+  for (const [name, text] of [
+    ['closeout reference', closeoutReference.text],
+    ['private compatibility flow', privateStack.text],
+  ]) {
+    const tracking = /git\s+push\s+--set-upstream\s+<targetRemote>\s+<temporaryBranch>/i;
+    const remoteDelete = /git\s+push[^\n]*--delete/i;
+    assert.match(text, tracking);
+    const trackingIndex = text.search(tracking);
+    const remoteDeleteIndex = text.search(remoteDelete);
+    assert.ok(remoteDeleteIndex > trackingIndex, `${name}: remote cleanup must follow tracked temp publish`);
   }
 });
 
