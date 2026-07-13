@@ -246,6 +246,7 @@ class SqliteSourceSnapshot:
         tuple[bool, int | None, int | None, tuple[int, int] | None],
         tuple[bool, int | None, int | None, tuple[int, int] | None],
     ]
+    content_known: tuple[bool, bool, bool, bool] = (True, True, True, True)
 
     def __iter__(self):
         # Preserve the old unpacking contract for snapshot fixture code.
@@ -2098,6 +2099,22 @@ def update_global_state(
                 or published_identity != replacement_identity
             ):
                 raise StatePolicyError("global state postwrite verification failed")
+            try:
+                _assert_permission_policy_fingerprint(permission_policy)
+            except StatePolicyError as policy_exc:
+                rolled_back = _restore_global_state_snapshot(
+                    path,
+                    original,
+                    expected_hash=_sha256(published),
+                    expected_identity=published_identity,
+                )
+                if rolled_back:
+                    raise StatePolicyError(
+                        "permission policy changed after global publish; state rolled back"
+                    ) from policy_exc
+                raise StatePolicyError(
+                    "permission policy changed after global publish; rollback failed"
+                ) from policy_exc
             published_state = _strict_json_loads(published)
             published_inventory = build_path_inventory(
                 published_state,
@@ -2169,6 +2186,100 @@ def select_thread_updates(
     ]
 
 
+def _capture_thread_rows(
+    conn: sqlite3.Connection,
+    thread_ids: list[str],
+) -> dict[str, tuple[str | None, str | None]]:
+    if not thread_ids:
+        return {}
+    placeholders = ",".join("?" for _ in thread_ids)
+    rows = conn.execute(
+        f"select id, approval_mode, sandbox_policy from threads where id in ({placeholders})",
+        tuple(thread_ids),
+    ).fetchall()
+    captured: dict[str, tuple[str | None, str | None]] = {}
+    for row in rows:
+        if len(row) < 3 or not isinstance(row[0], str):
+            raise StatePolicyError("thread state row snapshot is malformed")
+        if (not isinstance(row[1], str) and row[1] is not None) or (
+            not isinstance(row[2], str) and row[2] is not None
+        ):
+            raise StatePolicyError("thread state row snapshot is malformed")
+        captured[row[0]] = (row[1], row[2])
+    if len(captured) != len(thread_ids):
+        raise StatePolicyError("thread state row disappeared during update")
+    return captured
+
+
+def _rollback_thread_rows_after_policy_change(
+    conn: sqlite3.Connection,
+    path: Path,
+    source_identity: tuple[int, int],
+    original_rows: dict[str, tuple[str | None, str | None]],
+    permission_policy: PermissionPolicy,
+) -> bool:
+    """Reverse a committed update only when every row still matches its CAS value."""
+    if not original_rows:
+        return True
+    expected_new = (
+        permission_policy.approval_policy,
+        permission_policy.sqlite_sandbox_policy,
+    )
+    try:
+        if _file_handle_identity(path) != source_identity:
+            return False
+        conn.execute("begin immediate")
+        for thread_id, original in original_rows.items():
+            current = conn.execute(
+                "select approval_mode, sandbox_policy from threads where id=?",
+                (thread_id,),
+            ).fetchone()
+            if current is None:
+                conn.rollback()
+                return False
+            current_values = (current[0], current[1])
+            if current_values == original:
+                continue
+            if current_values != expected_new:
+                conn.rollback()
+                return False
+            changed = conn.execute(
+                """
+                update threads
+                set approval_mode=?, sandbox_policy=?
+                where id=? and approval_mode=? and sandbox_policy=?
+                """,
+                (
+                    original[0],
+                    original[1],
+                    thread_id,
+                    expected_new[0],
+                    expected_new[1],
+                ),
+            )
+            if changed.rowcount != 1:
+                conn.rollback()
+                return False
+        if _file_handle_identity(path) != source_identity:
+            conn.rollback()
+            return False
+        conn.commit()
+        for thread_id, original in original_rows.items():
+            current = conn.execute(
+                "select approval_mode, sandbox_policy from threads where id=?",
+                (thread_id,),
+            ).fetchone()
+            if current is None or (current[0], current[1]) != original:
+                return False
+        return True
+    except (OSError, sqlite3.Error, StatePolicyError):
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        return False
+
+
 def _capture_sqlite_source(path: Path) -> SqliteSourceSnapshot:
     paths = (
         path,
@@ -2179,16 +2290,29 @@ def _capture_sqlite_source(path: Path) -> SqliteSourceSnapshot:
     payload: list[bytes | None] = []
     identities: list[tuple[int, int] | None] = []
     metadata: list[tuple[bool, int | None, int | None, tuple[int, int] | None]] = []
+    content_known: list[bool] = []
     try:
-        for candidate in paths:
+        for index, candidate in enumerate(paths):
             _assert_check_only_d_path_without_reparse(candidate, name="thread state source")
             exists = candidate.exists()
             if not exists:
                 payload.append(None)
                 identities.append(None)
                 metadata.append((False, None, None, _file_handle_identity(candidate.parent)))
+                content_known.append(True)
                 continue
-            raw = candidate.read_bytes()
+            try:
+                raw = candidate.read_bytes()
+                known = True
+            except PermissionError:
+                if index == 0:
+                    raise
+                # SQLite may hold -wal/-shm/-journal with a sharing mode that
+                # denies a second byte reader.  Keep the generation anchored
+                # by identity and metadata; a byte comparison is unavailable
+                # but must not turn a valid WAL writer into a false busy error.
+                raw = None
+                known = False
             identity = _file_handle_identity(candidate)
             if identity is None:
                 raise StatePolicyError("thread state source identity unavailable")
@@ -2197,12 +2321,14 @@ def _capture_sqlite_source(path: Path) -> SqliteSourceSnapshot:
             payload.append(raw)
             identities.append(identity)
             metadata.append((True, int(stat.st_size), int(stat.st_mtime_ns), parent_identity))
+            content_known.append(known)
     except OSError as exc:
         raise StatePolicyError("thread state source snapshot is busy") from exc
     return SqliteSourceSnapshot(
         payload=(payload[0], payload[1], payload[2], payload[3]),
         identities=(identities[0], identities[1], identities[2], identities[3]),
         metadata=(metadata[0], metadata[1], metadata[2], metadata[3]),
+        content_known=(content_known[0], content_known[1], content_known[2], content_known[3]),
     )
 
 
@@ -2251,7 +2377,11 @@ def _assert_sqlite_snapshot_identity(
         if expected is not None and check_sidecar_content:
             if before.metadata[index] != after.metadata[index]:
                 raise StatePolicyError("thread state sidecar metadata changed concurrently")
-            if before.payload[index] != after.payload[index]:
+            if (
+                before.content_known[index]
+                and after.content_known[index]
+                and before.payload[index] != after.payload[index]
+            ):
                 raise StatePolicyError("thread state sidecar bytes changed concurrently")
     return after
 
@@ -2314,6 +2444,8 @@ def _select_thread_updates_from_snapshot(
                 continue
             if first != second:
                 continue
+            if any(not first.content_known[index] for index in range(1, 4)):
+                raise StatePolicyError("thread state sidecar bytes unavailable during check")
             database_bytes, wal_bytes, _shm_bytes, journal_bytes = first
             if database_bytes is None:
                 raise StatePolicyError("thread state database disappeared during check")
@@ -2429,6 +2561,7 @@ def update_thread_state(
             )
             _assert_permission_policy_unchanged(permission_policy)
             identities = select_thread_updates(conn, permission_policy)
+            original_rows = _capture_thread_rows(conn, identities)
             if identities:
                 conn.execute(
                     """
@@ -2502,6 +2635,23 @@ def update_thread_state(
             if _sha256(path.read_bytes()) != source_bytes_hash:
                 raise StatePolicyError("thread state concurrent update")
             conn.commit()
+            try:
+                _assert_permission_policy_fingerprint(permission_policy)
+            except StatePolicyError as policy_exc:
+                rolled_back = _rollback_thread_rows_after_policy_change(
+                    conn,
+                    path,
+                    source_identity,
+                    original_rows,
+                    permission_policy,
+                )
+                if rolled_back:
+                    raise StatePolicyError(
+                        "permission policy changed after thread commit; state rolled back"
+                    ) from policy_exc
+                raise StatePolicyError(
+                    "permission policy changed after thread commit; rollback failed"
+                ) from policy_exc
         except BaseException:
             conn.rollback()
             raise

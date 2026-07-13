@@ -1150,6 +1150,77 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
+    def test_global_policy_change_after_publish_is_rolled_back(self) -> None:
+        original = self.write_global(self.permission_drift())
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original_fingerprint = self.module._assert_permission_policy_fingerprint
+        calls = 0
+
+        def race_fingerprint(current_policy: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_fingerprint(current_policy)
+            # Call three is the fingerprint inside _publish_temp_file, after
+            # the target lease is verified and immediately before MoveFile.
+            if calls == 3:
+                self.write_permission_config(approval_policy="on-request")
+
+        with mock.patch.object(
+            self.module,
+            "_assert_permission_policy_fingerprint",
+            side_effect=race_fingerprint,
+        ):
+            with self.assertRaisesRegex(self.module.StatePolicyError, "policy|rollback"):
+                self.module.update_global_state(
+                    self.global_path,
+                    self.backup_root,
+                    permission_policy=policy,
+                )
+        self.assertGreaterEqual(calls, 4)
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_sqlite_policy_change_after_commit_is_rolled_back(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original_fingerprint = self.module._assert_permission_policy_fingerprint
+        calls = 0
+
+        def race_fingerprint(current_policy: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_fingerprint(current_policy)
+            # Call three is the last precommit fingerprint.  Mutating after it
+            # forces the postcommit policy gate to reverse the committed rows.
+            if calls == 3:
+                self.write_permission_config(approval_policy="on-request")
+
+        try:
+            with mock.patch.object(
+                self.module,
+                "_assert_permission_policy_fingerprint",
+                side_effect=race_fingerprint,
+            ):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "policy|rollback"):
+                    self.module.update_thread_state(
+                        self.db_path,
+                        permission_policy=policy,
+                    )
+            self.assertGreaterEqual(calls, 4)
+            verify = sqlite3.connect(self.db_path)
+            self.assertEqual(
+                verify.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
+                "on-request",
+            )
+            self.assertEqual(
+                verify.execute("select sandbox_policy from threads where id='target-a'").fetchone()[0],
+                '{"type":"workspace-write"}',
+            )
+            verify.close()
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
     def test_malformed_and_backup_failure_preserve_original_bytes(self) -> None:
         malformed = b'{"broken":'
         self.global_path.write_bytes(malformed)
@@ -1426,6 +1497,135 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.assertFalse(self.sqlite_snapshot_root.exists())
         finally:
             keeper.close()
+
+    def test_wal_write_allows_sqlite_owned_shm_and_wal_handles(self) -> None:
+        keeper = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
+            keeper.execute("pragma wal_autocheckpoint=0")
+            keeper.execute(
+                "create table threads (id text primary key, source text, thread_source text, "
+                "approval_mode text, sandbox_policy text, sentinel text)"
+            )
+            keeper.executemany(
+                "insert into threads values (?,?,?,?,?,?)",
+                [
+                    ("target-a", "vscode", "user", "on-request", '{"type":"workspace-write"}', "keep-a"),
+                    ("target-null", "vscode", "user", None, None, "keep-null"),
+                ],
+            )
+            keeper.commit()
+            self.assertTrue(Path(str(self.db_path) + "-wal").exists())
+            self.assertTrue(Path(str(self.db_path) + "-shm").exists())
+            updated = self.module.update_thread_state(self.db_path)
+            self.assertEqual(updated["changedCount"], 2)
+            self.assertEqual(
+                keeper.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
+                "never",
+            )
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_check_only_fails_closed_when_wal_sidecar_bytes_are_unavailable(self) -> None:
+        keeper = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
+            keeper.execute("pragma wal_autocheckpoint=0")
+            keeper.execute(
+                "create table threads (id text primary key, source text, thread_source text, "
+                "approval_mode text, sandbox_policy text, sentinel text)"
+            )
+            keeper.commit()
+            keeper.execute(
+                "insert into threads values (?,?,?,?,?,?)",
+                ("wal-hidden", "vscode", "user", "on-request", '{"type":"workspace-write"}', "keep"),
+            )
+            keeper.commit()
+            original_capture = self.module._capture_sqlite_source
+
+            def unavailable(path: Path):
+                snapshot = original_capture(path)
+                known = list(snapshot.content_known)
+                payload = list(snapshot.payload)
+                if snapshot.identities[1] is not None:
+                    payload[1] = None
+                    known[1] = False
+                return self.module.SqliteSourceSnapshot(
+                    payload=tuple(payload),
+                    identities=snapshot.identities,
+                    metadata=snapshot.metadata,
+                    content_known=tuple(known),
+                )
+
+            with mock.patch.object(self.module, "_capture_sqlite_source", side_effect=unavailable):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "sidecar bytes unavailable"):
+                    self.module.update_thread_state(
+                        self.db_path,
+                        check_only=True,
+                        snapshot_root=self.sqlite_snapshot_root,
+                    )
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_wal_write_policy_change_after_commit_rolls_back_rows(self) -> None:
+        keeper = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
+            keeper.execute("pragma wal_autocheckpoint=0")
+            keeper.execute(
+                "create table threads (id text primary key, source text, thread_source text, "
+                "approval_mode text, sandbox_policy text, sentinel text)"
+            )
+            keeper.executemany(
+                "insert into threads values (?,?,?,?,?,?)",
+                [
+                    ("target-a", "vscode", "user", "on-request", '{"type":"workspace-write"}', "keep-a"),
+                    ("target-null", "vscode", "user", None, None, "keep-null"),
+                ],
+            )
+            keeper.commit()
+            policy = self.module.resolve_permission_policy(self.codex_home)
+            original_fingerprint = self.module._assert_permission_policy_fingerprint
+            calls = 0
+
+            def race_fingerprint(current_policy: object) -> None:
+                nonlocal calls
+                calls += 1
+                original_fingerprint(current_policy)
+                if calls == 3:
+                    self.write_permission_config(approval_policy="on-request")
+
+            with mock.patch.object(
+                self.module,
+                "_assert_permission_policy_fingerprint",
+                side_effect=race_fingerprint,
+            ):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "policy|rollback"):
+                    self.module.update_thread_state(
+                        self.db_path,
+                        permission_policy=policy,
+                    )
+            self.assertGreaterEqual(calls, 4)
+            self.assertEqual(
+                keeper.execute(
+                    "select approval_mode, sandbox_policy from threads where id='target-a'"
+                ).fetchone(),
+                ("on-request", '{"type":"workspace-write"}'),
+            )
+            self.assertEqual(
+                keeper.execute(
+                    "select approval_mode, sandbox_policy from threads where id='target-null'"
+                ).fetchone(),
+                (None, None),
+            )
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     def test_check_only_runs_quick_check_on_snapshot_and_uses_manifest_identity(self) -> None:
         self.write_global(self.permission_drift())
