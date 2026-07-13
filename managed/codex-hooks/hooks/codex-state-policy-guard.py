@@ -102,6 +102,8 @@ class PermissionPolicy:
     sandbox_mode: str
     source: str
     source_hashes: tuple[tuple[str, str], ...] = ()
+    codex_home: str | None = None
+    source_identities: tuple[tuple[str, tuple[int, int]], ...] = ()
 
     def __post_init__(self) -> None:
         if (
@@ -118,7 +120,28 @@ class PermissionPolicy:
             raise StatePolicyError("permission policy source is missing")
         if not isinstance(self.source_hashes, tuple) or not self.source_hashes:
             raise StatePolicyError("permission policy source hash is missing")
+        if not isinstance(self.codex_home, str) or not self.codex_home:
+            raise StatePolicyError("permission policy home is missing")
+        try:
+            home_path = PureWindowsPath(self.codex_home)
+        except (TypeError, ValueError) as exc:
+            raise StatePolicyError("permission policy home is malformed") from exc
+        if (
+            not home_path.is_absolute()
+            or home_path.drive.casefold() != "d:"
+            or _path_lexical_issue(self.codex_home, home_path) is not None
+        ):
+            raise StatePolicyError("permission policy home is not a canonical D drive path")
+        if not isinstance(self.source_identities, tuple) or len(self.source_identities) != len(self.source_hashes):
+            raise StatePolicyError("permission policy source identity is missing")
         seen: set[str] = set()
+        allowed_sources = {
+            _windows_parts_casefold(PureWindowsPath(str(home_path / "config.toml"))),
+            *(
+                _windows_parts_casefold(PureWindowsPath(str(home_path / name)))
+                for name in PERMISSION_POLICY_JSON_NAMES
+            ),
+        }
         for item in self.source_hashes:
             if not isinstance(item, tuple) or len(item) != 2:
                 raise StatePolicyError("permission policy source hash is malformed")
@@ -131,9 +154,22 @@ class PermissionPolicy:
                 or source_path.drive.casefold() != "d:"
                 or not re.fullmatch(r"[0-9a-f]{64}", digest)
                 or source in seen
+                or _windows_parts_casefold(source_path) not in allowed_sources
             ):
                 raise StatePolicyError("permission policy source hash is malformed")
             seen.add(source)
+        for item in self.source_identities:
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise StatePolicyError("permission policy source identity is malformed")
+            source, identity = item
+            if (
+                not isinstance(source, str)
+                or not isinstance(identity, tuple)
+                or len(identity) != 2
+                or not all(isinstance(value, int) and value >= 0 for value in identity)
+                or source not in seen
+            ):
+                raise StatePolicyError("permission policy source identity is malformed")
 
     @property
     def heartbeat_sandbox_type(self) -> str:
@@ -157,6 +193,29 @@ class PermissionPolicy:
             "sandboxMode": self.sandbox_mode,
             "source": self.source,
         }
+
+
+@dataclass(frozen=True)
+class SqliteSourceSnapshot:
+    """Bytes plus path/identity metadata for a SQLite database and sidecars."""
+
+    payload: tuple[bytes | None, bytes | None, bytes | None, bytes | None]
+    identities: tuple[
+        tuple[int, int] | None,
+        tuple[int, int] | None,
+        tuple[int, int] | None,
+        tuple[int, int] | None,
+    ]
+    metadata: tuple[
+        tuple[bool, int | None, int | None, tuple[int, int] | None],
+        tuple[bool, int | None, int | None, tuple[int, int] | None],
+        tuple[bool, int | None, int | None, tuple[int, int] | None],
+        tuple[bool, int | None, int | None, tuple[int, int] | None],
+    ]
+
+    def __iter__(self):
+        # Preserve the old unpacking contract for snapshot fixture code.
+        return iter(self.payload)
 
 
 SUPPORTED_APPROVAL_POLICIES = frozenset(
@@ -830,6 +889,31 @@ def _permission_fields_from_mapping(document: object) -> tuple[object | None, ob
     return approval, sandbox
 
 
+PERMISSION_SOURCE_FIELDS = frozenset(
+    {
+        "approval_policy",
+        "approvalPolicy",
+        "approval-mode",
+        "approvalMode",
+        "sandbox_mode",
+        "sandboxMode",
+        "sandbox-mode",
+        "sandboxPolicy",
+        "permissionPolicy",
+    }
+)
+
+
+def _permission_source_unknown_fields(document: object) -> set[str]:
+    if not isinstance(document, dict):
+        return {"<non-object>"}
+    unknown = {str(key) for key in document if key not in PERMISSION_SOURCE_FIELDS}
+    nested = document.get("permissionPolicy")
+    if nested is not None:
+        unknown.update(_permission_source_unknown_fields(nested))
+    return unknown
+
+
 def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object, str]]:
     if not codex_home.is_absolute():
         raise StatePolicyError("permission policy home must be absolute")
@@ -884,9 +968,23 @@ def resolve_permission_policy(codex_home: Path | str) -> PermissionPolicy:
     approvals: list[tuple[str, str]] = []
     sandboxes: list[tuple[str, str]] = []
     source_hashes: list[tuple[str, str]] = []
+    source_identities: list[tuple[str, tuple[int, int]]] = []
     for source, document, source_hash in sources:
         source_hashes.append((source, source_hash))
         approval, sandbox = _permission_fields_from_mapping(document)
+        is_supplemental = PureWindowsPath(source).name.casefold() in {
+            name.casefold() for name in PERMISSION_POLICY_JSON_NAMES
+        }
+        if is_supplemental:
+            unknown_fields = _permission_source_unknown_fields(document)
+            if unknown_fields:
+                raise StatePolicyError("permission policy source contains unknown fields")
+            if approval is None or sandbox is None:
+                raise StatePolicyError("permission policy supplemental source is missing approval or sandbox")
+        source_identity = _file_handle_identity(Path(source))
+        if source_identity is None:
+            raise StatePolicyError("permission policy source disappeared")
+        source_identities.append((source, source_identity))
         if approval is not None:
             approvals.append(
                 (
@@ -913,10 +1011,17 @@ def resolve_permission_policy(codex_home: Path | str) -> PermissionPolicy:
         sandbox_mode=next(iter(sandbox_values)),
         source=source_names,
         source_hashes=tuple(source_hashes),
+        codex_home=str(home),
+        source_identities=tuple(source_identities),
     )
 
 
 def _assert_permission_policy_unchanged(permission_policy: PermissionPolicy) -> None:
+    if not isinstance(permission_policy.codex_home, str) or not permission_policy.codex_home:
+        raise StatePolicyError("permission policy home is missing")
+    identity_by_source = {
+        source: identity for source, identity in permission_policy.source_identities
+    }
     for source, expected_hash in permission_policy.source_hashes:
         source_path = Path(source)
         _assert_check_only_d_path_without_reparse(
@@ -929,12 +1034,21 @@ def _assert_permission_policy_unchanged(permission_policy: PermissionPolicy) -> 
             raise StatePolicyError("permission policy source is unreadable") from exc
         if actual_hash != expected_hash:
             raise StatePolicyError("permission policy changed concurrently")
+        actual_identity = _file_handle_identity(source_path)
+        if actual_identity is None or actual_identity != identity_by_source.get(source):
+            raise StatePolicyError("permission policy source changed concurrently")
 
 
 def _resolve_policy_for_path(path: Path, permission_policy: PermissionPolicy | None) -> PermissionPolicy:
     if permission_policy is not None:
         if not isinstance(permission_policy, PermissionPolicy):
             raise StatePolicyError("permission policy object is invalid")
+        if not isinstance(permission_policy.codex_home, str) or not permission_policy.codex_home:
+            raise StatePolicyError("permission policy home is missing")
+        policy_home = PureWindowsPath(permission_policy.codex_home)
+        path_home = PureWindowsPath(str(path.parent))
+        if _windows_parts_casefold(path_home) != _windows_parts_casefold(policy_home):
+            raise StatePolicyError("permission policy is bound to a different codex home")
         return permission_policy
     return resolve_permission_policy(path.parent)
 
@@ -1544,6 +1658,16 @@ def _publish_temp_file(
                 != expected_hash
             ):
                 raise StatePolicyError("state publish target changed concurrently")
+        if target_exists:
+            # Re-read the final path from the *same target handle* immediately
+            # before the rename.  A competitor that renamed/recreated the path
+            # after the preceding byte sample must fail closed instead of being
+            # overwritten by REPLACE_IF_EXISTS.
+            final_target_identity = _publish_handle_info(target_kernel32, target_handle, path)
+            if expected_identity is not None and final_target_identity != expected_identity:
+                raise StatePolicyError("state publish target changed concurrently")
+            if expected_hash is not None and _sha256(_read_publish_handle_bytes(target_kernel32, target_handle)) != expected_hash:
+                raise StatePolicyError("state publish target changed concurrently")
         _rename_temp_by_handle(
             temp_kernel32,
             temp_handle,
@@ -1808,17 +1932,64 @@ def select_thread_updates(
     ]
 
 
-def _capture_sqlite_source(path: Path) -> tuple[bytes | None, bytes | None, bytes | None, bytes | None]:
+def _capture_sqlite_source(path: Path) -> SqliteSourceSnapshot:
     paths = (
         path,
         Path(str(path) + "-wal"),
         Path(str(path) + "-shm"),
         Path(str(path) + "-journal"),
     )
+    payload: list[bytes | None] = []
+    identities: list[tuple[int, int] | None] = []
+    metadata: list[tuple[bool, int | None, int | None, tuple[int, int] | None]] = []
     try:
-        return tuple(candidate.read_bytes() if candidate.exists() else None for candidate in paths)
+        for candidate in paths:
+            _assert_check_only_d_path_without_reparse(candidate, name="thread state source")
+            exists = candidate.exists()
+            if not exists:
+                payload.append(None)
+                identities.append(None)
+                metadata.append((False, None, None, _file_handle_identity(candidate.parent)))
+                continue
+            raw = candidate.read_bytes()
+            identity = _file_handle_identity(candidate)
+            if identity is None:
+                raise StatePolicyError("thread state source identity unavailable")
+            stat = candidate.stat()
+            parent_identity = _file_handle_identity(candidate.parent)
+            payload.append(raw)
+            identities.append(identity)
+            metadata.append((True, int(stat.st_size), int(stat.st_mtime_ns), parent_identity))
     except OSError as exc:
         raise StatePolicyError("thread state source snapshot is busy") from exc
+    return SqliteSourceSnapshot(
+        payload=(payload[0], payload[1], payload[2], payload[3]),
+        identities=(identities[0], identities[1], identities[2], identities[3]),
+        metadata=(metadata[0], metadata[1], metadata[2], metadata[3]),
+    )
+
+
+def _assert_sqlite_snapshot_identity(
+    before: SqliteSourceSnapshot,
+    path: Path,
+    *,
+    allow_new_sidecars: bool,
+    check_main_metadata: bool = True,
+) -> SqliteSourceSnapshot:
+    """Reject path/identity replay between a checked snapshot and SQLite I/O."""
+    after = _capture_sqlite_source(path)
+    if before.identities[0] != after.identities[0] or (
+        check_main_metadata and before.metadata[0] != after.metadata[0]
+    ):
+        raise StatePolicyError("thread state concurrent replacement")
+    for index in range(1, 4):
+        expected = before.identities[index]
+        actual = after.identities[index]
+        if expected is not None and actual != expected:
+            raise StatePolicyError("thread state sidecar concurrent replacement")
+        if expected is None and actual is not None and not allow_new_sidecars:
+            raise StatePolicyError("thread state sidecar appeared during check")
+    return after
 
 
 def _assert_check_only_d_path_without_reparse(path: Path, *, name: str) -> None:
@@ -1942,17 +2113,11 @@ def update_thread_state(
     snapshot_root: Path | None = None,
     after_first_snapshot_capture: Callable[[int], None] | None = None,
 ) -> dict[str, object]:
-    if not path.is_file():
-        return {"status": "missing", "changedCount": 0, "wouldChangeCount": 0, "driftCount": 0}
     permission_policy = _resolve_policy_for_path(path, permission_policy)
     _assert_permission_policy_unchanged(permission_policy)
-    _assert_check_only_d_path_without_reparse(path, name="thread state source")
-    for sidecar in (
-        Path(str(path) + "-wal"),
-        Path(str(path) + "-shm"),
-        Path(str(path) + "-journal"),
-    ):
-        _assert_check_only_d_path_without_reparse(sidecar, name="thread state sidecar")
+    initial_snapshot = _capture_sqlite_source(path)
+    if initial_snapshot.payload[0] is None:
+        return {"status": "missing", "changedCount": 0, "wouldChangeCount": 0, "driftCount": 0}
     if check_only:
         if snapshot_root is None:
             raise StatePolicyError("thread state check snapshot root is required")
@@ -1970,16 +2135,14 @@ def update_thread_state(
             "integrityOk": True,
             "integrityResultCount": integrity_result_count,
         }
-    source_identity = _file_handle_identity(path)
+    source_identity = initial_snapshot.identities[0]
     if source_identity is None:
         raise StatePolicyError("thread state source disappeared")
-    try:
-        source_bytes_hash = _sha256(path.read_bytes())
-    except OSError as exc:
-        raise StatePolicyError("thread state source snapshot is busy") from exc
+    source_bytes_hash = _sha256(initial_snapshot.payload[0] or b"")
     conn = sqlite3.connect(path, timeout=1.5)
     try:
         conn.execute("pragma busy_timeout=1500")
+        _assert_sqlite_snapshot_identity(initial_snapshot, path, allow_new_sidecars=False)
         try:
             conn.execute("begin immediate")
         except sqlite3.OperationalError as exc:
@@ -1989,6 +2152,12 @@ def update_thread_state(
                 raise StatePolicyError("thread state concurrent replacement")
             if _sha256(path.read_bytes()) != source_bytes_hash:
                 raise StatePolicyError("thread state concurrent update")
+            _assert_sqlite_snapshot_identity(
+                initial_snapshot,
+                path,
+                allow_new_sidecars=True,
+                check_main_metadata=False,
+            )
             _assert_permission_policy_unchanged(permission_policy)
             identities = select_thread_updates(conn, permission_policy)
             if identities:
@@ -2036,6 +2205,12 @@ def update_thread_state(
                 raise StatePolicyError("thread state concurrent replacement")
             if _sha256(path.read_bytes()) != source_bytes_hash:
                 raise StatePolicyError("thread state concurrent update")
+            _assert_sqlite_snapshot_identity(
+                initial_snapshot,
+                path,
+                allow_new_sidecars=True,
+                check_main_metadata=False,
+            )
             conn.commit()
         except BaseException:
             conn.rollback()
@@ -2054,6 +2229,12 @@ def update_thread_state(
             raise StatePolicyError("thread state postcommit drift remains")
         if _file_handle_identity(path) != source_identity:
             raise StatePolicyError("thread state concurrent replacement")
+        _assert_sqlite_snapshot_identity(
+            initial_snapshot,
+            path,
+            allow_new_sidecars=True,
+            check_main_metadata=False,
+        )
         return {
             "status": "updated" if identities else "converged",
             "changedCount": len(identities),
@@ -2235,6 +2416,53 @@ def _restore_global_state_snapshot(
         return False
 
 
+def _claim_global_publication_after_failure(
+    path: Path,
+    before: bytes | None,
+    before_identity: tuple[int, int] | None,
+) -> dict[str, object]:
+    """Recover a non-optional publication fact when a postwrite step raises."""
+    claim: dict[str, object] = {
+        "status": "unsafe-partial",
+        "changed": True,
+        "wouldChange": True,
+        "changedCount": 1,
+        "driftCount": 0,
+        "beforeSha256": _sha256(before) if before is not None else None,
+        "afterSha256": None,
+        "beforeIdentity": list(before_identity) if before_identity is not None else None,
+        "afterIdentity": None,
+        "pathInventory": None,
+    }
+    try:
+        _assert_check_only_d_path_without_reparse(path, name="global state publication claim")
+        if not path.is_file():
+            return claim
+        current = path.read_bytes()
+        current_identity = _file_handle_identity(path)
+        if current_identity is None:
+            return claim
+        current_hash = _sha256(current)
+        claim["afterSha256"] = current_hash
+        claim["afterIdentity"] = list(current_identity)
+        if before is not None and before_identity is not None and current == before and current_identity == before_identity:
+            claim.update(
+                {
+                    "status": "not-published",
+                    "changed": False,
+                    "wouldChange": False,
+                    "changedCount": 0,
+                }
+            )
+        else:
+            claim["status"] = "published-unknown"
+    except (OSError, StatePolicyError):
+        # A missing/unreadable target is itself unsafe-partial: the caller must
+        # not report not-run or silently assume that no bytes were published.
+        return claim
+    return claim
+
+
 def run_policy(
     codex_home: Path,
     *,
@@ -2298,14 +2526,25 @@ def run_policy(
             ):
                 _assert_check_only_d_path_without_reparse(sidecar, name="thread state sidecar")
             sqlite_snapshot = _capture_sqlite_source(db_path)
-            global_result = update_global_state(
-                global_path,
-                codex_home / "backups_state" / "codex-state-policy",
-                permission_policy=permission_policy,
-                path_mode=path_mode,
-                approved_map=approved_map,
-                check_only=check_only,
-            )
+            try:
+                global_result = update_global_state(
+                    global_path,
+                    codex_home / "backups_state" / "codex-state-policy",
+                    permission_policy=permission_policy,
+                    path_mode=path_mode,
+                    approved_map=approved_map,
+                    check_only=check_only,
+                )
+            except BaseException:
+                publication_claim = _claim_global_publication_after_failure(
+                    global_path,
+                    global_snapshot,
+                    global_snapshot_identity,
+                )
+                if bool(publication_claim.get("changed")):
+                    global_result = publication_claim
+                    errors.append("unsafe-partial")
+                raise
             if global_result.get("status") == "missing":
                 raise StatePolicyError("global state source disappeared")
             production_home = _resolved_casefold(codex_home) == _resolved_casefold(PRODUCTION_CODEX_HOME)

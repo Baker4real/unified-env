@@ -558,6 +558,34 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertIn("unsafe-partial", result["errors"])
         self.assertNotEqual(self.global_path.read_bytes(), original)
 
+    def test_run_policy_reports_global_publish_claim_when_postcheck_fails(self) -> None:
+        original = self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        real_inventory = self.module.build_path_inventory
+        calls = 0
+
+        def fail_after_publish(*args: object, **kwargs: object) -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            if calls >= 2:
+                raise RuntimeError("fixture post-publish inventory failure")
+            return real_inventory(*args, **kwargs)
+
+        with mock.patch.object(self.module, "build_path_inventory", side_effect=fail_after_publish):
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=io.StringIO(),
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["changed"])
+        self.assertNotEqual(result["globalState"]["status"], "not-run")
+        self.assertIn("unsafe-partial", result["errors"])
+        self.assertNotEqual(self.global_path.read_bytes(), original)
+
     def test_run_policy_missing_state_domain_fails_closed(self) -> None:
         output = io.StringIO()
         result = self.module.run_policy(
@@ -598,6 +626,20 @@ class CodexStatePolicyTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(self.module.StatePolicyError, "malformed"):
             self.module.resolve_permission_policy(self.codex_home)
+
+    def test_empty_supplemental_permission_source_fails_closed(self) -> None:
+        (self.codex_home / "policy.json").write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(self.module.StatePolicyError, "policy"):
+            self.module.resolve_permission_policy(self.codex_home)
+
+    def test_explicit_permission_policy_cannot_cross_codex_home(self) -> None:
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        other_home = self.root / "other-codex-home"
+        other_home.mkdir()
+        other_db = other_home / "state_5.sqlite"
+        other_db.write_bytes(b"not-a-database")
+        with self.assertRaisesRegex(self.module.StatePolicyError, "home|source"):
+            self.module._resolve_policy_for_path(other_db, policy)
 
     def test_select_thread_updates_preserves_unknown_rows(self) -> None:
         conn = self.create_db()
@@ -705,6 +747,77 @@ class CodexStatePolicyTests(unittest.TestCase):
         finally:
             temporary.unlink(missing_ok=True)
         self.assertEqual(self.global_path.read_bytes(), original)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows handle-bound publish")
+    def test_global_publish_rejects_competitor_rename_after_final_handle_read(self) -> None:
+        original = self.write_global(self.permission_drift())
+        target_identity = self.module._file_handle_identity(self.global_path)
+        self.assertIsNotNone(target_identity)
+        temporary = self.module._write_same_directory_temp(self.global_path, b"replacement")
+        original_info = self.module._publish_handle_info
+        target_info_calls = 0
+
+        def competitor_rename(kernel32: object, handle: object, target: Path) -> tuple[int, int]:
+            nonlocal target_info_calls
+            if target == self.global_path:
+                target_info_calls += 1
+                if target_info_calls >= 2:
+                    raise self.module.StatePolicyError("state publish target changed concurrently")
+            return original_info(kernel32, handle, target)
+
+        try:
+            with mock.patch.object(self.module, "_publish_handle_info", side_effect=competitor_rename):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "concurrent"):
+                    self.module._publish_temp_file(
+                        self.global_path,
+                        temporary,
+                        expected_hash=hashlib.sha256(original).hexdigest(),
+                        expected_identity=target_identity,
+                    )
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_sqlite_snapshot_binds_identity_for_same_bytes_replay(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        original = self.db_path.read_bytes()
+        before = self.module._capture_sqlite_source(self.db_path)
+        competitor = self.root / "same-bytes-state.sqlite"
+        competitor.write_bytes(original)
+        os.replace(competitor, self.db_path)
+        after = self.module._capture_sqlite_source(self.db_path)
+        self.assertEqual(tuple(before), tuple(after))
+        self.assertNotEqual(before, after)
+
+    def test_sqlite_snapshot_binds_sidecar_identity_for_same_bytes_replay(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        for suffix in ("-wal", "-shm", "-journal"):
+            sidecar = Path(str(self.db_path) + suffix)
+            sidecar.write_bytes(b"fixture-sidecar")
+        try:
+            before = self.module._capture_sqlite_source(self.db_path)
+            replaced: list[str] = []
+            for suffix in ("-wal", "-shm", "-journal"):
+                sidecar = Path(str(self.db_path) + suffix)
+                competitor = self.root / ("same-bytes" + suffix)
+                competitor.write_bytes(sidecar.read_bytes())
+                for _attempt in range(3):
+                    try:
+                        os.replace(competitor, sidecar)
+                        replaced.append(suffix)
+                        break
+                    except PermissionError:
+                        if _attempt == 2:
+                            competitor.unlink(missing_ok=True)
+            after = self.module._capture_sqlite_source(self.db_path)
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        self.assertEqual(tuple(before), tuple(after))
+        self.assertTrue(replaced)
+        self.assertNotEqual(before, after)
 
     def test_malformed_and_backup_failure_preserve_original_bytes(self) -> None:
         malformed = b'{"broken":'
