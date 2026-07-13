@@ -434,6 +434,39 @@ class CodexStatePolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(self.module.StatePolicyError, "changed|source"):
             self.module._assert_permission_policy_unchanged(policy)
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows reparse-point semantics")
+    def test_permission_policy_rejects_dangling_supplemental_reparse_source(self) -> None:
+        policy_path = self.codex_home / "policy.json"
+        junction_target = self.root / "policy-target"
+        junction_target.mkdir()
+        command = (
+            "$ErrorActionPreference='Stop';"
+            f"New-Item -ItemType Junction -Path '{policy_path}' -Target '{junction_target}' | Out-Null;"
+            f"Remove-Item -LiteralPath '{junction_target}' -Force"
+        )
+        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
+        created = subprocess.run(
+            [
+                r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe",
+                "-NoProfile",
+                "-EncodedCommand",
+                encoded,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if created.returncode != 0:
+            self.skipTest(created.stderr or created.stdout)
+        try:
+            with self.assertRaisesRegex(self.module.StatePolicyError, "reparse|policy"):
+                self.module.resolve_permission_policy(self.codex_home)
+        finally:
+            junction_target.mkdir(exist_ok=True)
+            if policy_path.exists() or policy_path.is_symlink():
+                policy_path.rmdir()
+            junction_target.rmdir()
+
     def test_permission_policy_rejects_forged_values_even_with_source_hashes(self) -> None:
         policy = self.module.resolve_permission_policy(self.codex_home)
         with self.assertRaises(self.module.StatePolicyError):
@@ -898,6 +931,45 @@ class CodexStatePolicyTests(unittest.TestCase):
             for snapshot in self.global_path.parent.glob(f".{self.global_path.name}.*.snapshot"):
                 snapshot.unlink(missing_ok=True)
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows handle-bound publish")
+    def test_global_publish_keeps_lease_and_snapshot_when_lease_bytes_change(self) -> None:
+        original = self.write_global(self.permission_drift())
+        target_identity = self.module._file_handle_identity(self.global_path)
+        self.assertIsNotNone(target_identity)
+        temporary = self.module._write_same_directory_temp(self.global_path, b"replacement")
+        original_move = self.module._move_path_by_name
+
+        def pass_through_move(source: Path, target: Path, *, replace_if_exists: bool) -> None:
+            original_move(source, target, replace_if_exists=replace_if_exists)
+
+        original_read_bytes = Path.read_bytes
+
+        def tampered_read(path: Path) -> bytes:
+            if path.name.endswith(".lease"):
+                return b"tampered-lease"
+            return original_read_bytes(path)
+
+        try:
+            with mock.patch.object(self.module, "_move_path_by_name", side_effect=pass_through_move):
+                with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=tampered_read):
+                    self.module._publish_temp_file(
+                        self.global_path,
+                        temporary,
+                        expected_hash=hashlib.sha256(original).hexdigest(),
+                        expected_identity=target_identity,
+                    )
+            leases = list(self.global_path.parent.glob(f".{self.global_path.name}.*.lease"))
+            snapshots = list(self.global_path.parent.glob(f".{self.global_path.name}.*.snapshot"))
+            self.assertTrue(leases)
+            self.assertTrue(snapshots)
+            self.assertIn(original, [snapshot.read_bytes() for snapshot in snapshots])
+        finally:
+            temporary.unlink(missing_ok=True)
+            for artifact in self.global_path.parent.glob(f".{self.global_path.name}.*.lease"):
+                artifact.unlink(missing_ok=True)
+            for artifact in self.global_path.parent.glob(f".{self.global_path.name}.*.snapshot"):
+                artifact.unlink(missing_ok=True)
+
     def test_sqlite_snapshot_binds_identity_for_same_bytes_replay(self) -> None:
         connection = self.create_db()
         connection.close()
@@ -960,6 +1032,123 @@ class CodexStatePolicyTests(unittest.TestCase):
                 )
         finally:
             sidecar.unlink(missing_ok=True)
+
+    def test_sqlite_update_rejects_lexical_connection_to_competitor(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        competitor = self.root / "competitor.sqlite"
+        shutil.copy2(self.db_path, competitor)
+        original_connect = self.module.sqlite3.connect
+
+        def connect_competitor(*_args: object, **_kwargs: object) -> sqlite3.Connection:
+            return original_connect(competitor, timeout=1.5)
+
+        with mock.patch.object(self.module.sqlite3, "connect", side_effect=connect_competitor):
+            with self.assertRaisesRegex(self.module.StatePolicyError, "source|path|concurrent"):
+                self.module.update_thread_state(self.db_path)
+        verify = sqlite3.connect(self.db_path)
+        self.assertEqual(
+            verify.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
+            "on-request",
+        )
+        verify.close()
+
+    def test_sqlite_update_rechecks_sidecar_generation_before_commit(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        original_capture = self.module._capture_sqlite_source
+        original_assert = self.module._assert_sqlite_snapshot_identity
+        assert_calls = 0
+        mutate_next_capture = False
+
+        def race_capture(path: Path):
+            nonlocal mutate_next_capture
+            snapshot = original_capture(path)
+            payload = list(snapshot.payload)
+            identities = list(snapshot.identities)
+            metadata = list(snapshot.metadata)
+            if payload[1] is None:
+                payload[1] = b"synthetic-sidecar"
+                identities[1] = (1, 999)
+                exists, _size, _mtime, parent_identity = metadata[1]
+                metadata[1] = (True, len(payload[1]), 1, parent_identity)
+            if mutate_next_capture:
+                mutate_next_capture = False
+                payload[1] = bytes([(payload[1][0] ^ 0x01) if payload[1] else 1]) + payload[1][1:]
+                exists, size, mtime, parent_identity = metadata[1]
+                metadata[1] = (exists, size, (mtime or 0) + 1, parent_identity)
+            return self.module.SqliteSourceSnapshot(
+                payload=tuple(payload),
+                identities=tuple(identities),
+                metadata=tuple(metadata),
+            )
+
+        def race_assert(*args: object, **kwargs: object):
+            nonlocal assert_calls, mutate_next_capture
+            assert_calls += 1
+            result = original_assert(*args, **kwargs)
+            if assert_calls == 4:
+                mutate_next_capture = True
+            return result
+
+        with mock.patch.object(self.module, "_capture_sqlite_source", side_effect=race_capture):
+            with mock.patch.object(
+                self.module,
+                "_assert_sqlite_snapshot_identity",
+                side_effect=race_assert,
+            ):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "sidecar|concurrent"):
+                    self.module.update_thread_state(self.db_path)
+
+    def test_global_policy_source_change_after_final_assert_fails_closed(self) -> None:
+        original = self.write_global(self.permission_drift())
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original_assert = self.module._assert_permission_policy_unchanged
+        calls = 0
+
+        def stale_assert(current_policy: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_assert(current_policy)
+            if calls == 1:
+                self.write_permission_config(approval_policy="on-request")
+
+        with mock.patch.object(self.module, "_assert_permission_policy_unchanged", side_effect=stale_assert):
+            with self.assertRaisesRegex(self.module.StatePolicyError, "policy|concurrent"):
+                self.module.update_global_state(
+                    self.global_path,
+                    self.backup_root,
+                    permission_policy=policy,
+                )
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_sqlite_policy_source_change_after_select_assert_fails_closed(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original_assert = self.module._assert_permission_policy_unchanged
+        calls = 0
+
+        def stale_assert(current_policy: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_assert(current_policy)
+            if calls == 2:
+                self.write_permission_config(approval_policy="on-request")
+
+        try:
+            with mock.patch.object(self.module, "_assert_permission_policy_unchanged", side_effect=stale_assert):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "policy|concurrent"):
+                    self.module.update_thread_state(self.db_path, permission_policy=policy)
+            verify = sqlite3.connect(self.db_path)
+            self.assertEqual(
+                verify.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
+                "on-request",
+            )
+            verify.close()
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     def test_malformed_and_backup_failure_preserve_original_bytes(self) -> None:
         malformed = b'{"broken":'

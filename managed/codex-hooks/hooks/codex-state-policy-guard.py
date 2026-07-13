@@ -955,11 +955,11 @@ def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object,
         raise StatePolicyError("permission policy home must be on the D drive")
     sources: list[tuple[str, object, str]] = []
     config_path = codex_home / "config.toml"
+    _assert_check_only_d_path_without_reparse(
+        config_path,
+        name="permission policy config",
+    )
     if config_path.exists():
-        _assert_check_only_d_path_without_reparse(
-            config_path,
-            name="permission policy config",
-        )
         if not config_path.is_file() or config_path.is_symlink():
             raise StatePolicyError("permission policy config path is not a regular file")
         if tomllib is None:
@@ -972,12 +972,12 @@ def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object,
         sources.append((str(config_path), document, _sha256(raw)))
     for name in PERMISSION_POLICY_JSON_NAMES:
         policy_path = codex_home / name
-        if not policy_path.exists():
-            continue
         _assert_check_only_d_path_without_reparse(
             policy_path,
             name="permission policy source",
         )
+        if not policy_path.exists():
+            continue
         if not policy_path.is_file() or policy_path.is_symlink():
             raise StatePolicyError("permission policy source is not a regular file")
         try:
@@ -1063,6 +1063,11 @@ def resolve_permission_policy(codex_home: Path | str) -> PermissionPolicy:
 def _assert_permission_policy_unchanged(permission_policy: PermissionPolicy) -> None:
     if not isinstance(permission_policy.codex_home, str) or not permission_policy.codex_home:
         raise StatePolicyError("permission policy home is missing")
+    _assert_permission_policy_fingerprint(permission_policy)
+
+
+def _assert_permission_policy_fingerprint(permission_policy: PermissionPolicy) -> None:
+    """Re-resolve policy sources without relying on a patchable outer guard."""
     current = resolve_permission_policy(Path(permission_policy.codex_home))
     if current != permission_policy:
         raise StatePolicyError("permission policy changed concurrently")
@@ -1671,6 +1676,7 @@ def _publish_temp_file(
     expected_hash: str | None = None,
     expected_identity: tuple[int, int] | None = None,
     replace_if_exists: bool = True,
+    permission_policy: PermissionPolicy | None = None,
 ) -> tuple[int, int]:
     """Publish a same-directory temp while holding a verified target lease."""
     _assert_check_only_d_path_without_reparse(path, name="state publish target")
@@ -1820,6 +1826,8 @@ def _publish_temp_file(
                     _read_publish_handle_bytes(target_kernel32, target_handle)
                 ) != _sha256(target_snapshot_bytes):
                     raise StatePolicyError("state publish target changed concurrently")
+                if permission_policy is not None:
+                    _assert_permission_policy_fingerprint(permission_policy)
                 lease_expected_identity = expected_identity if expected_identity is not None else target_identity
                 lease_handoff = True
                 _move_path_by_name(path, lease_backup_path, replace_if_exists=False)
@@ -1888,19 +1896,28 @@ def _publish_temp_file(
             _close_publish_handle(lease_snapshot_kernel32, lease_snapshot_handle)
         if snapshot_temporary is not None:
             snapshot_temporary.unlink(missing_ok=True)
+        if lease_published and lease_backup_path is not None:
+            try:
+                lease_is_original = (
+                    lease_snapshot_identity is not None
+                    and lease_expected_identity is not None
+                    and _file_handle_identity(lease_backup_path) == lease_expected_identity
+                    and target_snapshot_bytes is not None
+                    and lease_backup_path.read_bytes() == target_snapshot_bytes
+                )
+                if lease_is_original:
+                    lease_backup_path.unlink(missing_ok=True)
+                else:
+                    lease_snapshot_keep = True
+            except (OSError, StatePolicyError):
+                # A changed or unverifiable lease must retain the snapshot as
+                # the last verified copy of the original bytes.
+                lease_snapshot_keep = True
         if lease_snapshot_path is not None and not lease_snapshot_keep:
             try:
                 if lease_snapshot_identity is not None and _file_handle_identity(lease_snapshot_path) == lease_snapshot_identity:
                     lease_snapshot_path.unlink(missing_ok=True)
             except (OSError, StatePolicyError):
-                pass
-        if lease_published and lease_backup_path is not None:
-            try:
-                if _file_handle_identity(lease_backup_path) == lease_expected_identity:
-                    lease_backup_path.unlink(missing_ok=True)
-            except (OSError, StatePolicyError):
-                # The new state is already published; leave an auditable lease
-                # backup when cleanup itself cannot be verified.
                 pass
 
 
@@ -2053,7 +2070,7 @@ def update_global_state(
                 before_prewrite_check(attempt)
             # Rebind the policy source and the target identity after all
             # potentially slow preparation, still inside the caller mutex.
-            _assert_permission_policy_unchanged(permission_policy)
+            _assert_permission_policy_fingerprint(permission_policy)
             current = path.read_bytes()
             if (
                 _sha256(current) != before_hash
@@ -2072,6 +2089,7 @@ def update_global_state(
                 temp_path,
                 expected_hash=before_hash,
                 expected_identity=before_identity,
+                permission_policy=permission_policy,
             )
             _fsync_parent(path)
             published = path.read_bytes()
@@ -2186,6 +2204,25 @@ def _capture_sqlite_source(path: Path) -> SqliteSourceSnapshot:
         identities=(identities[0], identities[1], identities[2], identities[3]),
         metadata=(metadata[0], metadata[1], metadata[2], metadata[3]),
     )
+
+
+def _connect_sqlite_bound(path: Path, expected_identity: tuple[int, int]) -> sqlite3.Connection:
+    """Open SQLite and prove its main database resolves to the checked path."""
+    try:
+        conn = sqlite3.connect(path, timeout=1.5)
+    except sqlite3.Error as exc:
+        raise StatePolicyError("thread state database operation failed") from exc
+    try:
+        rows = conn.execute("pragma database_list").fetchall()
+        main_paths = [str(row[2]) for row in rows if len(row) >= 3 and str(row[1]).casefold() == "main"]
+        if len(main_paths) != 1 or _path_compare_key(main_paths[0]) != _path_compare_key(str(path)):
+            raise StatePolicyError("thread state database path changed during connect")
+        if _file_handle_identity(path) != expected_identity:
+            raise StatePolicyError("thread state database changed during connect")
+        return conn
+    except (OSError, sqlite3.Error, StatePolicyError):
+        conn.close()
+        raise
 
 
 def _assert_sqlite_snapshot_identity(
@@ -2366,7 +2403,7 @@ def update_thread_state(
     if source_identity is None:
         raise StatePolicyError("thread state source disappeared")
     source_bytes_hash = _sha256(initial_snapshot.payload[0] or b"")
-    conn = sqlite3.connect(path, timeout=1.5)
+    conn = _connect_sqlite_bound(path, source_identity)
     try:
         conn.execute("pragma busy_timeout=1500")
         _assert_sqlite_snapshot_identity(
@@ -2431,27 +2468,39 @@ def update_thread_state(
                 raise StatePolicyError("thread state concurrent replacement")
             if _sha256(path.read_bytes()) != source_bytes_hash:
                 raise StatePolicyError("thread state concurrent update")
-            callback_snapshot = _capture_sqlite_source(path) if before_commit is not None else None
+            transaction_snapshot = _capture_sqlite_source(path)
             if before_commit is not None:
                 before_commit()
             if _file_handle_identity(path) != source_identity:
                 raise StatePolicyError("thread state concurrent replacement")
             if _sha256(path.read_bytes()) != source_bytes_hash:
                 raise StatePolicyError("thread state concurrent update")
-            if callback_snapshot is not None:
-                _assert_sqlite_snapshot_identity(
-                    callback_snapshot,
-                    path,
-                    allow_new_sidecars=True,
-                    check_main_metadata=False,
-                    check_sidecar_content=True,
-                )
             _assert_sqlite_snapshot_identity(
-                initial_snapshot,
+                transaction_snapshot,
                 path,
                 allow_new_sidecars=True,
                 check_main_metadata=False,
+                check_sidecar_content=True,
             )
+            _assert_permission_policy_fingerprint(permission_policy)
+            _assert_sqlite_snapshot_identity(
+                transaction_snapshot,
+                path,
+                allow_new_sidecars=True,
+                check_main_metadata=False,
+                check_sidecar_content=True,
+            )
+            _assert_sqlite_snapshot_identity(
+                transaction_snapshot,
+                path,
+                allow_new_sidecars=True,
+                check_main_metadata=False,
+                check_sidecar_content=True,
+            )
+            if _file_handle_identity(path) != source_identity:
+                raise StatePolicyError("thread state concurrent replacement")
+            if _sha256(path.read_bytes()) != source_bytes_hash:
+                raise StatePolicyError("thread state concurrent update")
             conn.commit()
         except BaseException:
             conn.rollback()
