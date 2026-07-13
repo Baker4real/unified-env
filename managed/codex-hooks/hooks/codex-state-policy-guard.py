@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import json
+import mmap
 import os
 from pathlib import Path, PureWindowsPath
 import re
@@ -1841,6 +1842,30 @@ def _read_publish_handle_bytes(kernel32: object, handle: wintypes.HANDLE) -> byt
     return b"".join(chunks)
 
 
+def _read_sqlite_shm_mapped_bytes(path: Path) -> bytes:
+    """Read a SQLite WAL-index while SQLite owns its byte-range locks.
+
+    Windows can deny a second ``ReadFile`` on ``-shm`` while an active SQLite
+    connection owns the WAL-index lock window, even though a read-only file
+    mapping remains observable.  The mapping is intentionally read-only and
+    is used only as a content observation; callers still re-check identity,
+    size, metadata and the complete payload before accepting a generation.
+    If the mapping cannot be established, the generation is not safely
+    observable and must fail closed rather than downgrade to metadata-only
+    validation.
+    """
+    try:
+        with path.open("rb") as stream:
+            length = int(stream.seek(0, os.SEEK_END))
+            stream.seek(0)
+            if length == 0:
+                return b""
+            with mmap.mmap(stream.fileno(), length, access=mmap.ACCESS_READ) as mapped:
+                return mapped[:]
+    except (OSError, ValueError, BufferError) as exc:
+        raise StatePolicyError("thread state SHM lock window unavailable") from exc
+
+
 class StateTargetLease:
     """Hold a published state target against replacement until the caller returns."""
 
@@ -2112,7 +2137,14 @@ class SqliteTargetLease:
             locked_sidecar_indices = {
                 index
                 for index, _kernel32, _handle, _byte_lease in self._windows_byte_locks
-                if index > 0 and (not self.read_only or index != 2)
+                if index > 0
+                and (not self.read_only or index != 2)
+                # The writer's split SHM lease deliberately leaves SQLite's
+                # lock window (120..127) to the connection, but strict return
+                # gates must compare the mapped payload rather than treating
+                # that window as implicitly trusted.  If the payload cannot
+                # be observed, _capture_sqlite_source fails closed.
+                and not (strict_sidecar_content and index == 2)
             }
             current_snapshot = _assert_sqlite_snapshot_identity(
                 self.expected_snapshot,
@@ -2123,6 +2155,7 @@ class SqliteTargetLease:
                 check_sidecar_content=strict_sidecar_content,
                 handle_sources=handle_sources or None,
                 locked_sidecar_indices=locked_sidecar_indices,
+                strict_sidecar_content_indices={2} if strict_sidecar_content else None,
             )
             if strict_sidecar_content:
                 if (
@@ -2137,7 +2170,9 @@ class SqliteTargetLease:
                 locked_sidecars = {
                     index
                     for index, _kernel32, _handle, _byte_lease in self._windows_byte_locks
-                    if index > 0 and (not self.read_only or index != 2)
+                    if index > 0
+                    and (not self.read_only or index != 2)
+                    and not (strict_sidecar_content and index == 2)
                 }
                 for index in range(1, 4):
                     if index in locked_sidecars:
@@ -3192,12 +3227,23 @@ def _capture_sqlite_source(
             except PermissionError:
                 if index == 0:
                     raise
-                # SQLite may hold -wal/-shm/-journal with a sharing mode that
-                # denies a second byte reader.  Keep the generation anchored
-                # by identity and metadata; a byte comparison is unavailable
-                # but must not turn a valid WAL writer into a false busy error.
-                raw = None
-                known = False
+                if index == 2:
+                    # SQLite may deny a second byte reader for -shm while its
+                    # connection owns offsets 120..127.  Do not silently
+                    # replace a missing payload with metadata-only evidence:
+                    # a same-size/same-mtime in-place write would otherwise
+                    # be indistinguishable from a stable generation.  A
+                    # read-only mapping remains observable on Windows and
+                    # gives the strict return gate a real payload to compare.
+                    raw = _read_sqlite_shm_mapped_bytes(candidate)
+                    known = True
+                else:
+                    # SQLite may hold -wal/-journal with a sharing mode that
+                    # denies a second byte reader.  Their complete byte-range
+                    # leases and identity/metadata gates remain authoritative;
+                    # SHM is never allowed to take this metadata-only path.
+                    raw = None
+                    known = False
             identity = _file_handle_identity(candidate)
             if identity is None:
                 raise StatePolicyError("thread state source identity unavailable")
@@ -3288,6 +3334,7 @@ def _assert_sqlite_snapshot_identity(
     check_sidecar_content: bool = False,
     handle_sources: dict[int, tuple[object, wintypes.HANDLE]] | None = None,
     locked_sidecar_indices: set[int] | None = None,
+    strict_sidecar_content_indices: set[int] | None = None,
 ) -> SqliteSourceSnapshot:
     """Reject path/identity replay between a checked snapshot and SQLite I/O."""
     if handle_sources:
@@ -3295,6 +3342,7 @@ def _assert_sqlite_snapshot_identity(
     else:
         after = _capture_sqlite_source(path)
     locked_indices = set(locked_sidecar_indices or {})
+    strict_indices = set(strict_sidecar_content_indices or {})
     if before.identities[0] != after.identities[0] or (
         check_main_metadata and before.metadata[0] != after.metadata[0]
     ):
@@ -3311,7 +3359,7 @@ def _assert_sqlite_snapshot_identity(
         if expected is None and actual is not None and not allow_new_sidecars:
             raise StatePolicyError("thread state sidecar appeared during check")
         if expected is not None and check_sidecar_content:
-            if index in locked_indices:
+            if index in locked_indices and index not in strict_indices:
                 # A leased WAL/SHM/journal may legitimately change SQLite's
                 # lock bytes while the identity/range lease prevents an
                 # outsider from replacing or writing the generation.  SQLite
@@ -3321,6 +3369,16 @@ def _assert_sqlite_snapshot_identity(
                 # catches an output callback that writes the lock window.
                 if before.metadata[index] != after.metadata[index]:
                     raise StatePolicyError("thread state sidecar metadata changed during return gate")
+                continue
+            if index == 2 and index not in strict_indices:
+                # SQLite may legitimately rewrite the WAL-index lock window
+                # while its active connection advances a transaction.  This
+                # is only a pre-return identity/metadata gate; the final
+                # SqliteTargetLease strict gate passes ``{2}`` and compares
+                # the mapped payload in full, failing closed if it cannot be
+                # observed.
+                if before.metadata[index] != after.metadata[index]:
+                    raise StatePolicyError("thread state sidecar metadata changed concurrently")
                 continue
             if before.metadata[index] != after.metadata[index]:
                 raise StatePolicyError("thread state sidecar metadata changed concurrently")
@@ -4043,7 +4101,16 @@ def run_policy(
                 Path(str(db_path) + "-journal"),
             ):
                 _assert_check_only_d_path_without_reparse(sidecar, name="thread state sidecar")
-            sqlite_snapshot = _capture_sqlite_source(db_path)
+            try:
+                sqlite_snapshot = _capture_sqlite_source(db_path)
+            except StatePolicyError as exc:
+                if not check_only and "shm lock window unavailable" in str(exc).casefold():
+                    # A write/repair generation is not safe when the active
+                    # SQLite connection's SHM lock window cannot be observed.
+                    # Do not let the caller mistake the fail-closed result for
+                    # a clean no-op; maintenance must quiesce SQLite first.
+                    errors.append("unsafe-partial")
+                raise
             missing_sidecars = {
                 index
                 for index in range(1, 4)

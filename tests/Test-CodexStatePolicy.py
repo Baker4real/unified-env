@@ -1765,9 +1765,18 @@ class CodexStatePolicyTests(unittest.TestCase):
                     def write(self, value: str) -> int:
                         if not self.mutated and not self.blocked:
                             try:
+                                metadata = shm_path.stat()
                                 with shm_path.open("r+b") as stream:
                                     stream.seek(offset)
                                     stream.write(b"X")
+                                    stream.flush()
+                                # Restore observable metadata to prove that the
+                                # return gate cannot rely on size/mtime/identity
+                                # instead of the SHM lock-window payload.
+                                os.utime(
+                                    shm_path,
+                                    ns=(metadata.st_atime_ns, metadata.st_mtime_ns),
+                                )
                                 self.mutated = True
                             except OSError:
                                 self.blocked = True
@@ -1800,6 +1809,36 @@ class CodexStatePolicyTests(unittest.TestCase):
                     self.assertTrue(output.blocked, (offset, result, output.getvalue()))
                     self.assertTrue(result["ok"], (offset, result, output.getvalue()))
                     self.assertTrue(json.loads(output.getvalue())["ok"])
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows SHM mapping semantics")
+    def test_run_policy_write_requires_observable_shm_lock_window(self) -> None:
+        """An unobservable active SHM lock window is a maintenance prerequisite."""
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        try:
+            original_global = self.global_path.read_bytes()
+            with mock.patch.object(
+                self.module,
+                "_read_sqlite_shm_mapped_bytes",
+                side_effect=self.module.StatePolicyError("thread state SHM lock window unavailable"),
+            ):
+                output = io.StringIO()
+                result = self.module.run_policy(
+                    self.codex_home,
+                    check_only=False,
+                    health_root=self.root / "health",
+                    output=output,
+                )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertFalse(result["converged"])
+            self.assertEqual(self.global_path.read_bytes(), original_global)
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     @unittest.skipUnless(os.name == "nt", "requires Windows byte-range leases")
     def test_sqlite_writer_return_lease_keeps_connection_during_wal_shm_output(self) -> None:
