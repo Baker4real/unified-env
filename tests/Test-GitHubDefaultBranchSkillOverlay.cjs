@@ -173,6 +173,57 @@ assert.equal(idempotent.changed, 0);
 assert.equal(idempotent.failed, 0);
 assert.equal(idempotent.skipped, 6);
 
+// Any new version or sibling surface is an inventory drift, even when both
+// files carry a catalog-known upstream fingerprint. The entire operation must
+// block before writing the six expected targets.
+const extraSurfaceRoots = [
+  path.join(fixtureRoot, 'plugins', 'cache', 'openai-curated', 'github', '27126220-extra'),
+  path.join(fixtureRoot, '.tmp', 'plugins', 'plugins', 'github-extra'),
+];
+for (const extraRoot of extraSurfaceRoots) {
+  for (const role of ['yeet', 'github']) {
+    fs.mkdirSync(path.join(extraRoot, 'skills', role), { recursive: true });
+    fs.writeFileSync(
+      path.join(extraRoot, 'skills', role, 'SKILL.md'),
+      fixtureUpstream[role].local,
+      'utf8',
+    );
+  }
+}
+const extraBefore = {};
+for (const target of overlay.discoverTargets(fixtureRoot).targets) {
+  extraBefore[target.path] = sha256(fs.readFileSync(target.path));
+}
+const extraDiscovery = overlay.discoverTargets(fixtureRoot);
+assert.ok(extraDiscovery.errors.some((error) => error.reason === 'unexpected-plugin-surface'));
+assert.ok(extraDiscovery.errors.some((error) => error.reason === 'unexpected-surface-count'));
+const extraPlan = overlay.buildChangePlan(extraDiscovery, fixtureCatalogPath);
+assert.ok(extraPlan.errors.some((error) => error.reason === 'unexpected-plugin-surface'));
+const extraDryRun = overlay.applyChangePlan(extraPlan, fixtureApplyOptions({ dryRun: true }));
+assert.equal(extraDryRun.blocked, true);
+const extraApply = overlay.applyChangePlan(extraPlan, fixtureApplyOptions({ dryRun: false }));
+assert.equal(extraApply.blocked, true);
+assert.equal(extraApply.changed, 0);
+for (const [filePath, expected] of Object.entries(extraBefore)) {
+  assert.equal(sha256(fs.readFileSync(filePath)), expected, `extra surface drift must not write ${filePath}`);
+}
+for (const extraRoot of extraSurfaceRoots) fs.rmSync(extraRoot, { recursive: true, force: true });
+
+// Removing an expected surface is also a hard inventory failure.
+const missingSurfaceRoot = path.join(fixtureRoot, 'plugins', 'cache', 'openai-curated', 'github', '27126220');
+const missingSurfaceBackup = path.join(evidenceRoot, 'missing-surface-backup');
+fs.rmSync(missingSurfaceBackup, { recursive: true, force: true });
+fs.renameSync(missingSurfaceRoot, missingSurfaceBackup);
+const missingSurfaceDiscovery = overlay.discoverTargets(fixtureRoot);
+assert.ok(missingSurfaceDiscovery.errors.some((error) => error.reason === 'missing-plugin-surface'));
+assert.ok(missingSurfaceDiscovery.errors.some((error) => error.reason === 'unexpected-surface-count'));
+assert.ok(missingSurfaceDiscovery.errors.some((error) => error.reason === 'unexpected-target-count'));
+const missingSurfacePlan = overlay.buildChangePlan(missingSurfaceDiscovery, fixtureCatalogPath);
+const missingSurfaceApply = overlay.applyChangePlan(missingSurfacePlan, fixtureApplyOptions({ dryRun: false }));
+assert.equal(missingSurfaceApply.blocked, true);
+assert.equal(missingSurfaceApply.changed, 0);
+fs.renameSync(missingSurfaceBackup, missingSurfaceRoot);
+
 // Only the three supported plugin surfaces may be changed, even when an
 // external D: file happens to carry a known upstream fingerprint.
 const externalTarget = path.join(evidenceRoot, 'external', 'SKILL.md');
@@ -341,6 +392,7 @@ const pairChange = postWritePlan.changes[0];
 const pairRole = pairChange.role === 'yeet' ? 'github' : 'yeet';
 const pairPath = path.join(pairChange.surfaceDirectory, 'skills', pairRole, 'SKILL.md');
 const pairOriginal = fs.readFileSync(pairPath);
+const pairOriginalMtimeMs = pairChange.originalMtimeMs;
 fs.writeFileSync(pairPath, 'unknown pair fingerprint\n', 'utf8');
 const pairFingerprintResult = overlay.applyChangePlan(
   { changes: [pairChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
@@ -349,6 +401,8 @@ const pairFingerprintResult = overlay.applyChangePlan(
 assert.equal(pairFingerprintResult.changed, 0);
 assert.ok(pairFingerprintResult.errors.some((error) => error.reason === 'canonical-pair-fingerprint-mismatch'));
 fs.writeFileSync(pairPath, pairOriginal);
+fs.utimesSync(pairPath, new Date(pairOriginalMtimeMs), new Date(pairOriginalMtimeMs));
+assert.equal(fs.statSync(pairPath).mtimeMs, pairOriginalMtimeMs);
 const casTarget = postWritePlan.changes[0].path;
 fs.writeFileSync(casTarget, 'user changed before apply\n', 'utf8');
 const casResult = overlay.applyChangePlan(
@@ -358,6 +412,16 @@ const casResult = overlay.applyChangePlan(
 assert.equal(casResult.changed, 0);
 assert.ok(casResult.errors.some((error) => error.reason === 'original-cas-conflict'));
 fs.writeFileSync(casTarget, postWritePlan.changes[0].original, 'utf8');
+const originalMtimeMs = postWritePlan.changes[0].originalMtimeMs;
+fs.utimesSync(casTarget, new Date(originalMtimeMs), new Date(originalMtimeMs));
+assert.equal(fs.statSync(casTarget).mtimeMs, originalMtimeMs);
+fs.utimesSync(casTarget, new Date(originalMtimeMs + 2000), new Date(originalMtimeMs + 2000));
+const mtimeCasResult = overlay.applyChangePlan(postWritePlan, fixtureApplyOptions({ dryRun: true }));
+assert.equal(mtimeCasResult.changed, 0);
+assert.ok(mtimeCasResult.blocked);
+assert.ok(mtimeCasResult.errors.some((error) => error.reason === 'original-mtime-cas-conflict'));
+fs.utimesSync(casTarget, new Date(originalMtimeMs), new Date(originalMtimeMs));
+assert.equal(fs.statSync(casTarget).mtimeMs, originalMtimeMs);
 const postWriteFailure = overlay.applyChangePlan(postWritePlan, fixtureApplyOptions({
   dryRun: false,
   onAfterWrite: () => { throw new Error('injected post-write verification failure'); },

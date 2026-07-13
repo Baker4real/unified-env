@@ -17,6 +17,13 @@ const DEFAULT_EVIDENCE_ROOT = 'D:\\Codex\\.codex\\run-evidence\\github-default-b
 const CODEX_ROOT = 'D:\\Codex\\.codex';
 const CONTROLLED_EVIDENCE_ROOT = DEFAULT_EVIDENCE_ROOT;
 const CATALOG_VERSION = 1;
+const EXPECTED_SURFACE_RELATIVES = Object.freeze([
+  '.tmp/plugins/plugins/github',
+  'plugins/cache/openai-curated/github/27126220',
+  'plugins/cache/openai-curated-remote/github/0.1.8-2841cf9749ae',
+]);
+const EXPECTED_SURFACE_COUNT = EXPECTED_SURFACE_RELATIVES.length;
+const EXPECTED_TARGET_COUNT = EXPECTED_SURFACE_COUNT * EXPECTED_ROLES.length;
 
 class CatalogValidationError extends Error {
   constructor(errors) {
@@ -32,6 +39,11 @@ function sha256(value) {
 
 function sha256File(filePath) {
   return sha256(fs.readFileSync(filePath));
+}
+
+function mtimeFingerprint(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.trunc(number) : Number.NaN;
 }
 
 function resolveAbsolute(filePath) {
@@ -67,28 +79,36 @@ function assertControlledEvidencePath(filePath, label) {
   }
 }
 
+function normaliseRelativePath(relativePath) {
+  return String(relativePath).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '').toLowerCase();
+}
+
+function expectedSurfaceRelative(codexRoot, surfaceDirectory) {
+  const relative = path.relative(resolveAbsolute(codexRoot), resolveAbsolute(surfaceDirectory));
+  const normalised = normaliseRelativePath(relative);
+  return EXPECTED_SURFACE_RELATIVES.find((candidate) => normaliseRelativePath(candidate) === normalised) || null;
+}
+
+function expectedSurfaceDirectories(codexRoot) {
+  const root = resolveAbsolute(codexRoot);
+  return EXPECTED_SURFACE_RELATIVES.map((relative) => ({
+    relative,
+    directory: path.join(root, ...relative.split('/')),
+  }));
+}
+
 function supportedPluginSurface(filePath, codexRoot = CODEX_ROOT) {
   const resolved = resolveAbsolute(filePath);
   const rootBase = resolveAbsolute(codexRoot);
-  const roots = [
-    {
-      root: path.join(rootBase, '.tmp', 'plugins', 'plugins', 'github'),
-      relativePattern: /^skills\\(github|yeet)\\SKILL\.md$/i,
-    },
-    {
-      root: path.join(rootBase, 'plugins', 'cache', 'openai-curated', 'github'),
-      relativePattern: /^[^\\/]+\\skills\\(github|yeet)\\SKILL\.md$/i,
-    },
-    {
-      root: path.join(rootBase, 'plugins', 'cache', 'openai-curated-remote', 'github'),
-      relativePattern: /^[^\\/]+\\skills\\(github|yeet)\\SKILL\.md$/i,
-    },
-  ];
+  const roots = expectedSurfaceDirectories(rootBase).map(({ directory }) => ({
+    root: directory,
+    relativePattern: /^skills\\(github|yeet)\\SKILL\.md$/i,
+  }));
   for (const descriptor of roots) {
     if (!isWithin(descriptor.root, resolved)) continue;
     const relative = path.relative(descriptor.root, resolved).replace(/\//g, '\\');
     const match = relative.match(descriptor.relativePattern);
-    if (match) {
+    if (match && expectedSurfaceRelative(rootBase, descriptor.root)) {
       const role = match[1].toLowerCase();
       return {
         root: descriptor.root,
@@ -275,36 +295,87 @@ function walkFiles(root, output = []) {
   return output;
 }
 
+function discoverSurfaceCandidates(codexRoot) {
+  const root = resolveAbsolute(codexRoot);
+  const candidates = expectedSurfaceDirectories(root).map((descriptor) => ({
+    directory: descriptor.directory,
+    relative: descriptor.relative,
+    expected: true,
+  }));
+  const parentDescriptors = [
+    { parent: path.join(root, '.tmp', 'plugins', 'plugins'), includeChildren: true },
+    { parent: path.join(root, 'plugins', 'cache', 'openai-curated', 'github'), includeChildren: true },
+    { parent: path.join(root, 'plugins', 'cache', 'openai-curated-remote', 'github'), includeChildren: true },
+  ];
+  for (const descriptor of parentDescriptors) {
+    if (!fs.existsSync(descriptor.parent) || !fs.statSync(descriptor.parent).isDirectory()) continue;
+    for (const entry of fs.readdirSync(descriptor.parent, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const directory = path.join(descriptor.parent, entry.name);
+      const githubSkill = path.join(directory, 'skills', 'github', 'SKILL.md');
+      const yeetSkill = path.join(directory, 'skills', 'yeet', 'SKILL.md');
+      if (!fs.existsSync(githubSkill) && !fs.existsSync(yeetSkill)) continue;
+      const relative = path.relative(root, directory).replace(/\\/g, '/');
+      candidates.push({
+        directory,
+        relative,
+        expected: Boolean(expectedSurfaceRelative(root, directory)),
+      });
+    }
+  }
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const key = candidate.directory.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function discoverTargets(codexRoot) {
   const root = resolveAbsolute(codexRoot);
   assertDDrivePath(root, 'codexRoot');
-  const roots = [
-    path.join(root, '.tmp', 'plugins', 'plugins', 'github'),
-    path.join(root, 'plugins', 'cache', 'openai-curated', 'github'),
-    path.join(root, 'plugins', 'cache', 'openai-curated-remote', 'github'),
-  ];
   const groups = new Map();
   const errors = [];
   let foundAnySurface = false;
+  const surfaceCandidates = discoverSurfaceCandidates(root);
 
-  for (const searchRoot of roots) {
-    for (const filePath of walkFiles(searchRoot)) {
-      const roleDirectory = path.basename(path.dirname(filePath));
-      if (!EXPECTED_ROLES.includes(roleDirectory)) continue;
-      const skillsDirectory = path.dirname(path.dirname(filePath));
-      const surfaceDirectory = path.dirname(skillsDirectory);
+  for (const candidate of surfaceCandidates) {
+    const surfaceDirectory = candidate.directory;
+    const expected = candidate.expected;
+    const existingRoles = EXPECTED_ROLES.filter((role) => (
+      fs.existsSync(path.join(surfaceDirectory, 'skills', role, 'SKILL.md'))
+    ));
+    if (!expected) {
+      errors.push({
+        path: surfaceDirectory,
+        relative: candidate.relative,
+        reason: 'unexpected-plugin-surface',
+        message: `surface is not in the exact catalog: ${candidate.relative}`,
+      });
+      continue;
+    }
+    if (!fs.existsSync(surfaceDirectory) || !fs.statSync(surfaceDirectory).isDirectory()) {
+      errors.push({
+        path: surfaceDirectory,
+        relative: candidate.relative,
+        reason: 'missing-plugin-surface',
+        message: `expected GitHub plugin surface is missing: ${candidate.relative}`,
+      });
+      continue;
+    }
+    if (existingRoles.length > 0) foundAnySurface = true;
+    const key = surfaceDirectory.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { surfaceDirectory, roles: new Map() });
+    const group = groups.get(key);
+    for (const role of existingRoles) {
+      const filePath = path.join(surfaceDirectory, 'skills', role, 'SKILL.md');
       if (!isWithin(root, filePath)) {
         errors.push({ path: filePath, reason: 'target-outside-codex-root' });
-        continue;
-      }
-      foundAnySurface = true;
-      const key = surfaceDirectory.toLowerCase();
-      if (!groups.has(key)) groups.set(key, { surfaceDirectory, roles: new Map() });
-      const group = groups.get(key);
-      if (group.roles.has(roleDirectory)) {
+      } else if (group.roles.has(role)) {
         errors.push({ path: filePath, reason: 'duplicate-role-surface' });
       } else {
-        group.roles.set(roleDirectory, { path: filePath, role: roleDirectory, surfaceDirectory, codexRoot: root });
+        group.roles.set(role, { path: filePath, role, surfaceDirectory, codexRoot: root });
       }
     }
   }
@@ -328,6 +399,23 @@ function discoverTargets(codexRoot) {
     for (const target of group.roles.values()) targets.push(target);
   }
 
+  if (surfaceCandidates.length !== EXPECTED_SURFACE_COUNT || groups.size !== EXPECTED_SURFACE_COUNT) {
+    errors.push({
+      reason: 'unexpected-surface-count',
+      expected: EXPECTED_SURFACE_COUNT,
+      actual: surfaceCandidates.length,
+      grouped: groups.size,
+      message: `expected exactly ${EXPECTED_SURFACE_COUNT} GitHub plugin surfaces, found ${surfaceCandidates.length}`,
+    });
+  }
+  if (targets.length !== EXPECTED_TARGET_COUNT) {
+    errors.push({
+      reason: 'unexpected-target-count',
+      expected: EXPECTED_TARGET_COUNT,
+      actual: targets.length,
+      message: `expected exactly ${EXPECTED_TARGET_COUNT} GitHub plugin targets, found ${targets.length}`,
+    });
+  }
   targets.sort((left, right) => left.path.localeCompare(right.path));
   return { targets, errors };
 }
@@ -343,6 +431,15 @@ function buildChangePlan(targetInput, catalogOrPath) {
   const errors = [...discovered.errors];
   const changes = [];
   const skipped = [];
+  if (discovered.targets.length !== EXPECTED_TARGET_COUNT
+    && !errors.some((error) => error.reason === 'unexpected-target-count')) {
+    errors.push({
+      reason: 'unexpected-target-count',
+      expected: EXPECTED_TARGET_COUNT,
+      actual: discovered.targets.length,
+      message: `expected exactly ${EXPECTED_TARGET_COUNT} GitHub plugin targets, found ${discovered.targets.length}`,
+    });
+  }
   let catalog;
   try {
     catalog = validateCatalog(catalogOrPath);
@@ -386,6 +483,7 @@ function buildChangePlan(targetInput, catalogOrPath) {
       errors.push({ path: filePath, reason: 'missing-target' });
       continue;
     }
+    const originalStat = fs.statSync(filePath);
     const originalBytes = fs.readFileSync(filePath);
     const original = originalBytes.toString('utf8');
     const currentSha256 = sha256(originalBytes);
@@ -407,6 +505,7 @@ function buildChangePlan(targetInput, catalogOrPath) {
       original,
       originalBytes,
       originalSha256: currentSha256,
+      originalMtimeMs: mtimeFingerprint(originalStat.mtimeMs),
       replacement: entry.patchedDocument,
       replacementSha256: entry.patchedSha256,
       catalogEntry: entry,
@@ -488,6 +587,12 @@ function validateRollbackManifest(resolvedManifest, manifest) {
     if (!isWithin(evidenceDirectory, backup)) {
       throw new Error(`manifest backupPath is outside its evidenceDirectory: ${backup}`);
     }
+    if (entry.originalMtimeMs !== undefined && !Number.isFinite(Number(entry.originalMtimeMs))) {
+      throw new Error(`manifest originalMtimeMs is invalid: ${entry.path}`);
+    }
+    if (entry.replacementMtimeMs !== undefined && !Number.isFinite(Number(entry.replacementMtimeMs))) {
+      throw new Error(`manifest replacementMtimeMs is invalid: ${entry.path}`);
+    }
     entry.path = target;
     entry.backupPath = backup;
     entry.codexRoot = entryCodexRoot;
@@ -520,13 +625,27 @@ function rollbackManifest(manifestPath, options = {}) {
       if (currentSha256 !== entry.replacementSha256) {
         throw new Error(`compare-and-swap conflict at ${entry.path}: expected ${entry.replacementSha256}, got ${currentSha256}`);
       }
+      if (entry.replacementMtimeMs !== undefined) {
+        const currentMtimeMs = mtimeFingerprint(fs.statSync(entry.path).mtimeMs);
+        if (currentMtimeMs !== Number(entry.replacementMtimeMs)) {
+          throw new Error(`compare-and-swap mtime conflict at ${entry.path}: expected ${entry.replacementMtimeMs}, got ${currentMtimeMs}`);
+        }
+      }
       const backupBytes = fs.readFileSync(entry.backupPath);
       if (sha256(backupBytes) !== entry.originalSha256) {
         throw new Error(`backup fingerprint mismatch at ${entry.backupPath}`);
       }
       writeAtomic(entry.path, backupBytes);
+      if (entry.originalMtimeMs !== undefined) {
+        const originalMtimeMs = Number(entry.originalMtimeMs);
+        fs.utimesSync(entry.path, new Date(originalMtimeMs), new Date(originalMtimeMs));
+      }
       if (sha256File(entry.path) !== entry.originalSha256) {
         throw new Error(`restored fingerprint mismatch at ${entry.path}`);
+      }
+      if (entry.originalMtimeMs !== undefined
+        && mtimeFingerprint(fs.statSync(entry.path).mtimeMs) !== Number(entry.originalMtimeMs)) {
+        throw new Error(`restored mtime fingerprint mismatch at ${entry.path}`);
       }
       entry.status = 'restored';
       restored += 1;
@@ -619,6 +738,15 @@ function resolveCanonicalCatalog(plan, options = {}) {
 function validateApplyChangePlan(plan, canonicalCatalog) {
   const errors = [];
   const seenPaths = new Set();
+  const changes = Array.isArray(plan.changes) ? plan.changes : [];
+  if (changes.length !== EXPECTED_TARGET_COUNT) {
+    errors.push({
+      reason: 'unexpected-change-count',
+      expected: EXPECTED_TARGET_COUNT,
+      actual: changes.length,
+      message: `apply requires exactly ${EXPECTED_TARGET_COUNT} target changes`,
+    });
+  }
   for (const [index, change] of (Array.isArray(plan.changes) ? plan.changes : []).entries()) {
     const prefix = `changes[${index}]`;
     if (!change || typeof change.path !== 'string' || !EXPECTED_ROLES.includes(change.role)) {
@@ -664,6 +792,17 @@ function validateApplyChangePlan(plan, canonicalCatalog) {
       errors.push({ path: filePath, reason: 'invalid-original-sha256' });
     } else if (currentSha256 !== String(change.originalSha256).toUpperCase()) {
       errors.push({ path: filePath, reason: 'original-cas-conflict', currentSha256, expectedSha256: change.originalSha256 });
+    }
+    const currentMtimeMs = mtimeFingerprint(fs.statSync(filePath).mtimeMs);
+    if (!Number.isFinite(Number(change.originalMtimeMs))) {
+      errors.push({ path: filePath, reason: 'invalid-original-mtime-ms' });
+    } else if (currentMtimeMs !== Number(change.originalMtimeMs)) {
+      errors.push({
+        path: filePath,
+        reason: 'original-mtime-cas-conflict',
+        currentMtimeMs,
+        expectedMtimeMs: Number(change.originalMtimeMs),
+      });
     }
     if (typeof change.original === 'string' && sha256(change.original) !== String(change.originalSha256).toUpperCase()) {
       errors.push({ path: filePath, reason: 'original-plan-fingerprint-mismatch' });
@@ -789,6 +928,10 @@ function applyChangePlan(plan, options = {}) {
       if (currentSha256 !== change.originalSha256) {
         throw new Error(`compare-and-swap conflict before backup at ${change.path}`);
       }
+      const currentMtimeMs = mtimeFingerprint(fs.statSync(change.path).mtimeMs);
+      if (currentMtimeMs !== Number(change.originalMtimeMs)) {
+        throw new Error(`compare-and-swap mtime conflict before backup at ${change.path}`);
+      }
       const backupPath = path.join(evidenceDirectory, `backup-${String(index + 1).padStart(2, '0')}-${path.basename(change.path)}`);
       fs.writeFileSync(backupPath, currentBytes);
       manifest.entries.push({
@@ -796,6 +939,7 @@ function applyChangePlan(plan, options = {}) {
         role: change.role,
         codexRoot: change.codexRoot || CODEX_ROOT,
         originalSha256: change.originalSha256,
+        originalMtimeMs: change.originalMtimeMs,
         replacementSha256: change.replacementSha256,
         backupPath,
         status: 'prepared',
@@ -812,6 +956,10 @@ function applyChangePlan(plan, options = {}) {
       if (sha256(currentBytes) !== change.originalSha256) {
         throw new Error(`compare-and-swap conflict while applying at ${change.path}`);
       }
+      const currentMtimeMs = mtimeFingerprint(fs.statSync(change.path).mtimeMs);
+      if (currentMtimeMs !== Number(change.originalMtimeMs)) {
+        throw new Error(`compare-and-swap mtime conflict while applying at ${change.path}`);
+      }
       if (typeof options.onBeforeWrite === 'function') options.onBeforeWrite(change, index);
       if (Number.isInteger(options.failAfter) && changed >= options.failAfter) {
         throw new Error(`injected failure after ${changed} writes`);
@@ -821,6 +969,7 @@ function applyChangePlan(plan, options = {}) {
       writeAtomic(change.path, Buffer.from(change.replacement, 'utf8'));
       entry.status = 'committed';
       entry.committedAt = new Date().toISOString();
+      entry.replacementMtimeMs = mtimeFingerprint(fs.statSync(change.path).mtimeMs);
       if (typeof options.onAfterWrite === 'function') options.onAfterWrite(change, index);
       if (sha256File(change.path) !== change.replacementSha256) {
         throw new Error(`replacement fingerprint mismatch at ${change.path}`);
