@@ -2013,14 +2013,15 @@ class SqliteTargetLease:
                     raise StatePolicyError("state generation target disappeared")
                 kernel32, handle, byte_lease = _open_publish_byte_lock(
                     candidate,
-                    # SQLite itself owns shared-memory lock bytes.  A shared
-                    # Windows lease coexists with those readers while still
-                    # rejecting direct writes; the main/journal ranges remain
-                    # exclusive and the read-only WAL range is shared only
-                    # with another lease, not with file writes.
+                    # SQLite itself owns shared-memory lock bytes.  The
+                    # main/WAL/journal ranges remain exclusive; the SHM range
+                    # is split around SQLite's lock-byte window so an active
+                    # reader or writer transaction can coexist.
                     # The read-only transaction materializes its WAL pages
                     # before this call, so the complete WAL range can remain
-                    # exclusive; only SQLite's SHM lock-byte window is split.
+                    # exclusive.  Read-only return gates therefore verify the
+                    # full SHM content strictly; writer leases retain the
+                    # historical split-lock-only protection.
                     shared=index == 2,
                 )
                 try:
@@ -2056,7 +2057,31 @@ class SqliteTargetLease:
             else:
                 self._connection.execute("begin immediate")
             self._acquire_generation_locks()
-            self.assert_unchanged(strict_sidecar_content=self.read_only)
+            if self.read_only and self.expected_snapshot is not None:
+                # Opening a read transaction legitimately updates SQLite's
+                # SHM reader-lock bytes.  Rebase the strict content baseline
+                # after the generation locks are held, while retaining the
+                # original identity/path checks for the race into the lease.
+                locked_sidecar_indices = {
+                    index
+                    for index, _kernel32, _handle, _byte_lease in self._windows_byte_locks
+                    if index > 0 and index != 2
+                }
+                self.expected_snapshot = _assert_sqlite_snapshot_identity(
+                    self.expected_snapshot,
+                    self.path,
+                    allow_new_sidecars=False,
+                    allow_removed_sidecars=True,
+                    check_main_metadata=False,
+                    check_sidecar_content=False,
+                    handle_sources={
+                        index: (kernel32, handle)
+                        for index, kernel32, handle, _byte_lease in self._windows_byte_locks
+                        if index == 0
+                    },
+                    locked_sidecar_indices=locked_sidecar_indices,
+                )
+            self.assert_unchanged(strict_sidecar_content=False)
         except BaseException:
             self.close()
             raise
@@ -2080,7 +2105,7 @@ class SqliteTargetLease:
             locked_sidecar_indices = {
                 index
                 for index, _kernel32, _handle, _byte_lease in self._windows_byte_locks
-                if index > 0
+                if index > 0 and (not self.read_only or index != 2)
             }
             current_snapshot = _assert_sqlite_snapshot_identity(
                 self.expected_snapshot,
@@ -3991,50 +4016,48 @@ def run_policy(
             ):
                 _assert_check_only_d_path_without_reparse(sidecar, name="thread state sidecar")
             sqlite_snapshot = _capture_sqlite_source(db_path)
-            if not check_only:
-                if _sqlite_snapshot_has_unknown_sidecars(sqlite_snapshot):
-                    # A valid WAL generation is writable only when every
-                    # existing sidecar is identity- and byte-observable.  Do
-                    # this before global publication so an unreadable WAL or
-                    # SHM cannot turn into a cross-domain partial result.
-                    errors.append("unsafe-partial")
-                    raise StatePolicyError("thread state sidecar bytes unavailable for write")
-                missing_sidecars = {
-                    index
-                    for index in range(1, 4)
-                    if sqlite_snapshot.identities[index] is None
-                }
-                if (
-                    missing_sidecars == {3}
-                    and sqlite_snapshot.identities[1] is not None
-                    and sqlite_snapshot.identities[2] is not None
-                ):
-                    # WAL+SHM with no rollback journal is a legal production
-                    # generation.  Reserve the absent name before publishing
-                    # global state, then recapture to close the snapshot-to-
-                    # reservation race.  The lease masks its placeholder from
-                    # all logical SQLite snapshots.
-                    try:
-                        missing_journal_lease = SqliteMissingSidecarLease(
-                            Path(str(db_path) + "-journal")
+            missing_sidecars = {
+                index
+                for index in range(1, 4)
+                if sqlite_snapshot.identities[index] is None
+            }
+            if not check_only and _sqlite_snapshot_has_unknown_sidecars(sqlite_snapshot):
+                # A valid WAL generation is writable only when every existing
+                # sidecar is identity- and byte-observable.  Do this before
+                # global publication so an unreadable WAL or SHM cannot turn
+                # into a cross-domain partial result.
+                errors.append("unsafe-partial")
+                raise StatePolicyError("thread state sidecar bytes unavailable for write")
+            if (
+                missing_sidecars == {3}
+                and sqlite_snapshot.identities[1] is not None
+                and sqlite_snapshot.identities[2] is not None
+            ):
+                # WAL+SHM with no rollback journal is a legal production
+                # generation.  Reserve the absent name in both write and
+                # check-only modes before any downstream publication, then
+                # recapture to close the snapshot-to-reservation race.  The
+                # lease masks its placeholder from logical snapshots.
+                try:
+                    missing_journal_lease = SqliteMissingSidecarLease(
+                        Path(str(db_path) + "-journal")
+                    )
+                    missing_journal_lease.__enter__()
+                    reserved_snapshot = _capture_sqlite_source(db_path)
+                    if reserved_snapshot != sqlite_snapshot:
+                        raise StatePolicyError(
+                            "thread state source changed before missing sidecar lease"
                         )
-                        missing_journal_lease.__enter__()
-                        reserved_snapshot = _capture_sqlite_source(db_path)
-                        if reserved_snapshot != sqlite_snapshot:
-                            raise StatePolicyError(
-                                "thread state source changed before missing sidecar lease"
-                            )
-                        sqlite_snapshot = reserved_snapshot
-                    except BaseException:
-                        errors.extend(("generation-unbounded", "unsafe-partial"))
-                        raise
-                elif _sqlite_generation_unbounded(sqlite_snapshot, sqlite_snapshot):
-                    # A missing required source name cannot carry a
-                    # handle-bound/no-create lease.  Reject before the global
-                    # JSON publisher runs so a repair never leaves cross-domain
-                    # partial state behind.
+                    sqlite_snapshot = reserved_snapshot
+                except BaseException:
                     errors.extend(("generation-unbounded", "unsafe-partial"))
-                    raise StatePolicyError("thread state source generation is unbounded")
+                    raise
+            elif not check_only and _sqlite_generation_unbounded(sqlite_snapshot, sqlite_snapshot):
+                # A missing required source name cannot carry a handle-bound
+                # no-create lease.  Reject before the global JSON publisher
+                # runs so a repair never leaves cross-domain partial state.
+                errors.extend(("generation-unbounded", "unsafe-partial"))
+                raise StatePolicyError("thread state source generation is unbounded")
             try:
                 global_result = update_global_state(
                     global_path,

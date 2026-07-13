@@ -1994,6 +1994,93 @@ class CodexStatePolicyTests(unittest.TestCase):
         if output.mutated:
             self.assertFalse(result["ok"])
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows read-only generation leases")
+    def test_check_only_blocks_shm_lock_byte_mutation_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
+        keeper.commit()
+        shm_path = Path(str(self.db_path) + "-shm")
+        original_shm = shm_path.read_bytes()
+
+        class CheckOnlyShmLockByteOutput(io.StringIO):
+            attempted = False
+            blocked = False
+            mutated = False
+
+            def write(self, value: str) -> int:
+                if not self.attempted:
+                    self.attempted = True
+                    try:
+                        with shm_path.open("r+b") as stream:
+                            stream.seek(122)
+                            stream.write(b"X")
+                        self.mutated = True
+                    except OSError:
+                        self.blocked = True
+                return super().write(value)
+
+        output = CheckOnlyShmLockByteOutput()
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=True,
+                health_root=self.root / "health",
+                output=output,
+            )
+        finally:
+            keeper.close()
+            if output.mutated:
+                shm_path.write_bytes(original_shm)
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        self.assertTrue(output.attempted)
+        self.assertTrue(output.blocked or not result["ok"])
+        if output.mutated:
+            self.assertFalse(result["ok"])
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows missing-sidecar leases")
+    def test_check_only_reserves_missing_journal_name_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
+        keeper.commit()
+        journal_path = Path(str(self.db_path) + "-journal")
+        self.assertFalse(journal_path.exists())
+
+        class CheckOnlyJournalOutput(io.StringIO):
+            attempted = False
+            blocked = False
+            mutated = False
+
+            def write(self, value: str) -> int:
+                if not self.attempted:
+                    self.attempted = True
+                    try:
+                        journal_path.write_bytes(b"late-journal")
+                        self.mutated = True
+                    except OSError:
+                        self.blocked = True
+                return super().write(value)
+
+        output = CheckOnlyJournalOutput()
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=True,
+                health_root=self.root / "health",
+                output=output,
+            )
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        self.assertTrue(output.attempted)
+        self.assertTrue(output.blocked)
+        self.assertFalse(output.mutated)
+        self.assertTrue(result["ok"])
+        self.assertTrue(json.loads(output.getvalue())["ok"])
+
     def test_run_policy_rejects_new_sidecar_during_output(self) -> None:
         self.write_global(self.permission_drift())
         keeper = self.create_wal_db()
