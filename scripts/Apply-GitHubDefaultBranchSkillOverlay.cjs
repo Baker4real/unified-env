@@ -100,6 +100,43 @@ function expectedSurfaceDirectories(codexRoot) {
   }));
 }
 
+function canonicalInventoryTarget(target) {
+  return {
+    path: resolveAbsolute(target.path).toLowerCase(),
+    role: String(target.role).toLowerCase(),
+    surfaceDirectory: resolveAbsolute(target.surfaceDirectory).toLowerCase(),
+    codexRoot: resolveAbsolute(target.codexRoot).toLowerCase(),
+  };
+}
+
+function buildInventory(codexRoot, targets) {
+  const canonicalTargets = (Array.isArray(targets) ? targets : [])
+    .map(canonicalInventoryTarget)
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const canonicalRoot = resolveAbsolute(codexRoot).toLowerCase();
+  const payload = { codexRoot: canonicalRoot, targets: canonicalTargets };
+  return {
+    codexRoot: resolveAbsolute(codexRoot),
+    targets: canonicalTargets,
+    digest: sha256(JSON.stringify(payload)),
+  };
+}
+
+function inventoryPayload(inventory) {
+  if (!inventory || typeof inventory !== 'object' || typeof inventory.codexRoot !== 'string') return null;
+  if (!Array.isArray(inventory.targets)) return null;
+  return {
+    codexRoot: resolveAbsolute(inventory.codexRoot).toLowerCase(),
+    targets: inventory.targets.map(canonicalInventoryTarget)
+      .sort((left, right) => left.path.localeCompare(right.path)),
+  };
+}
+
+function inventoryDigest(inventory) {
+  const payload = inventoryPayload(inventory);
+  return payload ? sha256(JSON.stringify(payload)) : null;
+}
+
 function supportedPluginSurface(filePath, codexRoot = CODEX_ROOT) {
   const resolved = resolveAbsolute(filePath);
   const rootBase = resolveAbsolute(codexRoot);
@@ -420,12 +457,18 @@ function discoverTargets(codexRoot) {
     });
   }
   targets.sort((left, right) => left.path.localeCompare(right.path));
-  return { targets, errors };
+  return { targets, errors, inventory: buildInventory(root, targets) };
 }
 
 function normaliseTargets(input) {
-  if (Array.isArray(input)) return { targets: input, errors: [] };
-  if (input && Array.isArray(input.targets)) return { targets: input.targets, errors: Array.isArray(input.errors) ? input.errors : [] };
+  if (Array.isArray(input)) return { targets: input, errors: [], inventory: null };
+  if (input && Array.isArray(input.targets)) {
+    return {
+      targets: input.targets,
+      errors: Array.isArray(input.errors) ? input.errors : [],
+      inventory: input.inventory || null,
+    };
+  }
   return { targets: [], errors: [{ reason: 'invalid-target-list', message: 'targets must be an array or discoverTargets result' }] };
 }
 
@@ -434,6 +477,13 @@ function buildChangePlan(targetInput, catalogOrPath) {
   const errors = [...discovered.errors];
   const changes = [];
   const skipped = [];
+  const inventory = discovered.inventory;
+  if (!inventory || inventoryDigest(inventory) !== inventory.digest) {
+    errors.push({
+      reason: 'missing-or-invalid-inventory',
+      message: 'buildChangePlan requires the unmodified discoverTargets inventory and digest',
+    });
+  }
   if (discovered.targets.length !== EXPECTED_TARGET_COUNT
     && !errors.some((error) => error.reason === 'unexpected-target-count')) {
     errors.push({
@@ -498,7 +548,15 @@ function buildChangePlan(targetInput, catalogOrPath) {
       continue;
     }
     if (entry.patchedSha256 === currentSha256) {
-      skipped.push({ path: filePath, role: target.role, sha256: currentSha256, reason: 'already-patched' });
+      skipped.push({
+        ...target,
+        path: filePath,
+        role: target.role,
+        sha256: currentSha256,
+        patchedSha256: entry.patchedSha256,
+        mtimeMs: mtimeFingerprint(originalStat.mtimeMs),
+        reason: 'already-patched',
+      });
       continue;
     }
     changes.push({
@@ -515,7 +573,7 @@ function buildChangePlan(targetInput, catalogOrPath) {
     });
   }
 
-  return { changes, skipped, errors, catalogRef };
+  return { changes, skipped, errors, catalogRef, inventory };
 }
 
 function ensureDirectory(directory) {
@@ -754,16 +812,104 @@ function resolveCanonicalCatalog(plan, options = {}) {
   };
 }
 
+function validatePlanInventory(plan, changes, skipped) {
+  const errors = [];
+  const inventoryByPath = new Map();
+  const inventory = plan.inventory;
+  if (!inventory || typeof inventory !== 'object' || typeof inventory.codexRoot !== 'string'
+    || !Array.isArray(inventory.targets) || typeof inventory.digest !== 'string') {
+    errors.push({ reason: 'missing-or-invalid-inventory', message: 'apply requires a complete discoverTargets inventory' });
+    return { errors, inventoryByPath };
+  }
+  let root;
+  try {
+    root = resolveAbsolute(inventory.codexRoot);
+    assertDDrivePath(root, 'inventory codexRoot');
+  } catch (error) {
+    errors.push({ reason: 'inventory-validation-failed', message: error.message });
+    return { errors, inventoryByPath };
+  }
+  if (inventory.targets.length !== EXPECTED_TARGET_COUNT) {
+    errors.push({ reason: 'unexpected-inventory-target-count', expected: EXPECTED_TARGET_COUNT, actual: inventory.targets.length });
+  }
+  let canonicalTargets;
+  try {
+    canonicalTargets = inventory.targets.map((target) => {
+      if (!target || typeof target.path !== 'string' || typeof target.role !== 'string'
+        || typeof target.surfaceDirectory !== 'string' || typeof target.codexRoot !== 'string') {
+        throw new Error('inventory target fields are incomplete');
+      }
+      return canonicalInventoryTarget(target);
+    });
+  } catch (error) {
+    errors.push({ reason: 'invalid-inventory-target', message: error.message });
+    canonicalTargets = [];
+  }
+  canonicalTargets.sort((left, right) => left.path.localeCompare(right.path));
+  for (const target of canonicalTargets) {
+    if (inventoryByPath.has(target.path)) errors.push({ path: target.path, reason: 'duplicate-inventory-target' });
+    inventoryByPath.set(target.path, target);
+  }
+  try {
+    const digest = inventoryDigest(inventory);
+    if (!digest || digest !== String(inventory.digest).toUpperCase()) {
+      errors.push({ reason: 'inventory-digest-mismatch', message: 'inventory digest does not match canonical target list' });
+    }
+  } catch (error) {
+    errors.push({ reason: 'inventory-digest-failed', message: error.message });
+  }
+
+  const currentDiscovery = discoverTargets(root);
+  if (currentDiscovery.errors.length > 0) {
+    errors.push(...currentDiscovery.errors.map((error) => ({ ...error, reason: `current-${error.reason}` })));
+  }
+  if (!currentDiscovery.inventory || currentDiscovery.inventory.digest !== String(inventory.digest).toUpperCase()) {
+    errors.push({ reason: 'inventory-drift', message: 'current discoverTargets inventory differs from the plan inventory' });
+  }
+
+  const represented = new Set();
+  const combined = [
+    ...changes.map((entry) => ({ kind: 'change', entry })),
+    ...skipped.map((entry) => ({ kind: 'skipped', entry })),
+  ];
+  if (combined.length !== EXPECTED_TARGET_COUNT) {
+    errors.push({ reason: 'unexpected-plan-target-count', expected: EXPECTED_TARGET_COUNT, actual: combined.length });
+  }
+  for (const { kind, entry } of combined) {
+    if (!entry || typeof entry.path !== 'string' || typeof entry.role !== 'string'
+      || typeof entry.surfaceDirectory !== 'string' || typeof entry.codexRoot !== 'string') {
+      errors.push({ reason: 'invalid-plan-entry', kind, message: 'plan entry lacks inventory identity fields' });
+      continue;
+    }
+    const canonical = canonicalInventoryTarget(entry);
+    const expected = inventoryByPath.get(canonical.path);
+    if (!expected || expected.role !== canonical.role
+      || expected.surfaceDirectory !== canonical.surfaceDirectory
+      || expected.codexRoot !== canonical.codexRoot) {
+      errors.push({ path: entry.path, role: entry.role, reason: 'inventory-entry-mismatch' });
+    }
+    if (represented.has(canonical.path)) errors.push({ path: entry.path, reason: 'duplicate-plan-target' });
+    represented.add(canonical.path);
+  }
+  if (represented.size !== EXPECTED_TARGET_COUNT || inventoryByPath.size !== EXPECTED_TARGET_COUNT) {
+    errors.push({ reason: 'incomplete-plan-inventory-coverage', expected: EXPECTED_TARGET_COUNT, represented: represented.size, inventory: inventoryByPath.size });
+  }
+  return { errors, inventoryByPath };
+}
+
 function validateApplyChangePlan(plan, canonicalCatalog) {
   const errors = [];
   const seenPaths = new Set();
   const changes = Array.isArray(plan.changes) ? plan.changes : [];
-  if (changes.length !== EXPECTED_TARGET_COUNT) {
+  const skipped = Array.isArray(plan.skipped) ? plan.skipped : [];
+  const inventoryValidation = validatePlanInventory(plan, changes, skipped);
+  errors.push(...inventoryValidation.errors);
+  if (changes.length + skipped.length !== EXPECTED_TARGET_COUNT) {
     errors.push({
-      reason: 'unexpected-change-count',
+      reason: 'unexpected-plan-target-count',
       expected: EXPECTED_TARGET_COUNT,
-      actual: changes.length,
-      message: `apply requires exactly ${EXPECTED_TARGET_COUNT} target changes`,
+      actual: changes.length + skipped.length,
+      message: `apply requires exactly ${EXPECTED_TARGET_COUNT} inventory target entries`,
     });
   }
   for (const [index, change] of (Array.isArray(plan.changes) ? plan.changes : []).entries()) {
@@ -855,6 +1001,35 @@ function validateApplyChangePlan(plan, canonicalCatalog) {
       errors.push({ path: pairedPath, role: pairedRole, reason: 'canonical-pair-fingerprint-mismatch' });
     }
   }
+  for (const [index, skippedEntry] of skipped.entries()) {
+    const role = String(skippedEntry.role || '').toLowerCase();
+    const filePath = typeof skippedEntry.path === 'string' ? resolveAbsolute(skippedEntry.path) : null;
+    if (!filePath || !fs.existsSync(filePath)) {
+      errors.push({ path: skippedEntry.path, reason: 'missing-skipped-target' });
+      continue;
+    }
+    const surface = supportedPluginSurface(filePath, skippedEntry.codexRoot || CODEX_ROOT);
+    if (!surface || surface.role !== role) {
+      errors.push({ path: filePath, role, reason: 'unsupported-skipped-surface' });
+      continue;
+    }
+    const currentSha256 = sha256File(filePath);
+    const canonicalPatched = canonicalCatalog.roles[role]?.find((entry) => entry.patchedSha256 === currentSha256);
+    if (!canonicalPatched) {
+      errors.push({ path: filePath, role, reason: 'skipped-canonical-fingerprint-mismatch' });
+    } else if (String(skippedEntry.patchedSha256 || '').toUpperCase() !== canonicalPatched.patchedSha256) {
+      errors.push({ path: filePath, role, reason: 'skipped-plan-fingerprint-mismatch' });
+    }
+    if (String(skippedEntry.sha256 || '').toUpperCase() !== currentSha256) {
+      errors.push({ path: filePath, role, reason: 'skipped-current-fingerprint-mismatch' });
+    }
+    const currentMtimeMs = mtimeFingerprint(fs.statSync(filePath).mtimeMs);
+    if (!Number.isFinite(Number(skippedEntry.mtimeMs))) {
+      errors.push({ path: filePath, reason: 'invalid-skipped-mtime-ms' });
+    } else if (currentMtimeMs !== Number(skippedEntry.mtimeMs)) {
+      errors.push({ path: filePath, role, reason: 'skipped-mtime-cas-conflict', currentMtimeMs, expectedMtimeMs: Number(skippedEntry.mtimeMs) });
+    }
+  }
   return errors;
 }
 
@@ -874,10 +1049,6 @@ function applyChangePlan(plan, options = {}) {
       evidencePaths: [],
     };
   }
-  if (planned.length === 0) {
-    return { ok: true, changed: 0, skipped: alreadySkipped, failed: 0, errors: [], evidencePaths: [] };
-  }
-
   let canonicalCatalog;
   try {
     canonicalCatalog = resolveCanonicalCatalog(safePlan, options).catalog;
@@ -904,6 +1075,10 @@ function applyChangePlan(plan, options = {}) {
       errors: boundaryErrors,
       evidencePaths: [],
     };
+  }
+
+  if (planned.length === 0) {
+    return { ok: true, changed: 0, skipped: alreadySkipped, failed: 0, errors: [], evidencePaths: [] };
   }
 
   if (options.dryRun) {

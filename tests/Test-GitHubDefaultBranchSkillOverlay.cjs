@@ -173,6 +173,34 @@ assert.equal(idempotent.changed, 0);
 assert.equal(idempotent.failed, 0);
 assert.equal(idempotent.skipped, 6);
 
+// Mixed state is valid: five targets are already patched and one target is
+// upstream. The complete inventory is still six, so apply changes only one.
+const mixedTarget = targets[0];
+const mixedVariant = mixedTarget.surfaceDirectory.includes('0.1.8-') ? 'remote' : 'local';
+fs.writeFileSync(mixedTarget.path, fixtureUpstream[mixedTarget.role][mixedVariant], 'utf8');
+const mixedDiscovery = overlay.discoverTargets(fixtureRoot);
+const mixedPlan = overlay.buildChangePlan(mixedDiscovery, fixtureCatalogPath);
+assert.equal(mixedPlan.changes.length, 1);
+assert.equal(mixedPlan.skipped.length, 5);
+const mixedApply = overlay.applyChangePlan(mixedPlan, fixtureApplyOptions({ dryRun: false }));
+assert.equal(mixedApply.changed, 1);
+assert.equal(mixedApply.failed, 0);
+
+// A skipped entry is not trusted merely because it is marked skipped.
+const forgedSkippedPlan = JSON.parse(JSON.stringify(secondPlan));
+forgedSkippedPlan.skipped[0].patchedSha256 = '0'.repeat(64);
+const forgedSkippedResult = overlay.applyChangePlan(forgedSkippedPlan, fixtureApplyOptions({ dryRun: true }));
+assert.equal(forgedSkippedResult.blocked, true);
+assert.ok(forgedSkippedResult.errors.some((error) => error.reason === 'skipped-plan-fingerprint-mismatch'));
+
+// A partial/hand-built plan without the discovery inventory is never allowed.
+const missingInventoryPartial = overlay.applyChangePlan(
+  { changes: [mixedPlan.changes[0]], skipped: [], errors: [], catalogRef: mixedPlan.catalogRef },
+  fixtureApplyOptions({ dryRun: true }),
+);
+assert.equal(missingInventoryPartial.blocked, true);
+assert.ok(missingInventoryPartial.errors.some((error) => error.reason === 'missing-or-invalid-inventory'));
+
 // Any new version or sibling surface is an inventory drift, even when both
 // files carry a catalog-known upstream fingerprint. The entire operation must
 // block before writing the six expected targets.
@@ -239,7 +267,7 @@ const forgedChange = JSON.parse(JSON.stringify(plan.changes[0]));
 forgedChange.path = externalTarget;
 forgedChange.codexRoot = codexRoot;
 const forgedApplyPlan = overlay.applyChangePlan(
-  { changes: [forgedChange], skipped: [], errors: [] },
+  { changes: [forgedChange], skipped: [], errors: [], inventory: plan.inventory },
   fixtureApplyOptions({ dryRun: true }),
 );
 assert.equal(forgedApplyPlan.changed, 0);
@@ -349,7 +377,7 @@ const canonicalCatalogObject = JSON.parse(fs.readFileSync(
 ));
 const canonicalObjectRef = overlay.buildChangePlan([], canonicalCatalogObject).catalogRef;
 const canonicalObjectNoFlag = overlay.applyChangePlan(
-  { changes: postWritePlan.changes, skipped: [], errors: [], catalogRef: canonicalObjectRef },
+  { changes: postWritePlan.changes, skipped: [], errors: [], catalogRef: canonicalObjectRef, inventory: postWritePlan.inventory },
   { dryRun: true, evidenceRoot },
 );
 assert.equal(canonicalObjectNoFlag.blocked, true);
@@ -369,7 +397,7 @@ assert.ok(outsideEvidenceResult.errors.some((error) => /evidenceRoot must stay u
 const replacementTamper = JSON.parse(JSON.stringify(postWritePlan.changes[0]));
 replacementTamper.replacement = 'tampered replacement';
 const replacementTamperResult = overlay.applyChangePlan(
-  { changes: [replacementTamper], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
+  { changes: [replacementTamper], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef, inventory: postWritePlan.inventory },
   fixtureApplyOptions({ dryRun: false }),
 );
 assert.equal(replacementTamperResult.changed, 0);
@@ -383,7 +411,7 @@ forgedCanonicalChange.catalogEntry = {
   patchedSha256: forgedCanonicalChange.replacementSha256,
 };
 const forgedCanonicalResult = overlay.applyChangePlan(
-  { changes: [forgedCanonicalChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
+  { changes: [forgedCanonicalChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef, inventory: postWritePlan.inventory },
   fixtureApplyOptions({ dryRun: false }),
 );
 assert.equal(forgedCanonicalResult.changed, 0);
@@ -395,7 +423,7 @@ const pairOriginal = fs.readFileSync(pairPath);
 const pairOriginalMtimeMs = pairChange.originalMtimeMs;
 fs.writeFileSync(pairPath, 'unknown pair fingerprint\n', 'utf8');
 const pairFingerprintResult = overlay.applyChangePlan(
-  { changes: [pairChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
+  { changes: [pairChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef, inventory: postWritePlan.inventory },
   fixtureApplyOptions({ dryRun: false }),
 );
 assert.equal(pairFingerprintResult.changed, 0);
@@ -406,7 +434,7 @@ assert.equal(fs.statSync(pairPath).mtimeMs, pairOriginalMtimeMs);
 const casTarget = postWritePlan.changes[0].path;
 fs.writeFileSync(casTarget, 'user changed before apply\n', 'utf8');
 const casResult = overlay.applyChangePlan(
-  { changes: [postWritePlan.changes[0]], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
+  { changes: [postWritePlan.changes[0]], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef, inventory: postWritePlan.inventory },
   fixtureApplyOptions({ dryRun: false }),
 );
 assert.equal(casResult.changed, 0);
