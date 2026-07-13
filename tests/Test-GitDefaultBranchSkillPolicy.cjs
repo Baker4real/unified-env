@@ -35,6 +35,23 @@ function check(name, callback) {
   }
 }
 
+function assertOrdered(text, patterns, label) {
+  let cursor = -1;
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    assert.ok(match, `${label}: missing ${pattern}`);
+    assert.ok(match.index > cursor, `${label}: ${pattern} is out of order`);
+    cursor = match.index;
+  }
+}
+
+function sectionBetween(text, start, end) {
+  const startIndex = text.search(start);
+  assert.ok(startIndex >= 0, `missing section ${start}`);
+  const endIndex = text.search(end);
+  return text.slice(startIndex, endIndex >= 0 ? endIndex : text.length);
+}
+
 check('finishing must resolve the default branch instead of guessing main/master', () => {
   assert.doesNotMatch(finishing.text, /merge-base\s+HEAD\s+(?:main|master)/i);
   assert.match(finishing.text, /ls-remote\s+--symref[\s\S]*\bHEAD\b/i);
@@ -46,6 +63,32 @@ check('finishing must publish and reconcile temporary branches explicitly', () =
   assert.match(finishing.text, /fetch\s+--prune/i);
   assert.match(finishing.text, /local[\s\S]*remote|remote[\s\S]*local/i);
   assert.doesNotMatch(finishing.text, /create (?:a )?pull request by default|default pull request|Keep the branch as-is/i);
+});
+
+check('canonical flows must own worktrees and remove them in a safe order', () => {
+  for (const [name, text] of [
+    ['finishing', finishing.text],
+    ['closeout reference', closeoutReference.text],
+    ['private compatibility flow', privateStack.text],
+  ]) {
+    assert.match(text, /(?:workflow|流程).*(?:owned|ownership|所有权|创建并.*接管|明确接管)/is);
+    assert.match(text, /(?:用户|user|未知|unknown).*(?:worktree).*(?:不.*删除|报告|停止|stop|保留)/is);
+    assert.match(text, /(?:其他|other).*(?:worktree).*(?:报告|停止|stop|保留)/is);
+    assert.match(text, /remote deletion failed|远端删除失败/i);
+    assert.match(text, /(?:保留|preserve).*(?:local|本地).*(?:worktree|工作树)/is);
+    assertOrdered(
+      text,
+      [
+        /git\s+push[^\n]*--delete/i,
+        /git\s+worktree\s+remove/i,
+        /git\s+branch\s+-d\b/i,
+        /git\s+fetch\s+--prune/i,
+      ],
+      name,
+    );
+    const direct = sectionBetween(text, /直接 default branch 发布|默认发布路径/i, /受控临时分支|受控临时 worktree|临时分支生命周期|临时分支清理/i);
+    assert.doesNotMatch(direct, /git\s+worktree\s+(?:add|remove)/i);
+  }
 });
 
 check('private-patch-stack must be private-default compatibility protection', () => {
