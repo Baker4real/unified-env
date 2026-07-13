@@ -1,7 +1,7 @@
 {
   "artifactType": "env-governance.codex-hook-inventory",
   "schemaVersion": 1,
-  "generatedAtUtc": "2026-07-12T09:50:56.1021224+00:00",
+  "generatedAtUtc": "2026-07-13T02:13:15.4103186+00:00",
   "readOnly": true,
   "executionAllowed": false,
   "manifest": {
@@ -10,7 +10,7 @@
     "codexHome": "D:\\Codex\\.codex",
     "managedRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks",
     "hookCount": 8,
-    "fileCount": 12
+    "fileCount": 16
   },
   "registry": {
     "registryFileSha256": "eb55a1b92aa9828ab9ab1c410aeb188fe64c39815f216bc96889ce93cd913b6f",
@@ -228,20 +228,20 @@
       "relativePath": "hooks/codex-github-cli-guard.ps1",
       "liveRelativePath": "codex-github-cli-guard.ps1",
       "lifecycle": "active",
-      "declaredSha256": "e953359767c3eed033aa9ad1ceb52793287d7b27bc531399c642167f14eb0f3d",
+      "declaredSha256": "96e02d0d01a711c4901864b430009edef33f961fd9087fddc53a8a80ad3258e6",
       "managedExists": true,
       "managedProbeState": "regular-file",
-      "managedSha256": "e953359767c3eed033aa9ad1ceb52793287d7b27bc531399c642167f14eb0f3d",
+      "managedSha256": "96e02d0d01a711c4901864b430009edef33f961fd9087fddc53a8a80ad3258e6",
       "managedMatchesManifest": true,
       "liveExists": true,
       "liveProbeState": "regular-file",
       "liveSha256": "e953359767c3eed033aa9ad1ceb52793287d7b27bc531399c642167f14eb0f3d",
-      "liveMatchesManifest": true
+      "liveMatchesManifest": false
     },
     {
-      "relativePath": "hooks/codex-mobile-permission-guard.cmd",
+      "relativePath": "retired/codex-mobile-permission-guard.cmd",
       "liveRelativePath": "codex-mobile-permission-guard.cmd",
-      "lifecycle": "compatibility",
+      "lifecycle": "retired",
       "declaredSha256": "b86b9c3e743998b41324f868b15594d979fe6bcecd079be5a3cb4e44e6c8e7ec",
       "managedExists": true,
       "managedProbeState": "regular-file",
@@ -253,9 +253,9 @@
       "liveMatchesManifest": false
     },
     {
-      "relativePath": "hooks/codex-mobile-permission-guard.py",
+      "relativePath": "retired/codex-mobile-permission-guard.py",
       "liveRelativePath": "codex-mobile-permission-guard.py",
-      "lifecycle": "compatibility",
+      "lifecycle": "retired",
       "declaredSha256": "efb7c3838f9085e5ebe1a452352149fb8843db64d6560e552e009b8de71aac64",
       "managedExists": true,
       "managedProbeState": "regular-file",
@@ -270,20 +270,20 @@
       "relativePath": "hooks/codex-projectless-root-d.cmd",
       "liveRelativePath": "codex-projectless-root-d.cmd",
       "lifecycle": "active",
-      "declaredSha256": "19fafb8c1c59b4f967a0e60597fb76d7db443c9e7ba04ef31ab53e04cd723b23",
+      "declaredSha256": "5cf8bcfae4907df658f887d36f34ac518641bed12f70ad8ff4c391069d5a3a0b",
       "managedExists": true,
       "managedProbeState": "regular-file",
-      "managedSha256": "19fafb8c1c59b4f967a0e60597fb76d7db443c9e7ba04ef31ab53e04cd723b23",
+      "managedSha256": "5cf8bcfae4907df658f887d36f34ac518641bed12f70ad8ff4c391069d5a3a0b",
       "managedMatchesManifest": true,
       "liveExists": true,
       "liveProbeState": "regular-file",
       "liveSha256": "19fafb8c1c59b4f967a0e60597fb76d7db443c9e7ba04ef31ab53e04cd723b23",
-      "liveMatchesManifest": true
+      "liveMatchesManifest": false
     },
     {
-      "relativePath": "hooks/codex-projectless-root-d.js",
+      "relativePath": "retired/codex-projectless-root-d.js",
       "liveRelativePath": "codex-projectless-root-d.js",
-      "lifecycle": "active",
+      "lifecycle": "retired",
       "declaredSha256": "f32046560a34c035e28a58bf3c7dee9e770e424de87a313f6fd336c01eacca21",
       "managedExists": true,
       "managedProbeState": "regular-file",
@@ -293,6 +293,20 @@
       "liveProbeState": "regular-file",
       "liveSha256": "f32046560a34c035e28a58bf3c7dee9e770e424de87a313f6fd336c01eacca21",
       "liveMatchesManifest": true
+    },
+    {
+      "relativePath": "hooks/codex-state-policy-guard.py",
+      "liveRelativePath": "codex-state-policy-guard.py",
+      "lifecycle": "active",
+      "declaredSha256": "a87392c2b9094c8fcf29b26a61713151f2e85c4bef15b0d73126d0943a5789c1",
+      "managedExists": true,
+      "managedProbeState": "regular-file",
+      "managedSha256": "a87392c2b9094c8fcf29b26a61713151f2e85c4bef15b0d73126d0943a5789c1",
+      "managedMatchesManifest": true,
+      "liveExists": false,
+      "liveProbeState": "missing",
+      "liveSha256": null,
+      "liveMatchesManifest": false
     },
     {
       "relativePath": "hooks/codex-provider-stability-guard.cmd",
@@ -312,15 +326,15 @@
       "relativePath": "hooks/codex-provider-stability-guard.ps1",
       "liveRelativePath": "codex-provider-stability-guard.ps1",
       "lifecycle": "active",
-      "declaredSha256": "24e2aa35bb07bf962b7b081a3de7b8f9b48b8b6817ebfadcf052686bc054ccf6",
+      "declaredSha256": "e2e7c570bd3db78f75491558605bc8d4c932226fec345cfab58aa23f1a387f1a",
       "managedExists": true,
       "managedProbeState": "regular-file",
-      "managedSha256": "24e2aa35bb07bf962b7b081a3de7b8f9b48b8b6817ebfadcf052686bc054ccf6",
+      "managedSha256": "e2e7c570bd3db78f75491558605bc8d4c932226fec345cfab58aa23f1a387f1a",
       "managedMatchesManifest": true,
       "liveExists": true,
       "liveProbeState": "regular-file",
       "liveSha256": "24e2aa35bb07bf962b7b081a3de7b8f9b48b8b6817ebfadcf052686bc054ccf6",
-      "liveMatchesManifest": true
+      "liveMatchesManifest": false
     },
     {
       "relativePath": "hooks/serena-activate-guarded.cmd",
@@ -340,15 +354,15 @@
       "relativePath": "hooks/serena-activate-guarded.ps1",
       "liveRelativePath": "serena-activate-guarded.ps1",
       "lifecycle": "active",
-      "declaredSha256": "87855f0e8d239737461b79207fa9486650d756f3a8af69f98a4279f6c690eb97",
+      "declaredSha256": "6af75c67f64c16abb33cfa47a765c93afff7cc83f0f21076a96d9505a2d0d0ca",
       "managedExists": true,
       "managedProbeState": "regular-file",
-      "managedSha256": "87855f0e8d239737461b79207fa9486650d756f3a8af69f98a4279f6c690eb97",
+      "managedSha256": "6af75c67f64c16abb33cfa47a765c93afff7cc83f0f21076a96d9505a2d0d0ca",
       "managedMatchesManifest": true,
       "liveExists": true,
       "liveProbeState": "regular-file",
       "liveSha256": "87855f0e8d239737461b79207fa9486650d756f3a8af69f98a4279f6c690eb97",
-      "liveMatchesManifest": true
+      "liveMatchesManifest": false
     },
     {
       "relativePath": "hooks/serena-dashboard-guard.cmd",
@@ -368,15 +382,57 @@
       "relativePath": "hooks/serena-dashboard-guard.ps1",
       "liveRelativePath": "serena-dashboard-guard.ps1",
       "lifecycle": "active",
-      "declaredSha256": "ab6f29732ef350adc4c038451a3fdad3b1fe0a57f0b02fa774c9c280d1f26bb1",
+      "declaredSha256": "820b49e97fc77aeda865ee2eca4d06de642be43f7ed3d671f47d4d9270ffac84",
       "managedExists": true,
       "managedProbeState": "regular-file",
-      "managedSha256": "ab6f29732ef350adc4c038451a3fdad3b1fe0a57f0b02fa774c9c280d1f26bb1",
+      "managedSha256": "820b49e97fc77aeda865ee2eca4d06de642be43f7ed3d671f47d4d9270ffac84",
       "managedMatchesManifest": true,
       "liveExists": true,
       "liveProbeState": "regular-file",
       "liveSha256": "ab6f29732ef350adc4c038451a3fdad3b1fe0a57f0b02fa774c9c280d1f26bb1",
-      "liveMatchesManifest": true
+      "liveMatchesManifest": false
+    },
+    {
+      "relativePath": "hooks/lib/CodexHookRuntime.ps1",
+      "liveRelativePath": "lib/CodexHookRuntime.ps1",
+      "lifecycle": "active",
+      "declaredSha256": "8e79250ba9f8114a38b3411dda1fe62616701ba1b43c0cdbafedd14680172004",
+      "managedExists": true,
+      "managedProbeState": "regular-file",
+      "managedSha256": "8e79250ba9f8114a38b3411dda1fe62616701ba1b43c0cdbafedd14680172004",
+      "managedMatchesManifest": true,
+      "liveExists": false,
+      "liveProbeState": "missing",
+      "liveSha256": null,
+      "liveMatchesManifest": false
+    },
+    {
+      "relativePath": "hooks/lib/CodexGitHubCliGuardEntry.ps1",
+      "liveRelativePath": "lib/CodexGitHubCliGuardEntry.ps1",
+      "lifecycle": "active",
+      "declaredSha256": "bf7239c8e24ca33d410e6f1c36855f187703f90a35e212a86386d9723740bad2",
+      "managedExists": true,
+      "managedProbeState": "regular-file",
+      "managedSha256": "bf7239c8e24ca33d410e6f1c36855f187703f90a35e212a86386d9723740bad2",
+      "managedMatchesManifest": true,
+      "liveExists": false,
+      "liveProbeState": "missing",
+      "liveSha256": null,
+      "liveMatchesManifest": false
+    },
+    {
+      "relativePath": "hooks/lib/CodexConfigFile.ps1",
+      "liveRelativePath": "lib/CodexConfigFile.ps1",
+      "lifecycle": "active",
+      "declaredSha256": "d2f8b2bedd555c8eb4bf6ec785699fbcb84ffb133ec26647ecd2fe9e271df25c",
+      "managedExists": true,
+      "managedProbeState": "regular-file",
+      "managedSha256": "d2f8b2bedd555c8eb4bf6ec785699fbcb84ffb133ec26647ecd2fe9e271df25c",
+      "managedMatchesManifest": true,
+      "liveExists": false,
+      "liveProbeState": "missing",
+      "liveSha256": null,
+      "liveMatchesManifest": false
     }
   ],
   "dependencyFacts": [
@@ -401,12 +457,12 @@
       "wrapperReferencesImplementation": true,
       "wrapperReferencesRuntime": true,
       "readResourceCount": 3,
-      "writeResourceCount": 4,
+      "writeResourceCount": 6,
       "dependencyState": "ready"
     },
     {
       "id": "codex-state-policy",
-      "sourceState": "planned",
+      "sourceState": "managed",
       "entrypointKind": "wrapper",
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
       "wrapperExists": true,
@@ -448,8 +504,8 @@
       "wrapperParseState": "matched",
       "wrapperReferencesImplementation": true,
       "wrapperReferencesRuntime": true,
-      "readResourceCount": 3,
-      "writeResourceCount": 2,
+      "readResourceCount": 4,
+      "writeResourceCount": 4,
       "dependencyState": "ready"
     },
     {
@@ -473,7 +529,7 @@
       "wrapperReferencesImplementation": true,
       "wrapperReferencesRuntime": true,
       "readResourceCount": 2,
-      "writeResourceCount": 3,
+      "writeResourceCount": 6,
       "dependencyState": "ready"
     },
     {
@@ -496,8 +552,8 @@
       "wrapperParseState": "matched",
       "wrapperReferencesImplementation": true,
       "wrapperReferencesRuntime": true,
-      "readResourceCount": 5,
-      "writeResourceCount": 5,
+      "readResourceCount": 6,
+      "writeResourceCount": 6,
       "dependencyState": "ready"
     },
     {
@@ -582,7 +638,7 @@
     "duplicateIdentityCount": 0,
     "duplicateCommandCount": 0,
     "managedMissingCount": 0,
-    "liveMissingCount": 0,
+    "liveMissingCount": 4,
     "unsafeFileProbeCount": 0,
     "dependencyGapCount": 1,
     "retiredButRegisteredCount": 1,
@@ -708,5 +764,5 @@
       ]
     }
   ],
-  "generationId": "3bc25a61-0a99-4bfc-8460-02d80718a0df"
+  "generationId": "f96390ee-6d32-459e-b005-dd52a4751b3b"
 }

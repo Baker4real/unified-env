@@ -1,10 +1,10 @@
 ---
-generationId: 3bc25a61-0a99-4bfc-8460-02d80718a0df
-sourceJsonSha256: a7ad39f4d0a611d5b4542354be3c777ebb04f0d9e51d5ae3e212b871dda7f71b
+generationId: f96390ee-6d32-459e-b005-dd52a4751b3b
+sourceJsonSha256: a8ab487490fdd679d822345fe65b0a9092e19dbe7cf56884fb69b17ea5353c5f
 ---
 # Codex Hook 只读盘点
 
-- 生成时间（UTC）：2026-07-12T09:50:56.1021224+00:00
+- 生成时间（UTC）：2026-07-13T02:13:15.4103186+00:00
 - 只读：True
 - 允许执行：False
 - Registry 事件数：4
@@ -13,7 +13,7 @@ sourceJsonSha256: a7ad39f4d0a611d5b4542354be3c777ebb04f0d9e51d5ae3e212b871dda7f7
 - 缺失 command target：0
 - 未探测 unknown target：0
 - 缺失 managed 文件：0
-- 缺失 live 文件：0
+- 缺失 live 文件：4
 - Wrapper/runtime/implementation 缺口：1
 - 已 retirement 但仍注册：1
 - Trust key 观察数：0

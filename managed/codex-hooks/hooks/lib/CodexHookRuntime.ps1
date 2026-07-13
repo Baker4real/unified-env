@@ -13,6 +13,34 @@ function Receive-CodexHookBoundedProcessStream {
     return $Task.GetAwaiter().GetResult()
 }
 
+function Complete-CodexHookProcessWithBoundedDrain {
+    param(
+        [Parameter(Mandatory)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][object]$StdoutTask,
+        [Parameter(Mandatory)][object]$StderrTask,
+        [Parameter(Mandatory)][int]$TimeoutMilliseconds,
+        [Parameter(Mandatory)][string]$ProcessName
+    )
+    if (-not $Process.WaitForExit($TimeoutMilliseconds)) {
+        try { $Process.Kill($true) } catch {}
+        try { [void]$Process.WaitForExit($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+        try { [void]$StdoutTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+        try { [void]$StderrTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+        throw "$ProcessName 超时。"
+    }
+    try {
+        [void](Receive-CodexHookBoundedProcessStream -Task $StdoutTask -StreamName "$ProcessName stdout")
+        return Receive-CodexHookBoundedProcessStream -Task $StderrTask -StreamName "$ProcessName stderr"
+    } catch {
+        $drainError = $_
+        try { $Process.Kill($true) } catch {}
+        try { [void]$Process.WaitForExit($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+        try { [void]$StdoutTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+        try { [void]$StderrTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+        throw $drainError
+    }
+}
+
 function Get-CodexHookSha256 {
     param([Parameter(Mandatory)][string]$Path)
     if (-not [IO.File]::Exists($Path)) { throw "文件不存在：$Path" }
@@ -197,7 +225,7 @@ function Assert-CodexHookHealthPayload {
     if ($HookId -cnotmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') { throw 'health hookId 非法。' }
     $allowed = @('hookId','runId','startedAtUtc','completedAtUtc','durationMs','ok','changed','restartRequired','errors')
     $names = @($Payload.PSObject.Properties.Name)
-    if (($names -join "`0") -cne ($allowed -join "`0")) { throw 'health payload schema 非法。' }
+    if ($names.Count -ne $allowed.Count -or ((@($names | Sort-Object) -join "`0") -cne (@($allowed | Sort-Object) -join "`0"))) { throw 'health payload schema 非法。' }
     if ([string]$Payload.hookId -cne $HookId) { throw 'health hookId 不一致。' }
     if ([string]$Payload.runId -cnotmatch '^[0-9a-f]{32}$') { throw 'health runId 非法。' }
     foreach($name in @('startedAtUtc','completedAtUtc')){$parsed=[datetimeoffset]::MinValue;if(-not[datetimeoffset]::TryParse([string]$Payload.$name,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind,[ref]$parsed)){throw "health $name 非法。"}}

@@ -23,8 +23,7 @@ $p=[Diagnostics.Process]::new();$p.StartInfo=$psi;$buffer=[IO.MemoryStream]::new
 try{
     if(-not $p.Start()){throw 'fixture vendor 启动失败'}
     $copy=$p.StandardOutput.BaseStream.CopyToAsync($buffer);$stderrTask=$p.StandardError.ReadToEndAsync();$p.StandardInput.Write($input);$p.StandardInput.Close()
-    if(-not $p.WaitForExit(5000)){try{$p.Kill($true)}catch{};throw 'fixture vendor 超时'}
-    [void]$copy.GetAwaiter().GetResult();$stderr=$stderrTask.GetAwaiter().GetResult();[byte[]]$bytes=$buffer.ToArray()
+    $stderr=Complete-CodexHookProcessWithBoundedDrain -Process $p -StdoutTask $copy -StderrTask $stderrTask -TimeoutMilliseconds 5000 -ProcessName 'fixture vendor';[byte[]]$bytes=$buffer.ToArray()
     if($p.ExitCode -ne 0 -or -not[string]::IsNullOrWhiteSpace($stderr)){throw 'fixture vendor 失败'}
     Assert-CodexSerenaSessionStartOutputBytes -Bytes $bytes
     $watch.Stop();$health=[pscustomobject][ordered]@{hookId='serena-activate';runId=[guid]::NewGuid().ToString('N');startedAtUtc=$started.ToString('o');completedAtUtc=[DateTime]::UtcNow.ToString('o');durationMs=[long]$watch.ElapsedMilliseconds;ok=$true;changed=$false;restartRequired=$false;errors=[string[]]@()}

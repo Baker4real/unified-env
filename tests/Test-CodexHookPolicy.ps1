@@ -378,6 +378,9 @@ $dashboard=@($managedManifest.hooks|Where-Object id -ceq 'serena-dashboard')[0]
 $serenaActivate=@($managedManifest.hooks|Where-Object id -ceq 'serena-activate')[0]
 $github=@($managedManifest.hooks|Where-Object id -ceq 'github-cli')[0]
 function Assert-WriteResource([object]$Hook,[string]$Path,[string]$Message){Assert-True (@($Hook.writeResources|Where-Object{$_.kind -ceq 'path' -and $_.value -ceq $Path}).Count -eq 1) $Message}
+function Assert-ReadResource([object]$Hook,[string]$Path,[string]$Message){Assert-True (@($Hook.readResources|Where-Object{$_.kind -ceq 'path' -and $_.value -ceq $Path}).Count -eq 1) $Message}
+Assert-ReadResource $github 'D:\Codex\tools\gh\bin\gh.exe' 'GitHub manifest 必须声明实际官方 gh.exe 信任/签名输入'
+Assert-ReadResource $serenaActivate 'D:\Codex\tools\uv\bin\serena-hooks.exe' 'Serena activate manifest 必须声明实际 serena-hooks.exe runtime 输入'
 Assert-WriteResource $provider 'D:\Codex\.codex\backups_state\provider-stability-guard' 'provider manifest 必须声明 config rollback backup 写资源'
 Assert-WriteResource $dashboard 'D:\Codex\.codex\backups_state\serena-dashboard-guard\toml' 'dashboard manifest 必须声明 TOML rollback backup 写资源'
 Assert-WriteResource $dashboard 'D:\Codex\.codex\backups_state\serena-dashboard-guard\yaml' 'dashboard manifest 必须声明 YAML rollback backup 写资源'

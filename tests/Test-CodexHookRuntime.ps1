@@ -193,6 +193,21 @@ $serenaFixtureScript=Join-Path $serenaFixtureRoot 'serena-hooks-fixture.ps1'
 $fixtureSource=@'
 $null=[Console]::In.ReadToEnd()
 $valid="{`"hookSpecificOutput`":{`"hookEventName`":`"SessionStart`",`"additionalContext`":`"fixture context`"}}`r`n"
+$child=$null
+if($env:CODEX_SERENA_FIXTURE_MODE -ceq 'inherited'){
+  $childStart=[Diagnostics.ProcessStartInfo]::new()
+  $childStart.FileName='D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+  $childStart.UseShellExecute=$false
+  $childStart.CreateNoWindow=$true
+  [void]$childStart.ArgumentList.Add('-NoProfile')
+  [void]$childStart.ArgumentList.Add('-Command')
+  [void]$childStart.ArgumentList.Add('Start-Sleep -Seconds 3')
+  $child=[Diagnostics.Process]::Start($childStart)
+  if($null -eq $child){throw 'inherited-pipe child failed to start'}
+  if(-not [string]::IsNullOrWhiteSpace($env:CODEX_SERENA_CHILD_PID_PATH)){
+    [IO.File]::WriteAllText($env:CODEX_SERENA_CHILD_PID_PATH,[string]$child.Id,[Text.UTF8Encoding]::new($false))
+  }
+}
 $output=switch($env:CODEX_SERENA_FIXTURE_MODE){'invalid'{'not-json'}'extra'{"${valid}EXTRA"}default{$valid}}
 $bytes=[Text.UTF8Encoding]::new($false).GetBytes($output)
 [Console]::OpenStandardOutput().Write($bytes,0,$bytes.Length)
@@ -200,13 +215,15 @@ $bytes=[Text.UTF8Encoding]::new($false).GetBytes($output)
 [IO.File]::WriteAllText($serenaFixtureScript,$fixtureSource,[Text.UTF8Encoding]::new($false))
 $serenaScript=Join-Path $projectRoot 'tests\lib\Invoke-SerenaActivateFixture.ps1'
 $serenaHealthRoot='D:\Codex\projects\统一环境\reports\codex-hook-health-test'
+$serenaChildPidPath=Join-Path $serenaFixtureRoot 'inherited-child.pid'
 function Invoke-SerenaActivateFixture([string]$Mode){
     if(Test-Path -LiteralPath $serenaHealthRoot){Remove-Item -LiteralPath $serenaHealthRoot -Recurse -Force}
     $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName='D:\Codex\tools\PowerShell\7.6.3\pwsh.exe';$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardInput=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
     foreach($arg in @('-NoProfile','-File',$serenaScript,'-VendorPath','D:\Codex\tools\PowerShell\7.6.3\pwsh.exe','-FixtureVendorScriptPath',$serenaFixtureScript,'-RuntimePath',$runtimePath,'-HealthRoot',$serenaHealthRoot,'-AllowFixture')){[void]$psi.ArgumentList.Add($arg)}
-    $psi.Environment['CODEX_SERENA_FIXTURE_MODE']=$Mode
+    $psi.Environment['CODEX_SERENA_FIXTURE_MODE']=$Mode;$psi.Environment['CODEX_SERENA_CHILD_PID_PATH']=$serenaChildPidPath
     $p=[Diagnostics.Process]::new();$p.StartInfo=$psi;$buffer=[IO.MemoryStream]::new()
-    try{Assert-True $p.Start() 'Serena fixture process 必须启动';$copy=$p.StandardOutput.BaseStream.CopyToAsync($buffer);$stderrTask=$p.StandardError.ReadToEndAsync();$p.StandardInput.Write('{"session_id":"redacted-session"}');$p.StandardInput.Close();Assert-True ($p.WaitForExit(10000)) 'Serena fixture process 必须结束';$copy.GetAwaiter().GetResult();return [pscustomobject]@{exitCode=$p.ExitCode;stdout=[byte[]]$buffer.ToArray();stderr=$stderrTask.GetAwaiter().GetResult()}}finally{$buffer.Dispose();$p.Dispose()}
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    try{Assert-True $p.Start() 'Serena fixture process 必须启动';$copy=$p.StandardOutput.BaseStream.CopyToAsync($buffer);$stderrTask=$p.StandardError.ReadToEndAsync();$p.StandardInput.Write('{"session_id":"redacted-session"}');$p.StandardInput.Close();Assert-True ($p.WaitForExit(10000)) 'Serena fixture process 必须结束';$copy.GetAwaiter().GetResult();$watch.Stop();return [pscustomobject]@{exitCode=$p.ExitCode;stdout=[byte[]]$buffer.ToArray();stderr=$stderrTask.GetAwaiter().GetResult();durationMs=[long]$watch.ElapsedMilliseconds}}finally{$watch.Stop();$buffer.Dispose();$p.Dispose()}
 }
 $validVendorBytes=[Text.UTF8Encoding]::new($false).GetBytes("{`"hookSpecificOutput`":{`"hookEventName`":`"SessionStart`",`"additionalContext`":`"fixture context`"}}`r`n")
 $validActivate=@(Invoke-SerenaActivateFixture 'valid')[-1]
@@ -215,6 +232,23 @@ Assert-Bytes $validActivate.stdout $validVendorBytes ("Serena activate 必须逐
 $validHealth=Get-Content -Raw -LiteralPath (Join-Path $serenaHealthRoot 'serena-activate.json')|ConvertFrom-Json
 Assert-True ($validHealth.ok -eq $true -and $validHealth.hookId -ceq 'serena-activate') 'Serena activate 合法输出后必须写独立成功 health'
 foreach($mode in @('invalid','extra')){$failed=@(Invoke-SerenaActivateFixture $mode)[-1];Assert-True ($failed.exitCode -ne 0) "$mode vendor 输出必须 fail closed";Assert-True ($failed.stdout.Length -eq 0) "$mode vendor 输出不得污染 stdout";$failedHealth=Get-Content -Raw -LiteralPath (Join-Path $serenaHealthRoot 'serena-activate.json')|ConvertFrom-Json;Assert-True ($failedHealth.ok -eq $false) "$mode vendor 输出必须写脱敏失败 health"}
+try{
+    if(Test-Path -LiteralPath $serenaChildPidPath){Remove-Item -LiteralPath $serenaChildPidPath -Force}
+    $inheritedPipe=@(Invoke-SerenaActivateFixture 'inherited')[-1]
+    Assert-True ($inheritedPipe.exitCode -ne 0) 'vendor 已退出但后代继承 pipe 时必须 fail closed'
+    Assert-True ($inheritedPipe.durationMs -lt 2000) "vendor inherited pipe drain 必须受 10 秒 manifest budget 约束；actual=$($inheritedPipe.durationMs)"
+    Assert-True ($inheritedPipe.stdout.Length -eq 0) 'bounded inherited-pipe failure 不得污染 stdout'
+}finally{
+    if(Test-Path -LiteralPath $serenaChildPidPath){
+        $childIdText=(Get-Content -Raw -LiteralPath $serenaChildPidPath).Trim()
+        $childProcess=Get-Process -Id $childIdText -ErrorAction SilentlyContinue
+        if($null -ne $childProcess -and -not $childProcess.HasExited){$childProcess.Kill($true)}
+        Remove-Item -LiteralPath $serenaChildPidPath -Force
+    }
+}
+Assert-True ($serenaSource.Contains('Complete-CodexHookProcessWithBoundedDrain')) 'Serena activate 必须使用 shared bounded drain helper'
+Assert-True (-not $serenaSource.Contains('$stdoutTask.GetAwaiter().GetResult()')) 'Serena activate 不得在 WaitForExit 后无界等待 stdout task'
+Assert-True (-not $serenaSource.Contains('$stderrTask.GetAwaiter().GetResult()')) 'Serena activate 不得在 WaitForExit 后无界等待 stderr task'
 Remove-Item -LiteralPath $serenaFixtureRoot -Recurse -Force
 
 $syntheticRoot='D:\Codex\projects\统一环境\reports\codex-hook-serena-synthetic'
@@ -253,6 +287,9 @@ try{
     [IO.Directory]::CreateDirectory($healthRoot)|Out-Null
     function New-Health([string]$Id){[pscustomobject][ordered]@{hookId=$Id;runId=[guid]::NewGuid().ToString('N');startedAtUtc=[DateTime]::UtcNow.ToString('o');completedAtUtc=[DateTime]::UtcNow.ToString('o');durationMs=1;ok=$true;changed=$false;restartRequired=$false;errors=[string[]]@()}}
     $badHealth=New-Health 'provider-stability';$badHealth|Add-Member extra $true;Assert-Throws { Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $badHealth -HealthRoot $healthRoot -AllowFixtureRoot } 'schema'
+    $reorderedHealth=[pscustomobject][ordered]@{errors=[string[]]@();restartRequired=$false;changed=$false;ok=$true;durationMs=[long]1;completedAtUtc=[DateTime]::UtcNow.ToString('o');startedAtUtc=[DateTime]::UtcNow.ToString('o');runId=[guid]::NewGuid().ToString('N');hookId='provider-stability'}
+    $reorderedHealthOutput=@(Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $reorderedHealth -HealthRoot $healthRoot -AllowFixtureRoot)
+    Assert-True ($reorderedHealthOutput.Count -eq 0) 'health schema 必须按属性集合接受合法重排 payload'
     foreach($invalidErrors in @('scalar',$null,1,[pscustomobject]@{bad=$true},[object[]]@('ok',1))){$invalid=New-Health 'provider-stability';$invalid.errors=$invalidErrors;Assert-Throws { Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $invalid -HealthRoot $healthRoot -AllowFixtureRoot } 'errors 类型'}
     $jobs=@();foreach($id in @('provider-stability','serena-activate','serena-dashboard','github-cli')){$jobs+=Start-Job -ScriptBlock {param($runtime,$root,$hookId). $runtime;$p=[pscustomobject][ordered]@{hookId=$hookId;runId=[guid]::NewGuid().ToString('N');startedAtUtc=[DateTime]::UtcNow.ToString('o');completedAtUtc=[DateTime]::UtcNow.ToString('o');durationMs=1;ok=$true;changed=$false;restartRequired=$false;errors=[string[]]@()};Write-CodexHookLatestHealthCore -HookId $hookId -Payload $p -HealthRoot $root -AllowFixtureRoot} -ArgumentList $runtimePath,$healthRoot,$id}
     try{$jobs|Wait-Job|Out-Null;$jobOutput=@($jobs|Receive-Job);Assert-True ($jobOutput.Count -eq 0) 'health writer 不得污染 stdout';foreach($job in $jobs){Assert-True ($job.State -ceq 'Completed') "health 并发 job 必须完成：$($job.State)"}}finally{$jobs|Remove-Job -Force}

@@ -66,7 +66,7 @@ if ($PSCmdlet.ParameterSetName -ceq 'ProductionFull') {
     $profile = Get-CodexHookProductionFullProfile
     [void](Assert-CodexHookProductionFullProfile -Profile $profile)
     $readUserEnvironment = { param($Name,$Scope) [Environment]::GetEnvironmentVariable($Name,[EnvironmentVariableTarget]::$Scope) }
-    $state = New-CodexHookProductionFullState -Profile $profile -EnvironmentReadValue $readUserEnvironment
+    $state = New-CodexHookProductionFullValidatedState -Profile $profile -EnvironmentReadValue $readUserEnvironment
     Publish-JsonMarkdownArtifactPair -Document $state.plan -OutputDir ([string]$profile.planOutputDir) -JsonFileName 'plan.json' -MarkdownFileName 'PLAN.md' -RenderMarkdown {
         param($Document,$JsonSha256)
         @(

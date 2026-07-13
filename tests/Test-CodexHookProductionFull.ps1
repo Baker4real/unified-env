@@ -36,6 +36,22 @@ function Write-Utf8NoBom {
     [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false))
 }
 
+function Write-TestCodexHookProductionFullPlanPair {
+    param(
+        [Parameter(Mandatory)][object]$Profile,
+        [Parameter(Mandatory)][object]$Plan,
+        [string]$MarkdownGenerationId = ([string]$Plan.generationId),
+        [string]$MarkdownSourceJsonSha256
+    )
+    [byte[]]$jsonBytes = [Text.UTF8Encoding]::new($false).GetBytes(($Plan | ConvertTo-Json -Depth 100))
+    $jsonSha256 = Get-CodexHookBytesSha256 -Bytes $jsonBytes
+    if([string]::IsNullOrWhiteSpace($MarkdownSourceJsonSha256)){$MarkdownSourceJsonSha256=$jsonSha256}
+    [IO.File]::WriteAllBytes([string]$Profile.planPath, $jsonBytes)
+    $markdownPath = Join-Path ([string]$Profile.planOutputDir) 'PLAN.md'
+    Write-Utf8NoBom -Path $markdownPath -Text "---`ngenerationId: $MarkdownGenerationId`nsourceJsonSha256: $MarkdownSourceJsonSha256`n---`nfixture plan pair"
+    return [pscustomobject][ordered]@{ generationId=[string]$Plan.generationId; sha256=$jsonSha256; markdownPath=$markdownPath }
+}
+
 function Invoke-CompetingFileWrite {
     param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][byte[]]$Bytes)
     $literal="'"+$Path.Replace("'","''")+"'";$payload=[Convert]::ToBase64String($Bytes)
@@ -119,6 +135,68 @@ try {
     Assert-True ((@($state.plan.actions).Count + @($state.plan.environmentActions).Count) -eq 15) 'Task 7 production rollback 只能覆盖 15 个 deployment actions'
     $planJson = $state.plan | ConvertTo-Json -Depth 100
     Assert-True ($planJson -notmatch 'registry-secret|keep-secret|serena-secret|D:\\Private') 'plan 不得泄露 registry command 或环境原值'
+
+    $fixture = Initialize-ProductionFullFixture
+    $environment.present = $true
+    $environment.value = 'D:\Private\serena-secret'
+    $extraRelativePath = 'hooks\fixture-extra-production-full-support.ps1'
+    $extraLiveRelativePath = 'lib\fixture-extra-production-full-support.ps1'
+    $extraSourcePath = Join-Path ([string]$fixture.profile.sourceRoot) $extraRelativePath
+    $extraLivePath = Join-Path ([string]$fixture.profile.hooksRoot) $extraLiveRelativePath
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $extraSourcePath))
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $extraLivePath))
+    [byte[]]$extraSourceBytes = [Text.UTF8Encoding]::new($false).GetBytes('fixture 16-action source')
+    [IO.File]::WriteAllBytes($extraSourcePath, $extraSourceBytes)
+    [IO.File]::WriteAllText($extraLivePath, 'fixture 16-action live', [Text.UTF8Encoding]::new($false))
+    $extraFile = [pscustomobject][ordered]@{
+        relativePath = $extraRelativePath
+        liveRelativePath = $extraLiveRelativePath
+        sha256 = Get-CodexHookBytesSha256 -Bytes $extraSourceBytes
+        lifecycle = 'active'
+        ownerHookIds = @('provider-stability')
+    }
+    $fixture.manifest.files = @($fixture.manifest.files) + @($extraFile)
+    Write-Utf8NoBom -Path ([string]$fixture.profile.manifestPath) -Text ($fixture.manifest | ConvertTo-Json -Depth 100)
+    $sixteenActionPlanError = Assert-Throws {
+        New-CodexHookProductionFullValidatedState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment | Out-Null
+    } '16-action production plan generator 必须在发布前拒绝'
+    Assert-True ($sixteenActionPlanError -match '15-action|allowlist') '16-action generator 必须命中 fixed production validator'
+
+    $fixture = Initialize-ProductionFullFixture
+    $environment.present = $true
+    $environment.value = 'D:\Private\serena-secret'
+    $approvalState = New-CodexHookProductionFullState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment
+    $approvedPair = Write-TestCodexHookProductionFullPlanPair -Profile $fixture.profile -Plan $approvalState.plan
+    $approvedBinding = Assert-CodexHookProductionFullApprovedPlanPair -Profile $fixture.profile -ApprovedGenerationId $approvedPair.generationId -ApprovedPlanSha256 $approvedPair.sha256
+    Assert-True ($approvedBinding.planSnapshot.sha256 -ceq $approvedPair.sha256) 'approved plan pair 必须返回同一 JSON snapshot'
+    $pairMismatch = Assert-Throws {
+        Write-TestCodexHookProductionFullPlanPair -Profile $fixture.profile -Plan $approvalState.plan -MarkdownGenerationId ([guid]::NewGuid().ToString()) | Out-Null
+        Assert-CodexHookProductionFullApprovedPlanPair -Profile $fixture.profile -ApprovedGenerationId $approvedPair.generationId -ApprovedPlanSha256 $approvedPair.sha256 | Out-Null
+    } 'JSON/Markdown generation mismatch 必须 fail closed'
+    Assert-True ($pairMismatch -match 'pair|generation') 'pair mismatch 拒绝原因必须可审计'
+    Remove-Item -LiteralPath $approvedPair.markdownPath -Force
+    $partialPair = Assert-Throws {
+        Assert-CodexHookProductionFullApprovedPlanPair -Profile $fixture.profile -ApprovedGenerationId $approvedPair.generationId -ApprovedPlanSha256 $approvedPair.sha256 | Out-Null
+    } 'partial plan pair 必须 fail closed'
+    Assert-True ($partialPair -match 'pair|PLAN|Markdown|文件') 'partial pair 拒绝原因必须可审计'
+    Write-TestCodexHookProductionFullPlanPair -Profile $fixture.profile -Plan $approvalState.plan | Out-Null
+    $replacementPlan = (($approvalState.plan | ConvertTo-Json -Depth 100) | ConvertFrom-Json -Depth 100 -DateKind String)
+    $replacementPlan.generationId = [guid]::NewGuid().ToString()
+    $replacementPlan.generatedAtUtc = [DateTime]::UtcNow.ToString('o')
+    Write-TestCodexHookProductionFullPlanPair -Profile $fixture.profile -Plan $replacementPlan | Out-Null
+    $replacementError = Assert-Throws {
+        Assert-CodexHookProductionFullApprovedPlanPair -Profile $fixture.profile -ApprovedGenerationId $approvedPair.generationId -ApprovedPlanSha256 $approvedPair.sha256 | Out-Null
+    } 'same-scope replacement plan 必须拒绝旧 approval'
+    Assert-True ($replacementError -match 'approved|generation|SHA') 'replacement 拒绝必须绑定 approved generation/hash'
+    $replacementPair = Write-TestCodexHookProductionFullPlanPair -Profile $fixture.profile -Plan $replacementPlan
+    $wrongGeneration = Assert-Throws {
+        Assert-CodexHookProductionFullApprovedPlanPair -Profile $fixture.profile -ApprovedGenerationId ([guid]::NewGuid().ToString()) -ApprovedPlanSha256 $replacementPair.sha256 | Out-Null
+    } '错误 approved generation 必须拒绝'
+    Assert-True ($wrongGeneration -match 'approved|generation') '错误 generation 必须指向 approval binding'
+    $wrongHash = Assert-Throws {
+        Assert-CodexHookProductionFullApprovedPlanPair -Profile $fixture.profile -ApprovedGenerationId $replacementPair.generationId -ApprovedPlanSha256 ('0' * 64) | Out-Null
+    } '错误 approved SHA-256 必须拒绝'
+    Assert-True ($wrongHash -match 'approved|SHA') '错误 SHA 必须指向 approval binding'
 
     $retiredFile=@($fixture.manifest.files|Where-Object lifecycle -ceq 'retired')[0]
     $retiredLivePath=Join-Path ([string]$fixture.profile.hooksRoot) ([string]$retiredFile.liveRelativePath)
@@ -313,6 +391,91 @@ try {
     $partialRollbackStatusPath=[string](Get-CodexHookProductionFullLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$partialRollbackState.plan.generationId)).statusPath
     $partialRollbackStatus=Get-Content -Raw -LiteralPath $partialRollbackStatusPath|ConvertFrom-Json
     Assert-True ($partialRollbackStatus.status -ceq 'rollback-blocked' -and @($partialRollbackStatus.restoredActionIds).Count -ge 1) 'partial automatic rollback blocked status 必须保留已持久 restoredActionIds'
+
+    $fixture = Initialize-ProductionFullFixture
+    $environment.present = $true
+    $environment.value = 'D:\Private\serena-secret'
+    $registryFinalState = New-CodexHookProductionFullState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment
+    Write-Utf8NoBom -Path ([string]$fixture.profile.planPath) -Text ($registryFinalState.plan | ConvertTo-Json -Depth 100)
+    $registryFinalMutation = [ordered]@{ done = $false }
+    [byte[]]$registryFinalThirdPartyBytes = [Text.UTF8Encoding]::new($false).GetBytes('{"external":"registry-drift-after-restore"}')
+    $registryFinalError = Assert-Throws {
+        Invoke-CodexHookProductionFullApplyCore `
+            -Profile $fixture.profile `
+            -EnvironmentReadValue $readEnvironment `
+            -EnvironmentWriteValue $writeEnvironment `
+            -TestFaultInjection before-registry `
+            -TestAfterAutomaticRollbackAction {
+                param($ActionId)
+                if ($ActionId -ceq 'registry:hooks.json') {
+                    [IO.File]::WriteAllBytes([string]$fixture.profile.registryPath, $registryFinalThirdPartyBytes)
+                    $registryFinalMutation.done = $true
+                }
+            } | Out-Null
+    } 'registry restore 后第三方 drift 必须阻止 automatic rollback-confirmed'
+    Assert-True $registryFinalMutation.done 'fixture 必须在 registry restore 后、下一 action 前注入第三方 bytes'
+    Assert-True ($registryFinalError -match 'rollback-blocked|recovery-required') 'registry final drift 不得报告 rollback-confirmed'
+    $registryFinalStatusPath = [string](Get-CodexHookProductionFullLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$registryFinalState.plan.generationId)).statusPath
+    $registryFinalStatus = Get-Content -Raw -LiteralPath $registryFinalStatusPath | ConvertFrom-Json
+    Assert-True ($registryFinalStatus.status -ceq 'rollback-blocked') 'registry final drift 必须持久化 rollback-blocked'
+    Assert-Bytes ([IO.File]::ReadAllBytes([string]$fixture.profile.registryPath)) $registryFinalThirdPartyBytes 'final restore verification 不得覆盖 registry 第三方 bytes'
+
+    foreach($transactionDriftKind in @('published-file','unknown-live')){
+        $fixture = Initialize-ProductionFullFixture
+        $environment.present = $true
+        $environment.value = 'D:\Private\serena-secret'
+        $transactionState = New-CodexHookProductionFullState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment
+        Write-Utf8NoBom -Path ([string]$fixture.profile.planPath) -Text ($transactionState.plan | ConvertTo-Json -Depth 100)
+        [byte[]]$registryBeforeTransactionDrift = [IO.File]::ReadAllBytes([string]$fixture.profile.registryPath)
+        $publishedFile = @($fixture.manifest.files | Where-Object lifecycle -cne 'retired')[0]
+        $publishedPath = Join-Path ([string]$fixture.profile.hooksRoot) ([string]$publishedFile.liveRelativePath)
+        $transactionDriftInjected = [ordered]@{ done = $false }
+        $transactionDriftError = Assert-Throws {
+            Invoke-CodexHookProductionFullApplyCore `
+                -Profile $fixture.profile `
+                -EnvironmentReadValue $readEnvironment `
+                -EnvironmentWriteValue $writeEnvironment `
+                -TestBeforeRegistryPublish {
+                    if($transactionDriftKind -ceq 'published-file'){
+                        [IO.File]::WriteAllText($publishedPath, 'third-party-published-file-drift', [Text.UTF8Encoding]::new($false))
+                    }else{
+                        [IO.File]::WriteAllText((Join-Path ([string]$fixture.profile.hooksRoot) 'third-party-unknown-live.txt'), 'unknown-live-drift', [Text.UTF8Encoding]::new($false))
+                    }
+                    $transactionDriftInjected.done = $true
+                } | Out-Null
+        } "$transactionDriftKind drift 必须在 registry 最终发布前停止 transaction"
+        Assert-True $transactionDriftInjected.done "$transactionDriftKind fixture 必须在 registry publish 前注入 drift"
+        Assert-True ($transactionDriftError -match 'rollback|recovery|required|final') "$transactionDriftKind drift 必须走 rollback/recovery 而非 applied"
+        Assert-Bytes ([IO.File]::ReadAllBytes([string]$fixture.profile.registryPath)) $registryBeforeTransactionDrift "$transactionDriftKind drift 不得激活 registry"
+        $transactionStatusPath = [string](Get-CodexHookProductionFullLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$transactionState.plan.generationId)).statusPath
+        $transactionStatus = Get-Content -Raw -LiteralPath $transactionStatusPath | ConvertFrom-Json
+        Assert-True ($transactionStatus.status -cne 'applied') "$transactionDriftKind drift 不得发布 applied terminal status"
+    }
+
+    $fixture = Initialize-ProductionFullFixture
+    $environment.present = $true
+    $environment.value = 'D:\Private\serena-secret'
+    $terminalActiveState = New-CodexHookProductionFullState -Profile $fixture.profile -EnvironmentReadValue $readEnvironment
+    Write-Utf8NoBom -Path ([string]$fixture.profile.planPath) -Text ($terminalActiveState.plan | ConvertTo-Json -Depth 100)
+    $terminalActivePath = [string](Get-CodexHookProductionFullLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$terminalActiveState.plan.generationId)).activePath
+    [byte[]]$terminalActiveThirdPartyBytes = [Text.UTF8Encoding]::new($false).GetBytes('{"external":"active-terminal-drift"}')
+    $terminalActiveMutation = [ordered]@{ done = $false }
+    $terminalActiveError = Assert-Throws {
+        Invoke-CodexHookProductionFullApplyCore `
+            -Profile $fixture.profile `
+            -EnvironmentReadValue $readEnvironment `
+            -EnvironmentWriteValue $writeEnvironment `
+            -TestBeforeAppliedActivePublish {
+                [IO.File]::WriteAllBytes($terminalActivePath, $terminalActiveThirdPartyBytes)
+                $terminalActiveMutation.done = $true
+            } | Out-Null
+    } 'applying 到 applied 的 terminal active drift 必须被 known-SHA CAS 拒绝'
+    Assert-True $terminalActiveMutation.done 'terminal active fixture 必须在 applying snapshot 后注入 drift'
+    Assert-True ($terminalActiveError -match 'rollback-blocked|recovery-required|漂移|CAS') 'terminal active drift 不得报告 applied'
+    $terminalActiveStatusPath = [string](Get-CodexHookProductionFullLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$terminalActiveState.plan.generationId)).statusPath
+    $terminalActiveStatus = Get-Content -Raw -LiteralPath $terminalActiveStatusPath | ConvertFrom-Json
+    Assert-True ($terminalActiveStatus.status -cne 'applied') 'terminal active drift 不得持久化 applied'
+    Assert-Bytes ([IO.File]::ReadAllBytes($terminalActivePath)) $terminalActiveThirdPartyBytes 'terminal active CAS 不得覆盖第三方 evidence bytes'
 
     $conditionalDeletePath=Join-Path ([string]$fixture.profile.hooksRoot) 'conditional-delete.tmp'
     [byte[]]$conditionalDeleteBytes=[Text.UTF8Encoding]::new($false).GetBytes('deployed-delete-target')

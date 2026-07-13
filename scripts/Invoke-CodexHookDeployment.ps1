@@ -11,7 +11,9 @@ param(
     [Parameter(ParameterSetName = 'Fixture')][scriptblock]$EnvironmentWriteValue,
     [Parameter(ParameterSetName = 'Fixture')][ValidateSet('none', 'before-wrapper', 'registry-postcheck')][string]$FaultInjection = 'none',
     [Parameter(Mandatory, ParameterSetName = 'ProductionRegistrationRepair')][switch]$ProductionRegistrationRepair,
-    [Parameter(Mandatory, ParameterSetName = 'ProductionFull')][switch]$ProductionFull
+    [Parameter(Mandatory, ParameterSetName = 'ProductionFull')][switch]$ProductionFull,
+    [Parameter(ParameterSetName = 'ProductionFull')][string]$ApprovedGenerationId,
+    [Parameter(ParameterSetName = 'ProductionFull')][string]$ApprovedPlanSha256
 )
 
 Set-StrictMode -Version Latest
@@ -36,7 +38,11 @@ if ($PSCmdlet.ParameterSetName -ceq 'ProductionRegistrationRepair') {
 }
 
 if ($PSCmdlet.ParameterSetName -ceq 'ProductionFull') {
-    return Invoke-CodexHookProductionFullApply
+    if ([string]::IsNullOrWhiteSpace($ApprovedGenerationId) -or [string]::IsNullOrWhiteSpace($ApprovedPlanSha256)) {
+        [pscustomobject][ordered]@{ applied = $false; refusalReason = 'approved-plan-binding-required' }
+        return
+    }
+    return Invoke-CodexHookProductionFullApply -ApprovedGenerationId $ApprovedGenerationId -ApprovedPlanSha256 $ApprovedPlanSha256
 }
 
 $planFullPath = Assert-CodexHookDPath -Value $PlanPath -Name 'PlanPath'

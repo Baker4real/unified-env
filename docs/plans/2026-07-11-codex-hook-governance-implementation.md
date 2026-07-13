@@ -29,6 +29,7 @@
 - 每个任务先写稳定红灯，再写最小实现；每个任务独立提交。Tasks 2、3、4、5、7、8 需要风险/对抗审查。
 - existing-target 原子发布使用 write-excluding target lease：`FileShare.Read | FileShare.Delete` 明确不共享 `WRITE`，同一 verified handle 完成最终 bytes/hash 并持有到 `FileRenameInformationEx(65)` rename 结束；不支持 class 65 时失败关闭，不回退 class 10。
 - 完整性并发保证不得表述为绝对 CAS：普通用户态 Windows API 无法同时让 target handle 不共享 `DELETE`，又允许另一 handle 在其存活期间原子替换。当前保证由同进程 mutex、fresh rederive、两次 snapshot、write-excluding lease、同目录原子 rename、handle/path postcheck 与 blocked rollback 组成；不合作外部 delete/replace 在最终 syscall 前的残余窗口必须写入 production PLAN。
+- production full 在发布绿色计划前固定验证 13 个 active 文件、唯一 User 环境动作和 registry 最后的 15-action allowlist；真实 apply 必须传入经审查的 `ApprovedGenerationId` 与 `ApprovedPlanSha256`，并以同一 JSON snapshot 验证 `plan.json`/`PLAN.md` 成对一致。registry 激活前后都重验 source、已发布文件、unknown-live projection、registry 与环境；active/status 终态使用已知 applying/restoring hash 的条件发布并重验。可检测的 drift 一律进入 rollback 或 recovery，不将此描述为消除最终系统调用前的不合作 Windows delete/replace 窗口。
 
 ---
 
@@ -813,7 +814,7 @@ Expected: 全部 exit 0；专项测试内部覆盖 PowerShell parser、strict JS
 
 - [ ] **Step 2：重新生成 live inventory 与 full plan**
 
-plan 必须精确包含：active managed 文件发布、provider/state/Serena/GitHub wrapper 更新、旧 mobile/projectless JS 标记 retired 但不删除、auto-approve 取消注册、User `SERENA_HOME` before/after、registry 最后发布。任何未预期 unknown entry/file 变化阻断 apply。
+plan 必须精确包含：active managed 文件发布、provider/state/Serena/GitHub wrapper 更新、旧 mobile/projectless JS 标记 retired 但不删除、auto-approve 取消注册、User `SERENA_HOME` before/after、registry 最后发布。任何未预期 unknown entry/file 变化阻断 apply。独立审查完成后，主 agent 必须从该成对报告记录 `generationId` 与 `sourceJsonSha256`；后续 apply 只接受这两个精确批准值，不能以相同 scope 接受后来替换的计划。
 
 Run:
 
@@ -838,7 +839,9 @@ Run:
 
 ```powershell
 & 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File 'D:\Codex\projects\统一环境\scripts\Invoke-CodexHookDeployment.ps1' `
-  -ProductionFull -Apply -ApprovedScope 'codex-hook-governance-2026-07-11'
+  -ProductionFull -Apply -ApprovedScope 'codex-hook-governance-2026-07-11' `
+  -ApprovedGenerationId '<已审查 plan generationId>' `
+  -ApprovedPlanSha256 '<已审查 plan JSON SHA-256>'
 ```
 
 Expected: evidence `status=applied`、所有 source/live hashes 与 plan 一致、registry 顺序为 0–4、auto-approve 已取消、retired live 文件仍存在且未注册、User `SERENA_HOME` 已持久化为 D 盘。

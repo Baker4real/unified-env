@@ -169,8 +169,8 @@ fail-open 模式；完整签名/认证检查保留为显式 strict 验收。内�
 
 1. inventory 读取 live registry、受管/未知文件、runtime、trust observation、wrapper 依赖和 hash，
    不执行有副作用的 hook。
-2. plan 记录 source/live SHA-256、所有新增/覆盖/取消注册项、顺序变化、风险、验收和回滚动作。
-3. apply 前重新计算全部 hash；任一 source 或 live 输入漂移立即停止，且不得产生 live 写入。
+2. plan 记录 source/live SHA-256、所有新增/覆盖/取消注册项、顺序变化、风险、验收和回滚动作；production full 报告同时绑定 `generationId` 与 JSON SHA-256，Markdown front matter 必须引用同一 JSON。
+3. apply 前重新计算全部 hash；真实 production full apply 还必须接收人工批准的 `generationId` 与 plan SHA-256，并验证 `plan.json`/`PLAN.md` 成对一致。任一 source、live、unknown projection 或报告对输入漂移立即停止，且不得产生或保留不一致的 registry 激活。
 4. 对 live `hooks.json`、所有将覆盖或 retirement 的文件、相关配置创建证据备份。
 5. 按共享库/implementation → wrapper → `hooks.json` 的顺序发布；registry 最后激活。
 6. 每个文件在替换前完成语法/结构校验，并使用同目录临时文件和原子替换。
@@ -187,8 +187,8 @@ sharing violation 失败。因此部署器不声称提供对所有不合作外�
 existing-target 发布采用可实现的完整性合同：在 production mutex 内 fresh rederive；由同一 verified
 target handle 完成最终路径、普通文件、bytes 和 SHA-256 采样；该 lease 使用
 `FileShare.Read | FileShare.Delete`，明确不共享 `WRITE`，并持有到同目录 class 65 原子 rename 完成。
-随后继续做 handle/path postcheck；rollback 只有在 registry/status 双重回读确认后才报告成功，其他状态
-进入 blocked 语义。missing-target 发布使用 flags=0，若最终 missing snapshot 后出现竞争创建则 collision
+随后继续做 handle/path postcheck；rollback 只有在所有已恢复 target（包括 registry）与 active/status 终态发布均按明确 expected hash 完成最终重验后才报告成功，其他状态
+进入 `rollback-blocked` / recovery 语义。missing-target 发布使用 flags=0，若最终 missing snapshot 后出现竞争创建则 collision
 并失败关闭，不覆盖新文件。
 
 这套合同保证不合作的内容 writer 不能在最终采样后写入 third bytes，同时保留 crash-atomic replacement；

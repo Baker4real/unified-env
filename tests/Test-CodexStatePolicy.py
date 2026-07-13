@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import io
@@ -9,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -235,6 +237,31 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertTrue(first["changed"])
         self.assertFalse(second["changed"])
 
+    def test_write_mode_reports_postwrite_residual_drift_zero(self) -> None:
+        self.write_global(
+            {
+                "thread-workspace-root-hints": {
+                    "x": r"C:\Users\WINDOWS\Documents\Codex\a"
+                }
+            }
+        )
+        connection = self.create_db()
+        connection.close()
+        output = io.StringIO()
+
+        payload = self.module.run_policy(
+            self.codex_home,
+            check_only=False,
+            health_root=self.root / "health",
+            output=output,
+        )
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["converged"])
+        self.assertEqual(payload["driftCount"], 0)
+        self.assertEqual(payload["globalState"]["status"], "updated")
+        self.assertEqual(payload["threadState"]["driftCount"], 0)
+
     def test_check_only_removes_new_snapshot_root_and_empty_ancestors(self) -> None:
         conn = self.create_db()
         conn.close()
@@ -266,6 +293,46 @@ class CodexStatePolicyTests(unittest.TestCase):
                 after_first_snapshot_capture=leave_concurrent_content,
             )
         self.assertTrue((snapshot_root / "concurrent-owner.txt").is_file())
+
+    def test_check_only_rejects_snapshot_reparse_parent_before_any_write(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        outside = self.root / "snapshot-reparse-outside"
+        outside.mkdir()
+        junction = self.root / "snapshot-reparse-junction"
+        junction_literal = str(junction).replace("'", "''")
+        outside_literal = str(outside).replace("'", "''")
+        command = (
+            "$ErrorActionPreference='Stop';"
+            f"New-Item -ItemType Junction -Path '{junction_literal}' "
+            f"-Target '{outside_literal}' | Out-Null"
+        )
+        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
+        created = subprocess.run(
+            [
+                r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe",
+                "-NoProfile",
+                "-EncodedCommand",
+                encoded,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(created.returncode, 0, created.stderr or created.stdout)
+        try:
+            before = self.db_path.read_bytes()
+            with self.assertRaisesRegex(self.module.StatePolicyError, "reparse"):
+                self.module.update_thread_state(
+                    self.db_path,
+                    check_only=True,
+                    snapshot_root=junction / "sqlite-snapshots",
+                )
+            self.assertEqual(self.db_path.read_bytes(), before)
+            self.assertEqual(list(outside.iterdir()), [])
+        finally:
+            if junction.exists() or junction.is_symlink():
+                junction.rmdir()
 
     def test_sqlite_transaction_busy_check_only_and_drift_zero(self) -> None:
         conn = self.create_db()

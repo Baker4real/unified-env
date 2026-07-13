@@ -52,12 +52,12 @@ try {
     $stderrTask = $process.StandardError.ReadToEndAsync()
     $process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)
     $process.StandardInput.Close()
-    if (-not $process.WaitForExit(5000)) {
-        try { $process.Kill($true) } catch {}
-        throw 'Serena activate vendor 超时。'
-    }
-    [void]$stdoutTask.GetAwaiter().GetResult()
-    $stderr = $stderrTask.GetAwaiter().GetResult()
+    $stderr = Complete-CodexHookProcessWithBoundedDrain `
+        -Process $process `
+        -StdoutTask $stdoutTask `
+        -StderrTask $stderrTask `
+        -TimeoutMilliseconds 5000 `
+        -ProcessName 'Serena activate vendor'
     [byte[]]$vendorBytes = $stdoutBuffer.ToArray()
     if ($process.ExitCode -ne 0) { throw "Serena activate vendor 退出码非零：$($process.ExitCode)。" }
     if (-not [string]::IsNullOrWhiteSpace($stderr)) { throw 'Serena activate vendor stderr 非空。' }

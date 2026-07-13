@@ -99,6 +99,7 @@
       "readResources": [
         { "kind": "abstract", "value": "hook-stdin" },
         { "kind": "abstract", "value": "process-environment" },
+        { "kind": "path", "value": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe" },
         { "kind": "abstract", "value": "serena-hook-state" }
       ],
       "writeResources": [
@@ -169,6 +170,7 @@
       "sourceState": "managed",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\tools\\bin" },
+        { "kind": "path", "value": "D:\\Codex\\tools\\gh\\bin\\gh.exe" },
         { "kind": "path", "value": "D:\\Codex\\.config\\gh" },
         { "kind": "abstract", "value": "process-environment" },
         { "kind": "abstract", "value": "network" },
@@ -371,7 +373,7 @@
     {
       "relativePath": "hooks/codex-state-policy-guard.py",
       "liveRelativePath": "codex-state-policy-guard.py",
-      "sha256": "ebe557b7d5b1a00ccdb1dc9ed4b17520c938233d85ac1b65cb80e59dc411ad21",
+      "sha256": "a87392c2b9094c8fcf29b26a61713151f2e85c4bef15b0d73126d0943a5789c1",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
@@ -407,7 +409,7 @@
     {
       "relativePath": "hooks/serena-activate-guarded.ps1",
       "liveRelativePath": "serena-activate-guarded.ps1",
-      "sha256": "7cd2eb2c5484631958084b3ad653aff5858a11e59f342e70049e936354679f79",
+      "sha256": "6af75c67f64c16abb33cfa47a765c93afff7cc83f0f21076a96d9505a2d0d0ca",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -434,7 +436,7 @@
     {
       "relativePath": "hooks/lib/CodexHookRuntime.ps1",
       "liveRelativePath": "lib/CodexHookRuntime.ps1",
-      "sha256": "30e72bc436e841ef1028dbcf680a5f9c13a8efb3b82df28edea353f94fbc6d37",
+      "sha256": "8e79250ba9f8114a38b3411dda1fe62616701ba1b43c0cdbafedd14680172004",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",

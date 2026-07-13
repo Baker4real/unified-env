@@ -33,6 +33,7 @@ TARGET_MAPS = (
     "thread-workspace-root-hints",
     "thread-projectless-output-directories",
 )
+FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 
 
 class StatePolicyError(RuntimeError):
@@ -297,6 +298,30 @@ def _capture_sqlite_source(path: Path) -> tuple[bytes | None, bytes | None, byte
         raise StatePolicyError("thread state source snapshot is busy") from exc
 
 
+def _assert_check_only_d_path_without_reparse(path: Path, *, name: str) -> None:
+    windows_path = PureWindowsPath(str(path))
+    if not windows_path.is_absolute() or windows_path.drive.casefold() != "d:":
+        raise StatePolicyError(f"{name} must be an absolute D drive path")
+    lexical_chain: list[Path] = []
+    current = path
+    while True:
+        lexical_chain.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for candidate in reversed(lexical_chain):
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise StatePolicyError(f"{name} path inspection failed") from exc
+        if candidate.is_symlink() or bool(
+            getattr(metadata, "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT
+        ):
+            raise StatePolicyError(f"{name} path contains reparse point")
+
+
 def _select_thread_updates_from_snapshot(
     path: Path,
     snapshot_root: Path,
@@ -305,6 +330,14 @@ def _select_thread_updates_from_snapshot(
     snapshot_windows_path = PureWindowsPath(str(snapshot_root))
     if not snapshot_windows_path.is_absolute() or snapshot_windows_path.drive.casefold() != "d:":
         raise StatePolicyError("thread state snapshot root must be an absolute D drive path")
+    _assert_check_only_d_path_without_reparse(path, name="thread state source")
+    _assert_check_only_d_path_without_reparse(snapshot_root, name="thread state snapshot root")
+    for sidecar in (
+        Path(str(path) + "-wal"),
+        Path(str(path) + "-shm"),
+        Path(str(path) + "-journal"),
+    ):
+        _assert_check_only_d_path_without_reparse(sidecar, name="thread state sidecar")
     created_roots: list[Path] = []
     candidate = snapshot_root
     while not candidate.exists():
@@ -566,7 +599,11 @@ def run_policy(
         errors.append(_safe_error(exc))
     changed = bool(global_result.get("changed")) or int(thread_result.get("changedCount", 0)) > 0
     restart_required = changed
-    global_drift_count = int(global_result.get("changedCount", 0)) if bool(global_result.get("wouldChange")) else 0
+    global_drift_count = (
+        int(global_result.get("changedCount", 0))
+        if check_only and bool(global_result.get("wouldChange"))
+        else 0
+    )
     thread_drift_count = int(thread_result.get("driftCount", 0))
     drift_count = global_drift_count + thread_drift_count
     converged = ok and drift_count == 0
