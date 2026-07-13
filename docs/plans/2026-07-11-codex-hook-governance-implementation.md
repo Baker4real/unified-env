@@ -2,6 +2,8 @@
 
 > **供 agent worker 使用：** 按任务逐项实施。优先使用 `subagent-driven-development`；每个任务必须走红灯、绿灯、任务级 spec/质量评审，高风险任务再追加独立对抗性审查。所有步骤使用复选框跟踪。
 
+> **状态（2026-07-13）：** 受管源码、manifest、inventory/plan、fixture 测试和安全策略已合并到 `main`；本计划复选框保留为实施过程记录。Production full 的 live apply、用户信任确认、完整 Codex 重启、fresh SessionStart、Serena MCP 和移动端新线程证据仍未完成，不得将仓库 fixture 绿灯当作这些 live 验收的替代。
+
 **目标：** 把本机 Codex hooks 从未纳管的 live 脚本升级为可盘点、可审查、可回滚、并发安全且通过真实 SessionStart 验收的 D 盘受管系统。
 
 **架构：** `统一环境` 仓库保存严格 manifest、受管 hook 源码、纯策略库和 plan/apply/restore 工具；`D:\Codex\.codex` 只作为 patch-preserving 部署目标。先在 fixture 中证明 manifest、注册合并和回滚，再恢复旧 0–3 trust 顺序；配置文件和全局状态分别使用共享安全写入器，provider、state、GitHub、Serena config/activate 保持独立故障域。
