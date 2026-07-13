@@ -1,5 +1,7 @@
 # 功能钩子分层恢复实施计划
 
+> **状态（2026-07-13）：** Task 1/2 的 path inventory 与 state policy 核心已落地并持续加固；Task 3–8 尚未实施、未注册 live hook。下方复选框保留原始实施过程记录，当前状态以设计文档、实际代码和专项测试为准。
+
 > **For agentic workers:** Implement this plan task-by-task. Prefer `subagent-driven-development` when available for independent tasks; otherwise use the repository's normal implementation workflow. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在保留实际防错和 Serena 效率能力的前提下，以无网络单一 state preflight、受控 reminder/cleanup 和显式 provider/GitHub 维护替代旧的多钩子自动写入。
@@ -21,7 +23,7 @@
 
 ---
 
-### Task 1: 记录 path inventory 的失败行为
+### Task 1: 记录 path inventory 的失败行为（已落地）
 
 **Files:**
 - Create: `tests/Test-CodexStatePathInventory.py`
@@ -59,7 +61,7 @@ git add tests/Test-CodexStatePathInventory.py managed/codex-hooks/hooks/codex-st
 git commit -m "test: define safe projectless path inventory"
 ```
 
-### Task 2: 将 state policy 拆成 policy source、path inventory 和 state repair
+### Task 2: 将 state policy 拆成 policy source、path inventory 和 state repair（已落地）
 
 **Files:**
 - Modify: `managed/codex-hooks/hooks/codex-state-policy-guard.py`
@@ -97,7 +99,7 @@ git add managed/codex-hooks/hooks/codex-state-policy-guard.py tests/Test-CodexSt
 git commit -m "feat: split state policy from canonical path repair"
 ```
 
-### Task 3: 新增 local-only state preflight wrapper
+### Task 3: 新增 local-only state preflight wrapper（未实施）
 
 **Files:**
 - Create: `managed/codex-hooks/hooks/codex-state-preflight.py`
@@ -133,7 +135,7 @@ git add managed/codex-hooks/hooks/codex-state-preflight.py managed/codex-hooks/h
 git commit -m "feat: add local-only state preflight entrypoint"
 ```
 
-### Task 4: 恢复 Serena reminder、cleanup 和静态 activation reminder
+### Task 4: 恢复 Serena reminder、cleanup 和静态 activation reminder（未实施）
 
 **Files:**
 - Create: `managed/codex-hooks/hooks/serena-reminder-guarded.cmd`
@@ -169,7 +171,7 @@ git add managed/codex-hooks/hooks/serena-reminder-guarded.cmd managed/codex-hook
 git commit -m "feat: restore Serena reminder and cleanup safely"
 ```
 
-### Task 5: 分离 provider/GitHub 的本地检查与显式修复
+### Task 5: 分离 provider/GitHub 的本地检查与显式修复（未实施）
 
 **Files:**
 - Modify: `managed/codex-hooks/hooks/codex-provider-stability-guard.ps1`
@@ -199,7 +201,7 @@ git add managed/codex-hooks/hooks/codex-provider-stability-guard.ps1 tests/Test-
 git commit -m "fix: separate local health checks from provider repairs"
 ```
 
-### Task 6: 拆分 legacy fixture manifest 与生产 preflight manifest
+### Task 6: 拆分 legacy fixture manifest 与生产 preflight manifest（未实施）
 
 **Files:**
 - Create: `managed/codex-hooks/legacy-fixture-manifest.json`
@@ -233,7 +235,7 @@ git add managed/codex-hooks/legacy-fixture-manifest.json managed/codex-hooks/hos
 git commit -m "refactor: separate production preflight manifest from fixtures"
 ```
 
-### Task 7: 生成 canonical path repair plan 并执行获授权的 state 修复
+### Task 7: 生成 canonical path repair plan 并执行获授权的 state 修复（未实施）
 
 **Files:**
 - Modify: `scripts/Invoke-CodexHostHookReconciliation.ps1` only for evidence linkage if required
@@ -272,7 +274,7 @@ git add scripts/Get-CodexStatePathInventory.ps1 tests/Test-CodexStatePathRepair.
 git commit -m "feat: repair projectless state with approved canonical mappings"
 ```
 
-### Task 8: 注册新功能 hook 并做 fresh lifecycle 验收
+### Task 8: 注册新功能 hook 并做 fresh lifecycle 验收（未实施）
 
 **Files:**
 - Modify live: `D:\Codex\.codex\hooks.json` only through the approved reconciler/registration transaction
@@ -309,4 +311,3 @@ git commit -m "feat: repair projectless state with approved canonical mappings"
 git add tests/Test-CodexFunctionalHookRegistration.ps1
 git commit -m "feat: enable verified functional Codex hooks"
 ```
-

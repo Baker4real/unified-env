@@ -14,6 +14,8 @@
 - 共享环境入口已验证：`planning-with-files`、CMake `4.3.3`、Rust toolchain `1.96.1` 等均保持可用；skill ledger coverage 为 `missing=0` / `duplicates=0`。
 - 已按用户授权修复默认入口：`.NET` 默认命中 D 盘 SDK `10.0.301`，Python 默认切到官方 `3.14.6`；WSL 当前判断为“不确实需要”，未安装、未启用、未初始化；CodeGraph 活动版本仍为 `1.2.0`，已验证 `1.4.1` staging，待 Codex 完整重启后切换。
 - 已固化上游稳定 skill 约束并同步 Matt stable catalog：28 个稳定目录已与上游对齐，活动 skill 资源闭包为 98 个、0 项缺失；`skills/in-progress/**` 未安装。
+- 功能钩子分层恢复目前只落地 path inventory、policy source 和显式 state repair 核心；新的 state preflight wrapper、Serena 行为 hook、provider/GitHub 显式维护和 live registration 尚未启用。
+- GitHub 与收尾 skill 已统一为“解析远端默认分支后发布”；临时分支只在说明必要性并获确认后使用，patch-stack 仅报告、不自动创建或删除。实现状态与证据见对应设计和计划文档。
 
 ## 关键入口
 
@@ -21,6 +23,8 @@
 - 迁移政策：`docs/env-governance/d-drive-layout-and-migration-policy.md`
 - Codex 主机钩子治理：`docs/specs/2026-07-11-host-hook-reconciliation-design.md`
 - Codex Hook 治理设计：`docs/specs/2026-07-11-codex-hook-governance-design.md`
+- 功能钩子分层恢复设计/计划：`docs/specs/2026-07-13-functional-hook-preflight-design.md`、`docs/plans/2026-07-13-functional-hook-preflight.md`
+- Git 默认分支与收尾 skill 策略：`docs/specs/2026-07-13-github-default-branch-skill-policy-design.md`、`docs/plans/2026-07-13-github-default-branch-skill-policy-implementation.md`
 - 本地 tracker/spec/tickets：`.scratch/unified-env/`
 - 可信盘点设计：`docs/specs/2026-07-10-environment-inventory-trust-design.md`
 - 可信盘点实施计划：`docs/plans/2026-07-10-environment-inventory-trust-implementation.md`
@@ -46,16 +50,41 @@
 
 ## 验证命令
 
-从仓库根目录使用 PowerShell 7.6+ 运行全部测试：
+从仓库根目录使用 PowerShell 7.6+ 运行 PowerShell 测试。普通测试可直接按文件运行；参数化的 hook hardening 套件必须按 `-Case` 逐项运行：
 
 ```powershell
-$tests = Get-ChildItem -LiteralPath '.\tests' -Filter 'Test-*.ps1' -File | Sort-Object Name
+$tests = Get-ChildItem -LiteralPath '.\tests' -Filter 'Test-*.ps1' -File |
+    Where-Object Name -ne 'Test-CodexHookProductionRegistrationRepairHardening.ps1' |
+    Sort-Object Name
 foreach ($test in $tests) {
     & ([Environment]::ProcessPath) -NoProfile -File $test.FullName
     if ($LASTEXITCODE -ne 0) {
         throw "$($test.Name) 失败，退出码：$LASTEXITCODE"
     }
 }
+
+$hardeningCases = @(
+    'semantic-noop', 'crash-applying-deployed', 'crash-applied-before',
+    'crash-applying-before', 'terminal-incompatible', 'third-hash-rejected',
+    'postpublish-source-drift', 'postpublish-live-drift',
+    'postpublish-static-and-registry-third', 'rollback-cas-race',
+    'rollback-write-excluding-lease', 'forged-evidence', 'projection-summary'
+)
+foreach ($case in $hardeningCases) {
+    & ([Environment]::ProcessPath) -NoProfile -File '.\tests\Test-CodexHookProductionRegistrationRepairHardening.ps1' -Case $case
+    if ($LASTEXITCODE -ne 0) {
+        throw "Test-CodexHookProductionRegistrationRepairHardening.ps1 -Case $case 失败，退出码：$LASTEXITCODE"
+    }
+}
+```
+
+仓库还包含 Python 与 Node 专项测试；使用已验证的 Python/Node 入口分别运行：
+
+```powershell
+python -B .\tests\Test-CodexStatePathInventory.py
+python -B .\tests\Test-CodexStatePolicy.py
+node .\tests\Test-GitDefaultBranchSkillPolicy.cjs
+node .\tests\Test-GitHubDefaultBranchSkillOverlay.cjs
 ```
 
 ## 安全边界

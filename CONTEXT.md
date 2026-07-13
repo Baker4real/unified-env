@@ -30,5 +30,7 @@
 - 可信盘点设计：`docs/specs/2026-07-10-environment-inventory-trust-design.md`
 - 可信盘点实施计划：`docs/plans/2026-07-10-environment-inventory-trust-implementation.md`
 - Codex 主机钩子采用显式冷路径 reconciler；`scripts/Invoke-CodexHostHookReconciliation.ps1` 是唯一当前生产入口，用户级自定义 lifecycle hook 目标为 0，同时保留 `features.hooks=true`。旧 ProductionFull / registration-repair 生产 façade 已退役，只保留 fixture/core 历史测试价值。Serena 中性启动并在任务内按绝对 workspace root 显式激活。接口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`。
+- 功能钩子分层恢复目前只实现 path inventory、policy source 与显式 state repair 核心；`codex-state-preflight` wrapper、Serena 行为 hook、provider/GitHub 显式维护、manifest 分离和 live registration 仍未实施。对应状态见 `docs/specs/2026-07-13-functional-hook-preflight-design.md`、`docs/plans/2026-07-13-functional-hook-preflight.md`，专项实现位于 `managed/codex-hooks/hooks/codex-state-policy-guard.py`。
+- GitHub/收尾 skill 的默认分支策略已完成实现与验证：默认分支用 remote HEAD 与 GitHub `defaultBranchRef` 双证据解析，临时分支在确认后合入并双端清理，历史 patch-stack 只报告。设计与实施记录见 `docs/specs/2026-07-13-github-default-branch-skill-policy-design.md` 和 `docs/plans/2026-07-13-github-default-branch-skill-policy-implementation.md`；运行证据保存在 `D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\`。
 
 这些报告是事实快照，不是执行授权。真实迁移、PATH 修改、全局管理器更新或删除前必须重新生成最新基线，并取得具体项授权。

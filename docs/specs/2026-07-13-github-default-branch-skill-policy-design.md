@@ -1,6 +1,8 @@
 # Git 默认分支发布与收尾 Skill 统一策略设计
 
-> 状态：已确认，待实施。它不授权删除任何现有分支。
+> 状态：已实施并验证（2026-07-13）。默认分支发布、临时分支确认后清理和 patch-stack report-only 规则已落地；本状态不授权删除任何既有或未知分支。
+
+验证摘要与有序清理记录位于 `D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\verification-summary.json`、`VERIFICATION.md` 和 `task5-action-log.md`。计划中的临时 worktree 路径仅是历史执行记录，不代表当前目录仍存在。
 
 ## 目标
 
