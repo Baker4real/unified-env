@@ -1,5 +1,18 @@
 Set-StrictMode -Version Latest
 
+$script:CodexHookProcessDrainTimeoutMilliseconds = 250
+
+function Receive-CodexHookBoundedProcessStream {
+    param(
+        [Parameter(Mandatory)][object]$Task,
+        [Parameter(Mandatory)][string]$StreamName
+    )
+    if (-not $Task.Wait($script:CodexHookProcessDrainTimeoutMilliseconds)) {
+        throw "进程 $StreamName drain 超时。"
+    }
+    return $Task.GetAwaiter().GetResult()
+}
+
 function Get-CodexHookSha256 {
     param([Parameter(Mandatory)][string]$Path)
     if (-not [IO.File]::Exists($Path)) { throw "文件不存在：$Path" }
@@ -95,16 +108,20 @@ function Write-CodexHookAtomicText {
         if ($replaced -and [IO.File]::Exists($backup)) {
             try {
                 if($TestBeforeRollback){&$TestBeforeRollback $full}
-                if((Get-CodexHookSha256 $backup) -cne $before){throw 'rollback backup SHA-256 漂移。'}
+                [byte[]]$backupBytes=[IO.File]::ReadAllBytes($backup)
+                if(([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($backupBytes))).ToLowerInvariant() -cne $before){throw 'rollback backup SHA-256 漂移。'}
                 # Keep WRITE excluded from the verified deployed target through replacement.
                 $rollbackLease=[IO.File]::Open($full,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::Read -bor [IO.FileShare]::Delete))
                 $rollbackLease.Position=0
                 $rollbackLeaseSha256=([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($rollbackLease))).ToLowerInvariant()
                 if($rollbackLeaseSha256 -cne $expectedAfter){throw 'rollback live SHA-256 不再匹配本 writer 发布值。'}
                 if($TestBeforeRollbackReplace){&$TestBeforeRollbackReplace $full}
+                # A normal user-mode delete/replace can still race after this check and before
+                # File.Replace. This detects the observable window but does not claim absolute CAS.
+                if((Get-CodexHookSha256 $full) -cne $expectedAfter){throw 'rollback live SHA-256 在 replace 前漂移。'}
                 $restoreTemp=Join-Path $parent ('.codex-hook-restore-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
                 $replaceBackup=Join-Path $parent ('.codex-hook-replace-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
-                [IO.File]::WriteAllBytes($restoreTemp,[IO.File]::ReadAllBytes($backup))
+                [IO.File]::WriteAllBytes($restoreTemp,$backupBytes)
                 &$Validator $restoreTemp
                 [IO.File]::Replace($restoreTemp,$full,$replaceBackup,$true);$restoreTemp=$null
                 $rollbackLease.Dispose();$rollbackLease=$null
@@ -131,8 +148,18 @@ function Invoke-CodexHookProcess {
     try {
         if (-not $process.Start()) { throw "进程启动失败：$FilePath" }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync(); $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutMilliseconds)) { try { $process.Kill($true) } catch {}; throw "进程超时：$FilePath" }
-        return [pscustomobject][ordered]@{ exitCode = $process.ExitCode; stdout = $stdoutTask.GetAwaiter().GetResult(); stderr = $stderrTask.GetAwaiter().GetResult() }
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            try { $process.Kill($true) } catch {}
+            try { [void]$process.WaitForExit($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+            try { [void]$stdoutTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+            try { [void]$stderrTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+            throw "进程超时：$FilePath"
+        }
+        return [pscustomobject][ordered]@{
+            exitCode = $process.ExitCode
+            stdout = Receive-CodexHookBoundedProcessStream -Task $stdoutTask -StreamName "$FilePath stdout"
+            stderr = Receive-CodexHookBoundedProcessStream -Task $stderrTask -StreamName "$FilePath stderr"
+        }
     } finally { $process.Dispose() }
 }
 
@@ -158,7 +185,7 @@ function Assert-CodexSerenaSessionStartOutputBytes {
         $hookOutput = $root.GetProperty('hookSpecificOutput')
         if ($hookOutput.ValueKind -ne [Text.Json.JsonValueKind]::Object) { throw 'Serena activate hookSpecificOutput 必须是 object。' }
         $hookNames = @($hookOutput.EnumerateObject() | ForEach-Object Name)
-        if (($hookNames -join "`0") -cne ('hookEventName','additionalContext' -join "`0")) { throw 'Serena activate hookSpecificOutput schema 非法。' }
+        if ($hookNames.Count -ne 2 -or $hookNames -cnotcontains 'hookEventName' -or $hookNames -cnotcontains 'additionalContext') { throw 'Serena activate hookSpecificOutput schema 非法。' }
         if ($hookOutput.GetProperty('hookEventName').ValueKind -ne [Text.Json.JsonValueKind]::String -or $hookOutput.GetProperty('hookEventName').GetString() -cne 'SessionStart') { throw 'Serena activate hookEventName 非法。' }
         if ($hookOutput.GetProperty('additionalContext').ValueKind -ne [Text.Json.JsonValueKind]::String -or [string]::IsNullOrWhiteSpace($hookOutput.GetProperty('additionalContext').GetString())) { throw 'Serena activate additionalContext 非法。' }
     }

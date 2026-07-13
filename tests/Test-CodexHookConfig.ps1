@@ -63,12 +63,19 @@ $stateHook=@($manifest.hooks|Where-Object id -ceq 'codex-state-policy')[0]
 $activateHook=@($manifest.hooks|Where-Object id -ceq 'serena-activate')[0]
 $dashboardHook=@($manifest.hooks|Where-Object id -ceq 'serena-dashboard')[0]
 Assert-True (($providerHook.quickHealthCheck.arguments -join ',') -ceq '-CheckOnly,-Json') 'provider quick check 必须只读'
-Assert-True (($providerHook.fullAcceptanceCommand.arguments -join ',') -ceq '-CheckOnly,-Json') 'provider full acceptance 必须只读'
+Assert-True (($providerHook.fullAcceptanceCommand.arguments -join ',') -ceq '-Json,-CheckNetwork') 'provider full acceptance 必须保留 Task 8 的真实 network 验收；Task 7 另走只读 quick check'
 Assert-True (($stateHook.quickHealthCheck.arguments -join ',') -ceq '--check-only,--json') 'state quick check 必须只读'
 Assert-True (($stateHook.fullAcceptanceCommand.arguments -join ',') -ceq '--check-only,--json') 'state postcheck 必须只读'
 Assert-True ($dashboardHook.quickHealthCheck.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -and ($dashboardHook.quickHealthCheck.arguments -join ' ') -ceq "-NoProfile -Command Test-Path -LiteralPath 'D:\Codex\.codex\hooks\serena-dashboard-guard.cmd'") 'dashboard quick check 必须为固定 wrapper 存在性 static acceptance'
 Assert-True (($dashboardHook.fullAcceptanceCommand.arguments -join ',') -ceq '-CheckOnly,-Json') 'dashboard acceptance 必须只读'
-Assert-True (($activateHook.fullAcceptanceCommand.arguments -join ' ').Contains('session_id') -and ($activateHook.fullAcceptanceCommand.arguments -join ' ') -match '-CheckOnly\s+-Json') 'activate acceptance 必须使用合法脱敏 SessionStart JSON 且只读'
+$expectedActivateFullAcceptance = "'{`"session_id`":`"00000000-0000-0000-0000-000000000000`"}' | & 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd'"
+Assert-True (
+    $activateHook.fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -and
+    @($activateHook.fullAcceptanceCommand.arguments).Count -eq 3 -and
+    $activateHook.fullAcceptanceCommand.arguments[0] -ceq '-NoProfile' -and
+    $activateHook.fullAcceptanceCommand.arguments[1] -ceq '-Command' -and
+    $activateHook.fullAcceptanceCommand.arguments[2] -ceq $expectedActivateFullAcceptance
+) 'activate full acceptance 必须保留给 Task 8 的真实 vendor protocol；Task 7 只验证 input/runtime'
 foreach($hook in @($providerHook,$stateHook,$dashboardHook)){
     Assert-True (@($hook.writeResources|Where-Object{$_.kind -ceq 'abstract' -and $_.value -ceq 'hook-stdout'}).Count -eq 0) "$($hook.id) SessionStart 默认不得声明 stdout"
 }

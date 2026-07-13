@@ -121,6 +121,33 @@ function Assert-CodexHookProductionFullPlan {
         foreach($action in @($Plan.actions)){Assert-CodexHookExactProperties $action @('actionId','phase','kind','sourceRef','sourceSha256','logicalTarget','targetPath','beforeExists','beforeSha256','afterSha256','restoreOrder') 'production full action';if($action.kind -ceq 'registry'){if($action.targetPath -cne $Profile.registryPath -or $action.phase -cne 'registry'){throw 'production full registry action 非法。'}}elseif($action.kind -ceq 'file'){if(-not(Test-CodexHookPathWithin ([string]$action.targetPath) ([string]$Profile.hooksRoot))){throw 'production full file action 越界。'}}else{throw 'production full action kind 非法。'}}
         foreach($action in @($Plan.environmentActions)){Assert-CodexHookExactProperties $action @('actionId','phase','kind','name','scope','after','beforePresent','beforeMatchesTarget','beforeValueSha256','afterValueSha256','restoreOrder') 'production full environment action';if($action.name -cne 'SERENA_HOME' -or $action.scope -cne 'User' -or $action.after -cne 'D:\Codex\.serena'){throw 'production full environment action 非法。'}}
     }
+    $expectedFileActionIds=[string[]]@(
+        'file:hooks/codex-github-cli-guard.cmd',
+        'file:hooks/codex-github-cli-guard.ps1',
+        'file:hooks/codex-projectless-root-d.cmd',
+        'file:hooks/codex-state-policy-guard.py',
+        'file:hooks/codex-provider-stability-guard.cmd',
+        'file:hooks/codex-provider-stability-guard.ps1',
+        'file:hooks/serena-activate-guarded.cmd',
+        'file:hooks/serena-activate-guarded.ps1',
+        'file:hooks/serena-dashboard-guard.cmd',
+        'file:hooks/serena-dashboard-guard.ps1',
+        'file:hooks/lib/CodexHookRuntime.ps1',
+        'file:hooks/lib/CodexGitHubCliGuardEntry.ps1',
+        'file:hooks/lib/CodexConfigFile.ps1'
+    )
+    $fileActions=@($Plan.actions|Where-Object kind -ceq 'file')
+    $registryActions=@($Plan.actions|Where-Object kind -ceq 'registry')
+    if(
+        @($Plan.actions).Count -ne 14 -or @($Plan.environmentActions).Count -ne 1 -or
+        $fileActions.Count -ne 13 -or $registryActions.Count -ne 1 -or
+        -not(Test-CodexHookExactStringSequence -Actual @($fileActions.actionId|Sort-Object) -Expected @($expectedFileActionIds|Sort-Object)) -or
+        $registryActions[0].actionId -cne 'registry:hooks.json' -or
+        $Plan.environmentActions[0].actionId -cne 'environment:User:SERENA_HOME' -or
+        [int]$registryActions[0].restoreOrder -ne 15
+    ){throw 'production full fixed 15-action allowlist/environment/registry-final contract 非法。'}
+    [int[]]$restoreOrders=@(@($Plan.actions)+@($Plan.environmentActions)|ForEach-Object {[int]$_.restoreOrder}|Sort-Object)
+    if($restoreOrders.Count -ne 15 -or -not(Test-CodexHookExactStringSequence -Actual @($restoreOrders|ForEach-Object {[string]$_}) -Expected @((1..15)|ForEach-Object {[string]$_}))){throw 'production full restoreOrder 必须唯一且连续 1..15。'}
     Assert-CodexHookExactProperties -Value $Plan.projectionSummary -Names @('restartRequired','fileActions','environmentActions','unknownLiveCount','unknownLiveSha256') -Scope 'production full projection summary'
     Assert-CodexHookInteger -Value $Plan.projectionSummary.unknownLiveCount -Name 'production full unknownLiveCount'
     if (
@@ -146,7 +173,7 @@ function New-CodexHookProductionFullState {
     $manifest = ([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$manifestSnapshot.bytes)) | ConvertFrom-Json -Depth 128
     [void](Assert-CodexHookManifest -Manifest $manifest)
     if (@($manifest.environment).Count -ne 1 -or $manifest.environment[0].name -cne 'SERENA_HOME' -or $manifest.environment[0].scope -cne 'User' -or $manifest.environment[0].desired -cne 'D:\Codex\.serena') { throw 'production full environment manifest 必须是唯一 User SERENA_HOME。' }
-    $sourceFacts = [Collections.Generic.List[object]]::new(); $liveFacts = [Collections.Generic.List[object]]::new(); $sourceBytes = @{}
+    $sourceFacts = [Collections.Generic.List[object]]::new(); $liveFacts = [Collections.Generic.List[object]]::new(); $sourceBytes = @{}; $blockers=[Collections.Generic.List[string]]::new()
     foreach ($file in @($manifest.files)) {
         $sourcePath = [IO.Path]::GetFullPath((Join-Path ([string]$Profile.sourceRoot) ([string]$file.relativePath)))
         $livePath = [IO.Path]::GetFullPath((Join-Path ([string]$Profile.hooksRoot) ([string]$file.liveRelativePath)))
@@ -155,6 +182,7 @@ function New-CodexHookProductionFullState {
         $live = Get-CodexHookCapabilityFileSnapshot -Path $livePath -CapabilityRoot ([string]$Profile.hooksRoot) -AllowedExactPaths @($livePath) -Name 'production full live'
         $sourceFacts.Add([pscustomobject][ordered]@{ relativePath=[string]$file.relativePath; path=$sourcePath; exists=[bool]$source.exists; probeState=[string]$source.state; sha256=[string]$source.sha256 })
         $liveFacts.Add([pscustomobject][ordered]@{ liveRelativePath=[string]$file.liveRelativePath; path=$livePath; exists=[bool]$live.exists; probeState=[string]$live.state; sha256=[string]$live.sha256 })
+        if($file.lifecycle -ceq 'retired' -and ((-not $live.exists) -or $live.state -cne 'regular-file')){$blockers.Add('retired-live-not-retained')}
         if ($source.exists) { $sourceBytes[[string]$file.relativePath] = [byte[]]$source.bytes }
     }
     $registrySnapshot = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.registryPath) -CapabilityRoot ([string]$Profile.codexHome) -AllowedExactPaths @([string]$Profile.registryPath) -Name 'production full registry'
@@ -167,7 +195,7 @@ function New-CodexHookProductionFullState {
         targetProfile='codex-hook-fixture-v1'; mappingIdentity=(Get-CodexHookFixtureMappingIdentity -Manifest $manifest -SourceRoot ([string]$Profile.sourceRoot) -CodexHome ([string]$Profile.codexHome));
         manifestPath=[string]$Profile.manifestPath; manifestSha256=[string]$manifestSnapshot.sha256; sourceRoot=[string]$Profile.sourceRoot; codexHome=[string]$Profile.codexHome;
         hooksRoot=[string]$Profile.hooksRoot; registryPath=[string]$Profile.registryPath; registryBeforeSha256=[string]$registrySnapshot.sha256;
-        sourceFiles=[object[]]$sourceFacts.ToArray(); liveFiles=[object[]]$liveFacts.ToArray(); environmentFacts=@($envFact); blockers=@()
+        sourceFiles=[object[]]$sourceFacts.ToArray(); liveFiles=[object[]]$liveFacts.ToArray(); environmentFacts=@($envFact); blockers=[string[]]$blockers.ToArray()
     }
     $plan = New-CodexHookDeploymentPlanDocument -Manifest $manifest -Inventory $inventory -DesiredRegistry $desiredRegistry -Mode full
     $plan.sourceFacts.targetProfile = 'codex-hook-production-full-v1'; $plan.liveFacts.targetProfile = 'codex-hook-production-full-v1'
@@ -321,15 +349,15 @@ function Assert-CodexHookProductionFullAttestedLineage {
 }
 
 function Assert-CodexHookProductionFullApplySeamGuard {
-    param([Parameter(Mandatory)][object]$Profile,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot,[scriptblock]$TestBeforeRollbackPendingStatus,[scriptblock]$TestBeforeAutomaticRollback)
-    if(($TestFaultInjection -cne 'none' -or $null -ne $TestAfterPredecessorSnapshot -or $null -ne $TestBeforeRollbackPendingStatus -or $null -ne $TestBeforeAutomaticRollback) -and -not $Profile.isFixtureAdapter){throw 'production full apply seam 仅允许 fixture adapter。'}
+    param([Parameter(Mandatory)][object]$Profile,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot,[scriptblock]$TestBeforeRollbackPendingStatus,[scriptblock]$TestBeforeAutomaticRollback,[scriptblock]$TestAfterAutomaticRollbackAction)
+    if(($TestFaultInjection -cne 'none' -or $null -ne $TestAfterPredecessorSnapshot -or $null -ne $TestBeforeRollbackPendingStatus -or $null -ne $TestBeforeAutomaticRollback -or $null -ne $TestAfterAutomaticRollbackAction) -and -not $Profile.isFixtureAdapter){throw 'production full apply seam 仅允许 fixture adapter。'}
     return $true
 }
 
 function Invoke-CodexHookProductionFullApplyEngine {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot,[scriptblock]$TestBeforeRollbackPendingStatus,[scriptblock]$TestBeforeAutomaticRollback)
-    [void](Assert-CodexHookProductionFullApplySeamGuard -Profile $Profile -TestFaultInjection $TestFaultInjection -TestAfterPredecessorSnapshot $TestAfterPredecessorSnapshot -TestBeforeRollbackPendingStatus $TestBeforeRollbackPendingStatus -TestBeforeAutomaticRollback $TestBeforeAutomaticRollback)
+    param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot,[scriptblock]$TestBeforeRollbackPendingStatus,[scriptblock]$TestBeforeAutomaticRollback,[scriptblock]$TestAfterAutomaticRollbackAction)
+    [void](Assert-CodexHookProductionFullApplySeamGuard -Profile $Profile -TestFaultInjection $TestFaultInjection -TestAfterPredecessorSnapshot $TestAfterPredecessorSnapshot -TestBeforeRollbackPendingStatus $TestBeforeRollbackPendingStatus -TestBeforeAutomaticRollback $TestBeforeAutomaticRollback -TestAfterAutomaticRollbackAction $TestAfterAutomaticRollbackAction)
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     $planSnapshot = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.planPath) -CapabilityRoot ([string]$Profile.planOutputDir) -AllowedExactPaths @([string]$Profile.planPath) -Name 'production full plan'
     $planText=[Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$planSnapshot.bytes); Assert-CodexHookStrictJsonText $planText; $plan=$planText|ConvertFrom-Json -Depth 128 -DateKind String
@@ -420,11 +448,19 @@ function Invoke-CodexHookProductionFullApplyEngine {
             }
             try {
                 if($null -ne $TestBeforeAutomaticRollback){& $TestBeforeAutomaticRollback}
-                [void](Restore-CodexHookProductionFullEngine -Profile $Profile -EvidenceDirectory ([string]$paths.evidenceDirectory) -EnvironmentReadValue $EnvironmentReadValue -EnvironmentWriteValue $EnvironmentWriteValue -FinalStatus rolled-back)
+                [void](Restore-CodexHookProductionFullEngine -Profile $Profile -EvidenceDirectory ([string]$paths.evidenceDirectory) -EnvironmentReadValue $EnvironmentReadValue -EnvironmentWriteValue $EnvironmentWriteValue -FinalStatus rolled-back -TestAfterRestoreAction $TestAfterAutomaticRollbackAction)
             } catch {
+                try {
+                    $persistedStatusSnapshot=Get-CodexHookCapabilityFileSnapshot ([string]$paths.statusPath) ([string]$Profile.evidenceRoot) @([string]$paths.statusPath) 'production full rollback blocked status'
+                    if($persistedStatusSnapshot.exists){
+                        $persistedStatus=([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$persistedStatusSnapshot.bytes))|ConvertFrom-Json -Depth 32
+                        if($persistedStatus.PSObject.Properties.Name -contains 'restoredActionIds'){$status.restoredActionIds=[string[]]@($persistedStatus.restoredActionIds)}
+                    }
+                } catch {}
                 $status.status='rollback-blocked'
                 try { Set-CodexHookProductionFullJson ([string]$paths.statusPath) $status $Profile } catch {}
-                throw 'production full apply 失败且自动 rollback 未完成；rollback-blocked；recovery-required。'
+                $recovery=[ordered]@{code='rollback-blocked';recoveryRequired=$true;generationId=[string]$plan.generationId;evidenceDirectory=[string]$paths.evidenceDirectory;statusPath=[string]$paths.statusPath;reason='automatic-rollback-failed';restoredActionIds=[string[]]@($status.restoredActionIds)}
+                throw ('production full recovery-required:' + ($recovery|ConvertTo-Json -Compress -Depth 8))
             }
             if($rollbackPendingStatusWriteFailed){throw 'production full apply 失败；自动 rollback 完成（rollback-confirmed；rollback-pending status evidence write failed）。'}
             throw 'production full apply 失败；自动 rollback 完成（rollback-confirmed）。'
@@ -439,8 +475,8 @@ function Remove-CodexHookProductionFullFile {
 }
 
 function Assert-CodexHookProductionFullRestoreSeamGuard {
-    param([Parameter(Mandatory)][object]$Profile,[scriptblock]$TestAfterRestoreAction,[scriptblock]$TestBeforeEnvironmentRestoreWrite,[scriptblock]$TestAfterActiveConverged)
-    if(($null -ne $TestAfterRestoreAction -or $null -ne $TestBeforeEnvironmentRestoreWrite -or $null -ne $TestAfterActiveConverged) -and -not $Profile.isFixtureAdapter){throw 'production full restore seam 仅允许 fixture adapter。'}
+    param([Parameter(Mandatory)][object]$Profile,[scriptblock]$TestAfterRestoreAction,[scriptblock]$TestBeforeEnvironmentRestoreWrite,[scriptblock]$TestBeforeActiveRestorePublish,[scriptblock]$TestAfterActiveConverged)
+    if(($null -ne $TestAfterRestoreAction -or $null -ne $TestBeforeEnvironmentRestoreWrite -or $null -ne $TestBeforeActiveRestorePublish -or $null -ne $TestAfterActiveConverged) -and -not $Profile.isFixtureAdapter){throw 'production full restore seam 仅允许 fixture adapter。'}
     return $true
 }
 
@@ -454,9 +490,10 @@ function Restore-CodexHookProductionFullEngine {
         [ValidateSet('restored','rolled-back')][string]$FinalStatus='restored',
         [scriptblock]$TestAfterRestoreAction,
         [scriptblock]$TestBeforeEnvironmentRestoreWrite,
+        [scriptblock]$TestBeforeActiveRestorePublish,
         [scriptblock]$TestAfterActiveConverged
     )
-    [void](Assert-CodexHookProductionFullRestoreSeamGuard -Profile $Profile -TestAfterRestoreAction $TestAfterRestoreAction -TestBeforeEnvironmentRestoreWrite $TestBeforeEnvironmentRestoreWrite -TestAfterActiveConverged $TestAfterActiveConverged)
+    [void](Assert-CodexHookProductionFullRestoreSeamGuard -Profile $Profile -TestAfterRestoreAction $TestAfterRestoreAction -TestBeforeEnvironmentRestoreWrite $TestBeforeEnvironmentRestoreWrite -TestBeforeActiveRestorePublish $TestBeforeActiveRestorePublish -TestAfterActiveConverged $TestAfterActiveConverged)
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     $evidence=Assert-CodexHookCapabilityPath $EvidenceDirectory ([string]$Profile.evidenceRoot) @() 'production full evidence'
     $restorePath=Join-Path $evidence 'restore-manifest.json'
@@ -585,12 +622,13 @@ function Restore-CodexHookProductionFullEngine {
             if($null -ne $TestAfterRestoreAction){& $TestAfterRestoreAction ([string]$a.actionId)}
         }
         $terminal=if($FinalStatus -ceq 'rolled-back'){'rolled-back'}else{'restored'}
+        if($null -ne $TestBeforeActiveRestorePublish){if(-not $Profile.isFixtureAdapter){throw 'active restore publish seam 仅允许 fixture'};& $TestBeforeActiveRestorePublish}
         if($null -ne $previousActiveBackup){
-            $currentActiveSnapshot=Get-CodexHookCapabilityFileSnapshot ([string]$paths.activePath) ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full active predecessor publish'
-            Set-CodexHookAtomicFileBytesWithCapability ([string]$paths.activePath) ([byte[]]$previousActiveBackup.bytes) $true ([string]$currentActiveSnapshot.sha256) ([string]$previousActiveBackup.sha256) ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full active predecessor publish'
+            Set-CodexHookAtomicFileBytesWithCapability ([string]$paths.activePath) ([byte[]]$previousActiveBackup.bytes) $true ([string]$as.sha256) ([string]$previousActiveBackup.sha256) ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full active predecessor publish'
         }else{
             $active.state=$terminal
-            Set-CodexHookProductionFullJson ([string]$paths.activePath) $active $Profile
+            [byte[]]$terminalActiveBytes=[Text.UTF8Encoding]::new($false).GetBytes(($active|ConvertTo-Json -Depth 20))
+            Set-CodexHookAtomicFileBytesWithCapability ([string]$paths.activePath) $terminalActiveBytes $true ([string]$as.sha256) (Get-CodexHookBytesSha256 $terminalActiveBytes) ([string]$Profile.evidenceRoot) @([string]$paths.activePath) 'production full active terminal publish'
         }
         if($null -ne $TestAfterActiveConverged){if(-not $Profile.isFixtureAdapter){throw 'active converged seam 仅允许 fixture'};& $TestAfterActiveConverged}
         $st.status=$terminal
@@ -601,18 +639,18 @@ function Restore-CodexHookProductionFullEngine {
 
 function Invoke-CodexHookProductionFullApplyCore {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot,[scriptblock]$TestBeforeRollbackPendingStatus,[scriptblock]$TestBeforeAutomaticRollback)
+    param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('none','before-registry')][string]$TestFaultInjection='none',[scriptblock]$TestAfterPredecessorSnapshot,[scriptblock]$TestBeforeRollbackPendingStatus,[scriptblock]$TestBeforeAutomaticRollback,[scriptblock]$TestAfterAutomaticRollbackAction)
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     if(-not $Profile.isFixtureAdapter){throw 'production full core adapters 仅允许 fixed fixture；真实 production 必须使用固定 façade。'}
-    return Invoke-CodexHookProductionFullApplyEngine -Profile $Profile -EnvironmentReadValue $EnvironmentReadValue -EnvironmentWriteValue $EnvironmentWriteValue -TestFaultInjection $TestFaultInjection -TestAfterPredecessorSnapshot $TestAfterPredecessorSnapshot -TestBeforeRollbackPendingStatus $TestBeforeRollbackPendingStatus -TestBeforeAutomaticRollback $TestBeforeAutomaticRollback
+    return Invoke-CodexHookProductionFullApplyEngine -Profile $Profile -EnvironmentReadValue $EnvironmentReadValue -EnvironmentWriteValue $EnvironmentWriteValue -TestFaultInjection $TestFaultInjection -TestAfterPredecessorSnapshot $TestAfterPredecessorSnapshot -TestBeforeRollbackPendingStatus $TestBeforeRollbackPendingStatus -TestBeforeAutomaticRollback $TestBeforeAutomaticRollback -TestAfterAutomaticRollbackAction $TestAfterAutomaticRollbackAction
 }
 
 function Restore-CodexHookProductionFullCore {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][string]$EvidenceDirectory,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('restored','rolled-back')][string]$FinalStatus='restored',[scriptblock]$TestAfterRestoreAction,[scriptblock]$TestBeforeEnvironmentRestoreWrite,[scriptblock]$TestAfterActiveConverged)
+    param([Parameter(Mandatory)][object]$Profile,[Parameter(Mandatory)][string]$EvidenceDirectory,[Parameter(Mandatory)][scriptblock]$EnvironmentReadValue,[Parameter(Mandatory)][scriptblock]$EnvironmentWriteValue,[ValidateSet('restored','rolled-back')][string]$FinalStatus='restored',[scriptblock]$TestAfterRestoreAction,[scriptblock]$TestBeforeEnvironmentRestoreWrite,[scriptblock]$TestBeforeActiveRestorePublish,[scriptblock]$TestAfterActiveConverged)
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     if(-not $Profile.isFixtureAdapter){throw 'production full restore core adapters 仅允许 fixed fixture；真实 production 必须使用固定 façade。'}
-    return Restore-CodexHookProductionFullEngine -Profile $Profile -EvidenceDirectory $EvidenceDirectory -EnvironmentReadValue $EnvironmentReadValue -EnvironmentWriteValue $EnvironmentWriteValue -FinalStatus $FinalStatus -TestAfterRestoreAction $TestAfterRestoreAction -TestBeforeEnvironmentRestoreWrite $TestBeforeEnvironmentRestoreWrite -TestAfterActiveConverged $TestAfterActiveConverged
+    return Restore-CodexHookProductionFullEngine -Profile $Profile -EvidenceDirectory $EvidenceDirectory -EnvironmentReadValue $EnvironmentReadValue -EnvironmentWriteValue $EnvironmentWriteValue -FinalStatus $FinalStatus -TestAfterRestoreAction $TestAfterRestoreAction -TestBeforeEnvironmentRestoreWrite $TestBeforeEnvironmentRestoreWrite -TestBeforeActiveRestorePublish $TestBeforeActiveRestorePublish -TestAfterActiveConverged $TestAfterActiveConverged
 }
 
 function Invoke-CodexHookProductionFullApply {

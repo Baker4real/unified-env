@@ -198,7 +198,7 @@ snapshot、write-excluding lease、原子 rename、handle/path postcheck 与 blo
 
 ## Timeout 与 Failure Semantics
 
-- 外层 hook timeout 初始保持 10 秒，内部任一锁等待最多 1–2 秒，为运行、验证与清理留出预算。
+- provider SessionStart 预算为 `1500ms + 4 x (1000ms + 250ms) + 2000ms = 8500ms`，保持 10 秒；dashboard 最坏预算为 `1500ms + 7 x (1000ms + 250ms) + 2000ms = 12250ms`，外层为 15 秒。250ms 是 stdout/stderr drain 的有界上限；Task 8 的 provider `-CheckNetwork` 不属于常规 SessionStart 预算。
 - provider/state/config 属于 `critical`：变更失败时不覆盖 live 文件，并返回明确非零退出或结构化失败。
 - GitHub CLI 属于 `optional`：失败记录 warning/health，但不阻断普通会话。
 - Serena activate 属于 `degraded`：协议转发失败会丢失提示，但不应破坏其他 host policy 写入。

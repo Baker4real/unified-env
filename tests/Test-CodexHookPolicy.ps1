@@ -373,17 +373,31 @@ Assert-True (
 
 $runtimeFile=@($managedManifest.files|Where-Object relativePath -ceq 'hooks/lib/CodexHookRuntime.ps1')
 Assert-True ($runtimeFile.Count -eq 1 -and (@($runtimeFile[0].ownerHookIds) -join ',') -ceq 'provider-stability,serena-activate,serena-dashboard,github-cli') 'shared runtime owners 必须覆盖所有 PowerShell active hooks'
+$provider=@($managedManifest.hooks|Where-Object id -ceq 'provider-stability')[0]
+$dashboard=@($managedManifest.hooks|Where-Object id -ceq 'serena-dashboard')[0]
 $serenaActivate=@($managedManifest.hooks|Where-Object id -ceq 'serena-activate')[0]
-Assert-True (@($serenaActivate.writeResources|Where-Object{$_.kind -ceq 'path' -and $_.value -ceq 'D:\Codex\.codex\run-evidence\codex-hook-health\serena-activate.json'}).Count -eq 1) 'Serena activate manifest 必须声明独立 health 写资源'
-$expectedSerenaActivateAcceptance = "'{`"session_id`":`"00000000-0000-0000-0000-000000000000`"}' | & 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd' -CheckOnly -Json"
-Assert-True ($serenaActivate.fullAcceptanceCommand.arguments[2] -ceq $expectedSerenaActivateAcceptance) 'Serena activate full acceptance 必须固定为脱敏 session_id check-only JSON'
-$legacySerenaActivateAcceptance = Copy-TestDocument $managedManifest
-$legacySerenaActivateHook = @($legacySerenaActivateAcceptance.hooks | Where-Object id -ceq 'serena-activate')[0]
-$legacySerenaActivateHook.fullAcceptanceCommand.arguments[2] = "'{}' | & '$($legacySerenaActivateHook.commandPath)'"
-Assert-Throws { Assert-CodexHookManifest -Manifest $legacySerenaActivateAcceptance } 'Serena activate 旧 stdout vendor acceptance 形状不得绕过只读 allowlist'
 $github=@($managedManifest.hooks|Where-Object id -ceq 'github-cli')[0]
+function Assert-WriteResource([object]$Hook,[string]$Path,[string]$Message){Assert-True (@($Hook.writeResources|Where-Object{$_.kind -ceq 'path' -and $_.value -ceq $Path}).Count -eq 1) $Message}
+Assert-WriteResource $provider 'D:\Codex\.codex\backups_state\provider-stability-guard' 'provider manifest 必须声明 config rollback backup 写资源'
+Assert-WriteResource $dashboard 'D:\Codex\.codex\backups_state\serena-dashboard-guard\toml' 'dashboard manifest 必须声明 TOML rollback backup 写资源'
+Assert-WriteResource $dashboard 'D:\Codex\.codex\backups_state\serena-dashboard-guard\yaml' 'dashboard manifest 必须声明 YAML rollback backup 写资源'
+foreach($hook in @($provider,$serenaActivate,$dashboard,$github)){Assert-WriteResource $hook 'D:\Codex\.codex\run-evidence\codex-hook-health\.backups' "$($hook.id) manifest 必须声明 latest-health backup 写资源"}
+Assert-WriteResource $serenaActivate 'D:\Codex\.codex\run-evidence\codex-hook-health\serena-activate.json' 'Serena activate manifest 必须声明独立 health 写资源'
+Assert-True (($provider.fullAcceptanceCommand.arguments -join ',') -ceq '-Json,-CheckNetwork') 'provider full acceptance 必须保留 Task 8 实际 network 验收；Task 7 另走 CheckOnly'
+$expectedSerenaActivateAcceptance = "'{`"session_id`":`"00000000-0000-0000-0000-000000000000`"}' | & 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd'"
+Assert-True ($serenaActivate.fullAcceptanceCommand.arguments[2] -ceq $expectedSerenaActivateAcceptance) 'Serena activate full acceptance 必须留给 Task 8 的真实 vendor protocol'
+$invalidSerenaActivateAcceptance = Copy-TestDocument $managedManifest
+$invalidSerenaActivateHook = @($invalidSerenaActivateAcceptance.hooks | Where-Object id -ceq 'serena-activate')[0]
+$invalidSerenaActivateHook.fullAcceptanceCommand.arguments[2] = "'{}' | & '$($invalidSerenaActivateHook.commandPath)'"
+Assert-Throws { Assert-CodexHookManifest -Manifest $invalidSerenaActivateAcceptance } 'Serena activate invalid SessionStart input 不得绕过 full vendor protocol allowlist'
 Assert-True (($github.quickHealthCheck.arguments -join ',') -ceq '-CheckOnly,-Json') 'GitHub quick health 接口必须固定且不请求 auth'
 Assert-True (($github.fullAcceptanceCommand.arguments -join ',') -ceq '-Json,-CheckAuth,-Strict') 'GitHub full health 接口必须固定为 auth strict'
+
+$implementationPlan=Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'docs\plans\2026-07-11-codex-hook-governance-implementation.md')
+Assert-True ($implementationPlan -match 'git -C .+ diff --check\s*\r?\nif \(\$LASTEXITCODE -ne 0\)') 'Task 7 Step 1 diff check 必须检查 $LASTEXITCODE'
+Assert-True ($implementationPlan.Contains('1500ms + 4 x (1000ms + 250ms) + 2000ms = 8500ms') -and $implementationPlan.Contains('1500ms + 7 x (1000ms + 250ms) + 2000ms = 12250ms')) 'provider/dashboard timeout 预算公式必须与有界 drain 一致'
+Assert-True ($implementationPlan.Contains('CheckOnly 成功仅说明安全验证可执行，不等同于收敛') -and $implementationPlan.Contains('Task 8')) 'Task 7 文档必须区分 CheckOnly 安全验证与 Task 8 收敛验收'
+Assert-True ($implementationPlan.Contains('activate 的 CheckOnly 仅验证合法输入与 runtime binary，不验证 vendor protocol')) 'Task 7 文档不得把 Serena activate CheckOnly 误称为 vendor protocol 验收'
 
 [pscustomobject]@{
     ok = $true

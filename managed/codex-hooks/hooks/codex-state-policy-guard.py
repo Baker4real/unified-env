@@ -310,8 +310,8 @@ def _select_thread_updates_from_snapshot(
     while not candidate.exists():
         created_roots.append(candidate)
         candidate = candidate.parent
-    snapshot_root.mkdir(parents=True, exist_ok=True)
     try:
+        snapshot_root.mkdir(parents=True, exist_ok=True)
         for attempt in range(1, MAX_GLOBAL_ATTEMPTS + 1):
             try:
                 first = _capture_sqlite_source(path)
@@ -370,8 +370,10 @@ def _select_thread_updates_from_snapshot(
         for created_root in created_roots:
             try:
                 created_root.rmdir()
-            except OSError:
-                break
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise StatePolicyError("thread state snapshot root cleanup failed") from exc
 
 
 def update_thread_state(
@@ -530,8 +532,10 @@ def run_policy(
     check_only: bool,
     health_root: Path,
     output: TextIO = sys.stdout,
-    write_health: bool = True,
+    write_health: bool | None = None,
 ) -> dict[str, object]:
+    if write_health is None:
+        write_health = not check_only
     started = datetime.now(timezone.utc)
     started_clock = time.monotonic()
     run_id = uuid.uuid4().hex
@@ -562,10 +566,16 @@ def run_policy(
         errors.append(_safe_error(exc))
     changed = bool(global_result.get("changed")) or int(thread_result.get("changedCount", 0)) > 0
     restart_required = changed
+    global_drift_count = int(global_result.get("changedCount", 0)) if bool(global_result.get("wouldChange")) else 0
+    thread_drift_count = int(thread_result.get("driftCount", 0))
+    drift_count = global_drift_count + thread_drift_count
+    converged = ok and drift_count == 0
     payload: dict[str, object] = {
         "hookId": "codex-state-policy",
         "ok": ok,
         "changed": changed,
+        "converged": converged,
+        "driftCount": drift_count,
         "globalState": {
             "status": global_result.get("status"),
             "changedCount": int(global_result.get("changedCount", 0)),

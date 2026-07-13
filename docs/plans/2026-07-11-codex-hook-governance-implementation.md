@@ -22,7 +22,7 @@
 - 所有 live apply 前必须有 source/live SHA-256 final gate、D 盘/reparse 父链检查、完整备份、反序回滚和独立对抗性审查。
 - `.codex-global-state.json`、`config.toml`、`serena_config.yml` 和 `hooks.json` 的写入必须使用同目录临时文件、验证和原子替换；写入失败时旧字节保持不变。
 - 输出不得包含完整线程 ID、auth token、代理 user-info、GitHub 凭据、原始全局状态或完整用户 PATH。
-- 外层 hook timeout 初始保持 10 秒；内部单锁等待上限 1500ms，子进程必须有显式 timeout。
+- SessionStart timeout 必须覆盖 mutex、所有 validator 的 process+drain 上限和余量：provider 为 `1500ms + 4 x (1000ms + 250ms) + 2000ms = 8500ms`，保持 10 秒；dashboard 为 `1500ms + 7 x (1000ms + 250ms) + 2000ms = 12250ms`，使用 15 秒。`-CheckNetwork` 只属于 Task 8 的完整验收，不属于 SessionStart 的 10 秒 provider 预算。
 - provider/state/config 为 critical，GitHub 为 optional，Serena activate 为 degraded；optional 失败不得阻断普通会话。
 - `Bash` matcher 暂时保留，只有合成 payload 与 fresh live 证据都否定时才能改 matcher。
 - User `SERENA_HOME` 的唯一目标值是 `D:\Codex\.serena`；变更必须记录 before/after 和 restartRequired，不输出其他用户环境值。
@@ -609,7 +609,7 @@ git commit -m "refactor: harden codex hook config writes"
 **接口：**
 
 - `codex-state-policy-guard.py --codex-home <D path> [--check-only] [--json]`。
-- Produces JSON：`ok,changed,globalState,threadState,restartRequired,errors`；只输出 count/hash/status，不输出 thread IDs。
+- Produces JSON：`ok,changed,converged,driftCount,globalState,threadState,restartRequired,errors`；只输出 count/hash/status，不输出 thread IDs。`--check-only` 的 `converged=false` 只报告 drift，不把检查路径伪装成写入收敛。
 - Pure functions: `rewrite_projectless_path(value)`, `normalize_global_state(state)`, `select_thread_updates(conn)`。
 
 - [ ] **Step 1：写路径与全局状态纯函数红灯**
@@ -661,7 +661,7 @@ conn.execute("begin immediate")
 
 production 运行结束后以 stdlib 原子写入
 `D:\Codex\.codex\run-evidence\codex-hook-health\state-policy.json`，字段与 PowerShell health envelope 一致；
-`--check-only` 使用 D 盘 fixture health root 或 `--health-root` 显式参数，测试不得写 production health。
+`--check-only` 默认不写 health；测试如需 health evidence 必须显式 opt-in 到 D 盘 fixture root，且不得写 production health。
 
 - [ ] **Step 5：切换 compatibility wrapper 与 provider 职责**
 
@@ -806,6 +806,7 @@ $hardening = 'D:\Codex\projects\统一环境\tests\Test-CodexHookProductionRegis
 & 'D:\Codex\tools\python314-official\python.exe' 'D:\Codex\projects\统一环境\tests\Test-CodexStatePolicy.py'
 if ($LASTEXITCODE -ne 0) { throw 'Test-CodexStatePolicy.py 失败' }
 git -C 'D:\Codex\projects\统一环境' diff --check
+if ($LASTEXITCODE -ne 0) { throw 'git diff --check 失败' }
 ```
 
 Expected: 全部 exit 0；专项测试内部覆盖 PowerShell parser、strict JSON、tomllib、PyYAML；仓库在开始生成 production report 前干净。
@@ -844,7 +845,7 @@ Expected: evidence `status=applied`、所有 source/live hashes 与 plan 一致�
 
 - [ ] **Step 5：运行真实入口的只读 wrapper 级 postcheck**
 
-按真实入口的 `CheckOnly` 分支执行；此步骤只验证当前配置、SQLite 快照和 vendor/runtime 可用性，不得写 `config.toml`、proxy 环境、YAML、global-state、SQLite 或 health evidence：
+按真实入口的 `CheckOnly` 分支执行；此步骤只验证当前配置、SQLite 快照和受限 runtime/input 合约，不得写 `config.toml`、proxy 环境、YAML、global-state、SQLite 或 health evidence。activate 的 CheckOnly 仅验证合法输入与 runtime binary，不验证 vendor protocol；后者留给 Task 8 的真实 fresh SessionStart。
 
 ```powershell
 & 'D:\Codex\.codex\hooks\codex-provider-stability-guard.cmd' -CheckOnly -Json
@@ -855,7 +856,7 @@ Expected: evidence `status=applied`、所有 source/live hashes 与 plan 一致�
 & 'D:\Codex\.codex\hooks\serena-dashboard-guard.cmd' -CheckOnly -Json
 ```
 
-Expected：所有结果 `ok=true`；provider/state/Serena 的 TOML、YAML、JSON 均可解析；SQLite `PRAGMA quick_check=ok`；projectless C-prefix=0，D-prefix 与 total 一致；heartbeat/mobile drift=0；activate 的 check-only 输入为合法 SessionStart JSON；输出无 thread IDs、credentials、user-info、raw proxy/NO_PROXY 值。
+Expected：所有结果 `ok=true`；provider/state/Serena 的 TOML、YAML、JSON 均可解析；SQLite `PRAGMA quick_check=ok`；activate 的 check-only 输入为合法 SessionStart JSON；输出无 thread IDs、credentials、user-info、raw proxy/NO_PROXY 值。CheckOnly 成功仅说明安全验证可执行，不等同于收敛：必须记录 state payload 的 `converged`/`driftCount`，任何 drift 都不得当作 Task 7 的收敛绿灯；Task 8 以真实 SessionStart 写路径和 fresh `runId` 验收 drift=0。
 
 - [ ] **Step 6：失败处理与暂停点**
 
@@ -867,7 +868,7 @@ Expected：所有结果 `ok=true`；provider/state/Serena 的 TOML、YAML、JSON
   -Apply -ApprovedScope 'codex-hook-governance-2026-07-11'
 ```
 
-再验证旧 hash、registry、User `SERENA_HOME` 和语法。完整部署 engine 只发布受管文件、User 环境变量和 registry；不会在 plan 或 apply core 中主动运行 wrapper，也不会主动写 config/global-state/SQLite。Step 5 也不产生这些副作用，因此固定 restore 覆盖完整的 Task 7 写集合。全部 wrapper postcheck 通过时保留新状态，但不在当前进程中伪称 SessionStart 已验收；记录必须完整重启 Codex。
+再验证旧 hash、registry、User `SERENA_HOME` 和语法。完整部署 engine 只发布受管文件、User 环境变量和 registry；不会在 plan 或 apply core 中主动运行 wrapper，也不会主动写 config/global-state/SQLite。Step 5 也不产生这些副作用，因此固定 restore 覆盖完整的 15 个 Task 7 deployment actions。若自动 rollback blocked，立即保存并使用返回的脱敏 `generationId`、`evidenceDirectory`、`statusPath`、reason 和已持久 `restoredActionIds` 进行外部 restore；不得扫描或猜测证据目录。全部 wrapper postcheck 通过时保留新状态，但不在当前进程中伪称 SessionStart 已验收；记录必须完整重启 Codex。
 
 - [ ] **Step 7：提交 production inventory 与部署摘要**
 
@@ -902,7 +903,7 @@ git commit -m "feat: deploy managed codex hooks"
 
 - [ ] **Step 2：验证 fresh SessionStart 实际触发**
 
-在重启前记录 5 个 health 文件的 SHA-256 与 `completedAtUtc`；重启后创建新任务或重新进入会触发 startup/resume 的任务，证明 provider、state、Serena activate/config、GitHub 的 `runId` 全部变化且 `completedAtUtc` 晚于 Codex 新进程启动时间。不得只运行底层 `.ps1`、只看文件存在或沿用 Task 7 手工 postcheck。
+在重启前记录 5 个 health 文件的 SHA-256 与 `completedAtUtc`；重启后创建新任务或重新进入会触发 startup/resume 的任务，证明 provider、state、Serena activate/config、GitHub 的 `runId` 全部变化且 `completedAtUtc` 晚于 Codex 新进程启动时间。此处运行真实 state/config 写路径并要求最终 drift=0，同时验证 Serena activate 的真实 vendor protocol；不得只运行底层 `.ps1`、只看文件存在或沿用 Task 7 手工 postcheck。
 
 - [ ] **Step 3：验证 Serena hooks 与 MCP**
 

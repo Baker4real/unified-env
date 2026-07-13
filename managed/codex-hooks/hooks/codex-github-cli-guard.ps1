@@ -283,6 +283,11 @@ function Repair-GhHardLink {
   }
 }
 
+function Wait-CodexGitHubNativeProbeDrain {
+  param([Parameter(Mandatory)][object]$Task,[int]$TimeoutMs=250)
+  try { return [bool]$Task.Wait($TimeoutMs) } catch { return $false }
+}
+
 function Invoke-NativeProbe {
   param(
     [string]$FileName,
@@ -318,12 +323,17 @@ function Invoke-NativeProbe {
 
     if (-not $process.WaitForExit($TimeoutMs)) {
       try { $process.Kill($true) } catch {}
-      try { [void]$stdoutTask.GetAwaiter().GetResult() } catch {}
-      try { [void]$stderrTask.GetAwaiter().GetResult() } catch {}
-      return [ordered]@{ success = $false; exitCode = $null; durationMs = $stopwatch.ElapsedMilliseconds; timedOut = $true; error = 'timeout'; executablePath = $executablePath }
+      try { [void]$process.WaitForExit(250) } catch {}
+      $stdoutDrained=Wait-CodexGitHubNativeProbeDrain -Task $stdoutTask
+      $stderrDrained=Wait-CodexGitHubNativeProbeDrain -Task $stderrTask
+      $error=if($stdoutDrained -and $stderrDrained){'timeout'}else{'timeout; stream-drain-incomplete'}
+      return [ordered]@{ success = $false; exitCode = $null; durationMs = $stopwatch.ElapsedMilliseconds; timedOut = $true; error = $error; executablePath = $executablePath }
     }
-    [void]$stdoutTask.GetAwaiter().GetResult()
-    [void]$stderrTask.GetAwaiter().GetResult()
+    $stdoutDrained=Wait-CodexGitHubNativeProbeDrain -Task $stdoutTask
+    $stderrDrained=Wait-CodexGitHubNativeProbeDrain -Task $stderrTask
+    if(-not($stdoutDrained -and $stderrDrained)){
+      return [ordered]@{ success = $false; exitCode = $null; durationMs = $stopwatch.ElapsedMilliseconds; timedOut = $true; error = 'stream-drain-timeout'; executablePath = $executablePath }
+    }
 
     return [ordered]@{
       success = ($process.ExitCode -eq 0)
@@ -459,4 +469,4 @@ $healthWriter = {
   }
   Write-CodexHookLatestHealth -HookId 'github-cli' -Payload $healthPayload
 }
-Invoke-CodexGitHubCliGuardEntry -Operation $operation -HealthWriter $healthWriter -Json:$Json -Strict:$Strict
+Invoke-CodexGitHubCliGuardEntry -Operation $operation -HealthWriter $healthWriter -WriteHealth:(-not $CheckOnly) -Json:$Json -Strict:$Strict

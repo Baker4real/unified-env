@@ -250,6 +250,23 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertFalse(snapshot_root.exists())
         self.assertFalse(snapshot_parent.exists())
 
+    def test_check_only_fails_closed_when_concurrent_content_blocks_new_root_cleanup(self) -> None:
+        conn = self.create_db()
+        conn.close()
+        snapshot_root = self.root / "concurrent-cleanup-parent" / "sqlite-snapshots"
+
+        def leave_concurrent_content(_attempt: int) -> None:
+            (snapshot_root / "concurrent-owner.txt").write_text("keep", encoding="utf-8")
+
+        with self.assertRaisesRegex(self.module.StatePolicyError, "cleanup"):
+            self.module.update_thread_state(
+                self.db_path,
+                check_only=True,
+                snapshot_root=snapshot_root,
+                after_first_snapshot_capture=leave_concurrent_content,
+            )
+        self.assertTrue((snapshot_root / "concurrent-owner.txt").is_file())
+
     def test_sqlite_transaction_busy_check_only_and_drift_zero(self) -> None:
         conn = self.create_db()
         conn.close()
@@ -404,6 +421,17 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.codex_home, check_only=True, health_root=self.root / "health", output=output
         )
         self.assertEqual(payload["hookId"], "codex-state-policy")
+        self.assertFalse(payload["converged"])
+        self.assertGreater(payload["driftCount"], 0)
+        self.assertFalse((self.root / "health" / "codex-state-policy.json").exists())
+
+        self.module.run_policy(
+            self.codex_home,
+            check_only=True,
+            health_root=self.root / "health",
+            output=io.StringIO(),
+            write_health=True,
+        )
         self.assertTrue((self.root / "health" / "codex-state-policy.json").is_file())
 
     def test_rollback_on_sqlite_failure(self) -> None:
@@ -431,9 +459,10 @@ class CodexStatePolicyTests(unittest.TestCase):
             check_only=True,
             health_root=health_root,
             output=output,
+            write_health=True,
         )
         payload = json.loads(output.getvalue())
-        self.assertEqual(set(payload), {"hookId", "ok", "changed", "globalState", "threadState", "restartRequired", "errors"})
+        self.assertEqual(set(payload), {"hookId", "ok", "changed", "converged", "driftCount", "globalState", "threadState", "restartRequired", "errors"})
         text = output.getvalue()
         self.assertNotRegex(text, r"target-a|redacted|codex-home|\\Users\\|thread[_ -]?id")
         health = json.loads((health_root / "codex-state-policy.json").read_text(encoding="utf-8"))
@@ -453,6 +482,7 @@ class CodexStatePolicyTests(unittest.TestCase):
                 check_only=True,
                 health_root=FIXTURE_ROOT / "health",
                 output=output,
+                write_health=True,
             )
         self.assertFalse(result["ok"])
         self.assertEqual(result["errors"], ["state policy health write failed"])

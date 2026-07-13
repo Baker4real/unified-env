@@ -26,4 +26,4 @@ $healthWriter={
     if($Case -ceq 'pre-payload' -and ($state.changed -or $state.restartRequired)){throw 'fixture pre-payload state drifted'}
     if($Case -ceq 'health-writer'){throw 'fixture health secret'}
 }.GetNewClosure()
-Invoke-CodexGitHubCliGuardEntry -Operation $operation -HealthWriter $healthWriter -Json:$Json -Strict:$Strict
+Invoke-CodexGitHubCliGuardEntry -Operation $operation -HealthWriter $healthWriter -WriteHealth:$true -Json:$Json -Strict:$Strict

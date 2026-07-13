@@ -46,6 +46,7 @@ function Invoke-CodexGitHubCliGuardEntry {
     param(
         [Parameter(Mandatory)][scriptblock]$Operation,
         [Parameter(Mandatory)][scriptblock]$HealthWriter,
+        [Parameter(Mandatory)][bool]$WriteHealth,
         [switch]$Json,
         [switch]$Strict
     )
@@ -60,8 +61,10 @@ function Invoke-CodexGitHubCliGuardEntry {
         $payload = New-CodexGitHubCliGuardPayload -State $state -Ok $false -Errors ([string[]]@('github-cli guard failed'))
     }
 
-    try { $null = @(& $HealthWriter $state $payload) }
-    catch { $payload = New-CodexGitHubCliGuardPayload -State $state -Ok $false -Errors ([string[]]@('health write failed')) }
+    if ($WriteHealth) {
+        try { $null = @(& $HealthWriter $state $payload) }
+        catch { $payload = New-CodexGitHubCliGuardPayload -State $state -Ok $false -Errors ([string[]]@('health write failed')) }
+    }
 
     $failed = -not [bool]$payload['ok']
     if ($Json) { Write-Output ($payload | ConvertTo-Json -Depth 8 -Compress) }

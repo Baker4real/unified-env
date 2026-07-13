@@ -37,12 +37,14 @@ Assert-True ($githubSource.Contains("Write-CodexHookLatestHealth -HookId 'github
 Assert-True ($githubSource.Contains('$GuardStopwatch.ElapsedMilliseconds')) 'GitHub health 必须记录真实 duration 而非常量'
 Assert-True ([regex]::Matches($githubSource,"@\('auth', 'status'\)").Count -eq 1 -and $githubSource.Contains('$authProbe = if (-not $CheckAuth)')) 'GitHub quick 路径不得执行 auth/network probe'
 Assert-True ($githubSource.Contains('$stdoutTask = $process.StandardOutput.ReadToEndAsync()') -and $githubSource.Contains('$stderrTask = $process.StandardError.ReadToEndAsync()')) 'Invoke-NativeProbe 必须在等待前持续 drain stdout/stderr'
+Assert-True ($githubSource.Contains('function Wait-CodexGitHubNativeProbeDrain')) 'GitHub timeout/kill 后必须通过有界 drain helper 回收 stdout/stderr'
 $providerHook=@($manifest.hooks|Where-Object id -ceq 'provider-stability')[0]
 $dashboardHook=@($manifest.hooks|Where-Object id -ceq 'serena-dashboard')[0]
 $mutexBudgetMs=1500
 $validatorBudgetMs=1000
-$providerBudget=$mutexBudgetMs+(3*$validatorBudgetMs)+2000
-$dashboardBudget=$mutexBudgetMs+(7*$validatorBudgetMs)+2000
+$streamDrainBudgetMs=250
+$providerBudget=$mutexBudgetMs+(4*($validatorBudgetMs+$streamDrainBudgetMs))+2000
+$dashboardBudget=$mutexBudgetMs+(7*($validatorBudgetMs+$streamDrainBudgetMs))+2000
 Assert-True ([int]$providerHook.timeoutSeconds*1000 -ge $providerBudget) 'provider manifest timeout 必须覆盖 mutex、validator 与余量'
 Assert-True ([int]$dashboardHook.timeoutSeconds*1000 -ge $dashboardBudget) 'dashboard manifest timeout 必须覆盖 mutex、7 次 validator（含 rollback）与 I/O 余量'
 $githubEntryPath=Join-Path $managedRoot 'hooks\lib\CodexGitHubCliGuardEntry.ps1'
@@ -75,6 +77,11 @@ $successEntry=Invoke-GitHubEntryFixture 'success' $true $false
 $successJson=$successEntry.stdout|ConvertFrom-Json
 Assert-True ($successEntry.exitCode -eq 0 -and $successJson.ok -eq $true -and @($successJson.errors).Count -eq 0 -and @($successEntry.stdout.Trim() -split "`r?`n").Count -eq 1) 'JSON success stdout 必须严格一个对象且 errors 为稳定 array'
 
+. $githubEntryPath
+$checkOnlyHealthCalls=[ordered]@{count=0}
+$checkOnlyPayload=@(Invoke-CodexGitHubCliGuardEntry -Operation {param($state)[ordered]@{ok=$true;errors=[string[]]@()}} -HealthWriter {param($state,$payload)$checkOnlyHealthCalls.count++} -WriteHealth:$false -Json)
+Assert-True ($checkOnlyHealthCalls.count -eq 0 -and ($checkOnlyPayload|ConvertFrom-Json).ok -eq $true) 'GitHub CheckOnly internal entry 必须显式 writeHealth=false 且零 health 写入'
+
 $runtimeSource=Get-Content -Raw -LiteralPath $runtimePath
 $serenaSource=Get-Content -Raw -LiteralPath (Join-Path $managedRoot 'hooks\serena-activate-guarded.ps1')
 Assert-True ($serenaSource.Contains("Write-CodexHookLatestHealth -HookId 'serena-activate'")) 'Serena activate 必须写独立 latest health'
@@ -85,6 +92,9 @@ Assert-True ($serenaErrors.Count -eq 0 -and $null -eq $serenaAst.ParamBlock) 'Se
 foreach($forbiddenCapability in @('AllowFixture','VendorPath','FixtureVendorScriptPath','RuntimePath','HealthRoot','codex-hook-serena-fixture','codex-hook-health-test')){Assert-True (-not $serenaSource.Contains($forbiddenCapability)) "Serena production CLI 不得包含 fixture/path override：$forbiddenCapability"}
 Assert-Throws { Assert-CodexHookDPath 'C:\fixture\x' } '路径|D 盘'
 Assert-True ((ConvertTo-CodexHookRedactedUri 'http://user:secret@example.com:8080/a?q=token#x') -ceq 'http://example.com:8080') 'URI 必须移除 user-info/path/query/fragment'
+[byte[]]$reorderedSerenaOutput=[Text.UTF8Encoding]::new($false).GetBytes('{"hookSpecificOutput":{"additionalContext":"fixture context","hookEventName":"SessionStart"}}')
+Assert-CodexSerenaSessionStartOutputBytes -Bytes $reorderedSerenaOutput
+Assert-True ($runtimeSource.Contains('function Receive-CodexHookBoundedProcessStream')) 'shared runtime 必须在 timeout/kill 后使用有界 stdout/stderr drain helper'
 
 $fixtureRoot='D:\Codex\projects\统一环境\reports\codex-hook-runtime-test'
 if(Test-Path -LiteralPath $fixtureRoot){Remove-Item -LiteralPath $fixtureRoot -Recurse -Force}
@@ -136,6 +146,25 @@ Assert-Throws {
 } 'postwrite invalid'
 Assert-True $rollbackLeaseWriter.blocked 'rollback hash 后 target lease 必须阻止独立 writer'
 Assert-True ([IO.File]::ReadAllText($target) -ceq 'old') 'rollback target lease 释放后必须恢复原 bytes'
+[IO.File]::WriteAllText($target,'old',[Text.UTF8Encoding]::new($false))
+$oldHash=Get-CodexHookSha256 $target
+$script:replaceRaceValidatorCalls=0
+$replaceRaceWriter=[ordered]@{blocked=$false}
+Assert-Throws {
+    Write-CodexHookAtomicText -Path $target -Text 'new' -Validator {
+        param($p)
+        $script:replaceRaceValidatorCalls++
+        if($script:replaceRaceValidatorCalls -eq 2){throw 'postwrite invalid'}
+    } -BackupRoot $backups -ExpectedBeforeSha256 $oldHash -TestBeforeRollbackReplace {
+        param($p)
+        try {[IO.File]::WriteAllText($p,'third-party-after-target-lease',[Text.UTF8Encoding]::new($false))}catch{$replaceRaceWriter.blocked=$true}
+    }
+} 'postwrite invalid'
+Assert-True $replaceRaceWriter.blocked 'target lease 必须拒绝普通 writer；不把它误作绝对 CAS'
+Assert-True ([IO.File]::ReadAllText($target) -ceq 'old') '普通 writer 被拒绝后 rollback 必须恢复原 bytes'
+$rollbackHookIndex=$runtimeSource.IndexOf('if($TestBeforeRollbackReplace){&$TestBeforeRollbackReplace $full}')
+$rollbackFinalCheckIndex=$runtimeSource.IndexOf("if((Get-CodexHookSha256 `$full) -cne `$expectedAfter){throw 'rollback live SHA-256 在 replace 前漂移。'}")
+Assert-True ($rollbackHookIndex -ge 0 -and $rollbackFinalCheckIndex -gt $rollbackHookIndex) 'replace-race 检测窗口必须在 target lease 后、File.Replace 前重新验证 live bytes'
 [IO.File]::WriteAllBytes($target,$old)
 $oldHash=Get-CodexHookSha256 $target
 $outside=Join-Path $fixtureRoot 'outside';[IO.Directory]::CreateDirectory($outside)|Out-Null;$junction=Join-Path $fixtureRoot 'junction'

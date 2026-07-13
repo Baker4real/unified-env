@@ -808,6 +808,14 @@ function Assert-CodexHookManifest {
                         continue
                     }
                 }
+                $vendorInvokePattern = '^''\{"session_(?:id|Id)":"[0-9a-f-]{36}"\}'' \| & ''(?<path>[^'']+)''$'
+                $vendorInvokeMatch = [regex]::Match($scriptText, $vendorInvokePattern)
+                if ($hook.id -ceq 'serena-activate' -and $vendorInvokeMatch.Success -and (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected @($hook.fullAcceptanceCommand.arguments))) {
+                    $invokedPath = Assert-CodexHookDPath -Value $vendorInvokeMatch.Groups['path'].Value -Name "hooks[$($hook.id)] full vendor acceptance invoke"
+                    if ($invokedPath.Equals($commandPath, [StringComparison]::OrdinalIgnoreCase)) {
+                        continue
+                    }
+                }
                 throw "hooks[$($hook.id)] pwsh health/acceptance script 不在受控 allowlist。"
             }
 
@@ -2291,7 +2299,7 @@ function Assert-CodexHookDeploymentPlanFresh {
     Assert-CodexHookArray -Value ([object]$Plan.liveFacts.files) -Name 'plan liveFacts.files'
     Assert-CodexHookArray -Value ([object]$Plan.sourceFacts.blockerReasonCodes) -Name 'plan sourceFacts.blockerReasonCodes'
     Assert-CodexHookArray -Value ([object]$Plan.liveFacts.blockerReasonCodes) -Name 'plan liveFacts.blockerReasonCodes'
-    $allowedBlockers = @('registry-ownership-ambiguous', 'source-fact-mismatch', 'live-target-unsafe', 'environment-fact-missing')
+    $allowedBlockers = @('registry-ownership-ambiguous', 'source-fact-mismatch', 'live-target-unsafe', 'environment-fact-missing', 'retired-live-not-retained')
     $sourceBlockers = @($Plan.sourceFacts.blockerReasonCodes)
     $liveBlockers = @($Plan.liveFacts.blockerReasonCodes)
     if (-not (Test-CodexHookExactStringSequence -Actual $sourceBlockers -Expected $liveBlockers)) { throw 'plan blocker reason codes 不一致。' }

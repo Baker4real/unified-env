@@ -29,7 +29,9 @@
       ],
       "writeResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\config.toml" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\backups_state\\provider-stability-guard" },
         { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\provider-stability.json" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups" },
         { "kind": "abstract", "value": "process-environment" },
         { "kind": "abstract", "value": "windows-user-environment" }
       ],
@@ -42,7 +44,7 @@
       },
       "fullAcceptanceCommand": {
         "commandPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
-        "arguments": ["-CheckOnly", "-Json"]
+        "arguments": ["-Json", "-CheckNetwork"]
       }
     },
     {
@@ -102,7 +104,8 @@
       "writeResources": [
         { "kind": "abstract", "value": "hook-stdout" },
         { "kind": "abstract", "value": "serena-hook-state" },
-        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-activate.json" }
+        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-activate.json" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups" }
       ],
       "criticality": "degraded",
       "lifecycle": "active",
@@ -113,7 +116,7 @@
       },
       "fullAcceptanceCommand": {
         "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
-        "arguments": ["-NoProfile", "-Command", "'{\"session_id\":\"00000000-0000-0000-0000-000000000000\"}' | & 'D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd' -CheckOnly -Json"]
+        "arguments": ["-NoProfile", "-Command", "'{\"session_id\":\"00000000-0000-0000-0000-000000000000\"}' | & 'D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd'"]
       }
     },
     {
@@ -135,7 +138,10 @@
       "writeResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\config.toml" },
         { "kind": "path", "value": "D:\\Codex\\.serena\\serena_config.yml" },
-        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-dashboard.json" }
+        { "kind": "path", "value": "D:\\Codex\\.codex\\backups_state\\serena-dashboard-guard\\toml" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\backups_state\\serena-dashboard-guard\\yaml" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-dashboard.json" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups" }
       ],
       "criticality": "critical",
       "lifecycle": "active",
@@ -172,6 +178,7 @@
         { "kind": "path", "value": "D:\\Codex\\tools\\bin" },
         { "kind": "path", "value": "D:\\Codex\\.codex\\backups_state" },
         { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\github-cli.json" },
+        { "kind": "path", "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups" },
         { "kind": "abstract", "value": "process-environment" },
         { "kind": "abstract", "value": "windows-user-environment" }
       ],
@@ -316,7 +323,7 @@
     {
       "relativePath": "hooks/codex-github-cli-guard.ps1",
       "liveRelativePath": "codex-github-cli-guard.ps1",
-      "sha256": "0430d38abfbc7ec679dd0af31e8d9d700708b71af2a8c1dd18d60da8f8f08051",
+      "sha256": "96e02d0d01a711c4901864b430009edef33f961fd9087fddc53a8a80ad3258e6",
       "lifecycle": "active",
       "ownerHookIds": [
         "github-cli"
@@ -364,7 +371,7 @@
     {
       "relativePath": "hooks/codex-state-policy-guard.py",
       "liveRelativePath": "codex-state-policy-guard.py",
-      "sha256": "7aadbf92df0de87f5d261df54e36413b962dfb3a3523ca5d535a143247be0f8d",
+      "sha256": "ebe557b7d5b1a00ccdb1dc9ed4b17520c938233d85ac1b65cb80e59dc411ad21",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
@@ -427,7 +434,7 @@
     {
       "relativePath": "hooks/lib/CodexHookRuntime.ps1",
       "liveRelativePath": "lib/CodexHookRuntime.ps1",
-      "sha256": "f41070eb794b5900d2e2f3582d6c5a248571e2949ef31e1b496807890c3b3f64",
+      "sha256": "30e72bc436e841ef1028dbcf680a5f9c13a8efb3b82df28edea353f94fbc6d37",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",
@@ -439,7 +446,7 @@
     {
       "relativePath": "hooks/lib/CodexGitHubCliGuardEntry.ps1",
       "liveRelativePath": "lib/CodexGitHubCliGuardEntry.ps1",
-      "sha256": "5ac93906775563eb6a94d6bce9c22e57c6243432598cd05037f1242992577b64",
+      "sha256": "bf7239c8e24ca33d410e6f1c36855f187703f90a35e212a86386d9723740bad2",
       "lifecycle": "active",
       "ownerHookIds": [
         "github-cli"
