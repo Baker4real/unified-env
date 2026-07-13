@@ -590,6 +590,10 @@ function resolveCanonicalCatalog(plan, options = {}) {
   if (options.testOnlyCatalogPath !== undefined || options.testOnlyCatalog !== undefined) {
     throw new Error('test-only catalog injection requires allowTestCatalog=true');
   }
+  if (plan.catalogRef && Object.prototype.hasOwnProperty.call(plan.catalogRef, 'path')
+    && plan.catalogRef.path === null) {
+    throw new Error('production canonical catalog requires a file-backed catalog path; inline catalog objects are test-only');
+  }
   if (plan.catalogRef?.path && resolveAbsolute(plan.catalogRef.path).toLowerCase() !== defaultCatalogPath.toLowerCase()) {
     throw new Error(`production canonical catalog must be the script-local file: ${plan.catalogRef.path}`);
   }

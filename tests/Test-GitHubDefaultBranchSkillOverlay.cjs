@@ -259,7 +259,18 @@ const postWritePlan = overlay.buildChangePlan(postWriteDiscovery, fixtureCatalog
 const objectProductionPlan = overlay.buildChangePlan(postWriteDiscovery, fixtureCatalog);
 const objectProductionResult = overlay.applyChangePlan(objectProductionPlan, { dryRun: true, evidenceRoot });
 assert.equal(objectProductionResult.blocked, true);
-assert.ok(objectProductionResult.errors.some((error) => /canonical catalog normalized fingerprint drift/.test(error.message)));
+assert.ok(objectProductionResult.errors.some((error) => /inline catalog objects are test-only/.test(error.message)));
+const canonicalCatalogObject = JSON.parse(fs.readFileSync(
+  path.join(repoRoot, 'scripts', 'github-default-branch-skill-overlay-catalog.json'),
+  'utf8',
+));
+const canonicalObjectRef = overlay.buildChangePlan([], canonicalCatalogObject).catalogRef;
+const canonicalObjectNoFlag = overlay.applyChangePlan(
+  { changes: postWritePlan.changes, skipped: [], errors: [], catalogRef: canonicalObjectRef },
+  { dryRun: true, evidenceRoot },
+);
+assert.equal(canonicalObjectNoFlag.blocked, true);
+assert.ok(canonicalObjectNoFlag.errors.some((error) => /inline catalog objects are test-only/.test(error.message)));
 const productionEvidenceCatalogResult = overlay.applyChangePlan(postWritePlan, {
   dryRun: true,
   evidenceRoot,
