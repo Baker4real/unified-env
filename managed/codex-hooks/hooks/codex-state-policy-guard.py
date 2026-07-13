@@ -2306,6 +2306,8 @@ def run_policy(
                 approved_map=approved_map,
                 check_only=check_only,
             )
+            if global_result.get("status") == "missing":
+                raise StatePolicyError("global state source disappeared")
             production_home = _resolved_casefold(codex_home) == _resolved_casefold(PRODUCTION_CODEX_HOME)
             snapshot_root = (
                 codex_home / "tmp" / "codex-state-policy-check"
@@ -2319,6 +2321,8 @@ def run_policy(
                     check_only=check_only,
                     snapshot_root=snapshot_root if check_only else None,
                 )
+                if thread_result.get("status") == "missing":
+                    raise StatePolicyError("thread state source disappeared")
             except BaseException:
                 sqlite_changed = True
                 try:
