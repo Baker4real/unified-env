@@ -262,6 +262,11 @@ foreach ($invalidTimeout in @(0, 30)) {
 
 $managedManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
 $managedManifest = Read-CodexHookManifest -Path $managedManifestPath
+$stateGuardSource = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\hooks\codex-state-policy-guard.py')
+Assert-True ($stateGuardSource.Contains('def resolve_permission_policy(')) 'state guard 必须从受控来源解析权限策略'
+Assert-True ($stateGuardSource.Contains('path_mode: str = "inventory"')) 'state guard 必须公开 inventory path mode'
+Assert-True ($stateGuardSource.Contains('approved_map: object = None')) 'state guard 必须要求显式 approved map 才能修复路径'
+Assert-True ($stateGuardSource.Contains('permission policy sources conflict')) '策略来源冲突必须 fail closed'
 Assert-True (@($managedManifest.hooks).Count -eq 8) '受管 manifest 必须声明 8 个当前 hook'
 Assert-True (@($managedManifest.files).Count -eq 16) '受管 manifest 必须声明冻结 12 文件、state writer 与 3 个共享库文件'
 Assert-True (

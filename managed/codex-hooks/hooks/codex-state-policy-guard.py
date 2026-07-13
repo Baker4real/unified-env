@@ -4,6 +4,7 @@ import argparse
 import copy
 import ctypes
 from ctypes import wintypes
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import io
@@ -18,6 +19,11 @@ import tempfile
 import time
 from typing import Callable, TextIO
 import uuid
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.11+ is required in production.
+    tomllib = None  # type: ignore[assignment]
 
 
 PRODUCTION_CODEX_HOME = Path(r"D:\Codex\.codex")
@@ -68,6 +74,47 @@ class _ByHandleFileInformation(ctypes.Structure):
 
 class StatePolicyError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class PermissionPolicy:
+    """The single, explicitly sourced permission policy for both state domains."""
+
+    approval_policy: str
+    sandbox_mode: str
+    source: str
+
+    @property
+    def heartbeat_sandbox_type(self) -> str:
+        return {
+            "read-only": "readOnly",
+            "workspace-write": "workspaceWrite",
+            "danger-full-access": "dangerFullAccess",
+        }[self.sandbox_mode]
+
+    @property
+    def sqlite_sandbox_policy(self) -> str:
+        # The SQLite state stores the unrestricted mode as the internal disabled
+        # sandbox object, while the other modes use the same JSON type spelling.
+        if self.sandbox_mode == "danger-full-access":
+            return '{"type":"disabled"}'
+        return json.dumps({"type": self.sandbox_mode}, separators=(",", ":"))
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "approvalPolicy": self.approval_policy,
+            "sandboxMode": self.sandbox_mode,
+            "source": self.source,
+        }
+
+
+SUPPORTED_APPROVAL_POLICIES = frozenset(
+    {"untrusted", "on-failure", "on-request", "never"}
+)
+SUPPORTED_SANDBOX_MODES = frozenset(
+    {"read-only", "workspace-write", "danger-full-access"}
+)
+PERMISSION_POLICY_JSON_NAMES = ("policy.json", "state-policy.json")
 
 
 def _sha256(data: bytes) -> str:
@@ -604,21 +651,251 @@ def build_path_inventory(
     }
 
 
-def normalize_global_state(state: object) -> tuple[dict[str, object], dict[str, int]]:
+def _validate_permission_value(name: str, value: object, allowed: frozenset[str]) -> str:
+    if not isinstance(value, str) or value not in allowed:
+        raise StatePolicyError(f"permission policy {name} is missing or unsupported")
+    return value
+
+
+def _permission_fields_from_mapping(document: object) -> tuple[object | None, object | None]:
+    if not isinstance(document, dict):
+        return None, None
+    approval: object | None = None
+    sandbox: object | None = None
+    for key in ("approval_policy", "approvalPolicy", "approval-mode", "approvalMode"):
+        if key in document:
+            if approval is not None and document[key] != approval:
+                raise StatePolicyError("permission policy source contains conflicting approval values")
+            approval = document[key]
+    for key in ("sandbox_mode", "sandboxMode", "sandbox-mode", "sandboxPolicy"):
+        if key not in document:
+            continue
+        value = document[key]
+        if isinstance(value, dict):
+            value = value.get("type")
+            if isinstance(value, str):
+                value = {
+                    "readOnly": "read-only",
+                    "workspaceWrite": "workspace-write",
+                    "dangerFullAccess": "danger-full-access",
+                    "disabled": "danger-full-access",
+                }.get(value, value)
+        if sandbox is not None and value != sandbox:
+            raise StatePolicyError("permission policy source contains conflicting sandbox values")
+        sandbox = value
+    nested = document.get("permissionPolicy")
+    if nested is not None:
+        nested_approval, nested_sandbox = _permission_fields_from_mapping(nested)
+        if nested_approval is not None:
+            if approval is not None and nested_approval != approval:
+                raise StatePolicyError("permission policy source contains conflicting approval values")
+            approval = nested_approval
+        if nested_sandbox is not None:
+            if sandbox is not None and nested_sandbox != sandbox:
+                raise StatePolicyError("permission policy source contains conflicting sandbox values")
+            sandbox = nested_sandbox
+    return approval, sandbox
+
+
+def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object]]:
+    if not codex_home.is_absolute():
+        raise StatePolicyError("permission policy home must be absolute")
+    if codex_home.drive.casefold() != "d:":
+        raise StatePolicyError("permission policy home must be on the D drive")
+    sources: list[tuple[str, object]] = []
+    config_path = codex_home / "config.toml"
+    if config_path.exists():
+        if not config_path.is_file() or config_path.is_symlink():
+            raise StatePolicyError("permission policy config path is not a regular file")
+        if tomllib is None:
+            raise StatePolicyError("permission policy TOML parser unavailable")
+        try:
+            document = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise StatePolicyError("permission policy config is malformed") from exc
+        sources.append((str(config_path), document))
+    for name in PERMISSION_POLICY_JSON_NAMES:
+        policy_path = codex_home / name
+        if not policy_path.exists():
+            continue
+        if not policy_path.is_file() or policy_path.is_symlink():
+            raise StatePolicyError("permission policy source is not a regular file")
+        try:
+            document = _strict_json_loads(policy_path.read_bytes())
+        except OSError as exc:
+            raise StatePolicyError("permission policy source is unreadable") from exc
+        sources.append((str(policy_path), document))
+    return sources
+
+
+def resolve_permission_policy(codex_home: Path | str) -> PermissionPolicy:
+    """Resolve approval/sandbox only from controlled, local policy sources.
+
+    A missing field or disagreement between sources is an intentional hard stop;
+    the state guard must never guess a broader permission profile.
+    """
+    home = Path(codex_home)
+    sources = _load_permission_policy_sources(home)
+    if not sources:
+        raise StatePolicyError("permission policy source is missing")
+    approvals: list[tuple[str, str]] = []
+    sandboxes: list[tuple[str, str]] = []
+    for source, document in sources:
+        approval, sandbox = _permission_fields_from_mapping(document)
+        if approval is not None:
+            approvals.append(
+                (
+                    source,
+                    _validate_permission_value("approval", approval, SUPPORTED_APPROVAL_POLICIES),
+                )
+            )
+        if sandbox is not None:
+            sandboxes.append(
+                (
+                    source,
+                    _validate_permission_value("sandbox", sandbox, SUPPORTED_SANDBOX_MODES),
+                )
+            )
+    if not approvals or not sandboxes:
+        raise StatePolicyError("permission policy is missing approval or sandbox")
+    approval_values = {value for _source, value in approvals}
+    sandbox_values = {value for _source, value in sandboxes}
+    if len(approval_values) != 1 or len(sandbox_values) != 1:
+        raise StatePolicyError("permission policy sources conflict")
+    source_names = ",".join(source for source, _value in sources)
+    return PermissionPolicy(
+        approval_policy=next(iter(approval_values)),
+        sandbox_mode=next(iter(sandbox_values)),
+        source=source_names,
+    )
+
+
+def _resolve_policy_for_path(path: Path, permission_policy: PermissionPolicy | None) -> PermissionPolicy:
+    if permission_policy is not None:
+        if not isinstance(permission_policy, PermissionPolicy):
+            raise StatePolicyError("permission policy object is invalid")
+        return permission_policy
+    return resolve_permission_policy(path.parent)
+
+
+def _approved_candidate(
+    approved_map: object,
+    map_name: str,
+    identity: object,
+) -> str | None:
+    if not isinstance(approved_map, dict):
+        return None
+    nested = approved_map.get(map_name)
+    if isinstance(nested, dict) and identity in nested:
+        candidate = nested[identity]
+        return candidate if isinstance(candidate, str) else None
+    flat_key = f"{map_name}:{identity}"
+    candidate = approved_map.get(flat_key)
+    return candidate if isinstance(candidate, str) else None
+
+
+def _should_repair_path(
+    *,
+    path_mode: str,
+    approved_map: object,
+    map_name: str,
+    identity: object,
+    entry: dict[str, object],
+) -> bool:
+    if path_mode == "inventory":
+        return False
+    if path_mode not in {"repair-safe-only", "repair-all-approved"}:
+        raise StatePolicyError("unknown state path mode")
+    if not bool(entry.get("safe")):
+        return False
+    approved = _approved_candidate(approved_map, map_name, identity)
+    candidate = entry.get("candidate")
+    return isinstance(approved, str) and approved == candidate
+
+
+def _reprobe_approved_paths(
+    inventory: dict[str, object],
+    approved_map: object,
+    path_mode: str,
+) -> None:
+    """Re-probe every approved target immediately before CAS publication."""
+    maps = inventory.get("maps")
+    if not isinstance(maps, dict):
+        return
+    for map_name, entries in maps.items():
+        if not isinstance(entries, dict):
+            continue
+        for identity, entry in entries.items():
+            if not isinstance(entry, dict) or not _should_repair_path(
+                path_mode=path_mode,
+                approved_map=approved_map,
+                map_name=str(map_name),
+                identity=identity,
+                entry=entry,
+            ):
+                continue
+            candidate = entry.get("candidate")
+            expected_identity = entry.get("finalIdentity")
+            if not isinstance(candidate, str) or not isinstance(expected_identity, list):
+                raise StatePolicyError("approved path inventory entry is incomplete")
+            probe = _probe_candidate(Path(candidate))
+            if probe.get("state") != "verified" or probe.get("reparse"):
+                raise StatePolicyError("approved path reprobe failed")
+            if probe.get("identity") != expected_identity:
+                raise StatePolicyError("approved path identity changed")
+
+
+def normalize_global_state(
+    state: object,
+    *,
+    permission_policy: PermissionPolicy | None = None,
+    path_mode: str = "inventory",
+    path_inventory: dict[str, object] | None = None,
+    approved_map: object = None,
+) -> tuple[dict[str, object], dict[str, int]]:
     if not isinstance(state, dict):
         raise StatePolicyError("global state root must be an object")
+    if path_mode not in {"inventory", "repair-safe-only", "repair-all-approved"}:
+        raise StatePolicyError("unknown state path mode")
+    if permission_policy is None:
+        raise StatePolicyError("permission policy is required")
+    if not isinstance(permission_policy, PermissionPolicy):
+        raise StatePolicyError("permission policy object is invalid")
     normalized = copy.deepcopy(state)
     path_changed = 0
+    path_drift = 0
     heartbeat_changed = 0
+    if path_inventory is None:
+        path_inventory = build_path_inventory(
+            state,
+            PROJECTLESS_SOURCE_ROOT,
+            CANONICAL_CANDIDATE_ROOT,
+        )
+    inventory_maps = path_inventory.get("maps") if isinstance(path_inventory, dict) else None
     for key in TARGET_MAPS:
         mapping = normalized.get(key)
         if not isinstance(mapping, dict):
             continue
+        inventory_map = inventory_maps.get(key) if isinstance(inventory_maps, dict) else None
+        if not isinstance(inventory_map, dict):
+            inventory_map = {}
         for identity, value in list(mapping.items()):
-            replacement = rewrite_projectless_path(value)
-            if replacement != value:
-                mapping[identity] = replacement
-                path_changed += 1
+            entry = inventory_map.get(identity)
+            if not isinstance(entry, dict):
+                continue
+            if isinstance(value, str) and rewrite_projectless_path(value) != value:
+                path_drift += 1
+            if _should_repair_path(
+                path_mode=path_mode,
+                approved_map=approved_map,
+                map_name=key,
+                identity=identity,
+                entry=entry,
+            ):
+                candidate = entry.get("candidate")
+                if isinstance(candidate, str) and candidate != value:
+                    mapping[identity] = candidate
+                    path_changed += 1
 
     atom = normalized.get("electron-persisted-atom-state")
     if isinstance(atom, dict):
@@ -629,15 +906,19 @@ def normalize_global_state(state: object) -> tuple[dict[str, object], dict[str, 
                     continue
                 sandbox = value.get("sandboxPolicy")
                 sandbox_type = sandbox.get("type") if isinstance(sandbox, dict) else None
-                if value.get("approvalPolicy") != "never" or sandbox_type != "dangerFullAccess":
+                if (
+                    value.get("approvalPolicy") != permission_policy.approval_policy
+                    or sandbox_type != permission_policy.heartbeat_sandbox_type
+                ):
                     value["activePermissionProfile"] = None
-                    value["approvalPolicy"] = "never"
+                    value["approvalPolicy"] = permission_policy.approval_policy
                     if not value.get("approvalsReviewer"):
                         value["approvalsReviewer"] = "user"
-                    value["sandboxPolicy"] = {"type": "dangerFullAccess"}
+                    value["sandboxPolicy"] = {"type": permission_policy.heartbeat_sandbox_type}
                     heartbeat_changed += 1
     return normalized, {
         "pathChangedCount": path_changed,
+        "pathDriftCount": path_drift,
         "heartbeatChangedCount": heartbeat_changed,
     }
 
@@ -723,19 +1004,33 @@ def update_global_state(
     path: Path,
     backup_root: Path,
     *,
+    permission_policy: PermissionPolicy | None = None,
+    path_mode: str = "inventory",
+    approved_map: object = None,
+    source_root: Path | str | None = None,
+    candidate_root: Path | str | None = None,
     check_only: bool = False,
     max_attempts: int = MAX_GLOBAL_ATTEMPTS,
     before_prewrite_check: Callable[[int], None] | None = None,
 ) -> dict[str, object]:
+    if path_mode not in {"inventory", "repair-safe-only", "repair-all-approved"}:
+        raise StatePolicyError("unknown state path mode")
+    permission_policy = _resolve_policy_for_path(path, permission_policy)
+    if source_root is None:
+        source_root = PROJECTLESS_SOURCE_ROOT
+    if candidate_root is None:
+        candidate_root = CANONICAL_CANDIDATE_ROOT
     if not path.is_file():
         return {
             "status": "missing",
             "changed": False,
             "wouldChange": False,
             "changedCount": 0,
+            "driftCount": 0,
             "beforeSha256": None,
             "afterSha256": None,
             "attempts": 0,
+            "pathInventory": None,
         }
     if max_attempts != MAX_GLOBAL_ATTEMPTS:
         raise StatePolicyError("global state retry contract is fixed")
@@ -743,17 +1038,27 @@ def update_global_state(
         original = path.read_bytes()
         before_hash = _sha256(original)
         state = _strict_json_loads(original)
-        normalized, summary = normalize_global_state(state)
+        inventory = build_path_inventory(state, source_root, candidate_root)
+        normalized, summary = normalize_global_state(
+            state,
+            permission_policy=permission_policy,
+            path_mode=path_mode,
+            path_inventory=inventory,
+            approved_map=approved_map,
+        )
         changed_count = summary["pathChangedCount"] + summary["heartbeatChangedCount"]
-        if changed_count == 0:
+        drift_count = summary["pathDriftCount"] + summary["heartbeatChangedCount"]
+        if drift_count == 0:
             return {
                 "status": "converged",
                 "changed": False,
                 "wouldChange": False,
                 "changedCount": 0,
+                "driftCount": 0,
                 "beforeSha256": before_hash,
                 "afterSha256": before_hash,
                 "attempts": attempt,
+                "pathInventory": inventory,
                 **summary,
             }
         if check_only:
@@ -762,9 +1067,24 @@ def update_global_state(
                 "changed": False,
                 "wouldChange": True,
                 "changedCount": changed_count,
+                "driftCount": drift_count,
                 "beforeSha256": before_hash,
                 "afterSha256": before_hash,
                 "attempts": attempt,
+                "pathInventory": inventory,
+                **summary,
+            }
+        if changed_count == 0:
+            return {
+                "status": "unresolved",
+                "changed": False,
+                "wouldChange": True,
+                "changedCount": 0,
+                "driftCount": drift_count,
+                "beforeSha256": before_hash,
+                "afterSha256": before_hash,
+                "attempts": attempt,
+                "pathInventory": inventory,
                 **summary,
             }
         replacement = _json_bytes(normalized)
@@ -781,6 +1101,7 @@ def update_global_state(
             current = path.read_bytes()
             if _sha256(current) != before_hash:
                 continue
+            _reprobe_approved_paths(inventory, approved_map, path_mode)
             # A normal user-mode delete/replace can still race this final name-based
             # replacement. This is a bounded replay contract, not absolute CAS.
             os.replace(temp_path, path)
@@ -788,15 +1109,33 @@ def update_global_state(
             published = path.read_bytes()
             if published != replacement:
                 raise StatePolicyError("global state postwrite verification failed")
-            _strict_json_loads(published)
+            published_state = _strict_json_loads(published)
+            published_inventory = build_path_inventory(
+                published_state,
+                source_root,
+                candidate_root,
+            )
+            _published_normalized, published_summary = normalize_global_state(
+                published_state,
+                permission_policy=permission_policy,
+                path_mode=path_mode,
+                path_inventory=published_inventory,
+                approved_map=approved_map,
+            )
+            published_drift = (
+                published_summary["pathDriftCount"]
+                + published_summary["heartbeatChangedCount"]
+            )
             return {
                 "status": "updated",
                 "changed": True,
                 "wouldChange": True,
                 "changedCount": changed_count,
+                "driftCount": published_drift,
                 "beforeSha256": before_hash,
                 "afterSha256": _sha256(published),
                 "attempts": attempt,
+                "pathInventory": published_inventory,
                 **summary,
             }
         finally:
@@ -809,16 +1148,34 @@ select id from threads
 where source='vscode'
   and (thread_source='user' or thread_source is null)
   and (
-    approval_mode is null or approval_mode <> 'never'
+    approval_mode is null or approval_mode <> ?
     or sandbox_policy is null
-    or sandbox_policy not in ('{"type":"disabled"}', 'danger-full-access')
+    or (
+      sandbox_policy <> ?
+      and (? <> '{"type":"disabled"}' or sandbox_policy <> 'danger-full-access')
+    )
   )
 order by id
 """
 
 
-def select_thread_updates(conn: sqlite3.Connection) -> list[str]:
-    return [str(row[0]) for row in conn.execute(THREAD_DRIFT_SQL)]
+def select_thread_updates(
+    conn: sqlite3.Connection,
+    permission_policy: PermissionPolicy,
+) -> list[str]:
+    if not isinstance(permission_policy, PermissionPolicy):
+        raise StatePolicyError("permission policy object is invalid")
+    return [
+        str(row[0])
+        for row in conn.execute(
+            THREAD_DRIFT_SQL,
+            (
+                permission_policy.approval_policy,
+                permission_policy.sqlite_sandbox_policy,
+                permission_policy.sqlite_sandbox_policy,
+            ),
+        )
+    ]
 
 
 def _capture_sqlite_source(path: Path) -> tuple[bytes | None, bytes | None, bytes | None, bytes | None]:
@@ -861,6 +1218,7 @@ def _assert_check_only_d_path_without_reparse(path: Path, *, name: str) -> None:
 def _select_thread_updates_from_snapshot(
     path: Path,
     snapshot_root: Path,
+    permission_policy: PermissionPolicy,
     after_first_capture: Callable[[int], None] | None = None,
 ) -> tuple[list[str], int]:
     snapshot_windows_path = PureWindowsPath(str(snapshot_root))
@@ -915,7 +1273,7 @@ def _select_thread_updates_from_snapshot(
                     integrity_rows = [str(row[0]) for row in conn.execute("pragma quick_check")]
                     if not integrity_rows or any(value.casefold() != "ok" for value in integrity_rows):
                         raise StatePolicyError("thread state snapshot integrity check failed")
-                    identities = select_thread_updates(conn)
+                    identities = select_thread_updates(conn, permission_policy)
                 finally:
                     conn.close()
                 try:
@@ -948,6 +1306,7 @@ def _select_thread_updates_from_snapshot(
 def update_thread_state(
     path: Path,
     *,
+    permission_policy: PermissionPolicy | None = None,
     check_only: bool = False,
     before_commit: Callable[[], None] | None = None,
     snapshot_root: Path | None = None,
@@ -955,14 +1314,14 @@ def update_thread_state(
 ) -> dict[str, object]:
     if not path.is_file():
         return {"status": "missing", "changedCount": 0, "wouldChangeCount": 0, "driftCount": 0}
-    if not isinstance(DISABLED_SANDBOX, str):
-        raise StatePolicyError("thread state policy constant is invalid")
+    permission_policy = _resolve_policy_for_path(path, permission_policy)
     if check_only:
         if snapshot_root is None:
             raise StatePolicyError("thread state check snapshot root is required")
         identities, integrity_result_count = _select_thread_updates_from_snapshot(
             path,
             snapshot_root,
+            permission_policy,
             after_first_capture=after_first_snapshot_capture,
         )
         return {
@@ -981,22 +1340,40 @@ def update_thread_state(
         except sqlite3.OperationalError as exc:
             raise StatePolicyError("thread state database busy") from exc
         try:
-            identities = select_thread_updates(conn)
+            identities = select_thread_updates(conn, permission_policy)
             if identities:
                 conn.execute(
                     """
-                    update threads set approval_mode='never', sandbox_policy=?
+                    update threads set approval_mode=?, sandbox_policy=?
                     where source='vscode'
                       and (thread_source='user' or thread_source is null)
                       and (
-                        approval_mode is null or approval_mode <> 'never'
+                        approval_mode is null or approval_mode <> ?
                         or sandbox_policy is null
-                        or sandbox_policy not in ('{"type":"disabled"}', 'danger-full-access')
+                        or (
+                          sandbox_policy <> ?
+                          and (? <> '{"type":"disabled"}' or sandbox_policy <> 'danger-full-access')
+                        )
                       )
                     """,
-                    (DISABLED_SANDBOX,),
+                    (
+                        permission_policy.approval_policy,
+                        permission_policy.sqlite_sandbox_policy,
+                        permission_policy.approval_policy,
+                        permission_policy.sqlite_sandbox_policy,
+                        permission_policy.sqlite_sandbox_policy,
+                    ),
                 )
-            drift_count = int(conn.execute(f"select count(*) from ({THREAD_DRIFT_SQL})").fetchone()[0])
+            drift_count = int(
+                conn.execute(
+                    f"select count(*) from ({THREAD_DRIFT_SQL})",
+                    (
+                        permission_policy.approval_policy,
+                        permission_policy.sqlite_sandbox_policy,
+                        permission_policy.sqlite_sandbox_policy,
+                    ),
+                ).fetchone()[0]
+            )
             if drift_count:
                 raise StatePolicyError("thread state drift remains before commit")
             if before_commit is not None:
@@ -1005,7 +1382,16 @@ def update_thread_state(
         except BaseException:
             conn.rollback()
             raise
-        verify_count = int(conn.execute(f"select count(*) from ({THREAD_DRIFT_SQL})").fetchone()[0])
+        verify_count = int(
+            conn.execute(
+                f"select count(*) from ({THREAD_DRIFT_SQL})",
+                (
+                    permission_policy.approval_policy,
+                    permission_policy.sqlite_sandbox_policy,
+                    permission_policy.sqlite_sandbox_policy,
+                ),
+            ).fetchone()[0]
+        )
         if verify_count:
             raise StatePolicyError("thread state postcommit drift remains")
         return {
@@ -1095,6 +1481,29 @@ def _safe_error(exc: BaseException) -> str:
     return "state policy operation failed"
 
 
+def _redact_path_inventory(inventory: object) -> object:
+    """Keep inventory disposition evidence while omitting raw local values."""
+    if not isinstance(inventory, dict):
+        return inventory
+    redacted = copy.deepcopy(inventory)
+    for key in ("sourceRoot", "candidateRoot"):
+        if key in redacted:
+            redacted[key] = "<omitted>"
+    redacted.pop("candidateRootProbe", None)
+    maps = redacted.get("maps")
+    if isinstance(maps, dict):
+        for entries in maps.values():
+            if not isinstance(entries, dict):
+                continue
+            for entry in entries.values():
+                if isinstance(entry, dict):
+                    entry.pop("value", None)
+                    entry.pop("candidate", None)
+                    entry.pop("probe", None)
+    redacted["unknown"] = {str(key): "<omitted>" for key in redacted.get("unknown", {})}
+    return redacted
+
+
 def run_policy(
     codex_home: Path,
     *,
@@ -1102,6 +1511,9 @@ def run_policy(
     health_root: Path,
     output: TextIO = sys.stdout,
     write_health: bool | None = None,
+    path_mode: str = "inventory",
+    permission_policy: PermissionPolicy | None = None,
+    approved_map: object = None,
 ) -> dict[str, object]:
     if write_health is None:
         write_health = not check_only
@@ -1109,13 +1521,26 @@ def run_policy(
     started_clock = time.monotonic()
     run_id = uuid.uuid4().hex
     errors: list[str] = []
-    global_result: dict[str, object] = {"status": "not-run", "changed": False, "changedCount": 0}
+    global_result: dict[str, object] = {
+        "status": "not-run",
+        "changed": False,
+        "changedCount": 0,
+        "driftCount": 0,
+        "pathInventory": None,
+    }
     thread_result: dict[str, object] = {"status": "not-run", "changedCount": 0, "wouldChangeCount": 0, "driftCount": 0}
     try:
+        if permission_policy is None:
+            permission_policy = resolve_permission_policy(codex_home)
+        elif not isinstance(permission_policy, PermissionPolicy):
+            raise StatePolicyError("permission policy object is invalid")
         with WindowsNamedMutex():
             global_result = update_global_state(
                 codex_home / ".codex-global-state.json",
                 codex_home / "backups_state" / "codex-state-policy",
+                permission_policy=permission_policy,
+                path_mode=path_mode,
+                approved_map=approved_map,
                 check_only=check_only,
             )
             production_home = _resolved_casefold(codex_home) == _resolved_casefold(PRODUCTION_CODEX_HOME)
@@ -1126,6 +1551,7 @@ def run_policy(
             )
             thread_result = update_thread_state(
                 codex_home / "state_5.sqlite",
+                permission_policy=permission_policy,
                 check_only=check_only,
                 snapshot_root=snapshot_root if check_only else None,
             )
@@ -1135,11 +1561,7 @@ def run_policy(
         errors.append(_safe_error(exc))
     changed = bool(global_result.get("changed")) or int(thread_result.get("changedCount", 0)) > 0
     restart_required = changed
-    global_drift_count = (
-        int(global_result.get("changedCount", 0))
-        if check_only and bool(global_result.get("wouldChange"))
-        else 0
-    )
+    global_drift_count = int(global_result.get("driftCount", 0))
     thread_drift_count = int(thread_result.get("driftCount", 0))
     drift_count = global_drift_count + thread_drift_count
     converged = ok and drift_count == 0
@@ -1154,6 +1576,7 @@ def run_policy(
             "changedCount": int(global_result.get("changedCount", 0)),
             "beforeSha256": global_result.get("beforeSha256"),
             "afterSha256": global_result.get("afterSha256"),
+            "driftCount": global_drift_count,
         },
         "threadState": {
             "status": thread_result.get("status"),
@@ -1162,6 +1585,7 @@ def run_policy(
             "integrityOk": bool(thread_result.get("integrityOk", False)),
             "integrityResultCount": int(thread_result.get("integrityResultCount", 0)),
         },
+        "pathInventory": _redact_path_inventory(global_result.get("pathInventory")),
         "restartRequired": restart_required,
         "errors": errors,
     }

@@ -61,6 +61,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.db_path = self.codex_home / "state_5.sqlite"
         self.backup_root = self.root / "backups"
         self.sqlite_snapshot_root = self.root / "sqlite-snapshots"
+        self.write_permission_config()
 
     def write_permission_config(
         self,
@@ -81,6 +82,19 @@ class CodexStatePolicyTests(unittest.TestCase):
         data = json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode()
         self.global_path.write_bytes(data)
         return data
+
+    @staticmethod
+    def permission_drift() -> dict[str, object]:
+        return {
+            "electron-persisted-atom-state": {
+                "heartbeat-thread-permissions-by-id": {
+                    "target": {
+                        "approvalPolicy": "on-request",
+                        "sandboxPolicy": {"type": "workspaceWrite"},
+                    }
+                }
+            }
+        }
 
     def create_db(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -134,6 +148,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertIs(rewrite(sentinel), sentinel)
 
     def test_normalize_global_state_combines_both_maps_and_heartbeat(self) -> None:
+        policy = self.module.resolve_permission_policy(self.codex_home)
         state = {
             "thread-workspace-root-hints": {"redacted-a": r"C:\Users\WINDOWS\Documents\Codex\a"},
             "thread-projectless-output-directories": {"redacted-b": r"c:/users/windows/documents/codex/b"},
@@ -146,15 +161,20 @@ class CodexStatePolicyTests(unittest.TestCase):
             },
             "unknown": "keep",
         }
-        normalized, summary = self.module.normalize_global_state(state)
-        self.assertEqual(normalized["thread-workspace-root-hints"]["redacted-a"], r"D:\Users\WINDOWS\Documents\Codex\a")
-        self.assertEqual(normalized["thread-projectless-output-directories"]["redacted-b"], r"D:\Users\WINDOWS\Documents\Codex\b")
+        normalized, summary = self.module.normalize_global_state(
+            state,
+            permission_policy=policy,
+            path_mode="inventory",
+        )
+        self.assertEqual(normalized["thread-workspace-root-hints"]["redacted-a"], r"C:\Users\WINDOWS\Documents\Codex\a")
+        self.assertEqual(normalized["thread-projectless-output-directories"]["redacted-b"], r"c:/users/windows/documents/codex/b")
         heartbeat = normalized["electron-persisted-atom-state"]["heartbeat-thread-permissions-by-id"]
         self.assertEqual(heartbeat["redacted-c"]["approvalPolicy"], "never")
         self.assertEqual(heartbeat["redacted-c"]["sandboxPolicy"], {"type": "dangerFullAccess"})
         self.assertEqual(heartbeat["redacted-d"], "unknown-shape")
         self.assertEqual(normalized["unknown"], "keep")
-        self.assertEqual(summary["pathChangedCount"], 2)
+        self.assertEqual(summary["pathChangedCount"], 0)
+        self.assertEqual(summary["pathDriftCount"], 2)
         self.assertEqual(summary["heartbeatChangedCount"], 1)
         self.assertNotIn("redacted-a", json.dumps(summary))
 
@@ -169,6 +189,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertEqual(policy.sqlite_sandbox_policy, '{"type":"workspace-write"}')
 
     def test_permission_policy_missing_fails_closed(self) -> None:
+        (self.codex_home / "config.toml").unlink()
         with self.assertRaisesRegex(self.module.StatePolicyError, "permission policy"):
             self.module.resolve_permission_policy(self.codex_home)
 
@@ -186,6 +207,23 @@ class CodexStatePolicyTests(unittest.TestCase):
 
         with self.assertRaisesRegex(self.module.StatePolicyError, "conflict"):
             self.module.resolve_permission_policy(self.codex_home)
+
+    def test_run_policy_missing_permission_source_fails_closed(self) -> None:
+        (self.codex_home / "config.toml").unlink()
+        self.write_global(self.permission_drift())
+        output = io.StringIO()
+
+        payload = self.module.run_policy(
+            self.codex_home,
+            check_only=True,
+            health_root=self.root / "health",
+            output=output,
+        )
+
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["converged"])
+        self.assertTrue(payload["errors"])
+        self.assertEqual(payload["globalState"]["status"], "not-run")
 
     def test_heartbeat_and_sqlite_use_resolved_permission_policy(self) -> None:
         self.write_permission_config(approval_policy="on-request", sandbox_mode="workspace-write")
@@ -290,16 +328,22 @@ class CodexStatePolicyTests(unittest.TestCase):
     def test_select_thread_updates_preserves_unknown_rows(self) -> None:
         conn = self.create_db()
         try:
-            self.assertEqual(self.module.select_thread_updates(conn), ["target-a", "target-null"])
+            policy = self.module.resolve_permission_policy(self.codex_home)
+            self.assertEqual(self.module.select_thread_updates(conn, policy), ["target-a", "target-null"])
         finally:
             conn.close()
 
     def test_global_writer_replays_latest_competitor_state(self) -> None:
-        original = self.write_global({"thread-workspace-root-hints": {"x": r"C:\Users\WINDOWS\Documents\Codex\a"}})
+        original_state = self.permission_drift()
+        original_state["thread-workspace-root-hints"] = {
+            "x": r"C:\Users\WINDOWS\Documents\Codex\a"
+        }
+        original = self.write_global(original_state)
         competitor = {
             "thread-workspace-root-hints": {"x": r"C:\Users\WINDOWS\Documents\Codex\a"},
             "competitorSentinel": "keep",
         }
+        competitor.update(self.permission_drift())
         calls = 0
 
         def race(_attempt: int) -> None:
@@ -315,23 +359,29 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertGreaterEqual(result["attempts"], 2)
         after = json.loads(self.global_path.read_text(encoding="utf-8"))
         self.assertEqual(after["competitorSentinel"], "keep")
-        self.assertTrue(after["thread-workspace-root-hints"]["x"].startswith("D:"))
+        self.assertTrue(after["thread-workspace-root-hints"]["x"].startswith("C:"))
         self.assertNotEqual(hashlib.sha256(original).hexdigest(), result["afterSha256"])
 
     def test_global_writer_never_overwrites_unstable_competitor(self) -> None:
-        self.write_global({"thread-workspace-root-hints": {"x": r"C:\Users\WINDOWS\Documents\Codex\a"}})
+        state = self.permission_drift()
+        state["thread-workspace-root-hints"] = {
+            "x": r"C:\Users\WINDOWS\Documents\Codex\a"
+        }
+        self.write_global(state)
         latest = b""
 
         def race(attempt: int) -> None:
             nonlocal latest
-            latest = json.dumps(
+            latest_state = self.permission_drift()
+            latest_state.update(
                 {
                     "competitor": attempt,
                     "thread-workspace-root-hints": {
                         "x": r"C:\Users\WINDOWS\Documents\Codex\a"
                     },
                 }
-            ).encode()
+            )
+            latest = json.dumps(latest_state).encode()
             self.global_path.write_bytes(latest)
 
         with self.assertRaisesRegex(self.module.StatePolicyError, "concurrent"):
@@ -347,7 +397,11 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.module.update_global_state(self.global_path, self.backup_root)
         self.assertEqual(self.global_path.read_bytes(), malformed)
 
-        original = self.write_global({"thread-workspace-root-hints": {"x": r"C:\Users\WINDOWS\Documents\Codex\a"}})
+        original_state = self.permission_drift()
+        original_state["thread-workspace-root-hints"] = {
+            "x": r"C:\Users\WINDOWS\Documents\Codex\a"
+        }
+        original = self.write_global(original_state)
         with mock.patch.object(self.module, "create_backup", side_effect=OSError("fixture backup denied")):
             with self.assertRaisesRegex(self.module.StatePolicyError, "backup"):
                 self.module.update_global_state(self.global_path, self.backup_root)
@@ -369,7 +423,11 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.module._json_bytes({"unknown": float("nan")})
 
     def test_check_only_and_idempotence(self) -> None:
-        original = self.write_global({"thread-workspace-root-hints": {"x": r"C:\Users\WINDOWS\Documents\Codex\a"}})
+        state = self.permission_drift()
+        state["thread-workspace-root-hints"] = {
+            "x": r"C:\Users\WINDOWS\Documents\Codex\a"
+        }
+        original = self.write_global(state)
         check = self.module.update_global_state(self.global_path, self.backup_root, check_only=True)
         self.assertEqual(self.global_path.read_bytes(), original)
         self.assertTrue(check["wouldChange"])
@@ -377,15 +435,10 @@ class CodexStatePolicyTests(unittest.TestCase):
         second = self.module.update_global_state(self.global_path, self.backup_root)
         self.assertTrue(first["changed"])
         self.assertFalse(second["changed"])
+        self.assertGreater(second["driftCount"], 0)
 
     def test_write_mode_reports_postwrite_residual_drift_zero(self) -> None:
-        self.write_global(
-            {
-                "thread-workspace-root-hints": {
-                    "x": r"C:\Users\WINDOWS\Documents\Codex\a"
-                }
-            }
-        )
+        self.write_global(self.permission_drift())
         connection = self.create_db()
         connection.close()
         output = io.StringIO()
@@ -670,7 +723,7 @@ class CodexStatePolicyTests(unittest.TestCase):
             write_health=True,
         )
         payload = json.loads(output.getvalue())
-        self.assertEqual(set(payload), {"hookId", "ok", "changed", "converged", "driftCount", "globalState", "threadState", "restartRequired", "errors"})
+        self.assertEqual(set(payload), {"hookId", "ok", "changed", "converged", "driftCount", "globalState", "threadState", "pathInventory", "restartRequired", "errors"})
         text = output.getvalue()
         self.assertNotRegex(text, r"target-a|redacted|codex-home|\\Users\\|thread[_ -]?id")
         health = json.loads((health_root / "codex-state-policy.json").read_text(encoding="utf-8"))
