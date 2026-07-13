@@ -1725,19 +1725,27 @@ class SqliteTargetLease:
             raise
         return self
 
-    def assert_unchanged(self) -> None:
+    def assert_unchanged(self, *, strict_sidecar_content: bool = False) -> None:
         if self._closed or self._connection is None:
             raise StatePolicyError("sqlite target lease is closed")
         if _file_handle_identity(self.path) != self.expected_identity:
             raise StatePolicyError("thread state target changed concurrently")
         if self.expected_snapshot is not None:
-            _assert_sqlite_snapshot_identity(
+            current_snapshot = _assert_sqlite_snapshot_identity(
                 self.expected_snapshot,
                 self.path,
                 allow_new_sidecars=False,
                 allow_removed_sidecars=True,
                 check_main_metadata=False,
+                check_sidecar_content=strict_sidecar_content,
             )
+            if strict_sidecar_content:
+                for index in range(1, 4):
+                    if (
+                        self.expected_snapshot.content_known[index]
+                        != current_snapshot.content_known[index]
+                    ):
+                        raise StatePolicyError("thread state sidecar bytes unavailable during return gate")
         if select_thread_updates(self._connection, self.permission_policy):
             raise StatePolicyError("thread state target changed concurrently")
 
@@ -3679,6 +3687,32 @@ def run_policy(
             payload["errors"] = errors
     try:
         output.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+        try:
+            if sqlite_return_lease is not None:
+                sqlite_return_lease.assert_unchanged(strict_sidecar_content=True)
+            if global_return_lease is not None:
+                global_return_lease.assert_unchanged()
+            if policy_return_lease is not None:
+                policy_return_lease.assert_unchanged()
+        except BaseException as exc:
+            if "unsafe-partial" not in errors:
+                errors.append("unsafe-partial")
+            errors.append(_safe_error(exc))
+            payload["ok"] = False
+            payload["converged"] = False
+            payload["errors"] = errors
+            health["ok"] = False
+            health["errors"] = errors
+            if write_health:
+                try:
+                    _write_health(health_root / "codex-state-policy.json", health)
+                except (OSError, StatePolicyError):
+                    errors.append("state policy health write failed")
+                    payload["errors"] = errors
+            # The first line may already contain a success envelope. Emit the
+            # fail-closed result after the post-output gate so stream consumers
+            # can use the final line and callers receive the unsafe status.
+            output.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
         return payload
     finally:
         if sqlite_return_lease is not None:

@@ -1634,6 +1634,104 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
+    def test_run_policy_rejects_wal_mutation_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
+            keeper.execute("pragma wal_autocheckpoint=0")
+            keeper.execute(
+                "create table threads (id text primary key, source text, thread_source text, "
+                "approval_mode text, sandbox_policy text, sentinel text)"
+            )
+            keeper.execute(
+                "insert into threads values (?,?,?,?,?,?)",
+                ("target-a", "vscode", "user", "on-request", '{"type":"workspace-write"}', "keep-a"),
+            )
+            keeper.commit()
+            wal_path = Path(str(self.db_path) + "-wal")
+
+            class MutatingOutput(io.StringIO):
+                mutated = False
+
+                def write(self, value: str) -> int:
+                    if not self.mutated:
+                        self.mutated = True
+                        wal_path.write_bytes(b"corrupted-wal")
+                    return super().write(value)
+
+            output = MutatingOutput()
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=output,
+            )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_run_policy_rejects_new_sidecar_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        journal_path = Path(str(self.db_path) + "-journal")
+
+        class SidecarOutput(io.StringIO):
+            created = False
+
+            def write(self, value: str) -> int:
+                if not self.created:
+                    self.created = True
+                    journal_path.write_bytes(b"late-journal")
+                return super().write(value)
+
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=SidecarOutput(),
+            )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_run_policy_rejects_policy_supplemental_created_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        policy_path = self.codex_home / "policy.json"
+
+        class PolicyOutput(io.StringIO):
+            created = False
+
+            def write(self, value: str) -> int:
+                if not self.created:
+                    self.created = True
+                    policy_path.write_text(
+                        '{"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite"}}',
+                        encoding="utf-8",
+                    )
+                return super().write(value)
+
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=PolicyOutput(),
+            )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+        finally:
+            policy_path.unlink(missing_ok=True)
+
     def test_sqlite_return_lease_unavailable_reports_unsafe_partial(self) -> None:
         connection = self.create_db()
         connection.close()
