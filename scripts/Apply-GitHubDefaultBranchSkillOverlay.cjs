@@ -43,7 +43,10 @@ function sha256File(filePath) {
 
 function mtimeFingerprint(value) {
   const number = Number(value);
-  return Number.isFinite(number) ? Math.trunc(number) : Number.NaN;
+  // NTFS/utimes can differ by a few sub-millisecond/rounding ticks between
+  // reads. A 10 ms bucket remains sensitive to real touches while avoiding a
+  // false CAS conflict on a byte-identical file.
+  return Number.isFinite(number) ? Math.trunc(number / 10) * 10 : Number.NaN;
 }
 
 function resolveAbsolute(filePath) {
