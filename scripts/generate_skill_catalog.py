@@ -58,6 +58,18 @@ _CLOSURE_SUMMARY_KEYS = (
 )
 
 
+def _assert_local_d_path(path: Path, *, label: str) -> None:
+    """Keep diagnostic inputs and outputs on this host's local D drive."""
+
+    raw = str(path)
+    if raw.startswith("\\\\") or raw.startswith("//"):
+        raise CatalogError(f"{label}不能是 UNC 或远程共享路径：{path}")
+    if any(part.casefold() == ".agents" for part in path.parts):
+        raise CatalogError(f"{label}不能位于已停用的 .agents 路径：{path}")
+    if os.name == "nt" and path.drive.casefold() != "d:":
+        raise CatalogError(f"{label}必须位于本机 D 盘：{path}")
+
+
 class CatalogError(RuntimeError):
     """Raised when the local catalog cannot make a safe, explicit claim."""
 
@@ -95,6 +107,7 @@ def _normalize_root(value: Path | str, *, required: bool, label: str) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
+    _assert_local_d_path(path, label=label)
     if not path.exists():
         if required:
             raise CatalogError(f"{label}不存在：{path}")
@@ -110,6 +123,7 @@ def _normalize_file(value: Path | str, *, label: str) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
+    _assert_local_d_path(path, label=label)
     if not path.exists():
         raise CatalogError(f"{label}不存在：{path}")
     if not path.is_file():
@@ -301,16 +315,6 @@ def _source_for(skill_md: Path, *, skill_name: str) -> dict[str, Any]:
         "read_consistency": "stable",
     }
     return result
-
-
-def _case_insensitive_exists(parent: Path, name: str) -> bool:
-    if not parent.is_dir():
-        return False
-    wanted = name.casefold()
-    try:
-        return any(child.name.casefold() == wanted for child in parent.iterdir())
-    except OSError as exc:
-        raise CatalogError(f"无法读取导航文件目录：{parent}：{exc}") from exc
 
 
 def _scan_skill_files(root: Path, *, scope: str) -> tuple[list[Path], list[str]]:
@@ -575,18 +579,14 @@ def _artifact(
             conflicts.append("ledger 对该 skill 存在多个 active 记录")
     else:
         ledger_coverage = "pass"
-    ledger_state = sorted({entry["state"] for entry in active_entries})
+    ledger_state = sorted({entry["state"] for entry in ledger_entries})
     ledger_records = sorted(
-        {entry["source"] for entry in active_entries if entry["source"]}
+        {entry["source"] for entry in ledger_entries if entry["source"]}
     )
 
     disable_value = frontmatter.get("disable_model_invocation")
     mode = "user-invoked" if disable_value is True else "model-invoked"
     relative = skill_path.relative_to(root).as_posix()
-    navigation = {
-        "agents_openai_yaml": _case_insensitive_exists(skill_path.parent / "agents", "openai.yaml"),
-        "agents_md": _case_insensitive_exists(skill_path.parent, "AGENTS.md"),
-    }
     return {
         "artifact_id": identity["artifact_id"],
         "location_id": identity["location_id"],
@@ -608,7 +608,6 @@ def _artifact(
             "description_present": bool(str(frontmatter.get("description", "")).strip()),
             "disable_model_invocation": disable_value,
         },
-        "navigation": navigation,
         "source": source,
         "ledger": {
             "coverage": ledger_coverage,
@@ -775,17 +774,12 @@ def build_catalog(
     }
 
 
-def _assert_d_drive(path: Path, *, label: str) -> None:
-    if os.name == "nt" and path.drive.casefold() != "d:":
-        raise CatalogError(f"{label}必须位于 D 盘：{path}")
-
-
 def _safe_output_path(output_path: Path | str, *, active_root: Path, cache_root: Path) -> Path:
     path = Path(output_path).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
     path = path.absolute()
-    _assert_d_drive(path, label="输出路径")
+    _assert_local_d_path(path, label="输出路径")
     existing_parent = path.parent
     while not existing_parent.exists() and existing_parent != existing_parent.parent:
         existing_parent = existing_parent.parent
@@ -806,7 +800,7 @@ def write_catalog(catalog: dict[str, Any], output_path: Path) -> None:
     if not output.is_absolute():
         output = Path.cwd() / output
     output = output.absolute()
-    _assert_d_drive(output, label="输出路径")
+    _assert_local_d_path(output, label="输出路径")
     parent = output.parent
     temp_path: Path | None = None
     try:

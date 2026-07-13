@@ -33,16 +33,16 @@
 
 - [x] **步骤 1：编写失败测试**
 
-  Cover these behaviors with real temporary files:
-  1. active and plugin-cache roots are separated and same-name skills keep different artifact IDs;
-  2. frontmatter extracts `name`, `description`, and `disable-model-invocation` into an invocation record;
-  3. source metadata and ledger coverage are represented while runtime state remains `unverified`;
-  4. missing roots fail closed with `CatalogError`;
-  5. `write_catalog` creates a valid UTF-8 JSON file and `build_catalog` itself does not write output.
+  使用真实临时文件覆盖以下行为：
+  1. active 与 plugin-cache 根目录分离，同名 skill 保留不同 artifact ID；
+  2. frontmatter 将 `name`、`description` 和 `disable-model-invocation` 提取到调用记录；
+  3. 保留来源元数据和 ledger 覆盖事实，同时将运行状态保持为 `unverified`；
+  4. 根目录缺失时以 `CatalogError` 失败关闭；
+  5. `write_catalog` 生成合法 UTF-8 JSON，而 `build_catalog` 本身不写输出。
 
 - [x] **步骤 2：运行聚焦测试确认 RED**
 
-  Run:
+  运行命令：
 
   ```powershell
   & 'D:\Codex\tools\python314-official\python.exe' -B 'D:\Codex\projects\统一环境\tests\Test-SkillCatalog.py'
@@ -63,27 +63,27 @@
 
 - [x] **步骤 1：实现路径发现和作用域分类**
 
-  Recursively include exact `SKILL.md` files under the two declared roots, excluding `.agents` and disabled/backup trees. Mark normal active entries as `active`, `.system` entries as `system`, and cache entries as `plugin-cache`; set only plugin-cache entries to read-only. Reparse points are never followed; cache junctions are reported as a partial scan.
+  递归纳入两个声明根目录下名称严格为 `SKILL.md` 的文件，排除 `.agents` 以及停用/备份历史树。普通 active 项标为 `active`，`.system` 项标为 `system`，缓存项标为 `plugin-cache`；只有 plugin-cache 项标记为只读。永不跟随 reparse point；缓存 junction 报告为部分扫描。
 
 - [x] **步骤 2：实现元数据和身份提取**
 
-  Parse the required frontmatter fields, including literal/folded block descriptions, without adding a dependency. Record the skill name, description presence, three-state invocation flag, source record fields, modification facts, content SHA-256, separate artifact/location identities, source-relative path, and package/version locator. Every file read is checked for a replacement during the read.
+  不增加依赖，解析必需的 frontmatter 字段，包括 literal/folded 块描述。记录 skill 名称、描述是否存在、三态调用标记、来源记录字段、修改事实、内容 SHA-256、分离的 artifact/location 身份、来源相对路径和 package/version 定位。每次读取文件后都检查文件是否被替换。
 
 - [x] **步骤 3：实现 ledger 和闭包事实提取**
 
-  Read the existing JSON ledger by its `sources`, `unresolved`, and `deleted` states so conflicts are visible rather than silently selected; artifact records retain the ledger state instead of collapsing it into a boolean. Store coverage as a fact, not a health claim. Validate an injected closure result against the existing checker schema; production CLI invokes only the fixed local closure checker and records its heuristic coverage without duplicating its rules.
+  按 `sources`、`unresolved` 和 `deleted` 状态读取现有 JSON ledger，使冲突可见而不是静默择一；artifact 记录保留 ledger 状态，不折叠成布尔值。覆盖率只作为事实记录，不作为健康声明。按现有检查器 schema 校验注入的闭包结果；生产 CLI 只调用固定的本地闭包检查器，并记录其 heuristic 覆盖范围，不重复实现检查规则。
 
 - [x] **步骤 4：实现失败关闭的 catalog 组装**
 
-  Emit `schema_version`, `generated_at`, `authority`, root summaries, checks, snapshot/read-consistency facts, and artifact records. Set every artifact's `runtime_verification` to `unverified`; do not infer capability availability from file presence.
+  输出 `schema_version`、`generated_at`、`authority`、根目录摘要、检查结果、快照/读取一致性事实和 artifact 记录。每个 artifact 的 `runtime_verification` 都设为 `unverified`；不从文件存在推断能力可用。
 
 - [x] **步骤 5：实现本地原子输出**
 
-  `write_catalog` creates only the requested output parent, writes UTF-8 JSON to a same-directory temporary file, flushes and fsyncs it, and replaces the target with `os.replace`. Replacement failure cleans the temporary file and leaves an existing target unchanged. No remote or credential code is allowed.
+  `write_catalog` 只创建请求的输出父目录，把 UTF-8 JSON 写入同目录临时文件，flush 并 fsync 后用 `os.replace` 替换目标。替换失败时清理临时文件并保持旧目标不变。不允许远程或凭据代码。
 
 - [x] **步骤 6：运行聚焦测试确认 GREEN**
 
-  结果：14 项 catalog 测试全部通过，无警告。
+  结果：16 项 catalog 测试全部通过，无警告。
 
 ### 任务 3：增加安全 CLI 模式
 
@@ -115,7 +115,7 @@
   & 'D:\Codex\tools\python314-official\python.exe' -B 'D:\Codex\projects\统一环境\scripts\generate_skill_catalog.py' --dry-run
   ```
 
-  结果：291 条记录：active 93、system 5、plugin-cache 193；缓存中既有的 junction 被明确报告为只读部分扫描。ledger 覆盖率为 98/98，资源闭包以 heuristic 覆盖方式通过。
+  结果：本次运行证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`。
 
 - [x] **步骤 2：运行现有严格资源闭包检查器**
 
@@ -123,7 +123,7 @@
   & 'D:\Codex\tools\python314-official\python.exe' 'D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py' --root 'D:\Codex\.codex\skills' --strict --format json
   ```
 
-  结果：现有检查器返回 active skill 98 个，发现 0 个，缺失/重复/过期资源或 ledger 记录均为 0。
+  结果：本次运行证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`。
 
 - [x] **步骤 3：仅在 dry-run 和闭包检查通过后写入本地 catalog**
 
@@ -131,7 +131,7 @@
   & 'D:\Codex\tools\python314-official\python.exe' -B 'D:\Codex\projects\统一环境\scripts\generate_skill_catalog.py' --write --output 'D:\Codex\.codex\skill-catalog\catalog.json'
   ```
 
-  结果：本地 catalog 已原子写入，并验证为 291 条记录的 UTF-8 JSON；它位于项目工作树之外。
+  结果：本次运行证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`；生成物位于项目工作树之外。
 
 - [x] **步骤 4：运行聚焦测试和仓库相关回归测试**
 
@@ -141,8 +141,8 @@
   & 'D:\Codex\tools\python314-official\python.exe' -B 'D:\Codex\projects\统一环境\tests\Test-CodexStatePolicy.py'
   ```
 
-  结果：catalog 14/14、路径清单 17/17、资源闭包 9/9 通过。无关的 state-policy 套件为 55/56：唯一失败来自既有提交 `54e138a` 的 lease 改动（实际为 `state publish handle final path mismatch`，而测试期待 `concurrent`）；本计划未修改该文件。
+  结果：本次运行证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`；无关的 state-policy 结果和既有提交边界也记录在那里。
 
 - [x] **步骤 5：验证作用域和工作树边界**
 
-  catalog 数量区分 active/system/plugin-cache；聚焦网络守卫通过；生成的 catalog 位于仓库之外；本计划涉及的项目文件仅有计划、扫描器和聚焦测试。既有 pycache 仍保持未跟踪、未暂存。
+  作用域、网络守卫、输出位置和工作树边界的本次证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`。

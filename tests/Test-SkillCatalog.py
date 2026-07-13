@@ -22,7 +22,7 @@ try:
     catalog_module = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(catalog_module)
     IMPORT_ERROR = None
-except Exception as exc:  # pragma: no cover - exercised by the initial RED run
+except (FileNotFoundError, ImportError) as exc:  # pragma: no cover - initial RED run
     catalog_module = None
     IMPORT_ERROR = exc
 
@@ -127,7 +127,7 @@ else:
                 self.assertTrue(cache_alpha["read_only"])
                 self.assertEqual(cache_alpha["runtime_verification"], "unverified")
 
-        def test_extracts_invocation_source_and_navigation_facts(self) -> None:
+        def test_extracts_invocation_source_and_ledger_facts(self) -> None:
             with tempfile.TemporaryDirectory() as temp:
                 base = Path(temp)
                 active = base / "active"
@@ -142,8 +142,6 @@ else:
                     disable_model_invocation=True,
                     source=source,
                 )
-                (skill_dir / "agents").mkdir()
-                (skill_dir / "agents" / "openai.yaml").write_text("display: manual\n", encoding="utf-8")
                 ledger = base / "ledger.json"
                 ledger.write_text(json.dumps({"unresolved": [{"name": "manual"}]}), encoding="utf-8")
 
@@ -160,8 +158,6 @@ else:
                 self.assertEqual(artifact["source"]["status"], "retained-local")
                 self.assertEqual(artifact["ledger_coverage"], "pass")
                 self.assertEqual(artifact["ledger"]["states"], ["unresolved"])
-                self.assertTrue(artifact["navigation"]["agents_openai_yaml"])
-                self.assertFalse(artifact["navigation"]["agents_md"])
                 self.assertEqual(artifact["runtime_verification"], "unverified")
 
         def test_build_is_read_only_and_write_catalog_creates_valid_json(self) -> None:
@@ -205,6 +201,25 @@ else:
                         ledger_path=ledger,
                         resource_closure=None,
                     )
+
+        def test_remote_and_disabled_roots_fail_closed(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                cache = base / "cache"
+                cache.mkdir()
+                ledger = base / "ledger.json"
+                ledger.write_text(json.dumps({"sources": []}), encoding="utf-8")
+                for forbidden_root in (
+                    Path(r"D:\Codex\.agents\skills"),
+                    Path(r"\\server\share\skills"),
+                ):
+                    with self.assertRaises(catalog_module.CatalogError):
+                        catalog_module.build_catalog(
+                            active_root=forbidden_root,
+                            plugin_cache_root=cache,
+                            ledger_path=ledger,
+                            resource_closure=None,
+                        )
 
         def test_excludes_legacy_agents_tree_and_preserves_utf8_facts(self) -> None:
             with tempfile.TemporaryDirectory(prefix="技能目录-") as temp:
@@ -311,6 +326,29 @@ else:
                         ledger_path=ledger,
                         resource_closure=None,
                     )
+
+        def test_deleted_ledger_state_is_preserved_as_a_conflict_fact(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                cache.mkdir()
+                _write_skill(active, "alpha", name="alpha", description="branch")
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"deleted": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+                artifact = catalog["artifacts"][0]
+                self.assertEqual(artifact["ledger"]["states"], ["deleted"])
+                self.assertEqual(artifact["ledger_coverage"], "deleted")
 
         def test_write_failure_keeps_existing_target_and_cleans_temp_file(self) -> None:
             with tempfile.TemporaryDirectory() as temp:
@@ -484,6 +522,8 @@ else:
         def test_output_rejects_non_d_drive(self) -> None:
             with self.assertRaises(catalog_module.CatalogError):
                 catalog_module.write_catalog({}, Path(r"C:\Codex\skill-catalog.json"))
+            with self.assertRaises(catalog_module.CatalogError):
+                catalog_module.write_catalog({}, Path(r"D:\Codex\.agents\skill-catalog.json"))
 
 
 if __name__ == "__main__":
