@@ -84,6 +84,14 @@ class PermissionPolicy:
     sandbox_mode: str
     source: str
 
+    def __post_init__(self) -> None:
+        if self.approval_policy not in SUPPORTED_APPROVAL_POLICIES:
+            raise StatePolicyError("permission policy approval is unsupported")
+        if self.sandbox_mode not in SUPPORTED_SANDBOX_MODES:
+            raise StatePolicyError("permission policy sandbox is unsupported")
+        if not isinstance(self.source, str) or not self.source:
+            raise StatePolicyError("permission policy source is missing")
+
     @property
     def heartbeat_sandbox_type(self) -> str:
         return {
