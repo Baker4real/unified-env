@@ -1808,6 +1808,18 @@ def _publish_temp_file(
                     target_snapshot_bytes
                 ):
                     raise StatePolicyError("state publish lease snapshot changed concurrently")
+                try:
+                    final_snapshot_target_identity = _publish_handle_info(
+                        target_kernel32,
+                        target_handle,
+                        path,
+                    )
+                except StatePolicyError as exc:
+                    raise StatePolicyError("state publish target changed concurrently") from exc
+                if final_snapshot_target_identity != target_identity or _sha256(
+                    _read_publish_handle_bytes(target_kernel32, target_handle)
+                ) != _sha256(target_snapshot_bytes):
+                    raise StatePolicyError("state publish target changed concurrently")
                 lease_expected_identity = expected_identity if expected_identity is not None else target_identity
                 lease_handoff = True
                 _move_path_by_name(path, lease_backup_path, replace_if_exists=False)
