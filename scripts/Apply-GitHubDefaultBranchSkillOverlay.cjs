@@ -873,6 +873,74 @@ function loadCatalog(catalogOrPath) {
   return validateCatalog(catalogOrPath);
 }
 
+function parseCliArgs(argv) {
+  const options = {
+    codexRoot: CODEX_ROOT,
+    evidenceRoot: DEFAULT_EVIDENCE_ROOT,
+    catalogPath: path.join(__dirname, 'github-default-branch-skill-overlay-catalog.json'),
+    dryRun: false,
+    json: false,
+  };
+  const errors = [];
+  const positional = [];
+  const explicit = new Set();
+  const valueFlags = new Map([
+    ['--codex-root', 'codexRoot'],
+    ['--evidence-root', 'evidenceRoot'],
+    ['--catalog-path', 'catalogPath'],
+  ]);
+  const booleanFlags = new Map([
+    ['--dry-run', 'dryRun'],
+    ['--json', 'json'],
+  ]);
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (!token.startsWith('-')) {
+      positional.push(token);
+      continue;
+    }
+    if (valueFlags.has(token)) {
+      const key = valueFlags.get(token);
+      if (explicit.has(key)) {
+        errors.push({ reason: 'duplicate-cli-option', option: token });
+        continue;
+      }
+      const value = argv[index + 1];
+      if (!value || value.startsWith('-')) {
+        errors.push({ reason: 'missing-cli-value', option: token });
+        continue;
+      }
+      explicit.add(key);
+      options[key] = value;
+      index += 1;
+      continue;
+    }
+    if (booleanFlags.has(token)) {
+      const key = booleanFlags.get(token);
+      if (explicit.has(key)) errors.push({ reason: 'duplicate-cli-option', option: token });
+      explicit.add(key);
+      options[key] = true;
+      continue;
+    }
+    errors.push({ reason: 'unknown-cli-option', option: token });
+  }
+
+  if (positional.length > 2) {
+    errors.push({ reason: 'too-many-positional-arguments', count: positional.length });
+  }
+  if (positional[0] !== undefined) {
+    if (explicit.has('codexRoot')) errors.push({ reason: 'duplicate-cli-option', option: '--codex-root' });
+    else options.codexRoot = positional[0];
+  }
+  if (positional[1] !== undefined) {
+    if (explicit.has('catalogPath')) errors.push({ reason: 'duplicate-cli-option', option: '--catalog-path' });
+    else options.catalogPath = positional[1];
+  }
+
+  return { ok: errors.length === 0, options, errors };
+}
+
 module.exports = {
   STABLE_MARKER,
   DEFAULT_EVIDENCE_ROOT,
@@ -882,14 +950,28 @@ module.exports = {
   buildChangePlan,
   applyChangePlan,
   rollbackManifest,
+  parseCliArgs,
 };
 
 if (require.main === module) {
-  const codexRoot = process.argv[2] || 'D:\\Codex\\.codex';
-  const catalogPath = process.argv[3] || path.join(__dirname, 'github-default-branch-skill-overlay-catalog.json');
-  const discovered = discoverTargets(codexRoot);
-  const plan = buildChangePlan(discovered, catalogPath);
-  const report = applyChangePlan(plan, { dryRun: process.argv.includes('--dry-run') });
-  console.log(JSON.stringify({ discovered, plan: { changes: plan.changes.length, skipped: plan.skipped.length, errors: plan.errors }, report }, null, 2));
-  process.exitCode = report.ok ? 0 : 1;
+  const parsed = parseCliArgs(process.argv.slice(2));
+  if (!parsed.ok) {
+    const failure = { ok: false, blocked: true, errors: parsed.errors };
+    if (parsed.options.json) console.log(JSON.stringify(failure, null, 2));
+    else console.error(`GitHub default-branch overlay CLI 参数错误：${parsed.errors.map((error) => error.option || error.reason).join('; ')}`);
+    process.exitCode = 2;
+  } else {
+    const { codexRoot, catalogPath, evidenceRoot, dryRun, json } = parsed.options;
+    const discovered = discoverTargets(codexRoot);
+    const plan = buildChangePlan(discovered, catalogPath);
+    const report = applyChangePlan(plan, { dryRun, evidenceRoot });
+    const result = {
+      discovered,
+      plan: { changes: plan.changes.length, skipped: plan.skipped.length, errors: plan.errors },
+      report,
+    };
+    if (json) console.log(JSON.stringify(result, null, 2));
+    else console.log(`GitHub default-branch overlay: planned=${plan.changes.length}, skipped=${plan.skipped.length}, changed=${report.changed}, errors=${report.errors?.length ?? 0}`);
+    process.exitCode = report.ok ? 0 : 1;
+  }
 }
