@@ -1944,7 +1944,7 @@ class StateTargetLease:
 
 
 class SqliteTargetLease:
-    """Hold a SQLite writer lease while the run result is finalized."""
+    """Hold a SQLite writer or read-only lease while the run result is finalized."""
 
     def __init__(
         self,
@@ -1953,11 +1953,13 @@ class SqliteTargetLease:
         expected_identity: tuple[int, int],
         permission_policy: PermissionPolicy,
         expected_snapshot: SqliteSourceSnapshot | None = None,
+        read_only: bool = False,
     ) -> None:
         self.path = path
         self.expected_identity = expected_identity
         self.permission_policy = permission_policy
         self.expected_snapshot = expected_snapshot
+        self.read_only = read_only
         self._connection: sqlite3.Connection | None = None
         self._windows_byte_locks: list[tuple[int, object, wintypes.HANDLE, _ByteRangeLease]] = []
         self._closed = False
@@ -1971,6 +1973,7 @@ class SqliteTargetLease:
         permission_policy: PermissionPolicy,
         expected_snapshot: SqliteSourceSnapshot,
         connection: sqlite3.Connection,
+        read_only: bool = False,
     ) -> "SqliteTargetLease":
         if not connection.in_transaction:
             raise StatePolicyError("sqlite return lease connection is inactive")
@@ -1979,6 +1982,7 @@ class SqliteTargetLease:
             expected_identity=expected_identity,
             permission_policy=permission_policy,
             expected_snapshot=expected_snapshot,
+            read_only=read_only,
         )
         lease._connection = connection
         try:
@@ -2011,9 +2015,14 @@ class SqliteTargetLease:
                     candidate,
                     # SQLite itself owns shared-memory lock bytes.  A shared
                     # Windows lease coexists with those readers while still
-                    # rejecting direct writes; the main/WAL/journal ranges
-                    # remain exclusive and therefore fail closed on conflict.
-                    shared=index == 2,
+                    # rejecting direct writes; the main/journal ranges remain
+                    # exclusive and the read-only WAL range is shared only
+                    # with another lease, not with file writes.
+                    # A read-only SQLite transaction also needs to retain its
+                    # WAL read handle, so share the WAL range only for that
+                    # mode.  Windows byte-range locks still reject direct
+                    # writes even when another lock holder may share it.
+                    shared=index == 2 or (self.read_only and index == 1),
                 )
                 try:
                     actual_identity = _publish_handle_info(kernel32, handle, candidate)
@@ -2037,9 +2046,18 @@ class SqliteTargetLease:
         try:
             self._connection = _connect_sqlite_bound(self.path, self.expected_identity)
             self._connection.execute("pragma busy_timeout=0")
-            self._connection.execute("begin immediate")
+            if self.read_only:
+                self._connection.execute("pragma query_only=on")
+                self._connection.execute("begin")
+                # Materialize the read transaction's WAL pages before taking
+                # the generation locks.  Otherwise SQLite can report a disk
+                # I/O error when the subsequent Windows WAL lease is acquired
+                # ahead of its first page read.
+                select_thread_updates(self._connection, self.permission_policy)
+            else:
+                self._connection.execute("begin immediate")
             self._acquire_generation_locks()
-            self.assert_unchanged()
+            self.assert_unchanged(strict_sidecar_content=self.read_only)
         except BaseException:
             self.close()
             raise
@@ -2060,6 +2078,11 @@ class SqliteTargetLease:
                 for index, kernel32, handle, _byte_lease in self._windows_byte_locks
                 if index == 0
             }
+            locked_sidecar_indices = {
+                index
+                for index, _kernel32, _handle, _byte_lease in self._windows_byte_locks
+                if index > 0
+            }
             current_snapshot = _assert_sqlite_snapshot_identity(
                 self.expected_snapshot,
                 self.path,
@@ -2068,6 +2091,7 @@ class SqliteTargetLease:
                 check_main_metadata=False,
                 check_sidecar_content=strict_sidecar_content,
                 handle_sources=handle_sources or None,
+                locked_sidecar_indices=locked_sidecar_indices,
             )
             if strict_sidecar_content:
                 if (
@@ -2096,7 +2120,7 @@ class SqliteTargetLease:
                         != current_snapshot.content_known[index]
                     ):
                         raise StatePolicyError("thread state sidecar bytes unavailable during return gate")
-        if select_thread_updates(self._connection, self.permission_policy):
+        if not self.read_only and select_thread_updates(self._connection, self.permission_policy):
             raise StatePolicyError("thread state target changed concurrently")
 
     def assert_no_create(self) -> None:
@@ -3232,12 +3256,14 @@ def _assert_sqlite_snapshot_identity(
     check_main_metadata: bool = True,
     check_sidecar_content: bool = False,
     handle_sources: dict[int, tuple[object, wintypes.HANDLE]] | None = None,
+    locked_sidecar_indices: set[int] | None = None,
 ) -> SqliteSourceSnapshot:
     """Reject path/identity replay between a checked snapshot and SQLite I/O."""
     if handle_sources:
         after = _capture_sqlite_source(path, handle_sources=handle_sources)
     else:
         after = _capture_sqlite_source(path)
+    locked_indices = set(locked_sidecar_indices or {})
     if before.identities[0] != after.identities[0] or (
         check_main_metadata and before.metadata[0] != after.metadata[0]
     ):
@@ -3254,6 +3280,11 @@ def _assert_sqlite_snapshot_identity(
         if expected is None and actual is not None and not allow_new_sidecars:
             raise StatePolicyError("thread state sidecar appeared during check")
         if expected is not None and check_sidecar_content:
+            if index in locked_indices:
+                # A leased WAL/SHM/journal may legitimately change SQLite's
+                # lock bytes while the identity/range lease prevents an
+                # outsider from replacing or writing the generation.
+                continue
             if before.metadata[index] != after.metadata[index]:
                 raise StatePolicyError("thread state sidecar metadata changed concurrently")
             if (
@@ -4130,10 +4161,27 @@ def run_policy(
                     errors.append("unsafe-partial")
                 raise
             try:
-                if not check_only:
-                    database_identity = sqlite_snapshot.identities[0]
-                    if database_identity is None:
-                        raise StatePolicyError("thread state return target identity is missing")
+                database_identity = sqlite_snapshot.identities[0]
+                if database_identity is None:
+                    raise StatePolicyError("thread state return target identity is missing")
+                if check_only:
+                    # Check-only must remain a read-only observation through
+                    # the output envelope.  Re-capture before acquiring the
+                    # lease so the advisory snapshot cannot become a false
+                    # stable result if a writer ran during the check phase.
+                    current_snapshot = _capture_sqlite_source(db_path)
+                    if current_snapshot != sqlite_snapshot:
+                        raise StatePolicyError("thread state source changed during check")
+                    sqlite_return_lease = SqliteTargetLease(
+                        db_path,
+                        expected_identity=database_identity,
+                        permission_policy=permission_policy,
+                        expected_snapshot=sqlite_snapshot,
+                        read_only=True,
+                    )
+                    sqlite_return_lease.__enter__()
+                    sqlite_return_lease.assert_unchanged(strict_sidecar_content=True)
+                else:
                     expected_snapshot = thread_result.get("_sourceSnapshot")
                     if not isinstance(expected_snapshot, SqliteSourceSnapshot):
                         raise StatePolicyError("thread state return snapshot is missing")

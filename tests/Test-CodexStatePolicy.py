@@ -1785,7 +1785,7 @@ class CodexStatePolicyTests(unittest.TestCase):
                         with self.db_path.open("r+b") as stream:
                             stream.seek(1)
                             stream.write(b"X")
-                            self.mutated = True
+                        self.mutated = True
                     except OSError:
                         self.blocked = True
                 return super().write(value)
@@ -1807,6 +1807,145 @@ class CodexStatePolicyTests(unittest.TestCase):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
         self.assertTrue(output.attempted)
         self.assertTrue(output.blocked)
+        self.assertTrue(result["ok"])
+        self.assertTrue(json.loads(output.getvalue())["ok"])
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows read-only generation leases")
+    def test_check_only_blocks_nonzero_offset_sqlite_write_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
+        keeper.commit()
+        original_main = self.db_path.read_bytes()
+
+        class CheckOnlyMainOutput(io.StringIO):
+            attempted = False
+            blocked = False
+            mutated = False
+
+            def write(self, value: str) -> int:
+                if not self.attempted:
+                    self.attempted = True
+                    try:
+                        with self.db_path.open("r+b") as stream:
+                            stream.seek(1)
+                            stream.write(b"X")
+                        self.mutated = True
+                    except OSError:
+                        self.blocked = True
+                return super().write(value)
+
+        output = CheckOnlyMainOutput()
+        output.db_path = self.db_path
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=True,
+                health_root=self.root / "health",
+                output=output,
+            )
+        finally:
+            keeper.close()
+            if output.mutated:
+                self.db_path.write_bytes(original_main)
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        self.assertTrue(output.attempted)
+        self.assertTrue(output.blocked)
+        self.assertFalse(output.mutated)
+        self.assertTrue(result["ok"])
+        self.assertTrue(json.loads(output.getvalue())["ok"])
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows read-only generation leases")
+    def test_check_only_blocks_sqlite_row_mutation_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
+        keeper.commit()
+
+        class CheckOnlyRowOutput(io.StringIO):
+            attempted = False
+            blocked = False
+            mutated = False
+
+            def write(self, value: str) -> int:
+                if not self.attempted:
+                    self.attempted = True
+                    competitor = sqlite3.connect(self.db_path, timeout=0)
+                    try:
+                        competitor.execute(
+                            "update threads set sentinel='competitor' where id='target-a'"
+                        )
+                        competitor.commit()
+                        self.mutated = True
+                    except sqlite3.Error:
+                        self.blocked = True
+                    finally:
+                        try:
+                            competitor.close()
+                        except sqlite3.Error:
+                            self.blocked = True
+                return super().write(value)
+
+        output = CheckOnlyRowOutput()
+        output.db_path = self.db_path
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=True,
+                health_root=self.root / "health",
+                output=output,
+            )
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        self.assertTrue(output.attempted)
+        self.assertTrue(output.blocked or not result["ok"])
+        if output.mutated:
+            self.assertFalse(result["ok"])
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows read-only generation leases")
+    def test_check_only_blocks_wal_sidecar_mutation_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
+        keeper.commit()
+        wal_path = Path(str(self.db_path) + "-wal")
+        original_wal = wal_path.read_bytes()
+
+        class CheckOnlyWalOutput(io.StringIO):
+            attempted = False
+            blocked = False
+            mutated = False
+
+            def write(self, value: str) -> int:
+                if not self.attempted:
+                    self.attempted = True
+                    try:
+                        wal_path.write_bytes(b"corrupted-wal")
+                        self.mutated = True
+                    except OSError:
+                        self.blocked = True
+                return super().write(value)
+
+        output = CheckOnlyWalOutput()
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=True,
+                health_root=self.root / "health",
+                output=output,
+            )
+        finally:
+            keeper.close()
+            if output.mutated:
+                wal_path.write_bytes(original_wal)
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        self.assertTrue(output.attempted)
+        self.assertTrue(output.blocked)
+        self.assertFalse(output.mutated)
         self.assertTrue(result["ok"])
         self.assertTrue(json.loads(output.getvalue())["ok"])
 
