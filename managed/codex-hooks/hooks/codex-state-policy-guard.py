@@ -68,6 +68,7 @@ FILE_RENAME_REPLACE_IF_EXISTS = 0x00000001
 FILE_RENAME_POSIX_SEMANTICS = 0x00000002
 MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
+_ACTIVE_POLICY_SOURCE_LEASE: object | None = None
 
 
 class _ByHandleFileInformation(ctypes.Structure):
@@ -1069,6 +1070,10 @@ def _assert_permission_policy_unchanged(permission_policy: PermissionPolicy) -> 
 
 def _assert_permission_policy_fingerprint(permission_policy: PermissionPolicy) -> None:
     """Re-resolve policy sources without relying on a patchable outer guard."""
+    active_lease = _ACTIVE_POLICY_SOURCE_LEASE
+    if active_lease is not None and getattr(active_lease, "permission_policy", None) == permission_policy:
+        active_lease.assert_unchanged()  # type: ignore[attr-defined]
+        return
     current = resolve_permission_policy(Path(permission_policy.codex_home))
     if current != permission_policy:
         raise StatePolicyError("permission policy changed concurrently")
@@ -1564,6 +1569,122 @@ def _read_publish_handle_bytes(kernel32: object, handle: wintypes.HANDLE) -> byt
     return b"".join(chunks)
 
 
+class PermissionPolicySourceLease:
+    """Hold policy source handles without sharing write access during a state update."""
+
+    def __init__(self, permission_policy: PermissionPolicy) -> None:
+        self.permission_policy = permission_policy
+        self._windows_handles: list[tuple[object, wintypes.HANDLE]] = []
+        self._portable_streams: list[object] = []
+        self._previous_lease: object | None = None
+        self._closed = False
+
+    def __enter__(self) -> "PermissionPolicySourceLease":
+        global _ACTIVE_POLICY_SOURCE_LEASE
+        expected_hashes = dict(self.permission_policy.source_hashes)
+        try:
+            for source, expected_identity in self.permission_policy.source_identities:
+                path = Path(source)
+                _assert_check_only_d_path_without_reparse(
+                    path,
+                    name="permission policy source lease",
+                )
+                expected_hash = expected_hashes.get(source)
+                if expected_hash is None:
+                    raise StatePolicyError("permission policy source lease hash is missing")
+                if os.name == "nt":
+                    kernel32, handle = _open_publish_handle(
+                        path,
+                        desired_access=GENERIC_READ | DELETE_ACCESS,
+                        share_mode=FILE_SHARE_READ | FILE_SHARE_DELETE,
+                    )
+                    try:
+                        actual_identity = _publish_handle_info(kernel32, handle, path)
+                        actual_hash = _sha256(_read_publish_handle_bytes(kernel32, handle))
+                        if actual_identity != expected_identity or actual_hash != expected_hash:
+                            raise StatePolicyError("permission policy source changed before lease")
+                    except BaseException:
+                        _close_publish_handle(kernel32, handle)
+                        raise
+                    self._windows_handles.append((kernel32, handle))
+                else:
+                    stream = path.open("rb")
+                    try:
+                        actual_hash = _sha256(stream.read())
+                        if _file_handle_identity(path) != expected_identity or actual_hash != expected_hash:
+                            raise StatePolicyError("permission policy source changed before lease")
+                        stream.seek(0)
+                    except BaseException:
+                        stream.close()
+                        raise
+                    self._portable_streams.append(stream)
+        except BaseException:
+            self.close()
+            raise
+        self._previous_lease = _ACTIVE_POLICY_SOURCE_LEASE
+        _ACTIVE_POLICY_SOURCE_LEASE = self
+        return self
+
+    def assert_unchanged(self) -> None:
+        expected_hashes = dict(self.permission_policy.source_hashes)
+        expected_sources = {
+            _path_compare_key(source)
+            for source, _identity in self.permission_policy.source_identities
+        }
+        home = Path(self.permission_policy.codex_home)
+        for name in ("config.toml", *PERMISSION_POLICY_JSON_NAMES):
+            candidate = home / name
+            _assert_check_only_d_path_without_reparse(
+                candidate,
+                name="permission policy source lease",
+            )
+            if candidate.exists() != (_path_compare_key(str(candidate)) in expected_sources):
+                raise StatePolicyError("permission policy source changed concurrently")
+        for source, expected_identity in self.permission_policy.source_identities:
+            path = Path(source)
+            expected_hash = expected_hashes.get(source)
+            if expected_hash is None or not path.exists():
+                raise StatePolicyError("permission policy source changed concurrently")
+            if os.name == "nt":
+                matching = [
+                    (kernel32, handle)
+                    for kernel32, handle in self._windows_handles
+                    if _path_compare_key(source) == _path_compare_key(str(path))
+                ]
+                if len(matching) != 1:
+                    raise StatePolicyError("permission policy source lease is incomplete")
+                kernel32, handle = matching[0]
+                if _publish_handle_info(kernel32, handle, path) != expected_identity:
+                    raise StatePolicyError("permission policy source changed concurrently")
+                if _file_handle_identity(path) != expected_identity:
+                    raise StatePolicyError("permission policy source changed concurrently")
+                if _sha256(_read_publish_handle_bytes(kernel32, handle)) != expected_hash:
+                    raise StatePolicyError("permission policy source changed concurrently")
+            else:
+                if _file_handle_identity(path) != expected_identity or _sha256(path.read_bytes()) != expected_hash:
+                    raise StatePolicyError("permission policy source changed concurrently")
+
+    def close(self) -> None:
+        global _ACTIVE_POLICY_SOURCE_LEASE
+        if self._closed:
+            return
+        for kernel32, handle in reversed(self._windows_handles):
+            _close_publish_handle(kernel32, handle)
+        self._windows_handles.clear()
+        for stream in reversed(self._portable_streams):
+            try:
+                stream.close()  # type: ignore[attr-defined]
+            except OSError:
+                pass
+        self._portable_streams.clear()
+        if _ACTIVE_POLICY_SOURCE_LEASE is self:
+            _ACTIVE_POLICY_SOURCE_LEASE = self._previous_lease
+        self._closed = True
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
 def _rename_temp_by_handle(
     kernel32: object,
     handle: wintypes.HANDLE,
@@ -1961,7 +2082,7 @@ def create_backup(backup_root: Path, original: bytes) -> Path:
         raise StatePolicyError("global state backup failed") from exc
 
 
-def update_global_state(
+def _update_global_state_impl(
     path: Path,
     backup_root: Path,
     *,
@@ -2060,6 +2181,7 @@ def update_global_state(
             }
         replacement = _json_bytes(normalized)
         temp_path = _write_same_directory_temp(path, replacement)
+        policy_lease: PermissionPolicySourceLease | None = None
         try:
             try:
                 create_backup(backup_root, original)
@@ -2083,6 +2205,8 @@ def update_global_state(
             replacement_identity = _file_handle_identity(temp_path)
             if replacement_identity is None:
                 raise StatePolicyError("global state replacement identity unavailable")
+            policy_lease = PermissionPolicySourceLease(permission_policy)
+            policy_lease.__enter__()
             # Hold a verified target lease through the native class-65 rename;
             # the identity/hash checks also refuse a same-bytes replacement.
             published_identity = _publish_temp_file(
@@ -2102,19 +2226,13 @@ def update_global_state(
             try:
                 _assert_permission_policy_fingerprint(permission_policy)
             except StatePolicyError as policy_exc:
-                rolled_back = _restore_global_state_snapshot(
+                _raise_global_policy_change_after_publish(
                     path,
                     original,
-                    expected_hash=_sha256(published),
-                    expected_identity=published_identity,
+                    published,
+                    published_identity,
+                    policy_exc,
                 )
-                if rolled_back:
-                    raise StatePolicyError(
-                        "permission policy changed after global publish; state rolled back"
-                    ) from policy_exc
-                raise StatePolicyError(
-                    "permission policy changed after global publish; rollback failed"
-                ) from policy_exc
             published_state = _strict_json_loads(published)
             published_inventory = build_path_inventory(
                 published_state,
@@ -2132,23 +2250,63 @@ def update_global_state(
                 published_summary["pathDriftCount"]
                 + published_summary["heartbeatChangedCount"]
             )
-            return {
-                "status": "updated",
-                "changed": True,
-                "wouldChange": True,
-                "changedCount": changed_count,
-                "driftCount": published_drift,
-                "beforeSha256": before_hash,
-                "afterSha256": _sha256(published),
-                "beforeIdentity": list(before_identity),
-                "afterIdentity": list(replacement_identity),
-                "attempts": attempt,
-                "pathInventory": published_inventory,
-                **summary,
-            }
+            try:
+                _assert_permission_policy_fingerprint(permission_policy)
+                return {
+                    "status": "updated",
+                    "changed": True,
+                    "wouldChange": True,
+                    "changedCount": changed_count,
+                    "driftCount": published_drift,
+                    "beforeSha256": before_hash,
+                    "afterSha256": _sha256(published),
+                    "beforeIdentity": list(before_identity),
+                    "afterIdentity": list(replacement_identity),
+                    "attempts": attempt,
+                    "pathInventory": published_inventory,
+                    **summary,
+                }
+            except StatePolicyError as policy_exc:
+                _raise_global_policy_change_after_publish(
+                    path,
+                    original,
+                    published,
+                    published_identity,
+                    policy_exc,
+                )
         finally:
+            if policy_lease is not None:
+                policy_lease.close()
             temp_path.unlink(missing_ok=True)
     raise StatePolicyError("global state concurrent updates did not stabilize")
+
+
+def update_global_state(
+    path: Path,
+    backup_root: Path,
+    *,
+    permission_policy: PermissionPolicy | None = None,
+    path_mode: str = "inventory",
+    approved_map: object = None,
+    source_root: Path | str | None = None,
+    candidate_root: Path | str | None = None,
+    check_only: bool = False,
+    max_attempts: int = MAX_GLOBAL_ATTEMPTS,
+    before_prewrite_check: Callable[[int], None] | None = None,
+) -> dict[str, object]:
+    resolved_policy = _resolve_policy_for_path(path, permission_policy)
+    return _update_global_state_impl(
+        path,
+        backup_root,
+        permission_policy=resolved_policy,
+        path_mode=path_mode,
+        approved_map=approved_map,
+        source_root=source_root,
+        candidate_root=candidate_root,
+        check_only=check_only,
+        max_attempts=max_attempts,
+        before_prewrite_check=before_prewrite_check,
+    )
 
 
 THREAD_DRIFT_SQL = """
@@ -2280,6 +2438,30 @@ def _rollback_thread_rows_after_policy_change(
         return False
 
 
+def _raise_thread_policy_change_after_commit(
+    conn: sqlite3.Connection,
+    path: Path,
+    source_identity: tuple[int, int],
+    original_rows: dict[str, tuple[str | None, str | None]],
+    permission_policy: PermissionPolicy,
+    policy_exc: StatePolicyError,
+) -> None:
+    rolled_back = _rollback_thread_rows_after_policy_change(
+        conn,
+        path,
+        source_identity,
+        original_rows,
+        permission_policy,
+    )
+    if rolled_back:
+        raise StatePolicyError(
+            "permission policy changed after thread commit; state rolled back"
+        ) from policy_exc
+    raise StatePolicyError(
+        "permission policy changed after thread commit; rollback failed"
+    ) from policy_exc
+
+
 def _capture_sqlite_source(path: Path) -> SqliteSourceSnapshot:
     paths = (
         path,
@@ -2332,6 +2514,13 @@ def _capture_sqlite_source(path: Path) -> SqliteSourceSnapshot:
     )
 
 
+def _sqlite_snapshot_has_unknown_sidecars(snapshot: SqliteSourceSnapshot) -> bool:
+    known = getattr(snapshot, "content_known", None)
+    if not isinstance(known, tuple) or len(known) != 4:
+        return True
+    return any(known[index] is not True for index in range(1, 4))
+
+
 def _connect_sqlite_bound(path: Path, expected_identity: tuple[int, int]) -> sqlite3.Connection:
     """Open SQLite and prove its main database resolves to the checked path."""
     try:
@@ -2356,6 +2545,7 @@ def _assert_sqlite_snapshot_identity(
     path: Path,
     *,
     allow_new_sidecars: bool,
+    allow_removed_sidecars: bool = False,
     check_main_metadata: bool = True,
     check_sidecar_content: bool = False,
 ) -> SqliteSourceSnapshot:
@@ -2370,6 +2560,8 @@ def _assert_sqlite_snapshot_identity(
         actual = after.identities[index]
         if before.metadata[index][3] != after.metadata[index][3]:
             raise StatePolicyError("thread state sidecar parent changed concurrently")
+        if expected is not None and actual is None and allow_removed_sidecars:
+            continue
         if expected is not None and actual != expected:
             raise StatePolicyError("thread state sidecar concurrent replacement")
         if expected is None and actual is not None and not allow_new_sidecars:
@@ -2500,7 +2692,7 @@ def _select_thread_updates_from_snapshot(
                 raise StatePolicyError("thread state snapshot root cleanup failed") from exc
 
 
-def update_thread_state(
+def _update_thread_state_impl(
     path: Path,
     *,
     permission_policy: PermissionPolicy | None = None,
@@ -2536,6 +2728,7 @@ def update_thread_state(
         raise StatePolicyError("thread state source disappeared")
     source_bytes_hash = _sha256(initial_snapshot.payload[0] or b"")
     conn = _connect_sqlite_bound(path, source_identity)
+    policy_lease: PermissionPolicySourceLease | None = None
     try:
         conn.execute("pragma busy_timeout=1500")
         _assert_sqlite_snapshot_identity(
@@ -2604,6 +2797,8 @@ def update_thread_state(
             transaction_snapshot = _capture_sqlite_source(path)
             if before_commit is not None:
                 before_commit()
+            policy_lease = PermissionPolicySourceLease(permission_policy)
+            policy_lease.__enter__()
             if _file_handle_identity(path) != source_identity:
                 raise StatePolicyError("thread state concurrent replacement")
             if _sha256(path.read_bytes()) != source_bytes_hash:
@@ -2638,20 +2833,14 @@ def update_thread_state(
             try:
                 _assert_permission_policy_fingerprint(permission_policy)
             except StatePolicyError as policy_exc:
-                rolled_back = _rollback_thread_rows_after_policy_change(
+                _raise_thread_policy_change_after_commit(
                     conn,
                     path,
                     source_identity,
                     original_rows,
                     permission_policy,
+                    policy_exc,
                 )
-                if rolled_back:
-                    raise StatePolicyError(
-                        "permission policy changed after thread commit; state rolled back"
-                    ) from policy_exc
-                raise StatePolicyError(
-                    "permission policy changed after thread commit; rollback failed"
-                ) from policy_exc
         except BaseException:
             conn.rollback()
             raise
@@ -2670,17 +2859,29 @@ def update_thread_state(
         if _file_handle_identity(path) != source_identity:
             raise StatePolicyError("thread state concurrent replacement")
         _assert_sqlite_snapshot_identity(
-            initial_snapshot,
+            transaction_snapshot,
             path,
-            allow_new_sidecars=True,
+            allow_new_sidecars=False,
+            allow_removed_sidecars=True,
             check_main_metadata=False,
         )
-        return {
-            "status": "updated" if identities else "converged",
-            "changedCount": len(identities),
-            "wouldChangeCount": len(identities),
-            "driftCount": verify_count,
-        }
+        try:
+            _assert_permission_policy_fingerprint(permission_policy)
+            return {
+                "status": "updated" if identities else "converged",
+                "changedCount": len(identities),
+                "wouldChangeCount": len(identities),
+                "driftCount": verify_count,
+            }
+        except StatePolicyError as policy_exc:
+            _raise_thread_policy_change_after_commit(
+                conn,
+                path,
+                source_identity,
+                original_rows,
+                permission_policy,
+                policy_exc,
+            )
     except StatePolicyError:
         raise
     except sqlite3.OperationalError as exc:
@@ -2688,7 +2889,29 @@ def update_thread_state(
             raise StatePolicyError("thread state database busy") from exc
         raise StatePolicyError("thread state database operation failed") from exc
     finally:
+        if policy_lease is not None:
+            policy_lease.close()
         conn.close()
+
+
+def update_thread_state(
+    path: Path,
+    *,
+    permission_policy: PermissionPolicy | None = None,
+    check_only: bool = False,
+    before_commit: Callable[[], None] | None = None,
+    snapshot_root: Path | None = None,
+    after_first_snapshot_capture: Callable[[int], None] | None = None,
+) -> dict[str, object]:
+    resolved_policy = _resolve_policy_for_path(path, permission_policy)
+    return _update_thread_state_impl(
+        path,
+        permission_policy=resolved_policy,
+        check_only=check_only,
+        before_commit=before_commit,
+        snapshot_root=snapshot_root,
+        after_first_snapshot_capture=after_first_snapshot_capture,
+    )
 
 
 class WindowsNamedMutex:
@@ -2856,6 +3079,28 @@ def _restore_global_state_snapshot(
         return False
 
 
+def _raise_global_policy_change_after_publish(
+    path: Path,
+    original: bytes,
+    published: bytes,
+    published_identity: tuple[int, int],
+    policy_exc: StatePolicyError,
+) -> None:
+    rolled_back = _restore_global_state_snapshot(
+        path,
+        original,
+        expected_hash=_sha256(published),
+        expected_identity=published_identity,
+    )
+    if rolled_back:
+        raise StatePolicyError(
+            "permission policy changed after global publish; state rolled back"
+        ) from policy_exc
+    raise StatePolicyError(
+        "permission policy changed after global publish; rollback failed"
+    ) from policy_exc
+
+
 def _claim_global_publication_after_failure(
     path: Path,
     before: bytes | None,
@@ -3005,7 +3250,12 @@ def run_policy(
             except BaseException:
                 sqlite_changed = True
                 try:
-                    sqlite_changed = _capture_sqlite_source(db_path) != sqlite_snapshot
+                    current_sqlite_snapshot = _capture_sqlite_source(db_path)
+                    sqlite_changed = (
+                        _sqlite_snapshot_has_unknown_sidecars(sqlite_snapshot)
+                        or _sqlite_snapshot_has_unknown_sidecars(current_sqlite_snapshot)
+                        or current_sqlite_snapshot != sqlite_snapshot
+                    )
                 except BaseException:
                     sqlite_changed = True
                 rolled_back = False

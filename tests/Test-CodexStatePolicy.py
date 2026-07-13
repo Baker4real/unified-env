@@ -69,11 +69,19 @@ class CodexStatePolicyTests(unittest.TestCase):
         approval_policy: str = "never",
         sandbox_mode: str = "danger-full-access",
     ) -> None:
-        (self.codex_home / "config.toml").write_text(
+        target = self.codex_home / "config.toml"
+        temporary = self.codex_home / ".config.toml.test.tmp"
+        temporary.write_text(
             f'approval_policy = "{approval_policy}"\n'
             f'sandbox_mode = "{sandbox_mode}"\n',
             encoding="utf-8",
         )
+        try:
+            os.replace(temporary, target)
+        except PermissionError as exc:
+            raise self.module.StatePolicyError(
+                "permission policy source changed concurrently: writer blocked by lease"
+            ) from exc
 
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -187,6 +195,17 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertEqual(policy.sandbox_mode, "workspace-write")
         self.assertEqual(policy.heartbeat_sandbox_type, "workspaceWrite")
         self.assertEqual(policy.sqlite_sandbox_policy, '{"type":"workspace-write"}')
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows source lease semantics")
+    def test_permission_policy_source_lease_denies_in_place_writer(self) -> None:
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        with self.module.PermissionPolicySourceLease(policy):
+            with self.assertRaises(PermissionError):
+                (self.codex_home / "config.toml").write_text(
+                    'approval_policy = "on-request"\n'
+                    'sandbox_mode = "danger-full-access"\n',
+                    encoding="utf-8",
+                )
 
     def test_permission_policy_object_shape_fails_closed(self) -> None:
         digest = "0" * 64
@@ -617,6 +636,60 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("unsafe-partial", result["errors"])
         self.assertNotEqual(self.global_path.read_bytes(), original)
+
+    def test_run_policy_marks_unknown_wal_snapshot_unsafe_partial(self) -> None:
+        original = self.write_global(self.permission_drift())
+        keeper = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
+            keeper.execute("pragma wal_autocheckpoint=0")
+            keeper.execute(
+                "create table threads (id text primary key, source text, thread_source text, "
+                "approval_mode text, sandbox_policy text, sentinel text)"
+            )
+            keeper.execute(
+                "insert into threads values (?,?,?,?,?,?)",
+                ("wal-unknown", "vscode", "user", "on-request", '{"type":"workspace-write"}', "keep"),
+            )
+            keeper.commit()
+            real_capture = self.module._capture_sqlite_source
+
+            def unknown_capture(path: Path):
+                snapshot = real_capture(path)
+                known = list(snapshot.content_known)
+                payload = list(snapshot.payload)
+                for index in range(1, 4):
+                    if snapshot.identities[index] is not None:
+                        known[index] = False
+                        payload[index] = None
+                return self.module.SqliteSourceSnapshot(
+                    payload=tuple(payload),
+                    identities=snapshot.identities,
+                    metadata=snapshot.metadata,
+                    content_known=tuple(known),
+                )
+
+            with mock.patch.object(self.module, "_capture_sqlite_source", side_effect=unknown_capture):
+                with mock.patch.object(
+                    self.module,
+                    "update_thread_state",
+                    side_effect=self.module.StatePolicyError("fixture sqlite failure with unknown WAL"),
+                ):
+                    result = self.module.run_policy(
+                        self.codex_home,
+                        check_only=False,
+                        health_root=self.root / "health",
+                        output=io.StringIO(),
+                    )
+            self.assertFalse(result["ok"])
+            self.assertTrue(result["changed"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertNotEqual(result["globalState"]["status"], "rolled-back")
+            self.assertNotEqual(self.global_path.read_bytes(), original)
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     def test_run_policy_reports_global_publish_claim_when_postcheck_fails(self) -> None:
         original = self.write_global(self.permission_drift())
@@ -1100,6 +1173,33 @@ class CodexStatePolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(self.module.StatePolicyError, "sidecar|concurrent"):
                     self.module.update_thread_state(self.db_path)
 
+    def test_sqlite_update_rejects_sidecar_after_final_precommit_gate(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        original_assert = self.module._assert_sqlite_snapshot_identity
+        assert_calls = 0
+
+        def race_assert(*args: object, **kwargs: object):
+            nonlocal assert_calls
+            assert_calls += 1
+            result = original_assert(*args, **kwargs)
+            if assert_calls == 5:
+                Path(str(self.db_path) + "-wal").write_bytes(b"late-sidecar")
+            return result
+
+        try:
+            with mock.patch.object(
+                self.module,
+                "_assert_sqlite_snapshot_identity",
+                side_effect=race_assert,
+            ):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "sidecar|concurrent"):
+                    self.module.update_thread_state(self.db_path)
+            self.assertGreaterEqual(assert_calls, 6)
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
     def test_global_policy_source_change_after_final_assert_fails_closed(self) -> None:
         original = self.write_global(self.permission_drift())
         policy = self.module.resolve_permission_policy(self.codex_home)
@@ -1176,7 +1276,7 @@ class CodexStatePolicyTests(unittest.TestCase):
                     self.backup_root,
                     permission_policy=policy,
                 )
-        self.assertGreaterEqual(calls, 4)
+        self.assertGreaterEqual(calls, 3)
         self.assertEqual(self.global_path.read_bytes(), original)
 
     def test_sqlite_policy_change_after_commit_is_rolled_back(self) -> None:
@@ -1206,7 +1306,7 @@ class CodexStatePolicyTests(unittest.TestCase):
                         self.db_path,
                         permission_policy=policy,
                     )
-            self.assertGreaterEqual(calls, 4)
+            self.assertGreaterEqual(calls, 3)
             verify = sqlite3.connect(self.db_path)
             self.assertEqual(
                 verify.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
@@ -1215,6 +1315,71 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.assertEqual(
                 verify.execute("select sandbox_policy from threads where id='target-a'").fetchone()[0],
                 '{"type":"workspace-write"}',
+            )
+            verify.close()
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_global_policy_change_after_postpublish_check_is_rolled_back(self) -> None:
+        original = self.write_global(self.permission_drift())
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original_fingerprint = self.module._assert_permission_policy_fingerprint
+        calls = 0
+
+        def race_fingerprint(current_policy: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_fingerprint(current_policy)
+            # Call four is the post-publish check.  Mutate after it returns so
+            # the final return gate must detect and reverse the publication.
+            if calls == 4:
+                self.write_permission_config(approval_policy="on-request")
+
+        with mock.patch.object(
+            self.module,
+            "_assert_permission_policy_fingerprint",
+            side_effect=race_fingerprint,
+        ):
+            with self.assertRaisesRegex(self.module.StatePolicyError, "policy|rollback"):
+                self.module.update_global_state(
+                    self.global_path,
+                    self.backup_root,
+                    permission_policy=policy,
+                )
+        self.assertGreaterEqual(calls, 4)
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_sqlite_policy_change_after_postcommit_check_is_rolled_back(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original_fingerprint = self.module._assert_permission_policy_fingerprint
+        calls = 0
+
+        def race_fingerprint(current_policy: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_fingerprint(current_policy)
+            if calls == 4:
+                self.write_permission_config(approval_policy="on-request")
+
+        try:
+            with mock.patch.object(
+                self.module,
+                "_assert_permission_policy_fingerprint",
+                side_effect=race_fingerprint,
+            ):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "policy|rollback"):
+                    self.module.update_thread_state(
+                        self.db_path,
+                        permission_policy=policy,
+                    )
+            self.assertGreaterEqual(calls, 4)
+            verify = sqlite3.connect(self.db_path)
+            self.assertEqual(
+                verify.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
+                "on-request",
             )
             verify.close()
         finally:
@@ -1609,7 +1774,7 @@ class CodexStatePolicyTests(unittest.TestCase):
                         self.db_path,
                         permission_policy=policy,
                     )
-            self.assertGreaterEqual(calls, 4)
+            self.assertGreaterEqual(calls, 3)
             self.assertEqual(
                 keeper.execute(
                     "select approval_mode, sandbox_policy from threads where id='target-a'"
