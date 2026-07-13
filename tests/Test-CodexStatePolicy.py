@@ -1552,6 +1552,52 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
+    def test_run_policy_holds_policy_lease_after_thread_update(self) -> None:
+        self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        original_update = self.module.update_thread_state
+
+        def update_then_change_policy(*args: object, **kwargs: object):
+            result = original_update(*args, **kwargs)
+            self.write_permission_config(approval_policy="on-request")
+            return result
+
+        with mock.patch.object(self.module, "update_thread_state", side_effect=update_then_change_policy):
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=io.StringIO(),
+            )
+        self.assertFalse(result["ok"])
+        self.assertIn("unsafe-partial", result["errors"])
+
+    def test_run_policy_rejects_new_sqlite_sidecar_after_thread_update(self) -> None:
+        self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        original_update = self.module.update_thread_state
+
+        def update_then_sidecar(*args: object, **kwargs: object):
+            result = original_update(*args, **kwargs)
+            Path(str(self.db_path) + "-wal").write_bytes(b"late-sidecar")
+            return result
+
+        try:
+            with mock.patch.object(self.module, "update_thread_state", side_effect=update_then_sidecar):
+                result = self.module.run_policy(
+                    self.codex_home,
+                    check_only=False,
+                    health_root=self.root / "health",
+                    output=io.StringIO(),
+                )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
     def test_sqlite_return_lease_unavailable_reports_unsafe_partial(self) -> None:
         connection = self.create_db()
         connection.close()

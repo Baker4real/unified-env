@@ -1678,10 +1678,12 @@ class SqliteTargetLease:
         *,
         expected_identity: tuple[int, int],
         permission_policy: PermissionPolicy,
+        expected_snapshot: SqliteSourceSnapshot | None = None,
     ) -> None:
         self.path = path
         self.expected_identity = expected_identity
         self.permission_policy = permission_policy
+        self.expected_snapshot = expected_snapshot
         self._connection: sqlite3.Connection | None = None
         self._closed = False
 
@@ -1701,6 +1703,14 @@ class SqliteTargetLease:
             raise StatePolicyError("sqlite target lease is closed")
         if _file_handle_identity(self.path) != self.expected_identity:
             raise StatePolicyError("thread state target changed concurrently")
+        if self.expected_snapshot is not None:
+            _assert_sqlite_snapshot_identity(
+                self.expected_snapshot,
+                self.path,
+                allow_new_sidecars=False,
+                allow_removed_sidecars=True,
+                check_main_metadata=False,
+            )
         if select_thread_updates(self._connection, self.permission_policy):
             raise StatePolicyError("thread state target changed concurrently")
 
@@ -3063,7 +3073,7 @@ def _update_thread_state_impl(
             raise StatePolicyError("thread state postcommit drift remains")
         if _file_handle_identity(path) != source_identity:
             raise StatePolicyError("thread state concurrent replacement")
-        _assert_sqlite_snapshot_identity(
+        final_snapshot = _assert_sqlite_snapshot_identity(
             transaction_snapshot,
             path,
             allow_new_sidecars=False,
@@ -3077,6 +3087,7 @@ def _update_thread_state_impl(
                 "changedCount": len(identities),
                 "wouldChangeCount": len(identities),
                 "driftCount": verify_count,
+                "_sourceSnapshot": final_snapshot,
             }
         except StatePolicyError as policy_exc:
             if return_lease_active:
@@ -3388,6 +3399,7 @@ def run_policy(
         "pathInventory": None,
     }
     thread_result: dict[str, object] = {"status": "not-run", "changedCount": 0, "wouldChangeCount": 0, "driftCount": 0}
+    policy_return_lease: PermissionPolicySourceLease | None = None
     global_return_lease: StateTargetLease | None = None
     sqlite_return_lease: SqliteTargetLease | None = None
     try:
@@ -3402,6 +3414,8 @@ def run_policy(
             # compared after a downstream failure so a committed partial write
             # is reported as unsafe instead of being mistaken for a clean run.
             _assert_permission_policy_unchanged(permission_policy)
+            policy_return_lease = PermissionPolicySourceLease(permission_policy)
+            policy_return_lease.__enter__()
             global_snapshot: bytes | None = None
             global_snapshot_identity: tuple[int, int] | None = None
             _assert_check_only_d_path_without_reparse(
@@ -3541,10 +3555,14 @@ def run_policy(
                     database_identity = sqlite_snapshot.identities[0]
                     if database_identity is None:
                         raise StatePolicyError("thread state return target identity is missing")
+                    expected_snapshot = thread_result.get("_sourceSnapshot")
+                    if not isinstance(expected_snapshot, SqliteSourceSnapshot):
+                        raise StatePolicyError("thread state return snapshot is missing")
                     sqlite_return_lease = SqliteTargetLease(
                         db_path,
                         expected_identity=database_identity,
                         permission_policy=permission_policy,
+                        expected_snapshot=expected_snapshot,
                     )
                     sqlite_return_lease.__enter__()
                     sqlite_return_lease.assert_unchanged()
@@ -3613,6 +3631,8 @@ def run_policy(
             sqlite_return_lease.close()
         if global_return_lease is not None:
             global_return_lease.close()
+        if policy_return_lease is not None:
+            policy_return_lease.close()
 
 
 def _resolved_casefold(path: Path) -> str:
