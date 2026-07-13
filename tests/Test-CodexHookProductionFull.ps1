@@ -449,7 +449,7 @@ try {
         Assert-Bytes ([IO.File]::ReadAllBytes([string]$fixture.profile.registryPath)) $registryBeforeTransactionDrift "$transactionDriftKind drift 不得激活 registry"
         $transactionStatusPath = [string](Get-CodexHookProductionFullLifecyclePaths -Profile $fixture.profile -GenerationId ([string]$transactionState.plan.generationId)).statusPath
         $transactionStatus = Get-Content -Raw -LiteralPath $transactionStatusPath | ConvertFrom-Json
-        Assert-True ($transactionStatus.status -cne 'applied') "$transactionDriftKind drift 不得发布 applied terminal status"
+    Assert-True ($transactionStatus.status -cne 'applied') "$transactionDriftKind drift 不得发布 applied terminal status"
     }
 
     $fixture = Initialize-ProductionFullFixture
