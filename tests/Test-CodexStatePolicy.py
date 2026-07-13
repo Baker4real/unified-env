@@ -1598,6 +1598,42 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
+    def test_run_policy_wal_cold_start_succeeds_with_return_handoff(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
+            keeper.execute("pragma wal_autocheckpoint=0")
+            keeper.execute(
+                "create table threads (id text primary key, source text, thread_source text, "
+                "approval_mode text, sandbox_policy text, sentinel text)"
+            )
+            keeper.executemany(
+                "insert into threads values (?,?,?,?,?,?)",
+                [
+                    ("target-a", "vscode", "user", "on-request", '{"type":"workspace-write"}', "keep-a"),
+                    ("target-null", "vscode", "user", None, None, "keep-null"),
+                ],
+            )
+            keeper.commit()
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=io.StringIO(),
+            )
+            self.assertTrue(result["ok"])
+            self.assertNotIn("unsafe-partial", result["errors"])
+            self.assertEqual(result["threadState"]["status"], "updated")
+            self.assertEqual(
+                keeper.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
+                "never",
+            )
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
     def test_sqlite_return_lease_unavailable_reports_unsafe_partial(self) -> None:
         connection = self.create_db()
         connection.close()

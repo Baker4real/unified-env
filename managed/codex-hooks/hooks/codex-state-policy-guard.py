@@ -1668,6 +1668,12 @@ class StateTargetLease:
     def __exit__(self, *_args: object) -> None:
         self.close()
 
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except BaseException:
+            pass
+
 
 class SqliteTargetLease:
     """Hold a SQLite writer lease while the run result is finalized."""
@@ -1686,6 +1692,27 @@ class SqliteTargetLease:
         self.expected_snapshot = expected_snapshot
         self._connection: sqlite3.Connection | None = None
         self._closed = False
+
+    @classmethod
+    def from_connection(
+        cls,
+        path: Path,
+        *,
+        expected_identity: tuple[int, int],
+        permission_policy: PermissionPolicy,
+        expected_snapshot: SqliteSourceSnapshot,
+        connection: sqlite3.Connection,
+    ) -> "SqliteTargetLease":
+        if not connection.in_transaction:
+            raise StatePolicyError("sqlite return lease connection is inactive")
+        lease = cls(
+            path,
+            expected_identity=expected_identity,
+            permission_policy=permission_policy,
+            expected_snapshot=expected_snapshot,
+        )
+        lease._connection = connection
+        return lease
 
     def __enter__(self) -> "SqliteTargetLease":
         try:
@@ -1728,6 +1755,12 @@ class SqliteTargetLease:
 
     def __exit__(self, *_args: object) -> None:
         self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except BaseException:
+            pass
 
 
 class PermissionPolicySourceLease:
@@ -2894,6 +2927,7 @@ def _update_thread_state_impl(
     before_commit: Callable[[], None] | None = None,
     snapshot_root: Path | None = None,
     after_first_snapshot_capture: Callable[[int], None] | None = None,
+    retain_return_lease: bool = False,
 ) -> dict[str, object]:
     permission_policy = _resolve_policy_for_path(path, permission_policy)
     _assert_permission_policy_unchanged(permission_policy)
@@ -2926,6 +2960,7 @@ def _update_thread_state_impl(
     conn = _connect_sqlite_bound(path, source_identity)
     policy_lease: PermissionPolicySourceLease | None = None
     return_lease_active = False
+    return_lease_handoff = False
     try:
         conn.execute("pragma busy_timeout=1500")
         _assert_sqlite_snapshot_identity(
@@ -3082,13 +3117,24 @@ def _update_thread_state_impl(
         )
         try:
             _assert_permission_policy_fingerprint(permission_policy)
-            return {
+            result = {
                 "status": "updated" if identities else "converged",
                 "changedCount": len(identities),
                 "wouldChangeCount": len(identities),
                 "driftCount": verify_count,
                 "_sourceSnapshot": final_snapshot,
             }
+            if retain_return_lease:
+                return_lease = SqliteTargetLease.from_connection(
+                    path,
+                    expected_identity=source_identity,
+                    permission_policy=permission_policy,
+                    expected_snapshot=final_snapshot,
+                    connection=conn,
+                )
+                return_lease_handoff = True
+                result["_returnLease"] = return_lease
+            return result
         except StatePolicyError as policy_exc:
             if return_lease_active:
                 conn.rollback()
@@ -3108,14 +3154,15 @@ def _update_thread_state_impl(
             raise StatePolicyError("thread state database busy") from exc
         raise StatePolicyError("thread state database operation failed") from exc
     finally:
-        if return_lease_active:
+        if return_lease_active and not return_lease_handoff:
             try:
                 conn.rollback()
             except sqlite3.Error:
                 pass
         if policy_lease is not None:
             policy_lease.close()
-        conn.close()
+        if not return_lease_handoff:
+            conn.close()
 
 
 def update_thread_state(
@@ -3126,6 +3173,7 @@ def update_thread_state(
     before_commit: Callable[[], None] | None = None,
     snapshot_root: Path | None = None,
     after_first_snapshot_capture: Callable[[int], None] | None = None,
+    retain_return_lease: bool = False,
 ) -> dict[str, object]:
     resolved_policy = _resolve_policy_for_path(path, permission_policy)
     return _update_thread_state_impl(
@@ -3135,6 +3183,7 @@ def update_thread_state(
         before_commit=before_commit,
         snapshot_root=snapshot_root,
         after_first_snapshot_capture=after_first_snapshot_capture,
+        retain_return_lease=retain_return_lease,
     )
 
 
@@ -3402,6 +3451,7 @@ def run_policy(
     policy_return_lease: PermissionPolicySourceLease | None = None
     global_return_lease: StateTargetLease | None = None
     sqlite_return_lease: SqliteTargetLease | None = None
+    pending_sqlite_return_lease: SqliteTargetLease | None = None
     try:
         if permission_policy is None:
             permission_policy = resolve_permission_policy(codex_home)
@@ -3503,10 +3553,17 @@ def run_policy(
                     permission_policy=permission_policy,
                     check_only=check_only,
                     snapshot_root=snapshot_root if check_only else None,
+                    retain_return_lease=not check_only,
                 )
+                candidate_return_lease = thread_result.get("_returnLease")
+                if isinstance(candidate_return_lease, SqliteTargetLease):
+                    pending_sqlite_return_lease = candidate_return_lease
                 if thread_result.get("status") == "missing":
                     raise StatePolicyError("thread state source disappeared")
             except BaseException:
+                if pending_sqlite_return_lease is not None:
+                    pending_sqlite_return_lease.close()
+                    pending_sqlite_return_lease = None
                 if global_return_lease is not None:
                     global_return_lease.close()
                     global_return_lease = None
@@ -3558,13 +3615,10 @@ def run_policy(
                     expected_snapshot = thread_result.get("_sourceSnapshot")
                     if not isinstance(expected_snapshot, SqliteSourceSnapshot):
                         raise StatePolicyError("thread state return snapshot is missing")
-                    sqlite_return_lease = SqliteTargetLease(
-                        db_path,
-                        expected_identity=database_identity,
-                        permission_policy=permission_policy,
-                        expected_snapshot=expected_snapshot,
-                    )
-                    sqlite_return_lease.__enter__()
+                    if pending_sqlite_return_lease is None:
+                        raise StatePolicyError("thread state return lease connection is missing")
+                    sqlite_return_lease = pending_sqlite_return_lease
+                    pending_sqlite_return_lease = None
                     sqlite_return_lease.assert_unchanged()
             except BaseException:
                 if bool(global_result.get("changed")) or int(thread_result.get("changedCount", 0)) > 0:
@@ -3629,6 +3683,8 @@ def run_policy(
     finally:
         if sqlite_return_lease is not None:
             sqlite_return_lease.close()
+        if pending_sqlite_return_lease is not None:
+            pending_sqlite_return_lease.close()
         if global_return_lease is not None:
             global_return_lease.close()
         if policy_return_lease is not None:
