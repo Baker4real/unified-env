@@ -667,19 +667,23 @@ function Get-UniqueKeyIndex {
         [int]$End
     )
 
-    $expectedSegments = @($Key)
-    $keyIndices = [System.Collections.Generic.List[int]]::new()
-    for ($index = $Start; $index -lt $End; $index++) {
-        $segments = @(Get-TomlAssignmentKeySegments -Line $Document.lines[$index])
-        if (Test-TomlKeySegmentsEqual -Left $segments -Right $expectedSegments) {
-            $keyIndices.Add($index)
-        }
-    }
+    $keyIndices = @(Get-TomlKeyIndices -Document $Document -Key $Key -Start $Start -End $End)
     if ($keyIndices.Count -ne 1) {
         throw "TOML key 必须在目标作用域恰好出现一次：$Key；实际 $($keyIndices.Count)"
     }
 
     $keyIndices[0]
+}
+
+function Get-TomlKeyIndices {
+    param([object]$Document,[string]$Key,[int]$Start,[int]$End)
+    $expectedSegments = @($Key)
+    @(
+        for ($index = $Start; $index -lt $End; $index++) {
+            $segments = @(Get-TomlAssignmentKeySegments -Line $Document.lines[$index])
+            if (Test-TomlKeySegmentsEqual -Left $segments -Right $expectedSegments) { $index }
+        }
+    )
 }
 
 function Set-TomlKeyLiteral {
@@ -808,7 +812,39 @@ function Get-DesiredConfig {
     Set-TomlKeyLiteral -Document $document -Index $unifiedExecIndex -Key "unified_exec" -Literal "true"
 
     $serena = Get-UniqueSectionRange -Document $document -Name "mcp_servers.serena"
-    $argsIndex = Get-UniqueKeyIndex -Document $document -Key "args" -Start $serena.start -End $serena.end
+    $commandIndices = @(Get-TomlKeyIndices -Document $document -Key "command" -Start $serena.start -End $serena.end)
+    $argsIndices = @(Get-TomlKeyIndices -Document $document -Key "args" -Start $serena.start -End $serena.end)
+    if ($commandIndices.Count -gt 1) { throw "Serena command 最多出现一次；实际 $($commandIndices.Count)" }
+    if ($argsIndices.Count -gt 1) { throw "Serena args 最多出现一次；实际 $($argsIndices.Count)" }
+    $canonicalCommandLiteral = '"D:\\Codex\\.codex\\scripts\\start-serena-mcp.cmd"'
+    $canonicalArgsLiteral = ConvertTo-Json -InputObject @("start-mcp-server", "--context=$ExpectedSerenaContextPath", "--enable-web-dashboard=true", "--open-web-dashboard=false") -Compress
+    if ($commandIndices.Count -eq 0 -or $argsIndices.Count -eq 0) {
+        $insertLines = [System.Collections.Generic.List[string]]::new()
+        if ($commandIndices.Count -eq 0) { [void]$insertLines.Add("command = $canonicalCommandLiteral") }
+        if ($argsIndices.Count -eq 0) { [void]$insertLines.Add("args = $canonicalArgsLiteral") }
+        $rebuilt = [System.Collections.Generic.List[string]]::new()
+        for ($index = 0; $index -lt $document.lines.Count; $index++) {
+            if ($index -eq $serena.start) { foreach ($line in $insertLines) { [void]$rebuilt.Add($line) } }
+            [void]$rebuilt.Add($document.lines[$index])
+        }
+        if ($serena.start -eq $document.lines.Count) {
+            foreach ($line in $insertLines) { [void]$rebuilt.Add($line) }
+        }
+        $insertedContent = [string]::Join($document.newLine, $rebuilt)
+        if ($insertedContent.Equals($Content, [System.StringComparison]::Ordinal)) {
+            throw "Serena command/args 缺失插入未取得进展"
+        }
+        Assert-ValidToml -Content $insertedContent
+        $normalizedAfterInsert = Get-DesiredConfig -Content $insertedContent -ExpectedSerenaContextPath $ExpectedSerenaContextPath
+        return [pscustomobject]@{
+            content = [string]$normalizedAfterInsert.content
+            changed = -not $Content.Equals([string]$normalizedAfterInsert.content, [System.StringComparison]::Ordinal)
+        }
+    }
+
+    $commandIndex = $commandIndices[0]
+    Set-TomlKeyLiteral -Document $document -Index $commandIndex -Key "command" -Literal $canonicalCommandLiteral
+    $argsIndex = $argsIndices[0]
     $argsLine = $document.lines[$argsIndex]
     $equalsIndex = $argsLine.IndexOf('=')
     if ($equalsIndex -lt 0) {

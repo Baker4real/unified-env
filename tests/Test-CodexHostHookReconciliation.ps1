@@ -165,7 +165,7 @@ $legacyNames = @(
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "DuplicateSerenaArgs", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "LegacySerenaContext", "NegatedSerenaPolicy", "InvalidSerenaContextPolicy", "MalformedSerenaIndent", "BareCrSerenaContext", "NullSerenaScalar", "DuplicateSerenaMarker", "ExternalSerenaMarker", "QuotedSerenaScalar", "QuotedSerenaListScalar", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml", "InvalidUnmanagedToml", "InvalidUtf8Toml", "BomToml")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "MissingSerenaCommand", "HermesCommandDrift", "EmptySerenaSectionAtEof", "DuplicateSerenaArgs", "DuplicateSerenaCommand", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "LegacySerenaContext", "NegatedSerenaPolicy", "InvalidSerenaContextPolicy", "MalformedSerenaIndent", "BareCrSerenaContext", "NullSerenaScalar", "DuplicateSerenaMarker", "ExternalSerenaMarker", "QuotedSerenaScalar", "QuotedSerenaListScalar", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml", "InvalidUnmanagedToml", "InvalidUtf8Toml", "BomToml")]
         [string]$Variant = "Drift"
     )
 
@@ -220,8 +220,14 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
 '@
     } elseif ($Variant -eq "MissingSerenaArgs") {
         $config = $config -replace '(?m)^args\s*=.*\r?\n', ''
+    } elseif ($Variant -eq "MissingSerenaCommand") {
+        $config = $config -replace '(?m)^command\s*=.*\r?\n', ''
+    } elseif ($Variant -eq "HermesCommandDrift") {
+        $config = $config -replace '(?m)^command\s*=.*$', 'command = "D:\\hermes-data\\serena-wrapper.cmd"'
     } elseif ($Variant -eq "DuplicateSerenaArgs") {
         $config = $config -replace '(?m)^(args\s*=.*)$', ('$1' + "`n" + '$1')
+    } elseif ($Variant -eq "DuplicateSerenaCommand") {
+        $config = $config -replace '(?m)^(command\s*=.*)$', ('$1' + "`n" + '$1')
     } elseif ($Variant -eq "MalformedSerenaArgs") {
         $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", '
     } elseif ($Variant -eq "MissingSerenaContext") {
@@ -254,6 +260,23 @@ multiline-body-must-survive
 '@
     } elseif ($Variant -eq "InvalidUnmanagedToml") {
         $config += "`n[fixture.invalid]`nunmanaged = [`n"
+    } elseif ($Variant -eq "EmptySerenaSectionAtEof") {
+        $config = @'
+model = "fixture-model-must-survive"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+fixture_root_sentinel = "must-survive"
+
+[features]
+hooks = false
+unified_exec = false
+fixture_feature_sentinel = true
+
+[fixture.unknown]
+value = "must-survive"
+
+[mcp_servers.serena]
+'@.TrimEnd("`r", "`n")
     }
 
     $configPath = Join-Path $Root "config.toml"
@@ -927,11 +950,52 @@ try {
     $unknownCacheEvidence = @($legacyUnknownManifest.preservedHookTree | Where-Object { $_.path -eq '__pycache__\keep-me.pyc' })
     Assert-True -Condition ($unknownCacheEvidence.Count -eq 1 -and $unknownCacheEvidence[0].sha256 -eq $unknownCacheHash) -Message "manifest 漏记 legacy 目录中的未知文件"
 
+    foreach ($serenaConfigCase in @(
+        @{ Name = "missing-serena-args-repair"; Variant = "MissingSerenaArgs" },
+        @{ Name = "missing-serena-command-repair"; Variant = "MissingSerenaCommand" },
+        @{ Name = "hermes-command-drift-repair"; Variant = "HermesCommandDrift" }
+    )) {
+        $serenaConfigHome = Join-Path $testRoot "$($serenaConfigCase.Name)\.codex"
+        New-FixtureCodexHome -Root $serenaConfigHome -Variant $serenaConfigCase.Variant
+        $serenaConfigContextPath = Join-Path ([System.IO.Directory]::GetParent($serenaConfigHome).FullName) ".serena\contexts\codex-file-tools.yml"
+        $serenaConfigRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $serenaConfigHome
+        Assert-True -Condition ([bool]$serenaConfigRepair.ok -and [bool]$serenaConfigRepair.changed) -Message "$($serenaConfigCase.Name) 未被 Repair 收敛"
+        $serenaConfigText = Get-Content -Raw -LiteralPath (Join-Path $serenaConfigHome "config.toml")
+        Assert-True -Condition ($serenaConfigText -match '(?m)^command\s*=\s*"D:\\\\Codex\\\\\.codex\\\\scripts\\\\start-serena-mcp\.cmd"\s*$') -Message "$($serenaConfigCase.Name) command 未规范为固定 wrapper"
+        $argsMatch = [regex]::Match($serenaConfigText, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$')
+        Assert-True -Condition $argsMatch.Success -Message "$($serenaConfigCase.Name) 缺少 canonical args"
+        $argsTokens = @((ConvertFrom-Json -InputObject $argsMatch.Groups['rhs'].Value -NoEnumerate))
+        $expectedArgs = @("start-mcp-server", "--context=$serenaConfigContextPath", "--enable-web-dashboard=true", "--open-web-dashboard=false")
+        Assert-True -Condition (($argsTokens -join "`n") -ceq ($expectedArgs -join "`n")) -Message "$($serenaConfigCase.Name) args 目标不精确"
+        foreach ($sentinel in @('startup_timeout_sec = 60', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true')) {
+            Assert-True -Condition $serenaConfigText.Contains($sentinel) -Message "$($serenaConfigCase.Name) 未保留 Serena/全文件未知 key：$sentinel"
+        }
+        $serenaConfigSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $serenaConfigHome
+        Assert-True -Condition ([bool]$serenaConfigSecond.ok -and -not [bool]$serenaConfigSecond.changed) -Message "$($serenaConfigCase.Name) 第二次 Repair 不是 no-op"
+    }
+
+    $emptySerenaHome = Join-Path $testRoot "empty-serena-section-eof\.codex"
+    New-FixtureCodexHome -Root $emptySerenaHome -Variant "EmptySerenaSectionAtEof"
+    $emptySerenaContextPath = Join-Path ([System.IO.Directory]::GetParent($emptySerenaHome).FullName) ".serena\contexts\codex-file-tools.yml"
+    $emptySerenaRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $emptySerenaHome
+    Assert-True -Condition ([bool]$emptySerenaRepair.ok -and [bool]$emptySerenaRepair.changed) -Message "EOF 空 Serena section 未被 Repair 收敛"
+    $emptySerenaConfig = Get-Content -Raw -LiteralPath (Join-Path $emptySerenaHome "config.toml")
+    $emptyCommandCount = [regex]::Matches($emptySerenaConfig, '(?m)^command\s*=').Count
+    $emptyArgsCount = [regex]::Matches($emptySerenaConfig, '(?m)^args\s*=').Count
+    Assert-True -Condition ($emptyCommandCount -eq 1 -and $emptyArgsCount -eq 1) -Message "EOF 空 Serena section Repair 后 command/args 不是各1：command=$emptyCommandCount args=$emptyArgsCount config=$emptySerenaConfig"
+    foreach ($sentinel in @('model = "fixture-model-must-survive"', 'fixture_root_sentinel = "must-survive"', 'fixture_feature_sentinel = true', 'value = "must-survive"')) {
+        Assert-True -Condition $emptySerenaConfig.Contains($sentinel) -Message "EOF 插入改写了无关/root 状态：$sentinel"
+    }
+    $emptySerenaArgs = [regex]::Match($emptySerenaConfig, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$').Groups['rhs'].Value | ConvertFrom-Json -NoEnumerate
+    Assert-True -Condition (@($emptySerenaArgs).Count -eq 4 -and @($emptySerenaArgs)[1] -ceq "--context=$emptySerenaContextPath") -Message "EOF 空 Serena section canonical args 不精确"
+    $emptySerenaSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $emptySerenaHome
+    Assert-True -Condition ([bool]$emptySerenaSecond.ok -and -not [bool]$emptySerenaSecond.changed) -Message "EOF 空 Serena section 第二次 Repair 不是 no-op"
+
     foreach ($case in @(
         @{ Name = "malformed-hooks"; Variant = "MalformedHooks" },
         @{ Name = "duplicate-serena"; Variant = "DuplicateSerena" },
-        @{ Name = "missing-serena-args"; Variant = "MissingSerenaArgs" },
         @{ Name = "duplicate-serena-args"; Variant = "DuplicateSerenaArgs" },
+        @{ Name = "duplicate-serena-command"; Variant = "DuplicateSerenaCommand" },
         @{ Name = "malformed-serena-args"; Variant = "MalformedSerenaArgs" },
         @{ Name = "missing-serena-context"; Variant = "MissingSerenaContext" },
         @{ Name = "missing-serena-context-value"; Variant = "MissingSerenaContextValue" },
