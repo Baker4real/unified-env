@@ -100,6 +100,12 @@ function supportedPluginSurface(filePath, codexRoot = CODEX_ROOT) {
   return null;
 }
 
+function isAllowedCodexRoot(codexRoot) {
+  const resolved = resolveAbsolute(codexRoot);
+  return resolved.toLowerCase() === CODEX_ROOT.toLowerCase()
+    || isWithin(CONTROLLED_EVIDENCE_ROOT, resolved);
+}
+
 function unique(items) {
   return [...new Set(items)];
 }
@@ -190,9 +196,11 @@ function validateCatalog(catalogOrPath) {
       const forbidden = [
         /git\s+push[^\r\n]*patch-stack/i,
         /git\s+(?:merge-base|merge|rebase)[^\r\n]*(?:\bmain\b|\bmaster\b)/i,
-        /git\s+push[^\r\n]*(?:--force(?:-[A-Za-z0-9-]+)?|-f)(?:\s|$)/i,
-        /git\s+(?:switch|checkout)\s+-(?:b|c)\s+patch-stack\b/i,
-        /git\s+update-ref\s+refs\/heads\/patch-stack\b/i,
+        /git\s+push[^\r\n]*(?:--force(?:-[A-Za-z0-9-]+)?|-f)(?:\s|=|$)/i,
+        /git\s+branch[^\r\n]*patch-stack\b/i,
+        /git\s+(?:switch|checkout)\s+(?:-(?:b|c)|--create|--branch)\s+patch-stack\b/i,
+        /git\s+worktree\s+add[^\r\n]*patch-stack\b/i,
+        /refs\/heads\/patch-stack\b/i,
         /(?:^|\s)--draft(?:\s|$)/i,
       ];
       for (const pattern of forbidden) {
@@ -420,12 +428,19 @@ function validateRollbackManifest(resolvedManifest, manifest) {
   }
   const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
   for (const entry of entries) {
-    if (!entry || typeof entry.path !== 'string' || typeof entry.backupPath !== 'string') {
-      throw new Error('manifest entry must include path and backupPath');
+    if (!entry || typeof entry.path !== 'string' || typeof entry.backupPath !== 'string' || typeof entry.codexRoot !== 'string') {
+      throw new Error('manifest entry must include D: path, backupPath, and codexRoot');
     }
     const target = resolveAbsolute(entry.path);
     const backup = resolveAbsolute(entry.backupPath);
-    if (!supportedPluginSurface(target, entry.codexRoot || CODEX_ROOT)) {
+    const entryCodexRoot = resolveAbsolute(entry.codexRoot);
+    assertDDrivePath(target, 'manifest entry.path');
+    assertDDrivePath(backup, 'manifest entry.backupPath');
+    assertDDrivePath(entryCodexRoot, 'manifest entry.codexRoot');
+    if (!isAllowedCodexRoot(entryCodexRoot)) {
+      throw new Error(`manifest codexRoot is outside the allowed roots: ${entryCodexRoot}`);
+    }
+    if (!supportedPluginSurface(target, entryCodexRoot)) {
       throw new Error(`manifest target is outside a supported GitHub plugin surface: ${target}`);
     }
     if (!isWithin(evidenceDirectory, backup)) {
@@ -433,6 +448,7 @@ function validateRollbackManifest(resolvedManifest, manifest) {
     }
     entry.path = target;
     entry.backupPath = backup;
+    entry.codexRoot = entryCodexRoot;
     entry.evidenceDirectory = evidenceDirectory;
   }
 }
@@ -504,6 +520,78 @@ function rollbackManifest(manifestPath, options = {}) {
   };
 }
 
+function validateApplyChangePlan(plan) {
+  const errors = [];
+  const seenPaths = new Set();
+  for (const [index, change] of (Array.isArray(plan.changes) ? plan.changes : []).entries()) {
+    const prefix = `changes[${index}]`;
+    if (!change || typeof change.path !== 'string' || !EXPECTED_ROLES.includes(change.role)) {
+      errors.push({ reason: 'invalid-change', message: `${prefix} must include a supported role and path` });
+      continue;
+    }
+    let filePath;
+    try {
+      filePath = resolveAbsolute(change.path);
+      assertDDrivePath(filePath, 'change path');
+    } catch (error) {
+      errors.push({ path: change.path, reason: 'unsafe-change-path', message: error.message });
+      continue;
+    }
+    const codexRoot = change.codexRoot || CODEX_ROOT;
+    if (!isAllowedCodexRoot(codexRoot)) {
+      errors.push({ path: filePath, reason: 'unsafe-codex-root', message: `codexRoot is outside the allowed roots: ${codexRoot}` });
+      continue;
+    }
+    const surface = supportedPluginSurface(filePath, codexRoot);
+    if (!surface || surface.role !== change.role) {
+      errors.push({ path: filePath, role: change.role, reason: 'unsupported-plugin-surface' });
+      continue;
+    }
+    const lowerPath = filePath.toLowerCase();
+    if (seenPaths.has(lowerPath)) {
+      errors.push({ path: filePath, reason: 'duplicate-change-path' });
+      continue;
+    }
+    seenPaths.add(lowerPath);
+    const pairedRole = change.role === 'yeet' ? 'github' : 'yeet';
+    const pairedPath = path.join(surface.surfaceDirectory, 'skills', pairedRole, 'SKILL.md');
+    if (!fs.existsSync(pairedPath)) {
+      errors.push({ path: pairedPath, role: pairedRole, reason: 'missing-paired-skill' });
+      continue;
+    }
+    if (!fs.existsSync(filePath)) {
+      errors.push({ path: filePath, reason: 'missing-change-target' });
+      continue;
+    }
+    const currentSha256 = sha256File(filePath);
+    if (!/^[A-F0-9]{64}$/.test(String(change.originalSha256 || '').toUpperCase())) {
+      errors.push({ path: filePath, reason: 'invalid-original-sha256' });
+    } else if (currentSha256 !== String(change.originalSha256).toUpperCase()) {
+      errors.push({ path: filePath, reason: 'original-cas-conflict', currentSha256, expectedSha256: change.originalSha256 });
+    }
+    if (typeof change.original === 'string' && sha256(change.original) !== String(change.originalSha256).toUpperCase()) {
+      errors.push({ path: filePath, reason: 'original-plan-fingerprint-mismatch' });
+    }
+    if (typeof change.replacement !== 'string') {
+      errors.push({ path: filePath, reason: 'missing-replacement-document' });
+    } else {
+      const replacementSha256 = sha256(change.replacement);
+      if (replacementSha256 !== String(change.replacementSha256 || '').toUpperCase()) {
+        errors.push({ path: filePath, reason: 'replacement-plan-fingerprint-mismatch' });
+      }
+      if (!change.replacement.includes(STABLE_MARKER)) {
+        errors.push({ path: filePath, reason: 'replacement-marker-mismatch' });
+      }
+    }
+    if (!change.catalogEntry || change.catalogEntry.role !== change.role
+      || change.catalogEntry.patchedDocument !== change.replacement
+      || change.catalogEntry.patchedSha256 !== String(change.replacementSha256 || '').toUpperCase()) {
+      errors.push({ path: filePath, reason: 'catalog-replacement-mismatch' });
+    }
+  }
+  return errors;
+}
+
 function applyChangePlan(plan, options = {}) {
   const safePlan = plan && typeof plan === 'object' ? plan : { changes: [], skipped: [], errors: [{ reason: 'invalid-plan' }] };
   const errors = Array.isArray(safePlan.errors) ? safePlan.errors : [];
@@ -534,6 +622,19 @@ function applyChangePlan(plan, options = {}) {
   }
   if (planned.length === 0) {
     return { ok: true, changed: 0, skipped: alreadySkipped, failed: 0, errors: [], evidencePaths: [] };
+  }
+
+  const boundaryErrors = validateApplyChangePlan(safePlan);
+  if (boundaryErrors.length > 0) {
+    return {
+      ok: false,
+      blocked: true,
+      changed: 0,
+      skipped: 0,
+      failed: 0,
+      errors: boundaryErrors,
+      evidencePaths: [],
+    };
   }
 
   const evidenceDirectory = createEvidenceDirectory(options.evidenceRoot || DEFAULT_EVIDENCE_ROOT);

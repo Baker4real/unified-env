@@ -144,29 +144,41 @@ const externalPlan = overlay.buildChangePlan(
 );
 assert.ok(externalPlan.errors.some((error) => error.reason === 'unsupported-plugin-surface'));
 assert.equal(overlay.applyChangePlan(externalPlan, { dryRun: false, evidenceRoot }).changed, 0);
-assert.throws(
-  () => overlay.applyChangePlan(plan, {
-    dryRun: false,
-    evidenceRoot: 'D:\\Codex\\.codex\\run-evidence-outside-policy',
-  }),
-  /evidenceRoot must stay under/,
+const forgedChange = JSON.parse(JSON.stringify(plan.changes[0]));
+forgedChange.path = externalTarget;
+forgedChange.codexRoot = codexRoot;
+const forgedApplyPlan = overlay.applyChangePlan(
+  { changes: [forgedChange], skipped: [], errors: [] },
+  { dryRun: false, evidenceRoot },
 );
-
+assert.equal(forgedApplyPlan.changed, 0);
+assert.ok(forgedApplyPlan.errors.some((error) => error.reason === 'unsupported-plugin-surface'));
 // A patched marker is not sufficient when the catalog document contains a
 // forbidden force/patch-stack operation.
 const forgedCatalog = JSON.parse(JSON.stringify(fixtureCatalog));
 forgedCatalog.roles.yeet[0].patchedDocument += [
   '`git push --force-with-lease origin feature`',
+  '`git push --force-with-lease=origin/feature origin feature`',
   '`git push -f origin feature`',
+  '`git push -f=origin/feature origin feature`',
+  '`git branch patch-stack`',
   '`git switch -c patch-stack`',
+  '`git switch --create patch-stack`',
   '`git checkout -b patch-stack`',
+  '`git worktree add D:\\tmp\\patch-stack patch-stack`',
   '`git update-ref refs/heads/patch-stack deadbeef`',
 ].join('\n');
 const forgedCatalogPlan = overlay.buildChangePlan(
   overlay.discoverTargets(fixtureRoot),
   forgedCatalog,
 );
-assert.ok(forgedCatalogPlan.errors.filter((error) => error.reason === 'forbidden-publish-pattern').length >= 3);
+const forbiddenErrors = forgedCatalogPlan.errors.filter((error) => error.reason === 'forbidden-publish-pattern');
+assert.equal(forbiddenErrors.length, 5);
+assert.ok(forbiddenErrors.some((error) => /force/.test(error.message)));
+assert.ok(forbiddenErrors.some((error) => /branch/.test(error.message)));
+assert.ok(forbiddenErrors.some((error) => /switch|checkout/.test(error.message)));
+assert.ok(forbiddenErrors.some((error) => /worktree/.test(error.message)));
+assert.ok(forbiddenErrors.some((error) => /refs/.test(error.message)));
 
 // Rollback refuses a manifest that attempts to address a non-plugin path.
 const maliciousManifestDirectory = path.join(evidenceRoot, 'malicious-manifest');
@@ -180,6 +192,7 @@ fs.writeFileSync(maliciousManifestPath, JSON.stringify({
     path: externalTarget,
     backupPath: maliciousBackupPath,
     status: 'committed',
+    codexRoot: fixtureRoot,
     originalSha256: sha256(fixtureUpstream.yeet.local),
     replacementSha256: sha256(fixtureUpstream.yeet.local),
   }],
@@ -204,6 +217,22 @@ assert.throws(
   () => overlay.rollbackManifest(maliciousBackupManifestPath),
   /manifest backupPath is outside its evidenceDirectory/,
 );
+const cDriveManifestPath = path.join(maliciousManifestDirectory, 'manifest-c-drive.json');
+fs.writeFileSync(cDriveManifestPath, JSON.stringify({
+  evidenceDirectory: maliciousManifestDirectory,
+  entries: [{
+    path: 'C:\\outside-plugin\\skills\\yeet\\SKILL.md',
+    backupPath: 'C:\\outside-evidence\\backup-SKILL.md',
+    codexRoot: 'C:\\outside-plugin',
+    status: 'committed',
+    originalSha256: sha256(fixtureUpstream.yeet.local),
+    replacementSha256: fixtureCatalog.roles.yeet[0].patchedSha256,
+  }],
+}), 'utf8');
+assert.throws(
+  () => overlay.rollbackManifest(cDriveManifestPath),
+  /must stay on the D: drive/,
+);
 
 // A failure after the target rename must restore every already-written target.
 const postWriteRoot = path.join(evidenceRoot, 'post-write-fixture');
@@ -218,6 +247,30 @@ for (const surface of surfaces) {
 }
 const postWriteDiscovery = overlay.discoverTargets(postWriteRoot);
 const postWritePlan = overlay.buildChangePlan(postWriteDiscovery, fixtureCatalog);
+assert.throws(
+  () => overlay.applyChangePlan(postWritePlan, {
+    dryRun: false,
+    evidenceRoot: 'D:\\Codex\\.codex\\run-evidence-outside-policy',
+  }),
+  /evidenceRoot must stay under/,
+);
+const replacementTamper = JSON.parse(JSON.stringify(postWritePlan.changes[0]));
+replacementTamper.replacement = 'tampered replacement';
+const replacementTamperResult = overlay.applyChangePlan(
+  { changes: [replacementTamper], skipped: [], errors: [] },
+  { dryRun: false, evidenceRoot },
+);
+assert.equal(replacementTamperResult.changed, 0);
+assert.ok(replacementTamperResult.errors.some((error) => error.reason === 'replacement-plan-fingerprint-mismatch'));
+const casTarget = postWritePlan.changes[0].path;
+fs.writeFileSync(casTarget, 'user changed before apply\n', 'utf8');
+const casResult = overlay.applyChangePlan(
+  { changes: [postWritePlan.changes[0]], skipped: [], errors: [] },
+  { dryRun: false, evidenceRoot },
+);
+assert.equal(casResult.changed, 0);
+assert.ok(casResult.errors.some((error) => error.reason === 'original-cas-conflict'));
+fs.writeFileSync(casTarget, postWritePlan.changes[0].original, 'utf8');
 const postWriteFailure = overlay.applyChangePlan(postWritePlan, {
   dryRun: false,
   evidenceRoot,
@@ -360,6 +413,28 @@ assert.equal(
 assert.equal(
   fs.existsSync(path.join(deploymentCodexRoot, 'scripts', 'github-default-branch-skill-overlay-catalog.json')),
   false,
+);
+const concurrentRollbackProcess = childProcess.spawnSync(
+  'D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe',
+  [
+    '-NoProfile',
+    '-File',
+    path.join(repoRoot, 'scripts', 'Deploy-GitHubDefaultBranchSkillOverlay.ps1'),
+    '-SourceRoot', path.join(deploymentSourceRoot, 'scripts'),
+    '-CodexRoot', deploymentCodexRoot,
+    '-EvidenceRoot', path.join(evidenceRoot, 'concurrent-deployment-evidence'),
+    '-InjectFailureAfter', '1',
+    '-InjectConcurrentChangeBeforeRollback',
+  ],
+  { encoding: 'utf8' },
+);
+assert.notEqual(concurrentRollbackProcess.status, 0, concurrentRollbackProcess.stdout || concurrentRollbackProcess.stderr);
+const concurrentRollbackReport = JSON.parse(concurrentRollbackProcess.stdout.trim());
+assert.equal(concurrentRollbackReport.status, 'unsafe-partial');
+assert.equal(concurrentRollbackReport.rolledBack, false);
+assert.match(
+  fs.readFileSync(path.join(deploymentCodexRoot, 'scripts', 'Apply-GitHubDefaultBranchSkillOverlay.cjs'), 'utf8'),
+  /concurrent change detected during rollback/,
 );
 const outsideDeployment = childProcess.spawnSync(
   'D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe',

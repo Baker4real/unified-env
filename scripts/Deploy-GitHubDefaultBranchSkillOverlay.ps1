@@ -13,7 +13,10 @@ param(
     [string] $EvidenceRoot,
 
     [Parameter(Mandatory = $false)]
-    [int] $InjectFailureAfter = -1
+    [int] $InjectFailureAfter = -1,
+
+    [Parameter(Mandatory = $false)]
+    [switch] $InjectConcurrentChangeBeforeRollback
 )
 
 $ErrorActionPreference = 'Stop'
@@ -211,14 +214,24 @@ catch {
         $rollbackErrors += [ordered]@{ reason = 'manifest-pre-rollback-write-failed'; message = $_.Exception.Message }
     }
 
+    if ($InjectConcurrentChangeBeforeRollback -and $replacedFiles.Count -gt 0) {
+        $concurrentTarget = [string] $replacedFiles[0].target
+        Set-Content -LiteralPath $concurrentTarget -Value 'concurrent change detected during rollback' -Encoding UTF8
+    }
+
     for ($replacedIndex = $replacedFiles.Count - 1; $replacedIndex -ge 0; $replacedIndex--) {
         $replaced = $replacedFiles[$replacedIndex]
         try {
             $target = [string] $replaced.target
+            if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+                throw "回滚 CAS 目标不存在：$target"
+            }
+            $currentReplacementHash = Get-HashUpper -PathValue $target
+            if ($currentReplacementHash -ne [string] $replaced.file.sourceSha256) {
+                throw "回滚 CAS 冲突：$target 当前指纹不是本次 replacement"
+            }
             if ([string]::IsNullOrWhiteSpace([string] $replaced.backup)) {
-                if (Test-Path -LiteralPath $target -PathType Leaf) {
-                    Remove-Item -LiteralPath $target -Force
-                }
+                Remove-Item -LiteralPath $target -Force
                 if (Test-Path -LiteralPath $target -PathType Leaf) {
                     throw "无法删除本次创建的 runtime 文件：$target"
                 }
