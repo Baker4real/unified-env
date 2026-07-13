@@ -36,6 +36,7 @@ TARGET_MAPS = (
 FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 LEGACY_DESTINATION_ROOT = PureWindowsPath(r"D:\Users\WINDOWS\Documents\Codex")
 PROJECTLESS_SOURCE_ROOT = PureWindowsPath(r"C:\Users\WINDOWS\Documents\Codex")
+CANONICAL_CANDIDATE_ROOT = PureWindowsPath(r"D:\Documents\Codex")
 INVENTORY_REPAIR_CONTRACT = "generation-hash-mutex-cas-reprobe"
 FILE_ATTRIBUTE_DIRECTORY = 0x0010
 FILE_READ_ATTRIBUTES = 0x0080
@@ -131,7 +132,7 @@ def _windows_relative_path(
 def _is_reserved_device_component(value: str) -> bool:
     normalized = value.rstrip(" .")
     base = normalized.split(".", 1)[0].upper()
-    if base in {"CON", "PRN", "AUX", "NUL"}:
+    if base in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "CLOCK$"}:
         return True
     if len(base) == 4 and base[:3] in {"COM", "LPT"} and base[3] in "123456789":
         return True
@@ -221,7 +222,7 @@ def _path_compare_key(value: str) -> str:
     return normalised.rstrip("\\/").casefold()
 
 
-def _probe_candidate(candidate: Path) -> dict[str, object]:
+def _probe_candidate(candidate: Path, *, require_directory: bool = False) -> dict[str, object]:
     """Open every candidate segment with OPEN_REPARSE_POINT and verify its handle."""
     default: dict[str, object] = {
         "state": "probe-error",
@@ -345,6 +346,8 @@ def _probe_candidate(candidate: Path) -> dict[str, object]:
             if not is_final and not (info.file_attributes & FILE_ATTRIBUTE_DIRECTORY):
                 return result("non-directory-ancestor", final_path_verified=True, path=lexical)
             if is_final:
+                if require_directory and not (info.file_attributes & FILE_ATTRIBUTE_DIRECTORY):
+                    return result("non-directory-target", final_path_verified=True, path=lexical)
                 identity = (
                     int(info.volume_serial_number),
                     (int(info.file_index_high) << 32) | int(info.file_index_low),
@@ -379,6 +382,8 @@ def _probe_candidate(candidate: Path) -> dict[str, object]:
         final_path = get_final_path(handle)
         if final_path is None or _path_compare_key(final_path) != _path_compare_key(root_lexical):
             return result("final-path-mismatch", path=root_lexical)
+        if require_directory and not (info.file_attributes & FILE_ATTRIBUTE_DIRECTORY):
+            return result("non-directory-target", final_path_verified=True, path=root_lexical)
         identity = (
             int(info.volume_serial_number),
             (int(info.file_index_high) << 32) | int(info.file_index_low),
@@ -408,6 +413,8 @@ def _path_inventory_entry(
     candidate_root: Path,
     candidate_root_windows: PureWindowsPath,
     source_root_allowed: bool,
+    candidate_root_allowed: bool,
+    candidate_root_ready: bool,
 ) -> tuple[dict[str, object], tuple[int, int] | None]:
     source_hash: str | None = None
     if isinstance(value, str):
@@ -436,6 +443,15 @@ def _path_inventory_entry(
     if not source_root_allowed:
         base["reason"] = "unresolved-source-root-not-allowed"
         return base, None
+    if _windows_is_same_or_child(candidate_root_windows, LEGACY_DESTINATION_ROOT):
+        base["reason"] = "unresolved-legacy-destination"
+        return base, None
+    if not candidate_root_allowed:
+        base["reason"] = "unresolved-candidate-root-not-allowed"
+        return base, None
+    if not candidate_root_ready:
+        base["reason"] = "unresolved-candidate-root-unavailable"
+        return base, None
 
     try:
         source_path = PureWindowsPath(value)
@@ -462,12 +478,6 @@ def _path_inventory_entry(
     relative_parts = _windows_relative_path(value, source_root)
     if relative_parts is None:
         base["reason"] = "unresolved-outside-source-root"
-        return base, None
-
-    # The historical destination is not a valid candidate, even when supplied
-    # accidentally as the caller's candidate root.
-    if _windows_is_same_or_child(candidate_root_windows, LEGACY_DESTINATION_ROOT):
-        base["reason"] = "unresolved-legacy-destination"
         return base, None
 
     candidate = candidate_root.joinpath(*relative_parts)
@@ -530,6 +540,20 @@ def build_path_inventory(
     source_root_allowed = _windows_parts_casefold(source_root_windows) == _windows_parts_casefold(
         PROJECTLESS_SOURCE_ROOT
     )
+    candidate_root_allowed = _windows_parts_casefold(candidate_root_windows) == _windows_parts_casefold(
+        CANONICAL_CANDIDATE_ROOT
+    )
+    if candidate_root_allowed:
+        candidate_root_probe = _probe_candidate(Path(CANONICAL_CANDIDATE_ROOT), require_directory=True)
+    else:
+        candidate_root_probe = {
+            "state": "not-probed",
+            "reparse": False,
+            "finalPathVerified": False,
+            "identity": None,
+            "advisoryOnly": True,
+        }
+    candidate_root_ready = candidate_root_allowed and candidate_root_probe.get("state") == "verified"
 
     candidate_root_path = Path(candidate_root)
     maps: dict[str, dict[object, dict[str, object]]] = {}
@@ -549,6 +573,8 @@ def build_path_inventory(
                 candidate_root_path,
                 candidate_root_windows,
                 source_root_allowed,
+                candidate_root_allowed,
+                candidate_root_ready,
             )
             inventory_map[identity] = entry
             if final_identity is not None:
@@ -569,6 +595,8 @@ def build_path_inventory(
         "sourceRoot": str(source_root_windows),
         "sourceRootAllowed": source_root_allowed,
         "candidateRoot": str(candidate_root_windows),
+        "candidateRootAllowed": candidate_root_allowed,
+        "candidateRootProbe": candidate_root_probe,
         "safeAdvisory": True,
         "repairContract": INVENTORY_REPAIR_CONTRACT,
         "maps": maps,

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,6 +13,11 @@ import unittest
 PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
 MODULE_PATH = PROJECT_ROOT / "managed" / "codex-hooks" / "hooks" / "codex-state-policy-guard.py"
 FIXTURE_ROOT = PROJECT_ROOT / "reports" / "codex-state-path-inventory-test"
+CANONICAL_CANDIDATE_ROOT = Path(r"D:\Documents\Codex")
+SOURCE_PREFIX = r"C:\Users\WINDOWS\Documents\Codex"
+SAFE_RELATIVE = r"2026-07-13\new-chat"
+REPARSE_RELATIVE = r"2026-05-31"
+SAFE_FILE_RELATIVE = r"2026-06-03\c\outputs\optimize-c-drive-admin.ps1"
 
 
 def load_module():
@@ -45,15 +48,7 @@ class CodexStatePathInventoryTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.root = Path(tempfile.mkdtemp(dir=FIXTURE_ROOT))
-        self.source_root = self.root / "source"
-        self.candidate_root = self.root / "candidate"
-        self.source_root.mkdir()
-        self.candidate_root.mkdir()
-        (self.candidate_root / "project-a").mkdir()
-        (self.candidate_root / "project-a" / "output").mkdir()
-        (self.candidate_root / "project-a" / "output" / "result.txt").write_text(
-            "fixture", encoding="utf-8"
-        )
+        self.candidate_root = CANONICAL_CANDIDATE_ROOT
 
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -67,32 +62,13 @@ class CodexStatePathInventoryTests(unittest.TestCase):
         self.assertIsInstance(entry, dict)
         return entry
 
-    def _create_junction(self, junction: Path, target: Path) -> None:
-        junction_literal = str(junction).replace("'", "''")
-        target_literal = str(target).replace("'", "''")
-        command = (
-            "$ErrorActionPreference='Stop';"
-            f"New-Item -ItemType Junction -Path '{junction_literal}' "
-            f"-Target '{target_literal}' | Out-Null"
-        )
-        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
-        result = subprocess.run(
-            [
-                r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe",
-                "-NoProfile",
-                "-EncodedCommand",
-                encoded,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+    def _source(self, relative: str) -> str:
+        return SOURCE_PREFIX if not relative else f"{SOURCE_PREFIX}\\{relative}"
 
     def test_root_hint_has_safe_candidate_and_source_hash(self) -> None:
         state = {
             "thread-workspace-root-hints": {
-                "project-a": r"C:\Users\WINDOWS\Documents\Codex\project-a",
+                "safe-path": self._source(SAFE_RELATIVE),
             }
         }
         inventory = self.module.build_path_inventory(
@@ -101,16 +77,16 @@ class CodexStatePathInventoryTests(unittest.TestCase):
             self.candidate_root,
         )
 
-        entry = self._entry(inventory, "thread-workspace-root-hints", "project-a")
-        self.assertEqual(entry["value"], state["thread-workspace-root-hints"]["project-a"])
+        entry = self._entry(inventory, "thread-workspace-root-hints", "safe-path")
+        self.assertEqual(entry["value"], state["thread-workspace-root-hints"]["safe-path"])
         self.assertTrue(entry["safe"])
-        self.assertEqual(entry["candidate"], str(self.candidate_root / "project-a"))
+        self.assertEqual(entry["candidate"], str(self.candidate_root / SAFE_RELATIVE))
         self.assertEqual(entry["reason"], "safe")
         self.assertFalse(entry["reparse"])
         self.assertEqual(
             entry["sourceSha256"],
             hashlib.sha256(
-                state["thread-workspace-root-hints"]["project-a"].encode("utf-8")
+                state["thread-workspace-root-hints"]["safe-path"].encode("utf-8")
             ).hexdigest(),
         )
 
@@ -134,33 +110,28 @@ class CodexStatePathInventoryTests(unittest.TestCase):
         self.assertEqual(json.dumps(state, ensure_ascii=False, sort_keys=True), before)
 
     def test_junction_is_unresolved_reparse(self) -> None:
-        outside = self.root / "outside"
-        outside.mkdir()
-        (outside / "project-b").mkdir()
-        junction = self.candidate_root / "junction"
-        self._create_junction(junction, outside)
+        junction = self.candidate_root / REPARSE_RELATIVE
         try:
-            state = {
-                "thread-workspace-root-hints": {
-                    "junction": r"C:\Users\WINDOWS\Documents\Codex\junction\project-b",
-                }
+            metadata = junction.lstat()
+        except FileNotFoundError:
+            self.skipTest(f"受控 canonical root 缺少 reparse fixture：{junction}")
+        if not bool(getattr(metadata, "st_file_attributes", 0) & self.module.FILE_ATTRIBUTE_REPARSE_POINT):
+            self.skipTest(f"受控 canonical root fixture 不是 reparse：{junction}")
+        state = {
+            "thread-workspace-root-hints": {
+                "junction": self._source(REPARSE_RELATIVE + r"\project-b"),
             }
-            inventory = self.module.build_path_inventory(
-                state,
-                r"C:\Users\WINDOWS\Documents\Codex",
-                self.candidate_root,
-            )
-            entry = self._entry(inventory, "thread-workspace-root-hints", "junction")
-            self.assertFalse(entry["safe"])
-            self.assertEqual(entry["reason"], "unresolved-reparse")
-            self.assertTrue(entry["reparse"])
-            self.assertEqual(
-                entry["value"],
-                state["thread-workspace-root-hints"]["junction"],
-            )
-        finally:
-            if junction.exists() or junction.is_symlink():
-                junction.rmdir()
+        }
+        inventory = self.module.build_path_inventory(
+            state,
+            SOURCE_PREFIX,
+            self.candidate_root,
+        )
+        entry = self._entry(inventory, "thread-workspace-root-hints", "junction")
+        self.assertFalse(entry["safe"])
+        self.assertEqual(entry["reason"], "unresolved-reparse")
+        self.assertTrue(entry["reparse"])
+        self.assertEqual(entry["value"], state["thread-workspace-root-hints"]["junction"])
 
     def test_legacy_destination_never_becomes_candidate(self) -> None:
         state = {
@@ -261,6 +232,9 @@ class CodexStatePathInventoryTests(unittest.TestCase):
                 "con": r"C:\Users\WINDOWS\Documents\Codex\CON\project-a",
                 "nul": r"C:\Users\WINDOWS\Documents\Codex\NUL\project-a",
                 "com": r"C:\Users\WINDOWS\Documents\Codex\COM1.txt\project-a",
+                "conin": r"C:\Users\WINDOWS\Documents\Codex\CONIN$\project-a",
+                "conout": r"C:\Users\WINDOWS\Documents\Codex\CONOUT$\project-a",
+                "clock": r"C:\Users\WINDOWS\Documents\Codex\CLOCK$\project-a",
             }
         }
         inventory = self.module.build_path_inventory(
@@ -272,17 +246,55 @@ class CodexStatePathInventoryTests(unittest.TestCase):
             self._entry(inventory, "thread-workspace-root-hints", "short-many")["reason"],
             "unresolved-alternate-lexical",
         )
-        for identity in ("con", "nul", "com"):
+        for identity in ("con", "nul", "com", "conin", "conout", "clock"):
             with self.subTest(identity=identity):
                 entry = self._entry(inventory, "thread-workspace-root-hints", identity)
                 self.assertFalse(entry["safe"])
                 self.assertIsNone(entry["candidate"])
                 self.assertEqual(entry["reason"], "unresolved-device-name")
 
-    def test_uncontrolled_source_root_is_structured_unresolved(self) -> None:
+    def test_uncontrolled_candidate_root_is_structured_unresolved(self) -> None:
         state = {
             "thread-workspace-root-hints": {
                 "project-a": r"C:\Users\WINDOWS\Documents\Codex\project-a",
+            }
+        }
+        inventory = self.module.build_path_inventory(
+            state,
+            r"C:\Users\WINDOWS\Documents\Codex",
+            self.root,
+        )
+        self.assertFalse(inventory["candidateRootAllowed"])
+        entry = self._entry(inventory, "thread-workspace-root-hints", "project-a")
+        self.assertFalse(entry["safe"])
+        self.assertIsNone(entry["candidate"])
+        self.assertEqual(entry["reason"], "unresolved-candidate-root-not-allowed")
+
+    def test_candidate_root_file_cannot_become_safe_target(self) -> None:
+        state = {
+            "thread-workspace-root-hints": {
+                "root": r"C:\Users\WINDOWS\Documents\Codex",
+            }
+        }
+        candidate_file = Path(
+            r"D:\Documents\Codex\2026-06-03\c\outputs\optimize-c-drive-admin.ps1"
+        )
+        self.assertTrue(candidate_file.is_file())
+        inventory = self.module.build_path_inventory(
+            state,
+            r"C:\Users\WINDOWS\Documents\Codex",
+            candidate_file,
+        )
+        self.assertFalse(inventory["candidateRootAllowed"])
+        entry = self._entry(inventory, "thread-workspace-root-hints", "root")
+        self.assertFalse(entry["safe"])
+        self.assertIsNone(entry["candidate"])
+        self.assertEqual(entry["reason"], "unresolved-candidate-root-not-allowed")
+
+    def test_uncontrolled_source_root_is_structured_unresolved(self) -> None:
+        state = {
+            "thread-workspace-root-hints": {
+                "safe-path": self._source(SAFE_RELATIVE),
             }
         }
         inventory = self.module.build_path_inventory(
@@ -291,16 +303,16 @@ class CodexStatePathInventoryTests(unittest.TestCase):
             self.candidate_root,
         )
         self.assertFalse(inventory["sourceRootAllowed"])
-        entry = self._entry(inventory, "thread-workspace-root-hints", "project-a")
+        entry = self._entry(inventory, "thread-workspace-root-hints", "safe-path")
         self.assertFalse(entry["safe"])
         self.assertIsNone(entry["candidate"])
         self.assertEqual(entry["reason"], "unresolved-source-root-not-allowed")
-        self.assertEqual(entry["value"], state["thread-workspace-root-hints"]["project-a"])
+        self.assertEqual(entry["value"], state["thread-workspace-root-hints"]["safe-path"])
 
     def test_safe_result_is_explicitly_advisory_for_repair(self) -> None:
         state = {
             "thread-workspace-root-hints": {
-                "project-a": r"C:\Users\WINDOWS\Documents\Codex\project-a",
+                "safe-path": self._source(SAFE_RELATIVE),
             }
         }
         inventory = self.module.build_path_inventory(
@@ -310,7 +322,7 @@ class CodexStatePathInventoryTests(unittest.TestCase):
         )
         self.assertTrue(inventory["safeAdvisory"])
         self.assertEqual(inventory["repairContract"], "generation-hash-mutex-cas-reprobe")
-        entry = self._entry(inventory, "thread-workspace-root-hints", "project-a")
+        entry = self._entry(inventory, "thread-workspace-root-hints", "safe-path")
         self.assertTrue(entry["safe"])
         self.assertTrue(entry["probe"]["advisoryOnly"])
 
@@ -335,7 +347,7 @@ class CodexStatePathInventoryTests(unittest.TestCase):
                 self.assertIsNone(entry["sourceSha256"])
 
     def test_duplicate_final_identity_is_not_safe_for_either_entry(self) -> None:
-        source_value = r"C:\Users\WINDOWS\Documents\Codex\project-a"
+        source_value = self._source(SAFE_RELATIVE)
         state = {
             "thread-workspace-root-hints": {"root": source_value},
             "thread-projectless-output-directories": {"output": source_value},
@@ -358,8 +370,8 @@ class CodexStatePathInventoryTests(unittest.TestCase):
     def test_casefolded_candidate_aliases_are_also_ambiguous(self) -> None:
         state = {
             "thread-workspace-root-hints": {
-                "lower": r"C:\Users\WINDOWS\Documents\Codex\project-a",
-                "upper": r"C:\Users\WINDOWS\Documents\Codex\PROJECT-A",
+                "lower": self._source(SAFE_RELATIVE),
+                "upper": self._source(SAFE_RELATIVE.upper()),
             }
         }
         inventory = self.module.build_path_inventory(
@@ -376,7 +388,7 @@ class CodexStatePathInventoryTests(unittest.TestCase):
     def test_safe_entry_contains_handle_bound_probe_identity(self) -> None:
         state = {
             "thread-workspace-root-hints": {
-                "project-a": r"C:\Users\WINDOWS\Documents\Codex\project-a",
+                "safe-path": self._source(SAFE_RELATIVE),
             }
         }
         before_paths = sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*"))
@@ -385,7 +397,7 @@ class CodexStatePathInventoryTests(unittest.TestCase):
             r"C:\Users\WINDOWS\Documents\Codex",
             self.candidate_root,
         )
-        entry = self._entry(inventory, "thread-workspace-root-hints", "project-a")
+        entry = self._entry(inventory, "thread-workspace-root-hints", "safe-path")
         self.assertTrue(entry["safe"])
         probe = entry["probe"]
         self.assertIsInstance(probe, dict)
@@ -400,7 +412,7 @@ class CodexStatePathInventoryTests(unittest.TestCase):
     def test_handle_probe_accepts_a_regular_file_target(self) -> None:
         state = {
             "thread-projectless-output-directories": {
-                "file": r"C:\Users\WINDOWS\Documents\Codex\project-a\output\result.txt",
+                "file": self._source(SAFE_FILE_RELATIVE),
             }
         }
         inventory = self.module.build_path_inventory(
