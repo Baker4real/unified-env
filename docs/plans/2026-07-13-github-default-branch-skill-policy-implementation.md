@@ -2,6 +2,8 @@
 
 > **状态（2026-07-13）：** Task 1–5 已实施、验证并完成默认分支集成；临时分支与本 workflow worktree 已按顺序清理。下方复选框保留实施过程记录，不再表示当前待办。完整证据见 `D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\verification-summary.json`、`VERIFICATION.md` 和 `task5-action-log.md`。
 
+> **历史路径说明：** 下方实施命令中出现的 `D:\Codex\projects\unified-env-github-default-branch-skill-policy` 是已清理的历史 worktree；当前版本化源代码位于 `D:\Codex\projects\统一环境\scripts`，部署入口和验证证据仍以 D 盘当前路径为准。
+
 > **供 agentic workers 使用：** 按任务逐项实施；每个任务先建立可观察的失败信号，再写最小实现并复验。此变更涉及插件缓存、分支生命周期与本机全局 skill，Task 3 和 Task 4 必须完成独立对抗性审查。
 
 **目标：** 让本机收尾和 GitHub 发布 skill 默认只发布到可验证的远端默认分支，淘汰 patch-stack 分支，并让临时分支在确认后合入、推送和双端删除。

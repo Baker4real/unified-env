@@ -19,3 +19,4 @@ reports/codex-state-policy-test/
 .env.*.local
 *.tmp
 *.temp
+__pycache__/
