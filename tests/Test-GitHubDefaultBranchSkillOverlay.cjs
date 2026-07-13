@@ -105,6 +105,49 @@ for (const role of ['yeet', 'github']) {
 }
 overlay.loadCatalog(fixtureCatalog);
 
+const requiredPolicyPatterns = [
+  /git\s+fetch\s+--prune\s+<targetRemote>/i,
+  /本地\s+HEAD[\s\S]{0,180}(?:tracking|一致)/i,
+  /只有[\s\S]{0,180}用户确认[\s\S]{0,180}git\s+push\s+--set-upstream\s+<targetRemote>\s+<temporaryBranch>/i,
+  /git\s+push\s+--delete\s+<targetRemote>\s+<temporaryBranch>/i,
+  /git\s+worktree\s+remove\s+<temporaryWorktree>/i,
+  /git\s+branch\s+--delete\s+<temporaryBranch>/i,
+  /ownedByThisWorkflow/i,
+  /远端删除失败[\s\S]{0,180}(?:保留|停止)/i,
+];
+for (const role of ['github', 'yeet']) {
+  for (const entry of fixtureCatalog.roles[role]) {
+    for (const pattern of requiredPolicyPatterns) {
+      assert.match(entry.patchedDocument, pattern, `${role} patchedDocument 缺少可验证发布契约 ${pattern}`);
+    }
+    const cleanupCommands = [
+      'git push --delete <targetRemote> <temporaryBranch>',
+      'git worktree remove <temporaryWorktree>',
+      'git branch --delete <temporaryBranch>',
+      'git fetch --prune <targetRemote>',
+    ];
+    const cleanupIndexes = cleanupCommands.map((command) => entry.patchedDocument.lastIndexOf(command));
+    assert.ok(cleanupIndexes.every((index) => index >= 0), `${role} patchedDocument 缺少 cleanup 命令`);
+    assert.ok(cleanupIndexes.every((index, indexInOrder) => indexInOrder === 0 || index > cleanupIndexes[indexInOrder - 1]), `${role} patchedDocument cleanup 顺序错误`);
+  }
+}
+const missingSemanticCatalog = JSON.parse(JSON.stringify(fixtureCatalog));
+missingSemanticCatalog.roles.yeet[0].patchedDocument = missingSemanticCatalog.roles.yeet[0].patchedDocument
+  .replaceAll('`git fetch --prune <targetRemote>`', '`git fetch --prune <remote>`');
+assert.throws(
+  () => overlay.loadCatalog(missingSemanticCatalog),
+  (error) => error?.errors?.some((item) => item.reason === 'missing-direct-default-fetch'),
+  'catalog 缺少直接默认分支 fetch 证据时必须失败关闭',
+);
+const misorderedCleanupCatalog = JSON.parse(JSON.stringify(fixtureCatalog));
+misorderedCleanupCatalog.roles.github[0].patchedDocument = misorderedCleanupCatalog.roles.github[0].patchedDocument
+  .replace('`git branch --delete <temporaryBranch>`、`git fetch --prune <targetRemote>`', '`git fetch --prune <targetRemote>`、`git branch --delete <temporaryBranch>`');
+assert.throws(
+  () => overlay.loadCatalog(misorderedCleanupCatalog),
+  (error) => error?.errors?.some((item) => item.reason === 'cleanup-order-mismatch'),
+  'cleanup 顺序不满足远端→worktree→本地分支→fetch 时必须失败关闭',
+);
+
 function entryFor(role, document, fixture = fixtureCatalog) {
   const current = sha256(document);
   const entry = fixture.roles[role].find((candidate) => candidate.upstreamSha256 === current);

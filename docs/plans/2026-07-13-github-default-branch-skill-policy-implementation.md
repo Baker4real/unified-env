@@ -50,17 +50,26 @@ const surfaces = [
   'plugins/cache/openai-curated-remote/github/0.1.8-2841cf9749ae/skills/yeet/SKILL.md',
 ];
 
+// fixtureCatalogPath points to a D: evidence file written before this plan.
+// Production runs use the script-local file-backed catalog and never enable
+// allowTestCatalog; the explicit test-only options below keep the fixture
+// provenance visible and prevent an inline object from becoming production input.
 const plan = overlay.buildChangePlan(
   overlay.discoverTargets(fixtureCodexRoot),
-  catalog,
+  fixtureCatalogPath,
 );
+const fixtureApplyOptions = {
+  evidenceRoot,
+  allowTestCatalog: true,
+  testOnlyCatalogPath: fixtureCatalogPath,
+};
 assert.equal(plan.errors.length, 0);
 assert.equal(plan.changes.length, 6);
-assert.equal(overlay.applyChangePlan(plan, { dryRun: true }).changed, 0);
-assert.equal(overlay.applyChangePlan(plan, { dryRun: false }).changed, 6);
+assert.equal(overlay.applyChangePlan(plan, { ...fixtureApplyOptions, dryRun: true }).changed, 0);
+assert.equal(overlay.applyChangePlan(plan, { ...fixtureApplyOptions, dryRun: false }).changed, 6);
 assert.equal(overlay.applyChangePlan(
-  overlay.buildChangePlan(overlay.discoverTargets(fixtureCodexRoot), catalog),
-  { dryRun: false },
+  overlay.buildChangePlan(overlay.discoverTargets(fixtureCodexRoot), fixtureCatalogPath),
+  { ...fixtureApplyOptions, dryRun: false },
 ).changed, 0);
 ~~~
 
@@ -434,7 +443,7 @@ git -C 'D:\Codex\projects\unified-env-github-default-branch-skill-policy' push
 
 - [ ] **Step 4：删除临时分支与 worktree**
 
-仅在默认分支推送成功后，按顺序执行 `git push --delete <TARGET_REMOTE> <TEMPORARY_BRANCH>`、`git branch --delete <TEMPORARY_BRANCH>`、`git fetch <TARGET_REMOTE> --prune`，并只移除 `ownedByThisWorkflow` 创建的 worktree。每一步都检查上一步成功；若远端或本地删除失败，保留另一端并如实报告不一致。用户明确要求保留临时分支或创建 PR 时不得执行删除例外。
+仅在默认分支推送成功后，严格按“远端删除成功 → worktree 删除 → 本地分支删除 → fetch/prune”顺序执行：先执行 `git push --delete <TARGET_REMOTE> <TEMPORARY_BRANCH>`；只有远端删除成功，才对 `ownedByThisWorkflow=true` 的 worktree 执行 `git worktree remove <TEMPORARY_WORKTREE>`，再执行 `git branch --delete <TEMPORARY_BRANCH>`，最后执行 `git fetch --prune <TARGET_REMOTE>`。每一步都检查上一步成功；远端删除失败时必须停止并保留本地临时分支及其 worktree，不能继续任何本地清理；后续任一步失败也保留尚未删除的现场并如实报告不一致。用户明确要求保留临时分支或创建 PR 时不得执行删除例外。
 
 - [ ] **Step 5：最终证明**
 

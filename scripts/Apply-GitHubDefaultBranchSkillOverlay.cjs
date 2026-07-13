@@ -268,6 +268,34 @@ function validateCatalog(catalogOrPath) {
           errors.push({ role, reason: 'forbidden-publish-pattern', message: `${prefix}.patchedDocument contains ${pattern}` });
         }
       }
+      if (role === 'github' || role === 'yeet') {
+        const requiredPolicyPatterns = [
+          { pattern: /git\s+fetch\s+--prune\s+<targetRemote>/i, reason: 'missing-direct-default-fetch' },
+          { pattern: /本地\s+HEAD[\s\S]{0,180}(?:tracking|一致)/i, reason: 'missing-default-tracking-proof' },
+          { pattern: /只有[\s\S]{0,180}用户确认[\s\S]{0,180}git\s+push\s+--set-upstream\s+<targetRemote>\s+<temporaryBranch>/i, reason: 'missing-confirmation-tracking-gate' },
+          { pattern: /git\s+push\s+--delete\s+<targetRemote>\s+<temporaryBranch>/i, reason: 'missing-temporary-remote-delete' },
+          { pattern: /git\s+worktree\s+remove\s+<temporaryWorktree>/i, reason: 'missing-temporary-worktree-remove' },
+          { pattern: /git\s+branch\s+--delete\s+<temporaryBranch>/i, reason: 'missing-temporary-local-delete' },
+          { pattern: /ownedByThisWorkflow/i, reason: 'missing-owned-worktree-guard' },
+          { pattern: /远端删除失败[\s\S]{0,180}(?:保留|停止)/i, reason: 'missing-remote-delete-failure-preservation' },
+        ];
+        for (const { pattern, reason } of requiredPolicyPatterns) {
+          if (!pattern.test(patchedDocument)) {
+            errors.push({ role, reason, message: `${prefix}.patchedDocument is missing required policy pattern ${pattern}` });
+          }
+        }
+        const cleanupCommands = [
+          ['remote-delete', 'git push --delete <targetRemote> <temporaryBranch>'],
+          ['worktree-remove', 'git worktree remove <temporaryWorktree>'],
+          ['local-branch-delete', 'git branch --delete <temporaryBranch>'],
+          ['fetch-prune', 'git fetch --prune <targetRemote>'],
+        ];
+        const cleanupIndexes = cleanupCommands.map(([, command]) => patchedDocument.lastIndexOf(command));
+        if (cleanupIndexes.some((index) => index < 0)
+          || cleanupIndexes.some((index, indexInOrder) => indexInOrder > 0 && index <= cleanupIndexes[indexInOrder - 1])) {
+          errors.push({ role, reason: 'cleanup-order-mismatch', message: `${prefix}.patchedDocument must order remote delete, owned worktree removal, local branch deletion, then fetch --prune` });
+        }
+      }
       roles[role].push({
         ...entry,
         role,
