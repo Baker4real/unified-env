@@ -60,6 +60,13 @@ FILE_SHARE_DELETE = 0x00000004
 OPEN_EXISTING = 3
 FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
+LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
+# SQLite's WAL-index reserves eight bytes at this offset for its writer,
+# checkpoint/recovery and reader locks.  A shared-memory lease must leave
+# those bytes to SQLite while covering the data ranges around them.
+SQLITE_SHM_LOCK_OFFSET = 120
+SQLITE_SHM_LOCK_LENGTH = 8
 ERROR_FILE_NOT_FOUND = 2
 ERROR_PATH_NOT_FOUND = 3
 SHORT_LEXICAL_SEGMENT = re.compile(r"^[^\\/]{1,8}~[0-9]+(?:\.[^\\/]+)?$", re.IGNORECASE)
@@ -84,6 +91,28 @@ class _ByHandleFileInformation(ctypes.Structure):
         ("file_index_high", wintypes.DWORD),
         ("file_index_low", wintypes.DWORD),
     ]
+
+
+class _Overlapped(ctypes.Structure):
+    _fields_ = [
+        ("internal", ctypes.c_void_p),
+        ("internal_high", ctypes.c_void_p),
+        ("offset", wintypes.DWORD),
+        ("offset_high", wintypes.DWORD),
+        ("event", wintypes.HANDLE),
+    ]
+
+
+@dataclass(frozen=True)
+class _LockedRange:
+    overlap: _Overlapped
+    offset: int
+    length: int
+
+
+@dataclass(frozen=True)
+class _ByteRangeLease:
+    ranges: tuple[_LockedRange, ...]
 
 
 class _IoStatusBlock(ctypes.Structure):
@@ -1490,6 +1519,125 @@ def _close_publish_handle(kernel32: object, handle: wintypes.HANDLE) -> None:
         pass
 
 
+def _open_publish_byte_lock(
+    path: Path,
+    *,
+    shared: bool = False,
+) -> tuple[object, wintypes.HANDLE, _ByteRangeLease]:
+    """Open a shared read handle and lock the current generation range.
+
+    SQLite keeps its own database/WAL handles open with broad sharing, so a
+    second no-share handle cannot be acquired after a connection is active.
+    A Windows byte-range lock is the compatible handle-bound alternative: it
+    blocks in-place writes and same-name replacement while preserving the
+    SQLite connection's legitimate WAL lifecycle.
+    """
+    kernel32, handle = _open_publish_handle(
+        path,
+        desired_access=GENERIC_READ,
+        share_mode=FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    )
+    byte_lease: _ByteRangeLease | None = None
+    try:
+        kernel32.GetFileSizeEx.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(ctypes.c_longlong),
+        )
+        kernel32.GetFileSizeEx.restype = wintypes.BOOL
+        size = ctypes.c_longlong()
+        if not kernel32.GetFileSizeEx(handle, ctypes.byref(size)):  # type: ignore[attr-defined]
+            raise StatePolicyError("state generation byte lease size unavailable")
+        if size.value < 0 or size.value >= 0xFFFFFFFFFFFFFFFF:
+            raise StatePolicyError("state generation byte lease size is unsupported")
+        # Lock the complete observed file plus its first append byte.  A
+        # byte-zero token is insufficient: an output callback could otherwise
+        # patch a non-zero page or extend the file past the lease.  SQLite's
+        # WAL-index has a fixed lock-byte window; shared leases split around
+        # that window so they coexist with SQLite's own writer lock.
+        end = max(1, int(size.value) + 1)
+        if shared:
+            ranges_to_lock = []
+            prefix_end = min(end, SQLITE_SHM_LOCK_OFFSET)
+            if prefix_end:
+                ranges_to_lock.append((0, prefix_end))
+            suffix_start = SQLITE_SHM_LOCK_OFFSET + SQLITE_SHM_LOCK_LENGTH
+            if end > suffix_start:
+                ranges_to_lock.append((suffix_start, end - suffix_start))
+        else:
+            ranges_to_lock = [(0, end)]
+        if not ranges_to_lock:
+            raise StatePolicyError("state generation byte lease range is empty")
+        kernel32.LockFileEx.argtypes = (
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(_Overlapped),
+        )
+        kernel32.LockFileEx.restype = wintypes.BOOL
+        lock_flags = 0 if shared else LOCKFILE_EXCLUSIVE_LOCK
+        locked_ranges: list[_LockedRange] = []
+        for offset, lock_length in ranges_to_lock:
+            overlap = _Overlapped()
+            overlap.offset = offset & 0xFFFFFFFF
+            overlap.offset_high = (offset >> 32) & 0xFFFFFFFF
+            if not kernel32.LockFileEx(  # type: ignore[attr-defined]
+                handle,
+                lock_flags | LOCKFILE_FAIL_IMMEDIATELY,
+                0,
+                lock_length & 0xFFFFFFFF,
+                (lock_length >> 32) & 0xFFFFFFFF,
+                ctypes.byref(overlap),
+            ):
+                error = int(ctypes.get_last_error())
+                raise StatePolicyError(f"state generation byte lease unavailable ({error})")
+            locked_ranges.append(
+                _LockedRange(overlap=overlap, offset=offset, length=lock_length)
+            )
+        byte_lease = _ByteRangeLease(ranges=tuple(locked_ranges))
+        after_size = ctypes.c_longlong()
+        if not kernel32.GetFileSizeEx(handle, ctypes.byref(after_size)):  # type: ignore[attr-defined]
+            raise StatePolicyError("state generation byte lease size unavailable")
+        if after_size.value != size.value:
+            raise StatePolicyError("state generation target grew before lease")
+        return kernel32, handle, byte_lease
+    except BaseException:
+        if byte_lease is None:
+            _close_publish_handle(kernel32, handle)
+        else:
+            _close_publish_byte_lock(kernel32, handle, byte_lease)
+        raise
+
+
+def _close_publish_byte_lock(
+    kernel32: object,
+    handle: wintypes.HANDLE,
+    lease: _ByteRangeLease,
+) -> None:
+    try:
+        kernel32.UnlockFileEx.argtypes = (
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(_Overlapped),
+        )
+        kernel32.UnlockFileEx.restype = wintypes.BOOL
+        for locked_range in reversed(lease.ranges):
+            kernel32.UnlockFileEx(  # type: ignore[attr-defined]
+                handle,
+                0,
+                locked_range.length & 0xFFFFFFFF,
+                (locked_range.length >> 32) & 0xFFFFFFFF,
+                ctypes.byref(locked_range.overlap),
+            )
+    except (AttributeError, OSError):
+        pass
+    finally:
+        _close_publish_handle(kernel32, handle)
+
+
 def _publish_handle_info(
     kernel32: object,
     handle: wintypes.HANDLE,
@@ -1691,6 +1839,7 @@ class SqliteTargetLease:
         self.permission_policy = permission_policy
         self.expected_snapshot = expected_snapshot
         self._connection: sqlite3.Connection | None = None
+        self._windows_byte_locks: list[tuple[int, object, wintypes.HANDLE, _ByteRangeLease]] = []
         self._closed = False
 
     @classmethod
@@ -1712,13 +1861,64 @@ class SqliteTargetLease:
             expected_snapshot=expected_snapshot,
         )
         lease._connection = connection
+        try:
+            lease._acquire_generation_locks()
+        except BaseException:
+            lease.close()
+            raise
         return lease
+
+    def _acquire_generation_locks(self) -> None:
+        if os.name != "nt" or self.expected_snapshot is None:
+            return
+        paths = (
+            self.path,
+            Path(str(self.path) + "-wal"),
+            Path(str(self.path) + "-shm"),
+            Path(str(self.path) + "-journal"),
+        )
+        try:
+            for index, candidate in enumerate(paths):
+                if self.expected_snapshot.identities[index] is None:
+                    continue
+                _assert_check_only_d_path_without_reparse(
+                    candidate,
+                    name="state generation lease",
+                )
+                if not candidate.is_file():
+                    raise StatePolicyError("state generation target disappeared")
+                kernel32, handle, byte_lease = _open_publish_byte_lock(
+                    candidate,
+                    # SQLite itself owns shared-memory lock bytes.  A shared
+                    # Windows lease coexists with those readers while still
+                    # rejecting direct writes; the main/WAL/journal ranges
+                    # remain exclusive and therefore fail closed on conflict.
+                    shared=index == 2,
+                )
+                try:
+                    actual_identity = _publish_handle_info(kernel32, handle, candidate)
+                    expected_identity = self.expected_snapshot.identities[index]
+                    if expected_identity is None or actual_identity != expected_identity:
+                        raise StatePolicyError("state generation target changed before lease")
+                except BaseException:
+                    _close_publish_byte_lock(kernel32, handle, byte_lease)
+                    raise
+                self._windows_byte_locks.append((index, kernel32, handle, byte_lease))
+        except BaseException:
+            self._close_generation_locks()
+            raise
+
+    def _close_generation_locks(self) -> None:
+        for _index, kernel32, handle, byte_lease in reversed(self._windows_byte_locks):
+            _close_publish_byte_lock(kernel32, handle, byte_lease)
+        self._windows_byte_locks.clear()
 
     def __enter__(self) -> "SqliteTargetLease":
         try:
             self._connection = _connect_sqlite_bound(self.path, self.expected_identity)
             self._connection.execute("pragma busy_timeout=0")
             self._connection.execute("begin immediate")
+            self._acquire_generation_locks()
             self.assert_unchanged()
         except BaseException:
             self.close()
@@ -1728,9 +1928,18 @@ class SqliteTargetLease:
     def assert_unchanged(self, *, strict_sidecar_content: bool = False) -> None:
         if self._closed or self._connection is None:
             raise StatePolicyError("sqlite target lease is closed")
+        if os.name == "nt" and self.expected_snapshot is not None:
+            expected_lock_count = sum(identity is not None for identity in self.expected_snapshot.identities)
+            if len(self._windows_byte_locks) != expected_lock_count:
+                raise StatePolicyError("state generation byte lease is incomplete")
         if _file_handle_identity(self.path) != self.expected_identity:
             raise StatePolicyError("thread state target changed concurrently")
         if self.expected_snapshot is not None:
+            handle_sources = {
+                index: (kernel32, handle)
+                for index, kernel32, handle, _byte_lease in self._windows_byte_locks
+                if index == 0
+            }
             current_snapshot = _assert_sqlite_snapshot_identity(
                 self.expected_snapshot,
                 self.path,
@@ -1738,6 +1947,7 @@ class SqliteTargetLease:
                 allow_removed_sidecars=True,
                 check_main_metadata=False,
                 check_sidecar_content=strict_sidecar_content,
+                handle_sources=handle_sources or None,
             )
             if strict_sidecar_content:
                 if (
@@ -1749,7 +1959,18 @@ class SqliteTargetLease:
                 if self.expected_snapshot.content_known[0] != current_snapshot.content_known[0]:
                     raise StatePolicyError("thread state database bytes unavailable during return gate")
             if strict_sidecar_content:
+                locked_sidecars = {
+                    index
+                    for index, _kernel32, _handle, _byte_lease in self._windows_byte_locks
+                    if index > 0
+                }
                 for index in range(1, 4):
+                    if index in locked_sidecars:
+                        # The byte-range lease is stronger than a second
+                        # byte read: SQLite may deny that read while keeping
+                        # its WAL/SHM handle open, but an outsider cannot
+                        # write or replace the locked generation.
+                        continue
                     if (
                         self.expected_snapshot.content_known[index]
                         != current_snapshot.content_known[index]
@@ -1768,6 +1989,7 @@ class SqliteTargetLease:
                 pass
             self._connection.close()
             self._connection = None
+        self._close_generation_locks()
         self._closed = True
 
     def __exit__(self, *_args: object) -> None:
@@ -1851,20 +2073,15 @@ class PermissionPolicySourceLease:
             )
             if candidate.exists() != (_path_compare_key(str(candidate)) in expected_sources):
                 raise StatePolicyError("permission policy source changed concurrently")
-        for source, expected_identity in self.permission_policy.source_identities:
+        if os.name == "nt" and len(self._windows_handles) != len(self.permission_policy.source_identities):
+            raise StatePolicyError("permission policy source lease is incomplete")
+        for source_index, (source, expected_identity) in enumerate(self.permission_policy.source_identities):
             path = Path(source)
             expected_hash = expected_hashes.get(source)
             if expected_hash is None or not path.exists():
                 raise StatePolicyError("permission policy source changed concurrently")
             if os.name == "nt":
-                matching = [
-                    (kernel32, handle)
-                    for kernel32, handle in self._windows_handles
-                    if _path_compare_key(source) == _path_compare_key(str(path))
-                ]
-                if len(matching) != 1:
-                    raise StatePolicyError("permission policy source lease is incomplete")
-                kernel32, handle = matching[0]
+                kernel32, handle = self._windows_handles[source_index]
                 if _publish_handle_info(kernel32, handle, path) != expected_identity:
                     raise StatePolicyError("permission policy source changed concurrently")
                 if _file_handle_identity(path) != expected_identity:
@@ -2706,7 +2923,11 @@ def _raise_thread_policy_change_after_commit(
     ) from policy_exc
 
 
-def _capture_sqlite_source(path: Path) -> SqliteSourceSnapshot:
+def _capture_sqlite_source(
+    path: Path,
+    *,
+    handle_sources: dict[int, tuple[object, wintypes.HANDLE]] | None = None,
+) -> SqliteSourceSnapshot:
     paths = (
         path,
         Path(str(path) + "-wal"),
@@ -2728,7 +2949,11 @@ def _capture_sqlite_source(path: Path) -> SqliteSourceSnapshot:
                 content_known.append(True)
                 continue
             try:
-                raw = candidate.read_bytes()
+                locked_source = (handle_sources or {}).get(index)
+                if locked_source is not None:
+                    raw = _read_publish_handle_bytes(*locked_source)
+                else:
+                    raw = candidate.read_bytes()
                 known = True
             except PermissionError:
                 if index == 0:
@@ -2765,6 +2990,36 @@ def _sqlite_snapshot_has_unknown_sidecars(snapshot: SqliteSourceSnapshot) -> boo
     return any(known[index] is not True for index in range(1, 4))
 
 
+def _missing_permission_policy_supplementals(permission_policy: PermissionPolicy) -> tuple[str, ...]:
+    home = Path(permission_policy.codex_home or "")
+    return tuple(
+        name
+        for name in PERMISSION_POLICY_JSON_NAMES
+        if not (home / name).is_file()
+    )
+
+
+def _sqlite_generation_unbounded(
+    initial: SqliteSourceSnapshot,
+    final: SqliteSourceSnapshot,
+) -> bool:
+    """Return whether a missing initial sidecar remains unleased at return.
+
+    A WAL database may legitimately have no rollback journal; that name is
+    not a source-set gap while the initial WAL generation is present.  Any
+    other missing name has no Windows no-create primitive, so a write-mode
+    caller must not publish a success envelope.
+    """
+    missing_initial = {
+        index
+        for index in range(1, 4)
+        if initial.identities[index] is None
+    }
+    if initial.identities[1] is not None and initial.identities[3] is None:
+        missing_initial.discard(3)
+    return any(final.identities[index] is None for index in missing_initial)
+
+
 def _connect_sqlite_bound(path: Path, expected_identity: tuple[int, int]) -> sqlite3.Connection:
     """Open SQLite and prove its main database resolves to the checked path."""
     try:
@@ -2792,9 +3047,13 @@ def _assert_sqlite_snapshot_identity(
     allow_removed_sidecars: bool = False,
     check_main_metadata: bool = True,
     check_sidecar_content: bool = False,
+    handle_sources: dict[int, tuple[object, wintypes.HANDLE]] | None = None,
 ) -> SqliteSourceSnapshot:
     """Reject path/identity replay between a checked snapshot and SQLite I/O."""
-    after = _capture_sqlite_source(path)
+    if handle_sources:
+        after = _capture_sqlite_source(path, handle_sources=handle_sources)
+    else:
+        after = _capture_sqlite_source(path)
     if before.identities[0] != after.identities[0] or (
         check_main_metadata and before.metadata[0] != after.metadata[0]
     ):
@@ -3469,11 +3728,17 @@ def run_policy(
     global_return_lease: StateTargetLease | None = None
     sqlite_return_lease: SqliteTargetLease | None = None
     pending_sqlite_return_lease: SqliteTargetLease | None = None
+    sqlite_changed = False
     try:
         if permission_policy is None:
             permission_policy = resolve_permission_policy(codex_home)
         elif not isinstance(permission_policy, PermissionPolicy):
             raise StatePolicyError("permission policy object is invalid")
+        if not check_only:
+            missing_policy_sources = _missing_permission_policy_supplementals(permission_policy)
+            if missing_policy_sources:
+                errors.extend(("generation-unbounded", "unsafe-partial"))
+                raise StatePolicyError("permission policy source generation is unbounded")
         global_path = codex_home / ".codex-global-state.json"
         db_path = codex_home / "state_5.sqlite"
         with WindowsNamedMutex():
@@ -3577,6 +3842,13 @@ def run_policy(
                     pending_sqlite_return_lease = candidate_return_lease
                 if thread_result.get("status") == "missing":
                     raise StatePolicyError("thread state source disappeared")
+                if not check_only:
+                    final_snapshot = thread_result.get("_sourceSnapshot")
+                    if not isinstance(final_snapshot, SqliteSourceSnapshot):
+                        raise StatePolicyError("thread state return snapshot is missing")
+                    if _sqlite_generation_unbounded(sqlite_snapshot, final_snapshot):
+                        errors.extend(("generation-unbounded", "unsafe-partial"))
+                        raise StatePolicyError("thread state source generation is unbounded")
             except BaseException:
                 if pending_sqlite_return_lease is not None:
                     pending_sqlite_return_lease.close()
@@ -3594,6 +3866,8 @@ def run_policy(
                     )
                 except BaseException:
                     sqlite_changed = True
+                if sqlite_changed and "unsafe-partial" not in errors:
+                    errors.append("unsafe-partial")
                 rolled_back = False
                 if (
                     not sqlite_changed
@@ -3638,14 +3912,24 @@ def run_policy(
                     pending_sqlite_return_lease = None
                     sqlite_return_lease.assert_unchanged()
             except BaseException:
-                if bool(global_result.get("changed")) or int(thread_result.get("changedCount", 0)) > 0:
+                if (
+                    sqlite_changed
+                    or bool(global_result.get("changed"))
+                    or int(thread_result.get("changedCount", 0)) > 0
+                ) and "unsafe-partial" not in errors:
                     errors.append("unsafe-partial")
                 raise
         ok = True
     except BaseException as exc:
         ok = False
+        if sqlite_changed and "unsafe-partial" not in errors:
+            errors.append("unsafe-partial")
         errors.append(_safe_error(exc))
-    changed = bool(global_result.get("changed")) or int(thread_result.get("changedCount", 0)) > 0
+    changed = (
+        sqlite_changed
+        or bool(global_result.get("changed"))
+        or int(thread_result.get("changedCount", 0)) > 0
+    )
     restart_required = changed
     global_drift_count = int(global_result.get("driftCount", 0))
     thread_drift_count = int(thread_result.get("driftCount", 0))
@@ -3724,6 +4008,11 @@ def run_policy(
         except (AttributeError, OSError, io.UnsupportedOperation):
             return False
 
+    def write_exact(target: TextIO, value: str) -> None:
+        written = target.write(value)
+        if not isinstance(written, int) or written != len(value):
+            raise StatePolicyError("state policy output short write")
+
     def emit_controlled_failure() -> None:
         # A pipe/real stdout cannot retract a provisional line.  Keep that
         # channel free of a misleading success envelope and send the single
@@ -3742,48 +4031,44 @@ def run_policy(
             mark_return_gate_failure(exc)
         rendered = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
         seekable_output = output_is_seekable()
+        if not seekable_output:
+            if not return_gate_failed:
+                mark_return_gate_failure(StatePolicyError("state policy output is not seekable"))
+            emit_controlled_failure()
+            return payload
         if return_gate_failed:
-            if seekable_output:
-                output.write(rendered)
-            else:
+            try:
+                write_exact(output, rendered)
+            except BaseException:
                 emit_controlled_failure()
             return payload
-        if seekable_output:
-            output.write(rendered)
+        try:
+            write_exact(output, rendered)
+        except BaseException as exc:
+            mark_return_gate_failure(exc)
+            rewritten = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
             try:
-                # A sink can run arbitrary code from write().  A second,
-                # consecutive assertion closes the gap where that callback
-                # creates a sidecar or policy source immediately after the
-                # first post-write assertion returns.
-                run_return_gates()
-                run_return_gates()
-            except BaseException as exc:
-                mark_return_gate_failure(exc)
-                rewritten = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
-                try:
-                    output.seek(0)
-                    output.truncate(0)
-                    output.write(rewritten)
-                except (AttributeError, OSError, io.UnsupportedOperation):
-                    # Non-seekable streams cannot retract a prior write; keep
-                    # the returned payload fail-closed and do not emit a third
-                    # line.
-                    pass
-        else:
-            try:
-                # A non-seekable protocol sink cannot retract a line.  Run
-                # two final gates before its first write; any failure is
-                # reported only through the controlled diagnostic channel.
-                run_return_gates()
-                run_return_gates()
-            except BaseException as exc:
-                mark_return_gate_failure(exc)
+                output.seek(0)
+                output.truncate(0)
+                write_exact(output, rewritten)
+            except BaseException:
                 emit_controlled_failure()
-                return payload
+            return payload
+        try:
+            # A sink can run arbitrary code from write().  A second,
+            # consecutive assertion closes the gap where that callback
+            # creates a sidecar or policy source immediately after the
+            # first post-write assertion returns.
+            run_return_gates()
+            run_return_gates()
+        except BaseException as exc:
+            mark_return_gate_failure(exc)
+            rewritten = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
             try:
-                output.write(rendered)
-            except BaseException as exc:
-                mark_return_gate_failure(exc)
+                output.seek(0)
+                output.truncate(0)
+                write_exact(output, rewritten)
+            except BaseException:
                 emit_controlled_failure()
         return payload
     finally:

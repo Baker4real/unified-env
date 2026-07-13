@@ -82,6 +82,20 @@ class CodexStatePolicyTests(unittest.TestCase):
             raise self.module.StatePolicyError(
                 "permission policy source changed concurrently: writer blocked by lease"
             ) from exc
+        sandbox_json = {
+            "read-only": "readOnly",
+            "workspace-write": "workspaceWrite",
+            "danger-full-access": "dangerFullAccess",
+        }[sandbox_mode]
+        policy_json = json.dumps(
+            {
+                "approvalPolicy": approval_policy,
+                "sandboxPolicy": {"type": sandbox_json},
+            },
+            separators=(",", ":"),
+        )
+        for supplemental in ("policy.json", "state-policy.json"):
+            (self.codex_home / supplemental).write_text(policy_json, encoding="utf-8")
 
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -119,6 +133,13 @@ class CodexStatePolicyTests(unittest.TestCase):
                 ("target-null", "vscode", "user", None, None, "keep-null"),
             ],
         )
+        conn.commit()
+        return conn
+
+    def create_wal_db(self) -> sqlite3.Connection:
+        conn = self.create_db()
+        self.assertEqual(conn.execute("pragma journal_mode=wal").fetchone()[0], "wal")
+        conn.execute("pragma wal_autocheckpoint=0")
         conn.commit()
         return conn
 
@@ -229,6 +250,8 @@ class CodexStatePolicyTests(unittest.TestCase):
 
     def test_permission_policy_missing_fails_closed(self) -> None:
         (self.codex_home / "config.toml").unlink()
+        (self.codex_home / "policy.json").unlink()
+        (self.codex_home / "state-policy.json").unlink()
         with self.assertRaisesRegex(self.module.StatePolicyError, "permission policy"):
             self.module.resolve_permission_policy(self.codex_home)
 
@@ -249,6 +272,8 @@ class CodexStatePolicyTests(unittest.TestCase):
 
     def test_run_policy_missing_permission_source_fails_closed(self) -> None:
         (self.codex_home / "config.toml").unlink()
+        (self.codex_home / "policy.json").unlink()
+        (self.codex_home / "state-policy.json").unlink()
         self.write_global(self.permission_drift())
         output = io.StringIO()
 
@@ -447,6 +472,8 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertEqual(self.global_path.read_bytes(), original)
 
     def test_permission_policy_rejects_new_supplemental_source_after_resolution(self) -> None:
+        (self.codex_home / "policy.json").unlink()
+        (self.codex_home / "state-policy.json").unlink()
         policy = self.module.resolve_permission_policy(self.codex_home)
         (self.codex_home / "policy.json").write_text(
             json.dumps(
@@ -463,6 +490,7 @@ class CodexStatePolicyTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "requires Windows reparse-point semantics")
     def test_permission_policy_rejects_dangling_supplemental_reparse_source(self) -> None:
         policy_path = self.codex_home / "policy.json"
+        policy_path.unlink(missing_ok=True)
         junction_target = self.root / "policy-target"
         junction_target.mkdir()
         command = (
@@ -1678,8 +1706,7 @@ class CodexStatePolicyTests(unittest.TestCase):
 
     def test_run_policy_rejects_main_sqlite_mutation_during_output(self) -> None:
         self.write_global(self.permission_drift())
-        connection = self.create_db()
-        connection.close()
+        keeper = self.create_wal_db()
 
         class MainOutput(io.StringIO):
             mutated = False
@@ -1704,13 +1731,58 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.assertEqual(len(output.getvalue().splitlines()), 1)
             self.assertFalse(json.loads(output.getvalue())["ok"])
         finally:
+            keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows byte-range leases")
+    def test_run_policy_blocks_nonzero_offset_sqlite_write_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
+        keeper.commit()
+        original_main = self.db_path.read_bytes()
+
+        class NonzeroOffsetOutput(io.StringIO):
+            attempted = False
+            blocked = False
+            mutated = False
+
+            def write(self, value: str) -> int:
+                if not self.attempted:
+                    self.attempted = True
+                    try:
+                        with self.db_path.open("r+b") as stream:
+                            stream.seek(1)
+                            stream.write(b"X")
+                            self.mutated = True
+                    except OSError:
+                        self.blocked = True
+                return super().write(value)
+
+        output = NonzeroOffsetOutput()
+        output.db_path = self.db_path
+        try:
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=output,
+            )
+        finally:
+            keeper.close()
+            if output.mutated:
+                self.db_path.write_bytes(original_main)
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        self.assertTrue(output.attempted)
+        self.assertTrue(output.blocked)
+        self.assertTrue(result["ok"])
+        self.assertTrue(json.loads(output.getvalue())["ok"])
+
     def test_run_policy_rejects_new_sidecar_during_output(self) -> None:
         self.write_global(self.permission_drift())
-        connection = self.create_db()
-        connection.close()
+        keeper = self.create_wal_db()
         journal_path = Path(str(self.db_path) + "-journal")
 
         class SidecarOutput(io.StringIO):
@@ -1735,13 +1807,13 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.assertEqual(len(output.getvalue().splitlines()), 1)
             self.assertFalse(json.loads(output.getvalue())["ok"])
         finally:
+            keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     def test_run_policy_rejects_policy_supplemental_created_during_output(self) -> None:
         self.write_global(self.permission_drift())
-        connection = self.create_db()
-        connection.close()
+        keeper = self.create_wal_db()
         policy_path = self.codex_home / "policy.json"
 
         class PolicyOutput(io.StringIO):
@@ -1769,7 +1841,70 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.assertEqual(len(output.getvalue().splitlines()), 1)
             self.assertFalse(json.loads(output.getvalue())["ok"])
         finally:
+            keeper.close()
             policy_path.unlink(missing_ok=True)
+
+    def test_run_policy_rejects_short_output_write(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+
+        class ShortOutput(io.StringIO):
+            short = True
+
+            def write(self, value: str) -> int:
+                if self.short:
+                    self.short = False
+                    partial = value[:-1]
+                    super().write(partial)
+                    return len(partial)
+                return super().write(value)
+
+        try:
+            output = ShortOutput()
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=output,
+            )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_run_policy_rejects_output_exception(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+
+        class RaisingOutput(io.StringIO):
+            raised = True
+
+            def write(self, value: str) -> int:
+                if self.raised:
+                    self.raised = False
+                    raise OSError("fixture output failure")
+                return super().write(value)
+
+        try:
+            output = RaisingOutput()
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=output,
+            )
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     def test_run_policy_rejects_sidecar_created_after_first_return_gate(self) -> None:
         self.write_global(self.permission_drift())
@@ -1803,7 +1938,8 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.assertIn("unsafe-partial", result["errors"])
             self.assertEqual(len(output.getvalue().splitlines()), 1)
             self.assertFalse(json.loads(output.getvalue())["ok"])
-            self.assertGreaterEqual(calls, 3)
+            self.assertIn("generation-unbounded", result["errors"])
+            self.assertEqual(calls, 0)
         finally:
             journal_path.unlink(missing_ok=True)
 
@@ -1819,9 +1955,9 @@ class CodexStatePolicyTests(unittest.TestCase):
             nonlocal calls
             calls += 1
             original_assert(lease, *args, **kwargs)
-            if calls == 2:
+            if calls == 5:
                 policy_path.write_text(
-                    '{"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite"}}',
+                    '{"approvalPolicy":"never","sandboxPolicy":{"type":"dangerFullAccess"}}',
                     encoding="utf-8",
                 )
 
@@ -1961,7 +2097,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertFalse(second["changed"])
         self.assertGreater(second["driftCount"], 0)
 
-    def test_write_mode_reports_postwrite_residual_drift_zero(self) -> None:
+    def test_write_mode_fails_closed_on_unbounded_sqlite_generation(self) -> None:
         self.write_global(self.permission_drift())
         connection = self.create_db()
         connection.close()
@@ -1974,11 +2110,10 @@ class CodexStatePolicyTests(unittest.TestCase):
             output=output,
         )
 
-        self.assertTrue(payload["ok"])
-        self.assertTrue(payload["converged"])
-        self.assertEqual(payload["driftCount"], 0)
-        self.assertEqual(payload["globalState"]["status"], "updated")
-        self.assertEqual(payload["threadState"]["driftCount"], 0)
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["converged"])
+        self.assertIn("generation-unbounded", payload["errors"])
+        self.assertIn("unsafe-partial", payload["errors"])
 
     def test_check_only_removes_new_snapshot_root_and_empty_ancestors(self) -> None:
         conn = self.create_db()
