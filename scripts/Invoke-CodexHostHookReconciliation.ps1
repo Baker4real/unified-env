@@ -14,6 +14,7 @@ $script:FixtureConcurrentReplaceKind = "content"
 $script:FixtureConcurrentReplaceRemaining = 0
 $script:FixtureCasFailureMode = $null
 $script:FixturePostCommitFailurePhase = $null
+$script:FixtureForbiddenAclPath = $null
 
 $script:LegacyHookNames = @(
     "codex-mobile-permission-guard.py",
@@ -178,9 +179,11 @@ function Initialize-FixtureTestSeams {
 
     $requestedPath = $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE
     $postCommitFailurePhase = $env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE
+    $forbiddenAclPath = $env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH
     if (
         [string]::IsNullOrWhiteSpace($requestedPath) -and
-        [string]::IsNullOrWhiteSpace($postCommitFailurePhase)
+        [string]::IsNullOrWhiteSpace($postCommitFailurePhase) -and
+        [string]::IsNullOrWhiteSpace($forbiddenAclPath)
     ) {
         return
     }
@@ -195,6 +198,19 @@ function Initialize-FixtureTestSeams {
             throw "fixture-only post-commit failure phase 无效"
         }
         $script:FixturePostCommitFailurePhase = $postCommitFailurePhase
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($forbiddenAclPath)) {
+        $fullForbiddenAclPath = Assert-NoReparsePath -Path $forbiddenAclPath -RequireLeaf
+        $hookRoot = [System.IO.Path]::GetFullPath((Join-Path $ResolvedCodexHome "hooks"))
+        if (-not $fullForbiddenAclPath.StartsWith("$hookRoot\", [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "fixture-only forbidden ACL path 必须位于当前 hooks 内"
+        }
+        $relativeForbiddenAclPath = [System.IO.Path]::GetRelativePath($hookRoot, $fullForbiddenAclPath).Replace('/', '\')
+        if (-not (Test-IsLegacyHookRelativePath -RelativePath $relativeForbiddenAclPath)) {
+            throw "fixture-only forbidden ACL path 必须是待退役 allowlist 路径"
+        }
+        $script:FixtureForbiddenAclPath = $fullForbiddenAclPath
     }
 
     if ([string]::IsNullOrWhiteSpace($requestedPath)) {
@@ -1022,6 +1038,10 @@ function Test-ProtectedAcl {
 function Set-ProtectedAcl {
     param([string]$Path)
 
+    if ($null -ne $script:FixtureForbiddenAclPath -and $Path.Equals($script:FixtureForbiddenAclPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "fixture-only retired path ACL mutation forbidden"
+    }
+
     if ((Test-ProtectedAcl -Path $Path).ok) {
         return
     }
@@ -1552,12 +1572,18 @@ function Invoke-Repair {
             throw "三资源提交完成后目标状态被并发改写"
         }
 
+        $retiredPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($name in $InitialState.legacyPresent) { [void]$retiredPathSet.Add((Join-Path $InitialState.hookDirectory $name)) }
+        foreach ($name in $InitialState.legacyDirectoriesPresent) { [void]$retiredPathSet.Add((Join-Path $InitialState.hookDirectory $name)) }
         $aclTargets = @(
             $InitialState.hooksPath,
             $InitialState.serenaContextPath,
             $InitialState.hookDirectory
         ) + @(
-            Get-ChildItem -LiteralPath $InitialState.hookDirectory -Recurse -Force | ForEach-Object { $_.FullName }
+            Get-ChildItem -LiteralPath $InitialState.hookDirectory -Recurse -Force | Where-Object {
+                $candidate = $_.FullName
+                -not $retiredPathSet.Contains($candidate)
+            } | ForEach-Object { $_.FullName }
         )
         $aclApplied = [System.Collections.Generic.List[string]]::new()
         foreach ($path in $aclTargets) {

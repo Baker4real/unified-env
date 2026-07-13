@@ -496,7 +496,12 @@ try {
     }
     $unknownFileHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks\keep-me.txt")
     $unknownNestedHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks\unknown-nested\keep.bin")
-    $repair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
+    try {
+        $env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH = Join-Path $healthyHome "hooks\$($legacyNames[0])"
+        $repair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
+    } finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH -ErrorAction SilentlyContinue
+    }
     Assert-True -Condition ($repair.mode -eq "Repair") -Message "Repair 结果 mode 错误"
     Assert-True -Condition ([bool]$repair.ok) -Message "Repair 未形成健康终态"
     Assert-True -Condition ([bool]$repair.changed) -Message "首次 Repair 应报告 changed=true"
@@ -552,6 +557,10 @@ try {
         (Join-Path ([System.IO.Directory]::GetParent($healthyHome).FullName) ".serena\contexts\codex-file-tools.yml")
     )) {
         Assert-True -Condition (@($manifest.aclTargets) -contains $path) -Message "manifest.aclTargets 漏记托管 ACL：$path"
+    }
+    foreach ($name in $legacyNames) {
+        $retiredPath = Join-Path $healthyHome "hooks\$name"
+        Assert-True -Condition (@($manifest.aclTargets) -notcontains $retiredPath) -Message "manifest.aclTargets 不得包含待退役路径：$retiredPath"
     }
     $aclBefore = Get-Content -LiteralPath (Join-Path $repair.evidencePath "acl-before.json") -Raw | ConvertFrom-Json -AsHashtable
     foreach ($path in @(
@@ -949,6 +958,23 @@ try {
     $legacyUnknownManifest = Get-Content -LiteralPath (Join-Path $legacyUnknownEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
     $unknownCacheEvidence = @($legacyUnknownManifest.preservedHookTree | Where-Object { $_.path -eq '__pycache__\keep-me.pyc' })
     Assert-True -Condition ($unknownCacheEvidence.Count -eq 1 -and $unknownCacheEvidence[0].sha256 -eq $unknownCacheHash) -Message "manifest 漏记 legacy 目录中的未知文件"
+    Assert-True -Condition (@($legacyUnknownManifest.aclTargets) -contains $unknownCachePath) -Message "未知 legacy 目录后代必须作为 preserved path 进入 aclTargets"
+    Assert-True -Condition (@($legacyUnknownManifest.aclTargets) -notcontains (Join-Path $legacyUnknownHome "hooks\__pycache__")) -Message "exact retired legacy 目录不得进入 aclTargets"
+    Assert-True -Condition (@($legacyUnknownManifest.aclTargets) -notcontains (Join-Path $legacyUnknownHome "hooks\__pycache__\codex-mobile-permission-guard.cpython-313.pyc")) -Message "known retired pyc 不得进入 aclTargets"
+
+    $forbidOnlyHome = Join-Path $testRoot "forbid-only-seam\.codex"
+    New-FixtureCodexHome -Root $forbidOnlyHome
+    $forbidOnlyThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH = Join-Path $forbidOnlyHome "hooks\keep-me.txt"
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $forbidOnlyHome | Out-Null
+    } catch {
+        $forbidOnlyThrew = $true
+    } finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_FORBID_ACL_PATH -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition $forbidOnlyThrew -Message "仅设置 forbidden ACL env 时 seam 未在 early return 前解析/授权"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $forbidOnlyHome "run-evidence"))) -Message "非法 forbid-only seam 在拒绝前产生 evidence"
 
     foreach ($serenaConfigCase in @(
         @{ Name = "missing-serena-args-repair"; Variant = "MissingSerenaArgs" },
