@@ -58,7 +58,7 @@ FILE_SHARE_READ = 0x00000001
 FILE_SHARE_WRITE = 0x00000002
 FILE_SHARE_DELETE = 0x00000004
 OPEN_EXISTING = 3
-OPEN_ALWAYS = 4
+CREATE_NEW = 1
 FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 FILE_FLAG_DELETE_ON_CLOSE = 0x04000000
@@ -71,7 +71,7 @@ SQLITE_SHM_LOCK_OFFSET = 120
 SQLITE_SHM_LOCK_LENGTH = 8
 ERROR_FILE_NOT_FOUND = 2
 ERROR_PATH_NOT_FOUND = 3
-ERROR_ALREADY_EXISTS = 183
+ERROR_FILE_EXISTS = 80
 SHORT_LEXICAL_SEGMENT = re.compile(r"^[^\\/]{1,8}~[0-9]+(?:\.[^\\/]+)?$", re.IGNORECASE)
 FILE_RENAME_INFORMATION_EX = 65
 FILE_RENAME_REPLACE_IF_EXISTS = 0x00000001
@@ -1690,9 +1690,9 @@ def _open_missing_sidecar_handle(
     the directory itself has no useful child-creation lock, so reserve the
     exact name with a delete-on-close handle and no sharing.  Any writer,
     replacement, or reparse-point creation attempt then fails with a sharing
-    violation while the lease is held.  ``OPEN_ALWAYS`` lets us distinguish a
-    genuine cold-start from a journal that appeared in the race immediately
-    before reservation.
+    violation while the lease is held.  ``CREATE_NEW`` is required here: if a
+    journal appears after the caller's existence check, the open must fail
+    without ever acquiring a handle to (and therefore deleting) that file.
     """
     if os.name != "nt":
         raise StatePolicyError("missing sidecar no-create lease is unavailable")
@@ -1715,19 +1715,21 @@ def _open_missing_sidecar_handle(
         GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS,
         0,
         None,
-        OPEN_ALWAYS,
+        CREATE_NEW,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_DELETE_ON_CLOSE,
         None,
     )
     invalid_handle = ctypes.c_void_p(-1).value
     if not handle or handle == invalid_handle:
         error = int(ctypes.get_last_error())
+        if error == ERROR_FILE_EXISTS:
+            # CREATE_NEW never returns an existing file handle.  In
+            # particular, do not close a handle here: doing so with
+            # DELETE_ON_CLOSE could remove a competitor's journal.
+            raise StatePolicyError("missing sidecar appeared before lease")
         if handle and handle != invalid_handle:
             kernel32.CloseHandle(handle)
         raise StatePolicyError(f"missing sidecar lease unavailable ({error})")
-    if int(ctypes.get_last_error()) == ERROR_ALREADY_EXISTS:
-        kernel32.CloseHandle(handle)
-        raise StatePolicyError("missing sidecar appeared before lease")
     return kernel32, handle
 
 
@@ -2130,7 +2132,7 @@ class SqliteTargetLease:
                 locked_sidecars = {
                     index
                     for index, _kernel32, _handle, _byte_lease in self._windows_byte_locks
-                    if index > 0
+                    if index > 0 and (not self.read_only or index != 2)
                 }
                 for index in range(1, 4):
                     if index in locked_sidecars:
@@ -4029,15 +4031,30 @@ def run_policy(
                 errors.append("unsafe-partial")
                 raise StatePolicyError("thread state sidecar bytes unavailable for write")
             if (
-                missing_sidecars == {3}
+                check_only
+                and missing_sidecars == {3}
+                and sqlite_snapshot.identities[1] is not None
+                and sqlite_snapshot.identities[2] is not None
+            ):
+                # Check-only is strictly read-only: do not create a physical
+                # journal placeholder merely to prove a no-create window.
+                # A legal WAL+SHM/no-journal generation therefore needs the
+                # write/repair path to establish that proof first.
+                errors.extend(("generation-unbounded", "repair-required"))
+                raise StatePolicyError(
+                    "thread state source generation is unbounded; repair required"
+                )
+            if (
+                not check_only
+                and missing_sidecars == {3}
                 and sqlite_snapshot.identities[1] is not None
                 and sqlite_snapshot.identities[2] is not None
             ):
                 # WAL+SHM with no rollback journal is a legal production
-                # generation.  Reserve the absent name in both write and
-                # check-only modes before any downstream publication, then
-                # recapture to close the snapshot-to-reservation race.  The
-                # lease masks its placeholder from logical snapshots.
+                # generation. Reserve the absent name in write mode before
+                # any downstream publication, then recapture to close the
+                # snapshot-to-reservation race. The lease masks its
+                # placeholder from logical snapshots.
                 try:
                     missing_journal_lease = SqliteMissingSidecarLease(
                         Path(str(db_path) + "-journal")
