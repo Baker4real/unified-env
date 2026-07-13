@@ -373,7 +373,7 @@
     {
       "relativePath": "hooks/codex-state-policy-guard.py",
       "liveRelativePath": "codex-state-policy-guard.py",
-      "sha256": "e0ae1878159a28fe4098c9e2687c824e2de985b42d03ef7f65931f74fc52a0f0",
+      "sha256": "f8d485f9d4ce2fe96b7af83311ddad453ea1aae0ff6c8586e5bef114d7b169cb",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
