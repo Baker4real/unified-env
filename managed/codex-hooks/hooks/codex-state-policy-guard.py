@@ -174,16 +174,26 @@ def _sha256(data: bytes) -> str:
 
 def _canonical_json_bytes(value: object) -> bytes:
     try:
-        return json.dumps(
+        text = json.dumps(
             value,
-            # ASCII escaping keeps lone surrogate evidence hashable without
-            # attempting to emit invalid UTF-8.  The original state bytes are
-            # still preserved and never rewritten for such unresolved values.
-            ensure_ascii=True,
+            ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
             allow_nan=False,
-        ).encode("utf-8")
+        )
+        try:
+            return text.encode("utf-8")
+        except UnicodeEncodeError:
+            # ASCII escaping keeps lone-surrogate evidence hashable without
+            # attempting to emit invalid UTF-8.  The original state bytes are
+            # still preserved and never rewritten for such unresolved values.
+            return json.dumps(
+                value,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise StatePolicyError("state generation serialization failed") from exc
 
