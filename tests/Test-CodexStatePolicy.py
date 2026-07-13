@@ -485,7 +485,8 @@ class CodexStatePolicyTests(unittest.TestCase):
     def test_legacy_destination_stays_drift_when_candidate_root_is_unavailable(self) -> None:
         state = {
             "thread-workspace-root-hints": {
-                "legacy": r"D:\Users\WINDOWS\Documents\Codex\legacy"
+                "legacy": r"D:\Users\WINDOWS\Documents\Codex\legacy",
+                "legacy-alternate": r"\\?\D:\Users\WINDOWS\Documents\Codex\legacy-alternate",
             }
         }
         self.write_global(state)
@@ -495,7 +496,7 @@ class CodexStatePolicyTests(unittest.TestCase):
             check_only=True,
             candidate_root=r"D:\Documents\Codex\uncontrolled",
         )
-        self.assertGreaterEqual(result["driftCount"], 1)
+        self.assertGreaterEqual(result["driftCount"], 2)
 
     def test_path_inventory_keeps_lone_surrogate_as_unresolved_evidence(self) -> None:
         value = r"C:\Users\WINDOWS\Documents\Codex\bad" + "\ud800"

@@ -207,8 +207,13 @@ def _is_projectless_source_value(value: str) -> bool:
 
 
 def _is_legacy_destination_value(value: str) -> bool:
+    normalized = value.replace("/", "\\")
+    for prefix in ("\\\\?\\", "\\\\.\\"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix) :]
+            break
     try:
-        path = PureWindowsPath(value)
+        path = PureWindowsPath(normalized)
     except (TypeError, ValueError):
         return False
     return _windows_is_same_or_child(path, LEGACY_DESTINATION_ROOT)
