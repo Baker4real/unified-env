@@ -207,6 +207,13 @@ class CodexStatePolicyTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows source lease semantics")
+    def test_permission_policy_source_lease_denies_delete(self) -> None:
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        with self.module.PermissionPolicySourceLease(policy):
+            with self.assertRaises(PermissionError):
+                (self.codex_home / "config.toml").unlink()
+
     def test_permission_policy_object_shape_fails_closed(self) -> None:
         digest = "0" * 64
         invalid = [
@@ -1382,6 +1389,108 @@ class CodexStatePolicyTests(unittest.TestCase):
                 "on-request",
             )
             verify.close()
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_global_target_lease_rejects_competitor_after_final_policy_check(self) -> None:
+        original = self.write_global(self.permission_drift())
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original_fingerprint = self.module._assert_permission_policy_fingerprint
+        calls = 0
+
+        def race_fingerprint(current_policy: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_fingerprint(current_policy)
+            if calls == 5:
+                competitor = self.root / "global-competitor.json"
+                competitor.write_bytes(b'{"competitor":true}')
+                try:
+                    os.replace(competitor, self.global_path)
+                except PermissionError as exc:
+                    raise self.module.StatePolicyError(
+                        "global target lease blocked competitor"
+                    ) from exc
+
+        with mock.patch.object(
+            self.module,
+            "_assert_permission_policy_fingerprint",
+            side_effect=race_fingerprint,
+        ):
+            with self.assertRaisesRegex(self.module.StatePolicyError, "target|rollback"):
+                self.module.update_global_state(
+                    self.global_path,
+                    self.backup_root,
+                    permission_policy=policy,
+                )
+        self.assertGreaterEqual(calls, 5)
+        self.assertNotEqual(self.global_path.read_bytes(), b'{"competitor":true}')
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_sqlite_target_lease_rejects_competitor_after_final_policy_check(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original_fingerprint = self.module._assert_permission_policy_fingerprint
+        calls = 0
+
+        def race_fingerprint(current_policy: object) -> None:
+            nonlocal calls
+            calls += 1
+            original_fingerprint(current_policy)
+            if calls == 5:
+                competitor = sqlite3.connect(self.db_path, timeout=0)
+                try:
+                    competitor.execute(
+                        "update threads set approval_mode='on-request' where id='target-a'"
+                    )
+                    competitor.commit()
+                except sqlite3.OperationalError as exc:
+                    raise self.module.StatePolicyError(
+                        "sqlite target lease blocked competitor"
+                    ) from exc
+                finally:
+                    competitor.close()
+
+        try:
+            with mock.patch.object(
+                self.module,
+                "_assert_permission_policy_fingerprint",
+                side_effect=race_fingerprint,
+            ):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "target|rollback"):
+                    self.module.update_thread_state(
+                        self.db_path,
+                        permission_policy=policy,
+                    )
+            self.assertGreaterEqual(calls, 5)
+        finally:
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_sqlite_write_fails_closed_when_sidecar_content_is_unknown(self) -> None:
+        connection = self.create_db()
+        connection.close()
+        original_capture = self.module._capture_sqlite_source
+
+        def unavailable(path: Path):
+            snapshot = original_capture(path)
+            known = list(snapshot.content_known)
+            payload = list(snapshot.payload)
+            payload[1] = b"synthetic-wal"
+            known[1] = False
+            return self.module.SqliteSourceSnapshot(
+                payload=tuple(payload),
+                identities=snapshot.identities,
+                metadata=snapshot.metadata,
+                content_known=tuple(known),
+            )
+
+        try:
+            with mock.patch.object(self.module, "_capture_sqlite_source", side_effect=unavailable):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "sidecar|unavailable"):
+                    self.module.update_thread_state(self.db_path)
         finally:
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)

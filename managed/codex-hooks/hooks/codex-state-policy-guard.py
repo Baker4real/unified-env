@@ -1569,6 +1569,106 @@ def _read_publish_handle_bytes(kernel32: object, handle: wintypes.HANDLE) -> byt
     return b"".join(chunks)
 
 
+class StateTargetLease:
+    """Hold a published state target against replacement until the caller returns."""
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        expected_identity: tuple[int, int],
+        expected_hash: str,
+    ) -> None:
+        self.path = path
+        self.expected_identity = expected_identity
+        self.expected_hash = expected_hash
+        self._windows_handle: tuple[object, wintypes.HANDLE] | None = None
+        self._portable_stream: object | None = None
+        self._closed = False
+
+    def __enter__(self) -> "StateTargetLease":
+        try:
+            _assert_check_only_d_path_without_reparse(
+                self.path,
+                name="state target lease",
+            )
+            if os.name == "nt":
+                # No write or delete sharing: an external writer cannot mutate,
+                # replace, or unlink the published target while it is leased.
+                kernel32, handle = _open_publish_handle(
+                    self.path,
+                    desired_access=GENERIC_READ,
+                    share_mode=FILE_SHARE_READ,
+                )
+                try:
+                    actual_identity = _publish_handle_info(kernel32, handle, self.path)
+                    actual_hash = _sha256(_read_publish_handle_bytes(kernel32, handle))
+                    if (
+                        actual_identity != self.expected_identity
+                        or actual_hash != self.expected_hash
+                    ):
+                        raise StatePolicyError("state target changed before lease")
+                except BaseException:
+                    _close_publish_handle(kernel32, handle)
+                    raise
+                self._windows_handle = (kernel32, handle)
+            else:
+                stream = self.path.open("rb")
+                try:
+                    actual_identity = _file_handle_identity(self.path)
+                    actual_hash = _sha256(stream.read())
+                    if (
+                        actual_identity != self.expected_identity
+                        or actual_hash != self.expected_hash
+                    ):
+                        raise StatePolicyError("state target changed before lease")
+                    stream.seek(0)
+                except BaseException:
+                    stream.close()
+                    raise
+                self._portable_stream = stream
+        except BaseException:
+            self.close()
+            raise
+        return self
+
+    def assert_unchanged(self) -> None:
+        if self._closed:
+            raise StatePolicyError("state target lease is closed")
+        if os.name == "nt":
+            if self._windows_handle is None:
+                raise StatePolicyError("state target lease is incomplete")
+            kernel32, handle = self._windows_handle
+            if _publish_handle_info(kernel32, handle, self.path) != self.expected_identity:
+                raise StatePolicyError("state target changed concurrently")
+            if _sha256(_read_publish_handle_bytes(kernel32, handle)) != self.expected_hash:
+                raise StatePolicyError("state target changed concurrently")
+            return
+        if (
+            _file_handle_identity(self.path) != self.expected_identity
+            or _sha256(self.path.read_bytes()) != self.expected_hash
+        ):
+            raise StatePolicyError("state target changed concurrently")
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        if self._windows_handle is not None:
+            kernel32, handle = self._windows_handle
+            _close_publish_handle(kernel32, handle)
+            self._windows_handle = None
+        if self._portable_stream is not None:
+            try:
+                self._portable_stream.close()  # type: ignore[attr-defined]
+            except OSError:
+                pass
+            self._portable_stream = None
+        self._closed = True
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
 class PermissionPolicySourceLease:
     """Hold policy source handles without sharing write access during a state update."""
 
@@ -1595,8 +1695,8 @@ class PermissionPolicySourceLease:
                 if os.name == "nt":
                     kernel32, handle = _open_publish_handle(
                         path,
-                        desired_access=GENERIC_READ | DELETE_ACCESS,
-                        share_mode=FILE_SHARE_READ | FILE_SHARE_DELETE,
+                        desired_access=GENERIC_READ,
+                        share_mode=FILE_SHARE_READ,
                     )
                     try:
                         actual_identity = _publish_handle_info(kernel32, handle, path)
@@ -2182,6 +2282,7 @@ def _update_global_state_impl(
         replacement = _json_bytes(normalized)
         temp_path = _write_same_directory_temp(path, replacement)
         policy_lease: PermissionPolicySourceLease | None = None
+        target_lease: StateTargetLease | None = None
         try:
             try:
                 create_backup(backup_root, original)
@@ -2224,8 +2325,30 @@ def _update_global_state_impl(
             ):
                 raise StatePolicyError("global state postwrite verification failed")
             try:
+                target_lease = StateTargetLease(
+                    path,
+                    expected_identity=published_identity,
+                    expected_hash=_sha256(published),
+                )
+                target_lease.__enter__()
+                target_lease.assert_unchanged()
+            except StatePolicyError as target_exc:
+                if target_lease is not None:
+                    target_lease.close()
+                    target_lease = None
+                _raise_global_policy_change_after_publish(
+                    path,
+                    original,
+                    published,
+                    published_identity,
+                    target_exc,
+                )
+            try:
                 _assert_permission_policy_fingerprint(permission_policy)
             except StatePolicyError as policy_exc:
+                if target_lease is not None:
+                    target_lease.close()
+                    target_lease = None
                 _raise_global_policy_change_after_publish(
                     path,
                     original,
@@ -2251,6 +2374,9 @@ def _update_global_state_impl(
                 + published_summary["heartbeatChangedCount"]
             )
             try:
+                if target_lease is None:
+                    raise StatePolicyError("global state target lease is missing")
+                target_lease.assert_unchanged()
                 _assert_permission_policy_fingerprint(permission_policy)
                 return {
                     "status": "updated",
@@ -2267,6 +2393,9 @@ def _update_global_state_impl(
                     **summary,
                 }
             except StatePolicyError as policy_exc:
+                if target_lease is not None:
+                    target_lease.close()
+                    target_lease = None
                 _raise_global_policy_change_after_publish(
                     path,
                     original,
@@ -2275,6 +2404,8 @@ def _update_global_state_impl(
                     policy_exc,
                 )
         finally:
+            if target_lease is not None:
+                target_lease.close()
             if policy_lease is not None:
                 policy_lease.close()
             temp_path.unlink(missing_ok=True)
@@ -2453,12 +2584,14 @@ def _raise_thread_policy_change_after_commit(
         original_rows,
         permission_policy,
     )
+    target_change = "target lease" in str(policy_exc).casefold() or "target" in str(policy_exc).casefold()
+    subject = "thread state target lease" if target_change else "permission policy"
     if rolled_back:
         raise StatePolicyError(
-            "permission policy changed after thread commit; state rolled back"
+            f"{subject} changed after thread commit; state rolled back"
         ) from policy_exc
     raise StatePolicyError(
-        "permission policy changed after thread commit; rollback failed"
+        f"{subject} changed after thread commit; rollback failed"
     ) from policy_exc
 
 
@@ -2706,6 +2839,8 @@ def _update_thread_state_impl(
     initial_snapshot = _capture_sqlite_source(path)
     if initial_snapshot.payload[0] is None:
         return {"status": "missing", "changedCount": 0, "wouldChangeCount": 0, "driftCount": 0}
+    if _sqlite_snapshot_has_unknown_sidecars(initial_snapshot):
+        raise StatePolicyError("thread state sidecar bytes unavailable for write")
     if check_only:
         if snapshot_root is None:
             raise StatePolicyError("thread state check snapshot root is required")
@@ -2729,6 +2864,7 @@ def _update_thread_state_impl(
     source_bytes_hash = _sha256(initial_snapshot.payload[0] or b"")
     conn = _connect_sqlite_bound(path, source_identity)
     policy_lease: PermissionPolicySourceLease | None = None
+    return_lease_active = False
     try:
         conn.execute("pragma busy_timeout=1500")
         _assert_sqlite_snapshot_identity(
@@ -2751,6 +2887,7 @@ def _update_thread_state_impl(
                 path,
                 allow_new_sidecars=True,
                 check_main_metadata=False,
+                check_sidecar_content=True,
             )
             _assert_permission_policy_unchanged(permission_policy)
             identities = select_thread_updates(conn, permission_policy)
@@ -2795,6 +2932,11 @@ def _update_thread_state_impl(
             if _sha256(path.read_bytes()) != source_bytes_hash:
                 raise StatePolicyError("thread state concurrent update")
             transaction_snapshot = _capture_sqlite_source(path)
+            # SQLite may own the WAL/SHM handles after the update starts, so a
+            # late byte read can become unavailable even though the initial
+            # source snapshot was fully known.  The initial fail-closed gate,
+            # plus the identity/metadata checks below, anchors this generation
+            # without rejecting a legitimate SQLite-owned sidecar.
             if before_commit is not None:
                 before_commit()
             policy_lease = PermissionPolicySourceLease(permission_policy)
@@ -2844,6 +2986,16 @@ def _update_thread_state_impl(
         except BaseException:
             conn.rollback()
             raise
+        try:
+            # Keep a RESERVED SQLite writer lease across every postcommit gate
+            # and the return expression.  A competing SQLite writer must fail
+            # instead of changing rows after the final policy check.
+            conn.execute("begin immediate")
+            return_lease_active = True
+        except sqlite3.OperationalError as exc:
+            raise StatePolicyError("thread state target lease unavailable") from exc
+        if _file_handle_identity(path) != source_identity:
+            raise StatePolicyError("thread state concurrent replacement")
         verify_count = int(
             conn.execute(
                 f"select count(*) from ({THREAD_DRIFT_SQL})",
@@ -2874,6 +3026,9 @@ def _update_thread_state_impl(
                 "driftCount": verify_count,
             }
         except StatePolicyError as policy_exc:
+            if return_lease_active:
+                conn.rollback()
+                return_lease_active = False
             _raise_thread_policy_change_after_commit(
                 conn,
                 path,
@@ -2889,6 +3044,11 @@ def _update_thread_state_impl(
             raise StatePolicyError("thread state database busy") from exc
         raise StatePolicyError("thread state database operation failed") from exc
     finally:
+        if return_lease_active:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
         if policy_lease is not None:
             policy_lease.close()
         conn.close()
@@ -3092,12 +3252,14 @@ def _raise_global_policy_change_after_publish(
         expected_hash=_sha256(published),
         expected_identity=published_identity,
     )
+    target_change = "target lease" in str(policy_exc).casefold() or "target" in str(policy_exc).casefold()
+    subject = "global state target lease" if target_change else "permission policy"
     if rolled_back:
         raise StatePolicyError(
-            "permission policy changed after global publish; state rolled back"
+            f"{subject} changed after global publish; state rolled back"
         ) from policy_exc
     raise StatePolicyError(
-        "permission policy changed after global publish; rollback failed"
+        f"{subject} changed after global publish; rollback failed"
     ) from policy_exc
 
 
