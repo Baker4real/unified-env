@@ -449,6 +449,33 @@ for (const target of postWriteDiscovery.targets) {
   );
 }
 
+// A concurrent actor may restore the original bytes but touch the mtime. It
+// must not be treated as an already-restored entry during rollback.
+const rollbackMtimeApply = overlay.applyChangePlan(postWritePlan, fixtureApplyOptions({ dryRun: false }));
+assert.equal(rollbackMtimeApply.changed, 6);
+const rollbackMtimeManifest = JSON.parse(fs.readFileSync(rollbackMtimeApply.manifestPath, 'utf8'));
+const rollbackMtimeEntry = rollbackMtimeManifest.entries[0];
+const rollbackMtimeTarget = rollbackMtimeEntry.path;
+fs.writeFileSync(rollbackMtimeTarget, postWritePlan.changes[0].original, 'utf8');
+fs.utimesSync(
+  rollbackMtimeTarget,
+  new Date(Number(rollbackMtimeEntry.originalMtimeMs) + 2000),
+  new Date(Number(rollbackMtimeEntry.originalMtimeMs) + 2000),
+);
+const rollbackMtimeResult = overlay.rollbackManifest(rollbackMtimeApply.manifestPath);
+assert.equal(rollbackMtimeResult.status, 'unsafe-partial');
+assert.ok(rollbackMtimeResult.errors.some((error) => error.reason === 'rollback-mtime-cas-conflict'));
+assert.equal(
+  sha256(fs.readFileSync(rollbackMtimeTarget)),
+  sha256(Buffer.from(postWritePlan.changes[0].original, 'utf8')),
+);
+fs.utimesSync(
+  rollbackMtimeTarget,
+  new Date(Number(rollbackMtimeEntry.originalMtimeMs)),
+  new Date(Number(rollbackMtimeEntry.originalMtimeMs)),
+);
+assert.equal(fs.statSync(rollbackMtimeTarget).mtimeMs, Number(rollbackMtimeEntry.originalMtimeMs));
+
 function snapshotFiles() {
   return targets.reduce((snapshot, target) => {
     snapshot[target.path] = fs.existsSync(target.path)

@@ -618,6 +618,22 @@ function rollbackManifest(manifestPath, options = {}) {
       const currentBytes = fs.readFileSync(entry.path);
       const currentSha256 = sha256(currentBytes);
       if (currentSha256 === entry.originalSha256) {
+        if (entry.originalMtimeMs !== undefined) {
+          const currentMtimeMs = mtimeFingerprint(fs.statSync(entry.path).mtimeMs);
+          if (currentMtimeMs !== Number(entry.originalMtimeMs)) {
+            const message = `compare-and-swap rollback mtime conflict at ${entry.path}: expected ${entry.originalMtimeMs}, got ${currentMtimeMs}`;
+            entry.status = 'rollback-failed';
+            entry.rollbackError = message;
+            errors.push({
+              path: entry.path,
+              reason: 'rollback-mtime-cas-conflict',
+              message,
+              expectedMtimeMs: Number(entry.originalMtimeMs),
+              currentMtimeMs,
+            });
+            continue;
+          }
+        }
         entry.status = 'restored';
         skipped += 1;
         continue;
