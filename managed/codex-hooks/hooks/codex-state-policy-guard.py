@@ -705,6 +705,10 @@ def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object]
     sources: list[tuple[str, object]] = []
     config_path = codex_home / "config.toml"
     if config_path.exists():
+        _assert_check_only_d_path_without_reparse(
+            config_path,
+            name="permission policy config",
+        )
         if not config_path.is_file() or config_path.is_symlink():
             raise StatePolicyError("permission policy config path is not a regular file")
         if tomllib is None:
@@ -718,6 +722,10 @@ def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object]
         policy_path = codex_home / name
         if not policy_path.exists():
             continue
+        _assert_check_only_d_path_without_reparse(
+            policy_path,
+            name="permission policy source",
+        )
         if not policy_path.is_file() or policy_path.is_symlink():
             raise StatePolicyError("permission policy source is not a regular file")
         try:
