@@ -92,6 +92,8 @@ const surfaces = [
 
 removeTree(evidenceRoot);
 fs.mkdirSync(fixtureRoot, { recursive: true });
+const fixtureCatalogPath = path.join(evidenceRoot, 'fixture-catalog.json');
+fs.writeFileSync(fixtureCatalogPath, `${JSON.stringify(fixtureCatalog, null, 2)}\n`, 'utf8');
 
 for (const surface of surfaces) {
   for (const role of ['yeet', 'github']) {
@@ -108,7 +110,7 @@ assert.equal(discovered.errors?.length ?? 0, 0);
 const targets = discovered.targets ?? discovered;
 assert.equal(targets.length, 6);
 
-const plan = overlay.buildChangePlan(discovered, fixtureCatalog);
+const plan = overlay.buildChangePlan(discovered, fixtureCatalogPath);
 assert.equal(plan.errors.length, 0);
 assert.equal(plan.changes.length, 6);
 
@@ -124,7 +126,7 @@ assert.ok(applied.evidencePaths?.length >= 6);
 
 const secondPlan = overlay.buildChangePlan(
   overlay.discoverTargets(fixtureRoot),
-  fixtureCatalog,
+  fixtureCatalogPath,
 );
 assert.equal(secondPlan.errors.length, 0);
 assert.equal(secondPlan.changes.length, 0);
@@ -149,9 +151,10 @@ forgedChange.path = externalTarget;
 forgedChange.codexRoot = codexRoot;
 const forgedApplyPlan = overlay.applyChangePlan(
   { changes: [forgedChange], skipped: [], errors: [] },
-  { dryRun: false, evidenceRoot },
+  { dryRun: true, evidenceRoot },
 );
 assert.equal(forgedApplyPlan.changed, 0);
+assert.equal(forgedApplyPlan.blocked, true);
 assert.ok(forgedApplyPlan.errors.some((error) => error.reason === 'unsupported-plugin-surface'));
 // A patched marker is not sufficient when the catalog document contains a
 // forbidden force/patch-stack operation.
@@ -246,26 +249,51 @@ for (const surface of surfaces) {
   }
 }
 const postWriteDiscovery = overlay.discoverTargets(postWriteRoot);
-const postWritePlan = overlay.buildChangePlan(postWriteDiscovery, fixtureCatalog);
-assert.throws(
-  () => overlay.applyChangePlan(postWritePlan, {
-    dryRun: false,
-    evidenceRoot: 'D:\\Codex\\.codex\\run-evidence-outside-policy',
-  }),
-  /evidenceRoot must stay under/,
-);
+const postWritePlan = overlay.buildChangePlan(postWriteDiscovery, fixtureCatalogPath);
+const outsideEvidenceResult = overlay.applyChangePlan(postWritePlan, {
+  dryRun: true,
+  evidenceRoot: 'D:\\Codex\\.codex\\run-evidence-outside-policy',
+});
+assert.equal(outsideEvidenceResult.blocked, true);
+assert.ok(outsideEvidenceResult.errors.some((error) => /evidenceRoot must stay under/.test(error.message)));
 const replacementTamper = JSON.parse(JSON.stringify(postWritePlan.changes[0]));
 replacementTamper.replacement = 'tampered replacement';
 const replacementTamperResult = overlay.applyChangePlan(
-  { changes: [replacementTamper], skipped: [], errors: [] },
+  { changes: [replacementTamper], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
   { dryRun: false, evidenceRoot },
 );
 assert.equal(replacementTamperResult.changed, 0);
 assert.ok(replacementTamperResult.errors.some((error) => error.reason === 'replacement-plan-fingerprint-mismatch'));
+const forgedCanonicalChange = JSON.parse(JSON.stringify(postWritePlan.changes[0]));
+forgedCanonicalChange.replacement = `${forgedCanonicalChange.replacement}\n\`git push --force-with-lease=origin/patch-stack\`\n`;
+forgedCanonicalChange.replacementSha256 = sha256(forgedCanonicalChange.replacement);
+forgedCanonicalChange.catalogEntry = {
+  role: forgedCanonicalChange.role,
+  patchedDocument: forgedCanonicalChange.replacement,
+  patchedSha256: forgedCanonicalChange.replacementSha256,
+};
+const forgedCanonicalResult = overlay.applyChangePlan(
+  { changes: [forgedCanonicalChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
+  { dryRun: false, evidenceRoot },
+);
+assert.equal(forgedCanonicalResult.changed, 0);
+assert.ok(forgedCanonicalResult.errors.some((error) => error.reason === 'canonical-replacement-mismatch'));
+const pairChange = postWritePlan.changes[0];
+const pairRole = pairChange.role === 'yeet' ? 'github' : 'yeet';
+const pairPath = path.join(pairChange.surfaceDirectory, 'skills', pairRole, 'SKILL.md');
+const pairOriginal = fs.readFileSync(pairPath);
+fs.writeFileSync(pairPath, 'unknown pair fingerprint\n', 'utf8');
+const pairFingerprintResult = overlay.applyChangePlan(
+  { changes: [pairChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
+  { dryRun: false, evidenceRoot },
+);
+assert.equal(pairFingerprintResult.changed, 0);
+assert.ok(pairFingerprintResult.errors.some((error) => error.reason === 'canonical-pair-fingerprint-mismatch'));
+fs.writeFileSync(pairPath, pairOriginal);
 const casTarget = postWritePlan.changes[0].path;
 fs.writeFileSync(casTarget, 'user changed before apply\n', 'utf8');
 const casResult = overlay.applyChangePlan(
-  { changes: [postWritePlan.changes[0]], skipped: [], errors: [] },
+  { changes: [postWritePlan.changes[0]], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef },
   { dryRun: false, evidenceRoot },
 );
 assert.equal(casResult.changed, 0);
@@ -324,7 +352,7 @@ function assertUnchanged(snapshot) {
 const unknownTarget = targets[0].path;
 fs.writeFileSync(unknownTarget, 'unknown upstream content\n', 'utf8');
 let unknownDiscovery = overlay.discoverTargets(fixtureRoot);
-let unknownPlan = overlay.buildChangePlan(unknownDiscovery, fixtureCatalog);
+let unknownPlan = overlay.buildChangePlan(unknownDiscovery, fixtureCatalogPath);
 assert.ok(unknownPlan.errors.some((error) => error.reason === 'unknown-input-fingerprint'));
 const unknownSnapshot = snapshotFiles();
 const unknownApply = overlay.applyChangePlan(unknownPlan, { dryRun: false, evidenceRoot });
@@ -335,7 +363,7 @@ fs.writeFileSync(unknownTarget, patchedDocuments[unknownTarget], 'utf8');
 
 // A stable marker alone is not proof that the file is one of our patched documents.
 fs.writeFileSync(unknownTarget, '<!-- codex-github-default-branch-overlay: v1 -->\nforged\n', 'utf8');
-let forgedPlan = overlay.buildChangePlan(overlay.discoverTargets(fixtureRoot), fixtureCatalog);
+let forgedPlan = overlay.buildChangePlan(overlay.discoverTargets(fixtureRoot), fixtureCatalogPath);
 assert.ok(forgedPlan.errors.some((error) => error.reason === 'unknown-input-fingerprint'));
 const forgedSnapshot = snapshotFiles();
 const forgedApply = overlay.applyChangePlan(forgedPlan, { dryRun: false, evidenceRoot });
@@ -355,7 +383,7 @@ for (const target of targets) {
 const missingPair = targets.find((target) => target.role === 'github');
 fs.unlinkSync(missingPair.path);
 const missingDiscovery = overlay.discoverTargets(fixtureRoot);
-const missingPlan = overlay.buildChangePlan(missingDiscovery, fixtureCatalog);
+const missingPlan = overlay.buildChangePlan(missingDiscovery, fixtureCatalogPath);
 assert.ok(
   (missingDiscovery.errors ?? []).some((error) => error.reason === 'missing-paired-skill')
     || missingPlan.errors.some((error) => error.reason === 'missing-paired-skill'),

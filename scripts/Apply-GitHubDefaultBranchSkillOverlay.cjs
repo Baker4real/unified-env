@@ -222,6 +222,20 @@ function validateCatalog(catalogOrPath) {
   return { ...catalog, roles };
 }
 
+function catalogReference(catalogOrPath, validatedCatalog) {
+  if (typeof catalogOrPath === 'string') {
+    const catalogPath = resolveAbsolute(catalogOrPath);
+    return {
+      path: catalogPath,
+      sha256: sha256(fs.readFileSync(catalogPath)),
+    };
+  }
+  return {
+    path: path.join(__dirname, 'github-default-branch-skill-overlay-catalog.json'),
+    sha256: sha256(JSON.stringify(validatedCatalog)),
+  };
+}
+
 function walkFiles(root, output = []) {
   if (!fs.existsSync(root)) return output;
   const stat = fs.statSync(root);
@@ -309,6 +323,7 @@ function buildChangePlan(targetInput, catalogOrPath) {
     const catalogErrors = error instanceof CatalogValidationError ? error.errors : [{ reason: 'catalog-invalid', message: error.message }];
     return { changes: [], skipped: [], errors: [...errors, ...catalogErrors], catalogError: true };
   }
+  const catalogRef = catalogReference(catalogOrPath, catalog);
 
   const seenPaths = new Set();
   for (const target of discovered.targets) {
@@ -371,7 +386,7 @@ function buildChangePlan(targetInput, catalogOrPath) {
     });
   }
 
-  return { changes, skipped, errors };
+  return { changes, skipped, errors, catalogRef };
 }
 
 function ensureDirectory(directory) {
@@ -520,7 +535,27 @@ function rollbackManifest(manifestPath, options = {}) {
   };
 }
 
-function validateApplyChangePlan(plan) {
+function resolveCanonicalCatalog(plan, options = {}) {
+  const requestedPath = options.catalogPath || plan.catalogRef?.path || path.join(__dirname, 'github-default-branch-skill-overlay-catalog.json');
+  const catalogPath = resolveAbsolute(requestedPath);
+  const defaultCatalogPath = resolveAbsolute(path.join(__dirname, 'github-default-branch-skill-overlay-catalog.json'));
+  if (catalogPath.toLowerCase() !== defaultCatalogPath.toLowerCase()
+    && !isControlledEvidencePath(catalogPath)) {
+    throw new Error(`canonical catalog path is outside the allowed roots: ${catalogPath}`);
+  }
+  const catalogBytes = fs.readFileSync(catalogPath);
+  const catalogSha256 = sha256(catalogBytes);
+  if (plan.catalogRef?.sha256 && catalogSha256 !== String(plan.catalogRef.sha256).toUpperCase()) {
+    throw new Error(`canonical catalog fingerprint drift: expected ${plan.catalogRef.sha256}, got ${catalogSha256}`);
+  }
+  return {
+    path: catalogPath,
+    sha256: catalogSha256,
+    catalog: validateCatalog(catalogPath),
+  };
+}
+
+function validateApplyChangePlan(plan, canonicalCatalog) {
   const errors = [];
   const seenPaths = new Set();
   for (const [index, change] of (Array.isArray(plan.changes) ? plan.changes : []).entries()) {
@@ -572,6 +607,12 @@ function validateApplyChangePlan(plan) {
     if (typeof change.original === 'string' && sha256(change.original) !== String(change.originalSha256).toUpperCase()) {
       errors.push({ path: filePath, reason: 'original-plan-fingerprint-mismatch' });
     }
+    const canonicalEntry = canonicalCatalog.roles[change.role].find((entry) => (
+      entry.upstreamSha256 === String(change.originalSha256).toUpperCase()
+    ));
+    if (!canonicalEntry) {
+      errors.push({ path: filePath, role: change.role, reason: 'canonical-target-fingerprint-mismatch' });
+    }
     if (typeof change.replacement !== 'string') {
       errors.push({ path: filePath, reason: 'missing-replacement-document' });
     } else {
@@ -582,11 +623,17 @@ function validateApplyChangePlan(plan) {
       if (!change.replacement.includes(STABLE_MARKER)) {
         errors.push({ path: filePath, reason: 'replacement-marker-mismatch' });
       }
+      if (canonicalEntry && (canonicalEntry.patchedSha256 !== String(change.replacementSha256).toUpperCase()
+        || canonicalEntry.patchedDocument !== change.replacement)) {
+        errors.push({ path: filePath, reason: 'canonical-replacement-mismatch' });
+      }
     }
-    if (!change.catalogEntry || change.catalogEntry.role !== change.role
-      || change.catalogEntry.patchedDocument !== change.replacement
-      || change.catalogEntry.patchedSha256 !== String(change.replacementSha256 || '').toUpperCase()) {
-      errors.push({ path: filePath, reason: 'catalog-replacement-mismatch' });
+    const pairBytes = fs.readFileSync(pairedPath);
+    const pairSha256 = sha256(pairBytes);
+    if (!canonicalCatalog.roles[pairedRole].some((entry) => (
+      entry.upstreamSha256 === pairSha256 || entry.patchedSha256 === pairSha256
+    ))) {
+      errors.push({ path: pairedPath, role: pairedRole, reason: 'canonical-pair-fingerprint-mismatch' });
     }
   }
   return errors;
@@ -608,6 +655,38 @@ function applyChangePlan(plan, options = {}) {
       evidencePaths: [],
     };
   }
+  if (planned.length === 0) {
+    return { ok: true, changed: 0, skipped: alreadySkipped, failed: 0, errors: [], evidencePaths: [] };
+  }
+
+  let canonicalCatalog;
+  try {
+    canonicalCatalog = resolveCanonicalCatalog(safePlan, options).catalog;
+    assertControlledEvidencePath(options.evidenceRoot || DEFAULT_EVIDENCE_ROOT, 'evidenceRoot');
+  } catch (error) {
+    return {
+      ok: false,
+      blocked: true,
+      changed: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [{ reason: 'canonical-validation-failed', message: error.message }],
+      evidencePaths: [],
+    };
+  }
+  const boundaryErrors = validateApplyChangePlan(safePlan, canonicalCatalog);
+  if (boundaryErrors.length > 0) {
+    return {
+      ok: false,
+      blocked: true,
+      changed: 0,
+      skipped: 0,
+      failed: 0,
+      errors: boundaryErrors,
+      evidencePaths: [],
+    };
+  }
+
   if (options.dryRun) {
     return {
       ok: true,
@@ -617,22 +696,6 @@ function applyChangePlan(plan, options = {}) {
       planned: planned.length,
       failed: 0,
       errors: [],
-      evidencePaths: [],
-    };
-  }
-  if (planned.length === 0) {
-    return { ok: true, changed: 0, skipped: alreadySkipped, failed: 0, errors: [], evidencePaths: [] };
-  }
-
-  const boundaryErrors = validateApplyChangePlan(safePlan);
-  if (boundaryErrors.length > 0) {
-    return {
-      ok: false,
-      blocked: true,
-      changed: 0,
-      skipped: 0,
-      failed: 0,
-      errors: boundaryErrors,
       evidencePaths: [],
     };
   }
