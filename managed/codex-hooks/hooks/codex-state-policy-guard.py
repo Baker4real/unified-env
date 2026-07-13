@@ -2478,7 +2478,7 @@ def update_thread_state(
             _assert_sqlite_snapshot_identity(
                 transaction_snapshot,
                 path,
-                allow_new_sidecars=True,
+                allow_new_sidecars=False,
                 check_main_metadata=False,
                 check_sidecar_content=True,
             )
@@ -2486,14 +2486,14 @@ def update_thread_state(
             _assert_sqlite_snapshot_identity(
                 transaction_snapshot,
                 path,
-                allow_new_sidecars=True,
+                allow_new_sidecars=False,
                 check_main_metadata=False,
                 check_sidecar_content=True,
             )
             _assert_sqlite_snapshot_identity(
                 transaction_snapshot,
                 path,
-                allow_new_sidecars=True,
+                allow_new_sidecars=False,
                 check_main_metadata=False,
                 check_sidecar_content=True,
             )
