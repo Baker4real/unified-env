@@ -25,7 +25,7 @@ DONE
 
 ### WhatIf
 
-命令：`D:\Codex\tools\PowerShell\7.6.3\pwsh.exe -NoProfile -File scripts\Deploy-GitHubDefaultBranchSkillOverlay.ps1 -SourceRoot scripts -CodexRoot D:\Codex\.codex -EvidenceRoot D:\Codex\.codex\run-evidence\github-default-branch-skill-policy -WhatIf`
+命令：`D:\Codex\tools\PowerShell\7.6.3\pwsh.exe -NoProfile -File D:\Codex\projects\unified-env-github-default-branch-skill-policy\scripts\Deploy-GitHubDefaultBranchSkillOverlay.ps1 -SourceRoot D:\Codex\projects\unified-env-github-default-branch-skill-policy\scripts -CodexRoot D:\Codex\.codex -EvidenceRoot D:\Codex\.codex\run-evidence\github-default-branch-skill-policy -WhatIf`
 
 结果：退出码 `0`；源文件 SHA-256 与部署目标预检为：
 
@@ -94,10 +94,10 @@ WhatIf evidence 输出目录：`D:\Codex\.codex\run-evidence\github-default-bran
 
 ## 内容与回归测试
 
-- `node --check scripts\Apply-GitHubDefaultBranchSkillOverlay.cjs`：通过。
-- `node --check tests\Test-GitHubDefaultBranchSkillOverlay.cjs`：通过。
-- `node tests\Test-GitHubDefaultBranchSkillOverlay.cjs`：通过，`changed=6`、`idempotent=6`；包含未知指纹、伪造 marker、缺配对、CAS/回滚、catalog provenance、CLI named flag 和 unknown flag 阻断。
-- `node tests\Test-GitDefaultBranchSkillPolicy.cjs --codex-root D:\Codex\.codex`：通过，退出码 `0`，输出 `Git default-branch skill policy: PASS`；source、两组 cache 和本地收尾 skill 内容策略一致。完整输出及退出码在 `D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\task3-cli-runs\content-policy-test.txt` 与 `.exitcode`。
+- `D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe --check D:\Codex\projects\unified-env-github-default-branch-skill-policy\scripts\Apply-GitHubDefaultBranchSkillOverlay.cjs`：通过。
+- `D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe --check D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitHubDefaultBranchSkillOverlay.cjs`：通过。
+- `D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitHubDefaultBranchSkillOverlay.cjs`：通过，`changed=6`、`idempotent=6`；包含未知指纹、伪造 marker、缺配对、CAS/回滚、catalog provenance、CLI named flag 和 unknown flag 阻断。
+- `D:\Codex\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe D:\Codex\projects\unified-env-github-default-branch-skill-policy\tests\Test-GitDefaultBranchSkillPolicy.cjs --codex-root D:\Codex\.codex`：通过，退出码 `0`，输出 `Git default-branch skill policy: PASS`；source、两组 cache 和本地收尾 skill 内容策略一致。完整输出及退出码在 `D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\task3-cli-runs\content-policy-test.txt` 与 `.exitcode`。
 
 ## 运行说明
 
