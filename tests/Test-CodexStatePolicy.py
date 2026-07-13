@@ -325,6 +325,144 @@ class CodexStatePolicyTests(unittest.TestCase):
             str(candidate),
         )
 
+    def test_approved_map_requires_inventory_generation_and_mapping_hash(self) -> None:
+        candidate_root = self.root / "generation-canonical"
+        candidate = candidate_root / "safe"
+        candidate.mkdir(parents=True)
+        state = {
+            "thread-workspace-root-hints": {
+                "safe": r"C:\Users\WINDOWS\Documents\Codex\safe"
+            }
+        }
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original = self.write_global(state)
+        with mock.patch.object(
+            self.module,
+            "CANONICAL_CANDIDATE_ROOT",
+            self.module.PureWindowsPath(str(candidate_root)),
+        ):
+            with self.assertRaisesRegex(self.module.StatePolicyError, "generation"):
+                self.module.update_global_state(
+                    self.global_path,
+                    self.backup_root,
+                    permission_policy=policy,
+                    path_mode="repair-safe-only",
+                    approved_map={
+                        "thread-workspace-root-hints": {"safe": str(candidate)}
+                    },
+                )
+
+    def test_repair_modes_distinguish_safe_only_from_all_approved(self) -> None:
+        candidate_root = self.root / "mode-canonical"
+        safe_candidate = candidate_root / "safe"
+        safe_candidate.mkdir(parents=True)
+        state = {
+            "thread-workspace-root-hints": {
+                "safe": r"C:\Users\WINDOWS\Documents\Codex\safe",
+                "missing": r"C:\Users\WINDOWS\Documents\Codex\missing",
+            }
+        }
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        original = self.write_global(state)
+        with mock.patch.object(
+            self.module,
+            "CANONICAL_CANDIDATE_ROOT",
+            self.module.PureWindowsPath(str(candidate_root)),
+        ):
+            inventory = self.module.build_path_inventory(
+                state,
+                self.module.PROJECTLESS_SOURCE_ROOT,
+                self.module.CANONICAL_CANDIDATE_ROOT,
+            )
+            approved = {
+                "inventoryGeneration": inventory["inventoryGeneration"],
+                "stateSha256": inventory["stateSha256"],
+                "mappingSha256": inventory["mappingSha256"],
+                "mappings": {
+                    "thread-workspace-root-hints": {
+                        "safe": str(safe_candidate),
+                        "missing": str(candidate_root / "missing"),
+                    }
+                },
+            }
+            with self.assertRaisesRegex(self.module.StatePolicyError, "approved"):
+                self.module.update_global_state(
+                    self.global_path,
+                    self.backup_root,
+                    permission_policy=policy,
+                    path_mode="repair-all-approved",
+                    approved_map=approved,
+                )
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_all_unresolved_path_kinds_remain_drift(self) -> None:
+        state = {
+            "thread-workspace-root-hints": {
+                "alternate": r"\\?\C:\Users\WINDOWS\Documents\Codex\alternate",
+                "invalid": r"C:\Users\WINDOWS\Documents\Codex\bad\x00".replace(
+                    "\\x00", "\x00"
+                ),
+                "legacy": r"D:\Users\WINDOWS\Documents\Codex\legacy",
+            }
+        }
+        self.write_global(state)
+        result = self.module.update_global_state(
+            self.global_path,
+            self.backup_root,
+            check_only=True,
+        )
+        self.assertGreaterEqual(result["driftCount"], 3)
+        self.assertEqual(self.global_path.read_bytes(), json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode())
+
+    def test_run_policy_rolls_back_json_when_sqlite_domain_fails(self) -> None:
+        original = self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+        output = io.StringIO()
+        with mock.patch.object(
+            self.module,
+            "update_thread_state",
+            side_effect=self.module.StatePolicyError("fixture sqlite failure"),
+        ):
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=output,
+            )
+        self.assertFalse(result["ok"])
+        self.assertIn("unsafe-partial", result["errors"])
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_stdout_redaction_drops_map_and_unknown_keys(self) -> None:
+        self.write_global(
+            {
+                "thread-workspace-root-hints": {
+                    "secret-thread-id": r"C:\Users\WINDOWS\Documents\Codex\missing"
+                },
+                "secret-unknown-map": {"private": "value"},
+            }
+        )
+        output = io.StringIO()
+        self.module.run_policy(
+            self.codex_home,
+            check_only=True,
+            health_root=self.root / "health",
+            output=output,
+        )
+        text = output.getvalue()
+        self.assertNotIn("thread-workspace-root-hints", text)
+        self.assertNotIn("secret-thread-id", text)
+        self.assertNotIn("secret-unknown-map", text)
+
+    def test_nested_permission_policy_shape_is_malformed(self) -> None:
+        (self.codex_home / "policy.json").write_text(
+            json.dumps({"permissionPolicy": "not-an-object"}),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(self.module.StatePolicyError, "malformed"):
+            self.module.resolve_permission_policy(self.codex_home)
+
     def test_select_thread_updates_preserves_unknown_rows(self) -> None:
         conn = self.create_db()
         try:
