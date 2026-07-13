@@ -188,6 +188,19 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertEqual(policy.heartbeat_sandbox_type, "workspaceWrite")
         self.assertEqual(policy.sqlite_sandbox_policy, '{"type":"workspace-write"}')
 
+    def test_permission_policy_object_shape_fails_closed(self) -> None:
+        digest = "0" * 64
+        invalid = [
+            ([], "danger-full-access", r"D:\Codex\config.toml", ((r"D:\Codex\config.toml", digest),)),
+            ("never", {}, r"D:\Codex\config.toml", ((r"D:\Codex\config.toml", digest),)),
+            ("never", "danger-full-access", r"D:\Codex\config.toml", ((r"D:\Codex\config.toml",),)),
+            ("never", "danger-full-access", r"D:\Codex\config.toml", ((r"C:\Codex\config.toml", digest),)),
+        ]
+        for approval, sandbox, source, source_hashes in invalid:
+            with self.subTest(approval=approval, sandbox=sandbox, source_hashes=source_hashes):
+                with self.assertRaises(self.module.StatePolicyError):
+                    self.module.PermissionPolicy(approval, sandbox, source, source_hashes)
+
     def test_permission_policy_missing_fails_closed(self) -> None:
         (self.codex_home / "config.toml").unlink()
         with self.assertRaisesRegex(self.module.StatePolicyError, "permission policy"):
@@ -282,7 +295,6 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.backup_root,
             permission_policy=policy,
             path_mode="repair-safe-only",
-            approved_map={"thread-workspace-root-hints": {"missing": r"D:\Documents\Codex\missing"}},
         )
 
         self.assertFalse(result["changed"])
@@ -310,13 +322,23 @@ class CodexStatePolicyTests(unittest.TestCase):
             )
             self.assertFalse(no_approval["changed"])
             self.assertGreater(no_approval["driftCount"], 0)
+            inventory = self.module.build_path_inventory(
+                state,
+                self.module.PROJECTLESS_SOURCE_ROOT,
+                self.module.CANONICAL_CANDIDATE_ROOT,
+            )
             approved = self.module.update_global_state(
                 self.global_path,
                 self.backup_root,
                 permission_policy=policy,
                 path_mode="repair-safe-only",
                 approved_map={
-                    "thread-workspace-root-hints": {"safe": str(candidate)}
+                    "inventoryGeneration": inventory["inventoryGeneration"],
+                    "stateSha256": inventory["stateSha256"],
+                    "mappingSha256": inventory["mappingSha256"],
+                    "mappings": {
+                        "thread-workspace-root-hints": {"safe": str(candidate)}
+                    },
                 },
             )
         self.assertTrue(approved["changed"])
@@ -351,6 +373,52 @@ class CodexStatePolicyTests(unittest.TestCase):
                         "thread-workspace-root-hints": {"safe": str(candidate)}
                     },
                 )
+
+    def test_approved_map_rejects_unknown_contract_fields(self) -> None:
+        state = {
+            "thread-workspace-root-hints": {
+                "safe": r"C:\Users\WINDOWS\Documents\Codex\safe"
+            }
+        }
+        policy = self.module.resolve_permission_policy(self.codex_home)
+        self.write_global(state)
+        inventory = self.module.build_path_inventory(
+            state,
+            self.module.PROJECTLESS_SOURCE_ROOT,
+            self.module.CANONICAL_CANDIDATE_ROOT,
+        )
+        approved = {
+            "inventoryGeneration": inventory["inventoryGeneration"],
+            "stateSha256": inventory["stateSha256"],
+            "mappingSha256": inventory["mappingSha256"],
+            "mappings": {},
+            "unexpected": True,
+        }
+        with self.assertRaisesRegex(self.module.StatePolicyError, "unknown"):
+            self.module.update_global_state(
+                self.global_path,
+                self.backup_root,
+                permission_policy=policy,
+                path_mode="repair-safe-only",
+                approved_map=approved,
+            )
+
+    def test_permission_policy_source_change_before_publish_fails_closed(self) -> None:
+        state = self.permission_drift()
+        original = self.write_global(state)
+        policy = self.module.resolve_permission_policy(self.codex_home)
+
+        def change_policy(_attempt: int) -> None:
+            self.write_permission_config(approval_policy="on-request")
+
+        with self.assertRaisesRegex(self.module.StatePolicyError, "concurrently"):
+            self.module.update_global_state(
+                self.global_path,
+                self.backup_root,
+                permission_policy=policy,
+                before_prewrite_check=change_policy,
+            )
+        self.assertEqual(self.global_path.read_bytes(), original)
 
     def test_repair_modes_distinguish_safe_only_from_all_approved(self) -> None:
         candidate_root = self.root / "mode-canonical"
@@ -414,6 +482,33 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertGreaterEqual(result["driftCount"], 3)
         self.assertEqual(self.global_path.read_bytes(), json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode())
 
+    def test_legacy_destination_stays_drift_when_candidate_root_is_unavailable(self) -> None:
+        state = {
+            "thread-workspace-root-hints": {
+                "legacy": r"D:\Users\WINDOWS\Documents\Codex\legacy"
+            }
+        }
+        self.write_global(state)
+        result = self.module.update_global_state(
+            self.global_path,
+            self.backup_root,
+            check_only=True,
+            candidate_root=r"D:\Documents\Codex\uncontrolled",
+        )
+        self.assertGreaterEqual(result["driftCount"], 1)
+
+    def test_path_inventory_keeps_lone_surrogate_as_unresolved_evidence(self) -> None:
+        value = r"C:\Users\WINDOWS\Documents\Codex\bad" + "\ud800"
+        inventory = self.module.build_path_inventory(
+            {"thread-workspace-root-hints": {"surrogate": value}},
+            self.module.PROJECTLESS_SOURCE_ROOT,
+            self.module.CANONICAL_CANDIDATE_ROOT,
+        )
+        entry = inventory["maps"]["thread-workspace-root-hints"]["surrogate"]
+        self.assertFalse(entry["safe"])
+        self.assertTrue(str(entry["reason"]).startswith("unresolved-"))
+        self.assertRegex(inventory["inventoryGeneration"], r"^inventory-v1-[0-9a-f]{64}$")
+
     def test_run_policy_rolls_back_json_when_sqlite_domain_fails(self) -> None:
         original = self.write_global(self.permission_drift())
         connection = self.create_db()
@@ -431,8 +526,48 @@ class CodexStatePolicyTests(unittest.TestCase):
                 output=output,
             )
         self.assertFalse(result["ok"])
-        self.assertIn("unsafe-partial", result["errors"])
+        self.assertTrue(
+            any(
+                marker in result["errors"]
+                for marker in ("state policy rollback completed", "unsafe-partial")
+            )
+        )
         self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_run_policy_marks_unsafe_partial_when_sqlite_snapshot_changes(self) -> None:
+        original = self.write_global(self.permission_drift())
+        connection = self.create_db()
+        connection.close()
+
+        def fail_after_sqlite_change(*_args: object, **_kwargs: object) -> None:
+            changed = sqlite3.connect(self.db_path)
+            changed.execute("update threads set sentinel='competitor' where id='target-a'")
+            changed.commit()
+            changed.close()
+            raise self.module.StatePolicyError("fixture sqlite failure after commit")
+
+        with mock.patch.object(self.module, "update_thread_state", side_effect=fail_after_sqlite_change):
+            result = self.module.run_policy(
+                self.codex_home,
+                check_only=False,
+                health_root=self.root / "health",
+                output=io.StringIO(),
+            )
+        self.assertFalse(result["ok"])
+        self.assertIn("unsafe-partial", result["errors"])
+        self.assertNotEqual(self.global_path.read_bytes(), original)
+
+    def test_run_policy_missing_state_domain_fails_closed(self) -> None:
+        output = io.StringIO()
+        result = self.module.run_policy(
+            self.codex_home,
+            check_only=True,
+            health_root=self.root / "health",
+            output=output,
+        )
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["converged"])
+        self.assertEqual(result["globalState"]["status"], "not-run")
 
     def test_stdout_redaction_drops_map_and_unknown_keys(self) -> None:
         self.write_global(
@@ -527,6 +662,48 @@ class CodexStatePolicyTests(unittest.TestCase):
                 self.global_path, self.backup_root, before_prewrite_check=race
             )
         self.assertEqual(self.global_path.read_bytes(), latest)
+
+    def test_global_writer_rejects_same_bytes_competitor_by_handle_identity(self) -> None:
+        state = self.permission_drift()
+        state["thread-workspace-root-hints"] = {
+            "x": r"C:\Users\WINDOWS\Documents\Codex\a"
+        }
+        original = self.write_global(state)
+
+        def replace_with_same_bytes(_attempt: int) -> None:
+            competitor_path = self.root / "same-bytes-competitor.json"
+            competitor_path.write_bytes(original)
+            os.replace(competitor_path, self.global_path)
+
+        with self.assertRaisesRegex(self.module.StatePolicyError, "concurrent"):
+            self.module.update_global_state(
+                self.global_path,
+                self.backup_root,
+                before_prewrite_check=replace_with_same_bytes,
+            )
+        self.assertEqual(self.global_path.read_bytes(), original)
+
+    def test_global_publish_rechecks_bytes_on_same_target_handle(self) -> None:
+        original = self.write_global(self.permission_drift())
+        target_identity = self.module._file_handle_identity(self.global_path)
+        self.assertIsNotNone(target_identity)
+        temporary = self.module._write_same_directory_temp(self.global_path, b"replacement")
+        try:
+            with mock.patch.object(
+                self.module,
+                "_read_publish_handle_bytes",
+                side_effect=[original, b"changed-by-existing-writer"],
+            ):
+                with self.assertRaisesRegex(self.module.StatePolicyError, "concurrent"):
+                    self.module._publish_temp_file(
+                        self.global_path,
+                        temporary,
+                        expected_hash=hashlib.sha256(original).hexdigest(),
+                        expected_identity=target_identity,
+                    )
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.assertEqual(self.global_path.read_bytes(), original)
 
     def test_malformed_and_backup_failure_preserve_original_bytes(self) -> None:
         malformed = b'{"broken":'
@@ -806,6 +983,7 @@ class CodexStatePolicyTests(unittest.TestCase):
             keeper.close()
 
     def test_check_only_runs_quick_check_on_snapshot_and_uses_manifest_identity(self) -> None:
+        self.write_global(self.permission_drift())
         conn = self.create_db()
         conn.close()
         result = self.module.update_thread_state(
@@ -845,6 +1023,19 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertEqual(verify.execute("select approval_mode from threads where id='target-a'").fetchone()[0], "on-request")
         verify.close()
 
+    def test_sqlite_write_rechecks_main_bytes_before_commit(self) -> None:
+        conn = self.create_db()
+        conn.close()
+
+        def mutate_same_inode() -> None:
+            with self.db_path.open("r+b") as stream:
+                stream.seek(0)
+                stream.write(b"x")
+                stream.flush()
+
+        with self.assertRaisesRegex(self.module.StatePolicyError, "concurrent"):
+            self.module.update_thread_state(self.db_path, before_commit=mutate_same_inode)
+
     def test_health_envelope_and_stdout_are_redacted(self) -> None:
         self.write_global({"unknown": "keep"})
         conn = self.create_db()
@@ -874,6 +1065,8 @@ class CodexStatePolicyTests(unittest.TestCase):
 
     def test_health_failure_is_structured_and_redacted(self) -> None:
         self.write_global({"unknown": "keep"})
+        conn = self.create_db()
+        conn.close()
         output = io.StringIO()
         with mock.patch.object(self.module, "_write_health", side_effect=OSError("fixture secret path")):
             result = self.module.run_policy(

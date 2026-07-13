@@ -40,11 +40,19 @@ TARGET_MAPS = (
     "thread-projectless-output-directories",
 )
 FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
+FILE_ATTRIBUTE_NORMAL = 0x0080
 LEGACY_DESTINATION_ROOT = PureWindowsPath(r"D:\Users\WINDOWS\Documents\Codex")
 PROJECTLESS_SOURCE_ROOT = PureWindowsPath(r"C:\Users\WINDOWS\Documents\Codex")
 CANONICAL_CANDIDATE_ROOT = PureWindowsPath(r"D:\Documents\Codex")
 INVENTORY_REPAIR_CONTRACT = "generation-hash-mutex-cas-reprobe"
+APPROVED_MAP_FIELDS = frozenset(
+    {"inventoryGeneration", "stateSha256", "mappingSha256", "mappings"}
+)
 FILE_ATTRIBUTE_DIRECTORY = 0x0010
+GENERIC_READ = 0x80000000
+GENERIC_WRITE = 0x40000000
+DELETE_ACCESS = 0x00010000
+SYNCHRONIZE_ACCESS = 0x00100000
 FILE_READ_ATTRIBUTES = 0x0080
 FILE_SHARE_READ = 0x00000001
 FILE_SHARE_WRITE = 0x00000002
@@ -55,6 +63,9 @@ FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 ERROR_FILE_NOT_FOUND = 2
 ERROR_PATH_NOT_FOUND = 3
 SHORT_LEXICAL_SEGMENT = re.compile(r"^[^\\/]{1,8}~[0-9]+(?:\.[^\\/]+)?$", re.IGNORECASE)
+FILE_RENAME_INFORMATION_EX = 65
+FILE_RENAME_REPLACE_IF_EXISTS = 0x00000001
+FILE_RENAME_POSIX_SEMANTICS = 0x00000002
 
 
 class _ByHandleFileInformation(ctypes.Structure):
@@ -72,6 +83,13 @@ class _ByHandleFileInformation(ctypes.Structure):
     ]
 
 
+class _IoStatusBlock(ctypes.Structure):
+    _fields_ = [
+        ("status", ctypes.c_void_p),
+        ("information", ctypes.c_size_t),
+    ]
+
+
 class StatePolicyError(RuntimeError):
     pass
 
@@ -83,14 +101,39 @@ class PermissionPolicy:
     approval_policy: str
     sandbox_mode: str
     source: str
+    source_hashes: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
-        if self.approval_policy not in SUPPORTED_APPROVAL_POLICIES:
+        if (
+            not isinstance(self.approval_policy, str)
+            or self.approval_policy not in SUPPORTED_APPROVAL_POLICIES
+        ):
             raise StatePolicyError("permission policy approval is unsupported")
-        if self.sandbox_mode not in SUPPORTED_SANDBOX_MODES:
+        if (
+            not isinstance(self.sandbox_mode, str)
+            or self.sandbox_mode not in SUPPORTED_SANDBOX_MODES
+        ):
             raise StatePolicyError("permission policy sandbox is unsupported")
         if not isinstance(self.source, str) or not self.source:
             raise StatePolicyError("permission policy source is missing")
+        if not isinstance(self.source_hashes, tuple) or not self.source_hashes:
+            raise StatePolicyError("permission policy source hash is missing")
+        seen: set[str] = set()
+        for item in self.source_hashes:
+            if not isinstance(item, tuple) or len(item) != 2:
+                raise StatePolicyError("permission policy source hash is malformed")
+            source, digest = item
+            if not isinstance(source, str) or not isinstance(digest, str):
+                raise StatePolicyError("permission policy source hash is malformed")
+            source_path = PureWindowsPath(source)
+            if (
+                not source_path.is_absolute()
+                or source_path.drive.casefold() != "d:"
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or source in seen
+            ):
+                raise StatePolicyError("permission policy source hash is malformed")
+            seen.add(source)
 
     @property
     def heartbeat_sandbox_type(self) -> str:
@@ -127,6 +170,48 @@ PERMISSION_POLICY_JSON_NAMES = ("policy.json", "state-policy.json")
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _canonical_json_bytes(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            # ASCII escaping keeps lone surrogate evidence hashable without
+            # attempting to emit invalid UTF-8.  The original state bytes are
+            # still preserved and never rewritten for such unresolved values.
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise StatePolicyError("state generation serialization failed") from exc
+
+
+def _inventory_hashes(state: dict[str, object]) -> tuple[str, str]:
+    state_hash = _sha256(_canonical_json_bytes(state))
+    mapping = {key: copy.deepcopy(state[key]) for key in TARGET_MAPS if key in state}
+    mapping_hash = _sha256(_canonical_json_bytes(mapping))
+    return state_hash, mapping_hash
+
+
+def _is_projectless_source_value(value: str) -> bool:
+    normalized = value.replace("/", "\\")
+    for prefix in ("\\\\?\\", "\\\\.\\"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix) :]
+            break
+    source = str(PROJECTLESS_SOURCE_ROOT).rstrip("\\").casefold()
+    normalized = normalized.casefold()
+    return normalized == source or normalized.startswith(source + "\\")
+
+
+def _is_legacy_destination_value(value: str) -> bool:
+    try:
+        path = PureWindowsPath(value)
+    except (TypeError, ValueError):
+        return False
+    return _windows_is_same_or_child(path, LEGACY_DESTINATION_ROOT)
 
 
 def rewrite_projectless_path(value: object) -> object:
@@ -586,6 +671,7 @@ def build_path_inventory(
     """
     if not isinstance(state, dict):
         raise StatePolicyError("global state root must be an object")
+    state_hash, mapping_hash = _inventory_hashes(state)
     source_root_windows = _validate_inventory_root(source_root, name="path inventory source root")
     candidate_root_windows = _validate_inventory_root(
         candidate_root,
@@ -646,7 +732,29 @@ def build_path_inventory(
             entry["safe"] = False
             entry["reason"] = "unresolved-ambiguous"
 
+    # The generation claim is deliberately different from the state hash.  It
+    # binds the canonical source/mapping hashes to this inventory's exact
+    # candidate roots, probe dispositions and final identities.  An approval
+    # captured for a different probe result therefore cannot be replayed merely
+    # because the JSON bytes happen to be unchanged.
+    generation_payload = {
+        "contract": INVENTORY_REPAIR_CONTRACT,
+        "stateSha256": state_hash,
+        "mappingSha256": mapping_hash,
+        "sourceRoot": str(source_root_windows),
+        "candidateRoot": str(candidate_root_windows),
+        "sourceRootAllowed": source_root_allowed,
+        "candidateRootAllowed": candidate_root_allowed,
+        "candidateRootReady": candidate_root_ready,
+        "candidateRootProbe": candidate_root_probe,
+        "maps": maps,
+    }
+    inventory_generation = "inventory-v1-" + _sha256(_canonical_json_bytes(generation_payload))
+
     return {
+        "inventoryGeneration": inventory_generation,
+        "stateSha256": state_hash,
+        "mappingSha256": mapping_hash,
         "sourceRoot": str(source_root_windows),
         "sourceRootAllowed": source_root_allowed,
         "candidateRoot": str(candidate_root_windows),
@@ -693,6 +801,8 @@ def _permission_fields_from_mapping(document: object) -> tuple[object | None, ob
         sandbox = value
     nested = document.get("permissionPolicy")
     if nested is not None:
+        if not isinstance(nested, dict):
+            raise StatePolicyError("permission policy nested source is malformed")
         nested_approval, nested_sandbox = _permission_fields_from_mapping(nested)
         if nested_approval is not None:
             if approval is not None and nested_approval != approval:
@@ -705,12 +815,12 @@ def _permission_fields_from_mapping(document: object) -> tuple[object | None, ob
     return approval, sandbox
 
 
-def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object]]:
+def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object, str]]:
     if not codex_home.is_absolute():
         raise StatePolicyError("permission policy home must be absolute")
     if codex_home.drive.casefold() != "d:":
         raise StatePolicyError("permission policy home must be on the D drive")
-    sources: list[tuple[str, object]] = []
+    sources: list[tuple[str, object, str]] = []
     config_path = codex_home / "config.toml"
     if config_path.exists():
         _assert_check_only_d_path_without_reparse(
@@ -722,10 +832,11 @@ def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object]
         if tomllib is None:
             raise StatePolicyError("permission policy TOML parser unavailable")
         try:
-            document = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            raw = config_path.read_bytes()
+            document = tomllib.loads(raw.decode("utf-8", errors="strict"))
         except (OSError, UnicodeError, ValueError) as exc:
             raise StatePolicyError("permission policy config is malformed") from exc
-        sources.append((str(config_path), document))
+        sources.append((str(config_path), document, _sha256(raw)))
     for name in PERMISSION_POLICY_JSON_NAMES:
         policy_path = codex_home / name
         if not policy_path.exists():
@@ -737,10 +848,11 @@ def _load_permission_policy_sources(codex_home: Path) -> list[tuple[str, object]
         if not policy_path.is_file() or policy_path.is_symlink():
             raise StatePolicyError("permission policy source is not a regular file")
         try:
-            document = _strict_json_loads(policy_path.read_bytes())
+            raw = policy_path.read_bytes()
+            document = _strict_json_loads(raw)
         except OSError as exc:
             raise StatePolicyError("permission policy source is unreadable") from exc
-        sources.append((str(policy_path), document))
+        sources.append((str(policy_path), document, _sha256(raw)))
     return sources
 
 
@@ -756,7 +868,9 @@ def resolve_permission_policy(codex_home: Path | str) -> PermissionPolicy:
         raise StatePolicyError("permission policy source is missing")
     approvals: list[tuple[str, str]] = []
     sandboxes: list[tuple[str, str]] = []
-    for source, document in sources:
+    source_hashes: list[tuple[str, str]] = []
+    for source, document, source_hash in sources:
+        source_hashes.append((source, source_hash))
         approval, sandbox = _permission_fields_from_mapping(document)
         if approval is not None:
             approvals.append(
@@ -778,12 +892,28 @@ def resolve_permission_policy(codex_home: Path | str) -> PermissionPolicy:
     sandbox_values = {value for _source, value in sandboxes}
     if len(approval_values) != 1 or len(sandbox_values) != 1:
         raise StatePolicyError("permission policy sources conflict")
-    source_names = ",".join(source for source, _value in sources)
+    source_names = ",".join(source for source, _value, _hash in sources)
     return PermissionPolicy(
         approval_policy=next(iter(approval_values)),
         sandbox_mode=next(iter(sandbox_values)),
         source=source_names,
+        source_hashes=tuple(source_hashes),
     )
+
+
+def _assert_permission_policy_unchanged(permission_policy: PermissionPolicy) -> None:
+    for source, expected_hash in permission_policy.source_hashes:
+        source_path = Path(source)
+        _assert_check_only_d_path_without_reparse(
+            source_path,
+            name="permission policy source",
+        )
+        try:
+            actual_hash = _sha256(source_path.read_bytes())
+        except OSError as exc:
+            raise StatePolicyError("permission policy source is unreadable") from exc
+        if actual_hash != expected_hash:
+            raise StatePolicyError("permission policy changed concurrently")
 
 
 def _resolve_policy_for_path(path: Path, permission_policy: PermissionPolicy | None) -> PermissionPolicy:
@@ -795,25 +925,106 @@ def _resolve_policy_for_path(path: Path, permission_policy: PermissionPolicy | N
 
 
 def _approved_candidate(
-    approved_map: object,
+    approved_mappings: object,
     map_name: str,
     identity: object,
 ) -> str | None:
-    if not isinstance(approved_map, dict):
+    if not isinstance(approved_mappings, dict):
         return None
-    nested = approved_map.get(map_name)
+    nested = approved_mappings.get(map_name)
     if isinstance(nested, dict) and identity in nested:
         candidate = nested[identity]
         return candidate if isinstance(candidate, str) else None
-    flat_key = f"{map_name}:{identity}"
-    candidate = approved_map.get(flat_key)
-    return candidate if isinstance(candidate, str) else None
+    return None
+
+
+def _validate_approved_map(
+    inventory: dict[str, object],
+    approved_map: object,
+    path_mode: str,
+) -> dict[object, object] | None:
+    if approved_map is None:
+        return None
+    if not isinstance(approved_map, dict):
+        raise StatePolicyError("approved map generation contract is malformed")
+    for field in ("inventoryGeneration", "stateSha256", "mappingSha256", "mappings"):
+        if field not in approved_map:
+            raise StatePolicyError("approved map generation contract is missing")
+    unknown_fields = set(approved_map) - APPROVED_MAP_FIELDS
+    if unknown_fields:
+        raise StatePolicyError("approved map contains unknown fields")
+    inventory_generation = inventory.get("inventoryGeneration")
+    state_hash = inventory.get("stateSha256")
+    mapping_hash = inventory.get("mappingSha256")
+    if (
+        not isinstance(inventory_generation, str)
+        or not inventory_generation.startswith("inventory-v1-")
+        or not re.fullmatch(r"inventory-v1-[0-9a-f]{64}", inventory_generation)
+        or not isinstance(state_hash, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", state_hash)
+        or not isinstance(mapping_hash, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", mapping_hash)
+    ):
+        raise StatePolicyError("approved map inventory generation is malformed")
+    if approved_map.get("inventoryGeneration") != inventory_generation:
+        raise StatePolicyError("approved map generation does not match inventory")
+    if approved_map.get("stateSha256") != state_hash:
+        raise StatePolicyError("approved map state hash does not match inventory")
+    if approved_map.get("mappingSha256") != mapping_hash:
+        raise StatePolicyError("approved map mapping hash does not match inventory")
+    if not all(
+        isinstance(approved_map.get(field), str)
+        and re.fullmatch(
+            r"[0-9a-f]{64}",
+            str(approved_map.get(field)),
+        )
+        for field in ("stateSha256", "mappingSha256")
+    ):
+        raise StatePolicyError("approved map hash is malformed")
+    mappings = approved_map.get("mappings")
+    if not isinstance(mappings, dict):
+        raise StatePolicyError("approved map mappings are malformed")
+    inventory_maps = inventory.get("maps")
+    if not isinstance(inventory_maps, dict):
+        raise StatePolicyError("approved map inventory is malformed")
+    for map_name, entries in mappings.items():
+        if map_name not in TARGET_MAPS or not isinstance(entries, dict):
+            raise StatePolicyError("approved map contains an unknown mapping")
+        inventory_entries = inventory_maps.get(map_name)
+        if not isinstance(inventory_entries, dict):
+            raise StatePolicyError("approved map mapping is not present in inventory")
+        for identity, candidate in entries.items():
+            entry = inventory_entries.get(identity)
+            valid = (
+                isinstance(candidate, str)
+                and isinstance(entry, dict)
+                and bool(entry.get("safe"))
+                and entry.get("candidate") == candidate
+            )
+            if not valid:
+                raise StatePolicyError("approved map contains an unresolved entry")
+    if path_mode == "repair-all-approved":
+        # The broad repair mode is still bounded by the same safe inventory,
+        # but it must account for every currently safe entry instead of
+        # silently repairing only a reviewed subset.
+        for map_name, entries in inventory_maps.items():
+            if not isinstance(entries, dict):
+                continue
+            approved_entries = mappings.get(map_name, {})
+            if not isinstance(approved_entries, dict):
+                raise StatePolicyError("approved map mappings are malformed")
+            for identity, entry in entries.items():
+                if isinstance(entry, dict) and entry.get("safe"):
+                    candidate = entry.get("candidate")
+                    if approved_entries.get(identity) != candidate:
+                        raise StatePolicyError("approved map does not approve every safe entry")
+    return mappings
 
 
 def _should_repair_path(
     *,
     path_mode: str,
-    approved_map: object,
+    approved_mappings: object,
     map_name: str,
     identity: object,
     entry: dict[str, object],
@@ -824,14 +1035,14 @@ def _should_repair_path(
         raise StatePolicyError("unknown state path mode")
     if not bool(entry.get("safe")):
         return False
-    approved = _approved_candidate(approved_map, map_name, identity)
+    approved = _approved_candidate(approved_mappings, map_name, identity)
     candidate = entry.get("candidate")
     return isinstance(approved, str) and approved == candidate
 
 
 def _reprobe_approved_paths(
     inventory: dict[str, object],
-    approved_map: object,
+    approved_mappings: object,
     path_mode: str,
 ) -> None:
     """Re-probe every approved target immediately before CAS publication."""
@@ -844,7 +1055,7 @@ def _reprobe_approved_paths(
         for identity, entry in entries.items():
             if not isinstance(entry, dict) or not _should_repair_path(
                 path_mode=path_mode,
-                approved_map=approved_map,
+                approved_mappings=approved_mappings,
                 map_name=str(map_name),
                 identity=identity,
                 entry=entry,
@@ -887,6 +1098,7 @@ def normalize_global_state(
             PROJECTLESS_SOURCE_ROOT,
             CANONICAL_CANDIDATE_ROOT,
         )
+    approved_mappings = _validate_approved_map(path_inventory, approved_map, path_mode)
     inventory_maps = path_inventory.get("maps") if isinstance(path_inventory, dict) else None
     for key in TARGET_MAPS:
         mapping = normalized.get(key)
@@ -900,13 +1112,14 @@ def normalize_global_state(
             if not isinstance(entry, dict):
                 continue
             if isinstance(value, str) and (
-                rewrite_projectless_path(value) != value
+                _is_projectless_source_value(value)
+                or _is_legacy_destination_value(value)
                 or entry.get("reason") == "unresolved-legacy-destination"
             ):
                 path_drift += 1
             if _should_repair_path(
                 path_mode=path_mode,
-                approved_map=approved_map,
+                approved_mappings=approved_mappings,
                 map_name=key,
                 identity=identity,
                 entry=entry,
@@ -979,7 +1192,7 @@ def _json_bytes(value: dict[str, object]) -> bytes:
             separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, UnicodeError) as exc:
         raise StatePolicyError("global state JSON serialization failed") from exc
 
 
@@ -992,7 +1205,352 @@ def _fsync_parent(path: Path) -> None:
             os.close(descriptor)
 
 
+def _file_handle_identity(path: Path) -> tuple[int, int] | None:
+    """Return a stable file identity without following a reparse target."""
+    if os.name != "nt":
+        try:
+            metadata = path.stat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise StatePolicyError("state file identity unavailable") from exc
+        return int(metadata.st_dev), int(metadata.st_ino)
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.GetFileInformationByHandle.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(_ByHandleFileInformation),
+    )
+    kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.CreateFileW(
+        str(path),
+        FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_DELETE,
+        None,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if not handle or handle == invalid_handle:
+        error = int(ctypes.get_last_error())
+        if error in (ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND):
+            return None
+        raise StatePolicyError("state file identity unavailable")
+    try:
+        info = _ByHandleFileInformation()
+        if not kernel32.GetFileInformationByHandle(handle, ctypes.byref(info)):
+            raise StatePolicyError("state file identity unavailable")
+        identity = (
+            int(info.volume_serial_number),
+            (int(info.file_index_high) << 32) | int(info.file_index_low),
+        )
+        if identity == (0, 0):
+            raise StatePolicyError("state file identity unavailable")
+        return identity
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _open_publish_handle(
+    path: Path,
+    *,
+    desired_access: int,
+    share_mode: int,
+) -> tuple[object, wintypes.HANDLE]:
+    if os.name != "nt":
+        raise StatePolicyError("handle-bound publish is unavailable")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.GetFileInformationByHandle.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(_ByHandleFileInformation),
+    )
+    kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+    kernel32.GetFinalPathNameByHandleW.argtypes = (
+        wintypes.HANDLE,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    )
+    kernel32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.CreateFileW(
+        str(path),
+        desired_access,
+        share_mode,
+        None,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if not handle or handle == invalid_handle:
+        error = int(ctypes.get_last_error())
+        kernel32.CloseHandle(handle) if handle and handle != invalid_handle else None
+        raise StatePolicyError(f"state publish handle unavailable ({error})")
+    return kernel32, handle
+
+
+def _close_publish_handle(kernel32: object, handle: wintypes.HANDLE) -> None:
+    try:
+        kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+    except OSError:
+        pass
+
+
+def _publish_handle_info(
+    kernel32: object,
+    handle: wintypes.HANDLE,
+    path: Path,
+) -> tuple[int, int]:
+    info = _ByHandleFileInformation()
+    if not kernel32.GetFileInformationByHandle(handle, ctypes.byref(info)):  # type: ignore[attr-defined]
+        raise StatePolicyError("state publish handle identity unavailable")
+    if info.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT:
+        raise StatePolicyError("state publish target contains reparse point")
+    if info.file_attributes & FILE_ATTRIBUTE_DIRECTORY:
+        raise StatePolicyError("state publish target is not a regular file")
+    capacity = 512
+    final_path: str | None = None
+    while capacity <= 32768:
+        buffer = ctypes.create_unicode_buffer(capacity)
+        length = kernel32.GetFinalPathNameByHandleW(  # type: ignore[attr-defined]
+            handle,
+            buffer,
+            capacity,
+            0,
+        )
+        if length == 0:
+            break
+        if length < capacity:
+            final_path = buffer.value
+            break
+        capacity = int(length) + 1
+    if final_path is None or _path_compare_key(final_path) != _path_compare_key(str(path)):
+        raise StatePolicyError("state publish handle final path mismatch")
+    identity = (
+        int(info.volume_serial_number),
+        (int(info.file_index_high) << 32) | int(info.file_index_low),
+    )
+    if identity == (0, 0):
+        raise StatePolicyError("state publish handle identity unavailable")
+    return identity
+
+
+def _read_publish_handle_bytes(kernel32: object, handle: wintypes.HANDLE) -> bytes:
+    kernel32.GetFileSizeEx.argtypes = (wintypes.HANDLE, ctypes.POINTER(ctypes.c_longlong))  # type: ignore[attr-defined]
+    kernel32.GetFileSizeEx.restype = wintypes.BOOL  # type: ignore[attr-defined]
+    kernel32.SetFilePointerEx.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_longlong,
+        ctypes.POINTER(ctypes.c_longlong),
+        wintypes.DWORD,
+    )  # type: ignore[attr-defined]
+    kernel32.SetFilePointerEx.restype = wintypes.BOOL  # type: ignore[attr-defined]
+    kernel32.ReadFile.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    )  # type: ignore[attr-defined]
+    kernel32.ReadFile.restype = wintypes.BOOL  # type: ignore[attr-defined]
+    length = ctypes.c_longlong()
+    if not kernel32.GetFileSizeEx(handle, ctypes.byref(length)):  # type: ignore[attr-defined]
+        raise StatePolicyError("state publish target bytes unavailable")
+    if length.value < 0 or length.value > 128 * 1024 * 1024:
+        raise StatePolicyError("state publish target is too large")
+    if not kernel32.SetFilePointerEx(handle, 0, None, 0):  # type: ignore[attr-defined]
+        raise StatePolicyError("state publish target seek failed")
+    remaining = int(length.value)
+    chunks: list[bytes] = []
+    while remaining:
+        chunk_size = min(1024 * 1024, remaining)
+        buffer = ctypes.create_string_buffer(chunk_size)
+        read = wintypes.DWORD()
+        if not kernel32.ReadFile(handle, buffer, chunk_size, ctypes.byref(read), None):  # type: ignore[attr-defined]
+            raise StatePolicyError("state publish target read failed")
+        if read.value == 0:
+            raise StatePolicyError("state publish target read truncated")
+        chunks.append(buffer.raw[: read.value])
+        remaining -= int(read.value)
+    return b"".join(chunks)
+
+
+def _rename_temp_by_handle(
+    kernel32: object,
+    handle: wintypes.HANDLE,
+    target: Path,
+    *,
+    replace_if_exists: bool,
+) -> None:
+    ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+    ntdll.NtSetInformationFile.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(_IoStatusBlock),
+        ctypes.c_void_p,
+        wintypes.ULONG,
+        ctypes.c_int,
+    )
+    ntdll.NtSetInformationFile.restype = ctypes.c_long
+    ntdll.RtlNtStatusToDosError.argtypes = (ctypes.c_long,)
+    ntdll.RtlNtStatusToDosError.restype = wintypes.ULONG
+    target_leaf = PureWindowsPath(str(target)).name
+    name_bytes = target_leaf.encode("utf-16-le")
+    root_offset = ctypes.sizeof(ctypes.c_void_p)
+    length_offset = root_offset + ctypes.sizeof(ctypes.c_void_p)
+    name_offset = length_offset + ctypes.sizeof(wintypes.DWORD)
+    buffer_length = name_offset + len(name_bytes)
+    rename_buffer = ctypes.create_string_buffer(buffer_length)
+    flags = FILE_RENAME_POSIX_SEMANTICS
+    if replace_if_exists:
+        flags |= FILE_RENAME_REPLACE_IF_EXISTS
+    ctypes.memmove(rename_buffer, ctypes.byref(ctypes.c_uint32(flags)), 4)
+    ctypes.memset(ctypes.addressof(rename_buffer) + root_offset, 0, ctypes.sizeof(ctypes.c_void_p))
+    ctypes.memmove(
+        ctypes.addressof(rename_buffer) + length_offset,
+        ctypes.byref(ctypes.c_uint32(len(name_bytes))),
+        ctypes.sizeof(wintypes.DWORD),
+    )
+    ctypes.memmove(
+        ctypes.addressof(rename_buffer) + name_offset,
+        name_bytes,
+        len(name_bytes),
+    )
+    io_status = _IoStatusBlock()
+    status = ntdll.NtSetInformationFile(
+        handle,
+        ctypes.byref(io_status),
+        ctypes.byref(rename_buffer),
+        buffer_length,
+        FILE_RENAME_INFORMATION_EX,
+    )
+    if status != 0:
+        error = int(ntdll.RtlNtStatusToDosError(status))
+        raise StatePolicyError(f"state publish rename failed ({error})")
+
+
+def _publish_temp_file(
+    path: Path,
+    temp_path: Path,
+    *,
+    expected_hash: str | None = None,
+    expected_identity: tuple[int, int] | None = None,
+    replace_if_exists: bool = True,
+) -> tuple[int, int]:
+    """Publish a same-directory temp while holding a verified target lease."""
+    _assert_check_only_d_path_without_reparse(path, name="state publish target")
+    _assert_check_only_d_path_without_reparse(temp_path, name="state publish temporary")
+    replacement_identity = _file_handle_identity(temp_path)
+    if replacement_identity is None:
+        raise StatePolicyError("state publish temporary identity unavailable")
+    if os.name != "nt":
+        if path.exists():
+            if expected_identity is not None and _file_handle_identity(path) != expected_identity:
+                raise StatePolicyError("state publish target changed concurrently")
+            if expected_hash is not None and _sha256(path.read_bytes()) != expected_hash:
+                raise StatePolicyError("state publish target changed concurrently")
+        elif not replace_if_exists:
+            raise StatePolicyError("state publish target appeared concurrently")
+        os.replace(temp_path, path)
+        published_identity = _file_handle_identity(path)
+        if published_identity != replacement_identity:
+            raise StatePolicyError("state publish postwrite identity mismatch")
+        return published_identity
+
+    target_kernel32: object | None = None
+    target_handle: wintypes.HANDLE | None = None
+    temp_kernel32: object | None = None
+    temp_handle: wintypes.HANDLE | None = None
+    try:
+        target_exists = path.exists()
+        if target_exists:
+            target_kernel32, target_handle = _open_publish_handle(
+                path,
+                desired_access=GENERIC_READ | DELETE_ACCESS,
+                share_mode=FILE_SHARE_READ | FILE_SHARE_DELETE,
+            )
+            target_identity = _publish_handle_info(target_kernel32, target_handle, path)
+            if expected_identity is not None and target_identity != expected_identity:
+                raise StatePolicyError("state publish target changed concurrently")
+            if (
+                expected_hash is not None
+                and _sha256(_read_publish_handle_bytes(target_kernel32, target_handle))
+                != expected_hash
+            ):
+                raise StatePolicyError("state publish target changed concurrently")
+        elif not replace_if_exists:
+            # A missing target is intentionally published with a no-replace
+            # rename, so a competing creator cannot be overwritten.
+            target_identity = None
+        else:
+            target_identity = None
+
+        temp_kernel32, temp_handle = _open_publish_handle(
+            temp_path,
+            desired_access=GENERIC_READ | DELETE_ACCESS | SYNCHRONIZE_ACCESS,
+            share_mode=0,
+        )
+        if _publish_handle_info(temp_kernel32, temp_handle, temp_path) != replacement_identity:
+            raise StatePolicyError("state publish temporary changed concurrently")
+        if target_exists and expected_identity is not None:
+            if _file_handle_identity(path) != expected_identity:
+                raise StatePolicyError("state publish target changed concurrently")
+        if target_exists and expected_hash is not None:
+            # Sample the same leased handle again immediately before the
+            # native rename.  This catches an already-open writer that changed
+            # the inode after the initial sample; identity alone cannot detect
+            # that case.
+            if (
+                _sha256(_read_publish_handle_bytes(target_kernel32, target_handle))
+                != expected_hash
+            ):
+                raise StatePolicyError("state publish target changed concurrently")
+        _rename_temp_by_handle(
+            temp_kernel32,
+            temp_handle,
+            path,
+            replace_if_exists=target_exists and replace_if_exists,
+        )
+        published_identity = _publish_handle_info(temp_kernel32, temp_handle, path)
+        if published_identity != replacement_identity:
+            raise StatePolicyError("state publish postwrite identity mismatch")
+        return published_identity
+    finally:
+        if temp_kernel32 is not None and temp_handle is not None:
+            _close_publish_handle(temp_kernel32, temp_handle)
+        if target_kernel32 is not None and target_handle is not None:
+            _close_publish_handle(target_kernel32, target_handle)
+
+
 def _write_same_directory_temp(path: Path, data: bytes) -> Path:
+    _assert_check_only_d_path_without_reparse(
+        path.parent,
+        name="state writer target",
+    )
     descriptor, raw_path = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temp_path = Path(raw_path)
     try:
@@ -1008,11 +1566,19 @@ def _write_same_directory_temp(path: Path, data: bytes) -> Path:
 
 def create_backup(backup_root: Path, original: bytes) -> Path:
     try:
+        _assert_check_only_d_path_without_reparse(
+            backup_root,
+            name="global state backup root",
+        )
         directory = backup_root / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}-{os.getpid()}-{uuid.uuid4().hex}"
         directory.mkdir(parents=True, exist_ok=False)
+        _assert_check_only_d_path_without_reparse(
+            directory,
+            name="global state backup directory",
+        )
         path = directory / ".codex-global-state.json"
         temp = _write_same_directory_temp(path, original)
-        os.replace(temp, path)
+        _publish_temp_file(path, temp, replace_if_exists=False)
         _fsync_parent(path)
         return path
     except OSError as exc:
@@ -1035,10 +1601,12 @@ def update_global_state(
     if path_mode not in {"inventory", "repair-safe-only", "repair-all-approved"}:
         raise StatePolicyError("unknown state path mode")
     permission_policy = _resolve_policy_for_path(path, permission_policy)
+    _assert_permission_policy_unchanged(permission_policy)
     if source_root is None:
         source_root = PROJECTLESS_SOURCE_ROOT
     if candidate_root is None:
         candidate_root = CANONICAL_CANDIDATE_ROOT
+    _assert_check_only_d_path_without_reparse(path, name="global state source")
     if not path.is_file():
         return {
             "status": "missing",
@@ -1054,7 +1622,15 @@ def update_global_state(
     if max_attempts != MAX_GLOBAL_ATTEMPTS:
         raise StatePolicyError("global state retry contract is fixed")
     for attempt in range(1, max_attempts + 1):
-        original = path.read_bytes()
+        before_identity = _file_handle_identity(path)
+        if before_identity is None:
+            raise StatePolicyError("global state source disappeared")
+        try:
+            original = path.read_bytes()
+        except OSError as exc:
+            raise StatePolicyError("global state source is unreadable") from exc
+        if _file_handle_identity(path) != before_identity:
+            continue
         before_hash = _sha256(original)
         state = _strict_json_loads(original)
         inventory = build_path_inventory(state, source_root, candidate_root)
@@ -1117,16 +1693,34 @@ def update_global_state(
                 raise StatePolicyError("global state backup failed") from exc
             if before_prewrite_check is not None:
                 before_prewrite_check(attempt)
+            # Rebind the policy source and the target identity after all
+            # potentially slow preparation, still inside the caller mutex.
+            _assert_permission_policy_unchanged(permission_policy)
             current = path.read_bytes()
-            if _sha256(current) != before_hash:
+            if (
+                _sha256(current) != before_hash
+                or _file_handle_identity(path) != before_identity
+            ):
                 continue
-            _reprobe_approved_paths(inventory, approved_map, path_mode)
-            # A normal user-mode delete/replace can still race this final name-based
-            # replacement. This is a bounded replay contract, not absolute CAS.
-            os.replace(temp_path, path)
+            approved_mappings = _validate_approved_map(inventory, approved_map, path_mode)
+            _reprobe_approved_paths(inventory, approved_mappings, path_mode)
+            replacement_identity = _file_handle_identity(temp_path)
+            if replacement_identity is None:
+                raise StatePolicyError("global state replacement identity unavailable")
+            # Hold a verified target lease through the native class-65 rename;
+            # the identity/hash checks also refuse a same-bytes replacement.
+            published_identity = _publish_temp_file(
+                path,
+                temp_path,
+                expected_hash=before_hash,
+                expected_identity=before_identity,
+            )
             _fsync_parent(path)
             published = path.read_bytes()
-            if published != replacement:
+            if (
+                published != replacement
+                or published_identity != replacement_identity
+            ):
                 raise StatePolicyError("global state postwrite verification failed")
             published_state = _strict_json_loads(published)
             published_inventory = build_path_inventory(
@@ -1137,9 +1731,9 @@ def update_global_state(
             _published_normalized, published_summary = normalize_global_state(
                 published_state,
                 permission_policy=permission_policy,
-                path_mode=path_mode,
+                path_mode="inventory",
                 path_inventory=published_inventory,
-                approved_map=approved_map,
+                approved_map=None,
             )
             published_drift = (
                 published_summary["pathDriftCount"]
@@ -1153,6 +1747,8 @@ def update_global_state(
                 "driftCount": published_drift,
                 "beforeSha256": before_hash,
                 "afterSha256": _sha256(published),
+                "beforeIdentity": list(before_identity),
+                "afterIdentity": list(replacement_identity),
                 "attempts": attempt,
                 "pathInventory": published_inventory,
                 **summary,
@@ -1334,6 +1930,14 @@ def update_thread_state(
     if not path.is_file():
         return {"status": "missing", "changedCount": 0, "wouldChangeCount": 0, "driftCount": 0}
     permission_policy = _resolve_policy_for_path(path, permission_policy)
+    _assert_permission_policy_unchanged(permission_policy)
+    _assert_check_only_d_path_without_reparse(path, name="thread state source")
+    for sidecar in (
+        Path(str(path) + "-wal"),
+        Path(str(path) + "-shm"),
+        Path(str(path) + "-journal"),
+    ):
+        _assert_check_only_d_path_without_reparse(sidecar, name="thread state sidecar")
     if check_only:
         if snapshot_root is None:
             raise StatePolicyError("thread state check snapshot root is required")
@@ -1351,6 +1955,13 @@ def update_thread_state(
             "integrityOk": True,
             "integrityResultCount": integrity_result_count,
         }
+    source_identity = _file_handle_identity(path)
+    if source_identity is None:
+        raise StatePolicyError("thread state source disappeared")
+    try:
+        source_bytes_hash = _sha256(path.read_bytes())
+    except OSError as exc:
+        raise StatePolicyError("thread state source snapshot is busy") from exc
     conn = sqlite3.connect(path, timeout=1.5)
     try:
         conn.execute("pragma busy_timeout=1500")
@@ -1359,6 +1970,11 @@ def update_thread_state(
         except sqlite3.OperationalError as exc:
             raise StatePolicyError("thread state database busy") from exc
         try:
+            if _file_handle_identity(path) != source_identity:
+                raise StatePolicyError("thread state concurrent replacement")
+            if _sha256(path.read_bytes()) != source_bytes_hash:
+                raise StatePolicyError("thread state concurrent update")
+            _assert_permission_policy_unchanged(permission_policy)
             identities = select_thread_updates(conn, permission_policy)
             if identities:
                 conn.execute(
@@ -1395,8 +2011,16 @@ def update_thread_state(
             )
             if drift_count:
                 raise StatePolicyError("thread state drift remains before commit")
+            if _file_handle_identity(path) != source_identity:
+                raise StatePolicyError("thread state concurrent replacement")
+            if _sha256(path.read_bytes()) != source_bytes_hash:
+                raise StatePolicyError("thread state concurrent update")
             if before_commit is not None:
                 before_commit()
+            if _file_handle_identity(path) != source_identity:
+                raise StatePolicyError("thread state concurrent replacement")
+            if _sha256(path.read_bytes()) != source_bytes_hash:
+                raise StatePolicyError("thread state concurrent update")
             conn.commit()
         except BaseException:
             conn.rollback()
@@ -1413,6 +2037,8 @@ def update_thread_state(
         )
         if verify_count:
             raise StatePolicyError("thread state postcommit drift remains")
+        if _file_handle_identity(path) != source_identity:
+            raise StatePolicyError("thread state concurrent replacement")
         return {
             "status": "updated" if identities else "converged",
             "changedCount": len(identities),
@@ -1477,11 +2103,12 @@ class WindowsNamedMutex:
 
 
 def _write_health(path: Path, envelope: dict[str, object]) -> None:
+    _assert_check_only_d_path_without_reparse(path, name="state policy health target")
     path.parent.mkdir(parents=True, exist_ok=True)
     data = _json_bytes(envelope)
     temp = _write_same_directory_temp(path, data)
     try:
-        os.replace(temp, path)
+        _publish_temp_file(path, temp)
         _fsync_parent(path)
     finally:
         temp.unlink(missing_ok=True)
@@ -1504,23 +2131,93 @@ def _redact_path_inventory(inventory: object) -> object:
     """Keep inventory disposition evidence while omitting raw local values."""
     if not isinstance(inventory, dict):
         return inventory
-    redacted = copy.deepcopy(inventory)
+    redacted: dict[str, object] = {}
+    for key in (
+        "inventoryGeneration",
+        "stateSha256",
+        "mappingSha256",
+        "sourceRootAllowed",
+        "candidateRootAllowed",
+        "safeAdvisory",
+        "repairContract",
+    ):
+        if key in inventory:
+            redacted[key] = copy.deepcopy(inventory[key])
     for key in ("sourceRoot", "candidateRoot"):
         if key in redacted:
             redacted[key] = "<omitted>"
-    redacted.pop("candidateRootProbe", None)
+    redacted["sourceRoot"] = "<omitted>"
+    redacted["candidateRoot"] = "<omitted>"
     maps = redacted.get("maps")
-    if isinstance(maps, dict):
-        for entries in maps.values():
+    inventory_maps = inventory.get("maps")
+    evidence: list[dict[str, object]] = []
+    if isinstance(inventory_maps, dict):
+        for entries in inventory_maps.values():
             if not isinstance(entries, dict):
                 continue
             for entry in entries.values():
-                if isinstance(entry, dict):
-                    entry.pop("value", None)
-                    entry.pop("candidate", None)
-                    entry.pop("probe", None)
-    redacted["unknown"] = {str(key): "<omitted>" for key in redacted.get("unknown", {})}
+                if not isinstance(entry, dict):
+                    continue
+                evidence.append(
+                    {
+                        "safe": bool(entry.get("safe")),
+                        "reason": entry.get("reason")
+                        if isinstance(entry.get("reason"), str)
+                        else "unknown",
+                        "reparse": bool(entry.get("reparse")),
+                        "sourceSha256": entry.get("sourceSha256")
+                        if isinstance(entry.get("sourceSha256"), str)
+                        else None,
+                        "finalIdentity": copy.deepcopy(entry.get("finalIdentity")),
+                    }
+                )
+    redacted["entries"] = evidence
+    unknown = inventory.get("unknown")
+    redacted["unknownCount"] = len(unknown) if isinstance(unknown, dict) else 0
+    redacted.pop("maps", None)
     return redacted
+
+
+def _restore_global_state_snapshot(
+    path: Path,
+    original: bytes,
+    *,
+    expected_hash: str,
+    expected_identity: tuple[int, int] | None,
+) -> bool:
+    """Best-effort reverse CAS used only while the domain mutex is held."""
+    try:
+        _assert_check_only_d_path_without_reparse(path, name="global state rollback target")
+        if not path.is_file():
+            return False
+        current = path.read_bytes()
+        current_identity = _file_handle_identity(path)
+        if _sha256(current) != expected_hash:
+            return False
+        if expected_identity is not None and current_identity != expected_identity:
+            return False
+        replacement = _write_same_directory_temp(path, original)
+        try:
+            replacement_identity = _file_handle_identity(replacement)
+            if replacement_identity is None:
+                return False
+            if _sha256(path.read_bytes()) != expected_hash or _file_handle_identity(path) != current_identity:
+                return False
+            _publish_temp_file(
+                path,
+                replacement,
+                expected_hash=expected_hash,
+                expected_identity=expected_identity,
+            )
+            _fsync_parent(path)
+            return (
+                path.read_bytes() == original
+                and _file_handle_identity(path) == replacement_identity
+            )
+        finally:
+            replacement.unlink(missing_ok=True)
+    except (OSError, StatePolicyError):
+        return False
 
 
 def run_policy(
@@ -1553,9 +2250,41 @@ def run_policy(
             permission_policy = resolve_permission_policy(codex_home)
         elif not isinstance(permission_policy, PermissionPolicy):
             raise StatePolicyError("permission policy object is invalid")
+        global_path = codex_home / ".codex-global-state.json"
+        db_path = codex_home / "state_5.sqlite"
         with WindowsNamedMutex():
+            # Capture both domains before publication.  The SQLite tuple is
+            # compared after a downstream failure so a committed partial write
+            # is reported as unsafe instead of being mistaken for a clean run.
+            _assert_permission_policy_unchanged(permission_policy)
+            global_snapshot: bytes | None = None
+            global_snapshot_identity: tuple[int, int] | None = None
+            _assert_check_only_d_path_without_reparse(
+                global_path,
+                name="global state source",
+            )
+            if not global_path.is_file():
+                raise StatePolicyError("global state source is missing")
+            if global_path.is_file():
+                global_snapshot_identity = _file_handle_identity(global_path)
+                global_snapshot = global_path.read_bytes()
+                if (
+                    global_snapshot_identity is None
+                    or _file_handle_identity(global_path) != global_snapshot_identity
+                ):
+                    raise StatePolicyError("global state source changed while snapshotting")
+            _assert_check_only_d_path_without_reparse(db_path, name="thread state source")
+            if not db_path.is_file():
+                raise StatePolicyError("thread state source is missing")
+            for sidecar in (
+                Path(str(db_path) + "-wal"),
+                Path(str(db_path) + "-shm"),
+                Path(str(db_path) + "-journal"),
+            ):
+                _assert_check_only_d_path_without_reparse(sidecar, name="thread state sidecar")
+            sqlite_snapshot = _capture_sqlite_source(db_path)
             global_result = update_global_state(
-                codex_home / ".codex-global-state.json",
+                global_path,
                 codex_home / "backups_state" / "codex-state-policy",
                 permission_policy=permission_policy,
                 path_mode=path_mode,
@@ -1568,12 +2297,49 @@ def run_policy(
                 if production_home
                 else health_root / "sqlite-snapshots"
             )
-            thread_result = update_thread_state(
-                codex_home / "state_5.sqlite",
-                permission_policy=permission_policy,
-                check_only=check_only,
-                snapshot_root=snapshot_root if check_only else None,
-            )
+            try:
+                thread_result = update_thread_state(
+                    db_path,
+                    permission_policy=permission_policy,
+                    check_only=check_only,
+                    snapshot_root=snapshot_root if check_only else None,
+                )
+            except BaseException:
+                sqlite_changed = True
+                try:
+                    sqlite_changed = _capture_sqlite_source(db_path) != sqlite_snapshot
+                except BaseException:
+                    sqlite_changed = True
+                rolled_back = False
+                if (
+                    not sqlite_changed
+                    and bool(global_result.get("changed"))
+                    and global_snapshot is not None
+                    and global_snapshot_identity is not None
+                ):
+                    after_hash = global_result.get("afterSha256")
+                    after_identity = global_result.get("afterIdentity")
+                    if (
+                        isinstance(after_hash, str)
+                        and isinstance(after_identity, list)
+                        and len(after_identity) == 2
+                    ):
+                        rolled_back = _restore_global_state_snapshot(
+                            global_path,
+                            global_snapshot,
+                            expected_hash=after_hash,
+                            expected_identity=(int(after_identity[0]), int(after_identity[1])),
+                        )
+                if rolled_back:
+                    global_result["status"] = "rolled-back"
+                    global_result["changed"] = False
+                    global_result["changedCount"] = 0
+                    global_result["afterSha256"] = _sha256(global_snapshot)
+                    global_result["afterIdentity"] = list(global_snapshot_identity)
+                    errors.append("state policy rollback completed")
+                elif bool(global_result.get("changed")):
+                    errors.append("unsafe-partial")
+                raise
         ok = True
     except BaseException as exc:
         ok = False
@@ -1623,7 +2389,7 @@ def run_policy(
     if write_health:
         try:
             _write_health(health_root / "codex-state-policy.json", health)
-        except OSError:
+        except (OSError, StatePolicyError):
             errors.append("state policy health write failed")
             payload["ok"] = False
             payload["errors"] = errors
