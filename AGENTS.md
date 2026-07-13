@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-本项目使用本地 markdown issue：任务、PRD 和讨论记录放在 `.scratch/<feature-slug>/`。见 `docs/agents/issue-tracker.md`。
+本项目使用本地 Markdown tracker：任务、spec、tickets 和讨论记录放在 `.scratch/<feature-slug>/`。见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
