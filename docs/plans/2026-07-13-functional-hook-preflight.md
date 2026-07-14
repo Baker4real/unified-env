@@ -238,9 +238,12 @@ git commit -m "refactor: separate production preflight manifest from fixtures"
 ### Task 7: 生成 canonical path repair plan 并执行获授权的 state 修复（未实施）
 
 **Files:**
-- Modify: `scripts/Invoke-CodexHostHookReconciliation.ps1` only for evidence linkage if required
+- Modify: `scripts/lib/CodexHookHandleBoundIO.cs`
+- Modify: `scripts/lib/CodexHookPolicy.ps1`
 - Create: `scripts/Get-CodexStatePathInventory.ps1`
+- Create: `scripts/lib/CodexRepairTransaction.ps1`
 - Create: `tests/Test-CodexStatePathRepair.ps1`
+- Create: `tests/Test-CodexStatePathRepairHardening.ps1`
 - Evidence: `D:\Codex\.codex\run-evidence\env-governance\codex-state-preflight\`
 
 **Interfaces:**
@@ -249,7 +252,7 @@ git commit -m "refactor: separate production preflight manifest from fixtures"
 
 - [ ] **Step 1: Write RED inventory/approval tests**
 
-覆盖 171 个可候选条目、5 个 missing、junction target、竞争创建和 generation/hash 不一致。
+合成规模门覆盖 171 个 safe、5 个 missing、junction target、ambiguous、竞争创建和 generation/hash 不一致；hardening 必须覆盖批准闭包、文件身份、固定认证消费账本、no-op、apply/restore/automatic rollback 的真实 FailFast 崩溃恢复；这些数量只属于 fixture，真实执行前必须以 fresh live inventory 为唯一事实来源。
 
 - [ ] **Step 2: Implement D:\Documents\Codex candidate inventory**
 
@@ -261,7 +264,7 @@ git commit -m "refactor: separate production preflight manifest from fixtures"
 
 - [ ] **Step 4: Implement approved repair**
 
-对已明确批准且最终身份稳定的条目执行 state JSON 原子 CAS；5 个 missing 和任何未批准 reparse 条目保持原值。
+对 fresh live inventory 中已明确批准且最终身份稳定的条目执行 state JSON 原子 CAS；所有 missing、reparse、ambiguous 或未批准条目保持原值并逐项报告，不预设生产数量。
 
 - [ ] **Step 5: Run live repair and immediate check**
 
@@ -270,7 +273,7 @@ git commit -m "refactor: separate production preflight manifest from fixtures"
 - [ ] **Step 6: Commit code and reports**
 
 ```powershell
-git add scripts/Get-CodexStatePathInventory.ps1 tests/Test-CodexStatePathRepair.ps1 scripts/Invoke-CodexHostHookReconciliation.ps1
+git add scripts/Get-CodexStatePathInventory.ps1 scripts/lib/CodexRepairTransaction.ps1 scripts/lib/CodexHookHandleBoundIO.cs scripts/lib/CodexHookPolicy.ps1 tests/Test-CodexStatePathRepair.ps1 tests/Test-CodexStatePathRepairHardening.ps1 docs/plans/2026-07-13-functional-hook-preflight.md
 git commit -m "feat: repair projectless state with approved canonical mappings"
 ```
 

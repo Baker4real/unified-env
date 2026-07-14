@@ -10,15 +10,25 @@ namespace CodexHookGovernance
 {
     public sealed class HandleBoundFileSnapshot
     {
-        public HandleBoundFileSnapshot(string finalPath, byte[] bytes)
+        public HandleBoundFileSnapshot(
+            string finalPath,
+            byte[] bytes,
+            string volumeSerialNumber,
+            string fileIndex)
         {
             FinalPath = finalPath;
             Bytes = bytes;
+            VolumeSerialNumber = volumeSerialNumber;
+            FileIndex = fileIndex;
         }
 
         public string FinalPath { get; }
 
         public byte[] Bytes { get; }
+
+        public string VolumeSerialNumber { get; }
+
+        public string FileIndex { get; }
     }
 
     public sealed class HandlePathMismatchException : IOException
@@ -39,12 +49,40 @@ namespace CodexHookGovernance
     {
         private const uint FileNameNormalized = 0x0;
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeFileTime
+        {
+            public uint LowDateTime;
+            public uint HighDateTime;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ByHandleFileInformation
+        {
+            public uint FileAttributes;
+            public NativeFileTime CreationTime;
+            public NativeFileTime LastAccessTime;
+            public NativeFileTime LastWriteTime;
+            public uint VolumeSerialNumber;
+            public uint FileSizeHigh;
+            public uint FileSizeLow;
+            public uint NumberOfLinks;
+            public uint FileIndexHigh;
+            public uint FileIndexLow;
+        }
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern uint GetFinalPathNameByHandleW(
             SafeFileHandle fileHandle,
             StringBuilder filePath,
             uint filePathLength,
             uint flags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandle(
+            SafeFileHandle fileHandle,
+            out ByHandleFileInformation fileInformation);
 
         public static SafeFileHandle OpenVerifiedReadHandle(string expectedPath)
         {
@@ -84,8 +122,18 @@ namespace CodexHookGovernance
             using (FileStream stream = new FileStream(handle, FileAccess.Read))
             using (MemoryStream buffer = new MemoryStream())
             {
+                ByHandleFileInformation fileInformation;
+                if (!GetFileInformationByHandle(handle, out fileInformation))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
                 stream.CopyTo(buffer);
-                return new HandleBoundFileSnapshot(lexicalPath, buffer.ToArray());
+                return new HandleBoundFileSnapshot(
+                    lexicalPath,
+                    buffer.ToArray(),
+                    fileInformation.VolumeSerialNumber.ToString("x8"),
+                    fileInformation.FileIndexHigh.ToString("x8") +
+                        fileInformation.FileIndexLow.ToString("x8"));
             }
         }
 
@@ -149,13 +197,23 @@ namespace CodexHookGovernance
         private readonly List<SafeFileHandle> handles;
         private bool disposed;
 
-        private VerifiedDirectoryChainGuard(string directoryPath, List<SafeFileHandle> handles)
+        private VerifiedDirectoryChainGuard(
+            string directoryPath,
+            List<SafeFileHandle> handles,
+            string volumeSerialNumber,
+            string fileIndex)
         {
             DirectoryPath = directoryPath;
             this.handles = handles;
+            VolumeSerialNumber = volumeSerialNumber;
+            FileIndex = fileIndex;
         }
 
         public string DirectoryPath { get; }
+
+        public string VolumeSerialNumber { get; }
+
+        public string FileIndex { get; }
 
         public GuardedTempFile CreateTempFile(string tempPath)
         {
@@ -179,7 +237,7 @@ namespace CodexHookGovernance
             try
             {
                 VerifyRegularFileHandle(handle, lexicalPath);
-                return new GuardedTempFile(this, lexicalPath, handle);
+                return new GuardedTempFile(this, lexicalPath, handle, false);
             }
             catch
             {
@@ -213,6 +271,75 @@ namespace CodexHookGovernance
             {
                 VerifyRegularFileHandle(handle, lexicalPath);
                 return new GuardedTargetFileLease(this, lexicalPath, handle);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        public GuardedTempFile AcquirePreparedTempFile(string tempPath)
+        {
+            ThrowIfDisposed();
+            string lexicalPath = ValidateChildPath(tempPath, "tempPath");
+            SafeFileHandle handle = CreateFileW(
+                lexicalPath,
+                GenericRead | GenericWrite | DeleteAccess | SynchronizeAccess,
+                FileShare.None,
+                IntPtr.Zero,
+                OpenExisting,
+                FileAttributeNormal | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, "Unable to acquire a guarded prepared temporary file.");
+            }
+            try
+            {
+                VerifyRegularFileHandle(handle, lexicalPath);
+                return new GuardedTempFile(this, lexicalPath, handle, true);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        public GuardedReadOnlyFileLease AcquireReadOnlyFileLease(string targetPath)
+        {
+            ThrowIfDisposed();
+            string lexicalPath = ValidateChildPath(targetPath, "targetPath");
+            SafeFileHandle handle = CreateFileW(
+                lexicalPath,
+                GenericRead,
+                // This lease protects an approved input object. It must prevent
+                // writes, delete, and class-65 POSIX replacement for its lifetime.
+                FileShare.Read,
+                IntPtr.Zero,
+                OpenExisting,
+                FileAttributeNormal | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, "Unable to acquire a guarded read-only file lease.");
+            }
+
+            try
+            {
+                VerifyRegularFileHandle(handle, lexicalPath);
+                string[] identity = GetFileIdentity(handle);
+                return new GuardedReadOnlyFileLease(
+                    this,
+                    lexicalPath,
+                    handle,
+                    identity[0],
+                    identity[1]);
             }
             catch
             {
@@ -357,7 +484,12 @@ namespace CodexHookGovernance
                     openedHandles.Add(handle);
                 }
 
-                return new VerifiedDirectoryChainGuard(targetPath, openedHandles);
+                string[] identity = GetFileIdentity(openedHandles[openedHandles.Count - 1]);
+                return new VerifiedDirectoryChainGuard(
+                    targetPath,
+                    openedHandles,
+                    identity[0],
+                    identity[1]);
             }
             catch
             {
@@ -536,6 +668,21 @@ namespace CodexHookGovernance
             }
         }
 
+        internal static string[] GetFileIdentity(SafeFileHandle handle)
+        {
+            ByHandleFileInformation fileInformation;
+            if (!GetFileInformationByHandle(handle, out fileInformation))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return new[]
+            {
+                fileInformation.VolumeSerialNumber.ToString("x8"),
+                fileInformation.FileIndexHigh.ToString("x8") +
+                    fileInformation.FileIndexLow.ToString("x8")
+            };
+        }
+
         private static string TrimDirectoryEnding(string path)
         {
             string root = Path.GetPathRoot(path);
@@ -553,6 +700,91 @@ namespace CodexHookGovernance
                 openedHandles[index].Dispose();
             }
             openedHandles.Clear();
+        }
+    }
+
+    public sealed class GuardedReadOnlyFileLease : IDisposable
+    {
+        private readonly VerifiedDirectoryChainGuard owner;
+        private readonly SafeFileHandle handle;
+        private readonly FileStream stream;
+        private readonly byte[] snapshotBytes;
+        private bool disposed;
+
+        internal GuardedReadOnlyFileLease(
+            VerifiedDirectoryChainGuard owner,
+            string originalPath,
+            SafeFileHandle handle,
+            string volumeSerialNumber,
+            string fileIndex)
+        {
+            this.owner = owner;
+            OriginalPath = originalPath;
+            this.handle = handle;
+            VolumeSerialNumber = volumeSerialNumber;
+            FileIndex = fileIndex;
+            stream = new FileStream(handle, FileAccess.Read);
+            try
+            {
+                snapshotBytes = ReadAllBytesFromHandleCore();
+            }
+            catch
+            {
+                stream.Dispose();
+                throw;
+            }
+        }
+
+        public string OriginalPath { get; }
+
+        public string VolumeSerialNumber { get; }
+
+        public string FileIndex { get; }
+
+        public byte[] SnapshotBytes
+        {
+            get
+            {
+                ThrowIfDisposed();
+                owner.ThrowIfDisposed();
+                return (byte[])snapshotBytes.Clone();
+            }
+        }
+
+        public byte[] ReadAllBytesFromHandle()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, OriginalPath);
+            return ReadAllBytesFromHandleCore();
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            stream.Dispose();
+        }
+
+        private byte[] ReadAllBytesFromHandleCore()
+        {
+            stream.Position = 0;
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                stream.CopyTo(buffer);
+                return buffer.ToArray();
+            }
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (disposed)
+            {
+                throw new ObjectDisposedException(nameof(GuardedReadOnlyFileLease));
+            }
         }
     }
 
@@ -607,6 +839,24 @@ namespace CodexHookGovernance
         }
 
         public string OriginalPath { get; }
+
+        public string VolumeSerialNumber
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return VerifiedDirectoryChainGuard.GetFileIdentity(handle)[0];
+            }
+        }
+
+        public string FileIndex
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return VerifiedDirectoryChainGuard.GetFileIdentity(handle)[1];
+            }
+        }
 
         public byte[] SnapshotBytes
         {
@@ -685,8 +935,11 @@ namespace CodexHookGovernance
     public sealed class GuardedTempFile : IDisposable
     {
         private const int FileRenameInformationEx = 65;
+        private const int FileDispositionInformationEx = 64;
         private const uint FileRenameReplaceIfExists = 0x00000001;
         private const uint FileRenamePosixSemantics = 0x00000002;
+        private const uint FileDispositionDelete = 0x00000001;
+        private const uint FileDispositionPosixSemantics = 0x00000002;
 
         private readonly VerifiedDirectoryChainGuard owner;
         private readonly SafeFileHandle handle;
@@ -717,15 +970,35 @@ namespace CodexHookGovernance
         internal GuardedTempFile(
             VerifiedDirectoryChainGuard owner,
             string currentPath,
-            SafeFileHandle handle)
+            SafeFileHandle handle,
+            bool alreadyFlushed)
         {
             this.owner = owner;
             this.currentPath = currentPath;
             this.handle = handle;
-            stream = new FileStream(handle, FileAccess.Write);
+            stream = new FileStream(handle, alreadyFlushed ? FileAccess.ReadWrite : FileAccess.Write);
+            flushed = alreadyFlushed;
         }
 
         public string CurrentPath { get { return currentPath; } }
+
+        public string VolumeSerialNumber
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return VerifiedDirectoryChainGuard.GetFileIdentity(handle)[0];
+            }
+        }
+
+        public string FileIndex
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return VerifiedDirectoryChainGuard.GetFileIdentity(handle)[1];
+            }
+        }
 
         public void WriteAndFlush(byte[] bytes)
         {
@@ -743,6 +1016,22 @@ namespace CodexHookGovernance
             stream.Write(bytes, 0, bytes.Length);
             stream.Flush(true);
             flushed = true;
+        }
+
+        public byte[] ReadAllBytesFromHandle()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            if (!stream.CanRead)
+            {
+                throw new InvalidOperationException("The guarded temporary file is not readable.");
+            }
+            stream.Position = 0;
+            using (MemoryStream copy = new MemoryStream())
+            {
+                stream.CopyTo(copy);
+                return copy.ToArray();
+            }
         }
 
         public void RenameTo(string targetPath, bool replaceIfExists)
@@ -808,6 +1097,34 @@ namespace CodexHookGovernance
             currentPath = lexicalTarget;
             renamed = true;
             VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, currentPath);
+        }
+
+        public void DeleteWithPosixSemantics()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            if (renamed)
+            {
+                throw new InvalidOperationException("The guarded temporary file was already renamed or deleted.");
+            }
+            VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, currentPath);
+            IntPtr buffer = Marshal.AllocHGlobal(sizeof(uint));
+            try
+            {
+                Marshal.WriteInt32(buffer, unchecked((int)(FileDispositionDelete | FileDispositionPosixSemantics)));
+                IoStatusBlock ioStatusBlock;
+                int status = NtSetInformationFile(handle, out ioStatusBlock, buffer, sizeof(uint), FileDispositionInformationEx);
+                if (status != 0)
+                {
+                    uint dosError = RtlNtStatusToDosError(status);
+                    throw new Win32Exception(checked((int)dosError), "Unable to delete a guarded temporary file.");
+                }
+                renamed = true;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
         }
 
         public void Dispose()

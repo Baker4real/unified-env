@@ -348,6 +348,7 @@ function Get-CodexHookHandleBoundFileSnapshot {
                 byteLength = $preOpenProbe.byteLength
                 blockedAtSha256 = $preOpenProbe.blockedAtSha256
                 finalPathVerified = $false
+                identity = $null
             }
             bytes = $null
         }
@@ -367,6 +368,7 @@ function Get-CodexHookHandleBoundFileSnapshot {
                     byteLength = $null
                     blockedAtSha256 = $null
                     finalPathVerified = $false
+                    identity = $null
                 }
                 bytes = $null
             }
@@ -381,6 +383,7 @@ function Get-CodexHookHandleBoundFileSnapshot {
                     byteLength = $null
                     blockedAtSha256 = Get-CodexHookTextSha256 -Text $leaf.FinalPath
                     finalPathVerified = $false
+                    identity = $null
                 }
                 bytes = $null
             }
@@ -398,6 +401,10 @@ function Get-CodexHookHandleBoundFileSnapshot {
             byteLength = [int64]$bytes.Length
             blockedAtSha256 = $null
             finalPathVerified = $true
+            identity = @(
+                [string]$nativeSnapshot.VolumeSerialNumber,
+                [string]$nativeSnapshot.FileIndex
+            )
         }
         bytes = $bytes
     }
@@ -2678,6 +2685,7 @@ function Get-CodexHookFixtureFileSnapshot {
         state = [string]$snapshot.probe.state
         sha256 = if ($snapshot.probe.safeToRead) { Get-CodexHookBytesSha256 -Bytes ([byte[]]$snapshot.bytes) } else { $null }
         bytes = if ($snapshot.probe.safeToRead) { [byte[]]$snapshot.bytes } else { $null }
+        identity = if ($snapshot.probe.safeToRead) { @($snapshot.probe.identity) } else { @() }
     }
 }
 
@@ -2730,6 +2738,7 @@ function Get-CodexHookCapabilityFileSnapshot {
         state = [string]$snapshot.probe.state
         sha256 = if ($snapshot.probe.safeToRead) { Get-CodexHookBytesSha256 -Bytes ([byte[]]$snapshot.bytes) } else { $null }
         bytes = if ($snapshot.probe.safeToRead) { [byte[]]$snapshot.bytes } else { $null }
+        identity = if ($snapshot.probe.safeToRead) { @($snapshot.probe.identity) } else { @() }
     }
 }
 
@@ -2761,12 +2770,16 @@ function Assert-CodexHookSnapshotExpectedState {
         [Parameter(Mandatory)][object]$Snapshot,
         [Parameter(Mandatory)][bool]$ExpectedExists,
         [AllowNull()][string]$ExpectedSha256,
-        [Parameter(Mandatory)][string]$Scope
+        [Parameter(Mandatory)][string]$Scope,
+        [AllowNull()][string[]]$ExpectedIdentity
     )
 
     if ($ExpectedExists) {
         if (-not $Snapshot.exists -or $Snapshot.state -cne 'regular-file' -or $Snapshot.sha256 -cne $ExpectedSha256) {
             throw "$Scope 临写前状态漂移。"
+        }
+        if ($null -ne $ExpectedIdentity -and @(Compare-Object @($ExpectedIdentity) @($Snapshot.identity)).Count -ne 0) {
+            throw "$Scope 临写前文件身份漂移。"
         }
     } elseif ($Snapshot.exists -or $Snapshot.state -cne 'missing') {
         throw "$Scope 临写前 missing 状态漂移。"
@@ -2785,7 +2798,11 @@ function Set-CodexHookAtomicFileBytesWithCapability {
         [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
         [string]$Scope = 'atomic publish',
         [scriptblock]$BeforeMove,
-        [scriptblock]$TestAfterPremoveSnapshot
+        [scriptblock]$TestAfterPremoveSnapshot,
+        [AllowNull()][string[]]$ExpectedIdentity,
+        [scriptblock]$BeforeRename,
+        [switch]$PreservePreparedTempOnRenameFailure,
+        [scriptblock]$RenameAction
     )
 
     $fullPath = Assert-CodexHookCapabilityPath `
@@ -2809,7 +2826,7 @@ function Set-CodexHookAtomicFileBytesWithCapability {
             -CapabilityRoot $capabilityRootPath `
             -AllowedExactPaths $AllowedExactPaths `
             -Name "$Scope prewrite"
-        Assert-CodexHookSnapshotExpectedState -Snapshot $before -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope $Scope
+        Assert-CodexHookSnapshotExpectedState -Snapshot $before -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -ExpectedIdentity $ExpectedIdentity -Scope $Scope
         $parentItem = Get-Item -LiteralPath $parent -Force -ErrorAction Stop
         if (-not $parentItem.PSIsContainer -or ($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "$Scope target parent 非安全普通目录。"
@@ -2817,6 +2834,8 @@ function Set-CodexHookAtomicFileBytesWithCapability {
         $tempPath = Join-Path $parent ".codex-hook-$([guid]::NewGuid().ToString('N')).tmp"
         $tempFile = $null
         $targetLease = $null
+        $beforeRenameCompleted = $false
+        $renameSucceeded = $false
         try {
             $tempFile = $directoryGuard.CreateTempFile($tempPath)
             $tempFile.WriteAndFlush($Bytes)
@@ -2830,6 +2849,7 @@ function Set-CodexHookAtomicFileBytesWithCapability {
                     state = 'regular-file'
                     sha256 = Get-CodexHookBytesSha256 -Bytes $leasedBytes
                     bytes = $leasedBytes
+                    identity = @($targetLease.VolumeSerialNumber, $targetLease.FileIndex)
                 }
             } else {
                 $preMove = Get-CodexHookCapabilityFileSnapshot `
@@ -2838,10 +2858,23 @@ function Set-CodexHookAtomicFileBytesWithCapability {
                     -AllowedExactPaths $AllowedExactPaths `
                     -Name "$Scope premove"
             }
-            Assert-CodexHookSnapshotExpectedState -Snapshot $preMove -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -Scope "$Scope premove"
+            Assert-CodexHookSnapshotExpectedState -Snapshot $preMove -ExpectedExists $ExpectedExists -ExpectedSha256 $ExpectedSha256 -ExpectedIdentity $ExpectedIdentity -Scope "$Scope premove"
             if ($null -ne $TestAfterPremoveSnapshot) { & $TestAfterPremoveSnapshot $fullPath }
             [void](Assert-CodexHookCapabilityPath -Path $parent -CapabilityRoot $capabilityRootPath -Name "$Scope parent premove")
-            $tempFile.RenameTo($fullPath, $ExpectedExists)
+            if ($null -ne $BeforeRename) {
+                [void](& $BeforeRename ([pscustomobject][ordered]@{
+                    path = $tempFile.CurrentPath
+                    sha256 = $AfterSha256
+                    identity = @($tempFile.VolumeSerialNumber, $tempFile.FileIndex)
+                }))
+                $beforeRenameCompleted = $true
+            }
+            if ($null -ne $RenameAction) {
+                [void](& $RenameAction $tempFile $fullPath $ExpectedExists)
+            } else {
+                $tempFile.RenameTo($fullPath, $ExpectedExists)
+            }
+            $renameSucceeded = $true
         } finally {
             try {
                 try {
@@ -2850,7 +2883,8 @@ function Set-CodexHookAtomicFileBytesWithCapability {
                     if ($null -ne $targetLease) { $targetLease.Dispose() }
                 }
             } finally {
-                if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
+                $preservePrepared = $PreservePreparedTempOnRenameFailure -and $beforeRenameCompleted -and -not $renameSucceeded
+                if (-not $preservePrepared -and [IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
             }
         }
 
@@ -2859,7 +2893,7 @@ function Set-CodexHookAtomicFileBytesWithCapability {
             -CapabilityRoot $capabilityRootPath `
             -AllowedExactPaths $AllowedExactPaths `
             -Name "$Scope postwrite"
-        Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $true -ExpectedSha256 $AfterSha256 -Scope "$Scope postcheck"
+        Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $true -ExpectedSha256 $AfterSha256 -ExpectedIdentity $null -Scope "$Scope postcheck"
     } finally {
         $directoryGuard.Dispose()
     }
