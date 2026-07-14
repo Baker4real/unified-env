@@ -70,6 +70,8 @@ LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
 # those bytes to SQLite while covering the data ranges around them.
 SQLITE_SHM_LOCK_OFFSET = 120
 SQLITE_SHM_LOCK_LENGTH = 8
+COLD_MAINTENANCE_EVIDENCE_VERSION = "codex-state-cold-maintenance-v1"
+COLD_MAINTENANCE_REQUIRED = "cold-maintenance-required"
 ERROR_FILE_NOT_FOUND = 2
 ERROR_PATH_NOT_FOUND = 3
 ERROR_FILE_EXISTS = 80
@@ -3510,6 +3512,8 @@ def _update_thread_state_impl(
     *,
     permission_policy: PermissionPolicy | None = None,
     check_only: bool = False,
+    cold_maintenance: bool = False,
+    maintenance_evidence: object = None,
     before_commit: Callable[[], None] | None = None,
     snapshot_root: Path | None = None,
     after_first_snapshot_capture: Callable[[int], None] | None = None,
@@ -3517,6 +3521,8 @@ def _update_thread_state_impl(
 ) -> dict[str, object]:
     permission_policy = _resolve_policy_for_path(path, permission_policy)
     _assert_permission_policy_unchanged(permission_policy)
+    if cold_maintenance:
+        _require_cold_maintenance_evidence(Path(permission_policy.codex_home or path.parent), maintenance_evidence)
     initial_snapshot = _capture_sqlite_source(path)
     if initial_snapshot.payload[0] is None:
         return {"status": "missing", "changedCount": 0, "wouldChangeCount": 0, "driftCount": 0}
@@ -3537,6 +3543,8 @@ def _update_thread_state_impl(
             "integrityOk": True,
             "integrityResultCount": integrity_result_count,
         }
+    if initial_snapshot.identities[2] is not None and not cold_maintenance:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     if _sqlite_snapshot_has_unknown_sidecars(initial_snapshot):
         raise StatePolicyError("thread state sidecar bytes unavailable for write")
     source_identity = initial_snapshot.identities[0]
@@ -3769,6 +3777,8 @@ def update_thread_state(
     *,
     permission_policy: PermissionPolicy | None = None,
     check_only: bool = False,
+    cold_maintenance: bool = False,
+    maintenance_evidence: object = None,
     before_commit: Callable[[], None] | None = None,
     snapshot_root: Path | None = None,
     after_first_snapshot_capture: Callable[[int], None] | None = None,
@@ -3779,6 +3789,8 @@ def update_thread_state(
         path,
         permission_policy=resolved_policy,
         check_only=check_only,
+        cold_maintenance=cold_maintenance,
+        maintenance_evidence=maintenance_evidence,
         before_commit=before_commit,
         snapshot_root=snapshot_root,
         after_first_snapshot_capture=after_first_snapshot_capture,
@@ -3847,6 +3859,8 @@ def _write_health(path: Path, envelope: dict[str, object]) -> None:
 
 def _safe_error(exc: BaseException) -> str:
     known = str(exc).lower()
+    if COLD_MAINTENANCE_REQUIRED in known:
+        return COLD_MAINTENANCE_REQUIRED
     if "cold maintenance" in known or ("shm" in known and "generation" in known):
         return "state policy generation requires cold maintenance"
     if "generation-unbounded" in known or ("generation" in known and "unbounded" in known):
@@ -3862,6 +3876,27 @@ def _safe_error(exc: BaseException) -> str:
     if "concurrent" in known:
         return "global state concurrent update limit reached"
     return "state policy operation failed"
+
+
+def _require_cold_maintenance_evidence(
+    codex_home: Path,
+    evidence: object,
+) -> None:
+    """Validate the explicit, offline contract required for SQLite WAL repair."""
+    if not isinstance(evidence, dict):
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    if evidence.get("schema") != COLD_MAINTENANCE_EVIDENCE_VERSION:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    evidence_home = evidence.get("codexHome")
+    if (
+        not isinstance(evidence_home, str)
+        or _path_compare_key(evidence_home) != _path_compare_key(str(codex_home))
+    ):
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    if evidence.get("sqliteStopped") is not True:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    if evidence.get("backupVerified") is not True:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
 
 
 def _redact_path_inventory(inventory: object) -> object:
@@ -4038,6 +4073,8 @@ def run_policy(
     path_mode: str = "inventory",
     permission_policy: PermissionPolicy | None = None,
     approved_map: object = None,
+    cold_maintenance: bool = False,
+    maintenance_evidence: object = None,
 ) -> dict[str, object]:
     if write_health is None:
         write_health = not check_only
@@ -4063,6 +4100,8 @@ def run_policy(
             permission_policy = resolve_permission_policy(codex_home)
         elif not isinstance(permission_policy, PermissionPolicy):
             raise StatePolicyError("permission policy object is invalid")
+        if cold_maintenance:
+            _require_cold_maintenance_evidence(codex_home, maintenance_evidence)
         if not check_only:
             missing_policy_sources = _missing_permission_policy_supplementals(permission_policy)
             if missing_policy_sources:
@@ -4112,14 +4151,14 @@ def run_policy(
                     # a clean no-op; maintenance must quiesce SQLite first.
                     errors.append("unsafe-partial")
                 raise
-            if sqlite_snapshot.identities[2] is not None:
+            if sqlite_snapshot.identities[2] is not None and not cold_maintenance:
                 # A live SQLite WAL-index owns the 120..127 lock window.  The
                 # lifecycle publisher cannot atomically transfer that window
                 # to an output-bound lease, so a write/repair would leave a
                 # close-to-return race even when payload reads are available.
                 # Require a cold maintenance run with SQLite stopped; never
                 # publish the global JSON half of a WAL+SHM repair.
-                errors.append("generation-unbounded")
+                errors.extend(("generation-unbounded", COLD_MAINTENANCE_REQUIRED))
                 errors.append("repair-required" if check_only else "unsafe-partial")
                 raise StatePolicyError(
                     "thread state SHM generation requires cold maintenance repair"
@@ -4197,6 +4236,8 @@ def run_policy(
                     db_path,
                     permission_policy=permission_policy,
                     check_only=check_only,
+                    cold_maintenance=cold_maintenance,
+                    maintenance_evidence=maintenance_evidence,
                     snapshot_root=snapshot_root if check_only else None,
                     retain_return_lease=not check_only,
                 )
