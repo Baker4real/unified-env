@@ -379,7 +379,7 @@
     {
       "relativePath": "hooks/codex-state-preflight.py",
       "liveRelativePath": "codex-state-preflight.py",
-      "sha256": "3fcd5a800cafa4b8b1caad4117b49b8c2dfd18df4ed769d652d5d95dcc53b38c",
+      "sha256": "cf6b251500b2417aa928709d8632a1b26a9ee14ca327f35037db7a841089fbe3",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
@@ -388,7 +388,7 @@
     {
       "relativePath": "hooks/codex-state-preflight.cmd",
       "liveRelativePath": "codex-state-preflight.cmd",
-      "sha256": "5392cd7d18253b4b372c9e6811b1a6380ffd554ad7b2d88008f8d1819d9b252e",
+      "sha256": "299d1940ee6f187fea5bb7f870f234fdf781e752616df7f5358bf9b9a67f4cad",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
@@ -415,7 +415,7 @@
     {
       "relativePath": "hooks/serena-reminder-guarded.cmd",
       "liveRelativePath": "serena-reminder-guarded.cmd",
-      "sha256": "d6120f87231a058aa1a4b4a3610965c69401285637b5f7b5a2fe19dc9021925b",
+      "sha256": "ed7d69de104d624a12bd02914bb503f10d8c714883069f480853966c80416938",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-reminder"
@@ -424,7 +424,7 @@
     {
       "relativePath": "hooks/serena-cleanup-guarded.cmd",
       "liveRelativePath": "serena-cleanup-guarded.cmd",
-      "sha256": "0944b2e57c5920f7be9c87dc32e13f8ab29adbd7e2837dcd9d64cf2b90142440",
+      "sha256": "c49702a48a23ccacea2c4f12300a0f203729c1925fa6ccd551a83ed8e9ea7ef3",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-cleanup"
@@ -433,7 +433,7 @@
     {
       "relativePath": "hooks/serena-behavior-guard.ps1",
       "liveRelativePath": "serena-behavior-guard.ps1",
-      "sha256": "c19ff4b9bfa6912d67ae99ece33ca732e3f600e6bba7e213fd9cc7a4a7585be1",
+      "sha256": "72e4d59d862775c100f35b7b345a5414a7337519f2d42ac49931a5e9891df8e2",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-reminder",
@@ -444,7 +444,7 @@
     {
       "relativePath": "hooks/serena-activation-reminder.cmd",
       "liveRelativePath": "serena-activation-reminder.cmd",
-      "sha256": "1ddf42321e82d6410266da79e591dc53a37490f5da862fce3b8f64cdebcc0e17",
+      "sha256": "fc8ccb26de2e95b4d971e4149ce5282f45a6d6f39f7105daf92dadecc65b8200",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -489,7 +489,7 @@
     {
       "relativePath": "hooks/lib/CodexHookRuntime.ps1",
       "liveRelativePath": "lib/CodexHookRuntime.ps1",
-      "sha256": "8e79250ba9f8114a38b3411dda1fe62616701ba1b43c0cdbafedd14680172004",
+      "sha256": "a6ecb01a6c57dafa23f62ed9efb59febd06c6059bfde83fd4c59ddbad2abacb4",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
@@ -14,12 +15,14 @@ namespace CodexHookGovernance
             string finalPath,
             byte[] bytes,
             string volumeSerialNumber,
-            string fileIndex)
+            string fileIndex,
+            string securityDescriptorSddl)
         {
             FinalPath = finalPath;
             Bytes = bytes;
             VolumeSerialNumber = volumeSerialNumber;
             FileIndex = fileIndex;
+            SecurityDescriptorSddl = securityDescriptorSddl;
         }
 
         public string FinalPath { get; }
@@ -29,6 +32,8 @@ namespace CodexHookGovernance
         public string VolumeSerialNumber { get; }
 
         public string FileIndex { get; }
+
+        public string SecurityDescriptorSddl { get; }
     }
 
     public sealed class HandlePathMismatchException : IOException
@@ -133,7 +138,8 @@ namespace CodexHookGovernance
                     buffer.ToArray(),
                     fileInformation.VolumeSerialNumber.ToString("x8"),
                     fileInformation.FileIndexHigh.ToString("x8") +
-                        fileInformation.FileIndexLow.ToString("x8"));
+                        fileInformation.FileIndexLow.ToString("x8"),
+                    GuardedAclTargetLease.GetSecurityDescriptorSddlForHandle(handle, lexicalPath));
             }
         }
 
@@ -181,6 +187,8 @@ namespace CodexHookGovernance
     {
         private const uint GenericRead = 0x80000000;
         private const uint GenericWrite = 0x40000000;
+        private const uint ReadControl = 0x00020000;
+        private const uint WriteDac = 0x00040000;
         private const uint DeleteAccess = 0x00010000;
         private const uint SynchronizeAccess = 0x00100000;
         private const uint CreateNew = 1;
@@ -193,6 +201,43 @@ namespace CodexHookGovernance
         private const int ErrorFileNotFound = 2;
         private const int ErrorPathNotFound = 3;
         private const int ErrorAlreadyExists = 183;
+        private const int FileDispositionInformationEx = 64;
+        private const int FileNamesInformation = 12;
+        private const uint FileDispositionDelete = 0x00000001;
+        private const uint FileDispositionPosixSemantics = 0x00000002;
+        private const int StatusNoMoreFiles = unchecked((int)0x80000006);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoStatusBlock
+        {
+            public IntPtr Status;
+            public UIntPtr Information;
+        }
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtQueryDirectoryFile(
+            SafeFileHandle fileHandle,
+            IntPtr eventHandle,
+            IntPtr apcRoutine,
+            IntPtr apcContext,
+            out IoStatusBlock ioStatusBlock,
+            IntPtr fileInformation,
+            uint length,
+            int fileInformationClass,
+            [MarshalAs(UnmanagedType.U1)] bool returnSingleEntry,
+            IntPtr fileName,
+            [MarshalAs(UnmanagedType.U1)] bool restartScan);
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtSetInformationFile(
+            SafeFileHandle fileHandle,
+            out IoStatusBlock ioStatusBlock,
+            IntPtr fileInformation,
+            uint length,
+            int fileInformationClass);
+
+        [DllImport("ntdll.dll")]
+        private static extern uint RtlNtStatusToDosError(int status);
 
         private readonly List<SafeFileHandle> handles;
         private bool disposed;
@@ -215,13 +260,54 @@ namespace CodexHookGovernance
 
         public string FileIndex { get; }
 
+        public void DeleteEmptyDirectory()
+        {
+            ThrowIfDisposed();
+            SafeFileHandle directoryHandle = handles[handles.Count - 1];
+            VerifyDirectoryHandle(directoryHandle, DirectoryPath);
+            AssertDirectoryEmpty(directoryHandle);
+
+            IntPtr disposition = Marshal.AllocHGlobal(sizeof(uint));
+            try
+            {
+                Marshal.WriteInt32(
+                    disposition,
+                    unchecked((int)(FileDispositionDelete | FileDispositionPosixSemantics)));
+                IoStatusBlock ioStatusBlock;
+                int status = NtSetInformationFile(
+                    directoryHandle,
+                    out ioStatusBlock,
+                    disposition,
+                    sizeof(uint),
+                    FileDispositionInformationEx);
+                if (status != 0)
+                {
+                    uint dosError = RtlNtStatusToDosError(status);
+                    throw new Win32Exception(
+                        checked((int)dosError),
+                        "Unable to delete the verified empty directory.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(disposition);
+            }
+
+            disposed = true;
+            DisposeHandles(handles);
+            if (Directory.Exists(DirectoryPath))
+            {
+                throw new IOException("The verified empty directory path still exists after handle-bound deletion.");
+            }
+        }
+
         public GuardedTempFile CreateTempFile(string tempPath)
         {
             ThrowIfDisposed();
             string lexicalPath = ValidateChildPath(tempPath, "tempPath");
             SafeFileHandle handle = CreateFileW(
-                lexicalPath,
-                GenericWrite | DeleteAccess | SynchronizeAccess,
+                ToExtendedPath(lexicalPath),
+                GenericRead | GenericWrite | ReadControl | WriteDac | DeleteAccess | SynchronizeAccess,
                 FileShare.None,
                 IntPtr.Zero,
                 CreateNew,
@@ -348,6 +434,52 @@ namespace CodexHookGovernance
             }
         }
 
+        public GuardedAclTargetLease AcquireAclTargetLease(string targetPath)
+        {
+            ThrowIfDisposed();
+            string lexicalPath = ValidateChildPath(targetPath, "targetPath");
+            SafeFileHandle handle = CreateFileW(
+                ToExtendedPath(lexicalPath),
+                ReadControl | WriteDac | SynchronizeAccess,
+                FileShare.Read,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, "Unable to acquire a guarded ACL target lease.");
+            }
+
+            try
+            {
+                bool isDirectory = VerifyAclTargetHandle(handle, lexicalPath);
+                string[] identity = GetFileIdentity(handle);
+                return new GuardedAclTargetLease(
+                    this,
+                    lexicalPath,
+                    handle,
+                    isDirectory,
+                    identity[0],
+                    identity[1],
+                    GuardedAclTargetLease.GetSecurityDescriptorSddlForHandle(handle, lexicalPath));
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        private static string ToExtendedPath(string path)
+        {
+            if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) { return path; }
+            if (path.StartsWith(@"\\", StringComparison.Ordinal)) { return @"\\?\UNC\" + path.Substring(2); }
+            return @"\\?\" + path;
+        }
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern SafeFileHandle CreateFileW(
             string fileName,
@@ -397,7 +529,7 @@ namespace CodexHookGovernance
             string targetDirectory,
             bool createMissing)
         {
-            return Acquire(trustedRoot, targetDirectory, createMissing, false);
+            return Acquire(trustedRoot, targetDirectory, createMissing, false, false);
         }
 
         public static VerifiedDirectoryChainGuard Acquire(
@@ -405,6 +537,23 @@ namespace CodexHookGovernance
             string targetDirectory,
             bool createMissing,
             bool requireTargetCreation)
+        {
+            return Acquire(trustedRoot, targetDirectory, createMissing, requireTargetCreation, false);
+        }
+
+        public static VerifiedDirectoryChainGuard AcquireForEmptyDelete(
+            string trustedRoot,
+            string targetDirectory)
+        {
+            return Acquire(trustedRoot, targetDirectory, false, false, true);
+        }
+
+        private static VerifiedDirectoryChainGuard Acquire(
+            string trustedRoot,
+            string targetDirectory,
+            bool createMissing,
+            bool requireTargetCreation,
+            bool targetDeleteAccess)
         {
             if (trustedRoot == null)
             {
@@ -445,7 +594,7 @@ namespace CodexHookGovernance
                     bool isTarget = segmentIndex == segments.Length - 1;
                     SafeFileHandle handle;
                     int error;
-                    if (TryOpenVerifiedDirectory(current, out handle, out error))
+                    if (TryOpenVerifiedDirectory(current, isTarget && targetDeleteAccess, out handle, out error))
                     {
                         if (isTarget && requireTargetCreation)
                         {
@@ -476,7 +625,7 @@ namespace CodexHookGovernance
                             }
                         }
 
-                        if (!TryOpenVerifiedDirectory(current, out handle, out error))
+                        if (!TryOpenVerifiedDirectory(current, isTarget && targetDeleteAccess, out handle, out error))
                         {
                             throw new Win32Exception(error, "Unable to verify a newly created directory in the path chain.");
                         }
@@ -514,7 +663,7 @@ namespace CodexHookGovernance
         {
             SafeFileHandle handle;
             int error;
-            if (!TryOpenVerifiedDirectory(path, out handle, out error))
+            if (!TryOpenVerifiedDirectory(path, false, out handle, out error))
             {
                 throw new Win32Exception(error, "Unable to open a verified directory in the path chain.");
             }
@@ -523,13 +672,14 @@ namespace CodexHookGovernance
 
         private static bool TryOpenVerifiedDirectory(
             string expectedPath,
+            bool requireDeleteAccess,
             out SafeFileHandle handle,
             out int error)
         {
             string lexicalPath = Path.GetFullPath(expectedPath);
             handle = CreateFileW(
                 lexicalPath,
-                GenericRead,
+                GenericRead | (requireDeleteAccess ? DeleteAccess : 0),
                 FileShare.Read,
                 IntPtr.Zero,
                 OpenExisting,
@@ -575,6 +725,98 @@ namespace CodexHookGovernance
                 handle.Dispose();
                 handle = null;
                 throw;
+            }
+        }
+
+        private static void VerifyDirectoryHandle(SafeFileHandle handle, string expectedPath)
+        {
+            ByHandleFileInformation fileInformation;
+            if (!GetFileInformationByHandle(handle, out fileInformation))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if ((fileInformation.FileAttributes & FileAttributeReparsePoint) != 0 ||
+                (fileInformation.FileAttributes & FileAttributeDirectory) == 0)
+            {
+                throw new IOException("The guarded directory is not a regular directory.");
+            }
+            string finalPath = HandleBoundFileReader.NormalizeFinalPath(
+                HandleBoundFileReader.GetFinalPath(handle));
+            if (!string.Equals(
+                TrimDirectoryEnding(Path.GetFullPath(expectedPath)),
+                TrimDirectoryEnding(Path.GetFullPath(finalPath)),
+                StringComparison.OrdinalIgnoreCase))
+            {
+                throw new HandlePathMismatchException(expectedPath, finalPath);
+            }
+        }
+
+        private static void AssertDirectoryEmpty(SafeFileHandle handle)
+        {
+            const int bufferLength = 65536;
+            IntPtr buffer = Marshal.AllocHGlobal(bufferLength);
+            try
+            {
+                bool restartScan = true;
+                while (true)
+                {
+                    IoStatusBlock ioStatusBlock;
+                    int status = NtQueryDirectoryFile(
+                        handle,
+                        IntPtr.Zero,
+                        IntPtr.Zero,
+                        IntPtr.Zero,
+                        out ioStatusBlock,
+                        buffer,
+                        bufferLength,
+                        FileNamesInformation,
+                        false,
+                        IntPtr.Zero,
+                        restartScan);
+                    restartScan = false;
+                    if (status == StatusNoMoreFiles)
+                    {
+                        return;
+                    }
+                    if (status != 0)
+                    {
+                        uint dosError = RtlNtStatusToDosError(status);
+                        throw new Win32Exception(
+                            checked((int)dosError),
+                            "Unable to enumerate the verified directory handle.");
+                    }
+
+                    int returnedLength = checked((int)ioStatusBlock.Information.ToUInt64());
+                    int offset = 0;
+                    while (offset < returnedLength)
+                    {
+                        int nameLength = Marshal.ReadInt32(buffer, offset + 8);
+                        if (nameLength < 0 || (nameLength & 1) != 0 || offset + 12 + nameLength > returnedLength)
+                        {
+                            throw new IOException("The verified directory enumeration returned an invalid record.");
+                        }
+                        string name = Marshal.PtrToStringUni(IntPtr.Add(buffer, offset + 12), nameLength / 2);
+                        if (!string.Equals(name, ".", StringComparison.Ordinal) &&
+                            !string.Equals(name, "..", StringComparison.Ordinal))
+                        {
+                            throw new IOException("The verified directory is not empty.");
+                        }
+                        int nextOffset = Marshal.ReadInt32(buffer, offset);
+                        if (nextOffset == 0)
+                        {
+                            break;
+                        }
+                        if (nextOffset < 12 || offset + nextOffset > returnedLength)
+                        {
+                            throw new IOException("The verified directory enumeration returned an invalid offset.");
+                        }
+                        offset += nextOffset;
+                    }
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
             }
         }
 
@@ -683,6 +925,36 @@ namespace CodexHookGovernance
             };
         }
 
+        internal static bool VerifyAclTargetHandle(SafeFileHandle handle, string expectedPath)
+        {
+            ByHandleFileInformation fileInformation;
+            if (!GetFileInformationByHandle(handle, out fileInformation))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if ((fileInformation.FileAttributes & FileAttributeReparsePoint) != 0)
+            {
+                throw new IOException("The guarded ACL target is a reparse point.");
+            }
+
+            bool isDirectory = (fileInformation.FileAttributes & FileAttributeDirectory) != 0;
+            if (!isDirectory && fileInformation.NumberOfLinks != 1)
+            {
+                throw new IOException("The guarded ACL target is a hard link.");
+            }
+
+            string finalPath = HandleBoundFileReader.NormalizeFinalPath(
+                HandleBoundFileReader.GetFinalPath(handle));
+            if (!string.Equals(
+                TrimDirectoryEnding(Path.GetFullPath(expectedPath)),
+                TrimDirectoryEnding(Path.GetFullPath(finalPath)),
+                StringComparison.OrdinalIgnoreCase))
+            {
+                throw new HandlePathMismatchException(expectedPath, finalPath);
+            }
+            return isDirectory;
+        }
+
         private static string TrimDirectoryEnding(string path)
         {
             string root = Path.GetPathRoot(path);
@@ -700,6 +972,329 @@ namespace CodexHookGovernance
                 openedHandles[index].Dispose();
             }
             openedHandles.Clear();
+        }
+    }
+
+    public sealed class GuardedAclTargetLease : IDisposable
+    {
+        private const uint SeFileObject = 1;
+        private const uint OwnerSecurityInformation = 0x00000001;
+        private const uint GroupSecurityInformation = 0x00000002;
+        private const uint DaclSecurityInformation = 0x00000004;
+        private const uint ProtectedDaclSecurityInformation = 0x80000000;
+        private const uint UnprotectedDaclSecurityInformation = 0x20000000;
+        private const uint SddlRevision1 = 1;
+        private const ushort SeDaclProtected = 0x1000;
+
+        private readonly VerifiedDirectoryChainGuard owner;
+        private readonly SafeFileHandle handle;
+        private bool disposed;
+
+        internal GuardedAclTargetLease(
+            VerifiedDirectoryChainGuard owner,
+            string originalPath,
+            SafeFileHandle handle,
+            bool isDirectory,
+            string volumeSerialNumber,
+            string fileIndex,
+            string securityDescriptorSddl)
+        {
+            this.owner = owner;
+            OriginalPath = originalPath;
+            this.handle = handle;
+            IsDirectory = isDirectory;
+            VolumeSerialNumber = volumeSerialNumber;
+            FileIndex = fileIndex;
+            SecurityDescriptorSddl = securityDescriptorSddl;
+        }
+
+        public string OriginalPath { get; }
+        public bool IsDirectory { get; }
+        public string VolumeSerialNumber { get; }
+        public string FileIndex { get; }
+
+        public string SecurityDescriptorSddl { get; }
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern uint GetSecurityInfo(
+            SafeFileHandle handle,
+            uint objectType,
+            uint securityInformation,
+            out IntPtr ownerSid,
+            out IntPtr groupSid,
+            out IntPtr dacl,
+            out IntPtr sacl,
+            out IntPtr securityDescriptor);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern uint SetSecurityInfo(
+            SafeFileHandle handle,
+            uint objectType,
+            uint securityInformation,
+            IntPtr ownerSid,
+            IntPtr groupSid,
+            IntPtr dacl,
+            IntPtr sacl);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            IntPtr securityDescriptor,
+            uint requestedStringSdRevision,
+            uint securityInformation,
+            out IntPtr stringSecurityDescriptor,
+            out uint stringSecurityDescriptorLength);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            string stringSecurityDescriptor,
+            uint stringSdRevision,
+            out IntPtr securityDescriptor,
+            out uint securityDescriptorSize);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetSecurityDescriptorOwner(IntPtr securityDescriptor, out IntPtr ownerSid, [MarshalAs(UnmanagedType.Bool)] out bool ownerDefaulted);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetSecurityDescriptorGroup(IntPtr securityDescriptor, out IntPtr groupSid, [MarshalAs(UnmanagedType.Bool)] out bool groupDefaulted);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetSecurityDescriptorDacl(IntPtr securityDescriptor, [MarshalAs(UnmanagedType.Bool)] out bool daclPresent, out IntPtr dacl, [MarshalAs(UnmanagedType.Bool)] out bool daclDefaulted);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetSecurityDescriptorControl(IntPtr securityDescriptor, out ushort control, out uint revision);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr LocalFree(IntPtr memory);
+
+        public string GetSecurityDescriptorSddl()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            VerifiedDirectoryChainGuard.VerifyAclTargetHandle(handle, OriginalPath);
+            uint sections = OwnerSecurityInformation | GroupSecurityInformation | DaclSecurityInformation;
+            IntPtr ownerSid;
+            IntPtr groupSid;
+            IntPtr dacl;
+            IntPtr sacl;
+            IntPtr descriptor;
+            uint error = GetSecurityInfo(handle, SeFileObject, sections, out ownerSid, out groupSid, out dacl, out sacl, out descriptor);
+            if (error != 0)
+            {
+                throw new Win32Exception(checked((int)error), "Unable to read the guarded ACL target security descriptor.");
+            }
+            try
+            {
+                IntPtr sddl;
+                uint sddlLength;
+                if (!ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor, SddlRevision1, sections, out sddl, out sddlLength))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                try
+                {
+                    return Marshal.PtrToStringUni(sddl);
+                }
+                finally
+                {
+                    LocalFree(sddl);
+                }
+            }
+            finally
+            {
+                LocalFree(descriptor);
+            }
+        }
+
+        internal static string GetSecurityDescriptorSddlForHandle(SafeFileHandle targetHandle, string originalPath)
+        {
+            VerifiedDirectoryChainGuard.VerifyAclTargetHandle(targetHandle, originalPath);
+            uint sections = OwnerSecurityInformation | GroupSecurityInformation | DaclSecurityInformation;
+            IntPtr ownerSid;
+            IntPtr groupSid;
+            IntPtr dacl;
+            IntPtr sacl;
+            IntPtr descriptor;
+            uint error = GetSecurityInfo(targetHandle, SeFileObject, sections, out ownerSid, out groupSid, out dacl, out sacl, out descriptor);
+            if (error != 0)
+            {
+                throw new Win32Exception(checked((int)error), "Unable to read the guarded ACL target security descriptor.");
+            }
+            try
+            {
+                IntPtr sddl;
+                uint sddlLength;
+                if (!ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor, SddlRevision1, sections, out sddl, out sddlLength))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                try { return Marshal.PtrToStringUni(sddl); }
+                finally { LocalFree(sddl); }
+            }
+            finally { LocalFree(descriptor); }
+        }
+
+        internal static void SetSecurityDescriptorSddlForHandle(
+            SafeFileHandle targetHandle,
+            string originalPath,
+            string expectedCurrentSddl,
+            string sddl)
+        {
+            if (sddl == null) { throw new ArgumentNullException(nameof(sddl)); }
+            VerifiedDirectoryChainGuard.VerifyAclTargetHandle(targetHandle, originalPath);
+            string currentSddl = GetSecurityDescriptorSddlForHandle(targetHandle, originalPath);
+            if (expectedCurrentSddl != null && !string.Equals(currentSddl, expectedCurrentSddl, StringComparison.Ordinal))
+            {
+                throw new IOException("The guarded ACL target security descriptor changed before the handle-bound write.");
+            }
+            RawSecurityDescriptor currentDescriptor = new RawSecurityDescriptor(currentSddl);
+            RawSecurityDescriptor desiredDescriptor = new RawSecurityDescriptor(sddl);
+            string currentOwner = currentDescriptor.Owner == null ? string.Empty : currentDescriptor.Owner.Value;
+            string desiredOwner = desiredDescriptor.Owner == null ? string.Empty : desiredDescriptor.Owner.Value;
+            string currentGroup = currentDescriptor.Group == null ? string.Empty : currentDescriptor.Group.Value;
+            string desiredGroup = desiredDescriptor.Group == null ? string.Empty : desiredDescriptor.Group.Value;
+            if (!string.Equals(currentOwner, desiredOwner, StringComparison.Ordinal) ||
+                !string.Equals(currentGroup, desiredGroup, StringComparison.Ordinal))
+            {
+                throw new IOException("The guarded ACL target owner or group changed outside this lease.");
+            }
+
+            IntPtr descriptor;
+            uint descriptorSize;
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, SddlRevision1, out descriptor, out descriptorSize))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            try
+            {
+                IntPtr ownerSid;
+                IntPtr groupSid;
+                IntPtr dacl;
+                bool ownerDefaulted;
+                bool groupDefaulted;
+                bool daclPresent;
+                bool daclDefaulted;
+                ushort control;
+                uint revision;
+                if (!GetSecurityDescriptorOwner(descriptor, out ownerSid, out ownerDefaulted) ||
+                    !GetSecurityDescriptorGroup(descriptor, out groupSid, out groupDefaulted) ||
+                    !GetSecurityDescriptorDacl(descriptor, out daclPresent, out dacl, out daclDefaulted) ||
+                    !GetSecurityDescriptorControl(descriptor, out control, out revision))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                uint sections = DaclSecurityInformation;
+                if ((control & SeDaclProtected) != 0) { sections |= ProtectedDaclSecurityInformation; }
+                else { sections |= UnprotectedDaclSecurityInformation; }
+                uint error = SetSecurityInfo(targetHandle, SeFileObject, sections, ownerSid, groupSid, daclPresent ? dacl : IntPtr.Zero, IntPtr.Zero);
+                if (error != 0) { throw new Win32Exception(checked((int)error), "Unable to write the guarded ACL target security descriptor."); }
+            }
+            finally { LocalFree(descriptor); }
+
+            if (!string.Equals(GetSecurityDescriptorSddlForHandle(targetHandle, originalPath), sddl, StringComparison.Ordinal))
+            {
+                throw new IOException("The guarded ACL target security descriptor changed after the handle-bound write.");
+            }
+        }
+
+        public void SetSecurityDescriptorSddl(string sddl)
+        {
+            SetSecurityDescriptorSddl(null, sddl);
+        }
+
+        public void SetSecurityDescriptorSddl(string expectedCurrentSddl, string sddl)
+        {
+            if (sddl == null)
+            {
+                throw new ArgumentNullException(nameof(sddl));
+            }
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            VerifiedDirectoryChainGuard.VerifyAclTargetHandle(handle, OriginalPath);
+
+            string currentSddl = GetSecurityDescriptorSddl();
+            if (expectedCurrentSddl != null && !string.Equals(currentSddl, expectedCurrentSddl, StringComparison.Ordinal))
+            {
+                throw new IOException("The guarded ACL target security descriptor changed before the handle-bound write.");
+            }
+            RawSecurityDescriptor currentDescriptor = new RawSecurityDescriptor(currentSddl);
+            RawSecurityDescriptor desiredDescriptor = new RawSecurityDescriptor(sddl);
+            string currentOwner = currentDescriptor.Owner == null ? string.Empty : currentDescriptor.Owner.Value;
+            string desiredOwner = desiredDescriptor.Owner == null ? string.Empty : desiredDescriptor.Owner.Value;
+            string currentGroup = currentDescriptor.Group == null ? string.Empty : currentDescriptor.Group.Value;
+            string desiredGroup = desiredDescriptor.Group == null ? string.Empty : desiredDescriptor.Group.Value;
+            if (!string.Equals(currentOwner, desiredOwner, StringComparison.Ordinal) ||
+                !string.Equals(currentGroup, desiredGroup, StringComparison.Ordinal))
+            {
+                throw new IOException("The guarded ACL target owner or group changed outside this lease.");
+            }
+
+            IntPtr descriptor;
+            uint descriptorSize;
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, SddlRevision1, out descriptor, out descriptorSize))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            try
+            {
+                IntPtr ownerSid;
+                IntPtr groupSid;
+                IntPtr dacl;
+                bool ownerDefaulted;
+                bool groupDefaulted;
+                bool daclPresent;
+                bool daclDefaulted;
+                ushort control;
+                uint revision;
+                if (!GetSecurityDescriptorOwner(descriptor, out ownerSid, out ownerDefaulted) ||
+                    !GetSecurityDescriptorGroup(descriptor, out groupSid, out groupDefaulted) ||
+                    !GetSecurityDescriptorDacl(descriptor, out daclPresent, out dacl, out daclDefaulted) ||
+                    !GetSecurityDescriptorControl(descriptor, out control, out revision))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                if (!daclPresent)
+                {
+                    throw new IOException("The guarded ACL target SDDL has no DACL.");
+                }
+                uint sections = DaclSecurityInformation;
+                sections |= (control & SeDaclProtected) != 0
+                    ? ProtectedDaclSecurityInformation
+                    : UnprotectedDaclSecurityInformation;
+                uint error = SetSecurityInfo(handle, SeFileObject, sections, IntPtr.Zero, IntPtr.Zero, dacl, IntPtr.Zero);
+                if (error != 0)
+                {
+                    throw new Win32Exception(checked((int)error), "Unable to write the guarded ACL target security descriptor.");
+                }
+                VerifiedDirectoryChainGuard.VerifyAclTargetHandle(handle, OriginalPath);
+            }
+            finally
+            {
+                LocalFree(descriptor);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            handle.Dispose();
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (disposed)
+            {
+                throw new ObjectDisposedException(nameof(GuardedAclTargetLease));
+            }
         }
     }
 
@@ -976,7 +1571,7 @@ namespace CodexHookGovernance
             this.owner = owner;
             this.currentPath = currentPath;
             this.handle = handle;
-            stream = new FileStream(handle, alreadyFlushed ? FileAccess.ReadWrite : FileAccess.Write);
+            stream = new FileStream(handle, FileAccess.ReadWrite);
             flushed = alreadyFlushed;
         }
 
@@ -1097,6 +1692,20 @@ namespace CodexHookGovernance
             currentPath = lexicalTarget;
             renamed = true;
             VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, currentPath);
+        }
+
+        public string GetSecurityDescriptorSddl()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            return GuardedAclTargetLease.GetSecurityDescriptorSddlForHandle(handle, currentPath);
+        }
+
+        public void SetSecurityDescriptorSddl(string expectedCurrentSddl, string sddl)
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            GuardedAclTargetLease.SetSecurityDescriptorSddlForHandle(handle, currentPath, expectedCurrentSddl, sddl);
         }
 
         public void DeleteWithPosixSemantics()

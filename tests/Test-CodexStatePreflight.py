@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+import uuid
 from unittest import mock
 
 
@@ -73,7 +74,7 @@ class CodexStatePreflightTests(unittest.TestCase):
             text,
         )
         self.assertIn(
-            r'"D:\Codex\.codex\hooks\codex-state-preflight.py"',
+            r'"%~dp0codex-state-preflight.py"',
             text,
         )
         self.assertIn("%*", text)
@@ -111,13 +112,58 @@ class CodexStatePreflightTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(
             set(payload),
-            {"ok", "converged", "driftCount", "domains", "repairRequired"},
+            {"ok", "converged", "driftCount", "domains", "repairRequired", "reviewRequired"},
         )
         self.assertIs(payload["ok"], True)
         self.assertIs(payload["converged"], True)
         self.assertEqual(payload["driftCount"], 0)
         self.assertIs(payload["repairRequired"], False)
+        self.assertIs(payload["reviewRequired"], False)
         self.assertEqual(set(payload["domains"]), {"globalState", "threadState", "paths"})
+
+    def test_project_marks_unresolved_path_drift_as_review_only(self) -> None:
+        module = self.load_preflight()
+
+        payload = module._project(
+            {
+                "ok": True,
+                "converged": False,
+                "driftCount": 2,
+                "globalState": {"status": "unresolved", "changedCount": 0, "driftCount": 2},
+                "threadState": {"status": "converged", "changedCount": 0, "driftCount": 0},
+                "pathInventory": {
+                    "entries": [
+                        {"safe": False, "reason": "unresolved-ambiguous"},
+                        {"safe": False, "reason": "unresolved-outside-source-root"},
+                    ]
+                },
+                "errors": [],
+            }
+        )
+
+        self.assertIs(payload["ok"], True)
+        self.assertIs(payload["converged"], False)
+        self.assertEqual(payload["driftCount"], 2)
+        self.assertIs(payload["repairRequired"], False)
+        self.assertIs(payload["reviewRequired"], True)
+
+    def test_project_keeps_safe_path_drift_repair_required(self) -> None:
+        module = self.load_preflight()
+
+        payload = module._project(
+            {
+                "ok": True,
+                "converged": False,
+                "driftCount": 1,
+                "globalState": {"status": "drift", "changedCount": 0, "driftCount": 1},
+                "threadState": {"status": "converged", "changedCount": 0, "driftCount": 0},
+                "pathInventory": {"entries": [{"safe": True, "reason": "safe"}]},
+                "errors": [],
+            }
+        )
+
+        self.assertIs(payload["repairRequired"], True)
+        self.assertIs(payload["reviewRequired"], False)
 
     @unittest.skipUnless(os.name == "nt", "requires Windows junction semantics")
     def test_fixture_codex_home_and_health_junctions_are_rejected(self) -> None:
@@ -251,6 +297,56 @@ class CodexStatePreflightTests(unittest.TestCase):
             self.assertEqual(row, ("on-request", '{"type":"workspace-write"}'))
         finally:
             keeper.close()
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows active WAL semantics")
+    def test_active_wal_auto_repairs_safe_projectless_paths(self) -> None:
+        module = self.load_preflight()
+        core = module._load_state_core()
+        relative = Path("codex-state-preflight-test") / uuid.uuid4().hex / "outputs"
+        candidate = Path(r"D:\Documents\Codex") / relative
+        candidate.mkdir(parents=True, exist_ok=True)
+        source_value = str(Path(r"C:\Users\WINDOWS\Documents\Codex") / relative)
+        candidate_value = str(candidate)
+        global_state = {
+            "thread-projectless-output-directories": {
+                "target": source_value,
+            },
+            "electron-persisted-atom-state": {},
+        }
+        (self.codex_home / ".codex-global-state.json").write_text(
+            json.dumps(global_state, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        keeper = sqlite3.connect(self.codex_home / "state_5.sqlite")
+        try:
+            self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
+            keeper.execute("pragma wal_autocheckpoint=0")
+            keeper.execute(
+                "insert into threads values (?,?,?,?,?,?)",
+                ("target", "vscode", "user", "never", 'danger-full-access', "keep"),
+            )
+            keeper.commit()
+
+            payload = module._run_state_preflight(
+                core,
+                self.codex_home,
+                self.root / "health",
+                check_only=False,
+                write_health=False,
+            )
+
+            self.assertIs(payload["ok"], True)
+            self.assertIs(payload["changed"], True)
+            self.assertEqual(payload["globalState"]["status"], "updated")
+            repaired = json.loads(
+                (self.codex_home / ".codex-global-state.json").read_text(encoding="utf-8")
+            )["thread-projectless-output-directories"]["target"]
+            self.assertEqual(repaired, candidate_value)
+            projected = module._project(payload)
+            self.assertIs(projected["repairRequired"], False)
+        finally:
+            keeper.close()
+            shutil.rmtree(candidate.parent, ignore_errors=True)
 
     def test_loader_rejects_modified_sibling_core_before_execution(self) -> None:
         isolated = self.root / "isolated"

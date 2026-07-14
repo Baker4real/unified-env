@@ -271,6 +271,9 @@ $leaseTemp = $null
 try {
     $leaseTemp = $leaseGuard.CreateTempFile($leaseTempPath)
     $leaseTemp.WriteAndFlush($leaseAfter)
+    $leaseTempSddl = [string]$leaseTemp.GetSecurityDescriptorSddl()
+    $leaseTemp.SetSecurityDescriptorSddl($leaseTempSddl, $leaseTempSddl)
+    Assert-True ([string]$leaseTemp.GetSecurityDescriptorSddl() -ceq $leaseTempSddl) 'guarded temp 必须在同一 handle 上完成 expected-SDDL CAS 与 postcheck'
     $targetLease = $leaseGuard.AcquireTargetFileLease($leaseTarget)
     Assert-True ((Get-CodexHookBytesSha256 -Bytes ([byte[]]$targetLease.SnapshotBytes)) -ceq (Get-CodexHookBytesSha256 -Bytes $leaseBefore)) 'target lease snapshot 必须来自同一 verified handle'
     $leaseTemp.RenameTo($leaseTarget, $true)
@@ -317,6 +320,117 @@ Assert-True ([IO.Directory]::Exists($createdNested)) 'guard 必须逐段创建 t
 [void](Assert-Throws -Message 'RequireMissing directory 不得接受预先存在的 target' -Action {
     New-CodexHookFixtureDirectory -Path $createdNested -Name 'already-existing guarded directory' -RequireMissing | Out-Null
 })
+
+$emptyDeletePath = Join-Path $testRoot 'identity-bound-empty-delete'
+[void][IO.Directory]::CreateDirectory($emptyDeletePath)
+$emptyDeleteGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::AcquireForEmptyDelete($testRoot, $emptyDeletePath)
+try {
+    $emptyDeleteParked = "$emptyDeletePath.parked"
+    $emptyDeleteMove = [CodexHookGovernanceTests.DirectoryRenameAttacker]::TryMove($emptyDeletePath, $emptyDeleteParked)
+    Assert-True (-not $emptyDeleteMove.Moved -and $emptyDeleteMove.Win32Error -eq 32) 'empty-directory delete guard 必须在枚举与删除之间拒绝目录替换'
+    $emptyDeleteGuard.DeleteEmptyDirectory()
+} finally {
+    $emptyDeleteGuard.Dispose()
+}
+
+$aclTarget = Join-Path $atomicParent 'acl-target.bin'
+$aclParkedTarget = Join-Path $atomicParent 'acl-target-parked.bin'
+[IO.File]::WriteAllText($aclTarget, 'acl-target', [Text.UTF8Encoding]::new($false))
+$aclGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath $atomicParent
+$aclLease = $null
+try {
+    $aclLease = $aclGuard.AcquireAclTargetLease($aclTarget)
+    $aclSddl = [string]$aclLease.GetSecurityDescriptorSddl()
+    Assert-True (-not [string]::IsNullOrWhiteSpace($aclSddl)) 'ACL lease 必须通过同一 verified handle 读取 Owner/Group/DACL'
+    $aclRenameAttempt = [CodexHookGovernanceTests.DirectoryRenameAttacker]::TryMove($aclTarget, $aclParkedTarget)
+    Assert-True (-not $aclRenameAttempt.Moved -and $aclRenameAttempt.Win32Error -eq 32) 'ACL lease 存活时目标替换必须以 sharing violation 失败'
+    $aclDesired = Get-Acl -LiteralPath $aclTarget
+    $aclDesired.SetAccessRuleProtection($true, $true)
+    $aclDesiredSddl = [string]$aclDesired.Sddl
+    Assert-True ($aclDesiredSddl -cne $aclSddl) 'ACL fixture 必须产生真实 DACL protection 变化'
+    # Windows file share flags do not serialize WRITE_DAC. Prove that an ACL-only
+    # competitor is visible to the same-handle expected-SDDL gate instead.
+    [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($aclTarget), [Security.AccessControl.FileSecurity]$aclDesired)
+    $aclCompetingSddl = [string]$aclLease.GetSecurityDescriptorSddl()
+    Assert-True ($aclCompetingSddl -cne $aclSddl) 'ACL-only competitor fixture 必须真实改变同一 target security descriptor'
+    $aclCasError = Assert-Throws -Message 'same-handle ACL write 必须拒绝 pre-write SDDL 漂移' -Action {
+        $aclLease.SetSecurityDescriptorSddl($aclSddl, $aclDesiredSddl)
+    }
+    Assert-True ($aclCasError -match 'changed before') 'ACL pre-write CAS 必须返回稳定漂移错误'
+    $aclLease.SetSecurityDescriptorSddl($aclCompetingSddl, $aclSddl)
+    $aclLease.SetSecurityDescriptorSddl($aclSddl, $aclDesiredSddl)
+    $aclActualDesiredSddl = [string]$aclLease.GetSecurityDescriptorSddl()
+    Assert-True ($aclActualDesiredSddl -match 'D:P') 'ACL lease 必须在同一目标 handle 上写入并复核 protected DACL；Windows 可规范化 inherited ACE flags'
+    $aclLease.SetSecurityDescriptorSddl($aclActualDesiredSddl, $aclSddl)
+    Assert-True ([string]$aclLease.GetSecurityDescriptorSddl() -ceq $aclSddl) 'ACL lease 必须能在同一目标 handle 上恢复原 Owner/Group/DACL'
+} finally {
+    if ($null -ne $aclLease) { $aclLease.Dispose() }
+    $aclGuard.Dispose()
+}
+Assert-True ([IO.File]::Exists($aclTarget) -and -not [IO.File]::Exists($aclParkedTarget)) 'ACL lease 释放前目标 identity 必须保持原路径'
+
+$aclHardLink = Join-Path $atomicParent 'acl-hardlink.bin'
+New-Item -ItemType HardLink -Path $aclHardLink -Target $aclTarget | Out-Null
+$aclHardLinkGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath $atomicParent
+try {
+    $aclHardLinkError = Assert-Throws -Message 'ACL lease 必须拒绝 hardlink target' -Action {
+        $unexpectedAclLease = $null
+        $unexpectedAclLease = $aclHardLinkGuard.AcquireAclTargetLease($aclHardLink)
+        try { } finally { if ($null -ne $unexpectedAclLease) { $unexpectedAclLease.Dispose() } }
+    }
+    Assert-True ($aclHardLinkError -match 'hard link|link') 'hardlink target 必须返回稳定的 link 拒绝'
+} finally {
+    $aclHardLinkGuard.Dispose()
+}
+
+$aclDirectory = Join-Path $atomicParent 'acl-directory'
+$aclParkedDirectory = Join-Path $atomicParent 'acl-directory-parked'
+[void][IO.Directory]::CreateDirectory($aclDirectory)
+$aclDirectoryGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath $atomicParent
+$aclDirectoryLease = $null
+try {
+    $aclDirectoryLease = $aclDirectoryGuard.AcquireAclTargetLease($aclDirectory)
+    Assert-True ([bool]$aclDirectoryLease.IsDirectory) 'ACL directory lease 必须保留 target 类型'
+    $aclDirectorySddl = [string]$aclDirectoryLease.GetSecurityDescriptorSddl()
+    $aclDirectoryRenameAttempt = [CodexHookGovernanceTests.DirectoryRenameAttacker]::TryMove($aclDirectory, $aclParkedDirectory)
+    Assert-True (-not $aclDirectoryRenameAttempt.Moved -and $aclDirectoryRenameAttempt.Win32Error -eq 32) 'ACL directory lease 存活时目录替换必须被拒绝'
+    $aclDirectoryLease.SetSecurityDescriptorSddl($aclDirectorySddl)
+} finally {
+    if ($null -ne $aclDirectoryLease) { $aclDirectoryLease.Dispose() }
+    $aclDirectoryGuard.Dispose()
+}
+
+$aclJunction = Join-Path $atomicParent 'acl-junction'
+$aclJunctionOutput = & $env:ComSpec /d /c "mklink /J `"$aclJunction`" `"$externalRoot`"" 2>&1
+if ($LASTEXITCODE -ne 0) { throw "无法创建 ACL junction fixture：$aclJunctionOutput" }
+$aclJunctionGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath $atomicParent
+try {
+    $aclJunctionError = Assert-Throws -Message 'ACL lease 必须拒绝 reparse target' -Action {
+        $unexpectedAclJunctionLease = $null
+        $unexpectedAclJunctionLease = $aclJunctionGuard.AcquireAclTargetLease($aclJunction)
+        try { } finally { if ($null -ne $unexpectedAclJunctionLease) { $unexpectedAclJunctionLease.Dispose() } }
+    }
+    Assert-True ($aclJunctionError -match 'reparse') 'reparse target 必须返回稳定拒绝'
+} finally {
+    $aclJunctionGuard.Dispose()
+    & $env:ComSpec /d /c rmdir $aclJunction | Out-Null
+}
+Assert-True (-not [IO.Directory]::Exists($emptyDeletePath)) '空目录必须通过同一 verified handle 完成 identity-bound delete'
+
+$nonEmptyDeletePath = Join-Path $testRoot 'identity-bound-non-empty-delete'
+[void][IO.Directory]::CreateDirectory($nonEmptyDeletePath)
+$nonEmptySentinel = Join-Path $nonEmptyDeletePath 'sentinel.txt'
+[IO.File]::WriteAllText($nonEmptySentinel, 'must-survive', [Text.UTF8Encoding]::new($false))
+$nonEmptyDeleteGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::AcquireForEmptyDelete($testRoot, $nonEmptyDeletePath)
+try {
+    $nonEmptyDeleteError = Assert-Throws -Message 'identity-bound delete 必须拒绝非空目录' -Action {
+        $nonEmptyDeleteGuard.DeleteEmptyDirectory()
+    }
+    Assert-True ($nonEmptyDeleteError -match 'not empty|非空') '非空目录删除必须返回稳定类型错误'
+} finally {
+    $nonEmptyDeleteGuard.Dispose()
+}
+Assert-True ([IO.Directory]::Exists($nonEmptyDeletePath) -and [IO.File]::ReadAllText($nonEmptySentinel) -ceq 'must-survive') '非空拒绝不得改写目录或内容'
 
 $danglingTarget = Join-Path $externalRoot 'must-not-be-created'
 $danglingLink = Join-Path $testRoot 'dangling-junction'

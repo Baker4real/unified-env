@@ -170,15 +170,24 @@ foreach ($mobileRetiredClosure in @("codex-mobile-permission-guard.cmd", "codex-
     Assert-True -Condition ([regex]::Matches($reconcilerSource, [regex]::Escape('"' + $mobileRetiredClosure + '"')).Count -eq 1) -Message "mobile permission retired wrapper/implementation 必须各在 exact legacy allowlist 出现一次：$mobileRetiredClosure"
 }
 
+function Set-TestInheritedFileAcl {
+    param([string]$Path)
+
+    $security = Get-Acl -LiteralPath $Path
+    $security.SetAccessRuleProtection($false, $true)
+    [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.FileInfo]::new($Path), $security)
+}
+
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "MissingSerenaCommand", "HermesCommandDrift", "EmptySerenaSectionAtEof", "DuplicateSerenaArgs", "DuplicateSerenaCommand", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "LegacySerenaContext", "NegatedSerenaPolicy", "InvalidSerenaContextPolicy", "MalformedSerenaIndent", "BareCrSerenaContext", "NullSerenaScalar", "DuplicateSerenaMarker", "ExternalSerenaMarker", "QuotedSerenaScalar", "QuotedSerenaListScalar", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml", "InvalidUnmanagedToml", "InvalidUtf8Toml", "BomToml")]
+        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "MissingSerenaCommand", "HermesCommandDrift", "SingleQuotedSerenaArgs", "EmptySerenaSectionAtEof", "DuplicateSerenaArgs", "DuplicateSerenaCommand", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "LegacySerenaContext", "NegatedSerenaPolicy", "InvalidSerenaContextPolicy", "MalformedSerenaIndent", "BareCrSerenaContext", "NullSerenaScalar", "DuplicateSerenaMarker", "ExternalSerenaMarker", "QuotedSerenaScalar", "QuotedSerenaListScalar", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "MultilineToml", "InvalidUnmanagedToml", "InvalidUtf8Toml", "BomToml")]
         [string]$Variant = "Drift"
     )
 
     New-Item -ItemType Directory -Force -Path $Root | Out-Null
     Set-Content -LiteralPath (Join-Path $Root ".codex-host-hook-reconciliation-fixture") -Value "codex-host-hook-reconciliation-fixture-v1" -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $Root ".fixture-user-environment.json") -Value '{"SERENA_HOME":"D:\\hermes-data\\.serena"}' -Encoding UTF8
     $hookDirectory = Join-Path $Root "hooks"
     New-Item -ItemType Directory -Force -Path $hookDirectory | Out-Null
 
@@ -232,6 +241,9 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
         $config = $config -replace '(?m)^command\s*=.*\r?\n', ''
     } elseif ($Variant -eq "HermesCommandDrift") {
         $config = $config -replace '(?m)^command\s*=.*$', 'command = "D:\\hermes-data\\serena-wrapper.cmd"'
+    } elseif ($Variant -eq "SingleQuotedSerenaArgs") {
+        $literalContext = $serenaContextPath
+        $config = $config -replace '(?m)^args\s*=.*$', "args = ['start-mcp-server', '--context=$literalContext', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
     } elseif ($Variant -eq "DuplicateSerenaArgs") {
         $config = $config -replace '(?m)^(args\s*=.*)$', ('$1' + "`n" + '$1')
     } elseif ($Variant -eq "DuplicateSerenaCommand") {
@@ -392,14 +404,14 @@ prompt: |
                 SessionStart = @(
                     [ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/codex-provider-stability-guard.cmd"' }) },
                     [ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/codex-projectless-root-d.cmd"' }) },
-                    [ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/serena-activate-guarded.cmd"' }) },
+                    [ordered]@{ matcher = 'startup|resume'; hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/serena-activate-guarded.cmd"' }) },
                     [ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:/Codex/.codex/hooks/serena-dashboard-guard.cmd"' }) }
                 )
                 PreToolUse = @(
-                    [ordered]@{ matcher = "Bash"; hooks = @([ordered]@{ type = "command"; command = "serena-hooks remind --client=codex" }) },
-                    [ordered]@{ matcher = "mcp__serena__*"; hooks = @([ordered]@{ type = "command"; command = "serena-hooks auto-approve --client=codex" }) }
+                    [ordered]@{ matcher = "Bash"; hooks = @([ordered]@{ type = "command"; command = '"D:\Codex\tools\uv\bin\serena-hooks.exe" remind --client=codex' }) },
+                    [ordered]@{ matcher = "mcp__serena__.*|mcp__serena\..*"; hooks = @([ordered]@{ type = "command"; command = '"D:\Codex\tools\uv\bin\serena-hooks.exe" auto-approve --client=codex' }) }
                 )
-                Stop = @([ordered]@{ hooks = @([ordered]@{ type = "command"; command = "serena-hooks cleanup --client=codex" }) })
+                Stop = @([ordered]@{ hooks = @([ordered]@{ type = "command"; command = '"D:\Codex\tools\uv\bin\serena-hooks.exe" cleanup --client=codex' }) })
             }
         }
         ($hooks | ConvertTo-Json -Depth 12).Replace('"HUGE_NUMBER_SENTINEL"', '1e400') | Set-Content -LiteralPath (Join-Path $Root "hooks.json") -Encoding UTF8
@@ -419,10 +431,13 @@ function Invoke-Reconciler {
     param(
         [string]$ScriptPath,
         [string]$Mode,
-        [string]$CodexHome
+        [string]$CodexHome,
+        [string]$EvidencePath
     )
 
-    $raw = & $ScriptPath -Mode $Mode -CodexHome $CodexHome -Json
+    $arguments = @{ Mode=$Mode; CodexHome=$CodexHome; Json=$true }
+    if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) { $arguments.EvidencePath = $EvidencePath }
+    $raw = & $ScriptPath @arguments
     $json = ($raw | Out-String).Trim()
     Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($json)) -Message "$Mode 没有返回 JSON"
     $json | ConvertFrom-Json
@@ -541,8 +556,11 @@ try {
     Assert-True -Condition ([int]$hooks.schemaVersion -eq 7) -Message "hooks.json 未保留未知 schemaVersion"
     Assert-True -Condition ($hooks.owner -eq "fixture-owner") -Message "hooks.json 未保留未知 owner"
     Assert-True -Condition ($hooksRaw -match '"hugeNumber"\s*:\s*1e400') -Message "hooks.json 改写了未知大数值"
-    Assert-True -Condition ($hooks.hooks -is [System.Collections.IDictionary]) -Message "hooks 必须是 JSON 空对象，不能是数组或 null"
-    Assert-True -Condition ($hooks.hooks.Count -eq 0) -Message "hooks.json 的 hooks 不是空对象"
+    Assert-True -Condition ($hooks.hooks -is [System.Collections.IDictionary]) -Message "hooks 必须是 JSON 对象，不能是数组或 null"
+    Assert-True -Condition ($hooks.hooks.Keys.Count -eq 3) -Message "hooks.json 必须只包含三个受管事件"
+    Assert-True -Condition (@($hooks.hooks.SessionStart).Count -eq 2) -Message "SessionStart 必须包含 state preflight 与 activation reminder"
+    Assert-True -Condition ($hooks.hooks.PreToolUse.matcher -ceq 'Bash') -Message "PreToolUse 必须只注册 Bash reminder"
+    Assert-True -Condition (@($hooks.hooks.Stop).Count -eq 1) -Message "Stop 必须只注册 cleanup"
 
     $config = Get-Content -LiteralPath (Join-Path $healthyHome "config.toml") -Raw
     Assert-True -Condition (-not ($config -match '"--project-from-cwd(?:=|"\s*,)')) -Message "Serena 仍包含不可靠的 --project-from-cwd"
@@ -799,6 +817,78 @@ try {
     Assert-True -Condition ([bool]$inheritedAclRepair.ok -and [bool]$inheritedAclRepair.changed) -Message "继承型 config ACL fixture 未成功 Repair"
     Assert-True -Condition ((Get-Acl -LiteralPath $inheritedConfigPath).Sddl -ceq $inheritedConfigAclBefore) -Message "Repair 改写了普通继承型 config ACL control flags"
 
+    $protectedRestoreHome = Join-Path $testRoot 'protected-config-restore-acl\.codex'
+    New-FixtureCodexHome -Root $protectedRestoreHome -Variant 'MissingSerenaArgs'
+    $protectedRestoreConfig = Join-Path $protectedRestoreHome 'config.toml'
+    Set-TestProtectedFileAcl -Path $protectedRestoreConfig
+    $protectedRestoreSddl = (Get-Acl -LiteralPath $protectedRestoreConfig).Sddl
+    try { $protectedRestoreRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $protectedRestoreHome }
+    catch {
+        $debugManifest = Get-ChildItem -LiteralPath (Join-Path $protectedRestoreHome 'run-evidence\host-hook-remediation') -Filter manifest.json -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $debugError = if ($null -eq $debugManifest) { 'no evidence' } else { (Get-Content -Raw -LiteralPath $debugManifest.FullName | ConvertFrom-Json).error }
+        throw "protected config Repair failed: $debugError"
+    }
+    Assert-True -Condition ((Get-Acl -LiteralPath $protectedRestoreConfig).Sddl -ceq $protectedRestoreSddl) -Message 'protected config Repair 必须保持事务前 ACL'
+    try { $protectedRestoreResult = Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $protectedRestoreHome -EvidencePath ([string]$protectedRestoreRepair.evidencePath) }
+    catch {
+        $debugManifest = Get-Content -Raw -LiteralPath (Join-Path ([string]$protectedRestoreRepair.evidencePath) 'manifest.json') | ConvertFrom-Json
+        throw "protected config Restore failed: $($_.Exception.Message) evidence=$($debugManifest.error) status=$($debugManifest.status) blocked=$(@($debugManifest.restoreBlocked)-join ',')"
+    }
+    Assert-True -Condition ([bool]$protectedRestoreResult.ok -and [bool]$protectedRestoreResult.changed) -Message 'protected config Restore 未成功'
+    Assert-True -Condition ((Get-Acl -LiteralPath $protectedRestoreConfig).Sddl -ceq $protectedRestoreSddl) -Message 'protected config Restore 未精确恢复事务前 ACL'
+    Set-TestInheritedFileAcl -Path $protectedRestoreConfig
+    Assert-True -Condition ((Get-Acl -LiteralPath $protectedRestoreConfig).Sddl -cne $protectedRestoreSddl) -Message 'content same-bytes different-ACL fixture 未形成真实漂移'
+    $protectedRestoreAclDriftThrew = $false
+    try { Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $protectedRestoreHome -EvidencePath ([string]$protectedRestoreRepair.evidencePath) | Out-Null } catch { $protectedRestoreAclDriftThrew = $true }
+    Assert-True -Condition $protectedRestoreAclDriftThrew -Message 'content same-bytes different-ACL 不得通过 restored shortcut/final postcheck'
+
+    $legacyAclRestoreHome = Join-Path $testRoot 'legacy-file-restore-acl\.codex'
+    New-FixtureCodexHome -Root $legacyAclRestoreHome
+    $legacyAclRestorePath = Join-Path $legacyAclRestoreHome "hooks\$($legacyNames[0])"
+    Set-TestProtectedFileAcl -Path $legacyAclRestorePath
+    $legacyAclRestoreSddl = (Get-Acl -LiteralPath $legacyAclRestorePath).Sddl
+    try { $legacyAclRestoreRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $legacyAclRestoreHome }
+    catch { throw 'explicit ACL legacy Repair failed' }
+    try { $legacyAclRestoreResult = Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $legacyAclRestoreHome -EvidencePath ([string]$legacyAclRestoreRepair.evidencePath) }
+    catch {
+        $debugManifest = Get-Content -Raw -LiteralPath (Join-Path ([string]$legacyAclRestoreRepair.evidencePath) 'manifest.json') | ConvertFrom-Json
+        throw "explicit ACL legacy Restore failed: $($debugManifest.error) status=$($debugManifest.status) blocked=$(@($debugManifest.restoreBlocked)-join ',')"
+    }
+    Assert-True -Condition ([bool]$legacyAclRestoreResult.ok -and [bool]$legacyAclRestoreResult.changed) -Message 'explicit ACL legacy file Restore 未成功'
+    Assert-True -Condition ((Get-Acl -LiteralPath $legacyAclRestorePath).Sddl -ceq $legacyAclRestoreSddl) -Message 'explicit ACL legacy file Restore 未精确恢复事务前 ACL'
+    $legacyFinalDirectoryPath = Join-Path $legacyAclRestoreHome 'hooks\__pycache__'
+    $legacyFinalExternal = Join-Path $testRoot 'legacy-final-postcheck-race-external'
+    New-Item -ItemType Directory -Path $legacyFinalExternal | Out-Null
+    $legacyFinalExternalBefore = Get-TreeFingerprint -CodexHome $legacyFinalExternal
+    $legacyFinalRaceThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_RESTORE_LEGACY_DIRECTORY_FINAL_REPLACE = [ordered]@{ targetPath=$legacyFinalDirectoryPath; externalParent=$legacyFinalExternal } | ConvertTo-Json -Compress
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $legacyAclRestoreHome -EvidencePath ([string]$legacyAclRestoreRepair.evidencePath) | Out-Null
+    } catch { $legacyFinalRaceThrew = $true }
+    finally { Remove-Item Env:CODEX_HOST_HOOK_TEST_RESTORE_LEGACY_DIRECTORY_FINAL_REPLACE -ErrorAction SilentlyContinue }
+    Assert-True -Condition $legacyFinalRaceThrew -Message 'legacy final postcheck 目录替换竞态必须被持有中的 directory lease 拒绝'
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $legacyFinalExternal) -ceq $legacyFinalExternalBefore) -Message 'legacy final postcheck 目录替换不得触碰外部目录'
+    Assert-True -Condition (-not (Test-Path -LiteralPath "$legacyFinalDirectoryPath.fixture-moved")) -Message 'legacy final postcheck 目录替换不得移走认证目录'
+    Set-TestInheritedFileAcl -Path $legacyAclRestorePath
+    Assert-True -Condition ((Get-Acl -LiteralPath $legacyAclRestorePath).Sddl -cne $legacyAclRestoreSddl) -Message 'legacy same-bytes different-ACL fixture 未形成真实漂移'
+    $legacyRestoreAclDriftThrew = $false
+    try { Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $legacyAclRestoreHome -EvidencePath ([string]$legacyAclRestoreRepair.evidencePath) | Out-Null } catch { $legacyRestoreAclDriftThrew = $true }
+    Assert-True -Condition $legacyRestoreAclDriftThrew -Message 'legacy same-bytes different-ACL 不得通过 restored shortcut/final postcheck'
+
+    $managedAclRollbackHome = Join-Path $testRoot 'managed-file-rollback-acl\.codex'
+    New-FixtureCodexHome -Root $managedAclRollbackHome
+    $managedAclRollbackPath = Join-Path $managedAclRollbackHome 'hooks\codex-state-preflight.cmd'
+    [IO.File]::WriteAllText($managedAclRollbackPath, "@echo off`r`nrem fixture before`r`n", [Text.UTF8Encoding]::new($false))
+    Set-TestProtectedFileAcl -Path $managedAclRollbackPath
+    $managedAclRollbackHash = Get-Sha256 -Path $managedAclRollbackPath
+    $managedAclRollbackSddl = (Get-Acl -LiteralPath $managedAclRollbackPath).Sddl
+    $managedAclRollbackLock = [IO.File]::Open((Join-Path $managedAclRollbackHome 'hooks.json'), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $managedAclRollbackThrew = $false
+    try { Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $managedAclRollbackHome | Out-Null } catch { $managedAclRollbackThrew = $true } finally { $managedAclRollbackLock.Dispose() }
+    Assert-True -Condition $managedAclRollbackThrew -Message 'managed file post-publish failure seam 未触发'
+    Assert-True -Condition ((Get-Sha256 -Path $managedAclRollbackPath) -ceq $managedAclRollbackHash) -Message 'managed file 自动回滚未恢复原 bytes'
+    Assert-True -Condition ((Get-Acl -LiteralPath $managedAclRollbackPath).Sddl -ceq $managedAclRollbackSddl) -Message 'managed file 自动回滚未精确恢复事务前 ACL'
+
     $concurrentHome = Join-Path $testRoot "concurrent-config\.codex"
     New-FixtureCodexHome -Root $concurrentHome
     $concurrentConfigPath = Join-Path $concurrentHome "config.toml"
@@ -952,18 +1042,17 @@ try {
         $postCommitEvidence = @(Get-ChildItem -LiteralPath (Join-Path $postCommitHome "run-evidence\host-hook-remediation") -Directory -Force)
         Assert-True -Condition ($postCommitEvidence.Count -eq 1) -Message "post-commit $phase failure 必须恰好生成一份 evidence"
         $postCommitManifest = Get-Content -LiteralPath (Join-Path $postCommitEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
-        Assert-True -Condition ($postCommitManifest.status -eq "unsafe-partial") -Message "post-commit $phase failure 未标记 unsafe-partial"
+        Assert-True -Condition ($postCommitManifest.status -eq "rolled-back") -Message "post-commit $phase failure 未完成统一回滚"
         foreach ($resource in @("config.toml", "hooks.json")) {
             Assert-True -Condition (@($postCommitManifest.committedResources) -contains $resource) -Message "post-commit $phase failure 漏记已提交资源：$resource"
         }
         if ($phase -eq "acl") {
             Assert-True -Condition (@($postCommitManifest.aclTargets).Count -eq 1 -and $postCommitManifest.aclTargets[0] -eq $firstAclPath) -Message "ACL failure seam 未精确记录首个 ACL mutation"
-            Assert-True -Condition ((Get-Acl -LiteralPath $firstAclPath).Sddl -cne $firstAclBefore) -Message "ACL failure seam 未实际改变首个 ACL"
-            Assert-OnlyAllowedWriters -Path $firstAclPath
+            Assert-True -Condition ((Get-Acl -LiteralPath $firstAclPath).Sddl -ceq $firstAclBefore) -Message "ACL failure seam 未恢复首个 ACL"
             Assert-True -Condition (Test-Path -LiteralPath (Join-Path $postCommitHome "hooks\$($legacyNames[0])") -PathType Leaf) -Message "ACL failure seam 不应提前退役 legacy 文件"
         } else {
             Assert-True -Condition (@($postCommitManifest.retiredResources).Count -eq 1 -and $postCommitManifest.retiredResources[0] -eq $legacyNames[0]) -Message "legacy failure seam 未精确记录首个退役 mutation"
-            Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $postCommitHome "hooks\$($legacyNames[0])"))) -Message "legacy failure seam 未实际删除首个 legacy 文件"
+            Assert-True -Condition (Test-Path -LiteralPath (Join-Path $postCommitHome "hooks\$($legacyNames[0])") -PathType Leaf) -Message "legacy failure seam 未恢复首个已删除 legacy 文件"
             Assert-True -Condition (Test-Path -LiteralPath (Join-Path $postCommitHome "hooks\$($legacyNames[1])") -PathType Leaf) -Message "legacy failure seam 多删了后续 legacy 文件"
         }
     }
@@ -990,6 +1079,152 @@ try {
     Assert-True -Condition (@($legacyUnknownManifest.aclTargets) -notcontains (Join-Path $legacyUnknownHome "hooks\__pycache__")) -Message "exact retired legacy 目录不得进入 aclTargets"
     Assert-True -Condition (@($legacyUnknownManifest.aclTargets) -notcontains (Join-Path $legacyUnknownHome "hooks\__pycache__\codex-mobile-permission-guard.cpython-313.pyc")) -Message "known retired pyc 不得进入 aclTargets"
 
+    $evidenceRaceHome = Join-Path $testRoot 'evidence-ancestor-race\.codex'
+    New-FixtureCodexHome -Root $evidenceRaceHome
+    $evidenceRaceExternal = Join-Path $testRoot 'evidence-ancestor-race-external'
+    New-Item -ItemType Directory -Path $evidenceRaceExternal | Out-Null
+    $evidenceRaceExternalBefore = Get-TreeFingerprint -CodexHome $evidenceRaceExternal
+    $evidenceRaceThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_EVIDENCE_ANCESTOR_REPLACE = [ordered]@{ targetParent=(Join-Path $evidenceRaceHome 'run-evidence\host-hook-remediation'); externalParent=$evidenceRaceExternal } | ConvertTo-Json -Compress
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $evidenceRaceHome | Out-Null
+    } catch { $evidenceRaceThrew = $true }
+    finally { Remove-Item Env:CODEX_HOST_HOOK_TEST_EVIDENCE_ANCESTOR_REPLACE -ErrorAction SilentlyContinue }
+    Assert-True -Condition $evidenceRaceThrew -Message 'evidence ancestor replacement seam 必须真实触发并 fail closed'
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $evidenceRaceExternal) -ceq $evidenceRaceExternalBefore) -Message 'evidence ancestor replacement 不得写入或改 ACL 到外部目录'
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $evidenceRaceHome 'run-evidence\host-hook-remediation.fixture-moved'))) -Message 'evidence ancestor replacement 不得移走受管 evidence root'
+
+    $legacyDirectoryDeleteHome = Join-Path $testRoot 'legacy-directory-delete-race\.codex'
+    New-FixtureCodexHome -Root $legacyDirectoryDeleteHome
+    $legacyDirectoryDeleteExternal = Join-Path $testRoot 'legacy-directory-delete-race-external'
+    New-Item -ItemType Directory -Path $legacyDirectoryDeleteExternal | Out-Null
+    $legacyDirectoryDeleteExternalBefore = Get-TreeFingerprint -CodexHome $legacyDirectoryDeleteExternal
+    $legacyDirectoryDeleteTarget = Join-Path $legacyDirectoryDeleteHome 'hooks\__pycache__'
+    $legacyDirectoryDeleteThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_LEGACY_DIRECTORY_DELETE_REPLACE = [ordered]@{ targetPath=$legacyDirectoryDeleteTarget; externalParent=$legacyDirectoryDeleteExternal } | ConvertTo-Json -Compress
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $legacyDirectoryDeleteHome | Out-Null
+    } catch { $legacyDirectoryDeleteThrew = $true }
+    finally { Remove-Item Env:CODEX_HOST_HOOK_TEST_LEGACY_DIRECTORY_DELETE_REPLACE -ErrorAction SilentlyContinue }
+    Assert-True -Condition $legacyDirectoryDeleteThrew -Message 'legacy empty-directory replacement seam 必须真实触发并 fail closed'
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $legacyDirectoryDeleteExternal) -ceq $legacyDirectoryDeleteExternalBefore) -Message 'legacy empty-directory replacement 不得删除或写入外部目录'
+    Assert-True -Condition (-not (Test-Path -LiteralPath "$legacyDirectoryDeleteTarget.fixture-moved")) -Message 'legacy empty-directory replacement 不得移走已验证目录'
+
+    $aclCasHome = Join-Path $testRoot 'repair-acl-cas-race\.codex'
+    New-FixtureCodexHome -Root $aclCasHome
+    $aclCasTarget = Join-Path $aclCasHome 'hooks.json'
+    $aclCasThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_ACL_CAS_REPLACE = $aclCasTarget
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $aclCasHome | Out-Null
+    } catch { $aclCasThrew = $true }
+    finally { Remove-Item Env:CODEX_HOST_HOOK_TEST_ACL_CAS_REPLACE -ErrorAction SilentlyContinue }
+    Assert-True -Condition $aclCasThrew -Message 'Repair ACL expected-SDDL race 必须拒绝竞争 ACL'
+
+    $rollbackAclCasHome = Join-Path $testRoot 'rollback-acl-cas-race\.codex'
+    New-FixtureCodexHome -Root $rollbackAclCasHome
+    $rollbackAclCasTarget = Join-Path $rollbackAclCasHome 'hooks.json'
+    $rollbackAclCasThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE = 'acl'
+        $env:CODEX_HOST_HOOK_TEST_ROLLBACK_ACL_CAS_REPLACE = $rollbackAclCasTarget
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $rollbackAclCasHome | Out-Null
+    } catch { $rollbackAclCasThrew = $true }
+    finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE -ErrorAction SilentlyContinue
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_ROLLBACK_ACL_CAS_REPLACE -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition $rollbackAclCasThrew -Message 'Repair rollback ACL expected-SDDL race 必须拒绝竞争 ACL'
+    $rollbackAclCasEvidence = @(Get-ChildItem -LiteralPath (Join-Path $rollbackAclCasHome 'run-evidence\host-hook-remediation') -Directory -Force)
+    $rollbackAclCasManifest = Get-Content -Raw -LiteralPath (Join-Path $rollbackAclCasEvidence[0].FullName 'manifest.json') | ConvertFrom-Json
+    Assert-True -Condition ($rollbackAclCasManifest.status -eq 'unsafe-partial') -Message 'rollback ACL CAS 竞争必须标记 unsafe-partial'
+    Assert-True -Condition (@($rollbackAclCasManifest.recoveryRequired) -contains "acl:$rollbackAclCasTarget") -Message 'rollback ACL CAS 竞争必须记录 recoveryRequired'
+
+    $legacyCreateRollbackHome = Join-Path $testRoot 'legacy-directory-create-rollback-race\.codex'
+    New-FixtureCodexHome -Root $legacyCreateRollbackHome
+    $legacyCreateRollbackExternal = Join-Path $testRoot 'legacy-directory-create-rollback-race-external'
+    New-Item -ItemType Directory -Path $legacyCreateRollbackExternal | Out-Null
+    $legacyCreateRollbackExternalBefore = Get-TreeFingerprint -CodexHome $legacyCreateRollbackExternal
+    $legacyCreateRollbackTarget = Join-Path $legacyCreateRollbackHome 'hooks\__pycache__'
+    $legacyCreateRollbackThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE = 'final'
+        $env:CODEX_HOST_HOOK_TEST_LEGACY_DIRECTORY_CREATE_REPLACE = [ordered]@{ targetPath=$legacyCreateRollbackTarget; externalParent=$legacyCreateRollbackExternal } | ConvertTo-Json -Compress
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $legacyCreateRollbackHome | Out-Null
+    } catch { $legacyCreateRollbackThrew = $true }
+    finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE -ErrorAction SilentlyContinue
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_LEGACY_DIRECTORY_CREATE_REPLACE -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition $legacyCreateRollbackThrew -Message 'legacy rollback create replacement seam 必须触发失败'
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $legacyCreateRollbackExternal) -ceq $legacyCreateRollbackExternalBefore) -Message 'legacy rollback create replacement 不得写外部 ACL'
+    Assert-True -Condition (-not (Test-Path -LiteralPath "$legacyCreateRollbackTarget.fixture-moved")) -Message 'legacy rollback create replacement 不得移走受管目录'
+
+    $legacyCreateRestoreHome = Join-Path $testRoot 'legacy-directory-create-restore-race\.codex'
+    New-FixtureCodexHome -Root $legacyCreateRestoreHome
+    $legacyCreateRestoreRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $legacyCreateRestoreHome
+    $legacyCreateRestoreExternal = Join-Path $testRoot 'legacy-directory-create-restore-race-external'
+    New-Item -ItemType Directory -Path $legacyCreateRestoreExternal | Out-Null
+    $legacyCreateRestoreExternalBefore = Get-TreeFingerprint -CodexHome $legacyCreateRestoreExternal
+    $legacyCreateRestoreTarget = Join-Path $legacyCreateRestoreHome 'hooks\__pycache__'
+    $legacyCreateRestoreThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_LEGACY_DIRECTORY_CREATE_REPLACE = [ordered]@{ targetPath=$legacyCreateRestoreTarget; externalParent=$legacyCreateRestoreExternal } | ConvertTo-Json -Compress
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $legacyCreateRestoreHome -EvidencePath ([string]$legacyCreateRestoreRepair.evidencePath) | Out-Null
+    } catch { $legacyCreateRestoreThrew = $true }
+    finally { Remove-Item Env:CODEX_HOST_HOOK_TEST_LEGACY_DIRECTORY_CREATE_REPLACE -ErrorAction SilentlyContinue }
+    Assert-True -Condition $legacyCreateRestoreThrew -Message 'legacy manual Restore create replacement seam 必须触发失败'
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $legacyCreateRestoreExternal) -ceq $legacyCreateRestoreExternalBefore) -Message 'legacy manual Restore create replacement 不得写外部 ACL'
+    Assert-True -Condition (-not (Test-Path -LiteralPath "$legacyCreateRestoreTarget.fixture-moved")) -Message 'legacy manual Restore create replacement 不得移走受管目录'
+
+    # Run the manifest race before content races so both independent RED/GREEN
+    # contracts remain observable when either class regresses.
+    $restoreManifestAclHome = Join-Path $testRoot 'restore-manifest-acl-race\.codex'
+    New-FixtureCodexHome -Root $restoreManifestAclHome
+    $restoreManifestAclRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $restoreManifestAclHome
+    $restoreManifestAclTarget = Join-Path ([string]$restoreManifestAclRepair.evidencePath) 'manifest.json'
+    $restoreManifestAclParked = "$restoreManifestAclTarget.fixture-moved"
+    $restoreManifestAclExternal = Join-Path $testRoot 'restore-manifest-acl-external.json'
+    Set-Content -LiteralPath $restoreManifestAclExternal -Value '{"external":true}' -Encoding UTF8
+    $restoreManifestAclExternalHashBefore = Get-Sha256 -Path $restoreManifestAclExternal
+    $restoreManifestAclExternalAclBefore = (Get-Acl -LiteralPath $restoreManifestAclExternal).Sddl
+    $restoreManifestAclThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_RESTORE_MANIFEST_ACL_REPLACE = [ordered]@{ targetPath=$restoreManifestAclTarget; parkedPath=$restoreManifestAclParked; externalPath=$restoreManifestAclExternal } | ConvertTo-Json -Compress
+        Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $restoreManifestAclHome -EvidencePath ([string]$restoreManifestAclRepair.evidencePath) | Out-Null
+    } catch { $restoreManifestAclThrew = $true }
+    finally { Remove-Item Env:CODEX_HOST_HOOK_TEST_RESTORE_MANIFEST_ACL_REPLACE -ErrorAction SilentlyContinue }
+    Assert-True -Condition $restoreManifestAclThrew -Message 'Restore manifest capability publish→ACL replacement 必须 fail closed'
+    Assert-True -Condition ((Get-Sha256 -Path $restoreManifestAclExternal) -ceq $restoreManifestAclExternalHashBefore) -Message 'Restore manifest replacement 不得改写外部 bytes'
+    Assert-True -Condition ((Get-Acl -LiteralPath $restoreManifestAclExternal).Sddl -ceq $restoreManifestAclExternalAclBefore) -Message 'Restore manifest replacement 不得改写外部 ACL'
+    Assert-True -Condition (-not (Test-Path -LiteralPath $restoreManifestAclParked)) -Message 'Restore manifest replacement 不得移走 evidence manifest'
+
+    foreach ($restoreContentCase in @(
+        [pscustomobject]@{ name='hooks.json'; relativePath='hooks.json' },
+        [pscustomobject]@{ name='config.toml'; relativePath='config.toml' },
+        [pscustomobject]@{ name='codex-file-tools.yml'; relativePath='..\.serena\contexts\codex-file-tools.yml' }
+    )) {
+        $restoreContentHome = Join-Path $testRoot "restore-content-parent-$($restoreContentCase.name)\.codex"
+        New-FixtureCodexHome -Root $restoreContentHome
+        $restoreContentRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $restoreContentHome
+        $restoreContentTarget = [IO.Path]::GetFullPath((Join-Path $restoreContentHome ([string]$restoreContentCase.relativePath)))
+        $restoreContentParent = [IO.Path]::GetDirectoryName($restoreContentTarget)
+        $restoreContentParked = "$restoreContentParent.fixture-moved"
+        $restoreContentExternal = Join-Path $testRoot "restore-content-parent-$($restoreContentCase.name)-external"
+        New-Item -ItemType Directory -Path $restoreContentExternal | Out-Null
+        Set-Content -LiteralPath (Join-Path $restoreContentExternal 'sentinel.txt') -Value 'external-must-not-change' -Encoding UTF8
+        $restoreContentExternalBefore = Get-TreeFingerprint -CodexHome $restoreContentExternal
+        $restoreContentThrew = $false
+        try {
+            $env:CODEX_HOST_HOOK_TEST_RESTORE_CONTENT_PARENT_REPLACE = [ordered]@{ targetPath=$restoreContentParent; parkedPath=$restoreContentParked; externalPath=$restoreContentExternal } | ConvertTo-Json -Compress
+            Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $restoreContentHome -EvidencePath ([string]$restoreContentRepair.evidencePath) | Out-Null
+        } catch { $restoreContentThrew = $true }
+        finally { Remove-Item Env:CODEX_HOST_HOOK_TEST_RESTORE_CONTENT_PARENT_REPLACE -ErrorAction SilentlyContinue }
+        Assert-True -Condition $restoreContentThrew -Message "Restore $($restoreContentCase.name) parent replacement 必须 fail closed"
+        Assert-True -Condition ((Get-TreeFingerprint -CodexHome $restoreContentExternal) -ceq $restoreContentExternalBefore) -Message "Restore $($restoreContentCase.name) parent replacement 不得改写外部 bytes/ACL"
+        Assert-True -Condition (-not (Test-Path -LiteralPath $restoreContentParked)) -Message "Restore $($restoreContentCase.name) parent replacement 不得移走受管 parent"
+    }
+
     $forbidOnlyHome = Join-Path $testRoot "forbid-only-seam\.codex"
     New-FixtureCodexHome -Root $forbidOnlyHome
     $forbidOnlyThrew = $false
@@ -1007,7 +1242,8 @@ try {
     foreach ($serenaConfigCase in @(
         @{ Name = "missing-serena-args-repair"; Variant = "MissingSerenaArgs" },
         @{ Name = "missing-serena-command-repair"; Variant = "MissingSerenaCommand" },
-        @{ Name = "hermes-command-drift-repair"; Variant = "HermesCommandDrift" }
+        @{ Name = "hermes-command-drift-repair"; Variant = "HermesCommandDrift" },
+        @{ Name = "single-quoted-serena-args-repair"; Variant = "SingleQuotedSerenaArgs" }
     )) {
         $serenaConfigHome = Join-Path $testRoot "$($serenaConfigCase.Name)\.codex"
         New-FixtureCodexHome -Root $serenaConfigHome -Variant $serenaConfigCase.Variant
@@ -1132,6 +1368,12 @@ values = [
         Assert-SafeTestRoot -Path $testRoot
         Assert-True -Condition (Test-Path -LiteralPath $ownershipMarker -PathType Leaf) -Message "拒绝清理缺少 ownership marker 的测试目录"
         Assert-True -Condition ((Get-Content -LiteralPath $ownershipMarker -Raw).Trim() -eq $testRunId) -Message "拒绝清理 ownership marker 不匹配的测试目录"
-        Remove-Item -LiteralPath $testRoot -Recurse -Force
+        try {
+            Remove-Item -LiteralPath $testRoot -Recurse -Force
+        } catch {
+            if (Test-Path -LiteralPath $testRoot) {
+                throw
+            }
+        }
     }
 }

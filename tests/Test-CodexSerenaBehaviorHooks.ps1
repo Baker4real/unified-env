@@ -19,6 +19,13 @@ function Assert-Equal([object]$Actual, [object]$Expected, [string]$Message) {
     if ($Actual -cne $Expected) { throw "$Message actual=[$Actual] expected=[$Expected]" }
 }
 
+function Assert-Throws([scriptblock]$Action, [string]$ExpectedFragment) {
+    try { & $Action; throw 'expected exception was not thrown' }
+    catch {
+        if (-not $_.Exception.Message.Contains($ExpectedFragment, [StringComparison]::OrdinalIgnoreCase)) { throw }
+    }
+}
+
 function Invoke-ChildProcess {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -77,9 +84,9 @@ foreach ($source in @($reminderSource, $cleanupSource, $activationSource)) {
     Assert-True $source.Contains('set "SERENA_HOME=D:\Codex\.serena"') 'wrapper 必须覆盖外部 SERENA_HOME。'
     Assert-True (-not $source.Contains('%*')) 'wrapper 不得接受外部参数覆盖固定命令。'
 }
-Assert-True $reminderSource.Contains('"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\serena-behavior-guard.ps1" -Mode Reminder') 'reminder 必须固定受控 guard 和 Mode。'
-Assert-True $cleanupSource.Contains('"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\serena-behavior-guard.ps1" -Mode Cleanup') 'cleanup 必须固定受控 guard 和 Mode。'
-Assert-True $activationSource.Contains('"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\serena-behavior-guard.ps1" -Mode Activation') 'activation reminder 必须固定受控 guard 和 Mode。'
+Assert-True $reminderSource.Contains('"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Reminder') 'reminder 必须固定 sibling 受控 guard 和 Mode。'
+Assert-True $cleanupSource.Contains('"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Cleanup') 'cleanup 必须固定 sibling 受控 guard 和 Mode。'
+Assert-True $activationSource.Contains('"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Activation') 'activation reminder 必须固定 sibling 受控 guard 和 Mode。'
 Assert-True $behaviorGuardSource.Contains("'D:\Codex\tools\uv\bin\serena-hooks.exe'") 'behavior guard 必须固定官方 vendor。'
 Assert-True $behaviorGuardSource.Contains("'--client=codex'") 'behavior guard 必须固定 Codex client。'
 Assert-True $behaviorGuardSource.Contains('Complete-CodexHookProcessWithBoundedDrain') 'behavior guard 必须复用 bounded native drain。'
@@ -96,6 +103,18 @@ try {
     function Invoke-SerenaVendor([string]$Command, [string]$InputJson) {
         Invoke-ChildProcess -FilePath $vendorPath -Arguments @($Command, '--client=codex') -InputText $InputJson -Environment @{ SERENA_HOME = $fixtureHome }
     }
+
+    # 格式等价的脱敏 UUID；fixture 只证明当前观察到的 Codex payload schema。
+    $codexSession = '11111111-2222-4333-8444-555555555555'
+    $codexSessionResult = Invoke-SerenaVendor 'remind' (New-ReminderPayload $codexSession 'Bash')
+    Assert-True ($codexSessionResult.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($codexSessionResult.stdout)) '真实 Codex UUID session grammar 必须可用。'
+
+    $claudeAccept = Invoke-SerenaVendor 'auto-approve' '{"session_id":"claude-redacted","permission_mode":"acceptEdits","tool_name":"mcp__serena__get_symbols_overview"}'
+    $claudeAuto = Invoke-SerenaVendor 'auto-approve' '{"session_id":"claude-redacted","permission_mode":"auto","tool_name":"mcp__serena__get_symbols_overview"}'
+    $codexAutoApprove = Invoke-SerenaVendor 'auto-approve' (New-ReminderPayload $codexSession 'mcp__serena__get_symbols_overview')
+    Assert-Equal (($claudeAccept.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision) 'allow' 'Claude acceptEdits 对照必须返回 allow。'
+    Assert-Equal (($claudeAuto.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision) 'allow' 'Claude auto 对照必须返回 allow。'
+    Assert-True ($codexAutoApprove.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($codexAutoApprove.stdout)) '无 permission_mode 的脱敏负向 payload 不得被 vendor auto-approve 误判为 allow。'
 
     $sessionA = 'session-a-redacted'
     $sessionB = 'session-b-redacted'
@@ -154,9 +173,125 @@ if (Test-Path -LiteralPath $guardHealthRoot) { Remove-Item -LiteralPath $guardHe
 [IO.Directory]::CreateDirectory($guardFixtureRoot) | Out-Null
 try {
     . $behaviorGuardPath
+    $outsideSentinel = Join-Path $guardFixtureRoot 'outside-sentinel.txt'
+    [IO.File]::WriteAllText($outsideSentinel, 'preserve', [Text.UTF8Encoding]::new($false))
+
+    $hookDataRoot = Join-Path $guardFixtureHome 'hook_data'
+    $outsideSessionRoot = Join-Path $guardFixtureRoot 'outside-session-state'
+    [IO.Directory]::CreateDirectory($hookDataRoot) | Out-Null
+    [IO.Directory]::CreateDirectory($outsideSessionRoot) | Out-Null
+    $outsideSessionSentinel = Join-Path $outsideSessionRoot 'third-party-sentinel.txt'
+    [IO.File]::WriteAllText($outsideSessionSentinel, 'preserve', [Text.UTF8Encoding]::new($false))
+
+    # 缺失 leaf 由 guard 创建后，其逐段目录句柄必须持续阻止删除/替换；否则 vendor 按路径重开时可越界。
+    Initialize-CodexSerenaSessionDirectoryGuard
+    $raceSessionPath = Join-Path $hookDataRoot 'missing-leaf-race-redacted'
+    $raceGuard = [CodexHookRuntime.SerenaSessionDirectoryGuard]::Acquire($guardFixtureRoot, $raceSessionPath)
+    try {
+        Assert-True (Test-Path -LiteralPath $raceSessionPath -PathType Container) 'guard 必须安全创建缺失 session leaf。'
+        & 'C:\Windows\System32\cmd.exe' /d /c rmdir $raceSessionPath 2>$null
+        Assert-True ($LASTEXITCODE -ne 0 -and (Test-Path -LiteralPath $raceSessionPath -PathType Container)) 'guard 持有期间必须拒绝删除缺失 leaf 的竞争替换。'
+        $junctionReplacementRejected = $false
+        try { $null = New-Item -ItemType Junction -Path $raceSessionPath -Target $outsideSessionRoot -ErrorAction Stop }
+        catch { $junctionReplacementRejected = $true }
+        Assert-True $junctionReplacementRejected 'guard 持有期间必须拒绝把缺失 leaf 替换为 junction。'
+        Assert-Equal ([IO.File]::ReadAllText($outsideSessionSentinel)) 'preserve' '缺失 leaf 竞争不得触及 hook_data 外哨兵。'
+    }
+    finally { $raceGuard.Dispose() }
+    Remove-Item -LiteralPath $raceSessionPath -Force
+
+    # session 目录租约必须同时封住 counter 的 rename/replacement 窗口；cleanup 随后再对文件本身做同句柄验证和删除。
+    $counterRacePath = Join-Path $hookDataRoot 'counter-replacement-race-redacted'
+    [IO.Directory]::CreateDirectory($counterRacePath) | Out-Null
+    $counterRaceFile = Join-Path $counterRacePath 'tool_use_counter.pkl'
+    [IO.File]::WriteAllText($counterRaceFile, 'owned-counter', [Text.UTF8Encoding]::new($false))
+    $counterRaceGuard = [CodexHookRuntime.SerenaSessionDirectoryGuard]::Acquire($guardFixtureRoot, $counterRacePath)
+    try {
+        Assert-Throws { Move-Item -LiteralPath $counterRaceFile -Destination (Join-Path $counterRacePath 'attacker-counter.pkl') -ErrorAction Stop } 'being used by another process'
+        Assert-Equal ([IO.File]::ReadAllText($counterRaceFile)) 'owned-counter' '目录租约持有期间 counter replacement 必须失败且原字节保持。'
+    }
+    finally { $counterRaceGuard.Dispose() }
+    Remove-Item -LiteralPath $counterRacePath -Recurse -Force
+
+    # Reminder 在调用 vendor 前必须认证既有 counter；共享 hardlink 不能被 vendor 原地改写。
+    $reminderHardlinkSession = 'reminder-hardlink-redacted'
+    $reminderHardlinkDirectory = Join-Path $hookDataRoot $reminderHardlinkSession
+    [IO.Directory]::CreateDirectory($reminderHardlinkDirectory) | Out-Null
+    $reminderHardlinkOutside = Join-Path $guardFixtureRoot 'reminder-shared-counter.pkl'
+    $reminderHardlinkCounter = Join-Path $reminderHardlinkDirectory 'tool_use_counter.pkl'
+    [IO.File]::WriteAllText($reminderHardlinkOutside, 'preserve-reminder-shared-bytes', [Text.UTF8Encoding]::new($false))
+    $null = New-Item -ItemType HardLink -Path $reminderHardlinkCounter -Target $reminderHardlinkOutside
+    $reminderHardlink = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $reminderHardlinkSession 'Bash') `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True (-not $reminderHardlink.ok -and $reminderHardlink.exitCode -eq 0 -and $reminderHardlink.stdout.Length -eq 0) 'reminder 必须在 vendor 前拒绝多硬链接 counter。'
+    Assert-Equal ([IO.File]::ReadAllText($reminderHardlinkOutside)) 'preserve-reminder-shared-bytes' 'reminder 不得让 vendor 改写共享 counter 的外部链接。'
+
+    $reminderReparseSession = 'reminder-reparse-redacted'
+    $reminderReparseDirectory = Join-Path $hookDataRoot $reminderReparseSession
+    [IO.Directory]::CreateDirectory($reminderReparseDirectory) | Out-Null
+    $reminderReparseOutside = Join-Path $guardFixtureRoot 'reminder-reparse-outside'
+    $reminderReparseSentinel = Join-Path $reminderReparseOutside 'sentinel.pkl'
+    $reminderReparseCounter = Join-Path $reminderReparseDirectory 'tool_use_counter.pkl'
+    [IO.Directory]::CreateDirectory($reminderReparseOutside) | Out-Null
+    [IO.File]::WriteAllText($reminderReparseSentinel, 'preserve-reminder-reparse-bytes', [Text.UTF8Encoding]::new($false))
+    $null = New-Item -ItemType Junction -Path $reminderReparseCounter -Target $reminderReparseOutside -ErrorAction Stop
+    $reminderReparse = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $reminderReparseSession 'Bash') `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True (-not $reminderReparse.ok -and $reminderReparse.exitCode -eq 0 -and $reminderReparse.stdout.Length -eq 0) 'reminder 必须在 vendor 前拒绝 reparse counter。'
+    Assert-Equal ([IO.File]::ReadAllText($reminderReparseSentinel)) 'preserve-reminder-reparse-bytes' 'reminder 不得让 vendor 通过 reparse counter 改写外部文件。'
+
+    # 缺失 counter 必须由 guard 以 CREATE_NEW 建立并持有 name fence；租约期间删除/替换必须被 Windows 拒绝。
+    $missingCounterSession = 'missing-counter-race-redacted'
+    $missingCounterDirectory = Join-Path $hookDataRoot $missingCounterSession
+    [IO.Directory]::CreateDirectory($missingCounterDirectory) | Out-Null
+    $missingCounterPath = Join-Path $missingCounterDirectory 'tool_use_counter.pkl'
+    $missingCounterGuard = [CodexHookRuntime.SerenaSessionDirectoryGuard]::Acquire($guardFixtureRoot, $missingCounterDirectory)
+    $missingCounterLease = $null
+    try {
+        $missingCounterLease = $missingCounterGuard.AcquireCounterLease($missingCounterPath)
+        Assert-True (Test-Path -LiteralPath $missingCounterPath -PathType Leaf) 'missing counter lease 必须原子建立受管 leaf。'
+        Assert-Throws { Remove-Item -LiteralPath $missingCounterPath -Force -ErrorAction Stop } 'being used by another process'
+        $missingCounterLease.ValidateAfterVendor($missingCounterPath)
+    }
+    finally {
+        if ($null -ne $missingCounterLease) { $missingCounterLease.Dispose() }
+        $missingCounterGuard.Dispose()
+    }
+    Remove-Item -LiteralPath $missingCounterDirectory -Recurse -Force
+
+    $junctionSession = 'junction-session-redacted'
+    $junctionPath = Join-Path $hookDataRoot $junctionSession
+    $null = New-Item -ItemType Junction -Path $junctionPath -Target $outsideSessionRoot
+    try {
+        foreach ($behavior in @('Reminder', 'Cleanup')) {
+            $junctionPayload = if ($behavior -ceq 'Reminder') {
+                New-ReminderPayload $junctionSession 'Bash'
+            }
+            else {
+                [pscustomobject][ordered]@{ session_id = $junctionSession } | ConvertTo-Json -Compress
+            }
+            $junctionResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior $behavior -InputText $junctionPayload `
+                -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+            Assert-True (-not $junctionResult.ok -and $junctionResult.exitCode -eq 0 -and $junctionResult.stdout.Length -eq 0) "$behavior 遇到越界 session junction 必须静默拒绝。"
+            Assert-Equal ([IO.File]::ReadAllText($outsideSessionSentinel)) 'preserve' "$behavior 不得改写或删除 hook_data 外哨兵。"
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $outsideSessionRoot 'tool_use_counter.pkl'))) "$behavior 不得通过 junction 在 hook_data 外创建 vendor 状态。"
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $junctionPath) { & 'C:\Windows\System32\cmd.exe' /d /c rmdir $junctionPath | Out-Null }
+    }
+    foreach ($dangerousSession in @('..', '../outside-sentinel.txt', '..\outside-sentinel.txt', 'D:\outside', '\\server\share', 'nested/session', 'nested\session')) {
+        foreach ($behavior in @('Reminder', 'Cleanup', 'Activation')) {
+            $dangerousPayload = [pscustomobject][ordered]@{ session_id = $dangerousSession; tool_name = 'Bash'; tool_input = [pscustomobject]@{ command = 'rg hook' } } | ConvertTo-Json -Compress -Depth 4
+            $dangerous = Invoke-CodexSerenaBehaviorGuardCore -Behavior $behavior -InputText $dangerousPayload `
+                -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+            Assert-True (-not $dangerous.ok -and $dangerous.exitCode -eq 0 -and $dangerous.stdout.Length -eq 0) "$behavior 必须静默拒绝危险 session id：$dangerousSession"
+            Assert-Equal ([IO.File]::ReadAllText($outsideSentinel)) 'preserve' '危险 session 不得读写或删除 hook_data 外哨兵。'
+        }
+    }
     $invalidActivation = Invoke-CodexSerenaBehaviorGuardCore -Behavior Activation -InputText '{invalid payload}' `
         -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
-    Assert-True (-not $invalidActivation.ok -and $invalidActivation.exitCode -eq 1 -and $invalidActivation.stdout.Length -eq 0) 'activation reminder 必须拒绝畸形 SessionStart payload。'
+    Assert-True (-not $invalidActivation.ok -and $invalidActivation.exitCode -eq 0 -and $invalidActivation.stdout.Length -eq 0) 'activation reminder 必须静默拒绝畸形 SessionStart payload。'
     $activation = Invoke-CodexSerenaBehaviorGuardCore -Behavior Activation -InputText '{"session_id":"activation-session-redacted"}' `
         -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
     Assert-True ($activation.ok -and $activation.exitCode -eq 0) '静态 activation reminder 必须成功。'
@@ -170,13 +305,28 @@ try {
 
     $failedGuard = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText '{not-json}' `
         -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
-    Assert-True (-not $failedGuard.ok -and $failedGuard.exitCode -eq 1) '错误 payload 必须由 behavior guard 失败关闭。'
+    Assert-True (-not $failedGuard.ok -and $failedGuard.exitCode -eq 0) 'optional 错误 payload 必须静默降级。'
     Assert-Equal $failedGuard.stdout.Length 0 'behavior guard 失败不得污染 stdout。'
     Assert-Equal ([string]$failedGuard.error) 'serena behavior hook failed' 'behavior guard 错误必须脱敏。'
     $failureHealth = Get-Content -LiteralPath (Join-Path $guardHealthRoot 'serena-reminder.json') -Raw | ConvertFrom-Json
     Assert-True ($failureHealth.ok -eq $false) 'behavior guard 失败必须写结构化失败 health。'
     Assert-Equal (@($failureHealth.errors) -join ',') 'serena behavior protocol validation failed' '失败 health 不得包含 payload/session/vendor stderr。'
     Remove-Item -LiteralPath $guardHealthRoot -Recurse -Force
+
+    $vendorFailure = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText '{"session_id":"11111111-2222-4333-8444-555555555555"}' `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True (-not $vendorFailure.ok -and $vendorFailure.exitCode -eq 0 -and $vendorFailure.stdout.Length -eq 0) 'optional vendor 失败必须静默降级。'
+    Remove-Item -LiteralPath $guardHealthRoot -Recurse -Force
+
+    [IO.File]::WriteAllText($guardHealthRoot, 'block-health-root', [Text.UTF8Encoding]::new($false))
+    $healthFailure = Invoke-CodexSerenaBehaviorGuardCore -Behavior Activation -InputText '{"session_id":"11111111-2222-4333-8444-555555555555"}' `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True (-not $healthFailure.ok -and $healthFailure.exitCode -eq 0 -and $healthFailure.stdout.Length -eq 0) 'optional health 写入失败必须静默降级。'
+    Assert-Throws {
+        Invoke-CodexSerenaBehaviorAcceptanceCore -Behavior Activation `
+            -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    } 'acceptance'
+    Remove-Item -LiteralPath $guardHealthRoot -Force
 
     $guardSession = 'guard-session-redacted'
     $guardPayload = New-ReminderPayload $guardSession 'Bash'
@@ -192,6 +342,8 @@ try {
     Assert-True ($guardThird.ok -and $guardThird.stdout.Length -gt 0) 'guard 第三次 reminder 必须转发 vendor 协议字节。'
     $guardThirdJson = [Text.UTF8Encoding]::new($false, $true).GetString($guardThird.stdout) | ConvertFrom-Json
     Assert-Equal $guardThirdJson.hookSpecificOutput.permissionDecision 'deny' 'guard 不得改变 vendor reminder 决策。'
+    $successHealth = Get-Content -LiteralPath (Join-Path $guardHealthRoot 'serena-reminder.json') -Raw | ConvertFrom-Json
+    Assert-True ($successHealth.ok -eq $true -and @($successHealth.errors).Count -eq 0) '合法 vendor 协议后必须写成功 health。'
 
     # 独立重建同一 vendor 状态，证明受管 guard 没有重编码或改写协议字节。
     if (Test-Path -LiteralPath $guardFixtureHome) { Remove-Item -LiteralPath $guardFixtureHome -Recurse -Force }
@@ -221,6 +373,42 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $cleanupTarget)) 'cleanup guard 必须删除当前 session state。'
     Assert-True (Test-Path -LiteralPath $cleanupOther -PathType Container) 'cleanup guard 不得删除其他 session state。'
 
+    $hardlinkSession = 'cleanup-hardlink-redacted'
+    $hardlinkDirectory = Join-Path $guardFixtureHome "hook_data\$hardlinkSession"
+    [IO.Directory]::CreateDirectory($hardlinkDirectory) | Out-Null
+    $hardlinkOutside = Join-Path $guardFixtureRoot 'shared-counter-sentinel.pkl'
+    $hardlinkCounter = Join-Path $hardlinkDirectory 'tool_use_counter.pkl'
+    [IO.File]::WriteAllText($hardlinkOutside, 'preserve-shared-bytes', [Text.UTF8Encoding]::new($false))
+    $null = New-Item -ItemType HardLink -Path $hardlinkCounter -Target $hardlinkOutside
+    $hardlinkCleanup = Invoke-CodexSerenaBehaviorGuardCore -Behavior Cleanup -InputText ("{`"session_id`":`"$hardlinkSession`"}") `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True (-not $hardlinkCleanup.ok -and $hardlinkCleanup.exitCode -eq 0 -and $hardlinkCleanup.stdout.Length -eq 0) 'cleanup 必须拒绝多硬链接 counter。'
+    Assert-Equal ([IO.File]::ReadAllText($hardlinkOutside)) 'preserve-shared-bytes' 'cleanup 不得改写或删除共享 counter 的外部链接。'
+    Assert-True (Test-Path -LiteralPath $hardlinkCounter -PathType Leaf) 'cleanup 拒绝共享 counter 时必须保留 session 内链接。'
+
+    $unknownSession = 'cleanup-unknown-redacted'
+    $unknownDirectory = Join-Path $guardFixtureHome "hook_data\$unknownSession"
+    [IO.Directory]::CreateDirectory($unknownDirectory) | Out-Null
+    $unknownSentinel = Join-Path $unknownDirectory 'third-party-state.txt'
+    [IO.File]::WriteAllText($unknownSentinel, 'preserve', [Text.UTF8Encoding]::new($false))
+    $unknownCleanup = Invoke-CodexSerenaBehaviorGuardCore -Behavior Cleanup -InputText ("{`"session_id`":`"$unknownSession`"}") `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True (-not $unknownCleanup.ok -and $unknownCleanup.exitCode -eq 0 -and $unknownCleanup.stdout.Length -eq 0) 'cleanup 遇到未知 session 子项必须静默 fail-open。'
+    Assert-Equal ([IO.File]::ReadAllText($unknownSentinel)) 'preserve' 'cleanup 不得删除或改写未知 session 子项。'
+
+    $mixedUnknownSession = 'cleanup-counter-unknown-redacted'
+    $mixedUnknownDirectory = Join-Path $guardFixtureHome "hook_data\$mixedUnknownSession"
+    [IO.Directory]::CreateDirectory($mixedUnknownDirectory) | Out-Null
+    $mixedCounter = Join-Path $mixedUnknownDirectory 'tool_use_counter.pkl'
+    $mixedUnknown = Join-Path $mixedUnknownDirectory 'third-party-state.txt'
+    [IO.File]::WriteAllText($mixedCounter, 'preserve-counter', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($mixedUnknown, 'preserve-unknown', [Text.UTF8Encoding]::new($false))
+    $mixedCleanup = Invoke-CodexSerenaBehaviorGuardCore -Behavior Cleanup -InputText ("{`"session_id`":`"$mixedUnknownSession`"}") `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True (-not $mixedCleanup.ok -and $mixedCleanup.exitCode -eq 0 -and $mixedCleanup.stdout.Length -eq 0) 'cleanup 遇到 counter+unknown 组合必须静默失败。'
+    Assert-Equal ([IO.File]::ReadAllText($mixedCounter)) 'preserve-counter' 'cleanup 在完整 closure 验证前不得删除或改写 counter。'
+    Assert-Equal ([IO.File]::ReadAllText($mixedUnknown)) 'preserve-unknown' 'cleanup 不得删除或改写未知子项。'
+
     foreach ($behavior in @('Reminder','Cleanup','Activation')) {
         $acceptance = Invoke-CodexSerenaBehaviorAcceptanceCore -Behavior $behavior `
             -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
@@ -230,8 +418,6 @@ try {
         }
     }
 
-    $successHealth = Get-Content -LiteralPath (Join-Path $guardHealthRoot 'serena-reminder.json') -Raw | ConvertFrom-Json
-    Assert-True ($successHealth.ok -eq $true -and @($successHealth.errors).Count -eq 0) '合法 vendor 协议后必须写成功 health。'
 }
 finally {
     if (Test-Path -LiteralPath $guardFixtureRoot) { Remove-Item -LiteralPath $guardFixtureRoot -Recurse -Force }

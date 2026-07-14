@@ -4,7 +4,6 @@ $codexHookHandleBoundSource = Join-Path $PSScriptRoot 'CodexHookHandleBoundIO.cs
 if (-not ('CodexHookGovernance.HandleBoundFileReader' -as [type])) {
     Add-Type -Path $codexHookHandleBoundSource -ErrorAction Stop
 }
-
 function Assert-CodexHookJsonElementUniqueProperties {
     param(
         [Parameter(Mandatory)][System.Text.Json.JsonElement]$Element,
@@ -28,7 +27,6 @@ function Assert-CodexHookJsonElementUniqueProperties {
         }
     }
 }
-
 function Assert-CodexHookStrictJsonText {
     param([Parameter(Mandatory)][string]$JsonText)
 
@@ -351,6 +349,7 @@ function Get-CodexHookHandleBoundFileSnapshot {
                 identity = $null
             }
             bytes = $null
+            sddl = $null
         }
     }
 
@@ -371,6 +370,7 @@ function Get-CodexHookHandleBoundFileSnapshot {
                     identity = $null
                 }
                 bytes = $null
+                sddl = $null
             }
         }
         if ($leaf -is [CodexHookGovernance.HandlePathMismatchException]) {
@@ -386,6 +386,7 @@ function Get-CodexHookHandleBoundFileSnapshot {
                     identity = $null
                 }
                 bytes = $null
+                sddl = $null
             }
         }
         throw
@@ -407,6 +408,7 @@ function Get-CodexHookHandleBoundFileSnapshot {
             )
         }
         bytes = $bytes
+        sddl = [string]$nativeSnapshot.SecurityDescriptorSddl
     }
 }
 
@@ -1057,13 +1059,13 @@ function Assert-CodexHookHostPreflightManifest {
 
     $expectedFiles = @{
         'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', '1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8', 'codex-state-preflight')
-        'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', '3fcd5a800cafa4b8b1caad4117b49b8c2dfd18df4ed769d652d5d95dcc53b38c', 'codex-state-preflight')
-        'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '5392cd7d18253b4b372c9e6811b1a6380ffd554ad7b2d88008f8d1819d9b252e', 'codex-state-preflight')
-        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', 'd6120f87231a058aa1a4b4a3610965c69401285637b5f7b5a2fe19dc9021925b', 'serena-reminder')
-        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '0944b2e57c5920f7be9c87dc32e13f8ab29adbd7e2837dcd9d64cf2b90142440', 'serena-cleanup')
-        'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', 'c19ff4b9bfa6912d67ae99ece33ca732e3f600e6bba7e213fd9cc7a4a7585be1', 'serena-reminder', 'serena-cleanup', 'serena-activate')
-        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', '1ddf42321e82d6410266da79e591dc53a37490f5da862fce3b8f64cdebcc0e17', 'serena-activate')
-        'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', '8e79250ba9f8114a38b3411dda1fe62616701ba1b43c0cdbafedd14680172004', 'serena-activate', 'serena-cleanup', 'serena-reminder')
+        'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', 'cf6b251500b2417aa928709d8632a1b26a9ee14ca327f35037db7a841089fbe3', 'codex-state-preflight')
+        'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '299d1940ee6f187fea5bb7f870f234fdf781e752616df7f5358bf9b9a67f4cad', 'codex-state-preflight')
+        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', 'ed7d69de104d624a12bd02914bb503f10d8c714883069f480853966c80416938', 'serena-reminder')
+        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', 'c49702a48a23ccacea2c4f12300a0f203729c1925fa6ccd551a83ed8e9ea7ef3', 'serena-cleanup')
+        'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '72e4d59d862775c100f35b7b345a5414a7337519f2d42ac49931a5e9891df8e2', 'serena-reminder', 'serena-cleanup', 'serena-activate')
+        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', 'fc8ccb26de2e95b4d971e4149ce5282f45a6d6f39f7105daf92dadecc65b8200', 'serena-activate')
+        'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', 'a6ecb01a6c57dafa23f62ed9efb59febd06c6059bfde83fd4c59ddbad2abacb4', 'serena-activate', 'serena-cleanup', 'serena-reminder')
     }
     if (@($Manifest.files).Count -ne $expectedFiles.Count) {
         throw "host-preflight manifest file 闭包不精确：$(@($Manifest.files).Count)"
@@ -1769,6 +1771,8 @@ function Get-CodexHookKnownRetiredRegistrationManifest {
             [pscustomobject]@{ id = 'serena-dashboard'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\serena-dashboard-guard.cmd'; arguments = @(); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'github-cli'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd'; arguments = @(); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-auto-approve'; event = 'PreToolUse'; matcher = 'mcp__serena__.*|mcp__serena\..*'; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('auto-approve', '--client=codex'); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'serena-reminder-direct'; event = 'PreToolUse'; matcher = 'Bash'; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('remind', '--client=codex'); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'serena-cleanup-direct'; event = 'Stop'; matcher = $null; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('cleanup', '--client=codex'); lifecycle = 'retired' }
         )
     }
 }
@@ -2686,6 +2690,7 @@ function Get-CodexHookFixtureFileSnapshot {
         sha256 = if ($snapshot.probe.safeToRead) { Get-CodexHookBytesSha256 -Bytes ([byte[]]$snapshot.bytes) } else { $null }
         bytes = if ($snapshot.probe.safeToRead) { [byte[]]$snapshot.bytes } else { $null }
         identity = if ($snapshot.probe.safeToRead) { @($snapshot.probe.identity) } else { @() }
+        sddl = if ($snapshot.probe.safeToRead) { [string]$snapshot.sddl } else { $null }
     }
 }
 
@@ -2801,6 +2806,7 @@ function Set-CodexHookAtomicFileBytesWithCapability {
         [scriptblock]$TestAfterPremoveSnapshot,
         [AllowNull()][string[]]$ExpectedIdentity,
         [scriptblock]$BeforeRename,
+        [scriptblock]$AfterRename,
         [switch]$PreservePreparedTempOnRenameFailure,
         [scriptblock]$RenameAction
     )
@@ -2875,6 +2881,15 @@ function Set-CodexHookAtomicFileBytesWithCapability {
                 $tempFile.RenameTo($fullPath, $ExpectedExists)
             }
             $renameSucceeded = $true
+            if ($null -ne $AfterRename) {
+                $publishedLease = $null
+                try {
+                    $publishedLease = $directoryGuard.AcquireAclTargetLease($fullPath)
+                    [void](& $AfterRename $publishedLease $fullPath)
+                } finally {
+                    if ($null -ne $publishedLease) { $publishedLease.Dispose() }
+                }
+            }
         } finally {
             try {
                 try {

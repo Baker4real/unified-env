@@ -13,6 +13,45 @@ function Assert-Bytes([byte[]]$Actual,[byte[]]$Expected,[string]$Message){if(([C
 
 foreach ($name in @('Get-CodexHookSha256','Assert-CodexHookDPath','Invoke-CodexHookMutex','Write-CodexHookAtomicText','Invoke-CodexHookProcess','ConvertTo-CodexHookRedactedUri','Write-CodexHookLatestHealth')) { Assert-True ($null -ne (Get-Command $name -CommandType Function -ErrorAction SilentlyContinue)) "缺少接口：$name" }
 
+$stdinBlocker = [Diagnostics.Process]::new()
+$stdinInfo = [Diagnostics.ProcessStartInfo]::new()
+$stdinInfo.FileName = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+$stdinInfo.UseShellExecute = $false
+$stdinInfo.CreateNoWindow = $true
+$stdinInfo.RedirectStandardInput = $true
+$stdinInfo.RedirectStandardOutput = $true
+$stdinInfo.RedirectStandardError = $true
+[void]$stdinInfo.ArgumentList.Add('-NoProfile')
+[void]$stdinInfo.ArgumentList.Add('-Command')
+[void]$stdinInfo.ArgumentList.Add('Start-Sleep -Seconds 30')
+$stdinBlocker.StartInfo = $stdinInfo
+$stdinPid = $null
+try {
+    Assert-True ($stdinBlocker.Start()) 'stdin blocker fixture 必须启动'
+    $stdinPid = $stdinBlocker.Id
+    $stdinStdout = $stdinBlocker.StandardOutput.ReadToEndAsync()
+    $stdinStderr = $stdinBlocker.StandardError.ReadToEndAsync()
+    [byte[]]$largeInput = New-Object byte[] (8MB)
+    $stdinWrite = $stdinBlocker.StandardInput.BaseStream.WriteAsync($largeInput, 0, $largeInput.Length)
+    $stdinWatch = [Diagnostics.Stopwatch]::StartNew()
+    $stdinError = $null
+    try {
+        $null = Complete-CodexHookProcessWithBoundedDrain `
+            -Process $stdinBlocker -StdoutTask $stdinStdout -StderrTask $stdinStderr `
+            -TimeoutMilliseconds 1000 -ProcessName 'stdin blocker fixture' `
+            -StdinTask $stdinWrite -StdinStream $stdinBlocker.StandardInput.BaseStream
+    }
+    catch { $stdinError = $_.Exception.Message }
+    $stdinWatch.Stop()
+    Assert-True (-not [string]::IsNullOrWhiteSpace($stdinError)) '不读 stdin 的 child 必须超时失败'
+    Assert-True ($stdinWatch.ElapsedMilliseconds -ge 700 -and $stdinWatch.ElapsedMilliseconds -lt 4000) "stdin 写、进程等待和 drain 必须共用有界 deadline；actual=$($stdinWatch.ElapsedMilliseconds)"
+    Assert-True ($stdinBlocker.HasExited -and $null -eq (Get-Process -Id $stdinPid -ErrorAction SilentlyContinue)) 'stdin 超时必须终止整个 child tree 并回收 PID'
+}
+finally {
+    if (-not $stdinBlocker.HasExited) { try { $stdinBlocker.Kill($true); $stdinBlocker.WaitForExit(2000) | Out-Null } catch {} }
+    $stdinBlocker.Dispose()
+}
+
 $forbiddenWrapperTokens=@('C:\Program Files\nodejs','python313-official','D:\hermes-data\.npm-global\python.exe')
 $activeWrappers=@($manifest.files|Where-Object{$_.lifecycle -ceq 'active' -and $_.relativePath -like 'hooks/*.cmd'})
 Assert-True ($activeWrappers.Count -eq 9) '必须验证全部 9 个 active cmd wrapper（含过渡闭包中的历史入口）'
@@ -268,6 +307,13 @@ function Invoke-SerenaVendor([string[]]$Arguments,[string]$InputJson){
     try{$didStart=$p.Start();Assert-True $didStart 'Serena synthetic vendor 必须启动';$stdoutTask=$p.StandardOutput.ReadToEndAsync();$stderrTask=$p.StandardError.ReadToEndAsync();$p.StandardInput.Write($InputJson);$p.StandardInput.Close();Assert-True ($p.WaitForExit(10000)) 'Serena synthetic vendor 必须结束';return [pscustomobject]@{exitCode=$p.ExitCode;stdout=$stdoutTask.GetAwaiter().GetResult();stderr=$stderrTask.GetAwaiter().GetResult()}}finally{$p.Dispose()}
 }
 $syntheticSession='redacted-session'
+$syntheticCodexSession='11111111-2222-4333-8444-555555555555'
+$claudeAccept=@(Invoke-SerenaVendor @('auto-approve','--client=codex') '{"session_id":"claude-redacted","permission_mode":"acceptEdits","tool_name":"mcp__serena__get_symbols_overview"}')[-1]
+$claudeAuto=@(Invoke-SerenaVendor @('auto-approve','--client=codex') '{"session_id":"claude-redacted","permission_mode":"auto","tool_name":"mcp__serena__get_symbols_overview"}')[-1]
+$codexNoApprove=@(Invoke-SerenaVendor @('auto-approve','--client=codex') ("{`"session_id`":`"$syntheticCodexSession`",`"tool_name`":`"mcp__serena__get_symbols_overview`",`"tool_input`":{}}"))[-1]
+Assert-True (($claudeAccept.stdout|ConvertFrom-Json).hookSpecificOutput.permissionDecision -ceq 'allow') 'Claude acceptEdits 对照必须返回 allow'
+Assert-True (($claudeAuto.stdout|ConvertFrom-Json).hookSpecificOutput.permissionDecision -ceq 'allow') 'Claude auto 对照必须返回 allow'
+Assert-True ($codexNoApprove.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($codexNoApprove.stdout)) 'Codex payload 不得产生 auto-approve allow'
 $remindInput=[pscustomobject][ordered]@{session_id=$syntheticSession;tool_name='Bash';tool_input=[pscustomobject][ordered]@{command='rg -n hook file.ps1'}}|ConvertTo-Json -Compress -Depth 5
 $remind1=@(Invoke-SerenaVendor @('remind','--client=codex') $remindInput)[-1]
 $remind2=@(Invoke-SerenaVendor @('remind','--client=codex') $remindInput)[-1]
@@ -302,6 +348,29 @@ try{
     foreach($id in @('provider-stability','serena-activate','serena-dashboard','github-cli')){$path=Join-Path $healthRoot "$id.json";Assert-True (Test-Path $path) "health writer 必须隔离写入 $id.json";$doc=Get-Content -Raw $path|ConvertFrom-Json;Assert-True ($doc.hookId -ceq $id) 'health 文件不得交叉覆盖'}
     $single=New-Health 'provider-stability';$single.errors=[string[]]@('one');$healthOutput=@(Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $single -HealthRoot $healthRoot -AllowFixtureRoot);Assert-True ($healthOutput.Count -eq 0) 'single-error health 写入不得污染 stdout'
     foreach($id in @('provider-stability','serena-activate','serena-dashboard','github-cli')){$raw=Get-Content -Raw (Join-Path $healthRoot "$id.json");$json=[Text.Json.JsonDocument]::Parse($raw);try{Assert-True ($json.RootElement.GetProperty('errors').ValueKind -eq [Text.Json.JsonValueKind]::Array) 'health errors JSON token 必须稳定为 array'}finally{$json.Dispose()}}
+    $reconcilerFixtureRoot=Join-Path $projectRoot ('.scratch\host-hook-reconciliation-tests-'+[guid]::NewGuid().ToString('N'))
+    $reconcilerCodexHome=Join-Path $reconcilerFixtureRoot 'runtime canary & path\.codex'
+    $reconcilerHealth=Join-Path $reconcilerCodexHome 'run-evidence\codex-hook-health'
+    [IO.Directory]::CreateDirectory($reconcilerCodexHome)|Out-Null
+    [IO.Directory]::CreateDirectory((Join-Path $reconcilerCodexHome 'run-evidence'))|Out-Null
+    [IO.File]::WriteAllText((Join-Path $reconcilerCodexHome '.codex-host-hook-reconciliation-fixture'),'codex-host-hook-reconciliation-fixture-v1',[Text.UTF8Encoding]::new($false))
+    try{
+        $positive=New-Health 'serena-activate'
+        $null=Write-CodexHookLatestHealthCore -HookId 'serena-activate' -Payload $positive -HealthRoot $reconcilerHealth -AllowFixtureRoot
+        Assert-True (Test-Path -LiteralPath (Join-Path $reconcilerHealth 'serena-activate.json') -PathType Leaf) 'reconciler health fixture 必须绑定同一 CodexHome marker'
+        foreach($negative in @(
+            (Join-Path $reconcilerCodexHome 'child\run-evidence\codex-hook-health'),
+            (Join-Path $reconcilerCodexHome 'run-evidence\wrong-leaf'),
+            'D:\Codex\projects\other-project\.scratch\host-hook-reconciliation-tests-00000000000000000000000000000000\case\.codex\run-evidence\codex-hook-health'
+        )){
+            Assert-Throws { Write-CodexHookLatestHealthCore -HookId 'serena-activate' -Payload $positive -HealthRoot $negative -AllowFixtureRoot } 'fixture root'
+            Assert-True (-not(Test-Path -LiteralPath $negative)) "非法 health fixture 必须零写：$negative"
+        }
+        Remove-Item -LiteralPath $reconcilerHealth -Recurse -Force
+        [IO.File]::WriteAllText((Join-Path $reconcilerCodexHome '.codex-host-hook-reconciliation-fixture'),'wrong-marker',[Text.UTF8Encoding]::new($false))
+        Assert-Throws { Write-CodexHookLatestHealthCore -HookId 'serena-activate' -Payload $positive -HealthRoot $reconcilerHealth -AllowFixtureRoot } 'fixture root'
+        Assert-True (-not(Test-Path -LiteralPath $reconcilerHealth)) '错误 marker 必须在任何 health 写入前拒绝'
+    }finally{if(Test-Path -LiteralPath $reconcilerFixtureRoot){Remove-Item -LiteralPath $reconcilerFixtureRoot -Recurse -Force}}
     $astErrors=$null;$tokens=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'),[ref]$tokens,[ref]$astErrors);Assert-True ($astErrors.Count -eq 0) 'runtime AST 必须合法'
 }finally{
     if(Test-Path $healthRoot){Remove-Item $healthRoot -Recurse -Force}

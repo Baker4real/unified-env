@@ -19,13 +19,38 @@ function Complete-CodexHookProcessWithBoundedDrain {
         [Parameter(Mandatory)][object]$StdoutTask,
         [Parameter(Mandatory)][object]$StderrTask,
         [Parameter(Mandatory)][int]$TimeoutMilliseconds,
-        [Parameter(Mandatory)][string]$ProcessName
+        [Parameter(Mandatory)][string]$ProcessName,
+        [AllowNull()][object]$StdinTask = $null,
+        [AllowNull()][object]$StdinStream = $null
     )
-    if (-not $Process.WaitForExit($TimeoutMilliseconds)) {
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    $stopTimedOutProcess = {
         try { $Process.Kill($true) } catch {}
+        try { if ($null -ne $StdinStream) { $StdinStream.Dispose() } } catch {}
         try { [void]$Process.WaitForExit($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+        try { if ($null -ne $StdinTask) { [void]$StdinTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } } catch {}
         try { [void]$StdoutTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
         try { [void]$StderrTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+    }
+    if ($null -ne $StdinTask) {
+        $remaining = [Math]::Max(0, $TimeoutMilliseconds - [int]$deadline.ElapsedMilliseconds)
+        if (-not $StdinTask.Wait($remaining)) {
+            & $stopTimedOutProcess
+            throw "$ProcessName stdin 超时。"
+        }
+        try { [void]$StdinTask.GetAwaiter().GetResult() }
+        catch {
+            & $stopTimedOutProcess
+            throw
+        }
+        try { if ($null -ne $StdinStream) { $StdinStream.Dispose() } } catch {
+            & $stopTimedOutProcess
+            throw
+        }
+    }
+    $remaining = [Math]::Max(0, $TimeoutMilliseconds - [int]$deadline.ElapsedMilliseconds)
+    if (-not $Process.WaitForExit($remaining)) {
+        & $stopTimedOutProcess
         throw "$ProcessName 超时。"
     }
     try {
@@ -33,10 +58,7 @@ function Complete-CodexHookProcessWithBoundedDrain {
         return Receive-CodexHookBoundedProcessStream -Task $StderrTask -StreamName "$ProcessName stderr"
     } catch {
         $drainError = $_
-        try { $Process.Kill($true) } catch {}
-        try { [void]$Process.WaitForExit($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
-        try { [void]$StdoutTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
-        try { [void]$StderrTask.Wait($script:CodexHookProcessDrainTimeoutMilliseconds) } catch {}
+        & $stopTimedOutProcess
         throw $drainError
     }
 }
@@ -254,7 +276,15 @@ function Write-CodexHookLatestHealthCore {
     $fixedRoot='D:\Codex\.codex\run-evidence\codex-hook-health'
     $fixtureRoot='D:\Codex\projects\统一环境\reports\codex-hook-health-test'
     $root=[IO.Path]::GetFullPath($HealthRoot)
-    if($AllowFixtureRoot){if($root -ine $fixtureRoot){throw 'health fixture root 非法。'}}elseif($root -ine $fixedRoot){throw 'health root 必须使用固定路径。'}
+    if($AllowFixtureRoot){
+        $reconcilerFixture=$false
+        if($root -cmatch '^D:\\Codex\\projects\\统一环境\\\.scratch\\host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\\run-evidence\\codex-hook-health\z'){
+            $codexHome=[IO.Directory]::GetParent([IO.Directory]::GetParent($root).FullName).FullName
+            $marker=Join-Path $codexHome '.codex-host-hook-reconciliation-fixture'
+            $reconcilerFixture=(Test-Path -LiteralPath $marker -PathType Leaf)-and((Get-Content -LiteralPath $marker -Raw).Trim()-ceq'codex-host-hook-reconciliation-fixture-v1')
+        }
+        if($root -ine $fixtureRoot -and -not $reconcilerFixture){throw 'health fixture root 非法。'}
+    }elseif($root -ine $fixedRoot){throw 'health root 必须使用固定路径。'}
     [void](Assert-CodexHookDPath -Path $root -AllowMissingLeaf)
     if (-not [IO.Directory]::Exists($root)) { [IO.Directory]::CreateDirectory($root) | Out-Null }
     [void](Assert-CodexHookDPath -Path $root)

@@ -84,6 +84,39 @@ def _load_state_core():
     return module
 
 
+def _build_hot_path_approved_map(core, global_path: Path) -> dict[str, object]:
+    try:
+        state = core._strict_json_loads(global_path.read_bytes())
+        inventory = core.build_path_inventory(
+            state,
+            core.PROJECTLESS_SOURCE_ROOT,
+            core.CANONICAL_CANDIDATE_ROOT,
+        )
+    except Exception as exc:
+        raise PreflightError("state path inventory failed") from exc
+    inventory_maps = inventory.get("maps")
+    mappings: dict[str, dict[str, str]] = {}
+    if isinstance(inventory_maps, dict):
+        for map_name, entries in inventory_maps.items():
+            if not isinstance(map_name, str) or not isinstance(entries, dict):
+                continue
+            selected: dict[str, str] = {}
+            for identity, entry in entries.items():
+                if not isinstance(identity, str) or not isinstance(entry, dict):
+                    continue
+                candidate = entry.get("candidate")
+                if entry.get("safe") is True and isinstance(candidate, str):
+                    selected[identity] = candidate
+            if selected:
+                mappings[map_name] = selected
+    return {
+        "inventoryGeneration": inventory.get("inventoryGeneration"),
+        "stateSha256": inventory.get("stateSha256"),
+        "mappingSha256": inventory.get("mappingSha256"),
+        "mappings": mappings,
+    }
+
+
 def _run_active_sqlite_preflight(
     core,
     codex_home: Path,
@@ -102,11 +135,18 @@ def _run_active_sqlite_preflight(
         permission_policy = core.resolve_permission_policy(codex_home)
         with core.WindowsNamedMutex():
             global_path = codex_home / ".codex-global-state.json"
+            if check_only:
+                path_mode = "inventory"
+                approved_map = None
+            else:
+                path_mode = "repair-all-approved"
+                approved_map = _build_hot_path_approved_map(core, global_path)
             global_result = core.update_global_state(
                 global_path,
                 codex_home / "backups_state" / "codex-state-policy",
                 permission_policy=permission_policy,
-                path_mode="inventory",
+                path_mode=path_mode,
+                approved_map=approved_map,
                 check_only=check_only,
             )
             expected_identity_value = global_result.get("afterIdentity")
@@ -184,6 +224,7 @@ def _run_active_sqlite_preflight(
     try:
         if write_health:
             completed = datetime.now(timezone.utc)
+            projected = _project(build_payload())
             try:
                 core._write_health(
                     health_root / "codex-state-preflight.json",
@@ -195,7 +236,8 @@ def _run_active_sqlite_preflight(
                         "durationMs": int((time.monotonic() - started_clock) * 1000),
                         "ok": ok,
                         "changed": changed,
-                        "repairRequired": drift_count > 0 or not ok,
+                        "repairRequired": bool(projected.get("repairRequired")),
+                        "reviewRequired": bool(projected.get("reviewRequired")),
                         "errors": errors,
                     },
                 )
@@ -225,12 +267,24 @@ def _run_state_preflight(
             write_health=write_health,
         )
     buffer = io.StringIO()
+    global_path = codex_home / ".codex-global-state.json"
+    if check_only or not all(
+        hasattr(core, name)
+        for name in ("_strict_json_loads", "build_path_inventory", "PROJECTLESS_SOURCE_ROOT", "CANONICAL_CANDIDATE_ROOT")
+    ):
+        path_mode = "inventory"
+        approved_map = None
+    else:
+        path_mode = "repair-all-approved"
+        approved_map = _build_hot_path_approved_map(core, global_path)
     return core.run_policy(
         codex_home,
         check_only=check_only,
         health_root=health_root,
         output=buffer,
         write_health=write_health,
+        path_mode=path_mode,
+        approved_map=approved_map,
     )
 
 
@@ -240,15 +294,26 @@ def _project(core_payload: dict[str, object]) -> dict[str, object]:
     converged = core_payload.get("converged") is True
     errors = core_payload.get("errors")
     error_values = errors if isinstance(errors, list) else []
+    path_inventory = core_payload.get("pathInventory")
+    path_entries = []
+    if isinstance(path_inventory, dict):
+        raw_entries = path_inventory.get("entries")
+        if isinstance(raw_entries, list):
+            path_entries = [entry for entry in raw_entries if isinstance(entry, dict)]
+    has_repairable_path = any(entry.get("safe") is True for entry in path_entries)
+    thread_state = core_payload.get("threadState")
+    thread_repair_required = (
+        isinstance(thread_state, dict)
+        and int(thread_state.get("driftCount", 0)) > 0
+    )
     repair_required = (
         not ok
-        or not converged
-        or drift_count > 0
+        or has_repairable_path
+        or thread_repair_required
         or "repair-required" in error_values
     )
     global_state = core_payload.get("globalState")
-    thread_state = core_payload.get("threadState")
-    path_inventory = core_payload.get("pathInventory")
+    review_required = ok and drift_count > 0 and not repair_required
     return {
         "ok": ok,
         "converged": converged,
@@ -259,6 +324,7 @@ def _project(core_payload: dict[str, object]) -> dict[str, object]:
             "paths": path_inventory if isinstance(path_inventory, dict) else {"status": "not-applicable"},
         },
         "repairRequired": repair_required,
+        "reviewRequired": review_required,
     }
 
 
