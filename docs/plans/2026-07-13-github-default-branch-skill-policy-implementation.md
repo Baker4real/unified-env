@@ -4,6 +4,8 @@
 
 > **历史路径说明：** 下方实施命令中出现的 `D:\Codex\projects\unified-env-github-default-branch-skill-policy` 是已清理的历史 worktree；当前版本化源代码位于 `D:\Codex\projects\统一环境\scripts`，部署入口和验证证据仍以 D 盘当前路径为准。
 
+> **退役说明（2026-07-14）：** 本计划中的 `finishing-a-development-branch`、`subagent-driven-development` 和 `writing-plans` 路径只保留为历史实施记录；obra-superpowers 指定 7 项已按用户授权无备份退役，不代表当前 active 路径，也不应从本文恢复。
+
 > **供 agentic workers 使用：** 按任务逐项实施；每个任务先建立可观察的失败信号，再写最小实现并复验。此变更涉及插件缓存、分支生命周期与本机全局 skill，Task 3 和 Task 4 必须完成独立对抗性审查。
 
 **目标：** 让本机收尾和 GitHub 发布 skill 默认只发布到可验证的远端默认分支，淘汰 patch-stack 分支，并让临时分支在确认后合入、推送和双端删除。
