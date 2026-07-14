@@ -1636,8 +1636,8 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.module._open_missing_sidecar_handle(journal_path)
         self.assertEqual(journal_path.read_bytes(), original)
 
-    def test_run_policy_wal_cold_start_succeeds_with_reserved_journal_lease(self) -> None:
-        self.write_global(self.permission_drift())
+    def test_run_policy_wal_cold_start_requires_cold_maintenance(self) -> None:
+        original_global = self.write_global(self.permission_drift())
         keeper = sqlite3.connect(self.db_path)
         try:
             self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
@@ -1660,14 +1660,13 @@ class CodexStatePolicyTests(unittest.TestCase):
                 health_root=self.root / "health",
                 output=io.StringIO(),
             )
-            self.assertTrue(result["ok"])
-            self.assertNotIn("generation-unbounded", result["errors"])
-            self.assertNotIn("unsafe-partial", result["errors"])
-            self.assertEqual(result["threadState"]["status"], "updated")
-            self.assertEqual(
-                keeper.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
-                "never",
-            )
+            self.assertFalse(result["ok"])
+            self.assertFalse(result["changed"])
+            self.assertFalse(result["converged"])
+            self.assertIn("generation-unbounded", result["errors"])
+            self.assertIn("unsafe-partial", result["errors"])
+            self.assertEqual(result["threadState"]["status"], "not-run")
+            self.assertEqual(self.global_path.read_bytes(), original_global)
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
@@ -1748,7 +1747,7 @@ class CodexStatePolicyTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "requires Windows byte-range leases")
     def test_run_policy_rejects_shm_lock_byte_mutation_during_output(self) -> None:
-        """Keep SQLite's writer lock across output; never use a close-to-lock handoff."""
+        """Lifecycle write rejects WAL+SHM before an output-bound lease exists."""
         for offset in (120, 122, 127):
             with self.subTest(offset=offset):
                 self.write_global(self.permission_drift())
@@ -1797,18 +1796,11 @@ class CodexStatePolicyTests(unittest.TestCase):
                     for suffix in ("-wal", "-shm", "-journal"):
                         Path(str(self.db_path) + suffix).unlink(missing_ok=True)
                     self.db_path.unlink(missing_ok=True)
-                self.assertTrue(output.mutated or output.blocked)
-                if output.mutated:
-                    # SQLite owns byte 120; the other WAL-index lock bytes
-                    # may accept a raw callback write.  The metadata return
-                    # gate must still reject the generation and rewrite a
-                    # fail-closed envelope rather than report success.
-                    self.assertFalse(result["ok"], (offset, result, output.getvalue()))
-                    self.assertFalse(json.loads(output.getvalue())["ok"])
-                else:
-                    self.assertTrue(output.blocked, (offset, result, output.getvalue()))
-                    self.assertTrue(result["ok"], (offset, result, output.getvalue()))
-                    self.assertTrue(json.loads(output.getvalue())["ok"])
+                self.assertTrue(output.mutated or output.blocked, (offset, result, output.getvalue()))
+                self.assertFalse(result["ok"], (offset, result, output.getvalue()))
+                self.assertIn("generation-unbounded", result["errors"])
+                self.assertIn("unsafe-partial", result["errors"])
+                self.assertFalse(json.loads(output.getvalue())["ok"])
 
     @unittest.skipUnless(os.name == "nt", "requires Windows SHM mapping semantics")
     def test_run_policy_write_requires_observable_shm_lock_window(self) -> None:
@@ -1862,6 +1854,46 @@ class CodexStatePolicyTests(unittest.TestCase):
         finally:
             if isinstance(locals().get("lease"), self.module.SqliteTargetLease):
                 lease.close()
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows SHM mapping semantics")
+    def test_sqlite_strict_gate_rejects_shm_metadata_restore(self) -> None:
+        keeper = self.create_wal_db()
+        try:
+            keeper.execute("update threads set sentinel='metadata-restore' where id='target-a'")
+            keeper.commit()
+            before = self.module._capture_sqlite_source(self.db_path)
+            self.assertIsNotNone(before.payload[2])
+            for offset in (122, 127):
+                with self.subTest(offset=offset):
+                    original = bytearray(before.payload[2] or b"")
+                    self.assertNotEqual(original[offset:offset + 1], b"X")
+                    original[offset] = ord("X")
+                    after = self.module.SqliteSourceSnapshot(
+                        payload=(before.payload[0], before.payload[1], bytes(original), before.payload[3]),
+                        identities=before.identities,
+                        metadata=before.metadata,
+                        content_known=before.content_known,
+                    )
+                    with mock.patch.object(
+                        self.module,
+                        "_capture_sqlite_source",
+                        return_value=after,
+                    ):
+                        with self.assertRaisesRegex(
+                            self.module.StatePolicyError,
+                            "bytes changed|concurrent",
+                        ):
+                            self.module._assert_sqlite_snapshot_identity(
+                                before,
+                                self.db_path,
+                                allow_new_sidecars=False,
+                                check_sidecar_content=True,
+                                strict_sidecar_content_indices={2},
+                            )
+        finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
@@ -1934,10 +1966,14 @@ class CodexStatePolicyTests(unittest.TestCase):
                 self.db_path.write_bytes(original_main)
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+        # Existing SHM is rejected before any output-bound lease is created;
+        # the failure envelope may still invoke the sink, but the result is
+        # already fail-closed and cannot publish a repair.
         self.assertTrue(output.attempted)
-        self.assertTrue(output.blocked)
-        self.assertTrue(result["ok"])
-        self.assertTrue(json.loads(output.getvalue())["ok"])
+        self.assertFalse(result["ok"])
+        self.assertIn("generation-unbounded", result["errors"])
+        self.assertIn("unsafe-partial", result["errors"])
+        self.assertFalse(json.loads(output.getvalue())["ok"])
 
     @unittest.skipUnless(os.name == "nt", "requires Windows read-only generation leases")
     def test_check_only_blocks_nonzero_offset_sqlite_write_during_output(self) -> None:
@@ -2072,7 +2108,8 @@ class CodexStatePolicyTests(unittest.TestCase):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
     @unittest.skipUnless(os.name == "nt", "requires Windows missing-sidecar leases")
-    def test_check_only_rejects_missing_journal_without_placeholder(self) -> None:
+    def test_check_only_wal_shm_requires_cold_maintenance_without_placeholder(self) -> None:
+        """Check-only reports repair-required and never creates a journal placeholder."""
         self.write_global(self.permission_drift())
         keeper = self.create_wal_db()
         keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
@@ -2264,8 +2301,8 @@ class CodexStatePolicyTests(unittest.TestCase):
         finally:
             journal_path.unlink(missing_ok=True)
 
-    def test_run_policy_wal_missing_journal_created_after_last_return_gate_is_blocked(self) -> None:
-        """A legal WAL cold-start reserves the absent journal name."""
+    def test_run_policy_wal_missing_journal_requires_cold_maintenance(self) -> None:
+        """WAL+SHM repair stays blocked until a cold maintenance run."""
         self.write_global(self.permission_drift())
         keeper = self.create_wal_db()
         journal_path = Path(str(self.db_path) + "-journal")
@@ -2305,10 +2342,12 @@ class CodexStatePolicyTests(unittest.TestCase):
                     health_root=self.root / "health",
                     output=output,
                 )
-            self.assertTrue(result["ok"], (calls, result, output.getvalue(), journal_path.exists()))
-            self.assertTrue(blocked, (calls, result, output.getvalue(), journal_path.exists()))
+            self.assertFalse(result["ok"], (calls, result, output.getvalue(), journal_path.exists()))
+            self.assertFalse(blocked, (calls, result, output.getvalue(), journal_path.exists()))
+            self.assertEqual(calls, 0)
+            self.assertIn("unsafe-partial", result["errors"])
             self.assertEqual(len(output.getvalue().splitlines()), 1)
-            self.assertTrue(json.loads(output.getvalue())["ok"])
+            self.assertFalse(json.loads(output.getvalue())["ok"])
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
@@ -2369,10 +2408,12 @@ class CodexStatePolicyTests(unittest.TestCase):
                     health_root=self.root / "health",
                     output=output,
                 )
-            self.assertTrue(result["ok"])
-            self.assertTrue(blocked)
+            self.assertFalse(result["ok"])
+            self.assertFalse(blocked)
+            self.assertEqual(calls, 0)
+            self.assertIn("unsafe-partial", result["errors"])
             self.assertEqual(len(output.getvalue().splitlines()), 1)
-            self.assertTrue(json.loads(output.getvalue())["ok"])
+            self.assertFalse(json.loads(output.getvalue())["ok"])
         finally:
             keeper.close()
             if journal_path.exists() or journal_path.is_symlink():
