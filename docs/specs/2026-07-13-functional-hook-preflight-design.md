@@ -2,13 +2,13 @@
 
 ## 状态
 
-分阶段实施中：Task 1（path inventory）与 Task 2（policy source、path inventory、state repair 核心）已合入当前 `main` 并由专项测试覆盖；Task 3–8 仍是未排期的设计/未实施项。只有用户明确授权并完成 fixture、对抗性审查、重启和 fresh lifecycle 验收后，才可讨论推进。本文不授权注册新的 live hooks、执行 live repair 或恢复旧的多钩子热路径。
+分阶段实施中：Task 1–6 已合入当前 `main` 并由专项测试覆盖；Task 7（canonical path repair）和 Task 8（live registration/fresh lifecycle 验收）尚未完成。后两项只有在用户明确授权并完成 fixture、对抗性审查、重启和 fresh lifecycle 验收后才可推进。本文不授权注册新的 live hooks、执行 live repair 或恢复旧的多钩子热路径。
 
 ## 当前实现落点
 
-- `managed/codex-hooks/hooks/codex-state-policy-guard.py` 已提供 `build_path_inventory`、`resolve_permission_policy` 和分域 `run_policy`，并保留 unresolved path 的原始字节。
-- `tests/Test-CodexStatePathInventory.py`、`tests/Test-CodexStatePolicy.py` 与 `tests/Test-CodexHookPolicy.ps1` 覆盖当前已落地的 path/policy 安全边界。
-- `codex-state-preflight` wrapper、Serena reminder/cleanup/activation hook、provider/GitHub 显式维护层、manifest 分离和 live registration 尚未落地；不要把本设计中的目标接口当作当前可调用入口。
+- `managed/codex-hooks/hooks/codex-state-policy-guard.py` 已提供 path inventory、permission policy 和分域 state policy；local-only preflight、Serena reminder/cleanup/activation、provider/GitHub 显式维护层及 production/legacy manifest 分离均已落地。
+- 专项测试覆盖当前已合入的 path/state、preflight、Serena 行为、local health guard 与 manifest 路由边界。
+- canonical path repair 和 live registration 尚未完成；不要把这两部分设计接口当作当前可调用的生产入口。
 
 ## 目标
 

@@ -13,9 +13,9 @@
 - Codex CLI、Node、npm、Git、gh、uv、sqlite3、CodeGraph 和 Serena 主链路已验证；Serena 运行在官方 Python 3.14.6 上，并通过 uv override 使用 `anthropic==0.116.0`。
 - 共享环境入口已验证：`planning-with-files`、CMake `4.3.3`、Rust toolchain `1.96.1` 等均保持可用；skill ledger coverage 为 `missing=0` / `duplicates=0`。
 - 已按用户授权修复默认入口：`.NET` 默认命中 D 盘 SDK `10.0.301`，Python 默认切到官方 `3.14.6`；WSL 当前判断为“不确实需要”，未安装、未启用、未初始化；CodeGraph 活动版本已切换为 `1.4.1`，Codex Desktop 已完整重启并通过 fresh MCP smoke。
-- 已固化上游稳定 skill 约束并同步 Matt stable catalog：28 个稳定目录已与上游对齐；当前活动 skill 资源闭包为 62 个 active、0 项缺失、0 项 ledger 漂移；`skills/in-progress/**` 未安装。2026-07-14 按用户授权无备份退役 obra-superpowers 指定 7 项 skill；同插件未授权的其他 skill 与独立上游源码 checkout 保留。
+- 已固化上游稳定 skill 约束并同步 Matt stable catalog：稳定目录与上游对齐，严格资源闭包和 ledger 一致性检查通过；活动数量、哈希和上游版本属于易变状态，操作前必须实时复核。`skills/in-progress/**` 不安装；用户明确退役的 skill 不保留本机备份。
 - 本机 Skill Catalog 生成器已落地：默认只读扫描 active、system 和 plugin-cache，来源以本机 ledger / `SOURCE.md` 为准；它不安装或更新 skill、不访问网络、不读取凭据、不注册 hook。实现入口是 `scripts/generate_skill_catalog.py`，本机派生输出和运行证据位于 `D:\Codex\.codex\skill-catalog\` 与 `D:\Codex\.codex\run-evidence\skill-catalog\`。
-- 功能钩子分层恢复目前只落地 path inventory、policy source 和显式 state repair 核心；新的 state preflight wrapper、Serena 行为 hook、provider/GitHub 显式维护和 live registration 尚未启用。
+- 功能钩子分层恢复的 Task 1–6 已合入 `main`：path inventory/state policy、local-only preflight、Serena 行为 hooks、provider/GitHub 显式维护和 production/legacy manifest 分离均有专项实现；canonical path repair 与 live registration 仍须按计划和显式授权推进。
 - GitHub 与收尾 skill 已统一为“解析远端默认分支后发布”；临时分支只在说明必要性并获确认后使用，patch-stack 仅报告、不自动创建或删除。实现状态与证据见对应设计和计划文档。
 
 ## 关键入口

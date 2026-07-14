@@ -63,7 +63,13 @@ check('private-patch-stack must be private-default compatibility protection', ()
   assert.match(privateStack.text, /user-owned remote|用户拥有/i);
   assert.match(privateStack.text, /third-party upstream|public fork|vendor|非用户/i);
   assert.doesNotMatch(privateStack.text, /refs\/heads\/patch-stack/i);
-  assert.match(privateStack.text, /do not create, update, or push a patch stack/i);
+  const englishContract = /do not create, update, or push a patch stack/i.test(privateStack.text);
+  const chineseContract =
+    /不再创建 patch-stack 分支/i.test(privateStack.text) &&
+    /不拆分、不推送、不追踪 patch-stack 分支/i.test(privateStack.text);
+  assert.ok(englishContract || chineseContract, '缺少禁止创建、更新或推送 patch-stack 的完整契约');
+  assert.doesNotMatch(privateStack.text, /允许(?:创建|更新|推送)[^。\n]{0,40}patch-stack/i);
+  assert.doesNotMatch(privateStack.text, /^\s*git\s+(?:branch|switch|checkout|push)\b[^\n]*patch-stack/im);
   assert.doesNotMatch(privateStack.text, /patch-stack\/NN-|patch-stack\/\d{2}-/i);
   assert.match(privateStack.text, /temporary branch|临时分支/i);
 });
