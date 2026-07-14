@@ -371,6 +371,449 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertTrue(result["ok"], (result, blocked, output.getvalue()))
         self.assertTrue(blocked)
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows cold source fencing")
+    def test_cold_commit_window_rejects_competing_writer(self) -> None:
+        """A writer released by commit must not be absorbed by the cold rebase."""
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='cold-window' where id='target-a'")
+        keeper.commit()
+        self.close_wal_keeper_preserving_source(keeper)
+        evidence = self.cold_maintenance_evidence()
+        original_connect = self.module._connect_sqlite_bound
+        competitor_state = {"attempted": False, "committed": False, "error": ""}
+        result: dict[str, object] | None = None
+
+        class CommitAfterProxy:
+            def __init__(self, connection: sqlite3.Connection) -> None:
+                self._connection = connection
+
+            def commit(self) -> None:
+                self._connection.commit()
+                competitor_state["attempted"] = True
+                competitor: sqlite3.Connection | None = None
+                try:
+                    competitor = sqlite3.connect(self_outer.db_path, timeout=0)
+                    competitor.execute(
+                        "update threads set sentinel='competitor-after-commit' where id='target-a'"
+                    )
+                    competitor.commit()
+                    competitor_state["committed"] = True
+                except sqlite3.Error as exc:
+                    competitor_state["error"] = str(exc)
+                finally:
+                    if competitor is not None:
+                        competitor.close()
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(self._connection, name)
+
+        self_outer = self
+        try:
+            with mock.patch.object(
+                self.module,
+                "_connect_sqlite_bound",
+                side_effect=lambda path, identity: CommitAfterProxy(
+                    original_connect(path, identity)
+                ),
+            ):
+                result = self.module.update_thread_state(
+                    self.db_path,
+                    cold_maintenance=True,
+                    maintenance_evidence=evidence,
+                    retain_return_lease=True,
+                )
+            self.assertTrue(competitor_state["attempted"])
+            self.assertFalse(competitor_state["committed"])
+            self.assertRegex(competitor_state["error"].casefold(), "busy|locked")
+            self.assertEqual(result["driftCount"], 0)
+            lease = result.get("_returnLease")
+            self.assertIsInstance(lease, self.module.SqliteTargetLease)
+            lease.close()
+            result.pop("_returnLease", None)
+            verification = sqlite3.connect(self.db_path)
+            try:
+                sentinel = verification.execute(
+                    "select sentinel from threads where id='target-a'"
+                ).fetchone()[0]
+            finally:
+                verification.close()
+            self.assertEqual(sentinel, "cold-window")
+        finally:
+            if isinstance(result, dict):
+                lease = result.get("_returnLease")
+                if isinstance(lease, self.module.SqliteTargetLease):
+                    lease.close()
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows raw commit-window attacks")
+    def test_cold_commit_window_rejects_raw_physical_mutation(self) -> None:
+        for suffix, offset in (("", 100), ("-wal", 32), ("-shm", 0)):
+            with self.subTest(suffix=suffix):
+                for candidate in (
+                    self.db_path,
+                    Path(str(self.db_path) + "-wal"),
+                    Path(str(self.db_path) + "-shm"),
+                    Path(str(self.db_path) + "-journal"),
+                ):
+                    candidate.unlink(missing_ok=True)
+                shutil.rmtree(self.backup_root, ignore_errors=True)
+                keeper = self.create_wal_db()
+                keeper.execute("update threads set sentinel='raw-window' where id='target-a'")
+                keeper.commit()
+                self.close_wal_keeper_preserving_source(keeper)
+                evidence = self.cold_maintenance_evidence()
+                original_connect = self.module._connect_sqlite_bound
+                target = Path(str(self.db_path) + suffix)
+                attacked = False
+
+                class RawMutationProxy:
+                    def __init__(inner_self, connection: sqlite3.Connection) -> None:
+                        inner_self._connection = connection
+
+                    def commit(inner_self) -> None:
+                        nonlocal attacked
+                        inner_self._connection.commit()
+                        with target.open("r+b", buffering=0) as stream:
+                            stream.seek(offset)
+                            current = stream.read(1)
+                            self.assertEqual(len(current), 1)
+                            stream.seek(offset)
+                            stream.write(bytes([current[0] ^ 0x01]))
+                            stream.flush()
+                        attacked = True
+
+                    def __getattr__(inner_self, name: str) -> object:
+                        return getattr(inner_self._connection, name)
+
+                try:
+                    with mock.patch.object(
+                        self.module,
+                        "_connect_sqlite_bound",
+                        side_effect=lambda path, identity: RawMutationProxy(
+                            original_connect(path, identity)
+                        ),
+                    ):
+                        with self.assertRaisesRegex(
+                            self.module.StatePolicyError,
+                            "thread state physical generation changed during commit; unsafe-partial",
+                        ):
+                            self.module.update_thread_state(
+                                self.db_path,
+                                cold_maintenance=True,
+                                maintenance_evidence=evidence,
+                                retain_return_lease=True,
+                            )
+                    self.assertTrue(attacked)
+                finally:
+                    keeper.close()
+                    for sidecar_suffix in ("-wal", "-shm", "-journal"):
+                        Path(str(self.db_path) + sidecar_suffix).unlink(missing_ok=True)
+
+    def test_cold_physical_comparator_rejects_each_payload_change(self) -> None:
+        expected = self.module.SqliteSourceSnapshot(
+            payload=(b"main", b"wal", b"shm", b"journal"),
+            identities=((1, 1), (1, 2), (1, 3), (1, 4)),
+            metadata=(
+                (True, 4, 1, (1, 1)),
+                (True, 3, 1, (1, 2)),
+                (True, 3, 1, (1, 3)),
+                (True, 7, 1, (1, 4)),
+            ),
+        )
+        for index in range(4):
+            with self.subTest(index=index):
+                payload = list(expected.payload)
+                payload[index] = payload[index] + b"!"
+                actual = self.module.SqliteSourceSnapshot(
+                    payload=tuple(payload),
+                    identities=expected.identities,
+                    metadata=expected.metadata,
+                )
+                with self.assertRaisesRegex(
+                    self.module.StatePolicyError,
+                    "thread state physical generation changed during commit; unsafe-partial",
+                ):
+                    self.module._assert_expected_cold_physical_snapshot(expected, actual)
+
+        missing = self.module.SqliteSourceSnapshot(
+            payload=(b"main", None, b"shm", b"journal"),
+            identities=((1, 1), None, (1, 3), (1, 4)),
+            metadata=expected.metadata,
+        )
+        with self.assertRaisesRegex(
+            self.module.StatePolicyError,
+            "thread state physical generation changed during commit; unsafe-partial",
+        ):
+            self.module._assert_expected_cold_physical_snapshot(expected, missing)
+        unknown = self.module.SqliteSourceSnapshot(
+            payload=expected.payload,
+            identities=expected.identities,
+            metadata=expected.metadata,
+            content_known=(True, False, True, True),
+        )
+        with self.assertRaisesRegex(
+            self.module.StatePolicyError,
+            "cold-maintenance-required",
+        ):
+            self.module._assert_expected_cold_physical_snapshot(expected, unknown)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows handle-bound deletion")
+    def test_shadow_cleanup_preserves_exact_name_replacement(self) -> None:
+        target = self.codex_home / "state.sqlite"
+        target.write_bytes(b"owned")
+        identity = self.module._file_handle_identity(target)
+        self.assertIsNotNone(identity)
+        replacement = self.codex_home / "replacement.sqlite"
+        replacement.write_bytes(b"competitor")
+        target.unlink()
+        replacement.rename(target)
+        with self.assertRaisesRegex(
+            self.module.StatePolicyError,
+            "identity changed before cleanup",
+        ):
+            self.module._delete_owned_shadow_file(target, identity, b"owned")
+        self.assertEqual(target.read_bytes(), b"competitor")
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows directory sharing semantics")
+    def test_shadow_directory_lease_blocks_replacement(self) -> None:
+        shadow_dir = self.codex_home / "shadow-lease-canary"
+        replacement = self.codex_home / "shadow-lease-replaced"
+        shadow_dir.mkdir()
+        with self.module._DirectoryPathLease(self.codex_home):
+            with self.module._DirectoryPathLease(shadow_dir):
+                with self.assertRaises(PermissionError):
+                    shadow_dir.rename(replacement)
+        shadow_dir.rename(replacement)
+        replacement.rmdir()
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows cold source fencing")
+    def test_cold_commit_window_rejects_late_journal_creation(self) -> None:
+        """An initially absent journal name remains reserved through commit handoff."""
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='cold-journal-window' where id='target-a'")
+        keeper.commit()
+        self.close_wal_keeper_preserving_source(keeper)
+        journal_path = Path(str(self.db_path) + "-journal")
+        self.assertFalse(journal_path.exists())
+        evidence = self.cold_maintenance_evidence()
+        original_connect = self.module._connect_sqlite_bound
+        created = {"attempted": False, "blocked": False}
+        result: dict[str, object] | None = None
+
+        class CommitCreatesJournal:
+            def __init__(self, connection: sqlite3.Connection) -> None:
+                self._connection = connection
+
+            def commit(self) -> None:
+                self._connection.commit()
+                created["attempted"] = True
+                try:
+                    journal_path.write_bytes(b"late-journal")
+                except OSError:
+                    created["blocked"] = True
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(self._connection, name)
+
+        try:
+            with mock.patch.object(
+                self.module,
+                "_connect_sqlite_bound",
+                side_effect=lambda path, identity: CommitCreatesJournal(
+                    original_connect(path, identity)
+                ),
+            ):
+                result = self.module.update_thread_state(
+                    self.db_path,
+                    cold_maintenance=True,
+                    maintenance_evidence=evidence,
+                    retain_return_lease=True,
+                )
+            self.assertTrue(created["attempted"])
+            self.assertTrue(created["blocked"])
+            self.assertEqual(result["driftCount"], 0)
+            lease = result.get("_returnLease")
+            self.assertIsInstance(lease, self.module.SqliteTargetLease)
+            lease.assert_no_create()
+            lease.close()
+            result.pop("_returnLease", None)
+            self.assertFalse(journal_path.exists())
+        finally:
+            if isinstance(result, dict):
+                lease = result.get("_returnLease")
+                if isinstance(lease, self.module.SqliteTargetLease):
+                    lease.close()
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows missing-name leases")
+    def test_missing_sidecar_leases_are_isolated_and_close_out_of_order(self) -> None:
+        second_db = self.codex_home / "second.sqlite"
+        second = sqlite3.connect(second_db)
+        second.execute("create table t(id integer primary key)")
+        second.commit()
+        second.close()
+        first_journal = Path(str(self.db_path) + "-journal")
+        second_journal = Path(str(second_db) + "-journal")
+        first = self.module.SqliteMissingSidecarLease(first_journal)
+        second_lease = self.module.SqliteMissingSidecarLease(second_journal)
+        try:
+            first.__enter__()
+            second_lease.__enter__()
+            self.assertIs(
+                self.module._active_sqlite_missing_sidecar_lease(first_journal),
+                first,
+            )
+            self.assertIs(
+                self.module._active_sqlite_missing_sidecar_lease(second_journal),
+                second_lease,
+            )
+            first.close()
+            self.assertIsNone(
+                self.module._active_sqlite_missing_sidecar_lease(first_journal)
+            )
+            self.assertIs(
+                self.module._active_sqlite_missing_sidecar_lease(second_journal),
+                second_lease,
+            )
+            self.assertIsNone(
+                self.module._capture_sqlite_source(second_db).identities[3]
+            )
+        finally:
+            first.close()
+            second_lease.close()
+            first_journal.unlink(missing_ok=True)
+            second_journal.unlink(missing_ok=True)
+            second_db.unlink(missing_ok=True)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows missing-name leases")
+    def test_return_lease_close_failure_still_releases_generation_handles(self) -> None:
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='close-failure' where id='target-a'")
+        keeper.commit()
+        self.close_wal_keeper_preserving_source(keeper)
+        evidence = self.cold_maintenance_evidence()
+        result = self.module.update_thread_state(
+            self.db_path,
+            cold_maintenance=True,
+            maintenance_evidence=evidence,
+            retain_return_lease=True,
+        )
+        lease = result.get("_returnLease")
+        self.assertIsInstance(lease, self.module.SqliteTargetLease)
+        original_connection = lease._connection
+
+        class CloseFailureProxy:
+            def rollback(inner_self) -> None:
+                original_connection.rollback()
+
+            def close(inner_self) -> None:
+                original_connection.close()
+                raise sqlite3.OperationalError("injected close failure")
+
+        lease._connection = CloseFailureProxy()
+        journal_path = Path(str(self.db_path) + "-journal")
+        try:
+            with self.assertRaisesRegex(sqlite3.OperationalError, "injected close failure"):
+                lease.close()
+            self.assertTrue(lease._closed)
+            self.assertEqual(lease._windows_byte_locks, [])
+            self.assertIsNone(lease._missing_sidecar_lease)
+            self.assertIsNone(
+                self.module._active_sqlite_missing_sidecar_lease(journal_path)
+            )
+            self.assertFalse(journal_path.exists())
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_cold_write_defers_threshold_autocheckpoint(self) -> None:
+        """Cold repair accepts a checkpoint-sized WAL and defers physical checkpointing."""
+        keeper = self.create_wal_db()
+        keeper.execute("create table checkpoint_payload (id integer primary key, payload blob)")
+        keeper.executemany(
+            "insert into checkpoint_payload(payload) values (?)",
+            [(b"x" * 4096,) for _ in range(1100)],
+        )
+        keeper.commit()
+        self.close_wal_keeper_preserving_source(keeper)
+        wal_path = Path(str(self.db_path) + "-wal")
+        self.assertGreater(wal_path.stat().st_size, 1000 * 4096)
+        evidence = self.cold_maintenance_evidence()
+        original_main_hash = self.module._sha256(self.db_path.read_bytes())
+        result: dict[str, object] | None = None
+        try:
+            result = self.module.update_thread_state(
+                self.db_path,
+                cold_maintenance=True,
+                maintenance_evidence=evidence,
+                retain_return_lease=True,
+            )
+            self.assertEqual(result["driftCount"], 0)
+            lease = result.get("_returnLease")
+            self.assertIsInstance(lease, self.module.SqliteTargetLease)
+            lease.close()
+            result.pop("_returnLease", None)
+            self.assertEqual(
+                self.module._sha256(self.db_path.read_bytes()),
+                original_main_hash,
+                "cold maintenance must defer its own physical checkpoint",
+            )
+        finally:
+            if isinstance(result, dict):
+                lease = result.get("_returnLease")
+                if isinstance(lease, self.module.SqliteTargetLease):
+                    lease.close()
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_cold_write_rejects_rollback_database_before_mutation(self) -> None:
+        """A no-sidecar database cannot commit and then report cold-maintenance failure."""
+        keeper = self.create_db()
+        keeper.close()
+        original_bytes = self.db_path.read_bytes()
+        evidence = self.cold_maintenance_evidence()
+
+        with mock.patch.object(
+            self.module,
+            "_connect_sqlite_bound",
+            wraps=self.module._connect_sqlite_bound,
+        ) as connect:
+            with self.assertRaisesRegex(
+                self.module.StatePolicyError,
+                "cold-maintenance-required|WAL|sidecar",
+            ):
+                self.module.update_thread_state(
+                    self.db_path,
+                    cold_maintenance=True,
+                    maintenance_evidence=evidence,
+                    retain_return_lease=True,
+                )
+            connect.assert_not_called()
+
+        self.assertEqual(self.db_path.read_bytes(), original_bytes)
+        self.assertFalse(
+            any(
+                Path(str(self.db_path) + suffix).exists()
+                for suffix in ("-wal", "-shm", "-journal")
+            )
+        )
+        verification = sqlite3.connect(self.db_path)
+        try:
+            target = verification.execute(
+                "select approval_mode, sandbox_policy from threads where id='target-a'"
+            ).fetchone()
+        finally:
+            verification.close()
+        self.assertEqual(target, ("on-request", '{"type":"workspace-write"}'))
+
     def test_cold_evidence_rejects_tampered_backup(self) -> None:
         original_global = self.write_global(self.permission_drift())
         keeper = self.create_db()

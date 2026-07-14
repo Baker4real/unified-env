@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from contextvars import ContextVar
 import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -87,7 +88,10 @@ FILE_RENAME_POSIX_SEMANTICS = 0x00000002
 MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
 _ACTIVE_POLICY_SOURCE_LEASE: object | None = None
-_ACTIVE_SQLITE_MISSING_SIDECAR_LEASE: object | None = None
+_ACTIVE_SQLITE_MISSING_SIDECAR_LEASES: ContextVar[tuple[object, ...]] = ContextVar(
+    "active_sqlite_missing_sidecar_leases",
+    default=(),
+)
 
 
 class _ByHandleFileInformation(ctypes.Structure):
@@ -103,6 +107,10 @@ class _ByHandleFileInformation(ctypes.Structure):
         ("file_index_high", wintypes.DWORD),
         ("file_index_low", wintypes.DWORD),
     ]
+
+
+class _FileDispositionInfo(ctypes.Structure):
+    _fields_ = [("delete_file", ctypes.c_ubyte)]
 
 
 class _Overlapped(ctypes.Structure):
@@ -1678,16 +1686,41 @@ def _normalise_cold_source_hashes(value: object) -> dict[str, str] | None:
 def _rebase_cold_sqlite_snapshot(
     path: Path,
     expected_database_identity: tuple[int, int],
-    expected_database_hash: str,
+    expected_database_hash: str | None,
 ) -> SqliteSourceSnapshot:
     snapshot = _capture_sqlite_source(path)
     if (
         snapshot.identities[0] != expected_database_identity
-        or _sha256(snapshot.payload[0] or b"") != expected_database_hash
+        or (
+            expected_database_hash is not None
+            and _sha256(snapshot.payload[0] or b"") != expected_database_hash
+        )
         or _sqlite_snapshot_has_unknown_sidecars(snapshot)
     ):
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     return snapshot
+
+
+def _sqlite_logical_hash(connection: sqlite3.Connection) -> str:
+    """Hash the transaction-visible logical database, independent of checkpoint layout."""
+    try:
+        payload = connection.serialize()
+    except (sqlite3.Error, MemoryError) as exc:
+        raise StatePolicyError("thread state logical snapshot unavailable") from exc
+    if not isinstance(payload, bytes) or not payload:
+        raise StatePolicyError("thread state logical snapshot unavailable")
+    return _sha256(payload)
+
+
+def _assert_no_new_sqlite_sidecars(
+    expected: SqliteSourceSnapshot,
+    actual: SqliteSourceSnapshot,
+) -> None:
+    for index in range(1, 4):
+        if expected.identities[index] is None and actual.identities[index] is not None:
+            raise StatePolicyError(
+                "thread state sidecar appeared after commit; unsafe-partial"
+            )
 
 
 def _close_publish_handle(kernel32: object, handle: wintypes.HANDLE) -> None:
@@ -1916,11 +1949,9 @@ class SqliteMissingSidecarLease:
         self.path = path
         self._windows_handle: tuple[object, wintypes.HANDLE] | None = None
         self._expected_identity: tuple[int, int] | None = None
-        self._previous_lease: object | None = None
         self._closed = False
 
     def __enter__(self) -> "SqliteMissingSidecarLease":
-        global _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
         try:
             if self.path.exists():
                 raise StatePolicyError("missing sidecar appeared before lease")
@@ -1932,8 +1963,8 @@ class SqliteMissingSidecarLease:
                 raise
             self._windows_handle = (kernel32, handle)
             self._expected_identity = actual_identity
-            self._previous_lease = _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
-            _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE = self
+            active = _ACTIVE_SQLITE_MISSING_SIDECAR_LEASES.get()
+            _ACTIVE_SQLITE_MISSING_SIDECAR_LEASES.set((*active, self))
         except BaseException:
             self.close()
             raise
@@ -1954,11 +1985,12 @@ class SqliteMissingSidecarLease:
             raise StatePolicyError("missing sidecar lease changed concurrently")
 
     def close(self) -> None:
-        global _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
         if self._closed:
             return
-        if _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE is self:
-            _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE = self._previous_lease
+        active = _ACTIVE_SQLITE_MISSING_SIDECAR_LEASES.get()
+        _ACTIVE_SQLITE_MISSING_SIDECAR_LEASES.set(
+            tuple(candidate for candidate in active if candidate is not self)
+        )
         if self._windows_handle is not None:
             kernel32, handle = self._windows_handle
             _close_publish_handle(kernel32, handle)
@@ -1973,6 +2005,136 @@ class SqliteMissingSidecarLease:
             self.close()
         except BaseException:
             pass
+
+
+def _active_sqlite_missing_sidecar_lease(
+    path: Path,
+) -> SqliteMissingSidecarLease | None:
+    for candidate in reversed(_ACTIVE_SQLITE_MISSING_SIDECAR_LEASES.get()):
+        if (
+            isinstance(candidate, SqliteMissingSidecarLease)
+            and candidate.reserves(path)
+        ):
+            return candidate
+    return None
+
+
+class _DirectoryPathLease:
+    """Hold an existing D-drive directory against rename/reparse replacement."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._windows_handle: tuple[object, wintypes.HANDLE] | None = None
+
+    def __enter__(self) -> "_DirectoryPathLease":
+        _assert_check_only_d_path_without_reparse(self.path, name="shadow directory lease")
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateFileW.argtypes = (
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        )
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.GetFileInformationByHandle.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(_ByHandleFileInformation),
+        )
+        kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+        kernel32.GetFinalPathNameByHandleW.argtypes = (
+            wintypes.HANDLE,
+            wintypes.LPWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+        )
+        kernel32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.CreateFileW(
+            str(self.path),
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        invalid_handle = ctypes.c_void_p(-1).value
+        if not handle or handle == invalid_handle:
+            raise StatePolicyError("shadow directory lease unavailable")
+        try:
+            info = _ByHandleFileInformation()
+            if not kernel32.GetFileInformationByHandle(handle, ctypes.byref(info)):
+                raise StatePolicyError("shadow directory identity unavailable")
+            if not info.file_attributes & FILE_ATTRIBUTE_DIRECTORY:
+                raise StatePolicyError("shadow lease target is not a directory")
+            if info.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT:
+                raise StatePolicyError("shadow directory contains reparse point")
+            capacity = 512
+            final_path: str | None = None
+            while capacity <= 32768:
+                buffer = ctypes.create_unicode_buffer(capacity)
+                length = kernel32.GetFinalPathNameByHandleW(handle, buffer, capacity, 0)
+                if length == 0:
+                    break
+                if length < capacity:
+                    final_path = buffer.value
+                    break
+                capacity = int(length) + 1
+            if final_path is None or _path_compare_key(final_path) != _path_compare_key(str(self.path)):
+                raise StatePolicyError("shadow directory final path mismatch")
+        except BaseException:
+            kernel32.CloseHandle(handle)
+            raise
+        self._windows_handle = (kernel32, handle)
+        return self
+
+    def close(self) -> None:
+        if self._windows_handle is not None:
+            kernel32, handle = self._windows_handle
+            kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+            self._windows_handle = None
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
+def _delete_owned_shadow_file(
+    path: Path,
+    expected_identity: tuple[int, int],
+    expected_payload: bytes,
+) -> None:
+    """Delete only the exact shadow-file generation captured after SQLite closed."""
+    kernel32, handle = _open_publish_handle(
+        path,
+        desired_access=GENERIC_READ | DELETE_ACCESS | SYNCHRONIZE_ACCESS,
+        share_mode=FILE_SHARE_READ,
+    )
+    try:
+        if _publish_handle_info(kernel32, handle, path) != expected_identity:
+            raise StatePolicyError("cold state shadow file identity changed before cleanup")
+        if _read_publish_handle_bytes(kernel32, handle) != expected_payload:
+            raise StatePolicyError("cold state shadow file bytes changed before cleanup")
+        kernel32.SetFileInformationByHandle.argtypes = (  # type: ignore[attr-defined]
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        )
+        kernel32.SetFileInformationByHandle.restype = wintypes.BOOL  # type: ignore[attr-defined]
+        disposition = _FileDispositionInfo(1)
+        if not kernel32.SetFileInformationByHandle(  # type: ignore[attr-defined]
+            handle,
+            4,  # FileDispositionInfo
+            ctypes.byref(disposition),
+            ctypes.sizeof(disposition),
+        ):
+            raise StatePolicyError("cold state shadow file conditional delete failed")
+    finally:
+        _close_publish_handle(kernel32, handle)
 
 
 def _read_publish_handle_bytes(kernel32: object, handle: wintypes.HANDLE) -> bytes:
@@ -2164,6 +2326,7 @@ class SqliteTargetLease:
         self.read_only = read_only
         self._connection: sqlite3.Connection | None = None
         self._windows_byte_locks: list[tuple[int, object, wintypes.HANDLE, _ByteRangeLease]] = []
+        self._missing_sidecar_lease: SqliteMissingSidecarLease | None = None
         self._closed = False
 
     @classmethod
@@ -2175,6 +2338,7 @@ class SqliteTargetLease:
         permission_policy: PermissionPolicy,
         expected_snapshot: SqliteSourceSnapshot,
         connection: sqlite3.Connection,
+        missing_sidecar_lease: SqliteMissingSidecarLease | None = None,
         read_only: bool = False,
     ) -> "SqliteTargetLease":
         if not connection.in_transaction:
@@ -2187,6 +2351,7 @@ class SqliteTargetLease:
             read_only=read_only,
         )
         lease._connection = connection
+        lease._missing_sidecar_lease = missing_sidecar_lease
         try:
             lease._acquire_generation_locks()
         except BaseException:
@@ -2378,7 +2543,7 @@ class SqliteTargetLease:
         if snapshot is None or snapshot.identities[1] is None or snapshot.identities[3] is not None:
             return
         journal_path = Path(str(self.path) + "-journal")
-        missing_sidecar_lease = _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
+        missing_sidecar_lease = self._missing_sidecar_lease
         if (
             isinstance(missing_sidecar_lease, SqliteMissingSidecarLease)
             and missing_sidecar_lease.reserves(journal_path)
@@ -2409,15 +2574,25 @@ class SqliteTargetLease:
     def close(self) -> None:
         if self._closed:
             return
-        if self._connection is not None:
+        try:
+            if self._connection is not None:
+                connection = self._connection
+                self._connection = None
+                try:
+                    connection.rollback()
+                except sqlite3.Error:
+                    pass
+                connection.close()
+        finally:
             try:
-                self._connection.rollback()
-            except sqlite3.Error:
-                pass
-            self._connection.close()
-            self._connection = None
-        self._close_generation_locks()
-        self._closed = True
+                self._close_generation_locks()
+            finally:
+                try:
+                    if self._missing_sidecar_lease is not None:
+                        self._missing_sidecar_lease.close()
+                        self._missing_sidecar_lease = None
+                finally:
+                    self._closed = True
 
     def __exit__(self, *_args: object) -> None:
         self.close()
@@ -3368,11 +3543,10 @@ def _capture_sqlite_source(
     try:
         for index, candidate in enumerate(paths):
             _assert_check_only_d_path_without_reparse(candidate, name="thread state source")
-            missing_sidecar_lease = _ACTIVE_SQLITE_MISSING_SIDECAR_LEASE
+            missing_sidecar_lease = _active_sqlite_missing_sidecar_lease(candidate)
             if (
                 index == 3
                 and isinstance(missing_sidecar_lease, SqliteMissingSidecarLease)
-                and missing_sidecar_lease.reserves(candidate)
             ):
                 # The lease intentionally creates a zero-byte placeholder so
                 # Windows can deny later child creation.  Keep that physical
@@ -3690,6 +3864,162 @@ def _select_thread_updates_from_snapshot(
                 raise StatePolicyError("thread state snapshot root cleanup failed") from exc
 
 
+def _apply_thread_policy_updates(
+    connection: sqlite3.Connection,
+    permission_policy: PermissionPolicy,
+) -> tuple[list[str], int]:
+    identities = select_thread_updates(connection, permission_policy)
+    if identities:
+        connection.execute(
+            """
+            update threads set approval_mode=?, sandbox_policy=?
+            where source='vscode'
+              and (thread_source='user' or thread_source is null)
+              and (
+                approval_mode is null or approval_mode <> ?
+                or sandbox_policy is null
+                or (
+                  sandbox_policy <> ?
+                  and (? <> '{"type":"disabled"}' or sandbox_policy <> 'danger-full-access')
+                )
+              )
+            """,
+            (
+                permission_policy.approval_policy,
+                permission_policy.sqlite_sandbox_policy,
+                permission_policy.approval_policy,
+                permission_policy.sqlite_sandbox_policy,
+                permission_policy.sqlite_sandbox_policy,
+            ),
+        )
+    drift_count = int(
+        connection.execute(
+            f"select count(*) from ({THREAD_DRIFT_SQL})",
+            (
+                permission_policy.approval_policy,
+                permission_policy.sqlite_sandbox_policy,
+                permission_policy.sqlite_sandbox_policy,
+            ),
+        ).fetchone()[0]
+    )
+    return identities, drift_count
+
+
+def _build_expected_cold_sqlite_snapshot(
+    source: SqliteSourceSnapshot,
+    path: Path,
+    permission_policy: PermissionPolicy,
+) -> tuple[list[str], str, SqliteSourceSnapshot]:
+    shadow_dir: Path | None = None
+    shadow_lease: _DirectoryPathLease | None = None
+    expected_targets: tuple[Path, ...] = ()
+    cleanup_snapshot: SqliteSourceSnapshot | None = None
+    with _DirectoryPathLease(path.parent):
+        try:
+            shadow_dir = Path(
+                tempfile.mkdtemp(prefix="codex-state-policy-cold-expected-", dir=path.parent)
+            )
+            shadow_lease = _DirectoryPathLease(shadow_dir)
+            shadow_lease.__enter__()
+            shadow_db = shadow_dir / "state.sqlite"
+            expected_targets = (
+                shadow_db,
+                Path(str(shadow_db) + "-wal"),
+                Path(str(shadow_db) + "-shm"),
+                Path(str(shadow_db) + "-journal"),
+            )
+            for index, target in enumerate(expected_targets):
+                payload = source.payload[index]
+                if payload is not None:
+                    target.write_bytes(payload)
+            connection = sqlite3.connect(shadow_db, timeout=1.5)
+            try:
+                connection.execute("pragma busy_timeout=1500")
+                mode = str(
+                    connection.execute("pragma locking_mode=exclusive").fetchone()[0]
+                ).casefold()
+                if mode != "exclusive":
+                    raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+                connection.execute("pragma wal_autocheckpoint=0")
+                connection.execute("begin immediate")
+                identities, drift_count = _apply_thread_policy_updates(
+                    connection,
+                    permission_policy,
+                )
+                if drift_count:
+                    raise StatePolicyError("thread state shadow drift remains before commit")
+                expected_logical_hash = _sqlite_logical_hash(connection)
+                connection.commit()
+                connection.execute("begin immediate")
+                if _sqlite_logical_hash(connection) != expected_logical_hash:
+                    raise StatePolicyError("thread state shadow changed during commit")
+                expected = _capture_sqlite_source(shadow_db)
+                return identities, expected_logical_hash, expected
+            finally:
+                try:
+                    connection.rollback()
+                except sqlite3.Error:
+                    pass
+                connection.close()
+                cleanup_snapshot = _capture_sqlite_source(shadow_db)
+        except sqlite3.Error as exc:
+            raise StatePolicyError("thread state shadow transaction failed") from exc
+        finally:
+            cleanup_error: BaseException | None = None
+            if shadow_dir is not None:
+                try:
+                    if cleanup_snapshot is None:
+                        raise StatePolicyError("cold state shadow cleanup generation unavailable")
+                    for index, target in enumerate(expected_targets):
+                        identity = cleanup_snapshot.identities[index]
+                        payload = cleanup_snapshot.payload[index]
+                        if identity is None:
+                            if target.exists():
+                                raise StatePolicyError(
+                                    "cold state shadow file appeared before cleanup"
+                                )
+                            continue
+                        if payload is None or cleanup_snapshot.content_known[index] is not True:
+                            raise StatePolicyError(
+                                "cold state shadow file bytes unavailable for cleanup"
+                            )
+                        _delete_owned_shadow_file(target, identity, payload)
+                    if any(shadow_dir.iterdir()):
+                        raise StatePolicyError("cold state shadow directory contains unknown entries")
+                except BaseException as exc:
+                    cleanup_error = exc
+                finally:
+                    if shadow_lease is not None:
+                        shadow_lease.close()
+                if cleanup_error is None:
+                    try:
+                        shadow_dir.rmdir()
+                    except OSError as exc:
+                        cleanup_error = StatePolicyError(
+                            "cold state shadow directory cleanup failed"
+                        )
+                        cleanup_error.__cause__ = exc
+            if cleanup_error is not None and sys.exc_info()[0] is None:
+                raise cleanup_error
+
+
+def _assert_expected_cold_physical_snapshot(
+    expected: SqliteSourceSnapshot,
+    actual: SqliteSourceSnapshot,
+) -> None:
+    for index in range(4):
+        if (expected.identities[index] is None) != (actual.identities[index] is None):
+            raise StatePolicyError(
+                "thread state physical generation changed during commit; unsafe-partial"
+            )
+        if expected.content_known[index] is not True or actual.content_known[index] is not True:
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+        if expected.payload[index] != actual.payload[index]:
+            raise StatePolicyError(
+                "thread state physical generation changed during commit; unsafe-partial"
+            )
+
+
 def _update_thread_state_impl(
     path: Path,
     *,
@@ -3737,6 +4067,12 @@ def _update_thread_state_impl(
     if _sqlite_snapshot_has_unknown_sidecars(initial_snapshot):
         raise StatePolicyError("thread state sidecar bytes unavailable for write")
     if cold_maintenance:
+        # Cold repair is supported only for a bounded WAL generation.  A
+        # rollback-journal database changes its main bytes at COMMIT and cannot
+        # provide the same source-generation/return-lease contract; reject it
+        # before opening a write transaction instead of committing then failing.
+        if initial_snapshot.identities[1] is None or initial_snapshot.identities[2] is None:
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
         _assert_cold_maintenance_sources(
             Path(permission_policy.codex_home or path.parent)
         )
@@ -3744,14 +4080,36 @@ def _update_thread_state_impl(
     if source_identity is None:
         raise StatePolicyError("thread state source disappeared")
     source_bytes_hash = _sha256(initial_snapshot.payload[0] or b"")
-    conn = _connect_sqlite_bound(path, source_identity)
+    missing_sidecar_lease: SqliteMissingSidecarLease | None = None
+    if cold_maintenance and initial_snapshot.identities[3] is None:
+        missing_sidecar_lease = SqliteMissingSidecarLease(
+            Path(str(path) + "-journal")
+        )
+        missing_sidecar_lease.__enter__()
+    try:
+        conn = _connect_sqlite_bound(path, source_identity)
+    except BaseException:
+        if missing_sidecar_lease is not None:
+            missing_sidecar_lease.close()
+        raise
     policy_lease: PermissionPolicySourceLease | None = None
     return_lease: SqliteTargetLease | None = None
     return_lease_active = False
     return_lease_handoff = False
+    expected_cold_logical_hash: str | None = None
+    expected_cold_physical_snapshot: SqliteSourceSnapshot | None = None
     try:
         conn.execute("pragma busy_timeout=1500")
         if cold_maintenance:
+            locking_mode = str(
+                conn.execute("pragma locking_mode=exclusive").fetchone()[0]
+            ).casefold()
+            if locking_mode != "exclusive":
+                raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+            # Keep the cold writer's WAL generation stable.  Automatic
+            # checkpointing is a physical layout optimization and is deferred
+            # until after the returned exclusive connection lease is released.
+            conn.execute("pragma wal_autocheckpoint=0")
             connected_snapshot = _rebase_cold_sqlite_snapshot(
                 path,
                 source_identity,
@@ -3795,39 +4153,26 @@ def _update_thread_state_impl(
             _assert_permission_policy_unchanged(permission_policy)
             identities = select_thread_updates(conn, permission_policy)
             original_rows = _capture_thread_rows(conn, identities)
-            if identities:
-                conn.execute(
-                    """
-                    update threads set approval_mode=?, sandbox_policy=?
-                    where source='vscode'
-                      and (thread_source='user' or thread_source is null)
-                      and (
-                        approval_mode is null or approval_mode <> ?
-                        or sandbox_policy is null
-                        or (
-                          sandbox_policy <> ?
-                          and (? <> '{"type":"disabled"}' or sandbox_policy <> 'danger-full-access')
-                        )
-                      )
-                    """,
-                    (
-                        permission_policy.approval_policy,
-                        permission_policy.sqlite_sandbox_policy,
-                        permission_policy.approval_policy,
-                        permission_policy.sqlite_sandbox_policy,
-                        permission_policy.sqlite_sandbox_policy,
-                    ),
+            if cold_maintenance:
+                (
+                    shadow_identities,
+                    expected_cold_logical_hash,
+                    expected_cold_physical_snapshot,
+                ) = _build_expected_cold_sqlite_snapshot(
+                    initial_snapshot,
+                    path,
+                    permission_policy,
                 )
-            drift_count = int(
-                conn.execute(
-                    f"select count(*) from ({THREAD_DRIFT_SQL})",
-                    (
-                        permission_policy.approval_policy,
-                        permission_policy.sqlite_sandbox_policy,
-                        permission_policy.sqlite_sandbox_policy,
-                    ),
-                ).fetchone()[0]
+                if shadow_identities != identities:
+                    raise StatePolicyError(
+                        "thread state shadow selection changed concurrently"
+                    )
+            applied_identities, drift_count = _apply_thread_policy_updates(
+                conn,
+                permission_policy,
             )
+            if applied_identities != identities:
+                raise StatePolicyError("thread state selection changed before update")
             if drift_count:
                 raise StatePolicyError("thread state drift remains before commit")
             if _file_handle_identity(path) != source_identity:
@@ -3880,6 +4225,8 @@ def _update_thread_state_impl(
                 raise StatePolicyError("thread state concurrent replacement")
             if _sha256(path.read_bytes()) != source_bytes_hash:
                 raise StatePolicyError("thread state concurrent update")
+            if cold_maintenance and _sqlite_logical_hash(conn) != expected_cold_logical_hash:
+                raise StatePolicyError("thread state live transaction differs from shadow")
             conn.commit()
             try:
                 _assert_permission_policy_fingerprint(permission_policy)
@@ -3906,16 +4253,32 @@ def _update_thread_state_impl(
                 "thread state target lease unavailable after commit; unsafe-partial"
             ) from exc
         if cold_maintenance:
-            # COMMIT and the immediately reacquired RESERVED transaction can
-            # legitimately advance SQLite's WAL-index lock bytes.  Rebase the
-            # cold final payload baseline after that SQLite-owned transition;
-            # the strict transaction_snapshot gates above already covered the
-            # pre-COMMIT attack window, while the returned lease covers output.
-            transaction_snapshot = _rebase_cold_sqlite_snapshot(
+            # COMMIT may legitimately checkpoint WAL pages into the main file,
+            # so physical hashes cannot distinguish that transition from an
+            # external SQLite writer.  Compare the transaction-visible logical
+            # database captured before COMMIT with the state visible after the
+            # RESERVED lease is reacquired.  Any intervening logical write is
+            # an unsafe partial result and must never be rebased as success.
+            if (
+                expected_cold_logical_hash is None
+                or _sqlite_logical_hash(conn) != expected_cold_logical_hash
+            ):
+                raise StatePolicyError(
+                    "thread state changed during commit handoff; unsafe-partial"
+                )
+            postcommit_snapshot = _rebase_cold_sqlite_snapshot(
                 path,
                 source_identity,
-                source_bytes_hash,
+                None,
             )
+            _assert_no_new_sqlite_sidecars(transaction_snapshot, postcommit_snapshot)
+            if expected_cold_physical_snapshot is None:
+                raise StatePolicyError("thread state expected physical generation is missing")
+            _assert_expected_cold_physical_snapshot(
+                expected_cold_physical_snapshot,
+                postcommit_snapshot,
+            )
+            transaction_snapshot = postcommit_snapshot
         if _file_handle_identity(path) != source_identity:
             raise StatePolicyError("thread state concurrent replacement")
         verify_count = int(
@@ -3958,6 +4321,7 @@ def _update_thread_state_impl(
                     permission_policy=permission_policy,
                     expected_snapshot=final_snapshot,
                     connection=conn,
+                    missing_sidecar_lease=missing_sidecar_lease,
                 )
                 # Keep the same SQLite connection (and its SHM lock bytes)
                 # alive through the caller's output envelope.  Closing it and
@@ -3967,6 +4331,7 @@ def _update_thread_state_impl(
                 # SQLite itself owns the lock window while our leases cover
                 # every other byte and sidecar name.
                 return_lease_handoff = True
+                missing_sidecar_lease = None
                 result["_returnLease"] = return_lease
             return result
         except StatePolicyError as policy_exc:
@@ -4000,10 +4365,16 @@ def _update_thread_state_impl(
                 conn.rollback()
             except sqlite3.Error:
                 pass
-        if policy_lease is not None:
-            policy_lease.close()
-        if not return_lease_handoff:
-            conn.close()
+        try:
+            if policy_lease is not None:
+                policy_lease.close()
+        finally:
+            try:
+                if not return_lease_handoff:
+                    conn.close()
+            finally:
+                if missing_sidecar_lease is not None:
+                    missing_sidecar_lease.close()
 
 
 def update_thread_state(
