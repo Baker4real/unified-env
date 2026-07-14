@@ -268,7 +268,11 @@ Assert-True ($stateGuardSource.Contains('path_mode: str = "inventory"')) 'state 
 Assert-True ($stateGuardSource.Contains('approved_map: object = None')) 'state guard 必须要求显式 approved map 才能修复路径'
 Assert-True ($stateGuardSource.Contains('permission policy sources conflict')) '策略来源冲突必须 fail closed'
 Assert-True (@($managedManifest.hooks).Count -eq 8) '受管 manifest 必须声明 8 个当前 hook'
-Assert-True (@($managedManifest.files).Count -eq 16) '受管 manifest 必须声明冻结 12 文件、state writer 与 3 个共享库文件'
+Assert-True (@($managedManifest.files).Count -eq 18) '受管 manifest 必须声明冻结 12 文件、state writer、state preflight 两个入口与 3 个共享库文件'
+Assert-True (
+    @($managedManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.py').Count -eq 1 -and
+    @($managedManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.cmd').Count -eq 1
+) '受管 manifest 必须唯一声明 state preflight 实现与固定 wrapper'
 Assert-True (
     @($managedManifest.environment).Count -eq 1 -and
     $managedManifest.environment[0].name -ceq 'SERENA_HOME' -and

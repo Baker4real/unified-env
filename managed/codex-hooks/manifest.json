@@ -373,7 +373,25 @@
     {
       "relativePath": "hooks/codex-state-policy-guard.py",
       "liveRelativePath": "codex-state-policy-guard.py",
-      "sha256": "80b06094fa72384ec1f2f53f109b1ace608987560c542e5a89bed7ebec046c70",
+      "sha256": "1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "codex-state-policy"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-state-preflight.py",
+      "liveRelativePath": "codex-state-preflight.py",
+      "sha256": "3fcd5a800cafa4b8b1caad4117b49b8c2dfd18df4ed769d652d5d95dcc53b38c",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "codex-state-policy"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-state-preflight.cmd",
+      "liveRelativePath": "codex-state-preflight.cmd",
+      "sha256": "5392cd7d18253b4b372c9e6811b1a6380ffd554ad7b2d88008f8d1819d9b252e",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
