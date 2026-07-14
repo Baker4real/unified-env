@@ -28,6 +28,13 @@
 
 守卫默认只读；只有显式 `-Repair` 才允许修改入口、环境或 health 状态。完整验收使用 `-Json -CheckAuth -Strict`，预期 `ok:true`、`authProbe.success:true`、`restartRequired:false`。GitHub 登录和认证验收必须在设备的交互终端执行；SSH 网络登录会话可能无法读取 Windows Credential Manager 中的 DPAPI 凭据，不能复制 token 或配置文件绕过该边界。
 
+## Android 调试工具
+
+- 官方 Android SDK Platform-Tools：`D:\Codex\tools\android-platform-tools\platform-tools`，当前稳定版 `37.0.0`。
+- 本机命令入口：`D:\Codex\tools\bin\adb.cmd`；包装入口把临时文件和日志限制在 D 盘。
+- 每次操作手机前必须实时运行 `adb devices -l`；只有状态为 `device` 才表示当前会话已授权，`unauthorized`、`offline` 或空列表都必须停止。
+- 手机型号、序列号、当前授权状态、已安装应用版本和密钥位置属于本地易变或敏感事实，不写入仓库，也不能从本页推断当前可访问范围。
+
 ## 跨设备同步与验收
 
 1. 先同步本仓库的已提交默认分支，不复制调用端的 dirty worktree。
