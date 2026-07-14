@@ -19,6 +19,15 @@
 
 不得把安装后的回写职责放入被安装的 skill，也不得直接修改 bundled `.system` 安装器。新安装或更新必须经过 decision manifest、`writing-great-skills` 证据、SOURCE/ledger、严格资源闭包和 catalog 后置校验；任一门槛失败都应回滚。
 
+## GitHub CLI
+
+- 官方二进制：`D:\Codex\tools\gh\bin\gh.exe`
+- Codex 原生入口：`D:\Codex\tools\bin\gh.exe`
+- 配置目录：`D:\Codex\.config\gh`
+- 检查与修复入口：`D:\Codex\.codex\hooks\codex-github-cli-guard.ps1`
+
+守卫默认只读；只有显式 `-Repair` 才允许修改入口、环境或 health 状态。完整验收使用 `-Json -CheckAuth -Strict`，预期 `ok:true`、`authProbe.success:true`、`restartRequired:false`。GitHub 登录和认证验收必须在设备的交互终端执行；SSH 网络登录会话可能无法读取 Windows Credential Manager 中的 DPAPI 凭据，不能复制 token 或配置文件绕过该边界。
+
 ## 跨设备同步与验收
 
 1. 先同步本仓库的已提交默认分支，不复制调用端的 dirty worktree。
