@@ -63,7 +63,7 @@ function Get-CodexHookProductionRegistrationRepairProfile {
     return [pscustomobject][ordered]@{
         profileId = 'codex-hook-production-registration-repair-v1'
         mode = 'registration-repair'
-        manifestPath = 'D:\Codex\projects\统一环境\managed\codex-hooks\manifest.json'
+        manifestPath = 'D:\Codex\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
         sourceRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks'
         codexHome = 'D:\Codex\.codex'
         hooksRoot = 'D:\Codex\.codex\hooks'
@@ -130,7 +130,12 @@ function Assert-CodexHookProductionRegistrationRepairProfile {
     if ([IO.Path]::GetFullPath([string]$Profile.registryPath) -ine [IO.Path]::GetFullPath((Join-Path ([string]$Profile.codexHome) 'hooks.json'))) {
         throw 'production profile registryPath 映射非法。'
     }
-    if ([IO.Path]::GetFullPath([string]$Profile.manifestPath) -ine [IO.Path]::GetFullPath((Join-Path ([string]$Profile.sourceRoot) 'manifest.json'))) {
+    $expectedManifestPath = if ($Profile.isFixtureAdapter) {
+        Join-Path ([string]$Profile.sourceRoot) 'manifest.json'
+    } else {
+        Join-Path ([string]$Profile.sourceRoot) 'host-preflight-manifest.json'
+    }
+    if ([IO.Path]::GetFullPath([string]$Profile.manifestPath) -ine [IO.Path]::GetFullPath($expectedManifestPath)) {
         throw 'production profile manifestPath 映射非法。'
     }
     if ([IO.Path]::GetFullPath([string]$Profile.planPath) -ine [IO.Path]::GetFullPath((Join-Path ([string]$Profile.planOutputDir) 'plan.json'))) {
@@ -396,6 +401,9 @@ function New-CodexHookProductionRegistrationRepairState {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Profile)
 
+    if ($null -eq $Profile -or $Profile.PSObject.Properties.Name -notcontains 'isFixtureAdapter' -or $Profile.isFixtureAdapter -ne $true) {
+        throw 'superseded-by-host-hook-reconciler'
+    }
     [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $Profile -AllowFixtureAdapter)
     $manifestSnapshot = Get-CodexHookCapabilityFileSnapshot `
         -Path ([string]$Profile.manifestPath) `
@@ -820,6 +828,9 @@ function Invoke-CodexHookProductionRegistrationRepairApplyCore {
     )
 
     if ($Profile.PSObject.Properties.Name -contains 'isFixtureAdapter' -and -not [bool]$Profile.isFixtureAdapter) {
+        throw 'superseded-by-host-hook-reconciler'
+    }
+    if ($null -eq $Profile -or $Profile.PSObject.Properties.Name -notcontains 'isFixtureAdapter' -or $Profile.isFixtureAdapter -ne $true) {
         throw 'superseded-by-host-hook-reconciler'
     }
     [void](Assert-CodexHookProductionRegistrationRepairProfile -Profile $Profile -AllowFixtureAdapter)

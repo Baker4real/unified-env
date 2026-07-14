@@ -238,7 +238,7 @@ finally {
     if (Test-Path -LiteralPath $guardHealthRoot) { Remove-Item -LiteralPath $guardHealthRoot -Recurse -Force }
 }
 
-$manifestPath = Join-Path $projectRoot 'managed\codex-hooks\manifest.json'
+$manifestPath = Join-Path $projectRoot 'managed\codex-hooks\host-preflight-manifest.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 100
 $hooksById = @{}
 foreach ($hook in @($manifest.hooks)) { $hooksById[[string]$hook.id] = $hook }
@@ -259,7 +259,7 @@ Assert-Equal ([string]$hooksById['serena-cleanup'].event) 'Stop' 'cleanup 只能
 Assert-Equal ([string]$hooksById['serena-activate'].commandPath) 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd' 'SessionStart 必须切换为静态 activation reminder。'
 Assert-Equal ([string]$hooksById['serena-activate'].wrapperPath) 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd' 'activation reminder wrapperPath 必须固定。'
 Assert-Equal ([string]$hooksById['serena-activate'].implementationPath) 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1' 'activation reminder 必须复用安全 guard。'
-Assert-Equal ([string]$hooksById['serena-auto-approve'].lifecycle) 'retired' 'auto-approve 必须保持退役。'
+Assert-True (-not $hooksById.ContainsKey('serena-auto-approve')) 'production manifest 必须完全排除 auto-approve。'
 
 $filesByRelativePath = @{}
 foreach ($file in @($manifest.files)) { $filesByRelativePath[[string]$file.relativePath] = $file }

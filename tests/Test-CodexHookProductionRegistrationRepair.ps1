@@ -35,7 +35,7 @@ function Write-Utf8NoBom {
 $profile = Get-CodexHookProductionRegistrationRepairProfile
 Assert-True ($profile.profileId -ceq 'codex-hook-production-registration-repair-v1') 'production profile id 必须固定'
 Assert-True ($profile.mode -ceq 'registration-repair') 'production profile 只能 registration-repair'
-Assert-True ($profile.manifestPath -ceq 'D:\Codex\projects\统一环境\managed\codex-hooks\manifest.json') 'manifest path 必须固定'
+Assert-True ($profile.manifestPath -ceq 'D:\Codex\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json') '非 fixture production profile 只能绑定 host-preflight manifest，legacy 仅供 fixture adapter'
 Assert-True ($profile.sourceRoot -ceq 'D:\Codex\projects\统一环境\managed\codex-hooks') 'source root 必须固定'
 Assert-True ($profile.codexHome -ceq 'D:\Codex\.codex') 'codex home 必须固定'
 Assert-True ($profile.registryPath -ceq 'D:\Codex\.codex\hooks.json') 'registry path 必须固定'
@@ -85,7 +85,7 @@ if ([IO.Directory]::Exists($fixtureRoot)) {
 [void][IO.Directory]::CreateDirectory([string]$fixtureProfile.planOutputDir)
 [void][IO.Directory]::CreateDirectory([string]$fixtureProfile.evidenceRoot)
 
-$templateText = Get-Content -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json') -Raw
+$templateText = Get-Content -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json') -Raw
 $fixtureManifest = $templateText | ConvertFrom-Json -Depth 128
 foreach ($file in @($fixtureManifest.files)) {
     $sourcePath = Join-Path ([string]$fixtureProfile.sourceRoot) ([string]$file.relativePath)

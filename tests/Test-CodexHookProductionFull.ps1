@@ -64,7 +64,7 @@ function Initialize-ProductionFullFixture {
         [void][IO.Directory]::CreateDirectory([string]$directory)
     }
 
-    $manifest = Get-Content -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json') -Raw |
+    $manifest = Get-Content -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json') -Raw |
         ConvertFrom-Json -Depth 128
     $before = @{}
     foreach ($file in @($manifest.files)) {

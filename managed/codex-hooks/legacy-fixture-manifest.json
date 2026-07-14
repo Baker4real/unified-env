@@ -1,0 +1,700 @@
+{
+  "artifactType": "env-governance.codex-hook-manifest",
+  "schemaVersion": 1,
+  "codexHome": "D:\\Codex\\.codex",
+  "managedRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks",
+  "runtimes": {
+    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+    "python": "D:\\Codex\\tools\\python314-official\\python.exe",
+    "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
+    "serenaHooks": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
+  },
+  "hooks": [
+    {
+      "id": "provider-stability",
+      "event": "SessionStart",
+      "order": 0,
+      "matcher": null,
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
+      "arguments": [],
+      "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
+      "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.ps1",
+      "runtimeId": "pwsh",
+      "sourceState": "managed",
+      "readResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\config.toml"
+        },
+        {
+          "kind": "abstract",
+          "value": "process-environment"
+        },
+        {
+          "kind": "abstract",
+          "value": "network"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\config.toml"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\backups_state\\provider-stability-guard"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\provider-stability.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups"
+        },
+        {
+          "kind": "abstract",
+          "value": "process-environment"
+        },
+        {
+          "kind": "abstract",
+          "value": "windows-user-environment"
+        }
+      ],
+      "criticality": "critical",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
+        "arguments": [
+          "-CheckOnly",
+          "-Json"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
+        "arguments": [
+          "-Json",
+          "-CheckNetwork"
+        ]
+      }
+    },
+    {
+      "id": "codex-state-policy",
+      "event": "SessionStart",
+      "order": 1,
+      "matcher": null,
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
+      "arguments": [],
+      "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
+      "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-state-policy-guard.py",
+      "runtimeId": "python",
+      "sourceState": "managed",
+      "readResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\.codex-global-state.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\state_5.sqlite"
+        },
+        {
+          "kind": "abstract",
+          "value": "hook-stdin"
+        },
+        {
+          "kind": "abstract",
+          "value": "codex-thread-state"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\.codex-global-state.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\state_5.sqlite"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\tmp\\codex-state-policy-check"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\codex-state-policy.json"
+        },
+        {
+          "kind": "abstract",
+          "value": "codex-thread-state"
+        }
+      ],
+      "criticality": "critical",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
+        "arguments": [
+          "--check-only",
+          "--json"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
+        "arguments": [
+          "--check-only",
+          "--json"
+        ]
+      }
+    },
+    {
+      "id": "serena-activate",
+      "event": "SessionStart",
+      "order": 2,
+      "matcher": "startup|resume",
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd",
+      "arguments": [],
+      "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd",
+      "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-activate-guarded.ps1",
+      "runtimeId": "pwsh",
+      "sourceState": "managed",
+      "readResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdin"
+        },
+        {
+          "kind": "abstract",
+          "value": "process-environment"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdout"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-activate.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups"
+        }
+      ],
+      "criticality": "degraded",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-Command",
+          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd'"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-Command",
+          "'{\"session_id\":\"00000000-0000-0000-0000-000000000000\"}' | & 'D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd'"
+        ]
+      }
+    },
+    {
+      "id": "serena-dashboard",
+      "event": "SessionStart",
+      "order": 3,
+      "matcher": null,
+      "timeoutSeconds": 15,
+      "commandPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
+      "arguments": [],
+      "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
+      "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.ps1",
+      "runtimeId": "pwsh",
+      "sourceState": "managed",
+      "readResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\config.toml"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.serena\\serena_config.yml"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\config.toml"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.serena\\serena_config.yml"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\backups_state\\serena-dashboard-guard\\toml"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\backups_state\\serena-dashboard-guard\\yaml"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-dashboard.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups"
+        }
+      ],
+      "criticality": "critical",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-Command",
+          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd'"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
+        "arguments": [
+          "-CheckOnly",
+          "-Json"
+        ]
+      }
+    },
+    {
+      "id": "github-cli",
+      "event": "SessionStart",
+      "order": 4,
+      "matcher": null,
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
+      "arguments": [],
+      "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
+      "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1",
+      "runtimeId": "pwsh",
+      "sourceState": "managed",
+      "readResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\tools\\bin"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\tools\\gh\\bin\\gh.exe"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.config\\gh"
+        },
+        {
+          "kind": "abstract",
+          "value": "process-environment"
+        },
+        {
+          "kind": "abstract",
+          "value": "network"
+        },
+        {
+          "kind": "abstract",
+          "value": "github-credential-store"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\tools\\bin"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\backups_state"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\github-cli.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups"
+        },
+        {
+          "kind": "abstract",
+          "value": "process-environment"
+        },
+        {
+          "kind": "abstract",
+          "value": "windows-user-environment"
+        }
+      ],
+      "criticality": "optional",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
+        "arguments": [
+          "-CheckOnly",
+          "-Json"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
+        "arguments": [
+          "-Json",
+          "-CheckAuth",
+          "-Strict"
+        ]
+      }
+    },
+    {
+      "id": "serena-cleanup",
+      "event": "Stop",
+      "order": 0,
+      "matcher": null,
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
+      "arguments": [
+        "cleanup",
+        "--client=codex"
+      ],
+      "wrapperPath": null,
+      "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
+      "runtimeId": "serenaHooks",
+      "sourceState": "vendor",
+      "readResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdin"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdout"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        }
+      ],
+      "criticality": "optional",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-Command",
+          "Test-Path -LiteralPath 'D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe'"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
+        "arguments": [
+          "cleanup",
+          "--client=codex"
+        ]
+      }
+    },
+    {
+      "id": "serena-reminder",
+      "event": "PreToolUse",
+      "order": 0,
+      "matcher": "Bash",
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
+      "arguments": [
+        "remind",
+        "--client=codex"
+      ],
+      "wrapperPath": null,
+      "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
+      "runtimeId": "serenaHooks",
+      "sourceState": "vendor",
+      "readResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdin"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdout"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        }
+      ],
+      "criticality": "optional",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-Command",
+          "Test-Path -LiteralPath 'D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe'"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
+        "arguments": [
+          "remind",
+          "--client=codex"
+        ]
+      }
+    },
+    {
+      "id": "serena-auto-approve",
+      "event": "PreToolUse",
+      "order": 1,
+      "matcher": "mcp__serena__.*|mcp__serena\\..*",
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
+      "arguments": [
+        "auto-approve",
+        "--client=codex"
+      ],
+      "wrapperPath": null,
+      "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
+      "runtimeId": "serenaHooks",
+      "sourceState": "vendor",
+      "readResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdin"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdout"
+        }
+      ],
+      "criticality": "optional",
+      "lifecycle": "retired",
+      "lifecycleReason": "Codex payload does not expose acceptEdits/auto permission modes",
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-Command",
+          "Test-Path -LiteralPath 'D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe'"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "D:\\Codex\\projects\\统一环境\\scripts\\Get-CodexHookInventory.ps1",
+          "-LegacyFixtureManifest",
+          "-ManifestPath",
+          "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\legacy-fixture-manifest.json",
+          "-CodexHome",
+          "D:\\Codex\\.codex",
+          "-OutputDir",
+          "D:\\Codex\\projects\\统一环境\\reports\\codex-hook-inventory",
+          "-RequireNoRetiredRegistrations"
+        ]
+      }
+    }
+  ],
+  "files": [
+    {
+      "relativePath": "hooks/codex-github-cli-guard.cmd",
+      "liveRelativePath": "codex-github-cli-guard.cmd",
+      "sha256": "bea37dd5bcd8a9cafff2a405b459e6b0242de952926c518054b5764ab94c570c",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "github-cli"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-github-cli-guard.ps1",
+      "liveRelativePath": "codex-github-cli-guard.ps1",
+      "sha256": "0a41c9d42e8c80ab1793d0c4554da8772c32e8fdd4b7dbd61065a02b8670212e",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "github-cli"
+      ]
+    },
+    {
+      "relativePath": "retired/codex-mobile-permission-guard.cmd",
+      "liveRelativePath": "codex-mobile-permission-guard.cmd",
+      "sha256": "b86b9c3e743998b41324f868b15594d979fe6bcecd079be5a3cb4e44e6c8e7ec",
+      "lifecycle": "retired",
+      "deleteLive": false,
+      "ownerHookIds": [
+        "codex-state-policy"
+      ]
+    },
+    {
+      "relativePath": "retired/codex-mobile-permission-guard.py",
+      "liveRelativePath": "codex-mobile-permission-guard.py",
+      "sha256": "efb7c3838f9085e5ebe1a452352149fb8843db64d6560e552e009b8de71aac64",
+      "lifecycle": "retired",
+      "deleteLive": false,
+      "ownerHookIds": [
+        "codex-state-policy"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-projectless-root-d.cmd",
+      "liveRelativePath": "codex-projectless-root-d.cmd",
+      "sha256": "5cf8bcfae4907df658f887d36f34ac518641bed12f70ad8ff4c391069d5a3a0b",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "codex-state-policy"
+      ]
+    },
+    {
+      "relativePath": "retired/codex-projectless-root-d.js",
+      "liveRelativePath": "codex-projectless-root-d.js",
+      "sha256": "f32046560a34c035e28a58bf3c7dee9e770e424de87a313f6fd336c01eacca21",
+      "lifecycle": "retired",
+      "deleteLive": false,
+      "ownerHookIds": [
+        "codex-state-policy"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-state-policy-guard.py",
+      "liveRelativePath": "codex-state-policy-guard.py",
+      "sha256": "1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "codex-state-policy"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-provider-stability-guard.cmd",
+      "liveRelativePath": "codex-provider-stability-guard.cmd",
+      "sha256": "b13ece637046af65cd3b619453f9b9d6a93b4c40cfcbc6409bb9b38112cdad83",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "provider-stability"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-provider-stability-guard.ps1",
+      "liveRelativePath": "codex-provider-stability-guard.ps1",
+      "sha256": "bac74f7214ab98b25d8ef390d931dcecf148b2f8518e1f6af8f4e83b3732a323",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "provider-stability"
+      ]
+    },
+    {
+      "relativePath": "hooks/serena-activate-guarded.cmd",
+      "liveRelativePath": "serena-activate-guarded.cmd",
+      "sha256": "e29b5e67e7566eb0561ca72bc0cfa3daed9e01f2cf36b38fa0d6be8e127a9fd2",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-activate"
+      ]
+    },
+    {
+      "relativePath": "hooks/serena-activate-guarded.ps1",
+      "liveRelativePath": "serena-activate-guarded.ps1",
+      "sha256": "6af75c67f64c16abb33cfa47a765c93afff7cc83f0f21076a96d9505a2d0d0ca",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-activate"
+      ]
+    },
+    {
+      "relativePath": "hooks/serena-dashboard-guard.cmd",
+      "liveRelativePath": "serena-dashboard-guard.cmd",
+      "sha256": "8d9c435c21495f1999f8e1d19e9ac770c67c56fa21842c772e7bf09021825d9c",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-dashboard"
+      ]
+    },
+    {
+      "relativePath": "hooks/serena-dashboard-guard.ps1",
+      "liveRelativePath": "serena-dashboard-guard.ps1",
+      "sha256": "820b49e97fc77aeda865ee2eca4d06de642be43f7ed3d671f47d4d9270ffac84",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-dashboard"
+      ]
+    },
+    {
+      "relativePath": "hooks/lib/CodexHookRuntime.ps1",
+      "liveRelativePath": "lib/CodexHookRuntime.ps1",
+      "sha256": "8e79250ba9f8114a38b3411dda1fe62616701ba1b43c0cdbafedd14680172004",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "provider-stability",
+        "serena-activate",
+        "serena-dashboard",
+        "github-cli"
+      ]
+    },
+    {
+      "relativePath": "hooks/lib/CodexGitHubCliGuardEntry.ps1",
+      "liveRelativePath": "lib/CodexGitHubCliGuardEntry.ps1",
+      "sha256": "bf7239c8e24ca33d410e6f1c36855f187703f90a35e212a86386d9723740bad2",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "github-cli"
+      ]
+    },
+    {
+      "relativePath": "hooks/lib/CodexConfigFile.ps1",
+      "liveRelativePath": "lib/CodexConfigFile.ps1",
+      "sha256": "d2f8b2bedd555c8eb4bf6ec785699fbcb84ffb133ec26647ecd2fe9e271df25c",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "provider-stability",
+        "serena-dashboard"
+      ]
+    }
+  ],
+  "environment": [
+    {
+      "name": "SERENA_HOME",
+      "scope": "User",
+      "desired": "D:\\Codex\\.serena",
+      "restartRequired": true
+    }
+  ]
+}

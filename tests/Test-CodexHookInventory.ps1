@@ -78,6 +78,8 @@ New-Item -ItemType Directory -Path (Join-Path $ManagedRoot 'hooks') -Force | Out
 
 $probeMarker = Join-Path $FixtureRoot 'HOOK-EXECUTED.txt'
 $manifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
+$legacyManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json'
+$productionManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json'
 $manifest = Read-CodexHookManifest -Path $manifestPath
 $missingTargetManifest = Copy-TestDocument $manifest
 $missingActivate = @($missingTargetManifest.hooks | Where-Object id -ceq 'serena-activate')[0]
@@ -163,6 +165,27 @@ $RegistryPath = Join-Path $FixtureRoot 'hooks.json'
 Write-TestText -Path $RegistryPath -Value ($registry | ConvertTo-Json -Depth 100)
 
 $facts = Get-CodexHookRegistryFacts -RegistryPath $RegistryPath -Manifest $missingTargetManifest
+$hostPreflightManifest = Read-CodexHookHostPreflightManifest
+$retiredIdentityFacts = Get-CodexHookRegistryFacts -RegistryPath $RegistryPath -Manifest $hostPreflightManifest
+$retiredIdentityEntries = @(
+    @($retiredIdentityFacts.events.SessionStart) +
+    @($retiredIdentityFacts.events.PreToolUse) +
+    @($retiredIdentityFacts.events.Stop)
+)
+foreach ($retiredId in @('provider-stability', 'serena-dashboard', 'serena-auto-approve')) {
+    Assert-True (
+        @($retiredIdentityEntries | Where-Object {
+            $_.idMatch -ceq $retiredId -and $_.registrationState -ceq 'retired-but-registered'
+        }).Count -eq 1
+    ) "production inventory 必须独立识别 exact retired identity：$retiredId"
+}
+$retiredIdentityDocument = New-CodexHookInventoryDocument `
+    -Manifest $hostPreflightManifest `
+    -Registry $retiredIdentityFacts `
+    -FileFacts @() `
+    -DependencyFacts @() `
+    -TrustObservation @()
+Assert-True ($retiredIdentityDocument.summary.retiredButRegisteredCount -ge 3) 'RequireNoRetiredRegistrations 必须覆盖已从 production manifest 删除的 exact retired identity'
 $factsJson = $facts | ConvertTo-Json -Depth 100
 Assert-True ($facts.events.SessionStart.Count -eq 10) '必须看到全部 SessionStart entries，包括缺 command/non-string entry'
 Assert-True ($facts.events.SessionStart[1].idMatch -eq 'github-cli') '必须观察 GitHub 插入索引 1'
@@ -363,26 +386,27 @@ Assert-True ($document.registry.registryFileSha256 -ceq $facts.registryFileSha25
 
 Assert-Throws {
     & $InventoryScript `
-        -ManifestPath $manifestPath `
+        -ManifestPath $productionManifestPath `
         -CodexHome $CodexHome `
         -OutputDir (Join-Path $CodexHome 'forbidden-inventory-output') |
         Out-Null
 } 'inventory OutputDir 不得位于 CodexHome live 树内'
 
-Assert-Throws { & $InventoryScript -ManifestPath $manifestPath -CodexHome $CodexHome -OutputDir (Join-Path $ProjectRoot 'reports\other-output') | Out-Null } 'inventory OutputDir 必须受控'
-Assert-Throws { & $InventoryScript -ManifestPath $manifestPath -CodexHome $CodexHome -OutputDir ($OutputDir + ':secret') | Out-Null } 'inventory OutputDir 不得使用 ADS'
+Assert-Throws { & $InventoryScript -ManifestPath $productionManifestPath -CodexHome $CodexHome -OutputDir (Join-Path $ProjectRoot 'reports\other-output') | Out-Null } 'inventory OutputDir 必须受控'
+Assert-Throws { & $InventoryScript -ManifestPath $productionManifestPath -CodexHome $CodexHome -OutputDir ($OutputDir + ':secret') | Out-Null } 'inventory OutputDir 不得使用 ADS'
+Assert-Throws { & $InventoryScript -ManifestPath $legacyManifestPath -CodexHome $CodexHome -OutputDir $OutputDir | Out-Null } 'legacy manifest 不得在没有显式 fixture switch 时冒充 production inventory'
 
 $reparseTarget = Join-Path $FixtureRoot 'reparse-target'
 $reparseLink = Join-Path $FixtureRoot 'reparse-link'
 New-Item -ItemType Directory -Path $reparseTarget -Force | Out-Null
 New-Item -ItemType Junction -Path $reparseLink -Target $reparseTarget | Out-Null
 try {
-    Assert-Throws { & $InventoryScript -ManifestPath $manifestPath -CodexHome $CodexHome -OutputDir (Join-Path $reparseLink 'output') | Out-Null } 'inventory OutputDir 不得穿过 reparse ancestor'
+    Assert-Throws { & $InventoryScript -ManifestPath $productionManifestPath -CodexHome $CodexHome -OutputDir (Join-Path $reparseLink 'output') | Out-Null } 'inventory OutputDir 不得穿过 reparse ancestor'
 } finally {
     Remove-Item -LiteralPath $reparseLink -Force
 }
 
-$published = & $InventoryScript -ManifestPath $manifestPath -CodexHome $CodexHome -OutputDir $OutputDir
+$published = & $InventoryScript -ManifestPath $productionManifestPath -CodexHome $CodexHome -OutputDir $OutputDir
 $publishedJson = [IO.File]::ReadAllText((Join-Path $OutputDir 'inventory.json'))
 $publishedDocument = $publishedJson | ConvertFrom-Json -Depth 100
 Assert-True ($publishedDocument.artifactType -ceq 'env-governance.codex-hook-inventory') '入口必须发布 inventory JSON'
@@ -392,13 +416,20 @@ Assert-True (-not (Test-Path -LiteralPath $probeMarker)) 'inventory 入口不得
 Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'REPORT.md'))) '入口必须发布 Markdown 配对报告'
 Assert-True ($published.jsonPath -ceq (Join-Path $OutputDir 'inventory.json')) '入口返回值必须指向已发布 JSON'
 $accepted = & $InventoryScript `
-    -ManifestPath $manifestPath `
+    -ManifestPath $productionManifestPath `
     -CodexHome $CodexHome `
     -OutputDir $OutputDir `
     -RequireNoRetiredRegistrations
 $acceptedDocument = [IO.File]::ReadAllText([string]$accepted.jsonPath) | ConvertFrom-Json -Depth 100
 Assert-True ($acceptedDocument.summary.retiredButRegisteredCount -eq 0) '当前终态必须通过 retired registration 硬门槛'
 Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'inventory.json'))) 'full acceptance 通过后必须保留已发布 inventory artifact'
+$legacyPublished = & $InventoryScript `
+    -LegacyFixtureManifest `
+    -ManifestPath $legacyManifestPath `
+    -CodexHome $CodexHome `
+    -OutputDir $OutputDir
+$legacyDocument = [IO.File]::ReadAllText([string]$legacyPublished.jsonPath) | ConvertFrom-Json -Depth 100
+Assert-True ([int]$legacyDocument.manifest.hookCount -eq 8) '历史 inventory 必须显式 switch 后才可读取完整 legacy fixture manifest'
 
 $gitIgnoreLines = @([IO.File]::ReadAllLines((Join-Path $ProjectRoot '.gitignore')))
 foreach ($requiredIgnore in @(

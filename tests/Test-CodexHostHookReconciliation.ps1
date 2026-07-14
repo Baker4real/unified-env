@@ -164,6 +164,8 @@ $legacyNames = @(
 )
 
 $reconcilerSource = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\Invoke-CodexHostHookReconciliation.ps1")
+Assert-True -Condition ($reconcilerSource.Contains('Read-CodexHookHostPreflightManifest')) -Message '生产 reconciler 必须读取固定 host-preflight manifest 作为唯一 ownership 边界'
+Assert-True -Condition (-not $reconcilerSource.Contains('legacy-fixture-manifest.json')) -Message '生产 reconciler 不得读取 legacy fixture manifest'
 foreach ($mobileRetiredClosure in @("codex-mobile-permission-guard.cmd", "codex-mobile-permission-guard.py")) {
     Assert-True -Condition ([regex]::Matches($reconcilerSource, [regex]::Escape('"' + $mobileRetiredClosure + '"')).Count -eq 1) -Message "mobile permission retired wrapper/implementation 必须各在 exact legacy allowlist 出现一次：$mobileRetiredClosure"
 }
@@ -457,6 +459,26 @@ try {
     Assert-True -Condition (-not (Test-Path -LiteralPath $testRoot)) -Message "唯一测试目录意外已存在：$testRoot"
     New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
     Set-Content -LiteralPath $ownershipMarker -Value $testRunId -Encoding UTF8
+
+    $manifestGateRoot = Join-Path $testRoot 'manifest-gate-canary'
+    $manifestGateLib = Join-Path $manifestGateRoot 'lib'
+    New-Item -ItemType Directory -Force -Path $manifestGateLib | Out-Null
+    $isolatedReconcilerPath = Join-Path $manifestGateRoot 'Invoke-CodexHostHookReconciliation.ps1'
+    Copy-Item -LiteralPath $scriptPath -Destination $isolatedReconcilerPath
+    [IO.File]::WriteAllText(
+        (Join-Path $manifestGateLib 'CodexHookPolicy.ps1'),
+        "function Read-CodexHookHostPreflightManifest { throw 'host-preflight manifest identity 漂移：isolated-canary' }`r`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    $manifestGateError = $null
+    try {
+        & $isolatedReconcilerPath -Mode Check -CodexHome (Join-Path $testRoot 'must-not-be-read\.codex') -Json | Out-Null
+    } catch {
+        $manifestGateError = $_.Exception.Message
+    }
+    Assert-True `
+        -Condition ($manifestGateError -ceq 'host-preflight manifest identity 漂移：isolated-canary') `
+        -Message "reconciler 必须在读取/处理 live state 前执行 host manifest gate，实际错误：$manifestGateError"
 
     $healthyHome = Join-Path $testRoot "drift\.codex"
     New-FixtureCodexHome -Root $healthyHome

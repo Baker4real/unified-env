@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $PolicyPath = Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1'
-$ManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
+$ManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json'
 
 . $PolicyPath
 

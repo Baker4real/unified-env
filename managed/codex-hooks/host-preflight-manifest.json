@@ -1,0 +1,356 @@
+{
+  "artifactType": "env-governance.codex-hook-manifest",
+  "schemaVersion": 1,
+  "codexHome": "D:\\Codex\\.codex",
+  "managedRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks",
+  "runtimes": {
+    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+    "python": "D:\\Codex\\tools\\python314-official\\python.exe",
+    "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
+    "serenaHooks": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
+  },
+  "hooks": [
+    {
+      "id": "codex-state-preflight",
+      "event": "SessionStart",
+      "order": 0,
+      "matcher": null,
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
+      "arguments": [],
+      "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
+      "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.py",
+      "runtimeId": "python",
+      "sourceState": "managed",
+      "readResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\.codex-global-state.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\state_5.sqlite"
+        },
+        {
+          "kind": "abstract",
+          "value": "hook-stdin"
+        },
+        {
+          "kind": "abstract",
+          "value": "codex-thread-state"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\.codex-global-state.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\state_5.sqlite"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\tmp\\codex-state-policy-check"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\codex-state-policy.json"
+        },
+        {
+          "kind": "abstract",
+          "value": "codex-thread-state"
+        }
+      ],
+      "criticality": "critical",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
+        "arguments": [
+          "--check-only",
+          "--json"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
+        "arguments": [
+          "--check-only",
+          "--json"
+        ]
+      }
+    },
+    {
+      "id": "serena-activate",
+      "event": "SessionStart",
+      "order": 2,
+      "matcher": "startup|resume",
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\.codex\\hooks\\serena-activation-reminder.cmd",
+      "arguments": [],
+      "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-activation-reminder.cmd",
+      "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
+      "runtimeId": "pwsh",
+      "sourceState": "managed",
+      "readResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdin"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdout"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-activate.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups"
+        }
+      ],
+      "criticality": "degraded",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-Command",
+          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-activation-reminder.cmd'"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
+          "-Mode",
+          "ActivationAcceptance"
+        ]
+      }
+    },
+    {
+      "id": "serena-cleanup",
+      "event": "Stop",
+      "order": 0,
+      "matcher": null,
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\.codex\\hooks\\serena-cleanup-guarded.cmd",
+      "arguments": [],
+      "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-cleanup-guarded.cmd",
+      "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
+      "runtimeId": "pwsh",
+      "sourceState": "managed",
+      "readResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdin"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdout"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-cleanup.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups"
+        }
+      ],
+      "criticality": "optional",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-Command",
+          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-cleanup-guarded.cmd'"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
+          "-Mode",
+          "CleanupAcceptance"
+        ]
+      }
+    },
+    {
+      "id": "serena-reminder",
+      "event": "PreToolUse",
+      "order": 0,
+      "matcher": "Bash",
+      "timeoutSeconds": 10,
+      "commandPath": "D:\\Codex\\.codex\\hooks\\serena-reminder-guarded.cmd",
+      "arguments": [],
+      "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-reminder-guarded.cmd",
+      "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
+      "runtimeId": "pwsh",
+      "sourceState": "managed",
+      "readResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdin"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        }
+      ],
+      "writeResources": [
+        {
+          "kind": "abstract",
+          "value": "hook-stdout"
+        },
+        {
+          "kind": "abstract",
+          "value": "serena-hook-state"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\serena-reminder.json"
+        },
+        {
+          "kind": "path",
+          "value": "D:\\Codex\\.codex\\run-evidence\\codex-hook-health\\.backups"
+        }
+      ],
+      "criticality": "optional",
+      "lifecycle": "active",
+      "lifecycleReason": null,
+      "quickHealthCheck": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-Command",
+          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-reminder-guarded.cmd'"
+        ]
+      },
+      "fullAcceptanceCommand": {
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
+          "-Mode",
+          "ReminderAcceptance"
+        ]
+      }
+    }
+  ],
+  "files": [
+    {
+      "relativePath": "hooks/codex-state-policy-guard.py",
+      "liveRelativePath": "codex-state-policy-guard.py",
+      "sha256": "1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "codex-state-preflight"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-state-preflight.py",
+      "liveRelativePath": "codex-state-preflight.py",
+      "sha256": "3fcd5a800cafa4b8b1caad4117b49b8c2dfd18df4ed769d652d5d95dcc53b38c",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "codex-state-preflight"
+      ]
+    },
+    {
+      "relativePath": "hooks/codex-state-preflight.cmd",
+      "liveRelativePath": "codex-state-preflight.cmd",
+      "sha256": "5392cd7d18253b4b372c9e6811b1a6380ffd554ad7b2d88008f8d1819d9b252e",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "codex-state-preflight"
+      ]
+    },
+    {
+      "relativePath": "hooks/serena-reminder-guarded.cmd",
+      "liveRelativePath": "serena-reminder-guarded.cmd",
+      "sha256": "d6120f87231a058aa1a4b4a3610965c69401285637b5f7b5a2fe19dc9021925b",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-reminder"
+      ]
+    },
+    {
+      "relativePath": "hooks/serena-cleanup-guarded.cmd",
+      "liveRelativePath": "serena-cleanup-guarded.cmd",
+      "sha256": "0944b2e57c5920f7be9c87dc32e13f8ab29adbd7e2837dcd9d64cf2b90142440",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-cleanup"
+      ]
+    },
+    {
+      "relativePath": "hooks/serena-behavior-guard.ps1",
+      "liveRelativePath": "serena-behavior-guard.ps1",
+      "sha256": "c19ff4b9bfa6912d67ae99ece33ca732e3f600e6bba7e213fd9cc7a4a7585be1",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-reminder",
+        "serena-cleanup",
+        "serena-activate"
+      ]
+    },
+    {
+      "relativePath": "hooks/serena-activation-reminder.cmd",
+      "liveRelativePath": "serena-activation-reminder.cmd",
+      "sha256": "1ddf42321e82d6410266da79e591dc53a37490f5da862fce3b8f64cdebcc0e17",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-activate"
+      ]
+    },
+    {
+      "relativePath": "hooks/lib/CodexHookRuntime.ps1",
+      "liveRelativePath": "lib/CodexHookRuntime.ps1",
+      "sha256": "8e79250ba9f8114a38b3411dda1fe62616701ba1b43c0cdbafedd14680172004",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-activate",
+        "serena-cleanup",
+        "serena-reminder"
+      ]
+    }
+  ],
+  "environment": [
+    {
+      "name": "SERENA_HOME",
+      "scope": "User",
+      "desired": "D:\\Codex\\.serena",
+      "restartRequired": true
+    }
+  ]
+}

@@ -8,6 +8,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+$script:HookPolicyPath = Join-Path $PSScriptRoot 'lib\CodexHookPolicy.ps1'
+. $script:HookPolicyPath
+$script:HostPreflightManifest = Read-CodexHookHostPreflightManifest
 $script:CurrentEvidencePath = $null
 $script:FixtureConcurrentReplacePath = $null
 $script:FixtureConcurrentReplaceKind = "content"

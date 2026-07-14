@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$ManifestPath = 'D:\Codex\projects\统一环境\managed\codex-hooks\manifest.json',
+    [string]$ManifestPath,
+    [switch]$LegacyFixtureManifest,
     [string]$CodexHome = 'D:\Codex\.codex',
     [string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-inventory',
     [switch]$RequireNoRetiredRegistrations
@@ -96,7 +97,18 @@ function Get-CodexHookReparseAncestorFacts {
     }
 }
 
-$manifest = Read-CodexHookManifest -Path $ManifestPath
+if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
+    $ManifestPath = if ($LegacyFixtureManifest) {
+        Get-CodexHookLegacyFixtureManifestPath
+    } else {
+        Get-CodexHookHostPreflightManifestPath
+    }
+}
+$manifest = if ($LegacyFixtureManifest) {
+    Read-CodexHookLegacyFixtureManifest -Path $ManifestPath
+} else {
+    Read-CodexHookHostPreflightManifest -Path $ManifestPath
+}
 $codexHomePath = Assert-CodexHookDPath -Value $CodexHome -Name 'CodexHome'
 $outputPath = Assert-CodexHookDPath -Value $OutputDir -Name 'OutputDir'
 if (Test-CodexHookPathWithin -Path $outputPath -ParentPath $codexHomePath) {

@@ -766,7 +766,15 @@ function Assert-CodexHookManifest {
         Assert-CodexHookDeclaredCommand -Command $hook.quickHealthCheck -Name "hooks[$($hook.id)].quickHealthCheck"
         Assert-CodexHookDeclaredCommand -Command $hook.fullAcceptanceCommand -Name "hooks[$($hook.id)].fullAcceptanceCommand"
         $allowedAcceptanceCommands = @($commandPath) + @($expectedRuntimes.Values | ForEach-Object { [IO.Path]::GetFullPath([string]$_) })
-        $inventoryAcceptanceArguments = @(
+        $legacyInventoryAcceptanceArguments = @(
+            '-NoProfile', '-File', 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1',
+            '-LegacyFixtureManifest',
+            '-ManifestPath', 'D:\Codex\projects\统一环境\managed\codex-hooks\legacy-fixture-manifest.json',
+            '-CodexHome', 'D:\Codex\.codex',
+            '-OutputDir', 'D:\Codex\projects\统一环境\reports\codex-hook-inventory',
+            '-RequireNoRetiredRegistrations'
+        )
+        $compatibilityInventoryAcceptanceArguments = @(
             '-NoProfile', '-File', 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1',
             '-ManifestPath', 'D:\Codex\projects\统一环境\managed\codex-hooks\manifest.json',
             '-CodexHome', 'D:\Codex\.codex',
@@ -782,7 +790,10 @@ function Assert-CodexHookManifest {
             $declaredArguments = [object[]]@($declaredCommand.arguments)
             $pwshPath = [IO.Path]::GetFullPath([string]$expectedRuntimes.pwsh)
             if ($declaredPath.Equals($pwshPath, [StringComparison]::OrdinalIgnoreCase)) {
-                if (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected $inventoryAcceptanceArguments) {
+                if (
+                    (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected $legacyInventoryAcceptanceArguments) -or
+                    (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected $compatibilityInventoryAcceptanceArguments)
+                ) {
                     continue
                 }
                 $behaviorAcceptanceArguments = @{
@@ -980,6 +991,157 @@ function Read-CodexHookManifest {
     $manifest = $jsonText | ConvertFrom-Json -Depth 128 -ErrorAction Stop
     [void](Assert-CodexHookManifest -Manifest $manifest)
     return $manifest
+}
+
+function Get-CodexHookHostPreflightManifestPath {
+    return 'D:\Codex\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
+}
+
+function Get-CodexHookLegacyFixtureManifestPath {
+    return 'D:\Codex\projects\统一环境\managed\codex-hooks\legacy-fixture-manifest.json'
+}
+
+function Assert-CodexHookHostPreflightManifest {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Manifest)
+
+    [void](Assert-CodexHookManifest -Manifest $Manifest)
+    $expectedIds = @('codex-state-preflight', 'serena-activate', 'serena-cleanup', 'serena-reminder')
+    $actualIds = @($Manifest.hooks | ForEach-Object { [string]$_.id } | Sort-Object)
+    if (($actualIds -join "`0") -cne (@($expectedIds | Sort-Object) -join "`0")) {
+        throw "host-preflight manifest hook 集合不精确：$($actualIds -join ',')"
+    }
+    if (@($Manifest.hooks | Where-Object lifecycle -cne 'active').Count -ne 0) {
+        throw 'host-preflight manifest 只能包含 active hook。'
+    }
+
+    $expectedHookIdentityHashes = @{
+        'codex-state-preflight' = '15dbc61e3ba5514b09e713a7814b69c6a5b05244f9208ffe67b3a27ffee7ec2c'
+        'serena-activate' = '70b0e6406be68f2f4b47b7666baf130e4d11b2364ae39925180fe50edb351344'
+        'serena-cleanup' = '4e13fc275f0eab40c8e95a02a86ec82f65699fefd79100b4e071bce8676849de'
+        'serena-reminder' = 'a34adceb6423c2bc872e5a42891769df16a03cd966f31883e2745af1db41b812'
+    }
+    foreach ($hook in @($Manifest.hooks)) {
+        $identity = [ordered]@{
+            id = $hook.id
+            event = $hook.event
+            order = $hook.order
+            matcher = $hook.matcher
+            timeoutSeconds = $hook.timeoutSeconds
+            commandPath = $hook.commandPath
+            arguments = @($hook.arguments)
+            wrapperPath = $hook.wrapperPath
+            implementationPath = $hook.implementationPath
+            runtimeId = $hook.runtimeId
+            sourceState = $hook.sourceState
+            readResources = @($hook.readResources)
+            writeResources = @($hook.writeResources)
+            criticality = $hook.criticality
+            lifecycle = $hook.lifecycle
+            lifecycleReason = $hook.lifecycleReason
+            quickHealthCheck = $hook.quickHealthCheck
+            fullAcceptanceCommand = $hook.fullAcceptanceCommand
+        }
+        $identityHash = Get-CodexHookTextSha256 -Text ($identity | ConvertTo-Json -Depth 100 -Compress)
+        if (-not $expectedHookIdentityHashes.ContainsKey([string]$hook.id) -or $identityHash -cne $expectedHookIdentityHashes[[string]$hook.id]) {
+            throw "host-preflight manifest identity 漂移：$($hook.id)"
+        }
+    }
+
+    $expectedFiles = @{
+        'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', '1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8', 'codex-state-preflight')
+        'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', '3fcd5a800cafa4b8b1caad4117b49b8c2dfd18df4ed769d652d5d95dcc53b38c', 'codex-state-preflight')
+        'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '5392cd7d18253b4b372c9e6811b1a6380ffd554ad7b2d88008f8d1819d9b252e', 'codex-state-preflight')
+        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', 'd6120f87231a058aa1a4b4a3610965c69401285637b5f7b5a2fe19dc9021925b', 'serena-reminder')
+        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '0944b2e57c5920f7be9c87dc32e13f8ab29adbd7e2837dcd9d64cf2b90142440', 'serena-cleanup')
+        'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', 'c19ff4b9bfa6912d67ae99ece33ca732e3f600e6bba7e213fd9cc7a4a7585be1', 'serena-reminder', 'serena-cleanup', 'serena-activate')
+        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', '1ddf42321e82d6410266da79e591dc53a37490f5da862fce3b8f64cdebcc0e17', 'serena-activate')
+        'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', '8e79250ba9f8114a38b3411dda1fe62616701ba1b43c0cdbafedd14680172004', 'serena-activate', 'serena-cleanup', 'serena-reminder')
+    }
+    if (@($Manifest.files).Count -ne $expectedFiles.Count) {
+        throw "host-preflight manifest file 闭包不精确：$(@($Manifest.files).Count)"
+    }
+    foreach ($file in @($Manifest.files)) {
+        $liveRelativePath = [string]$file.liveRelativePath
+        if (-not $expectedFiles.ContainsKey($liveRelativePath)) {
+            throw "host-preflight manifest file identity 漂移：$liveRelativePath"
+        }
+        $expectedFile = [object[]]$expectedFiles[$liveRelativePath]
+        if (
+            [string]$file.relativePath -cne [string]$expectedFile[0] -or
+            [string]$file.sha256 -cne [string]$expectedFile[1] -or
+            [string]$file.lifecycle -cne 'active' -or
+            -not (Test-CodexHookExactStringSequence -Actual @($file.ownerHookIds) -Expected @($expectedFile | Select-Object -Skip 2))
+        ) {
+            throw "host-preflight manifest file identity 漂移：$liveRelativePath"
+        }
+    }
+
+    $stateHook = @($Manifest.hooks | Where-Object id -ceq 'codex-state-preflight')
+    if (
+        $stateHook.Count -ne 1 -or
+        $stateHook[0].commandPath -cne 'D:\Codex\.codex\hooks\codex-state-preflight.cmd' -or
+        $stateHook[0].wrapperPath -cne 'D:\Codex\.codex\hooks\codex-state-preflight.cmd' -or
+        $stateHook[0].implementationPath -cne 'D:\Codex\.codex\hooks\codex-state-preflight.py'
+    ) {
+        throw 'host-preflight manifest state identity 必须固定为 local-only preflight。'
+    }
+
+    $forbiddenLivePaths = @(
+        'codex-projectless-root-d.cmd',
+        'codex-projectless-root-d.js',
+        'codex-mobile-permission-guard.cmd',
+        'codex-mobile-permission-guard.py',
+        'codex-provider-stability-guard.cmd',
+        'codex-provider-stability-guard.ps1',
+        'serena-dashboard-guard.cmd',
+        'serena-dashboard-guard.ps1',
+        'serena-activate-guarded.cmd',
+        'serena-activate-guarded.ps1'
+    )
+    foreach ($file in @($Manifest.files)) {
+        if ([string]$file.liveRelativePath -cin $forbiddenLivePaths -or $file.lifecycle -cne 'active') {
+            throw "host-preflight manifest 包含退役或冷路径外实现：$($file.liveRelativePath)"
+        }
+    }
+
+    $environment = @($Manifest.environment)
+    if (
+        $environment.Count -ne 1 -or
+        $environment[0].name -cne 'SERENA_HOME' -or
+        $environment[0].scope -cne 'User' -or
+        $environment[0].desired -cne 'D:\Codex\.serena' -or
+        -not [bool]$environment[0].restartRequired
+    ) {
+        throw 'host-preflight manifest 静态 cold ownership 必须精确声明 User SERENA_HOME。'
+    }
+    return $true
+}
+
+function Read-CodexHookHostPreflightManifest {
+    [CmdletBinding()]
+    param([string]$Path = (Get-CodexHookHostPreflightManifestPath))
+
+    $expected = [IO.Path]::GetFullPath((Get-CodexHookHostPreflightManifestPath))
+    $actual = [IO.Path]::GetFullPath((Assert-CodexHookDPath -Value $Path -Name 'host-preflight manifest path'))
+    if (-not $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "production 只接受固定 host-preflight manifest：$actual"
+    }
+    $manifest = Read-CodexHookManifest -Path $actual
+    [void](Assert-CodexHookHostPreflightManifest -Manifest $manifest)
+    return $manifest
+}
+
+function Read-CodexHookLegacyFixtureManifest {
+    [CmdletBinding()]
+    param([string]$Path = (Get-CodexHookLegacyFixtureManifestPath))
+
+    $expected = [IO.Path]::GetFullPath((Get-CodexHookLegacyFixtureManifestPath))
+    $actual = [IO.Path]::GetFullPath((Assert-CodexHookDPath -Value $Path -Name 'legacy fixture manifest path'))
+    if (-not $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "历史 fixture 只接受固定 legacy manifest：$actual"
+    }
+    return Read-CodexHookManifest -Path $actual
 }
 
 function Get-CodexHookTextSha256 {
@@ -1591,6 +1753,19 @@ function Get-CodexHookWrapperReferenceFacts {
     }
 }
 
+function Get-CodexHookKnownRetiredRegistrationManifest {
+    return [pscustomobject]@{
+        hooks = @(
+            [pscustomobject]@{ id = 'provider-stability'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\codex-provider-stability-guard.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'codex-state-policy'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\codex-projectless-root-d.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'serena-activate-legacy'; event = 'SessionStart'; matcher = 'startup|resume'; commandPath = 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'serena-dashboard'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\serena-dashboard-guard.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'github-cli'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'serena-auto-approve'; event = 'PreToolUse'; matcher = 'mcp__serena__.*|mcp__serena\..*'; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('auto-approve', '--client=codex'); lifecycle = 'retired' }
+        )
+    }
+}
+
 function Get-CodexHookRegistryFacts {
     [CmdletBinding()]
     param(
@@ -1643,6 +1818,20 @@ function Get-CodexHookRegistryFacts {
                     $manifestMatches = [object[]]@(Get-CodexHookManifestMatches -Manifest $Manifest -Event $eventName -Matcher $matcher -Tokens $parsed.tokens -IsCommandEntry $true | Where-Object { $null -ne $_ })
                 }
                 $matchedHook = if ($manifestMatches.Count -eq 1) { $manifestMatches[0] } else { $null }
+                if ($null -eq $matchedHook -and $parsed.parsed -and $entryType -ceq 'command') {
+                    $retiredMatches = [object[]]@(
+                        Get-CodexHookManifestMatches `
+                            -Manifest (Get-CodexHookKnownRetiredRegistrationManifest) `
+                            -Event $eventName `
+                            -Matcher $matcher `
+                            -Tokens $parsed.tokens `
+                            -IsCommandEntry $true |
+                            Where-Object { $null -ne $_ }
+                    )
+                    if ($retiredMatches.Count -eq 1) {
+                        $matchedHook = $retiredMatches[0]
+                    }
+                }
                 $targetExists = $null
                 $commandSha256 = $null
                 $targetPath = $null
@@ -1697,7 +1886,7 @@ function Get-CodexHookRegistryFacts {
                     commandIdentitySha256 = Get-CodexHookObservedIdentitySha256 -Event $eventName -Matcher $matcher -Command $command -EntryType $entryType -ParsedCommand $parsed -GroupIndex $groupIndex -EntryIndex $entryIndex
                     argumentCount = if ($parsed.parsed) { [Math]::Max(0, $parsed.tokens.Count - 1) } else { $null }
                     idMatch = if ($null -ne $matchedHook) { $matchedHook.id } else { $null }
-                    idMatchStatus = if (-not $commandPresent) { 'missing-command' } elseif (-not $commandIsString) { 'non-string-command' } elseif ($entryType -cne 'command') { 'not-command' } elseif (-not $parsed.parsed) { 'unparsed' } elseif ($manifestMatches.Count -gt 1) { 'ambiguous' } elseif ($manifestMatches.Count -eq 1) { 'matched' } else { 'unmatched' }
+                    idMatchStatus = if (-not $commandPresent) { 'missing-command' } elseif (-not $commandIsString) { 'non-string-command' } elseif ($entryType -cne 'command') { 'not-command' } elseif (-not $parsed.parsed) { 'unparsed' } elseif ($manifestMatches.Count -gt 1) { 'ambiguous' } elseif ($null -ne $matchedHook) { 'matched' } else { 'unmatched' }
                     lifecycleMatch = if ($null -ne $matchedHook) { $matchedHook.lifecycle } else { $null }
                     registrationState = if ($null -ne $matchedHook -and $matchedHook.lifecycle -ceq 'retired') { 'retired-but-registered' } elseif ($null -ne $matchedHook) { 'declared' } else { 'unknown' }
                 })

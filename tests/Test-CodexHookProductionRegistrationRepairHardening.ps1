@@ -79,7 +79,7 @@ function Initialize-HardeningFixture {
         [void][IO.Directory]::CreateDirectory([string]$directory)
     }
 
-    $manifest = Get-Content -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json') -Raw |
+    $manifest = Get-Content -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json') -Raw |
         ConvertFrom-Json -Depth 128
     foreach ($file in @($manifest.files)) {
         $sourcePath = Join-Path ([string]$profile.sourceRoot) ([string]$file.relativePath)

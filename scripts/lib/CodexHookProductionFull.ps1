@@ -4,7 +4,7 @@ function Get-CodexHookProductionFullProfile {
     [pscustomobject][ordered]@{
         profileId = 'codex-hook-production-full-v1'
         isFixtureAdapter = $false
-        manifestPath = 'D:\Codex\projects\统一环境\managed\codex-hooks\manifest.json'
+        manifestPath = 'D:\Codex\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
         sourceRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks'
         codexHome = 'D:\Codex\.codex'
         hooksRoot = 'D:\Codex\.codex\hooks'
@@ -167,6 +167,9 @@ function Assert-CodexHookProductionFullPlan {
 function New-CodexHookProductionFullState {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Profile, [Parameter(Mandatory)][scriptblock]$EnvironmentReadValue)
+    if ($null -eq $Profile -or $Profile.PSObject.Properties.Name -notcontains 'isFixtureAdapter' -or $Profile.isFixtureAdapter -ne $true) {
+        throw 'superseded-by-host-hook-reconciler'
+    }
     [void](Assert-CodexHookProductionFullProfile -Profile $Profile -AllowFixtureAdapter)
     $manifestSnapshot = Get-CodexHookCapabilityFileSnapshot -Path ([string]$Profile.manifestPath) -CapabilityRoot ([string]$Profile.sourceRoot) -AllowedExactPaths @([string]$Profile.manifestPath) -Name 'production full manifest'
     Assert-CodexHookStrictJsonText -JsonText ([Text.UTF8Encoding]::new($false,$true).GetString([byte[]]$manifestSnapshot.bytes))

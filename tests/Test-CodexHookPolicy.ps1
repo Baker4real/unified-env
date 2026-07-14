@@ -262,17 +262,59 @@ foreach ($invalidTimeout in @(0, 30)) {
 
 $managedManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
 $managedManifest = Read-CodexHookManifest -Path $managedManifestPath
+
+$legacyFixtureManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json'
+$hostPreflightManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json'
+Assert-True (Test-Path -LiteralPath $legacyFixtureManifestPath -PathType Leaf) '必须提供仅供历史 fixture 使用的 legacy manifest'
+Assert-True (Test-Path -LiteralPath $hostPreflightManifestPath -PathType Leaf) '必须提供唯一生产 host-preflight manifest'
+$legacyFixtureManifest = Read-CodexHookManifest -Path $legacyFixtureManifestPath
+$hostPreflightManifest = Read-CodexHookManifest -Path $hostPreflightManifestPath
+[void](Read-CodexHookHostPreflightManifest)
+[void](Read-CodexHookLegacyFixtureManifest)
+Assert-Throws { Read-CodexHookHostPreflightManifest -Path $legacyFixtureManifestPath | Out-Null } 'legacy manifest 不得提供 production identity'
+Assert-Throws { Read-CodexHookLegacyFixtureManifest -Path $hostPreflightManifestPath | Out-Null } 'host manifest 不得伪装历史 fixture identity'
+$mutatedHostHookIdentity = Copy-TestDocument $hostPreflightManifest
+@($mutatedHostHookIdentity.hooks | Where-Object id -ceq 'serena-reminder')[0].order = 9
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $mutatedHostHookIdentity | Out-Null } 'host manifest 必须冻结 Serena reminder 的完整 identity'
+$mutatedHostFileClosure = Copy-TestDocument $hostPreflightManifest
+@($mutatedHostFileClosure.files | Where-Object liveRelativePath -ceq 'serena-reminder-guarded.cmd')[0].sha256 = ('0' * 64)
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $mutatedHostFileClosure | Out-Null } 'host manifest 必须冻结 8-file closure 的精确 hash map'
+$expectedProductionHookIds = @('codex-state-preflight', 'serena-activate', 'serena-cleanup', 'serena-reminder')
+Assert-True (
+    (@($hostPreflightManifest.hooks | ForEach-Object id | Sort-Object) -join ',') -ceq
+    (@($expectedProductionHookIds | Sort-Object) -join ',')
+) 'production manifest 只能声明 state preflight 与三项 Serena 行为 hook'
+foreach ($forbiddenHookId in @('provider-stability', 'serena-dashboard', 'github-cli', 'serena-auto-approve')) {
+    Assert-True (@($hostPreflightManifest.hooks | Where-Object id -ceq $forbiddenHookId).Count -eq 0) "production manifest 不得包含旧/显式维护 identity：$forbiddenHookId"
+}
+$productionStateHook = @($hostPreflightManifest.hooks | Where-Object id -ceq 'codex-state-preflight')[0]
+Assert-True (
+    $productionStateHook.commandPath -ceq 'D:\Codex\.codex\hooks\codex-state-preflight.cmd' -and
+    $productionStateHook.wrapperPath -ceq 'D:\Codex\.codex\hooks\codex-state-preflight.cmd' -and
+    $productionStateHook.implementationPath -ceq 'D:\Codex\.codex\hooks\codex-state-preflight.py'
+) 'production state identity 必须指向 local-only state preflight，不得恢复旧 projectless wrapper'
+foreach ($forbiddenLivePath in @(
+    'codex-projectless-root-d.cmd',
+    'codex-projectless-root-d.js',
+    'codex-mobile-permission-guard.cmd',
+    'codex-mobile-permission-guard.py',
+    'serena-auto-approve.cmd'
+)) {
+    Assert-True (@($hostPreflightManifest.files | Where-Object liveRelativePath -ceq $forbiddenLivePath).Count -eq 0) "production manifest 不得包含退役双写/auto-approve 文件：$forbiddenLivePath"
+}
+Assert-True (@($legacyFixtureManifest.hooks).Count -gt @($hostPreflightManifest.hooks).Count) 'legacy fixture manifest 必须保留历史测试闭包，而非伪装 production manifest'
 $stateGuardSource = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\hooks\codex-state-policy-guard.py')
 Assert-True ($stateGuardSource.Contains('def resolve_permission_policy(')) 'state guard 必须从受控来源解析权限策略'
 Assert-True ($stateGuardSource.Contains('path_mode: str = "inventory"')) 'state guard 必须公开 inventory path mode'
 Assert-True ($stateGuardSource.Contains('approved_map: object = None')) 'state guard 必须要求显式 approved map 才能修复路径'
 Assert-True ($stateGuardSource.Contains('permission policy sources conflict')) '策略来源冲突必须 fail closed'
-Assert-True (@($managedManifest.hooks).Count -eq 8) '受管 manifest 必须声明 8 个当前 hook'
-Assert-True (@($managedManifest.files).Count -eq 23) '受管 manifest 必须纳入 state preflight、Serena behavior wrapper 与 provider core 的完整文件闭包'
+Assert-True (@($managedManifest.hooks).Count -eq 8) '兼容 manifest 必须继续覆盖 Task 1-5 的当前 hook 模型'
+Assert-True (@($managedManifest.files).Count -eq 23) '兼容 manifest 必须纳入 state preflight、Serena behavior wrapper 与 provider core 的完整文件闭包'
+Assert-True (@($legacyFixtureManifest.files).Count -eq 16) 'legacy fixture manifest 必须冻结 13 active + 3 retired 历史事务闭包'
 Assert-True (
-    @($managedManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.py').Count -eq 1 -and
-    @($managedManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.cmd').Count -eq 1
-) '受管 manifest 必须唯一声明 state preflight 实现与固定 wrapper'
+    @($hostPreflightManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.py').Count -eq 1 -and
+    @($hostPreflightManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.cmd').Count -eq 1
+) 'host-preflight manifest 必须唯一声明 state preflight 实现与固定 wrapper'
 Assert-True (
     @($managedManifest.environment).Count -eq 1 -and
     $managedManifest.environment[0].name -ceq 'SERENA_HOME' -and
