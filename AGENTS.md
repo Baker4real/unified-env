@@ -18,6 +18,8 @@
 
 真实迁移前必须先读取 `docs/env-governance/d-drive-layout-and-migration-policy.md`，确认 D 盘布局、环境分类、显式授权、验证和回滚边界。
 
+用户明确退役或删除 skill 时，不创建或保留本机 skill 备份；已存在副本直接清理，细则见 `D:\Codex\.codex\docs\agent-guidance\skill-operations.md`。
+
 ## 终端窗口可见性
 
 - 只有用户主动打开并正在使用的 `PowerShell`、`pwsh` 或 `cmd.exe` 终端可以保持可见；Codex、agent、脚本、hook、任务计划或设备自动启动的终端必须无窗口运行，不得抢到前台或遮挡用户屏幕。

@@ -18,13 +18,16 @@ function readSkill(skill, relativePath = 'SKILL.md') {
   return { file, text: fs.readFileSync(file, 'utf8') };
 }
 
-const finishing = readSkill('finishing-a-development-branch');
 const privateStack = readSkill('private-patch-stack');
 const neatFreak = readSkill('neat-freak');
 const closeoutReference = readSkill('neat-freak', 'references/repo-clean-closeout.md');
 const repoCloseout = readSkill('repo-clean-closeout');
 const cleanWorktree = readSkill('clean-git-worktree');
 const handoff = readSkill('handoff');
+const sourceLedger = JSON.parse(
+  fs.readFileSync(path.join(codexRoot, 'skills', '.downloaded-skills-source-state.json'), 'utf8'),
+);
+const retiredFinishingPath = path.join(codexRoot, 'skills', 'finishing-a-development-branch');
 
 const failures = [];
 function check(name, callback) {
@@ -52,22 +55,16 @@ function sectionBetween(text, start, end) {
   return text.slice(startIndex, endIndex >= 0 ? endIndex : text.length);
 }
 
-check('finishing must resolve the default branch instead of guessing main/master', () => {
-  assert.doesNotMatch(finishing.text, /merge-base\s+HEAD\s+(?:main|master)/i);
-  assert.match(finishing.text, /ls-remote\s+--symref[\s\S]*\bHEAD\b/i);
-  assert.match(finishing.text, /defaultBranchRef/i);
-});
-
-check('finishing must publish and reconcile temporary branches explicitly', () => {
-  assert.match(finishing.text, /git\s+push[\s\S]*--delete/i);
-  assert.match(finishing.text, /fetch\s+--prune/i);
-  assert.match(finishing.text, /local[\s\S]*remote|remote[\s\S]*local/i);
-  assert.doesNotMatch(finishing.text, /create (?:a )?pull request by default|default pull request|Keep the branch as-is/i);
+check('obra/superpowers finishing skill must be retired from active root', () => {
+  assert.equal(fs.existsSync(retiredFinishingPath), false, 'finishing-a-development-branch 仍在 active root');
+  const deleted = sourceLedger.deleted.find((entry) => entry.name === 'finishing-a-development-branch');
+  assert.ok(deleted, '账本缺少 finishing-a-development-branch 的退役记录');
+  assert.equal(deleted.source, 'obra-superpowers');
+  assert.equal(deleted.status, 'deleted-by-user');
 });
 
 check('canonical flows must own worktrees and remove them in a safe order', () => {
   for (const [name, text] of [
-    ['finishing', finishing.text],
     ['closeout reference', closeoutReference.text],
     ['private compatibility flow', privateStack.text],
   ]) {
