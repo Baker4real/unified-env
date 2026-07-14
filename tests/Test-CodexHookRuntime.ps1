@@ -35,9 +35,10 @@ foreach($file in $activeWrappers){
 }
 
 $githubSource=Get-Content -Raw -LiteralPath (Join-Path $managedRoot 'hooks\codex-github-cli-guard.ps1')
+Assert-True ($githubSource.Contains('[switch]$Repair') -and $githubSource.Contains('$ReadOnly = -not [bool]$Repair') -and $githubSource.Contains('-WriteHealth:$Repair')) 'GitHub guard 写入必须只由显式 Repair 参数授权'
 Assert-True ([regex]::Matches($githubSource,'\.WaitOne\(1500\)').Count -eq 2) 'GitHub 两个 mutex 必须各使用 1500ms budget'
 Assert-True (-not $githubSource.Contains('.WaitOne(5000)')) 'GitHub mutex 不得保留 5000ms budget'
-Assert-True ($githubSource.Contains(". 'D:\Codex\.codex\hooks\lib\CodexHookRuntime.ps1'")) 'GitHub guard 必须加载 shared runtime'
+Assert-True ($githubSource.Contains(". (Join-Path `$ScriptRoot 'lib\CodexHookRuntime.ps1')")) 'GitHub guard 必须从同一受管闭包加载 shared runtime'
 Assert-True ($githubSource.Contains("Write-CodexHookLatestHealth -HookId 'github-cli'")) 'GitHub guard 必须写独立 latest health'
 Assert-True ($githubSource.Contains('$GuardStopwatch.ElapsedMilliseconds')) 'GitHub health 必须记录真实 duration 而非常量'
 Assert-True ([regex]::Matches($githubSource,"@\('auth', 'status'\)").Count -eq 1 -and $githubSource.Contains('$authProbe = if (-not $CheckAuth)')) 'GitHub quick 路径不得执行 auth/network probe'
@@ -54,7 +55,7 @@ Assert-True ([int]$providerHook.timeoutSeconds*1000 -ge $providerBudget) 'provid
 Assert-True ([int]$dashboardHook.timeoutSeconds*1000 -ge $dashboardBudget) 'dashboard manifest timeout 必须覆盖 mutex、7 次 validator（含 rollback）与 I/O 余量'
 $githubEntryPath=Join-Path $managedRoot 'hooks\lib\CodexGitHubCliGuardEntry.ps1'
 Assert-True (Test-Path -LiteralPath $githubEntryPath -PathType Leaf) 'GitHub guard 必须使用可独立验证的 published internal entry state machine'
-Assert-True ($githubSource.Contains(". 'D:\Codex\.codex\hooks\lib\CodexGitHubCliGuardEntry.ps1'") -and $githubSource.Contains('Invoke-CodexGitHubCliGuardEntry -Operation')) 'GitHub production guard 必须调用 fixed-path internal entry state machine'
+Assert-True ($githubSource.Contains(". (Join-Path `$ScriptRoot 'lib\CodexGitHubCliGuardEntry.ps1')") -and $githubSource.Contains('Invoke-CodexGitHubCliGuardEntry -Operation')) 'GitHub production guard 必须调用同一受管闭包的 internal entry state machine'
 $githubHarness=Join-Path $projectRoot 'tests\lib\Invoke-GitHubGuardEntryFixture.ps1'
 Assert-True (Test-Path -LiteralPath $githubHarness -PathType Leaf) 'GitHub entry fixture harness 必须留在 tests/lib'
 function Invoke-GitHubEntryFixture([string]$Case,[bool]$Json,[bool]$Strict){

@@ -1,13 +1,17 @@
 param(
   [switch]$CheckOnly,
+  [switch]$Repair,
   [switch]$CheckAuth,
   [switch]$Strict,
   [switch]$Json
 )
 
 $ErrorActionPreference = "Stop"
-. 'D:\Codex\.codex\hooks\lib\CodexHookRuntime.ps1'
-. 'D:\Codex\.codex\hooks\lib\CodexGitHubCliGuardEntry.ps1'
+if ($CheckOnly -and $Repair) { throw 'CheckOnly 与 Repair 不能同时使用。' }
+$ReadOnly = -not [bool]$Repair
+$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ScriptRoot 'lib\CodexHookRuntime.ps1')
+. (Join-Path $ScriptRoot 'lib\CodexGitHubCliGuardEntry.ps1')
 $GuardStarted = [DateTime]::UtcNow
 $GuardStopwatch = [Diagnostics.Stopwatch]::StartNew()
 $script:ActiveGitHubGuardState = $null
@@ -69,7 +73,7 @@ function Protect-GhPersistentEnvironment {
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $persistentPathOk = (Test-EnvironmentPathEntry -PathValue $userPath -Expected $ToolsBinPath) -or (Test-EnvironmentPathEntry -PathValue $machinePath -Expected $ToolsBinPath)
-    if (-not $persistentPathOk -and -not $CheckOnly) {
+    if (-not $persistentPathOk -and -not $ReadOnly) {
       $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $ToolsBinPath } else { "$ToolsBinPath;$userPath" }
       [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
       $script:ActiveGitHubGuardState.changed = $true
@@ -79,7 +83,7 @@ function Protect-GhPersistentEnvironment {
 
     $userConfig = [Environment]::GetEnvironmentVariable('GH_CONFIG_DIR', 'User')
     $persistentConfigOk = [string]::Equals((Normalize-PathEntry $userConfig), (Normalize-PathEntry $ExpectedGhConfigDir), [StringComparison]::OrdinalIgnoreCase)
-    if (-not $persistentConfigOk -and -not $CheckOnly) {
+    if (-not $persistentConfigOk -and -not $ReadOnly) {
       [Environment]::SetEnvironmentVariable('GH_CONFIG_DIR', $ExpectedGhConfigDir, 'User')
       $script:ActiveGitHubGuardState.changed = $true
       $repairs += 'userGhConfigDir'
@@ -210,7 +214,7 @@ function Repair-GhHardLink {
     if ($state['status'] -eq 'unverifiable') {
       throw "Refusing to repair an unverifiable GitHub CLI entry: $($state['reason'])"
     }
-    if ($CheckOnly) {
+    if ($ReadOnly) {
       return [ordered]@{ changed = $false; backupPath = $null }
     }
     if (-not (Test-Path -LiteralPath $GhSourcePath -PathType Leaf)) {
@@ -469,4 +473,4 @@ $healthWriter = {
   }
   Write-CodexHookLatestHealth -HookId 'github-cli' -Payload $healthPayload
 }
-Invoke-CodexGitHubCliGuardEntry -Operation $operation -HealthWriter $healthWriter -WriteHealth:(-not $CheckOnly) -Json:$Json -Strict:$Strict
+Invoke-CodexGitHubCliGuardEntry -Operation $operation -HealthWriter $healthWriter -WriteHealth:$Repair -Json:$Json -Strict:$Strict
