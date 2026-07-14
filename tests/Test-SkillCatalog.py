@@ -127,6 +127,42 @@ else:
                 self.assertTrue(cache_alpha["read_only"])
                 self.assertEqual(cache_alpha["runtime_verification"], "unverified")
 
+        def test_system_source_accepts_dot_system_qualified_skill_name(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                cache.mkdir()
+                _write_skill(
+                    active,
+                    ".system/imagegen",
+                    name="imagegen",
+                    description="system skill",
+                    source=(
+                        "# Source Provenance\n"
+                        "Skill: `.system/imagegen`\n"
+                        "Status: bundled-system\n"
+                    ),
+                )
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"sources": [{"skills": [".system/imagegen"]}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                artifact = catalog["artifacts"][0]
+                self.assertEqual(artifact["scope"], "system")
+                self.assertEqual(artifact["ledger_coverage"], "pass")
+                self.assertEqual(artifact["source"]["conflicts"], [])
+                self.assertEqual(catalog["checks"]["ledger"]["status"], "pass")
+
         def test_extracts_invocation_source_and_ledger_facts(self) -> None:
             with tempfile.TemporaryDirectory() as temp:
                 base = Path(temp)

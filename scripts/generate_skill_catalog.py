@@ -269,7 +269,13 @@ def _parse_frontmatter(data: bytes, *, path: Path) -> dict[str, Any]:
     return values
 
 
-def _parse_source(data: bytes, *, path: Path, skill_name: str) -> dict[str, Any]:
+def _parse_source(
+    data: bytes,
+    *,
+    path: Path,
+    skill_name: str,
+    accepted_skill_names: set[str] | None = None,
+) -> dict[str, Any]:
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -285,7 +291,8 @@ def _parse_source(data: bytes, *, path: Path, skill_name: str) -> dict[str, Any]
 
     source_skill = fields.get("skill")
     conflicts: list[str] = []
-    if source_skill and source_skill != skill_name and "," not in source_skill:
+    accepted_names = {skill_name, *(accepted_skill_names or set())}
+    if source_skill and source_skill not in accepted_names and "," not in source_skill:
         conflicts.append(f"SOURCE.md Skill={source_skill!r} 与 name={skill_name!r} 不一致")
     return {
         "record_path": str(path),
@@ -295,7 +302,12 @@ def _parse_source(data: bytes, *, path: Path, skill_name: str) -> dict[str, Any]
     }
 
 
-def _source_for(skill_md: Path, *, skill_name: str) -> dict[str, Any]:
+def _source_for(
+    skill_md: Path,
+    *,
+    skill_name: str,
+    accepted_skill_names: set[str] | None = None,
+) -> dict[str, Any]:
     source_path = skill_md.parent / "SOURCE.md"
     if not source_path.exists():
         return {
@@ -307,7 +319,12 @@ def _source_for(skill_md: Path, *, skill_name: str) -> dict[str, Any]:
     if not source_path.is_file() or _is_reparse(source_path):
         raise CatalogError(f"SOURCE.md 不是安全的普通文件：{source_path}")
     data, stat_result = _read_stable(source_path, label="SOURCE.md")
-    result = _parse_source(data, path=source_path, skill_name=skill_name)
+    result = _parse_source(
+        data,
+        path=source_path,
+        skill_name=skill_name,
+        accepted_skill_names=accepted_skill_names,
+    )
     result["integrity"] = {
         "sha256": hashlib.sha256(data).hexdigest(),
         "size": stat_result.st_size,
@@ -543,7 +560,11 @@ def _artifact(
     frontmatter = _parse_frontmatter(data, path=skill_path)
     name = str(frontmatter["name"]).strip()
     content_sha256 = hashlib.sha256(data).hexdigest()
-    source = _source_for(skill_path, skill_name=name) if scope != "plugin-cache" else {
+    source = _source_for(
+        skill_path,
+        skill_name=name,
+        accepted_skill_names={f".system/{name}"} if scope == "system" else None,
+    ) if scope != "plugin-cache" else {
         "record_path": None,
         "status": "not-applicable",
         "fields": {},
