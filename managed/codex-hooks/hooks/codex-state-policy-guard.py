@@ -75,7 +75,7 @@ LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
 # those bytes to SQLite while covering the data ranges around them.
 SQLITE_SHM_LOCK_OFFSET = 120
 SQLITE_SHM_LOCK_LENGTH = 8
-COLD_MAINTENANCE_EVIDENCE_VERSION = "codex-state-cold-maintenance-v1"
+COLD_MAINTENANCE_EVIDENCE_VERSION = "codex-state-cold-maintenance-v2"
 COLD_MAINTENANCE_REQUIRED = "cold-maintenance-required"
 ERROR_FILE_NOT_FOUND = 2
 ERROR_PATH_NOT_FOUND = 3
@@ -1603,6 +1603,76 @@ def _assert_cold_maintenance_sources(
     ):
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     return actual
+
+
+def _capture_cold_source_generation(
+    codex_home: Path,
+) -> tuple[SqliteSourceSnapshot, dict[str, list[int]], dict[str, str]]:
+    source_set = _probe_cold_maintenance_sources(codex_home)
+    database = codex_home / "state_5.sqlite"
+    snapshot = _capture_sqlite_source(database)
+    source_hashes: dict[str, str] = {}
+    for index, path in enumerate(
+        (
+            database,
+            Path(str(database) + "-wal"),
+            Path(str(database) + "-shm"),
+            Path(str(database) + "-journal"),
+        )
+    ):
+        identity = snapshot.identities[index]
+        payload = snapshot.payload[index]
+        if identity is None:
+            continue
+        if payload is None or not snapshot.content_known[index]:
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+        source_hashes[path.name] = _sha256(payload)
+    actual_set = {
+        name: list(snapshot.identities[index])
+        for index, name in enumerate(
+            (
+                database.name,
+                Path(str(database) + "-wal").name,
+                Path(str(database) + "-shm").name,
+                Path(str(database) + "-journal").name,
+            )
+        )
+        if snapshot.identities[index] is not None
+    }
+    if actual_set != source_set or database.name not in source_hashes:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    return snapshot, actual_set, source_hashes
+
+
+def _normalise_cold_source_set(value: object) -> dict[str, list[int]] | None:
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, list[int]] = {}
+    for name, identity in value.items():
+        if (
+            not isinstance(name, str)
+            or not isinstance(identity, (list, tuple))
+            or len(identity) != 2
+            or not all(isinstance(item, int) and item >= 0 for item in identity)
+        ):
+            return None
+        result[name] = [int(identity[0]), int(identity[1])]
+    return result
+
+
+def _normalise_cold_source_hashes(value: object) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, str] = {}
+    for name, digest in value.items():
+        if (
+            not isinstance(name, str)
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        ):
+            return None
+        result[name] = digest
+    return result
 
 
 def _rebase_cold_sqlite_snapshot(
@@ -3911,7 +3981,9 @@ def update_thread_state(
     retain_return_lease: bool = False,
 ) -> dict[str, object]:
     resolved_policy = _resolve_policy_for_path(path, permission_policy)
-    result = _update_thread_state_impl(
+    if cold_maintenance and not check_only and not retain_return_lease:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    return _update_thread_state_impl(
         path,
         permission_policy=resolved_policy,
         check_only=check_only,
@@ -3922,18 +3994,6 @@ def update_thread_state(
         after_first_snapshot_capture=after_first_snapshot_capture,
         retain_return_lease=retain_return_lease,
     )
-    if cold_maintenance and not retain_return_lease:
-        source_snapshot = result.get("_sourceSnapshot")
-        expected_identity = (
-            source_snapshot.identities[0]
-            if isinstance(source_snapshot, SqliteSourceSnapshot)
-            else None
-        )
-        _assert_cold_maintenance_sources(
-            Path(resolved_policy.codex_home or path.parent),
-            expected_database_identity=expected_identity,
-        )
-    return result
 
 
 class WindowsNamedMutex:
@@ -4075,14 +4135,41 @@ def _require_cold_maintenance_evidence(
             raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     except (OSError, StatePolicyError) as exc:
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
-    expected_sources = evidence.get("sourceIdentities")
-    if not isinstance(expected_sources, dict):
+    source_database_identity = evidence.get("sourceDatabaseIdentity")
+    source_database_hash = evidence.get("sourceDatabaseSha256")
+    expected_source_set = _normalise_cold_source_set(evidence.get("sourceSet"))
+    expected_source_hashes = _normalise_cold_source_hashes(evidence.get("sourceHashes"))
+    if (
+        not isinstance(source_database_identity, (list, tuple))
+        or len(source_database_identity) != 2
+        or not all(isinstance(value, int) and value >= 0 for value in source_database_identity)
+        or not isinstance(source_database_hash, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", source_database_hash)
+        or expected_source_set is None
+        or expected_source_hashes is None
+    ):
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     try:
-        actual_sources = _probe_cold_maintenance_sources(codex_home)
+        source_snapshot, actual_source_set, actual_source_hashes = _capture_cold_source_generation(codex_home)
     except (OSError, StatePolicyError) as exc:
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
-    if expected_sources != actual_sources:
+    if (
+        expected_source_set != actual_source_set
+        or expected_source_hashes != actual_source_hashes
+        or actual_source_set.get("state_5.sqlite") != list(source_database_identity)
+        or actual_source_hashes.get("state_5.sqlite") != source_database_hash
+        or source_snapshot.payload[0] is None
+        or _sha256(source_snapshot.payload[0]) != source_database_hash
+        or backup_hash != source_database_hash
+    ):
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    source_paths = {
+        _path_compare_key(str(codex_home / name))
+        for name in actual_source_set
+    }
+    if _path_compare_key(backup_path_value) in source_paths:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    if list(backup_identity) in actual_source_set.values():
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
 
 
@@ -4104,15 +4191,28 @@ def build_cold_maintenance_evidence(
     identity = _file_handle_identity(backup)
     if identity is None:
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    source_snapshot, source_set, source_hashes = _capture_cold_source_generation(codex_home)
+    backup_hash = _sha256(backup.read_bytes())
+    if (
+        source_snapshot.payload[0] is None
+        or backup_hash != source_hashes.get("state_5.sqlite")
+        or _path_compare_key(str(backup))
+        in {_path_compare_key(str(codex_home / name)) for name in source_set}
+        or list(identity) in source_set.values()
+    ):
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     evidence: dict[str, object] = {
         "schema": COLD_MAINTENANCE_EVIDENCE_VERSION,
         "codexHome": str(codex_home),
         "sqliteStopped": True,
         "backupVerified": True,
         "backupPath": str(backup),
-        "backupSha256": _sha256(backup.read_bytes()),
+        "backupSha256": backup_hash,
         "backupIdentity": list(identity),
-        "sourceIdentities": _probe_cold_maintenance_sources(codex_home),
+        "sourceDatabaseIdentity": source_set["state_5.sqlite"],
+        "sourceDatabaseSha256": source_hashes["state_5.sqlite"],
+        "sourceSet": source_set,
+        "sourceHashes": source_hashes,
     }
     _require_cold_maintenance_evidence(codex_home, evidence)
     return evidence

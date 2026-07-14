@@ -202,6 +202,26 @@ class CodexStatePolicyTests(unittest.TestCase):
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
 
+    def test_cold_direct_write_requires_return_lease_before_source_access(self) -> None:
+        keeper = self.create_wal_db()
+        try:
+            keeper.execute("update threads set sentinel='lease-required' where id='target-a'")
+            keeper.commit()
+            self.close_wal_keeper_preserving_source(keeper)
+            evidence = self.cold_maintenance_evidence()
+            before = self.module._capture_sqlite_source(self.db_path)
+            with self.assertRaisesRegex(self.module.StatePolicyError, "cold-maintenance-required"):
+                self.module.update_thread_state(
+                    self.db_path,
+                    cold_maintenance=True,
+                    maintenance_evidence=evidence,
+                )
+            self.assertEqual(self.module._capture_sqlite_source(self.db_path), before)
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
     def test_run_policy_cold_maintenance_requires_evidence_before_global_publish(self) -> None:
         original_global = self.write_global(self.permission_drift())
         keeper = self.create_wal_db()
@@ -283,6 +303,47 @@ class CodexStatePolicyTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("cold-maintenance-required", result["errors"])
         self.assertEqual(self.global_path.read_bytes(), original_global)
+
+    def test_cold_evidence_rejects_same_source_or_foreign_backup(self) -> None:
+        original_global = self.write_global(self.permission_drift())
+        keeper = self.create_db()
+        keeper.close()
+        evidence = self.cold_maintenance_evidence()
+        source_snapshot = self.module._capture_sqlite_source(self.db_path)
+        source_identity = source_snapshot.identities[0]
+        source_hash = self.module._sha256(source_snapshot.payload[0] or b"")
+        self.assertIsNotNone(source_identity)
+        for backup_path, backup_hash, backup_identity in (
+            (self.db_path, source_hash, list(source_identity or ())),
+            (
+                self.backup_root / "foreign.sqlite",
+                self.module._sha256(b"foreign-backup"),
+                None,
+            ),
+        ):
+            with self.subTest(backup_path=backup_path):
+                candidate = dict(evidence)
+                candidate["backupPath"] = str(backup_path)
+                candidate["backupSha256"] = backup_hash
+                if backup_identity is None:
+                    backup_path = Path(str(backup_path))
+                    backup_path.write_bytes(b"foreign-backup")
+                    identity = self.module._file_handle_identity(backup_path)
+                    self.assertIsNotNone(identity)
+                    candidate["backupIdentity"] = list(identity or ())
+                else:
+                    candidate["backupIdentity"] = backup_identity
+                result = self.module.run_policy(
+                    self.codex_home,
+                    check_only=False,
+                    health_root=self.root / "health",
+                    output=io.StringIO(),
+                    cold_maintenance=True,
+                    maintenance_evidence=candidate,
+                )
+                self.assertFalse(result["ok"])
+                self.assertIn("cold-maintenance-required", result["errors"])
+                self.assertEqual(self.global_path.read_bytes(), original_global)
 
     def test_rewrite_projectless_path_is_boundary_safe_and_case_insensitive(self) -> None:
         rewrite = self.module.rewrite_projectless_path
@@ -3004,6 +3065,7 @@ class CodexStatePolicyTests(unittest.TestCase):
 
     def test_wal_write_allows_sqlite_owned_shm_and_wal_handles(self) -> None:
         keeper = sqlite3.connect(self.db_path)
+        lease = None
         try:
             self.assertEqual(keeper.execute("pragma journal_mode=wal").fetchone()[0], "wal")
             keeper.execute("pragma wal_autocheckpoint=0")
@@ -3026,8 +3088,13 @@ class CodexStatePolicyTests(unittest.TestCase):
                 self.db_path,
                 cold_maintenance=True,
                 maintenance_evidence=self.cold_maintenance_evidence(),
+                retain_return_lease=True,
             )
+            lease = updated.get("_returnLease")
             self.assertEqual(updated["changedCount"], 2)
+            if isinstance(lease, self.module.SqliteTargetLease):
+                lease.close()
+                lease = None
             verify = sqlite3.connect(self.db_path)
             self.assertEqual(
                 verify.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
@@ -3035,6 +3102,8 @@ class CodexStatePolicyTests(unittest.TestCase):
             )
             verify.close()
         finally:
+            if isinstance(lease, self.module.SqliteTargetLease):
+                lease.close()
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
@@ -3122,6 +3191,7 @@ class CodexStatePolicyTests(unittest.TestCase):
                         permission_policy=policy,
                         cold_maintenance=True,
                         maintenance_evidence=self.cold_maintenance_evidence(),
+                        retain_return_lease=True,
                     )
             self.assertGreaterEqual(calls, 3)
             verify = sqlite3.connect(self.db_path)
