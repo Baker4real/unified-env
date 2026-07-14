@@ -216,11 +216,97 @@ class CodexStatePolicyTests(unittest.TestCase):
                     cold_maintenance=True,
                     maintenance_evidence=evidence,
                 )
+            # The public wrapper is not the only entry point that must enforce
+            # the cold return-lease contract.  Exercise the implementation
+            # helper directly so an internal caller cannot bypass the final
+            # source-generation gate.
+            with self.assertRaisesRegex(self.module.StatePolicyError, "cold-maintenance-required"):
+                self.module._update_thread_state_impl(
+                    self.db_path,
+                    cold_maintenance=True,
+                    maintenance_evidence=evidence,
+                )
             self.assertEqual(self.module._capture_sqlite_source(self.db_path), before)
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows SHM mapping semantics")
+    def test_cold_write_rejects_shm_metadata_restore_before_commit(self) -> None:
+        """Cold commit gates reject SHM lock-window payload replay attacks."""
+        for offset in (120, 122, 127):
+            with self.subTest(offset=offset):
+                self.write_global(self.permission_drift())
+                keeper = self.create_wal_db()
+                keeper.execute(
+                    "update threads set sentinel='cold-shm-attack' where id='target-a'"
+                )
+                keeper.commit()
+                self.close_wal_keeper_preserving_source(keeper)
+                shutil.rmtree(self.backup_root, ignore_errors=True)
+                evidence = self.cold_maintenance_evidence()
+                original_capture = self.module._capture_sqlite_source
+                capture_patch = None
+                mutation = {"changed": False}
+
+                def restore_metadata_attack() -> None:
+                    # The active SQLite connection owns the SHM lock window,
+                    # so Windows correctly blocks a raw second writer here.
+                    # Inject the same late payload replay at the observation
+                    # seam instead: identity and metadata are preserved while
+                    # one lock-window byte changes after transaction_snapshot.
+                    def attacked_capture(path: Path, *args: object, **kwargs: object):
+                        snapshot = original_capture(path, *args, **kwargs)
+                        payload = list(snapshot.payload)
+                        shm_payload = payload[2]
+                        if not mutation["changed"] and shm_payload is not None:
+                            self.assertLess(offset, len(shm_payload))
+                            changed = bytearray(shm_payload)
+                            changed[offset] ^= 0x01
+                            payload[2] = bytes(changed)
+                            mutation["changed"] = True
+                            return self.module.SqliteSourceSnapshot(
+                                payload=tuple(payload),
+                                identities=snapshot.identities,
+                                metadata=snapshot.metadata,
+                                content_known=snapshot.content_known,
+                            )
+                        return snapshot
+
+                    nonlocal capture_patch
+                    capture_patch = mock.patch.object(
+                        self.module,
+                        "_capture_sqlite_source",
+                        side_effect=attacked_capture,
+                    )
+                    capture_patch.start()
+
+                result: dict[str, object] | None = None
+                try:
+                    with self.assertRaisesRegex(
+                        self.module.StatePolicyError,
+                        "bytes changed|concurrent",
+                    ):
+                        result = self.module.update_thread_state(
+                            self.db_path,
+                            cold_maintenance=True,
+                            maintenance_evidence=evidence,
+                            retain_return_lease=True,
+                            before_commit=restore_metadata_attack,
+                        )
+                finally:
+                    if capture_patch is not None:
+                        capture_patch.stop()
+                    if isinstance(result, dict):
+                        lease = result.get("_returnLease")
+                        if isinstance(lease, self.module.SqliteTargetLease):
+                            lease.close()
+                    self.assertTrue(mutation["changed"])
+                    keeper.close()
+                    for suffix in ("-wal", "-shm", "-journal"):
+                        Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+                    self.db_path.unlink(missing_ok=True)
 
     def test_run_policy_cold_maintenance_requires_evidence_before_global_publish(self) -> None:
         original_global = self.write_global(self.permission_drift())

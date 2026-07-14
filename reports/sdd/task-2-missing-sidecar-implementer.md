@@ -14,7 +14,7 @@ DONE（生命周期热路径已安全收口）
 
 ## 验证
 
-- `D:\Codex\tools\python314-official\python.exe -W error::ResourceWarning -m unittest tests/Test-CodexStatePolicy.py -q`：112 tests，全部通过。
+- `D:\Codex\tools\python314-official\python.exe -W error::ResourceWarning -m unittest tests/Test-CodexStatePolicy.py -q`：113 tests，全部通过。
 - `D:\Codex\tools\python314-official\python.exe -W error::ResourceWarning -m unittest tests/Test-CodexStatePathInventory.py -q`：17 tests，全部通过；`Test-SkillCatalog.py`：16 tests，全部通过。
 - `D:\Codex\tools\python314-official\python.exe -W error::ResourceWarning -m unittest tests/Test-SkillCatalog.py -q`：16 tests，全部通过。
 - `D:\Codex\tools\PowerShell\7.6.3\pwsh.exe -NoProfile -File tests\Test-CodexHookPolicy.ps1`：通过。
@@ -22,7 +22,7 @@ DONE（生命周期热路径已安全收口）
 - `git diff --check`（本任务文件）：通过；测试生成的临时目录、SQLite probe 和 `__pycache__` 已清理。
 - live check-only：`codex-state-policy-guard.py --codex-home D:\Codex\.codex --check-only --json` 退出码 1（预期 fail-closed），`ok=false`、`changed=false`、`converged=false`，错误含 `generation-unbounded`/`cold-maintenance-required`/`repair-required`；global、SQLite 主库/WAL/SHM、config 哈希前后一致，`D:\Codex\.codex\tmp\codex-state-policy-check` 前后均不存在。
 
-- 新增回归：`test_run_policy_rejects_shm_lock_byte_mutation_during_output` 覆盖 SHM 偏移 120、122、127 的 metadata-restore 攻击并确认 lifecycle 预检先 fail-closed；`test_sqlite_strict_gate_rejects_shm_metadata_restore` 覆盖同 identity/metadata 下 122/127 payload 变化；`test_run_policy_write_requires_observable_shm_lock_window` 覆盖 mmap 不可观测的维护前置；冷维护 evidence 的备份篡改、source generation/独立备份绑定、活动 SQLite handle 和无 return lease 直写均被 gate 拒绝，关闭 keeper 后的 WAL/SHM cold write 仍可收敛，run_policy 输出期间竞争 writer 被 return lease 阻断。
+- 新增回归：`test_run_policy_rejects_shm_lock_byte_mutation_during_output` 覆盖 SHM 偏移 120、122、127 的 metadata-restore 攻击并确认 lifecycle 预检先 fail-closed；`test_sqlite_strict_gate_rejects_shm_metadata_restore` 覆盖同 identity/metadata 下 122/127 payload 变化；`test_cold_write_rejects_shm_metadata_restore_before_commit` 覆盖冷写 transaction snapshot 后、提交前对 120/122/127 payload 的 metadata-restore 回放并确认严格内容门 fail-closed；`test_run_policy_write_requires_observable_shm_lock_window` 覆盖 mmap 不可观测的维护前置；冷维护 evidence 的备份篡改、source generation/独立备份绑定、活动 SQLite handle 和无 return lease 直写均被 gate 拒绝，关闭 keeper 后的 WAL/SHM cold write 仍可收敛，run_policy 输出期间竞争 writer 被 return lease 阻断。
 
 ## 边界
 

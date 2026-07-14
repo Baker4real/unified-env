@@ -3507,6 +3507,7 @@ def _assert_sqlite_snapshot_identity(
     check_sidecar_content: bool = False,
     handle_sources: dict[int, tuple[object, wintypes.HANDLE]] | None = None,
     locked_sidecar_indices: set[int] | None = None,
+    sidecar_content_indices: set[int] | None = None,
     strict_sidecar_content_indices: set[int] | None = None,
 ) -> SqliteSourceSnapshot:
     """Reject path/identity replay between a checked snapshot and SQLite I/O."""
@@ -3515,6 +3516,11 @@ def _assert_sqlite_snapshot_identity(
     else:
         after = _capture_sqlite_source(path)
     locked_indices = set(locked_sidecar_indices or {})
+    content_indices = (
+        set(range(1, 4))
+        if sidecar_content_indices is None
+        else set(sidecar_content_indices)
+    )
     strict_indices = set(strict_sidecar_content_indices or {})
     if before.identities[0] != after.identities[0] or (
         check_main_metadata and before.metadata[0] != after.metadata[0]
@@ -3531,7 +3537,7 @@ def _assert_sqlite_snapshot_identity(
             raise StatePolicyError("thread state sidecar concurrent replacement")
         if expected is None and actual is not None and not allow_new_sidecars:
             raise StatePolicyError("thread state sidecar appeared during check")
-        if expected is not None and check_sidecar_content:
+        if expected is not None and check_sidecar_content and index in content_indices:
             if index in locked_indices and index not in strict_indices:
                 # A leased WAL/SHM/journal may legitimately change SQLite's
                 # lock bytes while the identity/range lease prevents an
@@ -3553,8 +3559,14 @@ def _assert_sqlite_snapshot_identity(
                 if before.metadata[index] != after.metadata[index]:
                     raise StatePolicyError("thread state sidecar metadata changed concurrently")
                 continue
-            if before.metadata[index] != after.metadata[index]:
+            if (
+                not (index == 2 and index in strict_indices)
+                and before.metadata[index] != after.metadata[index]
+            ):
                 raise StatePolicyError("thread state sidecar metadata changed concurrently")
+            if index == 2 and index in strict_indices:
+                if before.content_known[index] != after.content_known[index]:
+                    raise StatePolicyError("thread state sidecar bytes unavailable during return gate")
             if (
                 before.content_known[index]
                 and after.content_known[index]
@@ -3690,6 +3702,12 @@ def _update_thread_state_impl(
     after_first_snapshot_capture: Callable[[int], None] | None = None,
     retain_return_lease: bool = False,
 ) -> dict[str, object]:
+    # Keep the cold-maintenance return-lease contract at the implementation
+    # boundary as well as the public wrapper.  Callers inside this module (or
+    # tests/tools reaching the private helper directly) must not be able to
+    # bypass the lease that closes the post-commit source-generation window.
+    if cold_maintenance and not check_only and not retain_return_lease:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     permission_policy = _resolve_policy_for_path(path, permission_policy)
     _assert_permission_policy_unchanged(permission_policy)
     if cold_maintenance:
@@ -3836,6 +3854,8 @@ def _update_thread_state_impl(
                 allow_new_sidecars=False,
                 check_main_metadata=False,
                 check_sidecar_content=True,
+                sidecar_content_indices={2} if cold_maintenance else None,
+                strict_sidecar_content_indices={2} if cold_maintenance else None,
             )
             _assert_permission_policy_fingerprint(permission_policy)
             _assert_sqlite_snapshot_identity(
@@ -3844,6 +3864,8 @@ def _update_thread_state_impl(
                 allow_new_sidecars=False,
                 check_main_metadata=False,
                 check_sidecar_content=True,
+                sidecar_content_indices={2} if cold_maintenance else None,
+                strict_sidecar_content_indices={2} if cold_maintenance else None,
             )
             _assert_sqlite_snapshot_identity(
                 transaction_snapshot,
@@ -3851,6 +3873,8 @@ def _update_thread_state_impl(
                 allow_new_sidecars=False,
                 check_main_metadata=False,
                 check_sidecar_content=True,
+                sidecar_content_indices={2} if cold_maintenance else None,
+                strict_sidecar_content_indices={2} if cold_maintenance else None,
             )
             if _file_handle_identity(path) != source_identity:
                 raise StatePolicyError("thread state concurrent replacement")
@@ -3881,6 +3905,17 @@ def _update_thread_state_impl(
             raise StatePolicyError(
                 "thread state target lease unavailable after commit; unsafe-partial"
             ) from exc
+        if cold_maintenance:
+            # COMMIT and the immediately reacquired RESERVED transaction can
+            # legitimately advance SQLite's WAL-index lock bytes.  Rebase the
+            # cold final payload baseline after that SQLite-owned transition;
+            # the strict transaction_snapshot gates above already covered the
+            # pre-COMMIT attack window, while the returned lease covers output.
+            transaction_snapshot = _rebase_cold_sqlite_snapshot(
+                path,
+                source_identity,
+                source_bytes_hash,
+            )
         if _file_handle_identity(path) != source_identity:
             raise StatePolicyError("thread state concurrent replacement")
         verify_count = int(
@@ -3903,6 +3938,9 @@ def _update_thread_state_impl(
             allow_new_sidecars=False,
             allow_removed_sidecars=True,
             check_main_metadata=False,
+            check_sidecar_content=cold_maintenance,
+            sidecar_content_indices={2} if cold_maintenance else None,
+            strict_sidecar_content_indices={2} if cold_maintenance else None,
         )
         try:
             _assert_permission_policy_fingerprint(permission_policy)
