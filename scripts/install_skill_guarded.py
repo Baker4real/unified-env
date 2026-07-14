@@ -717,6 +717,7 @@ def copy_tree_without_security_metadata(source: Path, destination: Path) -> None
         raise InstallError(f"激活临时目录已存在：{destination}")
     destination.mkdir()
     try:
+        root_skill_md = source / "SKILL.md"
         for current, directories, files in os.walk(
             source,
             topdown=True,
@@ -735,9 +736,14 @@ def copy_tree_without_security_metadata(source: Path, destination: Path) -> None
                 (target_directory / directory).mkdir(exist_ok=True)
             for filename in files:
                 child = current_path / filename
+                if child == root_skill_md:
+                    continue
                 if is_reparse(child) or not child.is_file():
                     raise InstallError(f"待激活 skill 只允许普通文件：{child}")
                 shutil.copyfile(child, target_directory / filename)
+        if not root_skill_md.is_file() or is_reparse(root_skill_md):
+            raise InstallError(f"待激活 skill 缺少安全的 SKILL.md：{root_skill_md}")
+        shutil.copyfile(root_skill_md, destination / "SKILL.md")
         if tree_file_hashes(source) != tree_file_hashes(destination):
             raise InstallError(f"激活临时目录内容指纹不一致：{destination}")
     except Exception:
@@ -883,7 +889,7 @@ def activate_directories(
             raise InstallError(f"active skill 目标是 reparse point：{active}")
         if active_exists and not active.is_dir():
             raise InstallError(f"active skill 目标不是目录：{active}")
-        activation_temp = active_root / f".{name}.{uuid.uuid4().hex}.activating"
+        activation_temp = active_root / f"_disabled-guarded-{name}-{uuid.uuid4().hex}"
         record = {
             "name": name,
             "active": str(active),

@@ -80,6 +80,29 @@ class SkillInstallGuardedTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
+    def protect_private_candidate_tree(self, path: Path) -> None:
+        for arguments in (
+            ["/inheritance:r", "/T", "/C"],
+            [
+                "/grant:r",
+                "*S-1-3-4:(OI)(CI)(F)",
+                "*S-1-5-18:(OI)(CI)(F)",
+                "*S-1-5-32-544:(OI)(CI)(F)",
+                "/T",
+                "/C",
+            ],
+        ):
+            result = subprocess.run(
+                ["icacls.exe", str(path), *arguments],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertTrue(self.acl_state(path)["protected"])
+
     def acl_state(self, path: Path) -> dict[str, object]:
         script = (
             "$pathValue=[Environment]::GetEnvironmentVariable('SKILL_ACL_TEST_PATH','Process');"
@@ -191,6 +214,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         references = candidate / "references"
         references.mkdir()
         (references / "guide.md").write_text("runtime-readable\n", encoding="utf-8")
+        self.protect_private_candidate_tree(candidate)
         manifest = self.write_manifest("test-skill-wrapper", "install")
 
         with contextlib.redirect_stdout(io.StringIO()):
