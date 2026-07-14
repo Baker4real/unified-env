@@ -785,6 +785,14 @@ function Assert-CodexHookManifest {
                 if (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected $inventoryAcceptanceArguments) {
                     continue
                 }
+                $behaviorAcceptanceArguments = @{
+                    'serena-activate' = @('-NoProfile', '-File', 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1', '-Mode', 'ActivationAcceptance')
+                    'serena-cleanup' = @('-NoProfile', '-File', 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1', '-Mode', 'CleanupAcceptance')
+                    'serena-reminder' = @('-NoProfile', '-File', 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1', '-Mode', 'ReminderAcceptance')
+                }
+                if ($behaviorAcceptanceArguments.ContainsKey([string]$hook.id) -and (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected $behaviorAcceptanceArguments[[string]$hook.id])) {
+                    continue
+                }
                 if ($declaredArguments.Count -ne 3 -or $declaredArguments[0] -cne '-NoProfile' -or $declaredArguments[1] -cne '-Command') {
                     throw "hooks[$($hook.id)] pwsh health/acceptance arguments 不在受控 allowlist。"
                 }
@@ -926,8 +934,26 @@ function Assert-CodexHookManifest {
 
             $roleFile = $filesByLivePath[$rolePath]
             $roleOwners = @($roleFile.ownerHookIds)
-            if ($roleOwners.Count -ne 1 -or $roleOwners[0] -cne $hook.id) {
-                throw "files[$($roleFile.relativePath)] 对 $rolePath 声称了无关 owner。"
+            if ($role -ceq 'wrapperPath') {
+                if ($roleOwners.Count -ne 1 -or $roleOwners[0] -cne $hook.id) {
+                    throw "files[$($roleFile.relativePath)] 对 $rolePath 声称了无关 owner。"
+                }
+            }
+            else {
+                if ($roleOwners -cnotcontains $hook.id) {
+                    throw "files[$($roleFile.relativePath)] 未声明 implementation owner：$($hook.id)"
+                }
+                foreach ($implementationOwner in $roleOwners) {
+                    $ownerHook = $hooksById[$implementationOwner]
+                    if (
+                        $null -eq $ownerHook -or
+                        $null -eq $ownerHook.wrapperPath -or
+                        $ownerHook.sourceState -cne 'managed' -or
+                        -not ([IO.Path]::GetFullPath([string]$ownerHook.implementationPath)).Equals($rolePath, [StringComparison]::OrdinalIgnoreCase)
+                    ) {
+                        throw "files[$($roleFile.relativePath)] 声明了无关 shared implementation owner：$implementationOwner"
+                    }
+                }
             }
             if ($hook.lifecycle -cne 'retired' -and $roleFile.lifecycle -ceq 'retired') {
                 throw "hooks[$($hook.id)].$role 不能只由 retired file 提供。"

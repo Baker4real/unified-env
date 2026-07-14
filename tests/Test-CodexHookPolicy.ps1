@@ -268,7 +268,7 @@ Assert-True ($stateGuardSource.Contains('path_mode: str = "inventory"')) 'state 
 Assert-True ($stateGuardSource.Contains('approved_map: object = None')) 'state guard 必须要求显式 approved map 才能修复路径'
 Assert-True ($stateGuardSource.Contains('permission policy sources conflict')) '策略来源冲突必须 fail closed'
 Assert-True (@($managedManifest.hooks).Count -eq 8) '受管 manifest 必须声明 8 个当前 hook'
-Assert-True (@($managedManifest.files).Count -eq 18) '受管 manifest 必须声明冻结 12 文件、state writer、state preflight 两个入口与 3 个共享库文件'
+Assert-True (@($managedManifest.files).Count -eq 22) '受管 manifest 必须纳入 state preflight 与三个 Serena behavior wrapper 的完整文件闭包'
 Assert-True (
     @($managedManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.py').Count -eq 1 -and
     @($managedManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.cmd').Count -eq 1
@@ -338,7 +338,14 @@ $retiredReplacement = Copy-TestDocument @($retiredReplacementOrder.hooks | Where
 $retiredReplacement.id = 'serena-cleanup-retired-replacement'
 $retiredReplacement.lifecycle = 'retired'
 $retiredReplacement.lifecycleReason = 'retired replacement may retain the active order'
+$retiredReplacement.commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
+$retiredReplacement.wrapperPath = $null
+$retiredReplacement.implementationPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
+$retiredReplacement.runtimeId = 'serenaHooks'
+$retiredReplacement.sourceState = 'vendor'
 $retiredReplacement.arguments = @('cleanup-retired', '--client=codex')
+$retiredReplacement.quickHealthCheck.arguments = @('-NoProfile', '-Command', "Test-Path -LiteralPath 'D:\Codex\tools\uv\bin\serena-hooks.exe'")
+$retiredReplacement.fullAcceptanceCommand.commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
 $retiredReplacement.fullAcceptanceCommand.arguments = @('cleanup-retired', '--client=codex')
 $retiredReplacementOrder.hooks = @($retiredReplacementOrder.hooks) + @($retiredReplacement)
 Assert-True (Assert-CodexHookManifest -Manifest $retiredReplacementOrder) 'event/order 唯一性只约束 active+compatibility；retired replacement 可保留同 order'
@@ -369,8 +376,8 @@ Assert-True (
 $sourceStates = @($managedManifest.hooks | Group-Object sourceState -AsHashTable -AsString)
 Assert-True (
     @($managedManifest.hooks | Where-Object sourceState -ceq 'planned').Count -eq 0 -and
-    @($managedManifest.hooks | Where-Object sourceState -ceq 'vendor').Count -eq 3 -and
-    @($managedManifest.hooks | Where-Object sourceState -ceq 'managed').Count -eq 5
+    @($managedManifest.hooks | Where-Object sourceState -ceq 'vendor').Count -eq 1 -and
+    @($managedManifest.hooks | Where-Object sourceState -ceq 'managed').Count -eq 7
 ) 'sourceState 必须诚实区分 managed/planned/vendor'
 
 Assert-True (
@@ -381,7 +388,7 @@ Assert-True (
 ) 'runtime manifest 必须使用 brief 固定路径'
 
 $runtimeFile=@($managedManifest.files|Where-Object relativePath -ceq 'hooks/lib/CodexHookRuntime.ps1')
-Assert-True ($runtimeFile.Count -eq 1 -and (@($runtimeFile[0].ownerHookIds) -join ',') -ceq 'provider-stability,serena-activate,serena-dashboard,github-cli') 'shared runtime owners 必须覆盖所有 PowerShell active hooks'
+Assert-True ($runtimeFile.Count -eq 1 -and (@($runtimeFile[0].ownerHookIds) -join ',') -ceq 'provider-stability,serena-activate,serena-dashboard,github-cli,serena-cleanup,serena-reminder') 'shared runtime owners 必须覆盖所有 PowerShell active hooks'
 $provider=@($managedManifest.hooks|Where-Object id -ceq 'provider-stability')[0]
 $dashboard=@($managedManifest.hooks|Where-Object id -ceq 'serena-dashboard')[0]
 $serenaActivate=@($managedManifest.hooks|Where-Object id -ceq 'serena-activate')[0]
@@ -389,19 +396,28 @@ $github=@($managedManifest.hooks|Where-Object id -ceq 'github-cli')[0]
 function Assert-WriteResource([object]$Hook,[string]$Path,[string]$Message){Assert-True (@($Hook.writeResources|Where-Object{$_.kind -ceq 'path' -and $_.value -ceq $Path}).Count -eq 1) $Message}
 function Assert-ReadResource([object]$Hook,[string]$Path,[string]$Message){Assert-True (@($Hook.readResources|Where-Object{$_.kind -ceq 'path' -and $_.value -ceq $Path}).Count -eq 1) $Message}
 Assert-ReadResource $github 'D:\Codex\tools\gh\bin\gh.exe' 'GitHub manifest 必须声明实际官方 gh.exe 信任/签名输入'
-Assert-ReadResource $serenaActivate 'D:\Codex\tools\uv\bin\serena-hooks.exe' 'Serena activate manifest 必须声明实际 serena-hooks.exe runtime 输入'
+Assert-True (@($serenaActivate.readResources | Where-Object { $_.kind -ceq 'path' -and $_.value -ceq 'D:\Codex\tools\uv\bin\serena-hooks.exe' }).Count -eq 0) '静态 activation reminder 不得读取 vendor runtime'
 Assert-WriteResource $provider 'D:\Codex\.codex\backups_state\provider-stability-guard' 'provider manifest 必须声明 config rollback backup 写资源'
 Assert-WriteResource $dashboard 'D:\Codex\.codex\backups_state\serena-dashboard-guard\toml' 'dashboard manifest 必须声明 TOML rollback backup 写资源'
 Assert-WriteResource $dashboard 'D:\Codex\.codex\backups_state\serena-dashboard-guard\yaml' 'dashboard manifest 必须声明 YAML rollback backup 写资源'
 foreach($hook in @($provider,$serenaActivate,$dashboard,$github)){Assert-WriteResource $hook 'D:\Codex\.codex\run-evidence\codex-hook-health\.backups' "$($hook.id) manifest 必须声明 latest-health backup 写资源"}
 Assert-WriteResource $serenaActivate 'D:\Codex\.codex\run-evidence\codex-hook-health\serena-activate.json' 'Serena activate manifest 必须声明独立 health 写资源'
 Assert-True (($provider.fullAcceptanceCommand.arguments -join ',') -ceq '-Json,-CheckNetwork') 'provider full acceptance 必须保留 Task 8 实际 network 验收；Task 7 另走 CheckOnly'
-$expectedSerenaActivateAcceptance = "'{`"session_id`":`"00000000-0000-0000-0000-000000000000`"}' | & 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd'"
-Assert-True ($serenaActivate.fullAcceptanceCommand.arguments[2] -ceq $expectedSerenaActivateAcceptance) 'Serena activate full acceptance 必须留给 Task 8 的真实 vendor protocol'
+$expectedSerenaActivateAcceptance = @('-NoProfile','-File','D:\Codex\.codex\hooks\serena-behavior-guard.ps1','-Mode','ActivationAcceptance')
+Assert-True ((@($serenaActivate.fullAcceptanceCommand.arguments) -join "`0") -ceq ($expectedSerenaActivateAcceptance -join "`0")) 'Serena activation reminder acceptance 必须调用固定无残留验收模式'
 $invalidSerenaActivateAcceptance = Copy-TestDocument $managedManifest
 $invalidSerenaActivateHook = @($invalidSerenaActivateAcceptance.hooks | Where-Object id -ceq 'serena-activate')[0]
-$invalidSerenaActivateHook.fullAcceptanceCommand.arguments[2] = "'{}' | & '$($invalidSerenaActivateHook.commandPath)'"
+$invalidSerenaActivateHook.fullAcceptanceCommand.arguments[-1] = 'ReminderAcceptance'
 Assert-Throws { Assert-CodexHookManifest -Manifest $invalidSerenaActivateAcceptance } 'Serena activate invalid SessionStart input 不得绕过 full vendor protocol allowlist'
+$serenaCleanup=@($managedManifest.hooks|Where-Object id -ceq 'serena-cleanup')[0]
+$serenaReminder=@($managedManifest.hooks|Where-Object id -ceq 'serena-reminder')[0]
+$expectedCleanupAcceptance = @('-NoProfile','-File','D:\Codex\.codex\hooks\serena-behavior-guard.ps1','-Mode','CleanupAcceptance')
+$expectedReminderAcceptance = @('-NoProfile','-File','D:\Codex\.codex\hooks\serena-behavior-guard.ps1','-Mode','ReminderAcceptance')
+Assert-True ($serenaCleanup.fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -and (@($serenaCleanup.fullAcceptanceCommand.arguments) -join "`0") -ceq ($expectedCleanupAcceptance -join "`0")) 'Serena cleanup full acceptance 必须使用唯一 session 并验证删除'
+Assert-True ($serenaReminder.fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -and (@($serenaReminder.fullAcceptanceCommand.arguments) -join "`0") -ceq ($expectedReminderAcceptance -join "`0")) 'Serena reminder full acceptance 必须验证阈值并清理唯一 session'
+$invalidBehaviorAcceptance = Copy-TestDocument $managedManifest
+@($invalidBehaviorAcceptance.hooks|Where-Object id -ceq 'serena-reminder')[0].fullAcceptanceCommand.arguments[-1] = 'CleanupAcceptance'
+Assert-Throws { Assert-CodexHookManifest -Manifest $invalidBehaviorAcceptance } 'Serena reminder 空对象不得绕过受控 full acceptance allowlist'
 Assert-True (($github.quickHealthCheck.arguments -join ',') -ceq '-CheckOnly,-Json') 'GitHub quick health 接口必须固定且不请求 auth'
 Assert-True (($github.fullAcceptanceCommand.arguments -join ',') -ceq '-Json,-CheckAuth,-Strict') 'GitHub full health 接口必须固定为 auth strict'
 

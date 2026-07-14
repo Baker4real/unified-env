@@ -41,10 +41,10 @@ $badYaml=Join-Path $fixture 'malformed.yml';[IO.File]::WriteAllText($badYaml,"we
 $astErrors=$null;$tokens=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexConfigFile.ps1'),[ref]$tokens,[ref]$astErrors);Assert-True ($astErrors.Count -eq 0) 'config AST 必须合法'
 $providerText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\codex-provider-stability-guard.ps1'))
 $dashboardText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\serena-dashboard-guard.ps1'))
-$activateText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\serena-activate-guarded.ps1'))
+$activateText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\serena-behavior-guard.ps1'))
 Assert-True ($providerText -match '\[switch\]\$CheckOnly' -and $providerText.Contains('if(-not $CheckOnly)')) 'provider 必须提供明确只读 check-only 分支'
 Assert-True ($dashboardText -match '\[switch\]\$CheckOnly' -and $dashboardText.Contains('if(-not $CheckOnly)')) 'dashboard 必须提供明确只读 check-only 分支'
-Assert-True ($activateText.Contains("'-CheckOnly'") -and $activateText.Contains("'-Json'") -and $activateText.Contains('session_id') -and $activateText.Contains('sessionId')) 'activate 必须以无 public param table 的显式 token 解析提供合法 SessionStart id 的只读 static acceptance'
+Assert-True ($activateText.Contains('absolute workspace root from environment_context') -and $activateText.Contains('mcp__serena__activate_project') -and $activateText.Contains('mcp__serena__get_current_config')) 'activation reminder 必须要求按 environment_context 的绝对 workspace 显式激活并复验'
 Assert-True ($providerText -match '(?s)\$network\s*=\s*if\(\$CheckNetwork\)\s*\{\s*Test-ProviderNetwork') 'provider check-only/static acceptance 不得隐式联网；network probe 必须显式受 CheckNetwork 控制'
 Assert-True (-not $providerText.Contains('elseif($changed -or $CheckNetwork)')) 'provider 默认 SessionStart 必须 zero stdout'
 Assert-True (-not $dashboardText.Contains("if($changed){'Serena dashboard settings normalized for Codex.'}")) 'dashboard 默认 SessionStart 必须 zero stdout'
@@ -68,14 +68,11 @@ Assert-True (($stateHook.quickHealthCheck.arguments -join ',') -ceq '--check-onl
 Assert-True (($stateHook.fullAcceptanceCommand.arguments -join ',') -ceq '--check-only,--json') 'state postcheck 必须只读'
 Assert-True ($dashboardHook.quickHealthCheck.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -and ($dashboardHook.quickHealthCheck.arguments -join ' ') -ceq "-NoProfile -Command Test-Path -LiteralPath 'D:\Codex\.codex\hooks\serena-dashboard-guard.cmd'") 'dashboard quick check 必须为固定 wrapper 存在性 static acceptance'
 Assert-True (($dashboardHook.fullAcceptanceCommand.arguments -join ',') -ceq '-CheckOnly,-Json') 'dashboard acceptance 必须只读'
-$expectedActivateFullAcceptance = "'{`"session_id`":`"00000000-0000-0000-0000-000000000000`"}' | & 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd'"
+$expectedActivateFullAcceptance = @('-NoProfile','-File','D:\Codex\.codex\hooks\serena-behavior-guard.ps1','-Mode','ActivationAcceptance')
 Assert-True (
     $activateHook.fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -and
-    @($activateHook.fullAcceptanceCommand.arguments).Count -eq 3 -and
-    $activateHook.fullAcceptanceCommand.arguments[0] -ceq '-NoProfile' -and
-    $activateHook.fullAcceptanceCommand.arguments[1] -ceq '-Command' -and
-    $activateHook.fullAcceptanceCommand.arguments[2] -ceq $expectedActivateFullAcceptance
-) 'activate full acceptance 必须保留给 Task 8 的真实 vendor protocol；Task 7 只验证 input/runtime'
+    (@($activateHook.fullAcceptanceCommand.arguments) -join "`0") -ceq ($expectedActivateFullAcceptance -join "`0")
+) 'activate full acceptance 必须走固定、无残留的受控验收模式'
 foreach($hook in @($providerHook,$stateHook,$dashboardHook)){
     Assert-True (@($hook.writeResources|Where-Object{$_.kind -ceq 'abstract' -and $_.value -ceq 'hook-stdout'}).Count -eq 0) "$($hook.id) SessionStart 默认不得声明 stdout"
 }

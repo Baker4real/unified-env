@@ -83,11 +83,8 @@ $missingTargetManifest = Copy-TestDocument $manifest
 $missingActivate = @($missingTargetManifest.hooks | Where-Object id -ceq 'serena-activate')[0]
 $missingActivate.commandPath = 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'
 $missingActivate.wrapperPath = 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'
-$missingActivate.implementationPath = 'D:\Codex\.codex\hooks\missing-serena-activate.ps1'
 $missingActivate.quickHealthCheck.arguments[2] = "Test-Path -LiteralPath 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'"
-$missingActivate.fullAcceptanceCommand.arguments[2] = '''{"session_id":"00000000-0000-0000-0000-000000000000"}'' | & ''D:\Codex\.codex\hooks\missing-serena-activate.cmd'' -CheckOnly -Json'
-@($missingTargetManifest.files | Where-Object liveRelativePath -ceq 'serena-activate-guarded.cmd')[0].liveRelativePath = 'missing-serena-activate.cmd'
-@($missingTargetManifest.files | Where-Object liveRelativePath -ceq 'serena-activate-guarded.ps1')[0].liveRelativePath = 'missing-serena-activate.ps1'
+@($missingTargetManifest.files | Where-Object liveRelativePath -ceq 'serena-activation-reminder.cmd')[0].liveRelativePath = 'missing-serena-activate.cmd'
 [void](Assert-CodexHookManifest -Manifest $missingTargetManifest)
 
 function Get-HookById {
@@ -141,7 +138,7 @@ $registry = [pscustomobject][ordered]@{
         Stop = @(
             [pscustomobject][ordered]@{
                 hooks = @(
-                    [pscustomobject][ordered]@{ type = 'command'; command = '"d:\codex\TOOLS\uv\bin\serena-hooks.exe" cleanup --client=codex'; timeout = 10 }
+                    [pscustomobject][ordered]@{ type = 'command'; command = '"d:\codex\.CODEX\hooks\serena-cleanup-guarded.cmd"'; timeout = 10 }
                     [pscustomobject][ordered]@{ type = 'command'; command = ConvertTo-TestCommand $cleanup.commandPath $cleanup.arguments; timeout = 10 }
                     [pscustomobject][ordered]@{ type = 'command'; command = ConvertTo-TestCommand $cleanup.commandPath @('cleanup-now', '--client=codex'); timeout = 10 }
                     [pscustomobject][ordered]@{ type = 'command'; command = ConvertTo-TestCommand $cleanup.commandPath @('precleanup', '--client=codex'); timeout = 10 }
@@ -176,7 +173,7 @@ Assert-True ($facts.events.SessionStart[7].groupIndex -eq 7 -and $facts.events.S
 Assert-True ($facts.events.SessionStart[8].groupIndex -eq 7 -and $facts.events.SessionStart[8].entryIndex -eq 1 -and $facts.events.SessionStart[8].idMatchStatus -ceq 'non-string-command') '非 string command entry 必须保留安全位置事实'
 Assert-True (@($facts.events.Unknown).Count -eq 3) '未知 event 必须聚合为脱敏计数事实'
 Assert-True (@($facts.events.Unknown | Where-Object { $null -ne $_.targetExists }).Count -eq 0) 'UNC/C/device unknown target 不得探测'
-Assert-True (@($facts.events.Stop | Where-Object idMatch -ceq 'serena-cleanup').Count -eq 2) '精确 vendor args 必须识别'
+Assert-True (@($facts.events.Stop | Where-Object idMatch -ceq 'serena-cleanup').Count -eq 2) '精确受管 wrapper identity 必须识别'
 Assert-True ($facts.events.Stop[0].commandIdentitySha256 -ceq $facts.events.Stop[1].commandIdentitySha256) 'slash/case/quote command 变体必须归一为同一 identity digest'
 Assert-True ($facts.events.SessionStart[9].commandIdentitySha256 -cne $facts.events.Stop[0].commandIdentitySha256) '相同 path/args 在不同 event 中不得误算重复 identity'
 Assert-True (@($facts.events.Stop | Where-Object idMatchStatus -ceq 'unmatched').Count -eq 2) 'verb 前后缀不得误识别'
@@ -335,7 +332,10 @@ $dependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $manifest)
 $directFact = @($dependencyFacts | Where-Object id -ceq 'serena-cleanup')[0]
 $stateFact = @($dependencyFacts | Where-Object id -ceq 'codex-state-policy')[0]
 $providerFact = @($dependencyFacts | Where-Object id -ceq 'provider-stability')[0]
-Assert-True ($directFact.entrypointKind -ceq 'direct-vendor' -and $null -eq $directFact.wrapperPath) 'direct vendor 必须显式无 wrapper'
+Assert-True (
+    $directFact.entrypointKind -ceq 'wrapper' -and
+    $directFact.wrapperPath -ceq 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd'
+) 'Serena cleanup 必须声明受控 wrapper，不得回退 direct vendor'
 Assert-True (
     $stateFact.dependencyState -ceq 'pending-or-mismatched' -and
     $stateFact.wrapperExists -eq $false -and

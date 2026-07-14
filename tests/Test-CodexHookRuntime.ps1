@@ -15,7 +15,7 @@ foreach ($name in @('Get-CodexHookSha256','Assert-CodexHookDPath','Invoke-CodexH
 
 $forbiddenWrapperTokens=@('C:\Program Files\nodejs','python313-official','D:\hermes-data\.npm-global\python.exe')
 $activeWrappers=@($manifest.files|Where-Object{$_.lifecycle -ceq 'active' -and $_.relativePath -like 'hooks/*.cmd'})
-Assert-True ($activeWrappers.Count -eq 5) '必须验证全部 5 个 active cmd wrapper'
+Assert-True ($activeWrappers.Count -eq 9) '必须验证全部 9 个 active cmd wrapper（含过渡闭包中的历史入口）'
 foreach($file in $activeWrappers){
     $wrapperPath=Join-Path $managedRoot $file.relativePath
     $text=Get-Content -Raw -LiteralPath $wrapperPath
@@ -23,7 +23,12 @@ foreach($file in $activeWrappers){
     Assert-True ($owners.Count -eq 1) "active wrapper 必须有唯一 active owner：$($file.relativePath)"
     $owner=$owners[0];$expectedRuntime=[string]$manifest.runtimes.($owner.runtimeId)
     Assert-True ($text.Contains('"'+$expectedRuntime+'"')) "wrapper 必须只调用 manifest runtime：$($file.relativePath)"
-    Assert-True ($text -match '(?m)%\*\s*$') "wrapper 必须保留 %*：$($file.relativePath)"
+    if ($file.relativePath -in @('hooks/serena-reminder-guarded.cmd','hooks/serena-cleanup-guarded.cmd','hooks/serena-activation-reminder.cmd')) {
+        Assert-True ($text -notmatch '%\*') "Serena behavior wrapper 不得接受外部参数：$($file.relativePath)"
+    }
+    else {
+        Assert-True ($text -match '(?m)%\*\s*$') "wrapper 必须保留 %*：$($file.relativePath)"
+    }
     Assert-True ($text -match '(?m)^exit /b %ERRORLEVEL%\s*$') "wrapper 必须透传退出码：$($file.relativePath)"
     foreach($token in $forbiddenWrapperTokens){Assert-True (-not $text.Contains($token)) "wrapper 禁止旧 runtime：$token"}
     Assert-True ($text -notmatch '(?im)(^|[\s\"])(python)(?:\.exe)?([\s\"]|$)') "wrapper 禁止裸 python：$($file.relativePath)"
