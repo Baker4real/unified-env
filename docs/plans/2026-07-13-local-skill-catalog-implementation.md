@@ -1,5 +1,7 @@
 # 本机 Skill Catalog 实现计划
 
+> **状态（2026-07-13）：** 已实施并验证完成。下方复选框保留实施过程记录，不再表示当前待办；当前派生输出和运行证据以 `D:\Codex\.codex\skill-catalog\` 与 `D:\Codex\.codex\run-evidence\skill-catalog\` 为准。
+
 > **给执行代理：** 按任务逐项执行。保持既有工作树改动不变，只暂存本计划涉及的文件。
 
 **目标：** 生成一份只读派生的本机 Codex skill catalog，区分 active skill 与插件缓存镜像，并用现有 source ledger 与资源闭包检查提供可审计事实。

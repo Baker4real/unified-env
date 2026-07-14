@@ -1,6 +1,6 @@
 # 功能钩子分层恢复实施计划
 
-> **状态（2026-07-13）：** Task 1/2 的 path inventory 与 state policy 核心已落地并持续加固；Task 3–8 尚未实施、未注册 live hook。下方复选框保留原始实施过程记录，当前状态以设计文档、实际代码和专项测试为准。
+> **状态（2026-07-13）：** Task 1/2 的 path inventory 与 state policy 核心已落地并持续加固；Task 3–8 尚未实施、未注册 live hook，当前未排期。只有用户明确授权恢复新的 live hook，并完成 fixture、对抗性审查、重启和 fresh lifecycle 验收后，才推进这些任务。下方复选框保留原始实施过程记录，当前状态以设计文档、实际代码和专项测试为准。
 
 > **For agentic workers:** Implement this plan task-by-task. Prefer `subagent-driven-development` when available for independent tasks; otherwise use the repository's normal implementation workflow. Steps use checkbox (`- [ ]`) syntax for tracking.
 

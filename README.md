@@ -12,8 +12,8 @@
 - Codex 主机钩子治理以“用户级自定义 lifecycle hook 为 0”为目标；`scripts/Invoke-CodexHostHookReconciliation.ps1` 是唯一当前生产权威，只允许显式冷路径 `Check` / `Repair`。旧 ProductionFull 与 registration-repair façade 已稳定拒绝，历史 fixture/core 仅保留测试价值；`features.hooks=true` 继续支持项目/skill hooks。
 - Codex CLI、Node、npm、Git、gh、uv、sqlite3、CodeGraph 和 Serena 主链路已验证；Serena 运行在官方 Python 3.14.6 上，并通过 uv override 使用 `anthropic==0.116.0`。
 - 共享环境入口已验证：`planning-with-files`、CMake `4.3.3`、Rust toolchain `1.96.1` 等均保持可用；skill ledger coverage 为 `missing=0` / `duplicates=0`。
-- 已按用户授权修复默认入口：`.NET` 默认命中 D 盘 SDK `10.0.301`，Python 默认切到官方 `3.14.6`；WSL 当前判断为“不确实需要”，未安装、未启用、未初始化；CodeGraph 活动版本仍为 `1.2.0`，已验证 `1.4.1` staging，待 Codex 完整重启后切换。
-- 已固化上游稳定 skill 约束并同步 Matt stable catalog：28 个稳定目录已与上游对齐，活动 skill 资源闭包为 98 个、0 项缺失；`skills/in-progress/**` 未安装。
+- 已按用户授权修复默认入口：`.NET` 默认命中 D 盘 SDK `10.0.301`，Python 默认切到官方 `3.14.6`；WSL 当前判断为“不确实需要”，未安装、未启用、未初始化；CodeGraph 活动版本已切换为 `1.4.1`，Codex Desktop 已完整重启并通过 fresh MCP smoke。
+- 已固化上游稳定 skill 约束并同步 Matt stable catalog：28 个稳定目录已与上游对齐；当前活动 skill 资源闭包为 65 个 active、0 项缺失、0 项 ledger 漂移；`skills/in-progress/**` 未安装。
 - 本机 Skill Catalog 生成器已落地：默认只读扫描 active、system 和 plugin-cache，来源以本机 ledger / `SOURCE.md` 为准；它不安装或更新 skill、不访问网络、不读取凭据、不注册 hook。实现入口是 `scripts/generate_skill_catalog.py`，本机派生输出和运行证据位于 `D:\Codex\.codex\skill-catalog\` 与 `D:\Codex\.codex\run-evidence\skill-catalog\`。
 - 功能钩子分层恢复目前只落地 path inventory、policy source 和显式 state repair 核心；新的 state preflight wrapper、Serena 行为 hook、provider/GitHub 显式维护和 live registration 尚未启用。
 - GitHub 与收尾 skill 已统一为“解析远端默认分支后发布”；临时分支只在说明必要性并获确认后使用，patch-stack 仅报告、不自动创建或删除。实现状态与证据见对应设计和计划文档。

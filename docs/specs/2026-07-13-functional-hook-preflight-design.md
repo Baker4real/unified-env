@@ -2,7 +2,7 @@
 
 ## 状态
 
-分阶段实施中：Task 1（path inventory）与 Task 2（policy source、path inventory、state repair 核心）已合入当前 `main` 并由专项测试覆盖；Task 3–8 仍是设计/未实施项。本文不授权注册新的 live hooks、执行 live repair 或恢复旧的多钩子热路径。
+分阶段实施中：Task 1（path inventory）与 Task 2（policy source、path inventory、state repair 核心）已合入当前 `main` 并由专项测试覆盖；Task 3–8 仍是未排期的设计/未实施项。只有用户明确授权并完成 fixture、对抗性审查、重启和 fresh lifecycle 验收后，才可讨论推进。本文不授权注册新的 live hooks、执行 live repair 或恢复旧的多钩子热路径。
 
 ## 当前实现落点
 
