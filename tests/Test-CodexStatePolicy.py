@@ -143,13 +143,31 @@ class CodexStatePolicyTests(unittest.TestCase):
         conn.commit()
         return conn
 
-    def cold_maintenance_evidence(self) -> dict[str, object]:
-        return {
-            "schema": self.module.COLD_MAINTENANCE_EVIDENCE_VERSION,
-            "codexHome": str(self.codex_home),
-            "sqliteStopped": True,
-            "backupVerified": True,
+    def close_wal_keeper_preserving_source(self, keeper: sqlite3.Connection) -> None:
+        paths = [
+            self.db_path,
+            Path(str(self.db_path) + "-wal"),
+            Path(str(self.db_path) + "-shm"),
+            Path(str(self.db_path) + "-journal"),
+        ]
+        snapshots = {
+            path: path.read_bytes()
+            for path in paths
+            if path.exists()
         }
+        keeper.close()
+        for path, data in snapshots.items():
+            path.write_bytes(data)
+
+    def cold_maintenance_evidence(self) -> dict[str, object]:
+        backup_path = self.backup_root / "state-5.sqlite.backup"
+        self.backup_root.mkdir(parents=True, exist_ok=True)
+        if not backup_path.exists():
+            shutil.copy2(self.db_path, backup_path)
+        return self.module.build_cold_maintenance_evidence(
+            self.codex_home,
+            backup_path,
+        )
 
     def test_update_thread_state_hot_path_requires_cold_maintenance_for_wal_shm(self) -> None:
         keeper = self.create_wal_db()
@@ -158,6 +176,27 @@ class CodexStatePolicyTests(unittest.TestCase):
             keeper.commit()
             with self.assertRaisesRegex(self.module.StatePolicyError, "cold-maintenance-required"):
                 self.module.update_thread_state(self.db_path)
+        finally:
+            keeper.close()
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows no-share semantics")
+    def test_cold_evidence_rejects_active_sqlite_handles(self) -> None:
+        keeper = self.create_wal_db()
+        try:
+            self.close_wal_keeper_preserving_source(keeper)
+            evidence = self.cold_maintenance_evidence()
+            active = sqlite3.connect(self.db_path)
+            try:
+                with self.assertRaisesRegex(self.module.StatePolicyError, "cold-maintenance-required"):
+                    self.module.update_thread_state(
+                        self.db_path,
+                        cold_maintenance=True,
+                        maintenance_evidence=evidence,
+                    )
+            finally:
+                active.close()
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
@@ -183,6 +222,67 @@ class CodexStatePolicyTests(unittest.TestCase):
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(self.db_path) + suffix).unlink(missing_ok=True)
+
+    def test_cold_run_policy_keeps_sqlite_return_lease_during_output(self) -> None:
+        self.write_global(self.permission_drift())
+        keeper = self.create_wal_db()
+        keeper.execute("update threads set sentinel='cold-output' where id='target-a'")
+        keeper.commit()
+        self.close_wal_keeper_preserving_source(keeper)
+        evidence = self.cold_maintenance_evidence()
+        blocked = False
+
+        class CompetingOutput(io.StringIO):
+            attempted = False
+
+            def write(inner_self, value: str) -> int:
+                nonlocal blocked
+                if not inner_self.attempted:
+                    inner_self.attempted = True
+                    competitor: sqlite3.Connection | None = None
+                    try:
+                        competitor = sqlite3.connect(self.db_path, timeout=0)
+                        competitor.execute(
+                            "update threads set sentinel='competitor' where id='target-a'"
+                        )
+                        competitor.commit()
+                    except sqlite3.Error:
+                        blocked = True
+                    finally:
+                        if competitor is not None:
+                            competitor.close()
+                return super().write(value)
+
+        output = CompetingOutput()
+        result = self.module.run_policy(
+            self.codex_home,
+            check_only=False,
+            health_root=self.root / "health",
+            output=output,
+            cold_maintenance=True,
+            maintenance_evidence=evidence,
+        )
+        self.assertTrue(result["ok"], (result, blocked, output.getvalue()))
+        self.assertTrue(blocked)
+
+    def test_cold_evidence_rejects_tampered_backup(self) -> None:
+        original_global = self.write_global(self.permission_drift())
+        keeper = self.create_db()
+        keeper.close()
+        evidence = self.cold_maintenance_evidence()
+        backup_path = Path(str(evidence["backupPath"]))
+        backup_path.write_bytes(backup_path.read_bytes() + b"tampered")
+        result = self.module.run_policy(
+            self.codex_home,
+            check_only=False,
+            health_root=self.root / "health",
+            output=io.StringIO(),
+            cold_maintenance=True,
+            maintenance_evidence=evidence,
+        )
+        self.assertFalse(result["ok"])
+        self.assertIn("cold-maintenance-required", result["errors"])
+        self.assertEqual(self.global_path.read_bytes(), original_global)
 
     def test_rewrite_projectless_path_is_boundary_safe_and_case_insensitive(self) -> None:
         rewrite = self.module.rewrite_projectless_path
@@ -1712,6 +1812,7 @@ class CodexStatePolicyTests(unittest.TestCase):
             self.assertEqual(result["threadState"]["status"], "not-run")
             self.assertEqual(self.global_path.read_bytes(), original_global)
 
+            self.close_wal_keeper_preserving_source(keeper)
             cold_result = self.module.run_policy(
                 self.codex_home,
                 check_only=False,
@@ -1722,10 +1823,12 @@ class CodexStatePolicyTests(unittest.TestCase):
             )
             self.assertTrue(cold_result["ok"], cold_result)
             self.assertTrue(cold_result["changed"])
+            verify = sqlite3.connect(self.db_path)
             self.assertEqual(
-                keeper.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
+                verify.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
                 "never",
             )
+            verify.close()
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
@@ -1897,6 +2000,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         try:
             keeper.execute("update threads set sentinel='lease-seed' where id='target-a'")
             keeper.commit()
+            self.close_wal_keeper_preserving_source(keeper)
             policy = self.module.resolve_permission_policy(self.codex_home)
             result = self.module.update_thread_state(
                 self.db_path,
@@ -2917,16 +3021,19 @@ class CodexStatePolicyTests(unittest.TestCase):
             keeper.commit()
             self.assertTrue(Path(str(self.db_path) + "-wal").exists())
             self.assertTrue(Path(str(self.db_path) + "-shm").exists())
+            self.close_wal_keeper_preserving_source(keeper)
             updated = self.module.update_thread_state(
                 self.db_path,
                 cold_maintenance=True,
                 maintenance_evidence=self.cold_maintenance_evidence(),
             )
             self.assertEqual(updated["changedCount"], 2)
+            verify = sqlite3.connect(self.db_path)
             self.assertEqual(
-                keeper.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
+                verify.execute("select approval_mode from threads where id='target-a'").fetchone()[0],
                 "never",
             )
+            verify.close()
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):
@@ -2992,6 +3099,7 @@ class CodexStatePolicyTests(unittest.TestCase):
                 ],
             )
             keeper.commit()
+            self.close_wal_keeper_preserving_source(keeper)
             policy = self.module.resolve_permission_policy(self.codex_home)
             original_fingerprint = self.module._assert_permission_policy_fingerprint
             calls = 0
@@ -3016,18 +3124,20 @@ class CodexStatePolicyTests(unittest.TestCase):
                         maintenance_evidence=self.cold_maintenance_evidence(),
                     )
             self.assertGreaterEqual(calls, 3)
+            verify = sqlite3.connect(self.db_path)
             self.assertEqual(
-                keeper.execute(
+                verify.execute(
                     "select approval_mode, sandbox_policy from threads where id='target-a'"
                 ).fetchone(),
                 ("on-request", '{"type":"workspace-write"}'),
             )
             self.assertEqual(
-                keeper.execute(
+                verify.execute(
                     "select approval_mode, sandbox_policy from threads where id='target-null'"
                 ).fetchone(),
                 (None, None),
             )
+            verify.close()
         finally:
             keeper.close()
             for suffix in ("-wal", "-shm", "-journal"):

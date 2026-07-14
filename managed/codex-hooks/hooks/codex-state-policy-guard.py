@@ -6,6 +6,11 @@ import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+try:
+    import fcntl
+except ModuleNotFoundError:  # pragma: no cover - Windows uses CreateFileW below.
+    fcntl = None  # type: ignore[assignment]
 import hashlib
 import io
 import json
@@ -1517,6 +1522,102 @@ def _open_publish_handle(
         kernel32.CloseHandle(handle) if handle and handle != invalid_handle else None
         raise StatePolicyError(f"state publish handle unavailable ({error})")
     return kernel32, handle
+
+
+def _probe_cold_maintenance_sources(codex_home: Path) -> dict[str, list[int]]:
+    """Prove that the SQLite source-set is not held by another process."""
+    _validate_inventory_root(codex_home, name="cold maintenance home", required_drive="D:")
+    database = codex_home / "state_5.sqlite"
+    paths = (
+        database,
+        Path(str(database) + "-wal"),
+        Path(str(database) + "-shm"),
+        Path(str(database) + "-journal"),
+    )
+    identities: dict[str, list[int]] = {}
+    for index, path in enumerate(paths):
+        _assert_check_only_d_path_without_reparse(path, name="cold maintenance source")
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            if index == 0:
+                raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+            continue
+        except OSError as exc:
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
+        try:
+            regular_file = path.is_file()
+        except OSError as exc:
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
+        if path.is_symlink() or not regular_file:
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+        identity: tuple[int, int] | None = None
+        if os.name == "nt":
+            kernel32: object | None = None
+            handle: wintypes.HANDLE | None = None
+            try:
+                kernel32, handle = _open_publish_handle(
+                    path,
+                    desired_access=GENERIC_READ | FILE_READ_ATTRIBUTES | SYNCHRONIZE_ACCESS,
+                    share_mode=0,
+                )
+                identity = _publish_handle_info(kernel32, handle, path)
+            except (OSError, StatePolicyError) as exc:
+                raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
+            finally:
+                if kernel32 is not None and handle is not None:
+                    _close_publish_handle(kernel32, handle)
+        else:
+            if fcntl is None:
+                raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+            descriptor: int | None = None
+            try:
+                descriptor = os.open(path, os.O_RDONLY)
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                metadata = os.fstat(descriptor)
+                identity = (int(metadata.st_dev), int(metadata.st_ino))
+            except (OSError, TypeError) as exc:
+                raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
+            finally:
+                if descriptor is not None:
+                    try:
+                        fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    except (OSError, TypeError):
+                        pass
+                    os.close(descriptor)
+        if identity is None or identity == (0, 0):
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+        identities[path.name] = [int(identity[0]), int(identity[1])]
+    return identities
+
+
+def _assert_cold_maintenance_sources(
+    codex_home: Path,
+    *,
+    expected_database_identity: tuple[int, int] | None = None,
+) -> dict[str, list[int]]:
+    actual = _probe_cold_maintenance_sources(codex_home)
+    if (
+        expected_database_identity is not None
+        and actual.get("state_5.sqlite") != list(expected_database_identity)
+    ):
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    return actual
+
+
+def _rebase_cold_sqlite_snapshot(
+    path: Path,
+    expected_database_identity: tuple[int, int],
+    expected_database_hash: str,
+) -> SqliteSourceSnapshot:
+    snapshot = _capture_sqlite_source(path)
+    if (
+        snapshot.identities[0] != expected_database_identity
+        or _sha256(snapshot.payload[0] or b"") != expected_database_hash
+        or _sqlite_snapshot_has_unknown_sidecars(snapshot)
+    ):
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    return snapshot
 
 
 def _close_publish_handle(kernel32: object, handle: wintypes.HANDLE) -> None:
@@ -3547,6 +3648,10 @@ def _update_thread_state_impl(
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     if _sqlite_snapshot_has_unknown_sidecars(initial_snapshot):
         raise StatePolicyError("thread state sidecar bytes unavailable for write")
+    if cold_maintenance:
+        _assert_cold_maintenance_sources(
+            Path(permission_policy.codex_home or path.parent)
+        )
     source_identity = initial_snapshot.identities[0]
     if source_identity is None:
         raise StatePolicyError("thread state source disappeared")
@@ -3558,6 +3663,17 @@ def _update_thread_state_impl(
     return_lease_handoff = False
     try:
         conn.execute("pragma busy_timeout=1500")
+        if cold_maintenance:
+            connected_snapshot = _rebase_cold_sqlite_snapshot(
+                path,
+                source_identity,
+                source_bytes_hash,
+            )
+            # Opening a quiescent WAL database can legitimately refresh the SHM
+            # index metadata.  The no-share probe above proves that this refresh
+            # belongs to our newly opened connection, so anchor all later gates
+            # to the post-open source tuple rather than rejecting its own metadata.
+            initial_snapshot = connected_snapshot
         _assert_sqlite_snapshot_identity(
             initial_snapshot,
             path,
@@ -3567,8 +3683,16 @@ def _update_thread_state_impl(
         try:
             conn.execute("begin immediate")
         except sqlite3.OperationalError as exc:
+            if cold_maintenance:
+                raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
             raise StatePolicyError("thread state database busy") from exc
         try:
+            if cold_maintenance:
+                initial_snapshot = _rebase_cold_sqlite_snapshot(
+                    path,
+                    source_identity,
+                    source_bytes_hash,
+                )
             if _file_handle_identity(path) != source_identity:
                 raise StatePolicyError("thread state concurrent replacement")
             if _sha256(path.read_bytes()) != source_bytes_hash:
@@ -3758,6 +3882,8 @@ def _update_thread_state_impl(
         raise
     except sqlite3.OperationalError as exc:
         if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            if cold_maintenance:
+                raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
             raise StatePolicyError("thread state database busy") from exc
         raise StatePolicyError("thread state database operation failed") from exc
     finally:
@@ -3785,7 +3911,7 @@ def update_thread_state(
     retain_return_lease: bool = False,
 ) -> dict[str, object]:
     resolved_policy = _resolve_policy_for_path(path, permission_policy)
-    return _update_thread_state_impl(
+    result = _update_thread_state_impl(
         path,
         permission_policy=resolved_policy,
         check_only=check_only,
@@ -3796,6 +3922,18 @@ def update_thread_state(
         after_first_snapshot_capture=after_first_snapshot_capture,
         retain_return_lease=retain_return_lease,
     )
+    if cold_maintenance and not retain_return_lease:
+        source_snapshot = result.get("_sourceSnapshot")
+        expected_identity = (
+            source_snapshot.identities[0]
+            if isinstance(source_snapshot, SqliteSourceSnapshot)
+            else None
+        )
+        _assert_cold_maintenance_sources(
+            Path(resolved_policy.codex_home or path.parent),
+            expected_database_identity=expected_identity,
+        )
+    return result
 
 
 class WindowsNamedMutex:
@@ -3887,6 +4025,14 @@ def _require_cold_maintenance_evidence(
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     if evidence.get("schema") != COLD_MAINTENANCE_EVIDENCE_VERSION:
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    try:
+        _validate_inventory_root(
+            codex_home,
+            name="cold maintenance home",
+            required_drive="D:",
+        )
+    except StatePolicyError as exc:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
     evidence_home = evidence.get("codexHome")
     if (
         not isinstance(evidence_home, str)
@@ -3897,6 +4043,79 @@ def _require_cold_maintenance_evidence(
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
     if evidence.get("backupVerified") is not True:
         raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    backup_path_value = evidence.get("backupPath")
+    backup_hash = evidence.get("backupSha256")
+    backup_identity = evidence.get("backupIdentity")
+    if (
+        not isinstance(backup_path_value, str)
+        or not isinstance(backup_hash, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", backup_hash)
+        or not isinstance(backup_identity, (list, tuple))
+        or len(backup_identity) != 2
+        or not all(isinstance(value, int) and value >= 0 for value in backup_identity)
+    ):
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    try:
+        backup_windows = _validate_inventory_root(
+            backup_path_value,
+            name="cold maintenance backup",
+            required_drive="D:",
+        )
+        backup_path = Path(str(backup_windows))
+        _assert_check_only_d_path_without_reparse(
+            backup_path,
+            name="cold maintenance backup",
+        )
+        if not backup_path.is_file() or backup_path.is_symlink():
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+        actual_identity = _file_handle_identity(backup_path)
+        if actual_identity is None or list(actual_identity) != list(backup_identity):
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+        if _sha256(backup_path.read_bytes()) != backup_hash:
+            raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    except (OSError, StatePolicyError) as exc:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
+    expected_sources = evidence.get("sourceIdentities")
+    if not isinstance(expected_sources, dict):
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    try:
+        actual_sources = _probe_cold_maintenance_sources(codex_home)
+    except (OSError, StatePolicyError) as exc:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED) from exc
+    if expected_sources != actual_sources:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+
+
+def build_cold_maintenance_evidence(
+    codex_home: Path,
+    backup_path: Path,
+) -> dict[str, object]:
+    """Create evidence only after the source set and backup pass cold gates."""
+    _validate_inventory_root(codex_home, name="cold maintenance home", required_drive="D:")
+    backup_windows = _validate_inventory_root(
+        backup_path,
+        name="cold maintenance backup",
+        required_drive="D:",
+    )
+    backup = Path(str(backup_windows))
+    _assert_check_only_d_path_without_reparse(backup, name="cold maintenance backup")
+    if not backup.is_file() or backup.is_symlink():
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    identity = _file_handle_identity(backup)
+    if identity is None:
+        raise StatePolicyError(COLD_MAINTENANCE_REQUIRED)
+    evidence: dict[str, object] = {
+        "schema": COLD_MAINTENANCE_EVIDENCE_VERSION,
+        "codexHome": str(codex_home),
+        "sqliteStopped": True,
+        "backupVerified": True,
+        "backupPath": str(backup),
+        "backupSha256": _sha256(backup.read_bytes()),
+        "backupIdentity": list(identity),
+        "sourceIdentities": _probe_cold_maintenance_sources(codex_home),
+    }
+    _require_cold_maintenance_evidence(codex_home, evidence)
+    return evidence
 
 
 def _redact_path_inventory(inventory: object) -> object:
