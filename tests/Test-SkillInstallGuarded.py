@@ -7,11 +7,14 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +35,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.plugin_cache = self.temp / "plugin-cache"
         self.active.mkdir()
         self.plugin_cache.mkdir()
+        self._grant_active_root_runtime_access()
         self.ledger = self.active / ".downloaded-skills-source-state.json"
         self.ledger.write_text(
             json.dumps(
@@ -51,6 +55,83 @@ class SkillInstallGuardedTests(unittest.TestCase):
             r"D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py"
         )
         self.interpreter = Path(sys.executable).resolve()
+
+    def _powershell(self) -> str:
+        executable = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+        if not executable:
+            self.fail("测试需要 PowerShell 读取 Windows ACL")
+        return executable
+
+    def _grant_active_root_runtime_access(self) -> None:
+        result = subprocess.run(
+            [
+                "icacls.exe",
+                str(self.active),
+                "/inheritancelevel:e",
+                "/grant:r",
+                "*S-1-5-11:(OI)(CI)(M)",
+                "*S-1-5-32-545:(OI)(CI)(RX)",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+    def protect_private_candidate_tree(self, path: Path) -> None:
+        for arguments in (
+            ["/inheritance:r", "/T", "/C"],
+            [
+                "/grant:r",
+                "*S-1-3-4:(OI)(CI)(F)",
+                "*S-1-5-18:(OI)(CI)(F)",
+                "*S-1-5-32-544:(OI)(CI)(F)",
+                "/T",
+                "/C",
+            ],
+        ):
+            result = subprocess.run(
+                ["icacls.exe", str(path), *arguments],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertTrue(self.acl_state(path)["protected"])
+
+    def acl_state(self, path: Path) -> dict[str, object]:
+        script = (
+            "$pathValue=[Environment]::GetEnvironmentVariable('SKILL_ACL_TEST_PATH','Process');"
+            "$acl=Get-Acl -LiteralPath $pathValue -ErrorAction Stop;"
+            "[ordered]@{protected=$acl.AreAccessRulesProtected;"
+            "owner=$acl.Owner;sddl=$acl.Sddl;"
+            "rules=@($acl.Access|ForEach-Object{[ordered]@{"
+            "identity=[string]$_.IdentityReference;"
+            "type=[string]$_.AccessControlType;"
+            "inherited=$_.IsInherited}})}|ConvertTo-Json -Depth 5 -Compress"
+        )
+        result = subprocess.run(
+            [
+                self._powershell(),
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ],
+            env={**os.environ, "SKILL_ACL_TEST_PATH": str(path)},
+            capture_output=True,
+            text=True,
+            encoding="utf-8-sig",
+            errors="replace",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        return json.loads(result.stdout)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.temp, ignore_errors=True)
@@ -128,6 +209,34 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(artifact["ledger_coverage"], "pass")
         self.assertEqual(catalog["checks"]["resource_closure"]["status"], "pass")
 
+    def test_install_drops_private_staging_acl_and_verifies_new_process_readability(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "测试 ACL 继承")
+        references = candidate / "references"
+        references.mkdir()
+        (references / "guide.md").write_text("runtime-readable\n", encoding="utf-8")
+        self.protect_private_candidate_tree(candidate)
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 0)
+        active_skill = self.active / "test-skill-wrapper"
+        acl = self.acl_state(active_skill)
+        self.assertFalse(acl["protected"])
+        inherited_identities = {
+            item["identity"]
+            for item in acl["rules"]
+            if item["inherited"] and item["type"] == "Allow"
+        }
+        self.assertIn("NT AUTHORITY\\Authenticated Users", inherited_identities)
+        self.assertIn("BUILTIN\\Users", inherited_identities)
+
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["activation_readability"]["status"], "passed")
+        self.assertGreaterEqual(result["activation_readability"]["file_count"], 3)
+
     def test_catalog_failure_rolls_back_active_skill_and_ledger(self) -> None:
         name = "test-skill-wrapper"
         active_skill = self.active / name
@@ -164,6 +273,58 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertIn("baseline", (active_skill / "SKILL.md").read_text(encoding="utf-8"))
         ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
         self.assertEqual(ledger["sources"][0]["skills"], [name])
+
+    def test_activation_readability_failure_restores_content_acl_and_ledger(self) -> None:
+        name = "test-skill-wrapper"
+        active_skill = self.active / name
+        active_skill.mkdir()
+        (active_skill / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: baseline\n---\n\n# baseline\n",
+            encoding="utf-8",
+        )
+        (active_skill / "SOURCE.md").write_text(
+            f"# Source Provenance\n\nSkill: `{name}`\nStatus: source-review\n",
+            encoding="utf-8",
+        )
+        self.ledger.write_text(
+            json.dumps(
+                {
+                    "updated_at": "2026-07-14",
+                    "notes": [],
+                    "sources": [{"id": "local-test", "type": "local-candidate", "skills": [name]}],
+                    "unresolved": [],
+                    "deleted": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        before_acl = self.acl_state(active_skill)
+        before_ledger = self.ledger.read_bytes()
+        candidate = self.write_candidate(name, "replacement")
+        manifest = self.write_manifest(name, "update")
+        args = self.wrapper_args(candidate, manifest)
+        args.insert(2, "--update")
+
+        with (
+            mock.patch.object(
+                WRAPPER,
+                "verify_activation_readability",
+                side_effect=WRAPPER.InstallError("injected runtime readability failure"),
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = WRAPPER.main(args)
+
+        self.assertEqual(code, 2)
+        self.assertIn("baseline", (active_skill / "SKILL.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.ledger.read_bytes(), before_ledger)
+        after_acl = self.acl_state(active_skill)
+        self.assertEqual(after_acl["owner"], before_acl["owner"])
+        self.assertEqual(after_acl["sddl"], before_acl["sddl"])
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "rolled-back")
 
 
 if __name__ == "__main__":

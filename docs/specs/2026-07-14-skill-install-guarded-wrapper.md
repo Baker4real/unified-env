@@ -22,10 +22,13 @@
 1. `skill-install-guard` 产生 decision manifest，必须包含 `install` 或 `update`、`source-pass/source-review` 和 `writing-great-skills` 通过证据。
 2. wrapper 将远端候选下载到 D 盘 staging，或复制已审查的本地候选。
 3. wrapper 写入/保留 `SOURCE.md` 和 staging ledger，运行严格资源闭包检查。
-4. wrapper 备份 active skill、ledger 和 catalog，再激活候选。
-5. wrapper 更新 `D:\Codex\.codex\skills\.downloaded-skills-source-state.json`。
-6. wrapper 调用 `generate_skill_catalog.py --write`，再运行闭包、catalog 条目、ledger coverage 和 `SKILL.md` SHA-256 复核。
-7. 任一步失败都恢复 active 目录和状态文件，并把失败/回滚结果写入 `D:\Codex\.codex\run-evidence\skill-install-guarded\`。
+4. wrapper 在 active root 下重新创建候选内容，不移动 staging 目录，也不复制 staging 的 owner、DACL 或 SACL；目标目录和文件必须继承本机 active root 的权限。
+5. wrapper 备份旧 active skill，再原子换入候选；立即在独立子进程中枚举并读取全部文件，同时验证目标树不存在受保护 ACL。任一项失败都回滚，事务不得标记成功。
+6. wrapper 更新 `D:\Codex\.codex\skills\.downloaded-skills-source-state.json`。
+7. wrapper 调用 `generate_skill_catalog.py --write`，再运行闭包、catalog 条目、ledger coverage 和 `SKILL.md` SHA-256 复核。
+8. 任一步失败都恢复 active 目录和状态文件，并把失败/回滚结果写入 `D:\Codex\.codex\run-evidence\skill-install-guarded\`。
+
+`activation_readability` 只证明安装后的文件系统权限、枚举和读取健康；Skill Catalog 的 `runtime_verification=unverified` 仍表示尚未验证 skill 行为本身，两者不能互相替代。
 
 ## Decision manifest 最小格式
 

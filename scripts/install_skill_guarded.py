@@ -527,6 +527,7 @@ def run_process(
     evidence_dir: Path,
     label: str,
     check: bool = True,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         command,
@@ -535,6 +536,8 @@ def run_process(
         encoding="utf-8",
         errors="replace",
         check=False,
+        env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     atomic_write_bytes(
         evidence_dir / f"{label}.stdout.txt",
@@ -673,6 +676,191 @@ def safe_remove(path: Path) -> None:
         path.unlink()
 
 
+def path_exists_strict(path: Path, *, label: str) -> bool:
+    try:
+        path.lstat()
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise InstallError(f"无法确认{label}是否存在：{path}：{exc}") from exc
+
+
+def tree_file_hashes(root: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+
+    def onerror(error: OSError) -> None:
+        raise InstallError(f"无法遍历 skill 内容树：{root}：{error}") from error
+
+    for current, directories, files in os.walk(
+        root,
+        topdown=True,
+        followlinks=False,
+        onerror=onerror,
+    ):
+        directories.sort(key=str.casefold)
+        files.sort(key=str.casefold)
+        current_path = Path(current)
+        for filename in files:
+            source = current_path / filename
+            if is_reparse(source) or not source.is_file():
+                raise InstallError(f"skill 内容树只允许普通文件：{source}")
+            relative = source.relative_to(root).as_posix()
+            result[relative] = sha256_file(source)
+    return result
+
+
+def copy_tree_without_security_metadata(source: Path, destination: Path) -> None:
+    """Copy skill content while letting every target inherit active-root ACLs."""
+    ensure_tree_no_reparse(source, label="待激活 skill")
+    if path_exists_strict(destination, label="激活临时目录"):
+        raise InstallError(f"激活临时目录已存在：{destination}")
+    destination.mkdir()
+    try:
+        root_skill_md = source / "SKILL.md"
+        for current, directories, files in os.walk(
+            source,
+            topdown=True,
+            followlinks=False,
+        ):
+            directories.sort(key=str.casefold)
+            files.sort(key=str.casefold)
+            current_path = Path(current)
+            relative = current_path.relative_to(source)
+            target_directory = destination / relative
+            target_directory.mkdir(exist_ok=True)
+            for directory in directories:
+                child = current_path / directory
+                if is_reparse(child):
+                    raise InstallError(f"待激活 skill 不能包含 reparse point：{child}")
+                (target_directory / directory).mkdir(exist_ok=True)
+            for filename in files:
+                child = current_path / filename
+                if child == root_skill_md:
+                    continue
+                if is_reparse(child) or not child.is_file():
+                    raise InstallError(f"待激活 skill 只允许普通文件：{child}")
+                shutil.copyfile(child, target_directory / filename)
+        if not root_skill_md.is_file() or is_reparse(root_skill_md):
+            raise InstallError(f"待激活 skill 缺少安全的 SKILL.md：{root_skill_md}")
+        shutil.copyfile(root_skill_md, destination / "SKILL.md")
+        if tree_file_hashes(source) != tree_file_hashes(destination):
+            raise InstallError(f"激活临时目录内容指纹不一致：{destination}")
+    except Exception:
+        if path_exists_strict(destination, label="失败的激活临时目录"):
+            safe_remove(destination)
+        raise
+
+
+def verify_activation_readability(
+    *,
+    active_root: Path,
+    names: list[str],
+    interpreter: Path,
+    evidence_dir: Path,
+) -> dict[str, Any]:
+    roots = [str(active_root / name) for name in names]
+    probe_environment = dict(os.environ)
+    probe_environment["CODEX_SKILL_READ_ROOTS"] = json.dumps(roots, ensure_ascii=False)
+    probe_code = """
+import json, os
+from pathlib import Path
+
+roots = [Path(item) for item in json.loads(os.environ["CODEX_SKILL_READ_ROOTS"])]
+directory_count = 0
+file_count = 0
+for root in roots:
+    root.lstat()
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        directory_count += 1
+        current_path = Path(current)
+        for directory in directories:
+            child = current_path / directory
+            if child.is_symlink():
+                raise RuntimeError(f"reparse/symlink directory: {child}")
+        for filename in files:
+            child = current_path / filename
+            if child.is_symlink() or not child.is_file():
+                raise RuntimeError(f"non-regular file: {child}")
+            with child.open("rb") as stream:
+                while stream.read(1024 * 1024):
+                    pass
+            file_count += 1
+print(json.dumps({"directory_count": directory_count, "file_count": file_count}))
+"""
+    runtime_result = run_process(
+        [str(interpreter), "-c", probe_code],
+        evidence_dir=evidence_dir,
+        label="activation-readability-process",
+        env=probe_environment,
+    )
+    try:
+        runtime_payload = json.loads(runtime_result.stdout)
+    except json.JSONDecodeError as exc:
+        raise InstallError(f"activation readability 子进程未返回合法 JSON：{exc}") from exc
+
+    powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+    if not powershell:
+        raise InstallError("无法找到 PowerShell，不能验证 Windows ACL 继承")
+    acl_script = r"""
+$ErrorActionPreference = 'Stop'
+$roots = ConvertFrom-Json ([Environment]::GetEnvironmentVariable('CODEX_SKILL_READ_ROOTS', 'Process'))
+$normalRuntimeSids = @('S-1-5-11', 'S-1-5-32-545')
+$itemCount = 0
+foreach ($root in $roots) {
+    $items = @((Get-Item -LiteralPath $root -Force -ErrorAction Stop)) + @(
+        Get-ChildItem -LiteralPath $root -Force -Recurse -ErrorAction Stop
+    )
+    foreach ($item in $items) {
+        $acl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+        if ($acl.AreAccessRulesProtected) {
+            throw "受保护 ACL 未从 active root 继承：$($item.FullName)"
+        }
+        $inheritedAllowSids = @(
+            $acl.Access |
+                Where-Object { $_.IsInherited -and $_.AccessControlType -eq 'Allow' } |
+                ForEach-Object {
+                    try {
+                        $_.IdentityReference.Translate(
+                            [System.Security.Principal.SecurityIdentifier]
+                        ).Value
+                    } catch {}
+                }
+        )
+        if (@($inheritedAllowSids | Where-Object { $normalRuntimeSids -contains $_ }).Count -eq 0) {
+            throw "active skill 缺少普通运行身份的继承读取权限：$($item.FullName)"
+        }
+        $itemCount++
+    }
+}
+[ordered]@{ item_count = $itemCount } | ConvertTo-Json -Compress
+"""
+    acl_result = run_process(
+        [
+            powershell,
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            acl_script,
+        ],
+        evidence_dir=evidence_dir,
+        label="activation-acl-inheritance",
+        env=probe_environment,
+    )
+    try:
+        acl_payload = json.loads(acl_result.stdout.lstrip("\ufeff"))
+    except json.JSONDecodeError as exc:
+        raise InstallError(f"ACL 继承检查未返回合法 JSON：{exc}") from exc
+    return {
+        "status": "passed",
+        "process": "new-child-process",
+        "directory_count": int(runtime_payload["directory_count"]),
+        "file_count": int(runtime_payload["file_count"]),
+        "acl_item_count": int(acl_payload["item_count"]),
+    }
+
+
 def backup_file(path: Path, backup_root: Path, label: str) -> Path | None:
     if not path.exists():
         return None
@@ -690,33 +878,37 @@ def activate_directories(
     active_root: Path,
     names: list[str],
     backup_root: Path,
+    records: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
     ensure_dir(backup_root, label="skill backup 目录")
     for name in names:
         staged = stage_root / name
         active = active_root / name
-        if active.exists() and is_reparse(active):
+        active_exists = path_exists_strict(active, label=f"active skill {name}")
+        if active_exists and is_reparse(active):
             raise InstallError(f"active skill 目标是 reparse point：{active}")
-        if active.exists() and not active.is_dir():
+        if active_exists and not active.is_dir():
             raise InstallError(f"active skill 目标不是目录：{active}")
+        activation_temp = active_root / f"_disabled-guarded-{name}-{uuid.uuid4().hex}"
         record = {
             "name": name,
             "active": str(active),
             "backup": str(backup_root / name),
-            "had_existing": active.exists(),
+            "activation_temp": str(activation_temp),
+            "had_existing": active_exists,
+            "backup_moved": False,
             "activated": False,
         }
-        if active.exists():
-            shutil.move(str(active), str(backup_root / name))
-        try:
-            shutil.move(str(staged), str(active))
-        except Exception:
-            if record["had_existing"] and Path(record["backup"]).exists() and not active.exists():
-                shutil.move(record["backup"], str(active))
-            raise
-        record["activated"] = True
         records.append(record)
+        copy_tree_without_security_metadata(staged, activation_temp)
+        if active_exists:
+            shutil.move(str(active), str(backup_root / name))
+            record["backup_moved"] = True
+        try:
+            os.replace(activation_temp, active)
+        except Exception as exc:
+            raise InstallError(f"激活 skill 失败：{name}：{exc}") from exc
+        record["activated"] = True
     return records
 
 
@@ -725,10 +917,13 @@ def rollback_directories(records: list[dict[str, Any]]) -> list[str]:
     for record in reversed(records):
         active = Path(record["active"])
         backup = Path(record["backup"])
+        activation_temp = Path(record["activation_temp"])
         try:
-            if active.exists():
+            if path_exists_strict(activation_temp, label="rollback 激活临时目录"):
+                safe_remove(activation_temp)
+            if record["activated"] and path_exists_strict(active, label="rollback active skill"):
                 safe_remove(active)
-            if record["had_existing"] and backup.exists():
+            if record["backup_moved"] and path_exists_strict(backup, label="rollback skill backup"):
                 shutil.move(str(backup), str(active))
         except Exception as exc:  # pragma: no cover - exercised by injected host failures
             errors.append(f"{record['name']}: {exc}")
@@ -910,11 +1105,18 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 raise InstallError(f"install 分支不能覆盖已有 active skill：{active}")
             if decision["decision"] == "update" and not active.exists():
                 raise InstallError(f"update 分支要求已有 active skill：{active}")
-        directory_records = activate_directories(
+        activate_directories(
             stage_root=stage_dir,
             active_root=active_root,
             names=names,
             backup_root=backup_root / "active-skills",
+            records=directory_records,
+        )
+        activation_readability = verify_activation_readability(
+            active_root=active_root,
+            names=names,
+            interpreter=interpreter,
+            evidence_dir=evidence_dir,
         )
         updated_ledger = update_ledger(active_state, names=names, context=context)
         atomic_write_json(ledger_path, updated_ledger)
@@ -953,6 +1155,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "completed_at": utc_now(),
             "targets": names,
             "directory_records": directory_records,
+            "activation_readability": activation_readability,
             "post_resource_closure": post_closure,
             "catalog_verification": catalog_verification,
             "catalog_sha256": sha256_file(catalog_path),
