@@ -268,7 +268,7 @@ Assert-True ($stateGuardSource.Contains('path_mode: str = "inventory"')) 'state 
 Assert-True ($stateGuardSource.Contains('approved_map: object = None')) 'state guard 必须要求显式 approved map 才能修复路径'
 Assert-True ($stateGuardSource.Contains('permission policy sources conflict')) '策略来源冲突必须 fail closed'
 Assert-True (@($managedManifest.hooks).Count -eq 8) '受管 manifest 必须声明 8 个当前 hook'
-Assert-True (@($managedManifest.files).Count -eq 22) '受管 manifest 必须纳入 state preflight 与三个 Serena behavior wrapper 的完整文件闭包'
+Assert-True (@($managedManifest.files).Count -eq 23) '受管 manifest 必须纳入 state preflight、Serena behavior wrapper 与 provider core 的完整文件闭包'
 Assert-True (
     @($managedManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.py').Count -eq 1 -and
     @($managedManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.cmd').Count -eq 1

@@ -40,15 +40,16 @@ $badYaml=Join-Path $fixture 'malformed.yml';[IO.File]::WriteAllText($badYaml,"we
 
 $astErrors=$null;$tokens=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexConfigFile.ps1'),[ref]$tokens,[ref]$astErrors);Assert-True ($astErrors.Count -eq 0) 'config AST 必须合法'
 $providerText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\codex-provider-stability-guard.ps1'))
+$providerCoreText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexProviderGuardCore.ps1'))
 $dashboardText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\serena-dashboard-guard.ps1'))
 $activateText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\serena-behavior-guard.ps1'))
-Assert-True ($providerText -match '\[switch\]\$CheckOnly' -and $providerText.Contains('if(-not $CheckOnly)')) 'provider 必须提供明确只读 check-only 分支'
+Assert-True ($providerText -match '\[switch\]\$CheckOnly' -and $providerText -match '\[switch\]\$Repair' -and $providerText.Contains('-Repair:$Repair') -and $providerText.Contains('if($CheckOnly -and $Repair){throw')) 'provider 必须默认只读并只允许显式 Repair'
 Assert-True ($dashboardText -match '\[switch\]\$CheckOnly' -and $dashboardText.Contains('if(-not $CheckOnly)')) 'dashboard 必须提供明确只读 check-only 分支'
 Assert-True ($activateText.Contains('absolute workspace root from environment_context') -and $activateText.Contains('mcp__serena__activate_project') -and $activateText.Contains('mcp__serena__get_current_config')) 'activation reminder 必须要求按 environment_context 的绝对 workspace 显式激活并复验'
-Assert-True ($providerText -match '(?s)\$network\s*=\s*if\(\$CheckNetwork\)\s*\{\s*Test-ProviderNetwork') 'provider check-only/static acceptance 不得隐式联网；network probe 必须显式受 CheckNetwork 控制'
+Assert-True ($providerText.Contains('-CheckNetwork:$CheckNetwork') -and $providerText.Contains('-NetworkProbe ${function:Invoke-ProviderNetworkProbe}')) 'provider check-only/static acceptance 不得隐式联网；network probe 必须显式受 CheckNetwork 控制'
 Assert-True (-not $providerText.Contains('elseif($changed -or $CheckNetwork)')) 'provider 默认 SessionStart 必须 zero stdout'
 Assert-True (-not $dashboardText.Contains("if($changed){'Serena dashboard settings normalized for Codex.'}")) 'dashboard 默认 SessionStart 必须 zero stdout'
-Assert-True ($providerText.Contains('beforeSha256') -and $providerText.Contains('afterSha256') -and -not $providerText.Contains('before=ConvertTo-SafeEnvironmentValue')) 'provider JSON 必须只发布 hash/category，不得发布 raw NO_PROXY'
+Assert-True ($providerCoreText.Contains("hookId = 'provider-stability'") -and $providerCoreText.Contains('driftCount = $driftCount') -and -not $providerCoreText.Contains('proxyUrl') -and -not $providerCoreText.Contains('noProxy')) 'provider JSON 必须只发布状态摘要，不得发布 raw proxy 值'
 Assert-True (-not $providerText.Contains('$Watch') -and -not $providerText.Contains('Repair-CodexMobilePermissionDrift')) 'provider 不得保留 watcher 或 state/mobile 职责'
 Assert-True ($providerText.Contains("Local\CodexConfigTomlGuard") -and $dashboardText.Contains("Local\CodexConfigTomlGuard")) '两者必须共享固定 TOML mutex'
 Assert-True ($providerText.Contains('Update-CodexTomlPolicyText') -and $dashboardText.Contains('Update-CodexTomlPolicyText') -and $dashboardText.Contains('Update-SerenaYamlPolicyText')) 'hook 必须只声明 desired 并复用纯变换'

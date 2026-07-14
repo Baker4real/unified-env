@@ -8,6 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 if ($CheckOnly -and $Repair) { throw 'CheckOnly 与 Repair 不能同时使用。' }
+if ($Repair -and $CheckAuth) { throw 'Repair 与 CheckAuth 不能同时使用。' }
 $ReadOnly = -not [bool]$Repair
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ScriptRoot 'lib\CodexHookRuntime.ps1')
