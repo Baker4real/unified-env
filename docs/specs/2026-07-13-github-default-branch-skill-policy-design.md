@@ -87,14 +87,12 @@
 
 | 位置 | 角色 | 改动 |
 | --- | --- | --- |
-| D:\Codex\.codex\skills\finishing-a-development-branch\SKILL.md | 开发分支结束 | 用默认发布和受控临时分支替换旧的 merge/PR 菜单。 |
-| D:\Codex\.codex\skills\neat-freak\references\repo-clean-closeout.md | clean closeout 真源 | 增加默认分支解析、镜像验证与无 patch-stack 路由。 |
+| D:\Codex\.codex\skills\neat-freak\references\repo-clean-closeout.md | clean closeout 真源 | `neat-freak` 对发生改动的 Git 仓库默认提交本次授权范围、显式推送到用户拥有远端的 `main`，并验证 clean worktree 与远端 parity；只审计、只整理或不发布的显式阶段要求优先。 |
 | D:\Codex\.codex\skills\repo-clean-closeout\SKILL.md | 直接入口 | 保持薄包装，只明确委托真源，不复制规则。 |
-| D:\Codex\.codex\skills\clean-git-worktree\SKILL.md | 兼容入口 | 保持薄包装，只明确委托真源，不复制规则。 |
-| D:\Codex\.codex\skills\private-patch-stack\SKILL.md | 兼容入口和上游保护 | 改为私有默认分支发布，不再有 patch-stack 生命周期。 |
+| D:\Codex\.codex\skills\private-patch-stack\SKILL.md | 遗留兼容入口 | 仅处理用户明确要求的历史 patch-stack 审计、只读保留、精确清理或迁移；普通发布不进入此 skill。 |
 | D:\Codex\.codex\skills\handoff\SKILL.md | 收尾交接路由 | 只在存在非用户上游和未发布补丁时建议兼容入口，且说明默认分支发布规则。 |
 
-neat-freak 的 reference 是 Git clean closeout 的唯一行为真源；两个薄包装不重复维护分支规则。每个变更过的本地 skill 会同步更新 SOURCE.md 与统一来源账本。
+neat-freak 的 reference 是 Git clean closeout 的唯一行为真源；`repo-clean-closeout` 薄包装不重复维护分支规则。默认发布不意味着吸收、删除或丢弃既有无关脏改动：无法合法归属的路径必须保留，并使 closeout 明确处于 incomplete。每个变更过的本地 skill 会同步更新 SOURCE.md 与统一来源账本。
 
 ### 4. GitHub 发布插件的可重放本地覆盖
 
@@ -110,9 +108,8 @@ yeet 将改为默认分支发布流程：先解析默认分支、默认不建 PR
 
 ### 5. 来源与更新边界
 
-- finishing-a-development-branch 是 obra/superpowers 的 source-backed skill。来源账本会从错误的 retained-local 回填项中移除，并加入 obra-superpowers source group，标记为带本地策略覆盖。
 - neat-freak、handoff 和其他 source-backed skill 保留上游身份，只在 SOURCE.md 与账本中追加本地策略覆盖。
-- private-patch-stack、repo-clean-closeout 和 clean-git-worktree 保留其本地来源记录。
+- private-patch-stack 和 repo-clean-closeout 保留其本地来源记录。
 - 插件行为覆盖不伪装成上游改动；其来源、输入指纹、应用时间和回滚证据由覆盖器文档和 run-evidence 记录。
 
 ## 失败处理
@@ -131,8 +128,8 @@ yeet 将改为默认分支发布流程：先解析默认分支、默认不建 PR
 实施完成前必须同时满足：
 
 1. 本地 skill 内容测试证明没有创建、推送或追踪 patch-stack 分支的指令。
-2. 默认分支解析只能使用 remote 默认分支证据，不存在 main/master 猜测回退。
-3. 临时分支路径涵盖：远端同步、确认后合入默认分支、推送默认分支、删除本地和远端分支、fetch --prune 验证。
+2. 普通收尾目标固定为用户拥有远端的 `main`；remote 名称不能代替所有权证据，remote ahead/diverged、目标歧义或非 `main` 时停止。
+3. `neat-freak` delivery mode 覆盖：全仓库集合预检、脏路径分类、窄验证、精确 staging、显式 `HEAD:main` push、远端 SHA parity 和空 porcelain；任一步失败都不能宣称 clean closeout 完成。
 4. 插件覆盖器对 fixture、marketplace source 和两个 cache 变体的已知指纹均可应用；重复运行 no-op；未知指纹失败且不写入。
 5. 所有被改本地 skill 的 SOURCE.md 与 D:\Codex\.codex\skills\.downloaded-skills-source-state.json 一致，且资源闭包严格检查为零问题。
 6. git diff --check、覆盖器专项测试和最窄的相关测试全部通过。
