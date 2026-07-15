@@ -9,6 +9,13 @@
 
 网络地址、SSH 用户、密钥路径、登录态和凭据属于调用端本地事实，不写入仓库；连接前必须从当前设备的本地配置重新确认。
 
+## Aura 风扇灯自动关闭
+
+- 登录后通过 `C:\Users\WINDOWS\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\aura-lights-off.lnk` 运行；该快捷方式只承载 Startup 兼容配置，目标为 `C:\Windows\System32\wscript.exe`。
+- 实际载荷位于 D 盘：`D:\Codex\.codex\scripts\Start-AuraLightsOffHidden.vbs`；它以隐藏窗口运行 `D:\hermes-data\hermes-agent\venv-new\Scripts\python.exe D:\hermes-data\scripts\turn_off_aura_hid_startup.py`。这个解释器含有必需的 `hidapi`。
+- 此自动化只关闭 ASUS Aura / 风扇 RGB，不改变风扇转速或散热策略；不要在常规 Startup/Hermes 清理中删除或改写快捷方式与 D 盘载荷。
+- 2026-07-15 验证：启动器退出码为 `0`、未新建 Windows Terminal 进程，且用户已目视确认灯光保持熄灭。若修复或迁移，仍须同时核对启动器退出码与实际灯光状态。
+
 ## Skill 安装入口
 
 - 活动 skill 根：`D:\Codex\.codex\skills`
@@ -42,4 +49,4 @@
 3. 运行严格资源闭包和 catalog dry-run；只有两者都通过，才把设备视为已同步。
 4. 设备上的日志、临时 staging 和验证快照留在该设备的 D 盘 evidence 路径，不提交到仓库。
 
-本页记录的验证日期为 2026-07-14；数量、哈希和工具版本属于易变状态，后续操作必须实时复核，不能把本页当作当前运行结果。
+本页记录的验证日期为 2026-07-15；数量、哈希和工具版本属于易变状态，后续操作必须实时复核，不能把本页当作当前运行结果。
