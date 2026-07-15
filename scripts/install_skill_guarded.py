@@ -313,12 +313,45 @@ def target_specs(args: argparse.Namespace) -> list[tuple[str, str]]:
     return specs
 
 
+LEDGER_UPDATE_FIELDS = {"action", "installed_version", "path", "resource_paths", "status"}
+
+
+def ledger_updates(source: dict[str, Any]) -> dict[str, Any]:
+    """Validate optional source-ledger facts supplied by an update decision."""
+    raw = source.get("ledger_updates")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise InstallError("source.ledger_updates 必须是对象")
+
+    unexpected = sorted(set(raw) - LEDGER_UPDATE_FIELDS)
+    if unexpected:
+        raise InstallError(
+            "source.ledger_updates 包含不允许的字段：" + ", ".join(unexpected)
+        )
+
+    normalized: dict[str, Any] = {}
+    for field, value in raw.items():
+        if field == "resource_paths":
+            if not isinstance(value, list) or not value or not all(
+                isinstance(item, str) and item.strip() for item in value
+            ):
+                raise InstallError("source.ledger_updates.resource_paths 必须是非空字符串数组")
+            normalized[field] = list(value)
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise InstallError(f"source.ledger_updates.{field} 必须是非空字符串")
+        normalized[field] = value
+    return normalized
+
+
 def source_context(
     args: argparse.Namespace,
     decision: dict[str, Any],
     specs: list[tuple[str, str]],
 ) -> dict[str, Any]:
     source = decision.get("source") if isinstance(decision.get("source"), dict) else {}
+    ledger_update_values = ledger_updates(source)
     repo_value = source.get("repo") or args.repo
     repo_url = None
     if repo_value:
@@ -366,6 +399,7 @@ def source_context(
         "writing_revision": str(writing_revision),
         "overlay_status": str(overlay_status),
         "overlay_summary": str(overlay_summary),
+        "ledger_updates": ledger_update_values,
         "manifest_path": str(args.decision_manifest),
         "source_paths": [path for _, path in specs],
     }
@@ -503,6 +537,8 @@ def update_ledger(
         target_source["catalog_ref"] = context["commit"]
     target_source["last_guarded_install"] = utc_now()
     target_source.setdefault("status", "installed-by-guarded-wrapper")
+    for field, value in context.get("ledger_updates", {}).items():
+        target_source[field] = value
     skills = target_source.setdefault("skills", [])
     if not isinstance(skills, list):
         raise InstallError(f"source ledger source.skills 不是数组：{source_id}")

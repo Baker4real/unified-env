@@ -24,7 +24,7 @@
 3. wrapper 写入/保留 `SOURCE.md` 和 staging ledger，运行严格资源闭包检查。
 4. wrapper 在 active root 下重新创建候选内容，不移动 staging 目录，也不复制 staging 的 owner、DACL 或 SACL；目标目录和文件必须继承本机 active root 的权限。
 5. wrapper 备份旧 active skill，再原子换入候选；立即在独立子进程中枚举并读取全部文件，同时验证目标树不存在受保护 ACL。任一项失败都回滚，事务不得标记成功。
-6. wrapper 更新 `D:\Codex\.codex\skills\.downloaded-skills-source-state.json`。
+6. wrapper 更新 `D:\Codex\.codex\skills\.downloaded-skills-source-state.json`；只有 decision manifest 明确提供且通过白名单校验的来源元数据才可覆盖既有字段。
 7. wrapper 调用 `generate_skill_catalog.py --write`，再运行闭包、catalog 条目、ledger coverage 和 `SKILL.md` SHA-256 复核。
 8. 任一步失败都恢复 active 目录和状态文件，并把失败/回滚结果写入 `D:\Codex\.codex\run-evidence\skill-install-guarded\`。
 
@@ -41,13 +41,19 @@
   "source": {
     "id": "owner-repo",
     "repo": "owner/repo",
-    "ref": "main"
+    "ref": "main",
+    "ledger_updates": {
+      "installed_version": "1.2.3",
+      "status": "updated-with-local-overlay"
+    }
   }
 }
 ```
 
 `decision=update` 才允许替换已有 active skill。直接调用 `.system\skill-installer`、手工复制到 active root 或跳过 decision manifest，都不算完成的安装流程。
 
+`source.ledger_updates` 可选且只允许更新 `action`、`installed_version`、`path`、`resource_paths`、`status` 五个字段；`action`、`installed_version`、`path` 与 `status` 必须是非空字符串，`resource_paths` 必须是非空字符串数组。未知字段或错误类型会在 activation 前拒绝事务，避免 decision manifest 静默改写任意台账内容。
+
 ## 可维护性
 
-项目源文件是 `scripts\install_skill_guarded.py` 和 `scripts\install-skill-guarded.cmd`；通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。
+项目源文件是 `scripts\install_skill_guarded.py` 和 `scripts\install-skill-guarded.cmd`；通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁项目源、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。

@@ -145,8 +145,17 @@ class SkillInstallGuardedTests(unittest.TestCase):
         )
         return candidate
 
-    def write_manifest(self, name: str, decision: str, source_id: str = "local-test") -> Path:
+    def write_manifest(
+        self,
+        name: str,
+        decision: str,
+        source_id: str = "local-test",
+        ledger_updates: dict[str, object] | None = None,
+    ) -> Path:
         path = self.temp / f"manifest-{name}-{decision}.json"
+        source: dict[str, object] = {"id": source_id, "ref": "local"}
+        if ledger_updates is not None:
+            source["ledger_updates"] = ledger_updates
         path.write_text(
             json.dumps(
                 {
@@ -154,7 +163,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                     "source_status": "source-review",
                     "writing_great_skills": {"status": "no-change"},
                     "skills": [name],
-                    "source": {"id": source_id, "ref": "local"},
+                    "source": source,
                 },
                 ensure_ascii=False,
             ),
@@ -194,7 +203,17 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
     def test_install_updates_source_ledger_and_catalog(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "测试 guarded wrapper")
-        manifest = self.write_manifest("test-skill-wrapper", "install")
+        manifest = self.write_manifest(
+            "test-skill-wrapper",
+            "install",
+            ledger_updates={
+                "action": "updated",
+                "installed_version": "3.5.1",
+                "path": ".codex/skills/test-skill-wrapper",
+                "resource_paths": ["skill/SKILL.md"],
+                "status": "updated-with-local-overlay",
+            },
+        )
         with contextlib.redirect_stdout(io.StringIO()):
             code = WRAPPER.main(self.wrapper_args(candidate, manifest))
         self.assertEqual(code, 0)
@@ -204,10 +223,61 @@ class SkillInstallGuardedTests(unittest.TestCase):
         ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
         source = next(item for item in ledger["sources"] if item["id"] == "local-test")
         self.assertEqual(source["skills"], ["test-skill-wrapper"])
+        self.assertEqual(source["action"], "updated")
+        self.assertEqual(source["installed_version"], "3.5.1")
+        self.assertEqual(source["path"], ".codex/skills/test-skill-wrapper")
+        self.assertEqual(source["resource_paths"], ["skill/SKILL.md"])
+        self.assertEqual(source["status"], "updated-with-local-overlay")
         catalog = json.loads((self.temp / "catalog.json").read_text(encoding="utf-8"))
         artifact = next(item for item in catalog["artifacts"] if item.get("name") == "test-skill-wrapper")
         self.assertEqual(artifact["ledger_coverage"], "pass")
         self.assertEqual(catalog["checks"]["resource_closure"]["status"], "pass")
+
+    def test_install_uses_default_status_without_ledger_updates(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "默认 ledger 状态")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+        self.assertEqual(code, 0)
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        source = next(item for item in ledger["sources"] if item["id"] == "local-test")
+        self.assertEqual(source["status"], "installed-by-guarded-wrapper")
+
+    def test_install_rejects_unknown_ledger_update_field_before_activation(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "未知 ledger 字段")
+        manifest = self.write_manifest(
+            "test-skill-wrapper",
+            "install",
+            ledger_updates={"unknown": "not allowed"},
+        )
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+        self.assertEqual(code, 2)
+        self.assertFalse((self.active / "test-skill-wrapper").exists())
+
+    def test_install_rejects_non_list_resource_paths_before_activation(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "错误 resource paths")
+        manifest = self.write_manifest(
+            "test-skill-wrapper",
+            "install",
+            ledger_updates={"resource_paths": "skill/SKILL.md"},
+        )
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+        self.assertEqual(code, 2)
+        self.assertFalse((self.active / "test-skill-wrapper").exists())
+
+    def test_install_rejects_empty_resource_paths_before_activation(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "空 resource paths")
+        manifest = self.write_manifest(
+            "test-skill-wrapper",
+            "install",
+            ledger_updates={"resource_paths": []},
+        )
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+        self.assertEqual(code, 2)
+        self.assertFalse((self.active / "test-skill-wrapper").exists())
 
     def test_install_drops_private_staging_acl_and_verifies_new_process_readability(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "测试 ACL 继承")
