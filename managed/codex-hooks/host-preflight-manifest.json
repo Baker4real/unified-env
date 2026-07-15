@@ -3,6 +3,15 @@
   "schemaVersion": 1,
   "codexHome": "D:\\Codex\\.codex",
   "managedRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks",
+  "trustedProjects": [
+    "D:\\Codex\\projects\\时钟倒计时",
+    "D:\\Codex\\projects\\统一环境",
+    "D:\\Codex\\projects\\杨杨子",
+    "D:\\Codex\\projects\\codex-account-switch",
+    "D:\\Codex\\projects\\codex-gsd-codex-c-skill",
+    "D:\\Codex\\projects\\CodexProviderSync",
+    "D:\\Codex\\projects\\minmin-calendar"
+  ],
   "runtimes": {
     "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
     "python": "D:\\Codex\\tools\\python314-official\\python.exe",

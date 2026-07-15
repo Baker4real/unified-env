@@ -1354,6 +1354,70 @@ function Convert-SerenaArgs {
     ConvertTo-Json -InputObject $result.ToArray() -Compress
 }
 
+function Set-DesiredProjectTrust {
+    param(
+        [Parameter(Mandatory)][string]$Content,
+        [Parameter(Mandatory)][string[]]$TrustedProjects
+    )
+
+    $document = Get-TomlDocument -Content $Content
+    $missingProjects = [Collections.Generic.List[string]]::new()
+    $missingTrustIndices = [Collections.Generic.HashSet[int]]::new()
+    foreach ($projectPath in $TrustedProjects) {
+        $canonicalPath = [IO.Path]::GetFullPath($projectPath).TrimEnd('\', '/')
+        if (-not $canonicalPath.StartsWith('D:\Codex\projects\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "受管 project trust 路径不在项目根下：$projectPath"
+        }
+        if ($canonicalPath.Equals('D:\Codex\projects', [StringComparison]::OrdinalIgnoreCase)) {
+            throw '受管 project trust 不得使用 projects 集合根。'
+        }
+        $segments = @('projects', $canonicalPath.ToLowerInvariant())
+        $matches = @($document.headers | Where-Object {
+            $_.kind -ceq 'table' -and (Test-TomlKeySegmentsEqual -Left @($_.segments) -Right $segments)
+        })
+        if ($matches.Count -gt 1) {
+            throw "项目 trust section 重复：$canonicalPath"
+        }
+        if ($matches.Count -eq 0) {
+            [void]$missingProjects.Add($canonicalPath.ToLowerInvariant())
+            continue
+        }
+
+        $header = $matches[0]
+        $next = @($document.headers | Where-Object { $_.index -gt $header.index } | Sort-Object index | Select-Object -First 1)
+        $end = if ($next.Count -eq 1) { $next[0].index } else { $document.lines.Count }
+        $trustIndices = @(Get-TomlKeyIndices -Document $document -Key 'trust_level' -Start ($header.index + 1) -End $end)
+        if ($trustIndices.Count -gt 1) {
+            throw "项目 trust_level 重复：$canonicalPath"
+        }
+        if ($trustIndices.Count -eq 0) {
+            [void]$missingTrustIndices.Add([int]$header.index)
+            continue
+        }
+        Set-TomlKeyLiteral -Document $document -Index $trustIndices[0] -Key 'trust_level' -Literal '"trusted"'
+        $Content = [string]::Join($document.newLine, $document.lines)
+        $document = Get-TomlDocument -Content $Content
+    }
+    $rebuilt = [Collections.Generic.List[string]]::new()
+    for ($index = 0; $index -lt $document.lines.Count; $index++) {
+        [void]$rebuilt.Add($document.lines[$index])
+        if ($missingTrustIndices.Contains($index)) {
+            [void]$rebuilt.Add('trust_level = "trusted"')
+        }
+    }
+    $desired = [string]::Join($document.newLine, $rebuilt)
+    if ($missingProjects.Count -gt 0) {
+        if (-not $desired.EndsWith($document.newLine, [StringComparison]::Ordinal)) {
+            $desired += $document.newLine
+        }
+        foreach ($projectPath in $missingProjects) {
+            $desired += $document.newLine + "[projects.'$projectPath']" + $document.newLine + 'trust_level = "trusted"' + $document.newLine
+        }
+    }
+    Assert-ValidToml -Content $desired
+    return $desired
+}
+
 function Get-DesiredConfig {
     param(
         [string]$Content,
@@ -1448,6 +1512,7 @@ function Get-DesiredConfig {
         }
     }
     $desired = [string]::Join($document.newLine, $keptLines)
+    $desired = Set-DesiredProjectTrust -Content $desired -TrustedProjects @($script:HostPreflightManifest.trustedProjects)
     Assert-ValidToml -Content $desired
 
     [pscustomobject]@{

@@ -627,6 +627,9 @@ function Assert-CodexHookManifest {
     param([Parameter(Mandatory)][object]$Manifest)
 
     $topNames = @('artifactType', 'schemaVersion', 'codexHome', 'managedRoot', 'runtimes', 'hooks', 'files', 'environment')
+    if ($Manifest.PSObject.Properties.Name -contains 'trustedProjects') {
+        $topNames += 'trustedProjects'
+    }
     Assert-CodexHookExactProperties -Value $Manifest -Names $topNames -Scope 'manifest'
 
     Assert-CodexHookString -Value $Manifest.artifactType -Name 'artifactType'
@@ -657,6 +660,12 @@ function Assert-CodexHookManifest {
     Assert-CodexHookArray -Value ([object]$Manifest.hooks) -Name 'hooks'
     Assert-CodexHookArray -Value ([object]$Manifest.files) -Name 'files'
     Assert-CodexHookArray -Value ([object]$Manifest.environment) -Name 'environment'
+    if ($Manifest.PSObject.Properties.Name -contains 'trustedProjects') {
+        Assert-CodexHookArray -Value ([object]$Manifest.trustedProjects) -Name 'trustedProjects'
+        foreach ($projectPath in @($Manifest.trustedProjects)) {
+            Assert-CodexHookString -Value $projectPath -Name 'trustedProjects[]'
+        }
+    }
 
     $hookNames = @(
         'id', 'event', 'order', 'matcher', 'timeoutSeconds', 'commandPath', 'arguments',
@@ -1022,6 +1031,26 @@ function Assert-CodexHookHostPreflightManifest {
     }
     if (@($Manifest.hooks | Where-Object lifecycle -cne 'active').Count -ne 0) {
         throw 'host-preflight manifest 只能包含 active hook。'
+    }
+
+    $expectedTrustedProjects = @(
+        'D:\Codex\projects\时钟倒计时',
+        'D:\Codex\projects\统一环境',
+        'D:\Codex\projects\杨杨子',
+        'D:\Codex\projects\codex-account-switch',
+        'D:\Codex\projects\codex-gsd-codex-c-skill',
+        'D:\Codex\projects\CodexProviderSync',
+        'D:\Codex\projects\minmin-calendar'
+    )
+    $actualTrustedProjects = @($Manifest.trustedProjects)
+    if (-not (Test-CodexHookExactStringSequence -Actual $actualTrustedProjects -Expected $expectedTrustedProjects)) {
+        throw 'host-preflight manifest project trust 集合不精确。'
+    }
+    foreach ($projectPath in $actualTrustedProjects) {
+        [void](Assert-CodexHookExactPath -Value $projectPath -Expected $projectPath -Name 'host-preflight trusted project')
+        if ($projectPath -ceq 'D:\Codex\projects') {
+            throw 'host-preflight manifest 不得信任 projects 集合根。'
+        }
     }
 
     $expectedHookIdentityHashes = @{

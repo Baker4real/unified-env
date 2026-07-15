@@ -271,6 +271,17 @@ $legacyFixtureManifest = Read-CodexHookManifest -Path $legacyFixtureManifestPath
 $hostPreflightManifest = Read-CodexHookManifest -Path $hostPreflightManifestPath
 [void](Read-CodexHookHostPreflightManifest)
 [void](Read-CodexHookLegacyFixtureManifest)
+$expectedTrustedProjects = @(
+    'D:\Codex\projects\时钟倒计时',
+    'D:\Codex\projects\统一环境',
+    'D:\Codex\projects\杨杨子',
+    'D:\Codex\projects\codex-account-switch',
+    'D:\Codex\projects\codex-gsd-codex-c-skill',
+    'D:\Codex\projects\CodexProviderSync',
+    'D:\Codex\projects\minmin-calendar'
+)
+Assert-True ((@($hostPreflightManifest.trustedProjects) -join "`0") -ceq ($expectedTrustedProjects -join "`0")) 'host-preflight manifest 必须只声明当前七个精确项目根的 trust 投影'
+Assert-True (-not (@($hostPreflightManifest.trustedProjects) -ccontains 'D:\Codex\projects')) 'host-preflight manifest 不得信任 projects 集合根'
 Assert-Throws { Read-CodexHookHostPreflightManifest -Path $legacyFixtureManifestPath | Out-Null } 'legacy manifest 不得提供 production identity'
 Assert-Throws { Read-CodexHookLegacyFixtureManifest -Path $hostPreflightManifestPath | Out-Null } 'host manifest 不得伪装历史 fixture identity'
 $mutatedHostHookIdentity = Copy-TestDocument $hostPreflightManifest

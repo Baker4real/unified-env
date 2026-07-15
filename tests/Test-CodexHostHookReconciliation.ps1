@@ -574,6 +574,19 @@ try {
     Assert-True -Condition ($config -match '(?m)^sandbox_mode\s*=\s*"danger-full-access"\s*$') -Message "sandbox_mode 未归一化"
     Assert-True -Condition ($config -match '(?m)^hooks\s*=\s*true\s*$') -Message "features.hooks 未保持开启"
     Assert-True -Condition ($config -match '(?m)^unified_exec\s*=\s*true\s*$') -Message "features.unified_exec 未保持开启"
+    foreach ($trustedProject in @(
+        'D:\Codex\projects\时钟倒计时',
+        'D:\Codex\projects\统一环境',
+        'D:\Codex\projects\杨杨子',
+        'D:\Codex\projects\codex-account-switch',
+        'D:\Codex\projects\codex-gsd-codex-c-skill',
+        'D:\Codex\projects\CodexProviderSync',
+        'D:\Codex\projects\minmin-calendar'
+    )) {
+        $header = [regex]::Escape("[projects.'$($trustedProject.ToLowerInvariant())']")
+        Assert-True -Condition ([regex]::IsMatch($config, "(?m)^$header\s*\r?\ntrust_level\s*=\s*`"trusted`"\s*$")) -Message "项目 trust 未收敛：$trustedProject"
+    }
+    Assert-True -Condition (-not $config.Contains("[projects.'d:\codex\projects']")) -Message '不得把 projects 集合根设为 trusted'
     Assert-True -Condition (-not ($config -match '(?m)^\[hooks(?:\.|\])')) -Message "旧 hook trust section 未删除"
     Assert-True -Condition (-not $config.Contains('fixture-trust-hash')) -Message "带点号空白的合法 hook trust section 未删除"
 
