@@ -879,14 +879,14 @@ function Get-UniqueSectionRange {
     )
 
     $expectedSegments = @($Name.Split('.'))
-    $matches = @($Document.headers | Where-Object {
+    $matchingSectionHeaders = @($Document.headers | Where-Object {
         $_.kind -ceq "table" -and (Test-TomlKeySegmentsEqual -Left @($_.segments) -Right $expectedSegments)
     })
-    if ($matches.Count -ne 1) {
-        throw "TOML section 必须恰好出现一次：[$Name]；实际 $($matches.Count)"
+    if ($matchingSectionHeaders.Count -ne 1) {
+        throw "TOML section 必须恰好出现一次：[$Name]；实际 $($matchingSectionHeaders.Count)"
     }
 
-    $header = $matches[0]
+    $header = $matchingSectionHeaders[0]
     $next = @($Document.headers | Where-Object { $_.index -gt $header.index } | Sort-Object index | Select-Object -First 1)
     [pscustomobject]@{
         start = $header.index + 1
@@ -1372,18 +1372,18 @@ function Set-DesiredProjectTrust {
             throw '受管 project trust 不得使用 projects 集合根。'
         }
         $segments = @('projects', $canonicalPath.ToLowerInvariant())
-        $matches = @($document.headers | Where-Object {
+        $matchingProjectTrustHeaders = @($document.headers | Where-Object {
             $_.kind -ceq 'table' -and (Test-TomlKeySegmentsEqual -Left @($_.segments) -Right $segments)
         })
-        if ($matches.Count -gt 1) {
+        if ($matchingProjectTrustHeaders.Count -gt 1) {
             throw "项目 trust section 重复：$canonicalPath"
         }
-        if ($matches.Count -eq 0) {
+        if ($matchingProjectTrustHeaders.Count -eq 0) {
             [void]$missingProjects.Add($canonicalPath.ToLowerInvariant())
             continue
         }
 
-        $header = $matches[0]
+        $header = $matchingProjectTrustHeaders[0]
         $next = @($document.headers | Where-Object { $_.index -gt $header.index } | Sort-Object index | Select-Object -First 1)
         $end = if ($next.Count -eq 1) { $next[0].index } else { $document.lines.Count }
         $trustIndices = @(Get-TomlKeyIndices -Document $document -Key 'trust_level' -Start ($header.index + 1) -End $end)
@@ -1538,8 +1538,8 @@ function Remove-KnownRetiredHookRegistrations {
                 if ($null -ne $entry -and $entry.PSObject.Properties.Name -contains 'type' -and $entry.type -ceq 'command' -and $entry.command -is [string]) {
                     $parsed = Split-CodexHookCommandLine -Command ([string]$entry.command)
                     if ($parsed.parsed) {
-                        $matches = @(Get-CodexHookManifestMatches -Manifest $retiredManifest -Event $eventName -Matcher $matcher -Tokens $parsed.tokens -IsCommandEntry $true | Where-Object { $null -ne $_ })
-                        $isRetired = $matches.Count -eq 1
+                        $retiredManifestMatches = @(Get-CodexHookManifestMatches -Manifest $retiredManifest -Event $eventName -Matcher $matcher -Tokens $parsed.tokens -IsCommandEntry $true | Where-Object { $null -ne $_ })
+                        $isRetired = $retiredManifestMatches.Count -eq 1
                     }
                 }
                 if (-not $isRetired) { $keptEntries.Add($entry) }

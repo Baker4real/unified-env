@@ -144,9 +144,9 @@ function Get-CheckResult {
         [string]$Name
     )
 
-    $matches = @($Result.checks | Where-Object { $_.name -eq $Name })
-    Assert-True -Condition ($matches.Count -eq 1) -Message "检查项必须恰好出现一次：$Name"
-    $matches[0]
+    $matchingChecks = @($Result.checks | Where-Object { $_.name -eq $Name })
+    Assert-True -Condition ($matchingChecks.Count -eq 1) -Message "检查项必须恰好出现一次：$Name"
+    $matchingChecks[0]
 }
 
 $legacyNames = @(
@@ -662,7 +662,6 @@ try {
     [System.IO.File]::WriteAllText($legacyContextSiblingPath, "description: sibling-must-survive`n", [System.Text.UTF8Encoding]::new($false))
     $legacyContextSiblingHash = Get-Sha256 -Path $legacyContextSiblingPath
     $legacyContextSiblingAcl = (Get-Acl -LiteralPath $legacyContextSiblingPath).Sddl
-    $legacyContextBefore = [System.IO.File]::ReadAllText($legacyContextPath)
     $legacyContextBeforeHash = Get-Sha256 -Path $legacyContextPath
     $legacyContextCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $legacyContextHome
     Assert-True -Condition (-not [bool]$legacyContextCheck.ok -and -not [bool](Get-CheckResult -Result $legacyContextCheck -Name "serenaContext").ok) -Message "合法旧 Serena context 的 Check 应报告可修复 drift，而不是 fatal"
