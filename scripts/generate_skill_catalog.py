@@ -190,6 +190,37 @@ def _parse_bool(value: Any, *, label: str) -> bool | None:
     raise CatalogError(f"{label}不是受支持的布尔值：{value!r}")
 
 
+def _openai_invocation_policy(skill_dir: Path) -> dict[str, Any]:
+    """Read only the invocation policy from agents/openai.yaml.
+
+    Display fields intentionally remain outside the catalog's authority: they
+    may carry a local Chinese presentation overlay.  Invocation policy is
+    behavioral and must agree with SKILL.md.
+    """
+
+    path = skill_dir / "agents" / "openai.yaml"
+    if not path.exists():
+        return {"path": None, "allow_implicit_invocation": None}
+    if not path.is_file() or _is_reparse(path):
+        raise CatalogError(f"agents/openai.yaml 不是安全的普通文件：{path}")
+    data, _ = _read_stable(path, label="agents/openai.yaml")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise CatalogError(f"agents/openai.yaml 不是合法 UTF-8：{path}") from exc
+    matches = re.findall(
+        r"(?m)^\s*allow_implicit_invocation\s*:\s*([^#\r\n]+)", text
+    )
+    if len(matches) > 1:
+        raise CatalogError(f"agents/openai.yaml 重复声明 allow_implicit_invocation：{path}")
+    value = (
+        _parse_bool(matches[0].strip(), label=f"{path} 的 allow_implicit_invocation")
+        if matches
+        else None
+    )
+    return {"path": str(path), "allow_implicit_invocation": value}
+
+
 def _fold_block(lines: list[str], *, literal: bool) -> str:
     nonempty = [len(line) - len(line.lstrip(" \t")) for line in lines if line.strip()]
     indent = min(nonempty) if nonempty else 0
@@ -606,6 +637,14 @@ def _artifact(
     )
 
     disable_value = frontmatter.get("disable_model_invocation")
+    openai_policy = _openai_invocation_policy(skill_path.parent)
+    allow_implicit = openai_policy["allow_implicit_invocation"]
+    effective_disabled = disable_value is True
+    if allow_implicit is not None and allow_implicit == effective_disabled:
+        conflicts.append(
+            "SKILL.md disable-model-invocation 与 agents/openai.yaml "
+            "allow_implicit_invocation 语义冲突"
+        )
     mode = "user-invoked" if disable_value is True else "model-invoked"
     relative = skill_path.relative_to(root).as_posix()
     return {
@@ -628,6 +667,8 @@ def _artifact(
             "mode": mode,
             "description_present": bool(str(frontmatter.get("description", "")).strip()),
             "disable_model_invocation": disable_value,
+            "openai_yaml_path": openai_policy["path"],
+            "allow_implicit_invocation": allow_implicit,
         },
         "source": source,
         "ledger": {

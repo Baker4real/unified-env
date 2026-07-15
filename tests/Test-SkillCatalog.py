@@ -52,6 +52,19 @@ def _write_skill(
     return skill_dir
 
 
+def _write_openai_policy(skill_dir: Path, *, allow_implicit_invocation: bool) -> None:
+    agents = skill_dir / "agents"
+    agents.mkdir(parents=True, exist_ok=True)
+    (agents / "openai.yaml").write_text(
+        "interface:\n"
+        '  display_name: "测试名称"\n'
+        '  short_description: "中文展示 overlay"\n'
+        "policy:\n"
+        f"  allow_implicit_invocation: {str(allow_implicit_invocation).lower()}\n",
+        encoding="utf-8",
+    )
+
+
 def _closure_result(active_root: Path, active_skill_count: int) -> dict:
     return {
         "summary": {
@@ -178,6 +191,7 @@ else:
                     disable_model_invocation=True,
                     source=source,
                 )
+                _write_openai_policy(skill_dir, allow_implicit_invocation=False)
                 ledger = base / "ledger.json"
                 ledger.write_text(json.dumps({"unresolved": [{"name": "manual"}]}), encoding="utf-8")
 
@@ -190,11 +204,43 @@ else:
                 artifact = catalog["artifacts"][0]
 
                 self.assertEqual(artifact["invocation"]["mode"], "user-invoked")
+                self.assertFalse(artifact["invocation"]["allow_implicit_invocation"])
+                self.assertEqual(artifact["conflicts"], [])
                 self.assertTrue(artifact["invocation"]["description_present"])
                 self.assertEqual(artifact["source"]["status"], "retained-local")
                 self.assertEqual(artifact["ledger_coverage"], "pass")
                 self.assertEqual(artifact["ledger"]["states"], ["unresolved"])
                 self.assertEqual(artifact["runtime_verification"], "unverified")
+
+        def test_rejects_split_invocation_policy_between_skill_and_openai_yaml(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                cache.mkdir()
+                skill_dir = _write_skill(
+                    active,
+                    "split",
+                    name="split",
+                    description="model branch",
+                    source="# Source Provenance\nSkill: split\nStatus: retained-local\n",
+                )
+                _write_openai_policy(skill_dir, allow_implicit_invocation=False)
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "split"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                self.assertEqual(catalog["checks"]["ledger"]["status"], "conflict")
+                self.assertIn("语义冲突", catalog["artifacts"][0]["conflicts"][0])
 
         def test_build_is_read_only_and_write_catalog_creates_valid_json(self) -> None:
             with tempfile.TemporaryDirectory() as temp:
