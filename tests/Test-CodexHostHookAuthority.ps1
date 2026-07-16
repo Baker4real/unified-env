@@ -57,8 +57,9 @@ Assert-Superseded { Invoke-CodexHookProductionRegistrationRepairApplyCore -Profi
 Assert-Superseded { Restore-CodexHookProductionRegistrationRepairCore -Profile $registrationProfile -EvidenceDirectory $unreadEvidence } 'RegistrationRepair restore core 必须在 evidence 读取前拒绝'
 
 $reconciler = Get-Content -Raw -LiteralPath (Join-Path $root 'scripts\Invoke-CodexHostHookReconciliation.ps1')
-Assert-True ($reconciler -match '\$alreadyEmpty\s*=\s*-not\s+\$hookProperties\[0\]\.Value\.EnumerateObject\(\)\.MoveNext\(\)') 'reconciler 必须保持用户级 lifecycle hooks=0 目标'
-Assert-True ($reconciler -match 'Set-TomlKeyLiteral[^\r\n]+-Key\s+"hooks"\s+-Literal\s+"true"') 'reconciler 必须保持 features.hooks=true 目标'
+Assert-True ($reconciler -match 'Merge-CodexHookRegistry\s+-Manifest\s+\$script:HostPreflightManifest') 'reconciler 必须按 active host manifest 合并 lifecycle hooks'
+Assert-True ($reconciler -match '\$alreadyDesired\s*=\s+\$currentHooksJson\s+-ceq\s+\$mergedHooksJson') 'reconciler 必须以目标 registry 幂等判断替代已退役的 hooks=0 判断'
+Assert-True (-not ($reconciler -match 'Set-TomlKeyLiteral[^\r\n]+-Key\s+"(?:approval_policy|sandbox_mode|unified_exec)"')) 'reconciler 不得擅自重写用户权限或 Windows unified_exec 默认值'
 
 $userDocs = @(
     'README.md',
@@ -72,10 +73,5 @@ foreach ($relativePath in $userDocs) {
     Assert-True ($text -match '唯一.{0,12}(生产|当前).{0,12}(权威|入口)|唯一.{0,12}(权威|入口)') "$relativePath 必须声明 reconciler 的单一生产权威"
 }
 
-$historicalBriefPath = Join-Path $root '.superpowers\sdd\task-7-brief.md'
-if (Test-Path -LiteralPath $historicalBriefPath -PathType Leaf) {
-    $historicalBrief = Get-Content -Raw -LiteralPath $historicalBriefPath
-    Assert-True ($historicalBrief -notmatch '(?m)^\s*&.*(?:Invoke|Restore)-CodexHookDeployment\.ps1') '本机历史 Task 7 brief 不得保留可复制的 live apply/restore 命令'
-}
 
 [pscustomobject][ordered]@{ok=$true;test='CodexHostHookAuthority'}

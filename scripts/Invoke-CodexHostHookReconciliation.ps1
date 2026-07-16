@@ -29,8 +29,6 @@ $script:FixtureManagedParentAttack = $null
 $script:FixtureCreatedDirectoryCleanupReplace = $null
 $script:FixtureLegacyDeleteReplace = $null
 $script:FixtureLegacyDirectoryDeleteReplace = $null
-$script:FixtureLegacyDirectoryCreateReplace = $null
-$script:FixtureLegacyDirectoryFinalReplace = $null
 $script:FixtureEvidenceAncestorReplace = $null
 $script:FixtureAclCasReplace = $null
 $script:FixtureRollbackAclCasReplace = $null
@@ -222,8 +220,6 @@ function Initialize-FixtureTestSeams {
     $createdDirectoryCleanupReplace = $env:CODEX_HOST_HOOK_TEST_CREATED_DIRECTORY_CLEANUP_REPLACE
     $legacyDeleteReplace = $env:CODEX_HOST_HOOK_TEST_LEGACY_DELETE_REPLACE
     $legacyDirectoryDeleteReplace = $env:CODEX_HOST_HOOK_TEST_LEGACY_DIRECTORY_DELETE_REPLACE
-    $legacyDirectoryCreateReplace = $env:CODEX_HOST_HOOK_TEST_LEGACY_DIRECTORY_CREATE_REPLACE
-    $legacyDirectoryFinalReplace = $env:CODEX_HOST_HOOK_TEST_RESTORE_LEGACY_DIRECTORY_FINAL_REPLACE
     $evidenceAncestorReplace = $env:CODEX_HOST_HOOK_TEST_EVIDENCE_ANCESTOR_REPLACE
     $aclCasReplace = $env:CODEX_HOST_HOOK_TEST_ACL_CAS_REPLACE
     $rollbackAclCasReplace = $env:CODEX_HOST_HOOK_TEST_ROLLBACK_ACL_CAS_REPLACE
@@ -235,8 +231,6 @@ function Initialize-FixtureTestSeams {
         [string]::IsNullOrWhiteSpace($createdDirectoryCleanupReplace) -and
         [string]::IsNullOrWhiteSpace($legacyDeleteReplace) -and
         [string]::IsNullOrWhiteSpace($legacyDirectoryDeleteReplace) -and
-        [string]::IsNullOrWhiteSpace($legacyDirectoryCreateReplace) -and
-        [string]::IsNullOrWhiteSpace($legacyDirectoryFinalReplace) -and
         [string]::IsNullOrWhiteSpace($evidenceAncestorReplace) -and
         [string]::IsNullOrWhiteSpace($aclCasReplace) -and
         [string]::IsNullOrWhiteSpace($rollbackAclCasReplace)
@@ -344,13 +338,8 @@ function Initialize-FixtureTestSeams {
         }
     }
 
-    foreach ($directoryReplaceSpec in @(
-        [pscustomobject]@{ json=$legacyDirectoryDeleteReplace; slot='FixtureLegacyDirectoryDeleteReplace' },
-        [pscustomobject]@{ json=$legacyDirectoryCreateReplace; slot='FixtureLegacyDirectoryCreateReplace' },
-        [pscustomobject]@{ json=$legacyDirectoryFinalReplace; slot='FixtureLegacyDirectoryFinalReplace' }
-    )) {
-        if ([string]::IsNullOrWhiteSpace([string]$directoryReplaceSpec.json)) { continue }
-        $replace = ([string]$directoryReplaceSpec.json) | ConvertFrom-Json
+    if (-not [string]::IsNullOrWhiteSpace($legacyDirectoryDeleteReplace)) {
+        $replace = $legacyDirectoryDeleteReplace | ConvertFrom-Json
         if ((@($replace.PSObject.Properties.Name) -join ',') -cne 'targetPath,externalParent') { throw 'fixture-only legacy directory replacement schema 无效' }
         $targetPath = [IO.Path]::GetFullPath([string]$replace.targetPath).TrimEnd('\')
         $externalParent = [IO.Path]::GetFullPath([string]$replace.externalParent).TrimEnd('\')
@@ -361,11 +350,11 @@ function Initialize-FixtureTestSeams {
             throw 'fixture-only legacy directory replacement capability 非法'
         }
         Assert-NoReparsePath -Path $externalParent -RequireLeaf | Out-Null
-        Set-Variable -Scope Script -Name ([string]$directoryReplaceSpec.slot) -Value ([pscustomobject]@{
+        $script:FixtureLegacyDirectoryDeleteReplace = [pscustomobject]@{
             targetPath=$targetPath
             movedPath="$targetPath.fixture-moved"
             externalParent=$externalParent
-        })
+        }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($evidenceAncestorReplace)) {
@@ -821,6 +810,82 @@ function Assert-ValidToml {
     }
 }
 
+function Assert-NoHeaderLikeTomlContainerLine {
+    param([string[]]$Lines)
+
+    $arrayDepth = 0
+    $inlineTableDepth = 0
+    $tableHeaderPattern = '^\s*\[(?<name>[^\[\]]+)\]\s*(?:#.*)?$'
+    $arrayTableHeaderPattern = '^\s*\[\[(?<name>[^\[\]]+)\]\]\s*(?:#.*)?$'
+    foreach ($line in $Lines) {
+        $looksLikeTableHeader = [regex]::IsMatch($line, $tableHeaderPattern)
+        $looksLikeArrayTableHeader = [regex]::IsMatch($line, $arrayTableHeaderPattern)
+        if (
+            ($arrayDepth -gt 0 -or $inlineTableDepth -gt 0) -and
+            ($looksLikeTableHeader -or $looksLikeArrayTableHeader)
+        ) {
+            throw 'TOML 多行容器包含 header-like 元素；当前定向 parser 无法安全区分，拒绝写入'
+        }
+        if ($arrayDepth -eq 0 -and $inlineTableDepth -eq 0 -and ($looksLikeTableHeader -or $looksLikeArrayTableHeader)) {
+            continue
+        }
+
+        $quote = [char]0
+        $escaped = $false
+        for ($column = 0; $column -lt $line.Length; $column++) {
+            $character = $line[$column]
+            if ($quote -ne [char]0) {
+                if ($quote -eq '"' -and $escaped) {
+                    $escaped = $false
+                    continue
+                }
+                if ($quote -eq '"' -and $character -eq '\') {
+                    $escaped = $true
+                    continue
+                }
+                if ($character -eq $quote) {
+                    $quote = [char]0
+                }
+                continue
+            }
+            if ($character -eq '#') {
+                break
+            }
+            if ($character -eq '"' -or $character -eq "'") {
+                $quote = $character
+                continue
+            }
+            if ($character -eq '[') {
+                $arrayDepth++
+                continue
+            }
+            if ($character -eq ']') {
+                $arrayDepth--
+                if ($arrayDepth -lt 0) {
+                    throw 'TOML array container 边界非法'
+                }
+                continue
+            }
+            if ($character -eq '{') {
+                $inlineTableDepth++
+                continue
+            }
+            if ($character -eq '}') {
+                $inlineTableDepth--
+                if ($inlineTableDepth -lt 0) {
+                    throw 'TOML inline table container 边界非法'
+                }
+            }
+        }
+        if ($quote -ne [char]0) {
+            throw '当前安全 parser 不处理跨行或未终止 TOML string；拒绝写入'
+        }
+    }
+    if ($arrayDepth -ne 0 -or $inlineTableDepth -ne 0) {
+        throw 'TOML container 边界未闭合；拒绝写入'
+    }
+}
+
 function Invoke-FixturePostCommitFailure {
     param([ValidateSet("managed", "environment", "registry", "acl", "legacy", "final")][string]$Phase)
 
@@ -840,6 +905,7 @@ function Get-TomlDocument {
 
     $newLine = if ($Content.Contains("`r`n")) { "`r`n" } else { "`n" }
     $lines = [regex]::Split($Content, "\r?\n")
+    Assert-NoHeaderLikeTomlContainerLine -Lines $lines
     $headers = [System.Collections.Generic.List[object]]::new()
     for ($index = 0; $index -lt $lines.Count; $index++) {
         $match = [regex]::Match($lines[$index], '^\s*\[(?<name>[^\[\]]+)\]\s*(?:#.*)?$')
@@ -1045,13 +1111,12 @@ function Invoke-FixtureLegacyDeleteReplace {
 function Invoke-FixtureLegacyDirectoryReplace {
     param(
         [string]$TargetPath,
-        [ValidateSet('delete','create','final')][string]$Phase
+        [ValidateSet('delete')][string]$Phase
     )
 
-    $slot = if ($Phase -ceq 'delete') { 'FixtureLegacyDirectoryDeleteReplace' } elseif ($Phase -ceq 'create') { 'FixtureLegacyDirectoryCreateReplace' } else { 'FixtureLegacyDirectoryFinalReplace' }
-    $replace = Get-Variable -Scope Script -Name $slot -ValueOnly
+    $replace = $script:FixtureLegacyDirectoryDeleteReplace
     if ($null -eq $replace -or $TargetPath -ine [string]$replace.targetPath) { return }
-    Set-Variable -Scope Script -Name $slot -Value $null
+    $script:FixtureLegacyDirectoryDeleteReplace = $null
     Move-Item -LiteralPath $TargetPath -Destination ([string]$replace.movedPath)
     try { New-FixtureJunction -JunctionPath $TargetPath -TargetPath ([string]$replace.externalParent) }
     catch {
@@ -1112,24 +1177,30 @@ function Get-ManagedHookFileStates {
         $sourcePath = [System.IO.Path]::GetFullPath((Join-Path $managedRoot ([string]$_.relativePath)))
         if (-not $sourcePath.StartsWith("$managedRoot\", [System.StringComparison]::OrdinalIgnoreCase)) { throw '受管 source 路径越界' }
         Assert-NoReparsePath -Path $sourcePath -RequireLeaf | Out-Null
-        $sourceSha256 = (Get-Sha256 -Path $sourcePath).ToLowerInvariant()
-        if ($sourceSha256 -cne ([string]$_.sha256).ToLowerInvariant()) { throw "受管 source hash 漂移：$($_.relativePath)" }
+        $sourceSnapshot = Get-CodexHookHandleBoundFileSnapshot -Path $sourcePath -Name "managed source $($_.relativePath)" -AllowedExactPaths @($sourcePath)
+        if (-not $sourceSnapshot.probe.safeToRead) { throw "受管 source 无法安全读取：$($_.relativePath) state=$($sourceSnapshot.probe.state)" }
+        [byte[]]$sourceBytes = [byte[]]$sourceSnapshot.bytes
+        $sourceRawSha256 = (Get-CodexHookBytesSha256 -Bytes $sourceBytes).ToLowerInvariant()
+        $sourceCanonicalSha256 = (Get-CodexHookManifestSourceSha256 -Bytes $sourceBytes).ToLowerInvariant()
+        if ($sourceCanonicalSha256 -cne ([string]$_.sha256).ToLowerInvariant()) { throw "受管 source canonical hash 漂移：$($_.relativePath)" }
         $targetPath = [System.IO.Path]::GetFullPath((Join-Path $hookDirectory ([string]$_.liveRelativePath)))
         if (-not $targetPath.StartsWith("$hookDirectory\", [System.StringComparison]::OrdinalIgnoreCase)) { throw '受管 live 路径越界' }
         $targetExists = Test-Path -LiteralPath $targetPath -PathType Leaf
         if ($targetExists) { Assert-NoReparsePath -Path $targetPath -RequireLeaf | Out-Null }
-        $targetSha256 = if ($targetExists) { (Get-Sha256 -Path $targetPath).ToLowerInvariant() } else { $null }
+        $targetRawSha256 = if ($targetExists) { (Get-Sha256 -Path $targetPath).ToLowerInvariant() } else { $null }
         [pscustomobject]@{
             relativePath = [string]$_.relativePath
             liveRelativePath = [string]$_.liveRelativePath
             sourcePath = $sourcePath
-            sourceSha256 = $sourceSha256
+            sourceBytes = $sourceBytes
+            sourceCanonicalSha256 = $sourceCanonicalSha256
+            sourceRawSha256 = $sourceRawSha256
             targetPath = $targetPath
             targetParentPath = Split-Path -Parent $targetPath
             targetParentExisted = Test-Path -LiteralPath (Split-Path -Parent $targetPath) -PathType Container
             targetExists = $targetExists
-            targetSha256 = $targetSha256
-            ok = $targetExists -and $targetSha256 -ceq $sourceSha256
+            targetRawSha256 = $targetRawSha256
+            ok = $targetExists -and $targetRawSha256 -ceq $sourceRawSha256
         }
     })
 }
@@ -1192,6 +1263,31 @@ function Get-TomlKeyIndices {
             if (Test-TomlKeySegmentsEqual -Left $segments -Right $expectedSegments) { $index }
         }
     )
+}
+
+function Get-OptionalTomlBooleanKeyValue {
+    param(
+        [object]$Document,
+        [string]$Key,
+        [int]$Start,
+        [int]$End,
+        [string]$Scope
+    )
+
+    $indices = @(Get-TomlKeyIndices -Document $Document -Key $Key -Start $Start -End $End)
+    if ($indices.Count -gt 1) {
+        throw "TOML boolean key 在 $Scope 中重复：$Key"
+    }
+    if ($indices.Count -eq 0) { return $null }
+
+    $line = [string]$Document.lines[$indices[0]]
+    $equalsIndex = $line.IndexOf('=')
+    if ($equalsIndex -lt 0) { throw "无法解析 TOML boolean key：$Key" }
+    $match = [regex]::Match($line.Substring($equalsIndex + 1).Trim(), '^(?<value>true|false)\s*(?:#.*)?$')
+    if (-not $match.Success) {
+        throw "TOML boolean key 必须为 true 或 false：$Scope.$Key"
+    }
+    return [bool]::Parse($match.Groups['value'].Value)
 }
 
 function Set-TomlKeyLiteral {
@@ -1426,23 +1522,66 @@ function Get-DesiredConfig {
 
     $document = Get-TomlDocument -Content $Content
     $firstSectionIndex = if ($document.headers.Count -gt 0) { ($document.headers | Sort-Object index | Select-Object -First 1).index } else { $document.lines.Count }
+    $rootFeatureFlags = @{}
     for ($index = 0; $index -lt $firstSectionIndex; $index++) {
         $segments = @(Get-TomlAssignmentKeySegments -Line $document.lines[$index])
         if ($segments.Count -gt 0 -and $segments[0] -ceq "hooks") {
             throw "根级 TOML dotted hook key 不受支持，拒绝写入"
         }
+        if ($segments.Count -eq 0 -or $segments[0] -cne 'features') { continue }
+        if ($segments.Count -ne 2 -or ($segments[1] -cne 'hooks' -and $segments[1] -cne 'codex_hooks')) {
+            throw '根级 features assignment 无法安全解释；拒绝写入'
+        }
+        $featureKey = [string]$segments[1]
+        if ($rootFeatureFlags.ContainsKey($featureKey)) { throw "根级 features boolean key 重复：$featureKey" }
+        $equalsIndex = ([string]$document.lines[$index]).IndexOf('=')
+        if ($equalsIndex -lt 0) { throw "无法解析根级 features boolean key：$featureKey" }
+        $featureValue = [regex]::Match(([string]$document.lines[$index]).Substring($equalsIndex + 1).Trim(), '^(?<value>true|false)\s*(?:#.*)?$')
+        if (-not $featureValue.Success) { throw "根级 features boolean key 必须为 true 或 false：$featureKey" }
+        $rootFeatureFlags[$featureKey] = [bool]::Parse($featureValue.Groups['value'].Value)
+    }
+    $rootHooksEnabled = if ($rootFeatureFlags.ContainsKey('hooks')) { [bool]$rootFeatureFlags['hooks'] } else { $null }
+    $rootDeprecatedHooksEnabled = if ($rootFeatureFlags.ContainsKey('codex_hooks')) { [bool]$rootFeatureFlags['codex_hooks'] } else { $null }
+    if ($rootHooksEnabled -eq $false -or $rootDeprecatedHooksEnabled -eq $false) {
+        throw '根级 features.hooks 或已弃用的 features.codex_hooks 被显式关闭；拒绝修改配置'
+    }
+    if ($null -ne $rootHooksEnabled -and $null -ne $rootDeprecatedHooksEnabled -and $rootHooksEnabled -ne $rootDeprecatedHooksEnabled) {
+        throw '根级 features.hooks 与已弃用的 features.codex_hooks 冲突；拒绝修改配置'
     }
 
-    $approvalIndex = Get-UniqueKeyIndex -Document $document -Key "approval_policy" -Start 0 -End $firstSectionIndex
-    $sandboxIndex = Get-UniqueKeyIndex -Document $document -Key "sandbox_mode" -Start 0 -End $firstSectionIndex
-    Set-TomlKeyLiteral -Document $document -Index $approvalIndex -Key "approval_policy" -Literal '"never"'
-    Set-TomlKeyLiteral -Document $document -Index $sandboxIndex -Key "sandbox_mode" -Literal '"danger-full-access"'
+    $nestedHookFeatureHeaders = @($document.headers | Where-Object {
+        $segments = @($_.segments)
+        $segments.Count -ge 2 -and
+        $segments[0] -ceq 'features' -and
+        ($segments[1] -ceq 'hooks' -or $segments[1] -ceq 'codex_hooks')
+    })
+    if ($nestedHookFeatureHeaders.Count -gt 0) {
+        throw 'features.hooks 或已弃用的 features.codex_hooks 不得作为 TOML table 或 array-table；拒绝修改配置'
+    }
 
-    $features = Get-UniqueSectionRange -Document $document -Name "features"
-    $featuresHooksIndex = Get-UniqueKeyIndex -Document $document -Key "hooks" -Start $features.start -End $features.end
-    $unifiedExecIndex = Get-UniqueKeyIndex -Document $document -Key "unified_exec" -Start $features.start -End $features.end
-    Set-TomlKeyLiteral -Document $document -Index $featuresHooksIndex -Key "hooks" -Literal "true"
-    Set-TomlKeyLiteral -Document $document -Index $unifiedExecIndex -Key "unified_exec" -Literal "true"
+    $featureHeaders = @($document.headers | Where-Object {
+        Test-TomlKeySegmentsEqual -Left @($_.segments) -Right @('features')
+    })
+    if ($featureHeaders.Count -gt 1 -or ($featureHeaders.Count -eq 1 -and $featureHeaders[0].kind -cne 'table')) {
+        throw 'features TOML section 必须是唯一普通 table'
+    }
+    if ($featureHeaders.Count -eq 1) {
+        $features = Get-UniqueSectionRange -Document $document -Name 'features'
+        for ($index = $features.start; $index -lt $features.end; $index++) {
+            $segments = @(Get-TomlAssignmentKeySegments -Line $document.lines[$index])
+            if ($segments.Count -gt 1 -and ($segments[0] -ceq 'hooks' -or $segments[0] -ceq 'codex_hooks')) {
+                throw 'features.hooks 或已弃用的 features.codex_hooks 不得使用 dotted descendant key；拒绝修改配置'
+            }
+        }
+        $hooksEnabled = Get-OptionalTomlBooleanKeyValue -Document $document -Key 'hooks' -Start $features.start -End $features.end -Scope 'features'
+        $deprecatedHooksEnabled = Get-OptionalTomlBooleanKeyValue -Document $document -Key 'codex_hooks' -Start $features.start -End $features.end -Scope 'features'
+        if ($hooksEnabled -eq $false -or $deprecatedHooksEnabled -eq $false) {
+            throw 'features.hooks 或已弃用的 features.codex_hooks 被显式关闭；拒绝修改配置'
+        }
+        if ($null -ne $hooksEnabled -and $null -ne $deprecatedHooksEnabled -and $hooksEnabled -ne $deprecatedHooksEnabled) {
+            throw 'features.hooks 与已弃用的 features.codex_hooks 冲突；拒绝修改配置'
+        }
+    }
 
     $serena = Get-UniqueSectionRange -Document $document -Name "mcp_servers.serena"
     $commandIndices = @(Get-TomlKeyIndices -Document $document -Key "command" -Start $serena.start -End $serena.end)
@@ -1489,20 +1628,30 @@ function Get-DesiredConfig {
     $keep = [bool[]]::new($document.lines.Count)
     [array]::Fill($keep, $true)
     $headers = @($document.headers | Sort-Object index)
-    $seenHookSections = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
         $header = $headers[$headerIndex]
-        if (@($header.segments).Count -eq 0 -or $header.segments[0] -cne "hooks") {
+        if (@($header.segments).Count -lt 2 -or $header.segments[0] -cne 'hooks' -or $header.segments[1] -cne 'state') {
             continue
-        }
-        $semanticName = ConvertTo-Json -InputObject ([object[]]@($header.segments)) -Compress
-        if (-not $seenHookSections.Add($semanticName)) {
-            throw "重复的 TOML hook section：$semanticName"
         }
         $end = if ($headerIndex + 1 -lt $headers.Count) { $headers[$headerIndex + 1].index } else { $document.lines.Count }
         for ($lineIndex = $header.index; $lineIndex -lt $end; $lineIndex++) {
             $keep[$lineIndex] = $false
         }
+    }
+    for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
+        $header = $headers[$headerIndex]
+        if ($header.kind -cne 'table' -or -not (Test-TomlKeySegmentsEqual -Left @($header.segments) -Right @('hooks'))) {
+            continue
+        }
+        $end = if ($headerIndex + 1 -lt $headers.Count) { $headers[$headerIndex + 1].index } else { $document.lines.Count }
+        $hasUserContent = $false
+        for ($lineIndex = $header.index + 1; $lineIndex -lt $end; $lineIndex++) {
+            if ($keep[$lineIndex] -and -not [string]::IsNullOrWhiteSpace([string]$document.lines[$lineIndex])) {
+                $hasUserContent = $true
+                break
+            }
+        }
+        if (-not $hasUserContent) { $keep[$header.index] = $false }
     }
 
     $keptLines = [System.Collections.Generic.List[string]]::new()
@@ -2049,6 +2198,9 @@ function Write-Manifest {
 function Get-RestoreImmutableState {
     param([System.Collections.IDictionary]$Manifest)
 
+    # Retired hooks are deliberately irreversible.  Evidence retains their
+    # audit trail in the mutable manifest, but a restore contract must never
+    # grant authority to recreate them.
     [ordered]@{
         runId = [string]$Manifest.runId
         codexHome = [string]$Manifest.codexHome
@@ -2056,7 +2208,7 @@ function Get-RestoreImmutableState {
         preservedHookTree = @($Manifest.preservedHookTree)
         intendedResources = $Manifest.intendedResources
         committedResources = @($Manifest.committedResources)
-        retiredResources = @($Manifest.retiredResources)
+        retiredResources = @()
         aclTargets = @($Manifest.aclTargets)
         aclAppliedStates = $Manifest.aclAppliedStates
     }
@@ -2183,8 +2335,6 @@ function New-HostHookRestoreContract {
     foreach ($aclAction in @($orderedAclActions | Where-Object { [IO.Path]::GetFullPath([string]$_.path).TrimEnd('\').Equals($hookRootPath, [StringComparison]::OrdinalIgnoreCase) })) {
         if ($aclBefore.Contains($aclAction.path) -and (Get-RestoreImmutableState -Manifest $Manifest).aclAppliedStates.Contains($aclAction.path)) { $actionOrder.Add("acl:$($aclAction.path)") }
     }
-    foreach ($name in @($Manifest.retiredResources | Where-Object { [string]$_ -match '\\$' })) { $actionOrder.Add("legacy:$name") }
-    foreach ($name in @($Manifest.retiredResources | Where-Object { [string]$_ -notmatch '\\$' })) { $actionOrder.Add("legacy:$name") }
     foreach ($aclAction in @($orderedAclActions | Where-Object { -not [IO.Path]::GetFullPath([string]$_.path).TrimEnd('\').Equals($hookRootPath, [StringComparison]::OrdinalIgnoreCase) })) {
         if ($aclBefore.Contains($aclAction.path) -and (Get-RestoreImmutableState -Manifest $Manifest).aclAppliedStates.Contains($aclAction.path)) { $actionOrder.Add("acl:$($aclAction.path)") }
     }
@@ -2281,38 +2431,6 @@ function New-EvidenceSnapshot {
     [void](Write-NewOnlyProtectedBytes -Path $hooksEvidencePath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes([string]$State.hooksContent)) -CapabilityRoot $evidencePath)
     [void](Write-NewOnlyProtectedBytes -Path $serenaContextEvidencePath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes([string]$State.serenaContextContent)) -CapabilityRoot $evidencePath)
 
-    $legacyEvidence = Join-Path $evidencePath "legacy-hooks"
-    [void](New-CodexHookCapabilityDirectory -Path $legacyEvidence -CapabilityRoot $evidencePath -Name 'legacy evidence root' -RequireMissing)
-    Set-ProtectedAclWithCapability -Path $legacyEvidence -CapabilityRoot $evidencePath
-    $legacyHashes = [ordered]@{}
-    foreach ($name in $State.legacyPresent) {
-        $source = Join-Path $State.hookDirectory $name
-        Assert-NoReparsePath -Path $source -RequireLeaf | Out-Null
-        $destination = Join-Path $legacyEvidence $name
-        $destinationParent = [System.IO.Path]::GetDirectoryName($destination)
-        if ($destinationParent -ine $legacyEvidence) {
-            [void](New-CodexHookCapabilityDirectory -Path $destinationParent -CapabilityRoot $legacyEvidence -Name 'legacy evidence parent')
-            Set-ProtectedAclWithCapability -Path $destinationParent -CapabilityRoot $legacyEvidence
-        }
-        [byte[]]$legacyBytes = [IO.File]::ReadAllBytes($source)
-        $legacyHashes[$name] = [ordered]@{
-            sha256 = Write-NewOnlyProtectedBytes -Path $destination -Bytes $legacyBytes -CapabilityRoot $legacyEvidence
-            sddl = (Get-Acl -LiteralPath $source).Sddl
-        }
-    }
-    $legacyDirectoryStates = [ordered]@{}
-    foreach ($name in @($State.legacyDirectoriesPresent)) {
-        $directoryPath = Join-Path $State.hookDirectory $name
-        Assert-NoReparsePath -Path $directoryPath -RequireLeaf | Out-Null
-        $allowedChildren = @($State.legacyPresent | Where-Object {
-            [IO.Path]::GetDirectoryName(([string]$_).Replace('/', '\')).Equals([string]$name, [StringComparison]::OrdinalIgnoreCase)
-        } | Sort-Object)
-        $legacyDirectoryStates["$name\"] = [ordered]@{
-            sddl = (Get-Acl -LiteralPath $directoryPath).Sddl
-            children = @($allowedChildren)
-        }
-    }
-
     $managedEvidence = Join-Path $evidencePath 'managed-hooks-before'
     [void](New-CodexHookCapabilityDirectory -Path $managedEvidence -CapabilityRoot $evidencePath -Name 'managed evidence root' -RequireMissing)
     Set-ProtectedAclWithCapability -Path $managedEvidence -CapabilityRoot $evidencePath
@@ -2330,7 +2448,7 @@ function New-EvidenceSnapshot {
         }
         $managedBefore[$backupRelativePath] = [ordered]@{
             existed = [bool]$fileState.targetExists
-            sha256 = $fileState.targetSha256
+            sha256 = $fileState.targetRawSha256
             sddl = if ($fileState.targetExists) { (Get-Acl -LiteralPath ([string]$fileState.targetPath)).Sddl } else { $null }
             backupPath = if ($fileState.targetExists) { $backupPath } else { $null }
         }
@@ -2361,8 +2479,6 @@ function New-EvidenceSnapshot {
             "hooks.json" = Get-Sha256 -Path $hooksEvidencePath
             "codex-file-tools.yml" = Get-Sha256 -Path $serenaContextEvidencePath
             "acl-before.json" = Get-Sha256 -Path $aclBeforePath
-            legacyHooks = $legacyHashes
-            legacyDirectories = $legacyDirectoryStates
             managedHooks = $managedBefore
             environment = [ordered]@{ SERENA_HOME = [ordered]@{ value = $State.environmentState.value; kind = [string]$State.environmentState.valueKind; backupPath = $environmentEvidencePath; sha256 = $environmentEvidenceSha256 } }
         }
@@ -2392,7 +2508,8 @@ function New-EvidenceSnapshot {
         completedAtUtc = $null
     }
     foreach ($fileState in @($State.managedFileStates)) {
-        $manifest.intendedResources.managedHooks[[string]$fileState.liveRelativePath] = [string]$fileState.sourceSha256
+        $managedHookKey = ([string]$fileState.liveRelativePath).Replace('/', '\')
+        $manifest.intendedResources.managedHooks[$managedHookKey] = [string]$fileState.sourceRawSha256
     }
     $manifestPath = Join-Path $evidencePath "manifest.json"
     Write-Manifest -Path $manifestPath -Manifest $manifest
@@ -2497,19 +2614,23 @@ function Invoke-Repair {
                     }
                 }
             }
-            [byte[]]$sourceBytes = [IO.File]::ReadAllBytes([string]$fileState.sourcePath)
+            [byte[]]$sourceBytes = [byte[]]$fileState.sourceBytes
+            if ((Get-CodexHookBytesSha256 -Bytes $sourceBytes) -cne [string]$fileState.sourceRawSha256) {
+                throw "managed source snapshot hash 不一致：$($fileState.liveRelativePath)"
+            }
             Set-CodexHookAtomicFileBytesWithCapability `
                 -Path ([string]$fileState.targetPath) `
                 -Bytes $sourceBytes `
                 -ExpectedExists ([bool]$fileState.targetExists) `
-                -ExpectedSha256 ([string]$fileState.targetSha256) `
-                -AfterSha256 ([string]$fileState.sourceSha256) `
+                -ExpectedSha256 ([string]$fileState.targetRawSha256) `
+                -AfterSha256 ([string]$fileState.sourceRawSha256) `
                 -CapabilityRoot $InitialState.hookDirectory `
                 -AllowedExactPaths $managedTargetPaths `
                 -Scope "managed publish $($fileState.liveRelativePath)" `
                 -BeforeMove { param($targetPath) Invoke-FixtureManagedParentAttack -TargetParent (Split-Path -Parent $targetPath) } `
                 -AfterRename $(if ($fileState.targetExists) {
-                    $beforeManagedSddl = [string]$manifest.originalHashes.managedHooks[[string]$fileState.liveRelativePath].sddl
+                    $beforeManagedKey = ([string]$fileState.liveRelativePath).Replace('/', '\')
+                    $beforeManagedSddl = [string]$manifest.originalHashes.managedHooks[$beforeManagedKey].sddl
                     { param($publishedLease, $publishedPath)
                         $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
                         if ($currentSddl -cne $beforeManagedSddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, $beforeManagedSddl) }
@@ -2645,9 +2766,10 @@ function Invoke-Repair {
             try {
                 $currentSnapshot = Get-CodexHookCapabilityFileSnapshot -Path ([string]$fileState.targetPath) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -Name "rollback snapshot $($fileState.liveRelativePath)"
                 $currentHash = [string]$currentSnapshot.sha256
-                if ($currentHash -ceq [string]$fileState.sourceSha256) {
+                if ($currentHash -ceq [string]$fileState.sourceRawSha256) {
                     if ($fileState.targetExists) {
-                        $backup = $manifest.originalHashes.managedHooks[[string]$fileState.liveRelativePath]
+                        $backupKey = ([string]$fileState.liveRelativePath).Replace('/', '\')
+                        $backup = $manifest.originalHashes.managedHooks[$backupKey]
                         [byte[]]$backupBytes = [IO.File]::ReadAllBytes([string]$backup.backupPath)
                         $backupSha256 = Get-CodexHookBytesSha256 -Bytes $backupBytes
                         if ($backupSha256 -cne [string]$backup.sha256) { throw '受管 hook rollback backup hash 不一致' }
@@ -2655,7 +2777,7 @@ function Invoke-Repair {
                             -Path ([string]$fileState.targetPath) `
                             -Bytes $backupBytes `
                             -ExpectedExists $true `
-                            -ExpectedSha256 ([string]$fileState.sourceSha256) `
+                            -ExpectedSha256 ([string]$fileState.sourceRawSha256) `
                             -AfterSha256 $backupSha256 `
                             -CapabilityRoot $InitialState.hookDirectory `
                             -AllowedExactPaths $managedTargetPaths `
@@ -2668,11 +2790,11 @@ function Invoke-Repair {
                                 if ([string]$publishedLease.GetSecurityDescriptorSddl() -cne $beforeSddl) { throw 'managed rollback ACL same-handle postcheck 失败' }
                             }
                     } else {
-                        Remove-CodexHookCapabilityFile -Path ([string]$fileState.targetPath) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -ExpectedSha256 ([string]$fileState.sourceSha256) -Scope "rollback $($fileState.liveRelativePath)"
+                        Remove-CodexHookCapabilityFile -Path ([string]$fileState.targetPath) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -ExpectedSha256 ([string]$fileState.sourceRawSha256) -Scope "rollback $($fileState.liveRelativePath)"
                     }
-                } elseif ([bool]$fileState.targetExists -and $currentHash -ceq [string]$fileState.targetSha256 -and [string]$currentSnapshot.sddl -cne [string]$manifest.originalHashes.managedHooks[[string]$fileState.liveRelativePath].sddl) {
+                } elseif ([bool]$fileState.targetExists -and $currentHash -ceq [string]$fileState.targetRawSha256 -and [string]$currentSnapshot.sddl -cne [string]$manifest.originalHashes.managedHooks[([string]$fileState.liveRelativePath).Replace('/', '\')].sddl) {
                     throw '检测到 managed rollback before bytes 的第三方 ACL，拒绝接纳'
-                } elseif ($currentHash -cne [string]$fileState.targetSha256) {
+                } elseif ($currentHash -cne [string]$fileState.targetRawSha256) {
                     throw '检测到非本次 Repair 写入的受管 hook 文件，拒绝覆盖'
                 }
             } catch {
@@ -2761,15 +2883,16 @@ function Invoke-Repair {
         $legacyAllowedPaths = @($script:LegacyHookNames | ForEach-Object { Join-Path $InitialState.hookDirectory $_ })
         foreach ($name in $InitialState.legacyPresent) {
             $livePath = Join-Path $InitialState.hookDirectory $name
-            $evidencePath = Join-Path $snapshot.path "legacy-hooks\$name"
             Assert-NoReparsePath -Path $livePath -RequireLeaf | Out-Null
-            if (-not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) {
-                throw "退役前缺少 legacy evidence：$name"
+            $legacySnapshot = Get-CodexHookCapabilityFileSnapshot `
+                -Path $livePath `
+                -CapabilityRoot $InitialState.hookDirectory `
+                -AllowedExactPaths $legacyAllowedPaths `
+                -Name "retire legacy $name"
+            if (-not $legacySnapshot.exists -or [string]$legacySnapshot.state -cne 'regular-file') {
+                throw "退役前 legacy target 不可安全删除：$name"
             }
-            $expectedLegacySha256 = (Get-Sha256 -Path $evidencePath).ToLowerInvariant()
-            if ($expectedLegacySha256 -cne ([string]$manifest.originalHashes.legacyHooks[$name].sha256).ToLowerInvariant()) {
-                throw "退役前 legacy evidence 哈希不一致：$name"
-            }
+            $expectedLegacySha256 = [string]$legacySnapshot.sha256
             Remove-CodexHookCapabilityFile `
                 -Path $livePath `
                 -ExpectedSha256 $expectedLegacySha256 `
@@ -2847,101 +2970,9 @@ function Invoke-Repair {
             } finally { Close-RestoreAclTargetLease -Record $aclRecord }
         }
 
-        # Restore the hooks parent ACL before recreating inherited legacy
-        # descendants; Windows derives inherited ACEs from the live parent.
-        foreach ($path in @($aclRollbackPaths | Where-Object { [IO.Path]::GetFullPath([string]$_).TrimEnd('\').Equals([IO.Path]::GetFullPath($InitialState.hookDirectory).TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase) })) {
-            & $restoreRollbackAcl ([string]$path)
-        }
-
-        # Recreate an allowlisted legacy parent before restoring nested files.
-        # A pre-existing directory may only contain the authenticated subset;
-        # unknown descendants remain third-party state and block rollback.
-        $legacyAllowedPaths = @($script:LegacyHookNames | ForEach-Object { Join-Path $InitialState.hookDirectory $_ })
-        foreach ($directoryName in @($InitialState.legacyDirectoriesPresent)) {
-            $directoryPath = Join-Path $InitialState.hookDirectory $directoryName
-            $directoryState = $manifest.originalHashes.legacyDirectories["$directoryName\"]
-            try {
-                if ($null -eq $directoryState) { throw 'legacy directory evidence state 缺失' }
-                $allowedChildSet = [Collections.Generic.HashSet[string]]::new([string[]]@($directoryState.children), [StringComparer]::OrdinalIgnoreCase)
-                if (Test-Path -LiteralPath $directoryPath) {
-                    Assert-NoReparsePath -Path $directoryPath -RequireLeaf | Out-Null
-                    if (-not (Test-Path -LiteralPath $directoryPath -PathType Container)) { throw 'legacy directory path 已被第三方文件占用' }
-                    foreach ($child in @(Get-ChildItem -LiteralPath $directoryPath -Force)) {
-                        $relativeChild = [IO.Path]::GetRelativePath($InitialState.hookDirectory, $child.FullName).Replace('/', '\')
-                        if ($child.PSIsContainer -or -not $allowedChildSet.Contains($relativeChild)) { throw "legacy directory 出现第三方后代：$relativeChild" }
-                        Assert-NoReparsePath -Path $child.FullName -RequireLeaf | Out-Null
-                    }
-                } else {
-                    $createdGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire($InitialState.hookDirectory, $directoryPath, $true, $true)
-                    try {
-                        Invoke-FixtureLegacyDirectoryReplace -TargetPath $directoryPath -Phase create
-                        $aclRecord = New-RestoreAclTargetLease -ResolvedCodexHome $ResolvedCodexHome -Path $directoryPath
-                        try {
-                            $createdSddl = [string]$aclRecord.lease.GetSecurityDescriptorSddl()
-                            $aclRecord.lease.SetSecurityDescriptorSddl($createdSddl, [string]$directoryState.sddl)
-                        } finally { Close-RestoreAclTargetLease -Record $aclRecord }
-                    } finally { $createdGuard.Dispose() }
-                }
-            } catch {
-                $rollbackErrors.Add("legacy-directory:${directoryName}: $($_.Exception.Message)")
-                $recoveryRequired.Add("legacy:$directoryName\")
-            }
-        }
-
-        # Restore exact legacy files after their authenticated parents exist.
-        # Missing means this transaction deleted the allowlisted identity; any
-        # different live bytes are third-party state.
-        foreach ($name in @($InitialState.legacyPresent)) {
-            $legacyPath = Join-Path $InitialState.hookDirectory $name
-            $legacyEvidencePath = Join-Path $snapshot.path "legacy-hooks\$name"
-            try {
-                [byte[]]$legacyBytes = [IO.File]::ReadAllBytes($legacyEvidencePath)
-                $legacySha = Get-CodexHookBytesSha256 -Bytes $legacyBytes
-                if ($legacySha -cne ([string]$manifest.originalHashes.legacyHooks[$name].sha256).ToLowerInvariant()) { throw 'legacy evidence hash 漂移' }
-                $legacySnapshot = Get-CodexHookCapabilityFileSnapshot -Path $legacyPath -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $legacyAllowedPaths -Name "rollback legacy $name"
-                if (-not $legacySnapshot.exists) {
-                    $legacyBeforeSddl = [string]$manifest.originalHashes.legacyHooks[$name].sddl
-                    Set-CodexHookAtomicFileBytesWithCapability -Path $legacyPath -Bytes $legacyBytes -ExpectedExists $false -ExpectedSha256 $null -AfterSha256 $legacySha -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $legacyAllowedPaths -Scope "rollback legacy $name" -AfterRename {
-                        param($publishedLease, $publishedPath)
-                        $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
-                        if ($currentSddl -cne $legacyBeforeSddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, $legacyBeforeSddl) }
-                        if ([string]$publishedLease.GetSecurityDescriptorSddl() -cne $legacyBeforeSddl) { throw 'legacy rollback ACL same-handle postcheck 失败' }
-                    }
-                } elseif ([string]$legacySnapshot.sha256 -cne $legacySha) {
-                    throw '检测到第三方 legacy 版本，拒绝覆盖'
-                }
-            } catch {
-                $rollbackErrors.Add("legacy:${name}: $($_.Exception.Message)")
-                $recoveryRequired.Add("legacy:$name")
-            }
-        }
-
         # Restore ACL only when it is still exactly the ACL written by this run.
         foreach ($path in $aclRollbackPaths) {
             & $restoreRollbackAcl ([string]$path)
-        }
-
-        # Parent ACL rollback can change inherited child SDDL. Validate the
-        # restored legacy directory only after the parent ACLs are back.
-        foreach ($directoryName in @($InitialState.legacyDirectoriesPresent)) {
-            $directoryPath = Join-Path $InitialState.hookDirectory $directoryName
-            $directoryState = $manifest.originalHashes.legacyDirectories["$directoryName\"]
-            $directoryRecord = $null
-            try {
-                $directoryRecord = New-RestoreAclTargetLease -ResolvedCodexHome $ResolvedCodexHome -Path $directoryPath
-                if (-not [bool]$directoryRecord.lease.IsDirectory) { throw 'legacy directory 未恢复' }
-                if ([string]$directoryRecord.lease.GetSecurityDescriptorSddl() -cne [string]$directoryState.sddl) { throw 'legacy directory final ACL 漂移' }
-                $actualChildren = @(Get-ChildItem -LiteralPath $directoryPath -Force | ForEach-Object {
-                    if ($_.PSIsContainer) { throw "legacy directory 出现未知目录：$($_.FullName)" }
-                    [IO.Path]::GetRelativePath($InitialState.hookDirectory, $_.FullName).Replace('/', '\')
-                } | Sort-Object)
-                if (($actualChildren -join "`n") -cne (@($directoryState.children) -join "`n")) { throw 'legacy directory final children 漂移' }
-                if ([string]$directoryRecord.lease.GetSecurityDescriptorSddl() -cne [string]$directoryState.sddl) { throw 'legacy directory final ACL 复读漂移' }
-            } catch {
-                $entry = "legacy-directory:${directoryName}: $($_.Exception.Message)"
-                if (-not $rollbackErrors.Contains($entry)) { $rollbackErrors.Add($entry) }
-                $recoveryRequired.Add("legacy:$directoryName\")
-            } finally { Close-RestoreAclTargetLease -Record $directoryRecord }
         }
 
         foreach ($resource in @(
@@ -2981,19 +3012,20 @@ function Invoke-Repair {
             try {
                 $current = Get-CodexHookCapabilityFileSnapshot -Path ([string]$fileState.targetPath) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -Name "post-commit rollback $($fileState.liveRelativePath)"
                 if ($fileState.targetExists) {
-                    $backup = $manifest.originalHashes.managedHooks[[string]$fileState.liveRelativePath]
-                    if ([string]$current.sha256 -ceq [string]$fileState.targetSha256 -and [string]$current.sddl -ceq [string]$backup.sddl) { continue }
-                    if ([string]$current.sha256 -cne [string]$fileState.sourceSha256) { throw '检测到第三方 managed 版本，拒绝覆盖' }
+                    $backupKey = ([string]$fileState.liveRelativePath).Replace('/', '\')
+                    $backup = $manifest.originalHashes.managedHooks[$backupKey]
+                    if ([string]$current.sha256 -ceq [string]$fileState.targetRawSha256 -and [string]$current.sddl -ceq [string]$backup.sddl) { continue }
+                    if ([string]$current.sha256 -cne [string]$fileState.sourceRawSha256) { throw '检测到第三方 managed 版本，拒绝覆盖' }
                     [byte[]]$backupBytes = [IO.File]::ReadAllBytes([string]$backup.backupPath)
-                    Set-CodexHookAtomicFileBytesWithCapability -Path ([string]$fileState.targetPath) -Bytes $backupBytes -ExpectedExists $true -ExpectedSha256 ([string]$fileState.sourceSha256) -AfterSha256 ([string]$backup.sha256) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -Scope "post-commit rollback $($fileState.liveRelativePath)" -AfterRename {
+                    Set-CodexHookAtomicFileBytesWithCapability -Path ([string]$fileState.targetPath) -Bytes $backupBytes -ExpectedExists $true -ExpectedSha256 ([string]$fileState.sourceRawSha256) -AfterSha256 ([string]$backup.sha256) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -Scope "post-commit rollback $($fileState.liveRelativePath)" -AfterRename {
                         param($publishedLease, $publishedPath)
                         $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
                         if ($currentSddl -cne [string]$backup.sddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, [string]$backup.sddl) }
                         if ([string]$publishedLease.GetSecurityDescriptorSddl() -cne [string]$backup.sddl) { throw 'post-commit managed rollback ACL same-handle postcheck 失败' }
                     }
                 } elseif ($current.exists) {
-                    if ([string]$current.sha256 -cne [string]$fileState.sourceSha256) { throw '检测到第三方 managed 版本，拒绝覆盖' }
-                    Remove-CodexHookCapabilityFile -Path ([string]$fileState.targetPath) -ExpectedSha256 ([string]$fileState.sourceSha256) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -Scope "post-commit rollback $($fileState.liveRelativePath)"
+                    if ([string]$current.sha256 -cne [string]$fileState.sourceRawSha256) { throw '检测到第三方 managed 版本，拒绝覆盖' }
+                    Remove-CodexHookCapabilityFile -Path ([string]$fileState.targetPath) -ExpectedSha256 ([string]$fileState.sourceRawSha256) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -Scope "post-commit rollback $($fileState.liveRelativePath)"
                 }
             } catch {
                 $rollbackErrors.Add("managed:$($fileState.liveRelativePath): $($_.Exception.Message)")
@@ -3022,6 +3054,10 @@ function Invoke-Repair {
                 $rollbackErrors.Add("managed-directory:${directory}: $($_.Exception.Message)")
                 $recoveryRequired.Add("managed-directory:$directory")
             }
+        }
+
+        if (@($manifest.retiredResources).Count -gt 0) {
+            $rollbackErrors.Add("retired resources are irreversible and were not recreated: $(@($manifest.retiredResources) -join ',')")
         }
 
         $manifest.status = if ($rollbackErrors.Count -eq 0) { 'rolled-back' } else { 'unsafe-partial' }
@@ -3140,20 +3176,6 @@ function Initialize-RestoreFixtureTestSeam {
         ) { throw "$($fixture.targetKind) fixture capability 非法" }
         foreach ($path in @($targetPath,$externalPath)) { Assert-NoReparsePath -Path $path -RequireLeaf | Out-Null }
         Set-Variable -Scope Script -Name ([string]$fixture.scriptName) -Value ([pscustomobject]@{ targetPath=$targetPath; parkedPath=$parkedPath; externalPath=$externalPath })
-    }
-    $legacyDirectoryCreateReplace = $env:CODEX_HOST_HOOK_TEST_LEGACY_DIRECTORY_CREATE_REPLACE
-    if (-not [string]::IsNullOrWhiteSpace($legacyDirectoryCreateReplace)) {
-        if (Test-IsLiveCodexHome -ResolvedCodexHome $ResolvedCodexHome) { throw 'Restore legacy directory replacement fixture seam 禁止用于 live CodexHome' }
-        $replace = $legacyDirectoryCreateReplace | ConvertFrom-Json
-        if ((@($replace.PSObject.Properties.Name) -join ',') -cne 'targetPath,externalParent') { throw 'fixture-only legacy directory replacement schema 无效' }
-        $targetPath = [IO.Path]::GetFullPath([string]$replace.targetPath).TrimEnd('\')
-        $externalParent = [IO.Path]::GetFullPath([string]$replace.externalParent).TrimEnd('\')
-        $hookRoot = [IO.Path]::GetFullPath((Join-Path $ResolvedCodexHome 'hooks')).TrimEnd('\')
-        $relativeTarget = [IO.Path]::GetRelativePath($hookRoot, $targetPath).Replace('/', '\')
-        $fixtureRoot = [IO.Directory]::GetParent([IO.Directory]::GetParent($ResolvedCodexHome).FullName).FullName
-        if (-not (Test-IsLegacyHookRelativePath -RelativePath $relativeTarget) -or -not $externalParent.StartsWith("$fixtureRoot\", [StringComparison]::OrdinalIgnoreCase) -or $externalParent.StartsWith("$ResolvedCodexHome\", [StringComparison]::OrdinalIgnoreCase)) { throw 'fixture-only legacy directory replacement capability 非法' }
-        Assert-NoReparsePath -Path $externalParent -RequireLeaf | Out-Null
-        $script:FixtureLegacyDirectoryCreateReplace = [pscustomobject]@{ targetPath=$targetPath; movedPath="$targetPath.fixture-moved"; externalParent=$externalParent }
     }
 }
 
@@ -3315,24 +3337,6 @@ function Assert-RestoreFreshPostcheck {
                     if ([string]$snapshot.sddl -cne [string]$item.before.sddl) { throw "Restore postcheck ACL 漂移：$($item.name)" }
                 } elseif ($snapshot.probe.exists) { throw "Restore postcheck 漂移：$($item.name)" }
             }
-            'legacy' {
-                $snapshot = Get-CodexHookHandleBoundFileSnapshot -Path ([string]$item.path) -Name "Restore postcheck $($item.name)" -AllowedExactPaths @([string]$item.path)
-                if (-not $snapshot.probe.safeToRead -or (Get-CodexHookBytesSha256 -Bytes ([byte[]]$snapshot.bytes)) -cne [string]$item.beforeSha) { throw "Restore postcheck 漂移：$($item.name)" }
-                if ([string]$snapshot.sddl -cne [string]$item.beforeSddl) { throw "Restore postcheck ACL 漂移：$($item.name)" }
-            }
-            'legacy-directory' {
-                $directoryRecord = New-RestoreAclTargetLease -ResolvedCodexHome $ResolvedCodexHome -Path ([string]$item.path)
-                try {
-                    Invoke-FixtureLegacyDirectoryReplace -TargetPath ([string]$item.path) -Phase final
-                    if (-not [bool]$directoryRecord.lease.IsDirectory -or [string]$directoryRecord.lease.GetSecurityDescriptorSddl() -cne [string]$item.beforeSddl) { throw "Restore postcheck 漂移：$($item.name)" }
-                    $actualChildren = @(Get-ChildItem -LiteralPath $item.path -Force | ForEach-Object {
-                        if ($_.PSIsContainer) { throw "Restore postcheck legacy 目录包含未知目录：$($_.FullName)" }
-                        [IO.Path]::GetRelativePath((Join-Path $ResolvedCodexHome 'hooks'), $_.FullName).Replace('/', '\')
-                    } | Sort-Object)
-                    if (($actualChildren -join "`n") -cne (@($item.allowedChildren) -join "`n")) { throw "Restore postcheck legacy 目录 children 漂移：$($item.name)" }
-                    if ([string]$directoryRecord.lease.GetSecurityDescriptorSddl() -cne [string]$item.beforeSddl) { throw "Restore postcheck legacy 目录 ACL 复读漂移：$($item.name)" }
-                } finally { Close-RestoreAclTargetLease -Record $directoryRecord }
-            }
             'acl' {
                 if ((Get-RestoreAclTargetSddl -ResolvedCodexHome $ResolvedCodexHome -Item $item) -cne [string]$item.beforeSddl) { throw "Restore postcheck 漂移：$($item.name)" }
             }
@@ -3396,8 +3400,9 @@ function Assert-RestoreContractClosure {
     [string[]]$allowedCommitted = @('codex-file-tools.yml','config.toml') + $managedIds + @('environment:SERENA_HOME','hooks.json')
     Assert-OrderedUniqueSubsequence -Actual @($state.committedResources) -Allowed $allowedCommitted -Name 'committedResources'
     if (@($state.committedResources) -ccontains 'hooks.json' -and @($state.committedResources)[-1] -cne 'hooks.json') { throw 'committedResources 的 hooks.json 必须最后' }
-    [string[]]$allowedRetired = @($script:LegacyHookNames) + @($script:LegacyHookDirectoryNames | ForEach-Object { "$_\" })
-    Assert-OrderedUniqueSubsequence -Actual @($state.retiredResources) -Allowed $allowedRetired -Name 'retiredResources'
+    if (@($state.retiredResources).Count -ne 0) {
+        throw 'Restore contract 不得包含已退役 Hook；删除不可逆'
+    }
     $aclSeen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($path in @($state.aclTargets)) {
         if ($path -isnot [string] -or -not $aclSeen.Add([string]$path)) { throw 'ACL targets 包含非字符串或重复项' }
@@ -3405,7 +3410,17 @@ function Assert-RestoreContractClosure {
         if ($state.aclAppliedStates.PSObject.Properties.Name -cnotcontains [string]$path) { throw 'ACL target 缺少 deployed SDDL binding' }
     }
     if (@($state.aclAppliedStates.PSObject.Properties.Name).Count -ne @($state.aclTargets).Count) { throw 'ACL target/applied closure 不精确' }
+    $intendedManagedNames = @($state.intendedResources.managedHooks.PSObject.Properties.Name)
+    $expectedManagedNames = @($script:HostPreflightManifest.files | ForEach-Object { ([string]$_.liveRelativePath).Replace('/', '\') })
+    if ((($intendedManagedNames | Sort-Object) -join "`n") -cne (($expectedManagedNames | Sort-Object) -join "`n")) {
+        throw 'Restore managed intended raw hash closure 不精确'
+    }
     foreach ($file in @($script:HostPreflightManifest.files)) {
+        $managedKey = ([string]$file.liveRelativePath).Replace('/', '\')
+        $intendedProperty = $state.intendedResources.managedHooks.PSObject.Properties[$managedKey]
+        if ($null -eq $intendedProperty -or [string]$intendedProperty.Value -cnotmatch '^[0-9a-f]{64}$') {
+            throw "Restore managed deployed raw hash 缺失或非法：$($file.liveRelativePath)"
+        }
         $key = ([string]$file.liveRelativePath).Replace('/', '\')
         $beforeProperty = $state.originalHashes.managedHooks.PSObject.Properties[$key]
         if ($null -eq $beforeProperty) { throw "Restore managed before state 缺失：$key" }
@@ -3414,31 +3429,11 @@ function Assert-RestoreContractClosure {
         if ([bool]$before.existed -and ([string]::IsNullOrWhiteSpace([string]$before.sha256) -or [string]::IsNullOrWhiteSpace([string]$before.sddl) -or [string]::IsNullOrWhiteSpace([string]$before.backupPath))) { throw "Restore managed before state 未绑定 bytes/ACL：$key" }
         if (-not [bool]$before.existed -and ($null -ne $before.sha256 -or $null -ne $before.sddl -or $null -ne $before.backupPath)) { throw "Restore managed missing before state 非空：$key" }
     }
-    foreach ($name in @($state.retiredResources | Where-Object { [string]$_ -notmatch '\\$' })) {
-        $legacyProperty = $state.originalHashes.legacyHooks.PSObject.Properties[[string]$name]
-        if ($null -eq $legacyProperty) { throw "Restore legacy before state 缺失：$name" }
-        Assert-CodexHookExactProperties $legacyProperty.Value @('sha256','sddl') "Restore legacy before state $name"
-        if ([string]::IsNullOrWhiteSpace([string]$legacyProperty.Value.sha256) -or [string]::IsNullOrWhiteSpace([string]$legacyProperty.Value.sddl)) { throw "Restore legacy before state 未绑定 bytes/ACL：$name" }
-    }
     $expectedActions = [Collections.Generic.List[string]]::new()
     if (@($state.committedResources) -ccontains 'hooks.json') { $expectedActions.Add('hooks.json') }
     if (@($state.committedResources) -ccontains 'environment:SERENA_HOME') { $expectedActions.Add('environment:SERENA_HOME') }
     foreach ($id in $managedIds) { if (@($state.committedResources) -ccontains $id) { $expectedActions.Add($id) } }
     foreach ($id in @('config.toml','codex-file-tools.yml')) { if (@($state.committedResources) -ccontains $id) { $expectedActions.Add($id) } }
-    $retiredDirectoryNames = @($state.retiredResources | Where-Object { [string]$_ -match '\\$' })
-    $retiredFileNames = @($state.retiredResources | Where-Object { [string]$_ -notmatch '\\$' })
-    foreach ($directoryNameWithSlash in $retiredDirectoryNames) {
-        $directoryProperty = $state.originalHashes.legacyDirectories.PSObject.Properties[[string]$directoryNameWithSlash]
-        if ($null -eq $directoryProperty) { throw "Restore legacy directory 缺少认证 state：$directoryNameWithSlash" }
-        $directoryState = $directoryProperty.Value
-        Assert-CodexHookExactProperties $directoryState @('sddl','children') "Restore legacy directory state $directoryNameWithSlash"
-        if ([string]::IsNullOrWhiteSpace([string]$directoryState.sddl) -or $directoryState.children -isnot [System.Collections.IList]) { throw "Restore legacy directory state 非法：$directoryNameWithSlash" }
-        $directoryName = ([string]$directoryNameWithSlash).TrimEnd('\')
-        $expectedChildren = @($retiredFileNames | Where-Object {
-            [IO.Path]::GetDirectoryName(([string]$_).Replace('/', '\')).Equals($directoryName, [StringComparison]::OrdinalIgnoreCase)
-        } | Sort-Object)
-        if ((@($directoryState.children) -join "`n") -cne ($expectedChildren -join "`n")) { throw "Restore legacy directory children closure 非法：$directoryNameWithSlash" }
-    }
     $hookRootPath = [IO.Path]::GetFullPath((Join-Path $ResolvedCodexHome 'hooks')).TrimEnd('\')
     $aclActionOrdinal = 0
     $orderedAclActions = @($state.aclTargets | ForEach-Object {
@@ -3446,8 +3441,6 @@ function Assert-RestoreContractClosure {
         [pscustomobject]@{ path=$path; depth=@([IO.Path]::GetFullPath($path).TrimEnd('\') -split '[\\/]').Count; ordinal=$aclActionOrdinal++ }
     } | Sort-Object depth,ordinal)
     foreach ($aclAction in @($orderedAclActions | Where-Object { [IO.Path]::GetFullPath([string]$_.path).TrimEnd('\').Equals($hookRootPath, [StringComparison]::OrdinalIgnoreCase) })) { if ($AclBefore.Contains($aclAction.path)) { $expectedActions.Add("acl:$($aclAction.path)") } }
-    foreach ($name in $retiredDirectoryNames) { $expectedActions.Add("legacy:$name") }
-    foreach ($name in $retiredFileNames) { $expectedActions.Add("legacy:$name") }
     foreach ($aclAction in @($orderedAclActions | Where-Object { -not [IO.Path]::GetFullPath([string]$_.path).TrimEnd('\').Equals($hookRootPath, [StringComparison]::OrdinalIgnoreCase) })) { if ($AclBefore.Contains($aclAction.path)) { $expectedActions.Add("acl:$($aclAction.path)") } }
     if ((@($Contract.actionOrder) -join "`n") -cne ($expectedActions.ToArray() -join "`n")) { throw 'restore contract actionOrder 与固定 profile closure 不一致' }
 }
@@ -3472,8 +3465,6 @@ function Invoke-EvidenceRestore {
     $authority = $restoreContract.immutableState
     $hookDirectory = Join-Path $ResolvedCodexHome 'hooks'
     $managedTargetPaths = @($script:HostPreflightManifest.files | ForEach-Object { Join-Path $hookDirectory ([string]$_.liveRelativePath) })
-    $legacyAllowedPaths = @($script:LegacyHookNames | ForEach-Object { Join-Path $hookDirectory $_ })
-    $legacyDirectoryAllowedPaths = @($script:LegacyHookDirectoryNames | ForEach-Object { Join-Path $hookDirectory $_ })
     $aclBeforePath = Join-Path $evidence.path 'acl-before.json'
     $aclBeforeSnapshot = Get-RequiredCapabilitySnapshot -Path $aclBeforePath -CapabilityRoot ([string]$evidence.path) -Name 'Restore ACL backup snapshot'
     if (([string]$aclBeforeSnapshot.sha256).ToLowerInvariant() -cne ([string]$authority.originalHashes.'acl-before.json').ToLowerInvariant()) { throw 'Restore ACL backup hash 漂移' }
@@ -3535,52 +3526,20 @@ function Invoke-EvidenceRestore {
         $targetPath = Join-Path $hookDirectory ([string]$file.liveRelativePath)
         $beforeKey = ([string]$file.liveRelativePath).Replace('/', '\')
         $before = $authority.originalHashes.managedHooks.$beforeKey
+        $deployedProperty = $authority.intendedResources.managedHooks.PSObject.Properties[$beforeKey]
+        if ($null -eq $deployedProperty -or [string]$deployedProperty.Value -cnotmatch '^[0-9a-f]{64}$') { throw "Restore managed deployed raw hash 缺失或非法：$($file.liveRelativePath)" }
+        $deployedSha = ([string]$deployedProperty.Value).ToLowerInvariant()
         $managedBackupPath = Join-Path (Join-Path $evidence.path 'managed-hooks-before') $beforeKey
         $managedBackupSnapshot = if ([bool]$before.existed) { Get-RequiredCapabilitySnapshot -Path $managedBackupPath -CapabilityRoot ([string]$evidence.path) -Name "Restore managed backup snapshot $name" } else { $null }
         [byte[]]$managedBackupBytes = if ([bool]$before.existed) { [byte[]]$managedBackupSnapshot.bytes } else { $null }
         if ([bool]$before.existed -and (Get-CodexHookBytesSha256 -Bytes $managedBackupBytes) -cne [string]$before.sha256) { throw "Restore managed backup hash 漂移：$name" }
         $snapshot = Get-CodexHookCapabilityFileSnapshot -Path $targetPath -CapabilityRoot $hookDirectory -AllowedExactPaths $managedTargetPaths -Name "restore preflight $name"
         $state = if ([bool]$before.existed) {
-            if ($snapshot.exists -and [string]$snapshot.sha256 -ceq [string]$before.sha256 -and [string]$snapshot.sddl -ceq [string]$before.sddl) { 'before' } elseif ($snapshot.exists -and [string]$snapshot.sha256 -ceq [string]$file.sha256) { 'deployed' } else { 'third' }
+            if ($snapshot.exists -and [string]$snapshot.sha256 -ceq [string]$before.sha256 -and [string]$snapshot.sddl -ceq [string]$before.sddl) { 'before' } elseif ($snapshot.exists -and [string]$snapshot.sha256 -ceq $deployedSha) { 'deployed' } else { 'third' }
         } else {
-            if (-not $snapshot.exists) { 'before' } elseif ([string]$snapshot.sha256 -ceq [string]$file.sha256) { 'deployed' } else { 'third' }
+            if (-not $snapshot.exists) { 'before' } elseif ([string]$snapshot.sha256 -ceq $deployedSha) { 'deployed' } else { 'third' }
         }
-        $preflight.Add([pscustomobject]@{ kind='managed'; name=$name; path=$targetPath; state=$state; before=$before; backupBytes=$managedBackupBytes; deployedSha=[string]$file.sha256 })
-    }
-
-    foreach ($name in @($authority.retiredResources)) {
-        if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
-        if ([string]$name -match '\\$') {
-            $directoryName = ([string]$name).TrimEnd('\')
-            $targetPath = Join-Path $hookDirectory $directoryName
-            [void](Assert-CodexHookCapabilityPath -Path $targetPath -CapabilityRoot $hookDirectory -AllowedExactPaths $legacyDirectoryAllowedPaths -Name "Restore legacy directory $directoryName")
-            $exists = Test-Path -LiteralPath $targetPath
-            $directoryBeforeProperty = $authority.originalHashes.legacyDirectories.PSObject.Properties[[string]$name]
-            $directoryBefore = if ($null -eq $directoryBeforeProperty) { $null } else { $directoryBeforeProperty.Value }
-            if ($null -eq $directoryBefore -or [string]::IsNullOrWhiteSpace([string]$directoryBefore.sddl)) { throw "Restore legacy directory 缺少认证 before state：$name" }
-            $allowedChildren = @($directoryBefore.children)
-            $allowedChildSet = [Collections.Generic.HashSet[string]]::new([string[]]$allowedChildren, [StringComparer]::OrdinalIgnoreCase)
-            $childrenSafe = $true
-            if ($exists -and (Test-Path -LiteralPath $targetPath -PathType Container)) {
-                foreach ($child in @(Get-ChildItem -LiteralPath $targetPath -Force)) {
-                    $relativeChild = [IO.Path]::GetRelativePath($hookDirectory, $child.FullName).Replace('/', '\')
-                    if ($child.PSIsContainer -or -not $allowedChildSet.Contains($relativeChild)) { $childrenSafe = $false; break }
-                    try { Assert-NoReparsePath -Path $child.FullName -RequireLeaf | Out-Null } catch { $childrenSafe = $false; break }
-                }
-            }
-            $state = if (-not $exists) { 'deployed' } elseif (-not (Test-Path -LiteralPath $targetPath -PathType Container)) { 'third' } elseif (-not $childrenSafe) { 'third' } elseif ((Get-Acl -LiteralPath $targetPath).Sddl -ceq [string]$directoryBefore.sddl) { 'before' } else { 'third' }
-            $preflight.Add([pscustomobject]@{ kind='legacy-directory'; name="legacy:$name"; path=$targetPath; beforeSddl=[string]$directoryBefore.sddl; allowedChildren=$allowedChildren; state=$state })
-            continue
-        }
-        $targetPath = Join-Path $hookDirectory ([string]$name)
-        $backupPath = Join-Path (Join-Path $evidence.path 'legacy-hooks') ([string]$name)
-        $legacyBackupSnapshot = Get-RequiredCapabilitySnapshot -Path $backupPath -CapabilityRoot ([string]$evidence.path) -Name "Restore legacy backup snapshot $name"
-        $beforeSha = ([string]$legacyBackupSnapshot.sha256).ToLowerInvariant()
-        if ($beforeSha -cne ([string]$authority.originalHashes.legacyHooks.$name.sha256).ToLowerInvariant()) { throw "Restore legacy backup hash 漂移：$name" }
-        [byte[]]$legacyBytes = [byte[]]$legacyBackupSnapshot.bytes
-        $snapshot = Get-CodexHookCapabilityFileSnapshot -Path $targetPath -CapabilityRoot $hookDirectory -AllowedExactPaths $legacyAllowedPaths -Name "restore preflight legacy $name"
-        $state = if (-not $snapshot.exists) { 'deployed' } elseif ([string]$snapshot.sha256 -ceq $beforeSha -and [string]$snapshot.sddl -ceq [string]$authority.originalHashes.legacyHooks.$name.sddl) { 'before' } else { 'third' }
-        $preflight.Add([pscustomobject]@{ kind='legacy'; name="legacy:$name"; path=$targetPath; backupBytes=$legacyBytes; beforeSha=$beforeSha; beforeSddl=[string]$authority.originalHashes.legacyHooks.$name.sddl; state=$state })
+        $preflight.Add([pscustomobject]@{ kind='managed'; name=$name; path=$targetPath; state=$state; before=$before; backupBytes=$managedBackupBytes; deployedSha=$deployedSha })
     }
 
     $aclOrdinal = 0
@@ -3691,31 +3650,6 @@ function Invoke-EvidenceRestore {
                 if ([string]$record.lease.GetSecurityDescriptorSddl() -cne [string]$item.beforeSddl) { throw "Restore parent ACL same-handle postcheck 失败：$($item.name)" }
                 $item.state = 'before'
             } finally { Close-RestoreAclTargetLease -Record $record }
-        }
-        Complete-RestoreAction -Name $item.name -Progress $progress -Manifest $manifest -ManifestState $manifestState
-    }
-    foreach ($item in @($preflight | Where-Object { $_.kind -ceq 'legacy-directory' })) {
-        if ($item.state -ceq 'deployed') {
-            $createdGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire($hookDirectory, [string]$item.path, $true, $true)
-            try {
-                Invoke-FixtureLegacyDirectoryReplace -TargetPath ([string]$item.path) -Phase create
-                $aclRecord = New-RestoreAclTargetLease -ResolvedCodexHome $ResolvedCodexHome -Path ([string]$item.path)
-                try {
-                    $createdSddl = [string]$aclRecord.lease.GetSecurityDescriptorSddl()
-                    $aclRecord.lease.SetSecurityDescriptorSddl($createdSddl, [string]$item.beforeSddl)
-                } finally { Close-RestoreAclTargetLease -Record $aclRecord }
-            } finally { $createdGuard.Dispose() }
-        }
-        Complete-RestoreAction -Name $item.name -Progress $progress -Manifest $manifest -ManifestState $manifestState
-    }
-    foreach ($item in @($preflight | Where-Object { $_.kind -ceq 'legacy' })) {
-        if ($item.state -ceq 'deployed') {
-            Set-CodexHookAtomicFileBytesWithCapability -Path $item.path -Bytes ([byte[]]$item.backupBytes) -ExpectedExists $false -ExpectedSha256 $null -AfterSha256 $item.beforeSha -CapabilityRoot $hookDirectory -AllowedExactPaths $legacyAllowedPaths -Scope "restore $($item.name)" -AfterRename {
-                param($publishedLease, $publishedPath)
-                $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
-                if ($currentSddl -cne [string]$item.beforeSddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, [string]$item.beforeSddl) }
-                if ([string]$publishedLease.GetSecurityDescriptorSddl() -cne [string]$item.beforeSddl) { throw "Restore legacy ACL same-handle postcheck 失败：$($item.name)" }
-            }
         }
         Complete-RestoreAction -Name $item.name -Progress $progress -Manifest $manifest -ManifestState $manifestState
     }

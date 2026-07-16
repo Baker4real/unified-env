@@ -38,6 +38,11 @@
 
 不得把安装后的回写职责放入被安装的 skill，也不得直接修改 bundled `.system` 安装器。新安装或更新必须经过 decision manifest、`writing-great-skills` 证据、SOURCE/ledger、严格资源闭包和 catalog 后置校验；任一门槛失败都应回滚。
 
+## Codex 主机 Hook 当前边界（2026-07-16）
+
+- 当日只读运行 `Invoke-CodexHostHookReconciliation.ps1 -Mode Check -Json` 返回 `reconciliation-failed`；非 JSON 诊断显示 active `D:\Codex\.codex\config.toml` 缺少唯一 `[mcp_servers.serena]` section。
+- 此为本机当前配置事实，不得依据历史 evidence 或本文重建 Serena section、hook registration、`approval_policy` 或 `sandbox_mode`。须先由配置所有者明确 Serena command/args 与权限策略，再考虑受控 `Repair` 或 `Restore`；本轮未对 live home 执行写入。
+
 ## GitHub CLI
 
 - 官方二进制：`D:\Codex\tools\gh\bin\gh.exe`

@@ -11,7 +11,7 @@ param(
     [switch]$OnlyRestoreManifestHardening,
     [switch]$OnlyRestoreManifestCas,
     [switch]$OnlyRestoreBackupSnapshot,
-    [switch]$OnlyRestoreLegacyDirectory,
+    [switch]$OnlyRestoreRetirementIrreversibility,
     [switch]$OnlyRestoreAclReplace,
     [switch]$OnlyPostCleanupReplace
 )
@@ -27,6 +27,8 @@ function Get-Sha256([string]$Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+. (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
+
 function Get-RestoreTargetFingerprint([string]$CodexHome, [object]$HostManifest, [object]$EvidenceManifest, [string]$ContextPath) {
     $parts = [Collections.Generic.List[string]]::new()
     foreach ($path in @(
@@ -41,7 +43,7 @@ function Get-RestoreTargetFingerprint([string]$CodexHome, [object]$HostManifest,
     }
     foreach ($name in @($EvidenceManifest.retiredResources)) {
         $path = Join-Path (Join-Path $CodexHome 'hooks') ([string]$name)
-        $parts.Add("legacy:$path=$(if(Test-Path -LiteralPath $path -PathType Leaf){Get-Sha256 $path}else{'missing'})")
+        $parts.Add("retired:$path=$(if(Test-Path -LiteralPath $path -PathType Leaf){Get-Sha256 $path}else{'missing'})")
     }
     foreach ($path in @($EvidenceManifest.aclTargets)) {
         if (Test-Path -LiteralPath ([string]$path)) { $parts.Add("acl:$path=$((Get-Acl -LiteralPath ([string]$path)).Sddl)") }
@@ -196,12 +198,10 @@ try {
     }
 
     New-FunctionalHookFixture -CodexHome $codexHome
-    $legacyDirectoryFilePath = Join-Path $codexHome 'hooks\__pycache__\codex-mobile-permission-guard.cpython-313.pyc'
-    $legacyDirectoryFileHash = $null
-    if ($OnlyRestoreLegacyDirectory) {
+    $retiredDirectoryFilePath = Join-Path $codexHome 'hooks\__pycache__\codex-mobile-permission-guard.cpython-313.pyc'
+    if ($OnlyRestoreRetirementIrreversibility) {
         New-Item -ItemType Directory -Path (Join-Path $codexHome 'hooks\__pycache__') | Out-Null
-        [IO.File]::WriteAllText($legacyDirectoryFilePath, 'fixture:allowlisted-retired-pyc', [Text.UTF8Encoding]::new($false))
-        $legacyDirectoryFileHash = Get-Sha256 $legacyDirectoryFilePath
+        [IO.File]::WriteAllText($retiredDirectoryFilePath, 'fixture:allowlisted-retired-pyc', [Text.UTF8Encoding]::new($false))
     }
     $checkFingerprintBefore = @(
         Get-Sha256 (Join-Path $codexHome 'hooks.json')
@@ -379,25 +379,17 @@ try {
         return
     }
 
-    if ($OnlyRestoreLegacyDirectory) {
+    if ($OnlyRestoreRetirementIrreversibility) {
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $codexHome 'hooks\__pycache__'))) 'Repair 必须先退役 allowlisted legacy 文件，再退役其目录'
         $restoreRaw = & $scriptPath -Mode Restore -CodexHome $codexHome -EvidencePath $repair.evidencePath -Json
         $restore = (($restoreRaw | Out-String).Trim() | ConvertFrom-Json)
-        Assert-True ([bool]$restore.ok -and [bool]$restore.changed) 'Restore 必须重建 legacy 目录并恢复认证文件'
-        Assert-True ((Test-Path -LiteralPath (Join-Path $codexHome 'hooks\__pycache__') -PathType Container)) 'Restore 后 legacy 目录必须存在'
-        Assert-True ((Get-Sha256 $legacyDirectoryFilePath) -ceq $legacyDirectoryFileHash) 'Restore 后 nested legacy 文件必须恢复原字节'
-        Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $codexHome 'hooks\__pycache__') -Force).Count -eq 1) 'Restore 后 legacy 目录只能包含认证恢复文件'
+        Assert-True ([bool]$restore.ok -and [bool]$restore.changed) 'Restore 必须完成受管资源回滚'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $codexHome 'hooks\__pycache__') -PathType Container)) 'Restore 不得重建已退役 legacy 目录'
+        Assert-True (-not (Test-Path -LiteralPath $retiredDirectoryFilePath -PathType Leaf)) 'Restore 不得重建已退役 nested legacy 文件'
         $secondRaw = & $scriptPath -Mode Restore -CodexHome $codexHome -EvidencePath $repair.evidencePath -Json
         $second = (($secondRaw | Out-String).Trim() | ConvertFrom-Json)
-        Assert-True ([bool]$second.ok -and -not [bool]$second.changed) 'legacy 目录 Restore 第二次必须 no-op'
-        $unknownRestoredChild = Join-Path $codexHome 'hooks\__pycache__\unknown-third-party.pyc'
-        [IO.File]::WriteAllText($unknownRestoredChild, 'third-party-must-survive', [Text.UTF8Encoding]::new($false))
-        $unknownRestoredChildHash = Get-Sha256 $unknownRestoredChild
-        $unknownRestoreFailed = $false
-        try { & $scriptPath -Mode Restore -CodexHome $codexHome -EvidencePath $repair.evidencePath -Json | Out-Null } catch { $unknownRestoreFailed = $true }
-        Assert-True $unknownRestoreFailed 'Restore 必须拒绝 legacy 目录中的未知后代'
-        Assert-True ((Get-Sha256 $unknownRestoredChild) -ceq $unknownRestoredChildHash) 'Restore 拒绝不得删除或改写未知后代'
-        'Test-CodexFunctionalHookRegistration.ps1 -OnlyRestoreLegacyDirectory: PASS'
+        Assert-True ([bool]$second.ok -and -not [bool]$second.changed) '退役资源不可恢复后的第二次 Restore 必须 no-op'
+        'Test-CodexFunctionalHookRegistration.ps1 -OnlyRestoreRetirementIrreversibility: PASS'
         return
     }
 
@@ -480,8 +472,12 @@ try {
 
     foreach ($file in @($manifest.files)) {
         $livePath = Join-Path (Join-Path $codexHome 'hooks') $file.liveRelativePath
+        $sourcePath = Join-Path $ProjectRoot "managed\codex-hooks\$($file.relativePath)"
         Assert-True (Test-Path -LiteralPath $livePath -PathType Leaf) "缺少发布文件：$($file.liveRelativePath)"
-        Assert-True ((Get-Sha256 $livePath) -ceq ([string]$file.sha256).ToLowerInvariant()) "发布文件 hash 错误：$($file.liveRelativePath)"
+        $sourceRawSha256 = Get-Sha256 $sourcePath
+        $sourceCanonicalSha256 = Get-CodexHookManifestSourceSha256 -Path $sourcePath -Name "functional manifest source $($file.relativePath)" -AllowedExactPaths @($sourcePath)
+        Assert-True ($sourceCanonicalSha256 -ceq [string]$file.sha256) "host manifest canonical hash 错误：$($file.relativePath)"
+        Assert-True ((Get-Sha256 $livePath) -ceq $sourceRawSha256) "发布文件原始字节 hash 错误：$($file.liveRelativePath)"
     }
     foreach ($wrapperName in @('serena-reminder-guarded.cmd','serena-cleanup-guarded.cmd','serena-activation-reminder.cmd')) {
         $wrapper = Get-Content -LiteralPath (Join-Path $codexHome "hooks\$wrapperName") -Raw
@@ -726,7 +722,6 @@ try {
             (Join-Path $postHome 'hooks.json'),
             (Join-Path $postHome '.fixture-user-environment.json'),
             (Join-Path $postHome 'hooks\unknown-preserve.txt'),
-            $postLegacyPath,
             $postContextPath
         )
         $postHashesBefore = [ordered]@{}
@@ -788,8 +783,18 @@ try {
                 Move-Item -LiteralPath $postCleanupMoved -Destination $postCleanupTarget
             }
         } else {
-            Assert-True ($postManifest.status -ceq 'rolled-back') "post-commit $postPhase 正常故障必须完整回滚：status=$($postManifest.status); recoveryRequired=$postRecoveryRequired; rollbackErrors=$postRollbackErrors"
-            Assert-True (Test-Path -LiteralPath $postNestedLegacyPath -PathType Leaf) "post-commit $postPhase rollback 必须恢复 nested legacy 文件"
+            $expectedStatus = if ($postPhase -eq 'acl') { 'rolled-back' } else { 'unsafe-partial' }
+            Assert-True ($postManifest.status -ceq $expectedStatus) "post-commit $postPhase 状态错误：status=$($postManifest.status); recoveryRequired=$postRecoveryRequired; rollbackErrors=$postRollbackErrors"
+            if ($postPhase -eq 'acl') {
+                Assert-True (Test-Path -LiteralPath $postLegacyPath -PathType Leaf) 'ACL phase 失败不应提前退役 legacy 文件'
+                Assert-True (Test-Path -LiteralPath $postNestedLegacyPath -PathType Leaf) 'ACL phase 失败不应提前退役 nested legacy 文件'
+            } elseif ($postPhase -eq 'legacy') {
+                Assert-True (-not (Test-Path -LiteralPath $postLegacyPath -PathType Leaf)) 'legacy phase 不得复活首个已退役文件'
+                Assert-True (Test-Path -LiteralPath $postNestedLegacyPath -PathType Leaf) 'legacy phase 不得删除后续 nested legacy 文件'
+            } else {
+                Assert-True (-not (Test-Path -LiteralPath $postLegacyPath -PathType Leaf)) 'final phase 不得复活已退役 legacy 文件'
+                Assert-True (-not (Test-Path -LiteralPath $postNestedLegacyPath -PathType Leaf)) 'final phase 不得复活已退役 nested legacy 文件'
+            }
         }
     }
     'Test-CodexFunctionalHookRegistration.ps1: PASS'

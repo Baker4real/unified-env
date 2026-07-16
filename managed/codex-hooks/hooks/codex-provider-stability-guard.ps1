@@ -27,7 +27,7 @@ function Assert-ProviderToml([string]$Path){
 }
 function Get-ProviderDesiredConfigText([string]$Text){
     $sections=[ordered]@{
-        features=[ordered]@{unified_exec='true';image_generation='false';responses_websockets_v2='false';responses_websockets='false';network_proxy='false';respect_system_proxy='false'}
+        features=[ordered]@{image_generation='false';responses_websockets_v2='false';responses_websockets='false';network_proxy='false';respect_system_proxy='false'}
         network=[ordered]@{enabled='true';allow_local_binding='true';allow_upstream_proxy='true';proxy_url='"http://127.0.0.1:10808"'}
     }
     return Update-CodexTomlPolicyText -Text $Text -Sections $sections -RemoveKeys @('experimental_use_unified_exec_tool')

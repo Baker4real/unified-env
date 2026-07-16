@@ -1193,6 +1193,35 @@ function Get-CodexHookTextSha256 {
     }
 }
 
+function Get-CodexHookManifestSourceSha256 {
+    [CmdletBinding(DefaultParameterSetName = 'Path')]
+    param(
+        [Parameter(Mandatory, ParameterSetName = 'Path')][string]$Path,
+        [Parameter(Mandatory, ParameterSetName = 'Bytes')][byte[]]$Bytes,
+        [Parameter(ParameterSetName = 'Path')][string]$Name = 'manifest source',
+        [Parameter(ParameterSetName = 'Path')][string[]]$AllowedExactPaths = @(),
+        [Parameter(ParameterSetName = 'Path')][string[]]$AllowedRoots = @()
+    )
+
+    [byte[]]$sourceBytes = if ($PSCmdlet.ParameterSetName -ceq 'Bytes') {
+        $Bytes
+    } else {
+        $snapshot = Get-CodexHookHandleBoundFileSnapshot -Path $Path -Name $Name -AllowedExactPaths $AllowedExactPaths -AllowedRoots $AllowedRoots
+        if (-not $snapshot.probe.safeToRead) {
+            throw "$Name 无法安全读取 manifest source：state=$($snapshot.probe.state)"
+        }
+        [byte[]]$snapshot.bytes
+    }
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    try {
+        $text = $utf8.GetString($sourceBytes)
+    } catch {
+        throw "manifest source 不是严格 UTF-8"
+    }
+
+    return Get-CodexHookTextSha256 -Text $text.Replace("`r`n", "`n")
+}
+
 function Split-CodexHookCommandLine {
     param([Parameter(Mandatory)][string]$Command)
 
@@ -2029,7 +2058,8 @@ function Get-CodexHookFileFacts {
     param(
         [Parameter(Mandatory)][object]$Manifest,
         [Parameter(Mandatory)][string]$ManagedRoot,
-        [Parameter(Mandatory)][string]$LiveHooksRoot
+        [Parameter(Mandatory)][string]$LiveHooksRoot,
+        [ValidateSet('Raw', 'CanonicalLf')][string]$ManifestHashMode = 'Raw'
     )
 
     [void](Assert-CodexHookManifest -Manifest $Manifest)
@@ -2045,32 +2075,48 @@ function Get-CodexHookFileFacts {
         if (-not (Test-CodexHookPathWithin -Path $livePath -ParentPath $liveHooksRootPath)) {
             throw "live file 逃逸固定根：$($file.liveRelativePath)"
         }
-        $managedObservation = Get-CodexHookSafeFileHash `
+        $managedObservation = Get-CodexHookHandleBoundFileSnapshot `
             -Path $managedPath `
             -Name "managed file $($file.relativePath)" `
             -AllowedRoots @($managedRootPath)
-        $liveObservation = Get-CodexHookSafeFileHash `
+        $liveObservation = Get-CodexHookHandleBoundFileSnapshot `
             -Path $livePath `
             -Name "live file $($file.liveRelativePath)" `
             -AllowedRoots @($liveHooksRootPath)
         $managedExists = $managedObservation.probe.exists
         $liveExists = $liveObservation.probe.exists
-        $managedSha256 = $managedObservation.sha256
-        $liveSha256 = $liveObservation.sha256
+        $managedSha256 = if ($managedObservation.probe.safeToRead) { Get-CodexHookBytesSha256 -Bytes ([byte[]]$managedObservation.bytes) } else { $null }
+        $liveSha256 = if ($liveObservation.probe.safeToRead) { Get-CodexHookBytesSha256 -Bytes ([byte[]]$liveObservation.bytes) } else { $null }
+        $managedManifestSha256 = if ($managedObservation.probe.safeToRead) {
+            if ($ManifestHashMode -ceq 'CanonicalLf') {
+                Get-CodexHookManifestSourceSha256 -Bytes ([byte[]]$managedObservation.bytes)
+            }
+            else {
+                $managedSha256
+            }
+        }
+        else {
+            $null
+        }
+        $managedMatchesManifest = $managedObservation.probe.safeToRead -and $managedManifestSha256 -ceq $file.sha256
+        $liveMatchesManagedSource = $managedObservation.probe.safeToRead -and $liveObservation.probe.safeToRead -and $liveSha256 -ceq $managedSha256
 
         [pscustomobject][ordered]@{
             relativePath = $file.relativePath
             liveRelativePath = $file.liveRelativePath
             lifecycle = $file.lifecycle
             declaredSha256 = $file.sha256
+            manifestHashMode = $ManifestHashMode
             managedExists = $managedExists
             managedProbeState = $managedObservation.probe.state
             managedSha256 = $managedSha256
-            managedMatchesManifest = $managedObservation.probe.safeToRead -and $managedSha256 -ceq $file.sha256
+            managedManifestSha256 = $managedManifestSha256
+            managedMatchesManifest = $managedMatchesManifest
             liveExists = $liveExists
             liveProbeState = $liveObservation.probe.state
             liveSha256 = $liveSha256
-            liveMatchesManifest = $liveObservation.probe.safeToRead -and $liveSha256 -ceq $file.sha256
+            liveMatchesManagedSource = $liveMatchesManagedSource
+            liveMatchesManifest = $managedMatchesManifest -and $liveMatchesManagedSource
         }
     }
 }
@@ -2773,6 +2819,7 @@ function Get-CodexHookCapabilityFileSnapshot {
         sha256 = if ($snapshot.probe.safeToRead) { Get-CodexHookBytesSha256 -Bytes ([byte[]]$snapshot.bytes) } else { $null }
         bytes = if ($snapshot.probe.safeToRead) { [byte[]]$snapshot.bytes } else { $null }
         identity = if ($snapshot.probe.safeToRead) { @($snapshot.probe.identity) } else { @() }
+        sddl = if ($snapshot.probe.safeToRead) { [string]$snapshot.sddl } else { $null }
     }
 }
 

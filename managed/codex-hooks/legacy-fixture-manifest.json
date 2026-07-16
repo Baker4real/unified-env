@@ -615,7 +615,7 @@
     {
       "relativePath": "hooks/codex-provider-stability-guard.ps1",
       "liveRelativePath": "codex-provider-stability-guard.ps1",
-      "sha256": "bac74f7214ab98b25d8ef390d931dcecf148b2f8518e1f6af8f4e83b3732a323",
+      "sha256": "a761a88f40c79a5f2143b8a1196426626ffae44cffce891e9406f6c82549eb6b",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability"
@@ -660,7 +660,7 @@
     {
       "relativePath": "hooks/lib/CodexHookRuntime.ps1",
       "liveRelativePath": "lib/CodexHookRuntime.ps1",
-      "sha256": "8e79250ba9f8114a38b3411dda1fe62616701ba1b43c0cdbafedd14680172004",
+      "sha256": "a6ecb01a6c57dafa23f62ed9efb59febd06c6059bfde83fd4c59ddbad2abacb4",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",

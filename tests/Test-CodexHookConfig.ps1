@@ -2,6 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
 . (Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexConfigFile.ps1')
+. (Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1')
 function Assert-True([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
 function Assert-Throws([scriptblock]$Action,[string]$Pattern){try{&$Action;throw 'DID_NOT_THROW'}catch{if($_.Exception.Message -eq 'DID_NOT_THROW' -or $_.Exception.Message -notmatch $Pattern){throw "异常不匹配 [$Pattern]：$($_.Exception.Message)"}}}
 

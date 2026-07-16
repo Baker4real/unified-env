@@ -388,7 +388,7 @@
     {
       "relativePath": "hooks/codex-state-preflight.cmd",
       "liveRelativePath": "codex-state-preflight.cmd",
-      "sha256": "299d1940ee6f187fea5bb7f870f234fdf781e752616df7f5358bf9b9a67f4cad",
+      "sha256": "c6df6e890f91a7b0d83ba971f316b730f3b82ef1b881f0d15a739758f774af84",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
@@ -406,7 +406,7 @@
     {
       "relativePath": "hooks/codex-provider-stability-guard.ps1",
       "liveRelativePath": "codex-provider-stability-guard.ps1",
-      "sha256": "bac74f7214ab98b25d8ef390d931dcecf148b2f8518e1f6af8f4e83b3732a323",
+      "sha256": "a761a88f40c79a5f2143b8a1196426626ffae44cffce891e9406f6c82549eb6b",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability"
@@ -415,7 +415,7 @@
     {
       "relativePath": "hooks/serena-reminder-guarded.cmd",
       "liveRelativePath": "serena-reminder-guarded.cmd",
-      "sha256": "ed7d69de104d624a12bd02914bb503f10d8c714883069f480853966c80416938",
+      "sha256": "e843162726368a2575ae44fca6b9c077b8566005676f6ebd4cd159127466e623",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-reminder"
@@ -424,7 +424,7 @@
     {
       "relativePath": "hooks/serena-cleanup-guarded.cmd",
       "liveRelativePath": "serena-cleanup-guarded.cmd",
-      "sha256": "c49702a48a23ccacea2c4f12300a0f203729c1925fa6ccd551a83ed8e9ea7ef3",
+      "sha256": "05faccdc0ba9ac0442d4b04e3bfd9e70b41c25213f4fcf2dad625964bbf32a1e",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-cleanup"
@@ -444,7 +444,7 @@
     {
       "relativePath": "hooks/serena-activation-reminder.cmd",
       "liveRelativePath": "serena-activation-reminder.cmd",
-      "sha256": "fc8ccb26de2e95b4d971e4149ce5282f45a6d6f39f7105daf92dadecc65b8200",
+      "sha256": "039dd4d502a4d05050c33ae1fe6778db2cf6304c460ee4da2e725a7faa4fb1ea",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"

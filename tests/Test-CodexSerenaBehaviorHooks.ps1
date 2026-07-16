@@ -10,6 +10,7 @@ $reminderPath = Join-Path $hooksRoot 'serena-reminder-guarded.cmd'
 $cleanupPath = Join-Path $hooksRoot 'serena-cleanup-guarded.cmd'
 $activationPath = Join-Path $hooksRoot 'serena-activation-reminder.cmd'
 $behaviorGuardPath = Join-Path $hooksRoot 'serena-behavior-guard.ps1'
+. (Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1')
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -459,7 +460,7 @@ foreach ($wrapper in @(
     $record = $filesByRelativePath[$wrapper.relative]
     Assert-Equal ([string]$record.liveRelativePath) $wrapper.live "$($wrapper.relative) live path 非法。"
     Assert-Equal (@($record.ownerHookIds) -join ',') $wrapper.owner "$($wrapper.relative) owner 非法。"
-    Assert-Equal ([string]$record.sha256) ((Get-FileHash -LiteralPath $wrapper.path -Algorithm SHA256).Hash.ToLowerInvariant()) "$($wrapper.relative) hash 漂移。"
+    Assert-Equal ([string]$record.sha256) (Get-CodexHookManifestSourceSha256 -Path $wrapper.path -AllowedExactPaths @($wrapper.path)) "$($wrapper.relative) manifest hash 漂移。"
 }
 
 Write-Output 'Codex Serena behavior hook tests passed.'

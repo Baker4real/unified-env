@@ -250,6 +250,31 @@ Assert-True ($presentFileFact.managedMatchesManifest -and $presentFileFact.liveM
 Assert-True (-not $missingFileFact.managedExists) 'managed 缺文件必须作为事实缺口输出'
 Assert-True (-not $missingFileFact.liveExists) 'live 缺文件必须作为事实缺口输出'
 
+$crlfManifest = Copy-TestDocument $fixtureManifest
+$crlfSourcePath = Join-Path $ManagedRoot 'hooks\test-crlf.cmd'
+$crlfLivePath = Join-Path $FixtureLiveHooksRoot 'test-crlf.cmd'
+$crlfSourceText = "@echo off`r`necho canonical-source`r`n"
+[IO.File]::WriteAllText($crlfSourcePath, $crlfSourceText, [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($crlfLivePath, $crlfSourceText, [Text.UTF8Encoding]::new($false))
+$crlfCanonicalSha256 = Get-CodexHookManifestSourceSha256 -Path $crlfSourcePath -Name 'CRLF manifest source' -AllowedExactPaths @($crlfSourcePath)
+$crlfManifest.files = @($crlfManifest.files) + @([pscustomobject][ordered]@{
+    relativePath = 'hooks/test-crlf.cmd'
+    liveRelativePath = 'test-crlf.cmd'
+    sha256 = $crlfCanonicalSha256
+    lifecycle = 'active'
+    ownerHookIds = @('provider-stability')
+})
+[void](Assert-CodexHookManifest -Manifest $crlfManifest)
+$canonicalFileFacts = @(Get-CodexHookFileFacts -Manifest $crlfManifest -ManagedRoot $ManagedRoot -LiveHooksRoot $FixtureLiveHooksRoot -ManifestHashMode CanonicalLf)
+$crlfCanonicalFact = @($canonicalFileFacts | Where-Object relativePath -ceq 'hooks/test-crlf.cmd')[0]
+Assert-True ($crlfCanonicalFact.manifestHashMode -ceq 'CanonicalLf') 'host inventory 必须显式记录 canonical manifest hash mode'
+Assert-True ($crlfCanonicalFact.managedSha256 -cne $crlfCanonicalFact.declaredSha256) 'CRLF source raw hash 不得误当作 manifest identity'
+Assert-True ($crlfCanonicalFact.managedManifestSha256 -ceq $crlfCanonicalFact.declaredSha256 -and $crlfCanonicalFact.managedMatchesManifest) 'host inventory 必须用 LF canonical source hash 比较 manifest'
+Assert-True ($crlfCanonicalFact.liveMatchesManagedSource -and $crlfCanonicalFact.liveMatchesManifest) 'host inventory 必须用 raw source/live bytes 比较发布态'
+$rawFileFacts = @(Get-CodexHookFileFacts -Manifest $crlfManifest -ManagedRoot $ManagedRoot -LiveHooksRoot $FixtureLiveHooksRoot -ManifestHashMode Raw)
+$crlfRawFact = @($rawFileFacts | Where-Object relativePath -ceq 'hooks/test-crlf.cmd')[0]
+Assert-True ($crlfRawFact.manifestHashMode -ceq 'Raw' -and -not $crlfRawFact.managedMatchesManifest -and $crlfRawFact.liveMatchesManagedSource) 'legacy fixture manifest 必须保持 raw hash 语义'
+
 $probeTarget = Join-Path $FixtureRoot 'safe-probe-target'
 $probeLink = Join-Path $FixtureRoot 'safe-probe-link'
 New-Item -ItemType Directory -Path $probeTarget -Force | Out-Null

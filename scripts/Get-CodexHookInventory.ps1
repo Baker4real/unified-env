@@ -142,7 +142,12 @@ $registryPath = Join-Path $codexHomePath 'hooks.json'
 $configPath = Join-Path $codexHomePath 'config.toml'
 
 $registry = Get-CodexHookRegistryFacts -RegistryPath $registryPath -Manifest $manifest
-$fileFacts = @(Get-CodexHookFileFacts -Manifest $manifest -ManagedRoot $managedRoot -LiveHooksRoot $liveHooksRoot)
+$manifestHashMode = if ($LegacyFixtureManifest) { 'Raw' } else { 'CanonicalLf' }
+$fileFacts = @(Get-CodexHookFileFacts `
+    -Manifest $manifest `
+    -ManagedRoot $managedRoot `
+    -LiveHooksRoot $liveHooksRoot `
+    -ManifestHashMode $manifestHashMode)
 $dependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $manifest)
 $trustObservation = @(Get-CodexHookTrustKeyObservations -ConfigPath $configPath)
 $document = New-CodexHookInventoryDocument `
