@@ -16,6 +16,13 @@
 - 此自动化只关闭 ASUS Aura / 风扇 RGB，不改变风扇转速或散热策略；不要在常规 Startup/Hermes 清理中删除或改写快捷方式与 D 盘载荷。
 - 2026-07-15 验证：启动器退出码为 `0`、未新建 Windows Terminal 进程，且用户已目视确认灯光保持熄灭。若修复或迁移，仍须同时核对启动器退出码与实际灯光状态。
 
+## Codex provider 代理（后台）
+
+- 此代理是 Codex 主机服务，不属于 Hermes 项目。脚本固定为 `D:\Codex\.codex\scripts\codex-provider-proxy.py`，日志固定为 `D:\Codex\.codex\logs\codex-provider-proxy.log`，运行时使用官方 `D:\Codex\tools\python314-official\pythonw.exe`。
+- 入口源码位于 `D:\Codex\tools\codex-launcher\`，现役入口为 `D:\Codex\tools\bin\codex.exe`。修改脚本或 launcher 后必须重新发布并核验现役入口，不能改动官方 Store/AppX Codex 二进制。
+- 服务子进程必须以 `pythonw.exe` 和 `CREATE_NO_WINDOW` 后台启动；验收时检查 `/health`、`/v1/models`、窗口句柄为零且没有 `conhost.exe` 后代，不能通过关闭用户终端来掩盖问题。
+- 不得把 proxy 或其日志放回 `D:\hermes-data`。`D:\hermes-data\.npm-global` 仅用于排除旧 npm shim，与该代理无关，不能作为迁移副作用修改。
+
 ## Codex 设备连接
 
 - 已于 2026-07-16 在本机 Codex Desktop 的“连接”页确认：当前只显示“控制此电脑”和“SSH”。“控制此电脑”中的“添加”仅配对可远程控制本机的设备，不赋予本机控制其他电脑的能力。
