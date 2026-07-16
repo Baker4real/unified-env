@@ -12,7 +12,7 @@
 
 ### Domain docs
 
-本项目使用 single-context 布局：根目录 `CONTEXT.md` 描述项目背景，`docs/adr/` 记录架构决策。见 `docs/agents/domain.md`。
+本项目使用 single-context 布局：根目录 `CONTEXT.md` 描述项目背景；如存在架构决策记录，位于 `docs/adr/`。见 `docs/agents/domain.md`。
 
 ### Environment governance
 

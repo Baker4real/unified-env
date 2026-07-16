@@ -1,6 +1,6 @@
 # 本机 Skill Catalog 实现计划
 
-> **状态（2026-07-13）：** 已实施并验证完成。下方复选框保留实施过程记录，不再表示当前待办；当前派生输出和运行证据以 `D:\Codex\.codex\skill-catalog\` 与 `D:\Codex\.codex\run-evidence\skill-catalog\` 为准。
+> **状态（2026-07-13）：** 已实施并验证完成。下方复选框保留实施过程记录，不再表示当前待办；当前派生输出以 `D:\Codex\.codex\skill-catalog\` 为准，一次性运行证据按 run id 写入 `D:\Codex\.codex\run-evidence\`。
 
 > **给执行代理：** 按任务逐项执行。保持既有工作树改动不变，只暂存本计划涉及的文件。
 
@@ -109,7 +109,7 @@
 
 **文件：**
 - 输出：`D:\Codex\.codex\skill-catalog\catalog.json`（本机派生状态，不纳入项目提交）
-- 证据：仅在需要保存本次运行证据时使用 `D:\Codex\.codex\run-evidence\skill-catalog\`
+- 证据：仅在需要保存本次运行证据时，使用 `D:\Codex\.codex\run-evidence\` 下按 run id 划分的目录。
 
 - [x] **步骤 1：对真实 active 和缓存根目录运行 dry-run**
 
@@ -117,7 +117,7 @@
   & 'D:\Codex\tools\python314-official\python.exe' -B 'D:\Codex\projects\统一环境\scripts\generate_skill_catalog.py' --dry-run
   ```
 
-  结果：本次运行证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`。
+  结果：历史运行证据已按保留策略清理；当前运行必须生成新的 run-specific D 盘 evidence。
 
 - [x] **步骤 2：运行现有严格资源闭包检查器**
 
@@ -125,7 +125,7 @@
   & 'D:\Codex\tools\python314-official\python.exe' 'D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py' --root 'D:\Codex\.codex\skills' --strict --format json
   ```
 
-  结果：本次运行证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`。
+  结果：历史运行证据已按保留策略清理；当前运行必须生成新的 run-specific D 盘 evidence。
 
 - [x] **步骤 3：仅在 dry-run 和闭包检查通过后写入本地 catalog**
 
@@ -133,7 +133,7 @@
   & 'D:\Codex\tools\python314-official\python.exe' -B 'D:\Codex\projects\统一环境\scripts\generate_skill_catalog.py' --write --output 'D:\Codex\.codex\skill-catalog\catalog.json'
   ```
 
-  结果：本次运行证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`；生成物位于项目工作树之外。
+  结果：历史运行证据已按保留策略清理；当前运行必须生成新的 run-specific D 盘 evidence，生成物位于项目工作树之外。
 
 - [x] **步骤 4：运行聚焦测试和仓库相关回归测试**
 
@@ -143,8 +143,8 @@
   & 'D:\Codex\tools\python314-official\python.exe' -B 'D:\Codex\projects\统一环境\tests\Test-CodexStatePolicy.py'
   ```
 
-  结果：本次运行证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`；无关的 state-policy 结果和既有提交边界也记录在那里。
+  结果：历史运行证据已按保留策略清理；当前运行必须生成新的 run-specific D 盘 evidence。无关的 state-policy 结果和既有提交边界不得混入该 evidence。
 
 - [x] **步骤 5：验证作用域和工作树边界**
 
-  作用域、网络守卫、输出位置和工作树边界的本次证据见 `D:\Codex\.codex\run-evidence\skill-catalog\20260713-validation.md`。
+  历史的作用域、网络守卫、输出位置和工作树边界证据已按保留策略清理；当前验证必须在新的 run-specific D 盘 evidence 中记录。

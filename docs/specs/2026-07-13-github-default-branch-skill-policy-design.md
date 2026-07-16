@@ -4,7 +4,7 @@
 
 > 退役说明（2026-07-16）：本文保留实施时的历史路径和设计决策。已删除来源的 skill 路径、来源和 overlay 描述不代表当前安装，也不授权恢复。
 
-验证摘要与有序清理记录位于 `D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\verification-summary.json`、`VERIFICATION.md` 和 `task5-action-log.md`。计划中的临时 worktree 路径仅是历史执行记录，不代表当前目录仍存在。
+验证摘要与有序清理记录属于当时的 run-specific D 盘证据，可能已按保留策略清理；当前行为应以本设计、实施计划和回归测试重新核验。计划中的临时 worktree 路径仅是历史执行记录，不代表当前目录仍存在。
 
 ## 目标
 

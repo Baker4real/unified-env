@@ -1,14 +1,16 @@
 # 本机 Codex 功能钩子分层恢复设计
 
+> **历史设计（已取代）：** 本文保留分层恢复的设计来源和 fixture 测试背景，不构成 live registration、`Repair`、`Restore` 或 lifecycle canary 的执行授权。当前唯一生产入口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`；本机 live 状态见 `docs/environments/zi-xi-shi.md`。
+
 ## 状态
 
-分阶段实施中：Task 1–8 已完成到 live registration；4 个有用 host hooks 已通过受控 reconciler 启用，canonical path repair 已应用安全映射。完整重启后的 fresh lifecycle 验收尚未执行。本文不授权恢复旧的多钩子热路径。
+本文已被当前 host hook reconciler 取代。Task 1–8、live registration、canonical path repair 与 lifecycle 验收的描述均为历史快照，不能据此推断当前配置健康或执行 live 写入。fixture 回归可独立验证；live `Repair`、`Restore` 与 lifecycle canary 仍须先由配置所有者明确 Serena 配置及权限策略来源。
 
-## 当前实现落点
+## 已归档的实现落点
 
 - `managed/codex-hooks/hooks/codex-state-policy-guard.py` 已提供 path inventory、permission policy 和分域 state policy；local-only preflight、Serena reminder/cleanup/activation、provider/GitHub 显式维护层及 production/legacy manifest 分离均已落地。
 - 专项测试覆盖当前已合入的 path/state、preflight、Serena 行为、local health guard 与 manifest 路由边界。
-- canonical path repair 已按批准映射完成并保留歧义项报告；live registration 已启用 `codex-state-preflight`、`serena-activate`、`serena-cleanup`、`serena-reminder` 这 4 个有用 hooks。
+- canonical path repair 与四个受管 hook 的 registration 是历史实现记录；它们不替代当前 reconciler 的 `Check` 结果，也不授权恢复旧 lifecycle 状态。
 
 ## 目标
 
@@ -21,7 +23,9 @@
 5. 继续由冷路径 reconciler 维护 hooks、Serena 静态配置、context、ACL 和退役文件。
 6. 任何未知字段、未知文件、竞争写入或不确定路径都必须保留并报告，不能静默覆盖。
 
-## 当前事实与问题
+## 历史事实与问题
+
+以下内容是设计阶段的基线和调查记录。需要 live 状态时必须运行当前生产入口的只读 `Check` 并查看设备事实，不得以这些数值或路径作为写入依据。
 
 - 当前 `D:\Codex\.codex\hooks.json` 的用户级 `hooks` 精确注册 4 个受管本地 hooks：`codex-state-preflight`、`serena-activate`、`serena-cleanup`、`serena-reminder`。GitHub CLI guard 文件仍可作为显式工具保留，但未注册为生命周期 hook。
 - 初始审计时，旧 state policy 的只读检查曾报告 `178` 项 drift：两张 projectless map 共 `176` 项，heartbeat 权限 `2` 项；`state_5.sqlite` drift 为 `0`。这是修复前基线，不是当前状态。
@@ -88,14 +92,14 @@
 - provider/GitHub 的 `Check` 只读；`Repair`、`-CheckNetwork`、`-CheckAuth` 分离为显式命令，输出独立 evidence。
 - firewall/runtime 版本漂移、dashboard listener 数量和 User `SERENA_HOME` 持久环境作为独立 host health 项，不塞入 state preflight。
 
-### 4. Manifest 与状态分离
+### 4. Manifest 与状态分离（已完成）
 
-当前 `managed/codex-hooks/manifest.json` 仍把历史 wrapper 标成 active，容易被未来部署器误认为可恢复。实施时必须拆分：
+历史问题是 `managed/codex-hooks/manifest.json` 曾把历史 wrapper 标成 active，容易被未来部署器误认为可恢复。现已拆分为：
 
 - `legacy-fixture-manifest.json`：只供历史 fixture/core 测试；
-- `host-preflight-manifest.json`：只声明真正允许的 state preflight、reminder、cleanup 和静态冷路径 ownership。
+- `host-preflight-manifest.json`：只声明真正允许的 state preflight、activation reminder、reminder、cleanup 和静态冷路径 ownership。
 
-任何生产入口只接受后者，旧 manifest 不能提供 production apply identity。
+当前生产入口只读取 `host-preflight-manifest.json`；`legacy-fixture-manifest.json` 与旧 manifest 都不能提供 production apply identity。
 
 ## 失败、回滚与安全边界
 
@@ -115,6 +119,6 @@
 7. 完整重启后，Serena 初始无项目，显式 `activate_project`、`get_current_config` 和符号查询成功。
 8. hooks/config/context/reconciler 的现有全套测试、新增 preflight/reminder/cleanup/path tests、`git diff --check` 全部通过。
 
-## 实施顺序
+## 历史实施顺序
 
-先完成 path inventory 和 state preflight，再恢复 reminder/cleanup/activation reminder；之后拆分 provider/GitHub 的只读与显式 repair；最后做 live registration、重启、网络边界和回滚验收。任何一个子项目未通过其独立门槛，都不进入下一个子项目。
+此顺序仅解释历史实现过程。后续变更必须从当前 host hook reconciler 的设计、真实 live `Check` 和配置所有者授权重新开始，不得续跑本文步骤。

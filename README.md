@@ -14,7 +14,7 @@
 - 共享环境入口已验证：`planning-with-files`、CMake `4.3.3`、Rust toolchain `1.96.1` 等均保持可用；skill ledger coverage 为 `missing=0` / `duplicates=0`。
 - 已按用户授权修复默认入口：`.NET` 默认命中 D 盘 SDK `10.0.301`，Python 默认切到官方 `3.14.6`；WSL 当前判断为“不确实需要”，未安装、未启用、未初始化；CodeGraph 活动版本已切换为 `1.4.1`，Codex Desktop 已完整重启并通过 fresh MCP smoke。
 - 已固化上游稳定 skill 约束并同步 Matt stable catalog：稳定目录与上游对齐，严格资源闭包和 ledger 一致性检查通过；活动数量、哈希和上游版本属于易变状态，操作前必须实时复核。`skills/in-progress/**` 不安装；用户明确退役的 skill 不保留本机备份。
-- 本机 Skill Catalog 生成器已落地：默认只读扫描 active、system 和 plugin-cache，来源以本机 ledger / `SOURCE.md` 为准；它不安装或更新 skill、不访问网络、不读取凭据、不注册 hook。实现入口是 `scripts/generate_skill_catalog.py`，本机派生输出和运行证据位于 `D:\Codex\.codex\skill-catalog\` 与 `D:\Codex\.codex\run-evidence\skill-catalog\`。
+- 本机 Skill Catalog 生成器已落地：默认只读扫描 active、system 和 plugin-cache，来源以本机 ledger / `SOURCE.md` 为准；它不安装或更新 skill、不访问网络、不读取凭据、不注册 hook。实现入口是 `scripts/generate_skill_catalog.py`，本机派生输出位于 `D:\Codex\.codex\skill-catalog\`；一次性运行证据按 run id 写入 `D:\Codex\.codex\run-evidence\`。
 - 功能钩子分层恢复的 path inventory/state policy、local-only preflight、Serena 行为 hooks、provider/GitHub 显式维护和 production/legacy manifest 分离均已有专项实现，并通过定向 fixture 回归。fixture 全量 reconciler 回归不依赖 live 配置所有者；仅 live Repair 与 live 验收仍待配置所有者明确 Serena 配置及权限策略来源，不得从历史 evidence 推断或自动写入这些值。
 - GitHub 与收尾 skill 已统一为“解析远端默认分支后发布”；临时分支只在说明必要性并获确认后使用，patch-stack 仅报告、不自动创建或删除。实现状态与证据见对应设计和计划文档。
 

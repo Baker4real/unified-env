@@ -1,6 +1,6 @@
 # Git 默认分支发布与收尾 Skill 统一策略 Implementation Plan
 
-> **状态（2026-07-13）：** Task 1–5 已实施、验证并完成默认分支集成；临时分支与本 workflow worktree 已按顺序清理。下方复选框保留实施过程记录，不再表示当前待办。完整证据见 `D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\verification-summary.json`、`VERIFICATION.md` 和 `task5-action-log.md`。
+> **状态（2026-07-13）：** Task 1–5 已实施、验证并完成默认分支集成；临时分支与本 workflow worktree 已按顺序清理。下方复选框保留实施过程记录，不再表示当前待办。一次性验证证据为当时的 run-specific D 盘产物，可能已按保留策略清理；当前行为以版本化设计、实现和回归测试为准。
 
 > **历史路径说明：** 下方实施命令中出现的 `D:\Codex\projects\unified-env-github-default-branch-skill-policy` 是已清理的历史 worktree；当前版本化源代码位于 `D:\Codex\projects\统一环境\scripts`，部署入口和验证证据仍以 D 盘当前路径为准。
 
@@ -22,7 +22,7 @@
 - 临时分支只能在 agent 说明必要性后使用；首个可发布提交必须同步远端；用户确认后必须合入并推送默认分支，再删除远端和本地临时分支。
 - 收尾态只校验 workflow 管理的默认分支与临时分支；未知分支不删、不改。
 - 严禁 force push、自动绕过保护、自动删除用户 worktree 或自动清理历史分支。
-- 所有临时、备份和验证证据必须在 D 盘；使用 D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\ 作为本次证据根。
+- 所有临时、备份和验证证据必须在 D 盘；每次运行使用 `D:\Codex\.codex\run-evidence\` 下的独立证据根，不复用历史目录。
 - 每个被改的本地 skill 必须同步 SOURCE.md 和 D:\Codex\.codex\skills\.downloaded-skills-source-state.json；最终资源闭包检查必须无硬失败。
 - GitHub 插件 cache 是镜像；只能通过失败关闭的覆盖器修改，未知输入指纹不得写入任何目标。
 

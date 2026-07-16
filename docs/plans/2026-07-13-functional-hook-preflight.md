@@ -1,8 +1,10 @@
 # 功能钩子分层恢复实施计划
 
-> **状态（2026-07-15）：** Task 1–8 已完成到 live registration：4 个有用 host hooks 已通过 reconciler 启用，`Check → Repair(no-op) → Check` 为 `driftCount=0`；canonical path repair 已应用安全映射，剩余歧义项为 review-only。完整重启后的 fresh lifecycle canary 仍待执行。
+> **历史实施计划（已取代）：** 本文保留 2026-07-15 前的任务拆分和测试来源，不是当前 live runbook。当前唯一生产入口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`，本机 live 状态见 `docs/environments/zi-xi-shi.md`。
 
-> **供 agent worker 使用：** 按任务逐项实施；独立任务采用仓库当前的聚焦实施流程。步骤使用复选框（`- [ ]`）跟踪。
+> **当前边界（2026-07-16）：** 历史中的 live registration、`Check → Repair(no-op) → Check` 与 canonical path repair 不是当前健康证明。所有复选框只记录过去过程，不是待办；不得根据本文执行 live `Repair`、`Restore` 或 fresh lifecycle canary。fixture 回归可独立运行，live 写入仍需配置所有者明确 Serena 配置及权限策略来源。
+
+> **给 agent 的历史阅读说明：** 可用本文理解测试来源，但不得续跑未勾选步骤或把步骤命令当作当前操作指令。
 
 **Goal:** 在保留实际防错和 Serena 效率能力的前提下，以无网络单一 state preflight、受控 reminder/cleanup 和显式 provider/GitHub 维护替代旧的多钩子自动写入。
 
@@ -244,7 +246,7 @@ git commit -m "refactor: separate production preflight manifest from fixtures"
 - Create: `scripts/lib/CodexRepairTransaction.ps1`
 - Create: `tests/Test-CodexStatePathRepair.ps1`
 - Create: `tests/Test-CodexStatePathRepairHardening.ps1`
-- Evidence: `D:\Codex\.codex\run-evidence\env-governance\codex-state-preflight\`
+- 历史 evidence：当时的 run-specific D 盘 evidence；该临时目录已清理，不是当前入口。
 
 **Interfaces:**
 - inventory 输出每个 source path、candidate、final identity、reparse state、disposition 和 reason；不得直接改 state。
@@ -277,7 +279,7 @@ git add scripts/Get-CodexStatePathInventory.ps1 scripts/lib/CodexRepairTransacti
 git commit -m "feat: repair projectless state with approved canonical mappings"
 ```
 
-### Task 8: 注册新功能 hook 并做 fresh lifecycle 验收（live registration 已完成，fresh restart canary 待执行）
+### Task 8（历史）：注册新功能 hook 并做 fresh lifecycle 验收
 
 **Files:**
 - Modify live: `D:\Codex\.codex\hooks.json` only through the approved reconciler/registration transaction
@@ -300,13 +302,15 @@ git commit -m "feat: repair projectless state with approved canonical mappings"
 
 逐个验证 SessionStart、PreToolUse Bash、Stop 的 stdout、stderr、退出码、超时和 session isolation。
 
-- [ ] **Step 4: Perform explicit user-trust/restart canary**
+- [ ] **历史未执行：Perform explicit user-trust/restart canary**
 
 完整重启 Codex；确认 state preflight 只做本地 state 工作，Serena 初始中性，显式激活后符号查询成功，reminder/cleanup 只读写 D 盘 hook state。
 
-- [x] **Step 5: Run complete verification**
+当前不得按此步骤修改或重启 live 主机；只有配置所有者明确 Serena 配置及权限策略来源后，才能基于当时的当前生产设计重新制定验收。
 
-运行全部 PowerShell tests、13 个 hardening cases、Python suite、live Check/Repair/Check、firewall/runtime/dashboard 独立只读 inventory 和 `git diff --check`。
+- [x] **历史验证记录：Run complete verification**
+
+历史记录包含全部 PowerShell tests、13 个 hardening cases、Python suite、live Check/Repair/Check、firewall/runtime/dashboard 独立只读 inventory 和 `git diff --check`。其中 live Check/Repair/Check 不再是当前验收步骤；当前 live 状态只能由现行只读 `Check` 与设备事实确认。
 
 - [x] **Step 6: Commit and report**
 
