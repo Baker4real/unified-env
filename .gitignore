@@ -13,6 +13,7 @@ reports/codex-hook-config-test/
 reports/codex-state-policy-test/
 .serena/
 .codex/skill-state/
+/.codex/config.toml
 .local/
 *.local.md
 .env.local
