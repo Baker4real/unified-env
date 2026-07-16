@@ -2,7 +2,7 @@
 
 > **状态（2026-07-15）：** Task 1–8 已完成到 live registration：4 个有用 host hooks 已通过 reconciler 启用，`Check → Repair(no-op) → Check` 为 `driftCount=0`；canonical path repair 已应用安全映射，剩余歧义项为 review-only。完整重启后的 fresh lifecycle canary 仍待执行。
 
-> **For agentic workers:** Implement this plan task-by-task. Prefer `subagent-driven-development` when available for independent tasks; otherwise use the repository's normal implementation workflow. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **供 agent worker 使用：** 按任务逐项实施；独立任务采用仓库当前的聚焦实施流程。步骤使用复选框（`- [ ]`）跟踪。
 
 **Goal:** 在保留实际防错和 Serena 效率能力的前提下，以无网络单一 state preflight、受控 reminder/cleanup 和显式 provider/GitHub 维护替代旧的多钩子自动写入。
 

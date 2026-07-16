@@ -4,7 +4,7 @@
 
 > **历史路径说明：** 下方实施命令中出现的 `D:\Codex\projects\unified-env-github-default-branch-skill-policy` 是已清理的历史 worktree；当前版本化源代码位于 `D:\Codex\projects\统一环境\scripts`，部署入口和验证证据仍以 D 盘当前路径为准。
 
-> **退役说明（2026-07-16）：** 本计划中的 `finishing-a-development-branch`、`subagent-driven-development` 和 `writing-plans` 路径只保留为历史实施记录；`obra-superpowers` 已按用户授权整体无备份退役，不代表当前 active 路径，也不应从本文恢复。
+> **退役说明（2026-07-16）：** 本计划中的已删除 skill 路径和来源信息只保留为历史实施记录，不代表当前 active 路径，也不应从本文恢复。
 
 > **供 agentic workers 使用：** 按任务逐项实施；每个任务先建立可观察的失败信号，再写最小实现并复验。此变更涉及插件缓存、分支生命周期与本机全局 skill，Task 3 和 Task 4 必须完成独立对抗性审查。
 
@@ -173,14 +173,14 @@ git -C 'D:\Codex\projects\unified-env-github-default-branch-skill-policy' push
 **Files:**
 
 - Create: tests/Test-GitDefaultBranchSkillPolicy.cjs
-- Modify: D:\Codex\.codex\skills\finishing-a-development-branch\SKILL.md
+- Modify: 已删除的分支收尾 skill（历史目录）
 - Modify: D:\Codex\.codex\skills\private-patch-stack\SKILL.md
 - Modify: D:\Codex\.codex\skills\neat-freak\SKILL.md
 - Modify: D:\Codex\.codex\skills\neat-freak\references\repo-clean-closeout.md
 - Modify: D:\Codex\.codex\skills\repo-clean-closeout\SKILL.md
 - Modify: D:\Codex\.codex\skills\clean-git-worktree\SKILL.md
 - Modify: D:\Codex\.codex\skills\handoff\SKILL.md
-- Modify: D:\Codex\.codex\skills\finishing-a-development-branch\SOURCE.md
+- Modify: 上述已删除 skill 的 source record（历史文件）
 - Modify: D:\Codex\.codex\skills\private-patch-stack\SOURCE.md
 - Modify: D:\Codex\.codex\skills\neat-freak\SOURCE.md
 - Modify: D:\Codex\.codex\skills\repo-clean-closeout\SOURCE.md
@@ -233,7 +233,7 @@ D:\Codex\.codex\run-evidence\github-default-branch-skill-policy\before-local-ski
 
 - [ ] **Step 4：重写执行真源与薄包装**
 
-finishing-a-development-branch 改为固定流程：验证 → 解析目标 remote/default branch 双证据 → 选择直接默认分支或已说明的临时分支 → 用户确认 → 合入/推送默认分支 → 远端与本地删除临时分支 → fetch --prune 验证。保留 discard 的精确确认，但不再提供“默认创建 PR”或“保持 branch as-is”的普通选项。
+分支收尾流程改为固定流程：验证 → 解析目标 remote/default branch 双证据 → 选择直接默认分支或已说明的临时分支 → 用户确认 → 合入/推送默认分支 → 远端与本地删除临时分支 → fetch --prune 验证。保留 discard 的精确确认，但不再提供“默认创建 PR”或“保持 branch as-is”的普通选项。
 
 private-patch-stack 保留兼容名称，description 改为私有上游保护和 private 默认分支发布。它必须保留 source remote push 禁用、私有仓库和机密扫描；把当前完整提交历史发往 private 的已解析默认分支；移除 baseline/full patch branch 与所有 patch-stack checkpoint 指令；空 private repo、未知默认分支、历史 patch-stack 引用均失败关闭或报告。
 
@@ -245,8 +245,8 @@ handoff 当前内容与 SOURCE.md 记录的 D-hosted overlay 不一致。先恢�
 
 对每个已改本地 skill 在 SOURCE.md 写入日期、本地覆盖意图、具体 policy 和恢复/迁移原因。统一账本中：
 
-- 把 finishing-a-development-branch 从 retained-local 的错误回填对象中删除；
-- 将它加入 obra-superpowers source group，并记录 source-backed local overlay；
+- 从 retained-local 的错误回填对象中删除已退役条目；
+- 在已删除来源组中记录无备份退役，不保留 local overlay；
 - 更新 khazix-skills、mattpocock-skills 和 retained-local 项中受影响 skill 的 local_changes；
 - 保证每个 active local skill 仅被账本覆盖一次。
 
