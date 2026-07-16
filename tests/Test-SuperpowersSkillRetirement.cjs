@@ -16,12 +16,19 @@ const menuScript = fs.readFileSync(
 assert.doesNotMatch(menuScript, /backupAndRemove|backupPathFor|cpSync|copyFileSync/);
 const retiredNames = [
   'brainstorming',
+  'dispatching-parallel-agents',
+  'executing-plans',
   'finishing-a-development-branch',
+  'receiving-code-review',
+  'requesting-code-review',
   'subagent-driven-development',
   'systematic-debugging',
   'test-driven-development',
+  'using-git-worktrees',
+  'using-superpowers',
   'verification-before-completion',
   'writing-plans',
+  'writing-skills',
 ];
 
 const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
@@ -29,6 +36,14 @@ const sourceGroup = ledger.sources.find((source) => source.id === 'obra-superpow
 assert.ok(sourceGroup, '缺少 obra-superpowers source group');
 assert.equal(sourceGroup.status, 'deleted-by-user');
 assert.deepEqual(sourceGroup.skills, []);
+assert.deepEqual([...sourceGroup.retirement_scope].sort(), [...retiredNames].sort());
+assert.equal(sourceGroup.backup_path, null);
+assert.equal(sourceGroup.backup_status, 'purged-by-user-rule');
+assert.match(sourceGroup.action, /full retirement/i);
+assert.match(menuScript, /\['obra-superpowers', \['superpowers'\]\]/);
+assert.match(menuScript, /--source/);
+assert.match(menuScript, /registry/);
+assert.match(menuScript, /accountBackupRemoteCatalog/);
 const sourceDeleted = new Map((sourceGroup.deleted_skills || []).map((row) => [row.name, row]));
 
 const deleted = retiredNames.map((name) => {
@@ -50,4 +65,5 @@ const deleted = retiredNames.map((name) => {
 });
 
 assert.equal(new Set(deleted).size, retiredNames.length);
-console.log('Superpowers skill retirement: PASS (' + deleted.length + ' skills)');
+assert.equal(sourceDeleted.size, retiredNames.length);
+console.log('Superpowers full retirement: PASS (' + deleted.length + ' skills)');
