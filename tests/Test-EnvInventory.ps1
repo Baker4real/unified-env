@@ -208,13 +208,6 @@ if (Test-Path -LiteralPath $repairBackupPath -PathType Container) {
     Assert-True -Condition ($repairBackup.classification -eq "plugin-cache-backup") -Message "repair backup 分类错误"
 }
 
-$archiveCachePath = "D:\Codex\projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator\phase6-skills\source-skills\shared-skill\node_modules"
-if (Test-Path -LiteralPath $archiveCachePath -PathType Container) {
-    $archiveCache = $quickFindings | Where-Object { $_.path -ieq $archiveCachePath } | Select-Object -First 1
-    Assert-True -Condition ($null -ne $archiveCache) -Message "递归扫描应发现归档缓存 node_modules：$archiveCachePath"
-    Assert-True -Condition ($archiveCache.classification -eq "archived-project-cache") -Message "归档缓存分类错误"
-}
-
 $fullResult = & $scriptPath -OutputDir $fullOutput
 Assert-True -Condition ([bool]$fullResult.readOnly) -Message "Full run did not report readOnly=true"
 

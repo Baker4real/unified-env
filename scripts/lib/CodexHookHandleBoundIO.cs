@@ -190,6 +190,7 @@ namespace CodexHookGovernance
         private const uint ReadControl = 0x00020000;
         private const uint WriteDac = 0x00040000;
         private const uint DeleteAccess = 0x00010000;
+        private const uint FileWriteAttributes = 0x00000100;
         private const uint SynchronizeAccess = 0x00100000;
         private const uint CreateNew = 1;
         private const uint OpenExisting = 3;
@@ -338,9 +339,11 @@ namespace CodexHookGovernance
             string lexicalPath = ValidateChildPath(targetPath, "targetPath");
             SafeFileHandle handle = CreateFileW(
                 lexicalPath,
-                GenericRead | DeleteAccess,
+                GenericRead | FileWriteAttributes | DeleteAccess,
                 // NTFS requires existing target handles to share DELETE for a
-                // FileRenameInformationEx POSIX replacement. WRITE remains excluded.
+                // FileRenameInformationEx POSIX replacement. Write data remains
+                // excluded; FILE_WRITE_ATTRIBUTES is required to delete a
+                // read-only file with FileDispositionInformationEx.
                 FileShare.Read | FileShare.Delete,
                 IntPtr.Zero,
                 OpenExisting,
@@ -357,6 +360,46 @@ namespace CodexHookGovernance
             {
                 VerifyRegularFileHandle(handle, lexicalPath);
                 return new GuardedTargetFileLease(this, lexicalPath, handle);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        // The caller already holds this directory with a deny-DELETE share.
+        // Open only an immediate child so recursive capability deletion never
+        // has to re-open the protected ancestor chain (which would otherwise
+        // conflict with the caller's own DELETE lease).
+        public VerifiedDirectoryChainGuard AcquireChildDirectoryForEmptyDelete(string childDirectoryPath)
+        {
+            ThrowIfDisposed();
+            string lexicalPath = ValidateChildPath(childDirectoryPath, "childDirectoryPath");
+            SafeFileHandle handle = CreateFileW(
+                ToExtendedPath(lexicalPath),
+                GenericRead | DeleteAccess,
+                FileShare.Read,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, "Unable to acquire a guarded child directory delete lease.");
+            }
+
+            try
+            {
+                VerifyDirectoryHandle(handle, lexicalPath);
+                string[] identity = GetFileIdentity(handle);
+                return new VerifiedDirectoryChainGuard(
+                    lexicalPath,
+                    new List<SafeFileHandle> { handle },
+                    identity[0],
+                    identity[1]);
             }
             catch
             {
@@ -898,6 +941,10 @@ namespace CodexHookGovernance
             {
                 throw new IOException("The guarded file is not a regular file.");
             }
+            if (fileInformation.NumberOfLinks != 1)
+            {
+                throw new IOException("The guarded file is a hard link.");
+            }
 
             string finalPath = HandleBoundFileReader.NormalizeFinalPath(
                 HandleBoundFileReader.GetFinalPath(handle));
@@ -1388,6 +1435,7 @@ namespace CodexHookGovernance
         private const int FileDispositionInformationEx = 64;
         private const uint FileDispositionDelete = 0x00000001;
         private const uint FileDispositionPosixSemantics = 0x00000002;
+        private const uint FileDispositionIgnoreReadonlyAttribute = 0x00000010;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct IoStatusBlock
@@ -1478,7 +1526,12 @@ namespace CodexHookGovernance
             IntPtr buffer = Marshal.AllocHGlobal(sizeof(uint));
             try
             {
-                Marshal.WriteInt32(buffer, unchecked((int)(FileDispositionDelete | FileDispositionPosixSemantics)));
+                Marshal.WriteInt32(
+                    buffer,
+                    unchecked((int)(
+                        FileDispositionDelete
+                        | FileDispositionPosixSemantics
+                        | FileDispositionIgnoreReadonlyAttribute)));
                 IoStatusBlock ioStatusBlock;
                 int status = NtSetInformationFile(
                     handle,

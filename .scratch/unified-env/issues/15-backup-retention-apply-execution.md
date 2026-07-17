@@ -2,7 +2,7 @@
 
 Status: done
 
-> 历史说明：下列 `D:\Codex\.codex\run-evidence` 路径记录当时执行位置，当前证据目录已退役；本 issue 与 Git 历史仅作为历史记录，不构成新的删除授权。
+> 历史说明：下列 `D:\Codex\.codex\run-evidence` 路径记录当时执行位置，相关条目可能已按保留策略清理；本 issue 与 Git 历史仅作为历史记录，不构成新的删除授权。
 
 ## Parent
 
@@ -35,7 +35,7 @@ Status: done
 ## Post-apply verification
 
 - 最新 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-161022\BACKUP-RETENTION-DRY-RUN.md`
-- 最新 apply manifest：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
+- 当时的 schema 1 apply manifest 已移除；当前没有可发布的 schema 2 apply manifest。
 - 最新保留规则候选：0 个，0 MB
 - 最新 apply manifest 选中路径：0 个，0 MB
 - 阻塞路径：0 个
@@ -46,4 +46,3 @@ Status: done
 
 - `tests/Test-BackupRetentionDryRun.ps1`
 - `tests/Test-BackupRetentionApplyManifest.ps1`
-- 已确认 `D:\Codex\projects\codex-gsd-codex-c-skill` 工作区未被改脏。

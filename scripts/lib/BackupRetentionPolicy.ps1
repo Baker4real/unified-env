@@ -171,8 +171,6 @@ function Get-BackupRetentionDeclaredScanRoots {
     return @(
         [pscustomobject]@{ rootId = 'codex-backups-state'; path = Get-BackupRetentionCanonicalPath (Join-Path $PolicyContext.CodexRoot 'backups_state'); rule = 'backups-state-root' },
         [pscustomobject]@{ rootId = 'provider-sync'; path = Get-BackupRetentionCanonicalPath (Join-Path $PolicyContext.CodexRoot 'backups_state\provider-sync'); rule = 'provider-sync' },
-        [pscustomobject]@{ rootId = 'gsd-replicator'; path = Get-BackupRetentionCanonicalPath (Join-Path $PolicyContext.DDriveRoot '.gsd\backups\replicator'); rule = 'replicator' },
-        [pscustomobject]@{ rootId = 'archive-replicator'; path = Get-BackupRetentionCanonicalPath (Join-Path $PolicyContext.DDriveRoot 'projects\codex-gsd-codex-c-skill\docs\gsd-archive\tmp\replicator'); rule = 'replicator' },
         [pscustomobject]@{ rootId = 'codex-switch-installed-backups'; path = Get-BackupRetentionCanonicalPath (Join-Path $PolicyContext.DDriveRoot 'apps\codex_switch\backups'); rule = 'codex-switch' }
     )
 }
@@ -657,11 +655,6 @@ function Invoke-BackupRetentionEvaluation {
                 'provider-sync' {
                     if ($child.name -match '^20\d{6}T\d{6}(?:\d{3,7})?Z?$') { $backupType = 'provider-sync' }
                     $projectRoot = '.codex/backups_state/provider-sync'; $reason = 'provider-sync 状态备份按固定数量保留。'
-                }
-                'replicator' {
-                    $phase = [regex]::Match($child.name, '^(phase\d+)')
-                    if ($phase.Success) { $backupType = $phase.Groups[1].Value } elseif ($child.name -like 'review-*') { $backupType = 'review' }
-                    $projectRoot = $root.rootId; $risk = '中'; $reason = 'replicator 备份超过保留数。'
                 }
                 'codex-switch' {
                     $backupType = 'codex-switch-installed-binary'; $projectRoot = 'apps/codex_switch/backups'; $risk = '中'; $bucket = 'codex_switch 安装回滚备份'; $reason = 'codex_switch 安装版回滚备份超过保留数。'

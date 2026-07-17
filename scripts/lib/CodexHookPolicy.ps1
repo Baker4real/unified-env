@@ -630,6 +630,9 @@ function Assert-CodexHookManifest {
     if ($Manifest.PSObject.Properties.Name -contains 'trustedProjects') {
         $topNames += 'trustedProjects'
     }
+    if ($Manifest.PSObject.Properties.Name -contains 'retiredProjectTrusts') {
+        $topNames += 'retiredProjectTrusts'
+    }
     Assert-CodexHookExactProperties -Value $Manifest -Names $topNames -Scope 'manifest'
 
     Assert-CodexHookString -Value $Manifest.artifactType -Name 'artifactType'
@@ -664,6 +667,12 @@ function Assert-CodexHookManifest {
         Assert-CodexHookArray -Value ([object]$Manifest.trustedProjects) -Name 'trustedProjects'
         foreach ($projectPath in @($Manifest.trustedProjects)) {
             Assert-CodexHookString -Value $projectPath -Name 'trustedProjects[]'
+        }
+    }
+    if ($Manifest.PSObject.Properties.Name -contains 'retiredProjectTrusts') {
+        Assert-CodexHookArray -Value ([object]$Manifest.retiredProjectTrusts) -Name 'retiredProjectTrusts'
+        foreach ($projectPath in @($Manifest.retiredProjectTrusts)) {
+            Assert-CodexHookString -Value $projectPath -Name 'retiredProjectTrusts[]'
         }
     }
 
@@ -1033,12 +1042,50 @@ function Assert-CodexHookHostPreflightManifest {
         throw 'host-preflight manifest 只能包含 active hook。'
     }
 
+    if (
+        $Manifest.PSObject.Properties.Name -notcontains 'trustedProjects' -or
+        $Manifest.PSObject.Properties.Name -notcontains 'retiredProjectTrusts'
+    ) {
+        throw 'host-preflight manifest 必须同时声明 trustedProjects 与 retiredProjectTrusts。'
+    }
+
+    $projectRoot = 'D:\Codex\projects'
+    $trustedProjectPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($projectPath in @($Manifest.trustedProjects)) {
+        $canonicalPath = (Assert-CodexHookDPath -Value $projectPath -Name 'host-preflight trusted project').TrimEnd('\', '/')
+        if (
+            $canonicalPath.Equals($projectRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            -not $canonicalPath.StartsWith("$projectRoot\", [StringComparison]::OrdinalIgnoreCase)
+        ) {
+            throw 'host-preflight manifest trusted project 必须是 D:\Codex\projects 下的非集合根路径。'
+        }
+        if (-not $trustedProjectPaths.Add($canonicalPath)) {
+            throw "host-preflight manifest trusted project 重复：$canonicalPath"
+        }
+    }
+
+    $retiredProjectPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($projectPath in @($Manifest.retiredProjectTrusts)) {
+        $canonicalPath = (Assert-CodexHookDPath -Value $projectPath -Name 'host-preflight retired project trust').TrimEnd('\', '/')
+        if (
+            $canonicalPath.Equals($projectRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            -not $canonicalPath.StartsWith("$projectRoot\", [StringComparison]::OrdinalIgnoreCase)
+        ) {
+            throw 'host-preflight manifest retired project trust 必须是 D:\Codex\projects 下的非集合根路径。'
+        }
+        if (-not $retiredProjectPaths.Add($canonicalPath)) {
+            throw "host-preflight manifest retired project trust 重复：$canonicalPath"
+        }
+        if ($trustedProjectPaths.Contains($canonicalPath)) {
+            throw "host-preflight manifest retired project trust 不得与 trusted project 重叠：$canonicalPath"
+        }
+    }
+
     $expectedTrustedProjects = @(
         'D:\Codex\projects\时钟倒计时',
         'D:\Codex\projects\统一环境',
         'D:\Codex\projects\杨杨子',
         'D:\Codex\projects\codex-account-switch',
-        'D:\Codex\projects\codex-gsd-codex-c-skill',
         'D:\Codex\projects\CodexProviderSync',
         'D:\Codex\projects\minmin-calendar'
     )
@@ -1048,9 +1095,17 @@ function Assert-CodexHookHostPreflightManifest {
     }
     foreach ($projectPath in $actualTrustedProjects) {
         [void](Assert-CodexHookExactPath -Value $projectPath -Expected $projectPath -Name 'host-preflight trusted project')
-        if ($projectPath -ceq 'D:\Codex\projects') {
-            throw 'host-preflight manifest 不得信任 projects 集合根。'
-        }
+    }
+
+    $expectedRetiredProjectTrusts = @(
+        'D:\Codex\projects\codex-gsd-codex-c-skill'
+    )
+    $actualRetiredProjectTrusts = @($Manifest.retiredProjectTrusts)
+    if (-not (Test-CodexHookExactStringSequence -Actual $actualRetiredProjectTrusts -Expected $expectedRetiredProjectTrusts)) {
+        throw 'host-preflight manifest retired project trust 集合不精确。'
+    }
+    foreach ($projectPath in $actualRetiredProjectTrusts) {
+        [void](Assert-CodexHookExactPath -Value $projectPath -Expected $projectPath -Name 'host-preflight retired project trust')
     }
 
     $expectedHookIdentityHashes = @{
@@ -2202,7 +2257,7 @@ function New-CodexHookInventoryDocument {
 }
 
 function Get-CodexHookBytesSha256 {
-    param([Parameter(Mandatory)][byte[]]$Bytes)
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
 
     return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
 }
@@ -2998,6 +3053,7 @@ function Remove-CodexHookCapabilityFile {
         [Parameter(Mandatory)][string]$CapabilityRoot,
         [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
         [string]$Scope = 'capability conditional delete',
+        [AllowNull()][string[]]$ExpectedIdentity,
         [scriptblock]$TestAfterSnapshot
     )
 
@@ -3011,6 +3067,9 @@ function Remove-CodexHookCapabilityFile {
         [byte[]]$leasedBytes = $targetLease.ReadAllBytesFromHandle()
         $leasedSha256 = Get-CodexHookBytesSha256 -Bytes $leasedBytes
         if ($leasedSha256 -cne $ExpectedSha256) { throw "$Scope 临删前状态漂移。" }
+        if ($null -ne $ExpectedIdentity) {
+            Assert-CodexHookDirectoryTreeIdentity -Expected @($ExpectedIdentity) -Actual @($targetLease.VolumeSerialNumber, $targetLease.FileIndex) -Scope "$Scope handle identity"
+        }
         if ($null -ne $TestAfterSnapshot) { & $TestAfterSnapshot $fullPath }
         [byte[]]$confirmedBytes = $targetLease.ReadAllBytesFromHandle()
         if ((Get-CodexHookBytesSha256 -Bytes $confirmedBytes) -cne $ExpectedSha256) { throw "$Scope handle identity 内容漂移。" }
@@ -3021,6 +3080,420 @@ function Remove-CodexHookCapabilityFile {
     }
     $after = Get-CodexHookCapabilityFileSnapshot -Path $fullPath -CapabilityRoot $capabilityRootPath -AllowedExactPaths $AllowedExactPaths -Name "$Scope postdelete"
     Assert-CodexHookSnapshotExpectedState -Snapshot $after -ExpectedExists $false -ExpectedSha256 $null -Scope "$Scope postcheck"
+}
+
+function Test-CodexHookDirectoryTreeIdentityEqual {
+    param(
+        [AllowNull()][object[]]$Expected,
+        [AllowNull()][object[]]$Actual
+    )
+
+    return @($Expected).Count -eq 2 -and @($Actual).Count -eq 2 -and
+        ([string]$Expected[0]) -ceq ([string]$Actual[0]) -and
+        ([string]$Expected[1]) -ceq ([string]$Actual[1])
+}
+
+function Assert-CodexHookDirectoryTreeIdentity {
+    param(
+        [Parameter(Mandatory)][object[]]$Expected,
+        [Parameter(Mandatory)][object[]]$Actual,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    if (@($Expected).Count -ne 2 -or
+        ([string]$Expected[0]) -notmatch '^[0-9a-f]{8}$' -or
+        ([string]$Expected[1]) -notmatch '^[0-9a-f]{16}$') {
+        throw "$Scope expected identity 非法。"
+    }
+    if (@($Actual).Count -ne 2 -or
+        ([string]$Actual[0]) -notmatch '^[0-9a-f]{8}$' -or
+        ([string]$Actual[1]) -notmatch '^[0-9a-f]{16}$') {
+        throw "$Scope observed identity 非法。"
+    }
+    if (-not (Test-CodexHookDirectoryTreeIdentityEqual -Expected $Expected -Actual $Actual)) {
+        throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 身份漂移。"
+    }
+}
+
+function Get-CodexHookDirectoryTreeRelativeParent {
+    param([Parameter(Mandatory)][string]$RelativePath)
+
+    if ($RelativePath -ceq '.') { return $null }
+    $lastSlash = $RelativePath.LastIndexOf('/')
+    if ($lastSlash -lt 0) { return '.' }
+    return $RelativePath.Substring(0, $lastSlash)
+}
+
+function Get-CodexHookDirectoryTreeRelativeLeaf {
+    param([Parameter(Mandatory)][string]$RelativePath)
+
+    if ($RelativePath -ceq '.') { return $null }
+    $lastSlash = $RelativePath.LastIndexOf('/')
+    if ($lastSlash -lt 0) { return $RelativePath }
+    return $RelativePath.Substring($lastSlash + 1)
+}
+
+function Assert-CodexHookDirectoryTreeRelativePath {
+    param(
+        [Parameter(Mandatory)][string]$RelativePath,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    if ($RelativePath -ceq '.') { return }
+    if ([string]::IsNullOrWhiteSpace($RelativePath) -or
+        $RelativePath.StartsWith('/') -or $RelativePath.EndsWith('/') -or
+        $RelativePath.Contains('\') -or $RelativePath.Contains(':')) {
+        throw "$Scope relativePath 非法。"
+    }
+    foreach ($segment in $RelativePath.Split('/')) {
+        if ([string]::IsNullOrWhiteSpace($segment) -or $segment -in @('.', '..') -or
+            $segment.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
+            $segment.EndsWith(' ') -or $segment.EndsWith('.')) {
+            throw "$Scope relativePath 含不安全路径段。"
+        }
+    }
+}
+
+function Assert-CodexHookDirectoryTreeExactProperties {
+    param(
+        [Parameter(Mandatory)][object]$Value,
+        [Parameter(Mandatory)][string[]]$Names,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    if ($null -eq $Value -or $null -eq $Value.PSObject) {
+        throw "$Scope 不是对象。"
+    }
+    $actual = @($Value.PSObject.Properties.Name)
+    if (@($actual | Where-Object { $_ -notin $Names }).Count -ne 0 -or
+        @($Names | Where-Object { $_ -notin $actual }).Count -ne 0) {
+        throw "$Scope 属性集合非法。"
+    }
+}
+
+function Get-CodexHookCapabilityDirectoryTreeSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [string]$Name = 'capability directory-tree snapshot'
+    )
+
+    $fullPath = Assert-CodexHookCapabilityPath `
+        -Path $Path `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name $Name
+    $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Name capability root"
+    $entries = [Collections.Generic.List[object]]::new()
+    $rootGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+        $capabilityRootPath,
+        $fullPath,
+        $false)
+    try {
+        function Add-CodexHookCapabilityDirectoryTreeSnapshotNode {
+            param(
+                [Parameter(Mandatory)][string]$DirectoryPath,
+                [Parameter(Mandatory)][string]$RelativePath,
+                [Parameter(Mandatory)][object]$DirectoryGuard
+            )
+
+            $item = Get-Item -LiteralPath $DirectoryPath -Force -ErrorAction Stop
+            if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "$Name snapshot 遇到非安全普通目录：$DirectoryPath"
+            }
+            $entries.Add([pscustomobject][ordered]@{
+                relativePath = $RelativePath
+                kind = 'directory'
+                sha256 = $null
+                identity = @([string]$DirectoryGuard.VolumeSerialNumber, [string]$DirectoryGuard.FileIndex)
+            })
+            $children = @(Get-ChildItem -LiteralPath $DirectoryPath -Force -ErrorAction Stop | Sort-Object -Property Name)
+            foreach ($child in $children) {
+                $childPath = Join-Path $DirectoryPath $child.Name
+                [void](Assert-CodexHookCapabilityPath `
+                    -Path $childPath `
+                    -CapabilityRoot $capabilityRootPath `
+                    -Name "$Name snapshot child")
+                $childItem = Get-Item -LiteralPath $childPath -Force -ErrorAction Stop
+                if (($childItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "$Name snapshot 包含 reparse point：$childPath"
+                }
+                $childRelative = if ($RelativePath -ceq '.') { $child.Name } else { "$RelativePath/$($child.Name)" }
+                if ($childItem.PSIsContainer) {
+                    $childGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+                        $capabilityRootPath,
+                        $childPath,
+                        $false)
+                    try {
+                        Add-CodexHookCapabilityDirectoryTreeSnapshotNode `
+                            -DirectoryPath $childPath `
+                            -RelativePath $childRelative `
+                            -DirectoryGuard $childGuard
+                    } finally {
+                        $childGuard.Dispose()
+                    }
+                    continue
+                }
+
+                $parentGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+                    $capabilityRootPath,
+                    $DirectoryPath,
+                    $false)
+                $lease = $null
+                try {
+                    $lease = $parentGuard.AcquireReadOnlyFileLease($childPath)
+                    [byte[]]$bytes = $lease.SnapshotBytes
+                    $entries.Add([pscustomobject][ordered]@{
+                        relativePath = $childRelative
+                        kind = 'file'
+                        sha256 = Get-CodexHookBytesSha256 -Bytes $bytes
+                        identity = @([string]$lease.VolumeSerialNumber, [string]$lease.FileIndex)
+                    })
+                } finally {
+                    if ($null -ne $lease) { $lease.Dispose() }
+                    $parentGuard.Dispose()
+                }
+            }
+        }
+
+        Add-CodexHookCapabilityDirectoryTreeSnapshotNode `
+            -DirectoryPath $fullPath `
+            -RelativePath '.' `
+            -DirectoryGuard $rootGuard
+        return [pscustomobject][ordered]@{
+            schemaVersion = 1
+            rootIdentity = @([string]$rootGuard.VolumeSerialNumber, [string]$rootGuard.FileIndex)
+            entries = @($entries)
+        }
+    } finally {
+        $rootGuard.Dispose()
+    }
+}
+
+function ConvertTo-CodexHookExpectedDirectoryTreeManifest {
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    Assert-CodexHookDirectoryTreeExactProperties `
+        -Value $Manifest `
+        -Names @('schemaVersion', 'rootIdentity', 'entries') `
+        -Scope "$Scope manifest"
+    if ([int]$Manifest.schemaVersion -ne 1) {
+        throw "$Scope manifest schemaVersion 非法。"
+    }
+    $rootIdentity = @($Manifest.rootIdentity)
+    Assert-CodexHookDirectoryTreeIdentity -Expected $rootIdentity -Actual $rootIdentity -Scope "$Scope manifest root"
+    $entriesByPath = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    $childrenByParent = [Collections.Generic.Dictionary[string, Collections.Generic.List[object]]]::new([StringComparer]::OrdinalIgnoreCase)
+    $entries = [Collections.Generic.List[object]]::new()
+    foreach ($entry in @($Manifest.entries)) {
+        Assert-CodexHookDirectoryTreeExactProperties `
+            -Value $entry `
+            -Names @('relativePath', 'kind', 'sha256', 'identity') `
+            -Scope "$Scope manifest entry"
+        $relativePath = [string]$entry.relativePath
+        Assert-CodexHookDirectoryTreeRelativePath -RelativePath $relativePath -Scope "$Scope manifest entry"
+        $kind = [string]$entry.kind
+        if ($kind -cne 'directory' -and $kind -cne 'file') {
+            throw "$Scope manifest entry kind 非法。"
+        }
+        $sha256 = $entry.sha256
+        if ($kind -ceq 'directory') {
+            if ($null -ne $sha256) { throw "$Scope manifest directory 不得声明 SHA-256。" }
+        } elseif ($sha256 -isnot [string] -or $sha256 -notmatch '^[0-9a-f]{64}$') {
+            throw "$Scope manifest file SHA-256 非法。"
+        }
+        $identity = @($entry.identity)
+        Assert-CodexHookDirectoryTreeIdentity -Expected $identity -Actual $identity -Scope "$Scope manifest entry"
+        if (-not $entriesByPath.TryAdd($relativePath, $null)) {
+            throw "$Scope manifest relativePath 重复。"
+        }
+        $canonical = [pscustomobject][ordered]@{
+            relativePath = $relativePath
+            kind = $kind
+            sha256 = if ($kind -ceq 'file') { [string]$sha256 } else { $null }
+            identity = @([string]$identity[0], [string]$identity[1])
+        }
+        $entriesByPath[$relativePath] = $canonical
+        $entries.Add($canonical)
+    }
+    if (-not $entriesByPath.ContainsKey('.')) {
+        throw "$Scope manifest 缺少根目录条目。"
+    }
+    $rootEntry = $entriesByPath['.']
+    if ($rootEntry.kind -cne 'directory') {
+        throw "$Scope manifest 根目录 kind 非法。"
+    }
+    Assert-CodexHookDirectoryTreeIdentity -Expected $rootIdentity -Actual @($rootEntry.identity) -Scope "$Scope manifest root"
+    foreach ($entry in $entries) {
+        if ($entry.relativePath -ceq '.') { continue }
+        $parent = Get-CodexHookDirectoryTreeRelativeParent -RelativePath $entry.relativePath
+        if (-not $entriesByPath.ContainsKey($parent) -or $entriesByPath[$parent].kind -cne 'directory') {
+            throw "$Scope manifest entry 缺少安全目录父级。"
+        }
+        if (-not $childrenByParent.ContainsKey($parent)) {
+            $childrenByParent.Add($parent, [Collections.Generic.List[object]]::new())
+        }
+        $childrenByParent[$parent].Add($entry)
+    }
+    return [pscustomobject][ordered]@{
+        rootIdentity = @([string]$rootIdentity[0], [string]$rootIdentity[1])
+        entriesByPath = $entriesByPath
+        childrenByParent = $childrenByParent
+    }
+}
+
+function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
+    param(
+        [Parameter(Mandatory)][object]$DirectoryGuard,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExpectedSha256,
+        [Parameter(Mandatory)][object[]]$ExpectedIdentity,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    $targetLease = $null
+    try {
+        $targetLease = $DirectoryGuard.AcquireTargetFileLease($Path)
+        [byte[]]$leasedBytes = $targetLease.ReadAllBytesFromHandle()
+        if ((Get-CodexHookBytesSha256 -Bytes $leasedBytes) -cne $ExpectedSha256) {
+            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 临删前内容漂移。"
+        }
+        Assert-CodexHookDirectoryTreeIdentity `
+            -Expected $ExpectedIdentity `
+            -Actual @($targetLease.VolumeSerialNumber, $targetLease.FileIndex) `
+            -Scope "$Scope handle identity"
+        [byte[]]$confirmedBytes = $targetLease.ReadAllBytesFromHandle()
+        if ((Get-CodexHookBytesSha256 -Bytes $confirmedBytes) -cne $ExpectedSha256) {
+            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope handle identity 内容漂移。"
+        }
+        $targetLease.DeleteWithPosixSemantics()
+    } finally {
+        if ($null -ne $targetLease) { $targetLease.Dispose() }
+    }
+}
+
+function Remove-CodexHookCapabilityDirectoryTree {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [string]$Scope = 'capability directory-tree delete',
+        [Parameter(Mandatory)][string[]]$ExpectedRootIdentity,
+        [Parameter(Mandatory)][object]$ExpectedTreeManifest
+    )
+
+    $fullPath = Assert-CodexHookCapabilityPath `
+        -Path $Path `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name $Scope
+    $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Scope capability root"
+    $manifest = ConvertTo-CodexHookExpectedDirectoryTreeManifest -Manifest $ExpectedTreeManifest -Scope $Scope
+    Assert-CodexHookDirectoryTreeIdentity -Expected @($ExpectedRootIdentity) -Actual @($ExpectedRootIdentity) -Scope "$Scope expected root"
+    Assert-CodexHookDirectoryTreeIdentity -Expected @($ExpectedRootIdentity) -Actual @($manifest.rootIdentity) -Scope "$Scope root manifest"
+
+    function Remove-CodexHookCapabilityDirectoryNode {
+        param(
+            [Parameter(Mandatory)][string]$DirectoryPath,
+            [Parameter(Mandatory)][string]$RelativePath,
+            [Parameter(Mandatory)][object]$DirectoryGuard,
+            [Parameter(Mandatory)][string]$RootPath,
+            [Parameter(Mandatory)][string]$NodeScope
+        )
+
+        $expectedDirectory = $manifest.entriesByPath[$RelativePath]
+        if ($null -eq $expectedDirectory -or $expectedDirectory.kind -cne 'directory') {
+            throw "$NodeScope manifest 缺少当前目录条目。"
+        }
+        Assert-CodexHookDirectoryTreeIdentity `
+            -Expected @($expectedDirectory.identity) `
+            -Actual @($DirectoryGuard.VolumeSerialNumber, $DirectoryGuard.FileIndex) `
+            -Scope "$NodeScope 目录"
+        [void](Assert-CodexHookCapabilityPath `
+            -Path $DirectoryPath `
+            -CapabilityRoot $RootPath `
+            -Name "$NodeScope directory")
+        $item = Get-Item -LiteralPath $DirectoryPath -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $NodeScope 不是安全普通目录。"
+        }
+        $children = @(Get-ChildItem -LiteralPath $DirectoryPath -Force -ErrorAction Stop | Sort-Object -Property Name)
+        $expectedChildren = if ($manifest.childrenByParent.ContainsKey($RelativePath)) {
+            @($manifest.childrenByParent[$RelativePath] | Sort-Object -Property relativePath)
+        } else {
+            @()
+        }
+        if (@($children).Count -ne @($expectedChildren).Count) {
+            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $NodeScope 目录内容与已审计树清单不一致。"
+        }
+        $actualNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($child in $children) { [void]$actualNames.Add([string]$child.Name) }
+        foreach ($expectedChild in @($expectedChildren)) {
+            $leaf = Get-CodexHookDirectoryTreeRelativeLeaf -RelativePath $expectedChild.relativePath
+            if (-not $actualNames.Contains($leaf)) {
+                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $NodeScope 目录内容与已审计树清单不一致。"
+            }
+        }
+        foreach ($expectedChild in @($expectedChildren)) {
+            $leaf = Get-CodexHookDirectoryTreeRelativeLeaf -RelativePath $expectedChild.relativePath
+            $childPath = Join-Path $DirectoryPath $leaf
+            [void](Assert-CodexHookCapabilityPath `
+                -Path $childPath `
+                -CapabilityRoot $RootPath `
+                -Name "$NodeScope child")
+            $child = Get-Item -LiteralPath $childPath -Force -ErrorAction Stop
+            if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $NodeScope 包含 reparse point，拒绝递归删除：$childPath"
+            }
+            if ($expectedChild.kind -ceq 'directory') {
+                if (-not $child.PSIsContainer) {
+                    throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $NodeScope 已审计目录被替换为文件：$childPath"
+                }
+                $childGuard = $DirectoryGuard.AcquireChildDirectoryForEmptyDelete($childPath)
+                try {
+                    Remove-CodexHookCapabilityDirectoryNode `
+                        -DirectoryPath $childPath `
+                        -RelativePath $expectedChild.relativePath `
+                        -DirectoryGuard $childGuard `
+                        -RootPath $RootPath `
+                        -NodeScope $NodeScope
+                } finally {
+                    $childGuard.Dispose()
+                }
+                continue
+            }
+            if ($child.PSIsContainer) {
+                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $NodeScope 已审计文件被替换为目录：$childPath"
+            }
+            Remove-CodexHookCapabilityTreeFileWithDirectoryGuard `
+                -DirectoryGuard $DirectoryGuard `
+                -Path $childPath `
+                -ExpectedSha256 $expectedChild.sha256 `
+                -ExpectedIdentity @($expectedChild.identity) `
+                -Scope "$NodeScope child"
+        }
+        $DirectoryGuard.DeleteEmptyDirectory()
+    }
+
+    $rootGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::AcquireForEmptyDelete(
+        $capabilityRootPath,
+        $fullPath)
+    try {
+        Remove-CodexHookCapabilityDirectoryNode `
+            -DirectoryPath $fullPath `
+            -RelativePath '.' `
+            -DirectoryGuard $rootGuard `
+            -RootPath $capabilityRootPath `
+            -NodeScope $Scope
+    } finally {
+        $rootGuard.Dispose()
+    }
 }
 
 function Set-CodexHookAtomicFileBytes {

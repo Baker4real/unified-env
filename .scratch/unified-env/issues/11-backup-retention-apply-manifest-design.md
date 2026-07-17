@@ -2,7 +2,7 @@
 
 Status: done
 
-> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，当前目录已退役；现行 apply 门以最新 production dry-run 与 schema 2 验证器为准。
+> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，相关条目可能已按后续保留策略清理；现行 apply 门以最新 production dry-run 与 schema 2 验证器为准。
 
 ## Parent
 
@@ -40,9 +40,7 @@ Status: done
 
 - 新增脚本：`scripts/New-BackupRetentionApplyManifest.ps1`。
 - 新增测试：`tests/Test-BackupRetentionApplyManifest.ps1`。
-- 正式 manifest 设计产物：
-  - `reports/backup-retention-apply-manifest/backup-retention-apply-manifest.json`
-  - `reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
+- 当时的 schema 1 manifest 设计产物已移除，不是当前入口；当前没有可发布的 schema 2 apply manifest。
 - 正式 manifest 摘要：
   - manifest id：`backup-retention-apply-20260701-155200-57ae1622`
   - source dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-154928\backup-retention-dry-run.json`
@@ -55,10 +53,9 @@ Status: done
 
 ## Refresh 2026-07-01 15:52
 
-已基于纳入 `codex_switch` 安装回滚备份后的最新 dry-run 重新生成 apply manifest。
+当时基于纳入 `codex_switch` 安装回滚备份后的 dry-run 重新生成 schema 1 apply manifest；该产物已移除。
 
-- 最新 manifest：`reports/backup-retention-apply-manifest/backup-retention-apply-manifest.json`
-- 中文报告：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
+- 当时的 schema 1 manifest 已移除；当前没有可发布的 schema 2 apply manifest。
 - manifest id：`backup-retention-apply-20260701-155200-57ae1622`
 - source dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-154928\backup-retention-dry-run.json`
 - 通过二次校验：36 个，234.11 MB
@@ -72,7 +69,7 @@ Status: done
 
 - 执行证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-apply-20260701-160956\EXECUTION.md`
 - 最新 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-161022\backup-retention-dry-run.json`
-- 最新 manifest：`reports/backup-retention-apply-manifest/backup-retention-apply-manifest.json`
+- 当时后续生成的 schema 1 manifest 已移除；当前没有可发布的 schema 2 apply manifest。
 - manifest id：`backup-retention-apply-20260701-161209-032bc2ef`
 - 通过二次校验：0 个，0 MB
 - 阻塞路径：0 个

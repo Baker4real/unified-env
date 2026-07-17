@@ -2,7 +2,7 @@
 
 Status: done
 
-> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，当前目录已退役；现行备份事实以 production schema 2 dry-run 为准。
+> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，相关条目可能已按后续保留策略清理；现行备份事实以 production schema 2 dry-run 为准。
 
 ## Parent
 
@@ -28,7 +28,7 @@ Status: done
 
 - 更新脚本：`scripts/New-BackupRetentionDryRun.ps1`
 - 更新测试：`tests/Test-BackupRetentionDryRun.ps1`
-- 最新正式 dry-run：
+- 当时的 production dry-run：
   - `D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-154928\backup-retention-dry-run.json`
   - `D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-154928\BACKUP-RETENTION-DRY-RUN.md`
 - 最新正式 dry-run 摘要：
@@ -47,10 +47,10 @@ Status: done
 
 ## Follow-up manifest 2026-07-01 15:52
 
-已基于最新 dry-run 生成 apply manifest：
+当时基于最新 dry-run 生成 schema 1 apply manifest；该产物现已移除：
 
 - manifest id：`backup-retention-apply-20260701-155200-57ae1622`
-- manifest 报告：`reports/backup-retention-apply-manifest/BACKUP-RETENTION-APPLY-MANIFEST.md`
+- 当前没有可发布的 schema 2 apply manifest。
 - 总候选：36 个，234.11 MB
 - `codex_switch` 安装回滚备份候选：6 个，200.91 MB
 - 阻塞路径：0 个
@@ -63,7 +63,7 @@ Status: done
 
 - 执行证据：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-apply-20260701-160956\EXECUTION.md`
 - 删除的 `codex_switch` 安装回滚备份：6 个，200.91 MB
-- 最新 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-161022\BACKUP-RETENTION-DRY-RUN.md`
+- 当时后续的 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-161022\BACKUP-RETENTION-DRY-RUN.md`
 - 最新保留规则候选：0 个，0 MB
 - 旧式平铺文件仍只作为人工审查项保留，未自动删除
 
@@ -74,6 +74,6 @@ Status: done
 - 执行证据：`D:\Codex\.codex\run-evidence\env-governance\codex-switch-flat-backup-delete-20260701-162530\EXECUTION.md`
 - 删除文件：3 个，54.78 MB
 - 删除后剩余命中路径：0 个
-- 最新 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-162612\BACKUP-RETENTION-DRY-RUN.md`
+- 当时后续的 dry-run：`D:\Codex\.codex\run-evidence\env-governance\backup-retention-20260701-162612\BACKUP-RETENTION-DRY-RUN.md`
 - 最新保留规则候选：0 个，0 MB
 - 最新人工审查项：263 个，5166.21 MB

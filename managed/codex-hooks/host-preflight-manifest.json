@@ -8,9 +8,11 @@
     "D:\\Codex\\projects\\统一环境",
     "D:\\Codex\\projects\\杨杨子",
     "D:\\Codex\\projects\\codex-account-switch",
-    "D:\\Codex\\projects\\codex-gsd-codex-c-skill",
     "D:\\Codex\\projects\\CodexProviderSync",
     "D:\\Codex\\projects\\minmin-calendar"
+  ],
+  "retiredProjectTrusts": [
+    "D:\\Codex\\projects\\codex-gsd-codex-c-skill"
   ],
   "runtimes": {
     "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",

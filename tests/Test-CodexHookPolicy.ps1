@@ -33,6 +33,11 @@ function Assert-Throws {
     throw "未拒绝：$Message"
 }
 
+Assert-True (
+    (Get-CodexHookBytesSha256 -Bytes ([byte[]]@())) -ceq
+    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+) '空文件字节数组必须产生稳定 SHA-256，而不是被误判为缺少参数'
+
 function Copy-TestDocument {
     param([Parameter(Mandatory)][object]$Document)
 
@@ -276,14 +281,38 @@ $expectedTrustedProjects = @(
     'D:\Codex\projects\统一环境',
     'D:\Codex\projects\杨杨子',
     'D:\Codex\projects\codex-account-switch',
-    'D:\Codex\projects\codex-gsd-codex-c-skill',
     'D:\Codex\projects\CodexProviderSync',
     'D:\Codex\projects\minmin-calendar'
 )
-Assert-True ((@($hostPreflightManifest.trustedProjects) -join "`0") -ceq ($expectedTrustedProjects -join "`0")) 'host-preflight manifest 必须只声明当前七个精确项目根的 trust 投影'
+Assert-True ((@($hostPreflightManifest.trustedProjects) -join "`0") -ceq ($expectedTrustedProjects -join "`0")) 'host-preflight manifest 必须只声明当前六个精确项目根的 trust 投影'
 Assert-True (-not (@($hostPreflightManifest.trustedProjects) -ccontains 'D:\Codex\projects')) 'host-preflight manifest 不得信任 projects 集合根'
+$expectedRetiredProjectTrusts = @(
+    'D:\Codex\projects\codex-gsd-codex-c-skill'
+)
+Assert-True ((@($hostPreflightManifest.retiredProjectTrusts) -join "`0") -ceq ($expectedRetiredProjectTrusts -join "`0")) 'host-preflight manifest 必须只声明旧 GSD 精确 project trust denylist'
 Assert-Throws { Read-CodexHookHostPreflightManifest -Path $legacyFixtureManifestPath | Out-Null } 'legacy manifest 不得提供 production identity'
 Assert-Throws { Read-CodexHookLegacyFixtureManifest -Path $hostPreflightManifestPath | Out-Null } 'host manifest 不得伪装历史 fixture identity'
+$missingHostRetiredTrusts = Copy-TestDocument $hostPreflightManifest
+[void]$missingHostRetiredTrusts.PSObject.Properties.Remove('retiredProjectTrusts')
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $missingHostRetiredTrusts | Out-Null } 'host manifest 缺少 retired project trust denylist 必须被拒绝'
+$duplicateHostRetiredTrusts = Copy-TestDocument $hostPreflightManifest
+$duplicateHostRetiredTrusts.retiredProjectTrusts = @(
+    'D:\Codex\projects\codex-gsd-codex-c-skill',
+    'D:\CODEX\PROJECTS\CODEX-GSD-CODEX-C-SKILL'
+)
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $duplicateHostRetiredTrusts | Out-Null } 'host manifest retired project trust 的大小写重复必须被拒绝'
+$overlappingHostRetiredTrusts = Copy-TestDocument $hostPreflightManifest
+$overlappingHostRetiredTrusts.retiredProjectTrusts = @('D:\CODEX\PROJECTS\MINMIN-CALENDAR')
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $overlappingHostRetiredTrusts | Out-Null } 'host manifest retired project trust 不得与 trusted project 重叠'
+$collectionRootRetiredTrusts = Copy-TestDocument $hostPreflightManifest
+$collectionRootRetiredTrusts.retiredProjectTrusts = @('D:\Codex\projects')
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $collectionRootRetiredTrusts | Out-Null } 'host manifest retired project trust 不得使用 projects 集合根'
+$outOfRootRetiredTrusts = Copy-TestDocument $hostPreflightManifest
+$outOfRootRetiredTrusts.retiredProjectTrusts = @('D:\Codex\retired-project')
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $outOfRootRetiredTrusts | Out-Null } 'host manifest retired project trust 必须位于 projects 根下'
+$duplicateHostTrustedProjects = Copy-TestDocument $hostPreflightManifest
+$duplicateHostTrustedProjects.trustedProjects += 'D:\CODEX\PROJECTS\MINMIN-CALENDAR'
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $duplicateHostTrustedProjects | Out-Null } 'host manifest trusted project 的大小写重复必须被拒绝'
 $mutatedHostHookIdentity = Copy-TestDocument $hostPreflightManifest
 @($mutatedHostHookIdentity.hooks | Where-Object id -ceq 'serena-reminder')[0].order = 9
 Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $mutatedHostHookIdentity | Out-Null } 'host manifest 必须冻结 Serena reminder 的完整 identity'

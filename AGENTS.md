@@ -8,11 +8,11 @@
 
 ### Triage labels
 
-本项目使用默认五状态标签：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。见 `docs/agents/triage-labels.md`。
+本项目使用五种 triage 状态：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`；已完成 issue 使用终态 `done`。见 `docs/agents/triage-labels.md`。
 
 ### Domain docs
 
-本项目使用 single-context 布局：根目录 `CONTEXT.md` 描述项目背景；如存在架构决策记录，位于 `docs/adr/`。见 `docs/agents/domain.md`。
+本项目使用 single-context 布局：根目录 `CONTEXT.md` 描述项目背景；当前没有独立 ADR 目录，如未来存在架构决策记录则位于 `docs/adr/`。见 `docs/agents/domain.md`。
 
 ### Environment governance
 

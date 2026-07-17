@@ -94,12 +94,12 @@
 
 ### 4. Manifest 与状态分离（已完成）
 
-历史问题是 `managed/codex-hooks/manifest.json` 曾把历史 wrapper 标成 active，容易被未来部署器误认为可恢复。现已拆分为：
+历史问题是 `managed/codex-hooks/manifest.json` 曾把历史 wrapper 标成 active，容易被未来部署器误认为可恢复。现已完成拆分，生产与历史 fixture 使用不同入口：
 
 - `legacy-fixture-manifest.json`：只供历史 fixture/core 测试；
 - `host-preflight-manifest.json`：只声明真正允许的 state preflight、activation reminder、reminder、cleanup 和静态冷路径 ownership。
 
-当前生产入口只读取 `host-preflight-manifest.json`；`legacy-fixture-manifest.json` 与旧 manifest 都不能提供 production apply identity。
+当前生产入口只读取 `host-preflight-manifest.json`；`legacy-fixture-manifest.json` 与旧 manifest 仅保留历史 fixture/core 测试用途，均不能提供 production apply identity。
 
 ## 失败、回滚与安全边界
 

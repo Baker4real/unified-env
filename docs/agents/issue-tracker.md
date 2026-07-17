@@ -7,7 +7,7 @@
 - 每个功能一个目录：`.scratch/<feature-slug>/`
 - spec 文件：`.scratch/<feature-slug>/spec.md`
 - 实施 ticket：`.scratch/<feature-slug>/issues/<NN>-<slug>.md`，从 `01` 开始编号；每个 ticket 独立成文件
-- triage 状态写在每个 issue 文件靠前位置的 `Status:` 行
+- triage 状态写在每个 issue 文件靠前位置的 `Status:` 行；已完成的 issue 使用终态 `done`
 - 评论和对话历史追加到文件底部的 `## Comments`
 
 历史目录中仍可能存在 `PRD.md`，它们是旧记录，不作为新工作的命名模板。
