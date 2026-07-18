@@ -10,7 +10,7 @@
 - 环境迁移、项目本地环境重建、备份保留和依赖更新均先生成 dry-run；真实迁移、更新或删除仍需对具体项显式授权。
 - 备份保留 apply 受 schema、覆盖完整性、候选一致性和 manifest 安全门约束，不从过期报告推断可执行动作。
 - Codex 主机钩子治理由 `scripts/Invoke-CodexHostHookReconciliation.ps1` 作为唯一当前生产入口统一维护；当前受管 lifecycle hooks 为 `codex-state-preflight`、Serena activation、cleanup 与 reminder。它提供只读 `Check`、显式 `Repair` 与受 evidence 约束的 `Restore`；后者只能使用同一 Codex home 固定 evidence root 的直接子目录。旧 ProductionFull 与 registration-repair façade 已稳定拒绝，历史 fixture/core 仅保留测试价值；协调器不写入 `approval_policy`、`sandbox_mode`、`features.hooks` 或 `unified_exec`，省略 `features.hooks` 时遵循官方默认启用，合法的 inline `[hooks]` 保留，退役 hook 不会由 Restore 重建。manifest 的 `trustedProjects` 仅补齐精确项目根，`retiredProjectTrusts` 是精确根 denylist：evidence 与 Restore 均不得保留或回流退役 trust，其余用户 trust 保留。
-- Codex CLI、Node、npm、Git、gh、uv、sqlite3、CodeGraph 和 Serena 主链路已验证；Serena 运行在官方 Python 3.14.6 上，并通过 uv override 使用 `anthropic==0.116.0`。
+- Codex CLI、Node、npm、Git、gh、uv、sqlite3、CodeGraph 和 Serena 主链路已验证；Serena 运行在官方 Python 3.14.6 上。其运行时版本与解析依赖属于易变状态，操作前必须实时复核。
 - 共享环境入口已验证：`planning-with-files`、CMake `4.3.3`、Rust toolchain `1.96.1` 等均保持可用；skill ledger coverage 为 `missing=0` / `duplicates=0`。
 - 已按用户授权修复默认入口：`.NET` 默认命中 D 盘 SDK `10.0.301`，Python 默认切到官方 `3.14.6`；WSL 当前判断为“不确实需要”，未安装、未启用、未初始化；CodeGraph 活动版本已切换为 `1.4.1`，Codex Desktop 已完整重启并通过 fresh MCP smoke。
 - 已固化上游稳定 skill 约束并同步 Matt stable catalog：稳定目录与上游对齐，严格资源闭包和 ledger 一致性检查通过；活动数量、哈希和上游版本属于易变状态，操作前必须实时复核。`skills/in-progress/**` 不安装；用户明确退役的 skill 不保留本机备份。
