@@ -335,6 +335,17 @@ if ([IO.Directory]::Exists($fixtureRoot)) {
     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
 }
 [void][IO.Directory]::CreateDirectory($fixtureRoot)
+[IO.File]::WriteAllText(
+    (Join-Path $fixtureRoot 'README.md'),
+    @(
+        '# Hook 部署测试夹具'
+        ''
+        '此目录仅由 `Test-CodexHookDeployment.ps1` 生成，且已被 Git 忽略。'
+        '`plan/` 与 `registration-plan/` 中的“可执行：True”只表示模拟夹具可通过历史算法门，不构成任何生产执行授权。'
+        '当前生产权威是 `scripts/Invoke-CodexHostHookReconciliation.ps1`。'
+    ) -join [Environment]::NewLine,
+    [Text.UTF8Encoding]::new($false)
+)
 $fixtureSourceRoot = Join-Path $fixtureRoot 'fixture-source'
 $fixtureCodexHome = Join-Path $fixtureRoot 'fixture-home'
 $fixtureHooksRoot = Join-Path $fixtureCodexHome 'hooks'

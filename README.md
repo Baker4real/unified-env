@@ -36,6 +36,8 @@
 
 ## 主要报告
 
+以下报告都是带时间戳的事实快照。JSON/Markdown 配对校验只证明同一次生成的来源一致；真实迁移、更新或删除前必须重新生成相关报告并现场核验。
+
 - 只读盘点：`reports/env-inventory/REPORT.md`
 - 迁移 dry-run：`reports/env-migration-plan/PLAN.md`
 - pip cache 迁移证据：`reports/env-migration-execution/pip-cache/`

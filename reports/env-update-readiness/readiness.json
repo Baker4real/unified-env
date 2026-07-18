@@ -1,44 +1,42 @@
 {
   "artifactType": "env-governance.update-readiness",
   "schemaVersion": 3,
-  "generatedAt": "2026-07-11T08:05:31.0074785+08:00",
+  "generatedAt": "2026-07-18T17:35:14.2821773+08:00",
   "readOnly": true,
   "executionAllowed": false,
   "inventoryPath": "D:\\Codex\\projects\\统一环境\\reports\\env-inventory\\inventory.json",
-  "inventoryGeneratedAt": "2026-07-11T08:03:37.5369016+08:00",
+  "inventoryGeneratedAt": "2026-07-18T17:34:59.1454389+08:00",
   "inventorySchemaVersion": 3,
   "toolReadiness": [
     {
       "name": "python",
       "found": true,
-      "path": "D:\\hermes-data\\.npm-global\\python.exe",
-      "pathDisplay": "D:\\hermes-data\\.npm-global\\python.exe",
+      "path": "D:\\Codex\\tools\\PowerShell\\7.6.3\\python.cmd",
+      "pathDisplay": "D:\\Codex\\tools\\PowerShell\\7.6.3\\python.cmd",
       "pathStatus": "resolved",
-      "version": "Python 3.14.5",
+      "version": "Python 3.14.6",
       "probeSucceeded": true,
       "locationClass": "d-drive",
-      "originClass": "project-local-env",
+      "originClass": "shared-tool",
       "decisionInputs": {
         "locationClass": "d-drive",
-        "originClass": "project-local-env",
+        "originClass": "shared-tool",
         "probeSucceeded": true,
-        "requiresManualReview": true,
+        "requiresManualReview": false,
         "resolutionScope": "process",
         "roleOriginClasses": [
           "shared-tool",
-          "project-local-env"
+          "shared-tool"
         ],
-        "riskRoleOriginClasses": [
-          "project-local-env"
-        ],
+        "riskRoleOriginClasses": [],
         "hasReparseEvidence": false,
         "hasMetadataFailure": false
       },
       "recommendedUpdateEntry": "Python 官方安装器或 uv python",
-      "recommendedAction": "归属项目本地环境；保持项目隔离，按项目重建流程人工审查，不作为共享默认入口。",
-      "requiresManualReview": true,
+      "recommendedAction": "位于明确的 D 盘共享工具根；保持现有位置策略，后续按工具生态单独审查更新。",
+      "requiresManualReview": false,
       "autoUpdateAllowed": false,
-      "riskLevel": "high",
+      "riskLevel": "low",
       "reason": "本报告只做更新准备分类，不执行任何更新命令。"
     },
     {
@@ -107,7 +105,7 @@
       "path": "C:\\Program Files\\nodejs\\node.exe",
       "pathDisplay": "C:\\Program Files\\nodejs\\node.exe",
       "pathStatus": "resolved",
-      "version": "v24.15.0",
+      "version": "v24.18.0",
       "probeSucceeded": true,
       "locationClass": "system-installer",
       "originClass": "system-installer",
@@ -139,7 +137,7 @@
       "path": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback\\pnpm.cmd",
       "pathDisplay": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback\\pnpm.cmd",
       "pathStatus": "resolved",
-      "version": "11.7.0",
+      "version": "11.9.0",
       "probeSucceeded": true,
       "locationClass": "user-profile",
       "originClass": "user-profile",
@@ -203,7 +201,7 @@
       "path": "C:\\Program Files\\Git\\cmd\\git.exe",
       "pathDisplay": "C:\\Program Files\\Git\\cmd\\git.exe",
       "pathStatus": "resolved",
-      "version": "git version 2.55.0.windows.1",
+      "version": "git version 2.55.0.windows.2",
       "probeSucceeded": true,
       "locationClass": "system-installer",
       "originClass": "system-installer",
@@ -358,12 +356,44 @@
       "reason": "本报告只做更新准备分类，不执行任何更新命令。"
     },
     {
+      "name": "docker",
+      "found": true,
+      "path": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "pathDisplay": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "pathStatus": "resolved",
+      "version": "Docker version 29.6.1, build 8900f1d",
+      "probeSucceeded": true,
+      "locationClass": "system-installer",
+      "originClass": "system-installer",
+      "decisionInputs": {
+        "locationClass": "system-installer",
+        "originClass": "system-installer",
+        "probeSucceeded": true,
+        "requiresManualReview": true,
+        "resolutionScope": "process",
+        "roleOriginClasses": [
+          "system-installer"
+        ],
+        "riskRoleOriginClasses": [
+          "system-installer"
+        ],
+        "hasReparseEvidence": false,
+        "hasMetadataFailure": false
+      },
+      "recommendedUpdateEntry": "该工具的官方更新机制",
+      "recommendedAction": "位于 Windows 系统或安装器管理范围；只使用官方机制，不直接搬目录。",
+      "requiresManualReview": true,
+      "autoUpdateAllowed": false,
+      "riskLevel": "medium",
+      "reason": "本报告只做更新准备分类，不执行任何更新命令。"
+    },
+    {
       "name": "wsl",
       "found": true,
       "path": "C:\\WINDOWS\\system32\\wsl.exe",
       "pathDisplay": "C:\\WINDOWS\\system32\\wsl.exe",
       "pathStatus": "resolved",
-      "version": "W\u0000S\u0000L\u0000 \u0000Hr,g:\u0000 \u00002\u0000.\u00007\u0000.\u00003\u0000.\u00000\u0000 \u0000 \u0000匭8hHr,g:\u0000 \u00006\u0000.\u00006\u0000.\u00001\u00001\u00004\u0000.\u00001\u0000-\u00001\u0000 \u0000",
+      "version": "WSL 版本: 2.7.3.0 内核版本: 6.6.114.1-1 WSLg 版本: 1.0.73 MSRDC 版本: 1.2.6676",
       "probeSucceeded": true,
       "locationClass": "windows-system",
       "originClass": "windows-system",
@@ -425,7 +455,7 @@
       "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       "pathDisplay": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       "pathStatus": "resolved",
-      "version": "5.1.26100.8737",
+      "version": "5.1.26100.8875",
       "probeSucceeded": true,
       "locationClass": "windows-system",
       "originClass": "windows-system",
@@ -457,14 +487,14 @@
     "complete": true,
     "cleanupAdviceAllowed": true,
     "errors": [],
-    "total": 34,
-    "existing": 32,
-    "cDrive": 24,
+    "total": 37,
+    "existing": 33,
+    "cDrive": 25,
     "dDrive": 8,
-    "missing": 2,
+    "missing": 4,
     "missingEntries": [
       {
-        "index": 29,
+        "index": 30,
         "path": "C:\\Users\\WINDOWS\\.dotnet\\tools",
         "drive": "C:\\",
         "isProjectLocalEnvEntry": false,
@@ -472,8 +502,24 @@
         "recommendedAction": "先确认工具是否仍需要该入口；不得作为迁移副作用直接删除。"
       },
       {
-        "index": 30,
+        "index": 31,
         "path": "D:\\Codex\\.codex\\tmp\\dotnet-home\\.dotnet\\tools",
+        "drive": "D:\\",
+        "isProjectLocalEnvEntry": false,
+        "riskLevel": "low",
+        "recommendedAction": "先确认工具是否仍需要该入口；不得作为迁移副作用直接删除。"
+      },
+      {
+        "index": 32,
+        "path": "C:\\Users\\WINDOWS\\AppData\\Roaming\\npm",
+        "drive": "C:\\",
+        "isProjectLocalEnvEntry": false,
+        "riskLevel": "low",
+        "recommendedAction": "先确认工具是否仍需要该入口；不得作为迁移副作用直接删除。"
+      },
+      {
+        "index": 33,
+        "path": "D:\\Codex\\.dotnet\\.dotnet\\tools",
         "drive": "D:\\",
         "isProjectLocalEnvEntry": false,
         "riskLevel": "low",
@@ -484,7 +530,7 @@
     "duplicates": [
       {
         "firstIndex": 1,
-        "duplicateIndex": 23,
+        "duplicateIndex": 24,
         "expandedPath": "C:\\Users\\WINDOWS\\AppData\\Local\\Programs\\PowerShell\\7"
       }
     ],
@@ -496,45 +542,12 @@
   },
   "highRiskItems": [
     {
-      "name": "python",
-      "found": true,
-      "path": "D:\\hermes-data\\.npm-global\\python.exe",
-      "pathDisplay": "D:\\hermes-data\\.npm-global\\python.exe",
-      "pathStatus": "resolved",
-      "version": "Python 3.14.5",
-      "probeSucceeded": true,
-      "locationClass": "d-drive",
-      "originClass": "project-local-env",
-      "decisionInputs": {
-        "locationClass": "d-drive",
-        "originClass": "project-local-env",
-        "probeSucceeded": true,
-        "requiresManualReview": true,
-        "resolutionScope": "process",
-        "roleOriginClasses": [
-          "shared-tool",
-          "project-local-env"
-        ],
-        "riskRoleOriginClasses": [
-          "project-local-env"
-        ],
-        "hasReparseEvidence": false,
-        "hasMetadataFailure": false
-      },
-      "recommendedUpdateEntry": "Python 官方安装器或 uv python",
-      "recommendedAction": "归属项目本地环境；保持项目隔离，按项目重建流程人工审查，不作为共享默认入口。",
-      "requiresManualReview": true,
-      "autoUpdateAllowed": false,
-      "riskLevel": "high",
-      "reason": "本报告只做更新准备分类，不执行任何更新命令。"
-    },
-    {
       "name": "pnpm",
       "found": true,
       "path": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback\\pnpm.cmd",
       "pathDisplay": "C:\\Users\\WINDOWS\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback\\pnpm.cmd",
       "pathStatus": "resolved",
-      "version": "11.7.0",
+      "version": "11.9.0",
       "probeSucceeded": true,
       "locationClass": "user-profile",
       "originClass": "user-profile",
@@ -667,5 +680,5 @@
       "只有完整的 Process PATH scope 才能生成缺失、重复或失效入口清理建议。"
     ]
   },
-  "generationId": "8194cf2e-e3d5-44db-b8f3-ac435ff514be"
+  "generationId": "b5ef5bc7-2492-421c-a883-fd259cabe9d9"
 }

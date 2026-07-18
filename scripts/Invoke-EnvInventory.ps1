@@ -155,16 +155,24 @@ function Invoke-CommandWithTimeout {
     param(
         [string]$Executable,
         [string[]]$Arguments,
-        [int]$TimeoutSeconds
+        [int]$TimeoutSeconds,
+        [int]$NativeOutputCodePage = 0
     )
 
     $job = Start-Job -ScriptBlock {
         param(
             [string]$JobExecutable,
-            [string[]]$JobArguments
+            [string[]]$JobArguments,
+            [int]$JobNativeOutputCodePage
         )
 
+        $previousOutputEncoding = $null
         try {
+            if ($JobNativeOutputCodePage -gt 0) {
+                $previousOutputEncoding = [Console]::OutputEncoding
+                [Console]::OutputEncoding = [Text.Encoding]::GetEncoding($JobNativeOutputCodePage)
+            }
+
             $global:LASTEXITCODE = $null
             & $JobExecutable @JobArguments 2>&1
             $exitCode = $LASTEXITCODE
@@ -180,8 +188,12 @@ function Invoke-CommandWithTimeout {
                 __CodexProbeExitCode = $null
                 __CodexProbeError = $_.Exception.Message
             }
+        } finally {
+            if ($null -ne $previousOutputEncoding) {
+                [Console]::OutputEncoding = $previousOutputEncoding
+            }
         }
-    } -ArgumentList $Executable, $Arguments
+    } -ArgumentList $Executable, $Arguments, $NativeOutputCodePage
 
     $completed = Wait-Job -Job $job -Timeout $TimeoutSeconds
     if (-not $completed) {
@@ -220,7 +232,8 @@ function Invoke-CommandWithTimeout {
 function Invoke-VersionProbe {
     param(
         [string]$Name,
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [int]$NativeOutputCodePage = 0
     )
 
     $command = Get-Command -Name $Name -ErrorAction SilentlyContinue |
@@ -263,7 +276,7 @@ function Invoke-VersionProbe {
     }
 
     try {
-        $probe = Invoke-CommandWithTimeout -Executable $path -Arguments $Arguments -TimeoutSeconds $VersionProbeTimeoutSeconds
+        $probe = Invoke-CommandWithTimeout -Executable $path -Arguments $Arguments -TimeoutSeconds $VersionProbeTimeoutSeconds -NativeOutputCodePage $NativeOutputCodePage
         $output = $probe.output | Select-Object -First 4
         $exitCode = $probe.exitCode
         $evidence = (($output | ForEach-Object { "$_" }) -join " ").Trim()
@@ -530,7 +543,7 @@ function Invoke-PythonRuntimeProbe {
         "-I",
         "-S",
         "-c",
-        'import json,sys; print(json.dumps({"executable":sys.executable,"prefix":sys.prefix,"basePrefix":sys.base_prefix}))'
+        'import json,sys; print(json.dumps(dict(executable=sys.executable,prefix=sys.prefix,basePrefix=sys.base_prefix)))'
     )
     $probe = Invoke-CommandWithTimeout -Executable $PythonPath -Arguments $arguments -TimeoutSeconds $VersionProbeTimeoutSeconds
     if ($probe.timedOut) {
@@ -842,7 +855,7 @@ $rawTools = @(
     Invoke-VersionProbe -Name "cmake" -Arguments @("--version")
     Invoke-VersionProbe -Name "ninja" -Arguments @("--version")
     Invoke-VersionProbe -Name "docker" -Arguments @("--version")
-    Invoke-VersionProbe -Name "wsl" -Arguments @("--version")
+    Invoke-VersionProbe -Name "wsl" -Arguments @("--version") -NativeOutputCodePage 1200
     Invoke-VersionProbe -Name "code" -Arguments @("--version")
     Invoke-VersionProbe -Name "pwsh" -Arguments @("--version")
     Invoke-VersionProbe -Name "powershell" -Arguments @("-NoProfile", "-Command", "`$PSVersionTable.PSVersion.ToString()")
