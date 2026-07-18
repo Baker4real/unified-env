@@ -9,6 +9,13 @@
 
 网络地址、SSH 用户、密钥路径、登录态和凭据属于调用端本地事实，不写入仓库；连接前必须从当前设备的本地配置重新确认。
 
+## 显示输出与窗口恢复
+
+- 同一台 Odyssey G7 同时连接 NVIDIA 的 DisplayPort 与 HDMI。期望拓扑是任一时刻只启用一条物理桌面路径：DP 为主路径（已验证模式 `3840 × 2160 @ 165 Hz`），HDMI 保持已连接但不作为第二个扩展屏；需要切换时把 HDMI 当作人工备选路径，不把它视为已验证的自动故障接管。
+- `DISPLAY1`、`DISPLAY2` 等编号会随拓扑重排，不能作为端口的持久身份。诊断时应使用 Windows CCD 的 target device path 与 `outputTechnology` 区分 DP/HDMI。微信或 CC Switch 点击后无主界面时，先检查顶层窗口的 monitor、`WINDOWPLACEMENT`、DWM cloaked 状态和恢复矩形，把窗口恢复到当前活动工作区后再调整显示拓扑。
+- 更改拓扑前必须保存完整 CCD path/mode 基线和精确回滚数据；先临时应用并确认画面稳定，再持久化。若屏幕枚举只出现 `WinDisc` / GameViewer 虚拟显示，或 `GetDisplayConfigBufferSizes` 返回零路径，说明虚拟显示层正在干扰物理拓扑查询，此时不得写入持久显示配置。
+- 2026-07-18 已完成一次 DP 单路径验收：活动路径为 DP、模式为 `3840 × 2160 @ 165 Hz`，HDMI target 保留但不活动，微信和 CC Switch 均已移回活动屏幕。当天稍后的只读复核受到 `WinDisc` 虚拟显示层影响，因此后续操作仍须重新查询 live CCD，不能把本条历史验收当作当前状态。
+
 ## Aura 风扇灯自动关闭
 
 - 登录后通过 `C:\Users\WINDOWS\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\aura-lights-off.lnk` 运行；该快捷方式只承载 Startup 兼容配置，目标为 `C:\Windows\System32\wscript.exe`。
@@ -65,4 +72,4 @@
 3. 运行严格资源闭包和 catalog dry-run；只有两者都通过，才把设备视为已同步。
 4. 设备上的日志、临时 staging 和验证快照留在该设备的 D 盘 evidence 路径，不提交到仓库。
 
-除另有注明外，本页最近审计日期为 2026-07-17；数量、哈希和工具版本属于易变状态，后续操作必须实时复核，不能把本页当作当前运行结果。
+除另有注明外，本页最近审计日期为 2026-07-18；数量、哈希和工具版本属于易变状态，后续操作必须实时复核，不能把本页当作当前运行结果。
