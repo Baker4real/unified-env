@@ -54,32 +54,16 @@
 
 ## 验证命令
 
-从仓库根目录使用 PowerShell 7.6+ 运行 PowerShell 测试。普通测试可直接按文件运行；参数化的 hook hardening 套件必须按 `-Case` 逐项运行：
+从仓库根目录使用 Node 编排 PowerShell 7.6+ 测试。PowerShell 只逐项启动测试文件；文件枚举、排序和参数化用例编排均由 Node 完成。默认使用 PATH 中的 `pwsh`；非标准路径可通过 `PWSH_PATH` 指定完整 `pwsh.exe` 路径，脚本会确认它是 PowerShell 并拒绝低于 7.6 的版本：
 
 ```powershell
-$tests = Get-ChildItem -LiteralPath '.\tests' -Filter 'Test-*.ps1' -File |
-    Where-Object Name -ne 'Test-CodexHookProductionRegistrationRepairHardening.ps1' |
-    Sort-Object Name
-foreach ($test in $tests) {
-    & ([Environment]::ProcessPath) -NoProfile -File $test.FullName
-    if ($LASTEXITCODE -ne 0) {
-        throw "$($test.Name) 失败，退出码：$LASTEXITCODE"
-    }
-}
+node .\scripts\Run-PowerShellTests.cjs
+```
 
-$hardeningCases = @(
-    'semantic-noop', 'crash-applying-deployed', 'crash-applied-before',
-    'crash-applying-before', 'terminal-incompatible', 'third-hash-rejected',
-    'postpublish-source-drift', 'postpublish-live-drift',
-    'postpublish-static-and-registry-third', 'rollback-cas-race',
-    'rollback-write-excluding-lease', 'forged-evidence', 'projection-summary'
-)
-foreach ($case in $hardeningCases) {
-    & ([Environment]::ProcessPath) -NoProfile -File '.\tests\Test-CodexHookProductionRegistrationRepairHardening.ps1' -Case $case
-    if ($LASTEXITCODE -ne 0) {
-        throw "Test-CodexHookProductionRegistrationRepairHardening.ps1 -Case $case 失败，退出码：$LASTEXITCODE"
-    }
-}
+仅查看将执行的测试清单：
+
+```powershell
+node .\scripts\Run-PowerShellTests.cjs --list
 ```
 
 仓库还包含 Python 与 Node 专项测试；使用已验证的 Python/Node 入口分别运行：
