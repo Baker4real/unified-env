@@ -1,6 +1,8 @@
 # PRD：本机统一环境治理
 
-Status: ready-for-agent
+Status: done
+
+> 本 PRD 拆分出的 17 个 issue 均已进入终态 `done`。本文保留原始问题、范围和设计约束；当前能力与事实以根目录 `README.md`、`CONTEXT.md` 和重新生成的 `reports/` 为准。
 
 ## Problem Statement
 
@@ -81,6 +83,4 @@ Status: ready-for-agent
 
 ## Further Notes
 
-当前事实基线显示：已有多个关键缓存和工具目录已经在 D 盘，但仍存在少量 C 盘候选。第一步应该继续强化盘点器的准确性，再从低风险缓存迁移做 dry-run。
-
-后续 `to-issues` 拆分时，应按垂直切片推进：每个 issue 都要能独立运行、独立验证，并且不能依赖一次性大迁移。
+本节是立项时的历史判断，不再代表当前主机事实或开放计划。后续新增治理范围应基于 fresh inventory 另建垂直切片 issue，并继续满足独立验证、显式授权和回滚边界。

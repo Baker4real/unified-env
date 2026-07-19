@@ -20,7 +20,7 @@ if (Test-Path -LiteralPath $libraryPath -PathType Leaf) {
 . $libraryPath
 
 $canonicalSharedRoots = @(Get-InventoryCanonicalSharedRoots)
-Assert-True (($canonicalSharedRoots -join "|") -ceq "D:\Codex\tools|D:\Codex\envs|D:\hermes-data\.local|D:\hermes-data\.npm-global") "canonical shared roots 必须保持单一可信定义"
+Assert-True (($canonicalSharedRoots -join "|") -ceq "D:\Codex\tools|D:\Codex\envs|D:\uv") "canonical shared roots 必须保持单一可信定义"
 }
 
 $unsafePathResolverCalls = 0

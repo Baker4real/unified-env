@@ -48,11 +48,6 @@
 - 当前备份膨胀治理 dry-run：`reports/backup-retention-dry-run-current/BACKUP-RETENTION-DRY-RUN.md`
 - 备份清理 apply manifest：当前没有可发布的 schema 2 manifest；生产 dry-run 覆盖不完整，安全门已拒绝生成。
 - `codex-account-switch` 依赖更新 dry-run：`reports/codex-account-switch-dependency-update-dry-run/PLAN.md`
-- 项目本地环境分类刷新：`.scratch/unified-env/issues/12-project-local-env-classification-refresh.md`
-- `codex_switch` 安装回滚备份保留 dry-run：`.scratch/unified-env/issues/14-codex-switch-installed-backup-retention.md`
-- 备份保留 apply 执行：`.scratch/unified-env/issues/15-backup-retention-apply-execution.md`
-- `codex_switch` 旧式平铺备份文件删除：`.scratch/unified-env/issues/16-codex-switch-flat-backup-delete.md`
-- 三类人工审查项删除：`.scratch/unified-env/issues/17-manual-review-cache-staging-backup-delete.md`
 
 ## 验证命令
 

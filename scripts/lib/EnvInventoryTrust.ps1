@@ -6,8 +6,7 @@ function Get-InventoryCanonicalSharedRoots {
     return [string[]]@(
         "D:\Codex\tools",
         "D:\Codex\envs",
-        "D:\hermes-data\.local",
-        "D:\hermes-data\.npm-global"
+        "D:\uv"
     )
 }
 

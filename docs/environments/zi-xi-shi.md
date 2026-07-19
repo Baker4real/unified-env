@@ -27,8 +27,14 @@
 
 - 此代理是 Codex 主机服务，不属于 Hermes 项目。脚本固定为 `D:\Codex\.codex\scripts\codex-provider-proxy.py`，日志固定为 `D:\Codex\.codex\logs\codex-provider-proxy.log`，运行时使用官方 `D:\Codex\tools\python314-official\pythonw.exe`。
 - 入口源码位于 `D:\Codex\tools\codex-launcher\`，现役入口为 `D:\Codex\tools\bin\codex.exe`。修改脚本或 launcher 后必须重新发布并核验现役入口，不能改动官方 Store/AppX Codex 二进制。
+- launcher 只在 stdin、stdout、stderr 都连接真实终端，且 `TERM` 缺失或为 `dumb` 时，为官方 Codex 子进程设置 `TERM=xterm-256color`；重定向、GUI 和后台入口必须保留原值。修改该契约后运行 `tests\Test-CodexLauncherTerminalEnvironment.ps1`，并在不显式覆盖 `TERM` 的真实 PTY 中复验 `codex doctor --json`。
 - 服务子进程必须以 `pythonw.exe` 和 `CREATE_NO_WINDOW` 后台启动；验收时检查 `/health`、`/v1/models`、窗口句柄为零且没有 `conhost.exe` 后代，不能通过关闭用户终端来掩盖问题。
 - 不得把 proxy 或其日志放回 `D:\hermes-data`。`D:\hermes-data\.npm-global` 仅用于排除旧 npm shim，与该代理无关，不能作为迁移副作用修改。
+
+## 共享工具判定根
+
+- 环境盘点的 canonical shared roots 为 `D:\Codex\tools`、`D:\Codex\envs` 和 `D:\uv`。
+- `D:\hermes-data\.local` 与 `D:\hermes-data\.npm-global` 已从共享工具根分类中退役；仍存在的 Hermes 专属内容按 Hermes authority 保留，旧报告或历史测试中的引用不能作为恢复共享入口的依据。
 
 ## Codex 设备连接
 

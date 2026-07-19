@@ -14,7 +14,7 @@ Assert-True (Test-Path -LiteralPath $policyPath -PathType Leaf) "找不到 EnvUp
 . $policyPath
 
 $canonicalSharedRoots = @(Get-InventoryCanonicalSharedRoots)
-Assert-True (($canonicalSharedRoots -join "|") -ceq "D:\Codex\tools|D:\Codex\envs|D:\hermes-data\.local|D:\hermes-data\.npm-global") "canonical shared roots 漂移或函数缺失"
+Assert-True (($canonicalSharedRoots -join "|") -ceq "D:\Codex\tools|D:\Codex\envs|D:\uv") "canonical shared roots 漂移或函数缺失"
 
 function New-OriginEvidence {
     param([string]$Path, [string]$OriginClass)
