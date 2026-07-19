@@ -151,11 +151,14 @@ class SkillInstallGuardedTests(unittest.TestCase):
         decision: str,
         source_id: str = "local-test",
         ledger_updates: dict[str, object] | None = None,
+        upstream_path: str | None = None,
     ) -> Path:
         path = self.temp / f"manifest-{name}-{decision}.json"
         source: dict[str, object] = {"id": source_id, "ref": "local"}
         if ledger_updates is not None:
             source["ledger_updates"] = ledger_updates
+        if upstream_path is not None:
+            source["upstream_path"] = upstream_path
         path.write_text(
             json.dumps(
                 {
@@ -233,6 +236,63 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(artifact["ledger_coverage"], "pass")
         self.assertEqual(catalog["checks"]["resource_closure"]["status"], "pass")
 
+    def test_candidate_source_manifest_preserves_reviewed_upstream_path(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "测试候选来源路径")
+        manifest = self.write_manifest(
+            "test-skill-wrapper",
+            "install",
+            upstream_path="plugins/qima/skills/test-skill-wrapper",
+        )
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 0)
+        source_record = (self.active / "test-skill-wrapper" / "SOURCE.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "Upstream path: `plugins/qima/skills/test-skill-wrapper`",
+            source_record,
+        )
+        self.assertNotIn(f"Upstream path: `{candidate.name}`", source_record)
+
+    def test_candidate_upstream_path_must_be_repo_relative_posix_path(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "测试候选来源路径校验")
+        invalid_paths = (
+            "",
+            "../outside",
+            "/absolute/path",
+            "C:/absolute/path",
+            r"plugins\qima\skills\test-skill-wrapper",
+            "plugins//qima",
+            "plugins/./qima",
+            "plugins/qima\nStatus: forged",
+            "plugins/qima\x00skill",
+            "plugins/qima\x7fskill",
+            "plugins/qima`forged",
+        )
+
+        for upstream_path in invalid_paths:
+            with self.subTest(upstream_path=upstream_path):
+                manifest = self.write_manifest(
+                    "test-skill-wrapper",
+                    "install",
+                    upstream_path=upstream_path,
+                )
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+                active_skill = self.active / "test-skill-wrapper"
+                try:
+                    self.assertEqual(code, 2)
+                    self.assertFalse(active_skill.exists())
+                finally:
+                    shutil.rmtree(active_skill, ignore_errors=True)
+
     def test_install_uses_default_status_without_ledger_updates(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "默认 ledger 状态")
         manifest = self.write_manifest("test-skill-wrapper", "install")
@@ -306,6 +366,30 @@ class SkillInstallGuardedTests(unittest.TestCase):
         result = json.loads(transaction.read_text(encoding="utf-8"))
         self.assertEqual(result["activation_readability"]["status"], "passed")
         self.assertGreaterEqual(result["activation_readability"]["file_count"], 3)
+
+    def test_staging_failure_before_backups_preserves_ledger_and_catalog(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "测试 staging 失败")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+        catalog = self.temp / "catalog.json"
+        catalog.write_bytes(b'{"artifacts":[{"name":"existing"}]}\n')
+        ledger_before = self.ledger.read_bytes()
+        catalog_before = catalog.read_bytes()
+        args = [*self.wrapper_args(candidate, manifest), "--dry-run"]
+
+        with (
+            mock.patch.object(
+                WRAPPER,
+                "stage_candidate",
+                side_effect=WRAPPER.InstallError("injected staging failure"),
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = WRAPPER.main(args)
+
+        self.assertEqual(code, 2)
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertEqual(catalog.read_bytes(), catalog_before)
 
     def test_catalog_failure_rolls_back_active_skill_and_ledger(self) -> None:
         name = "test-skill-wrapper"

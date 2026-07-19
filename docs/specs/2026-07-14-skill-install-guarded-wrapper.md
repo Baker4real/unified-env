@@ -42,6 +42,7 @@
     "id": "owner-repo",
     "repo": "owner/repo",
     "ref": "main",
+    "upstream_path": "plugins/example/skills/example-skill",
     "ledger_updates": {
       "installed_version": "1.2.3",
       "status": "updated-with-local-overlay"
@@ -49,6 +50,8 @@
   }
 }
 ```
+
+`source.upstream_path` 只用于已审查的 `--candidate`：它把本地暂存候选映射回真实仓库子路径，确保新写入的 `SOURCE.md` 可精确追溯。该字段必须是仓库内的 POSIX 相对路径，不接受绝对路径、反斜杠、反引号、不可打印字符、空段、`.` 或 `..`；省略时为兼容旧调用仍回退到候选目录名。它与 `source.ledger_updates.path` 不同，后者是统一来源台账已有的本地路径字段。
 
 `decision=update` 才允许替换已有 active skill。直接调用 `.system\skill-installer`、手工复制到 active root 或跳过 decision manifest，都不算完成的安装流程。
 

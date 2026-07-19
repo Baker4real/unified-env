@@ -313,6 +313,34 @@ def target_specs(args: argparse.Namespace) -> list[tuple[str, str]]:
     return specs
 
 
+def apply_candidate_upstream_path(
+    args: argparse.Namespace,
+    decision: dict[str, Any],
+    specs: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    if not args.candidate:
+        return specs
+    source = decision.get("source")
+    if not isinstance(source, dict) or source.get("upstream_path") is None:
+        return specs
+    upstream_path = source["upstream_path"]
+    if not isinstance(upstream_path, str) or not upstream_path.strip():
+        raise InstallError("source.upstream_path 必须是非空字符串")
+    if any(not character.isprintable() for character in upstream_path):
+        raise InstallError("source.upstream_path 不能包含不可打印字符")
+    upstream_path = upstream_path.strip()
+    parts = upstream_path.split("/")
+    if (
+        "\\" in upstream_path
+        or "`" in upstream_path
+        or upstream_path.startswith("/")
+        or re.match(r"^[A-Za-z]:", upstream_path)
+        or any(not part or part in {".", ".."} for part in parts)
+    ):
+        raise InstallError("source.upstream_path 必须是仓库内的 POSIX 相对路径")
+    return [(specs[0][0], upstream_path)]
+
+
 LEDGER_UPDATE_FIELDS = {"action", "installed_version", "path", "resource_paths", "status"}
 
 
@@ -1079,6 +1107,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     specs = target_specs(args)
     names = [name for name, _ in specs]
     decision = load_and_validate_manifest(decision_path, names=names)
+    specs = apply_candidate_upstream_path(args, decision, specs)
     if args.update and decision["decision"] != "update":
         raise InstallError("--update 只能与 decision=update 的 manifest 一起使用")
     if decision["decision"] == "update" and not args.update:
@@ -1108,6 +1137,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     directory_records: list[dict[str, Any]] = []
     ledger_backup: Path | None = None
     catalog_backup: Path | None = None
+    state_backups_ready = False
     try:
         staged = stage_candidate(
             args=args,
@@ -1135,6 +1165,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         ensure_dir(backup_root, label="transaction backup root")
         ledger_backup = backup_file(ledger_path, backup_root, "source-state-before.json")
         catalog_backup = backup_file(catalog_path, backup_root, "catalog-before.json")
+        state_backups_ready = True
         for name in names:
             active = active_root / name
             if decision["decision"] == "install" and active.exists():
@@ -1201,11 +1232,12 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         return result
     except Exception as exc:
         rollback_errors = rollback_directories(directory_records)
-        try:
-            restore_file(ledger_path, ledger_backup)
-            restore_file(catalog_path, catalog_backup)
-        except Exception as restore_exc:
-            rollback_errors.append(f"state restore: {restore_exc}")
+        if state_backups_ready:
+            try:
+                restore_file(ledger_path, ledger_backup)
+                restore_file(catalog_path, catalog_backup)
+            except Exception as restore_exc:
+                rollback_errors.append(f"state restore: {restore_exc}")
         failure = {
             **plan,
             "status": "rollback-failed" if rollback_errors else "rolled-back",
