@@ -11,7 +11,7 @@
 ## 报告与当前事实边界
 
 - `reports/` 下的 JSON/Markdown 报告是带时间戳的事实快照；`generationId` 与源 JSON SHA-256 只证明同一次生成的配对一致，不证明进程、用户环境或工具入口仍是当前状态。任何决策或执行前必须重新生成相关报告并现场核验。
-- 最近一次 production backup retention dry-run 的覆盖已计账但不完整（`coverageComplete=false`），真实候选为 0；apply 安全门已拒绝生成，因此没有可发布的 schema 2 apply manifest。旧 schema 1 manifest 快照已从项目报告中移除，但没有删除任何备份源数据。
+- 当前已发布的 production backup retention dry-run 覆盖已计账但不完整（`coverageComplete=false`），真实候选为 0；apply 安全门已拒绝生成，因此没有可发布的 schema 2 apply manifest。旧 schema 1 manifest 快照已从项目报告中移除，但没有删除任何备份源数据。
 - 只读盘点快照：`reports/env-inventory/REPORT.md`
 - dry-run 迁移计划：`reports/env-migration-plan/PLAN.md`
 - 统一更新准备快照：`reports/env-update-readiness/REPORT.md`
@@ -20,7 +20,7 @@
 - 项目本地环境审查：`reports/project-local-env-review/REPORT.md`
 - 项目本地环境重建 dry-run：`reports/project-local-env-rebuild-plan/PLAN.md`
 - 项目本地环境分类刷新：`.scratch/unified-env/issues/12-project-local-env-classification-refresh.md`
-- 最近一次备份膨胀治理 dry-run：`reports/backup-retention-dry-run-current/BACKUP-RETENTION-DRY-RUN.md`
+- 当前备份膨胀治理 dry-run：`reports/backup-retention-dry-run-current/BACKUP-RETENTION-DRY-RUN.md`
 - `codex_switch` 安装回滚备份保留 issue：`.scratch/unified-env/issues/14-codex-switch-installed-backup-retention.md`
 - 备份保留 apply 执行 issue：`.scratch/unified-env/issues/15-backup-retention-apply-execution.md`
 - `codex_switch` 旧式平铺备份文件删除 issue：`.scratch/unified-env/issues/16-codex-switch-flat-backup-delete.md`
