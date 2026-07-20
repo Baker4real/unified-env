@@ -17,10 +17,9 @@
   `DelegationTerminal={E12CFF52-A866-4C77-9A90-F570A7AA2C6B}`、
   `DelegationConsole={2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}`。
 - PowerShell Store 包版本为 `7.6.3.0`，User PATH 已把
-  `D:\Codex\tools\PowerShell\7.6.3` 放在首位；新进程应解析到该目录的
-  `pwsh.exe`。本轮核验时，已运行的 Codex 执行器仍继承旧 PATH 并解析到
-  `C:\Users\WINDOWS\AppData\Local\Programs\PowerShell\7\pwsh.exe` `7.6.1`，因此
-  完整退出并重新启动 Codex 后才可把 7.6.3 视为其进程级当前值。
+  `D:\Codex\tools\PowerShell\7.6.3` 放在首位。2026-07-20 完整重启 Codex 后实测：
+  当前运行 shell 与 `Get-Command pwsh.exe` 均解析到该目录的 `pwsh.exe`，两项版本均为
+  `7.6.3`，进程 PATH 也以该目录开头；此前的旧 PATH 继承边界已经验收关闭。
 - `D:\Codex\.codex\config.toml` 已设
   `integratedTerminalShell = "powershell"`。这表示 Codex 的集成终端使用 PowerShell；
   Codex 内部 PTY 和后台命令仍在应用内或隐藏运行，不应为每条命令新开外部 Windows
