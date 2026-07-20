@@ -9,6 +9,27 @@
 
 网络地址、SSH 用户、密钥路径、登录态和凭据属于调用端本地事实，不写入仓库；连接前必须从当前设备的本地配置重新确认。
 
+## Windows Terminal、PowerShell 与 WSL
+
+- 2026-07-20 实测 Windows Terminal `1.24.11911.0` 已设为系统默认终端；其
+  `defaultProfile` 为 `{5fb123f1-af88-5b5c-8953-d14a8def1978}`，对应
+  `PowerShell 7` / `Windows.Terminal.PowershellCore`。系统委派值为
+  `DelegationTerminal={E12CFF52-A866-4C77-9A90-F570A7AA2C6B}`、
+  `DelegationConsole={2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}`。
+- PowerShell Store 包版本为 `7.6.3.0`，User PATH 已把
+  `D:\Codex\tools\PowerShell\7.6.3` 放在首位；新进程应解析到该目录的
+  `pwsh.exe`。本轮核验时，已运行的 Codex 执行器仍继承旧 PATH 并解析到
+  `C:\Users\WINDOWS\AppData\Local\Programs\PowerShell\7\pwsh.exe` `7.6.1`，因此
+  完整退出并重新启动 Codex 后才可把 7.6.3 视为其进程级当前值。
+- `D:\Codex\.codex\config.toml` 已设
+  `integratedTerminalShell = "powershell"`。这表示 Codex 的集成终端使用 PowerShell；
+  Codex 内部 PTY 和后台命令仍在应用内或隐藏运行，不应为每条命令新开外部 Windows
+  Terminal 窗口。
+- 同日 `wsl.exe --list --verbose` 返回 `Ubuntu` 与 `docker-desktop`，两者均为
+  WSL2；这已经推翻旧 README 中“WSL 未安装、未启用、未初始化”的历史判断。运行时
+  `Running` / `Stopped` 状态属于易变事实，使用前现场复核；D-Radar 的 WSL/Docker
+  配置与验收步骤以 `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 为准。
+
 ## 显示输出与窗口恢复
 
 - 同一台 Odyssey G7 同时连接 NVIDIA 的 DisplayPort 与 HDMI。期望拓扑是任一时刻只启用一条物理桌面路径：DP 为主路径（已验证模式 `3840 × 2160 @ 165 Hz`），HDMI 保持已连接但不作为第二个扩展屏；需要切换时把 HDMI 当作人工备选路径，不把它视为已验证的自动故障接管。
