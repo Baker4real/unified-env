@@ -650,7 +650,7 @@ function Assert-CodexHookManifest {
 
     $runtimeNames = @('pwsh', 'python', 'serenaPython', 'serenaHooks')
     $expectedRuntimes = [ordered]@{
-        pwsh = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+        pwsh = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
         python = 'D:\Codex\tools\python314-official\python.exe'
         serenaPython = 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
         serenaHooks = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
@@ -1110,9 +1110,9 @@ function Assert-CodexHookHostPreflightManifest {
 
     $expectedHookIdentityHashes = @{
         'codex-state-preflight' = '15dbc61e3ba5514b09e713a7814b69c6a5b05244f9208ffe67b3a27ffee7ec2c'
-        'serena-activate' = '70b0e6406be68f2f4b47b7666baf130e4d11b2364ae39925180fe50edb351344'
-        'serena-cleanup' = '4e13fc275f0eab40c8e95a02a86ec82f65699fefd79100b4e071bce8676849de'
-        'serena-reminder' = 'a34adceb6423c2bc872e5a42891769df16a03cd966f31883e2745af1db41b812'
+        'serena-activate' = '99fd5703be433862e5c3abef0a33d5cff6226195b1213168f0a832acfa64d9b6'
+        'serena-cleanup' = '4a0d537f9469f9912a07c6d54566de9ef4428de6ef6bcfa0a5734ec09becb2da'
+        'serena-reminder' = 'cac2f6bd47e4da7c24d343210a0e60c430dcbb6c92d655390662b6e23c8b9668'
     }
     foreach ($hook in @($Manifest.hooks)) {
         $identity = [ordered]@{
@@ -1145,10 +1145,10 @@ function Assert-CodexHookHostPreflightManifest {
         'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', '1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8', 'codex-state-preflight')
         'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', 'cf6b251500b2417aa928709d8632a1b26a9ee14ca327f35037db7a841089fbe3', 'codex-state-preflight')
         'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '299d1940ee6f187fea5bb7f870f234fdf781e752616df7f5358bf9b9a67f4cad', 'codex-state-preflight')
-        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', 'ed7d69de104d624a12bd02914bb503f10d8c714883069f480853966c80416938', 'serena-reminder')
-        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', 'c49702a48a23ccacea2c4f12300a0f203729c1925fa6ccd551a83ed8e9ea7ef3', 'serena-cleanup')
+        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', 'f311fcba27b79e9da53c30c30b83082e0bc6647be5e15b49b4c196116af7e936', 'serena-reminder')
+        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '227c29c8facac25b2766d8e6a84bad3d838a668348f42b2be3e1ce0eb807bd53', 'serena-cleanup')
         'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '72e4d59d862775c100f35b7b345a5414a7337519f2d42ac49931a5e9891df8e2', 'serena-reminder', 'serena-cleanup', 'serena-activate')
-        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', 'fc8ccb26de2e95b4d971e4149ce5282f45a6d6f39f7105daf92dadecc65b8200', 'serena-activate')
+        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', 'c5ec2d5b40998a32b5859489a439499f1eee27302d317db53df68cef04e87d05', 'serena-activate')
         'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', 'a6ecb01a6c57dafa23f62ed9efb59febd06c6059bfde83fd4c59ddbad2abacb4', 'serena-activate', 'serena-cleanup', 'serena-reminder')
     }
     if (@($Manifest.files).Count -ne $expectedFiles.Count) {

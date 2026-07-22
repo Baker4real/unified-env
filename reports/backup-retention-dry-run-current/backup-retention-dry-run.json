@@ -1,9 +1,9 @@
 {
   "artifactType": "env-governance.backup-retention-dry-run",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "artifactMode": "production",
-  "generatedAtLocal": "2026-07-16T19:42:41.6695902+08:00",
-  "generatedAtUtc": "2026-07-16T11:42:41.6695902+00:00",
+  "generatedAtLocal": "2026-07-22T19:28:10.7056587+08:00",
+  "generatedAtUtc": "2026-07-22T11:28:10.7056587+00:00",
   "dryRun": true,
   "readOnly": true,
   "deleteAllowed": false,
@@ -13,10 +13,10 @@
   "DDriveRoot": "D:\\Codex",
   "retainCount": 5,
   "policyId": "env-governance.backup-retention",
-  "policyVersion": 2,
+  "policyVersion": 3,
   "policy": {
     "policyId": "env-governance.backup-retention",
-    "policyVersion": 2,
+    "policyVersion": 3,
     "summary": "只读 dry-run；不删除、不移动、不迁移；真实清理必须另行显式授权。",
     "protectedRootsCannotBeDeleted": true,
     "explicitAuthorizationRequired": true,
@@ -57,15 +57,8 @@
       "enumerationStarted": true,
       "enumerationCompleted": true,
       "errors": [],
-      "directChildCount": 9,
+      "directChildCount": 10,
       "directChildren": [
-        {
-          "path": "D:\\Codex\\.codex\\backups_state\\ccswitch-wss-solidification",
-          "name": "ccswitch-wss-solidification",
-          "itemType": "directory",
-          "isReparsePoint": false,
-          "reparseTarget": null
-        },
         {
           "path": "D:\\Codex\\.codex\\backups_state\\chrome-native-hosts-fix-20260701-230016",
           "name": "chrome-native-hosts-fix-20260701-230016",
@@ -90,6 +83,13 @@
         {
           "path": "D:\\Codex\\.codex\\backups_state\\codex-state-policy",
           "name": "codex-state-policy",
+          "itemType": "directory",
+          "isReparsePoint": false,
+          "reparseTarget": null
+        },
+        {
+          "path": "D:\\Codex\\.codex\\backups_state\\hermes-data-migration",
+          "name": "hermes-data-migration",
           "itemType": "directory",
           "isReparsePoint": false,
           "reparseTarget": null
@@ -121,16 +121,23 @@
           "itemType": "directory",
           "isReparsePoint": false,
           "reparseTarget": null
+        },
+        {
+          "path": "D:\\Codex\\.codex\\backups_state\\sub2api",
+          "name": "sub2api",
+          "itemType": "directory",
+          "isReparsePoint": false,
+          "reparseTarget": null
         }
       ],
-      "snapshotSha256": "54cd7bcb60a158431a2741e8ee04a99c5477b9242c13b3b5eb5c67bb356e1c4e",
-      "classificationCount": 9,
+      "snapshotSha256": "7954b445fa11a095dfc6dd142e9d5ed18999d42edcb0b4379b9cc59202804259",
+      "classificationCount": 10,
       "classificationCounts": {
         "candidate": 0,
         "retained": 0,
-        "protected": 0,
+        "protected": 9,
         "delegated-root": 1,
-        "gap": 8
+        "gap": 0
       }
     },
     {
@@ -209,6 +216,7 @@
       "path": "D:\\Codex\\.codex-c-backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -243,24 +251,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\.backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -295,24 +292,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\.tmp\\bundled-marketplaces",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -347,24 +333,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 136105459,
-        "mb": 129.8,
-        "files": 1560,
-        "dirs": 343,
-        "skillMd": 15,
-        "newestUtc": "2026-07-16T10:20:56.7909958Z",
-        "oldestUtc": "2026-05-31T03:00:19.8211509Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -397,24 +372,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 2174142575,
-        "mb": 2073.42,
-        "files": 5151,
-        "dirs": 1939,
-        "skillMd": 379,
-        "newestUtc": "2026-07-16T11:28:42.2959088Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\_autosave",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -449,24 +413,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 77465,
-        "mb": 0.07,
-        "files": 17,
-        "dirs": 17,
-        "skillMd": 0,
-        "newestUtc": "2026-07-12T23:27:11.5825817Z",
-        "oldestUtc": "2026-06-26T08:00:06.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\auth.json",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -499,24 +452,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\cache",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -549,24 +491,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\install_state.json",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -599,24 +530,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 255,
-        "mb": 0.0,
-        "files": 1,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": "2026-07-16T00:08:39.6956768Z",
-        "oldestUtc": "2026-07-16T00:08:39.6956768Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\login_runtime\\.tmp\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -651,24 +571,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\login_runtime\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -703,24 +612,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 124829335,
-        "mb": 119.05,
-        "files": 2377,
-        "dirs": 863,
-        "skillMd": 177,
-        "newestUtc": "2026-07-14T01:31:54.8406621Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -753,24 +651,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\profile.json",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -803,24 +690,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\quota_cache.json",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -853,24 +729,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 49196,
-        "mb": 0.05,
-        "files": 1,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": "2026-07-16T11:37:40.1963515Z",
-        "oldestUtc": "2026-07-16T11:37:40.1963515Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\refresh_runtime\\.tmp",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -905,24 +770,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\refresh_runtime\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -957,24 +811,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 530174328,
-        "mb": 505.61,
-        "files": 2538,
-        "dirs": 946,
-        "skillMd": 190,
-        "newestUtc": "2026-07-16T08:37:07.5877810Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\sqlite",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -1007,24 +850,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -1059,24 +891,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\plugins\\cache",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -1109,24 +930,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 118965359,
-        "mb": 113.45,
-        "files": 2174,
-        "dirs": 868,
-        "skillMd": 182,
-        "newestUtc": "2026-07-16T10:21:06.8205325Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 1,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\run-evidence",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -1161,24 +971,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 4255548341,
-        "mb": 4058.41,
-        "files": 32398,
-        "dirs": 8464,
-        "skillMd": 905,
-        "newestUtc": "2026-07-16T08:34:53.1793699Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\skills",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -1211,24 +1010,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 55297123,
-        "mb": 52.74,
-        "files": 1076,
-        "dirs": 382,
-        "skillMd": 87,
-        "newestUtc": "2026-07-16T11:06:48.0062954Z",
-        "oldestUtc": "1985-10-26T08:15:00.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\skills-backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -1263,70 +1051,19 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
-    },
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\ccswitch-wss-solidification",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
-      "coverageAccounted": true,
-      "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
-      "rule": "人工审查。",
-      "bucket": "",
-      "groupKey": "",
-      "projectRoot": "",
-      "backupType": "",
-      "timestampUtc": null,
-      "timestampSource": null,
-      "retainRank": null,
-      "risk": "中",
-      "metadataStatus": "ok",
-      "errors": [],
-      "delegatedScanRoot": null,
-      "isReparsePoint": false,
-      "reparseTarget": null,
-      "reparseAncestor": null,
-      "reparse": {
-        "isReparsePoint": false,
-        "hasReparsePoint": false,
-        "firstReparsePoint": null,
-        "target": null
-      },
-      "automaticCandidate": false,
-      "selectedByRetention": false,
-      "applyEligible": false,
-      "requiresExplicitAuthorization": true,
-      "blockedBy": [
-        "必须人工确认路径用途和 owner"
-      ],
       "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\backups_state\\chrome-native-hosts-fix-20260701-230016",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -1335,7 +1072,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -1361,12 +1098,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\codex-launcher-visibility",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -1375,7 +1113,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -1401,12 +1139,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\codex-path-clean",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -1415,7 +1154,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -1441,12 +1180,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\codex-state-policy",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -1455,7 +1195,48 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\hermes-data-migration",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -1481,12 +1262,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\machine-path",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -1495,7 +1277,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -1521,6 +1303,7 @@
       "path": "D:\\Codex\\.codex\\backups_state\\provider-sync",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
+      "pathExists": true,
       "coverageOrigin": "scan",
       "coverageDisposition": "delegated-root",
       "coverageAccounted": true,
@@ -1559,12 +1342,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\remote-plugin-debug-20260630",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -1573,7 +1357,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -1599,12 +1383,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\serena-dashboard-guard",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -1613,7 +1398,48 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\sub2api",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -1639,6 +1465,7 @@
       "path": "D:\\Codex\\.codex\\backups_state\\provider-sync\\20260601T100726103Z",
       "scanRoot": "D:\\Codex\\.codex\\backups_state\\provider-sync",
       "itemType": "directory",
+      "pathExists": true,
       "coverageOrigin": "scan",
       "coverageDisposition": "retained",
       "coverageAccounted": true,
@@ -1689,6 +1516,7 @@
       "path": "D:\\Codex\\.codex\\backups_state\\provider-sync\\20260601T101031954Z",
       "scanRoot": "D:\\Codex\\.codex\\backups_state\\provider-sync",
       "itemType": "directory",
+      "pathExists": true,
       "coverageOrigin": "scan",
       "coverageDisposition": "retained",
       "coverageAccounted": true,
@@ -1739,6 +1567,7 @@
       "path": "D:\\Codex\\.codex\\backups_state\\provider-sync\\20260713T145129356Z",
       "scanRoot": "D:\\Codex\\.codex\\backups_state\\provider-sync",
       "itemType": "directory",
+      "pathExists": true,
       "coverageOrigin": "scan",
       "coverageDisposition": "retained",
       "coverageAccounted": true,
@@ -1773,12 +1602,12 @@
       "blockedBy": [],
       "stats": {
         "exists": true,
-        "bytes": 2925985,
+        "bytes": 2925792,
         "mb": 2.79,
         "files": 6,
         "dirs": 2,
         "skillMd": 0,
-        "newestUtc": "2026-07-13T14:51:29.3567798Z",
+        "newestUtc": "2026-07-16T17:21:10.7022409Z",
         "oldestUtc": "2026-07-13T14:51:29.3537756Z",
         "reparsePointsSkipped": 0,
         "inaccessibleItems": 0,
@@ -1792,6 +1621,7 @@
       "path": "D:\\Codex\\.codex\\backups_state\\provider-sync\\20260601T100726103Z",
       "scanRoot": "D:\\Codex\\.codex\\backups_state\\provider-sync",
       "itemType": "directory",
+      "pathExists": true,
       "coverageOrigin": "scan",
       "coverageDisposition": "retained",
       "coverageAccounted": true,
@@ -1842,6 +1672,7 @@
       "path": "D:\\Codex\\.codex\\backups_state\\provider-sync\\20260601T101031954Z",
       "scanRoot": "D:\\Codex\\.codex\\backups_state\\provider-sync",
       "itemType": "directory",
+      "pathExists": true,
       "coverageOrigin": "scan",
       "coverageDisposition": "retained",
       "coverageAccounted": true,
@@ -1892,6 +1723,7 @@
       "path": "D:\\Codex\\.codex\\backups_state\\provider-sync\\20260713T145129356Z",
       "scanRoot": "D:\\Codex\\.codex\\backups_state\\provider-sync",
       "itemType": "directory",
+      "pathExists": true,
       "coverageOrigin": "scan",
       "coverageDisposition": "retained",
       "coverageAccounted": true,
@@ -1926,12 +1758,12 @@
       "blockedBy": [],
       "stats": {
         "exists": true,
-        "bytes": 2925985,
+        "bytes": 2925792,
         "mb": 2.79,
         "files": 6,
         "dirs": 2,
         "skillMd": 0,
-        "newestUtc": "2026-07-13T14:51:29.3567798Z",
+        "newestUtc": "2026-07-16T17:21:10.7022409Z",
         "oldestUtc": "2026-07-13T14:51:29.3537756Z",
         "reparsePointsSkipped": 0,
         "inaccessibleItems": 0,
@@ -1944,6 +1776,7 @@
       "path": "D:\\Codex\\.codex-c-backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -1978,24 +1811,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\.backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2030,24 +1852,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\.tmp\\bundled-marketplaces",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2082,24 +1893,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 136105459,
-        "mb": 129.8,
-        "files": 1560,
-        "dirs": 343,
-        "skillMd": 15,
-        "newestUtc": "2026-07-16T10:20:56.7909958Z",
-        "oldestUtc": "2026-05-31T03:00:19.8211509Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2132,24 +1932,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 2174142575,
-        "mb": 2073.42,
-        "files": 5151,
-        "dirs": 1939,
-        "skillMd": 379,
-        "newestUtc": "2026-07-16T11:28:42.2959088Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\_autosave",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2184,24 +1973,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 77465,
-        "mb": 0.07,
-        "files": 17,
-        "dirs": 17,
-        "skillMd": 0,
-        "newestUtc": "2026-07-12T23:27:11.5825817Z",
-        "oldestUtc": "2026-06-26T08:00:06.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\auth.json",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2234,24 +2012,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\cache",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2284,24 +2051,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\install_state.json",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2334,24 +2090,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 255,
-        "mb": 0.0,
-        "files": 1,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": "2026-07-16T00:08:39.6956768Z",
-        "oldestUtc": "2026-07-16T00:08:39.6956768Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\login_runtime\\.tmp\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2386,24 +2131,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\login_runtime\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2438,24 +2172,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 124829335,
-        "mb": 119.05,
-        "files": 2377,
-        "dirs": 863,
-        "skillMd": 177,
-        "newestUtc": "2026-07-14T01:31:54.8406621Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2488,24 +2211,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\profile.json",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2538,24 +2250,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\quota_cache.json",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2588,24 +2289,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 49196,
-        "mb": 0.05,
-        "files": 1,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": "2026-07-16T11:37:40.1963515Z",
-        "oldestUtc": "2026-07-16T11:37:40.1963515Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\refresh_runtime\\.tmp",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2640,24 +2330,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\refresh_runtime\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2692,24 +2371,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 530174328,
-        "mb": 505.61,
-        "files": 2538,
-        "dirs": 946,
-        "skillMd": 190,
-        "newestUtc": "2026-07-16T08:37:07.5877810Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\sqlite",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2742,24 +2410,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2794,24 +2451,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\plugins\\cache",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2844,24 +2490,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 118965359,
-        "mb": 113.45,
-        "files": 2174,
-        "dirs": 868,
-        "skillMd": 182,
-        "newestUtc": "2026-07-16T10:21:06.8205325Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 1,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\run-evidence",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2896,24 +2531,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 4255548341,
-        "mb": 4058.41,
-        "files": 32398,
-        "dirs": 8464,
-        "skillMd": 905,
-        "newestUtc": "2026-07-16T08:34:53.1793699Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\skills",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2946,24 +2570,13 @@
       "applyEligible": false,
       "requiresExplicitAuthorization": false,
       "blockedBy": [],
-      "stats": {
-        "exists": true,
-        "bytes": 55297123,
-        "mb": 52.74,
-        "files": 1076,
-        "dirs": 382,
-        "skillMd": 87,
-        "newestUtc": "2026-07-16T11:06:48.0062954Z",
-        "oldestUtc": "1985-10-26T08:15:00.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\skills-backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -2998,19 +2611,376 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\chrome-native-hosts-fix-20260701-230016",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\codex-launcher-visibility",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\codex-path-clean",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\codex-state-policy",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\hermes-data-migration",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\machine-path",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\remote-plugin-debug-20260630",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\serena-dashboard-guard",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\sub2api",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
     }
   ],
   "manualReview": [
@@ -3018,6 +2988,7 @@
       "path": "D:\\Codex\\.codex-c-backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3052,24 +3023,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\.backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3104,24 +3064,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\.tmp\\bundled-marketplaces",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3156,24 +3105,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 136105459,
-        "mb": 129.8,
-        "files": 1560,
-        "dirs": 343,
-        "skillMd": 15,
-        "newestUtc": "2026-07-16T10:20:56.7909958Z",
-        "oldestUtc": "2026-05-31T03:00:19.8211509Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\_autosave",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3208,24 +3146,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 77465,
-        "mb": 0.07,
-        "files": 17,
-        "dirs": 17,
-        "skillMd": 0,
-        "newestUtc": "2026-07-12T23:27:11.5825817Z",
-        "oldestUtc": "2026-06-26T08:00:06.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\login_runtime\\.tmp\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3260,24 +3187,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\login_runtime\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3312,24 +3228,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 124829335,
-        "mb": 119.05,
-        "files": 2377,
-        "dirs": 863,
-        "skillMd": 177,
-        "newestUtc": "2026-07-14T01:31:54.8406621Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\refresh_runtime\\.tmp",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3364,24 +3269,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\account_backup\\windows\\refresh_runtime\\plugins",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3416,24 +3310,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 530174328,
-        "mb": 505.61,
-        "files": 2538,
-        "dirs": 946,
-        "skillMd": 190,
-        "newestUtc": "2026-07-16T08:37:07.5877810Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3468,24 +3351,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\run-evidence",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": true,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3520,24 +3392,13 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": true,
-        "bytes": 4255548341,
-        "mb": 4058.41,
-        "files": 32398,
-        "dirs": 8464,
-        "skillMd": 905,
-        "newestUtc": "2026-07-16T08:34:53.1793699Z",
-        "oldestUtc": "1970-01-01T00:00:01.0000000Z",
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 0,
-        "treeSha256": null
-      }
+      "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\skills-backups",
       "scanRoot": null,
       "itemType": "policy-path",
+      "pathExists": false,
       "coverageOrigin": "policy-guardrail",
       "coverageDisposition": "protected",
       "coverageAccounted": true,
@@ -3572,70 +3433,19 @@
       "blockedBy": [
         "必须人工确认路径用途和 owner"
       ],
-      "stats": {
-        "exists": false,
-        "bytes": 0,
-        "mb": 0.0,
-        "files": 0,
-        "dirs": 0,
-        "skillMd": 0,
-        "newestUtc": null,
-        "oldestUtc": null,
-        "reparsePointsSkipped": 0,
-        "inaccessibleItems": 1,
-        "treeSha256": null
-      }
-    },
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\ccswitch-wss-solidification",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
-      "coverageAccounted": true,
-      "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
-      "rule": "人工审查。",
-      "bucket": "",
-      "groupKey": "",
-      "projectRoot": "",
-      "backupType": "",
-      "timestampUtc": null,
-      "timestampSource": null,
-      "retainRank": null,
-      "risk": "中",
-      "metadataStatus": "ok",
-      "errors": [],
-      "delegatedScanRoot": null,
-      "isReparsePoint": false,
-      "reparseTarget": null,
-      "reparseAncestor": null,
-      "reparse": {
-        "isReparsePoint": false,
-        "hasReparsePoint": false,
-        "firstReparsePoint": null,
-        "target": null
-      },
-      "automaticCandidate": false,
-      "selectedByRetention": false,
-      "applyEligible": false,
-      "requiresExplicitAuthorization": true,
-      "blockedBy": [
-        "必须人工确认路径用途和 owner"
-      ],
       "stats": null
     },
     {
       "path": "D:\\Codex\\.codex\\backups_state\\chrome-native-hosts-fix-20260701-230016",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -3644,7 +3454,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -3670,12 +3480,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\codex-launcher-visibility",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -3684,7 +3495,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -3710,12 +3521,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\codex-path-clean",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -3724,7 +3536,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -3750,12 +3562,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\codex-state-policy",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -3764,7 +3577,48 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\hermes-data-migration",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -3790,12 +3644,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\machine-path",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -3804,7 +3659,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -3830,12 +3685,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\remote-plugin-debug-20260630",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -3844,7 +3700,7 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -3870,12 +3726,13 @@
       "path": "D:\\Codex\\.codex\\backups_state\\serena-dashboard-guard",
       "scanRoot": "D:\\Codex\\.codex\\backups_state",
       "itemType": "directory",
-      "coverageOrigin": "scan",
-      "coverageDisposition": "gap",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
       "coverageAccounted": true,
       "requiresManualReview": true,
-      "blocksCoverage": true,
-      "reason": "未知 backups_state 直接子项。",
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
       "rule": "人工审查。",
       "bucket": "",
       "groupKey": "",
@@ -3884,7 +3741,48 @@
       "timestampUtc": null,
       "timestampSource": null,
       "retainRank": null,
-      "risk": "中",
+      "risk": "高",
+      "metadataStatus": "ok",
+      "errors": [],
+      "delegatedScanRoot": null,
+      "isReparsePoint": false,
+      "reparseTarget": null,
+      "reparseAncestor": null,
+      "reparse": {
+        "isReparsePoint": false,
+        "hasReparsePoint": false,
+        "firstReparsePoint": null,
+        "target": null
+      },
+      "automaticCandidate": false,
+      "selectedByRetention": false,
+      "applyEligible": false,
+      "requiresExplicitAuthorization": true,
+      "blockedBy": [
+        "必须人工确认路径用途和 owner"
+      ],
+      "stats": null
+    },
+    {
+      "path": "D:\\Codex\\.codex\\backups_state\\sub2api",
+      "scanRoot": "D:\\Codex\\.codex\\backups_state",
+      "itemType": "directory",
+      "pathExists": true,
+      "coverageOrigin": "policy-guardrail",
+      "coverageDisposition": "protected",
+      "coverageAccounted": true,
+      "requiresManualReview": true,
+      "blocksCoverage": false,
+      "reason": "受管主机维护回滚状态，仅人工审查。",
+      "rule": "人工审查。",
+      "bucket": "",
+      "groupKey": "",
+      "projectRoot": "",
+      "backupType": "",
+      "timestampUtc": null,
+      "timestampSource": null,
+      "retainRank": null,
+      "risk": "高",
       "metadataStatus": "ok",
       "errors": [],
       "delegatedScanRoot": null,
@@ -3907,68 +3805,34 @@
       "stats": null
     }
   ],
-  "unclassifiedCoverageGaps": [
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\ccswitch-wss-solidification",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "reason": "未知 backups_state 直接子项。"
-    },
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\chrome-native-hosts-fix-20260701-230016",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "reason": "未知 backups_state 直接子项。"
-    },
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\codex-launcher-visibility",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "reason": "未知 backups_state 直接子项。"
-    },
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\codex-path-clean",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "reason": "未知 backups_state 直接子项。"
-    },
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\codex-state-policy",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "reason": "未知 backups_state 直接子项。"
-    },
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\machine-path",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "reason": "未知 backups_state 直接子项。"
-    },
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\remote-plugin-debug-20260630",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "reason": "未知 backups_state 直接子项。"
-    },
-    {
-      "path": "D:\\Codex\\.codex\\backups_state\\serena-dashboard-guard",
-      "scanRoot": "D:\\Codex\\.codex\\backups_state",
-      "reason": "未知 backups_state 直接子项。"
-    }
-  ],
+  "unclassifiedCoverageGaps": [],
   "coverageAccounted": true,
-  "coverageComplete": false,
+  "coverageComplete": true,
   "coverageNotes": [
     "覆盖证明仅适用于显式 declaredScanRoots，不声称扫描全盘。",
-    "每个成功枚举的直接子项恰好分类一次。"
+    "每个成功枚举的直接子项恰好分类一次。",
+    "policy-guardrail 路径只记录根路径元数据，不递归统计。"
   ],
   "errors": [],
   "summary": {
     "declaredScanRootCount": 3,
     "evaluatedRootCount": 3,
-    "coverageItemCount": 33,
+    "coverageItemCount": 34,
     "candidateCount": 0,
     "retainedCount": 3,
-    "protectedCount": 21,
-    "manualReviewCount": 19,
-    "gapCount": 8,
+    "protectedCount": 30,
+    "manualReviewCount": 20,
+    "manualReviewExistingCount": 14,
+    "manualReviewAbsentCount": 6,
+    "manualReviewExistenceUnknownCount": 0,
+    "gapCount": 0,
     "candidateBytes": 0,
     "candidateMb": 0.0,
-    "manualReviewBytes": 5046734928,
-    "manualReviewMb": 4812.94,
+    "manualReviewStatsKnownCount": 0,
+    "manualReviewStatsUnknownCount": 14,
+    "manualReviewStatsComplete": false,
+    "manualReviewBytes": null,
+    "manualReviewMb": null,
     "candidateSkillMd": 0,
     "selectedByRetentionCount": 0,
     "lowRiskCount": 0,
@@ -3978,9 +3842,9 @@
     "manualByBucket": [
       {
         "bucket": "",
-        "count": 19
+        "count": 20
       }
     ]
   },
-  "generationId": "1be1d55f-1660-4e05-96eb-fb85d627246a"
+  "generationId": "57ad464b-e777-4e6b-ab87-15221bbecda8"
 }

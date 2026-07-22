@@ -73,7 +73,7 @@ function Invoke-HiddenPowerShellFileWrite {
         [Parameter(Mandatory)][byte[]]$Bytes
     )
 
-    $pwshPath = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+    $pwshPath = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
     $targetLiteral = "'" + $TargetPath.Replace("'", "''") + "'"
     $payload = [Convert]::ToBase64String($Bytes)
     $command = "try { [IO.File]::WriteAllBytes($targetLiteral, [Convert]::FromBase64String('$payload')); exit 0 } catch [IO.IOException] { exit (`$_.Exception.HResult -band 0xffff) } catch { exit 254 }"
@@ -701,7 +701,7 @@ try {
     $restoreWhileApplyStdout = Join-Path $fixtureRoot 'restore-while-apply.stdout.txt'
     $restoreWhileApplyStderr = Join-Path $fixtureRoot 'restore-while-apply.stderr.txt'
     $restoreWhileApplyProcess = Start-Process `
-        -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+        -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
         -ArgumentList @('-NoProfile', '-File', $restoreScript, '-EvidenceDirectory', $applyResult.evidenceDirectory, '-Apply') `
         -RedirectStandardOutput $restoreWhileApplyStdout `
         -RedirectStandardError $restoreWhileApplyStderr `
@@ -987,7 +987,7 @@ for ($processIndex = 0; $processIndex -lt 2; $processIndex++) {
     $stdoutPath = Join-Path $fixtureRoot "concurrent-$processIndex.stdout.txt"
     $stderrPath = Join-Path $fixtureRoot "concurrent-$processIndex.stderr.txt"
     $processes.Add((Start-Process `
-        -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+        -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
         -ArgumentList @(
             '-NoProfile', '-File', $invokeScript,
             '-PlanPath', $registrationPlanPublished.jsonPath,

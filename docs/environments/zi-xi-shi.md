@@ -16,10 +16,10 @@
   `PowerShell 7` / `Windows.Terminal.PowershellCore`。系统委派值为
   `DelegationTerminal={E12CFF52-A866-4C77-9A90-F570A7AA2C6B}`、
   `DelegationConsole={2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}`。
-- PowerShell Store 包版本为 `7.6.3.0`，User PATH 已把
-  `D:\Codex\tools\PowerShell\7.6.3` 放在首位。2026-07-20 完整重启 Codex 后实测：
-  当前运行 shell 与 `Get-Command pwsh.exe` 均解析到该目录的 `pwsh.exe`，两项版本均为
-  `7.6.3`，进程 PATH 也以该目录开头；此前的旧 PATH 继承边界已经验收关闭。
+- PowerShell Store 包版本为 `7.6.4.0`，User PATH 已把
+  `D:\Codex\tools\PowerShell\7.6.4` 放在首位。2026-07-22 更新后复核：
+  新进程与 `Get-Command pwsh.exe` 均解析到该目录的 `pwsh.exe`，版本为 `7.6.4`；
+  已启动的 Codex 进程仍可能继承更新前 PATH，需重启后才会采用新值。
 - `D:\Codex\.codex\config.toml` 已设
   `integratedTerminalShell = "powershell"`。这表示 Codex 的集成终端使用 PowerShell；
   Codex 内部 PTY 和后台命令仍在应用内或隐藏运行，不应为每条命令新开外部 Windows
@@ -55,6 +55,18 @@
 
 - 环境盘点的 canonical shared roots 为 `D:\Codex\tools`、`D:\Codex\envs` 和 `D:\uv`。
 - `D:\hermes-data\.local` 与 `D:\hermes-data\.npm-global` 已从共享工具根分类中退役；仍存在的 Hermes 专属内容按 Hermes authority 保留，旧报告或历史测试中的引用不能作为恢复共享入口的依据。
+
+## CodeGraph 与 Serena
+
+- CodeGraph `1.5.0` 已安装在 `D:\Codex\tools\codegraph\releases\1.5.0`，受管
+  `current\bin\codegraph.cmd` 已指向该版本；旧 `1.4.1` release 保留为回滚点。独立
+  MCP 的 `initialize`、`tools/list` 与真实查询均已通过。
+- 2026-07-22 当前为 mixed adoption：19:00 后新建的 CodeGraph MCP 会话已运行 `1.5.0`，
+  早先已启动的会话继续运行 `1.4.1` 直至自然结束。为避免中断现有服务，本次不重启、替换或终止任何旧会话；
+  新旧会话均已用进程命令行和真实 MCP 查询分别验收。
+- Serena 已更新并由现有 MCP 进程采用 `1.6.1`；真实项目激活、配置查询、文件查询和
+  76 包依赖检查均通过。上游 `1.6.1` 已直接要求 `anthropic==0.117.0`，不再需要本机
+  针对 `1.6.0` 的依赖 metadata override。
 
 ## Codex 设备连接
 

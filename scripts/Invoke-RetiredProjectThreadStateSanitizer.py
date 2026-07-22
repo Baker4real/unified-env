@@ -253,7 +253,7 @@ def check_live_cold_maintenance() -> None:
     try:
         import subprocess
 
-        pwsh = Path(r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe")
+        pwsh = Path(r"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe")
         assert_ordinary_file(pwsh, "固定 PowerShell runtime")
         command = (
             "$ErrorActionPreference='Stop';"

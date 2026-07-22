@@ -53,7 +53,7 @@ function Invoke-HiddenPowerShellFileWrite {
         [Parameter(Mandatory)][byte[]]$Bytes
     )
 
-    $pwshPath = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+    $pwshPath = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
     $targetLiteral = "'" + $TargetPath.Replace("'", "''") + "'"
     $payload = [Convert]::ToBase64String($Bytes)
     $command = "try { [IO.File]::WriteAllBytes($targetLiteral, [Convert]::FromBase64String('$payload')); exit 0 } catch [IO.IOException] { exit (`$_.Exception.HResult -band 0xffff) } catch { exit 254 }"

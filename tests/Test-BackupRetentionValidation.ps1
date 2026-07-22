@@ -17,10 +17,9 @@ function Assert-CanRemoveFixture { param([string]$Path)
     }
 }
 function New-TestDocument { param($Context,$Evaluation)
-    $candidateBytes=[int64](($Evaluation.candidates|ForEach-Object { if ($null-ne$_.stats){[int64]$_.stats.bytes}else{0}}|Measure-Object -Sum).Sum)
     $generatedAt=[datetimeoffset]::Now
     $doc=[pscustomobject][ordered]@{
-        artifactType='env-governance.backup-retention-dry-run'; schemaVersion=2; artifactMode=$Context.artifactMode
+        artifactType='env-governance.backup-retention-dry-run'; schemaVersion=3; artifactMode=$Context.artifactMode
         generatedAtLocal=$generatedAt.ToString('o',[Globalization.CultureInfo]::InvariantCulture); generatedAtUtc=$generatedAt.ToUniversalTime().ToString('o',[Globalization.CultureInfo]::InvariantCulture)
         dryRun=$true; readOnly=$true; deleteAllowed=$false; applySupported=$false; executionAllowed=$false
         CodexRoot=$Context.CodexRoot; DDriveRoot=$Context.DDriveRoot; retainCount=$Context.retainCount; policyId=$Context.policyId; policyVersion=$Context.policyVersion
@@ -55,6 +54,12 @@ try {
     $validated=Test-BackupRetentionDryRunDocument -Document $document -TrustedPolicyContext $context
     Assert-True (@($validated.candidates).Count -eq 1) '纯验证器应返回现场复算结果'
 
+    $existenceDriftPath=Join-Path $codexRoot 'run-evidence'
+    $documentExistenceItem=@($document.coverageItems|Where-Object path -ieq $existenceDriftPath)[0]
+    Assert-True($documentExistenceItem.pathExists-is[bool]-and-not$documentExistenceItem.pathExists)'基线中缺失的 guardrail 必须显式记录 pathExists=false'
+    New-Item -ItemType Directory -Path $existenceDriftPath|Out-Null
+    try{Assert-Rejected {Test-BackupRetentionDryRunDocument -Document $document -TrustedPolicyContext $context} 'guardrail 缺失到存在的现场漂移'}finally{Remove-Item -LiteralPath $existenceDriftPath -Recurse -Force}
+
     $sourcePairDir=Join-Path $fixtureRoot 'trusted-source-pair';$published=Publish-JsonMarkdownArtifactPair -Document $document -OutputDir $sourcePairDir -JsonFileName 'backup-retention-dry-run.json' -MarkdownFileName 'BACKUP-RETENTION-DRY-RUN.md' -RenderMarkdown { 'fixture' }
     Assert-True ($null-ne(Get-Command Invoke-BackupRetentionApplyFinalGate -ErrorAction SilentlyContinue)) '缺少 Invoke-BackupRetentionApplyFinalGate'
     $sourceDocument=Get-Content -Raw -LiteralPath $published.jsonPath|ConvertFrom-Json -DateKind String
@@ -64,6 +69,32 @@ try {
     [IO.File]::WriteAllText($oldManifestJson,'old-json',[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText($oldManifestMarkdown,'old-markdown',[Text.UTF8Encoding]::new($false))
     $noHookFinal=Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $context -DryRunJson $published.jsonPath -DryRunMarkdown $published.markdownPath -InitialSourceSha256 $initialSourceSha -OutputDir $finalOutput -UseAllDryRunCandidates
     Assert-True(@($noHookFinal.validatedCandidates).Count-eq1-and$noHookFinal.validatedCandidates[0].currentStats.treeSha256-match'^[0-9a-f]{64}$'-and$noHookFinal.finalAgeHours-ge0-and$noHookFinal.validatedAtUtc-is[string])'无 hook 正式路径必须执行一次完整 gate 并返回最终 freshness/tree digest'
+
+    $emptyScopeRoot=Join-Path $fixtureRoot 'empty-candidate-scope';$emptyCodexRoot=Join-Path $emptyScopeRoot '.codex';$emptyProvider=Join-Path $emptyCodexRoot 'backups_state\provider-sync'
+    New-Item -ItemType Directory -Force -Path $emptyProvider|Out-Null
+    foreach($name in @('20260701T000005Z','20260701T000004Z','20260701T000003Z','20260701T000002Z','20260701T000001Z')){New-Item -ItemType Directory -Path(Join-Path $emptyProvider $name)|Out-Null}
+    $emptyContext=New-BackupRetentionPolicyContext -ArtifactMode test -CodexRoot $emptyCodexRoot -DDriveRoot $emptyScopeRoot
+    $emptyEvaluation=Invoke-BackupRetentionEvaluation -PolicyContext $emptyContext
+    Assert-True($emptyEvaluation.coverageComplete-and@($emptyEvaluation.candidates).Count-eq0)'五个保留项必须形成零 candidate fixture'
+    $emptyDocument=New-TestDocument $emptyContext $emptyEvaluation;$emptyPairDir=Join-Path $fixtureRoot 'empty-candidate-source-pair'
+    $emptyPublished=Publish-JsonMarkdownArtifactPair -Document $emptyDocument -OutputDir $emptyPairDir -JsonFileName 'backup-retention-dry-run.json' -MarkdownFileName 'BACKUP-RETENTION-DRY-RUN.md' -RenderMarkdown { 'fixture' }
+    $emptySourceSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($emptyPublished.jsonPath))).ToLowerInvariant();$emptyOutput=Join-Path $fixtureRoot 'empty-candidate-manifest-output';$emptyMessage=$null
+    try{Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $emptyContext -DryRunJson $emptyPublished.jsonPath -DryRunMarkdown $emptyPublished.markdownPath -InitialSourceSha256 $emptySourceSha -OutputDir $emptyOutput -UseAllDryRunCandidates|Out-Null}catch{$emptyMessage=$_.Exception.Message}
+    Assert-True($emptyMessage-like'*至少需要一个 directory candidate*')"零 candidate 必须由非零类型门失败关闭，实际：$emptyMessage"
+    Assert-True(-not(Test-Path -LiteralPath $emptyOutput))'零 candidate 被拒绝时不得创建 manifest OutputDir'
+
+    $fileScopeRoot=Join-Path $fixtureRoot 'file-candidate-scope';$fileCodexRoot=Join-Path $fileScopeRoot '.codex';$fileBackupsState=Join-Path $fileCodexRoot 'backups_state'
+    New-Item -ItemType Directory -Force -Path $fileBackupsState|Out-Null
+    foreach($name in @('config.toml-20260701T000006Z','config.toml-20260701T000005Z','config.toml-20260701T000004Z','config.toml-20260701T000003Z','config.toml-20260701T000002Z','config.toml-20260701T000001Z')){[IO.File]::WriteAllText((Join-Path $fileBackupsState $name),'fixture',[Text.UTF8Encoding]::new($false))}
+    $fileContext=New-BackupRetentionPolicyContext -ArtifactMode test -CodexRoot $fileCodexRoot -DDriveRoot $fileScopeRoot
+    $fileEvaluation=Invoke-BackupRetentionEvaluation -PolicyContext $fileContext
+    Assert-True($fileEvaluation.coverageComplete-and@($fileEvaluation.candidates).Count-eq1-and$fileEvaluation.candidates[0].itemType-ceq'file')'第 6 个合法 sidecar 必须成为 file candidate fixture'
+    $fileDocument=New-TestDocument $fileContext $fileEvaluation;$filePairDir=Join-Path $fixtureRoot 'file-candidate-source-pair'
+    $filePublished=Publish-JsonMarkdownArtifactPair -Document $fileDocument -OutputDir $filePairDir -JsonFileName 'backup-retention-dry-run.json' -MarkdownFileName 'BACKUP-RETENTION-DRY-RUN.md' -RenderMarkdown { 'fixture' }
+    $fileSourceSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($filePublished.jsonPath))).ToLowerInvariant();$fileOutput=Join-Path $fixtureRoot 'file-candidate-manifest-output';$fileMessage=$null
+    try{Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $fileContext -DryRunJson $filePublished.jsonPath -DryRunMarkdown $filePublished.markdownPath -InitialSourceSha256 $fileSourceSha -OutputDir $fileOutput -UseAllDryRunCandidates|Out-Null}catch{$fileMessage=$_.Exception.Message}
+    Assert-True($fileMessage-like'*directory candidate*')"file candidate 必须由类型门失败关闭，实际：$fileMessage"
+    Assert-True(-not(Test-Path -LiteralPath $fileOutput))'file candidate 被拒绝时不得创建 manifest OutputDir'
 
     $generatedAt=[datetimeoffset]::Parse($sourceDocument.generatedAtUtc,[Globalization.CultureInfo]::InvariantCulture)
     $script:crossBoundaryClockCalls=0
@@ -103,6 +134,11 @@ try {
         & $runFinalHookCase {param($phase)Move-Item -LiteralPath $script:candidatePath -Destination $script:candidateHolding;New-Item -ItemType Junction -Path $script:candidatePath -Target $script:candidateJunctionTarget|Out-Null} 'hook 后 candidate swap 为 junction'
     }finally{if(Test-Path -LiteralPath $candidatePath){$item=Get-Item -LiteralPath $candidatePath -Force;if(($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){Remove-Item -LiteralPath $candidatePath -Force}};if(Test-Path -LiteralPath $candidateHolding){Move-Item -LiteralPath $candidateHolding -Destination $candidatePath}}
 
+    $candidateTypeHolding=Join-Path $fixtureRoot 'hook-candidate-type-holding'
+    try{
+        & $runFinalHookCase {param($phase)Move-Item -LiteralPath $script:candidatePath -Destination $script:candidateTypeHolding;[IO.File]::WriteAllText($script:candidatePath,'type-drift',[Text.UTF8Encoding]::new($false))} 'hook 后 directory candidate swap 为 file'
+    }finally{if(Test-Path -LiteralPath $candidatePath){Remove-Item -LiteralPath $candidatePath -Force};if(Test-Path -LiteralPath $candidateTypeHolding){Move-Item -LiteralPath $candidateTypeHolding -Destination $candidatePath}}
+
     $originalSourceJson=[IO.File]::ReadAllText($published.jsonPath)
     try{&$runFinalHookCase {param($phase)[IO.File]::WriteAllText($script:published.jsonPath,"$script:originalSourceJson ",[Text.UTF8Encoding]::new($false))} 'hook 后源 JSON 漂移'}finally{[IO.File]::WriteAllText($published.jsonPath,$originalSourceJson,[Text.UTF8Encoding]::new($false))}
 
@@ -127,8 +163,8 @@ try {
     foreach($case in @(
         @{n='字符串 boolean';m={param($d)$d.coverageComplete='false'}},
         @{n='非整数 schema';m={param($d)$d.schemaVersion=2.0}},
-        @{n='旧 schema';m={param($d)$d.schemaVersion=1}},
-        @{n='未来 schema';m={param($d)$d.schemaVersion=3}},
+        @{n='旧 schema';m={param($d)$d.schemaVersion=2}},
+        @{n='未来 schema';m={param($d)$d.schemaVersion=4}},
         @{n='错误 artifactType';m={param($d)$d.artifactType='forged'}},
         @{n='集合非数组';m={param($d)$d.candidates=$d.candidates[0]}},
         @{n='test policy 伪造 mode';m={param($d)$d.artifactMode='production'}},
@@ -149,10 +185,13 @@ try {
         @{n='policy extra property';m={param($d)$d.policy|Add-Member -NotePropertyName smuggled -NotePropertyValue $true}},
         @{n='policy summary 伪造';m={param($d)$d.policy.summary='forged human text'}},
         @{n='缺失 nullable reparseTarget';m={param($d)$d.candidates[0].PSObject.Properties.Remove('reparseTarget')}},
+        @{n='缺失 pathExists';m={param($d)$d.candidates[0].PSObject.Properties.Remove('pathExists')}},
+        @{n='pathExists 非 boolean';m={param($d)$d.candidates[0].pathExists='true'}},
         @{n='coverageNotes 伪造';m={param($d)$d.coverageNotes[0]='forged coverage note'}},
         @{n='evaluatedRoot enumerationStarted 伪造';m={param($d)$d.evaluatedRoots[0].enumerationStarted='2000-01-01T00:00:00.0000000Z'}},
         @{n='summary candidateCount 篡改';m={param($d)$d.summary.candidateCount=999}},
-        @{n='summary candidateBytes 篡改';m={param($d)$d.summary.candidateBytes=999999999}}
+        @{n='summary candidateBytes 篡改';m={param($d)$d.summary.candidateBytes=999999999}},
+        @{n='summary manual stats 完整性伪造';m={param($d)$d.summary.manualReviewStatsComplete=-not$d.summary.manualReviewStatsComplete}}
     )){
         $copy=Copy-Document $document; & $case.m $copy; Assert-Rejected { Test-BackupRetentionDryRunDocument -Document $copy -TrustedPolicyContext $context } $case.n
     }

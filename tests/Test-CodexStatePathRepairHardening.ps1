@@ -46,7 +46,7 @@ function New-Fixture([switch]$Scale,[switch]$FileCandidate,[switch]$NoOp) {
 }
 function Invoke-Entry([string[]]$Arguments,[hashtable]$Environment=@{}) {
     $saved=@{};try{foreach($k in $Environment.Keys){$saved[$k]=[Environment]::GetEnvironmentVariable($k,'Process');[Environment]::SetEnvironmentVariable($k,[string]$Environment[$k],'Process')}
-        $text=& 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File $Entry @Arguments 2>&1;[pscustomobject]@{ExitCode=$LASTEXITCODE;Text=($text-join[Environment]::NewLine)}
+        $text=& 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -NoProfile -File $Entry @Arguments 2>&1;[pscustomobject]@{ExitCode=$LASTEXITCODE;Text=($text-join[Environment]::NewLine)}
     }finally{foreach($k in $Environment.Keys){[Environment]::SetEnvironmentVariable($k,$saved[$k],'Process')}}
 }
 function Read-Result($Run){if($Run.ExitCode-ne 0){throw "command failed: $($Run.Text)"};$Run.Text|ConvertFrom-Json -Depth 64}

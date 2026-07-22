@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
 LIVE_CODEX_HOME = Path(r"D:\Codex\.codex")
 MANIFEST_PATH = PROJECT_ROOT / "managed" / "codex-hooks" / "host-preflight-manifest.json"
 HANDLE_BOUND_POLICY_PATH = PROJECT_ROOT / "scripts" / "lib" / "CodexHookPolicy.ps1"
-FIXED_PWSH = Path(r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe")
+FIXED_PWSH = Path(r"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe")
 REGISTRY_RELATIVE_PATH = Path("process_manager") / "chat_processes.json"
 FIXTURE_MARKER_NAME = ".retired-project-process-registry-purger-fixture"
 FIXTURE_MARKER_VALUE = "retired-project-process-registry-purger-fixture-v1\n"
@@ -262,7 +262,7 @@ def read_registry(path: Path, root: Path) -> tuple[bytes, list[Any], dict[str, A
 
 
 def check_live_cold_maintenance() -> None:
-    pwsh = assert_ordinary_file(Path(r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe"), "固定 PowerShell runtime")
+    pwsh = assert_ordinary_file(Path(r"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe"), "固定 PowerShell runtime")
     command = (
         "$ErrorActionPreference='Stop';"
         "$root='C:\\Program Files\\WindowsApps\\OpenAI.Codex_';"

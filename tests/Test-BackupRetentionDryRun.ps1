@@ -51,6 +51,52 @@ function Assert-CanRemoveTestRoot {
     }
 }
 
+function Invoke-BackupRetentionScriptWithTimeout {
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$OutputDir,
+        [int]$TimeoutSeconds = 20
+    )
+
+    $pwshPath = Join-Path $PSHOME 'pwsh.exe'
+    Assert-True -Condition (Test-Path -LiteralPath $pwshPath -PathType Leaf) -Message "找不到当前 PowerShell 运行时：$pwshPath"
+    $escapedScriptPath = $ScriptPath.Replace("'", "''")
+    $escapedOutputDir = $OutputDir.Replace("'", "''")
+    $command = "& '$escapedScriptPath' -OutputDir '$escapedOutputDir' | ConvertTo-Json -Compress"
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $pwshPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.ArgumentList.Add('-NoProfile')
+    $startInfo.ArgumentList.Add('-Command')
+    $startInfo.ArgumentList.Add($command)
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $completed = $process.WaitForExit($TimeoutSeconds * 1000)
+    if (-not $completed) {
+        $process.Kill($true)
+        $process.WaitForExit()
+        throw "生产 backup retention dry-run 在 $TimeoutSeconds 秒内未完成。"
+    }
+
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+    if ($process.ExitCode -ne 0) {
+        throw "生产 backup retention dry-run 失败，exitCode=$($process.ExitCode)：$($stderr.Trim())"
+    }
+    if ([string]::IsNullOrWhiteSpace($stdout)) {
+        throw '生产 backup retention dry-run 没有返回 JSON 结果。'
+    }
+    return $stdout | ConvertFrom-Json
+}
+
 $scriptPath = Join-Path $ProjectRoot "scripts\New-BackupRetentionDryRun.ps1"
 $publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
 $testRoot = Join-Path $ProjectRoot ("reports\backup-retention-dry-run-test-{0}" -f ([guid]::NewGuid().ToString('N')))
@@ -66,7 +112,7 @@ try {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 
-    $result = & $scriptPath -OutputDir $testRoot
+    $result = Invoke-BackupRetentionScriptWithTimeout -ScriptPath $scriptPath -OutputDir $testRoot
     Assert-True -Condition ([bool]$result.dryRun) -Message "脚本没有返回 dryRun=true"
     Assert-True -Condition ([bool]$result.readOnly) -Message "脚本没有返回 readOnly=true"
     Assert-True -Condition (-not [bool]$result.deleteAllowed) -Message "脚本不应允许删除"
@@ -79,7 +125,7 @@ try {
     $plan = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     . $publisherPath
     Assert-True -Condition ($plan.artifactType -ceq 'env-governance.backup-retention-dry-run') -Message "artifactType 不正确"
-    Assert-True -Condition ($plan.schemaVersion -eq 2) -Message "schemaVersion 必须为 2"
+    Assert-True -Condition ($plan.schemaVersion -eq 3) -Message "schemaVersion 必须为 3"
     Assert-True -Condition ($plan.artifactMode -ceq 'production') -Message "默认产物必须是 production"
     foreach ($property in @('declaredScanRoots', 'evaluatedRoots', 'coverageItems', 'retainedItems', 'coverageAccounted', 'coverageComplete', 'coverageNotes', 'unclassifiedCoverageGaps', 'errors')) {
         Assert-Property -Object $plan -Name $property
@@ -99,6 +145,26 @@ try {
     Assert-True -Condition ([bool]$plan.policy.strictTimestampRequired) -Message "策略必须要求严格时间戳"
     Assert-True -Condition ([bool]$plan.policy.runtimeSharedDirsExcluded) -Message "策略必须排除 runtime shared dirs"
     Assert-True -Condition ([bool]$plan.policy.authAutosaveExcludedByDefault) -Message "策略必须默认排除 auth autosave"
+
+    foreach ($property in @('manualReviewExistingCount', 'manualReviewAbsentCount', 'manualReviewExistenceUnknownCount', 'manualReviewStatsKnownCount', 'manualReviewStatsUnknownCount', 'manualReviewStatsComplete', 'manualReviewBytes', 'manualReviewMb')) {
+        Assert-Property -Object $plan.summary -Name $property
+    }
+    $manualExisting = @($plan.manualReview | Where-Object { $_.pathExists -is [bool] -and $_.pathExists })
+    $manualAbsent = @($plan.manualReview | Where-Object { $_.pathExists -is [bool] -and -not $_.pathExists })
+    $manualExistenceUnknown = @($plan.manualReview | Where-Object { $_.pathExists -isnot [bool] })
+    $manualStatsKnown = @($manualExisting | Where-Object { $null -ne $_.stats -and $_.metadataStatus -ceq 'ok' -and @($_.errors).Count -eq 0 }).Count
+    $manualStatsUnknown = @($manualExisting).Count - $manualStatsKnown + $manualExistenceUnknown.Count
+    Assert-True -Condition ($plan.summary.manualReviewExistingCount -eq $manualExisting.Count) -Message '人工审查存在路径数必须与明细一致'
+    Assert-True -Condition ($plan.summary.manualReviewAbsentCount -eq $manualAbsent.Count) -Message '人工审查缺失路径数必须与明细一致'
+    Assert-True -Condition ($plan.summary.manualReviewExistenceUnknownCount -eq $manualExistenceUnknown.Count) -Message '人工审查存在性未知数必须与明细一致'
+    Assert-True -Condition ($plan.summary.manualReviewStatsKnownCount -eq $manualStatsKnown) -Message '人工审查已统计项数必须与明细一致'
+    Assert-True -Condition ($plan.summary.manualReviewStatsUnknownCount -eq $manualStatsUnknown) -Message '人工审查未统计项数必须与明细一致'
+    Assert-True -Condition ([bool]$plan.summary.manualReviewStatsComplete -eq ($manualStatsUnknown -eq 0)) -Message '人工审查统计完整性必须与明细一致'
+    if ($manualStatsUnknown -eq 0) {
+        Assert-True -Condition ($null -ne $plan.summary.manualReviewBytes -and $null -ne $plan.summary.manualReviewMb) -Message '完整人工审查统计必须给出总大小'
+    } else {
+        Assert-True -Condition ($null -eq $plan.summary.manualReviewBytes -and $null -eq $plan.summary.manualReviewMb) -Message '未递归统计的人工审查总大小必须为未知，而不是 0'
+    }
 
     $protectedPaths = @($plan.protected | ForEach-Object { $_.path })
     foreach ($required in @(
@@ -169,6 +235,10 @@ try {
     $report = Get-Content -LiteralPath $reportPath -Raw
     foreach ($expected in @("只读", "不删除", "deleteAllowed=false", "auth.json", "profile.json", "plugins", "cache", "sqlite", "人工审查", "严格目录名时间戳", "reparse point", "显式 allowlist")) {
         Assert-True -Condition $report.Contains($expected) -Message "报告缺少预期文本：$expected"
+    }
+    Assert-True -Condition $report.Contains('人工审查大小') -Message '报告必须披露人工审查大小统计状态'
+    if ($manualStatsUnknown -gt 0) {
+        Assert-True -Condition $report.Contains('总大小未知') -Message '报告不得把未递归统计的人工审查大小表述为 0'
     }
     Assert-True -Condition (-not $report.Contains('$(@')) -Message "报告含有 PowerShell 插值残留"
     Assert-True -Condition (-not ($report -match "、\r?\nun-evidence")) -Message "报告含有 PowerShell 反引号转义污染"

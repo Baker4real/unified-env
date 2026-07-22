@@ -18,9 +18,9 @@
 - 所有新输出和测试 fixture 必须位于 `D:\`；路径操作使用绝对路径、`-LiteralPath` 和 reparse point 父链检查。
 - inventory schema 固定为 3，`artifactType="env-governance.inventory"`。
 - readiness schema 固定为 3，`artifactType="env-governance.update-readiness"`，只接受 inventory 3。
-- backup dry-run schema 固定为 2，`artifactType="env-governance.backup-retention-dry-run"`。
-- apply manifest schema 固定为 2，`artifactType="env-governance.backup-retention-apply-manifest"`，只接受 production dry-run 2。
-- backup production context 固定：`CodexRoot=D:\Codex\.codex`、`DDriveRoot=D:\Codex`、`retainCount=5`、`policyId=env-governance.backup-retention`、`policyVersion=2`。
+- backup dry-run 现役 schema 固定为 3，`artifactType="env-governance.backup-retention-dry-run"`；下方 Task 5 的 schema 2 表述只保留为历史实施记录。
+- 历史实施 baseline 中 apply manifest schema 固定为 2，`artifactType="env-governance.backup-retention-apply-manifest"`；当前实现已转为只接受 production dry-run 3。
+- backup production context 固定：`CodexRoot=D:\Codex\.codex`、`DDriveRoot=D:\Codex`、`retainCount=5`、`policyId=env-governance.backup-retention`、`policyVersion=3`。
 - 严格 JSON 校验不得使用 `[bool]"false"` 或其他 PowerShell 宽松强转。
 - 报告是脚本可再生产物；不得手工修改 JSON/Markdown 快照。
 - 每个生产改动前必须先运行能稳定失败的专项测试；失败原因必须是目标行为尚未实现。
@@ -295,7 +295,7 @@ git commit -m "fix: derive readiness advice from trusted facts"
 
 ---
 
-### Task 5：备份覆盖账本与 dry-run schema 2
+### Task 5：备份覆盖账本与 dry-run schema 2（历史实施基线；现役为 schema 3）
 
 **风险：** 高。覆盖假阳性可能导致未来误删；任务后必须 spec/质量评审和独立对抗性审查。
 
@@ -323,7 +323,7 @@ fixture root 包含未知目录和未知文件；断言两者均为 `coverageDis
 
 production context 必须精确匹配全局常量；fixture 必须 `artifactMode=test`。枚举使用 `Get-ChildItem -Force` 包含文件/目录，记录 started/completed/errors、canonical snapshot 和 SHA-256。
 
-- [ ] **Step 4：实现 schema 2 dry-run 编排**
+- [ ] **Step 4：实现 schema 2 dry-run 编排（历史步骤）**
 
 入口只做参数门、context 构造、evaluation、Markdown 渲染、共享发布。未知项进入 gap+manualReview，不能静默 `continue`。
 
@@ -353,7 +353,7 @@ git commit -m "feat: prove backup retention coverage"
 
 **接口：**
 
-- Consumes `BackupRetentionPolicy.ps1`, publisher and production dry-run 2.
+- Historical task baseline consumed production dry-run 2; the current implementation consumes production dry-run 3 through the same `BackupRetentionPolicy.ps1` and publisher boundary.
 - Produces `Test-BackupRetentionDryRunDocument -Document <object> -TrustedPolicyContext <context>`，成功返回 canonical live evaluation，失败抛错。
 - Produces `Compare-BackupRetentionEvaluation` and schema 2 manifest model.
 
@@ -426,7 +426,7 @@ git commit -m "feat: harden backup apply manifest gate"
 
 - inventory 3 有三个 path scope，Python launcher/runtime owner 可见；
 - readiness 3 不含已知矛盾文案；
-- backup dry-run 2 对每个 declared root 有 coverage 结果；
+- 历史 baseline 的 backup dry-run 2 对每个 declared root 有 coverage 结果；现役报告为 schema 3；
 - `coverageComplete=false` 时 apply manifest 明确被阻止且不生成新产物；
 - JSON/Markdown generationId/hash 配对通过。
 

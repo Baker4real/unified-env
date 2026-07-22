@@ -52,7 +52,7 @@ function Invoke-CompetingFileWrite {
     $literal="'"+$Path.Replace("'","''")+"'";$payload=[Convert]::ToBase64String($Bytes)
     $command="try { [IO.File]::WriteAllBytes($literal,[Convert]::FromBase64String('$payload')); exit 0 } catch [IO.IOException] { exit (`$_.Exception.HResult -band 0xffff) } catch { exit 254 }"
     $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    $process=Start-Process -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -ArgumentList @('-NoProfile','-EncodedCommand',$encoded) -WindowStyle Hidden -Wait -PassThru
+    $process=Start-Process -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList @('-NoProfile','-EncodedCommand',$encoded) -WindowStyle Hidden -Wait -PassThru
     return [int]$process.ExitCode
 }
 

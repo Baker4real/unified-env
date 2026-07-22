@@ -15,7 +15,7 @@ foreach ($name in @('Get-CodexHookSha256','Assert-CodexHookDPath','Invoke-CodexH
 
 $stdinBlocker = [Diagnostics.Process]::new()
 $stdinInfo = [Diagnostics.ProcessStartInfo]::new()
-$stdinInfo.FileName = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+$stdinInfo.FileName = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
 $stdinInfo.UseShellExecute = $false
 $stdinInfo.CreateNoWindow = $true
 $stdinInfo.RedirectStandardInput = $true
@@ -100,7 +100,7 @@ Assert-True (Test-Path -LiteralPath $githubHarness -PathType Leaf) 'GitHub entry
 function Invoke-GitHubEntryFixture([string]$Case,[bool]$Json,[bool]$Strict){
     $args=@('-NoProfile','-File',$githubHarness,'-Case',$Case)
     if($Json){$args+='-Json'};if($Strict){$args+='-Strict'}
-    Invoke-CodexHookProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -ArgumentList $args
+    Invoke-CodexHookProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList $args
 }
 $preFailure=Invoke-GitHubEntryFixture 'pre-payload' $true $false
 Assert-True ($preFailure.exitCode -eq 0) '非 Strict JSON pre-payload failure 必须 fail-open'
@@ -222,13 +222,13 @@ Assert-True (-not $again.changed) '幂等写入 changed=false'
 
 $marker=Join-Path $fixtureRoot 'mutex-ready.txt'
 $holderCode='$m=[Threading.Mutex]::new($false,''Local\CodexRuntimeTestBusy'');[void]$m.WaitOne();[IO.File]::WriteAllText('''+$marker+''',''ready'');Start-Sleep -Seconds 3;[void]$m.ReleaseMutex();$m.Dispose()'
-$holder=Start-Process -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -ArgumentList @('-NoProfile','-Command',$holderCode) -WindowStyle Hidden -PassThru
+$holder=Start-Process -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList @('-NoProfile','-Command',$holderCode) -WindowStyle Hidden -PassThru
 try{for($i=0;$i -lt 40 -and -not(Test-Path $marker);$i++){Start-Sleep -Milliseconds 50};Assert-True (Test-Path $marker) 'mutex holder 未就绪';Assert-Throws { Invoke-CodexHookMutex -Name 'Local\CodexRuntimeTestBusy' -ScriptBlock {} } '超时'}finally{if(-not $holder.HasExited){$holder.Kill($true)};$holder.Dispose()}
 $abandonedMarker=Join-Path $fixtureRoot 'mutex-abandoned-ready.txt'
 $abandonedCode='$m=[Threading.Mutex]::new($false,''Local\CodexRuntimeTestAbandoned'');[void]$m.WaitOne();[IO.File]::WriteAllText('''+$abandonedMarker+''',''ready'');exit 0'
-$abandoner=Start-Process -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -ArgumentList @('-NoProfile','-Command',$abandonedCode) -WindowStyle Hidden -PassThru
+$abandoner=Start-Process -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList @('-NoProfile','-Command',$abandonedCode) -WindowStyle Hidden -PassThru
 try{for($i=0;$i -lt 40 -and -not(Test-Path $abandonedMarker);$i++){Start-Sleep -Milliseconds 50};Assert-True (Test-Path $abandonedMarker) 'abandoned holder 未就绪';$abandoner.WaitForExit();$taken=Invoke-CodexHookMutex -Name 'Local\CodexRuntimeTestAbandoned' -ScriptBlock {'taken'};Assert-True ($taken -ceq 'taken') 'abandoned mutex 必须被安全接管'}finally{if(-not $abandoner.HasExited){$abandoner.Kill($true)};$abandoner.Dispose()}
-$process=Invoke-CodexHookProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -ArgumentList @('-NoProfile','-Command','[Console]::Out.Write("ok")')
+$process=Invoke-CodexHookProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList @('-NoProfile','-Command','[Console]::Out.Write("ok")')
 Assert-True ($process.exitCode -eq 0 -and $process.stdout -ceq 'ok') 'process helper 必须捕获输出与退出码'
 
 $serenaFixtureRoot='D:\Codex\projects\统一环境\reports\codex-hook-serena-fixture'
@@ -241,12 +241,12 @@ $valid="{`"hookSpecificOutput`":{`"hookEventName`":`"SessionStart`",`"additional
 $child=$null
 if($env:CODEX_SERENA_FIXTURE_MODE -ceq 'inherited'){
   $childStart=[Diagnostics.ProcessStartInfo]::new()
-  $childStart.FileName='D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+  $childStart.FileName='D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
   $childStart.UseShellExecute=$false
   $childStart.CreateNoWindow=$true
   [void]$childStart.ArgumentList.Add('-NoProfile')
   [void]$childStart.ArgumentList.Add('-Command')
-  [void]$childStart.ArgumentList.Add('Start-Sleep -Seconds 3')
+  [void]$childStart.ArgumentList.Add('Start-Sleep -Seconds 15')
   $child=[Diagnostics.Process]::Start($childStart)
   if($null -eq $child){throw 'inherited-pipe child failed to start'}
   if(-not [string]::IsNullOrWhiteSpace($env:CODEX_SERENA_CHILD_PID_PATH)){
@@ -263,8 +263,8 @@ $serenaHealthRoot='D:\Codex\projects\统一环境\reports\codex-hook-health-test
 $serenaChildPidPath=Join-Path $serenaFixtureRoot 'inherited-child.pid'
 function Invoke-SerenaActivateFixture([string]$Mode){
     if(Test-Path -LiteralPath $serenaHealthRoot){Remove-Item -LiteralPath $serenaHealthRoot -Recurse -Force}
-    $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName='D:\Codex\tools\PowerShell\7.6.3\pwsh.exe';$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardInput=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
-    foreach($arg in @('-NoProfile','-File',$serenaScript,'-VendorPath','D:\Codex\tools\PowerShell\7.6.3\pwsh.exe','-FixtureVendorScriptPath',$serenaFixtureScript,'-RuntimePath',$runtimePath,'-HealthRoot',$serenaHealthRoot,'-AllowFixture')){[void]$psi.ArgumentList.Add($arg)}
+    $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName='D:\Codex\tools\PowerShell\7.6.4\pwsh.exe';$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardInput=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
+    foreach($arg in @('-NoProfile','-File',$serenaScript,'-VendorPath','D:\Codex\tools\PowerShell\7.6.4\pwsh.exe','-FixtureVendorScriptPath',$serenaFixtureScript,'-RuntimePath',$runtimePath,'-HealthRoot',$serenaHealthRoot,'-AllowFixture')){[void]$psi.ArgumentList.Add($arg)}
     $psi.Environment['CODEX_SERENA_FIXTURE_MODE']=$Mode;$psi.Environment['CODEX_SERENA_CHILD_PID_PATH']=$serenaChildPidPath
     $p=[Diagnostics.Process]::new();$p.StartInfo=$psi;$buffer=[IO.MemoryStream]::new()
     $watch=[Diagnostics.Stopwatch]::StartNew()
@@ -281,7 +281,7 @@ try{
     if(Test-Path -LiteralPath $serenaChildPidPath){Remove-Item -LiteralPath $serenaChildPidPath -Force}
     $inheritedPipe=@(Invoke-SerenaActivateFixture 'inherited')[-1]
     Assert-True ($inheritedPipe.exitCode -ne 0) 'vendor 已退出但后代继承 pipe 时必须 fail closed'
-    Assert-True ($inheritedPipe.durationMs -lt 2000) "vendor inherited pipe drain 必须受 10 秒 manifest budget 约束；actual=$($inheritedPipe.durationMs)"
+    Assert-True ($inheritedPipe.durationMs -lt 8000) "vendor inherited pipe drain 必须在 10 秒 manifest budget 前失败；actual=$($inheritedPipe.durationMs)"
     Assert-True ($inheritedPipe.stdout.Length -eq 0) 'bounded inherited-pipe failure 不得污染 stdout'
 }finally{
     if(Test-Path -LiteralPath $serenaChildPidPath){

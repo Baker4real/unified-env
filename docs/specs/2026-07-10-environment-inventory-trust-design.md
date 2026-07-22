@@ -153,6 +153,8 @@ readiness 输出新增 `decisionInputs`，保存本次建议实际使用的分�
 
 每项另有 `requiresManualReview` 和 `blocksCoverage`。人工审查是处置动作，不参与分类互斥性；`gap`、根/子项 reparse point、不可访问和枚举异常必须 `blocksCoverage=true`。其他 disposition 可以要求人工审查，但只有明确的覆盖阻塞原因才能令 `blocksCoverage=true`。
 
+`backups_state` 中已命名的主机维护回滚目录只能进入人工审查 allowlist，不能自动成为候选；任意未来未命名目录仍必须进入 `gap` 并阻塞覆盖完整性。
+
 生产模式固定：
 
 - `artifactMode="production"`；
@@ -160,7 +162,7 @@ readiness 输出新增 `decisionInputs`，保存本次建议实际使用的分�
 - `DDriveRoot="D:\Codex"`；
 - `retainCount=5`；
 - `policyId="env-governance.backup-retention"`；
-- `policyVersion=2`。
+- `policyVersion=3`。
 
 测试可以使用 fixture 根，但产物必须标为 `artifactMode="test"`；apply 无条件拒绝测试模式。生产模式若收到不同根、保留数量或 policy 值，必须失败，不能仅以“仍在 D 盘”为由接受。
 
@@ -176,6 +178,8 @@ readiness 输出新增 `decisionInputs`，保存本次建议实际使用的分�
 
 每个 `evaluatedRoots` 条目记录 `enumerationStarted`、`enumerationCompleted`、`errors`、直接子项规范路径快照、项目类型、reparse 状态、分类计数和快照 SHA-256。覆盖核对使用规范化绝对路径作为身份键。每个直接子项必须恰好进入一个父根分类；`delegated-root` 的目标必须对应另一个实际完成的 `evaluatedRoots` 条目，否则覆盖仍为不完整。
 
+每个 coverage item 还必须有 nullable boolean `pathExists`：扫描得到的直接子项为 `true`，scan-root 与 policy-guardrail 来自当次路径链元数据。保护路径可以不递归统计内容，但不得因 `stats=null` 丢失存在/缺失状态；现场存在性漂移必须使 apply 验证失败。人工审查汇总分别记录存在、缺失和存在性未知的路径，缺失路径不计入“大小未知”。
+
 `delegated-root` 的目标必须严格等于当前子项的规范路径、是父扫描根的直接子项，并严格等于另一个 canonical `declaredScanRoots` 条目。委托图必须无自引用、无环，且每个被委托根只有一个父级归属。
 
 ### 5. Apply manifest 安全门
@@ -185,7 +189,8 @@ readiness 输出新增 `decisionInputs`，保存本次建议实际使用的分�
 - `artifactType="env-governance.backup-retention-dry-run"`；
 - `coverageComplete=true`；
 - `unclassifiedCoverageGaps` 为空；
-- 输入 JSON 的 `schemaVersion` 必须严格等于 2，且包含 `evaluatedRoots`、`coverageComplete`、`unclassifiedCoverageGaps` 和互斥 disposition 统计；
+- 输入 JSON 的 `schemaVersion` 必须严格等于 3，且包含 `evaluatedRoots`、`coverageComplete`、`unclassifiedCoverageGaps` 和互斥 disposition 统计；
+- apply manifest 当前只支持 `itemType="directory"` 的 candidate；任何 file candidate 必须在创建输出目录前失败关闭，不得生成递归删除目录操作。
 - 每个候选仍满足既有 D 盘、路径、reparse point、数量和体积校验。
 
 解析必须严格校验 JSON 原生类型：版本是整数、布尔字段是 boolean、必需集合是数组；不得把字符串 `"false"` 强制转换为真值。还要校验候选规范路径唯一、分类集合互斥、计数守恒、所有路径属于声明根，并保留现有未来时间与 24 小时 freshness gate。
@@ -273,9 +278,10 @@ flowchart LR
 - inventory schema 从 2 升到 3；旧消费者可继续读取兼容 `pathEntries`；
 - readiness schema 从 2 升到 3，记录 inventory schema 版本；
 - backup dry-run schema 从 1 升到 2，apply manifest schema 从 1 升到 2；
+- backup dry-run 随后从 2 升到 3：未递归统计的人工审查路径以 `null` 表示未知大小，并公布已知/未知数量和完整性状态；
 - 四类 JSON 分别使用 `env-governance.inventory`、`env-governance.update-readiness`、`env-governance.backup-retention-dry-run`、`env-governance.backup-retention-apply-manifest` 作为 `artifactType`；
 - readiness 3 只接受 inventory 3，并拒绝缺少 `pathScopes` 或 origin 字段的输入；
-- apply manifest 2 只接受 backup dry-run 2；旧版、未来版或缺少必需字段的输入均失败，不做宽松降级；
+- apply manifest 2 只接受 backup dry-run 3；旧版、未来版或缺少必需字段的输入均失败，不做宽松降级；
 - 旧 backup dry-run 一律视为覆盖未知，不能生成新 apply manifest；
 - 当前已生成但存在已知缺陷的报告，在实现后由脚本覆盖重建，不手工编辑。
 

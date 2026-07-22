@@ -145,6 +145,14 @@ def _is_under(path: Path, root: Path) -> bool:
         return False
 
 
+def _is_lexically_under(path: Path, root: Path) -> bool:
+    try:
+        path.absolute().relative_to(root.absolute())
+        return True
+    except ValueError:
+        return False
+
+
 def _read_stable(path: Path, *, label: str) -> tuple[bytes, os.stat_result]:
     """Read one file and reject a replacement while it is being read."""
 
@@ -365,29 +373,53 @@ def _source_for(
     return result
 
 
-def _scan_skill_files(root: Path, *, scope: str) -> tuple[list[Path], list[str]]:
+def _scan_skill_files(
+    root: Path,
+    *,
+    scope: str,
+) -> tuple[list[Path], list[str], dict[str, dict[str, Any]]]:
     found: list[Path] = []
     skipped_reparse: list[str] = []
+    visited_directories: dict[str, dict[str, Any]] = {}
     root_key = root.resolve()
-    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+
+    def onerror(error: OSError) -> None:
+        raise CatalogError(f"无法完整扫描 {scope} 根目录：{error}") from error
+
+    for current, directories, files in os.walk(
+        root,
+        topdown=True,
+        followlinks=False,
+        onerror=onerror,
+    ):
         current_path = Path(current)
+        visited_directories[_path_key(current_path)] = {
+            "path": str(current_path.absolute()),
+            "identity": _stat_identity(current_path.lstat()),
+            "scanned": True,
+        }
         safe_directories: list[str] = []
         for directory in directories:
-            if directory.casefold() in _EXCLUDED_DIRS or directory.casefold().startswith("_disabled-"):
-                continue
             child = current_path / directory
             if _is_reparse(child):
                 skipped_reparse.append(str(child))
+                continue
+            if directory.casefold() in _EXCLUDED_DIRS or directory.casefold().startswith("_disabled-"):
+                visited_directories[_path_key(child)] = {
+                    "path": str(child.absolute()),
+                    "identity": _stat_identity(child.lstat()),
+                    "scanned": False,
+                }
                 continue
             safe_directories.append(directory)
         directories[:] = safe_directories
 
         for filename in files:
-            if filename != "SKILL.md":
-                continue
             candidate = current_path / filename
             if _is_reparse(candidate):
                 skipped_reparse.append(str(candidate))
+                continue
+            if filename != "SKILL.md":
                 continue
             try:
                 resolved = candidate.resolve()
@@ -395,7 +427,173 @@ def _scan_skill_files(root: Path, *, scope: str) -> tuple[list[Path], list[str]]
             except (OSError, ValueError) as exc:
                 raise CatalogError(f"发现越过 {scope} 根目录的 SKILL.md：{candidate}") from exc
             found.append(candidate)
-    return sorted(found, key=lambda item: _path_key(item)), skipped_reparse
+    return (
+        sorted(found, key=lambda item: _path_key(item)),
+        sorted(set(skipped_reparse), key=str.casefold),
+        visited_directories,
+    )
+
+
+def _stat_identity(stat_result: os.stat_result) -> tuple[Any, ...]:
+    return (
+        getattr(stat_result, "st_dev", None),
+        getattr(stat_result, "st_ino", None),
+        stat_result.st_size,
+        stat_result.st_mtime_ns,
+        getattr(stat_result, "st_ctime_ns", None),
+        getattr(stat_result, "st_file_attributes", None),
+        getattr(stat_result, "st_reparse_tag", None),
+    )
+
+
+def _direct_reparse_target(alias: Path, raw: str | None = None) -> Path:
+    raw = os.readlink(alias) if raw is None else raw
+    if os.name == "nt" and raw.startswith("\\\\?\\"):
+        raw = raw[4:]
+    target = Path(raw)
+    if not target.is_absolute():
+        target = alias.parent / target
+    return target.absolute()
+
+
+def _verify_plugin_cache_aliases(
+    *,
+    root: Path,
+    reparse_paths: list[str],
+    visited_directories: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str], list[dict[str, str]]]:
+    """Accept only stable cache-local ``latest`` aliases to scanned physical trees."""
+
+    root_resolved = root.resolve()
+    root_lexical = root.absolute()
+    visited = dict(visited_directories)
+    reparse = [Path(path).absolute() for path in reparse_paths]
+    verified: list[dict[str, Any]] = []
+    unsafe: list[str] = []
+    failures: list[dict[str, str]] = []
+
+    def reject(alias: Path, reason: str) -> None:
+        unsafe.append(str(alias))
+        failures.append({"path": str(alias), "reason": reason})
+
+    for raw_alias in sorted(reparse_paths, key=str.casefold):
+        alias = Path(raw_alias).absolute()
+        try:
+            alias_before = alias.lstat()
+            if alias.name.casefold() != "latest":
+                reject(alias, "unsupported-reparse-name")
+                continue
+
+            raw_target_before = os.readlink(alias)
+            direct_target = _direct_reparse_target(alias, raw_target_before)
+            raw_direct = str(direct_target)
+            if raw_direct.startswith(("\\\\", "//")):
+                reject(alias, "target-outside-plugin-cache")
+                continue
+            if os.name == "nt" and direct_target.drive.casefold() != root_lexical.drive.casefold():
+                reject(alias, "target-outside-plugin-cache")
+                continue
+            try:
+                direct_target.relative_to(root_lexical)
+            except ValueError:
+                reject(alias, "target-outside-plugin-cache")
+                continue
+
+            relative_target = direct_target.relative_to(root_lexical)
+            cursor = root_lexical
+            target_chain_unsafe = False
+            for part in relative_target.parts:
+                cursor = cursor / part
+                if _is_reparse(cursor):
+                    reject(alias, "reparse-chain")
+                    target_chain_unsafe = True
+                    break
+            if target_chain_unsafe:
+                continue
+            if not direct_target.is_dir():
+                reject(alias, "target-not-physical-directory")
+                continue
+
+            target = direct_target.resolve(strict=True)
+            if target == root_resolved:
+                reject(alias, "target-is-plugin-cache-root")
+                continue
+            if _is_lexically_under(alias, target):
+                reject(alias, "target-contains-alias")
+                continue
+
+            target_key = _path_key(target)
+            scanned_target = visited.get(target_key)
+            if scanned_target is None or scanned_target.get("scanned") is not True:
+                reject(alias, "target-tree-not-scanned")
+                continue
+            target_before = direct_target.lstat()
+            if _stat_identity(target_before) != scanned_target["identity"]:
+                reject(alias, "target-changed-after-scan")
+                continue
+
+            scanned_target_tree = [
+                item
+                for item in visited.values()
+                if _is_lexically_under(Path(item["path"]), target)
+            ]
+            target_tree_failure: str | None = None
+            for item in scanned_target_tree:
+                if item.get("scanned") is not True:
+                    target_tree_failure = "target-tree-not-scanned"
+                    break
+                scanned_path = Path(item["path"])
+                try:
+                    current_identity = _stat_identity(scanned_path.lstat())
+                except OSError:
+                    target_tree_failure = "target-tree-changed-after-scan"
+                    break
+                if _is_reparse(scanned_path) or current_identity != item["identity"]:
+                    target_tree_failure = "target-tree-changed-after-scan"
+                    break
+            if target_tree_failure:
+                reject(alias, target_tree_failure)
+                continue
+
+            nested_reparse = [
+                path
+                for path in reparse
+                if str(path).casefold() != str(alias).casefold()
+                and _is_lexically_under(path, target)
+            ]
+            if nested_reparse:
+                reject(alias, "target-tree-contains-reparse")
+                continue
+
+            alias_target = alias.resolve(strict=True)
+            if _path_key(alias_target) != _path_key(target):
+                reject(alias, "direct-target-resolution-mismatch")
+                continue
+
+            alias_after = alias.lstat()
+            target_after = direct_target.lstat()
+            raw_target_after = os.readlink(alias)
+            if raw_target_before != raw_target_after:
+                reject(alias, "alias-target-changed-during-scan")
+                continue
+            if _stat_identity(alias_before) != _stat_identity(alias_after):
+                reject(alias, "alias-changed-during-scan")
+                continue
+            if _stat_identity(target_before) != _stat_identity(target_after):
+                reject(alias, "target-changed-during-scan")
+                continue
+
+            verified.append(
+                {
+                    "alias": str(alias),
+                    "target": str(target),
+                    "verification": "physical-target-already-scanned",
+                }
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            reject(alias, f"alias-verification-failed:{type(exc).__name__}")
+
+    return verified, sorted(set(unsafe), key=str.casefold), failures
 
 
 def _ledger_state(data: Any) -> dict[str, list[dict[str, str]]]:
@@ -696,6 +894,8 @@ def _root_summary(
     artifacts: Iterable[dict[str, Any]],
     read_only: bool,
     skipped_reparse: list[str],
+    verified_reparse_aliases: list[dict[str, Any]] | None = None,
+    reparse_failures: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     return {
         "scope": scope,
@@ -703,6 +903,8 @@ def _root_summary(
         "read_only": read_only,
         "artifact_count": sum(1 for item in artifacts if item["scope"] == scope),
         "skipped_reparse": skipped_reparse,
+        "verified_reparse_aliases": verified_reparse_aliases or [],
+        "reparse_failures": reparse_failures or [],
         "scan_status": "partial" if skipped_reparse else "complete",
     }
 
@@ -720,7 +922,7 @@ def build_catalog(
     cache = _normalize_root(plugin_cache_root, required=True, label="plugin cache root")
     ledger = _normalize_file(ledger_path, label="source-state ledger")
 
-    active_paths, active_reparse = _scan_skill_files(active, scope="active")
+    active_paths, active_reparse, _ = _scan_skill_files(active, scope="active")
     if active_reparse:
         raise CatalogError(
             "active root 内存在未扫描的 reparse point，拒绝生成不完整目录："
@@ -728,8 +930,25 @@ def build_catalog(
         )
     cache_paths: list[Path] = []
     cache_reparse: list[str] = []
+    cache_reparse_candidates: list[str] = []
+    cache_visited: dict[str, dict[str, Any]] = {}
+    cache_verified_aliases: list[dict[str, Any]] = []
+    cache_reparse_failures: list[dict[str, str]] = []
     if cache.exists():
-        cache_paths, cache_reparse = _scan_skill_files(cache, scope="plugin-cache")
+        cache_paths, cache_reparse, cache_visited = _scan_skill_files(
+            cache,
+            scope="plugin-cache",
+        )
+        cache_reparse_candidates = list(cache_reparse)
+        (
+            cache_verified_aliases,
+            cache_reparse,
+            cache_reparse_failures,
+        ) = _verify_plugin_cache_aliases(
+            root=cache,
+            reparse_paths=cache_reparse_candidates,
+            visited_directories=cache_visited,
+        )
 
     _, ledger_states, ledger_fingerprint = _load_ledger(ledger)
     active_count = len(active_paths)
@@ -767,6 +986,17 @@ def build_catalog(
             )
         )
     artifacts.sort(key=lambda item: (item["scope"], item["name"].casefold(), item["relative_path"].casefold()))
+
+    if cache_reparse_candidates:
+        (
+            cache_verified_aliases,
+            cache_reparse,
+            cache_reparse_failures,
+        ) = _verify_plugin_cache_aliases(
+            root=cache,
+            reparse_paths=cache_reparse_candidates,
+            visited_directories=cache_visited,
+        )
 
     ledger_conflicts = [
         {
@@ -820,6 +1050,8 @@ def build_catalog(
                 artifacts=artifacts,
                 read_only=True,
                 skipped_reparse=cache_reparse,
+                verified_reparse_aliases=cache_verified_aliases,
+                reparse_failures=cache_reparse_failures,
             ),
         ],
         "checks": {

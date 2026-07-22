@@ -2,7 +2,7 @@
 
 Status: done
 
-> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，相关条目可能已按后续保留策略清理；现行备份事实以 production schema 2 dry-run 为准。
+> 历史说明：本 issue 中记录的 `D:\Codex\.codex\run-evidence` 路径属于当时执行快照，相关条目可能已按后续保留策略清理；现行备份事实以 production schema 3 dry-run 为准。
 
 ## Parent
 

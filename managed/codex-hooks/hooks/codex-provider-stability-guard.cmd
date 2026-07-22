@@ -1,3 +1,3 @@
 @echo off
-"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1" %*
+"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1" %*
 exit /b %ERRORLEVEL%

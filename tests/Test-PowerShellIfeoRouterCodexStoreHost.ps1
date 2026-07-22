@@ -1,5 +1,8 @@
 param(
-    [string]$RouterSource = "D:\Codex\local-overrides\codex-local-patches\powershell-ifeo-router\powershell-ifeo-router.ps1"
+    [string]$CodexHome = "D:\Codex\.codex",
+    [string]$RouterSource = "D:\Codex\local-overrides\codex-local-patches\powershell-ifeo-router\powershell-ifeo-router.ps1",
+    [string]$RouterRuntime = "D:\Codex\.codex\powershell-ifeo-router",
+    [string]$RouterDriftTask = "CodexPwshRouterDriftCheck"
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,43 +22,33 @@ function Assert-False {
     }
 }
 
-Assert-True -Condition (Test-Path -LiteralPath $RouterSource) -Message "找不到受管 router 源：$RouterSource"
+$configPath = Join-Path $CodexHome "config.toml"
+Assert-True -Condition (Test-Path -LiteralPath $configPath -PathType Leaf) -Message "找不到 Codex 配置：$configPath"
+Assert-False -Condition (Test-Path -LiteralPath $RouterSource) -Message "已退役 router source 不得恢复：$RouterSource"
+Assert-False -Condition (Test-Path -LiteralPath $RouterRuntime) -Message "已退役 router runtime 不得恢复：$RouterRuntime"
 
-$content = Get-Content -Raw -LiteralPath $RouterSource
-$mainMarker = 'New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogPath)'
-$mainIndex = $content.IndexOf($mainMarker, [System.StringComparison]::Ordinal)
-Assert-True -Condition ($mainIndex -gt 0) -Message "无法定位 router 主执行段，不能安全加载测试 seam。"
-
-$definitions = $content.Substring(0, $mainIndex)
-Invoke-Expression $definitions
-
-$officialStoreHost = [pscustomobject]@{
-    Name = "ChatGPT.exe"
-    ExecutablePath = "C:\Program Files\WindowsApps\OpenAI.Codex_26.707.3748.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"
-    CommandLine = '"C:\Program Files\WindowsApps\OpenAI.Codex_26.707.3748.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"'
-    ParentProcessId = 0
+foreach ($registryPath in @(
+    "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\powershell.exe",
+    "HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\powershell.exe"
+)) {
+    Assert-False -Condition (Test-Path -LiteralPath $registryPath) -Message "已退役 router 不得保留 IFEO 注册：$registryPath"
 }
 
-$sameNameOutsideStore = [pscustomobject]@{
-    Name = "ChatGPT.exe"
-    ExecutablePath = "D:\Codex\tmp\ChatGPT.exe"
-    CommandLine = '"D:\Codex\tmp\ChatGPT.exe"'
-    ParentProcessId = 0
+$scheduledTask = $null
+try {
+    $scheduledTask = Get-ScheduledTask -TaskName $RouterDriftTask -ErrorAction Stop
+} catch {
+    $notFound = $_.Exception.Message -match "(?i)not found|cannot find|does not exist|no .*objects found|找不到|不存在"
+    Assert-True -Condition $notFound -Message "无法确认已退役 router 计划任务状态：$($_.Exception.Message)"
 }
+Assert-True -Condition ($null -eq $scheduledTask) -Message "已退役 router 漂移任务不得保留：$RouterDriftTask"
 
-$otherStorePackage = [pscustomobject]@{
-    Name = "ChatGPT.exe"
-    ExecutablePath = "C:\Program Files\WindowsApps\Other.Product_1.0.0.0_x64__example\app\ChatGPT.exe"
-    CommandLine = '"C:\Program Files\WindowsApps\Other.Product_1.0.0.0_x64__example\app\ChatGPT.exe"'
-    ParentProcessId = 0
-}
-
-Assert-True -Condition (Test-CodexProcessTree -StartProcess $officialStoreHost) -Message "官方 OpenAI.Codex Store 宿主应被允许进入固定 pwsh 转发链。"
-Assert-False -Condition (Test-CodexProcessTree -StartProcess $sameNameOutsideStore) -Message "仅同名的非 Store ChatGPT.exe 不得被放行。"
-Assert-False -Condition (Test-CodexProcessTree -StartProcess $otherStorePackage) -Message "其他 Store 包中的同名 ChatGPT.exe 不得被放行。"
+$configText = Get-Content -Raw -LiteralPath $configPath
+Assert-True -Condition ($configText -match '(?m)^integratedTerminalShell\s*=\s*"powershell"\s*$') -Message "Codex 必须使用现行 PowerShell 终端配置。"
 
 [pscustomobject]@{
     ok = $true
-    routerSource = $RouterSource
+    mode = "retired"
+    integratedTerminalShell = "powershell"
     checkedAt = (Get-Date).ToString("o")
 } | ConvertTo-Json -Depth 3

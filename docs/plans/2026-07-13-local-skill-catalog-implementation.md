@@ -65,7 +65,7 @@
 
 - [x] **步骤 1：实现路径发现和作用域分类**
 
-  递归纳入两个声明根目录下名称严格为 `SKILL.md` 的文件，排除 `.agents` 以及停用/备份历史树。普通 active 项标为 `active`，`.system` 项标为 `system`，缓存项标为 `plugin-cache`；只有 plugin-cache 项标记为只读。永不跟随 reparse point；缓存 junction 报告为部分扫描。
+  递归纳入两个声明根目录下名称严格为 `SKILL.md` 的文件，排除 `.agents` 以及停用/备份历史树。普通 active 项标为 `active`，`.system` 项标为 `system`，缓存项标为 `plugin-cache`；只有 plugin-cache 项标记为只读。永不通过 reparse point 遍历；只有名称为 `latest`、直接指向 plugin cache 内普通目录、且目标已由实体路径完整扫描并在扫描期间保持稳定的冗余别名可记为 `verified_reparse_aliases`。外部、悬空、链式、未扫描或目标树仍含 reparse 的别名继续报告为部分扫描。
 
 - [x] **步骤 2：实现元数据和身份提取**
 

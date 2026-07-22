@@ -52,37 +52,13 @@ if ([string]::IsNullOrWhiteSpace($OutputDir)) {
 $OutputDir = Assert-BackupRetentionOutputDirectory -Path $OutputDir
 
 $evaluation = Invoke-BackupRetentionEvaluation -PolicyContext $context
-$candidateBytes = [int64](($evaluation.candidates | ForEach-Object { if ($null -ne $_.stats) { [int64]$_.stats.bytes } else { 0 } } | Measure-Object -Sum).Sum)
-$manualBytes = [int64](($evaluation.manualReview | ForEach-Object { if ($null -ne $_.stats) { [int64]$_.stats.bytes } else { 0 } } | Measure-Object -Sum).Sum)
-
 $policy = Get-BackupRetentionPolicyDocument -PolicyContext $context
-
-$summary = [pscustomobject][ordered]@{
-    declaredScanRootCount = @($evaluation.declaredScanRoots).Count
-    evaluatedRootCount = @($evaluation.evaluatedRoots).Count
-    coverageItemCount = @($evaluation.coverageItems).Count
-    candidateCount = @($evaluation.candidates).Count
-    retainedCount = @($evaluation.retainedItems).Count
-    protectedCount = @($evaluation.protected).Count
-    manualReviewCount = @($evaluation.manualReview).Count
-    gapCount = @($evaluation.unclassifiedCoverageGaps).Count
-    candidateBytes = $candidateBytes
-    candidateMb = [math]::Round(($candidateBytes / 1MB), 2)
-    manualReviewBytes = $manualBytes
-    manualReviewMb = [math]::Round(($manualBytes / 1MB), 2)
-    candidateSkillMd = [int](($evaluation.candidates | ForEach-Object { if ($null -ne $_.stats) { [int]$_.stats.skillMd } else { 0 } } | Measure-Object -Sum).Sum)
-    selectedByRetentionCount = @($evaluation.candidates).Count
-    lowRiskCount = @($evaluation.candidates | Where-Object risk -eq '低').Count
-    mediumRiskCount = @($evaluation.candidates | Where-Object risk -eq '中').Count
-    highRiskCount = @($evaluation.candidates | Where-Object risk -eq '高').Count
-    byBucket = @($evaluation.candidates | Group-Object bucket | ForEach-Object { [pscustomobject]@{ bucket = $_.Name; count = $_.Count } })
-    manualByBucket = @($evaluation.manualReview | Group-Object bucket | ForEach-Object { [pscustomobject]@{ bucket = $_.Name; count = $_.Count } })
-}
+$summary = Get-BackupRetentionEvaluationSummary -Evaluation $evaluation
 
 $generatedAt = [datetimeoffset]::Now
 $document = [pscustomobject][ordered]@{
     artifactType = 'env-governance.backup-retention-dry-run'
-    schemaVersion = 2
+    schemaVersion = 3
     artifactMode = $context.artifactMode
     generatedAtLocal = $generatedAt.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
     generatedAtUtc = $generatedAt.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture)
@@ -143,6 +119,12 @@ $published = Publish-JsonMarkdownArtifactPair `
         $lines.Add("- 候选 candidate：$(@($Document.candidates).Count) 个")
         $lines.Add("- 保护 protected：$(@($Document.protected).Count) 个")
         $lines.Add("- 人工审查：$(@($Document.manualReview).Count) 个")
+        $lines.Add("- 人工审查存在性：存在 $($Document.summary.manualReviewExistingCount) 个；缺失 $($Document.summary.manualReviewAbsentCount) 个；未知 $($Document.summary.manualReviewExistenceUnknownCount) 个")
+        if ($Document.summary.manualReviewStatsComplete) {
+            $lines.Add("- 人工审查大小：已统计 $($Document.summary.manualReviewStatsKnownCount)/$($Document.summary.manualReviewExistingCount) 个存在路径；总大小 $($Document.summary.manualReviewMb) MB")
+        } else {
+            $lines.Add("- 人工审查大小：已统计 $($Document.summary.manualReviewStatsKnownCount)/$($Document.summary.manualReviewExistingCount) 个存在路径；$($Document.summary.manualReviewStatsUnknownCount) 个存在路径或存在性未知项未递归统计，总大小未知")
+        }
         $lines.Add('')
         $lines.Add('## 声明扫描根')
         $lines.Add('')
@@ -184,5 +166,9 @@ $published = Publish-JsonMarkdownArtifactPair `
     candidateCount = $summary.candidateCount
     candidateMb = $summary.candidateMb
     manualReviewCount = $summary.manualReviewCount
+    manualReviewExistingCount = $summary.manualReviewExistingCount
+    manualReviewAbsentCount = $summary.manualReviewAbsentCount
+    manualReviewExistenceUnknownCount = $summary.manualReviewExistenceUnknownCount
+    manualReviewStatsComplete = $summary.manualReviewStatsComplete
     manualReviewMb = $summary.manualReviewMb
 }

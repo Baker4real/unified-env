@@ -590,8 +590,17 @@ function Invoke-Reconciler {
 
     $arguments = @{ Mode=$Mode; CodexHome=$CodexHome; Json=$true }
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) { $arguments.EvidencePath = $EvidencePath }
-    $raw = & $ScriptPath @arguments
-    $json = ($raw | Out-String).Trim()
+    $captured = [System.Collections.Generic.List[string]]::new()
+    $failure = $null
+    try {
+        & $ScriptPath @arguments 2>&1 | ForEach-Object { [void]$captured.Add([string]$_) }
+    } catch {
+        $failure = $_
+    }
+    $json = ($captured -join [Environment]::NewLine).Trim()
+    if ($null -ne $failure) {
+        throw "Reconciler 调用失败（caller line $($MyInvocation.ScriptLineNumber), mode=$Mode, home=$CodexHome）：$json"
+    }
     Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($json)) -Message "$Mode 没有返回 JSON"
     $json | ConvertFrom-Json
 }

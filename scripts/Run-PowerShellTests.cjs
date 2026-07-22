@@ -6,7 +6,6 @@ const path = require('node:path');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const TEST_DIRECTORY = path.join(PROJECT_ROOT, 'tests');
-const PARAMETERIZED_TEST = 'Test-CodexHookProductionRegistrationRepairHardening.ps1';
 const POWERSHELL_EXECUTABLE = process.env.PWSH_PATH || 'pwsh';
 const HARDENING_CASES = Object.freeze([
   'semantic-noop', 'crash-applying-deployed', 'crash-applied-before',
@@ -14,6 +13,21 @@ const HARDENING_CASES = Object.freeze([
   'postpublish-source-drift', 'postpublish-live-drift',
   'postpublish-static-and-registry-third', 'rollback-cas-race',
   'rollback-write-excluding-lease', 'forged-evidence', 'projection-summary',
+]);
+const STATE_PATH_REPAIR_HARDENING_CASES = Object.freeze([
+  'I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10', 'I11', 'I12',
+  'I13', 'I14', 'I15', 'I16', 'I17', 'I18', 'I19', 'I20', 'I21', 'I22', 'I23',
+  'I24', 'I25',
+]);
+const PARAMETERIZED_TESTS = Object.freeze([
+  {
+    name: 'Test-CodexHookProductionRegistrationRepairHardening.ps1',
+    cases: HARDENING_CASES,
+  },
+  {
+    name: 'Test-CodexStatePathRepairHardening.ps1',
+    cases: STATE_PATH_REPAIR_HARDENING_CASES,
+  },
 ]);
 
 function isPowerShellTest(name) {
@@ -54,21 +68,22 @@ function getPowerShellExecutable() {
 }
 
 function buildCommands() {
+  const parameterizedTestNames = new Set(PARAMETERIZED_TESTS.map((test) => test.name.toLowerCase()));
   const standardTests = fs.readdirSync(TEST_DIRECTORY, { withFileTypes: true })
     .filter((entry) => entry.isFile() && isPowerShellTest(entry.name))
     .map((entry) => entry.name)
-    .filter((name) => name.toLowerCase() !== PARAMETERIZED_TEST.toLowerCase())
+    .filter((name) => !parameterizedTestNames.has(name.toLowerCase()))
     .sort((left, right) => left.localeCompare(right));
 
   return [
     ...standardTests.map((name) => ({
-      arguments: ['-NoProfile', '-File', path.join(TEST_DIRECTORY, name)],
+      arguments: ['-NoProfile', '-NonInteractive', '-File', path.join(TEST_DIRECTORY, name)],
       label: name,
     })),
-    ...HARDENING_CASES.map((testCase) => ({
-      arguments: ['-NoProfile', '-File', path.join(TEST_DIRECTORY, PARAMETERIZED_TEST), '-Case', testCase],
-      label: `${PARAMETERIZED_TEST} -Case ${testCase}`,
-    })),
+    ...PARAMETERIZED_TESTS.flatMap(({ name, cases }) => cases.map((testCase) => ({
+      arguments: ['-NoProfile', '-NonInteractive', '-File', path.join(TEST_DIRECTORY, name), '-Case', testCase],
+      label: `${name} -Case ${testCase}`,
+    }))),
   ];
 }
 

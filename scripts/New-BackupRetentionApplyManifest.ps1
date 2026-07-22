@@ -61,8 +61,9 @@ $OutputDir=Assert-BackupRetentionApplyEvidencePath -Path $OutputDir -Name 'Outpu
 # 7. 完整初检、candidate 当前校验与最终全门复算；正式入口不暴露 phase hook。
 $finalGate=Invoke-BackupRetentionApplyFinalGate -TrustedPolicyContext $context -DryRunJson $DryRunJson -DryRunMarkdown $dryRunMarkdown -InitialSourceSha256 $sourceSha256 -OutputDir $OutputDir -MaxDryRunAgeHours $MaxDryRunAgeHours -UseAllDryRunCandidates:$UseAllDryRunCandidates -AllowPath $AllowPath
 $dryRun=$finalGate.sourceDocument;$sourceSha256=$finalGate.sourceJsonSha256;$live=$finalGate.liveEvaluation;$selected=@($finalGate.selectedCandidates);$OutputDir=$finalGate.outputDir
+Assert-BackupRetentionApplyCandidateItemTypes -Candidates $selected
 
-# 8. manifest item 只消费最终 gate 返回的 candidate 与内容树指纹。
+# 8. manifest item 只消费最终 gate 返回的 directory candidate 与内容树指纹。
 $items=[Collections.Generic.List[object]]::new()
 foreach($validatedCandidate in @($finalGate.validatedCandidates)){
     $candidate=$validatedCandidate.candidate;$current=$validatedCandidate.currentStats

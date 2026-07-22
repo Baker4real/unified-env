@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $scriptPath = Join-Path $ProjectRoot 'scripts\Invoke-RetiredProjectSnapshotSanitizer.ps1'
-$pwshPath = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+$pwshPath = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
 $retiredProject = 'codex-gsd-codex-c-skill'
 $retiredRoot = "D:\Codex\projects\$retiredProject"
 $safeRoot = 'D:\Codex\projects\统一环境'

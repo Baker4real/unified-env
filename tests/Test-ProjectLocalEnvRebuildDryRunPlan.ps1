@@ -236,6 +236,16 @@ try {
         }
     }
 
+    $coordinationDisguisePath = [string](@($review.items | Where-Object {
+        $_.classification -ceq "nested-app-local-env" -and
+        -not ([string]$_.project).Equals([string]$_.parentProject, [System.StringComparison]::OrdinalIgnoreCase)
+    } | Select-Object -First 1).path)
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($coordinationDisguisePath)) -Message "测试 review 必须包含真实嵌套项目条目，才能覆盖 coordination-disguise 反例"
+    $coordinationDisguiseItem = @($review.items | Where-Object { $_.path -ceq $coordinationDisguisePath } | Select-Object -First 1)
+    Assert-True -Condition ($coordinationDisguiseItem.Count -eq 1 -and $coordinationDisguiseItem[0].classification -ceq "nested-app-local-env") -Message "coordination-disguise 反例必须使用 nested-app-local-env 条目"
+    $markerPathMismatchPath = [string](@($review.items | Where-Object { $_.marker -cne ".venv" } | Select-Object -First 1).path)
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($markerPathMismatchPath)) -Message "测试 review 必须包含非 .venv 条目，才能覆盖 marker-path-mismatch 反例"
+
     $invalidReviewCases = @(
         @{ name = "items-empty-old-summary"; mutate = { param($d) $d.items = [object[]]@() } },
         @{ name = "items-empty-updated-summary"; mutate = { param($d) $d.items = [object[]]@(); foreach ($p in $d.summary.PSObject.Properties) { $p.Value = 0 } } },
@@ -253,8 +263,19 @@ try {
         @{ name = "path-scalar"; mutate = { param($d) $d.items[0].path = 42 } },
         @{ name = "classification-scalar"; mutate = { param($d) $d.items[0].classification = 42 } },
         @{ name = "classification-banana"; mutate = { param($d) $d.items[0].classification = "banana" } },
-        @{ name = "coordination-disguise"; mutate = { param($d) $d.items[0].parentProject = $d.items[0].project } },
-        @{ name = "marker-path-mismatch"; mutate = { param($d) $d.items[0].marker = ".venv"; $d.items[0].rebuildEvidence.marker = ".venv" } },
+        @{ name = "coordination-disguise"; mutate = {
+            param($d)
+            $target = @($d.items | Where-Object { $_.path -ceq $coordinationDisguisePath } | Select-Object -First 1)
+            Assert-True -Condition ($target.Count -eq 1) -Message "coordination-disguise 反例找不到嵌套项目条目：$coordinationDisguisePath"
+            $target[0].parentProject = $target[0].project
+        } },
+        @{ name = "marker-path-mismatch"; mutate = {
+            param($d)
+            $target = @($d.items | Where-Object { $_.path -ceq $markerPathMismatchPath } | Select-Object -First 1)
+            Assert-True -Condition ($target.Count -eq 1) -Message "marker-path-mismatch 反例找不到非 .venv 条目：$markerPathMismatchPath"
+            $target[0].marker = ".venv"
+            $target[0].rebuildEvidence.marker = ".venv"
+        } },
         @{ name = "risk-boolean-inconsistent"; mutate = { param($d) $d.items[0].isLongRunningOrStateful = $true; $d.items[0].riskLevel = "medium" } },
         @{ name = "owner-boolean-inconsistent"; mutate = { param($d) $d.items[0].requiresOwnerDecision = -not [bool]$d.items[0].requiresOwnerDecision } },
         @{ name = "automation-true"; mutate = { param($d) $d.items[0].automationAllowed = $true } },

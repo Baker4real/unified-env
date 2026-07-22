@@ -160,7 +160,7 @@ function New-BackupRetentionPolicyContext {
         DDriveRoot = $canonicalDDriveRoot
         retainCount = $RetainCount
         policyId = 'env-governance.backup-retention'
-        policyVersion = 2
+        policyVersion = 3
     }
 }
 
@@ -178,7 +178,7 @@ function Get-BackupRetentionDeclaredScanRoots {
 function Get-BackupRetentionPolicyDocument {
     [CmdletBinding()]
     param([Parameter(Mandatory)][psobject]$PolicyContext)
-    if($PolicyContext.policyId-cne'env-governance.backup-retention'-or$PolicyContext.policyVersion-ne2){throw 'PolicyContext 不能生成 canonical policy document。'}
+    if($PolicyContext.policyId-cne'env-governance.backup-retention'-or$PolicyContext.policyVersion-ne3){throw 'PolicyContext 不能生成 canonical policy document。'}
     return [pscustomobject][ordered]@{
         policyId=$PolicyContext.policyId
         policyVersion=$PolicyContext.policyVersion
@@ -191,6 +191,94 @@ function Get-BackupRetentionPolicyDocument {
         strictTimestampRequired=$true
         runtimeSharedDirsExcluded=$true
         authAutosaveExcludedByDefault=$true
+    }
+}
+
+function Get-BackupRetentionKnownBackupsStateManualDirectoryNames {
+    return [string[]]@(
+        'chrome-native-hosts-fix-20260701-230016',
+        'codex-launcher-visibility',
+        'codex-path-clean',
+        'codex-state-policy',
+        'github-cli-native-entry',
+        'hermes-data-migration',
+        'machine-path',
+        'provider-stability-guard',
+        'remote-plugin-debug-20260630',
+        'serena-dashboard-guard',
+        'sub2api'
+    )
+}
+
+function Test-BackupRetentionManualStatsTrusted {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][psobject]$Item)
+
+    if ($Item.pathExists -isnot [bool] -or -not $Item.pathExists -or $null -eq $Item.stats -or $Item.metadataStatus -cne 'ok' -or @($Item.errors).Count -ne 0) {
+        return $false
+    }
+
+    $stats = $Item.stats
+    foreach ($name in @('reparsePointsSkipped', 'inaccessibleItems')) {
+        if ($stats.PSObject.Properties.Name -notcontains $name -or [int64]$stats.$name -ne 0) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Get-BackupRetentionEvaluationSummary {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][psobject]$Evaluation)
+
+    $candidates = @($Evaluation.candidates)
+    $manualReview = @($Evaluation.manualReview)
+    $manualExisting = @($manualReview | Where-Object { $_.pathExists -is [bool] -and $_.pathExists })
+    $manualAbsent = @($manualReview | Where-Object { $_.pathExists -is [bool] -and -not $_.pathExists })
+    $manualExistenceUnknown = @($manualReview | Where-Object { $_.pathExists -isnot [bool] })
+    $manualWithStats = @($manualExisting | Where-Object { Test-BackupRetentionManualStatsTrusted -Item $_ })
+    $manualWithoutStats = @($manualExisting | Where-Object { -not (Test-BackupRetentionManualStatsTrusted -Item $_) })
+    $manualStatsUnknownCount = $manualWithoutStats.Count + $manualExistenceUnknown.Count
+    $manualStatsComplete = $manualStatsUnknownCount -eq 0
+
+    $candidateBytes = [int64](($candidates | ForEach-Object {
+        if ($null -ne $_.stats) { [int64]$_.stats.bytes } else { 0 }
+    } | Measure-Object -Sum).Sum)
+    $manualReviewBytes = if ($manualStatsComplete) {
+        [int64](($manualWithStats | ForEach-Object { [int64]$_.stats.bytes } | Measure-Object -Sum).Sum)
+    } else {
+        $null
+    }
+
+    return [pscustomobject][ordered]@{
+        declaredScanRootCount = @($Evaluation.declaredScanRoots).Count
+        evaluatedRootCount = @($Evaluation.evaluatedRoots).Count
+        coverageItemCount = @($Evaluation.coverageItems).Count
+        candidateCount = $candidates.Count
+        retainedCount = @($Evaluation.retainedItems).Count
+        protectedCount = @($Evaluation.protected).Count
+        manualReviewCount = $manualReview.Count
+        manualReviewExistingCount = $manualExisting.Count
+        manualReviewAbsentCount = $manualAbsent.Count
+        manualReviewExistenceUnknownCount = $manualExistenceUnknown.Count
+        gapCount = @($Evaluation.unclassifiedCoverageGaps).Count
+        candidateBytes = $candidateBytes
+        candidateMb = [math]::Round($candidateBytes / 1MB, 2)
+        manualReviewStatsKnownCount = $manualWithStats.Count
+        manualReviewStatsUnknownCount = $manualStatsUnknownCount
+        manualReviewStatsComplete = $manualStatsComplete
+        manualReviewBytes = $manualReviewBytes
+        manualReviewMb = if ($null -ne $manualReviewBytes) { [math]::Round($manualReviewBytes / 1MB, 2) } else { $null }
+        candidateSkillMd = [int](($candidates | ForEach-Object {
+            if ($null -ne $_.stats) { [int]$_.stats.skillMd } else { 0 }
+        } | Measure-Object -Sum).Sum)
+        selectedByRetentionCount = $candidates.Count
+        lowRiskCount = @($candidates | Where-Object risk -eq '低').Count
+        mediumRiskCount = @($candidates | Where-Object risk -eq '中').Count
+        highRiskCount = @($candidates | Where-Object risk -eq '高').Count
+        byBucket = [object[]]@($candidates | Group-Object bucket | ForEach-Object { [pscustomobject]@{ bucket = $_.Name; count = $_.Count } })
+        manualByBucket = [object[]]@($manualReview | Group-Object bucket | ForEach-Object { [pscustomobject]@{ bucket = $_.Name; count = $_.Count } })
     }
 }
 
@@ -419,6 +507,7 @@ function Get-BackupRetentionSafeStats {
 function New-BackupRetentionCoverageItem {
     param(
         [string]$Path, [AllowNull()][string]$ScanRoot, [string]$ItemType,
+        [AllowNull()][object]$PathExists = $true,
         [string]$Disposition, [string]$Reason, [bool]$Manual,
         [bool]$Blocks, [string]$Bucket = '', [string]$GroupKey = '',
         [string]$ProjectRoot = '', [string]$BackupType = '',
@@ -438,6 +527,7 @@ function New-BackupRetentionCoverageItem {
         path = Get-BackupRetentionCanonicalPath -Path $Path
         scanRoot = if ([string]::IsNullOrWhiteSpace($ScanRoot)) { $null } else { Get-BackupRetentionCanonicalPath -Path $ScanRoot }
         itemType = $ItemType
+        pathExists = $PathExists
         coverageOrigin = $CoverageOrigin
         coverageDisposition = $Disposition
         coverageAccounted = $true
@@ -570,7 +660,7 @@ function Get-BackupRetentionGuardrailItems {
         $path = Join-Path $PolicyContext.CodexRoot $definition.Relative
         $chain = Resolve-BackupRetentionPathChainState -Path $path -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver
         $stats = if ($chain.status -ceq 'ok') {
-            Get-BackupRetentionSafeStats -Path $path
+            $null
         } else {
             [pscustomobject]@{ exists = if ($chain.exists -is [bool]) { $chain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($chain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($chain.status -ceq 'error') { 1 } else { 0 }; treeSha256 = $null }
         }
@@ -580,15 +670,15 @@ function Get-BackupRetentionGuardrailItems {
         $errors = if ($chain.status -ceq 'reparse') { @("protected path ancestor is reparse point: $($chain.reparseAncestor)") } elseif ($chain.status -ceq 'error') { @([string]$chain.error) } else { @() }
         $reason = if ($metadataFailed) { "$($definition.Reason) reparse metadata 不可信，失败关闭。" } else { $definition.Reason }
         $isReparse = if ($chain.status -ceq 'reparse') { $true } elseif ($chain.status -ceq 'error') { $null } else { $false }
-        $items.Add((New-BackupRetentionCoverageItem -Path $path -ScanRoot $null -ItemType 'policy-path' -Disposition 'protected' -Reason $reason -Manual $manual -Blocks $metadataFailed -Risk $risk -Stats $stats -CoverageOrigin 'policy-guardrail' -MetadataStatus $chain.status -IsReparsePoint $isReparse -ReparseAncestor $chain.reparseAncestor -ReparseTarget $chain.reparseTarget -Errors $errors))
+        $items.Add((New-BackupRetentionCoverageItem -Path $path -ScanRoot $null -ItemType 'policy-path' -PathExists $chain.exists -Disposition 'protected' -Reason $reason -Manual $manual -Blocks $metadataFailed -Risk $risk -Stats $stats -CoverageOrigin 'policy-guardrail' -MetadataStatus $chain.status -IsReparsePoint $isReparse -ReparseAncestor $chain.reparseAncestor -ReparseTarget $chain.reparseTarget -Errors $errors))
     }
     $legacy = Join-Path $PolicyContext.DDriveRoot '.codex-c-backups'
     $legacyChain = Resolve-BackupRetentionPathChainState -Path $legacy -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver
-    $legacyStats = if ($legacyChain.status -ceq 'ok') { Get-BackupRetentionSafeStats $legacy } else { [pscustomobject]@{ exists = if ($legacyChain.exists -is [bool]) { $legacyChain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($legacyChain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($legacyChain.status -ceq 'error') { 1 } else { 0 }; treeSha256 = $null } }
+    $legacyStats = if ($legacyChain.status -ceq 'ok') { $null } else { [pscustomobject]@{ exists = if ($legacyChain.exists -is [bool]) { $legacyChain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($legacyChain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($legacyChain.status -ceq 'error') { 1 } else { 0 }; treeSha256 = $null } }
     $legacyFailed = $legacyChain.status -cne 'ok'
     $legacyErrors = if ($legacyChain.status -ceq 'reparse') { @("protected path ancestor is reparse point: $($legacyChain.reparseAncestor)") } elseif ($legacyChain.status -ceq 'error') { @([string]$legacyChain.error) } else { @() }
     $legacyIsReparse = if ($legacyChain.status -ceq 'reparse') { $true } elseif ($legacyChain.status -ceq 'error') { $null } else { $false }
-    $items.Add((New-BackupRetentionCoverageItem -Path $legacy -ScanRoot $null -ItemType 'policy-path' -Disposition 'protected' -Reason '历史迁移备份可能有审计价值，仅人工审查。' -Manual $true -Blocks $legacyFailed -Risk '高' -Stats $legacyStats -CoverageOrigin 'policy-guardrail' -MetadataStatus $legacyChain.status -IsReparsePoint $legacyIsReparse -ReparseAncestor $legacyChain.reparseAncestor -ReparseTarget $legacyChain.reparseTarget -Errors $legacyErrors))
+    $items.Add((New-BackupRetentionCoverageItem -Path $legacy -ScanRoot $null -ItemType 'policy-path' -PathExists $legacyChain.exists -Disposition 'protected' -Reason '历史迁移备份可能有审计价值，仅人工审查。' -Manual $true -Blocks $legacyFailed -Risk '高' -Stats $legacyStats -CoverageOrigin 'policy-guardrail' -MetadataStatus $legacyChain.status -IsReparsePoint $legacyIsReparse -ReparseAncestor $legacyChain.reparseAncestor -ReparseTarget $legacyChain.reparseTarget -Errors $legacyErrors))
     return [object[]]$items.ToArray()
 }
 
@@ -602,7 +692,7 @@ function Invoke-BackupRetentionEvaluation {
     foreach ($required in @('artifactMode', 'CodexRoot', 'DDriveRoot', 'retainCount', 'policyId', 'policyVersion')) {
         if ($PolicyContext.PSObject.Properties.Name -notcontains $required) { throw "PolicyContext 缺少必需字段：$required" }
     }
-    if ([string]$PolicyContext.policyId -cne 'env-governance.backup-retention' -or [int]$PolicyContext.policyVersion -ne 2) {
+    if ([string]$PolicyContext.policyId -cne 'env-governance.backup-retention' -or [int]$PolicyContext.policyVersion -ne 3) {
         throw 'PolicyContext policyId/policyVersion 不受信任。'
     }
     $PolicyContext = New-BackupRetentionPolicyContext -ArtifactMode ([string]$PolicyContext.artifactMode) -CodexRoot ([string]$PolicyContext.CodexRoot) -DDriveRoot ([string]$PolicyContext.DDriveRoot) -RetainCount ([int]$PolicyContext.retainCount)
@@ -611,12 +701,16 @@ function Invoke-BackupRetentionEvaluation {
     $evaluated = @($declared | ForEach-Object { Get-BackupRetentionRootSnapshot -DeclaredScanRoot $_ -TrustedRoot $PolicyContext.DDriveRoot -PathChainResolver $PathChainResolver })
     $items = [Collections.Generic.List[object]]::new()
     $pending = [Collections.Generic.List[object]]::new()
+    $manualBackupsStateNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @(Get-BackupRetentionKnownBackupsStateManualDirectoryNames)) {
+        [void]$manualBackupsStateNames.Add($name)
+    }
 
     foreach ($root in $evaluated) {
         if (-not $root.enumerationCompleted -or @($root.errors).Count -gt 0) {
             $rootReason = if ($root.rootIsReparsePoint) { '声明扫描根是 reparse point，覆盖失败关闭。' } else { '声明扫描根枚举未完成，覆盖失败关闭。' }
             $rootItemIsReparse = if ($root.metadataStatus -ceq 'error') { $null } else { [bool]$root.rootIsReparsePoint }
-            $items.Add((New-BackupRetentionCoverageItem -Path $root.path -ScanRoot $null -ItemType 'scan-root' -Disposition 'gap' -Reason $rootReason -Manual $true -Blocks $true -Risk '高' -IsReparsePoint $rootItemIsReparse -ReparseAncestor $root.reparseAncestor -ReparseTarget $root.reparseTarget -CoverageOrigin 'scan-root-error' -MetadataStatus $root.metadataStatus -Errors @($root.errors)))
+            $items.Add((New-BackupRetentionCoverageItem -Path $root.path -ScanRoot $null -ItemType 'scan-root' -PathExists $root.exists -Disposition 'gap' -Reason $rootReason -Manual $true -Blocks $true -Risk '高' -IsReparsePoint $rootItemIsReparse -ReparseAncestor $root.reparseAncestor -ReparseTarget $root.reparseTarget -CoverageOrigin 'scan-root-error' -MetadataStatus $root.metadataStatus -Errors @($root.errors)))
         }
         foreach ($child in @($root.directChildren)) {
             if ($child.isReparsePoint) {
@@ -627,6 +721,10 @@ function Invoke-BackupRetentionEvaluation {
             if ($root.rule -ceq 'backups-state-root') {
                 if ($child.name -ceq 'provider-sync' -and $child.itemType -ceq 'directory') {
                     $items.Add((New-BackupRetentionCoverageItem -Path $child.path -ScanRoot $root.path -ItemType $child.itemType -Disposition 'delegated-root' -Reason '由更窄的 provider-sync 扫描根负责分类。' -Manual $false -Blocks $false -DelegatedScanRoot $child.path))
+                    continue
+                }
+                if ($child.itemType -ceq 'directory' -and $manualBackupsStateNames.Contains($child.name)) {
+                    $items.Add((New-BackupRetentionCoverageItem -Path $child.path -ScanRoot $root.path -ItemType $child.itemType -Disposition 'protected' -Reason '受管主机维护回滚状态，仅人工审查。' -Manual $true -Blocks $false -Risk '高' -CoverageOrigin 'policy-guardrail'))
                     continue
                 }
                 $sidecarMatch = [regex]::Match($child.name, '^(?<base>config\.toml|\.codex-global-state\.json)-(?<ts>20\d{6}T\d{6}(?:\d{3,7})?Z)$')
@@ -734,7 +832,7 @@ function Invoke-BackupRetentionEvaluation {
         unclassifiedCoverageGaps = [object[]]$gaps
         coverageAccounted = $accounted
         coverageComplete = $complete
-        coverageNotes = @('覆盖证明仅适用于显式 declaredScanRoots，不声称扫描全盘。', '每个成功枚举的直接子项恰好分类一次。')
+        coverageNotes = @('覆盖证明仅适用于显式 declaredScanRoots，不声称扫描全盘。', '每个成功枚举的直接子项恰好分类一次。', 'policy-guardrail 路径只记录根路径元数据，不递归统计。')
         errors = [object[]]$errors
         delegationGraph = $graph
     }

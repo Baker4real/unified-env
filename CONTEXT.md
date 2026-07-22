@@ -11,7 +11,7 @@
 ## 报告与当前事实边界
 
 - `reports/` 下的 JSON/Markdown 报告是带时间戳的事实快照；`generationId` 与源 JSON SHA-256 只证明同一次生成的配对一致，不证明进程、用户环境或工具入口仍是当前状态。任何决策或执行前必须重新生成相关报告并现场核验。
-- 当前已发布的 production backup retention dry-run 覆盖已计账但不完整（`coverageComplete=false`），真实候选为 0；apply 安全门已拒绝生成，因此没有可发布的 schema 2 apply manifest。旧 schema 1 manifest 快照已从项目报告中移除，但没有删除任何备份源数据。
+- Backup retention 的现役合同为 schema 3 dry-run；apply manifest 必须消费现场重新验证且覆盖完整的 production dry-run，并且只接受非零 directory candidates。当前计数、覆盖状态与是否有 manifest 只从 `reports/backup-retention-dry-run-current/` 的最新报告读取，不在本长期文档重复快照。
 - 只读盘点快照：`reports/env-inventory/REPORT.md`
 - dry-run 迁移计划：`reports/env-migration-plan/PLAN.md`
 - 统一更新准备快照：`reports/env-update-readiness/REPORT.md`

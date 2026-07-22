@@ -81,6 +81,12 @@ $manifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
 $legacyManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json'
 $productionManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json'
 $manifest = Read-CodexHookManifest -Path $manifestPath
+$legacySourceFacts = @(Get-CodexHookFileFacts `
+    -Manifest (Read-CodexHookLegacyFixtureManifest -Path $legacyManifestPath) `
+    -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks') `
+    -LiveHooksRoot $FixtureLiveHooksRoot `
+    -ManifestHashMode Raw)
+Assert-True (@($legacySourceFacts | Where-Object { -not $_.managedMatchesManifest }).Count -eq 0) 'legacy fixture manifest 必须覆盖当前受管 source 的 raw SHA-256'
 $missingTargetManifest = Copy-TestDocument $manifest
 $missingActivate = @($missingTargetManifest.hooks | Where-Object id -ceq 'serena-activate')[0]
 $missingActivate.commandPath = 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'
@@ -321,43 +327,43 @@ $missingRuntimeProbe = Get-CodexHookSafeFileProbe -Path (Join-Path $FixtureRoot 
 Assert-True ($missingRuntimeProbe.state -ceq 'missing' -and -not $missingRuntimeProbe.exists) '缺 runtime 应作为 inventory gap，而不是 manifest schema 错误'
 
 $providerWrapperReference = Get-CodexHookWrapperReferenceFacts `
-    -WrapperText "@echo off`r`nREM D:\Codex\tools\PowerShell\7.6.3\pwsh.exe D:\Codex\.codex\hooks\wrong.ps1`r`n`"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe`" -NoProfile -File `"D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`" %*`r`nexit /b %ERRORLEVEL%" `
-    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -WrapperText "@echo off`r`nREM D:\Codex\tools\PowerShell\7.6.4\pwsh.exe D:\Codex\.codex\hooks\wrong.ps1`r`n`"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe`" -NoProfile -File `"D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`" %*`r`nexit /b %ERRORLEVEL%" `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
     -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
     -RuntimeId 'pwsh'
 Assert-True ($providerWrapperReference.parseState -ceq 'matched') '有效 .cmd command line 必须精确识别 runtime/implementation'
 
 $commentOnlyReference = Get-CodexHookWrapperReferenceFacts `
-    -WrapperText "@echo off`r`nREM D:\Codex\tools\PowerShell\7.6.3\pwsh.exe D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`r`n:: same fake reference" `
-    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -WrapperText "@echo off`r`nREM D:\Codex\tools\PowerShell\7.6.4\pwsh.exe D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`r`n:: same fake reference" `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
     -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
     -RuntimeId 'pwsh'
 Assert-True ($commentOnlyReference.parseState -ceq 'no-effective-command' -and $null -eq $commentOnlyReference.referencesImplementation) 'REM/:: comment substring 不得构成 dependency 引用'
 
 $wrongCommandReference = Get-CodexHookWrapperReferenceFacts `
-    -WrapperText "REM D:\Codex\tools\PowerShell\7.6.3\pwsh.exe D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`r`n`"D:\Codex\tools\python314-official\python.exe`" `"D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`"" `
-    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -WrapperText "REM D:\Codex\tools\PowerShell\7.6.4\pwsh.exe D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`r`n`"D:\Codex\tools\python314-official\python.exe`" `"D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`"" `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
     -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
     -RuntimeId 'pwsh'
 Assert-True ($wrongCommandReference.parseState -ceq 'runtime-mismatch' -and -not $wrongCommandReference.referencesRuntime) 'comment 中的正确 path 不得掩盖实际错误 command line'
 
 $injectedPwshReference = Get-CodexHookWrapperReferenceFacts `
-    -WrapperText '"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -Command injected -File "D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1" & whoami' `
-    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -WrapperText '"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -Command injected -File "D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1" & whoami' `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
     -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
     -RuntimeId 'pwsh'
 Assert-True ($injectedPwshReference.parseState -ceq 'unsafe-cmd-metacharacter' -and $injectedPwshReference.referencesImplementation -ne $true) 'reviewer 注入反例不得 matched/ready'
 
 $commandModeReference = Get-CodexHookWrapperReferenceFacts `
-    -WrapperText '"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -Command injected -File "D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1"' `
-    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -WrapperText '"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -Command injected -File "D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1"' `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
     -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
     -RuntimeId 'pwsh'
 Assert-True ($commandModeReference.parseState -ceq 'forbidden-pwsh-command-mode' -and $commandModeReference.referencesImplementation -ne $true) '-Command/-EncodedCommand 不得伪装为 -File wrapper'
 
 $extraEffectiveCommandReference = Get-CodexHookWrapperReferenceFacts `
-    -WrapperText "`"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe`" -NoProfile -File `"D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`"`r`nwhoami" `
-    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' `
+    -WrapperText "`"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe`" -NoProfile -File `"D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1`"`r`nwhoami" `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
     -ImplementationPath 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1' `
     -RuntimeId 'pwsh'
 Assert-True ($extraEffectiveCommandReference.parseState -ceq 'ambiguous-effective-command' -and $extraEffectiveCommandReference.referencesImplementation -ne $true) '额外有效命令必须保持 pending'

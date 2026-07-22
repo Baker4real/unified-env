@@ -4,7 +4,7 @@
   "codexHome": "D:\\Codex\\.codex",
   "managedRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks",
   "runtimes": {
-    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
     "python": "D:\\Codex\\tools\\python314-official\\python.exe",
     "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
     "serenaHooks": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
@@ -202,7 +202,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -210,7 +210,7 @@
         ]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -270,7 +270,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -407,7 +407,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -461,7 +461,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -511,7 +511,7 @@
       "lifecycle": "retired",
       "lifecycleReason": "Codex payload does not expose acceptEdits/auto permission modes",
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -519,7 +519,7 @@
         ]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.3\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-File",
@@ -540,7 +540,7 @@
     {
       "relativePath": "hooks/codex-github-cli-guard.cmd",
       "liveRelativePath": "codex-github-cli-guard.cmd",
-      "sha256": "bea37dd5bcd8a9cafff2a405b459e6b0242de952926c518054b5764ab94c570c",
+      "sha256": "e2612d82b1f05572ed244afc8c3261cd3abefcb086e0864bc175d0dfb38996c9",
       "lifecycle": "active",
       "ownerHookIds": [
         "github-cli"
@@ -606,7 +606,7 @@
     {
       "relativePath": "hooks/codex-provider-stability-guard.cmd",
       "liveRelativePath": "codex-provider-stability-guard.cmd",
-      "sha256": "b13ece637046af65cd3b619453f9b9d6a93b4c40cfcbc6409bb9b38112cdad83",
+      "sha256": "feeb68d28ae3bdf174bdd695322de2bdfeaf297115d706e91d07cf8e0f04715f",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability"
@@ -624,7 +624,7 @@
     {
       "relativePath": "hooks/serena-activate-guarded.cmd",
       "liveRelativePath": "serena-activate-guarded.cmd",
-      "sha256": "e29b5e67e7566eb0561ca72bc0cfa3daed9e01f2cf36b38fa0d6be8e127a9fd2",
+      "sha256": "2758f7df015aff835fb89f57d1375ef4d80b4d0ab993dea66cac804479f598e1",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -642,7 +642,7 @@
     {
       "relativePath": "hooks/serena-dashboard-guard.cmd",
       "liveRelativePath": "serena-dashboard-guard.cmd",
-      "sha256": "8d9c435c21495f1999f8e1d19e9ac770c67c56fa21842c772e7bf09021825d9c",
+      "sha256": "642c9a760ddf9e4e339fd2e4559748aeadb9a52c517de186294da9720bbd1584",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-dashboard"

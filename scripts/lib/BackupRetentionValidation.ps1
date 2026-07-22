@@ -33,6 +33,7 @@ function Assert-BackupRetentionNumber {
     param([object]$Value,[string]$Name)
     if($Value-isnot[sbyte]-and$Value-isnot[byte]-and$Value-isnot[int16]-and$Value-isnot[uint16]-and$Value-isnot[int32]-and$Value-isnot[uint32]-and$Value-isnot[int64]-and$Value-isnot[uint64]-and$Value-isnot[single]-and$Value-isnot[double]-and$Value-isnot[decimal]){throw "$Name 必须是 JSON number。"}
 }
+function Assert-BackupRetentionNullableNumber { param([object]$Value,[string]$Name) if($null-ne$Value){Assert-BackupRetentionNumber $Value $Name} }
 function Assert-BackupRetentionStringArray {
     param([object]$Value,[string]$Name)
     Assert-BackupRetentionArray ([object]$Value) $Name
@@ -71,10 +72,11 @@ function Assert-BackupRetentionStatsSchema {
 }
 function Assert-BackupRetentionItemSchema {
     param([object]$Item,[string]$Scope)
-    $names=@('path','scanRoot','itemType','coverageOrigin','coverageDisposition','coverageAccounted','requiresManualReview','blocksCoverage','reason','rule','bucket','groupKey','projectRoot','backupType','timestampUtc','timestampSource','retainRank','risk','metadataStatus','errors','delegatedScanRoot','isReparsePoint','reparseTarget','reparseAncestor','reparse','automaticCandidate','selectedByRetention','applyEligible','requiresExplicitAuthorization','blockedBy','stats')
+    $names=@('path','scanRoot','itemType','pathExists','coverageOrigin','coverageDisposition','coverageAccounted','requiresManualReview','blocksCoverage','reason','rule','bucket','groupKey','projectRoot','backupType','timestampUtc','timestampSource','retainRank','risk','metadataStatus','errors','delegatedScanRoot','isReparsePoint','reparseTarget','reparseAncestor','reparse','automaticCandidate','selectedByRetention','applyEligible','requiresExplicitAuthorization','blockedBy','stats')
     Assert-BackupRetentionExactProperties $Item $names $Scope
     foreach($name in @('path','itemType','coverageOrigin','coverageDisposition','reason','rule','bucket','groupKey','projectRoot','backupType','risk','metadataStatus')){Assert-BackupRetentionString $Item.$name "$Scope.$name" -AllowEmpty}
     foreach($name in @('scanRoot','timestampUtc','timestampSource','delegatedScanRoot','reparseTarget','reparseAncestor')){Assert-BackupRetentionNullableString $Item.$name "$Scope.$name"}
+    Assert-BackupRetentionNullableBoolean $Item.pathExists "$Scope.pathExists"
     Assert-BackupRetentionNullableInteger $Item.retainRank "$Scope.retainRank"
     foreach($name in @('coverageAccounted','requiresManualReview','blocksCoverage','automaticCandidate','selectedByRetention','applyEligible','requiresExplicitAuthorization')){Assert-BackupRetentionBoolean $Item.$name "$Scope.$name"}
     Assert-BackupRetentionNullableBoolean $Item.isReparsePoint "$Scope.isReparsePoint"
@@ -85,26 +87,20 @@ function Assert-BackupRetentionItemSchema {
     if($null-ne$Item.stats){Assert-BackupRetentionStatsSchema $Item.stats "$Scope.stats" ($Item.coverageDisposition-ceq'candidate')}
     elseif($Item.coverageDisposition-ceq'candidate'){throw "$Scope.stats 是 candidate 必需对象。"}
 }
-function Get-BackupRetentionEvaluationSummary {
-    param([Parameter(Mandatory)][psobject]$Evaluation)
-    $candidateBytes=[int64](($Evaluation.candidates|ForEach-Object{if($null-ne$_.stats){[int64]$_.stats.bytes}else{0}}|Measure-Object -Sum).Sum)
-    $manualBytes=[int64](($Evaluation.manualReview|ForEach-Object{if($null-ne$_.stats){[int64]$_.stats.bytes}else{0}}|Measure-Object -Sum).Sum)
-    return [pscustomobject][ordered]@{
-        declaredScanRootCount=@($Evaluation.declaredScanRoots).Count;evaluatedRootCount=@($Evaluation.evaluatedRoots).Count;coverageItemCount=@($Evaluation.coverageItems).Count
-        candidateCount=@($Evaluation.candidates).Count;retainedCount=@($Evaluation.retainedItems).Count;protectedCount=@($Evaluation.protected).Count;manualReviewCount=@($Evaluation.manualReview).Count;gapCount=@($Evaluation.unclassifiedCoverageGaps).Count
-        candidateBytes=$candidateBytes;candidateMb=[math]::Round($candidateBytes/1MB,2);manualReviewBytes=$manualBytes;manualReviewMb=[math]::Round($manualBytes/1MB,2)
-        candidateSkillMd=[int](($Evaluation.candidates|ForEach-Object{if($null-ne$_.stats){[int]$_.stats.skillMd}else{0}}|Measure-Object -Sum).Sum);selectedByRetentionCount=@($Evaluation.candidates).Count
-        lowRiskCount=@($Evaluation.candidates|Where-Object risk -eq '低').Count;mediumRiskCount=@($Evaluation.candidates|Where-Object risk -eq '中').Count;highRiskCount=@($Evaluation.candidates|Where-Object risk -eq '高').Count
-        byBucket=[object[]]@($Evaluation.candidates|Group-Object bucket|ForEach-Object{[pscustomobject]@{bucket=$_.Name;count=$_.Count}})
-        manualByBucket=[object[]]@($Evaluation.manualReview|Group-Object bucket|ForEach-Object{[pscustomobject]@{bucket=$_.Name;count=$_.Count}})
-    }
-}
 function Assert-BackupRetentionSummarySchema {
     param([object]$Summary,[string]$Scope)
-    $names=@('declaredScanRootCount','evaluatedRootCount','coverageItemCount','candidateCount','retainedCount','protectedCount','manualReviewCount','gapCount','candidateBytes','candidateMb','manualReviewBytes','manualReviewMb','candidateSkillMd','selectedByRetentionCount','lowRiskCount','mediumRiskCount','highRiskCount','byBucket','manualByBucket')
+    $names=@('declaredScanRootCount','evaluatedRootCount','coverageItemCount','candidateCount','retainedCount','protectedCount','manualReviewCount','manualReviewExistingCount','manualReviewAbsentCount','manualReviewExistenceUnknownCount','gapCount','candidateBytes','candidateMb','manualReviewStatsKnownCount','manualReviewStatsUnknownCount','manualReviewStatsComplete','manualReviewBytes','manualReviewMb','candidateSkillMd','selectedByRetentionCount','lowRiskCount','mediumRiskCount','highRiskCount','byBucket','manualByBucket')
     Assert-BackupRetentionExactProperties $Summary $names $Scope
-    foreach($name in @('declaredScanRootCount','evaluatedRootCount','coverageItemCount','candidateCount','retainedCount','protectedCount','manualReviewCount','gapCount','candidateBytes','manualReviewBytes','candidateSkillMd','selectedByRetentionCount','lowRiskCount','mediumRiskCount','highRiskCount')){Assert-BackupRetentionInteger $Summary.$name "$Scope.$name"}
-    foreach($name in @('candidateMb','manualReviewMb')){Assert-BackupRetentionNumber $Summary.$name "$Scope.$name"}
+    foreach($name in @('declaredScanRootCount','evaluatedRootCount','coverageItemCount','candidateCount','retainedCount','protectedCount','manualReviewCount','manualReviewExistingCount','manualReviewAbsentCount','manualReviewExistenceUnknownCount','gapCount','candidateBytes','manualReviewStatsKnownCount','manualReviewStatsUnknownCount','candidateSkillMd','selectedByRetentionCount','lowRiskCount','mediumRiskCount','highRiskCount')){Assert-BackupRetentionInteger $Summary.$name "$Scope.$name"}
+    Assert-BackupRetentionBoolean $Summary.manualReviewStatsComplete "$Scope.manualReviewStatsComplete"
+    Assert-BackupRetentionNumber $Summary.candidateMb "$Scope.candidateMb"
+    Assert-BackupRetentionNullableInteger $Summary.manualReviewBytes "$Scope.manualReviewBytes"
+    Assert-BackupRetentionNullableNumber $Summary.manualReviewMb "$Scope.manualReviewMb"
+    if(($Summary.manualReviewExistingCount+$Summary.manualReviewAbsentCount+$Summary.manualReviewExistenceUnknownCount)-ne$Summary.manualReviewCount){throw "$Scope manual review 存在性计数不守恒。"}
+    if(($Summary.manualReviewStatsKnownCount+$Summary.manualReviewStatsUnknownCount+$Summary.manualReviewAbsentCount)-ne$Summary.manualReviewCount){throw "$Scope manual review stats 计数不守恒。"}
+    if($Summary.manualReviewStatsComplete-cne($Summary.manualReviewStatsUnknownCount-eq0)){throw "$Scope.manualReviewStatsComplete 与未知统计项不一致。"}
+    if($Summary.manualReviewStatsComplete){if($null-eq$Summary.manualReviewBytes-or$null-eq$Summary.manualReviewMb){throw "$Scope 完整人工审查统计不得为 null。"}}
+    elseif($null-ne$Summary.manualReviewBytes-or$null-ne$Summary.manualReviewMb){throw "$Scope 不完整人工审查统计必须为 null。"}
     foreach($name in @('byBucket','manualByBucket')){Assert-BackupRetentionArray ([object]$Summary.$name) "$Scope.$name";foreach($entry in @($Summary.$name)){Assert-BackupRetentionExactProperties $entry @('bucket','count') "$Scope.$name[]";Assert-BackupRetentionString $entry.bucket "$Scope.$name[].bucket" -AllowEmpty;Assert-BackupRetentionInteger $entry.count "$Scope.$name[].count"}}
 }
 function Assert-BackupRetentionGeneratedAtConsistency {
@@ -132,7 +128,7 @@ function Get-BackupRetentionRootSemanticProjection {
 function Get-BackupRetentionItemSemanticProjection {
     param([object]$Item)
     $ordered=[ordered]@{}
-    foreach($name in @('path','scanRoot','itemType','coverageOrigin','coverageDisposition','coverageAccounted','requiresManualReview','blocksCoverage','reason','rule','bucket','groupKey','projectRoot','backupType','timestampUtc','timestampSource','retainRank','risk','metadataStatus','errors','delegatedScanRoot','isReparsePoint','reparseTarget','reparseAncestor','reparse','automaticCandidate','selectedByRetention','applyEligible','requiresExplicitAuthorization','blockedBy','stats')) {
+    foreach($name in @('path','scanRoot','itemType','pathExists','coverageOrigin','coverageDisposition','coverageAccounted','requiresManualReview','blocksCoverage','reason','rule','bucket','groupKey','projectRoot','backupType','timestampUtc','timestampSource','retainRank','risk','metadataStatus','errors','delegatedScanRoot','isReparsePoint','reparseTarget','reparseAncestor','reparse','automaticCandidate','selectedByRetention','applyEligible','requiresExplicitAuthorization','blockedBy','stats')) {
         $ordered[$name]=$Item.$name
     }
     return [pscustomobject]$ordered
@@ -185,7 +181,7 @@ function Test-BackupRetentionDryRunDocument {
     $topNames=@('artifactType','schemaVersion','artifactMode','generatedAtLocal','generatedAtUtc','dryRun','readOnly','deleteAllowed','applySupported','executionAllowed','CodexRoot','DDriveRoot','retainCount','policyId','policyVersion','policy','declaredScanRoots','evaluatedRoots','coverageItems','candidates','retainedItems','protected','manualReview','unclassifiedCoverageGaps','coverageAccounted','coverageComplete','coverageNotes','errors','summary','generationId')
     Assert-BackupRetentionExactProperties $Document $topNames 'document'
     Assert-BackupRetentionString $Document.artifactType 'artifactType'; if($Document.artifactType-cne'env-governance.backup-retention-dry-run'){throw 'artifactType 不受支持。'}
-    Assert-BackupRetentionInteger $Document.schemaVersion 'schemaVersion';if([int64]$Document.schemaVersion-ne2){throw 'schemaVersion 必须严格等于 2。'}
+    Assert-BackupRetentionInteger $Document.schemaVersion 'schemaVersion';if([int64]$Document.schemaVersion-ne3){throw 'schemaVersion 必须严格等于 3。'}
     foreach($name in @('artifactMode','generatedAtLocal','generatedAtUtc','CodexRoot','DDriveRoot','policyId','generationId')){Assert-BackupRetentionString $Document.$name $name}
     Assert-BackupRetentionGeneratedAtConsistency -Document $Document
     $parsedGenerationId=[guid]::Empty;if(-not[guid]::TryParse($Document.generationId,[ref]$parsedGenerationId)){throw 'generationId 必须是 GUID string。'}
@@ -244,6 +240,21 @@ function Resolve-BackupRetentionCandidateSelection {
     $result=[Collections.Generic.List[object]]::new();$seen=@{}
     foreach($allow in $AllowPath){$full=Assert-BackupRetentionDPath -Path $allow -Name 'AllowPath';$key=$full.ToLowerInvariant();if($seen.ContainsKey($key)){throw "AllowPath 重复：$full"};$seen[$key]=$true;if(-not$map.ContainsKey($key)){throw "AllowPath 不在已验证 candidates 中：$full"};$result.Add($map[$key])}
     return [object[]]$result.ToArray()
+}
+
+function Assert-BackupRetentionApplyCandidateItemTypes {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Candidates)
+
+    if(@($Candidates).Count-eq0){throw 'apply manifest 至少需要一个 directory candidate。'}
+    foreach($candidate in @($Candidates)) {
+        if($null-eq$candidate-or$candidate.PSObject.Properties.Name-notcontains'itemType'){
+            throw 'apply manifest candidate 缺少 itemType。'
+        }
+        if($candidate.itemType-isnot[string]-or$candidate.itemType-cne'directory'){
+            throw "apply manifest 仅支持 directory candidate：$($candidate.path) (itemType=$($candidate.itemType))"
+        }
+    }
 }
 
 function Assert-BackupRetentionCandidateLiveState {
@@ -319,6 +330,7 @@ function Invoke-BackupRetentionApplyFinalGate {
     if($initialSource.sourceJsonSha256-cne$InitialSourceSha256){throw 'DryRunJson 初始 SHA-256 已漂移。'}
     $initialLive=Test-BackupRetentionDryRunDocument -Document $initialSource.document -TrustedPolicyContext $TrustedPolicyContext
     $initialSelected=@(Resolve-BackupRetentionCandidateSelection -Candidates @($initialLive.candidates) -UseAllDryRunCandidates:$UseAllDryRunCandidates -AllowPath $AllowPath)
+    Assert-BackupRetentionApplyCandidateItemTypes -Candidates $initialSelected
     $initialValidated=[Collections.Generic.List[object]]::new()
     foreach($candidate in $initialSelected){$stats=Assert-BackupRetentionCandidateLiveState -Candidate $candidate -TrustedPolicyContext $TrustedPolicyContext -LiveEvaluation $initialLive;$initialValidated.Add([pscustomobject]@{candidate=$candidate;currentStats=$stats})}
 
@@ -335,6 +347,7 @@ function Invoke-BackupRetentionApplyFinalGate {
     if($finalSource.sourceJsonSha256-cne$InitialSourceSha256){throw 'DryRunJson 在二次校验后发生 SHA-256 漂移。'}
     $finalLive=Test-BackupRetentionDryRunDocument -Document $finalSource.document -TrustedPolicyContext $TrustedPolicyContext
     $finalSelected=@(Resolve-BackupRetentionCandidateSelection -Candidates @($finalLive.candidates) -UseAllDryRunCandidates:$UseAllDryRunCandidates -AllowPath $AllowPath)
+    Assert-BackupRetentionApplyCandidateItemTypes -Candidates $finalSelected
     $initialKeys=@($initialSelected|ForEach-Object{(Get-BackupRetentionCanonicalPath $_.path).ToLowerInvariant()}|Sort-Object)
     $finalKeys=@($finalSelected|ForEach-Object{(Get-BackupRetentionCanonicalPath $_.path).ToLowerInvariant()}|Sort-Object)
     if($initialKeys.Count-ne$finalKeys.Count-or(Compare-Object -ReferenceObject $initialKeys -DifferenceObject $finalKeys).Count-ne0){throw 'candidate selection 在最终 gate 发生漂移。'}

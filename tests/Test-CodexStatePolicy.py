@@ -1232,7 +1232,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
         created = subprocess.run(
             [
-                r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe",
+                r"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe",
                 "-NoProfile",
                 "-EncodedCommand",
                 encoded,
@@ -3140,7 +3140,7 @@ class CodexStatePolicyTests(unittest.TestCase):
             if calls == 4:
                 created = subprocess.run(
                     [
-                        r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe",
+                        r"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe",
                         "-NoProfile",
                         "-EncodedCommand",
                         encoded,
@@ -3429,7 +3429,7 @@ class CodexStatePolicyTests(unittest.TestCase):
         encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
         created = subprocess.run(
             [
-                r"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe",
+                r"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe",
                 "-NoProfile",
                 "-EncodedCommand",
                 encoded,

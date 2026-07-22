@@ -35,10 +35,19 @@ $fullOutput = Join-Path $testRoot "full"
 $pathReparseOutput = Join-Path $testRoot "path-reparse"
 $deviceNamespaceOutput = Join-Path $testRoot "device-namespace"
 $unsafeEnvBaseOutput = Join-Path $testRoot "unsafe-env-base"
-$managedPythonCmd = "D:\Codex\tools\PowerShell\7.6.3\python.cmd"
+$managedPythonCmd = "D:\Codex\tools\bin\python.cmd"
+$managedPythonAliases = @(
+    $managedPythonCmd,
+    "D:\Codex\tools\bin\python3.cmd",
+    "D:\Codex\tools\bin\python3.14.cmd",
+    "D:\Codex\tools\bin\python314.cmd"
+)
 
 Assert-True -Condition (Test-Path -Path $scriptPath -PathType Leaf) -Message "Inventory script not found: $scriptPath"
 Assert-True -Condition (Test-Path -LiteralPath $publisherPath -PathType Leaf) -Message "Report publisher not found: $publisherPath"
+foreach ($managedPythonAlias in $managedPythonAliases) {
+    Assert-True -Condition (Test-Path -LiteralPath $managedPythonAlias -PathType Leaf) -Message "受控 Python alias 缺失：$managedPythonAlias"
+}
 . $publisherPath
 
 if (Test-Path -Path $testRoot) {
@@ -211,8 +220,13 @@ if (Test-Path -LiteralPath $repairBackupPath -PathType Container) {
 
 $previousFullPath = $env:Path
 try {
-    if (Test-Path -LiteralPath $managedPythonCmd -PathType Leaf) {
-        $env:Path = (Split-Path -Parent $managedPythonCmd) + [IO.Path]::PathSeparator + $previousFullPath
+    $env:Path = (Split-Path -Parent $managedPythonCmd) + [IO.Path]::PathSeparator + $previousFullPath
+    foreach ($managedPythonAlias in $managedPythonAliases) {
+        $commandName = [IO.Path]::GetFileNameWithoutExtension($managedPythonAlias)
+        $resolvedAlias = Get-Command $commandName -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        Assert-True -Condition ($resolvedAlias.Source -ieq $managedPythonAlias) -Message "受控 Python alias 解析错误：$commandName => $($resolvedAlias.Source)"
+        $aliasVersion = & $managedPythonAlias --version 2>&1
+        Assert-True -Condition ([string]$aliasVersion -like 'Python 3.14.*') -Message "受控 Python alias 版本探测失败：$managedPythonAlias => $aliasVersion"
     }
     $fullResult = & $scriptPath -OutputDir $fullOutput
 } finally {
@@ -272,14 +286,12 @@ if ($pythonProbe -and $pythonProbe.found) {
     foreach ($property in @("launcher", "runtime", "originClass", "originEvidence", "resolutionScope", "requiresManualReview")) {
         Assert-Property -Object $pythonProbe -Name $property
     }
-    if (Test-Path -LiteralPath $managedPythonCmd -PathType Leaf) {
-        Assert-True -Condition ($pythonProbe.path -ieq $managedPythonCmd) -Message "受控 python.cmd 必须作为 Python launcher 被盘点"
-        Assert-True -Condition ($null -ne $pythonProbe.runtime) -Message "python.cmd launcher 必须保留 runtime probe 结果"
-        Assert-True -Condition ($pythonProbe.runtime.matchedRule -ne "runtime-probe-failed") -Message "python.cmd runtime probe 不得失败"
-        Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($pythonProbe.runtime.path)) -Message "python.cmd runtime path 不得为空"
-        Assert-True -Condition ([string]::IsNullOrWhiteSpace($pythonProbe.runtime.probeError)) -Message "python.cmd runtime probe 不得记录错误"
-        Assert-True -Condition ($pythonProbe.runtime.originClass -eq "shared-tool") -Message "受控 python.cmd runtime 必须分类为 shared-tool"
-    }
+    Assert-True -Condition ($pythonProbe.path -ieq $managedPythonCmd) -Message "受控 python.cmd 必须作为 Python launcher 被盘点"
+    Assert-True -Condition ($null -ne $pythonProbe.runtime) -Message "python.cmd launcher 必须保留 runtime probe 结果"
+    Assert-True -Condition ($pythonProbe.runtime.matchedRule -ne "runtime-probe-failed") -Message "python.cmd runtime probe 不得失败"
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($pythonProbe.runtime.path)) -Message "python.cmd runtime path 不得为空"
+    Assert-True -Condition ([string]::IsNullOrWhiteSpace($pythonProbe.runtime.probeError)) -Message "python.cmd runtime probe 不得记录错误"
+    Assert-True -Condition ($pythonProbe.runtime.originClass -eq "shared-tool") -Message "受控 python.cmd runtime 必须分类为 shared-tool"
     $pythonRolesTrustedShared = $pythonProbe.launcher.originClass -eq "shared-tool" -and
         $null -ne $pythonProbe.runtime -and
         $pythonProbe.runtime.originClass -eq "shared-tool" -and

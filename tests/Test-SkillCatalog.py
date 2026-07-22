@@ -4,7 +4,9 @@ import importlib.util
 import contextlib
 import io
 import json
+import os
 import socket
+import subprocess
 import tempfile
 import unittest
 import urllib.request
@@ -81,6 +83,26 @@ def _closure_result(active_root: Path, active_skill_count: int) -> dict:
     }
 
 
+def _create_directory_alias(alias: Path, target: Path) -> None:
+    alias.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        completed = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(alias), str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise unittest.SkipTest(
+                f"当前环境无法创建 junction fixture：{completed.stderr or completed.stdout}"
+            )
+        return
+    try:
+        alias.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        raise unittest.SkipTest(f"当前环境无法创建 symlink fixture：{exc}") from exc
+
+
 if IMPORT_ERROR is not None:
 
     class SkillCatalogTests(unittest.TestCase):
@@ -90,6 +112,530 @@ if IMPORT_ERROR is not None:
 else:
 
     class SkillCatalogTests(unittest.TestCase):
+        def test_internal_plugin_cache_alias_is_verified_without_duplicate_artifacts(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                _write_skill(
+                    version,
+                    "skills/cached",
+                    name="cached",
+                    description="cached",
+                )
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, version)
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                self.assertTrue(catalog["checks"]["scan_complete"])
+                self.assertEqual(cache_root["scan_status"], "complete")
+                self.assertEqual(cache_root["skipped_reparse"], [])
+                self.assertEqual(len(cache_root["verified_reparse_aliases"]), 1)
+                self.assertEqual(cache_root["verified_reparse_aliases"][0]["alias"], str(alias))
+                self.assertEqual(cache_root["verified_reparse_aliases"][0]["target"], str(version.resolve()))
+                self.assertEqual(
+                    [item["name"] for item in catalog["artifacts"] if item["scope"] == "plugin-cache"],
+                    ["cached"],
+                )
+
+        def test_external_plugin_cache_alias_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                cache.mkdir()
+                external = base / "external"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                _write_skill(external, "skills/external", name="external", description="external")
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, external)
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                self.assertFalse(catalog["checks"]["scan_complete"])
+                self.assertEqual(cache_root["scan_status"], "partial")
+                self.assertEqual(cache_root["skipped_reparse"], [str(alias)])
+                self.assertEqual(cache_root["verified_reparse_aliases"], [])
+                self.assertNotIn("external", [item["name"] for item in catalog["artifacts"]])
+
+        def test_internal_alias_to_excluded_unvisited_target_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                excluded = cache / "tmp" / "1.0.0"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                _write_skill(excluded, "skills/hidden", name="hidden", description="hidden")
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, excluded)
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                self.assertFalse(catalog["checks"]["scan_complete"])
+                self.assertEqual(cache_root["skipped_reparse"], [str(alias)])
+                self.assertEqual(cache_root["verified_reparse_aliases"], [])
+
+        def test_chained_plugin_cache_aliases_keep_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                current = cache / "package" / "current"
+                latest = cache / "package" / "latest"
+                _create_directory_alias(current, version)
+                _create_directory_alias(latest, current)
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                self.assertFalse(catalog["checks"]["scan_complete"])
+                self.assertEqual(
+                    {Path(path).name for path in cache_root["skipped_reparse"]},
+                    {"current", "latest"},
+                )
+                self.assertEqual(cache_root["verified_reparse_aliases"], [])
+                failures = {Path(item["path"]).name: item["reason"] for item in cache_root["reparse_failures"]}
+                self.assertEqual(failures["current"], "unsupported-reparse-name")
+                self.assertEqual(failures["latest"], "reparse-chain")
+
+        def test_latest_alias_with_reparse_inside_target_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                nested_target = cache / "package" / "shared"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                nested_target.mkdir(parents=True)
+                _create_directory_alias(version / "nested" / "latest", nested_target)
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, version)
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                self.assertFalse(catalog["checks"]["scan_complete"])
+                failures = {item["path"]: item["reason"] for item in cache_root["reparse_failures"]}
+                self.assertEqual(failures[str(alias)], "target-tree-contains-reparse")
+
+        def test_alias_identity_change_during_validation_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, version)
+                _, reparse_paths, visited = catalog_module._scan_skill_files(
+                    cache,
+                    scope="plugin-cache",
+                )
+
+                original_lstat = Path.lstat
+                alias_lstat_count = 0
+
+                def lstat_with_alias_change(path: Path):
+                    nonlocal alias_lstat_count
+                    result = original_lstat(path)
+                    if Path(path) != alias:
+                        return result
+                    alias_lstat_count += 1
+                    if alias_lstat_count == 1:
+                        return result
+
+                    class ChangedStat:
+                        def __getattr__(self, name):
+                            if name == "st_mtime_ns":
+                                return result.st_mtime_ns + 1
+                            return getattr(result, name)
+
+                    return ChangedStat()
+
+                with mock.patch.object(Path, "lstat", new=lstat_with_alias_change):
+                    verified, unsafe, failures = catalog_module._verify_plugin_cache_aliases(
+                        root=cache,
+                        reparse_paths=reparse_paths,
+                        visited_directories=visited,
+                    )
+
+                self.assertEqual(verified, [])
+                self.assertEqual(unsafe, [str(alias)])
+                self.assertEqual(failures[0]["reason"], "alias-changed-during-scan")
+
+        def test_target_replacement_after_scan_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, version)
+                _, reparse_paths, visited = catalog_module._scan_skill_files(
+                    cache,
+                    scope="plugin-cache",
+                )
+
+                old_version = cache / "package" / "old-1.2.3"
+                version.rename(old_version)
+                _write_skill(version, "skills/replacement", name="replacement", description="replacement")
+                verified, unsafe, failures = catalog_module._verify_plugin_cache_aliases(
+                    root=cache,
+                    reparse_paths=reparse_paths,
+                    visited_directories=visited,
+                )
+
+                self.assertEqual(verified, [])
+                self.assertEqual(unsafe, [str(alias)])
+                self.assertEqual(failures[0]["reason"], "target-changed-after-scan")
+
+        def test_descendant_added_after_scan_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, version)
+                _, reparse_paths, visited = catalog_module._scan_skill_files(
+                    cache,
+                    scope="plugin-cache",
+                )
+
+                _write_skill(version, "skills/new", name="new", description="new")
+                verified, unsafe, failures = catalog_module._verify_plugin_cache_aliases(
+                    root=cache,
+                    reparse_paths=reparse_paths,
+                    visited_directories=visited,
+                )
+
+                self.assertEqual(verified, [])
+                self.assertEqual(unsafe, [str(alias)])
+                self.assertEqual(failures[0]["reason"], "target-tree-changed-after-scan")
+
+        def test_reparse_ancestor_in_direct_target_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                versions = cache / "versions"
+                version = versions / "1.2.3"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                bridge = cache / "bridge"
+                _create_directory_alias(bridge, versions)
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, bridge / "1.2.3")
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                failures = {item["path"]: item["reason"] for item in cache_root["reparse_failures"]}
+                self.assertFalse(catalog["checks"]["scan_complete"])
+                self.assertEqual(failures[str(alias)], "reparse-chain")
+
+        def test_excluded_named_reparse_inside_target_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                external = base / "external"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                external.mkdir()
+                nested = version / "tmp"
+                _create_directory_alias(nested, external)
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, version)
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                failures = {item["path"]: item["reason"] for item in cache_root["reparse_failures"]}
+                self.assertFalse(catalog["checks"]["scan_complete"])
+                self.assertEqual(failures[str(alias)], "target-tree-contains-reparse")
+                self.assertEqual(failures[str(nested)], "unsupported-reparse-name")
+
+        def test_reparse_below_excluded_directory_inside_target_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                external = base / "external"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                external.mkdir()
+                nested = version / "tmp" / "nested"
+                _create_directory_alias(nested, external)
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, version)
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                failures = {item["path"]: item["reason"] for item in cache_root["reparse_failures"]}
+                self.assertFalse(catalog["checks"]["scan_complete"])
+                self.assertEqual(failures[str(alias)], "target-tree-not-scanned")
+                self.assertNotIn(str(nested), failures)
+
+        def test_latest_alias_to_parent_directory_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                package = cache / "package"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                _write_skill(package, "skills/cached", name="cached", description="cached")
+                alias = package / "latest"
+                _create_directory_alias(alias, package)
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                self.assertFalse(catalog["checks"]["scan_complete"])
+                self.assertEqual(cache_root["reparse_failures"][0]["reason"], "target-contains-alias")
+
+        def test_reparse_file_is_not_silently_ignored(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                cache = Path(temp) / "cache"
+                candidate = cache / "package" / "latest"
+                candidate.parent.mkdir(parents=True)
+                candidate.write_text("fixture", encoding="utf-8")
+                original_is_reparse = catalog_module._is_reparse
+
+                def fixture_is_reparse(path: Path) -> bool:
+                    return Path(path) == candidate or original_is_reparse(path)
+
+                with mock.patch.object(
+                    catalog_module,
+                    "_is_reparse",
+                    side_effect=fixture_is_reparse,
+                ):
+                    found, reparse_paths, _ = catalog_module._scan_skill_files(
+                        cache,
+                        scope="plugin-cache",
+                    )
+
+                self.assertEqual(found, [])
+                self.assertEqual(reparse_paths, [str(candidate)])
+
+        def test_scan_error_fails_closed(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                cache = Path(temp) / "cache"
+                cache.mkdir()
+
+                def failing_walk(*_args, **kwargs):
+                    kwargs["onerror"](PermissionError("blocked fixture"))
+                    return iter(())
+
+                with mock.patch.object(catalog_module.os, "walk", side_effect=failing_walk):
+                    with self.assertRaisesRegex(catalog_module.CatalogError, "无法完整扫描"):
+                        catalog_module._scan_skill_files(cache, scope="plugin-cache")
+
+        def test_dangling_latest_alias_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                source = "# Source Provenance\nSkill: alpha\nStatus: retained-local\n"
+                _write_skill(active, "alpha", name="alpha", description="active", source=source)
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, cache / "package" / "missing")
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"unresolved": [{"name": "alpha"}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+
+                cache_root = next(item for item in catalog["roots"] if item["scope"] == "plugin-cache")
+                self.assertFalse(catalog["checks"]["scan_complete"])
+                self.assertEqual(cache_root["skipped_reparse"], [str(alias)])
+                self.assertEqual(cache_root["verified_reparse_aliases"], [])
+
+        def test_latest_alias_to_regular_file_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, version)
+                regular_file = cache / "package" / "target.txt"
+                regular_file.write_text("fixture", encoding="utf-8")
+                _, reparse_paths, visited = catalog_module._scan_skill_files(
+                    cache,
+                    scope="plugin-cache",
+                )
+
+                with mock.patch.object(
+                    catalog_module,
+                    "_direct_reparse_target",
+                    return_value=regular_file,
+                ):
+                    verified, unsafe, failures = catalog_module._verify_plugin_cache_aliases(
+                        root=cache,
+                        reparse_paths=reparse_paths,
+                        visited_directories=visited,
+                    )
+
+                self.assertEqual(verified, [])
+                self.assertEqual(unsafe, [str(alias)])
+                self.assertEqual(failures[0]["reason"], "target-not-physical-directory")
+
+        def test_raw_alias_target_change_during_validation_keeps_scan_partial(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                cache = base / "cache"
+                version = cache / "package" / "1.2.3"
+                _write_skill(version, "skills/cached", name="cached", description="cached")
+                alias = cache / "package" / "latest"
+                _create_directory_alias(alias, version)
+                _, reparse_paths, visited = catalog_module._scan_skill_files(
+                    cache,
+                    scope="plugin-cache",
+                )
+                raw_target = os.readlink(alias)
+                resolved_version = version.resolve()
+                original_resolve = Path.resolve
+
+                def stable_alias_resolve(path: Path, *args, **kwargs):
+                    if Path(path) == alias:
+                        return resolved_version
+                    return original_resolve(path, *args, **kwargs)
+
+                with mock.patch.object(Path, "resolve", new=stable_alias_resolve):
+                    with mock.patch.object(
+                        catalog_module.os,
+                        "readlink",
+                        side_effect=[raw_target, raw_target + ".changed"],
+                    ):
+                        verified, unsafe, failures = catalog_module._verify_plugin_cache_aliases(
+                            root=cache,
+                            reparse_paths=reparse_paths,
+                            visited_directories=visited,
+                        )
+
+                self.assertEqual(verified, [])
+                self.assertEqual(unsafe, [str(alias)])
+                self.assertEqual(failures[0]["reason"], "alias-target-changed-during-scan")
+
         def test_separates_active_and_cache_and_keeps_duplicate_names_distinct(self) -> None:
             with tempfile.TemporaryDirectory() as temp:
                 base = Path(temp)

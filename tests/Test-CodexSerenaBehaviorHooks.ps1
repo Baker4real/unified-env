@@ -85,9 +85,9 @@ foreach ($source in @($reminderSource, $cleanupSource, $activationSource)) {
     Assert-True $source.Contains('set "SERENA_HOME=D:\Codex\.serena"') 'wrapper 必须覆盖外部 SERENA_HOME。'
     Assert-True (-not $source.Contains('%*')) 'wrapper 不得接受外部参数覆盖固定命令。'
 }
-Assert-True $reminderSource.Contains('"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Reminder') 'reminder 必须固定 sibling 受控 guard 和 Mode。'
-Assert-True $cleanupSource.Contains('"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Cleanup') 'cleanup 必须固定 sibling 受控 guard 和 Mode。'
-Assert-True $activationSource.Contains('"D:\Codex\tools\PowerShell\7.6.3\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Activation') 'activation reminder 必须固定 sibling 受控 guard 和 Mode。'
+Assert-True $reminderSource.Contains('"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Reminder') 'reminder 必须固定 sibling 受控 guard 和 Mode。'
+Assert-True $cleanupSource.Contains('"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Cleanup') 'cleanup 必须固定 sibling 受控 guard 和 Mode。'
+Assert-True $activationSource.Contains('"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Activation') 'activation reminder 必须固定 sibling 受控 guard 和 Mode。'
 Assert-True $behaviorGuardSource.Contains("'D:\Codex\tools\uv\bin\serena-hooks.exe'") 'behavior guard 必须固定官方 vendor。'
 Assert-True $behaviorGuardSource.Contains("'--client=codex'") 'behavior guard 必须固定 Codex client。'
 Assert-True $behaviorGuardSource.Contains('Complete-CodexHookProcessWithBoundedDrain') 'behavior guard 必须复用 bounded native drain。'

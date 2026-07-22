@@ -9,7 +9,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$fixtureVendor = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+$fixtureVendor = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
 $fixtureVendorScript = 'D:\Codex\projects\统一环境\reports\codex-hook-serena-fixture\serena-hooks-fixture.ps1'
 $fixtureRuntime = 'D:\Codex\projects\统一环境\managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
 $fixtureHealth = 'D:\Codex\projects\统一环境\reports\codex-hook-health-test'

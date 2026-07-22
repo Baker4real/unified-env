@@ -46,8 +46,8 @@ check('obra/superpowers finishing skill must be retired from active root', () =>
 });
 
 check('neat-freak delivery mode must publish only authorized scope and prove clean parity', () => {
-  assert.match(neatFreak.text, /默认完成目标[\s\S]*用户拥有远端[\s\S]*main/i);
-  assert.match(neatFreak.text, /只审计、只整理或不发布/);
+  assert.match(neatFreak.text, /本机 Git 交付 overlay[\s\S]*默认还要完成受管交付[\s\S]*用户拥有远端[\s\S]*main/i);
+  assert.match(neatFreak.text, /只读、只整理或不发布/);
   assert.match(closeoutReference.text, /delivery mode/i);
   assert.match(closeoutReference.text, /all read-only publication preflights[\s\S]*before the first commit or push/i);
   assert.match(closeoutReference.text, /git status --porcelain=v1 -uall --branch/i);

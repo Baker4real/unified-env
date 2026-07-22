@@ -54,6 +54,21 @@ try {
 
     $fixtureCodexRoot = Join-Path $testRoot '.codex'
     $providerRoot = Join-Path $fixtureCodexRoot 'backups_state\provider-sync'
+    $expectedManualBackupsStateNames = @(
+        'chrome-native-hosts-fix-20260701-230016',
+        'codex-launcher-visibility',
+        'codex-path-clean',
+        'codex-state-policy',
+        'github-cli-native-entry',
+        'hermes-data-migration',
+        'machine-path',
+        'provider-stability-guard',
+        'remote-plugin-debug-20260630',
+        'serena-dashboard-guard',
+        'sub2api'
+    )
+    $actualManualBackupsStateNames = @(Get-BackupRetentionKnownBackupsStateManualDirectoryNames)
+    Assert-True ($actualManualBackupsStateNames.Count -eq $expectedManualBackupsStateNames.Count -and (Compare-Object -ReferenceObject $expectedManualBackupsStateNames -DifferenceObject $actualManualBackupsStateNames).Count -eq 0) 'backups_state 人工 owner allowlist 必须与显式受管集合一致'
     New-Item -ItemType Directory -Force -Path $providerRoot | Out-Null
     foreach ($name in @(
         '20260701T000007Z', '20260701T000006Z', '20260701T000005Z',
@@ -71,6 +86,13 @@ try {
     Set-Content -LiteralPath $nonDirectoryScanRoot -Value 'not a directory' -Encoding UTF8
 
     $backupsStateRoot = Join-Path $fixtureCodexRoot 'backups_state'
+    foreach ($name in $expectedManualBackupsStateNames) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $backupsStateRoot $name) | Out-Null
+    }
+    $existingManualGuardrailPath = Join-Path $fixtureCodexRoot 'run-evidence'
+    New-Item -ItemType Directory -Force -Path $existingManualGuardrailPath | Out-Null
+    $futureUnknownBackupsStateDirectory = Join-Path $backupsStateRoot 'future-unclassified-host-backup'
+    New-Item -ItemType Directory -Force -Path $futureUnknownBackupsStateDirectory | Out-Null
     $validSidecar = Join-Path $backupsStateRoot 'config.toml-20260701T010101Z'
     Set-Content -LiteralPath $validSidecar -Value 'valid sidecar' -Encoding UTF8
     $sidecarViolations = @(
@@ -176,6 +198,13 @@ try {
 
     $validSidecarItem = @($evaluation.coverageItems | Where-Object path -ieq $validSidecar)
     Assert-True ($validSidecarItem.Count -eq 1 -and $validSidecarItem[0].itemType -ceq 'file' -and $validSidecarItem[0].coverageDisposition -ceq 'retained') '精确命名的 sidecar 文件应进入 retained'
+    foreach ($name in $expectedManualBackupsStateNames) {
+        $path = Join-Path $backupsStateRoot $name
+        $item = @($evaluation.coverageItems | Where-Object path -ieq $path)
+        Assert-True ($item.Count -eq 1 -and $item[0].pathExists -and $item[0].coverageDisposition -ceq 'protected' -and $item[0].requiresManualReview -and -not $item[0].blocksCoverage -and $item[0].risk -ceq '高' -and $item[0].coverageOrigin -ceq 'policy-guardrail' -and $null -eq $item[0].stats) "明确主机维护回滚目录必须仅人工审查：$name"
+    }
+    $futureUnknownItem = @($evaluation.coverageItems | Where-Object path -ieq $futureUnknownBackupsStateDirectory)
+    Assert-True ($futureUnknownItem.Count -eq 1 -and $futureUnknownItem[0].coverageDisposition -ceq 'gap' -and $futureUnknownItem[0].requiresManualReview -and $futureUnknownItem[0].blocksCoverage) '未来未知 backups_state 目录必须继续失败关闭'
     foreach ($invalidSidecar in $sidecarViolations) {
         $item = @($evaluation.coverageItems | Where-Object path -ieq $invalidSidecar)
         Assert-True ($item.Count -eq 1 -and $item[0].coverageDisposition -ceq 'gap' -and $item[0].requiresManualReview -and $item[0].blocksCoverage) "sidecar 目录/近似名/垃圾前后缀必须 gap：$invalidSidecar"
@@ -188,6 +217,39 @@ try {
     $protectedReparse = @($evaluation.protected | Where-Object path -ieq $skillsJunction)[0]
     Assert-True ($protectedReparse.metadataStatus -ceq 'reparse' -and $protectedReparse.isReparsePoint -and $protectedReparse.reparseAncestor -ieq $skillsJunction -and -not [string]::IsNullOrWhiteSpace([string]$protectedReparse.reparseTarget)) 'protected reparse 必须投影 canonical metadata'
     Assert-True ($protectedReparse.requiresManualReview -and $protectedReparse.risk -ceq '高' -and $protectedReparse.blocksCoverage -and @($protectedReparse.errors).Count -gt 0 -and $protectedReparse.stats.reparsePointsSkipped -eq 1) 'protected reparse 必须 manual+高风险+blocks+errors，且与 stats 一致'
+    $placeholderStatsSummary = Get-BackupRetentionEvaluationSummary -Evaluation ([pscustomobject]@{
+        declaredScanRoots = @()
+        evaluatedRoots = @()
+        coverageItems = @($protectedReparse)
+        candidates = @()
+        retainedItems = @()
+        protected = @($protectedReparse)
+        manualReview = @($protectedReparse)
+        unclassifiedCoverageGaps = @()
+    })
+    Assert-True ($placeholderStatsSummary.manualReviewStatsKnownCount -eq 0 -and $placeholderStatsSummary.manualReviewStatsUnknownCount -eq 1 -and -not $placeholderStatsSummary.manualReviewStatsComplete -and $null -eq $placeholderStatsSummary.manualReviewBytes -and $null -eq $placeholderStatsSummary.manualReviewMb) 'reparse 占位 stats 不得伪装为已统计的零字节人工审查项'
+    $errorPlaceholder = $protectedReparse | ConvertTo-Json -Depth 20 | ConvertFrom-Json -DateKind String
+    $errorPlaceholder.metadataStatus = 'error'
+    $errorPlaceholder.errors = @('fixture metadata failure')
+    $errorPlaceholder.stats.reparsePointsSkipped = 0
+    $errorPlaceholder.stats.inaccessibleItems = 1
+    $errorStatsSummary = Get-BackupRetentionEvaluationSummary -Evaluation ([pscustomobject]@{
+        declaredScanRoots = @()
+        evaluatedRoots = @()
+        coverageItems = @($errorPlaceholder)
+        candidates = @()
+        retainedItems = @()
+        protected = @($errorPlaceholder)
+        manualReview = @($errorPlaceholder)
+        unclassifiedCoverageGaps = @()
+    })
+    Assert-True ($errorStatsSummary.manualReviewStatsKnownCount -eq 0 -and $errorStatsSummary.manualReviewStatsUnknownCount -eq 1 -and -not $errorStatsSummary.manualReviewStatsComplete -and $null -eq $errorStatsSummary.manualReviewBytes) 'error 占位 stats 不得伪装为已统计的零字节人工审查项'
+    $successfulGuardrails = @($evaluation.coverageItems | Where-Object { $_.coverageOrigin -ceq 'policy-guardrail' -and $_.metadataStatus -ceq 'ok' })
+    Assert-True ($successfulGuardrails.Count -gt 0 -and @($successfulGuardrails | Where-Object { $null -ne $_.stats }).Count -eq 0) '正常 policy-guardrail 路径只记录根路径元数据，不递归统计'
+    Assert-True (@($successfulGuardrails | Where-Object { $_.pathExists -is [bool] -and $_.pathExists }).Count -gt 0 -and @($successfulGuardrails | Where-Object { $_.pathExists -is [bool] -and -not $_.pathExists }).Count -gt 0) 'policy-guardrail 必须在不递归统计时仍区分存在与缺失'
+    $evaluationSummary = Get-BackupRetentionEvaluationSummary -Evaluation $evaluation
+    Assert-True ($evaluationSummary.manualReviewExistingCount + $evaluationSummary.manualReviewAbsentCount + $evaluationSummary.manualReviewExistenceUnknownCount -eq $evaluationSummary.manualReviewCount) '人工审查存在性汇总必须守恒'
+    Assert-True ($evaluationSummary.manualReviewStatsKnownCount + $evaluationSummary.manualReviewStatsUnknownCount + $evaluationSummary.manualReviewAbsentCount -eq $evaluationSummary.manualReviewCount) '缺失的人工审查路径不得计为大小未知'
 
     $rootSnapshots = @($evaluation.evaluatedRoots)
     foreach ($root in $rootSnapshots) {
@@ -336,7 +398,7 @@ try {
     Assert-True ($production.DDriveRoot -ceq 'D:\Codex') 'production DDriveRoot 必须固定'
     Assert-True ($production.retainCount -eq 5) 'production retainCount 必须固定'
     Assert-True ($production.policyId -ceq 'env-governance.backup-retention') 'production policyId 必须固定'
-    Assert-True ($production.policyVersion -eq 2) 'production policyVersion 必须固定'
+    Assert-True ($production.policyVersion -eq 3) 'production policyVersion 必须固定'
 } finally {
     if (Test-Path -LiteralPath $testRoot) {
         Assert-CanRemoveBackupRetentionPolicyTestRoot -Path $testRoot

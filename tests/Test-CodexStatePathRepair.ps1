@@ -15,7 +15,7 @@ $CandidateRoot = Join-Path $FixtureRoot 'candidate-root'
 function Invoke-PathCommand {
     param([Parameter(Mandatory)][string[]]$Arguments)
 
-    $result = & 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe' -NoProfile -File $ScriptPath @Arguments 2>&1
+    $result = & 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -NoProfile -File $ScriptPath @Arguments 2>&1
     [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Text = ($result -join [Environment]::NewLine)
