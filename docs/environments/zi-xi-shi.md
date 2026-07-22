@@ -17,9 +17,9 @@
   `DelegationTerminal={E12CFF52-A866-4C77-9A90-F570A7AA2C6B}`、
   `DelegationConsole={2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}`。
 - PowerShell Store 包版本为 `7.6.4.0`，User PATH 已把
-  `D:\Codex\tools\PowerShell\7.6.4` 放在首位。2026-07-22 更新后复核：
-  新进程与 `Get-Command pwsh.exe` 均解析到该目录的 `pwsh.exe`，版本为 `7.6.4`；
-  已启动的 Codex 进程仍可能继承更新前 PATH，需重启后才会采用新值。
+  `D:\Codex\tools\PowerShell\7.6.4` 放在首位。2026-07-23 重启后复核：
+  当前 Codex 进程与 `Get-Command pwsh.exe` 均解析到该目录的 `pwsh.exe`，版本为
+  `7.6.4`，不再有等待重启采用的 PowerShell 路径变更。
 - `D:\Codex\.codex\config.toml` 已设
   `integratedTerminalShell = "powershell"`。这表示 Codex 的集成终端使用 PowerShell；
   Codex 内部 PTY 和后台命令仍在应用内或隐藏运行，不应为每条命令新开外部 Windows
@@ -61,9 +61,9 @@
 - CodeGraph `1.5.0` 已安装在 `D:\Codex\tools\codegraph\releases\1.5.0`，受管
   `current\bin\codegraph.cmd` 已指向该版本；旧 `1.4.1` release 保留为回滚点。独立
   MCP 的 `initialize`、`tools/list` 与真实查询均已通过。
-- 2026-07-22 当前为 mixed adoption：19:00 后新建的 CodeGraph MCP 会话已运行 `1.5.0`，
-  早先已启动的会话继续运行 `1.4.1` 直至自然结束。为避免中断现有服务，本次不重启、替换或终止任何旧会话；
-  新旧会话均已用进程命令行和真实 MCP 查询分别验收。
+- 2026-07-23 重启后复核：所有现役受管 CodeGraph MCP 进程均运行 `1.5.0`，
+  不再有 `1.4.1` 旧会话等待自然退出；受管 wrapper 的真实 MCP
+  `initialize`、`tools/list` 与查询再次通过。
 - Serena 已更新并由现有 MCP 进程采用 `1.6.1`；真实项目激活、配置查询、文件查询和
   76 包依赖检查均通过。上游 `1.6.1` 已直接要求 `anthropic==0.117.0`，不再需要本机
   针对 `1.6.0` 的依赖 metadata override。
