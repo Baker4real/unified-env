@@ -29,6 +29,7 @@ function getPowerShellExecutable() {
   ], {
     cwd: PROJECT_ROOT,
     encoding: 'utf8',
+    windowsHide: true,
   });
   if (result.error) {
     throw new Error(`Unable to start ${POWERSHELL_EXECUTABLE}: ${result.error.message}`);
@@ -76,6 +77,7 @@ function run(command, powershellExecutable) {
   const result = spawnSync(powershellExecutable, command.arguments, {
     cwd: PROJECT_ROOT,
     stdio: 'inherit',
+    windowsHide: true,
   });
 
   if (result.error) throw result.error;
