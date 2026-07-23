@@ -38,6 +38,53 @@ $FixtureMarkerValue = 'codex-state-path-repair-test-v1'
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
 . (Join-Path $ProjectRoot 'scripts\lib\CodexRepairTransaction.ps1')
 
+function Invoke-HiddenProcess {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter()][string[]]$Arguments = @()
+    )
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $started = $false
+    try {
+        if (-not $process.Start()) { throw "failed to start hidden process: $FilePath" }
+        $started = $true
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $text = $stdout
+        if (-not [string]::IsNullOrEmpty($stderr)) {
+            if (-not [string]::IsNullOrEmpty($text) -and -not $text.EndsWith("`n")) { $text += [Environment]::NewLine }
+            $text += $stderr
+        }
+        [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            StdOut = $stdout
+            StdErr = $stderr
+            Text = $text
+        }
+    } finally {
+        if ($started -and -not $process.HasExited) {
+            try { $process.Kill($true); $process.WaitForExit() } catch {}
+        }
+        $process.Dispose()
+    }
+}
+
 function Assert-DPathWithoutReparse {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -374,9 +421,8 @@ print(json.dumps(base, ensure_ascii=True, separators=(",", ":")))
 
 $requestJson = $request | ConvertTo-Json -Depth 8 -Compress
 $requestBase64 = [Convert]::ToBase64String([Text.UTF8Encoding]::new($false).GetBytes($requestJson))
-$output = & $PythonPath -I -B -c $python $requestBase64 2>&1
-$exitCode = $LASTEXITCODE
-if ($exitCode -ne 0) {
+$pythonRun = Invoke-HiddenProcess -FilePath $PythonPath -Arguments @('-I', '-B', '-c', $python, $requestBase64)
+if ($pythonRun.ExitCode -ne 0) {
     if($null-ne$evidenceLease){$evidenceLease.Dispose()}
     Exit-CodexRepairLeaseSet -LeaseSet $candidateLeases
     if ($Json) {
@@ -390,12 +436,12 @@ if ($exitCode -ne 0) {
             }
         } | ConvertTo-Json -Compress
     } elseif ($capability.fixture) {
-        Write-Error ($output -join [Environment]::NewLine)
+        Write-Error $pythonRun.Text
     }
     exit 1
 }
 
-$rendered = $output -join [Environment]::NewLine
+$rendered = $pythonRun.Text
 $document = $rendered | ConvertFrom-Json -Depth 64
 if ($Mode -eq 'Inventory') {
     $approvalRoots = Initialize-ApprovalRoots -Capability $capability

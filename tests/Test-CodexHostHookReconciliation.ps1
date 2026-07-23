@@ -4,6 +4,7 @@ param(
     [switch]$OnlyFeatureDisableVariants,
     [string]$OnlyFeatureDisableVariant,
     [switch]$OnlyHeaderLikeArrayToml,
+    [switch]$OnlyEnvironmentPostCommitRollback,
     [string]$CleanupFixturePath
 )
 
@@ -146,6 +147,53 @@ function Get-Sha256 {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 
+function Invoke-SilentProcess {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [int]$TimeoutMilliseconds = 10000
+    )
+
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FilePath
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { [void]$start.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw "静默进程启动失败：$FilePath" }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            try { $process.Kill($true) } catch {}
+            [void]$process.WaitForExit(1000)
+            throw "静默进程超时：$FilePath"
+        }
+        [pscustomobject]@{
+            exitCode = $process.ExitCode
+            stdout = $stdoutTask.GetAwaiter().GetResult()
+            stderr = $stderrTask.GetAwaiter().GetResult()
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Assert-TomlParsesWithPython {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Message
+    )
+
+    $result = Invoke-SilentProcess `
+        -FilePath 'D:\Codex\tools\python314-official\python.exe' `
+        -Arguments @('-B','-I','-S','-X','utf8','-c','import pathlib, sys, tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))',$Path)
+    Assert-True -Condition ($result.exitCode -eq 0) -Message "$Message stderr=$($result.stderr.Trim())"
+}
+
 function Get-TreeFingerprint {
     param(
         [string]$CodexHome,
@@ -256,6 +304,11 @@ $hostPreflightManifest = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot '
 $reconcilerSource = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\Invoke-CodexHostHookReconciliation.ps1")
 Assert-True -Condition ($reconcilerSource.Contains('Read-CodexHookHostPreflightManifest')) -Message '生产 reconciler 必须读取固定 host-preflight manifest 作为唯一 ownership 边界'
 Assert-True -Condition (-not $reconcilerSource.Contains('legacy-fixture-manifest.json')) -Message '生产 reconciler 不得读取 legacy fixture manifest'
+$managedRollbackOrderingPattern = '(?m)^\s*\$managedRollbackStates = @\(Get-OrderedManagedHookItems -Items @\(\$InitialState\.managedFileStates \| Where-Object \{ \$attempted\.Contains\("managed:\$\(\$_.liveRelativePath\)"\) \}\) -Direction Restore\)\r?\n\s*foreach \(\$fileState in \$managedRollbackStates\) \{'
+Assert-True -Condition ([regex]::Matches($reconcilerSource, $managedRollbackOrderingPattern).Count -eq 2) -Message 'Repair 的 transaction catch 与 post-commit catch 必须各自先筛 attempted managed files，再按 Restore 顺序回滚'
+$unorderedManagedRollbackPattern = 'foreach \(\$fileState in @\(\$InitialState\.managedFileStates \| Where-Object \{ \$attempted\.Contains\("managed:\$\(\$_.liveRelativePath\)"\) \}\)\)'
+Assert-True -Condition (-not [regex]::IsMatch($reconcilerSource, $unorderedManagedRollbackPattern)) -Message 'Repair rollback 不得直接按 manifest 顺序遍历 attempted managed files'
+Assert-True -Condition ($reconcilerSource.Contains('完整 TOML 语法验证失败：TOML parser Python 超时')) -Message 'TOML parser timeout 必须在非 JSON 诊断中保留安全的高层原因'
 foreach ($mobileRetiredClosure in @("codex-mobile-permission-guard.cmd", "codex-mobile-permission-guard.py")) {
     Assert-True -Condition ([regex]::Matches($reconcilerSource, [regex]::Escape('"' + $mobileRetiredClosure + '"')).Count -eq 1) -Message "mobile permission retired wrapper/implementation 必须各在 exact legacy allowlist 出现一次：$mobileRetiredClosure"
 }
@@ -465,8 +518,7 @@ value = "must-survive"
         'FeaturesHooksArrayTable'
     )
     if ($Variant -in $featureSafetyVariants) {
-        & 'D:\Codex\tools\python314-official\python.exe' -B -I -S -X utf8 -c 'import pathlib, sys, tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $configPath
-        Assert-True -Condition ($LASTEXITCODE -eq 0) -Message "feature safety fixture 必须是合法 TOML：$Variant"
+        Assert-TomlParsesWithPython -Path $configPath -Message "feature safety fixture 必须是合法 TOML：$Variant"
     }
 
     New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($serenaContextPath)) | Out-Null
@@ -588,6 +640,25 @@ function Invoke-Reconciler {
         [string]$EvidencePath
     )
 
+    $arguments = @{ Mode=$Mode; CodexHome=$CodexHome }
+    if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) { $arguments.EvidencePath = $EvidencePath }
+    try {
+        $results = @(& $ScriptPath @arguments)
+    } catch {
+        throw "Reconciler 调用失败（caller line $($MyInvocation.ScriptLineNumber), mode=$Mode, home=$CodexHome）：$($_.Exception.Message)`n$($_.ScriptStackTrace)"
+    }
+    Assert-True -Condition ($results.Count -eq 1 -and $null -ne $results[0]) -Message "$Mode 必须恰好返回一个结果对象"
+    $results[0]
+}
+
+function Invoke-ReconcilerJson {
+    param(
+        [string]$ScriptPath,
+        [string]$Mode,
+        [string]$CodexHome,
+        [string]$EvidencePath
+    )
+
     $arguments = @{ Mode=$Mode; CodexHome=$CodexHome; Json=$true }
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) { $arguments.EvidencePath = $EvidencePath }
     $captured = [System.Collections.Generic.List[string]]::new()
@@ -599,10 +670,14 @@ function Invoke-Reconciler {
     }
     $json = ($captured -join [Environment]::NewLine).Trim()
     if ($null -ne $failure) {
-        throw "Reconciler 调用失败（caller line $($MyInvocation.ScriptLineNumber), mode=$Mode, home=$CodexHome）：$json"
+        throw "Reconciler JSON 调用失败（caller line $($MyInvocation.ScriptLineNumber), mode=$Mode, home=$CodexHome）：$json"
     }
     Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($json)) -Message "$Mode 没有返回 JSON"
-    $json | ConvertFrom-Json
+    try {
+        $json | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "$Mode 返回了无效 JSON：$($_.Exception.Message)"
+    }
 }
 
 function Assert-RepairWasRejectedWithoutMutation {
@@ -673,8 +748,7 @@ values = [
 ]
 '@
     [System.IO.File]::WriteAllText($headerLikeConfigPath, $headerLikeConfig, [System.Text.UTF8Encoding]::new($false))
-    & 'D:\Codex\tools\python314-official\python.exe' -B -I -S -X utf8 -c 'import pathlib, sys, tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $headerLikeConfigPath
-    Assert-True -Condition ($LASTEXITCODE -eq 0) -Message 'header-like-array 输入本身不是合法 TOML'
+    Assert-TomlParsesWithPython -Path $headerLikeConfigPath -Message 'header-like-array 输入本身不是合法 TOML'
     Assert-CheckWasRejectedWithoutMutation -ScriptPath $ScriptPath -CodexHome $headerLikeArrayHome -CaseName 'header-like-array-toml'
     Assert-RepairWasRejectedWithoutMutation -ScriptPath $ScriptPath -CodexHome $headerLikeArrayHome -CaseName 'header-like-array-toml'
 
@@ -688,10 +762,48 @@ values = [
 '@
     Assert-True -Condition ($headerLikeArrayTableConfig -match '(?m)^\s*\[\["hooks"\]\]\s*$') -Message 'header-like-array-table fixture 未形成独立的 array-table-like 元素'
     [System.IO.File]::WriteAllText($headerLikeConfigPath, $headerLikeArrayTableConfig, [System.Text.UTF8Encoding]::new($false))
-    & 'D:\Codex\tools\python314-official\python.exe' -B -I -S -X utf8 -c 'import pathlib, sys, tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $headerLikeConfigPath
-    Assert-True -Condition ($LASTEXITCODE -eq 0) -Message 'header-like-array-table 输入本身不是合法 TOML'
+    Assert-TomlParsesWithPython -Path $headerLikeConfigPath -Message 'header-like-array-table 输入本身不是合法 TOML'
     Assert-CheckWasRejectedWithoutMutation -ScriptPath $ScriptPath -CodexHome $headerLikeArrayHome -CaseName 'header-like-array-table-toml'
     Assert-RepairWasRejectedWithoutMutation -ScriptPath $ScriptPath -CodexHome $headerLikeArrayHome -CaseName 'header-like-array-table-toml'
+}
+
+function Invoke-EnvironmentPostCommitRollbackTest {
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$TestRoot,
+        [Parameter(Mandatory)][object]$HostPreflightManifest
+    )
+
+    $environmentRollbackHome = Join-Path $TestRoot 'environment-post-commit-rollback\.codex'
+    New-FixtureCodexHome -Root $environmentRollbackHome
+    $environmentRollbackBefore = Get-TreeFingerprint -CodexHome $environmentRollbackHome -ExcludeEvidence
+    $environmentRollbackError = $null
+    try {
+        $env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE = 'environment'
+        Invoke-Reconciler -ScriptPath $ScriptPath -Mode Repair -CodexHome $environmentRollbackHome | Out-Null
+    } catch {
+        $environmentRollbackError = $_.Exception.Message
+    } finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE -ErrorAction SilentlyContinue
+    }
+
+    Assert-True -Condition ($environmentRollbackError -match 'fixture-only post-commit environment failure') -Message "environment post-commit failure 未经第一层 transaction catch 原样返回：$environmentRollbackError"
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $environmentRollbackHome -ExcludeEvidence) -ceq $environmentRollbackBefore) -Message 'environment post-commit failure 未完整恢复 config、managed files 与环境 fixture'
+    $environmentRollbackEvidence = @(Get-ChildItem -LiteralPath (Join-Path $environmentRollbackHome 'run-evidence\host-hook-remediation') -Directory -Force)
+    Assert-True -Condition ($environmentRollbackEvidence.Count -eq 1) -Message 'environment post-commit failure 必须恰好生成一份 evidence'
+    $environmentRollbackManifest = Get-Content -Raw -LiteralPath (Join-Path $environmentRollbackEvidence[0].FullName 'manifest.json') | ConvertFrom-Json
+    $expectedManagedResources = @($HostPreflightManifest.files | ForEach-Object { "managed:$($_.liveRelativePath)" })
+    $attemptedManagedResources = @($environmentRollbackManifest.attemptedResources | Where-Object { [string]$_ -clike 'managed:*' })
+    $committedManagedResources = @($environmentRollbackManifest.committedResources | Where-Object { [string]$_ -clike 'managed:*' })
+    $expectedManagedSet = @($expectedManagedResources | Sort-Object) -join "`n"
+    Assert-True -Condition (
+        $environmentRollbackManifest.status -ceq 'rolled-back' -and
+        @($environmentRollbackManifest.attemptedResources) -ccontains 'environment:SERENA_HOME' -and
+        @($environmentRollbackManifest.committedResources) -ccontains 'environment:SERENA_HOME' -and
+        @($environmentRollbackManifest.attemptedResources) -cnotcontains 'hooks.json' -and
+        (@($attemptedManagedResources | Sort-Object) -join "`n") -ceq $expectedManagedSet -and
+        (@($committedManagedResources | Sort-Object) -join "`n") -ceq $expectedManagedSet
+    ) -Message 'environment post-commit failure 未证明第一层 catch 回滚了全部已提交 managed closure 与环境写入'
 }
 
 $featureDisableCases = @(
@@ -718,8 +830,14 @@ try {
     Assert-True -Condition (-not (Test-Path -LiteralPath $testRoot)) -Message "唯一测试目录意外已存在：$testRoot"
     New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
     Set-Content -LiteralPath $ownershipMarker -Value $testRunId -Encoding UTF8
-    Assert-True -Condition (-not ($OnlyHeaderLikeArrayToml -and $OnlyFeatureDisableVariants)) -Message 'OnlyHeaderLikeArrayToml 与 OnlyFeatureDisableVariants 不能同时使用'
-    Assert-True -Condition (-not ($OnlyFeatureDisableVariant -and ($OnlyHeaderLikeArrayToml -or $OnlyFeatureDisableVariants))) -Message 'OnlyFeatureDisableVariant 不能与其他定向 selector 同时使用'
+    $selectorCount = @($OnlyHeaderLikeArrayToml, $OnlyFeatureDisableVariants, $OnlyEnvironmentPostCommitRollback, -not [string]::IsNullOrWhiteSpace($OnlyFeatureDisableVariant) | Where-Object { $_ }).Count
+    Assert-True -Condition ($selectorCount -le 1) -Message '定向 selector 不能组合使用'
+
+    if ($OnlyEnvironmentPostCommitRollback) {
+        Invoke-EnvironmentPostCommitRollbackTest -ScriptPath $scriptPath -TestRoot $testRoot -HostPreflightManifest $hostPreflightManifest
+        Write-Host 'PASS: Codex host hook environment post-commit rollback'
+        return
+    }
 
     if ($OnlyHeaderLikeArrayToml) {
         Invoke-HeaderLikeArrayTomlRejectionTest -ScriptPath $scriptPath -TestRoot $testRoot
@@ -900,6 +1018,17 @@ try {
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $repair.evidencePath "config.toml")) -eq $originalConfigHash) -Message "config evidence 不是修复前快照"
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $repair.evidencePath "hooks.json")) -eq $originalHooksHash) -Message "hooks evidence 不是修复前快照"
     $manifest = Get-Content -LiteralPath (Join-Path $repair.evidencePath "manifest.json") -Raw | ConvertFrom-Json
+    $wrapperManagedNames = @($hostPreflightManifest.hooks | ForEach-Object { "managed:$([IO.Path]::GetFileName([string]$_.wrapperPath))" })
+    $dependencyManagedNames = @($hostPreflightManifest.files | Where-Object { "managed:$($_.liveRelativePath)" -cnotin $wrapperManagedNames } | ForEach-Object { "managed:$($_.liveRelativePath)" })
+    $repairManagedOrder = [string[]]@($manifest.committedResources | Where-Object { [string]$_ -clike 'managed:*' })
+    $repairWrapperPositions = @($wrapperManagedNames | ForEach-Object { [Array]::IndexOf($repairManagedOrder, [string]$_) })
+    $repairDependencyPositions = @($dependencyManagedNames | ForEach-Object { [Array]::IndexOf($repairManagedOrder, [string]$_) })
+    Assert-True -Condition (
+        $repairManagedOrder.Count -eq @($hostPreflightManifest.files).Count -and
+        @($repairWrapperPositions | Where-Object { $_ -lt 0 }).Count -eq 0 -and
+        @($repairDependencyPositions | Where-Object { $_ -lt 0 }).Count -eq 0 -and
+        ($repairDependencyPositions | Measure-Object -Maximum).Maximum -lt ($repairWrapperPositions | Measure-Object -Minimum).Minimum
+    ) -Message 'Repair 必须先发布 launcher/implementation dependencies，最后发布 wrappers'
     Assert-True -Condition ($manifest.originalHashes.PSObject.Properties.Name -cnotcontains 'legacyHooks') -Message 'evidence 不得记录可用于恢复的 legacy Hook 备份'
     $unknownFileEvidence = @($manifest.preservedHookTree | Where-Object { $_.path -eq 'keep-me.txt' })
     $unknownNestedEvidence = @($manifest.preservedHookTree | Where-Object { $_.path -eq 'unknown-nested\keep.bin' })
@@ -1074,7 +1203,7 @@ try {
     }
     Assert-True -Condition ((Get-Acl -LiteralPath $configPath).Sddl -cne $originalConfigAclSddl) -Message "vendor 原子替换 canary 未实际改变 config.toml ACL"
     Assert-True -Condition (-not (Get-Acl -LiteralPath $configPath).AreAccessRulesProtected) -Message "vendor 原子替换 canary 未恢复父目录继承 ACL"
-    $healthyCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
+    $healthyCheck = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
     Assert-True -Condition ([bool]$healthyCheck.ok -and [int]$healthyCheck.driftCount -eq 0) -Message "Repair 后的直接 Check 不健康"
     foreach ($name in @("serenaContext", "config", "registrations", "legacyImplementations", "acl")) {
         Assert-True -Condition ([bool](Get-CheckResult -Result $healthyCheck -Name $name).ok) -Message "Repair 后检查项不健康：$name"
@@ -1083,11 +1212,40 @@ try {
     $stableFingerprint = Get-TreeFingerprint -CodexHome $healthyHome
     $evidenceRoot = Join-Path $healthyHome "run-evidence\host-hook-remediation"
     $evidenceCount = @(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count
-    $secondRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
+    $secondRepair = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
     Assert-True -Condition ([bool]$secondRepair.ok) -Message "第二次 Repair 未通过"
     Assert-True -Condition (-not [bool]$secondRepair.changed) -Message "第二次 Repair 不幂等"
     Assert-True -Condition ((Get-TreeFingerprint -CodexHome $healthyHome) -eq $stableFingerprint) -Message "第二次 Repair 改变了核心文件"
     Assert-True -Condition (@(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count -eq $evidenceCount) -Message "幂等 Repair 创建了无意义 evidence"
+
+    $runtimeFailureFingerprint = Get-TreeFingerprint -CodexHome $healthyHome
+    $runtimeFailureEvidenceCount = @(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count
+    $runtimeRepairThrew = $false
+    try {
+        $env:CODEX_HOST_HOOK_TEST_MISSING_RUNTIME_ID = 'pythonw'
+        $missingRuntimeCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
+        $runtimeDependencyCheck = Get-CheckResult -Result $missingRuntimeCheck -Name 'runtimeDependencies'
+        Assert-True -Condition (
+            -not [bool]$missingRuntimeCheck.ok -and
+            [int]$missingRuntimeCheck.driftCount -eq 1 -and
+            -not [bool]$runtimeDependencyCheck.ok -and
+            (@($runtimeDependencyCheck.unavailableRuntimeIds) -join ',') -ceq 'pythonw'
+        ) -Message 'launcher runtime 缺失时 Check 必须只让 runtimeDependencies 变红'
+        foreach ($name in @('serenaContext','config','registrations','managedFiles','environment','legacyImplementations','acl')) {
+            Assert-True -Condition ([bool](Get-CheckResult -Result $missingRuntimeCheck -Name $name).ok) -Message "launcher runtime 缺失误伤检查项：$name"
+        }
+        Assert-True -Condition (@($missingRuntimeCheck.registrationProjection | Where-Object { $null -ne $_.launcherRuntimeSha256 }).Count -eq 0) -Message '缺失 launcher runtime 不得伪造 projection hash'
+        try {
+            Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome | Out-Null
+        } catch {
+            $runtimeRepairThrew = $true
+        }
+    } finally {
+        Remove-Item Env:CODEX_HOST_HOOK_TEST_MISSING_RUNTIME_ID -ErrorAction SilentlyContinue
+    }
+    Assert-True -Condition $runtimeRepairThrew -Message 'launcher runtime 缺失时 Repair 未 fail closed'
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $healthyHome) -ceq $runtimeFailureFingerprint) -Message 'launcher runtime Repair 拒绝后修改了 fixture tree'
+    Assert-True -Condition (@(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count -eq $runtimeFailureEvidenceCount) -Message 'launcher runtime Repair 拒绝后仍创建 evidence'
 
     $vendorAclSddl = (Get-Acl -LiteralPath $configPath).Sddl
     $vendorDriftedConfig = [System.IO.File]::ReadAllText($configPath).Replace('command = "D:\\Codex\\.codex\\scripts\\start-serena-mcp.cmd"', 'command = "D:\\fixture\\serena-wrapper.cmd"')
@@ -1139,8 +1297,20 @@ try {
     Assert-True -Condition ([bool]$rawManagedRepair.ok -and (Test-Path -LiteralPath $rawManagedTargetPath -PathType Leaf)) -Message 'raw managed Restore fixture 未部署受管 wrapper'
     $rawManagedEvidence = Get-Content -Raw -LiteralPath (Join-Path $rawManagedRepair.evidencePath 'manifest.json') | ConvertFrom-Json
     Assert-True -Condition ([string]$rawManagedEvidence.intendedResources.managedHooks.$rawManagedRelativePath -ceq $rawManagedSourceHash) -Message 'evidence 必须记录本次发布的 raw managed bytes hash'
-    $rawManagedRestore = Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $rawManagedRestoreHome -EvidencePath ([string]$rawManagedRepair.evidencePath)
+    $rawManagedRestore = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Restore -CodexHome $rawManagedRestoreHome -EvidencePath ([string]$rawManagedRepair.evidencePath)
     Assert-True -Condition ([bool]$rawManagedRestore.ok -and [bool]$rawManagedRestore.changed -and -not (Test-Path -LiteralPath $rawManagedTargetPath -PathType Leaf)) -Message 'Restore 必须用 evidence 中的 raw deployed hash 回滚 CRLF 受管 wrapper'
+    $rawManagedRestoredEvidence = Get-Content -Raw -LiteralPath (Join-Path $rawManagedRepair.evidencePath 'manifest.json') | ConvertFrom-Json
+    $restoreProgress = [string[]]@($rawManagedRestoredEvidence.restoreProgress)
+    $restoreManagedOrder = [string[]]@($restoreProgress | Where-Object { [string]$_ -clike 'managed:*' })
+    $restoreWrapperPositions = @($wrapperManagedNames | ForEach-Object { [Array]::IndexOf($restoreManagedOrder, [string]$_) })
+    $restoreDependencyPositions = @($dependencyManagedNames | ForEach-Object { [Array]::IndexOf($restoreManagedOrder, [string]$_) })
+    Assert-True -Condition (
+        $restoreProgress.Count -gt 0 -and $restoreProgress[0] -ceq 'hooks.json' -and
+        $restoreManagedOrder.Count -eq @($hostPreflightManifest.files).Count -and
+        @($restoreWrapperPositions | Where-Object { $_ -lt 0 }).Count -eq 0 -and
+        @($restoreDependencyPositions | Where-Object { $_ -lt 0 }).Count -eq 0 -and
+        ($restoreWrapperPositions | Measure-Object -Maximum).Maximum -lt ($restoreDependencyPositions | Measure-Object -Minimum).Minimum
+    ) -Message 'Restore 必须先撤销 hooks.json 和 wrappers，最后撤销 launcher/implementation dependencies'
 
     $nestedManagedRestoreHome = Join-Path $testRoot 'nested-managed-restore\.codex'
     New-FixtureCodexHome -Root $nestedManagedRestoreHome
@@ -1388,6 +1558,8 @@ try {
     $retiredTrustPostCommitRollbackEvidence = @(Get-ChildItem -LiteralPath (Join-Path $retiredTrustPostCommitRollbackHome 'run-evidence\host-hook-remediation') -Directory -Force)
     $retiredTrustPostCommitRollbackManifest = Get-Content -LiteralPath (Join-Path $retiredTrustPostCommitRollbackEvidence[0].FullName 'manifest.json') -Raw | ConvertFrom-Json
     Assert-True -Condition ($retiredTrustPostCommitRollbackManifest.status -eq 'rolled-back' -and @($retiredTrustPostCommitRollbackManifest.committedResources) -contains 'config.toml') -Message 'post-commit retired trust rollback 未记录 config 提交和完整回滚'
+
+    Invoke-EnvironmentPostCommitRollbackTest -ScriptPath $scriptPath -TestRoot $testRoot -HostPreflightManifest $hostPreflightManifest
 
     foreach ($phase in @("acl", "legacy")) {
         $postCommitHome = Join-Path $testRoot "post-commit-$phase-failure\.codex"
@@ -1986,8 +2158,7 @@ try {
     $inlineRetiredTrustConfig = $inlineRetiredTrustWithoutUserBlock.Replace($inlineRetiredTrustAnchor, $inlineRetiredTrustLine + $inlineRetiredTrustNewLine + $inlineRetiredTrustAnchor)
     Assert-True -Condition (-not $inlineRetiredTrustConfig.Equals($inlineRetiredTrustWithoutUserBlock, [StringComparison]::Ordinal)) -Message 'mixed inline map fixture 未注入 root projects inline table'
     [IO.File]::WriteAllText($inlineRetiredTrustConfigPath, $inlineRetiredTrustConfig, [Text.UTF8Encoding]::new($false))
-    & 'D:\Codex\tools\python314-official\python.exe' -B -I -S -X utf8 -c 'import pathlib, sys, tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $inlineRetiredTrustConfigPath
-    Assert-True -Condition ($LASTEXITCODE -eq 0) -Message 'mixed inline map fixture 输入本身不是合法 TOML'
+    Assert-TomlParsesWithPython -Path $inlineRetiredTrustConfigPath -Message 'mixed inline map fixture 输入本身不是合法 TOML'
 
     $inlineRetiredTrustBefore = Get-TreeFingerprint -CodexHome $inlineRetiredTrustHome
     $inlineRetiredTrustCheckError = $null

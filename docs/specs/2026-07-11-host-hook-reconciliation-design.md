@@ -7,6 +7,9 @@
 ## 目标状态
 
 - 受管 `hooks.json` 的用户级 lifecycle hook 注册严格收敛为 manifest 声明的四项：`codex-state-preflight`、`serena-activate`、`serena-cleanup` 和 `serena-reminder`。active config layer 中合法的 inline `[hooks]` 也是有效来源；reconciler 只维护 manifest 定义的受管注册和退役项，不删除合法 inline hooks。省略 `features.hooks` 时遵循官方默认启用；`[features]` 与根级 dotted（含 quoted key）形式的显式关闭、或与废弃别名 `codex_hooks` 冲突时 fail closed。将这两个开关写成 `[features]` 内 dotted descendant，或写成 table / array-table，同样因不可安全解释而拒绝。根级 `features = { ... }` inline table 不属于 reconciler 的安全解释范围，也必须拒绝继续写入。
+- 四个生产 `.cmd` wrapper 统一通过官方 `pythonw.exe` 和受管 `managed/codex-hooks/hooks/lib/hidden-console-launcher.py` 启动最终 `pwsh.exe` / `python.exe`。launcher 对最终 console 程序显式使用 `CREATE_NO_WINDOW`；外层 Node 的 `windowsHide` 或父进程的 `CreateNoWindow` 只约束直接子进程，不能穿过 `.cmd` 自动约束孙进程。
+- hidden launcher 复制当前进程有效的 Windows stdin/stdout/stderr 句柄，缺失流才定向到 `DEVNULL`，并原样返回最终子进程退出码。窗口隐藏不得破坏 hook JSON 协议流、错误流或失败状态。
+- wrapper 依赖校验将 `%~dp0<relative>` 只相对该 wrapper 的实际目录安全展开；其他 `%` 变量、绝对替代、父目录逃逸或无法证明位于 wrapper 目录内的 token 均不得匹配。三个 Serena wrapper 的最终 `-Mode` 分别固定为 `Activation`、`Cleanup`、`Reminder`，不能因共用同一 PowerShell implementation 而互相冒充。
 - Serena 不固定项目，也不根据 MCP 进程 cwd 推断项目。任务需要语义工具时，按当前 `environment_context` 的绝对 workspace root 显式激活。
 - `approval_policy`、`sandbox_mode`、`features.hooks` 与 `unified_exec` 属于用户或受管策略边界，reconciler 不推断缺失值也不强写它们。官方默认 `hooks=true`；Windows 上省略 `unified_exec` 时默认关闭。
 - Projectless 路径、线程数据库、heartbeat、Store、IFEO、代理和其他 Windows guard 不由本 reconciler 接管。
@@ -46,7 +49,7 @@ reconciler 只维护以下状态：
 - `config.toml` 中明确列出的 Serena 项目选择参数，以及失效的用户级 hook trust state；manifest `trustedProjects` 所列精确项目根的 trust 会补齐并归一化为 `trusted`。`retiredProjectTrusts` 是结构化 denylist：按大小写不敏感的精确 project 根删除对应普通 table、array table，以及该 table 在 TOML dotted-key 下的全部 descendant；evidence 与 Restore 均不得保留或回流退役 trust，其他 project 根、用户 trust 与未知内容保持不变。`approval_policy`、`sandbox_mode`、`features.hooks`、`unified_exec` 与合法 inline hooks 不属于 reconciler 的写入所有权。就 unified-exec 兼容键而言，provider guard 只清理废弃的 `experimental_use_unified_exec_tool`。
 - `hooks.json` 中的用户级 lifecycle hook 注册；
 - 明确 allowlist 内的旧 hook implementation；
-- 稳定 hook surface；目标 `codex-file-tools.yml` 的写权限，以及其唯一根级 prompt。协调器完整拥有该 prompt block：健康状态必须逐行精确等于唯一 canonical block（mandatory marker、Codex/Serena shell ownership、按当前绝对 workspace 执行 `activate_project` 并以 `get_current_config` 复验）；不健康时只按原始字符偏移替换 prompt body。description、tool lists、其他顶层字段、prompt 外原始字节、混合换行和 sibling context 保持不变；重复/外部 marker、引号或转义 scalar、错误缩进、folded/重复/歧义 prompt 继续 fail closed。
+- 稳定 hook surface，包括四个生产 wrapper 与 `hooks/lib/hidden-console-launcher.py`；生产 manifest 必须把 launcher 纳入固定文件闭包、hash 检查和部署。目标 `codex-file-tools.yml` 的写权限及其唯一根级 prompt 同样受管。协调器完整拥有该 prompt block：健康状态必须逐行精确等于唯一 canonical block（mandatory marker、Codex/Serena shell ownership、按当前绝对 workspace 执行 `activate_project` 并以 `get_current_config` 复验）；不健康时只按原始字符偏移替换 prompt body。description、tool lists、其他顶层字段、prompt 外原始字节、混合换行和 sibling context 保持不变；重复/外部 marker、引号或转义 scalar、错误缩进、folded/重复/歧义 prompt 继续 fail closed。
 
 `config.toml` 是 Codex Desktop 可原子替换的 vendor-owned 文件。工具维护其列明字段的语义，但不把该文件或整个 Codex home 的 ACL 当作持久安全边界，也不改写无关 vendor state、Serena sibling context 或其他主机 guard。
 
@@ -61,13 +64,15 @@ reconciler 只维护以下状态：
 - 只有固定 allowlist 内的旧实现可以退役；未知路径与文件内容必须保持不变，其 ACL 可随稳定 hook surface 收紧。
 - 退役资源是单向删除项：Restore 不会重建任何已退役的实现、目录或注册。退役删除后的失败保留证据并按 `unsafe-partial` 报告，而不是回写旧 snapshot。
 - `Repair` 按 Codex home 获取互斥锁；健康状态再次执行必须返回 `changed = false`。
+- 生产 wrapper 的最终 PowerShell/Python 子进程必须满足 `GetConsoleWindow() == 0`，同时保持 stdin/stdout、真实退出码和 stderr 可观察；只检查外层 runner 或 `pythonw.exe` 不构成无窗口验收。
 
 ## 验证
 
 回归测试：
 
 ```powershell
+& .\tests\Test-HiddenConsoleHookLauncher.ps1
 & .\tests\Test-CodexHostHookReconciliation.ps1
 ```
 
-live 终态以 `Check` 返回 `ok = true`、`driftCount = 0` 为准。执行过 `Repair` 后必须立即再次 `Check`，并复跑 `Repair` 验证幂等。Serena 的端到端验收还必须使用 fresh 任务证明激活前为中性状态、显式激活后可以解析当前项目符号；旧任务或仅观察进程日志不能替代这项 canary。
+hidden launcher 回归必须让最终 PowerShell/Python 子进程自行读取 `GetConsoleWindow()`，严格断言句柄为 `0`，并同时覆盖 stdin/stdout 与非零退出码。live 终态以 `Check` 返回 `ok = true`、`driftCount = 0` 为准。执行过 `Repair` 后必须立即再次 `Check`，并复跑 `Repair` 验证幂等。Serena 的端到端验收还必须使用 fresh 任务证明激活前为中性状态、显式激活后可以解析当前项目符号；旧任务或仅观察进程日志不能替代这项 canary。

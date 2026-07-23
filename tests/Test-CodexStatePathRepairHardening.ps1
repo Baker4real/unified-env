@@ -22,6 +22,19 @@ function Get-TreeFingerprint([string]$Root) {
         [ordered]@{path=[IO.Path]::GetRelativePath($Root,$_.FullName);kind=if($_.PSIsContainer){'d'}else{'f'};length=if($_.PSIsContainer){$null}else{$_.Length};sha256=if($_.PSIsContainer){$null}else{(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}}
     })|ConvertTo-Json -Depth 6 -Compress
 }
+function Invoke-HiddenProcess([string]$FilePath,[string[]]$Arguments,[hashtable]$Environment=@{}) {
+    $start=[Diagnostics.ProcessStartInfo]::new();$start.FileName=$FilePath;$start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardInput=$false;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+    foreach($argument in $Arguments){[void]$start.ArgumentList.Add($argument)}
+    foreach($key in $Environment.Keys){$start.Environment[$key]=[string]$Environment[$key]}
+    $process=[Diagnostics.Process]::new();$process.StartInfo=$start;$started=$false
+    try{
+        if(-not$process.Start()){throw "hidden process did not start: $FilePath"};$started=$true
+        $stdoutTask=$process.StandardOutput.ReadToEndAsync();$stderrTask=$process.StandardError.ReadToEndAsync();$process.WaitForExit()
+        $stdout=$stdoutTask.GetAwaiter().GetResult();$stderr=$stderrTask.GetAwaiter().GetResult();$text=$stdout
+        if(-not[string]::IsNullOrEmpty($stderr)){if(-not[string]::IsNullOrEmpty($text)-and-not$text.EndsWith("`n")){$text+=[Environment]::NewLine};$text+=$stderr}
+        [pscustomobject]@{ExitCode=$process.ExitCode;StdOut=$stdout;StdErr=$stderr;Text=$text}
+    }finally{if($started-and-not$process.HasExited){try{$process.Kill($true);$process.WaitForExit()}catch{}};$process.Dispose()}
+}
 function New-Fixture([switch]$Scale,[switch]$FileCandidate,[switch]$NoOp) {
     $root=Join-Path $FixtureParent ([guid]::NewGuid().ToString('N'));$fixtureHome=Join-Path $root 'codex-home';New-Item -ItemType Directory -Path $fixtureHome -Force|Out-Null
     [IO.File]::WriteAllText((Join-Path $root '.codex-state-path-repair-fixture'),'codex-state-path-repair-test-v1',[Text.UTF8Encoding]::new($false))
@@ -34,7 +47,7 @@ function New-Fixture([switch]$Scale,[switch]$FileCandidate,[switch]$NoOp) {
         0..170|ForEach-Object{$leaf='safe-{0:d3}' -f $_;New-Item -ItemType Directory -Path (Join-Path $candidate $leaf)|Out-Null;$map[$leaf]="C:\Users\WINDOWS\Documents\Codex\$leaf"}
         0..4|ForEach-Object{$leaf='missing-{0:d3}' -f $_;$map[$leaf]="C:\Users\WINDOWS\Documents\Codex\$leaf"}
         New-Item -ItemType Directory -Path (Join-Path $root 'junction-target')|Out-Null
-        $mk=Start-Process cmd.exe -ArgumentList @('/d','/c','mklink','/J',(Join-Path $candidate 'junction'),(Join-Path $root 'junction-target')) -NoNewWindow -Wait -PassThru;if($mk.ExitCode-ne 0){throw 'junction setup failed'}
+        $mk=Invoke-HiddenProcess -FilePath 'cmd.exe' -Arguments @('/d','/c','mklink','/J',(Join-Path $candidate 'junction'),(Join-Path $root 'junction-target'));if($mk.ExitCode-ne 0){throw "junction setup failed: $($mk.Text)"}
         $map.junction='C:\Users\WINDOWS\Documents\Codex\junction';New-Item -ItemType Directory -Path (Join-Path $candidate 'ambiguous')|Out-Null
         $map.ambiguousA='C:\Users\WINDOWS\Documents\Codex\ambiguous';$map.ambiguousB='C:\Users\WINDOWS\Documents\Codex\ambiguous'
     }elseif($FileCandidate){New-Item -ItemType Directory -Path $candidate -Force|Out-Null;[IO.File]::WriteAllBytes((Join-Path $candidate 'safe-file'),[byte[]](1,2,3,4));$map.safeFile='C:\Users\WINDOWS\Documents\Codex\safe-file'}
@@ -45,9 +58,7 @@ function New-Fixture([switch]$Scale,[switch]$FileCandidate,[switch]$NoOp) {
     [pscustomobject]@{Root=$root;Home=$fixtureHome;StatePath=$statePath;CandidateRoot=$candidate}
 }
 function Invoke-Entry([string[]]$Arguments,[hashtable]$Environment=@{}) {
-    $saved=@{};try{foreach($k in $Environment.Keys){$saved[$k]=[Environment]::GetEnvironmentVariable($k,'Process');[Environment]::SetEnvironmentVariable($k,[string]$Environment[$k],'Process')}
-        $text=& 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -NoProfile -File $Entry @Arguments 2>&1;[pscustomobject]@{ExitCode=$LASTEXITCODE;Text=($text-join[Environment]::NewLine)}
-    }finally{foreach($k in $Environment.Keys){[Environment]::SetEnvironmentVariable($k,$saved[$k],'Process')}}
+    Invoke-HiddenProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -Arguments (@('-NoProfile','-File',$Entry)+$Arguments) -Environment $Environment
 }
 function Read-Result($Run){if($Run.ExitCode-ne 0){throw "command failed: $($Run.Text)"};$Run.Text|ConvertFrom-Json -Depth 64}
 function Assert-SingleJsonFailure($Run,[string]$Label) {
@@ -60,10 +71,18 @@ function Assert-SingleJsonFailure($Run,[string]$Label) {
     if($Run.Text-cmatch'[A-Z]:\\'){throw "$Label leaked an absolute path: $($Run.Text)"}
 }
 
+$testSource=Get-Content -Raw -LiteralPath $PSCommandPath
+$helperStart=$testSource.IndexOf('function Invoke-HiddenProcess');$helperEnd=$testSource.IndexOf('function New-Fixture',$helperStart)
+if($helperStart-lt0-or$helperEnd-le$helperStart){throw 'hidden process helper is unavailable'}
+$helperSource=$testSource.Substring($helperStart,$helperEnd-$helperStart)
+if($helperSource-cnotmatch'UseShellExecute\s*=\s*\$false'-or$helperSource-cnotmatch'CreateNoWindow\s*=\s*\$true'){throw 'hardening child processes must be hidden'}
+$startProcessPattern='Start-'+'Process\s+cmd\.exe';if($testSource-cmatch$startProcessPattern){throw 'hardening test must not use Start-Process for cmd'}
+$directPwshPattern='&\s*'+[regex]::Escape("'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'");if($testSource-cmatch$directPwshPattern){throw 'hardening test must not directly invoke pwsh'}
+
 $f=$null
 try{
 switch($Case){
-'I1'{$f=New-Fixture;$before=Get-TreeFingerprint $ManagedRoot;$r=Invoke-Entry @('-Mode','Inventory','-FixtureRoot',$f.Root,'-Json');if($r.ExitCode-ne 0){throw $r.Text};$after=Get-TreeFingerprint $ManagedRoot;if($before-cne$after){throw 'I1 RED managed source tree changed'};$s=Get-Content -Raw $Entry;if($s-cnotmatch '-I\s+-B\s+-c'){throw 'I1 RED Python invocation lacks -B'};if($s-cnotmatch 'sys\.dont_write_bytecode\s*=\s*True'){throw 'I1 RED adapter lacks dont_write_bytecode'}}
+'I1'{$s=Get-Content -Raw $Entry;$productionHelperStart=$s.IndexOf('function Invoke-HiddenProcess');$productionHelperEnd=$s.IndexOf('function Assert-DPathWithoutReparse',$productionHelperStart);if($productionHelperStart-lt0-or$productionHelperEnd-le$productionHelperStart){throw 'I1 RED Python invocation does not use ProcessStartInfo'};$productionHelper=$s.Substring($productionHelperStart,$productionHelperEnd-$productionHelperStart);if($productionHelper-cnotmatch 'UseShellExecute\s*=\s*\$false'){throw 'I1 RED Python invocation does not disable shell execution'};if($productionHelper-cnotmatch 'CreateNoWindow\s*=\s*\$true'){throw 'I1 RED Python invocation can allocate a console window'};if($productionHelper-cnotmatch 'RedirectStandardOutput\s*=\s*\$true'-or$productionHelper-cnotmatch 'RedirectStandardError\s*=\s*\$true'){throw 'I1 RED Python output is not captured'};if($s-cmatch '&\s*\$PythonPath'){throw 'I1 RED Python invocation still uses the call operator'};$pythonArgumentsPattern='Invoke-HiddenProcess\s+-FilePath\s+\$PythonPath\s+-Arguments\s+@\(\s*''-I''\s*,\s*''-B''\s*,\s*''-c''';if($s-cnotmatch$pythonArgumentsPattern){throw 'I1 RED Python invocation lacks -I -B -c'};$f=New-Fixture;$before=Get-TreeFingerprint $ManagedRoot;$r=Invoke-Entry @('-Mode','Inventory','-FixtureRoot',$f.Root,'-Json');if($r.ExitCode-ne 0){throw $r.Text};$after=Get-TreeFingerprint $ManagedRoot;if($before-cne$after){throw 'I1 RED managed source tree changed'};if($s-cnotmatch 'sys\.dont_write_bytecode\s*=\s*True'){throw 'I1 RED adapter lacks dont_write_bytecode'}}
 'I2'{$f=New-Fixture -Scale;$i=Read-Result (Invoke-Entry @('-Mode','Inventory','-FixtureRoot',$f.Root,'-Json'));if([string]$i.candidateRoot-cne[string]$f.CandidateRoot){throw 'I2 RED fixture candidate root not bound'};if($i.summary.safeCount-ne171-or$i.summary.missingCount-ne5-or$i.summary.reparseCount-ne1-or$i.summary.ambiguousCount-ne2){throw "I2 RED bad classification counts: $($i.summary|ConvertTo-Json -Compress)"}}
 'I3'{$f=New-Fixture;$i=Read-Result (Invoke-Entry @('-Mode','Inventory','-FixtureRoot',$f.Root,'-Json'));if(-not(Test-Path -LiteralPath ([string]$i.approvalArtifactPath)-PathType Leaf)){throw 'I3 RED approval artifact missing'};$a=Get-Content -Raw $i.approvalArtifactPath|ConvertFrom-Json -Depth 64;if([string]$a.nonce-cnotmatch'^[0-9a-f]{32}$'-or$a.state-cne'fresh'){throw 'I3 RED nonce/fresh state missing'};$args=@('-Mode','Repair','-FixtureRoot',$f.Root,'-InventoryGeneration',$i.generationId,'-ApprovedMappingHash',$i.approvedMappingHash,'-Json');$first=Invoke-Entry $args;if($first.ExitCode-ne0){throw $first.Text};$orig=[ordered]@{'thread-workspace-root-hints'=[ordered]@{safe='C:\Users\WINDOWS\Documents\Codex\safe'};untouched=[ordered]@{sentinel='preserve'}};[IO.File]::WriteAllText($f.StatePath,($orig|ConvertTo-Json -Depth 8 -Compress),[Text.UTF8Encoding]::new($false));$bytes=[IO.File]::ReadAllBytes($f.StatePath);$replay=Invoke-Entry $args;if($replay.ExitCode-eq0){throw 'I3 RED consumed approval replayed'};if(@(Compare-Object $bytes ([IO.File]::ReadAllBytes($f.StatePath))).Count-ne0){throw 'I3 RED replay changed state'}}
 'I4'{$f=New-Fixture -Scale;$i=Read-Result (Invoke-Entry @('-Mode','Inventory','-FixtureRoot',$f.Root,'-Json'));$bytes=[IO.File]::ReadAllBytes($f.StatePath);$r=Invoke-Entry @('-Mode','Repair','-FixtureRoot',$f.Root,'-InventoryGeneration',$i.generationId,'-ApprovedMappingHash',$i.approvedMappingHash,'-Json') @{CODEX_STATE_PATH_REPAIR_FIXTURE_REPLACE_CANDIDATE='safe-000'};if($r.ExitCode-eq0){throw 'I4 RED candidate replacement accepted'};if(@(Compare-Object $bytes ([IO.File]::ReadAllBytes($f.StatePath))).Count-ne0){throw 'I4 RED candidate drift changed state'}}

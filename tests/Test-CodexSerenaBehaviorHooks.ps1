@@ -83,6 +83,7 @@ $activationSource = Get-Content -LiteralPath $activationPath -Raw
 $behaviorGuardSource = Get-Content -LiteralPath $behaviorGuardPath -Raw
 foreach ($source in @($reminderSource, $cleanupSource, $activationSource)) {
     Assert-True $source.Contains('set "SERENA_HOME=D:\Codex\.serena"') 'wrapper 必须覆盖外部 SERENA_HOME。'
+    Assert-True ($source.Contains('D:\Codex\tools\python314-official\pythonw.exe') -and $source.Contains('lib\hidden-console-launcher.py')) 'wrapper 必须通过 hidden launcher 启动。'
     Assert-True (-not $source.Contains('%*')) 'wrapper 不得接受外部参数覆盖固定命令。'
 }
 Assert-True $reminderSource.Contains('"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Reminder') 'reminder 必须固定 sibling 受控 guard 和 Mode。'
@@ -190,8 +191,8 @@ try {
     $raceGuard = [CodexHookRuntime.SerenaSessionDirectoryGuard]::Acquire($guardFixtureRoot, $raceSessionPath)
     try {
         Assert-True (Test-Path -LiteralPath $raceSessionPath -PathType Container) 'guard 必须安全创建缺失 session leaf。'
-        & 'C:\Windows\System32\cmd.exe' /d /c rmdir $raceSessionPath 2>$null
-        Assert-True ($LASTEXITCODE -ne 0 -and (Test-Path -LiteralPath $raceSessionPath -PathType Container)) 'guard 持有期间必须拒绝删除缺失 leaf 的竞争替换。'
+        $raceDelete = Invoke-ChildProcess -FilePath 'C:\Windows\System32\cmd.exe' -Arguments @('/d','/c','rmdir',$raceSessionPath) -InputText ''
+        Assert-True ($raceDelete.exitCode -ne 0 -and (Test-Path -LiteralPath $raceSessionPath -PathType Container)) 'guard 持有期间必须拒绝删除缺失 leaf 的竞争替换。'
         $junctionReplacementRejected = $false
         try { $null = New-Item -ItemType Junction -Path $raceSessionPath -Target $outsideSessionRoot -ErrorAction Stop }
         catch { $junctionReplacementRejected = $true }
@@ -279,7 +280,10 @@ try {
         }
     }
     finally {
-        if (Test-Path -LiteralPath $junctionPath) { & 'C:\Windows\System32\cmd.exe' /d /c rmdir $junctionPath | Out-Null }
+        if (Test-Path -LiteralPath $junctionPath) {
+            $junctionDelete = Invoke-ChildProcess -FilePath 'C:\Windows\System32\cmd.exe' -Arguments @('/d','/c','rmdir',$junctionPath) -InputText ''
+            Assert-True ($junctionDelete.exitCode -eq 0) 'session junction 清理失败。'
+        }
     }
     foreach ($dangerousSession in @('..', '../outside-sentinel.txt', '..\outside-sentinel.txt', 'D:\outside', '\\server\share', 'nested/session', 'nested\session')) {
         foreach ($behavior in @('Reminder', 'Cleanup', 'Activation')) {

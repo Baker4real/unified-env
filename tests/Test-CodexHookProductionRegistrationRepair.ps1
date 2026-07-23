@@ -204,28 +204,55 @@ Assert-True (@(Get-ChildItem -LiteralPath ([string]$fixtureProfile.evidenceRoot)
 [IO.File]::WriteAllBytes([string]$fixtureProfile.registryPath, $registryBeforeBytes)
 $state = New-CodexHookProductionRegistrationRepairState -Profile $fixtureProfile
 Write-Utf8NoBom -Path ([string]$fixtureProfile.planPath) -Text ($state.plan | ConvertTo-Json -Depth 100)
-$mutexJob = Start-Job -ArgumentList ([string]$fixtureProfile.mutexName) -ScriptBlock {
-    param($Name)
-    $mutex = [Threading.Mutex]::new($false, $Name)
-    try {
-        if (-not $mutex.WaitOne(0)) { throw 'fixture mutex setup busy' }
-        'held'
-        Start-Sleep -Seconds 30
-    } finally {
-        try { [void]$mutex.ReleaseMutex() } catch {}
-        $mutex.Dispose()
-    }
-}
+$mutexReadyPath = Join-Path $fixtureRoot 'production-mutex-ready.txt'
+$mutexHolderCode = @'
+$mutex = [Threading.Mutex]::new($false, $env:CODEX_TEST_MUTEX_NAME)
 try {
-    Start-Sleep -Seconds 1
-    Assert-True ($mutexJob.State -ceq 'Running') 'production fixture mutex 预占失败'
+    if (-not $mutex.WaitOne(0)) { throw 'fixture mutex setup busy' }
+    [IO.File]::WriteAllText($env:CODEX_TEST_MUTEX_READY, 'ready', [Text.UTF8Encoding]::new($false))
+    Start-Sleep -Seconds 30
+} finally {
+    try { [void]$mutex.ReleaseMutex() } catch {}
+    $mutex.Dispose()
+}
+'@
+$mutexHolderEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($mutexHolderCode))
+$mutexHolderStart = [Diagnostics.ProcessStartInfo]::new()
+$mutexHolderStart.FileName = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
+$mutexHolderStart.UseShellExecute = $false
+$mutexHolderStart.CreateNoWindow = $true
+$mutexHolderStart.RedirectStandardOutput = $true
+$mutexHolderStart.RedirectStandardError = $true
+$mutexHolderStart.Environment['CODEX_TEST_MUTEX_NAME'] = [string]$fixtureProfile.mutexName
+$mutexHolderStart.Environment['CODEX_TEST_MUTEX_READY'] = $mutexReadyPath
+foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $mutexHolderEncoded)) {
+    [void]$mutexHolderStart.ArgumentList.Add($argument)
+}
+$mutexHolder = [Diagnostics.Process]::new()
+$mutexHolder.StartInfo = $mutexHolderStart
+$mutexStdoutTask = $null
+$mutexStderrTask = $null
+try {
+    Assert-True $mutexHolder.Start() 'production fixture mutex holder 无法启动'
+    $mutexStdoutTask = $mutexHolder.StandardOutput.ReadToEndAsync()
+    $mutexStderrTask = $mutexHolder.StandardError.ReadToEndAsync()
+    for ($attempt = 0; $attempt -lt 100 -and -not (Test-Path -LiteralPath $mutexReadyPath -PathType Leaf); $attempt++) {
+        if ($mutexHolder.HasExited) { break }
+        Start-Sleep -Milliseconds 50
+    }
+    Assert-True ((Test-Path -LiteralPath $mutexReadyPath -PathType Leaf) -and -not $mutexHolder.HasExited) 'production fixture mutex 预占失败'
     $mutexError = Assert-Throws {
         Invoke-CodexHookProductionRegistrationRepairApplyCore -Profile $fixtureProfile | Out-Null
     } 'production apply 必须受 fixed mutex 保护'
     Assert-True ($mutexError -match 'mutex busy') 'production mutex 冲突必须给出脱敏原因'
 } finally {
-    Stop-Job -Job $mutexJob -ErrorAction SilentlyContinue
-    Remove-Job -Job $mutexJob -Force -ErrorAction SilentlyContinue
+    if (-not $mutexHolder.HasExited) {
+        $mutexHolder.Kill($true)
+        [void]$mutexHolder.WaitForExit(5000)
+    }
+    if ($null -ne $mutexStdoutTask) { [void]$mutexStdoutTask.GetAwaiter().GetResult() }
+    if ($null -ne $mutexStderrTask) { [void]$mutexStderrTask.GetAwaiter().GetResult() }
+    $mutexHolder.Dispose()
 }
 Assert-True (-not [IO.Directory]::Exists((Join-Path ([string]$fixtureProfile.evidenceRoot) '.claims'))) 'mutex gate 失败不得创建 claim'
 

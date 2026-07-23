@@ -36,7 +36,11 @@ const LARGE_MANIFEST_FILE_CONTENT = 'fixture large manifest payload\n';
 const LARGE_MANIFEST_FILE_SUFFIX = '-abcdefghijklmnopqrstuvwxyz0123456789.bin';
 
 function runJsonScript(script, args = [], env = process.env, expectedStatus = 0) {
-  const result = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env });
+  const result = spawnSync(process.execPath, [script, ...args], {
+    encoding: 'utf8',
+    env,
+    windowsHide: true,
+  });
   assert.equal(result.status, expectedStatus, `${path.basename(script)} 未通过：${result.stderr || result.stdout}`);
   assert.equal(result.stderr, '', `${path.basename(script)} 不应向 stderr 输出：${result.stderr}`);
   assert.notEqual(result.stdout.trim(), '', `${path.basename(script)} 必须输出 JSON`);

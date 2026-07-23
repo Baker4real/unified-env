@@ -25,6 +25,8 @@ MODULE_PATH = PROJECT_ROOT / "managed" / "codex-hooks" / "hooks" / "codex-state-
 os.environ["TMP"] = str(FIXTURE_ROOT / "tmp")
 os.environ["TEMP"] = str(FIXTURE_ROOT / "tmp")
 tempfile.tempdir = str(FIXTURE_ROOT / "tmp")
+SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+SUBPROCESS_TEXT_ENCODING = "oem" if os.name == "nt" else "utf-8"
 
 
 def load_module():
@@ -1239,7 +1241,10 @@ class CodexStatePolicyTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding=SUBPROCESS_TEXT_ENCODING,
+            errors="replace",
             check=False,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
         if created.returncode != 0:
             self.skipTest(created.stderr or created.stdout)
@@ -3147,7 +3152,10 @@ class CodexStatePolicyTests(unittest.TestCase):
                     ],
                     capture_output=True,
                     text=True,
+                    encoding=SUBPROCESS_TEXT_ENCODING,
+                    errors="replace",
                     check=False,
+                    creationflags=SUBPROCESS_CREATION_FLAGS,
                 )
                 blocked = created.returncode != 0
 
@@ -3436,7 +3444,10 @@ class CodexStatePolicyTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding=SUBPROCESS_TEXT_ENCODING,
+            errors="replace",
             check=False,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
         self.assertEqual(created.returncode, 0, created.stderr or created.stdout)
         try:

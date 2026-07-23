@@ -33,6 +33,41 @@ function Assert-Throws {
     throw "未拒绝：$Message"
 }
 
+function Invoke-HiddenNativeCommand {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$ArgumentList
+    )
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $ArgumentList) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        Assert-True $process.Start() "native command 无法启动：$FilePath"
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        Assert-True ($process.WaitForExit(30000)) "native command 超时：$FilePath"
+        [pscustomobject]@{
+            exitCode = $process.ExitCode
+            stdout = $stdoutTask.GetAwaiter().GetResult()
+            stderr = $stderrTask.GetAwaiter().GetResult()
+        }
+    } finally {
+        if (-not $process.HasExited) {
+            try { $process.Kill($true) } catch {}
+        }
+        $process.Dispose()
+    }
+}
+
 Assert-True (
     (Get-CodexHookBytesSha256 -Bytes ([byte[]]@())) -ceq
     'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
@@ -53,6 +88,7 @@ function New-ValidManifest {
         runtimes = [pscustomobject][ordered]@{
             pwsh = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
             python = 'D:\Codex\tools\python314-official\python.exe'
+            pythonw = 'D:\Codex\tools\python314-official\pythonw.exe'
             serenaPython = 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
             serenaHooks = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
         }
@@ -68,6 +104,8 @@ function New-ValidManifest {
                 wrapperPath = 'D:\Codex\.codex\hooks\codex-provider-stability-guard.cmd'
                 implementationPath = 'D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1'
                 runtimeId = 'pwsh'
+                launcherRuntimeId = $null
+                launcherImplementationPath = $null
                 sourceState = 'managed'
                 readResources = @([pscustomobject][ordered]@{ kind = 'path'; value = 'D:\Codex\.codex\config.toml' })
                 writeResources = @([pscustomobject][ordered]@{ kind = 'abstract'; value = 'hook-stdout' })
@@ -150,6 +188,24 @@ Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'runtime 路径/类�
 $case = Copy-TestDocument $valid
 $case.hooks[0].runtimeId = 'python'
 Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'hook implementation/runtime 类型错配'
+
+$case = Copy-TestDocument $valid
+$case.hooks[0].launcherRuntimeId = 'pythonw'
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'launcher runtime/path 必须成对声明'
+
+$case = Copy-TestDocument $valid
+$case.hooks[0].launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'launcher path/runtime 必须成对声明'
+
+$case = Copy-TestDocument $valid
+$case.hooks[0].launcherRuntimeId = 'python'
+$case.hooks[0].launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'launcher runtime 必须固定为 pythonw'
+
+$case = Copy-TestDocument $valid
+$case.hooks[0].launcherRuntimeId = 'pythonw'
+$case.hooks[0].launcherImplementationPath = 'D:\Codex\.codex\outside\hidden-console-launcher.py'
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'launcher implementation 必须位于 live hooks 根'
 
 $case = Copy-TestDocument $valid
 $case.hooks[0].readResources[0].value = 'D:\Codex\.codex\config.toml:secret'
@@ -270,10 +326,31 @@ $managedManifest = Read-CodexHookManifest -Path $managedManifestPath
 
 $legacyFixtureManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json'
 $hostPreflightManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json'
+$hiddenLauncherRelativePath = 'managed/codex-hooks/hooks/lib/hidden-console-launcher.py'
+$hiddenLauncherSourcePath = Join-Path $ProjectRoot ($hiddenLauncherRelativePath.Replace('/', '\'))
 Assert-True (Test-Path -LiteralPath $legacyFixtureManifestPath -PathType Leaf) '必须提供仅供历史 fixture 使用的 legacy manifest'
 Assert-True (Test-Path -LiteralPath $hostPreflightManifestPath -PathType Leaf) '必须提供唯一生产 host-preflight manifest'
+Assert-True (Test-Path -LiteralPath $hiddenLauncherSourcePath -PathType Leaf) '必须提供受管 hidden console launcher 源文件'
+$gitCommands = @(Get-Command git.exe -CommandType Application -ErrorAction Stop)
+Assert-True ($gitCommands.Count -gt 0) '必须能够解析真实 git.exe 以验证 Git 属性'
+$gitPath = [string]$gitCommands[0].Source
+$gitAttributeResult = Invoke-HiddenNativeCommand -FilePath $gitPath -ArgumentList @('-C', $ProjectRoot, 'check-attr', 'text', 'eol', '--', $hiddenLauncherRelativePath)
+Assert-True ($gitAttributeResult.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($gitAttributeResult.stderr)) 'git check-attr 必须能够读取 hidden console launcher 属性'
+$hiddenLauncherAttributes = @([regex]::Split($gitAttributeResult.stdout.Trim(), '\r?\n'))
+Assert-True (
+    $hiddenLauncherAttributes.Count -eq 2 -and
+    [string]$hiddenLauncherAttributes[0] -ceq ('{0}: text: set' -f $hiddenLauncherRelativePath) -and
+    [string]$hiddenLauncherAttributes[1] -ceq ('{0}: eol: lf' -f $hiddenLauncherRelativePath)
+) 'hidden console launcher 必须由 Git 属性固定为 text eol=lf'
 $legacyFixtureManifest = Read-CodexHookManifest -Path $legacyFixtureManifestPath
 $hostPreflightManifest = Read-CodexHookManifest -Path $hostPreflightManifestPath
+$hostHiddenLauncherFile = @($hostPreflightManifest.files | Where-Object relativePath -ceq 'hooks/lib/hidden-console-launcher.py')
+Assert-True ($hostHiddenLauncherFile.Count -eq 1) 'host-preflight manifest 必须唯一声明 hidden console launcher'
+[byte[]]$hiddenLauncherRawBytes = [IO.File]::ReadAllBytes($hiddenLauncherSourcePath)
+$hiddenLauncherRawSha256 = Get-CodexHookBytesSha256 -Bytes $hiddenLauncherRawBytes
+Assert-True (
+    [string]$hostHiddenLauncherFile[0].sha256 -ceq $hiddenLauncherRawSha256
+) 'host-preflight manifest 的 hidden console launcher SHA-256 必须匹配工作树原始字节，不得只匹配 canonical text hash'
 [void](Read-CodexHookHostPreflightManifest)
 [void](Read-CodexHookLegacyFixtureManifest)
 $expectedTrustedProjects = @(
@@ -349,7 +426,7 @@ Assert-True ($stateGuardSource.Contains('path_mode: str = "inventory"')) 'state 
 Assert-True ($stateGuardSource.Contains('approved_map: object = None')) 'state guard 必须要求显式 approved map 才能修复路径'
 Assert-True ($stateGuardSource.Contains('permission policy sources conflict')) '策略来源冲突必须 fail closed'
 Assert-True (@($managedManifest.hooks).Count -eq 8) '兼容 manifest 必须继续覆盖 Task 1-5 的当前 hook 模型'
-Assert-True (@($managedManifest.files).Count -eq 23) '兼容 manifest 必须纳入 state preflight、Serena behavior wrapper 与 provider core 的完整文件闭包'
+Assert-True (@($managedManifest.files).Count -eq 24) '兼容 manifest 必须纳入 state preflight、hidden launcher、Serena behavior wrapper 与 provider core 的完整文件闭包'
 Assert-True (@($legacyFixtureManifest.files).Count -eq 16) 'legacy fixture manifest 必须冻结 13 active + 3 retired 历史事务闭包'
 Assert-True (
     @($hostPreflightManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.py').Count -eq 1 -and
@@ -465,12 +542,15 @@ Assert-True (
 Assert-True (
     $managedManifest.runtimes.pwsh -ceq 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -and
     $managedManifest.runtimes.python -ceq 'D:\Codex\tools\python314-official\python.exe' -and
+    $managedManifest.runtimes.pythonw -ceq 'D:\Codex\tools\python314-official\pythonw.exe' -and
     $managedManifest.runtimes.serenaPython -ceq 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe' -and
     $managedManifest.runtimes.serenaHooks -ceq 'D:\Codex\tools\uv\bin\serena-hooks.exe'
 ) 'runtime manifest 必须使用 brief 固定路径'
 
 $runtimeFile=@($managedManifest.files|Where-Object relativePath -ceq 'hooks/lib/CodexHookRuntime.ps1')
 Assert-True ($runtimeFile.Count -eq 1 -and (@($runtimeFile[0].ownerHookIds) -join ',') -ceq 'provider-stability,serena-activate,serena-dashboard,github-cli,serena-cleanup,serena-reminder') 'shared runtime owners 必须覆盖所有 PowerShell active hooks'
+$hiddenLauncherFile=@($managedManifest.files|Where-Object relativePath -ceq 'hooks/lib/hidden-console-launcher.py')
+Assert-True ($hiddenLauncherFile.Count -eq 1 -and (@($hiddenLauncherFile[0].ownerHookIds) -join ',') -ceq 'serena-activate,serena-cleanup,serena-reminder') '兼容 manifest 的 hidden launcher owners 必须只覆盖真实使用两层链的 hook'
 $provider=@($managedManifest.hooks|Where-Object id -ceq 'provider-stability')[0]
 $dashboard=@($managedManifest.hooks|Where-Object id -ceq 'serena-dashboard')[0]
 $serenaActivate=@($managedManifest.hooks|Where-Object id -ceq 'serena-activate')[0]

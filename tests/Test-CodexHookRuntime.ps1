@@ -6,10 +6,21 @@ $runtimePath=Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexHookRunt
 $manifestPath=Join-Path $projectRoot 'managed\codex-hooks\manifest.json'
 $managedRoot=Split-Path -Parent $manifestPath
 $manifest=Get-Content -Raw -LiteralPath $manifestPath|ConvertFrom-Json -Depth 100
+$hostManifest=Get-Content -Raw -LiteralPath (Join-Path $managedRoot 'host-preflight-manifest.json')|ConvertFrom-Json -Depth 100
 
 function Assert-True([bool]$Condition,[string]$Message) { if(-not $Condition){throw $Message} }
 function Assert-Throws([scriptblock]$Action,[string]$Pattern){try{&$Action;throw 'DID_NOT_THROW'}catch{if($_.Exception.Message -eq 'DID_NOT_THROW' -or $_.Exception.Message -notmatch $Pattern){throw "异常不匹配 [$Pattern]：$($_.Exception.Message)"}}}
 function Assert-Bytes([byte[]]$Actual,[byte[]]$Expected,[string]$Message){if(([Convert]::ToHexString($Actual)) -cne ([Convert]::ToHexString($Expected))){throw $Message}}
+function Start-NoWindowTestProcess([string]$FilePath,[string[]]$ArgumentList){
+    $start=[Diagnostics.ProcessStartInfo]::new()
+    $start.FileName=$FilePath
+    $start.UseShellExecute=$false
+    $start.CreateNoWindow=$true
+    foreach($argument in $ArgumentList){[void]$start.ArgumentList.Add($argument)}
+    $process=[Diagnostics.Process]::new()
+    $process.StartInfo=$start
+    try{Assert-True $process.Start() "fixture process 启动失败：$FilePath";return $process}catch{$process.Dispose();throw}
+}
 
 foreach ($name in @('Get-CodexHookSha256','Assert-CodexHookDPath','Invoke-CodexHookMutex','Write-CodexHookAtomicText','Invoke-CodexHookProcess','ConvertTo-CodexHookRedactedUri','Write-CodexHookLatestHealth')) { Assert-True ($null -ne (Get-Command $name -CommandType Function -ErrorAction SilentlyContinue)) "缺少接口：$name" }
 
@@ -67,6 +78,11 @@ foreach($file in $activeWrappers){
     }
     else {
         Assert-True ($text -match '(?m)%\*\s*$') "wrapper 必须保留 %*：$($file.relativePath)"
+    }
+    if ($file.relativePath -in @('hooks/codex-state-preflight.cmd','hooks/serena-reminder-guarded.cmd','hooks/serena-cleanup-guarded.cmd','hooks/serena-activation-reminder.cmd')) {
+        $productionOwner=@($hostManifest.hooks|Where-Object { [IO.Path]::GetFileName([string]$_.wrapperPath) -ceq [IO.Path]::GetFileName([string]$file.liveRelativePath) })
+        Assert-True ($productionOwner.Count -eq 1 -and $productionOwner[0].launcherRuntimeId -ceq 'pythonw' -and $productionOwner[0].launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py') "console lifecycle hook 必须声明 launcher dependency：$($file.relativePath)"
+        Assert-True ($text.Contains('"D:\Codex\tools\python314-official\pythonw.exe" -I -S -B -X utf8') -and $text.Contains('lib\hidden-console-launcher.py')) "console lifecycle wrapper 必须通过隔离 hidden launcher 启动：$($file.relativePath)"
     }
     Assert-True ($text -match '(?m)^exit /b %ERRORLEVEL%\s*$') "wrapper 必须透传退出码：$($file.relativePath)"
     foreach($token in $forbiddenWrapperTokens){Assert-True (-not $text.Contains($token)) "wrapper 禁止旧 runtime：$token"}
@@ -222,11 +238,11 @@ Assert-True (-not $again.changed) '幂等写入 changed=false'
 
 $marker=Join-Path $fixtureRoot 'mutex-ready.txt'
 $holderCode='$m=[Threading.Mutex]::new($false,''Local\CodexRuntimeTestBusy'');[void]$m.WaitOne();[IO.File]::WriteAllText('''+$marker+''',''ready'');Start-Sleep -Seconds 3;[void]$m.ReleaseMutex();$m.Dispose()'
-$holder=Start-Process -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList @('-NoProfile','-Command',$holderCode) -WindowStyle Hidden -PassThru
+$holder=Start-NoWindowTestProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList @('-NoProfile','-Command',$holderCode)
 try{for($i=0;$i -lt 40 -and -not(Test-Path $marker);$i++){Start-Sleep -Milliseconds 50};Assert-True (Test-Path $marker) 'mutex holder 未就绪';Assert-Throws { Invoke-CodexHookMutex -Name 'Local\CodexRuntimeTestBusy' -ScriptBlock {} } '超时'}finally{if(-not $holder.HasExited){$holder.Kill($true)};$holder.Dispose()}
 $abandonedMarker=Join-Path $fixtureRoot 'mutex-abandoned-ready.txt'
 $abandonedCode='$m=[Threading.Mutex]::new($false,''Local\CodexRuntimeTestAbandoned'');[void]$m.WaitOne();[IO.File]::WriteAllText('''+$abandonedMarker+''',''ready'');exit 0'
-$abandoner=Start-Process -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList @('-NoProfile','-Command',$abandonedCode) -WindowStyle Hidden -PassThru
+$abandoner=Start-NoWindowTestProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList @('-NoProfile','-Command',$abandonedCode)
 try{for($i=0;$i -lt 40 -and -not(Test-Path $abandonedMarker);$i++){Start-Sleep -Milliseconds 50};Assert-True (Test-Path $abandonedMarker) 'abandoned holder 未就绪';$abandoner.WaitForExit();$taken=Invoke-CodexHookMutex -Name 'Local\CodexRuntimeTestAbandoned' -ScriptBlock {'taken'};Assert-True ($taken -ceq 'taken') 'abandoned mutex 必须被安全接管'}finally{if(-not $abandoner.HasExited){$abandoner.Kill($true)};$abandoner.Dispose()}
 $process=Invoke-CodexHookProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -ArgumentList @('-NoProfile','-Command','[Console]::Out.Write("ok")')
 Assert-True ($process.exitCode -eq 0 -and $process.stdout -ceq 'ok') 'process helper 必须捕获输出与退出码'
@@ -343,8 +359,47 @@ try{
     $reorderedHealthOutput=@(Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $reorderedHealth -HealthRoot $healthRoot -AllowFixtureRoot)
     Assert-True ($reorderedHealthOutput.Count -eq 0) 'health schema 必须按属性集合接受合法重排 payload'
     foreach($invalidErrors in @('scalar',$null,1,[pscustomobject]@{bad=$true},[object[]]@('ok',1))){$invalid=New-Health 'provider-stability';$invalid.errors=$invalidErrors;Assert-Throws { Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $invalid -HealthRoot $healthRoot -AllowFixtureRoot } 'errors 类型'}
-    $jobs=@();foreach($id in @('provider-stability','serena-activate','serena-dashboard','github-cli')){$jobs+=Start-Job -ScriptBlock {param($runtime,$root,$hookId). $runtime;$p=[pscustomobject][ordered]@{hookId=$hookId;runId=[guid]::NewGuid().ToString('N');startedAtUtc=[DateTime]::UtcNow.ToString('o');completedAtUtc=[DateTime]::UtcNow.ToString('o');durationMs=1;ok=$true;changed=$false;restartRequired=$false;errors=[string[]]@()};Write-CodexHookLatestHealthCore -HookId $hookId -Payload $p -HealthRoot $root -AllowFixtureRoot} -ArgumentList $runtimePath,$healthRoot,$id}
-    try{$jobs|Wait-Job|Out-Null;$jobOutput=@($jobs|Receive-Job);Assert-True ($jobOutput.Count -eq 0) 'health writer 不得污染 stdout';foreach($job in $jobs){Assert-True ($job.State -ceq 'Completed') "health 并发 job 必须完成：$($job.State)"}}finally{$jobs|Remove-Job -Force}
+    $healthWorkerScript = @'
+param($RuntimePath, $Root, $HookId)
+. $RuntimePath
+$payload = [pscustomobject][ordered]@{
+    hookId = $HookId
+    runId = [guid]::NewGuid().ToString('N')
+    startedAtUtc = [DateTime]::UtcNow.ToString('o')
+    completedAtUtc = [DateTime]::UtcNow.ToString('o')
+    durationMs = 1
+    ok = $true
+    changed = $false
+    restartRequired = $false
+    errors = [string[]]@()
+}
+Write-CodexHookLatestHealthCore -HookId $HookId -Payload $payload -HealthRoot $Root -AllowFixtureRoot
+'@
+    $healthWorkers = @()
+    foreach($id in @('provider-stability','serena-activate','serena-dashboard','github-cli')) {
+        $worker = [Management.Automation.PowerShell]::Create()
+        [void]$worker.AddScript($healthWorkerScript).AddArgument($runtimePath).AddArgument($healthRoot).AddArgument($id)
+        $healthWorkers += [pscustomobject]@{
+            hookId = $id
+            worker = $worker
+            async = $worker.BeginInvoke()
+        }
+    }
+    try {
+        foreach($healthWorker in $healthWorkers) {
+            $workerOutput = @($healthWorker.worker.EndInvoke($healthWorker.async))
+            Assert-True ($workerOutput.Count -eq 0) 'health writer 不得污染 stdout'
+            Assert-True ($healthWorker.worker.Streams.Error.Count -eq 0) "health 并发 worker 失败：$($healthWorker.hookId) / $($healthWorker.worker.Streams.Error -join '; ')"
+            Assert-True ($healthWorker.worker.InvocationStateInfo.State -ceq 'Completed') "health 并发 worker 必须完成：$($healthWorker.worker.InvocationStateInfo.State)"
+        }
+    } finally {
+        foreach($healthWorker in $healthWorkers) {
+            if (-not $healthWorker.async.IsCompleted) {
+                try { $healthWorker.worker.Stop() } catch {}
+            }
+            $healthWorker.worker.Dispose()
+        }
+    }
     foreach($id in @('provider-stability','serena-activate','serena-dashboard','github-cli')){$path=Join-Path $healthRoot "$id.json";Assert-True (Test-Path $path) "health writer 必须隔离写入 $id.json";$doc=Get-Content -Raw $path|ConvertFrom-Json;Assert-True ($doc.hookId -ceq $id) 'health 文件不得交叉覆盖'}
     $single=New-Health 'provider-stability';$single.errors=[string[]]@('one');$healthOutput=@(Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $single -HealthRoot $healthRoot -AllowFixtureRoot);Assert-True ($healthOutput.Count -eq 0) 'single-error health 写入不得污染 stdout'
     foreach($id in @('provider-stability','serena-activate','serena-dashboard','github-cli')){$raw=Get-Content -Raw (Join-Path $healthRoot "$id.json");$json=[Text.Json.JsonDocument]::Parse($raw);try{Assert-True ($json.RootElement.GetProperty('errors').ValueKind -eq [Text.Json.JsonValueKind]::Array) 'health errors JSON token 必须稳定为 array'}finally{$json.Dispose()}}
@@ -376,4 +431,19 @@ try{
     if(Test-Path $healthRoot){Remove-Item $healthRoot -Recurse -Force}
 }
 Assert-True (-not(Test-Path $healthRoot)) 'health fixture 必须在测试结束时清理'
+$startJobViolations = [Collections.Generic.List[string]]::new()
+foreach($testFile in Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -File -Recurse) {
+    if ($testFile.Name -ceq 'Test-HiddenConsoleHookLauncher.ps1') { continue }
+    $testTokens = $null
+    $testParseErrors = $null
+    $testAst = [Management.Automation.Language.Parser]::ParseFile($testFile.FullName, [ref]$testTokens, [ref]$testParseErrors)
+    Assert-True ($testParseErrors.Count -eq 0) "测试 AST 必须合法：$($testFile.FullName) / $($testParseErrors -join '; ')"
+    foreach($commandAst in $testAst.FindAll({
+        param($node)
+        $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -ceq 'Start-Job'
+    }, $true)) {
+        $startJobViolations.Add("$($testFile.FullName):$($commandAst.Extent.StartLineNumber)")
+    }
+}
+Assert-True ($startJobViolations.Count -eq 0) "测试不得直接使用可能分配控制台的 Start-Job：$($startJobViolations -join ', ')"
 'ok=True'

@@ -17,6 +17,7 @@
   "runtimes": {
     "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
     "python": "D:\\Codex\\tools\\python314-official\\python.exe",
+    "pythonw": "D:\\Codex\\tools\\python314-official\\pythonw.exe",
     "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
     "serenaHooks": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
   },
@@ -32,6 +33,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.py",
       "runtimeId": "python",
+      "launcherRuntimeId": "pythonw",
+      "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
         {
@@ -102,6 +105,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-activation-reminder.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": "pythonw",
+      "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
         {
@@ -156,6 +161,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-cleanup-guarded.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": "pythonw",
+      "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
         {
@@ -222,6 +229,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-reminder-guarded.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": "pythonw",
+      "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
         {
@@ -300,7 +309,7 @@
     {
       "relativePath": "hooks/codex-state-preflight.cmd",
       "liveRelativePath": "codex-state-preflight.cmd",
-      "sha256": "299d1940ee6f187fea5bb7f870f234fdf781e752616df7f5358bf9b9a67f4cad",
+      "sha256": "14e46a0309e74b8415dd6d6ea626611b5015272dab3849ff6fb864138cf4f9f9",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-preflight"
@@ -309,7 +318,7 @@
     {
       "relativePath": "hooks/serena-reminder-guarded.cmd",
       "liveRelativePath": "serena-reminder-guarded.cmd",
-      "sha256": "f311fcba27b79e9da53c30c30b83082e0bc6647be5e15b49b4c196116af7e936",
+      "sha256": "2f5061658d1d7052852e114cc479adfe0256977de2127a717199b70d234f5ef0",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-reminder"
@@ -318,7 +327,7 @@
     {
       "relativePath": "hooks/serena-cleanup-guarded.cmd",
       "liveRelativePath": "serena-cleanup-guarded.cmd",
-      "sha256": "227c29c8facac25b2766d8e6a84bad3d838a668348f42b2be3e1ce0eb807bd53",
+      "sha256": "3fc836f420537772bf3be938421defe8eeae81d5d8ae91f239471b9976faa39c",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-cleanup"
@@ -338,10 +347,22 @@
     {
       "relativePath": "hooks/serena-activation-reminder.cmd",
       "liveRelativePath": "serena-activation-reminder.cmd",
-      "sha256": "c5ec2d5b40998a32b5859489a439499f1eee27302d317db53df68cef04e87d05",
+      "sha256": "2ba290a861bd885d02a8cfeca7bc8c2b7e1c22de8dae245d2e3cee78c261da70",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
+      ]
+    },
+    {
+      "relativePath": "hooks/lib/hidden-console-launcher.py",
+      "liveRelativePath": "lib/hidden-console-launcher.py",
+      "sha256": "c0a95d83b106dbba904af187b1a9f88102894317f163afb6c284114cf358973e",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "codex-state-preflight",
+        "serena-activate",
+        "serena-cleanup",
+        "serena-reminder"
       ]
     },
     {

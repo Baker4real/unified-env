@@ -48,6 +48,56 @@ function Assert-Throws {
     throw "未拒绝：$Message"
 }
 
+function Start-NoWindowProcess {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$ArgumentList
+    )
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $ArgumentList) { [void]$startInfo.ArgumentList.Add($argument) }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        Assert-True ($process.Start()) "无法启动无窗口子进程：$FilePath"
+        $process | Add-Member -NotePropertyName NoWindowStdoutTask -NotePropertyValue ($process.StandardOutput.ReadToEndAsync())
+        $process | Add-Member -NotePropertyName NoWindowStderrTask -NotePropertyValue ($process.StandardError.ReadToEndAsync())
+        return $process
+    } catch {
+        $process.Dispose()
+        throw
+    }
+}
+
+function Complete-NoWindowProcess {
+    param(
+        [Parameter(Mandatory)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][int]$TimeoutMilliseconds,
+        [string]$StandardOutputPath,
+        [string]$StandardErrorPath
+    )
+
+    if (-not $Process.WaitForExit($TimeoutMilliseconds)) {
+        try { $Process.Kill($true) } catch {}
+        throw "无窗口子进程超时：pid=$($Process.Id)"
+    }
+    $stdout = $Process.NoWindowStdoutTask.GetAwaiter().GetResult()
+    $stderr = $Process.NoWindowStderrTask.GetAwaiter().GetResult()
+    if (-not [string]::IsNullOrWhiteSpace($StandardOutputPath)) {
+        [IO.File]::WriteAllText($StandardOutputPath, $stdout, [Text.UTF8Encoding]::new($false))
+    }
+    if (-not [string]::IsNullOrWhiteSpace($StandardErrorPath)) {
+        [IO.File]::WriteAllText($StandardErrorPath, $stderr, [Text.UTF8Encoding]::new($false))
+    }
+    return [pscustomobject]@{ exitCode=[int]$Process.ExitCode; stdout=$stdout; stderr=$stderr }
+}
+
 function Get-ByteSha256 {
     param([Parameter(Mandatory)][byte[]]$Bytes)
 
@@ -78,13 +128,12 @@ function Invoke-HiddenPowerShellFileWrite {
     $payload = [Convert]::ToBase64String($Bytes)
     $command = "try { [IO.File]::WriteAllBytes($targetLiteral, [Convert]::FromBase64String('$payload')); exit 0 } catch [IO.IOException] { exit (`$_.Exception.HResult -band 0xffff) } catch { exit 254 }"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    $process = Start-Process `
-        -FilePath $pwshPath `
-        -ArgumentList @('-NoProfile', '-EncodedCommand', $encoded) `
-        -WindowStyle Hidden `
-        -Wait `
-        -PassThru
-    return [int]$process.ExitCode
+    $process = Start-NoWindowProcess -FilePath $pwshPath -ArgumentList @('-NoProfile', '-EncodedCommand', $encoded)
+    try {
+        return (Complete-NoWindowProcess -Process $process -TimeoutMilliseconds 120000).exitCode
+    } finally {
+        $process.Dispose()
+    }
 }
 
 function New-RegistryGroup {
@@ -695,21 +744,22 @@ Assert-True ($environmentStore['User|SERENA_HOME'] -ceq 'D:\Codex\.serena') 'ful
 $mappingMutexName = Get-CodexHookFixtureDeploymentMutexName -MappingIdentity ([string]$plan3.sourceFacts.mappingIdentity)
 $heldMappingMutex = [Threading.Mutex]::new($false, $mappingMutexName)
 $heldMappingMutexAcquired = $false
+$restoreWhileApplyProcess = $null
 try {
     $heldMappingMutexAcquired = $heldMappingMutex.WaitOne(0)
     Assert-True $heldMappingMutexAcquired '测试进程必须先占有 mapping lifecycle mutex'
     $restoreWhileApplyStdout = Join-Path $fixtureRoot 'restore-while-apply.stdout.txt'
     $restoreWhileApplyStderr = Join-Path $fixtureRoot 'restore-while-apply.stderr.txt'
-    $restoreWhileApplyProcess = Start-Process `
+    $restoreWhileApplyProcess = Start-NoWindowProcess `
         -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
-        -ArgumentList @('-NoProfile', '-File', $restoreScript, '-EvidenceDirectory', $applyResult.evidenceDirectory, '-Apply') `
-        -RedirectStandardOutput $restoreWhileApplyStdout `
-        -RedirectStandardError $restoreWhileApplyStderr `
-        -WindowStyle Hidden `
-        -PassThru
-    Assert-True ($restoreWhileApplyProcess.WaitForExit(120000)) '锁占用期间 restore 子进程必须在 120 秒内退出'
-    Assert-True ($restoreWhileApplyProcess.ExitCode -ne 0) 'restore 不得与持有同 mapping mutex 的 apply 生命周期并发'
-    $restoreWhileApplyError = [IO.File]::ReadAllText($restoreWhileApplyStderr)
+        -ArgumentList @('-NoProfile', '-File', $restoreScript, '-EvidenceDirectory', $applyResult.evidenceDirectory, '-Apply')
+    $restoreWhileApplyResult = Complete-NoWindowProcess `
+        -Process $restoreWhileApplyProcess `
+        -TimeoutMilliseconds 120000 `
+        -StandardOutputPath $restoreWhileApplyStdout `
+        -StandardErrorPath $restoreWhileApplyStderr
+    Assert-True ($restoreWhileApplyResult.exitCode -ne 0) 'restore 不得与持有同 mapping mutex 的 apply 生命周期并发'
+    $restoreWhileApplyError = $restoreWhileApplyResult.stderr
     Assert-True ($restoreWhileApplyError -match 'mutex busy') '并发 restore 必须由同一 mapping mutex 明确拒绝'
     foreach ($targetPath in $expectedNewFileBytes.Keys) {
         Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($targetPath))) -ceq (Get-ByteSha256 -Bytes $expectedNewFileBytes[$targetPath])) 'mutex 拒绝后 deployed file 不得出现混合状态'
@@ -717,6 +767,7 @@ try {
     Assert-True ((Get-ByteSha256 -Bytes ([IO.File]::ReadAllBytes($fixtureRegistryPath))) -ceq $plan3.registryAfterSha256) 'mutex 拒绝后 registry 必须仍为 deployed 状态'
     Assert-True ($environmentStore['User|SERENA_HOME'] -ceq 'D:\Codex\.serena') 'mutex 拒绝后 environment 必须仍为 deployed 状态'
 } finally {
+    if ($null -ne $restoreWhileApplyProcess) { $restoreWhileApplyProcess.Dispose() }
     if ($heldMappingMutexAcquired) { [void]$heldMappingMutex.ReleaseMutex() }
     $heldMappingMutex.Dispose()
 }
@@ -986,7 +1037,7 @@ $processes = [Collections.Generic.List[Diagnostics.Process]]::new()
 for ($processIndex = 0; $processIndex -lt 2; $processIndex++) {
     $stdoutPath = Join-Path $fixtureRoot "concurrent-$processIndex.stdout.txt"
     $stderrPath = Join-Path $fixtureRoot "concurrent-$processIndex.stderr.txt"
-    $processes.Add((Start-Process `
+    $concurrentProcess = Start-NoWindowProcess `
         -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
         -ArgumentList @(
             '-NoProfile', '-File', $invokeScript,
@@ -994,17 +1045,21 @@ for ($processIndex = 0; $processIndex -lt 2; $processIndex++) {
             '-Apply',
             '-ApprovedScope', 'codex-hook-governance-2026-07-11',
             '-EvidenceRoot', $concurrentEvidence
-        ) `
-        -RedirectStandardOutput $stdoutPath `
-        -RedirectStandardError $stderrPath `
-        -WindowStyle Hidden `
-        -PassThru))
+        )
+    $concurrentProcess | Add-Member -NotePropertyName NoWindowStdoutPath -NotePropertyValue $stdoutPath
+    $concurrentProcess | Add-Member -NotePropertyName NoWindowStderrPath -NotePropertyValue $stderrPath
+    $processes.Add($concurrentProcess)
 }
 foreach ($process in $processes) {
-    Assert-True ($process.WaitForExit(120000)) '并发 apply 子进程必须在 120 秒内退出'
+    [void](Complete-NoWindowProcess `
+        -Process $process `
+        -TimeoutMilliseconds 120000 `
+        -StandardOutputPath $process.NoWindowStdoutPath `
+        -StandardErrorPath $process.NoWindowStderrPath)
 }
 $successfulProcesses = @($processes | Where-Object ExitCode -eq 0)
 Assert-True ($successfulProcesses.Count -eq 1) '同 generationId 双进程 apply 必须恰有一个成功'
+foreach ($process in $processes) { $process.Dispose() }
 $concurrentEvidenceDirectory = @(Get-ChildItem -LiteralPath $concurrentEvidence -Directory | Where-Object Name -like 'deployment-*')
 Assert-True ($concurrentEvidenceDirectory.Count -eq 1) '双进程 apply 只能生成一个 deployment evidence'
 $concurrentRestore = & $restoreScript -EvidenceDirectory $concurrentEvidenceDirectory[0].FullName -Apply

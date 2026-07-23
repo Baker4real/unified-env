@@ -24,6 +24,7 @@ function runRaw(fixtureRoot, args = [], { testMode = true } = {}) {
   return spawnSync(process.execPath, [scriptPath, '--fixture-root', fixtureRoot, ...args], {
     encoding: 'utf8',
     env,
+    windowsHide: true,
   });
 }
 

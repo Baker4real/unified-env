@@ -22,6 +22,7 @@ MARKER_NAME = ".retired-project-usage-evidence-purger-fixture"
 MARKER_VALUE = "retired-project-usage-evidence-purger-fixture-v1\n"
 PREFIX = "retired-project-usage-evidence-purger-tests-"
 TARGET_KEY = "common_config_codex"
+SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 def assert_true(condition: bool, message: str) -> None:
@@ -68,6 +69,7 @@ def run_purger(home: Path, *arguments: str, expected_status: int) -> dict:
         text=True,
         encoding="utf-8",
         errors="strict",
+        creationflags=SUBPROCESS_CREATION_FLAGS,
     )
     assert_true(completed.returncode == expected_status, f"purger exit code 不符：{completed.stdout}\n{completed.stderr}")
     assert_true(completed.stderr == "", f"purger 不应向 stderr 输出：{completed.stderr}")

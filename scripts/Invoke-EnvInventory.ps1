@@ -159,73 +159,124 @@ function Invoke-CommandWithTimeout {
         [int]$NativeOutputCodePage = 0
     )
 
-    $job = Start-Job -ScriptBlock {
-        param(
-            [string]$JobExecutable,
-            [string[]]$JobArguments,
-            [int]$JobNativeOutputCodePage
-        )
-
-        $previousOutputEncoding = $null
-        try {
-            if ($JobNativeOutputCodePage -gt 0) {
-                $previousOutputEncoding = [Console]::OutputEncoding
-                [Console]::OutputEncoding = [Text.Encoding]::GetEncoding($JobNativeOutputCodePage)
-            }
-
-            $global:LASTEXITCODE = $null
-            & $JobExecutable @JobArguments 2>&1
-            $exitCode = $LASTEXITCODE
-            if ($null -eq $exitCode) {
-                $exitCode = 0
-            }
-
-            [pscustomobject]@{
-                __CodexProbeExitCode = $exitCode
-            }
-        } catch {
-            [pscustomobject]@{
-                __CodexProbeExitCode = $null
-                __CodexProbeError = $_.Exception.Message
-            }
-        } finally {
-            if ($null -ne $previousOutputEncoding) {
-                [Console]::OutputEncoding = $previousOutputEncoding
-            }
-        }
-    } -ArgumentList $Executable, $Arguments, $NativeOutputCodePage
-
-    $completed = Wait-Job -Job $job -Timeout $TimeoutSeconds
-    if (-not $completed) {
-        Stop-Job -Job $job | Out-Null
-        Remove-Job -Job $job -Force | Out-Null
-
-        return [pscustomobject]@{
-            timedOut = $true
-            output = @()
-            exitCode = $null
-            error = "Version probe timed out after $TimeoutSeconds seconds"
-        }
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Executable
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    if ($NativeOutputCodePage -gt 0) {
+        $nativeOutputEncoding = [Text.Encoding]::GetEncoding($NativeOutputCodePage)
+        $startInfo.StandardOutputEncoding = $nativeOutputEncoding
+        $startInfo.StandardErrorEncoding = $nativeOutputEncoding
     }
 
-    $received = @(Receive-Job -Job $job)
-    Remove-Job -Job $job -Force | Out-Null
-
-    $exitRecord = $received |
-        Where-Object { $_.PSObject.Properties.Name -contains "__CodexProbeExitCode" } |
-        Select-Object -First 1
-
-    $output = @(
-        $received | Where-Object {
-            -not ($_.PSObject.Properties.Name -contains "__CodexProbeExitCode")
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $started = $false
+    $output = [Collections.Generic.List[object]]::new()
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    try {
+        if (-not $process.Start()) {
+            throw "Version probe process did not start: $Executable"
         }
-    )
+        $started = $true
+        $stdoutOpen = $true
+        $stderrOpen = $true
+        $stdoutTask = $process.StandardOutput.ReadLineAsync()
+        $stderrTask = $process.StandardError.ReadLineAsync()
 
-    return [pscustomobject]@{
-        timedOut = $false
-        output = $output
-        exitCode = if ($exitRecord) { $exitRecord.__CodexProbeExitCode } else { 0 }
-        error = if ($exitRecord -and ($exitRecord.PSObject.Properties.Name -contains "__CodexProbeError")) { $exitRecord.__CodexProbeError } else { $null }
+        while ($stdoutOpen -or $stderrOpen) {
+            $remainingMilliseconds = [Math]::Ceiling(($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+            if ($remainingMilliseconds -le 0) {
+                break
+            }
+
+            $pendingTasks = [Collections.Generic.List[Threading.Tasks.Task]]::new()
+            if ($stdoutOpen) {
+                $pendingTasks.Add($stdoutTask)
+            }
+            if ($stderrOpen) {
+                $pendingTasks.Add($stderrTask)
+            }
+            $timeoutTask = [Threading.Tasks.Task]::Delay([int][Math]::Min($remainingMilliseconds, [int]::MaxValue))
+            $pendingTasks.Add($timeoutTask)
+
+            $completedTask = [Threading.Tasks.Task]::WhenAny($pendingTasks).GetAwaiter().GetResult()
+            if ([object]::ReferenceEquals($completedTask, $timeoutTask)) {
+                break
+            }
+            if ($stdoutOpen -and [object]::ReferenceEquals($completedTask, $stdoutTask)) {
+                $line = $stdoutTask.GetAwaiter().GetResult()
+                if ($null -eq $line) {
+                    $stdoutOpen = $false
+                } else {
+                    $output.Add($line)
+                    $stdoutTask = $process.StandardOutput.ReadLineAsync()
+                }
+            } elseif ($stderrOpen) {
+                $line = $stderrTask.GetAwaiter().GetResult()
+                if ($null -eq $line) {
+                    $stderrOpen = $false
+                } else {
+                    $output.Add($line)
+                    $stderrTask = $process.StandardError.ReadLineAsync()
+                }
+            }
+        }
+
+        if ($stdoutOpen -or $stderrOpen) {
+            if (-not $process.HasExited) {
+                $process.Kill($true)
+                $process.WaitForExit()
+            }
+            return [pscustomobject]@{
+                timedOut = $true
+                output = @()
+                exitCode = $null
+                error = "Version probe timed out after $TimeoutSeconds seconds"
+            }
+        }
+
+        $remainingMilliseconds = [Math]::Ceiling(($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+        if ($remainingMilliseconds -le 0 -or -not $process.WaitForExit([int][Math]::Min($remainingMilliseconds, [int]::MaxValue))) {
+            if (-not $process.HasExited) {
+                $process.Kill($true)
+                $process.WaitForExit()
+            }
+            return [pscustomobject]@{
+                timedOut = $true
+                output = @()
+                exitCode = $null
+                error = "Version probe timed out after $TimeoutSeconds seconds"
+            }
+        }
+
+        return [pscustomobject]@{
+            timedOut = $false
+            output = $output.ToArray()
+            exitCode = $process.ExitCode
+            error = $null
+        }
+    } catch {
+        return [pscustomobject]@{
+            timedOut = $false
+            output = @()
+            exitCode = $null
+            error = $_.Exception.Message
+        }
+    } finally {
+        if ($started -and -not $process.HasExited) {
+            try {
+                $process.Kill($true)
+                $process.WaitForExit()
+            } catch {}
+        }
+        $process.Dispose()
     }
 }
 

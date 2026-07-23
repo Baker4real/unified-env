@@ -16,6 +16,8 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "generate_skill_catalog.py"
+SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+SUBPROCESS_TEXT_ENCODING = "oem" if os.name == "nt" else "utf-8"
 
 try:
     _spec = importlib.util.spec_from_file_location("generate_skill_catalog", SCRIPT)
@@ -90,7 +92,10 @@ def _create_directory_alias(alias: Path, target: Path) -> None:
             ["cmd.exe", "/d", "/c", "mklink", "/J", str(alias), str(target)],
             capture_output=True,
             text=True,
+            encoding=SUBPROCESS_TEXT_ENCODING,
+            errors="replace",
             check=False,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
         if completed.returncode != 0:
             raise unittest.SkipTest(

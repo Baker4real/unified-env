@@ -22,6 +22,7 @@ from typing import Any, Iterable
 
 
 sys.dont_write_bytecode = True
+SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 DEFAULT_ACTIVE_ROOT = Path(r"D:\Codex\.codex\skills")
@@ -711,6 +712,7 @@ def _run_resource_closure(active_root: Path) -> dict[str, Any]:
             encoding="utf-8",
             errors="replace",
             env={"PYTHONDONTWRITEBYTECODE": "1"},
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
     except OSError as exc:
         raise CatalogError(f"无法运行本地资源闭包脚本：{exc}") from exc

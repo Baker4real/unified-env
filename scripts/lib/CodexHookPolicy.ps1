@@ -180,6 +180,45 @@ function Test-CodexHookPathWithin {
     )
 }
 
+function Resolve-CodexHookWrapperPathToken {
+    param(
+        [Parameter(Mandatory)][string]$Token,
+        [AllowNull()][string]$WrapperPath = $null,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $normalizedToken = $Token.Replace('/', '\')
+    if (-not $normalizedToken.Contains('%')) {
+        return Assert-CodexHookDPath -Value $normalizedToken -Name $Name
+    }
+
+    $match = [regex]::Match($normalizedToken, '^(?i:%~dp0)(?<relative>[^%]+)$')
+    if (-not $match.Success -or [string]::IsNullOrWhiteSpace($WrapperPath)) {
+        throw "$Name 只能使用受 wrapper 上下文约束的 %~dp0 相对路径。"
+    }
+
+    $relativePath = $match.Groups['relative'].Value
+    if (
+        [IO.Path]::IsPathRooted($relativePath) -or
+        $relativePath.Contains(':') -or
+        $relativePath -match '(?:^|[\\/])\.\.(?:[\\/]|$)'
+    ) {
+        throw "$Name 的 %~dp0 相对路径不得逸出 wrapper 目录。"
+    }
+
+    $wrapperFullPath = Assert-CodexHookDPath -Value $WrapperPath -Name "$Name wrapper"
+    $wrapperDirectory = Split-Path -Parent $wrapperFullPath
+    $resolvedPath = [IO.Path]::GetFullPath((Join-Path $wrapperDirectory $relativePath))
+    if (
+        $resolvedPath.Equals($wrapperDirectory, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-CodexHookPathWithin -Path $resolvedPath -ParentPath $wrapperDirectory)
+    ) {
+        throw "$Name 的 %~dp0 相对路径不得逸出 wrapper 目录。"
+    }
+
+    return Assert-CodexHookDPath -Value $resolvedPath -Name $Name
+}
+
 function Resolve-CodexHookAllowedReadPath {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -648,10 +687,11 @@ function Assert-CodexHookManifest {
     $codexHome = Assert-CodexHookExactPath -Value $Manifest.codexHome -Expected 'D:\Codex\.codex' -Name 'codexHome'
     [void](Assert-CodexHookExactPath -Value $Manifest.managedRoot -Expected 'D:\Codex\projects\统一环境\managed\codex-hooks' -Name 'managedRoot')
 
-    $runtimeNames = @('pwsh', 'python', 'serenaPython', 'serenaHooks')
+    $runtimeNames = @('pwsh', 'python', 'pythonw', 'serenaPython', 'serenaHooks')
     $expectedRuntimes = [ordered]@{
         pwsh = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
         python = 'D:\Codex\tools\python314-official\python.exe'
+        pythonw = 'D:\Codex\tools\python314-official\pythonw.exe'
         serenaPython = 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
         serenaHooks = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
     }
@@ -678,7 +718,8 @@ function Assert-CodexHookManifest {
 
     $hookNames = @(
         'id', 'event', 'order', 'matcher', 'timeoutSeconds', 'commandPath', 'arguments',
-        'wrapperPath', 'implementationPath', 'runtimeId', 'sourceState', 'readResources', 'writeResources',
+        'wrapperPath', 'implementationPath', 'runtimeId', 'launcherRuntimeId', 'launcherImplementationPath',
+        'sourceState', 'readResources', 'writeResources',
         'criticality', 'lifecycle', 'lifecycleReason', 'quickHealthCheck', 'fullAcceptanceCommand'
     )
     $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -729,6 +770,24 @@ function Assert-CodexHookManifest {
         Assert-CodexHookString -Value $hook.runtimeId -Name "hooks[$($hook.id)].runtimeId"
         if ($hook.runtimeId -cnotin $runtimeNames) {
             throw "hooks[$($hook.id)].runtimeId 非法：$($hook.runtimeId)"
+        }
+        $hasLauncherRuntime = $null -ne $hook.launcherRuntimeId
+        $hasLauncherImplementation = $null -ne $hook.launcherImplementationPath
+        if ($hasLauncherRuntime -ne $hasLauncherImplementation) {
+            throw "hooks[$($hook.id)] launcherRuntimeId/launcherImplementationPath 必须成对声明。"
+        }
+        if ($hasLauncherRuntime) {
+            Assert-CodexHookString -Value $hook.launcherRuntimeId -Name "hooks[$($hook.id)].launcherRuntimeId"
+            if ($hook.launcherRuntimeId -cne 'pythonw') {
+                throw "hooks[$($hook.id)].launcherRuntimeId 必须严格等于 pythonw。"
+            }
+            $launcherImplementationPath = Assert-CodexHookDPath -Value $hook.launcherImplementationPath -Name "hooks[$($hook.id)].launcherImplementationPath"
+            if (-not (Test-CodexHookPathWithin -Path $launcherImplementationPath -ParentPath (Join-Path $codexHome 'hooks'))) {
+                throw "hooks[$($hook.id)].launcherImplementationPath 必须位于固定 live hooks 根。"
+            }
+            if ([IO.Path]::GetExtension($launcherImplementationPath) -ine '.py') {
+                throw "hooks[$($hook.id)].launcherImplementationPath 必须是 Python 文件。"
+            }
         }
         Assert-CodexHookString -Value $hook.sourceState -Name "hooks[$($hook.id)].sourceState"
         if ($hook.sourceState -cnotin @('managed', 'planned', 'vendor')) {
@@ -964,6 +1023,9 @@ function Assert-CodexHookManifest {
             throw "hooks[$($hook.id)] sourceState=planned 时不得为未实现 implementation 伪造 files[] SHA-256。"
         }
         $requiredRoles = if ($hook.sourceState -ceq 'planned') { @('wrapperPath') } else { @('wrapperPath', 'implementationPath') }
+        if ($hook.sourceState -cne 'planned' -and $null -ne $hook.launcherImplementationPath) {
+            $requiredRoles += 'launcherImplementationPath'
+        }
         foreach ($role in $requiredRoles) {
             $rolePath = [IO.Path]::GetFullPath([string]$hook.$role)
             if (-not $filesByLivePath.ContainsKey($rolePath)) {
@@ -979,17 +1041,23 @@ function Assert-CodexHookManifest {
             }
             else {
                 if ($roleOwners -cnotcontains $hook.id) {
-                    throw "files[$($roleFile.relativePath)] 未声明 implementation owner：$($hook.id)"
+                    throw "files[$($roleFile.relativePath)] 未声明 $role owner：$($hook.id)"
                 }
                 foreach ($implementationOwner in $roleOwners) {
                     $ownerHook = $hooksById[$implementationOwner]
+                    $ownerRolePath = if ($role -ceq 'implementationPath') {
+                        $ownerHook.implementationPath
+                    } else {
+                        $ownerHook.launcherImplementationPath
+                    }
                     if (
                         $null -eq $ownerHook -or
                         $null -eq $ownerHook.wrapperPath -or
                         $ownerHook.sourceState -cne 'managed' -or
-                        -not ([IO.Path]::GetFullPath([string]$ownerHook.implementationPath)).Equals($rolePath, [StringComparison]::OrdinalIgnoreCase)
+                        $null -eq $ownerRolePath -or
+                        -not ([IO.Path]::GetFullPath([string]$ownerRolePath)).Equals($rolePath, [StringComparison]::OrdinalIgnoreCase)
                     ) {
-                        throw "files[$($roleFile.relativePath)] 声明了无关 shared implementation owner：$implementationOwner"
+                        throw "files[$($roleFile.relativePath)] 声明了无关 shared $role owner：$implementationOwner"
                     }
                 }
             }
@@ -1109,10 +1177,10 @@ function Assert-CodexHookHostPreflightManifest {
     }
 
     $expectedHookIdentityHashes = @{
-        'codex-state-preflight' = '15dbc61e3ba5514b09e713a7814b69c6a5b05244f9208ffe67b3a27ffee7ec2c'
-        'serena-activate' = '99fd5703be433862e5c3abef0a33d5cff6226195b1213168f0a832acfa64d9b6'
-        'serena-cleanup' = '4a0d537f9469f9912a07c6d54566de9ef4428de6ef6bcfa0a5734ec09becb2da'
-        'serena-reminder' = 'cac2f6bd47e4da7c24d343210a0e60c430dcbb6c92d655390662b6e23c8b9668'
+        'codex-state-preflight' = 'b08e99107b7cebe8f63520f9f16a5e0f2abd23d2e00ecff31de20b8fa40da608'
+        'serena-activate' = 'f4a49cf5f9af99d3ea7dd5253499f5b951f759cc8cdb81d904def99a802ca82e'
+        'serena-cleanup' = '5733b854961d35a6002e48d6c8bf0cd93f0947024ea61f8260bef000d32e7877'
+        'serena-reminder' = 'cfb44780e7e70c45ac95459f0c4bf44631922a51e263f8abf5579202d5207890'
     }
     foreach ($hook in @($Manifest.hooks)) {
         $identity = [ordered]@{
@@ -1126,6 +1194,8 @@ function Assert-CodexHookHostPreflightManifest {
             wrapperPath = $hook.wrapperPath
             implementationPath = $hook.implementationPath
             runtimeId = $hook.runtimeId
+            launcherRuntimeId = $hook.launcherRuntimeId
+            launcherImplementationPath = $hook.launcherImplementationPath
             sourceState = $hook.sourceState
             readResources = @($hook.readResources)
             writeResources = @($hook.writeResources)
@@ -1144,11 +1214,12 @@ function Assert-CodexHookHostPreflightManifest {
     $expectedFiles = @{
         'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', '1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8', 'codex-state-preflight')
         'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', 'cf6b251500b2417aa928709d8632a1b26a9ee14ca327f35037db7a841089fbe3', 'codex-state-preflight')
-        'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '299d1940ee6f187fea5bb7f870f234fdf781e752616df7f5358bf9b9a67f4cad', 'codex-state-preflight')
-        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', 'f311fcba27b79e9da53c30c30b83082e0bc6647be5e15b49b4c196116af7e936', 'serena-reminder')
-        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '227c29c8facac25b2766d8e6a84bad3d838a668348f42b2be3e1ce0eb807bd53', 'serena-cleanup')
+        'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '14e46a0309e74b8415dd6d6ea626611b5015272dab3849ff6fb864138cf4f9f9', 'codex-state-preflight')
+        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', '2f5061658d1d7052852e114cc479adfe0256977de2127a717199b70d234f5ef0', 'serena-reminder')
+        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '3fc836f420537772bf3be938421defe8eeae81d5d8ae91f239471b9976faa39c', 'serena-cleanup')
         'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '72e4d59d862775c100f35b7b345a5414a7337519f2d42ac49931a5e9891df8e2', 'serena-reminder', 'serena-cleanup', 'serena-activate')
-        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', 'c5ec2d5b40998a32b5859489a439499f1eee27302d317db53df68cef04e87d05', 'serena-activate')
+        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', '2ba290a861bd885d02a8cfeca7bc8c2b7e1c22de8dae245d2e3cee78c261da70', 'serena-activate')
+        'lib/hidden-console-launcher.py' = @('hooks/lib/hidden-console-launcher.py', 'c0a95d83b106dbba904af187b1a9f88102894317f163afb6c284114cf358973e', 'codex-state-preflight', 'serena-activate', 'serena-cleanup', 'serena-reminder')
         'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', 'a6ecb01a6c57dafa23f62ed9efb59febd06c6059bfde83fd4c59ddbad2abacb4', 'serena-activate', 'serena-cleanup', 'serena-reminder')
     }
     if (@($Manifest.files).Count -ne $expectedFiles.Count) {
@@ -1720,7 +1791,11 @@ function Get-CodexHookWrapperReferenceFacts {
         [Parameter(Mandatory)][string]$WrapperText,
         [Parameter(Mandatory)][string]$RuntimePath,
         [Parameter(Mandatory)][string]$ImplementationPath,
-        [Parameter(Mandatory)][string]$RuntimeId
+        [Parameter(Mandatory)][string]$RuntimeId,
+        [AllowNull()][string]$LauncherRuntimePath = $null,
+        [AllowNull()][string]$LauncherImplementationPath = $null,
+        [AllowNull()][string]$WrapperPath = $null,
+        [ValidateSet('Activation', 'Cleanup', 'Reminder')][AllowNull()][string]$ExpectedMode = $null
     )
 
     $effectiveLines = [Collections.Generic.List[string]]::new()
@@ -1742,6 +1817,7 @@ function Get-CodexHookWrapperReferenceFacts {
         if (
             $line -match '^(?i:echo\s+off)$' -or
             $line -match '^(?i:setlocal|endlocal)$' -or
+            $line -ceq 'set "SERENA_HOME=D:\Codex\.serena"' -or
             $line -match '^(?i:exit\s+/b\s+%ERRORLEVEL%)$'
         ) { continue }
         $effectiveLines.Add($line)
@@ -1772,8 +1848,174 @@ function Get-CodexHookWrapperReferenceFacts {
     }
 
     $tokens = [string[]]$parsed.tokens
+    $hasLauncherRuntime = -not [string]::IsNullOrEmpty($LauncherRuntimePath)
+    $hasLauncherImplementation = -not [string]::IsNullOrEmpty($LauncherImplementationPath)
+    if ($hasLauncherRuntime -ne $hasLauncherImplementation) {
+        return [pscustomobject][ordered]@{
+            parseState = 'launcher-contract-mismatch'
+            referencesLauncherRuntime = $false
+            referencesLauncherImplementation = $false
+            referencesRuntime = $null
+            referencesImplementation = $null
+        }
+    }
+    if ($hasLauncherRuntime) {
+        if ($tokens.Count -lt 8) {
+            return [pscustomobject][ordered]@{
+                parseState = 'launcher-chain-incomplete'
+                referencesLauncherRuntime = $null
+                referencesLauncherImplementation = $null
+                referencesRuntime = $null
+                referencesImplementation = $null
+            }
+        }
+        try {
+            $observedLauncherRuntime = Resolve-CodexHookWrapperPathToken -Token $tokens[0] -WrapperPath $WrapperPath -Name 'launcher runtime'
+            $observedLauncherImplementation = Resolve-CodexHookWrapperPathToken -Token $tokens[6] -WrapperPath $WrapperPath -Name 'launcher implementation'
+        } catch {
+            return [pscustomobject][ordered]@{
+                parseState = 'unparseable-launcher-path'
+                referencesLauncherRuntime = $null
+                referencesLauncherImplementation = $null
+                referencesRuntime = $null
+                referencesImplementation = $null
+            }
+        }
+        $launcherRuntimeMatches = $observedLauncherRuntime.Equals([IO.Path]::GetFullPath($LauncherRuntimePath), [StringComparison]::OrdinalIgnoreCase)
+        if (-not $launcherRuntimeMatches) {
+            return [pscustomobject][ordered]@{
+                parseState = 'launcher-runtime-mismatch'
+                referencesLauncherRuntime = $false
+                referencesLauncherImplementation = $false
+                referencesRuntime = $false
+                referencesImplementation = $false
+            }
+        }
+        if (($tokens[1..5] -join "`0") -cne (@('-I', '-S', '-B', '-X', 'utf8') -join "`0")) {
+            return [pscustomobject][ordered]@{
+                parseState = 'launcher-startup-arguments-mismatch'
+                referencesLauncherRuntime = $true
+                referencesLauncherImplementation = $null
+                referencesRuntime = $null
+                referencesImplementation = $null
+            }
+        }
+        $launcherImplementationMatches = $observedLauncherImplementation.Equals([IO.Path]::GetFullPath($LauncherImplementationPath), [StringComparison]::OrdinalIgnoreCase)
+        if (-not $launcherImplementationMatches) {
+            return [pscustomobject][ordered]@{
+                parseState = 'launcher-implementation-mismatch'
+                referencesLauncherRuntime = $true
+                referencesLauncherImplementation = $false
+                referencesRuntime = $false
+                referencesImplementation = $false
+            }
+        }
+
+        $finalTokens = [string[]]@($tokens | Select-Object -Skip 7)
+        try {
+            $observedRuntime = Resolve-CodexHookWrapperPathToken -Token $finalTokens[0] -WrapperPath $WrapperPath -Name 'final runtime'
+        } catch {
+            return [pscustomobject][ordered]@{
+                parseState = 'unparseable-runtime-path'
+                referencesLauncherRuntime = $true
+                referencesLauncherImplementation = $true
+                referencesRuntime = $null
+                referencesImplementation = $null
+            }
+        }
+        $runtimeMatches = $observedRuntime.Equals([IO.Path]::GetFullPath($RuntimePath), [StringComparison]::OrdinalIgnoreCase)
+        if (-not $runtimeMatches) {
+            return [pscustomobject][ordered]@{
+                parseState = 'runtime-mismatch'
+                referencesLauncherRuntime = $true
+                referencesLauncherImplementation = $true
+                referencesRuntime = $false
+                referencesImplementation = $false
+            }
+        }
+        $implementationToken = if ($RuntimeId -ceq 'pwsh') {
+            $requiresExpectedMode = -not [string]::IsNullOrWhiteSpace($ExpectedMode)
+            if (-not $requiresExpectedMode -and $hasLauncherRuntime) {
+                return [pscustomobject][ordered]@{
+                    parseState = 'missing-expected-mode-contract'
+                    referencesLauncherRuntime = $true
+                    referencesLauncherImplementation = $true
+                    referencesRuntime = $true
+                    referencesImplementation = $null
+                }
+            }
+            $expectedTokenCount = if ($requiresExpectedMode) { 9 } else { $null }
+            if (
+                ($requiresExpectedMode -and $finalTokens.Count -ne $expectedTokenCount) -or
+                (-not $requiresExpectedMode -and $finalTokens.Count -notin @(7, 9)) -or
+                ($finalTokens[1..5] -join "`0") -cne (@('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File') -join "`0") -or
+                ($requiresExpectedMode -and ($finalTokens[7] -cne '-Mode' -or $finalTokens[8] -cne $ExpectedMode))
+            ) {
+                return [pscustomobject][ordered]@{
+                    parseState = 'final-runtime-arguments-mismatch'
+                    referencesLauncherRuntime = $true
+                    referencesLauncherImplementation = $true
+                    referencesRuntime = $true
+                    referencesImplementation = $null
+                }
+            }
+            if (-not $requiresExpectedMode -and $finalTokens.Count -eq 9 -and ($finalTokens[7] -cne '-Mode' -or $finalTokens[8] -cnotin @('Activation', 'Cleanup', 'Reminder'))) {
+                return [pscustomobject][ordered]@{
+                    parseState = 'final-runtime-arguments-mismatch'
+                    referencesLauncherRuntime = $true
+                    referencesLauncherImplementation = $true
+                    referencesRuntime = $true
+                    referencesImplementation = $null
+                }
+            }
+            $finalTokens[6]
+        } elseif ($RuntimeId -ceq 'python') {
+            if (
+                $finalTokens.Count -ne 8 -or
+                ($finalTokens[1..5] -join "`0") -cne (@('-I', '-S', '-B', '-X', 'utf8') -join "`0") -or
+                $finalTokens[7] -cne '%*'
+            ) {
+                return [pscustomobject][ordered]@{
+                    parseState = 'final-runtime-arguments-mismatch'
+                    referencesLauncherRuntime = $true
+                    referencesLauncherImplementation = $true
+                    referencesRuntime = $true
+                    referencesImplementation = $null
+                }
+            }
+            $finalTokens[6]
+        } else {
+            return [pscustomobject][ordered]@{
+                parseState = 'unsupported-wrapper-runtime'
+                referencesLauncherRuntime = $true
+                referencesLauncherImplementation = $true
+                referencesRuntime = $true
+                referencesImplementation = $null
+            }
+        }
+        try {
+            $observedImplementation = Resolve-CodexHookWrapperPathToken -Token $implementationToken -WrapperPath $WrapperPath -Name 'implementation'
+        } catch {
+            return [pscustomobject][ordered]@{
+                parseState = 'unparseable-implementation-path'
+                referencesLauncherRuntime = $true
+                referencesLauncherImplementation = $true
+                referencesRuntime = $true
+                referencesImplementation = $null
+            }
+        }
+        $implementationMatches = $observedImplementation.Equals([IO.Path]::GetFullPath($ImplementationPath), [StringComparison]::OrdinalIgnoreCase)
+        return [pscustomobject][ordered]@{
+            parseState = if ($implementationMatches) { 'matched' } else { 'implementation-mismatch' }
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $true
+            referencesRuntime = $true
+            referencesImplementation = $implementationMatches
+        }
+    }
+
     try {
-        $observedRuntime = [IO.Path]::GetFullPath($tokens[0].Replace('/', '\'))
+        $observedRuntime = Resolve-CodexHookWrapperPathToken -Token $tokens[0] -WrapperPath $WrapperPath -Name 'runtime'
     } catch {
         return [pscustomobject][ordered]@{
             parseState = 'unparseable-runtime-path'
@@ -1859,7 +2101,7 @@ function Get-CodexHookWrapperReferenceFacts {
     }
 
     try {
-        $observedImplementation = [IO.Path]::GetFullPath($implementationToken.Replace('/', '\'))
+        $observedImplementation = Resolve-CodexHookWrapperPathToken -Token $implementationToken -WrapperPath $WrapperPath -Name 'implementation'
     } catch {
         return [pscustomobject][ordered]@{
             parseState = 'unparseable-implementation-path'
@@ -2037,6 +2279,9 @@ function Get-CodexHookDependencyFacts {
         $wrapperPath = if ($null -ne $hook.wrapperPath) { [IO.Path]::GetFullPath([string]$hook.wrapperPath) } else { $null }
         $implementationPath = [IO.Path]::GetFullPath([string]$hook.implementationPath)
         $runtimePath = [IO.Path]::GetFullPath([string]$Manifest.runtimes.PSObject.Properties[$hook.runtimeId].Value)
+        $launcherRuntimeId = if ($null -ne $hook.launcherRuntimeId) { [string]$hook.launcherRuntimeId } else { $null }
+        $launcherRuntimePath = if ($null -ne $launcherRuntimeId) { [IO.Path]::GetFullPath([string]$Manifest.runtimes.PSObject.Properties[$launcherRuntimeId].Value) } else { $null }
+        $launcherImplementationPath = if ($null -ne $hook.launcherImplementationPath) { [IO.Path]::GetFullPath([string]$hook.launcherImplementationPath) } else { $null }
         $wrapperObservation = if ($null -ne $wrapperPath) {
             $wrapperProbe = Get-CodexHookSafeFileProbe -Path $wrapperPath -Name "hooks[$($hook.id)].wrapper" -AllowedExactPaths @($wrapperPath)
             if ($wrapperProbe.safeToRead) {
@@ -2047,10 +2292,40 @@ function Get-CodexHookDependencyFacts {
         } else { $null }
         $implementationObservation = Get-CodexHookSafeFileHash -Path $implementationPath -Name "hooks[$($hook.id)].implementation" -AllowedExactPaths @($implementationPath)
         $runtimeObservation = Get-CodexHookSafeFileHash -Path $runtimePath -Name "hooks[$($hook.id)].runtime" -AllowedExactPaths @($runtimePath)
+        $launcherRuntimeObservation = if ($null -ne $launcherRuntimePath) {
+            Get-CodexHookSafeFileHash -Path $launcherRuntimePath -Name "hooks[$($hook.id)].launcherRuntime" -AllowedExactPaths @($launcherRuntimePath)
+        } else { $null }
+        $launcherImplementationObservation = if ($null -ne $launcherImplementationPath) {
+            Get-CodexHookSafeFileHash -Path $launcherImplementationPath -Name "hooks[$($hook.id)].launcherImplementation" -AllowedExactPaths @($launcherImplementationPath)
+        } else { $null }
         $wrapperReferences = if ($null -eq $wrapperObservation -or -not $wrapperObservation.probe.safeToRead) {
             $null
         } else {
-            Get-CodexHookWrapperReferenceFacts -WrapperText $wrapperObservation.text -RuntimePath $runtimePath -ImplementationPath $implementationPath -RuntimeId $hook.runtimeId
+            $referenceArguments = @{
+                WrapperText = $wrapperObservation.text
+                RuntimePath = $runtimePath
+                ImplementationPath = $implementationPath
+                RuntimeId = $hook.runtimeId
+                WrapperPath = $wrapperPath
+            }
+            if ($null -ne $launcherRuntimePath) {
+                $referenceArguments.LauncherRuntimePath = $launcherRuntimePath
+                $referenceArguments.LauncherImplementationPath = $launcherImplementationPath
+            }
+            if ($null -ne $launcherRuntimePath -and $hook.runtimeId -ceq 'pwsh') {
+                # These wrappers share one implementation, so their lifecycle Mode is part of the identity contract.
+                $expectedMode = switch ([string]$hook.id) {
+                    'serena-activate' { 'Activation' }
+                    'serena-cleanup' { 'Cleanup' }
+                    'serena-reminder' { 'Reminder' }
+                    default { $null }
+                }
+                if ($null -eq $expectedMode) {
+                    throw "hooks[$($hook.id)] hidden PowerShell wrapper 缺少精确 Mode 契约。"
+                }
+                $referenceArguments.ExpectedMode = $expectedMode
+            }
+            Get-CodexHookWrapperReferenceFacts @referenceArguments
         }
 
         [pscustomobject][ordered]@{
@@ -2070,14 +2345,27 @@ function Get-CodexHookDependencyFacts {
             runtimeExists = $runtimeObservation.probe.exists
             runtimeProbeState = $runtimeObservation.probe.state
             runtimeSha256 = $runtimeObservation.sha256
+            launcherRuntimeId = $launcherRuntimeId
+            launcherRuntimePath = $launcherRuntimePath
+            launcherRuntimeExists = if ($null -eq $launcherRuntimeObservation) { $null } else { $launcherRuntimeObservation.probe.exists }
+            launcherRuntimeProbeState = if ($null -eq $launcherRuntimeObservation) { 'not-applicable' } else { $launcherRuntimeObservation.probe.state }
+            launcherRuntimeSha256 = if ($null -eq $launcherRuntimeObservation) { $null } else { $launcherRuntimeObservation.sha256 }
+            launcherImplementationPath = $launcherImplementationPath
+            launcherImplementationExists = if ($null -eq $launcherImplementationObservation) { $null } else { $launcherImplementationObservation.probe.exists }
+            launcherImplementationProbeState = if ($null -eq $launcherImplementationObservation) { 'not-applicable' } else { $launcherImplementationObservation.probe.state }
+            launcherImplementationSha256 = if ($null -eq $launcherImplementationObservation) { $null } else { $launcherImplementationObservation.sha256 }
             wrapperParseState = if ($null -eq $wrapperReferences) { if ($null -eq $wrapperPath) { 'not-applicable' } else { 'not-read' } } else { $wrapperReferences.parseState }
             wrapperReferencesImplementation = if ($null -eq $wrapperReferences) { $null } else { $wrapperReferences.referencesImplementation }
             wrapperReferencesRuntime = if ($null -eq $wrapperReferences) { $null } else { $wrapperReferences.referencesRuntime }
+            wrapperReferencesLauncherImplementation = if ($null -eq $launcherImplementationPath -or $null -eq $wrapperReferences -or $wrapperReferences.parseState -cne 'matched') { $null } else { $wrapperReferences.referencesLauncherImplementation }
+            wrapperReferencesLauncherRuntime = if ($null -eq $launcherRuntimePath -or $null -eq $wrapperReferences -or $wrapperReferences.parseState -cne 'matched') { $null } else { $wrapperReferences.referencesLauncherRuntime }
             readResourceCount = @($hook.readResources).Count
             writeResourceCount = @($hook.writeResources).Count
             dependencyState = if ($null -eq $wrapperPath) {
                 if ($implementationObservation.probe.safeToRead -and $runtimeObservation.probe.safeToRead) { 'ready' } else { 'pending' }
             } elseif ($wrapperObservation.probe.safeToRead -and $implementationObservation.probe.safeToRead -and $runtimeObservation.probe.safeToRead -and
+                ($null -eq $launcherRuntimeObservation -or $launcherRuntimeObservation.probe.safeToRead) -and
+                ($null -eq $launcherImplementationObservation -or $launcherImplementationObservation.probe.safeToRead) -and
                 $null -ne $wrapperReferences -and $wrapperReferences.parseState -ceq 'matched') {
                 'ready'
             } else {

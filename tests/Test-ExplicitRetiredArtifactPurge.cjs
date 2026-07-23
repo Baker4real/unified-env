@@ -319,6 +319,7 @@ function runPurge(root, argumentsList = [], expectedStatus = 0, extraEnvironment
   const result = spawnSync(process.execPath, [scriptPath, '--fixture-root', root, ...argumentsList], {
     encoding: 'utf8',
     env: { ...process.env, [purge.FIXTURE_ENV]: '1', ...extraEnvironment },
+    windowsHide: true,
   });
   assert.equal(result.status, expectedStatus, 'purger 退出码异常：' + (result.stderr || result.stdout));
   assert.equal(result.stderr, '', 'purger 不应向 stderr 写非 JSON：' + result.stderr);

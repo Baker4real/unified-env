@@ -6,6 +6,7 @@
   "runtimes": {
     "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
     "python": "D:\\Codex\\tools\\python314-official\\python.exe",
+    "pythonw": "D:\\Codex\\tools\\python314-official\\pythonw.exe",
     "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
     "serenaHooks": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
   },
@@ -21,6 +22,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "managed",
       "readResources": [
         {
@@ -91,6 +94,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-state-policy-guard.py",
       "runtimeId": "python",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "managed",
       "readResources": [
         {
@@ -161,6 +166,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-activate-guarded.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-activate-guarded.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "managed",
       "readResources": [
         {
@@ -229,6 +236,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "managed",
       "readResources": [
         {
@@ -296,6 +305,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "managed",
       "readResources": [
         {
@@ -382,6 +393,8 @@
       "wrapperPath": null,
       "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
       "runtimeId": "serenaHooks",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "vendor",
       "readResources": [
         {
@@ -436,6 +449,8 @@
       "wrapperPath": null,
       "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
       "runtimeId": "serenaHooks",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "vendor",
       "readResources": [
         {
@@ -490,6 +505,8 @@
       "wrapperPath": null,
       "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
       "runtimeId": "serenaHooks",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "vendor",
       "readResources": [
         {

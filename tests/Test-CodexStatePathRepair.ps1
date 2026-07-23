@@ -15,12 +15,53 @@ $CandidateRoot = Join-Path $FixtureRoot 'candidate-root'
 function Invoke-PathCommand {
     param([Parameter(Mandatory)][string[]]$Arguments)
 
-    $result = & 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -NoProfile -File $ScriptPath @Arguments 2>&1
-    [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
-        Text = ($result -join [Environment]::NewLine)
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @('-NoProfile', '-File', $ScriptPath) + $Arguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $started = $false
+    try {
+        if (-not $process.Start()) { throw 'state path command did not start' }
+        $started = $true
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $text = $stdout
+        if (-not [string]::IsNullOrEmpty($stderr)) {
+            if (-not [string]::IsNullOrEmpty($text) -and -not $text.EndsWith("`n")) { $text += [Environment]::NewLine }
+            $text += $stderr
+        }
+        [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            Text = $text
+        }
+    } finally {
+        if ($started -and -not $process.HasExited) {
+            try { $process.Kill($true); $process.WaitForExit() } catch {}
+        }
+        $process.Dispose()
     }
 }
+
+$testSource = Get-Content -Raw -LiteralPath $PSCommandPath
+$helperStart = $testSource.IndexOf('function Invoke-PathCommand')
+$helperEnd = $testSource.IndexOf('$testSource = Get-Content', $helperStart)
+if ($helperStart -lt 0 -or $helperEnd -le $helperStart) { throw 'hidden state path helper is unavailable' }
+$helperSource = $testSource.Substring($helperStart, $helperEnd - $helperStart)
+if ($helperSource -cnotmatch 'UseShellExecute\s*=\s*\$false' -or $helperSource -cnotmatch 'CreateNoWindow\s*=\s*\$true') { throw 'state path test process must be hidden' }
+$directPwshPattern = '&\s*' + [regex]::Escape("'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'")
+if ($testSource -cmatch $directPwshPattern) { throw 'state path test must not directly invoke pwsh' }
 
 try {
     New-Item -ItemType Directory -Path $CodexHome -Force | Out-Null

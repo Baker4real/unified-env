@@ -21,6 +21,7 @@ PREFLIGHT = HOOK_ROOT / "codex-state-preflight.py"
 WRAPPER = HOOK_ROOT / "codex-state-preflight.cmd"
 PYTHON = Path(r"D:\Codex\tools\python314-official\python.exe")
 FIXTURE_ROOT = PROJECT_ROOT / "reports" / "codex-state-preflight-test"
+SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 class CodexStatePreflightTests(unittest.TestCase):
@@ -105,6 +106,7 @@ class CodexStatePreflightTests(unittest.TestCase):
             env=environment,
             timeout=20,
             check=False,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -180,7 +182,7 @@ class CodexStatePreflightTests(unittest.TestCase):
                         ["cmd.exe", "/d", "/c", "mklink", "/J", str(target), str(external)],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.PIPE,
-                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        creationflags=SUBPROCESS_CREATION_FLAGS,
                         check=False,
                     )
                     self.assertEqual(created.returncode, 0, created.stderr)
@@ -210,6 +212,7 @@ class CodexStatePreflightTests(unittest.TestCase):
                     capture_output=True,
                     timeout=20,
                     check=False,
+                    creationflags=SUBPROCESS_CREATION_FLAGS,
                 )
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stderr, "")
@@ -370,6 +373,7 @@ class CodexStatePreflightTests(unittest.TestCase):
             capture_output=True,
             timeout=20,
             check=False,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, "")

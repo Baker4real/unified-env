@@ -58,13 +58,29 @@ function Invoke-HiddenPowerShellFileWrite {
     $payload = [Convert]::ToBase64String($Bytes)
     $command = "try { [IO.File]::WriteAllBytes($targetLiteral, [Convert]::FromBase64String('$payload')); exit 0 } catch [IO.IOException] { exit (`$_.Exception.HResult -band 0xffff) } catch { exit 254 }"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
-    $process = Start-Process `
-        -FilePath $pwshPath `
-        -ArgumentList @('-NoProfile', '-EncodedCommand', $encoded) `
-        -WindowStyle Hidden `
-        -Wait `
-        -PassThru
-    return [int]$process.ExitCode
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $pwshPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @('-NoProfile', '-EncodedCommand', $encoded)) { [void]$startInfo.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $started = $false
+    try {
+        $started = $process.Start()
+        Assert-True $started 'hardening competing writer 无法以无窗口模式启动'
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        Assert-True ($process.WaitForExit(120000)) 'hardening competing writer 子进程超时'
+        [void]$stdoutTask.GetAwaiter().GetResult()
+        [void]$stderrTask.GetAwaiter().GetResult()
+        return [int]$process.ExitCode
+    } finally {
+        if ($started -and -not $process.HasExited) { try { $process.Kill($true) } catch {} }
+        $process.Dispose()
+    }
 }
 
 function Initialize-HardeningFixture {

@@ -24,6 +24,8 @@ if SPEC is None or SPEC.loader is None:  # pragma: no cover
     raise RuntimeError(f"无法加载 wrapper：{WRAPPER_PATH}")
 WRAPPER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WRAPPER)
+SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+SUBPROCESS_TEXT_ENCODING = "oem" if os.name == "nt" else "utf-8"
 
 
 class SkillInstallGuardedTests(unittest.TestCase):
@@ -74,9 +76,10 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
-            encoding="utf-8",
+            encoding=SUBPROCESS_TEXT_ENCODING,
             errors="replace",
             check=False,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
@@ -96,9 +99,10 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 ["icacls.exe", str(path), *arguments],
                 capture_output=True,
                 text=True,
-                encoding="utf-8",
+                encoding=SUBPROCESS_TEXT_ENCODING,
                 errors="replace",
                 check=False,
+                creationflags=SUBPROCESS_CREATION_FLAGS,
             )
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         self.assertTrue(self.acl_state(path)["protected"])
@@ -126,9 +130,10 @@ class SkillInstallGuardedTests(unittest.TestCase):
             env={**os.environ, "SKILL_ACL_TEST_PATH": str(path)},
             capture_output=True,
             text=True,
-            encoding="utf-8-sig",
+            encoding=SUBPROCESS_TEXT_ENCODING,
             errors="replace",
             check=False,
+            creationflags=SUBPROCESS_CREATION_FLAGS,
         )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         return json.loads(result.stdout)

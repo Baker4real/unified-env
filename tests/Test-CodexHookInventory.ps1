@@ -382,13 +382,106 @@ $invalidPythonReference = Get-CodexHookWrapperReferenceFacts `
     -RuntimeId 'python'
 Assert-True ($invalidPythonReference.parseState -cne 'matched' -and $invalidPythonReference.referencesImplementation -ne $true) 'Python wrapper 不得接受额外 token/flag'
 
+$hiddenPwshReference = Get-CodexHookWrapperReferenceFacts `
+    -WrapperText '"D:\Codex\tools\python314-official\pythonw.exe" -I -S -B -X utf8 "D:\Codex\.codex\hooks\lib\hidden-console-launcher.py" "D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\serena-behavior-guard.ps1" -Mode Cleanup' `
+    -RuntimePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+    -ImplementationPath 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1' `
+    -RuntimeId 'pwsh' `
+    -LauncherRuntimePath 'D:\Codex\tools\python314-official\pythonw.exe' `
+    -LauncherImplementationPath 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py' `
+    -ExpectedMode 'Cleanup'
+Assert-True (
+    $hiddenPwshReference.parseState -ceq 'matched' -and
+    $hiddenPwshReference.referencesLauncherRuntime -and
+    $hiddenPwshReference.referencesLauncherImplementation -and
+    $hiddenPwshReference.referencesRuntime -and
+    $hiddenPwshReference.referencesImplementation
+) '两层 hidden launcher wrapper 必须精确识别 launcher 与最终 runtime/implementation'
+
+foreach ($invalidHiddenCommand in @(
+    '"D:\Codex\tools\python314-official\pythonw.exe" -S -I -B -X utf8 "D:\Codex\.codex\hooks\lib\hidden-console-launcher.py" "D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\serena-behavior-guard.ps1"',
+    '"D:\Codex\tools\python314-official\pythonw.exe" -I -S -B -X utf8 injected "D:\Codex\.codex\hooks\lib\hidden-console-launcher.py" "D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\serena-behavior-guard.ps1"',
+    '"D:\Codex\tools\python314-official\pythonw.exe" -I -S -B -X utf8 "D:\Codex\.codex\hooks\lib\wrong.py" "D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\serena-behavior-guard.ps1"',
+    '"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\serena-behavior-guard.ps1"'
+)) {
+    $invalidHiddenReference = Get-CodexHookWrapperReferenceFacts `
+        -WrapperText $invalidHiddenCommand `
+        -RuntimePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+        -ImplementationPath 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1' `
+        -RuntimeId 'pwsh' `
+        -LauncherRuntimePath 'D:\Codex\tools\python314-official\pythonw.exe' `
+        -LauncherImplementationPath 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+    Assert-True ($invalidHiddenReference.parseState -cne 'matched') "hidden launcher 乱序/额外 token 必须拒绝：$invalidHiddenCommand"
+}
+
+$productionManifest = Read-CodexHookManifest -Path $productionManifestPath
+$ManagedHookRoot = Join-Path $ProjectRoot 'managed\codex-hooks'
+$canonicalHiddenWrapperContracts = @(
+    [pscustomobject]@{ id = 'codex-state-preflight'; sourceRelativePath = 'hooks\codex-state-preflight.cmd'; expectedMode = $null },
+    [pscustomobject]@{ id = 'serena-activate'; sourceRelativePath = 'hooks\serena-activation-reminder.cmd'; expectedMode = 'Activation' },
+    [pscustomobject]@{ id = 'serena-cleanup'; sourceRelativePath = 'hooks\serena-cleanup-guarded.cmd'; expectedMode = 'Cleanup' },
+    [pscustomobject]@{ id = 'serena-reminder'; sourceRelativePath = 'hooks\serena-reminder-guarded.cmd'; expectedMode = 'Reminder' }
+)
+foreach ($contract in $canonicalHiddenWrapperContracts) {
+    $hook = @($productionManifest.hooks | Where-Object { $_.id -ceq $contract.id })[0]
+    $referenceArguments = @{
+        WrapperText = Get-Content -Raw -LiteralPath (Join-Path $ManagedHookRoot $contract.sourceRelativePath)
+        WrapperPath = [string]$hook.wrapperPath
+        RuntimePath = [string]$productionManifest.runtimes.PSObject.Properties[$hook.runtimeId].Value
+        ImplementationPath = [string]$hook.implementationPath
+        RuntimeId = [string]$hook.runtimeId
+        LauncherRuntimePath = [string]$productionManifest.runtimes.PSObject.Properties[$hook.launcherRuntimeId].Value
+        LauncherImplementationPath = [string]$hook.launcherImplementationPath
+    }
+    if ($null -ne $contract.expectedMode) {
+        $referenceArguments.ExpectedMode = [string]$contract.expectedMode
+    }
+    $canonicalHiddenReference = Get-CodexHookWrapperReferenceFacts @referenceArguments
+    Assert-True (
+        $canonicalHiddenReference.parseState -ceq 'matched' -and
+        $canonicalHiddenReference.referencesLauncherRuntime -and
+        $canonicalHiddenReference.referencesLauncherImplementation -and
+        $canonicalHiddenReference.referencesRuntime -and
+        $canonicalHiddenReference.referencesImplementation
+    ) "canonical hidden wrapper 必须按自身 %~dp0 目录解析并匹配：$($contract.id)"
+}
+
+$cleanupHook = @($productionManifest.hooks | Where-Object { $_.id -ceq 'serena-cleanup' })[0]
+$cleanupReferenceArguments = @{
+    WrapperText = Get-Content -Raw -LiteralPath (Join-Path $ManagedHookRoot 'hooks\serena-cleanup-guarded.cmd')
+    WrapperPath = [string]$cleanupHook.wrapperPath
+    RuntimePath = [string]$productionManifest.runtimes.PSObject.Properties[$cleanupHook.runtimeId].Value
+    ImplementationPath = [string]$cleanupHook.implementationPath
+    RuntimeId = [string]$cleanupHook.runtimeId
+    LauncherRuntimePath = [string]$productionManifest.runtimes.PSObject.Properties[$cleanupHook.launcherRuntimeId].Value
+    LauncherImplementationPath = [string]$cleanupHook.launcherImplementationPath
+}
+$crossModeReferenceArguments = $cleanupReferenceArguments.Clone()
+$crossModeReferenceArguments.ExpectedMode = 'Reminder'
+$crossModeReference = Get-CodexHookWrapperReferenceFacts @crossModeReferenceArguments
+Assert-True ($crossModeReference.parseState -cne 'matched' -and $crossModeReference.referencesImplementation -ne $true) 'Cleanup wrapper 不得伪装为 Reminder wrapper'
+
+$escapedWrapperText = $cleanupReferenceArguments.WrapperText -replace [regex]::Escape('%~dp0serena-behavior-guard.ps1'), '%~dp0..\escaped.ps1'
+$escapedReferenceArguments = $cleanupReferenceArguments.Clone()
+$escapedReferenceArguments.WrapperText = $escapedWrapperText
+$escapedReferenceArguments.ExpectedMode = 'Cleanup'
+$escapedReference = Get-CodexHookWrapperReferenceFacts @escapedReferenceArguments
+Assert-True ($escapedReference.parseState -cne 'matched' -and $escapedReference.referencesImplementation -ne $true) '%~dp0 wrapper token 不得逃逸 wrapper 目录'
+
 $dependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $manifest)
 $directFact = @($dependencyFacts | Where-Object id -ceq 'serena-cleanup')[0]
 $stateFact = @($dependencyFacts | Where-Object id -ceq 'codex-state-policy')[0]
 $providerFact = @($dependencyFacts | Where-Object id -ceq 'provider-stability')[0]
 Assert-True (
     $directFact.entrypointKind -ceq 'wrapper' -and
-    $directFact.wrapperPath -ceq 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd'
+    $directFact.wrapperPath -ceq 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd' -and
+    $directFact.wrapperParseState -ceq 'matched' -and
+    $directFact.dependencyState -ceq 'ready' -and
+    $directFact.launcherRuntimeId -ceq 'pythonw' -and
+    $directFact.launcherRuntimePath -ceq 'D:\Codex\tools\python314-official\pythonw.exe' -and
+    $directFact.launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py' -and
+    $directFact.launcherRuntimeExists -and
+    $directFact.launcherImplementationExists
 ) 'Serena cleanup 必须声明受控 wrapper，不得回退 direct vendor'
 Assert-True (
     $stateFact.dependencyState -ceq 'pending-or-mismatched' -and
@@ -402,7 +495,7 @@ Assert-True (
 ) '已退役 provider wrapper 必须作为缺失依赖观察，不得假定仍在线'
 
 $runtimeFacts = @(Get-CodexHookRuntimeFacts -Manifest $manifest)
-Assert-True ($runtimeFacts.Count -eq 4 -and @($runtimeFacts | Where-Object probeState -ceq 'regular-file').Count -eq 4) 'runtime existence/hash 必须由安全 inventory probe 观察'
+Assert-True ($runtimeFacts.Count -eq 5 -and @($runtimeFacts | Where-Object probeState -ceq 'regular-file').Count -eq 5) 'runtime existence/hash 必须由安全 inventory probe 观察，包含 hidden launcher pythonw'
 
 $trustSecret = 'DO_NOT_LEAK_FULL_TRUST_HASH_0123456789'
 $document = New-CodexHookInventoryDocument -Manifest $fixtureManifest -Registry $facts -FileFacts $fileFacts -DependencyFacts $dependencyFacts -TrustObservation @([pscustomobject]@{ section = 'hooks.state'; keyName = 'trusted_hash_0'; present = $true; value = $trustSecret })

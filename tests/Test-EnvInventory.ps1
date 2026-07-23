@@ -27,6 +27,40 @@ function Assert-Property {
     Assert-True -Condition $hasProperty -Message "Missing property: $Name"
 }
 
+function Invoke-HiddenProcess {
+    param([Parameter(Mandatory)][string]$FilePath,[Parameter()][string[]]$Arguments=@())
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $started = $false
+    try {
+        if (-not $process.Start()) { throw "hidden process did not start: $FilePath" }
+        $started = $true
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $text = $stdout
+        if (-not [string]::IsNullOrEmpty($stderr)) {
+            if (-not [string]::IsNullOrEmpty($text) -and -not $text.EndsWith("`n")) { $text += [Environment]::NewLine }
+            $text += $stderr
+        }
+        [pscustomobject]@{ExitCode=$process.ExitCode;StdOut=$stdout;StdErr=$stderr;Text=$text}
+    } finally {
+        if ($started -and -not $process.HasExited) { try { $process.Kill($true); $process.WaitForExit() } catch {} }
+        $process.Dispose()
+    }
+}
+
 $scriptPath = Join-Path $ProjectRoot "scripts\Invoke-EnvInventory.ps1"
 $publisherPath = Join-Path $ProjectRoot "scripts\lib\ReportArtifactPublisher.ps1"
 $testRoot = Join-Path $ProjectRoot "reports\env-inventory-test"
@@ -36,6 +70,7 @@ $pathReparseOutput = Join-Path $testRoot "path-reparse"
 $deviceNamespaceOutput = Join-Path $testRoot "device-namespace"
 $unsafeEnvBaseOutput = Join-Path $testRoot "unsafe-env-base"
 $managedPythonCmd = "D:\Codex\tools\bin\python.cmd"
+$managedPythonRuntime = "D:\Codex\tools\python314-official\python.exe"
 $managedPythonAliases = @(
     $managedPythonCmd,
     "D:\Codex\tools\bin\python3.cmd",
@@ -43,10 +78,23 @@ $managedPythonAliases = @(
     "D:\Codex\tools\bin\python314.cmd"
 )
 
+$testSource = Get-Content -Raw -LiteralPath $PSCommandPath
+$helperStart = $testSource.IndexOf('function Invoke-HiddenProcess')
+$helperEnd = $testSource.IndexOf('$scriptPath =', $helperStart)
+Assert-True -Condition ($helperStart -ge 0 -and $helperEnd -gt $helperStart) -Message 'hidden Python probe helper is unavailable'
+$helperSource = $testSource.Substring($helperStart, $helperEnd - $helperStart)
+Assert-True -Condition ($helperSource -cmatch 'UseShellExecute\s*=\s*\$false' -and $helperSource -cmatch 'CreateNoWindow\s*=\s*\$true') -Message 'Python probe process must be hidden'
+$directAliasPattern = '&\s*\$' + 'managedPythonAlias\b'
+Assert-True -Condition ($testSource -cnotmatch $directAliasPattern) -Message '受控 Python alias 不得通过可见 cmd 入口执行'
+
 Assert-True -Condition (Test-Path -Path $scriptPath -PathType Leaf) -Message "Inventory script not found: $scriptPath"
 Assert-True -Condition (Test-Path -LiteralPath $publisherPath -PathType Leaf) -Message "Report publisher not found: $publisherPath"
+Assert-True -Condition (Test-Path -LiteralPath $managedPythonRuntime -PathType Leaf) -Message "受控 Python runtime 缺失：$managedPythonRuntime"
 foreach ($managedPythonAlias in $managedPythonAliases) {
     Assert-True -Condition (Test-Path -LiteralPath $managedPythonAlias -PathType Leaf) -Message "受控 Python alias 缺失：$managedPythonAlias"
+    $aliasSource = Get-Content -Raw -LiteralPath $managedPythonAlias
+    $aliasPattern = '\A@echo off\r?\n"' + [regex]::Escape($managedPythonRuntime) + '" %\*\r?\nexit /b %ERRORLEVEL%\r?\n?\z'
+    Assert-True -Condition ($aliasSource -cmatch $aliasPattern) -Message "受控 Python alias 内容漂移：$managedPythonAlias"
 }
 . $publisherPath
 
@@ -101,6 +149,57 @@ $directoryRecordEnd = $inventoryScriptText.IndexOf("function Invoke-CommandWithT
 $directoryRecordText = $inventoryScriptText.Substring($directoryRecordStart, $directoryRecordEnd - $directoryRecordStart)
 Assert-True -Condition ($directoryRecordText.IndexOf("Assert-EnvSafeAbsolutePath") -lt $directoryRecordText.IndexOf("Test-Path")) -Message "New-DirectoryRecord namespace guard 必须位于 Test-Path 前"
 Assert-True -Condition ($directoryRecordText.IndexOf("Assert-EnvSafeAbsolutePath") -lt $directoryRecordText.IndexOf("Get-DirectorySize")) -Message "New-DirectoryRecord namespace guard 必须位于 IncludeSizes 递归前"
+
+$inventoryTokens = $null
+$inventoryParseErrors = $null
+$inventoryAst = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$inventoryTokens, [ref]$inventoryParseErrors)
+Assert-True -Condition ($inventoryParseErrors.Count -eq 0) -Message "Inventory script AST parse failed: $($inventoryParseErrors -join '; ')"
+$commandWithTimeoutAst = $inventoryAst.Find({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Invoke-CommandWithTimeout"
+}, $true)
+Assert-True -Condition ($null -ne $commandWithTimeoutAst) -Message "Invoke-CommandWithTimeout function missing"
+$commandWithTimeoutSource = $commandWithTimeoutAst.Extent.Text
+Assert-True -Condition ($commandWithTimeoutSource -cmatch 'UseShellExecute\s*=\s*\$false') -Message "Version probes must disable shell execution"
+Assert-True -Condition ($commandWithTimeoutSource -cmatch 'CreateNoWindow\s*=\s*\$true') -Message "Version probes must not allocate a console window"
+Assert-True -Condition ($commandWithTimeoutSource -cmatch 'RedirectStandardOutput\s*=\s*\$true' -and $commandWithTimeoutSource -cmatch 'RedirectStandardError\s*=\s*\$true') -Message "Version probes must redirect both output streams"
+Assert-True -Condition ($commandWithTimeoutSource -cmatch 'StandardOutputEncoding' -and $commandWithTimeoutSource -cmatch 'StandardErrorEncoding') -Message "Version probes must apply explicit native output encoding to both streams"
+Assert-True -Condition ($commandWithTimeoutSource -cnotmatch '\bStart-Job\b') -Message "Version probes must not create a PowerShell job worker"
+Assert-True -Condition ($commandWithTimeoutSource -cnotmatch '&\s*\$Executable\b') -Message "Version probes must not use direct native invocation"
+Invoke-Expression $commandWithTimeoutSource
+
+$probeChildScript = @'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+Add-Type -Namespace EnvInventoryProbe -Name NativeMethods -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow();'
+[Console]::Out.WriteLine("stdout-一|handle=$([EnvInventoryProbe.NativeMethods]::GetConsoleWindow().ToInt64())")
+[Console]::Out.Flush()
+Start-Sleep -Milliseconds 75
+[Console]::Error.WriteLine("stderr-二")
+[Console]::Error.Flush()
+Start-Sleep -Milliseconds 75
+[Console]::Out.WriteLine("stdout-三")
+[Console]::Out.Flush()
+exit 7
+'@
+$pwshPath = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$orderedProbe = Invoke-CommandWithTimeout -Executable $pwshPath -Arguments @("-NoProfile", "-NonInteractive", "-Command", $probeChildScript) -TimeoutSeconds 5 -NativeOutputCodePage 65001
+Assert-True -Condition (-not $orderedProbe.timedOut) -Message "Hidden version probe unexpectedly timed out"
+Assert-True -Condition ($orderedProbe.exitCode -eq 7) -Message "Hidden version probe exit code contract drifted: $($orderedProbe.exitCode)"
+Assert-True -Condition ([string]::IsNullOrWhiteSpace($orderedProbe.error)) -Message "Hidden version probe returned an unexpected error: $($orderedProbe.error)"
+$orderedOutput = @($orderedProbe.output | ForEach-Object { "$_" })
+Assert-True -Condition (($orderedOutput -join "|") -ceq "stdout-一|handle=0|stderr-二|stdout-三") -Message "Hidden version probe output order, encoding, or console isolation drifted: $($orderedOutput -join ' / ')"
+
+$failedProbe = Invoke-CommandWithTimeout -Executable "D:\Codex\missing-env-inventory-probe.exe" -Arguments @() -TimeoutSeconds 5
+Assert-True -Condition (-not $failedProbe.timedOut) -Message "Failed process start must not be reported as a timeout"
+Assert-True -Condition ($null -eq $failedProbe.exitCode) -Message "Failed process start must keep exitCode null"
+Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($failedProbe.error)) -Message "Failed process start must report an error"
+Assert-True -Condition (@($failedProbe.output).Count -eq 0) -Message "Failed process start must not report output"
+
+$timedOutProbe = Invoke-CommandWithTimeout -Executable $pwshPath -Arguments @("-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 10") -TimeoutSeconds 1
+Assert-True -Condition ($timedOutProbe.timedOut) -Message "Long-running process must report timedOut=true"
+Assert-True -Condition ($null -eq $timedOutProbe.exitCode) -Message "Timed-out process must keep exitCode null"
+Assert-True -Condition (@($timedOutProbe.output).Count -eq 0) -Message "Timed-out process must discard partial output"
+Assert-True -Condition ($timedOutProbe.error -ceq "Version probe timed out after 1 seconds") -Message "Timed-out process error contract drifted: $($timedOutProbe.error)"
 
 $previousUserProfile = $env:USERPROFILE
 $unsafeEnvBaseRejected = $false
@@ -225,7 +324,9 @@ try {
         $commandName = [IO.Path]::GetFileNameWithoutExtension($managedPythonAlias)
         $resolvedAlias = Get-Command $commandName -CommandType Application -ErrorAction Stop | Select-Object -First 1
         Assert-True -Condition ($resolvedAlias.Source -ieq $managedPythonAlias) -Message "受控 Python alias 解析错误：$commandName => $($resolvedAlias.Source)"
-        $aliasVersion = & $managedPythonAlias --version 2>&1
+        $aliasRun = Invoke-HiddenProcess -FilePath $managedPythonRuntime -Arguments @('--version')
+        Assert-True -Condition ($aliasRun.ExitCode -eq 0) -Message "受控 Python runtime 版本探测失败：$managedPythonAlias => $($aliasRun.Text)"
+        $aliasVersion = $aliasRun.Text.Trim()
         Assert-True -Condition ([string]$aliasVersion -like 'Python 3.14.*') -Message "受控 Python alias 版本探测失败：$managedPythonAlias => $aliasVersion"
     }
     $fullResult = & $scriptPath -OutputDir $fullOutput

@@ -6,6 +6,7 @@
   "runtimes": {
     "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
     "python": "D:\\Codex\\tools\\python314-official\\python.exe",
+    "pythonw": "D:\\Codex\\tools\\python314-official\\pythonw.exe",
     "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
     "serenaHooks": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
   },
@@ -21,6 +22,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-provider-stability-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "managed",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\config.toml" },
@@ -59,6 +62,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-projectless-root-d.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-state-policy-guard.py",
       "runtimeId": "python",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "managed",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\.codex-global-state.json" },
@@ -96,6 +101,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-activation-reminder.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": "pythonw",
+      "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
         { "kind": "abstract", "value": "hook-stdin" }
@@ -128,6 +135,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "managed",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\.codex\\config.toml" },
@@ -164,6 +173,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "managed",
       "readResources": [
         { "kind": "path", "value": "D:\\Codex\\tools\\bin" },
@@ -204,6 +215,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-cleanup-guarded.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": "pythonw",
+      "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
         { "kind": "abstract", "value": "hook-stdin" },
@@ -239,6 +252,8 @@
       "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-reminder-guarded.cmd",
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
       "runtimeId": "pwsh",
+      "launcherRuntimeId": "pythonw",
+      "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
         { "kind": "abstract", "value": "hook-stdin" },
@@ -277,6 +292,8 @@
       "wrapperPath": null,
       "implementationPath": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe",
       "runtimeId": "serenaHooks",
+      "launcherRuntimeId": null,
+      "launcherImplementationPath": null,
       "sourceState": "vendor",
       "readResources": [
         { "kind": "abstract", "value": "hook-stdin" },
@@ -388,7 +405,7 @@
     {
       "relativePath": "hooks/codex-state-preflight.cmd",
       "liveRelativePath": "codex-state-preflight.cmd",
-      "sha256": "c6df6e890f91a7b0d83ba971f316b730f3b82ef1b881f0d15a739758f774af84",
+      "sha256": "5a97358adbcdabfb8dffd4f7d798c4335b54c06211d663fb134ff8cd3ac9bedc",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
@@ -415,7 +432,7 @@
     {
       "relativePath": "hooks/serena-reminder-guarded.cmd",
       "liveRelativePath": "serena-reminder-guarded.cmd",
-      "sha256": "b07bd9712a0ae118d9e512c23662fb2511f1e72fa07bfa429c45cdf8cd9b5fe5",
+      "sha256": "b6cfb4469dbccd1e9be6cb06d60c7201a4531f089626e72dcd7e7e4063bdd669",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-reminder"
@@ -424,7 +441,7 @@
     {
       "relativePath": "hooks/serena-cleanup-guarded.cmd",
       "liveRelativePath": "serena-cleanup-guarded.cmd",
-      "sha256": "44502359e59e922c8bc63aef39ee8c2e10135c6aa4ccc66a7fcdcedb4e727c33",
+      "sha256": "2945e34faca06805df790f30952e99d9b9ad559adb93e581c87ab42b037d13df",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-cleanup"
@@ -444,7 +461,7 @@
     {
       "relativePath": "hooks/serena-activation-reminder.cmd",
       "liveRelativePath": "serena-activation-reminder.cmd",
-      "sha256": "7c24c2fbb0bc1393834d7d332cd379b6f3f9196cdd7d920d2a90bd6e8ff044e6",
+      "sha256": "7d3fed8b77425ff2724cf618d506bbadd8babc3843619533d4f7aa385d10eea1",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -484,6 +501,17 @@
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-dashboard"
+      ]
+    },
+    {
+      "relativePath": "hooks/lib/hidden-console-launcher.py",
+      "liveRelativePath": "lib/hidden-console-launcher.py",
+      "sha256": "c0a95d83b106dbba904af187b1a9f88102894317f163afb6c284114cf358973e",
+      "lifecycle": "active",
+      "ownerHookIds": [
+        "serena-activate",
+        "serena-cleanup",
+        "serena-reminder"
       ]
     },
     {

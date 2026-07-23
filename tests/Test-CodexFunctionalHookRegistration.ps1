@@ -29,6 +29,52 @@ function Get-Sha256([string]$Path) {
 
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
 
+function Invoke-HiddenChildProcess {
+    [CmdletBinding(DefaultParameterSetName = 'ArgumentList')]
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(ParameterSetName = 'ArgumentList')][string[]]$ArgumentList = @(),
+        [Parameter(Mandatory, ParameterSetName = 'RawArguments')][AllowEmptyString()][string]$RawArguments,
+        [AllowEmptyString()][string]$InputText = '',
+        [hashtable]$Environment = @{}
+    )
+
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FilePath
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    if ($PSCmdlet.ParameterSetName -ceq 'RawArguments') {
+        $start.Arguments = $RawArguments
+    } else {
+        foreach ($argument in $ArgumentList) { [void]$start.ArgumentList.Add($argument) }
+    }
+    foreach ($name in $Environment.Keys) { $start.Environment[[string]$name] = [string]$Environment[$name] }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    $started = $false
+    try {
+        $started = $process.Start()
+        Assert-True $started "child process 无法启动：$FilePath"
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.StandardInput.Write($InputText)
+        $process.StandardInput.Close()
+        Assert-True ($process.WaitForExit(10000)) "child process 超过10秒：$FilePath"
+        [pscustomobject]@{
+            exitCode = $process.ExitCode
+            stdout = $stdoutTask.GetAwaiter().GetResult()
+            stderr = $stderrTask.GetAwaiter().GetResult()
+        }
+    } finally {
+        if ($started -and -not $process.HasExited) { try { $process.Kill($true) } catch {} }
+        $process.Dispose()
+    }
+}
+
 function Get-RestoreTargetFingerprint([string]$CodexHome, [object]$HostManifest, [object]$EvidenceManifest, [string]$ContextPath) {
     $parts = [Collections.Generic.List[string]]::new()
     foreach ($path in @(
@@ -108,36 +154,18 @@ function Invoke-Reconciler([string]$ScriptPath, [string]$Mode, [string]$CodexHom
 }
 
 function Invoke-PublicWrapper([string]$Path, [string]$InputText, [string[]]$ArgumentList = @(), [hashtable]$Environment = @{}) {
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = 'C:\Windows\System32\cmd.exe'
     $quotedArguments = @($ArgumentList | ForEach-Object { '"' + ([string]$_).Replace('"', '""') + '"' }) -join ' '
-    $start.Arguments = '/d /s /c ""' + $Path + '" ' + $quotedArguments + '"'
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardInput = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    foreach ($name in $Environment.Keys) { $start.Environment[[string]$name] = [string]$Environment[$name] }
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = $start
-    try {
-        Assert-True $process.Start() "wrapper 无法启动：$Path"
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        $process.StandardInput.Write($InputText)
-        $process.StandardInput.Close()
-        Assert-True ($process.WaitForExit(10000)) "wrapper 超过10秒：$Path"
-        [pscustomobject]@{ exitCode = $process.ExitCode; stdout = $stdoutTask.GetAwaiter().GetResult(); stderr = $stderrTask.GetAwaiter().GetResult() }
-    } finally {
-        if (-not $process.HasExited) { try { $process.Kill($true) } catch {} }
-        $process.Dispose()
-    }
+    Invoke-HiddenChildProcess `
+        -FilePath 'C:\Windows\System32\cmd.exe' `
+        -RawArguments ('/d /s /c ""' + $Path + '" ' + $quotedArguments + '"') `
+        -InputText $InputText `
+        -Environment $Environment
 }
 
 $manifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 Assert-True (@($manifest.hooks).Count -eq 4) 'production manifest 必须精确包含4个功能 hook'
-Assert-True (@($manifest.files).Count -eq 8) 'production manifest 必须精确包含8个 active 文件'
+Assert-True (@($manifest.files).Count -eq 9) 'production manifest 必须精确包含9个 active 文件'
 Assert-True (@($manifest.environment).Count -eq 1 -and $manifest.environment[0].name -ceq 'SERENA_HOME') 'production manifest 必须精确包含 User SERENA_HOME action'
 $hookIds = @($manifest.hooks | ForEach-Object id)
 foreach ($retiredId in @('serena-auto-approve','provider-stability','codex-state-policy','serena-dashboard','github-cli')) {
@@ -187,7 +215,8 @@ try {
             Assert-True (@($cleanupManifest.rollbackErrors).Count -eq 1) '目录 identity 漂移必须产生精确 rollback error'
         } finally {
             if ((Test-Path -LiteralPath $cleanupTarget) -and ((Get-Item -LiteralPath $cleanupTarget -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                & 'C:\Windows\System32\cmd.exe' /d /c rmdir $cleanupTarget | Out-Null
+                $cleanupResult = Invoke-HiddenChildProcess -FilePath 'C:\Windows\System32\cmd.exe' -ArgumentList @('/d','/c','rmdir',$cleanupTarget)
+                Assert-True ($cleanupResult.exitCode -eq 0) "目录清理 fixture junction 删除失败：$($cleanupResult.stderr)"
             }
             if ((Test-Path -LiteralPath $cleanupMoved -PathType Container) -and -not (Test-Path -LiteralPath $cleanupTarget)) {
                 Move-Item -LiteralPath $cleanupMoved -Destination $cleanupTarget
@@ -213,13 +242,14 @@ try {
     $expectedProjectionFields = @(
         'identity', 'id', 'event', 'order', 'matcher', 'timeoutSeconds',
         'sourceSha256', 'wrapperSha256', 'implementationSha256', 'runtimeSha256',
+        'launcherImplementationSha256', 'launcherRuntimeSha256',
         'trustRequired', 'restartRequired'
     )
     Assert-True ($check.PSObject.Properties.Name -ccontains 'registrationProjection') 'Check 必须输出确定性的 per-hook registration projection'
     Assert-True (@($check.registrationProjection).Count -eq 4) 'Check registration projection 必须精确包含4个 hook'
     foreach ($projection in @($check.registrationProjection)) {
         Assert-True ((@($projection.PSObject.Properties.Name) -join ',') -ceq ($expectedProjectionFields -join ',')) "registration projection schema 非法：$($projection.id)"
-        foreach ($hashName in @('identity','sourceSha256','wrapperSha256','implementationSha256','runtimeSha256')) {
+        foreach ($hashName in @('identity','sourceSha256','wrapperSha256','implementationSha256','runtimeSha256','launcherImplementationSha256','launcherRuntimeSha256')) {
             Assert-True ([string]$projection.$hashName -cmatch '^[0-9a-f]{64}$') "registration projection $hashName 必须为脱敏 SHA-256：$($projection.id)"
         }
     }
@@ -482,10 +512,12 @@ try {
     foreach ($wrapperName in @('serena-reminder-guarded.cmd','serena-cleanup-guarded.cmd','serena-activation-reminder.cmd')) {
         $wrapper = Get-Content -LiteralPath (Join-Path $codexHome "hooks\$wrapperName") -Raw
         Assert-True ($wrapper.Contains('SERENA_HOME=D:\Codex\.serena', [System.StringComparison]::OrdinalIgnoreCase)) "Serena wrapper 未 pin SERENA_HOME：$wrapperName"
+        Assert-True ($wrapper.Contains('pythonw.exe', [System.StringComparison]::OrdinalIgnoreCase) -and $wrapper.Contains('lib\hidden-console-launcher.py', [System.StringComparison]::OrdinalIgnoreCase)) "Serena wrapper 未通过 hidden launcher 启动：$wrapperName"
         Assert-True ($wrapper -notmatch '(?i)https?://|curl|check[-_]?network|check[-_]?auth') "生命周期 wrapper 含网络/认证能力：$wrapperName"
     }
     $stateWrapper = Get-Content -LiteralPath (Join-Path $codexHome 'hooks\codex-state-preflight.cmd') -Raw
     Assert-True ($stateWrapper.Contains('D:\Codex\tools\python314-official\python.exe', [System.StringComparison]::OrdinalIgnoreCase)) 'state wrapper 未固定官方 Python'
+    Assert-True ($stateWrapper.Contains('pythonw.exe', [System.StringComparison]::OrdinalIgnoreCase) -and $stateWrapper.Contains('lib\hidden-console-launcher.py', [System.StringComparison]::OrdinalIgnoreCase)) 'state wrapper 未通过 hidden launcher 启动'
     Assert-True ($stateWrapper -notmatch '(?i)https?://|curl|check[-_]?network|check[-_]?auth') 'state lifecycle wrapper 含网络/认证能力'
 
     $stateFixtureParent = Join-Path $ProjectRoot 'reports\codex-state-preflight-test'
@@ -501,8 +533,10 @@ try {
         foreach ($name in @('policy.json','state-policy.json')) { [System.IO.File]::WriteAllText((Join-Path $stateFixtureHome $name), $statePolicy, $fixtureUtf8) }
         $sqlitePath = Join-Path $stateFixtureHome 'state_5.sqlite'
         $sqliteSetup = 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("create table threads (id text primary key, source text, thread_source text, approval_mode text, sandbox_policy text, sentinel text)"); c.commit(); c.close()'
-        & 'D:\Codex\tools\python314-official\python.exe' -c $sqliteSetup $sqlitePath
-        Assert-True ($LASTEXITCODE -eq 0) 'state preflight SQLite fixture 创建失败'
+        $sqliteSetupResult = Invoke-HiddenChildProcess `
+            -FilePath 'D:\Codex\tools\python314-official\python.exe' `
+            -ArgumentList @('-I','-S','-B','-X','utf8','-c',$sqliteSetup,$sqlitePath)
+        Assert-True ($sqliteSetupResult.exitCode -eq 0) "state preflight SQLite fixture 创建失败：$($sqliteSetupResult.stderr)"
         $stateBefore = @(
             Get-Sha256 (Join-Path $stateFixtureHome '.codex-global-state.json')
             Get-Sha256 $sqlitePath
@@ -638,7 +672,8 @@ try {
         Assert-True ($ancestorRollbackErrorCount -eq 0) "managed ancestor 攻击不得有 rollbackErrors：$ancestorRollbackErrors"
     } finally {
         if ((Test-Path -LiteralPath $ancestorParent) -and ((Get-Item -LiteralPath $ancestorParent -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            & 'C:\Windows\System32\cmd.exe' /d /c rmdir $ancestorParent | Out-Null
+            $ancestorCleanupResult = Invoke-HiddenChildProcess -FilePath 'C:\Windows\System32\cmd.exe' -ArgumentList @('/d','/c','rmdir',$ancestorParent)
+            Assert-True ($ancestorCleanupResult.exitCode -eq 0) "managed ancestor fixture junction 删除失败：$($ancestorCleanupResult.stderr)"
         }
         if ((Test-Path -LiteralPath $ancestorMoved -PathType Container) -and -not (Test-Path -LiteralPath $ancestorParent)) {
             Move-Item -LiteralPath $ancestorMoved -Destination $ancestorParent
@@ -691,8 +726,8 @@ try {
     New-FunctionalHookFixture -CodexHome $reparseHome
     New-Item -ItemType Directory -Force -Path $reparseExternal | Out-Null
     [IO.File]::WriteAllText((Join-Path $reparseExternal 'sentinel.txt'), 'reparse-target-must-survive', $fixtureUtf8)
-    & 'C:\Windows\System32\cmd.exe' /d /c mklink /J $reparsePath $reparseExternal | Out-Null
-    Assert-True ($LASTEXITCODE -eq 0) 'legacy reparse fixture junction 创建失败'
+    $reparseCreateResult = Invoke-HiddenChildProcess -FilePath 'C:\Windows\System32\cmd.exe' -ArgumentList @('/d','/c','mklink','/J',$reparsePath,$reparseExternal)
+    Assert-True ($reparseCreateResult.exitCode -eq 0) "legacy reparse fixture junction 创建失败：$($reparseCreateResult.stderr)"
     try {
         $reparseFailed = $false
         try { & $scriptPath -Mode Repair -CodexHome $reparseHome -Json | Out-Null } catch { $reparseFailed = $true }
@@ -700,7 +735,8 @@ try {
         Assert-True ((Get-Content -LiteralPath (Join-Path $reparseExternal 'sentinel.txt') -Raw) -ceq 'reparse-target-must-survive') 'legacy reparse 拒绝不得改变外部目标 bytes'
     } finally {
         if ((Test-Path -LiteralPath $reparsePath) -and ((Get-Item -LiteralPath $reparsePath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            & 'C:\Windows\System32\cmd.exe' /d /c rmdir $reparsePath | Out-Null
+            $reparseCleanupResult = Invoke-HiddenChildProcess -FilePath 'C:\Windows\System32\cmd.exe' -ArgumentList @('/d','/c','rmdir',$reparsePath)
+            Assert-True ($reparseCleanupResult.exitCode -eq 0) "legacy reparse fixture junction 删除失败：$($reparseCleanupResult.stderr)"
         }
     }
 
@@ -777,7 +813,8 @@ try {
             Assert-True (@($postManifest.rollbackErrors).Count -eq 1) "post-commit $postPhase cleanup identity 漂移必须精确一条 rollback error"
             Assert-True (@($postManifest.recoveryRequired).Count -eq 1 -and [string]$postManifest.recoveryRequired[0] -clike 'managed-directory:*') "post-commit $postPhase cleanup 必须给出精确 recoveryRequired"
             if ((Test-Path -LiteralPath $postCleanupTarget) -and ((Get-Item -LiteralPath $postCleanupTarget -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                & 'C:\Windows\System32\cmd.exe' /d /c rmdir $postCleanupTarget | Out-Null
+                $postCleanupResult = Invoke-HiddenChildProcess -FilePath 'C:\Windows\System32\cmd.exe' -ArgumentList @('/d','/c','rmdir',$postCleanupTarget)
+                Assert-True ($postCleanupResult.exitCode -eq 0) "post-commit $postPhase fixture junction 删除失败：$($postCleanupResult.stderr)"
             }
             if ((Test-Path -LiteralPath $postCleanupMoved -PathType Container) -and -not (Test-Path -LiteralPath $postCleanupTarget)) {
                 Move-Item -LiteralPath $postCleanupMoved -Destination $postCleanupTarget

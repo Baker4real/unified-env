@@ -38,20 +38,27 @@ try {
 "@
 $encodedHolderScript = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($holderScript))
 $holder = $null
+$holderStarted = $false
 $holderPid = $null
 $contender = $null
 $contenderBlocked = $false
 $sentinelPreserved = $false
 $primaryError = $null
 try {
-    $holder = Start-Process `
-        -FilePath (Get-Process -Id $PID).Path `
-        -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $encodedHolderScript) `
-        -WindowStyle Hidden `
-        -PassThru
+    $holderStart = [Diagnostics.ProcessStartInfo]::new()
+    $holderStart.FileName = (Get-Process -Id $PID).Path
+    $holderStart.UseShellExecute = $false
+    $holderStart.CreateNoWindow = $true
+    foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $encodedHolderScript)) {
+        [void]$holderStart.ArgumentList.Add($argument)
+    }
+    $holder = [Diagnostics.Process]::new()
+    $holder.StartInfo = $holderStart
+    $holderStarted = $holder.Start()
+    Assert-True $holderStarted 'holder 无法以无窗口模式启动'
     Assert-True ($ready.WaitOne([TimeSpan]::FromSeconds(10))) 'holder 未进入 fixture lifecycle critical section'
     $holderPid = [int](Get-Content -LiteralPath $holderPidPath -Raw)
-    Assert-True ($holderPid -eq $holder.Id -and $holderPid -ne $PID -and $null -ne (Get-Process -Id $holderPid -ErrorAction Stop)) 'holder 必须运行在 Start-Process 创建的独立进程'
+    Assert-True ($holderPid -eq $holder.Id -and $holderPid -ne $PID -and $null -ne (Get-Process -Id $holderPid -ErrorAction Stop)) 'holder 必须运行在独立无窗口进程'
     # Keep this non-owning handle open through holder termination so the kernel
     # object survives long enough for the helper to observe abandonment.
     $contender = [Threading.Mutex]::new($false, $mutexName)
@@ -69,7 +76,7 @@ try {
 } catch {
     $primaryError = $_
 } finally {
-    if ($null -ne $holder -and $null -ne (Get-Process -Id $holder.Id -ErrorAction SilentlyContinue)) {
+    if ($holderStarted -and $null -ne (Get-Process -Id $holder.Id -ErrorAction SilentlyContinue)) {
         Stop-Process -Id $holder.Id -Force
         Wait-Process -Id $holder.Id -Timeout 10 -ErrorAction SilentlyContinue
     }

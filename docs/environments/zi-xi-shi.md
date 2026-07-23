@@ -24,6 +24,11 @@
   `integratedTerminalShell = "powershell"`。这表示 Codex 的集成终端使用 PowerShell；
   Codex 内部 PTY 和后台命令仍在应用内或隐藏运行，不应为每条命令新开外部 Windows
   Terminal 窗口。
+- 2026-07-23 已在本机复现并修复 lifecycle hook/test 的 PowerShell 闪窗；当前 4 个
+  live wrapper 已采用受管 hidden-console launcher。实现、标准流与最终子进程无窗口验收
+  合同见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`，本文不复制项目机制。
+  实际 Codex Desktop 重启后的独立 180 秒观察窗内，新增可见 cmd、PowerShell、pwsh、
+  conhost 或 Windows Terminal 窗口为 `0`。
 - 同日 `wsl.exe --list --verbose` 返回 `Ubuntu` 与 `docker-desktop`，两者均为
   WSL2；这已经推翻旧 README 中“WSL 未安装、未启用、未初始化”的历史判断。运行时
   `Running` / `Stopped` 状态属于易变事实，使用前现场复核；D-Radar 的 WSL/Docker
@@ -83,9 +88,10 @@
 
 不得把安装后的回写职责放入被安装的 skill，也不得直接修改 bundled `.system` 安装器。新安装或更新必须经过 decision manifest、`writing-great-skills` 证据、SOURCE/ledger、严格资源闭包和 catalog 后置校验；任一门槛失败都应回滚。
 
-## Codex 主机 Hook 当前边界（2026-07-17）
+## Codex 主机 Hook 当前边界（2026-07-23）
 
-- 已通过唯一生产入口 `Invoke-CodexHostHookReconciliation.ps1` 完成 live `Check → Repair → Check`；最后一次 Check 为 `ok=true`、`driftCount=0`，随后第二次 Repair 为 `changed=false`、`evidencePath=null`。
+- 已通过唯一生产入口 `Invoke-CodexHostHookReconciliation.ps1` 完成本次 live Repair；结果为 `ok=true`、`changed=true`。随后 Check 为 `ok=true`、`driftCount=0`，四项 registration 的 `restartRequired` 均为 `false`；第二次 Repair 严格返回 `changed=false`、`evidencePath=null`。
+- fresh live SessionStart wrapper 返回退出码 `0`、空 stderr 和合法 Serena activation JSON。获授权重启 Codex Desktop 后，独立监视器完成 180 秒观察并返回 `passed=true`、`new_visible_console_or_terminal_window_count=0`；重启后的 live Check 仍为 `ok=true`、`driftCount=0`。
 - 只有 reconciler 可以修复受管 Serena section 与 hook registration；不得依据历史 evidence 或本文手工重建它们，也不得手工写入 `approval_policy` 或 `sandbox_mode`。若 Repair 结果的 `registrationProjection` 出现 `restartRequired=true`，完整退出并重启 Codex 应用后再做运行时验收。
 
 ## GitHub CLI

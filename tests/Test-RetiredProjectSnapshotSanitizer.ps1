@@ -375,9 +375,28 @@ function Invoke-Sanitizer {
         $callArgs += '-ConfirmRetiredProject'
         $callArgs += $value
     }
-    $output = @(& $pwshPath @callArgs 2>&1)
-    $exitCode = $LASTEXITCODE
-    $raw = @($output | ForEach-Object { [string]$_ }) -join "`n"
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $pwshPath
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $callArgs) { [void]$start.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        Assert-True -Condition $process.Start() -Message 'sanitizer 子进程无法启动。'
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        Assert-True -Condition ($process.WaitForExit(120000)) -Message 'sanitizer 子进程超时。'
+        $exitCode = $process.ExitCode
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+    } finally {
+        if (-not $process.HasExited) { try { $process.Kill($true) } catch {} }
+        $process.Dispose()
+    }
+    $raw = @($stdout,$stderr | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "`n"
     if ([string]::IsNullOrWhiteSpace($raw)) {
         throw 'sanitizer 未输出 JSON 摘要。'
     }

@@ -30,6 +30,30 @@ function Assert-Throws {
     throw "未拒绝：$Message"
 }
 
+function Invoke-HiddenProcess {
+    param([Parameter(Mandatory)][string]$FilePath,[Parameter(Mandatory)][string[]]$Arguments)
+
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FilePath
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { [void]$start.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        Assert-True $process.Start() "子进程无法启动：$FilePath"
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        Assert-True ($process.WaitForExit(10000)) "子进程超时：$FilePath"
+        [pscustomobject]@{ exitCode=$process.ExitCode; stdout=$stdoutTask.GetAwaiter().GetResult(); stderr=$stderrTask.GetAwaiter().GetResult() }
+    } finally {
+        if (-not $process.HasExited) { try { $process.Kill($true) } catch {} }
+        $process.Dispose()
+    }
+}
+
 Add-Type -TypeDefinition @'
 using System;
 using System.IO;
@@ -401,8 +425,8 @@ try {
 }
 
 $aclJunction = Join-Path $atomicParent 'acl-junction'
-$aclJunctionOutput = & $env:ComSpec /d /c "mklink /J `"$aclJunction`" `"$externalRoot`"" 2>&1
-if ($LASTEXITCODE -ne 0) { throw "无法创建 ACL junction fixture：$aclJunctionOutput" }
+$aclJunctionResult = Invoke-HiddenProcess $env:ComSpec @('/d','/c','mklink','/J',$aclJunction,$externalRoot)
+if ($aclJunctionResult.exitCode -ne 0) { throw "无法创建 ACL junction fixture：$($aclJunctionResult.stdout)$($aclJunctionResult.stderr)" }
 $aclJunctionGuard = Enter-CodexHookFixtureDirectoryChainGuard -DirectoryPath $atomicParent
 try {
     $aclJunctionError = Assert-Throws -Message 'ACL lease 必须拒绝 reparse target' -Action {
@@ -413,7 +437,7 @@ try {
     Assert-True ($aclJunctionError -match 'reparse') 'reparse target 必须返回稳定拒绝'
 } finally {
     $aclJunctionGuard.Dispose()
-    & $env:ComSpec /d /c rmdir $aclJunction | Out-Null
+    [void](Invoke-HiddenProcess $env:ComSpec @('/d','/c','rmdir',$aclJunction))
 }
 Assert-True (-not [IO.Directory]::Exists($emptyDeletePath)) '空目录必须通过同一 verified handle 完成 identity-bound delete'
 
@@ -434,8 +458,8 @@ Assert-True ([IO.Directory]::Exists($nonEmptyDeletePath) -and [IO.File]::ReadAll
 
 $danglingTarget = Join-Path $externalRoot 'must-not-be-created'
 $danglingLink = Join-Path $testRoot 'dangling-junction'
-$junctionOutput = & $env:ComSpec /d /c "mklink /J `"$danglingLink`" `"$danglingTarget`"" 2>&1
-if ($LASTEXITCODE -ne 0) { throw "无法创建 dangling junction fixture：$junctionOutput" }
+$junctionResult = Invoke-HiddenProcess $env:ComSpec @('/d','/c','mklink','/J',$danglingLink,$danglingTarget)
+if ($junctionResult.exitCode -ne 0) { throw "无法创建 dangling junction fixture：$($junctionResult.stdout)$($junctionResult.stderr)" }
 [void](Assert-Throws -Message 'dangling junction 不得被目录创建跟随' -Action {
     New-CodexHookFixtureDirectory -Path (Join-Path $danglingLink 'child') -Name 'dangling junction child' -RequireMissing | Out-Null
 })

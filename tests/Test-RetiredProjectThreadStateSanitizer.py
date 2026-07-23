@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -22,6 +23,7 @@ RETIRED_ORIGIN = "https://github.com/Baker4real/codex-gsd-codex-c-skill.git"
 MARKER_NAME = ".retired-project-thread-state-sanitizer-fixture"
 MARKER_VALUE = "retired-project-thread-state-sanitizer-fixture-v1\n"
 PREFIX = "retired-project-thread-state-sanitizer-tests-"
+SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 def assert_true(condition: bool, message: str) -> None:
@@ -96,6 +98,7 @@ def run_sanitizer(home: Path, *arguments: str, expected_status: int) -> dict:
         text=True,
         encoding="utf-8",
         errors="strict",
+        creationflags=SUBPROCESS_CREATION_FLAGS,
     )
     assert_true(completed.returncode == expected_status, f"sanitizer exit code 不符：{completed.stdout}\n{completed.stderr}")
     assert_true(completed.stderr == "", f"sanitizer 不应向 stderr 输出：{completed.stderr}")

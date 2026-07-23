@@ -810,7 +810,12 @@ function Assert-ValidToml {
             throw "config.toml 未通过完整 TOML 语法验证"
         }
     } catch {
-        throw "完整 TOML 语法验证失败"
+        switch -Exact ($_.Exception.Message) {
+            "TOML parser Python 未启动" { throw "完整 TOML 语法验证失败：TOML parser Python 未启动" }
+            "TOML parser Python 超时" { throw "完整 TOML 语法验证失败：TOML parser Python 超时" }
+            "config.toml 未通过完整 TOML 语法验证" { throw "完整 TOML 语法验证失败：config.toml 未通过完整 TOML 语法验证" }
+            default { throw "完整 TOML 语法验证失败：TOML parser I/O 失败" }
+        }
     } finally {
         if ($started -and -not $process.HasExited) {
             try {
@@ -1227,6 +1232,80 @@ function Get-ManagedHookFileStates {
             ok = $targetExists -and $targetRawSha256 -ceq $sourceRawSha256
         }
     })
+}
+
+function Test-ManagedHookFileIsWrapper {
+    param([Parameter(Mandatory)][string]$LiveRelativePath)
+
+    $normalized = $LiveRelativePath.Replace('/', '\')
+    $liveHooksRoot = [IO.Path]::GetFullPath('D:\Codex\.codex\hooks').TrimEnd('\')
+    foreach ($hook in @($script:HostPreflightManifest.hooks)) {
+        $wrapperPath = [IO.Path]::GetFullPath([string]$hook.wrapperPath)
+        $relativeWrapperPath = [IO.Path]::GetRelativePath($liveHooksRoot, $wrapperPath).Replace('/', '\')
+        if ($relativeWrapperPath -ceq $normalized) { return $true }
+    }
+    return $false
+}
+
+function Get-OrderedManagedHookItems {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items,
+        [Parameter(Mandatory)][ValidateSet('Repair','Restore')][string]$Direction
+    )
+
+    $wrappers = @($Items | Where-Object { Test-ManagedHookFileIsWrapper -LiveRelativePath ([string]$_.liveRelativePath) })
+    $dependencies = @($Items | Where-Object { -not (Test-ManagedHookFileIsWrapper -LiveRelativePath ([string]$_.liveRelativePath)) })
+    if ($Direction -ceq 'Repair') {
+        $dependencies
+        $wrappers
+    } else {
+        $wrappers
+        $dependencies
+    }
+}
+
+function Get-HostRuntimeDependencyStates {
+    param([Parameter(Mandatory)][string]$ResolvedCodexHome)
+
+    $requestedMissingRuntimeId = $env:CODEX_HOST_HOOK_TEST_MISSING_RUNTIME_ID
+    if (-not [string]::IsNullOrWhiteSpace($requestedMissingRuntimeId)) {
+        if ($requestedMissingRuntimeId -cne 'pythonw') {
+            throw 'fixture-only missing runtime id 只允许 pythonw'
+        }
+        if (Test-IsLiveCodexHome -ResolvedCodexHome $ResolvedCodexHome) {
+            throw 'fixture-only missing runtime seam 不得用于 live CodexHome'
+        }
+        Assert-RepairHomeAuthorized -ResolvedCodexHome $ResolvedCodexHome
+    }
+
+    $runtimeIds = [Collections.Generic.List[string]]::new()
+    $seenRuntimeIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($hook in @($script:HostPreflightManifest.hooks)) {
+        foreach ($runtimeId in @([string]$hook.runtimeId, [string]$hook.launcherRuntimeId)) {
+            if (-not [string]::IsNullOrEmpty($runtimeId) -and $seenRuntimeIds.Add($runtimeId)) {
+                $runtimeIds.Add($runtimeId)
+            }
+        }
+    }
+
+    foreach ($runtimeId in $runtimeIds) {
+        $runtimeProperty = $script:HostPreflightManifest.runtimes.PSObject.Properties[$runtimeId]
+        if ($null -eq $runtimeProperty) { throw "host runtime dependency 未声明：$runtimeId" }
+        $runtimePath = [IO.Path]::GetFullPath([string]$runtimeProperty.Value)
+        $observation = Get-CodexHookSafeFileHash `
+            -Path $runtimePath `
+            -Name "host runtime dependency $runtimeId" `
+            -AllowedExactPaths @($runtimePath)
+        $simulatedMissing = $runtimeId -ceq $requestedMissingRuntimeId
+        [pscustomobject][ordered]@{
+            id = $runtimeId
+            path = $runtimePath
+            exists = if ($simulatedMissing) { $false } else { [bool]$observation.probe.exists }
+            probeState = if ($simulatedMissing) { 'missing-fixture' } else { [string]$observation.probe.state }
+            sha256 = if ($simulatedMissing) { $null } else { $observation.sha256 }
+            ok = -not $simulatedMissing -and [bool]$observation.probe.safeToRead -and [string]$observation.sha256 -cmatch '^[0-9a-f]{64}$'
+        }
+    }
 }
 
 function Test-IsLiveCodexHome {
@@ -2557,6 +2636,7 @@ function Get-ReconciliationState {
     $desiredConfig = Get-DesiredConfig -Content $configContent -ExpectedSerenaContextPath $serenaContextPath
     $desiredHooks = Get-DesiredHooksJson -Content $hooksContent
     $managedFileStates = @(Get-ManagedHookFileStates -ResolvedCodexHome $ResolvedCodexHome)
+    $runtimeDependencyStates = @(Get-HostRuntimeDependencyStates -ResolvedCodexHome $ResolvedCodexHome)
     $environmentState = Get-SerenaEnvironmentState -ResolvedCodexHome $ResolvedCodexHome
     $legacyPresent = @($script:LegacyHookNames | Where-Object {
         $candidate = Join-Path $hookDirectory $_
@@ -2594,6 +2674,7 @@ function Get-ReconciliationState {
         [pscustomobject]@{ name = "config"; ok = -not $desiredConfig.changed },
         [pscustomobject]@{ name = "registrations"; ok = -not $desiredHooks.changed },
         [pscustomobject]@{ name = "managedFiles"; ok = @($managedFileStates | Where-Object { -not $_.ok }).Count -eq 0; driftedTargetCount = @($managedFileStates | Where-Object { -not $_.ok }).Count },
+        [pscustomobject]@{ name = "runtimeDependencies"; ok = @($runtimeDependencyStates | Where-Object { -not $_.ok }).Count -eq 0; unavailableRuntimeIds = @($runtimeDependencyStates | Where-Object { -not $_.ok } | ForEach-Object { [string]$_.id }) },
         [pscustomobject]@{ name = "environment"; ok = [bool]$environmentState.ok },
         [pscustomobject]@{ name = "legacyImplementations"; ok = $legacyPresent.Count -eq 0 -and $legacyDirectoriesPresent.Count -eq 0; presentCount = $legacyPresent.Count + $legacyDirectoriesPresent.Count },
         [pscustomobject]@{ name = "acl"; ok = @($aclStates | Where-Object { -not $_.ok }).Count -eq 0; driftedTargetCount = @($aclStates | Where-Object { -not $_.ok }).Count }
@@ -2615,6 +2696,7 @@ function Get-ReconciliationState {
         desiredConfig = $desiredConfig
         desiredHooks = $desiredHooks
         managedFileStates = $managedFileStates
+        runtimeDependencyStates = $runtimeDependencyStates
         environmentState = $environmentState
         legacyPresent = $legacyPresent
         legacyDirectoriesPresent = $legacyDirectoriesPresent
@@ -2645,7 +2727,22 @@ function New-Result {
         $sourceClosure = @($ownedFiles | Sort-Object -Property relativePath | ForEach-Object {
             ([string]$_.relativePath) + '=' + ([string]$_.sha256).ToLowerInvariant()
         }) -join "`n"
-        $runtimePath = [IO.Path]::GetFullPath([string]$script:HostPreflightManifest.runtimes.PSObject.Properties[[string]$hook.runtimeId].Value)
+        $runtimeState = @($State.runtimeDependencyStates | Where-Object { [string]$_.id -ceq [string]$hook.runtimeId })
+        if ($runtimeState.Count -ne 1) { throw "registration projection runtime closure 非法：$($hook.id)" }
+        $launcherImplementationSha256 = $null
+        $launcherRuntimeSha256 = $null
+        if (-not [string]::IsNullOrEmpty([string]$hook.launcherRuntimeId)) {
+            $launcherRuntimeState = @($State.runtimeDependencyStates | Where-Object { [string]$_.id -ceq [string]$hook.launcherRuntimeId })
+            if ($launcherRuntimeState.Count -ne 1) { throw "registration projection launcher runtime closure 非法：$($hook.id)" }
+            $launcherRuntimeSha256 = $launcherRuntimeState[0].sha256
+            $launcherRelativePath = [IO.Path]::GetRelativePath(
+                [IO.Path]::GetFullPath('D:\Codex\.codex\hooks'),
+                [IO.Path]::GetFullPath([string]$hook.launcherImplementationPath)
+            ).Replace('\', '/')
+            $launcherImplementationFile = @($ownedFiles | Where-Object { [string]$_.liveRelativePath -ceq $launcherRelativePath })
+            if ($launcherImplementationFile.Count -ne 1) { throw "registration projection launcher implementation closure 非法：$($hook.id)" }
+            $launcherImplementationSha256 = ([string]$launcherImplementationFile[0].sha256).ToLowerInvariant()
+        }
         [pscustomobject][ordered]@{
             identity = (Get-TextSha256 -Content (Get-CodexHookCommandIdentity -Hook $hook)).ToLowerInvariant()
             id = [string]$hook.id
@@ -2656,7 +2753,9 @@ function New-Result {
             sourceSha256 = (Get-TextSha256 -Content $sourceClosure).ToLowerInvariant()
             wrapperSha256 = ([string]$wrapperFile[0].sha256).ToLowerInvariant()
             implementationSha256 = ([string]$implementationFile[0].sha256).ToLowerInvariant()
-            runtimeSha256 = (Get-FileHash -LiteralPath $runtimePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            runtimeSha256 = $runtimeState[0].sha256
+            launcherImplementationSha256 = $launcherImplementationSha256
+            launcherRuntimeSha256 = $launcherRuntimeSha256
             trustRequired = [bool]$requiresActivation
             restartRequired = [bool]$requiresActivation
         }
@@ -2815,11 +2914,11 @@ function New-HostHookRestoreContract {
     $sourceFiles = @($script:HostPreflightManifest.files | ForEach-Object {
         [ordered]@{ relativePath=[string]$_.relativePath; liveRelativePath=[string]$_.liveRelativePath; sha256=([string]$_.sha256).ToLowerInvariant() }
     })
-    if ($sourceFiles.Count -ne 8) { throw 'restore contract 必须绑定固定8个 source 文件' }
+    if ($sourceFiles.Count -ne 9) { throw 'restore contract 必须绑定固定9个 source 文件' }
     $actionOrder = [Collections.Generic.List[string]]::new()
     if (@($Manifest.committedResources) -ccontains 'hooks.json') { $actionOrder.Add('hooks.json') }
     if (@($Manifest.committedResources) -ccontains 'environment:SERENA_HOME') { $actionOrder.Add('environment:SERENA_HOME') }
-    foreach ($file in @($script:HostPreflightManifest.files)) {
+    foreach ($file in @(Get-OrderedManagedHookItems -Items @($script:HostPreflightManifest.files) -Direction Restore)) {
         $id = "managed:$($file.liveRelativePath)"
         if (@($Manifest.committedResources) -ccontains $id) { $actionOrder.Add($id) }
     }
@@ -2891,8 +2990,8 @@ function Read-HostHookRestoreContract {
     if ($claim.artifactType -cne 'env-governance.codex-host-hook-restore-claim' -or [int]$claim.schemaVersion -ne 1 -or $claim.runId -cne $runId -or $claim.evidencePath -cne [string]$Evidence.path -or $claim.restoreContractSha256 -cne $contractSha) { throw 'host hook restore claim binding 非法' }
     $hostManifestSnapshot = Get-RequiredCapabilitySnapshot -Path $script:HostPreflightManifestPath -CapabilityRoot $script:ProjectRoot -Name 'restore current host manifest snapshot'
     if ($payload.hostManifestSha256 -cne ([string]$hostManifestSnapshot.sha256).ToLowerInvariant()) { throw 'host hook restore contract host manifest 漂移' }
-    if (@($payload.sourceFiles).Count -ne 8) { throw 'host hook restore contract source closure 非法' }
-    for ($i=0; $i -lt 8; $i++) {
+    if (@($payload.sourceFiles).Count -ne 9) { throw 'host hook restore contract source closure 非法' }
+    for ($i=0; $i -lt 9; $i++) {
         $expected = $script:HostPreflightManifest.files[$i]
         $actual = $payload.sourceFiles[$i]
         Assert-CodexHookExactProperties $actual @('relativePath','liveRelativePath','sha256') "host hook restore source[$i]"
@@ -3039,6 +3138,10 @@ function Invoke-Repair {
     if ($InitialState.ok) {
         return New-Result -ResultMode "Repair" -State $InitialState -Changed $false -EvidencePath $null
     }
+    $unavailableRuntimeIds = @($InitialState.runtimeDependencyStates | Where-Object { -not $_.ok } | ForEach-Object { [string]$_.id })
+    if ($unavailableRuntimeIds.Count -gt 0) {
+        throw "受管 hook runtime dependency 不可用，Repair 在 evidence 前拒绝：$($unavailableRuntimeIds -join ',')"
+    }
 
     $originalConfigAcl = Get-Acl -LiteralPath $InitialState.configPath
     $originalHooksAcl = Get-Acl -LiteralPath $InitialState.hooksPath
@@ -3056,8 +3159,8 @@ function Invoke-Repair {
     $managedTargetPaths = @($InitialState.managedFileStates | ForEach-Object { [string]$_.targetPath })
     $managedTargetSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($managedTargetPath in $managedTargetPaths) { [void]$managedTargetSet.Add([IO.Path]::GetFullPath($managedTargetPath)) }
-    if ($managedTargetPaths.Count -ne 8 -or $managedTargetSet.Count -ne 8) {
-        throw '受管 hook 发布 capability 必须精确包含8个唯一目标。'
+    if ($managedTargetPaths.Count -ne 9 -or $managedTargetSet.Count -ne 9) {
+        throw '受管 hook 发布 capability 必须精确包含9个唯一目标。'
     }
     $createdManagedDirectories = @{}
 
@@ -3106,7 +3209,8 @@ function Invoke-Repair {
             Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
         }
 
-        foreach ($fileState in @($InitialState.managedFileStates | Where-Object { -not $_.ok })) {
+        $managedPublishStates = @(Get-OrderedManagedHookItems -Items @($InitialState.managedFileStates | Where-Object { -not $_.ok }) -Direction Repair)
+        foreach ($fileState in $managedPublishStates) {
             $resourceName = "managed:$($fileState.liveRelativePath)"
             $attempted.Add($resourceName) | Out-Null
             $manifest.attemptedResources = @($attempted)
@@ -3277,7 +3381,8 @@ function Invoke-Repair {
                 $rollbackErrors.Add("environment:SERENA_HOME: $($_.Exception.Message)")
             }
         }
-        foreach ($fileState in @($InitialState.managedFileStates | Where-Object { $attempted.Contains("managed:$($_.liveRelativePath)") })) {
+        $managedRollbackStates = @(Get-OrderedManagedHookItems -Items @($InitialState.managedFileStates | Where-Object { $attempted.Contains("managed:$($_.liveRelativePath)") }) -Direction Restore)
+        foreach ($fileState in $managedRollbackStates) {
             try {
                 $currentSnapshot = Get-CodexHookCapabilityFileSnapshot -Path ([string]$fileState.targetPath) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -Name "rollback snapshot $($fileState.liveRelativePath)"
                 $currentHash = [string]$currentSnapshot.sha256
@@ -3523,7 +3628,8 @@ function Invoke-Repair {
             }
         }
 
-        foreach ($fileState in @($InitialState.managedFileStates | Where-Object { $attempted.Contains("managed:$($_.liveRelativePath)") })) {
+        $managedRollbackStates = @(Get-OrderedManagedHookItems -Items @($InitialState.managedFileStates | Where-Object { $attempted.Contains("managed:$($_.liveRelativePath)") }) -Direction Restore)
+        foreach ($fileState in $managedRollbackStates) {
             try {
                 $current = Get-CodexHookCapabilityFileSnapshot -Path ([string]$fileState.targetPath) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -Name "post-commit rollback $($fileState.liveRelativePath)"
                 if ($fileState.targetExists) {
@@ -3702,8 +3808,7 @@ function Invoke-FixtureRestorePathReplace {
     if ($null -eq $Fixture -or -not [string]::Equals([string]$Fixture.targetPath, [IO.Path]::GetFullPath($TargetPath), [StringComparison]::OrdinalIgnoreCase)) { return }
     Move-Item -LiteralPath ([string]$Fixture.targetPath) -Destination ([string]$Fixture.parkedPath)
     if (Test-Path -LiteralPath ([string]$Fixture.externalPath) -PathType Container) {
-        $output = & 'C:\Windows\System32\cmd.exe' /d /c "mklink /J `"$($Fixture.targetPath)`" `"$($Fixture.externalPath)`"" 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "fixture junction 建立失败：$output" }
+        New-FixtureJunction -JunctionPath ([string]$Fixture.targetPath) -TargetPath ([string]$Fixture.externalPath)
     } else {
         New-Item -ItemType HardLink -Path ([string]$Fixture.targetPath) -Target ([string]$Fixture.externalPath) | Out-Null
     }
@@ -3911,8 +4016,9 @@ function Assert-RestoreContractClosure {
 
     $state = $Contract.immutableState
     Assert-CodexHookExactProperties $state @('runId','codexHome','originalHashes','preservedHookTree','intendedResources','committedResources','retiredResources','aclTargets','aclAppliedStates') 'host hook restore immutable state'
-    $managedIds = @($script:HostPreflightManifest.files | ForEach-Object { "managed:$($_.liveRelativePath)" })
-    [string[]]$allowedCommitted = @('codex-file-tools.yml','config.toml') + $managedIds + @('environment:SERENA_HOME','hooks.json')
+    $repairManagedIds = @(Get-OrderedManagedHookItems -Items @($script:HostPreflightManifest.files) -Direction Repair | ForEach-Object { "managed:$($_.liveRelativePath)" })
+    $restoreManagedIds = @(Get-OrderedManagedHookItems -Items @($script:HostPreflightManifest.files) -Direction Restore | ForEach-Object { "managed:$($_.liveRelativePath)" })
+    [string[]]$allowedCommitted = @('codex-file-tools.yml','config.toml') + $repairManagedIds + @('environment:SERENA_HOME','hooks.json')
     Assert-OrderedUniqueSubsequence -Actual @($state.committedResources) -Allowed $allowedCommitted -Name 'committedResources'
     if (@($state.committedResources) -ccontains 'hooks.json' -and @($state.committedResources)[-1] -cne 'hooks.json') { throw 'committedResources 的 hooks.json 必须最后' }
     if (@($state.retiredResources).Count -ne 0) {
@@ -3947,7 +4053,7 @@ function Assert-RestoreContractClosure {
     $expectedActions = [Collections.Generic.List[string]]::new()
     if (@($state.committedResources) -ccontains 'hooks.json') { $expectedActions.Add('hooks.json') }
     if (@($state.committedResources) -ccontains 'environment:SERENA_HOME') { $expectedActions.Add('environment:SERENA_HOME') }
-    foreach ($id in $managedIds) { if (@($state.committedResources) -ccontains $id) { $expectedActions.Add($id) } }
+    foreach ($id in $restoreManagedIds) { if (@($state.committedResources) -ccontains $id) { $expectedActions.Add($id) } }
     foreach ($id in @('config.toml','codex-file-tools.yml')) { if (@($state.committedResources) -ccontains $id) { $expectedActions.Add($id) } }
     $hookRootPath = [IO.Path]::GetFullPath((Join-Path $ResolvedCodexHome 'hooks')).TrimEnd('\')
     $aclActionOrdinal = 0
@@ -4073,7 +4179,7 @@ function Invoke-EvidenceRestore {
         } else {
             if (-not $snapshot.exists) { 'before' } elseif ([string]$snapshot.sha256 -ceq $deployedSha) { 'deployed' } else { 'third' }
         }
-        $preflight.Add([pscustomobject]@{ kind='managed'; name=$name; path=$targetPath; state=$state; before=$before; backupBytes=$managedBackupBytes; deployedSha=$deployedSha })
+        $preflight.Add([pscustomobject]@{ kind='managed'; name=$name; liveRelativePath=[string]$file.liveRelativePath; path=$targetPath; state=$state; before=$before; backupBytes=$managedBackupBytes; deployedSha=$deployedSha })
     }
 
     $aclOrdinal = 0
@@ -4137,7 +4243,8 @@ function Invoke-EvidenceRestore {
         }
         Complete-RestoreAction -Name $item.name -Progress $progress -Manifest $manifest -ManifestState $manifestState
     }
-    foreach ($item in @($preflight | Where-Object { $_.kind -ceq 'managed' })) {
+    $managedRestoreItems = @(Get-OrderedManagedHookItems -Items @($preflight | Where-Object { $_.kind -ceq 'managed' }) -Direction Restore)
+    foreach ($item in $managedRestoreItems) {
         if ($item.state -ceq 'deployed') {
             if ([bool]$item.before.existed) {
                 Set-CodexHookAtomicFileBytesWithCapability -Path $item.path -Bytes ([byte[]]$item.backupBytes) -ExpectedExists $true -ExpectedSha256 $item.deployedSha -AfterSha256 ([string]$item.before.sha256) -CapabilityRoot $hookDirectory -AllowedExactPaths $managedTargetPaths -Scope "restore $($item.name)" -AfterRename {

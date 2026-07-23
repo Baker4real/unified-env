@@ -5,6 +5,17 @@ $projectRoot=Split-Path -Parent $PSScriptRoot
 . (Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1')
 function Assert-True([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
 function Assert-Throws([scriptblock]$Action,[string]$Pattern){try{&$Action;throw 'DID_NOT_THROW'}catch{if($_.Exception.Message -eq 'DID_NOT_THROW' -or $_.Exception.Message -notmatch $Pattern){throw "异常不匹配 [$Pattern]：$($_.Exception.Message)"}}}
+function Invoke-HiddenProcess([string]$FilePath,[string[]]$Arguments){
+    $start=[Diagnostics.ProcessStartInfo]::new();$start.FileName=$FilePath;$start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+    foreach($argument in $Arguments){[void]$start.ArgumentList.Add($argument)}
+    $process=[Diagnostics.Process]::new();$process.StartInfo=$start
+    try{
+        Assert-True $process.Start() "子进程无法启动：$FilePath"
+        $stdoutTask=$process.StandardOutput.ReadToEndAsync();$stderrTask=$process.StandardError.ReadToEndAsync()
+        Assert-True ($process.WaitForExit(10000)) "子进程超时：$FilePath"
+        [pscustomobject]@{exitCode=$process.ExitCode;stdout=$stdoutTask.GetAwaiter().GetResult();stderr=$stderrTask.GetAwaiter().GetResult()}
+    }finally{if(-not $process.HasExited){try{$process.Kill($true)}catch{}};$process.Dispose()}
+}
 
 $sections=[ordered]@{features=[ordered]@{unified_exec='true'};network=[ordered]@{enabled='true'}}
 $input="[features]`n`nunified_exec = false`n`n[network]`nenabled = true`n"
@@ -34,10 +45,12 @@ Assert-True ($quotedYamlOut -match '(?m)^web_dashboard: true # old$') 'quoted sc
 Assert-True ($quotedYamlOut -match '(?m)^  web_dashboard: false # nested$') '嵌套同名键与 inline comment 必须保留'
 
 $fixture='D:\Codex\projects\统一环境\reports\codex-hook-config-test';if(Test-Path $fixture){Remove-Item $fixture -Recurse -Force};[IO.Directory]::CreateDirectory($fixture)|Out-Null
-$toml=Join-Path $fixture 'fixture.toml';[IO.File]::WriteAllText($toml,$output,[Text.UTF8Encoding]::new($false));$python='D:\Codex\tools\python314-official\python.exe';&$python -c 'import pathlib,sys,tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $toml;if($LASTEXITCODE -ne 0){throw 'Python tomllib 验证失败'}
-$yamlPath=Join-Path $fixture 'fixture.yml';[IO.File]::WriteAllText($yamlPath,$yamlOut,[Text.UTF8Encoding]::new($false));$serenaPython='D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe';&$serenaPython -c 'import pathlib,sys,yaml; value=yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")); assert isinstance(value,dict)' $yamlPath;if($LASTEXITCODE -ne 0){throw 'PyYAML shape 验证失败'}
-foreach($tomlText in @($scalarArrayOut,$scalarTableOut)){[IO.File]::WriteAllText($toml,$tomlText,[Text.UTF8Encoding]::new($false));&$python -c 'import pathlib,sys,tomllib; value=tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")); assert isinstance(value,dict)' $toml;if($LASTEXITCODE -ne 0){throw 'scalar replacement 后 tomllib 验证失败'}}
-$badYaml=Join-Path $fixture 'malformed.yml';[IO.File]::WriteAllText($badYaml,"web_dashboard: [`n",[Text.UTF8Encoding]::new($false));&$serenaPython -c 'import pathlib,sys,yaml; yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $badYaml 2>$null;Assert-True ($LASTEXITCODE -ne 0) 'malformed YAML 必须被 PyYAML 拒绝'
+$toml=Join-Path $fixture 'fixture.toml';[IO.File]::WriteAllText($toml,$output,[Text.UTF8Encoding]::new($false));$python='D:\Codex\tools\python314-official\python.exe'
+$tomlResult=Invoke-HiddenProcess $python @('-c','import pathlib,sys,tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))',$toml);if($tomlResult.exitCode -ne 0){throw 'Python tomllib 验证失败'}
+$yamlPath=Join-Path $fixture 'fixture.yml';[IO.File]::WriteAllText($yamlPath,$yamlOut,[Text.UTF8Encoding]::new($false));$serenaPython='D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
+$yamlResult=Invoke-HiddenProcess $serenaPython @('-c','import pathlib,sys,yaml; value=yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")); assert isinstance(value,dict)',$yamlPath);if($yamlResult.exitCode -ne 0){throw 'PyYAML shape 验证失败'}
+foreach($tomlText in @($scalarArrayOut,$scalarTableOut)){[IO.File]::WriteAllText($toml,$tomlText,[Text.UTF8Encoding]::new($false));$scalarResult=Invoke-HiddenProcess $python @('-c','import pathlib,sys,tomllib; value=tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")); assert isinstance(value,dict)',$toml);if($scalarResult.exitCode -ne 0){throw 'scalar replacement 后 tomllib 验证失败'}}
+$badYaml=Join-Path $fixture 'malformed.yml';[IO.File]::WriteAllText($badYaml,"web_dashboard: [`n",[Text.UTF8Encoding]::new($false));$badYamlResult=Invoke-HiddenProcess $serenaPython @('-c','import pathlib,sys,yaml; yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))',$badYaml);Assert-True ($badYamlResult.exitCode -ne 0) 'malformed YAML 必须被 PyYAML 拒绝'
 
 $astErrors=$null;$tokens=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexConfigFile.ps1'),[ref]$tokens,[ref]$astErrors);Assert-True ($astErrors.Count -eq 0) 'config AST 必须合法'
 $providerText=[IO.File]::ReadAllText((Join-Path $projectRoot 'managed\codex-hooks\hooks\codex-provider-stability-guard.ps1'))

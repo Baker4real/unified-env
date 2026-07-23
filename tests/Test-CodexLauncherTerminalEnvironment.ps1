@@ -5,9 +5,52 @@ $projectPath = Join-Path $launcherRoot 'CodexLauncher.csproj'
 $assemblyPath = Join-Path $launcherRoot 'bin\Release\net6.0\codex-launcher.dll'
 $dotnet = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
 
-& $dotnet build $projectPath -c Release --nologo | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw "Codex launcher build failed with exit code $LASTEXITCODE"
+function Invoke-HiddenProcess {
+    param([Parameter(Mandatory)][string]$FilePath,[Parameter()][string[]]$Arguments=@())
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $started = $false
+    try {
+        if (-not $process.Start()) { throw "hidden process did not start: $FilePath" }
+        $started = $true
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $text = $stdout
+        if (-not [string]::IsNullOrEmpty($stderr)) {
+            if (-not [string]::IsNullOrEmpty($text) -and -not $text.EndsWith("`n")) { $text += [Environment]::NewLine }
+            $text += $stderr
+        }
+        [pscustomobject]@{ExitCode=$process.ExitCode;StdOut=$stdout;StdErr=$stderr;Text=$text}
+    } finally {
+        if ($started -and -not $process.HasExited) { try { $process.Kill($true); $process.WaitForExit() } catch {} }
+        $process.Dispose()
+    }
+}
+
+$testSource = Get-Content -Raw -LiteralPath $PSCommandPath
+$helperStart = $testSource.IndexOf('function Invoke-HiddenProcess')
+$helperEnd = $testSource.IndexOf('$testSource =', $helperStart)
+if ($helperStart -lt 0 -or $helperEnd -le $helperStart) { throw 'hidden dotnet helper is unavailable' }
+$helperSource = $testSource.Substring($helperStart, $helperEnd - $helperStart)
+if ($helperSource -cnotmatch 'UseShellExecute\s*=\s*\$false' -or $helperSource -cnotmatch 'CreateNoWindow\s*=\s*\$true') { throw 'dotnet build process must be hidden' }
+$directDotnetPattern = '&\s*\$' + 'dotnet\b'
+if ($testSource -cmatch $directDotnetPattern) { throw 'launcher test must not directly invoke dotnet' }
+
+$buildRun = Invoke-HiddenProcess -FilePath $dotnet -Arguments @('build', $projectPath, '-c', 'Release', '--nologo')
+if ($buildRun.ExitCode -ne 0) {
+    throw "Codex launcher build failed with exit code $($buildRun.ExitCode): $($buildRun.Text)"
 }
 if (-not (Test-Path -LiteralPath $assemblyPath -PathType Leaf)) {
     throw "Codex launcher assembly was not produced: $assemblyPath"
