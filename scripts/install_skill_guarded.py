@@ -341,7 +341,14 @@ def apply_candidate_upstream_path(
     return [(specs[0][0], upstream_path)]
 
 
-LEDGER_UPDATE_FIELDS = {"action", "installed_version", "path", "resource_paths", "status"}
+LEDGER_UPDATE_FIELDS = {
+    "action",
+    "installed_version",
+    "path",
+    "resource_paths",
+    "status",
+    "tag",
+}
 
 
 def ledger_updates(source: dict[str, Any]) -> dict[str, Any]:

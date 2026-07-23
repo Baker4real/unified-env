@@ -220,6 +220,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 "path": ".codex/skills/test-skill-wrapper",
                 "resource_paths": ["skill/SKILL.md"],
                 "status": "updated-with-local-overlay",
+                "tag": "v3.5.1",
             },
         )
         with contextlib.redirect_stdout(io.StringIO()):
@@ -236,6 +237,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(source["path"], ".codex/skills/test-skill-wrapper")
         self.assertEqual(source["resource_paths"], ["skill/SKILL.md"])
         self.assertEqual(source["status"], "updated-with-local-overlay")
+        self.assertEqual(source["tag"], "v3.5.1")
         catalog = json.loads((self.temp / "catalog.json").read_text(encoding="utf-8"))
         artifact = next(item for item in catalog["artifacts"] if item.get("name") == "test-skill-wrapper")
         self.assertEqual(artifact["ledger_coverage"], "pass")
