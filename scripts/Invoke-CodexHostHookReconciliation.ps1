@@ -1474,6 +1474,16 @@ function ConvertFrom-SingleLineTomlStringArray {
     return [string[]]$items.ToArray()
 }
 
+function ConvertFrom-SingleLineTomlString {
+    param([string]$Literal)
+
+    $items = @(ConvertFrom-SingleLineTomlStringArray -Literal ("[$Literal]"))
+    if ($items.Count -ne 1) {
+        throw 'TOML value 必须是单个字符串。'
+    }
+    [string]$items[0]
+}
+
 function Convert-SerenaArgs {
     param(
         [string]$RightHandSide,
@@ -2112,8 +2122,10 @@ function Get-DesiredConfig {
         }
     }
 
+    $canonicalCommandValue = 'D:\Codex\.codex\scripts\start-serena-mcp.cmd'
     $canonicalCommandLiteral = '"D:\\Codex\\.codex\\scripts\\start-serena-mcp.cmd"'
-    $canonicalArgsLiteral = ConvertTo-Json -InputObject @("start-mcp-server", "--context=$ExpectedSerenaContextPath", "--enable-web-dashboard=true", "--open-web-dashboard=false") -Compress
+    $canonicalArgs = @("start-mcp-server", "--context=$ExpectedSerenaContextPath", "--enable-web-dashboard=true", "--open-web-dashboard=false")
+    $canonicalArgsLiteral = ConvertTo-Json -InputObject $canonicalArgs -Compress
     $serena = Get-UniqueSectionRange -Document $document -Name "mcp_servers.serena" -AllowMissing
     if ($null -eq $serena) {
         $serenaSegments = @("mcp_servers", "serena")
@@ -2192,15 +2204,45 @@ function Get-DesiredConfig {
     }
 
     $commandIndex = $commandIndices[0]
-    Set-TomlKeyLiteral -Document $document -Index $commandIndex -Key "command" -Literal $canonicalCommandLiteral
+    $commandLine = [string]$document.lines[$commandIndex]
+    $commandEqualsIndex = $commandLine.IndexOf('=')
+    if ($commandEqualsIndex -lt 0) {
+        throw "无法解析 Serena command"
+    }
+    $commandAlreadyDesired = $false
+    try {
+        $commandValue = ConvertFrom-SingleLineTomlString -Literal $commandLine.Substring($commandEqualsIndex + 1).Trim()
+        $commandAlreadyDesired = $commandValue -ceq $canonicalCommandValue
+    } catch {
+        # Keep the existing repair behavior for values outside the narrow safe parser.
+        $commandAlreadyDesired = $false
+    }
+    if (-not $commandAlreadyDesired) {
+        Set-TomlKeyLiteral -Document $document -Index $commandIndex -Key "command" -Literal $canonicalCommandLiteral
+    }
+
     $argsIndex = $argsIndices[0]
     $argsLine = $document.lines[$argsIndex]
     $equalsIndex = $argsLine.IndexOf('=')
     if ($equalsIndex -lt 0) {
         throw "无法解析 Serena args"
     }
-    $argsLiteral = Convert-SerenaArgs -RightHandSide $argsLine.Substring($equalsIndex + 1).Trim() -ExpectedContextPath $ExpectedSerenaContextPath
-    Set-TomlKeyLiteral -Document $document -Index $argsIndex -Key "args" -Literal $argsLiteral
+    $argsRightHandSide = $argsLine.Substring($equalsIndex + 1).Trim()
+    $argsLiteral = Convert-SerenaArgs -RightHandSide $argsRightHandSide -ExpectedContextPath $ExpectedSerenaContextPath
+    $actualArgs = @(ConvertFrom-SingleLineTomlStringArray -Literal $argsRightHandSide)
+    $normalizedArgs = @((ConvertFrom-Json -InputObject $argsLiteral -NoEnumerate))
+    $argsAlreadyDesired = $actualArgs.Count -eq $normalizedArgs.Count
+    if ($argsAlreadyDesired) {
+        for ($argsIndexValue = 0; $argsIndexValue -lt $normalizedArgs.Count; $argsIndexValue++) {
+            if ([string]$actualArgs[$argsIndexValue] -cne [string]$normalizedArgs[$argsIndexValue]) {
+                $argsAlreadyDesired = $false
+                break
+            }
+        }
+    }
+    if (-not $argsAlreadyDesired) {
+        Set-TomlKeyLiteral -Document $document -Index $argsIndex -Key "args" -Literal $argsLiteral
+    }
 
     $keep = [bool[]]::new($document.lines.Count)
     [array]::Fill($keep, $true)

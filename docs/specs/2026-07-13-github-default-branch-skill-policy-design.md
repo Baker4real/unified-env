@@ -1,14 +1,14 @@
 # Git 默认分支发布与收尾 Skill 统一策略设计
 
-> 状态：已实施并验证（2026-07-13）。默认分支发布、临时分支确认后清理和 patch-stack report-only 规则已落地；本状态不授权删除任何既有或未知分支。
+> 状态：2026-07-13 的默认分支统一方案是历史实现。2026-07-23 起，全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）的唯一现役合同固定为用户拥有远端的 `main`。clean closeout 真源已经符合该政策；版本化 GitHub overlay、现役插件 cache 和兼容 wrapper 仍保留 default-branch 文案或行为，统一标为 `pending drift`，不得作为非 `main` 发布授权。本文保留历史设计，当前执行面以第 3 节和“验证与验收”为准。
 
 > 退役说明（2026-07-16）：本文保留实施时的历史路径和设计决策。已删除来源的 skill 路径、来源和 overlay 描述不代表当前安装，也不授权恢复。
 
-验证摘要与有序清理记录属于当时的 run-specific D 盘证据，可能已按保留策略清理；当前行为应以本设计、实施计划和回归测试重新核验。计划中的临时 worktree 路径仅是历史执行记录，不代表当前目录仍存在。
+验证摘要与有序清理记录属于当时的 run-specific D 盘证据，可能已按保留策略清理；旧 overlay 与对应测试只能证明历史实现或当前漂移，不能覆盖现役 `main`-only 政策。计划中的临时 worktree 路径仅是历史执行记录，不代表当前目录仍存在。
 
-## 目标
+## 历史目标（2026-07-13）
 
-把本机所有受本次范围控制的发布和收尾流程统一到一条可验证的规则：
+当时的方案把受控发布和收尾流程统一到以下规则；本节不是现役执行授权：
 
 1. 默认只向远端默认分支发布。通常是 main，但不得硬编码 main。
 2. 不再创建、推送或保留 patch-stack 分支。
@@ -16,14 +16,14 @@
 4. 收尾完成时，由本次 workflow 管理的本地与远端分支保持一致。
 5. 继续禁止向不属于用户的上游仓库推送。
 
-## 非目标
+## 历史非目标
 
 - 不删除任何已存在的 patch-stack 或其他分支；先盘点并由用户单独确认。
 - 不绕过远端保护、强制推送、重写历史或自动处理合并冲突。
 - 不改 gh-address-comments、gh-fix-ci 或 git-guardrails-claude-code；它们没有发布分支的执行路径，后者仍应保留为安全防线。
 - 不 fork、替换或直接长期维护 OpenAI GitHub 插件的上游副本。
 
-## 可观察事实与术语
+## 历史可观察事实与术语
 
 ### 目标 remote 与默认分支
 
@@ -48,7 +48,7 @@
 
 未提交工作树、尚未形成第一个提交的临时工作，不被误报为“单边残留分支”；一旦 branch 被 workflow 发布或收尾，它就必须遵守镜像规则。
 
-## 设计
+## 历史设计与现役收敛
 
 ### 1. 默认发布与临时分支生命周期
 
@@ -81,22 +81,22 @@
 
 空私有仓库没有可解析默认分支时，workflow 停止并要求用户先初始化仓库，或明确授权初始化后重新解析。现有 patch-stack 引用只在盘点中列出；删除必须单独得到用户确认。
 
-### 3. 收尾 skill 的单一真源
+### 3. 现役收尾 skill 的单一真源
 
 以下文件构成收尾策略的执行面：
 
 | 位置 | 角色 | 改动 |
 | --- | --- | --- |
 | D:\Codex\.codex\skills\neat-freak\references\repo-clean-closeout.md | clean closeout 真源 | `neat-freak` 对发生改动的 Git 仓库默认提交本次授权范围、显式推送到用户拥有远端的 `main`，并验证 clean worktree 与远端 parity；只审计、只整理或不发布的显式阶段要求优先。 |
-| D:\Codex\.codex\skills\repo-clean-closeout\SKILL.md | 直接入口 | 保持薄包装，只明确委托真源，不复制规则。 |
+| D:\Codex\.codex\skills\repo-clean-closeout\SKILL.md | 直接入口（`pending drift`） | 仍委托真源，但残留 default-branch 摘要；在受控 skill 修复完成前，以真源的 `main`-only 合同为准。 |
 | D:\Codex\.codex\skills\private-patch-stack\SKILL.md | 遗留兼容入口 | 仅处理用户明确要求的历史 patch-stack 审计、只读保留、精确清理或迁移；普通发布不进入此 skill。 |
-| D:\Codex\.codex\skills\handoff\SKILL.md | 收尾交接路由 | 只在存在非用户上游和未发布补丁时建议兼容入口，且说明默认分支发布规则。 |
+| D:\Codex\.codex\skills\handoff\SKILL.md | 收尾交接路由 | 只在存在非用户上游和未发布补丁时建议兼容入口；普通发布仍服从 `main`-only 政策。 |
 
-neat-freak 的 reference 是 Git clean closeout 的唯一行为真源；`repo-clean-closeout` 薄包装不重复维护分支规则。默认发布不意味着吸收、删除或丢弃既有无关脏改动：无法合法归属的路径必须保留，并使 closeout 明确处于 incomplete。每个变更过的本地 skill 会同步更新 SOURCE.md 与统一来源账本。
+neat-freak 的 reference 是 Git clean closeout 的唯一行为真源；任何 wrapper、overlay 或历史文档里的 default-branch 文案都不能覆盖其 `main`-only 合同。普通发布不意味着吸收、删除或丢弃既有无关脏改动：无法合法归属的路径必须保留，并使 closeout 明确处于 incomplete。未来获准修复本地 skill 时，必须同步 SOURCE.md 与统一来源账本。
 
-### 4. GitHub 发布插件的可重放本地覆盖
+### 4. GitHub 发布插件的历史 overlay 与待修漂移
 
-GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本地 skill 根。直接手改 cache 会在插件更新时丢失，因此采用独立、失败关闭的覆盖器：
+GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本地 skill 根。当前版本化 overlay 和现役 cache 仍按 resolved default branch 发布，与 `main`-only 现役政策冲突，因此状态是 `pending drift`。未取得 active plugin 修改授权并完成失败关闭的重放验证前，不得直接手改 cache，也不得把旧 overlay 当作执行授权。下列内容只记录 2026-07-13 的覆盖器设计：
 
 1. 在 D:\Codex\.codex\scripts 下增加一个专用覆盖器和声明式补丁清单。
 2. 覆盖器只发现 GitHub 插件的 marketplace source、已安装 cache 与当前可见 remote cache 中的 github 和 yeet SKILL.md。
@@ -104,7 +104,7 @@ GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本�
 4. 已打补丁的内容带稳定标记，重复运行必须是 no-op。
 5. 每次 plugin refresh 后先运行 dry-run，再应用覆盖；重放规则和当前指纹记录在 D:\Codex\.codex\docs\agent-guidance\ 中，不把插件 cache 当成来源真相。
 
-yeet 将改为默认分支发布流程：先解析默认分支、默认不建 PR、仅在明确建议临时分支时创建和同步该分支；用户确认后合入、推送默认分支并删除两端临时分支。github 仅修改路由说明，使 publish changes 明确进入此规则。gh-address-comments 与 gh-fix-ci 只做 review/CI 工作，不纳入行为补丁。
+2026-07-13 的 overlay 曾把 yeet 改为默认分支发布流程，并让 github 把 publish changes 路由到该流程。该行为现已被 `main`-only 政策取代，但版本化模板与 cache 尚待受控修复；gh-address-comments 与 gh-fix-ci 仍只做 review/CI 工作，不纳入发布行为补丁。
 
 ### 5. 来源与更新边界
 
@@ -113,6 +113,8 @@ yeet 将改为默认分支发布流程：先解析默认分支、默认不建 PR
 - 插件行为覆盖不伪装成上游改动；其来源、输入指纹、应用时间和回滚证据由覆盖器文档和 run-evidence 记录。
 
 ## 失败处理
+
+现役普通发布只接受用户拥有远端的 `main`；目标不是 `main`、远端状态不明或现有 overlay 试图选择其他默认分支时，必须停止并报告 `pending drift`。下表中的“默认分支”条件仅描述历史 overlay 的失败关闭行为。
 
 | 触发条件 | 第一处理 | 仍无法恢复时 |
 | --- | --- | --- |
@@ -125,15 +127,15 @@ yeet 将改为默认分支发布流程：先解析默认分支、默认不建 PR
 
 ## 验证与验收
 
-实施完成前必须同时满足：
+`pending drift` 关闭前必须同时满足：
 
 1. 本地 skill 内容测试证明没有创建、推送或追踪 patch-stack 分支的指令。
 2. 普通收尾目标固定为用户拥有远端的 `main`；remote 名称不能代替所有权证据，remote ahead/diverged、目标歧义或非 `main` 时停止。
 3. `neat-freak` delivery mode 覆盖：全仓库集合预检、脏路径分类、窄验证、精确 staging、显式 `HEAD:main` push、远端 SHA parity 和空 porcelain；任一步失败都不能宣称 clean closeout 完成。
-4. 插件覆盖器对 fixture、marketplace source 和两个 cache 变体的已知指纹均可应用；重复运行 no-op；未知指纹失败且不写入。
+4. GitHub overlay 模板、fixture 和现役 cache 都执行 `main`-only，且不再把 remote HEAD / `defaultBranchRef` 解析结果当作普通发布目标；重复运行 no-op，未知指纹失败且不写入。
 5. 所有被改本地 skill 的 SOURCE.md 与 D:\Codex\.codex\skills\.downloaded-skills-source-state.json 一致，且资源闭包严格检查为零问题。
 6. git diff --check、覆盖器专项测试和最窄的相关测试全部通过。
-7. 独立对抗性审查覆盖：错误默认分支、非用户 remote、单边临时分支、历史 patch-stack、插件升级漂移和回滚。
+7. 独立对抗性审查覆盖：非 `main` 目标、非用户 remote、单边临时分支、历史 patch-stack、插件升级漂移和回滚。
 
 ## 回滚
 

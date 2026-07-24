@@ -12,11 +12,11 @@
 - Codex 主机钩子治理由 `scripts/Invoke-CodexHostHookReconciliation.ps1` 作为唯一当前生产入口统一维护；当前受管 lifecycle hooks 为 `codex-state-preflight`、Serena activation、cleanup 与 reminder。它提供只读 `Check`、显式 `Repair` 与受 evidence 约束的 `Restore`；后者只能使用同一 Codex home 固定 evidence root 的直接子目录。生产 wrapper 通过受管 hidden-console launcher 启动最终 PowerShell/Python 进程，显式禁止外部控制台窗口，同时保留协议流与退出码。旧 ProductionFull 与 registration-repair façade 已稳定拒绝，历史 fixture/core 仅保留测试价值；协调器不写入 `approval_policy`、`sandbox_mode`、`features.hooks` 或 `unified_exec`，省略 `features.hooks` 时遵循官方默认启用，合法的 inline `[hooks]` 保留，退役 hook 不会由 Restore 重建。manifest 的 `trustedProjects` 仅补齐精确项目根，`retiredProjectTrusts` 是精确根 denylist：evidence 与 Restore 均不得保留或回流退役 trust，其余用户 trust 保留。
 - Codex CLI、Node、npm、Git、gh、uv、sqlite3、CodeGraph 和 Serena 主链路已验证；Serena 运行在官方 Python 3.14.6 上。其运行时版本与解析依赖属于易变状态，操作前必须实时复核。
 - 共享环境入口已验证：`planning-with-files`、CMake `4.3.3`、Rust toolchain `1.96.1` 等均保持可用；skill ledger coverage 为 `missing=0` / `duplicates=0`。
-- 已按用户授权修复默认入口：`.NET` 默认命中 D 盘 SDK `10.0.301`，Python 默认切到官方 `3.14.6`；WSL、Windows Terminal、PowerShell 与 CodeGraph 的设备级版本和进程采用边界改由 `docs/environments/zi-xi-shi.md` 和主机 runbook 维护，不再在项目概览写死易变状态。
+- Python 默认入口已切到官方 `3.14.6`；`.NET` 默认入口当前未收敛，具体 live 状态与待授权修复边界记录在 `docs/environments/zi-xi-shi.md`。WSL、Windows Terminal、PowerShell 与 CodeGraph 的设备级版本和进程采用边界同样由该设备文档和主机 runbook 维护，不在项目概览写死易变版本。
 - 已固化上游稳定 skill 约束并同步 Matt stable catalog：稳定目录与上游对齐，严格资源闭包和 ledger 一致性检查通过；活动数量、哈希和上游版本属于易变状态，操作前必须实时复核。`skills/in-progress/**` 不安装；用户明确退役的 skill 不保留本机备份。
 - 本机 Skill Catalog 生成器已落地：默认只读扫描 active、system 和 plugin-cache，来源以本机 ledger / `SOURCE.md` 为准；它不安装或更新 skill、不访问网络、不读取凭据、不注册 hook。实现入口是 `scripts/generate_skill_catalog.py`，本机派生输出位于 `D:\Codex\.codex\skill-catalog\`；一次性运行证据按 run id 写入 `D:\Codex\.codex\run-evidence\`。
 - 功能钩子分层恢复的 path inventory/state policy、local-only preflight、Serena 行为 hooks、provider/GitHub 显式维护和 production/legacy manifest 分离均已有专项实现，并通过定向 fixture 回归。fixture 全量 reconciler 回归不依赖 live 配置所有者；获授权的 live Repair 与验收只通过当前 reconciler 和当前主机状态执行，不得从历史 evidence 推断或手工写入 Serena 配置或权限策略值。
-- GitHub 与收尾 skill 已统一为“解析远端默认分支后发布”；临时分支只在说明必要性并获确认后使用，patch-stack 仅报告、不自动创建或删除。实现状态与证据见对应设计和计划文档。
+- Git 的唯一现役发布政策要求全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）只发布到用户拥有远端的 `main`。2026-07-13 的 default-branch overlay 模板和现役插件 cache 仍保留旧实现，当前属于 `pending drift`；受控修复完成前，它们不构成向非 `main` 分支发布的授权。临时分支只在事前确认后使用，历史 patch-stack 只报告、不自动创建或删除。
 
 ## 关键入口
 
@@ -28,7 +28,7 @@
 - Codex 主机钩子治理：`docs/specs/2026-07-11-host-hook-reconciliation-design.md`
 - Codex Hook 治理设计：`docs/specs/2026-07-11-codex-hook-governance-design.md`
 - 功能钩子分层恢复设计/计划：`docs/specs/2026-07-13-functional-hook-preflight-design.md`、`docs/plans/2026-07-13-functional-hook-preflight.md`
-- Git 默认分支与收尾 skill 策略：`docs/specs/2026-07-13-github-default-branch-skill-policy-design.md`、`docs/plans/2026-07-13-github-default-branch-skill-policy-implementation.md`
+- Git `main`-only 现役政策与历史 default-branch overlay：`docs/specs/2026-07-13-github-default-branch-skill-policy-design.md`、`docs/plans/2026-07-13-github-default-branch-skill-policy-implementation.md`
 - 本地 tracker/spec/tickets：`.scratch/unified-env/`
 - 可信盘点设计：`docs/specs/2026-07-10-environment-inventory-trust-design.md`
 - 可信盘点实施计划：`docs/plans/2026-07-10-environment-inventory-trust-implementation.md`

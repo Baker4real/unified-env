@@ -11,6 +11,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# This script's JSON protocol is consumed through UTF-8 ProcessStartInfo readers.
+$ProtocolEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = $ProtocolEncoding
+
 trap {
     if ($Json) {
         [Console]::Out.WriteLine(([ordered]@{
@@ -51,6 +55,8 @@ function Invoke-HiddenProcess {
     $startInfo.RedirectStandardInput = $false
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = $ProtocolEncoding
+    $startInfo.StandardErrorEncoding = $ProtocolEncoding
     foreach ($argument in $Arguments) {
         [void]$startInfo.ArgumentList.Add($argument)
     }
@@ -421,7 +427,7 @@ print(json.dumps(base, ensure_ascii=True, separators=(",", ":")))
 
 $requestJson = $request | ConvertTo-Json -Depth 8 -Compress
 $requestBase64 = [Convert]::ToBase64String([Text.UTF8Encoding]::new($false).GetBytes($requestJson))
-$pythonRun = Invoke-HiddenProcess -FilePath $PythonPath -Arguments @('-I', '-B', '-c', $python, $requestBase64)
+$pythonRun = Invoke-HiddenProcess -FilePath $PythonPath -Arguments @('-I', '-B', '-X', 'utf8', '-c', $python, $requestBase64)
 if ($pythonRun.ExitCode -ne 0) {
     if($null-ne$evidenceLease){$evidenceLease.Dispose()}
     Exit-CodexRepairLeaseSet -LeaseSet $candidateLeases

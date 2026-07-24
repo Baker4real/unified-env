@@ -381,6 +381,9 @@ function Invoke-Sanitizer {
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $start.StandardOutputEncoding = $utf8
+    $start.StandardErrorEncoding = $utf8
     foreach ($argument in $callArgs) { [void]$start.ArgumentList.Add($argument) }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
@@ -388,7 +391,8 @@ function Invoke-Sanitizer {
         Assert-True -Condition $process.Start() -Message 'sanitizer 子进程无法启动。'
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        Assert-True -Condition ($process.WaitForExit(120000)) -Message 'sanitizer 子进程超时。'
+        $completed = $process.WaitForExit(120000)
+        Assert-True -Condition $completed -Message "sanitizer 子进程超时：mode=$Mode fixture=$FixtureRoot hasExited=$($process.HasExited) stdoutTask=$($stdoutTask.Status) stderrTask=$($stderrTask.Status)"
         $exitCode = $process.ExitCode
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()

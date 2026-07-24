@@ -34,6 +34,17 @@
   `Running` / `Stopped` 状态属于易变事实，使用前现场复核；D-Radar 的 WSL/Docker
   配置与验收步骤以 `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 为准。
 
+## .NET 默认入口
+
+- 2026-07-23 现场复核：裸 `dotnet` 只解析到
+  `C:\Program Files\dotnet\dotnet.exe`，SDK 为 `6.0.428`。`DOTNET_ROOT` 虽指向
+  `D:\Codex\tools\dotnet`，该根目前只有 .NET host/runtime `10.0.9`，残留的
+  `sdk\10.0.301` 仅含 `Roslyn` 子树，`dotnet --info` 明确返回 `No SDKs were found`。
+  这是入口与载荷分裂的待修复状态，不得再表述为 D 盘 SDK 已采用。
+- 本机没有可复用的官方 `10.0.301` 安装包或缓存。恢复必须按 D 盘迁移政策另行取得
+  对 `.NET 10.0.301` 的具体授权：从微软官方源安装到全新 staging，校验版本与哈希后
+  可回滚切换，并单独处理 PATH；不得在残缺 live 根上原地覆盖，也不得删除 C 盘后备入口。
+
 ## 显示输出与窗口恢复
 
 - 同一台 Odyssey G7 同时连接 NVIDIA 的 DisplayPort 与 HDMI。期望拓扑是任一时刻只启用一条物理桌面路径：DP 为主路径（已验证模式 `3840 × 2160 @ 165 Hz`），HDMI 保持已连接但不作为第二个扩展屏；需要切换时把 HDMI 当作人工备选路径，不把它视为已验证的自动故障接管。
@@ -88,10 +99,10 @@
 
 不得把安装后的回写职责放入被安装的 skill，也不得直接修改 bundled `.system` 安装器。新安装或更新必须经过 decision manifest、`writing-great-skills` 证据、SOURCE/ledger、严格资源闭包和 catalog 后置校验；任一门槛失败都应回滚。
 
-## Codex 主机 Hook 当前边界（2026-07-23）
+## Codex 主机 Hook 当前边界（2026-07-24）
 
-- 已通过唯一生产入口 `Invoke-CodexHostHookReconciliation.ps1` 完成本次 live Repair；结果为 `ok=true`、`changed=true`。随后 Check 为 `ok=true`、`driftCount=0`，四项 registration 的 `restartRequired` 均为 `false`；第二次 Repair 严格返回 `changed=false`、`evidencePath=null`。
-- fresh live SessionStart wrapper 返回退出码 `0`、空 stderr 和合法 Serena activation JSON。获授权重启 Codex Desktop 后，独立监视器完成 180 秒观察并返回 `passed=true`、`new_visible_console_or_terminal_window_count=0`；重启后的 live Check 仍为 `ok=true`、`driftCount=0`。
+- 2026-07-23 早些时候的 live Repair、SessionStart wrapper 与重启后监视器曾全部通过；同日稍后的只读 Check 曾返回 `ok=false`、`driftCount=1`，漂移类别为 `config`。这些都是历史验证快照，不代表当前配置持续保持一致。
+- 2026-07-24 22:07 的当前验收先发现 `config` 单项 drift，随后通过 reconciler Repair 恢复；首轮 Repair 为 `ok=true`、`changed=true`、`driftCount=0`，证据位于 `D:\Codex\.codex\run-evidence\host-hook-remediation\20260724T140626.793Z-c015fdca`。第二轮 Repair 为 `changed=false`，最终只读 Check 为 `ok=true`、`changed=false`、`driftCount=0`，8 项检查全部通过。后续操作前仍须重新运行 Check，不能把本条快照当作永久状态。
 - 只有 reconciler 可以修复受管 Serena section 与 hook registration；不得依据历史 evidence 或本文手工重建它们，也不得手工写入 `approval_policy` 或 `sandbox_mode`。若 Repair 结果的 `registrationProjection` 出现 `restartRequired=true`，完整退出并重启 Codex 应用后再做运行时验收。
 
 ## GitHub CLI

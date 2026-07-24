@@ -1743,8 +1743,7 @@ try {
     foreach ($serenaConfigCase in @(
         @{ Name = "missing-serena-args-repair"; Variant = "MissingSerenaArgs" },
         @{ Name = "missing-serena-command-repair"; Variant = "MissingSerenaCommand" },
-        @{ Name = "hermes-command-drift-repair"; Variant = "HermesCommandDrift" },
-        @{ Name = "single-quoted-serena-args-repair"; Variant = "SingleQuotedSerenaArgs" }
+        @{ Name = "hermes-command-drift-repair"; Variant = "HermesCommandDrift" }
     )) {
         $serenaConfigHome = Join-Path $testRoot "$($serenaConfigCase.Name)\.codex"
         New-FixtureCodexHome -Root $serenaConfigHome -Variant $serenaConfigCase.Variant
@@ -1764,6 +1763,42 @@ try {
         $serenaConfigSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $serenaConfigHome
         Assert-True -Condition ([bool]$serenaConfigSecond.ok -and -not [bool]$serenaConfigSecond.changed) -Message "$($serenaConfigCase.Name) 第二次 Repair 不是 no-op"
     }
+
+    $singleQuotedArgsHome = Join-Path $testRoot 'single-quoted-serena-args-command-drift\.codex'
+    New-FixtureCodexHome -Root $singleQuotedArgsHome -Variant 'SingleQuotedSerenaArgs'
+    $singleQuotedArgsContextPath = Join-Path ([System.IO.Directory]::GetParent($singleQuotedArgsHome).FullName) '.serena\contexts\codex-file-tools.yml'
+    $singleQuotedArgsExpectedLine = "args = ['start-mcp-server', '--context=$singleQuotedArgsContextPath', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
+    $singleQuotedArgsRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedArgsHome
+    Assert-True -Condition ([bool]$singleQuotedArgsRepair.ok -and [bool]$singleQuotedArgsRepair.changed) -Message 'single-quoted Serena args fixture 未修复真实 command drift'
+    $singleQuotedArgsText = Get-Content -Raw -LiteralPath (Join-Path $singleQuotedArgsHome 'config.toml')
+    Assert-True -Condition ($singleQuotedArgsText -match '(?m)^command\s*=\s*"D:\\\\Codex\\\\\.codex\\\\scripts\\\\start-serena-mcp\.cmd"\s*$') -Message 'single-quoted Serena args fixture 未修复 command'
+    Assert-True -Condition $singleQuotedArgsText.Contains($singleQuotedArgsExpectedLine) -Message '真实 command drift Repair 不得改写已正确的 single-quoted Serena args'
+    $singleQuotedArgsSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedArgsHome
+    Assert-True -Condition ([bool]$singleQuotedArgsSecond.ok -and -not [bool]$singleQuotedArgsSecond.changed) -Message 'single-quoted Serena args command Repair 后第二次不是 no-op'
+
+    $singleQuotedCanonicalHome = Join-Path $testRoot 'single-quoted-canonical-serena-values\.codex'
+    New-FixtureCodexHome -Root $singleQuotedCanonicalHome
+    $singleQuotedCanonicalConfigPath = Join-Path $singleQuotedCanonicalHome 'config.toml'
+    $singleQuotedCanonicalBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedCanonicalHome
+    Assert-True -Condition ([bool]$singleQuotedCanonicalBaselineRepair.ok -and [bool]$singleQuotedCanonicalBaselineRepair.changed) -Message 'single-quoted canonical Serena values fixture 未先收敛到健康基线'
+    $singleQuotedCanonicalContextPath = Join-Path ([System.IO.Directory]::GetParent($singleQuotedCanonicalHome).FullName) '.serena\contexts\codex-file-tools.yml'
+    $singleQuotedCanonicalCommandLine = "command = 'D:\Codex\.codex\scripts\start-serena-mcp.cmd'"
+    $singleQuotedCanonicalArgsLine = "args = ['start-mcp-server', '--context=$singleQuotedCanonicalContextPath', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
+    $singleQuotedCanonicalText = Get-Content -Raw -LiteralPath $singleQuotedCanonicalConfigPath
+    Assert-True -Condition ([regex]::Matches($singleQuotedCanonicalText, '(?m)^command\s*=').Count -eq 1 -and [regex]::Matches($singleQuotedCanonicalText, '(?m)^args\s*=').Count -eq 1) -Message 'single-quoted canonical Serena values fixture 未形成唯一 Serena command/args 基线'
+    $singleQuotedCanonicalText = [regex]::Replace($singleQuotedCanonicalText, '(?m)^command\s*=[^\r\n]*', $singleQuotedCanonicalCommandLine)
+    $singleQuotedCanonicalText = [regex]::Replace($singleQuotedCanonicalText, '(?m)^args\s*=[^\r\n]*', $singleQuotedCanonicalArgsLine)
+    [System.IO.File]::WriteAllText($singleQuotedCanonicalConfigPath, $singleQuotedCanonicalText, [System.Text.UTF8Encoding]::new($false))
+    $singleQuotedCanonicalBefore = Get-TreeFingerprint -CodexHome $singleQuotedCanonicalHome
+    $singleQuotedCanonicalCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $singleQuotedCanonicalHome
+    Assert-True -Condition ([bool]$singleQuotedCanonicalCheck.ok -and [int]$singleQuotedCanonicalCheck.driftCount -eq 0 -and [bool](Get-CheckResult -Result $singleQuotedCanonicalCheck -Name 'config').ok) -Message 'single-quoted canonical Serena values 的 Check 不应报告 config drift'
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $singleQuotedCanonicalHome) -eq $singleQuotedCanonicalBefore) -Message 'single-quoted canonical Serena values 的 Check 修改了 fixture'
+    $singleQuotedCanonicalRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedCanonicalHome
+    Assert-True -Condition ([bool]$singleQuotedCanonicalRepair.ok -and -not [bool]$singleQuotedCanonicalRepair.changed -and $null -eq $singleQuotedCanonicalRepair.evidencePath) -Message 'single-quoted canonical Serena values 的 Repair 必须是 no-op'
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $singleQuotedCanonicalHome) -eq $singleQuotedCanonicalBefore) -Message 'single-quoted canonical Serena values 的 no-op Repair 修改了 fixture'
+    $singleQuotedCanonicalAfter = Get-Content -Raw -LiteralPath $singleQuotedCanonicalConfigPath
+    Assert-True -Condition $singleQuotedCanonicalAfter.Contains($singleQuotedCanonicalCommandLine) -Message 'no-op Repair 改写了 canonical single-quoted Serena command'
+    Assert-True -Condition $singleQuotedCanonicalAfter.Contains($singleQuotedCanonicalArgsLine) -Message 'no-op Repair 改写了 canonical single-quoted Serena args'
 
     $emptySerenaHome = Join-Path $testRoot "empty-serena-section-eof\.codex"
     New-FixtureCodexHome -Root $emptySerenaHome -Variant "EmptySerenaSectionAtEof"

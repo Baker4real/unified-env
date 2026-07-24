@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false, $true)
 
 $script:ProjectRoot = Split-Path -Parent $PSScriptRoot
 $script:ProductionCodexRoot = 'D:\Codex\.codex'

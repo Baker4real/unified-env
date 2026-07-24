@@ -392,7 +392,7 @@ namespace CodexHookGovernance
             ThrowIfDisposed();
             string lexicalPath = ValidateChildPath(targetPath, "targetPath");
             SafeFileHandle handle = CreateFileW(
-                lexicalPath,
+                ToExtendedPath(lexicalPath),
                 GenericRead | FileWriteAttributes | DeleteAccess,
                 // NTFS requires existing target handles to share DELETE for a
                 // FileRenameInformationEx POSIX replacement. Write data remains
@@ -467,7 +467,7 @@ namespace CodexHookGovernance
             ThrowIfDisposed();
             string lexicalPath = ValidateChildPath(tempPath, "tempPath");
             SafeFileHandle handle = CreateFileW(
-                lexicalPath,
+                ToExtendedPath(lexicalPath),
                 GenericRead | GenericWrite | DeleteAccess | SynchronizeAccess,
                 FileShare.None,
                 IntPtr.Zero,
@@ -497,7 +497,7 @@ namespace CodexHookGovernance
             ThrowIfDisposed();
             string lexicalPath = ValidateChildPath(targetPath, "targetPath");
             SafeFileHandle handle = CreateFileW(
-                lexicalPath,
+                ToExtendedPath(lexicalPath),
                 GenericRead,
                 // This lease protects an approved input object. It must prevent
                 // writes, delete, and class-65 POSIX replacement for its lifetime.
@@ -709,7 +709,7 @@ namespace CodexHookGovernance
                             throw new Win32Exception(error, "Unable to open a verified directory in the path chain.");
                         }
 
-                        if (!CreateDirectoryW(current, IntPtr.Zero))
+                        if (!CreateDirectoryW(ToExtendedPath(current), IntPtr.Zero))
                         {
                             int createError = Marshal.GetLastWin32Error();
                             if (isTarget && requireTargetCreation && createError == ErrorAlreadyExists)
@@ -775,7 +775,7 @@ namespace CodexHookGovernance
         {
             string lexicalPath = Path.GetFullPath(expectedPath);
             handle = CreateFileW(
-                lexicalPath,
+                ToExtendedPath(lexicalPath),
                 GenericRead | (requireDeleteAccess ? DeleteAccess : 0),
                 FileShare.Read,
                 IntPtr.Zero,

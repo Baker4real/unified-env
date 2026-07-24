@@ -22,6 +22,8 @@ function Invoke-PathCommand {
     $startInfo.RedirectStandardInput = $false
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $startInfo.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
     foreach ($argument in @('-NoProfile', '-File', $ScriptPath) + $Arguments) {
         [void]$startInfo.ArgumentList.Add($argument)
     }
@@ -59,7 +61,7 @@ $helperStart = $testSource.IndexOf('function Invoke-PathCommand')
 $helperEnd = $testSource.IndexOf('$testSource = Get-Content', $helperStart)
 if ($helperStart -lt 0 -or $helperEnd -le $helperStart) { throw 'hidden state path helper is unavailable' }
 $helperSource = $testSource.Substring($helperStart, $helperEnd - $helperStart)
-if ($helperSource -cnotmatch 'UseShellExecute\s*=\s*\$false' -or $helperSource -cnotmatch 'CreateNoWindow\s*=\s*\$true') { throw 'state path test process must be hidden' }
+if ($helperSource -cnotmatch 'UseShellExecute\s*=\s*\$false' -or $helperSource -cnotmatch 'CreateNoWindow\s*=\s*\$true' -or $helperSource -cnotmatch 'StandardOutputEncoding\s*=' -or $helperSource -cnotmatch 'StandardErrorEncoding\s*=') { throw 'state path test process must preserve the UTF-8 protocol' }
 $directPwshPattern = '&\s*' + [regex]::Escape("'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'")
 if ($testSource -cmatch $directPwshPattern) { throw 'state path test must not directly invoke pwsh' }
 

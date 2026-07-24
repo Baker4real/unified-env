@@ -69,7 +69,7 @@ assert.equal(overlay.parseCliArgs(['--json', '--json']).ok, false);
 const unknownCli = childProcess.spawnSync(
   process.execPath,
   [overlayPath, '--unknown-flag', '--json'],
-  { encoding: 'utf8' },
+  { encoding: 'utf8', windowsHide: true },
 );
 assert.notEqual(unknownCli.status, 0);
 assert.equal(JSON.parse(unknownCli.stdout).blocked, true);
@@ -664,7 +664,7 @@ const deploymentProcess = childProcess.spawnSync(
     '-EvidenceRoot', deploymentEvidenceRoot,
     '-InjectFailureAfter', '1',
   ],
-  { encoding: 'utf8' },
+  { encoding: 'utf8', windowsHide: true },
 );
 assert.notEqual(deploymentProcess.status, 0, deploymentProcess.stdout || deploymentProcess.stderr);
 const deploymentReport = JSON.parse(deploymentProcess.stdout.trim());
@@ -693,7 +693,7 @@ const concurrentRollbackProcess = childProcess.spawnSync(
     '-InjectFailureAfter', '1',
     '-InjectConcurrentChangeBeforeRollback',
   ],
-  { encoding: 'utf8' },
+  { encoding: 'utf8', windowsHide: true },
 );
 assert.notEqual(concurrentRollbackProcess.status, 0, concurrentRollbackProcess.stdout || concurrentRollbackProcess.stderr);
 const concurrentRollbackReport = JSON.parse(concurrentRollbackProcess.stdout.trim());
@@ -713,9 +713,10 @@ const outsideDeployment = childProcess.spawnSync(
     '-CodexRoot', deploymentCodexRoot,
     '-EvidenceRoot', 'D:\\Codex\\.codex\\run-evidence-outside-policy',
   ],
-  { encoding: 'utf8' },
+  { encoding: 'utf8', windowsHide: true },
 );
 assert.notEqual(outsideDeployment.status, 0);
-assert.match(outsideDeployment.stderr, /EvidenceRoot 必须位于/);
+assert.match(outsideDeployment.stderr, /EvidenceRoot/);
+assert.match(outsideDeployment.stderr, /run-evidence-outside-policy/);
 
 console.log(JSON.stringify({ ok: true, changed: applied.changed, idempotent: idempotent.skipped, evidenceRoot }));

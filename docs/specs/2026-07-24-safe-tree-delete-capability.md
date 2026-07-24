@@ -15,6 +15,10 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 - allowlist：`managed\safe-tree-delete\policy.json`
 - evidence：`D:\Codex\.codex\run-evidence\safe-tree-delete\<run-id>\`
 
+项目内 Codex 远程附件只允许以
+`D:\Codex\projects\统一环境\.codex-remote-attachments` 为 capability root 删除其后代，
+最小后代深度为 1；附件根本身和其他项目顶层目录不在该授权面内。
+
 生产 CLI 不接受 policy 或 evidence override。测试替身仅位于 `tests\`，不得复制到宿主
 脚本目录或作为生产入口。
 

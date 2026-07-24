@@ -12,6 +12,7 @@ reports/codex-hook-runtime-test/
 reports/codex-hook-config-test/
 reports/codex-state-policy-test/
 .serena/
+.codex-remote-attachments/
 .codex/skill-state/
 /.codex/config.toml
 .local/

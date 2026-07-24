@@ -1,20 +1,22 @@
-# Git 默认分支发布与收尾 Skill 统一策略 Implementation Plan
+# 历史实施计划：Git 默认分支发布与收尾 Skill 统一策略
 
-> **状态（2026-07-13）：** Task 1–5 已实施、验证并完成默认分支集成；临时分支与本 workflow worktree 已按顺序清理。下方复选框保留实施过程记录，不再表示当前待办。一次性验证证据为当时的 run-specific D 盘产物，可能已按保留策略清理；当前行为以版本化设计、实现和回归测试为准。
+> **历史状态（2026-07-13）：** Task 1–5 当时已实施、验证并完成默认分支集成；临时分支与本 workflow worktree 已按顺序清理。下方复选框仅保留实施过程，不再表示当前待办或执行授权。
+
+> **现役替代说明（2026-07-23）：** 全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）现在只允许发布到用户拥有远端的 `main`。本计划实现的 default-branch overlay、版本化模板及现役插件 cache 当前属于 `pending drift`；在取得 active plugin 修改授权并通过受控重放、来源和回归门禁前，不得按本计划再次实施或用于非 `main` 发布。
 
 > **历史路径说明：** 下方实施命令中出现的 `D:\Codex\projects\unified-env-github-default-branch-skill-policy` 是已清理的历史 worktree；当前版本化源代码位于 `D:\Codex\projects\统一环境\scripts`，部署入口和验证证据仍以 D 盘当前路径为准。
 
 > **退役说明（2026-07-16）：** 本计划中的已删除 skill 路径和来源信息只保留为历史实施记录，不代表当前 active 路径，也不应从本文恢复。
 
-> **供 agentic workers 使用：** 按任务逐项实施；每个任务先建立可观察的失败信号，再写最小实现并复验。此变更涉及插件缓存、分支生命周期与本机全局 skill，Task 3 和 Task 4 必须完成独立对抗性审查。
+> **历史执行说明：** 下方任务记录当时如何建立失败信号、实现和复验，不是当前 agentic worker 的执行队列。现役修复必须另行设计，并重新完成 active plugin 授权与独立对抗性审查。
 
-**目标：** 让本机收尾和 GitHub 发布 skill 默认只发布到可验证的远端默认分支，淘汰 patch-stack 分支，并让临时分支在确认后合入、推送和双端删除。
+**历史目标：** 让本机收尾和 GitHub 发布 skill 默认只发布到可验证的远端默认分支，淘汰 patch-stack 分支，并让临时分支在确认后合入、推送和双端删除。
 
 **架构：** 活跃本地 skill 直接在 D:\Codex\.codex\skills 中更新，并由 SOURCE.md 与统一账本记录本地覆盖。GitHub 插件不直接长期手改 cache：版本化源代码位于本仓库的 scripts 与 tests，部署器将其哈希校验后复制到 D:\Codex\.codex\scripts；运行时覆盖器仅接受已知上游指纹，先生成完整变更计划，再原子写入 marketplace source 与 cache，同时在 D:\Codex\.codex\run-evidence 下留可验证备份 manifest。
 
 **技术栈：** Node.js 24（仅用内置 fs、path、crypto、assert），PowerShell 7.6.3，Git，GitHub CLI，Markdown skill 与 JSON 来源账本。
 
-## 全局约束
+## 历史全局约束
 
 - 目标 remote 不从名称猜测，而是由用户授权的仓库上下文解析；私有上游保护流程只允许已验证的 private remote。每次推送前必须证明 remote 属于用户或已获明确授权。
 - 默认分支同时读取目标 remote 的 HEAD 符号引用与 GitHub defaultBranchRef；双证据必须一致，只有一个证据时才可使用，均缺失或冲突即停止。

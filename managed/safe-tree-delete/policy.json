@@ -41,6 +41,12 @@
       "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.scratch",
       "minimumDescendantDepth": 1,
       "deniedExactPaths": []
+    },
+    {
+      "id": "environment-remote-attachments",
+      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.codex-remote-attachments",
+      "minimumDescendantDepth": 1,
+      "deniedExactPaths": []
     }
   ]
 }
