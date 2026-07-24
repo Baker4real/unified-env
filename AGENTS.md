@@ -18,6 +18,8 @@
 
 真实迁移前必须先读取 `docs/env-governance/d-drive-layout-and-migration-policy.md`，确认 D 盘布局、环境分类、显式授权、验证和回滚边界。
 
+宿主递归目录删除只能通过 `D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd` 执行，不得使用直接递归删除入口；能力边界和三阶段确认流程见 `docs/specs/2026-07-24-safe-tree-delete-capability.md`。
+
 ## 知识适用域策略
 
 使用 `neat-freak`、整理文档或准备提交前，先按 `docs/agents/knowledge-scope.md` 分类新增知识。
