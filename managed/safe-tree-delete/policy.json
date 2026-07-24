@@ -1,0 +1,46 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-policy",
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "active-local-skills",
+      "capabilityRoot": "D:\\Codex\\.codex\\skills",
+      "minimumDescendantDepth": 1,
+      "deniedExactPaths": [
+        "D:\\Codex\\.codex\\skills\\.system"
+      ]
+    },
+    {
+      "id": "codex-backup-state",
+      "capabilityRoot": "D:\\Codex\\.codex\\backups_state",
+      "minimumDescendantDepth": 1,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-run-evidence",
+      "capabilityRoot": "D:\\Codex\\.codex\\run-evidence",
+      "minimumDescendantDepth": 2,
+      "deniedExactPaths": [
+        "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete"
+      ]
+    },
+    {
+      "id": "codex-temp",
+      "capabilityRoot": "D:\\Codex\\tmp",
+      "minimumDescendantDepth": 1,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-reports",
+      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
+      "minimumDescendantDepth": 1,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-scratch",
+      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.scratch",
+      "minimumDescendantDepth": 1,
+      "deniedExactPaths": []
+    }
+  ]
+}

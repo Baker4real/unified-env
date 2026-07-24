@@ -203,6 +203,7 @@ namespace CodexHookGovernance
         private const int ErrorPathNotFound = 3;
         private const int ErrorAlreadyExists = 183;
         private const int FileDispositionInformationEx = 64;
+        private const int FileRenameInformationEx = 65;
         private const int FileNamesInformation = 12;
         private const uint FileDispositionDelete = 0x00000001;
         private const uint FileDispositionPosixSemantics = 0x00000002;
@@ -255,7 +256,7 @@ namespace CodexHookGovernance
             FileIndex = fileIndex;
         }
 
-        public string DirectoryPath { get; }
+        public string DirectoryPath { get; private set; }
 
         public string VolumeSerialNumber { get; }
 
@@ -300,6 +301,59 @@ namespace CodexHookGovernance
             {
                 throw new IOException("The verified empty directory path still exists after handle-bound deletion.");
             }
+        }
+
+        public string RenameToSibling(string targetPath)
+        {
+            ThrowIfDisposed();
+            string lexicalTarget = ValidateSiblingDirectoryPath(targetPath, nameof(targetPath));
+            SafeFileHandle directoryHandle = handles[handles.Count - 1];
+            VerifyDirectoryHandle(directoryHandle, DirectoryPath);
+
+            string targetLeaf = Path.GetFileName(lexicalTarget);
+            byte[] targetNameBytes = Encoding.Unicode.GetBytes(targetLeaf);
+            int rootDirectoryOffset = IntPtr.Size;
+            int fileNameLengthOffset = checked(rootDirectoryOffset + IntPtr.Size);
+            int fileNameOffset = checked(fileNameLengthOffset + sizeof(uint));
+            int bufferLength = checked(fileNameOffset + targetNameBytes.Length);
+            IntPtr buffer = Marshal.AllocHGlobal(bufferLength);
+            string sourcePath = DirectoryPath;
+            try
+            {
+                for (int index = 0; index < bufferLength; index++)
+                {
+                    Marshal.WriteByte(buffer, index, 0);
+                }
+                Marshal.WriteInt32(buffer, 0, 0);
+                Marshal.WriteIntPtr(buffer, rootDirectoryOffset, IntPtr.Zero);
+                Marshal.WriteInt32(buffer, fileNameLengthOffset, targetNameBytes.Length);
+                Marshal.Copy(targetNameBytes, 0, IntPtr.Add(buffer, fileNameOffset), targetNameBytes.Length);
+
+                IoStatusBlock ioStatusBlock;
+                int status = NtSetInformationFile(
+                    directoryHandle,
+                    out ioStatusBlock,
+                    buffer,
+                    checked((uint)bufferLength),
+                    FileRenameInformationEx);
+                if (status != 0)
+                {
+                    uint dosError = RtlNtStatusToDosError(status);
+                    throw new Win32Exception(checked((int)dosError), "Unable to rename the verified directory to quarantine.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+
+            DirectoryPath = lexicalTarget;
+            VerifyDirectoryHandle(directoryHandle, DirectoryPath);
+            if (Directory.Exists(sourcePath) || !Directory.Exists(DirectoryPath))
+            {
+                throw new IOException("The verified directory quarantine rename did not reach the expected path state.");
+            }
+            return DirectoryPath;
         }
 
         public GuardedTempFile CreateTempFile(string tempPath)
@@ -904,6 +958,37 @@ namespace CodexHookGovernance
                 throw new IOException("The guarded file name is a reserved Windows device leaf.");
             }
             return lexicalPath;
+        }
+
+        private string ValidateSiblingDirectoryPath(string targetPath, string parameterName)
+        {
+            if (targetPath == null)
+            {
+                throw new ArgumentNullException(parameterName);
+            }
+
+            string lexicalTarget = Path.GetFullPath(targetPath);
+            string sourceParent = TrimDirectoryEnding(Path.GetDirectoryName(DirectoryPath));
+            string targetParent = TrimDirectoryEnding(Path.GetDirectoryName(lexicalTarget));
+            if (!string.Equals(sourceParent, targetParent, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(DirectoryPath, lexicalTarget, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("The quarantine directory must be a distinct sibling of the guarded directory.");
+            }
+
+            string leaf = Path.GetFileName(lexicalTarget);
+            if (string.IsNullOrWhiteSpace(leaf) || leaf == "." || leaf == ".." ||
+                leaf.Length > 255 || leaf.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                leaf.EndsWith(" ", StringComparison.Ordinal) || leaf.EndsWith(".", StringComparison.Ordinal) ||
+                IsReservedDeviceLeaf(leaf))
+            {
+                throw new IOException("The quarantine directory name is an invalid or reserved Windows leaf.");
+            }
+            if (Directory.Exists(lexicalTarget) || File.Exists(lexicalTarget))
+            {
+                throw new IOException("The quarantine target already exists.");
+            }
+            return lexicalTarget;
         }
 
         private static bool IsReservedDeviceLeaf(string leaf)
