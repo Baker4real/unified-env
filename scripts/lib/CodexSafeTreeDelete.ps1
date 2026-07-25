@@ -627,3 +627,135 @@ function Invoke-CodexSafeTreeDeletePurge {
         recoverable = $false
     }
 }
+
+function Find-CodexSafeTreeDeleteRecoverableTransaction {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [Parameter(Mandatory)][string]$PolicyPath,
+        [Parameter(Mandatory)][string]$EvidenceRoot
+    )
+
+    $policy = Read-CodexSafeTreeDeletePolicy -PolicyPath $PolicyPath
+    $target = Resolve-CodexSafeTreeDeleteTarget `
+        -TargetPath $TargetPath `
+        -CapabilityRoot $CapabilityRoot `
+        -Policy $policy `
+        -RequireExisting:$false
+    $fullEvidenceRoot = Initialize-CodexSafeTreeDeleteEvidenceRoot -EvidenceRoot $EvidenceRoot
+    $matches = [Collections.Generic.List[object]]::new()
+    foreach ($transactionPath in [IO.Directory]::EnumerateFiles($fullEvidenceRoot, 'transaction.json', [IO.SearchOption]::AllDirectories)) {
+        $transactionFullPath = Assert-CodexHookDPath -Value $transactionPath -Name 'safe-delete recover transaction path'
+        [void](Assert-CodexHookCapabilityPath `
+            -Path $transactionFullPath `
+            -CapabilityRoot $fullEvidenceRoot `
+            -AllowedExactPaths @($transactionFullPath) `
+            -Name 'safe-delete recover transaction')
+        $snapshot = Read-CodexHookSafeUtf8FileSnapshot `
+            -Path $transactionFullPath `
+            -Name 'safe-delete recover transaction' `
+            -AllowedExactPaths @($transactionFullPath)
+        Assert-CodexHookStrictJsonText -JsonText $snapshot.text
+        $transaction = $snapshot.text | ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
+        $status = [string]$transaction.status
+        if ($status -cne 'quarantined') { continue }
+        if ([string]$transaction.targetPath -cne $target.targetPath) { continue }
+        if ([IO.Directory]::Exists($target.targetPath)) { continue }
+        if (-not [IO.Directory]::Exists([string]$transaction.quarantinePath)) { continue }
+        $matches.Add([pscustomobject][ordered]@{
+            transactionPath = $transactionFullPath
+            transactionSha256 = $snapshot.sha256
+            updatedAtUtc = [string]$transaction.updatedAtUtc
+        })
+    }
+    if ($matches.Count -gt 1) { throw 'safe-delete recoverable transaction 不唯一。' }
+    if ($matches.Count -eq 0) { return $null }
+    return $matches[0]
+}
+
+function Invoke-CodexSafeTreeDeleteBatchPurge {
+    param(
+        [Parameter(Mandatory)][string[]]$TargetPaths,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [Parameter(Mandatory)][string]$PolicyPath,
+        [Parameter(Mandatory)][string]$EvidenceRoot
+    )
+
+    $policy = Read-CodexSafeTreeDeletePolicy -PolicyPath $PolicyPath
+    $seenTargets = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $canonicalTargets = [Collections.Generic.List[string]]::new()
+    foreach ($targetPath in @($TargetPaths)) {
+        $target = Resolve-CodexSafeTreeDeleteTarget `
+            -TargetPath $targetPath `
+            -CapabilityRoot $CapabilityRoot `
+            -Policy $policy `
+            -RequireExisting:$false
+        if (-not $seenTargets.Add([string]$target.targetPath)) {
+            throw 'safe-delete batch target 重复。'
+        }
+        $canonicalTargets.Add([string]$target.targetPath)
+    }
+
+    $results = [Collections.Generic.List[object]]::new()
+    foreach ($targetPath in @($canonicalTargets)) {
+        $recoverable = Find-CodexSafeTreeDeleteRecoverableTransaction `
+            -TargetPath $targetPath `
+            -CapabilityRoot $CapabilityRoot `
+            -PolicyPath $PolicyPath `
+            -EvidenceRoot $EvidenceRoot
+        if ($null -ne $recoverable) {
+            $purge = Invoke-CodexSafeTreeDeletePurge `
+                -TransactionPath ([string]$recoverable.transactionPath) `
+                -ApprovedTransactionSha256 ([string]$recoverable.transactionSha256) `
+                -PolicyPath $PolicyPath `
+                -EvidenceRoot $EvidenceRoot
+            $results.Add([pscustomobject][ordered]@{
+                targetPath = $targetPath
+                action = 'recovered-purged'
+                purged = [bool]$purge.purged
+                transactionPath = [string]$purge.transactionPath
+            })
+            continue
+        }
+        if (-not [IO.Directory]::Exists($targetPath)) {
+            $results.Add([pscustomobject][ordered]@{
+                targetPath = $targetPath
+                action = 'already-absent'
+                purged = $false
+                transactionPath = $null
+            })
+            continue
+        }
+
+        $plan = New-CodexSafeTreeDeletePlan `
+            -TargetPath $targetPath `
+            -CapabilityRoot $CapabilityRoot `
+            -PolicyPath $PolicyPath `
+            -EvidenceRoot $EvidenceRoot
+        $apply = Invoke-CodexSafeTreeDeleteQuarantine `
+            -PlanPath ([string]$plan.planPath) `
+            -ApprovedPlanSha256 ([string]$plan.planSha256) `
+            -PolicyPath $PolicyPath `
+            -EvidenceRoot $EvidenceRoot
+        $purge = Invoke-CodexSafeTreeDeletePurge `
+            -TransactionPath ([string]$apply.transactionPath) `
+            -ApprovedTransactionSha256 ([string]$apply.transactionSha256) `
+            -PolicyPath $PolicyPath `
+            -EvidenceRoot $EvidenceRoot
+        $results.Add([pscustomobject][ordered]@{
+            targetPath = $targetPath
+            action = 'planned-applied-purged'
+            purged = [bool]$purge.purged
+            transactionPath = [string]$purge.transactionPath
+        })
+    }
+
+    return [pscustomobject][ordered]@{
+        completed = $true
+        targetCount = $canonicalTargets.Count
+        purgedCount = @($results | Where-Object { $_.purged -eq $true }).Count
+        recoveredCount = @($results | Where-Object { $_.action -ceq 'recovered-purged' }).Count
+        alreadyAbsentCount = @($results | Where-Object { $_.action -ceq 'already-absent' }).Count
+        results = @($results)
+    }
+}

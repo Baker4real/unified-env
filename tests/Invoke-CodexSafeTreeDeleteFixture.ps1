@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Plan', 'Apply', 'Purge')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Plan', 'Apply', 'Purge', 'BatchPurge')][string]$Mode,
     [string]$TargetPath,
+    [string[]]$TargetPaths,
     [string]$CapabilityRoot,
     [string]$PlanPath,
     [string]$ApprovedPlanSha256,
@@ -16,6 +17,16 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Resolve-TargetPathArguments {
+    param([string[]]$Values)
+
+    $items = @($Values)
+    if ($items.Count -eq 1 -and [string]$items[0] -match '::') {
+        $items = @(([string]$items[0]).Split([string[]]@('::'), [StringSplitOptions]::RemoveEmptyEntries))
+    }
+    return @($items)
+}
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1')
@@ -58,6 +69,21 @@ switch ($Mode) {
         Invoke-CodexSafeTreeDeletePurge `
             -TransactionPath $TransactionPath `
             -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
+            -PolicyPath $FixturePolicyPath `
+            -EvidenceRoot $FixtureEvidenceRoot
+    }
+    'BatchPurge' {
+        if (-not $ConfirmApply -or -not $ConfirmPurge) {
+            [pscustomobject][ordered]@{ completed = $false; refusalReason = 'confirm-apply-and-purge-required' }
+            break
+        }
+        $resolvedTargets = @(Resolve-TargetPathArguments -Values $TargetPaths)
+        if ($resolvedTargets.Count -eq 0 -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
+            throw 'BatchPurge 模式要求 TargetPaths 与 CapabilityRoot。'
+        }
+        Invoke-CodexSafeTreeDeleteBatchPurge `
+            -TargetPaths $resolvedTargets `
+            -CapabilityRoot $CapabilityRoot `
             -PolicyPath $FixturePolicyPath `
             -EvidenceRoot $FixtureEvidenceRoot
     }

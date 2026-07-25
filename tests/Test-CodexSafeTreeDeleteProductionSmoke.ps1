@@ -8,6 +8,9 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $reportsRoot = Join-Path $projectRoot 'reports'
 $fixtureRoot = Join-Path $reportsRoot ("safe-tree-delete-production-smoke-{0}" -f ([guid]::NewGuid().ToString('N')))
 $payloadPath = Join-Path $fixtureRoot 'readonly-payload.txt'
+$batchParent = Join-Path $reportsRoot ("safe-tree-delete-batch-smoke-{0}" -f ([guid]::NewGuid().ToString('N')))
+$batchA = Join-Path $batchParent 'old-a'
+$batchB = Join-Path $batchParent 'old-b'
 $liveWrapper = 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd'
 $sourceWrapper = Join-Path $projectRoot 'scripts\invoke-codex-safe-tree-delete.cmd'
 $livePowerShellWrapper = 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1'
@@ -72,10 +75,46 @@ $purge = Invoke-LiveSafeDeleteJson -Arguments @(
 Assert-True ($purge.purged -eq $true) 'live Purge 必须成功'
 Assert-True (-not [IO.Directory]::Exists([string]$apply.quarantinePath)) 'live Purge 后 quarantine 必须不存在'
 
+foreach ($path in @($batchA, $batchB)) {
+    [void][IO.Directory]::CreateDirectory($path)
+    [IO.File]::WriteAllText((Join-Path $path 'payload.txt'), $path, [Text.UTF8Encoding]::new($false))
+}
+
+$batchPrePlan = Invoke-LiveSafeDeleteJson -Arguments @(
+    '-Mode', 'Plan',
+    '-TargetPath', $batchA,
+    '-CapabilityRoot', $reportsRoot,
+    '-Json'
+)
+$batchPreApply = Invoke-LiveSafeDeleteJson -Arguments @(
+    '-Mode', 'Apply',
+    '-PlanPath', [string]$batchPrePlan.planPath,
+    '-ApprovedPlanSha256', [string]$batchPrePlan.planSha256,
+    '-ConfirmApply',
+    '-Json'
+)
+Assert-True ($batchPreApply.quarantined -eq $true) 'live batch smoke 必须制造 recoverable quarantine'
+
+$batch = Invoke-LiveSafeDeleteJson -Arguments @(
+    '-Mode', 'BatchPurge',
+    '-TargetPaths', ('{0}::{1}' -f $batchA, $batchB),
+    '-CapabilityRoot', $reportsRoot,
+    '-ConfirmApply',
+    '-ConfirmPurge',
+    '-Json'
+)
+Assert-True ($batch.completed -eq $true) 'live BatchPurge 必须成功'
+Assert-True ($batch.purgedCount -eq 2) 'live BatchPurge 必须清理两个目标'
+Assert-True ($batch.recoveredCount -eq 1) 'live BatchPurge 必须恢复一个 quarantine'
+Assert-True (-not [IO.Directory]::Exists($batchA)) 'live BatchPurge 后 batchA 不得存在'
+Assert-True (-not [IO.Directory]::Exists($batchB)) 'live BatchPurge 后 batchB 不得存在'
+Assert-True (-not [IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) 'live BatchPurge 后 recoverable quarantine 不得存在'
+
 [pscustomobject][ordered]@{
     ok = $true
     suite = 'CodexSafeTreeDeleteProductionSmoke'
     planPath = [string]$plan.planPath
     transactionPath = [string]$purge.transactionPath
     transactionSha256 = [string]$purge.transactionSha256
+    batchRecoveredCount = [int]$batch.recoveredCount
 }

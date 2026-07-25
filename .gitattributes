@@ -1,3 +1,5 @@
+.gitattributes text eol=lf
+docs/specs/2026-07-24-safe-tree-delete-capability.md text eol=lf
 managed/codex-hooks/hooks/*.cmd text eol=crlf
 managed/codex-hooks/hooks/*.ps1 text eol=lf
 managed/codex-hooks/hooks/**/*.ps1 text eol=lf
@@ -8,3 +10,7 @@ managed/codex-hooks/retired/*.cmd text eol=crlf
 managed/codex-hooks/retired/*.py text eol=lf
 managed/codex-hooks/retired/*.js text eol=lf
 managed/codex-hooks/*.json text eol=lf
+scripts/*.ps1 text eol=lf
+scripts/**/*.ps1 text eol=lf
+tests/*.ps1 text eol=lf
+tests/**/*.ps1 text eol=lf

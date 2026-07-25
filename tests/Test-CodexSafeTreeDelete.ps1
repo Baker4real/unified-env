@@ -338,6 +338,57 @@ try {
     Assert-True ($driftError -match '漂移') '树漂移拒绝必须返回稳定原因'
     Assert-True ([IO.File]::Exists($driftOriginal) -and [IO.File]::Exists($driftAdded)) '树漂移拒绝必须发生在任何删除前'
 
+    $batchParent = Join-Path $fixtureRoot 'batch-parent'
+    $batchA = Join-Path $batchParent 'old-a'
+    $batchB = Join-Path $batchParent 'old-b'
+    $batchC = Join-Path $batchParent 'old-c'
+    foreach ($path in @($batchA, $batchB, $batchC)) {
+        [void][IO.Directory]::CreateDirectory($path)
+        [IO.File]::WriteAllText((Join-Path $path 'payload.txt'), $path, [Text.UTF8Encoding]::new($false))
+    }
+    $batchPrePlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $batchA `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $batchPreApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$batchPrePlan.planPath) `
+        -ApprovedPlanSha256 ([string]$batchPrePlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($batchPreApply.quarantined -eq $true) 'batch fixture 必须能制造已 quarantine 未 purge 的中间态'
+    Assert-True ([IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) 'batch fixture 必须保留待恢复 quarantine'
+
+    $unconfirmedBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($batchA, $batchB, $batchC) `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($unconfirmedBatch.refusalReason -ceq 'confirm-apply-and-purge-required') 'BatchPurge 缺少确认必须结构化拒绝'
+    Assert-True ([IO.Directory]::Exists($batchB) -and [IO.Directory]::Exists($batchC)) '未确认 BatchPurge 不得删除新目标'
+    Assert-True ([IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) '未确认 BatchPurge 不得清理既有 quarantine'
+
+    $batchResult = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($batchA, $batchB, $batchC) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($batchResult.completed -eq $true) 'BatchPurge 必须完成批量清理'
+    Assert-True ($batchResult.targetCount -eq 3) 'BatchPurge 必须报告全部目标数'
+    Assert-True ($batchResult.purgedCount -eq 3) 'BatchPurge 必须 purge 新目标和恢复目标'
+    Assert-True ($batchResult.recoveredCount -eq 1) 'BatchPurge 必须恢复并 purge 既有 quarantine transaction'
+    Assert-True (-not [IO.Directory]::Exists($batchA)) 'BatchPurge 后原 batchA 不得存在'
+    Assert-True (-not [IO.Directory]::Exists($batchB)) 'BatchPurge 后原 batchB 不得存在'
+    Assert-True (-not [IO.Directory]::Exists($batchC)) 'BatchPurge 后原 batchC 不得存在'
+    Assert-True (-not [IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) 'BatchPurge 必须清理既有 quarantine'
+
     $junctionTarget = Join-Path $fixtureRoot 'junction-candidate'
     $junctionExternal = Join-Path $fixtureRoot 'junction-external'
     $junctionPath = Join-Path $junctionTarget 'linked'

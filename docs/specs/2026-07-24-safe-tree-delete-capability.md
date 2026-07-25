@@ -38,6 +38,13 @@ policy schema v2 的 `minimumDescendantDepth` 通常至少为 1，且 `rootDelet
 3. `Purge`：要求 `ConfirmPurge` 与精确 `ApprovedTransactionSha256`；再次复算完整清单后，
    逐节点使用 handle-bound POSIX disposition 删除，包括 ReadOnly 文件。完成后不可恢复。
 
+批量清理使用 `BatchPurge`，调用方一次传入同一 capability root 下的多个 `TargetPaths`，并同时提供
+`ConfirmApply` 与 `ConfirmPurge`。入口对每个目标仍逐项执行相同的 `Plan` / `Apply` / `Purge` 校验；
+如果发现同一目标已有 `quarantined` transaction 且原路径不存在、quarantine 仍存在，则先按该
+transaction 完成 `Purge`，再继续后续目标。这样批量调用中断后可以从受控 evidence 恢复，不需要
+调用方手写循环、重新计算 transaction hash 或手工删除 quarantine。通过 `.cmd` wrapper 调用时，
+`TargetPaths` 使用单个 `::` 分隔字符串传入，避免 `cmd.exe` 把分隔符解释成管道或命令控制符。
+
 计划 30 分钟过期。缺少确认、哈希不匹配、policy 漂移、目标重新出现、目录内容或 identity
 漂移、junction/symlink/reparse point、越界路径以及并发 mutex 冲突均失败关闭。
 
