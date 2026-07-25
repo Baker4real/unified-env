@@ -10,8 +10,15 @@ $entryPath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteFixture.ps1'
 $policyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1'
 $fixtureRoot = Join-Path $projectRoot ("reports\safe-tree-delete-test-{0}" -f ([guid]::NewGuid().ToString('N')))
 $targetPath = Join-Path $fixtureRoot 'candidate'
+$rootTargetParent = Join-Path $fixtureRoot 'root-target-parent'
+$rootTargetPath = Join-Path $rootTargetParent 'build-output'
+$rollbackRootParent = Join-Path $fixtureRoot 'rollback-root-parent'
+$rollbackRootTarget = Join-Path $rollbackRootParent 'build-output'
+$rollbackSiblingPath = Join-Path $rollbackRootParent 'must-survive.txt'
 $evidenceRoot = Join-Path $fixtureRoot 'evidence'
 $policyPath = Join-Path $fixtureRoot 'policy.json'
+$invalidProjectRootPolicyPath = Join-Path $fixtureRoot 'invalid-project-root-policy.json'
+$invalidStateRootPolicyPath = Join-Path $fixtureRoot 'invalid-state-root-policy.json'
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -47,15 +54,37 @@ function Remove-TestTree {
 $payloadPath = Join-Path $targetPath 'payload.txt'
 [IO.File]::WriteAllText($payloadPath, 'keep-until-apply', [Text.UTF8Encoding]::new($false))
 [IO.File]::SetAttributes($payloadPath, [IO.FileAttributes]::ReadOnly)
+[void][IO.Directory]::CreateDirectory($rootTargetPath)
+[IO.File]::WriteAllText((Join-Path $rootTargetPath 'root-payload.txt'), 'root-target', [Text.UTF8Encoding]::new($false))
+[void][IO.Directory]::CreateDirectory($rollbackRootTarget)
+[IO.File]::WriteAllText((Join-Path $rollbackRootTarget 'rollback-payload.txt'), 'rollback-target', [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($rollbackSiblingPath, 'must-survive', [Text.UTF8Encoding]::new($false))
 $policy = [pscustomobject][ordered]@{
     artifactType = 'env-governance.codex-safe-tree-delete-policy'
-    schemaVersion = 1
-    entries = @([pscustomobject][ordered]@{
-        id = 'fixture'
-        capabilityRoot = $fixtureRoot
-        minimumDescendantDepth = 1
-        deniedExactPaths = @($evidenceRoot)
-    })
+    schemaVersion = 2
+    entries = @(
+        [pscustomobject][ordered]@{
+            id = 'fixture'
+            capabilityRoot = $fixtureRoot
+            minimumDescendantDepth = 1
+            rootDeletionPurpose = 'none'
+            deniedExactPaths = @($evidenceRoot)
+        },
+        [pscustomobject][ordered]@{
+            id = 'fixture-root-target'
+            capabilityRoot = $rootTargetPath
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'
+            deniedExactPaths = @()
+        },
+        [pscustomobject][ordered]@{
+            id = 'fixture-root-rollback'
+            capabilityRoot = $rollbackRootTarget
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'
+            deniedExactPaths = @()
+        }
+    )
 }
 [IO.File]::WriteAllText($policyPath, ($policy | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
 
@@ -145,6 +174,74 @@ try {
     Assert-True (-not [IO.Directory]::Exists([string]$applyResult.quarantinePath)) 'Purge 必须清理精确隔离目录'
     Assert-True ($purgeResult.recoverable -eq $false) 'Purge 后必须明确标记不可恢复'
 
+    $rootParentEscapeError = Assert-Throws -Message 'minimumDescendantDepth=0 不得授权父目录' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $rootTargetParent `
+            -CapabilityRoot $rootTargetPath `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($rootParentEscapeError -match 'capability root 内') '精确 root 策略必须拒绝父目录逃逸'
+
+    $rollbackPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $rollbackRootTarget `
+        -CapabilityRoot $rollbackRootTarget `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $rollbackPlanDocument = Get-Content -Raw -LiteralPath ([string]$rollbackPlan.planPath) | ConvertFrom-Json -Depth 128
+    $rollbackQuarantinePath = Join-Path `
+        $rollbackRootParent `
+        ('.codex-safe-delete-{0}.quarantine' -f ([string]$rollbackPlanDocument.generationId))
+    $rollbackError = Assert-Throws -Message 'root-target rename 后故障必须回滚' -Action {
+        & $entryPath `
+            -Mode Apply `
+            -PlanPath ([string]$rollbackPlan.planPath) `
+            -ApprovedPlanSha256 ([string]$rollbackPlan.planSha256) `
+            -ConfirmApply `
+            -FixtureFailAfterRename `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($rollbackError -match 'fixture failure after rename') 'root-target 故障注入必须返回原始失败'
+    Assert-True ([IO.Directory]::Exists($rollbackRootTarget)) 'root-target rollback 必须恢复原目录'
+    Assert-True (-not [IO.Directory]::Exists($rollbackQuarantinePath)) 'root-target rollback 不得残留 quarantine'
+    Assert-True (
+        [IO.File]::ReadAllText((Join-Path $rollbackRootTarget 'rollback-payload.txt')) -ceq 'rollback-target'
+    ) 'root-target rollback 必须完整恢复 payload'
+    Assert-True ([IO.File]::ReadAllText($rollbackSiblingPath) -ceq 'must-survive') 'root-target rollback 不得触及同级文件'
+    $rollbackTransactionPath = Join-Path (Split-Path -Parent ([string]$rollbackPlan.planPath)) 'transaction.json'
+    $rollbackTransaction = Get-Content -Raw -LiteralPath $rollbackTransactionPath | ConvertFrom-Json -Depth 32
+    Assert-True ($rollbackTransaction.status -ceq 'rolled-back') 'root-target rollback 必须发布 rolled-back transaction'
+
+    $rootPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $rootTargetPath `
+        -CapabilityRoot $rootTargetPath `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($rootPlan.planned -eq $true) 'minimumDescendantDepth=0 必须允许精确 capability root 计划'
+    $rootApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$rootPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$rootPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($rootApply.quarantined -eq $true) '精确 capability root 必须可隔离'
+    Assert-True (-not [IO.Directory]::Exists($rootTargetPath)) '精确 capability root 隔离后原路径必须不存在'
+    Assert-True ([IO.Directory]::Exists([string]$rootApply.quarantinePath)) '精确 capability root 必须保留同父隔离目录'
+    $rootPurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$rootApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$rootApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($rootPurge.purged -eq $true) '精确 capability root 必须可完成 purge'
+    Assert-True (-not [IO.Directory]::Exists([string]$rootApply.quarantinePath)) '精确 capability root purge 后不得残留隔离目录'
+
     $rootDeleteError = Assert-Throws -Message 'capability root 自身必须拒绝' -Action {
         & $entryPath `
             -Mode Plan `
@@ -153,7 +250,59 @@ try {
             -FixturePolicyPath $policyPath `
             -FixtureEvidenceRoot $evidenceRoot
     }
-    Assert-True ($rootDeleteError -match '严格后代') 'root 删除拒绝必须返回稳定原因'
+    Assert-True ($rootDeleteError -match '最小后代深度') 'minimumDescendantDepth=1 必须继续拒绝 root 删除'
+
+    $invalidProjectRootPolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 2
+        entries = @([pscustomobject][ordered]@{
+            id = 'invalid-project-root'
+            capabilityRoot = 'D:\Codex\projects\unsafe-workspace'
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'
+            deniedExactPaths = @()
+        })
+    }
+    [IO.File]::WriteAllText(
+        $invalidProjectRootPolicyPath,
+        ($invalidProjectRootPolicy | ConvertTo-Json -Depth 10),
+        [Text.UTF8Encoding]::new($false))
+    $projectRootPolicyError = Assert-Throws -Message 'minimumDescendantDepth=0 不得授权项目根' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath 'D:\Codex\projects\unsafe-workspace' `
+            -CapabilityRoot 'D:\Codex\projects\unsafe-workspace' `
+            -FixturePolicyPath $invalidProjectRootPolicyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($projectRootPolicyError -match '必须位于项目根之下') `
+        "项目根授权拒绝必须返回稳定原因，实际为：$projectRootPolicyError"
+
+    $invalidStateRootPolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 2
+        entries = @([pscustomobject][ordered]@{
+            id = 'invalid-state-root'
+            capabilityRoot = 'D:\Codex\.codex\skills'
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'
+            deniedExactPaths = @()
+        })
+    }
+    [IO.File]::WriteAllText(
+        $invalidStateRootPolicyPath,
+        ($invalidStateRootPolicy | ConvertTo-Json -Depth 10),
+        [Text.UTF8Encoding]::new($false))
+    $stateRootPolicyError = Assert-Throws -Message 'depth=0 不得授权 Codex 状态根' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath 'D:\Codex\.codex\skills' `
+            -CapabilityRoot 'D:\Codex\.codex\skills' `
+            -FixturePolicyPath $invalidStateRootPolicyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($stateRootPolicyError -match '必须位于项目根之下') '状态根授权必须失败关闭'
 
     $denylistError = Assert-Throws -Message 'denylist 子树必须拒绝' -Action {
         & $entryPath `

@@ -29,7 +29,7 @@ function Read-CodexSafeTreeDeletePolicy {
         -Value $policy `
         -Names @('artifactType', 'schemaVersion', 'entries') `
         -Scope 'safe-delete policy'
-    if ($policy.artifactType -cne 'env-governance.codex-safe-tree-delete-policy' -or [int]$policy.schemaVersion -ne 1) {
+    if ($policy.artifactType -cne 'env-governance.codex-safe-tree-delete-policy' -or [int]$policy.schemaVersion -ne 2) {
         throw 'safe-delete policy artifact/schema 非法。'
     }
     if (@($policy.entries).Count -eq 0) { throw 'safe-delete policy 不得为空。' }
@@ -40,7 +40,7 @@ function Read-CodexSafeTreeDeletePolicy {
     foreach ($entry in @($policy.entries)) {
         Assert-CodexSafeTreeDeleteExactProperties `
             -Value $entry `
-            -Names @('id', 'capabilityRoot', 'minimumDescendantDepth', 'deniedExactPaths') `
+            -Names @('id', 'capabilityRoot', 'minimumDescendantDepth', 'rootDeletionPurpose', 'deniedExactPaths') `
             -Scope 'safe-delete policy entry'
         $id = [string]$entry.id
         if ($id -notmatch '^[a-z0-9][a-z0-9-]{0,63}$' -or -not $ids.Add($id)) {
@@ -52,8 +52,22 @@ function Read-CodexSafeTreeDeletePolicy {
         }
         if (-not $roots.Add($root)) { throw 'safe-delete policy capabilityRoot 重复。' }
         $minimumDepth = [int]$entry.minimumDescendantDepth
-        if ($minimumDepth -lt 1 -or $minimumDepth -gt 16) {
+        if ($minimumDepth -lt 0 -or $minimumDepth -gt 16) {
             throw "safe-delete policy $id minimumDescendantDepth 非法。"
+        }
+        $rootDeletionPurpose = [string]$entry.rootDeletionPurpose
+        if ($rootDeletionPurpose -notin @('none', 'rebuildable-build-output')) {
+            throw "safe-delete policy $id rootDeletionPurpose 非法。"
+        }
+        if ($minimumDepth -eq 0 -and $rootDeletionPurpose -cne 'rebuildable-build-output') {
+            throw "safe-delete policy $id 深度 0 必须显式限定为可重建构建产物。"
+        }
+        if ($minimumDepth -gt 0 -and $rootDeletionPurpose -cne 'none') {
+            throw "safe-delete policy $id 非 root 删除条目的 purpose 必须为 none。"
+        }
+        if ($rootDeletionPurpose -ceq 'rebuildable-build-output' -and
+            $root -notmatch '^D:\\Codex\\projects\\[^\\]+\\.+$') {
+            throw "safe-delete policy $id 可重建构建产物必须位于项目根之下。"
         }
         $denied = [Collections.Generic.List[string]]::new()
         foreach ($candidate in @($entry.deniedExactPaths)) {
@@ -67,6 +81,7 @@ function Read-CodexSafeTreeDeletePolicy {
             id = $id
             capabilityRoot = $root
             minimumDescendantDepth = $minimumDepth
+            rootDeletionPurpose = $rootDeletionPurpose
             deniedExactPaths = @($denied)
         })
     }
@@ -90,8 +105,8 @@ function Resolve-CodexSafeTreeDeleteTarget {
     $fullRoot = Assert-CodexHookDPath -Value $CapabilityRoot -Name 'safe-delete capability root'
     $entry = @($Policy.entries | Where-Object { $_.capabilityRoot -ieq $fullRoot })
     if ($entry.Count -ne 1) { throw 'safe-delete capability root 不在受管 allowlist。' }
-    if ($fullTarget -ieq $fullRoot -or -not (Test-CodexHookPathWithin -Path $fullTarget -ParentPath $fullRoot)) {
-        throw 'safe-delete target 必须是 capability root 的严格后代。'
+    if (-not (Test-CodexHookPathWithin -Path $fullTarget -ParentPath $fullRoot)) {
+        throw 'safe-delete target 必须位于 capability root 内。'
     }
     $relative = $fullTarget.Substring($fullRoot.Length).TrimStart('\', '/')
     $depth = @($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 }).Count
@@ -117,6 +132,15 @@ function Resolve-CodexSafeTreeDeleteTarget {
         capabilityRoot = $fullRoot
         policyEntryId = [string]$entry[0].id
     }
+}
+
+function Get-CodexSafeTreeDeleteQuarantineCapabilityRoot {
+    param([Parameter(Mandatory)][object]$Target)
+
+    if ([string]$Target.targetPath -ieq [string]$Target.capabilityRoot) {
+        return Split-Path -Parent ([string]$Target.targetPath)
+    }
+    return [string]$Target.capabilityRoot
 }
 
 function Initialize-CodexSafeTreeDeleteEvidenceRoot {
@@ -303,7 +327,8 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         [Parameter(Mandatory)][string]$PlanPath,
         [Parameter(Mandatory)][string]$ApprovedPlanSha256,
         [Parameter(Mandatory)][string]$PolicyPath,
-        [Parameter(Mandatory)][string]$EvidenceRoot
+        [Parameter(Mandatory)][string]$EvidenceRoot,
+        [switch]$FailAfterRenameForTest
     )
 
     $approved = Read-CodexSafeTreeDeleteApprovedPlan `
@@ -313,6 +338,7 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         -EvidenceRoot $EvidenceRoot
     $plan = $approved.document
     $target = $approved.target
+    $quarantineCapabilityRoot = Get-CodexSafeTreeDeleteQuarantineCapabilityRoot -Target $target
     $currentTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
         -Path $target.targetPath `
         -CapabilityRoot $target.capabilityRoot `
@@ -328,7 +354,7 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         ('.codex-safe-delete-{0}.quarantine' -f ([string]$plan.generationId))
     [void](Assert-CodexHookCapabilityPath `
         -Path $quarantinePath `
-        -CapabilityRoot $target.capabilityRoot `
+        -CapabilityRoot $quarantineCapabilityRoot `
         -AllowedExactPaths @($quarantinePath) `
         -Name 'safe-delete quarantine target')
     if ([IO.Directory]::Exists($quarantinePath) -or [IO.File]::Exists($quarantinePath)) {
@@ -371,6 +397,7 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
                 -Scope 'safe-delete quarantine root'
             [void]$guard.RenameToSibling($quarantinePath)
             $renamed = $true
+            if ($FailAfterRenameForTest) { throw 'safe-delete fixture failure after rename' }
         } finally {
             $guard.Dispose()
         }
@@ -380,7 +407,7 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         }
         $quarantinedTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
             -Path $quarantinePath `
-            -CapabilityRoot $target.capabilityRoot `
+            -CapabilityRoot $quarantineCapabilityRoot `
             -AllowedExactPaths @($quarantinePath) `
             -Name 'safe-delete quarantine postcheck'
         if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $quarantinedTree) -cne
@@ -414,7 +441,7 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         if ($renamed -and [IO.Directory]::Exists($quarantinePath) -and -not [IO.Directory]::Exists($target.targetPath)) {
             try {
                 $rollbackGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::AcquireForEmptyDelete(
-                    [string]$target.capabilityRoot,
+                    [string]$quarantineCapabilityRoot,
                     [string]$quarantinePath)
                 try {
                     Assert-CodexHookDirectoryTreeIdentity `
@@ -534,10 +561,11 @@ function Invoke-CodexSafeTreeDeletePurge {
     $transaction = $approved.document
     $plan = $approved.approvedPlan.document
     $target = $approved.approvedPlan.target
+    $quarantineCapabilityRoot = Get-CodexSafeTreeDeleteQuarantineCapabilityRoot -Target $target
     $quarantinePath = [string]$transaction.quarantinePath
     $currentTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
         -Path $quarantinePath `
-        -CapabilityRoot $target.capabilityRoot `
+        -CapabilityRoot $quarantineCapabilityRoot `
         -AllowedExactPaths @($quarantinePath) `
         -Name 'safe-delete purge preflight'
     if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $currentTree) -cne
@@ -563,7 +591,7 @@ function Invoke-CodexSafeTreeDeletePurge {
         if (-not $held) { throw 'safe-delete target mutex busy。' }
         Remove-CodexHookCapabilityDirectoryTree `
             -Path $quarantinePath `
-            -CapabilityRoot $target.capabilityRoot `
+            -CapabilityRoot $quarantineCapabilityRoot `
             -AllowedExactPaths @($quarantinePath) `
             -ExpectedRootIdentity @($plan.treeManifest.rootIdentity) `
             -ExpectedTreeManifest $plan.treeManifest `

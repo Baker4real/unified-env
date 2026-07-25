@@ -19,6 +19,13 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 `D:\Codex\projects\统一环境\.codex-remote-attachments` 为 capability root 删除其后代，
 最小后代深度为 1；附件根本身和其他项目顶层目录不在该授权面内。
 
+policy schema v2 的 `minimumDescendantDepth` 通常至少为 1，且 `rootDeletionPurpose` 必须为
+`none`。仅当 capability root 自身就是项目根之下的可重建精确构建产物根时，才可以同时设为
+0 和 `rebuildable-build-output`；解析器会拒绝 workspace/项目根、`.codex` 状态根和项目外
+用户数据根。这不会授权其父目录或同级目录。此类根在 Apply 时仍只允许原子改名到同父、
+随机 generation 绑定的 quarantine，Purge 仍校验原计划、transaction、完整树清单与
+文件 identity。
+
 生产 CLI 不接受 policy 或 evidence override。测试替身仅位于 `tests\`，不得复制到宿主
 脚本目录或作为生产入口。
 

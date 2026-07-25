@@ -1,11 +1,12 @@
 {
   "artifactType": "env-governance.codex-safe-tree-delete-policy",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "entries": [
     {
       "id": "active-local-skills",
       "capabilityRoot": "D:\\Codex\\.codex\\skills",
       "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
       "deniedExactPaths": [
         "D:\\Codex\\.codex\\skills\\.system"
       ]
@@ -14,12 +15,14 @@
       "id": "codex-backup-state",
       "capabilityRoot": "D:\\Codex\\.codex\\backups_state",
       "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
       "deniedExactPaths": []
     },
     {
       "id": "codex-run-evidence",
       "capabilityRoot": "D:\\Codex\\.codex\\run-evidence",
       "minimumDescendantDepth": 2,
+      "rootDeletionPurpose": "none",
       "deniedExactPaths": [
         "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete"
       ]
@@ -28,24 +31,84 @@
       "id": "codex-temp",
       "capabilityRoot": "D:\\Codex\\tmp",
       "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
       "deniedExactPaths": []
     },
     {
       "id": "environment-reports",
       "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
       "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
       "deniedExactPaths": []
     },
     {
       "id": "environment-scratch",
       "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.scratch",
       "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
       "deniedExactPaths": []
     },
     {
       "id": "environment-remote-attachments",
       "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.codex-remote-attachments",
       "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-app-build",
+      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-verification-build",
+      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-core-bin",
+      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-core-obj",
+      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-app-bin",
+      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-app-obj",
+      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-verification-bin",
+      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-verification-obj",
+      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     }
   ]

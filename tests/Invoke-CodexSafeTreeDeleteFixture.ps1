@@ -9,6 +9,7 @@ param(
     [string]$TransactionPath,
     [string]$ApprovedTransactionSha256,
     [switch]$ConfirmPurge,
+    [switch]$FixtureFailAfterRename,
     [Parameter(Mandatory)][string]$FixturePolicyPath,
     [Parameter(Mandatory)][string]$FixtureEvidenceRoot
 )
@@ -43,7 +44,8 @@ switch ($Mode) {
             -PlanPath $PlanPath `
             -ApprovedPlanSha256 $ApprovedPlanSha256 `
             -PolicyPath $FixturePolicyPath `
-            -EvidenceRoot $FixtureEvidenceRoot
+            -EvidenceRoot $FixtureEvidenceRoot `
+            -FailAfterRenameForTest:$FixtureFailAfterRename
     }
     'Purge' {
         if (-not $ConfirmPurge) {
