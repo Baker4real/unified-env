@@ -1,0 +1,4 @@
+interface:
+  display_name: "目标优先审查"
+  short_description: "先重审真实目标、关键事实与替代路径，再明确决策并执行"
+  default_prompt: "使用 $goal-first 审查我提出的路径，选出更好的方案并继续执行。"

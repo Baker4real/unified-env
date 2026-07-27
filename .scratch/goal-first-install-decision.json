@@ -1,0 +1,49 @@
+{
+  "decision": "update",
+  "source_status": "source-review",
+  "writing_great_skills": {
+    "status": "passed",
+    "revision": "保留既有触发边界与审查流程；补入用户默认授权子代理的协作审查边界，允许复杂任务直接做独立核查、反案和对抗复核；当工具不可用时由主代理完成同一复核，同时禁止在敏感、外发、不可逆或明确单代理任务中委派。"
+  },
+  "skills": [
+    "goal-first"
+  ],
+  "source": {
+    "id": "local-candidate-goal-first",
+    "ref": "local",
+    "revision": "sha256:C5EF6681C8A229144E2E0C2BC404ADDB87D95934EE64AAB71D895EF8A1F4BC9F",
+    "upstream_path": "goal-first",
+    "ledger_updates": {
+      "action": "updated-user-authored-local-skill",
+      "installed_version": "2026-07-27",
+      "path": "D:/Codex/.codex/skills/goal-first",
+      "resource_paths": [
+        "SKILL.md",
+        "SOURCE.md",
+        "agents/openai.yaml",
+        "evals/evals.json"
+      ],
+      "status": "installed-local-only"
+    }
+  },
+  "local_overlay": {
+    "status": "updated",
+    "summary": "按用户目标创建的本地 model-invoked 决策审查 skill；无公共上游，已完成复杂路径、硬约束和简单任务三类前向测试，并加入默认子代理授权与工具不可用时的主代理复核边界。"
+  },
+  "gate_evidence": {
+    "candidate": "D:/Codex/projects/统一环境/.scratch/goal-first",
+    "source_rationale": "用户明确要求创建并按本机治理落地的 local-only skill；公共采用度不适用，因此以 source-review 记录真实来源边界。",
+    "overlap_scan": "skill_similarity.py pre-install: active goal-first self-match score 1.000 is the intended update target; all other matches are likely-distinct",
+    "inspected_matches": [
+      "leader: 只生成任务书，不执行任务",
+      "implement: 按已确认需求实现代码，不负责通用路径挑战",
+      "grilling: 逐问逐答且确认前不行动"
+    ],
+    "forward_tests": [
+      "复杂架构题给出模块化单体零起点反案",
+      "内网知识库题保留不得出网硬约束并否决 70B 训练和自研向量库",
+      "简单翻译题直接返回一句译文"
+    ],
+    "approval": "用户于 2026-07-27 明确要求按照 skill 相关约束进行落地，并明确默认授权子代理"
+  }
+}

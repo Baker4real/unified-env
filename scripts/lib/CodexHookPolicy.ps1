@@ -1770,12 +1770,15 @@ function Merge-CodexHookRegistry {
         $analysisProperty = $ownership.groupsByEvent.PSObject.Properties[$eventName]
         [object[]]$analyses = @()
         if ($null -ne $analysisProperty) { $analyses = [object[]]@($analysisProperty.Value) }
-        $mergedGroups = Merge-CodexHookRegistryEventGroups `
-            -Manifest $Manifest `
-            -Event $eventName `
-            -Groups $groups `
-            -Analyses $analyses `
-            -RemoveRetired ($Mode -ceq 'full')
+        # Preserve the JSON array shape even when an event has exactly one group.
+        [object[]]$mergedGroups = @(
+            Merge-CodexHookRegistryEventGroups `
+                -Manifest $Manifest `
+                -Event $eventName `
+                -Groups $groups `
+                -Analyses $analyses `
+                -RemoveRetired ($Mode -ceq 'full')
+        )
         if ($null -eq $eventProperty) {
             $registry.hooks | Add-Member -NotePropertyName $eventName -NotePropertyValue $mergedGroups
         } else {

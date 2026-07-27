@@ -489,6 +489,8 @@ try {
     Assert-True ($session[0].customGroup -ceq 'unknown-group-must-survive') '未知 SessionStart 组顺序和扩展字段必须保留'
     Assert-True ($session[1].hooks[0].command -ceq 'D:\Codex\.codex\hooks\codex-state-preflight.cmd') 'state preflight identity/order 错误'
     Assert-True ($session[2].matcher -ceq 'startup|resume' -and $session[2].hooks[0].command -ceq 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd') 'activation reminder identity/matcher 错误'
+    Assert-True ($registry.hooks.PreToolUse -is [System.Array]) 'PreToolUse 必须序列化为 matcher group 数组'
+    Assert-True ($registry.hooks.Stop -is [System.Array]) 'Stop 必须序列化为 matcher group 数组'
     Assert-True ($registry.hooks.PreToolUse.matcher -ceq 'Bash' -and $registry.hooks.PreToolUse.hooks[0].command -ceq 'D:\Codex\.codex\hooks\serena-reminder-guarded.cmd') 'reminder identity/matcher 错误'
     Assert-True ($registry.hooks.Stop.hooks[0].command -ceq 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd') 'cleanup identity 错误'
     Assert-True ([int]$session[1].hooks[0].timeout -eq 10) 'state preflight timeout 必须精确为10秒'
