@@ -21,7 +21,7 @@
 ## 关键入口
 
 - 项目上下文：`CONTEXT.md`
-- 设备差异与跨设备验证：`docs/environments/`
+- 设备差异与跨设备验证：`docs/environments/zi-xi-shi.md`、`docs/environments/ban-gong-shi.md`
 - 迁移政策：`docs/env-governance/d-drive-layout-and-migration-policy.md`
 - 本机 Skill Catalog：`scripts/generate_skill_catalog.py`、`docs/plans/2026-07-13-local-skill-catalog-implementation.md`
 - Skill 安装事务已统一到 `D:\Codex\.codex\scripts\install-skill-guarded.cmd`：它在安装/更新后同步 `SOURCE.md`、统一 ledger、资源闭包和 catalog，失败时回滚；设计见 `docs/specs/2026-07-14-skill-install-guarded-wrapper.md`。
