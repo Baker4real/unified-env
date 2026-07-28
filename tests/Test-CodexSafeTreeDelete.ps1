@@ -8,6 +8,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $productionEntryPath = Join-Path $projectRoot 'scripts\Invoke-CodexSafeTreeDelete.ps1'
 $entryPath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteFixture.ps1'
 $policyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1'
+$productionPolicyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
 $fixtureRoot = Join-Path $projectRoot ("reports\safe-tree-delete-test-{0}" -f ([guid]::NewGuid().ToString('N')))
 $targetPath = Join-Path $fixtureRoot 'candidate'
 $rootTargetParent = Join-Path $fixtureRoot 'root-target-parent'
@@ -95,6 +96,13 @@ try {
     foreach ($forbiddenParameter in @('Fixture', 'FixturePolicyPath', 'FixtureEvidenceRoot', 'PolicyPath', 'EvidenceRoot')) {
         Assert-True (-not $productionCommand.Parameters.ContainsKey($forbiddenParameter)) "生产 CLI 不得暴露 $forbiddenParameter"
     }
+    $productionPolicy = Get-Content -LiteralPath $productionPolicyPath -Raw | ConvertFrom-Json -Depth 32
+    $legacyTempEntries = @($productionPolicy.entries | Where-Object { $_.id -ceq 'codex-legacy-temp' })
+    Assert-True ($legacyTempEntries.Count -eq 1) '生产策略必须唯一声明 legacy temp capability root'
+    $legacyTempEntry = $legacyTempEntries[0]
+    Assert-True ($legacyTempEntry.capabilityRoot -ceq 'D:\Codex\.tmp') 'legacy temp capability root 必须精确指向 D:\Codex\.tmp'
+    Assert-True ($legacyTempEntry.minimumDescendantDepth -eq 1) 'legacy temp capability root 不得删除根目录自身'
+    Assert-True ($legacyTempEntry.rootDeletionPurpose -ceq 'none') 'legacy temp capability root 不得声明 root 删除用途'
     $planResult = & $entryPath `
         -Mode Plan `
         -TargetPath $targetPath `

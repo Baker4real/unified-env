@@ -35,6 +35,13 @@
       "deniedExactPaths": []
     },
     {
+      "id": "codex-legacy-temp",
+      "capabilityRoot": "D:\\Codex\\.tmp",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
       "id": "environment-reports",
       "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
       "minimumDescendantDepth": 1,
