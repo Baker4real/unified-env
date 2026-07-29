@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -49,10 +50,29 @@ DEFAULT_EVIDENCE_ROOT = Path(r"D:\Codex\.codex\run-evidence\skill-install-guarde
 
 SAFE_SKILL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
+SHA256_HEX = re.compile(r"^[0-9a-fA-F]{64}$")
+CANDIDATE_TREE_HASH_ALGORITHM = (
+    "sha256(utf8(concat(sorted_unicode_codepoint("
+    "D + tab + relative_posix_directory + lf, or "
+    "F + tab + relative_posix_file + tab + file_sha256 + lf)))); "
+    "excludes any path segment named .git or __pycache__, and files ending in .pyc"
+)
+CANDIDATE_EXCLUDED_DIRECTORIES = frozenset({".git", "__pycache__"})
+CANDIDATE_EXCLUDED_PATTERNS = [
+    "**/.git",
+    "**/.git/**",
+    "**/__pycache__",
+    "**/__pycache__/**",
+    "**/*.pyc",
+]
 
 
 class InstallError(RuntimeError):
     """A fail-closed wrapper error."""
+
+
+class RecoveryRequiredError(InstallError):
+    """The wrapper could not prove that pre-transaction active state was restored."""
 
 
 def utc_now() -> str:
@@ -69,7 +89,7 @@ def is_reparse(path: Path) -> bool:
     if path.is_symlink():
         return True
     try:
-        stat_result = path.stat()
+        stat_result = path.lstat()
     except FileNotFoundError:
         return False
     except OSError as exc:
@@ -134,6 +154,163 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def tree_manifest_sha256(
+    files: dict[str, str],
+    directories: list[str],
+) -> str:
+    records = [f"D\t{relative}\n" for relative in directories]
+    records.extend(f"F\t{relative}\t{digest}\n" for relative, digest in files.items())
+    canonical = "".join(sorted(records))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def candidate_payload_inventory(root: Path) -> tuple[list[str], dict[str, str]]:
+    """Inventory exactly the candidate topology eligible for activation."""
+    directories_result: list[str] = []
+    files_result: dict[str, str] = {}
+
+    if is_reparse(root) or not root.is_dir():
+        raise InstallError(f"candidate 安装载荷根必须是普通目录：{root}")
+
+    def onerror(error: OSError) -> None:
+        raise InstallError(f"无法遍历 candidate 安装载荷：{root}：{error}") from error
+
+    for current, directories, files in os.walk(
+        root,
+        topdown=True,
+        followlinks=False,
+        onerror=onerror,
+    ):
+        current_path = Path(current)
+        retained_directories: list[str] = []
+        for name in directories:
+            child = current_path / name
+            if is_reparse(child) or not child.is_dir():
+                raise InstallError(f"candidate 安装载荷只允许普通目录：{child}")
+            if name.casefold() in CANDIDATE_EXCLUDED_DIRECTORIES:
+                continue
+            retained_directories.append(name)
+            directories_result.append(child.relative_to(root).as_posix())
+        directories[:] = sorted(retained_directories, key=str.casefold)
+        files.sort(key=str.casefold)
+        for filename in files:
+            source = current_path / filename
+            if is_reparse(source) or not source.is_file():
+                raise InstallError(f"candidate 安装载荷只允许普通文件：{source}")
+            if (
+                filename.casefold() in CANDIDATE_EXCLUDED_DIRECTORIES
+                or filename.casefold().endswith(".pyc")
+            ):
+                continue
+            files_result[source.relative_to(root).as_posix()] = sha256_file(source)
+    return sorted(directories_result), files_result
+
+
+def candidate_payload_file_hashes(root: Path) -> dict[str, str]:
+    """Compatibility helper for callers that only need eligible file hashes."""
+    return candidate_payload_inventory(root)[1]
+
+
+def candidate_copy_ignore(directory: str, names: list[str]) -> set[str]:
+    ignored: set[str] = set()
+    for name in names:
+        if name.casefold() in CANDIDATE_EXCLUDED_DIRECTORIES:
+            ignored.add(name)
+        elif name.casefold().endswith(".pyc") and not (Path(directory) / name).is_dir():
+            ignored.add(name)
+    return ignored
+
+
+def candidate_excluded_file_summary(root: Path) -> dict[str, int]:
+    included = set(candidate_payload_file_hashes(root))
+    excluded_files = 0
+    excluded_bytes = 0
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        if relative in included:
+            continue
+        excluded_files += 1
+        excluded_bytes += path.stat().st_size
+    return {"file_count": excluded_files, "byte_count": excluded_bytes}
+
+
+def candidate_integrity_payload(candidate: Path) -> dict[str, Any]:
+    directories, files = candidate_payload_inventory(candidate)
+    skill_md_sha256 = files.get("SKILL.md")
+    if skill_md_sha256 is None:
+        raise InstallError("candidate 安装载荷缺少 SKILL.md")
+    return {
+        "algorithm": CANDIDATE_TREE_HASH_ALGORITHM,
+        "excluded": CANDIDATE_EXCLUDED_PATTERNS,
+        "directory_count": len(directories),
+        "file_count": len(files),
+        "tree_sha256": tree_manifest_sha256(files, directories),
+        "skill_md_sha256": skill_md_sha256,
+    }
+
+
+def validate_candidate_integrity(
+    candidate: Path,
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    integrity = decision.get("candidate_integrity")
+    if not isinstance(integrity, dict):
+        raise InstallError(
+            "本地 --candidate 必须在 decision manifest 中包含 candidate_integrity"
+        )
+    expected_fields = {
+        "algorithm",
+        "excluded",
+        "directory_count",
+        "file_count",
+        "tree_sha256",
+        "skill_md_sha256",
+    }
+    if set(integrity) != expected_fields:
+        raise InstallError(
+            "candidate_integrity 字段必须精确为：" + ", ".join(sorted(expected_fields))
+        )
+    if integrity.get("algorithm") != CANDIDATE_TREE_HASH_ALGORITHM:
+        raise InstallError("candidate_integrity.algorithm 与受管安装载荷算法不一致")
+    if integrity.get("excluded") != CANDIDATE_EXCLUDED_PATTERNS:
+        raise InstallError("candidate_integrity.excluded 与受管排除规则不一致")
+    for field, minimum in (("directory_count", 0), ("file_count", 1)):
+        value = integrity.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            qualifier = "非负整数" if minimum == 0 else "正整数"
+            raise InstallError(f"candidate_integrity.{field} 必须是{qualifier}")
+    for field in ("tree_sha256", "skill_md_sha256"):
+        value = integrity.get(field)
+        if not isinstance(value, str) or not SHA256_HEX.fullmatch(value):
+            raise InstallError(f"candidate_integrity.{field} 必须是 SHA-256")
+
+    actual = candidate_integrity_payload(candidate)
+    normalized_expected = {
+        **integrity,
+        "tree_sha256": integrity["tree_sha256"].casefold(),
+        "skill_md_sha256": integrity["skill_md_sha256"].casefold(),
+    }
+    if actual != normalized_expected:
+        raise InstallError(
+            "candidate_integrity 与当前候选安装载荷不一致："
+            + json.dumps({"expected": normalized_expected, "actual": actual}, ensure_ascii=False)
+        )
+    return {
+        **actual,
+        "excluded_files": candidate_excluded_file_summary(candidate),
+    }
+
+
+def inspect_candidate_integrity(candidate: Path) -> dict[str, Any]:
+    ensure_tree_no_reparse(candidate, label="candidate")
+    return {
+        "candidate_integrity": candidate_integrity_payload(candidate),
+        "excluded_files": candidate_excluded_file_summary(candidate),
+    }
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -329,6 +506,8 @@ def apply_candidate_upstream_path(
     if any(not character.isprintable() for character in upstream_path):
         raise InstallError("source.upstream_path 不能包含不可打印字符")
     upstream_path = upstream_path.strip()
+    if upstream_path == ".":
+        return [(specs[0][0], upstream_path)]
     parts = upstream_path.split("/")
     if (
         "\\" in upstream_path
@@ -683,13 +862,23 @@ def stage_candidate(
     closure_script: Path,
     interpreter: Path,
     evidence_dir: Path,
+    decision: dict[str, Any],
 ) -> dict[str, Any]:
     ensure_dir(stage_root, label="staging root")
+    candidate_integrity: dict[str, Any] | None = None
     if args.candidate:
         candidate = d_path(args.candidate, label="candidate", must_exist=True)
         ensure_tree_no_reparse(candidate, label="candidate")
+        candidate_integrity = validate_candidate_integrity(candidate, decision)
         name = specs[0][0]
-        shutil.copytree(candidate, stage_root / name)
+        shutil.copytree(candidate, stage_root / name, ignore=candidate_copy_ignore)
+        copied_seal = tree_content_seal(stage_root / name)
+        expected_copied_seal = {
+            field: candidate_integrity[field]
+            for field in ("directory_count", "file_count", "tree_sha256")
+        }
+        if copied_seal != expected_copied_seal:
+            raise InstallError("复制后的 candidate 安装载荷指纹不一致")
     else:
         command = [str(interpreter), str(args.system_installer)]
         if args.url:
@@ -733,7 +922,13 @@ def stage_candidate(
         evidence_dir=evidence_dir,
         label="staged-resource-closure",
     )
-    return {"names": names, "closure": closure}
+    staged_payloads = {name: tree_content_seal(stage_root / name) for name in names}
+    return {
+        "names": names,
+        "closure": closure,
+        "candidate_integrity": candidate_integrity,
+        "staged_payloads": staged_payloads,
+    }
 
 
 def safe_remove(path: Path) -> None:
@@ -742,8 +937,10 @@ def safe_remove(path: Path) -> None:
     if is_reparse(path):
         raise InstallError(f"拒绝删除 reparse point：{path}")
     if path.is_dir():
+        make_tree_writable(path)
         shutil.rmtree(path)
     else:
+        path.chmod(path.stat().st_mode | stat.S_IWRITE)
         path.unlink()
 
 
@@ -757,8 +954,110 @@ def path_exists_strict(path: Path, *, label: str) -> bool:
         raise InstallError(f"无法确认{label}是否存在：{path}：{exc}") from exc
 
 
-def tree_file_hashes(root: Path) -> dict[str, str]:
-    result: dict[str, str] = {}
+def make_tree_writable(root: Path) -> None:
+    """Clear read-only bits so Windows copy-delete fallbacks can finish."""
+    ensure_tree_no_reparse(root, label="待移动目录")
+    for current, directories, files in os.walk(root, topdown=False, followlinks=False):
+        current_path = Path(current)
+        for name in [*files, *directories]:
+            child = current_path / name
+            child.chmod(child.stat().st_mode | stat.S_IWRITE)
+    root.chmod(root.stat().st_mode | stat.S_IWRITE)
+
+
+def read_only_relative_paths(root: Path) -> list[str]:
+    """Capture the write-bit state that make_tree_writable intentionally changes."""
+    ensure_tree_no_reparse(root, label="只读属性盘点目录")
+    result: list[str] = []
+    if not (root.stat().st_mode & stat.S_IWRITE):
+        result.append(".")
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        for name in [*directories, *files]:
+            child = current_path / name
+            if not (child.stat().st_mode & stat.S_IWRITE):
+                result.append(child.relative_to(root).as_posix())
+    return sorted(result)
+
+
+def restore_read_only_paths(root: Path, relative_paths: list[str]) -> None:
+    """Restore only the read-only bits cleared for a guarded tree move."""
+    for relative in sorted(relative_paths, key=lambda value: value.count("/"), reverse=True):
+        target = root if relative == "." else root / Path(relative)
+        if not path_exists_strict(target, label="只读属性恢复目标"):
+            raise InstallError(f"只读属性恢复目标不存在：{target}")
+        target.chmod(target.stat().st_mode & ~stat.S_IWRITE)
+
+
+def merge_tree_contents(source: Path, destination: Path) -> None:
+    """Merge a backup fragment into a source fragment without deleting either side."""
+    ensure_tree_no_reparse(source, label="恢复来源目录")
+    if path_exists_strict(destination, label="恢复目标目录"):
+        if is_reparse(destination) or not destination.is_dir():
+            raise InstallError(f"恢复目标必须是普通目录：{destination}")
+        make_tree_writable(destination)
+    else:
+        destination.mkdir(parents=True)
+    for current, directories, files in os.walk(source, topdown=True, followlinks=False):
+        directories.sort(key=str.casefold)
+        files.sort(key=str.casefold)
+        current_path = Path(current)
+        relative = current_path.relative_to(source)
+        target_directory = destination / relative
+        target_directory.mkdir(exist_ok=True)
+        for directory in directories:
+            (target_directory / directory).mkdir(exist_ok=True)
+        for filename in files:
+            shutil.copyfile(current_path / filename, target_directory / filename)
+
+
+def restore_move_union(
+    *,
+    source: Path,
+    destination: Path,
+    seal: dict[str, Any],
+    label: str,
+) -> None:
+    """Reconstruct a tree after shutil.move partially copied or removed it."""
+    if path_exists_strict(source, label=f"{label}来源"):
+        merge_tree_contents(source, destination)
+    verify_tree_seal(destination, seal=seal, label=label)
+
+
+def move_active_to_backup(active: Path, backup: Path) -> tuple[dict[str, Any], list[str]]:
+    """Move active state while guaranteeing restoration after a partial fallback."""
+    seal = tree_content_seal(active)
+    read_only_paths = read_only_relative_paths(active)
+    try:
+        make_tree_writable(active)
+        shutil.move(str(active), str(backup))
+        verify_tree_seal(backup, seal=seal, label="active skill 事务备份")
+        restore_read_only_paths(backup, read_only_paths)
+    except Exception as move_error:
+        try:
+            restore_move_union(
+                source=backup,
+                destination=active,
+                seal=seal,
+                label="备份移动失败后的 active skill",
+            )
+            restore_read_only_paths(active, read_only_paths)
+        except Exception as restore_error:
+            raise RecoveryRequiredError(
+                f"active skill 备份移动失败且无法证明恢复：{move_error}；恢复错误：{restore_error}"
+            ) from restore_error
+        raise InstallError(
+            f"active skill 备份移动失败；原 active 已按内容 seal 恢复：{move_error}"
+        ) from move_error
+    return seal, read_only_paths
+
+
+def tree_content_seal(root: Path) -> dict[str, Any]:
+    directories_result: list[str] = []
+    files_result: dict[str, str] = {}
+
+    if is_reparse(root) or not root.is_dir():
+        raise InstallError(f"skill 内容树根必须是普通目录：{root}")
 
     def onerror(error: OSError) -> None:
         raise InstallError(f"无法遍历 skill 内容树：{root}：{error}") from error
@@ -769,16 +1068,64 @@ def tree_file_hashes(root: Path) -> dict[str, str]:
         followlinks=False,
         onerror=onerror,
     ):
+        current_path = Path(current)
+        if is_reparse(current_path) or not current_path.is_dir():
+            raise InstallError(f"skill 内容树只允许普通目录：{current_path}")
+        for directory in directories:
+            child = current_path / directory
+            if is_reparse(child) or not child.is_dir():
+                raise InstallError(f"skill 内容树只允许普通目录：{child}")
+            directories_result.append(child.relative_to(root).as_posix())
         directories.sort(key=str.casefold)
         files.sort(key=str.casefold)
-        current_path = Path(current)
         for filename in files:
             source = current_path / filename
             if is_reparse(source) or not source.is_file():
                 raise InstallError(f"skill 内容树只允许普通文件：{source}")
             relative = source.relative_to(root).as_posix()
-            result[relative] = sha256_file(source)
-    return result
+            files_result[relative] = sha256_file(source)
+    return {
+        "directory_count": len(directories_result),
+        "file_count": len(files_result),
+        "tree_sha256": tree_manifest_sha256(files_result, directories_result),
+    }
+
+
+def verify_tree_seal(root: Path, *, seal: dict[str, Any], label: str) -> None:
+    expected_fields = {"directory_count", "file_count", "tree_sha256"}
+    if set(seal) != expected_fields:
+        raise InstallError(f"{label} seal 字段不合法")
+    expected_directory_count = seal.get("directory_count")
+    expected_file_count = seal.get("file_count")
+    expected_hash = seal.get("tree_sha256")
+    if (
+        isinstance(expected_directory_count, bool)
+        or not isinstance(expected_directory_count, int)
+        or expected_directory_count < 0
+        or isinstance(expected_file_count, bool)
+        or not isinstance(expected_file_count, int)
+        or expected_file_count < 1
+        or not isinstance(expected_hash, str)
+        or not SHA256_HEX.fullmatch(expected_hash)
+    ):
+        raise InstallError(f"{label} seal 值不合法")
+    expected = {
+        "directory_count": expected_directory_count,
+        "file_count": expected_file_count,
+        "tree_sha256": expected_hash.casefold(),
+    }
+    actual = tree_content_seal(root)
+    if actual != expected:
+        raise InstallError(
+            f"{label} 内容 seal 漂移："
+            + json.dumps(
+                {
+                    "expected": expected,
+                    "actual": actual,
+                },
+                ensure_ascii=False,
+            )
+        )
 
 
 def copy_tree_without_security_metadata(source: Path, destination: Path) -> None:
@@ -815,7 +1162,7 @@ def copy_tree_without_security_metadata(source: Path, destination: Path) -> None
         if not root_skill_md.is_file() or is_reparse(root_skill_md):
             raise InstallError(f"待激活 skill 缺少安全的 SKILL.md：{root_skill_md}")
         shutil.copyfile(root_skill_md, destination / "SKILL.md")
-        if tree_file_hashes(source) != tree_file_hashes(destination):
+        if tree_content_seal(source) != tree_content_seal(destination):
             raise InstallError(f"激活临时目录内容指纹不一致：{destination}")
     except Exception:
         if path_exists_strict(destination, label="失败的激活临时目录"):
@@ -840,18 +1187,27 @@ from pathlib import Path
 roots = [Path(item) for item in json.loads(os.environ["CODEX_SKILL_READ_ROOTS"])]
 directory_count = 0
 file_count = 0
+
+def is_reparse(path):
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    return path.is_symlink() or bool(attributes & 0x400)
+
 for root in roots:
     root.lstat()
+    if is_reparse(root) or not root.is_dir():
+        raise RuntimeError(f"reparse/non-directory root: {root}")
     for current, directories, files in os.walk(root, topdown=True, followlinks=False):
         directory_count += 1
         current_path = Path(current)
+        if is_reparse(current_path) or not current_path.is_dir():
+            raise RuntimeError(f"reparse/non-directory path: {current_path}")
         for directory in directories:
             child = current_path / directory
-            if child.is_symlink():
-                raise RuntimeError(f"reparse/symlink directory: {child}")
+            if is_reparse(child) or not child.is_dir():
+                raise RuntimeError(f"reparse/non-directory child: {child}")
         for filename in files:
             child = current_path / filename
-            if child.is_symlink() or not child.is_file():
+            if is_reparse(child) or not child.is_file():
                 raise RuntimeError(f"non-regular file: {child}")
             with child.open("rb") as stream:
                 while stream.read(1024 * 1024):
@@ -950,10 +1306,15 @@ def activate_directories(
     names: list[str],
     backup_root: Path,
     records: list[dict[str, Any]],
+    payload_seals: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     ensure_dir(backup_root, label="skill backup 目录")
     for name in names:
         staged = stage_root / name
+        seal = payload_seals.get(name)
+        if not isinstance(seal, dict):
+            raise InstallError(f"staging 缺少 skill 内容 seal：{name}")
+        verify_tree_seal(staged, seal=seal, label=f"staging skill {name}")
         active = active_root / name
         active_exists = path_exists_strict(active, label=f"active skill {name}")
         if active_exists and is_reparse(active):
@@ -968,18 +1329,41 @@ def activate_directories(
             "activation_temp": str(activation_temp),
             "had_existing": active_exists,
             "backup_moved": False,
+            "backup_seal": None,
+            "backup_read_only_paths": [],
+            "pre_activation_recovery_error": None,
             "activated": False,
         }
         records.append(record)
         copy_tree_without_security_metadata(staged, activation_temp)
+        verify_tree_seal(
+            activation_temp,
+            seal=seal,
+            label=f"激活临时目录 {name}",
+        )
         if active_exists:
-            shutil.move(str(active), str(backup_root / name))
-            record["backup_moved"] = True
+            try:
+                backup_seal, backup_read_only_paths = move_active_to_backup(
+                    active,
+                    backup_root / name,
+                )
+                record["backup_seal"] = backup_seal
+                record["backup_read_only_paths"] = backup_read_only_paths
+                record["backup_moved"] = True
+            except RecoveryRequiredError as exc:
+                record["pre_activation_recovery_error"] = str(exc)
+                raise
         try:
+            verify_tree_seal(
+                activation_temp,
+                seal=seal,
+                label=f"原子换入前临时目录 {name}",
+            )
             os.replace(activation_temp, active)
         except Exception as exc:
             raise InstallError(f"激活 skill 失败：{name}：{exc}") from exc
         record["activated"] = True
+        verify_tree_seal(active, seal=seal, label=f"已激活 skill {name}")
     return records
 
 
@@ -992,12 +1376,43 @@ def rollback_directories(records: list[dict[str, Any]]) -> list[str]:
         try:
             if path_exists_strict(activation_temp, label="rollback 激活临时目录"):
                 safe_remove(activation_temp)
+            seal = record.get("backup_seal")
+            if record["backup_moved"]:
+                if not isinstance(seal, dict):
+                    raise InstallError(f"rollback 缺少 active skill 内容 seal：{record['name']}")
+                if not path_exists_strict(backup, label="rollback skill backup"):
+                    raise InstallError(f"rollback active skill 事务备份不存在：{record['name']}")
+                verify_tree_seal(
+                    backup,
+                    seal=seal,
+                    label=f"rollback 删除 active 前事务备份 {record['name']}",
+                )
+            elif record["activated"] and record["had_existing"]:
+                raise InstallError(f"rollback 已有 active skill 缺少事务备份：{record['name']}")
             if record["activated"] and path_exists_strict(active, label="rollback active skill"):
                 safe_remove(active)
-            if record["backup_moved"] and path_exists_strict(backup, label="rollback skill backup"):
-                shutil.move(str(backup), str(active))
+            if record["backup_moved"]:
+                try:
+                    make_tree_writable(backup)
+                    shutil.move(str(backup), str(active))
+                    verify_tree_seal(active, seal=seal, label=f"rollback active skill {record['name']}")
+                except Exception:
+                    restore_move_union(
+                        source=backup,
+                        destination=active,
+                        seal=seal,
+                        label=f"rollback active skill {record['name']}",
+                    )
+                read_only_paths = record.get("backup_read_only_paths")
+                if not isinstance(read_only_paths, list) or any(
+                    not isinstance(relative, str) for relative in read_only_paths
+                ):
+                    raise InstallError(f"rollback 只读属性记录不合法：{record['name']}")
+                restore_read_only_paths(active, read_only_paths)
         except Exception as exc:  # pragma: no cover - exercised by injected host failures
             errors.append(f"{record['name']}: {exc}")
+        if record.get("pre_activation_recovery_error"):
+            errors.append(f"{record['name']}: {record['pre_activation_recovery_error']}")
     return errors
 
 
@@ -1078,7 +1493,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ref", default="main")
     parser.add_argument("--name", help="单个 skill 的 active name")
     parser.add_argument("--method", choices=("auto", "download", "git"), default="auto")
-    parser.add_argument("--decision-manifest", type=Path, required=True)
+    parser.add_argument("--decision-manifest", type=Path)
+    parser.add_argument(
+        "--candidate-integrity-only",
+        action="store_true",
+        help="只读计算本地 candidate 的受管安装载荷指纹，不执行事务",
+    )
     parser.add_argument("--update", action="store_true", help="兼容旧调用；实际更新权限仍由 manifest decision=update 决定")
     parser.add_argument("--dry-run", action="store_true", help="只暂存和验证，不改变 active root、ledger 或 catalog")
     parser.add_argument("--active-root", type=Path, default=DEFAULT_ACTIVE_ROOT)
@@ -1145,6 +1565,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     ledger_backup: Path | None = None
     catalog_backup: Path | None = None
     state_backups_ready = False
+    staged: dict[str, Any] | None = None
     try:
         staged = stage_candidate(
             args=args,
@@ -1155,6 +1576,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             closure_script=closure_script,
             interpreter=interpreter,
             evidence_dir=evidence_dir,
+            decision=decision,
         )
         if args.dry_run:
             result = {
@@ -1185,6 +1607,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             names=names,
             backup_root=backup_root / "active-skills",
             records=directory_records,
+            payload_seals=staged["staged_payloads"],
         )
         activation_readability = verify_activation_readability(
             active_root=active_root,
@@ -1228,6 +1651,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "status": "succeeded",
             "completed_at": utc_now(),
             "targets": names,
+            "staged": staged,
             "directory_records": directory_records,
             "activation_readability": activation_readability,
             "post_resource_closure": post_closure,
@@ -1251,6 +1675,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "completed_at": utc_now(),
             "error": str(exc),
             "rollback_errors": rollback_errors,
+            "staged": staged,
             "evidence": str(evidence_dir),
         }
         write_transaction_manifest(manifest_path, failure)
@@ -1265,6 +1690,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.candidate_integrity_only:
+            if not args.candidate:
+                raise InstallError("--candidate-integrity-only 必须配合 --candidate")
+            if args.decision_manifest is not None or args.update or args.dry_run:
+                raise InstallError(
+                    "--candidate-integrity-only 不能与 decision/update/dry-run 事务参数混用"
+                )
+            candidate = d_path(args.candidate, label="candidate", must_exist=True)
+            if not candidate.is_dir():
+                raise InstallError(f"candidate 必须是目录：{candidate}")
+            result = inspect_candidate_integrity(candidate)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.decision_manifest is None:
+            raise InstallError("安装事务必须提供 --decision-manifest")
         with installation_lock(d_path(args.lock_root, label="skill install lock root") / "install.lock"):
             result = execute(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
