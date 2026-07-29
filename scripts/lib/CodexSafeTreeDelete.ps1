@@ -241,6 +241,40 @@ function Get-CodexSafeTreeDeleteManifestSha256 {
     return Get-CodexHookTextSha256 -Text $canonical
 }
 
+function Assert-CodexSafeTreeDeletePartialPurgeManifest {
+    param(
+        [Parameter(Mandatory)][object]$CurrentManifest,
+        [Parameter(Mandatory)][object]$PlannedManifest
+    )
+
+    $current = ConvertTo-CodexHookExpectedDirectoryTreeManifest `
+        -Manifest $CurrentManifest `
+        -Scope 'safe-delete purge resume current'
+    $planned = ConvertTo-CodexHookExpectedDirectoryTreeManifest `
+        -Manifest $PlannedManifest `
+        -Scope 'safe-delete purge resume planned'
+    Assert-CodexHookDirectoryTreeIdentity `
+        -Expected @($planned.rootIdentity) `
+        -Actual @($current.rootIdentity) `
+        -Scope 'safe-delete purge resume root'
+
+    foreach ($entry in @($CurrentManifest.entries)) {
+        $relativePath = [string]$entry.relativePath
+        $currentEntry = $current.entriesByPath[$relativePath]
+        $plannedEntry = $planned.entriesByPath[$relativePath]
+        if ($null -eq $plannedEntry -or
+            [string]$plannedEntry.relativePath -cne [string]$currentEntry.relativePath -or
+            [string]$plannedEntry.kind -cne [string]$currentEntry.kind -or
+            [string]$plannedEntry.sha256 -cne [string]$currentEntry.sha256) {
+            throw 'safe-delete purge resume tree manifest 漂移。'
+        }
+        Assert-CodexHookDirectoryTreeIdentity `
+            -Expected @($plannedEntry.identity) `
+            -Actual @($currentEntry.identity) `
+            -Scope "safe-delete purge resume $relativePath"
+    }
+}
+
 function Read-CodexSafeTreeDeleteApprovedPlan {
     param(
         [Parameter(Mandatory)][string]$PlanPath,
@@ -511,7 +545,8 @@ function Read-CodexSafeTreeDeleteApprovedTransaction {
         ) `
         -Scope 'safe-delete transaction'
     if ($transaction.artifactType -cne 'env-governance.codex-safe-tree-delete-transaction' -or
-        [int]$transaction.schemaVersion -ne 1 -or $transaction.status -cne 'quarantined') {
+        [int]$transaction.schemaVersion -ne 1 -or
+        [string]$transaction.status -cnotin @('quarantined', 'purging')) {
         throw 'safe-delete transaction 状态或 schema 非法。'
     }
 
@@ -568,20 +603,30 @@ function Invoke-CodexSafeTreeDeletePurge {
         -CapabilityRoot $quarantineCapabilityRoot `
         -AllowedExactPaths @($quarantinePath) `
         -Name 'safe-delete purge preflight'
-    if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $currentTree) -cne
-        (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
-        throw 'safe-delete purge preflight tree manifest 漂移。'
+    $purgeManifest = $plan.treeManifest
+    if ([string]$transaction.status -ceq 'quarantined') {
+        if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $currentTree) -cne
+            (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
+            throw 'safe-delete purge preflight tree manifest 漂移。'
+        }
+    } else {
+        Assert-CodexSafeTreeDeletePartialPurgeManifest `
+            -CurrentManifest $currentTree `
+            -PlannedManifest $plan.treeManifest
+        $purgeManifest = $currentTree
     }
 
     $runDirectory = Split-Path -Parent $approved.path
-    $transaction.status = 'purging'
-    $transaction.updatedAtUtc = [datetimeoffset]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
-    Set-CodexHookCapabilityJson `
-        -Path $approved.path `
-        -Document $transaction `
-        -CapabilityRoot $runDirectory `
-        -AllowedExactPaths @($approved.path) `
-        -Scope 'safe-delete transaction purging'
+    if ([string]$transaction.status -ceq 'quarantined') {
+        $transaction.status = 'purging'
+        $transaction.updatedAtUtc = [datetimeoffset]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+        Set-CodexHookCapabilityJson `
+            -Path $approved.path `
+            -Document $transaction `
+            -CapabilityRoot $runDirectory `
+            -AllowedExactPaths @($approved.path) `
+            -Scope 'safe-delete transaction purging'
+    }
 
     $mutexHash = Get-CodexHookTextSha256 -Text $target.targetPath.ToUpperInvariant()
     $mutex = [Threading.Mutex]::new($false, "Local\CodexSafeTreeDelete-$mutexHash")
@@ -594,7 +639,7 @@ function Invoke-CodexSafeTreeDeletePurge {
             -CapabilityRoot $quarantineCapabilityRoot `
             -AllowedExactPaths @($quarantinePath) `
             -ExpectedRootIdentity @($plan.treeManifest.rootIdentity) `
-            -ExpectedTreeManifest $plan.treeManifest `
+            -ExpectedTreeManifest $purgeManifest `
             -Scope 'safe-delete approved purge'
     } finally {
         if ($held) { [void]$mutex.ReleaseMutex() }
@@ -658,7 +703,7 @@ function Find-CodexSafeTreeDeleteRecoverableTransaction {
         Assert-CodexHookStrictJsonText -JsonText $snapshot.text
         $transaction = $snapshot.text | ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
         $status = [string]$transaction.status
-        if ($status -cne 'quarantined') { continue }
+        if ($status -cnotin @('quarantined', 'purging')) { continue }
         if ([string]$transaction.targetPath -cne $target.targetPath) { continue }
         if ([IO.Directory]::Exists($target.targetPath)) { continue }
         if (-not [IO.Directory]::Exists([string]$transaction.quarantinePath)) { continue }

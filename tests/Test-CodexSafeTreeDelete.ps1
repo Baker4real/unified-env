@@ -49,6 +49,57 @@ function Remove-TestTree {
         -Scope 'safe-delete test cleanup'
 }
 
+function New-InterruptedPurgeFixture {
+    param([Parameter(Mandatory)][string]$Path)
+
+    [void][IO.Directory]::CreateDirectory($Path)
+    [IO.File]::WriteAllText(
+        (Join-Path $Path 'already-purged.txt'),
+        'already-purged',
+        [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText(
+        (Join-Path $Path 'still-present.txt'),
+        'still-present',
+        [Text.UTF8Encoding]::new($false))
+    $plan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $Path `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $apply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$plan.planPath) `
+        -ApprovedPlanSha256 ([string]$plan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $transaction = Get-Content -Raw -LiteralPath ([string]$apply.transactionPath) |
+        ConvertFrom-Json -Depth 32 -DateKind String
+    $transaction.status = 'purging'
+    $transaction.updatedAtUtc = [datetimeoffset]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    $runDirectory = Split-Path -Parent ([string]$apply.transactionPath)
+    Set-CodexHookCapabilityJson `
+        -Path ([string]$apply.transactionPath) `
+        -Document $transaction `
+        -CapabilityRoot $runDirectory `
+        -AllowedExactPaths @([string]$apply.transactionPath) `
+        -Scope 'safe-delete partial purge fixture'
+    [IO.File]::Delete((Join-Path ([string]$apply.quarantinePath) 'already-purged.txt'))
+    $transactionSnapshot = Get-CodexHookCapabilityFileSnapshot `
+        -Path ([string]$apply.transactionPath) `
+        -CapabilityRoot $runDirectory `
+        -AllowedExactPaths @([string]$apply.transactionPath) `
+        -Name 'safe-delete partial purge fixture transaction'
+    return [pscustomobject][ordered]@{
+        targetPath = $Path
+        quarantinePath = [string]$apply.quarantinePath
+        transactionPath = [string]$apply.transactionPath
+        transactionSha256 = [string]$transactionSnapshot.sha256
+        remainingPath = Join-Path ([string]$apply.quarantinePath) 'still-present.txt'
+    }
+}
+
 . $policyLibraryPath
 
 [void][IO.Directory]::CreateDirectory($targetPath)
@@ -181,6 +232,112 @@ try {
     Assert-True ($purgeResult.purged -eq $true) 'Purge 必须返回 purged=true'
     Assert-True (-not [IO.Directory]::Exists([string]$applyResult.quarantinePath)) 'Purge 必须清理精确隔离目录'
     Assert-True ($purgeResult.recoverable -eq $false) 'Purge 后必须明确标记不可恢复'
+
+    $partialPurge = New-InterruptedPurgeFixture `
+        -Path (Join-Path $fixtureRoot 'partial-purge-candidate')
+    $partialPurgeResult = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$partialPurge.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$partialPurge.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($partialPurgeResult.purged -eq $true) '显式 Purge 必须恢复 purging transaction 的部分删除状态'
+    Assert-True (-not [IO.Directory]::Exists([string]$partialPurge.quarantinePath)) '部分删除恢复后不得残留 quarantine'
+
+    $partialDrift = New-InterruptedPurgeFixture `
+        -Path (Join-Path $fixtureRoot 'partial-purge-content-drift')
+    [IO.File]::WriteAllText(
+        [string]$partialDrift.remainingPath,
+        'content-drift',
+        [Text.UTF8Encoding]::new($false))
+    $partialDriftError = Assert-Throws -Message 'purging transaction 内容漂移必须失败关闭' -Action {
+        & $entryPath `
+            -Mode Purge `
+            -TransactionPath ([string]$partialDrift.transactionPath) `
+            -ApprovedTransactionSha256 ([string]$partialDrift.transactionSha256) `
+            -ConfirmPurge `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($partialDriftError -match '漂移') 'purging transaction 内容漂移必须返回稳定原因'
+    Assert-True ([IO.Directory]::Exists([string]$partialDrift.quarantinePath)) '内容漂移拒绝必须保留 quarantine 现场'
+    Assert-True ([IO.File]::ReadAllText([string]$partialDrift.remainingPath) -ceq 'content-drift') '内容漂移拒绝不得修改现场文件'
+
+    $partialUnexpected = New-InterruptedPurgeFixture `
+        -Path (Join-Path $fixtureRoot 'partial-purge-unplanned-node')
+    $unexpectedPath = Join-Path ([string]$partialUnexpected.quarantinePath) 'unplanned.txt'
+    [IO.File]::WriteAllText($unexpectedPath, 'unplanned', [Text.UTF8Encoding]::new($false))
+    $partialUnexpectedError = Assert-Throws -Message 'purging transaction 未计划节点必须失败关闭' -Action {
+        & $entryPath `
+            -Mode Purge `
+            -TransactionPath ([string]$partialUnexpected.transactionPath) `
+            -ApprovedTransactionSha256 ([string]$partialUnexpected.transactionSha256) `
+            -ConfirmPurge `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($partialUnexpectedError -match '漂移') 'purging transaction 未计划节点必须返回稳定原因'
+    Assert-True ([IO.File]::Exists($unexpectedPath)) '未计划节点拒绝必须原样保留现场'
+
+    $partialReplacement = New-InterruptedPurgeFixture `
+        -Path (Join-Path $fixtureRoot 'partial-purge-file-replacement')
+    $replacementPath = Join-Path ([string]$partialReplacement.quarantinePath) 'replacement.tmp'
+    [IO.File]::WriteAllText($replacementPath, 'still-present', [Text.UTF8Encoding]::new($false))
+    [IO.File]::Move($replacementPath, [string]$partialReplacement.remainingPath, $true)
+    $partialReplacementError = Assert-Throws -Message 'purging transaction 同内容文件替换必须失败关闭' -Action {
+        & $entryPath `
+            -Mode Purge `
+            -TransactionPath ([string]$partialReplacement.transactionPath) `
+            -ApprovedTransactionSha256 ([string]$partialReplacement.transactionSha256) `
+            -ConfirmPurge `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($partialReplacementError -match 'identity|漂移') 'purging transaction 文件 identity 漂移必须返回稳定原因'
+    Assert-True ([IO.File]::Exists([string]$partialReplacement.remainingPath)) '文件 identity 漂移拒绝必须保留替换文件'
+
+    $partialRootReplacement = New-InterruptedPurgeFixture `
+        -Path (Join-Path $fixtureRoot 'partial-purge-root-replacement')
+    $parkedQuarantine = '{0}.parked' -f ([string]$partialRootReplacement.quarantinePath)
+    [IO.Directory]::Move([string]$partialRootReplacement.quarantinePath, $parkedQuarantine)
+    [void][IO.Directory]::CreateDirectory([string]$partialRootReplacement.quarantinePath)
+    [IO.File]::WriteAllText(
+        (Join-Path ([string]$partialRootReplacement.quarantinePath) 'still-present.txt'),
+        'still-present',
+        [Text.UTF8Encoding]::new($false))
+    $partialRootReplacementError = Assert-Throws -Message 'purging transaction quarantine root 替换必须失败关闭' -Action {
+        & $entryPath `
+            -Mode Purge `
+            -TransactionPath ([string]$partialRootReplacement.transactionPath) `
+            -ApprovedTransactionSha256 ([string]$partialRootReplacement.transactionSha256) `
+            -ConfirmPurge `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($partialRootReplacementError -match 'identity|漂移') 'purging transaction root identity 漂移必须返回稳定原因'
+    Assert-True ([IO.Directory]::Exists([string]$partialRootReplacement.quarantinePath)) 'root identity 漂移拒绝必须保留替换目录'
+    Assert-True ([IO.Directory]::Exists($parkedQuarantine)) 'root identity 漂移拒绝不得触及原隔离目录'
+
+    $partialTargetReappeared = New-InterruptedPurgeFixture `
+        -Path (Join-Path $fixtureRoot 'partial-purge-target-reappeared')
+    [void][IO.Directory]::CreateDirectory([string]$partialTargetReappeared.targetPath)
+    [IO.File]::WriteAllText(
+        (Join-Path ([string]$partialTargetReappeared.targetPath) 'new-owner.txt'),
+        'new-owner',
+        [Text.UTF8Encoding]::new($false))
+    $partialTargetReappearedError = Assert-Throws -Message 'purging transaction 原目标重新出现必须失败关闭' -Action {
+        & $entryPath `
+            -Mode Purge `
+            -TransactionPath ([string]$partialTargetReappeared.transactionPath) `
+            -ApprovedTransactionSha256 ([string]$partialTargetReappeared.transactionSha256) `
+            -ConfirmPurge `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($partialTargetReappearedError -match '重新出现') 'purging transaction 原目标重新出现必须返回稳定原因'
+    Assert-True ([IO.Directory]::Exists([string]$partialTargetReappeared.targetPath)) '原目标重新出现拒绝不得触及新目录'
+    Assert-True ([IO.Directory]::Exists([string]$partialTargetReappeared.quarantinePath)) '原目标重新出现拒绝必须保留 quarantine'
 
     $rootParentEscapeError = Assert-Throws -Message 'minimumDescendantDepth=0 不得授权父目录' -Action {
         & $entryPath `
@@ -350,6 +507,7 @@ try {
     $batchA = Join-Path $batchParent 'old-a'
     $batchB = Join-Path $batchParent 'old-b'
     $batchC = Join-Path $batchParent 'old-c'
+    $batchD = Join-Path $batchParent 'old-d-partial-purge'
     foreach ($path in @($batchA, $batchB, $batchC)) {
         [void][IO.Directory]::CreateDirectory($path)
         [IO.File]::WriteAllText((Join-Path $path 'payload.txt'), $path, [Text.UTF8Encoding]::new($false))
@@ -369,10 +527,12 @@ try {
         -FixtureEvidenceRoot $evidenceRoot
     Assert-True ($batchPreApply.quarantined -eq $true) 'batch fixture 必须能制造已 quarantine 未 purge 的中间态'
     Assert-True ([IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) 'batch fixture 必须保留待恢复 quarantine'
+    $batchPartial = New-InterruptedPurgeFixture -Path $batchD
+    Assert-True ([IO.Directory]::Exists([string]$batchPartial.quarantinePath)) 'batch fixture 必须制造 purging 部分删除中间态'
 
     $unconfirmedBatch = & $entryPath `
         -Mode BatchPurge `
-        -TargetPaths @($batchA, $batchB, $batchC) `
+        -TargetPaths @($batchA, $batchB, $batchC, $batchD) `
         -CapabilityRoot $fixtureRoot `
         -FixturePolicyPath $policyPath `
         -FixtureEvidenceRoot $evidenceRoot
@@ -382,20 +542,22 @@ try {
 
     $batchResult = & $entryPath `
         -Mode BatchPurge `
-        -TargetPaths @($batchA, $batchB, $batchC) `
+        -TargetPaths @($batchA, $batchB, $batchC, $batchD) `
         -CapabilityRoot $fixtureRoot `
         -ConfirmApply `
         -ConfirmPurge `
         -FixturePolicyPath $policyPath `
         -FixtureEvidenceRoot $evidenceRoot
     Assert-True ($batchResult.completed -eq $true) 'BatchPurge 必须完成批量清理'
-    Assert-True ($batchResult.targetCount -eq 3) 'BatchPurge 必须报告全部目标数'
-    Assert-True ($batchResult.purgedCount -eq 3) 'BatchPurge 必须 purge 新目标和恢复目标'
-    Assert-True ($batchResult.recoveredCount -eq 1) 'BatchPurge 必须恢复并 purge 既有 quarantine transaction'
+    Assert-True ($batchResult.targetCount -eq 4) 'BatchPurge 必须报告全部目标数'
+    Assert-True ($batchResult.purgedCount -eq 4) 'BatchPurge 必须 purge 新目标和恢复目标'
+    Assert-True ($batchResult.recoveredCount -eq 2) 'BatchPurge 必须恢复 quarantined 与 purging transaction'
     Assert-True (-not [IO.Directory]::Exists($batchA)) 'BatchPurge 后原 batchA 不得存在'
     Assert-True (-not [IO.Directory]::Exists($batchB)) 'BatchPurge 后原 batchB 不得存在'
     Assert-True (-not [IO.Directory]::Exists($batchC)) 'BatchPurge 后原 batchC 不得存在'
+    Assert-True (-not [IO.Directory]::Exists($batchD)) 'BatchPurge 后原 batchD 不得存在'
     Assert-True (-not [IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) 'BatchPurge 必须清理既有 quarantine'
+    Assert-True (-not [IO.Directory]::Exists([string]$batchPartial.quarantinePath)) 'BatchPurge 必须清理 purging 部分删除 quarantine'
 
     $junctionTarget = Join-Path $fixtureRoot 'junction-candidate'
     $junctionExternal = Join-Path $fixtureRoot 'junction-external'
@@ -420,7 +582,7 @@ try {
         & $env:ComSpec /d /c rmdir $junctionPath | Out-Null
     }
 
-    [pscustomobject][ordered]@{ ok = $true; suite = 'CodexSafeTreeDelete'; slices = 4 }
+    [pscustomobject][ordered]@{ ok = $true; suite = 'CodexSafeTreeDelete'; slices = 5 }
 } finally {
     Remove-TestTree -Path $fixtureRoot
 }
