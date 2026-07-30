@@ -97,17 +97,25 @@ def is_reparse(path: Path) -> bool:
     return bool(getattr(stat_result, "st_file_attributes", 0) & 0x400)
 
 
+def ensure_no_reparse_ancestors(path: Path, *, label: str) -> None:
+    for current in (*reversed(path.parents), path):
+        if is_reparse(current):
+            raise InstallError(
+                f"{label}不能位于符号链接、junction 或其他 reparse point 之下：{current}"
+            )
+
+
 def d_path(value: Path | str, *, label: str, must_exist: bool = False) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
+    path = path.absolute()
     if path.drive.casefold() != "d:":
         raise InstallError(f"{label}必须位于本机 D 盘：{path}")
+    ensure_no_reparse_ancestors(path, label=label)
     if must_exist and not path.exists():
         raise InstallError(f"{label}不存在：{path}")
-    if path.exists() and is_reparse(path):
-        raise InstallError(f"{label}不能是符号链接、junction 或其他 reparse point：{path}")
-    return path.absolute()
+    return path
 
 
 def ensure_dir(path: Path, *, label: str) -> Path:
@@ -115,8 +123,7 @@ def ensure_dir(path: Path, *, label: str) -> Path:
     if path.exists() and not path.is_dir():
         raise InstallError(f"{label}不是目录：{path}")
     path.mkdir(parents=True, exist_ok=True)
-    if is_reparse(path):
-        raise InstallError(f"{label}不能是 reparse point：{path}")
+    ensure_no_reparse_ancestors(path, label=label)
     return path
 
 
@@ -358,6 +365,9 @@ def strip_scalar(value: str) -> str:
 
 
 def read_skill_name(skill_md: Path) -> str:
+    skill_md = d_path(skill_md, label="SKILL.md", must_exist=True)
+    if is_reparse(skill_md) or not skill_md.is_file():
+        raise InstallError(f"SKILL.md 必须是安全的普通文件：{skill_md}")
     try:
         lines = skill_md.read_text(encoding="utf-8-sig").splitlines()
     except (OSError, UnicodeError) as exc:
@@ -376,10 +386,96 @@ def read_skill_name(skill_md: Path) -> str:
     raise InstallError(f"SKILL.md frontmatter 缺少 name：{skill_md}")
 
 
+def source_record_sections(path: Path) -> list[list[str]]:
+    path = d_path(path, label="SOURCE.md", must_exist=True)
+    if is_reparse(path) or not path.is_file():
+        raise InstallError(f"SOURCE.md 必须是安全的普通文件：{path}")
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise InstallError(f"无法读取 SOURCE.md：{path}：{exc}") from exc
+    sections: list[list[str]] = [[]]
+    for line in lines:
+        if re.fullmatch(r"\s*---\s*", line):
+            sections.append([])
+        else:
+            sections[-1].append(line)
+    return sections
+
+
+def source_record_values(path: Path, field: str) -> list[str]:
+    pattern = re.compile(rf"^\s*{re.escape(field)}\s*:\s*(.+?)\s*$", re.IGNORECASE)
+    current_section = source_record_sections(path)[-1]
+    return [
+        strip_scalar(match.group(1))
+        for line in current_section
+        if (match := pattern.match(line))
+    ]
+
+
+def source_record_unique_value(
+    path: Path,
+    fields: tuple[str, ...],
+    *,
+    label: str,
+) -> str:
+    patterns = [
+        re.compile(rf"^\s*{re.escape(field)}\s*:\s*(.+?)\s*$", re.IGNORECASE)
+        for field in fields
+    ]
+    current_section = source_record_sections(path)[-1]
+    values = [
+        strip_scalar(match.group(1))
+        for line in current_section
+        for pattern in patterns
+        if (match := pattern.match(line))
+    ]
+    unique = set(values)
+    if len(unique) == 1:
+        return values[0]
+    if values:
+        raise InstallError(
+            f"{label} SOURCE.md 当前记录的 {'/'.join(fields)} 存在冲突：{values!r}"
+        )
+    raise InstallError(f"{label} SOURCE.md 当前记录缺少 {'/'.join(fields)}")
+
+
+def validate_source_record_identity(
+    path: Path,
+    *,
+    skill_name: str,
+    repository: str,
+    label: str,
+) -> None:
+    recorded_names = source_record_values(path, "Skill")
+    if not recorded_names or any(name != skill_name for name in recorded_names):
+        raise InstallError(
+            f"{label} SOURCE.md 的 Skill 与 canonical identity 不一致："
+            f"{recorded_names!r} != {skill_name!r}"
+        )
+    expected_repo = normalize_repo(repository)
+    recorded_repos = source_record_values(path, "Source repository")
+    normalized_repos = [normalize_repo(value) for value in recorded_repos]
+    if (
+        expected_repo is None
+        or not normalized_repos
+        or any(value != expected_repo for value in normalized_repos)
+    ):
+        raise InstallError(
+            f"{label} SOURCE.md 的 source repository 与 canonical source 不一致"
+        )
+
+
 def entry_name(entry: Any) -> str | None:
     if isinstance(entry, dict):
-        value = entry.get("name") or entry.get("skill")
-        return str(value) if isinstance(value, str) else None
+        values = [
+            value
+            for key in ("name", "skill")
+            if isinstance((value := entry.get(key)), str) and value
+        ]
+        if len(set(values)) > 1:
+            raise InstallError(f"source ledger direct coverage 字段冲突：{values!r}")
+        return values[0] if values else None
     if isinstance(entry, str):
         return entry
     return None
@@ -455,6 +551,51 @@ def validate_decision_manifest(path: Path) -> dict[str, Any]:
             "guard decision manifest 必须证明 writing-great-skills 已通过或无需修改"
         )
     return data
+
+
+def canonical_rename_spec(
+    *,
+    args: argparse.Namespace,
+    decision: dict[str, Any],
+    names: list[str],
+) -> dict[str, str] | None:
+    raw = decision.get("canonical_rename")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) != {"old_name", "new_name", "source_id"}:
+        raise InstallError(
+            "canonical_rename 字段必须精确为 old_name、new_name、source_id"
+        )
+    if decision.get("decision") != "update":
+        raise InstallError("canonical rename 只允许 decision=update")
+    if not args.candidate or len(names) != 1:
+        raise InstallError("canonical rename 只支持单个本地 --candidate")
+    normalized: dict[str, str] = {}
+    for field in ("old_name", "new_name", "source_id"):
+        value = raw.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise InstallError(f"canonical_rename.{field} 必须是非空字符串")
+        normalized[field] = value.strip()
+    for field in ("old_name", "new_name"):
+        if not SAFE_SKILL_NAME.fullmatch(normalized[field]):
+            raise InstallError(f"canonical_rename.{field} 不是合法 skill name")
+    if normalized["old_name"] == normalized["new_name"]:
+        raise InstallError("canonical rename 的旧名与新名不能相同")
+    if normalized["new_name"] != names[0]:
+        raise InstallError("canonical_rename.new_name 与候选目标名不一致")
+    if decision.get("skills") != [normalized["new_name"]]:
+        raise InstallError(
+            "canonical rename manifest.skills 必须显式且唯一包含 successor"
+        )
+    source = decision.get("source")
+    if not isinstance(source, dict):
+        raise InstallError("canonical rename 必须提供 source identity")
+    if source.get("id") != normalized["source_id"]:
+        raise InstallError("canonical_rename.source_id 与 source.id 不一致")
+    for field in ("repo", "ref", "commit", "upstream_path"):
+        if not isinstance(source.get(field), str) or not source[field].strip():
+            raise InstallError(f"canonical rename 必须提供 source.{field}")
+    return normalized
 
 
 def target_specs(args: argparse.Namespace) -> list[tuple[str, str]]:
@@ -619,6 +760,200 @@ def source_context(
     }
 
 
+def ledger_entry_covers(entry: Any, name: str) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    if entry_name(entry) == name:
+        return True
+    skills = entry.get("skills")
+    return isinstance(skills, list) and name in skills
+
+
+def validate_canonical_rename_state(
+    *,
+    args: argparse.Namespace,
+    active_root: Path,
+    ledger: dict[str, Any],
+    context: dict[str, Any],
+    rename: dict[str, str],
+) -> None:
+    old_name = rename["old_name"]
+    new_name = rename["new_name"]
+    repository = context.get("repo")
+    if not isinstance(repository, str) or not repository:
+        raise InstallError("canonical rename 缺少可验证的 GitHub source repository")
+    if context.get("source_id") != rename["source_id"]:
+        raise InstallError("canonical rename 的 source identity 与事务 context 不一致")
+    source_paths = context.get("source_paths")
+    if (
+        not isinstance(source_paths, list)
+        or len(source_paths) != 1
+        or not isinstance(source_paths[0], str)
+    ):
+        raise InstallError("canonical rename 必须绑定唯一 upstream path")
+    expected_upstream_path = source_paths[0]
+    expected_ref = context.get("ref")
+    expected_commit = context.get("commit")
+    if not isinstance(expected_ref, str) or not expected_ref:
+        raise InstallError("canonical rename 缺少 source ref")
+    if not isinstance(expected_commit, str) or not expected_commit:
+        raise InstallError("canonical rename 缺少 source commit")
+
+    candidate = d_path(args.candidate, label="canonical rename candidate", must_exist=True)
+    ensure_tree_no_reparse(candidate, label="canonical rename candidate")
+    candidate_name = read_skill_name(candidate / "SKILL.md")
+    if candidate_name != new_name:
+        raise InstallError(
+            f"canonical rename candidate name 不一致：{candidate_name!r} != {new_name!r}"
+        )
+    validate_source_record_identity(
+        candidate / "SOURCE.md",
+        skill_name=new_name,
+        repository=repository,
+        label="candidate",
+    )
+    candidate_source = candidate / "SOURCE.md"
+    candidate_predecessor = source_record_unique_value(
+        candidate_source,
+        ("Canonical predecessor",),
+        label="candidate",
+    )
+    candidate_source_id = source_record_unique_value(
+        candidate_source,
+        ("Source identity",),
+        label="candidate",
+    )
+    candidate_upstream_path = source_record_unique_value(
+        candidate_source,
+        ("Upstream path",),
+        label="candidate",
+    )
+    candidate_ref = source_record_unique_value(
+        candidate_source,
+        ("Ref",),
+        label="candidate",
+    )
+    candidate_commit = source_record_unique_value(
+        candidate_source,
+        ("Commit or revision", "Reference commit"),
+        label="candidate",
+    )
+    expected_candidate_identity = {
+        "canonical_predecessor": old_name,
+        "source_identity": rename["source_id"],
+        "upstream_path": expected_upstream_path,
+        "ref": expected_ref,
+        "commit": expected_commit,
+    }
+    actual_candidate_identity = {
+        "canonical_predecessor": candidate_predecessor,
+        "source_identity": candidate_source_id,
+        "upstream_path": candidate_upstream_path,
+        "ref": candidate_ref,
+        "commit": candidate_commit,
+    }
+    if actual_candidate_identity != expected_candidate_identity:
+        raise InstallError(
+            "candidate SOURCE.md 的 canonical source identity 不一致："
+            + json.dumps(
+                {
+                    "expected": expected_candidate_identity,
+                    "actual": actual_candidate_identity,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    old_active = d_path(
+        active_root / old_name,
+        label="canonical rename 旧 active skill",
+        must_exist=True,
+    )
+    new_active = d_path(active_root / new_name, label="canonical rename 新 active skill")
+    if not path_exists_strict(old_active, label="canonical rename 旧 active skill"):
+        raise InstallError(f"canonical rename 旧 active skill 不存在：{old_active}")
+    if is_reparse(old_active) or not old_active.is_dir():
+        raise InstallError(f"canonical rename 旧 active skill 不是安全目录：{old_active}")
+    ensure_tree_no_reparse(old_active, label="canonical rename 旧 active skill")
+    if path_exists_strict(new_active, label="canonical rename 新 active skill"):
+        raise InstallError(f"canonical rename 新 active skill 已存在：{new_active}")
+    actual_old_name = read_skill_name(old_active / "SKILL.md")
+    if actual_old_name != old_name:
+        raise InstallError(
+            f"canonical rename 旧 active name 不一致：{actual_old_name!r} != {old_name!r}"
+        )
+    validate_source_record_identity(
+        old_active / "SOURCE.md",
+        skill_name=old_name,
+        repository=repository,
+        label="旧 active skill",
+    )
+    old_source = old_active / "SOURCE.md"
+    old_upstream_path = source_record_unique_value(
+        old_source,
+        ("Upstream path",),
+        label="旧 active skill",
+    )
+    old_ref = source_record_unique_value(
+        old_source,
+        ("Ref",),
+        label="旧 active skill",
+    )
+    old_commit = source_record_unique_value(
+        old_source,
+        ("Commit or revision", "Reference commit"),
+        label="旧 active skill",
+    )
+    if (
+        old_upstream_path != expected_upstream_path
+        or old_ref != expected_ref
+        or old_commit != expected_commit
+    ):
+        raise InstallError("旧 active SOURCE.md 与 canonical source identity 不一致")
+
+    if not isinstance(ledger, dict):
+        raise InstallError("source ledger 顶层必须是 JSON 对象")
+    live_matches: list[tuple[str, dict[str, Any]]] = []
+    for section in ("sources", "unresolved"):
+        entries = ledger.get(section, [])
+        if not isinstance(entries, list):
+            raise InstallError(f"source ledger 的 {section} 必须是数组")
+        for entry in entries:
+            if ledger_entry_covers(entry, old_name):
+                if not isinstance(entry, dict):
+                    raise InstallError("canonical rename 旧名 ledger coverage 不合法")
+                live_matches.append((section, entry))
+            if ledger_entry_covers(entry, new_name):
+                raise InstallError("canonical rename 新名已存在 live ledger coverage")
+    if len(live_matches) != 1 or live_matches[0][0] != "sources":
+        raise InstallError("canonical rename 旧名必须由唯一 sources ledger entry 覆盖")
+    source_entry = live_matches[0][1]
+    if source_entry.get("id") != rename["source_id"]:
+        raise InstallError("canonical rename 旧名 ledger source id 不一致")
+    source_id_matches = [
+        entry
+        for entry in ledger["sources"]
+        if isinstance(entry, dict) and entry.get("id") == rename["source_id"]
+    ]
+    if len(source_id_matches) != 1 or source_id_matches[0] is not source_entry:
+        raise InstallError(
+            "canonical rename source id 必须唯一绑定旧名 ledger source entry"
+        )
+    if normalize_repo(source_entry.get("repo")) != normalize_repo(repository):
+        raise InstallError("canonical rename 旧名 ledger source repo 不一致")
+    if source_entry.get("ref") != expected_ref:
+        raise InstallError("canonical rename 旧名 ledger source ref 不一致")
+    ledger_commits = {
+        value
+        for key in ("last_checked_commit", "catalog_ref", "commit", "revision")
+        if isinstance((value := source_entry.get(key)), str) and value
+    }
+    if ledger_commits != {expected_commit}:
+        raise InstallError(
+            f"canonical rename 旧名 ledger source commit 不一致：{sorted(ledger_commits)!r}"
+        )
+
+
 def guarded_command(args: argparse.Namespace) -> str:
     if args.candidate:
         return f"guarded wrapper --candidate {args.candidate}"
@@ -707,12 +1042,32 @@ def update_ledger(
         if not isinstance(data[key], list):
             raise InstallError(f"source ledger 的 {key} 必须是数组")
 
-    name_set = set(names)
+    rename = context.get("canonical_rename")
+    retired_names: list[str] = []
+    if isinstance(rename, dict):
+        old_name = rename.get("old_name")
+        new_name = rename.get("new_name")
+        source_id = rename.get("source_id")
+        if (
+            not isinstance(old_name, str)
+            or not isinstance(new_name, str)
+            or not isinstance(source_id, str)
+            or names != [new_name]
+        ):
+            raise InstallError("canonical rename ledger context 不合法")
+        retired_names.append(old_name)
+
+    name_set = set([*names, *retired_names])
     for key in ("unresolved", "deleted"):
         data[key] = [entry for entry in data[key] if entry_name(entry) not in name_set]
     for entry in data["sources"]:
         if not isinstance(entry, dict):
             continue
+        direct_name = entry_name(entry)
+        if direct_name in name_set:
+            for direct_key in ("name", "skill"):
+                if entry.get(direct_key) == direct_name:
+                    entry.pop(direct_key)
         skills = entry.get("skills")
         if isinstance(skills, list):
             entry["skills"] = [skill for skill in skills if skill not in name_set]
@@ -723,11 +1078,16 @@ def update_ledger(
     for entry in data["sources"]:
         if not isinstance(entry, dict):
             continue
-        if entry.get("id") == source_id or (
-            source_repo and normalize_repo(entry.get("repo")) == normalize_repo(source_repo)
-        ):
+        if entry.get("id") == source_id:
             target_source = entry
             break
+    if target_source is None and source_repo:
+        for entry in data["sources"]:
+            if not isinstance(entry, dict):
+                continue
+            if normalize_repo(entry.get("repo")) == normalize_repo(source_repo):
+                target_source = entry
+                break
 
     if target_source is None:
         target_source = {
@@ -759,6 +1119,17 @@ def update_ledger(
     for name in names:
         if name not in skills:
             skills.append(name)
+    if retired_names:
+        data["deleted"].append(
+            {
+                "name": retired_names[0],
+                "status": "moved",
+                "reason": "canonical rename",
+                "new_name": names[0],
+                "source_id": context["source_id"],
+                "date": today(),
+            }
+        )
     if context["overlay_status"].casefold() not in {"none", "no-change", ""}:
         changes = target_source.setdefault("local_changes", [])
         if not isinstance(changes, list):
@@ -952,6 +1323,39 @@ def path_exists_strict(path: Path, *, label: str) -> bool:
         return False
     except OSError as exc:
         raise InstallError(f"无法确认{label}是否存在：{path}：{exc}") from exc
+
+
+def directory_identity(path: Path, *, label: str) -> dict[str, int]:
+    path = d_path(path, label=label, must_exist=True)
+    if is_reparse(path) or not path.is_dir():
+        raise InstallError(f"{label}必须是安全目录：{path}")
+    try:
+        stat_result = path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise InstallError(f"无法读取{label}目录 identity：{path}：{exc}") from exc
+    return {
+        "device": int(stat_result.st_dev),
+        "inode": int(stat_result.st_ino),
+    }
+
+
+def verify_directory_identity(
+    path: Path,
+    *,
+    expected: dict[str, int],
+    label: str,
+) -> None:
+    if set(expected) != {"device", "inode"} or any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in expected.values()
+    ):
+        raise InstallError(f"{label}预期目录 identity 不合法")
+    actual = directory_identity(path, label=label)
+    if actual != expected:
+        raise InstallError(
+            f"{label}目录 identity 漂移："
+            + json.dumps({"expected": expected, "actual": actual}, ensure_ascii=False)
+        )
 
 
 def make_tree_writable(root: Path) -> None:
@@ -1299,6 +1703,52 @@ def backup_file(path: Path, backup_root: Path, label: str) -> Path | None:
     return backup
 
 
+def retire_directories(
+    *,
+    active_root: Path,
+    names: list[str],
+    backup_root: Path,
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    ensure_dir(backup_root, label="retired skill backup 目录")
+    ensure_no_reparse_ancestors(active_root, label="active root")
+    ensure_no_reparse_ancestors(backup_root, label="retired skill backup 目录")
+    for name in names:
+        active = d_path(active_root / name, label=f"待退场 active skill {name}")
+        if not path_exists_strict(active, label=f"待退场 active skill {name}"):
+            raise InstallError(f"待退场 active skill 不存在：{active}")
+        if is_reparse(active) or not active.is_dir():
+            raise InstallError(f"待退场 active skill 不是安全目录：{active}")
+        record = {
+            "name": name,
+            "active": str(active),
+            "backup": str(backup_root / name),
+            "activation_temp": str(
+                active_root / f"_disabled-guarded-retired-{name}-{uuid.uuid4().hex}"
+            ),
+            "had_existing": True,
+            "backup_moved": False,
+            "backup_seal": None,
+            "backup_read_only_paths": [],
+            "pre_activation_recovery_error": None,
+            "activated": False,
+            "retired": True,
+        }
+        records.append(record)
+        try:
+            backup_seal, backup_read_only_paths = move_active_to_backup(
+                active,
+                backup_root / name,
+            )
+            record["backup_seal"] = backup_seal
+            record["backup_read_only_paths"] = backup_read_only_paths
+            record["backup_moved"] = True
+        except RecoveryRequiredError as exc:
+            record["pre_activation_recovery_error"] = str(exc)
+            raise
+    return records
+
+
 def activate_directories(
     *,
     stage_root: Path,
@@ -1307,21 +1757,36 @@ def activate_directories(
     backup_root: Path,
     records: list[dict[str, Any]],
     payload_seals: dict[str, dict[str, Any]],
+    must_not_exist: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     ensure_dir(backup_root, label="skill backup 目录")
+    ensure_no_reparse_ancestors(active_root, label="active root")
+    ensure_no_reparse_ancestors(backup_root, label="skill backup 目录")
+    protected_new_names = set(must_not_exist or ())
+    unexpected_protected_names = protected_new_names - set(names)
+    if unexpected_protected_names:
+        raise InstallError(
+            "must_not_exist 包含非目标 skill："
+            + ", ".join(sorted(unexpected_protected_names))
+        )
     for name in names:
         staged = stage_root / name
         seal = payload_seals.get(name)
         if not isinstance(seal, dict):
             raise InstallError(f"staging 缺少 skill 内容 seal：{name}")
         verify_tree_seal(staged, seal=seal, label=f"staging skill {name}")
-        active = active_root / name
+        active = d_path(active_root / name, label=f"active skill {name}")
         active_exists = path_exists_strict(active, label=f"active skill {name}")
+        if name in protected_new_names and active_exists:
+            raise InstallError(f"canonical rename successor 已在换入前出现：{active}")
         if active_exists and is_reparse(active):
             raise InstallError(f"active skill 目标是 reparse point：{active}")
         if active_exists and not active.is_dir():
             raise InstallError(f"active skill 目标不是目录：{active}")
-        activation_temp = active_root / f"_disabled-guarded-{name}-{uuid.uuid4().hex}"
+        activation_temp = d_path(
+            active_root / f"_disabled-guarded-{name}-{uuid.uuid4().hex}",
+            label=f"激活临时目录 {name}",
+        )
         record = {
             "name": name,
             "active": str(active),
@@ -1333,12 +1798,18 @@ def activate_directories(
             "backup_read_only_paths": [],
             "pre_activation_recovery_error": None,
             "activated": False,
+            "activated_payload_seal": seal,
+            "activated_payload_identity": None,
         }
         records.append(record)
         copy_tree_without_security_metadata(staged, activation_temp)
         verify_tree_seal(
             activation_temp,
             seal=seal,
+            label=f"激活临时目录 {name}",
+        )
+        record["activated_payload_identity"] = directory_identity(
+            activation_temp,
             label=f"激活临时目录 {name}",
         )
         if active_exists:
@@ -1359,10 +1830,35 @@ def activate_directories(
                 seal=seal,
                 label=f"原子换入前临时目录 {name}",
             )
-            os.replace(activation_temp, active)
+            ensure_no_reparse_ancestors(active_root, label="active root")
+            if name in protected_new_names:
+                if path_exists_strict(active, label=f"canonical rename successor {name}"):
+                    raise InstallError(
+                        f"canonical rename successor 已在原子换入前出现：{active}"
+                    )
+                try:
+                    os.rename(activation_temp, active)
+                except OSError as rename_error:
+                    if path_exists_strict(
+                        active, label=f"canonical rename successor {name}"
+                    ):
+                        raise InstallError(
+                            f"canonical rename successor 在原子换入竞争中出现：{active}"
+                        ) from rename_error
+                    raise
+            else:
+                os.replace(activation_temp, active)
         except Exception as exc:
             raise InstallError(f"激活 skill 失败：{name}：{exc}") from exc
         record["activated"] = True
+        activated_identity = record.get("activated_payload_identity")
+        if not isinstance(activated_identity, dict):
+            raise InstallError(f"已激活 skill 缺少目录 identity：{name}")
+        verify_directory_identity(
+            active,
+            expected=activated_identity,
+            label=f"已激活 skill {name}",
+        )
         verify_tree_seal(active, seal=seal, label=f"已激活 skill {name}")
     return records
 
@@ -1389,9 +1885,39 @@ def rollback_directories(records: list[dict[str, Any]]) -> list[str]:
                 )
             elif record["activated"] and record["had_existing"]:
                 raise InstallError(f"rollback 已有 active skill 缺少事务备份：{record['name']}")
-            if record["activated"] and path_exists_strict(active, label="rollback active skill"):
+            if record["activated"]:
+                if not path_exists_strict(active, label="rollback active skill"):
+                    raise InstallError(
+                        f"rollback 已激活 skill 路径已消失，无法证明事务 payload 已移除：{record['name']}"
+                    )
+                activated_seal = record.get("activated_payload_seal")
+                if not isinstance(activated_seal, dict):
+                    raise InstallError(
+                        f"rollback 缺少已激活 skill 内容 seal：{record['name']}"
+                    )
+                activated_identity = record.get("activated_payload_identity")
+                if not isinstance(activated_identity, dict):
+                    raise InstallError(
+                        f"rollback 缺少已激活 skill 目录 identity：{record['name']}"
+                    )
+                verify_directory_identity(
+                    active,
+                    expected=activated_identity,
+                    label=f"rollback 删除前事务 payload {record['name']}",
+                )
+                verify_tree_seal(
+                    active,
+                    seal=activated_seal,
+                    label=f"rollback 删除前事务 payload {record['name']}",
+                )
                 safe_remove(active)
             if record["backup_moved"]:
+                if record.get("retired") and path_exists_strict(
+                    active, label="rollback retired active skill"
+                ):
+                    raise InstallError(
+                        f"rollback 待恢复旧名路径已被占用：{record['name']}"
+                    )
                 try:
                     make_tree_writable(backup)
                     shutil.move(str(backup), str(active))
@@ -1534,6 +2060,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     specs = target_specs(args)
     names = [name for name, _ in specs]
     decision = load_and_validate_manifest(decision_path, names=names)
+    rename = canonical_rename_spec(args=args, decision=decision, names=names)
     specs = apply_candidate_upstream_path(args, decision, specs)
     if args.update and decision["decision"] != "update":
         raise InstallError("--update 只能与 decision=update 的 manifest 一起使用")
@@ -1542,6 +2069,15 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         # extra compatibility signal, not a second approval gate.
         pass
     context = source_context(args, decision, specs)
+    if rename is not None:
+        context["canonical_rename"] = rename
+        validate_canonical_rename_state(
+            args=args,
+            active_root=active_root,
+            ledger=load_json(ledger_path, label="source ledger"),
+            context=context,
+            rename=rename,
+        )
     transaction_id = uuid.uuid4().hex
     evidence_dir = evidence_root / f"install-{_datetime.datetime.now().strftime('%Y%m%dT%H%M%S')}-{transaction_id}"
     ensure_dir(evidence_dir, label="transaction evidence directory")
@@ -1590,17 +2126,33 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             return result
 
         active_state = load_json(ledger_path, label="source ledger")
+        if rename is not None:
+            validate_canonical_rename_state(
+                args=args,
+                active_root=active_root,
+                ledger=active_state,
+                context=context,
+                rename=rename,
+            )
         backup_root = evidence_dir / "backups"
         ensure_dir(backup_root, label="transaction backup root")
         ledger_backup = backup_file(ledger_path, backup_root, "source-state-before.json")
         catalog_backup = backup_file(catalog_path, backup_root, "catalog-before.json")
         state_backups_ready = True
-        for name in names:
-            active = active_root / name
-            if decision["decision"] == "install" and active.exists():
-                raise InstallError(f"install 分支不能覆盖已有 active skill：{active}")
-            if decision["decision"] == "update" and not active.exists():
-                raise InstallError(f"update 分支要求已有 active skill：{active}")
+        if rename is None:
+            for name in names:
+                active = active_root / name
+                if decision["decision"] == "install" and active.exists():
+                    raise InstallError(f"install 分支不能覆盖已有 active skill：{active}")
+                if decision["decision"] == "update" and not active.exists():
+                    raise InstallError(f"update 分支要求已有 active skill：{active}")
+        else:
+            retire_directories(
+                active_root=active_root,
+                names=[rename["old_name"]],
+                backup_root=backup_root / "active-skills",
+                records=directory_records,
+            )
         activate_directories(
             stage_root=stage_dir,
             active_root=active_root,
@@ -1608,6 +2160,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             backup_root=backup_root / "active-skills",
             records=directory_records,
             payload_seals=staged["staged_payloads"],
+            must_not_exist={rename["new_name"]} if rename is not None else None,
         )
         activation_readability = verify_activation_readability(
             active_root=active_root,

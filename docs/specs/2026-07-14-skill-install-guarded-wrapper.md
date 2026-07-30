@@ -20,10 +20,10 @@
 ## 事务流程
 
 1. `skill-install-guard` 产生 decision manifest，必须包含 `install` 或 `update`、`source-pass/source-review` 和 `writing-great-skills` 通过证据。
-2. wrapper 将远端候选下载到 D 盘 staging；本地 `--candidate` 必须先用 decision manifest 绑定 `SKILL.md` 和安装载荷 SHA-256，再复制已审查内容。安装载荷排除任何层级的 `.git`、`__pycache__` 和 `.pyc`，这些来源仓库/解释器元数据不进入 active skill。
+2. wrapper 将远端候选下载到 D 盘 staging；本地 `--candidate` 必须先用 decision manifest 绑定 `SKILL.md` 和安装载荷 SHA-256，再复制已审查内容。安装载荷排除任何层级的 `.git`、`__pycache__` 和 `.pyc`，这些来源仓库/解释器元数据不进入 active skill。所有 D 盘输入和写入路径都检查目标及全部既有祖先，任何父级 symlink、junction 或其他 reparse point 都在读取、暂存、备份或激活前失败闭锁；canonical identity 读取还必须先完成 candidate 与 predecessor 整树 reparse 审计。
 3. wrapper 写入/保留 `SOURCE.md` 和 staging ledger，运行严格资源闭包检查。
 4. wrapper 在 active root 下重新创建候选内容，不移动 staging 目录，也不复制 staging 的 owner、DACL 或 SACL；目标目录和文件必须继承本机 active root 的权限。
-5. wrapper 备份旧 active skill，再原子换入候选；Windows 备份移动前清除旧树只读位，该属性规范化本身也必须位于同一恢复边界内。若属性规范化或复制式移动在清理阶段失败，则合并源树与事务备份、恢复原只读属性，并按旧树内容 seal 证明恢复。回滚已有 active skill 时，删除当前 active 前必须先证明事务备份存在且匹配旧树 seal；缺失或不匹配时保留当前 active 并标记 `rollback-failed`。无法证明恢复时状态必须为 `rollback-failed`。换入后立即在独立子进程中枚举并读取全部文件，同时验证目标树不存在受保护 ACL。任一项失败都回滚，事务不得标记成功。
+5. wrapper 备份旧 active skill，再原子换入候选；Windows 备份移动前清除旧树只读位，该属性规范化本身也必须位于同一恢复边界内。若属性规范化或复制式移动在清理阶段失败，则合并源树与事务备份、恢复原只读属性，并按旧树内容 seal 证明恢复。回滚已有 active skill 时，删除当前 active 前必须先证明事务备份存在且匹配旧树 seal；删除已换入目录前还必须证明当前路径同时匹配本事务换入前捕获的目录 identity（volume/file index）与 payload seal。缺失、不匹配或路径消失时保留现状并标记 `rollback-failed`。无法证明恢复时状态必须为 `rollback-failed`。canonical rename 在 preflight、旧名退场后和真正换入前持续断言 successor 不存在，并使用 Windows 原子 no-replace rename；竞争产生的意外 successor 原样保留，既不备份成普通 update，也不覆盖或删除。换入后立即在独立子进程中枚举并读取全部文件，同时验证目标树不存在受保护 ACL。任一项失败都回滚，事务不得标记成功。
 6. wrapper 更新 `D:\Codex\.codex\skills\.downloaded-skills-source-state.json`；只有 decision manifest 明确提供且通过白名单校验的来源元数据才可覆盖既有字段。
 7. wrapper 调用 `generate_skill_catalog.py --write`，再运行闭包、catalog 条目、ledger coverage 和 `SKILL.md` SHA-256 复核。
 8. 任一步失败都恢复 active 目录和状态文件，并把失败/回滚结果写入 `D:\Codex\.codex\run-evidence\skill-install-guarded\`。
@@ -66,6 +66,33 @@
 `decision=update` 才允许替换已有 active skill。直接调用 `.system\skill-installer`、手工复制到 active root 或跳过 decision manifest，都不算完成的安装流程。
 
 `source.ledger_updates` 可选且只允许更新 `action`、`installed_version`、`path`、`resource_paths`、`status` 五个字段；`action`、`installed_version`、`path` 与 `status` 必须是非空字符串，`resource_paths` 必须是非空字符串数组。未知字段或错误类型会在 activation 前拒绝事务，避免 decision manifest 静默改写任意台账内容。
+
+## Canonical rename
+
+canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不是“安装新名后手工删除旧名”。manifest 必须额外包含：
+
+```json
+{
+  "decision": "update",
+  "skills": ["new-skill"],
+  "canonical_rename": {
+    "old_name": "old-skill",
+    "new_name": "new-skill",
+    "source_id": "owner-repo-source"
+  },
+  "source": {
+    "id": "owner-repo-source",
+    "repo": "owner/repo",
+    "ref": "main",
+    "commit": "<reviewed-commit>",
+    "upstream_path": "skills/new-skill"
+  }
+}
+```
+
+`canonical_rename.new_name` 必须等于唯一 candidate 目标和 manifest `skills` 中显式声明的唯一名称，`old_name` 必须是当前唯一 active predecessor，`source_id` 必须与 `source.id` 及覆盖旧名的唯一 ledger source entry 完全一致，并且该 id 在 live `sources` 中只能出现一次。direct-entry coverage 的 `name`/`skill` 若同时存在必须指向同一名称，否则在任何 ledger mutation 前失败闭锁。candidate `SOURCE.md` 必须在当前追加记录中无歧义地记录 `Skill`、`Canonical predecessor`、`Source identity`、`Source repository`、`Upstream path`、`Ref` 和 `Commit or revision`；wrapper 将其与旧 active `SOURCE.md` 的最新追加记录、manifest 及 ledger 的 id/repo/ref/commit 结构化交叉核对。历史追加记录可以保留旧 ref/commit/path，但当前记录字段缺失或重复冲突、同 repo 错误 identity、错误 predecessor 或版本漂移都在 staging/activation 前失败闭锁。
+
+事务先把旧 active 目录移动到同一 evidence backup，再以 no-replace 语义激活 successor。成功后 ledger 只给新名保留一个 live source coverage，并把旧名记录为 `deleted/status=moved/reason=canonical rename/new_name=<successor>`；catalog 和严格 closure 必须同时通过。activation、ledger、catalog、closure 或后置 hash 任一步失败时，按逆序移除本事务创建的新目录、恢复旧目录及其只读属性，并原样恢复 ledger/catalog；由竞争者创建的 successor 不属于本事务，必须保留。
 
 ## 可维护性
 
