@@ -42,10 +42,38 @@
       "deniedExactPaths": []
     },
     {
+      "id": "codex-managed-temp",
+      "capabilityRoot": "D:\\Codex\\.codex\\tmp",
+      "minimumDescendantDepth": 2,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
       "id": "environment-reports",
       "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
       "minimumDescendantDepth": 1,
       "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-hook-pycache",
+      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\__pycache__",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-scripts-pycache",
+      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\scripts\\__pycache__",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-tests-pycache",
+      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\tests\\__pycache__",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {

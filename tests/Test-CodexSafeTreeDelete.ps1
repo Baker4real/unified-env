@@ -263,6 +263,51 @@ try {
     Assert-True ($legacyTempEntry.capabilityRoot -ceq 'D:\Codex\.tmp') 'legacy temp capability root 必须精确指向 D:\Codex\.tmp'
     Assert-True ($legacyTempEntry.minimumDescendantDepth -eq 1) 'legacy temp capability root 不得删除根目录自身'
     Assert-True ($legacyTempEntry.rootDeletionPurpose -ceq 'none') 'legacy temp capability root 不得声明 root 删除用途'
+    $productionPolicyExpectations = @(
+        [pscustomobject]@{
+            id = 'codex-managed-temp'
+            capabilityRoot = 'D:\Codex\.codex\tmp'
+            minimumDescendantDepth = 2
+            rootDeletionPurpose = 'none'
+        },
+        [pscustomobject]@{
+            id = 'environment-hook-pycache'
+            capabilityRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks\hooks\__pycache__'
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'
+        },
+        [pscustomobject]@{
+            id = 'environment-scripts-pycache'
+            capabilityRoot = 'D:\Codex\projects\统一环境\scripts\__pycache__'
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'
+        },
+        [pscustomobject]@{
+            id = 'environment-tests-pycache'
+            capabilityRoot = 'D:\Codex\projects\统一环境\tests\__pycache__'
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'
+        }
+    )
+    foreach ($expectedPolicyEntry in $productionPolicyExpectations) {
+        $matchingPolicyEntries = @($productionPolicy.entries | Where-Object {
+            $_.id -ceq $expectedPolicyEntry.id
+        })
+        Assert-True ($matchingPolicyEntries.Count -eq 1) "生产策略必须唯一声明 $($expectedPolicyEntry.id) capability root"
+        $matchingPolicyEntry = $matchingPolicyEntries[0]
+        Assert-True `
+            ($matchingPolicyEntry.capabilityRoot -ceq $expectedPolicyEntry.capabilityRoot) `
+            "$($expectedPolicyEntry.id) capability root 路径不匹配"
+        Assert-True `
+            ($matchingPolicyEntry.minimumDescendantDepth -eq $expectedPolicyEntry.minimumDescendantDepth) `
+            "$($expectedPolicyEntry.id) minimumDescendantDepth 不匹配"
+        Assert-True `
+            ($matchingPolicyEntry.rootDeletionPurpose -ceq $expectedPolicyEntry.rootDeletionPurpose) `
+            "$($expectedPolicyEntry.id) rootDeletionPurpose 不匹配"
+        Assert-True `
+            (@($matchingPolicyEntry.deniedExactPaths).Count -eq 0) `
+            "$($expectedPolicyEntry.id) 不得隐含额外 denylist"
+    }
     $planResult = & $entryPath `
         -Mode Plan `
         -TargetPath $targetPath `
