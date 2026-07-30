@@ -954,9 +954,9 @@ def validate_canonical_rename_state(
         )
 
 
-def guarded_command(args: argparse.Namespace) -> str:
+def guarded_retrieval(args: argparse.Namespace) -> str:
     if args.candidate:
-        return f"guarded wrapper --candidate {args.candidate}"
+        return "guarded wrapper local candidate verified by candidate_integrity"
     if args.url:
         return f"guarded wrapper --url {args.url}"
     return f"guarded wrapper --repo {args.repo} --path {' '.join(args.paths)}"
@@ -994,6 +994,7 @@ def source_record_text(
             f"Local overlay: {context['overlay_status']}"
             + (f" ({context['overlay_summary']})" if context["overlay_summary"] else ""),
             "Guarded activation: complete only after ledger, closure, catalog, and hash postchecks pass.",
+            f"Guarded transaction evidence: `{context['evidence_path']}`",
             f"Decision manifest: `{context['manifest_path']}`",
             "",
         ]
@@ -1026,6 +1027,38 @@ def append_source_record(
     else:
         content = generated
     atomic_write_bytes(path, (content.rstrip() + "\n").encode("utf-8"))
+
+
+def validate_durable_source_record(
+    path: Path,
+    *,
+    durable_paths: list[Path],
+    transient_paths: list[Path],
+) -> None:
+    text = path.read_text(encoding="utf-8-sig").replace("\\", "/").casefold()
+    for durable in sorted(
+        (
+            str(item).replace("\\", "/").rstrip("/").casefold()
+            for item in durable_paths
+        ),
+        key=len,
+        reverse=True,
+    ):
+        text = text.replace(durable, "<durable-evidence>")
+    forbidden = {
+        "d:/codex/tmp",
+        "d:/codex/.tmp",
+        "d:/codex/.codex/tmp",
+        *(
+            str(item).replace("\\", "/").rstrip("/").casefold()
+            for item in transient_paths
+        ),
+    }
+    matches = sorted(item for item in forbidden if item and item in text)
+    if matches:
+        raise InstallError(
+            "SOURCE.md 不得保留临时 provenance 路径：" + ", ".join(matches)
+        )
 
 
 def update_ledger(
@@ -1283,8 +1316,18 @@ def stage_candidate(
             active_root=active_root,
             upstream_path=upstream_path,
             context=context,
-            command=guarded_command(args),
+            command=guarded_retrieval(args),
         )
+        if args.candidate:
+            validate_durable_source_record(
+                target / "SOURCE.md",
+                durable_paths=[
+                    active_root,
+                    Path(context["evidence_path"]),
+                    Path(context["manifest_path"]),
+                ],
+                transient_paths=[Path(args.candidate), Path(args.decision_manifest)],
+            )
     atomic_write_json(stage_root / ".downloaded-skills-source-state.json", make_staging_ledger(names, context))
     closure = run_closure(
         root=stage_root,
@@ -2060,6 +2103,15 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     specs = target_specs(args)
     names = [name for name, _ in specs]
     decision = load_and_validate_manifest(decision_path, names=names)
+    decision_snapshot_bytes = decision_path.read_bytes()
+    try:
+        decision_snapshot_value = json.loads(
+            decision_snapshot_bytes.decode("utf-8-sig")
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InstallError(f"decision manifest 快照无法解析：{exc}") from exc
+    if decision_snapshot_value != decision:
+        raise InstallError("decision manifest 在验证期间发生变化")
     rename = canonical_rename_spec(args=args, decision=decision, names=names)
     specs = apply_candidate_upstream_path(args, decision, specs)
     if args.update and decision["decision"] != "update":
@@ -2082,12 +2134,20 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     evidence_dir = evidence_root / f"install-{_datetime.datetime.now().strftime('%Y%m%dT%H%M%S')}-{transaction_id}"
     ensure_dir(evidence_dir, label="transaction evidence directory")
     manifest_path = evidence_dir / "manifest.json"
+    decision_snapshot_path = evidence_dir / "decision-manifest.json"
+    decision_snapshot = {
+        "path": str(decision_snapshot_path),
+        "sha256": hashlib.sha256(decision_snapshot_bytes).hexdigest(),
+    }
+    context["evidence_path"] = str(evidence_dir)
+    context["manifest_path"] = str(decision_snapshot_path)
     plan = {
         "schema_version": 1,
         "transaction_id": transaction_id,
         "status": "prepared",
         "started_at": utc_now(),
         "decision": decision,
+        "decision_manifest_snapshot": decision_snapshot,
         "targets": names,
         "active_root": str(active_root),
         "ledger": str(ledger_path),
@@ -2103,6 +2163,9 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     state_backups_ready = False
     staged: dict[str, Any] | None = None
     try:
+        atomic_write_bytes(decision_snapshot_path, decision_snapshot_bytes)
+        if sha256_file(decision_snapshot_path) != decision_snapshot["sha256"]:
+            raise InstallError("decision manifest 事务快照指纹不一致")
         staged = stage_candidate(
             args=args,
             specs=specs,

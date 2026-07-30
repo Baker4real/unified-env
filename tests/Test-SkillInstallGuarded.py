@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -429,6 +430,79 @@ class SkillInstallGuardedTests(unittest.TestCase):
         artifact = next(item for item in catalog["artifacts"] if item.get("name") == "test-skill-wrapper")
         self.assertEqual(artifact["ledger_coverage"], "pass")
         self.assertEqual(catalog["checks"]["resource_closure"]["status"], "pass")
+
+    def test_candidate_activation_records_durable_decision_evidence(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "持久 provenance")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 0)
+        transaction_manifest = max(
+            (self.temp / "evidence").glob("install-*/manifest.json")
+        )
+        result = json.loads(transaction_manifest.read_text(encoding="utf-8"))
+        decision_snapshot = transaction_manifest.parent / "decision-manifest.json"
+        self.assertEqual(
+            result["decision_manifest_snapshot"],
+            {
+                "path": str(decision_snapshot),
+                "sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+            },
+        )
+        self.assertEqual(decision_snapshot.read_bytes(), manifest.read_bytes())
+
+        source_record = (
+            self.active / "test-skill-wrapper" / "SOURCE.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            f"Guarded transaction evidence: `{transaction_manifest.parent}`",
+            source_record,
+        )
+        self.assertIn(f"Decision manifest: `{decision_snapshot}`", source_record)
+        self.assertNotIn(str(candidate), source_record)
+        self.assertNotIn(str(manifest), source_record)
+
+        catalog = json.loads((self.temp / "catalog.json").read_text(encoding="utf-8"))
+        artifact = next(
+            item for item in catalog["artifacts"] if item.get("name") == "test-skill-wrapper"
+        )
+        source_fields = artifact["source"]["fields"]
+        self.assertEqual(source_fields["decision_manifest"], str(decision_snapshot))
+        self.assertEqual(
+            source_fields["guarded_transaction_evidence"],
+            str(transaction_manifest.parent),
+        )
+        flattened_source = json.dumps(source_fields, ensure_ascii=False)
+        self.assertNotIn(str(candidate), flattened_source)
+        self.assertNotIn(str(manifest), flattened_source)
+
+    def test_candidate_activation_rejects_transient_source_provenance(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "拒绝临时 provenance")
+        manifest = self.temp / "manifest-test-skill-wrapper-install.json"
+        (candidate / "SOURCE.md").write_text(
+            "\n".join(
+                [
+                    "# Source Provenance",
+                    "",
+                    "Skill: `test-skill-wrapper`",
+                    f"Candidate path: `{candidate}`",
+                    f"Original decision manifest: `{manifest}`",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertFalse((self.active / "test-skill-wrapper").exists())
+        self.assertIn("SOURCE.md 不得保留临时 provenance 路径", stderr.getvalue())
 
     def test_candidate_metadata_is_excluded_from_active_payload(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "排除候选元数据")
