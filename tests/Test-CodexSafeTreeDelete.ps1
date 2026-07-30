@@ -20,6 +20,9 @@ $evidenceRoot = Join-Path $fixtureRoot 'evidence'
 $policyPath = Join-Path $fixtureRoot 'policy.json'
 $invalidProjectRootPolicyPath = Join-Path $fixtureRoot 'invalid-project-root-policy.json'
 $invalidStateRootPolicyPath = Join-Path $fixtureRoot 'invalid-state-root-policy.json'
+$largeSparseTargetPath = Join-Path $fixtureRoot 'large-sparse-candidate'
+$largeSparseFilePath = Join-Path $largeSparseTargetPath 'large-zero.bin'
+$largeSparseQuarantinePath = $null
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -31,6 +34,112 @@ function Assert-Throws {
     try { & $Action | Out-Null } catch { return $_.Exception.Message }
     throw $Message
 }
+
+function Get-ExceptionChainText {
+    param([Parameter(Mandatory)][Exception]$Exception)
+
+    $parts = [Collections.Generic.List[string]]::new()
+    $current = $Exception
+    while ($null -ne $current) {
+        $nativeErrorCode = if ($current.PSObject.Properties.Name -contains 'NativeErrorCode') {
+            "; NativeErrorCode=$($current.NativeErrorCode)"
+        } else { '' }
+        $parts.Add("$($current.GetType().FullName): $($current.Message)$nativeErrorCode")
+        $current = $current.InnerException
+    }
+    return $parts -join ' -> '
+}
+
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+using Microsoft.Win32.SafeHandles;
+
+public static class CodexSafeDeleteSparseFixture
+{
+    private const uint FsctlSetSparse = 0x000900C4;
+    private const uint DeleteAccess = 0x00010000;
+    private const uint OpenExisting = 3;
+    private const uint FileAttributeNormal = 0x00000080;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(
+        SafeFileHandle device,
+        uint controlCode,
+        IntPtr inputBuffer,
+        uint inputBufferSize,
+        IntPtr outputBuffer,
+        uint outputBufferSize,
+        out uint bytesReturned,
+        IntPtr overlapped);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(
+        string fileName,
+        uint desiredAccess,
+        FileShare shareMode,
+        IntPtr securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile);
+
+    public static void CreateZeroFile(string path, long length)
+    {
+        using (FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+        {
+            uint bytesReturned;
+            if (!DeviceIoControl(
+                stream.SafeFileHandle,
+                FsctlSetSparse,
+                IntPtr.Zero,
+                0,
+                IntPtr.Zero,
+                0,
+                out bytesReturned,
+                IntPtr.Zero))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to mark the large-file fixture sparse.");
+            }
+            stream.SetLength(length);
+            stream.Flush(true);
+        }
+    }
+
+    public static long WaitForDeleteShare(string path, int timeoutMilliseconds)
+    {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        while (stopwatch.ElapsedMilliseconds < timeoutMilliseconds)
+        {
+            using (SafeFileHandle handle = CreateFileW(
+                path,
+                DeleteAccess,
+                FileShare.Read | FileShare.Write | FileShare.Delete,
+                IntPtr.Zero,
+                OpenExisting,
+                FileAttributeNormal | FileFlagOpenReparsePoint,
+                IntPtr.Zero))
+            {
+                if (!handle.IsInvalid)
+                {
+                    return stopwatch.ElapsedMilliseconds;
+                }
+                int error = Marshal.GetLastWin32Error();
+                if (error != 5 && error != 32)
+                {
+                    throw new Win32Exception(error, "Unable to probe DELETE sharing for the sparse fixture.");
+                }
+            }
+            Thread.Sleep(50);
+        }
+        throw new TimeoutException("The sparse fixture did not release DELETE sharing within the test timeout.");
+    }
+}
+'@
 
 function Remove-TestTree {
     param([Parameter(Mandatory)][string]$Path)
@@ -232,6 +341,60 @@ try {
     Assert-True ($purgeResult.purged -eq $true) 'Purge 必须返回 purged=true'
     Assert-True (-not [IO.Directory]::Exists([string]$applyResult.quarantinePath)) 'Purge 必须清理精确隔离目录'
     Assert-True ($purgeResult.recoverable -eq $false) 'Purge 后必须明确标记不可恢复'
+
+    [void][IO.Directory]::CreateDirectory($largeSparseTargetPath)
+    [CodexSafeDeleteSparseFixture]::CreateZeroFile($largeSparseFilePath, [int64]2147483648)
+    $largeSparseItem = Get-Item -LiteralPath $largeSparseFilePath -Force
+    Assert-True ($largeSparseItem.Length -eq [int64]2147483648) '大文件 fixture 逻辑长度必须精确为 2 GiB'
+    Assert-True (
+        ($largeSparseItem.Attributes -band [IO.FileAttributes]::SparseFile) -ne 0
+    ) '大文件 fixture 必须保留 NTFS SparseFile 属性'
+
+    $largeSparsePlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $largeSparseTargetPath `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($largeSparsePlan.planned -eq $true) 'Plan 必须支持 2 GiB sparse 普通文件'
+    Assert-True ([IO.File]::Exists($largeSparseFilePath)) '大文件 Plan 必须保持目标文件存在'
+    $largeSparsePlanDocument = Get-Content -Raw -LiteralPath ([string]$largeSparsePlan.planPath) |
+        ConvertFrom-Json -Depth 128
+    $largeSparseEntries = @($largeSparsePlanDocument.treeManifest.entries | Where-Object {
+        $_.relativePath -ceq 'large-zero.bin' -and $_.kind -ceq 'file'
+    })
+    Assert-True ($largeSparseEntries.Count -eq 1) '大文件 Plan manifest 必须唯一记录 sparse 文件'
+    Assert-True (
+        [string]$largeSparseEntries[0].sha256 -ceq 'a7c744c13cc101ed66c29f672f92455547889cc586ce6d44fe76ae824958ea51'
+    ) '2 GiB sparse 零文件必须匹配独立固定 SHA-256'
+    $deleteShareWaitMilliseconds = [CodexSafeDeleteSparseFixture]::WaitForDeleteShare($largeSparseFilePath, 30000)
+    Assert-True ($deleteShareWaitMilliseconds -lt 30000) '大文件 fixture 必须在有界等待内允许 DELETE share'
+
+    try {
+        $largeSparseApply = & $entryPath `
+            -Mode Apply `
+            -PlanPath ([string]$largeSparsePlan.planPath) `
+            -ApprovedPlanSha256 ([string]$largeSparsePlan.planSha256) `
+            -ConfirmApply `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    } catch {
+        throw "大文件 Apply 失败：$(Get-ExceptionChainText -Exception $_.Exception)"
+    }
+    $largeSparseQuarantinePath = [string]$largeSparseApply.quarantinePath
+    Assert-True ($largeSparseApply.quarantined -eq $true) 'Apply 必须隔离包含 2 GiB sparse 文件的目录'
+    Assert-True (-not [IO.Directory]::Exists($largeSparseTargetPath)) '大文件 Apply 后原目标必须不存在'
+    Assert-True ([IO.Directory]::Exists($largeSparseQuarantinePath)) '大文件 Apply 必须保留 quarantine'
+
+    $largeSparsePurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$largeSparseApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$largeSparseApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($largeSparsePurge.purged -eq $true) 'Purge 必须删除包含 2 GiB sparse 文件的 quarantine'
+    Assert-True (-not [IO.Directory]::Exists($largeSparseQuarantinePath)) '大文件 Purge 后不得残留 quarantine'
 
     $partialPurge = New-InterruptedPurgeFixture `
         -Path (Join-Path $fixtureRoot 'partial-purge-candidate')
@@ -582,7 +745,18 @@ try {
         & $env:ComSpec /d /c rmdir $junctionPath | Out-Null
     }
 
-    [pscustomobject][ordered]@{ ok = $true; suite = 'CodexSafeTreeDelete'; slices = 5 }
+    [pscustomobject][ordered]@{ ok = $true; suite = 'CodexSafeTreeDelete'; slices = 6 }
 } finally {
+    if ([IO.File]::Exists($largeSparseFilePath)) {
+        [IO.File]::SetAttributes($largeSparseFilePath, [IO.FileAttributes]::Normal)
+        [IO.File]::Delete($largeSparseFilePath)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($largeSparseQuarantinePath)) {
+        $quarantinedSparsePath = Join-Path $largeSparseQuarantinePath 'large-zero.bin'
+        if ([IO.File]::Exists($quarantinedSparsePath)) {
+            [IO.File]::SetAttributes($quarantinedSparsePath, [IO.FileAttributes]::Normal)
+            [IO.File]::Delete($quarantinedSparsePath)
+        }
+    }
     Remove-TestTree -Path $fixtureRoot
 }

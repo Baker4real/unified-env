@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
@@ -1435,7 +1436,7 @@ namespace CodexHookGovernance
         private readonly VerifiedDirectoryChainGuard owner;
         private readonly SafeFileHandle handle;
         private readonly FileStream stream;
-        private readonly byte[] snapshotBytes;
+        private byte[] snapshotBytes;
         private bool disposed;
 
         internal GuardedReadOnlyFileLease(
@@ -1451,15 +1452,6 @@ namespace CodexHookGovernance
             VolumeSerialNumber = volumeSerialNumber;
             FileIndex = fileIndex;
             stream = new FileStream(handle, FileAccess.Read);
-            try
-            {
-                snapshotBytes = ReadAllBytesFromHandleCore();
-            }
-            catch
-            {
-                stream.Dispose();
-                throw;
-            }
         }
 
         public string OriginalPath { get; }
@@ -1474,7 +1466,24 @@ namespace CodexHookGovernance
             {
                 ThrowIfDisposed();
                 owner.ThrowIfDisposed();
+                if (snapshotBytes == null)
+                {
+                    VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, OriginalPath);
+                    snapshotBytes = ReadAllBytesFromHandleCore();
+                }
                 return (byte[])snapshotBytes.Clone();
+            }
+        }
+
+        public byte[] ComputeSha256FromHandle()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, OriginalPath);
+            stream.Position = 0;
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                return sha256.ComputeHash(stream);
             }
         }
 
@@ -1543,7 +1552,7 @@ namespace CodexHookGovernance
         private readonly VerifiedDirectoryChainGuard owner;
         private readonly SafeFileHandle handle;
         private readonly FileStream stream;
-        private readonly byte[] snapshotBytes;
+        private byte[] snapshotBytes;
         private bool disposed;
 
         internal GuardedTargetFileLease(
@@ -1555,15 +1564,6 @@ namespace CodexHookGovernance
             OriginalPath = originalPath;
             this.handle = handle;
             stream = new FileStream(handle, FileAccess.Read);
-            try
-            {
-                snapshotBytes = ReadAllBytesFromHandleCore();
-            }
-            catch
-            {
-                stream.Dispose();
-                throw;
-            }
         }
 
         public string OriginalPath { get; }
@@ -1592,7 +1592,24 @@ namespace CodexHookGovernance
             {
                 ThrowIfDisposed();
                 owner.ThrowIfDisposed();
+                if (snapshotBytes == null)
+                {
+                    VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, OriginalPath);
+                    snapshotBytes = ReadAllBytesFromHandleCore();
+                }
                 return (byte[])snapshotBytes.Clone();
+            }
+        }
+
+        public byte[] ComputeSha256FromHandle()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            VerifiedDirectoryChainGuard.VerifyRegularFileHandle(handle, OriginalPath);
+            stream.Position = 0;
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                return sha256.ComputeHash(stream);
             }
         }
 

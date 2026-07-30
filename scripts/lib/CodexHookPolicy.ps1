@@ -3535,11 +3535,11 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
                 $lease = $null
                 try {
                     $lease = $parentGuard.AcquireReadOnlyFileLease($childPath)
-                    [byte[]]$bytes = $lease.SnapshotBytes
+                    [byte[]]$sha256 = $lease.ComputeSha256FromHandle()
                     $entries.Add([pscustomobject][ordered]@{
                         relativePath = $childRelative
                         kind = 'file'
-                        sha256 = Get-CodexHookBytesSha256 -Bytes $bytes
+                        sha256 = [Convert]::ToHexString($sha256).ToLowerInvariant()
                         identity = @([string]$lease.VolumeSerialNumber, [string]$lease.FileIndex)
                     })
                 } finally {
@@ -3650,16 +3650,16 @@ function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
     $targetLease = $null
     try {
         $targetLease = $DirectoryGuard.AcquireTargetFileLease($Path)
-        [byte[]]$leasedBytes = $targetLease.ReadAllBytesFromHandle()
-        if ((Get-CodexHookBytesSha256 -Bytes $leasedBytes) -cne $ExpectedSha256) {
+        [byte[]]$leasedSha256 = $targetLease.ComputeSha256FromHandle()
+        if ([Convert]::ToHexString($leasedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
             throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 临删前内容漂移。"
         }
         Assert-CodexHookDirectoryTreeIdentity `
             -Expected $ExpectedIdentity `
             -Actual @($targetLease.VolumeSerialNumber, $targetLease.FileIndex) `
             -Scope "$Scope handle identity"
-        [byte[]]$confirmedBytes = $targetLease.ReadAllBytesFromHandle()
-        if ((Get-CodexHookBytesSha256 -Bytes $confirmedBytes) -cne $ExpectedSha256) {
+        [byte[]]$confirmedSha256 = $targetLease.ComputeSha256FromHandle()
+        if ([Convert]::ToHexString($confirmedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
             throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope handle identity 内容漂移。"
         }
         $targetLease.DeleteWithPosixSemantics()
