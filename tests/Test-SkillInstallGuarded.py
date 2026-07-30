@@ -474,27 +474,30 @@ class SkillInstallGuardedTests(unittest.TestCase):
             source_fields["guarded_transaction_evidence"],
             str(transaction_manifest.parent),
         )
-        flattened_source = json.dumps(source_fields, ensure_ascii=False)
-        self.assertNotIn(str(candidate), flattened_source)
-        self.assertNotIn(str(manifest), flattened_source)
+        source_values = "\n".join(
+            value for value in source_fields.values() if isinstance(value, str)
+        )
+        self.assertNotIn(str(candidate), source_values)
+        self.assertNotIn(str(manifest), source_values)
 
     def test_candidate_activation_rejects_transient_source_provenance(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "拒绝临时 provenance")
-        manifest = self.temp / "manifest-test-skill-wrapper-install.json"
+        manifest = self.active / "transient-decision.json"
         (candidate / "SOURCE.md").write_text(
             "\n".join(
                 [
                     "# Source Provenance",
                     "",
                     "Skill: `test-skill-wrapper`",
-                    f"Candidate path: `{candidate}`",
                     f"Original decision manifest: `{manifest}`",
                     "",
                 ]
             ),
             encoding="utf-8",
         )
-        manifest = self.write_manifest("test-skill-wrapper", "install")
+        generated_manifest = self.write_manifest("test-skill-wrapper", "install")
+        generated_manifest.replace(manifest)
+        ledger_before = self.ledger.read_bytes()
         stderr = io.StringIO()
 
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
@@ -502,7 +505,72 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
         self.assertEqual(code, 2)
         self.assertFalse((self.active / "test-skill-wrapper").exists())
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertFalse((self.temp / "catalog.json").exists())
         self.assertIn("SOURCE.md 不得保留临时 provenance 路径", stderr.getvalue())
+        transaction_manifest = max(
+            (self.temp / "evidence").glob("install-*/manifest.json")
+        )
+        result = json.loads(transaction_manifest.read_text(encoding="utf-8"))
+        decision_snapshot = transaction_manifest.parent / "decision-manifest.json"
+        self.assertEqual(result["status"], "rolled-back")
+        self.assertEqual(
+            result["decision_manifest_snapshot"]["path"], str(decision_snapshot)
+        )
+        self.assertEqual(decision_snapshot.read_bytes(), manifest.read_bytes())
+
+    def test_manifest_disappearing_after_validation_returns_governed_error(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "decision manifest race")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+        original_load = WRAPPER.load_and_validate_manifest
+
+        def load_then_remove(path: Path, *, names: list[str]) -> dict[str, object]:
+            result = original_load(path, names=names)
+            path.unlink()
+            return result
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                WRAPPER,
+                "load_and_validate_manifest",
+                side_effect=load_then_remove,
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        error = json.loads(stderr.getvalue())
+        self.assertIn("无法读取 decision manifest 快照", error["error"])
+        self.assertFalse((self.active / "test-skill-wrapper").exists())
+        self.assertFalse(any((self.temp / "evidence").glob("install-*")))
+
+    def test_candidate_source_allows_non_temp_prefix_peer(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "允许相邻持久路径")
+        (candidate / "SOURCE.md").write_text(
+            "\n".join(
+                [
+                    "# Source Provenance",
+                    "",
+                    "Skill: `test-skill-wrapper`",
+                    r"Reference archive: `D:\Codex\tmp-archive\reviewed-source`",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 0)
+        source_record = (
+            self.active / "test-skill-wrapper" / "SOURCE.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn(r"D:\Codex\tmp-archive\reviewed-source", source_record)
 
     def test_candidate_metadata_is_excluded_from_active_payload(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "排除候选元数据")
@@ -1454,7 +1522,20 @@ class SkillInstallGuardedTests(unittest.TestCase):
             code = WRAPPER.main(args)
 
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(stdout.getvalue())["status"], "dry-run-pass")
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["status"], "dry-run-pass")
+        evidence = Path(result["evidence"])
+        decision_snapshot = evidence / "decision-manifest.json"
+        self.assertEqual(
+            result["decision_manifest_snapshot"]["path"], str(decision_snapshot)
+        )
+        self.assertEqual(
+            result["decision_manifest_snapshot"]["sha256"],
+            hashlib.sha256(Path(state["manifest"]).read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            decision_snapshot.read_bytes(), Path(state["manifest"]).read_bytes()
+        )
         self.assertEqual(WRAPPER.tree_content_seal(old_skill), old_seal)
         self.assertFalse((self.active / str(state["new_name"])).exists())
         self.assertEqual(self.ledger.read_bytes(), ledger_before)
@@ -1507,6 +1588,31 @@ class SkillInstallGuardedTests(unittest.TestCase):
             if item.get("scope") == "active" and item.get("name") == new_name
         )
         self.assertEqual(artifact["ledger_coverage"], "pass")
+        source_record = (self.active / new_name / "SOURCE.md").read_text(
+            encoding="utf-8"
+        )
+        for expected in (
+            f"Canonical predecessor: `{old_name}`",
+            f"Source identity: `{state['source_id']}`",
+            f"Source repository: `{state['source_repo']}`",
+            f"Upstream path: `{state['upstream_path']}`",
+            "Ref: `main`",
+            f"Commit or revision: `{state['source_commit']}`",
+            "writing-great-skills gate:",
+            f"Local overlay: replayed (canonical rename {old_name} -> {new_name})",
+            "Guarded transaction evidence:",
+            "Decision manifest:",
+        ):
+            self.assertIn(expected, source_record)
+        source_fields = artifact["source"]["fields"]
+        self.assertEqual(source_fields["canonical_predecessor"], old_name)
+        self.assertEqual(source_fields["source_identity"], state["source_id"])
+        self.assertEqual(source_fields["source_repository"], state["source_repo"])
+        self.assertEqual(source_fields["upstream_path"], state["upstream_path"])
+        self.assertEqual(source_fields["ref"], "main")
+        self.assertEqual(source_fields["commit_or_revision"], state["source_commit"])
+        self.assertIn("canonical rename", source_fields["local_overlay"])
+        self.assertIn("decision-manifest.json", source_fields["decision_manifest"])
 
     def test_canonical_rename_migrates_direct_source_coverage(self) -> None:
         state = self.prepare_canonical_rename()

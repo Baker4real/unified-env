@@ -1032,29 +1032,59 @@ def append_source_record(
 def validate_durable_source_record(
     path: Path,
     *,
-    durable_paths: list[Path],
+    durable_fields: dict[str, Path],
     transient_paths: list[Path],
 ) -> None:
-    text = path.read_text(encoding="utf-8-sig").replace("\\", "/").casefold()
-    for durable in sorted(
-        (
-            str(item).replace("\\", "/").rstrip("/").casefold()
-            for item in durable_paths
-        ),
-        key=len,
-        reverse=True,
-    ):
-        text = text.replace(durable, "<durable-evidence>")
-    forbidden = {
+    raw_text = path.read_text(encoding="utf-8-sig")
+    normalized_text = raw_text.replace("\\", "/").casefold()
+
+    def normalize_path(item: Path) -> str:
+        return str(item).replace("\\", "/").rstrip("/").casefold()
+
+    def contains_path(text: str, item: str) -> bool:
+        if not item:
+            return False
+        pattern = re.compile(
+            rf"(?<![a-z0-9._-]){re.escape(item)}(?=$|[/\s`'\"<>()\[\]{{}},;:])"
+        )
+        return pattern.search(text) is not None
+
+    exact_transient = sorted(
+        item
+        for item in (normalize_path(path) for path in transient_paths)
+        if contains_path(normalized_text, item)
+    )
+    if exact_transient:
+        raise InstallError(
+            "SOURCE.md 不得保留临时 provenance 路径："
+            + ", ".join(exact_transient)
+        )
+
+    allowed_fields = {
+        key.casefold(): normalize_path(value) for key, value in durable_fields.items()
+    }
+    sanitized_lines: list[str] = []
+    field_pattern = re.compile(
+        r"^\s*(?P<key>[A-Za-z][A-Za-z0-9 _-]*)\s*:\s*(?P<value>.+?)\s*$"
+    )
+    for line in raw_text.splitlines():
+        match = field_pattern.match(line)
+        if match is not None:
+            key = match.group("key").strip().casefold()
+            value = normalize_path(Path(strip_scalar(match.group("value"))))
+            if key in allowed_fields and value == allowed_fields[key]:
+                sanitized_lines.append(f"{key}: <durable-path>")
+                continue
+        sanitized_lines.append(line.replace("\\", "/").casefold())
+    sanitized_text = "\n".join(sanitized_lines)
+    transient_roots = (
         "d:/codex/tmp",
         "d:/codex/.tmp",
         "d:/codex/.codex/tmp",
-        *(
-            str(item).replace("\\", "/").rstrip("/").casefold()
-            for item in transient_paths
-        ),
-    }
-    matches = sorted(item for item in forbidden if item and item in text)
+    )
+    matches = sorted(
+        item for item in transient_roots if contains_path(sanitized_text, item)
+    )
     if matches:
         raise InstallError(
             "SOURCE.md 不得保留临时 provenance 路径：" + ", ".join(matches)
@@ -1321,11 +1351,12 @@ def stage_candidate(
         if args.candidate:
             validate_durable_source_record(
                 target / "SOURCE.md",
-                durable_paths=[
-                    active_root,
-                    Path(context["evidence_path"]),
-                    Path(context["manifest_path"]),
-                ],
+                durable_fields={
+                    "Local path": active_root / name,
+                    "Active root": active_root,
+                    "Guarded transaction evidence": Path(context["evidence_path"]),
+                    "Decision manifest": Path(context["manifest_path"]),
+                },
                 transient_paths=[Path(args.candidate), Path(args.decision_manifest)],
             )
     atomic_write_json(stage_root / ".downloaded-skills-source-state.json", make_staging_ledger(names, context))
@@ -2103,7 +2134,12 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     specs = target_specs(args)
     names = [name for name, _ in specs]
     decision = load_and_validate_manifest(decision_path, names=names)
-    decision_snapshot_bytes = decision_path.read_bytes()
+    try:
+        decision_snapshot_bytes = decision_path.read_bytes()
+    except OSError as exc:
+        raise InstallError(
+            f"无法读取 decision manifest 快照：{decision_path}：{exc}"
+        ) from exc
     try:
         decision_snapshot_value = json.loads(
             decision_snapshot_bytes.decode("utf-8-sig")
