@@ -405,7 +405,15 @@ try {
     Assert-True ($aclHardLinkError -match 'hard link|link') 'hardlink target 必须返回稳定的 link 拒绝'
 } finally {
     $aclHardLinkGuard.Dispose()
+    if ([IO.File]::Exists($aclHardLink)) {
+        $currentAclHardLink = Get-Item -LiteralPath $aclHardLink -Force
+        if ($currentAclHardLink.LinkType -cne 'HardLink') {
+            throw "拒绝清理类型不匹配的 ACL hardlink fixture：$aclHardLink"
+        }
+        [IO.File]::Delete($aclHardLink)
+    }
 }
+Assert-True ([IO.File]::Exists($aclTarget) -and -not [IO.File]::Exists($aclHardLink)) 'ACL hardlink fixture 必须在测试后清理且保留原 target'
 
 $aclDirectory = Join-Path $atomicParent 'acl-directory'
 $aclParkedDirectory = Join-Path $atomicParent 'acl-directory-parked'
@@ -458,12 +466,32 @@ Assert-True ([IO.Directory]::Exists($nonEmptyDeletePath) -and [IO.File]::ReadAll
 
 $danglingTarget = Join-Path $externalRoot 'must-not-be-created'
 $danglingLink = Join-Path $testRoot 'dangling-junction'
+$staleDanglingLink = Get-Item -LiteralPath $danglingLink -Force -ErrorAction SilentlyContinue
+if ($null -ne $staleDanglingLink) {
+    if ($staleDanglingLink.LinkType -cne 'Junction' -or [string]$staleDanglingLink.Target -ine $danglingTarget) {
+        throw "拒绝清理 identity 不匹配的 dangling junction fixture：$danglingLink"
+    }
+    $staleCleanup = Invoke-HiddenProcess $env:ComSpec @('/d','/c','rmdir',$danglingLink)
+    if ($staleCleanup.exitCode -ne 0) { throw "无法清理遗留 dangling junction fixture：$($staleCleanup.stderr)" }
+}
 $junctionResult = Invoke-HiddenProcess $env:ComSpec @('/d','/c','mklink','/J',$danglingLink,$danglingTarget)
 if ($junctionResult.exitCode -ne 0) { throw "无法创建 dangling junction fixture：$($junctionResult.stdout)$($junctionResult.stderr)" }
-[void](Assert-Throws -Message 'dangling junction 不得被目录创建跟随' -Action {
-    New-CodexHookFixtureDirectory -Path (Join-Path $danglingLink 'child') -Name 'dangling junction child' -RequireMissing | Out-Null
-})
-Assert-True (-not [IO.Directory]::Exists($danglingTarget)) 'dangling junction 外部 target 必须保持不存在'
+try {
+    [void](Assert-Throws -Message 'dangling junction 不得被目录创建跟随' -Action {
+        New-CodexHookFixtureDirectory -Path (Join-Path $danglingLink 'child') -Name 'dangling junction child' -RequireMissing | Out-Null
+    })
+    Assert-True (-not [IO.Directory]::Exists($danglingTarget)) 'dangling junction 外部 target 必须保持不存在'
+} finally {
+    $currentDanglingLink = Get-Item -LiteralPath $danglingLink -Force -ErrorAction SilentlyContinue
+    if ($null -ne $currentDanglingLink) {
+        if ($currentDanglingLink.LinkType -cne 'Junction' -or [string]$currentDanglingLink.Target -ine $danglingTarget) {
+            throw "拒绝清理 identity 不匹配的 dangling junction fixture：$danglingLink"
+        }
+        $junctionCleanup = Invoke-HiddenProcess $env:ComSpec @('/d','/c','rmdir',$danglingLink)
+        if ($junctionCleanup.exitCode -ne 0) { throw "无法清理 dangling junction fixture：$($junctionCleanup.stderr)" }
+    }
+}
+Assert-True ($null -eq (Get-Item -LiteralPath $danglingLink -Force -ErrorAction SilentlyContinue)) 'dangling junction fixture 必须在测试后清理'
 
 $notDirectoryPath = Join-Path $testRoot 'not-a-directory.bin'
 [IO.File]::WriteAllBytes($notDirectoryPath, [byte[]](1, 2, 3))
