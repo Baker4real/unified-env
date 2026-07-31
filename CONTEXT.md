@@ -15,6 +15,12 @@ intent: 定位统一环境项目的治理目标、边界和必读政策
 
 - D 盘布局、环境分类、迁移授权、验证和回滚边界见 `docs/env-governance/d-drive-layout-and-migration-policy.md`。
 
+## 模块上下文
+
+本项目保持为单一治理仓库，内部划分为 `dev-environment`、`codex-host`、`skill-supply-chain`、`host-safety` 和 `workstation-operations` 五个模块。处理具体任务时，先读 `modules/README.md`，再读对应 `modules/<module-id>/CONTEXT.md`；文件归属、对外接口、测试 profile 和依赖以 `modules/manifest.json` 为真源。
+
+第一阶段模块迁移已完成：现役脚本、部署路径和历史合同文档保持原位，通用 capability I/O 由 `scripts/lib/CodexHostSafety.ps1` 唯一实现。`CodexHookPolicy.ps1` 依赖该模块，safe-delete 直接加载该模块，不再形成 `host-safety -> codex-host` 反向依赖。
+
 ## 报告与当前事实边界
 
 - `reports/` 下的 JSON/Markdown 报告是带时间戳的事实快照；`generationId` 与源 JSON SHA-256 只证明同一次生成的配对一致，不证明进程、用户环境或工具入口仍是当前状态。任何决策或执行前必须重新生成相关报告并现场核验。

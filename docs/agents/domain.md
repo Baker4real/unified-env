@@ -12,19 +12,27 @@ intent: 说明 Agent 探索统一环境项目时的领域文档读取顺序
 ## 探索前优先读取
 
 - 根目录 `CONTEXT.md`
+- `modules/README.md`
+- 与当前任务相关的 `modules/<module-id>/CONTEXT.md`
 - `docs/agents/` 中与当前工作相关的项目规则
 
 如果这些文件不存在，静默继续即可；不要因为缺失而主动报错。后续可以由 `domain-modeling`、`grill-with-docs` 或 `improve-codebase-architecture` 在真正需要时补齐。
 
 ## 文件布局
 
-本项目采用 single-context 布局：
+本项目采用单仓模块化布局：
 
 ```text
 /
 ├── CONTEXT.md
+├── modules/
+│   ├── README.md
+│   ├── manifest.json
+│   └── <module-id>/CONTEXT.md
 └── docs/agents/
 ```
+
+根 `CONTEXT.md` 只负责项目组合与跨模块规则；模块的 scope、interface、依赖和已知 drift 记录在对应模块 CONTEXT。现役合同仍以模块 CONTEXT 引用的 `docs/` 文档为真源，不在 CONTEXT 中复制正文。
 
 ## 使用项目词汇
 

@@ -36,7 +36,7 @@ DEFAULT_ACTIVE_ROOT = Path(r"D:\Codex\.codex\skills")
 DEFAULT_PLUGIN_CACHE_ROOT = Path(r"D:\Codex\.codex\plugins\cache")
 DEFAULT_LEDGER = Path(r"D:\Codex\.codex\skills\.downloaded-skills-source-state.json")
 DEFAULT_CATALOG = Path(r"D:\Codex\.codex\skill-catalog\catalog.json")
-DEFAULT_GENERATOR = Path(r"D:\Codex\projects\统一环境\scripts\generate_skill_catalog.py")
+DEFAULT_GENERATOR = Path(__file__).absolute().with_name("generate_skill_catalog.py")
 DEFAULT_CLOSURE = Path(
     r"D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py"
 )

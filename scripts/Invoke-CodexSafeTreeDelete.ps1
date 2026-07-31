@@ -27,7 +27,7 @@ function Resolve-TargetPathArguments {
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-. (Join-Path $PSScriptRoot 'lib\CodexHookPolicy.ps1')
+. (Join-Path $PSScriptRoot 'lib\CodexHostSafety.ps1')
 . (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDelete.ps1')
 
 $policyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'

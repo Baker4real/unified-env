@@ -1,7 +1,8 @@
 {
   "include": [
     "*.md",
-    "docs/**/*.md"
+    "docs/**/*.md",
+    "modules/**/*.md"
   ],
   "exclude": [
     "AGENTS.md",

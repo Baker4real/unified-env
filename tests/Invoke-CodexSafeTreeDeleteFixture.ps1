@@ -29,7 +29,7 @@ function Resolve-TargetPathArguments {
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-. (Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1')
+. (Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1')
 . (Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1')
 
 switch ($Mode) {

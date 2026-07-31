@@ -1,0 +1,345 @@
+{
+  "artifactType": "unified-environment.module-ownership",
+  "schemaVersion": 1,
+  "constraints": {
+    "pathsRemainInPlace": true,
+    "exactlyOneOwner": true
+  },
+  "modules": [
+    {
+      "id": "dev-environment",
+      "kind": "domain",
+      "root": "modules/dev-environment",
+      "context": "modules/dev-environment/CONTEXT.md",
+      "summary": "环境事实盘点、dry-run 迁移、PATH、备份保留与报告合同。",
+      "interfaces": [
+        "scripts/Invoke-EnvInventory.ps1",
+        "scripts/Invoke-PipCacheMigration.ps1",
+        "scripts/New-BackupRetentionApplyManifest.ps1",
+        "scripts/New-BackupRetentionDryRun.ps1",
+        "scripts/New-CodexAccountSwitchDependencyUpdateDryRun.ps1",
+        "scripts/New-EnvMigrationPlan.ps1",
+        "scripts/New-EnvUpdateReadinessReport.ps1",
+        "scripts/New-ProjectLocalEnvRebuildDryRunPlan.ps1",
+        "scripts/New-ProjectLocalEnvReviewPack.ps1",
+        "scripts/New-StalePathEntryCleanupDryRun.ps1"
+      ],
+      "dependsOn": [
+        "host-safety"
+      ],
+      "transitionalDependencies": [],
+      "ownership": {
+        "files": [
+          "docs/env-governance/d-drive-layout-and-migration-policy.md",
+          "docs/plans/2026-07-10-environment-inventory-trust-implementation.md",
+          "docs/specs/2026-07-10-environment-inventory-trust-design.md",
+          "scripts/lib/BackupRetentionPolicy.ps1",
+          "scripts/lib/BackupRetentionValidation.ps1",
+          "scripts/lib/EnvInventoryTrust.ps1",
+          "scripts/lib/EnvMigrationPolicy.ps1",
+          "scripts/lib/EnvUpdateReadinessPolicy.ps1"
+        ],
+        "prefixes": [
+          ".scratch/env-update-audit-20260706/",
+          ".scratch/environment-cleanup-20260710/",
+          ".scratch/unified-env/",
+          "reports/backup-retention-dry-run-current/",
+          "reports/codex-account-switch-dependency-update-dry-run/",
+          "reports/env-inventory/",
+          "reports/env-migration-execution/",
+          "reports/env-migration-plan/",
+          "reports/env-update-audit-20260706/",
+          "reports/env-update-execution-20260706/",
+          "reports/env-update-readiness/",
+          "reports/project-local-env-rebuild-plan/",
+          "reports/project-local-env-review/",
+          "reports/stale-path-entry-cleanup-dry-run/"
+        ]
+      },
+      "tests": {
+        "fixture": {
+          "powershell": [
+          "tests/Test-BackupRetentionApplyManifest.ps1",
+          "tests/Test-BackupRetentionDryRun.ps1",
+          "tests/Test-BackupRetentionPolicy.ps1",
+          "tests/Test-BackupRetentionValidation.ps1",
+          "tests/Test-CodexAccountSwitchDependencyUpdateDryRun.ps1",
+          "tests/Test-DDrivePolicyDocs.ps1",
+          "tests/Test-EnvInventory.ps1",
+          "tests/Test-EnvInventoryTrust.ps1",
+          "tests/Test-EnvMigrationPlan.ps1",
+          "tests/Test-EnvMigrationPolicy.ps1",
+          "tests/Test-EnvUpdateReadiness.ps1",
+          "tests/Test-EnvUpdateReadinessPolicy.ps1",
+          "tests/Test-PipCacheMigration.ps1",
+          "tests/Test-ProjectLocalEnvRebuildDryRunPlan.ps1",
+          "tests/Test-ProjectLocalEnvReviewPack.ps1",
+          "tests/Test-StalePathEntryCleanupDryRun.ps1"
+          ],
+          "python": [],
+          "node": []
+        }
+      }
+    },
+    {
+      "id": "codex-host",
+      "kind": "domain",
+      "root": "modules/codex-host",
+      "context": "modules/codex-host/CONTEXT.md",
+      "summary": "Codex hooks、state preflight、Serena/CodeGraph 运行时与远程插件 catalog 守卫。",
+      "interfaces": [
+        "scripts/Get-CodexHookInventory.ps1",
+        "scripts/Get-CodexStatePathInventory.ps1",
+        "scripts/Invoke-CodexHookDeployment.ps1",
+        "scripts/Invoke-CodexHostHookReconciliation.ps1",
+        "scripts/Invoke-CodexRemotePluginCatalogGuard.ps1",
+        "scripts/Invoke-RetiredProjectProcessRegistryPurger.py",
+        "scripts/Invoke-RetiredProjectSnapshotSanitizer.ps1",
+        "scripts/Invoke-RetiredProjectThreadStateSanitizer.py",
+        "scripts/Invoke-RetiredProjectUsageEvidenceConfigPurger.py",
+        "scripts/New-CodexHookDeploymentPlan.ps1",
+        "scripts/Restore-CodexHookDeployment.ps1"
+      ],
+      "dependsOn": [
+        "host-safety"
+      ],
+      "transitionalDependencies": [],
+      "ownership": {
+        "files": [
+          "docs/env-governance/remote-plugin-catalog-guard.md",
+          "docs/plans/2026-07-11-codex-hook-governance-implementation.md",
+          "docs/plans/2026-07-13-functional-hook-preflight.md",
+          "docs/specs/2026-07-11-codex-hook-governance-design.md",
+          "docs/specs/2026-07-11-host-hook-reconciliation-design.md",
+          "docs/specs/2026-07-13-functional-hook-preflight-design.md",
+          "reports/sdd/task-2-missing-sidecar-implementer.md",
+          "scripts/lib/CodexHookPolicy.ps1",
+          "scripts/lib/CodexHookProductionFull.ps1",
+          "scripts/lib/CodexHookProductionRegistrationRepair.ps1",
+          "scripts/lib/CodexRepairTransaction.ps1"
+        ],
+        "prefixes": [
+          ".scratch/host-stable-upgrade-20260712/",
+          "managed/codex-hooks/",
+          "managed/remote-plugin-catalog-guard/",
+          "reports/codex-hook-deployment-plan/",
+          "reports/codex-hook-inventory/",
+          "tests/lib/"
+        ]
+      },
+      "tests": {
+        "fixture": {
+          "powershell": [
+          "tests/Test-CodexFunctionalHookRegistration.ps1",
+          "tests/Test-CodexHookConfig.ps1",
+          "tests/Test-CodexHookDeployment.ps1",
+          "tests/Test-CodexHookDirectoryGuard.ps1",
+          "tests/Test-CodexHookInventory.ps1",
+          "tests/Test-CodexHookPolicy.ps1",
+          "tests/Test-CodexHookProductionFixtureConcurrency.ps1",
+          "tests/Test-CodexHookProductionFull.ps1",
+          "tests/Test-CodexHookProductionFullCli.ps1",
+          "tests/Test-CodexHookProductionRegistrationRepair.ps1",
+          "tests/Test-CodexHookProductionRegistrationRepairHardening.ps1",
+          "tests/Test-CodexHookRuntime.ps1",
+          "tests/Test-CodexHostHookAuthority.ps1",
+          "tests/Test-CodexHostHookReconciliation.ps1",
+          "tests/Test-CodexLocalHealthGuards.ps1",
+          "tests/Test-CodexRemotePluginCatalogGuard.ps1",
+          "tests/Test-CodexRemotePluginCatalogGuardDeployment.ps1",
+          "tests/Test-CodexRemotePluginCatalogGuardHardening.ps1",
+          "tests/Test-CodexSerenaBehaviorHooks.ps1",
+          "tests/Test-CodexStatePathRepair.ps1",
+          "tests/Test-CodexStatePathRepairHardening.ps1",
+          "tests/Test-HiddenConsoleHookLauncher.ps1",
+          "tests/Test-RetiredProjectSnapshotSanitizer.ps1"
+          ],
+          "python": [
+          "tests/Test-CodexStatePathInventory.py",
+          "tests/Test-CodexStatePolicy.py",
+          "tests/Test-CodexStatePreflight.py",
+          "tests/Test-RetiredProjectProcessRegistryPurger.py",
+          "tests/Test-RetiredProjectThreadStateSanitizer.py",
+          "tests/Test-RetiredProjectUsageEvidenceConfigPurger.py"
+          ],
+          "node": []
+        },
+        "host-live": {
+          "powershell": [
+            "tests/Test-CodexLauncherTerminalEnvironment.ps1",
+            "tests/Test-CodexRemotePluginCatalogGuardVendorAbortStress.ps1",
+            "tests/Test-PowerShellIfeoRouterCodexStoreHost.ps1"
+          ],
+          "python": [],
+          "node": [
+            "tests/Test-ExplicitRetiredArtifactPurge.cjs"
+          ]
+        }
+      }
+    },
+    {
+      "id": "skill-supply-chain",
+      "kind": "domain",
+      "root": "modules/skill-supply-chain",
+      "context": "modules/skill-supply-chain/CONTEXT.md",
+      "summary": "Skill 来源、guarded install、catalog、ledger 与 Git overlay 发布政策。",
+      "interfaces": [
+        "scripts/Apply-GitHubDefaultBranchSkillOverlay.cjs",
+        "scripts/Deploy-GitHubDefaultBranchSkillOverlay.ps1",
+        "scripts/Deploy-SkillInstallGuarded.ps1",
+        "scripts/generate_skill_catalog.py",
+        "scripts/install-skill-guarded.cmd",
+        "scripts/install_skill_guarded.py",
+        "scripts/verify_skill_openai_yaml_parity.py"
+      ],
+      "dependsOn": [],
+      "transitionalDependencies": [],
+      "ownership": {
+        "files": [
+          ".scratch/goal-first-install-decision.json",
+          "docs/plans/2026-07-13-github-default-branch-skill-policy-implementation.md",
+          "docs/plans/2026-07-13-local-skill-catalog-implementation.md",
+          "docs/specs/2026-07-13-github-default-branch-skill-policy-design.md",
+          "docs/specs/2026-07-14-skill-install-guarded-wrapper.md",
+          "reports/sdd/task-3-implementer.md",
+          "scripts/github-default-branch-skill-overlay-catalog.json"
+        ],
+        "prefixes": [
+          ".scratch/goal-first/",
+          ".scratch/upstream-stable-skill-sync-20260713/"
+        ]
+      },
+      "tests": {
+        "fixture": {
+          "powershell": [
+            "tests/Test-SkillInstallGuardedDeployment.ps1"
+          ],
+          "python": [
+          "tests/Test-SkillCatalog.py",
+          "tests/Test-SkillInstallGuarded.py",
+          "tests/Test-SkillOpenAIYamlParity.py"
+          ],
+          "node": [
+          "tests/Test-GitDefaultBranchSkillPolicy.cjs",
+          "tests/Test-GitHubDefaultBranchSkillOverlay.cjs",
+          "tests/Test-RetiredSkillBackupManifestPurger.cjs",
+          "tests/Test-SuperpowersSkillRetirement.cjs"
+          ]
+        }
+      }
+    },
+    {
+      "id": "host-safety",
+      "kind": "platform",
+      "root": "modules/host-safety",
+      "context": "modules/host-safety/CONTEXT.md",
+      "summary": "句柄绑定 I/O、路径/reparse 校验、原子发布与受管安全树删除。",
+      "interfaces": [
+        "scripts/lib/CodexHookHandleBoundIO.cs",
+        "scripts/lib/CodexHostSafety.ps1",
+        "scripts/lib/CodexUserEnvironmentTransaction.cs",
+        "scripts/lib/EnvPathSafety.ps1",
+        "scripts/lib/ReportArtifactPublisher.ps1",
+        "scripts/lib/TrustedReportInput.ps1",
+        "scripts/invoke-codex-safe-tree-delete-host.ps1",
+        "scripts/invoke-codex-safe-tree-delete.cmd",
+        "scripts/Invoke-CodexSafeTreeDelete.ps1"
+      ],
+      "dependsOn": [],
+      "transitionalDependencies": [],
+      "ownership": {
+        "files": [
+          "docs/specs/2026-07-24-safe-tree-delete-capability.md",
+          "modules/host-safety/lib/EnvPathSafety.ps1",
+          "modules/host-safety/lib/ReportArtifactPublisher.ps1",
+          "modules/host-safety/lib/TrustedReportInput.ps1",
+          "scripts/lib/CodexHookHandleBoundIO.cs",
+          "scripts/lib/CodexHostSafety.ps1",
+          "scripts/lib/CodexSafeTreeDelete.ps1",
+          "scripts/lib/CodexUserEnvironmentTransaction.cs",
+          "scripts/lib/EnvPathSafety.ps1",
+          "scripts/lib/ReportArtifactPublisher.ps1",
+          "scripts/lib/TrustedReportInput.ps1",
+          "tests/Invoke-CodexSafeTreeDeleteFixture.ps1"
+        ],
+        "prefixes": [
+          "managed/safe-tree-delete/"
+        ]
+      },
+      "tests": {
+        "fixture": {
+          "powershell": [
+            "tests/Test-CodexSafeTreeDelete.ps1",
+            "tests/Test-CodexUserEnvironmentTransaction.ps1",
+            "tests/Test-ReportArtifactPublisher.ps1"
+          ],
+          "python": [],
+          "node": []
+        },
+        "host-live": {
+          "powershell": [
+            "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1"
+          ],
+          "python": [],
+          "node": []
+        }
+      }
+    },
+    {
+      "id": "workstation-operations",
+      "kind": "integration",
+      "root": "modules/workstation-operations",
+      "context": "modules/workstation-operations/CONTEXT.md",
+      "summary": "设备事实、跨设备验收与 Sub2API 等工作站集成政策。",
+      "interfaces": [
+        "docs/env-governance/sub2api-update-policy.md",
+        "docs/environments/ban-gong-shi.md",
+        "docs/environments/zi-xi-shi.md"
+      ],
+      "dependsOn": [],
+      "transitionalDependencies": [],
+      "ownership": {
+        "files": [],
+        "prefixes": []
+      },
+      "tests": {
+        "fixture": {
+          "powershell": [],
+          "python": [],
+          "node": []
+        }
+      }
+    }
+  ],
+  "shared": {
+    "ownership": {
+      "files": [
+        ".codegraph/.gitignore",
+        ".gitattributes",
+        ".gitignore",
+        ".okf-frontmatter.json",
+        "AGENTS.md",
+        "CONTEXT.md",
+        "README.md",
+        "modules/README.md",
+        "modules/manifest.json",
+        "scripts/Run-PowerShellTests.cjs",
+        "scripts/Validate-ModuleBoundaries.cjs"
+      ],
+      "prefixes": [
+        "docs/agents/"
+      ]
+    },
+    "tests": {
+      "fixture": {
+        "powershell": [
+          "tests/Test-RunPowerShellTests.ps1"
+        ],
+        "python": [],
+        "node": [
+          "tests/Test-ModuleBoundaries.cjs"
+        ]
+      }
+    }
+  }
+}

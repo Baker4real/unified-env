@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $productionEntryPath = Join-Path $projectRoot 'scripts\Invoke-CodexSafeTreeDelete.ps1'
 $entryPath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteFixture.ps1'
-$policyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1'
+$hostSafetyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1'
 $productionPolicyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
 $fixtureRoot = Join-Path $projectRoot ("reports\safe-tree-delete-test-{0}" -f ([guid]::NewGuid().ToString('N')))
 $targetPath = Join-Path $fixtureRoot 'candidate'
@@ -209,7 +209,12 @@ function New-InterruptedPurgeFixture {
     }
 }
 
-. $policyLibraryPath
+. $hostSafetyLibraryPath
+
+$gitIgnoreLines = @([IO.File]::ReadAllLines((Join-Path $projectRoot '.gitignore')))
+Assert-True (
+    $gitIgnoreLines -ccontains 'reports/safe-tree-delete-test-*/'
+) 'safe-delete fixture 必须被 Git 精确忽略，避免仓库 watcher 扫描大文件'
 
 [void][IO.Directory]::CreateDirectory($targetPath)
 $payloadPath = Join-Path $targetPath 'payload.txt'

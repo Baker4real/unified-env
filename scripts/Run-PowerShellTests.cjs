@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const TEST_DIRECTORY = path.join(PROJECT_ROOT, 'tests');
+const MODULE_MANIFEST_PATH = path.join(PROJECT_ROOT, 'modules', 'manifest.json');
 const POWERSHELL_EXECUTABLE = process.env.PWSH_PATH || 'pwsh';
 const HARDENING_CASES = Object.freeze([
   'semantic-noop', 'crash-applying-deployed', 'crash-applied-before',
@@ -67,23 +68,60 @@ function getPowerShellExecutable() {
   return POWERSHELL_EXECUTABLE;
 }
 
-function buildCommands() {
+function getModuleTestNames(moduleId, profileName) {
+  const manifest = JSON.parse(fs.readFileSync(MODULE_MANIFEST_PATH, 'utf8'));
+  const owner = moduleId === 'shared'
+    ? { id: 'shared', ...manifest.shared }
+    : manifest.modules.find((entry) => entry.id === moduleId);
+  if (!owner) {
+    throw new Error(`Unknown module: ${moduleId}`);
+  }
+  const profile = owner.tests?.[profileName];
+  if (!profile) {
+    throw new Error(`Unknown test profile for ${moduleId}: ${profileName}`);
+  }
+
+  return new Set(profile.powershell.map((testPath) => {
+    const absolutePath = path.resolve(PROJECT_ROOT, testPath);
+    if (path.dirname(absolutePath).toLowerCase() !== TEST_DIRECTORY.toLowerCase()) {
+      throw new Error(`PowerShell module test must be a direct child of tests: ${testPath}`);
+    }
+    return path.basename(absolutePath).toLowerCase();
+  }));
+}
+
+function buildCommands(moduleId = null, profileName = 'fixture') {
+  const selectedNames = moduleId ? getModuleTestNames(moduleId, profileName) : null;
   const parameterizedTestNames = new Set(PARAMETERIZED_TESTS.map((test) => test.name.toLowerCase()));
   const standardTests = fs.readdirSync(TEST_DIRECTORY, { withFileTypes: true })
     .filter((entry) => entry.isFile() && isPowerShellTest(entry.name))
     .map((entry) => entry.name)
     .filter((name) => !parameterizedTestNames.has(name.toLowerCase()))
+    .filter((name) => !selectedNames || selectedNames.has(name.toLowerCase()))
     .sort((left, right) => left.localeCompare(right));
+
+  if (selectedNames) {
+    const discoveredNames = new Set([
+      ...standardTests.map((name) => name.toLowerCase()),
+      ...PARAMETERIZED_TESTS.map((test) => test.name.toLowerCase()),
+    ]);
+    const missing = [...selectedNames].filter((name) => !discoveredNames.has(name));
+    if (missing.length > 0) {
+      throw new Error(`Module test is not discoverable by the PowerShell runner: ${missing.join(', ')}`);
+    }
+  }
 
   return [
     ...standardTests.map((name) => ({
       arguments: ['-NoProfile', '-NonInteractive', '-File', path.join(TEST_DIRECTORY, name)],
       label: name,
     })),
-    ...PARAMETERIZED_TESTS.flatMap(({ name, cases }) => cases.map((testCase) => ({
+    ...PARAMETERIZED_TESTS
+      .filter(({ name }) => !selectedNames || selectedNames.has(name.toLowerCase()))
+      .flatMap(({ name, cases }) => cases.map((testCase) => ({
       arguments: ['-NoProfile', '-NonInteractive', '-File', path.join(TEST_DIRECTORY, name), '-Case', testCase],
       label: `${name} -Case ${testCase}`,
-    }))),
+      }))),
   ];
 }
 
@@ -101,15 +139,46 @@ function run(command, powershellExecutable) {
   }
 }
 
+function parseArguments(args) {
+  const options = { list: false, module: null, profile: 'fixture' };
+  let profileWasSet = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--list') {
+      if (options.list) throw new Error('--list may only be specified once');
+      options.list = true;
+    } else if (argument === '--module') {
+      index += 1;
+      if (index >= args.length || args[index].startsWith('--')) {
+        throw new Error('--module requires a module id');
+      }
+      if (options.module) throw new Error('--module may only be specified once');
+      options.module = args[index];
+    } else if (argument === '--profile') {
+      index += 1;
+      if (index >= args.length || args[index].startsWith('--')) {
+        throw new Error('--profile requires a profile name');
+      }
+      if (profileWasSet) throw new Error('--profile may only be specified once');
+      options.profile = args[index];
+      profileWasSet = true;
+    } else {
+      throw new Error('Usage: node scripts/Run-PowerShellTests.cjs [--list] [--module <id> [--profile <name>]]');
+    }
+  }
+  if (profileWasSet && !options.module) {
+    throw new Error('--profile requires --module');
+  }
+  return options;
+}
+
 function main(args) {
-  const commands = buildCommands();
+  const options = parseArguments(args);
+  const commands = buildCommands(options.module, options.profile);
   const powershellExecutable = getPowerShellExecutable();
-  if (args.length === 1 && args[0] === '--list') {
+  if (options.list) {
     for (const command of commands) console.log(command.label);
     return;
-  }
-  if (args.length !== 0) {
-    throw new Error('Usage: node scripts/Run-PowerShellTests.cjs [--list]');
   }
 
   for (const command of commands) run(command, powershellExecutable);

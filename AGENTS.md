@@ -12,7 +12,7 @@
 
 ### Domain docs
 
-本项目使用 single-context 布局：根目录 `CONTEXT.md` 描述项目背景；当前没有独立 ADR 目录，如未来存在架构决策记录则位于 `docs/adr/`。见 `docs/agents/domain.md`。
+本项目使用单仓模块化布局：先读根 `CONTEXT.md`，再读 `modules/<module-id>/CONTEXT.md`；文件归属、接口和测试清单以 `modules/manifest.json` 为真源。当前没有独立 ADR 目录，如未来存在架构决策记录则位于 `docs/adr/`。见 `docs/agents/domain.md`。
 
 ### Environment governance
 

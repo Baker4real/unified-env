@@ -14,6 +14,7 @@ intent: 区分统一环境项目中长期知识、设备事实和临时证据的
 | 适用域 | 判定 | 落点 |
 | --- | --- | --- |
 | `project` | 换设备后仍成立 | `README.md`、`docs/` 或 `CONTEXT.md` |
+| `module` | 换设备后仍成立，但只属于一个模块 | `modules/<module-id>/CONTEXT.md` 引用的权威文档；归属同步到 `modules/manifest.json` |
 | `device` | 只对某台设备成立，但其他设备需要知道 | `docs/environments/<device-id>.md` |
 | `local` | 只对当前机器有用，且不应提交 | `.local/`、`*.local.md` 或 `.env.local` |
 | `agent` | 下次 AI 写代码必须遵守 | `AGENTS.md` |

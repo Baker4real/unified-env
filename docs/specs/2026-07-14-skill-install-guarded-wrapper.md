@@ -103,4 +103,4 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
 
 ## 可维护性
 
-项目源文件是 `scripts\install_skill_guarded.py` 和 `scripts\install-skill-guarded.cmd`；通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁项目源、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。
+项目源文件是 `scripts\install_skill_guarded.py`、`scripts\install-skill-guarded.cmd` 和 `scripts\generate_skill_catalog.py`；部署后 installer 从同目录解析 generator，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁项目源、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。

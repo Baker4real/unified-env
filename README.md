@@ -11,6 +11,8 @@ intent: 说明统一环境项目的能力、入口和当前治理边界
 
 核心原则：该共享的共享，该隔离的隔离。共享缓存和可复用工具入口优先放到 D 盘；项目本地 `.venv`、`node_modules`、服务状态和凭据目录默认保持隔离。
 
+仓库当前按五个模块维护：`dev-environment`、`codex-host`、`skill-supply-chain`、`host-safety` 和 `workstation-operations`。导航、依赖与迁移规则见 `modules/README.md`；机器可校验的 ownership/interface/test 真源是 `modules/manifest.json`。当前处于保留现役路径的 `expand` 阶段，尚未拆 Git 仓库。
+
 ## 当前能力
 
 - 可信环境治理报告链分别记录 Process、User、Machine PATH，并用 `generationId` 和源 JSON SHA-256 配对校验当前 JSON/Markdown 产物。
@@ -28,11 +30,12 @@ intent: 说明统一环境项目的能力、入口和当前治理边界
 ## 关键入口
 
 - 项目上下文：`CONTEXT.md`
+- 模块导航与归属真源：`modules/README.md`、`modules/manifest.json`
 - 设备差异与跨设备验证：`docs/environments/zi-xi-shi.md`、`docs/environments/ban-gong-shi.md`
 - 迁移政策：`docs/env-governance/d-drive-layout-and-migration-policy.md`
 - Codex 远端插件 catalog guard：`docs/env-governance/remote-plugin-catalog-guard.md`
 - 本机 Skill Catalog：`scripts/generate_skill_catalog.py`、`docs/plans/2026-07-13-local-skill-catalog-implementation.md`
-- Skill 安装事务已统一到 `D:\Codex\.codex\scripts\install-skill-guarded.cmd`：它在安装/更新后同步 `SOURCE.md`、统一 ledger、资源闭包和 catalog，失败时回滚；设计见 `docs/specs/2026-07-14-skill-install-guarded-wrapper.md`。
+- Skill 安装事务的仓库源已形成 installer、command wrapper 与 catalog generator 的三文件部署闭包；现役 `D:\Codex\.codex\scripts\` 尚未部署本轮版本，移动或拆分仓库前必须通过 `scripts/Deploy-SkillInstallGuarded.ps1` 部署并核验。现役入口仍是 `D:\Codex\.codex\scripts\install-skill-guarded.cmd`；设计见 `docs/specs/2026-07-14-skill-install-guarded-wrapper.md`。
 - Codex 主机钩子治理：`docs/specs/2026-07-11-host-hook-reconciliation-design.md`
 - Codex Hook 治理设计：`docs/specs/2026-07-11-codex-hook-governance-design.md`
 - 功能钩子分层恢复设计/计划：`docs/specs/2026-07-13-functional-hook-preflight-design.md`、`docs/plans/2026-07-13-functional-hook-preflight.md`
@@ -69,6 +72,21 @@ node .\scripts\Run-PowerShellTests.cjs
 
 ```powershell
 node .\scripts\Run-PowerShellTests.cjs --list
+```
+
+查看某个模块的默认 `fixture` 测试清单：
+
+```powershell
+node .\scripts\Run-PowerShellTests.cjs --module dev-environment --list
+```
+
+`host-live` 会读取真实宿主状态或写入受管 evidence，只能显式选择，例如 `--module codex-host --profile host-live --list`。无 `--module` 的旧入口保持原有全量 PowerShell 行为。
+
+模块 ownership/interface/test 边界校验：
+
+```powershell
+node .\scripts\Validate-ModuleBoundaries.cjs --json
+node .\tests\Test-ModuleBoundaries.cjs
 ```
 
 仓库还包含 Python 与 Node 专项测试；使用已验证的 Python/Node 入口分别运行：
