@@ -1,3 +1,10 @@
+---
+type: report
+title: 功能钩子分层恢复实施计划
+tags: [历史计划, Codex, hooks]
+intent: 记录 Codex 功能钩子分层恢复的历史实施过程
+---
+
 # 功能钩子分层恢复实施计划
 
 > **历史实施计划（已取代）：** 本文保留 2026-07-15 前的任务拆分和测试来源，不是当前 live runbook。当前唯一生产入口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`，本机 live 状态见 `docs/environments/zi-xi-shi.md`。

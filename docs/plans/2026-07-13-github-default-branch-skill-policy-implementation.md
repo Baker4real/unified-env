@@ -1,3 +1,10 @@
+---
+type: report
+title: 历史实施计划：Git 默认分支发布与收尾 Skill 统一策略
+tags: [历史计划, Git, skill-policy]
+intent: 记录 Git 默认分支发布与收尾 Skill 策略的历史实施过程
+---
+
 # 历史实施计划：Git 默认分支发布与收尾 Skill 统一策略
 
 > **历史状态（2026-07-13）：** Task 1–5 当时已实施、验证并完成默认分支集成；临时分支与本 workflow worktree 已按顺序清理。下方复选框仅保留实施过程，不再表示当前待办或执行授权。

@@ -1,3 +1,10 @@
+---
+type: report
+title: 本机 Skill Catalog 实现计划
+tags: [历史计划, skill-catalog, Codex]
+intent: 记录本机 Skill Catalog 的实施任务和完成过程
+---
+
 # 本机 Skill Catalog 实现计划
 
 > **状态（2026-07-13）：** 已实施并验证完成。下方复选框保留实施过程记录，不再表示当前待办；当前派生输出以 `D:\Codex\.codex\skill-catalog\` 为准，一次性运行证据按 run id 写入 `D:\Codex\.codex\run-evidence\`。

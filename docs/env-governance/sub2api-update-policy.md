@@ -1,3 +1,10 @@
+---
+type: reference
+title: Sub2API 受管更新策略
+tags: [Sub2API, 更新, Docker]
+intent: 约束 Sub2API 稳定版升级、静默窗口和联合回滚
+---
+
 # Sub2API 受管更新策略
 
 ## 适用范围

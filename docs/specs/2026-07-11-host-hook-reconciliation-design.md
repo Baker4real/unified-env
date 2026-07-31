@@ -1,3 +1,10 @@
+---
+type: reference
+title: Codex 主机钩子 reconciler 设计
+tags: [设计, Codex, hooks]
+intent: 说明 Codex 主机钩子 reconciler 的目标状态和安全边界
+---
+
 # Codex 主机钩子 reconciler 设计
 
 本项目用 `scripts/Invoke-CodexHostHookReconciliation.ps1` 检查并收敛 Codex 主机钩子状态。它是唯一当前生产权威，也是显式调用的冷路径维护工具；不注册 watcher、计划任务或新的启动 hook，也不占用每个任务的生命周期热路径。

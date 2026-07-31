@@ -1,3 +1,10 @@
+---
+type: reference
+title: 知识适用域
+tags: [agents, knowledge-scope, project-docs]
+intent: 区分统一环境项目中长期知识、设备事实和临时证据的落点
+---
+
 # 知识适用域
 
 使用 `neat-freak`、整理文档或准备提交前，先为新增知识选择适用域，避免把设备事实、临时证据或 agent 规则混入项目长期文档。

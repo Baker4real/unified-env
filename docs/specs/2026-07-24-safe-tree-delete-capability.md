@@ -1,3 +1,10 @@
+---
+type: reference
+title: 受管安全树删除 capability
+tags: [设计, 安全删除, capability]
+intent: 说明受管目录树删除入口的安全边界和迁移状态
+---
+
 # 受管安全树删除 capability
 
 ## 目标

@@ -1,3 +1,10 @@
+---
+type: reference
+title: Issue tracker：本地 Markdown
+tags: [agents, issue-tracker, project-docs]
+intent: 说明统一环境项目的本地 Markdown issue tracker 约定
+---
+
 # Issue tracker：本地 Markdown
 
 本项目的 issue、spec 和 tickets 以 Markdown 文件形式保存在 `.scratch/`。

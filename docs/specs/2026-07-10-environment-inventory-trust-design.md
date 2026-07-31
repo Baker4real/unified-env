@@ -1,3 +1,10 @@
+---
+type: reference
+title: 环境盘点可信度修复设计
+tags: [设计, 环境盘点, project-docs]
+intent: 说明环境盘点可信度修复的设计依据和边界
+---
+
 # 环境盘点可信度修复设计
 
 > 状态：已于 2026-07-11 实施并验证完成。本文件保留设计依据；当前主机事实以 `README.md`、`CONTEXT.md` 和 `reports/` 下的最新报告为准。

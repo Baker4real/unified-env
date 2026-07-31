@@ -1,3 +1,10 @@
+---
+type: reference
+title: Triage Labels
+tags: [agents, triage, project-docs]
+intent: 定义统一环境项目 issue tracker 的 triage 状态
+---
+
 # Triage Labels
 
 Matt 工程技能使用五个标准 triage 角色。本文件把这些角色映射到本项目 issue tracker 里实际使用的状态字符串，并定义完成后的终态。

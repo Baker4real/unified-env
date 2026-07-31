@@ -1,3 +1,10 @@
+---
+type: readme
+title: 统一环境治理
+tags: [环境治理, 项目说明]
+intent: 说明统一环境项目的能力、入口和当前治理边界
+---
+
 # 统一环境治理
 
 本项目用于治理本机开发环境：先只读盘点事实，再生成 dry-run 计划，最后只在明确授权下逐项迁移、更新或重建。
@@ -23,6 +30,7 @@
 - 项目上下文：`CONTEXT.md`
 - 设备差异与跨设备验证：`docs/environments/zi-xi-shi.md`、`docs/environments/ban-gong-shi.md`
 - 迁移政策：`docs/env-governance/d-drive-layout-and-migration-policy.md`
+- Codex 远端插件 catalog guard：`docs/env-governance/remote-plugin-catalog-guard.md`
 - 本机 Skill Catalog：`scripts/generate_skill_catalog.py`、`docs/plans/2026-07-13-local-skill-catalog-implementation.md`
 - Skill 安装事务已统一到 `D:\Codex\.codex\scripts\install-skill-guarded.cmd`：它在安装/更新后同步 `SOURCE.md`、统一 ledger、资源闭包和 catalog，失败时回滚；设计见 `docs/specs/2026-07-14-skill-install-guarded-wrapper.md`。
 - Codex 主机钩子治理：`docs/specs/2026-07-11-host-hook-reconciliation-design.md`

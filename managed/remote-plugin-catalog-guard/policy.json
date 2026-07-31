@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "catalogRoot": "D:\\Codex\\.codex\\cache\\remote_plugin_catalog",
+  "fileNamePattern": "^[0-9a-f]{16}\\.json$",
+  "mutexName": "CodexRemotePluginCatalogGuardV2",
+  "stopEventName": "CodexRemotePluginCatalogGuardStopV2",
+  "scanIntervalSeconds": 15,
+  "debounceMilliseconds": 400,
+  "retryDelaysMilliseconds": [250, 500, 1000, 2000, 5000, 15000],
+  "targets": [
+    {
+      "name": "heygen",
+      "id": "plugin_asdk_app_69418aad55e08191aa5e437b649ca2e4"
+    },
+    {
+      "name": "hyperframes",
+      "id": "Plugin_d72b815ecf6481919e3beede9c71ef08"
+    },
+    {
+      "name": "remotion",
+      "id": "plugins~Plugin_efd07789186881918253a50acfc32762"
+    },
+    {
+      "name": "superpowers",
+      "id": "plugins~Plugin_60aea7460bd4819199fd97a9553a5e12"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ reports/codex-hook-deployment-test/
 reports/codex-hook-runtime-test/
 reports/codex-hook-config-test/
 reports/codex-state-policy-test/
+reports/catalog-guard-tests-*/
 .serena/
 .codex-remote-attachments/
 .codex/skill-state/

@@ -1,3 +1,10 @@
+---
+type: report
+title: 历史实施计划：已被主机钩子协调器取代
+tags: [历史计划, Codex, hooks]
+intent: 记录已被主机钩子协调器取代的 Codex Hook 治理实施方案
+---
+
 # 历史实施计划：已被主机钩子协调器取代
 
 本计划记录的五个 SessionStart / ProductionFull 部署架构已经退役，不再是可执行计划，也不提供旧 live apply、restore 或 wrapper 命令。

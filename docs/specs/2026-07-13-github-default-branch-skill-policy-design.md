@@ -1,3 +1,10 @@
+---
+type: reference
+title: Git 默认分支发布与收尾 Skill 统一策略设计
+tags: [设计, Git, skill-policy]
+intent: 说明 Git 默认分支发布与收尾 Skill 策略的设计和现役边界
+---
+
 # Git 默认分支发布与收尾 Skill 统一策略设计
 
 > 状态：2026-07-13 的默认分支统一方案是历史实现。2026-07-23 起，全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）的唯一现役合同固定为用户拥有远端的 `main`。clean closeout 真源已经符合该政策；版本化 GitHub overlay、现役插件 cache 和兼容 wrapper 仍保留 default-branch 文案或行为，统一标为 `pending drift`，不得作为非 `main` 发布授权。本文保留历史设计，当前执行面以第 3 节和“验证与验收”为准。

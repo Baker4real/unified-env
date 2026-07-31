@@ -1,3 +1,10 @@
+---
+type: reference
+title: Domain Docs
+tags: [agents, domain, project-docs]
+intent: 说明 Agent 探索统一环境项目时的领域文档读取顺序
+---
+
 # Domain Docs
 
 本文件说明工程技能在探索本项目时应该如何读取领域文档。

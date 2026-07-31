@@ -1,3 +1,10 @@
+---
+type: reference
+title: Skill 安装事务 Wrapper 设计
+tags: [设计, skill-install, transaction]
+intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
+---
+
 # Skill 安装事务 Wrapper 设计
 
 状态：已实施并通过本机验证。
