@@ -941,7 +941,13 @@ function Remove-CodexHookCapabilityDirectoryTree {
         [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
         [string]$Scope = 'capability directory-tree delete',
         [Parameter(Mandatory)][string[]]$ExpectedRootIdentity,
-        [Parameter(Mandatory)][object]$ExpectedTreeManifest
+        [Parameter(Mandatory)][object]$ExpectedTreeManifest,
+        [switch]$RejectNamedStreams,
+        [string]$NamedStreamDeleteIntentRoot,
+        [string]$NamedStreamDeleteGenerationId,
+        [AllowEmptyCollection()][object[]]$NamedStreamDeleteJournalAnchors = @(),
+        [scriptblock]$NamedStreamDeleteCommitAnchor,
+        [scriptblock]$NamedStreamDeleteCheckpointForTest
     )
 
     $fullPath = Assert-CodexHookCapabilityPath `
@@ -951,8 +957,205 @@ function Remove-CodexHookCapabilityDirectoryTree {
         -Name $Scope
     $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Scope capability root"
     $manifest = ConvertTo-CodexHookExpectedDirectoryTreeManifest -Manifest $ExpectedTreeManifest -Scope $Scope
+    $intentRoot = $null
+    $intentGenerationId = $null
+    $journalAnchorsByIdentity = [Collections.Generic.Dictionary[string, object]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    if ($RejectNamedStreams) {
+        if ([string]::IsNullOrWhiteSpace($NamedStreamDeleteIntentRoot)) {
+            throw "$Scope named-stream 删除必须提供 intent root。"
+        }
+        $intentRoot = Assert-CodexHookDPath -Value $NamedStreamDeleteIntentRoot -Name "$Scope intent root"
+        $intentRootItem = Get-Item -LiteralPath $intentRoot -Force -ErrorAction Stop
+        if (-not $intentRootItem.PSIsContainer -or
+            ($intentRootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "$Scope intent root 必须是安全普通目录。"
+        }
+        if (Test-CodexHookPathWithin -Path $intentRoot -ParentPath $fullPath) {
+            throw "$Scope intent root 不得位于待删除树内。"
+        }
+        $parsedGenerationId = [guid]::Empty
+        if (-not [guid]::TryParseExact(
+            $NamedStreamDeleteGenerationId,
+            'D',
+            [ref]$parsedGenerationId)) {
+            throw "$Scope named-stream 删除必须提供规范 generation id。"
+        }
+        $intentGenerationId = $parsedGenerationId.ToString('D')
+        if ($null -eq $NamedStreamDeleteCommitAnchor) {
+            throw "$Scope named-stream 删除必须提供 transaction commit anchor。"
+        }
+        foreach ($anchor in @($NamedStreamDeleteJournalAnchors)) {
+            Assert-CodexHookDirectoryTreeExactProperties `
+                -Value $anchor `
+                -Names @(
+                    'generationId', 'operationId', 'directoryPath', 'relativePath',
+                    'volumeSerialNumber', 'fileIndex',
+                    'freezeIntentPath', 'freezeIntentSha256', 'freezeIntentIdentity',
+                    'commitIntentPath', 'commitIntentSha256', 'commitIntentIdentity'
+                ) `
+                -Scope "$Scope directory journal anchor"
+            $anchorIdentity = @(
+                [string]$anchor.volumeSerialNumber,
+                [string]$anchor.fileIndex)
+            Assert-CodexHookDirectoryTreeIdentity `
+                -Expected $anchorIdentity `
+                -Actual $anchorIdentity `
+                -Scope "$Scope directory journal anchor identity"
+            Assert-CodexHookDirectoryTreeIdentity `
+                -Expected @($anchor.freezeIntentIdentity) `
+                -Actual @($anchor.freezeIntentIdentity) `
+                -Scope "$Scope directory freeze journal identity"
+            Assert-CodexHookDirectoryTreeIdentity `
+                -Expected @($anchor.commitIntentIdentity) `
+                -Actual @($anchor.commitIntentIdentity) `
+                -Scope "$Scope directory commit journal identity"
+            if ([string]$anchor.generationId -cne $intentGenerationId -or
+                [string]$anchor.operationId -notmatch '^[0-9a-f]{32}$' -or
+                [string]$anchor.freezeIntentSha256 -notmatch '^[0-9a-f]{64}$' -or
+                [string]$anchor.commitIntentSha256 -notmatch '^[0-9a-f]{64}$') {
+                throw "$Scope directory journal anchor 状态非法。"
+            }
+            $identityKey = '{0}|{1}' -f $anchorIdentity[0], $anchorIdentity[1]
+            if ($journalAnchorsByIdentity.ContainsKey($identityKey)) {
+                throw "$Scope directory journal anchor identity 重复。"
+            }
+            $journalAnchorsByIdentity.Add($identityKey, $anchor)
+        }
+    }
     Assert-CodexHookDirectoryTreeIdentity -Expected @($ExpectedRootIdentity) -Actual @($ExpectedRootIdentity) -Scope "$Scope expected root"
     Assert-CodexHookDirectoryTreeIdentity -Expected @($ExpectedRootIdentity) -Actual @($manifest.rootIdentity) -Scope "$Scope root manifest"
+
+    function Read-CodexHookDirectoryDeleteJournal {
+        param(
+            [Parameter(Mandatory)][string]$JournalPath,
+            [Parameter(Mandatory)][ValidateSet('freeze', 'commit', 'abort')][string]$Kind,
+            [Parameter(Mandatory)][string]$JournalScope
+        )
+
+        $fullJournalPath = Assert-CodexHookDPath -Value $JournalPath -Name "$JournalScope path"
+        if (-not (Test-CodexHookPathWithin -Path $fullJournalPath -ParentPath $intentRoot) -or
+            $fullJournalPath -ieq $intentRoot -or
+            [IO.Path]::GetFileName($fullJournalPath) -notmatch "^directory-delete-.+-$Kind\.json$") {
+            throw "$JournalScope path 越界或命名非法。"
+        }
+        $safeSnapshot = Read-CodexHookSafeUtf8FileSnapshot `
+            -Path $fullJournalPath `
+            -Name $JournalScope `
+            -AllowedExactPaths @($fullJournalPath)
+        $snapshot = [pscustomobject][ordered]@{
+            sha256 = [string]$safeSnapshot.sha256
+            text = [string]$safeSnapshot.text
+            bytes = [byte[]]$safeSnapshot.bytes
+            identity = @($safeSnapshot.probe.identity)
+        }
+        Assert-CodexHookStrictJsonText -JsonText $snapshot.text
+        $document = $snapshot.text |
+            ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
+        $commonNames = @(
+            'artifactType', 'schemaVersion', 'generationId', 'operationId',
+            'directoryPath', 'relativePath', 'volumeSerialNumber', 'fileIndex',
+            'state')
+        $expectedNames = switch ($Kind) {
+            'freeze' {
+                @($commonNames) + @(
+                    'originalSecurityDescriptorSddl',
+                    'requestedFrozenSecurityDescriptorSddl', 'createdAtUtc')
+            }
+            'commit' {
+                @($commonNames) + @(
+                    'originalSecurityDescriptorSddl',
+                    'requestedFrozenSecurityDescriptorSddl',
+                    'appliedFrozenSecurityDescriptorSddl',
+                    'freezeIntentPath', 'freezeIntentSha256',
+                    'freezeIntentIdentity', 'createdAtUtc')
+            }
+            'abort' {
+                @($commonNames) + @(
+                    'restoredSecurityDescriptorSddl',
+                    'freezeIntentPath', 'freezeIntentSha256',
+                    'freezeIntentIdentity', 'createdAtUtc')
+            }
+        }
+        Assert-CodexHookDirectoryTreeExactProperties `
+            -Value $document `
+            -Names $expectedNames `
+            -Scope $JournalScope
+        $expectedArtifactType = "env-governance.codex-safe-tree-delete-directory-$Kind-intent"
+        $expectedState = switch ($Kind) {
+            'freeze' { 'freeze-prepared' }
+            'commit' { 'commit-authorized' }
+            'abort' { 'aborted' }
+        }
+        if ([string]$document.artifactType -cne $expectedArtifactType -or
+            [long]$document.schemaVersion -ne 2 -or
+            [string]$document.generationId -cne $intentGenerationId -or
+            [string]$document.operationId -notmatch '^[0-9a-f]{32}$' -or
+            [string]$document.state -cne $expectedState) {
+            throw "$JournalScope artifact、schema 或状态非法。"
+        }
+        $documentIdentity = @(
+            [string]$document.volumeSerialNumber,
+            [string]$document.fileIndex)
+        Assert-CodexHookDirectoryTreeIdentity `
+            -Expected $documentIdentity `
+            -Actual $documentIdentity `
+            -Scope "$JournalScope directory identity"
+        if ($Kind -cne 'freeze') {
+            if ([string]$document.freezeIntentSha256 -notmatch '^[0-9a-f]{64}$') {
+                throw "$JournalScope freeze SHA-256 非法。"
+            }
+            Assert-CodexHookDirectoryTreeIdentity `
+                -Expected @($document.freezeIntentIdentity) `
+                -Actual @($document.freezeIntentIdentity) `
+                -Scope "$JournalScope freeze identity"
+        }
+        return [pscustomobject][ordered]@{
+            path = $fullJournalPath
+            snapshot = $snapshot
+            document = $document
+        }
+    }
+
+    function Assert-CodexHookDirectoryDeleteJournalBinding {
+        param(
+            [Parameter(Mandatory)][object]$FreezeJournal,
+            [Parameter(Mandatory)][object]$TerminalJournal,
+            [Parameter(Mandatory)][string]$BindingScope
+        )
+
+        $freeze = $FreezeJournal.document
+        $terminal = $TerminalJournal.document
+        if ([string]$terminal.generationId -cne [string]$freeze.generationId -or
+            [string]$terminal.operationId -cne [string]$freeze.operationId -or
+            [string]$terminal.directoryPath -cne [string]$freeze.directoryPath -or
+            [string]$terminal.relativePath -cne [string]$freeze.relativePath -or
+            [string]$terminal.volumeSerialNumber -cne [string]$freeze.volumeSerialNumber -or
+            [string]$terminal.fileIndex -cne [string]$freeze.fileIndex -or
+            [string]$terminal.freezeIntentPath -cne [string]$FreezeJournal.path -or
+            [string]$terminal.freezeIntentSha256 -cne [string]$FreezeJournal.snapshot.sha256 -or
+            -not (Test-CodexHookDirectoryTreeIdentityEqual `
+                -Expected @($terminal.freezeIntentIdentity) `
+                -Actual @($FreezeJournal.snapshot.identity))) {
+            throw "$BindingScope journal 绑定不一致。"
+        }
+        if ([string]$terminal.state -ceq 'commit-authorized') {
+            if ([string]$terminal.originalSecurityDescriptorSddl -cne
+                    [string]$freeze.originalSecurityDescriptorSddl -or
+                [string]$terminal.requestedFrozenSecurityDescriptorSddl -cne
+                    [string]$freeze.requestedFrozenSecurityDescriptorSddl -or
+                -not [CodexHookGovernance.VerifiedDirectoryChainGuard]::IsValidAlternateDataStreamWriteFreeze(
+                    [string]$terminal.originalSecurityDescriptorSddl,
+                    [string]$terminal.requestedFrozenSecurityDescriptorSddl,
+                    [string]$terminal.appliedFrozenSecurityDescriptorSddl)) {
+                throw "$BindingScope commit SDDL 冻结语义非法。"
+            }
+        } elseif (-not [CodexHookGovernance.VerifiedDirectoryChainGuard]::SecurityDescriptorsHaveEquivalentDacl(
+                [string]$freeze.originalSecurityDescriptorSddl,
+                [string]$terminal.restoredSecurityDescriptorSddl)) {
+            throw "$BindingScope abort 未恢复首份 freeze 的原始 DACL。"
+        }
+    }
 
     function Remove-CodexHookCapabilityDirectoryNode {
         param(
@@ -1034,6 +1237,313 @@ function Remove-CodexHookCapabilityDirectoryTree {
                 -ExpectedIdentity @($expectedChild.identity) `
                 -Scope "$NodeScope child"
         }
+        if ($RejectNamedStreams) {
+            $directoryIdentity = @(
+                [string]$expectedDirectory.identity[0],
+                [string]$expectedDirectory.identity[1])
+            $identityKey = '{0}|{1}' -f $directoryIdentity[0], $directoryIdentity[1]
+            $activeJournals = [Collections.Generic.List[object]]::new()
+            foreach ($freezePathCandidate in @([IO.Directory]::EnumerateFiles(
+                    $intentRoot,
+                    'directory-delete-*-freeze.json',
+                    [IO.SearchOption]::TopDirectoryOnly))) {
+                $freezeJournal = Read-CodexHookDirectoryDeleteJournal `
+                    -JournalPath $freezePathCandidate `
+                    -Kind freeze `
+                    -JournalScope "$NodeScope directory freeze journal"
+                $freeze = $freezeJournal.document
+                if ([string]$freeze.directoryPath -cne $DirectoryPath -or
+                    [string]$freeze.relativePath -cne $RelativePath -or
+                    [string]$freeze.volumeSerialNumber -cne $directoryIdentity[0] -or
+                    [string]$freeze.fileIndex -cne $directoryIdentity[1]) {
+                    continue
+                }
+                $commitPathCandidate = $freezeJournal.path -replace '-freeze\.json$', '-commit.json'
+                $abortPathCandidate = $freezeJournal.path -replace '-freeze\.json$', '-abort.json'
+                $hasCommit = [IO.File]::Exists($commitPathCandidate)
+                $hasAbort = [IO.File]::Exists($abortPathCandidate)
+                if ($hasCommit -and $hasAbort) {
+                    throw "$NodeScope 同一 directory operation 同时存在 commit 与 abort。"
+                }
+                if ($hasAbort) {
+                    $abortJournal = Read-CodexHookDirectoryDeleteJournal `
+                        -JournalPath $abortPathCandidate `
+                        -Kind abort `
+                        -JournalScope "$NodeScope directory abort journal"
+                    Assert-CodexHookDirectoryDeleteJournalBinding `
+                        -FreezeJournal $freezeJournal `
+                        -TerminalJournal $abortJournal `
+                        -BindingScope "$NodeScope directory abort"
+                    continue
+                }
+                $commitJournal = $null
+                if ($hasCommit) {
+                    $commitJournal = Read-CodexHookDirectoryDeleteJournal `
+                        -JournalPath $commitPathCandidate `
+                        -Kind commit `
+                        -JournalScope "$NodeScope directory commit journal"
+                    Assert-CodexHookDirectoryDeleteJournalBinding `
+                        -FreezeJournal $freezeJournal `
+                        -TerminalJournal $commitJournal `
+                        -BindingScope "$NodeScope directory commit"
+                }
+                $activeJournals.Add([pscustomobject][ordered]@{
+                    freeze = $freezeJournal
+                    commit = $commitJournal
+                    commitPath = $commitPathCandidate
+                    abortPath = $abortPathCandidate
+                })
+            }
+            if ($activeJournals.Count -gt 1) {
+                throw "$NodeScope 存在多个未终结 directory journal operation。"
+            }
+
+            $anchoredJournal = $null
+            if ($journalAnchorsByIdentity.ContainsKey($identityKey)) {
+                $anchor = $journalAnchorsByIdentity[$identityKey]
+                if ([string]$anchor.directoryPath -cne $DirectoryPath -or
+                    [string]$anchor.relativePath -cne $RelativePath) {
+                    throw "$NodeScope directory journal anchor 路径绑定不一致。"
+                }
+                $freezeJournal = Read-CodexHookDirectoryDeleteJournal `
+                    -JournalPath ([string]$anchor.freezeIntentPath) `
+                    -Kind freeze `
+                    -JournalScope "$NodeScope anchored freeze journal"
+                $commitJournal = Read-CodexHookDirectoryDeleteJournal `
+                    -JournalPath ([string]$anchor.commitIntentPath) `
+                    -Kind commit `
+                    -JournalScope "$NodeScope anchored commit journal"
+                Assert-CodexHookDirectoryDeleteJournalBinding `
+                    -FreezeJournal $freezeJournal `
+                    -TerminalJournal $commitJournal `
+                    -BindingScope "$NodeScope anchored commit"
+                if ([string]$anchor.operationId -cne [string]$commitJournal.document.operationId -or
+                    [string]$anchor.freezeIntentSha256 -cne [string]$freezeJournal.snapshot.sha256 -or
+                    [string]$anchor.commitIntentSha256 -cne [string]$commitJournal.snapshot.sha256 -or
+                    -not (Test-CodexHookDirectoryTreeIdentityEqual `
+                        -Expected @($anchor.freezeIntentIdentity) `
+                        -Actual @($freezeJournal.snapshot.identity)) -or
+                    -not (Test-CodexHookDirectoryTreeIdentityEqual `
+                        -Expected @($anchor.commitIntentIdentity) `
+                        -Actual @($commitJournal.snapshot.identity)) -or
+                    [IO.File]::Exists(
+                        ([string]$anchor.commitIntentPath -replace '-commit\.json$', '-abort.json'))) {
+                    throw "$NodeScope directory journal anchor hash、identity 或终态冲突。"
+                }
+                if ($activeJournals.Count -ne 1 -or
+                    [string]$activeJournals[0].commit.path -cne [string]$commitJournal.path) {
+                    throw "$NodeScope anchored commit 不是唯一活跃 operation。"
+                }
+                $anchoredJournal = $commitJournal
+            }
+
+            $freezeIntentPath = $null
+            $commitIntentPath = $null
+            $abortIntentPath = $null
+            $checkpointForTest = $null
+            if ($null -ne $NamedStreamDeleteCheckpointForTest) {
+                [Action[string]]$checkpointForTest = {
+                    param([string]$Phase)
+                    & $NamedStreamDeleteCheckpointForTest `
+                        $DirectoryPath `
+                        $RelativePath `
+                        $Phase `
+                        $freezeIntentPath `
+                        $commitIntentPath `
+                        $abortIntentPath
+                }
+            }
+
+            if ($null -ne $anchoredJournal) {
+                $freezeIntentPath = [string]$anchoredJournal.document.freezeIntentPath
+                $commitIntentPath = [string]$anchoredJournal.path
+                $abortIntentPath = $commitIntentPath -replace '-commit\.json$', '-abort.json'
+                $DirectoryGuard.DeleteEmptyDirectoryWithAuthorizedAlternateDataStreamCommit(
+                    [string]$anchoredJournal.document.originalSecurityDescriptorSddl,
+                    [string]$anchoredJournal.document.requestedFrozenSecurityDescriptorSddl,
+                    [string]$anchoredJournal.document.appliedFrozenSecurityDescriptorSddl,
+                    $checkpointForTest)
+                return
+            }
+
+            $resumePreparedFreeze = $activeJournals.Count -eq 1
+            if ($resumePreparedFreeze) {
+                $active = $activeJournals[0]
+                $freezeIntentPath = [string]$active.freeze.path
+                $commitIntentPath = [string]$active.commitPath
+                $abortIntentPath = [string]$active.abortPath
+                if ($null -ne $active.commit) {
+                    $commitDocument = $active.commit.document
+                    $commitAnchor = [pscustomobject][ordered]@{
+                        generationId = [string]$commitDocument.generationId
+                        operationId = [string]$commitDocument.operationId
+                        directoryPath = [string]$commitDocument.directoryPath
+                        relativePath = [string]$commitDocument.relativePath
+                        volumeSerialNumber = [string]$commitDocument.volumeSerialNumber
+                        fileIndex = [string]$commitDocument.fileIndex
+                        freezeIntentPath = [string]$active.freeze.path
+                        freezeIntentSha256 = [string]$active.freeze.snapshot.sha256
+                        freezeIntentIdentity = @($active.freeze.snapshot.identity)
+                        commitIntentPath = [string]$active.commit.path
+                        commitIntentSha256 = [string]$active.commit.snapshot.sha256
+                        commitIntentIdentity = @($active.commit.snapshot.identity)
+                    }
+                    & $NamedStreamDeleteCommitAnchor $commitAnchor
+                    $DirectoryGuard.DeleteEmptyDirectoryWithAuthorizedAlternateDataStreamCommit(
+                        [string]$commitDocument.originalSecurityDescriptorSddl,
+                        [string]$commitDocument.requestedFrozenSecurityDescriptorSddl,
+                        [string]$commitDocument.appliedFrozenSecurityDescriptorSddl,
+                        $checkpointForTest)
+                    return
+                }
+                $intentId = [string]$active.freeze.document.operationId
+            } else {
+                $intentId = [guid]::NewGuid().ToString('N')
+                $intentLeafBase = 'directory-delete-{0}-{1}-{2}' -f
+                        $directoryIdentity[0].ToLowerInvariant(),
+                        $directoryIdentity[1].ToLowerInvariant(),
+                        $intentId
+                $freezeIntentPath = Join-Path $intentRoot "$intentLeafBase-freeze.json"
+                $commitIntentPath = Join-Path $intentRoot "$intentLeafBase-commit.json"
+                $abortIntentPath = Join-Path $intentRoot "$intentLeafBase-abort.json"
+            }
+            $journalState = [pscustomobject][ordered]@{
+                freezeDocument = if ($resumePreparedFreeze) {
+                    $activeJournals[0].freeze.document
+                } else { $null }
+                freezeSnapshot = if ($resumePreparedFreeze) {
+                    $activeJournals[0].freeze.snapshot
+                } else { $null }
+                commitAnchor = $null
+            }
+            [Action[string, string]]$publishFreezeIntent = {
+                param([string]$OriginalSddl, [string]$FrozenSddl)
+                $journalState.freezeDocument = [ordered]@{
+                    artifactType = 'env-governance.codex-safe-tree-delete-directory-freeze-intent'
+                    schemaVersion = 2
+                    generationId = $intentGenerationId
+                    operationId = $intentId
+                    directoryPath = $DirectoryPath
+                    relativePath = $RelativePath
+                    volumeSerialNumber = [string]$expectedDirectory.identity[0]
+                    fileIndex = [string]$expectedDirectory.identity[1]
+                    state = 'freeze-prepared'
+                    originalSecurityDescriptorSddl = $OriginalSddl
+                    requestedFrozenSecurityDescriptorSddl = $FrozenSddl
+                    createdAtUtc = [datetimeoffset]::UtcNow.ToString(
+                        'o',
+                        [Globalization.CultureInfo]::InvariantCulture)
+                }
+                $journalState.freezeSnapshot = New-CodexHookCapabilityJson `
+                    -Path $freezeIntentPath `
+                    -Document $journalState.freezeDocument `
+                    -CapabilityRoot $intentRoot `
+                    -AllowedExactPaths @($freezeIntentPath) `
+                    -Scope "$NodeScope directory freeze intent"
+            }
+            [Action[string]]$publishCommitIntent = {
+                param([string]$AppliedFrozenSddl)
+                $commitDocument = [ordered]@{
+                    artifactType = 'env-governance.codex-safe-tree-delete-directory-commit-intent'
+                    schemaVersion = 2
+                    generationId = $intentGenerationId
+                    operationId = $intentId
+                    directoryPath = $DirectoryPath
+                    relativePath = $RelativePath
+                    volumeSerialNumber = [string]$expectedDirectory.identity[0]
+                    fileIndex = [string]$expectedDirectory.identity[1]
+                    state = 'commit-authorized'
+                    originalSecurityDescriptorSddl = [string]$journalState.freezeDocument.originalSecurityDescriptorSddl
+                    requestedFrozenSecurityDescriptorSddl = [string]$journalState.freezeDocument.requestedFrozenSecurityDescriptorSddl
+                    appliedFrozenSecurityDescriptorSddl = $AppliedFrozenSddl
+                    freezeIntentPath = $freezeIntentPath
+                    freezeIntentSha256 = [string]$journalState.freezeSnapshot.sha256
+                    freezeIntentIdentity = @($journalState.freezeSnapshot.identity)
+                    createdAtUtc = [datetimeoffset]::UtcNow.ToString(
+                        'o',
+                        [Globalization.CultureInfo]::InvariantCulture)
+                }
+                $commitSnapshot = New-CodexHookCapabilityJson `
+                    -Path $commitIntentPath `
+                    -Document $commitDocument `
+                    -CapabilityRoot $intentRoot `
+                    -AllowedExactPaths @($commitIntentPath) `
+                    -Scope "$NodeScope directory commit intent"
+                $journalState.commitAnchor = [pscustomobject][ordered]@{
+                    generationId = $intentGenerationId
+                    operationId = $intentId
+                    directoryPath = $DirectoryPath
+                    relativePath = $RelativePath
+                    volumeSerialNumber = $directoryIdentity[0]
+                    fileIndex = $directoryIdentity[1]
+                    freezeIntentPath = $freezeIntentPath
+                    freezeIntentSha256 = [string]$journalState.freezeSnapshot.sha256
+                    freezeIntentIdentity = @($journalState.freezeSnapshot.identity)
+                    commitIntentPath = $commitIntentPath
+                    commitIntentSha256 = [string]$commitSnapshot.sha256
+                    commitIntentIdentity = @($commitSnapshot.identity)
+                }
+                if ($null -ne $NamedStreamDeleteCheckpointForTest) {
+                    & $NamedStreamDeleteCheckpointForTest `
+                        $DirectoryPath `
+                        $RelativePath `
+                        'after-commit-publish-before-return' `
+                        $freezeIntentPath `
+                        $commitIntentPath `
+                        $abortIntentPath
+                }
+            }
+            [Action]$anchorCommitIntent = {
+                if ($null -eq $journalState.commitAnchor) {
+                    throw "$NodeScope directory commit anchor 尚未准备。"
+                }
+                & $NamedStreamDeleteCommitAnchor $journalState.commitAnchor
+            }
+            [Action[string]]$publishAbortIntent = {
+                param([string]$RestoredSddl)
+                $abortDocument = [ordered]@{
+                    artifactType = 'env-governance.codex-safe-tree-delete-directory-abort-intent'
+                    schemaVersion = 2
+                    generationId = $intentGenerationId
+                    operationId = $intentId
+                    directoryPath = $DirectoryPath
+                    relativePath = $RelativePath
+                    volumeSerialNumber = [string]$expectedDirectory.identity[0]
+                    fileIndex = [string]$expectedDirectory.identity[1]
+                    state = 'aborted'
+                    restoredSecurityDescriptorSddl = $RestoredSddl
+                    freezeIntentPath = $freezeIntentPath
+                    freezeIntentSha256 = [string]$journalState.freezeSnapshot.sha256
+                    freezeIntentIdentity = @($journalState.freezeSnapshot.identity)
+                    createdAtUtc = [datetimeoffset]::UtcNow.ToString(
+                        'o',
+                        [Globalization.CultureInfo]::InvariantCulture)
+                }
+                [void](New-CodexHookCapabilityJson `
+                    -Path $abortIntentPath `
+                    -Document $abortDocument `
+                    -CapabilityRoot $intentRoot `
+                    -AllowedExactPaths @($abortIntentPath) `
+                    -Scope "$NodeScope directory abort intent")
+            }
+            if ($resumePreparedFreeze) {
+                $DirectoryGuard.ResumeEmptyDirectoryRejectingAlternateDataStreams(
+                    [string]$journalState.freezeDocument.originalSecurityDescriptorSddl,
+                    [string]$journalState.freezeDocument.requestedFrozenSecurityDescriptorSddl,
+                    $publishCommitIntent,
+                    $anchorCommitIntent,
+                    $publishAbortIntent,
+                    $checkpointForTest)
+            } else {
+                $DirectoryGuard.DeleteEmptyDirectoryRejectingAlternateDataStreams(
+                    $publishFreezeIntent,
+                    $publishCommitIntent,
+                    $anchorCommitIntent,
+                    $publishAbortIntent,
+                    $checkpointForTest)
+            }
+            return
+        }
         $DirectoryGuard.DeleteEmptyDirectory()
     }
 
@@ -1076,4 +1586,65 @@ function Set-CodexHookCapabilityJson {
         -CapabilityRoot $CapabilityRoot `
         -AllowedExactPaths $AllowedExactPaths `
         -Scope $Scope
+}
+
+function New-CodexHookCapabilityJson {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][object]$Document,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [string]$Scope = 'create-only capability json'
+    )
+
+    [byte[]]$bytes = [Text.UTF8Encoding]::new($false).GetBytes(
+        ($Document | ConvertTo-Json -Depth 100))
+    $afterSha256 = Get-CodexHookBytesSha256 -Bytes $bytes
+    $publication = [pscustomobject][ordered]@{
+        renamePrepared = $false
+        identity = $null
+    }
+    try {
+        Set-CodexHookAtomicFileBytesWithCapability `
+            -Path $Path `
+            -Bytes $bytes `
+            -ExpectedExists $false `
+            -ExpectedSha256 $null `
+            -AfterSha256 $afterSha256 `
+            -CapabilityRoot $CapabilityRoot `
+            -AllowedExactPaths $AllowedExactPaths `
+            -Scope $Scope `
+            -BeforeRename {
+                param($PreparedSnapshot)
+                $publication.renamePrepared = $true
+                $publication.identity = @($PreparedSnapshot.identity)
+            }
+    } catch {
+        $failure = $_
+        if ($publication.renamePrepared) {
+            try {
+                $published = Get-CodexHookCapabilityFileSnapshot `
+                    -Path $Path `
+                    -CapabilityRoot $CapabilityRoot `
+                    -AllowedExactPaths $AllowedExactPaths `
+                    -Name "$Scope indeterminate publish"
+                if ($published.exists -and
+                    [string]$published.sha256 -ceq $afterSha256 -and
+                    (Test-CodexHookDirectoryTreeIdentityEqual `
+                        -Expected @($publication.identity) `
+                        -Actual @($published.identity))) {
+                    return $published
+                }
+            } catch {
+                throw $failure
+            }
+        }
+        throw $failure
+    }
+
+    return Get-CodexHookCapabilityFileSnapshot `
+        -Path $Path `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name "$Scope published"
 }

@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
@@ -202,12 +203,17 @@ namespace CodexHookGovernance
         private const uint FileAttributeReparsePoint = 0x00000400;
         private const int ErrorFileNotFound = 2;
         private const int ErrorPathNotFound = 3;
+        private const int ErrorAccessDenied = 5;
+        private const int ErrorHandleEof = 38;
         private const int ErrorAlreadyExists = 183;
+        private const int FileDispositionInformation = 13;
         private const int FileDispositionInformationEx = 64;
         private const int FileRenameInformationEx = 65;
         private const int FileNamesInformation = 12;
+        private const int FileStreamInfo = 7;
         private const uint FileDispositionDelete = 0x00000001;
         private const uint FileDispositionPosixSemantics = 0x00000002;
+        private const int AlternateDataStreamWriteMask = 0x00000116;
         private const int StatusNoMoreFiles = unchecked((int)0x80000006);
 
         [StructLayout(LayoutKind.Sequential)]
@@ -262,6 +268,265 @@ namespace CodexHookGovernance
         public string VolumeSerialNumber { get; }
 
         public string FileIndex { get; }
+
+        public void DeleteEmptyDirectoryRejectingAlternateDataStreams()
+        {
+            DeleteEmptyDirectoryRejectingAlternateDataStreams(
+                delegate { },
+                delegate { },
+                delegate { },
+                delegate(string ignored) { },
+                null);
+        }
+
+        public void DeleteEmptyDirectoryRejectingAlternateDataStreams(
+            Action<string, string> publishFreezeIntent,
+            Action<string> publishCommitIntent,
+            Action anchorCommitIntent,
+            Action<string> publishAbortIntent,
+            Action<string> checkpointForTest)
+        {
+            if (publishFreezeIntent == null)
+            {
+                throw new ArgumentNullException(nameof(publishFreezeIntent));
+            }
+            if (publishCommitIntent == null)
+            {
+                throw new ArgumentNullException(nameof(publishCommitIntent));
+            }
+            if (anchorCommitIntent == null)
+            {
+                throw new ArgumentNullException(nameof(anchorCommitIntent));
+            }
+            if (publishAbortIntent == null)
+            {
+                throw new ArgumentNullException(nameof(publishAbortIntent));
+            }
+            DeleteEmptyDirectoryRejectingAlternateDataStreamsCore(
+                publishFreezeIntent,
+                publishCommitIntent,
+                anchorCommitIntent,
+                publishAbortIntent,
+                checkpointForTest,
+                null,
+                null);
+        }
+
+        public void ResumeEmptyDirectoryRejectingAlternateDataStreams(
+            string originalSddl,
+            string frozenSddl,
+            Action<string> publishCommitIntent,
+            Action anchorCommitIntent,
+            Action<string> publishAbortIntent,
+            Action<string> checkpointForTest)
+        {
+            if (originalSddl == null) { throw new ArgumentNullException(nameof(originalSddl)); }
+            if (frozenSddl == null) { throw new ArgumentNullException(nameof(frozenSddl)); }
+            if (publishCommitIntent == null) { throw new ArgumentNullException(nameof(publishCommitIntent)); }
+            if (anchorCommitIntent == null) { throw new ArgumentNullException(nameof(anchorCommitIntent)); }
+            if (publishAbortIntent == null) { throw new ArgumentNullException(nameof(publishAbortIntent)); }
+            DeleteEmptyDirectoryRejectingAlternateDataStreamsCore(
+                null,
+                publishCommitIntent,
+                anchorCommitIntent,
+                publishAbortIntent,
+                checkpointForTest,
+                originalSddl,
+                frozenSddl);
+        }
+
+        private void DeleteEmptyDirectoryRejectingAlternateDataStreamsCore(
+            Action<string, string> publishFreezeIntent,
+            Action<string> publishCommitIntent,
+            Action anchorCommitIntent,
+            Action<string> publishAbortIntent,
+            Action<string> checkpointForTest,
+            string preparedOriginalSddl,
+            string preparedFrozenSddl)
+        {
+            ThrowIfDisposed();
+            SafeFileHandle directoryHandle = handles[handles.Count - 1];
+            VerifyDirectoryHandle(directoryHandle, DirectoryPath);
+            AssertDirectoryEmpty(directoryHandle);
+            string currentSddl = GuardedAclTargetLease.GetSecurityDescriptorSddlForHandle(
+                directoryHandle,
+                DirectoryPath);
+            bool resumingPreparedFreeze = preparedOriginalSddl != null;
+            bool preparedFreezeAlreadyApplied = false;
+            string originalSddl;
+            string frozenSddl;
+            if (resumingPreparedFreeze)
+            {
+                originalSddl = preparedOriginalSddl;
+                frozenSddl = preparedFrozenSddl;
+                preparedFreezeAlreadyApplied = IsValidAlternateDataStreamWriteFreeze(
+                    originalSddl,
+                    frozenSddl,
+                    currentSddl);
+                if (!preparedFreezeAlreadyApplied &&
+                    !SecurityDescriptorsHaveEquivalentDacl(originalSddl, currentSddl))
+                {
+                    throw new IOException(
+                        "The prepared directory write freeze no longer matches the current DACL.");
+                }
+            }
+            else
+            {
+                originalSddl = currentSddl;
+                frozenSddl = AddAlternateDataStreamWriteFreeze(originalSddl);
+                publishFreezeIntent(originalSddl, frozenSddl);
+                if (checkpointForTest != null)
+                {
+                    checkpointForTest("before-stream-freeze");
+                }
+            }
+
+            bool aclChanged = resumingPreparedFreeze
+                ? !preparedFreezeAlreadyApplied
+                : !string.Equals(originalSddl, frozenSddl, StringComparison.Ordinal);
+            string appliedFrozenSddl = currentSddl;
+            bool deletePending = false;
+            bool commitAuthorized = false;
+            bool commitPublicationStarted = false;
+            try
+            {
+                if (aclChanged)
+                {
+                    appliedFrozenSddl = GuardedAclTargetLease.SetSecurityDescriptorSddlForHandleAndReadBack(
+                        directoryHandle,
+                        DirectoryPath,
+                        currentSddl,
+                        frozenSddl);
+                }
+                AssertAlternateDataStreamWriteFreeze(directoryHandle);
+                if (checkpointForTest != null)
+                {
+                    checkpointForTest("after-stream-freeze");
+                }
+                AssertDirectoryEmpty(directoryHandle);
+                AssertNoAlternateDataStreams(directoryHandle);
+                AssertAlternateDataStreamWriteFreeze(directoryHandle);
+                AssertDirectoryEmpty(directoryHandle);
+                AssertNoAlternateDataStreams(directoryHandle);
+                commitPublicationStarted = true;
+                publishCommitIntent(appliedFrozenSddl);
+                anchorCommitIntent();
+                commitAuthorized = true;
+                if (checkpointForTest != null)
+                {
+                    checkpointForTest("after-commit-intent");
+                }
+                SetDirectoryDeletePending(directoryHandle, true);
+                deletePending = true;
+                if (checkpointForTest != null)
+                {
+                    checkpointForTest("after-delete-pending");
+                }
+            }
+            catch (Exception operationException)
+            {
+                if (!commitAuthorized && !commitPublicationStarted)
+                {
+                    List<Exception> recoveryExceptions = new List<Exception>();
+                    string restoredSddl = originalSddl;
+                    try
+                    {
+                        if (deletePending)
+                        {
+                            SetDirectoryDeletePending(directoryHandle, false);
+                        }
+                        if (aclChanged || resumingPreparedFreeze)
+                        {
+                            restoredSddl = GuardedAclTargetLease.SetSecurityDescriptorSddlForHandleAndReadBack(
+                                directoryHandle,
+                                DirectoryPath,
+                                appliedFrozenSddl,
+                                originalSddl);
+                        }
+                        if (!SecurityDescriptorsHaveEquivalentDacl(originalSddl, restoredSddl))
+                        {
+                            throw new IOException(
+                                "The guarded directory DACL was not restored to its original effective state.");
+                        }
+                    }
+                    catch (Exception exception)
+                    {
+                        recoveryExceptions.Add(exception);
+                    }
+                    if (recoveryExceptions.Count == 0)
+                    {
+                        try
+                        {
+                            publishAbortIntent(restoredSddl);
+                        }
+                        catch (Exception exception)
+                        {
+                            recoveryExceptions.Add(exception);
+                        }
+                    }
+                    if (recoveryExceptions.Count != 0)
+                    {
+                        recoveryExceptions.Insert(0, operationException);
+                        throw new AggregateException(
+                            "Unable to roll back and journal the guarded directory write freeze.",
+                            recoveryExceptions);
+                    }
+                }
+                throw;
+            }
+
+            disposed = true;
+            DisposeHandles(handles);
+            if (Directory.Exists(DirectoryPath))
+            {
+                throw new IOException("The verified stream-free directory path still exists after handle-bound deletion.");
+            }
+        }
+
+        public void DeleteEmptyDirectoryWithAuthorizedAlternateDataStreamCommit(
+            string originalSddl,
+            string requestedFrozenSddl,
+            string appliedFrozenSddl,
+            Action<string> checkpointForTest)
+        {
+            if (originalSddl == null) { throw new ArgumentNullException(nameof(originalSddl)); }
+            if (requestedFrozenSddl == null) { throw new ArgumentNullException(nameof(requestedFrozenSddl)); }
+            if (appliedFrozenSddl == null) { throw new ArgumentNullException(nameof(appliedFrozenSddl)); }
+            ThrowIfDisposed();
+            SafeFileHandle directoryHandle = handles[handles.Count - 1];
+            VerifyDirectoryHandle(directoryHandle, DirectoryPath);
+            AssertDirectoryEmpty(directoryHandle);
+            string currentSddl = GuardedAclTargetLease.GetSecurityDescriptorSddlForHandle(
+                directoryHandle,
+                DirectoryPath);
+            if (!IsValidAlternateDataStreamWriteFreeze(
+                    originalSddl,
+                    requestedFrozenSddl,
+                    appliedFrozenSddl) ||
+                !SecurityDescriptorsHaveEquivalentDacl(appliedFrozenSddl, currentSddl))
+            {
+                throw new IOException(
+                    "The authorized directory write freeze no longer matches the current DACL.");
+            }
+            AssertAlternateDataStreamWriteFreeze(directoryHandle);
+            AssertDirectoryEmpty(directoryHandle);
+            AssertNoAlternateDataStreams(directoryHandle);
+            AssertAlternateDataStreamWriteFreeze(directoryHandle);
+            AssertDirectoryEmpty(directoryHandle);
+            AssertNoAlternateDataStreams(directoryHandle);
+            SetDirectoryDeletePending(directoryHandle, true);
+            if (checkpointForTest != null)
+            {
+                checkpointForTest("after-delete-pending");
+            }
+            disposed = true;
+            DisposeHandles(handles);
+            if (Directory.Exists(DirectoryPath))
+            {
+                throw new IOException(
+                    "The authorized stream-free directory path still exists after handle-bound deletion.");
+            }
+        }
 
         public void DeleteEmptyDirectory()
         {
@@ -433,7 +698,7 @@ namespace CodexHookGovernance
             string lexicalPath = ValidateChildPath(childDirectoryPath, "childDirectoryPath");
             SafeFileHandle handle = CreateFileW(
                 ToExtendedPath(lexicalPath),
-                GenericRead | DeleteAccess,
+                GenericRead | ReadControl | WriteDac | DeleteAccess,
                 FileShare.Read,
                 IntPtr.Zero,
                 OpenExisting,
@@ -590,6 +855,10 @@ namespace CodexHookGovernance
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeleteFileW(string fileName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool CreateDirectoryW(
             string pathName,
             IntPtr securityAttributes);
@@ -621,6 +890,14 @@ namespace CodexHookGovernance
         private static extern bool GetFileInformationByHandle(
             SafeFileHandle fileHandle,
             out ByHandleFileInformation fileInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandleEx(
+            SafeFileHandle fileHandle,
+            int fileInformationClass,
+            IntPtr fileInformation,
+            uint bufferSize);
 
         public static VerifiedDirectoryChainGuard Acquire(
             string trustedRoot,
@@ -777,7 +1054,7 @@ namespace CodexHookGovernance
             string lexicalPath = Path.GetFullPath(expectedPath);
             handle = CreateFileW(
                 ToExtendedPath(lexicalPath),
-                GenericRead | (requireDeleteAccess ? DeleteAccess : 0),
+                GenericRead | (requireDeleteAccess ? ReadControl | WriteDac | DeleteAccess : 0),
                 FileShare.Read,
                 IntPtr.Zero,
                 OpenExisting,
@@ -959,6 +1236,206 @@ namespace CodexHookGovernance
                 throw new IOException("The guarded file name is a reserved Windows device leaf.");
             }
             return lexicalPath;
+        }
+
+        private static void AssertNoAlternateDataStreams(SafeFileHandle handle)
+        {
+            const int bufferLength = 4096;
+            IntPtr buffer = Marshal.AllocHGlobal(bufferLength);
+            try
+            {
+                if (GetFileInformationByHandleEx(
+                    handle,
+                    FileStreamInfo,
+                    buffer,
+                    bufferLength))
+                {
+                    throw new IOException("The verified directory contains an NTFS alternate data stream.");
+                }
+                int error = Marshal.GetLastWin32Error();
+                if (error != ErrorHandleEof)
+                {
+                    throw new Win32Exception(error, "Unable to enumerate streams for the verified directory handle.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        private static string AddAlternateDataStreamWriteFreeze(string sddl)
+        {
+            RawSecurityDescriptor descriptor = new RawSecurityDescriptor(sddl);
+            if (descriptor.DiscretionaryAcl == null)
+            {
+                throw new IOException("The verified directory security descriptor has no DACL.");
+            }
+
+            SecurityIdentifier world = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+            if (descriptor.DiscretionaryAcl.Count != 0)
+            {
+                CommonAce firstAce = descriptor.DiscretionaryAcl[0] as CommonAce;
+                if (firstAce != null &&
+                    firstAce.AceQualifier == AceQualifier.AccessDenied &&
+                    firstAce.SecurityIdentifier.Equals(world) &&
+                    (firstAce.AccessMask & AlternateDataStreamWriteMask) == AlternateDataStreamWriteMask &&
+                    (firstAce.AceFlags & AceFlags.InheritOnly) == 0)
+                {
+                    return sddl;
+                }
+            }
+
+            descriptor.DiscretionaryAcl.InsertAce(
+                0,
+                new CommonAce(
+                    AceFlags.None,
+                    AceQualifier.AccessDenied,
+                    AlternateDataStreamWriteMask,
+                    world,
+                    false,
+                    null));
+            return descriptor.GetSddlForm(
+                AccessControlSections.Owner |
+                AccessControlSections.Group |
+                AccessControlSections.Access);
+        }
+
+        public static bool IsValidAlternateDataStreamWriteFreeze(
+            string originalSddl,
+            string requestedFrozenSddl,
+            string appliedFrozenSddl)
+        {
+            if (originalSddl == null || requestedFrozenSddl == null || appliedFrozenSddl == null)
+            {
+                return false;
+            }
+            try
+            {
+                string expectedFrozenSddl = AddAlternateDataStreamWriteFreeze(originalSddl);
+                RawSecurityDescriptor applied = new RawSecurityDescriptor(appliedFrozenSddl);
+                if (applied.DiscretionaryAcl == null || applied.DiscretionaryAcl.Count == 0)
+                {
+                    return false;
+                }
+                CommonAce firstAce = applied.DiscretionaryAcl[0] as CommonAce;
+                SecurityIdentifier world = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+                return firstAce != null &&
+                    firstAce.AceQualifier == AceQualifier.AccessDenied &&
+                    firstAce.SecurityIdentifier.Equals(world) &&
+                    (firstAce.AccessMask & AlternateDataStreamWriteMask) == AlternateDataStreamWriteMask &&
+                    (firstAce.AceFlags & AceFlags.InheritOnly) == 0 &&
+                    SecurityDescriptorsHaveEquivalentDacl(expectedFrozenSddl, requestedFrozenSddl) &&
+                    SecurityDescriptorsHaveEquivalentDacl(requestedFrozenSddl, appliedFrozenSddl);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+        }
+
+        public static bool SecurityDescriptorsHaveEquivalentDacl(string expectedSddl, string actualSddl)
+        {
+            if (expectedSddl == null) { throw new ArgumentNullException(nameof(expectedSddl)); }
+            if (actualSddl == null) { throw new ArgumentNullException(nameof(actualSddl)); }
+            RawSecurityDescriptor expected = new RawSecurityDescriptor(expectedSddl);
+            RawSecurityDescriptor actual = new RawSecurityDescriptor(actualSddl);
+            if (!Equals(expected.Owner, actual.Owner) ||
+                !Equals(expected.Group, actual.Group) ||
+                ((expected.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0) !=
+                ((actual.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0))
+            {
+                return false;
+            }
+            if (expected.DiscretionaryAcl == null || actual.DiscretionaryAcl == null)
+            {
+                return expected.DiscretionaryAcl == null && actual.DiscretionaryAcl == null;
+            }
+            if (expected.DiscretionaryAcl.BinaryLength != actual.DiscretionaryAcl.BinaryLength)
+            {
+                return false;
+            }
+            byte[] expectedBytes = new byte[expected.DiscretionaryAcl.BinaryLength];
+            byte[] actualBytes = new byte[actual.DiscretionaryAcl.BinaryLength];
+            expected.DiscretionaryAcl.GetBinaryForm(expectedBytes, 0);
+            actual.DiscretionaryAcl.GetBinaryForm(actualBytes, 0);
+            return CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
+        }
+
+        private static void AssertAlternateDataStreamWriteFreeze(SafeFileHandle handle)
+        {
+            string directoryPath = DirectoryPathForHandle(handle);
+            string sddl = GuardedAclTargetLease.GetSecurityDescriptorSddlForHandle(handle, directoryPath);
+            string frozenSddl = AddAlternateDataStreamWriteFreeze(sddl);
+            if (!string.Equals(sddl, frozenSddl, StringComparison.Ordinal))
+            {
+                throw new IOException("The verified directory alternate-data-stream write freeze is missing.");
+            }
+
+            string probePath = directoryPath + ":codex-safe-delete-freeze-" + Guid.NewGuid().ToString("N");
+            SafeFileHandle probeHandle = CreateFileW(
+                ToExtendedPath(probePath),
+                GenericWrite,
+                FileShare.Read | FileShare.Write | FileShare.Delete,
+                IntPtr.Zero,
+                CreateNew,
+                FileAttributeNormal | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (probeHandle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                probeHandle.Dispose();
+                if (error == ErrorAccessDenied)
+                {
+                    return;
+                }
+                throw new Win32Exception(
+                    error,
+                    "The verified directory write freeze did not produce the required access-denied result.");
+            }
+
+            probeHandle.Dispose();
+            if (!DeleteFileW(ToExtendedPath(probePath)))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "The ineffective write-freeze probe created an alternate data stream that could not be removed.");
+            }
+            throw new IOException("The verified directory alternate-data-stream write freeze is not effective.");
+        }
+
+        private static string DirectoryPathForHandle(SafeFileHandle handle)
+        {
+            return HandleBoundFileReader.NormalizeFinalPath(HandleBoundFileReader.GetFinalPath(handle));
+        }
+
+        private static void SetDirectoryDeletePending(SafeFileHandle handle, bool deletePending)
+        {
+            IntPtr disposition = Marshal.AllocHGlobal(1);
+            try
+            {
+                Marshal.WriteByte(disposition, deletePending ? (byte)1 : (byte)0);
+                IoStatusBlock ioStatusBlock;
+                int status = NtSetInformationFile(
+                    handle,
+                    out ioStatusBlock,
+                    disposition,
+                    1,
+                    FileDispositionInformation);
+                if (status != 0)
+                {
+                    uint dosError = RtlNtStatusToDosError(status);
+                    throw new Win32Exception(
+                        checked((int)dosError),
+                        deletePending
+                            ? "Unable to mark the verified directory delete-pending."
+                            : "Unable to cancel delete-pending for the verified directory.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(disposition);
+            }
         }
 
         private string ValidateSiblingDirectoryPath(string targetPath, string parameterName)
@@ -1278,6 +1755,23 @@ namespace CodexHookGovernance
             string expectedCurrentSddl,
             string sddl)
         {
+            string actualSddl = SetSecurityDescriptorSddlForHandleAndReadBack(
+                targetHandle,
+                originalPath,
+                expectedCurrentSddl,
+                sddl);
+            if (!string.Equals(actualSddl, sddl, StringComparison.Ordinal))
+            {
+                throw new IOException("The guarded ACL target security descriptor changed after the handle-bound write.");
+            }
+        }
+
+        internal static string SetSecurityDescriptorSddlForHandleAndReadBack(
+            SafeFileHandle targetHandle,
+            string originalPath,
+            string expectedCurrentSddl,
+            string sddl)
+        {
             if (sddl == null) { throw new ArgumentNullException(nameof(sddl)); }
             VerifiedDirectoryChainGuard.VerifyAclTargetHandle(targetHandle, originalPath);
             string currentSddl = GetSecurityDescriptorSddlForHandle(targetHandle, originalPath);
@@ -1295,6 +1789,14 @@ namespace CodexHookGovernance
                 !string.Equals(currentGroup, desiredGroup, StringComparison.Ordinal))
             {
                 throw new IOException("The guarded ACL target owner or group changed outside this lease.");
+            }
+            bool currentDaclProtected =
+                (currentDescriptor.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0;
+            bool desiredDaclProtected =
+                (desiredDescriptor.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0;
+            if (currentDaclProtected != desiredDaclProtected)
+            {
+                throw new IOException("The guarded ACL target DACL protection changed outside this lease.");
             }
 
             IntPtr descriptor;
@@ -1321,18 +1823,19 @@ namespace CodexHookGovernance
                 {
                     throw new Win32Exception(Marshal.GetLastWin32Error());
                 }
-                uint sections = DaclSecurityInformation;
-                if ((control & SeDaclProtected) != 0) { sections |= ProtectedDaclSecurityInformation; }
-                else { sections |= UnprotectedDaclSecurityInformation; }
-                uint error = SetSecurityInfo(targetHandle, SeFileObject, sections, ownerSid, groupSid, daclPresent ? dacl : IntPtr.Zero, IntPtr.Zero);
+                uint error = SetSecurityInfo(
+                    targetHandle,
+                    SeFileObject,
+                    DaclSecurityInformation,
+                    ownerSid,
+                    groupSid,
+                    daclPresent ? dacl : IntPtr.Zero,
+                    IntPtr.Zero);
                 if (error != 0) { throw new Win32Exception(checked((int)error), "Unable to write the guarded ACL target security descriptor."); }
             }
             finally { LocalFree(descriptor); }
 
-            if (!string.Equals(GetSecurityDescriptorSddlForHandle(targetHandle, originalPath), sddl, StringComparison.Ordinal))
-            {
-                throw new IOException("The guarded ACL target security descriptor changed after the handle-bound write.");
-            }
+            return GetSecurityDescriptorSddlForHandle(targetHandle, originalPath);
         }
 
         public void SetSecurityDescriptorSddl(string sddl)

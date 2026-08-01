@@ -11,6 +11,8 @@ param(
     [string]$ApprovedTransactionSha256,
     [switch]$ConfirmPurge,
     [switch]$FixtureFailAfterRename,
+    [scriptblock]$FixtureBeforeDirectoryTreeDelete,
+    [scriptblock]$FixtureDirectoryDeleteCheckpoint,
     [Parameter(Mandatory)][string]$FixturePolicyPath,
     [Parameter(Mandatory)][string]$FixtureEvidenceRoot
 )
@@ -70,7 +72,9 @@ switch ($Mode) {
             -TransactionPath $TransactionPath `
             -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
             -PolicyPath $FixturePolicyPath `
-            -EvidenceRoot $FixtureEvidenceRoot
+            -EvidenceRoot $FixtureEvidenceRoot `
+            -BeforeDirectoryTreeDeleteForTest $FixtureBeforeDirectoryTreeDelete `
+            -DirectoryDeleteCheckpointForTest $FixtureDirectoryDeleteCheckpoint
     }
     'BatchPurge' {
         if (-not $ConfirmApply -or -not $ConfirmPurge) {

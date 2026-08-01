@@ -26,11 +26,21 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 `D:\Codex\projects\统一环境\.codex-remote-attachments` 为 capability root 删除其后代，
 最小后代深度为 1；附件根本身和其他项目顶层目录不在该授权面内。
 
-policy schema v2 的 `minimumDescendantDepth` 通常至少为 1，且 `rootDeletionPurpose` 必须为
-`none`。仅当 capability root 自身就是项目根之下的可重建精确构建产物根时，才可以同时设为
-0 和 `rebuildable-build-output`；解析器会拒绝 workspace/项目根、`.codex` 状态根和项目外
-用户数据根。这不会授权其父目录或同级目录。此类根在 Apply 时仍只允许原子改名到同父、
-随机 generation 绑定的 quarantine。Purge 仍校验原计划、transaction、当前树与文件
+policy schema v3 要求 `schemaVersion` 与 `minimumDescendantDepth` 都是真正的 JSON integer，
+不接受字符串或小数强转。`minimumDescendantDepth` 通常至少为 1，且
+`rootDeletionPurpose` 必须为 `none`。root 删除只允许两种精确用途：
+
+- capability root 自身是项目根之下的可重建构建产物根时，可设为 0 和
+  `rebuildable-build-output`；项目 `.codex` 根不得冒充构建产物。
+- capability root 精确匹配 `D:\Codex\projects\<project>\.codex` 时，可设为 0 和
+  `empty-project-state`。该用途只授权 capability root 自身，不授权其后代作为独立目标；
+  Plan 要求整棵树零文件，可以包含空子目录，任意普通文件、NTFS named stream 或 reparse
+  point 都会失败关闭。
+
+生产 policy 只为本项目退役的 `.codex` 精确声明 `empty-project-state`；远程附件根仍保持
+最小后代深度 1 和 `none`，不在 root 删除授权面内。解析器继续拒绝 workspace/项目根和
+项目外用户数据根。这不会授权父目录或同级目录。root 删除在 Apply 时仍只允许原子改名到
+同父、随机 generation 绑定的 quarantine。Purge 仍校验原计划、transaction、当前树与文件
 identity；只有 `purging` 中断恢复允许当前树成为原计划的未变子集，其他路径仍要求完整清单。
 
 生产 CLI 不接受 policy 或 evidence override。测试替身仅位于 `tests\`，不得复制到宿主
@@ -39,14 +49,42 @@ identity；只有 `purging` 中断恢复允许当前树成为原计划的未变�
 ## 状态机
 
 1. `Plan`：规范化目标与 capability root，校验固定 allowlist、最小后代深度、denylist、
-   父链与完整子树 reparse point，生成句柄绑定的文件 identity、SHA-256 和目录清单。
+   root 删除用途、父链与完整子树 reparse point；`empty-project-state` 还会在发布计划前确认
+   文件计数为零，并拒绝所有目录 NTFS named stream。通过后生成句柄绑定的文件 identity、
+   SHA-256 和目录清单。
 2. `Apply`：要求 `ConfirmApply` 与精确 `ApprovedPlanSha256`；复算完整树清单无漂移后，
-   通过目录句柄原子改名到同父 `.codex-safe-delete-<generation>.quarantine`。此时可恢复。
+   并再次确认 `empty-project-state` 没有 named stream，才通过目录句柄原子改名到同父
+   `.codex-safe-delete-<generation>.quarantine`。此时可恢复。
 3. `Purge`：要求 `ConfirmPurge` 与精确 `ApprovedTransactionSha256`。`quarantined` transaction
    必须再次匹配完整计划清单；如果进程在发布 `purging` 后中断，则允许从 quarantine 中不超出
    原计划的节点子集恢复。恢复时 quarantine root identity 必须不变，仍存在节点的相对路径、kind、
-   SHA-256 和 file identity 必须与原计划一致；只允许原计划节点缺失。校验通过后逐节点使用
-   handle-bound POSIX disposition 删除，包括 ReadOnly 文件。完成后不可恢复。
+   SHA-256 和 file identity 必须与原计划一致；只允许原计划节点缺失。`empty-project-state`
+   的 quarantine 仍须再次通过 named stream 检查。最终删除每个目录时，先发布绑定 generation、
+   relative path 和 file identity 的不可变 `freeze-prepared` journal，再在目录 DACL 首位加入对
+   `Everyone` 的 `FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES`
+   deny。实现必须读回实际 SDDL，并用原生新 ADS open 得到 `ERROR_ACCESS_DENIED` 来证明冻结真实
+   生效；仅检查 ACE 文本不算通过。随后在同一句柄上完成最后一轮 empty/stream 复验，才发布引用
+   freeze journal 精确路径与 SHA-256 的不可变 `commit-authorized` journal，并把目录标记为
+   delete-pending 后关闭句柄。其他用途仍逐节点使用 handle-bound POSIX disposition 删除，包括
+   ReadOnly 文件。完成后不可恢复。
+
+   `Apply` 与 `Purge` 都在目标 mutex 内重新读取并复验当前 capability、树和 transaction，才允许
+   写入 `prepared`、`purging`、commit anchor 或 `purged`。等待锁期间 capability 已变更时必须在
+   写入前拒绝，不能用过期内存快照把已隔离或已完成 transaction 降级。
+
+   journal 使用 create-only 原子发布：同一路径的第二次发布必须失败且不得改变原始 bytes 或 file
+   identity。每个 `commit-authorized` 还必须在进入 delete-pending 前，由 transaction schema v2
+   持久锚定 operation、目录 identity、freeze/commit 的精确路径、SHA-256 和 file identity。commit
+   引用的 freeze 与 applied SDDL 必须可解析，并证明 requested SDDL 是原始 DACL 的首位有效 deny
+   形态、applied SDDL 与其等价。`commit-authorized` 是删除线性化点：普通的 commit 前失败恢复首份
+   freeze 记录的原始 SDDL 并发布 `aborted`；一旦开始 commit 发布，任何不确定失败都保持冻结，不得
+   写出相互矛盾的 abort。FailFast 或重启后的重放复用最早 freeze 的原始 SDDL；已锚定 commit 直接
+   重新核验 identity、DACL 和 stream 后完成删除，不生成第二份 operation。
+
+   若 commit 后 quarantine 已不存在、transaction 尚停在 `purging`，只有 transaction 的锚定集合唯一
+   覆盖全部计划目录，且每份 freeze/commit 都按路径、SHA-256、file identity、generation、operation、
+   relative path 和 DACL 语义完整匹配，才允许收尾为 `purged`。任何未锚定 commit、未终结 freeze、重复
+   identity、缺失 journal 或同一 operation 同时存在 commit 与 abort 都失败关闭。
 
 批量清理使用 `BatchPurge`，调用方一次传入同一 capability root 下的多个 `TargetPaths`，并同时提供
 `ConfirmApply` 与 `ConfirmPurge`。入口对每个目标仍逐项执行相同的 `Plan` / `Apply` / `Purge` 校验；
@@ -58,6 +96,11 @@ identity；只有 `purging` 中断恢复允许当前树成为原计划的未变�
 计划 30 分钟过期。缺少确认、哈希不匹配、policy 漂移、目标重新出现、目录内容或 identity
 漂移、恢复时出现未计划节点或既有节点的 kind/SHA-256/file identity/root identity 漂移、
 junction/symlink/reparse point、越界路径以及并发 mutex 冲突均失败关闭。
+
+DACL 冻结覆盖当前 NTFS 上遵守访问检查的普通新 ADS/子项创建，并跨进程退出与正常操作系统重启
+保留。它不撤销 freeze 前已授予的句柄权限，也不声称约束 `WRITE_DAC`/`WRITE_OWNER`、父目录
+`FILE_DELETE_CHILD`、`SeRestorePrivilege`、备份 API、内核驱动或突然断电后的介质落盘顺序；
+最后的 handle-bound identity、empty 和 stream 复验用于在这些边界发生可观察漂移时失败关闭。
 
 ## 上游边界
 

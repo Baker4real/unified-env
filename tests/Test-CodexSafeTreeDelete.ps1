@@ -20,9 +20,18 @@ $evidenceRoot = Join-Path $fixtureRoot 'evidence'
 $policyPath = Join-Path $fixtureRoot 'policy.json'
 $invalidProjectRootPolicyPath = Join-Path $fixtureRoot 'invalid-project-root-policy.json'
 $invalidStateRootPolicyPath = Join-Path $fixtureRoot 'invalid-state-root-policy.json'
+$invalidProjectStateBuildOutputPolicyPath = Join-Path $fixtureRoot 'invalid-project-state-build-output-policy.json'
+$invalidEmptyProjectStateRootPolicyPath = Join-Path $fixtureRoot 'invalid-empty-project-state-root-policy.json'
+$invalidSchemaTypePolicyPath = Join-Path $fixtureRoot 'invalid-schema-type-policy.json'
+$invalidDepthTypePolicyPath = Join-Path $fixtureRoot 'invalid-depth-type-policy.json'
+$emptyProjectStateParent = Join-Path 'D:\Codex\projects' ('.safe-tree-delete-project-state-test-{0}' -f ([guid]::NewGuid().ToString('N')))
+$emptyProjectStateTarget = Join-Path $emptyProjectStateParent '.codex'
+$emptyProjectStateChild = Join-Path $emptyProjectStateTarget 'skill-state'
+$emptyProjectStateFile = Join-Path $emptyProjectStateChild 'must-survive.txt'
 $largeSparseTargetPath = Join-Path $fixtureRoot 'large-sparse-candidate'
 $largeSparseFilePath = Join-Path $largeSparseTargetPath 'large-zero.bin'
 $largeSparseQuarantinePath = $null
+$deletePendingProbePath = Join-Path $fixtureRoot 'delete-pending-probe'
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -62,10 +71,22 @@ using Microsoft.Win32.SafeHandles;
 public static class CodexSafeDeleteSparseFixture
 {
     private const uint FsctlSetSparse = 0x000900C4;
+    private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
     private const uint DeleteAccess = 0x00010000;
     private const uint OpenExisting = 3;
+    private const uint OpenAlways = 4;
     private const uint FileAttributeNormal = 0x00000080;
+    private const uint FileFlagBackupSemantics = 0x02000000;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const int FileDispositionInfo = 4;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeFileDispositionInfo
+    {
+        [MarshalAs(UnmanagedType.U1)]
+        public bool DeleteFile;
+    }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DeviceIoControl(
@@ -87,6 +108,14 @@ public static class CodexSafeDeleteSparseFixture
         uint creationDisposition,
         uint flagsAndAttributes,
         IntPtr templateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileInformationByHandle(
+        SafeFileHandle fileHandle,
+        int fileInformationClass,
+        ref NativeFileDispositionInfo fileInformation,
+        uint bufferSize);
 
     public static void CreateZeroFile(string path, long length)
     {
@@ -137,6 +166,61 @@ public static class CodexSafeDeleteSparseFixture
             Thread.Sleep(50);
         }
         throw new TimeoutException("The sparse fixture did not release DELETE sharing within the test timeout.");
+    }
+
+    public static int ProbeNamedStreamOpenWhileDeletePending(string directoryPath)
+    {
+        using (SafeFileHandle directoryHandle = CreateFileW(
+            directoryPath,
+            GenericRead | DeleteAccess,
+            FileShare.Read,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+            IntPtr.Zero))
+        {
+            if (directoryHandle.IsInvalid)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to open the delete-pending stream probe directory.");
+            }
+
+            NativeFileDispositionInfo disposition = new NativeFileDispositionInfo { DeleteFile = true };
+            if (!SetFileInformationByHandle(
+                directoryHandle,
+                FileDispositionInfo,
+                ref disposition,
+                checked((uint)Marshal.SizeOf<NativeFileDispositionInfo>())))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to mark the stream probe directory delete-pending.");
+            }
+
+            try
+            {
+                using (SafeFileHandle streamHandle = CreateFileW(
+                    directoryPath + ":delete-pending-probe",
+                    GenericWrite,
+                    FileShare.Read | FileShare.Write | FileShare.Delete,
+                    IntPtr.Zero,
+                    OpenAlways,
+                    FileAttributeNormal | FileFlagOpenReparsePoint,
+                    IntPtr.Zero))
+                {
+                    return streamHandle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
+                }
+            }
+            finally
+            {
+                disposition.DeleteFile = false;
+                if (!SetFileInformationByHandle(
+                    directoryHandle,
+                    FileDispositionInfo,
+                    ref disposition,
+                    checked((uint)Marshal.SizeOf<NativeFileDispositionInfo>())))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to cancel delete-pending for the stream probe directory.");
+                }
+            }
+        }
     }
 }
 '@
@@ -225,9 +309,10 @@ $payloadPath = Join-Path $targetPath 'payload.txt'
 [void][IO.Directory]::CreateDirectory($rollbackRootTarget)
 [IO.File]::WriteAllText((Join-Path $rollbackRootTarget 'rollback-payload.txt'), 'rollback-target', [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText($rollbackSiblingPath, 'must-survive', [Text.UTF8Encoding]::new($false))
+[void][IO.Directory]::CreateDirectory($emptyProjectStateChild)
 $policy = [pscustomobject][ordered]@{
     artifactType = 'env-governance.codex-safe-tree-delete-policy'
-    schemaVersion = 2
+    schemaVersion = 3
     entries = @(
         [pscustomobject][ordered]@{
             id = 'fixture'
@@ -249,6 +334,13 @@ $policy = [pscustomobject][ordered]@{
             minimumDescendantDepth = 0
             rootDeletionPurpose = 'rebuildable-build-output'
             deniedExactPaths = @()
+        },
+        [pscustomobject][ordered]@{
+            id = 'fixture-empty-project-state'
+            capabilityRoot = $emptyProjectStateTarget
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'empty-project-state'
+            deniedExactPaths = @()
         }
     )
 }
@@ -261,7 +353,22 @@ try {
     foreach ($forbiddenParameter in @('Fixture', 'FixturePolicyPath', 'FixtureEvidenceRoot', 'PolicyPath', 'EvidenceRoot')) {
         Assert-True (-not $productionCommand.Parameters.ContainsKey($forbiddenParameter)) "生产 CLI 不得暴露 $forbiddenParameter"
     }
+
+    [void][IO.Directory]::CreateDirectory($deletePendingProbePath)
+    $deletePendingStreamOpenError = [CodexSafeDeleteSparseFixture]::ProbeNamedStreamOpenWhileDeletePending(
+        $deletePendingProbePath)
+    Assert-True `
+        ($deletePendingStreamOpenError -ne 0) `
+        'delete-pending 目录必须拒绝原生 CreateFileW 新建 named stream'
+    Assert-True ([IO.Directory]::Exists($deletePendingProbePath)) '取消 delete-pending 后必须保留探针目录'
+    Assert-True `
+        (@(Get-Item -LiteralPath $deletePendingProbePath -Stream * -Force -ErrorAction Stop | Where-Object {
+            $_.Stream -cne ':$DATA'
+        }).Count -eq 0) `
+        'delete-pending 原生 stream 打开拒绝不得落入 ADS'
+
     $productionPolicy = Get-Content -LiteralPath $productionPolicyPath -Raw | ConvertFrom-Json -Depth 32
+    Assert-True ($productionPolicy.schemaVersion -eq 3) '生产策略必须使用 schema v3'
     $legacyTempEntries = @($productionPolicy.entries | Where-Object { $_.id -ceq 'codex-legacy-temp' })
     Assert-True ($legacyTempEntries.Count -eq 1) '生产策略必须唯一声明 legacy temp capability root'
     $legacyTempEntry = $legacyTempEntries[0]
@@ -292,6 +399,18 @@ try {
             capabilityRoot = 'D:\Codex\projects\统一环境\tests\__pycache__'
             minimumDescendantDepth = 0
             rootDeletionPurpose = 'rebuildable-build-output'
+        },
+        [pscustomobject]@{
+            id = 'environment-retired-project-state'
+            capabilityRoot = 'D:\Codex\projects\统一环境\.codex'
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'empty-project-state'
+        },
+        [pscustomobject]@{
+            id = 'environment-remote-attachments'
+            capabilityRoot = 'D:\Codex\projects\统一环境\.codex-remote-attachments'
+            minimumDescendantDepth = 1
+            rootDeletionPurpose = 'none'
         }
     )
     foreach ($expectedPolicyEntry in $productionPolicyExpectations) {
@@ -313,6 +432,72 @@ try {
             (@($matchingPolicyEntry.deniedExactPaths).Count -eq 0) `
             "$($expectedPolicyEntry.id) 不得隐含额外 denylist"
     }
+    $productionEmptyProjectStateEntries = @($productionPolicy.entries | Where-Object {
+        $_.rootDeletionPurpose -ceq 'empty-project-state'
+    })
+    Assert-True `
+        ($productionEmptyProjectStateEntries.Count -eq 1 -and
+            $productionEmptyProjectStateEntries[0].id -ceq 'environment-retired-project-state') `
+        '生产策略必须全局唯一声明本项目 empty-project-state'
+    $attachmentRootError = Assert-Throws -Message '生产策略必须拒绝删除 remote attachments 根' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath 'D:\Codex\projects\统一环境\.codex-remote-attachments' `
+            -CapabilityRoot 'D:\Codex\projects\统一环境\.codex-remote-attachments' `
+            -FixturePolicyPath $productionPolicyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($attachmentRootError -match '最小后代深度') 'remote attachments 根拒绝必须返回稳定原因'
+    $invalidSchemaTypePolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = '3'
+        entries = @([pscustomobject][ordered]@{
+            id = 'invalid-schema-type'
+            capabilityRoot = $fixtureRoot
+            minimumDescendantDepth = 1
+            rootDeletionPurpose = 'none'
+            deniedExactPaths = @($evidenceRoot)
+        })
+    }
+    [IO.File]::WriteAllText(
+        $invalidSchemaTypePolicyPath,
+        ($invalidSchemaTypePolicy | ConvertTo-Json -Depth 10),
+        [Text.UTF8Encoding]::new($false))
+    $schemaTypeError = Assert-Throws -Message '字符串 schemaVersion 必须失败关闭' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $targetPath `
+            -CapabilityRoot $fixtureRoot `
+            -FixturePolicyPath $invalidSchemaTypePolicyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True ($schemaTypeError -match 'schemaVersion.*JSON integer') 'schemaVersion 类型拒绝必须返回稳定原因'
+    $invalidDepthTypePolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 3
+        entries = @([pscustomobject][ordered]@{
+            id = 'invalid-depth-type'
+            capabilityRoot = $rootTargetPath
+            minimumDescendantDepth = 0.4
+            rootDeletionPurpose = 'rebuildable-build-output'
+            deniedExactPaths = @()
+        })
+    }
+    [IO.File]::WriteAllText(
+        $invalidDepthTypePolicyPath,
+        ($invalidDepthTypePolicy | ConvertTo-Json -Depth 10),
+        [Text.UTF8Encoding]::new($false))
+    $depthTypeError = Assert-Throws -Message '小数 minimumDescendantDepth 必须失败关闭' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $rootTargetPath `
+            -CapabilityRoot $rootTargetPath `
+            -FixturePolicyPath $invalidDepthTypePolicyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($depthTypeError -match 'minimumDescendantDepth.*JSON integer') `
+        'minimumDescendantDepth 类型拒绝必须返回稳定原因'
     $planResult = & $entryPath `
         -Mode Plan `
         -TargetPath $targetPath `
@@ -620,6 +805,203 @@ try {
     Assert-True ($rootPurge.purged -eq $true) '精确 capability root 必须可完成 purge'
     Assert-True (-not [IO.Directory]::Exists([string]$rootApply.quarantinePath)) '精确 capability root purge 后不得残留隔离目录'
 
+    Set-Content -LiteralPath $emptyProjectStateChild -Stream 'retired-state' -Value 'hidden-state' -NoNewline
+    $emptyProjectStateNamedStreams = @(Get-Item -LiteralPath $emptyProjectStateChild -Stream * -ErrorAction Stop | Where-Object {
+        $_.Stream -cne ':$DATA'
+    })
+    Assert-True ($emptyProjectStateNamedStreams.Count -eq 1) 'ADS fixture 必须真实创建一个目录 named stream'
+    $emptyProjectStateStreamError = Assert-Throws -Message '带 ADS 的项目状态根必须拒绝 Plan' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $emptyProjectStateTarget `
+            -CapabilityRoot $emptyProjectStateTarget `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($emptyProjectStateStreamError -match 'alternate data stream') `
+        '项目状态 ADS 拒绝必须返回稳定原因'
+    Assert-True `
+        ((Get-Content -LiteralPath $emptyProjectStateChild -Stream 'retired-state' -Raw) -ceq 'hidden-state') `
+        '项目状态 ADS 拒绝必须原样保留 named stream'
+    Remove-Item -LiteralPath $emptyProjectStateChild -Stream 'retired-state' -Force
+
+    $emptyProjectStatePlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $emptyProjectStateTarget `
+        -CapabilityRoot $emptyProjectStateTarget `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($emptyProjectStatePlan.planned -eq $true) '空项目状态根必须可生成受管计划'
+    Assert-True ($emptyProjectStatePlan.fileCount -eq 0) '空项目状态计划不得包含文件'
+    Assert-True ([IO.Directory]::Exists($emptyProjectStateChild)) '空项目状态 Plan 必须保持子目录不变'
+    $emptyProjectStateDescendantError = Assert-Throws -Message '空项目状态 capability 不得授权后代作为独立目标' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $emptyProjectStateChild `
+            -CapabilityRoot $emptyProjectStateTarget `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($emptyProjectStateDescendantError -match '精确.*root') `
+        '空项目状态后代拒绝必须返回稳定原因'
+    Set-Content -LiteralPath $emptyProjectStateChild -Stream 'retired-state' -Value 'apply-drift' -NoNewline
+    $emptyProjectStateApplyStreamError = Assert-Throws -Message 'Plan 后新增 ADS 必须拒绝 Apply' -Action {
+        & $entryPath `
+            -Mode Apply `
+            -PlanPath ([string]$emptyProjectStatePlan.planPath) `
+            -ApprovedPlanSha256 ([string]$emptyProjectStatePlan.planSha256) `
+            -ConfirmApply `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($emptyProjectStateApplyStreamError -match 'alternate data stream') `
+        'Apply ADS 漂移拒绝必须返回稳定原因'
+    Assert-True ([IO.Directory]::Exists($emptyProjectStateTarget)) 'Apply ADS 漂移拒绝不得隔离原目标'
+    Assert-True `
+        ((Get-Content -LiteralPath $emptyProjectStateChild -Stream 'retired-state' -Raw) -ceq 'apply-drift') `
+        'Apply ADS 漂移拒绝必须原样保留 named stream'
+    Remove-Item -LiteralPath $emptyProjectStateChild -Stream 'retired-state' -Force
+    $emptyProjectStateApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$emptyProjectStatePlan.planPath) `
+        -ApprovedPlanSha256 ([string]$emptyProjectStatePlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($emptyProjectStateApply.quarantined -eq $true) '空项目状态根必须可隔离'
+    Assert-True (-not [IO.Directory]::Exists($emptyProjectStateTarget)) '空项目状态 Apply 后原路径必须不存在'
+    $emptyProjectStateQuarantineChild = Join-Path ([string]$emptyProjectStateApply.quarantinePath) 'skill-state'
+    Set-Content -LiteralPath $emptyProjectStateQuarantineChild -Stream 'retired-state' -Value 'purge-drift' -NoNewline
+    $emptyProjectStatePurgeStreamError = Assert-Throws -Message 'Apply 后新增 ADS 必须拒绝 Purge' -Action {
+        & $entryPath `
+            -Mode Purge `
+            -TransactionPath ([string]$emptyProjectStateApply.transactionPath) `
+            -ApprovedTransactionSha256 ([string]$emptyProjectStateApply.transactionSha256) `
+            -ConfirmPurge `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($emptyProjectStatePurgeStreamError -match 'alternate data stream') `
+        'Purge ADS 漂移拒绝必须返回稳定原因'
+    Assert-True ([IO.Directory]::Exists([string]$emptyProjectStateApply.quarantinePath)) 'Purge ADS 漂移拒绝必须保留 quarantine'
+    Assert-True `
+        ((Get-Content -LiteralPath $emptyProjectStateQuarantineChild -Stream 'retired-state' -Raw) -ceq 'purge-drift') `
+        'Purge ADS 漂移拒绝必须原样保留 named stream'
+    Remove-Item -LiteralPath $emptyProjectStateQuarantineChild -Stream 'retired-state' -Force
+
+    $emptyProjectStateFinalGuardError = Assert-Throws -Message 'Purge 预检后新增 ADS 必须在最终目录 guard 内失败关闭' -Action {
+        & $entryPath `
+            -Mode Purge `
+            -TransactionPath ([string]$emptyProjectStateApply.transactionPath) `
+            -ApprovedTransactionSha256 ([string]$emptyProjectStateApply.transactionSha256) `
+            -ConfirmPurge `
+            -FixtureBeforeDirectoryTreeDelete {
+                param([string]$QuarantinePath)
+                $childPath = Join-Path $QuarantinePath 'skill-state'
+                Set-Content -LiteralPath $childPath -Stream 'retired-state' -Value 'final-guard-drift' -NoNewline
+            } `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($emptyProjectStateFinalGuardError -match 'alternate data stream') `
+        "最终目录 guard ADS 拒绝必须返回稳定原因：$emptyProjectStateFinalGuardError"
+    Assert-True `
+        ([IO.Directory]::Exists([string]$emptyProjectStateApply.quarantinePath)) `
+        '最终目录 guard ADS 拒绝必须保留 quarantine'
+    Assert-True `
+        ((Get-Content -LiteralPath $emptyProjectStateQuarantineChild -Stream 'retired-state' -Raw) -ceq 'final-guard-drift') `
+        '最终目录 guard ADS 拒绝必须原样保留 named stream'
+    Remove-Item -LiteralPath $emptyProjectStateQuarantineChild -Stream 'retired-state' -Force
+    $emptyProjectStatePurgingTransaction = Get-CodexHookCapabilityFileSnapshot `
+        -Path ([string]$emptyProjectStateApply.transactionPath) `
+        -CapabilityRoot (Split-Path -Parent ([string]$emptyProjectStateApply.transactionPath)) `
+        -AllowedExactPaths @([string]$emptyProjectStateApply.transactionPath) `
+        -Name 'safe-delete final guard retry transaction'
+    $emptyProjectStatePurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$emptyProjectStateApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$emptyProjectStatePurgingTransaction.sha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($emptyProjectStatePurge.purged -eq $true) '空项目状态根必须可完成 purge'
+    Assert-True (-not [IO.Directory]::Exists([string]$emptyProjectStateApply.quarantinePath)) '空项目状态 purge 后不得残留隔离目录'
+
+    [void][IO.Directory]::CreateDirectory($emptyProjectStateChild)
+    [IO.File]::WriteAllText($emptyProjectStateFile, 'must-survive', [Text.UTF8Encoding]::new($false))
+    $nonEmptyProjectStateError = Assert-Throws -Message '含文件的项目状态根必须拒绝 Plan' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $emptyProjectStateTarget `
+            -CapabilityRoot $emptyProjectStateTarget `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($nonEmptyProjectStateError -match '不得包含文件') `
+        '含文件项目状态拒绝必须返回稳定原因'
+    Assert-True ([IO.File]::ReadAllText($emptyProjectStateFile) -ceq 'must-survive') '含文件项目状态拒绝必须原样保留文件'
+
+    $invalidProjectStateBuildOutputPolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 3
+        entries = @([pscustomobject][ordered]@{
+            id = 'invalid-project-state-build-output'
+            capabilityRoot = $emptyProjectStateTarget
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'
+            deniedExactPaths = @()
+        })
+    }
+    [IO.File]::WriteAllText(
+        $invalidProjectStateBuildOutputPolicyPath,
+        ($invalidProjectStateBuildOutputPolicy | ConvertTo-Json -Depth 10),
+        [Text.UTF8Encoding]::new($false))
+    $projectStateBuildOutputError = Assert-Throws -Message '项目 .codex 不得冒充可重建构建产物' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $emptyProjectStateTarget `
+            -CapabilityRoot $emptyProjectStateTarget `
+            -FixturePolicyPath $invalidProjectStateBuildOutputPolicyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($projectStateBuildOutputError -match '不得声明为可重建构建产物') `
+        '项目 .codex 用途混淆必须返回稳定原因'
+    Assert-True ([IO.File]::ReadAllText($emptyProjectStateFile) -ceq 'must-survive') '用途混淆拒绝不得修改项目状态文件'
+
+    $invalidEmptyProjectStateRootPolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 3
+        entries = @([pscustomobject][ordered]@{
+            id = 'invalid-empty-project-state-root'
+            capabilityRoot = 'D:\Codex\projects\统一环境\.codex-remote-attachments'
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'empty-project-state'
+            deniedExactPaths = @()
+        })
+    }
+    [IO.File]::WriteAllText(
+        $invalidEmptyProjectStateRootPolicyPath,
+        ($invalidEmptyProjectStateRootPolicy | ConvertTo-Json -Depth 10),
+        [Text.UTF8Encoding]::new($false))
+    $invalidEmptyProjectStateRootError = Assert-Throws -Message '非 .codex 根不得声明 empty-project-state' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath 'D:\Codex\projects\统一环境\.codex-remote-attachments' `
+            -CapabilityRoot 'D:\Codex\projects\统一环境\.codex-remote-attachments' `
+            -FixturePolicyPath $invalidEmptyProjectStateRootPolicyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($invalidEmptyProjectStateRootError -match '必须精确指向项目 .codex 根') `
+        '非 .codex empty-project-state 拒绝必须返回稳定原因'
+
     $rootDeleteError = Assert-Throws -Message 'capability root 自身必须拒绝' -Action {
         & $entryPath `
             -Mode Plan `
@@ -632,7 +1014,7 @@ try {
 
     $invalidProjectRootPolicy = [pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-safe-tree-delete-policy'
-        schemaVersion = 2
+        schemaVersion = 3
         entries = @([pscustomobject][ordered]@{
             id = 'invalid-project-root'
             capabilityRoot = 'D:\Codex\projects\unsafe-workspace'
@@ -659,7 +1041,7 @@ try {
 
     $invalidStateRootPolicy = [pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-safe-tree-delete-policy'
-        schemaVersion = 2
+        schemaVersion = 3
         entries = @([pscustomobject][ordered]@{
             id = 'invalid-state-root'
             capabilityRoot = 'D:\Codex\.codex\skills'
@@ -795,7 +1177,7 @@ try {
         & $env:ComSpec /d /c rmdir $junctionPath | Out-Null
     }
 
-    [pscustomobject][ordered]@{ ok = $true; suite = 'CodexSafeTreeDelete'; slices = 6 }
+    [pscustomobject][ordered]@{ ok = $true; suite = 'CodexSafeTreeDelete'; slices = 11 }
 } finally {
     if ([IO.File]::Exists($largeSparseFilePath)) {
         [IO.File]::SetAttributes($largeSparseFilePath, [IO.FileAttributes]::Normal)
@@ -808,5 +1190,6 @@ try {
             [IO.File]::Delete($quarantinedSparsePath)
         }
     }
+    Remove-TestTree -Path $emptyProjectStateParent
     Remove-TestTree -Path $fixtureRoot
 }

@@ -1,6 +1,6 @@
 {
   "artifactType": "env-governance.codex-safe-tree-delete-policy",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "entries": [
     {
       "id": "active-local-skills",
@@ -81,6 +81,13 @@
       "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.scratch",
       "minimumDescendantDepth": 1,
       "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-retired-project-state",
+      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.codex",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "empty-project-state",
       "deniedExactPaths": []
     },
     {

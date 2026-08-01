@@ -260,7 +260,10 @@
           "scripts/lib/EnvPathSafety.ps1",
           "scripts/lib/ReportArtifactPublisher.ps1",
           "scripts/lib/TrustedReportInput.ps1",
-          "tests/Invoke-CodexSafeTreeDeleteFixture.ps1"
+          "tests/Invoke-CodexSafeTreeDeleteFixture.ps1",
+          "tests/Invoke-CodexSafeTreeDeleteApplyCrashFixture.ps1",
+          "tests/Invoke-CodexSafeTreeDeleteCrashFixture.ps1",
+          "tests/Test-CodexSafeTreeDeleteCrashSafety.ps1"
         ],
         "prefixes": [
           "managed/safe-tree-delete/"
@@ -270,6 +273,7 @@
         "fixture": {
           "powershell": [
             "tests/Test-CodexSafeTreeDelete.ps1",
+            "tests/Test-CodexSafeTreeDeleteCrashSafety.ps1",
             "tests/Test-CodexUserEnvironmentTransaction.ps1",
             "tests/Test-ReportArtifactPublisher.ps1"
           ],
