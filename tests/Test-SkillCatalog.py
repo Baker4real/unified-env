@@ -117,6 +117,64 @@ if IMPORT_ERROR is not None:
 else:
 
     class SkillCatalogTests(unittest.TestCase):
+        def test_nested_active_skill_uses_relative_directory_for_ledger_coverage(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                cache.mkdir()
+                source = "# Source Provenance\nSkill: parent\nStatus: source-pass\n"
+                _write_skill(
+                    active,
+                    "parent",
+                    name="parent",
+                    description="parent skill",
+                    source=source,
+                )
+                nested_key = "parent/vendor/runtime/trace"
+                _write_skill(
+                    active,
+                    nested_key,
+                    name="runtime-trace",
+                    description="nested runtime skill",
+                    source=source.replace("parent", "runtime-trace"),
+                )
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps(
+                        {
+                            "sources": [
+                                {
+                                    "id": "fixture-source",
+                                    "skills": ["parent", nested_key],
+                                }
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 2),
+                )
+
+                artifacts = {
+                    item["relative_path"]: item
+                    for item in catalog["artifacts"]
+                    if item["scope"] == "active"
+                }
+                self.assertEqual(
+                    artifacts[f"{nested_key}/SKILL.md"]["ledger_coverage"],
+                    "pass",
+                )
+                self.assertEqual(
+                    artifacts[f"{nested_key}/SKILL.md"]["ledger"]["records"],
+                    ["fixture-source"],
+                )
+
         def test_internal_plugin_cache_alias_is_verified_without_duplicate_artifacts(self) -> None:
             with tempfile.TemporaryDirectory() as temp:
                 base = Path(temp)

@@ -809,9 +809,7 @@ def _artifact(
         content_sha256=content_sha256,
         source=source,
     )
-    ledger_keys = [name]
-    if scope == "system":
-        ledger_keys.insert(0, f".system/{name}")
+    ledger_keys = [skill_path.parent.relative_to(root).as_posix()]
     ledger_entries = (
         [entry for key in ledger_keys for entry in ledger_states.get(key, [])]
         if scope != "plugin-cache"

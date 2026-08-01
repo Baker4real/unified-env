@@ -1120,20 +1120,59 @@ def update_ledger(
             raise InstallError("canonical rename ledger context 不合法")
         retired_names.append(old_name)
 
-    name_set = set([*names, *retired_names])
+    bundled_skills = context.get("bundled_skills", [])
+    if not isinstance(bundled_skills, list):
+        raise InstallError("bundled skill ledger context 不合法")
+    bundled_names = [
+        item["ledger_key"]
+        for item in bundled_skills
+        if isinstance(item, dict) and isinstance(item.get("ledger_key"), str)
+    ]
+    if len(bundled_names) != len(bundled_skills):
+        raise InstallError("bundled skill ledger context 缺少 ledger_key")
+
+    managed_roots = set([*names, *retired_names])
+    coverage_names = [*names, *bundled_names]
+
+    def is_managed_name(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        normalized_value = value.casefold()
+        return any(
+            normalized_value == root.casefold()
+            or normalized_value.startswith(f"{root.casefold()}/")
+            for root in managed_roots
+        )
+
     for key in ("unresolved", "deleted"):
-        data[key] = [entry for entry in data[key] if entry_name(entry) not in name_set]
+        data[key] = [entry for entry in data[key] if not is_managed_name(entry_name(entry))]
     for entry in data["sources"]:
         if not isinstance(entry, dict):
             continue
         direct_name = entry_name(entry)
-        if direct_name in name_set:
+        if is_managed_name(direct_name):
             for direct_key in ("name", "skill"):
                 if entry.get(direct_key) == direct_name:
                     entry.pop(direct_key)
         skills = entry.get("skills")
         if isinstance(skills, list):
-            entry["skills"] = [skill for skill in skills if skill not in name_set]
+            entry["skills"] = [skill for skill in skills if not is_managed_name(skill)]
+        existing_bundled = entry.get("bundled_skills")
+        if existing_bundled is not None:
+            if not isinstance(existing_bundled, list):
+                raise InstallError("source ledger bundled_skills 不是数组")
+            retained_bundled = [
+                item
+                for item in existing_bundled
+                if not (
+                    isinstance(item, dict)
+                    and is_managed_name(item.get("path"))
+                )
+            ]
+            if retained_bundled:
+                entry["bundled_skills"] = retained_bundled
+            else:
+                entry.pop("bundled_skills", None)
 
     source_id = str(context["source_id"])
     source_repo = context["repo"]
@@ -1179,9 +1218,28 @@ def update_ledger(
     skills = target_source.setdefault("skills", [])
     if not isinstance(skills, list):
         raise InstallError(f"source ledger source.skills 不是数组：{source_id}")
-    for name in names:
+    for name in coverage_names:
         if name not in skills:
             skills.append(name)
+    existing_bundled = target_source.get("bundled_skills", [])
+    if not isinstance(existing_bundled, list):
+        raise InstallError(f"source ledger bundled_skills 不是数组：{source_id}")
+    retained_bundled = [
+        item
+        for item in existing_bundled
+        if not (
+            isinstance(item, dict)
+            and is_managed_name(item.get("path"))
+        )
+    ]
+    retained_bundled.extend(
+        {"path": item["ledger_key"], "name": item["name"]}
+        for item in bundled_skills
+    )
+    if retained_bundled:
+        target_source["bundled_skills"] = retained_bundled
+    else:
+        target_source.pop("bundled_skills", None)
     if retired_names:
         data["deleted"].append(
             {
@@ -1278,6 +1336,155 @@ def load_and_validate_manifest(path: Path, *, names: list[str]) -> dict[str, Any
     return data
 
 
+def bundled_skill_specs(
+    *,
+    args: argparse.Namespace,
+    decision: dict[str, Any],
+    names: list[str],
+) -> list[dict[str, str]]:
+    raw = decision.get("bundled_skills")
+    if raw is None:
+        return []
+    if not args.candidate:
+        raise InstallError("bundled_skills 只允许绑定本地 --candidate 安装载荷")
+    if len(names) != 1:
+        raise InstallError("bundled_skills 只支持单个顶层安装目标")
+    if not isinstance(raw, list) or not raw:
+        raise InstallError("bundled_skills 必须是非空数组")
+
+    result: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+    seen_names: set[str] = set()
+    top_level_name_keys = {name.casefold() for name in names}
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict) or set(item) != {"path", "name"}:
+            raise InstallError(
+                f"bundled_skills[{index}] 字段必须精确为 path、name"
+            )
+        relative_path = item.get("path")
+        skill_name = item.get("name")
+        if not isinstance(relative_path, str) or not relative_path.strip():
+            raise InstallError(f"bundled_skills[{index}].path 必须是非空字符串")
+        if relative_path != relative_path.strip() or any(
+            not character.isprintable() for character in relative_path
+        ):
+            raise InstallError(
+                f"bundled_skills[{index}].path 必须是规范的可打印相对路径"
+            )
+        parts = relative_path.split("/")
+        if (
+            "\\" in relative_path
+            or "`" in relative_path
+            or relative_path.startswith("/")
+            or re.match(r"^[A-Za-z]:", relative_path)
+            or any(
+                not part
+                or part in {".", ".."}
+                or part.casefold() in CANDIDATE_EXCLUDED_DIRECTORIES
+                for part in parts
+            )
+        ):
+            raise InstallError(
+                f"bundled_skills[{index}].path 必须是 candidate 内安全的 POSIX 相对路径"
+            )
+        if not isinstance(skill_name, str) or not SAFE_SKILL_NAME.fullmatch(skill_name):
+            raise InstallError(f"bundled_skills[{index}].name 不是合法 skill name")
+        path_key = relative_path.casefold()
+        name_key = skill_name.casefold()
+        if path_key in seen_paths:
+            raise InstallError(f"bundled_skills[{index}].path 重复：{relative_path}")
+        if name_key in seen_names or name_key in top_level_name_keys:
+            raise InstallError(f"bundled_skills[{index}].name 重复：{skill_name}")
+        seen_paths.add(path_key)
+        seen_names.add(name_key)
+        result.append(
+            {
+                "path": relative_path,
+                "name": skill_name,
+                "ledger_key": f"{names[0]}/{relative_path}",
+            }
+        )
+    return result
+
+
+def validate_staged_bundled_skills(
+    *,
+    stage_root: Path,
+    top_level_name: str,
+    bundled_skills: list[dict[str, str]],
+    args: argparse.Namespace,
+) -> list[dict[str, str]]:
+    verified: list[dict[str, str]] = []
+    for item in bundled_skills:
+        target = stage_root / top_level_name / Path(*item["path"].split("/"))
+        if not target.is_dir() or is_reparse(target):
+            raise InstallError(f"bundled skill 路径不是安全目录：{target}")
+        ensure_tree_no_reparse(target, label=f"bundled skill {item['name']}")
+        skill_md = target / "SKILL.md"
+        if not skill_md.is_file() or is_reparse(skill_md):
+            raise InstallError(f"bundled skill 缺少安全的 SKILL.md：{skill_md}")
+        actual_name = read_skill_name(skill_md)
+        if actual_name != item["name"]:
+            raise InstallError(
+                "bundled skill name 与 manifest 不一致："
+                f"{actual_name!r} != {item['name']!r}"
+            )
+        source_md = target / "SOURCE.md"
+        if not source_md.is_file() or is_reparse(source_md):
+            raise InstallError(f"bundled skill 缺少安全的 SOURCE.md：{source_md}")
+        recorded_names = source_record_values(source_md, "Skill")
+        if not recorded_names or any(value != item["name"] for value in recorded_names):
+            raise InstallError(
+                f"bundled skill SOURCE.md identity 不一致：{recorded_names!r}"
+            )
+        source_repo = source_record_unique_value(
+            source_md,
+            ("Source repository",),
+            label=f"bundled skill {item['name']}",
+        )
+        parsed_repo = urlparse(source_repo)
+        if (
+            parsed_repo.scheme != "https"
+            or not parsed_repo.hostname
+            or not parsed_repo.path.strip("/")
+            or parsed_repo.username
+            or parsed_repo.password
+            or parsed_repo.query
+            or parsed_repo.fragment
+        ):
+            raise InstallError(
+                f"bundled skill {item['name']} SOURCE.md 必须记录不含凭据的 HTTPS source repository"
+            )
+        source_record_unique_value(
+            source_md,
+            ("Upstream path",),
+            label=f"bundled skill {item['name']}",
+        )
+        source_record_unique_value(
+            source_md,
+            ("Ref",),
+            label=f"bundled skill {item['name']}",
+        )
+        source_record_unique_value(
+            source_md,
+            ("Commit or revision", "Commit"),
+            label=f"bundled skill {item['name']}",
+        )
+        validate_durable_source_record(
+            source_md,
+            durable_fields={},
+            transient_paths=[Path(args.candidate), Path(args.decision_manifest)],
+        )
+        verified.append(
+            {
+                **item,
+                "skill_md_sha256": sha256_file(skill_md),
+                "source_md_sha256": sha256_file(source_md),
+            }
+        )
+    return verified
+
+
 def make_staging_ledger(names: list[str], context: dict[str, Any]) -> dict[str, Any]:
     return update_ledger(
         {"updated_at": today(), "notes": [], "sources": [], "unresolved": [], "deleted": []},
@@ -1359,6 +1566,12 @@ def stage_candidate(
                 },
                 transient_paths=[Path(args.candidate), Path(args.decision_manifest)],
             )
+    bundled_validation = validate_staged_bundled_skills(
+        stage_root=stage_root,
+        top_level_name=names[0],
+        bundled_skills=context.get("bundled_skills", []),
+        args=args,
+    )
     atomic_write_json(stage_root / ".downloaded-skills-source-state.json", make_staging_ledger(names, context))
     closure = run_closure(
         root=stage_root,
@@ -1372,6 +1585,7 @@ def stage_candidate(
         "names": names,
         "closure": closure,
         "candidate_integrity": candidate_integrity,
+        "bundled_skills": bundled_validation,
         "staged_payloads": staged_payloads,
     }
 
@@ -2032,6 +2246,7 @@ def verify_catalog(
     catalog_path: Path,
     active_root: Path,
     names: list[str],
+    bundled_skills: list[dict[str, Any]],
 ) -> dict[str, Any]:
     catalog = load_json(catalog_path, label="skill catalog")
     if not isinstance(catalog, dict) or not isinstance(catalog.get("artifacts"), list):
@@ -2039,11 +2254,38 @@ def verify_catalog(
     if catalog.get("checks", {}).get("resource_closure", {}).get("status") != "pass":
         raise InstallError("skill catalog 的资源闭包检查不是 pass")
     verified: list[dict[str, Any]] = []
-    for name in names:
+    targets = [
+        {"path": name, "name": name}
+        for name in names
+    ]
+    for item in bundled_skills:
+        expected_skill_md_sha256 = item.get("skill_md_sha256")
+        expected_source_md_sha256 = item.get("source_md_sha256")
+        if (
+            not isinstance(expected_skill_md_sha256, str)
+            or not isinstance(expected_source_md_sha256, str)
+            or not SHA256_HEX.fullmatch(expected_skill_md_sha256)
+            or not SHA256_HEX.fullmatch(expected_source_md_sha256)
+        ):
+            raise InstallError("bundled skill 缺少暂存期 provenance 哈希")
+        targets.append(
+            {
+                "path": item["ledger_key"],
+                "name": item["name"],
+                "expected_skill_md_sha256": expected_skill_md_sha256,
+                "expected_source_md_sha256": expected_source_md_sha256,
+            }
+        )
+    for target in targets:
+        path = target["path"]
+        name = target["name"]
         matches = [
             item
             for item in catalog["artifacts"]
-            if isinstance(item, dict) and item.get("scope") == "active" and item.get("name") == name
+            if isinstance(item, dict)
+            and item.get("scope") == "active"
+            and item.get("name") == name
+            and item.get("relative_path") == f"{path}/SKILL.md"
         ]
         if len(matches) != 1:
             raise InstallError(f"skill catalog 对 {name} 的 active 条目数量不是 1：{len(matches)}")
@@ -2053,11 +2295,42 @@ def verify_catalog(
         source = item.get("source") if isinstance(item.get("source"), dict) else {}
         if source.get("status") in {None, "missing"} or source.get("conflicts"):
             raise InstallError(f"skill catalog 对 {name} 的 SOURCE.md 存在冲突或缺失")
-        actual = sha256_file(active_root / name / "SKILL.md")
+        expected_source_md_sha256 = target.get("expected_source_md_sha256")
+        bundled_root: Path | None = None
+        if expected_source_md_sha256 is not None:
+            bundled_root = d_path(
+                active_root / Path(*path.split("/")),
+                label=f"bundled skill {name}",
+                must_exist=True,
+            )
+            if is_reparse(bundled_root) or not bundled_root.is_dir():
+                raise InstallError(f"bundled skill {name} 不是安全目录")
+            ensure_tree_no_reparse(bundled_root, label=f"bundled skill {name}")
+        skill_md = d_path(
+            (bundled_root or active_root / Path(*path.split("/"))) / "SKILL.md",
+            label=f"skill {name} 的 SKILL.md",
+            must_exist=True,
+        )
+        if is_reparse(skill_md) or not skill_md.is_file():
+            raise InstallError(f"skill {name} 的 SKILL.md 不是安全普通文件")
+        actual = sha256_file(skill_md)
         recorded = item.get("integrity", {}).get("skill_md_sha256")
         if actual != recorded:
             raise InstallError(f"skill catalog 对 {name} 的 SKILL.md 哈希不一致")
-        verified.append({"name": name, "skill_md_sha256": actual})
+        expected_skill_md_sha256 = target.get("expected_skill_md_sha256")
+        if expected_skill_md_sha256 is not None and actual != expected_skill_md_sha256:
+            raise InstallError(f"bundled skill {name} 的 SKILL.md 与暂存期哈希不一致")
+        verification = {"path": path, "name": name, "skill_md_sha256": actual}
+        if expected_source_md_sha256 is not None:
+            assert bundled_root is not None
+            source_md = bundled_root / "SOURCE.md"
+            if is_reparse(source_md) or not source_md.is_file():
+                raise InstallError(f"bundled skill {name} 的 SOURCE.md 不是安全普通文件")
+            source_md_sha256 = sha256_file(source_md)
+            if source_md_sha256 != expected_source_md_sha256:
+                raise InstallError(f"bundled skill {name} 的 SOURCE.md 与暂存期哈希不一致")
+            verification["source_md_sha256"] = source_md_sha256
+        verified.append(verification)
     return {"generated_at": catalog.get("generated_at"), "skills": verified}
 
 
@@ -2157,6 +2430,11 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         # extra compatibility signal, not a second approval gate.
         pass
     context = source_context(args, decision, specs)
+    context["bundled_skills"] = bundled_skill_specs(
+        args=args,
+        decision=decision,
+        names=names,
+    )
     if rename is not None:
         context["canonical_rename"] = rename
         validate_canonical_rename_state(
@@ -2297,6 +2575,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             catalog_path=catalog_path,
             active_root=active_root,
             names=names,
+            bundled_skills=staged["bundled_skills"],
         )
         result = {
             **plan,

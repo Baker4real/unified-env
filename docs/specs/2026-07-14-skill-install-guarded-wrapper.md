@@ -28,7 +28,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 1. `skill-install-guard` 产生 decision manifest，必须包含 `install` 或 `update`、`source-pass/source-review` 和 `writing-great-skills` 通过证据。
 2. wrapper 将远端候选下载到 D 盘 staging；本地 `--candidate` 必须先用 decision manifest 绑定 `SKILL.md` 和安装载荷 SHA-256，再复制已审查内容。安装载荷排除任何层级的 `.git`、`__pycache__` 和 `.pyc`，这些来源仓库/解释器元数据不进入 active skill。所有 D 盘输入和写入路径都检查目标及全部既有祖先，任何父级 symlink、junction 或其他 reparse point 都在读取、暂存、备份或激活前失败闭锁；canonical identity 读取还必须先完成 candidate 与 predecessor 整树 reparse 审计。
-3. wrapper 在事务身份建立后把已验证的 decision manifest 原子快照到持久 transaction evidence，并写入/保留 `SOURCE.md` 和 staging ledger。受管追加记录用 transaction evidence 与快照替代本地 candidate 和原始 decision manifest 输入路径；repo/ref/upstream、active path 等持久来源字段继续保留。候选已有记录仍包含当前输入路径或本机临时根时在激活前失败闭锁。随后运行严格资源闭包检查。
+3. wrapper 在事务身份建立后把已验证的 decision manifest 原子快照到持久 transaction evidence，并写入/保留 `SOURCE.md` 和 staging ledger。受管追加记录用 transaction evidence 与快照替代本地 candidate 和原始 decision manifest 输入路径；repo/ref/upstream、active path 等持久来源字段继续保留。候选已有记录仍包含当前输入路径或本机临时根时在激活前失败闭锁。父 skill 内会被运行时发现的 bundled skill 必须由 `bundled_skills` 逐项绑定安全相对路径和 frontmatter 名称，并各自保留可验证的 `SOURCE.md`；wrapper 把其 active-root 相对目录写入同一事务 ledger。随后运行严格资源闭包检查。
 4. wrapper 在 active root 下重新创建候选内容，不移动 staging 目录，也不复制 staging 的 owner、DACL 或 SACL；目标目录和文件必须继承本机 active root 的权限。
 5. wrapper 备份旧 active skill，再原子换入候选；Windows 备份移动前清除旧树只读位，该属性规范化本身也必须位于同一恢复边界内。若属性规范化或复制式移动在清理阶段失败，则合并源树与事务备份、恢复原只读属性，并按旧树内容 seal 证明恢复。回滚已有 active skill 时，删除当前 active 前必须先证明事务备份存在且匹配旧树 seal；删除已换入目录前还必须证明当前路径同时匹配本事务换入前捕获的目录 identity（volume/file index）与 payload seal。缺失、不匹配或路径消失时保留现状并标记 `rollback-failed`。无法证明恢复时状态必须为 `rollback-failed`。canonical rename 在 preflight、旧名退场后和真正换入前持续断言 successor 不存在，并使用 Windows 原子 no-replace rename；竞争产生的意外 successor 原样保留，既不备份成普通 update，也不覆盖或删除。换入后立即在独立子进程中枚举并读取全部文件，同时验证目标树不存在受保护 ACL。任一项失败都回滚，事务不得标记成功。
 6. wrapper 更新 `D:\Codex\.codex\skills\.downloaded-skills-source-state.json`；只有 decision manifest 明确提供且通过白名单校验的来源元数据才可覆盖既有字段。
@@ -45,6 +45,12 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
   "source_status": "source-review",
   "writing_great_skills": { "status": "no-change" },
   "skills": ["example-skill"],
+  "bundled_skills": [
+    {
+      "path": "node_modules/example-runtime/lib/tools/trace",
+      "name": "example-trace"
+    }
+  ],
   "candidate_integrity": {
     "algorithm": "sha256(utf8(concat(sorted_unicode_codepoint(D + tab + relative_posix_directory + lf, or F + tab + relative_posix_file + tab + file_sha256 + lf)))); excludes any path segment named .git or __pycache__, and files ending in .pyc",
     "excluded": ["**/.git", "**/.git/**", "**/__pycache__", "**/__pycache__/**", "**/*.pyc"],
@@ -67,6 +73,8 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 ```
 
 `candidate_integrity` 对本地 `--candidate` 是硬门槛。wrapper 的 `--candidate-integrity-only` 只读入口生成该对象；决策生产方必须把其原样写入 manifest，普通事务缺少 decision manifest 时在创建锁、temp 或 evidence 目录前失败闭锁。指纹同时绑定目录拓扑与文件哈希。wrapper 在复制前按上述固定排除规则重算输入指纹，复制后再次验证同一指纹；候选新增、删除或修改任何会进入 active 的文件或目录都会在备份和激活前失败。事务 manifest 同时记录输入绑定、decision manifest 快照路径及其 SHA-256、被排除文件的数量/总字节和写入 `SOURCE.md` 后的 staging seal；activation 在复制前、复制后、原子换入前和换入后都必须对照同一 seal，并在每次 seal 计算中拒绝 symlink、junction 或其他 reparse point。`.git` 或 `__pycache__` 无论是目录还是普通文件都不进入安装载荷；`.pyc` 只在它是文件时排除，同名普通目录属于受绑定载荷。被排除元数据若原先存在于 active skill，只保留在该次 update 的事务回滚备份中，不复制进新 active payload。候选 `SOURCE.md` 在追加受管记录后仍命中本机临时根、当前 candidate 或原始 decision manifest 路径时拒绝事务；只有 wrapper 生成且值精确匹配的 `Local path`、`Active root`、`Guarded transaction evidence` 和 `Decision manifest` 字段可在自定义测试根下豁免临时根检查，不能用共同祖先遮蔽其他路径。
+
+`bundled_skills` 只允许用于单个本地 `--candidate`。每一项只能包含 `path` 和 `name`：`path` 必须是 candidate 内不含绝对路径、反斜杠、空段、`.`、`..`、`.git` 或 `__pycache__` 的 POSIX 相对目录，`name` 必须与该目录 `SKILL.md` 的 frontmatter 完全一致，且不能与顶层目标或其他 bundled skill 仅大小写不同。目录必须包含安全普通文件 `SKILL.md` 与 `SOURCE.md`；当前 provenance 记录必须有一致的 `Skill`，以及不含用户信息、query 或 fragment 且带 hostname/path 的 HTTPS `Source repository`、`Upstream path`、`Ref` 和 `Commit or revision`。暂存态与 live 态都按 `<top-level-name>/<bundled-path>` 校验唯一 ledger coverage、catalog 相对路径和两个 provenance 文件的 SHA-256。`manifest.skills` 仍只声明顶层安装目标，不能把 bundled 路径伪装成额外顶层安装目录。
 
 `source.upstream_path` 只用于已审查的 `--candidate`：它把本地暂存候选映射回真实仓库子路径，确保新写入的 `SOURCE.md` 可精确追溯。仓库根使用精确值 `.`；其他值必须是仓库内的 POSIX 相对路径，不接受绝对路径、反斜杠、反引号、不可打印字符、空段、`.` 或 `..` 路径段。省略时为兼容旧调用仍回退到候选目录名。它与 `source.ledger_updates.path` 不同，后者是统一来源台账已有的本地路径字段。
 

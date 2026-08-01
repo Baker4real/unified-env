@@ -190,6 +190,38 @@ class SkillInstallGuardedTests(unittest.TestCase):
         )
         return candidate
 
+    def write_bundled_skill(
+        self,
+        candidate: Path,
+        relative_path: str,
+        name: str,
+        *,
+        include_source: bool = True,
+    ) -> Path:
+        bundled = candidate.joinpath(*relative_path.split("/"))
+        bundled.mkdir(parents=True)
+        (bundled / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: bundled fixture\n---\n\n# {name}\n",
+            encoding="utf-8",
+        )
+        if include_source:
+            (bundled / "SOURCE.md").write_text(
+                "\n".join(
+                    [
+                        "# Source Provenance",
+                        "",
+                        f"Skill: `{name}`",
+                        "Source repository: `https://github.com/example/bundled-runtime`",
+                        f"Upstream path: `{relative_path}`",
+                        "Ref: `v1.2.3`",
+                        "Commit or revision: `0123456789abcdef`",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+        return bundled
+
     def write_manifest(
         self,
         name: str,
@@ -430,6 +462,374 @@ class SkillInstallGuardedTests(unittest.TestCase):
         artifact = next(item for item in catalog["artifacts"] if item.get("name") == "test-skill-wrapper")
         self.assertEqual(artifact["ledger_coverage"], "pass")
         self.assertEqual(catalog["checks"]["resource_closure"]["status"], "pass")
+
+    def test_install_governs_declared_bundled_skill_in_same_transaction(self) -> None:
+        name = "test-skill-wrapper"
+        relative_path = "node_modules/example-runtime/lib/skills/trace"
+        bundled_name = "example-trace"
+        candidate = self.write_candidate(name, "bundled skill transaction")
+        self.write_bundled_skill(candidate, relative_path, bundled_name)
+        manifest = self.write_manifest(name, "install")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["bundled_skills"] = [
+            {"path": relative_path, "name": bundled_name}
+        ]
+        payload["candidate_integrity"] = WRAPPER.candidate_integrity_payload(candidate)
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 0, stdout.getvalue())
+        ledger_key = f"{name}/{relative_path}"
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        source = next(item for item in ledger["sources"] if item["id"] == "local-test")
+        self.assertEqual(source["skills"], [name, ledger_key])
+        self.assertEqual(
+            source["bundled_skills"],
+            [{"path": ledger_key, "name": bundled_name}],
+        )
+
+        catalog = json.loads((self.temp / "catalog.json").read_text(encoding="utf-8"))
+        bundled = [
+            item
+            for item in catalog["artifacts"]
+            if item.get("scope") == "active"
+            and item.get("relative_path") == f"{ledger_key}/SKILL.md"
+        ]
+        self.assertEqual(len(bundled), 1)
+        self.assertEqual(bundled[0]["name"], bundled_name)
+        self.assertEqual(bundled[0]["ledger_coverage"], "pass")
+
+        result = json.loads(stdout.getvalue())
+        verified_paths = {
+            item["path"] for item in result["catalog_verification"]["skills"]
+        }
+        self.assertEqual(verified_paths, {name, ledger_key})
+        bundled_verification = next(
+            item
+            for item in result["catalog_verification"]["skills"]
+            if item["path"] == ledger_key
+        )
+        self.assertIn("source_md_sha256", bundled_verification)
+
+        active_source = self.active / ledger_key / "SOURCE.md"
+        original_source = active_source.read_text(encoding="utf-8")
+        active_source.write_text(
+            original_source.replace(
+                "0123456789abcdef",
+                "fedcba9876543210",
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            WRAPPER.InstallError,
+            "SOURCE.md 与暂存期哈希不一致",
+        ):
+            WRAPPER.verify_catalog(
+                catalog_path=self.temp / "catalog.json",
+                active_root=self.active,
+                names=[name],
+                bundled_skills=result["staged"]["bundled_skills"],
+            )
+        active_source.write_text(original_source, encoding="utf-8")
+
+        active_skill = self.active / ledger_key / "SKILL.md"
+        active_skill.write_text(
+            active_skill.read_text(encoding="utf-8").replace(
+                "bundled fixture",
+                "modified bundled fixture",
+            ),
+            encoding="utf-8",
+        )
+        bundled[0]["integrity"]["skill_md_sha256"] = WRAPPER.sha256_file(active_skill)
+        (self.temp / "catalog.json").write_text(
+            json.dumps(catalog, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            WRAPPER.InstallError,
+            "SKILL.md 与暂存期哈希不一致",
+        ):
+            WRAPPER.verify_catalog(
+                catalog_path=self.temp / "catalog.json",
+                active_root=self.active,
+                names=[name],
+                bundled_skills=result["staged"]["bundled_skills"],
+            )
+
+    def test_update_ledger_preserves_bundled_entries_for_other_source_roots(self) -> None:
+        data = {
+            "sources": [
+                {
+                    "id": "shared-source",
+                    "skills": [
+                        "root-a",
+                        "root-a/vendor/old-skill",
+                        "root-b",
+                        "root-b/vendor/kept-skill",
+                    ],
+                    "bundled_skills": [
+                        {"path": "root-a/vendor/old-skill", "name": "old-skill"},
+                        {"path": "root-b/vendor/kept-skill", "name": "kept-skill"},
+                    ],
+                }
+            ],
+            "unresolved": [],
+            "deleted": [],
+        }
+        context = {
+            "source_id": "shared-source",
+            "source_type": "github",
+            "repo": "https://github.com/example/shared-source",
+            "ref": "v2.0.0",
+            "commit": "abcdef0123456789",
+            "ledger_updates": {},
+            "bundled_skills": [
+                {
+                    "ledger_key": "root-a/vendor/new-skill",
+                    "name": "new-skill",
+                }
+            ],
+            "overlay_status": "none",
+            "overlay_summary": "",
+        }
+
+        result = WRAPPER.update_ledger(data, names=["root-a"], context=context)
+
+        source = result["sources"][0]
+        self.assertEqual(
+            source["bundled_skills"],
+            [
+                {"path": "root-b/vendor/kept-skill", "name": "kept-skill"},
+                {"path": "root-a/vendor/new-skill", "name": "new-skill"},
+            ],
+        )
+        self.assertEqual(
+            set(source["skills"]),
+            {
+                "root-a",
+                "root-a/vendor/new-skill",
+                "root-b",
+                "root-b/vendor/kept-skill",
+            },
+        )
+
+    def test_update_ledger_without_bundled_skills_removes_only_current_root_entries(self) -> None:
+        data = {
+            "sources": [
+                {
+                    "id": "shared-source",
+                    "skills": [
+                        "root-a",
+                        "root-a/vendor/old-skill",
+                        "root-b",
+                        "root-b/vendor/kept-skill",
+                    ],
+                    "bundled_skills": [
+                        {"path": "root-a/vendor/old-skill", "name": "old-skill"},
+                        {"path": "root-b/vendor/kept-skill", "name": "kept-skill"},
+                    ],
+                }
+            ],
+            "unresolved": [],
+            "deleted": [],
+        }
+        context = {
+            "source_id": "shared-source",
+            "source_type": "github",
+            "repo": "https://github.com/example/shared-source",
+            "ref": "v2.0.0",
+            "commit": "abcdef0123456789",
+            "ledger_updates": {},
+            "bundled_skills": [],
+            "overlay_status": "none",
+            "overlay_summary": "",
+        }
+
+        result = WRAPPER.update_ledger(data, names=["root-a"], context=context)
+
+        source = result["sources"][0]
+        self.assertEqual(
+            source["bundled_skills"],
+            [{"path": "root-b/vendor/kept-skill", "name": "kept-skill"}],
+        )
+        self.assertEqual(
+            set(source["skills"]),
+            {"root-a", "root-b", "root-b/vendor/kept-skill"},
+        )
+
+    def test_update_ledger_removes_replaced_bundle_from_other_source(self) -> None:
+        data = {
+            "sources": [
+                {
+                    "id": "old-source",
+                    "skills": ["root-a", "root-a/vendor/old-skill"],
+                    "bundled_skills": [
+                        {"path": "root-a/vendor/old-skill", "name": "old-skill"}
+                    ],
+                },
+                {"id": "new-source", "skills": []},
+            ],
+            "unresolved": [],
+            "deleted": [],
+        }
+        context = {
+            "source_id": "new-source",
+            "source_type": "github",
+            "repo": "https://github.com/example/new-source",
+            "ref": "v2.0.0",
+            "commit": "abcdef0123456789",
+            "ledger_updates": {},
+            "bundled_skills": [
+                {
+                    "ledger_key": "root-a/vendor/new-skill",
+                    "name": "new-skill",
+                }
+            ],
+            "overlay_status": "none",
+            "overlay_summary": "",
+        }
+
+        result = WRAPPER.update_ledger(data, names=["root-a"], context=context)
+
+        old_source = next(item for item in result["sources"] if item["id"] == "old-source")
+        new_source = next(item for item in result["sources"] if item["id"] == "new-source")
+        self.assertEqual(old_source["skills"], [])
+        self.assertNotIn("bundled_skills", old_source)
+        self.assertEqual(
+            new_source["bundled_skills"],
+            [{"path": "root-a/vendor/new-skill", "name": "new-skill"}],
+        )
+
+    def test_bundled_skill_rejects_parent_traversal_path(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "reject bundled traversal")
+        manifest = self.write_manifest(name, "install")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["bundled_skills"] = [
+            {"path": "../outside/skill", "name": "outside-skill"}
+        ]
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("bundled_skills[0].path", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+
+    def test_bundled_skill_requires_source_record(self) -> None:
+        name = "test-skill-wrapper"
+        relative_path = "vendor/runtime/skill"
+        candidate = self.write_candidate(name, "require bundled source")
+        self.write_bundled_skill(
+            candidate,
+            relative_path,
+            "vendor-runtime",
+            include_source=False,
+        )
+        manifest = self.write_manifest(name, "install")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["bundled_skills"] = [
+            {"path": relative_path, "name": "vendor-runtime"}
+        ]
+        payload["candidate_integrity"] = WRAPPER.candidate_integrity_payload(candidate)
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("bundled skill 缺少安全的 SOURCE.md", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+
+    def test_bundled_skill_frontmatter_name_must_match_manifest(self) -> None:
+        name = "test-skill-wrapper"
+        relative_path = "vendor/runtime/skill"
+        candidate = self.write_candidate(name, "bind bundled name")
+        self.write_bundled_skill(candidate, relative_path, "actual-runtime")
+        manifest = self.write_manifest(name, "install")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["bundled_skills"] = [
+            {"path": relative_path, "name": "declared-runtime"}
+        ]
+        payload["candidate_integrity"] = WRAPPER.candidate_integrity_payload(candidate)
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("bundled skill name 与 manifest 不一致", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+
+    def test_bundled_skill_rejects_casefold_collision_with_top_level_name(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "reject bundle name collision")
+        self.write_bundled_skill(candidate, "vendor/runtime/skill", "Test-Skill-Wrapper")
+        manifest = self.write_manifest(name, "install")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["bundled_skills"] = [
+            {"path": "vendor/runtime/skill", "name": "Test-Skill-Wrapper"}
+        ]
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("bundled_skills[0].name 重复", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+
+    def test_bundled_skill_rejects_unsafe_source_repository_url(self) -> None:
+        invalid_urls = (
+            "https://token@example.invalid/bundled-runtime",
+            "https://example.invalid/bundled-runtime?token=secret",
+            "https://example.invalid/bundled-runtime#fragment",
+            "https:///bundled-runtime",
+            "https://example.invalid",
+        )
+        relative_path = "vendor/runtime/skill"
+        for index, invalid_url in enumerate(invalid_urls):
+            with self.subTest(source_repository=invalid_url):
+                name = f"test-skill-wrapper-{index}"
+                candidate = self.write_candidate(name, "reject unsafe bundle source")
+                bundled = self.write_bundled_skill(
+                    candidate,
+                    relative_path,
+                    f"vendor-runtime-{index}",
+                )
+                source = bundled / "SOURCE.md"
+                source.write_text(
+                    source.read_text(encoding="utf-8").replace(
+                        "https://github.com/example/bundled-runtime",
+                        invalid_url,
+                    ),
+                    encoding="utf-8",
+                )
+                manifest = self.write_manifest(name, "install")
+                payload = json.loads(manifest.read_text(encoding="utf-8"))
+                payload["bundled_skills"] = [
+                    {"path": relative_path, "name": f"vendor-runtime-{index}"}
+                ]
+                payload["candidate_integrity"] = WRAPPER.candidate_integrity_payload(candidate)
+                manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    code = WRAPPER.main(
+                        self.wrapper_args(candidate, manifest, name=name)
+                    )
+
+                self.assertEqual(code, 2)
+                self.assertIn("不含凭据的 HTTPS source repository", stderr.getvalue())
+                self.assertFalse((self.active / name).exists())
 
     def test_candidate_activation_records_durable_decision_evidence(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "持久 provenance")
