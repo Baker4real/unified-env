@@ -22,6 +22,12 @@ from typing import Any, Iterable
 
 
 sys.dont_write_bytecode = True
+_SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+if str(_SCRIPT_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIRECTORY))
+
+from skill_source_record import parse_current_source_record
+
 SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
@@ -37,7 +43,6 @@ DEFAULT_OUTPUT = Path(r"D:\Codex\.codex\skill-catalog\catalog.json")
 
 _FRONTMATTER_END = {"---", "..."}
 _KEY_VALUE = re.compile(r"^(?P<key>[^:#\s][^:]*?)\s*:\s*(?P<value>.*)$")
-_SOURCE_KEY_VALUE = re.compile(r"^\s*(?P<key>[A-Za-z][A-Za-z0-9 _-]*)\s*:\s*(?P<value>.*?)\s*$")
 _VERSION = re.compile(r"^v?\d+(?:\.\d+){1,3}(?:[-+][A-Za-z0-9.-]+)?$", re.IGNORECASE)
 _EXCLUDED_DIRS = {
     ".agents",
@@ -321,19 +326,17 @@ def _parse_source(
     except UnicodeDecodeError as exc:
         raise CatalogError(f"SOURCE.md 不是合法 UTF-8：{path}") from exc
 
-    fields: dict[str, str] = {}
-    for line in text.splitlines():
-        match = _SOURCE_KEY_VALUE.match(line)
-        if match is None:
-            continue
-        key = match.group("key").strip().casefold().replace(" ", "_").replace("-", "_")
-        fields[key] = _strip_scalar(match.group("value"))
-
-    source_skill = fields.get("skill")
-    conflicts: list[str] = []
+    record = parse_current_source_record(text)
+    fields = dict(record.fields)
+    conflicts = [
+        "SOURCE.md 当前记录的 "
+        f"{record.labels.get(key, key)} 存在冲突：{list(values)!r}"
+        for key, values in record.conflicts.items()
+    ]
     accepted_names = {skill_name, *(accepted_skill_names or set())}
-    if source_skill and source_skill not in accepted_names and "," not in source_skill:
-        conflicts.append(f"SOURCE.md Skill={source_skill!r} 与 name={skill_name!r} 不一致")
+    for source_skill in dict.fromkeys(record.values_for("Skill")):
+        if source_skill not in accepted_names and "," not in source_skill:
+            conflicts.append(f"SOURCE.md Skill={source_skill!r} 与 name={skill_name!r} 不一致")
     return {
         "record_path": str(path),
         "status": fields.get("status", "unknown"),

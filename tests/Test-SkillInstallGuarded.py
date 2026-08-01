@@ -463,6 +463,23 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(artifact["ledger_coverage"], "pass")
         self.assertEqual(catalog["checks"]["resource_closure"]["status"], "pass")
 
+        artifact["source"]["status"] = "unknown"
+        artifact["source"]["conflicts"] = []
+        (self.temp / "catalog.json").write_text(
+            json.dumps(catalog, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            WRAPPER.InstallError,
+            "SOURCE.md 存在冲突、未知或缺失",
+        ):
+            WRAPPER.verify_catalog(
+                catalog_path=self.temp / "catalog.json",
+                active_root=self.active,
+                names=["test-skill-wrapper"],
+                bundled_proofs=(),
+            )
+
     def test_install_governs_declared_bundled_skill_in_same_transaction(self) -> None:
         name = "test-skill-wrapper"
         relative_path = "node_modules/example-runtime/lib/skills/trace"
@@ -513,6 +530,20 @@ class SkillInstallGuardedTests(unittest.TestCase):
             if item["path"] == ledger_key
         )
         self.assertIn("source_md_sha256", bundled_verification)
+        self.assertEqual(
+            set(result["staged"]["bundled_skills"][0]),
+            {
+                "path",
+                "name",
+                "ledger_key",
+                "skill_md_sha256",
+                "source_md_sha256",
+            },
+        )
+        staged_proofs = tuple(
+            WRAPPER.BundledSkillProof.from_staged_projection(item)
+            for item in result["staged"]["bundled_skills"]
+        )
 
         active_source = self.active / ledger_key / "SOURCE.md"
         original_source = active_source.read_text(encoding="utf-8")
@@ -531,7 +562,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 catalog_path=self.temp / "catalog.json",
                 active_root=self.active,
                 names=[name],
-                bundled_skills=result["staged"]["bundled_skills"],
+                bundled_proofs=staged_proofs,
             )
         active_source.write_text(original_source, encoding="utf-8")
 
@@ -556,7 +587,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 catalog_path=self.temp / "catalog.json",
                 active_root=self.active,
                 names=[name],
-                bundled_skills=result["staged"]["bundled_skills"],
+                bundled_proofs=staged_proofs,
             )
 
     def test_update_ledger_preserves_bundled_entries_for_other_source_roots(self) -> None:
@@ -586,12 +617,13 @@ class SkillInstallGuardedTests(unittest.TestCase):
             "ref": "v2.0.0",
             "commit": "abcdef0123456789",
             "ledger_updates": {},
-            "bundled_skills": [
-                {
-                    "ledger_key": "root-a/vendor/new-skill",
-                    "name": "new-skill",
-                }
-            ],
+            "bundled_skill_proofs": (
+                WRAPPER.BundledSkillProof(
+                    top_level_name="root-a",
+                    path="vendor/new-skill",
+                    name="new-skill",
+                ),
+            ),
             "overlay_status": "none",
             "overlay_summary": "",
         }
@@ -643,7 +675,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             "ref": "v2.0.0",
             "commit": "abcdef0123456789",
             "ledger_updates": {},
-            "bundled_skills": [],
+            "bundled_skill_proofs": (),
             "overlay_status": "none",
             "overlay_summary": "",
         }
@@ -682,12 +714,13 @@ class SkillInstallGuardedTests(unittest.TestCase):
             "ref": "v2.0.0",
             "commit": "abcdef0123456789",
             "ledger_updates": {},
-            "bundled_skills": [
-                {
-                    "ledger_key": "root-a/vendor/new-skill",
-                    "name": "new-skill",
-                }
-            ],
+            "bundled_skill_proofs": (
+                WRAPPER.BundledSkillProof(
+                    top_level_name="root-a",
+                    path="vendor/new-skill",
+                    name="new-skill",
+                ),
+            ),
             "overlay_status": "none",
             "overlay_summary": "",
         }
@@ -828,8 +861,177 @@ class SkillInstallGuardedTests(unittest.TestCase):
                     )
 
                 self.assertEqual(code, 2)
+                self.assertIn(
+                    f"bundled skill vendor-runtime-{index}",
+                    stderr.getvalue(),
+                )
                 self.assertIn("不含凭据的 HTTPS source repository", stderr.getvalue())
                 self.assertFalse((self.active / name).exists())
+
+    def test_candidate_source_uses_only_final_record(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "current source record")
+        (candidate / "SOURCE.md").write_text(
+            "\n".join(
+                [
+                    "# Historical provenance",
+                    "Skill: `retired-skill`",
+                    "Status: retired",
+                    "",
+                    "---",
+                    "",
+                    "# Current provenance",
+                    f"Skill: `{name}`",
+                    "Status: source-review",
+                    "Status: source-review",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "install")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 0)
+        self.assertTrue((self.active / name / "SOURCE.md").is_file())
+
+    def test_candidate_source_normalizes_quoted_current_identity(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "quoted current source identity")
+        (candidate / "SOURCE.md").write_text(
+            "\n".join(
+                [
+                    f"Skill: ` {name} `",
+                    "Status: source-review",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "install")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 0)
+        self.assertTrue((self.active / name / "SOURCE.md").is_file())
+
+    def test_candidate_source_blank_current_identity_fails_closed(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "blank current source identity")
+        (candidate / "SOURCE.md").write_text(
+            "\n".join(
+                [
+                    "Skill:",
+                    f"Skill: `{name}`",
+                    "Status: source-review",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "install")
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("候选 SOURCE.md 当前记录存在冲突", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+
+    def test_candidate_source_without_current_identity_fails_closed(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "unknown current source record")
+        (candidate / "SOURCE.md").write_text(
+            "Arbitrary note: value\n",
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "install")
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("候选 SOURCE.md 当前记录缺少 Skill identity", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+
+    def test_candidate_source_empty_final_record_fails_closed(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "empty final source record")
+        source = candidate / "SOURCE.md"
+        source.write_text(
+            f"Skill: `{name}`\nStatus: source-review\n---\n",
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "install")
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("候选 SOURCE.md 当前记录存在冲突", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+
+    def test_candidate_source_current_conflict_fails_closed(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "conflicting current source record")
+        (candidate / "SOURCE.md").write_text(
+            "\n".join(
+                [
+                    "Skill: `retired-skill`",
+                    "Status: retired",
+                    "",
+                    "---",
+                    "",
+                    f"Skill: `{name}`",
+                    "Status: source-review",
+                    "Status: pending-review",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "install")
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("候选 SOURCE.md 当前记录存在冲突", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+
+    def test_bundled_skill_source_current_conflict_fails_closed(self) -> None:
+        name = "test-skill-wrapper"
+        relative_path = "vendor/runtime/skill"
+        candidate = self.write_candidate(name, "conflicting bundled source record")
+        bundled = self.write_bundled_skill(candidate, relative_path, "runtime-skill")
+        source = bundled / "SOURCE.md"
+        source.write_text(
+            source.read_text(encoding="utf-8")
+            + "Status: source-review\nStatus: pending-review\n",
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "install")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["bundled_skills"] = [
+            {"path": relative_path, "name": "runtime-skill"}
+        ]
+        payload["candidate_integrity"] = WRAPPER.candidate_integrity_payload(candidate)
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("SOURCE.md 当前记录存在冲突", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
 
     def test_candidate_activation_records_durable_decision_evidence(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "持久 provenance")

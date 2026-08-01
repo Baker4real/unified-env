@@ -1,11 +1,11 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][ValidateSet('I1','I2','I3','I4','I5','I6','I7','I8','I9','I10','I11','I12','I13','I14','I15','I16','I17','I18','I19','I20','I21','I22','I23','I24','I25')][string]$Case)
+param([Parameter(Mandatory)][ValidateSet('I1','I2','I3','I4','I5','I6','I7','I8','I9','I10','I11','I12','I13','I14','I15','I16','I17','I18','I19','I20','I21','I22','I23','I24','I25','I26')][string]$Case)
 $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest
 $ProjectRoot='D:\Codex\projects\统一环境'
 $Entry=Join-Path $ProjectRoot 'scripts\Get-CodexStatePathInventory.ps1'
 $FixtureParent=Join-Path $ProjectRoot 'reports\codex-state-path-repair-test'
 $ManagedRoot=Join-Path $ProjectRoot 'managed\codex-hooks'
-. (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
+. (Join-Path $ProjectRoot 'scripts\lib\CodexHostSafety.ps1')
 . (Join-Path $ProjectRoot 'scripts\lib\CodexRepairTransaction.ps1')
 $CaseDescriptions=[ordered]@{
     I1='managed tree remains read-only during inventory';I2='scaled path classification';I3='approval replay rejection';I4='candidate replacement rejection'
@@ -14,7 +14,7 @@ $CaseDescriptions=[ordered]@{
     I13='converged repair no-op';I14='apply rename hard-crash recovery';I15='restore rename hard-crash recovery';I16='authenticated fixed replay ledger'
     I17='strict DPAPI attestation decoding';I18='automatic rollback rename hard-crash recovery'
     I19='orphan apply intent promotion';I20='orphan manual restore intent promotion';I21='orphan automatic rollback intent promotion'
-    I22='orphan terminal restore attestation promotion';I23='authenticated pending ledger promotion';I24='ordinary restore rename failure resumes prepared temp';I25='prepared cleanup hard-crash idempotence'
+    I22='orphan terminal restore attestation promotion';I23='authenticated pending ledger promotion';I24='ordinary restore rename failure resumes prepared temp';I25='prepared cleanup hard-crash idempotence';I26='host-safety exact property boundary'
 }
 
 function Get-TreeFingerprint([string]$Root) {
@@ -478,6 +478,32 @@ switch($Case){
     $manifestPath=Join-Path $evidence 'manifest.json';$manifestBefore=[IO.File]::ReadAllBytes($manifestPath);$targetBefore=[IO.File]::ReadAllBytes($f.StatePath)
     Assert-SingleJsonFailure (Invoke-Entry @('-Mode','Restore','-FixtureRoot',$f.Root,'-EvidencePath',$evidence,'-Json')) 'I25 missing prepared temp with third target identity'
     if(@(Compare-Object $manifestBefore ([IO.File]::ReadAllBytes($manifestPath))).Count-ne0-or@(Compare-Object $targetBefore ([IO.File]::ReadAllBytes($f.StatePath))).Count-ne0){throw 'I25 RED missing temp plus third target identity caused a write'}
+}
+'I26'{
+    $inventorySource=Get-Content -Raw -LiteralPath $Entry
+    if(-not$inventorySource.Contains(". (Join-Path `$ProjectRoot 'scripts\lib\CodexHostSafety.ps1')")-or$inventorySource.Contains('CodexHookPolicy.ps1')){throw 'I26 RED state inventory still depends on hook policy'}
+    $repairSource=Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'scripts\lib\CodexRepairTransaction.ps1')
+    if(-not$repairSource.Contains(". (Join-Path `$PSScriptRoot 'CodexHostSafety.ps1')")){throw 'I26 RED state repair transaction does not load host safety directly'}
+
+    $exact=[pscustomobject][ordered]@{alpha='one';beta=2}
+    Assert-CodexHookExactProperties -Value $exact -Names @('alpha','beta') -Scope 'I26 exact object'
+    $assertRejects={
+        param([AllowNull()][object]$Value,[string[]]$Names,[string]$Label)
+        $rejected=$false
+        try{Assert-CodexHookExactProperties -Value $Value -Names $Names -Scope $Label}catch{$rejected=$true}
+        if(-not$rejected){throw "I26 RED $Label accepted"}
+    }
+    & $assertRejects -Value $exact -Names @('alpha','beta','gamma') -Label 'missing expected property'
+    & $assertRejects -Value $exact -Names @('alpha') -Label 'extra actual property'
+    & $assertRejects -Value $exact -Names @('alpha','alpha') -Label 'duplicate expected property'
+    foreach($invalid in @(
+        [pscustomobject]@{label='string scalar';value='alpha'},
+        [pscustomobject]@{label='integer scalar';value=1},
+        [pscustomobject]@{label='boolean scalar';value=$true},
+        [pscustomobject]@{label='array value';value=@($exact)}
+    )){
+        & $assertRejects -Value $invalid.value -Names @('alpha','beta') -Label $invalid.label
+    }
 }
 };"Test-CodexStatePathRepairHardening[$Case $($CaseDescriptions[$Case])]: PASS"
 }finally{if($null-ne$f-and(Test-Path $f.Root)){Remove-Item $f.Root -Recurse -Force};if((Test-Path $FixtureParent)-and@(Get-ChildItem $FixtureParent -Force).Count-eq0){Remove-Item $FixtureParent -Force}}

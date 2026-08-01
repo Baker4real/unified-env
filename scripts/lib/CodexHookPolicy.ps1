@@ -1,37 +1,6 @@
 Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'CodexHostSafety.ps1')
-function Assert-CodexHookExactProperties {
-    param(
-        [Parameter(Mandatory)][object]$Value,
-        [Parameter(Mandatory)][string[]]$Names,
-        [Parameter(Mandatory)][string]$Scope
-    )
-
-    if ($null -eq $Value -or $Value -is [string] -or $Value -is [array] -or $Value.GetType().IsPrimitive) {
-        throw "$Scope 必须是 JSON object。"
-    }
-
-    $actual = @($Value.PSObject.Properties.Name)
-    if ($actual.Count -ne $Names.Count) {
-        throw "$Scope 属性集合不精确：expected=$($Names -join ','), actual=$($actual -join ',')"
-    }
-
-    $expected = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($name in $Names) {
-        [void]$expected.Add($name)
-    }
-
-    foreach ($name in $actual) {
-        if (-not $expected.Remove($name)) {
-            throw "$Scope 包含未知或重复属性：$name"
-        }
-    }
-
-    if ($expected.Count -ne 0) {
-        throw "$Scope 缺少属性：$(@($expected) -join ',')"
-    }
-}
 
 function Assert-CodexHookInteger {
     param(

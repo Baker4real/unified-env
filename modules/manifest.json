@@ -202,7 +202,8 @@
           "docs/specs/2026-07-13-github-default-branch-skill-policy-design.md",
           "docs/specs/2026-07-14-skill-install-guarded-wrapper.md",
           "reports/sdd/task-3-implementer.md",
-          "scripts/github-default-branch-skill-overlay-catalog.json"
+          "scripts/github-default-branch-skill-overlay-catalog.json",
+          "scripts/skill_source_record.py"
         ],
         "prefixes": [
           ".scratch/goal-first/",

@@ -30,4 +30,4 @@ intent: 定义 Skill 来源、安装、catalog、ledger 和发布政策的责任
 
 ## 已知漂移
 
-仓库源中的 installer 已改为从同目录解析 generator，三文件部署闭包已受管部署；现役 `D:\Codex\.codex\scripts\` 从部署目录解析 generator，不依赖项目源仓库路径。后续源文件变更、移动或拆分仓库前必须重新执行受管部署并核验 hash。当前仍依赖 active `skill-install-guard` 的 closure 脚本和官方 system installer，且事务内部还有待迁移的递归删除。在这些依赖、独立 fixture 和受管删除全部收敛前，本模块不拆出独立 Git 仓库。
+仓库源中的四文件部署闭包由 `skill_source_record.py`、catalog generator、installer 与 command wrapper 组成；installer 与 catalog 从同目录加载共享 parser，不依赖项目源仓库路径。现役 `D:\Codex\.codex\scripts\` 是否已包含该闭包只以受管部署 manifest 与现场 hash 为准，不能由仓库源存在推断。后续源文件变更、移动或拆分仓库前必须重新执行受管部署并核验 hash。当前仍依赖 active `skill-install-guard` 的 closure 脚本和官方 system installer，且事务内部还有待迁移的递归删除。在这些依赖、独立 fixture 和受管删除全部收敛前，本模块不拆出独立 Git 仓库。

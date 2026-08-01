@@ -39,7 +39,7 @@ $CorePath = Join-Path $ProjectRoot 'managed\codex-hooks\hooks\codex-state-policy
 $PythonPath = 'D:\Codex\tools\python314-official\python.exe'
 $FixtureMarker = '.codex-state-path-repair-fixture'
 $FixtureMarkerValue = 'codex-state-path-repair-test-v1'
-. (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
+. (Join-Path $ProjectRoot 'scripts\lib\CodexHostSafety.ps1')
 . (Join-Path $ProjectRoot 'scripts\lib\CodexRepairTransaction.ps1')
 
 function Invoke-HiddenProcess {

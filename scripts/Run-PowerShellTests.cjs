@@ -18,7 +18,7 @@ const HARDENING_CASES = Object.freeze([
 const STATE_PATH_REPAIR_HARDENING_CASES = Object.freeze([
   'I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10', 'I11', 'I12',
   'I13', 'I14', 'I15', 'I16', 'I17', 'I18', 'I19', 'I20', 'I21', 'I22', 'I23',
-  'I24', 'I25',
+  'I24', 'I25', 'I26',
 ]);
 const PARAMETERIZED_TESTS = Object.freeze([
   {

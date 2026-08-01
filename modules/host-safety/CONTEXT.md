@@ -27,4 +27,4 @@ node .\scripts\Run-PowerShellTests.cjs --module host-safety --list
 
 ## 依赖方向
 
-`scripts/lib/CodexHostSafety.ps1` 是通用 capability I/O、路径校验和原子发布的唯一实现。`CodexHookPolicy.ps1` 与 safe-delete 入口分别直接加载它；本模块不依赖 hook policy。
+`scripts/lib/CodexHostSafety.ps1` 是通用 capability I/O、路径校验、原子发布和严格 JSON 属性合同的唯一实现。`CodexHookPolicy.ps1`、state path inventory、repair transaction 与 safe-delete 入口分别直接加载它；本模块不依赖 hook policy。

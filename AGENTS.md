@@ -4,11 +4,11 @@
 
 ### Issue tracker
 
-本项目使用本地 Markdown tracker：任务、spec、tickets 和讨论记录放在 `.scratch/<feature-slug>/`。见 `docs/agents/issue-tracker.md`。
+本项目使用 GitHub Issues 管理任务、spec、tickets 和讨论记录；在仓库中使用 `gh` CLI 操作。见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
-本项目使用五种 triage 状态：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`；已完成 issue 使用终态 `done`。见 `docs/agents/triage-labels.md`。
+本项目使用五种 triage 标签：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`；完成事项通过关闭 GitHub issue 表示。见 `docs/agents/triage-labels.md`。
 
 ### Domain docs
 

@@ -117,6 +117,117 @@ if IMPORT_ERROR is not None:
 else:
 
     class SkillCatalogTests(unittest.TestCase):
+        def test_source_uses_only_final_record_and_marks_current_conflicts(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                cache = base / "cache"
+                cache.mkdir()
+                source = (
+                    "# Historical provenance\n"
+                    "Skill: retired-alpha\n"
+                    "Status: retired\n"
+                    "Repository: https://example.invalid/retired\n"
+                    "\n---\n\n"
+                    "# Current provenance\n"
+                    "Skill: ` alpha `\n"
+                    "Status: retained-local\n"
+                    "Status: retained-local\n"
+                    "Repository: https://example.invalid/current\n"
+                )
+                skill_dir = _write_skill(
+                    active,
+                    "alpha",
+                    name="alpha",
+                    description="current source fixture",
+                    source=source,
+                )
+                ledger = base / "ledger.json"
+                ledger.write_text(
+                    json.dumps({"sources": [{"skills": ["alpha"]}]}),
+                    encoding="utf-8",
+                )
+
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+                artifact = catalog["artifacts"][0]
+                self.assertEqual(artifact["source"]["fields"]["skill"], "alpha")
+                self.assertEqual(
+                    artifact["source"]["fields"]["status"],
+                    "retained-local",
+                )
+                self.assertEqual(
+                    artifact["source"]["fields"]["repository"],
+                    "https://example.invalid/current",
+                )
+                self.assertEqual(artifact["source"]["conflicts"], [])
+                self.assertEqual(catalog["checks"]["ledger"]["status"], "pass")
+
+                (skill_dir / "SOURCE.md").write_text(
+                    source.replace(
+                        "Status: retained-local\nStatus: retained-local",
+                        "Status: retained-local\nStatus: pending-review",
+                    ),
+                    encoding="utf-8",
+                )
+                conflicted = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+                conflict_artifact = conflicted["artifacts"][0]
+                self.assertNotIn("status", conflict_artifact["source"]["fields"])
+                self.assertIn(
+                    "SOURCE.md 当前记录的 Status 存在冲突",
+                    conflict_artifact["source"]["conflicts"][0],
+                )
+                self.assertEqual(conflicted["checks"]["ledger"]["status"], "conflict")
+
+                (skill_dir / "SOURCE.md").write_text(
+                    source.replace("Skill: ` alpha `", "Skill:\nSkill: ` alpha `"),
+                    encoding="utf-8",
+                )
+                empty_field = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+                empty_field_artifact = empty_field["artifacts"][0]
+                self.assertNotIn("skill", empty_field_artifact["source"]["fields"])
+                self.assertIn(
+                    "SOURCE.md 当前记录的 Skill 存在冲突",
+                    empty_field_artifact["source"]["conflicts"][0],
+                )
+                self.assertEqual(
+                    empty_field["checks"]["ledger"]["status"], "conflict"
+                )
+
+                (skill_dir / "SOURCE.md").write_text(
+                    source.rstrip() + "\n---\n",
+                    encoding="utf-8",
+                )
+                empty_final_record = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_result(active, 1),
+                )
+                final_record_artifact = empty_final_record["artifacts"][0]
+                self.assertEqual(final_record_artifact["source"]["fields"], {})
+                self.assertIn(
+                    "SOURCE.md 当前记录的 末尾分段 存在冲突",
+                    final_record_artifact["source"]["conflicts"][0],
+                )
+                self.assertEqual(
+                    empty_final_record["checks"]["ledger"]["status"], "conflict"
+                )
+
         def test_nested_active_skill_uses_relative_directory_for_ledger_coverage(self) -> None:
             with tempfile.TemporaryDirectory() as temp:
                 base = Path(temp)

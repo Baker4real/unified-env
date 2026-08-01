@@ -25,11 +25,17 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, NamedTuple, Sequence
 from urllib.parse import unquote, urlparse
 
 
 sys.dont_write_bytecode = True
+
+_SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+if str(_SCRIPT_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIRECTORY))
+
+from skill_source_record import CurrentSourceRecord, parse_current_source_record
 
 
 DEFAULT_ACTIVE_ROOT = Path(r"D:\Codex\.codex\skills")
@@ -73,6 +79,95 @@ class InstallError(RuntimeError):
 
 class RecoveryRequiredError(InstallError):
     """The wrapper could not prove that pre-transaction active state was restored."""
+
+
+class BundledSkillProof(NamedTuple):
+    """The bound identity and staged provenance of one bundled skill."""
+
+    top_level_name: str
+    path: str
+    name: str
+    skill_md_sha256: str | None = None
+    source_md_sha256: str | None = None
+
+    @property
+    def ledger_key(self) -> str:
+        return f"{self.top_level_name}/{self.path}"
+
+    def with_staged_integrity(
+        self,
+        *,
+        skill_md_sha256: str,
+        source_md_sha256: str,
+    ) -> "BundledSkillProof":
+        return self._replace(
+            skill_md_sha256=skill_md_sha256,
+            source_md_sha256=source_md_sha256,
+        )
+
+    def require_staged_integrity(self) -> tuple[str, str]:
+        if (
+            not isinstance(self.skill_md_sha256, str)
+            or not isinstance(self.source_md_sha256, str)
+            or not SHA256_HEX.fullmatch(self.skill_md_sha256)
+            or not SHA256_HEX.fullmatch(self.source_md_sha256)
+        ):
+            raise InstallError("bundled skill 缺少暂存期 provenance 哈希")
+        return self.skill_md_sha256, self.source_md_sha256
+
+    def ledger_projection(self) -> dict[str, str]:
+        return {"path": self.ledger_key, "name": self.name}
+
+    def staged_projection(self) -> dict[str, str]:
+        skill_md_sha256, source_md_sha256 = self.require_staged_integrity()
+        return {
+            "path": self.path,
+            "name": self.name,
+            "ledger_key": self.ledger_key,
+            "skill_md_sha256": skill_md_sha256,
+            "source_md_sha256": source_md_sha256,
+        }
+
+    @classmethod
+    def from_staged_projection(cls, value: Any) -> "BundledSkillProof":
+        expected_fields = {
+            "path",
+            "name",
+            "ledger_key",
+            "skill_md_sha256",
+            "source_md_sha256",
+        }
+        if not isinstance(value, dict) or set(value) != expected_fields:
+            raise InstallError("bundled skill 暂存期证明对象不合法")
+        path = value.get("path")
+        name = value.get("name")
+        ledger_key = value.get("ledger_key")
+        if (
+            not isinstance(path, str)
+            or not isinstance(name, str)
+            or not isinstance(ledger_key, str)
+            or not ledger_key.endswith(f"/{path}")
+        ):
+            raise InstallError("bundled skill 暂存期证明对象不合法")
+        top_level_name = ledger_key[: -(len(path) + 1)]
+        if (
+            not top_level_name
+            or not SAFE_SKILL_NAME.fullmatch(top_level_name)
+            or not SAFE_SKILL_NAME.fullmatch(name)
+            or not path
+            or "\\" in path
+            or any(not part or part in {".", ".."} for part in path.split("/"))
+        ):
+            raise InstallError("bundled skill 暂存期证明对象不合法")
+        proof = cls(
+            top_level_name=top_level_name,
+            path=path,
+            name=name,
+            skill_md_sha256=value.get("skill_md_sha256"),
+            source_md_sha256=value.get("source_md_sha256"),
+        )
+        proof.require_staged_integrity()
+        return proof
 
 
 def utc_now() -> str:
@@ -386,31 +481,24 @@ def read_skill_name(skill_md: Path) -> str:
     raise InstallError(f"SKILL.md frontmatter 缺少 name：{skill_md}")
 
 
-def source_record_sections(path: Path) -> list[list[str]]:
+def current_source_record(path: Path) -> CurrentSourceRecord:
     path = d_path(path, label="SOURCE.md", must_exist=True)
     if is_reparse(path) or not path.is_file():
         raise InstallError(f"SOURCE.md 必须是安全的普通文件：{path}")
     try:
-        lines = path.read_text(encoding="utf-8-sig").splitlines()
+        text = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError) as exc:
         raise InstallError(f"无法读取 SOURCE.md：{path}：{exc}") from exc
-    sections: list[list[str]] = [[]]
-    for line in lines:
-        if re.fullmatch(r"\s*---\s*", line):
-            sections.append([])
-        else:
-            sections[-1].append(line)
-    return sections
+    record = parse_current_source_record(text)
+    if record.conflicts:
+        raise InstallError(
+            "SOURCE.md 当前记录存在冲突：" + record.conflict_description()
+        )
+    return record
 
 
 def source_record_values(path: Path, field: str) -> list[str]:
-    pattern = re.compile(rf"^\s*{re.escape(field)}\s*:\s*(.+?)\s*$", re.IGNORECASE)
-    current_section = source_record_sections(path)[-1]
-    return [
-        strip_scalar(match.group(1))
-        for line in current_section
-        if (match := pattern.match(line))
-    ]
+    return list(current_source_record(path).values_for(field))
 
 
 def source_record_unique_value(
@@ -419,17 +507,7 @@ def source_record_unique_value(
     *,
     label: str,
 ) -> str:
-    patterns = [
-        re.compile(rf"^\s*{re.escape(field)}\s*:\s*(.+?)\s*$", re.IGNORECASE)
-        for field in fields
-    ]
-    current_section = source_record_sections(path)[-1]
-    values = [
-        strip_scalar(match.group(1))
-        for line in current_section
-        for pattern in patterns
-        if (match := pattern.match(line))
-    ]
+    values = list(current_source_record(path).values_for(*fields))
     unique = set(values)
     if len(unique) == 1:
         return values[0]
@@ -971,6 +1049,7 @@ def source_record_text(
     command: str,
 ) -> str:
     repository = context["repo"] or "local candidate supplied by the user"
+    canonical_rename = context.get("canonical_rename")
     lines = [
         "# Source Provenance",
         "",
@@ -985,6 +1064,17 @@ def source_record_text(
         f"Upstream path: `{upstream_path}`",
         f"Ref: `{context['ref']}`",
     ]
+    if isinstance(canonical_rename, dict):
+        predecessor = canonical_rename.get("old_name")
+        source_id = canonical_rename.get("source_id")
+        if not isinstance(predecessor, str) or not isinstance(source_id, str):
+            raise InstallError("canonical rename source record context 不合法")
+        lines.extend(
+            [
+                f"Canonical predecessor: `{predecessor}`",
+                f"Source identity: `{source_id}`",
+            ]
+        )
     if context["commit"]:
         lines.append(f"Commit or revision: `{context['commit']}`")
     lines.extend(
@@ -1020,8 +1110,15 @@ def append_source_record(
     )
     if path.exists():
         existing = path.read_text(encoding="utf-8-sig")
-        match = re.search(r"^\s*Skill:\s*`?([^`\r\n]+)`?\s*$", existing, re.MULTILINE)
-        if match and match.group(1).strip() != skill_name:
+        record = parse_current_source_record(existing)
+        if record.conflicts:
+            raise InstallError(
+                "候选 SOURCE.md 当前记录存在冲突：" + record.conflict_description()
+            )
+        recorded_names = record.values_for("Skill")
+        if not recorded_names:
+            raise InstallError(f"候选 SOURCE.md 当前记录缺少 Skill identity：{path}")
+        if any(name != skill_name for name in recorded_names):
             raise InstallError(f"候选 SOURCE.md 的 Skill 与目录不一致：{path}")
         content = existing.rstrip() + "\n\n---\n\n" + generated
     else:
@@ -1120,16 +1217,13 @@ def update_ledger(
             raise InstallError("canonical rename ledger context 不合法")
         retired_names.append(old_name)
 
-    bundled_skills = context.get("bundled_skills", [])
-    if not isinstance(bundled_skills, list):
+    bundled_proofs = context.get("bundled_skill_proofs", ())
+    if (
+        not isinstance(bundled_proofs, tuple)
+        or not all(isinstance(proof, BundledSkillProof) for proof in bundled_proofs)
+    ):
         raise InstallError("bundled skill ledger context 不合法")
-    bundled_names = [
-        item["ledger_key"]
-        for item in bundled_skills
-        if isinstance(item, dict) and isinstance(item.get("ledger_key"), str)
-    ]
-    if len(bundled_names) != len(bundled_skills):
-        raise InstallError("bundled skill ledger context 缺少 ledger_key")
+    bundled_names = [proof.ledger_key for proof in bundled_proofs]
 
     managed_roots = set([*names, *retired_names])
     coverage_names = [*names, *bundled_names]
@@ -1232,10 +1326,7 @@ def update_ledger(
             and is_managed_name(item.get("path"))
         )
     ]
-    retained_bundled.extend(
-        {"path": item["ledger_key"], "name": item["name"]}
-        for item in bundled_skills
-    )
+    retained_bundled.extend(proof.ledger_projection() for proof in bundled_proofs)
     if retained_bundled:
         target_source["bundled_skills"] = retained_bundled
     else:
@@ -1341,10 +1432,10 @@ def bundled_skill_specs(
     args: argparse.Namespace,
     decision: dict[str, Any],
     names: list[str],
-) -> list[dict[str, str]]:
+) -> tuple[BundledSkillProof, ...]:
     raw = decision.get("bundled_skills")
     if raw is None:
-        return []
+        return ()
     if not args.candidate:
         raise InstallError("bundled_skills 只允许绑定本地 --candidate 安装载荷")
     if len(names) != 1:
@@ -1352,7 +1443,7 @@ def bundled_skill_specs(
     if not isinstance(raw, list) or not raw:
         raise InstallError("bundled_skills 必须是非空数组")
 
-    result: list[dict[str, str]] = []
+    result: list[BundledSkillProof] = []
     seen_paths: set[str] = set()
     seen_names: set[str] = set()
     top_level_name_keys = {name.casefold() for name in names}
@@ -1398,49 +1489,51 @@ def bundled_skill_specs(
         seen_paths.add(path_key)
         seen_names.add(name_key)
         result.append(
-            {
-                "path": relative_path,
-                "name": skill_name,
-                "ledger_key": f"{names[0]}/{relative_path}",
-            }
+            BundledSkillProof(
+                top_level_name=names[0],
+                path=relative_path,
+                name=skill_name,
+            )
         )
-    return result
+    return tuple(result)
 
 
 def validate_staged_bundled_skills(
     *,
     stage_root: Path,
     top_level_name: str,
-    bundled_skills: list[dict[str, str]],
+    bundled_proofs: Sequence[BundledSkillProof],
     args: argparse.Namespace,
-) -> list[dict[str, str]]:
-    verified: list[dict[str, str]] = []
-    for item in bundled_skills:
-        target = stage_root / top_level_name / Path(*item["path"].split("/"))
+) -> tuple[BundledSkillProof, ...]:
+    verified: list[BundledSkillProof] = []
+    for proof in bundled_proofs:
+        if proof.top_level_name != top_level_name:
+            raise InstallError("bundled skill 证明对象的顶层名称不一致")
+        target = stage_root / top_level_name / Path(*proof.path.split("/"))
         if not target.is_dir() or is_reparse(target):
             raise InstallError(f"bundled skill 路径不是安全目录：{target}")
-        ensure_tree_no_reparse(target, label=f"bundled skill {item['name']}")
+        ensure_tree_no_reparse(target, label=f"bundled skill {proof.name}")
         skill_md = target / "SKILL.md"
         if not skill_md.is_file() or is_reparse(skill_md):
             raise InstallError(f"bundled skill 缺少安全的 SKILL.md：{skill_md}")
         actual_name = read_skill_name(skill_md)
-        if actual_name != item["name"]:
+        if actual_name != proof.name:
             raise InstallError(
                 "bundled skill name 与 manifest 不一致："
-                f"{actual_name!r} != {item['name']!r}"
+                f"{actual_name!r} != {proof.name!r}"
             )
         source_md = target / "SOURCE.md"
         if not source_md.is_file() or is_reparse(source_md):
             raise InstallError(f"bundled skill 缺少安全的 SOURCE.md：{source_md}")
         recorded_names = source_record_values(source_md, "Skill")
-        if not recorded_names or any(value != item["name"] for value in recorded_names):
+        if not recorded_names or any(value != proof.name for value in recorded_names):
             raise InstallError(
                 f"bundled skill SOURCE.md identity 不一致：{recorded_names!r}"
             )
         source_repo = source_record_unique_value(
             source_md,
             ("Source repository",),
-            label=f"bundled skill {item['name']}",
+            label=f"bundled skill {proof.name}",
         )
         parsed_repo = urlparse(source_repo)
         if (
@@ -1453,22 +1546,22 @@ def validate_staged_bundled_skills(
             or parsed_repo.fragment
         ):
             raise InstallError(
-                f"bundled skill {item['name']} SOURCE.md 必须记录不含凭据的 HTTPS source repository"
+                f"bundled skill {proof.name} SOURCE.md 必须记录不含凭据的 HTTPS source repository"
             )
         source_record_unique_value(
             source_md,
             ("Upstream path",),
-            label=f"bundled skill {item['name']}",
+            label=f"bundled skill {proof.name}",
         )
         source_record_unique_value(
             source_md,
             ("Ref",),
-            label=f"bundled skill {item['name']}",
+            label=f"bundled skill {proof.name}",
         )
         source_record_unique_value(
             source_md,
             ("Commit or revision", "Commit"),
-            label=f"bundled skill {item['name']}",
+            label=f"bundled skill {proof.name}",
         )
         validate_durable_source_record(
             source_md,
@@ -1476,13 +1569,12 @@ def validate_staged_bundled_skills(
             transient_paths=[Path(args.candidate), Path(args.decision_manifest)],
         )
         verified.append(
-            {
-                **item,
-                "skill_md_sha256": sha256_file(skill_md),
-                "source_md_sha256": sha256_file(source_md),
-            }
+            proof.with_staged_integrity(
+                skill_md_sha256=sha256_file(skill_md),
+                source_md_sha256=sha256_file(source_md),
+            )
         )
-    return verified
+    return tuple(verified)
 
 
 def make_staging_ledger(names: list[str], context: dict[str, Any]) -> dict[str, Any]:
@@ -1569,7 +1661,7 @@ def stage_candidate(
     bundled_validation = validate_staged_bundled_skills(
         stage_root=stage_root,
         top_level_name=names[0],
-        bundled_skills=context.get("bundled_skills", []),
+        bundled_proofs=context.get("bundled_skill_proofs", ()),
         args=args,
     )
     atomic_write_json(stage_root / ".downloaded-skills-source-state.json", make_staging_ledger(names, context))
@@ -1585,7 +1677,7 @@ def stage_candidate(
         "names": names,
         "closure": closure,
         "candidate_integrity": candidate_integrity,
-        "bundled_skills": bundled_validation,
+        "bundled_skill_proofs": bundled_validation,
         "staged_payloads": staged_payloads,
     }
 
@@ -2246,7 +2338,7 @@ def verify_catalog(
     catalog_path: Path,
     active_root: Path,
     names: list[str],
-    bundled_skills: list[dict[str, Any]],
+    bundled_proofs: Sequence[BundledSkillProof],
 ) -> dict[str, Any]:
     catalog = load_json(catalog_path, label="skill catalog")
     if not isinstance(catalog, dict) or not isinstance(catalog.get("artifacts"), list):
@@ -2254,50 +2346,35 @@ def verify_catalog(
     if catalog.get("checks", {}).get("resource_closure", {}).get("status") != "pass":
         raise InstallError("skill catalog 的资源闭包检查不是 pass")
     verified: list[dict[str, Any]] = []
-    targets = [
-        {"path": name, "name": name}
-        for name in names
-    ]
-    for item in bundled_skills:
-        expected_skill_md_sha256 = item.get("skill_md_sha256")
-        expected_source_md_sha256 = item.get("source_md_sha256")
-        if (
-            not isinstance(expected_skill_md_sha256, str)
-            or not isinstance(expected_source_md_sha256, str)
-            or not SHA256_HEX.fullmatch(expected_skill_md_sha256)
-            or not SHA256_HEX.fullmatch(expected_source_md_sha256)
-        ):
-            raise InstallError("bundled skill 缺少暂存期 provenance 哈希")
-        targets.append(
-            {
-                "path": item["ledger_key"],
-                "name": item["name"],
-                "expected_skill_md_sha256": expected_skill_md_sha256,
-                "expected_source_md_sha256": expected_source_md_sha256,
-            }
-        )
-    for target in targets:
-        path = target["path"]
-        name = target["name"]
+
+    def verify_target(
+        *,
+        path: str,
+        name: str,
+        proof: BundledSkillProof | None,
+    ) -> None:
         matches = [
-            item
-            for item in catalog["artifacts"]
-            if isinstance(item, dict)
-            and item.get("scope") == "active"
-            and item.get("name") == name
-            and item.get("relative_path") == f"{path}/SKILL.md"
+            artifact
+            for artifact in catalog["artifacts"]
+            if isinstance(artifact, dict)
+            and artifact.get("scope") == "active"
+            and artifact.get("name") == name
+            and artifact.get("relative_path") == f"{path}/SKILL.md"
         ]
         if len(matches) != 1:
             raise InstallError(f"skill catalog 对 {name} 的 active 条目数量不是 1：{len(matches)}")
-        item = matches[0]
-        if item.get("ledger_coverage") != "pass":
+        artifact = matches[0]
+        if artifact.get("ledger_coverage") != "pass":
             raise InstallError(f"skill catalog 对 {name} 的 ledger coverage 不是 pass")
-        source = item.get("source") if isinstance(item.get("source"), dict) else {}
-        if source.get("status") in {None, "missing"} or source.get("conflicts"):
-            raise InstallError(f"skill catalog 对 {name} 的 SOURCE.md 存在冲突或缺失")
-        expected_source_md_sha256 = target.get("expected_source_md_sha256")
+        source = artifact.get("source") if isinstance(artifact.get("source"), dict) else {}
+        if (
+            source.get("status") in {None, "missing"}
+            or source.get("conflicts")
+            or (proof is None and source.get("status") == "unknown")
+        ):
+            raise InstallError(f"skill catalog 对 {name} 的 SOURCE.md 存在冲突、未知或缺失")
         bundled_root: Path | None = None
-        if expected_source_md_sha256 is not None:
+        if proof is not None:
             bundled_root = d_path(
                 active_root / Path(*path.split("/")),
                 label=f"bundled skill {name}",
@@ -2314,14 +2391,14 @@ def verify_catalog(
         if is_reparse(skill_md) or not skill_md.is_file():
             raise InstallError(f"skill {name} 的 SKILL.md 不是安全普通文件")
         actual = sha256_file(skill_md)
-        recorded = item.get("integrity", {}).get("skill_md_sha256")
+        recorded = artifact.get("integrity", {}).get("skill_md_sha256")
         if actual != recorded:
             raise InstallError(f"skill catalog 对 {name} 的 SKILL.md 哈希不一致")
-        expected_skill_md_sha256 = target.get("expected_skill_md_sha256")
-        if expected_skill_md_sha256 is not None and actual != expected_skill_md_sha256:
-            raise InstallError(f"bundled skill {name} 的 SKILL.md 与暂存期哈希不一致")
         verification = {"path": path, "name": name, "skill_md_sha256": actual}
-        if expected_source_md_sha256 is not None:
+        if proof is not None:
+            expected_skill_md_sha256, expected_source_md_sha256 = proof.require_staged_integrity()
+            if actual != expected_skill_md_sha256:
+                raise InstallError(f"bundled skill {name} 的 SKILL.md 与暂存期哈希不一致")
             assert bundled_root is not None
             source_md = bundled_root / "SOURCE.md"
             if is_reparse(source_md) or not source_md.is_file():
@@ -2331,7 +2408,34 @@ def verify_catalog(
                 raise InstallError(f"bundled skill {name} 的 SOURCE.md 与暂存期哈希不一致")
             verification["source_md_sha256"] = source_md_sha256
         verified.append(verification)
+
+    for name in names:
+        verify_target(path=name, name=name, proof=None)
+    for proof in bundled_proofs:
+        verify_target(path=proof.ledger_key, name=proof.name, proof=proof)
     return {"generated_at": catalog.get("generated_at"), "skills": verified}
+
+
+def staged_result_projection(staged: dict[str, Any] | None) -> dict[str, Any] | None:
+    if staged is None:
+        return None
+    bundled_proofs = staged.get("bundled_skill_proofs", ())
+    if (
+        not isinstance(bundled_proofs, tuple)
+        or not all(isinstance(proof, BundledSkillProof) for proof in bundled_proofs)
+    ):
+        raise InstallError("bundled skill 暂存期证明对象不合法")
+    return {
+        **{
+            key: value
+            for key, value in staged.items()
+            if key != "bundled_skill_proofs"
+        },
+        "bundled_skills": [
+            proof.staged_projection()
+            for proof in bundled_proofs
+        ],
+    }
 
 
 @contextlib.contextmanager
@@ -2430,7 +2534,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         # extra compatibility signal, not a second approval gate.
         pass
     context = source_context(args, decision, specs)
-    context["bundled_skills"] = bundled_skill_specs(
+    context["bundled_skill_proofs"] = bundled_skill_specs(
         args=args,
         decision=decision,
         names=names,
@@ -2496,7 +2600,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 **plan,
                 "status": "dry-run-pass",
                 "completed_at": utc_now(),
-                "staged": staged,
+                "staged": staged_result_projection(staged),
                 "evidence": str(evidence_dir),
             }
             write_transaction_manifest(manifest_path, result)
@@ -2575,14 +2679,14 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             catalog_path=catalog_path,
             active_root=active_root,
             names=names,
-            bundled_skills=staged["bundled_skills"],
+            bundled_proofs=staged["bundled_skill_proofs"],
         )
         result = {
             **plan,
             "status": "succeeded",
             "completed_at": utc_now(),
             "targets": names,
-            "staged": staged,
+            "staged": staged_result_projection(staged),
             "directory_records": directory_records,
             "activation_readability": activation_readability,
             "post_resource_closure": post_closure,
@@ -2606,7 +2710,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "completed_at": utc_now(),
             "error": str(exc),
             "rollback_errors": rollback_errors,
-            "staged": staged,
+            "staged": staged_result_projection(staged),
             "evidence": str(evidence_dir),
         }
         write_transaction_manifest(manifest_path, failure)

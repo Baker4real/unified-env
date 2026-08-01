@@ -1,5 +1,7 @@
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot 'CodexHostSafety.ps1')
+
 function Enter-CodexRepairDirectoryLease {
     param(
         [Parameter(Mandatory)][string]$CapabilityRoot,

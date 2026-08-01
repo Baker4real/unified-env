@@ -1,28 +1,31 @@
 ---
 type: reference
-title: Issue tracker：本地 Markdown
+title: Issue tracker：GitHub Issues
 tags: [agents, issue-tracker, project-docs]
-intent: 说明统一环境项目的本地 Markdown issue tracker 约定
+intent: 说明统一环境项目使用 GitHub Issues 的 tracker 约定
 ---
 
-# Issue tracker：本地 Markdown
+# Issue tracker：GitHub Issues
 
-本项目的 issue、spec 和 tickets 以 Markdown 文件形式保存在 `.scratch/`。
+本项目的新 issue、spec、tickets 和讨论记录使用 GitHub Issues 管理。仓库为 `Baker4real/unified-env`，在仓库根目录通过 `gh` CLI 操作。已跟踪的 `.scratch/` 内容是保留的历史记录，不作为新事项模板或清理候选。
 
 ## 约定
 
-- 每个功能一个目录：`.scratch/<feature-slug>/`
-- spec 文件：`.scratch/<feature-slug>/spec.md`
-- 实施 ticket：`.scratch/<feature-slug>/issues/<NN>-<slug>.md`，从 `01` 开始编号；每个 ticket 独立成文件
-- triage 状态写在每个 issue 文件靠前位置的 `Status:` 行；已完成的 issue 使用终态 `done`
-- 评论和对话历史追加到文件底部的 `## Comments`
+- 创建 issue：`gh issue create --title "..." --body "..."`
+- 读取 issue：`gh issue view <number> --comments`
+- 列出 issue：`gh issue list --state open --json number,title,body,labels,comments`
+- 添加评论：`gh issue comment <number> --body "..."`
+- 管理标签：`gh issue edit <number> --add-label "..."` 或 `--remove-label "..."`
+- 完成 issue：先添加必要的结论评论，再执行 `gh issue close <number>`
 
-历史目录中仍可能存在 `PRD.md`，它们是旧记录，不作为新工作的命名模板。
+标签词汇以 `docs/agents/triage-labels.md` 为准。已完成事项通过关闭 GitHub issue 表示。
 
-## 当技能说“发布到 issue tracker”
+## Pull requests
 
-在 `.scratch/<feature-slug>/` 下创建新文件，必要时先创建目录。
+Pull request 不作为 triage 请求入口。处理 issue 时只查询 GitHub Issues，除非用户明确要求审查某个 pull request。
 
-## 当技能说“读取相关 ticket”
+## 当技能引用 tracker
 
-读取用户给出的路径或 issue 文件。
+- “发布到 issue tracker”：创建 GitHub issue。
+- “读取相关 ticket”：运行 `gh issue view <number> --comments`。
+- 不能从当前仓库推断目标时，先检查 `git remote -v`，不要把其他仓库的 issue 作为本项目 tracker。
