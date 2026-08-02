@@ -68,6 +68,11 @@ identity；只有 `purging` 中断恢复允许当前树成为原计划的未变�
    delete-pending 后关闭句柄。其他用途仍逐节点使用 handle-bound POSIX disposition 删除，包括
    ReadOnly 文件。完成后不可恢复。
 
+   共享 handle-bound ACL writer 的合同面只包含 Owner、Group 和 DACL：Owner/Group 必须保持不变，
+   desired SDDL 含 SACL 时必须在写入前失败闭锁且目标 ACL 保持不变。DACL protection 切换必须显式
+   使用 protected/unprotected security-information 标志；切换到 protected 后，只允许 Windows 将
+   inherited ACE 实体化为 explicit ACE 这一已知规范化差异，其他 Owner/Group/DACL 回读漂移仍失败闭锁。
+
    `Apply` 与 `Purge` 都在目标 mutex 内重新读取并复验当前 capability、树和 transaction，才允许
    写入 `prepared`、`purging`、commit anchor 或 `purged`。等待锁期间 capability 已变更时必须在
    写入前拒绝，不能用过期内存快照把已隔离或已完成 transaction 降级。

@@ -21,6 +21,8 @@ intent: 说明远端插件 catalog guard 的治理范围、入口和安全边界
 - `-Mode Repair -Json`：按 source hash 原子部署到 `D:\Codex\.codex\catalog-guard`，注册并启动当前用户登录任务 `Codex Remote Plugin Catalog Guard`；第二次健康 Repair 应返回 `changed=false`、`evidencePath=null`。
 - `-Mode Remove -Json`：停止并注销 guard 自有任务，删除 guard 自有部署文件和 state；不恢复四条 vendor catalog 记录，也不触碰运行日志和历史 evidence。
 
+catalog schema v1 的可选 `fetched_at` 只接受严格 UTC `YYYY-MM-DDTHH:mm:ss[.1-9 位小数]Z`。时区偏移、尾随空白或换行、非法日期均以 `catalog-schema-drift` 失败闭锁，拒绝时保留 catalog 原始字节；合法值在过滤目标条目时逐字保留，不按 .NET 的七位小数精度重写。
+
 计划任务由 D 盘 `pythonw.exe` 与受管 hidden launcher 启动固定 PowerShell，任务和子进程均不得出现可见窗口。
 
 policy schema v2 使用无 `Local\` 前缀的命名 mutex/event，并显式设置 `CurrentUserOnly=true`、`CurrentSessionOnly=false`。因此同一 Windows 用户在不同交互或 RDP session 中共享同一 watcher 锁与 stop event，其他用户不能借该对象取得控制权；任务计划器的 `IgnoreNew` 只是第二层保护，不能代替 runtime 锁。
