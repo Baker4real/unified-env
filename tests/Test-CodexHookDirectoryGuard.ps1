@@ -296,6 +296,20 @@ try {
     $leaseTemp = $leaseGuard.CreateTempFile($leaseTempPath)
     $leaseTemp.WriteAndFlush($leaseAfter)
     $leaseTempSddl = [string]$leaseTemp.GetSecurityDescriptorSddl()
+    $leaseTempAcl = Get-Acl -LiteralPath $leaseTempPath
+    Assert-True (-not $leaseTempAcl.AreAccessRulesProtected) 'guarded temp fixture 必须从 inherited/unprotected DACL 开始'
+    $leaseTempAcl.SetAccessRuleProtection($true, $true)
+    $leaseTempProtectedSddl = [string]$leaseTempAcl.Sddl
+    Assert-True ($leaseTempProtectedSddl -match 'D:P') 'guarded temp fixture 必须产生真实 DACL protection 变化'
+    $leaseTemp.SetSecurityDescriptorSddl($leaseTempSddl, $leaseTempProtectedSddl)
+    $leaseTempProtectedActualSddl = [string]$leaseTemp.GetSecurityDescriptorSddl()
+    Assert-True ($leaseTempProtectedActualSddl -match 'D:P') 'guarded temp 必须在同一 handle 上将 inherited DACL 转为 protected DACL'
+    $leaseTempSaclError = Assert-Throws -Message 'guarded temp 必须拒绝无法完整处理的 SACL 请求' -Action {
+        $leaseTemp.SetSecurityDescriptorSddl($leaseTempProtectedActualSddl, ($leaseTempProtectedActualSddl + 'S:(AU;SA;FA;;;WD)'))
+    }
+    Assert-True ($leaseTempSaclError -match 'SACL') 'guarded temp 必须对 SACL 请求失败闭锁'
+    Assert-True ([string]$leaseTemp.GetSecurityDescriptorSddl() -ceq $leaseTempProtectedActualSddl) '被拒绝的 SACL 请求不得改写 guarded temp ACL'
+    $leaseTemp.SetSecurityDescriptorSddl($leaseTempProtectedActualSddl, $leaseTempSddl)
     $leaseTemp.SetSecurityDescriptorSddl($leaseTempSddl, $leaseTempSddl)
     Assert-True ([string]$leaseTemp.GetSecurityDescriptorSddl() -ceq $leaseTempSddl) 'guarded temp 必须在同一 handle 上完成 expected-SDDL CAS 与 postcheck'
     $targetLease = $leaseGuard.AcquireTargetFileLease($leaseTarget)
@@ -385,6 +399,11 @@ try {
     $aclLease.SetSecurityDescriptorSddl($aclSddl, $aclDesiredSddl)
     $aclActualDesiredSddl = [string]$aclLease.GetSecurityDescriptorSddl()
     Assert-True ($aclActualDesiredSddl -match 'D:P') 'ACL lease 必须在同一目标 handle 上写入并复核 protected DACL；Windows 可规范化 inherited ACE flags'
+    $aclLeaseSaclError = Assert-Throws -Message 'ACL lease 必须拒绝无法完整处理的 SACL 请求' -Action {
+        $aclLease.SetSecurityDescriptorSddl($aclActualDesiredSddl, ($aclActualDesiredSddl + 'S:(AU;SA;FA;;;WD)'))
+    }
+    Assert-True ($aclLeaseSaclError -match 'SACL') 'ACL lease 必须对 SACL 请求失败闭锁'
+    Assert-True ([string]$aclLease.GetSecurityDescriptorSddl() -ceq $aclActualDesiredSddl) '被拒绝的 SACL 请求不得改写 ACL lease target'
     $aclLease.SetSecurityDescriptorSddl($aclActualDesiredSddl, $aclSddl)
     Assert-True ([string]$aclLease.GetSecurityDescriptorSddl() -ceq $aclSddl) 'ACL lease 必须能在同一目标 handle 上恢复原 Owner/Group/DACL'
 } finally {

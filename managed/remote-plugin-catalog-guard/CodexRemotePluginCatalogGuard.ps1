@@ -2413,9 +2413,24 @@ function Convert-Catalog {
                 Throw-CatalogGuardFailure 'catalog-schema-drift' 'catalog fetched_at 必须是 UTC 时间字符串。'
             }
             $fetchedAt = $fetchedAtElement.GetString()
+            $fetchedAtMatch = [Text.RegularExpressions.Regex]::Match(
+                $fetchedAt,
+                "^(?<seconds>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.(?<fraction>[0-9]{1,9}))?Z\z",
+                [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+            if (-not $fetchedAtMatch.Success) {
+                Throw-CatalogGuardFailure 'catalog-schema-drift' 'catalog fetched_at 格式漂移。'
+            }
+            $fetchedAtFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+            $normalizedFetchedAt = $fetchedAtMatch.Groups['seconds'].Value + 'Z'
+            if ($fetchedAtMatch.Groups['fraction'].Success) {
+                $fraction = $fetchedAtMatch.Groups['fraction'].Value
+                $parseableFraction = $fraction.Substring(0, [Math]::Min(7, $fraction.Length))
+                $normalizedFetchedAt = $fetchedAtMatch.Groups['seconds'].Value + '.' + $parseableFraction + 'Z'
+                $fetchedAtFormat = "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'"
+            }
             $parsedFetchedAt = [DateTimeOffset]::MinValue
             $fetchedAtStyle = [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
-            if (-not [DateTimeOffset]::TryParseExact($fetchedAt, "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", [Globalization.CultureInfo]::InvariantCulture, $fetchedAtStyle, [ref]$parsedFetchedAt)) {
+            if (-not [DateTimeOffset]::TryParseExact($normalizedFetchedAt, $fetchedAtFormat, [Globalization.CultureInfo]::InvariantCulture, $fetchedAtStyle, [ref]$parsedFetchedAt)) {
                 Throw-CatalogGuardFailure 'catalog-schema-drift' 'catalog fetched_at 格式漂移。'
             }
         }

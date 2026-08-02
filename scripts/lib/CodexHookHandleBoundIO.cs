@@ -1760,7 +1760,23 @@ namespace CodexHookGovernance
                 originalPath,
                 expectedCurrentSddl,
                 sddl);
-            if (!string.Equals(actualSddl, sddl, StringComparison.Ordinal))
+            string expectedPostWriteSddl = sddl;
+            RawSecurityDescriptor expectedDescriptor = new RawSecurityDescriptor(sddl);
+            if ((expectedDescriptor.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0 &&
+                expectedDescriptor.DiscretionaryAcl != null)
+            {
+                // Windows materializes inherited ACEs as explicit when protecting a DACL.
+                for (int index = 0; index < expectedDescriptor.DiscretionaryAcl.Count; index++)
+                {
+                    GenericAce ace = expectedDescriptor.DiscretionaryAcl[index];
+                    ace.AceFlags &= ~AceFlags.Inherited;
+                }
+                expectedPostWriteSddl = expectedDescriptor.GetSddlForm(
+                    AccessControlSections.Owner |
+                    AccessControlSections.Group |
+                    AccessControlSections.Access);
+            }
+            if (!string.Equals(actualSddl, expectedPostWriteSddl, StringComparison.Ordinal))
             {
                 throw new IOException("The guarded ACL target security descriptor changed after the handle-bound write.");
             }
@@ -1781,6 +1797,11 @@ namespace CodexHookGovernance
             }
             RawSecurityDescriptor currentDescriptor = new RawSecurityDescriptor(currentSddl);
             RawSecurityDescriptor desiredDescriptor = new RawSecurityDescriptor(sddl);
+            if (desiredDescriptor.SystemAcl != null ||
+                (desiredDescriptor.ControlFlags & ControlFlags.SystemAclPresent) != 0)
+            {
+                throw new IOException("The guarded ACL target SDDL must not include a SACL.");
+            }
             string currentOwner = currentDescriptor.Owner == null ? string.Empty : currentDescriptor.Owner.Value;
             string desiredOwner = desiredDescriptor.Owner == null ? string.Empty : desiredDescriptor.Owner.Value;
             string currentGroup = currentDescriptor.Group == null ? string.Empty : currentDescriptor.Group.Value;
@@ -1790,85 +1811,8 @@ namespace CodexHookGovernance
             {
                 throw new IOException("The guarded ACL target owner or group changed outside this lease.");
             }
-            bool currentDaclProtected =
-                (currentDescriptor.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0;
             bool desiredDaclProtected =
                 (desiredDescriptor.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0;
-            if (currentDaclProtected != desiredDaclProtected)
-            {
-                throw new IOException("The guarded ACL target DACL protection changed outside this lease.");
-            }
-
-            IntPtr descriptor;
-            uint descriptorSize;
-            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, SddlRevision1, out descriptor, out descriptorSize))
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            }
-            try
-            {
-                IntPtr ownerSid;
-                IntPtr groupSid;
-                IntPtr dacl;
-                bool ownerDefaulted;
-                bool groupDefaulted;
-                bool daclPresent;
-                bool daclDefaulted;
-                ushort control;
-                uint revision;
-                if (!GetSecurityDescriptorOwner(descriptor, out ownerSid, out ownerDefaulted) ||
-                    !GetSecurityDescriptorGroup(descriptor, out groupSid, out groupDefaulted) ||
-                    !GetSecurityDescriptorDacl(descriptor, out daclPresent, out dacl, out daclDefaulted) ||
-                    !GetSecurityDescriptorControl(descriptor, out control, out revision))
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                }
-                uint error = SetSecurityInfo(
-                    targetHandle,
-                    SeFileObject,
-                    DaclSecurityInformation,
-                    ownerSid,
-                    groupSid,
-                    daclPresent ? dacl : IntPtr.Zero,
-                    IntPtr.Zero);
-                if (error != 0) { throw new Win32Exception(checked((int)error), "Unable to write the guarded ACL target security descriptor."); }
-            }
-            finally { LocalFree(descriptor); }
-
-            return GetSecurityDescriptorSddlForHandle(targetHandle, originalPath);
-        }
-
-        public void SetSecurityDescriptorSddl(string sddl)
-        {
-            SetSecurityDescriptorSddl(null, sddl);
-        }
-
-        public void SetSecurityDescriptorSddl(string expectedCurrentSddl, string sddl)
-        {
-            if (sddl == null)
-            {
-                throw new ArgumentNullException(nameof(sddl));
-            }
-            ThrowIfDisposed();
-            owner.ThrowIfDisposed();
-            VerifiedDirectoryChainGuard.VerifyAclTargetHandle(handle, OriginalPath);
-
-            string currentSddl = GetSecurityDescriptorSddl();
-            if (expectedCurrentSddl != null && !string.Equals(currentSddl, expectedCurrentSddl, StringComparison.Ordinal))
-            {
-                throw new IOException("The guarded ACL target security descriptor changed before the handle-bound write.");
-            }
-            RawSecurityDescriptor currentDescriptor = new RawSecurityDescriptor(currentSddl);
-            RawSecurityDescriptor desiredDescriptor = new RawSecurityDescriptor(sddl);
-            string currentOwner = currentDescriptor.Owner == null ? string.Empty : currentDescriptor.Owner.Value;
-            string desiredOwner = desiredDescriptor.Owner == null ? string.Empty : desiredDescriptor.Owner.Value;
-            string currentGroup = currentDescriptor.Group == null ? string.Empty : currentDescriptor.Group.Value;
-            string desiredGroup = desiredDescriptor.Group == null ? string.Empty : desiredDescriptor.Group.Value;
-            if (!string.Equals(currentOwner, desiredOwner, StringComparison.Ordinal) ||
-                !string.Equals(currentGroup, desiredGroup, StringComparison.Ordinal))
-            {
-                throw new IOException("The guarded ACL target owner or group changed outside this lease.");
-            }
 
             IntPtr descriptor;
             uint descriptorSize;
@@ -1899,20 +1843,38 @@ namespace CodexHookGovernance
                     throw new IOException("The guarded ACL target SDDL has no DACL.");
                 }
                 uint sections = DaclSecurityInformation;
-                sections |= (control & SeDaclProtected) != 0
+                sections |= desiredDaclProtected
                     ? ProtectedDaclSecurityInformation
                     : UnprotectedDaclSecurityInformation;
-                uint error = SetSecurityInfo(handle, SeFileObject, sections, IntPtr.Zero, IntPtr.Zero, dacl, IntPtr.Zero);
-                if (error != 0)
-                {
-                    throw new Win32Exception(checked((int)error), "Unable to write the guarded ACL target security descriptor.");
-                }
-                VerifiedDirectoryChainGuard.VerifyAclTargetHandle(handle, OriginalPath);
+                uint error = SetSecurityInfo(
+                    targetHandle,
+                    SeFileObject,
+                    sections,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    dacl,
+                    IntPtr.Zero);
+                if (error != 0) { throw new Win32Exception(checked((int)error), "Unable to write the guarded ACL target security descriptor."); }
             }
-            finally
+            finally { LocalFree(descriptor); }
+
+            return GetSecurityDescriptorSddlForHandle(targetHandle, originalPath);
+        }
+
+        public void SetSecurityDescriptorSddl(string sddl)
+        {
+            SetSecurityDescriptorSddl(null, sddl);
+        }
+
+        public void SetSecurityDescriptorSddl(string expectedCurrentSddl, string sddl)
+        {
+            if (sddl == null)
             {
-                LocalFree(descriptor);
+                throw new ArgumentNullException(nameof(sddl));
             }
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            SetSecurityDescriptorSddlForHandle(handle, OriginalPath, expectedCurrentSddl, sddl);
         }
 
         public void Dispose()

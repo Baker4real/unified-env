@@ -1022,12 +1022,21 @@ try {
     Assert-True ((Get-BytesSha256 -Bytes ([IO.File]::ReadAllBytes($catalogPath))) -ceq (Get-BytesSha256 -Bytes $schemaBytes)) 'schema drift 原文件字节被覆盖'
     [IO.File]::Delete($catalogPath)
 
-    $fetchedAt = '2026-07-30T16:17:38.598434Z'
-    Write-JsonFile -Path $catalogPath -Value ([ordered]@{ schema_version = 1; fetched_at = $fetchedAt; plugins = @((New-TargetCatalog).plugins) })
-    $fetchedSchema = Invoke-GuardSweep
-    Assert-True ($fetchedSchema.exitCode -eq 0 -and $fetchedSchema.result.removedCount -eq 1) "带 fetched_at 的官方 schema v1 必须受支持：exit=$($fetchedSchema.exitCode) result=$($fetchedSchema.result | ConvertTo-Json -Compress -Depth 8) stderr=$($fetchedSchema.stderr)"
-    $fetchedAfter = Get-Content -Raw -LiteralPath $catalogPath | ConvertFrom-Json -Depth 32 -DateKind String
-    Assert-True ($fetchedAfter.fetched_at -ceq $fetchedAt -and (@($fetchedAfter.plugins.name) -join ',') -ceq 'before,after') 'fetched_at 或非目标条目未保留'
+    foreach ($fetchedAt in @('2026-07-30T16:17:38.598434Z', '2026-08-01T21:51:59.725144300Z')) {
+        Write-JsonFile -Path $catalogPath -Value ([ordered]@{ schema_version = 1; fetched_at = $fetchedAt; plugins = @((New-TargetCatalog).plugins) })
+        $fetchedSchema = Invoke-GuardSweep
+        Assert-True ($fetchedSchema.exitCode -eq 0 -and $fetchedSchema.result.removedCount -eq 1) "带 fetched_at 的官方 schema v1 必须受支持：timestamp=$fetchedAt exit=$($fetchedSchema.exitCode) result=$($fetchedSchema.result | ConvertTo-Json -Compress -Depth 8) stderr=$($fetchedSchema.stderr)"
+        $fetchedAfter = Get-Content -Raw -LiteralPath $catalogPath | ConvertFrom-Json -Depth 32 -DateKind String
+        Assert-True ($fetchedAfter.fetched_at -ceq $fetchedAt -and (@($fetchedAfter.plugins.name) -join ',') -ceq 'before,after') 'fetched_at 或非目标条目未保留'
+        [IO.File]::Delete($catalogPath)
+    }
+
+    $fetchedAtWithTrailingLf = '2026-08-01T21:51:59.725144300Z' + [char]10
+    Write-JsonFile -Path $catalogPath -Value ([ordered]@{ schema_version = 1; fetched_at = $fetchedAtWithTrailingLf; plugins = @((New-TargetCatalog).plugins) })
+    $fetchedAtWithTrailingLfBytes = [IO.File]::ReadAllBytes($catalogPath)
+    $fetchedAtWithTrailingLfResult = Invoke-GuardSweep
+    Assert-Blocked -Invocation $fetchedAtWithTrailingLfResult -ExitCode 2 -Code 'catalog-schema-drift' -Label 'fetched_at trailing LF'
+    Assert-True ((Get-BytesSha256 -Bytes ([IO.File]::ReadAllBytes($catalogPath))) -ceq (Get-BytesSha256 -Bytes $fetchedAtWithTrailingLfBytes)) '带 trailing LF 的 fetched_at 原文件字节被覆盖'
     [IO.File]::Delete($catalogPath)
 
     $sentinelRoot = Join-Path $fixtureRoot 'sentinels'
@@ -1556,7 +1565,7 @@ try {
     $orphanCheck = Invoke-GovernanceFixtureCheck -FixturePolicyPath $fixturePolicyPath -FixtureStatePath $statePath
     Assert-True ($orphanCheck.exitCode -eq 0 -and $orphanCheck.result.ok -eq $true) 'orphan transaction 收敛后 Check 未恢复绿灯'
 
-    Write-Output "PASS Test-CodexRemotePluginCatalogGuardHardening malformed=1 pair=1 schema=2 policySchemaParity=1 catalogSchemaParity=1 stateHealth=4 strictState=7 hardlink=1 hashRace=1 identityRace=1 stagingCrash=6 durableRenameCrash=6 durablePublicationProbe=3 canonicalLeaseProbe=10 publishIoRecovery=1 crashRecovery=1 vendorAbortCrash=5 vendorAbortStageCrash=3 vendorAbortDurableCrash=3 vendorAbortDrift=1 markerReplacement=3 artifactIdentityReplacement=3 artifactInPlaceRewrite=5 integrityAnchorMutation=$integrityMutationCount sealFailure=$sealFailureCount eaSameName=1 transientSharingRetry=1 transactionUnknown=3 caseVariantUnknown=5 transactionRecovery=2 transactionConflict=1 transactionIdempotent=1 casRace=1 fingerprintRace=1 reparse=2 unsupported=1 sentinel=2"
+    Write-Output "PASS Test-CodexRemotePluginCatalogGuardHardening malformed=1 pair=1 schema=3 policySchemaParity=1 catalogSchemaParity=1 stateHealth=4 strictState=7 hardlink=1 hashRace=1 identityRace=1 stagingCrash=6 durableRenameCrash=6 durablePublicationProbe=3 canonicalLeaseProbe=10 publishIoRecovery=1 crashRecovery=1 vendorAbortCrash=5 vendorAbortStageCrash=3 vendorAbortDurableCrash=3 vendorAbortDrift=1 markerReplacement=3 artifactIdentityReplacement=3 artifactInPlaceRewrite=5 integrityAnchorMutation=$integrityMutationCount sealFailure=$sealFailureCount eaSameName=1 transientSharingRetry=1 transactionUnknown=3 caseVariantUnknown=5 transactionRecovery=2 transactionConflict=1 transactionIdempotent=1 casRace=1 fingerprintRace=1 reparse=2 unsupported=1 sentinel=2"
 } finally {
     if ($managedArtifactJunctionCreated -and $null -ne $managedArtifactJunctionPath -and (Test-Path -LiteralPath $managedArtifactJunctionPath)) {
         Remove-Item -LiteralPath $managedArtifactJunctionPath -Force
