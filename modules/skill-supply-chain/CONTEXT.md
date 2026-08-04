@@ -28,6 +28,12 @@ intent: 定义 Skill 来源、安装、catalog、ledger 和发布政策的责任
 
 对外接口是 `scripts/install-skill-guarded.cmd`、`scripts/generate_skill_catalog.py` 和受管 overlay/deploy 入口。专项测试列在 `modules/manifest.json` 的 `python` 和 `node` 清单中。
 
+旧 `SOURCE.md` 末尾记录的 schema 迁移只允许使用
+`scripts/reconcile_skill_source_records.py`：它在隔离镜像达到 strict
+zero-conflict 后，仅追加规范 current record，并为整批 SOURCE、统一 ledger、
+catalog 和四文件 runtime 建立受 ACL 保护的联合回滚点。迁移不得改写历史
+记录、`SKILL.md` 或 plugin cache；任一身份/标量歧义必须整批失败关闭。
+
 ## 已知漂移
 
 仓库源中的四文件部署闭包由 `skill_source_record.py`、catalog generator、installer 与 command wrapper 组成；installer 与 catalog 从同目录加载共享 parser，不依赖项目源仓库路径。现役 `D:\Codex\.codex\scripts\` 是否已包含该闭包只以受管部署 manifest 与现场 hash 为准，不能由仓库源存在推断。后续源文件变更、移动或拆分仓库前必须重新执行受管部署并核验 hash。当前仍依赖 active `skill-install-guard` 的 closure 脚本和官方 system installer，且事务内部还有待迁移的递归删除。在这些依赖、独立 fixture 和受管删除全部收敛前，本模块不拆出独立 Git 仓库。

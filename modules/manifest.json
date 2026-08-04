@@ -190,6 +190,7 @@
         "scripts/generate_skill_catalog.py",
         "scripts/install-skill-guarded.cmd",
         "scripts/install_skill_guarded.py",
+        "scripts/reconcile_skill_source_records.py",
         "scripts/verify_skill_openai_yaml_parity.py"
       ],
       "dependsOn": [],
@@ -203,7 +204,8 @@
           "docs/specs/2026-07-14-skill-install-guarded-wrapper.md",
           "reports/sdd/task-3-implementer.md",
           "scripts/github-default-branch-skill-overlay-catalog.json",
-          "scripts/skill_source_record.py"
+          "scripts/skill_source_record.py",
+          "scripts/reconcile_skill_source_records.py"
         ],
         "prefixes": [
           ".scratch/goal-first/",
@@ -218,7 +220,8 @@
           "python": [
           "tests/Test-SkillCatalog.py",
           "tests/Test-SkillInstallGuarded.py",
-          "tests/Test-SkillOpenAIYamlParity.py"
+          "tests/Test-SkillOpenAIYamlParity.py",
+          "tests/Test-SkillSourceRecordMigration.py"
           ],
           "node": [
           "tests/Test-GitDefaultBranchSkillPolicy.cjs",
