@@ -78,6 +78,27 @@
           ],
           "python": [],
           "node": []
+        },
+        "ci": {
+          "powershell": [
+            "tests/Test-BackupRetentionApplyManifest.ps1",
+            "tests/Test-BackupRetentionDryRun.ps1",
+            "tests/Test-BackupRetentionPolicy.ps1",
+            "tests/Test-BackupRetentionValidation.ps1",
+            "tests/Test-CodexAccountSwitchDependencyUpdateDryRun.ps1",
+            "tests/Test-DDrivePolicyDocs.ps1",
+            "tests/Test-EnvInventoryTrust.ps1",
+            "tests/Test-EnvMigrationPlan.ps1",
+            "tests/Test-EnvMigrationPolicy.ps1",
+            "tests/Test-EnvUpdateReadiness.ps1",
+            "tests/Test-EnvUpdateReadinessPolicy.ps1",
+            "tests/Test-PipCacheMigration.ps1",
+            "tests/Test-ProjectLocalEnvRebuildDryRunPlan.ps1",
+            "tests/Test-ProjectLocalEnvReviewPack.ps1",
+            "tests/Test-StalePathEntryCleanupDryRun.ps1"
+          ],
+          "python": [],
+          "node": []
         }
       }
     },

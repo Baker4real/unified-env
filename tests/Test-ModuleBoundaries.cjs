@@ -85,6 +85,10 @@ const codexHostLiveTests = listPowerShellTests('--module', 'codex-host', '--prof
 assert.match(codexHostLiveTests, /Test-CodexRemotePluginCatalogGuardVendorAbortStress\.ps1/);
 assert.match(codexHostLiveTests, /Test-CodexLauncherTerminalEnvironment\.ps1/);
 
+const devEnvironmentCiTests = listPowerShellTests('--module', 'dev-environment', '--profile', 'ci');
+assert.match(devEnvironmentCiTests, /Test-EnvInventoryTrust\.ps1/);
+assert.doesNotMatch(devEnvironmentCiTests, /^Test-EnvInventory\.ps1$/m);
+
 const hostSafetyModule = manifest.modules.find((entry) => entry.id === 'host-safety');
 const codexHostModule = manifest.modules.find((entry) => entry.id === 'codex-host');
 assert.deepEqual(hostSafetyModule.transitionalDependencies, []);
