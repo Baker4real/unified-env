@@ -69,6 +69,11 @@ jobs:
         with:
           node-version: '24.19.0'
 
+      - uses: actions/setup-python@v6
+        if: matrix.module == 'skill-supply-chain'
+        with:
+          python-version: '3.14'
+
       - name: Prepare canonical project path
         shell: pwsh
         run: |
@@ -77,6 +82,27 @@ jobs:
           New-Item -ItemType Directory -Path $env:CI_PROJECT_ROOT -Force | Out-Null
           Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force |
             Copy-Item -Destination $env:CI_PROJECT_ROOT -Recurse -Force
+
+      - name: Prepare managed Python runtime
+        if: matrix.module == 'skill-supply-chain'
+        shell: pwsh
+        run: |
+          $sourcePython = Join-Path $env:pythonLocation 'python.exe'
+          & $sourcePython -I -m pip install 'PyYAML==6.0.3'
+          $pipExit = $LASTEXITCODE
+          if ($pipExit -ne 0) { exit $pipExit }
+
+          $managedPythonRoot = 'D:\Codex\tools\python314-official'
+          $managedToolsRoot = Split-Path -Parent $managedPythonRoot
+          New-Item -ItemType Directory -Path $managedToolsRoot -Force | Out-Null
+          New-Item -ItemType Directory -Path $managedPythonRoot -Force | Out-Null
+          Get-ChildItem -LiteralPath $env:pythonLocation -Force |
+            Copy-Item -Destination $managedPythonRoot -Recurse -Force
+
+          $managedPython = Join-Path $managedPythonRoot 'python.exe'
+          & $managedPython -I -c 'import yaml; assert callable(yaml.safe_load)'
+          $probeExit = $LASTEXITCODE
+          if ($probeExit -ne 0) { exit $probeExit }
 
       - name: Run module fixture tests
         shell: pwsh

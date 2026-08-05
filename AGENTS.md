@@ -6,7 +6,7 @@
 
 1. 先读 `CONTEXT.md` 和 `modules/README.md`，再读当前任务对应的 `modules/<module-id>/CONTEXT.md`。文件归属、接口、依赖和测试 profile 以 `modules/manifest.json` 为真源。
 2. 只加载当前分支需要的政策：
-   - **迁移、PATH、全局运行时或包管理器更新**：执行前读 `docs/env-governance/d-drive-layout-and-migration-policy.md`，重新生成现场 inventory 与 dry-run。
+   - **迁移、PATH、全局运行时或包管理器更新**：真实迁移前读 `docs/env-governance/d-drive-layout-and-migration-policy.md`，重新生成现场 inventory 与 dry-run。
    - **宿主递归目录删除**：执行前读 `docs/specs/2026-07-24-safe-tree-delete-capability.md`；只通过 `D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd` 的受管 `Plan` / `Apply` / `Purge` 流程处理。
    - **Sub2API 稳定版升级**：执行前读 `docs/env-governance/sub2api-update-policy.md`，逐项证明静默窗口、官方稳定版、联合回滚点和健康验收条件。
    - **领域建模或架构边界**：读 `docs/agents/domain.md`，再按其中顺序加载相关模块上下文和现役合同。
