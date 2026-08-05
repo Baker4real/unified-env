@@ -87,7 +87,15 @@ assert.match(codexHostLiveTests, /Test-CodexLauncherTerminalEnvironment\.ps1/);
 
 const devEnvironmentCiTests = listPowerShellTests('--module', 'dev-environment', '--profile', 'ci');
 assert.match(devEnvironmentCiTests, /Test-EnvInventoryTrust\.ps1/);
-assert.doesNotMatch(devEnvironmentCiTests, /^Test-EnvInventory\.ps1$/m);
+const devEnvironmentCiTestNames = new Set(devEnvironmentCiTests.trim().split(/\r?\n/));
+for (const hostInventoryTest of [
+  'Test-EnvInventory.ps1',
+  'Test-EnvMigrationPlan.ps1',
+  'Test-EnvUpdateReadiness.ps1',
+  'Test-ProjectLocalEnvReviewPack.ps1',
+]) {
+  assert.equal(devEnvironmentCiTestNames.has(hostInventoryTest), false);
+}
 
 const hostSafetyModule = manifest.modules.find((entry) => entry.id === 'host-safety');
 const codexHostModule = manifest.modules.find((entry) => entry.id === 'codex-host');
