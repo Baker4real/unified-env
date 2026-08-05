@@ -10,5 +10,5 @@ if not exist "%WRAPPER%" (
   >&2 echo ERROR: missing guarded skill wrapper: %WRAPPER%
   exit /b 2
 )
-"%CODEX_PYTHON%" "%WRAPPER%" %*
+"%CODEX_PYTHON%" -I "%WRAPPER%" %*
 exit /b %ERRORLEVEL%

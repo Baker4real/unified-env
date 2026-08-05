@@ -2,7 +2,8 @@
 param(
     [string]$SourceRoot = $PSScriptRoot,
     [string]$CodexRoot = 'D:\Codex\.codex',
-    [string]$EvidenceRoot = 'D:\Codex\.codex\run-evidence\skill-install-guarded-deployment'
+    [string]$EvidenceRoot = 'D:\Codex\.codex\run-evidence\skill-install-guarded-deployment',
+    [string]$PythonPath = 'D:\Codex\tools\python314-official\python.exe'
 )
 
 Set-StrictMode -Version Latest
@@ -50,6 +51,7 @@ function Write-JsonAtomic {
 $sourceRootResolved = Resolve-DDrivePath $SourceRoot
 $codexRootResolved = Resolve-DDrivePath $CodexRoot
 $evidenceRootResolved = Resolve-DDrivePath $EvidenceRoot
+$pythonPathResolved = Resolve-DDrivePath $PythonPath
 $targetRoot = Join-Path $codexRootResolved 'scripts'
 $sourceFiles = @('skill_source_record.py', 'generate_skill_catalog.py', 'install_skill_guarded.py', 'install-skill-guarded.cmd')
 $evidenceDirectory = Join-Path $evidenceRootResolved ('deploy-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N'))
@@ -62,6 +64,8 @@ $manifest = [ordered]@{
     sourceRoot = $sourceRootResolved
     targetRoot = $targetRoot
     evidenceDirectory = $evidenceDirectory
+    pythonPath = $pythonPathResolved
+    yamlDependency = 'pending'
     files = @()
 }
 
@@ -69,6 +73,15 @@ try {
     if (-not (Test-Path -LiteralPath $sourceRootResolved -PathType Container)) { throw "SourceRoot 不存在：$sourceRootResolved" }
     if (Test-ReparsePoint $sourceRootResolved) { throw "SourceRoot 不能是 reparse point：$sourceRootResolved" }
     if (Test-ReparsePoint $codexRootResolved) { throw "CodexRoot 不能是 reparse point：$codexRootResolved" }
+    if (-not (Test-Path -LiteralPath $pythonPathResolved -PathType Leaf)) { throw "受管 Python 不存在：$pythonPathResolved" }
+    if (Test-ReparsePoint $pythonPathResolved) { throw "受管 Python 不能是 reparse point：$pythonPathResolved" }
+    $pythonProbeArgs = @('-I', '-c', 'import yaml; assert callable(yaml.safe_load)')
+    & $pythonPathResolved @pythonProbeArgs
+    $pythonProbeExitCode = $LASTEXITCODE
+    if ($pythonProbeExitCode -ne 0) {
+        throw "受管 Python 缺少 PyYAML 或 yaml.safe_load 不可用，拒绝部署 guarded skill wrapper：exit=$pythonProbeExitCode"
+    }
+    $manifest.yamlDependency = 'passed'
     New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
     if (Test-ReparsePoint $targetRoot) { throw "目标 scripts 目录不能是 reparse point：$targetRoot" }
     New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
@@ -117,7 +130,15 @@ try {
     $manifest.status = if ($WhatIfPreference) { 'what-if' } else { 'succeeded' }
     $manifest.completedAt = (Get-Date).ToUniversalTime().ToString('o')
     Write-JsonAtomic -PathValue $manifestPath -Value $manifest
-    [pscustomobject]@{ ok = $true; status = $manifest.status; targetRoot = $targetRoot; evidence = $evidenceDirectory; files = $manifest.files }
+    [pscustomobject]@{
+        ok = $true
+        status = $manifest.status
+        targetRoot = $targetRoot
+        evidence = $evidenceDirectory
+        pythonPath = $pythonPathResolved
+        yamlDependency = $manifest.yamlDependency
+        files = $manifest.files
+    }
 }
 catch {
     $failure = $_.Exception.Message

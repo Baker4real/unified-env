@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Sequence
 from urllib.parse import unquote, urlparse
 
+import yaml
+
 
 sys.dont_write_bytecode = True
 
@@ -57,6 +59,7 @@ DEFAULT_EVIDENCE_ROOT = Path(r"D:\Codex\.codex\run-evidence\skill-install-guarde
 SAFE_SKILL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
 SHA256_HEX = re.compile(r"^[0-9a-fA-F]{64}$")
+ASCII_DISPLAY_NAME = re.compile(r"^[\x20-\x7e]+$")
 CANDIDATE_TREE_HASH_ALGORITHM = (
     "sha256(utf8(concat(sorted_unicode_codepoint("
     "D + tab + relative_posix_directory + lf, or "
@@ -479,6 +482,40 @@ def read_skill_name(skill_md: Path) -> str:
                 raise InstallError(f"SKILL.md 的 name 非法：{skill_md}：{name!r}")
             return name
     raise InstallError(f"SKILL.md frontmatter 缺少 name：{skill_md}")
+
+
+def validate_openai_display_name(skill_dir: Path, *, label: str) -> None:
+    path = skill_dir / "agents" / "openai.yaml"
+    if not path.exists():
+        return
+    path = d_path(path, label=f"{label} agents/openai.yaml", must_exist=True)
+    if is_reparse(path) or not path.is_file():
+        raise InstallError(f"{label} agents/openai.yaml 必须是安全的普通文件：{path}")
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise InstallError(f"{label} agents/openai.yaml 不是合法 YAML：{path}：{exc}") from exc
+    if data is None:
+        return
+    if not isinstance(data, dict):
+        raise InstallError(f"{label} agents/openai.yaml 顶层必须是对象：{path}")
+    interface = data.get("interface")
+    if interface is None:
+        return
+    if not isinstance(interface, dict):
+        raise InstallError(f"{label} agents/openai.yaml interface 必须是对象：{path}")
+    display_name = interface.get("display_name")
+    if display_name is None:
+        return
+    if not isinstance(display_name, str) or not display_name.strip():
+        raise InstallError(
+            f"{label} agents/openai.yaml interface.display_name 必须是非空字符串：{path}"
+        )
+    if not ASCII_DISPLAY_NAME.fullmatch(display_name):
+        raise InstallError(
+            f"{label} agents/openai.yaml interface.display_name 必须保留英文，"
+            f"只能中文化 short_description 和 default_prompt：{path}：{display_name!r}"
+        )
 
 
 def current_source_record(path: Path) -> CurrentSourceRecord:
@@ -1522,6 +1559,7 @@ def validate_staged_bundled_skills(
                 "bundled skill name 与 manifest 不一致："
                 f"{actual_name!r} != {proof.name!r}"
             )
+        validate_openai_display_name(target, label=f"bundled skill {proof.name}")
         source_md = target / "SOURCE.md"
         if not source_md.is_file() or is_reparse(source_md):
             raise InstallError(f"bundled skill 缺少安全的 SOURCE.md：{source_md}")
@@ -1639,6 +1677,7 @@ def stage_candidate(
         actual_name = read_skill_name(skill_md)
         if actual_name != name:
             raise InstallError(f"SKILL.md name 与目标目录不一致：{actual_name!r} != {name!r}")
+        validate_openai_display_name(target, label=f"staging skill {name}")
         append_source_record(
             target / "SOURCE.md",
             skill_name=name,

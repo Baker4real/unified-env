@@ -190,6 +190,22 @@ class SkillInstallGuardedTests(unittest.TestCase):
         )
         return candidate
 
+    def write_openai_yaml(self, candidate: Path, display_name: str) -> None:
+        agents = candidate / "agents"
+        agents.mkdir()
+        (agents / "openai.yaml").write_text(
+            "\n".join(
+                [
+                    "interface:",
+                    f'  display_name: "{display_name}"',
+                    '  short_description: "中文说明"',
+                    '  default_prompt: "使用 $test-skill-wrapper 完成任务。"',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
     def write_bundled_skill(
         self,
         candidate: Path,
@@ -479,6 +495,77 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 names=["test-skill-wrapper"],
                 bundled_proofs=(),
             )
+
+    def test_install_rejects_chinese_display_name_before_activation(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "中文 identity 必须失败闭锁")
+        self.write_openai_yaml(candidate, "测试写作")
+        manifest = self.write_manifest(name, "install")
+        catalog = self.temp / "catalog.json"
+        catalog.write_bytes(b'{"artifacts":[{"name":"existing"}]}\n')
+        ledger_before = self.ledger.read_bytes()
+        catalog_before = catalog.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("interface.display_name 必须保留英文", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertEqual(catalog.read_bytes(), catalog_before)
+        transaction = max((self.temp / "evidence").glob("install-*"))
+        self.assertFalse((transaction / "backups").exists())
+
+    def test_install_rejects_non_ascii_display_name_before_activation(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "非 ASCII identity 必须失败闭锁")
+        self.write_openai_yaml(candidate, "\U00020000")
+        manifest = self.write_manifest(name, "install")
+        catalog = self.temp / "catalog.json"
+        catalog.write_bytes(b'{"artifacts":[{"name":"existing"}]}\n')
+        ledger_before = self.ledger.read_bytes()
+        catalog_before = catalog.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("interface.display_name 必须保留英文", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertEqual(catalog.read_bytes(), catalog_before)
+        transaction = max((self.temp / "evidence").glob("install-*"))
+        self.assertFalse((transaction / "backups").exists())
+
+    def test_install_rejects_malformed_openai_yaml_before_backups(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "非法 YAML 必须失败闭锁")
+        agents = candidate / "agents"
+        agents.mkdir()
+        (agents / "openai.yaml").write_text(
+            "interface: [unterminated\n",
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "install")
+        catalog = self.temp / "catalog.json"
+        catalog.write_bytes(b'{"artifacts":[{"name":"existing"}]}\n')
+        ledger_before = self.ledger.read_bytes()
+        catalog_before = catalog.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("agents/openai.yaml 不是合法 YAML", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertEqual(catalog.read_bytes(), catalog_before)
+        transaction = max((self.temp / "evidence").glob("install-*"))
+        self.assertFalse((transaction / "backups").exists())
 
     def test_install_governs_declared_bundled_skill_in_same_transaction(self) -> None:
         name = "test-skill-wrapper"
@@ -800,6 +887,35 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("bundled skill name 与 manifest 不一致", stderr.getvalue())
         self.assertFalse((self.active / name).exists())
+
+    def test_bundled_skill_rejects_chinese_display_name_before_activation(self) -> None:
+        name = "test-skill-wrapper"
+        bundled_name = "vendor-runtime"
+        relative_path = "vendor/runtime/skill"
+        candidate = self.write_candidate(name, "reject bundled Chinese identity")
+        bundled = self.write_bundled_skill(candidate, relative_path, bundled_name)
+        self.write_openai_yaml(bundled, "供应商运行时")
+        manifest = self.write_manifest(name, "install")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["bundled_skills"] = [{"path": relative_path, "name": bundled_name}]
+        payload["candidate_integrity"] = WRAPPER.candidate_integrity_payload(candidate)
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        catalog = self.temp / "catalog.json"
+        catalog.write_bytes(b'{"artifacts":[{"name":"existing"}]}\n')
+        ledger_before = self.ledger.read_bytes()
+        catalog_before = catalog.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("interface.display_name 必须保留英文", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertEqual(catalog.read_bytes(), catalog_before)
+        transaction = max((self.temp / "evidence").glob("install-*"))
+        self.assertFalse((transaction / "backups").exists())
 
     def test_bundled_skill_rejects_casefold_collision_with_top_level_name(self) -> None:
         name = "test-skill-wrapper"
