@@ -56,7 +56,6 @@ jobs:
         module:
           - shared
           - dev-environment
-          - codex-host
           - skill-supply-chain
           - host-safety
     steps:
@@ -67,7 +66,7 @@ jobs:
           node-version: '24.19.0'
 
       - uses: actions/setup-python@v5
-        if: matrix.module == 'dev-environment' || matrix.module == 'codex-host'
+        if: matrix.module == 'dev-environment'
         with:
           python-version: '3.14'
 
@@ -81,19 +80,30 @@ jobs:
             Copy-Item -Destination $env:CI_PROJECT_ROOT -Recurse -Force
 
       - name: Prepare managed Python runtime
-        if: matrix.module == 'dev-environment' || matrix.module == 'codex-host'
+        if: matrix.module == 'dev-environment'
         shell: pwsh
         run: |
           $managedPythonRoot = 'D:\Codex\tools\python314-official'
           $managedToolsRoot = Split-Path -Parent $managedPythonRoot
+          $managedPythonAliasRoot = 'D:\Codex\tools\bin'
           New-Item -ItemType Directory -Path $managedToolsRoot -Force | Out-Null
           New-Item -ItemType Directory -Path $managedPythonRoot -Force | Out-Null
+          New-Item -ItemType Directory -Path $managedPythonAliasRoot -Force | Out-Null
           Get-ChildItem -LiteralPath $env:pythonLocation -Force |
             Copy-Item -Destination $managedPythonRoot -Recurse -Force
           $managedPython = Join-Path $managedPythonRoot 'python.exe'
           & $managedPython --version
           $pythonExit = $LASTEXITCODE
           if ($pythonExit -ne 0) { exit $pythonExit }
+          $aliasContent = @(
+            '@echo off'
+            '"D:\Codex\tools\python314-official\python.exe" %*'
+            'exit /b %ERRORLEVEL%'
+          )
+          foreach ($aliasName in @('python.cmd', 'python3.cmd', 'python3.14.cmd', 'python314.cmd')) {
+            $aliasPath = Join-Path $managedPythonAliasRoot $aliasName
+            [System.IO.File]::WriteAllLines($aliasPath, $aliasContent, [System.Text.Encoding]::ASCII)
+          }
 
       - name: Run module fixture tests
         shell: pwsh
