@@ -14,6 +14,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CI_PROJECT_ROOT: D:\Codex\projects\统一环境
+
 jobs:
   module-boundaries:
     name: Module boundaries
@@ -26,9 +29,19 @@ jobs:
         with:
           node-version: '24.19.0'
 
+      - name: Prepare canonical project path
+        shell: pwsh
+        run: |
+          $projectParent = Split-Path -Parent $env:CI_PROJECT_ROOT
+          New-Item -ItemType Directory -Path $projectParent -Force | Out-Null
+          New-Item -ItemType Directory -Path $env:CI_PROJECT_ROOT -Force | Out-Null
+          Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force |
+            Copy-Item -Destination $env:CI_PROJECT_ROOT -Recurse -Force
+
       - name: Validate ownership and interfaces
         shell: pwsh
         run: |
+          Set-Location -LiteralPath $env:CI_PROJECT_ROOT
           node .\tests\Test-ModuleBoundaries.cjs
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) { exit $testExit }
@@ -53,9 +66,19 @@ jobs:
         with:
           node-version: '24.19.0'
 
+      - name: Prepare canonical project path
+        shell: pwsh
+        run: |
+          $projectParent = Split-Path -Parent $env:CI_PROJECT_ROOT
+          New-Item -ItemType Directory -Path $projectParent -Force | Out-Null
+          New-Item -ItemType Directory -Path $env:CI_PROJECT_ROOT -Force | Out-Null
+          Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force |
+            Copy-Item -Destination $env:CI_PROJECT_ROOT -Recurse -Force
+
       - name: Run module fixture tests
         shell: pwsh
         run: |
+          Set-Location -LiteralPath $env:CI_PROJECT_ROOT
           node .\scripts\Run-PowerShellTests.cjs --module '${{ matrix.module }}'
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) { exit $testExit }
