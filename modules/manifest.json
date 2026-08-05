@@ -344,6 +344,7 @@
         ".codegraph/.gitignore",
         ".gitattributes",
         ".gitignore",
+        ".node-version",
         ".okf-frontmatter.json",
         "AGENTS.md",
         "CONTEXT.md",
