@@ -15,6 +15,15 @@ function Assert-CodexSafeTreeDeleteExactProperties {
     }
 }
 
+function Test-CodexSafeTreeDeletePathEqual {
+    param(
+        [Parameter(Mandatory)][string]$Left,
+        [Parameter(Mandatory)][string]$Right
+    )
+
+    return [StringComparer]::OrdinalIgnoreCase.Equals($Left, $Right)
+}
+
 function Read-CodexSafeTreeDeletePolicy {
     param([Parameter(Mandatory)][string]$PolicyPath)
 
@@ -62,11 +71,11 @@ function Read-CodexSafeTreeDeletePolicy {
             throw "safe-delete policy $id minimumDescendantDepth 非法。"
         }
         $rootDeletionPurpose = [string]$entry.rootDeletionPurpose
-        if ($rootDeletionPurpose -notin @('none', 'rebuildable-build-output', 'empty-project-state')) {
+        if ($rootDeletionPurpose -notin @('none', 'rebuildable-build-output', 'empty-project-state', 'retired-project-root')) {
             throw "safe-delete policy $id rootDeletionPurpose 非法。"
         }
         if ($minimumDepth -eq 0 -and
-            $rootDeletionPurpose -cnotin @('rebuildable-build-output', 'empty-project-state')) {
+            $rootDeletionPurpose -cnotin @('rebuildable-build-output', 'empty-project-state', 'retired-project-root')) {
             throw "safe-delete policy $id 深度 0 必须显式限定 root 删除用途。"
         }
         if ($minimumDepth -gt 0 -and $rootDeletionPurpose -cne 'none') {
@@ -83,6 +92,10 @@ function Read-CodexSafeTreeDeletePolicy {
         if ($rootDeletionPurpose -ceq 'empty-project-state' -and
             $root -notmatch '^D:\\Codex\\projects\\[^\\]+\\\.codex$') {
             throw "safe-delete policy $id 空项目状态必须精确指向项目 .codex 根。"
+        }
+        if ($rootDeletionPurpose -ceq 'retired-project-root' -and
+            $root -notmatch '^D:\\Codex\\projects\\[^\\]+$') {
+            throw "safe-delete policy $id 退役项目必须精确指向项目根。"
         }
         $denied = [Collections.Generic.List[string]]::new()
         foreach ($candidate in @($entry.deniedExactPaths)) {
@@ -118,14 +131,16 @@ function Resolve-CodexSafeTreeDeleteTarget {
 
     $fullTarget = Assert-CodexHookDPath -Value $TargetPath -Name 'safe-delete target'
     $fullRoot = Assert-CodexHookDPath -Value $CapabilityRoot -Name 'safe-delete capability root'
-    $entry = @($Policy.entries | Where-Object { $_.capabilityRoot -ieq $fullRoot })
+    $entry = @($Policy.entries | Where-Object {
+        Test-CodexSafeTreeDeletePathEqual -Left ([string]$_.capabilityRoot) -Right $fullRoot
+    })
     if ($entry.Count -ne 1) { throw 'safe-delete capability root 不在受管 allowlist。' }
     if (-not (Test-CodexHookPathWithin -Path $fullTarget -ParentPath $fullRoot)) {
         throw 'safe-delete target 必须位于 capability root 内。'
     }
-    if ([string]$entry[0].rootDeletionPurpose -ceq 'empty-project-state' -and
-        $fullTarget -ine $fullRoot) {
-        throw 'safe-delete 空项目状态只允许精确 capability root。'
+    if ([string]$entry[0].rootDeletionPurpose -cin @('empty-project-state', 'retired-project-root') -and
+        -not (Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $fullRoot)) {
+        throw 'safe-delete root 删除用途只允许精确 capability root。'
     }
     $relative = $fullTarget.Substring($fullRoot.Length).TrimStart('\', '/')
     $depth = @($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 }).Count
@@ -133,7 +148,8 @@ function Resolve-CodexSafeTreeDeleteTarget {
         throw 'safe-delete target 未达到策略要求的最小后代深度。'
     }
     foreach ($deniedPath in @($entry[0].deniedExactPaths)) {
-        if ($fullTarget -ieq $deniedPath -or (Test-CodexHookPathWithin -Path $fullTarget -ParentPath $deniedPath)) {
+        if ((Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $deniedPath) -or
+            (Test-CodexHookPathWithin -Path $fullTarget -ParentPath $deniedPath)) {
             throw 'safe-delete target 命中 denylist。'
         }
     }
@@ -191,7 +207,9 @@ function Assert-CodexSafeTreeDeleteTargetTreePolicy {
 function Get-CodexSafeTreeDeleteQuarantineCapabilityRoot {
     param([Parameter(Mandatory)][object]$Target)
 
-    if ([string]$Target.targetPath -ieq [string]$Target.capabilityRoot) {
+    if (Test-CodexSafeTreeDeletePathEqual `
+            -Left ([string]$Target.targetPath) `
+            -Right ([string]$Target.capabilityRoot)) {
         return Split-Path -Parent ([string]$Target.targetPath)
     }
     return [string]$Target.capabilityRoot
@@ -348,7 +366,7 @@ function Read-CodexSafeTreeDeleteApprovedPlan {
     $fullPlanPath = Assert-CodexHookDPath -Value $PlanPath -Name 'safe-delete plan path'
     if ([IO.Path]::GetFileName($fullPlanPath) -cne 'plan.json' -or
         -not (Test-CodexHookPathWithin -Path $fullPlanPath -ParentPath $fullEvidenceRoot) -or
-        $fullPlanPath -ieq $fullEvidenceRoot) {
+        (Test-CodexSafeTreeDeletePathEqual -Left $fullPlanPath -Right $fullEvidenceRoot)) {
         throw 'safe-delete plan path 不在受管 evidence run 下。'
     }
     $runDirectory = Split-Path -Parent $fullPlanPath
@@ -615,7 +633,7 @@ function Read-CodexSafeTreeDeleteApprovedTransaction {
     $fullTransactionPath = Assert-CodexHookDPath -Value $TransactionPath -Name 'safe-delete transaction path'
     if ([IO.Path]::GetFileName($fullTransactionPath) -cne 'transaction.json' -or
         -not (Test-CodexHookPathWithin -Path $fullTransactionPath -ParentPath $fullEvidenceRoot) -or
-        $fullTransactionPath -ieq $fullEvidenceRoot) {
+        (Test-CodexSafeTreeDeletePathEqual -Left $fullTransactionPath -Right $fullEvidenceRoot)) {
         throw 'safe-delete transaction path 不在受管 evidence run 下。'
     }
     [void](Assert-CodexHookCapabilityPath `
@@ -1316,7 +1334,9 @@ function Find-CodexSafeTreeDeleteRecoverableTransaction {
         $transaction = $snapshot.text | ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
         $status = [string]$transaction.status
         if ($status -cnotin @('prepared', 'quarantined', 'purging')) { continue }
-        if ([string]$transaction.targetPath -cne $target.targetPath) { continue }
+        if (-not (Test-CodexSafeTreeDeletePathEqual `
+                -Left ([string]$transaction.targetPath) `
+                -Right ([string]$target.targetPath))) { continue }
         if ([IO.Directory]::Exists($target.targetPath)) { continue }
         $quarantineExists = [IO.Directory]::Exists([string]$transaction.quarantinePath) -and
             -not [IO.File]::Exists([string]$transaction.quarantinePath)

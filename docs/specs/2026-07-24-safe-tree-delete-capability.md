@@ -28,7 +28,7 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 
 policy schema v3 要求 `schemaVersion` 与 `minimumDescendantDepth` 都是真正的 JSON integer，
 不接受字符串或小数强转。`minimumDescendantDepth` 通常至少为 1，且
-`rootDeletionPurpose` 必须为 `none`。root 删除只允许两种精确用途：
+`rootDeletionPurpose` 必须为 `none`。root 删除只允许三种精确用途：
 
 - capability root 自身是项目根之下的可重建构建产物根时，可设为 0 和
   `rebuildable-build-output`；项目 `.codex` 根不得冒充构建产物。
@@ -36,9 +36,14 @@ policy schema v3 要求 `schemaVersion` 与 `minimumDescendantDepth` 都是真�
   `empty-project-state`。该用途只授权 capability root 自身，不授权其后代作为独立目标；
   Plan 要求整棵树零文件，可以包含空子目录，任意普通文件、NTFS named stream 或 reparse
   point 都会失败关闭。
+- capability root 精确匹配 `D:\Codex\projects\<project>` 且该项目已明确退役时，可设为 0 和
+  `retired-project-root`。该用途只授权 policy 中逐项登记的 capability root 自身，不授权其
+  后代作为独立目标，也不授权其他项目根。
 
-生产 policy 只为本项目退役的 `.codex` 精确声明 `empty-project-state`；远程附件根仍保持
-最小后代深度 1 和 `none`，不在 root 删除授权面内。解析器继续拒绝 workspace/项目根和
+生产 policy 只为本项目退役的 `.codex` 精确声明 `empty-project-state`；
+`retired-project-root` 只作为明确退役任务中的临时精确许可，成功 Purge 后必须在同一任务中
+从生产 policy 撤销，避免未来同路径新项目继承旧授权。远程附件根仍保持最小后代深度 1 和
+`none`，不在 root 删除授权面内。解析器继续拒绝未登记的 workspace/项目根和
 项目外用户数据根。这不会授权父目录或同级目录。root 删除在 Apply 时仍只允许原子改名到
 同父、随机 generation 绑定的 quarantine。Purge 仍校验原计划、transaction、当前树与文件
 identity；只有 `purging` 中断恢复允许当前树成为原计划的未变子集，其他路径仍要求完整清单。
@@ -95,7 +100,9 @@ identity；只有 `purging` 中断恢复允许当前树成为原计划的未变�
 `ConfirmApply` 与 `ConfirmPurge`。入口对每个目标仍逐项执行相同的 `Plan` / `Apply` / `Purge` 校验；
 如果发现同一目标已有 `quarantined` 或 `purging` transaction，且原路径不存在、quarantine 仍存在，
 则先按该 transaction 完成 `Purge`，再继续后续目标。这样批量调用中断后可以从受控 evidence 恢复，不需要
-调用方手写循环、重新计算 transaction hash 或手工删除 quarantine。通过 `.cmd` wrapper 调用时，
+调用方手写循环、重新计算 transaction hash 或手工删除 quarantine。恢复匹配使用
+`OrdinalIgnoreCase` 实现 Windows 路径大小写不敏感语义，但不做 Unicode 规范化；路径大小写变化不得
+绕过或遗漏既有 transaction，NFC/NFD 等不同 UTF-16 路径也不得误配。通过 `.cmd` wrapper 调用时，
 `TargetPaths` 使用单个 `::` 分隔字符串传入，避免 `cmd.exe` 把分隔符解释成管道或命令控制符。
 
 计划 30 分钟过期。缺少确认、哈希不匹配、policy 漂移、目标重新出现、目录内容或 identity

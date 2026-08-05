@@ -22,12 +22,22 @@ $invalidProjectRootPolicyPath = Join-Path $fixtureRoot 'invalid-project-root-pol
 $invalidStateRootPolicyPath = Join-Path $fixtureRoot 'invalid-state-root-policy.json'
 $invalidProjectStateBuildOutputPolicyPath = Join-Path $fixtureRoot 'invalid-project-state-build-output-policy.json'
 $invalidEmptyProjectStateRootPolicyPath = Join-Path $fixtureRoot 'invalid-empty-project-state-root-policy.json'
+$invalidRetiredProjectRootPolicyPath = Join-Path $fixtureRoot 'invalid-retired-project-root-policy.json'
 $invalidSchemaTypePolicyPath = Join-Path $fixtureRoot 'invalid-schema-type-policy.json'
 $invalidDepthTypePolicyPath = Join-Path $fixtureRoot 'invalid-depth-type-policy.json'
 $emptyProjectStateParent = Join-Path 'D:\Codex\projects' ('.safe-tree-delete-project-state-test-{0}' -f ([guid]::NewGuid().ToString('N')))
 $emptyProjectStateTarget = Join-Path $emptyProjectStateParent '.codex'
 $emptyProjectStateChild = Join-Path $emptyProjectStateTarget 'skill-state'
 $emptyProjectStateFile = Join-Path $emptyProjectStateChild 'must-survive.txt'
+$retiredProjectRoot = Join-Path 'D:\Codex\projects' ('.safe-tree-delete-retired-project-test-{0}' -f ([guid]::NewGuid().ToString('N')))
+$retiredProjectChild = Join-Path $retiredProjectRoot 'nested'
+$retiredProjectFile = Join-Path $retiredProjectChild 'payload.txt'
+$retiredProjectQuarantinePath = $null
+$unlistedRetiredProjectRoot = Join-Path 'D:\Codex\projects' ('.safe-tree-delete-unlisted-project-test-{0}' -f ([guid]::NewGuid().ToString('N')))
+$unicodeProjectStem = '.safe-tree-delete-unicode-project-test-{0}-' -f ([guid]::NewGuid().ToString('N'))
+$unicodeNfcProjectRoot = Join-Path 'D:\Codex\projects' ($unicodeProjectStem + [string][char]0x00E9)
+$unicodeNfdProjectRoot = Join-Path 'D:\Codex\projects' ($unicodeProjectStem + 'e' + [string][char]0x0301)
+$unicodeNfdProjectFile = Join-Path $unicodeNfdProjectRoot 'must-survive.txt'
 $largeSparseTargetPath = Join-Path $fixtureRoot 'large-sparse-candidate'
 $largeSparseFilePath = Join-Path $largeSparseTargetPath 'large-zero.bin'
 $largeSparseQuarantinePath = $null
@@ -310,6 +320,10 @@ $payloadPath = Join-Path $targetPath 'payload.txt'
 [IO.File]::WriteAllText((Join-Path $rollbackRootTarget 'rollback-payload.txt'), 'rollback-target', [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText($rollbackSiblingPath, 'must-survive', [Text.UTF8Encoding]::new($false))
 [void][IO.Directory]::CreateDirectory($emptyProjectStateChild)
+[void][IO.Directory]::CreateDirectory($retiredProjectChild)
+[IO.File]::WriteAllText($retiredProjectFile, 'retired-project-payload', [Text.UTF8Encoding]::new($false))
+[void][IO.Directory]::CreateDirectory($unicodeNfdProjectRoot)
+[IO.File]::WriteAllText($unicodeNfdProjectFile, 'unicode-must-survive', [Text.UTF8Encoding]::new($false))
 $policy = [pscustomobject][ordered]@{
     artifactType = 'env-governance.codex-safe-tree-delete-policy'
     schemaVersion = 3
@@ -340,6 +354,20 @@ $policy = [pscustomobject][ordered]@{
             capabilityRoot = $emptyProjectStateTarget
             minimumDescendantDepth = 0
             rootDeletionPurpose = 'empty-project-state'
+            deniedExactPaths = @()
+        },
+        [pscustomobject][ordered]@{
+            id = 'fixture-retired-project-root'
+            capabilityRoot = $retiredProjectRoot
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'retired-project-root'
+            deniedExactPaths = @()
+        },
+        [pscustomobject][ordered]@{
+            id = 'fixture-unicode-retired-project-root'
+            capabilityRoot = $unicodeNfcProjectRoot
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'retired-project-root'
             deniedExactPaths = @()
         }
     )
@@ -439,6 +467,12 @@ try {
         ($productionEmptyProjectStateEntries.Count -eq 1 -and
             $productionEmptyProjectStateEntries[0].id -ceq 'environment-retired-project-state') `
         '生产策略必须全局唯一声明本项目 empty-project-state'
+    $productionRetiredProjectEntries = @($productionPolicy.entries | Where-Object {
+        $_.rootDeletionPurpose -ceq 'retired-project-root'
+    })
+    Assert-True `
+        ($productionRetiredProjectEntries.Count -eq 0) `
+        '完成退役删除后，生产策略不得残留 retired-project-root 授权'
     $attachmentRootError = Assert-Throws -Message '生产策略必须拒绝删除 remote attachments 根' -Action {
         & $entryPath `
             -Mode Plan `
@@ -805,6 +839,98 @@ try {
     Assert-True ($rootPurge.purged -eq $true) '精确 capability root 必须可完成 purge'
     Assert-True (-not [IO.Directory]::Exists([string]$rootApply.quarantinePath)) '精确 capability root purge 后不得残留隔离目录'
 
+    $invalidRetiredProjectRootPolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 3
+        entries = @([pscustomobject][ordered]@{
+            id = 'invalid-retired-project-root'
+            capabilityRoot = $retiredProjectChild
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'retired-project-root'
+            deniedExactPaths = @()
+        })
+    }
+    [IO.File]::WriteAllText(
+        $invalidRetiredProjectRootPolicyPath,
+        ($invalidRetiredProjectRootPolicy | ConvertTo-Json -Depth 10),
+        [Text.UTF8Encoding]::new($false))
+    $invalidRetiredProjectRootError = Assert-Throws -Message '项目子目录不得声明为退役项目根' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $retiredProjectChild `
+            -CapabilityRoot $retiredProjectChild `
+            -FixturePolicyPath $invalidRetiredProjectRootPolicyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($invalidRetiredProjectRootError -match '必须精确指向项目根') `
+        '退役项目根路径形状拒绝必须返回稳定原因'
+    $retiredProjectDescendantError = Assert-Throws -Message '退役项目根 capability 不得授权后代作为独立目标' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $retiredProjectChild `
+            -CapabilityRoot $retiredProjectRoot `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($retiredProjectDescendantError -match '精确.*root') `
+        '退役项目根后代拒绝必须返回稳定原因'
+    $unlistedRetiredProjectError = Assert-Throws -Message '未登记项目根必须拒绝' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $unlistedRetiredProjectRoot `
+            -CapabilityRoot $unlistedRetiredProjectRoot `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($unlistedRetiredProjectError -match 'allowlist') `
+        '未登记项目根拒绝必须返回稳定原因'
+    $unicodeProjectError = Assert-Throws -Message 'Unicode 规范化不同的项目根必须视为不同路径' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $unicodeNfdProjectRoot `
+            -CapabilityRoot $unicodeNfdProjectRoot `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($unicodeProjectError -match 'allowlist') `
+        'Unicode 规范化不同的未登记项目根必须返回 allowlist 拒绝'
+    Assert-True `
+        ([IO.File]::ReadAllText($unicodeNfdProjectFile) -ceq 'unicode-must-survive') `
+        'Unicode 规范化路径拒绝不得修改未登记项目内容'
+    $retiredProjectPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $retiredProjectRoot `
+        -CapabilityRoot $retiredProjectRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($retiredProjectPlan.planned -eq $true) '精确登记的退役项目根必须可生成计划'
+    Assert-True ($retiredProjectPlan.fileCount -eq 1) '退役项目根计划必须包含普通项目文件'
+    Assert-True ([IO.File]::ReadAllText($retiredProjectFile) -ceq 'retired-project-payload') '退役项目根 Plan 不得修改内容'
+    $retiredProjectApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$retiredProjectPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$retiredProjectPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $retiredProjectQuarantinePath = [string]$retiredProjectApply.quarantinePath
+    Assert-True ($retiredProjectApply.quarantined -eq $true) '精确登记的退役项目根必须可隔离'
+    Assert-True (-not [IO.Directory]::Exists($retiredProjectRoot)) '退役项目根隔离后原路径必须不存在'
+    Assert-True ([IO.Directory]::Exists($retiredProjectQuarantinePath)) '退役项目根必须保留同父隔离目录'
+    $retiredProjectPurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$retiredProjectApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$retiredProjectApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($retiredProjectPurge.purged -eq $true) '精确登记的退役项目根必须可完成 purge'
+    Assert-True (-not [IO.Directory]::Exists($retiredProjectQuarantinePath)) '退役项目根 purge 后不得残留隔离目录'
+
     Set-Content -LiteralPath $emptyProjectStateChild -Stream 'retired-state' -Value 'hidden-state' -NoNewline
     $emptyProjectStateNamedStreams = @(Get-Item -LiteralPath $emptyProjectStateChild -Stream * -ErrorAction Stop | Where-Object {
         $_.Stream -cne ':$DATA'
@@ -1107,6 +1233,48 @@ try {
         [void][IO.Directory]::CreateDirectory($path)
         [IO.File]::WriteAllText((Join-Path $path 'payload.txt'), $path, [Text.UTF8Encoding]::new($false))
     }
+    $unicodeRecoveryStem = 'unicode-recovery-'
+    $unicodeRecoveryNfcTarget = Join-Path $batchParent ($unicodeRecoveryStem + [string][char]0x00E9)
+    $unicodeRecoveryNfdTarget = Join-Path $batchParent ($unicodeRecoveryStem + 'e' + [string][char]0x0301)
+    [void][IO.Directory]::CreateDirectory($unicodeRecoveryNfcTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $unicodeRecoveryNfcTarget 'payload.txt'),
+        'unicode-recovery-payload',
+        [Text.UTF8Encoding]::new($false))
+    $unicodeRecoveryPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $unicodeRecoveryNfcTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $unicodeRecoveryApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$unicodeRecoveryPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$unicodeRecoveryPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $unicodeRecoveryResult = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($unicodeRecoveryNfdTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($unicodeRecoveryResult.completed -eq $true) 'Unicode 恢复隔离测试必须完成'
+    Assert-True ($unicodeRecoveryResult.purgedCount -eq 0) 'Unicode 规范化不同的目标不得 purge 既有 transaction'
+    Assert-True ($unicodeRecoveryResult.recoveredCount -eq 0) 'Unicode 规范化不同的目标不得恢复既有 transaction'
+    Assert-True ($unicodeRecoveryResult.alreadyAbsentCount -eq 1) '缺失的 Unicode 近似目标必须报告 already-absent'
+    Assert-True ([IO.Directory]::Exists([string]$unicodeRecoveryApply.quarantinePath)) 'Unicode 近似目标不得触及既有 quarantine'
+    $unicodeRecoveryPurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$unicodeRecoveryApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$unicodeRecoveryApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($unicodeRecoveryPurge.purged -eq $true) 'Unicode 恢复隔离夹具必须可受管清理'
     $batchPrePlan = & $entryPath `
         -Mode Plan `
         -TargetPath $batchA `
@@ -1135,9 +1303,11 @@ try {
     Assert-True ([IO.Directory]::Exists($batchB) -and [IO.Directory]::Exists($batchC)) '未确认 BatchPurge 不得删除新目标'
     Assert-True ([IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) '未确认 BatchPurge 不得清理既有 quarantine'
 
+    $batchACaseVariant = $batchA.ToLowerInvariant()
+    Assert-True ($batchACaseVariant -cne $batchA) 'batch mixed-case fixture 必须真实改变路径大小写'
     $batchResult = & $entryPath `
         -Mode BatchPurge `
-        -TargetPaths @($batchA, $batchB, $batchC, $batchD) `
+        -TargetPaths @($batchACaseVariant, $batchB, $batchC, $batchD) `
         -CapabilityRoot $fixtureRoot `
         -ConfirmApply `
         -ConfirmPurge `
@@ -1190,6 +1360,12 @@ try {
             [IO.File]::Delete($quarantinedSparsePath)
         }
     }
+    if (-not [string]::IsNullOrWhiteSpace($retiredProjectQuarantinePath)) {
+        Remove-TestTree -Path $retiredProjectQuarantinePath
+    }
+    Remove-TestTree -Path $retiredProjectRoot
+    Remove-TestTree -Path $unicodeNfcProjectRoot
+    Remove-TestTree -Path $unicodeNfdProjectRoot
     Remove-TestTree -Path $emptyProjectStateParent
     Remove-TestTree -Path $fixtureRoot
 }
