@@ -256,7 +256,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         payload: dict[str, object] = {
             "decision": decision,
             "source_status": "source-review",
-            "writing_great_skills": {"status": "no-change"},
+            "writing_for_agents": {"status": "no-change"},
             "skills": [name],
             "source": source,
         }
@@ -313,9 +313,18 @@ class SkillInstallGuardedTests(unittest.TestCase):
         new_name: str = "new-orchestration",
         source_id: str = "orchestration-source",
         source_repo: str = "https://github.com/example/orchestration",
+        predecessor_identity: dict[str, str] | None = None,
+        successor_identity: dict[str, str] | None = None,
     ) -> dict[str, object]:
         source_commit = "0123456789abcdef"
         upstream_path = "skills/orchestration"
+        default_identity = {
+            "upstream_path": upstream_path,
+            "ref": "main",
+            "commit": source_commit,
+        }
+        predecessor = dict(predecessor_identity or default_identity)
+        successor = dict(successor_identity or default_identity)
         old_skill = self.active / old_name
         old_skill.mkdir()
         (old_skill / "SKILL.md").write_text(
@@ -329,9 +338,9 @@ class SkillInstallGuardedTests(unittest.TestCase):
                     "",
                     f"Skill: `{old_name}`",
                     f"Source repository: `{source_repo}`",
-                    f"Upstream path: `{upstream_path}`",
-                    "Ref: `main`",
-                    f"Commit or revision: `{source_commit}`",
+                    f"Upstream path: `{predecessor['upstream_path']}`",
+                    f"Ref: `{predecessor['ref']}`",
+                    f"Commit or revision: `{predecessor['commit']}`",
                     "",
                 ]
             ),
@@ -354,10 +363,10 @@ class SkillInstallGuardedTests(unittest.TestCase):
                             "id": source_id,
                             "type": "github",
                             "repo": source_repo,
-                            "ref": "main",
+                            "ref": predecessor["ref"],
                             "skills": [old_name],
-                            "last_checked_commit": source_commit,
-                            "catalog_ref": source_commit,
+                            "last_checked_commit": predecessor["commit"],
+                            "catalog_ref": predecessor["commit"],
                         }
                     ],
                     "unresolved": [],
@@ -377,9 +386,9 @@ class SkillInstallGuardedTests(unittest.TestCase):
                     f"Canonical predecessor: `{old_name}`",
                     f"Source identity: `{source_id}`",
                     f"Source repository: `{source_repo}`",
-                    f"Upstream path: `{upstream_path}`",
-                    "Ref: `main`",
-                    f"Commit or revision: `{source_commit}`",
+                    f"Upstream path: `{successor['upstream_path']}`",
+                    f"Ref: `{successor['ref']}`",
+                    f"Commit or revision: `{successor['commit']}`",
                     "",
                 ]
             ),
@@ -390,15 +399,17 @@ class SkillInstallGuardedTests(unittest.TestCase):
         manifest_payload["source"].update(
             {
                 "repo": source_repo,
-                "ref": "main",
-                "commit": source_commit,
-                "upstream_path": upstream_path,
+                "ref": successor["ref"],
+                "commit": successor["commit"],
+                "upstream_path": successor["upstream_path"],
             }
         )
         manifest_payload["canonical_rename"] = {
             "old_name": old_name,
             "new_name": new_name,
             "source_id": source_id,
+            "predecessor_source": dict(predecessor),
+            "successor_source": dict(successor),
         }
         manifest_payload["local_overlay"] = {
             "status": "replayed",
@@ -422,8 +433,10 @@ class SkillInstallGuardedTests(unittest.TestCase):
             "catalog": catalog,
             "source_id": source_id,
             "source_repo": source_repo,
-            "source_commit": source_commit,
-            "upstream_path": upstream_path,
+            "source_commit": successor["commit"],
+            "upstream_path": successor["upstream_path"],
+            "predecessor_identity": predecessor,
+            "successor_identity": successor,
         }
 
     def assert_canonical_rename_rollback(
@@ -444,6 +457,128 @@ class SkillInstallGuardedTests(unittest.TestCase):
         transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
         result = json.loads(transaction.read_text(encoding="utf-8"))
         self.assertEqual(result["status"], "rolled-back")
+
+    def test_decision_manifest_accepts_writing_for_agents_gate(self) -> None:
+        path = self.temp / "decision-writing-for-agents.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "decision": "update",
+                    "source_status": "source-pass",
+                    "writing_for_agents": {"status": "pass"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = WRAPPER.validate_decision_manifest(path)
+        self.assertEqual(result["decision"], "update")
+
+    def test_decision_manifest_rejects_retired_gate_field(self) -> None:
+        path = self.temp / "decision-retired-writing-gate.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "decision": "update",
+                    "source_status": "source-pass",
+                    "writing_great_skills": {"status": "pass"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(WRAPPER.InstallError, "已退役"):
+            WRAPPER.validate_decision_manifest(path)
+
+    def test_decision_manifest_rejects_both_writing_gate_fields(self) -> None:
+        path = self.temp / "decision-conflicting-writing-gates.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "decision": "update",
+                    "source_status": "source-pass",
+                    "writing_for_agents": {"status": "pass"},
+                    "writing_great_skills": {"status": "pass"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(WRAPPER.InstallError, "已退役"):
+            WRAPPER.validate_decision_manifest(path)
+
+    def test_canonical_rename_accepts_distinct_bound_identities(self) -> None:
+        predecessor = {
+            "upstream_path": "skills/old-orchestration",
+            "ref": "legacy",
+            "commit": "1111111111111111",
+        }
+        successor = {
+            "upstream_path": "skills/new-orchestration",
+            "ref": "main",
+            "commit": "2222222222222222",
+        }
+        state = self.prepare_canonical_rename(
+            predecessor_identity=predecessor,
+            successor_identity=successor,
+        )
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        source_entry = next(
+            item for item in ledger["sources"] if item["id"] == state["source_id"]
+        )
+        source_entry["last_checked_commit"] = successor["commit"]
+        source_entry["catalog_ref"] = successor["commit"]
+        self.ledger.write_text(json.dumps(ledger), encoding="utf-8")
+        ledger_before = self.ledger.read_bytes()
+        catalog_before = Path(state["catalog"]).read_bytes()
+        args = self.wrapper_args(
+            Path(state["candidate"]),
+            Path(state["manifest"]),
+            name=str(state["new_name"]),
+        )
+        args.extend(["--update", "--dry-run"])
+
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = WRAPPER.main(args)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertEqual(Path(state["catalog"]).read_bytes(), catalog_before)
+
+    def test_canonical_rename_rejects_unbound_or_mismatched_successor(self) -> None:
+        for mismatch_kind in ("unbound", "successor"):
+            with self.subTest(mismatch_kind=mismatch_kind):
+                state = self.prepare_canonical_rename(
+                    old_name=f"old-bound-{mismatch_kind}",
+                    new_name=f"new-bound-{mismatch_kind}",
+                    source_id=f"source-bound-{mismatch_kind}",
+                )
+                manifest = Path(state["manifest"])
+                payload = json.loads(manifest.read_text(encoding="utf-8"))
+                if mismatch_kind == "unbound":
+                    payload["canonical_rename"].pop("predecessor_source")
+                    payload["canonical_rename"].pop("successor_source")
+                else:
+                    payload["canonical_rename"]["successor_source"]["commit"] = (
+                        "different-commit"
+                    )
+                manifest.write_text(json.dumps(payload), encoding="utf-8")
+                args = self.wrapper_args(
+                    Path(state["candidate"]),
+                    manifest,
+                    name=str(state["new_name"]),
+                )
+                args.extend(["--update", "--dry-run"])
+
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    code = WRAPPER.main(args)
+
+                self.assertEqual(code, 2)
+                self.assertTrue(Path(state["old_skill"]).is_dir())
+                self.assertFalse((self.active / str(state["new_name"])).exists())
 
     def test_install_updates_source_ledger_and_catalog(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "测试 guarded wrapper")
@@ -2537,7 +2672,6 @@ class SkillInstallGuardedTests(unittest.TestCase):
             "wrong-ref",
             "wrong-commit",
             "ledger-ref",
-            "ledger-commit",
             "ledger-source-id-duplicate",
             "ledger-direct-field-conflict",
             "manifest-upstream",
@@ -2584,16 +2718,6 @@ class SkillInstallGuardedTests(unittest.TestCase):
                     next(
                         item for item in ledger["sources"] if item["id"] == source_id
                     )["ref"] = "next"
-                    self.ledger.write_text(
-                        json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
-                    )
-                elif mismatch_kind == "ledger-commit":
-                    ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
-                    source_entry = next(
-                        item for item in ledger["sources"] if item["id"] == source_id
-                    )
-                    source_entry["last_checked_commit"] = "different-commit"
-                    source_entry["catalog_ref"] = "different-commit"
                     self.ledger.write_text(
                         json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
                     )

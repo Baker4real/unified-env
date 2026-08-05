@@ -656,7 +656,12 @@ def validate_decision_manifest(path: Path) -> dict[str, Any]:
             "guard decision manifest 必须包含 source-pass 或 source-review；"
             f"当前为 {source_status!r}"
         )
-    writing_gate = data.get("writing_great_skills")
+    if "writing_great_skills" in data:
+        raise InstallError(
+            "guard decision manifest 不得使用已退役的 writing_great_skills 字段；"
+            "请改用 writing_for_agents"
+        )
+    writing_gate = data.get("writing_for_agents")
     if isinstance(writing_gate, dict):
         gate_status = writing_gate.get("status")
     else:
@@ -673,19 +678,27 @@ def canonical_rename_spec(
     args: argparse.Namespace,
     decision: dict[str, Any],
     names: list[str],
-) -> dict[str, str] | None:
+) -> dict[str, Any] | None:
     raw = decision.get("canonical_rename")
     if raw is None:
         return None
-    if not isinstance(raw, dict) or set(raw) != {"old_name", "new_name", "source_id"}:
+    required_fields = {
+        "old_name",
+        "new_name",
+        "source_id",
+        "predecessor_source",
+        "successor_source",
+    }
+    if not isinstance(raw, dict) or set(raw) != required_fields:
         raise InstallError(
-            "canonical_rename 字段必须精确为 old_name、new_name、source_id"
+            "canonical_rename 字段必须精确为 old_name、new_name、source_id、"
+            "predecessor_source、successor_source"
         )
     if decision.get("decision") != "update":
         raise InstallError("canonical rename 只允许 decision=update")
     if not args.candidate or len(names) != 1:
         raise InstallError("canonical rename 只支持单个本地 --candidate")
-    normalized: dict[str, str] = {}
+    normalized: dict[str, Any] = {}
     for field in ("old_name", "new_name", "source_id"):
         value = raw.get(field)
         if not isinstance(value, str) or not value.strip():
@@ -710,6 +723,37 @@ def canonical_rename_spec(
     for field in ("repo", "ref", "commit", "upstream_path"):
         if not isinstance(source.get(field), str) or not source[field].strip():
             raise InstallError(f"canonical rename 必须提供 source.{field}")
+
+    for identity_name in ("predecessor_source", "successor_source"):
+        identity = raw.get(identity_name)
+        if not isinstance(identity, dict) or set(identity) != {
+            "upstream_path",
+            "ref",
+            "commit",
+        }:
+            raise InstallError(
+                f"canonical_rename.{identity_name} 必须精确包含 "
+                "upstream_path、ref、commit"
+            )
+        normalized_identity: dict[str, str] = {}
+        for field in ("upstream_path", "ref", "commit"):
+            value = identity.get(field)
+            if not isinstance(value, str) or not value.strip():
+                raise InstallError(
+                    f"canonical_rename.{identity_name}.{field} 必须是非空字符串"
+                )
+            normalized_identity[field] = value.strip()
+        normalized[identity_name] = normalized_identity
+
+    expected_successor = {
+        "upstream_path": source["upstream_path"].strip(),
+        "ref": source["ref"].strip(),
+        "commit": source["commit"].strip(),
+    }
+    if normalized["successor_source"] != expected_successor:
+        raise InstallError(
+            "canonical_rename.successor_source 必须与顶层 source 的 path/ref/commit 一致"
+        )
     return normalized
 
 
@@ -843,7 +887,7 @@ def source_context(
             source_id = f"local-candidate-{specs[0][0]}"
     ref = source.get("ref") or args.ref or "main"
     commit = source.get("commit") or source.get("catalog_ref") or source.get("revision")
-    writing_gate = decision.get("writing_great_skills")
+    writing_gate = decision.get("writing_for_agents")
     if isinstance(writing_gate, dict):
         writing_revision = writing_gate.get("revision") or "no-change"
     else:
@@ -890,7 +934,7 @@ def validate_canonical_rename_state(
     active_root: Path,
     ledger: dict[str, Any],
     context: dict[str, Any],
-    rename: dict[str, str],
+    rename: dict[str, Any],
 ) -> None:
     old_name = rename["old_name"]
     new_name = rename["new_name"]
@@ -906,13 +950,28 @@ def validate_canonical_rename_state(
         or not isinstance(source_paths[0], str)
     ):
         raise InstallError("canonical rename 必须绑定唯一 upstream path")
-    expected_upstream_path = source_paths[0]
-    expected_ref = context.get("ref")
-    expected_commit = context.get("commit")
-    if not isinstance(expected_ref, str) or not expected_ref:
+    successor_source = rename.get("successor_source")
+    predecessor_source = rename.get("predecessor_source")
+    if not isinstance(successor_source, dict) or not isinstance(
+        predecessor_source, dict
+    ):
+        raise InstallError("canonical rename 缺少 predecessor/successor source identity")
+    expected_successor_path = source_paths[0]
+    expected_successor_ref = context.get("ref")
+    expected_successor_commit = context.get("commit")
+    if not isinstance(expected_successor_ref, str) or not expected_successor_ref:
         raise InstallError("canonical rename 缺少 source ref")
-    if not isinstance(expected_commit, str) or not expected_commit:
+    if not isinstance(expected_successor_commit, str) or not expected_successor_commit:
         raise InstallError("canonical rename 缺少 source commit")
+    context_successor = {
+        "upstream_path": expected_successor_path,
+        "ref": expected_successor_ref,
+        "commit": expected_successor_commit,
+    }
+    if successor_source != context_successor:
+        raise InstallError(
+            "canonical rename successor identity 与事务 source context 不一致"
+        )
 
     candidate = d_path(args.candidate, label="canonical rename candidate", must_exist=True)
     ensure_tree_no_reparse(candidate, label="canonical rename candidate")
@@ -956,9 +1015,9 @@ def validate_canonical_rename_state(
     expected_candidate_identity = {
         "canonical_predecessor": old_name,
         "source_identity": rename["source_id"],
-        "upstream_path": expected_upstream_path,
-        "ref": expected_ref,
-        "commit": expected_commit,
+        "upstream_path": successor_source["upstream_path"],
+        "ref": successor_source["ref"],
+        "commit": successor_source["commit"],
     }
     actual_candidate_identity = {
         "canonical_predecessor": candidate_predecessor,
@@ -1020,11 +1079,13 @@ def validate_canonical_rename_state(
         label="旧 active skill",
     )
     if (
-        old_upstream_path != expected_upstream_path
-        or old_ref != expected_ref
-        or old_commit != expected_commit
+        old_upstream_path != predecessor_source["upstream_path"]
+        or old_ref != predecessor_source["ref"]
+        or old_commit != predecessor_source["commit"]
     ):
-        raise InstallError("旧 active SOURCE.md 与 canonical source identity 不一致")
+        raise InstallError(
+            "旧 active SOURCE.md 与 canonical predecessor source identity 不一致"
+        )
 
     if not isinstance(ledger, dict):
         raise InstallError("source ledger 顶层必须是 JSON 对象")
@@ -1056,17 +1117,8 @@ def validate_canonical_rename_state(
         )
     if normalize_repo(source_entry.get("repo")) != normalize_repo(repository):
         raise InstallError("canonical rename 旧名 ledger source repo 不一致")
-    if source_entry.get("ref") != expected_ref:
+    if source_entry.get("ref") != predecessor_source["ref"]:
         raise InstallError("canonical rename 旧名 ledger source ref 不一致")
-    ledger_commits = {
-        value
-        for key in ("last_checked_commit", "catalog_ref", "commit", "revision")
-        if isinstance((value := source_entry.get(key)), str) and value
-    }
-    if ledger_commits != {expected_commit}:
-        raise InstallError(
-            f"canonical rename 旧名 ledger source commit 不一致：{sorted(ledger_commits)!r}"
-        )
 
 
 def guarded_retrieval(args: argparse.Namespace) -> str:

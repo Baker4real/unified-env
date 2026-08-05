@@ -43,7 +43,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 {
   "decision": "install",
   "source_status": "source-review",
-  "writing_great_skills": { "status": "no-change" },
+  "writing_for_agents": { "status": "no-change" },
   "skills": ["example-skill"],
   "bundled_skills": [
     {
@@ -72,7 +72,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 }
 ```
 
-`writing_great_skills` 是现役 decision manifest 的机器字段名；它承载的是 `writing-for-agents` gate 结果。字段名只有在实现、测试和部署协议同步迁移时才改变。
+`writing_for_agents` 是现役 decision manifest 的唯一机器字段名；`writing_great_skills` 已退役，只允许作为历史 evidence 原样保留。新 manifest 使用旧字段或同时提供新旧字段时必须失败闭锁。
 
 `candidate_integrity` 对本地 `--candidate` 是硬门槛。wrapper 的 `--candidate-integrity-only` 只读入口生成该对象；决策生产方必须把其原样写入 manifest，普通事务缺少 decision manifest 时在创建锁、temp 或 evidence 目录前失败闭锁。指纹同时绑定目录拓扑与文件哈希。wrapper 在复制前按上述固定排除规则重算输入指纹，复制后再次验证同一指纹；候选新增、删除或修改任何会进入 active 的文件或目录都会在备份和激活前失败。事务 manifest 同时记录输入绑定、decision manifest 快照路径及其 SHA-256、被排除文件的数量/总字节和写入 `SOURCE.md` 后的 staging seal；activation 在复制前、复制后、原子换入前和换入后都必须对照同一 seal，并在每次 seal 计算中拒绝 symlink、junction 或其他 reparse point。`.git` 或 `__pycache__` 无论是目录还是普通文件都不进入安装载荷；`.pyc` 只在它是文件时排除，同名普通目录属于受绑定载荷。被排除元数据若原先存在于 active skill，只保留在该次 update 的事务回滚备份中，不复制进新 active payload。候选已有 `SOURCE.md` 时，最后一个独立 `---` 分段必须无歧义地包含与目标目录一致的 `Skill`；仅未知字段、空值或冲突均在写入前拒绝。候选没有 `SOURCE.md` 时，wrapper 才生成新的受管记录。候选 `SOURCE.md` 在追加受管记录后仍命中本机临时根、当前 candidate 或原始 decision manifest 路径时拒绝事务；只有 wrapper 生成且值精确匹配的 `Local path`、`Active root`、`Guarded transaction evidence` 和 `Decision manifest` 字段可在自定义测试根下豁免临时根检查，不能用共同祖先遮蔽其他路径。
 
@@ -97,7 +97,17 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
   "canonical_rename": {
     "old_name": "old-skill",
     "new_name": "new-skill",
-    "source_id": "owner-repo-source"
+    "source_id": "owner-repo-source",
+    "predecessor_source": {
+      "upstream_path": "skills/old-skill",
+      "ref": "main",
+      "commit": "<predecessor-commit>"
+    },
+    "successor_source": {
+      "upstream_path": "skills/new-skill",
+      "ref": "main",
+      "commit": "<reviewed-commit>"
+    }
   },
   "source": {
     "id": "owner-repo-source",
@@ -109,7 +119,7 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
 }
 ```
 
-`canonical_rename.new_name` 必须等于唯一 candidate 目标和 manifest `skills` 中显式声明的唯一名称，`old_name` 必须是当前唯一 active predecessor，`source_id` 必须与 `source.id` 及覆盖旧名的唯一 ledger source entry 完全一致，并且该 id 在 live `sources` 中只能出现一次。direct-entry coverage 的 `name`/`skill` 若同时存在必须指向同一名称，否则在任何 ledger mutation 前失败闭锁。candidate `SOURCE.md` 只把最后一个独立 `---` 分段作为当前追加记录：历史段不参与当前 identity 校验，当前段同一字段出现不同值或空值即为冲突并失败闭锁。当前记录必须无歧义地记录 `Skill`、`Canonical predecessor`、`Source identity`、`Source repository`、`Upstream path`、`Ref` 和 `Commit or revision`；wrapper 将其与旧 active `SOURCE.md` 的最新追加记录、manifest 及 ledger 的 id/repo/ref/commit 结构化交叉核对。历史追加记录可以保留旧 ref/commit/path，但当前记录字段缺失或冲突、同 repo 错误 identity、错误 predecessor 或版本漂移都在 staging/activation 前失败闭锁。
+`canonical_rename.new_name` 必须等于唯一 candidate 目标和 manifest `skills` 中显式声明的唯一名称，`old_name` 必须是当前唯一 active predecessor，`source_id` 必须与 `source.id` 及覆盖旧名的唯一 ledger source entry 完全一致，并且该 id 在 live `sources` 中只能出现一次。`predecessor_source` 和 `successor_source` 都必须精确包含 `upstream_path`、`ref`、`commit`；successor 必须与顶层 `source` 的对应字段一致。direct-entry coverage 的 `name`/`skill` 若同时存在必须指向同一名称，否则在任何 ledger mutation 前失败闭锁。candidate `SOURCE.md` 只把最后一个独立 `---` 分段作为当前追加记录：历史段不参与当前 identity 校验，当前段同一字段出现不同值或空值即为冲突并失败闭锁。当前记录必须无歧义地记录 `Skill`、`Canonical predecessor`、`Source identity`、`Source repository`、`Upstream path`、`Ref` 和 `Commit or revision`；candidate 对照 successor identity，旧 active 的最新 `SOURCE.md` 记录对照 predecessor identity。ledger 继续校验唯一 coverage、source id、repo 和 predecessor ref；组级 ledger commit 可以比单个 predecessor 更新，不能替代两端 `SOURCE.md` 的精确身份绑定。历史追加记录可以保留旧 ref/commit/path，但当前记录字段缺失或冲突、同 repo 错误 identity、错误 predecessor 或版本漂移都在 staging/activation 前失败闭锁。
 
 事务先把旧 active 目录移动到同一 evidence backup，再以 no-replace 语义激活 successor。成功后 ledger 只给新名保留一个 live source coverage，并把旧名记录为 `deleted/status=moved/reason=canonical rename/new_name=<successor>`；catalog 和严格 closure 必须同时通过。activation、ledger、catalog、closure 或后置 hash 任一步失败时，按逆序移除本事务创建的新目录、恢复旧目录及其只读属性，并原样恢复 ledger/catalog；由竞争者创建的 successor 不属于本事务，必须保留。
 
