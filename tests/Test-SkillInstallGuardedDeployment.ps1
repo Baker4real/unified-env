@@ -53,9 +53,12 @@ finally {
     Remove-Item -LiteralPath $shadowRoot -Force -ErrorAction SilentlyContinue
 }
 
-Assert-True ($wrapperHelpExitCode -eq 0) 'production command wrapper must ignore PYTHONPATH yaml shadowing'
+$wrapperHelpText = $wrapperHelpOutput | Out-String
 Assert-True `
-    (-not (($wrapperHelpOutput | Out-String).Contains('untrusted yaml shadow imported', [StringComparison]::Ordinal))) `
+    ($wrapperHelpExitCode -eq 0) `
+    "production command wrapper must ignore PYTHONPATH yaml shadowing; exit=$wrapperHelpExitCode output=$wrapperHelpText"
+Assert-True `
+    (-not $wrapperHelpText.Contains('untrusted yaml shadow imported', [StringComparison]::Ordinal)) `
     'production command wrapper imported the untrusted yaml shadow module'
 
 $relativeFiles = @($result.files | ForEach-Object { [string]$_.relative })
