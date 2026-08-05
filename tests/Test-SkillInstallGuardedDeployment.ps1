@@ -77,25 +77,34 @@ Assert-True ($relativeFiles -contains 'generate_skill_catalog.py') 'deployment b
 $failureId = [guid]::NewGuid().ToString('N')
 $failureCodexRoot = Join-Path 'D:\Codex\tmp\skill-install-guarded-deployment-fixture' ("failure-$failureId-codex")
 $failureEvidenceRoot = Join-Path 'D:\Codex\tmp\skill-install-guarded-deployment-fixture' ("failure-$failureId-evidence")
-$nonPythonPath = Join-Path $PSHOME 'pwsh.exe'
+$failureRuntimeRoot = Join-Path 'D:\Codex\tmp\skill-install-guarded-deployment-fixture' ("failure-$failureId-runtime")
+$nonPythonPath = Join-Path $failureRuntimeRoot 'not-python.exe'
 $dependencyFailure = $null
 try {
-    $null = & $deployPath `
-        -SourceRoot $sourceRoot `
-        -CodexRoot $failureCodexRoot `
-        -EvidenceRoot $failureEvidenceRoot `
-        -PythonPath $nonPythonPath `
-        2>&1
-}
-catch {
-    $dependencyFailure = $_
-}
+    New-Item -ItemType Directory -Path $failureRuntimeRoot | Out-Null
+    Copy-Item -LiteralPath (Join-Path $env:WINDIR 'System32\where.exe') -Destination $nonPythonPath
+    try {
+        $null = & $deployPath `
+            -SourceRoot $sourceRoot `
+            -CodexRoot $failureCodexRoot `
+            -EvidenceRoot $failureEvidenceRoot `
+            -PythonPath $nonPythonPath `
+            2>&1
+    }
+    catch {
+        $dependencyFailure = $_
+    }
 
-Assert-True ($null -ne $dependencyFailure) 'deployment must fail when the target runtime cannot import PyYAML'
-Assert-True `
-    ($dependencyFailure.Exception.Message -like '*缺少 PyYAML*') `
-    'deployment must report the missing PyYAML dependency'
-Assert-True (-not (Test-Path -LiteralPath $failureCodexRoot)) 'failed dependency probe must not create the target Codex root'
-Assert-True (-not (Test-Path -LiteralPath $failureEvidenceRoot)) 'failed dependency probe must not create deployment evidence'
+    Assert-True ($null -ne $dependencyFailure) 'deployment must fail when the target runtime cannot import PyYAML'
+    Assert-True `
+        ($dependencyFailure.Exception.Message -like '*缺少 PyYAML*') `
+        'deployment must report the missing PyYAML dependency'
+    Assert-True (-not (Test-Path -LiteralPath $failureCodexRoot)) 'failed dependency probe must not create the target Codex root'
+    Assert-True (-not (Test-Path -LiteralPath $failureEvidenceRoot)) 'failed dependency probe must not create deployment evidence'
+}
+finally {
+    Remove-Item -LiteralPath $nonPythonPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $failureRuntimeRoot -Force -ErrorAction SilentlyContinue
+}
 
 Write-Output 'PASS Test-SkillInstallGuardedDeployment files=4 whatIf=1 yamlDependency=passed runtimeIsolation=passed missingYamlFailure=passed repositoryPathDependency=0'
