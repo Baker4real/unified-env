@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  module-boundaries:
+    name: Module boundaries
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+
+      - name: Validate ownership and interfaces
+        shell: pwsh
+        run: |
+          node .\tests\Test-ModuleBoundaries.cjs
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) { exit $testExit }
+
+  fixtures:
+    name: ${{ matrix.module }} fixtures
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - shared
+          - dev-environment
+          - codex-host
+          - skill-supply-chain
+          - host-safety
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+
+      - name: Run module fixture tests
+        shell: pwsh
+        run: |
+          node .\scripts\Run-PowerShellTests.cjs --module '${{ matrix.module }}'
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) { exit $testExit }

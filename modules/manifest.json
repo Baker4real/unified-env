@@ -322,6 +322,7 @@
   "shared": {
     "ownership": {
       "files": [
+        ".github/workflows/ci.yml",
         ".codegraph/.gitignore",
         ".gitattributes",
         ".gitignore",
