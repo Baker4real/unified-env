@@ -115,6 +115,6 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
 
 ## 可维护性
 
-部署入口必须以隔离模式验证目标受管 Python 可以导入 PyYAML，并确认 `yaml.safe_load` 可调用；真实 `install-skill-guarded.cmd` 也必须用 `python -I` 启动 wrapper，使部署探针与运行态保持相同的导入隔离。缺失、同名模块劫持或 API 不兼容时不得报告部署成功。
+部署入口必须以隔离模式验证目标受管 Python 可以导入 PyYAML，并确认 `yaml.safe_load` 可调用；真实 `install-skill-guarded.cmd` 也必须用 `python -X utf8 -I` 启动 wrapper，使部署探针与运行态保持相同的导入隔离，并避免非 UTF-8 Windows runner 在输出中文帮助时触发编码失败。缺失、同名模块劫持或 API 不兼容时不得报告部署成功。
 
 项目源部署闭包由 `scripts\skill_source_record.py`、`scripts\generate_skill_catalog.py`、`scripts\install_skill_guarded.py` 和 `scripts\install-skill-guarded.cmd` 组成；部署后 installer 与 catalog 从同目录加载共享 `SOURCE.md` parser，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁项目源、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。

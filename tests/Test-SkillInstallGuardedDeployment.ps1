@@ -12,6 +12,7 @@ $commandWrapperPath = Join-Path $projectRoot 'scripts\install-skill-guarded.cmd'
 $sourceRecordPath = Join-Path $projectRoot 'scripts\skill_source_record.py'
 $sourceRoot = Join-Path $projectRoot 'scripts'
 $wrapperSource = Get-Content -LiteralPath $wrapperPath -Raw
+$commandWrapperSource = Get-Content -LiteralPath $commandWrapperPath -Raw
 
 Assert-True `
     ($wrapperSource.Contains('Path(__file__).absolute().with_name("generate_skill_catalog.py")', [StringComparison]::Ordinal)) `
@@ -20,6 +21,9 @@ Assert-True `
     (-not $wrapperSource.Contains('D:\Codex\projects\统一环境\scripts\generate_skill_catalog.py', [StringComparison]::OrdinalIgnoreCase)) `
     'installer must not depend on the source repository generator path'
 Assert-True (Test-Path -LiteralPath $sourceRecordPath -PathType Leaf) 'deployment source is missing the shared SOURCE.md parser'
+Assert-True `
+    ($commandWrapperSource.Contains('"%CODEX_PYTHON%" -X utf8 -I "%WRAPPER%" %*', [StringComparison]::Ordinal)) `
+    'production command wrapper must enable UTF-8 mode before isolated execution'
 
 $shadowRoot = Join-Path 'D:\Codex\tmp\skill-install-guarded-deployment-fixture' ('yaml-shadow-' + [guid]::NewGuid().ToString('N'))
 $shadowModule = Join-Path $shadowRoot 'yaml.py'
