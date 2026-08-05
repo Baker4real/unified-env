@@ -659,7 +659,7 @@ def validate_decision_manifest(path: Path) -> dict[str, Any]:
     if "writing_great_skills" in data:
         raise InstallError(
             "guard decision manifest 不得使用已退役的 writing_great_skills 字段；"
-            "请改用 writing_for_agents"
+            "请改用 writing_for_agents（writing-for-agents gate）"
         )
     writing_gate = data.get("writing_for_agents")
     if isinstance(writing_gate, dict):
