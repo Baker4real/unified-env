@@ -77,7 +77,7 @@ Assert-True ($relativeFiles -contains 'generate_skill_catalog.py') 'deployment b
 $failureId = [guid]::NewGuid().ToString('N')
 $failureCodexRoot = Join-Path 'D:\Codex\tmp\skill-install-guarded-deployment-fixture' ("failure-$failureId-codex")
 $failureEvidenceRoot = Join-Path 'D:\Codex\tmp\skill-install-guarded-deployment-fixture' ("failure-$failureId-evidence")
-$nonPythonPath = 'D:\Codex\tools\PowerShell\7.6.3\pwsh.exe'
+$nonPythonPath = Join-Path $PSHOME 'pwsh.exe'
 $dependencyFailure = $null
 try {
     $null = & $deployPath `
