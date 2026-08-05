@@ -2316,7 +2316,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             f"Upstream path: `{state['upstream_path']}`",
             "Ref: `main`",
             f"Commit or revision: `{state['source_commit']}`",
-            "writing-great-skills gate:",
+            "writing-for-agents gate:",
             f"Local overlay: replayed (canonical rename {old_name} -> {new_name})",
             "Guarded transaction evidence:",
             "Decision manifest:",

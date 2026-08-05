@@ -663,7 +663,7 @@ def validate_decision_manifest(path: Path) -> dict[str, Any]:
         gate_status = writing_gate
     if gate_status not in {"pass", "passed", "no-change", "compliant"}:
         raise InstallError(
-            "guard decision manifest 必须证明 writing-great-skills 已通过或无需修改"
+            "guard decision manifest 必须证明 writing-for-agents 已通过或无需修改"
         )
     return data
 
@@ -1117,7 +1117,7 @@ def source_record_text(
     lines.extend(
         [
             f"Retrieval: `{command}`",
-            f"writing-great-skills gate: {context['writing_revision']}",
+            f"writing-for-agents gate: {context['writing_revision']}",
             f"Local overlay: {context['overlay_status']}"
             + (f" ({context['overlay_summary']})" if context["overlay_summary"] else ""),
             "Guarded activation: complete only after ledger, closure, catalog, and hash postchecks pass.",

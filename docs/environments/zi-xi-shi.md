@@ -104,7 +104,7 @@ intent: 记录自习室设备的受控环境事实与差异
 - 本机 catalog：`D:\Codex\.codex\skill-catalog\catalog.json`
 - 运行证据：`D:\Codex\.codex\run-evidence\skill-install-guarded\`
 
-不得把安装后的回写职责放入被安装的 skill，也不得直接修改 bundled `.system` 安装器。新安装或更新必须经过 decision manifest、`writing-great-skills` 证据、SOURCE/ledger、严格资源闭包和 catalog 后置校验；任一门槛失败都应回滚。
+不得把安装后的回写职责放入被安装的 skill，也不得直接修改 bundled `.system` 安装器。新安装或更新必须经过 decision manifest、`writing-for-agents` 证据、SOURCE/ledger、严格资源闭包和 catalog 后置校验；任一门槛失败都应回滚。
 
 ## Codex 主机 Hook 当前边界（2026-07-24）
 

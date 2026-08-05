@@ -17,7 +17,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 | 层 | 唯一职责 | 入口 |
 | --- | --- | --- |
-| 候选治理 | 来源、采用度、重叠、`writing-great-skills` 和 install/update 决策 | `D:\Codex\.codex\skills\skill-install-guard\SKILL.md` |
+| 候选治理 | 来源、采用度、重叠、`writing-for-agents` 和 install/update 决策 | `D:\Codex\.codex\skills\skill-install-guard\SKILL.md` |
 | 事务执行 | 暂存、备份、激活、台账写入、回滚和后置校验 | `D:\Codex\.codex\scripts\install-skill-guarded.cmd` |
 | 派生目录 | 从 active root、`SOURCE.md` 和 ledger 重新扫描生成 catalog | `scripts\generate_skill_catalog.py` |
 | 上游下载 | 只提供候选下载/复制能力 | `.system\skill-installer` |
@@ -26,7 +26,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 ## 事务流程
 
-1. `skill-install-guard` 产生 decision manifest，必须包含 `install` 或 `update`、`source-pass/source-review` 和 `writing-great-skills` 通过证据。
+1. `skill-install-guard` 产生 decision manifest，必须包含 `install` 或 `update`、`source-pass/source-review` 和 `writing-for-agents` 通过证据。
 2. wrapper 将远端候选下载到 D 盘 staging；本地 `--candidate` 必须先用 decision manifest 绑定 `SKILL.md` 和安装载荷 SHA-256，再复制已审查内容。安装载荷排除任何层级的 `.git`、`__pycache__` 和 `.pyc`，这些来源仓库/解释器元数据不进入 active skill。所有 D 盘输入和写入路径都检查目标及全部既有祖先，任何父级 symlink、junction 或其他 reparse point 都在读取、暂存、备份或激活前失败闭锁；canonical identity 读取还必须先完成 candidate 与 predecessor 整树 reparse 审计。顶层和 manifest 声明的 bundled skill 若包含 `agents/openai.yaml`，wrapper 必须结构化解析并要求 `interface.display_name` 是只含可打印 ASCII 的非空英文身份；只有 `short_description` 和 `default_prompt` 等解释字段可中文化。YAML 非法、字段类型错误或非 ASCII 身份都必须在 active/state 备份之前失败闭锁。
 3. wrapper 在事务身份建立后把已验证的 decision manifest 原子快照到持久 transaction evidence，并写入/保留 `SOURCE.md` 和 staging ledger。受管追加记录用 transaction evidence 与快照替代本地 candidate 和原始 decision manifest 输入路径；repo/ref/upstream、active path 等持久来源字段继续保留。候选已有记录仍包含当前输入路径或本机临时根时在激活前失败闭锁。父 skill 内会被运行时发现的 bundled skill 必须由 `bundled_skills` 逐项绑定安全相对路径和 frontmatter 名称，并各自保留可验证的 `SOURCE.md`；wrapper 把其 active-root 相对目录写入同一事务 ledger。随后运行严格资源闭包检查。
 4. wrapper 在 active root 下重新创建候选内容，不移动 staging 目录，也不复制 staging 的 owner、DACL 或 SACL；目标目录和文件必须继承本机 active root 的权限。
@@ -71,6 +71,8 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
   }
 }
 ```
+
+`writing_great_skills` 是现役 decision manifest 的机器字段名；它承载的是 `writing-for-agents` gate 结果。字段名只有在实现、测试和部署协议同步迁移时才改变。
 
 `candidate_integrity` 对本地 `--candidate` 是硬门槛。wrapper 的 `--candidate-integrity-only` 只读入口生成该对象；决策生产方必须把其原样写入 manifest，普通事务缺少 decision manifest 时在创建锁、temp 或 evidence 目录前失败闭锁。指纹同时绑定目录拓扑与文件哈希。wrapper 在复制前按上述固定排除规则重算输入指纹，复制后再次验证同一指纹；候选新增、删除或修改任何会进入 active 的文件或目录都会在备份和激活前失败。事务 manifest 同时记录输入绑定、decision manifest 快照路径及其 SHA-256、被排除文件的数量/总字节和写入 `SOURCE.md` 后的 staging seal；activation 在复制前、复制后、原子换入前和换入后都必须对照同一 seal，并在每次 seal 计算中拒绝 symlink、junction 或其他 reparse point。`.git` 或 `__pycache__` 无论是目录还是普通文件都不进入安装载荷；`.pyc` 只在它是文件时排除，同名普通目录属于受绑定载荷。被排除元数据若原先存在于 active skill，只保留在该次 update 的事务回滚备份中，不复制进新 active payload。候选已有 `SOURCE.md` 时，最后一个独立 `---` 分段必须无歧义地包含与目标目录一致的 `Skill`；仅未知字段、空值或冲突均在写入前拒绝。候选没有 `SOURCE.md` 时，wrapper 才生成新的受管记录。候选 `SOURCE.md` 在追加受管记录后仍命中本机临时根、当前 candidate 或原始 decision manifest 路径时拒绝事务；只有 wrapper 生成且值精确匹配的 `Local path`、`Active root`、`Guarded transaction evidence` 和 `Decision manifest` 字段可在自定义测试根下豁免临时根检查，不能用共同祖先遮蔽其他路径。
 
