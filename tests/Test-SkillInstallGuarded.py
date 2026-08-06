@@ -1094,6 +1094,99 @@ class SkillInstallGuardedTests(unittest.TestCase):
             [{"path": "root-a/vendor/new-skill", "name": "new-skill"}],
         )
 
+    def test_update_ledger_records_overlay_change_for_each_skill(self) -> None:
+        data = {
+            "sources": [{"id": "shared-source", "skills": []}],
+            "unresolved": [],
+            "deleted": [],
+        }
+        context = {
+            "source_id": "shared-source",
+            "source_type": "github",
+            "repo": "https://github.com/example/shared-source",
+            "ref": "v2.0.0",
+            "commit": "abcdef0123456789",
+            "ledger_updates": {},
+            "bundled_skill_proofs": (),
+            "overlay_status": "replayed",
+            "overlay_summary": "restore upstream provenance",
+        }
+
+        result = WRAPPER.update_ledger(
+            data,
+            names=["skill-a", "skill-b"],
+            context=context,
+        )
+
+        source = result["sources"][0]
+        self.assertEqual(
+            source["local_changes"],
+            [
+                {
+                    "skill": "skill-a",
+                    "date": WRAPPER.today(),
+                    "summary": "guarded wrapper: restore upstream provenance",
+                },
+                {
+                    "skill": "skill-b",
+                    "date": WRAPPER.today(),
+                    "summary": "guarded wrapper: restore upstream provenance",
+                },
+            ],
+        )
+
+    def test_update_ledger_assigns_legacy_overlay_change_before_appending(self) -> None:
+        data = {
+            "sources": [
+                {
+                    "id": "shared-source",
+                    "skills": [],
+                    "local_changes": [
+                        {
+                            "date": "2026-08-05",
+                            "summary": "guarded wrapper: restore upstream provenance",
+                        }
+                    ],
+                }
+            ],
+            "unresolved": [],
+            "deleted": [],
+        }
+        context = {
+            "source_id": "shared-source",
+            "source_type": "github",
+            "repo": "https://github.com/example/shared-source",
+            "ref": "v2.0.0",
+            "commit": "abcdef0123456789",
+            "ledger_updates": {},
+            "bundled_skill_proofs": (),
+            "overlay_status": "replayed",
+            "overlay_summary": "restore upstream provenance",
+        }
+
+        result = WRAPPER.update_ledger(
+            data,
+            names=["skill-a", "skill-b"],
+            context=context,
+        )
+
+        source = result["sources"][0]
+        self.assertEqual(
+            source["local_changes"],
+            [
+                {
+                    "skill": "skill-a",
+                    "date": "2026-08-05",
+                    "summary": "guarded wrapper: restore upstream provenance",
+                },
+                {
+                    "skill": "skill-b",
+                    "date": WRAPPER.today(),
+                    "summary": "guarded wrapper: restore upstream provenance",
+                },
+            ],
+        )
+
     def test_bundled_skill_rejects_parent_traversal_path(self) -> None:
         name = "test-skill-wrapper"
         candidate = self.write_candidate(name, "reject bundled traversal")

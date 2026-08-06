@@ -86,6 +86,8 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 `source.ledger_updates` 可选且只允许更新 `action`、`installed_version`、`path`、`resource_paths`、`status` 五个字段；`action`、`installed_version`、`path` 与 `status` 必须是非空字符串，`resource_paths` 必须是非空字符串数组。未知字段或错误类型会在 activation 前拒绝事务，避免 decision manifest 静默改写任意台账内容。
 
+本地 overlay 变更在目标 source 的 `local_changes` 中按 skill 独立记账，每条记录必须包含 `skill`、`date` 和 `summary`，并以 `(skill, summary)` 去重。兼容旧账本时，同摘要且缺少 `skill` 的 legacy 记录只允许依次归属给本次事务中的一个 skill；其余 skill 必须追加完整记录，不能因共享摘要而丢失归因。
+
 ## Canonical rename
 
 canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不是“安装新名后手工删除旧名”。manifest 必须额外包含：

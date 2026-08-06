@@ -1782,8 +1782,28 @@ def update_ledger(
             raise InstallError(f"source ledger local_changes 不是数组：{source_id}")
         summary = context["overlay_summary"] or context["overlay_status"]
         marker = f"guarded wrapper: {summary}"
-        if not any(isinstance(item, dict) and item.get("summary") == marker for item in changes):
-            changes.append({"date": today(), "summary": marker})
+        for name in names:
+            if any(
+                isinstance(item, dict)
+                and item.get("skill") == name
+                and item.get("summary") == marker
+                for item in changes
+            ):
+                continue
+            legacy_record = next(
+                (
+                    item
+                    for item in changes
+                    if isinstance(item, dict)
+                    and "skill" not in item
+                    and item.get("summary") == marker
+                ),
+                None,
+            )
+            if legacy_record is not None:
+                legacy_record["skill"] = name
+                continue
+            changes.append({"skill": name, "date": today(), "summary": marker})
     data["updated_at"] = today()
     return data
 
