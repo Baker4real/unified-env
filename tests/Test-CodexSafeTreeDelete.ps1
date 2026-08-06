@@ -425,6 +425,12 @@ try {
             rootDeletionPurpose = 'rebuildable-build-output'
         },
         [pscustomobject]@{
+            id = 'environment-hook-lib-pycache'
+            capabilityRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks\hooks\lib\__pycache__'
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'
+        },
+        [pscustomobject]@{
             id = 'environment-scripts-pycache'
             capabilityRoot = 'D:\Codex\projects\统一环境\scripts\__pycache__'
             minimumDescendantDepth = 0
