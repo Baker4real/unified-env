@@ -973,17 +973,28 @@ LEDGER_UPDATE_FIELDS = {
     "action",
     "installed_version",
     "path",
+    "repo_stars",
+    "repo_stars_checked_at",
     "resource_paths",
     "status",
     "tag",
 }
 
 
+def is_canonical_ledger_string(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and value == value.strip()
+        and value.isprintable()
+    )
+
+
 def ledger_updates(source: dict[str, Any]) -> dict[str, Any]:
     """Validate optional source-ledger facts supplied by an update decision."""
-    raw = source.get("ledger_updates")
-    if raw is None:
+    if "ledger_updates" not in source:
         return {}
+    raw = source["ledger_updates"]
     if not isinstance(raw, dict):
         raise InstallError("source.ledger_updates 必须是对象")
 
@@ -993,17 +1004,50 @@ def ledger_updates(source: dict[str, Any]) -> dict[str, Any]:
             "source.ledger_updates 包含不允许的字段：" + ", ".join(unexpected)
         )
 
+    if ("repo_stars" in raw) != ("repo_stars_checked_at" in raw):
+        raise InstallError(
+            "source.ledger_updates.repo_stars 与 repo_stars_checked_at 必须成对提供"
+        )
+
     normalized: dict[str, Any] = {}
     for field, value in raw.items():
         if field == "resource_paths":
             if not isinstance(value, list) or not value or not all(
-                isinstance(item, str) and item.strip() for item in value
+                is_canonical_ledger_string(item) for item in value
             ):
-                raise InstallError("source.ledger_updates.resource_paths 必须是非空字符串数组")
+                raise InstallError(
+                    "source.ledger_updates.resource_paths 必须是规范的非空字符串数组"
+                )
             normalized[field] = list(value)
             continue
-        if not isinstance(value, str) or not value.strip():
-            raise InstallError(f"source.ledger_updates.{field} 必须是非空字符串")
+        if field == "repo_stars":
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise InstallError(
+                    "source.ledger_updates.repo_stars 必须是非负整数"
+                )
+            normalized[field] = value
+            continue
+        if field == "repo_stars_checked_at":
+            if not isinstance(value, str):
+                raise InstallError(
+                    "source.ledger_updates.repo_stars_checked_at 必须是 ISO 日期"
+                )
+            try:
+                parsed_date = _datetime.date.fromisoformat(value)
+            except ValueError as exc:
+                raise InstallError(
+                    "source.ledger_updates.repo_stars_checked_at 必须是 ISO 日期"
+                ) from exc
+            if value != parsed_date.isoformat():
+                raise InstallError(
+                    "source.ledger_updates.repo_stars_checked_at 必须是 ISO 日期"
+                )
+            normalized[field] = value
+            continue
+        if not is_canonical_ledger_string(value):
+            raise InstallError(
+                f"source.ledger_updates.{field} 必须是规范的非空字符串"
+            )
         normalized[field] = value
     return normalized
 

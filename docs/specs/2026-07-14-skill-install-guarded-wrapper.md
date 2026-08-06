@@ -84,7 +84,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 `decision=update` 才允许替换已有 active skill。直接调用 `.system\skill-installer`、手工复制到 active root 或跳过 decision manifest，都不算完成的安装流程。
 
-`source.ledger_updates` 可选且只允许更新 `action`、`installed_version`、`path`、`resource_paths`、`status` 五个字段；`action`、`installed_version`、`path` 与 `status` 必须是非空字符串，`resource_paths` 必须是非空字符串数组。未知字段或错误类型会在 activation 前拒绝事务，避免 decision manifest 静默改写任意台账内容。
+`source.ledger_updates` 可选且只允许更新 `action`、`installed_version`、`path`、`repo_stars`、`repo_stars_checked_at`、`resource_paths`、`status`、`tag`。`action`、`installed_version`、`path`、`status`、`tag` 和 `resource_paths` 各项必须是非空、可打印且无首尾空白的规范字符串。`repo_stars` 必须是非负整数，`repo_stars_checked_at` 必须是规范 ISO 日期，且两者必须成对提供，使采用度数值始终带观测日期。未知字段、错误类型、非规范字符串或缺少配对字段会在 activation 前拒绝事务，避免 decision manifest 静默改写任意台账内容。
 
 本地 overlay 变更在目标 source 的 `local_changes` 中按 skill 独立记账，每条记录必须包含 `skill`、`date` 和 `summary`，并以 `(skill, summary)` 去重。兼容旧账本时，同摘要且缺少 `skill` 的 legacy 记录只允许依次归属给本次事务中的一个 skill；其余 skill 必须追加完整记录，不能因共享摘要而丢失归因。
 

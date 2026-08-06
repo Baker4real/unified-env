@@ -725,6 +725,8 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 "action": "updated",
                 "installed_version": "3.5.1",
                 "path": ".codex/skills/test-skill-wrapper",
+                "repo_stars": 19292,
+                "repo_stars_checked_at": "2026-08-06",
                 "resource_paths": ["skill/SKILL.md"],
                 "status": "updated-with-local-overlay",
                 "tag": "v3.5.1",
@@ -742,6 +744,8 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(source["action"], "updated")
         self.assertEqual(source["installed_version"], "3.5.1")
         self.assertEqual(source["path"], ".codex/skills/test-skill-wrapper")
+        self.assertEqual(source["repo_stars"], 19292)
+        self.assertEqual(source["repo_stars_checked_at"], "2026-08-06")
         self.assertEqual(source["resource_paths"], ["skill/SKILL.md"])
         self.assertEqual(source["status"], "updated-with-local-overlay")
         self.assertEqual(source["tag"], "v3.5.1")
@@ -766,6 +770,50 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 names=["test-skill-wrapper"],
                 bundled_proofs=(),
             )
+
+    def test_update_refreshes_repo_stars_and_preserves_existing_source_fields(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "旧采用度")
+        initial_manifest = self.write_manifest(
+            name,
+            "install",
+            ledger_updates={
+                "path": ".codex/skills/test-skill-wrapper",
+                "repo_stars": 15700,
+                "repo_stars_checked_at": "2026-08-05",
+                "status": "updated-with-local-overlay",
+                "tag": "v3.5.1",
+            },
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            initial_code = WRAPPER.main(self.wrapper_args(candidate, initial_manifest))
+        self.assertEqual(initial_code, 0)
+
+        (candidate / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: 新采用度\n---\n\n# {name}\n",
+            encoding="utf-8",
+        )
+        update_manifest = self.write_manifest(
+            name,
+            "update",
+            ledger_updates={
+                "repo_stars": 19292,
+                "repo_stars_checked_at": "2026-08-06",
+            },
+        )
+        update_args = self.wrapper_args(candidate, update_manifest)
+        update_args.append("--update")
+        with contextlib.redirect_stdout(io.StringIO()):
+            update_code = WRAPPER.main(update_args)
+        self.assertEqual(update_code, 0)
+
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        source = next(item for item in ledger["sources"] if item["id"] == "local-test")
+        self.assertEqual(source["repo_stars"], 19292)
+        self.assertEqual(source["repo_stars_checked_at"], "2026-08-06")
+        self.assertEqual(source["path"], ".codex/skills/test-skill-wrapper")
+        self.assertEqual(source["status"], "updated-with-local-overlay")
+        self.assertEqual(source["tag"], "v3.5.1")
 
     def test_install_rejects_chinese_display_name_before_activation(self) -> None:
         name = "test-skill-wrapper"
@@ -2270,6 +2318,17 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertFalse((self.active / "test-skill-wrapper").exists())
 
+    def test_install_rejects_null_ledger_updates_before_activation(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "空 ledger updates")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["source"]["ledger_updates"] = None
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+        self.assertEqual(code, 2)
+        self.assertFalse((self.active / "test-skill-wrapper").exists())
+
     def test_install_rejects_non_list_resource_paths_before_activation(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "错误 resource paths")
         manifest = self.write_manifest(
@@ -2293,6 +2352,94 @@ class SkillInstallGuardedTests(unittest.TestCase):
             code = WRAPPER.main(self.wrapper_args(candidate, manifest))
         self.assertEqual(code, 2)
         self.assertFalse((self.active / "test-skill-wrapper").exists())
+
+    def test_install_rejects_invalid_repo_stars_before_activation(self) -> None:
+        invalid_values = (-1, True, 19.2, "19292")
+        for index, value in enumerate(invalid_values):
+            with self.subTest(value=value):
+                name = f"test-skill-wrapper-invalid-stars-{index}"
+                candidate = self.write_candidate(name, "错误 star 数")
+                manifest = self.write_manifest(
+                    name,
+                    "install",
+                    ledger_updates={
+                        "repo_stars": value,
+                        "repo_stars_checked_at": "2026-08-06",
+                    },
+                )
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    code = WRAPPER.main(
+                        self.wrapper_args(candidate, manifest, name=name)
+                    )
+                self.assertEqual(code, 2)
+                self.assertFalse((self.active / name).exists())
+
+    def test_install_rejects_invalid_repo_stars_date_before_activation(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "错误 star 观测日期")
+        manifest = self.write_manifest(
+            "test-skill-wrapper",
+            "install",
+            ledger_updates={
+                "repo_stars": 19292,
+                "repo_stars_checked_at": "2026-02-30",
+            },
+        )
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+        self.assertEqual(code, 2)
+        self.assertFalse((self.active / "test-skill-wrapper").exists())
+
+    def test_install_rejects_unpaired_repo_stars_metadata_before_activation(self) -> None:
+        for index, ledger_updates in enumerate((
+            {"repo_stars": 19292},
+            {"repo_stars_checked_at": "2026-08-06"},
+        )):
+            with self.subTest(ledger_updates=ledger_updates):
+                name = f"test-skill-wrapper-unpaired-stars-{index}"
+                candidate = self.write_candidate(name, "未配对 star 元数据")
+                manifest = self.write_manifest(
+                    name,
+                    "install",
+                    ledger_updates=ledger_updates,
+                )
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    code = WRAPPER.main(
+                        self.wrapper_args(candidate, manifest, name=name)
+                    )
+                self.assertEqual(code, 2)
+                self.assertFalse((self.active / name).exists())
+
+    def test_install_rejects_noncanonical_ledger_strings_before_activation(self) -> None:
+        invalid_updates = (
+            {"status": " updated "},
+            {"status": "updated\nforged"},
+            {"resource_paths": [" SKILL.md "]},
+            {"resource_paths": ["SKILL.md\nforged"]},
+        )
+        for index, ledger_updates in enumerate(invalid_updates):
+            with self.subTest(ledger_updates=ledger_updates):
+                name = f"test-skill-wrapper-noncanonical-{index}"
+                candidate = self.write_candidate(name, "非规范 ledger 字符串")
+                manifest = self.write_manifest(
+                    name,
+                    "install",
+                    ledger_updates=ledger_updates,
+                )
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    code = WRAPPER.main(
+                        self.wrapper_args(candidate, manifest, name=name)
+                    )
+                self.assertEqual(code, 2)
+                self.assertFalse((self.active / name).exists())
 
     def test_install_drops_private_staging_acl_and_verifies_new_process_readability(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "测试 ACL 继承")
