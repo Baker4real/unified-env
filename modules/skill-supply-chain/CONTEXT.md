@@ -9,7 +9,7 @@ intent: 定义 Skill 来源、安装、catalog、ledger 和发布政策的责任
 
 ## 范围
 
-本模块拥有 guarded install、`SOURCE.md`/ledger 一致性、资源闭包、本机 Skill Catalog 和 GitHub default-branch overlay 政策。
+本模块拥有 guarded install、跨来源 merge retirement、`SOURCE.md`/ledger 一致性、资源闭包、本机 Skill Catalog 和 GitHub default-branch overlay 政策。
 
 ## 不属于本模块
 
@@ -26,7 +26,7 @@ intent: 定义 Skill 来源、安装、catalog、ledger 和发布政策的责任
 
 ## 接口与测试
 
-对外接口是 `scripts/install-skill-guarded.cmd`、`scripts/generate_skill_catalog.py` 和受管 overlay/deploy 入口。专项测试列在 `modules/manifest.json` 的 `python` 和 `node` 清单中。
+对外接口是 `scripts/install-skill-guarded.cmd`、`scripts/generate_skill_catalog.py` 和受管 overlay/deploy 入口。跨来源职责合并通过 installer 的 `merge_retirement` decision manifest 字段完成；成功 backup 必须在独立验收后由受管安全树删除入口清理。专项测试列在 `modules/manifest.json` 的 `python` 和 `node` 清单中。
 
 旧 `SOURCE.md` 末尾记录的 schema 迁移只允许使用
 `scripts/reconcile_skill_source_records.py`：它在隔离镜像达到 strict

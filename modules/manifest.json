@@ -200,7 +200,7 @@
       "kind": "domain",
       "root": "modules/skill-supply-chain",
       "context": "modules/skill-supply-chain/CONTEXT.md",
-      "summary": "Skill 来源、guarded install、catalog、ledger 与 Git overlay 发布政策。",
+      "summary": "Skill 来源、guarded install、跨来源 merge retirement、catalog、ledger 与 Git overlay 发布政策。",
       "interfaces": [
         "scripts/Apply-GitHubDefaultBranchSkillOverlay.cjs",
         "scripts/Deploy-GitHubDefaultBranchSkillOverlay.ps1",

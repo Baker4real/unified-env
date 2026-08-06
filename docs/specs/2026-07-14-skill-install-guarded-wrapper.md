@@ -123,6 +123,52 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
 
 事务先把旧 active 目录移动到同一 evidence backup，再以 no-replace 语义激活 successor。成功后 ledger 只给新名保留一个 live source coverage，并把旧名记录为 `deleted/status=moved/reason=canonical rename/new_name=<successor>`；catalog 和严格 closure 必须同时通过。activation、ledger、catalog、closure 或后置 hash 任一步失败时，按逆序移除本事务创建的新目录、恢复旧目录及其只读属性，并原样恢复 ledger/catalog；由竞争者创建的 successor 不属于本事务，必须保留。
 
+## Cross-source merge retirement
+
+当一个 active skill 的职责已经分别并入不同来源的 survivor 时，使用单候选 `decision=update` 的 `merge_retirement`，不能伪装成同源 canonical rename，也不能先安装后手工删除：
+
+```json
+{
+  "decision": "update",
+  "skills": ["leader"],
+  "merge_retirement": {
+    "retired": {
+      "name": "decision-to-brief",
+      "source_id": "local-candidate-decision-to-brief",
+      "skill_md_sha256": "<64-hex-sha256>",
+      "tree_seal": {
+        "directory_count": 1,
+        "file_count": 3,
+        "tree_sha256": "<64-hex-sha256>"
+      }
+    },
+    "survivors": [
+      {
+        "name": "goal-first",
+        "skill_md_sha256": "<64-hex-sha256>"
+      },
+      {
+        "name": "leader",
+        "skill_md_sha256": "<64-hex-sha256>"
+      }
+    ],
+    "reason": "merged into goal-first and leader"
+  }
+}
+```
+
+`merge_retirement` 只允许单个本地 candidate update，且不能与 `canonical_rename` 同时出现。退役对象必须与 update 目标属于不同 source id，名称按 Windows 大小写折叠后也不能相同；所有 direct-entry 和 `skills` ledger coverage 同样按大小写折叠比较，大小写别名属于同一 live identity，不能绕过唯一覆盖门禁。`retired` 精确绑定 active frontmatter name、唯一 live ledger source coverage、`SKILL.md` SHA-256 和整树 seal。update 目标必须由 manifest 中 survivor source id 的唯一 live `sources` 条目覆盖，同仓库的其他 source id 不能替代。survivors 至少包含本次 update 目标，名称不得重复或等于退役对象；目标 survivor 绑定 candidate `SKILL.md`，其他 survivor 绑定当前 active `SKILL.md`。
+
+事务在 active/state 备份前和真正写入前各复验一次所有绑定。写入阶段先把退役 active 移到同一事务 backup，再激活 update candidate；随后 ledger 移除退役 live coverage，在原 source entry 和顶层 `deleted` 各记录 `deleted-by-user`、reason、survivors、source id、旧 `SKILL.md` 哈希和旧整树 seal。catalog 重建和 strict closure 通过后，还必须证明：
+
+- 退役 active 路径不存在；
+- 重新读取的磁盘 ledger 与本事务写入结果精确一致；
+- `sources` 与 `unresolved` 不再覆盖退役名称，且顶层 `deleted` 与 retired source 的 `deleted_skills` 记录都唯一完整；direct-entry source 在移除退役名称后规范化为显式空 `skills` 数组；
+- catalog 不再包含退役 active artifact；
+- 每个 survivor 的 active `SKILL.md`、catalog hash 和 ledger coverage 与 manifest 一致。
+
+任一 activation、ledger、catalog、closure 或 postcondition 失败都恢复退役 skill、update 目标、ledger 和 catalog。成功事务保留一次可恢复 backup，并在结果中标记 `backup_cleanup=required-after-transaction-success`；调用方完成独立 active/hash/ledger/catalog/closure 验收后，必须只用 `D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd` 的 Plan/Apply/Purge 删除该精确 backup。最终退役证据只保留旧内容 seal、哈希、ledger 动作与安全删除 transaction，不保留 payload 副本。
+
 ## 可维护性
 
 部署入口必须以隔离模式验证目标受管 Python 可以导入 PyYAML，并确认 `yaml.safe_load` 可调用；真实 `install-skill-guarded.cmd` 也必须用 `python -X utf8 -I` 启动 wrapper，使部署探针与运行态保持相同的导入隔离，并避免非 UTF-8 Windows runner 在输出中文帮助时触发编码失败。缺失、同名模块劫持或 API 不兼容时不得报告部署成功。

@@ -757,6 +757,155 @@ def canonical_rename_spec(
     return normalized
 
 
+def normalize_tree_seal(value: Any, *, label: str) -> dict[str, Any]:
+    expected_fields = {"directory_count", "file_count", "tree_sha256"}
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise InstallError(f"{label} 必须精确包含 directory_count、file_count、tree_sha256")
+    directory_count = value.get("directory_count")
+    file_count = value.get("file_count")
+    tree_sha256 = value.get("tree_sha256")
+    if (
+        isinstance(directory_count, bool)
+        or not isinstance(directory_count, int)
+        or directory_count < 0
+        or isinstance(file_count, bool)
+        or not isinstance(file_count, int)
+        or file_count < 1
+        or not isinstance(tree_sha256, str)
+        or not SHA256_HEX.fullmatch(tree_sha256)
+    ):
+        raise InstallError(f"{label} 包含不合法的内容 seal")
+    return {
+        "directory_count": directory_count,
+        "file_count": file_count,
+        "tree_sha256": tree_sha256.casefold(),
+    }
+
+
+def merge_retirement_spec(
+    *,
+    args: argparse.Namespace,
+    decision: dict[str, Any],
+    names: list[str],
+) -> dict[str, Any] | None:
+    raw = decision.get("merge_retirement")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) != {"retired", "survivors", "reason"}:
+        raise InstallError(
+            "merge_retirement 必须精确包含 retired、survivors、reason"
+        )
+    if decision.get("decision") != "update":
+        raise InstallError("merge retirement 只允许 decision=update")
+    if not args.candidate or len(names) != 1:
+        raise InstallError("merge retirement 只支持单个本地 --candidate update")
+    if decision.get("canonical_rename") is not None:
+        raise InstallError("merge_retirement 不能与 canonical_rename 同时使用")
+
+    retired = raw.get("retired")
+    retired_fields = {
+        "name",
+        "source_id",
+        "skill_md_sha256",
+        "tree_seal",
+    }
+    if not isinstance(retired, dict) or set(retired) != retired_fields:
+        raise InstallError(
+            "merge_retirement.retired 必须精确包含 name、source_id、"
+            "skill_md_sha256、tree_seal"
+        )
+    retired_name = retired.get("name")
+    retired_source_id = retired.get("source_id")
+    retired_skill_md_sha256 = retired.get("skill_md_sha256")
+    if not isinstance(retired_name, str) or not SAFE_SKILL_NAME.fullmatch(retired_name):
+        raise InstallError("merge_retirement.retired.name 不是合法 skill name")
+    if (
+        not isinstance(retired_source_id, str)
+        or not retired_source_id.strip()
+        or retired_source_id != retired_source_id.strip()
+    ):
+        raise InstallError("merge_retirement.retired.source_id 必须是规范非空字符串")
+    if (
+        not isinstance(retired_skill_md_sha256, str)
+        or not SHA256_HEX.fullmatch(retired_skill_md_sha256)
+    ):
+        raise InstallError("merge_retirement.retired.skill_md_sha256 必须是 SHA-256")
+    if retired_name.casefold() == names[0].casefold():
+        raise InstallError("merge retirement 的退役 skill 不能是本次 update 目标")
+
+    raw_survivors = raw.get("survivors")
+    if not isinstance(raw_survivors, list) or not raw_survivors:
+        raise InstallError("merge_retirement.survivors 必须是非空数组")
+    survivors: list[dict[str, str]] = []
+    seen_survivors: set[str] = set()
+    for index, item in enumerate(raw_survivors):
+        if not isinstance(item, dict) or set(item) != {"name", "skill_md_sha256"}:
+            raise InstallError(
+                f"merge_retirement.survivors[{index}] 必须精确包含 name、skill_md_sha256"
+            )
+        survivor_name = item.get("name")
+        survivor_sha256 = item.get("skill_md_sha256")
+        if not isinstance(survivor_name, str) or not SAFE_SKILL_NAME.fullmatch(
+            survivor_name
+        ):
+            raise InstallError(
+                f"merge_retirement.survivors[{index}].name 不是合法 skill name"
+            )
+        if (
+            not isinstance(survivor_sha256, str)
+            or not SHA256_HEX.fullmatch(survivor_sha256)
+        ):
+            raise InstallError(
+                f"merge_retirement.survivors[{index}].skill_md_sha256 必须是 SHA-256"
+            )
+        survivor_key = survivor_name.casefold()
+        if survivor_key in seen_survivors:
+            raise InstallError(f"merge_retirement survivor 重复：{survivor_name}")
+        if survivor_key == retired_name.casefold():
+            raise InstallError("merge_retirement survivor 不能同时是退役 skill")
+        seen_survivors.add(survivor_key)
+        survivors.append(
+            {
+                "name": survivor_name,
+                "skill_md_sha256": survivor_sha256.casefold(),
+            }
+        )
+    if names[0].casefold() not in seen_survivors:
+        raise InstallError("merge_retirement.survivors 必须包含本次 update 目标")
+
+    reason = raw.get("reason")
+    if (
+        not isinstance(reason, str)
+        or not reason.strip()
+        or reason != reason.strip()
+        or any(not character.isprintable() for character in reason)
+    ):
+        raise InstallError("merge_retirement.reason 必须是规范可打印非空字符串")
+    source = decision.get("source")
+    if (
+        not isinstance(source, dict)
+        or not isinstance(source.get("id"), str)
+        or not source["id"].strip()
+    ):
+        raise InstallError("merge retirement 必须提供 survivor source.id")
+    if source["id"] == retired_source_id:
+        raise InstallError("merge retirement 必须绑定不同来源的 survivor 与 retired skill")
+    return {
+        "survivor_source_id": source["id"],
+        "retired": {
+            "name": retired_name,
+            "source_id": retired_source_id,
+            "skill_md_sha256": retired_skill_md_sha256.casefold(),
+            "tree_seal": normalize_tree_seal(
+                retired.get("tree_seal"),
+                label="merge_retirement.retired.tree_seal",
+            ),
+        },
+        "survivors": survivors,
+        "reason": reason,
+    }
+
+
 def target_specs(args: argparse.Namespace) -> list[tuple[str, str]]:
     specs: list[tuple[str, str]] = []
     if args.candidate:
@@ -922,10 +1071,15 @@ def source_context(
 def ledger_entry_covers(entry: Any, name: str) -> bool:
     if not isinstance(entry, dict):
         return False
-    if entry_name(entry) == name:
+    expected_name = name.casefold()
+    direct_name = entry_name(entry)
+    if isinstance(direct_name, str) and direct_name.casefold() == expected_name:
         return True
     skills = entry.get("skills")
-    return isinstance(skills, list) and name in skills
+    return isinstance(skills, list) and any(
+        isinstance(skill, str) and skill.casefold() == expected_name
+        for skill in skills
+    )
 
 
 def validate_canonical_rename_state(
@@ -1121,6 +1275,135 @@ def validate_canonical_rename_state(
         raise InstallError("canonical rename 旧名 ledger source ref 不一致")
 
 
+def validate_merge_retirement_state(
+    *,
+    args: argparse.Namespace,
+    active_root: Path,
+    ledger: dict[str, Any],
+    names: list[str],
+    retirement: dict[str, Any],
+) -> None:
+    retired = retirement["retired"]
+    retired_name = retired["name"]
+    retired_active = d_path(
+        active_root / retired_name,
+        label="merge retirement 退役 active skill",
+        must_exist=True,
+    )
+    if is_reparse(retired_active) or not retired_active.is_dir():
+        raise InstallError("merge retirement 退役 active skill 不是安全目录")
+    ensure_tree_no_reparse(retired_active, label="merge retirement 退役 active skill")
+    actual_retired_name = read_skill_name(retired_active / "SKILL.md")
+    if actual_retired_name != retired_name:
+        raise InstallError("merge retirement 退役 active frontmatter name 不一致")
+    actual_retired_sha256 = sha256_file(retired_active / "SKILL.md")
+    if actual_retired_sha256 != retired["skill_md_sha256"]:
+        raise InstallError("merge retirement 退役 active SKILL.md 哈希漂移")
+    verify_tree_seal(
+        retired_active,
+        seal=retired["tree_seal"],
+        label="merge retirement 退役 active skill",
+    )
+    source_md = retired_active / "SOURCE.md"
+    if not source_md.is_file() or is_reparse(source_md):
+        raise InstallError("merge retirement 退役 active skill 缺少安全 SOURCE.md")
+    recorded_skill = source_record_unique_value(
+        source_md,
+        ("Skill",),
+        label="merge retirement 退役 active skill",
+    )
+    if recorded_skill != retired_name:
+        raise InstallError("merge retirement 退役 active SOURCE.md identity 不一致")
+
+    if not isinstance(ledger, dict):
+        raise InstallError("source ledger 顶层必须是 JSON 对象")
+    live_matches: list[tuple[str, dict[str, Any]]] = []
+    for section in ("sources", "unresolved"):
+        entries = ledger.get(section)
+        if not isinstance(entries, list):
+            raise InstallError(f"source ledger 的 {section} 必须是数组")
+        for entry in entries:
+            if ledger_entry_covers(entry, retired_name):
+                if not isinstance(entry, dict):
+                    raise InstallError("merge retirement ledger coverage 不合法")
+                live_matches.append((section, entry))
+    if len(live_matches) != 1 or live_matches[0][0] != "sources":
+        raise InstallError(
+            "merge retirement 退役 skill 必须由唯一 sources ledger entry 覆盖"
+        )
+    source_entry = live_matches[0][1]
+    if source_entry.get("id") != retired["source_id"]:
+        raise InstallError("merge retirement 退役 skill 的 ledger source id 不一致")
+    source_id_matches = [
+        entry
+        for entry in ledger["sources"]
+        if isinstance(entry, dict) and entry.get("id") == retired["source_id"]
+    ]
+    if len(source_id_matches) != 1 or source_id_matches[0] is not source_entry:
+        raise InstallError("merge retirement 退役 source id 必须唯一")
+
+    survivor_source_id = retirement.get("survivor_source_id")
+    if not isinstance(survivor_source_id, str) or not survivor_source_id:
+        raise InstallError("merge retirement 缺少 survivor source id")
+    target_name = names[0]
+    target_live_matches: list[tuple[str, dict[str, Any]]] = []
+    for section in ("sources", "unresolved"):
+        for entry in ledger[section]:
+            if ledger_entry_covers(entry, target_name):
+                if not isinstance(entry, dict):
+                    raise InstallError("merge retirement update 目标 ledger coverage 不合法")
+                target_live_matches.append((section, entry))
+    if len(target_live_matches) != 1 or target_live_matches[0][0] != "sources":
+        raise InstallError(
+            "merge retirement update 目标必须由唯一 sources ledger entry 覆盖"
+        )
+    target_source_entry = target_live_matches[0][1]
+    if target_source_entry.get("id") != survivor_source_id:
+        raise InstallError("merge retirement survivor ledger source id 不一致")
+    survivor_source_id_matches = [
+        entry
+        for entry in ledger["sources"]
+        if isinstance(entry, dict) and entry.get("id") == survivor_source_id
+    ]
+    if (
+        len(survivor_source_id_matches) != 1
+        or survivor_source_id_matches[0] is not target_source_entry
+    ):
+        raise InstallError("merge retirement survivor source id 必须唯一")
+
+    candidate = d_path(
+        args.candidate,
+        label="merge retirement survivor candidate",
+        must_exist=True,
+    )
+    target_active = d_path(
+        active_root / target_name,
+        label="merge retirement update 目标",
+        must_exist=True,
+    )
+    if is_reparse(target_active) or not target_active.is_dir():
+        raise InstallError("merge retirement update 目标不是安全 active skill")
+    for survivor in retirement["survivors"]:
+        survivor_name = survivor["name"]
+        if survivor_name == target_name:
+            survivor_root = candidate
+            label = "merge retirement survivor candidate"
+        else:
+            survivor_root = d_path(
+                active_root / survivor_name,
+                label=f"merge retirement survivor {survivor_name}",
+                must_exist=True,
+            )
+            label = f"merge retirement survivor {survivor_name}"
+        if is_reparse(survivor_root) or not survivor_root.is_dir():
+            raise InstallError(f"{label} 不是安全目录")
+        ensure_tree_no_reparse(survivor_root, label=label)
+        if read_skill_name(survivor_root / "SKILL.md") != survivor_name:
+            raise InstallError(f"{label} frontmatter name 不一致")
+        if sha256_file(survivor_root / "SKILL.md") != survivor["skill_md_sha256"]:
+            raise InstallError(f"{label} SKILL.md 哈希漂移")
+
+
 def guarded_retrieval(args: argparse.Namespace) -> str:
     if args.candidate:
         return "guarded wrapper local candidate verified by candidate_integrity"
@@ -1292,6 +1575,9 @@ def update_ledger(
             raise InstallError(f"source ledger 的 {key} 必须是数组")
 
     rename = context.get("canonical_rename")
+    merge_retirement = context.get("merge_retirement")
+    if isinstance(rename, dict) and isinstance(merge_retirement, dict):
+        raise InstallError("ledger context 不能同时包含 canonical rename 和 merge retirement")
     retired_names: list[str] = []
     if isinstance(rename, dict):
         old_name = rename.get("old_name")
@@ -1305,6 +1591,24 @@ def update_ledger(
         ):
             raise InstallError("canonical rename ledger context 不合法")
         retired_names.append(old_name)
+    if isinstance(merge_retirement, dict):
+        retired = merge_retirement.get("retired")
+        survivors = merge_retirement.get("survivors")
+        if (
+            not isinstance(retired, dict)
+            or not isinstance(retired.get("name"), str)
+            or not isinstance(retired.get("source_id"), str)
+            or not isinstance(survivors, list)
+            or not all(
+                isinstance(item, dict)
+                and isinstance(item.get("name"), str)
+                and isinstance(item.get("skill_md_sha256"), str)
+                for item in survivors
+            )
+            or names[0] not in [item["name"] for item in survivors]
+        ):
+            raise InstallError("merge retirement ledger context 不合法")
+        retired_names.append(retired["name"])
 
     bundled_proofs = context.get("bundled_skill_proofs", ())
     if (
@@ -1337,6 +1641,7 @@ def update_ledger(
             for direct_key in ("name", "skill"):
                 if entry.get(direct_key) == direct_name:
                     entry.pop(direct_key)
+            entry.setdefault("skills", [])
         skills = entry.get("skills")
         if isinstance(skills, list):
             entry["skills"] = [skill for skill in skills if not is_managed_name(skill)]
@@ -1366,7 +1671,11 @@ def update_ledger(
         if entry.get("id") == source_id:
             target_source = entry
             break
-    if target_source is None and source_repo:
+    if (
+        target_source is None
+        and source_repo
+        and not isinstance(merge_retirement, dict)
+    ):
         for entry in data["sources"]:
             if not isinstance(entry, dict):
                 continue
@@ -1421,16 +1730,52 @@ def update_ledger(
     else:
         target_source.pop("bundled_skills", None)
     if retired_names:
-        data["deleted"].append(
-            {
-                "name": retired_names[0],
-                "status": "moved",
-                "reason": "canonical rename",
-                "new_name": names[0],
-                "source_id": context["source_id"],
+        if isinstance(rename, dict):
+            data["deleted"].append(
+                {
+                    "name": retired_names[0],
+                    "status": "moved",
+                    "reason": "canonical rename",
+                    "new_name": names[0],
+                    "source_id": context["source_id"],
+                    "date": today(),
+                }
+            )
+        else:
+            assert isinstance(merge_retirement, dict)
+            retired = merge_retirement["retired"]
+            survivor_names = [item["name"] for item in merge_retirement["survivors"]]
+            deleted_record = {
+                "name": retired["name"],
+                "status": "deleted-by-user",
+                "reason": merge_retirement["reason"],
+                "survivors": survivor_names,
+                "source": retired["source_id"],
+                "source_id": retired["source_id"],
+                "skill_md_sha256": retired["skill_md_sha256"],
+                "tree_seal": retired["tree_seal"],
                 "date": today(),
             }
-        )
+            data["deleted"].append(deleted_record)
+            retired_source_matches = [
+                entry
+                for entry in data["sources"]
+                if isinstance(entry, dict) and entry.get("id") == retired["source_id"]
+            ]
+            if len(retired_source_matches) > 1:
+                raise InstallError("merge retirement 退役 source id 在 ledger 中不唯一")
+            if retired_source_matches:
+                retired_source = retired_source_matches[0]
+                deleted_skills = retired_source.setdefault("deleted_skills", [])
+                if not isinstance(deleted_skills, list):
+                    raise InstallError("merge retirement source.deleted_skills 不是数组")
+                deleted_skills.append(dict(deleted_record))
+                remaining_skills = retired_source.get("skills")
+                if not isinstance(remaining_skills, list):
+                    raise InstallError("merge retirement source.skills 不是数组")
+                if not remaining_skills:
+                    retired_source["status"] = "deleted-by-user"
+                    retired_source["retirement_scope"] = [retired["name"]]
     if context["overlay_status"].casefold() not in {"none", "no-change", ""}:
         changes = target_source.setdefault("local_changes", [])
         if not isinstance(changes, list):
@@ -2507,6 +2852,159 @@ def verify_catalog(
     return {"generated_at": catalog.get("generated_at"), "skills": verified}
 
 
+def verify_merge_retirement_postcondition(
+    *,
+    active_root: Path,
+    ledger: dict[str, Any],
+    catalog_path: Path,
+    retirement: dict[str, Any],
+) -> dict[str, Any]:
+    retired = retirement["retired"]
+    retired_name = retired["name"]
+    retired_active = d_path(
+        active_root / retired_name,
+        label="merge retirement 退役 active skill",
+    )
+    if path_exists_strict(retired_active, label="merge retirement 退役 active skill"):
+        raise InstallError("merge retirement 后退役 active skill 仍然存在")
+
+    live_coverage: list[str] = []
+    for section in ("sources", "unresolved"):
+        entries = ledger.get(section)
+        if not isinstance(entries, list):
+            raise InstallError(f"source ledger 的 {section} 必须是数组")
+        for entry in entries:
+            if ledger_entry_covers(entry, retired_name):
+                live_coverage.append(section)
+    if live_coverage:
+        raise InstallError(
+            "merge retirement 后 ledger 仍有 live coverage："
+            + ", ".join(live_coverage)
+        )
+    expected_survivors = [item["name"] for item in retirement["survivors"]]
+    deleted_entries = ledger.get("deleted")
+    if not isinstance(deleted_entries, list):
+        raise InstallError("source ledger 的 deleted 必须是数组")
+    deleted_matches = [
+        entry
+        for entry in deleted_entries
+        if isinstance(entry, dict)
+        and entry.get("name") == retired_name
+        and entry.get("status") == "deleted-by-user"
+        and entry.get("reason") == retirement["reason"]
+        and entry.get("source_id") == retired["source_id"]
+        and entry.get("survivors") == expected_survivors
+        and entry.get("skill_md_sha256") == retired["skill_md_sha256"]
+        and entry.get("tree_seal") == retired["tree_seal"]
+    ]
+    if len(deleted_matches) != 1:
+        raise InstallError("merge retirement 后 ledger deleted 记录不唯一或不完整")
+
+    retired_source_matches = [
+        entry
+        for entry in ledger["sources"]
+        if isinstance(entry, dict) and entry.get("id") == retired["source_id"]
+    ]
+    if len(retired_source_matches) != 1:
+        raise InstallError("merge retirement 后 retired source id 不唯一")
+    retired_source = retired_source_matches[0]
+    source_deleted_skills = retired_source.get("deleted_skills")
+    if not isinstance(source_deleted_skills, list):
+        raise InstallError("merge retirement 后 retired source 缺少 deleted_skills")
+    source_deleted_matches = [
+        entry
+        for entry in source_deleted_skills
+        if isinstance(entry, dict)
+        and entry.get("name") == retired_name
+        and entry.get("status") == "deleted-by-user"
+        and entry.get("reason") == retirement["reason"]
+        and entry.get("source_id") == retired["source_id"]
+        and entry.get("survivors") == expected_survivors
+        and entry.get("skill_md_sha256") == retired["skill_md_sha256"]
+        and entry.get("tree_seal") == retired["tree_seal"]
+    ]
+    if len(source_deleted_matches) != 1:
+        raise InstallError(
+            "merge retirement 后 retired source.deleted_skills 记录不唯一或不完整"
+        )
+
+    survivor_results: list[dict[str, str]] = []
+    for survivor in retirement["survivors"]:
+        survivor_root = d_path(
+            active_root / survivor["name"],
+            label=f"merge retirement survivor {survivor['name']}",
+            must_exist=True,
+        )
+        if is_reparse(survivor_root) or not survivor_root.is_dir():
+            raise InstallError(
+                f"merge retirement survivor 不是安全目录：{survivor['name']}"
+            )
+        actual = sha256_file(survivor_root / "SKILL.md")
+        if actual != survivor["skill_md_sha256"]:
+            raise InstallError(
+                f"merge retirement survivor SKILL.md 哈希漂移：{survivor['name']}"
+            )
+        survivor_results.append(
+            {"name": survivor["name"], "skill_md_sha256": actual}
+        )
+
+    catalog = load_json(catalog_path, label="skill catalog")
+    artifacts = catalog.get("artifacts") if isinstance(catalog, dict) else None
+    if not isinstance(artifacts, list):
+        raise InstallError("skill catalog 缺少 artifacts 数组")
+    retired_catalog_entries = [
+        artifact
+        for artifact in artifacts
+        if isinstance(artifact, dict)
+        and artifact.get("scope") == "active"
+        and (
+            artifact.get("name") == retired_name
+            or artifact.get("relative_path") == f"{retired_name}/SKILL.md"
+        )
+    ]
+    if retired_catalog_entries:
+        raise InstallError("merge retirement 后 catalog 仍含退役 active skill")
+    for survivor in survivor_results:
+        survivor_entries = [
+            artifact
+            for artifact in artifacts
+            if isinstance(artifact, dict)
+            and artifact.get("scope") == "active"
+            and artifact.get("name") == survivor["name"]
+            and artifact.get("relative_path") == f"{survivor['name']}/SKILL.md"
+        ]
+        if len(survivor_entries) != 1:
+            raise InstallError(
+                f"merge retirement survivor catalog 条目数量不是 1：{survivor['name']}"
+            )
+        artifact = survivor_entries[0]
+        if artifact.get("ledger_coverage") != "pass":
+            raise InstallError(
+                f"merge retirement survivor ledger coverage 不是 pass：{survivor['name']}"
+            )
+        if (
+            artifact.get("integrity", {}).get("skill_md_sha256")
+            != survivor["skill_md_sha256"]
+        ):
+            raise InstallError(
+                f"merge retirement survivor catalog 哈希不一致：{survivor['name']}"
+            )
+    return {
+        "retired": {
+            "name": retired_name,
+            "source_id": retired["source_id"],
+            "skill_md_sha256": retired["skill_md_sha256"],
+            "tree_seal": retired["tree_seal"],
+            "active_absent": True,
+            "catalog_absent": True,
+            "ledger_live_coverage_absent": True,
+            "source_deleted_skills_recorded": True,
+        },
+        "survivors": survivor_results,
+        "backup_cleanup": "required-after-transaction-success",
+    }
+
+
 def staged_result_projection(staged: dict[str, Any] | None) -> dict[str, Any] | None:
     if staged is None:
         return None
@@ -2617,6 +3115,11 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if decision_snapshot_value != decision:
         raise InstallError("decision manifest 在验证期间发生变化")
     rename = canonical_rename_spec(args=args, decision=decision, names=names)
+    merge_retirement = merge_retirement_spec(
+        args=args,
+        decision=decision,
+        names=names,
+    )
     specs = apply_candidate_upstream_path(args, decision, specs)
     if args.update and decision["decision"] != "update":
         raise InstallError("--update 只能与 decision=update 的 manifest 一起使用")
@@ -2639,6 +3142,15 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             context=context,
             rename=rename,
         )
+    if merge_retirement is not None:
+        context["merge_retirement"] = merge_retirement
+        validate_merge_retirement_state(
+            args=args,
+            active_root=active_root,
+            ledger=load_json(ledger_path, label="source ledger"),
+            names=names,
+            retirement=merge_retirement,
+        )
     transaction_id = uuid.uuid4().hex
     evidence_dir = evidence_root / f"install-{_datetime.datetime.now().strftime('%Y%m%dT%H%M%S')}-{transaction_id}"
     ensure_dir(evidence_dir, label="transaction evidence directory")
@@ -2658,6 +3170,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         "decision": decision,
         "decision_manifest_snapshot": decision_snapshot,
         "targets": names,
+        "merge_retirement": merge_retirement,
         "active_root": str(active_root),
         "ledger": str(ledger_path),
         "catalog": str(catalog_path),
@@ -2706,18 +3219,42 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 context=context,
                 rename=rename,
             )
+        if merge_retirement is not None:
+            validate_merge_retirement_state(
+                args=args,
+                active_root=active_root,
+                ledger=active_state,
+                names=names,
+                retirement=merge_retirement,
+            )
         backup_root = evidence_dir / "backups"
         ensure_dir(backup_root, label="transaction backup root")
         ledger_backup = backup_file(ledger_path, backup_root, "source-state-before.json")
         catalog_backup = backup_file(catalog_path, backup_root, "catalog-before.json")
         state_backups_ready = True
-        if rename is None:
+        if rename is None and merge_retirement is None:
             for name in names:
                 active = active_root / name
                 if decision["decision"] == "install" and active.exists():
                     raise InstallError(f"install 分支不能覆盖已有 active skill：{active}")
                 if decision["decision"] == "update" and not active.exists():
                     raise InstallError(f"update 分支要求已有 active skill：{active}")
+        elif merge_retirement is not None:
+            retire_directories(
+                active_root=active_root,
+                names=[merge_retirement["retired"]["name"]],
+                backup_root=backup_root / "active-skills",
+                records=directory_records,
+            )
+            retired_record = directory_records[-1]
+            if (
+                retired_record.get("name") != merge_retirement["retired"]["name"]
+                or retired_record.get("backup_seal")
+                != merge_retirement["retired"]["tree_seal"]
+            ):
+                raise InstallError(
+                    "merge retirement 退役 payload 在预检与备份移动之间发生漂移"
+                )
         else:
             retire_directories(
                 active_root=active_root,
@@ -2766,11 +3303,24 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             evidence_dir=evidence_dir,
             label="post-resource-closure",
         )
+        persisted_ledger = load_json(ledger_path, label="postcondition source ledger")
+        if merge_retirement is not None and persisted_ledger != updated_ledger:
+            raise InstallError("merge retirement 写入后的 source ledger 发生漂移")
         catalog_verification = verify_catalog(
             catalog_path=catalog_path,
             active_root=active_root,
             names=names,
             bundled_proofs=staged["bundled_skill_proofs"],
+        )
+        merge_retirement_verification = (
+            verify_merge_retirement_postcondition(
+                active_root=active_root,
+                ledger=persisted_ledger,
+                catalog_path=catalog_path,
+                retirement=merge_retirement,
+            )
+            if merge_retirement is not None
+            else None
         )
         result = {
             **plan,
@@ -2782,6 +3332,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "activation_readability": activation_readability,
             "post_resource_closure": post_closure,
             "catalog_verification": catalog_verification,
+            "merge_retirement_verification": merge_retirement_verification,
             "catalog_sha256": sha256_file(catalog_path),
             "evidence": str(evidence_dir),
         }
