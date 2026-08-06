@@ -9,7 +9,7 @@ intent: 记录 Git 默认分支发布与收尾 Skill 策略的历史实施过程
 
 > **历史状态（2026-07-13）：** Task 1–5 当时已实施、验证并完成默认分支集成；临时分支与本 workflow worktree 已按顺序清理。下方复选框仅保留实施过程，不再表示当前待办或执行授权。
 
-> **现役替代说明（2026-07-23）：** 全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）现在只允许发布到用户拥有远端的 `main`。本计划实现的 default-branch overlay、版本化模板及现役插件 cache 当前属于 `pending drift`；在取得 active plugin 修改授权并通过受控重放、来源和回归门禁前，不得按本计划再次实施或用于非 `main` 发布。
+> **现役替代说明（2026-08-07）：** 全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）只允许在当前任务明确授权后发布到用户拥有远端的 `main`。本计划记录的 2026-07-13 default-branch 行为已经退役；现役 v2 overlay 已保留新版 upstream 的 connector、PR 与 `gh` fallback 能力，并通过受管部署、六目标 live policy 和幂等验收。本文其余内容只保留历史实施记录，不再作为执行步骤。
 
 > **历史路径说明：** 下方实施命令中出现的 `D:\Codex\projects\unified-env-github-default-branch-skill-policy` 是已清理的历史 worktree；当前版本化源代码位于 `D:\Codex\projects\统一环境\scripts`，部署入口和验证证据仍以 D 盘当前路径为准。
 

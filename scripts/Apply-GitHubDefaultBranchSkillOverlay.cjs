@@ -12,11 +12,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const EXPECTED_ROLES = Object.freeze(['github', 'yeet']);
-const STABLE_MARKER = '<!-- codex-github-default-branch-overlay: v1 -->';
+const STABLE_MARKER = '<!-- codex-github-main-only-overlay: v2 -->';
 const DEFAULT_EVIDENCE_ROOT = 'D:\\Codex\\.codex\\run-evidence\\github-default-branch-skill-policy';
 const CODEX_ROOT = 'D:\\Codex\\.codex';
 const CONTROLLED_EVIDENCE_ROOT = DEFAULT_EVIDENCE_ROOT;
-const CATALOG_VERSION = 1;
+const CATALOG_VERSION = 2;
+const CATALOG_POLICY = 'main-only-publish-v2';
 const EXPECTED_SURFACE_RELATIVES = Object.freeze([
   '.tmp/plugins/plugins/github',
   'plugins/cache/openai-curated/github/27126220',
@@ -184,6 +185,16 @@ function roleEntries(catalog, role) {
   if (catalog && catalog.roles && Array.isArray(catalog.roles[role])) {
     return catalog.roles[role];
   }
+  if (catalog && catalog.roles && catalog.roles[role] && typeof catalog.roles[role] === 'object') {
+    const definition = catalog.roles[role];
+    if (Array.isArray(definition.knownInputSha256)) {
+      return definition.knownInputSha256.map((upstreamSha256) => ({
+        upstreamSha256,
+        patchedSha256: definition.patchedSha256,
+        patchedDocument: definition.patchedDocument,
+      }));
+    }
+  }
   if (catalog && Array.isArray(catalog[role])) {
     return catalog[role];
   }
@@ -205,6 +216,9 @@ function validateCatalog(catalogOrPath) {
   }
   if (catalog && catalog.version !== CATALOG_VERSION) {
     errors.push({ reason: 'unsupported-catalog-version', message: `expected catalog version ${CATALOG_VERSION}` });
+  }
+  if (catalog && catalog.policy !== CATALOG_POLICY) {
+    errors.push({ reason: 'catalog-policy-mismatch', message: `expected catalog policy ${CATALOG_POLICY}` });
   }
   if (catalog && catalog.marker !== STABLE_MARKER) {
     errors.push({ reason: 'catalog-marker-mismatch', message: 'catalog marker does not match the overlay marker' });
@@ -261,7 +275,6 @@ function validateCatalog(catalogOrPath) {
         /git\s+(?:switch|checkout)\s+(?:-(?:b|c)|--create|--branch)\s+patch-stack\b/i,
         /git\s+worktree\s+add[^\r\n]*patch-stack\b/i,
         /refs\/heads\/patch-stack\b/i,
-        /(?:^|\s)--draft(?:\s|$)/i,
       ];
       for (const pattern of forbidden) {
         if (pattern.test(patchedDocument)) {
@@ -270,8 +283,40 @@ function validateCatalog(catalogOrPath) {
       }
       if (role === 'github' || role === 'yeet') {
         const requiredPolicyPatterns = [
-          { pattern: /git\s+fetch\s+--prune\s+<targetRemote>/i, reason: 'missing-direct-default-fetch' },
-          { pattern: /本地\s+HEAD[\s\S]{0,180}(?:tracking|一致)/i, reason: 'missing-default-tracking-proof' },
+          { pattern: /当前任务[\s\S]{0,100}明确授权[\s\S]{0,100}(?:commit|push|发布)/i, reason: 'missing-current-task-publish-authorization' },
+          { pattern: /用户拥有[\s\S]{0,80}(?:remote|远端)/i, reason: 'missing-user-owned-remote' },
+          { pattern: /git\s+push\s+<targetRemote>\s+HEAD:main/i, reason: 'missing-main-push' },
+          { pattern: /git\s+fetch\s+--prune\s+<targetRemote>/i, reason: 'missing-main-fetch' },
+          { pattern: /本地\s+HEAD[\s\S]{0,180}<targetRemote>\/main[\s\S]{0,100}(?:tracking|一致)/i, reason: 'missing-main-tracking-proof' },
+        ];
+        for (const { pattern, reason } of requiredPolicyPatterns) {
+          if (!pattern.test(patchedDocument)) {
+            errors.push({ role, reason, message: `${prefix}.patchedDocument is missing required policy pattern ${pattern}` });
+          }
+        }
+      }
+      if (role === 'github') {
+        const requiredGithubPatterns = [
+          { pattern: /GitHub app/i, reason: 'missing-github-app-capability' },
+          { pattern: /connector first|connector-first|优先使用 connector/i, reason: 'missing-connector-first-capability' },
+          { pattern: /current-branch PR discovery|当前分支[\s\S]{0,80}PR/i, reason: 'missing-current-branch-pr-discovery' },
+          { pattern: /GitHub Actions logs|GitHub Actions 日志/i, reason: 'missing-actions-log-fallback' },
+          { pattern: /PR creation|创建 PR/i, reason: 'missing-pr-creation-capability' },
+          { pattern: /`gh`[\s\S]{0,80}(?:fallback|兜底)/i, reason: 'missing-gh-fallback' },
+          { pattern: /\.\.\/yeet\/SKILL\.md/i, reason: 'missing-yeet-route' },
+        ];
+        for (const { pattern, reason } of requiredGithubPatterns) {
+          if (!pattern.test(patchedDocument)) {
+            errors.push({ role, reason, message: `${prefix}.patchedDocument is missing required GitHub capability ${pattern}` });
+          }
+        }
+      }
+      if (role === 'yeet') {
+        const requiredYeetPatterns = [
+          { pattern: /GitHub app/i, reason: 'missing-github-app-capability' },
+          { pattern: /PR creation|创建 PR/i, reason: 'missing-pr-creation-capability' },
+          { pattern: /`gh`[\s\S]{0,80}(?:fallback|兜底)/i, reason: 'missing-gh-fallback' },
+          { pattern: /发布前门禁[\s\S]{0,700}git\s+fetch\s+--prune\s+<targetRemote>[\s\S]{0,300}(?:ahead|diverged)/i, reason: 'missing-preflight-fetch-before-divergence-check' },
           { pattern: /只有[\s\S]{0,180}用户确认[\s\S]{0,180}git\s+push\s+--set-upstream\s+<targetRemote>\s+<temporaryBranch>/i, reason: 'missing-confirmation-tracking-gate' },
           { pattern: /git\s+push\s+--delete\s+<targetRemote>\s+<temporaryBranch>/i, reason: 'missing-temporary-remote-delete' },
           { pattern: /git\s+worktree\s+remove\s+<temporaryWorktree>/i, reason: 'missing-temporary-worktree-remove' },
@@ -279,9 +324,9 @@ function validateCatalog(catalogOrPath) {
           { pattern: /ownedByThisWorkflow/i, reason: 'missing-owned-worktree-guard' },
           { pattern: /远端删除失败[\s\S]{0,180}(?:保留|停止)/i, reason: 'missing-remote-delete-failure-preservation' },
         ];
-        for (const { pattern, reason } of requiredPolicyPatterns) {
+        for (const { pattern, reason } of requiredYeetPatterns) {
           if (!pattern.test(patchedDocument)) {
-            errors.push({ role, reason, message: `${prefix}.patchedDocument is missing required policy pattern ${pattern}` });
+            errors.push({ role, reason, message: `${prefix}.patchedDocument is missing required publish capability ${pattern}` });
           }
         }
         const cleanupCommands = [

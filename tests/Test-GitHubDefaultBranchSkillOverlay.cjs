@@ -28,6 +28,9 @@ assertFileExists(catalogPath, 'catalog');
 const overlay = require(overlayPath);
 const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 
+assert.equal(catalog.policy, 'main-only-publish-v2');
+assert.equal(catalog.marker, '<!-- codex-github-main-only-overlay: v2 -->');
+
 assert.equal(typeof overlay.discoverTargets, 'function');
 assert.equal(typeof overlay.buildChangePlan, 'function');
 assert.equal(typeof overlay.applyChangePlan, 'function');
@@ -80,8 +83,13 @@ function removeTree(target) {
 
 function catalogEntries(role) {
   const entries = Array.isArray(catalog) ? catalog : catalog.roles?.[role];
-  assert.ok(Array.isArray(entries), `catalog 缺少 role=${role}`);
-  return entries;
+  if (Array.isArray(entries)) return entries;
+  assert.ok(Array.isArray(entries?.knownInputSha256), `catalog 缺少 role=${role}`);
+  return entries.knownInputSha256.map((upstreamSha256) => ({
+    upstreamSha256,
+    patchedSha256: entries.patchedSha256,
+    patchedDocument: entries.patchedDocument,
+  }));
 }
 
 const fixtureUpstream = {
@@ -98,50 +106,109 @@ const fixtureUpstream = {
 // Keep the fixture independent of mutable global plugin files. Task 3 will
 // replace those files, while the real catalog itself is still validated here.
 overlay.loadCatalog(catalog);
-const fixtureCatalog = JSON.parse(JSON.stringify(catalog));
+const expectedInputs = {
+  github: [
+    '380D663305EB74B44858F58D76BDB21173A4D4C63D5885299AD6005D6FFC80B9',
+    '81DBDD90934FE86A79DDC4790FD211E5FCA866302A74090AD153395F56F2BD42',
+    '1A45C26345139509A3E7B759E688C3948C8A381143D8A2BD01C5D6F43CC38366',
+    '2107A6AA76F24B544D2F296C09B155FCEE1A936101364C38730335FE0D385FEE',
+  ],
+  yeet: [
+    '9D70C68282ACBC7FBEE678F142ADBF84B4F1091890D6CB93B3106E5E629FC0CB',
+    'E93C6EA769BA673D30749A981CD8AD75B687F454E3C8E2E45E7CFCBD412DF12C',
+    '036578CBD8FC6855B49156D3B1E585C128481B289DE660939F4F0305C699EB9F',
+    '4AE826B1F9EA1543AC582791DADE5D15A8B4A8E6B9211BC5B3A30B9B01D4E9C1',
+    '9E58C2B95136F8F5EE39A14340FDCC6B1E30B7AF37273B2C3D8CABA777B11901',
+  ],
+};
+for (const role of ['github', 'yeet']) {
+  const inputs = new Set(catalogEntries(role).map((entry) => entry.upstreamSha256));
+  for (const expected of expectedInputs[role]) {
+    assert.ok(inputs.has(expected), `${role} catalog 未识别现役输入 ${expected}`);
+  }
+  assert.equal(
+    new Set(catalogEntries(role).map((entry) => entry.patchedSha256)).size,
+    1,
+    `${role} 的所有已知输入必须收敛到同一现役 overlay`,
+  );
+}
+const fixtureCatalog = JSON.parse(JSON.stringify(overlay.loadCatalog(catalog)));
 for (const role of ['yeet', 'github']) {
   fixtureCatalog.roles[role][0].upstreamSha256 = sha256(fixtureUpstream[role].local);
   fixtureCatalog.roles[role][1].upstreamSha256 = sha256(fixtureUpstream[role].remote);
 }
 overlay.loadCatalog(fixtureCatalog);
 
-const requiredPolicyPatterns = [
+const sharedPolicyPatterns = [
+  /当前任务[\s\S]{0,100}明确授权[\s\S]{0,100}(?:commit|push|发布)/i,
+  /用户拥有[\s\S]{0,80}(?:remote|远端)/i,
+  /git\s+push\s+<targetRemote>\s+HEAD:main/i,
   /git\s+fetch\s+--prune\s+<targetRemote>/i,
-  /本地\s+HEAD[\s\S]{0,180}(?:tracking|一致)/i,
+  /本地\s+HEAD[\s\S]{0,180}<targetRemote>\/main[\s\S]{0,100}(?:tracking|一致)/i,
+];
+for (const role of ['github', 'yeet']) {
+  for (const entry of fixtureCatalog.roles[role]) {
+    for (const pattern of sharedPolicyPatterns) {
+      assert.match(entry.patchedDocument, pattern, `${role} patchedDocument 缺少可验证发布契约 ${pattern}`);
+    }
+    assert.doesNotMatch(entry.patchedDocument, /agent\/\{description\}/i);
+    assert.match(entry.patchedDocument, /创建 PR 不是默认|不默认创建 draft PR|does not default to a draft PR/i);
+  }
+}
+
+const githubDocument = fixtureCatalog.roles.github[0].patchedDocument;
+for (const pattern of [
+  /GitHub app/i,
+  /connector first|connector-first|优先使用 connector/i,
+  /current-branch PR discovery|当前分支[\s\S]{0,80}PR/i,
+  /GitHub Actions logs|GitHub Actions 日志/i,
+  /PR creation|创建 PR/i,
+  /`gh`[\s\S]{0,80}(?:fallback|兜底)/i,
+  /\.\.\/yeet\/SKILL\.md/i,
+]) {
+  assert.match(githubDocument, pattern, `github overlay 丢失新版 upstream 能力 ${pattern}`);
+}
+
+const yeetDocument = fixtureCatalog.roles.yeet[0].patchedDocument;
+for (const pattern of [
+  /GitHub app/i,
+  /PR creation|创建 PR/i,
+  /`gh`[\s\S]{0,80}(?:fallback|兜底)/i,
+  /发布前门禁[\s\S]{0,700}git\s+fetch\s+--prune\s+<targetRemote>[\s\S]{0,300}(?:ahead|diverged)/i,
   /只有[\s\S]{0,180}用户确认[\s\S]{0,180}git\s+push\s+--set-upstream\s+<targetRemote>\s+<temporaryBranch>/i,
   /git\s+push\s+--delete\s+<targetRemote>\s+<temporaryBranch>/i,
   /git\s+worktree\s+remove\s+<temporaryWorktree>/i,
   /git\s+branch\s+--delete\s+<temporaryBranch>/i,
   /ownedByThisWorkflow/i,
   /远端删除失败[\s\S]{0,180}(?:保留|停止)/i,
-];
-for (const role of ['github', 'yeet']) {
-  for (const entry of fixtureCatalog.roles[role]) {
-    for (const pattern of requiredPolicyPatterns) {
-      assert.match(entry.patchedDocument, pattern, `${role} patchedDocument 缺少可验证发布契约 ${pattern}`);
-    }
+]) {
+  assert.match(yeetDocument, pattern, `yeet overlay 缺少发布或例外边界 ${pattern}`);
+}
+{
     const cleanupCommands = [
       'git push --delete <targetRemote> <temporaryBranch>',
       'git worktree remove <temporaryWorktree>',
       'git branch --delete <temporaryBranch>',
       'git fetch --prune <targetRemote>',
     ];
-    const cleanupIndexes = cleanupCommands.map((command) => entry.patchedDocument.lastIndexOf(command));
-    assert.ok(cleanupIndexes.every((index) => index >= 0), `${role} patchedDocument 缺少 cleanup 命令`);
-    assert.ok(cleanupIndexes.every((index, indexInOrder) => indexInOrder === 0 || index > cleanupIndexes[indexInOrder - 1]), `${role} patchedDocument cleanup 顺序错误`);
-  }
+  const cleanupIndexes = cleanupCommands.map((command) => yeetDocument.lastIndexOf(command));
+  assert.ok(cleanupIndexes.every((index) => index >= 0), 'yeet patchedDocument 缺少 cleanup 命令');
+  assert.ok(cleanupIndexes.every((index, indexInOrder) => indexInOrder === 0 || index > cleanupIndexes[indexInOrder - 1]), 'yeet patchedDocument cleanup 顺序错误');
 }
 const missingSemanticCatalog = JSON.parse(JSON.stringify(fixtureCatalog));
 missingSemanticCatalog.roles.yeet[0].patchedDocument = missingSemanticCatalog.roles.yeet[0].patchedDocument
-  .replaceAll('`git fetch --prune <targetRemote>`', '`git fetch --prune <remote>`');
+  .replaceAll('`git push <targetRemote> HEAD:main`', '`git push <targetRemote> HEAD:<branch>`');
 assert.throws(
   () => overlay.loadCatalog(missingSemanticCatalog),
-  (error) => error?.errors?.some((item) => item.reason === 'missing-direct-default-fetch'),
-  'catalog 缺少直接默认分支 fetch 证据时必须失败关闭',
+  (error) => error?.errors?.some((item) => item.reason === 'missing-main-push'),
+  'catalog 缺少 main-only push 证据时必须失败关闭',
 );
 const misorderedCleanupCatalog = JSON.parse(JSON.stringify(fixtureCatalog));
-misorderedCleanupCatalog.roles.github[0].patchedDocument = misorderedCleanupCatalog.roles.github[0].patchedDocument
-  .replace('`git branch --delete <temporaryBranch>`、`git fetch --prune <targetRemote>`', '`git fetch --prune <targetRemote>`、`git branch --delete <temporaryBranch>`');
+misorderedCleanupCatalog.roles.yeet[0].patchedDocument = misorderedCleanupCatalog.roles.yeet[0].patchedDocument
+  .replace(
+    '3. `git branch --delete <temporaryBranch>`\n4. `git fetch --prune <targetRemote>`',
+    '3. `git fetch --prune <targetRemote>`\n4. `git branch --delete <temporaryBranch>`',
+  );
 assert.throws(
   () => overlay.loadCatalog(misorderedCleanupCatalog),
   (error) => error?.errors?.some((item) => item.reason === 'cleanup-order-mismatch'),

@@ -18,6 +18,11 @@ function readSkill(skill, relativePath = 'SKILL.md') {
   return { file, text: fs.readFileSync(file, 'utf8') };
 }
 
+function readPluginSkill(surface, role) {
+  const file = path.join(codexRoot, ...surface.split('/'), 'skills', role, 'SKILL.md');
+  return { file, text: fs.readFileSync(file, 'utf8') };
+}
+
 const privateStack = readSkill('private-patch-stack');
 const neatFreak = readSkill('neat-freak');
 const closeoutReference = readSkill('neat-freak', 'references/repo-clean-closeout.md');
@@ -27,6 +32,11 @@ const sourceLedger = JSON.parse(
   fs.readFileSync(path.join(codexRoot, 'skills', '.downloaded-skills-source-state.json'), 'utf8'),
 );
 const retiredFinishingPath = path.join(codexRoot, 'skills', 'finishing-a-development-branch');
+const githubPluginSurfaces = [
+  '.tmp/plugins/plugins/github',
+  'plugins/cache/openai-curated/github/27126220',
+  'plugins/cache/openai-curated-remote/github/0.1.8-2841cf9749ae',
+];
 
 const failures = [];
 function check(name, callback) {
@@ -92,6 +102,31 @@ check('handoff must use D-hosted point-in-time paths and stay observational', ()
   assert.doesNotMatch(handoff.text, /temporary directory of the user's OS/i);
   assert.match(handoff.text, /point[- ]in[- ]time|时间点/i);
   assert.doesNotMatch(handoff.text, /^\s*git\s+(?:push|branch|worktree)\b/im);
+});
+
+check('all GitHub plugin surfaces must preserve hybrid capabilities behind main-only authorization', () => {
+  for (const surface of githubPluginSurfaces) {
+    const github = readPluginSkill(surface, 'github');
+    const yeet = readPluginSkill(surface, 'yeet');
+    for (const skill of [github, yeet]) {
+      assert.match(skill.text, /<!-- codex-github-main-only-overlay: v2 -->/, skill.file);
+      assert.match(skill.text, /当前任务[\s\S]{0,100}明确授权[\s\S]{0,100}(?:commit|push|发布)/i, skill.file);
+      assert.match(skill.text, /用户拥有[\s\S]{0,80}(?:remote|远端)/i, skill.file);
+      assert.match(skill.text, /git\s+push\s+<targetRemote>\s+HEAD:main/i, skill.file);
+      assert.match(skill.text, /本地\s+HEAD[\s\S]{0,180}<targetRemote>\/main[\s\S]{0,100}(?:tracking|一致)/i, skill.file);
+      assert.doesNotMatch(skill.text, /agent\/\{description\}/i, skill.file);
+    }
+    assert.match(github.text, /GitHub app/i, github.file);
+    assert.match(github.text, /connector first|connector-first|优先使用 connector/i, github.file);
+    assert.match(github.text, /current-branch PR discovery|当前分支[\s\S]{0,80}PR/i, github.file);
+    assert.match(github.text, /GitHub Actions logs|GitHub Actions 日志/i, github.file);
+    assert.match(github.text, /`gh`[\s\S]{0,80}(?:fallback|兜底)/i, github.file);
+    assert.match(yeet.text, /PR creation|创建 PR/i, yeet.file);
+    assert.match(yeet.text, /GitHub app/i, yeet.file);
+    assert.match(yeet.text, /`gh`[\s\S]{0,80}(?:fallback|兜底)/i, yeet.file);
+    assert.match(yeet.text, /发布前门禁[\s\S]{0,700}git\s+fetch\s+--prune\s+<targetRemote>[\s\S]{0,300}(?:ahead|diverged)/i, yeet.file);
+    assert.match(yeet.text, /只有[\s\S]{0,180}用户确认[\s\S]{0,180}git\s+push\s+--set-upstream\s+<targetRemote>\s+<temporaryBranch>/i, yeet.file);
+  }
 });
 
 if (failures.length > 0) {

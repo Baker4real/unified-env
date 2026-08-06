@@ -1,31 +1,28 @@
 {
-  "version": 1,
-  "marker": "<!-- codex-github-default-branch-overlay: v1 -->",
-  "policy": "default-branch-publish-v1",
+  "version": 2,
+  "marker": "<!-- codex-github-main-only-overlay: v2 -->",
+  "policy": "main-only-publish-v2",
   "roles": {
-    "yeet": [
-      {
-        "upstreamSha256": "9D70C68282ACBC7FBEE678F142ADBF84B4F1091890D6CB93B3106E5E629FC0CB",
-        "patchedSha256": "4AE826B1F9EA1543AC582791DADE5D15A8B4A8E6B9211BC5B3A30B9B01D4E9C1",
-        "patchedDocument": "---\nname: \"yeet\"\ndescription: \"将已确认的本地改动发布到仓库默认分支；仅当代理说明理由且用户确认时使用临时分支。\"\n---\n\n<!-- codex-github-default-branch-overlay: v1 -->\n\n# GitHub 发布改动\n\n当用户明确要求发布本地改动时使用此 skill。默认目标是仓库已解析的默认分支；默认流程不创建 pull request。\n\n## 目标分支与远端\n\n1. 发布前检查 `git status -sb`、拟提交 diff 和已配置 remotes，保留无关改动。\n2. 从用户授权的仓库上下文解析目标 remote；不得把私有或用户所有 remote 静默替换为 upstream source remote。\n3. 在两种信号都可用时，同时读取 `git ls-remote --symref <remote> HEAD` 与 GitHub metadata 的 `defaultBranchRef`；冲突就停止并报告。只有一种信号可用时记录来源。不得从熟悉的分支名猜测。\n4. remote 未授权、仓库身份含糊或默认分支证据缺失/冲突时拒绝发布。\n\n## 默认发布\n\n1. 确认准确文件范围；除非用户确认整个工作树，否则只暂存明确路径。\n2. 运行最窄相关检查，提交指定改动，并使用已解析 remote 将提交发布到已解析默认分支；推送后执行 `git fetch --prune <targetRemote>`，证明本地 HEAD 与 `<targetRemote>/<resolvedDefaultBranch>` tracking 一致。\n3. 默认流程不包含 pull request；仅在用户明确要求时创建。不得隐式创建 draft pull request。\n4. 不使用 force-push，也不覆盖通过猜测得到的远端分支。\n\n## 临时分支例外\n\n仅当代理说明具体理由（例如隔离审查或必须的安全边界）且用户确认时使用临时分支。只有在 agent 说明具体理由且用户确认后，才执行 `git push --set-upstream <targetRemote> <temporaryBranch>`，使本地和远端引用一致。用户确认结果后，按普通非强制流程将临时分支合入 `<resolvedDefaultBranch>`，推送 `<targetRemote>/<resolvedDefaultBranch>`。默认分支推送成功后，清理必须严格按以下顺序执行：先执行 `git push --delete <targetRemote> <temporaryBranch>`；只有远端删除成功，才移除仅由 `ownedByThisWorkflow` 创建的临时 worktree，执行 `git worktree remove <temporaryWorktree>`；再执行 `git branch --delete <temporaryBranch>`；最后执行 `git fetch --prune <targetRemote>`。远端删除失败时必须停止并保留本地临时分支及其 worktree；后续任一步失败也保留尚未删除的现场并报告已完成与未完成动作。只有用户明确要求保留临时分支或创建 PR 时才走例外，并在最终报告写明例外。\n\n## 历史 patch-stack\n\n不创建、不推送、不保留 patch-stack 引用。已有或历史 patch-stack 只做盘点；删除它们需要另一次明确用户授权，不能隐含在收尾中。\n\n## 收尾\n\n报告已解析 remote、默认分支证据、提交、检查结果以及本地/远端最终一致性；任何不一致都停止，不猜测。\n"
-      },
-      {
-        "upstreamSha256": "E93C6EA769BA673D30749A981CD8AD75B687F454E3C8E2E45E7CFCBD412DF12C",
-        "patchedSha256": "4AE826B1F9EA1543AC582791DADE5D15A8B4A8E6B9211BC5B3A30B9B01D4E9C1",
-        "patchedDocument": "---\nname: \"yeet\"\ndescription: \"将已确认的本地改动发布到仓库默认分支；仅当代理说明理由且用户确认时使用临时分支。\"\n---\n\n<!-- codex-github-default-branch-overlay: v1 -->\n\n# GitHub 发布改动\n\n当用户明确要求发布本地改动时使用此 skill。默认目标是仓库已解析的默认分支；默认流程不创建 pull request。\n\n## 目标分支与远端\n\n1. 发布前检查 `git status -sb`、拟提交 diff 和已配置 remotes，保留无关改动。\n2. 从用户授权的仓库上下文解析目标 remote；不得把私有或用户所有 remote 静默替换为 upstream source remote。\n3. 在两种信号都可用时，同时读取 `git ls-remote --symref <remote> HEAD` 与 GitHub metadata 的 `defaultBranchRef`；冲突就停止并报告。只有一种信号可用时记录来源。不得从熟悉的分支名猜测。\n4. remote 未授权、仓库身份含糊或默认分支证据缺失/冲突时拒绝发布。\n\n## 默认发布\n\n1. 确认准确文件范围；除非用户确认整个工作树，否则只暂存明确路径。\n2. 运行最窄相关检查，提交指定改动，并使用已解析 remote 将提交发布到已解析默认分支；推送后执行 `git fetch --prune <targetRemote>`，证明本地 HEAD 与 `<targetRemote>/<resolvedDefaultBranch>` tracking 一致。\n3. 默认流程不包含 pull request；仅在用户明确要求时创建。不得隐式创建 draft pull request。\n4. 不使用 force-push，也不覆盖通过猜测得到的远端分支。\n\n## 临时分支例外\n\n仅当代理说明具体理由（例如隔离审查或必须的安全边界）且用户确认时使用临时分支。只有在 agent 说明具体理由且用户确认后，才执行 `git push --set-upstream <targetRemote> <temporaryBranch>`，使本地和远端引用一致。用户确认结果后，按普通非强制流程将临时分支合入 `<resolvedDefaultBranch>`，推送 `<targetRemote>/<resolvedDefaultBranch>`。默认分支推送成功后，清理必须严格按以下顺序执行：先执行 `git push --delete <targetRemote> <temporaryBranch>`；只有远端删除成功，才移除仅由 `ownedByThisWorkflow` 创建的临时 worktree，执行 `git worktree remove <temporaryWorktree>`；再执行 `git branch --delete <temporaryBranch>`；最后执行 `git fetch --prune <targetRemote>`。远端删除失败时必须停止并保留本地临时分支及其 worktree；后续任一步失败也保留尚未删除的现场并报告已完成与未完成动作。只有用户明确要求保留临时分支或创建 PR 时才走例外，并在最终报告写明例外。\n\n## 历史 patch-stack\n\n不创建、不推送、不保留 patch-stack 引用。已有或历史 patch-stack 只做盘点；删除它们需要另一次明确用户授权，不能隐含在收尾中。\n\n## 收尾\n\n报告已解析 remote、默认分支证据、提交、检查结果以及本地/远端最终一致性；任何不一致都停止，不猜测。\n"
-      }
-    ],
-    "github": [
-      {
-        "upstreamSha256": "380D663305EB74B44858F58D76BDB21173A4D4C63D5885299AD6005D6FFC80B9",
-        "patchedSha256": "2107A6AA76F24B544D2F296C09B155FCEE1A936101364C38730335FE0D385FEE",
-        "patchedDocument": "---\nname: github\ndescription: 通过已连接 GitHub app 处理仓库、pull request 和 issue；发布操作路由到默认分支发布器。\n---\n\n<!-- codex-github-default-branch-overlay: v1 -->\n\n# GitHub\n\n将此 skill 作为仓库、pull request 和 issue 工作的总入口。执行动作前先解析仓库身份和本地 checkout 上下文。\n\n## 路由\n\n- Repository、issue、pull request、comment、label、reaction 的分流仍优先使用 connector。\n- Review follow-up 路由到 `../gh-address-comments/SKILL.md`。\n- CI 调试路由到 `../gh-fix-ci/SKILL.md`。\n- 发布改动立即路由到 `../yeet/SKILL.md`，其默认目标是仓库已解析的默认分支。\n\n## 发布安全契约\n\n发布改动必须路由到 `../yeet/SKILL.md`，并遵守同一可验证契约：默认发布推送后执行 `git fetch --prune <targetRemote>`，证明本地 HEAD 与 `<targetRemote>/<resolvedDefaultBranch>` tracking 一致。只有在 agent 说明具体理由且用户确认后，才执行 `git push --set-upstream <targetRemote> <temporaryBranch>`。默认分支推送成功后，按顺序执行 `git push --delete <targetRemote> <temporaryBranch>`、仅移除 `ownedByThisWorkflow` 创建的 `git worktree remove <temporaryWorktree>`、`git branch --delete <temporaryBranch>`、`git fetch --prune <targetRemote>`；远端删除失败必须保留本地临时分支及其 worktree，并停止后续清理。\n\n## 默认分支证据\n\n发生发布请求时，发布器必须解析目标 remote 和默认分支；两者都可用时比较 `git ls-remote --symref <remote> HEAD` 与 GitHub metadata 的 `defaultBranchRef`，冲突或授权缺失都必须停止。不得把熟悉的分支名当作证据。\n\n## 输出\n\n说明检查了什么、选择了哪个 specialist 路径、使用了哪个已授权 remote 以及仍需什么确认。普通分流或默认发布不得副作用创建 pull request。不得创建、推送或保留 patch-stack；历史引用仅在用户另行批准删除时处理。\n"
-      },
-      {
-        "upstreamSha256": "81DBDD90934FE86A79DDC4790FD211E5FCA866302A74090AD153395F56F2BD42",
-        "patchedSha256": "2107A6AA76F24B544D2F296C09B155FCEE1A936101364C38730335FE0D385FEE",
-        "patchedDocument": "---\nname: github\ndescription: 通过已连接 GitHub app 处理仓库、pull request 和 issue；发布操作路由到默认分支发布器。\n---\n\n<!-- codex-github-default-branch-overlay: v1 -->\n\n# GitHub\n\n将此 skill 作为仓库、pull request 和 issue 工作的总入口。执行动作前先解析仓库身份和本地 checkout 上下文。\n\n## 路由\n\n- Repository、issue、pull request、comment、label、reaction 的分流仍优先使用 connector。\n- Review follow-up 路由到 `../gh-address-comments/SKILL.md`。\n- CI 调试路由到 `../gh-fix-ci/SKILL.md`。\n- 发布改动立即路由到 `../yeet/SKILL.md`，其默认目标是仓库已解析的默认分支。\n\n## 发布安全契约\n\n发布改动必须路由到 `../yeet/SKILL.md`，并遵守同一可验证契约：默认发布推送后执行 `git fetch --prune <targetRemote>`，证明本地 HEAD 与 `<targetRemote>/<resolvedDefaultBranch>` tracking 一致。只有在 agent 说明具体理由且用户确认后，才执行 `git push --set-upstream <targetRemote> <temporaryBranch>`。默认分支推送成功后，按顺序执行 `git push --delete <targetRemote> <temporaryBranch>`、仅移除 `ownedByThisWorkflow` 创建的 `git worktree remove <temporaryWorktree>`、`git branch --delete <temporaryBranch>`、`git fetch --prune <targetRemote>`；远端删除失败必须保留本地临时分支及其 worktree，并停止后续清理。\n\n## 默认分支证据\n\n发生发布请求时，发布器必须解析目标 remote 和默认分支；两者都可用时比较 `git ls-remote --symref <remote> HEAD` 与 GitHub metadata 的 `defaultBranchRef`，冲突或授权缺失都必须停止。不得把熟悉的分支名当作证据。\n\n## 输出\n\n说明检查了什么、选择了哪个 specialist 路径、使用了哪个已授权 remote 以及仍需什么确认。普通分流或默认发布不得副作用创建 pull request。不得创建、推送或保留 patch-stack；历史引用仅在用户另行批准删除时处理。\n"
-      }
-    ]
+    "github": {
+      "knownInputSha256": [
+        "380D663305EB74B44858F58D76BDB21173A4D4C63D5885299AD6005D6FFC80B9",
+        "81DBDD90934FE86A79DDC4790FD211E5FCA866302A74090AD153395F56F2BD42",
+        "2107A6AA76F24B544D2F296C09B155FCEE1A936101364C38730335FE0D385FEE",
+        "1A45C26345139509A3E7B759E688C3948C8A381143D8A2BD01C5D6F43CC38366"
+      ],
+      "patchedSha256": "D55F4BE567D686DFDED79642611CDCA7538020DB14CC3714E1F7B37E43A6BE6C",
+      "patchedDocument": "---\nname: github\ndescription: \"通过已连接的 GitHub app 分流仓库、PR 和 issue 工作；发布改动仅在当前任务明确授权后路由到 main-only 发布器。\"\n---\n\n<!-- codex-github-main-only-overlay: v2 -->\n\n# GitHub\n\n这是 GitHub 工作的总入口。先解析仓库、PR、issue 或本地 checkout，再尽快路由到最窄的工作流。\n\n## Connector First\n\n- 仓库定位、PR/issue 查询与摘要、patch、comment、label、reaction 和 PR creation 优先使用此插件的 GitHub app。\n- connector 写操作前重述准确仓库与 PR、issue、label 或 reaction 目标。\n- 当前分支或 current-branch PR discovery 先读取本地 git 上下文；connector 覆盖不足时才用 `gh` 兜底。\n- GitHub Actions logs 不由 connector 单独提供；CI 调试路由到 `../gh-fix-ci/SKILL.md`，必要时使用 `gh`。\n\n## 路由\n\n- 未解决 review thread、requested changes 或 inline feedback：`../gh-address-comments/SKILL.md`。\n- failing checks、Actions logs 或 CI 根因：`../gh-fix-ci/SKILL.md`。\n- stage、commit、push 或创建 PR：立即路由到 `../yeet/SKILL.md`。\n\n## 发布边界\n\n只有当前任务明确授权 commit 或 push 时才进入发布路径。普通发布只允许用户拥有的 remote，并由发布器执行 `git push <targetRemote> HEAD:main`、`git fetch --prune <targetRemote>`，证明本地 HEAD 与 `<targetRemote>/main` tracking 一致。remote 所有权、目标 `main`、ahead/diverged 或范围任一不明确时停止。\n\n创建 PR 不是默认副作用。只有用户明确要求 PR，且临时分支理由和范围已获确认时才走 PR 例外；PR creation 优先使用 GitHub app，connector 无法可靠表达 repository/head 时由 `gh` 兜底。\n\n## 输出\n\n说明已解析的仓库与目标、采用的 specialist 路径、实际写操作和仍需确认的事项。不得把 connector、local git 或 `gh` 任一侧的状态推断成另一侧已完成。\n"
+    },
+    "yeet": {
+      "knownInputSha256": [
+        "9D70C68282ACBC7FBEE678F142ADBF84B4F1091890D6CB93B3106E5E629FC0CB",
+        "E93C6EA769BA673D30749A981CD8AD75B687F454E3C8E2E45E7CFCBD412DF12C",
+        "4AE826B1F9EA1543AC582791DADE5D15A8B4A8E6B9211BC5B3A30B9B01D4E9C1",
+        "9E58C2B95136F8F5EE39A14340FDCC6B1E30B7AF37273B2C3D8CABA777B11901",
+        "036578CBD8FC6855B49156D3B1E585C128481B289DE660939F4F0305C699EB9F"
+      ],
+      "patchedSha256": "47A2BA034243EA8586EC4B80970B1AE2AE989069D66ECF3FA904E7A47D438F6B",
+      "patchedDocument": "---\nname: \"yeet\"\ndescription: \"仅在当前任务明确授权后，把已确认范围发布到用户拥有远端的 main；PR 和临时分支是事前确认的例外。\"\n---\n\n<!-- codex-github-main-only-overlay: v2 -->\n\n# GitHub 发布改动\n\n只处理用户明确要求的本地发布。当前任务必须明确授权 commit 和 push；授权未覆盖的写操作保持停止状态。\n\n## 发布前门禁\n\n1. 用 `git status -sb` 和 diff 确认准确范围；混合工作树只暂存明确路径。\n2. 先执行 `git fetch --prune <targetRemote>`，再证明 `<targetRemote>` 属于用户且普通目标固定为 `main`。remote 不明、当前分支不是 `main`、remote/main ahead 或 diverged 时停止，不自行 merge、rebase、切分支或改 tracking。\n3. 运行与改动相称的最窄检查。依赖或环境损坏时先在授权边界内修复并重跑，不绕过检查。\n4. 仅在需要 current-branch PR discovery、认证检查或 connector 缺口时检查 `gh --version` 与 `gh auth status`；`gh` 只作兜底。\n\n## Main-Only 发布\n\n1. 只暂存已确认路径，复核 staged diff，再提交已授权内容。\n2. 执行 `git push <targetRemote> HEAD:main`，不 force-push，不发布额外 ref 或 tag。\n3. 执行 `git fetch --prune <targetRemote>`，证明本地 HEAD 与 `<targetRemote>/main` tracking 一致，并复核工作树状态。\n4. 报告提交、验证、目标 remote/main 和 parity；任一门禁未闭合都不能声称发布完成。\n\n## PR 与临时分支例外\n\n创建 PR 不是默认步骤。只有代理先说明隔离或评审理由、用户确认临时分支和 PR 范围后，才创建或切换 `<temporaryBranch>`。只有在代理说明理由且用户确认后，才执行 `git push --set-upstream <targetRemote> <temporaryBranch>`。\n\n分支推送后，PR creation 优先使用此插件的 GitHub app；repository 或 head 无法可靠表达时使用 `gh` 兜底。ready/draft 状态和 base=`main` 服从用户明确要求，不默认创建 draft PR。\n\n用户验收并批准合入后，以普通非强制方式让 main 包含该提交，再执行 `git push <targetRemote> HEAD:main`。main 推送成功后，严格依次执行：\n\n1. `git push --delete <targetRemote> <temporaryBranch>`\n2. 只对 `ownedByThisWorkflow` 创建的 worktree 执行 `git worktree remove <temporaryWorktree>`\n3. `git branch --delete <temporaryBranch>`\n4. `git fetch --prune <targetRemote>`\n\n远端删除失败时停止并保留本地临时分支及其 worktree；后续任一步失败也保留尚存现场并准确报告。用户明确要求保留分支或 PR 等待外部评审时，同样保留并标明例外。\n\n## 安全边界\n\n- 不吸收无关改动，不向第三方 upstream、public fork 或 vendor remote 推送。\n- 不创建、更新或推送 patch-stack；历史引用只读盘点，删除另行授权。\n- GitHub app、local git 与 `gh` 的结果分别验证；PR 存在不代表 main 已发布。\n"
+    }
   }
 }

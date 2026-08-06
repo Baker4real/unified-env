@@ -7,7 +7,7 @@ intent: 说明 Git 默认分支发布与收尾 Skill 策略的设计和现役边
 
 # Git 默认分支发布与收尾 Skill 统一策略设计
 
-> 状态：2026-07-13 的默认分支统一方案是历史实现。2026-07-23 起，全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）的唯一现役合同固定为用户拥有远端的 `main`。clean closeout 真源已经符合该政策；版本化 GitHub overlay、现役插件 cache 和兼容 wrapper 仍保留 default-branch 文案或行为，统一标为 `pending drift`，不得作为非 `main` 发布授权。本文保留历史设计，当前执行面以第 3 节和“验证与验收”为准。
+> 状态：2026-07-13 的默认分支统一方案是历史实现。2026-07-23 起，全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）的唯一现役合同固定为用户拥有远端的 `main`；commit、push 或 PR 还必须由当前任务明确授权。GitHub plugin overlay 已于 2026-08-07 完成新版 upstream 适配和六目标 live 验收；兼容 wrapper 的独立状态仍以第 3 节为准。本文保留历史设计，当前执行面以第 3、4 节和“验证与验收”为准。
 
 > 退役说明（2026-07-16）：本文保留实施时的历史路径和设计决策。已删除来源的 skill 路径、来源和 overlay 描述不代表当前安装，也不授权恢复。
 
@@ -101,9 +101,9 @@ intent: 说明 Git 默认分支发布与收尾 Skill 策略的设计和现役边
 
 neat-freak 的 reference 是 Git clean closeout 的唯一行为真源；任何 wrapper、overlay 或历史文档里的 default-branch 文案都不能覆盖其 `main`-only 合同。普通发布不意味着吸收、删除或丢弃既有无关脏改动：无法合法归属的路径必须保留，并使 closeout 明确处于 incomplete。未来获准修复本地 skill 时，必须同步 SOURCE.md 与统一来源账本。
 
-### 4. GitHub 发布插件的历史 overlay 与待修漂移
+### 4. GitHub 发布插件的现役 v2 overlay
 
-GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本地 skill 根。当前版本化 overlay 和现役 cache 仍按 resolved default branch 发布，与 `main`-only 现役政策冲突，因此状态是 `pending drift`。未取得 active plugin 修改授权并完成失败关闭的重放验证前，不得直接手改 cache，也不得把旧 overlay 当作执行授权。下列内容只记录 2026-07-13 的覆盖器设计：
+GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本地 skill 根。现役 v2 overlay 以当前 upstream 为基线，保留 connector-first、PR creation、current-branch discovery、GitHub Actions logs 与 `gh` fallback，同时把普通发布固定为当前任务明确授权、用户拥有 remote 和 `main`。3 个 surface、6 个目标只通过版本化 source、deployer 和 runtime 覆盖器写入；不得直接手改 cache。下列 2026-07-13 条目解释覆盖器机制，发布语义以本段和版本化 catalog 为准：
 
 1. 在 D:\Codex\.codex\scripts 下增加一个专用覆盖器和声明式补丁清单。
 2. 覆盖器只发现 GitHub 插件的 marketplace source、已安装 cache 与当前可见 remote cache 中的 github 和 yeet SKILL.md。
@@ -111,7 +111,7 @@ GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本�
 4. 已打补丁的内容带稳定标记，重复运行必须是 no-op。
 5. 每次 plugin refresh 后先运行 dry-run，再应用覆盖；重放规则和当前指纹记录在 D:\Codex\.codex\docs\agent-guidance\ 中，不把插件 cache 当成来源真相。
 
-2026-07-13 的 overlay 曾把 yeet 改为默认分支发布流程，并让 github 把 publish changes 路由到该流程。该行为现已被 `main`-only 政策取代，但版本化模板与 cache 尚待受控修复；gh-address-comments 与 gh-fix-ci 仍只做 review/CI 工作，不纳入发布行为补丁。
+2026-07-13 的 overlay 曾把 yeet 改为默认分支发布流程，并让 github 把 publish changes 路由到该流程。v2 已用 `main`-only 和当前任务授权门禁取代该行为；gh-address-comments 与 gh-fix-ci 仍只做 review/CI 工作，不纳入发布行为补丁。
 
 ### 5. 来源与更新边界
 
@@ -121,7 +121,7 @@ GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本�
 
 ## 失败处理
 
-现役普通发布只接受用户拥有远端的 `main`；目标不是 `main`、远端状态不明或现有 overlay 试图选择其他默认分支时，必须停止并报告 `pending drift`。下表中的“默认分支”条件仅描述历史 overlay 的失败关闭行为。
+现役普通发布只接受用户拥有远端的 `main`；目标不是 `main`、远端状态不明或 overlay 输入指纹未知时必须停止。下表中的“默认分支”条件仅描述历史 overlay 的失败关闭行为。
 
 | 触发条件 | 第一处理 | 仍无法恢复时 |
 | --- | --- | --- |
@@ -134,7 +134,7 @@ GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本�
 
 ## 验证与验收
 
-`pending drift` 关闭前必须同时满足：
+GitHub overlay 漂移只有在以下条件全部满足后才可关闭；2026-08-07 的 v2 部署已经逐项通过：
 
 1. 本地 skill 内容测试证明没有创建、推送或追踪 patch-stack 分支的指令。
 2. 普通收尾目标固定为用户拥有远端的 `main`；remote 名称不能代替所有权证据，remote ahead/diverged、目标歧义或非 `main` 时停止。

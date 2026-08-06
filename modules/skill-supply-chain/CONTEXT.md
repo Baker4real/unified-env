@@ -22,7 +22,7 @@ intent: 定义 Skill 来源、安装、catalog、ledger 和发布政策的责任
 - `docs/plans/2026-07-13-local-skill-catalog-implementation.md`
 - `docs/specs/2026-07-13-github-default-branch-skill-policy-design.md`
 
-最后一份 dated spec 的后半段仍承载现役 `main`-only 合同和 `pending drift`，因此不能整份归档。
+最后一份 dated spec 的后半段仍承载现役 `main`-only 合同、overlay 重放门禁和验收条件，因此不能整份归档。GitHub plugin 的 2026-08-07 upstream 漂移已经闭合；未来新指纹仍按未知输入失败关闭。
 
 ## 接口与测试
 
