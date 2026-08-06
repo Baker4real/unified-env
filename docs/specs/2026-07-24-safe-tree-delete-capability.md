@@ -26,8 +26,12 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 `D:\Codex\projects\统一环境\.codex-remote-attachments` 为 capability root 删除其后代，
 最小后代深度为 1；附件根本身和其他项目顶层目录不在该授权面内。
 
-policy schema v3 要求 `schemaVersion` 与 `minimumDescendantDepth` 都是真正的 JSON integer，
-不接受字符串或小数强转。`minimumDescendantDepth` 通常至少为 1，且
+policy schema v4 要求 `schemaVersion` 与 `minimumDescendantDepth` 都是真正的 JSON integer，
+不接受字符串或小数强转；解析器仍兼容 schema v3，旧条目继续严格拒绝链接树。v4 的
+`allowHardLinks` 与 `allowInternalDirectoryJunctions` 必须是 JSON boolean，缺失时为 `false`；
+任一为 `true` 时只允许 `minimumDescendantDepth=0`、
+`rootDeletionPurpose=rebuildable-build-output`，且运行目标必须精确等于 capability root。
+`minimumDescendantDepth` 通常至少为 1，且
 `rootDeletionPurpose` 必须为 `none`。root 删除只允许三种精确用途：
 
 - capability root 自身是项目根之下的可重建构建产物根时，可设为 0 和
@@ -48,13 +52,30 @@ policy schema v3 要求 `schemaVersion` 与 `minimumDescendantDepth` 都是真�
 同父、随机 generation 绑定的 quarantine。Purge 仍校验原计划、transaction、当前树与文件
 identity；只有 `purging` 中断恢复允许当前树成为原计划的未变子集，其他路径仍要求完整清单。
 
+生产 policy 只为以下四个精确可重建目录启用 hardlink；只有两个 `node_modules` 同时启用内部
+directory junction：
+
+- `D:\Codex\projects\cc-switch\src-tauri\target`
+- `D:\Codex\projects\cc-switch\node_modules`
+- `D:\Codex\projects\开源分发 api\sub2api\frontend\node_modules`
+- `D:\Codex\projects\serena\.venv`
+
+directory junction 只能是普通父目录下的 mount-point 叶节点。句柄必须以
+`FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS` 打开，绑定 file identity、reparse tag
+与原始 reparse bytes SHA-256；target 只从原始 reparse data 解析为 D 盘绝对路径并验证位于原始
+capability root 内，绝不打开或遍历 target。外部、symlink、未知 tag、根/祖先 reparse point
+继续失败关闭。hardlink 只由 safe-tree-delete 专用 lease 按逐根 policy 放行；普通 hook/ACL/file
+guard 仍拒绝 hardlink。两类专用 lease 都拒绝 share-write/share-delete 和非默认 ADS，删除前在同一
+句柄复验 identity 与内容或 reparse bytes，并仅 unlink 当前目录项。
+
 生产 CLI 不接受 policy 或 evidence override。测试替身仅位于 `tests\`，不得复制到宿主
 脚本目录或作为生产入口。
 
 ## 状态机
 
 1. `Plan`：规范化目标与 capability root，校验固定 allowlist、最小后代深度、denylist、
-   root 删除用途、父链与完整子树 reparse point；`empty-project-state` 还会在发布计划前确认
+   root 删除用途、父链与完整子树；未授权 reparse point 一律拒绝，获准的内部 directory junction
+   以 manifest schema v2 的不可遍历叶节点记录；`empty-project-state` 还会在发布计划前确认
    文件计数为零，并拒绝所有目录 NTFS named stream。通过后生成句柄绑定的文件 identity、
    SHA-256 和目录清单。
 2. `Apply`：要求 `ConfirmApply` 与精确 `ApprovedPlanSha256`；复算完整树清单无漂移后，
@@ -107,7 +128,7 @@ identity；只有 `purging` 中断恢复允许当前树成为原计划的未变�
 
 计划 30 分钟过期。缺少确认、哈希不匹配、policy 漂移、目标重新出现、目录内容或 identity
 漂移、恢复时出现未计划节点或既有节点的 kind/SHA-256/file identity/root identity 漂移、
-junction/symlink/reparse point、越界路径以及并发 mutex 冲突均失败关闭。
+未授权或越界的 hardlink/junction/symlink/reparse point、越界路径以及并发 mutex 冲突均失败关闭。
 
 DACL 冻结覆盖当前 NTFS 上遵守访问检查的普通新 ADS/子项创建，并跨进程退出与正常操作系统重启
 保留。它不撤销 freeze 前已授予的句柄权限，也不声称约束 `WRITE_DAC`/`WRITE_OWNER`、父目录

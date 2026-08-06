@@ -42,6 +42,14 @@ $largeSparseTargetPath = Join-Path $fixtureRoot 'large-sparse-candidate'
 $largeSparseFilePath = Join-Path $largeSparseTargetPath 'large-zero.bin'
 $largeSparseQuarantinePath = $null
 $deletePendingProbePath = Join-Path $fixtureRoot 'delete-pending-probe'
+$linkAwareTargetPath = Join-Path $fixtureRoot 'link-aware-build-output'
+$linkAwarePolicyPath = Join-Path $fixtureRoot 'link-aware-policy.json'
+$linkAwareExternalPath = Join-Path $fixtureRoot 'link-aware-external'
+$linkAwareExternalFile = Join-Path $linkAwareExternalPath 'must-survive.txt'
+$linkAwareJunctionPath = Join-Path $linkAwareTargetPath 'linked-package'
+$linkAwareInternalPath = Join-Path $linkAwareTargetPath '.store\package'
+$linkAwareHardLinkPath = Join-Path $linkAwareTargetPath 'shared-cache.bin'
+$linkAwareDescendantPath = Join-Path $linkAwareTargetPath 'descendant'
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -396,7 +404,7 @@ try {
         'delete-pending 原生 stream 打开拒绝不得落入 ADS'
 
     $productionPolicy = Get-Content -LiteralPath $productionPolicyPath -Raw | ConvertFrom-Json -Depth 32
-    Assert-True ($productionPolicy.schemaVersion -eq 3) '生产策略必须使用 schema v3'
+    Assert-True ($productionPolicy.schemaVersion -eq 4) '生产策略必须使用 schema v4'
     $legacyTempEntries = @($productionPolicy.entries | Where-Object { $_.id -ceq 'codex-legacy-temp' })
     Assert-True ($legacyTempEntries.Count -eq 1) '生产策略必须唯一声明 legacy temp capability root'
     $legacyTempEntry = $legacyTempEntries[0]
@@ -473,6 +481,44 @@ try {
     Assert-True `
         ($productionRetiredProjectEntries.Count -eq 0) `
         '完成退役删除后，生产策略不得残留 retired-project-root 授权'
+    $linkAwareProductionExpectations = @(
+        [pscustomobject]@{
+            id = 'cc-switch-rust-target'
+            root = 'D:\Codex\projects\cc-switch\src-tauri\target'
+            junctions = $false
+        },
+        [pscustomobject]@{
+            id = 'cc-switch-node-modules'
+            root = 'D:\Codex\projects\cc-switch\node_modules'
+            junctions = $true
+        },
+        [pscustomobject]@{
+            id = 'sub2api-frontend-node-modules'
+            root = 'D:\Codex\projects\开源分发 api\sub2api\frontend\node_modules'
+            junctions = $true
+        },
+        [pscustomobject]@{
+            id = 'serena-python-venv'
+            root = 'D:\Codex\projects\serena\.venv'
+            junctions = $false
+        }
+    )
+    foreach ($expectedLinkAwareEntry in $linkAwareProductionExpectations) {
+        $matchingLinkAwareEntries = @($productionPolicy.entries | Where-Object {
+            $_.id -ceq $expectedLinkAwareEntry.id
+        })
+        Assert-True `
+            ($matchingLinkAwareEntries.Count -eq 1) `
+            "生产策略必须唯一声明 $($expectedLinkAwareEntry.id)"
+        $matchingLinkAwareEntry = $matchingLinkAwareEntries[0]
+        Assert-True `
+            ($matchingLinkAwareEntry.capabilityRoot -ceq $expectedLinkAwareEntry.root -and
+                $matchingLinkAwareEntry.minimumDescendantDepth -eq 0 -and
+                $matchingLinkAwareEntry.rootDeletionPurpose -ceq 'rebuildable-build-output' -and
+                $matchingLinkAwareEntry.allowHardLinks -eq $true -and
+                $matchingLinkAwareEntry.allowInternalDirectoryJunctions -eq $expectedLinkAwareEntry.junctions) `
+            "$($expectedLinkAwareEntry.id) link-aware 授权必须精确匹配"
+    }
     $attachmentRootError = Assert-Throws -Message '生产策略必须拒绝删除 remote attachments 根' -Action {
         & $entryPath `
             -Mode Plan `
@@ -1347,8 +1393,116 @@ try {
         & $env:ComSpec /d /c rmdir $junctionPath | Out-Null
     }
 
-    [pscustomobject][ordered]@{ ok = $true; suite = 'CodexSafeTreeDelete'; slices = 11 }
+    [void][IO.Directory]::CreateDirectory($linkAwareTargetPath)
+    [void][IO.Directory]::CreateDirectory($linkAwareExternalPath)
+    [IO.File]::WriteAllText(
+        $linkAwareExternalFile,
+        'must-survive',
+        [Text.UTF8Encoding]::new($false))
+    $linkAwarePolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 4
+        entries = @(
+            [pscustomobject][ordered]@{
+                id = 'fixture-link-aware-build-output'
+                capabilityRoot = $linkAwareTargetPath
+                minimumDescendantDepth = 0
+                rootDeletionPurpose = 'rebuildable-build-output'
+                allowHardLinks = $true
+                allowInternalDirectoryJunctions = $true
+                deniedExactPaths = @()
+            }
+        )
+    }
+    [IO.File]::WriteAllText(
+        $linkAwarePolicyPath,
+        ($linkAwarePolicy | ConvertTo-Json -Depth 10),
+        [Text.UTF8Encoding]::new($false))
+
+    [void][IO.Directory]::CreateDirectory($linkAwareDescendantPath)
+    $linkAwareDescendantError = Assert-Throws -Message 'link-aware policy 不得授权独立删除 root 后代' -Action {
+        & $entryPath `
+            -Mode Plan `
+            -TargetPath $linkAwareDescendantPath `
+            -CapabilityRoot $linkAwareTargetPath `
+            -FixturePolicyPath $linkAwarePolicyPath `
+            -FixtureEvidenceRoot $evidenceRoot
+    }
+    Assert-True `
+        ($linkAwareDescendantError -match 'link-aware.*精确 capability root') `
+        'link-aware 后代目标拒绝必须返回稳定原因'
+
+    [void](New-Item -ItemType Junction -Path $linkAwareJunctionPath -Target $linkAwareExternalPath)
+    try {
+        $externalJunctionError = Assert-Throws -Message 'link-aware policy 必须拒绝越界 junction target' -Action {
+            & $entryPath `
+                -Mode Plan `
+                -TargetPath $linkAwareTargetPath `
+                -CapabilityRoot $linkAwareTargetPath `
+                -FixturePolicyPath $linkAwarePolicyPath `
+                -FixtureEvidenceRoot $evidenceRoot
+        }
+        Assert-True `
+            ($externalJunctionError -match 'junction.*target|target.*junction|越界') `
+            '越界 junction target 拒绝必须返回稳定原因'
+        Assert-True ([IO.File]::Exists($linkAwareExternalFile)) '越界 junction 拒绝不得触及外部内容'
+    } finally {
+        if ([IO.Directory]::Exists($linkAwareJunctionPath)) {
+            & $env:ComSpec /d /c rmdir $linkAwareJunctionPath | Out-Null
+        }
+    }
+
+    [void][IO.Directory]::CreateDirectory($linkAwareInternalPath)
+    [IO.File]::WriteAllText(
+        (Join-Path $linkAwareInternalPath 'package.json'),
+        '{"name":"fixture"}',
+        [Text.UTF8Encoding]::new($false))
+    [void](New-Item -ItemType Junction -Path $linkAwareJunctionPath -Target $linkAwareInternalPath)
+    [void](New-Item -ItemType HardLink -Path $linkAwareHardLinkPath -Target $linkAwareExternalFile)
+    $linkAwarePlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $linkAwareTargetPath `
+        -CapabilityRoot $linkAwareTargetPath `
+        -FixturePolicyPath $linkAwarePolicyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($linkAwarePlan.planned -eq $true) 'link-aware build output 必须可生成计划'
+    $linkAwarePlanDocument = Get-Content -Raw -LiteralPath ([string]$linkAwarePlan.planPath) |
+        ConvertFrom-Json -Depth 128
+    Assert-True `
+        ([long]$linkAwarePlanDocument.treeManifest.schemaVersion -eq 2) `
+        'link-aware 计划必须使用 tree manifest schema v2'
+    Assert-True `
+        (@($linkAwarePlanDocument.treeManifest.entries | Where-Object kind -ceq 'directory-junction').Count -eq 1) `
+        'link-aware 计划必须把内部 junction 记录为不遍历的叶节点'
+    $linkAwareApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$linkAwarePlan.planPath) `
+        -ApprovedPlanSha256 ([string]$linkAwarePlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $linkAwarePolicyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($linkAwareApply.quarantined -eq $true) 'link-aware build output 必须可隔离'
+    $linkAwarePurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$linkAwareApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$linkAwareApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $linkAwarePolicyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($linkAwarePurge.purged -eq $true) 'link-aware build output 必须可 purge'
+    Assert-True (-not [IO.Directory]::Exists($linkAwareTargetPath)) 'link-aware purge 后目标根不得存在'
+    Assert-True `
+        ([IO.File]::ReadAllText($linkAwareExternalFile) -ceq 'must-survive') `
+        '删除 hard link 目录项不得触及外部源文件'
+
+    [pscustomobject][ordered]@{ ok = $true; suite = 'CodexSafeTreeDelete'; slices = 12 }
 } finally {
+    if ([IO.Directory]::Exists($linkAwareJunctionPath)) {
+        & $env:ComSpec /d /c rmdir $linkAwareJunctionPath | Out-Null
+    }
+    if ([IO.File]::Exists($linkAwareHardLinkPath)) {
+        [IO.File]::Delete($linkAwareHardLinkPath)
+    }
     if ([IO.File]::Exists($largeSparseFilePath)) {
         [IO.File]::SetAttributes($largeSparseFilePath, [IO.FileAttributes]::Normal)
         [IO.File]::Delete($largeSparseFilePath)

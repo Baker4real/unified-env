@@ -1,6 +1,6 @@
 {
   "artifactType": "env-governance.codex-safe-tree-delete-policy",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "entries": [
     {
       "id": "active-local-skills",
@@ -151,6 +151,42 @@
       "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\obj",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "cc-switch-rust-target",
+      "capabilityRoot": "D:\\Codex\\projects\\cc-switch\\src-tauri\\target",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "cc-switch-node-modules",
+      "capabilityRoot": "D:\\Codex\\projects\\cc-switch\\node_modules",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": true,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "sub2api-frontend-node-modules",
+      "capabilityRoot": "D:\\Codex\\projects\\开源分发 api\\sub2api\\frontend\\node_modules",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": true,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "serena-python-venv",
+      "capabilityRoot": "D:\\Codex\\projects\\serena\\.venv",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": false,
       "deniedExactPaths": []
     }
   ]

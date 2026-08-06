@@ -55,6 +55,7 @@ namespace CodexHookGovernance
     public static class HandleBoundFileReader
     {
         private const uint FileNameNormalized = 0x0;
+        private const uint FileNameOpened = 0x8;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct NativeFileTime
@@ -147,11 +148,21 @@ namespace CodexHookGovernance
 
         internal static string GetFinalPath(SafeFileHandle handle)
         {
+            return GetFinalPath(handle, FileNameNormalized);
+        }
+
+        internal static string GetOpenedFinalPath(SafeFileHandle handle)
+        {
+            return GetFinalPath(handle, FileNameOpened);
+        }
+
+        private static string GetFinalPath(SafeFileHandle handle, uint flags)
+        {
             uint capacity = 512;
             while (true)
             {
                 StringBuilder buffer = new StringBuilder(checked((int)capacity));
-                uint result = GetFinalPathNameByHandleW(handle, buffer, capacity, FileNameNormalized);
+                uint result = GetFinalPathNameByHandleW(handle, buffer, capacity, flags);
                 if (result == 0)
                 {
                     throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -206,13 +217,17 @@ namespace CodexHookGovernance
         private const int ErrorAccessDenied = 5;
         private const int ErrorHandleEof = 38;
         private const int ErrorAlreadyExists = 183;
+        private const int ErrorMoreData = 234;
         private const int FileDispositionInformation = 13;
         private const int FileDispositionInformationEx = 64;
         private const int FileRenameInformationEx = 65;
         private const int FileNamesInformation = 12;
         private const int FileStreamInfo = 7;
+        private const uint FsctlGetReparsePoint = 0x000900A8;
+        private const uint IoReparseTagMountPoint = 0xA0000003;
         private const uint FileDispositionDelete = 0x00000001;
         private const uint FileDispositionPosixSemantics = 0x00000002;
+        private const uint FileDispositionIgnoreReadonlyAttribute = 0x00000010;
         private const int AlternateDataStreamWriteMask = 0x00000116;
         private const int StatusNoMoreFiles = unchecked((int)0x80000006);
 
@@ -688,6 +703,111 @@ namespace CodexHookGovernance
             }
         }
 
+        public SafeTreeDeleteFileLease AcquireSafeTreeDeleteFileLease(
+            string targetPath,
+            bool allowHardLinks)
+        {
+            ThrowIfDisposed();
+            string lexicalPath = ValidateChildPath(targetPath, "targetPath");
+            SafeFileHandle handle = CreateFileW(
+                ToExtendedPath(lexicalPath),
+                GenericRead | FileWriteAttributes | DeleteAccess,
+                // This dedicated destructive lease intentionally refuses
+                // share-write and share-delete for its full lifetime.
+                FileShare.Read,
+                IntPtr.Zero,
+                OpenExisting,
+                FileAttributeNormal | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(
+                    error,
+                    "Unable to acquire a safe-tree-delete file lease.");
+            }
+
+            try
+            {
+                uint numberOfLinks = VerifySafeTreeDeleteFileHandle(
+                    handle,
+                    lexicalPath,
+                    allowHardLinks);
+                string[] identity = GetFileIdentity(handle);
+                return new SafeTreeDeleteFileLease(
+                    this,
+                    lexicalPath,
+                    handle,
+                    allowHardLinks,
+                    identity[0],
+                    identity[1],
+                    numberOfLinks);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        public SafeTreeDeleteReparseLeafLease AcquireSafeTreeDeleteReparseLeafLease(
+            string targetPath)
+        {
+            ThrowIfDisposed();
+            string lexicalPath = ValidateChildPath(targetPath, "targetPath");
+            SafeFileHandle handle = CreateFileW(
+                ToExtendedPath(lexicalPath),
+                GenericRead | FileWriteAttributes | DeleteAccess,
+                // Opening the reparse point itself and refusing write/delete
+                // sharing makes the captured junction payload immutable.
+                FileShare.Read,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(
+                    error,
+                    "Unable to acquire a safe-tree-delete reparse-leaf lease.");
+            }
+
+            try
+            {
+                uint reparseTag;
+                string targetPathFromReparseData;
+                byte[] reparseData;
+                VerifySafeTreeDeleteMountPointHandle(
+                    handle,
+                    lexicalPath,
+                    out reparseTag,
+                    out targetPathFromReparseData,
+                    out reparseData);
+                string[] identity = GetFileIdentity(handle);
+                using (SHA256 sha256 = SHA256.Create())
+                {
+                    return new SafeTreeDeleteReparseLeafLease(
+                        this,
+                        lexicalPath,
+                        handle,
+                        identity[0],
+                        identity[1],
+                        reparseTag,
+                        targetPathFromReparseData,
+                        reparseData,
+                        sha256.ComputeHash(reparseData));
+                }
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
         // The caller already holds this directory with a deny-DELETE share.
         // Open only an immediate child so recursive capability deletion never
         // has to re-open the protected ancestor chain (which would otherwise
@@ -898,6 +1018,18 @@ namespace CodexHookGovernance
             int fileInformationClass,
             IntPtr fileInformation,
             uint bufferSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeviceIoControl(
+            SafeFileHandle device,
+            uint ioControlCode,
+            IntPtr inputBuffer,
+            uint inputBufferSize,
+            IntPtr outputBuffer,
+            uint outputBufferSize,
+            out uint bytesReturned,
+            IntPtr overlapped);
 
         public static VerifiedDirectoryChainGuard Acquire(
             string trustedRoot,
@@ -1489,6 +1621,314 @@ namespace CodexHookGovernance
                 normalized == "LPT¹" || normalized == "LPT²" || normalized == "LPT³";
         }
 
+        internal static uint VerifySafeTreeDeleteFileHandle(
+            SafeFileHandle handle,
+            string expectedPath,
+            bool allowHardLinks)
+        {
+            ByHandleFileInformation fileInformation;
+            if (!GetFileInformationByHandle(handle, out fileInformation))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if ((fileInformation.FileAttributes & FileAttributeReparsePoint) != 0)
+            {
+                throw new IOException("The safe-tree-delete file is a reparse point.");
+            }
+            if ((fileInformation.FileAttributes & FileAttributeDirectory) != 0)
+            {
+                throw new IOException("The safe-tree-delete file is not a regular file.");
+            }
+            if (fileInformation.NumberOfLinks == 0)
+            {
+                throw new IOException("The safe-tree-delete file has an invalid hard-link count.");
+            }
+            if (!allowHardLinks && fileInformation.NumberOfLinks != 1)
+            {
+                throw new IOException("The safe-tree-delete file is a hard link not authorized by policy.");
+            }
+
+            AssertOpenedPathMatches(handle, expectedPath, false);
+            AssertRegularFileHasNoAlternateDataStreams(handle);
+            return fileInformation.NumberOfLinks;
+        }
+
+        internal static void VerifySafeTreeDeleteMountPointHandle(
+            SafeFileHandle handle,
+            string expectedPath,
+            out uint reparseTag,
+            out string targetPath,
+            out byte[] reparseData)
+        {
+            ByHandleFileInformation fileInformation;
+            if (!GetFileInformationByHandle(handle, out fileInformation))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if ((fileInformation.FileAttributes & FileAttributeReparsePoint) == 0 ||
+                (fileInformation.FileAttributes & FileAttributeDirectory) == 0)
+            {
+                throw new IOException(
+                    "The safe-tree-delete reparse leaf is not a directory reparse point.");
+            }
+
+            AssertOpenedPathMatches(handle, expectedPath, true);
+            AssertNoAlternateDataStreams(handle);
+            reparseData = ReadReparseData(handle);
+            reparseTag = ReadUInt32(reparseData, 0);
+            if (reparseTag != IoReparseTagMountPoint)
+            {
+                throw new IOException(
+                    "The safe-tree-delete reparse leaf is not a mount-point junction.");
+            }
+            targetPath = ParseMountPointTarget(reparseData);
+        }
+
+        private static void AssertOpenedPathMatches(
+            SafeFileHandle handle,
+            string expectedPath,
+            bool trimDirectoryEnding)
+        {
+            string lexicalPath = Path.GetFullPath(expectedPath);
+            string openedPath = Path.GetFullPath(
+                HandleBoundFileReader.NormalizeFinalPath(
+                    HandleBoundFileReader.GetOpenedFinalPath(handle)));
+            if (trimDirectoryEnding)
+            {
+                lexicalPath = TrimDirectoryEnding(lexicalPath);
+                openedPath = TrimDirectoryEnding(openedPath);
+            }
+            if (!string.Equals(lexicalPath, openedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new HandlePathMismatchException(expectedPath, openedPath);
+            }
+        }
+
+        private static void AssertRegularFileHasNoAlternateDataStreams(SafeFileHandle handle)
+        {
+            const int fileStreamInformationHeaderLength = 24;
+            int bufferLength = 4096;
+            while (true)
+            {
+                IntPtr buffer = Marshal.AllocHGlobal(bufferLength);
+                try
+                {
+                    for (int index = 0; index < bufferLength; index++)
+                    {
+                        Marshal.WriteByte(buffer, index, 0);
+                    }
+                    if (!GetFileInformationByHandleEx(
+                        handle,
+                        FileStreamInfo,
+                        buffer,
+                        checked((uint)bufferLength)))
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        if (error == ErrorMoreData && bufferLength < 1024 * 1024)
+                        {
+                            bufferLength = checked(bufferLength * 2);
+                            continue;
+                        }
+                        throw new Win32Exception(
+                            error,
+                            "Unable to enumerate streams for the safe-tree-delete file handle.");
+                    }
+
+                    int offset = 0;
+                    int defaultStreamCount = 0;
+                    while (true)
+                    {
+                        if (offset < 0 || offset + fileStreamInformationHeaderLength > bufferLength)
+                        {
+                            throw new IOException(
+                                "The safe-tree-delete file stream enumeration returned an invalid record.");
+                        }
+                        int nextOffset = Marshal.ReadInt32(buffer, offset);
+                        int nameLength = Marshal.ReadInt32(buffer, offset + 4);
+                        if (nameLength < 0 || (nameLength & 1) != 0 ||
+                            offset + fileStreamInformationHeaderLength + nameLength > bufferLength)
+                        {
+                            throw new IOException(
+                                "The safe-tree-delete file stream enumeration returned an invalid name.");
+                        }
+                        string streamName = Marshal.PtrToStringUni(
+                            IntPtr.Add(buffer, offset + fileStreamInformationHeaderLength),
+                            nameLength / 2);
+                        if (!string.Equals(streamName, "::$DATA", StringComparison.Ordinal))
+                        {
+                            throw new IOException(
+                                "The safe-tree-delete file contains an NTFS alternate data stream.");
+                        }
+                        defaultStreamCount++;
+                        if (nextOffset == 0)
+                        {
+                            break;
+                        }
+                        if (nextOffset < fileStreamInformationHeaderLength ||
+                            (nextOffset & 7) != 0 ||
+                            offset + nextOffset > bufferLength)
+                        {
+                            throw new IOException(
+                                "The safe-tree-delete file stream enumeration returned an invalid offset.");
+                        }
+                        offset += nextOffset;
+                    }
+                    if (defaultStreamCount != 1)
+                    {
+                        throw new IOException(
+                            "The safe-tree-delete file stream enumeration did not return exactly one default stream.");
+                    }
+                    return;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+        }
+
+        private static byte[] ReadReparseData(SafeFileHandle handle)
+        {
+            const int maximumReparseDataBufferSize = 16 * 1024;
+            IntPtr buffer = Marshal.AllocHGlobal(maximumReparseDataBufferSize);
+            try
+            {
+                uint bytesReturned;
+                if (!DeviceIoControl(
+                    handle,
+                    FsctlGetReparsePoint,
+                    IntPtr.Zero,
+                    0,
+                    buffer,
+                    maximumReparseDataBufferSize,
+                    out bytesReturned,
+                    IntPtr.Zero))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Unable to read the safe-tree-delete reparse leaf payload.");
+                }
+                if (bytesReturned < 16 || bytesReturned > maximumReparseDataBufferSize)
+                {
+                    throw new IOException("The reparse leaf returned an invalid payload length.");
+                }
+                byte[] bytes = new byte[checked((int)bytesReturned)];
+                Marshal.Copy(buffer, bytes, 0, bytes.Length);
+                int declaredLength = ReadUInt16(bytes, 4);
+                if (declaredLength < 8 || declaredLength + 8 != bytes.Length)
+                {
+                    throw new IOException("The reparse leaf payload length does not match its header.");
+                }
+                return bytes;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        private static string ParseMountPointTarget(byte[] reparseData)
+        {
+            const int pathBufferOffset = 16;
+            int reparseDataLength = ReadUInt16(reparseData, 4);
+            int pathBufferLength = checked(reparseDataLength - 8);
+            int substituteNameOffset = ReadUInt16(reparseData, 8);
+            int substituteNameLength = ReadUInt16(reparseData, 10);
+            int printNameOffset = ReadUInt16(reparseData, 12);
+            int printNameLength = ReadUInt16(reparseData, 14);
+            ValidateReparseNameRange(
+                substituteNameOffset,
+                substituteNameLength,
+                pathBufferLength,
+                "substitute");
+            ValidateReparseNameRange(
+                printNameOffset,
+                printNameLength,
+                pathBufferLength,
+                "print");
+            string substituteName = Encoding.Unicode.GetString(
+                reparseData,
+                checked(pathBufferOffset + substituteNameOffset),
+                substituteNameLength);
+            if (string.IsNullOrWhiteSpace(substituteName) || substituteName.IndexOf('\0') >= 0)
+            {
+                throw new IOException("The mount-point junction target is empty or malformed.");
+            }
+            return NormalizeMountPointTarget(substituteName);
+        }
+
+        private static void ValidateReparseNameRange(
+            int offset,
+            int length,
+            int pathBufferLength,
+            string name)
+        {
+            if ((offset & 1) != 0 || (length & 1) != 0 ||
+                offset < 0 || length < 0 || offset > pathBufferLength - length)
+            {
+                throw new IOException(
+                    "The mount-point junction " + name + " name range is invalid.");
+            }
+        }
+
+        private static string NormalizeMountPointTarget(string substituteName)
+        {
+            const string ntPrefix = @"\??\";
+            const string extendedPrefix = @"\\?\";
+            string target = substituteName;
+            if (target.StartsWith(ntPrefix + "UNC\\", StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFullPath(
+                    @"\\" + target.Substring((ntPrefix + "UNC\\").Length));
+            }
+            if (target.StartsWith(ntPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                string remainder = target.Substring(ntPrefix.Length);
+                if (remainder.Length >= 3 && char.IsLetter(remainder[0]) &&
+                    remainder[1] == ':' && remainder[2] == '\\')
+                {
+                    return Path.GetFullPath(remainder);
+                }
+                if (remainder.StartsWith("Volume{", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Path.GetFullPath(extendedPrefix + remainder);
+                }
+                throw new IOException("The mount-point junction uses an unsupported NT target path.");
+            }
+            if (target.StartsWith(extendedPrefix + "UNC\\", StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFullPath(
+                    @"\\" + target.Substring((extendedPrefix + "UNC\\").Length));
+            }
+            if (target.StartsWith(extendedPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFullPath(target);
+            }
+            throw new IOException("The mount-point junction target is not an absolute NT path.");
+        }
+
+        private static ushort ReadUInt16(byte[] bytes, int offset)
+        {
+            if (bytes == null || offset < 0 || offset > bytes.Length - sizeof(ushort))
+            {
+                throw new IOException("The reparse leaf payload is truncated.");
+            }
+            return checked((ushort)(bytes[offset] | (bytes[offset + 1] << 8)));
+        }
+
+        private static uint ReadUInt32(byte[] bytes, int offset)
+        {
+            if (bytes == null || offset < 0 || offset > bytes.Length - sizeof(uint))
+            {
+                throw new IOException("The reparse leaf payload is truncated.");
+            }
+            return (uint)(
+                bytes[offset] |
+                (bytes[offset + 1] << 8) |
+                (bytes[offset + 2] << 16) |
+                (bytes[offset + 3] << 24));
+        }
+
         internal static void VerifyRegularFileHandle(SafeFileHandle handle, string expectedPath)
         {
             ByHandleFileInformation fileInformation;
@@ -1533,6 +1973,38 @@ namespace CodexHookGovernance
                 fileInformation.FileIndexHigh.ToString("x8") +
                     fileInformation.FileIndexLow.ToString("x8")
             };
+        }
+
+        internal static void DeleteSafeTreeDeleteLeafHandle(
+            SafeFileHandle handle,
+            string failureMessage)
+        {
+            IntPtr buffer = Marshal.AllocHGlobal(sizeof(uint));
+            try
+            {
+                Marshal.WriteInt32(
+                    buffer,
+                    unchecked((int)(
+                        FileDispositionDelete |
+                        FileDispositionPosixSemantics |
+                        FileDispositionIgnoreReadonlyAttribute)));
+                IoStatusBlock ioStatusBlock;
+                int status = NtSetInformationFile(
+                    handle,
+                    out ioStatusBlock,
+                    buffer,
+                    sizeof(uint),
+                    FileDispositionInformationEx);
+                if (status != 0)
+                {
+                    uint dosError = RtlNtStatusToDosError(status);
+                    throw new Win32Exception(checked((int)dosError), failureMessage);
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
         }
 
         internal static bool VerifyAclTargetHandle(SafeFileHandle handle, string expectedPath)
@@ -1582,6 +2054,262 @@ namespace CodexHookGovernance
                 openedHandles[index].Dispose();
             }
             openedHandles.Clear();
+        }
+    }
+
+    public sealed class SafeTreeDeleteFileLease : IDisposable
+    {
+        private readonly VerifiedDirectoryChainGuard owner;
+        private readonly SafeFileHandle handle;
+        private readonly FileStream stream;
+        private readonly bool allowHardLinks;
+        private byte[] snapshotBytes;
+        private bool disposed;
+
+        internal SafeTreeDeleteFileLease(
+            VerifiedDirectoryChainGuard owner,
+            string originalPath,
+            SafeFileHandle handle,
+            bool allowHardLinks,
+            string volumeSerialNumber,
+            string fileIndex,
+            uint numberOfLinks)
+        {
+            this.owner = owner;
+            OriginalPath = originalPath;
+            this.handle = handle;
+            this.allowHardLinks = allowHardLinks;
+            VolumeSerialNumber = volumeSerialNumber;
+            FileIndex = fileIndex;
+            NumberOfLinks = numberOfLinks;
+            stream = new FileStream(handle, FileAccess.Read);
+        }
+
+        public string OriginalPath { get; }
+
+        public string VolumeSerialNumber { get; }
+
+        public string FileIndex { get; }
+
+        public uint NumberOfLinks { get; }
+
+        public byte[] SnapshotBytes
+        {
+            get
+            {
+                VerifyCurrentHandle();
+                if (snapshotBytes == null)
+                {
+                    snapshotBytes = ReadAllBytesFromHandleCore();
+                }
+                return (byte[])snapshotBytes.Clone();
+            }
+        }
+
+        public byte[] ComputeSha256FromHandle()
+        {
+            VerifyCurrentHandle();
+            stream.Position = 0;
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                return sha256.ComputeHash(stream);
+            }
+        }
+
+        public byte[] ReadAllBytesFromHandle()
+        {
+            VerifyCurrentHandle();
+            return ReadAllBytesFromHandleCore();
+        }
+
+        public void DeleteWithPosixSemantics()
+        {
+            VerifyCurrentHandle();
+            VerifiedDirectoryChainGuard.DeleteSafeTreeDeleteLeafHandle(
+                handle,
+                "Unable to delete the safe-tree-delete file leaf.");
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            stream.Dispose();
+        }
+
+        private void VerifyCurrentHandle()
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            VerifiedDirectoryChainGuard.VerifySafeTreeDeleteFileHandle(
+                handle,
+                OriginalPath,
+                allowHardLinks);
+            AssertIdentityUnchanged();
+        }
+
+        private void AssertIdentityUnchanged()
+        {
+            string[] identity = VerifiedDirectoryChainGuard.GetFileIdentity(handle);
+            if (!string.Equals(identity[0], VolumeSerialNumber, StringComparison.Ordinal) ||
+                !string.Equals(identity[1], FileIndex, StringComparison.Ordinal))
+            {
+                throw new IOException("The safe-tree-delete file handle identity changed.");
+            }
+        }
+
+        private byte[] ReadAllBytesFromHandleCore()
+        {
+            stream.Position = 0;
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                stream.CopyTo(buffer);
+                return buffer.ToArray();
+            }
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (disposed)
+            {
+                throw new ObjectDisposedException(nameof(SafeTreeDeleteFileLease));
+            }
+        }
+    }
+
+    public sealed class SafeTreeDeleteReparseLeafLease : IDisposable
+    {
+        private readonly VerifiedDirectoryChainGuard owner;
+        private readonly SafeFileHandle handle;
+        private readonly byte[] reparseData;
+        private readonly byte[] reparseDataSha256;
+        private bool disposed;
+
+        internal SafeTreeDeleteReparseLeafLease(
+            VerifiedDirectoryChainGuard owner,
+            string originalPath,
+            SafeFileHandle handle,
+            string volumeSerialNumber,
+            string fileIndex,
+            uint reparseTag,
+            string targetPath,
+            byte[] reparseData,
+            byte[] reparseDataSha256)
+        {
+            this.owner = owner;
+            OriginalPath = originalPath;
+            this.handle = handle;
+            VolumeSerialNumber = volumeSerialNumber;
+            FileIndex = fileIndex;
+            ReparseTag = reparseTag;
+            TargetPath = targetPath;
+            this.reparseData = (byte[])reparseData.Clone();
+            this.reparseDataSha256 = (byte[])reparseDataSha256.Clone();
+        }
+
+        public string OriginalPath { get; }
+
+        public string VolumeSerialNumber { get; }
+
+        public string FileIndex { get; }
+
+        public uint ReparseTag { get; }
+
+        public string TargetPath { get; }
+
+        public byte[] ReparseDataSha256
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return (byte[])reparseDataSha256.Clone();
+            }
+        }
+
+        public byte[] ComputeReparseDataSha256FromHandle()
+        {
+            byte[] currentReparseData;
+            CaptureCurrentState(out currentReparseData);
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                return sha256.ComputeHash(currentReparseData);
+            }
+        }
+
+        public string ReadTargetPathFromHandle()
+        {
+            byte[] ignored;
+            return CaptureCurrentState(out ignored);
+        }
+
+        public void DeleteWithPosixSemantics()
+        {
+            byte[] currentReparseData;
+            string currentTargetPath = CaptureCurrentState(out currentReparseData);
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] currentSha256 = sha256.ComputeHash(currentReparseData);
+                if (!CryptographicOperations.FixedTimeEquals(
+                    currentSha256,
+                    reparseDataSha256))
+                {
+                    throw new IOException("The mount-point junction reparse payload changed.");
+                }
+            }
+            if (!string.Equals(currentTargetPath, TargetPath, StringComparison.OrdinalIgnoreCase) ||
+                !CryptographicOperations.FixedTimeEquals(currentReparseData, reparseData))
+            {
+                throw new IOException("The mount-point junction target changed.");
+            }
+            VerifiedDirectoryChainGuard.DeleteSafeTreeDeleteLeafHandle(
+                handle,
+                "Unable to delete the safe-tree-delete mount-point junction leaf.");
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            handle.Dispose();
+        }
+
+        private string CaptureCurrentState(out byte[] currentReparseData)
+        {
+            ThrowIfDisposed();
+            owner.ThrowIfDisposed();
+            uint currentTag;
+            string currentTargetPath;
+            VerifiedDirectoryChainGuard.VerifySafeTreeDeleteMountPointHandle(
+                handle,
+                OriginalPath,
+                out currentTag,
+                out currentTargetPath,
+                out currentReparseData);
+            if (currentTag != ReparseTag)
+            {
+                throw new IOException("The mount-point junction reparse tag changed.");
+            }
+            string[] identity = VerifiedDirectoryChainGuard.GetFileIdentity(handle);
+            if (!string.Equals(identity[0], VolumeSerialNumber, StringComparison.Ordinal) ||
+                !string.Equals(identity[1], FileIndex, StringComparison.Ordinal))
+            {
+                throw new IOException("The mount-point junction handle identity changed.");
+            }
+            return currentTargetPath;
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (disposed)
+            {
+                throw new ObjectDisposedException(nameof(SafeTreeDeleteReparseLeafLease));
+            }
         }
     }
 

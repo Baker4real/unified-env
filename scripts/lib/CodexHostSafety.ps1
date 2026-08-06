@@ -478,6 +478,33 @@ function Assert-CodexHookCapabilityPath {
     return $fullPath
 }
 
+function Assert-CodexHookCapabilityLeafPath {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $fullPath = Assert-CodexHookDPath -Value $Path -Name $Name
+    $fullRoot = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Name capability root"
+    if (-not (Test-CodexHookPathWithin -Path $fullPath -ParentPath $fullRoot)) {
+        throw "$Name 超出 capability root。"
+    }
+    if ($fullPath.Substring(2).Contains(':')) {
+        throw "$Name 不得包含 NTFS alternate data stream。"
+    }
+    $parent = Split-Path -Parent $fullPath
+    if ([string]::IsNullOrWhiteSpace($parent) -or
+        [string]::IsNullOrWhiteSpace([IO.Path]::GetFileName($fullPath))) {
+        throw "$Name 必须是普通父目录下的叶节点。"
+    }
+    [void](Assert-CodexHookCapabilityPath `
+        -Path $parent `
+        -CapabilityRoot $fullRoot `
+        -Name "$Name parent")
+    return $fullPath
+}
+
 function Get-CodexHookCapabilityFileSnapshot {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -765,6 +792,9 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$CapabilityRoot,
         [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [switch]$AllowHardLinks,
+        [switch]$AllowInternalDirectoryJunctions,
+        [string]$InternalDirectoryJunctionTargetRoot,
         [string]$Name = 'capability directory-tree snapshot'
     )
 
@@ -774,6 +804,18 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
         -AllowedExactPaths $AllowedExactPaths `
         -Name $Name
     $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Name capability root"
+    $junctionTargetRoot = $null
+    if ($AllowInternalDirectoryJunctions) {
+        if ([string]::IsNullOrWhiteSpace($InternalDirectoryJunctionTargetRoot)) {
+            throw "$Name 允许内部 junction 时必须提供 target root。"
+        }
+        $junctionTargetRoot = Assert-CodexHookDPath `
+            -Value $InternalDirectoryJunctionTargetRoot `
+            -Name "$Name internal junction target root"
+        if (-not (Test-CodexHookPathWithin -Path $junctionTargetRoot -ParentPath $capabilityRootPath)) {
+            throw "$Name internal junction target root 超出 capability root。"
+        }
+    }
     $entries = [Collections.Generic.List[object]]::new()
     $rootGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
         $capabilityRootPath,
@@ -800,15 +842,43 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
             $children = @(Get-ChildItem -LiteralPath $DirectoryPath -Force -ErrorAction Stop | Sort-Object -Property Name)
             foreach ($child in $children) {
                 $childPath = Join-Path $DirectoryPath $child.Name
+                $childRelative = if ($RelativePath -ceq '.') { $child.Name } else { "$RelativePath/$($child.Name)" }
+                $childItem = Get-Item -LiteralPath $childPath -Force -ErrorAction Stop
+                if (($childItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    if (-not $AllowInternalDirectoryJunctions -or -not $childItem.PSIsContainer) {
+                        throw "$Name snapshot 包含未授权 reparse point：$childPath"
+                    }
+                    [void](Assert-CodexHookCapabilityLeafPath `
+                        -Path $childPath `
+                        -CapabilityRoot $capabilityRootPath `
+                        -Name "$Name snapshot junction leaf")
+                    $junctionLease = $null
+                    try {
+                        $junctionLease = $DirectoryGuard.AcquireSafeTreeDeleteReparseLeafLease($childPath)
+                        $junctionTarget = Assert-CodexHookDPath `
+                            -Value ([string]$junctionLease.TargetPath) `
+                            -Name "$Name snapshot junction target"
+                        if (-not (Test-CodexHookPathWithin -Path $junctionTarget -ParentPath $junctionTargetRoot)) {
+                            throw "$Name snapshot junction target 越界：$childPath"
+                        }
+                        [byte[]]$junctionSha256 = $junctionLease.ReparseDataSha256
+                        $entries.Add([pscustomobject][ordered]@{
+                            relativePath = $childRelative
+                            kind = 'directory-junction'
+                            sha256 = [Convert]::ToHexString($junctionSha256).ToLowerInvariant()
+                            identity = @(
+                                [string]$junctionLease.VolumeSerialNumber,
+                                [string]$junctionLease.FileIndex)
+                        })
+                    } finally {
+                        if ($null -ne $junctionLease) { $junctionLease.Dispose() }
+                    }
+                    continue
+                }
                 [void](Assert-CodexHookCapabilityPath `
                     -Path $childPath `
                     -CapabilityRoot $capabilityRootPath `
                     -Name "$Name snapshot child")
-                $childItem = Get-Item -LiteralPath $childPath -Force -ErrorAction Stop
-                if (($childItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                    throw "$Name snapshot 包含 reparse point：$childPath"
-                }
-                $childRelative = if ($RelativePath -ceq '.') { $child.Name } else { "$RelativePath/$($child.Name)" }
                 if ($childItem.PSIsContainer) {
                     $childGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
                         $capabilityRootPath,
@@ -831,7 +901,9 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
                     $false)
                 $lease = $null
                 try {
-                    $lease = $parentGuard.AcquireReadOnlyFileLease($childPath)
+                    $lease = $parentGuard.AcquireSafeTreeDeleteFileLease(
+                        $childPath,
+                        $AllowHardLinks.IsPresent)
                     [byte[]]$sha256 = $lease.ComputeSha256FromHandle()
                     $entries.Add([pscustomobject][ordered]@{
                         relativePath = $childRelative
@@ -851,7 +923,7 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
             -RelativePath '.' `
             -DirectoryGuard $rootGuard
         return [pscustomobject][ordered]@{
-            schemaVersion = 1
+            schemaVersion = 2
             rootIdentity = @([string]$rootGuard.VolumeSerialNumber, [string]$rootGuard.FileIndex)
             entries = @($entries)
         }
@@ -870,7 +942,8 @@ function ConvertTo-CodexHookExpectedDirectoryTreeManifest {
         -Value $Manifest `
         -Names @('schemaVersion', 'rootIdentity', 'entries') `
         -Scope "$Scope manifest"
-    if ([int]$Manifest.schemaVersion -ne 1) {
+    $manifestSchemaVersion = [int]$Manifest.schemaVersion
+    if ($manifestSchemaVersion -notin @(1, 2)) {
         throw "$Scope manifest schemaVersion 非法。"
     }
     $rootIdentity = @($Manifest.rootIdentity)
@@ -886,14 +959,16 @@ function ConvertTo-CodexHookExpectedDirectoryTreeManifest {
         $relativePath = [string]$entry.relativePath
         Assert-CodexHookDirectoryTreeRelativePath -RelativePath $relativePath -Scope "$Scope manifest entry"
         $kind = [string]$entry.kind
-        if ($kind -cne 'directory' -and $kind -cne 'file') {
+        if ($kind -cne 'directory' -and
+            $kind -cne 'file' -and
+            ($manifestSchemaVersion -ne 2 -or $kind -cne 'directory-junction')) {
             throw "$Scope manifest entry kind 非法。"
         }
         $sha256 = $entry.sha256
         if ($kind -ceq 'directory') {
             if ($null -ne $sha256) { throw "$Scope manifest directory 不得声明 SHA-256。" }
         } elseif ($sha256 -isnot [string] -or $sha256 -notmatch '^[0-9a-f]{64}$') {
-            throw "$Scope manifest file SHA-256 非法。"
+            throw "$Scope manifest leaf SHA-256 非法。"
         }
         $identity = @($entry.identity)
         Assert-CodexHookDirectoryTreeIdentity -Expected $identity -Actual $identity -Scope "$Scope manifest entry"
@@ -903,7 +978,7 @@ function ConvertTo-CodexHookExpectedDirectoryTreeManifest {
         $canonical = [pscustomobject][ordered]@{
             relativePath = $relativePath
             kind = $kind
-            sha256 = if ($kind -ceq 'file') { [string]$sha256 } else { $null }
+            sha256 = if ($kind -ceq 'directory') { $null } else { [string]$sha256 }
             identity = @([string]$identity[0], [string]$identity[1])
         }
         $entriesByPath[$relativePath] = $canonical
@@ -941,12 +1016,15 @@ function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$ExpectedSha256,
         [Parameter(Mandatory)][object[]]$ExpectedIdentity,
+        [switch]$AllowHardLinks,
         [Parameter(Mandatory)][string]$Scope
     )
 
     $targetLease = $null
     try {
-        $targetLease = $DirectoryGuard.AcquireTargetFileLease($Path)
+        $targetLease = $DirectoryGuard.AcquireSafeTreeDeleteFileLease(
+            $Path,
+            $AllowHardLinks.IsPresent)
         [byte[]]$leasedSha256 = $targetLease.ComputeSha256FromHandle()
         if ([Convert]::ToHexString($leasedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
             throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 临删前内容漂移。"
@@ -965,6 +1043,45 @@ function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
     }
 }
 
+function Remove-CodexHookCapabilityTreeJunctionWithDirectoryGuard {
+    param(
+        [Parameter(Mandatory)][object]$DirectoryGuard,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExpectedSha256,
+        [Parameter(Mandatory)][object[]]$ExpectedIdentity,
+        [Parameter(Mandatory)][string]$InternalDirectoryJunctionTargetRoot,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    $targetLease = $null
+    try {
+        $targetLease = $DirectoryGuard.AcquireSafeTreeDeleteReparseLeafLease($Path)
+        [byte[]]$leasedSha256 = $targetLease.ComputeReparseDataSha256FromHandle()
+        if ([Convert]::ToHexString($leasedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
+            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 临删前 reparse data 漂移。"
+        }
+        Assert-CodexHookDirectoryTreeIdentity `
+            -Expected $ExpectedIdentity `
+            -Actual @($targetLease.VolumeSerialNumber, $targetLease.FileIndex) `
+            -Scope "$Scope handle identity"
+        $junctionTarget = Assert-CodexHookDPath `
+            -Value ([string]$targetLease.ReadTargetPathFromHandle()) `
+            -Name "$Scope junction target"
+        if (-not (Test-CodexHookPathWithin `
+                -Path $junctionTarget `
+                -ParentPath $InternalDirectoryJunctionTargetRoot)) {
+            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope junction target 越界。"
+        }
+        [byte[]]$confirmedSha256 = $targetLease.ComputeReparseDataSha256FromHandle()
+        if ([Convert]::ToHexString($confirmedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
+            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope handle reparse data 漂移。"
+        }
+        $targetLease.DeleteWithPosixSemantics()
+    } finally {
+        if ($null -ne $targetLease) { $targetLease.Dispose() }
+    }
+}
+
 function Remove-CodexHookCapabilityDirectoryTree {
     [CmdletBinding()]
     param(
@@ -974,6 +1091,9 @@ function Remove-CodexHookCapabilityDirectoryTree {
         [string]$Scope = 'capability directory-tree delete',
         [Parameter(Mandatory)][string[]]$ExpectedRootIdentity,
         [Parameter(Mandatory)][object]$ExpectedTreeManifest,
+        [switch]$AllowHardLinks,
+        [switch]$AllowInternalDirectoryJunctions,
+        [string]$InternalDirectoryJunctionTargetRoot,
         [switch]$RejectNamedStreams,
         [string]$NamedStreamDeleteIntentRoot,
         [string]$NamedStreamDeleteGenerationId,
@@ -988,6 +1108,18 @@ function Remove-CodexHookCapabilityDirectoryTree {
         -AllowedExactPaths $AllowedExactPaths `
         -Name $Scope
     $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Scope capability root"
+    $junctionTargetRoot = $null
+    if ($AllowInternalDirectoryJunctions) {
+        if ([string]::IsNullOrWhiteSpace($InternalDirectoryJunctionTargetRoot)) {
+            throw "$Scope 允许内部 junction 时必须提供 target root。"
+        }
+        $junctionTargetRoot = Assert-CodexHookDPath `
+            -Value $InternalDirectoryJunctionTargetRoot `
+            -Name "$Scope internal junction target root"
+        if (-not (Test-CodexHookPathWithin -Path $junctionTargetRoot -ParentPath $capabilityRootPath)) {
+            throw "$Scope internal junction target root 超出 capability root。"
+        }
+    }
     $manifest = ConvertTo-CodexHookExpectedDirectoryTreeManifest -Manifest $ExpectedTreeManifest -Scope $Scope
     $intentRoot = $null
     $intentGenerationId = $null
@@ -1234,13 +1366,32 @@ function Remove-CodexHookCapabilityDirectoryTree {
         foreach ($expectedChild in @($expectedChildren)) {
             $leaf = Get-CodexHookDirectoryTreeRelativeLeaf -RelativePath $expectedChild.relativePath
             $childPath = Join-Path $DirectoryPath $leaf
+            $child = Get-Item -LiteralPath $childPath -Force -ErrorAction Stop
+            if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                if (-not $AllowInternalDirectoryJunctions -or
+                    $expectedChild.kind -cne 'directory-junction' -or
+                    -not $child.PSIsContainer) {
+                    throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $NodeScope 包含未授权 reparse point：$childPath"
+                }
+                [void](Assert-CodexHookCapabilityLeafPath `
+                    -Path $childPath `
+                    -CapabilityRoot $RootPath `
+                    -Name "$NodeScope junction leaf")
+                Remove-CodexHookCapabilityTreeJunctionWithDirectoryGuard `
+                    -DirectoryGuard $DirectoryGuard `
+                    -Path $childPath `
+                    -ExpectedSha256 $expectedChild.sha256 `
+                    -ExpectedIdentity @($expectedChild.identity) `
+                    -InternalDirectoryJunctionTargetRoot $junctionTargetRoot `
+                    -Scope "$NodeScope child"
+                continue
+            }
             [void](Assert-CodexHookCapabilityPath `
                 -Path $childPath `
                 -CapabilityRoot $RootPath `
                 -Name "$NodeScope child")
-            $child = Get-Item -LiteralPath $childPath -Force -ErrorAction Stop
-            if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $NodeScope 包含 reparse point，拒绝递归删除：$childPath"
+            if ($expectedChild.kind -ceq 'directory-junction') {
+                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $NodeScope 已审计 junction 被替换：$childPath"
             }
             if ($expectedChild.kind -ceq 'directory') {
                 if (-not $child.PSIsContainer) {
@@ -1267,6 +1418,7 @@ function Remove-CodexHookCapabilityDirectoryTree {
                 -Path $childPath `
                 -ExpectedSha256 $expectedChild.sha256 `
                 -ExpectedIdentity @($expectedChild.identity) `
+                -AllowHardLinks:$AllowHardLinks `
                 -Scope "$NodeScope child"
         }
         if ($RejectNamedStreams) {

@@ -41,19 +41,40 @@ function Read-CodexSafeTreeDeletePolicy {
     if ($policy.artifactType -cne 'env-governance.codex-safe-tree-delete-policy') {
         throw 'safe-delete policy artifact 非法。'
     }
-    if ($policy.schemaVersion -isnot [long] -or [long]$policy.schemaVersion -ne 3) {
-        throw 'safe-delete policy schemaVersion 必须是 JSON integer 3。'
+    if ($policy.schemaVersion -isnot [long] -or
+        [long]$policy.schemaVersion -notin @(3L, 4L)) {
+        throw 'safe-delete policy schemaVersion 必须是 JSON integer 3 或 4。'
     }
+    $schemaVersion = [long]$policy.schemaVersion
     if (@($policy.entries).Count -eq 0) { throw 'safe-delete policy 不得为空。' }
 
     $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $roots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $canonicalEntries = [Collections.Generic.List[object]]::new()
     foreach ($entry in @($policy.entries)) {
-        Assert-CodexSafeTreeDeleteExactProperties `
-            -Value $entry `
-            -Names @('id', 'capabilityRoot', 'minimumDescendantDepth', 'rootDeletionPurpose', 'deniedExactPaths') `
-            -Scope 'safe-delete policy entry'
+        $baseEntryProperties = @(
+            'id',
+            'capabilityRoot',
+            'minimumDescendantDepth',
+            'rootDeletionPurpose',
+            'deniedExactPaths'
+        )
+        if ($schemaVersion -eq 3) {
+            Assert-CodexSafeTreeDeleteExactProperties `
+                -Value $entry `
+                -Names $baseEntryProperties `
+                -Scope 'safe-delete policy entry'
+        } else {
+            $allowedEntryProperties = @($baseEntryProperties) + @(
+                'allowHardLinks',
+                'allowInternalDirectoryJunctions'
+            )
+            $actualEntryProperties = @($entry.PSObject.Properties.Name)
+            if (@($actualEntryProperties | Where-Object { $_ -notin $allowedEntryProperties }).Count -ne 0 -or
+                @($baseEntryProperties | Where-Object { $_ -notin $actualEntryProperties }).Count -ne 0) {
+                throw 'safe-delete policy entry 属性集合非法。'
+            }
+        }
         $id = [string]$entry.id
         if ($id -notmatch '^[a-z0-9][a-z0-9-]{0,63}$' -or -not $ids.Add($id)) {
             throw 'safe-delete policy entry id 非法或重复。'
@@ -97,6 +118,26 @@ function Read-CodexSafeTreeDeletePolicy {
             $root -notmatch '^D:\\Codex\\projects\\[^\\]+$') {
             throw "safe-delete policy $id 退役项目必须精确指向项目根。"
         }
+        $allowHardLinks = $false
+        $allowInternalDirectoryJunctions = $false
+        if ($schemaVersion -eq 4) {
+            if ($entry.PSObject.Properties.Name -contains 'allowHardLinks') {
+                if ($entry.allowHardLinks -isnot [bool]) {
+                    throw "safe-delete policy $id allowHardLinks 必须是 JSON boolean。"
+                }
+                $allowHardLinks = [bool]$entry.allowHardLinks
+            }
+            if ($entry.PSObject.Properties.Name -contains 'allowInternalDirectoryJunctions') {
+                if ($entry.allowInternalDirectoryJunctions -isnot [bool]) {
+                    throw "safe-delete policy $id allowInternalDirectoryJunctions 必须是 JSON boolean。"
+                }
+                $allowInternalDirectoryJunctions = [bool]$entry.allowInternalDirectoryJunctions
+            }
+        }
+        if (($allowHardLinks -or $allowInternalDirectoryJunctions) -and
+            ($minimumDepth -ne 0 -or $rootDeletionPurpose -cne 'rebuildable-build-output')) {
+            throw "safe-delete policy $id link-aware 能力只允许深度 0 的可重建构建产物根。"
+        }
         $denied = [Collections.Generic.List[string]]::new()
         foreach ($candidate in @($entry.deniedExactPaths)) {
             $deniedPath = Assert-CodexHookDPath -Value ([string]$candidate) -Name "safe-delete policy $id denied path"
@@ -110,6 +151,8 @@ function Read-CodexSafeTreeDeletePolicy {
             capabilityRoot = $root
             minimumDescendantDepth = $minimumDepth
             rootDeletionPurpose = $rootDeletionPurpose
+            allowHardLinks = $allowHardLinks
+            allowInternalDirectoryJunctions = $allowInternalDirectoryJunctions
             deniedExactPaths = @($denied)
         })
     }
@@ -142,6 +185,10 @@ function Resolve-CodexSafeTreeDeleteTarget {
         -not (Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $fullRoot)) {
         throw 'safe-delete root 删除用途只允许精确 capability root。'
     }
+    if (([bool]$entry[0].allowHardLinks -or [bool]$entry[0].allowInternalDirectoryJunctions) -and
+        -not (Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $fullRoot)) {
+        throw 'safe-delete link-aware 能力只允许精确 capability root。'
+    }
     $relative = $fullTarget.Substring($fullRoot.Length).TrimStart('\', '/')
     $depth = @($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 }).Count
     if ($depth -lt [int]$entry[0].minimumDescendantDepth) {
@@ -167,6 +214,8 @@ function Resolve-CodexSafeTreeDeleteTarget {
         capabilityRoot = $fullRoot
         policyEntryId = [string]$entry[0].id
         rootDeletionPurpose = [string]$entry[0].rootDeletionPurpose
+        allowHardLinks = [bool]$entry[0].allowHardLinks
+        allowInternalDirectoryJunctions = [bool]$entry[0].allowInternalDirectoryJunctions
     }
 }
 
@@ -177,6 +226,10 @@ function Assert-CodexSafeTreeDeleteTargetTreePolicy {
         [string]$TreePath
     )
 
+    if (-not [bool]$Target.allowInternalDirectoryJunctions -and
+        @($TreeManifest.entries | Where-Object kind -ceq 'directory-junction').Count -ne 0) {
+        throw 'safe-delete tree manifest 包含未授权的 directory junction。'
+    }
     if ([string]$Target.rootDeletionPurpose -cne 'empty-project-state') { return }
     if (@($TreeManifest.entries | Where-Object kind -ceq 'file').Count -ne 0) {
         throw 'safe-delete 空项目状态树不得包含文件。'
@@ -250,6 +303,9 @@ function New-CodexSafeTreeDeletePlan {
         -Path $target.targetPath `
         -CapabilityRoot $target.capabilityRoot `
         -AllowedExactPaths @($target.targetPath) `
+        -AllowHardLinks:([bool]$target.allowHardLinks) `
+        -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+        -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
         -Name 'safe-delete plan snapshot'
     Assert-CodexSafeTreeDeleteTargetTreePolicy `
         -Target $target `
@@ -456,6 +512,9 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         -Path $target.targetPath `
         -CapabilityRoot $target.capabilityRoot `
         -AllowedExactPaths @($target.targetPath) `
+        -AllowHardLinks:([bool]$target.allowHardLinks) `
+        -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+        -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
         -Name 'safe-delete apply preflight'
     Assert-CodexSafeTreeDeleteTargetTreePolicy `
         -Target $target `
@@ -509,6 +568,9 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
             -Path $target.targetPath `
             -CapabilityRoot $target.capabilityRoot `
             -AllowedExactPaths @($target.targetPath) `
+            -AllowHardLinks:([bool]$target.allowHardLinks) `
+            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
             -Name 'safe-delete apply locked preflight'
         Assert-CodexSafeTreeDeleteTargetTreePolicy `
             -Target $target `
@@ -552,6 +614,9 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
             -Path $quarantinePath `
             -CapabilityRoot $quarantineCapabilityRoot `
             -AllowedExactPaths @($quarantinePath) `
+            -AllowHardLinks:([bool]$target.allowHardLinks) `
+            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
             -Name 'safe-delete quarantine postcheck'
         Assert-CodexSafeTreeDeleteTargetTreePolicy `
             -Target $target `
@@ -1124,6 +1189,9 @@ function Invoke-CodexSafeTreeDeletePurge {
             -Path $quarantinePath `
             -CapabilityRoot $quarantineCapabilityRoot `
             -AllowedExactPaths @($quarantinePath) `
+            -AllowHardLinks:([bool]$target.allowHardLinks) `
+            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
             -Name 'safe-delete purge locked preflight'
         Assert-CodexSafeTreeDeleteTargetTreePolicy `
             -Target $target `
@@ -1253,6 +1321,9 @@ function Invoke-CodexSafeTreeDeletePurge {
             -Path $quarantinePath `
             -CapabilityRoot $quarantineCapabilityRoot `
             -AllowedExactPaths @($quarantinePath) `
+            -AllowHardLinks:([bool]$target.allowHardLinks) `
+            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
             -ExpectedRootIdentity @($plan.treeManifest.rootIdentity) `
             -ExpectedTreeManifest $purgeManifest `
             -RejectNamedStreams:([string]$target.rootDeletionPurpose -ceq 'empty-project-state') `
