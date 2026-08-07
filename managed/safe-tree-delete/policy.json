@@ -161,6 +161,42 @@
       "deniedExactPaths": []
     },
     {
+      "id": "codex-account-switch-rust-target",
+      "capabilityRoot": "D:\\Codex\\projects\\codex-account-switch\\src-tauri\\target",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-account-switch-node-modules",
+      "capabilityRoot": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": false,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-account-switch-dist",
+      "capabilityRoot": "D:\\Codex\\projects\\codex-account-switch\\dist",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": false,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-account-switch-tauri-gen",
+      "capabilityRoot": "D:\\Codex\\projects\\codex-account-switch\\src-tauri\\gen",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": false,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
       "id": "cc-switch-rust-target",
       "capabilityRoot": "D:\\Codex\\projects\\cc-switch\\src-tauri\\target",
       "minimumDescendantDepth": 0,

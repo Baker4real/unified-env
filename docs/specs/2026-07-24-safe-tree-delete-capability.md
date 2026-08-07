@@ -52,9 +52,10 @@ policy schema v4 要求 `schemaVersion` 与 `minimumDescendantDepth` 都是真�
 同父、随机 generation 绑定的 quarantine。Purge 仍校验原计划、transaction、当前树与文件
 identity；只有 `purging` 中断恢复允许当前树成为原计划的未变子集，其他路径仍要求完整清单。
 
-生产 policy 只为以下四个精确可重建目录启用 hardlink；只有两个 `node_modules` 同时启用内部
+生产 policy 只为以下五个精确可重建目录启用 hardlink；只有两个 `node_modules` 同时启用内部
 directory junction：
 
+- `D:\Codex\projects\codex-account-switch\src-tauri\target`
 - `D:\Codex\projects\cc-switch\src-tauri\target`
 - `D:\Codex\projects\cc-switch\node_modules`
 - `D:\Codex\projects\开源分发 api\sub2api\frontend\node_modules`

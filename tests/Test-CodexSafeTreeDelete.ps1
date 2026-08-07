@@ -489,6 +489,11 @@ try {
         '完成退役删除后，生产策略不得残留 retired-project-root 授权'
     $linkAwareProductionExpectations = @(
         [pscustomobject]@{
+            id = 'codex-account-switch-rust-target'
+            root = 'D:\Codex\projects\codex-account-switch\src-tauri\target'
+            junctions = $false
+        },
+        [pscustomobject]@{
             id = 'cc-switch-rust-target'
             root = 'D:\Codex\projects\cc-switch\src-tauri\target'
             junctions = $false
@@ -524,6 +529,36 @@ try {
                 $matchingLinkAwareEntry.allowHardLinks -eq $true -and
                 $matchingLinkAwareEntry.allowInternalDirectoryJunctions -eq $expectedLinkAwareEntry.junctions) `
             "$($expectedLinkAwareEntry.id) link-aware 授权必须精确匹配"
+    }
+    $accountSwitchPlainBuildOutputExpectations = @(
+        [pscustomobject]@{
+            id = 'codex-account-switch-node-modules'
+            root = 'D:\Codex\projects\codex-account-switch\node_modules'
+        },
+        [pscustomobject]@{
+            id = 'codex-account-switch-dist'
+            root = 'D:\Codex\projects\codex-account-switch\dist'
+        },
+        [pscustomobject]@{
+            id = 'codex-account-switch-tauri-gen'
+            root = 'D:\Codex\projects\codex-account-switch\src-tauri\gen'
+        }
+    )
+    foreach ($expectedPlainBuildOutputEntry in $accountSwitchPlainBuildOutputExpectations) {
+        $matchingPlainBuildOutputEntries = @($productionPolicy.entries | Where-Object {
+            $_.id -ceq $expectedPlainBuildOutputEntry.id
+        })
+        Assert-True `
+            ($matchingPlainBuildOutputEntries.Count -eq 1) `
+            "生产策略必须唯一声明 $($expectedPlainBuildOutputEntry.id)"
+        $matchingPlainBuildOutputEntry = $matchingPlainBuildOutputEntries[0]
+        Assert-True `
+            ($matchingPlainBuildOutputEntry.capabilityRoot -ceq $expectedPlainBuildOutputEntry.root -and
+                $matchingPlainBuildOutputEntry.minimumDescendantDepth -eq 0 -and
+                $matchingPlainBuildOutputEntry.rootDeletionPurpose -ceq 'rebuildable-build-output' -and
+                $matchingPlainBuildOutputEntry.allowHardLinks -ne $true -and
+                $matchingPlainBuildOutputEntry.allowInternalDirectoryJunctions -ne $true) `
+            "$($expectedPlainBuildOutputEntry.id) 普通构建输出授权必须精确匹配且拒绝链接"
     }
     $attachmentRootError = Assert-Throws -Message '生产策略必须拒绝删除 remote attachments 根' -Action {
         & $entryPath `
