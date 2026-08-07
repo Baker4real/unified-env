@@ -9,8 +9,8 @@ from unittest import mock
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_ROOT = PROJECT_ROOT / "scripts"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SCRIPT_ROOT = PROJECT_ROOT / "modules" / "skill-supply-chain" / "implementation"
 if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 SPEC = importlib.util.spec_from_file_location(

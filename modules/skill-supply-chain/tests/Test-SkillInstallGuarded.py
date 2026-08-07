@@ -19,8 +19,9 @@ from pathlib import Path
 from unittest import mock
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-WRAPPER_PATH = PROJECT_ROOT / "scripts" / "install_skill_guarded.py"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+IMPLEMENTATION_ROOT = PROJECT_ROOT / "modules" / "skill-supply-chain" / "implementation"
+WRAPPER_PATH = IMPLEMENTATION_ROOT / "install_skill_guarded.py"
 SPEC = importlib.util.spec_from_file_location("install_skill_guarded", WRAPPER_PATH)
 if SPEC is None or SPEC.loader is None:  # pragma: no cover
     raise RuntimeError(f"无法加载 wrapper：{WRAPPER_PATH}")
@@ -54,7 +55,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        self.generator = PROJECT_ROOT / "scripts" / "generate_skill_catalog.py"
+        self.generator = IMPLEMENTATION_ROOT / "generate_skill_catalog.py"
         self.closure = Path(
             r"D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py"
         )
@@ -770,6 +771,65 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 names=["test-skill-wrapper"],
                 bundled_proofs=(),
             )
+
+    def test_system_scope_installs_under_system_and_verifies_catalog(self) -> None:
+        name = "test-system-skill"
+        (self.active / ".system").mkdir()
+        candidate = self.write_candidate(name, "测试 system scope")
+        manifest = self.write_manifest(
+            name,
+            "install",
+            source_id="codex-bundled-system-skills",
+        )
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["target_scope"] = "system"
+        payload["local_overlay"] = {
+            "status": "replayed",
+            "summary": "writing-for-agents system overlay",
+        }
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest, name=name))
+
+        self.assertEqual(code, 0)
+        system_skill = self.active / ".system" / name
+        self.assertTrue((system_skill / "SKILL.md").is_file())
+        self.assertFalse((self.active / name).exists())
+        source_record = WRAPPER.parse_current_source_record(
+            (system_skill / "SOURCE.md").read_text(encoding="utf-8")
+        )
+        self.assertEqual(source_record.fields["skill"], f".system/{name}")
+        self.assertEqual(
+            source_record.fields["local_path"],
+            str(system_skill),
+        )
+
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        source = next(
+            item
+            for item in ledger["sources"]
+            if item["id"] == "codex-bundled-system-skills"
+        )
+        self.assertEqual(source["skills"], [f".system/{name}"])
+        self.assertEqual(
+            source["local_changes"][0]["skill"],
+            f".system/{name}",
+        )
+
+        catalog = json.loads((self.temp / "catalog.json").read_text(encoding="utf-8"))
+        artifact = next(
+            item
+            for item in catalog["artifacts"]
+            if item.get("relative_path") == f".system/{name}/SKILL.md"
+        )
+        self.assertEqual(artifact["scope"], "system")
+        self.assertEqual(artifact["ledger_coverage"], "pass")
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["target_scope"], "system")
+        self.assertEqual(Path(result["target_root"]), self.active / ".system")
 
     def test_update_refreshes_repo_stars_and_preserves_existing_source_fields(self) -> None:
         name = "test-skill-wrapper"

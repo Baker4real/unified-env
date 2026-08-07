@@ -24,6 +24,10 @@ intent: 定义 Codex hooks、state、代码智能运行时与 remote catalog 守
 
 旧 hook 设计和 functional preflight 文档仍被 fixture 与历史拒绝合同引用，本阶段不移动或归档。
 
+## 内部实现
+
+`modules/codex-host/CodexHostHookEvidence.ps1` 拥有 evidence snapshot、managed-hook backup 和 restore manifest 的构建逻辑；`scripts/Invoke-CodexHostHookReconciliation.ps1` 保留稳定生产 seam，并 dot-source 该 module implementation。生命周期重构按同一边界继续收敛，不能把 evidence 写入能力复制回根入口。
+
 ## 接口与测试
 
 主接口是 `scripts/Invoke-CodexHostHookReconciliation.ps1` 和 `scripts/Invoke-CodexRemotePluginCatalogGuard.ps1`。定向测试清单：

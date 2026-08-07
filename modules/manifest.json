@@ -131,6 +131,7 @@
           "docs/specs/2026-07-11-host-hook-reconciliation-design.md",
           "docs/specs/2026-07-13-functional-hook-preflight-design.md",
           "reports/sdd/task-2-missing-sidecar-implementer.md",
+          "modules/codex-host/CodexHostHookEvidence.ps1",
           "scripts/lib/CodexHookPolicy.ps1",
           "scripts/lib/CodexHookProductionFull.ps1",
           "scripts/lib/CodexHookProductionRegistrationRepair.ps1",
@@ -222,12 +223,13 @@
           "docs/specs/2026-07-14-skill-install-guarded-wrapper.md",
           "reports/sdd/task-3-implementer.md",
           "scripts/github-default-branch-skill-overlay-catalog.json",
-          "scripts/skill_source_record.py",
-          "scripts/reconcile_skill_source_records.py"
+          "scripts/skill_source_record.py"
         ],
         "prefixes": [
           ".scratch/goal-first/",
-          ".scratch/upstream-stable-skill-sync-20260713/"
+          ".scratch/upstream-stable-skill-sync-20260713/",
+          "modules/skill-supply-chain/implementation/",
+          "modules/skill-supply-chain/tests/"
         ]
       },
       "tests": {
@@ -236,10 +238,10 @@
             "tests/Test-SkillInstallGuardedDeployment.ps1"
           ],
           "python": [
-          "tests/Test-SkillCatalog.py",
-          "tests/Test-SkillInstallGuarded.py",
+          "modules/skill-supply-chain/tests/Test-SkillCatalog.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuarded.py",
           "tests/Test-SkillOpenAIYamlParity.py",
-          "tests/Test-SkillSourceRecordMigration.py"
+          "modules/skill-supply-chain/tests/Test-SkillSourceRecordMigration.py"
           ],
           "node": [
           "tests/Test-GitDefaultBranchSkillPolicy.cjs",

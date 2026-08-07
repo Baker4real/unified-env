@@ -7,10 +7,11 @@ function Assert-True([bool]$Condition, [string]$Message) {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $deployPath = Join-Path $projectRoot 'scripts\Deploy-SkillInstallGuarded.ps1'
-$wrapperPath = Join-Path $projectRoot 'scripts\install_skill_guarded.py'
+$implementationRoot = Join-Path $projectRoot 'modules\skill-supply-chain\implementation'
+$wrapperPath = Join-Path $implementationRoot 'install_skill_guarded.py'
 $commandWrapperPath = Join-Path $projectRoot 'scripts\install-skill-guarded.cmd'
-$sourceRecordPath = Join-Path $projectRoot 'scripts\skill_source_record.py'
-$sourceRoot = Join-Path $projectRoot 'scripts'
+$sourceRecordPath = Join-Path $implementationRoot 'skill_source_record.py'
+$sourceRoot = $implementationRoot
 $wrapperSource = Get-Content -LiteralPath $wrapperPath -Raw
 $commandWrapperSource = Get-Content -LiteralPath $commandWrapperPath -Raw
 

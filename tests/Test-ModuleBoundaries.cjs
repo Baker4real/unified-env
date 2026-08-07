@@ -181,4 +181,54 @@ for (const fileName of [
   );
 }
 
+const skillSupplyChain = manifest.modules.find((entry) => entry.id === 'skill-supply-chain');
+const skillImplementationRoot = path.join(PROJECT_ROOT, 'modules', 'skill-supply-chain', 'implementation');
+const skillTestRoot = path.join(PROJECT_ROOT, 'modules', 'skill-supply-chain', 'tests');
+for (const fileName of [
+  'skill_source_record.py',
+  'generate_skill_catalog.py',
+  'install_skill_guarded.py',
+  'reconcile_skill_source_records.py',
+]) {
+  assert.equal(
+    fs.existsSync(path.join(skillImplementationRoot, fileName)),
+    true,
+    `${fileName} implementation must live in skill-supply-chain`,
+  );
+}
+for (const fileName of [
+  'Test-SkillCatalog.py',
+  'Test-SkillInstallGuarded.py',
+  'Test-SkillSourceRecordMigration.py',
+]) {
+  assert.equal(
+    fs.existsSync(path.join(skillTestRoot, fileName)),
+    true,
+    `${fileName} hot-path test must be local to skill-supply-chain`,
+  );
+}
+assert.ok(
+  skillSupplyChain.interfaces.includes('scripts/install_skill_guarded.py'),
+  'skill-supply-chain must retain the guarded installer root adapter seam',
+);
+for (const adapterName of [
+  'skill_source_record.py',
+  'generate_skill_catalog.py',
+  'install_skill_guarded.py',
+  'reconcile_skill_source_records.py',
+]) {
+  const adapterSource = fs.readFileSync(path.join(PROJECT_ROOT, 'scripts', adapterName), 'utf8');
+  assert.match(adapterSource, /"skill-supply-chain"/);
+  assert.match(adapterSource, /"implementation"/);
+}
+
+const hostEvidenceModulePath = path.join(PROJECT_ROOT, 'modules', 'codex-host', 'CodexHostHookEvidence.ps1');
+const hostReconcilerSource = fs.readFileSync(
+  path.join(PROJECT_ROOT, 'scripts', 'Invoke-CodexHostHookReconciliation.ps1'),
+  'utf8',
+);
+assert.equal(fs.existsSync(hostEvidenceModulePath), true, 'codex-host evidence lifecycle must be module-local');
+assert.match(hostReconcilerSource, /CodexHostHookEvidence\.ps1/);
+assert.match(hostReconcilerSource, /New-CodexHostHookEvidenceSnapshot/);
+
 console.log(`PASS Test-ModuleBoundaries files=${repositoryFiles.length} modules=${manifest.modules.length}`);

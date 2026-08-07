@@ -1,6 +1,6 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$SourceRoot = $PSScriptRoot,
+    [string]$SourceRoot = '',
     [string]$CodexRoot = 'D:\Codex\.codex',
     [string]$EvidenceRoot = 'D:\Codex\.codex\run-evidence\skill-install-guarded-deployment',
     [string]$PythonPath = 'D:\Codex\tools\python314-official\python.exe'
@@ -8,6 +8,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
+    $SourceRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'modules\skill-supply-chain\implementation'
+}
 
 function Resolve-DDrivePath {
     param([Parameter(Mandatory = $true)][string]$Value)
@@ -49,6 +53,8 @@ function Write-JsonAtomic {
 }
 
 $sourceRootResolved = Resolve-DDrivePath $SourceRoot
+$repositoryScriptsRootResolved = Resolve-DDrivePath $PSScriptRoot
+$moduleImplementationRootResolved = Resolve-DDrivePath (Join-Path (Split-Path -Parent $PSScriptRoot) 'modules\skill-supply-chain\implementation')
 $codexRootResolved = Resolve-DDrivePath $CodexRoot
 $evidenceRootResolved = Resolve-DDrivePath $EvidenceRoot
 $pythonPathResolved = Resolve-DDrivePath $PythonPath
@@ -88,6 +94,12 @@ try {
 
     foreach ($relative in $sourceFiles) {
         $source = Join-Path $sourceRootResolved $relative
+        if ($sourceRootResolved -ieq $repositoryScriptsRootResolved -and $relative -ne 'install-skill-guarded.cmd') {
+            $source = Join-Path $moduleImplementationRootResolved $relative
+        }
+        if ($relative -eq 'install-skill-guarded.cmd' -and $sourceRootResolved -ieq $moduleImplementationRootResolved -and -not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            $source = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\install-skill-guarded.cmd'
+        }
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "缺少部署源文件：$source" }
         if (Test-ReparsePoint $source) { throw "部署源文件不能是 reparse point：$source" }
         $target = Join-Path $targetRoot $relative

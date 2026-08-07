@@ -14,8 +14,8 @@ from pathlib import Path
 from unittest import mock
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "generate_skill_catalog.py"
+ROOT = Path(__file__).resolve().parents[3]
+SCRIPT = ROOT / "modules" / "skill-supply-chain" / "implementation" / "generate_skill_catalog.py"
 SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 SUBPROCESS_TEXT_ENCODING = "oem" if os.name == "nt" else "utf-8"
 

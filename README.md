@@ -23,7 +23,7 @@ intent: 说明统一环境项目的能力、入口和当前治理边界
 - 共享环境入口已验证：CMake `4.3.3`、Rust toolchain `1.96.1` 等均保持可用；skill ledger coverage 为 `missing=0` / `duplicates=0`。
 - Python 默认入口已切到官方 `3.14.6`；`.NET` 默认入口当前未收敛，具体 live 状态与待授权修复边界记录在 `docs/environments/zi-xi-shi.md`。WSL、Windows Terminal、PowerShell 与 CodeGraph 的设备级版本和进程采用边界同样由该设备文档和主机 runbook 维护，不在项目概览写死易变版本。
 - 已固化上游稳定 skill 约束并同步 Matt stable catalog：稳定目录与上游对齐，严格资源闭包和 ledger 一致性检查通过；活动数量、哈希和上游版本属于易变状态，操作前必须实时复核。`skills/in-progress/**` 不安装；用户明确退役的 skill 不保留本机备份。
-- Skill Catalog 的仓库源实现已落地：默认只读扫描 active、system 和 plugin-cache，来源以本机 ledger / `SOURCE.md` 为准；它不安装或更新 skill、不访问网络、不读取凭据、不注册 hook。实现入口是 `scripts/generate_skill_catalog.py`，部署后的本机派生输出位于 `D:\Codex\.codex\skill-catalog\`；一次性运行证据按 run id 写入 `D:\Codex\.codex\run-evidence\`。
+- Skill Catalog 的仓库源实现已落地：默认只读扫描 active、system 和 plugin-cache，来源以本机 ledger / `SOURCE.md` 为准；它不安装或更新 skill、不访问网络、不读取凭据、不注册 hook。实现位于 `modules/skill-supply-chain/implementation/generate_skill_catalog.py`，根入口 `scripts/generate_skill_catalog.py` 负责稳定路径适配；部署后的本机派生输出位于 `D:\Codex\.codex\skill-catalog\`；一次性运行证据按 run id 写入 `D:\Codex\.codex\run-evidence\`。
 - 功能钩子分层恢复的 path inventory/state policy、local-only preflight、Serena 行为 hooks、provider/GitHub 显式维护和 production/legacy manifest 分离均已有专项实现，并通过定向 fixture 回归。fixture 全量 reconciler 回归不依赖 live 配置所有者；获授权的 live Repair 与验收只通过当前 reconciler 和当前主机状态执行，不得从历史 evidence 推断或手工写入 Serena 配置或权限策略值。
 - Git 的唯一现役发布政策要求全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）只发布到用户拥有远端的 `main`。GitHub plugin overlay 已与该政策对齐并通过 live policy test；connector、PR 与 `gh` fallback 能力保留，commit/push/PR 仍只在当前任务明确授权后触发。临时分支只在事前确认后使用，历史 patch-stack 只报告、不自动创建或删除。
 
@@ -34,8 +34,8 @@ intent: 说明统一环境项目的能力、入口和当前治理边界
 - 设备差异与跨设备验证：`docs/environments/zi-xi-shi.md`、`docs/environments/ban-gong-shi.md`
 - 迁移政策：`docs/env-governance/d-drive-layout-and-migration-policy.md`
 - Codex 远端插件 catalog guard：`docs/env-governance/remote-plugin-catalog-guard.md`
-- Skill Catalog 仓库源：`scripts/generate_skill_catalog.py`、`docs/plans/2026-07-13-local-skill-catalog-implementation.md`
-- Skill 安装事务的仓库源由共享 `SOURCE.md` 解析器、catalog generator、installer 与 command wrapper 组成四文件部署闭包；现役 `D:\Codex\.codex\scripts\` 是受管部署产物，installer 从同目录解析其依赖，不依赖项目源仓库路径。后续源文件变更、移动或拆分仓库前必须通过 `scripts/Deploy-SkillInstallGuarded.ps1` 重新部署并核验 hash；现役入口仍是 `D:\Codex\.codex\scripts\install-skill-guarded.cmd`；设计见 `docs/specs/2026-07-14-skill-install-guarded-wrapper.md`。
+- Skill Catalog 仓库源：`modules/skill-supply-chain/implementation/generate_skill_catalog.py`、`scripts/generate_skill_catalog.py`、`docs/plans/2026-07-13-local-skill-catalog-implementation.md`
+- Skill 安装事务的仓库源由 module implementation 中的共享 `SOURCE.md` 解析器、catalog generator、installer 与根 command adapter 组成四文件部署闭包；现役 `D:\Codex\.codex\scripts\` 是受管部署产物，installer 从同目录解析其依赖，不依赖项目源仓库路径。后续源文件变更、移动或拆分仓库前必须通过 `scripts/Deploy-SkillInstallGuarded.ps1` 重新部署并核验 hash；现役入口仍是 `D:\Codex\.codex\scripts\install-skill-guarded.cmd`；设计见 `docs/specs/2026-07-14-skill-install-guarded-wrapper.md`。
 - Codex 主机钩子治理：`docs/specs/2026-07-11-host-hook-reconciliation-design.md`
 - Codex Hook 治理设计：`docs/specs/2026-07-11-codex-hook-governance-design.md`
 - 功能钩子分层恢复设计/计划：`docs/specs/2026-07-13-functional-hook-preflight-design.md`、`docs/plans/2026-07-13-functional-hook-preflight.md`

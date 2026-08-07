@@ -19,7 +19,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 | --- | --- | --- |
 | 候选治理 | 来源、采用度、重叠、`writing-for-agents` 和 install/update 决策 | `D:\Codex\.codex\skills\skill-install-guard\SKILL.md` |
 | 事务执行 | 暂存、备份、激活、台账写入、回滚和后置校验 | `D:\Codex\.codex\scripts\install-skill-guarded.cmd` |
-| 派生目录 | 从 active root、`SOURCE.md` 和 ledger 重新扫描生成 catalog | `scripts\generate_skill_catalog.py` |
+| 派生目录 | 从 active root、`SOURCE.md` 和 ledger 重新扫描生成 catalog | `modules\skill-supply-chain\implementation\generate_skill_catalog.py`（根 adapter：`scripts\generate_skill_catalog.py`） |
 | 上游下载 | 只提供候选下载/复制能力 | `.system\skill-installer` |
 
 不把回写逻辑放进被安装的 skill，也不修改 bundled `.system` 安装器。skill 是提示词规则，不是可靠的安装后回调；原始安装器只复制目录，无法保证台账和 catalog 同步。
@@ -83,6 +83,8 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 `source.upstream_path` 只用于已审查的 `--candidate`：它把本地暂存候选映射回真实仓库子路径，确保新写入的 `SOURCE.md` 可精确追溯。仓库根使用精确值 `.`；其他值必须是仓库内的 POSIX 相对路径，不接受绝对路径、反斜杠、反引号、不可打印字符、空段、`.` 或 `..` 路径段。省略时为兼容旧调用仍回退到候选目录名。它与 `source.ledger_updates.path` 不同，后者是统一来源台账已有的本地路径字段。
 
 `decision=update` 才允许替换已有 active skill。直接调用 `.system\skill-installer`、手工复制到 active root 或跳过 decision manifest，都不算完成的安装流程。
+
+本机允许重放的官方 `.system` local overlay 使用同一事务入口，并在 manifest 中显式绑定 `target_scope: "system"`。该分支只接受经过 `candidate_integrity` 绑定的本地 candidate；frontmatter 与 `manifest.skills` 仍使用 canonical basename，目录换入、`SOURCE.md` identity、ledger key 和 catalog postcheck 使用 `.system/<name>`。catalog 生成与 strict resource closure 始终以顶层 active root 为输入，禁止把 `.system` 子目录伪装成新的 active root。该分支当前不承载 canonical rename、merge retirement 或 bundled skill。
 
 `source.ledger_updates` 可选且只允许更新 `action`、`installed_version`、`path`、`repo_stars`、`repo_stars_checked_at`、`resource_paths`、`status`、`tag`。`action`、`installed_version`、`path`、`status`、`tag` 和 `resource_paths` 各项必须是非空、可打印且无首尾空白的规范字符串。`repo_stars` 必须是非负整数，`repo_stars_checked_at` 必须是规范 ISO 日期，且两者必须成对提供，使采用度数值始终带观测日期。未知字段、错误类型、非规范字符串或缺少配对字段会在 activation 前拒绝事务，避免 decision manifest 静默改写任意台账内容。
 
@@ -175,4 +177,4 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
 
 部署入口必须以隔离模式验证目标受管 Python 可以导入 PyYAML，并确认 `yaml.safe_load` 可调用；真实 `install-skill-guarded.cmd` 也必须用 `python -X utf8 -I` 启动 wrapper，使部署探针与运行态保持相同的导入隔离，并避免非 UTF-8 Windows runner 在输出中文帮助时触发编码失败。缺失、同名模块劫持或 API 不兼容时不得报告部署成功。
 
-项目源部署闭包由 `scripts\skill_source_record.py`、`scripts\generate_skill_catalog.py`、`scripts\install_skill_guarded.py` 和 `scripts\install-skill-guarded.cmd` 组成；部署后 installer 与 catalog 从同目录加载共享 `SOURCE.md` parser，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁项目源、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。
+项目源部署闭包的 Python 实现位于 `modules\skill-supply-chain\implementation\`，由 `skill_source_record.py`、`generate_skill_catalog.py`、`install_skill_guarded.py` 组成，command adapter 仍位于根 `scripts\install-skill-guarded.cmd`；根目录 `scripts\` 同时保留稳定 Python adapters，部署脚本从 module implementation 复制 Python runtime 并绑定 command adapter。部署后 installer 与 catalog 从同目录加载共享 `SOURCE.md` parser，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁 module implementation、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。
