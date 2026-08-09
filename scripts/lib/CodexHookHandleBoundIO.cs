@@ -2093,6 +2093,15 @@ namespace CodexHookGovernance
 
         public uint NumberOfLinks { get; }
 
+        public long Length
+        {
+            get
+            {
+                VerifyCurrentHandle();
+                return stream.Length;
+            }
+        }
+
         public byte[] SnapshotBytes
         {
             get
@@ -2219,6 +2228,15 @@ namespace CodexHookGovernance
         public uint ReparseTag { get; }
 
         public string TargetPath { get; }
+
+        public int ReparseDataLength
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return reparseData.Length;
+            }
+        }
 
         public byte[] ReparseDataSha256
         {

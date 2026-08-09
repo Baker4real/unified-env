@@ -795,6 +795,7 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
         [switch]$AllowHardLinks,
         [switch]$AllowInternalDirectoryJunctions,
         [string]$InternalDirectoryJunctionTargetRoot,
+        [scriptblock]$MetricsObserver,
         [string]$Name = 'capability directory-tree snapshot'
     )
 
@@ -839,6 +840,7 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
                 sha256 = $null
                 identity = @([string]$DirectoryGuard.VolumeSerialNumber, [string]$DirectoryGuard.FileIndex)
             })
+            if ($null -ne $MetricsObserver) { & $MetricsObserver 'directory' 0L 0L }
             $children = @(Get-ChildItem -LiteralPath $DirectoryPath -Force -ErrorAction Stop | Sort-Object -Property Name)
             foreach ($child in $children) {
                 $childPath = Join-Path $DirectoryPath $child.Name
@@ -870,6 +872,9 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
                                 [string]$junctionLease.VolumeSerialNumber,
                                 [string]$junctionLease.FileIndex)
                         })
+                        if ($null -ne $MetricsObserver) {
+                            & $MetricsObserver 'directory-junction' 0L ([long]$junctionLease.ReparseDataLength)
+                        }
                     } finally {
                         if ($null -ne $junctionLease) { $junctionLease.Dispose() }
                     }
@@ -904,6 +909,7 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
                     $lease = $parentGuard.AcquireSafeTreeDeleteFileLease(
                         $childPath,
                         $AllowHardLinks.IsPresent)
+                    $length = [long]$lease.Length
                     [byte[]]$sha256 = $lease.ComputeSha256FromHandle()
                     $entries.Add([pscustomobject][ordered]@{
                         relativePath = $childRelative
@@ -911,6 +917,7 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
                         sha256 = [Convert]::ToHexString($sha256).ToLowerInvariant()
                         identity = @([string]$lease.VolumeSerialNumber, [string]$lease.FileIndex)
                     })
+                    if ($null -ne $MetricsObserver) { & $MetricsObserver 'file' $length $length }
                 } finally {
                     if ($null -ne $lease) { $lease.Dispose() }
                     $parentGuard.Dispose()
@@ -1010,6 +1017,77 @@ function ConvertTo-CodexHookExpectedDirectoryTreeManifest {
     }
 }
 
+function Assert-CodexHookCapabilityLeafRetryPolicy {
+    param([Parameter(Mandatory)][object]$RetryPolicy)
+
+    $expectedNames = @(
+        'schemaVersion', 'maxAttempts', 'wallTimeBudgetMs',
+        'delayMilliseconds', 'allowedWindowsErrors')
+    if ((@($RetryPolicy.PSObject.Properties.Name) -join '|') -cne ($expectedNames -join '|')) {
+        throw 'safe-delete leaf retry policy 属性结构非法。'
+    }
+    $maxAttempts = [long]$RetryPolicy.maxAttempts
+    $wallTimeBudgetMs = [long]$RetryPolicy.wallTimeBudgetMs
+    $delays = @($RetryPolicy.delayMilliseconds)
+    $allowedErrors = @($RetryPolicy.allowedWindowsErrors)
+    if ([long]$RetryPolicy.schemaVersion -ne 1L -or
+        $maxAttempts -lt 1L -or $maxAttempts -gt 16L -or
+        $wallTimeBudgetMs -lt 0L -or $wallTimeBudgetMs -gt 60000L -or
+        $delays.Count -ne ($maxAttempts - 1L) -or
+        (@($allowedErrors | ForEach-Object { [long]$_ }) -join ',') -cne '32,33,170') {
+        throw 'safe-delete leaf retry policy schema、attempts、budget 或 allowlist 非法。'
+    }
+    foreach ($delay in $delays) {
+        if ([long]$delay -lt 0L -or [long]$delay -gt $wallTimeBudgetMs) {
+            throw 'safe-delete leaf retry policy delay 非法。'
+        }
+    }
+}
+
+function New-CodexHookCapabilityLeafRetryRuntime {
+    param(
+        [Parameter(Mandatory)][object]$RetryPolicy,
+        [scriptblock]$ElapsedMillisecondsForTest,
+        [scriptblock]$DelayForTest
+    )
+
+    Assert-CodexHookCapabilityLeafRetryPolicy -RetryPolicy $RetryPolicy
+    return [pscustomobject][ordered]@{
+        stopwatch = [Diagnostics.Stopwatch]::StartNew()
+        elapsedMillisecondsForTest = $ElapsedMillisecondsForTest
+        delayForTest = $DelayForTest
+        lastElapsedMilliseconds = -1L
+    }
+}
+
+function Get-CodexHookCapabilityLeafRetryElapsedMilliseconds {
+    param([Parameter(Mandatory)][object]$RetryRuntime)
+
+    $elapsed = if ($null -ne $RetryRuntime.elapsedMillisecondsForTest) {
+        [long](& $RetryRuntime.elapsedMillisecondsForTest)
+    } else {
+        [long]$RetryRuntime.stopwatch.ElapsedMilliseconds
+    }
+    if ($elapsed -lt 0L -or $elapsed -lt [long]$RetryRuntime.lastElapsedMilliseconds) {
+        throw 'safe-delete leaf retry elapsed source 必须单调且非负。'
+    }
+    $RetryRuntime.lastElapsedMilliseconds = $elapsed
+    return $elapsed
+}
+
+function Invoke-CodexHookCapabilityLeafRetryDelay {
+    param(
+        [Parameter(Mandatory)][object]$RetryRuntime,
+        [Parameter(Mandatory)][long]$DelayMilliseconds
+    )
+
+    if ($null -ne $RetryRuntime.delayForTest) {
+        & $RetryRuntime.delayForTest $DelayMilliseconds
+        return
+    }
+    Start-Sleep -Milliseconds $DelayMilliseconds
+}
+
 function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
     param(
         [Parameter(Mandatory)][object]$DirectoryGuard,
@@ -1017,29 +1095,117 @@ function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
         [Parameter(Mandatory)][string]$ExpectedSha256,
         [Parameter(Mandatory)][object[]]$ExpectedIdentity,
         [switch]$AllowHardLinks,
+        [object]$RetryPolicy,
+        [object]$RetryRuntime,
+        [scriptblock]$RetryFaultForTest,
+        [scriptblock]$RetryObserver,
+        [scriptblock]$MetricsObserver,
+        [scriptblock]$DeleteCheckpointForTest,
+        [scriptblock]$DeleteCommitCallback,
         [Parameter(Mandatory)][string]$Scope
     )
 
-    $targetLease = $null
-    try {
-        $targetLease = $DirectoryGuard.AcquireSafeTreeDeleteFileLease(
-            $Path,
-            $AllowHardLinks.IsPresent)
-        [byte[]]$leasedSha256 = $targetLease.ComputeSha256FromHandle()
-        if ([Convert]::ToHexString($leasedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
-            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 临删前内容漂移。"
+    $maxAttempts = if ($null -eq $RetryPolicy) { 1 } else { [int]$RetryPolicy.maxAttempts }
+    $wallTimeBudgetMs = if ($null -eq $RetryPolicy) { 0L } else { [long]$RetryPolicy.wallTimeBudgetMs }
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $targetLease = $null
+        $revalidationPassed = $false
+        try {
+            if ($null -ne $RetryFaultForTest) {
+                $injectedError = & $RetryFaultForTest $Path $attempt
+                if ($null -ne $injectedError -and [int]$injectedError -ne 0) {
+                    throw [ComponentModel.Win32Exception]::new(
+                        [int]$injectedError,
+                        'Injected safe-delete leaf failure.')
+                }
+            }
+            $targetLease = $DirectoryGuard.AcquireSafeTreeDeleteFileLease(
+                $Path,
+                $AllowHardLinks.IsPresent)
+            $length = [long]$targetLease.Length
+            [byte[]]$leasedSha256 = $targetLease.ComputeSha256FromHandle()
+            if ($null -ne $MetricsObserver) { & $MetricsObserver 'hash-read' 0L $length }
+            if ([Convert]::ToHexString($leasedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
+                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 临删前内容漂移。"
+            }
+            Assert-CodexHookDirectoryTreeIdentity `
+                -Expected $ExpectedIdentity `
+                -Actual @($targetLease.VolumeSerialNumber, $targetLease.FileIndex) `
+                -Scope "$Scope handle identity"
+            [byte[]]$confirmedSha256 = $targetLease.ComputeSha256FromHandle()
+            if ($null -ne $MetricsObserver) { & $MetricsObserver 'hash-read' 0L $length }
+            if ([Convert]::ToHexString($confirmedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
+                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope handle identity 内容漂移。"
+            }
+            $revalidationPassed = $true
+            $targetLease.DeleteWithPosixSemantics()
+            if ($null -ne $DeleteCheckpointForTest) { & $DeleteCheckpointForTest $Path 'file' }
+            if ($null -ne $DeleteCommitCallback) { & $DeleteCommitCallback $Path 'file' }
+            if ($attempt -gt 1 -and $null -ne $RetryObserver) {
+                & $RetryObserver ([pscustomobject][ordered]@{
+                    revalidation = 'passed'
+                    result = 'succeeded'
+                })
+            }
+            return
+        } catch {
+            $failure = $_
+            $nativeError = $null
+            $current = $failure.Exception
+            while ($null -ne $current) {
+                if ($current -is [ComponentModel.Win32Exception]) {
+                    $nativeError = [int]$current.NativeErrorCode
+                    break
+                }
+                $current = $current.InnerException
+            }
+            $retryAllowed = $null -ne $RetryPolicy -and
+                $nativeError -in @($RetryPolicy.allowedWindowsErrors)
+            $retryDelays = if ($null -eq $RetryPolicy) { @() } else { @($RetryPolicy.delayMilliseconds) }
+            $delayIndex = [Math]::Min($attempt - 1, $retryDelays.Count - 1)
+            $delayMs = if ($retryAllowed -and $delayIndex -ge 0) {
+                [long]$retryDelays[$delayIndex]
+            } else { 0L }
+            $elapsedMs = if ($null -ne $RetryRuntime) {
+                Get-CodexHookCapabilityLeafRetryElapsedMilliseconds -RetryRuntime $RetryRuntime
+            } else { 0L }
+            if ($attempt -gt 1 -and $null -ne $RetryObserver) {
+                & $RetryObserver ([pscustomobject][ordered]@{
+                    revalidation = if ($revalidationPassed) { 'passed' } else { 'failed' }
+                    result = 'failed'
+                })
+            }
+            if (-not $retryAllowed -or $attempt -ge $maxAttempts -or
+                $elapsedMs + $delayMs -gt $wallTimeBudgetMs) {
+                throw $failure
+            }
+            if ($null -ne $RetryObserver) {
+                & $RetryObserver ([pscustomobject][ordered]@{
+                    attempt = $attempt
+                    errorCategory = if ($nativeError -eq 32) { 'sharing-violation' } elseif ($nativeError -eq 33) { 'lock-violation' } else { 'busy' }
+                    delayMs = $delayMs
+                    elapsedMs = $elapsedMs
+                    budgetRemainingMs = $wallTimeBudgetMs - $elapsedMs
+                    revalidation = 'pending'
+                    result = 'retrying'
+                })
+            }
+            Invoke-CodexHookCapabilityLeafRetryDelay `
+                -RetryRuntime $RetryRuntime `
+                -DelayMilliseconds $delayMs
+            if ((Get-CodexHookCapabilityLeafRetryElapsedMilliseconds -RetryRuntime $RetryRuntime) -gt
+                $wallTimeBudgetMs) {
+                if ($null -ne $RetryObserver) {
+                    & $RetryObserver ([pscustomobject][ordered]@{
+                        revalidation = 'not-attempted'
+                        result = 'failed'
+                    })
+                }
+                throw $failure
+            }
+        } finally {
+            if ($null -ne $targetLease) { $targetLease.Dispose() }
         }
-        Assert-CodexHookDirectoryTreeIdentity `
-            -Expected $ExpectedIdentity `
-            -Actual @($targetLease.VolumeSerialNumber, $targetLease.FileIndex) `
-            -Scope "$Scope handle identity"
-        [byte[]]$confirmedSha256 = $targetLease.ComputeSha256FromHandle()
-        if ([Convert]::ToHexString($confirmedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
-            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope handle identity 内容漂移。"
-        }
-        $targetLease.DeleteWithPosixSemantics()
-    } finally {
-        if ($null -ne $targetLease) { $targetLease.Dispose() }
     }
 }
 
@@ -1050,35 +1216,125 @@ function Remove-CodexHookCapabilityTreeJunctionWithDirectoryGuard {
         [Parameter(Mandatory)][string]$ExpectedSha256,
         [Parameter(Mandatory)][object[]]$ExpectedIdentity,
         [Parameter(Mandatory)][string]$InternalDirectoryJunctionTargetRoot,
+        [object]$RetryPolicy,
+        [object]$RetryRuntime,
+        [scriptblock]$RetryFaultForTest,
+        [scriptblock]$RetryObserver,
+        [scriptblock]$MetricsObserver,
+        [scriptblock]$DeleteCheckpointForTest,
+        [scriptblock]$DeleteCommitCallback,
         [Parameter(Mandatory)][string]$Scope
     )
 
-    $targetLease = $null
-    try {
-        $targetLease = $DirectoryGuard.AcquireSafeTreeDeleteReparseLeafLease($Path)
-        [byte[]]$leasedSha256 = $targetLease.ComputeReparseDataSha256FromHandle()
-        if ([Convert]::ToHexString($leasedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
-            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 临删前 reparse data 漂移。"
+    $maxAttempts = if ($null -eq $RetryPolicy) { 1 } else { [int]$RetryPolicy.maxAttempts }
+    $wallTimeBudgetMs = if ($null -eq $RetryPolicy) { 0L } else { [long]$RetryPolicy.wallTimeBudgetMs }
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $targetLease = $null
+        $revalidationPassed = $false
+        try {
+            if ($null -ne $RetryFaultForTest) {
+                $injectedError = & $RetryFaultForTest $Path $attempt
+                if ($null -ne $injectedError -and [int]$injectedError -ne 0) {
+                    throw [ComponentModel.Win32Exception]::new(
+                        [int]$injectedError,
+                        'Injected safe-delete junction failure.')
+                }
+            }
+            $targetLease = $DirectoryGuard.AcquireSafeTreeDeleteReparseLeafLease($Path)
+            $reparseLength = [long]$targetLease.ReparseDataLength
+            [byte[]]$leasedSha256 = $targetLease.ComputeReparseDataSha256FromHandle()
+            if ($null -ne $MetricsObserver) { & $MetricsObserver 'hash-read' 0L $reparseLength }
+            if ([Convert]::ToHexString($leasedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
+                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 临删前 reparse data 漂移。"
+            }
+            Assert-CodexHookDirectoryTreeIdentity `
+                -Expected $ExpectedIdentity `
+                -Actual @($targetLease.VolumeSerialNumber, $targetLease.FileIndex) `
+                -Scope "$Scope handle identity"
+            $junctionTarget = Assert-CodexHookDPath `
+                -Value ([string]$targetLease.ReadTargetPathFromHandle()) `
+                -Name "$Scope junction target"
+            if (-not (Test-CodexHookPathWithin `
+                    -Path $junctionTarget `
+                    -ParentPath $InternalDirectoryJunctionTargetRoot)) {
+                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope junction target 越界。"
+            }
+            [byte[]]$confirmedSha256 = $targetLease.ComputeReparseDataSha256FromHandle()
+            if ($null -ne $MetricsObserver) { & $MetricsObserver 'hash-read' 0L $reparseLength }
+            if ([Convert]::ToHexString($confirmedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
+                throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope handle reparse data 漂移。"
+            }
+            $revalidationPassed = $true
+            $targetLease.DeleteWithPosixSemantics()
+            if ($null -ne $DeleteCheckpointForTest) {
+                & $DeleteCheckpointForTest $Path 'directory-junction'
+            }
+            if ($null -ne $DeleteCommitCallback) { & $DeleteCommitCallback $Path 'directory-junction' }
+            if ($attempt -gt 1 -and $null -ne $RetryObserver) {
+                & $RetryObserver ([pscustomobject][ordered]@{
+                    revalidation = 'passed'
+                    result = 'succeeded'
+                })
+            }
+            return
+        } catch {
+            $failure = $_
+            $nativeError = $null
+            $current = $failure.Exception
+            while ($null -ne $current) {
+                if ($current -is [ComponentModel.Win32Exception]) {
+                    $nativeError = [int]$current.NativeErrorCode
+                    break
+                }
+                $current = $current.InnerException
+            }
+            $retryAllowed = $null -ne $RetryPolicy -and
+                $nativeError -in @($RetryPolicy.allowedWindowsErrors)
+            $retryDelays = if ($null -eq $RetryPolicy) { @() } else { @($RetryPolicy.delayMilliseconds) }
+            $delayIndex = [Math]::Min($attempt - 1, $retryDelays.Count - 1)
+            $delayMs = if ($retryAllowed -and $delayIndex -ge 0) {
+                [long]$retryDelays[$delayIndex]
+            } else { 0L }
+            $elapsedMs = if ($null -ne $RetryRuntime) {
+                Get-CodexHookCapabilityLeafRetryElapsedMilliseconds -RetryRuntime $RetryRuntime
+            } else { 0L }
+            if ($attempt -gt 1 -and $null -ne $RetryObserver) {
+                & $RetryObserver ([pscustomobject][ordered]@{
+                    revalidation = if ($revalidationPassed) { 'passed' } else { 'failed' }
+                    result = 'failed'
+                })
+            }
+            if (-not $retryAllowed -or $attempt -ge $maxAttempts -or
+                $elapsedMs + $delayMs -gt $wallTimeBudgetMs) {
+                throw $failure
+            }
+            if ($null -ne $RetryObserver) {
+                & $RetryObserver ([pscustomobject][ordered]@{
+                    attempt = $attempt
+                    errorCategory = if ($nativeError -eq 32) { 'sharing-violation' } elseif ($nativeError -eq 33) { 'lock-violation' } else { 'busy' }
+                    delayMs = $delayMs
+                    elapsedMs = $elapsedMs
+                    budgetRemainingMs = $wallTimeBudgetMs - $elapsedMs
+                    revalidation = 'pending'
+                    result = 'retrying'
+                })
+            }
+            Invoke-CodexHookCapabilityLeafRetryDelay `
+                -RetryRuntime $RetryRuntime `
+                -DelayMilliseconds $delayMs
+            if ((Get-CodexHookCapabilityLeafRetryElapsedMilliseconds -RetryRuntime $RetryRuntime) -gt
+                $wallTimeBudgetMs) {
+                if ($null -ne $RetryObserver) {
+                    & $RetryObserver ([pscustomobject][ordered]@{
+                        revalidation = 'not-attempted'
+                        result = 'failed'
+                    })
+                }
+                throw $failure
+            }
+        } finally {
+            if ($null -ne $targetLease) { $targetLease.Dispose() }
         }
-        Assert-CodexHookDirectoryTreeIdentity `
-            -Expected $ExpectedIdentity `
-            -Actual @($targetLease.VolumeSerialNumber, $targetLease.FileIndex) `
-            -Scope "$Scope handle identity"
-        $junctionTarget = Assert-CodexHookDPath `
-            -Value ([string]$targetLease.ReadTargetPathFromHandle()) `
-            -Name "$Scope junction target"
-        if (-not (Test-CodexHookPathWithin `
-                -Path $junctionTarget `
-                -ParentPath $InternalDirectoryJunctionTargetRoot)) {
-            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope junction target 越界。"
-        }
-        [byte[]]$confirmedSha256 = $targetLease.ComputeReparseDataSha256FromHandle()
-        if ([Convert]::ToHexString($confirmedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
-            throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope handle reparse data 漂移。"
-        }
-        $targetLease.DeleteWithPosixSemantics()
-    } finally {
-        if ($null -ne $targetLease) { $targetLease.Dispose() }
     }
 }
 
@@ -1099,9 +1355,23 @@ function Remove-CodexHookCapabilityDirectoryTree {
         [string]$NamedStreamDeleteGenerationId,
         [AllowEmptyCollection()][object[]]$NamedStreamDeleteJournalAnchors = @(),
         [scriptblock]$NamedStreamDeleteCommitAnchor,
-        [scriptblock]$NamedStreamDeleteCheckpointForTest
+        [scriptblock]$NamedStreamDeleteCheckpointForTest,
+        [object]$LeafRetryPolicy,
+        [scriptblock]$LeafRetryFaultForTest,
+        [scriptblock]$LeafRetryObserver,
+        [scriptblock]$LeafRetryElapsedMillisecondsForTest,
+        [scriptblock]$LeafRetryDelayForTest,
+        [scriptblock]$LeafDeleteCheckpointForTest,
+        [scriptblock]$MetricsObserver,
+        [scriptblock]$DeleteCommitCallback
     )
 
+    $leafRetryRuntime = if ($null -ne $LeafRetryPolicy) {
+        New-CodexHookCapabilityLeafRetryRuntime `
+            -RetryPolicy $LeafRetryPolicy `
+            -ElapsedMillisecondsForTest $LeafRetryElapsedMillisecondsForTest `
+            -DelayForTest $LeafRetryDelayForTest
+    } else { $null }
     $fullPath = Assert-CodexHookCapabilityPath `
         -Path $Path `
         -CapabilityRoot $CapabilityRoot `
@@ -1383,6 +1653,13 @@ function Remove-CodexHookCapabilityDirectoryTree {
                     -ExpectedSha256 $expectedChild.sha256 `
                     -ExpectedIdentity @($expectedChild.identity) `
                     -InternalDirectoryJunctionTargetRoot $junctionTargetRoot `
+                    -RetryPolicy $LeafRetryPolicy `
+                    -RetryRuntime $leafRetryRuntime `
+                    -RetryFaultForTest $LeafRetryFaultForTest `
+                    -RetryObserver $LeafRetryObserver `
+                    -MetricsObserver $MetricsObserver `
+                    -DeleteCheckpointForTest $LeafDeleteCheckpointForTest `
+                    -DeleteCommitCallback $DeleteCommitCallback `
                     -Scope "$NodeScope child"
                 continue
             }
@@ -1419,6 +1696,13 @@ function Remove-CodexHookCapabilityDirectoryTree {
                 -ExpectedSha256 $expectedChild.sha256 `
                 -ExpectedIdentity @($expectedChild.identity) `
                 -AllowHardLinks:$AllowHardLinks `
+                -RetryPolicy $LeafRetryPolicy `
+                -RetryRuntime $leafRetryRuntime `
+                -RetryFaultForTest $LeafRetryFaultForTest `
+                -RetryObserver $LeafRetryObserver `
+                -MetricsObserver $MetricsObserver `
+                -DeleteCheckpointForTest $LeafDeleteCheckpointForTest `
+                -DeleteCommitCallback $DeleteCommitCallback `
                 -Scope "$NodeScope child"
         }
         if ($RejectNamedStreams) {

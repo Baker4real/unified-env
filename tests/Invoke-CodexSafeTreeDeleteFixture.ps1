@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Plan', 'Apply', 'Purge', 'BatchPurge')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Plan', 'Apply', 'Purge', 'BatchPurge', 'Status', 'Restore')][string]$Mode,
     [string]$TargetPath,
     [string[]]$TargetPaths,
     [string]$CapabilityRoot,
@@ -10,9 +10,23 @@ param(
     [string]$TransactionPath,
     [string]$ApprovedTransactionSha256,
     [switch]$ConfirmPurge,
+    [switch]$ConfirmRestore,
     [switch]$FixtureFailAfterRename,
+    [scriptblock]$FixtureBeforePurgeMutex,
     [scriptblock]$FixtureBeforeDirectoryTreeDelete,
     [scriptblock]$FixtureDirectoryDeleteCheckpoint,
+    [scriptblock]$FixtureLeafDeleteFault,
+    [object]$FixtureLeafRetryPolicy,
+    [scriptblock]$FixtureLeafRetryElapsedMilliseconds,
+    [scriptblock]$FixtureLeafRetryDelay,
+    [switch]$Json,
+    [Nullable[datetimeoffset]]$FixtureTrustedNowUtc,
+    [Nullable[long]]$FixtureTrustedElapsedNowMilliseconds,
+    [string]$FixtureTrustedBootSessionId,
+    [scriptblock]$FixtureTrustedBootSessionSource,
+    [switch]$FixtureTrustedTimeRestartAmbiguous,
+    [string]$FixtureCandidatePolicyPath,
+    [string]$FixtureApprovedCandidatePolicySha256,
     [Parameter(Mandatory)][string]$FixturePolicyPath,
     [Parameter(Mandatory)][string]$FixtureEvidenceRoot
 )
@@ -34,7 +48,35 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1')
 . (Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1')
 
-switch ($Mode) {
+$result = switch ($Mode) {
+    'Status' {
+        $statusArguments = @{
+            PolicyPath = $FixturePolicyPath
+            EvidenceRoot = $FixtureEvidenceRoot
+        }
+        if (-not [string]::IsNullOrWhiteSpace($FixtureCandidatePolicyPath)) {
+            $statusArguments.CandidatePolicyPath = $FixtureCandidatePolicyPath
+        }
+        if (-not [string]::IsNullOrWhiteSpace($FixtureApprovedCandidatePolicySha256)) {
+            $statusArguments.ApprovedCandidatePolicySha256 = $FixtureApprovedCandidatePolicySha256
+        }
+        Get-CodexSafeTreeDeleteStatus @statusArguments
+    }
+    'Restore' {
+        if (-not $ConfirmRestore) {
+            [pscustomobject][ordered]@{ restored = $false; refusalReason = 'confirm-restore-required' }
+            break
+        }
+        if ([string]::IsNullOrWhiteSpace($TransactionPath) -or
+            [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
+            throw 'Restore 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
+        }
+        Invoke-CodexSafeTreeDeleteRestore `
+            -TransactionPath $TransactionPath `
+            -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
+            -PolicyPath $FixturePolicyPath `
+            -EvidenceRoot $FixtureEvidenceRoot
+    }
     'Plan' {
         if ([string]::IsNullOrWhiteSpace($TargetPath) -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
             throw 'Plan 模式要求 TargetPath 与 CapabilityRoot。'
@@ -68,13 +110,40 @@ switch ($Mode) {
         if ([string]::IsNullOrWhiteSpace($TransactionPath) -or [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
             throw 'Purge 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
         }
-        Invoke-CodexSafeTreeDeletePurge `
-            -TransactionPath $TransactionPath `
-            -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
-            -PolicyPath $FixturePolicyPath `
-            -EvidenceRoot $FixtureEvidenceRoot `
-            -BeforeDirectoryTreeDeleteForTest $FixtureBeforeDirectoryTreeDelete `
-            -DirectoryDeleteCheckpointForTest $FixtureDirectoryDeleteCheckpoint
+        $purgeArguments = @{
+            TransactionPath = $TransactionPath
+            ApprovedTransactionSha256 = $ApprovedTransactionSha256
+            PolicyPath = $FixturePolicyPath
+            EvidenceRoot = $FixtureEvidenceRoot
+            BeforePurgeMutexForTest = $FixtureBeforePurgeMutex
+            BeforeDirectoryTreeDeleteForTest = $FixtureBeforeDirectoryTreeDelete
+            DirectoryDeleteCheckpointForTest = $FixtureDirectoryDeleteCheckpoint
+            LeafDeleteFaultForTest = $FixtureLeafDeleteFault
+            TrustedTimeRestartAmbiguous = [bool]$FixtureTrustedTimeRestartAmbiguous
+            ReturnFailureMetrics = [bool]$Json
+        }
+        if ($null -ne $FixtureTrustedNowUtc) {
+            $purgeArguments.TrustedNowUtc = [datetimeoffset]$FixtureTrustedNowUtc
+        }
+        if ($null -ne $FixtureTrustedElapsedNowMilliseconds) {
+            $purgeArguments.TrustedElapsedNowMilliseconds = [long]$FixtureTrustedElapsedNowMilliseconds
+        }
+        if (-not [string]::IsNullOrWhiteSpace($FixtureTrustedBootSessionId)) {
+            $purgeArguments.TrustedBootSessionId = $FixtureTrustedBootSessionId
+        }
+        if ($null -ne $FixtureTrustedBootSessionSource) {
+            $purgeArguments.TrustedBootSessionSourceForTest = $FixtureTrustedBootSessionSource
+        }
+        if ($null -ne $FixtureLeafRetryPolicy) {
+            $purgeArguments.LeafRetryPolicyForTest = $FixtureLeafRetryPolicy
+        }
+        if ($null -ne $FixtureLeafRetryElapsedMilliseconds) {
+            $purgeArguments.LeafRetryElapsedMillisecondsForTest = $FixtureLeafRetryElapsedMilliseconds
+        }
+        if ($null -ne $FixtureLeafRetryDelay) {
+            $purgeArguments.LeafRetryDelayForTest = $FixtureLeafRetryDelay
+        }
+        Invoke-CodexSafeTreeDeletePurge @purgeArguments
     }
     'BatchPurge' {
         if (-not $ConfirmApply -or -not $ConfirmPurge) {
@@ -91,4 +160,10 @@ switch ($Mode) {
             -PolicyPath $FixturePolicyPath `
             -EvidenceRoot $FixtureEvidenceRoot
     }
+}
+
+if ($Json) {
+    $result | ConvertTo-Json -Depth 12 -Compress
+} else {
+    $result
 }

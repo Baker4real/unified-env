@@ -13,7 +13,8 @@ param(
         'FailFastAfterFreeze',
         'CommitPublishReturnFailure',
         'FailFastAfterCommit',
-        'FailFastAfterPending')]
+        'FailFastAfterPending',
+        'FailFastAfterLeafDelete')]
     [string]$Scenario
 )
 
@@ -215,9 +216,24 @@ $checkpoint = {
     }
 }
 
+$leafCheckpoint = {
+    param([string]$Path, [string]$Kind)
+
+    if ($Scenario -cne 'FailFastAfterLeafDelete') { return }
+    $markerValue = [pscustomobject][ordered]@{
+        path = $Path
+        kind = $Kind
+    } | ConvertTo-Json -Compress
+    Write-DurableMarker `
+        -Path (Join-Path $MarkerRoot 'after-leaf-delete.marker') `
+        -Value $markerValue
+    [Environment]::FailFast('safe-delete crash fixture after leaf delete')
+}
+
 Invoke-CodexSafeTreeDeletePurge `
     -TransactionPath $TransactionPath `
     -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
     -PolicyPath $FixturePolicyPath `
     -EvidenceRoot $FixtureEvidenceRoot `
-    -DirectoryDeleteCheckpointForTest $checkpoint
+    -DirectoryDeleteCheckpointForTest $checkpoint `
+    -LeafDeleteCheckpointForTest $leafCheckpoint

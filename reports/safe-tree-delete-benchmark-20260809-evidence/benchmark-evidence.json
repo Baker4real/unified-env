@@ -1,0 +1,1147 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-benchmark-evidence",
+  "schemaVersion": 1,
+  "capturedAtUtc": "2026-08-09T12:32:05.8428042+00:00",
+  "profile": "isolated-fixture",
+  "payloadBytesRetained": false,
+  "datasets": [
+    {
+      "name": "small",
+      "policyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+      "policySha256": "7c4f2d1affa225098ca7cf31af024e4facddf09a15efb70cf78101fd5d7e3654",
+      "fixture": {
+        "directoryCount": 4,
+        "fileCount": 4,
+        "logicalBytes": 4096
+      },
+      "stages": [
+        {
+          "name": "plan",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Plan",
+              "TargetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+              "CapabilityRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Plan\" -TargetPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output\" -CapabilityRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:53.9447365+00:00",
+          "completedAtUtc": "2026-08-09T12:31:54.5351461+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "planned": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+            "policyEntryId": "benchmark-small",
+            "fileCount": 4,
+            "directoryCount": 4,
+            "planPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89\\plan.json",
+            "planSha256": "4630e1a2b7b0103baa5cf7b843b5806d730739557272c6fe39f0911501590b95",
+            "expiresAtUtc": "2026-08-09T13:01:54.3097287+00:00",
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "plan",
+              "elapsedMs": 543,
+              "entriesScanned": 8,
+              "logicalBytes": 4096,
+              "bytesHashed": 7705,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "status-planned",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Status",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Status\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:54.5378207+00:00",
+          "completedAtUtc": "2026-08-09T12:31:54.8669806+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "artifactType": "env-governance.codex-safe-tree-delete-status",
+            "schemaVersion": 1,
+            "capturedAtUtc": "2026-08-09T12:31:54.8651168+00:00",
+            "complete": true,
+            "policyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+            "policySha256": "7c4f2d1affa225098ca7cf31af024e4facddf09a15efb70cf78101fd5d7e3654",
+            "policySchemaVersion": 5,
+            "migrationReadiness": {
+              "evaluated": false,
+              "candidatePolicyPath": null,
+              "candidatePolicySha256": null,
+              "candidatePolicySchemaVersion": null,
+              "ready": true,
+              "blockingRecords": []
+            },
+            "operations": [
+              {
+                "operationId": "20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89",
+                "runDirectory": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89",
+                "lifecycle": "planned",
+                "safeActions": [
+                  "apply"
+                ],
+                "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+                "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\.codex-safe-delete-5681e2c9-5f59-4a40-b159-7330f8cefc89.quarantine",
+                "targetPresent": true,
+                "quarantinePresent": false,
+                "targetEntryType": "directory",
+                "quarantineEntryType": "absent",
+                "namespaceAbsent": false,
+                "logicalCompletion": false,
+                "physicalReclaimStatus": "unknown",
+                "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+                "deletionOutcome": {
+                  "schemaVersion": 1,
+                  "namespaceAbsent": false,
+                  "logicalCompletion": false,
+                  "physicalReclaimStatus": "unknown",
+                  "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+                },
+                "policyCompatible": true,
+                "schemaCompatible": true,
+                "candidatePolicyCompatible": null,
+                "planSchemaVersion": 1,
+                "transactionSchemaVersion": null,
+                "transactionStatus": null,
+                "journalStatus": "not-started",
+                "errors": []
+              }
+            ],
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "status",
+              "elapsedMs": 298,
+              "entriesScanned": 9,
+              "logicalBytes": 4096,
+              "bytesHashed": 11314,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "apply",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Apply",
+              "PlanPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89\\plan.json",
+              "ApprovedPlanSha256": "4630e1a2b7b0103baa5cf7b843b5806d730739557272c6fe39f0911501590b95",
+              "ConfirmApply": true,
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Apply\" -PlanPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89\\plan.json\" -ApprovedPlanSha256 \"4630e1a2b7b0103baa5cf7b843b5806d730739557272c6fe39f0911501590b95\" -ConfirmApply -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:54.8690602+00:00",
+          "completedAtUtc": "2026-08-09T12:31:55.7623247+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "quarantined": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+            "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\.codex-safe-delete-5681e2c9-5f59-4a40-b159-7330f8cefc89.quarantine",
+            "transactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89\\transaction.json",
+            "transactionSha256": "8809fba7dd4c615046bdb4b517b382652fcd547803d0dca020e05268bcf589a2",
+            "recoverable": true,
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "apply",
+              "elapsedMs": 868,
+              "entriesScanned": 24,
+              "logicalBytes": 4096,
+              "bytesHashed": 17322,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "status-recoverable",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Status",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Status\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:55.7628892+00:00",
+          "completedAtUtc": "2026-08-09T12:31:56.1272869+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "artifactType": "env-governance.codex-safe-tree-delete-status",
+            "schemaVersion": 1,
+            "capturedAtUtc": "2026-08-09T12:31:56.1270948+00:00",
+            "complete": true,
+            "policyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+            "policySha256": "7c4f2d1affa225098ca7cf31af024e4facddf09a15efb70cf78101fd5d7e3654",
+            "policySchemaVersion": 5,
+            "migrationReadiness": {
+              "evaluated": false,
+              "candidatePolicyPath": null,
+              "candidatePolicySha256": null,
+              "candidatePolicySchemaVersion": null,
+              "ready": true,
+              "blockingRecords": []
+            },
+            "operations": [
+              {
+                "operationId": "20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89",
+                "runDirectory": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89",
+                "lifecycle": "recoverable",
+                "safeActions": [
+                  "restore",
+                  "purge"
+                ],
+                "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+                "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\.codex-safe-delete-5681e2c9-5f59-4a40-b159-7330f8cefc89.quarantine",
+                "targetPresent": false,
+                "quarantinePresent": true,
+                "targetEntryType": "absent",
+                "quarantineEntryType": "directory",
+                "namespaceAbsent": true,
+                "logicalCompletion": false,
+                "physicalReclaimStatus": "unknown",
+                "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+                "deletionOutcome": {
+                  "schemaVersion": 1,
+                  "namespaceAbsent": true,
+                  "logicalCompletion": false,
+                  "physicalReclaimStatus": "unknown",
+                  "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+                },
+                "policyCompatible": true,
+                "schemaCompatible": true,
+                "candidatePolicyCompatible": null,
+                "planSchemaVersion": 1,
+                "transactionSchemaVersion": 3,
+                "transactionStatus": "quarantined",
+                "journalStatus": "none",
+                "errors": []
+              }
+            ],
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "status",
+              "elapsedMs": 345,
+              "entriesScanned": 9,
+              "logicalBytes": 4096,
+              "bytesHashed": 18761,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "restore",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Restore",
+              "TransactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89\\transaction.json",
+              "ApprovedTransactionSha256": "8809fba7dd4c615046bdb4b517b382652fcd547803d0dca020e05268bcf589a2",
+              "ConfirmRestore": true,
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Restore\" -TransactionPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89\\transaction.json\" -ApprovedTransactionSha256 \"8809fba7dd4c615046bdb4b517b382652fcd547803d0dca020e05268bcf589a2\" -ConfirmRestore -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:56.1285879+00:00",
+          "completedAtUtc": "2026-08-09T12:31:57.2683054+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "restored": true,
+            "alreadyRestored": false,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+            "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\.codex-safe-delete-5681e2c9-5f59-4a40-b159-7330f8cefc89.quarantine",
+            "transactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89\\transaction.json",
+            "transactionSha256": "e8f7712044a6c31cb37dc7345fa05f10df015b3bf58018b0e17378009be73813",
+            "namespaceAbsent": false,
+            "logicalCompletion": false,
+            "physicalReclaimStatus": "not-applicable",
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "restore",
+              "elapsedMs": 1115,
+              "entriesScanned": 16,
+              "logicalBytes": 4096,
+              "bytesHashed": 29326,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "purge-plan",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Plan",
+              "TargetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+              "CapabilityRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Plan\" -TargetPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output\" -CapabilityRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:57.2691116+00:00",
+          "completedAtUtc": "2026-08-09T12:31:57.5785691+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "planned": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+            "policyEntryId": "benchmark-small",
+            "fileCount": 4,
+            "directoryCount": 4,
+            "planPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123157Z-58c1a55a-6c0d-44f4-a28a-4d05315a01b3\\plan.json",
+            "planSha256": "7513e7dae6650d24db2dff3e6bd3decc4ddf93e7e4ff8ea21d894cb8c5496cc6",
+            "expiresAtUtc": "2026-08-09T13:01:57.4253664+00:00",
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "plan",
+              "elapsedMs": 287,
+              "entriesScanned": 8,
+              "logicalBytes": 4096,
+              "bytesHashed": 7705,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "purge-apply",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Apply",
+              "PlanPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123157Z-58c1a55a-6c0d-44f4-a28a-4d05315a01b3\\plan.json",
+              "ApprovedPlanSha256": "7513e7dae6650d24db2dff3e6bd3decc4ddf93e7e4ff8ea21d894cb8c5496cc6",
+              "ConfirmApply": true,
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Apply\" -PlanPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123157Z-58c1a55a-6c0d-44f4-a28a-4d05315a01b3\\plan.json\" -ApprovedPlanSha256 \"7513e7dae6650d24db2dff3e6bd3decc4ddf93e7e4ff8ea21d894cb8c5496cc6\" -ConfirmApply -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:57.5792086+00:00",
+          "completedAtUtc": "2026-08-09T12:31:58.3886248+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "quarantined": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+            "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\.codex-safe-delete-58c1a55a-6c0d-44f4-a28a-4d05315a01b3.quarantine",
+            "transactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123157Z-58c1a55a-6c0d-44f4-a28a-4d05315a01b3\\transaction.json",
+            "transactionSha256": "c1b60f605535e4187ceb6bc5019e81c19d824edd074389ab4a9f6fbde11d56b6",
+            "recoverable": true,
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "apply",
+              "elapsedMs": 787,
+              "entriesScanned": 24,
+              "logicalBytes": 4096,
+              "bytesHashed": 17322,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "purge",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Purge",
+              "TransactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123157Z-58c1a55a-6c0d-44f4-a28a-4d05315a01b3\\transaction.json",
+              "ApprovedTransactionSha256": "c1b60f605535e4187ceb6bc5019e81c19d824edd074389ab4a9f6fbde11d56b6",
+              "ConfirmPurge": true,
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Purge\" -TransactionPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123157Z-58c1a55a-6c0d-44f4-a28a-4d05315a01b3\\transaction.json\" -ApprovedTransactionSha256 \"c1b60f605535e4187ceb6bc5019e81c19d824edd074389ab4a9f6fbde11d56b6\" -ConfirmPurge -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:58.3892535+00:00",
+          "completedAtUtc": "2026-08-09T12:31:59.1742066+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "purged": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+            "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\.codex-safe-delete-58c1a55a-6c0d-44f4-a28a-4d05315a01b3.quarantine",
+            "transactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123157Z-58c1a55a-6c0d-44f4-a28a-4d05315a01b3\\transaction.json",
+            "transactionSha256": "1770fe3f4ab6bbeaf8cfddcc868450ae590ed6678ed05b414f98dcb8163247a5",
+            "recoverable": false,
+            "namespaceAbsent": true,
+            "logicalCompletion": true,
+            "physicalReclaimStatus": "unknown",
+            "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+            "deletionOutcome": {
+              "schemaVersion": 1,
+              "namespaceAbsent": true,
+              "logicalCompletion": true,
+              "physicalReclaimStatus": "unknown",
+              "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+            },
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "purge",
+              "elapsedMs": 757,
+              "entriesScanned": 8,
+              "logicalBytes": 4096,
+              "bytesHashed": 26740,
+              "retry": {
+                "contract": {
+                  "schemaVersion": 1,
+                  "maxAttempts": 3,
+                  "wallTimeBudgetMs": 1000,
+                  "delayMilliseconds": [
+                    10,
+                    25
+                  ],
+                  "allowedErrorCategories": [
+                    "sharing-violation",
+                    "lock-violation",
+                    "busy"
+                  ]
+                },
+                "attempts": 0,
+                "result": "not-needed",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "status-terminal",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Status",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Status\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:59.1746044+00:00",
+          "completedAtUtc": "2026-08-09T12:31:59.6020342+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "artifactType": "env-governance.codex-safe-tree-delete-status",
+            "schemaVersion": 1,
+            "capturedAtUtc": "2026-08-09T12:31:59.6017610+00:00",
+            "complete": false,
+            "policyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\policy.json",
+            "policySha256": "7c4f2d1affa225098ca7cf31af024e4facddf09a15efb70cf78101fd5d7e3654",
+            "policySchemaVersion": 5,
+            "migrationReadiness": {
+              "evaluated": false,
+              "candidatePolicyPath": null,
+              "candidatePolicySha256": null,
+              "candidatePolicySchemaVersion": null,
+              "ready": false,
+              "blockingRecords": [
+                "20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89"
+              ]
+            },
+            "operations": [
+              {
+                "operationId": "20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89",
+                "runDirectory": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123154Z-5681e2c9-5f59-4a40-b159-7330f8cefc89",
+                "lifecycle": "manual-review",
+                "safeActions": [
+                  "manual-review"
+                ],
+                "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+                "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\.codex-safe-delete-5681e2c9-5f59-4a40-b159-7330f8cefc89.quarantine",
+                "targetPresent": false,
+                "quarantinePresent": false,
+                "targetEntryType": "absent",
+                "quarantineEntryType": "absent",
+                "namespaceAbsent": true,
+                "logicalCompletion": false,
+                "physicalReclaimStatus": "unknown",
+                "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+                "deletionOutcome": {
+                  "schemaVersion": 1,
+                  "namespaceAbsent": true,
+                  "logicalCompletion": false,
+                  "physicalReclaimStatus": "unknown",
+                  "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+                },
+                "policyCompatible": true,
+                "schemaCompatible": true,
+                "candidatePolicyCompatible": null,
+                "planSchemaVersion": 1,
+                "transactionSchemaVersion": 3,
+                "transactionStatus": "restored",
+                "journalStatus": "none",
+                "errors": [
+                  "restored transaction 的 live namespace 不一致。"
+                ]
+              },
+              {
+                "operationId": "20260809T123157Z-58c1a55a-6c0d-44f4-a28a-4d05315a01b3",
+                "runDirectory": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\evidence\\20260809T123157Z-58c1a55a-6c0d-44f4-a28a-4d05315a01b3",
+                "lifecycle": "terminal",
+                "safeActions": [],
+                "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\build-output",
+                "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\small\\.codex-safe-delete-58c1a55a-6c0d-44f4-a28a-4d05315a01b3.quarantine",
+                "targetPresent": false,
+                "quarantinePresent": false,
+                "targetEntryType": "absent",
+                "quarantineEntryType": "absent",
+                "namespaceAbsent": true,
+                "logicalCompletion": true,
+                "physicalReclaimStatus": "unknown",
+                "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+                "deletionOutcome": {
+                  "schemaVersion": 1,
+                  "namespaceAbsent": true,
+                  "logicalCompletion": true,
+                  "physicalReclaimStatus": "unknown",
+                  "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+                },
+                "policyCompatible": true,
+                "schemaCompatible": true,
+                "candidatePolicyCompatible": null,
+                "planSchemaVersion": 1,
+                "transactionSchemaVersion": 3,
+                "transactionStatus": "purged",
+                "journalStatus": "not-applicable",
+                "errors": []
+              }
+            ],
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "status",
+              "elapsedMs": 405,
+              "entriesScanned": 2,
+              "logicalBytes": 0,
+              "bytesHashed": 38025,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "large",
+      "policyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+      "policySha256": "d92b0b7d957006ac533f99c9f6348549b9f1ef1dbce2185ba31df04f7718e749",
+      "fixture": {
+        "directoryCount": 4,
+        "fileCount": 4,
+        "logicalBytes": 33554432
+      },
+      "stages": [
+        {
+          "name": "plan",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Plan",
+              "TargetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+              "CapabilityRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Plan\" -TargetPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output\" -CapabilityRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:31:59.6361759+00:00",
+          "completedAtUtc": "2026-08-09T12:32:00.0647134+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "planned": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+            "policyEntryId": "benchmark-large",
+            "fileCount": 4,
+            "directoryCount": 4,
+            "planPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553\\plan.json",
+            "planSha256": "c0dd973bb53e03ffef2ba046c2032de808e557075f8d88d28872c6ba50fccb70",
+            "expiresAtUtc": "2026-08-09T13:01:59.8345485+00:00",
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "plan",
+              "elapsedMs": 411,
+              "entriesScanned": 8,
+              "logicalBytes": 33554432,
+              "bytesHashed": 33558041,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "status-planned",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Status",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Status\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:32:00.0658106+00:00",
+          "completedAtUtc": "2026-08-09T12:32:00.4562196+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "artifactType": "env-governance.codex-safe-tree-delete-status",
+            "schemaVersion": 1,
+            "capturedAtUtc": "2026-08-09T12:32:00.4560031+00:00",
+            "complete": true,
+            "policyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+            "policySha256": "d92b0b7d957006ac533f99c9f6348549b9f1ef1dbce2185ba31df04f7718e749",
+            "policySchemaVersion": 5,
+            "migrationReadiness": {
+              "evaluated": false,
+              "candidatePolicyPath": null,
+              "candidatePolicySha256": null,
+              "candidatePolicySchemaVersion": null,
+              "ready": true,
+              "blockingRecords": []
+            },
+            "operations": [
+              {
+                "operationId": "20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553",
+                "runDirectory": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553",
+                "lifecycle": "planned",
+                "safeActions": [
+                  "apply"
+                ],
+                "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+                "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\.codex-safe-delete-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553.quarantine",
+                "targetPresent": true,
+                "quarantinePresent": false,
+                "targetEntryType": "directory",
+                "quarantineEntryType": "absent",
+                "namespaceAbsent": false,
+                "logicalCompletion": false,
+                "physicalReclaimStatus": "unknown",
+                "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+                "deletionOutcome": {
+                  "schemaVersion": 1,
+                  "namespaceAbsent": false,
+                  "logicalCompletion": false,
+                  "physicalReclaimStatus": "unknown",
+                  "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+                },
+                "policyCompatible": true,
+                "schemaCompatible": true,
+                "candidatePolicyCompatible": null,
+                "planSchemaVersion": 1,
+                "transactionSchemaVersion": null,
+                "transactionStatus": null,
+                "journalStatus": "not-started",
+                "errors": []
+              }
+            ],
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "status",
+              "elapsedMs": 296,
+              "entriesScanned": 9,
+              "logicalBytes": 33554432,
+              "bytesHashed": 33561650,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "apply",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Apply",
+              "PlanPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553\\plan.json",
+              "ApprovedPlanSha256": "c0dd973bb53e03ffef2ba046c2032de808e557075f8d88d28872c6ba50fccb70",
+              "ConfirmApply": true,
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Apply\" -PlanPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553\\plan.json\" -ApprovedPlanSha256 \"c0dd973bb53e03ffef2ba046c2032de808e557075f8d88d28872c6ba50fccb70\" -ConfirmApply -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:32:00.4565646+00:00",
+          "completedAtUtc": "2026-08-09T12:32:01.3633164+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "quarantined": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+            "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\.codex-safe-delete-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553.quarantine",
+            "transactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553\\transaction.json",
+            "transactionSha256": "38597c16e08d752297caa08e5b74734c8adce6f62a77e78469318c8c935a241e",
+            "recoverable": true,
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "apply",
+              "elapsedMs": 884,
+              "entriesScanned": 24,
+              "logicalBytes": 33554432,
+              "bytesHashed": 100668330,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "status-recoverable",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Status",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Status\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:32:01.3635779+00:00",
+          "completedAtUtc": "2026-08-09T12:32:01.6918104+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "artifactType": "env-governance.codex-safe-tree-delete-status",
+            "schemaVersion": 1,
+            "capturedAtUtc": "2026-08-09T12:32:01.6916558+00:00",
+            "complete": true,
+            "policyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+            "policySha256": "d92b0b7d957006ac533f99c9f6348549b9f1ef1dbce2185ba31df04f7718e749",
+            "policySchemaVersion": 5,
+            "migrationReadiness": {
+              "evaluated": false,
+              "candidatePolicyPath": null,
+              "candidatePolicySha256": null,
+              "candidatePolicySchemaVersion": null,
+              "ready": true,
+              "blockingRecords": []
+            },
+            "operations": [
+              {
+                "operationId": "20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553",
+                "runDirectory": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553",
+                "lifecycle": "recoverable",
+                "safeActions": [
+                  "restore",
+                  "purge"
+                ],
+                "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+                "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\.codex-safe-delete-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553.quarantine",
+                "targetPresent": false,
+                "quarantinePresent": true,
+                "targetEntryType": "absent",
+                "quarantineEntryType": "directory",
+                "namespaceAbsent": true,
+                "logicalCompletion": false,
+                "physicalReclaimStatus": "unknown",
+                "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+                "deletionOutcome": {
+                  "schemaVersion": 1,
+                  "namespaceAbsent": true,
+                  "logicalCompletion": false,
+                  "physicalReclaimStatus": "unknown",
+                  "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+                },
+                "policyCompatible": true,
+                "schemaCompatible": true,
+                "candidatePolicyCompatible": null,
+                "planSchemaVersion": 1,
+                "transactionSchemaVersion": 3,
+                "transactionStatus": "quarantined",
+                "journalStatus": "none",
+                "errors": []
+              }
+            ],
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "status",
+              "elapsedMs": 309,
+              "entriesScanned": 9,
+              "logicalBytes": 33554432,
+              "bytesHashed": 33569097,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "restore",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Restore",
+              "TransactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553\\transaction.json",
+              "ApprovedTransactionSha256": "38597c16e08d752297caa08e5b74734c8adce6f62a77e78469318c8c935a241e",
+              "ConfirmRestore": true,
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Restore\" -TransactionPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553\\transaction.json\" -ApprovedTransactionSha256 \"38597c16e08d752297caa08e5b74734c8adce6f62a77e78469318c8c935a241e\" -ConfirmRestore -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:32:01.6920955+00:00",
+          "completedAtUtc": "2026-08-09T12:32:03.2028795+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "restored": true,
+            "alreadyRestored": false,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+            "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\.codex-safe-delete-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553.quarantine",
+            "transactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553\\transaction.json",
+            "transactionSha256": "6f1fe500de027686f2756764c56de94d88faffabe226f24d419b458b3be5c486",
+            "namespaceAbsent": false,
+            "logicalCompletion": false,
+            "physicalReclaimStatus": "not-applicable",
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "restore",
+              "elapsedMs": 1184,
+              "entriesScanned": 16,
+              "logicalBytes": 33554432,
+              "bytesHashed": 67129998,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "purge-plan",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Plan",
+              "TargetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+              "CapabilityRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Plan\" -TargetPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output\" -CapabilityRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:32:03.2031484+00:00",
+          "completedAtUtc": "2026-08-09T12:32:03.5063177+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "planned": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+            "policyEntryId": "benchmark-large",
+            "fileCount": 4,
+            "directoryCount": 4,
+            "planPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123203Z-78833887-c9c7-4255-8309-f8ecb7c49a56\\plan.json",
+            "planSha256": "1ceabd358b50e4cb46633103dff0b91d947708df5bf1a781602fc5c9a751bc5d",
+            "expiresAtUtc": "2026-08-09T13:02:03.3742137+00:00",
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "plan",
+              "elapsedMs": 283,
+              "entriesScanned": 8,
+              "logicalBytes": 33554432,
+              "bytesHashed": 33558041,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "purge-apply",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Apply",
+              "PlanPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123203Z-78833887-c9c7-4255-8309-f8ecb7c49a56\\plan.json",
+              "ApprovedPlanSha256": "1ceabd358b50e4cb46633103dff0b91d947708df5bf1a781602fc5c9a751bc5d",
+              "ConfirmApply": true,
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Apply\" -PlanPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123203Z-78833887-c9c7-4255-8309-f8ecb7c49a56\\plan.json\" -ApprovedPlanSha256 \"1ceabd358b50e4cb46633103dff0b91d947708df5bf1a781602fc5c9a751bc5d\" -ConfirmApply -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:32:03.5066082+00:00",
+          "completedAtUtc": "2026-08-09T12:32:04.2507440+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "quarantined": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+            "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\.codex-safe-delete-78833887-c9c7-4255-8309-f8ecb7c49a56.quarantine",
+            "transactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123203Z-78833887-c9c7-4255-8309-f8ecb7c49a56\\transaction.json",
+            "transactionSha256": "50565f20f25bc4e98e8541a8c32ba11221ca1110ab1ed80fe8fa39920fd0f096",
+            "recoverable": true,
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "apply",
+              "elapsedMs": 727,
+              "entriesScanned": 24,
+              "logicalBytes": 33554432,
+              "bytesHashed": 100668330,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "purge",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Purge",
+              "TransactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123203Z-78833887-c9c7-4255-8309-f8ecb7c49a56\\transaction.json",
+              "ApprovedTransactionSha256": "50565f20f25bc4e98e8541a8c32ba11221ca1110ab1ed80fe8fa39920fd0f096",
+              "ConfirmPurge": true,
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Purge\" -TransactionPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123203Z-78833887-c9c7-4255-8309-f8ecb7c49a56\\transaction.json\" -ApprovedTransactionSha256 \"50565f20f25bc4e98e8541a8c32ba11221ca1110ab1ed80fe8fa39920fd0f096\" -ConfirmPurge -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:32:04.2510642+00:00",
+          "completedAtUtc": "2026-08-09T12:32:04.9037836+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "purged": true,
+            "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+            "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\.codex-safe-delete-78833887-c9c7-4255-8309-f8ecb7c49a56.quarantine",
+            "transactionPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123203Z-78833887-c9c7-4255-8309-f8ecb7c49a56\\transaction.json",
+            "transactionSha256": "99743a513a70c363948f48c65148ec21f832177b021e64f86eaec810b8e82ad7",
+            "recoverable": false,
+            "namespaceAbsent": true,
+            "logicalCompletion": true,
+            "physicalReclaimStatus": "unknown",
+            "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+            "deletionOutcome": {
+              "schemaVersion": 1,
+              "namespaceAbsent": true,
+              "logicalCompletion": true,
+              "physicalReclaimStatus": "unknown",
+              "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+            },
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "purge",
+              "elapsedMs": 635,
+              "entriesScanned": 8,
+              "logicalBytes": 33554432,
+              "bytesHashed": 100677748,
+              "retry": {
+                "contract": {
+                  "schemaVersion": 1,
+                  "maxAttempts": 3,
+                  "wallTimeBudgetMs": 1000,
+                  "delayMilliseconds": [
+                    10,
+                    25
+                  ],
+                  "allowedErrorCategories": [
+                    "sharing-violation",
+                    "lock-violation",
+                    "busy"
+                  ]
+                },
+                "attempts": 0,
+                "result": "not-needed",
+                "events": []
+              }
+            }
+          }
+        },
+        {
+          "name": "status-terminal",
+          "invocation": {
+            "scriptPath": "D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1",
+            "parameters": {
+              "Mode": "Status",
+              "FixturePolicyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+              "FixtureEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence"
+            },
+            "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\tests\\Invoke-CodexSafeTreeDeleteFixture.ps1\" -Mode \"Status\" -FixturePolicyPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json\" -FixtureEvidenceRoot \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\""
+          },
+          "startedAtUtc": "2026-08-09T12:32:04.9040052+00:00",
+          "completedAtUtc": "2026-08-09T12:32:05.2019668+00:00",
+          "exitStatus": "succeeded",
+          "exitCode": 0,
+          "result": {
+            "artifactType": "env-governance.codex-safe-tree-delete-status",
+            "schemaVersion": 1,
+            "capturedAtUtc": "2026-08-09T12:32:05.2018446+00:00",
+            "complete": false,
+            "policyPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\policy.json",
+            "policySha256": "d92b0b7d957006ac533f99c9f6348549b9f1ef1dbce2185ba31df04f7718e749",
+            "policySchemaVersion": 5,
+            "migrationReadiness": {
+              "evaluated": false,
+              "candidatePolicyPath": null,
+              "candidatePolicySha256": null,
+              "candidatePolicySchemaVersion": null,
+              "ready": false,
+              "blockingRecords": [
+                "20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553"
+              ]
+            },
+            "operations": [
+              {
+                "operationId": "20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553",
+                "runDirectory": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123159Z-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553",
+                "lifecycle": "manual-review",
+                "safeActions": [
+                  "manual-review"
+                ],
+                "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+                "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\.codex-safe-delete-d6d09ca9-c0ca-41e5-82fd-5ffc0af75553.quarantine",
+                "targetPresent": false,
+                "quarantinePresent": false,
+                "targetEntryType": "absent",
+                "quarantineEntryType": "absent",
+                "namespaceAbsent": true,
+                "logicalCompletion": false,
+                "physicalReclaimStatus": "unknown",
+                "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+                "deletionOutcome": {
+                  "schemaVersion": 1,
+                  "namespaceAbsent": true,
+                  "logicalCompletion": false,
+                  "physicalReclaimStatus": "unknown",
+                  "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+                },
+                "policyCompatible": true,
+                "schemaCompatible": true,
+                "candidatePolicyCompatible": null,
+                "planSchemaVersion": 1,
+                "transactionSchemaVersion": 3,
+                "transactionStatus": "restored",
+                "journalStatus": "none",
+                "errors": [
+                  "restored transaction 的 live namespace 不一致。"
+                ]
+              },
+              {
+                "operationId": "20260809T123203Z-78833887-c9c7-4255-8309-f8ecb7c49a56",
+                "runDirectory": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\evidence\\20260809T123203Z-78833887-c9c7-4255-8309-f8ecb7c49a56",
+                "lifecycle": "terminal",
+                "safeActions": [],
+                "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\build-output",
+                "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-benchmark-work-1edc1efb17274b7e98d06f8db5650ccc\\large\\.codex-safe-delete-78833887-c9c7-4255-8309-f8ecb7c49a56.quarantine",
+                "targetPresent": false,
+                "quarantinePresent": false,
+                "targetEntryType": "absent",
+                "quarantineEntryType": "absent",
+                "namespaceAbsent": true,
+                "logicalCompletion": true,
+                "physicalReclaimStatus": "unknown",
+                "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable",
+                "deletionOutcome": {
+                  "schemaVersion": 1,
+                  "namespaceAbsent": true,
+                  "logicalCompletion": true,
+                  "physicalReclaimStatus": "unknown",
+                  "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+                },
+                "policyCompatible": true,
+                "schemaCompatible": true,
+                "candidatePolicyCompatible": null,
+                "planSchemaVersion": 1,
+                "transactionSchemaVersion": 3,
+                "transactionStatus": "purged",
+                "journalStatus": "not-applicable",
+                "errors": []
+              }
+            ],
+            "metrics": {
+              "schemaVersion": 1,
+              "phase": "status",
+              "elapsedMs": 281,
+              "entriesScanned": 2,
+              "logicalBytes": 0,
+              "bytesHashed": 38025,
+              "retry": {
+                "contract": null,
+                "attempts": 0,
+                "result": "not-applicable",
+                "events": []
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

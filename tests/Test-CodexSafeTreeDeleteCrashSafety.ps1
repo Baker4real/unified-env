@@ -827,6 +827,8 @@ foreach ($scenario in $scenarios) {
             Assert-True `
                 ($purge.recoveredFromCommitJournal -eq $true) `
                 'pending crash 后缺失 quarantine 必须仅凭完整 commit journal 收尾'
+            Assert-True ($purge.metrics.schemaVersion -eq 1 -and $purge.metrics.phase -ceq 'purge') `
+                '缺失 quarantine 的 commit-journal 恢复也必须返回统一 Purge metrics'
         }
         $completed++
     } finally {

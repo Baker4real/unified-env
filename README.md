@@ -25,6 +25,7 @@ intent: 说明统一环境项目的能力、入口和当前治理边界
 - 已固化上游稳定 skill 约束并同步 Matt stable catalog：稳定目录与上游对齐，严格资源闭包和 ledger 一致性检查通过；活动数量、哈希和上游版本属于易变状态，操作前必须实时复核。`skills/in-progress/**` 不安装；用户明确退役的 skill 不保留本机备份。
 - Skill Catalog 的仓库源实现已落地：默认只读扫描 active、system 和 plugin-cache，来源以本机 ledger / `SOURCE.md` 为准；它不安装或更新 skill、不访问网络、不读取凭据、不注册 hook。实现位于 `modules/skill-supply-chain/implementation/generate_skill_catalog.py`，根入口 `scripts/generate_skill_catalog.py` 负责稳定路径适配；部署后的本机派生输出位于 `D:\Codex\.codex\skill-catalog\`；一次性运行证据按 run id 写入 `D:\Codex\.codex\run-evidence\`。
 - 功能钩子分层恢复的 path inventory/state policy、local-only preflight、Serena 行为 hooks、provider/GitHub 显式维护和 production/legacy manifest 分离均已有专项实现，并通过定向 fixture 回归。fixture 全量 reconciler 回归不依赖 live 配置所有者；获授权的 live Repair 与验收只通过当前 reconciler 和当前主机状态执行，不得从历史 evidence 推断或手工写入 Serena 配置或权限策略值。
+- 宿主递归目录删除只通过受管 `Status` / `Plan` / `Apply` / `Restore` / `Purge` 入口执行；仓库生产 policy 当前仍是 schema v4，v5 的隔离宽限期、producer fence 和完整 Restore 合同尚未激活。能力边界与迁移门见 `docs/specs/2026-07-24-safe-tree-delete-capability.md`。
 - Git 的唯一现役发布政策要求全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）只发布到用户拥有远端的 `main`。GitHub plugin overlay 已与该政策对齐并通过 live policy test；connector、PR 与 `gh` fallback 能力保留，commit/push/PR 仍只在当前任务明确授权后触发。临时分支只在事前确认后使用，历史 patch-stack 只报告、不自动创建或删除。
 
 ## 关键入口
@@ -39,6 +40,7 @@ intent: 说明统一环境项目的能力、入口和当前治理边界
 - Codex 主机钩子治理：`docs/specs/2026-07-11-host-hook-reconciliation-design.md`
 - Codex Hook 治理设计：`docs/specs/2026-07-11-codex-hook-governance-design.md`
 - 功能钩子分层恢复设计/计划：`docs/specs/2026-07-13-functional-hook-preflight-design.md`、`docs/plans/2026-07-13-functional-hook-preflight.md`
+- 受管安全树删除：`docs/specs/2026-07-24-safe-tree-delete-capability.md`
 - Git `main`-only 现役政策与历史 default-branch overlay：`docs/specs/2026-07-13-github-default-branch-skill-policy-design.md`、`docs/plans/2026-07-13-github-default-branch-skill-policy-implementation.md`
 - 现役 tracker/spec/tickets：GitHub Issues，约定见 `docs/agents/issue-tracker.md`；`.scratch/unified-env/` 保留为历史记录，不作为新事项模板。
 - 可信盘点设计：`docs/specs/2026-07-10-environment-inventory-trust-design.md`

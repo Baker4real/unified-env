@@ -110,6 +110,29 @@ Assert-True (-not [IO.Directory]::Exists($batchA)) 'live BatchPurge 后 batchA �
 Assert-True (-not [IO.Directory]::Exists($batchB)) 'live BatchPurge 后 batchB 不得存在'
 Assert-True (-not [IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) 'live BatchPurge 后 recoverable quarantine 不得存在'
 
+$batchParentPlan = Invoke-LiveSafeDeleteJson -Arguments @(
+    '-Mode', 'Plan',
+    '-TargetPath', $batchParent,
+    '-CapabilityRoot', $reportsRoot,
+    '-Json'
+)
+$batchParentApply = Invoke-LiveSafeDeleteJson -Arguments @(
+    '-Mode', 'Apply',
+    '-PlanPath', [string]$batchParentPlan.planPath,
+    '-ApprovedPlanSha256', [string]$batchParentPlan.planSha256,
+    '-ConfirmApply',
+    '-Json'
+)
+$batchParentPurge = Invoke-LiveSafeDeleteJson -Arguments @(
+    '-Mode', 'Purge',
+    '-TransactionPath', [string]$batchParentApply.transactionPath,
+    '-ApprovedTransactionSha256', [string]$batchParentApply.transactionSha256,
+    '-ConfirmPurge',
+    '-Json'
+)
+Assert-True ($batchParentPurge.purged -eq $true) 'live smoke 必须受管清理 batch 父目录'
+Assert-True (-not [IO.Directory]::Exists($batchParent)) 'live smoke 不得遗留新的 batch 父目录'
+
 [pscustomobject][ordered]@{
     ok = $true
     suite = 'CodexSafeTreeDeleteProductionSmoke'
@@ -117,4 +140,5 @@ Assert-True (-not [IO.Directory]::Exists([string]$batchPreApply.quarantinePath))
     transactionPath = [string]$purge.transactionPath
     transactionSha256 = [string]$purge.transactionSha256
     batchRecoveredCount = [int]$batch.recoveredCount
+    batchParentPurged = [bool]$batchParentPurge.purged
 }

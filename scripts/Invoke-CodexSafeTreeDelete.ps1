@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Plan', 'Apply', 'Purge', 'BatchPurge')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Plan', 'Apply', 'Purge', 'BatchPurge', 'Status', 'Restore')][string]$Mode,
     [string]$TargetPath,
     [string[]]$TargetPaths,
     [string]$CapabilityRoot,
@@ -10,6 +10,7 @@ param(
     [string]$TransactionPath,
     [string]$ApprovedTransactionSha256,
     [switch]$ConfirmPurge,
+    [switch]$ConfirmRestore,
     [switch]$Json
 )
 
@@ -34,6 +35,26 @@ $policyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
 $evidenceRoot = 'D:\Codex\.codex\run-evidence\safe-tree-delete'
 
 switch ($Mode) {
+    'Status' {
+        $result = Get-CodexSafeTreeDeleteStatus `
+            -PolicyPath $policyPath `
+            -EvidenceRoot $evidenceRoot
+    }
+    'Restore' {
+        if (-not $ConfirmRestore) {
+            $result = [pscustomobject][ordered]@{ restored = $false; refusalReason = 'confirm-restore-required' }
+            break
+        }
+        if ([string]::IsNullOrWhiteSpace($TransactionPath) -or
+            [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
+            throw 'Restore 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
+        }
+        $result = Invoke-CodexSafeTreeDeleteRestore `
+            -TransactionPath $TransactionPath `
+            -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
+            -PolicyPath $policyPath `
+            -EvidenceRoot $evidenceRoot
+    }
     'Plan' {
         if ([string]::IsNullOrWhiteSpace($TargetPath) -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
             throw 'Plan 模式要求 TargetPath 与 CapabilityRoot。'
@@ -70,7 +91,8 @@ switch ($Mode) {
             -TransactionPath $TransactionPath `
             -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
             -PolicyPath $policyPath `
-            -EvidenceRoot $evidenceRoot
+            -EvidenceRoot $evidenceRoot `
+            -ReturnFailureMetrics:$Json
     }
     'BatchPurge' {
         if (-not $ConfirmApply -or -not $ConfirmPurge) {
@@ -93,4 +115,11 @@ if ($Json) {
     $result | ConvertTo-Json -Depth 12 -Compress
 } else {
     $result
+}
+
+if ($Json -and
+    $null -ne $result -and
+    $result.PSObject.Properties.Name -contains 'refusalReason' -and
+    [string]$result.refusalReason -ceq 'leaf-delete-failed') {
+    exit 1
 }

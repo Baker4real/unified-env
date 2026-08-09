@@ -22,14 +22,20 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 - allowlist：`managed\safe-tree-delete\policy.json`
 - evidence：`D:\Codex\.codex\run-evidence\safe-tree-delete\<run-id>\`
 
+宿主 PowerShell wrapper 是仓库 `scripts\invoke-codex-safe-tree-delete-host.ps1` 的受管副本，
+直接转发到仓库生产脚本；因此仓库生产代码改动会进入宿主调用路径。wrapper hash 一致只证明
+adapter 未漂移，不代表新的 policy schema 已激活。真实目标操作前仍须核对当前 policy 与 `Status`。
+
 项目内 Codex 远程附件只允许以
 `D:\Codex\projects\统一环境\.codex-remote-attachments` 为 capability root 删除其后代，
 最小后代深度为 1；附件根本身和其他项目顶层目录不在该授权面内。
 
-policy schema v4 要求 `schemaVersion` 与 `minimumDescendantDepth` 都是真正的 JSON integer，
-不接受字符串或小数强转；解析器仍兼容 schema v3，旧条目继续严格拒绝链接树。v4 的
-`allowHardLinks` 与 `allowInternalDirectoryJunctions` 必须是 JSON boolean，缺失时为 `false`；
-任一为 `true` 时只允许 `minimumDescendantDepth=0`、
+解析器接受 policy schema v3、v4 与 v5；仓库当前生产 policy 仍是 v4，v5 激活尚未执行。
+不得用 v5 fixture、benchmark 或源码存在推断生产 policy 已迁移。`schemaVersion` 与
+`minimumDescendantDepth` 必须是真正的 JSON integer，不接受字符串或小数强转；v3 条目继续
+严格拒绝链接树。v4/v5 的 `allowHardLinks` 与 `allowInternalDirectoryJunctions` 必须是 JSON
+boolean；v4 缺失时为 `false`，v5 必须显式提供。任一为 `true` 时只允许
+`minimumDescendantDepth=0`、
 `rootDeletionPurpose=rebuildable-build-output`，且运行目标必须精确等于 capability root。
 `minimumDescendantDepth` 通常至少为 1，且
 `rootDeletionPurpose` 必须为 `none`。root 删除只允许三种精确用途：
@@ -69,24 +75,49 @@ capability root 内，绝不打开或遍历 target。外部、symlink、未知 t
 guard 仍拒绝 hardlink。两类专用 lease 都拒绝 share-write/share-delete 和非默认 ADS，删除前在同一
 句柄复验 identity 与内容或 reparse bytes，并仅 unlink 当前目录项。
 
+policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantineAgeMinutes` 与
+`producerFenceMode`。后者只接受 `manual-only` 或 `os-handle-required`：`manual-only` 仍允许逐笔、
+显式确认的控制面操作，但拒绝 `BatchPurge`；批量清理只对已经让生产者持有
+`New-CodexSafeTreeDeleteProducerLease` OS directory handle 的 `os-handle-required` capability 开放。
+活动或挂起的生产者会以 Windows handle sharing 语义阻止 Apply rename；生产者退出或崩溃后句柄
+由 OS 释放。这个 fence 只对实际接入 lease 的生产者成立，policy 字段本身不能证明所有 producer
+已接入。
+
 生产 CLI 不接受 policy 或 evidence override。测试替身仅位于 `tests\`，不得复制到宿主
 脚本目录或作为生产入口。
 
-## 状态机
+## 控制面与状态机
 
-1. `Plan`：规范化目标与 capability root，校验固定 allowlist、最小后代深度、denylist、
+1. `Status`：只读枚举 evidence run，重新验证 plan、transaction、当前 policy、目标与 quarantine
+   namespace、tree manifest 和 journal，逐项输出 `planned`、`recoverable`、`purge-resumable`、
+   `terminal` 或 `manual-review` 等 lifecycle 及允许的下一步。异常或不完整记录必须隔离为
+   `manual-review`，不能让单个坏记录掩盖其他健康记录。库内 candidate-policy preflight 只接受
+   v5 与精确 approved SHA-256；生产 CLI 不接受 policy override，迁移仍须走受管激活流程。
+2. `Plan`：规范化目标与 capability root，校验固定 allowlist、最小后代深度、denylist、
    root 删除用途、父链与完整子树；未授权 reparse point 一律拒绝，获准的内部 directory junction
    以 manifest schema v2 的不可遍历叶节点记录；`empty-project-state` 还会在发布计划前确认
    文件计数为零，并拒绝所有目录 NTFS named stream。通过后生成句柄绑定的文件 identity、
    SHA-256 和目录清单。
-2. `Apply`：要求 `ConfirmApply` 与精确 `ApprovedPlanSha256`；复算完整树清单无漂移后，
+3. `Apply`：要求 `ConfirmApply` 与精确 `ApprovedPlanSha256`；复算完整树清单无漂移后，
    并再次确认 `empty-project-state` 没有 named stream，才通过目录句柄原子改名到同父
-   `.codex-safe-delete-<generation>.quarantine`。此时可恢复。
-3. `Purge`：要求 `ConfirmPurge` 与精确 `ApprovedTransactionSha256`。`quarantined` transaction
+   `.codex-safe-delete-<generation>.quarantine`。此时可恢复。v5 Apply 生成 transaction schema v3，
+   并以 create-only `quarantine-time.json` 绑定 wall clock、单调 uptime 与 boot session；v3 transaction
+   允许 policy SHA 漂移后继续，但仍重新验证 policy path、entry id、target 与 tree policy，回退到 v4
+   必须进入 `manual-review`。v3 crash recovery 如果缺少时间锚，只能在 mutex 内复验完整 quarantine
+   后保守创建新锚，宽限期从该点重新起算。
+4. `Restore`：要求 `ConfirmRestore`、精确 transaction path 与 approved SHA-256，只恢复尚未发生
+   directory commit 的完整 v5 quarantine。它在目标 mutex 内复验 policy、identity 与完整 manifest，
+   用 create-only intent、renamed、verified、complete journals 记录原子 rename 回原路径，并发布
+   `restored` terminal transaction；中断重放必须幂等。`purging`、`purged`、`rolled-back`、部分删除、
+   target 冲突或树漂移均拒绝恢复。
+5. `Purge`：要求 `ConfirmPurge` 与精确 `ApprovedTransactionSha256`。`quarantined` transaction
    必须再次匹配完整计划清单；如果进程在发布 `purging` 后中断，则允许从 quarantine 中不超出
    原计划的节点子集恢复。恢复时 quarantine root identity 必须不变，仍存在节点的相对路径、kind、
    SHA-256 和 file identity 必须与原计划一致；只允许原计划节点缺失。`empty-project-state`
-   的 quarantine 仍须再次通过 named stream 检查。最终删除每个目录时，先发布绑定 generation、
+   的 quarantine 仍须再次通过 named stream 检查。v3 还必须证明 `minimumQuarantineAgeMinutes`
+   已满足：boot session 变化、wall clock 回退、单调时间回退或 wall/monotonic 异常漂移均进入
+   `manual-review`，不能从 transaction mtime 或 `updatedAtUtc` 推导隔离时长。最终删除每个目录时，
+   先发布绑定 generation、
    relative path 和 file identity 的不可变 `freeze-prepared` journal，再在目录 DACL 首位加入对
    `Everyone` 的 `FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES`
    deny。实现必须读回实际 SDDL，并用原生新 ADS open 得到 `ERROR_ACCESS_DENIED` 来证明冻结真实
@@ -100,12 +131,12 @@ guard 仍拒绝 hardlink。两类专用 lease 都拒绝 share-write/share-delete
    使用 protected/unprotected security-information 标志；切换到 protected 后，只允许 Windows 将
    inherited ACE 实体化为 explicit ACE 这一已知规范化差异，其他 Owner/Group/DACL 回读漂移仍失败闭锁。
 
-   `Apply` 与 `Purge` 都在目标 mutex 内重新读取并复验当前 capability、树和 transaction，才允许
-   写入 `prepared`、`purging`、commit anchor 或 `purged`。等待锁期间 capability 已变更时必须在
+   `Apply`、`Restore` 与 `Purge` 都在目标 mutex 内重新读取并复验当前 capability、树和 transaction，
+   才允许写入 `prepared`、`quarantined`、`purging`、commit anchor、`restored` 或 `purged`。等待锁期间 capability 已变更时必须在
    写入前拒绝，不能用过期内存快照把已隔离或已完成 transaction 降级。
 
    journal 使用 create-only 原子发布：同一路径的第二次发布必须失败且不得改变原始 bytes 或 file
-   identity。每个 `commit-authorized` 还必须在进入 delete-pending 前，由 transaction schema v2
+   identity。每个 `commit-authorized` 还必须在进入 delete-pending 前，由对应 transaction schema
    持久锚定 operation、目录 identity、freeze/commit 的精确路径、SHA-256 和 file identity。commit
    引用的 freeze 与 applied SDDL 必须可解析，并证明 requested SDDL 是原始 DACL 的首位有效 deny
    形态、applied SDDL 与其等价。`commit-authorized` 是删除线性化点：普通的 commit 前失败恢复首份
@@ -126,6 +157,8 @@ guard 仍拒绝 hardlink。两类专用 lease 都拒绝 share-write/share-delete
 `OrdinalIgnoreCase` 实现 Windows 路径大小写不敏感语义，但不做 Unicode 规范化；路径大小写变化不得
 绕过或遗漏既有 transaction，NFC/NFD 等不同 UTF-16 路径也不得误配。通过 `.cmd` wrapper 调用时，
 `TargetPaths` 使用单个 `::` 分隔字符串传入，避免 `cmd.exe` 把分隔符解释成管道或命令控制符。
+policy v5 下，`BatchPurge` 还要求 capability 的 `producerFenceMode=os-handle-required`；
+`manual-only` 条目必须逐笔处理。
 
 计划 30 分钟过期。缺少确认、哈希不匹配、policy 漂移、目标重新出现、目录内容或 identity
 漂移、恢复时出现未计划节点或既有节点的 kind/SHA-256/file identity/root identity 漂移、
@@ -135,6 +168,24 @@ DACL 冻结覆盖当前 NTFS 上遵守访问检查的普通新 ADS/子项创建�
 保留。它不撤销 freeze 前已授予的句柄权限，也不声称约束 `WRITE_DAC`/`WRITE_OWNER`、父目录
 `FILE_DELETE_CHILD`、`SeRestorePrivilege`、备份 API、内核驱动或突然断电后的介质落盘顺序；
 最后的 handle-bound identity、empty 和 stream 复验用于在这些边界发生可观察漂移时失败关闭。
+
+## 结果与可观测性
+
+`Plan`、`Status`、`Apply`、`Restore` 与 `Purge` 都返回 metrics schema v1：phase、elapsed milliseconds、
+scanned entries、logical bytes、hashed bytes 以及版本化 retry 记录。leaf delete 只对 allowlist 中的
+sharing violation、lock violation 与 busy 做有界重试；生产合同最多 3 次 attempt、总预算 1000 ms，
+退避为 10/25 ms。每次重试前仍须复验 handle identity 与内容，access denied、未知错误、identity/hash
+漂移和 policy 扩张不得进入 retry；JSON `leaf-delete-failed` 以非零退出码返回结构化 metrics。
+
+Purge/Status 的 `deletionOutcome` 必须分开表达 namespace 与存储事实：`namespaceAbsent=true` 和
+`logicalCompletion=true` 只证明受管名称空间删除完成。没有独立文件系统 allocation 证据时，
+`physicalReclaimStatus` 固定为 `unknown`；外部 hardlink、开放句柄、delete-pending 或 image mapping
+场景都不得据此宣称物理空间已回收。`logicalBytes` 是 manifest 名称项口径，也不是物理占用。
+
+`reports/safe-tree-delete-benchmark-20260809.json` 与
+`reports/safe-tree-delete-metrics-evidence-20260809.json` 是 fixture 快照，不是生产激活凭证。当前证据
+对 hash reuse 的结论为 `do-not-open-with-current-evidence`：不得用 benchmark 结果放宽逐字节内容认证、
+改成 metadata-only approval，或透明替换 manifest。
 
 ## 上游边界
 

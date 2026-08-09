@@ -277,7 +277,12 @@
           "modules/host-safety/lib/EnvPathSafety.ps1",
           "modules/host-safety/lib/ReportArtifactPublisher.ps1",
           "modules/host-safety/lib/TrustedReportInput.ps1",
+          "reports/safe-tree-delete-benchmark-20260809.json",
+          "reports/safe-tree-delete-benchmark-20260809-evidence/benchmark-evidence.json",
+          "reports/safe-tree-delete-metrics-evidence-20260809-evidence/benchmark-evidence.json",
+          "reports/safe-tree-delete-metrics-evidence-20260809.json",
           "reports/safe-tree-delete-optimization-research-20260809.md",
+          "scripts/Measure-CodexSafeTreeDelete.ps1",
           "scripts/lib/CodexHookHandleBoundIO.cs",
           "scripts/lib/CodexHostSafety.ps1",
           "scripts/lib/CodexSafeTreeDelete.ps1",
@@ -288,7 +293,16 @@
           "tests/Invoke-CodexSafeTreeDeleteFixture.ps1",
           "tests/Invoke-CodexSafeTreeDeleteApplyCrashFixture.ps1",
           "tests/Invoke-CodexSafeTreeDeleteCrashFixture.ps1",
-          "tests/Test-CodexSafeTreeDeleteCrashSafety.ps1"
+          "tests/Invoke-CodexSafeTreeDeleteRestoreCrashFixture.ps1",
+          "tests/Open-CodexSafeTreeDeleteProducerLeaseFixture.ps1",
+          "tests/Test-CodexSafeTreeDeleteBenchmark.ps1",
+          "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
+          "tests/Test-CodexSafeTreeDeleteCrashSafety.ps1",
+          "tests/Test-CodexSafeTreeDeleteGrace.ps1",
+          "tests/Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
+          "tests/Test-CodexSafeTreeDeleteRestore.ps1",
+          "tests/Test-CodexSafeTreeDeleteSchemaCompatibility.ps1",
+          "tests/Test-CodexSafeTreeDeleteStatus.ps1"
         ],
         "prefixes": [
           "managed/safe-tree-delete/"
@@ -298,7 +312,14 @@
         "fixture": {
           "powershell": [
             "tests/Test-CodexSafeTreeDelete.ps1",
+            "tests/Test-CodexSafeTreeDeleteBenchmark.ps1",
+            "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
             "tests/Test-CodexSafeTreeDeleteCrashSafety.ps1",
+            "tests/Test-CodexSafeTreeDeleteGrace.ps1",
+            "tests/Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
+            "tests/Test-CodexSafeTreeDeleteRestore.ps1",
+            "tests/Test-CodexSafeTreeDeleteSchemaCompatibility.ps1",
+            "tests/Test-CodexSafeTreeDeleteStatus.ps1",
             "tests/Test-CodexUserEnvironmentTransaction.ps1",
             "tests/Test-ReportArtifactPublisher.ps1"
           ],

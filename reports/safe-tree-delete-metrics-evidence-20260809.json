@@ -1,0 +1,292 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-benchmark",
+  "schemaVersion": 2,
+  "capturedAtUtc": "2026-08-09T12:31:34.4541896+00:00",
+  "profile": "isolated-fixture",
+  "machine": {
+    "osVersion": "Microsoft Windows NT 10.0.26200.0",
+    "processorCount": 20,
+    "powerShellVersion": "7.6.4",
+    "osArchitecture": "X64",
+    "processArchitecture": "X64"
+  },
+  "artifacts": {
+    "sourceLibraryPath": "D:\\Codex\\projects\\统一环境\\scripts\\lib\\CodexSafeTreeDelete.ps1",
+    "sourceLibrarySha256": "74ecec3b9ab6d68911db6d47314f35e172006fb2f54f915a97457c1c0f8b0096",
+    "sourceWrapperPath": "D:\\Codex\\projects\\统一环境\\scripts\\Invoke-CodexSafeTreeDelete.ps1",
+    "sourceWrapperSha256": "76769af8ad7fd2caa65047751f450d4f3bebdb9962f1696872cdd933127621a1",
+    "sourceHostAdapterPath": "D:\\Codex\\projects\\统一环境\\scripts\\invoke-codex-safe-tree-delete-host.ps1",
+    "sourceHostAdapterSha256": "d3155a23184e531aa8f8c5e981eeea98ce3f4d4ddfc649773e7f830e7cba2772",
+    "liveWrapperPath": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1",
+    "liveWrapperSha256": "d3155a23184e531aa8f8c5e981eeea98ce3f4d4ddfc649773e7f830e7cba2772",
+    "liveWrapperStatus": "matched-source"
+  },
+  "execution": {
+    "command": "pwsh -NoLogo -NoProfile -File \"D:\\Codex\\projects\\统一环境\\scripts\\Measure-CodexSafeTreeDelete.ps1\" -OutputPath \"D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-metrics-evidence-20260809.json\" -SmallDatasetBytes 4096 -LargeDatasetBytes 8192",
+    "exitCode": 0,
+    "exitStatus": "succeeded",
+    "cleanup": "managed-fixture-tree-removed"
+  },
+  "retainedEvidence": {
+    "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-metrics-evidence-20260809-evidence\\benchmark-evidence.json",
+    "sha256": "cae78a1027a20685fc72d35c8a9a8ee664d0ad2aa9b76d345368ebcd66c57450",
+    "payloadBytesRetained": false
+  },
+  "datasets": [
+    {
+      "name": "small",
+      "payloadBytes": 4096,
+      "policySha256": "19cd96d852ab38b2863f90e4dde752a6174a9eb7ef39cad3b98636cfb6e86df8",
+      "fixture": {
+        "directoryCount": 4,
+        "fileCount": 4,
+        "logicalBytes": 4096
+      },
+      "plan": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "plan",
+          "elapsedMs": 520,
+          "entriesScanned": 8,
+          "logicalBytes": 4096,
+          "bytesHashed": 7705,
+          "retry": {
+            "contract": null,
+            "attempts": 0,
+            "result": "not-applicable",
+            "events": []
+          }
+        },
+        "planSha256": "bec688da7c84578755a6f1978d49b0d97a7d98b91261b3ced5b7d925030128d9"
+      },
+      "status": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "status",
+          "elapsedMs": 353,
+          "entriesScanned": 9,
+          "logicalBytes": 4096,
+          "bytesHashed": 18761,
+          "retry": {
+            "contract": null,
+            "attempts": 0,
+            "result": "not-applicable",
+            "events": []
+          }
+        },
+        "plannedLifecycle": "planned",
+        "recoverableLifecycle": "recoverable",
+        "terminalComplete": false
+      },
+      "apply": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "apply",
+          "elapsedMs": 894,
+          "entriesScanned": 24,
+          "logicalBytes": 4096,
+          "bytesHashed": 17322,
+          "retry": {
+            "contract": null,
+            "attempts": 0,
+            "result": "not-applicable",
+            "events": []
+          }
+        },
+        "transactionSha256": "810fa2189213008c78162372572f87d13cce13e0ba8d6822fd8d24662c548331"
+      },
+      "restore": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "restore",
+          "elapsedMs": 1116,
+          "entriesScanned": 16,
+          "logicalBytes": 4096,
+          "bytesHashed": 29326,
+          "retry": {
+            "contract": null,
+            "attempts": 0,
+            "result": "not-applicable",
+            "events": []
+          }
+        },
+        "logicalCompletion": false
+      },
+      "purge": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "purge",
+          "elapsedMs": 715,
+          "entriesScanned": 8,
+          "logicalBytes": 4096,
+          "bytesHashed": 26740,
+          "retry": {
+            "contract": {
+              "schemaVersion": 1,
+              "maxAttempts": 3,
+              "wallTimeBudgetMs": 1000,
+              "delayMilliseconds": [
+                10,
+                25
+              ],
+              "allowedErrorCategories": [
+                "sharing-violation",
+                "lock-violation",
+                "busy"
+              ]
+            },
+            "attempts": 0,
+            "result": "not-needed",
+            "events": []
+          }
+        },
+        "deletionOutcome": {
+          "schemaVersion": 1,
+          "namespaceAbsent": true,
+          "logicalCompletion": true,
+          "physicalReclaimStatus": "unknown",
+          "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+        },
+        "transactionSha256": "9a19a3d7205b72c737d231bcae4384e3fe49d4c393bc5bfe01712a27f0b4be56"
+      },
+      "retainedEvidence": {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-metrics-evidence-20260809-evidence\\benchmark-evidence.json",
+        "datasetName": "small"
+      }
+    },
+    {
+      "name": "large",
+      "payloadBytes": 8192,
+      "policySha256": "4bd8e84544d85c2c115c9f53589d22cd1496c9c7d34c024ab3526a048b560377",
+      "fixture": {
+        "directoryCount": 4,
+        "fileCount": 4,
+        "logicalBytes": 8192
+      },
+      "plan": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "plan",
+          "elapsedMs": 260,
+          "entriesScanned": 8,
+          "logicalBytes": 8192,
+          "bytesHashed": 11801,
+          "retry": {
+            "contract": null,
+            "attempts": 0,
+            "result": "not-applicable",
+            "events": []
+          }
+        },
+        "planSha256": "991896b5f4a7840d015fa7edf1717ef6caaef0ef3e1fb10a66e6ab13bbe8add5"
+      },
+      "status": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "status",
+          "elapsedMs": 287,
+          "entriesScanned": 9,
+          "logicalBytes": 8192,
+          "bytesHashed": 22857,
+          "retry": {
+            "contract": null,
+            "attempts": 0,
+            "result": "not-applicable",
+            "events": []
+          }
+        },
+        "plannedLifecycle": "planned",
+        "recoverableLifecycle": "recoverable",
+        "terminalComplete": false
+      },
+      "apply": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "apply",
+          "elapsedMs": 700,
+          "entriesScanned": 24,
+          "logicalBytes": 8192,
+          "bytesHashed": 29610,
+          "retry": {
+            "contract": null,
+            "attempts": 0,
+            "result": "not-applicable",
+            "events": []
+          }
+        },
+        "transactionSha256": "c46d3a05b2e49b6f4d7be1be70ed324d54b6fc69c0985152abf87de352f130d3"
+      },
+      "restore": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "restore",
+          "elapsedMs": 826,
+          "entriesScanned": 16,
+          "logicalBytes": 8192,
+          "bytesHashed": 37518,
+          "retry": {
+            "contract": null,
+            "attempts": 0,
+            "result": "not-applicable",
+            "events": []
+          }
+        },
+        "logicalCompletion": false
+      },
+      "purge": {
+        "metrics": {
+          "schemaVersion": 1,
+          "phase": "purge",
+          "elapsedMs": 546,
+          "entriesScanned": 8,
+          "logicalBytes": 8192,
+          "bytesHashed": 39028,
+          "retry": {
+            "contract": {
+              "schemaVersion": 1,
+              "maxAttempts": 3,
+              "wallTimeBudgetMs": 1000,
+              "delayMilliseconds": [
+                10,
+                25
+              ],
+              "allowedErrorCategories": [
+                "sharing-violation",
+                "lock-violation",
+                "busy"
+              ]
+            },
+            "attempts": 0,
+            "result": "not-needed",
+            "events": []
+          }
+        },
+        "deletionOutcome": {
+          "schemaVersion": 1,
+          "namespaceAbsent": true,
+          "logicalCompletion": true,
+          "physicalReclaimStatus": "unknown",
+          "physicalReclaimReason": "independent-filesystem-allocation-evidence-unavailable"
+        },
+        "transactionSha256": "14e78bbd3a90d6cf4ac595bd5b128f49e68dd1c281cdba28f0939582d158c940"
+      },
+      "retainedEvidence": {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-metrics-evidence-20260809-evidence\\benchmark-evidence.json",
+        "datasetName": "large"
+      }
+    }
+  ],
+  "conclusion": {
+    "hashReuseDesignRecommendation": "insufficient-evidence",
+    "hashReuseDesignDecision": "do-not-open-with-current-evidence",
+    "contentAuthenticatedContractChanged": false,
+    "note": "Fixture measurements do not authorize metadata-only approval or transparent manifest replacement."
+  },
+  "unverified": [
+    "host wrapper deployment",
+    "live policy activation",
+    "real capability target deletion",
+    "16 GiB dataset",
+    "independent physical allocation evidence"
+  ]
+}
