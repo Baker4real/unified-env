@@ -277,6 +277,7 @@
           "modules/host-safety/lib/EnvPathSafety.ps1",
           "modules/host-safety/lib/ReportArtifactPublisher.ps1",
           "modules/host-safety/lib/TrustedReportInput.ps1",
+          "reports/safe-tree-delete-optimization-research-20260809.md",
           "scripts/lib/CodexHookHandleBoundIO.cs",
           "scripts/lib/CodexHostSafety.ps1",
           "scripts/lib/CodexSafeTreeDelete.ps1",
