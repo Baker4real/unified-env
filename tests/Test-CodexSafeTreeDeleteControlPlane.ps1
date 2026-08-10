@@ -21,6 +21,9 @@ $producerProcess = $null
 $crashedProducerProcess = $null
 $lateProducerProcess = $null
 $retryCrashProcess = $null
+$batchFailureHardLinkPath = $null
+$batchFailureHardLinkAliasPath = $null
+$batchPurgeMappedImageProbe = $null
 
 . $hostSafetyLibraryPath
 
@@ -823,6 +826,458 @@ try {
             ($afterStatus | ConvertTo-Json -Depth 8 -Compress))) `
         'Status 不得改变 fixture 中任何文件 bytes'
 
+    $archiveEvidenceRoot = Join-Path $fixtureRoot 'archive-evidence'
+    $archiveTarget = Join-Path $fixtureRoot 'archive-candidate'
+    [void][IO.Directory]::CreateDirectory($archiveTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $archiveTarget 'payload.txt'),
+        'archive-terminal-v1',
+        [Text.UTF8Encoding]::new($false))
+    $archivePlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $archiveTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $archiveApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$archivePlan.planPath) `
+        -ApprovedPlanSha256 ([string]$archivePlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $archivePurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$archiveApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$archiveApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $archiveV2Transaction = Get-Content -Raw -LiteralPath $archivePurge.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $archiveV1Transaction = [pscustomobject][ordered]@{
+        artifactType = [string]$archiveV2Transaction.artifactType
+        schemaVersion = 1L
+        generationId = [string]$archiveV2Transaction.generationId
+        planPath = [string]$archiveV2Transaction.planPath
+        planSha256 = [string]$archiveV2Transaction.planSha256
+        targetPath = [string]$archiveV2Transaction.targetPath
+        quarantinePath = [string]$archiveV2Transaction.quarantinePath
+        status = [string]$archiveV2Transaction.status
+        updatedAtUtc = [string]$archiveV2Transaction.updatedAtUtc
+    }
+    [IO.File]::WriteAllText(
+        $archivePurge.transactionPath,
+        ($archiveV1Transaction | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $archiveTransactionSha256 =
+        (Get-FileHash -LiteralPath $archivePurge.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $archiveRunDirectory = Split-Path -Parent ([string]$archivePurge.transactionPath)
+    $archiveOperationId = Split-Path -Leaf $archiveRunDirectory
+    $beforeArchiveFiles = @(Get-FixtureFileState -Root $archiveRunDirectory)
+    $beforeArchiveStatus = & $entryPath `
+        -Mode Status `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    Assert-True ($archiveOperationId -cin @($beforeArchiveStatus.migrationReadiness.blockingRecords)) `
+        '未归档的 terminal v1 transaction 必须继续阻断 Status'
+
+    $unconfirmedArchive = & $entryPath `
+        -Mode Archive `
+        -TransactionPath ([string]$archivePurge.transactionPath) `
+        -ApprovedTransactionSha256 $archiveTransactionSha256 `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    Assert-True (-not $unconfirmedArchive.archived -and
+        [string]$unconfirmedArchive.refusalReason -ceq 'confirm-archive-required') `
+        'Archive 缺少显式确认必须以稳定结构化原因拒绝'
+    Assert-True (
+        (($beforeArchiveFiles | ConvertTo-Json -Depth 16 -Compress) -ceq
+            ((Get-FixtureFileState -Root $archiveRunDirectory) |
+                ConvertTo-Json -Depth 16 -Compress))) `
+        'Archive 确认拒绝必须保持 operation run 零写入'
+
+    $archive = & $entryPath `
+        -Mode Archive `
+        -TransactionPath ([string]$archivePurge.transactionPath) `
+        -ApprovedTransactionSha256 $archiveTransactionSha256 `
+        -ConfirmArchive `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $archiveMarkerPath = Join-Path $archiveRunDirectory 'terminal-archive.json'
+    Assert-True ($archive.archived -eq $true -and -not $archive.alreadyArchived) `
+        '已验证 terminal v1 transaction 必须可受管归档'
+    Assert-True ([string]$archive.archivePath -ceq $archiveMarkerPath -and
+        [IO.File]::Exists($archiveMarkerPath)) `
+        'Archive 必须在 operation run 内发布固定 create-only marker'
+    $archiveDocument = Get-Content -Raw -LiteralPath $archiveMarkerPath |
+        ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
+    $archiveTime = [datetimeoffset]::MinValue
+    Assert-True ($archiveDocument.artifactType -ceq
+        'env-governance.codex-safe-tree-delete-terminal-archive' -and
+        $archiveDocument.schemaVersion -eq 1L -and
+        [datetimeoffset]::TryParseExact(
+            [string]$archiveDocument.archivedAtUtc,
+            'o',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind,
+            [ref]$archiveTime)) `
+        'Archive marker 必须使用稳定 schema 并记录可追溯归档时点'
+    $afterArchiveFiles = @(Get-FixtureFileState -Root $archiveRunDirectory)
+    Assert-True ($afterArchiveFiles.Count -eq ($beforeArchiveFiles.Count + 1)) `
+        'Archive 只允许新增一份 marker，不得删除 evidence'
+    foreach ($beforeArchiveFile in $beforeArchiveFiles) {
+        $afterArchiveFile = @($afterArchiveFiles | Where-Object {
+            [string]$_.relativePath -ceq [string]$beforeArchiveFile.relativePath
+        })
+        Assert-True ($afterArchiveFile.Count -eq 1 -and
+            [string]$afterArchiveFile[0].sha256 -ceq [string]$beforeArchiveFile.sha256 -and
+            ((@($afterArchiveFile[0].identity) -join '|') -ceq
+                (@($beforeArchiveFile.identity) -join '|'))) `
+            "Archive 不得改写或删除既有 evidence：$($beforeArchiveFile.relativePath)"
+    }
+    $afterArchiveStatus = & $entryPath `
+        -Mode Status `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $archivedOperation = @($afterArchiveStatus.operations | Where-Object operationId -ceq $archiveOperationId)
+    Assert-True ($afterArchiveStatus.complete -eq $true -and
+        $archivedOperation.Count -eq 1 -and
+        $archivedOperation[0].lifecycle -ceq 'terminal' -and
+        $archiveOperationId -cnotin @($afterArchiveStatus.migrationReadiness.blockingRecords)) `
+        'Status 必须认证 Archive marker 后让 operation 退出 blockingRecords'
+    Assert-MetricsContract -Metrics $archive.metrics -Phase 'archive'
+
+    $archiveCandidatePolicyPath = Join-Path $fixtureRoot 'archive-policy-v5-candidate.json'
+    $archiveCandidatePolicy = $policy | ConvertTo-Json -Depth 16 |
+        ConvertFrom-Json -Depth 16 -DateKind String -ErrorAction Stop
+    $archiveCandidatePolicy.schemaVersion = 5L
+    $archiveCandidatePolicy.entries[0] | Add-Member `
+        -NotePropertyName minimumQuarantineAgeMinutes -NotePropertyValue 0L
+    $archiveCandidatePolicy.entries[0] | Add-Member `
+        -NotePropertyName producerFenceMode -NotePropertyValue 'manual-only'
+    [IO.File]::WriteAllText(
+        $archiveCandidatePolicyPath,
+        ($archiveCandidatePolicy | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $archiveCandidatePolicySha256 =
+        (Get-FileHash -LiteralPath $archiveCandidatePolicyPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $archiveMigrationStatus = & $entryPath `
+        -Mode Status `
+        -FixtureCandidatePolicyPath $archiveCandidatePolicyPath `
+        -FixtureApprovedCandidatePolicySha256 $archiveCandidatePolicySha256 `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    Assert-True ($archiveMigrationStatus.migrationReadiness.evaluated -eq $true -and
+        $archiveMigrationStatus.migrationReadiness.ready -eq $true -and
+        @($archiveMigrationStatus.migrationReadiness.blockingRecords).Count -eq 0) `
+        '已归档 terminal v1 operation 不得阻断 candidate v5 migration readiness'
+
+    $archiveMarkerBeforeReplay = Get-CodexHookCapabilityFileSnapshot `
+        -Path $archiveMarkerPath `
+        -CapabilityRoot $archiveRunDirectory `
+        -AllowedExactPaths @($archiveMarkerPath) `
+        -Name 'safe-delete Archive replay marker before'
+    $archiveReplay = & $entryPath `
+        -Mode Archive `
+        -TransactionPath ([string]$archivePurge.transactionPath) `
+        -ApprovedTransactionSha256 $archiveTransactionSha256 `
+        -ConfirmArchive `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $archiveMarkerAfterReplay = Get-CodexHookCapabilityFileSnapshot `
+        -Path $archiveMarkerPath `
+        -CapabilityRoot $archiveRunDirectory `
+        -AllowedExactPaths @($archiveMarkerPath) `
+        -Name 'safe-delete Archive replay marker after'
+    Assert-True ($archiveReplay.archived -eq $true -and $archiveReplay.alreadyArchived -eq $true) `
+        '重复 Archive 必须报告已归档并保持幂等'
+    Assert-True ([string]$archiveMarkerAfterReplay.sha256 -ceq
+        [string]$archiveMarkerBeforeReplay.sha256 -and
+        ((@($archiveMarkerAfterReplay.identity) -join '|') -ceq
+            (@($archiveMarkerBeforeReplay.identity) -join '|'))) `
+        '重复 Archive 不得改变 create-only marker bytes 或 file identity'
+
+    $archiveMarkerBytes = [IO.File]::ReadAllBytes($archiveMarkerPath)
+    $forgedArchiveDocument = Get-Content -Raw -LiteralPath $archiveMarkerPath |
+        ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
+    $forgedArchiveDocument.transactionSha256 = '0' * 64
+    [IO.File]::WriteAllText(
+        $archiveMarkerPath,
+        ($forgedArchiveDocument | ConvertTo-Json -Depth 32),
+        [Text.UTF8Encoding]::new($false))
+    $forgedArchiveStatus = & $entryPath `
+        -Mode Status `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $forgedArchiveOperation = @($forgedArchiveStatus.operations |
+        Where-Object operationId -ceq $archiveOperationId)
+    Assert-True (-not $forgedArchiveStatus.complete -and
+        $forgedArchiveOperation.Count -eq 1 -and
+        $forgedArchiveOperation[0].lifecycle -ceq 'manual-review' -and
+        $archiveOperationId -cin @($forgedArchiveStatus.migrationReadiness.blockingRecords)) `
+        'Status 不得把伪造 transaction SHA 的 marker 当成可信 terminal 认证'
+    [IO.File]::WriteAllBytes($archiveMarkerPath, $archiveMarkerBytes)
+    $restoredArchiveMarker = Get-CodexHookCapabilityFileSnapshot `
+        -Path $archiveMarkerPath `
+        -CapabilityRoot $archiveRunDirectory `
+        -AllowedExactPaths @($archiveMarkerPath) `
+        -Name 'safe-delete Archive marker restored after forgery test'
+    Assert-True ([string]$restoredArchiveMarker.sha256 -ceq
+        [string]$archiveMarkerBeforeReplay.sha256 -and
+        ((@($restoredArchiveMarker.identity) -join '|') -ceq
+            (@($archiveMarkerBeforeReplay.identity) -join '|'))) `
+        '伪造 marker fixture 恢复必须保留原始 bytes 与 identity'
+
+    $archivedTransactionBytes = [IO.File]::ReadAllBytes([string]$archivePurge.transactionPath)
+    $archivedTransactionBeforeReplacement = Get-CodexHookCapabilityFileSnapshot `
+        -Path ([string]$archivePurge.transactionPath) `
+        -CapabilityRoot $archiveRunDirectory `
+        -AllowedExactPaths @([string]$archivePurge.transactionPath) `
+        -Name 'safe-delete archived transaction before identity replacement'
+    [IO.File]::Delete([string]$archivePurge.transactionPath)
+    [IO.File]::WriteAllBytes([string]$archivePurge.transactionPath, $archivedTransactionBytes)
+    $archivedTransactionAfterReplacement = Get-CodexHookCapabilityFileSnapshot `
+        -Path ([string]$archivePurge.transactionPath) `
+        -CapabilityRoot $archiveRunDirectory `
+        -AllowedExactPaths @([string]$archivePurge.transactionPath) `
+        -Name 'safe-delete archived transaction after identity replacement'
+    Assert-True ([string]$archivedTransactionAfterReplacement.sha256 -ceq
+        [string]$archivedTransactionBeforeReplacement.sha256 -and
+        ((@($archivedTransactionAfterReplacement.identity) -join '|') -cne
+            (@($archivedTransactionBeforeReplacement.identity) -join '|'))) `
+        'identity replacement fixture 必须保持 transaction bytes 但更换 file identity'
+    $identityDriftStatus = & $entryPath `
+        -Mode Status `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $identityDriftOperation = @($identityDriftStatus.operations |
+        Where-Object operationId -ceq $archiveOperationId)
+    Assert-True (-not $identityDriftStatus.complete -and
+        $identityDriftOperation.Count -eq 1 -and
+        $identityDriftOperation[0].lifecycle -ceq 'manual-review' -and
+        (($identityDriftOperation[0].errors -join ' ') -match 'identity')) `
+        'Status 必须拒绝 bytes 相同但 transaction file identity 已替换的 Archive marker'
+
+    $archiveRefusalTarget = Join-Path $fixtureRoot 'archive-refusal-candidate'
+    [void][IO.Directory]::CreateDirectory($archiveRefusalTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $archiveRefusalTarget 'payload.txt'),
+        'archive-refusal-v1',
+        [Text.UTF8Encoding]::new($false))
+    $archiveRefusalPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $archiveRefusalTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $archiveRefusalApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$archiveRefusalPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$archiveRefusalPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $archiveRefusalV2 = Get-Content -Raw -LiteralPath $archiveRefusalApply.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $archiveRefusalV1 = [pscustomobject][ordered]@{
+        artifactType = [string]$archiveRefusalV2.artifactType
+        schemaVersion = 1L
+        generationId = [string]$archiveRefusalV2.generationId
+        planPath = [string]$archiveRefusalV2.planPath
+        planSha256 = [string]$archiveRefusalV2.planSha256
+        targetPath = [string]$archiveRefusalV2.targetPath
+        quarantinePath = [string]$archiveRefusalV2.quarantinePath
+        status = [string]$archiveRefusalV2.status
+        updatedAtUtc = [string]$archiveRefusalV2.updatedAtUtc
+    }
+    $archiveRefusalRunDirectory = Split-Path -Parent ([string]$archiveRefusalApply.transactionPath)
+    $archiveRefusalMarkerPath = Join-Path $archiveRefusalRunDirectory 'terminal-archive.json'
+    foreach ($nonTerminalStatus in @(
+            'prepared', 'quarantined', 'purging', 'restored', 'rolled-back')) {
+        $archiveRefusalV1.status = $nonTerminalStatus
+        [IO.File]::WriteAllText(
+            $archiveRefusalApply.transactionPath,
+            ($archiveRefusalV1 | ConvertTo-Json -Depth 16),
+            [Text.UTF8Encoding]::new($false))
+        $nonTerminalSha256 =
+            (Get-FileHash -LiteralPath $archiveRefusalApply.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $beforeNonTerminalArchive = @(Get-FixtureFileState -Root $archiveRefusalRunDirectory)
+        $nonTerminalArchive = & $entryPath `
+            -Mode Archive `
+            -TransactionPath ([string]$archiveRefusalApply.transactionPath) `
+            -ApprovedTransactionSha256 $nonTerminalSha256 `
+            -ConfirmArchive `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $archiveEvidenceRoot
+        Assert-True (-not $nonTerminalArchive.archived -and
+            [string]$nonTerminalArchive.refusalReason -ceq 'transaction-status-not-purged') `
+            "Archive 必须以稳定原因拒绝 v1 $nonTerminalStatus transaction"
+        Assert-True (
+            (($beforeNonTerminalArchive | ConvertTo-Json -Depth 16 -Compress) -ceq
+                ((Get-FixtureFileState -Root $archiveRefusalRunDirectory) |
+                    ConvertTo-Json -Depth 16 -Compress)) -and
+            -not [IO.File]::Exists($archiveRefusalMarkerPath)) `
+            "Archive 拒绝 v1 $nonTerminalStatus transaction 时必须零写入"
+    }
+    $archiveRefusalV1.status = 'purged'
+    [IO.File]::WriteAllText(
+        $archiveRefusalApply.transactionPath,
+        ($archiveRefusalV1 | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $quarantinePresentTransactionSha256 =
+        (Get-FileHash -LiteralPath $archiveRefusalApply.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $beforeQuarantinePresentArchive = @(Get-FixtureFileState -Root $archiveRefusalRunDirectory)
+    $quarantinePresentArchive = & $entryPath `
+        -Mode Archive `
+        -TransactionPath ([string]$archiveRefusalApply.transactionPath) `
+        -ApprovedTransactionSha256 $quarantinePresentTransactionSha256 `
+        -ConfirmArchive `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    Assert-True (-not $quarantinePresentArchive.archived -and
+        [string]$quarantinePresentArchive.refusalReason -ceq 'quarantine-present') `
+        'Archive 必须以稳定原因拒绝 quarantine 仍存在的 purged transaction'
+    Assert-True (
+        (($beforeQuarantinePresentArchive | ConvertTo-Json -Depth 16 -Compress) -ceq
+            ((Get-FixtureFileState -Root $archiveRefusalRunDirectory) |
+                ConvertTo-Json -Depth 16 -Compress)) -and
+        -not [IO.File]::Exists($archiveRefusalMarkerPath)) `
+        'Archive 拒绝 quarantine 仍存在的 transaction 时必须零写入'
+
+    $invalidV2ArchiveTarget = Join-Path $fixtureRoot 'archive-invalid-v2-journal'
+    [void][IO.Directory]::CreateDirectory($invalidV2ArchiveTarget)
+    $invalidV2ArchivePlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $invalidV2ArchiveTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $invalidV2ArchiveApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$invalidV2ArchivePlan.planPath) `
+        -ApprovedPlanSha256 ([string]$invalidV2ArchivePlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $invalidV2ArchivePurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$invalidV2ArchiveApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$invalidV2ArchiveApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $invalidV2ArchiveTransaction = Get-Content -Raw -LiteralPath $invalidV2ArchivePurge.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $invalidV2ArchivePlanDocument = Get-Content -Raw -LiteralPath $invalidV2ArchivePlan.planPath |
+        ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
+    $invalidV2ArchiveRunDirectory = Split-Path -Parent ([string]$invalidV2ArchivePurge.transactionPath)
+    $invalidV2OperationId = '0' * 32
+    $invalidV2ArchiveTransaction.directoryCommitAnchors = @([pscustomobject][ordered]@{
+        generationId = [string]$invalidV2ArchiveTransaction.generationId
+        operationId = $invalidV2OperationId
+        directoryPath = [string]$invalidV2ArchiveTransaction.quarantinePath
+        relativePath = '.'
+        volumeSerialNumber = [string]$invalidV2ArchivePlanDocument.treeManifest.rootIdentity[0]
+        fileIndex = [string]$invalidV2ArchivePlanDocument.treeManifest.rootIdentity[1]
+        freezeIntentPath = Join-Path $invalidV2ArchiveRunDirectory `
+            "directory-delete-$invalidV2OperationId-freeze.json"
+        freezeIntentSha256 = '0' * 64
+        freezeIntentIdentity = @($invalidV2ArchivePlanDocument.treeManifest.rootIdentity)
+        commitIntentPath = Join-Path $invalidV2ArchiveRunDirectory `
+            "directory-delete-$invalidV2OperationId-commit.json"
+        commitIntentSha256 = '0' * 64
+        commitIntentIdentity = @($invalidV2ArchivePlanDocument.treeManifest.rootIdentity)
+    })
+    [IO.File]::WriteAllText(
+        $invalidV2ArchivePurge.transactionPath,
+        ($invalidV2ArchiveTransaction | ConvertTo-Json -Depth 64),
+        [Text.UTF8Encoding]::new($false))
+    $invalidV2ArchiveTransactionSha256 =
+        (Get-FileHash -LiteralPath $invalidV2ArchivePurge.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $invalidV2ArchiveMarkerPath = Join-Path $invalidV2ArchiveRunDirectory 'terminal-archive.json'
+    $invalidV2ArchiveError = $null
+    try {
+        & $entryPath `
+            -Mode Archive `
+            -TransactionPath ([string]$invalidV2ArchivePurge.transactionPath) `
+            -ApprovedTransactionSha256 $invalidV2ArchiveTransactionSha256 `
+            -ConfirmArchive `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $archiveEvidenceRoot | Out-Null
+    } catch {
+        $invalidV2ArchiveError = $_.Exception.Message
+    }
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$invalidV2ArchiveError) -and
+        -not [IO.File]::Exists($invalidV2ArchiveMarkerPath)) `
+        'Archive 必须拒绝 directory commit anchor/journal 绑定畸形的 purged v2 且 marker 零写入'
+
+    $invalidPlanTimeTarget = Join-Path $fixtureRoot 'archive-invalid-plan-time'
+    [void][IO.Directory]::CreateDirectory($invalidPlanTimeTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $invalidPlanTimeTarget 'payload.txt'),
+        'archive-invalid-plan-time',
+        [Text.UTF8Encoding]::new($false))
+    $invalidPlanTimePlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $invalidPlanTimeTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $invalidPlanTimeApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$invalidPlanTimePlan.planPath) `
+        -ApprovedPlanSha256 ([string]$invalidPlanTimePlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $invalidPlanTimePurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$invalidPlanTimeApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$invalidPlanTimeApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $archiveEvidenceRoot
+    $invalidPlanTimeDocument = Get-Content -Raw -LiteralPath $invalidPlanTimePlan.planPath |
+        ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
+    $invalidPlanTimeDocument.expiresAtUtc = 'not-a-roundtrip-timestamp'
+    [IO.File]::WriteAllText(
+        $invalidPlanTimePlan.planPath,
+        ($invalidPlanTimeDocument | ConvertTo-Json -Depth 64),
+        [Text.UTF8Encoding]::new($false))
+    $invalidPlanTimePlanSha256 =
+        (Get-FileHash -LiteralPath $invalidPlanTimePlan.planPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $invalidPlanTimeTransaction = Get-Content -Raw -LiteralPath $invalidPlanTimePurge.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $invalidPlanTimeTransaction.planSha256 = $invalidPlanTimePlanSha256
+    [IO.File]::WriteAllText(
+        $invalidPlanTimePurge.transactionPath,
+        ($invalidPlanTimeTransaction | ConvertTo-Json -Depth 64),
+        [Text.UTF8Encoding]::new($false))
+    $invalidPlanTimeTransactionSha256 =
+        (Get-FileHash -LiteralPath $invalidPlanTimePurge.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $invalidPlanTimeRunDirectory = Split-Path -Parent ([string]$invalidPlanTimePurge.transactionPath)
+    $invalidPlanTimeMarkerPath = Join-Path $invalidPlanTimeRunDirectory 'terminal-archive.json'
+    $invalidPlanTimeRunBefore = @(Get-FixtureFileState -Root $invalidPlanTimeRunDirectory)
+    $invalidPlanTimeError = $null
+    try {
+        & $entryPath `
+            -Mode Archive `
+            -TransactionPath ([string]$invalidPlanTimePurge.transactionPath) `
+            -ApprovedTransactionSha256 $invalidPlanTimeTransactionSha256 `
+            -ConfirmArchive `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $archiveEvidenceRoot | Out-Null
+    } catch {
+        $invalidPlanTimeError = $_.Exception.Message
+    }
+    $invalidPlanTimeRunAfter = @(Get-FixtureFileState -Root $invalidPlanTimeRunDirectory)
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$invalidPlanTimeError) -and
+        (($invalidPlanTimeRunBefore | ConvertTo-Json -Depth 16 -Compress) -ceq
+            ($invalidPlanTimeRunAfter | ConvertTo-Json -Depth 16 -Compress)) -and
+        -not [IO.File]::Exists($invalidPlanTimeMarkerPath)) `
+        'Archive 必须拒绝 expiresAtUtc 语法畸形但 SHA 重新绑定的历史 v2 plan 且 marker 零写入'
+
     $invalidRun = Join-Path $evidenceRoot 'invalid-record'
     [void][IO.Directory]::CreateDirectory($invalidRun)
     [IO.File]::WriteAllText(
@@ -1283,6 +1738,341 @@ try {
         $fencedPolicyPath,
         ($v5Policy | ConvertTo-Json -Depth 16),
         [Text.UTF8Encoding]::new($false))
+
+    $v1BatchTarget = Join-Path $fixtureRoot 'batch-v1-candidate'
+    [void][IO.Directory]::CreateDirectory($v1BatchTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $v1BatchTarget 'legacy.txt'),
+        'legacy-transaction',
+        [Text.UTF8Encoding]::new($false))
+    $v1BatchPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $v1BatchTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $v1BatchApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$v1BatchPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$v1BatchPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $v3BatchTransaction = Get-Content -Raw -LiteralPath $v1BatchApply.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $v1BatchTransaction = [pscustomobject][ordered]@{
+        artifactType = [string]$v3BatchTransaction.artifactType
+        schemaVersion = 1L
+        generationId = [string]$v3BatchTransaction.generationId
+        planPath = [string]$v3BatchTransaction.planPath
+        planSha256 = [string]$v3BatchTransaction.planSha256
+        targetPath = [string]$v3BatchTransaction.targetPath
+        quarantinePath = [string]$v3BatchTransaction.quarantinePath
+        status = [string]$v3BatchTransaction.status
+        updatedAtUtc = [string]$v3BatchTransaction.updatedAtUtc
+    }
+    [IO.File]::WriteAllText(
+        $v1BatchApply.transactionPath,
+        ($v1BatchTransaction | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $v1BatchTransactionSha256 =
+        (Get-FileHash -LiteralPath $v1BatchApply.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $v1BatchQuarantineBefore = @(Get-FixtureFileState -Root $v1BatchApply.quarantinePath)
+
+    $healthyBatchTarget = Join-Path $fixtureRoot 'batch-healthy-candidate'
+    [void][IO.Directory]::CreateDirectory($healthyBatchTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $healthyBatchTarget 'healthy.txt'),
+        'healthy-target',
+        [Text.UTF8Encoding]::new($false))
+    $schemaFilteredBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($v1BatchTarget, $healthyBatchTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $schemaSkipped = @($schemaFilteredBatch.results | Where-Object {
+        [string]$_.targetPath -ceq $v1BatchTarget
+    })
+    Assert-True (-not $schemaFilteredBatch.completed) `
+        '含不可执行 transaction schema 的 BatchPurge 不得报告整批完成'
+    Assert-True ($schemaFilteredBatch.targetCount -eq 2 -and
+        $schemaFilteredBatch.purgedCount -eq 1 -and
+        $schemaFilteredBatch.recoveredCount -eq 0 -and
+        $schemaFilteredBatch.alreadyAbsentCount -eq 0 -and
+        $schemaFilteredBatch.skippedCount -eq 1 -and
+        $schemaFilteredBatch.failedCount -eq 0) `
+        'schema 过滤批次的汇总计数必须与真实结果一致'
+    Assert-True ($schemaSkipped.Count -eq 1 -and
+        $schemaSkipped[0].action -ceq 'skipped-unsupported-transaction-schema' -and
+        $schemaSkipped[0].reason -ceq 'transaction-schema-unsupported' -and
+        $schemaSkipped[0].purged -eq $false) `
+        'v1 transaction 必须在挑选阶段以稳定 action/reason 跳过'
+    Assert-True (-not [IO.Directory]::Exists($healthyBatchTarget)) `
+        'v1 transaction 被跳过后同批健康目标必须继续完成'
+    Assert-True ([IO.Directory]::Exists([string]$v1BatchApply.quarantinePath) -and
+        -not [IO.Directory]::Exists($v1BatchTarget)) `
+        'v1 transaction 被拒绝时 target/quarantine namespace 必须零写入'
+    Assert-True (
+        (Get-FileHash -LiteralPath $v1BatchApply.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant() `
+            -ceq $v1BatchTransactionSha256) `
+        'v1 transaction 被拒绝时 transaction bytes 必须零写入'
+    $v1BatchQuarantineAfter = @(Get-FixtureFileState -Root $v1BatchApply.quarantinePath)
+    Assert-True (
+        (($v1BatchQuarantineBefore | ConvertTo-Json -Depth 16 -Compress) -ceq
+            ($v1BatchQuarantineAfter | ConvertTo-Json -Depth 16 -Compress))) `
+        'v1 transaction 被拒绝时 quarantine 内容必须零写入'
+
+    $mixedSchemaTarget = Join-Path $fixtureRoot 'batch-mixed-schema-candidate'
+    [void][IO.Directory]::CreateDirectory($mixedSchemaTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $mixedSchemaTarget 'legacy.txt'),
+        'legacy-generation',
+        [Text.UTF8Encoding]::new($false))
+    $mixedV1Plan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $mixedSchemaTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $mixedV1Apply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$mixedV1Plan.planPath) `
+        -ApprovedPlanSha256 ([string]$mixedV1Plan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $mixedV3Transaction = Get-Content -Raw -LiteralPath $mixedV1Apply.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $mixedV1Transaction = [pscustomobject][ordered]@{
+        artifactType = [string]$mixedV3Transaction.artifactType
+        schemaVersion = 1L
+        generationId = [string]$mixedV3Transaction.generationId
+        planPath = [string]$mixedV3Transaction.planPath
+        planSha256 = [string]$mixedV3Transaction.planSha256
+        targetPath = [string]$mixedV3Transaction.targetPath
+        quarantinePath = [string]$mixedV3Transaction.quarantinePath
+        status = [string]$mixedV3Transaction.status
+        updatedAtUtc = [string]$mixedV3Transaction.updatedAtUtc
+    }
+    [IO.File]::WriteAllText(
+        $mixedV1Apply.transactionPath,
+        ($mixedV1Transaction | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+
+    [void][IO.Directory]::CreateDirectory($mixedSchemaTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $mixedSchemaTarget 'current.txt'),
+        'supported-generation',
+        [Text.UTF8Encoding]::new($false))
+    $mixedSupportedPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $mixedSchemaTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $mixedSupportedApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$mixedSupportedPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$mixedSupportedPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $mixedV1TransactionSha256 =
+        (Get-FileHash -LiteralPath $mixedV1Apply.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $mixedSupportedTransactionSha256 =
+        (Get-FileHash -LiteralPath $mixedSupportedApply.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $mixedV1QuarantineBefore = @(Get-FixtureFileState -Root $mixedV1Apply.quarantinePath)
+    $mixedSupportedQuarantineBefore = @(Get-FixtureFileState -Root $mixedSupportedApply.quarantinePath)
+    $mixedHealthyTarget = Join-Path $fixtureRoot 'batch-mixed-schema-healthy'
+    [void][IO.Directory]::CreateDirectory($mixedHealthyTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $mixedHealthyTarget 'healthy.txt'),
+        'continue-after-ambiguous-schema',
+        [Text.UTF8Encoding]::new($false))
+    $mixedSchemaBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($mixedSchemaTarget, $mixedHealthyTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $mixedSchemaSkipped = @($mixedSchemaBatch.results | Where-Object {
+        [string]$_.targetPath -ceq $mixedSchemaTarget
+    })
+    Assert-True (-not $mixedSchemaBatch.completed -and
+        $mixedSchemaBatch.targetCount -eq 2 -and
+        $mixedSchemaBatch.purgedCount -eq 1 -and
+        $mixedSchemaBatch.recoveredCount -eq 0 -and
+        $mixedSchemaBatch.alreadyAbsentCount -eq 0 -and
+        $mixedSchemaBatch.skippedCount -eq 1 -and
+        $mixedSchemaBatch.failedCount -eq 0) `
+        'mixed schema 批次必须跳过歧义目标且保持旧计数语义'
+    Assert-True ($mixedSchemaSkipped.Count -eq 1 -and
+        $mixedSchemaSkipped[0].action -ceq 'skipped-ambiguous-transaction-schema' -and
+        $mixedSchemaSkipped[0].reason -ceq 'transaction-schema-ambiguous' -and
+        $mixedSchemaSkipped[0].purged -eq $false) `
+        '同目标 mixed schema 必须返回稳定 skipped/ambiguous 结果'
+    Assert-True ([IO.Directory]::Exists([string]$mixedV1Apply.quarantinePath) -and
+        [IO.Directory]::Exists([string]$mixedSupportedApply.quarantinePath) -and
+        -not [IO.Directory]::Exists($mixedSchemaTarget)) `
+        '同目标 mixed schema 跳过时两个 quarantine namespace 都必须零写入'
+    Assert-True (
+        (Get-FileHash -LiteralPath $mixedV1Apply.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant() `
+            -ceq $mixedV1TransactionSha256 -and
+        (Get-FileHash -LiteralPath $mixedSupportedApply.transactionPath -Algorithm SHA256).Hash.ToLowerInvariant() `
+            -ceq $mixedSupportedTransactionSha256) `
+        '同目标 mixed schema 跳过时两笔 transaction bytes 都必须零写入'
+    $mixedV1QuarantineAfter = @(Get-FixtureFileState -Root $mixedV1Apply.quarantinePath)
+    $mixedSupportedQuarantineAfter = @(Get-FixtureFileState -Root $mixedSupportedApply.quarantinePath)
+    Assert-True (
+        (($mixedV1QuarantineBefore | ConvertTo-Json -Depth 16 -Compress) -ceq
+            ($mixedV1QuarantineAfter | ConvertTo-Json -Depth 16 -Compress)) -and
+        (($mixedSupportedQuarantineBefore | ConvertTo-Json -Depth 16 -Compress) -ceq
+            ($mixedSupportedQuarantineAfter | ConvertTo-Json -Depth 16 -Compress))) `
+        '同目标 mixed schema 跳过时两棵 quarantine 内容都必须零写入'
+    Assert-True (-not [IO.Directory]::Exists($mixedHealthyTarget)) `
+        '同目标 mixed schema 被跳过后同批健康目标必须继续完成'
+
+    $isolatedFailureTarget = Join-Path $fixtureRoot 'batch-isolated-hardlink-failure'
+    [void][IO.Directory]::CreateDirectory($isolatedFailureTarget)
+    $batchFailureHardLinkPath = Join-Path $isolatedFailureTarget 'payload.txt'
+    $batchFailureHardLinkAliasPath = Join-Path $isolatedFailureTarget 'payload-alias.txt'
+    [IO.File]::WriteAllText(
+        $batchFailureHardLinkPath,
+        'disallowed-hardlink',
+        [Text.UTF8Encoding]::new($false))
+    [void](New-Item -ItemType HardLink -Path $batchFailureHardLinkAliasPath `
+        -Target $batchFailureHardLinkPath -ErrorAction Stop)
+    $isolatedHealthyTarget = Join-Path $fixtureRoot 'batch-isolated-healthy'
+    [void][IO.Directory]::CreateDirectory($isolatedHealthyTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $isolatedHealthyTarget 'healthy.txt'),
+        'continue-after-failure',
+        [Text.UTF8Encoding]::new($false))
+    $isolatedBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($isolatedFailureTarget, $isolatedHealthyTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $isolatedFailure = @($isolatedBatch.results | Where-Object {
+        [string]$_.targetPath -ceq $isolatedFailureTarget
+    })
+    Assert-True (-not $isolatedBatch.completed -and
+        $isolatedBatch.targetCount -eq 2 -and
+        $isolatedBatch.purgedCount -eq 1 -and
+        $isolatedBatch.recoveredCount -eq 0 -and
+        $isolatedBatch.alreadyAbsentCount -eq 0 -and
+        $isolatedBatch.skippedCount -eq 1 -and
+        $isolatedBatch.failedCount -eq 0) `
+        '单目标失败批次的完成态与汇总计数必须与真实结果一致'
+    Assert-True ($isolatedFailure.Count -eq 1 -and
+        $isolatedFailure[0].action -ceq 'skipped-target-error' -and
+        $isolatedFailure[0].reason -ceq 'target-operation-failed' -and
+        [string]$isolatedFailure[0].error -match 'hard link') `
+        '单目标实际失败必须返回稳定 skipped action/reason 与原始错误'
+    Assert-True ([IO.Directory]::Exists($isolatedFailureTarget) -and
+        [IO.File]::Exists($batchFailureHardLinkPath) -and
+        [IO.File]::Exists($batchFailureHardLinkAliasPath)) `
+        '单目标 Plan 拒绝必须对失败目标零写入'
+    Assert-True (-not [IO.Directory]::Exists($isolatedHealthyTarget)) `
+        '单目标实际失败后同批健康目标必须继续完成'
+
+    $postWriteFailureTarget = Join-Path $fixtureRoot 'batch-post-write-purge-failure'
+    [void][IO.Directory]::CreateDirectory($postWriteFailureTarget)
+    $postWriteMappedPath = Join-Path $postWriteFailureTarget 'mapped.exe'
+    [IO.File]::Copy(
+        [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName,
+        $postWriteMappedPath)
+    $batchPurgeMappedImageProbe = [CodexSafeDeleteTests.MappedImageProbe]::new(
+        $postWriteMappedPath)
+    $postWriteHealthyTarget = Join-Path $fixtureRoot 'batch-post-write-healthy'
+    [void][IO.Directory]::CreateDirectory($postWriteHealthyTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $postWriteHealthyTarget 'healthy.txt'),
+        'continue-after-purge-failure',
+        [Text.UTF8Encoding]::new($false))
+    $postWriteBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($postWriteFailureTarget, $postWriteHealthyTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $postWriteFailure = @($postWriteBatch.results | Where-Object {
+        [string]$_.targetPath -ceq $postWriteFailureTarget
+    })
+    $postWriteTransactions = @(Get-ChildItem -LiteralPath $fencedEvidenceRoot `
+            -Filter 'transaction.json' -File -Force -Recurse | ForEach-Object {
+            $document = Get-Content -Raw -LiteralPath $_.FullName |
+                ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+            if ([string]$document.targetPath -ceq $postWriteFailureTarget) {
+                [pscustomobject][ordered]@{
+                    path = $_.FullName
+                    document = $document
+                }
+            }
+        })
+    Assert-True ($postWriteTransactions.Count -eq 1 -and
+        [string]$postWriteTransactions[0].document.status -cin @('quarantined', 'purging') -and
+        -not [IO.Directory]::Exists($postWriteFailureTarget) -and
+        [IO.Directory]::Exists([string]$postWriteTransactions[0].document.quarantinePath)) `
+        ("post-write fixture 必须真实到达 Apply 成功后的 Purge 失败状态：" +
+            "transactions=$($postWriteTransactions.Count) " +
+            "statuses=$(@($postWriteTransactions | ForEach-Object { $_.document.status }) -join ',') " +
+            "targetPresent=$([IO.Directory]::Exists($postWriteFailureTarget)) " +
+            "resultAction=$(@($postWriteFailure | ForEach-Object { $_.action }) -join ',') " +
+            "resultError=$(@($postWriteFailure | ForEach-Object { $_.error }) -join ',')")
+    Assert-True (-not $postWriteBatch.completed -and
+        $postWriteBatch.targetCount -eq 2 -and
+        $postWriteBatch.purgedCount -eq 1 -and
+        $postWriteBatch.recoveredCount -eq 0 -and
+        $postWriteBatch.alreadyAbsentCount -eq 0 -and
+        $postWriteBatch.skippedCount -eq 0 -and
+        $postWriteBatch.failedCount -eq 1) `
+        'Apply 后 Purge 失败批次必须与 skipped 分开计数且不得报告完成'
+    Assert-True ($postWriteFailure.Count -eq 1 -and
+        $postWriteFailure[0].action -ceq 'applied-purge-failed' -and
+        $postWriteFailure[0].reason -ceq 'purge-failed-after-apply' -and
+        $postWriteFailure[0].purged -eq $false -and
+        [string]$postWriteFailure[0].error -match 'safe-tree-delete file leaf' -and
+        $null -eq $postWriteFailure[0].transactionObservationError -and
+        $null -eq $postWriteFailure[0].targetNamespaceObservationError -and
+        $null -eq $postWriteFailure[0].quarantineNamespaceObservationError -and
+        $postWriteFailure[0].recoverable -eq $true -and
+        $postWriteFailure[0].purgeResumable -eq $false) `
+        'Apply 后 Purge 失败必须返回稳定的非 skipped action/reason'
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$postWriteFailure[0].transactionPath) -and
+        [IO.File]::Exists([string]$postWriteFailure[0].transactionPath) -and
+        [string]$postWriteFailure[0].transactionSha256 -match '^[0-9a-f]{64}$') `
+        'Apply 后 Purge 失败必须返回可受管识别的 transaction path/SHA-256'
+    $postWriteTransaction = Get-Content -Raw -LiteralPath $postWriteFailure[0].transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    Assert-True (
+        (Get-FileHash -LiteralPath $postWriteFailure[0].transactionPath -Algorithm SHA256).Hash.ToLowerInvariant() `
+            -ceq [string]$postWriteFailure[0].transactionSha256 -and
+        [string]$postWriteFailure[0].transactionStatus -ceq [string]$postWriteTransaction.status) `
+        'Apply 后 Purge 失败返回的 transaction SHA/status 必须对应当前受管文档'
+    Assert-True ($postWriteFailure[0].targetPresent -eq $false -and
+        $postWriteFailure[0].quarantinePresent -eq $true -and
+        [string]$postWriteFailure[0].quarantinePath -ceq [string]$postWriteTransaction.quarantinePath -and
+        -not [IO.Directory]::Exists($postWriteFailureTarget) -and
+        [IO.Directory]::Exists([string]$postWriteFailure[0].quarantinePath)) `
+        'Apply 后 Purge 失败必须报告真实 target/quarantine namespace 状态'
+    Assert-True (-not [IO.Directory]::Exists($postWriteHealthyTarget)) `
+        'Apply 后 Purge 失败不得阻断同批健康目标'
+    Assert-True ($batchPurgeMappedImageProbe.ReadFirstByte() -eq 0x4d) `
+        'Apply 后 Purge 失败必须保持真实 SEC_IMAGE 映射可读'
+    $batchPurgeMappedImageProbe.Dispose()
+    $batchPurgeMappedImageProbe = $null
+
     $fencedTarget = Join-Path $fixtureRoot 'fenced-candidate'
     [void][IO.Directory]::CreateDirectory($fencedTarget)
     [IO.File]::WriteAllText(
@@ -2231,7 +3021,7 @@ try {
     [pscustomobject][ordered]@{
         ok = $true
         suite = 'CodexSafeTreeDeleteControlPlane'
-        slices = 9
+        slices = 10
     }
 } finally {
     if ($null -ne $producerProcess) {
@@ -2253,6 +3043,17 @@ try {
         if (-not $retryCrashProcess.HasExited) { $retryCrashProcess.Kill($true) }
         [void]$retryCrashProcess.WaitForExit(10000)
         $retryCrashProcess.Dispose()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($batchFailureHardLinkAliasPath) -and
+        [IO.File]::Exists($batchFailureHardLinkAliasPath)) {
+        [IO.File]::Delete($batchFailureHardLinkAliasPath)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($batchFailureHardLinkPath) -and
+        [IO.File]::Exists($batchFailureHardLinkPath)) {
+        [IO.File]::Delete($batchFailureHardLinkPath)
+    }
+    if ($null -ne $batchPurgeMappedImageProbe) {
+        $batchPurgeMappedImageProbe.Dispose()
     }
     Remove-TestTree -Path $fixtureRoot
 }

@@ -118,18 +118,30 @@ function Get-Operation {
 
 try {
     [void][IO.Directory]::CreateDirectory($evidenceRoot)
+    $rebuildableTarget = Join-Path $fixtureRoot 'rebuildable-build-output'
     $policy = [pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-safe-tree-delete-policy'
         schemaVersion = 4
-        entries = @([pscustomobject][ordered]@{
-            id = 'status-fixture'
-            capabilityRoot = $fixtureRoot
-            minimumDescendantDepth = 1
-            rootDeletionPurpose = 'none'
-            allowHardLinks = $false
-            allowInternalDirectoryJunctions = $false
-            deniedExactPaths = @($evidenceRoot)
-        })
+        entries = @(
+            [pscustomobject][ordered]@{
+                id = 'status-fixture'
+                capabilityRoot = $fixtureRoot
+                minimumDescendantDepth = 1
+                rootDeletionPurpose = 'none'
+                allowHardLinks = $false
+                allowInternalDirectoryJunctions = $false
+                deniedExactPaths = @($evidenceRoot)
+            },
+            [pscustomobject][ordered]@{
+                id = 'status-rebuildable-build-output'
+                capabilityRoot = $rebuildableTarget
+                minimumDescendantDepth = 0
+                rootDeletionPurpose = 'rebuildable-build-output'
+                allowHardLinks = $false
+                allowInternalDirectoryJunctions = $false
+                deniedExactPaths = @()
+            }
+        )
     }
     [IO.File]::WriteAllText(
         $policyPath,
@@ -299,6 +311,93 @@ try {
         'purged transaction 出现 live namespace 时必须失败闭锁。'
     [IO.File]::Delete($terminalTarget)
 
+    [void][IO.Directory]::CreateDirectory($rebuildableTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $rebuildableTarget 'original.txt'),
+        'original-build-output',
+        [Text.UTF8Encoding]::new($false))
+    $rebuildablePlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $rebuildableTarget `
+        -CapabilityRoot $rebuildableTarget `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $rebuildableApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$rebuildablePlan.planPath) `
+        -ApprovedPlanSha256 ([string]$rebuildablePlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $rebuildablePurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$rebuildableApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$rebuildableApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    [void][IO.Directory]::CreateDirectory($rebuildableTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $rebuildableTarget 'rebuilt.txt'),
+        'rebuilt-output',
+        [Text.UTF8Encoding]::new($false))
+    $rebuiltStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $policyPath -FixtureEvidenceRoot $evidenceRoot
+    $rebuiltOperation = Get-Operation `
+        -Status $rebuiltStatus -TransactionPath $rebuildablePurge.transactionPath
+    Assert-True ($rebuiltOperation.lifecycle -ceq 'terminal' -and
+        $rebuiltOperation.transactionStatus -ceq 'purged' -and
+        $rebuiltOperation.targetPresent -eq $true -and
+        $rebuiltOperation.namespaceAbsent -eq $false -and
+        $rebuiltOperation.logicalCompletion -eq $true) `
+        'rebuildable-build-output 完成删除后重建同名根必须保持 logical terminal。'
+    Assert-True ($rebuiltOperation.physicalReclaimStatus -ceq 'unknown' -and
+        $rebuiltOperation.deletionOutcome.physicalReclaimStatus -ceq 'unknown') `
+        '重建目标不得改变 physical reclaim unknown 语义。'
+
+    $unprovenPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $rebuildableTarget `
+        -CapabilityRoot $rebuildableTarget `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $unprovenPlanDocument = Get-Content -Raw -LiteralPath $unprovenPlan.planPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $unprovenTransactionPath = Join-Path `
+        (Split-Path -Parent $unprovenPlan.planPath) `
+        'transaction.json'
+    $unprovenTransaction = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-transaction'
+        schemaVersion = 2L
+        generationId = [string]$unprovenPlanDocument.generationId
+        planPath = [string]$unprovenPlan.planPath
+        planSha256 = [string]$unprovenPlan.planSha256
+        targetPath = $rebuildableTarget
+        quarantinePath = Join-Path `
+            (Split-Path -Parent $rebuildableTarget) `
+            ('.codex-safe-delete-{0}.quarantine' -f ([string]$unprovenPlanDocument.generationId))
+        directoryCommitAnchors = @()
+        status = 'purged'
+        updatedAtUtc = [datetimeoffset]::UtcNow.ToString(
+            'o',
+            [Globalization.CultureInfo]::InvariantCulture)
+    }
+    [IO.File]::WriteAllText(
+        $unprovenTransactionPath,
+        ($unprovenTransaction | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $unprovenStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $policyPath -FixtureEvidenceRoot $evidenceRoot
+    $unprovenOperation = Get-Operation `
+        -Status $unprovenStatus -TransactionPath $unprovenTransactionPath
+    Assert-True ($unprovenOperation.lifecycle -ceq 'manual-review' -and
+        $unprovenOperation.transactionStatus -ceq 'purged' -and
+        $unprovenOperation.targetPresent -eq $true -and
+        $unprovenOperation.logicalCompletion -eq $false) `
+        '未完成删除且原 target identity 未变化的 purged 声明必须失败闭锁。'
+    Assert-True ($unprovenOperation.physicalReclaimStatus -ceq 'unknown') `
+        '未证明完成的 purged 声明也不得推断 physical reclaim。'
+
     $restoredTarget = New-FixtureTarget -Name 'restored-terminal'
     $restoredApply = New-FixtureQuarantine -TargetPath $restoredTarget
     $restored = & $entryPath `
@@ -324,6 +423,73 @@ try {
     Assert-True (-not $restoreJournalDriftStatus.complete -and
         $restoreJournalDriftOperation.lifecycle -ceq 'manual-review') `
         'restored terminal 缺少 complete journal 时必须失败闭锁。'
+    Assert-True ($restoreJournalDriftOperation.transactionStatus -ceq 'restored' -and
+        [string]$restoreJournalDriftOperation.targetPath -ceq $restoredTarget) `
+        '晚期判定失败必须保留已解析的 transaction status 与 target path。'
+
+    $v2PolicyDriftTarget = New-FixtureTarget -Name 'v2-policy-drift'
+    $v2PolicyDriftApply = New-FixtureQuarantine -TargetPath $v2PolicyDriftTarget
+    $v2PolicyDriftTransaction = Get-Content -Raw -LiteralPath $v2PolicyDriftApply.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+
+    $v1Target = New-FixtureTarget -Name 'v1-policy-drift'
+    $v1Apply = New-FixtureQuarantine -TargetPath $v1Target
+    $v2Transaction = Get-Content -Raw -LiteralPath $v1Apply.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $v1Transaction = [pscustomobject][ordered]@{
+        artifactType = [string]$v2Transaction.artifactType
+        schemaVersion = 1L
+        generationId = [string]$v2Transaction.generationId
+        planPath = [string]$v2Transaction.planPath
+        planSha256 = [string]$v2Transaction.planSha256
+        targetPath = [string]$v2Transaction.targetPath
+        quarantinePath = [string]$v2Transaction.quarantinePath
+        status = [string]$v2Transaction.status
+        updatedAtUtc = [string]$v2Transaction.updatedAtUtc
+    }
+    [IO.File]::WriteAllText(
+        $v1Apply.transactionPath,
+        ($v1Transaction | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText(
+        $policyPath,
+        ($policy | ConvertTo-Json -Depth 16 -Compress),
+        [Text.UTF8Encoding]::new($false))
+    $beforeV1Status = Get-FixtureState -Root $fixtureRoot
+    $v1Status = & $entryPath -Mode Status `
+        -FixturePolicyPath $policyPath -FixtureEvidenceRoot $evidenceRoot
+    $afterV1Status = Get-FixtureState -Root $fixtureRoot
+    $v1Operation = Get-Operation -Status $v1Status -TransactionPath $v1Apply.transactionPath
+    $v2PolicyDriftOperation = Get-Operation `
+        -Status $v1Status `
+        -TransactionPath $v2PolicyDriftApply.transactionPath
+    $plannedPolicyDriftOperation = Get-Operation `
+        -Status $v1Status `
+        -TransactionPath $planned.planPath
+    Assert-True ([string]$plannedPolicyDriftOperation.targetPath -ceq $plannedTarget -and
+        -not $plannedPolicyDriftOperation.policyCompatible -and
+        $plannedPolicyDriftOperation.lifecycle -ceq 'manual-review' -and
+        'apply' -cnotin @($plannedPolicyDriftOperation.safeActions)) `
+        'policy SHA 漂移后的 plan 必须保留 target，但不得建议严格写路径会拒绝的 Apply。'
+    Assert-True ($v2PolicyDriftOperation.transactionSchemaVersion -eq 2L -and
+        $v2PolicyDriftOperation.transactionStatus -ceq $v2PolicyDriftTransaction.status -and
+        [string]$v2PolicyDriftOperation.targetPath -ceq $v2PolicyDriftTarget -and
+        -not $v2PolicyDriftOperation.policyCompatible) `
+        'Status 必须把 policy SHA 漂移降级为字段并保留 v2 transaction 的已解析字段。'
+    Assert-True ($v1Operation.transactionSchemaVersion -eq 1L -and
+        $v1Operation.transactionStatus -ceq $v1Transaction.status -and
+        [string]$v1Operation.targetPath -ceq $v1Target -and
+        [string]$v1Operation.quarantinePath -ceq $v1Transaction.quarantinePath -and
+        [string]$v1Operation.transactionUpdatedAtUtc -ceq $v1Transaction.updatedAtUtc) `
+        'Status 必须在 policy SHA 漂移后保留 v1 transaction 的精简观测字段。'
+    Assert-True (-not $v1Operation.schemaCompatible -and
+        -not $v1Operation.policyCompatible -and
+        $v1Operation.lifecycle -ceq 'manual-review') `
+        'v1 transaction 必须保持写入不兼容并把 policy SHA 漂移降级为兼容性结论。'
+    Assert-True (
+        (($beforeV1Status | ConvertTo-Json -Depth 100 -Compress) -ceq
+            ($afterV1Status | ConvertTo-Json -Depth 100 -Compress))) `
+        'v1 精简观测不得写入 evidence、target、quarantine 或 policy。'
 
     $outsideRecord = Join-Path $fixtureRoot 'outside-record'
     [void][IO.Directory]::CreateDirectory($outsideRecord)
@@ -348,7 +514,7 @@ try {
     [pscustomobject][ordered]@{
         ok = $true
         suite = 'CodexSafeTreeDeleteStatus'
-        slices = 12
+        slices = 17
     }
 } finally {
     if ($null -ne $lockedStream) { $lockedStream.Dispose() }

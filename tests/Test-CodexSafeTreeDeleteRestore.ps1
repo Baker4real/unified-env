@@ -430,7 +430,117 @@ try {
     Assert-True ($concurrentReplay.alreadyRestored -eq $true) `
         'concurrent Restore 之后必须可幂等重放'
 
-    'Safe tree delete Restore tests passed: confirmation/SHA, quarantined/prepared, fail-closed drift, 4 crash phases, full-tree replay, journals, mutex/idempotency.'
+    $archiveAnchorPolicy = $policy | ConvertTo-Json -Depth 16 |
+        ConvertFrom-Json -Depth 16 -DateKind String -ErrorAction Stop
+    $archiveAnchorPolicy.schemaVersion = 5L
+    $archiveAnchorPolicy.entries[0] | Add-Member `
+        -NotePropertyName minimumQuarantineAgeMinutes -NotePropertyValue 0L
+    $archiveAnchorPolicy.entries[0] | Add-Member `
+        -NotePropertyName producerFenceMode -NotePropertyValue 'manual-only'
+    [IO.File]::WriteAllText(
+        $policyPath,
+        ($archiveAnchorPolicy | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $archiveAnchorCase = New-RestoreCase -Name 'archive-restore-anchor'
+    $archiveAnchorRestore = Invoke-Restore `
+        -Case $archiveAnchorCase `
+        -ApprovedTransactionSha256 ([string]$archiveAnchorCase.apply.transactionSha256)
+    $archiveAnchorTransaction = Get-Content -Raw -LiteralPath $archiveAnchorRestore.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    Assert-True ($archiveAnchorTransaction.schemaVersion -eq 3L -and
+        $archiveAnchorTransaction.status -ceq 'restored' -and
+        @($archiveAnchorTransaction.restoreJournalAnchors).Count -eq 1) `
+        'Archive Restore-anchor fixture 必须来自真实 v3 Restore transaction'
+    $archiveAnchorTransaction.status = 'purged'
+    $archiveAnchorTransaction.updatedAtUtc = [datetimeoffset]::UtcNow.ToString(
+        'o',
+        [Globalization.CultureInfo]::InvariantCulture)
+    [IO.File]::WriteAllText(
+        $archiveAnchorRestore.transactionPath,
+        ($archiveAnchorTransaction | ConvertTo-Json -Depth 64),
+        [Text.UTF8Encoding]::new($false))
+    $archiveAnchorTransactionSha256 =
+        (Get-FileSnapshot -Path $archiveAnchorRestore.transactionPath).sha256
+    $archiveAnchorRunBefore = @(Get-OperationFileState -RunDirectory $archiveAnchorCase.runDirectory)
+    $archiveAnchorRefusal = & $entryPath `
+        -Mode Archive `
+        -TransactionPath ([string]$archiveAnchorRestore.transactionPath) `
+        -ApprovedTransactionSha256 $archiveAnchorTransactionSha256 `
+        -ConfirmArchive `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True (-not $archiveAnchorRefusal.archived -and
+        [string]$archiveAnchorRefusal.refusalReason -ceq 'restore-journal-anchors-present') `
+        'Archive 必须以稳定原因拒绝含 Restore journal anchors 的 purged transaction'
+    Assert-OperationFileStateEqual `
+        -Expected $archiveAnchorRunBefore `
+        -Actual @(Get-OperationFileState -RunDirectory $archiveAnchorCase.runDirectory) `
+        -Message 'Archive 拒绝 Restore journal anchors 时必须零写入 operation run'
+    Assert-True (-not [IO.File]::Exists((Join-Path $archiveAnchorCase.runDirectory 'terminal-archive.json'))) `
+        'Archive 拒绝 Restore journal anchors 时不得发布 marker'
+
+    $archiveAnchorTransaction.restoreJournalAnchors[0].completeSha256 = '0' * 64
+    [IO.File]::WriteAllText(
+        $archiveAnchorRestore.transactionPath,
+        ($archiveAnchorTransaction | ConvertTo-Json -Depth 64),
+        [Text.UTF8Encoding]::new($false))
+    $invalidRestoreAnchorTransactionSha256 =
+        (Get-FileSnapshot -Path $archiveAnchorRestore.transactionPath).sha256
+    $invalidRestoreAnchorError = $null
+    try {
+        & $entryPath `
+            -Mode Archive `
+            -TransactionPath ([string]$archiveAnchorRestore.transactionPath) `
+            -ApprovedTransactionSha256 $invalidRestoreAnchorTransactionSha256 `
+            -ConfirmArchive `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot | Out-Null
+    } catch {
+        $invalidRestoreAnchorError = $_.Exception.Message
+    }
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$invalidRestoreAnchorError) -and
+        -not [IO.File]::Exists((Join-Path $archiveAnchorCase.runDirectory 'terminal-archive.json'))) `
+        'Archive 必须认证 v3 Restore journal anchor 内容绑定，畸形时失败闭锁且 marker 零写入'
+
+    $invalidTimeAnchorCase = New-RestoreCase -Name 'archive-quarantine-time-anchor'
+    $invalidTimeAnchorPurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$invalidTimeAnchorCase.apply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$invalidTimeAnchorCase.apply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $invalidTimeAnchorTransaction = Get-Content -Raw -LiteralPath $invalidTimeAnchorPurge.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    Assert-True ($invalidTimeAnchorTransaction.schemaVersion -eq 3L -and
+        $invalidTimeAnchorTransaction.status -ceq 'purged' -and
+        $null -ne $invalidTimeAnchorTransaction.quarantineTimeAnchor) `
+        'Archive quarantine-time fixture 必须来自真实 purged v3 transaction'
+    $invalidTimeAnchorTransaction.quarantineTimeAnchor.sha256 = '0' * 64
+    [IO.File]::WriteAllText(
+        $invalidTimeAnchorPurge.transactionPath,
+        ($invalidTimeAnchorTransaction | ConvertTo-Json -Depth 64),
+        [Text.UTF8Encoding]::new($false))
+    $invalidTimeAnchorTransactionSha256 =
+        (Get-FileSnapshot -Path $invalidTimeAnchorPurge.transactionPath).sha256
+    $invalidTimeAnchorRunDirectory = Split-Path -Parent ([string]$invalidTimeAnchorPurge.transactionPath)
+    $invalidTimeAnchorError = $null
+    try {
+        & $entryPath `
+            -Mode Archive `
+            -TransactionPath ([string]$invalidTimeAnchorPurge.transactionPath) `
+            -ApprovedTransactionSha256 $invalidTimeAnchorTransactionSha256 `
+            -ConfirmArchive `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $evidenceRoot | Out-Null
+    } catch {
+        $invalidTimeAnchorError = $_.Exception.Message
+    }
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$invalidTimeAnchorError) -and
+        -not [IO.File]::Exists((Join-Path $invalidTimeAnchorRunDirectory 'terminal-archive.json'))) `
+        'Archive 必须认证 v3 quarantine-time anchor 内容绑定，畸形时失败闭锁且 marker 零写入'
+
+    'Safe tree delete Restore tests passed: confirmation/SHA, quarantined/prepared, fail-closed drift, 4 crash phases, full-tree replay, journals, mutex/idempotency, Archive strict anchors.'
 } finally {
     Remove-TestTree -Path $fixtureRoot
 }

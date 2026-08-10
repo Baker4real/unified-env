@@ -93,24 +93,52 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
    `terminal` 或 `manual-review` 等 lifecycle 及允许的下一步。异常或不完整记录必须隔离为
    `manual-review`，不能让单个坏记录掩盖其他健康记录。库内 candidate-policy preflight 只接受
    v5 与精确 approved SHA-256；生产 CLI 不接受 policy override，迁移仍须走受管激活流程。
-2. `Plan`：规范化目标与 capability root，校验固定 allowlist、最小后代深度、denylist、
+
+   历史 transaction schema v1 只在 `Status` 使用精简的只读观测解析，校验其与受管 plan 的
+   generation、path 和 SHA 绑定后，输出真实 `transactionStatus`、`targetPath`、
+   `quarantinePath` 与 `transactionUpdatedAtUtc`；该记录的 `schemaCompatible` 仍为 `false`。
+   plan 的 policy SHA 与当前 policy 不同时，`Status` 以 `policyCompatible=false` 表达漂移，仍保留
+   已验证的观测字段。`Purge` 与 `Restore` 的严格 transaction reader 继续只接受 schema v2/v3；
+   v1 缺少 `directoryCommitAnchors`，不可由受管写入路径恢复或清理，也绝不通过补写空 anchors
+   冒充 v2。
+
+2. `Archive`：要求 `ConfirmArchive`、精确 transaction path 与 approved SHA-256，只为同时满足
+   `status=purged`、quarantine 当前不存在、`restoreJournalAnchors` 为空的历史 transaction，在其
+   operation run 内发布固定的 create-only `terminal-archive.json`。任一判据不满足时，以稳定原因
+   拒绝且 operation run 零写入；重复归档必须认证并返回首份 marker，原始 bytes 与 file identity
+   均不改变。marker 记录归档时点，并绑定固定 plan/transaction path、SHA-256、file identity、
+   generation、schema、状态与 namespace；`Status` 重新读取这些受管内容并现场确认 quarantine
+   仍不存在，不能只凭 marker 文件存在或其自报 metadata 判 terminal。可信 marker 让该历史记录
+   退出 `blockingRecords`，但不改变 transaction schema compatibility，也不删除、重写或自动清理
+   任何 evidence。Archive 与 Status 的 marker 认证均不补写 v1 `directoryCommitAnchors`，也不放宽
+   `Purge`/`Restore` 的严格 reader。
+
+   schema v2/v3 的 Archive 与 `Purge`/`Restore` 复用同一 transaction schema、plan 绑定和 journal
+   内容认证核心：v3 必须认证 quarantine-time 与 Restore journal 的 SHA-256、file identity 和引用链；
+   purged transaction 的 directory commit anchors 必须认证 freeze/commit journals 并完整覆盖计划目录，
+   无 anchors 时也不得遗留未锚定的 freeze/commit journal。合法但非空的 Restore anchors 仍以稳定
+   `restore-journal-anchors-present` 原因拒绝，畸形 anchor/journal 则失败闭锁。该历史内容认证只读取
+   operation run 内已绑定的 plan 与 evidence，不把当前 policy SHA 或 policy entry 可执行性混入判断，
+   因此 current-policy 漂移不会永久阻断历史 v1/v2 Archive；`Purge`/`Restore` 仍须通过当前 policy
+   可执行性校验，且其严格 transaction reader 仍只接受 schema v2/v3。
+3. `Plan`：规范化目标与 capability root，校验固定 allowlist、最小后代深度、denylist、
    root 删除用途、父链与完整子树；未授权 reparse point 一律拒绝，获准的内部 directory junction
    以 manifest schema v2 的不可遍历叶节点记录；`empty-project-state` 还会在发布计划前确认
    文件计数为零，并拒绝所有目录 NTFS named stream。通过后生成句柄绑定的文件 identity、
    SHA-256 和目录清单。
-3. `Apply`：要求 `ConfirmApply` 与精确 `ApprovedPlanSha256`；复算完整树清单无漂移后，
+4. `Apply`：要求 `ConfirmApply` 与精确 `ApprovedPlanSha256`；复算完整树清单无漂移后，
    并再次确认 `empty-project-state` 没有 named stream，才通过目录句柄原子改名到同父
    `.codex-safe-delete-<generation>.quarantine`。此时可恢复。v5 Apply 生成 transaction schema v3，
    并以 create-only `quarantine-time.json` 绑定 wall clock、单调 uptime 与 boot session；v3 transaction
    允许 policy SHA 漂移后继续，但仍重新验证 policy path、entry id、target 与 tree policy，回退到 v4
    必须进入 `manual-review`。v3 crash recovery 如果缺少时间锚，只能在 mutex 内复验完整 quarantine
    后保守创建新锚，宽限期从该点重新起算。
-4. `Restore`：要求 `ConfirmRestore`、精确 transaction path 与 approved SHA-256，只恢复尚未发生
+5. `Restore`：要求 `ConfirmRestore`、精确 transaction path 与 approved SHA-256，只恢复尚未发生
    directory commit 的完整 v5 quarantine。它在目标 mutex 内复验 policy、identity 与完整 manifest，
    用 create-only intent、renamed、verified、complete journals 记录原子 rename 回原路径，并发布
    `restored` terminal transaction；中断重放必须幂等。`purging`、`purged`、`rolled-back`、部分删除、
    target 冲突或树漂移均拒绝恢复。
-5. `Purge`：要求 `ConfirmPurge` 与精确 `ApprovedTransactionSha256`。`quarantined` transaction
+6. `Purge`：要求 `ConfirmPurge` 与精确 `ApprovedTransactionSha256`。`quarantined` transaction
    必须再次匹配完整计划清单；如果进程在发布 `purging` 后中断，则允许从 quarantine 中不超出
    原计划的节点子集恢复。恢复时 quarantine root identity 必须不变，仍存在节点的相对路径、kind、
    SHA-256 和 file identity 必须与原计划一致；只允许原计划节点缺失。`empty-project-state`
@@ -131,8 +159,9 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
    使用 protected/unprotected security-information 标志；切换到 protected 后，只允许 Windows 将
    inherited ACE 实体化为 explicit ACE 这一已知规范化差异，其他 Owner/Group/DACL 回读漂移仍失败闭锁。
 
-   `Apply`、`Restore` 与 `Purge` 都在目标 mutex 内重新读取并复验当前 capability、树和 transaction，
-   才允许写入 `prepared`、`quarantined`、`purging`、commit anchor、`restored` 或 `purged`。等待锁期间 capability 已变更时必须在
+   `Apply`、`Restore`、`Purge` 与 `Archive` 都在目标 mutex 内重新读取并复验各自受管输入，
+   才允许写入 `prepared`、`quarantined`、`purging`、commit anchor、`restored`、`purged` 或 terminal
+   archive marker。等待锁期间 capability 已变更时必须在
    写入前拒绝，不能用过期内存快照把已隔离或已完成 transaction 降级。
 
    journal 使用 create-only 原子发布：同一路径的第二次发布必须失败且不得改变原始 bytes 或 file
@@ -171,7 +200,7 @@ DACL 冻结覆盖当前 NTFS 上遵守访问检查的普通新 ADS/子项创建�
 
 ## 结果与可观测性
 
-`Plan`、`Status`、`Apply`、`Restore` 与 `Purge` 都返回 metrics schema v1：phase、elapsed milliseconds、
+`Plan`、`Status`、`Apply`、`Restore`、`Purge` 与 `Archive` 都返回 metrics schema v1：phase、elapsed milliseconds、
 scanned entries、logical bytes、hashed bytes 以及版本化 retry 记录。leaf delete 只对 allowlist 中的
 sharing violation、lock violation 与 busy 做有界重试；生产合同最多 3 次 attempt、总预算 1000 ms，
 退避为 10/25 ms。每次重试前仍须复验 handle identity 与内容，access denied、未知错误、identity/hash

@@ -206,6 +206,125 @@ try {
         $v2Status.operations[0].schemaCompatible) `
         '现役 transaction v2 必须保持严格兼容读取'
 
+    $v1EvidenceRoot = Join-Path $fixtureRoot 'transaction-v1-evidence'
+    [void][IO.Directory]::CreateDirectory($v1EvidenceRoot)
+    $v1Policy = New-TestPolicy -SchemaVersion 4L
+    $v1Policy.entries[0].deniedExactPaths = @($v1EvidenceRoot)
+    $v1PolicyPath = Join-Path $fixtureRoot 'transaction-v1-policy.json'
+    Write-TestJson -Path $v1PolicyPath -Document $v1Policy
+    $v1Target = Join-Path $fixtureRoot 'transaction-v1-target'
+    [void][IO.Directory]::CreateDirectory($v1Target)
+    [IO.File]::WriteAllText(
+        (Join-Path $v1Target 'payload.txt'),
+        'transaction-v1',
+        [Text.UTF8Encoding]::new($false))
+    $v1Plan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $v1Target `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $v1PolicyPath `
+        -FixtureEvidenceRoot $v1EvidenceRoot
+    $v1Apply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$v1Plan.planPath) `
+        -ApprovedPlanSha256 ([string]$v1Plan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $v1PolicyPath `
+        -FixtureEvidenceRoot $v1EvidenceRoot
+    $v2Transaction = Get-Content -Raw -LiteralPath $v1Apply.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $v1Transaction = [pscustomobject][ordered]@{
+        artifactType = [string]$v2Transaction.artifactType
+        schemaVersion = 1L
+        generationId = [string]$v2Transaction.generationId
+        planPath = [string]$v2Transaction.planPath
+        planSha256 = [string]$v2Transaction.planSha256
+        targetPath = [string]$v2Transaction.targetPath
+        quarantinePath = [string]$v2Transaction.quarantinePath
+        status = [string]$v2Transaction.status
+        updatedAtUtc = [string]$v2Transaction.updatedAtUtc
+    }
+    Write-TestJson -Path $v1Apply.transactionPath -Document $v1Transaction
+    $v1TransactionSha256 = (Get-FileHash `
+        -LiteralPath $v1Apply.transactionPath `
+        -Algorithm SHA256).Hash.ToLowerInvariant()
+    $v1Status = & $entryPath `
+        -Mode Status `
+        -FixturePolicyPath $v1PolicyPath `
+        -FixtureEvidenceRoot $v1EvidenceRoot
+    $v1Operation = @($v1Status.operations)[0]
+    Assert-True ($v1Status.operations.Count -eq 1 -and
+        $v1Operation.transactionSchemaVersion -eq 1L -and
+        $v1Operation.transactionStatus -ceq 'quarantined' -and
+        [string]$v1Operation.targetPath -ceq $v1Target -and
+        -not $v1Operation.schemaCompatible) `
+        'transaction v1 必须仅在 Status 只读路径保留真实状态与 target'
+
+    $v1Policy.entries[0].minimumDescendantDepth = 2L
+    Write-TestJson -Path $v1PolicyPath -Document $v1Policy
+    $v1SemanticPolicyDriftStatus = & $entryPath `
+        -Mode Status `
+        -FixturePolicyPath $v1PolicyPath `
+        -FixtureEvidenceRoot $v1EvidenceRoot
+    $v1SemanticPolicyDriftOperation = @($v1SemanticPolicyDriftStatus.operations)[0]
+    Assert-True ($v1SemanticPolicyDriftStatus.operations.Count -eq 1 -and
+        $v1SemanticPolicyDriftOperation.transactionSchemaVersion -eq 1L -and
+        $v1SemanticPolicyDriftOperation.transactionStatus -ceq 'quarantined' -and
+        [string]$v1SemanticPolicyDriftOperation.targetPath -ceq $v1Target -and
+        [string]$v1SemanticPolicyDriftOperation.quarantinePath -ceq $v1Transaction.quarantinePath -and
+        [string]$v1SemanticPolicyDriftOperation.transactionUpdatedAtUtc -ceq $v1Transaction.updatedAtUtc -and
+        -not $v1SemanticPolicyDriftOperation.schemaCompatible -and
+        -not $v1SemanticPolicyDriftOperation.policyCompatible -and
+        $v1SemanticPolicyDriftOperation.lifecycle -ceq 'manual-review') `
+        'plan 语义拒绝必须继续 blocking，但不得清空 v1 transaction 的只读观测字段'
+
+    $beforeV1WriteRefusals = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+        -Path $fixtureRoot `
+        -CapabilityRoot (Split-Path -Parent $fixtureRoot) `
+        -AllowedExactPaths @($fixtureRoot) `
+        -Name 'safe-delete transaction v1 write refusal before state'
+    $v1PurgeError = Assert-Throws `
+        -Message 'Purge 必须继续拒绝 transaction v1' `
+        -Action {
+            & $entryPath `
+                -Mode Purge `
+                -TransactionPath ([string]$v1Apply.transactionPath) `
+                -ApprovedTransactionSha256 $v1TransactionSha256 `
+                -ConfirmPurge `
+                -FixturePolicyPath $v1PolicyPath `
+                -FixtureEvidenceRoot $v1EvidenceRoot
+        }
+    Assert-True ($v1PurgeError -match
+        'transaction schemaVersion 必须是 JSON integer 2 或 3') `
+        'Purge 对 transaction v1 必须返回稳定 schema 拒绝原因'
+    $v1RestoreError = Assert-Throws `
+        -Message 'Restore 必须继续拒绝 transaction v1' `
+        -Action {
+            & $entryPath `
+                -Mode Restore `
+                -TransactionPath ([string]$v1Apply.transactionPath) `
+                -ApprovedTransactionSha256 $v1TransactionSha256 `
+                -ConfirmRestore `
+                -FixturePolicyPath $v1PolicyPath `
+                -FixtureEvidenceRoot $v1EvidenceRoot
+        }
+    Assert-True ($v1RestoreError -match
+        'transaction schemaVersion 必须是 JSON integer 2 或 3') `
+        'Restore 对 transaction v1 必须返回稳定 schema 拒绝原因'
+    $afterV1WriteRefusals = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+        -Path $fixtureRoot `
+        -CapabilityRoot (Split-Path -Parent $fixtureRoot) `
+        -AllowedExactPaths @($fixtureRoot) `
+        -Name 'safe-delete transaction v1 write refusal after state'
+    Assert-True (
+        (($beforeV1WriteRefusals | ConvertTo-Json -Depth 100 -Compress) -ceq
+            ($afterV1WriteRefusals | ConvertTo-Json -Depth 100 -Compress))) `
+        'Purge/Restore 对 transaction v1 的拒绝必须保持 fixture 零写入'
+    $persistedV1Transaction = Get-Content -Raw -LiteralPath $v1Apply.transactionPath |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    Assert-True ($null -eq $persistedV1Transaction.PSObject.Properties['directoryCommitAnchors']) `
+        'Status/Purge/Restore 都不得为 transaction v1 补写 directoryCommitAnchors'
+
     $v5Policy = New-TestPolicy -SchemaVersion 5L
     $v5PolicyPath = Join-Path $fixtureRoot 'transaction-v5-policy.json'
     Write-TestJson -Path $v5PolicyPath -Document $v5Policy

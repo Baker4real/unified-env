@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Plan', 'Apply', 'Purge', 'BatchPurge', 'Status', 'Restore')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Plan', 'Apply', 'Purge', 'BatchPurge', 'Status', 'Restore', 'Archive')][string]$Mode,
     [string]$TargetPath,
     [string[]]$TargetPaths,
     [string]$CapabilityRoot,
@@ -11,6 +11,7 @@ param(
     [string]$ApprovedTransactionSha256,
     [switch]$ConfirmPurge,
     [switch]$ConfirmRestore,
+    [switch]$ConfirmArchive,
     [switch]$FixtureFailAfterRename,
     [scriptblock]$FixtureBeforePurgeMutex,
     [scriptblock]$FixtureBeforeDirectoryTreeDelete,
@@ -75,6 +76,20 @@ $result = switch ($Mode) {
             -TransactionPath $TransactionPath `
             -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
             -PolicyPath $FixturePolicyPath `
+            -EvidenceRoot $FixtureEvidenceRoot
+    }
+    'Archive' {
+        if (-not $ConfirmArchive) {
+            [pscustomobject][ordered]@{ archived = $false; refusalReason = 'confirm-archive-required' }
+            break
+        }
+        if ([string]::IsNullOrWhiteSpace($TransactionPath) -or
+            [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
+            throw 'Archive 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
+        }
+        Invoke-CodexSafeTreeDeleteArchive `
+            -TransactionPath $TransactionPath `
+            -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
             -EvidenceRoot $FixtureEvidenceRoot
     }
     'Plan' {
