@@ -49,6 +49,15 @@
       "deniedExactPaths": []
     },
     {
+      "id": "dotnet-bundle-extraction-cache",
+      "capabilityRoot": "D:\\Codex\\temp\\.net",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\Codex\\temp\\.net\\CodexProviderSync"
+      ]
+    },
+    {
       "id": "environment-reports",
       "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
       "minimumDescendantDepth": 1,

@@ -411,6 +411,22 @@ try {
     Assert-True ($legacyTempEntry.capabilityRoot -ceq 'D:\Codex\.tmp') 'legacy temp capability root 必须精确指向 D:\Codex\.tmp'
     Assert-True ($legacyTempEntry.minimumDescendantDepth -eq 1) 'legacy temp capability root 不得删除根目录自身'
     Assert-True ($legacyTempEntry.rootDeletionPurpose -ceq 'none') 'legacy temp capability root 不得声明 root 删除用途'
+    $dotnetCacheEntries = @($productionPolicy.entries | Where-Object {
+        $_.id -ceq 'dotnet-bundle-extraction-cache'
+    })
+    Assert-True ($dotnetCacheEntries.Count -eq 1) '生产策略必须唯一声明 .NET bundle extraction cache capability root'
+    $dotnetCacheEntry = $dotnetCacheEntries[0]
+    Assert-True `
+        ($dotnetCacheEntry.capabilityRoot -ceq 'D:\Codex\temp\.net') `
+        '.NET bundle extraction cache capability root 必须精确指向 D:\Codex\temp\.net'
+    Assert-True `
+        ($dotnetCacheEntry.minimumDescendantDepth -eq 1 -and
+            $dotnetCacheEntry.rootDeletionPurpose -ceq 'none') `
+        '.NET bundle extraction cache capability 不得授权删除根目录自身'
+    Assert-True `
+        (@($dotnetCacheEntry.deniedExactPaths).Count -eq 1 -and
+            $dotnetCacheEntry.deniedExactPaths[0] -ceq 'D:\Codex\temp\.net\CodexProviderSync') `
+        '.NET bundle extraction cache capability 必须精确拒绝 CodexProviderSync'
     $productionPolicyExpectations = @(
         [pscustomobject]@{
             id = 'codex-managed-temp'

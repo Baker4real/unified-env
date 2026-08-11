@@ -30,6 +30,11 @@ adapter 未漂移，不代表新的 policy schema 已激活。真实目标操作
 `D:\Codex\projects\统一环境\.codex-remote-attachments` 为 capability root 删除其后代，
 最小后代深度为 1；附件根本身和其他项目顶层目录不在该授权面内。
 
+全局 .NET single-file bundle 解压缓存以 `D:\Codex\temp\.net` 为 capability root，
+最小后代深度为 1、root 删除用途为 `none`，并精确拒绝
+`D:\Codex\temp\.net\CodexProviderSync`。每个其他后代仍须单独完成受管计划与确认；
+该条目不授权删除 `.net` 根或被拒绝的同级缓存。
+
 解析器接受 policy schema v3、v4 与 v5；仓库当前生产 policy 仍是 v4，v5 激活尚未执行。
 不得用 v5 fixture、benchmark 或源码存在推断生产 policy 已迁移。`schemaVersion` 与
 `minimumDescendantDepth` 必须是真正的 JSON integer，不接受字符串或小数强转；v3 条目继续
