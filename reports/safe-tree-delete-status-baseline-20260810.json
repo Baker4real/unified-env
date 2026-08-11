@@ -1,0 +1,144 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-status-baseline",
+  "schemaVersion": 1,
+  "capturedAtUtc": "2026-08-10T15:04:00Z",
+  "purpose": "归档前的生产 Status 基线，用于验证受管归档对 blockingRecords 与 Status 成本的收敛效果",
+  "sourceIssue": 19,
+  "parentSpec": 18,
+  "codeRevision": {
+    "commit": "6d68fb4",
+    "subject": "feat: complete safe tree delete control plane follow-ups",
+    "note": "生产仓库 HEAD 与被审计 worktree 同一 commit，工作树干净"
+  },
+  "policyDriftSinceCapture": {
+    "note": "本基线采集后 policy 已变更，重跑 Status 对比时必须计入",
+    "capturedPolicySha256": "62bbb4bf1a292d3fd79595d53e21faa5372321407cb3e07880673cfd8288a82f",
+    "capturedPolicyEntryCount": 30,
+    "supersededByCommit": "ec05faf",
+    "supersededBySubject": "feat: govern .NET bundle cache cleanup",
+    "changeSummary": "新增 capability root D:\\Codex\\temp\\.net（dotnet-bundle-extraction-cache，minimumDescendantDepth=1、rootDeletionPurpose=none）",
+    "impact": "新增条目不影响本基线记录的任何统计——1980 条 operations 均在该条目登记前产生。但后续重跑 Status 时 policySha256 会不同，且 policyCompatible 的分布可能因 current-policy 漂移判定而变化"
+  },
+  "invocation": {
+    "entry": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+    "mode": "Status",
+    "json": true,
+    "exitCode": 0,
+    "stderrBytes": 0,
+    "wallClockSeconds": 502,
+    "note": "只读调用，未对生产证据根做任何写操作"
+  },
+  "metrics": {
+    "schemaVersion": 1,
+    "phase": "status",
+    "elapsedMs": 501018,
+    "entriesScanned": 4815,
+    "logicalBytes": 1234156276,
+    "bytesHashed": 1625526811,
+    "retry": { "contract": null, "attempts": 0, "result": "not-applicable" }
+  },
+  "governanceVerdict": {
+    "complete": false,
+    "policySchemaVersion": 4,
+    "policySha256": "62bbb4bf1a292d3fd79595d53e21faa5372321407cb3e07880673cfd8288a82f",
+    "migrationReadinessEvaluated": false,
+    "migrationReadinessReady": false,
+    "blockingRecordCount": 1674,
+    "terminalArchiveMarkerCount": 0
+  },
+  "operations": {
+    "total": 1980,
+    "byLifecycle": { "manual-review": 1662, "terminal": 306, "inconsistent": 12 },
+    "byPlanSchemaVersion": { "1": 1979, "null": 1 },
+    "byTransactionSchemaVersion": { "2": 1063, "1": 881, "null": 35, "planNull": 1 },
+    "physicalReclaimStatusValues": ["unknown"]
+  },
+  "v1ReadOnlyObservability": {
+    "note": "issue #14 的交付效果：v1 记录不再同形塌缩",
+    "v1RecordCount": 881,
+    "byTransactionStatus": {
+      "purged": 876,
+      "prepared": 2,
+      "rolled-back": 1,
+      "quarantined": 1,
+      "purging": 1
+    },
+    "nullTargetPathCount": 0,
+    "schemaCompatibleValues": [false],
+    "unterminatedTransactions": [
+      { "status": "rolled-back", "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin" },
+      { "status": "prepared", "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin" },
+      { "status": "prepared", "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin" },
+      { "status": "purging", "targetPath": "D:\\Codex\\projects\\时钟倒计时\\app" },
+      { "status": "quarantined", "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-d77a341ca599407f82af77a64d7f6253\\old-a" }
+    ]
+  },
+  "rebuildDiscrimination": {
+    "note": "issue #16 的交付效果：删除后重建不再误报为不一致",
+    "terminalWithTargetPresentCount": 104,
+    "allSuchRecordsPurged": true,
+    "rebuildableRootRecordCount": 12,
+    "rebuildableRootByLifecycle": { "terminal": 5, "inconsistent": 4, "manual-review": 3 },
+    "interpretation": "放宽未掩盖真实问题：rebuildable 根下仍保留 4 条 inconsistent 与 3 条 manual-review"
+  },
+  "archiveCandidates": {
+    "note": "issue #21 的输入。判据：transactionStatus=purged 且 quarantinePresent=false 且 lifecycle!=terminal",
+    "total": 1595,
+    "byTransactionSchemaVersion": { "1": 872, "2": 723 },
+    "allInBlockingRecords": true,
+    "policyCompatibleValues": [false],
+    "policyCompatibleNote": "全部候选 policyCompatible=false。权威 spec 第 122 行明确 current-policy 漂移不永久阻断历史 v1/v2 Archive，故不影响归档资格"
+  },
+  "projectedResidual": {
+    "note": "归档全部 1595 条候选后 blockingRecords 的预计剩余量。issue #21 的验收依据、#22/#23 的输入",
+    "blockingRecordCount": 79,
+    "completeCanFlip": false,
+    "breakdown": {
+      "transactionDocumentUnparsed": 69,
+      "v1Unterminated": 5,
+      "v2Unterminated": 1,
+      "purgedButStillManualReview": 4
+    },
+    "warning": "归档不足以让 complete 翻转为 true。必须先处理剩余 79 条。父 spec #11 曾预期归档即可解除阻塞，该预期已被本基线证伪"
+  },
+  "unparsedRecordGroups": {
+    "note": "issue #22 的输入。69 条事务文档未解析记录按错误串分组",
+    "total": 69,
+    "byLifecycle": { "manual-review": 57, "inconsistent": 12 },
+    "groups": [
+      { "count": 34, "error": "safe-delete capability root 不在受管 allowlist", "targetPathVisible": false, "operationIdSpan": "20260805T082602 → 20260809T121122" },
+      { "count": 15, "error": "safe-delete Status planned tree manifest 漂移", "targetPathVisible": true, "operationIdSpan": "20260725T010405 → 20260806T071750" },
+      { "count": 12, "error": "planned operation 的 target/quarantine namespace 不一致", "targetPathVisible": true, "operationIdSpan": "20260807T042959 → 20260810T035443" },
+      { "count": 6, "error": "planned operation namespace 不一致 + plan policy SHA 漂移", "targetPathVisible": true, "operationIdSpan": "20260725T124407 → 20260802T075059" },
+      { "count": 1, "error": "safe-delete target 未达到最小要求后代深度", "targetPathVisible": false, "operationIdSpan": "20260729T074213" },
+      { "count": 1, "error": "evidence record 缺少 plan.json", "operationId": "acl-capability-probe-20260801", "note": "权威 spec 已登记为 ACL freeze 能力探测基线，有意保留" }
+    ],
+    "ruledOut": "planSchemaVersion=1 曾被怀疑为异常成因，实测为全部 1979 条记录的正常值，已排除"
+  },
+  "reconciliation": {
+    "parentSpecFormula": "1742 = 1661 + 80 + 1",
+    "parentSpecBaselineRecordCount": 1828,
+    "currentRecordCount": 1980,
+    "applicable": false,
+    "reason": "父 spec 算式针对 1828 条记录的基线，当前已增至 1980 条，不能直接套用",
+    "currentDecomposition": "blockingRecords 1674 = v1 非 terminal 881 + 含 policy 错误 730 + 其他 73（三者存在交叉，非严格互斥）"
+  },
+  "userStoryStatus": {
+    "us1_subSecondStatus": {
+      "target": "秒级而非 4 分半内返回",
+      "actual": "502 秒",
+      "priorBaseline": "267 秒",
+      "verdict": "未达成，且慢于修复前",
+      "note": "记录数由 1828 增至 1980 只能解释部分增长。父 spec 未设精确耗时断言，故不构成验收失败，但这是提出该需求的原始动机"
+    }
+  },
+  "retainedEvidence": {
+    "directory": "safe-tree-delete-status-baseline-20260810-evidence",
+    "files": ["status-output.json"],
+    "note": "status-output.json 是完整的 -Mode Status -Json 原始输出（2.6 MB，1980 条 operations），可用于复算本文件的全部统计"
+  },
+  "unverified": [
+    "Test-CodexSafeTreeDeleteProductionSmoke 未运行（审计期间始终未运行）",
+    "本基线是 2026-08-10 的时间点快照；真实写操作前必须重新推导候选集与核验 live 状态"
+  ]
+}

@@ -1,0 +1,39 @@
+DONE_WITH_CONCERNS
+
+**整体判定**：核心逻辑已实现，区分能力真实存在，但有两个值得关注的问题。
+
+---
+
+**区分能力结论**：机制真实且可靠。判定依据是**目录 inode identity（VolumeSerialNumber + FileIndex）**：Plan 阶段快照目标目录的 FileIndex 存入 `plan.treeManifest.rootIdentity`；Status 阶段若 purged 事务的目标重新出现，比较当前 FileIndex 与快照值——不同则证明曾被删除重建（→ terminal），相同则证明从未被删除（→ throw → manual-review）。`status = 'purged'` 写入点（`CodexSafeTreeDelete.ps1:3408`）严格位于 leaf 全部删除成功且 postcheck 通过之后，链是闭合的。两个 fixture 场景磁盘状态真实不同：rebuilt 场景走完整 Plan→Apply→Purge 再重建；unproven 场景构造伪造事务（未执行实际删除），target FileIndex 与 plan 记录的 rootIdentity 相同，触发 throw。
+
+---
+
+**逐条 AC 判定**：
+
+| AC | 判定 | 关键证据 |
+|----|------|----------|
+| rebuildable-build-output 下目标重现不报不一致 | 已验证通过 | `CodexSafeTreeDelete.ps1:1532-1561` |
+| fixture 验证「删除后重建」→ terminal | 已验证通过 | `Test-CodexSafeTreeDeleteStatus.ps1:319-359` |
+| fixture 验证「从未被删除」→ 仍报问题 | 已验证通过 | `Test-CodexSafeTreeDeleteStatus.ps1:358-403` |
+| 无法区分时保持报错 | 已验证通过 | `CodexSafeTreeDelete.ps1:1554-1558`，identity 相同 → throw → manual-review |
+| 非 rebuildable-build-output 严格性不变 | 已验证通过 | `CodexSafeTreeDelete.ps1:1537-1541` + terminalDrift 测试 |
+| physicalReclaimStatus 继续为 unknown | 已验证通过 | `CodexSafeTreeDelete.ps1:70,3434,3835`，status test 行 360、404 |
+| 生产 80 条误报消除 | **无法验证** | `reports/` 无 Status 前后对比产物，仅有 benchmark/metrics evidence |
+| 既有测试保持通过 | **未执行** | 超时风险 + 禁止生产 Status |
+| 不新增测试 seam | 已验证通过（扩展） | Fixture 新增 Status/Restore/Archive 三个 Mode，是同一文件扩展，未创建第二个 seam |
+
+---
+
+**最严重的 1-3 个发现**：
+
+1. **`rootDeletionPurpose` 来自当前 policy，非事务自身快照**（`CodexSafeTreeDelete.ps1:1537-1539`，调用链经 `Read-CodexSafeTreeDeleteApprovedPlan` → `Resolve-CodexSafeTreeDeleteTarget` 查当前 policy entry）。plan.json 存 `policyEntryId` 但不快照 purpose 值。若将来把 policy 某条目 purpose 从 `rebuildable-build-output` 改为 `none`，所有引用该 entry 的历史 purged+target-present 记录会追溯性地由 terminal 变为 runtime throw。反向修改同样会追溯放宽判定。这是已知架构选择（与 policy SHA drift 模式一致），ticket 规格未要求 purpose 快照，但父 spec #11 声称「判定依据是事务自身记录的完成事实」——purpose 查当前 policy 与该表述有偏差。**应在运维文档中注明**。
+
+2. **生产 80 条误报消除的验收证据不在仓库中**（`reports/` 无 Status 前后对比输出）。AC7 需运维者在生产环境实际执行并保留结果，当前状态为无法验证。
+
+3. FileIndex 复用的理论极端场景（实践概率极低，ticket 规格未要求防御）：不作为缺陷报告，仅供知悉。
+
+---
+
+**测试执行结果**：未执行。原因：禁止生产 Status 运行，全套测试超时风险，结论基于静态代码路径分析与 diff 核查。
+
+**未验证项**：AC7（生产验收）、AC8（既有15个测试回归）。

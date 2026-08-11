@@ -1,0 +1,30 @@
+# Issue #13 [OPEN] runbook 补两条调用契约：所有权访问拒绝与退出码语义
+
+## Parent
+
+#11
+
+## What to build
+
+补齐两条一直缺失的调用契约文档。纯文档，不改代码。
+
+**其一：所有权导致的访问拒绝。** 2026-08-10 曾有一次 `Apply` 失败报 `Unable to open a verified directory in the path chain.`，agent 花了 7 个来回逐级探测路径链才定位，因为错误消息指向「路径链」而真实原因是权限。文档必须写明真实触发条件：当目标目录 owner 为 `BUILTIN\Administrators`（通常由提权进程创建或移入）时，目录链 guard 请求 `WRITE_DAC` 会以 `ERROR_ACCESS_DENIED` 失败。处置方式是在提权上下文执行 `Apply`，或先把目标 owner 改回当前用户。
+
+同时必须注明同一条错误消息也可能来自 `ERROR_SHARING_VIOLATION`（包括进程 CWD 本身持有目录句柄的情形），排查时需要区分这两种机制——否则会把句柄占用误诊为权限问题。
+
+**不得表述为「受管删除需要提权」。** 这个说法是错的：语料库中 `D:\Codex\tmp` 下 154 次操作有 145 次在非提权下成功。判别因素是目标目录所有权，不是令牌是否提权。
+
+**其二：退出码契约。** 当前 `exit 0` 且响应含 `refusalReason` 表示**未执行**。调用方必须检查 `quarantined` / `purged` / `completed` 布尔字段，不能仅凭退出码判定成功。这是有意设计（真实失败与策略违规走 `exit 1`；调用方未表达意图的 4 个 confirm 开关走 `exit 0` + 结构化 refusal），但从未被记载，导致只检查退出码的调用方会把「未删除」读成「已删除」。
+
+## Acceptance criteria
+
+- [ ] `host-runbook.md` 的受管安全树删除章节记载所有权导致 `ERROR_ACCESS_DENIED` 的真实触发条件与处置方式
+- [ ] 同一处注明 `ERROR_SHARING_VIOLATION` 会产生相同错误消息，并说明如何区分
+- [ ] 文档中不出现「受管删除需要提权」或等价的普适性表述
+- [ ] 同一章节记载退出码契约：`exit 0` + `refusalReason` 表示未执行，调用方必须检查布尔结果字段
+- [ ] 明确写出退出码行为本身不变，避免后续 agent 误改
+- [ ] 不改动任何脚本、policy 或退出码行为
+
+## Blocked by
+
+- None — can start immediately

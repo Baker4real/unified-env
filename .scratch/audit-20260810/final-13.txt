@@ -1,0 +1,20 @@
+Now I have sufficient evidence to write the report.
+
+---
+
+DONE_WITH_CONCERNS
+
+整体判定：文档（host-runbook.md）满足 #13 全部 6 条 AC，附带 spec 补充亦完整，无准确性错误。但同批 commit 对入口脚本 exit 逻辑存在一处行为变更，需关注。
+
+逐条判定摘要：
+- AC1 已验证通过：host-runbook.md:336-342 记载 BUILTIN\Administrators owner → WRITE_DAC → ERROR_ACCESS_DENIED(5) 及两种处置方式；错误消息字面量与 CodexHookHandleBoundIO.cs:1119/1175 精确一致。
+- AC2 已验证通过：host-runbook.md:340-342 注明同消息可来自 ERROR_SHARING_VIOLATION(32)，含进程 CWD 持有句柄情形，区分依据（Win32 错误码）明确。
+- AC3 已验证通过：host-runbook.md:342 明文「进程令牌是否提权不是通用前提」；其余提权/管理员出现均在无关章节，无普适性断言。
+- AC4 已验证通过：host-runbook.md:343-346 覆盖 exit 0+refusalReason=未执行、须检查 quarantined/purged/completed/archived。
+- AC5 已验证通过：host-runbook.md:346「退出码行为本身保持不变」。
+- AC6 部分实现（需关注）：policy.json diff 为空（未改动）；但 scripts/Invoke-CodexSafeTreeDelete.ps1 在 0cedb49..HEAD 新增末尾 exit 逻辑（:132-139），基线无任何 exit 语句，leaf-delete-failed 靠未捕获异常产生 exit 1；HEAD 在 -Json 模式改为结构化 JSON 后显式 exit 1——退出码值（1）不变，stdout 行为改变。该变更由 commit 3d4c647 的 ReturnFailureMetrics 引入，归属 #11，不是 #13 引入，但与 AC5 文档表述存在细微张力，需由 #11 审计代理确认合规性。
+- AC7附带 已验证通过：docs/specs/2026-07-24-safe-tree-delete-capability.md 新增 Status 章节明确记载 v1 只读可观测性（真实 transactionStatus/targetPath 输出）与不可恢复性（写入路径拒绝、禁止补写空 anchors），有实质内容。
+
+最严重发现：scripts/Invoke-CodexSafeTreeDelete.ps1:132-139（HEAD）—— -Json 模式 leaf-delete-failed 行为从无输出抛异常改为结构化 JSON+显式 exit 1；退出码值不变，但 stdout 接口有静默扩展，归属 #11。
+
+未验证项：host-runbook.md 不在仓库版本控制内，改动时点无法通过 git 证明，仅凭文件内容和 mtime(2026-08-10 20:13) 判定满足 AC；因果归属无法核实。
