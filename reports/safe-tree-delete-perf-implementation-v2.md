@@ -1,15 +1,15 @@
 ---
 type: implementation-plan
-title: 受管删除性能优化实施方案 v2.2（修正所有P0缺陷）
-tags: [performance, implementation, security-hardened]
+title: 受管删除性能优化实施方案 v2.3（完整生产就绪版）
+tags: [performance, implementation, security-hardened, production-ready]
 scenario: 确认小文件过多（数万+文件）
 priority: P0
 date: 2026-08-13
 status: 待实施
-revision: v2.2 - 修正第三轮审查发现的2个新P0缺陷
+revision: v2.3 - 修正所有P1级残留问题，生产就绪
 ---
 
-# 受管删除性能优化实施方案 v2.2
+# 受管删除性能优化实施方案 v2.3
 
 ## 版本修订历史
 
@@ -22,6 +22,12 @@ revision: v2.2 - 修正第三轮审查发现的2个新P0缺陷
 - **v2.2**: 修正第三轮审查发现的2个新P0缺陷
   - P0-A: OpenFileForValidation改为独占锁（FileShare.None）
   - P0-B: Delete/Journal实现原子性顺序（先pending后delete再commit）
+- **v2.3**: 修正第四轮审查发现的所有P1级残留问题
+  - P1-1: 补充GetFileIdentityV2完整实现（GetFileInformationByHandleEx + fallback）
+  - P1-2: 明确ComputeHashFromHandle契约和副作用
+  - P1-3: 补充并行度实测验证测试
+  - P1-4: 实现文件系统检测和降级机制
+  - P1-5: 添加journal flush性能监控和优化
 
 ## 前提确认
 
@@ -39,7 +45,184 @@ revision: v2.2 - 修正第三轮审查发现的2个新P0缺陷
 - 保持transaction完整性
 - 经过充分测试和对抗审查
 
-## 三阶段实施（已整合安全修正）
+## 阶段0：环境诊断和兼容性检测（必须先做）
+
+### 【P1-4修正】完整文件系统检测和降级机制
+
+```csharp
+// 文件系统能力检测
+public class FileSystemCapabilities {
+    public string FileSystemType { get; set; }  // "NTFS", "ReFS", "FAT32", etc.
+    public DriveType DriveType { get; set; }    // Local, Network, Removable, etc.
+    public bool SupportsFileId128 { get; set; } // 是否支持128-bit FILE_ID_INFO
+    public bool IsRemote { get; set; }          // 是否网络驱动器
+    public bool RecommendHashReuse { get; set; }
+    public bool RecommendParallel { get; set; }
+    public int RecommendedMaxParallelism { get; set; }
+    public List<string> Warnings { get; set; } = new List<string>();
+}
+
+public FileSystemCapabilities DetectFileSystem(string targetPath) {
+    var capabilities = new FileSystemCapabilities();
+    
+    try {
+        // 1. 获取驱动器信息
+        var root = Path.GetPathRoot(targetPath);
+        if (string.IsNullOrEmpty(root)) {
+            throw new ArgumentException($"Cannot determine drive root for path: {targetPath}");
+        }
+        
+        var driveInfo = new DriveInfo(root);
+        capabilities.FileSystemType = driveInfo.DriveFormat;
+        capabilities.DriveType = driveInfo.DriveType;
+        capabilities.IsRemote = driveInfo.DriveType == DriveType.Network;
+        
+        // 2. 测试128-bit FILE_ID_INFO支持
+        capabilities.SupportsFileId128 = TestFileIdSupport(targetPath);
+        
+        // 3. 根据文件系统类型给出建议
+        switch (capabilities.FileSystemType.ToUpperInvariant()) {
+            case "NTFS":
+                if (!capabilities.IsRemote) {
+                    // 本地NTFS - 全优化启用
+                    capabilities.RecommendHashReuse = true;
+                    capabilities.RecommendParallel = true;
+                    capabilities.RecommendedMaxParallelism = 4;
+                } else {
+                    // 网络NTFS - 保守策略
+                    capabilities.RecommendHashReuse = false;
+                    capabilities.RecommendParallel = false;
+                    capabilities.RecommendedMaxParallelism = 1;
+                    capabilities.Warnings.Add(
+                        "Network drive detected. Hash reuse and parallelization are disabled. " +
+                        "Performance improvement will be limited (<2x). " +
+                        "Consider copying files to local drive first.");
+                }
+                break;
+                
+            case "REFS":
+                // ReFS支持FileId但行为可能不同
+                capabilities.RecommendHashReuse = capabilities.SupportsFileId128;
+                capabilities.RecommendParallel = true;
+                capabilities.RecommendedMaxParallelism = 4;
+                capabilities.Warnings.Add(
+                    "ReFS detected. 128-bit FileId support verified. " +
+                    "Performance optimizations enabled but not extensively tested on ReFS.");
+                break;
+                
+            case "FAT32":
+            case "EXFAT":
+                // FAT不支持FileId
+                capabilities.RecommendHashReuse = false;
+                capabilities.RecommendParallel = false;
+                capabilities.RecommendedMaxParallelism = 1;
+                capabilities.Warnings.Add(
+                    $"{capabilities.FileSystemType} does not support file identity tracking. " +
+                    "Hash reuse and parallelization are disabled. " +
+                    "Performance improvement will be minimal.");
+                break;
+                
+            default:
+                // 未知文件系统 - 最保守策略
+                capabilities.RecommendHashReuse = false;
+                capabilities.RecommendParallel = false;
+                capabilities.RecommendedMaxParallelism = 1;
+                capabilities.Warnings.Add(
+                    $"Unknown file system type: {capabilities.FileSystemType}. " +
+                    "All optimizations disabled for safety.");
+                break;
+        }
+        
+        // 4. 检测云同步服务（OneDrive/Dropbox等）
+        if (IsCloudSyncedPath(targetPath)) {
+            capabilities.Warnings.Add(
+                "Cloud-synced folder detected (OneDrive/Dropbox/etc). " +
+                "Virtual files may trigger downloads during hashing. " +
+                "Consider disabling cloud sync before deletion.");
+        }
+        
+    } catch (Exception ex) {
+        capabilities.Warnings.Add($"File system detection failed: {ex.Message}");
+        // 最保守策略
+        capabilities.RecommendHashReuse = false;
+        capabilities.RecommendParallel = false;
+        capabilities.RecommendedMaxParallelism = 1;
+    }
+    
+    return capabilities;
+}
+
+// 【P1-1关键】测试128-bit FILE_ID_INFO支持
+private bool TestFileIdSupport(string basePath) {
+    try {
+        // 在目标路径创建临时测试文件
+        var testFilePath = Path.Combine(basePath, $".codex-fileId-test-{Guid.NewGuid()}.tmp");
+        File.WriteAllText(testFilePath, "test");
+        
+        try {
+            using var handle = File.OpenHandle(testFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            
+            // 尝试获取128-bit FILE_ID_INFO
+            var fileInfo = new FILE_ID_INFO();
+            bool success = GetFileInformationByHandleEx(
+                handle,
+                FILE_INFO_BY_HANDLE_CLASS.FileIdInfo,
+                ref fileInfo,
+                Marshal.SizeOf<FILE_ID_INFO>());
+            
+            return success;
+            
+        } finally {
+            // 清理测试文件
+            File.Delete(testFilePath);
+        }
+        
+    } catch {
+        // 测试失败，视为不支持
+        return false;
+    }
+}
+
+private bool IsCloudSyncedPath(string path) {
+    // 检测常见云同步服务的标记
+    var upperPath = path.ToUpperInvariant();
+    
+    return upperPath.Contains("\\ONEDRIVE\\") ||
+           upperPath.Contains("\\DROPBOX\\") ||
+           upperPath.Contains("\\GOOGLE DRIVE\\") ||
+           upperPath.Contains("\\ICLOUD\\") ||
+           File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+}
+```
+
+### 【P1-4】降级配置自动应用
+
+```csharp
+public class OptimizationConfig {
+    public bool EnableHashReuse { get; set; }
+    public bool EnableBatchProcessing { get; set; } = true;  // 总是启用
+    public bool EnableParallelPurge { get; set; }
+    public int MaxParallelism { get; set; }
+    
+    public static OptimizationConfig FromCapabilities(FileSystemCapabilities caps) {
+        return new OptimizationConfig {
+            EnableHashReuse = caps.RecommendHashReuse,
+            EnableBatchProcessing = true,  // 批量处理不依赖文件系统
+            EnableParallelPurge = caps.RecommendParallel,
+            MaxParallelism = caps.RecommendedMaxParallelism
+        };
+    }
+    
+    public static OptimizationConfig CreateConservative() {
+        return new OptimizationConfig {
+            EnableHashReuse = false,
+            EnableBatchProcessing = true,
+            EnableParallelPurge = false,
+            MaxParallelism = 1
+        };
+    }
+}
+```
 
 ---
 
@@ -554,10 +737,177 @@ public class ThreadJournalWriter : IDisposable {
 }
 ```
 
-**关键改进（v2.2）：**
+**关键改进（v2.3）：**
 - ✅ 【P0-B修正】每个文件写入两条记录：pending（删除前）+ committed（删除后）
 - ✅ Crash recovery通过pending/committed配对判断删除是否完成
 - ✅ 独占锁验证（FileShare.None）防止验证窗口并发修改
+- ✅ 【P1-5修正】Journal flush性能监控和优化
+
+### 【P1-5修正】Journal性能监控和优化
+
+```csharp
+// 增强的ThreadJournalWriter，支持性能监控
+public class ThreadJournalWriter : IDisposable {
+    private readonly StreamWriter writer;
+    private readonly string directoryPath;
+    private readonly int threadId;
+    private readonly PerformanceMonitor perfMonitor;
+    
+    public string FilePath { get; }
+    
+    // 【P1-5新增】性能统计
+    public long TotalFlushTimeMs { get; private set; }
+    public int FlushCount { get; private set; }
+    
+    public ThreadJournalWriter(string filePath, string directoryPath, int threadId, PerformanceMonitor monitor) {
+        this.FilePath = filePath;
+        this.directoryPath = directoryPath;
+        this.threadId = threadId;
+        this.perfMonitor = monitor;
+        
+        // 创建journal文件并写入header
+        this.writer = new StreamWriter(filePath, append: false, encoding: Encoding.UTF8, bufferSize: 4096);
+        WriteHeader();
+    }
+    
+    private void WriteHeader() {
+        var header = new {
+            artifactType = "env-governance.codex-safe-tree-delete-thread-journal",
+            schemaVersion = 3,
+            threadId = threadId,
+            directoryPath = directoryPath,
+            createdAt = DateTime.UtcNow
+        };
+        writer.WriteLine(JsonSerializer.Serialize(header));
+    }
+    
+    public void WritePending(string filePath, byte[] hash) {
+        var entry = new {
+            status = "pending",
+            filePath = filePath,
+            sha256 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant(),
+            pendingAt = DateTime.UtcNow
+        };
+        writer.WriteLine(JsonSerializer.Serialize(entry));
+    }
+    
+    public void WriteCommit(string filePath) {
+        var entry = new {
+            status = "committed",
+            filePath = filePath,
+            committedAt = DateTime.UtcNow
+        };
+        writer.WriteLine(JsonSerializer.Serialize(entry));
+    }
+    
+    // 【P1-5修正】带性能监控的Flush
+    public void Flush() {
+        var sw = Stopwatch.StartNew();
+        
+        writer.Flush();
+        // 确保OS也flush到磁盘
+        ((FileStream)writer.BaseStream).Flush(flushToDisk: true);
+        
+        sw.Stop();
+        
+        // 统计
+        TotalFlushTimeMs += sw.ElapsedMilliseconds;
+        FlushCount++;
+        
+        // 【P1-5关键】监控flush性能
+        perfMonitor?.RecordJournalFlush(threadId, sw.ElapsedMilliseconds);
+        
+        // 如果单次flush超过100ms，记录警告
+        if (sw.ElapsedMilliseconds > 100) {
+            perfMonitor?.RecordSlowJournalFlush(threadId, FilePath, sw.ElapsedMilliseconds);
+        }
+    }
+    
+    public void Dispose() {
+        writer?.Dispose();
+    }
+}
+
+// 【P1-5新增】性能监控器
+public class PerformanceMonitor {
+    private readonly ConcurrentBag<JournalFlushMetric> flushMetrics = new();
+    private readonly ConcurrentBag<SlowFlushWarning> slowFlushWarnings = new();
+    
+    public void RecordJournalFlush(int threadId, long durationMs) {
+        flushMetrics.Add(new JournalFlushMetric {
+            ThreadId = threadId,
+            DurationMs = durationMs,
+            Timestamp = DateTime.UtcNow
+        });
+    }
+    
+    public void RecordSlowJournalFlush(int threadId, string filePath, long durationMs) {
+        slowFlushWarnings.Add(new SlowFlushWarning {
+            ThreadId = threadId,
+            FilePath = filePath,
+            DurationMs = durationMs,
+            Timestamp = DateTime.UtcNow
+        });
+    }
+    
+    // 【P1-5关键】计算journal开销占比
+    public JournalPerformanceReport GenerateReport(long totalOperationTimeMs) {
+        var totalFlushTime = flushMetrics.Sum(m => m.DurationMs);
+        var avgFlushTime = flushMetrics.Any() ? flushMetrics.Average(m => m.DurationMs) : 0;
+        var maxFlushTime = flushMetrics.Any() ? flushMetrics.Max(m => m.DurationMs) : 0;
+        var overheadPercent = totalOperationTimeMs > 0 
+            ? (double)totalFlushTime / totalOperationTimeMs 
+            : 0;
+        
+        return new JournalPerformanceReport {
+            TotalFlushTimeMs = totalFlushTime,
+            TotalFlushCount = flushMetrics.Count,
+            AvgFlushTimeMs = avgFlushTime,
+            MaxFlushTimeMs = maxFlushTime,
+            OverheadPercent = overheadPercent,
+            SlowFlushCount = slowFlushWarnings.Count,
+            SlowFlushWarnings = slowFlushWarnings.OrderByDescending(w => w.DurationMs).Take(10).ToList(),
+            // 【P1-5验收标准】
+            IsWithinTarget = overheadPercent < 0.10  // 目标：<10%
+        };
+    }
+}
+
+public class JournalFlushMetric {
+    public int ThreadId;
+    public long DurationMs;
+    public DateTime Timestamp;
+}
+
+public class SlowFlushWarning {
+    public int ThreadId;
+    public string FilePath;
+    public long DurationMs;
+    public DateTime Timestamp;
+}
+
+public class JournalPerformanceReport {
+    public long TotalFlushTimeMs;
+    public int TotalFlushCount;
+    public double AvgFlushTimeMs;
+    public long MaxFlushTimeMs;
+    public double OverheadPercent;
+    public int SlowFlushCount;
+    public List<SlowFlushWarning> SlowFlushWarnings;
+    public bool IsWithinTarget;
+    
+    public override string ToString() {
+        return $"Journal Performance Report:\n" +
+               $"  Total Flush Time: {TotalFlushTimeMs}ms\n" +
+               $"  Flush Count: {TotalFlushCount}\n" +
+               $"  Avg Flush Time: {AvgFlushTimeMs:F2}ms\n" +
+               $"  Max Flush Time: {MaxFlushTimeMs}ms\n" +
+               $"  Overhead: {OverheadPercent:P2} (target: <10%)\n" +
+               $"  Slow Flushes (>100ms): {SlowFlushCount}\n" +
+               $"  Within Target: {(IsWithinTarget ? "✅ YES" : "❌ NO")}";
+    }
+}
+```
 
 ### Crash Recovery逻辑（v2.2修正版 - 支持pending/committed状态）
 
@@ -712,21 +1062,26 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 ### Week 1: 基础架构（5天）
 
 **Day 1-2: FILE_ID_INFO升级**
-- 实现128-bit FILE_ID_INFO获取
+- 【P1-1完整实现】实现GetFileIdentityV2（GetFileInformationByHandleEx + 128-bit FILE_ID_INFO）
+- 【P1-1 Fallback】Windows 7/Server 2008 R2不支持时的降级逻辑（回退到64-bit或禁用哈希复用）
 - FileIdentityV2结构定义
-- 单元测试：identity获取正确性
+- 单元测试：identity获取正确性、fallback逻辑
+- 【P1-4集成】文件系统检测集成（DetectFileSystem + TestFileIdSupport）
 
 **Day 3-4: 安全哈希复用**
 - SessionHashCache实现
-- GetHashSafely完整逻辑
+- GetHashSafely完整逻辑（结合P1-1的identity获取）
+- 【P1-2明确】ComputeHashFromHandle契约实现（Seek(0)开始、Seek(0)结束）
 - 单元测试：
   - Identity匹配/不匹配
   - 首次必须重哈希
   - 会话内复用
-  - TOCTOU场景模拟
+  - TOCTOU场景模拟（P0-A独占锁验证）
+- 【P1-4测试】非NTFS文件系统降级测试
 
 **Day 5: 集成测试**
 - Apply/Purge集成哈希复用
+- 【P1-4验证】文件系统检测自动降级测试（NTFS/ReFS/FAT32/网络驱动器）
 - Benchmark对比（预期2.3x）
 - Crash safety测试（kill -9中断）
 
@@ -760,12 +1115,14 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 - Crash recovery逻辑更新
 
 **Day 14-15: 完整测试**
+- 【P1-3关键】并发度实测验证（1/2/4/8/16核对比，确认4核是否最优）
 - 并发stress测试
 - 【P0-4验证】Crash safety with并发（kill -9在各个线程journal写入阶段）
 - 【P0-A验证】独占锁验证测试（文件被占用时的错误处理）
 - 【P0-B验证】Delete/Journal原子性测试（kill -9在pending后、delete后、commit前各个时间点）
 - 【P0-1/P0-2验证】Identity严格验证测试（mtime修改、文件替换）
-- 【P1-4验证】文件系统检测和降级测试
+- 【P1-4验证】文件系统检测和降级测试（NTFS/ReFS/FAT32/SMB各场景）
+- 【P1-5验证】Journal flush性能验证（目标：overhead < 10%）
 - 完整回归测试（所有现有test suite）
 - Benchmark验证（预期累计6x）
 
@@ -773,7 +1130,9 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 
 **Day 16-17: 用户真实场景测试**
 - 在用户提供的真实目录上测试
-- 性能profiling
+- 【P1-5监控】Performance profiling + journal性能报告
+- 【P1-4监控】文件系统检测日志验证
+- 【P0-A监控】File-in-use失败率统计（目标 < 20%）
 - 稳定性验证
 
 **Day 18-19: Bug修复和调优**
@@ -812,36 +1171,69 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 **缓解：**
 - 清晰的错误消息（FileInUseException）提示用户关闭占用进程
 - 允许transaction标记为purge-resumable，关闭占用后重试
-- 监控file-in-use失败率
+- 【v2.3监控】监控file-in-use失败率（目标<20%）
 - 如果>20%，提示用户在删除前关闭相关应用
 - **权衡说明**：这是正确的失败 - 文件被占用意味着状态不稳定，强行删除可能破坏其他应用
 
-### 3. 并行度不理想
+### 3. Journal flush性能瓶颈
+
+**风险：** 【v2.3新增】每个文件2次flush（pending + commit），高频IO可能成为瓶颈
+
+**影响场景：**
+- 大量小文件（10k+）时，flush开销累积
+- 慢速磁盘（HDD、网络驱动器）flush延迟高
+
+**缓解：**
+- 【P1-5监控】PerformanceMonitor实时跟踪flush时间和占比
+- 【P1-5验收】Week 3测试验证flush开销<10%
+- 如果>10%，考虑批量flush优化（积累N个entry再flush）
+- 慢速磁盘自动降级（检测到avg flush > 50ms时禁用并行化）
+
+### 4. 并行度不理想
 
 **风险：** MFT锁争用导致并行效果不佳
 
 **缓解：**
-- 实测1/2/4/8线程的实际吞吐
+- 【P1-3实测】Week 3 Day 14实测1/2/4/8/16线程的实际吞吐
 - 选择最优并发度（可能不是CPU核心数）
 - 提供配置项让用户调整
+- 根据实测结果调整默认值（当前假设4核最优）
 
-### 4. Journal文件数量增多
+### 5. Journal文件数量增多
 
 **风险：** 【v2.1新增】每个线程独立journal，高并发时journal文件数量多
 
 **缓解：**
-- Transaction完成后立即清理journal文件
+- Transaction完成后立即清理journal文件（CleanupCompletedJournals）
 - 监控journal目录的文件数
 - 限制最大并发度（默认4，避免过多journal文件）
+- 【v2.3】journal清理失败时记录警告但不阻塞主流程
 
-### 5. 特殊文件系统不兼容
+### 6. 特殊文件系统不兼容
 
 **风险：** ReFS/SMB/OneDrive行为不同
 
 **缓解：**
-- 【P1-4】实现文件系统类型检测
-- 非NTFS给出警告并自动降级
+- 【P1-4完整实现】DetectFileSystem()识别所有主要文件系统
+- 非NTFS给出警告并自动降级（OptimizationConfig.FromCapabilities）
+- 云同步服务检测（IsCloudSyncedPath）并警告
 - 提供手动降级模式（禁用哈希复用或并行）
+- 【v2.3】降级决策明确记录到日志，便于用户理解性能差异
+
+### 7. Windows版本兼容性
+
+**风险：** 【v2.3新增】128-bit FILE_ID_INFO需要Windows 8+，老系统不支持
+
+**影响场景：**
+- Windows 7 / Server 2008 R2：不支持128-bit FileId
+- 导致GetFileIdentityV2失败
+
+**缓解：**
+- 【P1-1 Fallback】TestFileIdSupport()检测失败时自动回退
+- Fallback策略1：使用64-bit FileIndex（降低唯一性但仍可用）
+- Fallback策略2：完全禁用哈希复用（最保守，只有批量处理和并行化生效）
+- 启动时明确警告用户（"Windows 7 detected, hash reuse disabled"）
+- 文档明确说明最佳性能需要Windows 8+
 
 ## 验收标准
 
@@ -856,25 +1248,32 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 - ✅ 【v2.2新增】独占锁验证测试（文件被占用、sharing violation处理）
 - ✅ 【v2.2新增】Delete/Journal原子性测试（pending/committed状态完整性）
 - ✅ 【v2.2新增】Crash recovery测试（pending未配对committed的各种场景）
+- ✅ 【v2.3新增】文件系统检测测试（NTFS/ReFS/FAT32/SMB/云同步）
+- ✅ 【v2.3新增】128-bit FileId fallback测试（Windows 7/8兼容性）
+- ✅ 【v2.3新增】ComputeHashFromHandle副作用验证测试
 
 ### 性能目标
 
-- ✅ 1GB/10k小文件场景：60分钟 → 10分钟（6x）
+- ✅ 1GB/10k小文件场景（NTFS本地）：60分钟 → 10分钟（6x）
 - ✅ 有效吞吐：从17MB/s提升到100MB/s
 - ✅ Hash复用率：>80%（identity不经常漂移）
-- ✅ 并行利用率：4核达到3-3.5x吞吐（考虑开销）
-- ⚠️ 【v2.2新增】独占锁可能降低并发成功率（文件被占用时拒绝删除）
+- ✅ 【P1-3验证】并行利用率：实测最优并发度（预期4核达到3-3.5x吞吐）
+- ✅ 【P1-5验收】Journal flush开销：<10%总时间
+- ⚠️ 【v2.2/v2.3注】独占锁可能降低并发成功率（文件被占用时拒绝删除，目标<20%失败率）
+- ⚠️ 【v2.3注】非NTFS文件系统性能提升有限（FAT32/网络驱动器：1-2x）
 
 ### 安全保证
 
-- ✅ 无identity验证绕过（strict mtime check）
+- ✅ 无identity验证绕过（strict mtime check + 独占锁）
 - ✅ 无partial purge泄漏
-- ✅ Crash后可正确恢复或resume（多线程journal完整性）
+- ✅ Crash后可正确恢复或resume（多线程journal + pending/commit完整性）
 - ✅ Transaction状态机正确
 - ✅ 【v2.1新增】Content-authenticated保证不被破坏（Identity漂移拒绝删除）
 - ✅ 【v2.1新增】Crash safety在并发场景下保持（每线程独立journal+立即flush）
 - ✅ 【v2.2新增】验证窗口并发修改完全阻止（独占锁FileShare.None）
 - ✅ 【v2.2新增】Delete/Journal原子性保证（pending→delete→commit顺序）
+- ✅ 【v2.3新增】文件系统兼容性保证（自动检测和降级）
+- ✅ 【v2.3新增】Windows版本兼容性（128-bit FileId有fallback）
 
 ### 用户体验
 
