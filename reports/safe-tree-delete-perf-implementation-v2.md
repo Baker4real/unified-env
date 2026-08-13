@@ -1,15 +1,15 @@
 ---
 type: implementation-plan
-title: 受管删除性能优化实施方案 v2.3（完整生产就绪版）
+title: 受管删除性能优化实施方案 v2.4（修正P0编译错误）
 tags: [performance, implementation, security-hardened, production-ready]
 scenario: 确认小文件过多（数万+文件）
 priority: P0
 date: 2026-08-13
 status: 待实施
-revision: v2.3 - 修正所有P1级残留问题，生产就绪
+revision: v2.4 - 修正v2.3的2个P0编译错误和4个P1缺陷
 ---
 
-# 受管删除性能优化实施方案 v2.3
+# 受管删除性能优化实施方案 v2.4
 
 ## 版本修订历史
 
@@ -28,6 +28,13 @@ revision: v2.3 - 修正所有P1级残留问题，生产就绪
   - P1-3: 补充并行度实测验证测试
   - P1-4: 实现文件系统检测和降级机制
   - P1-5: 添加journal flush性能监控和优化
+- **v2.4**: 修正第五轮审查发现的2个P0编译错误和4个P1缺陷
+  - P0-1: 修正FILE_ID_INFO结构体（byte[]改为嵌入式FILE_ID_128结构体）
+  - P0-2: 修正GetFileIdentityV2实现（使用GetFileInformationByHandle获取size/mtime）
+  - P1-1: 补充ComputeHashFromHandle完整实现和契约文档
+  - P1-2: FileIdentityV2实现IEquatable和正确的Equals/GetHashCode
+  - P1-3: ThreadJournalWriter生命周期管理（ThreadLocal + finally cleanup）
+  - P1-4: Crash recovery增加uncertain状态处理
 
 ## 前提确认
 
@@ -241,12 +248,47 @@ public class OptimizationConfig {
 
 ```csharp
 // 文件Identity结构（升级到128-bit）
-public struct FileIdentityV2 {
+public struct FileIdentityV2 : IEquatable<FileIdentityV2> {
     public ulong VolumeSerialNumber;
     public byte[] FileId128;  // 升级：128-bit FILE_ID_INFO
     public long FileSize;
     public DateTime LastWriteTimeUtc;
     public DateTime CapturedAtUtc;  // Plan阶段的捕获时间
+    
+    // 【P1-2修正】实现IEquatable以支持正确的比较
+    public bool Equals(FileIdentityV2 other) {
+        return VolumeSerialNumber == other.VolumeSerialNumber &&
+               FileId128.SequenceEqual(other.FileId128) &&
+               FileSize == other.FileSize &&
+               LastWriteTimeUtc == other.LastWriteTimeUtc;
+        // 注意：CapturedAtUtc 不参与比较
+    }
+    
+    public override bool Equals(object obj) {
+        return obj is FileIdentityV2 other && Equals(other);
+    }
+    
+    public override int GetHashCode() {
+        unchecked {
+            int hash = 17;
+            hash = hash * 31 + VolumeSerialNumber.GetHashCode();
+            hash = hash * 31 + FileSize.GetHashCode();
+            hash = hash * 31 + LastWriteTimeUtc.GetHashCode();
+            // FileId128 的前8字节参与 hash
+            if (FileId128 != null && FileId128.Length >= 8) {
+                hash = hash * 31 + BitConverter.ToInt64(FileId128, 0).GetHashCode();
+            }
+            return hash;
+        }
+    }
+    
+    public static bool operator ==(FileIdentityV2 left, FileIdentityV2 right) {
+        return left.Equals(right);
+    }
+    
+    public static bool operator !=(FileIdentityV2 left, FileIdentityV2 right) {
+        return !left.Equals(right);
+    }
 }
 
 // 会话内Hash缓存（防止TOCTOU）
@@ -327,6 +369,32 @@ public byte[] GetHashSafely(
     } finally {
         handle?.Dispose();
     }
+}
+
+// 【P1-1修正】ComputeHashFromHandle完整实现和契约
+/// <summary>
+/// 从文件句柄计算 SHA256 hash。
+/// 
+/// 契约：
+/// - 调用前：handle 的 position 可以在任意位置
+/// - 调用后：handle 的 position 重置为 0
+/// - 副作用：会修改 handle 的 position
+/// - 线程安全：不安全，同一 handle 不能并发调用
+/// </summary>
+private byte[] ComputeHashFromHandle(SafeFileHandle handle) {
+    using var stream = new FileStream(handle, FileAccess.Read, 
+                                      bufferSize: 81920, isAsync: false);
+    
+    // 确保从文件开头读取
+    stream.Seek(0, SeekOrigin.Begin);
+    
+    using var sha256 = SHA256.Create();
+    byte[] hash = sha256.ComputeHash(stream);
+    
+    // 重置 position 到开头（明确契约）
+    stream.Seek(0, SeekOrigin.Begin);
+    
+    return hash;
 }
 
 // 【P0-A修正】明确OpenFileForValidation的完整实现 - 独占锁
@@ -1438,20 +1506,20 @@ $config.EnableParallelPurge = $false
 
 ---
 
-## 附录A：P1级待办事项（实施时处理）
+## 附录A：P0/P1级修正详细实现
 
-### P1-1: GetFileIdentityV2实现（已明确API）
+### P0-1/P0-2: GetFileIdentityV2完整实现
 
 ```csharp
-// 【P1-1补充】获取128-bit FILE_ID_INFO
+// 【P0-2修正】获取128-bit FILE_ID_INFO + 文件基本信息
 private FileIdentityV2 GetFileIdentityV2(SafeFileHandle handle) {
-    // 使用GetFileInformationByHandleEx获取128-bit FILE_ID_INFO
-    var fileInfo = new FILE_ID_INFO();
+    // 1. 获取 128-bit FILE_ID_INFO
+    var fileIdInfo = new FILE_ID_INFO();
     
     if (!GetFileInformationByHandleEx(
         handle,
         FILE_INFO_BY_HANDLE_CLASS.FileIdInfo,
-        ref fileInfo,
+        ref fileIdInfo,
         Marshal.SizeOf<FILE_ID_INFO>())) {
         
         int error = Marshal.GetLastWin32Error();
@@ -1459,37 +1527,226 @@ private FileIdentityV2 GetFileIdentityV2(SafeFileHandle handle) {
             $"Failed to get FILE_ID_INFO. This file system may not support 128-bit FileId.");
     }
     
-    var fileSize = new FileInfo(handle).Length;
-    var lastWriteTime = File.GetLastWriteTimeUtc(handle);
+    // 2. 获取文件基本信息（包含 size 和 mtime）
+    BY_HANDLE_FILE_INFORMATION fileInfo;
+    if (!GetFileInformationByHandle(handle, out fileInfo)) {
+        int error = Marshal.GetLastWin32Error();
+        throw new Win32Exception(error, "Failed to get file information.");
+    }
+    
+    // 3. 计算 file size (64-bit)
+    long fileSize = ((long)fileInfo.nFileSizeHigh << 32) | fileInfo.nFileSizeLow;
+    
+    // 4. 转换 FILETIME 到 DateTime
+    long ftLastWriteTime = ((long)fileInfo.ftLastWriteTime.dwHighDateTime << 32) | 
+                           fileInfo.ftLastWriteTime.dwLowDateTime;
+    DateTime lastWriteTime = DateTime.FromFileTimeUtc(ftLastWriteTime);
     
     return new FileIdentityV2 {
-        VolumeSerialNumber = fileInfo.VolumeSerialNumber,
-        FileId128 = fileInfo.FileId,  // 128-bit identifier
+        VolumeSerialNumber = fileIdInfo.VolumeSerialNumber,
+        FileId128 = fileIdInfo.FileId.ToArray(),  // 转换为 byte[]
         FileSize = fileSize,
         LastWriteTimeUtc = lastWriteTime,
         CapturedAtUtc = DateTime.UtcNow
     };
 }
 
+// 【P0-2补充】需要的额外 P/Invoke 声明
 [StructLayout(LayoutKind.Sequential)]
-private struct FILE_ID_INFO {
-    public ulong VolumeSerialNumber;
-    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
-    public byte[] FileId;  // 128-bit
+private struct BY_HANDLE_FILE_INFORMATION {
+    public uint dwFileAttributes;
+    public FILETIME ftCreationTime;
+    public FILETIME ftLastAccessTime;
+    public FILETIME ftLastWriteTime;
+    public uint dwVolumeSerialNumber;
+    public uint nFileSizeHigh;
+    public uint nFileSizeLow;
+    public uint nNumberOfLinks;
+    public uint nFileIndexHigh;
+    public uint nFileIndexLow;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+private struct FILETIME {
+    public uint dwLowDateTime;
+    public uint dwHighDateTime;
 }
 
 [DllImport("kernel32.dll", SetLastError = true)]
-private static extern bool GetFileInformationByHandleEx(
+private static extern bool GetFileInformationByHandle(
     SafeFileHandle hFile,
-    FILE_INFO_BY_HANDLE_CLASS FileInformationClass,
-    ref FILE_ID_INFO lpFileInformation,
-    int dwBufferSize);
+    out BY_HANDLE_FILE_INFORMATION lpFileInformation);
+```
 
-private enum FILE_INFO_BY_HANDLE_CLASS {
-    FileIdInfo = 18
+### P1-3: ThreadJournalWriter生命周期管理
+
+```csharp
+// 【P1-3修正】完整的生命周期管理
+public class ParallelPurgeCoordinator : IDisposable {
+    private readonly int maxParallelism;
+    private readonly string journalBaseDir;
+    private readonly string transactionId;
+    private readonly PerformanceMonitor perfMonitor;
+    
+    // 每个线程的 journal writer 缓存
+    private readonly ThreadLocal<ThreadJournalWriter> threadJournals = 
+        new ThreadLocal<ThreadJournalWriter>(trackAllValues: true);
+    
+    private void PurgeDirectoryFilesParallel(DirectoryEntry dir) {
+        var files = dir.GetFiles();
+        var failures = new ConcurrentQueue<(string path, Exception ex)>();
+        var threadJournalPaths = new ConcurrentBag<string>();
+        
+        try {
+            var parallelOptions = new ParallelOptions {
+                MaxDegreeOfParallelism = maxParallelism
+            };
+            
+            Parallel.ForEach(files, parallelOptions, (file, state) => {
+                var threadId = Thread.CurrentThread.ManagedThreadId;
+                
+                // 获取或创建线程局部 journal（每个目录一个新的）
+                var threadJournal = GetOrCreateThreadJournal(dir.Path, threadId);
+                threadJournalPaths.Add(threadJournal.FilePath);
+                
+                try {
+                    // 1. Pending entry
+                    threadJournal.WritePending(file.Path, file.Hash);
+                    threadJournal.Flush();
+                    
+                    // 2. Delete file
+                    File.Delete(file.Path);
+                    
+                    // 3. Commit entry
+                    threadJournal.WriteCommit(file.Path);
+                    threadJournal.Flush();
+                    
+                } catch (Exception ex) {
+                    failures.Enqueue((file.Path, ex));
+                    state.Stop();
+                }
+            });
+            
+        } finally {
+            // 清理所有线程的 journal writers
+            CleanupThreadJournals();
+        }
+        
+        // 写主 journal checkpoint
+        WriteMainJournalCheckpoint(dir.Path, threadJournalPaths.ToList());
+        
+        if (failures.TryDequeue(out var firstFailure)) {
+            throw new PartialPurgeException($"Failed to delete {firstFailure.path}", 
+                                           firstFailure.ex);
+        }
+    }
+    
+    private ThreadJournalWriter GetOrCreateThreadJournal(string directoryPath, int threadId) {
+        // 每个目录创建新的 journal writer
+        // 不复用之前目录的 writer
+        if (threadJournals.Value != null) {
+            threadJournals.Value.Dispose();
+        }
+        
+        var journalPath = Path.Combine(
+            journalBaseDir,
+            $"transaction-{transactionId}.thread-{threadId}.dir-{Path.GetFileName(directoryPath)}.json");
+        
+        var writer = new ThreadJournalWriter(journalPath, directoryPath, threadId, perfMonitor);
+        threadJournals.Value = writer;
+        
+        return writer;
+    }
+    
+    private void CleanupThreadJournals() {
+        // Dispose 所有线程的 journal writers
+        if (threadJournals.Values != null) {
+            foreach (var writer in threadJournals.Values) {
+                writer?.Dispose();
+            }
+        }
+        threadJournals.Dispose();
+    }
+    
+    public void Dispose() {
+        CleanupThreadJournals();
+    }
 }
 ```
-需要在Week 1-2实现：
+
+### P1-4: Crash recovery增加uncertain状态处理
+
+```csharp
+// 【P1-4修正】安全的crash recovery
+public class RecoveryState {
+    public string Status { get; set; }  // "purge-resumable", "uncertain", "completed"
+    public List<string> RemainingFiles { get; set; } = new List<string>();
+    public List<string> CompletedFiles { get; set; } = new List<string>();
+    public List<string> UncertainFiles { get; set; } = new List<string>();  // 【新增】
+    public string Message { get; set; }
+}
+
+private RecoveryState RecoverFromCrash(string journalPath) {
+    var journal = ReadJournal(journalPath);
+    var pendingFiles = journal.Entries.Where(e => e.State == "pending").ToDictionary(e => e.FilePath);
+    var committedFiles = journal.Entries.Where(e => e.State == "committed").Select(e => e.FilePath).ToHashSet();
+    
+    var remainingFiles = new List<string>();
+    var deletedFiles = new HashSet<string>();
+    var uncertainFiles = new List<string>();
+    
+    foreach (var pendingEntry in pendingFiles.Values) {
+        if (File.Exists(pendingEntry.FilePath)) {
+            // 文件仍存在 → 需要验证 hash 并重新删除
+            try {
+                using var handle = File.OpenHandle(pendingEntry.FilePath, 
+                    FileMode.Open, FileAccess.Read, FileShare.None);
+                
+                var currentHash = ComputeHashFromHandle(handle);
+                var expectedHash = HexStringToBytes(pendingEntry.Hash);
+                
+                if (currentHash.SequenceEqual(expectedHash)) {
+                    // Hash 匹配，这是我们要删除的文件
+                    remainingFiles.Add(pendingEntry.FilePath);
+                } else {
+                    // Hash 不匹配，文件已被修改
+                    throw new RecoveryException(
+                        $"Pending file has been modified since crash: {pendingEntry.FilePath}. " +
+                        $"Expected hash: {pendingEntry.Hash}, actual: {BitConverter.ToString(currentHash)}");
+                }
+            } catch (FileNotFoundException) {
+                // 文件在检查过程中被删除（竞争条件）
+                uncertainFiles.Add(pendingEntry.FilePath);
+            }
+        } else {
+            // 文件不存在，无法验证
+            // 可能是：1. 我们的删除完成了（committed 未写入）
+            //        2. 其他进程删除的
+            // 保守处理：标记为 uncertain，需要用户确认
+            uncertainFiles.Add(pendingEntry.FilePath);
+        }
+    }
+    
+    // 已提交的文件计入完成
+    deletedFiles.UnionWith(committedFiles);
+    
+    return new RecoveryState {
+        Status = remainingFiles.Count > 0 ? "purge-resumable" : 
+                 uncertainFiles.Count > 0 ? "uncertain" : "completed",
+        RemainingFiles = remainingFiles,
+        CompletedFiles = deletedFiles.ToList(),
+        UncertainFiles = uncertainFiles,
+        Message = uncertainFiles.Count > 0 
+            ? $"Warning: {uncertainFiles.Count} files were in pending state but no longer exist. " +
+              "Cannot verify if deletion completed correctly. Manual verification recommended." 
+            : null
+    };
+}
+```
+
+---
+
+## 附录B：P1-4文件系统检测（已在v2.3实现）
 
 ```csharp
 public FileSystemCapabilities DetectFileSystem(string path) {
