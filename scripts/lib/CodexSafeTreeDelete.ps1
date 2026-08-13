@@ -1,5 +1,165 @@
 Set-StrictMode -Version Latest
 
+$codexSafeTreeDeleteFileIdentitySource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteFileIdentity.cs'
+$codexSafeTreeDeleteHashCacheSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteHashCache.cs'
+if (-not ('CodexSafeTreeDelete.FileIdentityReader' -as [type])) {
+    Add-Type -Path $codexSafeTreeDeleteFileIdentitySource, $codexSafeTreeDeleteHashCacheSource -ErrorAction Stop
+}
+
+function Get-CodexSafeTreeDeleteFileIdentityV2 {
+    param(
+        [Parameter(Mandatory)]
+        [string]$LiteralPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LiteralPath)) {
+        throw 'LiteralPath 不得为空。'
+    }
+
+    return [CodexSafeTreeDelete.FileIdentityReader]::GetFileIdentityV2($LiteralPath)
+}
+
+function Get-CodexSafeTreeDeleteHashSafely {
+    param(
+        [Parameter(Mandatory)]
+        [string]$LiteralPath,
+        [Parameter(Mandatory)]
+        [CodexSafeTreeDelete.FileIdentityV2]$ExpectedIdentity,
+        [Parameter(Mandatory)]
+        [CodexSafeTreeDelete.SessionHashCache]$SessionCache
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LiteralPath)) {
+        throw 'LiteralPath 不得为空。'
+    }
+
+    return [CodexSafeTreeDelete.FileHashComputer]::GetHashSafely(
+        $LiteralPath,
+        $ExpectedIdentity,
+        $SessionCache
+    )
+}
+
+function ConvertTo-CodexSafeTreeDeleteAbsolutePathFromRelative {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][string]$RelativePath
+    )
+
+    if ($RelativePath -ceq '.') {
+        throw 'fileIdentitiesV2 不得使用根目录 relativePath。'
+    }
+    Assert-CodexHookDirectoryTreeRelativePath `
+        -RelativePath $RelativePath `
+        -Scope 'safe-delete plan fileIdentitiesV2'
+    $absolutePath = $TargetPath
+    foreach ($segment in $RelativePath.Split('/')) {
+        $absolutePath = Join-Path $absolutePath $segment
+    }
+    return $absolutePath
+}
+
+function ConvertTo-CodexSafeTreeDeleteUtcText {
+    param([Parameter(Mandatory)][datetime]$Value)
+
+    if ($Value.Kind -ne [DateTimeKind]::Utc) {
+        throw 'FileIdentityV2 时间必须是 UTC。'
+    }
+    return [datetimeoffset]::new($Value).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function ConvertTo-CodexSafeTreeDeleteUInt64JsonInteger {
+    param(
+        [Parameter(Mandatory)][AllowNull()]$Value,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    if ($null -eq $Value) {
+        throw "$Scope 必须是 JSON integer。"
+    }
+    if ($Value -is [UInt64]) {
+        return [UInt64]$Value
+    }
+    if ($Value -is [long]) {
+        if ([long]$Value -lt 0L) {
+            throw "$Scope 必须是非负 JSON integer。"
+        }
+        return [UInt64][long]$Value
+    }
+    if ($Value -is [int]) {
+        if ([int]$Value -lt 0) {
+            throw "$Scope 必须是非负 JSON integer。"
+        }
+        return [UInt64][int]$Value
+    }
+    if ($Value -is [decimal]) {
+        if ([decimal]$Value -lt 0 -or
+            [decimal]$Value -ne [Math]::Truncate([decimal]$Value) -or
+            [decimal]$Value -gt [decimal][UInt64]::MaxValue) {
+            throw "$Scope 必须是 uint64 JSON integer。"
+        }
+        return [UInt64][decimal]$Value
+    }
+    if ($Value -is [Numerics.BigInteger]) {
+        if ($Value -lt [Numerics.BigInteger]::Zero -or
+            $Value -gt [Numerics.BigInteger][UInt64]::MaxValue) {
+            throw "$Scope 必须是 uint64 JSON integer。"
+        }
+        return [UInt64]$Value
+    }
+    throw "$Scope 必须是 JSON integer。"
+}
+
+function ConvertTo-CodexSafeTreeDeleteFileIdentityV2Record {
+    param(
+        [Parameter(Mandatory)][string]$RelativePath,
+        [Parameter(Mandatory)]$Identity
+    )
+
+    if ($Identity -isnot [CodexSafeTreeDelete.FileIdentityV2]) {
+        throw 'safe-delete plan fileIdentitiesV2 必须来自 FileIdentityV2。'
+    }
+    if ($null -eq $Identity.FileId128 -or $Identity.FileId128.Length -ne 16) {
+        throw 'safe-delete plan fileIdentitiesV2 FileId128 必须是 16 字节。'
+    }
+
+    return [pscustomobject][ordered]@{
+        relativePath = $RelativePath
+        volumeSerialNumber = [UInt64]$Identity.VolumeSerialNumber
+        fileId128 = [Convert]::ToBase64String([byte[]]$Identity.FileId128)
+        fileSize = [long]$Identity.FileSize
+        lastWriteTimeUtc = ConvertTo-CodexSafeTreeDeleteUtcText -Value $Identity.LastWriteTimeUtc
+        capturedAtUtc = ConvertTo-CodexSafeTreeDeleteUtcText -Value $Identity.CapturedAtUtc
+    }
+}
+
+function New-CodexSafeTreeDeletePlanFileIdentitiesV2 {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][object]$TreeManifest
+    )
+
+    $records = [Collections.Generic.List[object]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in @($TreeManifest.entries)) {
+        if ([string]$entry.kind -cne 'file') { continue }
+        $relativePath = [string]$entry.relativePath
+        if (-not $seen.Add($relativePath)) {
+            throw "safe-delete plan fileIdentitiesV2 relativePath 重复：$relativePath"
+        }
+        $absolutePath = ConvertTo-CodexSafeTreeDeleteAbsolutePathFromRelative `
+            -TargetPath $TargetPath `
+            -RelativePath $relativePath
+        $identity = Get-CodexSafeTreeDeleteFileIdentityV2 -LiteralPath $absolutePath
+        $records.Add((
+            ConvertTo-CodexSafeTreeDeleteFileIdentityV2Record `
+                -RelativePath $relativePath `
+                -Identity $identity
+        ))
+    }
+    return $records
+}
+
 function New-CodexSafeTreeDeleteMetricsState {
     param([Parameter(Mandatory)][string]$Phase)
 
@@ -83,6 +243,25 @@ function Assert-CodexSafeTreeDeleteExactProperties {
     $actual = @($Value.PSObject.Properties.Name)
     if (@($actual | Where-Object { $_ -notin $Names }).Count -ne 0 -or
         @($Names | Where-Object { $_ -notin $actual }).Count -ne 0) {
+        throw "$Scope 属性集合非法。"
+    }
+}
+
+function Assert-CodexSafeTreeDeletePlanDocumentProperties {
+    param(
+        [Parameter(Mandatory)][object]$Plan,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    $required = @(
+        'artifactType', 'schemaVersion', 'generationId', 'createdAtUtc', 'expiresAtUtc',
+        'policyPath', 'policySha256', 'policyEntryId', 'targetPath', 'capabilityRoot',
+        'treeManifest', 'summary'
+    )
+    $allowed = $required + @('fileIdentitiesV2')
+    $actual = @($Plan.PSObject.Properties.Name)
+    if (@($actual | Where-Object { $_ -notin $allowed }).Count -ne 0 -or
+        @($required | Where-Object { $_ -notin $actual }).Count -ne 0) {
         throw "$Scope 属性集合非法。"
     }
 }
@@ -658,6 +837,9 @@ function New-CodexSafeTreeDeletePlan {
     $topLevelEntries = @($tree.entries | Where-Object {
         $_.relativePath -cne '.' -and $_.relativePath -notmatch '/'
     } | ForEach-Object { [string]$_.relativePath })
+    $fileIdentitiesV2 = New-CodexSafeTreeDeletePlanFileIdentitiesV2 `
+        -TargetPath $target.targetPath `
+        -TreeManifest $tree
     $document = [pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-safe-tree-delete-plan'
         schemaVersion = 1
@@ -670,6 +852,7 @@ function New-CodexSafeTreeDeletePlan {
         targetPath = $target.targetPath
         capabilityRoot = $target.capabilityRoot
         treeManifest = $tree
+        fileIdentitiesV2 = @($fileIdentitiesV2)
         summary = [pscustomobject][ordered]@{
             fileCount = @($tree.entries | Where-Object kind -ceq 'file').Count
             directoryCount = @($tree.entries | Where-Object kind -ceq 'directory').Count
@@ -709,6 +892,137 @@ function New-CodexSafeTreeDeletePlan {
         expiresAtUtc = $document.expiresAtUtc
         metrics = Complete-CodexSafeTreeDeleteMetrics -State $metricsState
     }
+}
+
+function ConvertFrom-CodexSafeTreeDeleteFileIdentityV2Record {
+    param(
+        [Parameter(Mandatory)][object]$Record,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    Assert-CodexSafeTreeDeleteExactProperties `
+        -Value $Record `
+        -Names @(
+            'relativePath', 'volumeSerialNumber', 'fileId128',
+            'fileSize', 'lastWriteTimeUtc', 'capturedAtUtc'
+        ) `
+        -Scope $Scope
+    if ($Record.relativePath -isnot [string]) {
+        throw "$Scope relativePath 必须是 JSON string。"
+    }
+    $relativePath = [string]$Record.relativePath
+    Assert-CodexHookDirectoryTreeRelativePath -RelativePath $relativePath -Scope $Scope
+    if ($relativePath -ceq '.') {
+        throw "$Scope 不得使用根目录 relativePath。"
+    }
+    $volumeSerialNumber = ConvertTo-CodexSafeTreeDeleteUInt64JsonInteger `
+        -Value $Record.volumeSerialNumber `
+        -Scope "$Scope volumeSerialNumber"
+    if ($Record.fileId128 -isnot [string]) {
+        throw "$Scope fileId128 必须是 Base64 JSON string。"
+    }
+    try {
+        $fileId128 = [Convert]::FromBase64String([string]$Record.fileId128)
+    } catch {
+        throw "$Scope fileId128 不是合法 Base64。"
+    }
+    if ($null -eq $fileId128 -or $fileId128.Length -ne 16) {
+        throw "$Scope fileId128 解码后必须是 16 字节。"
+    }
+    if ($Record.fileSize -isnot [long] -or [long]$Record.fileSize -lt 0L) {
+        throw "$Scope fileSize 必须是非负 JSON integer。"
+    }
+    $lastWrite = [datetimeoffset]::MinValue
+    if ($Record.lastWriteTimeUtc -isnot [string] -or
+        -not [datetimeoffset]::TryParseExact(
+            [string]$Record.lastWriteTimeUtc,
+            'o',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind,
+            [ref]$lastWrite)) {
+        throw "$Scope lastWriteTimeUtc 非法。"
+    }
+    $captured = [datetimeoffset]::MinValue
+    if ($Record.capturedAtUtc -isnot [string] -or
+        -not [datetimeoffset]::TryParseExact(
+            [string]$Record.capturedAtUtc,
+            'o',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind,
+            [ref]$captured)) {
+        throw "$Scope capturedAtUtc 非法。"
+    }
+
+    $identity = [CodexSafeTreeDelete.FileIdentityV2]::new()
+    $identity.VolumeSerialNumber = $volumeSerialNumber
+    $identity.FileId128 = $fileId128
+    $identity.FileSize = [long]$Record.fileSize
+    $identity.LastWriteTimeUtc = $lastWrite.UtcDateTime
+    $identity.CapturedAtUtc = $captured.UtcDateTime
+    return [pscustomobject][ordered]@{
+        relativePath = $relativePath
+        identity = $identity
+    }
+}
+
+function Read-CodexSafeTreeDeleteFileIdentityV2FromPlan {
+    param([Parameter(Mandatory)][object]$Plan)
+
+    if ($null -eq $Plan -or $null -eq $Plan.PSObject) {
+        throw 'safe-delete plan 不是对象。'
+    }
+    if ($Plan.artifactType -cne 'env-governance.codex-safe-tree-delete-plan') {
+        throw 'safe-delete plan artifact 非法。'
+    }
+    if (-not (@($Plan.PSObject.Properties.Name) -contains 'fileIdentitiesV2')) {
+        throw 'safe-delete plan 缺少 fileIdentitiesV2，拒绝将旧 identity 假装为 FileIdentityV2。'
+    }
+    if ($Plan.fileIdentitiesV2 -isnot [Array]) {
+        throw 'safe-delete plan fileIdentitiesV2 必须是 JSON array。'
+    }
+    if ($null -eq $Plan.treeManifest -or $null -eq $Plan.treeManifest.PSObject) {
+        throw 'safe-delete plan treeManifest 非法。'
+    }
+
+    $plannedFilePaths = [Collections.Generic.List[string]]::new()
+    $plannedFileSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in @($Plan.treeManifest.entries)) {
+        if ([string]$entry.kind -cne 'file') { continue }
+        $relativePath = [string]$entry.relativePath
+        if (-not $plannedFileSet.Add($relativePath)) {
+            throw "safe-delete plan treeManifest file relativePath 重复：$relativePath"
+        }
+        $plannedFilePaths.Add($relativePath)
+    }
+
+    $records = [Collections.Generic.List[object]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $index = 0
+    foreach ($record in @($Plan.fileIdentitiesV2)) {
+        $converted = ConvertFrom-CodexSafeTreeDeleteFileIdentityV2Record `
+            -Record $record `
+            -Scope "safe-delete plan fileIdentitiesV2[$index]"
+        if (-not $seen.Add([string]$converted.relativePath)) {
+            throw "safe-delete plan fileIdentitiesV2 relativePath 重复：$($converted.relativePath)"
+        }
+        $records.Add($converted)
+        $index += 1
+    }
+
+    if ($seen.Count -ne $plannedFileSet.Count -or
+        @($plannedFileSet | Where-Object { -not $seen.Contains($_) }).Count -ne 0) {
+        throw 'safe-delete plan fileIdentitiesV2 必须与 treeManifest file 集合精确对应。'
+    }
+
+    $byPath = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+    foreach ($record in $records) {
+        $byPath.Add([string]$record.relativePath, $record)
+    }
+    $ordered = [Collections.Generic.List[object]]::new()
+    foreach ($relativePath in $plannedFilePaths) {
+        $ordered.Add($byPath[$relativePath])
+    }
+    return $ordered
 }
 
 function Get-CodexSafeTreeDeleteNamespaceState {
@@ -867,13 +1181,8 @@ function Read-CodexSafeTreeDeleteArchiveSource {
     }
     Assert-CodexHookStrictJsonText -JsonText $planSnapshot.text
     $plan = $planSnapshot.text | ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
-    Assert-CodexSafeTreeDeleteExactProperties `
-        -Value $plan `
-        -Names @(
-            'artifactType', 'schemaVersion', 'generationId', 'createdAtUtc', 'expiresAtUtc',
-            'policyPath', 'policySha256', 'policyEntryId', 'targetPath', 'capabilityRoot',
-            'treeManifest', 'summary'
-        ) `
+    Assert-CodexSafeTreeDeletePlanDocumentProperties `
+        -Plan $plan `
         -Scope 'safe-delete archive plan'
     if ($plan.artifactType -cne 'env-governance.codex-safe-tree-delete-plan' -or
         $plan.schemaVersion -isnot [long] -or [long]$plan.schemaVersion -ne 1L) {
@@ -1944,13 +2253,8 @@ function Read-CodexSafeTreeDeleteApprovedPlan {
     if ($snapshot.sha256 -cne $ApprovedPlanSha256) { throw 'safe-delete approved plan SHA-256 不匹配。' }
     Assert-CodexHookStrictJsonText -JsonText $snapshot.text
     $plan = $snapshot.text | ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
-    Assert-CodexSafeTreeDeleteExactProperties `
-        -Value $plan `
-        -Names @(
-            'artifactType', 'schemaVersion', 'generationId', 'createdAtUtc', 'expiresAtUtc',
-            'policyPath', 'policySha256', 'policyEntryId', 'targetPath', 'capabilityRoot',
-            'treeManifest', 'summary'
-        ) `
+    Assert-CodexSafeTreeDeletePlanDocumentProperties `
+        -Plan $plan `
         -Scope 'safe-delete plan'
     if ($plan.artifactType -cne 'env-governance.codex-safe-tree-delete-plan' -or [int]$plan.schemaVersion -ne 1) {
         throw 'safe-delete plan artifact/schema 非法。'

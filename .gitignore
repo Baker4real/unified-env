@@ -13,6 +13,8 @@ reports/codex-hook-config-test/
 reports/codex-state-policy-test/
 reports/catalog-guard-tests-*/
 reports/safe-tree-delete-test-*/
+reports/safe-tree-delete-production-smoke-*/
+reports/safe-tree-delete-batch-smoke-*/
 .serena/
 .codex-remote-attachments/
 .codex/skill-state/
