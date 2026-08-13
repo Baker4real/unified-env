@@ -22,6 +22,8 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 - allowlist：`managed\safe-tree-delete\policy.json`
 - evidence：`D:\Codex\.codex\run-evidence\safe-tree-delete\<run-id>\`
 
+2026-08-13 起新 Plan 会并列写出 `fileIdentitiesV2`（128-bit `FILE_ID_INFO`）。现役 Apply/Purge 仍只认证 `treeManifest` 的内容哈希与 64-bit FileIndex；缺少 `FILE_ID_INFO` 的卷上新 Plan 失败关闭。性能优化进度见 `docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`。
+
 宿主 PowerShell wrapper 是仓库 `scripts\invoke-codex-safe-tree-delete-host.ps1` 的受管副本，
 直接转发到仓库生产脚本；因此仓库生产代码改动会进入宿主调用路径。wrapper hash 一致只证明
 adapter 未漂移，不代表新的 policy schema 已激活。真实目标操作前仍须核对当前 policy 与 `Status`。

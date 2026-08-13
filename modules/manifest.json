@@ -274,6 +274,14 @@
       "ownership": {
         "files": [
           "docs/specs/2026-07-24-safe-tree-delete-capability.md",
+          "docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md",
+          "reports/adversarial-review-round4-final.md",
+          "reports/adversarial-review-round5.md",
+          "reports/adversarial-review-round6-v2.4.md",
+          "reports/safe-tree-delete-emergency-perf-fix-plan.md",
+          "reports/safe-tree-delete-perf-adversarial-review.md",
+          "reports/safe-tree-delete-perf-executive-summary.md",
+          "reports/safe-tree-delete-perf-implementation-v2.md",
           "modules/host-safety/lib/EnvPathSafety.ps1",
           "modules/host-safety/lib/ReportArtifactPublisher.ps1",
           "modules/host-safety/lib/TrustedReportInput.ps1",
@@ -314,6 +322,7 @@
         ],
         "prefixes": [
           ".scratch/audit-20260810/",
+          ".scratch/safe-tree-delete-perf/",
           "managed/safe-tree-delete/"
         ]
       },

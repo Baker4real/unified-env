@@ -17,7 +17,10 @@ safe delete 的宿主公开入口仍是 `D:\Codex\.codex\scripts\invoke-safe-tre
 
 ## 权威合同
 
-- `docs/specs/2026-07-24-safe-tree-delete-capability.md`
+- 删除语义与生产 policy：`docs/specs/2026-07-24-safe-tree-delete-capability.md`
+- 性能优化（部分落地）：`docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`
+
+2026-08-13 起仓库含 `scripts/lib/CodexSafeTreeDeleteFileIdentity.cs` 与 `scripts/lib/CodexSafeTreeDeleteHashCache.cs`。Plan 会并列写出 `fileIdentitiesV2`；新 Plan 在不支持 `FILE_ID_INFO` 的卷上失败关闭。Apply/Purge 仍只认证 `treeManifest`，不调用 `GetHashSafely`。剩余票从 GitHub #32 起。
 
 ## 测试
 
