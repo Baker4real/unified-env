@@ -1,14 +1,24 @@
 ---
 type: implementation-plan
-title: 受管删除性能优化实施方案 v2.0（已整合对抗审查）
+title: 受管删除性能优化实施方案 v2.1（修正P0缺陷）
 tags: [performance, implementation, security-hardened]
 scenario: 确认小文件过多（数万+文件）
 priority: P0
 date: 2026-08-13
 status: 待实施
+revision: v2.1 - 修正第二轮审查发现的4个P0致命缺陷
 ---
 
-# 受管删除性能优化实施方案 v2.0
+# 受管删除性能优化实施方案 v2.1
+
+## 版本修订历史
+
+- **v2.0**: 整合第一轮对抗审查的P0修正
+- **v2.1**: 修正第二轮审查发现的4个P0致命缺陷
+  - P0-1: 移除LastWriteTime容忍窗口，改为严格验证
+  - P0-2: Identity漂移改为抛异常拒绝删除
+  - P0-3: 明确OpenFileForValidation的完整实现
+  - P0-4: 改为每线程独立journal文件+立即flush
 
 ## 前提确认
 
@@ -65,7 +75,7 @@ private class SessionHashCache {
     }
 }
 
-// 安全的Hash复用逻辑
+// 安全的Hash复用逻辑（v2.1修正版）
 public byte[] GetHashSafely(
     string path, 
     byte[] planHash,
@@ -74,17 +84,26 @@ public byte[] GetHashSafely(
     
     SafeFileHandle handle = null;
     try {
-        // 1. 以READ + DELETE sharing打开（阻止write）
+        // 1. 以READ + DELETE sharing打开（明确禁止write）
         handle = OpenFileForValidation(path);
         
         // 2. 获取当前FILE_ID_INFO (128-bit)
         var currentIdentity = GetFileIdentityV2(handle);
         
-        // 3. 快速检查：Identity是否匹配
+        // 3. 【P0-2修正】严格检查：Identity必须完全匹配
         if (!IdentityMatches(currentIdentity, planIdentity)) {
-            // Identity漂移，必须完整重哈希
-            LogWarning($"Identity drift detected for {path}, full rehash required");
-            return ComputeHashFromHandle(handle);
+            // Identity漂移视为验证失败，拒绝删除
+            throw new FileModifiedException(
+                $"File identity changed since Plan: {path}. " +
+                $"Expected: Vol={planIdentity.VolumeSerialNumber:X}, " +
+                $"FileId={BitConverter.ToString(planIdentity.FileId128)}, " +
+                $"Size={planIdentity.FileSize}, " +
+                $"Mtime={planIdentity.LastWriteTimeUtc:O}. " +
+                $"Current: Vol={currentIdentity.VolumeSerialNumber:X}, " +
+                $"FileId={BitConverter.ToString(currentIdentity.FileId128)}, " +
+                $"Size={currentIdentity.FileSize}, " +
+                $"Mtime={currentIdentity.LastWriteTimeUtc:O}. " +
+                $"This indicates the file was modified, replaced, or recreated.");
         }
         
         // 4. 检查是否在本会话内已验证过
@@ -103,7 +122,9 @@ public byte[] GetHashSafely(
         if (!actualHash.SequenceEqual(planHash)) {
             // Hash不匹配，内容已改变
             throw new FileModifiedException(
-                $"File content changed since Plan: {path}");
+                $"File content changed since Plan: {path}. " +
+                $"Expected hash: {BitConverter.ToString(planHash)}, " +
+                $"Actual hash: {BitConverter.ToString(actualHash)}");
         }
         
         // 6. 验证通过，加入会话缓存
@@ -122,12 +143,33 @@ public byte[] GetHashSafely(
     }
 }
 
+// 【P0-3修正】明确OpenFileForValidation的完整实现
+private SafeFileHandle OpenFileForValidation(string path) {
+    // 明确sharing模式：只允许Read和Delete，禁止Write
+    // 这样可以阻止其他进程在验证过程中修改文件
+    return File.OpenHandle(
+        path,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.Read | FileShare.Delete,  // 只share读和删，明确禁止写
+        FileOptions.SequentialScan
+    );
+}
+
+// 【P0-1修正】严格的Identity验证，移除容忍窗口
 private bool IdentityMatches(FileIdentityV2 a, FileIdentityV2 b) {
     return a.VolumeSerialNumber == b.VolumeSerialNumber &&
            a.FileId128.SequenceEqual(b.FileId128) &&
            a.FileSize == b.FileSize &&
-           // LastWriteTime只检查没有变新（允许clock skew）
-           a.LastWriteTimeUtc <= b.LastWriteTimeUtc.AddSeconds(2);
+           // 【P0-1修正】严格验证：mtime必须完全相等
+           // 不允许任何容忍窗口，避免TOCTOU漏洞
+           a.LastWriteTimeUtc == b.LastWriteTimeUtc;
+}
+
+// 【P1-1修正】明确CacheKey实现，确保全局唯一
+private string GetCacheKey(string path, FileIdentityV2 identity) {
+    // 使用完整路径 + FileId，确保不同目录的同名文件不会冲突
+    return $"{path.ToLowerInvariant()}|{identity.VolumeSerialNumber:X16}|{BitConverter.ToString(identity.FileId128)}";
 }
 ```
 
@@ -198,6 +240,9 @@ public BatchPurgeResult PurgeFileBatch(BatchPurgeRequest request) {
             // 验证通过，执行删除
             DeleteFileWithPosixSemantics(file.Path, request.Guard);
             
+            // 【P1-2修正】立即写journal，保证crash safety
+            request.Journal.WriteCommit(file.Path, hash);
+            
             result.DeletedPaths.Add(file.Path);
             result.SuccessCount++;
             
@@ -266,10 +311,11 @@ for ($i = 0; $i -lt $manifest.entries.Count; $i += $batchSize) {
 ### 安全设计（修正crash safety缺陷）
 
 ```csharp
-// 并行Purge设计
+// 【P0-4修正】并行Purge设计 - 每线程独立journal
 public class ParallelPurgeCoordinator {
     private readonly int maxParallelism;
-    private readonly JournalWriter mainJournal;
+    private readonly string journalBaseDir;
+    private readonly string transactionId;
     
     public ParallelPurgeCoordinator(int maxParallelism = 4) {
         this.maxParallelism = Math.Min(maxParallelism, Environment.ProcessorCount);
@@ -285,16 +331,14 @@ public class ParallelPurgeCoordinator {
             DeleteDirectory(dir.Path);
             
             // 写目录级checkpoint（串行）
-            mainJournal.WriteDirectoryCommit(dir.Path);
+            WriteMainJournalCheckpoint(dir.Path);
         }
     }
     
     private void PurgeDirectoryFilesParallel(DirectoryEntry dir) {
         var files = dir.GetFiles();
-        
-        // 线程局部journal
-        var threadJournals = new ConcurrentDictionary<int, List<string>>();
         var failures = new ConcurrentQueue<(string path, Exception ex)>();
+        var threadJournalPaths = new ConcurrentBag<string>();
         
         // 并行删除文件
         var parallelOptions = new ParallelOptions {
@@ -304,132 +348,246 @@ public class ParallelPurgeCoordinator {
         Parallel.ForEach(files, parallelOptions, (file, state) => {
             var threadId = Thread.CurrentThread.ManagedThreadId;
             
+            // 【P0-4关键修正】每个线程有独立的journal文件
+            var threadJournal = GetOrCreateThreadJournal(dir.Path, threadId);
+            threadJournalPaths.Add(threadJournal.FilePath);
+            
             try {
                 // 删除单个文件
                 DeleteFileWithValidation(file);
                 
-                // 记录到线程局部journal
-                var journal = threadJournals.GetOrAdd(threadId, _ => new List<string>());
-                journal.Add(file.Path);
+                // 【P0-4关键修正】立即写入线程journal并flush
+                // 确保crash时已删除的文件有journal记录
+                threadJournal.WriteCommit(file.Path, file.Hash);
+                threadJournal.Flush();  // 立即持久化到磁盘
                 
             } catch (Exception ex) {
-                // 记录失败，但继续处理其他文件
+                // 【P1-3修正】任何失败都立即停止所有线程
                 failures.Enqueue((file.Path, ex));
-                
-                // 如果是严重错误（非sharing violation），停止所有线程
-                if (!IsRetriableError(ex)) {
-                    state.Stop();
-                }
+                state.Stop();  // 停止所有线程
             }
         });
         
-        // 【关键】所有线程完成后，合并journal（串行）
-        MergeThreadJournals(dir.Path, threadJournals);
+        // 所有线程完成后，写入目录级checkpoint到主journal
+        WriteMainJournalCheckpoint(dir.Path, threadJournalPaths.ToList());
         
         // 如果有失败，抛出第一个错误
         if (failures.TryDequeue(out var firstFailure)) {
             throw new PartialPurgeException(
                 $"Failed to delete {firstFailure.path}",
-                firstFailure.ex,
-                threadJournals.Values.SelectMany(x => x).ToList());
+                firstFailure.ex);
         }
     }
     
-    private void MergeThreadJournals(
-        string directoryPath, 
-        ConcurrentDictionary<int, List<string>> threadJournals) {
+    // 获取或创建线程局部journal文件
+    private ThreadJournalWriter GetOrCreateThreadJournal(string directoryPath, int threadId) {
+        // 命名模式：transaction-{guid}.thread-{tid}.json
+        var journalPath = Path.Combine(
+            journalBaseDir,
+            $"transaction-{transactionId}.thread-{threadId}.json");
         
-        // 按线程ID排序（确保可重复性）
-        var sortedThreads = threadJournals.Keys.OrderBy(x => x).ToList();
+        return new ThreadJournalWriter(journalPath, directoryPath, threadId);
+    }
+    
+    // 写主journal的目录checkpoint
+    private void WriteMainJournalCheckpoint(string directoryPath, List<string> threadJournalPaths = null) {
+        var mainJournalPath = Path.Combine(
+            journalBaseDir,
+            $"transaction-{transactionId}.main.json");
         
-        foreach (var threadId in sortedThreads) {
-            var deletedFiles = threadJournals[threadId];
-            
-            // 批量写入主journal
-            mainJournal.WriteBatchCommit(directoryPath, deletedFiles, threadId);
+        using (var writer = new StreamWriter(mainJournalPath, append: true)) {
+            var checkpoint = new {
+                directoryPath = directoryPath,
+                allFilesDeleted = true,
+                threadJournals = threadJournalPaths ?? new List<string>(),
+                timestamp = DateTime.UtcNow
+            };
+            writer.WriteLine(JsonSerializer.Serialize(checkpoint));
         }
+    }
+}
+
+// 线程局部journal writer
+public class ThreadJournalWriter : IDisposable {
+    private readonly StreamWriter writer;
+    private readonly string directoryPath;
+    private readonly int threadId;
+    public string FilePath { get; }
+    
+    public ThreadJournalWriter(string filePath, string directoryPath, int threadId) {
+        this.FilePath = filePath;
+        this.directoryPath = directoryPath;
+        this.threadId = threadId;
         
-        // 刷新到磁盘
-        mainJournal.Flush();
+        // 创建journal文件并写入header
+        this.writer = new StreamWriter(filePath, append: false);
+        WriteHeader();
+    }
+    
+    private void WriteHeader() {
+        var header = new {
+            artifactType = "env-governance.codex-safe-tree-delete-thread-journal",
+            schemaVersion = 3,
+            threadId = threadId,
+            directoryPath = directoryPath,
+            createdAt = DateTime.UtcNow
+        };
+        writer.WriteLine(JsonSerializer.Serialize(header));
+    }
+    
+    public void WriteCommit(string filePath, byte[] hash) {
+        var commit = new {
+            filePath = filePath,
+            sha256 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant(),
+            deletedAt = DateTime.UtcNow
+        };
+        writer.WriteLine(JsonSerializer.Serialize(commit));
+    }
+    
+    public void Flush() {
+        writer.Flush();
+        // 确保OS也flush到磁盘
+        ((FileStream)writer.BaseStream).Flush(flushToDisk: true);
+    }
+    
+    public void Dispose() {
+        writer?.Dispose();
     }
 }
 ```
 
-### Journal格式升级（支持并行）
+### Journal格式升级（支持并行 + 线程独立journal）
 
+**主Journal格式（transaction-{guid}.main.json）：**
 ```json
 {
-  "artifactType": "env-governance.codex-safe-tree-delete-purge-journal",
+  "artifactType": "env-governance.codex-safe-tree-delete-main-journal",
   "schemaVersion": 3,
-  "commits": [
-    {
-      "directoryPath": "D:\\target\\subdir1",
-      "threadId": 12345,
-      "deletedFiles": ["file1.txt", "file2.txt", "file3.txt"],
-      "timestamp": "2026-08-13T10:30:15.123Z"
-    },
-    {
-      "directoryPath": "D:\\target\\subdir1",
-      "threadId": 12346,
-      "deletedFiles": ["file4.txt", "file5.txt"],
-      "timestamp": "2026-08-13T10:30:15.456Z"
-    },
-    {
-      "directoryPath": "D:\\target\\subdir1",
-      "threadId": 12347,
-      "deletedFiles": ["file6.txt"],
-      "timestamp": "2026-08-13T10:30:15.789Z"
-    }
-  ],
+  "transactionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "createdAt": "2026-08-13T10:30:00.000Z",
   "directoryCheckpoints": [
     {
       "path": "D:\\target\\subdir1",
       "allFilesDeleted": true,
+      "threadJournals": [
+        "transaction-a1b2c3d4.thread-12345.json",
+        "transaction-a1b2c3d4.thread-12346.json"
+      ],
       "timestamp": "2026-08-13T10:30:16.000Z"
     }
   ]
 }
 ```
 
-### Crash Recovery逻辑
+**线程Journal格式（transaction-{guid}.thread-{tid}.json）：**
+```json
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-thread-journal",
+  "schemaVersion": 3,
+  "threadId": 12345,
+  "directoryPath": "D:\\target\\subdir1",
+  "createdAt": "2026-08-13T10:30:10.000Z",
+  "commits": [
+    {
+      "filePath": "D:\\target\\subdir1\\file1.txt",
+      "sha256": "abc123...",
+      "deletedAt": "2026-08-13T10:30:11.123Z"
+    },
+    {
+      "filePath": "D:\\target\\subdir1\\file2.txt",
+      "sha256": "def456...",
+      "deletedAt": "2026-08-13T10:30:11.456Z"
+    }
+  ]
+}
+```
+
+**关键改进（v2.1）：**
+- ✅ 每个线程独立journal文件（立即flush，保证crash safety）
+- ✅ 主journal只记录目录checkpoint和线程journal引用
+- ✅ Crash recovery读取所有线程journal重建已删除文件集合
+
+### Crash Recovery逻辑（v2.1修正版）
 
 ```csharp
-public RecoveryState AnalyzeCrashJournal(string journalPath) {
-    var journal = LoadJournal(journalPath);
+public RecoveryState AnalyzeCrashJournal(string transactionId, string journalBaseDir) {
+    // 1. 读取主journal
+    var mainJournalPath = Path.Combine(journalBaseDir, $"transaction-{transactionId}.main.json");
+    if (!File.Exists(mainJournalPath)) {
+        return new RecoveryState { Status = "no-journal-found" };
+    }
     
-    // 按目录分组
-    var byDirectory = journal.commits.GroupBy(c => c.directoryPath);
+    var mainJournal = LoadMainJournal(mainJournalPath);
     
-    foreach (var dirGroup in byDirectory) {
-        var dirPath = dirGroup.Key;
-        
-        // 检查目录是否有checkpoint
-        var checkpoint = journal.directoryCheckpoints
-            .FirstOrDefault(c => c.path == dirPath);
-        
-        if (checkpoint != null && checkpoint.allFilesDeleted) {
-            // 该目录已完整处理
-            continue;
-        }
-        
-        // 该目录部分处理，收集已删除的文件
-        var deletedFiles = dirGroup.SelectMany(c => c.deletedFiles).ToHashSet();
-        
-        // 从manifest中找出未删除的文件
-        var remainingFiles = manifest.GetFilesInDirectory(dirPath)
-            .Where(f => !deletedFiles.Contains(f.Path))
-            .ToList();
-        
-        if (remainingFiles.Count > 0) {
-            // 标记为purge-resumable
-            return new RecoveryState {
-                Status = "purge-resumable",
-                RemainingFiles = remainingFiles
-            };
+    // 2. 【P0-4修正】读取所有线程journal
+    var threadJournalPattern = $"transaction-{transactionId}.thread-*.json";
+    var threadJournalPaths = Directory.GetFiles(journalBaseDir, threadJournalPattern);
+    
+    var allDeletedFiles = new HashSet<string>();
+    
+    foreach (var threadJournalPath in threadJournalPaths) {
+        var threadJournal = LoadThreadJournal(threadJournalPath);
+        foreach (var commit in threadJournal.commits) {
+            allDeletedFiles.Add(commit.filePath);
         }
     }
     
-    return new RecoveryState { Status = "completed" };
+    // 3. 检查哪些目录已完成
+    var completedDirectories = new HashSet<string>(
+        mainJournal.directoryCheckpoints
+            .Where(c => c.allFilesDeleted)
+            .Select(c => c.path)
+    );
+    
+    // 4. 从manifest中找出未删除的文件
+    var remainingFiles = new List<string>();
+    
+    foreach (var dir in manifest.GetAllDirectories()) {
+        if (completedDirectories.Contains(dir.Path)) {
+            // 该目录已完整处理，跳过
+            continue;
+        }
+        
+        // 该目录部分处理或未处理
+        var filesInDir = manifest.GetFilesInDirectory(dir.Path);
+        var notDeleted = filesInDir
+            .Where(f => !allDeletedFiles.Contains(f.Path))
+            .ToList();
+        
+        if (notDeleted.Count > 0) {
+            remainingFiles.AddRange(notDeleted.Select(f => f.Path));
+        }
+    }
+    
+    if (remainingFiles.Count > 0) {
+        // 有未删除的文件，标记为purge-resumable
+        return new RecoveryState {
+            Status = "purge-resumable",
+            RemainingFiles = remainingFiles,
+            CompletedFiles = allDeletedFiles.ToList()
+        };
+    }
+    
+    return new RecoveryState { 
+        Status = "completed",
+        CompletedFiles = allDeletedFiles.ToList()
+    };
+}
+
+// 清理已完成transaction的journal文件
+public void CleanupCompletedJournals(string transactionId, string journalBaseDir) {
+    // 删除主journal
+    var mainJournalPath = Path.Combine(journalBaseDir, $"transaction-{transactionId}.main.json");
+    if (File.Exists(mainJournalPath)) {
+        File.Delete(mainJournalPath);
+    }
+    
+    // 删除所有线程journal
+    var threadJournalPattern = $"transaction-{transactionId}.thread-*.json";
+    var threadJournalPaths = Directory.GetFiles(journalBaseDir, threadJournalPattern);
+    foreach (var path in threadJournalPaths) {
+        File.Delete(path);
+    }
 }
 ```
 
@@ -516,11 +674,13 @@ public RecoveryState AnalyzeCrashJournal(string journalPath) {
 
 **Day 14-15: 完整测试**
 - 并发stress测试
-- Crash safety with并发
+- 【P0-4验证】Crash safety with并发（kill -9在各个线程journal写入阶段）
+- 【P0-1/P0-2验证】Identity严格验证测试（mtime修改、文件替换）
+- 【P1-4验证】文件系统检测和降级测试
 - 完整回归测试（所有现有test suite）
 - Benchmark验证（预期累计6x）
 
-### Week 4: 生产验收（可选）
+### Week 4: 生产验收和文档（5天）
 
 **Day 16-17: 用户真实场景测试**
 - 在用户提供的真实目录上测试
@@ -548,6 +708,7 @@ public RecoveryState AnalyzeCrashJournal(string journalPath) {
 - 监控identity漂移率
 - 如果>10%，调查原因（是否有后台进程频繁修改文件）
 - 考虑缩短Plan到Apply的间隔
+- 【v2.1注】严格mtime验证可能增加漂移检测率，但保证了安全性
 
 ### 2. 并行度不理想
 
@@ -558,23 +719,23 @@ public RecoveryState AnalyzeCrashJournal(string journalPath) {
 - 选择最优并发度（可能不是CPU核心数）
 - 提供配置项让用户调整
 
-### 3. Journal合并成为瓶颈
+### 3. Journal文件数量增多
 
-**风险：** 高并发时journal写入成为瓶颈
+**风险：** 【v2.1新增】每个线程独立journal，高并发时journal文件数量多
 
 **缓解：**
-- 批量flush journal（积累N条再写入）
-- 监控journal写入耗时占比
-- 考虑异步journal写入（需要更复杂的crash safety保证）
+- Transaction完成后立即清理journal文件
+- 监控journal目录的文件数
+- 限制最大并发度（默认4，避免过多journal文件）
 
 ### 4. 特殊文件系统不兼容
 
 **风险：** ReFS/SMB/OneDrive行为不同
 
 **缓解：**
-- 检测文件系统类型
-- 非NTFS给出警告
-- 提供降级模式（禁用哈希复用或并行）
+- 【P1-4】实现文件系统类型检测
+- 非NTFS给出警告并自动降级
+- 提供手动降级模式（禁用哈希复用或并行）
 
 ## 验收标准
 
@@ -582,8 +743,10 @@ public RecoveryState AnalyzeCrashJournal(string journalPath) {
 
 - ✅ 所有现有test suite通过
 - ✅ 新增单元测试覆盖率>90%
-- ✅ Crash safety测试通过（kill -9 at各个阶段）
+- ✅ Crash safety测试通过（kill -9 at各个阶段，包括线程journal写入时）
 - ✅ Transaction完整性测试通过
+- ✅ 【v2.1新增】Identity严格验证测试（mtime修改、文件替换、FileId重用模拟）
+- ✅ 【v2.1新增】多线程journal独立性测试（并发写入、crash恢复）
 
 ### 性能目标
 
@@ -594,10 +757,12 @@ public RecoveryState AnalyzeCrashJournal(string journalPath) {
 
 ### 安全保证
 
-- ✅ 无identity验证绕过
+- ✅ 无identity验证绕过（strict mtime check）
 - ✅ 无partial purge泄漏
-- ✅ Crash后可正确恢复或resume
+- ✅ Crash后可正确恢复或resume（多线程journal完整性）
 - ✅ Transaction状态机正确
+- ✅ 【v2.1新增】Content-authenticated保证不被破坏（Identity漂移拒绝删除）
+- ✅ 【v2.1新增】Crash safety在并发场景下保持（每线程独立journal+立即flush）
 
 ### 用户体验
 
@@ -622,6 +787,7 @@ $config = @{
     EnableBatchProcessing = $true # 可禁用批量处理
     EnableParallelPurge = $true   # 可禁用并行化
     MaxParallelism = 4            # 可调整并发度
+    StrictIdentityCheck = $true   # 【v2.1新增】严格identity验证（默认启用）
 }
 
 # 如果发现问题，一键回退到保守模式
@@ -629,20 +795,47 @@ $config.EnableHashReuse = $false
 $config.EnableParallelPurge = $false
 ```
 
-### 监控指标
+### 监控指标（v2.1扩展）
 
 ```json
 {
   "metrics": {
     "hashReuseRate": 0.85,
     "identityDriftRate": 0.05,
+    "identityDriftReasons": {
+      "mtimeChanged": 0.03,
+      "sizeChanged": 0.01,
+      "fileIdChanged": 0.01
+    },
     "averageParallelism": 3.2,
-    "journalMergeDurationMs": 120,
+    "threadJournalCount": 4,
+    "threadJournalFlushDurationMs": 15,
     "effectiveThroughputMBps": 95,
-    "crashRecoverySuccessRate": 1.0
+    "crashRecoverySuccessRate": 1.0,
+    "strictIdentityCheckEnabled": true
   }
 }
 ```
+
+### 【v2.1新增】Schema兼容性策略
+
+```json
+{
+  "schemaVersion": 3,
+  "schemaCompatibility": {
+    "description": "v3引入多线程journal，主journal只记录checkpoint",
+    "canReadV1": false,
+    "canReadV2": false,
+    "v2CanReadV3": false,
+    "note": "v3是破坏性升级，需要完整的v3代码才能读取线程journal"
+  }
+}
+```
+
+**向后兼容策略：**
+- v2.1生成的journal（schema v3）只能由v2.1代码读取
+- 如果需要回滚到v2.0，必须完成当前transaction或手动清理journal
+- 不支持跨版本的crash recovery
 
 ## 不做的事（明确边界）
 
@@ -650,11 +843,13 @@ $config.EnableParallelPurge = $false
 - 不引入metadata-only轻量模式
 - 不跳过首次重哈希确认
 - 不假设FileId永不重用
+- 【v2.1强调】不允许LastWriteTime容忍窗口（严格相等）
+- 【v2.1强调】Identity漂移必须拒绝删除，不能"重哈希后继续"
 
 ❌ **不破坏现有契约**
 - 不改变transaction状态机
 - 不改变quarantine语义
-- 不改变journal格式（只扩展，保持兼容）
+- 不改变journal格式向后兼容性（v3是破坏性升级，明确声明）
 
 ❌ **不超出NTFS边界**
 - 不假设所有文件系统都支持FILE_ID_INFO
@@ -665,6 +860,33 @@ $config.EnableParallelPurge = $false
 - 不使用第三方哈希库
 - 不使用第三方并行库（只用TPL）
 - 不引入新的运行时要求
+
+❌ **不妥协crash safety**
+- 【v2.1强调】不允许内存journal延迟flush
+- 【v2.1强调】每个文件删除后必须立即持久化journal
+- 不允许"性能优先、安全次之"的权衡
+
+## v2.1关键修正总结
+
+### P0-1: 移除LastWriteTime容忍窗口
+- **修正前**：允许2秒mtime差异
+- **修正后**：严格相等验证（`a.LastWriteTimeUtc == b.LastWriteTimeUtc`）
+- **影响**：闭合TOCTOU窗口，但可能增加identity漂移检测率
+
+### P0-2: Identity漂移改为拒绝删除
+- **修正前**：漂移时重哈希并继续
+- **修正后**：`throw FileModifiedException`，拒绝删除
+- **影响**：保证content-authenticated语义
+
+### P0-3: 明确OpenFileForValidation实现
+- **修正前**：实现不明
+- **修正后**：明确`FileShare.Read | FileShare.Delete`，禁止write
+- **影响**：阻止验证过程中的并发修改
+
+### P0-4: 每线程独立journal+立即flush
+- **修正前**：内存journal，批量合并
+- **修正后**：每线程独立文件，删除后立即flush
+- **影响**：保证并发场景下的crash safety，代价是journal文件数增加
 
 ## 成功指标
 
@@ -691,9 +913,94 @@ $config.EnableParallelPurge = $false
 
 ## 下一步
 
-1. **获得批准**：确认方案可实施
-2. **Week 1**：开始FILE_ID_INFO和哈希复用实现
-3. **持续沟通**：每周进度更新
-4. **灵活调整**：根据测试结果调整并发度等参数
+1. **获得批准**：确认v2.1方案可实施
+2. **第三轮对抗审查**：验证P0修正是否充分
+3. **Week 1**：开始FILE_ID_INFO和哈希复用实现
+4. **持续沟通**：每周进度更新
+5. **灵活调整**：根据测试结果调整并发度等参数
 
-需要我现在开始实施Week 1的代码吗？
+---
+
+## 附录：P1级待办事项（实施时处理）
+
+### P1-1: GetCacheKey实现
+已在v2.1明确实现（第136-139行）
+
+### P1-2: 批量journal写入时机
+已在v2.1修正（第199行，立即写journal）
+
+### P1-3: 并行失败处理统一
+已在v2.1修正（第324行，任何失败都立即停止）
+
+### P1-4: 文件系统检测
+需要在Week 1-2实现：
+
+```csharp
+public FileSystemCapabilities DetectFileSystem(string path) {
+    var root = Path.GetPathRoot(path);
+    var driveInfo = new DriveInfo(root);
+    
+    var isRemote = driveInfo.DriveType == DriveType.Network;
+    var fsType = driveInfo.DriveFormat;
+    
+    // 测试FILE_ID_INFO支持
+    var supportsFileId128 = TestFileIdSupport(path);
+    
+    return new FileSystemCapabilities {
+        FileSystem = fsType,
+        IsRemote = isRemote,
+        SupportsFileId128 = supportsFileId128,
+        RecommendHashReuse = fsType == "NTFS" && !isRemote && supportsFileId128,
+        RecommendParallel = fsType == "NTFS" && !isRemote,
+        Warning = GetFileSystemWarning(fsType, isRemote, supportsFileId128)
+    };
+}
+
+private string GetFileSystemWarning(string fsType, bool isRemote, bool supportsFileId) {
+    if (isRemote) {
+        return "警告：网络驱动器，优化效果可能有限（<2x），建议本地处理";
+    }
+    if (fsType != "NTFS") {
+        return $"警告：文件系统 {fsType} 未经充分测试，建议禁用哈希复用和并行";
+    }
+    if (!supportsFileId) {
+        return "警告：FILE_ID_INFO不可用，将禁用哈希复用";
+    }
+    return null;
+}
+```
+
+### P1-5: Journal性能监控
+在Week 3 Day 14添加测试：
+
+```csharp
+[Test]
+public void TestJournalPerformanceNotBottleneck() {
+    // 测量journal写入占总时间的百分比
+    var sw = Stopwatch.StartNew();
+    var journalTime = 0L;
+    
+    foreach (var file in testFiles) {
+        DeleteFile(file);
+        
+        var journalSw = Stopwatch.StartNew();
+        journal.WriteCommit(file.Path);
+        journal.Flush();
+        journalSw.Stop();
+        
+        journalTime += journalSw.ElapsedMilliseconds;
+    }
+    
+    sw.Stop();
+    var journalPercent = (double)journalTime / sw.ElapsedMilliseconds;
+    
+    Assert.That(journalPercent, Is.LessThan(0.1), 
+        "Journal写入不应超过总时间的10%");
+}
+```
+
+### P1-6: 时间表调整
+已在Week 4扩展为生产验收（不再是"可选"）
+
+### P1-7: Schema兼容性
+已在v2.1明确声明为破坏性升级
