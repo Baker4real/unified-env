@@ -6,6 +6,8 @@ reviewer: Independent Security Review Agent
 reviewed: safe-tree-delete-emergency-perf-fix-plan.md
 date: 2026-08-13
 verdict: 🟡 CONDITIONAL APPROVAL - 必须修正P0缺陷后才能实施
+supersededBy: reports/adversarial-review-round6-v2.4.md
+supersededNote: 审查对象是 v1 方案；该方案已迭代至 v2.4，本 verdict 描述的 P0 状态不适用当前方案文本
 ---
 
 # 受管删除性能优化方案 - 对抗性审查报告

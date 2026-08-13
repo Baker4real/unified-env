@@ -4,6 +4,8 @@ title: 受管删除性能优化方案 v2.2 - 第四轮最终审查
 reviewer: Independent Security Review Agent (Round 4 - Final)
 date: 2026-08-13
 verdict: APPROVED WITH CONDITIONS
+supersededBy: reports/adversarial-review-round6-v2.4.md
+supersededNote: 标题的"最终"仅指第四轮内部；审查对象 v2.2 已被 v2.3（第五轮判定未通过）与 v2.4（第六轮批准）取代
 ---
 
 # 受管删除性能优化方案 v2.2 - 第四轮最终审查

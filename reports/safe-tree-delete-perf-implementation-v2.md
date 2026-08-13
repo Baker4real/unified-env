@@ -1,15 +1,20 @@
 ---
 type: implementation-plan
 title: 受管删除性能优化实施方案 v2.4（修正P0编译错误）
-tags: [performance, implementation, security-hardened, production-ready]
+tags: [performance, implementation, plan-reviewed-20260813]
 scenario: 确认小文件过多（数万+文件）
 priority: P0
 date: 2026-08-13
-status: 待实施
+status: 部分已实施（Phase 1 库与 Plan 采集已随 e2064a3 进入 main；Apply/Purge 接入与 Phase 2/3 未实现）
 revision: v2.4 - 修正v2.3的2个P0编译错误和4个P1缺陷
 ---
 
 # 受管删除性能优化实施方案 v2.4
+
+> 时点声明：本文是 2026-08-13 的**方案文本**，不是实施进度。真实进度只以
+> `docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md` 的
+> Implementation status 段为准。下文的 Week 1-4 时间表与验收标准是当时的计划，
+> 不是现役执行队列。
 
 ## 版本修订历史
 

@@ -1,5 +1,5 @@
 ---
-type: spec
+type: reference
 title: 受管安全树删除性能优化
 tags: [performance, safe-delete, hash-reuse, parallelization]
 date: 2026-08-13
@@ -11,7 +11,7 @@ priority: P0
 
 ## Implementation status (2026-08-13)
 
-`main` `e2064a3` 已落地 Phase 1 **库与 Plan 采集**（GitHub #27–#31）：`FileIdentityV2`、`SessionHashCache`、`GetHashSafely`、Plan 并列 `fileIdentitiesV2`。Apply/Purge **仍只认证** `treeManifest` 的 SHA-256 与 64-bit FileIndex，未调用哈希复用。剩余工作从 #32 起。不要把本 spec 的 4–6x 目标读成已上线性能。
+Phase 1 的**库与 Plan 采集**部分已随 `e2064a3` 进入 `main`（GitHub #27–#31）：`FileIdentityV2`、`SessionHashCache`、`GetHashSafely`、Plan 并列 `fileIdentitiesV2`。Apply/Purge **仍只认证** `treeManifest` 的 SHA-256 与 64-bit FileIndex，未调用哈希复用。剩余工作从 #32 起。不要把本 spec 的 4–6x 目标读成已上线性能。
 
 ## Problem Statement
 

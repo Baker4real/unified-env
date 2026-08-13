@@ -2,10 +2,15 @@
 type: summary
 title: 受管删除性能分析与优化 - 执行摘要
 date: 2026-08-13
-status: 对抗性审查完成，等待用户决策
+status: 历史快照（2026-08-13 审查时点）；决策已作出，Phase 1 库与 Plan 采集已实施，进度见 docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md
 ---
 
 # 受管删除性能分析与优化 - 执行摘要
+
+> 时点声明：本文是 2026-08-13 分析时点的快照。其中的"等待用户""立即行动项"
+> 均已执行完毕，不是当前行动队列。截至 2026-08-13，只有 Phase 1 的库与 Plan
+> 采集落地（GitHub #27–#31 已关闭）；Apply/Purge 接入（#32/#33）与 Phase 2/3
+> （#37–#42）未实现，真实删除性能尚无改善。
 
 ## 问题现状
 
@@ -166,15 +171,21 @@ $fileStats = $files | Measure-Object -Property Length -Sum
 
 ## 文档清单
 
+0. **当前权威合同**：`docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`
+   - 现役实施状态以其 Implementation status 段为准
+   - 下列 1、2 项是历史版本，勿据以实施
+
 1. **优化方案**：`reports/safe-tree-delete-emergency-perf-fix-plan.md`
    - 三步优化详细设计
    - 技术实现细节
    - 时间表和验收标准
+   - （v1 方案，已被 `reports/safe-tree-delete-perf-implementation-v2.md` 的 v2.4 取代，仅存历史）
 
 2. **对抗性审查**：`reports/safe-tree-delete-perf-adversarial-review.md`
    - 4个P0致命缺陷
    - 修正措施
    - 调整后的预期
+   - （针对 v1 的第 1 轮审查，已被 `reports/adversarial-review-round6-v2.4.md` 取代，仅存历史）
 
 3. **基础调研**：`reports/safe-tree-delete-optimization-research-20260809.md`
    - GitHub项目参考
