@@ -1,15 +1,15 @@
 ---
 type: implementation-plan
-title: 受管删除性能优化实施方案 v2.1（修正P0缺陷）
+title: 受管删除性能优化实施方案 v2.2（修正所有P0缺陷）
 tags: [performance, implementation, security-hardened]
 scenario: 确认小文件过多（数万+文件）
 priority: P0
 date: 2026-08-13
 status: 待实施
-revision: v2.1 - 修正第二轮审查发现的4个P0致命缺陷
+revision: v2.2 - 修正第三轮审查发现的2个新P0缺陷
 ---
 
-# 受管删除性能优化实施方案 v2.1
+# 受管删除性能优化实施方案 v2.2
 
 ## 版本修订历史
 
@@ -19,6 +19,9 @@ revision: v2.1 - 修正第二轮审查发现的4个P0致命缺陷
   - P0-2: Identity漂移改为抛异常拒绝删除
   - P0-3: 明确OpenFileForValidation的完整实现
   - P0-4: 改为每线程独立journal文件+立即flush
+- **v2.2**: 修正第三轮审查发现的2个新P0缺陷
+  - P0-A: OpenFileForValidation改为独占锁（FileShare.None）
+  - P0-B: Delete/Journal实现原子性顺序（先pending后delete再commit）
 
 ## 前提确认
 
@@ -143,17 +146,34 @@ public byte[] GetHashSafely(
     }
 }
 
-// 【P0-3修正】明确OpenFileForValidation的完整实现
+// 【P0-A修正】明确OpenFileForValidation的完整实现 - 独占锁
 private SafeFileHandle OpenFileForValidation(string path) {
-    // 明确sharing模式：只允许Read和Delete，禁止Write
-    // 这样可以阻止其他进程在验证过程中修改文件
-    return File.OpenHandle(
-        path,
-        FileMode.Open,
-        FileAccess.Read,
-        FileShare.Read | FileShare.Delete,  // 只share读和删，明确禁止写
-        FileOptions.SequentialScan
-    );
+    // 【P0-A关键修正】独占锁：验证期间不允许任何其他进程访问
+    // 完全阻止验证窗口内的并发修改/删除/读取
+    // 如果文件被其他进程占用，验证会失败 - 这是正确的失败
+    // 文件被占用意味着状态不稳定，不应该删除
+    try {
+        return File.OpenHandle(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None,  // 独占锁，验证期间禁止任何访问
+            FileOptions.SequentialScan
+        );
+    } catch (IOException ex) when (IsSharingViolation(ex)) {
+        // 文件被占用，抛出清晰的错误消息
+        throw new FileInUseException(
+            $"File is in use by another process: {path}. " +
+            $"Cannot safely verify and delete while file is being accessed.",
+            ex);
+    }
+}
+
+private bool IsSharingViolation(IOException ex) {
+    const int ERROR_SHARING_VIOLATION = 32;
+    const int ERROR_LOCK_VIOLATION = 33;
+    return ex.HResult == ERROR_SHARING_VIOLATION || 
+           ex.HResult == ERROR_LOCK_VIOLATION;
 }
 
 // 【P0-1修正】严格的Identity验证，移除容忍窗口
@@ -353,16 +373,24 @@ public class ParallelPurgeCoordinator {
             threadJournalPaths.Add(threadJournal.FilePath);
             
             try {
-                // 删除单个文件
+                // 【P0-B关键修正】实现Delete/Journal的原子性顺序
+                // 正确顺序：先journal(pending) → 删除 → journal(commit)
+                
+                // 1. 先写pending状态到journal并flush
+                threadJournal.WritePending(file.Path, file.Hash);
+                threadJournal.Flush();  // 确保持久化，crash时有pending记录
+                
+                // 2. 执行删除
                 DeleteFileWithValidation(file);
                 
-                // 【P0-4关键修正】立即写入线程journal并flush
-                // 确保crash时已删除的文件有journal记录
-                threadJournal.WriteCommit(file.Path, file.Hash);
+                // 3. 更新为committed状态
+                threadJournal.WriteCommit(file.Path);
                 threadJournal.Flush();  // 立即持久化到磁盘
                 
             } catch (Exception ex) {
                 // 【P1-3修正】任何失败都立即停止所有线程
+                // 注意：如果在步骤1之后失败，journal中有pending记录
+                // Recovery时会检查文件是否存在来判断删除是否完成
                 failures.Enqueue((file.Path, ex));
                 state.Stop();  // 停止所有线程
             }
@@ -407,7 +435,7 @@ public class ParallelPurgeCoordinator {
     }
 }
 
-// 线程局部journal writer
+// 线程局部journal writer（v2.2扩展支持pending/committed状态）
 public class ThreadJournalWriter : IDisposable {
     private readonly StreamWriter writer;
     private readonly string directoryPath;
@@ -435,13 +463,25 @@ public class ThreadJournalWriter : IDisposable {
         writer.WriteLine(JsonSerializer.Serialize(header));
     }
     
-    public void WriteCommit(string filePath, byte[] hash) {
-        var commit = new {
+    // 【P0-B修正】写入pending状态（删除前）
+    public void WritePending(string filePath, byte[] hash) {
+        var entry = new {
+            status = "pending",
             filePath = filePath,
             sha256 = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant(),
-            deletedAt = DateTime.UtcNow
+            pendingAt = DateTime.UtcNow
         };
-        writer.WriteLine(JsonSerializer.Serialize(commit));
+        writer.WriteLine(JsonSerializer.Serialize(entry));
+    }
+    
+    // 【P0-B修正】写入committed状态（删除后）
+    public void WriteCommit(string filePath) {
+        var entry = new {
+            status = "committed",
+            filePath = filePath,
+            committedAt = DateTime.UtcNow
+        };
+        writer.WriteLine(JsonSerializer.Serialize(entry));
     }
     
     public void Flush() {
@@ -487,27 +527,39 @@ public class ThreadJournalWriter : IDisposable {
   "threadId": 12345,
   "directoryPath": "D:\\target\\subdir1",
   "createdAt": "2026-08-13T10:30:10.000Z",
-  "commits": [
+  "entries": [
     {
+      "status": "pending",
       "filePath": "D:\\target\\subdir1\\file1.txt",
       "sha256": "abc123...",
-      "deletedAt": "2026-08-13T10:30:11.123Z"
+      "pendingAt": "2026-08-13T10:30:11.100Z"
     },
     {
+      "status": "committed",
+      "filePath": "D:\\target\\subdir1\\file1.txt",
+      "committedAt": "2026-08-13T10:30:11.456Z"
+    },
+    {
+      "status": "pending",
       "filePath": "D:\\target\\subdir1\\file2.txt",
       "sha256": "def456...",
-      "deletedAt": "2026-08-13T10:30:11.456Z"
+      "pendingAt": "2026-08-13T10:30:11.500Z"
+    },
+    {
+      "status": "committed",
+      "filePath": "D:\\target\\subdir1\\file2.txt",
+      "committedAt": "2026-08-13T10:30:11.789Z"
     }
   ]
 }
 ```
 
-**关键改进（v2.1）：**
-- ✅ 每个线程独立journal文件（立即flush，保证crash safety）
-- ✅ 主journal只记录目录checkpoint和线程journal引用
-- ✅ Crash recovery读取所有线程journal重建已删除文件集合
+**关键改进（v2.2）：**
+- ✅ 【P0-B修正】每个文件写入两条记录：pending（删除前）+ committed（删除后）
+- ✅ Crash recovery通过pending/committed配对判断删除是否完成
+- ✅ 独占锁验证（FileShare.None）防止验证窗口并发修改
 
-### Crash Recovery逻辑（v2.1修正版）
+### Crash Recovery逻辑（v2.2修正版 - 支持pending/committed状态）
 
 ```csharp
 public RecoveryState AnalyzeCrashJournal(string transactionId, string journalBaseDir) {
@@ -519,39 +571,68 @@ public RecoveryState AnalyzeCrashJournal(string transactionId, string journalBas
     
     var mainJournal = LoadMainJournal(mainJournalPath);
     
-    // 2. 【P0-4修正】读取所有线程journal
+    // 2. 【P0-B修正】读取所有线程journal，处理pending/committed状态
     var threadJournalPattern = $"transaction-{transactionId}.thread-*.json";
     var threadJournalPaths = Directory.GetFiles(journalBaseDir, threadJournalPattern);
     
-    var allDeletedFiles = new HashSet<string>();
+    var deletedFiles = new HashSet<string>();
+    var pendingFiles = new Dictionary<string, PendingEntry>();
     
     foreach (var threadJournalPath in threadJournalPaths) {
-        var threadJournal = LoadThreadJournal(threadJournalPath);
-        foreach (var commit in threadJournal.commits) {
-            allDeletedFiles.Add(commit.filePath);
+        var entries = LoadThreadJournalEntries(threadJournalPath);
+        
+        foreach (var entry in entries) {
+            if (entry.status == "pending") {
+                // 记录pending状态
+                pendingFiles[entry.filePath] = new PendingEntry {
+                    FilePath = entry.filePath,
+                    Hash = entry.sha256,
+                    PendingAt = entry.pendingAt
+                };
+            } else if (entry.status == "committed") {
+                // 找到对应的pending，标记为已完成
+                if (pendingFiles.ContainsKey(entry.filePath)) {
+                    pendingFiles.Remove(entry.filePath);
+                    deletedFiles.Add(entry.filePath);
+                } else {
+                    // 没有pending直接有committed（不应该发生，但容错处理）
+                    deletedFiles.Add(entry.filePath);
+                }
+            }
         }
     }
     
-    // 3. 检查哪些目录已完成
+    // 3. 【P0-B关键】处理剩余的pending条目（删除可能完成也可能未完成）
+    foreach (var pendingEntry in pendingFiles.Values) {
+        // 检查文件是否仍存在
+        if (File.Exists(pendingEntry.FilePath)) {
+            // 文件仍存在 → 删除未完成
+            // 不加入deletedFiles，将作为remainingFiles处理
+        } else {
+            // 文件不存在 → 删除已完成，但crash发生在commit之前
+            // 这是罕见情况：crash恰好在DeleteFile()和WriteCommit()之间
+            deletedFiles.Add(pendingEntry.FilePath);
+        }
+    }
+    
+    // 4. 检查哪些目录已完成
     var completedDirectories = new HashSet<string>(
         mainJournal.directoryCheckpoints
             .Where(c => c.allFilesDeleted)
             .Select(c => c.path)
     );
     
-    // 4. 从manifest中找出未删除的文件
+    // 5. 从manifest中找出未删除的文件
     var remainingFiles = new List<string>();
     
     foreach (var dir in manifest.GetAllDirectories()) {
         if (completedDirectories.Contains(dir.Path)) {
-            // 该目录已完整处理，跳过
             continue;
         }
         
-        // 该目录部分处理或未处理
         var filesInDir = manifest.GetFilesInDirectory(dir.Path);
         var notDeleted = filesInDir
-            .Where(f => !allDeletedFiles.Contains(f.Path))
+            .Where(f => !deletedFiles.Contains(f.Path))
             .ToList();
         
         if (notDeleted.Count > 0) {
@@ -560,18 +641,24 @@ public RecoveryState AnalyzeCrashJournal(string transactionId, string journalBas
     }
     
     if (remainingFiles.Count > 0) {
-        // 有未删除的文件，标记为purge-resumable
         return new RecoveryState {
             Status = "purge-resumable",
             RemainingFiles = remainingFiles,
-            CompletedFiles = allDeletedFiles.ToList()
+            CompletedFiles = deletedFiles.ToList(),
+            PendingFiles = pendingFiles.Keys.ToList()
         };
     }
     
     return new RecoveryState { 
         Status = "completed",
-        CompletedFiles = allDeletedFiles.ToList()
+        CompletedFiles = deletedFiles.ToList()
     };
+}
+
+private class PendingEntry {
+    public string FilePath;
+    public string Hash;
+    public DateTime PendingAt;
 }
 
 // 清理已完成transaction的journal文件
@@ -675,6 +762,8 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 **Day 14-15: 完整测试**
 - 并发stress测试
 - 【P0-4验证】Crash safety with并发（kill -9在各个线程journal写入阶段）
+- 【P0-A验证】独占锁验证测试（文件被占用时的错误处理）
+- 【P0-B验证】Delete/Journal原子性测试（kill -9在pending后、delete后、commit前各个时间点）
 - 【P0-1/P0-2验证】Identity严格验证测试（mtime修改、文件替换）
 - 【P1-4验证】文件系统检测和降级测试
 - 完整回归测试（所有现有test suite）
@@ -710,7 +799,24 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 - 考虑缩短Plan到Apply的间隔
 - 【v2.1注】严格mtime验证可能增加漂移检测率，但保证了安全性
 
-### 2. 并行度不理想
+### 2. 文件被占用导致删除失败
+
+**风险：** 【v2.2新增】独占锁（FileShare.None）会导致被其他进程占用的文件无法删除
+
+**影响场景：**
+- 杀毒软件正在扫描文件
+- 备份工具正在读取文件
+- 用户在编辑器中打开文件
+- 系统服务占用文件
+
+**缓解：**
+- 清晰的错误消息（FileInUseException）提示用户关闭占用进程
+- 允许transaction标记为purge-resumable，关闭占用后重试
+- 监控file-in-use失败率
+- 如果>20%，提示用户在删除前关闭相关应用
+- **权衡说明**：这是正确的失败 - 文件被占用意味着状态不稳定，强行删除可能破坏其他应用
+
+### 3. 并行度不理想
 
 **风险：** MFT锁争用导致并行效果不佳
 
@@ -719,7 +825,7 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 - 选择最优并发度（可能不是CPU核心数）
 - 提供配置项让用户调整
 
-### 3. Journal文件数量增多
+### 4. Journal文件数量增多
 
 **风险：** 【v2.1新增】每个线程独立journal，高并发时journal文件数量多
 
@@ -728,7 +834,7 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 - 监控journal目录的文件数
 - 限制最大并发度（默认4，避免过多journal文件）
 
-### 4. 特殊文件系统不兼容
+### 5. 特殊文件系统不兼容
 
 **风险：** ReFS/SMB/OneDrive行为不同
 
@@ -747,6 +853,9 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 - ✅ Transaction完整性测试通过
 - ✅ 【v2.1新增】Identity严格验证测试（mtime修改、文件替换、FileId重用模拟）
 - ✅ 【v2.1新增】多线程journal独立性测试（并发写入、crash恢复）
+- ✅ 【v2.2新增】独占锁验证测试（文件被占用、sharing violation处理）
+- ✅ 【v2.2新增】Delete/Journal原子性测试（pending/committed状态完整性）
+- ✅ 【v2.2新增】Crash recovery测试（pending未配对committed的各种场景）
 
 ### 性能目标
 
@@ -754,6 +863,7 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 - ✅ 有效吞吐：从17MB/s提升到100MB/s
 - ✅ Hash复用率：>80%（identity不经常漂移）
 - ✅ 并行利用率：4核达到3-3.5x吞吐（考虑开销）
+- ⚠️ 【v2.2新增】独占锁可能降低并发成功率（文件被占用时拒绝删除）
 
 ### 安全保证
 
@@ -763,6 +873,8 @@ public void CleanupCompletedJournals(string transactionId, string journalBaseDir
 - ✅ Transaction状态机正确
 - ✅ 【v2.1新增】Content-authenticated保证不被破坏（Identity漂移拒绝删除）
 - ✅ 【v2.1新增】Crash safety在并发场景下保持（每线程独立journal+立即flush）
+- ✅ 【v2.2新增】验证窗口并发修改完全阻止（独占锁FileShare.None）
+- ✅ 【v2.2新增】Delete/Journal原子性保证（pending→delete→commit顺序）
 
 ### 用户体验
 
@@ -866,27 +978,33 @@ $config.EnableParallelPurge = $false
 - 【v2.1强调】每个文件删除后必须立即持久化journal
 - 不允许"性能优先、安全次之"的权衡
 
-## v2.1关键修正总结
+## v2.2关键修正总结
 
-### P0-1: 移除LastWriteTime容忍窗口
-- **修正前**：允许2秒mtime差异
-- **修正后**：严格相等验证（`a.LastWriteTimeUtc == b.LastWriteTimeUtc`）
-- **影响**：闭合TOCTOU窗口，但可能增加identity漂移检测率
+### P0-A: OpenFileForValidation改为独占锁
+- **问题**：FileShare.Read|Delete无法阻止已打开句柄的进程修改，也无法阻止其他进程删除文件
+- **修正**：FileShare.None独占锁，验证期间禁止任何访问
+- **影响**：验证窗口完全闭合，但文件被占用时会失败（这是正确的失败）
+- **错误处理**：清晰的FileInUseException提示用户关闭占用进程
 
-### P0-2: Identity漂移改为拒绝删除
-- **修正前**：漂移时重哈希并继续
-- **修正后**：`throw FileModifiedException`，拒绝删除
-- **影响**：保证content-authenticated语义
+### P0-B: Delete/Journal实现原子性顺序
+- **问题**：先delete后journal，crash会导致文件已删除但journal无记录
+- **修正**：pending → delete → commit三阶段
+  1. WritePending() + Flush() - 标记待删除
+  2. DeleteFile() - 执行删除
+  3. WriteCommit() + Flush() - 标记已完成
+- **影响**：任何时刻crash都能正确恢复
+- **Crash recovery**：pending未配对committed时检查文件是否存在判断删除状态
 
-### P0-3: 明确OpenFileForValidation实现
-- **修正前**：实现不明
-- **修正后**：明确`FileShare.Read | FileShare.Delete`，禁止write
-- **影响**：阻止验证过程中的并发修改
+### 完整P0修正链条（v2.0 → v2.1 → v2.2）
 
-### P0-4: 每线程独立journal+立即flush
-- **修正前**：内存journal，批量合并
-- **修正后**：每线程独立文件，删除后立即flush
-- **影响**：保证并发场景下的crash safety，代价是journal文件数增加
+| 版本 | P0缺陷 | 修正 | 状态 |
+|------|--------|------|------|
+| v2.0 | P0-1: mtime容忍窗口 | v2.1: 严格相等 | ✅ |
+| v2.0 | P0-2: Identity漂移继续 | v2.1: throw拒绝 + v2.2: 独占锁 | ✅ |
+| v2.0 | P0-3: 实现不明 | v2.1: 明确FileShare + v2.2: 独占锁 | ✅ |
+| v2.0 | P0-4: 内存journal | v2.1: 独立文件 + v2.2: pending/commit | ✅ |
+| v2.1 | P0-A: FileShare不安全 | v2.2: 独占锁 | ✅ |
+| v2.1 | P0-B: Delete/Journal顺序 | v2.2: pending→delete→commit | ✅ |
 
 ## 成功指标
 
@@ -913,26 +1031,65 @@ $config.EnableParallelPurge = $false
 
 ## 下一步
 
-1. **获得批准**：确认v2.1方案可实施
-2. **第三轮对抗审查**：验证P0修正是否充分
+1. **第四轮对抗审查**：验证v2.2的P0-A和P0-B修正是否充分
+2. **获得批准**：确认方案可实施
 3. **Week 1**：开始FILE_ID_INFO和哈希复用实现
 4. **持续沟通**：每周进度更新
 5. **灵活调整**：根据测试结果调整并发度等参数
 
 ---
 
-## 附录：P1级待办事项（实施时处理）
+## 附录A：P1级待办事项（实施时处理）
 
-### P1-1: GetCacheKey实现
-已在v2.1明确实现（第136-139行）
+### P1-1: GetFileIdentityV2实现（已明确API）
 
-### P1-2: 批量journal写入时机
-已在v2.1修正（第199行，立即写journal）
+```csharp
+// 【P1-1补充】获取128-bit FILE_ID_INFO
+private FileIdentityV2 GetFileIdentityV2(SafeFileHandle handle) {
+    // 使用GetFileInformationByHandleEx获取128-bit FILE_ID_INFO
+    var fileInfo = new FILE_ID_INFO();
+    
+    if (!GetFileInformationByHandleEx(
+        handle,
+        FILE_INFO_BY_HANDLE_CLASS.FileIdInfo,
+        ref fileInfo,
+        Marshal.SizeOf<FILE_ID_INFO>())) {
+        
+        int error = Marshal.GetLastWin32Error();
+        throw new Win32Exception(error, 
+            $"Failed to get FILE_ID_INFO. This file system may not support 128-bit FileId.");
+    }
+    
+    var fileSize = new FileInfo(handle).Length;
+    var lastWriteTime = File.GetLastWriteTimeUtc(handle);
+    
+    return new FileIdentityV2 {
+        VolumeSerialNumber = fileInfo.VolumeSerialNumber,
+        FileId128 = fileInfo.FileId,  // 128-bit identifier
+        FileSize = fileSize,
+        LastWriteTimeUtc = lastWriteTime,
+        CapturedAtUtc = DateTime.UtcNow
+    };
+}
 
-### P1-3: 并行失败处理统一
-已在v2.1修正（第324行，任何失败都立即停止）
+[StructLayout(LayoutKind.Sequential)]
+private struct FILE_ID_INFO {
+    public ulong VolumeSerialNumber;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+    public byte[] FileId;  // 128-bit
+}
 
-### P1-4: 文件系统检测
+[DllImport("kernel32.dll", SetLastError = true)]
+private static extern bool GetFileInformationByHandleEx(
+    SafeFileHandle hFile,
+    FILE_INFO_BY_HANDLE_CLASS FileInformationClass,
+    ref FILE_ID_INFO lpFileInformation,
+    int dwBufferSize);
+
+private enum FILE_INFO_BY_HANDLE_CLASS {
+    FileIdInfo = 18
+}
+```
 需要在Week 1-2实现：
 
 ```csharp
