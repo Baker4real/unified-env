@@ -4053,27 +4053,31 @@ function Invoke-CodexSafeTreeDeletePurge {
             if (-not [bool]$deleteState.anyCommit -and
                 @($transaction.directoryCommitAnchors).Count -eq 0 -and
                 [IO.Directory]::Exists($quarantinePath)) {
-                $unchangedTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
-                    -Path $quarantinePath `
-                    -CapabilityRoot $quarantineCapabilityRoot `
-                    -AllowedExactPaths @($quarantinePath) `
-                    -AllowHardLinks:([bool]$target.allowHardLinks) `
-                    -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
-                    -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
-                    -MetricsObserver $repeatMetricsObserver `
-                    -Name 'safe-delete zero-commit purge rollback snapshot'
-                if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $unchangedTree) -ceq
-                    (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
-                    $transaction.status = 'quarantined'
-                    $transaction.updatedAtUtc = [datetimeoffset]::UtcNow.ToString(
-                        'o',
-                        [Globalization.CultureInfo]::InvariantCulture)
-                    Set-CodexHookCapabilityJson `
-                        -Path $approved.path `
-                        -Document $transaction `
-                        -CapabilityRoot $runDirectory `
-                        -AllowedExactPaths @($approved.path) `
-                        -Scope 'safe-delete zero-commit purge rollback'
+                try {
+                    $unchangedTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                        -Path $quarantinePath `
+                        -CapabilityRoot $quarantineCapabilityRoot `
+                        -AllowedExactPaths @($quarantinePath) `
+                        -AllowHardLinks:([bool]$target.allowHardLinks) `
+                        -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                        -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                        -MetricsObserver $repeatMetricsObserver `
+                        -Name 'safe-delete zero-commit purge rollback snapshot'
+                    if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $unchangedTree) -ceq
+                        (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
+                        $transaction.status = 'quarantined'
+                        $transaction.updatedAtUtc = [datetimeoffset]::UtcNow.ToString(
+                            'o',
+                            [Globalization.CultureInfo]::InvariantCulture)
+                        Set-CodexHookCapabilityJson `
+                            -Path $approved.path `
+                            -Document $transaction `
+                            -CapabilityRoot $runDirectory `
+                            -AllowedExactPaths @($approved.path) `
+                            -Scope 'safe-delete zero-commit purge rollback'
+                    }
+                } catch {
+                    # 回滚快照/lease 失败不得改写 transaction，也不得盖住原来的 purge 失败。
                 }
             }
             $metricsState.retryResult = if ([long]$metricsState.retryAttempts -gt 0L) {

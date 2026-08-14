@@ -1,0 +1,575 @@
+{
+  "snapshot": true,
+  "baselineCounts": {
+    "operations": 1980,
+    "blocking": 1674,
+    "statusNone": 69,
+    "bothNull": 36,
+    "ticketErrorGroups": 69,
+    "statusNoneByGroup": {
+      "manifest-drift": 15,
+      "allowlist": 34,
+      "min-depth": 1,
+      "namespace+policy-sha": 6,
+      "planned-namespace": 12,
+      "missing-plan": 1
+    },
+    "bothNullByGroup": {
+      "manifest-drift": 15,
+      "min-depth": 1,
+      "namespace+policy-sha": 6,
+      "planned-namespace": 12,
+      "missing-plan": 1,
+      "allowlist": 1
+    },
+    "ticketByGroup": {
+      "manifest-drift": 15,
+      "allowlist": 34,
+      "min-depth": 1,
+      "namespace+policy-sha": 6,
+      "planned-namespace": 12,
+      "missing-plan": 1
+    },
+    "statusNoneSchema": {
+      "None": 36,
+      "2": 33
+    },
+    "ticketSchema": {
+      "None": 36,
+      "2": 33
+    }
+  },
+  "afterCounts": {
+    "operations": 2300,
+    "blocking": 109,
+    "statusNone": 89,
+    "ticketErrorGroups": 89,
+    "statusNoneByGroup": {
+      "allowlist": 39,
+      "namespace+policy-sha": 18,
+      "missing-plan": 1,
+      "manifest-drift": 17,
+      "planned-namespace": 13,
+      "min-depth": 1
+    },
+    "ticketByGroup": {
+      "allowlist": 39,
+      "namespace+policy-sha": 18,
+      "missing-plan": 1,
+      "manifest-drift": 17,
+      "planned-namespace": 13,
+      "min-depth": 1
+    },
+    "statusNoneSchema": {
+      "2": 37,
+      "None": 52
+    },
+    "noneNotTicket": [],
+    "ticketNotNone": []
+  },
+  "deltaStatusNone": {
+    "added": 20,
+    "gone": 0,
+    "addedByGroup": {
+      "allowlist": 5,
+      "manifest-drift": 2,
+      "planned-namespace": 13
+    },
+    "goneByGroup": {},
+    "addedCreatedAfterBaseline": [
+      "20260812T155917Z-484e4708-d102-49fa-ac17-9d4acb899ae7",
+      "20260812T155931Z-d436eaec-55dc-4389-875d-6c54fe94e97a",
+      "20260812T155954Z-061d7c13-ef10-46f1-b37e-bea3c1f6ed3a",
+      "20260812T155956Z-a00cf1f1-ef11-4c64-9a6c-4a59d4b95409",
+      "20260812T155958Z-e093bbed-1204-4d53-a9e7-784e06fddc27",
+      "20260812T192132Z-54d8c0e4-656c-4950-8f6f-980e0b0504ac",
+      "20260812T203021Z-f209a81b-2377-4036-8a83-43f238412a88",
+      "20260813T162710Z-6f30a9ee-6134-4abd-b233-e34df4e070fb",
+      "20260813T162713Z-163ad4d4-6ada-47e9-8fa1-0d8db4794291",
+      "20260813T162715Z-5fce3d6d-59b4-4670-b68d-28fac5dce50b",
+      "20260813T162717Z-c5d3bbb4-5f0a-445e-b50a-d9673bb76d56",
+      "20260813T162720Z-8b50c56b-bbde-47f5-911c-f16924b5b7fa",
+      "20260813T162722Z-3a713dd5-e4a1-4182-8272-a305e117f926",
+      "20260813T162725Z-6d7ff61a-3164-44f5-8b9e-f0e4e04ab894",
+      "20260813T162727Z-04d4d616-d3db-4807-9309-61e5919cff1c",
+      "20260813T162730Z-d34f4e0d-23ca-4f1e-a2ae-89e2d7b3c728",
+      "20260813T162831Z-d0e3b27a-a6f7-4f9f-a7ea-24405216d955",
+      "20260813T162834Z-554d4b6c-cab8-449a-a5a6-119e0830bf52",
+      "20260813T162837Z-5c2d46d7-7830-42e3-aa1f-22f779fa1eef",
+      "20260813T162840Z-b5051b56-f655-41e8-9d85-83d22e494b38"
+    ],
+    "addedPresentInBaselineOps": [],
+    "addedNewOperations": [
+      "20260812T155917Z-484e4708-d102-49fa-ac17-9d4acb899ae7",
+      "20260812T155931Z-d436eaec-55dc-4389-875d-6c54fe94e97a",
+      "20260812T155954Z-061d7c13-ef10-46f1-b37e-bea3c1f6ed3a",
+      "20260812T155956Z-a00cf1f1-ef11-4c64-9a6c-4a59d4b95409",
+      "20260812T155958Z-e093bbed-1204-4d53-a9e7-784e06fddc27",
+      "20260812T192132Z-54d8c0e4-656c-4950-8f6f-980e0b0504ac",
+      "20260812T203021Z-f209a81b-2377-4036-8a83-43f238412a88",
+      "20260813T162710Z-6f30a9ee-6134-4abd-b233-e34df4e070fb",
+      "20260813T162713Z-163ad4d4-6ada-47e9-8fa1-0d8db4794291",
+      "20260813T162715Z-5fce3d6d-59b4-4670-b68d-28fac5dce50b",
+      "20260813T162717Z-c5d3bbb4-5f0a-445e-b50a-d9673bb76d56",
+      "20260813T162720Z-8b50c56b-bbde-47f5-911c-f16924b5b7fa",
+      "20260813T162722Z-3a713dd5-e4a1-4182-8272-a305e117f926",
+      "20260813T162725Z-6d7ff61a-3164-44f5-8b9e-f0e4e04ab894",
+      "20260813T162727Z-04d4d616-d3db-4807-9309-61e5919cff1c",
+      "20260813T162730Z-d34f4e0d-23ca-4f1e-a2ae-89e2d7b3c728",
+      "20260813T162831Z-d0e3b27a-a6f7-4f9f-a7ea-24405216d955",
+      "20260813T162834Z-554d4b6c-cab8-449a-a5a6-119e0830bf52",
+      "20260813T162837Z-5c2d46d7-7830-42e3-aa1f-22f779fa1eef",
+      "20260813T162840Z-b5051b56-f655-41e8-9d85-83d22e494b38"
+    ]
+  },
+  "deltaTicketGroups": {
+    "added": 20,
+    "gone": 0,
+    "addedIds": [
+      "20260812T155917Z-484e4708-d102-49fa-ac17-9d4acb899ae7",
+      "20260812T155931Z-d436eaec-55dc-4389-875d-6c54fe94e97a",
+      "20260812T155954Z-061d7c13-ef10-46f1-b37e-bea3c1f6ed3a",
+      "20260812T155956Z-a00cf1f1-ef11-4c64-9a6c-4a59d4b95409",
+      "20260812T155958Z-e093bbed-1204-4d53-a9e7-784e06fddc27",
+      "20260812T192132Z-54d8c0e4-656c-4950-8f6f-980e0b0504ac",
+      "20260812T203021Z-f209a81b-2377-4036-8a83-43f238412a88",
+      "20260813T162710Z-6f30a9ee-6134-4abd-b233-e34df4e070fb",
+      "20260813T162713Z-163ad4d4-6ada-47e9-8fa1-0d8db4794291",
+      "20260813T162715Z-5fce3d6d-59b4-4670-b68d-28fac5dce50b",
+      "20260813T162717Z-c5d3bbb4-5f0a-445e-b50a-d9673bb76d56",
+      "20260813T162720Z-8b50c56b-bbde-47f5-911c-f16924b5b7fa",
+      "20260813T162722Z-3a713dd5-e4a1-4182-8272-a305e117f926",
+      "20260813T162725Z-6d7ff61a-3164-44f5-8b9e-f0e4e04ab894",
+      "20260813T162727Z-04d4d616-d3db-4807-9309-61e5919cff1c",
+      "20260813T162730Z-d34f4e0d-23ca-4f1e-a2ae-89e2d7b3c728",
+      "20260813T162831Z-d0e3b27a-a6f7-4f9f-a7ea-24405216d955",
+      "20260813T162834Z-554d4b6c-cab8-449a-a5a6-119e0830bf52",
+      "20260813T162837Z-5c2d46d7-7830-42e3-aa1f-22f779fa1eef",
+      "20260813T162840Z-b5051b56-f655-41e8-9d85-83d22e494b38"
+    ],
+    "goneIds": []
+  },
+  "addedStatusNoneRecords": [
+    {
+      "group": "allowlist",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260812T155917Z-484e4708-d102-49fa-ac17-9d4acb899ae7",
+        "lifecycle": "manual-review",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": null,
+        "targetPresent": null,
+        "quarantinePresent": null,
+        "journalStatus": "not-evaluated",
+        "policyCompatible": false,
+        "errors": [
+          "safe-delete capability root 不在受管 allowlist。"
+        ]
+      }
+    },
+    {
+      "group": "allowlist",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260812T155931Z-d436eaec-55dc-4389-875d-6c54fe94e97a",
+        "lifecycle": "manual-review",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": 2,
+        "transactionStatus": null,
+        "targetPath": null,
+        "targetPresent": null,
+        "quarantinePresent": null,
+        "journalStatus": "not-evaluated",
+        "policyCompatible": false,
+        "errors": [
+          "safe-delete capability root 不在受管 allowlist。"
+        ]
+      }
+    },
+    {
+      "group": "allowlist",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260812T155954Z-061d7c13-ef10-46f1-b37e-bea3c1f6ed3a",
+        "lifecycle": "manual-review",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": 2,
+        "transactionStatus": null,
+        "targetPath": null,
+        "targetPresent": null,
+        "quarantinePresent": null,
+        "journalStatus": "not-evaluated",
+        "policyCompatible": false,
+        "errors": [
+          "safe-delete capability root 不在受管 allowlist。"
+        ]
+      }
+    },
+    {
+      "group": "allowlist",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260812T155956Z-a00cf1f1-ef11-4c64-9a6c-4a59d4b95409",
+        "lifecycle": "manual-review",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": 2,
+        "transactionStatus": null,
+        "targetPath": null,
+        "targetPresent": null,
+        "quarantinePresent": null,
+        "journalStatus": "not-evaluated",
+        "policyCompatible": false,
+        "errors": [
+          "safe-delete capability root 不在受管 allowlist。"
+        ]
+      }
+    },
+    {
+      "group": "allowlist",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260812T155958Z-e093bbed-1204-4d53-a9e7-784e06fddc27",
+        "lifecycle": "manual-review",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": 2,
+        "transactionStatus": null,
+        "targetPath": null,
+        "targetPresent": null,
+        "quarantinePresent": null,
+        "journalStatus": "not-evaluated",
+        "policyCompatible": false,
+        "errors": [
+          "safe-delete capability root 不在受管 allowlist。"
+        ]
+      }
+    },
+    {
+      "group": "manifest-drift",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260812T192132Z-54d8c0e4-656c-4950-8f6f-980e0b0504ac",
+        "lifecycle": "manual-review",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+        "targetPresent": true,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": false,
+        "errors": [
+          "safe-delete Status planned tree manifest 漂移。"
+        ]
+      }
+    },
+    {
+      "group": "manifest-drift",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260812T203021Z-f209a81b-2377-4036-8a83-43f238412a88",
+        "lifecycle": "manual-review",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+        "targetPresent": true,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": false,
+        "errors": [
+          "safe-delete Status planned tree manifest 漂移。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162710Z-6f30a9ee-6134-4abd-b233-e34df4e070fb",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v8",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162713Z-163ad4d4-6ada-47e9-8fa1-0d8db4794291",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v9",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162715Z-5fce3d6d-59b4-4670-b68d-28fac5dce50b",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v10",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162717Z-c5d3bbb4-5f0a-445e-b50a-d9673bb76d56",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v11",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162720Z-8b50c56b-bbde-47f5-911c-f16924b5b7fa",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v7",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162722Z-3a713dd5-e4a1-4182-8272-a305e117f926",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v8",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162725Z-6d7ff61a-3164-44f5-8b9e-f0e4e04ab894",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v9",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162727Z-04d4d616-d3db-4807-9309-61e5919cff1c",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v10",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162730Z-d34f4e0d-23ca-4f1e-a2ae-89e2d7b3c728",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v11",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162831Z-d0e3b27a-a6f7-4f9f-a7ea-24405216d955",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v8",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162834Z-554d4b6c-cab8-449a-a5a6-119e0830bf52",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v9",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162837Z-5c2d46d7-7830-42e3-aa1f-22f779fa1eef",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v10",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    },
+    {
+      "group": "planned-namespace",
+      "inBaselineOps": false,
+      "inBaselineBlocking": false,
+      "baseline": null,
+      "after": {
+        "operationId": "20260813T162840Z-b5051b56-f655-41e8-9d85-83d22e494b38",
+        "lifecycle": "inconsistent",
+        "planSchemaVersion": 1,
+        "transactionSchemaVersion": null,
+        "transactionStatus": null,
+        "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v11",
+        "targetPresent": false,
+        "quarantinePresent": false,
+        "journalStatus": "not-started",
+        "policyCompatible": true,
+        "errors": [
+          "planned operation 的 target/quarantine namespace 不一致。"
+        ]
+      }
+    }
+  ],
+  "goneStatusNoneRecords": []
+}

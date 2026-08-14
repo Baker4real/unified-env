@@ -1,0 +1,450 @@
+{
+  "snapshot": true,
+  "note": "归档后 remaining blocking 分解快照，不做 #23 归因结论。",
+  "blockingRecordCount": 109,
+  "missingFromOperations": [],
+  "byLifecycle": {
+    "manual-review": 86,
+    "inconsistent": 23
+  },
+  "byTransactionSchemaVersion": {
+    "2": 48,
+    "None": 52,
+    "1": 9
+  },
+  "byTransactionStatus": {
+    "None": 89,
+    "quarantined": 12,
+    "purging": 1,
+    "purged": 4,
+    "rolled-back": 1,
+    "prepared": 2
+  },
+  "v1UnterminatedInBlocking": [
+    {
+      "operationId": "20260729T055433Z-0f0aeb5d-efcc-43cb-973b-a58a9ea748d6",
+      "transactionStatus": "purging",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\app"
+    },
+    {
+      "operationId": "20260725T010726Z-0609f165-c496-4280-85c4-6bb8a5e9465b",
+      "transactionStatus": "rolled-back",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin"
+    },
+    {
+      "operationId": "20260730T170848Z-26f7ea53-0578-43c4-b245-9ab5304ca5d6",
+      "transactionStatus": "prepared",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin"
+    },
+    {
+      "operationId": "20260725T130041Z-a5fd8743-a239-423c-9c44-4cbb5aa6a2cc",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-d77a341ca599407f82af77a64d7f6253\\old-a"
+    },
+    {
+      "operationId": "20260728T162734Z-c602a5b7-34bb-4469-bf9b-2754cadc5a76",
+      "transactionStatus": "prepared",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin"
+    }
+  ],
+  "v2UnterminatedInBlocking": [
+    {
+      "operationId": "20260805T160705Z-42b9baac-1f3e-43eb-b038-ef86e0894a67",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260807T011336Z-7a5c38c6-d7ca-41de-ba85-da2b13c24968",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260809T121049Z-271cab68-1dc4-4c0e-8ac6-763690db5b50",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260812T155958Z-e093bbed-1204-4d53-a9e7-784e06fddc27",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160814Z-ffb190e0-db31-4811-88c6-292ab2e57ed1",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260813T162942Z-2745b2a3-23d6-4f93-bdd6-33379852d3ed",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v10",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260805T161107Z-f87382ff-39b8-4935-97e9-b530f8c037f3",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260813T163013Z-6db8957f-1e4f-4cf1-b956-2f81deb98aee",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v11",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162931Z-53cd598e-e051-4a39-8c9b-896eaeacc256",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v8",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260805T160859Z-f01a8632-c822-4b78-9033-c85a5fe5c44c",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T154045Z-3115fff4-93c2-4f69-929a-e6311b21be66",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T161021Z-3528d62b-79e5-4664-9531-b7afe242730a",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260812T155956Z-a00cf1f1-ef11-4c64-9a6c-4a59d4b95409",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260813T162956Z-215e2c23-71db-441b-a8db-f75b73343506",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v7",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260805T160607Z-2c20cff7-b6a5-43fe-875e-96aae5b9e4c1",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160950Z-54a18fc6-055c-4c1d-b3bd-47eaead4baa2",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T161122Z-2139a0f4-a099-471c-a6ac-623a1627bb26",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160649Z-e7ab6d35-b66f-4644-82c6-59e7ef5fe78a",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260809T121017Z-2b336128-8691-4ed8-b924-264778db0522",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160553Z-487dffb3-afa5-4fda-b5bc-3389821428a2",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260813T162935Z-56700506-0627-40dc-98e6-9af10bfde259",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v9",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T163004Z-03b96fc4-c8b0-4316-bfb6-d961f1f82fa0",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v9",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260805T160442Z-a0f27984-d254-443e-b505-b8a69f7b51ff",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T083256Z-1ba06d2f-fbf0-43fe-a57e-7fd57f943153",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\verification",
+      "errors": [
+        "safe-delete policy 自计划生成后已漂移。"
+      ]
+    },
+    {
+      "operationId": "20260805T160759Z-352e3d81-fe0e-45d0-9288-1bb1e32816c5",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260813T163000Z-54d37307-3bdc-4e0c-a5eb-dccb6eeca8a2",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v8",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260805T154034Z-aca423a1-a368-456c-88ce-fcf0f7fb4421",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160930Z-dfbf1a07-76c6-4290-a9aa-c314f6801664",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260812T155954Z-061d7c13-ef10-46f1-b37e-bea3c1f6ed3a",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260813T162340Z-8a1c1553-4ee6-48a2-97b6-a9f97347b325",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v7",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260809T121033Z-4a93df3e-4be2-4366-9910-71d777238aa4",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160915Z-b52e9c91-c960-434d-82e4-de5bea7464c5",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160539Z-11f6ef91-07f0-4d2a-af50-d14a17ac1b8f",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160627Z-9540badc-e828-441d-b822-ef216e2a869b",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160844Z-207a4a4c-0f1a-4bf8-9f06-bf1c0a0b23d1",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260813T163008Z-1d1ca8df-7aa7-4181-9461-667fb8f0dcaa",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v10",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260805T154030Z-6d78197f-0f81-4688-8c10-0f0f3026a1d6",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T153928Z-163b53ca-efeb-4b40-b49b-c4acd819882e",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260809T121122Z-2cea17f5-dfe2-41b0-b9b7-2f55ed3ef70f",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T161036Z-92de870f-e37e-4baf-9370-842a335767b0",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260813T162951Z-df0419e7-285b-4cd1-b41b-6829e34048c9",
+      "transactionStatus": "quarantined",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v11",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260805T154040Z-74f4b219-fff2-4efe-8703-25a43dde2fff",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T160829Z-d22a1332-6f67-4d31-9ebd-a1605a8553bc",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T161136Z-41921186-3a55-4b1d-bbd0-cd90f2d33e04",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260812T155931Z-d436eaec-55dc-4389-875d-6c54fe94e97a",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T161051Z-71a52327-694e-48fa-906a-e8d458400d90",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T082602Z-ea62c9f2-2e88-47eb-b860-1266dac2ad24",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T161004Z-5cb86255-4208-4637-933d-ea3f7bb82cf0",
+      "transactionStatus": null,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    }
+  ],
+  "purgedStillBlockingCount": 4,
+  "unparsedOrNullStatusCount": 89,
+  "unterminatedCount": 16,
+  "errorHeads": {
+    "safe-delete capability root 不在受管 allowlist。": 39,
+    "planned operation 的 target/quarantine namespace 不一致。": 31,
+    "prepared/quarantined operation 的 target/quarantine namespace 不一致。": 10,
+    "safe-delete Status planned tree manifest 漂移。": 17,
+    "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。": 5,
+    "plan 当前语义拒绝：safe-delete target 未达到策略要求的最小后代深度。": 4,
+    "safe-delete policy 自计划生成后已漂移。": 1,
+    "evidence record 缺少 plan.json。": 1,
+    "safe-delete target 未达到策略要求的最小后代深度。": 1
+  }
+}

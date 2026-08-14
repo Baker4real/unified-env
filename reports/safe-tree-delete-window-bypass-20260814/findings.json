@@ -1,0 +1,169 @@
+{
+  "snapshot": true,
+  "note": "只读调查快照，不构成 Archive / Apply / Purge / Restore / Delete 或改判 terminal 授权。",
+  "investigatedAtUtc": "2026-08-14T01:12:00+00:00",
+  "issue": 22,
+  "question": "10 条 ui-references quarantined→inconsistent 的 quarantine/target 由谁、何时、何入口弄没；能否排除本轮 Archive driver",
+  "winningHypothesis": "C",
+  "archiveDriverExcluded": true,
+  "managedPurgeOfTheseTenExcluded": true,
+  "exactUnmanagedCommandIdentified": false,
+  "userAttribution": {
+    "recordedAtUtc": "2026-08-14T01:20:00Z",
+    "source": "user message in orchestration session",
+    "statement": "v7-v11 是用户先前授权删除的，因为好像没有用了",
+    "effect": "authorization intent known; no longer an unexplained leftover of this archive wave; Status inconsistent remains contract-correct because Purge was not used"
+  },
+  "window": {
+    "archiveStartedAtUtc": "2026-08-13T17:32:37.6369792+00:00",
+    "archiveFinishedAtUtc": "2026-08-13T19:06:02.2551344+00:00",
+    "statusBeforeCapturedAtUtc": "2026-08-13T17:24:48.5620468+00:00",
+    "statusBeforeSummaryCapturedAtUtc": "2026-08-13T17:30:42.066448+00:00",
+    "statusAfterCapturedAtUtc": "2026-08-13T19:19:32.7449749+00:00",
+    "statusAfterSummaryCapturedAtUtc": "2026-08-13T19:33:18.902634+00:00"
+  },
+  "archiveDriver": {
+    "entry": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+    "mode": "Archive",
+    "orchestrator": "reports/safe-tree-delete-archive-20260814/invoke-archive-candidates.ps1",
+    "workerSession": "019ffbfd-8c68-77e3-965e-8a6ef3f70a0b",
+    "attempted": 2191,
+    "succeeded": 2191,
+    "refused": 0,
+    "failed": 0,
+    "lastArchivedOperationId": "20260813T142850Z-3ef6600a-e72a-4b90-b010-3a9c3673e050",
+    "tenIdsInCandidates": false,
+    "tenIdsInInvocationLog": false
+  },
+  "group": {
+    "count": 10,
+    "policyEntryId": "clock-countdown-intermediate-ui-references",
+    "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references",
+    "transactionSchemaVersion": 2,
+    "diskTransactionStatus": "quarantined",
+    "journalsPresent": false,
+    "statusBefore": {
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "errors": []
+    },
+    "statusAfter": {
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    }
+  },
+  "operations": [
+    {
+      "operationId": "20260813T162340Z-8a1c1553-4ee6-48a2-97b6-a9f97347b325",
+      "label": "main-window v7",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v7",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\.codex-safe-delete-8a1c1553-4ee6-48a2-97b6-a9f97347b325.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:23:40.4400068+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:26:12.4107413+00:00"
+    },
+    {
+      "operationId": "20260813T162931Z-53cd598e-e051-4a39-8c9b-896eaeacc256",
+      "label": "main-window v8",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v8",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\.codex-safe-delete-53cd598e-e051-4a39-8c9b-896eaeacc256.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:29:31.0492311+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:29:33.5391518+00:00"
+    },
+    {
+      "operationId": "20260813T162935Z-56700506-0627-40dc-98e6-9af10bfde259",
+      "label": "main-window v9",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v9",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\.codex-safe-delete-56700506-0627-40dc-98e6-9af10bfde259.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:29:35.3353703+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:29:38.0577732+00:00"
+    },
+    {
+      "operationId": "20260813T162942Z-2745b2a3-23d6-4f93-bdd6-33379852d3ed",
+      "label": "main-window v10",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v10",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\.codex-safe-delete-2745b2a3-23d6-4f93-bdd6-33379852d3ed.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:29:42.3705504+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:29:48.0849723+00:00"
+    },
+    {
+      "operationId": "20260813T162951Z-df0419e7-285b-4cd1-b41b-6829e34048c9",
+      "label": "main-window v11",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v11",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\.codex-safe-delete-df0419e7-285b-4cd1-b41b-6829e34048c9.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:29:51.7620962+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:29:55.1307394+00:00"
+    },
+    {
+      "operationId": "20260813T162956Z-215e2c23-71db-441b-a8db-f75b73343506",
+      "label": "floating v7",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v7",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\.codex-safe-delete-215e2c23-71db-441b-a8db-f75b73343506.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:29:56.9544890+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:29:59.1701174+00:00"
+    },
+    {
+      "operationId": "20260813T163000Z-54d37307-3bdc-4e0c-a5eb-dccb6eeca8a2",
+      "label": "floating v8",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v8",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\.codex-safe-delete-54d37307-3bdc-4e0c-a5eb-dccb6eeca8a2.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:30:00.8856642+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:30:03.1764857+00:00"
+    },
+    {
+      "operationId": "20260813T163004Z-03b96fc4-c8b0-4316-bfb6-d961f1f82fa0",
+      "label": "floating v9",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v9",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\.codex-safe-delete-03b96fc4-c8b0-4316-bfb6-d961f1f82fa0.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:30:04.9343998+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:30:07.2577955+00:00"
+    },
+    {
+      "operationId": "20260813T163008Z-1d1ca8df-7aa7-4181-9461-667fb8f0dcaa",
+      "label": "floating v10",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v10",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\.codex-safe-delete-1d1ca8df-7aa7-4181-9461-667fb8f0dcaa.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:30:08.9812011+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:30:11.2609137+00:00"
+    },
+    {
+      "operationId": "20260813T163013Z-6db8957f-1e4f-4cf1-b956-2f81deb98aee",
+      "label": "floating v11",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v11",
+      "quarantinePath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\.codex-safe-delete-6db8957f-1e4f-4cf1-b956-2f81deb98aee.quarantine",
+      "planCreatedAtUtc": "2026-08-13T16:30:13.0974919+00:00",
+      "transactionUpdatedAtUtc": "2026-08-13T16:30:15.7121444+00:00"
+    }
+  ],
+  "hypotheses": {
+    "A": {
+      "statement": "本轮 invoke-archive-candidates.ps1 / Archive 模式误动了这些 run",
+      "result": "falsified",
+      "archiveDriverExcluded": true
+    },
+    "B": {
+      "statement": "同窗口另一次受管 Apply/Purge/BatchPurge（例如时钟倒计时后续清理、v12）",
+      "result": "falsified-for-these-ten-operations"
+    },
+    "C": {
+      "statement": "受管入口之外的删除（手工、构建脚本、其他工具）",
+      "result": "supported-user-said-previously-authorized-unused-v7-v11"
+    },
+    "D": {
+      "statement": "无法判定",
+      "result": "not-needed-for-A-B; remains-for-exact-C-argv"
+    }
+  },
+  "liveUiReferencesRemaining": {
+    "mainWindow1165x1350": ["2026-08-05-v3", "2026-08-06-v6", "2026-08-13-v12"],
+    "floatingWindow520x390": ["2026-08-04-v1", "2026-08-05-v3", "2026-08-06-v6", "2026-08-13-v12"],
+    "v7toV11Present": false,
+    "tenQuarantineDirsPresent": false
+  },
+  "unknowns": [
+    "消失命令的精确 argv 与宿主会话 id 未在现役 Codex/Grok transcript 中找回",
+    "未采集 USN/recycle-bin/parent-dir live mtime；本调查无 shell"
+  ]
+}

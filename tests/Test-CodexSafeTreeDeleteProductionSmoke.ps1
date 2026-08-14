@@ -1,6 +1,11 @@
 [CmdletBinding()]
 param()
 
+# 完整 ProductionSmoke 会在 reports/ 下创建一次性 fixture，并经 live
+# invoke-safe-tree-delete.cmd 在 D:\Codex\.codex\run-evidence\safe-tree-delete\
+# 留下 operation。与 #22 的隔离：本套件只打 reports/ 下独立 capability 目标，
+# 不读写 #22 的 Status/Archive 候选。
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -21,11 +26,23 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
-function Invoke-LiveSafeDeleteJson {
+function Invoke-LiveSafeDeleteJsonCapture {
     param([Parameter(Mandatory)][string[]]$Arguments)
     $raw = & $liveWrapper @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "live safe-delete wrapper 失败：$raw" }
-    return ($raw -join "`n") | ConvertFrom-Json -Depth 32 -DateKind String
+    $exitCode = if (Test-Path Variable:LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    $text = ($raw -join "`n")
+    return [pscustomobject][ordered]@{
+        exitCode = $exitCode
+        raw = $text
+        document = $text | ConvertFrom-Json -Depth 32 -DateKind String
+    }
+}
+
+function Invoke-LiveSafeDeleteJson {
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    $captured = Invoke-LiveSafeDeleteJsonCapture -Arguments $Arguments
+    if ($captured.exitCode -ne 0) { throw "live safe-delete wrapper 失败：$($captured.raw)" }
+    return $captured.document
 }
 
 Assert-True ([IO.File]::Exists($liveWrapper)) 'live safe-delete wrapper 必须存在'
@@ -40,6 +57,19 @@ Assert-True (
     (Get-FileHash -LiteralPath $livePowerShellWrapper -Algorithm SHA256).Hash -ceq
     (Get-FileHash -LiteralPath $sourcePowerShellWrapper -Algorithm SHA256).Hash
 ) 'live/source PowerShell wrapper SHA-256 必须一致'
+
+# Archive 缺 -ConfirmArchive 必须经真实 .cmd → 宿主 .ps1 → 生产实现：
+# exit 0 + confirm-archive-required，且不写生产证据根。
+$unconfirmedArchive = Invoke-LiveSafeDeleteJsonCapture -Arguments @(
+    '-Mode', 'Archive',
+    '-Json'
+)
+Assert-True ($unconfirmedArchive.exitCode -eq 0) `
+    '缺确认 Archive 必须保持 exit 0，不得被 wrapper 改成非零'
+Assert-True (
+    $unconfirmedArchive.document.archived -eq $false -and
+    [string]$unconfirmedArchive.document.refusalReason -ceq 'confirm-archive-required') `
+    '缺确认 Archive 必须返回 confirm-archive-required'
 
 [void][IO.Directory]::CreateDirectory($fixtureRoot)
 [IO.File]::WriteAllText($payloadPath, 'production-smoke', [Text.UTF8Encoding]::new($false))
@@ -133,6 +163,14 @@ $batchParentPurge = Invoke-LiveSafeDeleteJson -Arguments @(
 Assert-True ($batchParentPurge.purged -eq $true) 'live smoke 必须受管清理 batch 父目录'
 Assert-True (-not [IO.Directory]::Exists($batchParent)) 'live smoke 不得遗留新的 batch 父目录'
 
+# 不要在 Purge 开始前对 quarantine 持 FileShare.Read 来测 leaf-delete-failed。
+# 生产 Purge 会先走 Get-CodexHookCapabilityDirectoryTreeSnapshot
+# （scripts/lib/CodexSafeTreeDelete.ps1 约 3847 行，name=safe-delete purge locked preflight）。
+# 该预检会因同一把锁卡住或抛错，到不了 delete catch，也打不出 leaf-delete-failed。
+# 生产 CLI 没有 FixtureBeforeDirectoryTreeDelete。
+# leaf-delete-failed 结构化 JSON 由 ControlPlane Retry 切片
+# rollback-snapshot-lock-candidate 在 preflight 之后持锁覆盖，本 live 套件不证明生产 Purge 失败 JSON。
+
 [pscustomobject][ordered]@{
     ok = $true
     suite = 'CodexSafeTreeDeleteProductionSmoke'
@@ -141,4 +179,6 @@ Assert-True (-not [IO.Directory]::Exists($batchParent)) 'live smoke 不得遗留
     transactionSha256 = [string]$purge.transactionSha256
     batchRecoveredCount = [int]$batch.recoveredCount
     batchParentPurged = [bool]$batchParentPurge.purged
+    unconfirmedArchiveExitCode = [int]$unconfirmedArchive.exitCode
+    unconfirmedArchiveRefusalReason = [string]$unconfirmedArchive.document.refusalReason
 }

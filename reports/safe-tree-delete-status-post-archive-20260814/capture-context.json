@@ -1,0 +1,50 @@
+{
+  "snapshot": true,
+  "note": "Status 采集前现场上下文。快照，不构成后续授权。",
+  "issue": 24,
+  "parentEpic": 18,
+  "capturedAtUtc": "2026-08-13T19:52:14.0941812+00:00",
+  "host": {
+    "psEdition": "Core",
+    "psVersion": "7.6.4"
+  },
+  "codeRevision": {
+    "commit": "6310d8d4b75d1b1f7f857c2341f9ee15adca3c42",
+    "short": "6310d8d",
+    "subject": "docs: 消除性能优化报告层的过期现役说法",
+    "branch": "main",
+    "note": "工作树不干净：他人 hook/Serena/policy.json 脏文件未回退。"
+  },
+  "policy": {
+    "path": "D:\\Codex\\projects\\统一环境\\managed\\safe-tree-delete\\policy.json",
+    "workingTreeSha256": "01a22918150646bc37c5a51c9f4d1392750fa1e44501b5c651ca2d14f4362c90",
+    "workingTreeBytes": 8776,
+    "workingTreeSchemaVersion": 4,
+    "workingTreeEntryCount": 32,
+    "headSha256": "bb80cc85da0f444c3f53d035ace43644ec85c4e833d0d8e347e2574f271bab8f",
+    "headBytes": 8517,
+    "dirty": true,
+    "diffStat": "1 file changed, 7 insertions(+)",
+    "workingTreeOnlyEntryId": "clock-countdown-intermediate-ui-references",
+    "note": "与 #22/#23 使用的工作树 policy SHA 一致。Status 读工作树 policy，不是 git HEAD。"
+  },
+  "wrapper": {
+    "liveCmd": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+    "repoCmd": "D:\\Codex\\projects\\统一环境\\scripts\\invoke-codex-safe-tree-delete.cmd",
+    "livePs1": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1",
+    "repoPs1": "D:\\Codex\\projects\\统一环境\\scripts\\invoke-codex-safe-tree-delete-host.ps1",
+    "cmdSha256": "45aeadf7f758a1cafce106f66e7eaecc5f60176d2017630e2af461a2a37bca12",
+    "ps1Sha256": "636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373",
+    "cmdMatch": true,
+    "ps1Match": true
+  },
+  "evidenceRootBeforeStatus": {
+    "path": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete",
+    "directoryCount": 2300,
+    "first": "20260724T105703Z-b2f1d552-3b4d-496e-8ea2-31c0b1f82a19",
+    "last": "acl-capability-probe-20260801",
+    "newestWriteUtc": "2026-08-13T19:06:02.0413482Z",
+    "newestWriteName": "20260813T142850Z-3ef6600a-e72a-4b90-b010-3a9c3673e050",
+    "note": "与 #22 归档后 2300 operations 一致。完整逐文件清单见 evidence-before.json。"
+  }
+}

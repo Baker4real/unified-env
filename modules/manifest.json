@@ -292,6 +292,7 @@
           "reports/safe-tree-delete-optimization-research-20260809.md",
           "reports/safe-tree-delete-status-baseline-20260810-evidence/status-output.json",
           "reports/safe-tree-delete-status-baseline-20260810.json",
+          "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1",
           "scripts/Measure-CodexSafeTreeDelete.ps1",
           "scripts/lib/CodexHookHandleBoundIO.cs",
           "scripts/lib/CodexHostSafety.ps1",
@@ -323,7 +324,13 @@
         "prefixes": [
           ".scratch/audit-20260810/",
           ".scratch/safe-tree-delete-perf/",
-          "managed/safe-tree-delete/"
+          "managed/safe-tree-delete/",
+          "reports/safe-tree-delete-archive-20260814/",
+          "reports/safe-tree-delete-unresolved-20260814/",
+          "reports/safe-tree-delete-status-post-archive-20260814/",
+          "reports/safe-tree-delete-control-plane-closeout-20260814/",
+          "reports/safe-tree-delete-round-leftover-20260814/",
+          "reports/safe-tree-delete-window-bypass-20260814/"
         ]
       },
       "tests": {

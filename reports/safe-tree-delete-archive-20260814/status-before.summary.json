@@ -1,0 +1,192 @@
+{
+  "snapshot": true,
+  "note": "live Status 摘要快照，不构成后续授权。",
+  "capturedAtUtc": "2026-08-13T17:30:42.066448+00:00",
+  "sourceStatusPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-archive-20260814\\status-before.json",
+  "sourceStatusSha256": "ce5868304abd18418d36bcc26724d5e5a6396432dcd40af18b8a571aa9afc26e",
+  "sourceStatusBytes": 3080472,
+  "complete": false,
+  "policySchemaVersion": 4,
+  "policySha256": "01a22918150646bc37c5a51c9f4d1392750fa1e44501b5c651ca2d14f4362c90",
+  "policyPath": "D:\\Codex\\projects\\统一环境\\managed\\safe-tree-delete\\policy.json",
+  "metrics": {
+    "schemaVersion": 1,
+    "phase": "status",
+    "elapsedMs": 1406040,
+    "entriesScanned": 6315,
+    "logicalBytes": 1626942518,
+    "bytesHashed": 2173400556,
+    "retry": {
+      "contract": null,
+      "attempts": 0,
+      "result": "not-applicable",
+      "events": []
+    }
+  },
+  "operationCount": 2300,
+  "blockingRecordCount": 2290,
+  "candidateCount": 2191,
+  "candidateCountDeltaFromBaseline1595": 596,
+  "projectedResidualIfAllCandidatesArchive": 99,
+  "candidatesByTransactionSchemaVersion": {
+    "1": 872,
+    "2": 1319
+  },
+  "operationsByLifecycle": {
+    "manual-review": 2277,
+    "recoverable": 10,
+    "inconsistent": 13
+  },
+  "operationsByTransactionSchemaVersion": {
+    "1": 881,
+    "None": 52,
+    "2": 1367
+  },
+  "unterminatedCount": 16,
+  "v1UnterminatedCount": 5,
+  "v2UnterminatedCount": 11,
+  "v1Unterminated": [
+    {
+      "operationId": "20260725T010726Z-0609f165-c496-4280-85c4-6bb8a5e9465b",
+      "lifecycle": "manual-review",
+      "transactionStatus": "rolled-back",
+      "transactionSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin",
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260725T130041Z-a5fd8743-a239-423c-9c44-4cbb5aa6a2cc",
+      "lifecycle": "manual-review",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-d77a341ca599407f82af77a64d7f6253\\old-a",
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260728T162734Z-c602a5b7-34bb-4469-bf9b-2754cadc5a76",
+      "lifecycle": "manual-review",
+      "transactionStatus": "prepared",
+      "transactionSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin",
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260729T055433Z-0f0aeb5d-efcc-43cb-973b-a58a9ea748d6",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purging",
+      "transactionSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\app",
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260730T170848Z-26f7ea53-0578-43c4-b245-9ab5304ca5d6",
+      "lifecycle": "manual-review",
+      "transactionStatus": "prepared",
+      "transactionSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    }
+  ],
+  "v2Unterminated": [
+    {
+      "operationId": "20260805T083256Z-1ba06d2f-fbf0-43fe-a57e-7fd57f943153",
+      "lifecycle": "manual-review",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\verification",
+      "errors": [
+        "safe-delete policy 自计划生成后已漂移。"
+      ]
+    },
+    {
+      "operationId": "20260813T162340Z-8a1c1553-4ee6-48a2-97b6-a9f97347b325",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v7",
+      "errors": []
+    },
+    {
+      "operationId": "20260813T162931Z-53cd598e-e051-4a39-8c9b-896eaeacc256",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v8",
+      "errors": []
+    },
+    {
+      "operationId": "20260813T162935Z-56700506-0627-40dc-98e6-9af10bfde259",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v9",
+      "errors": []
+    },
+    {
+      "operationId": "20260813T162942Z-2745b2a3-23d6-4f93-bdd6-33379852d3ed",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v10",
+      "errors": []
+    },
+    {
+      "operationId": "20260813T162951Z-df0419e7-285b-4cd1-b41b-6829e34048c9",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v11",
+      "errors": []
+    },
+    {
+      "operationId": "20260813T162956Z-215e2c23-71db-441b-a8db-f75b73343506",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v7",
+      "errors": []
+    },
+    {
+      "operationId": "20260813T163000Z-54d37307-3bdc-4e0c-a5eb-dccb6eeca8a2",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v8",
+      "errors": []
+    },
+    {
+      "operationId": "20260813T163004Z-03b96fc4-c8b0-4316-bfb6-d961f1f82fa0",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v9",
+      "errors": []
+    },
+    {
+      "operationId": "20260813T163008Z-1d1ca8df-7aa7-4181-9461-667fb8f0dcaa",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v10",
+      "errors": []
+    },
+    {
+      "operationId": "20260813T163013Z-6db8957f-1e4f-4cf1-b956-2f81deb98aee",
+      "lifecycle": "recoverable",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v11",
+      "errors": []
+    }
+  ]
+}

@@ -21,6 +21,7 @@ $producerProcess = $null
 $crashedProducerProcess = $null
 $lateProducerProcess = $null
 $retryCrashProcess = $null
+$rollbackSnapshotLockState = $null
 $batchFailureHardLinkPath = $null
 $batchFailureHardLinkAliasPath = $null
 $batchPurgeMappedImageProbe = $null
@@ -1277,6 +1278,157 @@ try {
             ($invalidPlanTimeRunAfter | ConvertTo-Json -Depth 16 -Compress)) -and
         -not [IO.File]::Exists($invalidPlanTimeMarkerPath)) `
         'Archive 必须拒绝 expiresAtUtc 语法畸形但 SHA 重新绑定的历史 v2 plan 且 marker 零写入'
+
+    $batchArchiveEvidenceRoot = Join-Path $fixtureRoot 'batch-archive-isolation-evidence'
+    $batchArchiveSpecs = @(
+        [pscustomobject][ordered]@{ name = 'batch-archive-good-a'; eligible = $true },
+        [pscustomobject][ordered]@{ name = 'batch-archive-bad'; eligible = $false },
+        [pscustomobject][ordered]@{ name = 'batch-archive-good-b'; eligible = $true }
+    )
+    $batchArchiveCandidates = [Collections.Generic.List[object]]::new()
+    foreach ($batchSpec in $batchArchiveSpecs) {
+        $batchTarget = Join-Path $fixtureRoot $batchSpec.name
+        [void][IO.Directory]::CreateDirectory($batchTarget)
+        [IO.File]::WriteAllText(
+            (Join-Path $batchTarget 'payload.txt'),
+            [string]$batchSpec.name,
+            [Text.UTF8Encoding]::new($false))
+        $batchPlan = & $entryPath `
+            -Mode Plan `
+            -TargetPath $batchTarget `
+            -CapabilityRoot $fixtureRoot `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+        $batchApply = & $entryPath `
+            -Mode Apply `
+            -PlanPath ([string]$batchPlan.planPath) `
+            -ApprovedPlanSha256 ([string]$batchPlan.planSha256) `
+            -ConfirmApply `
+            -FixturePolicyPath $policyPath `
+            -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+        $batchTransactionPath = [string]$batchApply.transactionPath
+        $batchTransactionSha256 = [string]$batchApply.transactionSha256
+        if ([bool]$batchSpec.eligible) {
+            $batchPurge = & $entryPath `
+                -Mode Purge `
+                -TransactionPath $batchTransactionPath `
+                -ApprovedTransactionSha256 $batchTransactionSha256 `
+                -ConfirmPurge `
+                -FixturePolicyPath $policyPath `
+                -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+            $batchTransactionPath = [string]$batchPurge.transactionPath
+            $batchTransactionSha256 = [string]$batchPurge.transactionSha256
+        }
+        $batchRunDirectory = Split-Path -Parent $batchTransactionPath
+        $batchArchiveCandidates.Add([pscustomobject][ordered]@{
+            name = [string]$batchSpec.name
+            eligible = [bool]$batchSpec.eligible
+            transactionPath = $batchTransactionPath
+            approvedTransactionSha256 = $batchTransactionSha256
+            runDirectory = $batchRunDirectory
+            operationId = Split-Path -Leaf $batchRunDirectory
+            beforeFiles = @(Get-FixtureFileState -Root $batchRunDirectory)
+        })
+    }
+
+    $batchArchiveResults = [Collections.Generic.List[object]]::new()
+    foreach ($batchCandidate in $batchArchiveCandidates) {
+        $batchArchiveError = $null
+        $batchArchive = $null
+        try {
+            $batchArchive = & $entryPath `
+                -Mode Archive `
+                -TransactionPath $batchCandidate.transactionPath `
+                -ApprovedTransactionSha256 $batchCandidate.approvedTransactionSha256 `
+                -ConfirmArchive `
+                -FixturePolicyPath $policyPath `
+                -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+        } catch {
+            $batchArchiveError = $_.Exception.Message
+        }
+        $batchAfterFiles = @(Get-FixtureFileState -Root $batchCandidate.runDirectory)
+        $batchMarkerPath = Join-Path $batchCandidate.runDirectory 'terminal-archive.json'
+        $batchHasRefusal = $null -ne $batchArchive -and
+            @($batchArchive.PSObject.Properties.Name) -contains 'refusalReason'
+        $batchResult = [pscustomobject][ordered]@{
+            name = [string]$batchCandidate.name
+            eligible = [bool]$batchCandidate.eligible
+            operationId = [string]$batchCandidate.operationId
+            archived = if ($null -ne $batchArchive) { [bool]$batchArchive.archived } else { $false }
+            alreadyArchived = if ($null -ne $batchArchive) { [bool]$batchArchive.alreadyArchived } else { $false }
+            refusalReason = if ($batchHasRefusal) { [string]$batchArchive.refusalReason } else { $null }
+            error = $batchArchiveError
+            archivePath = if ($null -ne $batchArchive -and
+                @($batchArchive.PSObject.Properties.Name) -contains 'archivePath') {
+                [string]$batchArchive.archivePath
+            } else { $null }
+            markerPresent = [IO.File]::Exists($batchMarkerPath)
+        }
+        $batchArchiveResults.Add($batchResult)
+
+        if ([bool]$batchCandidate.eligible) {
+            Assert-True ($batchResult.archived -eq $true -and
+                -not $batchResult.alreadyArchived -and
+                [string]::IsNullOrWhiteSpace([string]$batchResult.refusalReason) -and
+                [string]::IsNullOrWhiteSpace([string]$batchResult.error) -and
+                $batchResult.markerPresent -and
+                [string]$batchResult.archivePath -ceq $batchMarkerPath) `
+                "逐条 Archive 必须归档合格项 $($batchCandidate.name)"
+            Assert-True ($batchAfterFiles.Count -eq ($batchCandidate.beforeFiles.Count + 1)) `
+                "合格项 $($batchCandidate.name) 只允许新增一份 Archive marker"
+            foreach ($batchBeforeFile in $batchCandidate.beforeFiles) {
+                $batchAfterFile = @($batchAfterFiles | Where-Object {
+                    [string]$_.relativePath -ceq [string]$batchBeforeFile.relativePath
+                })
+                Assert-True ($batchAfterFile.Count -eq 1 -and
+                    [string]$batchAfterFile[0].sha256 -ceq [string]$batchBeforeFile.sha256 -and
+                    ((@($batchAfterFile[0].identity) -join '|') -ceq
+                        (@($batchBeforeFile.identity) -join '|'))) `
+                    "合格项 $($batchCandidate.name) 不得改写既有 evidence：$($batchBeforeFile.relativePath)"
+            }
+        } else {
+            Assert-True (-not $batchResult.archived -and
+                -not $batchResult.alreadyArchived -and
+                [string]$batchResult.refusalReason -ceq 'transaction-status-not-purged' -and
+                [string]::IsNullOrWhiteSpace([string]$batchResult.error) -and
+                -not $batchResult.markerPresent) `
+                "逐条 Archive 必须以稳定原因拒绝不合格项 $($batchCandidate.name)"
+            Assert-True (
+                (($batchCandidate.beforeFiles | ConvertTo-Json -Depth 16 -Compress) -ceq
+                    ($batchAfterFiles | ConvertTo-Json -Depth 16 -Compress))) `
+                "不合格项 $($batchCandidate.name) 必须零写入"
+        }
+    }
+
+    Assert-True ($batchArchiveResults.Count -eq 3 -and
+        [string]$batchArchiveResults[0].name -ceq 'batch-archive-good-a' -and
+        [string]$batchArchiveResults[1].name -ceq 'batch-archive-bad' -and
+        [string]$batchArchiveResults[2].name -ceq 'batch-archive-good-b' -and
+        $batchArchiveResults[0].archived -eq $true -and
+        $batchArchiveResults[1].archived -eq $false -and
+        $batchArchiveResults[2].archived -eq $true) `
+        '批量逐条 Archive 结果必须按调用顺序可读，且单条拒绝不得中断其余合格项'
+    $batchArchiveStatus = & $entryPath `
+        -Mode Status `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+    $batchEligibleIds = @(
+        $batchArchiveCandidates |
+            Where-Object { [bool]$_.eligible } |
+            ForEach-Object { [string]$_.operationId }
+    )
+    $batchArchivedOperations = @($batchArchiveStatus.operations | Where-Object {
+        [string]$_.operationId -cin $batchEligibleIds
+    })
+    $batchRefusedOperation = @($batchArchiveStatus.operations | Where-Object {
+        [string]$_.operationId -ceq [string]$batchArchiveCandidates[1].operationId
+    })
+    Assert-True ($batchArchivedOperations.Count -eq 2 -and
+        (@($batchArchivedOperations | Where-Object { [string]$_.lifecycle -ceq 'terminal' }).Count -eq 2) -and
+        $batchRefusedOperation.Count -eq 1 -and
+        [string]$batchRefusedOperation[0].lifecycle -cne 'terminal' -and
+        [string]$batchRefusedOperation[0].transactionStatus -ceq 'quarantined') `
+        'Status 必须只把合格归档项标为 terminal，不合格项保持原状态'
 
     $invalidRun = Join-Path $evidenceRoot 'invalid-record'
     [void][IO.Directory]::CreateDirectory($invalidRun)
@@ -3006,12 +3158,94 @@ try {
     Assert-True ($retryCrashResume.purged -eq $true) `
         'leaf 强杀后重入必须按 partial manifest 完成 Purge'
 
+    $rollbackSnapshotLockTarget = Join-Path $fixtureRoot 'rollback-snapshot-lock-candidate'
+    [void][IO.Directory]::CreateDirectory($rollbackSnapshotLockTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $rollbackSnapshotLockTarget 'locked-payload.txt'),
+        'rollback-snapshot-lease-failure',
+        [Text.UTF8Encoding]::new($false))
+    $rollbackSnapshotLockPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $rollbackSnapshotLockTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $rollbackSnapshotLockApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$rollbackSnapshotLockPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$rollbackSnapshotLockPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    $rollbackSnapshotLockState = [pscustomobject][ordered]@{ stream = $null }
+    $rollbackSnapshotLock = {
+        param([string]$QuarantinePath)
+        $rollbackSnapshotLockState.stream = [IO.File]::Open(
+            (Join-Path $QuarantinePath 'locked-payload.txt'),
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::Read)
+    }.GetNewClosure()
+    $rollbackSnapshotLockPolicy = [pscustomobject][ordered]@{
+        schemaVersion = 1
+        maxAttempts = 1
+        wallTimeBudgetMs = 0
+        delayMilliseconds = @()
+        allowedWindowsErrors = @(32, 33, 170)
+    }
+    try {
+        $rollbackSnapshotLockFailure = (& $entryPath `
+                -Mode Purge `
+                -TransactionPath ([string]$rollbackSnapshotLockApply.transactionPath) `
+                -ApprovedTransactionSha256 ([string]$rollbackSnapshotLockApply.transactionSha256) `
+                -ConfirmPurge `
+                -FixtureBeforeDirectoryTreeDelete $rollbackSnapshotLock `
+                -FixtureLeafRetryPolicy $rollbackSnapshotLockPolicy `
+                -FixturePolicyPath $fencedPolicyPath `
+                -FixtureEvidenceRoot $fencedEvidenceRoot `
+                -Json) | ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+        Assert-True (
+            $rollbackSnapshotLockFailure.purged -eq $false -and
+            [string]$rollbackSnapshotLockFailure.refusalReason -ceq 'leaf-delete-failed') `
+            '回滚快照 lease 失败仍必须返回 leaf-delete-failed'
+        Assert-True ([IO.Directory]::Exists([string]$rollbackSnapshotLockApply.quarantinePath)) `
+            '回滚快照 lease 失败必须保持 quarantine（zero-commit）'
+        $rollbackSnapshotLockTransactionSnapshot = Get-CodexHookCapabilityFileSnapshot `
+            -Path ([string]$rollbackSnapshotLockApply.transactionPath) `
+            -CapabilityRoot (Split-Path -Parent $rollbackSnapshotLockApply.transactionPath) `
+            -AllowedExactPaths @([string]$rollbackSnapshotLockApply.transactionPath) `
+            -Name 'rollback snapshot lock transaction'
+        $rollbackSnapshotLockTransaction = [Text.UTF8Encoding]::new($false).GetString(
+            $rollbackSnapshotLockTransactionSnapshot.bytes) |
+            ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+        Assert-True ($rollbackSnapshotLockTransaction.status -ceq 'purging') `
+            '回滚快照失败不得改写 transaction'
+        Assert-True (
+            $rollbackSnapshotLockFailure.recoverable -eq $false -and
+            $rollbackSnapshotLockFailure.purgeResumable -eq $true) `
+            '回滚快照失败时 JSON 必须反映未回滚的 purging 状态'
+    } finally {
+        if ($null -ne $rollbackSnapshotLockState.stream) {
+            $rollbackSnapshotLockState.stream.Dispose()
+            $rollbackSnapshotLockState.stream = $null
+        }
+    }
+    $rollbackSnapshotLockResume = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$rollbackSnapshotLockApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$rollbackSnapshotLockTransactionSnapshot.sha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $fencedPolicyPath `
+        -FixtureEvidenceRoot $fencedEvidenceRoot
+    Assert-True ($rollbackSnapshotLockResume.purged -eq $true) `
+        '释放回滚快照锁后必须可重入 Purge'
+
     if ($Slice -ceq 'Retry') {
         [pscustomobject][ordered]@{
             ok = $true
             suite = 'CodexSafeTreeDeleteRetry'
-            scenarios = 11
-            checks = 49
+            scenarios = 12
+            checks = 54
         }
         return
     }
@@ -3043,6 +3277,11 @@ try {
         if (-not $retryCrashProcess.HasExited) { $retryCrashProcess.Kill($true) }
         [void]$retryCrashProcess.WaitForExit(10000)
         $retryCrashProcess.Dispose()
+    }
+    if ($null -ne $rollbackSnapshotLockState -and
+        $null -ne $rollbackSnapshotLockState.stream) {
+        $rollbackSnapshotLockState.stream.Dispose()
+        $rollbackSnapshotLockState.stream = $null
     }
     if (-not [string]::IsNullOrWhiteSpace($batchFailureHardLinkAliasPath) -and
         [IO.File]::Exists($batchFailureHardLinkAliasPath)) {

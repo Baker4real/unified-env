@@ -1,0 +1,43 @@
+{
+  "snapshot": true,
+  "note": "ProductionSmoke 一次 live 运行记录。新 operation 不属于归档收敛判定集。未改测试、未改实现。",
+  "issue": 24,
+  "suite": "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+  "suiteProvenance": "跑的是工作树已有未提交副本（相对 HEAD +111 行，含 #21 持锁断言）。本票未改、未回退该文件。",
+  "startedAtUtc": "2026-08-13T20:04:59.7277113+00:00",
+  "finishedAtUtc": "2026-08-13T20:05:59.2542453+00:00",
+  "wallClockSeconds": 59.527,
+  "suiteExitCode": 1,
+  "stdoutBytes": 0,
+  "stderrBytes": 531,
+  "finalObjectEmitted": false,
+  "leafDeleteFailedAssertion": {
+    "reachedStructuredResult": false,
+    "passed": false,
+    "expected": "Purge -Json 非零退出码，且 refusalReason=leaf-delete-failed，purged=false",
+    "observedSuiteExitCode": 1,
+    "observedLeafDeleteFailedExitCode": null,
+    "observedRefusalReason": null,
+    "stderrExcerpt": "Exception calling \"AcquireSafeTreeDeleteFileLease\" with \"2\" argument(s): \"Unable to acquire a safe-tree-delete file lease.\" ; The property 'purged' cannot be found on this object."
+  },
+  "inferredFailurePoint": {
+    "kind": "inference-from-stderr-and-evidence",
+    "happyPathAndBatch": "passed; four operations already purged before leaf-fail",
+    "leafFailOperationId": "20260813T200553Z-03b8b4af-b466-4cce-9ff8-c977f3f48d93",
+    "leafFailFinalTransactionStatus": "purged",
+    "note": "持锁 Purge 未给出 leaf-delete-failed JSON。stderr 指向 quarantine 树快照再次 AcquireSafeTreeDeleteFileLease。对照实现：Purge 失败 catch 会在仍持锁时重扫 quarantine；该扫描抛错会盖住 ReturnFailureMetrics 的结构化拒绝。finally 释放句柄后受管收尾 Purge 成功，故事务现为 purged，fixture/quarantine 不在。"
+  },
+  "notInJudgmentSet": {
+    "beforeOperationCount": 2300,
+    "afterOperationCount": 2305,
+    "addedOperationIds": [
+      "20260813T200503Z-56d5dd42-5f0f-429c-87da-15e8518e4af9",
+      "20260813T200508Z-791fecd8-67af-49ce-95ae-891b42adf4c5",
+      "20260813T200545Z-ec5af9d0-035a-4213-8033-9b1432225e14",
+      "20260813T200547Z-087a6e03-6f19-4711-b8b4-5e4177cdedf9",
+      "20260813T200553Z-03b8b4af-b466-4cce-9ff8-c977f3f48d93"
+    ],
+    "allAddedNowPurged": true,
+    "leftoverFixturesFromThisRun": false
+  }
+}

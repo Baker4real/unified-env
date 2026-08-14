@@ -1,0 +1,71 @@
+{
+  "snapshot": true,
+  "note": "issue #18 史诗文档收口快照。不构成关票、归档、Apply/Purge/Delete 或放宽判据授权。快照数字不是现役合同。",
+  "issue": 18,
+  "result": "DONE_WITH_CONCERNS",
+  "role": "integration-and-documentation",
+  "githubIssuesLeftOpenByThisCloseout": [18, 20, 21, 22, 23, 24],
+  "githubIssuesAlreadyClosedElsewhere": [11, 17],
+  "childTickets": {
+    "19": {
+      "result": "baseline-in-repo",
+      "honored": "归档前 Status 基线已入仓",
+      "doNotReuse": "1674→79"
+    },
+    "20": {
+      "result": "DONE",
+      "wrapperForward": "exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })",
+      "sourceAndHostSha256": "636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373",
+      "repoSourceSha256ReverifiedThisCloseout": "636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373"
+    },
+    "21": {
+      "result": "DONE_WITH_CONCERNS",
+      "honored": "ProductionSmoke 已写入 leaf-delete-failed 非零退出码断言；副本探针修前 0 / 修后 1",
+      "liveRejected": "持锁 Purge 失败回滚再次 AcquireSafeTreeDeleteFileLease，未打出 leaf-delete-failed JSON；live smoke 未绿；未改测试去让它绿"
+    },
+    "22": {
+      "result": "DONE_WITH_CONCERNS",
+      "honored": "2191 条逐条 Archive 成功；blocking 2290→109",
+      "doNotReuse": "1674→79"
+    },
+    "23": {
+      "result": "DONE_WITH_CONCERNS",
+      "honored": "89 条未解析已分类；不放宽判据",
+      "concern": "37 条 v2 purged 因 plan 拒绝后不对 v2 观测而看不见"
+    },
+    "24": {
+      "result": "DONE_WITH_CONCERNS",
+      "liveStatusSnapshot": {
+        "capturedAtUtc": "2026-08-13T19:59Z",
+        "complete": false,
+        "ready": false,
+        "blockingRecords": 109,
+        "elapsedMs": 321851,
+        "completeFalseIsCorrect": true
+      },
+      "liveRejected": "Status 仍不满足顺手确认；归档后 complete 必为 true 不成立"
+    }
+  },
+  "specUpdated": "docs/specs/2026-07-24-safe-tree-delete-capability.md",
+  "specGapsClosed": [
+    "testing-seam-crash-helper-not-second-production-entry",
+    "rootDeletionPurpose-reads-current-policy-retroactive",
+    "archive-qualified-terminal-does-not-imply-complete-true",
+    "middleware-must-forward-LASTEXITCODE-unconfirmed-refusal-exit-0",
+    "archive-clears-blocking-noise-not-status-full-scan-bill"
+  ],
+  "remainingAfter17And11Closed": [
+    "status-observe-v2-after-plan-reject",
+    "status-performance-independent-ticket",
+    "production-smoke-lock-held-leaf-delete-failed-path",
+    "ten-ui-references-quarantined-bypass"
+  ],
+  "sources": [
+    "docs/specs/2026-07-24-safe-tree-delete-capability.md",
+    "docs/agents/knowledge-scope.md",
+    "reports/safe-tree-delete-archive-20260814/acceptance.json",
+    "reports/safe-tree-delete-unresolved-20260814/REPORT.md",
+    "reports/safe-tree-delete-status-post-archive-20260814/REPORT.md",
+    "scripts/invoke-codex-safe-tree-delete-host.ps1"
+  ]
+}

@@ -20,7 +20,9 @@ safe delete 的宿主公开入口仍是 `D:\Codex\.codex\scripts\invoke-safe-tre
 - 删除语义与生产 policy：`docs/specs/2026-07-24-safe-tree-delete-capability.md`
 - 性能优化（部分落地）：`docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`
 
-2026-08-13 起仓库含 `scripts/lib/CodexSafeTreeDeleteFileIdentity.cs` 与 `scripts/lib/CodexSafeTreeDeleteHashCache.cs`。Plan 会并列写出 `fileIdentitiesV2`；新 Plan 在不支持 `FILE_ID_INFO` 的卷上失败关闭。Apply/Purge 仍只认证 `treeManifest`，不调用 `GetHashSafely`。剩余票从 GitHub #32 起。
+2026-08-13 起仓库含 `scripts/lib/CodexSafeTreeDeleteFileIdentity.cs` 与 `scripts/lib/CodexSafeTreeDeleteHashCache.cs`。Plan 会并列写出 `fileIdentitiesV2`；新 Plan 在不支持 `FILE_ID_INFO` 的卷上失败关闭。Apply/Purge 仍只认证 `treeManifest`，不调用 `GetHashSafely`。性能优化剩余票从 GitHub #32 起。
+
+控制面收尾（Archive、退出码传递、`complete` 聚合）以 `docs/specs/2026-07-24-safe-tree-delete-capability.md` 为准：归档合格 terminal 不蕴含 `complete=true`；受管中间层必须转发 `$LASTEXITCODE`。2026-08-13 现场快照见 `reports/safe-tree-delete-control-plane-closeout-20260814/REPORT.md`，不是现役计数。GitHub #18–#24 仍 OPEN。
 
 ## 测试
 

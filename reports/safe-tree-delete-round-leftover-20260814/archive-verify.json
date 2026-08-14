@@ -1,0 +1,128 @@
+{
+  "snapshot": true,
+  "allMarkersPresent": true,
+  "allTransactionsUnchanged": true,
+  "anyUiReferencesTouched": false,
+  "leftoverReportDirs": [
+    "safe-tree-delete-production-smoke-5849ef763f1d42bab1341272288a672d"
+  ],
+  "rows": [
+    {
+      "operationId": "20260813T200503Z-56d5dd42-5f0f-429c-87da-15e8518e4af9",
+      "driverArchived": true,
+      "driverAlreadyArchived": false,
+      "driverRefusalReason": null,
+      "driverExitCode": 0,
+      "markerExists": true,
+      "transactionShaUnchanged": true,
+      "quarantineStillAbsent": true,
+      "uiReferences": false,
+      "markerSha256": "5be9765d6aebe789a80a6f1da1cef357616dff7379e005bdbdae19061d026a48",
+      "markerBytes": 1286
+    },
+    {
+      "operationId": "20260813T200508Z-791fecd8-67af-49ce-95ae-891b42adf4c5",
+      "driverArchived": true,
+      "driverAlreadyArchived": false,
+      "driverRefusalReason": null,
+      "driverExitCode": 0,
+      "markerExists": true,
+      "transactionShaUnchanged": true,
+      "quarantineStillAbsent": true,
+      "uiReferences": false,
+      "markerSha256": "318e9c1893ce0365afd96b2dfc1526acecef79e80b3591fc19574460c3d65a61",
+      "markerBytes": 1351
+    },
+    {
+      "operationId": "20260813T200545Z-ec5af9d0-035a-4213-8033-9b1432225e14",
+      "driverArchived": true,
+      "driverAlreadyArchived": false,
+      "driverRefusalReason": null,
+      "driverExitCode": 0,
+      "markerExists": true,
+      "transactionShaUnchanged": true,
+      "quarantineStillAbsent": true,
+      "uiReferences": false,
+      "markerSha256": "2468bbcab2423a35c4b18dfd2c68dc024759eb106ab140aa0f9b98023860589f",
+      "markerBytes": 1351
+    },
+    {
+      "operationId": "20260813T200547Z-087a6e03-6f19-4711-b8b4-5e4177cdedf9",
+      "driverArchived": true,
+      "driverAlreadyArchived": false,
+      "driverRefusalReason": null,
+      "driverExitCode": 0,
+      "markerExists": true,
+      "transactionShaUnchanged": true,
+      "quarantineStillAbsent": true,
+      "uiReferences": false,
+      "markerSha256": "270c1114e98ed3635b7fd3228eb864eef8cfc72b352ab6f0b90d2174afa34faf",
+      "markerBytes": 1281
+    },
+    {
+      "operationId": "20260813T200553Z-03b8b4af-b466-4cce-9ff8-c977f3f48d93",
+      "driverArchived": true,
+      "driverAlreadyArchived": false,
+      "driverRefusalReason": null,
+      "driverExitCode": 0,
+      "markerExists": true,
+      "transactionShaUnchanged": true,
+      "quarantineStillAbsent": true,
+      "uiReferences": false,
+      "markerSha256": "421eb50c355e19f81f0936a07fa628ddcb63f3b07b233af8a5e42414651be2c5",
+      "markerBytes": 1285
+    },
+    {
+      "operationId": "20260814T013149Z-b926e9a9-5e9f-4135-b83b-db9463dd7d81",
+      "driverArchived": true,
+      "driverAlreadyArchived": false,
+      "driverRefusalReason": null,
+      "driverExitCode": 0,
+      "markerExists": true,
+      "transactionShaUnchanged": true,
+      "quarantineStillAbsent": true,
+      "uiReferences": false,
+      "markerSha256": "8a2cf57b4d669ad5a3d9065b657712d4ca4abfd025e6c478c2d3adb5e6d9f4af",
+      "markerBytes": 1286
+    },
+    {
+      "operationId": "20260814T013209Z-874602a3-4ac7-41f3-8e5f-1b78457eddab",
+      "driverArchived": true,
+      "driverAlreadyArchived": false,
+      "driverRefusalReason": null,
+      "driverExitCode": 0,
+      "markerExists": true,
+      "transactionShaUnchanged": true,
+      "quarantineStillAbsent": true,
+      "uiReferences": false,
+      "markerSha256": "327e03625aa6e5339ca43efef5849d39a07b15a5eb6fd32646d2c049c04280bd",
+      "markerBytes": 1351
+    },
+    {
+      "operationId": "20260814T013338Z-a8b25145-25ff-4d05-8d97-8309a5c42d1b",
+      "driverArchived": true,
+      "driverAlreadyArchived": false,
+      "driverRefusalReason": null,
+      "driverExitCode": 0,
+      "markerExists": true,
+      "transactionShaUnchanged": true,
+      "quarantineStillAbsent": true,
+      "uiReferences": false,
+      "markerSha256": "24840274af658152af645a074a00e781b0f0ed80ebbfd20a4148bc5dcf47354f",
+      "markerBytes": 1351
+    },
+    {
+      "operationId": "20260814T013344Z-c8018649-73b5-49ad-833a-4e94cfef5784",
+      "driverArchived": true,
+      "driverAlreadyArchived": false,
+      "driverRefusalReason": null,
+      "driverExitCode": 0,
+      "markerExists": true,
+      "transactionShaUnchanged": true,
+      "quarantineStillAbsent": true,
+      "uiReferences": false,
+      "markerSha256": "896db25a2f454cb522bdcf5d48c962e80110e0255f6b765672cfada5eb32e07e",
+      "markerBytes": 1281
+    }
+  ]
+}

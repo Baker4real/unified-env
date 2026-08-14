@@ -1,0 +1,435 @@
+{
+  "snapshot": true,
+  "commits": [
+    {
+      "commit": "ec05faf",
+      "meta": "2026-08-11 22:55:59 +0800 feat: govern .NET bundle cache cleanup",
+      "schemaVersion": 4,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "codex-legacy-temp",
+        "codex-managed-temp",
+        "dotnet-bundle-extraction-cache",
+        "environment-reports",
+        "environment-hook-pycache",
+        "environment-hook-lib-pycache",
+        "environment-scripts-pycache",
+        "environment-tests-pycache",
+        "environment-scratch",
+        "environment-retired-project-state",
+        "environment-remote-attachments",
+        "clock-countdown-app-build",
+        "clock-countdown-verification-build",
+        "clock-countdown-core-bin",
+        "clock-countdown-core-obj",
+        "clock-countdown-app-bin",
+        "clock-countdown-app-obj",
+        "clock-countdown-verification-bin",
+        "clock-countdown-verification-obj",
+        "codex-account-switch-rust-target",
+        "codex-account-switch-node-modules",
+        "codex-account-switch-dist",
+        "codex-account-switch-tauri-gen",
+        "cc-switch-rust-target",
+        "cc-switch-node-modules",
+        "sub2api-frontend-node-modules",
+        "serena-python-venv"
+      ]
+    },
+    {
+      "commit": "af25e34",
+      "meta": "2026-08-07 12:32:33 +0800 chore: extend guarded build cleanup",
+      "schemaVersion": 4,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "codex-legacy-temp",
+        "codex-managed-temp",
+        "environment-reports",
+        "environment-hook-pycache",
+        "environment-hook-lib-pycache",
+        "environment-scripts-pycache",
+        "environment-tests-pycache",
+        "environment-scratch",
+        "environment-retired-project-state",
+        "environment-remote-attachments",
+        "clock-countdown-app-build",
+        "clock-countdown-verification-build",
+        "clock-countdown-core-bin",
+        "clock-countdown-core-obj",
+        "clock-countdown-app-bin",
+        "clock-countdown-app-obj",
+        "clock-countdown-verification-bin",
+        "clock-countdown-verification-obj",
+        "codex-account-switch-rust-target",
+        "codex-account-switch-node-modules",
+        "codex-account-switch-dist",
+        "codex-account-switch-tauri-gen",
+        "cc-switch-rust-target",
+        "cc-switch-node-modules",
+        "sub2api-frontend-node-modules",
+        "serena-python-venv"
+      ]
+    },
+    {
+      "commit": "26ed431",
+      "meta": "2026-08-06 23:21:05 +0800 fix(host-safety): cover hook library pycache cleanup",
+      "schemaVersion": 4,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "codex-legacy-temp",
+        "codex-managed-temp",
+        "environment-reports",
+        "environment-hook-pycache",
+        "environment-hook-lib-pycache",
+        "environment-scripts-pycache",
+        "environment-tests-pycache",
+        "environment-scratch",
+        "environment-retired-project-state",
+        "environment-remote-attachments",
+        "clock-countdown-app-build",
+        "clock-countdown-verification-build",
+        "clock-countdown-core-bin",
+        "clock-countdown-core-obj",
+        "clock-countdown-app-bin",
+        "clock-countdown-app-obj",
+        "clock-countdown-verification-bin",
+        "clock-countdown-verification-obj",
+        "cc-switch-rust-target",
+        "cc-switch-node-modules",
+        "sub2api-frontend-node-modules",
+        "serena-python-venv"
+      ]
+    },
+    {
+      "commit": "25105f8",
+      "meta": "2026-08-06 12:22:21 +0800 feat: support link-aware safe tree deletion",
+      "schemaVersion": 4,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "codex-legacy-temp",
+        "codex-managed-temp",
+        "environment-reports",
+        "environment-hook-pycache",
+        "environment-scripts-pycache",
+        "environment-tests-pycache",
+        "environment-scratch",
+        "environment-retired-project-state",
+        "environment-remote-attachments",
+        "clock-countdown-app-build",
+        "clock-countdown-verification-build",
+        "clock-countdown-core-bin",
+        "clock-countdown-core-obj",
+        "clock-countdown-app-bin",
+        "clock-countdown-app-obj",
+        "clock-countdown-verification-bin",
+        "clock-countdown-verification-obj",
+        "cc-switch-rust-target",
+        "cc-switch-node-modules",
+        "sub2api-frontend-node-modules",
+        "serena-python-venv"
+      ]
+    },
+    {
+      "commit": "292257d",
+      "meta": "2026-08-01 12:50:12 +0800 fix: harden managed safe tree deletion recovery",
+      "schemaVersion": 3,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "codex-legacy-temp",
+        "codex-managed-temp",
+        "environment-reports",
+        "environment-hook-pycache",
+        "environment-scripts-pycache",
+        "environment-tests-pycache",
+        "environment-scratch",
+        "environment-retired-project-state",
+        "environment-remote-attachments",
+        "clock-countdown-app-build",
+        "clock-countdown-verification-build",
+        "clock-countdown-core-bin",
+        "clock-countdown-core-obj",
+        "clock-countdown-app-bin",
+        "clock-countdown-app-obj",
+        "clock-countdown-verification-bin",
+        "clock-countdown-verification-obj"
+      ]
+    },
+    {
+      "commit": "8d58c9a",
+      "meta": "2026-07-30 12:19:44 +0800 chore: govern cleanup capability roots",
+      "schemaVersion": 2,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "codex-legacy-temp",
+        "codex-managed-temp",
+        "environment-reports",
+        "environment-hook-pycache",
+        "environment-scripts-pycache",
+        "environment-tests-pycache",
+        "environment-scratch",
+        "environment-remote-attachments",
+        "clock-countdown-app-build",
+        "clock-countdown-verification-build",
+        "clock-countdown-core-bin",
+        "clock-countdown-core-obj",
+        "clock-countdown-app-bin",
+        "clock-countdown-app-obj",
+        "clock-countdown-verification-bin",
+        "clock-countdown-verification-obj"
+      ]
+    },
+    {
+      "commit": "5221dae",
+      "meta": "2026-07-29 00:46:10 +0800 chore: govern legacy temp cleanup",
+      "schemaVersion": 2,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "codex-legacy-temp",
+        "environment-reports",
+        "environment-scratch",
+        "environment-remote-attachments",
+        "clock-countdown-app-build",
+        "clock-countdown-verification-build",
+        "clock-countdown-core-bin",
+        "clock-countdown-core-obj",
+        "clock-countdown-app-bin",
+        "clock-countdown-app-obj",
+        "clock-countdown-verification-bin",
+        "clock-countdown-verification-obj"
+      ]
+    },
+    {
+      "commit": "32b0fc3",
+      "meta": "2026-07-25 09:14:36 +0800 feat: govern build-root cleanup",
+      "schemaVersion": 2,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "environment-reports",
+        "environment-scratch",
+        "environment-remote-attachments",
+        "clock-countdown-app-build",
+        "clock-countdown-verification-build",
+        "clock-countdown-core-bin",
+        "clock-countdown-core-obj",
+        "clock-countdown-app-bin",
+        "clock-countdown-app-obj",
+        "clock-countdown-verification-bin",
+        "clock-countdown-verification-obj"
+      ]
+    },
+    {
+      "commit": "b07c9c7",
+      "meta": "2026-07-24 22:14:10 +0800 chore: harden Codex host governance",
+      "schemaVersion": 1,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "environment-reports",
+        "environment-scratch",
+        "environment-remote-attachments"
+      ]
+    },
+    {
+      "commit": "51899f9",
+      "meta": "2026-07-24 19:48:16 +0800 feat(host): add governed safe tree deletion",
+      "schemaVersion": 1,
+      "ids": [
+        "active-local-skills",
+        "codex-backup-state",
+        "codex-run-evidence",
+        "codex-temp",
+        "environment-reports",
+        "environment-scratch"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from": "af25e34",
+      "to": "ec05faf",
+      "removed": [],
+      "added": [
+        "dotnet-bundle-extraction-cache"
+      ]
+    },
+    {
+      "from": "26ed431",
+      "to": "af25e34",
+      "removed": [],
+      "added": [
+        "codex-account-switch-dist",
+        "codex-account-switch-node-modules",
+        "codex-account-switch-rust-target",
+        "codex-account-switch-tauri-gen"
+      ]
+    },
+    {
+      "from": "25105f8",
+      "to": "26ed431",
+      "removed": [],
+      "added": [
+        "environment-hook-lib-pycache"
+      ]
+    },
+    {
+      "from": "292257d",
+      "to": "25105f8",
+      "removed": [],
+      "added": [
+        "cc-switch-node-modules",
+        "cc-switch-rust-target",
+        "serena-python-venv",
+        "sub2api-frontend-node-modules"
+      ]
+    },
+    {
+      "from": "8d58c9a",
+      "to": "292257d",
+      "removed": [],
+      "added": [
+        "environment-retired-project-state"
+      ]
+    },
+    {
+      "from": "5221dae",
+      "to": "8d58c9a",
+      "removed": [],
+      "added": [
+        "codex-managed-temp",
+        "environment-hook-pycache",
+        "environment-scripts-pycache",
+        "environment-tests-pycache"
+      ]
+    },
+    {
+      "from": "32b0fc3",
+      "to": "5221dae",
+      "removed": [],
+      "added": [
+        "codex-legacy-temp"
+      ]
+    },
+    {
+      "from": "b07c9c7",
+      "to": "32b0fc3",
+      "removed": [],
+      "added": [
+        "clock-countdown-app-bin",
+        "clock-countdown-app-build",
+        "clock-countdown-app-obj",
+        "clock-countdown-core-bin",
+        "clock-countdown-core-obj",
+        "clock-countdown-verification-bin",
+        "clock-countdown-verification-build",
+        "clock-countdown-verification-obj"
+      ]
+    },
+    {
+      "from": "51899f9",
+      "to": "b07c9c7",
+      "removed": [],
+      "added": [
+        "environment-remote-attachments"
+      ]
+    }
+  ],
+  "headVersusWorktree": {
+    "removedInWorktree": [],
+    "addedInWorktree": [
+      "clock-countdown-intermediate-ui-references"
+    ],
+    "worktreeIds": [
+      "active-local-skills",
+      "cc-switch-node-modules",
+      "cc-switch-rust-target",
+      "clock-countdown-app-bin",
+      "clock-countdown-app-build",
+      "clock-countdown-app-obj",
+      "clock-countdown-core-bin",
+      "clock-countdown-core-obj",
+      "clock-countdown-intermediate-ui-references",
+      "clock-countdown-verification-bin",
+      "clock-countdown-verification-build",
+      "clock-countdown-verification-obj",
+      "codex-account-switch-dist",
+      "codex-account-switch-node-modules",
+      "codex-account-switch-rust-target",
+      "codex-account-switch-tauri-gen",
+      "codex-backup-state",
+      "codex-legacy-temp",
+      "codex-managed-temp",
+      "codex-run-evidence",
+      "codex-temp",
+      "dotnet-bundle-extraction-cache",
+      "environment-hook-lib-pycache",
+      "environment-hook-pycache",
+      "environment-remote-attachments",
+      "environment-reports",
+      "environment-retired-project-state",
+      "environment-scratch",
+      "environment-scripts-pycache",
+      "environment-tests-pycache",
+      "serena-python-venv",
+      "sub2api-frontend-node-modules"
+    ]
+  },
+  "allIdsEver": [
+    "active-local-skills",
+    "cc-switch-node-modules",
+    "cc-switch-rust-target",
+    "clock-countdown-app-bin",
+    "clock-countdown-app-build",
+    "clock-countdown-app-obj",
+    "clock-countdown-core-bin",
+    "clock-countdown-core-obj",
+    "clock-countdown-verification-bin",
+    "clock-countdown-verification-build",
+    "clock-countdown-verification-obj",
+    "codex-account-switch-dist",
+    "codex-account-switch-node-modules",
+    "codex-account-switch-rust-target",
+    "codex-account-switch-tauri-gen",
+    "codex-backup-state",
+    "codex-legacy-temp",
+    "codex-managed-temp",
+    "codex-run-evidence",
+    "codex-temp",
+    "dotnet-bundle-extraction-cache",
+    "environment-hook-lib-pycache",
+    "environment-hook-pycache",
+    "environment-remote-attachments",
+    "environment-reports",
+    "environment-retired-project-state",
+    "environment-scratch",
+    "environment-scripts-pycache",
+    "environment-tests-pycache",
+    "serena-python-venv",
+    "sub2api-frontend-node-modules"
+  ]
+}

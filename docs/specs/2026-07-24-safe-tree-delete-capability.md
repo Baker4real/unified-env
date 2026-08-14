@@ -65,6 +65,14 @@ boolean；v4 缺失时为 `false`，v5 必须显式提供。任一为 `true` 时
 同父、随机 generation 绑定的 quarantine。Purge 仍校验原计划、transaction、当前树与文件
 identity；只有 `purging` 中断恢复允许当前树成为原计划的未变子集，其他路径仍要求完整清单。
 
+`rootDeletionPurpose` 在 Plan、Status、Apply、Restore 与 Purge 复验时都从**当前 policy 的对应
+entry**读取，不从 plan 或 transaction 快照取值。plan 只持久化 `policyEntryId` 以及当时的
+policy path/SHA，不写入 purpose 值。因此修改某 entry 的 purpose 会追溯翻转所有引用该 entry
+的历史判定，尤其是 `purged` 且 target 仍存在：只有当前 purpose 仍是
+`rebuildable-build-output` 才允许把重建目录与原 identity 区分开；改成其他值会把同一记录打成
+namespace 仍存在。这与 policy SHA drift 同类，是已知架构选择，不是事务自身完成事实的独立
+快照。改 entry purpose 必须按漂移对待。
+
 生产 policy 只为以下五个精确可重建目录启用 hardlink；只有两个 `node_modules` 同时启用内部
 directory junction：
 
@@ -91,7 +99,10 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
 已接入。
 
 生产 CLI 不接受 policy 或 evidence override。测试替身仅位于 `tests\`，不得复制到宿主
-脚本目录或作为生产入口。
+脚本目录或作为生产入口。崩溃注入类子进程 helper（在指定阶段阻塞、持锁或 FailFast）不是
+竞争性主 seam，也不构成第二生产入口。主 fixture 缺少对应 Mode 与 checkpoint 参数，结构上
+无法承载这类探测；既有 Apply/Purge/Restore crash fixture 已建立同等先例。新增退出码或持锁
+断言应挂在既有 fixture 或 ProductionSmoke 上，不得另开生产入口。
 
 ## 控制面与状态机
 
@@ -100,6 +111,15 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
    `terminal` 或 `manual-review` 等 lifecycle 及允许的下一步。异常或不完整记录必须隔离为
    `manual-review`，不能让单个坏记录掩盖其他健康记录。库内 candidate-policy preflight 只接受
    v5 与精确 approved SHA-256；生产 CLI 不接受 policy override，迁移仍须走受管激活流程。
+
+   `complete` 是整次扫描的聚合：仅当没有任何未终结、不一致或未解析 residual 时才为 `true`。
+   可信 Archive 让合格历史记录退出 `blockingRecords` 并标为 `lifecycle=terminal`，但不蕴含
+   `complete=true`。仍有未终结、不一致或未解析 residual 时，`complete=false` 是正确取值。
+   不得把「归档全部合格 terminal 之后 `complete` 必为 true」当作验收。
+
+   Archive 消除的是治理视图里的 blocking 噪声，不是 Status 每次全量枚举、重读并重哈希
+   evidence 的扫描账。已归档记录仍要做 marker 与 namespace 认证。秒级返回不在本控制面史诗
+   的验收范围内；日常顺手确认若仍不够快，另立项，不得靠放宽 Archive 或跳过认证换时间。
 
    历史 transaction schema v1 只在 `Status` 使用精简的只读观测解析，校验其与受管 plan 的
    generation、path 和 SHA 绑定后，输出真实 `transactionStatus`、`targetPath`、
@@ -117,8 +137,10 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
    generation、schema、状态与 namespace；`Status` 重新读取这些受管内容并现场确认 quarantine
    仍不存在，不能只凭 marker 文件存在或其自报 metadata 判 terminal。可信 marker 让该历史记录
    退出 `blockingRecords`，但不改变 transaction schema compatibility，也不删除、重写或自动清理
-   任何 evidence。Archive 与 Status 的 marker 认证均不补写 v1 `directoryCommitAnchors`，也不放宽
-   `Purge`/`Restore` 的严格 reader。
+   任何 evidence。归档合格 terminal 只改变该记录是否仍 blocking，不把整次 Status 的 `complete`
+   翻成 `true`。权威合同禁止把「归档合格 terminal 后 `complete` 必为 true」当作验收。Archive
+   与 Status 的 marker 认证均不补写 v1 `directoryCommitAnchors`，也不放宽 `Purge`/`Restore` 的
+   严格 reader。
 
    schema v2/v3 的 Archive 与 `Purge`/`Restore` 复用同一 transaction schema、plan 绑定和 journal
    内容认证核心：v3 必须认证 quarantine-time 与 Restore journal 的 SHA-256、file identity 和引用链；
@@ -212,6 +234,10 @@ scanned entries、logical bytes、hashed bytes 以及版本化 retry 记录。le
 sharing violation、lock violation 与 busy 做有界重试；生产合同最多 3 次 attempt、总预算 1000 ms，
 退避为 10/25 ms。每次重试前仍须复验 handle identity 与内容，access denied、未知错误、identity/hash
 漂移和 policy 扩张不得进入 retry；JSON `leaf-delete-failed` 以非零退出码返回结构化 metrics。
+受管中间层（宿主 PowerShell wrapper）必须以 `$LASTEXITCODE` 转发内层退出码；变量不存在时按
+0 处理。缺少确认的结构化 refusal 仍是 exit 0，只修传递、不改取值。`leaf-delete-failed` 的
+非零退出码以生产脚本在发出该 JSON 后 `exit 1` 为准。持锁或 lease 失败若在发出该 JSON 前抛
+错，不属于已证明的生产 Purge 失败观测，不得用未打出该 JSON 的路径声称合同已 live 验收。
 
 Purge/Status 的 `deletionOutcome` 必须分开表达 namespace 与存储事实：`namespaceAbsent=true` 和
 `logicalCompletion=true` 只证明受管名称空间删除完成。没有独立文件系统 allocation 证据时，

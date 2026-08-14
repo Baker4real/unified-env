@@ -1,0 +1,139 @@
+{
+  "snapshot": true,
+  "issue": 23,
+  "note": "只读调查快照，不构成 Archive/Apply/Purge/Delete 或放宽判据的执行授权。",
+  "statusAfterRef": "reports/safe-tree-delete-archive-20260814/status-after.utf8.json",
+  "statusAfterPolicySha256": "01a22918150646bc37c5a51c9f4d1392750fa1e44501b5c651ca2d14f4362c90",
+  "statusAfterPolicyNote": "与当时工作树 managed/safe-tree-delete/policy.json 一致，不是 git HEAD bb80cc85…。工作树比 HEAD 多 clock-countdown-intermediate-ui-references。",
+  "counts": {
+    "blockingAfter": 109,
+    "unparsedTransactionStatusNone": 89,
+    "baselineTicket69": 69,
+    "addedAfter20260810": 20,
+    "disappearedFrom69": 0,
+    "schemaNoneAmong89": 52,
+    "schema2Among89": 37
+  },
+  "groups": [
+    {
+      "id": "allowlist",
+      "count": 39,
+      "baselineCount": 34,
+      "error": "safe-delete capability root 不在受管 allowlist。",
+      "cause": "parser-coverage-gap-after-ephemeral-policy-revoke",
+      "evidenceIncomplete": false,
+      "parserGap": true,
+      "realInconsistencyNeedingHuman": false,
+      "dataLossRisk": "none-for-37-purged; rebuilt-gen-is-expected",
+      "disposition": "code-change-then-archive-shape; keep-two-plan-only",
+      "disk": {
+        "transactionPurged": 37,
+        "noTransaction": 2,
+        "quarantinePresentNow": 0,
+        "targetPresentNow": 1
+      }
+    },
+    {
+      "id": "manifest-drift",
+      "count": 17,
+      "baselineCount": 15,
+      "error": "safe-delete Status planned tree manifest 漂移。",
+      "cause": "complete-planned-evidence-live-rebuildable-tree-changed",
+      "evidenceIncomplete": false,
+      "parserGap": false,
+      "realInconsistencyNeedingHuman": false,
+      "dataLossRisk": "none",
+      "disposition": "keep"
+    },
+    {
+      "id": "namespace+policy-sha",
+      "count": 18,
+      "baselineCount": 6,
+      "error": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ],
+      "cause": "planned-only-target-already-gone-plus-current-policy-sha-drift",
+      "evidenceIncomplete": false,
+      "parserGap": false,
+      "realInconsistencyNeedingHuman": false,
+      "dataLossRisk": "none",
+      "disposition": "keep",
+      "composition": {
+        "originalNamespacePlusSha": 6,
+        "flippedFromPlannedNamespaceDueToPolicySha": 12
+      }
+    },
+    {
+      "id": "planned-namespace",
+      "count": 13,
+      "baselineCount": 12,
+      "error": "planned operation 的 target/quarantine namespace 不一致。",
+      "cause": "new-20260813-ui-reference-leftover-plans-no-transaction",
+      "evidenceIncomplete": false,
+      "parserGap": false,
+      "realInconsistencyNeedingHuman": false,
+      "dataLossRisk": "none",
+      "disposition": "keep-classified; related-wave-to-24-but-these-are-plan-only"
+    },
+    {
+      "id": "min-depth",
+      "count": 1,
+      "baselineCount": 1,
+      "error": "safe-delete target 未达到策略要求的最小后代深度。",
+      "cause": "historical-depth1-plan-rejected-by-current-run-evidence-depth2",
+      "evidenceIncomplete": false,
+      "parserGap": false,
+      "realInconsistencyNeedingHuman": false,
+      "dataLossRisk": "none",
+      "disposition": "keep",
+      "operationId": "20260729T074213Z-34f4b598-5671-46c3-a002-13030b9d331b"
+    },
+    {
+      "id": "missing-plan",
+      "count": 1,
+      "baselineCount": 1,
+      "error": "evidence record 缺少 plan.json。",
+      "cause": "intentional-acl-probe-directory",
+      "evidenceIncomplete": true,
+      "parserGap": false,
+      "realInconsistencyNeedingHuman": false,
+      "dataLossRisk": "none",
+      "disposition": "keep-do-not-delete",
+      "operationId": "acl-capability-probe-20260801"
+    }
+  ],
+  "notUnparsedHandTo24": {
+    "windowUiReferencesQuarantined": {
+      "count": 10,
+      "transactionStatus": "quarantined",
+      "lifecycle": "inconsistent",
+      "inIssue23Unparsed89": false,
+      "reason": "事务已解析。归档窗口中 quarantine 消失，属 #24 旁路。"
+    },
+    "purgedStillManualReview": {
+      "count": 4,
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 1,
+      "inIssue23Unparsed89": false,
+      "reason": "事务已按 v1 观测为 purged，但 plan 被当前最小深度拒绝后未写入 quarantinePresent，#22 候选推导跳过它们。"
+    },
+    "v1Unterminated": {
+      "count": 5,
+      "inIssue23Unparsed89": false
+    },
+    "historicalV2Quarantined": {
+      "count": 1,
+      "operationId": "20260805T083256Z-1ba06d2f-fbf0-43fe-a57e-7fd57f943153",
+      "inIssue23Unparsed89": false,
+      "note": "quarantine 已被另一条已撤销 root 的 purged 操作删掉；verification 目录现已重建。交给 #24。"
+    }
+  },
+  "added20": {
+    "allowlistMinminCalendar20260812": 5,
+    "manifestDriftAppBin20260812": 2,
+    "plannedNamespaceUiReferences20260813": 13
+  },
+  "recommendCodeTicket": true,
+  "recommendRelaxCriteria": false
+}
