@@ -36,6 +36,11 @@ intent: 记录自习室设备的受控环境事实与差异
   合同见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`，本文不复制项目机制。
   实际 Codex Desktop 重启后的独立 180 秒观察窗内，新增可见 cmd、PowerShell、pwsh、
   conhost 或 Windows Terminal 窗口为 `0`。
+- 2026-08-16 本机 Cursor 用户级 hooks 现役文件为
+  `%USERPROFILE%\.cursor\hooks.json`，源在
+  `D:\Codex\projects\统一环境\managed\cursor-hooks\`。事件映射以
+  `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 的 Cursor Host Hooks
+  为准；不要把 Cursor 注册写进 Codex `hooks.json` 或 Cursor `settings.json`。
 - 同日 `wsl.exe --list --verbose` 返回 `Ubuntu` 与 `docker-desktop`，两者均为
   WSL2；这已经推翻旧 README 中“WSL 未安装、未启用、未初始化”的历史判断。运行时
   `Running` / `Stopped` 状态属于易变事实，使用前现场复核；D-Radar 的 WSL/Docker

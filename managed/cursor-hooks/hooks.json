@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "hooks": {
+    "workspaceOpen": [
+      {
+        "command": "cmd.exe /c D:\\Codex\\projects\\统一环境\\managed\\cursor-hooks\\cursor-github-cli.cmd",
+        "timeout": 10
+      },
+      {
+        "command": "cmd.exe /c D:\\Codex\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-dashboard.cmd",
+        "timeout": 15
+      }
+    ],
+    "sessionStart": [
+      {
+        "command": "cmd.exe /c D:\\Codex\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-activation.cmd",
+        "timeout": 10
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "cmd.exe /c D:\\Codex\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-cleanup.cmd",
+        "timeout": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "cmd.exe /c D:\\Codex\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-reminder.cmd",
+        "matcher": "Shell|Grep|Read",
+        "timeout": 10
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "cmd.exe /c D:\\Codex\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-auto-approve.cmd",
+        "timeout": 10
+      }
+    ]
+  }
+}

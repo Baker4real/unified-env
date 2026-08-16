@@ -140,6 +140,7 @@
         "prefixes": [
           ".scratch/host-stable-upgrade-20260712/",
           "managed/codex-hooks/",
+          "managed/cursor-hooks/",
           "managed/remote-plugin-catalog-guard/",
           "reports/codex-hook-deployment-plan/",
           "reports/codex-hook-inventory/",
@@ -170,6 +171,7 @@
           "tests/Test-CodexSerenaBehaviorHooks.ps1",
           "tests/Test-CodexStatePathRepair.ps1",
           "tests/Test-CodexStatePathRepairHardening.ps1",
+          "tests/Test-CursorHostHooks.ps1",
           "tests/Test-HiddenConsoleHookLauncher.ps1",
           "tests/Test-RetiredProjectSnapshotSanitizer.ps1"
           ],

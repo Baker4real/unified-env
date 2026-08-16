@@ -25,7 +25,7 @@ skill-supply-chain    (currently independent)
 workstation-operations (documentation/integration only)
 ```
 
-`CodexHostSafety.ps1` 是通用 capability I/O、路径校验和原子发布的唯一实现。`codex-host` 与 safe-delete 都依赖该 seam；safe-delete 不再加载 hook 专用 policy，现役入口路径保持不变。
+`CodexHostSafety.ps1` 是通用 capability I/O、路径校验和原子发布的唯一实现。`codex-host` 与 safe-delete 都依赖该 seam；safe-delete 不再加载 hook 专用 policy，现役入口路径保持不变。Grok/Cursor 用户级 wrapper 落在 `managed/grok-hooks/` 与 `managed/cursor-hooks/`，不是 reconciler 接口；现役注册以 `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 的 Grok Host Hooks 与 Cursor Host Hooks 为准。
 
 ## 迁移规则
 
