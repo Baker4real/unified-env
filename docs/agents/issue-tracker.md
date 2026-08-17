@@ -7,7 +7,7 @@ intent: 说明统一环境项目使用 GitHub Issues 的 tracker 约定
 
 # Issue tracker：GitHub Issues
 
-本项目的新 issue、spec、tickets 和讨论记录使用 GitHub Issues 管理。仓库为 `Baker4real/unified-env`，在仓库根目录通过 `gh` CLI 操作。已跟踪的 `.scratch/` 内容是保留的历史记录，不作为新事项模板或清理候选。2026-08-13 受管删除性能优化系列是 GitHub #26–#43；`.scratch/safe-tree-delete-perf/` 只是拆票副本。控制面收尾 #18–#24 已 CLOSED；仓库快照见 `reports/safe-tree-delete-control-plane-closeout-20260814/REPORT.md`。完成状态以 GitHub Issues 为准。
+本项目的新 issue、spec、tickets 和讨论记录使用 GitHub Issues 管理。仓库为 `Baker4real/unified-env`，在仓库根目录通过 `gh` CLI 操作。已跟踪的 `.scratch/` 内容是保留的历史记录，不作为新事项模板或清理候选。2026-08-13 受管删除性能优化系列是 GitHub #26–#43；`.scratch/safe-tree-delete-perf/` 只是拆票副本。控制面收尾 #18–#24 的状态不在本文缓存，当前事实以 GitHub live tracker 和各 issue 的最新结论评论为准；未完全满足关闭条件的票保持 OPEN。仓库快照见 `reports/safe-tree-delete-control-plane-closeout-20260814/REPORT.md`。完成状态以 GitHub Issues 为准。
 
 ## 约定
 
