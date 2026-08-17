@@ -1,0 +1,4 @@
+{
+  "command": "git diff --cached --check -- docs/specs/2026-07-24-safe-tree-delete-capability.md modules/manifest.json reports/safe-tree-delete-issue34-20260817/ scripts/lib/CodexSafeTreeDelete.ps1 tests/Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+  "exitCode": 0
+}

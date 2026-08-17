@@ -1,0 +1,23 @@
+{
+  "pending": {
+    "pendingPath": "D:\\Codex\\projects\\.safe-tree-delete-uncertain-dec24e7d9fb2454792fc6a6fafb9a07e\\.codex-safe-delete-6a6cdf23-6ee1-4f4f-8cd7-fd0a2ae472f8.quarantine",
+    "pendingFiles": [
+      "D:\\Codex\\projects\\.safe-tree-delete-uncertain-dec24e7d9fb2454792fc6a6fafb9a07e\\.codex-safe-delete-6a6cdf23-6ee1-4f4f-8cd7-fd0a2ae472f8.quarantine"
+    ],
+    "uncertainFiles": [],
+    "statusLifecycle": "purge-resumable",
+    "crashExitCode": -2146232797
+  },
+  "uncertain": {
+    "uncertainPath": "D:\\Codex\\projects\\.safe-tree-delete-uncertain-a4789f69276647d9862472907e591961\\.codex-safe-delete-220bcecb-99fc-42e5-94e8-50dfcbfb536b.quarantine",
+    "pendingFiles": [],
+    "uncertainFiles": [
+      "D:\\Codex\\projects\\.safe-tree-delete-uncertain-a4789f69276647d9862472907e591961\\.codex-safe-delete-220bcecb-99fc-42e5-94e8-50dfcbfb536b.quarantine"
+    ],
+    "statusLifecycle": "manual-review",
+    "purgePurged": false,
+    "purgeRefusalReason": "uncertain-pending-paths",
+    "transactionStatus": "purging",
+    "crashExitCode": -2146232797
+  }
+}

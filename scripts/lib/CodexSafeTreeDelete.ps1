@@ -1562,6 +1562,8 @@ function Resolve-CodexSafeTreeDeleteArchivedStatusOperation {
         transactionStatus = [string]$source.transactionStatus
         transactionUpdatedAtUtc = [string]$source.transactionUpdatedAtUtc
         journalStatus = 'archived'
+        pendingFiles = @()
+        uncertainFiles = @()
         errors = @()
     }
     return [pscustomobject][ordered]@{
@@ -1600,6 +1602,8 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
         $schemaCompatible = $false
         $candidatePolicyCompatible = $null
         $journalStatus = 'not-evaluated'
+        $pendingFiles = @()
+        $uncertainFiles = @()
         try {
             if (-not $runItem.PSIsContainer -or
                 ($runItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -1800,6 +1804,13 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                 } else {
                     'present'
                 }
+                $inFlightRecovery = Get-CodexSafeTreeDeleteInFlightRecovery `
+                    -RunDirectory $runDirectory `
+                    -GenerationId ([string]$plan.generationId) `
+                    -DirectoryCommitAnchors @($transaction.directoryCommitAnchors) `
+                    -MetricsObserver $treeMetricsObserver
+                $pendingFiles = @($inFlightRecovery.pendingFiles)
+                $uncertainFiles = @($inFlightRecovery.uncertainFiles)
                 if ($transactionStatus -cin @('prepared', 'quarantined', 'restored', 'rolled-back') -and
                     @($transaction.directoryCommitAnchors).Count -ne 0) {
                     $journalStatus = 'invalid'
@@ -1837,6 +1848,13 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                         $safeActions = @('manual-review')
                         $complete = $false
                         $errors.Add('purging operation 的 target/quarantine namespace 不可恢复。')
+                    }
+                    if (@($uncertainFiles).Count -gt 0) {
+                        $lifecycle = 'manual-review'
+                        $safeActions = @('manual-review')
+                        $complete = $false
+                        $errors.Add(
+                            'purging freeze-prepared 路径已消失，状态 uncertain，不得假设已删除；请手工核验后再决定重新 Plan 或保持 manual-review。')
                     }
                 } elseif ($transactionStatus -ceq 'purged') {
                     if ($quarantineEntryType -cne 'absent') {
@@ -2066,6 +2084,8 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
             transactionStatus = $transactionStatus
             transactionUpdatedAtUtc = $transactionUpdatedAtUtc
             journalStatus = $journalStatus
+            pendingFiles = @($pendingFiles)
+            uncertainFiles = @($uncertainFiles)
             errors = @($errors)
         }
         return [pscustomobject][ordered]@{
@@ -3340,6 +3360,124 @@ function Invoke-CodexSafeTreeDeleteRestore {
     }
 }
 
+function Get-CodexSafeTreeDeleteInFlightRecovery {
+    param(
+        [Parameter(Mandatory)][string]$RunDirectory,
+        [Parameter(Mandatory)][string]$GenerationId,
+        [AllowEmptyCollection()][object[]]$DirectoryCommitAnchors = @(),
+        [scriptblock]$MetricsObserver
+    )
+
+    $fullRunDirectory = Assert-CodexHookDPath `
+        -Value $RunDirectory `
+        -Name 'safe-delete in-flight recovery root'
+    $anchoredOperationIds = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($anchor in @($DirectoryCommitAnchors)) {
+        if ($null -eq $anchor -or -not $anchor.PSObject.Properties['operationId']) { continue }
+        $anchorOperationId = [string]$anchor.operationId
+        if ($anchorOperationId -notmatch '^[0-9a-f]{32}$') {
+            throw 'safe-delete in-flight recovery anchor operationId 非法。'
+        }
+        if (-not $anchoredOperationIds.Add($anchorOperationId)) {
+            throw 'safe-delete in-flight recovery anchor operation 重复。'
+        }
+    }
+
+    $pendingFiles = [Collections.Generic.List[string]]::new()
+    $uncertainFiles = [Collections.Generic.List[string]]::new()
+    $seenOperations = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    $seenPaths = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($freezePathCandidate in @([IO.Directory]::EnumerateFiles(
+            $fullRunDirectory,
+            'directory-delete-*-freeze.json',
+            [IO.SearchOption]::TopDirectoryOnly))) {
+        $freezePath = Assert-CodexHookDPath `
+            -Value $freezePathCandidate `
+            -Name 'safe-delete in-flight freeze journal path'
+        [void](Assert-CodexHookCapabilityPath `
+            -Path $freezePath `
+            -CapabilityRoot $fullRunDirectory `
+            -AllowedExactPaths @($freezePath) `
+            -Name 'safe-delete in-flight freeze journal')
+        if ([IO.Path]::GetFileName($freezePath) -notmatch '^directory-delete-.+-freeze\.json$') {
+            throw 'safe-delete in-flight freeze journal 命名非法。'
+        }
+        $freezeSnapshot = Read-CodexHookSafeUtf8FileSnapshot `
+            -Path $freezePath `
+            -Name 'safe-delete in-flight freeze journal' `
+            -AllowedExactPaths @($freezePath)
+        if ($null -ne $MetricsObserver) {
+            & $MetricsObserver 'hash-read' 0L ([long]$freezeSnapshot.bytes.Length)
+        }
+        # 只分类可识别的 freeze-prepared；畸形/orphan journal 留给既有 abort/anchor 门禁。
+        try {
+            Assert-CodexHookStrictJsonText -JsonText $freezeSnapshot.text
+            $freeze = $freezeSnapshot.text |
+                ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
+        } catch {
+            continue
+        }
+        $requiredFreezeNames = @(
+            'artifactType', 'schemaVersion', 'generationId', 'operationId',
+            'directoryPath', 'relativePath', 'volumeSerialNumber', 'fileIndex',
+            'state', 'originalSecurityDescriptorSddl',
+            'requestedFrozenSecurityDescriptorSddl', 'createdAtUtc'
+        )
+        $actualFreezeNames = @($freeze.PSObject.Properties.Name)
+        if (@($requiredFreezeNames | Where-Object { $_ -notin $actualFreezeNames }).Count -ne 0) {
+            continue
+        }
+        if ([string]$freeze.artifactType -cne
+                'env-governance.codex-safe-tree-delete-directory-freeze-intent' -or
+            [long]$freeze.schemaVersion -ne 2 -or
+            [string]$freeze.generationId -cne $GenerationId -or
+            [string]$freeze.operationId -notmatch '^[0-9a-f]{32}$' -or
+            [string]$freeze.state -cne 'freeze-prepared') {
+            continue
+        }
+        try {
+            Assert-CodexHookDirectoryTreeIdentity `
+                -Expected @([string]$freeze.volumeSerialNumber, [string]$freeze.fileIndex) `
+                -Actual @([string]$freeze.volumeSerialNumber, [string]$freeze.fileIndex) `
+                -Scope 'safe-delete in-flight freeze journal directory identity'
+            $directoryPath = Assert-CodexHookDPath `
+                -Value ([string]$freeze.directoryPath) `
+                -Name 'safe-delete in-flight freeze directory path'
+        } catch {
+            continue
+        }
+        if (-not $seenOperations.Add([string]$freeze.operationId)) {
+            throw 'safe-delete in-flight freeze journal operation 重复。'
+        }
+        $commitPath = $freezePath -replace '-freeze\.json$', '-commit.json'
+        $abortPath = $freezePath -replace '-freeze\.json$', '-abort.json'
+        if ([IO.File]::Exists($commitPath) -or
+            [IO.File]::Exists($abortPath) -or
+            $anchoredOperationIds.Contains([string]$freeze.operationId)) {
+            continue
+        }
+        if (-not $seenPaths.Add($directoryPath)) {
+            throw 'safe-delete in-flight freeze journal directoryPath 重复。'
+        }
+        $pathPresent = [IO.Directory]::Exists($directoryPath) -or [IO.File]::Exists($directoryPath)
+        if ($pathPresent) {
+            $pendingFiles.Add($directoryPath)
+        } else {
+            $uncertainFiles.Add($directoryPath)
+        }
+    }
+
+    $pendingFiles.Sort([StringComparer]::OrdinalIgnoreCase)
+    $uncertainFiles.Sort([StringComparer]::OrdinalIgnoreCase)
+    return [pscustomobject][ordered]@{
+        pendingFiles = @($pendingFiles)
+        uncertainFiles = @($uncertainFiles)
+    }
+}
+
 function Get-CodexSafeTreeDeleteAbortOperationKeys {
     param(
         [Parameter(Mandatory)][string]$RunDirectory,
@@ -3733,6 +3871,8 @@ function Complete-CodexSafeTreeDeleteCommittedMissingQuarantine {
         transactionSha256 = $finalSnapshot.sha256
         recoverable = $false
         recoveredFromCommitJournal = $true
+        pendingFiles = @()
+        uncertainFiles = @()
         namespaceAbsent = $true
         logicalCompletion = $true
         physicalReclaimStatus = 'unknown'
@@ -3837,6 +3977,27 @@ function Invoke-CodexSafeTreeDeletePurge {
         $target = $approved.approvedPlan.target
         $quarantineCapabilityRoot = Get-CodexSafeTreeDeleteQuarantineCapabilityRoot -Target $target
         $quarantinePath = [string]$transaction.quarantinePath
+        $runDirectory = Split-Path -Parent $approved.path
+        $inFlightRecovery = Get-CodexSafeTreeDeleteInFlightRecovery `
+            -RunDirectory $runDirectory `
+            -GenerationId ([string]$plan.generationId) `
+            -DirectoryCommitAnchors @($transaction.directoryCommitAnchors) `
+            -MetricsObserver $repeatMetricsObserver
+        if (@($inFlightRecovery.uncertainFiles).Count -gt 0) {
+            return [pscustomobject][ordered]@{
+                purged = $false
+                refusalReason = 'uncertain-pending-paths'
+                pendingFiles = @($inFlightRecovery.pendingFiles)
+                uncertainFiles = @($inFlightRecovery.uncertainFiles)
+                targetPath = [string]$transaction.targetPath
+                quarantinePath = $quarantinePath
+                transactionPath = $approved.path
+                recoverable = $false
+                recoveredFromCommitJournal = $false
+                logicalCompletion = $false
+                metrics = Complete-CodexSafeTreeDeleteMetrics -State $metricsState
+            }
+        }
         if (-not [IO.Directory]::Exists($quarantinePath) -and
             -not [IO.File]::Exists($quarantinePath)) {
             return Complete-CodexSafeTreeDeleteCommittedMissingQuarantine `
@@ -4138,6 +4299,8 @@ function Invoke-CodexSafeTreeDeletePurge {
             transactionPath = $approved.path
             transactionSha256 = $finalSnapshot.sha256
             recoverable = $false
+            pendingFiles = @()
+            uncertainFiles = @()
             namespaceAbsent = $true
             logicalCompletion = $true
             physicalReclaimStatus = 'unknown'

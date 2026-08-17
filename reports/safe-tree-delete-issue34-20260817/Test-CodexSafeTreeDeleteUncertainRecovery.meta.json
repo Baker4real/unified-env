@@ -1,0 +1,10 @@
+{
+  "test": "Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+  "exitCode": 0,
+  "startedAt": "2026-08-17T18:11:51.7069835+08:00",
+  "endedAt": "2026-08-17T18:12:07.8954025+08:00",
+  "elapsedMs": 16184,
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "validationMode": "isolated-index-tree",
+  "indexTree": "b67cf1f04de44dfdc4f1735a2be290f5d4813c6f"
+}

@@ -321,13 +321,15 @@
           "tests/Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
           "tests/Test-CodexSafeTreeDeleteRestore.ps1",
           "tests/Test-CodexSafeTreeDeleteSchemaCompatibility.ps1",
-          "tests/Test-CodexSafeTreeDeleteStatus.ps1"
+          "tests/Test-CodexSafeTreeDeleteStatus.ps1",
+          "tests/Test-CodexSafeTreeDeleteUncertainRecovery.ps1"
         ],
         "prefixes": [
           ".scratch/audit-20260810/",
           ".scratch/safe-tree-delete-perf/",
           "managed/safe-tree-delete/",
           "reports/safe-tree-delete-archive-20260814/",
+          "reports/safe-tree-delete-issue34-20260817/",
           "reports/safe-tree-delete-unresolved-20260814/",
           "reports/safe-tree-delete-status-post-archive-20260814/",
           "reports/safe-tree-delete-control-plane-closeout-20260814/",
@@ -351,6 +353,7 @@
             "tests/Test-CodexSafeTreeDeleteRestore.ps1",
             "tests/Test-CodexSafeTreeDeleteSchemaCompatibility.ps1",
             "tests/Test-CodexSafeTreeDeleteStatus.ps1",
+            "tests/Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
             "tests/Test-CodexUserEnvironmentTransaction.ps1",
             "tests/Test-ReportArtifactPublisher.ps1"
           ],

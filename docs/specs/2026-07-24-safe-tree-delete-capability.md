@@ -207,6 +207,12 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
    relative path 和 DACL 语义完整匹配，才允许收尾为 `purged`。任何未锚定 commit、未终结 freeze、重复
    identity、缺失 journal 或同一 operation 同时存在 commit 与 abort 都失败关闭。
 
+   尚未 `commit-authorized` 的 `freeze-prepared` 是 in-flight pending。恢复时检查 journal
+   记录的 `directoryPath`：路径仍在则列入 `pendingFiles`（可继续 Purge）；路径已不在则列入
+   `uncertainFiles`，不得假设是本能力删除的，也不得收尾为 `purged`。用户应手工核验该路径后，
+   再决定重新 Plan 或保持 `manual-review`。已 `commit-authorized` 且路径不在，仍按既有
+   commit journal 规则计为已删除。
+
 批量清理使用 `BatchPurge`，调用方一次传入同一 capability root 下的多个 `TargetPaths`，并同时提供
 `ConfirmApply` 与 `ConfirmPurge`。入口对每个目标仍逐项执行相同的 `Plan` / `Apply` / `Purge` 校验；
 如果发现同一目标已有 `quarantined` 或 `purging` transaction，且原路径不存在、quarantine 仍存在，
