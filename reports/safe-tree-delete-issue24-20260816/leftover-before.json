@@ -1,0 +1,11 @@
+{
+  "path": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\\transaction.json",
+  "exists": true,
+  "sha256": "4e73aedc260c43c536ab9df3d3f6d5f73a065a8a17c26d1706998f583a0339d7",
+  "expected": "4e73aedc260c43c536ab9df3d3f6d5f73a065a8a17c26d1706998f583a0339d7",
+  "matches": true,
+  "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine",
+  "quarantineExists": true,
+  "snapshot": true,
+  "note": "leftover 0ab1e1b6 只读核验。禁止 Purge/Restore。"
+}

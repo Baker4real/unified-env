@@ -1,0 +1,156 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.closeout-20260816.source-identity",
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-08-16T02:09:46.1277012+00:00",
+  "note": "当前工作树文件 SHA-256/mtime，不是 git commit，也不是执行授权。",
+  "runtime": {
+    "psEdition": "Core",
+    "psVersion": "7.6.4",
+    "processPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe"
+  },
+  "wrappers": {
+    "repoMiddleSha256": "636CB140720BF15681364459269C2D5DC4638E339F2589AD2A3A53B6E17B9373",
+    "hostMiddleSha256": "636CB140720BF15681364459269C2D5DC4638E339F2589AD2A3A53B6E17B9373",
+    "middleEqual": true,
+    "repoCmdSha256": "45AEADF7F758A1CAFCE106F66E7EAECC5F60176D2017630E2AF461A2A37BCA12",
+    "hostCmdSha256": "45AEADF7F758A1CAFCE106F66E7EAECC5F60176D2017630E2AF461A2A37BCA12",
+    "cmdEqual": true
+  },
+  "repoFiles": [
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\scripts\\lib\\CodexSafeTreeDelete.ps1",
+      "exists": true,
+      "length": 255837,
+      "lastWriteTimeUtc": "2026-08-15T14:26:48.9082185Z",
+      "sha256": "84E8A419AAD23E64F0FC0E118E400E8341226E249004A25ABB1FFE2E9000E961"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\scripts\\lib\\CodexSafeTreeDeleteFileIdentity.cs",
+      "exists": true,
+      "length": 20273,
+      "lastWriteTimeUtc": "2026-08-14T19:04:56.7414627Z",
+      "sha256": "67F7DDCF7B21175857018B95B647E08A35872DFBF76FE611A5B22866E15AA6FC"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\scripts\\lib\\CodexSafeTreeDeleteHashCache.cs",
+      "exists": true,
+      "length": 9459,
+      "lastWriteTimeUtc": "2026-08-13T09:10:23.9227251Z",
+      "sha256": "21E9C25206CFB804AFCC3F5510D39D273175129B32B67AB4126D6683B4994A62"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\scripts\\Invoke-CodexSafeTreeDelete.ps1",
+      "exists": true,
+      "length": 5372,
+      "lastWriteTimeUtc": "2026-08-10T08:27:08.3365845Z",
+      "sha256": "C25019805B3B996E9D27C02AFB88D7C7553988EC742F0BC694D054FE48ECAFF9"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\scripts\\invoke-codex-safe-tree-delete-host.ps1",
+      "exists": true,
+      "length": 218,
+      "lastWriteTimeUtc": "2026-08-13T16:45:34.8494025Z",
+      "sha256": "636CB140720BF15681364459269C2D5DC4638E339F2589AD2A3A53B6E17B9373"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\scripts\\invoke-codex-safe-tree-delete.cmd",
+      "exists": true,
+      "length": 172,
+      "lastWriteTimeUtc": "2026-07-24T10:56:50.8113784Z",
+      "sha256": "45AEADF7F758A1CAFCE106F66E7EAECC5F60176D2017630E2AF461A2A37BCA12"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\managed\\safe-tree-delete\\policy.json",
+      "exists": true,
+      "length": 8776,
+      "lastWriteTimeUtc": "2026-08-14T01:30:06.7879444Z",
+      "sha256": "01A22918150646BC37C5A51C9F4D1392750FA1E44501B5C651CA2D14F4362C90"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+      "exists": true,
+      "length": 8388,
+      "lastWriteTimeUtc": "2026-08-14T01:30:29.0867310Z",
+      "sha256": "45230066678E562E7BE1079D185D805F5312A2476F0C6B5F955A6FC247665070"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteStatus.ps1",
+      "exists": true,
+      "length": 44918,
+      "lastWriteTimeUtc": "2026-08-14T18:02:42.0553120Z",
+      "sha256": "4679B252983D816E51EB119BCFF19A5AFBDEB238AA6303BC81EF7BBB06DC2F50"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+      "exists": true,
+      "length": 48654,
+      "lastWriteTimeUtc": "2026-08-15T14:28:19.0476133Z",
+      "sha256": "F4C25B390B0C7769E74172C30FF1259F891FF66BFB7AD4F2CA912F908C610175"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteCrashSafety.ps1",
+      "exists": true,
+      "length": 67068,
+      "lastWriteTimeUtc": "2026-08-15T14:27:30.3338250Z",
+      "sha256": "06BA54E846253465D82AB22DC4467F70A873E78AC13034EF6949425EAD0875A6"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteFileSystem.ps1",
+      "exists": true,
+      "length": 37869,
+      "lastWriteTimeUtc": "2026-08-15T07:57:04.1140914Z",
+      "sha256": "15CD5769BCB3A69B4271BE0F7D396399F05BEA6D18BD1F778EC5C162827234FF"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteHashSafely.ps1",
+      "exists": true,
+      "length": 17566,
+      "lastWriteTimeUtc": "2026-08-13T09:16:13.3915959Z",
+      "sha256": "3E5C269469DCB061B33DC456665E0ACBA2FEDE99D173AB93B120008E03085326"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexHookInventory.ps1",
+      "exists": true,
+      "length": 39949,
+      "lastWriteTimeUtc": "2026-07-23T04:11:31.2643024Z",
+      "sha256": "D1E4F65F56103908B8EF425A395F3C2E43F462461F30FA4DA8706F7CBD297BDE"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSerenaBehaviorHooks.ps1",
+      "exists": true,
+      "length": 61867,
+      "lastWriteTimeUtc": "2026-08-15T13:06:03.3683525Z",
+      "sha256": "250F57117E6EFA0E8ADCF8BCEE2467DC38707F4CB1B1FF7FA30421D8AD3BCC7E"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\serena-behavior-guard.ps1",
+      "exists": true,
+      "length": 38825,
+      "lastWriteTimeUtc": "2026-08-15T14:23:58.3957296Z",
+      "sha256": "85D78B8533A47F8A9F3419E1BC4DB33E3351522D7E8C1FE1AA861C0399F4EA3A"
+    },
+    {
+      "path": "D:\\Codex\\projects\\统一环境\\docs\\specs\\2026-07-24-safe-tree-delete-capability.md",
+      "exists": true,
+      "length": 25953,
+      "lastWriteTimeUtc": "2026-08-15T14:36:56.8506676Z",
+      "sha256": "909DA3AF8F85A488F4DBC7D861CC7F9D9F5E9B37DF50C27F17E462E8DD965A9C"
+    }
+  ],
+  "hostFiles": [
+    {
+      "path": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1",
+      "exists": true,
+      "length": 218,
+      "lastWriteTimeUtc": "2026-08-13T16:45:34.8494025Z",
+      "sha256": "636CB140720BF15681364459269C2D5DC4638E339F2589AD2A3A53B6E17B9373"
+    },
+    {
+      "path": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+      "exists": true,
+      "length": 172,
+      "lastWriteTimeUtc": "2026-07-24T10:56:50.8123832Z",
+      "sha256": "45AEADF7F758A1CAFCE106F66E7EAECC5F60176D2017630E2AF461A2A37BCA12"
+    }
+  ]
+}

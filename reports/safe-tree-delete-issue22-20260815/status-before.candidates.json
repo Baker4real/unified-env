@@ -1,0 +1,12 @@
+{
+  "snapshot": true,
+  "note": "由本次 live Status 推导的归档候选；每条 Archive 必须现场重算 transaction SHA-256。",
+  "capturedAtUtc": "2026-08-14T17:59:59.486035+00:00",
+  "sourceStatusPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue22-20260815\\status-before.utf8.json",
+  "sourceStatusSha256": "59cd72358e18201ee0ab66d65f5541bc4aa7a62bb2b7cbcb89094141d49ecec8",
+  "liveCandidateCount": 0,
+  "blockingRecordCount": 110,
+  "statusComplete": false,
+  "statusPolicySchemaVersion": 4,
+  "candidates": []
+}

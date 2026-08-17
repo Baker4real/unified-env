@@ -1,0 +1,36 @@
+{
+  "snapshot": true,
+  "capturedAtUtc": "2026-08-14T18:15:13.1523189+00:00",
+  "note": "只读确认证据根三层保护。本票未改这些文件。",
+  "policySchemaVersion": 4,
+  "policySha256": "01a22918150646bc37c5a51c9f4d1392750fa1e44501b5c651ca2d14f4362c90",
+  "evidenceEntry": {
+    "id": "codex-run-evidence",
+    "capabilityRoot": "D:\\Codex\\.codex\\run-evidence",
+    "minimumDescendantDepth": 2,
+    "rootDeletionPurpose": "none",
+    "deniedExactPaths": [
+      "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete"
+    ]
+  },
+  "retentionManual": {
+    "file": "scripts/lib/BackupRetentionPolicy.ps1",
+    "relative": "run-evidence",
+    "manual": true,
+    "reason": "运行证据根不得自动清理。",
+    "gitStatus": null
+  },
+  "noBatchArchive": {
+    "productionScript": true,
+    "library": true,
+    "modes": [
+      "Plan",
+      "Apply",
+      "Purge",
+      "BatchPurge",
+      "Status",
+      "Restore",
+      "Archive"
+    ]
+  }
+}

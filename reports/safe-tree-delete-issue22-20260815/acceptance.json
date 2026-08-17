@@ -1,0 +1,79 @@
+{
+  "snapshot": true,
+  "issue": 22,
+  "capturedAtUtc": "2026-08-14T18:15:30+00:00",
+  "criteria": [
+    {
+      "id": "rederive-candidates",
+      "text": "候选集在执行时重新推导，不复用 #19 快照",
+      "result": "pass",
+      "evidence": "status-before.json + status-before.candidates.json；liveCandidateCount=0"
+    },
+    {
+      "id": "blocking-drop-with-delta",
+      "text": "归档后 blockingRecords 从 1674 降至约 79，偏差有解释",
+      "result": "pass-with-explanation",
+      "evidence": "live blocking=110, candidates=0。#19 的 1674/79 与 20260814 的 2290→109 都是过期快照。本次未再 Archive。"
+    },
+    {
+      "id": "unterminated-remain",
+      "text": "5 条 v1 未终结与 1 条 v2 未终结仍在视图",
+      "result": "pass",
+      "evidence": "status-before.summary.json historicalResidualsStillVisible"
+    },
+    {
+      "id": "zero-evidence-rewrite",
+      "text": "归档过程零 evidence 删除或重写",
+      "result": "pass",
+      "evidence": "未调用 Archive。Status 前后 evidence 目录均为 2321，addedOps=[]，removedOps=[]"
+    },
+    {
+      "id": "per-item-results",
+      "text": "单条失败不中断其余；结果可读",
+      "result": "not-applicable",
+      "evidence": "候选为 0，无逐条 Archive 循环。fixture 错误隔离仍由既有 ControlPlane 覆盖且绿。"
+    },
+    {
+      "id": "timestamped-evidence",
+      "text": "每条归档留下含时点的可追溯证据",
+      "result": "not-applicable",
+      "evidence": "无新 marker。本次只读报告带 capturedAtUtc。"
+    },
+    {
+      "id": "no-batch-archive",
+      "text": "未新增 BatchArchive 或等价批量入口",
+      "result": "pass",
+      "evidence": "scripts 中无 BatchArchive；ValidateSet 仍为 Plan/Apply/Purge/BatchPurge/Status/Restore/Archive"
+    },
+    {
+      "id": "criteria-unmodified-by-this-ticket",
+      "text": "归档判据代码未被本票改动",
+      "result": "pass-with-concern",
+      "evidence": "本票未写入 scripts/lib/CodexSafeTreeDelete.ps1。Status 使用 preflight sha256 e4afc6c2…。Status 结束后他人写入观测补丁，现 sha256 9e433514…"
+    },
+    {
+      "id": "three-layer-protection",
+      "text": "证据根三层保护未改动",
+      "result": "pass",
+      "evidence": "protection-check.json：denylist、minimumDescendantDepth=2、retention Manual=true"
+    },
+    {
+      "id": "policy-v4",
+      "text": "policy schema 仍为 v4，未激活 v5",
+      "result": "pass",
+      "evidence": "live Status policySchemaVersion=4；policy.json schemaVersion 仍是 JSON integer 4"
+    },
+    {
+      "id": "fixture-error-isolation",
+      "text": "批量归档错误隔离有 fixture 级回归",
+      "result": "pass",
+      "evidence": "既有 Test-CodexSafeTreeDeleteControlPlane.ps1 1282–1431；standalone exit 0；suite 内再次绿"
+    },
+    {
+      "id": "existing-tests-pass",
+      "text": "既有全部 safe-tree-delete 测试保持通过",
+      "result": "pass-with-concern",
+      "evidence": "ControlPlane 及大多数 fixture 绿。module runner 在他人 FileIdentity.cs 改动上的 HashSafely 失败。未跑 ProductionSmoke / IdentityV2 / PlanIdentityV2 / Status。"
+    }
+  ]
+}

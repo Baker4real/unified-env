@@ -1,0 +1,143 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.issue20.comment-20260815",
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-15T06:48:15.7599872+00:00",
+  "issue": 20,
+  "issueUrl": "https://github.com/Baker4real/unified-env/issues/20",
+  "authority": {
+    "kind": "latest-issue-comment",
+    "createdAt": "2026-08-15T06:23:46Z",
+    "url": "https://github.com/Baker4real/unified-env/issues/20#issuecomment-5300924272",
+    "title": "代码对齐审查（2026-08-15 后续）",
+    "priorAuditCommentUrl": "https://github.com/Baker4real/unified-env/issues/20#issuecomment-5300770465",
+    "priorAuditRole": "closeout-chain-only"
+  },
+  "verdict": "DONE_WITH_CONCERNS",
+  "productionPurgeLeafDeleteFailedJsonObtained": false,
+  "runtime": {
+    "psEdition": "Core",
+    "psVersion": "7.6.4"
+  },
+  "wrappers": {
+    "repoMiddlePath": "D:\\Codex\\projects\\统一环境\\scripts\\invoke-codex-safe-tree-delete-host.ps1",
+    "hostMiddlePath": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1",
+    "repoCmdPath": "D:\\Codex\\projects\\统一环境\\scripts\\invoke-codex-safe-tree-delete.cmd",
+    "hostCmdPath": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+    "repoMiddleSha256": "636CB140720BF15681364459269C2D5DC4638E339F2589AD2A3A53B6E17B9373",
+    "hostMiddleSha256": "636CB140720BF15681364459269C2D5DC4638E339F2589AD2A3A53B6E17B9373",
+    "repoCmdSha256": "45AEADF7F758A1CAFCE106F66E7EAECC5F60176D2017630E2AF461A2A37BCA12",
+    "hostCmdSha256": "45AEADF7F758A1CAFCE106F66E7EAECC5F60176D2017630E2AF461A2A37BCA12",
+    "hashesEqual": true,
+    "matchesPreviousIssue20Evidence": true,
+    "previousExpectedMiddleSha256": "636CB140720BF15681364459269C2D5DC4638E339F2589AD2A3A53B6E17B9373",
+    "previousExpectedCmdSha256": "45AEADF7F758A1CAFCE106F66E7EAECC5F60176D2017630E2AF461A2A37BCA12",
+    "forwardLine": "exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })",
+    "repoHasForward": true,
+    "hostHasForward": true,
+    "repoHostMiddleTextEqual": true,
+    "repoHostCmdTextEqual": true,
+    "wrapperFilesDirtyInWorktree": false
+  },
+  "unconfirmedArchive": {
+    "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+    "arguments": [
+      "-Mode",
+      "Archive",
+      "-Json"
+    ],
+    "confirmArchivePassed": false,
+    "exitCode": 0,
+    "stdout": "{\"archived\":false,\"refusalReason\":\"confirm-archive-required\"}",
+    "archived": false,
+    "refusalReason": "confirm-archive-required",
+    "lastExitCodeCheckedImmediately": true,
+    "evidenceRoot": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete",
+    "evidenceRootLastWriteUtcBefore": "2026-08-14T17:01:59.7562796Z",
+    "evidenceRootLastWriteUtcAfter": "2026-08-14T17:01:59.7562796Z",
+    "evidenceRootLastWriteUnchanged": true
+  },
+  "productionPurgeLeafDeleteFailed": {
+    "attempted": false,
+    "obtained": false,
+    "requiredShape": {
+      "purged": false,
+      "refusalReason": "leaf-delete-failed",
+      "metricsPresent": true,
+      "nonzeroExit": true,
+      "source": "production-Purge-via-managed-wrapper"
+    },
+    "ownedPathExists": false,
+    "whyNoOwnedPath": [
+      "生产 CLI scripts/Invoke-CodexSafeTreeDelete.ps1 只在 Purge -Json 时传 -ReturnFailureMetrics，且不含 FixtureBeforeDirectoryTreeDelete / FixtureLeafDeleteFault。",
+      "生产 Purge 在 Remove-CodexHookCapabilityDirectoryTree 之前先跑 Get-CodexHookCapabilityDirectoryTreeSnapshot（name=safe-delete purge locked preflight），对每个文件 AcquireSafeTreeDeleteFileLease；Purge 开始前持锁会在发出 leaf-delete-failed JSON 之前抛错或卡住。",
+      "权威 spec docs/specs/2026-07-24-safe-tree-delete-capability.md:236-240 禁止用 JSON 发出前的持锁/lease 抛错冒充 live 验收。",
+      "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1:166-172 已写明 live 套件不能用 Purge 前持锁打出生产 leaf-delete-failed；该 JSON 由 ControlPlane fixture 在 preflight 之后持锁覆盖。",
+      "BeforeDirectoryTreeDeleteForTest 仅 fixture 入口接线；经真实 .cmd 的生产链无法注入预检后锁。",
+      "BatchPurge 调用 Invoke-CodexSafeTreeDeletePurge 时不传 ReturnFailureMetrics，失败会 throw，不会发出该 JSON。",
+      "预检后持锁或真实受管负向 smoke 属于 #55；#55 被 #54 阻塞。改 Purge 业务逻辑、弱化 exit-0 refusal、改生产库或测试均超出 #20。"
+    ],
+    "remainingTickets": [
+      {
+        "number": 54,
+        "role": "blocks-55",
+        "note": "Apply/Purge live freeze 与 leafStreamSet 仍在改生产删除入口；本执行者未实现、未查看远端票体。"
+      },
+      {
+        "number": 55,
+        "role": "live-managed-negative-smoke",
+        "note": "关闭前评论点名的真实受管负向 smoke；负责打出生产 Purge leaf-delete-failed JSON。"
+      },
+      {
+        "number": 50,
+        "role": "recomputable-evidence-pack",
+        "note": "关闭前评论点名的可复算证据包；阻塞 #47。"
+      },
+      {
+        "number": 47,
+        "role": "real-failure-contract-review",
+        "note": "关闭前评论点名的真实失败合同复核；被 #50 阻塞。"
+      }
+    ]
+  },
+  "workingTree": {
+    "stabilized": false,
+    "stabilizationAuthorized": false,
+    "modifiedTrackedFileCount": 15,
+    "diffStatTracked": "+1487/-34",
+    "modifiedTrackedFiles": [
+      "AGENTS.md",
+      "docs/env-governance/sub2api-update-policy.md",
+      "docs/specs/2026-07-24-safe-tree-delete-capability.md",
+      "docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md",
+      "managed/codex-hooks/hooks/serena-behavior-guard.ps1",
+      "managed/codex-hooks/host-preflight-manifest.json",
+      "managed/codex-hooks/manifest.json",
+      "managed/safe-tree-delete/policy.json",
+      "modules/host-safety/CONTEXT.md",
+      "modules/manifest.json",
+      "scripts/lib/CodexHookPolicy.ps1",
+      "scripts/lib/CodexSafeTreeDelete.ps1",
+      "scripts/lib/CodexSafeTreeDeleteFileIdentity.cs",
+      "tests/Test-CodexSafeTreeDeleteStatus.ps1",
+      "tests/Test-CodexSerenaBehaviorHooks.ps1"
+    ],
+    "note": "与最新评论所述 15 个文件、+1487/-34 一致。本执行者未回退、未覆盖、未整理。wrapper 四个入口文件不在 dirty 集合中。"
+  },
+  "notDone": [
+    "未跑生产 Status",
+    "未跑 ProductionSmoke",
+    "未跑全量 host-safety",
+    "未改 scripts/lib/CodexSafeTreeDelete.ps1 及禁止清单内文件",
+    "未实现 #47/#50/#54/#55",
+    "未 commit/push/建 branch/worktree/开 PR",
+    "未 gh issue comment/close",
+    "未覆盖 reports/safe-tree-delete-issue20-exitcode-20260815/ 已有文件"
+  ],
+  "assertions": {
+    "wrapperForwardStillPresent": true,
+    "wrapperHashesStillMatch": true,
+    "unconfirmedArchiveStillExit0Refusal": true,
+    "productionPurgeJsonStillMissing": true,
+    "workingTreeStillUnstableAndOutOfScope": true
+  }
+}

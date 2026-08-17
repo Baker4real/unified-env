@@ -1,0 +1,28 @@
+{
+  "authorized": "user-authorized disposable FAT32 VHD/VHDX on D: only; never format existing disks",
+  "workspaceTried": "D:\\Codex\\temp\\issue35-livefs-20260815",
+  "leftoverAfterCleanup": false,
+  "attempts": [
+    {
+      "method": "Hyper-V New-VHD",
+      "result": "failed",
+      "exceptionType": "Microsoft.HyperV.PowerShell.VirtualizationException",
+      "message": "您没有访问该资源的权限。请与计算机 BAKER 上授权的管理员联系。",
+      "inner": "Microsoft.Management.Infrastructure.CimException: 拒绝访问"
+    },
+    {
+      "method": "diskpart.exe /s create+attach vdisk",
+      "result": "failed",
+      "exceptionType": "System.Management.Automation.ApplicationFailedException",
+      "win32": 740,
+      "message": "Program 'diskpart.exe' failed to run: 请求的操作需要提升"
+    }
+  ],
+  "sudo": {
+    "present": "C:\\WINDOWS\\system32\\sudo.exe",
+    "mode": "force-new-window",
+    "used": false,
+    "reason": "会弹出 UAC 新窗口；非交互会话不能完成确认"
+  },
+  "formattedExistingDisk": false
+}

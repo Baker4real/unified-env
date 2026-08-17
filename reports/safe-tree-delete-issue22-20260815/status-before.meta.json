@@ -1,0 +1,15 @@
+{
+  "snapshot": true,
+  "note": "Issue #22 live Status 快照，不构成后续授权。",
+  "entry": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "mode": "Status",
+  "json": true,
+  "startedAtUtc": "2026-08-14T17:48:23.2864797+00:00",
+  "finishedAtUtc": "2026-08-14T17:59:06.3576827+00:00",
+  "wallClockSeconds": 643.071,
+  "exitCode": 0,
+  "childPid": 8668,
+  "stdoutBytes": 2814331,
+  "stderrBytes": 0,
+  "outputSha256": "491f56d1e07514f4006d764f81f77037486ace3e727f96f5550c5eeb7563e471"
+}

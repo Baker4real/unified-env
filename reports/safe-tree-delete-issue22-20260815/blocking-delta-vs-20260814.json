@@ -1,0 +1,21 @@
+{
+  "snapshot": true,
+  "note": "live blocking 相对 20260814 收口后 Status 的增量，不是 #19 快照。",
+  "historical20260814Blocking": 109,
+  "liveBlocking": 110,
+  "added": [
+    {
+      "operationId": "20260814T012818Z-4f9b7a0c-f090-4609-9625-c0f03896290d",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": 2,
+      "targetPath": null,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ],
+      "archiveEligible": false,
+      "reason": "transactionStatus 不是 purged，三条 Archive 判据不满足。"
+    }
+  ],
+  "removed": []
+}

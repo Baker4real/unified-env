@@ -1,0 +1,11 @@
+{
+  "snapshot": true,
+  "note": "node scripts/Run-PowerShellTests.cjs --module host-safety（默认 fixture，不含 ProductionSmoke）",
+  "startedAtUtc": "2026-08-14T18:07:47.3005721+00:00",
+  "finishedAtUtc": "2026-08-14T18:12:29.1832827+00:00",
+  "wallClockSeconds": 281.884,
+  "executable": "D:\\Codex\\tools\\bin\\node.exe",
+  "exitCode": 1,
+  "stdoutBytes": 4086,
+  "stderrBytes": 466
+}

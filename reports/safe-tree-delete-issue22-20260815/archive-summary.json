@@ -1,0 +1,15 @@
+{
+  "snapshot": true,
+  "note": "本次 live Status 候选为 0，按票面不得为了做事再 Archive。",
+  "capturedAtUtc": "2026-08-14T18:03:00.0000000+00:00",
+  "entry": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "liveCandidateCount": 0,
+  "attempted": 0,
+  "succeeded": 0,
+  "alreadyArchived": 0,
+  "refused": 0,
+  "failed": 0,
+  "newArchiveWrites": 0,
+  "batchArchiveAdded": false,
+  "confirmHashReused": false
+}

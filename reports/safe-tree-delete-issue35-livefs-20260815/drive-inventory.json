@@ -1,0 +1,71 @@
+{
+  "capturedAtUtc": "2026-08-15T07:59:26.8018272+00:00",
+  "processIsAdministrator": false,
+  "user": "BAKER\\WINDOWS",
+  "sudoEnabled": true,
+  "sudoMode": "force-new-window",
+  "drives": [
+    {
+      "name": "C:\\",
+      "driveType": "Fixed",
+      "isReady": true,
+      "driveFormat": "NTFS",
+      "volumeLabelObserved": "应用",
+      "root": "C:\\"
+    },
+    {
+      "name": "D:\\",
+      "driveType": "Fixed",
+      "isReady": true,
+      "driveFormat": "NTFS",
+      "volumeLabelObserved": "应用",
+      "root": "D:\\"
+    },
+    {
+      "name": "E:\\",
+      "driveType": "Fixed",
+      "isReady": true,
+      "driveFormat": "NTFS",
+      "volumeLabelObserved": "游戏",
+      "root": "E:\\"
+    },
+    {
+      "name": "F:\\",
+      "driveType": "Fixed",
+      "isReady": true,
+      "driveFormat": "NTFS",
+      "volumeLabelObserved": "游戏",
+      "root": "F:\\"
+    }
+  ],
+  "volumes": [
+    {
+      "driveLetter": "C",
+      "fileSystem": "NTFS",
+      "driveType": "Fixed",
+      "path": "\\\\?\\Volume{51d19959-a087-456b-b499-056c11281bce}\\"
+    },
+    {
+      "driveLetter": "D",
+      "fileSystem": "NTFS",
+      "driveType": "Fixed",
+      "path": "\\\\?\\Volume{1a8a98c4-c7c0-4742-abd8-0ce1076c6225}\\"
+    },
+    {
+      "driveLetter": "E",
+      "fileSystem": "NTFS",
+      "driveType": "Fixed",
+      "path": "\\\\?\\Volume{86471a8d-9300-457e-8f25-4b0fb3f854f6}\\"
+    },
+    {
+      "driveLetter": "F",
+      "fileSystem": "NTFS",
+      "driveType": "Fixed",
+      "path": "\\\\?\\Volume{a0810a89-918b-45c0-8944-e23a777a53cd}\\"
+    }
+  ],
+  "fat32OrExFatDrives": [],
+  "networkDrives": [],
+  "netUse": "empty",
+  "smbMappings": []
+}

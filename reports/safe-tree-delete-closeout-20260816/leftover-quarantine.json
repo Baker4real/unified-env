@@ -1,0 +1,11 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.closeout-20260816.leftover-quarantine",
+  "schemaVersion": 1,
+  "note": "本次 #20 生产失败 smoke 留下的 quarantine。首次 resume 因 Get-FileHash 大写 SHA 与生产小写比对不一致失败。未再 Purge。需要明确确认后才能清理。",
+  "operationId": "20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e",
+  "transactionPath": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\\transaction.json",
+  "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine",
+  "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
+  "statusAtFail": "purging",
+  "cleanupScript": "reports/safe-tree-delete-closeout-20260816/invoke-issue20-cleanup.ps1"
+}

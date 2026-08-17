@@ -1,0 +1,16 @@
+{
+  "snapshot": true,
+  "note": "Status 快照，不构成后续授权。判定用 Status 应对证据根零写入。",
+  "closeout": "20260816",
+  "entry": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "mode": "Status",
+  "json": true,
+  "startedAtUtc": "2026-08-16T02:10:10.0088230+00:00",
+  "finishedAtUtc": "2026-08-16T02:17:19.0237747+00:00",
+  "wallClockSeconds": 429.015,
+  "exitCode": 0,
+  "childPid": 64020,
+  "stdoutBytes": 2828958,
+  "stderrBytes": 0,
+  "outputSha256": "0c7e502359f7335a145238bdfc73d9ea41a4106c704f19d05d2749a78ec1efd9"
+}

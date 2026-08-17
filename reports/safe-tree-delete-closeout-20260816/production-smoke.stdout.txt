@@ -1,0 +1,13 @@
+
+ok                              : True
+suite                           : CodexSafeTreeDeleteProductionSmoke
+planPath                        : D:\Codex\.codex\run-evidence\safe-tree-delete\20260816T022143Z-dc0a3c3a-cca5-4696-b33
+                                  1-8e6cf61de371\plan.json
+transactionPath                 : D:\Codex\.codex\run-evidence\safe-tree-delete\20260816T022143Z-dc0a3c3a-cca5-4696-b33
+                                  1-8e6cf61de371\transaction.json
+transactionSha256               : f54ef67a6df57c3bfa9eef2a8858682134dcb29f7acdc5964731f9ef6bfe8f6f
+batchRecoveredCount             : 1
+batchParentPurged               : True
+unconfirmedArchiveExitCode      : 0
+unconfirmedArchiveRefusalReason : confirm-archive-required
+

@@ -1,0 +1,44 @@
+{
+  "generatedAt": "2026-08-14T17:50:09.1197603Z",
+  "psEdition": "Core",
+  "psVersion": "7.6.4",
+  "hashes": {
+    "repoMiddle": "636CB140720BF15681364459269C2D5DC4638E339F2589AD2A3A53B6E17B9373",
+    "hostMiddle": "636CB140720BF15681364459269C2D5DC4638E339F2589AD2A3A53B6E17B9373",
+    "hashesEqual": true,
+    "matchesExpected": true,
+    "repoHasForward": true,
+    "hostHasForward": true,
+    "repoCmdHash": "45AEADF7F758A1CAFCE106F66E7EAECC5F60176D2017630E2AF461A2A37BCA12",
+    "hostCmdHash": "45AEADF7F758A1CAFCE106F66E7EAECC5F60176D2017630E2AF461A2A37BCA12",
+    "cmdHashesEqual": true
+  },
+  "unconfirmedArchive": {
+    "exitCode": 0,
+    "stdout": "{\"archived\":false,\"refusalReason\":\"confirm-archive-required\"}",
+    "archived": false,
+    "refusalReason": "confirm-archive-required"
+  },
+  "innerDirectExit": 1,
+  "innerDirectStdout": "{\"refusalReason\":\"leaf-delete-failed\"}",
+  "middleOnlyForward": {
+    "exitCode": 1,
+    "stdout": "{\"refusalReason\":\"leaf-delete-failed\"}"
+  },
+  "threeLayerForward": {
+    "exitCode": 1,
+    "stdout": "{\"refusalReason\":\"leaf-delete-failed\"}"
+  },
+  "threeLayerNoShim": {
+    "exitCode": 0,
+    "stdout": "{\"refusalReason\":\"leaf-delete-failed\"}"
+  },
+  "assertions": {
+    "hashesMatchAndForwardPresent": true,
+    "unconfirmedIsExit0Refusal": true,
+    "innerDirectIs1": true,
+    "middleOnlyKeeps1": true,
+    "forwardKeeps1": true,
+    "noshimLosesTo0": true
+  }
+}

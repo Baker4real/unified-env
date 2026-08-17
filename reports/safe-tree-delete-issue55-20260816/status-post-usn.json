@@ -1,0 +1,22 @@
+{
+  "evidence": {
+    "Root": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete",
+    "CapturedAtUtc": "2026-08-16T13:42:44.2381172+00:00",
+    "FileCount": 6879,
+    "DirectoryCount": 2351,
+    "ErrorCount": 0,
+    "DigestSha256": "094ffc0fd7a5b30064a978e398785fbdeeab85e822ce9c7fe50f4d515e9fe2f6"
+  },
+  "policy": {
+    "Root": "D:\\Codex\\projects\\统一环境\\managed\\safe-tree-delete\\policy.json",
+    "CapturedAtUtc": "2026-08-16T13:42:44.2383821+00:00",
+    "FileCount": 1,
+    "DirectoryCount": 0,
+    "ErrorCount": 0,
+    "DigestSha256": "a5ae6c0147b2779b004f2992c3fc122d1c0df5488d270a43a391ef7b997524a5"
+  },
+  "evidenceChangedCount": 0,
+  "policyChangedCount": 0,
+  "evidenceChanged": [],
+  "policyChanged": []
+}

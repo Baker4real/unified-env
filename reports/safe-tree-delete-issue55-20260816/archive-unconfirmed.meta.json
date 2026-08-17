@@ -1,0 +1,31 @@
+{
+  "name": "archive-unconfirmed",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Archive",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-16T13:42:44.8743468+00:00",
+  "endedAtUtc": "2026-08-16T13:42:46.0267831+00:00",
+  "wallClockMs": 1152.4,
+  "timeoutMs": 120000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 21216,
+  "trackedPids": [
+    21216,
+    10836
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\archive-unconfirmed.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\archive-unconfirmed.stderr.txt",
+  "stdoutSha256": "1d52a020f8294eb6db7964cf2cacf510a171e2580b9550bf7898ea2ba509d406",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

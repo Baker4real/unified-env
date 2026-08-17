@@ -1,0 +1,280 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.issue50.exclude",
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-08-16T14:55:51.998742+00:00",
+  "note": "逐项排除。不以整个 reports/ 代替审查。",
+  "categories": [
+    {
+      "id": "heartbeat",
+      "reason": "Status 采集 heartbeat/progress，瞬态，不是复算输入。"
+    },
+    {
+      "id": "lock-transient",
+      "reason": "lock-acquired.txt / lock-release.signal / lock-holder.log 是锁窗口瞬态。"
+    },
+    {
+      "id": "raw-status-duplicate",
+      "reason": "已有 UTF-8 派生的过大 raw Status stdout。保留 utf8 SHA 与 meta。"
+    },
+    {
+      "id": "evidence-root-dump",
+      "reason": "生产 evidence 根 enumeration，禁止拷进 git。零写入用 compare JSON。"
+    },
+    {
+      "id": "leftover-quarantine",
+      "reason": "leftover 0ab1e1b6 等 quarantine payload + 清空集。transaction 留在 evidence 根。"
+    },
+    {
+      "id": "livefail-payload",
+      "reason": "smoke 临时 reports/safe-tree-delete-issue*-livefail-* 锁文件。"
+    },
+    {
+      "id": "foreign-wip",
+      "reason": "Serena #44、Sub2API、policy allowlist、生产 lib、hooks、Grok hooks。不要求工作树干净。"
+    },
+    {
+      "id": "entire-reports-tree",
+      "reason": "禁止把 reports/ 一把梭提交。只收本清单 include。"
+    },
+    {
+      "id": "bytecode-ignored",
+      "reason": ".gitignore 的 __pycache__。复算用源 .py，不提交字节码。"
+    }
+  ],
+  "files": [
+    {
+      "path": "reports/.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine/locked-payload.txt",
+      "bytes": 37,
+      "category": "leftover-quarantine",
+      "reason": "leftover / 其它 quarantine payload。禁止提交。"
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/lock-acquired.txt",
+      "bytes": 33,
+      "category": "lock-transient",
+      "reason": "PID/锁窗口瞬态（lock-acquired / lock-release / lock-holder.log）。锁策略已写在对应 meta 与 revert-forwarding.json / leaf-delete-failed.json。"
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/lock-holder.log",
+      "bytes": 499,
+      "category": "lock-transient",
+      "reason": "PID/锁窗口瞬态（lock-acquired / lock-release / lock-holder.log）。锁策略已写在对应 meta 与 revert-forwarding.json / leaf-delete-failed.json。"
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/lock-release.signal",
+      "bytes": 33,
+      "category": "lock-transient",
+      "reason": "PID/锁窗口瞬态（lock-acquired / lock-release / lock-holder.log）。锁策略已写在对应 meta 与 revert-forwarding.json / leaf-delete-failed.json。"
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/status-raw.heartbeat.json",
+      "bytes": 148,
+      "category": "heartbeat",
+      "reason": "Status 采集用 heartbeat 进度文件，不是复算所需快照。"
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/status-raw.json",
+      "bytes": 2828958,
+      "category": "raw-status-duplicate",
+      "reason": "GB18030/原始 stdout 过大，已有 UTF-8 派生。utf8 SHA 与 meta.outputSha256 保留在清单内。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue21-20260816/lock-acquired.txt",
+      "bytes": 33,
+      "category": "lock-transient",
+      "reason": "PID/锁窗口瞬态（lock-acquired / lock-release / lock-holder.log）。锁策略已写在对应 meta 与 revert-forwarding.json / leaf-delete-failed.json。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue21-20260816/lock-holder.log",
+      "bytes": 188,
+      "category": "lock-transient",
+      "reason": "PID/锁窗口瞬态（lock-acquired / lock-release / lock-holder.log）。锁策略已写在对应 meta 与 revert-forwarding.json / leaf-delete-failed.json。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue21-20260816/lock-release.signal",
+      "bytes": 33,
+      "category": "lock-transient",
+      "reason": "PID/锁窗口瞬态（lock-acquired / lock-release / lock-holder.log）。锁策略已写在对应 meta 与 revert-forwarding.json / leaf-delete-failed.json。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/status-before.heartbeat.json",
+      "bytes": 147,
+      "category": "heartbeat",
+      "reason": "Status 采集用 heartbeat 进度文件，不是复算所需快照。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/status-before.json",
+      "bytes": 2814331,
+      "category": "raw-status-duplicate",
+      "reason": "GB18030/原始 stdout 过大，已有 UTF-8 派生。utf8 SHA 与 meta.outputSha256 保留在清单内。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/evidence-after.json",
+      "bytes": 1666713,
+      "category": "evidence-root-dump",
+      "reason": "生产 evidence 根整树清单（~1.6MB×2）。零写入结论以 evidence-status-write-compare.json 为准；禁止把生产 evidence 根拷进 git。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/evidence-before.json",
+      "bytes": 1666713,
+      "category": "evidence-root-dump",
+      "reason": "生产 evidence 根整树清单（~1.6MB×2）。零写入结论以 evidence-status-write-compare.json 为准；禁止把生产 evidence 根拷进 git。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/status-raw.heartbeat.json",
+      "bytes": 148,
+      "category": "heartbeat",
+      "reason": "Status 采集用 heartbeat 进度文件，不是复算所需快照。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/status-raw.json",
+      "bytes": 2870000,
+      "category": "raw-status-duplicate",
+      "reason": "GB18030/原始 stdout 过大，已有 UTF-8 派生。utf8 SHA 与 meta.outputSha256 保留在清单内。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/lock-acquired.txt",
+      "bytes": 33,
+      "category": "lock-transient",
+      "reason": "PID/锁窗口瞬态（lock-acquired / lock-release / lock-holder.log）。锁策略已写在对应 meta 与 revert-forwarding.json / leaf-delete-failed.json。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/lock-holder.log",
+      "bytes": 499,
+      "category": "lock-transient",
+      "reason": "PID/锁窗口瞬态（lock-acquired / lock-release / lock-holder.log）。锁策略已写在对应 meta 与 revert-forwarding.json / leaf-delete-failed.json。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/lock-release.signal",
+      "bytes": 33,
+      "category": "lock-transient",
+      "reason": "PID/锁窗口瞬态（lock-acquired / lock-release / lock-holder.log）。锁策略已写在对应 meta 与 revert-forwarding.json / leaf-delete-failed.json。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/__pycache__/compare_vs_baseline.cpython-314.pyc",
+      "bytes": 8792,
+      "category": "bytecode-ignored",
+      "reason": ".gitignore 的 __pycache__/*.pyc，不强制加入默认分支。源 .py 已在 include。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/__pycache__/inventory_evidence.cpython-314.pyc",
+      "bytes": 9185,
+      "category": "bytecode-ignored",
+      "reason": ".gitignore 的 __pycache__/*.pyc，不强制加入默认分支。源 .py 已在 include。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/__pycache__/summarize_status.cpython-314.pyc",
+      "bytes": 21551,
+      "category": "bytecode-ignored",
+      "reason": ".gitignore 的 __pycache__/*.pyc，不强制加入默认分支。源 .py 已在 include。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/__pycache__/test_recompute.cpython-314.pyc",
+      "bytes": 18914,
+      "category": "bytecode-ignored",
+      "reason": ".gitignore 的 __pycache__/*.pyc，不强制加入默认分支。源 .py 已在 include。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/__pycache__/transcode_status.cpython-314.pyc",
+      "bytes": 2811,
+      "category": "bytecode-ignored",
+      "reason": ".gitignore 的 __pycache__/*.pyc，不强制加入默认分支。源 .py 已在 include。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/__pycache__/verify_leftover.cpython-314.pyc",
+      "bytes": 4435,
+      "category": "bytecode-ignored",
+      "reason": ".gitignore 的 __pycache__/*.pyc，不强制加入默认分支。源 .py 已在 include。"
+    }
+  ],
+  "foreignWip": [
+    {
+      "path": "managed/safe-tree-delete/policy.json",
+      "reason": "他人 / 并行 WIP：policy allowlist。本关口禁止夹带。"
+    },
+    {
+      "path": "scripts/lib/CodexSafeTreeDelete.ps1",
+      "reason": "生产实现工作树改动。本关口禁止修改或提交该文件。"
+    },
+    {
+      "path": "scripts/lib/CodexSafeTreeDeleteFileIdentity.cs",
+      "reason": "生产实现工作树改动，不属于 #50 证据包。"
+    },
+    {
+      "path": "scripts/lib/CodexHookPolicy.ps1",
+      "reason": "codex-host / hook policy WIP，不属于控制面证据包。"
+    },
+    {
+      "path": "managed/codex-hooks/hooks/serena-behavior-guard.ps1",
+      "reason": "Serena #44 / hooks WIP。"
+    },
+    {
+      "path": "managed/codex-hooks/host-preflight-manifest.json",
+      "reason": "Serena / hook inventory WIP。"
+    },
+    {
+      "path": "managed/codex-hooks/manifest.json",
+      "reason": "Serena / hook inventory WIP（#46 评论已说明脏 manifest）。"
+    },
+    {
+      "path": "docs/env-governance/sub2api-update-policy.md",
+      "reason": "Sub2API WIP，禁止夹带。"
+    },
+    {
+      "path": "managed/grok-hooks/",
+      "reason": "Grok hooks 未跟踪目录，与 #50 无关。"
+    },
+    {
+      "path": "AGENTS.md",
+      "reason": "仓库入口 WIP，不属于证据包。"
+    },
+    {
+      "path": "modules/manifest.json",
+      "reason": "工作树另有无关 WIP。提交关口若要登记新 reports 前缀，须另开干净 diff，不得把本文件现有脏改动并进本包。"
+    },
+    {
+      "path": "modules/host-safety/CONTEXT.md",
+      "reason": "模块文档工作树改动，本关口不改生产/文档真源。"
+    },
+    {
+      "path": "docs/specs/2026-07-24-safe-tree-delete-capability.md",
+      "reason": "权威 spec 工作树改动，本关口只读。"
+    },
+    {
+      "path": "docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md",
+      "reason": "性能 spec 工作树改动，不属于本包。"
+    },
+    {
+      "path": "tests/Test-CodexSerenaBehaviorHooks.ps1",
+      "reason": "Serena 测试 WIP。"
+    },
+    {
+      "path": "tests/Test-CodexSafeTreeDeleteStatus.ps1",
+      "reason": "Status fixture 工作树改动，不是本包复算入口。"
+    },
+    {
+      "path": "tests/Test-CodexSafeTreeDeleteCrashSafety.ps1",
+      "reason": "CrashSafety 工作树改动，不属于 #50。"
+    },
+    {
+      "path": "tests/Invoke-CodexSafeTreeDeleteFixture.ps1",
+      "reason": "fixture helper 工作树改动。"
+    },
+    {
+      "path": "tests/Invoke-CodexSafeTreeDeleteCrashFixture.ps1",
+      "reason": "crash fixture 工作树改动。"
+    }
+  ],
+  "extraDirectoryGlobsNotWalkedIntoInclude": [
+    "reports/.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine/",
+    "reports/safe-tree-delete-round-leftover-20260814/",
+    "reports/safe-tree-delete-archive-20260814/",
+    "reports/safe-tree-delete-status-post-archive-20260814/",
+    "reports/safe-tree-delete-unresolved-20260814/",
+    "reports/safe-tree-delete-issue*-livefail-*/",
+    "reports/safe-tree-delete-issue50-20260816/_inventory.py",
+    "reports/safe-tree-delete-issue50-20260816/_inventory-files.json",
+    "reports/safe-tree-delete-issue50-20260816/build-issue50-pack.py",
+    "D:/Codex/.codex/run-evidence/safe-tree-delete/"
+  ]
+}

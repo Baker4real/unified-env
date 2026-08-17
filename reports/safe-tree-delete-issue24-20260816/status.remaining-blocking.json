@@ -1,0 +1,1876 @@
+{
+  "snapshot": true,
+  "note": "本次 live Status remaining blocking 分解。快照，不构成后续授权。",
+  "blockingRecordCount": 110,
+  "byLifecycle": {
+    "manual-review": 87,
+    "inconsistent": 23
+  },
+  "byTransactionSchemaVersion": {
+    "None": 52,
+    "1": 9,
+    "2": 49
+  },
+  "byTransactionStatus": {
+    "None": 52,
+    "rolled-back": 1,
+    "quarantined": 12,
+    "prepared": 2,
+    "purging": 1,
+    "purged": 42
+  },
+  "byClassification": {
+    "plan-only-both-null": {
+      "count": 51,
+      "operationIds": [
+        "20260725T010405Z-1050c8e4-3cfb-4d5a-ae41-b2b7e0d6e77a",
+        "20260725T010405Z-7d36c6b5-cf2f-4dcd-a0c9-d4868472861b",
+        "20260725T010405Z-8826367d-7701-412e-9454-bbe212dcde90",
+        "20260725T010406Z-0bd80e81-8e64-46b0-ae3f-e16d460d8ff4",
+        "20260725T010407Z-ee8726ea-a4e5-4b50-ad88-6d0f98d5fbef",
+        "20260725T010413Z-e8351b4d-ae0c-4826-ad1b-523cb67c751c",
+        "20260725T010421Z-233defb8-2066-4bf2-ba3c-ec5760fd730e",
+        "20260725T012146Z-910378d3-7f31-40c0-a4c7-84d1673d2ba5",
+        "20260725T124407Z-4008651c-dacc-4591-9dd7-82be96ae6b22",
+        "20260725T125312Z-c83bde25-33ed-456b-9fdc-f757e23c9dc9",
+        "20260726T173103Z-3b34b99f-0011-4181-b755-19a472098f2e",
+        "20260726T173103Z-e1fc7461-b68f-4780-ab33-c36213383905",
+        "20260729T074213Z-34f4b598-5671-46c3-a002-13030b9d331b",
+        "20260802T074737Z-eeefe226-ff13-4060-9248-6afd12bf949c",
+        "20260802T075059Z-c67f84c5-072a-4635-b7fa-3da5776bacf9",
+        "20260803T234356Z-905cb351-22f9-4a69-ae9c-7540e4b2fa2d",
+        "20260803T234410Z-9f25390c-b6ec-4a14-8811-7fce850a1fbf",
+        "20260803T234427Z-a85957ea-4924-4b6b-9544-1f9d344f5d73",
+        "20260803T234431Z-e4164288-e30b-4327-a9a7-8b16afb701ab",
+        "20260803T234439Z-21d22d86-40a3-48f7-9b3a-63ad4ae71a41",
+        "20260803T234441Z-b671f2f5-2d80-4090-af31-1d56b64f13b1",
+        "20260805T153744Z-58046b4e-fb35-4fe1-9f09-b9e50f62ff4a",
+        "20260806T071750Z-3463f0a3-11d4-478f-a937-d3f031c034f3",
+        "20260807T042959Z-c3e4b301-1bf0-405c-983d-5ce6b9a77af3",
+        "20260807T043020Z-8db24942-0344-4c19-8594-02465a4fb052",
+        "20260807T043020Z-a0a4d8f7-3aa9-4ffe-9e4f-3031d11502a1",
+        "20260807T043038Z-d7fcf239-06d0-4b2f-9dfd-cffbb0da9de8",
+        "20260810T031650Z-e6d07018-b204-497d-9beb-6da79e77d542",
+        "20260810T031659Z-136d72b7-66db-420b-9e76-b0948468ff9b",
+        "20260810T031848Z-0e90eb00-9840-4125-bb6f-945f122f40d6",
+        "20260810T031903Z-24757c4a-500b-43b6-b656-ca93d132c531",
+        "20260810T031950Z-579a7aec-b8ee-40ec-b8d8-c6ebd72255bf",
+        "20260810T035339Z-eb61deeb-1406-46a8-bc9e-93067d2bcc47",
+        "20260810T035401Z-00e75102-4d8d-413c-932d-95676572df97",
+        "20260810T035443Z-c9704959-28ee-40df-bdfd-d32672d9f28a",
+        "20260812T155917Z-484e4708-d102-49fa-ac17-9d4acb899ae7",
+        "20260812T192132Z-54d8c0e4-656c-4950-8f6f-980e0b0504ac",
+        "20260812T203021Z-f209a81b-2377-4036-8a83-43f238412a88",
+        "20260813T162710Z-6f30a9ee-6134-4abd-b233-e34df4e070fb",
+        "20260813T162713Z-163ad4d4-6ada-47e9-8fa1-0d8db4794291",
+        "20260813T162715Z-5fce3d6d-59b4-4670-b68d-28fac5dce50b",
+        "20260813T162717Z-c5d3bbb4-5f0a-445e-b50a-d9673bb76d56",
+        "20260813T162720Z-8b50c56b-bbde-47f5-911c-f16924b5b7fa",
+        "20260813T162722Z-3a713dd5-e4a1-4182-8272-a305e117f926",
+        "20260813T162725Z-6d7ff61a-3164-44f5-8b9e-f0e4e04ab894",
+        "20260813T162727Z-04d4d616-d3db-4807-9309-61e5919cff1c",
+        "20260813T162730Z-d34f4e0d-23ca-4f1e-a2ae-89e2d7b3c728",
+        "20260813T162831Z-d0e3b27a-a6f7-4f9f-a7ea-24405216d955",
+        "20260813T162834Z-554d4b6c-cab8-449a-a5a6-119e0830bf52",
+        "20260813T162837Z-5c2d46d7-7830-42e3-aa1f-22f779fa1eef",
+        "20260813T162840Z-b5051b56-f655-41e8-9d85-83d22e494b38"
+      ]
+    },
+    "purged-manual-review": {
+      "count": 42,
+      "operationIds": [
+        "20260729T074219Z-f91a4f79-94c6-4055-a404-a4e341d73306",
+        "20260729T074244Z-11c87c5a-8dc8-4b15-9f8e-cfdac8c45c60",
+        "20260729T074247Z-cc78cd84-8f67-4f8d-aa1e-cb4ed8949140",
+        "20260729T074250Z-fe0c62fd-2d31-47f8-9319-bafd41f0ae53",
+        "20260805T082602Z-ea62c9f2-2e88-47eb-b860-1266dac2ad24",
+        "20260805T153928Z-163b53ca-efeb-4b40-b49b-c4acd819882e",
+        "20260805T154030Z-6d78197f-0f81-4688-8c10-0f0f3026a1d6",
+        "20260805T154034Z-aca423a1-a368-456c-88ce-fcf0f7fb4421",
+        "20260805T154040Z-74f4b219-fff2-4efe-8703-25a43dde2fff",
+        "20260805T154045Z-3115fff4-93c2-4f69-929a-e6311b21be66",
+        "20260805T160442Z-a0f27984-d254-443e-b505-b8a69f7b51ff",
+        "20260805T160539Z-11f6ef91-07f0-4d2a-af50-d14a17ac1b8f",
+        "20260805T160553Z-487dffb3-afa5-4fda-b5bc-3389821428a2",
+        "20260805T160607Z-2c20cff7-b6a5-43fe-875e-96aae5b9e4c1",
+        "20260805T160627Z-9540badc-e828-441d-b822-ef216e2a869b",
+        "20260805T160649Z-e7ab6d35-b66f-4644-82c6-59e7ef5fe78a",
+        "20260805T160705Z-42b9baac-1f3e-43eb-b038-ef86e0894a67",
+        "20260805T160759Z-352e3d81-fe0e-45d0-9288-1bb1e32816c5",
+        "20260805T160814Z-ffb190e0-db31-4811-88c6-292ab2e57ed1",
+        "20260805T160829Z-d22a1332-6f67-4d31-9ebd-a1605a8553bc",
+        "20260805T160844Z-207a4a4c-0f1a-4bf8-9f06-bf1c0a0b23d1",
+        "20260805T160859Z-f01a8632-c822-4b78-9033-c85a5fe5c44c",
+        "20260805T160915Z-b52e9c91-c960-434d-82e4-de5bea7464c5",
+        "20260805T160930Z-dfbf1a07-76c6-4290-a9aa-c314f6801664",
+        "20260805T160950Z-54a18fc6-055c-4c1d-b3bd-47eaead4baa2",
+        "20260805T161004Z-5cb86255-4208-4637-933d-ea3f7bb82cf0",
+        "20260805T161021Z-3528d62b-79e5-4664-9531-b7afe242730a",
+        "20260805T161036Z-92de870f-e37e-4baf-9370-842a335767b0",
+        "20260805T161051Z-71a52327-694e-48fa-906a-e8d458400d90",
+        "20260805T161107Z-f87382ff-39b8-4935-97e9-b530f8c037f3",
+        "20260805T161122Z-2139a0f4-a099-471c-a6ac-623a1627bb26",
+        "20260805T161136Z-41921186-3a55-4b1d-bbd0-cd90f2d33e04",
+        "20260807T011336Z-7a5c38c6-d7ca-41de-ba85-da2b13c24968",
+        "20260809T121017Z-2b336128-8691-4ed8-b924-264778db0522",
+        "20260809T121033Z-4a93df3e-4be2-4366-9910-71d777238aa4",
+        "20260809T121049Z-271cab68-1dc4-4c0e-8ac6-763690db5b50",
+        "20260809T121122Z-2cea17f5-dfe2-41b0-b9b7-2f55ed3ef70f",
+        "20260812T155931Z-d436eaec-55dc-4389-875d-6c54fe94e97a",
+        "20260812T155954Z-061d7c13-ef10-46f1-b37e-bea3c1f6ed3a",
+        "20260812T155956Z-a00cf1f1-ef11-4c64-9a6c-4a59d4b95409",
+        "20260812T155958Z-e093bbed-1204-4d53-a9e7-784e06fddc27",
+        "20260814T012818Z-4f9b7a0c-f090-4609-9625-c0f03896290d"
+      ]
+    },
+    "planned-namespace": {
+      "count": 10,
+      "operationIds": [
+        "20260813T162340Z-8a1c1553-4ee6-48a2-97b6-a9f97347b325",
+        "20260813T162931Z-53cd598e-e051-4a39-8c9b-896eaeacc256",
+        "20260813T162935Z-56700506-0627-40dc-98e6-9af10bfde259",
+        "20260813T162942Z-2745b2a3-23d6-4f93-bdd6-33379852d3ed",
+        "20260813T162951Z-df0419e7-285b-4cd1-b41b-6829e34048c9",
+        "20260813T162956Z-215e2c23-71db-441b-a8db-f75b73343506",
+        "20260813T163000Z-54d37307-3bdc-4e0c-a5eb-dccb6eeca8a2",
+        "20260813T163004Z-03b96fc4-c8b0-4316-bfb6-d961f1f82fa0",
+        "20260813T163008Z-1d1ca8df-7aa7-4181-9461-667fb8f0dcaa",
+        "20260813T163013Z-6db8957f-1e4f-4cf1-b956-2f81deb98aee"
+      ]
+    },
+    "v1-unterminated": {
+      "count": 5,
+      "operationIds": [
+        "20260725T010726Z-0609f165-c496-4280-85c4-6bb8a5e9465b",
+        "20260725T130041Z-a5fd8743-a239-423c-9c44-4cbb5aa6a2cc",
+        "20260728T162734Z-c602a5b7-34bb-4469-bf9b-2754cadc5a76",
+        "20260729T055433Z-0f0aeb5d-efcc-43cb-973b-a58a9ea748d6",
+        "20260730T170848Z-26f7ea53-0578-43c4-b245-9ab5304ca5d6"
+      ]
+    },
+    "historical-v2-unterminated": {
+      "count": 1,
+      "operationIds": [
+        "20260805T083256Z-1ba06d2f-fbf0-43fe-a57e-7fd57f943153"
+      ]
+    },
+    "missing-plan": {
+      "count": 1,
+      "operationIds": [
+        "acl-capability-probe-20260801"
+      ]
+    }
+  },
+  "records": [
+    {
+      "operationId": "20260725T010405Z-1050c8e4-3cfb-4d5a-ae41-b2b7e0d6e77a",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\obj",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260725T010405Z-7d36c6b5-cf2f-4dcd-a0c9-d4868472861b",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\app",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260725T010405Z-8826367d-7701-412e-9454-bbe212dcde90",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\verification",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260725T010406Z-0bd80e81-8e64-46b0-ae3f-e16d460d8ff4",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\obj",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260725T010407Z-ee8726ea-a4e5-4b50-ad88-6d0f98d5fbef",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\obj",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260725T010413Z-e8351b4d-ae0c-4826-ad1b-523cb67c751c",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260725T010421Z-233defb8-2066-4bf2-ba3c-ec5760fd730e",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260725T010726Z-0609f165-c496-4280-85c4-6bb8a5e9465b",
+      "lifecycle": "manual-review",
+      "transactionStatus": "rolled-back",
+      "transactionSchemaVersion": 1,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260725T012146Z-910378d3-7f31-40c0-a4c7-84d1673d2ba5",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260725T124407Z-4008651c-dacc-4591-9dd7-82be96ae6b22",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\.codex\\run-evidence\\clock-countdown-deploy\\57813c3",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260725T125312Z-c83bde25-33ed-456b-9fdc-f757e23c9dc9",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\.codex\\run-evidence\\clock-countdown-deploy\\acc5f3d",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260725T130041Z-a5fd8743-a239-423c-9c44-4cbb5aa6a2cc",
+      "lifecycle": "manual-review",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 1,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-d77a341ca599407f82af77a64d7f6253\\old-a",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260726T173103Z-3b34b99f-0011-4181-b755-19a472098f2e",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\.codex\\skills\\nodesek-image-generation\\scripts\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260726T173103Z-e1fc7461-b68f-4780-ab33-c36213383905",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tmp\\skill-install-guard\\nodesek-image-generation-img2img-20260727-v2",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260728T162734Z-c602a5b7-34bb-4469-bf9b-2754cadc5a76",
+      "lifecycle": "manual-review",
+      "transactionStatus": "prepared",
+      "transactionSchemaVersion": 1,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260729T055433Z-0f0aeb5d-efcc-43cb-973b-a58a9ea748d6",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purging",
+      "transactionSchemaVersion": 1,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\app",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260729T074213Z-34f4b598-5671-46c3-a002-13030b9d331b",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": null,
+      "targetPresent": null,
+      "quarantinePresent": null,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete target 未达到策略要求的最小后代深度。"
+      ]
+    },
+    {
+      "operationId": "20260729T074219Z-f91a4f79-94c6-4055-a404-a4e341d73306",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 1,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete-smoke-a41322da0e924752a9b3a61c88fc6987",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete target 未达到策略要求的最小后代深度。",
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260729T074244Z-11c87c5a-8dc8-4b15-9f8e-cfdac8c45c60",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 1,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\.codex\\run-evidence\\desktop-shortcut-icon-name-fix-20260729T071110Z",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete target 未达到策略要求的最小后代深度。",
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260729T074247Z-cc78cd84-8f67-4f8d-aa1e-cb4ed8949140",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 1,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\.codex\\run-evidence\\desktop-shortcut-windows-terminal-20260729T065358Z",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete target 未达到策略要求的最小后代深度。",
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260729T074250Z-fe0c62fd-2d31-47f8-9319-bafd41f0ae53",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 1,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\.codex\\run-evidence\\desktop-shortcut-windows-terminal-alias-fix-20260729T070216Z",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete target 未达到策略要求的最小后代深度。",
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260730T170848Z-26f7ea53-0578-43c4-b245-9ab5304ca5d6",
+      "lifecycle": "manual-review",
+      "transactionStatus": "prepared",
+      "transactionSchemaVersion": 1,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260802T074737Z-eeefe226-ff13-4060-9248-6afd12bf949c",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\.codex\\run-evidence\\replicator\\runtime-constraints-sync-20260707T231344\\backup\\managed-before-apply\\skills\\planning-with-files",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260802T075059Z-c67f84c5-072a-4635-b7fa-3da5776bacf9",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\.codex\\run-evidence\\replicator\\runtime-constraints-sync-20260707T231344\\staging\\payload\\skills\\planning-with-files",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260803T234356Z-905cb351-22f9-4a69-ae9c-7540e4b2fa2d",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260803T234410Z-9f25390c-b6ec-4a14-8811-7fce850a1fbf",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\obj",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260803T234427Z-a85957ea-4924-4b6b-9544-1f9d344f5d73",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260803T234431Z-e4164288-e30b-4327-a9a7-8b16afb701ab",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\obj",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260803T234439Z-21d22d86-40a3-48f7-9b3a-63ad4ae71a41",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260803T234441Z-b671f2f5-2d80-4090-af31-1d56b64f13b1",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\obj",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260805T082602Z-ea62c9f2-2e88-47eb-b860-1266dac2ad24",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\雷达天梯",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T083256Z-1ba06d2f-fbf0-43fe-a57e-7fd57f943153",
+      "lifecycle": "manual-review",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\verification",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete policy 自计划生成后已漂移。"
+      ]
+    },
+    {
+      "operationId": "20260805T153744Z-58046b4e-fb35-4fe1-9f09-b9e50f62ff4a",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": null,
+      "targetPresent": null,
+      "quarantinePresent": null,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260805T153928Z-163b53ca-efeb-4b40-b49b-c4acd819882e",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\.codex-safe-delete-1ba06d2f-fbf0-43fe-a57e-7fd57f943153.quarantine",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T154030Z-6d78197f-0f81-4688-8c10-0f0f3026a1d6",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-05-v1",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T154034Z-aca423a1-a368-456c-88ce-fcf0f7fb4421",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-05-v2",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T154040Z-74f4b219-fff2-4efe-8703-25a43dde2fff",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-05-v1",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T154045Z-3115fff4-93c2-4f69-929a-e6311b21be66",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-05-v2",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160442Z-a0f27984-d254-443e-b505-b8a69f7b51ff",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\i-have-adhd\\scripts\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160539Z-11f6ef91-07f0-4d2a-af50-d14a17ac1b8f",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\cc-switch\\.codegraph",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160553Z-487dffb3-afa5-4fda-b5bc-3389821428a2",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\cc-switch\\src-tauri\\gen",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160607Z-2c20cff7-b6a5-43fe-875e-96aae5b9e4c1",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\i-have-adhd\\tests\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160627Z-9540badc-e828-441d-b822-ef216e2a869b",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\开源分发 api\\sub2api\\backend\\internal\\web\\dist",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160649Z-e7ab6d35-b66f-4644-82c6-59e7ef5fe78a",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\.pytest_cache",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160705Z-42b9baac-1f3e-43eb-b038-ef86e0894a67",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\.ruff_cache",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160759Z-352e3d81-fe0e-45d0-9288-1bb1e32816c5",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\src\\serena\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160814Z-ffb190e0-db31-4811-88c6-292ab2e57ed1",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\src\\serena\\config\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160829Z-d22a1332-6f67-4d31-9ebd-a1605a8553bc",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\src\\serena\\memories\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160844Z-207a4a4c-0f1a-4bf8-9f06-bf1c0a0b23d1",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\src\\serena\\util\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160859Z-f01a8632-c822-4b78-9033-c85a5fe5c44c",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\src\\solidlsp\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160915Z-b52e9c91-c960-434d-82e4-de5bea7464c5",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\src\\solidlsp\\language_servers\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160930Z-dfbf1a07-76c6-4290-a9aa-c314f6801664",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\src\\solidlsp\\lsp_protocol_handler\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T160950Z-54a18fc6-055c-4c1d-b3bd-47eaead4baa2",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\src\\solidlsp\\util\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T161004Z-5cb86255-4208-4637-933d-ea3f7bb82cf0",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\test\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T161021Z-3528d62b-79e5-4664-9531-b7afe242730a",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\test\\resources\\repos\\typescript\\cross_package_a\\.serena",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T161036Z-92de870f-e37e-4baf-9370-842a335767b0",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\test\\resources\\repos\\typescript\\test_repo\\.serena\\cache",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T161051Z-71a52327-694e-48fa-906a-e8d458400d90",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\test\\solidlsp\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T161107Z-f87382ff-39b8-4935-97e9-b530f8c037f3",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\test\\solidlsp\\clojure\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T161122Z-2139a0f4-a099-471c-a6ac-623a1627bb26",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\test\\solidlsp\\typescript\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260805T161136Z-41921186-3a55-4b1d-bbd0-cd90f2d33e04",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\serena\\test\\solidlsp\\util\\__pycache__",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260806T071750Z-3463f0a3-11d4-478f-a937-d3f031c034f3",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260807T011336Z-7a5c38c6-d7ca-41de-ba85-da2b13c24968",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\okf-frontmatter",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260807T042959Z-c3e4b301-1bf0-405c-983d-5ce6b9a77af3",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\codex-account-switch\\src-tauri\\target",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260807T043020Z-8db24942-0344-4c19-8594-02465a4fb052",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\codex-account-switch\\src-tauri\\gen",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260807T043020Z-a0a4d8f7-3aa9-4ffe-9e4f-3031d11502a1",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\codex-account-switch\\dist",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260807T043038Z-d7fcf239-06d0-4b2f-9dfd-cffbb0da9de8",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260809T121017Z-2b336128-8691-4ed8-b924-264778db0522",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\claude\\.claude",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260809T121033Z-4a93df3e-4be2-4366-9910-71d777238aa4",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\claude\\.local",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260809T121049Z-271cab68-1dc4-4c0e-8ac6-763690db5b50",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\claude\\.legacy-root-state-cleanup",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260809T121122Z-2cea17f5-dfe2-41b0-b9b7-2f55ed3ef70f",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tools\\npm-global\\node_modules\\@anthropic-ai",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260810T031650Z-e6d07018-b204-497d-9beb-6da79e77d542",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tmp\\luban-neat-closeout-20260810T1115",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260810T031659Z-136d72b7-66db-420b-9e76-b0948468ff9b",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tmp\\luban-upstream-verify-20260810T1115",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260810T031848Z-0e90eb00-9840-4125-bb6f-945f122f40d6",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tmp\\审计测试-中文路径",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260810T031903Z-24757c4a-500b-43b6-b656-ca93d132c531",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tmp\\审计测试-中文路径",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260810T031950Z-579a7aec-b8ee-40ec-b8d8-c6ebd72255bf",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tmp\\审计测试-中文路径",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260810T035339Z-eb61deeb-1406-46a8-bc9e-93067d2bcc47",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tmp\\审查B-编码测试-中文目录",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260810T035401Z-00e75102-4d8d-413c-932d-95676572df97",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tmp\\审查B-编码测试-中文目录",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260810T035443Z-c9704959-28ee-40df-bdfd-d32672d9f28a",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\tmp\\审查B-编码测试-中文目录",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "operationId": "20260812T155917Z-484e4708-d102-49fa-ac17-9d4acb899ae7",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": null,
+      "targetPresent": null,
+      "quarantinePresent": null,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "operationId": "20260812T155931Z-d436eaec-55dc-4389-875d-6c54fe94e97a",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\minmin-calendar\\.codex\\skill-state\\.cleanup-sdd-42d291404dd64b80ac9a6465e05a1057",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260812T155954Z-061d7c13-ef10-46f1-b37e-bea3c1f6ed3a",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\minmin-calendar\\.tdd\\.cleanup-red1-42d291404dd64b80ac9a6465e05a1057",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260812T155956Z-a00cf1f1-ef11-4c64-9a6c-4a59d4b95409",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\minmin-calendar\\_external\\.cleanup-zip-42d291404dd64b80ac9a6465e05a1057",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260812T155958Z-e093bbed-1204-4d53-a9e7-784e06fddc27",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\minmin-calendar\\scripts\\.cleanup-hermes-42d291404dd64b80ac9a6465e05a1057",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "20260812T192132Z-54d8c0e4-656c-4950-8f6f-980e0b0504ac",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260812T203021Z-f209a81b-2377-4036-8a83-43f238412a88",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "targetPresent": true,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": false,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "operationId": "20260813T162340Z-8a1c1553-4ee6-48a2-97b6-a9f97347b325",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v7",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162710Z-6f30a9ee-6134-4abd-b233-e34df4e070fb",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v8",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162713Z-163ad4d4-6ada-47e9-8fa1-0d8db4794291",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v9",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162715Z-5fce3d6d-59b4-4670-b68d-28fac5dce50b",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v10",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162717Z-c5d3bbb4-5f0a-445e-b50a-d9673bb76d56",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v11",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162720Z-8b50c56b-bbde-47f5-911c-f16924b5b7fa",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v7",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162722Z-3a713dd5-e4a1-4182-8272-a305e117f926",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v8",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162725Z-6d7ff61a-3164-44f5-8b9e-f0e4e04ab894",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v9",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162727Z-04d4d616-d3db-4807-9309-61e5919cff1c",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v10",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162730Z-d34f4e0d-23ca-4f1e-a2ae-89e2d7b3c728",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v11",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162831Z-d0e3b27a-a6f7-4f9f-a7ea-24405216d955",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v8",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162834Z-554d4b6c-cab8-449a-a5a6-119e0830bf52",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v9",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162837Z-5c2d46d7-7830-42e3-aa1f-22f779fa1eef",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v10",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162840Z-b5051b56-f655-41e8-9d85-83d22e494b38",
+      "lifecycle": "inconsistent",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v11",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162931Z-53cd598e-e051-4a39-8c9b-896eaeacc256",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v8",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162935Z-56700506-0627-40dc-98e6-9af10bfde259",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v9",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162942Z-2745b2a3-23d6-4f93-bdd6-33379852d3ed",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v10",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162951Z-df0419e7-285b-4cd1-b41b-6829e34048c9",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\main-window\\1165x1350\\2026-08-13-v11",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T162956Z-215e2c23-71db-441b-a8db-f75b73343506",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v7",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T163000Z-54d37307-3bdc-4e0c-a5eb-dccb6eeca8a2",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v8",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T163004Z-03b96fc4-c8b0-4316-bfb6-d961f1f82fa0",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v9",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T163008Z-1d1ca8df-7aa7-4181-9461-667fb8f0dcaa",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v10",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260813T163013Z-6db8957f-1e4f-4cf1-b956-2f81deb98aee",
+      "lifecycle": "inconsistent",
+      "transactionStatus": "quarantined",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references\\floating-window\\520x390\\2026-08-13-v11",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": true,
+      "policyCompatible": true,
+      "errors": [
+        "prepared/quarantined operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "operationId": "20260814T012818Z-4f9b7a0c-f090-4609-9625-c0f03896290d",
+      "lifecycle": "manual-review",
+      "transactionStatus": "purged",
+      "transactionSchemaVersion": 2,
+      "planSchemaVersion": 1,
+      "targetPath": "D:\\Codex\\projects\\i-have-adhd",
+      "targetPresent": false,
+      "quarantinePresent": false,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "plan 当前语义拒绝：safe-delete capability root 不在受管 allowlist。",
+        "plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。"
+      ]
+    },
+    {
+      "operationId": "acl-capability-probe-20260801",
+      "lifecycle": "manual-review",
+      "transactionStatus": null,
+      "transactionSchemaVersion": null,
+      "planSchemaVersion": null,
+      "targetPath": null,
+      "targetPresent": null,
+      "quarantinePresent": null,
+      "schemaCompatible": false,
+      "policyCompatible": false,
+      "errors": [
+        "evidence record 缺少 plan.json。"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "snapshot": true,
+  "note": "11 条差异分类。对照 20260815 Status 快照与 2026-08-15 现场磁盘 marker。未补写 marker，未 Archive，未改判据。",
+  "sourceStatusSha256": "59cd72358e18201ee0ab66d65f5541bc4aa7a62bb2b7cbcb89094141d49ecec8",
+  "statusCapturedAtUtc": "2026-08-14T17:59:04.8543069+00:00",
+  "diskEnumeratedAtUtcNote": "see terminal-marker-diff.json capturedAtUtc",
+  "sets": {
+    "bothTerminalAndMarker": 2200,
+    "terminalWithoutMarker": 11,
+    "markerWithoutTerminal": 0
+  },
+  "sharedFactsForTheEleven": {
+    "lifecycle": "terminal",
+    "journalStatus": "not-applicable",
+    "transactionStatus": "purged",
+    "transactionSchemaVersion": 2,
+    "planSchemaVersion": 1,
+    "quarantinePresent": false,
+    "errors": [],
+    "policyCompatible": true,
+    "schemaCompatible": true,
+    "diskMarkerExistsNow": false,
+    "directoryCommitAnchors": [],
+    "archiveCandidateByIssue22Criteria": false,
+    "whyNotArchiveCandidate": "Issue #22 候选是 transactionStatus=purged 且 quarantinePresent=false 且 lifecycle != terminal。这 11 条已被 Status 的 live purged 观测标成 terminal，因此不进候选，也不会出现在 blockingRecords。",
+    "whyJournalNotApplicable": "v2 purged 且 directoryCommitAnchors 为空，且当前 policy 的 rootDeletionPurpose 不是 empty-project-state，Status 把 journalStatus 标成 not-applicable 后仍标 lifecycle=terminal。"
+  },
+  "rows": [
+    {
+      "operationId": "20260814T020720Z-7fe528f4-5f51-4990-9818-ba3b99e96a69",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-namespace-absent",
+      "subclass": "post-closeout-smoke-or-report-cleanup",
+      "policyEntryId": "environment-reports",
+      "rootDeletionPurposeFromCurrentPolicy": "none",
+      "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-production-smoke-5849ef763f1d42bab1341272288a672d",
+      "targetPresent": false,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T022358Z-84436ddd-b95d-4608-beda-410897d3cec3",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-rebuildable-target-rebuilt",
+      "subclass": "clock-countdown-rebuildable-batch",
+      "policyEntryId": "clock-countdown-app-build",
+      "rootDeletionPurposeFromCurrentPolicy": "rebuildable-build-output",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\app",
+      "targetPresent": true,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T022434Z-f0c6f9ec-d42b-40a6-9a94-4637319d8d7f",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-rebuildable-target-rebuilt",
+      "subclass": "clock-countdown-rebuildable-batch",
+      "policyEntryId": "clock-countdown-verification-build",
+      "rootDeletionPurposeFromCurrentPolicy": "rebuildable-build-output",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\verification",
+      "targetPresent": true,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T022509Z-32c3ebd7-2083-4db4-a65f-e9d32dae719f",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-rebuildable-target-rebuilt",
+      "subclass": "clock-countdown-rebuildable-batch",
+      "policyEntryId": "clock-countdown-core-bin",
+      "rootDeletionPurposeFromCurrentPolicy": "rebuildable-build-output",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin",
+      "targetPresent": true,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T022544Z-5abb4a9d-d885-4e8f-9a7c-94f0845d8c63",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-rebuildable-target-rebuilt",
+      "subclass": "clock-countdown-rebuildable-batch",
+      "policyEntryId": "clock-countdown-core-obj",
+      "rootDeletionPurposeFromCurrentPolicy": "rebuildable-build-output",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\obj",
+      "targetPresent": true,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T022650Z-83de648e-cfaf-4c51-83e6-a40f84b54e96",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-rebuildable-target-rebuilt",
+      "subclass": "clock-countdown-rebuildable-batch",
+      "policyEntryId": "clock-countdown-app-bin",
+      "rootDeletionPurposeFromCurrentPolicy": "rebuildable-build-output",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "targetPresent": true,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T022826Z-aa6ba336-40ab-439e-a9ef-d5dedbe21097",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-rebuildable-target-rebuilt",
+      "subclass": "clock-countdown-rebuildable-batch",
+      "policyEntryId": "clock-countdown-app-obj",
+      "rootDeletionPurposeFromCurrentPolicy": "rebuildable-build-output",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\obj",
+      "targetPresent": true,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T022920Z-a447bd4a-2951-4570-8658-9d9bdd0d61c7",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-rebuildable-target-rebuilt",
+      "subclass": "clock-countdown-rebuildable-batch",
+      "policyEntryId": "clock-countdown-verification-bin",
+      "rootDeletionPurposeFromCurrentPolicy": "rebuildable-build-output",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin",
+      "targetPresent": true,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T023016Z-9d982bb3-a5e8-46b4-bc78-93dd4648ca9a",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-rebuildable-target-rebuilt",
+      "subclass": "clock-countdown-rebuildable-batch",
+      "policyEntryId": "clock-countdown-verification-obj",
+      "rootDeletionPurposeFromCurrentPolicy": "rebuildable-build-output",
+      "targetPath": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\obj",
+      "targetPresent": true,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T090756Z-54246ac3-9bd5-4ed0-b07d-cce9249e4700",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-namespace-absent",
+      "subclass": "run-evidence-descendant-cleanup",
+      "policyEntryId": "codex-run-evidence",
+      "rootDeletionPurposeFromCurrentPolicy": "none",
+      "targetPath": "D:\\Codex\\.codex\\run-evidence\\clock-countdown-csharp-tests\\run-7381e6016ae84f92aed78b884b1a9a42",
+      "targetPresent": false,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    },
+    {
+      "operationId": "20260814T170159Z-cf25c042-24c4-4c30-b1e6-fd3a49f52964",
+      "set": "terminal-without-marker",
+      "bucket": "live-purged-namespace-absent",
+      "subclass": "scratch-fixture-cleanup",
+      "policyEntryId": "environment-scratch",
+      "rootDeletionPurposeFromCurrentPolicy": "none",
+      "targetPath": "D:\\Codex\\projects\\统一环境\\.scratch\\host-hook-reconciliation-tests-b8a47d31e50f4c7aa3d2916e8f4205bc\\pretooluse-timeout-diag",
+      "targetPresent": false,
+      "not": ["window-bypass", "policy-rejected-observation", "invalid-marker", "unterminated"]
+    }
+  ]
+}

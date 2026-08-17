@@ -1,0 +1,104 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.issue20.production-purge-leaf-delete-failed",
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-08-16T02:18:50.1146582+00:00",
+  "startedAtUtc": "2026-08-16T02:18:43.5144463+00:00",
+  "wallClockSeconds": 6.603,
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "lockStrategy": "watch-transaction-status-purging-then-FileShare.Read",
+  "lockAcquiredMarkerExists": true,
+  "plan": {
+    "exitCode": 0,
+    "planned": true,
+    "planPath": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\\plan.json",
+    "planSha256": "ae0cf22cbe8cbcef457c90aa080fa5aa005cfe9184eb0ae73c0963eb4d24bdd4"
+  },
+  "apply": {
+    "exitCode": 0,
+    "quarantined": true,
+    "transactionPath": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\\transaction.json",
+    "transactionSha256": "ad90012162d69d4f0b3dfecfeb34626591514bc616e8294d7c3887cdb7ac3c47",
+    "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine"
+  },
+  "purge": {
+    "exitCode": 1,
+    "lastExitCodeCheckedImmediately": true,
+    "stdout": "{\"purged\":false,\"refusalReason\":\"leaf-delete-failed\",\"transactionPath\":\"D:\\\\Codex\\\\.codex\\\\run-evidence\\\\safe-tree-delete\\\\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\\\\transaction.json\",\"recoverable\":false,\"purgeResumable\":true,\"metrics\":{\"schemaVersion\":1,\"phase\":\"purge\",\"elapsedMs\":933,\"entriesScanned\":3,\"logicalBytes\":37,\"bytesHashed\":23899,\"retry\":{\"contract\":{\"schemaVersion\":1,\"maxAttempts\":3,\"wallTimeBudgetMs\":1000,\"delayMilliseconds\":[10,25],\"allowedErrorCategories\":[\"sharing-violation\",\"lock-violation\",\"busy\"]},\"attempts\":2,\"result\":\"failed-after-retry\",\"events\":[{\"attempt\":1,\"errorCategory\":\"sharing-violation\",\"delayMs\":10,\"elapsedMs\":58,\"budgetRemainingMs\":942,\"revalidation\":\"failed\",\"result\":\"failed\"},{\"attempt\":2,\"errorCategory\":\"sharing-violation\",\"delayMs\":25,\"elapsedMs\":102,\"budgetRemainingMs\":898,\"revalidation\":\"failed\",\"result\":\"failed\"}]}}}",
+    "purged": false,
+    "refusalReason": "leaf-delete-failed",
+    "recoverable": false,
+    "purgeResumable": true,
+    "metricsPresent": true,
+    "metrics": {
+      "schemaVersion": 1,
+      "phase": "purge",
+      "elapsedMs": 933,
+      "entriesScanned": 3,
+      "logicalBytes": 37,
+      "bytesHashed": 23899,
+      "retry": {
+        "contract": {
+          "schemaVersion": 1,
+          "maxAttempts": 3,
+          "wallTimeBudgetMs": 1000,
+          "delayMilliseconds": [
+            10,
+            25
+          ],
+          "allowedErrorCategories": [
+            "sharing-violation",
+            "lock-violation",
+            "busy"
+          ]
+        },
+        "attempts": 2,
+        "result": "failed-after-retry",
+        "events": [
+          {
+            "attempt": 1,
+            "errorCategory": "sharing-violation",
+            "delayMs": 10,
+            "elapsedMs": 58,
+            "budgetRemainingMs": 942,
+            "revalidation": "failed",
+            "result": "failed"
+          },
+          {
+            "attempt": 2,
+            "errorCategory": "sharing-violation",
+            "delayMs": 25,
+            "elapsedMs": 102,
+            "budgetRemainingMs": 898,
+            "revalidation": "failed",
+            "result": "failed"
+          }
+        ]
+      }
+    }
+  },
+  "requiredShape": {
+    "purged": false,
+    "refusalReason": "leaf-delete-failed",
+    "metricsPresent": true,
+    "nonzeroExit": true,
+    "source": "production-Purge-via-managed-wrapper"
+  },
+  "lockProcessId": 16184,
+  "assertions": {
+    "purgedFalse": true,
+    "refusalIsLeafDeleteFailed": true,
+    "metricsPresent": true,
+    "nonzeroExit": true,
+    "lockAcquired": true,
+    "productionJsonObtained": true
+  },
+  "cleanup": {
+    "lockReleased": true,
+    "resumeAttempted": true,
+    "resumeExitCode": 1,
+    "resumePurged": null,
+    "resumeRaw": "",
+    "resumeApprovedSha256": "4E73AEDC260C43C536AB9DF3D3F6D5F73A065A8A17C26D1706998F583A0339D7",
+    "fixtureExistsAfter": false
+  }
+}

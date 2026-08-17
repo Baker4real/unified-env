@@ -1,0 +1,20 @@
+{
+  "snapshot": true,
+  "note": "Status 快照，不构成后续授权。判定用 Status 应对证据根零写入。",
+  "issue": 24,
+  "entry": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "mode": "Status",
+  "json": true,
+  "wrapperSha256": "45aeadf7f758a1cafce106f66e7eaecc5f60176d2017630e2af461a2a37bca12",
+  "startedAtUtc": "2026-08-16T14:15:19.3662907+00:00",
+  "finishedAtUtc": "2026-08-16T14:23:33.1343808+00:00",
+  "wallClockSeconds": 493.768,
+  "exitCode": 0,
+  "childPid": 43492,
+  "stdoutBytes": 2870000,
+  "stderrBytes": 0,
+  "outputSha256": "abf2a6dd0f56eaa3c2b8ccf3084a0f92bea76c4ded08687a876016d4e058efce",
+  "psEdition": "Core",
+  "psVersion": "7.6.4",
+  "processPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe"
+}

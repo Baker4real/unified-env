@@ -1,0 +1,15 @@
+{
+  "snapshot": true,
+  "note": "本票未改判据代码。Status 之后工作树出现他人 diff，对照 #23 观测补丁。未回退。",
+  "capturedAtUtc": "2026-08-14T18:03:48.4958526+00:00",
+  "preflightLibSha256": "e4afc6c2fba26a42b2ff62e17e7f39fb92dcb53d920d754e3c4b8a324f5f0993",
+  "currentLibSha256": "9e43351403f268a65e0a8738d19ade4a28dd5890d4dce3f484299ea59afaca60",
+  "changedAfterStatus": true,
+  "lastWriteTimeUtc": "2026-08-14T18:01:20.3401206Z",
+  "statusFinishedAtUtc": "2026-08-14T17:59:06.3576827+00:00",
+  "gitStatus": " M scripts/lib/CodexSafeTreeDelete.ps1",
+  "diffStat": [
+    " scripts/lib/CodexSafeTreeDelete.ps1 | 62 +++++++++++++++++++++++++++++++------",
+    " 1 file changed, 52 insertions(+), 10 deletions(-)"
+  ]
+}

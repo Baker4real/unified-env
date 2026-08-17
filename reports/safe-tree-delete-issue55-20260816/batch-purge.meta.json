@@ -1,0 +1,37 @@
+{
+  "name": "batch-purge",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "BatchPurge",
+    "-TargetPaths",
+    "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-bcef45323c7d418fb2aa117fca3edbc7\\old-a::D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-bcef45323c7d418fb2aa117fca3edbc7\\old-b",
+    "-CapabilityRoot",
+    "D:\\Codex\\projects\\统一环境\\reports",
+    "-ConfirmApply",
+    "-ConfirmPurge",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-16T13:42:54.5372985+00:00",
+  "endedAtUtc": "2026-08-16T13:43:30.3809051+00:00",
+  "wallClockMs": 35843.6,
+  "timeoutMs": 180000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 35828,
+  "trackedPids": [
+    35828,
+    22256
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\batch-purge.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\batch-purge.stderr.txt",
+  "stdoutSha256": "7aeb2f5715669575f19d4f46d1b7ea038197d081584d00f410462a81c7fe88b9",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

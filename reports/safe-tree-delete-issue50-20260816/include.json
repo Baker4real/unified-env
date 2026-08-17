@@ -1,0 +1,1969 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.issue50.include",
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-08-16T14:55:51.998742+00:00",
+  "workspace": "reports/safe-tree-delete-issue50-20260816/",
+  "note": "相对仓库路径。不要把本机绝对路径当引用真源。本关口未 git add / commit / push。 发布前从清单剔除 6 个 gitignored __pycache__/*.pyc。",
+  "identityAlreadyOnDefaultBranch": [
+    {
+      "path": "scripts/invoke-codex-safe-tree-delete.cmd",
+      "sha256": "45aeadf7f758a1cafce106f66e7eaecc5f60176d2017630e2af461a2a37bca12",
+      "note": "live wrapper 与仓库源一致；工作树未改。不进 STAGED-FILE-LIST。"
+    },
+    {
+      "path": "scripts/invoke-codex-safe-tree-delete-host.ps1",
+      "sha256": "636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373",
+      "note": "含 LASTEXITCODE 转发；工作树未改。不进 STAGED-FILE-LIST。"
+    }
+  ],
+  "bindings": {
+    "issue55": {
+      "sourceIdentity": "reports/safe-tree-delete-issue55-20260816/identity.json",
+      "capturedAtUtc": "2026-08-16T13:43:49.0100671+00:00",
+      "startedAtUtc": "2026-08-16T13:37:01.5183122+00:00",
+      "keyCounts": {
+        "suiteExit": 0,
+        "wallClockSeconds": 407.492,
+        "invocationCount": 20,
+        "statusOperationIdCountAtSmokeStart": 2350,
+        "leafDeleteFailedExitCode": 1
+      },
+      "hashOrOperationIdBinding": {
+        "liveCmdSha256": "45aeadf7f758a1cafce106f66e7eaecc5f60176d2017630e2af461a2a37bca12",
+        "livePs1Sha256": "636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373",
+        "statusZeroWriteStdoutSha256": "1d069f8a09d16973686e79cd0827d5342e5ca458758f7738c507c5d8a21470da",
+        "usnDigestPrePost": "094ffc0fd7a5b30064a978e398785fbdeeab85e822ce9c7fe50f4d515e9fe2f6",
+        "bindingField": "operations[].operationId"
+      },
+      "recomputeEntry": "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+      "recomputeNote": "本关口禁止重跑。入口是相对仓库路径，不是本机绝对路径。"
+    },
+    "issue24": {
+      "sourceIdentity": "reports/safe-tree-delete-issue24-20260816/status-raw.meta.json",
+      "capturedAtUtc": "2026-08-16T14:23:31.9663166+00:00",
+      "keyCounts": {
+        "operations": 2356,
+        "blocking": 110,
+        "complete": false,
+        "wallClockSeconds": 493.768,
+        "exitCode": 0
+      },
+      "hashOrOperationIdBinding": {
+        "statusUtf8Sha256": "3dc6070797d4b99403d0e91ab96c97841d6c6a4bcf3f69ffe48199cbdfc94efe",
+        "rawStdoutSha256": "abf2a6dd0f56eaa3c2b8ccf3084a0f92bea76c4ded08687a876016d4e058efce",
+        "wrapperSha256": "45aeadf7f758a1cafce106f66e7eaecc5f60176d2017630e2af461a2a37bca12",
+        "leftoverOperationId": "20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e"
+      },
+      "recomputeEntry": "reports/safe-tree-delete-issue24-20260816/summarize_status.py",
+      "recomputeNote": "只对已落盘的 status-utf8.json 做离线复算。禁止重跑 live Status。"
+    },
+    "issue22": {
+      "sourceIdentity": "reports/safe-tree-delete-issue22-20260815/status-before.meta.json",
+      "capturedAtUtc": "2026-08-14T17:59:04.8543069+00:00",
+      "keyCounts": {
+        "operations": 2321,
+        "blocking": 110,
+        "qualifiedArchiveCandidates": 0,
+        "wallClockSeconds": 643.071
+      },
+      "hashOrOperationIdBinding": {
+        "statusUtf8Sha256": "59cd72358e18201ee0ab66d65f5541bc4aa7a62bb2b7cbcb89094141d49ecec8",
+        "rawStdoutSha256": "491f56d1e07514f4006d764f81f77037486ace3e727f96f5550c5eeb7563e471"
+      },
+      "recomputeEntry": "reports/safe-tree-delete-issue22-20260815/summarize-status.py"
+    },
+    "closeout0217": {
+      "sourceIdentity": "reports/safe-tree-delete-closeout-20260816/status-raw.meta.json",
+      "capturedAtUtc": "2026-08-16T02:17:18.2224754+00:00",
+      "keyCounts": {
+        "operations": 2323,
+        "blocking": 110,
+        "wallClockSeconds": 429.015
+      },
+      "hashOrOperationIdBinding": {
+        "rawStdoutSha256": "0c7e502359f7335a145238bdfc73d9ea41a4106c704f19d05d2749a78ec1efd9",
+        "note": "GitHub #22/#48 评论引用的 SHA 是 GB18030 raw。本包排除 raw，保留 meta 与 status-raw.utf8.json。"
+      },
+      "recomputeEntry": "reports/safe-tree-delete-closeout-20260816/summarize-status.py"
+    },
+    "baseline19": {
+      "sourceIdentity": "reports/safe-tree-delete-status-baseline-20260810.json",
+      "capturedAtUtc": "2026-08-10T15:04:00Z",
+      "recomputeEntry": "reports/safe-tree-delete-status-baseline-20260810.json",
+      "note": "已在默认分支。#24 comparison-vs-baseline-19.json 相对此文件。"
+    }
+  },
+  "githubCommentsPosted": {
+    "index": "reports/safe-tree-delete-closeout-20260816/github-comments-posted.json",
+    "copies": [
+      "reports/safe-tree-delete-closeout-20260816/github-comments/issue-20.md",
+      "reports/safe-tree-delete-closeout-20260816/github-comments/issue-22.md",
+      "reports/safe-tree-delete-closeout-20260816/github-comments/issue-35.md",
+      "reports/safe-tree-delete-closeout-20260816/github-comments/issue-46.md",
+      "reports/safe-tree-delete-closeout-20260816/github-comments/issue-48.md",
+      "reports/safe-tree-delete-closeout-20260816/github-comments/issue-54.md"
+    ],
+    "citedRelativePathsMustStayInInclude": [
+      "reports/safe-tree-delete-closeout-20260816/status-summary.json",
+      "reports/safe-tree-delete-closeout-20260816/related-fixture-tests.json",
+      "reports/safe-tree-delete-closeout-20260816/ORCHESTRATION-CLOSE-GAPS.md",
+      "reports/safe-tree-delete-closeout-20260816/issue20-production-purge-fail.json",
+      "reports/safe-tree-delete-closeout-20260816/purge-fail.stdout.txt",
+      "reports/safe-tree-delete-closeout-20260816/production-smoke.meta.json",
+      "reports/safe-tree-delete-closeout-20260816/legacy-inflight-inventory.json",
+      "reports/safe-tree-delete-issue22-comment-20260815/REPORT.md",
+      "reports/safe-tree-delete-issue35-livefs-20260815/"
+    ]
+  },
+  "fileCount": 236,
+  "files": [
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/ORCHESTRATION-CLOSE-GAPS.md",
+      "bytes": 5851,
+      "sha256": "6b2f3ce4d7e1eab7405992637c4f2677969802fa9c803bb36a90d32bb24ee4b0",
+      "pack": "closeout-20260816",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/REPORT.md",
+      "bytes": 7066,
+      "sha256": "043012380230e3d2d34dff834bff28efd4671952314e2a7da02ad1b25984165c",
+      "pack": "closeout-20260816",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/capture-source-identity.ps1",
+      "bytes": 3528,
+      "sha256": "cdc4cf7aeb91a9a82f62d559417860f5038be70357141991c85e8a8d3ea8bddf",
+      "pack": "closeout-20260816",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-CrashSafety.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-CrashSafety.stdout.txt",
+      "bytes": 145,
+      "sha256": "65a4c6844327ff8d2b3d24578fbd9ac29779c7c8ae965ec74f23f828ad5299e0",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-FileSystem.stderr.txt",
+      "bytes": 2183,
+      "sha256": "399b9124a538046c2d001456b95bf4e95112390bcc707c1ecc3d915cc6392d4b",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-FileSystem.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-HashSafely.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-HashSafely.stdout.txt",
+      "bytes": 133,
+      "sha256": "14cd510ca9fd869aae2a3bcc15b7199ab43bba4849671f5d30e8bbc818c6f807",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-HookInventory.stderr.txt",
+      "bytes": 221,
+      "sha256": "489cea7409edc3259a26cd43e675617e9eddd1507378ad4b26bbb6050abeeef5",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-HookInventory.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-LeafStreamSet.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-LeafStreamSet.stdout.txt",
+      "bytes": 142,
+      "sha256": "6092f8c45d1ec6bec8df857b6631c0ce644c23d9d32038d189ba6a0cf75a0297",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-SerenaBehavior.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-SerenaBehavior.stdout.txt",
+      "bytes": 84,
+      "sha256": "c4e36e1e90a71f96732c7e46c2f8e281b078b16bcf7e31878b53992e2a22661f",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-Status.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/fixture-Status.stdout.txt",
+      "bytes": 121,
+      "sha256": "c5b6454b4aca9ff6768b4b914a6d76af7733c355b6fd06e667c9fb20526af3f6",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/github-comments-posted.json",
+      "bytes": 1087,
+      "sha256": "39319031c34d687282fd7d2b8ca76f495f95bbb39ede482cd31c3cdd238c0005",
+      "pack": "closeout-20260816",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/github-comments/issue-20.md",
+      "bytes": 2482,
+      "sha256": "4d71e0d6e45c8536e7a54cc574534427b43d257f8b89662ced9078d02efd9795",
+      "pack": "closeout-20260816",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/github-comments/issue-22.md",
+      "bytes": 1909,
+      "sha256": "9fcaaab0624ff4b830699ce330a09c211c28c1bff652ee5102145118034512f2",
+      "pack": "closeout-20260816",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/github-comments/issue-35.md",
+      "bytes": 1339,
+      "sha256": "3c540655b3fbbfc1f25d03b13bdd876a190ba3052e54bd89f6d5110a1dc073ed",
+      "pack": "closeout-20260816",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/github-comments/issue-46.md",
+      "bytes": 1570,
+      "sha256": "158c0ddca50c6eb58c68a02beac3ca3b4918f6cae854ff9425ede3c10985ef47",
+      "pack": "closeout-20260816",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/github-comments/issue-48.md",
+      "bytes": 1872,
+      "sha256": "3e206535dd35d961b1a65d4c4a06fea7959ae97c8308fdb10875fa20279c024b",
+      "pack": "closeout-20260816",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/github-comments/issue-54.md",
+      "bytes": 2120,
+      "sha256": "80f0305d3228b48291baa0da1375bc2f0d4e9d5f160acae2ef5afbaa68dd758f",
+      "pack": "closeout-20260816",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/inventory-legacy-inflight.py",
+      "bytes": 3609,
+      "sha256": "a246ade210bb170ee8c72bc0ba641cbb241673e059fc21d9f95113b2b374c8d8",
+      "pack": "closeout-20260816",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/invoke-issue20-cleanup.ps1",
+      "bytes": 1617,
+      "sha256": "bf1adee32502653af989f97d0b6ac2a8d3bca543f811fd277dc92f53a82c89b2",
+      "pack": "closeout-20260816",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/invoke-issue20-production-purge-fail.ps1",
+      "bytes": 9265,
+      "sha256": "17efcdcbca26c3b5ea82f87736ce2093eaefe337996f89d15874f55fb1273fe6",
+      "pack": "closeout-20260816",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/invoke-related-fixture-tests.ps1",
+      "bytes": 2692,
+      "sha256": "7050bbd3994a18a292c5548f4ecd24991a0a8ab41dcc1d59c923ffcf3de15096",
+      "pack": "closeout-20260816",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/invoke-status-snapshot.ps1",
+      "bytes": 2966,
+      "sha256": "6a6cf28cec8d2c8487cb8fe9d2424bbf0354fa8e61b0ef93c12ffaa57184c30b",
+      "pack": "closeout-20260816",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/issue20-lock-holder.ps1",
+      "bytes": 2603,
+      "sha256": "aca697dcccff24eb051d2b456b84abffeee0ead2a921ab0b683c12e02e7b7550",
+      "pack": "closeout-20260816",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/issue20-production-purge-fail.json",
+      "bytes": 4364,
+      "sha256": "2985c0b63494d05c3833feff7695418cdb8b1afa5af657ffc5f1ddd34e2e972f",
+      "pack": "closeout-20260816",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/leftover-quarantine.json",
+      "bytes": 862,
+      "sha256": "5f72647a1e811fdf286c3d52946db7eb0e0c0cbd012d4f33335a7239a6b6d9d4",
+      "pack": "closeout-20260816",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/legacy-inflight-inventory.json",
+      "bytes": 23857,
+      "sha256": "1e0c56d6b54b52896eec8760527e0f04acf84bfc85b09373b3a1b2c8b60c60cc",
+      "pack": "closeout-20260816",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/production-smoke.meta.json",
+      "bytes": 274,
+      "sha256": "dbf0ee8b7397c083d5c8ae764489c48d2d5e8b38bafc404c1cd6b461e6e5aafa",
+      "pack": "closeout-20260816",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/production-smoke.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/production-smoke.stdout.txt",
+      "bytes": 757,
+      "sha256": "a3665ffc5a24ba07097db5db1dfa463ea66a16efdc9192d6a1e84c1763f19055",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/purge-fail.stdout.txt",
+      "bytes": 880,
+      "sha256": "9fe4fe7fd8e2b5d32a72178aacc1b3616daaac727ecb3caced7ad1f1bf607fab",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/purge-resume.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/related-fixture-tests.json",
+      "bytes": 3991,
+      "sha256": "28a1a0a0bb05baeaf42ff019258250f70aeabc678440f4f8fe4cb3a345b8ace2",
+      "pack": "closeout-20260816",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/source-identity.json",
+      "bytes": 6603,
+      "sha256": "2c06533006dd91232f2a0e51656893e9aa24b2f73df712ad94ba974995b041b7",
+      "pack": "closeout-20260816",
+      "role": "source-identity",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/status-raw.meta.json",
+      "bytes": 579,
+      "sha256": "85d3b9dcf095733443aa676bf489f2726273f4d2206b858f9640101f458d0aad",
+      "pack": "closeout-20260816",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/status-raw.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "closeout-20260816",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/status-raw.utf8.json",
+      "bytes": 2845734,
+      "sha256": "cb5edcbb577ff9d4c268dc08ccec758ca965af853610171b6dc84abf6e80babd",
+      "pack": "closeout-20260816",
+      "role": "status-utf8-snapshot",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/status-summary.json",
+      "bytes": 14134,
+      "sha256": "8a3afd6d6a1b0fee980c54823cfc969d6e39666f4fbcdfae5f8e5bb6b57ddba1",
+      "pack": "closeout-20260816",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-closeout-20260816/summarize-status.py",
+      "bytes": 3370,
+      "sha256": "9b70754cfbf4251804e116abc6dbc5016e92334b13880b294a5a64785617430b",
+      "pack": "closeout-20260816",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue20-comment-20260815/REPORT.md",
+      "bytes": 6033,
+      "sha256": "22b753b23ab0204a51f9a5942a7f706c2ddf859c4022ffbb17123b923088af28",
+      "pack": "issue20-earlier",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue20-comment-20260815/evidence.json",
+      "bytes": 6928,
+      "sha256": "1985a022697bda28b4f8b0109d6dfcd5ead64986a7efec5bff9e40f9f2ff068f",
+      "pack": "issue20-earlier",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue20-exitcode-20260815/evidence.json",
+      "bytes": 1481,
+      "sha256": "b1c7d193d068af5c84e512219134e23bc2f7b84a37290a12906ec0c0014f8f9a",
+      "pack": "issue20-earlier",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue21-20260816/CLOSEABLE.md",
+      "bytes": 6284,
+      "sha256": "393b910e04017dd6a364ab1371164bb7719f847dcdc076199bb969bc4180a334",
+      "pack": "issue21-revert-forwarding",
+      "role": "issue50-index",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue21-20260816/invoke-safe-tree-delete.ps1.backup",
+      "bytes": 218,
+      "sha256": "636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373",
+      "pack": "issue21-revert-forwarding",
+      "role": "wrapper-backup",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue21-20260816/revert-forwarding.json",
+      "bytes": 1692,
+      "sha256": "3acd8d576dd277ec78af3f92a18ba9076f6c868a485bd46a09b31a903f281691",
+      "pack": "issue21-revert-forwarding",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/REPORT.md",
+      "bytes": 7076,
+      "sha256": "1d365f8eddbb5f33f4858d1635a72d1b0ae723e7d4d92a10e74ff9595901ed28",
+      "pack": "issue22-archive-execution",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-CodexSafeTreeDeleteMetricsEvidence.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-CodexSafeTreeDeleteMetricsEvidence.stdout.txt",
+      "bytes": 205,
+      "sha256": "6f1b624f6e74e1d6cbb2448866db14022ef011aebec44afdad143aee7dd4eddd",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-CodexSafeTreeDeleteRestore.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-CodexSafeTreeDeleteRestore.stdout.txt",
+      "bytes": 186,
+      "sha256": "ba9313e3a53e31d572ba2fae26ca37107181d0dbc613a6f62d58c1e9f49d50c7",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-CodexSafeTreeDeleteSchemaCompatibility.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-CodexSafeTreeDeleteSchemaCompatibility.stdout.txt",
+      "bytes": 160,
+      "sha256": "305bd6a08540301b1e830cd7966639c92d7fa023d5f96cd1bd0e2c63e271eb50",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-CodexUserEnvironmentTransaction.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-CodexUserEnvironmentTransaction.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-ReportArtifactPublisher.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/Test-ReportArtifactPublisher.stdout.txt",
+      "bytes": 22,
+      "sha256": "a210a86557b2c7718fe76545ebe7dba6740d3283b19efb806f2e83128c2674ad",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/acceptance.json",
+      "bytes": 3261,
+      "sha256": "2284a2ab435176b6f31b8f60cc2071293e8c5c011135f9d3d6de1c21c66b1662",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/archive-summary.json",
+      "bytes": 440,
+      "sha256": "d4d6d958fbc9fb2c443bfb6ecd0e4f1e0886b045e69cb7144d8dbcb24cc29561",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/blocking-delta-vs-20260814.json",
+      "bytes": 642,
+      "sha256": "0fa0fe2b624d391beb5aad94cc7c104203b4a2857e8610625c055847f883672b",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/control-plane-test.meta.json",
+      "bytes": 474,
+      "sha256": "c5f7b8814c2ecc8da5ab5bc628aaaccb9b8d20d9882d608ba0b28183e26bc49a",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/control-plane-test.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/control-plane-test.stdout.txt",
+      "bytes": 139,
+      "sha256": "5955e93ea63e8b9090d1e2b0e907c40b2d1364c35da68b1cffba8bd66745ea2e",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/criteria-code-watch.json",
+      "bytes": 763,
+      "sha256": "df8eb07581d0b7f61a0024a5e0149e0e25e9c7eba56834e61ca54e8dc4e67b2d",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/evidence-ops-after-status.json",
+      "bytes": 141807,
+      "sha256": "8d3cfab9699844b729a39fcd57861e1d495b7eed133dc6b919f2f0d252190cb5",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/evidence-ops-before-status.json",
+      "bytes": 141778,
+      "sha256": "79651e883acbb4086a7e5e2cd146366ab1d9ec68e080cff845b3a028a143b0e3",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/host-safety-fixture.meta.json",
+      "bytes": 403,
+      "sha256": "33ce7dee486c7e0d652e4adb48a3ca7712841cf126a1e44d9b7d8b84df601956",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/host-safety-fixture.stderr.txt",
+      "bytes": 466,
+      "sha256": "5612bd53c5d814fdbb49725b73fe105c9bd72920c0fe54cea509b1ca1a6e2bc9",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/host-safety-fixture.stdout.txt",
+      "bytes": 4086,
+      "sha256": "fd1cef08106aab5d82e0487f05316d00f49160db77cee6b49f5bea059001e1b9",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/invoke-archive-one-by-one.ps1",
+      "bytes": 7085,
+      "sha256": "517e6cbb6f0452681d6a176b5a06895ebd69f470d2df9e20936422ea0268aedd",
+      "pack": "issue22-archive-execution",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/invoke-status.ps1",
+      "bytes": 2947,
+      "sha256": "54c2b21216246be6ec1086c55fbd9e00e84c1c0e8b7f2287801e66f50efda6a4",
+      "pack": "issue22-archive-execution",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/list-evidence-ops.py",
+      "bytes": 916,
+      "sha256": "9653fc8bea6ee5b58c4d9e186b5257b650a7c7f847fc326e0e576e38d6369d9c",
+      "pack": "issue22-archive-execution",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/preflight.json",
+      "bytes": 2099,
+      "sha256": "f6abd196b93fd25dd6b70e34eb676b2d6a5094a47f9dea55617f3b0292965eb6",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/protection-check.json",
+      "bytes": 998,
+      "sha256": "549376747a8c6192f06056d105856f847c1e38346fb12a3f63a2a04569cf9fa2",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/remaining-fixture-tests.json",
+      "bytes": 1229,
+      "sha256": "b1677c795ada44a3eddbcdd6131cac110f36cce0de4ece84d3fab7df433d11ac",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/status-before.candidates.json",
+      "bytes": 552,
+      "sha256": "74198dd9efff9f5da40606726df3eaff086330b4f9ed0f00158ecfdb4014e7d6",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/status-before.meta.json",
+      "bytes": 522,
+      "sha256": "6d6e3f73e975835957a15cace5fdc1f0de8988d04e1ba70a7feaac7816ceb9d5",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/status-before.remaining-blocking.json",
+      "bytes": 74426,
+      "sha256": "56ad14cad7f0afc1505ca10cce6a55267de3dda0f45b27350c33239d2b5918a8",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/status-before.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-archive-execution",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/status-before.summary.json",
+      "bytes": 14610,
+      "sha256": "d3b6000548319ce479a258d77aadaa9b5d561ad9dab58eeb727909b558ff3bd7",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/status-before.utf8.json",
+      "bytes": 2830057,
+      "sha256": "59cd72358e18201ee0ab66d65f5541bc4aa7a62bb2b7cbcb89094141d49ecec8",
+      "pack": "issue22-archive-execution",
+      "role": "status-utf8-snapshot",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/summarize-status.py",
+      "bytes": 8853,
+      "sha256": "9ac00231e111e4500042d8a226a4006ab46e4c94a1f86b1abea4d77c03432d8e",
+      "pack": "issue22-archive-execution",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/tests-summary.json",
+      "bytes": 1391,
+      "sha256": "66fe916fad634593be1e0ae3eea964fd4f578d476def7b8bce15618301132456",
+      "pack": "issue22-archive-execution",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-20260815/transcode-status.py",
+      "bytes": 977,
+      "sha256": "7ad284b21aba2e75af036b2233f81f433dbd4c926b342f346595a3a990a2a88e",
+      "pack": "issue22-archive-execution",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/REPORT.md",
+      "bytes": 7805,
+      "sha256": "2f057cc98bb9dbea2f7bd51ab9e4c96bd47d2f471523e6328a0780dc95282bcb",
+      "pack": "issue22-comment-pack",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteFileSystem.meta.json",
+      "bytes": 677,
+      "sha256": "55621f7b62d050901f7408c6b3911b04dd368deb21260e1429299f665a9d94df",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteFileSystem.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteFileSystem.stdout.txt",
+      "bytes": 133,
+      "sha256": "703b0f26725e72083b24f19f4776e79adcad2a472d16687c5dcc873db6a3dc89",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteHashSafely.meta.json",
+      "bytes": 677,
+      "sha256": "21724e771ac4f52014e0ea1eaedadcb50ce5a59c239922d910470b8c30279cbe",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteHashSafely.stderr.txt",
+      "bytes": 407,
+      "sha256": "d7d8666adceeee03c9b46392d95ef3a3acef0cc3e2e074561a1e29f525c26848",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteHashSafely.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteIdentityV2.meta.json",
+      "bytes": 677,
+      "sha256": "f51903457e72a61a1ec1ef42bde69957ccfd2ad839214d1b7c2cdfd9cb7bd73c",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteIdentityV2.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteIdentityV2.stdout.txt",
+      "bytes": 133,
+      "sha256": "6b67f531d0dda08fddc825223c54e3e4f8ee950765c7591472b8c7bce24b0cb9",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeletePlanIdentityV2.meta.json",
+      "bytes": 693,
+      "sha256": "36f316deac30234471e70912b81c71eaa9131f2c0ed5104f4a03920365fb1bda",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeletePlanIdentityV2.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeletePlanIdentityV2.stdout.txt",
+      "bytes": 145,
+      "sha256": "12229fe50a844c9fa602105627287e5abf3b4a044e2cecc9cc63df5e030a4190",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteStatus.meta.json",
+      "bytes": 662,
+      "sha256": "50de106581e21f799b772c9a447fa596807ee29aa6fd4bc517e69830079444b6",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteStatus.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/Test-CodexSafeTreeDeleteStatus.stdout.txt",
+      "bytes": 121,
+      "sha256": "c5b6454b4aca9ff6768b4b914a6d76af7733c355b6fd06e667c9fb20526af3f6",
+      "pack": "issue22-comment-pack",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/classification-table.json",
+      "bytes": 7906,
+      "sha256": "b6ccfe652e66b415db10ae3bad1070b4ec144da97b7810928d195c1ea4831aaf",
+      "pack": "issue22-comment-pack",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/compare-terminal-markers.py",
+      "bytes": 13507,
+      "sha256": "3f4b9edc1159673ba2227af6541853381dc70970eca4b20a72e0b033a2405106",
+      "pack": "issue22-comment-pack",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/fixture-tests-summary.json",
+      "bytes": 4087,
+      "sha256": "e399b17e9b3d7669dd2e19a308a6d8c8260d2ed5f3fb43188c31a6873c7e62f4",
+      "pack": "issue22-comment-pack",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/github-conclusion.md",
+      "bytes": 4385,
+      "sha256": "22b090012b4f1886a512bd20a808d6f37803e0c033c125ec5f199f5416da6a16",
+      "pack": "issue22-comment-pack",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/hash-safely-failure.json",
+      "bytes": 974,
+      "sha256": "19d1d87f1d5753858d9de1d743b3908e13c2c96423a858606f9e0466cdb2206c",
+      "pack": "issue22-comment-pack",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/invoke-remaining-fixture-tests.ps1",
+      "bytes": 3214,
+      "sha256": "7068ad8e7c70edab86c41a8a7e254e42a11e9b3bb78e9eff014635f4d3735d5a",
+      "pack": "issue22-comment-pack",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue22-comment-20260815/terminal-marker-diff.json",
+      "bytes": 31148,
+      "sha256": "92e742b18bb0b8807f63d30d54294243e948edc4323b986e86d4b6f948eb1a32",
+      "pack": "issue22-comment-pack",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue23-20260816/REPORT.md",
+      "bytes": 3329,
+      "sha256": "90ce20d61e31a81846ea397b29b5d993f2496b6fc2a04844d409f7f6ee39f897",
+      "pack": "issue23-investigation",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/CLOSEABLE.md",
+      "bytes": 2909,
+      "sha256": "02526e3e42e519ca619d30bf0e92ae0fe6d18c41bc477853f4aefa3d8b682120",
+      "pack": "issue24-live-status",
+      "role": "issue50-index",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/REPORT.md",
+      "bytes": 10651,
+      "sha256": "543d6aa945872eca32d4a9358d91f48619acfeeba77f6cfc5e31cd6aae47067a",
+      "pack": "issue24-live-status",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/assert_report_numbers.py",
+      "bytes": 2966,
+      "sha256": "9f170d11b23fad47cc32efe9cb6f137ea2a062502789a101eb873b9477b1fd01",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/compare_vs_baseline.py",
+      "bytes": 6298,
+      "sha256": "fe741c581dff82021533ea301f2bc34d42b550679287933b9ea336ec8f3f0b03",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/comparison-vs-baseline-19.json",
+      "bytes": 3093,
+      "sha256": "a30c4226ab38973e98039fcdfd0d5a242df199ad0a065cac7ca8d5dbc9991a6b",
+      "pack": "issue24-live-status",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/evidence-status-write-compare.json",
+      "bytes": 123,
+      "sha256": "8b3010e39b88c8eb7522788c8757d02a96dd40ac11f0700a245c68a607733617",
+      "pack": "issue24-live-status",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/git-head.txt",
+      "bytes": 42,
+      "sha256": "af19148f03e42cedd38d7dda61b793b9e5b270ec5ec4fd318af3dabf1fb8545f",
+      "pack": "issue24-live-status",
+      "role": "source-identity",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/github-comment-issue-11.md",
+      "bytes": 1058,
+      "sha256": "045df795ffc33cd587284be1d560c46dd3d89f8434da00e5f23c501ba746706e",
+      "pack": "issue24-live-status",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/github-comment-issue-17.md",
+      "bytes": 1091,
+      "sha256": "70492f8771cb02a0677f0aad718733fff63a7fa4f2b8f06fd2fb2e03c8ec5c48",
+      "pack": "issue24-live-status",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/inspect_live_status.py",
+      "bytes": 4426,
+      "sha256": "fbc6b82146450e42604253341e31338fcef073bdf68d5abcb56f227f60b2b816",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/inventory_evidence.py",
+      "bytes": 6261,
+      "sha256": "c7fef2522d9db5bf7bcddef2daa30887b852b1eec298c60834b0d3f787c7bed0",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/invoke-status-snapshot.ps1",
+      "bytes": 3405,
+      "sha256": "b783ba9c7e97e951644b5df428f9d1fbba13bb5647bb6677859c4cd066f64d11",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/leftover-after.json",
+      "bytes": 604,
+      "sha256": "56ba65f354a8cc8528fe996a69672959e318124ff3b228b9995127764966fdea",
+      "pack": "issue24-live-status",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/leftover-before.json",
+      "bytes": 590,
+      "sha256": "3e83e1de328d54bcc2b83e82460c5678f827e264d72e245629e064c1795409d3",
+      "pack": "issue24-live-status",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/live-inspect.json",
+      "bytes": 10246,
+      "sha256": "fb25052b1023bd273208474d70a445d67266a4f1c2b4b55aadcee318b8031f3b",
+      "pack": "issue24-live-status",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/live-recount.json",
+      "bytes": 1422,
+      "sha256": "b8fff1d42773555309a08546a5bc3232b4676662a32776fc64d04ca2815d4fa9",
+      "pack": "issue24-live-status",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/recount_live.py",
+      "bytes": 1987,
+      "sha256": "ee4c381b5a8987b1e976c24781a37e4cdf0c8b537e52a2705e023d1c021ed66c",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/status-raw.meta.json",
+      "bytes": 772,
+      "sha256": "929cb8306a71effae32b5f40c20873fa9f54af9feaafb3ae250a7b5112b16259",
+      "pack": "issue24-live-status",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/status-raw.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue24-live-status",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/status-utf8.json",
+      "bytes": 2886992,
+      "sha256": "3dc6070797d4b99403d0e91ab96c97841d6c6a4bcf3f69ffe48199cbdfc94efe",
+      "pack": "issue24-live-status",
+      "role": "status-utf8-snapshot",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/status.remaining-blocking.json",
+      "bytes": 76321,
+      "sha256": "93183056c18ea5644b98d0aaad15d8779625fb1661cb59486a55fcf28579569f",
+      "pack": "issue24-live-status",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/status.summary.json",
+      "bytes": 24961,
+      "sha256": "763e10c43c0b92796b40738c312fa0cd7b15b4a792b65bc710f27608e2e33e3f",
+      "pack": "issue24-live-status",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/summarize_status.py",
+      "bytes": 12261,
+      "sha256": "6ea1b95230117e015dd349a6e8e825c72426967cb4525a96fa0a7fae6ca92173",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/test_recompute.py",
+      "bytes": 15053,
+      "sha256": "4809454df912f1c61765b7e0f79d999139841fea565cd63411393bdc5fd3c934",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/transcode_status.py",
+      "bytes": 1670,
+      "sha256": "e77450ce7a2361b49bd05b09e8d74dd85b426c01ba8dc228ecb5ff75da188354",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue24-20260816/verify_leftover.py",
+      "bytes": 2517,
+      "sha256": "fcbbb68b449f1b5868f332ed4248ffb63df63046fc255a5977d3eb7a114625f5",
+      "pack": "issue24-live-status",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue35-comment-20260815/REPORT.md",
+      "bytes": 1885,
+      "sha256": "dafc3772a1a740881d1acc7e2e24fe7b81ed118d0db3e042107eb924dcf016c8",
+      "pack": "issue35-livefs",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue35-livefs-20260815/REPORT.md",
+      "bytes": 2797,
+      "sha256": "90b5f731b8d45ec1c51ccd0d96ec0a465611b024d3684b6378152c8754ffd125",
+      "pack": "issue35-livefs",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue35-livefs-20260815/drive-inventory.json",
+      "bytes": 1669,
+      "sha256": "b17a5522498c22ecc662f488da9d2ca37b66d82ef29f05d163ee30254075312c",
+      "pack": "issue35-livefs",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue35-livefs-20260815/elevated-filesystem.meta.json",
+      "bytes": 666,
+      "sha256": "6a348fa70039c3e5a3dde4c2157850bde8b08a3f3523eb2e7add323274ed829a",
+      "pack": "issue35-livefs",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue35-livefs-20260815/elevated-filesystem.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue35-livefs",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue35-livefs-20260815/elevated-filesystem.stdout.txt",
+      "bytes": 1230,
+      "sha256": "ec9d86acf329c783e290520320ab745acef72d023a5f9f9668842ef23bf12432",
+      "pack": "issue35-livefs",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue35-livefs-20260815/github-conclusion.md",
+      "bytes": 2797,
+      "sha256": "1d2fed17bdec26a0612e16bd18db848a4433483514a6536e4243fd3043ba7320",
+      "pack": "issue35-livefs",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue35-livefs-20260815/invoke-elevated-filesystem-test.ps1",
+      "bytes": 2118,
+      "sha256": "04bd0c72d5adf9e08fac17f897fc1c211a52180629641f8477a89593f24adba9",
+      "pack": "issue35-livefs",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue35-livefs-20260815/vhd-attempt.json",
+      "bytes": 1071,
+      "sha256": "07fc690a9116498a810980262d84a6d9ab035b72d795ab444dfce2074ac4ad60",
+      "pack": "issue35-livefs",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue47-20260816/CLOSEABLE.md",
+      "bytes": 8127,
+      "sha256": "ca6aa22b270f90363f27cb5f5f77cbd74ea1a3cb1a8c7b732298ed8214cd20d3",
+      "pack": "issue47-index",
+      "role": "issue50-index",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue47-20260816/evidence-index.md",
+      "bytes": 7874,
+      "sha256": "ef628fb69d33bc26247c30f5d556cf942767ad2a23a44db23fe621370f5ad30e",
+      "pack": "issue47-index",
+      "role": "derived-report",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue50-20260816/CLOSEABLE.md",
+      "bytes": 3975,
+      "sha256": "b5ec7f7c1856fc55ba3a6c9e215e43b9b9cbf9f611108ca9aad220c7ff0f7964",
+      "pack": "issue50-pack",
+      "role": "issue50-index",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue50-20260816/MANIFEST.md",
+      "bytes": 4069,
+      "sha256": "1aad836885ae2b4480ae5fc723ff5bf7b2c526c2277aa8a8ae0d1a273626335e",
+      "pack": "issue50-pack",
+      "role": "issue50-index",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue50-20260816/exclude.json",
+      "bytes": 12264,
+      "sha256": "4bf6bc6a118d0fbc4f97ff49be87870de2a377950ee62cab76f2bb2e9d059358",
+      "pack": "issue50-pack",
+      "role": "issue50-index",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue50-20260816/verify-issue50-pack.py",
+      "bytes": 5810,
+      "sha256": "530b9e3b1c416169b0aaa82198b3543d8b4630f00f251db3adabaaa7cb22a3ee",
+      "pack": "issue50-pack",
+      "role": "issue50-index",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/CLOSEABLE.md",
+      "bytes": 5091,
+      "sha256": "7be3c92124cce98ea96faf5a77fcd4a086a5fc5094fe23db571b93595ac16ea2",
+      "pack": "issue55-smoke",
+      "role": "issue50-index",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/archive-unconfirmed.meta.json",
+      "bytes": 1033,
+      "sha256": "c1acfd7757011bf491c1ec1dc4de8d2355c462ad59a15bf01f47c9ad1d8047b8",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/archive-unconfirmed.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/archive-unconfirmed.stdout.txt",
+      "bytes": 63,
+      "sha256": "1d52a020f8294eb6db7964cf2cacf510a171e2580b9550bf7898ea2ba509d406",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-parent-apply.meta.json",
+      "bytes": 1293,
+      "sha256": "0c7c55250057fb17af5a5c56f05de1b12b74a431f8c7529f6ab174b96263c9c7",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-parent-apply.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-parent-apply.stdout.txt",
+      "bytes": 709,
+      "sha256": "479375ee8b16a1c0967f6f626185f32702d479d5833792c8b321db1541751d8b",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-parent-plan.meta.json",
+      "bytes": 1233,
+      "sha256": "7781b7637c26db04685829492fd28a9b1bc49d2d32409ddb45d7d5709f446c8f",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-parent-plan.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-parent-plan.stdout.txt",
+      "bytes": 660,
+      "sha256": "1ac0e47bd91b6ad0ae4ce7aa81dde8a92c3bb66e10eb7c8facb49c50a906a180",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-parent-purge.meta.json",
+      "bytes": 1314,
+      "sha256": "15bda29da9e0b52d3e05680ccc934a5b19b5b0bffb1cbc11dda7e94495c16c5c",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-parent-purge.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-parent-purge.stdout.txt",
+      "bytes": 1465,
+      "sha256": "ea5f2145f5540a3eef3a4a7b346c26686b4ec489595d8cf090e92e05dcfeaa35",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-pre-apply.meta.json",
+      "bytes": 1283,
+      "sha256": "4254aeedda745c7f4227d69478ac7d12fb0c8000605ab0f1a16a1925864cdbdc",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-pre-apply.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-pre-apply.stdout.txt",
+      "bytes": 781,
+      "sha256": "61245baa98c3c0cd4f609b3e0a228b7daa936a9dbb3386917c99670d7ece6b36",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-pre-plan.meta.json",
+      "bytes": 1231,
+      "sha256": "582df882a957bf8d0cc5c58d7002e79ec61816e110892f07e4b5abfb3d5b6edb",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-pre-plan.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-pre-plan.stdout.txt",
+      "bytes": 669,
+      "sha256": "ed557f2f130270b1b4a9a56949d09bfcdb7c72ac193390458846cdd92ec0b203",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-purge.meta.json",
+      "bytes": 1388,
+      "sha256": "6a4e2a903ba5806ee2228d3f8347632c20eb656374094d3c5f2e98ae37a70414",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-purge.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/batch-purge.stdout.txt",
+      "bytes": 767,
+      "sha256": "7aeb2f5715669575f19d4f46d1b7ea038197d081584d00f410462a81c7fe88b9",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-apply.meta.json",
+      "bytes": 1269,
+      "sha256": "473135f5c69c5c9fde430ad50a02f14c433ec04c533b1bd7a4408981153315ab",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-apply.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-apply.stdout.txt",
+      "bytes": 715,
+      "sha256": "f969dcd0f3d93e494bc02b9c7258d26689da3a902588a9c8dd4cc9cb6aa29a48",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-plan.meta.json",
+      "bytes": 1212,
+      "sha256": "16b2c67ae7cff52b614942d334733807b3f750b3eaabbea9525dfd4e6107b4cb",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-plan.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-plan.stdout.txt",
+      "bytes": 666,
+      "sha256": "de21889a38342e3dc0d6918c212fd4625bef5cb5ca312e4bee25edf266227634",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-purge-leaf-delete.meta.json",
+      "bytes": 1324,
+      "sha256": "85b7c7413de2d58da23efa9c4e629a41f121de2b4e936fa11146aa934c230b11",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-purge-leaf-delete.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-purge-leaf-delete.stdout.txt",
+      "bytes": 881,
+      "sha256": "189cc6ac76f4dd7d335fb57fe21559114fbb798669b455de40f5ec0c5c62dd4d",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-purge-resume.meta.json",
+      "bytes": 1311,
+      "sha256": "5160687e6099d7fa811173159e08e8cfb3d3f830fadb31f5e53ec9b348911b18",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-purge-resume.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/fail-purge-resume.stdout.txt",
+      "bytes": 1471,
+      "sha256": "82ac51da5686cfa526bb27d84e10cfb561cbb8eb06e087ab1d8a34f31a957b89",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/identity.json",
+      "bytes": 1733,
+      "sha256": "bb2aaeb93ca6fa86c0241b91c4b2fd197f30082f45c0c4d21bd9e0f142ac2883",
+      "pack": "issue55-smoke",
+      "role": "source-identity",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/invocations.json",
+      "bytes": 26917,
+      "sha256": "bf4d333bc942951a4738c2bf05bc934684901805c577a428f3db5fa18d3c02ce",
+      "pack": "issue55-smoke",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-apply.meta.json",
+      "bytes": 1292,
+      "sha256": "73df3f80d0a1753929d5d398d5906487c25852b79f878a22116d2acadbf778cf",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-apply.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-apply.stdout.txt",
+      "bytes": 715,
+      "sha256": "461c13efd8ed857dec2545daec6adf58b70a4536e9887341834a36296bb3c73f",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-plan.meta.json",
+      "bytes": 1238,
+      "sha256": "5b99e1a1454369da763a1b2bae189e4b30105affc1e7f7e8b0dd39d02a4639bb",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-plan.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-plan.stdout.txt",
+      "bytes": 666,
+      "sha256": "6b6968ed6deec127c311f664d571a2bc41bf1c9e18961c5dc22c3c2ae5f00aeb",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-purge-resume.meta.json",
+      "bytes": 1335,
+      "sha256": "4c7c8af83feefeb63bbbd36fecc843007dccc70e070a50782fd324c310834126",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-purge-resume.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-purge-resume.stdout.txt",
+      "bytes": 1471,
+      "sha256": "e5386a5aa3fb9c4599a7e1fdd54bb4f4b4ae24be54ac5ded1e97a89f61ab6e9a",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-purge-revert-forwarding.meta.json",
+      "bytes": 1368,
+      "sha256": "5424bfdc2b507a76faf2a2baade9cbf067f2ffc87871ab05bc2531732c1c27c1",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-purge-revert-forwarding.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/issue21-fail-purge-revert-forwarding.stdout.txt",
+      "bytes": 881,
+      "sha256": "d0ef66de7bb6decf2382d127d4fa3ba13e620e51df44d561c27a8baed39b318d",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/leaf-delete-failed.json",
+      "bytes": 961,
+      "sha256": "6e451a914a926dbf69d586c929ed87f3cd90c8b941959398e3f4bac0a4a04881",
+      "pack": "issue55-smoke",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/lock-holder.ps1",
+      "bytes": 2495,
+      "sha256": "c39854ca8d3b1dc8a603e462010e1bf3d3ed1b2555fceff8cb437111c9f70981",
+      "pack": "issue55-smoke",
+      "role": "recompute-script",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/status-generation-binding.json",
+      "bytes": 1484,
+      "sha256": "b3033b8e26686304703c5fa35b0b5b1b7fed1b019641d9b308f8db2c871fbc00",
+      "pack": "issue55-smoke",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/status-post-usn.json",
+      "bytes": 749,
+      "sha256": "ef7bfef836a13e13f42a848be52adbc4cbc154af6cfd0bb2c15fa8bfecd5de93",
+      "pack": "issue55-smoke",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/status-pre-usn.json",
+      "bytes": 641,
+      "sha256": "06bc04b4a7001e45b5a7d136c2e565cbf993e06418c3e636c567c727a960a9b7",
+      "pack": "issue55-smoke",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/status-zero-write.meta.json",
+      "bytes": 1026,
+      "sha256": "ca1d710eb4c02ced9fe360fa7072046c1d74051b0d147fad6a419d3310ea35c4",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/status-zero-write.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/status-zero-write.stdout.txt",
+      "bytes": 2862555,
+      "sha256": "1d069f8a09d16973686e79cd0827d5342e5ca458758f7738c507c5d8a21470da",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/success-apply.meta.json",
+      "bytes": 1278,
+      "sha256": "a926202a58d18c2a796df20b7d860a35e8b635a0f372cc66a61baf870ff4d847",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/success-apply.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/success-apply.stdout.txt",
+      "bytes": 715,
+      "sha256": "767a2d542d5ee83a82dab7434c748e9ccd625ace97388a4e5d1657cc5d1e1298",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/success-plan.meta.json",
+      "bytes": 1223,
+      "sha256": "ae3a5f762d2bfd8af494af601ae51d5f94dc4011bbd9da1ef74ae07737f7c5c2",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/success-plan.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/success-plan.stdout.txt",
+      "bytes": 666,
+      "sha256": "f129a40c2d04e0fbea843abcf54435d092eea2388952039ba498e2710860a8e6",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/success-purge.meta.json",
+      "bytes": 1299,
+      "sha256": "dbf236ddaa052d2ea3487a77d1a8f728627c54610d76d4304de07b36d550dc99",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/success-purge.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/success-purge.stdout.txt",
+      "bytes": 1471,
+      "sha256": "9acb8e377a8d6d2a0e8e2fb1a8bfc2d0c8e7e6b93b7b878cfa4ab08c9258c269",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/suite.meta.json",
+      "bytes": 420,
+      "sha256": "18ae2edf6d1675a001823d7c1b621eec9c11e5df0256f6933a1beac1b62ce220",
+      "pack": "issue55-smoke",
+      "role": "invocation-meta",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/suite.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/suite.stdout.txt",
+      "bytes": 1197,
+      "sha256": "5d3d8495d28823631cca6112ec6495b42b9bf0761cbd9f6753522ab52b2e4a3a",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/summary.json",
+      "bytes": 1469,
+      "sha256": "46536acef91171f038d4a26dc7ebcfbd6f088011e42eaf8c38a2e47b30f54371",
+      "pack": "issue55-smoke",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/timeout-contract.json",
+      "bytes": 1619,
+      "sha256": "9af73b45b8784ac7957dbd5dc3e087389c64c8514fe95a9ae3e16af12f5adfa2",
+      "pack": "issue55-smoke",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/timeout-drill.json",
+      "bytes": 1486,
+      "sha256": "012a16f2a5820ce0d145fc4edadeec223b3ffb8d27638ee0b91a3b2efb3d930c",
+      "pack": "issue55-smoke",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/timeout-status.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-issue55-20260816/timeout-status.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "pack": "issue55-smoke",
+      "role": "invocation-stdio",
+      "alreadyOnDefaultBranch": false
+    },
+    {
+      "path": "reports/safe-tree-delete-status-baseline-20260810-evidence/status-output.json",
+      "bytes": 2619020,
+      "sha256": "b8d62f19c6471e320ec0c8ec53851b13d8aa84c681ba6e1ba33348abb95f7b86",
+      "pack": "baseline-19",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": true
+    },
+    {
+      "path": "reports/safe-tree-delete-status-baseline-20260810.json",
+      "bytes": 7712,
+      "sha256": "8b079352d7f1ee5326760cabf17a80ca882265f8537ece0cfb111465ef112484",
+      "pack": "baseline-19",
+      "role": "derived-or-raw-json",
+      "alreadyOnDefaultBranch": true
+    },
+    {
+      "path": "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+      "bytes": 75018,
+      "sha256": "dd11b2560fa4d3155d936fae0f816491240964bb63ec68d2046370bc98ab4015",
+      "pack": "production-smoke-source",
+      "role": "smoke-source",
+      "alreadyOnDefaultBranch": false
+    }
+  ],
+  "packOutputsToAdd": [
+    "reports/safe-tree-delete-issue50-20260816/MANIFEST.md",
+    "reports/safe-tree-delete-issue50-20260816/include.json",
+    "reports/safe-tree-delete-issue50-20260816/exclude.json",
+    "reports/safe-tree-delete-issue50-20260816/STAGED-FILE-LIST.txt",
+    "reports/safe-tree-delete-issue50-20260816/CLOSEABLE.md",
+    "reports/safe-tree-delete-issue50-20260816/verify-issue50-pack.py"
+  ]
+}

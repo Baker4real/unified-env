@@ -1,0 +1,12 @@
+{
+  "capturedAtUtc": "2026-08-15T13:10:24.8450110+00:00",
+  "elevatedProcessIsAdministrator": true,
+  "user": "BAKER\\WINDOWS",
+  "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteFileSystem.ps1",
+  "exitCode": 0,
+  "startedAtUtc": "2026-08-15T13:10:11.8622394+00:00",
+  "endedAtUtc": "2026-08-15T13:10:24.8450110+00:00",
+  "wallClockSeconds": 12.983,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue35-livefs-20260815\\elevated-filesystem.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue35-livefs-20260815\\elevated-filesystem.stderr.txt"
+}

@@ -1,0 +1,9 @@
+{
+  "startedAtUtc": "2026-08-16T08:58:26.2611937+00:00",
+  "endedAtUtc": "2026-08-16T09:04:52.7828948+00:00",
+  "wallClockSeconds": 386.522,
+  "waitReturned": true,
+  "exitCode": 0,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\suite.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\suite.stderr.txt"
+}

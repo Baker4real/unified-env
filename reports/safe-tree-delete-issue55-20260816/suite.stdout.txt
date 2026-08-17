@@ -1,0 +1,21 @@
+
+ok                              : True
+suite                           : CodexSafeTreeDeleteProductionSmoke
+planPath                        : D:\Codex\.codex\run-evidence\safe-tree-delete\20260816T090354Z-227c63d2-de52-47b6-a5b
+                                  3-926ce095deff\plan.json
+transactionPath                 : D:\Codex\.codex\run-evidence\safe-tree-delete\20260816T090354Z-227c63d2-de52-47b6-a5b
+                                  3-926ce095deff\transaction.json
+transactionSha256               : 6ee76af8c3c46f5429c42550a4e938e8e830703175db8e4b7432f0f7ffff3f1d
+batchRecoveredCount             : 1
+batchParentPurged               : True
+unconfirmedArchiveExitCode      : 0
+unconfirmedArchiveRefusalReason : confirm-archive-required
+statusZeroWrite                 : True
+statusPolicyZeroWrite           : True
+statusStdoutSha256              : 7351bc770d71dea20d503caae570a4f011c17b3e3ffd8bc6ab4de78572cb16e7
+timeoutTreeClosed               : True
+leafDeleteFailed                : True
+leftover0ab1e1b6Untouched       : True
+newInflightQuarantine           : 
+evidenceDirectory               : D:\Codex\projects\统一环境\reports\safe-tree-delete-issue55-20260816
+

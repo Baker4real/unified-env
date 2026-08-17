@@ -1,0 +1,36 @@
+{
+  "name": "fail-purge-resume",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Purge",
+    "-TransactionPath",
+    "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T134343Z-d0de032c-7ed6-44b9-8222-91d2522f99c8\\transaction.json",
+    "-ApprovedTransactionSha256",
+    "85824c5540a89c63a78c0264798ea63f9df54607978c59d6c1b6205a91356dfc",
+    "-ConfirmPurge",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-16T13:43:47.1379925+00:00",
+  "endedAtUtc": "2026-08-16T13:43:49.0050298+00:00",
+  "wallClockMs": 1867.0,
+  "timeoutMs": 180000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 17784,
+  "trackedPids": [
+    17784,
+    40916
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\fail-purge-resume.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\fail-purge-resume.stderr.txt",
+  "stdoutSha256": "82ac51da5686cfa526bb27d84e10cfb561cbb8eb06e087ab1d8a34f31a957b89",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

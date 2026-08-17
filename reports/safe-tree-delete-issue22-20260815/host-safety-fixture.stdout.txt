@@ -1,0 +1,73 @@
+Running Test-CodexSafeTreeDelete.ps1
+
+  ok suite               slices
+  -- -----               ------
+True CodexSafeTreeDelete     12
+
+Running Test-CodexSafeTreeDeleteBenchmark.ps1
+
+artifactType     : env-governance.codex-safe-tree-delete-benchmark
+schemaVersion    : 2
+capturedAtUtc    : 2026-08-14T18:09:10.1571586+00:00
+profile          : isolated-fixture
+machine          : @{osVersion=Microsoft Windows NT 10.0.26200.0; processorCount=20; powerShellVersion=7.6.4; osArchite
+                   cture=X64; processArchitecture=X64}
+artifacts        : @{sourceLibraryPath=D:\Codex\projects\统一环境\scripts\lib\CodexSafeTreeDelete.ps1; sourceLibrarySha
+                   256=9e43351403f268a65e0a8738d19ade4a28dd5890d4dce3f484299ea59afaca60; sourceWrapperPath=D:\Codex\pro
+                   jects\统一环境\scripts\Invoke-CodexSafeTreeDelete.ps1; sourceWrapperSha256=c25019805b3b996e9d27c02af
+                   b88d7c7553988ec742f0bc694d054fe48ecaff9; sourceHostAdapterPath=D:\Codex\projects\统一环境\scripts\in
+                   voke-codex-safe-tree-delete-host.ps1; sourceHostAdapterSha256=636cb140720bf15681364459269c2d5dc4638e
+                   339f2589ad2a3a53b6e17b9373; liveWrapperPath=D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1; liv
+                   eWrapperSha256=636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373; liveWrapperStatus=m
+                   atched-source}
+execution        : @{command=pwsh -NoLogo -NoProfile -File "D:\Codex\projects\统一环境\scripts\Measure-CodexSafeTreeDel
+                   ete.ps1" -OutputPath "D:\Codex\projects\统一环境\reports\safe-tree-delete-benchmark-test-c805d08bb30
+                   a4f12af072929513bc834.json" -SmallDatasetBytes 1024 -LargeDatasetBytes 1048576; exitCode=0; exitStat
+                   us=succeeded; cleanup=managed-fixture-tree-removed}
+retainedEvidence : @{path=D:\Codex\projects\统一环境\reports\safe-tree-delete-benchmark-test-c805d08bb30a4f12af07292951
+                   3bc834-evidence\benchmark-evidence.json; sha256=72b7679cc7fa14faa7456a0929fd2b7f31d2375d990a41e7ecfa
+                   f24b26cfb6d9; payloadBytesRetained=False}
+datasets         : {@{name=small; payloadBytes=1024; policySha256=63adf2c57eb807e4ebf8e3b4bfda06d2e096075991e3d0ae029e0
+                   b72b3818290; fixture=; plan=; status=; apply=; restore=; purge=; retainedEvidence=}, @{name=large; p
+                   ayloadBytes=1048576; policySha256=2400e1b52da3fd1e7735f5045871642e93500c833356661c697401341a8e70b8; 
+                   fixture=; plan=; status=; apply=; restore=; purge=; retainedEvidence=}}
+conclusion       : @{hashReuseDesignRecommendation=insufficient-evidence; hashReuseDesignDecision=do-not-open-with-curr
+                   ent-evidence; contentAuthenticatedContractChanged=False; note=Fixture measurements do not authorize 
+                   metadata-only approval or transparent manifest replacement.}
+unverified       : {host wrapper deployment, live policy activation, real capability target deletion, 16 GiB dataset…}
+
+ok       : True
+suite    : CodexSafeTreeDeleteBenchmark
+datasets : 2
+
+Running Test-CodexSafeTreeDeleteControlPlane.ps1
+
+  ok suite                           slices
+  -- -----                           ------
+True CodexSafeTreeDeleteControlPlane     10
+
+Running Test-CodexSafeTreeDeleteCrashSafety.ps1
+
+  ok suite                          scenarios
+  -- -----                          ---------
+True CodexSafeTreeDeleteCrashSafety        11
+
+Running Test-CodexSafeTreeDeleteFileSystem.ps1
+
+  ok suite                         slices
+  -- -----                         ------
+True CodexSafeTreeDeleteFileSystem      3
+
+Running Test-CodexSafeTreeDeleteGrace.ps1
+
+  ok suite                    slices
+  -- -----                    ------
+True CodexSafeTreeDeleteGrace     10
+
+Running Test-CodexSafeTreeDeleteHashCache.ps1
+
+  ok suite                        slices
+  -- -----                        ------
+True CodexSafeTreeDeleteHashCache      5
+
+Running Test-CodexSafeTreeDeleteHashSafely.ps1

@@ -1,0 +1,13 @@
+{
+  "test": "tests\\Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
+  "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
+  "exitCode": 0,
+  "startedAtUtc": "2026-08-15T06:49:46.8162238+00:00",
+  "finishedAtUtc": "2026-08-15T06:49:50.5738877+00:00",
+  "wallClockSeconds": 3.758,
+  "stdoutBytes": 145,
+  "stderrBytes": 0,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue22-comment-20260815\\Test-CodexSafeTreeDeletePlanIdentityV2.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue22-comment-20260815\\Test-CodexSafeTreeDeletePlanIdentityV2.stderr.txt"
+}
+

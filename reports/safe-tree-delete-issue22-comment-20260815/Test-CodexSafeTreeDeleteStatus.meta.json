@@ -1,0 +1,13 @@
+{
+  "test": "tests\\Test-CodexSafeTreeDeleteStatus.ps1",
+  "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteStatus.ps1",
+  "exitCode": 0,
+  "startedAtUtc": "2026-08-15T06:49:54.4824539+00:00",
+  "finishedAtUtc": "2026-08-15T06:50:48.9133469+00:00",
+  "wallClockSeconds": 54.431,
+  "stdoutBytes": 121,
+  "stderrBytes": 0,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue22-comment-20260815\\Test-CodexSafeTreeDeleteStatus.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue22-comment-20260815\\Test-CodexSafeTreeDeleteStatus.stderr.txt"
+}
+

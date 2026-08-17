@@ -1,0 +1,103 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.closeout-20260816.related-fixture-tests",
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-08-16T02:13:43.9797163+00:00",
+  "runtime": {
+    "psEdition": "Core",
+    "psVersion": "7.6.4"
+  },
+  "results": [
+    {
+      "id": "LeafStreamSet",
+      "tickets": [
+        "54"
+      ],
+      "script": "tests\\Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 17.142,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-LeafStreamSet.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-LeafStreamSet.stderr.txt",
+      "stdoutBytes": 142,
+      "stderrBytes": 0
+    },
+    {
+      "id": "Status",
+      "tickets": [
+        "22",
+        "48"
+      ],
+      "script": "tests\\Test-CodexSafeTreeDeleteStatus.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 34.849,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-Status.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-Status.stderr.txt",
+      "stdoutBytes": 121,
+      "stderrBytes": 0
+    },
+    {
+      "id": "FileSystem",
+      "tickets": [
+        "35"
+      ],
+      "script": "tests\\Test-CodexSafeTreeDeleteFileSystem.ps1",
+      "exitCode": 1,
+      "wallClockSeconds": 9.225,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-FileSystem.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-FileSystem.stderr.txt",
+      "stdoutBytes": 0,
+      "stderrBytes": 2183
+    },
+    {
+      "id": "HashSafely",
+      "tickets": [
+        "22"
+      ],
+      "script": "tests\\Test-CodexSafeTreeDeleteHashSafely.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 1.369,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-HashSafely.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-HashSafely.stderr.txt",
+      "stdoutBytes": 133,
+      "stderrBytes": 0
+    },
+    {
+      "id": "CrashSafety",
+      "tickets": [
+        "54"
+      ],
+      "script": "tests\\Test-CodexSafeTreeDeleteCrashSafety.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 86.741,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-CrashSafety.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-CrashSafety.stderr.txt",
+      "stdoutBytes": 145,
+      "stderrBytes": 0
+    },
+    {
+      "id": "SerenaBehavior",
+      "tickets": [
+        "46"
+      ],
+      "script": "tests\\Test-CodexSerenaBehaviorHooks.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 33.064,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-SerenaBehavior.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-SerenaBehavior.stderr.txt",
+      "stdoutBytes": 84,
+      "stderrBytes": 0
+    },
+    {
+      "id": "HookInventory",
+      "tickets": [
+        "46"
+      ],
+      "script": "tests\\Test-CodexHookInventory.ps1",
+      "exitCode": 1,
+      "wallClockSeconds": 7.645,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-HookInventory.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-closeout-20260816\\fixture-HookInventory.stderr.txt",
+      "stdoutBytes": 0,
+      "stderrBytes": 221
+    }
+  ]
+}

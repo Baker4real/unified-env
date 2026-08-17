@@ -1,0 +1,36 @@
+{
+  "name": "issue21-fail-apply",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Apply",
+    "-PlanPath",
+    "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T134336Z-fc1d1a90-885d-4535-bd15-4cfc8af3701b\\plan.json",
+    "-ApprovedPlanSha256",
+    "87d157d392567905002c53190460ebbb654f02e1e1f455cb11328f4aeb15ca7f",
+    "-ConfirmApply",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-16T13:43:36.5859347+00:00",
+  "endedAtUtc": "2026-08-16T13:43:38.1893267+00:00",
+  "wallClockMs": 1603.4,
+  "timeoutMs": 180000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 41664,
+  "trackedPids": [
+    41664,
+    3220
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\issue21-fail-apply.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\issue21-fail-apply.stderr.txt",
+  "stdoutSha256": "461c13efd8ed857dec2545daec6adf58b70a4536e9887341834a36296bb3c73f",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

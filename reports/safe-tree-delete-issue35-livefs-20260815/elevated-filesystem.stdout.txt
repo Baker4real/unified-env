@@ -1,0 +1,19 @@
+
+[32;1mok                     : [0mTrue
+[32;1msuite                  : [0mCodexSafeTreeDeleteFileSystem
+[32;1mslices                 : [0m7
+[32;1mliveDriveInventory     : [0m{@{name=C:\; root=C:\; driveType=Fixed; isReady=True; driveFormat=NTFS; volumeLabel=Ó¦ÓÃ}, @{n
+                         ame=D:\; root=D:\; driveType=Fixed; isReady=True; driveFormat=NTFS; volumeLabel=Ó¦ÓÃ}, @{name=
+                         E:\; root=E:\; driveType=Fixed; isReady=True; driveFormat=NTFS; volumeLabel=ÓÎÏ·}, @{name=F:\;
+                          root=F:\; driveType=Fixed; isReady=True; driveFormat=NTFS; volumeLabel=ÓÎÏ·}¡­}
+[32;1mliveFatSource          : [0mdisposable-vhd
+[32;1mliveFatFileSystemType  : [0mFAT32
+[32;1mliveFatDeletionAllowed : [0mFalse
+[32;1mlivePlanLayer          : [0md-path-governance
+[32;1mlivePlanError          : [0msafe-delete policy path ±ØÐëÎ»ÓÚ D:\£ºG:\issue35-live-5cced32502824f97881cb53beb09ca5e\policy.
+                         json
+[32;1mliveFolderPlanLayer    : [0mother
+[32;1mliveFolderPlanError    : [0msafe-delete policy ÎÞ·¨°²È«¶ÁÈ¡ snapshot£ºstate=reparse-blocked
+[32;1mliveNetworkDriveCount  : [0m0
+[32;1mliveNetworkNote        : [0m±¾»úÎÞÍøÂç¾í£¬Î´ÑéÖ¤
+

@@ -1,0 +1,64 @@
+{
+  "complete": false,
+  "ready": false,
+  "operations": 2356,
+  "blocking": 110,
+  "blockingIdsUnique": 110,
+  "lifecycleAll": {
+    "terminal": 2244,
+    "manual-review": 87,
+    "inconsistent": 23,
+    "recoverable": 1,
+    "purge-resumable": 1
+  },
+  "lifecycleBlocking": {
+    "manual-review": 87,
+    "inconsistent": 23
+  },
+  "bothNullBlocking": 52,
+  "bothNullErrorKeys": [
+    {
+      "count": 18,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。",
+        "plan policy SHA 已漂移；当前严格写路径不可执行该计划。"
+      ]
+    },
+    {
+      "count": 17,
+      "errors": [
+        "safe-delete Status planned tree manifest 漂移。"
+      ]
+    },
+    {
+      "count": 13,
+      "errors": [
+        "planned operation 的 target/quarantine namespace 不一致。"
+      ]
+    },
+    {
+      "count": 2,
+      "errors": [
+        "safe-delete capability root 不在受管 allowlist。"
+      ]
+    },
+    {
+      "count": 1,
+      "errors": [
+        "safe-delete target 未达到策略要求的最小后代深度。"
+      ]
+    },
+    {
+      "count": 1,
+      "errors": [
+        "evidence record 缺少 plan.json。"
+      ]
+    }
+  ],
+  "purgedBlocking": 42,
+  "aclInBlocking": true,
+  "formula": {
+    "opsEqualsLifecycleSum": true,
+    "blockingEqualsMrPlusInconsistent": true
+  }
+}

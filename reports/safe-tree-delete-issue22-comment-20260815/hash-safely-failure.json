@@ -1,0 +1,10 @@
+{
+  "snapshot": true,
+  "note": "原文记录。未改 CodexSafeTreeDelete.ps1 / FileIdentity.cs / HashSafely 测试。",
+  "test": "tests/Test-CodexSafeTreeDeleteHashSafely.ps1",
+  "exitCode": 1,
+  "wallClockSeconds": 2.047,
+  "stderr": "Get-CodexSafeTreeDeleteHashSafely: D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteHashSafely.ps1:283\nLine |\n 283 |              [void](Get-CodexSafeTreeDeleteHashSafely `\n     |                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n     | Exception calling \"GetHashSafely\" with \"3\" argument(s): \"Failed to open path exclusively for hash reuse without\n     | following reparse points.\"\n",
+  "failingCallSite": "tests/Test-CodexSafeTreeDeleteHashSafely.ps1:283",
+  "context": "sharing-probe 线程先占住文件后，测试调用 Get-CodexSafeTreeDeleteHashSafely。工作树 scripts/lib/CodexSafeTreeDeleteFileIdentity.cs 相对 HEAD +312，属他人未提交改动。本票不回退、不修绿。"
+}

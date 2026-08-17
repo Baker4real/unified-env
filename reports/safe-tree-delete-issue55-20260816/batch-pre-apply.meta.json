@@ -1,0 +1,36 @@
+{
+  "name": "batch-pre-apply",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Apply",
+    "-PlanPath",
+    "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T134252Z-8adc0422-428d-41c4-a8da-e0fa0b61c93e\\plan.json",
+    "-ApprovedPlanSha256",
+    "9c7ad8160c1e3e32eaecf6a6347c53b6236fac266fa72b587a169eb5e7b2930b",
+    "-ConfirmApply",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-16T13:42:52.9595345+00:00",
+  "endedAtUtc": "2026-08-16T13:42:54.5346476+00:00",
+  "wallClockMs": 1575.1,
+  "timeoutMs": 180000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 27424,
+  "trackedPids": [
+    27424,
+    7972
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\batch-pre-apply.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\batch-pre-apply.stderr.txt",
+  "stdoutSha256": "61245baa98c3c0cd4f609b3e0a228b7daa936a9dbb3386917c99670d7ece6b36",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

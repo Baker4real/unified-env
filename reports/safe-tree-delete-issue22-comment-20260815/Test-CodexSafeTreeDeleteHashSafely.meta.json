@@ -1,0 +1,13 @@
+{
+  "test": "tests\\Test-CodexSafeTreeDeleteHashSafely.ps1",
+  "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteHashSafely.ps1",
+  "exitCode": 1,
+  "startedAtUtc": "2026-08-15T06:49:50.5779284+00:00",
+  "finishedAtUtc": "2026-08-15T06:49:52.6244604+00:00",
+  "wallClockSeconds": 2.047,
+  "stdoutBytes": 0,
+  "stderrBytes": 407,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue22-comment-20260815\\Test-CodexSafeTreeDeleteHashSafely.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue22-comment-20260815\\Test-CodexSafeTreeDeleteHashSafely.stderr.txt"
+}
+

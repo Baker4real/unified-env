@@ -1,0 +1,5 @@
+Exception: D:\Codex\projects\统一环境\tests\Test-CodexHookInventory.ps1:18
+Line |
+  18 |          throw $Message
+     |          ~~~~~~~~~~~~~~
+     | 已退役 state policy wrapper 必须作为缺失依赖观察，不得假定仍在线

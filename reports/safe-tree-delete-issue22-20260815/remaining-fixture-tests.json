@@ -1,0 +1,43 @@
+{
+  "snapshot": true,
+  "note": "host-safety 套件在 HashSafely 处因他人 FileIdentity.cs 改动失败后，补跑与 #22 无关的剩余 fixture。",
+  "startedAtUtc": "2026-08-14T18:13:27.7741801+00:00",
+  "finishedAtUtc": "2026-08-14T18:14:32.7892774+00:00",
+  "results": [
+    {
+      "test": "tests\\Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 14.562,
+      "stdoutBytes": 205,
+      "stderrBytes": 0
+    },
+    {
+      "test": "tests\\Test-CodexSafeTreeDeleteRestore.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 39.801,
+      "stdoutBytes": 186,
+      "stderrBytes": 0
+    },
+    {
+      "test": "tests\\Test-CodexSafeTreeDeleteSchemaCompatibility.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 8.633,
+      "stdoutBytes": 160,
+      "stderrBytes": 0
+    },
+    {
+      "test": "tests\\Test-CodexUserEnvironmentTransaction.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 1.087,
+      "stdoutBytes": 0,
+      "stderrBytes": 0
+    },
+    {
+      "test": "tests\\Test-ReportArtifactPublisher.ps1",
+      "exitCode": 0,
+      "wallClockSeconds": 0.883,
+      "stdoutBytes": 22,
+      "stderrBytes": 0
+    }
+  ]
+}

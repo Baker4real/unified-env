@@ -1,0 +1,9 @@
+{
+  "suite": "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+  "startedAtUtc": "2026-08-16T02:21:39.5235913+00:00",
+  "finishedAtUtc": "2026-08-16T02:22:39.7473750+00:00",
+  "wallClockSeconds": 60.224,
+  "exitCode": 0,
+  "stdoutBytes": 757,
+  "stderrBytes": 0
+}

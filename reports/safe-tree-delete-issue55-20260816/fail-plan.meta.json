@@ -1,0 +1,35 @@
+{
+  "name": "fail-plan",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Plan",
+    "-TargetPath",
+    "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-livefail-dff97341d7ac48c48dfc6067dab9c617",
+    "-CapabilityRoot",
+    "D:\\Codex\\projects\\统一环境\\reports",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-16T13:43:42.0058835+00:00",
+  "endedAtUtc": "2026-08-16T13:43:43.4354870+00:00",
+  "wallClockMs": 1429.6,
+  "timeoutMs": 180000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 3544,
+  "trackedPids": [
+    3544,
+    39376
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\fail-plan.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\fail-plan.stderr.txt",
+  "stdoutSha256": "de21889a38342e3dc0d6918c212fd4625bef5cb5ca312e4bee25edf266227634",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

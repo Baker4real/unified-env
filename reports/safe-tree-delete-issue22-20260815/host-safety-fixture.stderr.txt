@@ -1,0 +1,7 @@
+Get-CodexSafeTreeDeleteHashSafely: D:\Codex\projects\统一环境\tests\Test-CodexSafeTreeDeleteHashSafely.ps1:283
+Line |
+ 283 |              [void](Get-CodexSafeTreeDeleteHashSafely `
+     |                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Exception calling "GetHashSafely" with "3" argument(s): "Failed to open path exclusively for hash reuse without
+     | following reparse points."
+Test-CodexSafeTreeDeleteHashSafely.ps1 failed with exit code 1

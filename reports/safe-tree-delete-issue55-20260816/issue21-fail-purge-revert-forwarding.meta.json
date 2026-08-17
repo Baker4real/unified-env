@@ -1,0 +1,36 @@
+{
+  "name": "issue21-fail-purge-revert-forwarding",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Purge",
+    "-TransactionPath",
+    "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T134336Z-fc1d1a90-885d-4535-bd15-4cfc8af3701b\\transaction.json",
+    "-ApprovedTransactionSha256",
+    "9a4529ec5c73c64d88a8515070796768b0a9daef61bb21784eb87a57b2b69b19",
+    "-ConfirmPurge",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-16T13:43:38.2339329+00:00",
+  "endedAtUtc": "2026-08-16T13:43:40.0269715+00:00",
+  "wallClockMs": 1793.0,
+  "timeoutMs": 180000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 41620,
+  "trackedPids": [
+    41620,
+    39408
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\issue21-fail-purge-revert-forwarding.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\issue21-fail-purge-revert-forwarding.stderr.txt",
+  "stdoutSha256": "d0ef66de7bb6decf2382d127d4fa3ba13e620e51df44d561c27a8baed39b318d",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

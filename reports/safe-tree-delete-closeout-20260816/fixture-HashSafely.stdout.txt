@@ -1,0 +1,5 @@
+
+  ok suite                         slices
+  -- -----                         ------
+True CodexSafeTreeDeleteHashSafely      7
+

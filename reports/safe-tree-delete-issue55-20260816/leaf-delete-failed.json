@@ -1,0 +1,18 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.issue55.production-purge-leaf-delete-failed",
+  "schemaVersion": 1,
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "lockStrategy": "watch-transaction-status-purging-then-FileShare.Read",
+  "lockAcquiredMarkerExists": true,
+  "exitCode": 1,
+  "purged": false,
+  "refusalReason": "leaf-delete-failed",
+  "recoverable": false,
+  "purgeResumable": true,
+  "metricsPresent": true,
+  "remainingDescendantCount": 0,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\fail-purge-leaf-delete.stdout.txt",
+  "transactionPath": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T134343Z-d0de032c-7ed6-44b9-8222-91d2522f99c8\\transaction.json",
+  "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\.codex-safe-delete-d0de032c-7ed6-44b9-8222-91d2522f99c8.quarantine",
+  "productionJsonObtained": true
+}

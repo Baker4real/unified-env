@@ -1,0 +1,12 @@
+{
+  "snapshot": true,
+  "note": "既有 ControlPlane fixture 测试。未新写平行测试。",
+  "startedAtUtc": "2026-08-14T18:04:36.2336808+00:00",
+  "finishedAtUtc": "2026-08-14T18:07:11.4805788+00:00",
+  "wallClockSeconds": 155.249,
+  "executable": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "testFile": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteControlPlane.ps1",
+  "exitCode": 0,
+  "stdoutBytes": 139,
+  "stderrBytes": 0
+}

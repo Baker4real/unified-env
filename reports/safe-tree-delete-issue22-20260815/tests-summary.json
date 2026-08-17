@@ -1,0 +1,39 @@
+{
+  "snapshot": true,
+  "capturedAtUtc": "2026-08-14T18:15:13.2455898+00:00",
+  "controlPlaneStandalone": {
+    "exitCode": 0,
+    "wallClockSeconds": 155.249
+  },
+  "hostSafetyModuleRunner": {
+    "exitCode": 1,
+    "failedAt": "tests/Test-CodexSafeTreeDeleteHashSafely.ps1",
+    "reason": "他人未提交的 CodexSafeTreeDeleteFileIdentity.cs 改动导致 exclusive hash-open 失败。本票未改该测试或 identity 实现。",
+    "passedBeforeFailure": [
+      "Test-CodexSafeTreeDelete.ps1",
+      "Test-CodexSafeTreeDeleteBenchmark.ps1",
+      "Test-CodexSafeTreeDeleteControlPlane.ps1",
+      "Test-CodexSafeTreeDeleteCrashSafety.ps1",
+      "Test-CodexSafeTreeDeleteFileSystem.ps1",
+      "Test-CodexSafeTreeDeleteGrace.ps1",
+      "Test-CodexSafeTreeDeleteHashCache.ps1"
+    ]
+  },
+  "remainingIndependent": {
+    "exitCode": 0,
+    "tests": [
+      "Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
+      "Test-CodexSafeTreeDeleteRestore.ps1",
+      "Test-CodexSafeTreeDeleteSchemaCompatibility.ps1",
+      "Test-CodexUserEnvironmentTransaction.ps1",
+      "Test-ReportArtifactPublisher.ps1"
+    ]
+  },
+  "notReRunDueToConcurrentEdits": [
+    "Test-CodexSafeTreeDeleteIdentityV2.ps1",
+    "Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
+    "Test-CodexSafeTreeDeleteStatus.ps1"
+  ],
+  "productionSmoke": "not-run",
+  "gitDiffCheckExitCode": 0
+}
