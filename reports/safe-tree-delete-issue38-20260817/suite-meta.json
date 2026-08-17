@@ -1,0 +1,11 @@
+{
+  "suite": "Test-CodexSafeTreeDeleteThreadJournal.ps1",
+  "issue": 38,
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteThreadJournal.ps1",
+  "startedAtUtc": "2026-08-16T20:12:11.5605043Z",
+  "finishedAtUtc": "2026-08-16T20:12:12.4437012Z",
+  "exitCode": 0,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue38-20260817\\Test-CodexSafeTreeDeleteThreadJournal.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue38-20260817\\Test-CodexSafeTreeDeleteThreadJournal.stderr.txt"
+}
