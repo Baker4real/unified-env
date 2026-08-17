@@ -322,6 +322,87 @@ function Assert-CodexSerenaBehaviorOutput {
     finally { $document.Dispose() }
 }
 
+function Get-CodexSerenaSessionMutexName {
+    param(
+        [Parameter(Mandatory)][string]$SerenaHome,
+        [Parameter(Mandatory)][string]$SessionId
+    )
+
+    # Windows path and session directory comparisons are case-insensitive. Use
+    # one invariant representation so equivalent spellings share one mutex.
+    $canonicalHome = [IO.Path]::GetFullPath($SerenaHome).TrimEnd('\', '/').ToUpperInvariant()
+    $canonicalSessionId = $SessionId.ToUpperInvariant()
+    $material = $canonicalHome + "`n" + $canonicalSessionId
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($material)
+    $hash = [Security.Cryptography.SHA256]::HashData($bytes)
+    return 'Local\CodexSerenaSession-' + [Convert]::ToHexString($hash)
+}
+
+function Enter-CodexSerenaSessionMutex {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [int]$TimeoutMilliseconds = 250
+    )
+
+    $mutex = [Threading.Mutex]::new($false, $Name)
+    $held = $false
+    try {
+        try {
+            $held = $mutex.WaitOne($TimeoutMilliseconds)
+        }
+        catch [Threading.AbandonedMutexException] {
+            # The previous hook died while holding the lock. The state guard
+            # below still revalidates every path and counter identity.
+            $held = $true
+        }
+    }
+    catch {
+        $mutex.Dispose()
+        throw
+    }
+    if (-not $held) {
+        $mutex.Dispose()
+        return $null
+    }
+    return $mutex
+}
+
+function Exit-CodexSerenaSessionMutex {
+    param([Parameter(Mandatory)][Threading.Mutex]$Mutex)
+
+    try { [void]$Mutex.ReleaseMutex() } finally { $Mutex.Dispose() }
+}
+
+function Invoke-CodexSerenaSessionMutex {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [int]$TimeoutMilliseconds = 250
+    )
+
+    Enter-CodexSerenaSessionMutex -Name $Name -TimeoutMilliseconds $TimeoutMilliseconds
+}
+
+function Release-CodexSerenaBehaviorState {
+    param(
+        [Parameter(Mandatory)][ref]$CounterLease,
+        [Parameter(Mandatory)][ref]$SessionGuard,
+        [Parameter(Mandatory)][ref]$SessionMutex
+    )
+
+    # Release the file capabilities before the named mutex. Health reporting is
+    # deliberately performed after this function so it cannot extend the
+    # session's critical section.
+    # Releasing the state is deliberately best-effort. The hook protocol is
+    # optional and a disposal race must not replace the original
+    # vendor/protocol result or make the host wait on a second exception path.
+    try { if ($null -ne $CounterLease.Value) { $CounterLease.Value.Dispose() } } catch {}
+    finally { $CounterLease.Value = $null }
+    try { if ($null -ne $SessionGuard.Value) { $SessionGuard.Value.Dispose() } } catch {}
+    finally { $SessionGuard.Value = $null }
+    try { if ($null -ne $SessionMutex.Value) { Exit-CodexSerenaSessionMutex -Mutex $SessionMutex.Value } } catch {}
+    finally { $SessionMutex.Value = $null }
+}
+
 function Invoke-CodexSerenaBehaviorGuardCore {
     param(
         [Parameter(Mandatory)][ValidateSet('Reminder', 'Cleanup', 'Activation')][string]$Behavior,
@@ -385,6 +466,7 @@ function Invoke-CodexSerenaBehaviorGuardCore {
     $buffer = [IO.MemoryStream]::new()
     $sessionGuard = $null
     $counterLease = $null
+    $sessionMutex = $null
     try {
         $sessionId = Assert-CodexSerenaSessionInput -InputText $InputText
         if ($Behavior -ceq 'Activation') {
@@ -393,6 +475,33 @@ function Invoke-CodexSerenaBehaviorGuardCore {
             [byte[]]$bytes = [Text.UTF8Encoding]::new($false).GetBytes($activationJson + "`r`n")
         }
         else {
+            $mutexName = Get-CodexSerenaSessionMutexName -SerenaHome $SerenaHome -SessionId $sessionId
+            # Leave startup/drain/cleanup headroom inside the host's 10s hook
+            # budget while still covering the vendor's 5s bounded drain.
+            $mutexTimeoutMilliseconds = if ($Behavior -ceq 'Cleanup') { 6000 } else { 250 }
+            $sessionMutex = Invoke-CodexSerenaSessionMutex -Name $mutexName -TimeoutMilliseconds $mutexTimeoutMilliseconds
+            if ($null -eq $sessionMutex) {
+                # PreToolUse and Stop are optional hooks. When another process
+                # owns this session, fail open before touching the shared
+                # state; waiting behind it would consume the host's 10s hook
+                # budget.
+                [byte[]]$bytes = @()
+                $watch.Stop()
+                if ($Behavior -ceq 'Cleanup') {
+                    # Stop fires once per session: a contended Cleanup leaks the
+                    # session state directory, so the skip must stay observable.
+                    # Reminder skips touch nothing and stay silent, keeping the
+                    # hot PreToolUse path off the health writer's .backups.
+                    # A health write failure must not flip the fail-open result.
+                    $health = [pscustomobject][ordered]@{
+                        hookId = $hookId; runId = [guid]::NewGuid().ToString('N'); startedAtUtc = $started.ToString('o')
+                        completedAtUtc = [DateTime]::UtcNow.ToString('o'); durationMs = [long]$watch.ElapsedMilliseconds
+                        ok = $false; changed = $false; restartRequired = $false; errors = [string[]]@('skipped: session mutex contention')
+                    }
+                    try { $null = Write-CodexHookLatestHealthCore -HookId $hookId -Payload $health -HealthRoot $HealthRoot -AllowFixtureRoot:$AllowFixture } catch {}
+                }
+                return [pscustomobject][ordered]@{ ok = $true; exitCode = 0; stdout = $bytes; error = $null }
+            }
             Initialize-CodexSerenaSessionDirectoryGuard
             $trustedParent = [IO.Directory]::GetParent([IO.Path]::GetFullPath($SerenaHome)).FullName
             $sessionDirectory = Join-Path ([IO.Path]::GetFullPath($SerenaHome)) ("hook_data\{0}" -f $sessionId)
@@ -420,6 +529,7 @@ function Invoke-CodexSerenaBehaviorGuardCore {
             }
         }
         Assert-CodexSerenaBehaviorOutput -Behavior $Behavior -Bytes $bytes
+        Release-CodexSerenaBehaviorState -CounterLease ([ref]$counterLease) -SessionGuard ([ref]$sessionGuard) -SessionMutex ([ref]$sessionMutex)
         if ($Behavior -ceq 'Reminder' -and $bytes.Length -eq 0) {
             $watch.Stop()
             return [pscustomobject][ordered]@{ ok = $true; exitCode = 0; stdout = $bytes; error = $null }
@@ -430,11 +540,15 @@ function Invoke-CodexSerenaBehaviorGuardCore {
             completedAtUtc = [DateTime]::UtcNow.ToString('o'); durationMs = [long]$watch.ElapsedMilliseconds
             ok = $true; changed = $false; restartRequired = $false; errors = [string[]]@()
         }
-        $null = Write-CodexHookLatestHealthCore -HookId $hookId -Payload $health -HealthRoot $HealthRoot -AllowFixtureRoot:$AllowFixture
+        # Health reporting is best-effort here as well: a write failure must
+        # not flip the result the vendor already produced (same pattern as the
+        # catch path below).
+        try { $null = Write-CodexHookLatestHealthCore -HookId $hookId -Payload $health -HealthRoot $HealthRoot -AllowFixtureRoot:$AllowFixture } catch {}
         return [pscustomobject][ordered]@{ ok = $true; exitCode = 0; stdout = $bytes; error = $null }
     }
     catch {
         $watch.Stop()
+        Release-CodexSerenaBehaviorState -CounterLease ([ref]$counterLease) -SessionGuard ([ref]$sessionGuard) -SessionMutex ([ref]$sessionMutex)
         $health = [pscustomobject][ordered]@{
             hookId = $hookId; runId = [guid]::NewGuid().ToString('N'); startedAtUtc = $started.ToString('o')
             completedAtUtc = [DateTime]::UtcNow.ToString('o'); durationMs = [long]$watch.ElapsedMilliseconds
@@ -445,8 +559,9 @@ function Invoke-CodexSerenaBehaviorGuardCore {
     }
     finally {
         $watch.Stop()
-        if ($null -ne $counterLease) { $counterLease.Dispose(); $counterLease = $null }
-        if ($null -ne $sessionGuard) { $sessionGuard.Dispose() }
+        if ($null -ne $counterLease -or $null -ne $sessionGuard -or $null -ne $sessionMutex) {
+            Release-CodexSerenaBehaviorState -CounterLease ([ref]$counterLease) -SessionGuard ([ref]$sessionGuard) -SessionMutex ([ref]$sessionMutex)
+        }
         $buffer.Dispose()
         $process.Dispose()
     }

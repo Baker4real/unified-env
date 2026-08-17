@@ -336,7 +336,7 @@
     {
       "relativePath": "hooks/serena-behavior-guard.ps1",
       "liveRelativePath": "serena-behavior-guard.ps1",
-      "sha256": "72e4d59d862775c100f35b7b345a5414a7337519f2d42ac49931a5e9891df8e2",
+      "sha256": "85d78b8533a47f8a9f3419e1bc4db33e3351522d7e8c1fe1aa861c0399f4ea3a",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-reminder",

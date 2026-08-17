@@ -61,6 +61,26 @@ function Invoke-ChildProcess {
     finally { $process.Dispose() }
 }
 
+function Start-NoWindowProcess {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [hashtable]$Environment = @{}
+    )
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
+    foreach ($name in $Environment.Keys) { $startInfo.Environment[$name] = [string]$Environment[$name] }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    Assert-True $process.Start() "子进程无法启动：$FilePath"
+    return $process
+}
+
 function New-ReminderPayload([string]$SessionId, [string]$ToolName) {
     [pscustomobject][ordered]@{
         session_id = $SessionId
@@ -94,6 +114,8 @@ Assert-True $behaviorGuardSource.Contains("'--client=codex'") 'behavior guard �
 Assert-True $behaviorGuardSource.Contains('Complete-CodexHookProcessWithBoundedDrain') 'behavior guard 必须复用 bounded native drain。'
 Assert-True $behaviorGuardSource.Contains('Write-CodexHookLatestHealthCore') 'behavior guard 必须复用 strict health writer。'
 Assert-True (-not $behaviorGuardSource.Contains('VendorPath =')) 'production CLI 不得暴露 vendor path override。'
+Assert-True $behaviorGuardSource.Contains('Get-CodexSerenaSessionMutexName') 'behavior guard 必须为每个 Serena session 建立稳定互斥名。'
+Assert-True $behaviorGuardSource.Contains('Invoke-CodexSerenaSessionMutex') 'behavior guard 必须通过 session 级互斥串行化状态访问。'
 
 $scratchBase = [IO.Path]::GetFullPath((Join-Path $projectRoot '.scratch'))
 $fixtureRoot = Join-Path $scratchBase ("codex-serena-behavior-hooks-{0}" -f [guid]::NewGuid().ToString('N'))
@@ -175,6 +197,8 @@ if (Test-Path -LiteralPath $guardHealthRoot) { Remove-Item -LiteralPath $guardHe
 [IO.Directory]::CreateDirectory($guardFixtureRoot) | Out-Null
 try {
     . $behaviorGuardPath
+    # holder 子进程继承本进程环境；防御性清除同名变量，持锁时长一律由下方显式注入。
+    Remove-Item Env:CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS -ErrorAction SilentlyContinue
     $outsideSentinel = Join-Path $guardFixtureRoot 'outside-sentinel.txt'
     [IO.File]::WriteAllText($outsideSentinel, 'preserve', [Text.UTF8Encoding]::new($false))
 
@@ -184,6 +208,279 @@ try {
     [IO.Directory]::CreateDirectory($outsideSessionRoot) | Out-Null
     $outsideSessionSentinel = Join-Path $outsideSessionRoot 'third-party-sentinel.txt'
     [IO.File]::WriteAllText($outsideSessionSentinel, 'preserve', [Text.UTF8Encoding]::new($false))
+
+    # A competing PreToolUse invocation must fail open before it creates or
+    # touches the shared Serena session state. The old guard had no session
+    # mutex, so this assertion is intentionally red until the guard is fixed.
+    $mutexSession = 'session-mutex-held-redacted'
+    $mutexSessionPath = Join-Path $guardFixtureHome "hook_data\$mutexSession"
+    $mutexName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $mutexSession
+    $mutexAlias = Get-CodexSerenaSessionMutexName -SerenaHome ($guardFixtureHome.ToUpperInvariant()) -SessionId $mutexSession.ToUpperInvariant()
+    Assert-Equal $mutexAlias $mutexName 'session mutex 名称必须对 Windows 路径和 session id 大小写等价。'
+    # 固定测试向量：期望锁名钉死当前算法的真实输出；若回归删掉 GetFullPath/TrimEnd/大写不变式，本断言必须变红。
+    $vectorSession = 'Session-Vector-Redacted_09'
+    $expectedVectorMutex = 'Local\CodexSerenaSession-E783D2590782B2A12551B3F479B6CF273373AF18363EF336A7524435DF69C877'
+    Assert-Equal (Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $vectorSession) $expectedVectorMutex 'session mutex 名称必须匹配固定测试向量。'
+    Assert-Equal (Get-CodexSerenaSessionMutexName -SerenaHome ($guardFixtureHome -replace '\\', '/') -SessionId $vectorSession) $expectedVectorMutex '/ 与 \ 等价拼写必须产生同一锁名。'
+    Assert-Equal (Get-CodexSerenaSessionMutexName -SerenaHome ($guardFixtureHome + '\') -SessionId $vectorSession) $expectedVectorMutex '尾部斜杠等价拼写必须产生同一锁名。'
+    $mutexReady = Join-Path $guardFixtureRoot 'session-mutex-ready.txt'
+    $mutexHolderScript = @'
+$mutex = [Threading.Mutex]::new($false, $env:CODEX_TEST_SERENA_MUTEX_NAME)
+try {
+    if (-not $mutex.WaitOne(0)) { exit 2 }
+    [IO.File]::WriteAllText($env:CODEX_TEST_SERENA_MUTEX_READY, 'ready', [Text.UTF8Encoding]::new($false))
+    $holdSeconds = 5
+    if ($env:CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS -match '^\d+$') { $holdSeconds = [int]$env:CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS }
+    Start-Sleep -Seconds $holdSeconds
+}
+finally {
+    try { [void]$mutex.ReleaseMutex() } catch {}
+    $mutex.Dispose()
+}
+'@
+    $mutexHolderEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($mutexHolderScript))
+    $mutexHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+        -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
+        -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $mutexName; CODEX_TEST_SERENA_MUTEX_READY = $mutexReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '5' }
+    try {
+        for ($attempt = 0; $attempt -lt 80 -and -not (Test-Path -LiteralPath $mutexReady -PathType Leaf); $attempt++) {
+            Start-Sleep -Milliseconds 50
+        }
+        Assert-True (Test-Path -LiteralPath $mutexReady -PathType Leaf) 'session mutex holder 必须进入临界区。'
+        $mutexWatch = [Diagnostics.Stopwatch]::StartNew()
+        $mutexResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+            -InputText (New-ReminderPayload $mutexSession 'Bash') `
+            -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        $mutexWatch.Stop()
+        Assert-True ($mutexResult.ok -and $mutexResult.exitCode -eq 0 -and $mutexResult.stdout.Length -eq 0) 'session mutex contention 必须静默 fail-open。'
+        Assert-True ($mutexWatch.ElapsedMilliseconds -lt 3500) "session mutex contention 必须在宿主 10 秒预算前返回；actual=$($mutexWatch.ElapsedMilliseconds)ms"
+        Assert-True (-not (Test-Path -LiteralPath $mutexSessionPath)) 'session mutex contention 不得创建或修改 session state。'
+        # Reminder 让路不触碰任何状态也无泄漏，热路径保持完全静默：不升级健康记录，
+        # 避免 health writer 的 .backups 随每次 PreToolUse 竞争无界增长。
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $guardHealthRoot 'serena-reminder.json'))) 'reminder 竞争让路必须保持静默，不得写 latest health。'
+        # A different session maps to a different mutex and must not be blocked
+        # by the held one.
+        $otherMutexSession = 'session-mutex-other-redacted'
+        $otherMutexName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $otherMutexSession
+        Assert-True ($otherMutexName -cne $mutexName) '不同 session 必须生成不同互斥名。'
+        $otherMutexResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+            -InputText (New-ReminderPayload $otherMutexSession 'Bash') `
+            -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        Assert-True ($otherMutexResult.ok -and $otherMutexResult.exitCode -eq 0) '不同 session 的 Reminder 不得被持有的互斥阻塞。'
+        Assert-True (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$otherMutexSession") -PathType Container) '不同 session 的 Reminder 必须正常建立自有 session state。'
+        # Activation 不拿这把 session 锁：同 session 互斥被占用时仍须立刻产出 SessionStart，
+        # 不得走 Reminder 的 250ms 空输出 fail-open，也不得等到 holder 释放。
+        $activationHeldWatch = [Diagnostics.Stopwatch]::StartNew()
+        $activationHeld = Invoke-CodexSerenaBehaviorGuardCore -Behavior Activation `
+            -InputText (ConvertTo-Json ([ordered]@{ session_id = $mutexSession }) -Compress) `
+            -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        $activationHeldWatch.Stop()
+        Assert-True ($activationHeld.ok -and $activationHeld.exitCode -eq 0 -and $activationHeld.stdout.Length -gt 0) 'Activation 在同 session 互斥被占用时仍须成功且有协议输出。'
+        Assert-True ($activationHeldWatch.ElapsedMilliseconds -lt 3500) "Activation 不得等待 session 互斥；actual=$($activationHeldWatch.ElapsedMilliseconds)ms"
+        $activationHeldJson = [Text.UTF8Encoding]::new($false, $true).GetString($activationHeld.stdout) | ConvertFrom-Json
+        Assert-Equal $activationHeldJson.hookSpecificOutput.hookEventName 'SessionStart' 'Activation 不得因互斥竞争变成空输出 fail-open。'
+        Assert-True (-not (Test-Path -LiteralPath $mutexSessionPath)) 'Activation 不得创建或修改 session state。'
+    }
+    finally {
+        if (-not $mutexHolder.HasExited) { $mutexHolder.Kill($true) }
+        try { $mutexHolder.WaitForExit(2000) } catch {}
+        $mutexHolder.Dispose()
+    }
+
+    # Stop/Cleanup may wait for an in-flight reminder, but must still finish
+    # within the outer 10s hook budget and remove the now-safe session state.
+    $cleanupMutexSession = 'cleanup-mutex-held-redacted'
+    $cleanupMutexPayload = New-ReminderPayload $cleanupMutexSession 'Bash'
+    $cleanupMutexSeed = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+        -InputText $cleanupMutexPayload `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($cleanupMutexSeed.ok -and (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$cleanupMutexSession") -PathType Container)) 'cleanup contention fixture 必须先建立 session state。'
+    $cleanupMutexName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $cleanupMutexSession
+    $cleanupMutexReady = Join-Path $guardFixtureRoot 'cleanup-mutex-ready.txt'
+    $cleanupMutexHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+        -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
+        -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $cleanupMutexName; CODEX_TEST_SERENA_MUTEX_READY = $cleanupMutexReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '5' }
+    try {
+        for ($attempt = 0; $attempt -lt 80 -and -not (Test-Path -LiteralPath $cleanupMutexReady -PathType Leaf); $attempt++) {
+            Start-Sleep -Milliseconds 50
+        }
+        Assert-True (Test-Path -LiteralPath $cleanupMutexReady -PathType Leaf) 'cleanup session mutex holder 必须进入临界区。'
+        $cleanupMutexWatch = [Diagnostics.Stopwatch]::StartNew()
+        $cleanupMutexResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Cleanup `
+            -InputText (ConvertTo-Json ([ordered]@{ session_id = $cleanupMutexSession }) -Compress) `
+            -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        $cleanupMutexWatch.Stop()
+        Assert-True ($cleanupMutexResult.ok -and $cleanupMutexResult.exitCode -eq 0 -and $cleanupMutexResult.stdout.Length -eq 0) 'cleanup contention 必须在锁释放后成功。'
+        Assert-True ($cleanupMutexWatch.ElapsedMilliseconds -lt 9500) "cleanup contention 必须留在宿主 10 秒预算内；actual=$($cleanupMutexWatch.ElapsedMilliseconds)ms"
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$cleanupMutexSession"))) 'cleanup contention 成功后不得留下 session state。'
+    }
+    finally {
+        if (-not $cleanupMutexHolder.HasExited) { $cleanupMutexHolder.Kill($true) }
+        try { $cleanupMutexHolder.WaitForExit(2000) } catch {}
+        $cleanupMutexHolder.Dispose()
+    }
+
+    # Cleanup 等锁超过 6000ms 预算必须 fail-open：返回形态不变、不删除 session
+    # 状态，但必须留下可区分的健康记录，不再静默跳过（本用例在修复前为红）。
+    $cleanupTimeoutSession = 'cleanup-timeout-redacted'
+    $cleanupTimeoutSessionDir = Join-Path $guardFixtureHome "hook_data\$cleanupTimeoutSession"
+    $cleanupTimeoutSeed = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+        -InputText (New-ReminderPayload $cleanupTimeoutSession 'Bash') `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($cleanupTimeoutSeed.ok -and (Test-Path -LiteralPath $cleanupTimeoutSessionDir -PathType Container)) 'cleanup timeout fixture 必须先建立 session state。'
+    $cleanupTimeoutCounter = Join-Path $cleanupTimeoutSessionDir 'tool_use_counter.pkl'
+    Assert-True (Test-Path -LiteralPath $cleanupTimeoutCounter -PathType Leaf) 'cleanup timeout fixture 必须有计数器文件。'
+    $cleanupTimeoutNamesBefore = @(Get-ChildItem -LiteralPath $cleanupTimeoutSessionDir -Force -Recurse | Sort-Object FullName | ForEach-Object { $_.FullName.Substring($cleanupTimeoutSessionDir.Length) }) -join ','
+    $cleanupTimeoutHashBefore = (Get-FileHash -LiteralPath $cleanupTimeoutCounter -Algorithm SHA256).Hash
+    $cleanupTimeoutName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $cleanupTimeoutSession
+    $cleanupTimeoutReady = Join-Path $guardFixtureRoot 'cleanup-timeout-ready.txt'
+    $cleanupTimeoutHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+        -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
+        -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $cleanupTimeoutName; CODEX_TEST_SERENA_MUTEX_READY = $cleanupTimeoutReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '8' }
+    try {
+        for ($attempt = 0; $attempt -lt 80 -and -not (Test-Path -LiteralPath $cleanupTimeoutReady -PathType Leaf); $attempt++) {
+            Start-Sleep -Milliseconds 50
+        }
+        Assert-True (Test-Path -LiteralPath $cleanupTimeoutReady -PathType Leaf) 'cleanup timeout holder 必须进入临界区。'
+        $cleanupTimeoutWatch = [Diagnostics.Stopwatch]::StartNew()
+        $cleanupTimeoutResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Cleanup `
+            -InputText (ConvertTo-Json ([ordered]@{ session_id = $cleanupTimeoutSession }) -Compress) `
+            -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        $cleanupTimeoutWatch.Stop()
+        Assert-True ($cleanupTimeoutResult.ok -and $cleanupTimeoutResult.exitCode -eq 0 -and $cleanupTimeoutResult.stdout.Length -eq 0) 'cleanup 等锁超时必须保持 fail-open 返回形态。'
+        Assert-True ($cleanupTimeoutWatch.ElapsedMilliseconds -ge 6000 -and $cleanupTimeoutWatch.ElapsedMilliseconds -lt 9500) "cleanup 等锁超时必须落在 6000ms 预算边界；actual=$($cleanupTimeoutWatch.ElapsedMilliseconds)ms"
+        Assert-True (Test-Path -LiteralPath $cleanupTimeoutSessionDir -PathType Container) 'cleanup 等锁超时不得删除 session state。'
+        $cleanupTimeoutNamesAfter = @(Get-ChildItem -LiteralPath $cleanupTimeoutSessionDir -Force -Recurse | Sort-Object FullName | ForEach-Object { $_.FullName.Substring($cleanupTimeoutSessionDir.Length) }) -join ','
+        Assert-Equal $cleanupTimeoutNamesAfter $cleanupTimeoutNamesBefore 'cleanup 等锁超时不得创建或删除 session 文件。'
+        Assert-Equal (Get-FileHash -LiteralPath $cleanupTimeoutCounter -Algorithm SHA256).Hash $cleanupTimeoutHashBefore 'cleanup 等锁超时不得改写 session 计数器。'
+        $timeoutHealth = Get-Content -LiteralPath (Join-Path $guardHealthRoot 'serena-cleanup.json') -Raw | ConvertFrom-Json
+        Assert-True ($timeoutHealth.ok -eq $false) 'cleanup 等锁超时必须写健康记录。'
+        Assert-Equal (@($timeoutHealth.errors) -join ',') 'skipped: session mutex contention' 'cleanup 超时健康记录必须携带可区分的跳过原因。'
+    }
+    finally {
+        if (-not $cleanupTimeoutHolder.HasExited) { $cleanupTimeoutHolder.Kill($true) }
+        try { $cleanupTimeoutHolder.WaitForExit(2000) } catch {}
+        $cleanupTimeoutHolder.Dispose()
+    }
+    # 超时让路不是永久状态：锁可用后重试 cleanup 必须完成删除。
+    $cleanupTimeoutRetry = Invoke-CodexSerenaBehaviorGuardCore -Behavior Cleanup `
+        -InputText (ConvertTo-Json ([ordered]@{ session_id = $cleanupTimeoutSession }) -Compress) `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($cleanupTimeoutRetry.ok -and -not (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$cleanupTimeoutSession"))) '超时让路后重试 cleanup 必须完成删除。'
+
+    # A holder that dies inside the critical section abandons the named mutex.
+    # The next hook must treat that as acquired and still run the existing path
+    # and counter identity validation instead of wedging the session.
+    $abandonedMutexSession = 'abandoned-mutex-redacted'
+    $abandonedMutexName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $abandonedMutexSession
+    $abandonedMutexReady = Join-Path $guardFixtureRoot 'abandoned-mutex-ready.txt'
+    $abandonedMutexHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+        -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
+        -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $abandonedMutexName; CODEX_TEST_SERENA_MUTEX_READY = $abandonedMutexReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '5' }
+    try {
+        for ($attempt = 0; $attempt -lt 80 -and -not (Test-Path -LiteralPath $abandonedMutexReady -PathType Leaf); $attempt++) {
+            Start-Sleep -Milliseconds 50
+        }
+        Assert-True (Test-Path -LiteralPath $abandonedMutexReady -PathType Leaf) 'abandoned session mutex holder 必须进入临界区。'
+        $abandonedMutexHolder.Kill($true)
+        Assert-True ($abandonedMutexHolder.WaitForExit(2000)) 'abandoned session mutex holder 必须被终止。'
+        $abandonedMutexResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+            -InputText (New-ReminderPayload $abandonedMutexSession 'Bash') `
+            -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        Assert-True ($abandonedMutexResult.ok -and $abandonedMutexResult.exitCode -eq 0) 'abandoned mutex 必须被视为已取得。'
+        Assert-True (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$abandonedMutexSession\tool_use_counter.pkl") -PathType Leaf) 'abandoned mutex 之后必须仍执行既有路径与计数器身份校验。'
+    }
+    finally {
+        if (-not $abandonedMutexHolder.HasExited) { $abandonedMutexHolder.Kill($true) }
+        try { $abandonedMutexHolder.WaitForExit(2000) } catch {}
+        $abandonedMutexHolder.Dispose()
+    }
+
+    # 两个并发 Cleanup 对同一 session 必须串行化并收敛到同一终态：状态被删、双方无异常。
+    # 竞争方用真实子进程跑受管 guard 核心（与 hook 同路径），不用线程内模拟。
+    $guardCoreChildScript = @'
+. $env:CODEX_TEST_SERENA_GUARD_PATH
+$result = Invoke-CodexSerenaBehaviorGuardCore -Behavior $env:CODEX_TEST_SERENA_BEHAVIOR -InputText $env:CODEX_TEST_SERENA_INPUT -VendorPath $env:CODEX_TEST_SERENA_VENDOR -SerenaHome $env:CODEX_TEST_SERENA_HOME -RuntimePath $env:CODEX_TEST_SERENA_RUNTIME -HealthRoot $env:CODEX_TEST_SERENA_HEALTH -AllowFixture
+if (-not $result.ok -or $result.exitCode -ne 0 -or $result.stdout.Length -ne 0) { exit 3 }
+exit 0
+'@
+    $guardCoreChildEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($guardCoreChildScript))
+    function Start-GuardCoreChild([string]$Behavior, [string]$InputText) {
+        Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+            -Arguments @('-NoProfile', '-EncodedCommand', $guardCoreChildEncoded) `
+            -Environment @{
+                CODEX_TEST_SERENA_GUARD_PATH = $behaviorGuardPath
+                CODEX_TEST_SERENA_BEHAVIOR = $Behavior
+                CODEX_TEST_SERENA_INPUT = $InputText
+                CODEX_TEST_SERENA_VENDOR = $vendorPath
+                CODEX_TEST_SERENA_HOME = $guardFixtureHome
+                CODEX_TEST_SERENA_RUNTIME = $runtimePath
+                CODEX_TEST_SERENA_HEALTH = $guardHealthRoot
+            }
+    }
+    $concurrentCleanupSession = 'cleanup-concurrent-redacted'
+    $concurrentCleanupSeed = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+        -InputText (New-ReminderPayload $concurrentCleanupSession 'Bash') `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($concurrentCleanupSeed.ok -and (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$concurrentCleanupSession") -PathType Container)) '并发 cleanup fixture 必须先建立 session state。'
+    $concurrentCleanupName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $concurrentCleanupSession
+    $concurrentCleanupReady = Join-Path $guardFixtureRoot 'cleanup-concurrent-ready.txt'
+    $concurrentCleanupHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+        -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
+        -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $concurrentCleanupName; CODEX_TEST_SERENA_MUTEX_READY = $concurrentCleanupReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '2' }
+    $concurrentCleanupFirst = $null
+    $concurrentCleanupSecond = $null
+    try {
+        for ($attempt = 0; $attempt -lt 80 -and -not (Test-Path -LiteralPath $concurrentCleanupReady -PathType Leaf); $attempt++) {
+            Start-Sleep -Milliseconds 50
+        }
+        Assert-True (Test-Path -LiteralPath $concurrentCleanupReady -PathType Leaf) '并发 cleanup holder 必须进入临界区。'
+        $concurrentCleanupPayload = ConvertTo-Json ([ordered]@{ session_id = $concurrentCleanupSession }) -Compress
+        $concurrentCleanupFirst = Start-GuardCoreChild 'Cleanup' $concurrentCleanupPayload
+        $concurrentCleanupSecond = Start-GuardCoreChild 'Cleanup' $concurrentCleanupPayload
+        Assert-True ($concurrentCleanupFirst.WaitForExit(20000)) '第一个并发 cleanup 必须在预算内退出。'
+        Assert-True ($concurrentCleanupSecond.WaitForExit(20000)) '第二个并发 cleanup 必须在预算内退出。'
+        Assert-Equal ([string]$concurrentCleanupFirst.ExitCode) '0' '第一个并发 cleanup 不得异常。'
+        Assert-Equal ([string]$concurrentCleanupSecond.ExitCode) '0' '第二个并发 cleanup 不得异常。'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$concurrentCleanupSession"))) '并发 cleanup 终态必须一致：session state 被删除。'
+    }
+    finally {
+        foreach ($child in @($concurrentCleanupFirst, $concurrentCleanupSecond, $concurrentCleanupHolder)) {
+            if ($null -ne $child) {
+                if (-not $child.HasExited) { $child.Kill($true) }
+                try { $child.WaitForExit(2000) } catch {}
+                $child.Dispose()
+            }
+        }
+    }
+
+    # Reminder×Cleanup 交错（确定性顺序编排）：Cleanup 完整删除并释放锁之后，后来的
+    # Reminder 拿锁会重建 session 状态。该行为是已知设计边界（互斥只保证串行化，不保证
+    # Cleanup 是最后一个持锁者），此处按现状钉住；消除需 tombstone 机制。
+    # 见 .scratch/serena-session-mutex-spec.md Further Notes 的边界记录（复核 F5）。
+    # 用严格顺序而非并发竞态表达同一事实：Cleanup 返回后锁必然空闲、状态必然已删，
+    # 随后的 Reminder 无竞争地拿锁并走既有 Acquire/vendor 重建路径，结果由代码路径
+    # 决定而非调度时序，因此是确定性的。
+    $interleaveSession = 'cleanup-reminder-interleave-redacted'
+    $interleaveSeed = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+        -InputText (New-ReminderPayload $interleaveSession 'Bash') `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($interleaveSeed.ok -and (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$interleaveSession") -PathType Container)) '交错 fixture 必须先建立 session state。'
+    $interleaveCleanup = Invoke-CodexSerenaBehaviorGuardCore -Behavior Cleanup `
+        -InputText (ConvertTo-Json ([ordered]@{ session_id = $interleaveSession }) -Compress) `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($interleaveCleanup.ok -and $interleaveCleanup.exitCode -eq 0 -and $interleaveCleanup.stdout.Length -eq 0) '交错 cleanup 必须成功且保持 stdout 空。'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$interleaveSession"))) '交错 cleanup 必须先完成删除。'
+    $interleaveReminder = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+        -InputText (New-ReminderPayload $interleaveSession 'Bash') `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($interleaveReminder.ok -and $interleaveReminder.exitCode -eq 0) '交错 reminder 不得异常。'
+    Assert-True (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$interleaveSession\tool_use_counter.pkl") -PathType Leaf) '设计边界钉住：Cleanup 后拿到锁的 Reminder 会重建 session 状态。'
+    # 边界用例结束后恢复干净终态。
+    $interleaveFinal = Invoke-CodexSerenaBehaviorGuardCore -Behavior Cleanup `
+        -InputText (ConvertTo-Json ([ordered]@{ session_id = $interleaveSession }) -Compress) `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($interleaveFinal.ok -and -not (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$interleaveSession"))) '交错用例收尾必须删除复活的状态。'
 
     # 缺失 leaf 由 guard 创建后，其逐段目录句柄必须持续阻止删除/替换；否则 vendor 按路径重开时可越界。
     Initialize-CodexSerenaSessionDirectoryGuard
@@ -326,11 +623,13 @@ try {
     [IO.File]::WriteAllText($guardHealthRoot, 'block-health-root', [Text.UTF8Encoding]::new($false))
     $healthFailure = Invoke-CodexSerenaBehaviorGuardCore -Behavior Activation -InputText '{"session_id":"11111111-2222-4333-8444-555555555555"}' `
         -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
-    Assert-True (-not $healthFailure.ok -and $healthFailure.exitCode -eq 0 -and $healthFailure.stdout.Length -eq 0) 'optional health 写入失败必须静默降级。'
-    Assert-Throws {
-        Invoke-CodexSerenaBehaviorAcceptanceCore -Behavior Activation `
-            -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
-    } 'acceptance'
+    # 成功路径健康写失败必须降级为仅缺失记录，不得翻转 vendor 已成功的结果（F2 修复前本断言为红）。
+    Assert-True ($healthFailure.ok -and $healthFailure.exitCode -eq 0 -and $healthFailure.stdout.Length -gt 0) 'health 写入失败不得翻转 vendor 已成功的结果。'
+    $healthFailureJson = [Text.UTF8Encoding]::new($false, $true).GetString($healthFailure.stdout) | ConvertFrom-Json
+    Assert-Equal $healthFailureJson.hookSpecificOutput.hookEventName 'SessionStart' 'health 写入失败不得吞掉 vendor stdout。'
+    $blockedHealthAcceptance = Invoke-CodexSerenaBehaviorAcceptanceCore -Behavior Activation `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($blockedHealthAcceptance.ok -and $blockedHealthAcceptance.exitCode -eq 0) 'health 写入失败降级后 acceptance 不得被健康层翻转。'
     Remove-Item -LiteralPath $guardHealthRoot -Force
 
     $guardSession = 'guard-session-redacted'
