@@ -106,9 +106,9 @@ foreach ($source in @($reminderSource, $cleanupSource, $activationSource)) {
     Assert-True ($source.Contains('D:\Codex\tools\python314-official\pythonw.exe') -and $source.Contains('lib\hidden-console-launcher.py')) 'wrapper 必须通过 hidden launcher 启动。'
     Assert-True (-not $source.Contains('%*')) 'wrapper 不得接受外部参数覆盖固定命令。'
 }
-Assert-True $reminderSource.Contains('"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Reminder') 'reminder 必须固定 sibling 受控 guard 和 Mode。'
-Assert-True $cleanupSource.Contains('"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Cleanup') 'cleanup 必须固定 sibling 受控 guard 和 Mode。'
-Assert-True $activationSource.Contains('"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Activation') 'activation reminder 必须固定 sibling 受控 guard 和 Mode。'
+Assert-True $reminderSource.Contains('"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Reminder') 'reminder 必须固定 sibling 受控 guard 和 Mode。'
+Assert-True $cleanupSource.Contains('"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Cleanup') 'cleanup 必须固定 sibling 受控 guard 和 Mode。'
+Assert-True $activationSource.Contains('"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Activation') 'activation reminder 必须固定 sibling 受控 guard 和 Mode。'
 Assert-True $behaviorGuardSource.Contains("'D:\Codex\tools\uv\bin\serena-hooks.exe'") 'behavior guard 必须固定官方 vendor。'
 Assert-True $behaviorGuardSource.Contains("'--client=codex'") 'behavior guard 必须固定 Codex client。'
 Assert-True $behaviorGuardSource.Contains('Complete-CodexHookProcessWithBoundedDrain') 'behavior guard 必须复用 bounded native drain。'
@@ -239,7 +239,7 @@ finally {
 }
 '@
     $mutexHolderEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($mutexHolderScript))
-    $mutexHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+    $mutexHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
         -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
         -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $mutexName; CODEX_TEST_SERENA_MUTEX_READY = $mutexReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '5' }
     try {
@@ -297,7 +297,7 @@ finally {
     Assert-True ($cleanupMutexSeed.ok -and (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$cleanupMutexSession") -PathType Container)) 'cleanup contention fixture 必须先建立 session state。'
     $cleanupMutexName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $cleanupMutexSession
     $cleanupMutexReady = Join-Path $guardFixtureRoot 'cleanup-mutex-ready.txt'
-    $cleanupMutexHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+    $cleanupMutexHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
         -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
         -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $cleanupMutexName; CODEX_TEST_SERENA_MUTEX_READY = $cleanupMutexReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '5' }
     try {
@@ -334,7 +334,7 @@ finally {
     $cleanupTimeoutHashBefore = (Get-FileHash -LiteralPath $cleanupTimeoutCounter -Algorithm SHA256).Hash
     $cleanupTimeoutName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $cleanupTimeoutSession
     $cleanupTimeoutReady = Join-Path $guardFixtureRoot 'cleanup-timeout-ready.txt'
-    $cleanupTimeoutHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+    $cleanupTimeoutHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
         -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
         -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $cleanupTimeoutName; CODEX_TEST_SERENA_MUTEX_READY = $cleanupTimeoutReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '8' }
     try {
@@ -374,7 +374,7 @@ finally {
     $abandonedMutexSession = 'abandoned-mutex-redacted'
     $abandonedMutexName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $abandonedMutexSession
     $abandonedMutexReady = Join-Path $guardFixtureRoot 'abandoned-mutex-ready.txt'
-    $abandonedMutexHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+    $abandonedMutexHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
         -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
         -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $abandonedMutexName; CODEX_TEST_SERENA_MUTEX_READY = $abandonedMutexReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '5' }
     try {
@@ -406,7 +406,7 @@ exit 0
 '@
     $guardCoreChildEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($guardCoreChildScript))
     function Start-GuardCoreChild([string]$Behavior, [string]$InputText) {
-        Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+        Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
             -Arguments @('-NoProfile', '-EncodedCommand', $guardCoreChildEncoded) `
             -Environment @{
                 CODEX_TEST_SERENA_GUARD_PATH = $behaviorGuardPath
@@ -425,7 +425,7 @@ exit 0
     Assert-True ($concurrentCleanupSeed.ok -and (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data\$concurrentCleanupSession") -PathType Container)) '并发 cleanup fixture 必须先建立 session state。'
     $concurrentCleanupName = Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $concurrentCleanupSession
     $concurrentCleanupReady = Join-Path $guardFixtureRoot 'cleanup-concurrent-ready.txt'
-    $concurrentCleanupHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+    $concurrentCleanupHolder = Start-NoWindowProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
         -Arguments @('-NoProfile', '-EncodedCommand', $mutexHolderEncoded) `
         -Environment @{ CODEX_TEST_SERENA_MUTEX_NAME = $concurrentCleanupName; CODEX_TEST_SERENA_MUTEX_READY = $concurrentCleanupReady; CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS = '2' }
     $concurrentCleanupFirst = $null

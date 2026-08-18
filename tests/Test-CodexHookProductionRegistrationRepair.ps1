@@ -218,7 +218,7 @@ try {
 '@
 $mutexHolderEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($mutexHolderCode))
 $mutexHolderStart = [Diagnostics.ProcessStartInfo]::new()
-$mutexHolderStart.FileName = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
+$mutexHolderStart.FileName = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
 $mutexHolderStart.UseShellExecute = $false
 $mutexHolderStart.CreateNoWindow = $true
 $mutexHolderStart.RedirectStandardOutput = $true

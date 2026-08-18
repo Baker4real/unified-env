@@ -1,0 +1,13 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue32-scale-10000",
+  "fileCount": 10000,
+  "bytesPerFile": 4096,
+  "method": "two sibling 10k trees; Apply with SessionHashCache vs -DisableApplyHashReuseForTest",
+  "reuseElapsedMs": 553787,
+  "baselineElapsedMs": 515007,
+  "reuseBytesHashed": 130237781,
+  "baselineBytesHashed": 130237787,
+  "speedup": 0.93,
+  "targetRange": "1.5-2x vs no-reuse baseline",
+  "metTarget": false
+}

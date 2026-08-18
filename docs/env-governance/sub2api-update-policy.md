@@ -2,7 +2,7 @@
 type: reference
 title: Sub2API 受管更新策略
 tags: [Sub2API, 更新, Docker]
-intent: 约束 Sub2API 稳定版升级、静默窗口和联合回滚
+intent: 约束 Sub2API 稳定版升级、短暂中断授权和联合回滚
 ---
 
 # Sub2API 受管更新策略
@@ -13,19 +13,18 @@ intent: 约束 Sub2API 稳定版升级、静默窗口和联合回滚
 
 ## 短暂中断授权
 
-Sub2API 升级不再以零中断为硬门槛。在以下条件全部成立时，现有“升级到官方最新稳定版”的持续授权包含仅重建 `sub2api` application service 所需的可控短暂中断，无需逐次另行取得维护窗口授权：
+Sub2API 升级不再以零中断或静默连接窗口为门槛。在以下硬条件全部成立时，现有“升级到官方最新稳定版”的持续授权包含在活跃连接存在时仅重建 `sub2api` application service 所需的可控短暂中断，无需逐次另行取得维护窗口授权：
 
 - Docker context 可用，升级前三项 Compose 服务均健康，宿主 `/health` 通过；
-- 已确认没有活跃依赖请求，能够建立安全静默窗口；
 - 目标版本是可验证的官方严格稳定版，目标镜像 tag、固定 digest 和本机平台一致；
 - 已建立并验证 ACL 保护的联合回滚点，覆盖 Compose 快照、PostgreSQL 逻辑备份和三个命名卷，并有可执行的联合恢复步骤；
 - Release notes 未要求破坏性数据操作、未说明兼容性的数据库迁移、卷布局转换或其他必须人工处理的变更。
 
-任一条件无法证明时，升级必须延期或标记为需要人工审查。无活跃请求只是允许短暂中断的前置条件，不得用来省略备份、回滚或健康验证。
+活跃连接、keep-alive、近期依赖请求或无法建立静默窗口不再构成延期条件；除活跃连接/请求外的任一硬条件无法证明时，升级必须延期或标记为需要人工审查。不得用该放宽省略备份、回滚或健康验证。
 
 ## 允许的服务变更
 
-升级事务只能修改 Compose 中 `sub2api` service 的唯一 application image pin，并保留旧镜像用于回滚。切换只能使用官方 Docker Compose 的 application-only 路径，以 `--no-deps --wait` 仅重建 `sub2api` service。
+升级事务只能修改 Compose 中 `sub2api` service 的唯一 application image pin，并保留旧镜像用于回滚。切换只能使用官方 Docker Compose 的 application-only 路径，以 `--no-deps --wait` 仅重建 `sub2api` service；发现官方稳定更新且其他硬门槛通过时直接切换，不因活跃连接延期。
 
 短暂中断授权不扩大到以下操作：
 

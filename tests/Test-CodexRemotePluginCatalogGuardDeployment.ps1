@@ -24,7 +24,7 @@ $entry = Get-Content -Raw -LiteralPath $entryPath
 foreach ($required in @(
     "[ValidateSet('Check', 'Repair', 'Remove')]",
     'D:\Codex\.codex\catalog-guard',
-    'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe',
+    'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe',
     'D:\Codex\tools\python314-official\pythonw.exe',
     'Codex Remote Plugin Catalog Guard',
     'New-ScheduledTaskTrigger -AtLogOn',

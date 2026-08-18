@@ -22,7 +22,17 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 - allowlist：`managed\safe-tree-delete\policy.json`
 - evidence：`D:\Codex\.codex\run-evidence\safe-tree-delete\<run-id>\`
 
-2026-08-13 起新 Plan 会并列写出 `fileIdentitiesV2`（128-bit `FILE_ID_INFO`）。现役 Apply/Purge 仍只认证 `treeManifest` 的内容哈希与 64-bit FileIndex；缺少 `FILE_ID_INFO` 的卷上新 Plan 失败关闭。性能优化进度见 `docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`。
+2026-08-13 起新 Plan 会并列写出 `fileIdentitiesV2`（128-bit `FILE_ID_INFO`）。2026-08-15 起新 Plan 再并列写出 `leafStreamSetV1`（每个 treeManifest 条目的原始 stream 名集合、hardlink 计数与消费边界）；Apply 在 `apply-locked-preflight`、Purge 在 `purge-locked-preflight` 的各自 live freeze 内逐 leaf 复验 stream 集、文件 FileIdentityV2 与 hardlink 计数，冻结后增删换 stream/leaf 全部失败闭锁，缺少该节的旧 Plan 在 Apply/Purge 失败闭锁（Status/Archive 只读路径不受影响）。Purge 提交 `purged` 前在 run 目录 create-only 发布 `leaf-dispositions.json`，为每个 file/junction leaf 记录最终 disposition（`deleted`/`absent-at-purge-resume`）。缺少 `FILE_ID_INFO` 的卷上新 Plan 失败关闭。性能优化进度见 `docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`；操作者指南与实测表见该 spec「操作者指南」。uncertain 处理见下文 Purge 恢复段，不要从性能表推断删除是否完成。
+
+`leafStreamSetV1.consumptionBoundary` 以 `requiresTreeManifestReverification='always'` 显式声明配对依赖：
+stream-set 复验必须与 treeManifest SHA-256/identity 复验配对消费，不得单独信任。junction/directory
+leaf 的 identity 不绑定进 stream-set，junction→junction 重定向在 stream-set 层不可检出，只能由
+Apply/Purge 的 treeManifest sha/identity 比对层（含删除期逐 junction 重算 reparse sha）检出。
+file leaf 携带命名流时 Plan 失败闭锁、记录后不放行——这是设计决策而非缺陷：下载文件常见的
+`Zone.Identifier` ADS 会使整个 build-output 类目标无法规划，属有意为之的 fail-closed；目录命名流
+按现状记录放行（`empty-project-state` 仍整体拒绝目录 named stream），漂移在各自 locked preflight
+复验中失败闭锁。冻结保证以 locked preflight 为界：stream-set 断言与逐 leaf 删除之间的命名流增删
+不再复检，新增流随 leaf 一并销毁且不进入审计。
 
 宿主 PowerShell wrapper 是仓库 `scripts\invoke-codex-safe-tree-delete-host.ps1` 的受管副本，
 直接转发到仓库生产脚本；因此仓库生产代码改动会进入宿主调用路径。wrapper hash 一致只证明
@@ -211,7 +221,35 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
    记录的 `directoryPath`：路径仍在则列入 `pendingFiles`（可继续 Purge）；路径已不在则列入
    `uncertainFiles`，不得假设是本能力删除的，也不得收尾为 `purged`。用户应手工核验该路径后，
    再决定重新 Plan 或保持 `manual-review`。已 `commit-authorized` 且路径不在，仍按既有
-   commit journal 规则计为已删除。
+   commit journal 规则计为已删除。`leaf-dispositions.json` 合法配对不含 uncertain。
+
+   `leaf-dispositions.json` 的发布先于 `purged` 落盘。进程崩在两者之间的窗口时，恢复路径发现 run
+   目录已存在 dispositions 证据，先做绑定校验（generation、plan SHA-256、transaction/quarantine
+   path、`purging` 时点的 `updatedAtUtc`、stream-set 来源与 artifact/schema），再复核载荷：每行
+   恰为 relativePath/kind/disposition/evidence 四字段，relativePath 必须是合法目录树相对路径，kind
+   限定 `file`/`directory-junction`，disposition/evidence 限定合法枚举配对
+   （`deleted`↔`exclusive-lease-reverification`；
+   `absent-at-purge-resume`↔`purging-subset-resume`/`committed-missing-quarantine-journal`），
+   行集合必须恰好一次覆盖 plan stream-set 的全部 file/junction leaf、无重复、无计划外行，summary
+   计数必须与行重述一致。绑定与载荷均通过才以既有文档为准幂等收口为 `purged`，不重建、不做字节
+   比对，审计记录保持首份内容；任一不一致、读取失败或形状漂移一律失败闭锁。该幂等收口同样覆盖
+   `empty-project-state` 用途（纯目录树的 dispositions 恒为零行，空载荷合法）；绑定有效的
+   dispositions 不豁免 `empty-project-state` 的 directory commit journal 完整性门禁，缺失锚定
+   journal 仍以 `commit-authorized` 拒绝。无既有绑定证据时，非 `empty-project-state` 的缺失
+   quarantine `purging` 仍按原条件硬拒绝，不得用空证据冒充完成。
+
+   `leaf-dispositions.json` 的 SHA-256 只出现在 Purge/Complete 的返回值中，不锚入 transaction.json
+   与 terminal-archive.json；终态发布后该文件的证据完整性不再受工具链保护，这是有意接受的取舍。
+   不对称的理由：directory commit journal 锚进 `transaction.directoryCommitAnchors`，因为它是缺失
+   quarantine 恢复的唯一授权依据，恢复决策必须能独立核验其身份与内容；dispositions 只是终态审计
+   旁证与崩溃窗口幂等收口的载体，收口瞬间已由绑定+载荷双校验把关，终态之后不再参与任何授权
+   决策，故不为它扩展 transaction/terminal-archive 的严格 schema。
+
+   恢复入口前置读取 plan stream-set 的在途后果必须明示：`purging` + quarantine 缺失 + 旧 plan
+   （无 `leafStreamSetV1`）的在途事务失去旧有的纯 commit-journal 恢复路径——stream-set reader
+   在恢复入口即失败闭锁，该事务永久 wedge（Status 落 `inconsistent`/`manual-review`，Archive
+   不可达）。这与"缺少该节的旧 Plan 失败闭锁"一致，是有意收紧；部署本版本前控制面必须先把
+   全部在途事务收尾清空（呼应 #45/#50 的上线排序）。
 
 批量清理使用 `BatchPurge`，调用方一次传入同一 capability root 下的多个 `TargetPaths`，并同时提供
 `ConfirmApply` 与 `ConfirmPurge`。入口对每个目标仍逐项执行相同的 `Plan` / `Apply` / `Purge` 校验；

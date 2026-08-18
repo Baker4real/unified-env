@@ -1,0 +1,6 @@
+interface:
+  display_name: "subagent-orchestration"
+  short_description: "按依赖、ownership 与运行时限制编排可递归多代理任务"
+  default_prompt: "使用 $subagent-orchestration 按依赖、ownership 与当前运行时限制编排这个任务树并完成统一验收。"
+policy:
+  allow_implicit_invocation: false

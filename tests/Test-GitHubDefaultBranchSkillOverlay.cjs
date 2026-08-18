@@ -721,7 +721,7 @@ fs.copyFileSync(
   path.join(deploymentSourceRoot, 'scripts', 'github-default-branch-skill-overlay-catalog.json'),
 );
 const deploymentProcess = childProcess.spawnSync(
-  'D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe',
+  'D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe',
   [
     '-NoProfile',
     '-File',
@@ -749,7 +749,7 @@ assert.equal(
   false,
 );
 const concurrentRollbackProcess = childProcess.spawnSync(
-  'D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe',
+  'D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe',
   [
     '-NoProfile',
     '-File',
@@ -771,7 +771,7 @@ assert.match(
   /concurrent change detected during rollback/,
 );
 const outsideDeployment = childProcess.spawnSync(
-  'D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe',
+  'D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe',
   [
     '-NoProfile',
     '-File',

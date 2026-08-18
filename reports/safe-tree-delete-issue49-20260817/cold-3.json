@@ -1,0 +1,63 @@
+{
+  "issue": 49,
+  "runIndex": 3,
+  "kind": "cold",
+  "whyCold": [
+    "new pwsh 7.6.4 process",
+    "live invoke-safe-tree-delete.cmd -Mode Status -Json",
+    "previous Status child process exited before this Start-Process",
+    "no Status-owned disk cache",
+    "OS standby list not flushed (not VSS, not EmptyStandbyList)"
+  ],
+  "entry": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "wrapperSha256": "45aeadf7f758a1cafce106f66e7eaecc5f60176d2017630e2af461a2a37bca12",
+  "launcherPid": 53224,
+  "childPid": 57332,
+  "psEdition": "Core",
+  "psVersion": "7.6.4",
+  "processPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "startedAtUtc": "2026-08-17T18:12:16.9378483+00:00",
+  "finishedAtUtc": "2026-08-17T18:14:42.7876980+00:00",
+  "wallClockSeconds": 145.85,
+  "exitCode": 0,
+  "parseError": null,
+  "before": {
+    "runDirectories": 2482,
+    "files": 7263,
+    "leftoverTransactionSha256": "4e73aedc260c43c536ab9df3d3f6d5f73a065a8a17c26d1706998f583a0339d7"
+  },
+  "after": {
+    "runDirectories": 2482,
+    "files": 7263,
+    "leftoverTransactionSha256": "4e73aedc260c43c536ab9df3d3f6d5f73a065a8a17c26d1706998f583a0339d7"
+  },
+  "zeroWrite": true,
+  "leftoverShaUnchanged": true,
+  "leftoverLifecycle": "purge-resumable",
+  "leftoverInBlocking": false,
+  "purgedManualReviewCount": 42,
+  "complete": false,
+  "operationCount": 2482,
+  "blockingCount": 116,
+  "entriesScanned": 3952,
+  "bytesHashed": 912539936,
+  "elapsedMs": 142979,
+  "capturedAtUtc": "2026-08-17T18:14:41.0231824+00:00",
+  "statusSegments": {
+    "directoryEnumerationMs": 49,
+    "planTransactionReadMs": 339,
+    "terminalArchiveAuthMs": 12,
+    "treeMaterializationMs": 34366,
+    "sha256Ms": 49,
+    "activeResolveMs": 89627,
+    "archivedResolveMs": 48578,
+    "prefetchMs": 2924,
+    "statusTreeCacheEntries": 10,
+    "planManifestShaCacheEntries": 21,
+    "unarchivedPlanPrefetchCount": 281,
+    "unarchivedPlanParsedCount": 0,
+    "jsonParseThrottleLimit": 4,
+    "consumptionBoundary": "status-invocation-local-not-session-hash-cache"
+  },
+  "metTarget": false
+}

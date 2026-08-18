@@ -1,0 +1,5 @@
+Exception: D:\Codex\projects\统一环境\tests\Test-CodexSafeTreeDeletePhase3Integration.ps1:59
+Line |
+  59 |      if (-not $Condition) { throw $Message }
+     |                             ~~~~~~~~~~~~~~
+     | #40 DOP4 wallClockMs 必须仍是 13255

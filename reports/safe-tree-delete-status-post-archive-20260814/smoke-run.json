@@ -1,0 +1,14 @@
+{
+  "snapshot": true,
+  "note": "ProductionSmoke 运行记录。其新 operation 不属于归档收敛判定集。",
+  "issue": 24,
+  "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+  "startedAtUtc": "2026-08-13T20:04:59.7277113+00:00",
+  "finishedAtUtc": "2026-08-13T20:05:59.2542453+00:00",
+  "wallClockSeconds": 59.527,
+  "exitCode": 1,
+  "stdoutBytes": 0,
+  "stderrBytes": 531,
+  "parseError": null,
+  "result": null
+}

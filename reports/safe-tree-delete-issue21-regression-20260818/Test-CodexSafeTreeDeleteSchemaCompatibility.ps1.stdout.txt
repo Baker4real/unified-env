@@ -1,0 +1,4 @@
+
+  ok suite                                  slices
+  -- -----                                  ------
+True CodexSafeTreeDeleteSchemaCompatibility     10

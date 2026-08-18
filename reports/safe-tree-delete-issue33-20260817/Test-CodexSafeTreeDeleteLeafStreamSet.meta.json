@@ -1,0 +1,7 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue33-related-test-meta",
+  "suite": "Test-CodexSafeTreeDeleteLeafStreamSet",
+  "exitCode": 0,
+  "slices": 4,
+  "note": "Existing #54 fixture still covers stream-set / disposition refusal, including Purge directory ADS drift."
+}

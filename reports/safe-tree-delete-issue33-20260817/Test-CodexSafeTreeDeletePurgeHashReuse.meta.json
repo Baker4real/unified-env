@@ -1,0 +1,8 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue33-test-meta",
+  "suite": "Test-CodexSafeTreeDeletePurgeHashReuse",
+  "exitCode": 0,
+  "elapsedMs": 1528506,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\Test-CodexSafeTreeDeletePurgeHashReuse.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\Test-CodexSafeTreeDeletePurgeHashReuse.stderr.txt"
+}

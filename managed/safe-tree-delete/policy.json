@@ -170,6 +170,13 @@
       "deniedExactPaths": []
     },
     {
+      "id": "clock-countdown-intermediate-ui-references",
+      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references",
+      "minimumDescendantDepth": 3,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
       "id": "codex-account-switch-rust-target",
       "capabilityRoot": "D:\\Codex\\projects\\codex-account-switch\\src-tauri\\target",
       "minimumDescendantDepth": 0,

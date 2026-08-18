@@ -1,0 +1,14 @@
+{
+  "snapshot": true,
+  "note": "ProductionSmoke 新增的 evidence operation 不属于 #24 归档收敛判定集。",
+  "beforeCount": 2300,
+  "afterCount": 2305,
+  "added": [
+    "20260813T200503Z-56d5dd42-5f0f-429c-87da-15e8518e4af9",
+    "20260813T200508Z-791fecd8-67af-49ce-95ae-891b42adf4c5",
+    "20260813T200545Z-ec5af9d0-035a-4213-8033-9b1432225e14",
+    "20260813T200547Z-087a6e03-6f19-4711-b8b4-5e4177cdedf9",
+    "20260813T200553Z-03b8b4af-b466-4cce-9ff8-c977f3f48d93"
+  ],
+  "removed": []
+}

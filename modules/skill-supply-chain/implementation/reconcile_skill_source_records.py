@@ -43,6 +43,8 @@ DEFAULT_EVIDENCE_PARENT = Path(
 RUNTIME_FILES = (
     "skill_source_record.py",
     "generate_skill_catalog.py",
+    "system_skill_provenance_repair.py",
+    "system_package_identity.py",
     "install_skill_guarded.py",
     "install-skill-guarded.cmd",
 )
@@ -676,7 +678,7 @@ def verify_backup(manifest_path: Path) -> dict[str, Any]:
         or not required_runtime.issubset(relatives)
         or len(entries) != len(source_entries) + len(required_state) + len(required_runtime)
     ):
-        raise MigrationError("rollback manifest 缺少 SOURCE、ledger、catalog 或四文件 runtime 闭包")
+        raise MigrationError("rollback manifest 缺少 SOURCE、ledger、catalog 或六文件 runtime 闭包")
     verified = 0
     for entry in entries:
         target = Path(entry["target"])

@@ -1,0 +1,30 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue32-summary",
+  "result": "BLOCKED",
+  "blockedReason": "Apply hashes each FileIdentityV2 three times per invocation (unlocked preflight, locked preflight, quarantine postcheck); SessionHashCache already skips content-hash 2 and 3. 10k unique 4KB files are dominated by three tree snapshots/lease acquires, not SHA-256, so 1.5-2x is structurally unreachable without skipping identity or snapshots.",
+  "hashSafelyWrapperLine": 83,
+  "applyFileHashCallLine": 1217,
+  "applySnapshotProviderLines": [3995, 4058, 4111],
+  "sameInvocationContentHashCount": 3,
+  "statusHunksReverted": false,
+  "tests": {
+    "Test-CodexSafeTreeDeleteHashSafely.ps1": 0,
+    "Test-CodexSafeTreeDeleteHashReuse.ps1": 0,
+    "Test-CodexSafeTreeDeleteStatus.ps1": 0,
+    "hashReuseScale": "skipped; 10k not rerun"
+  },
+  "scale1000": {
+    "fileCount": 1000,
+    "applyElapsedMs": 25387,
+    "quarantined": true
+  },
+  "scale10000": {
+    "fileCount": 10000,
+    "bytesPerFile": 4096,
+    "reuseElapsedMs": 349164,
+    "baselineElapsedMs": 302992,
+    "speedup": 0.868,
+    "metTarget": false,
+    "method": "two sibling 10k trees; Apply with SessionHashCache vs -DisableApplyHashReuseForTest (provider null; three lease ComputeSha256FromHandle; not a 7-read path)"
+  }
+}

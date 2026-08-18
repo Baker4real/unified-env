@@ -1,0 +1,11 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue37-suite-meta",
+  "suite": "Test-CodexSafeTreeDeletePurgeBatch.ps1",
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "startedAtUtc": "2026-08-16T19:33:47.7895943+00:00",
+  "endedAtUtc": "2026-08-16T19:59:30.5863885+00:00",
+  "elapsedMs": 1542797,
+  "exitCode": 0,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue37-20260817\\Test-CodexSafeTreeDeletePurgeBatch.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue37-20260817\\Test-CodexSafeTreeDeletePurgeBatch.stderr.txt"
+}

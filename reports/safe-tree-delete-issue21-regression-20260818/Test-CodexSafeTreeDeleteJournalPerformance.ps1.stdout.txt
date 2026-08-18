@@ -1,0 +1,14 @@
+
+ok                    : True
+suite                 : CodexSafeTreeDeleteJournalPerformance
+issue                 : 41
+slices                : 5
+smallFlushCount       : 8
+smallOverheadPercent  : 50
+scaleFileCount        : 10000
+scaleElapsedMs        : 37240
+scaleTotalFlushTimeMs : 7926
+scaleFlushCount       : 20000
+scaleOverheadPercent  : 21.2835660580021
+scaleIsWithinTarget   : False
+scaleSlowFlushCount   : 0

@@ -4,7 +4,7 @@
   "codexHome": "D:\\Codex\\.codex",
   "managedRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks",
   "runtimes": {
-    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
     "python": "D:\\Codex\\tools\\python314-official\\python.exe",
     "pythonw": "D:\\Codex\\tools\\python314-official\\pythonw.exe",
     "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
@@ -116,11 +116,11 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": ["-NoProfile", "-Command", "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-activation-reminder.cmd'"]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": ["-NoProfile", "-File", "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1", "-Mode", "ActivationAcceptance"]
       }
     },
@@ -154,7 +154,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": ["-NoProfile", "-Command", "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-dashboard-guard.cmd'"]
       },
       "fullAcceptanceCommand": {
@@ -233,11 +233,11 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": ["-NoProfile", "-Command", "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-cleanup-guarded.cmd'"]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": ["-NoProfile", "-File", "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1", "-Mode", "CleanupAcceptance"]
       }
     },
@@ -270,11 +270,11 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": ["-NoProfile", "-Command", "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-reminder-guarded.cmd'"]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": ["-NoProfile", "-File", "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1", "-Mode", "ReminderAcceptance"]
       }
     },
@@ -306,11 +306,11 @@
       "lifecycle": "retired",
       "lifecycleReason": "Codex payload does not expose acceptEdits/auto permission modes",
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": ["-NoProfile", "-Command", "Test-Path -LiteralPath 'D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe'"]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-File",
@@ -330,7 +330,7 @@
     {
       "relativePath": "hooks/codex-github-cli-guard.cmd",
       "liveRelativePath": "codex-github-cli-guard.cmd",
-      "sha256": "e2612d82b1f05572ed244afc8c3261cd3abefcb086e0864bc175d0dfb38996c9",
+      "sha256": "0ebb2bc8b62884c6fa8329008e3ffefdffdfd6ad783baab15a6ed9fe9a98d907",
       "lifecycle": "active",
       "ownerHookIds": [
         "github-cli"
@@ -414,7 +414,7 @@
     {
       "relativePath": "hooks/codex-provider-stability-guard.cmd",
       "liveRelativePath": "codex-provider-stability-guard.cmd",
-      "sha256": "feeb68d28ae3bdf174bdd695322de2bdfeaf297115d706e91d07cf8e0f04715f",
+      "sha256": "3da3c4db553047989363aca6d63a22c0c54abd26eb934d2a0b09de67d98a22ba",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability"
@@ -432,7 +432,7 @@
     {
       "relativePath": "hooks/serena-reminder-guarded.cmd",
       "liveRelativePath": "serena-reminder-guarded.cmd",
-      "sha256": "b6cfb4469dbccd1e9be6cb06d60c7201a4531f089626e72dcd7e7e4063bdd669",
+      "sha256": "5de6d3c0ae10d7073941f391d95c70fd6d6572e37991364f0884492cb8c0d29a",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-reminder"
@@ -441,7 +441,7 @@
     {
       "relativePath": "hooks/serena-cleanup-guarded.cmd",
       "liveRelativePath": "serena-cleanup-guarded.cmd",
-      "sha256": "2945e34faca06805df790f30952e99d9b9ad559adb93e581c87ab42b037d13df",
+      "sha256": "9ce4b60437b7bb5802c9087cacb246514fc0079db579b5065b7b1ee7824fb86e",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-cleanup"
@@ -461,7 +461,7 @@
     {
       "relativePath": "hooks/serena-activation-reminder.cmd",
       "liveRelativePath": "serena-activation-reminder.cmd",
-      "sha256": "7d3fed8b77425ff2724cf618d506bbadd8babc3843619533d4f7aa385d10eea1",
+      "sha256": "ba3841b0960c95b3946311b64666d3a8e03d73090d4ecf89c852126f184a85c7",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -470,7 +470,7 @@
     {
       "relativePath": "hooks/serena-activate-guarded.cmd",
       "liveRelativePath": "serena-activate-guarded.cmd",
-      "sha256": "2758f7df015aff835fb89f57d1375ef4d80b4d0ab993dea66cac804479f598e1",
+      "sha256": "c92e28f018feafa77c6504200766970dc22b4e9b06f5e910eeebd7c487cc5319",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -488,7 +488,7 @@
     {
       "relativePath": "hooks/serena-dashboard-guard.cmd",
       "liveRelativePath": "serena-dashboard-guard.cmd",
-      "sha256": "642c9a760ddf9e4e339fd2e4559748aeadb9a52c517de186294da9720bbd1584",
+      "sha256": "8023c5b65e3d3f80fcc1f3ead3c73e6d316714d560e1d4e866023801b391feaa",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-dashboard"

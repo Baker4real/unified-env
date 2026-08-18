@@ -1,0 +1,10 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue41-diffcheck",
+  "method": "git diff --check -- scripts/lib/CodexSafeTreeDeleteThreadJournal.cs tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1",
+  "files": [
+    "scripts/lib/CodexSafeTreeDeleteThreadJournal.cs",
+    "tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1"
+  ],
+  "DIFFCHECK_EXIT": 0,
+  "note": "Hit-disk Flush(true) restored on the hot path. Performance test records live 10k overhead and does not hard-assert <10%."
+}

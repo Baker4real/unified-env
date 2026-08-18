@@ -1,0 +1,6 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue33-related-test-meta",
+  "suite": "Test-CodexSafeTreeDeleteHashSafely",
+  "exitCode": 0,
+  "note": "Re-ran after a parallel-run flake; exclusive-share probe is timing-sensitive. Did not re-run Test-CodexSafeTreeDeleteHashReuse.ps1 because it embeds the #32 10k Apply benchmark (~11 minutes, numbers already on disk in reports/safe-tree-delete-issue32-20260817/scale-10000.json)."
+}

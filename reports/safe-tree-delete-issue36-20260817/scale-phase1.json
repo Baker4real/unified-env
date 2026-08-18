@@ -1,0 +1,27 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue36-scale-phase1",
+  "fileCount": 10000,
+  "bytesPerFile": 163840,
+  "totalBytes": 1638400000,
+  "method": "two sibling 10k trees of 160KiB (1.526GiB each); same working tree and library; baseline Plan→Apply→Purge with -DisableApplyHashReuseForTest and -DisablePurgeHashReuseForTest; phase1 same pipeline with SessionHashCache; no git checkout of old implementation",
+  "baselineElapsedMs": 598198,
+  "phase1ElapsedMs": 944302,
+  "baseline": {
+    "planElapsedMs": 95604,
+    "applyElapsedMs": 285218,
+    "purgeElapsedMs": 217376,
+    "applyBytesHashed": 4922577787,
+    "purgeBytesHashed": 4929956430
+  },
+  "phase1": {
+    "planElapsedMs": 115030,
+    "applyElapsedMs": 452462,
+    "purgeElapsedMs": 376810,
+    "applyBytesHashed": 4922577781,
+    "purgeBytesHashed": 4929956415
+  },
+  "ratio": 1.579,
+  "speedup": 0.633,
+  "target": "Phase1/baseline <= 0.33 (>=3x)",
+  "metTarget": false
+}

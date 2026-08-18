@@ -129,7 +129,7 @@ def load_retired_ids() -> tuple[str, ...]:
 def check_live_cold_maintenance() -> None:
     """Reject a live write while any official Codex desktop process is running."""
     try:
-        pwsh = assert_ordinary_file(Path(r"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe"), "固定 PowerShell runtime")
+        pwsh = assert_ordinary_file(Path(r"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe"), "固定 PowerShell runtime")
         command = (
             "$ErrorActionPreference='Stop';"
             "$root='C:\\Program Files\\WindowsApps\\OpenAI.Codex_';"

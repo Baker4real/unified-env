@@ -1,0 +1,32 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue37-safety-meta",
+  "results": [
+    {
+      "suite": "Test-CodexSafeTreeDeleteCrashSafety.ps1",
+      "exitCode": 0,
+      "elapsedMs": 30172,
+      "startedAtUtc": "2026-08-16T20:03:22.4234998+00:00",
+      "endedAtUtc": "2026-08-16T20:03:52.5959495+00:00",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue37-20260817\\Test-CodexSafeTreeDeleteCrashSafety.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue37-20260817\\Test-CodexSafeTreeDeleteCrashSafety.stderr.txt"
+    },
+    {
+      "suite": "Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+      "exitCode": 0,
+      "elapsedMs": 6721,
+      "startedAtUtc": "2026-08-16T20:03:52.6095558+00:00",
+      "endedAtUtc": "2026-08-16T20:03:59.3303927+00:00",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue37-20260817\\Test-CodexSafeTreeDeleteUncertainRecovery.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue37-20260817\\Test-CodexSafeTreeDeleteUncertainRecovery.stderr.txt"
+    },
+    {
+      "suite": "Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+      "exitCode": 0,
+      "elapsedMs": 10987,
+      "startedAtUtc": "2026-08-16T20:03:59.3317802+00:00",
+      "endedAtUtc": "2026-08-16T20:04:10.3185315+00:00",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue37-20260817\\Test-CodexSafeTreeDeleteLeafStreamSet.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue37-20260817\\Test-CodexSafeTreeDeleteLeafStreamSet.stderr.txt"
+    }
+  ]
+}

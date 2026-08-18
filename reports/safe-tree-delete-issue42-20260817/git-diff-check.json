@@ -1,0 +1,13 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-git-diff-check",
+  "exitCode": 0,
+  "paths": [
+    "scripts/lib/CodexHostSafety.ps1",
+    "scripts/lib/CodexSafeTreeDelete.ps1",
+    "tests/Test-CodexSafeTreeDeleteHashReuse.ps1",
+    "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1",
+    "reports/safe-tree-delete-issue42-20260817/CLOSEABLE.md",
+    "reports/safe-tree-delete-issue42-20260817/scale-phase3.json",
+    "reports/safe-tree-delete-issue42-20260817/apply-lease-reuse-slice.json"
+  ]
+}

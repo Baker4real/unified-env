@@ -1,0 +1,6 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue33-diff-check",
+  "command": "git diff --check -- scripts/lib/CodexSafeTreeDelete.ps1 scripts/lib/CodexHostSafety.ps1 tests/Test-CodexSafeTreeDeletePurgeHashReuse.ps1 modules/manifest.json modules/host-safety/CONTEXT.md",
+  "exitCode": 0,
+  "note": "Only CRLF/LF warnings. New test file is untracked and has no check errors."
+}

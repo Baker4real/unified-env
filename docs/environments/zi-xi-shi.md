@@ -23,10 +23,10 @@ intent: 记录自习室设备的受控环境事实与差异
   `PowerShell 7` / `Windows.Terminal.PowershellCore`。系统委派值为
   `DelegationTerminal={E12CFF52-A866-4C77-9A90-F570A7AA2C6B}`、
   `DelegationConsole={2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}`。
-- PowerShell Store 包版本为 `7.6.4.0`，User PATH 已把
-  `D:\Codex\tools\PowerShell\7.6.4` 放在首位。2026-07-23 重启后复核：
-  当前 Codex 进程与 `Get-Command pwsh.exe` 均解析到该目录的 `pwsh.exe`，版本为
-  `7.6.4`，不再有等待重启采用的 PowerShell 路径变更。
+- PowerShell Store 包版本为 `7.6.5.0`，User PATH 已把
+  `D:\Codex\tools\PowerShell\7.6.5` 放在首位。2026-08-18 新进程复核：
+  `Get-Command pwsh.exe` 解析到该目录的 `pwsh.exe`，版本为 `7.6.5`；当前 Codex
+  任务仍由既有 7.6.4 进程承载，需重启 Codex 后才会采用新 runtime。
 - `D:\Codex\.codex\config.toml` 已设
   `integratedTerminalShell = "powershell"`。这表示 Codex 的集成终端使用 PowerShell；
   Codex 内部 PTY 和后台命令仍在应用内或隐藏运行，不应为每条命令新开外部 Windows

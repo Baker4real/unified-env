@@ -71,7 +71,7 @@ $cases = @(
     @{ name = "ninja"; path = "C:\Users\tester\AppData\Local\Microsoft\WinGet\Packages\ninja.exe"; origin = "user-profile"; probe = $true; manual = $true; risk = "high"; entry = "Ninja"; forbidden = @("当前已在 D 盘") }
     @{ name = "wsl"; path = "C:\Windows\System32\wsl.exe"; origin = "windows-system"; probe = $true; manual = $true; risk = "medium"; entry = "WSL"; forbidden = @("当前已在 D 盘") }
     @{ name = "git"; path = "C:\Program Files\Git\cmd\git.exe"; origin = "system-installer"; probe = $true; manual = $true; risk = "medium"; entry = "Git for Windows"; forbidden = @("当前已在 D 盘") }
-    @{ name = "pwsh"; path = "D:\Codex\tools\PowerShell\7.6.4\pwsh.exe"; origin = "shared-tool"; probe = $true; manual = $false; risk = "low"; entry = "PowerShell"; forbidden = @("系统安装目录", "迁到 D 盘") }
+    @{ name = "pwsh"; path = "D:\Codex\tools\PowerShell\7.6.5\pwsh.exe"; origin = "shared-tool"; probe = $true; manual = $false; risk = "low"; entry = "PowerShell"; forbidden = @("系统安装目录", "迁到 D 盘") }
     @{ name = "powershell"; path = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"; origin = "windows-system"; probe = $true; manual = $true; risk = "medium"; entry = "Windows"; forbidden = @("当前已在 D 盘") }
 )
 

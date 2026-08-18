@@ -90,6 +90,30 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 本地 overlay 变更在目标 source 的 `local_changes` 中按 skill 独立记账，每条记录必须包含 `skill`、`date` 和 `summary`，并以 `(skill, summary)` 去重。兼容旧账本时，同摘要且缺少 `skill` 的 legacy 记录只允许依次归属给本次事务中的一个 skill；其余 skill 必须追加完整记录，不能因共享摘要而丢失归因。
 
+### Bundled system provenance atomic repair
+
+`--system-provenance-repair-plan <json>` 是独立的 bootstrap/repair 模式，不进入普通 candidate install/update 分支，也不改变其 full-root closure。它只接受固定顺序的 `imagegen`、`openai-docs`、`plugin-creator`、`review-agent`、`skill-creator`、`skill-installer` 六项，并要求 `codex-bundled-system-skills` 在 unified ledger 中唯一覆盖该精确集合。
+
+Repair plan 必须精确绑定 schema/mode、受管 `system_package_identity.py` 的 SHA-256、当前 `OpenAI.Codex` Store package full name/family/version/publisher、`SignatureKind=Store`、签名 `Valid`、AppX `Ok`、install location、`AppxManifest.xml` 与 `AppxSignature.p7x` 路径和 SHA-256、`.codex-system-skills.marker` 路径和 SHA-256、ledger/catalog 原始 SHA-256，以及六项各自排除 sibling `SOURCE.md` 后的 official/effective tree 与 `SKILL.md` hash。`review-agent` 还必须绑定 `agents/openai.yaml` hash 与 `allow_implicit_invocation: false`；唯一授权的 payload 变化是在 official baseline frontmatter 闭合符前插入 `disable-model-invocation: true`。其余五项 official/effective integrity 必须完全相同。
+
+事务在写前两次核验 repair plan/provider 的 identity+bytes、Store package 路径 identity+hash、marker identity+hash、六目录 identity+tree、critical payload、SOURCE baseline、ledger 和 catalog。随后为六个 SOURCE、`review-agent/SKILL.md`、ledger、catalog 建立同一 evidence backup，原子写 SOURCE/parity/ledger，运行 catalog `--write`、strict closure、catalog/ledger/SOURCE/hash/parity postcondition，并按 plan 执行至少两次稳定性观测。默认 live active root 的观测间隔不得低于 10 秒；该门槛只证明 bounded stability，不把 Codex runtime 进程停掉或改造成受管对象。
+
+任一 schema、package、marker、tree、critical payload、CAS、catalog、closure、postcondition 或稳定性检查失败时，按每个目标的 original/current/written bytes 做 CAS 联合回滚。目标已回到 original bytes 视为已恢复；目标既非 original 也非本事务 written bytes 时保留现场、标记 `rollback-failed` 并写入 evidence。Repair 生成的 SOURCE 只记录已观察的 Store package/marker/hash 与 ledger source-group 事实，不声明未知的 public upstream repo/commit；review-agent 的 SOURCE 与 ledger 同时区分 official baseline 和本机 invocation parity overlay。
+
+普通 `target_scope: "system"` 的 candidate update 不得用 `local_changes` 代替
+system provenance。当前唯一受管的 candidate payload overlay 是
+`system_provenance_overlay.kind = "skill-creator-quick-validate-compatibility"`，
+并且必须绑定 `.system/skill-creator`、Store identity provider SHA-256、
+SOURCE-excluding official/effective tree integrity、恰好三份 critical files
+(`SKILL.md`、`scripts/quick_validate.py`、`scripts/test_quick_validate.py`) 及固定
+契约（`argument-hint` 为 string、`disable-model-invocation` 为 boolean、非字符串
+key 和未知 frontmatter 字段拒绝）。wrapper 在换入前后用目录 identity、payload
+inventory、marker/provider CAS 和 catalog/ledger postcondition 复核；任一检查失败
+按目录与 state CAS 回滚，外部并发字节不被覆盖。ledger 只保存 overlay 的 hash
+projection，不保存候选临时路径或 payload 字节。
+
+受管发布顺序是：源码定向/模块测试通过；`Deploy-SkillInstallGuarded.ps1 -WhatIf` 证明六文件部署闭包；独立 review 通过后才实际部署六文件并核验 deployment manifest/hash；再从当时 live facts 生成新的 repair plan，先 dry-run 后 apply；最后复核稳定性、strict closure、catalog、ledger、六个 SOURCE 与 review parity。只有这些 live 验收通过后，后续任务才可激活依赖该能力的 `subagent-orchestration`；源码存在、WhatIf 或 fixture green 都不等于已部署/已激活。
+
 ## Canonical rename
 
 canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不是“安装新名后手工删除旧名”。manifest 必须额外包含：
@@ -177,4 +201,4 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
 
 部署入口必须以隔离模式验证目标受管 Python 可以导入 PyYAML，并确认 `yaml.safe_load` 可调用；真实 `install-skill-guarded.cmd` 也必须用 `python -X utf8 -I` 启动 wrapper，使部署探针与运行态保持相同的导入隔离，并避免非 UTF-8 Windows runner 在输出中文帮助时触发编码失败。缺失、同名模块劫持或 API 不兼容时不得报告部署成功。
 
-项目源部署闭包的 Python 实现位于 `modules\skill-supply-chain\implementation\`，由 `skill_source_record.py`、`generate_skill_catalog.py`、`install_skill_guarded.py` 组成，command adapter 仍位于根 `scripts\install-skill-guarded.cmd`；根目录 `scripts\` 同时保留稳定 Python adapters，部署脚本从 module implementation 复制 Python runtime 并绑定 command adapter。部署后 installer 与 catalog 从同目录加载共享 `SOURCE.md` parser，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁 module implementation、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。
+项目源部署闭包的 Python 实现位于 `modules\skill-supply-chain\implementation\`，由 `skill_source_record.py`、`generate_skill_catalog.py`、`system_skill_provenance_repair.py`、`system_package_identity.py`、`install_skill_guarded.py` 组成，command adapter 仍位于根 `scripts\install-skill-guarded.cmd`；根目录 `scripts\` 同时保留稳定 Python adapters，部署脚本从 module implementation 复制 Python runtime 并绑定 command adapter。部署后 installer、catalog 与 system repair 从同目录加载各自受管依赖，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁 module implementation、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。

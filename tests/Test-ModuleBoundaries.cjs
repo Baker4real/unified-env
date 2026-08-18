@@ -187,6 +187,8 @@ const skillTestRoot = path.join(PROJECT_ROOT, 'modules', 'skill-supply-chain', '
 for (const fileName of [
   'skill_source_record.py',
   'generate_skill_catalog.py',
+  'system_skill_provenance_repair.py',
+  'system_package_identity.py',
   'install_skill_guarded.py',
   'reconcile_skill_source_records.py',
 ]) {

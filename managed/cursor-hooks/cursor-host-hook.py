@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-PWSH = Path(r"D:\Codex\tools\PowerShell\7.6.4\pwsh.exe")
+PWSH = Path(r"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe")
 GUARD = Path(r"D:\Codex\.codex\hooks\serena-behavior-guard.ps1")
 SERENA_HOOKS = Path(r"D:\Codex\tools\uv\bin\serena-hooks.exe")
 GITHUB_CLI = Path(r"D:\Codex\.codex\hooks\codex-github-cli-guard.ps1")

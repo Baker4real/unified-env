@@ -1,0 +1,15 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue41-scale-10000",
+  "fileCount": 10000,
+  "elapsedMs": 48334,
+  "journalFileCount": 4,
+  "failedCount": 0,
+  "deletedCount": 10000,
+  "TotalFlushTimeMs": 7613,
+  "FlushCount": 20000,
+  "OverheadPercent": 15.75081723010717,
+  "IsWithinTarget": false,
+  "SlowFlushCount": 0,
+  "Warning": "Journal flush overhead is 15.751% (>= 10%). Consider reducing parallelism or checking disk performance.",
+  "method": "four top-level dirs x 2500 tiny files; ParallelPurgeCoordinator File.Delete on issue41 fixture tree only; not production Purge"
+}

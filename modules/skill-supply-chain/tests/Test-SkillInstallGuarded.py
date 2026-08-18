@@ -27,6 +27,12 @@ if SPEC is None or SPEC.loader is None:  # pragma: no cover
     raise RuntimeError(f"无法加载 wrapper：{WRAPPER_PATH}")
 WRAPPER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WRAPPER)
+REPAIR_PATH = IMPLEMENTATION_ROOT / "system_skill_provenance_repair.py"
+REPAIR_SPEC = importlib.util.spec_from_file_location("system_skill_provenance_repair", REPAIR_PATH)
+if REPAIR_SPEC is None or REPAIR_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(f"无法加载 system repair：{REPAIR_PATH}")
+REPAIR = importlib.util.module_from_spec(REPAIR_SPEC)
+REPAIR_SPEC.loader.exec_module(REPAIR)
 SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 SUBPROCESS_TEXT_ENCODING = "oem" if os.name == "nt" else "utf-8"
 
@@ -830,6 +836,760 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(result["target_scope"], "system")
         self.assertEqual(Path(result["target_root"]), self.active / ".system")
+
+    def prepare_system_provenance_repair(self) -> dict[str, object]:
+        names = [
+            "imagegen",
+            "openai-docs",
+            "plugin-creator",
+            "review-agent",
+            "skill-creator",
+            "skill-installer",
+        ]
+        system_root = self.active / ".system"
+        if system_root.exists():
+            shutil.rmtree(system_root)
+        system_root.mkdir()
+        marker = system_root / ".codex-system-skills.marker"
+        marker.write_bytes(b"fixture-marker-v1\n")
+
+        baseline_skill_bytes: dict[str, bytes] = {}
+        for name in names:
+            skill_root = system_root / name
+            skill_root.mkdir()
+            skill_text = (
+                f"---\nname: {name}\ndescription: System repair fixture for {name}.\n"
+                "---\n\n"
+                f"# {name}\n"
+            )
+            skill_path = skill_root / "SKILL.md"
+            skill_path.write_text(skill_text, encoding="utf-8")
+            baseline_skill_bytes[name] = skill_path.read_bytes()
+            if name == "review-agent":
+                agents = skill_root / "agents"
+                agents.mkdir()
+                (agents / "openai.yaml").write_text(
+                    "interface:\n"
+                    '  display_name: "Review Agent"\n'
+                    "policy:\n"
+                    "  allow_implicit_invocation: false\n",
+                    encoding="utf-8",
+                )
+
+        source_root = str(system_root).replace("\\", "/")
+        self.ledger.write_text(
+            json.dumps(
+                {
+                    "updated_at": "2026-08-18",
+                    "notes": [],
+                    "sources": [
+                        {
+                            "id": "codex-bundled-system-skills",
+                            "type": "codex-bundled-system",
+                            "source_root": source_root,
+                            "status": "tracked-bundled-system-skills",
+                            "skills": [f".system/{name}" for name in names],
+                            "local_changes": [],
+                        }
+                    ],
+                    "unresolved": [],
+                    "deleted": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        catalog = self.temp / "catalog.json"
+        catalog.write_bytes(b'{"sentinel":"before"}\n')
+
+        package_full_name = "OpenAI.Codex_26.810.7004.0_x64__fixture"
+        package_root = self.temp / package_full_name
+        if package_root.exists():
+            shutil.rmtree(package_root)
+        package_root.mkdir()
+        manifest_path = package_root / "AppxManifest.xml"
+        signature_path = package_root / "AppxSignature.p7x"
+        manifest_path.write_bytes(b"<Package fixture='system-provenance' />\n")
+        signature_path.write_bytes(b"fixture-valid-store-signature\n")
+        package_identity = {
+            "schema_version": 1,
+            "package_name": "OpenAI.Codex",
+            "package_full_name": package_full_name,
+            "package_family_name": "OpenAI.Codex_fixture",
+            "version": "26.810.7004.0",
+            "publisher": "CN=FIXTURE",
+            "signature_kind": "Store",
+            "signature_status": "Valid",
+            "appx_status": "Ok",
+            "install_location": str(package_root),
+            "appx_manifest_path": str(manifest_path),
+            "appx_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+            "appx_signature_path": str(signature_path),
+            "appx_signature_sha256": hashlib.sha256(signature_path.read_bytes()).hexdigest(),
+        }
+        provider = self.temp / "fixture_system_package_provider.py"
+        provider.write_text(
+            "import json\n"
+            f"print(json.dumps({package_identity!r}))\n",
+            encoding="utf-8",
+        )
+
+        skills: list[dict[str, object]] = []
+        for name in names:
+            skill_root = system_root / name
+            official = WRAPPER.candidate_integrity_payload(skill_root)
+            overlay: dict[str, object] = {"kind": "none"}
+            effective = dict(official)
+            critical_files: dict[str, str] = {}
+            if name == "review-agent":
+                parity_path = skill_root / "agents" / "openai.yaml"
+                critical_files["agents/openai.yaml"] = WRAPPER.sha256_file(parity_path)
+                baseline_text = baseline_skill_bytes[name].decode("utf-8")
+                newline = "\r\n" if "\r\n" in baseline_text else "\n"
+                patched_text = baseline_text.replace(
+                    f"---{newline}{newline}# review-agent",
+                    f"disable-model-invocation: true{newline}---{newline}{newline}# review-agent",
+                    1,
+                )
+                (skill_root / "SKILL.md").write_bytes(patched_text.encode("utf-8"))
+                effective = WRAPPER.candidate_integrity_payload(skill_root)
+                (skill_root / "SKILL.md").write_bytes(baseline_skill_bytes[name])
+                overlay = {
+                    "kind": "review-agent-invocation-parity",
+                    "disable_model_invocation": True,
+                    "allow_implicit_invocation": False,
+                    "parity_file": "agents/openai.yaml",
+                }
+            skills.append(
+                {
+                    "name": name,
+                    "source_before_sha256": None,
+                    "official_integrity": official,
+                    "effective_integrity": effective,
+                    "critical_files": critical_files,
+                    "overlay": overlay,
+                }
+            )
+
+        plan = self.temp / "system-provenance-repair-plan.json"
+        plan.write_text(
+            json.dumps(
+                {
+                    "artifact_type": "codex.system-skill-provenance-repair",
+                    "schema_version": 1,
+                    "mode": "atomic-six-skill-bootstrap",
+                    "source_group_id": "codex-bundled-system-skills",
+                    "package_identity_provider_sha256": hashlib.sha256(
+                        provider.read_bytes()
+                    ).hexdigest(),
+                    "package_identity": package_identity,
+                    "marker": {
+                        "relative_path": ".system/.codex-system-skills.marker",
+                        "sha256": hashlib.sha256(marker.read_bytes()).hexdigest(),
+                    },
+                    "ledger_before_sha256": hashlib.sha256(
+                        self.ledger.read_bytes()
+                    ).hexdigest(),
+                    "catalog_before_sha256": hashlib.sha256(
+                        catalog.read_bytes()
+                    ).hexdigest(),
+                    "stability_check": {"observations": 2, "interval_seconds": 0},
+                    "skills": skills,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "names": names,
+            "system_root": system_root,
+            "marker": marker,
+            "provider": provider,
+            "package_identity": package_identity,
+            "plan": plan,
+            "catalog": catalog,
+            "baseline_skill_bytes": baseline_skill_bytes,
+        }
+
+    def system_provenance_repair_args(
+        self,
+        state: dict[str, object],
+        *,
+        generator: Path | None = None,
+    ) -> list[str]:
+        return [
+            "--system-provenance-repair-plan",
+            str(state["plan"]),
+            "--system-package-provider",
+            str(state["provider"]),
+            "--active-root",
+            str(self.active),
+            "--plugin-cache-root",
+            str(self.plugin_cache),
+            "--ledger",
+            str(self.ledger),
+            "--catalog",
+            str(state["catalog"]),
+            "--generator",
+            str(generator or self.generator),
+            "--closure-script",
+            str(self.closure),
+            "--python",
+            str(self.interpreter),
+            "--temp-root",
+            str(self.temp / "staging"),
+            "--lock-root",
+            str(self.temp / "lock"),
+            "--evidence-root",
+            str(self.temp / "evidence"),
+        ]
+
+    def prepare_skill_creator_compatibility_overlay(self) -> dict[str, object]:
+        state = self.prepare_system_provenance_repair()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                WRAPPER.main(self.system_provenance_repair_args(state)),
+                0,
+            )
+        active_skill = Path(state["system_root"]) / "skill-creator"
+        scripts = active_skill / "scripts"
+        scripts.mkdir()
+        (scripts / "quick_validate.py").write_text(
+            "# official quick validator\nLEGACY = True\n",
+            encoding="utf-8",
+        )
+        (scripts / "test_quick_validate.py").write_text(
+            "# official quick validator tests\nLEGACY = True\n",
+            encoding="utf-8",
+        )
+        candidate = self.temp / "candidate-skill-creator"
+        shutil.copytree(active_skill, candidate)
+        (candidate / "SKILL.md").write_text(
+            "---\n"
+            "name: skill-creator\n"
+            "description: fixture\n"
+            "argument-hint: \"What should this skill do?\"\n"
+            "disable-model-invocation: false\n"
+            "---\n\n# skill-creator\n",
+            encoding="utf-8",
+        )
+        (candidate / "scripts" / "quick_validate.py").write_text(
+            "# compatibility quick validator\n"
+            "ALLOWED = {'argument-hint', 'disable-model-invocation'}\n",
+            encoding="utf-8",
+        )
+        (candidate / "scripts" / "test_quick_validate.py").write_text(
+            "# compatibility quick validator tests\n"
+            "assert {'argument-hint', 'disable-model-invocation'}\n",
+            encoding="utf-8",
+        )
+        official = REPAIR.system_skill_integrity(active_skill)
+        effective = REPAIR.system_skill_integrity(candidate)
+        critical = {
+            relative: hashlib.sha256(
+                (candidate / Path(*relative.split("/"))).read_bytes()
+            ).hexdigest()
+            for relative in REPAIR.SKILL_CREATOR_CRITICAL_FILES
+        }
+        manifest = self.write_manifest(
+            "skill-creator",
+            "update",
+            source_id="codex-bundled-system-skills",
+        )
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["target_scope"] = "system"
+        payload["source"]["ref"] = "unversioned-codex-bundled-system"
+        payload["local_overlay"] = {
+            "status": "replayed",
+            "summary": "skill-creator quick_validate compatibility overlay",
+        }
+        payload["system_provenance_overlay"] = {
+            "schema_version": 1,
+            "kind": REPAIR.SKILL_CREATOR_OVERLAY_KIND,
+            "skill": REPAIR.SKILL_CREATOR_OVERLAY_SKILL,
+            "package_identity_provider_sha256": hashlib.sha256(
+                Path(state["provider"]).read_bytes()
+            ).hexdigest(),
+            "official_integrity": official,
+            "effective_integrity": effective,
+            "critical_files": critical,
+            "contract": REPAIR.SKILL_CREATOR_OVERLAY_CONTRACT,
+        }
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        args = self.wrapper_args(candidate, manifest, name="skill-creator")
+        args.extend(["--system-package-provider", str(state["provider"])])
+        return {
+            "state": state,
+            "candidate": candidate,
+            "manifest": manifest,
+            "args": args,
+            "official": official,
+            "effective": effective,
+            "critical": critical,
+        }
+
+    def test_system_provenance_repair_commits_six_skills_atomically(self) -> None:
+        state = self.prepare_system_provenance_repair()
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(self.system_provenance_repair_args(state))
+
+        self.assertEqual(code, 0)
+        system_root = Path(state["system_root"])
+        for name in state["names"]:
+            self.assertTrue((system_root / name / "SOURCE.md").is_file())
+        review_text = (system_root / "review-agent" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("disable-model-invocation: true", review_text)
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        source = ledger["sources"][0]
+        self.assertEqual(source["id"], "codex-bundled-system-skills")
+        self.assertEqual(source["system_provenance"]["schema_version"], 1)
+        self.assertEqual(len(source["system_provenance"]["skills"]), 6)
+        catalog = json.loads(Path(state["catalog"]).read_text(encoding="utf-8"))
+        repaired = [
+            item
+            for item in catalog["artifacts"]
+            if item.get("relative_path", "").startswith(".system/")
+        ]
+        self.assertEqual(len(repaired), 6)
+        self.assertTrue(all(item["ledger_coverage"] == "pass" for item in repaired))
+        review = next(item for item in repaired if item["name"] == "review-agent")
+        self.assertEqual(review["invocation"]["mode"], "user-invoked")
+        self.assertFalse(review["invocation"]["allow_implicit_invocation"])
+        transaction = max((self.temp / "evidence").glob("system-provenance-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["targets"], state["names"])
+
+    def test_skill_creator_compatibility_overlay_updates_provenance_atomically(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay()
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(state["args"])
+        self.assertEqual(code, 0)
+        active_skill = Path(state["state"]["system_root"]) / "skill-creator"
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        source = next(item for item in ledger["sources"] if item["id"] == "codex-bundled-system-skills")
+        record = next(item for item in source["system_provenance"]["skills"] if item["name"] == "skill-creator")
+        overlay = json.loads(Path(state["manifest"]).read_text(encoding="utf-8"))["system_provenance_overlay"]
+        self.assertEqual(record["official_integrity"], overlay["official_integrity"])
+        self.assertEqual(record["effective_integrity"], overlay["effective_integrity"])
+        self.assertEqual(record["critical_files"], overlay["critical_files"])
+        self.assertEqual(record["overlay"]["kind"], REPAIR.SKILL_CREATOR_OVERLAY_KIND)
+        self.assertEqual(record["overlay"]["payload_files"], overlay["critical_files"])
+        self.assertEqual(
+            record["source_md_sha256"],
+            hashlib.sha256((active_skill / "SOURCE.md").read_bytes()).hexdigest(),
+        )
+        self.assertTrue(
+            any(
+                item.get("skill") == ".system/skill-creator"
+                and "quick_validate" in item.get("summary", "")
+                for item in source["local_changes"]
+            )
+        )
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(
+            result["system_provenance_overlay_postcondition"]["overlay"]["kind"],
+            REPAIR.SKILL_CREATOR_OVERLAY_KIND,
+        )
+
+    def test_skill_creator_update_without_managed_overlay_fails_closed(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay()
+        manifest = Path(state["manifest"])
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload.pop("system_provenance_overlay")
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        before = self.ledger.read_bytes()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(state["args"])
+        self.assertEqual(code, 2)
+        self.assertIn("system_provenance_overlay", stderr.getvalue())
+        self.assertEqual(self.ledger.read_bytes(), before)
+
+    def test_skill_creator_overlay_rejects_non_target_and_critical_drift(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay()
+        manifest = Path(state["manifest"])
+        original = json.loads(manifest.read_text(encoding="utf-8"))
+        for label, mutate in (
+            (
+                "wrong-kind",
+                lambda value: value["system_provenance_overlay"].update(
+                    {"kind": "review-agent-invocation-parity"}
+                ),
+            ),
+            (
+                "extra-file",
+                lambda value: value["system_provenance_overlay"]["critical_files"].update(
+                    {"references/extra.md": "0" * 64}
+                ),
+            ),
+        ):
+            with self.subTest(label=label):
+                manifest.write_text(json.dumps(original, ensure_ascii=False), encoding="utf-8")
+                changed = json.loads(manifest.read_text(encoding="utf-8"))
+                mutate(changed)
+                manifest.write_text(json.dumps(changed, ensure_ascii=False), encoding="utf-8")
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+                    code = WRAPPER.main(state["args"])
+                self.assertEqual(code, 2)
+                self.assertIn("overlay", stderr.getvalue())
+
+    def test_skill_creator_overlay_generator_failure_rolls_back_payload_and_state(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay()
+        active_skill = Path(state["state"]["system_root"]) / "skill-creator"
+        before = {
+            "skill": REPAIR.system_skill_payload_inventory(active_skill),
+            "ledger": self.ledger.read_bytes(),
+            "catalog": Path(state["state"]["catalog"]).read_bytes(),
+        }
+        failing_generator = self.temp / "overlay-failing-generator.py"
+        failing_generator.write_text("raise SystemExit(29)\n", encoding="utf-8")
+        args = list(state["args"])
+        args[args.index("--generator") + 1] = str(failing_generator)
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(args)
+        self.assertEqual(code, 2)
+        self.assertEqual(REPAIR.system_skill_payload_inventory(active_skill), before["skill"])
+        self.assertEqual(self.ledger.read_bytes(), before["ledger"])
+        self.assertEqual(Path(state["state"]["catalog"]).read_bytes(), before["catalog"])
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "rolled-back")
+
+    def test_skill_creator_overlay_rejects_active_drift_before_swap(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay()
+        active_skill = Path(state["state"]["system_root"]) / "skill-creator"
+        before_ledger = self.ledger.read_bytes()
+        original_stage = WRAPPER.stage_candidate
+
+        def stage_then_drift(*args: object, **kwargs: object) -> dict[str, object]:
+            staged = original_stage(*args, **kwargs)
+            (active_skill / "scripts" / "quick_validate.py").write_text(
+                "# concurrent mutation\n",
+                encoding="utf-8",
+            )
+            return staged
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(WRAPPER, "stage_candidate", side_effect=stage_then_drift),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            code = WRAPPER.main(state["args"])
+        self.assertEqual(code, 2)
+        self.assertIn("active payload changed", stderr.getvalue())
+        self.assertEqual(self.ledger.read_bytes(), before_ledger)
+        self.assertEqual(
+            (active_skill / "scripts" / "quick_validate.py").read_text(encoding="utf-8"),
+            "# concurrent mutation\n",
+        )
+
+    def test_skill_creator_overlay_live_readback_catches_post_generation_payload_drift(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay()
+        active_skill = Path(state["state"]["system_root"]) / "skill-creator"
+        tampering_generator = self.temp / "overlay-tampering-generator.py"
+        tampering_generator.write_text(
+            "import subprocess, sys\n"
+            "from pathlib import Path\n"
+            f"generator = Path({str(self.generator)!r})\n"
+            f"target = Path({str(active_skill / 'scripts' / 'quick_validate.py')!r})\n"
+            "result = subprocess.run([sys.executable, str(generator), *sys.argv[1:]], capture_output=True)\n"
+            "sys.stdout.buffer.write(result.stdout)\n"
+            "sys.stderr.buffer.write(result.stderr)\n"
+            "if result.returncode == 0:\n"
+            "    target.write_text('# post-generation concurrent mutation\\n', encoding='utf-8')\n"
+            "raise SystemExit(result.returncode)\n",
+            encoding="utf-8",
+        )
+        args = list(state["args"])
+        args[args.index("--generator") + 1] = str(tampering_generator)
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(args)
+        self.assertEqual(code, 2)
+        self.assertIn("effective integrity", stderr.getvalue())
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "rollback-failed")
+
+    def test_system_provenance_repair_detects_package_identity_replacement_and_rolls_back(
+        self,
+    ) -> None:
+        state = self.prepare_system_provenance_repair()
+        system_root = Path(state["system_root"])
+        before = {
+            "review": (system_root / "review-agent" / "SKILL.md").read_bytes(),
+            "ledger": self.ledger.read_bytes(),
+            "catalog": Path(state["catalog"]).read_bytes(),
+        }
+        manifest_path = Path(state["package_identity"]["appx_manifest_path"])
+        replacement_generator = self.temp / "replace-package-identity-generator.py"
+        replacement_generator.write_text(
+            "import os, subprocess, sys, uuid\n"
+            "from pathlib import Path\n"
+            f"generator = Path({str(self.generator)!r})\n"
+            f"manifest = Path({str(manifest_path)!r})\n"
+            "result = subprocess.run([sys.executable, '-X', 'utf8', '-I', str(generator), *sys.argv[1:]], capture_output=True)\n"
+            "sys.stdout.buffer.write(result.stdout)\n"
+            "sys.stderr.buffer.write(result.stderr)\n"
+            "if result.returncode == 0:\n"
+            "    temporary = manifest.with_name('.' + manifest.name + '.' + uuid.uuid4().hex + '.tmp')\n"
+            "    temporary.write_bytes(manifest.read_bytes())\n"
+            "    os.replace(temporary, manifest)\n"
+            "raise SystemExit(result.returncode)\n",
+            encoding="utf-8",
+        )
+
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = WRAPPER.main(
+                self.system_provenance_repair_args(
+                    state,
+                    generator=replacement_generator,
+                )
+            )
+
+        self.assertEqual(code, 2)
+        for name in state["names"]:
+            self.assertFalse((system_root / name / "SOURCE.md").exists())
+        self.assertEqual(
+            (system_root / "review-agent" / "SKILL.md").read_bytes(), before["review"]
+        )
+        self.assertEqual(self.ledger.read_bytes(), before["ledger"])
+        self.assertEqual(Path(state["catalog"]).read_bytes(), before["catalog"])
+        transaction = max((self.temp / "evidence").glob("system-provenance-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "rolled-back")
+
+    def test_system_provenance_repair_rejects_plan_schema_drift_before_write(
+        self,
+    ) -> None:
+        state = self.prepare_system_provenance_repair()
+        system_root = Path(state["system_root"])
+        before = {
+            "review": (system_root / "review-agent" / "SKILL.md").read_bytes(),
+            "ledger": self.ledger.read_bytes(),
+            "catalog": Path(state["catalog"]).read_bytes(),
+        }
+        provider = Path(state["provider"])
+        plan = Path(state["plan"])
+        count_path = self.temp / "provider-call-count.txt"
+        provider.write_text(
+            "import json\n"
+            "from pathlib import Path\n"
+            f"plan = Path({str(plan)!r})\n"
+            f"count_path = Path({str(count_path)!r})\n"
+            "count = int(count_path.read_text()) + 1 if count_path.exists() else 1\n"
+            "count_path.write_text(str(count))\n"
+            "if count == 2:\n"
+            "    value = json.loads(plan.read_text(encoding='utf-8'))\n"
+            "    value['schema_version'] = 2\n"
+            "    plan.write_text(json.dumps(value), encoding='utf-8')\n"
+            f"print(json.dumps({state['package_identity']!r}))\n",
+            encoding="utf-8",
+        )
+        plan_value = json.loads(plan.read_text(encoding="utf-8"))
+        plan_value["package_identity_provider_sha256"] = hashlib.sha256(
+            provider.read_bytes()
+        ).hexdigest()
+        plan.write_text(json.dumps(plan_value, ensure_ascii=False), encoding="utf-8")
+
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = WRAPPER.main(self.system_provenance_repair_args(state))
+
+        self.assertEqual(code, 2)
+        for name in state["names"]:
+            self.assertFalse((system_root / name / "SOURCE.md").exists())
+        self.assertEqual(
+            (system_root / "review-agent" / "SKILL.md").read_bytes(), before["review"]
+        )
+        self.assertEqual(self.ledger.read_bytes(), before["ledger"])
+        self.assertEqual(Path(state["catalog"]).read_bytes(), before["catalog"])
+
+    def test_system_provenance_repair_mismatches_preserve_all_target_bytes(
+        self,
+    ) -> None:
+        state = self.prepare_system_provenance_repair()
+        system_root = Path(state["system_root"])
+        plan = Path(state["plan"])
+        original_plan = json.loads(plan.read_text(encoding="utf-8"))
+        before = {
+            "review": (system_root / "review-agent" / "SKILL.md").read_bytes(),
+            "ledger": self.ledger.read_bytes(),
+            "catalog": Path(state["catalog"]).read_bytes(),
+        }
+
+        def package_mismatch(value: dict[str, object]) -> None:
+            value["package_identity"]["version"] = "26.810.7004.1"
+
+        def marker_mismatch(value: dict[str, object]) -> None:
+            value["marker"]["sha256"] = "0" * 64
+
+        def tree_mismatch(value: dict[str, object]) -> None:
+            value["skills"][0]["official_integrity"]["tree_sha256"] = "0" * 64
+
+        def schema_mismatch(value: dict[str, object]) -> None:
+            value["schema_version"] = 2
+
+        for label, mutate in (
+            ("package", package_mismatch),
+            ("marker", marker_mismatch),
+            ("tree", tree_mismatch),
+            ("schema", schema_mismatch),
+        ):
+            with self.subTest(label=label):
+                changed = json.loads(json.dumps(original_plan))
+                mutate(changed)
+                plan.write_text(json.dumps(changed), encoding="utf-8")
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    code = WRAPPER.main(self.system_provenance_repair_args(state))
+                self.assertEqual(code, 2)
+                for name in state["names"]:
+                    self.assertFalse((system_root / name / "SOURCE.md").exists())
+                self.assertEqual(
+                    (system_root / "review-agent" / "SKILL.md").read_bytes(),
+                    before["review"],
+                )
+                self.assertEqual(self.ledger.read_bytes(), before["ledger"])
+                self.assertEqual(Path(state["catalog"]).read_bytes(), before["catalog"])
+        plan.write_text(json.dumps(original_plan, ensure_ascii=False), encoding="utf-8")
+
+    def test_system_provenance_repair_injected_failure_restores_all_target_bytes(
+        self,
+    ) -> None:
+        state = self.prepare_system_provenance_repair()
+        system_root = Path(state["system_root"])
+        before = {
+            "review": (system_root / "review-agent" / "SKILL.md").read_bytes(),
+            "ledger": self.ledger.read_bytes(),
+            "catalog": Path(state["catalog"]).read_bytes(),
+        }
+        failing_generator = self.temp / "failing-catalog-generator.py"
+        failing_generator.write_text("raise SystemExit(23)\n", encoding="utf-8")
+
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = WRAPPER.main(
+                self.system_provenance_repair_args(
+                    state,
+                    generator=failing_generator,
+                )
+            )
+
+        self.assertEqual(code, 2)
+        for name in state["names"]:
+            self.assertFalse((system_root / name / "SOURCE.md").exists())
+        self.assertEqual(
+            (system_root / "review-agent" / "SKILL.md").read_bytes(), before["review"]
+        )
+        self.assertEqual(self.ledger.read_bytes(), before["ledger"])
+        self.assertEqual(Path(state["catalog"]).read_bytes(), before["catalog"])
+        transaction = max((self.temp / "evidence").glob("system-provenance-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "rolled-back")
+        self.assertEqual(len(result["backups"]), 9)
+        self.assertEqual(result["rollback_errors"], [])
+
+    def test_system_provenance_repair_rejects_post_generation_state_drift(self) -> None:
+        state = self.prepare_system_provenance_repair()
+        generator = self.temp / "post-generation-ledger.py"
+        generator.write_text(
+            "import subprocess, sys\n"
+            "from pathlib import Path\n"
+            f"result = subprocess.run([sys.executable, '-X', 'utf8', '-I', {str(self.generator)!r}, *sys.argv[1:]], capture_output=True)\n"
+            "sys.stdout.buffer.write(result.stdout); sys.stderr.buffer.write(result.stderr)\n"
+            f"Path({str(self.ledger)!r}).write_bytes(Path({str(self.ledger)!r}).read_bytes() + b'\\n')\n"
+            "raise SystemExit(result.returncode)\n",
+            encoding="utf-8",
+        )
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = WRAPPER.main(self.system_provenance_repair_args(state, generator=generator))
+        self.assertEqual(code, 2)
+        self.assertFalse((Path(state["system_root"]) / "review-agent" / "SOURCE.md").exists())
+
+    def test_system_provenance_repair_rejects_post_generation_catalog_drift(self) -> None:
+        state = self.prepare_system_provenance_repair()
+        generator = self.temp / "post-generation-catalog.py"
+        generator.write_text(
+            "import json, subprocess, sys\n"
+            "from pathlib import Path\n"
+            f"result = subprocess.run([sys.executable, '-X', 'utf8', '-I', {str(self.generator)!r}, *sys.argv[1:]], capture_output=True)\n"
+            "sys.stdout.buffer.write(result.stdout); sys.stderr.buffer.write(result.stderr)\n"
+            f"value = json.loads(Path({str(state['catalog'])!r}).read_text()); value['tampered'] = True; Path({str(state['catalog'])!r}).write_text(json.dumps(value), encoding='utf-8')\n"
+            "raise SystemExit(result.returncode)\n",
+            encoding="utf-8",
+        )
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = WRAPPER.main(self.system_provenance_repair_args(state, generator=generator))
+        self.assertEqual(code, 2)
+        self.assertFalse((Path(state["system_root"]) / "review-agent" / "SOURCE.md").exists())
+
+    def test_system_provenance_repair_malformed_preflight_is_structured_fail_closed(self) -> None:
+        state = self.prepare_system_provenance_repair()
+        parity_path = Path(state["system_root"]) / "review-agent" / "agents" / "openai.yaml"
+        parity_path.write_text("policy: null\n", encoding="utf-8")
+        plan = json.loads(Path(state["plan"]).read_text(encoding="utf-8"))
+        plan["skills"][3]["critical_files"]["agents/openai.yaml"] = hashlib.sha256(parity_path.read_bytes()).hexdigest()
+        Path(state["plan"]).write_text(json.dumps(plan), encoding="utf-8")
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.system_provenance_repair_args(state))
+        self.assertEqual(code, 2)
+        self.assertIn('"ok": false', stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_system_provenance_repair_malformed_ledger_is_structured_fail_closed(self) -> None:
+        state = self.prepare_system_provenance_repair()
+        ledger_value = json.loads(self.ledger.read_text(encoding="utf-8"))
+        ledger_value["sources"][0]["skills"] = [{"bad": "unhashable"}]
+        self.ledger.write_text(json.dumps(ledger_value), encoding="utf-8")
+        plan = json.loads(Path(state["plan"]).read_text(encoding="utf-8"))
+        plan["ledger_before_sha256"] = hashlib.sha256(self.ledger.read_bytes()).hexdigest()
+        Path(state["plan"]).write_text(json.dumps(plan), encoding="utf-8")
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.system_provenance_repair_args(state))
+        self.assertEqual(code, 2)
+        self.assertIn('"ok": false', stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_review_overlay_preserves_utf8_bom(self) -> None:
+        state = self.prepare_system_provenance_repair()
+        path = Path(state["system_root"]) / "review-agent" / "SKILL.md"
+        baseline = b"\xef\xbb\xbf---\nname: review-agent\ndescription: fixture\n---\n\n# review-agent\n"
+        path.write_bytes(baseline)
+        patched = REPAIR._review_overlay_bytes(path, baseline)
+        self.assertTrue(patched.startswith(b"\xef\xbb\xbf"))
+        self.assertIn(b"disable-model-invocation: true", patched)
+
+    def test_system_repair_rejects_ordinary_cli_options(self) -> None:
+        for option, value in (("--system-installer", str(self.temp / "installer.ps1")), ("--ref", "main"), ("--method", "auto")):
+            with self.subTest(option=option):
+                state = self.prepare_system_provenance_repair()
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+                    code = WRAPPER.main(self.system_provenance_repair_args(state) + [option, value])
+                self.assertEqual(code, 2)
+                self.assertIn("不能与普通 install/update 参数混用", stderr.getvalue())
 
     def test_update_refreshes_repo_stars_and_preserves_existing_source_fields(self) -> None:
         name = "test-skill-wrapper"

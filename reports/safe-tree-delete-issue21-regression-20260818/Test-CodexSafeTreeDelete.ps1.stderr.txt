@@ -1,0 +1,5 @@
+Exception: D:\Codex\projects\统一环境\tests\Test-CodexSafeTreeDelete.ps1:56
+Line |
+  56 |      if (-not $Condition) { throw $Message }
+     |                             ~~~~~~~~~~~~~~
+     | purging transaction 内容漂移必须返回稳定原因

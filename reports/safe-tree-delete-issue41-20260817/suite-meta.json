@@ -1,0 +1,18 @@
+{
+  "suite": "Test-CodexSafeTreeDeleteJournalPerformance.ps1",
+  "issue": 41,
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteJournalPerformance.ps1",
+  "startedAtUtc": "2026-08-17T17:16:33.1837993Z",
+  "finishedAtUtc": "2026-08-17T17:16:33.1837993Z",
+  "exitCode": 0,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue41-20260817\\Test-CodexSafeTreeDeleteJournalPerformance.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue41-20260817\\Test-CodexSafeTreeDeleteJournalPerformance.stderr.txt",
+  "scaleOverheadPercent": 14.88723292007386,
+  "scaleIsWithinTarget": false,
+  "scaleTotalFlushTimeMs": 9030,
+  "scaleElapsedMs": 60656,
+  "scaleFlushCount": 20000,
+  "gate": "BLOCKED",
+  "note": "exitCode/stdout from live pwsh after restoring Flush(true); timestamps are closeout write time."
+}

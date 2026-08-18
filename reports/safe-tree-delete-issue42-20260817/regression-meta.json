@@ -1,0 +1,57 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-regressions",
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "suites": [
+    {
+      "suite": "Test-CodexSafeTreeDeleteHashSafely.ps1",
+      "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteHashSafely.ps1",
+      "startedAtUtc": "2026-08-16T22:26:45.7641846Z",
+      "finishedAtUtc": "2026-08-16T22:26:46.9821411Z",
+      "exitCode": 0,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260817\\regressions\\Test-CodexSafeTreeDeleteHashSafely.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260817\\regressions\\Test-CodexSafeTreeDeleteHashSafely.stderr.txt",
+      "reran": true
+    },
+    {
+      "suite": "Test-CodexSafeTreeDeleteCrashSafety.ps1",
+      "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteCrashSafety.ps1",
+      "startedAtUtc": "2026-08-16T22:26:46.9896484Z",
+      "finishedAtUtc": "2026-08-16T22:27:19.6289224Z",
+      "exitCode": 0,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260817\\regressions\\Test-CodexSafeTreeDeleteCrashSafety.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260817\\regressions\\Test-CodexSafeTreeDeleteCrashSafety.stderr.txt",
+      "reran": true
+    },
+    {
+      "suite": "Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+      "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+      "startedAtUtc": "2026-08-16T22:27:19.6299401Z",
+      "finishedAtUtc": "2026-08-16T22:27:27.1226047Z",
+      "exitCode": 0,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260817\\regressions\\Test-CodexSafeTreeDeleteUncertainRecovery.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260817\\regressions\\Test-CodexSafeTreeDeleteUncertainRecovery.stderr.txt",
+      "reran": true
+    },
+    {
+      "suite": "Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+      "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+      "startedAtUtc": "2026-08-16T22:27:27.1232155Z",
+      "finishedAtUtc": "2026-08-16T22:27:38.5892242Z",
+      "exitCode": 0,
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260817\\regressions\\Test-CodexSafeTreeDeleteLeafStreamSet.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260817\\regressions\\Test-CodexSafeTreeDeleteLeafStreamSet.stderr.txt",
+      "reran": true
+    }
+  ],
+  "journalPerformance": {
+    "suite": "Test-CodexSafeTreeDeleteJournalPerformance.ps1",
+    "reran": false,
+    "reason": "cite #41 already-green meta; 10k overhead 18.659% IsWithinTarget=false; not rerun",
+    "citedMetaPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue41-20260817\\suite-meta.json",
+    "citedScalePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue41-20260817\\scale-10000.json",
+    "citedExitCode": 0,
+    "citedOverheadPercent": 18.659458802806206,
+    "citedIsWithinTarget": false
+  },
+  "allReranPassed": true
+}

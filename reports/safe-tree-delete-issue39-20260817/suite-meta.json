@@ -1,0 +1,11 @@
+{
+  "suite": "Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1",
+  "issue": 39,
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1",
+  "startedAtUtc": "2026-08-16T20:26:01.2678430Z",
+  "finishedAtUtc": "2026-08-16T20:26:36.6476317Z",
+  "exitCode": 0,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue39-20260817\\Test-CodexSafeTreeDeleteParallelPurgeCoordinator.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue39-20260817\\Test-CodexSafeTreeDeleteParallelPurgeCoordinator.stderr.txt"
+}

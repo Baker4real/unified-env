@@ -1,0 +1,19 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-apply-lease-reuse-slice",
+  "suite": "Test-CodexSafeTreeDeleteHashReuse.ps1",
+  "flags": ["SkipScale"],
+  "ok": true,
+  "exitCode": 0,
+  "assertions": [
+    "Get-CodexHookCapabilityDirectoryTreeSnapshot FileContentHashProvider receives live 4th-arg lease and can ComputeSha256FromHandle",
+    "Invoke-CodexSafeTreeDeleteApplyFileHash -Lease succeeds while SafeTreeDeleteFileLease is still held",
+    "lease miss writes SessionHashCache; second call cache-hits without rereading content"
+  ],
+  "hashSafely": {
+    "suite": "Test-CodexSafeTreeDeleteHashSafely.ps1",
+    "ok": true,
+    "exitCode": 0,
+    "slices": 7,
+    "note": "first attempt hit the existing concurrent writer-probe race (GetHashSafely exclusive open lost to probe); retry passed. FileShare.None unchanged."
+  }
+}

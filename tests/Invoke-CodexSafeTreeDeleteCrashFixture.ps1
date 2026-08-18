@@ -14,7 +14,8 @@ param(
         'CommitPublishReturnFailure',
         'FailFastAfterCommit',
         'FailFastAfterPending',
-        'FailFastAfterLeafDelete')]
+        'FailFastAfterLeafDelete',
+        'FailFastAfterLeafDispositionsPublish')]
     [string]$Scenario
 )
 
@@ -230,10 +231,25 @@ $leafCheckpoint = {
     [Environment]::FailFast('safe-delete crash fixture after leaf delete')
 }
 
+$publishCheckpoint = {
+    param([string]$Path, [string]$Sha256)
+
+    if ($Scenario -cne 'FailFastAfterLeafDispositionsPublish') { return }
+    $markerValue = [pscustomobject][ordered]@{
+        path = $Path
+        sha256 = $Sha256
+    } | ConvertTo-Json -Compress
+    Write-DurableMarker `
+        -Path (Join-Path $MarkerRoot 'after-leaf-dispositions-publish.marker') `
+        -Value $markerValue
+    [Environment]::FailFast('safe-delete crash fixture after leaf dispositions publish')
+}
+
 Invoke-CodexSafeTreeDeletePurge `
     -TransactionPath $TransactionPath `
     -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
     -PolicyPath $FixturePolicyPath `
     -EvidenceRoot $FixtureEvidenceRoot `
     -DirectoryDeleteCheckpointForTest $checkpoint `
-    -LeafDeleteCheckpointForTest $leafCheckpoint
+    -LeafDeleteCheckpointForTest $leafCheckpoint `
+    -AfterLeafDispositionsPublishForTest $publishCheckpoint

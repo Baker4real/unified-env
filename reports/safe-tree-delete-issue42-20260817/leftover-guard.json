@@ -1,0 +1,8 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-leftover-guard",
+  "quarantineExists": true,
+  "transactionExists": true,
+  "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine",
+  "transactionPath": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\\transaction.json",
+  "touched": false
+}

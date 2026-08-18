@@ -58,7 +58,7 @@ function New-Fixture([switch]$Scale,[switch]$FileCandidate,[switch]$NoOp) {
     [pscustomobject]@{Root=$root;Home=$fixtureHome;StatePath=$statePath;CandidateRoot=$candidate}
 }
 function Invoke-Entry([string[]]$Arguments,[hashtable]$Environment=@{}) {
-    Invoke-HiddenProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -Arguments (@('-NoProfile','-File',$Entry)+$Arguments) -Environment $Environment
+    Invoke-HiddenProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -Arguments (@('-NoProfile','-File',$Entry)+$Arguments) -Environment $Environment
 }
 function Read-Result($Run){if($Run.ExitCode-ne 0){throw "command failed: $($Run.Text)"};$Run.Text|ConvertFrom-Json -Depth 64}
 function Assert-SingleJsonFailure($Run,[string]$Label) {
@@ -77,7 +77,7 @@ if($helperStart-lt0-or$helperEnd-le$helperStart){throw 'hidden process helper is
 $helperSource=$testSource.Substring($helperStart,$helperEnd-$helperStart)
 if($helperSource-cnotmatch'UseShellExecute\s*=\s*\$false'-or$helperSource-cnotmatch'CreateNoWindow\s*=\s*\$true'){throw 'hardening child processes must be hidden'}
 $startProcessPattern='Start-'+'Process\s+cmd\.exe';if($testSource-cmatch$startProcessPattern){throw 'hardening test must not use Start-Process for cmd'}
-$directPwshPattern='&\s*'+[regex]::Escape("'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'");if($testSource-cmatch$directPwshPattern){throw 'hardening test must not directly invoke pwsh'}
+$directPwshPattern='&\s*'+[regex]::Escape("'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'");if($testSource-cmatch$directPwshPattern){throw 'hardening test must not directly invoke pwsh'}
 
 $f=$null
 try{

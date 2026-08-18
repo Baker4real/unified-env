@@ -1,0 +1,57 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue36-suite-meta",
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "note": "exit codes and timestamps from the live 2026-08-16 run; invoke-issue36.ps1 first write nested Write-Output strings into suites[]; this file is the flattened record of that same run, not a rerun",
+  "suites": [
+    {
+      "name": "HashSafely",
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteHashSafely.ps1",
+      "exitCode": 0,
+      "startedAtUtc": "2026-08-16T18:56:36.8455132+00:00",
+      "finishedAtUtc": "2026-08-16T18:56:38.0679945+00:00",
+      "elapsedMs": 1222,
+      "stdout": "Test-CodexSafeTreeDeleteHashSafely.stdout.txt",
+      "stderr": "Test-CodexSafeTreeDeleteHashSafely.stderr.txt"
+    },
+    {
+      "name": "LeafStreamSet",
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+      "exitCode": 0,
+      "startedAtUtc": "2026-08-16T18:56:38.0877834+00:00",
+      "finishedAtUtc": "2026-08-16T18:56:50.1985883+00:00",
+      "elapsedMs": 12111,
+      "stdout": "Test-CodexSafeTreeDeleteLeafStreamSet.stdout.txt",
+      "stderr": "Test-CodexSafeTreeDeleteLeafStreamSet.stderr.txt"
+    },
+    {
+      "name": "UncertainRecovery",
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+      "exitCode": 0,
+      "startedAtUtc": "2026-08-16T18:56:50.2006694+00:00",
+      "finishedAtUtc": "2026-08-16T18:56:57.9268530+00:00",
+      "elapsedMs": 7726,
+      "stdout": "Test-CodexSafeTreeDeleteUncertainRecovery.stdout.txt",
+      "stderr": "Test-CodexSafeTreeDeleteUncertainRecovery.stderr.txt"
+    },
+    {
+      "name": "CrashSafety",
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteCrashSafety.ps1",
+      "exitCode": 0,
+      "startedAtUtc": "2026-08-16T18:56:57.9274913+00:00",
+      "finishedAtUtc": "2026-08-16T18:57:31.1378170+00:00",
+      "elapsedMs": 33210,
+      "stdout": "Test-CodexSafeTreeDeleteCrashSafety.stdout.txt",
+      "stderr": "Test-CodexSafeTreeDeleteCrashSafety.stderr.txt"
+    },
+    {
+      "name": "Phase1Integration",
+      "path": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeletePhase1Integration.ps1",
+      "exitCode": 0,
+      "startedAtUtc": "2026-08-16T18:57:31.1384498+00:00",
+      "finishedAtUtc": "2026-08-16T19:15:16.7138888+00:00",
+      "elapsedMs": 1065575,
+      "stdout": "Test-CodexSafeTreeDeletePhase1Integration.stdout.txt",
+      "stderr": "Test-CodexSafeTreeDeletePhase1Integration.stderr.txt"
+    }
+  ]
+}

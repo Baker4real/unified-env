@@ -86,7 +86,7 @@ function New-ValidManifest {
         codexHome = 'D:\Codex\.codex'
         managedRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks'
         runtimes = [pscustomobject][ordered]@{
-            pwsh = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
+            pwsh = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
             python = 'D:\Codex\tools\python314-official\python.exe'
             pythonw = 'D:\Codex\tools\python314-official\pythonw.exe'
             serenaPython = 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
@@ -262,7 +262,7 @@ $case.hooks[0].writeResources[0].value = 'Hook-Stdout'
 Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'abstract resource 必须大小写敏感'
 
 $case = Copy-TestDocument $valid
-$case.hooks[0].quickHealthCheck.commandPath = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
+$case.hooks[0].quickHealthCheck.commandPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
 $case.hooks[0].quickHealthCheck.arguments = @('-NoProfile', '-Command', 'Write-Output ok')
 Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'pwsh health script 必须在受控 allowlist'
 
@@ -526,7 +526,7 @@ Assert-True (
     $autoApprove[0].lifecycleReason -ceq 'Codex payload does not expose acceptEdits/auto permission modes'
 ) 'Serena auto-approve 必须以精确原因声明为 retired'
 Assert-True (
-    $autoApprove[0].fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -and
+    $autoApprove[0].fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -and
     @($autoApprove[0].fullAcceptanceCommand.arguments) -ccontains 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1' -and
     $autoApprove[0].fullAcceptanceCommand.arguments[-1] -ceq '-RequireNoRetiredRegistrations' -and
     -not (($autoApprove[0].fullAcceptanceCommand.arguments -join ' ').Contains('Get-Content'))
@@ -540,7 +540,7 @@ Assert-True (
 ) 'sourceState 必须诚实区分 managed/planned/vendor'
 
 Assert-True (
-    $managedManifest.runtimes.pwsh -ceq 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -and
+    $managedManifest.runtimes.pwsh -ceq 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -and
     $managedManifest.runtimes.python -ceq 'D:\Codex\tools\python314-official\python.exe' -and
     $managedManifest.runtimes.pythonw -ceq 'D:\Codex\tools\python314-official\pythonw.exe' -and
     $managedManifest.runtimes.serenaPython -ceq 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe' -and
@@ -575,8 +575,8 @@ $serenaCleanup=@($managedManifest.hooks|Where-Object id -ceq 'serena-cleanup')[0
 $serenaReminder=@($managedManifest.hooks|Where-Object id -ceq 'serena-reminder')[0]
 $expectedCleanupAcceptance = @('-NoProfile','-File','D:\Codex\.codex\hooks\serena-behavior-guard.ps1','-Mode','CleanupAcceptance')
 $expectedReminderAcceptance = @('-NoProfile','-File','D:\Codex\.codex\hooks\serena-behavior-guard.ps1','-Mode','ReminderAcceptance')
-Assert-True ($serenaCleanup.fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -and (@($serenaCleanup.fullAcceptanceCommand.arguments) -join "`0") -ceq ($expectedCleanupAcceptance -join "`0")) 'Serena cleanup full acceptance 必须使用唯一 session 并验证删除'
-Assert-True ($serenaReminder.fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -and (@($serenaReminder.fullAcceptanceCommand.arguments) -join "`0") -ceq ($expectedReminderAcceptance -join "`0")) 'Serena reminder full acceptance 必须验证阈值并清理唯一 session'
+Assert-True ($serenaCleanup.fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -and (@($serenaCleanup.fullAcceptanceCommand.arguments) -join "`0") -ceq ($expectedCleanupAcceptance -join "`0")) 'Serena cleanup full acceptance 必须使用唯一 session 并验证删除'
+Assert-True ($serenaReminder.fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -and (@($serenaReminder.fullAcceptanceCommand.arguments) -join "`0") -ceq ($expectedReminderAcceptance -join "`0")) 'Serena reminder full acceptance 必须验证阈值并清理唯一 session'
 $invalidBehaviorAcceptance = Copy-TestDocument $managedManifest
 @($invalidBehaviorAcceptance.hooks|Where-Object id -ceq 'serena-reminder')[0].fullAcceptanceCommand.arguments[-1] = 'CleanupAcceptance'
 Assert-Throws { Assert-CodexHookManifest -Manifest $invalidBehaviorAcceptance } 'Serena reminder 空对象不得绕过受控 full acceptance allowlist'

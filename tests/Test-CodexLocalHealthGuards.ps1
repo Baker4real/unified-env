@@ -59,7 +59,7 @@ function Get-EnvironmentFingerprint {
 
 function Invoke-Guard([string]$Path, [string[]]$Arguments, [AllowEmptyString()][string]$InputText = '') {
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
+    $startInfo.FileName = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true

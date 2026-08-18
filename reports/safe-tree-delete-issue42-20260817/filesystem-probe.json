@@ -1,0 +1,60 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-filesystem-probe",
+  "driveFormat": "NTFS",
+  "driveType": "Fixed",
+  "availableFreeBytes": 397284753408,
+  "requiredBytes": 350355456,
+  "fileIdInfoSupported": true,
+  "detector": {
+    "fileSystemType": "NTFS",
+    "isRemote": false,
+    "supportsFileId128": true,
+    "recommendHashReuse": true,
+    "recommendParallel": true,
+    "deletionAllowed": true
+  },
+  "networkDegrade": {
+    "fromDetectionRecommendParallel": false,
+    "fromDetectionRecommendedMaxParallelism": 1,
+    "resolveMaxDegreeOfParallelism": 1,
+    "liveReadyVolumeCount": 0,
+    "liveVolumeVerified": false,
+    "reason": "no ready Network volume; #35 maintainer waiver; do not elevate or mount; live Network e2e unverified",
+    "waiver": "#35"
+  },
+  "fat32LiveE2e": {
+    "verified": false,
+    "reason": "no ready FAT32/exFAT volume; #35 maintainer waiver",
+    "readyVolumeCount": 0
+  },
+  "readyDrives": [
+    {
+      "name": "C:\\",
+      "driveType": "Fixed",
+      "isReady": true,
+      "driveFormat": "NTFS",
+      "availableFreeBytes": 45298450432
+    },
+    {
+      "name": "D:\\",
+      "driveType": "Fixed",
+      "isReady": true,
+      "driveFormat": "NTFS",
+      "availableFreeBytes": 397284753408
+    },
+    {
+      "name": "E:\\",
+      "driveType": "Fixed",
+      "isReady": true,
+      "driveFormat": "NTFS",
+      "availableFreeBytes": 234144219136
+    },
+    {
+      "name": "F:\\",
+      "driveType": "Fixed",
+      "isReady": true,
+      "driveFormat": "NTFS",
+      "availableFreeBytes": 178027872256
+    }
+  ]
+}

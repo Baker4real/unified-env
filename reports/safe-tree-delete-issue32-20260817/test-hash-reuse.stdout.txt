@@ -1,0 +1,6 @@
+
+ok                  : True
+suite               : CodexSafeTreeDeleteHashReuse
+scale1000ElapsedMs  : 25387
+scale10000Speedup   : 0.868
+scale10000MetTarget : False

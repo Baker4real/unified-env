@@ -252,11 +252,14 @@ try {
         -FixturePolicyPath $policyPath -FixtureEvidenceRoot $evidenceRoot
     $targetReparseOperation = Get-Operation `
         -Status $targetReparseStatus -TransactionPath $recoverableApply.transactionPath
-    Assert-True ($targetReparseOperation.lifecycle -ceq 'manual-review') `
-        'target reparse point 必须分类为 manual-review。'
-    Assert-True ($null -eq $targetReparseOperation.namespaceAbsent -and
-        $targetReparseOperation.targetEntryType -ceq 'unknown') `
-        'target reparse point 必须报告 unknown，不能误报 namespace absent。'
+    Assert-True ($targetReparseOperation.lifecycle -ceq 'manual-review' -and
+        'restore' -cnotin @($targetReparseOperation.safeActions) -and
+        'purge' -cnotin @($targetReparseOperation.safeActions)) `
+        'target reparse point 必须分类为 manual-review 且不得建议严格写动作。'
+    Assert-True ($targetReparseOperation.namespaceAbsent -eq $false -and
+        $targetReparseOperation.targetPresent -eq $true -and
+        $targetReparseOperation.targetEntryType -ceq 'reparse-point') `
+        'target reparse point 必须报告真实 namespace 状态，不能误报 namespace absent。'
     Assert-True (($targetReparseOperation.errors -join ' ') -match 'reparse') `
         'target reparse point 必须输出稳定错误详情。'
     [IO.Directory]::Delete($reparsePath)
@@ -511,10 +514,460 @@ try {
     Assert-True ([IO.File]::Exists((Join-Path $outsideRecord 'plan.json'))) `
         'Status 与 junction 清理不得触碰 reparse target。'
 
+    $revokedEvidenceRoot = Join-Path $fixtureRoot 'revoked-evidence'
+    $revokedPolicyPath = Join-Path $fixtureRoot 'revoked-policy.json'
+    $revokedAllowlistRoot = Join-Path $fixtureRoot 'revoked-allowlist'
+    $revokedMinDepthRoot = Join-Path $fixtureRoot 'revoked-mindepth'
+    $revokedPolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 4
+        entries = @(
+            [pscustomobject][ordered]@{
+                id = 'revoked-allowlist'
+                capabilityRoot = $revokedAllowlistRoot
+                minimumDescendantDepth = 1
+                rootDeletionPurpose = 'none'
+                allowHardLinks = $false
+                allowInternalDirectoryJunctions = $false
+                deniedExactPaths = @()
+            },
+            [pscustomobject][ordered]@{
+                id = 'revoked-mindepth'
+                capabilityRoot = $revokedMinDepthRoot
+                minimumDescendantDepth = 1
+                rootDeletionPurpose = 'none'
+                allowHardLinks = $false
+                allowInternalDirectoryJunctions = $false
+                deniedExactPaths = @()
+            }
+        )
+    }
+    [IO.File]::WriteAllText(
+        $revokedPolicyPath,
+        ($revokedPolicy | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+
+    $revokedV2Target = New-FixtureTarget -Name 'revoked-allowlist\purged-v2'
+    $revokedV2Plan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $revokedV2Target `
+        -CapabilityRoot $revokedAllowlistRoot `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedV2Apply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$revokedV2Plan.planPath) `
+        -ApprovedPlanSha256 ([string]$revokedV2Plan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedV2Purge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$revokedV2Apply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$revokedV2Apply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+
+    $revokedV1Target = New-FixtureTarget -Name 'revoked-allowlist\purged-v1'
+    $revokedV1Plan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $revokedV1Target `
+        -CapabilityRoot $revokedAllowlistRoot `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedV1Apply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$revokedV1Plan.planPath) `
+        -ApprovedPlanSha256 ([string]$revokedV1Plan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedV1Purge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$revokedV1Apply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$revokedV1Apply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedV1SourceDocument = Get-Content -Raw -LiteralPath ([string]$revokedV1Purge.transactionPath) |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $revokedV1Document = [pscustomobject][ordered]@{
+        artifactType = [string]$revokedV1SourceDocument.artifactType
+        schemaVersion = 1L
+        generationId = [string]$revokedV1SourceDocument.generationId
+        planPath = [string]$revokedV1SourceDocument.planPath
+        planSha256 = [string]$revokedV1SourceDocument.planSha256
+        targetPath = [string]$revokedV1SourceDocument.targetPath
+        quarantinePath = [string]$revokedV1SourceDocument.quarantinePath
+        status = [string]$revokedV1SourceDocument.status
+        updatedAtUtc = [string]$revokedV1SourceDocument.updatedAtUtc
+    }
+    [IO.File]::WriteAllText(
+        [string]$revokedV1Purge.transactionPath,
+        ($revokedV1Document | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+
+    $revokedQuarantinedTarget = New-FixtureTarget -Name 'revoked-allowlist\quarantined-v2'
+    $revokedQuarantinedPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $revokedQuarantinedTarget `
+        -CapabilityRoot $revokedAllowlistRoot `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedQuarantinedApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$revokedQuarantinedPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$revokedQuarantinedPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+
+    $revokedPlanOnlyTarget = New-FixtureTarget -Name 'revoked-allowlist\plan-only'
+    $revokedPlanOnly = & $entryPath `
+        -Mode Plan `
+        -TargetPath $revokedPlanOnlyTarget `
+        -CapabilityRoot $revokedAllowlistRoot `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedPlanOnlyDocument = Get-Content -Raw -LiteralPath ([string]$revokedPlanOnly.planPath) |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $revokedPlanOnlyDocument.expiresAtUtc = [datetimeoffset]::UtcNow.AddMinutes(-1).ToString(
+        'o', [Globalization.CultureInfo]::InvariantCulture)
+    [IO.File]::WriteAllText(
+        [string]$revokedPlanOnly.planPath,
+        ($revokedPlanOnlyDocument | ConvertTo-Json -Depth 64),
+        [Text.UTF8Encoding]::new($false))
+
+    $revokedMinDepthTarget = New-FixtureTarget -Name 'revoked-mindepth\purged-v2'
+    $revokedMinDepthPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $revokedMinDepthTarget `
+        -CapabilityRoot $revokedMinDepthRoot `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedMinDepthApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$revokedMinDepthPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$revokedMinDepthPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedMinDepthPurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$revokedMinDepthApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$revokedMinDepthApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+
+    $revokedPolicy.entries = @([pscustomobject][ordered]@{
+        id = 'revoked-mindepth'
+        capabilityRoot = $revokedMinDepthRoot
+        minimumDescendantDepth = 5
+        rootDeletionPurpose = 'none'
+        allowHardLinks = $false
+        allowInternalDirectoryJunctions = $false
+        deniedExactPaths = @()
+    })
+    [IO.File]::WriteAllText(
+        $revokedPolicyPath,
+        ($revokedPolicy | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+
+    $lockedStream = [IO.FileStream]::new(
+        [string]$revokedQuarantinedApply.transactionPath,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::None)
+    $revokedLockedStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $revokedPolicyPath -FixtureEvidenceRoot $revokedEvidenceRoot
+    $revokedLockedOperation = Get-Operation `
+        -Status $revokedLockedStatus `
+        -TransactionPath ([string]$revokedQuarantinedApply.transactionPath)
+    Assert-True ($revokedLockedOperation.lifecycle -ceq 'manual-review' -and
+        $null -eq $revokedLockedOperation.transactionStatus) `
+        '观测路径必须保留既有 handle-bound probe，锁定 transaction 不得解析出部分字段。'
+    $lockedStream.Dispose()
+    $lockedStream = $null
+
+    $beforeRevokedStatus = Get-FixtureState -Root $fixtureRoot
+    $revokedStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $revokedPolicyPath -FixtureEvidenceRoot $revokedEvidenceRoot
+    $afterRevokedStatus = Get-FixtureState -Root $fixtureRoot
+    Assert-True (
+        (($beforeRevokedStatus | ConvertTo-Json -Depth 100 -Compress) -ceq
+            ($afterRevokedStatus | ConvertTo-Json -Depth 100 -Compress))) `
+        'policy 拒绝后的 Status 只读观测必须保持 evidence、target 与 policy 零写入。'
+    Assert-True (-not $revokedStatus.complete) `
+        'policy 拒绝的记录必须继续令全局 complete=false。'
+
+    $revokedV2Document = Get-Content -Raw -LiteralPath ([string]$revokedV2Purge.transactionPath) |
+        ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+    $revokedV2Operation = Get-Operation `
+        -Status $revokedStatus -TransactionPath ([string]$revokedV2Purge.transactionPath)
+    Assert-True ($revokedV2Operation.transactionSchemaVersion -eq 2L -and
+        $revokedV2Operation.transactionStatus -ceq [string]$revokedV2Document.status -and
+        [string]$revokedV2Operation.targetPath -ceq [string]$revokedV2Document.targetPath -and
+        [string]$revokedV2Operation.quarantinePath -ceq [string]$revokedV2Document.quarantinePath -and
+        [string]$revokedV2Operation.transactionUpdatedAtUtc -ceq
+            [string]$revokedV2Document.updatedAtUtc) `
+        'allowlist 拒绝后 v2 purged transaction 必须保留 generation/路径/内容绑定校验后的观测字段。'
+    Assert-True ($revokedV2Operation.targetPresent -eq $false -and
+        $revokedV2Operation.quarantinePresent -eq $false -and
+        $revokedV2Operation.namespaceAbsent -eq $true) `
+        'allowlist 拒绝后 v2 purged transaction 必须输出真实 live namespace。'
+    Assert-True (-not $revokedV2Operation.schemaCompatible -and
+        -not $revokedV2Operation.policyCompatible -and
+        $revokedV2Operation.lifecycle -ceq 'manual-review' -and
+        'purge' -cnotin @($revokedV2Operation.safeActions) -and
+        'restore' -cnotin @($revokedV2Operation.safeActions) -and
+        'apply' -cnotin @($revokedV2Operation.safeActions)) `
+        'allowlist 拒绝后 v2 transaction 必须标记 schema 不兼容且严格写动作不可用。'
+    Assert-True (($revokedV2Operation.errors -join ' ') -match 'allowlist') `
+        'allowlist 拒绝原因必须保留在 errors 中。'
+    $revokedV2OperationId = Split-Path -Leaf (Split-Path -Parent ([string]$revokedV2Purge.transactionPath))
+    Assert-True ($revokedV2OperationId -cin @($revokedStatus.migrationReadiness.blockingRecords)) `
+        '未归档的 policy 拒绝记录必须继续 blocking。'
+
+    $revokedV1Operation = Get-Operation `
+        -Status $revokedStatus -TransactionPath ([string]$revokedV1Purge.transactionPath)
+    Assert-True ($revokedV1Operation.transactionSchemaVersion -eq 1L -and
+        $revokedV1Operation.transactionStatus -ceq 'purged' -and
+        [string]$revokedV1Operation.targetPath -ceq $revokedV1Target -and
+        [string]$revokedV1Operation.quarantinePath -ceq [string]$revokedV1Document.quarantinePath -and
+        [string]$revokedV1Operation.transactionUpdatedAtUtc -ceq [string]$revokedV1Document.updatedAtUtc) `
+        'allowlist 拒绝后 v1 purged transaction 必须保留精简观测字段。'
+    Assert-True ($revokedV1Operation.quarantinePresent -is [bool] -and
+        $revokedV1Operation.quarantinePresent -eq $false -and
+        $revokedV1Operation.targetPresent -eq $false) `
+        'allowlist 拒绝后 v1 purged 记录的 quarantine present 必须是布尔值而非 null。'
+    Assert-True (-not $revokedV1Operation.schemaCompatible -and
+        $revokedV1Operation.lifecycle -ceq 'manual-review') `
+        'v1 transaction 必须保持 schema 不兼容与 manual-review。'
+
+    $revokedQuarantinedOperation = Get-Operation `
+        -Status $revokedStatus -TransactionPath ([string]$revokedQuarantinedApply.transactionPath)
+    Assert-True ($revokedQuarantinedOperation.transactionSchemaVersion -eq 2L -and
+        $revokedQuarantinedOperation.transactionStatus -ceq 'quarantined' -and
+        $revokedQuarantinedOperation.quarantinePresent -eq $true -and
+        $revokedQuarantinedOperation.targetPresent -eq $false -and
+        $revokedQuarantinedOperation.lifecycle -ceq 'manual-review' -and
+        'purge' -cnotin @($revokedQuarantinedOperation.safeActions) -and
+        'restore' -cnotin @($revokedQuarantinedOperation.safeActions)) `
+        '未终结 quarantined 记录不得被误判为 terminal，且不得建议 Purge/Restore。'
+
+    $revokedPlanOnlyOperation = Get-Operation `
+        -Status $revokedStatus -TransactionPath ([string]$revokedPlanOnly.planPath)
+    Assert-True ($revokedPlanOnlyOperation.lifecycle -ceq 'manual-review' -and
+        $null -eq $revokedPlanOnlyOperation.transactionSchemaVersion -and
+        $null -eq $revokedPlanOnlyOperation.transactionStatus -and
+        $null -eq $revokedPlanOnlyOperation.quarantinePresent -and
+        $null -eq $revokedPlanOnlyOperation.targetPath) `
+        '无事务过期 plan 不得被扩成可观测 transaction 或 Archive 对象。'
+
+    $revokedMinDepthOperation = Get-Operation `
+        -Status $revokedStatus -TransactionPath ([string]$revokedMinDepthPurge.transactionPath)
+    Assert-True ($revokedMinDepthOperation.transactionSchemaVersion -eq 2L -and
+        $revokedMinDepthOperation.transactionStatus -ceq 'purged' -and
+        $revokedMinDepthOperation.quarantinePresent -eq $false -and
+        -not $revokedMinDepthOperation.schemaCompatible -and
+        $revokedMinDepthOperation.lifecycle -ceq 'manual-review' -and
+        (($revokedMinDepthOperation.errors -join ' ') -match '最小后代深度')) `
+        '最小深度拒绝后 v2 purged transaction 必须保留观测字段与拒绝原因。'
+
+    $revokedQuarantinedTransactionSha256 = (Get-FileHash `
+        -LiteralPath ([string]$revokedQuarantinedApply.transactionPath) `
+        -Algorithm SHA256).Hash.ToLowerInvariant()
+    $revokedV2TransactionSha256 = (Get-FileHash `
+        -LiteralPath ([string]$revokedV2Purge.transactionPath) `
+        -Algorithm SHA256).Hash.ToLowerInvariant()
+    $beforeRevokedWriteRefusals = Get-FixtureState -Root $fixtureRoot
+    $revokedPurgeError = $null
+    try {
+        & $entryPath `
+            -Mode Purge `
+            -TransactionPath ([string]$revokedQuarantinedApply.transactionPath) `
+            -ApprovedTransactionSha256 $revokedQuarantinedTransactionSha256 `
+            -ConfirmPurge `
+            -FixturePolicyPath $revokedPolicyPath `
+            -FixtureEvidenceRoot $revokedEvidenceRoot | Out-Null
+    } catch {
+        $revokedPurgeError = $_.Exception.Message
+    }
+    Assert-True ($null -ne $revokedPurgeError) 'policy 拒绝后的 Purge 必须继续抛出拒绝。'
+    $revokedRestoreError = $null
+    try {
+        & $entryPath `
+            -Mode Restore `
+            -TransactionPath ([string]$revokedV2Purge.transactionPath) `
+            -ApprovedTransactionSha256 $revokedV2TransactionSha256 `
+            -ConfirmRestore `
+            -FixturePolicyPath $revokedPolicyPath `
+            -FixtureEvidenceRoot $revokedEvidenceRoot | Out-Null
+    } catch {
+        $revokedRestoreError = $_.Exception.Message
+    }
+    Assert-True ($null -ne $revokedRestoreError) 'policy 拒绝后的 Restore 必须继续抛出拒绝。'
+    $revokedApplyError = $null
+    try {
+        & $entryPath `
+            -Mode Apply `
+            -PlanPath ([string]$revokedPlanOnly.planPath) `
+            -ApprovedPlanSha256 ([string]$revokedPlanOnly.planSha256) `
+            -ConfirmApply `
+            -FixturePolicyPath $revokedPolicyPath `
+            -FixtureEvidenceRoot $revokedEvidenceRoot | Out-Null
+    } catch {
+        $revokedApplyError = $_.Exception.Message
+    }
+    Assert-True ($null -ne $revokedApplyError) 'policy 拒绝后的 Apply 必须继续抛出拒绝。'
+    $afterRevokedWriteRefusals = Get-FixtureState -Root $fixtureRoot
+    Assert-True (
+        (($beforeRevokedWriteRefusals | ConvertTo-Json -Depth 100 -Compress) -ceq
+            ($afterRevokedWriteRefusals | ConvertTo-Json -Depth 100 -Compress))) `
+        'policy 拒绝后的严格写拒绝必须保持零写入。'
+
+    $revokedQuarantinedArchive = & $entryPath `
+        -Mode Archive `
+        -TransactionPath ([string]$revokedQuarantinedApply.transactionPath) `
+        -ApprovedTransactionSha256 $revokedQuarantinedTransactionSha256 `
+        -ConfirmArchive `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    Assert-True (-not $revokedQuarantinedArchive.archived -and
+        [string]$revokedQuarantinedArchive.refusalReason -ceq 'transaction-status-not-purged') `
+        '未终结记录不得进入 Archive 归档。'
+
+    $revokedArchive = & $entryPath `
+        -Mode Archive `
+        -TransactionPath ([string]$revokedV2Purge.transactionPath) `
+        -ApprovedTransactionSha256 $revokedV2TransactionSha256 `
+        -ConfirmArchive `
+        -FixturePolicyPath $revokedPolicyPath `
+        -FixtureEvidenceRoot $revokedEvidenceRoot
+    Assert-True ($revokedArchive.archived -eq $true -and -not $revokedArchive.alreadyArchived) `
+        'purged 且 quarantine 不存在的 policy 拒绝记录必须能进入现有 Archive 内容认证。'
+    $postArchiveStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $revokedPolicyPath -FixtureEvidenceRoot $revokedEvidenceRoot
+    $postArchiveOperation = Get-Operation `
+        -Status $postArchiveStatus -TransactionPath ([string]$revokedV2Purge.transactionPath)
+    Assert-True ($postArchiveOperation.lifecycle -ceq 'terminal' -and
+        $postArchiveOperation.journalStatus -ceq 'archived' -and
+        $postArchiveOperation.transactionStatus -ceq 'purged') `
+        '归档后的 policy 拒绝记录必须按既有 terminal archive 路径分类。'
+    $postArchiveQuarantinedOperation = Get-Operation `
+        -Status $postArchiveStatus -TransactionPath ([string]$revokedQuarantinedApply.transactionPath)
+    Assert-True ($postArchiveQuarantinedOperation.lifecycle -ceq 'manual-review') `
+        '归档其他记录不得把未终结 quarantined 记录误判为 terminal。'
+    Assert-True (-not [IO.File]::Exists((Join-Path `
+        (Split-Path -Parent ([string]$revokedPlanOnly.planPath)) 'terminal-archive.json'))) `
+        '无事务过期 plan 不得生成 terminal archive marker。'
+
+    $cacheRoot = Join-Path $fixtureRoot 'status-tree-cache'
+    $cacheEvidence = Join-Path $cacheRoot 'evidence'
+    $cachePolicyPath = Join-Path $cacheRoot 'policy.json'
+    $cacheTarget = Join-Path $cacheRoot 'shared-target'
+    [void][IO.Directory]::CreateDirectory($cacheEvidence)
+    [void][IO.Directory]::CreateDirectory($cacheTarget)
+    $sharedPayload = 'x' * 65536
+    [IO.File]::WriteAllText(
+        (Join-Path $cacheTarget 'payload-0.txt'),
+        $sharedPayload,
+        [Text.UTF8Encoding]::new($false))
+    $cachePolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 4
+        entries = @(
+            [pscustomobject][ordered]@{
+                id = 'status-tree-cache'
+                capabilityRoot = $cacheRoot
+                minimumDescendantDepth = 1
+                rootDeletionPurpose = 'none'
+                allowHardLinks = $false
+                allowInternalDirectoryJunctions = $false
+                deniedExactPaths = @($cacheEvidence)
+            }
+        )
+    }
+    [IO.File]::WriteAllText(
+        $cachePolicyPath,
+        ($cachePolicy | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $sharedPlan1 = & $entryPath `
+        -Mode Plan `
+        -TargetPath $cacheTarget `
+        -CapabilityRoot $cacheRoot `
+        -FixturePolicyPath $cachePolicyPath `
+        -FixtureEvidenceRoot $cacheEvidence
+    $sharedPlan2 = & $entryPath `
+        -Mode Plan `
+        -TargetPath $cacheTarget `
+        -CapabilityRoot $cacheRoot `
+        -FixturePolicyPath $cachePolicyPath `
+        -FixtureEvidenceRoot $cacheEvidence
+    $sharedStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $cachePolicyPath -FixtureEvidenceRoot $cacheEvidence
+    $sharedOp1 = Get-Operation -Status $sharedStatus -TransactionPath ([string]$sharedPlan1.planPath)
+    $sharedOp2 = Get-Operation -Status $sharedStatus -TransactionPath ([string]$sharedPlan2.planPath)
+    Assert-True ($sharedOp1.lifecycle -ceq 'planned' -and $sharedOp2.lifecycle -ceq 'planned') `
+        '同一 live 树的两条 planned 记录必须各自保持 planned。'
+    Assert-True ([long]$sharedStatus.metrics.bytesHashed -ge [long]$sharedPayload.Length) `
+        'Status 必须至少哈希一次共享 live 树。'
+    Assert-True ([long]$sharedStatus.metrics.bytesHashed -lt (2L * [long]$sharedPayload.Length)) `
+        '同一 Status 调用不得把同一 live 树再哈希一遍；这不是 Apply/Purge SessionHashCache。'
+
+    $archivedRunDirectory = Split-Path -Parent ([string]$revokedV2Purge.transactionPath)
+    $archivedMarkerPath = Join-Path $archivedRunDirectory 'terminal-archive.json'
+    $archivedPlanPath = Join-Path $archivedRunDirectory 'plan.json'
+    $intactMarker = [IO.File]::ReadAllText($archivedMarkerPath)
+    $intactPlan = [IO.File]::ReadAllBytes($archivedPlanPath)
+    $tamperedMarkerDocument = $intactMarker | ConvertFrom-Json -Depth 32 -DateKind String
+    $tamperedMarkerDocument.transactionStatus = 'quarantined'
+    $tamperedMarker = $tamperedMarkerDocument | ConvertTo-Json -Depth 32
+    Assert-True ($tamperedMarker -cne $intactMarker) 'marker 篡改必须改变原文。'
+    [IO.File]::WriteAllText($archivedMarkerPath, $tamperedMarker, [Text.UTF8Encoding]::new($false))
+    $tamperedMarkerStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $revokedPolicyPath -FixtureEvidenceRoot $revokedEvidenceRoot
+    $tamperedMarkerOperation = Get-Operation `
+        -Status $tamperedMarkerStatus -TransactionPath ([string]$revokedV2Purge.transactionPath)
+    Assert-True ($tamperedMarkerOperation.lifecycle -ceq 'manual-review') `
+        '篡改 terminal-archive 内容后不得只凭 marker 文件存在判 terminal。'
+    [IO.File]::WriteAllText($archivedMarkerPath, $intactMarker, [Text.UTF8Encoding]::new($false))
+
+    [IO.File]::WriteAllBytes($archivedPlanPath, ($intactPlan + [byte[]]@(0x20)))
+    $tamperedPlanStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $revokedPolicyPath -FixtureEvidenceRoot $revokedEvidenceRoot
+    $tamperedPlanOperation = Get-Operation `
+        -Status $tamperedPlanStatus -TransactionPath ([string]$revokedV2Purge.transactionPath)
+    Assert-True ($tamperedPlanOperation.lifecycle -ceq 'manual-review') `
+        'plan 字节漂移后 terminal-archive 必须失败闭锁。'
+    [IO.File]::WriteAllBytes($archivedPlanPath, $intactPlan)
+
+    $reappearedQuarantine = [string]$revokedV2Operation.quarantinePath
+    [void][IO.Directory]::CreateDirectory($reappearedQuarantine)
+    $reappearedStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $revokedPolicyPath -FixtureEvidenceRoot $revokedEvidenceRoot
+    $reappearedOperation = Get-Operation `
+        -Status $reappearedStatus -TransactionPath ([string]$revokedV2Purge.transactionPath)
+    Assert-True ($reappearedOperation.lifecycle -ceq 'manual-review') `
+        '归档后 quarantine 重新出现必须失败闭锁，不能靠跳过 namespace 核验加速。'
+    [IO.Directory]::Delete($reappearedQuarantine)
+
+    $restoredArchiveStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $revokedPolicyPath -FixtureEvidenceRoot $revokedEvidenceRoot
+    $restoredArchiveOperation = Get-Operation `
+        -Status $restoredArchiveStatus -TransactionPath ([string]$revokedV2Purge.transactionPath)
+    Assert-True ($restoredArchiveOperation.lifecycle -ceq 'terminal' -and
+        $restoredArchiveOperation.journalStatus -ceq 'archived') `
+        '恢复完好的 terminal-archive 必须重新通过内容认证。'
+    Assert-True ($postArchiveQuarantinedOperation.lifecycle -ceq 'manual-review') `
+        '#48 未终结 quarantined 观测语义不得被本票改掉。'
+
     [pscustomobject][ordered]@{
         ok = $true
         suite = 'CodexSafeTreeDeleteStatus'
-        slices = 17
+        slices = 22
     }
 } finally {
     if ($null -ne $lockedStream) { $lockedStream.Dispose() }

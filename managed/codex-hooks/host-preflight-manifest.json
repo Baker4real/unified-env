@@ -15,7 +15,7 @@
     "D:\\Codex\\projects\\codex-gsd-codex-c-skill"
   ],
   "runtimes": {
-    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
     "python": "D:\\Codex\\tools\\python314-official\\python.exe",
     "pythonw": "D:\\Codex\\tools\\python314-official\\pythonw.exe",
     "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
@@ -132,7 +132,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -140,7 +140,7 @@
         ]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-File",
@@ -200,7 +200,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -208,7 +208,7 @@
         ]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-File",
@@ -268,7 +268,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -276,7 +276,7 @@
         ]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-File",
@@ -318,7 +318,7 @@
     {
       "relativePath": "hooks/serena-reminder-guarded.cmd",
       "liveRelativePath": "serena-reminder-guarded.cmd",
-      "sha256": "2f5061658d1d7052852e114cc479adfe0256977de2127a717199b70d234f5ef0",
+      "sha256": "30750335c561fc7a3f7d5ed40eabe528a554caa49c66efa73b296dcddf84e95f",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-reminder"
@@ -327,7 +327,7 @@
     {
       "relativePath": "hooks/serena-cleanup-guarded.cmd",
       "liveRelativePath": "serena-cleanup-guarded.cmd",
-      "sha256": "3fc836f420537772bf3be938421defe8eeae81d5d8ae91f239471b9976faa39c",
+      "sha256": "25706cc4ae08e954c2b9f35a49225c94479b0267b8313c9951acb23ef277a572",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-cleanup"
@@ -347,7 +347,7 @@
     {
       "relativePath": "hooks/serena-activation-reminder.cmd",
       "liveRelativePath": "serena-activation-reminder.cmd",
-      "sha256": "2ba290a861bd885d02a8cfeca7bc8c2b7e1c22de8dae245d2e3cee78c261da70",
+      "sha256": "6a9d1abca43d05426ffa9d18ae0e65e51357d9e9aad70f3d77364d4ecdad4eb2",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"

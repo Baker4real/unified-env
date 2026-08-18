@@ -1,0 +1,7 @@
+{
+  "test": "Test-CodexSafeTreeDeleteCrashSafety.ps1",
+  "exitCode": 0,
+  "startedAt": "2026-08-17T02:45:05.0908455+08:00",
+  "endedAt": "2026-08-17T02:45:42.9882655+08:00",
+  "elapsedMs": 37897
+}

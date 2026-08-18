@@ -1,0 +1,21 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-phase3-prod-attempts",
+  "successfulRun": {
+    "attempt": 1,
+    "ok": true,
+    "elapsedMs": 534034,
+    "startedAtUtc": "2026-08-16T22:54:35.7368222+00:00",
+    "finishedAtUtc": "2026-08-16T23:03:29.8192968+00:00",
+    "flags": ["SkipBaseline", "default hash reuse", "default purge batch collect", "serial HostSafety Purge"]
+  },
+  "priorBlockedAttempts": {
+    "note": "Pre-fix and mid-fix 32s. Not used in A ratio. Successful run above is attempt 1 after both lease-reuse and batch cache-hit fixes.",
+    "applyDisposeThenGetHashSafely": "reports/safe-tree-delete-issue42-20260817/phase3-prod-failure.json",
+    "purgeBatchGetHashSafelyAfterSnapshot": {
+      "nativeErrorCode": 32,
+      "when": "2026-08-16T22:42:54+08:00",
+      "transactionStatus": "purging",
+      "message": "Exception calling GetHashSafely with 3 argument(s): Failed to open path exclusively for hash reuse without following reparse points."
+    }
+  }
+}

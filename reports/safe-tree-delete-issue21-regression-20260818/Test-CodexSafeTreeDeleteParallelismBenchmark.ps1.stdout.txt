@@ -1,0 +1,15 @@
+
+ok                           : True
+suite                        : CodexSafeTreeDeleteParallelismBenchmark
+issue                        : 40
+mode                         : All
+processorCount               : 20
+smallKnee                    : 16
+mediumKnee                   : 16
+largeKnee                    : 16
+smallPeak                    : 2
+mediumPeak                   : 1
+largePeak                    : 2
+dataSupportsTicketSuggestion : False
+flushVerified                : True
+rawCount                     : 15

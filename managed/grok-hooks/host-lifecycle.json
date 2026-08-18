@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-github-cli.cmd",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-dashboard.cmd",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-activation.cmd",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-cleanup.cmd",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Grep|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-reminder.cmd",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "serena__.*|mcp__serena__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-auto-approve.cmd",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

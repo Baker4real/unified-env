@@ -1,0 +1,9 @@
+
+ok                    : True
+suite                 : CodexSafeTreeDeleteParallelPurgeCoordinator
+issue                 : 39
+slices                : 5
+scaleFileCount        : 10000
+scaleElapsedMs        : 37221
+scaleJournalFileCount : 4
+scaleFailedCount      : 0

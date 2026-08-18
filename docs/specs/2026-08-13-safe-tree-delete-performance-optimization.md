@@ -3,7 +3,7 @@ type: reference
 title: 受管安全树删除性能优化
 tags: [performance, safe-delete, hash-reuse, parallelization]
 date: 2026-08-13
-status: in-progress
+status: landed-below-target
 priority: P0
 ---
 
@@ -11,7 +11,132 @@ priority: P0
 
 ## Implementation status (2026-08-13)
 
-Phase 1 的**库与 Plan 采集**部分已随 `e2064a3` 进入 `main`（GitHub #27–#31）：`FileIdentityV2`、`SessionHashCache`、`GetHashSafely`、Plan 并列 `fileIdentitiesV2`。Apply/Purge **仍只认证** `treeManifest` 的 SHA-256 与 64-bit FileIndex，未调用哈希复用。剩余工作从 #32 起。不要把本 spec 的 4–6x 目标读成已上线性能。
+Phase 1 的**库与 Plan 采集**部分已随 `e2064a3` 进入 `main`（GitHub #27–#31）：`FileIdentityV2`、`SessionHashCache`、`GetHashSafely`、Plan 并列 `fileIdentitiesV2`。2026-08-15 起（#54）Plan 再并列 `leafStreamSetV1`，Apply/Purge 在各自 locked preflight freeze 内逐 leaf 复验 stream 集、FileIdentityV2 与 hardlink 计数，并在 Purge 发布 `leaf-dispositions.json`。工作树 Apply 已接入 `GetHashSafely` + 会话级 `SessionHashCache`（#32，10k 0.868x）；Purge 已接入 invocation-local `SessionHashCache`（#33，10k 0.921x）。两者单独墙钟均未加速。#42 已改为 snapshot 持有 lease 时从同一 handle 算哈希。Crash recovery uncertain 已接入（#34）：尚未 commit-authorized 的 freeze 按路径是否仍在分为 `pendingFiles` / `uncertainFiles`，uncertain 不得收成 `purged`。#36 完整 Plan→Apply→Purge（10k×160KiB，每树 1.526 GiB）baseline 527846ms / Phase 1 517444ms = **1.02x**，未达 3x。#37 Purge 先收集 `List<PurgeFileLeaf>` 再 `GetHashSafely` 验证，删除仍走 HostSafety 逐 leaf freeze/commit；10k×4KB batch/Phase1/baseline = 187157/190905/180384ms（1.02x / 0.964x）。该 10k 墙钟测于一度尝试的 HostSafety collect-then-process，随后已撤回，未重跑。#38 已落地 `ThreadJournalWriter` / `ThreadJournalOwner`。#39 已落地 `ParallelPurgeCoordinator`（`scripts/lib/CodexSafeTreeDeleteParallelPurge.cs`）：夹具树上目录级 `Parallel.ForEach` + 每文件 pending→Flush→`File.Delete`→commit；10k 小文件 31339ms / 4 journal / 0 失败。允许根为构造注入；2-arg 仍默认 issue38 测试根。生产 `Invoke-CodexSafeTreeDeletePurge` 未接线。#40 在 coordinator 夹具上测完 1/2/4/8/16：10k×1KB 效率峰值 DOP 4（13255ms，4.48x），墙钟最佳 DOP 16（4926ms）；`FromDetection` optimize 仍为 4。#41 10k journal overhead **18.659%**。#42 生产路径 10k×4KB：baseline 513510ms / phase3-prod 534034ms = **0.962x**（未达 4x/6x）。snapshot 有 provider 时不再先放 lease，Apply/Purge 有 lease 时从同一 handle 算哈希。Coordinator 夹具 DOP4=4.48x 未计入生产倍率。生产 Purge 仍走 HostSafety，未接 `ParallelPurgeCoordinator`。操作者指南见下文「操作者指南」。不要把本 spec 的 4–6x 目标读成已上线性能。
+
+2026-08-15 复核补丁（#54 跟进）：`leafStreamSetV1.consumptionBoundary` 增加
+`requiresTreeManifestReverification='always'` 配对声明——stream-set 复验必须与 treeManifest
+SHA-256/identity 复验配对消费，junction→junction 重定向仅由后者检出；冻结保证以 locked
+preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检，新增流随 leaf 销毁且不进审计
+（临删前命名流存在性复检的成本评估属 #32/#33 范围）；file leaf 携带命名流（含下载文件常见的
+`Zone.Identifier` ADS）在 Plan 即失败闭锁；`leaf-dispositions.json` 发布后、`purged` 落盘前的
+崩溃窗口由绑定校验后的幂等收口覆盖，详见
+`docs/specs/2026-07-24-safe-tree-delete-capability.md`。
+
+史诗收口（#26）：实现关口 `DONE_WITH_CONCERNS`（生产倍率未达票面 4–6x）。子票表与证据见 `reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md`。
+
+## 操作者指南
+
+本节是落地后的操作合同。同文件后部 Problem / Solution / Compatibility Matrix 的 3x / 4x / 6x 是设计目标，不是已测生产倍率。删除语义、uncertain、`leafStreamSetV1` 楔死与 `fileIdentitiesV2` 缺节闭锁以 `docs/specs/2026-07-24-safe-tree-delete-capability.md` 为准；本节不复述那些段落。
+
+### 三阶段实际落地
+
+| 阶段 | 已落地 | 生产接线 | 已测墙钟 |
+| --- | --- | --- | --- |
+| Phase 1 哈希复用 | `FileIdentityV2`、Plan `fileIdentitiesV2`、`GetHashSafely`、invocation-local `SessionHashCache`（Apply #32、Purge #33） | 已接 Apply/Purge | #36 完整 Plan→Apply→Purge 10k×160KiB = **1.02x**，未达 3x |
+| Phase 2 批量 | Purge 先收集 `List<PurgeFileLeaf>` 再验证（#37） | 验证已接；删除仍走 HostSafety 逐 leaf freeze/commit | 10k×4KB batch vs Phase1 **1.02x** / vs baseline **0.964x** |
+| Phase 3 并行 | `ParallelPurgeCoordinator` + `ThreadJournalWriter`（#38–#41） | **未接**生产 `Invoke-CodexSafeTreeDeletePurge` | 生产 #42 10k×4KB = **0.962x**，未达 4x/6x |
+
+生产 Purge 没有接 `ParallelPurgeCoordinator`。夹具上的并行墙钟不能当成删除加速。
+
+### FILE_ID_INFO
+
+新 Plan 并列写出 `fileIdentitiesV2`：每个 file leaf 绑定 128-bit `FILE_ID_INFO`（`VolumeSerialNumber` + 16 字节 `FileId128`）以及同一句柄上 `GetFileInformationByHandle` 得到的 `FileSize` / `LastWriteTimeUtc`。`CapturedAtUtc` 不参与相等。缺少 `FILE_ID_INFO` 的卷上新 Plan 失败关闭。Apply/Purge 用该 identity 做 TOCTOU 门闩，再决定是否复用会话哈希。
+
+### 哈希复用与会话缓存
+
+`SessionHashCache` 只活在一次 Apply 或一次 Purge 调用内；两阶段不共享。键是 `FileIdentityV2`（内容相等，不是引用）。
+
+无 lease 时走 `GetHashSafely`：`FileShare.None` 独占打开、不跟随 reparse；同一句柄读 identity；与 expected 不等则抛 `IdentityMismatchException` 且不读内容；缓存命中直接返回副本；未命中则 `ComputeHashFromHandle` 后写入缓存。该方法**不**对照 Plan 内容哈希——内容比对由 Apply/Purge 调用方对 treeManifest 做。
+
+有 snapshot/Purge lease 时：先按路径复验 identity，命中缓存则跳过哈希；未命中则在同一 lease 上 `ComputeSha256FromHandle`，再写入缓存。
+
+### 并行仅夹具
+
+`ParallelPurgeCoordinator` 只在夹具树上做目录级 `Parallel.ForEach`，每文件 `pending → Flush → File.Delete → commit`。`FileSystemCapabilities.RecommendParallel == false` 时 `ResolveMaxDegreeOfParallelism` 返回 1。生产删除仍是 HostSafety 串行 Purge。
+
+### 文件系统探测
+
+`FileSystemDetector.DetectFileSystem` 读 `DriveInfo.DriveFormat`、`DriveType == Network`，并对目标路径试 `GetFileIdentityV2`。`FromDetection` 现役规则：
+
+- FAT32 / exFAT：`SupportsFileId128` 强制为 false，`DeletionAllowed` 为 false。
+- 本地 NTFS / ReFS 且探测到 `FILE_ID_INFO`：`RecommendHashReuse` / `RecommendParallel` 为 true，`RecommendedMaxParallelism` 为 4（#40 效率峰值，不是墙钟最快的 16）。
+- 网络卷或非 NTFS 族：两项 Recommend 为 false，并行度建议为 1；只要 `FILE_ID_INFO` 可用且非 FAT 族，`DeletionAllowed` 仍可为 true。
+
+生产 Plan / Apply / Purge 只把 `DeletionAllowed` 当硬门（`Assert-CodexSafeTreeDeleteDeletionAllowed`）。`RecommendHashReuse` / `RecommendParallel` **不**关掉生产哈希复用；后者只约束夹具 coordinator。FAT32 / 网络实卷 e2e 有维护者 waiver，未提权验证（#35）。
+
+### 实测性能（未达票面 4x/6x）
+
+**生产 Plan→Apply→Purge（HostSafety 串行 Purge）**
+
+| 来源 | 场景 | 墙钟 | 倍率 | 是否达票面 |
+| --- | --- | --- | --- | --- |
+| #36 | 10k×160KiB 完整流水线 | baseline 527846ms / Phase1 517444ms | **1.02x** | 未达 3x |
+| #42 | 10k×4KB 完整流水线 | baseline 513510ms / phase3-prod 534034ms | **0.962x** | 未达 4x/6x |
+| #32 | Apply 10k×4KB | reuse 349164ms / baseline 302992ms | **0.868x** | 未达 1.5–2x |
+| #33 | Purge 10k×4KB | reuse 224320ms / baseline 206496ms | **0.921x** | 未加速 |
+| #37 | Purge batch 10k×4KB | batch 187157 / Phase1 190905 / baseline 180384ms | **1.02x** / **0.964x** | 未达 1.2x / 3.5–4x |
+
+JSON：`reports/safe-tree-delete-issue36-20260817/scale-phase1.json`、`reports/safe-tree-delete-issue42-20260817/scale-phase3.json`、`reports/safe-tree-delete-issue32-20260817/scale-10000.json`、`reports/safe-tree-delete-issue33-20260817/scale-10000.json`、`reports/safe-tree-delete-issue37-20260817/scale-10000.json`。#37 的 10k 墙钟测于一度尝试的 HostSafety collect-then-process，随后已撤回，未重跑。
+
+**Coordinator 夹具（`File.Delete`，未接生产 Purge）**
+
+| 来源 | 场景 | 墙钟 | 倍率 | 备注 |
+| --- | --- | --- | --- | --- |
+| #40 | 10k×1KB DOP4 / DOP1 | 13255ms / 59439ms | **4.48x** | 效率峰值 DOP4；DOP2=2.17x；墙钟最快 DOP16=4926ms |
+| #41 | 10k journal flush | TotalFlushTimeMs 6144 / elapsed 32927ms | overhead **18.659%** | 线程求和，`IsWithinTarget=false` |
+
+JSON：`reports/safe-tree-delete-issue40-20260817/analysis.json`、`reports/safe-tree-delete-issue41-20260817/scale-10000.json`。#35 FAT32/网络实卷 e2e 有维护者 waiver，未提权验证，不列入倍率表。
+
+### 故障排查
+
+| 触发 | 先做什么 | 仍失败 |
+| --- | --- | --- |
+| 目标在网络卷，或担心并行 | 生产 Purge 本来就是 HostSafety 串行，没有可关的并行开关。夹具 coordinator 在 `RecommendParallel=false` 时 DOP=1 | 网络实卷 e2e 未提权验证（#35）。无 `FILE_ID_INFO` 时新 Plan 失败关闭，不要改走未受管删除 |
+| 非 NTFS，或报 `FILE_ID_INFO` / `DeletionAllowed` | 读抛错：FAT32/exFAT 与探测失败都会让新 Plan 失败关闭 | 换到支持 `FILE_ID_INFO` 的本地 NTFS/ReFS 后重新 Plan。不要注入 `FileSystemCapabilitiesForTest` 绕过生产门闩 |
+| journal flush 慢、overhead ≥10% | 只出现在 coordinator 夹具。#41 10k 为 18.659%，`IsWithinTarget=false`。先看磁盘延迟，再降低夹具 DOP | 生产 HostSafety journal 是串行 create-only，没有这条 flush 占比合同 |
+| 恢复列出 `uncertainFiles`，或 Status 为 `manual-review` / `inconsistent` | 按能力 spec 的 pending / uncertain 段：路径已不在且尚未 `commit-authorized` 的 freeze 不得当成已删除，也不得收成 `purged`。手工核验该路径后重新 Plan，或保持 `manual-review` | 缺 `leafStreamSetV1` 的在途会 wedge。不要 Purge leftover |
+
+### 迁移
+
+Apply/Purge 读到旧 Plan 缺 `fileIdentitiesV2` 或 `leafStreamSetV1` 时失败闭锁（票面所称 schema v4 evidence 即这类缺节 Plan）。完成标准：对该目标重新 Plan，得到两节齐全的新 Plan 后再 Apply。Status / Archive 只读路径不受缺节影响。
+
+`purging` 且 quarantine 已缺失、Plan 又无 `leafStreamSetV1` 的在途会永久 wedge（能力 spec 已写合同）。完成标准：部署前先把在途事务收尾清空；已经 wedge 的保持 `manual-review`，重新 Plan 新目标。不要对 leftover quarantine 做未授权 Purge。
+
+### 发布说明
+
+- **已测生产倍率**：#36 = 1.02x；#42 = 0.962x。未达票面 3x / 4x / 6x。
+- **已接生产**：128-bit `FILE_ID_INFO`、`fileIdentitiesV2`、`leafStreamSetV1`、Apply/Purge 会话哈希复用、Purge 批量收集验证、lease 同句柄哈希。
+- **仅夹具**：`ParallelPurgeCoordinator`（`File.Delete`）。#40 DOP4=4.48x 与 #41 journal 18.659% 都不是生产删除加速。
+- **破坏性**：缺 `fileIdentitiesV2` / `leafStreamSetV1` 的旧 Plan 必须重新 Plan。缺 `leafStreamSetV1` 的在途会 wedge。
+
+### API 契约
+
+真源是 `scripts/lib/CodexSafeTreeDeleteFileIdentity.cs`、`scripts/lib/CodexSafeTreeDeleteHashCache.cs` 的 XML/实现，以及 `scripts/lib/CodexHookHandleBoundIO.cs` 的 lease 方法。PowerShell 包装为 `Get-CodexSafeTreeDeleteFileIdentityV2` / `Get-CodexSafeTreeDeleteHashSafely`。
+
+**`FileIdentityReader.GetFileIdentityV2`**
+
+| 重载 | 参数 | 返回 | 异常 |
+| --- | --- | --- | --- |
+| `(string path)` | 非空路径；`CreateFileW` 以 `GenericRead` + `FileShare.ReadWrite\|Delete` + `FILE_FLAG_BACKUP_SEMANTICS\|FILE_FLAG_OPEN_REPARSE_POINT` 打开 | `FileIdentityV2` | 空路径 → `ArgumentException`；打开失败或无 `FILE_ID_INFO` → `Win32Exception` |
+| `(SafeFileHandle handle)` | 有效句柄 | 同上；`FileId128` 来自 `GetFileInformationByHandleEx`（`FileIdInfo=18`）；size/mtime 来自 `GetFileInformationByHandle`；`CapturedAtUtc=UtcNow` | 无效句柄 → `ArgumentException`；查询失败 → `Win32Exception` |
+
+**`FileHashComputer.GetHashSafely(filePath, expectedIdentity, sessionCache)`** — 见源码 XML。独占 `FileShare.None`，不跟随 reparse；identity 不等 → `IdentityMismatchException` 且不读内容；缓存命中不哈希。空路径 / null identity / null cache → `ArgumentException` / `ArgumentNullException`；打开失败 → `Win32Exception`。
+
+**`FileHashComputer.ComputeHashFromHandle(handle)`** — 见源码 XML。调用前 seek 到 0，返回前再 seek 到 0。同一句柄并发调用不安全。无效/已关句柄 → `ArgumentException`；seek/read 失败 → `Win32Exception`。
+
+**`ComputeSha256FromHandle`**（`SafeTreeDeleteFileLease` / `GuardedReadOnlyFileLease` / `GuardedTargetFileLease`）— 先把 `stream.Position` 置 0，再 `SHA256.ComputeHash(stream)`。哈希后指针停在 EOF，**不会**回到 0。与 `ComputeHashFromHandle` 的复位合同不同。
+
+**`FileSystemCapabilities` 字段**
+
+| 字段 | 含义 |
+| --- | --- |
+| `FileSystemType` | `DriveInfo.DriveFormat`（如 NTFS / ReFS / FAT32） |
+| `IsRemote` | `DriveType == Network` |
+| `SupportsFileId128` | 探测到 `FILE_ID_INFO` 且非 FAT32/exFAT |
+| `RecommendHashReuse` | 仅本地 NTFS/ReFS 且 `SupportsFileId128`；生产 Apply/Purge 不读此字段 |
+| `RecommendParallel` | 同上；夹具 coordinator 在 false 时 DOP=1 |
+| `RecommendedMaxParallelism` | 可优化时为 4，否则 1 |
+| `DeletionAllowed` | 等于 `SupportsFileId128`；生产硬门 |
 
 ## Problem Statement
 
@@ -330,7 +455,7 @@ Specific test additions:
 - Typical case (local NTFS HDD, mixed file sizes): 4x improvement
 - Worst case (network drive, large files): 1.5x improvement (batch only, no hash reuse or parallel)
 
-**Compatibility Matrix**
+**Compatibility Matrix**（设计预期，不是已测生产倍率；已测数字见「操作者指南」）
 | File System | Hash Reuse | Parallel | Expected Gain |
 |-------------|------------|----------|---------------|
 | Local NTFS  | ✅         | ✅       | 6x            |

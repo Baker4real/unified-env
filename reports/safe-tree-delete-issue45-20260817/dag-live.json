@@ -1,0 +1,2022 @@
+{
+  "schema": "safe-tree-delete-issue45-dag-live/v1",
+  "generatedAt": "2026-08-16T17:23:31Z",
+  "repo": "Baker4real/unified-env",
+  "sourceIssue": 45,
+  "sourceUrl": "https://github.com/Baker4real/unified-env/issues/45",
+  "query": {
+    "method": "GitHub GraphQL",
+    "fields": [
+      "parent",
+      "subIssues",
+      "blockedBy",
+      "blocking",
+      "labels",
+      "state",
+      "stateReason"
+    ],
+    "issueNumbers": [
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      26,
+      27,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      45,
+      47,
+      48,
+      49,
+      50,
+      52,
+      53,
+      54,
+      55
+    ],
+    "writeOps": false,
+    "ghIssueEdit": false,
+    "ghIssueComment": false,
+    "ghIssueClose": false
+  },
+  "gate": {
+    "kind": "implement-verification",
+    "scope": "tracker DAG and ticket-correction readback",
+    "notInScope": [
+      "implement delete capability",
+      "Purge",
+      "commit",
+      "close any issue"
+    ],
+    "implementationCompleteClaim": false
+  },
+  "issues": {
+    "18": {
+      "number": 18,
+      "title": "受管安全树删除控制面收尾：批量归档、退出码传递与遗留归因",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/18",
+      "updatedAt": "2026-08-14T15:34:15Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": null,
+      "subIssues": [
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "subIssuesSummary": {
+        "total": 6,
+        "completed": 1
+      },
+      "blockedBy": [
+        24,
+        21
+      ],
+      "blocking": [],
+      "issueDependenciesSummary": {
+        "blockedBy": 2,
+        "blocking": 0,
+        "totalBlockedBy": 2,
+        "totalBlocking": 0
+      }
+    },
+    "19": {
+      "number": 19,
+      "title": "记录归档前生产 Status 基线到受版本控制位置",
+      "state": "CLOSED",
+      "stateReason": "COMPLETED",
+      "url": "https://github.com/Baker4real/unified-env/issues/19",
+      "updatedAt": "2026-08-11T15:04:04Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 18,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [],
+      "blocking": [
+        22
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 1,
+        "totalBlockedBy": 0,
+        "totalBlocking": 1
+      }
+    },
+    "20": {
+      "number": 20,
+      "title": "修复受管 wrapper 链的退出码转发",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/20",
+      "updatedAt": "2026-08-16T03:41:24Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 18,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [],
+      "blocking": [
+        21
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 1,
+        "totalBlockedBy": 0,
+        "totalBlocking": 1
+      }
+    },
+    "21": {
+      "number": 21,
+      "title": "为退出码传递补端到端断言",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/21",
+      "updatedAt": "2026-08-11T02:18:26Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 18,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        20
+      ],
+      "blocking": [
+        18
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "22": {
+      "number": 22,
+      "title": "分批归档 1595 条已确认 terminal 记录",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/22",
+      "updatedAt": "2026-08-16T03:41:27Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 18,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        19
+      ],
+      "blocking": [
+        24,
+        23
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 2,
+        "totalBlockedBy": 1,
+        "totalBlocking": 2
+      }
+    },
+    "23": {
+      "number": 23,
+      "title": "查清并归类剩余 69 条事务未解析记录",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/23",
+      "updatedAt": "2026-08-11T02:19:49Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 18,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        22
+      ],
+      "blocking": [
+        24
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "24": {
+      "number": 24,
+      "title": "归档后重跑 Status 并判定 complete 收敛",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/24",
+      "updatedAt": "2026-08-11T02:20:32Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 18,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        23,
+        22
+      ],
+      "blocking": [
+        18
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 2,
+        "blocking": 1,
+        "totalBlockedBy": 2,
+        "totalBlocking": 1
+      }
+    },
+    "26": {
+      "number": 26,
+      "title": "受管安全树删除性能优化：哈希复用、批量处理与受限并行",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/26",
+      "updatedAt": "2026-08-14T15:57:52Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": null,
+      "subIssues": [
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        54
+      ],
+      "subIssuesSummary": {
+        "total": 18,
+        "completed": 5
+      },
+      "blockedBy": [
+        43
+      ],
+      "blocking": [],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 0,
+        "totalBlockedBy": 1,
+        "totalBlocking": 0
+      }
+    },
+    "27": {
+      "number": 27,
+      "title": "[Safe Delete Perf 1/17] FILE_ID_INFO P/Invoke 基础设施",
+      "state": "CLOSED",
+      "stateReason": "COMPLETED",
+      "url": "https://github.com/Baker4real/unified-env/issues/27",
+      "updatedAt": "2026-08-14T15:57:53Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [],
+      "blocking": [
+        35,
+        31,
+        28
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 1,
+        "totalBlockedBy": 0,
+        "totalBlocking": 3
+      }
+    },
+    "30": {
+      "number": 30,
+      "title": "[Safe Delete Perf 4/17] GetHashSafely 安全哈希复用协议",
+      "state": "CLOSED",
+      "stateReason": "COMPLETED",
+      "url": "https://github.com/Baker4real/unified-env/issues/30",
+      "updatedAt": "2026-08-14T15:57:57Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        29
+      ],
+      "blocking": [
+        54,
+        33,
+        32
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 3,
+        "totalBlockedBy": 1,
+        "totalBlocking": 3
+      }
+    },
+    "31": {
+      "number": 31,
+      "title": "[Safe Delete Perf 5/17] Plan 阶段升级到 FileIdentityV2",
+      "state": "CLOSED",
+      "stateReason": "COMPLETED",
+      "url": "https://github.com/Baker4real/unified-env/issues/31",
+      "updatedAt": "2026-08-14T15:57:59Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        27
+      ],
+      "blocking": [
+        33,
+        32
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 2,
+        "totalBlockedBy": 1,
+        "totalBlocking": 2
+      }
+    },
+    "32": {
+      "number": 32,
+      "title": "[Safe Delete Perf 6/17] Apply 阶段集成哈希复用",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/32",
+      "updatedAt": "2026-08-14T15:58:02Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        54,
+        30,
+        31
+      ],
+      "blocking": [
+        36
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 3,
+        "totalBlocking": 1
+      }
+    },
+    "33": {
+      "number": 33,
+      "title": "[Safe Delete Perf 7/17] Purge 阶段集成哈希复用",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/33",
+      "updatedAt": "2026-08-14T15:58:04Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        54,
+        31,
+        30
+      ],
+      "blocking": [
+        36,
+        34
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 2,
+        "totalBlockedBy": 3,
+        "totalBlocking": 2
+      }
+    },
+    "34": {
+      "number": 34,
+      "title": "[Safe Delete Perf 8/17] Crash recovery uncertain 状态处理",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/34",
+      "updatedAt": "2026-08-14T15:58:05Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        33
+      ],
+      "blocking": [
+        36
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "35": {
+      "number": 35,
+      "title": "[Safe Delete Perf 9/17] 文件系统检测和能力探测",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/35",
+      "updatedAt": "2026-08-16T03:41:30Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        27
+      ],
+      "blocking": [
+        36
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "36": {
+      "number": 36,
+      "title": "[Safe Delete Perf 10/17] Phase 1 集成测试和生产验证",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/36",
+      "updatedAt": "2026-08-14T15:58:09Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        34,
+        32,
+        33,
+        35
+      ],
+      "blocking": [
+        37
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 4,
+        "blocking": 1,
+        "totalBlockedBy": 4,
+        "totalBlocking": 1
+      }
+    },
+    "37": {
+      "number": 37,
+      "title": "[Safe Delete Perf 11/17] Purge 批量处理优化",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/37",
+      "updatedAt": "2026-08-14T15:58:10Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        36
+      ],
+      "blocking": [
+        38
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "38": {
+      "number": 38,
+      "title": "[Safe Delete Perf 12/17] ThreadJournalWriter 和生命周期管理",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/38",
+      "updatedAt": "2026-08-14T15:58:12Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        37
+      ],
+      "blocking": [
+        39
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "39": {
+      "number": 39,
+      "title": "[Safe Delete Perf 13/17] ParallelPurgeCoordinator 目录级并行",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/39",
+      "updatedAt": "2026-08-14T15:58:13Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        38
+      ],
+      "blocking": [
+        42,
+        41,
+        40
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 3,
+        "totalBlockedBy": 1,
+        "totalBlocking": 3
+      }
+    },
+    "40": {
+      "number": 40,
+      "title": "[Safe Delete Perf 14/17] 并行度基准测试和调优",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/40",
+      "updatedAt": "2026-08-14T15:58:16Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        39
+      ],
+      "blocking": [
+        42
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "41": {
+      "number": 41,
+      "title": "[Safe Delete Perf 15/17] Journal 性能监控和告警",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/41",
+      "updatedAt": "2026-08-14T15:58:18Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        39
+      ],
+      "blocking": [
+        42
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "42": {
+      "number": 42,
+      "title": "[Safe Delete Perf 16/17] Phase 3 集成测试和生产验证",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/42",
+      "updatedAt": "2026-08-14T15:58:19Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        40,
+        39,
+        41
+      ],
+      "blocking": [
+        43
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 3,
+        "blocking": 1,
+        "totalBlockedBy": 3,
+        "totalBlocking": 1
+      }
+    },
+    "43": {
+      "number": 43,
+      "title": "[Safe Delete Perf 17/17] 文档和用户指南更新",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/43",
+      "updatedAt": "2026-08-14T15:58:21Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        42
+      ],
+      "blocking": [
+        26
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "45": {
+      "number": 45,
+      "title": "受管安全树删除控制面收口：smoke 复跑、ticket 建档与关闭序列",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/45",
+      "updatedAt": "2026-08-14T15:36:33Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": null,
+      "subIssues": [
+        47,
+        50,
+        52,
+        53
+      ],
+      "subIssuesSummary": {
+        "total": 4,
+        "completed": 0
+      },
+      "blockedBy": [],
+      "blocking": [],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 0,
+        "totalBlockedBy": 0,
+        "totalBlocking": 0
+      }
+    },
+    "47": {
+      "number": 47,
+      "title": "在真实受管 wrapper 上实证 leaf-delete-failed 失败合同",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/47",
+      "updatedAt": "2026-08-14T15:36:36Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 45,
+      "subIssues": [
+        55
+      ],
+      "subIssuesSummary": {
+        "total": 1,
+        "completed": 0
+      },
+      "blockedBy": [
+        50
+      ],
+      "blocking": [
+        52
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 1,
+        "totalBlockedBy": 1,
+        "totalBlocking": 1
+      }
+    },
+    "48": {
+      "number": 48,
+      "title": "Status：plan 被当前 policy 拒绝后仍只读观测历史事务",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/48",
+      "updatedAt": "2026-08-16T03:41:36Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": null,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [],
+      "blocking": [
+        49
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 1,
+        "totalBlockedBy": 0,
+        "totalBlocking": 1
+      }
+    },
+    "49": {
+      "number": 49,
+      "title": "将生产 Status 冷启动优化到可顺手确认的 SLA",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/49",
+      "updatedAt": "2026-08-14T15:36:40Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": null,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        55,
+        48
+      ],
+      "blocking": [],
+      "issueDependenciesSummary": {
+        "blockedBy": 2,
+        "blocking": 0,
+        "totalBlockedBy": 2,
+        "totalBlocking": 0
+      }
+    },
+    "50": {
+      "number": 50,
+      "title": "发布控制面收口的可复算证据包",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/50",
+      "updatedAt": "2026-08-14T15:36:43Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 45,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        55
+      ],
+      "blocking": [
+        47,
+        52
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 2,
+        "totalBlockedBy": 1,
+        "totalBlocking": 2
+      }
+    },
+    "52": {
+      "number": 52,
+      "title": "用版本化证据回写并关闭 #20–#24 与父 spec #18",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/52",
+      "updatedAt": "2026-08-14T15:36:45Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 45,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        50,
+        47
+      ],
+      "blocking": [
+        53
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 2,
+        "blocking": 1,
+        "totalBlockedBy": 2,
+        "totalBlocking": 1
+      }
+    },
+    "53": {
+      "number": 53,
+      "title": "同步 tracker 真源并自关闭（#45 由父流程最后关闭）",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/53",
+      "updatedAt": "2026-08-14T15:55:35Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 45,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        52
+      ],
+      "blocking": [],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 0,
+        "totalBlockedBy": 1,
+        "totalBlocking": 0
+      }
+    },
+    "54": {
+      "number": 54,
+      "title": "Purge：在同一 live freeze 下绑定完整 stream-set 与 leaf disposition",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/54",
+      "updatedAt": "2026-08-16T03:41:38Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        30
+      ],
+      "blocking": [
+        33,
+        32,
+        55
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 0,
+        "blocking": 3,
+        "totalBlockedBy": 1,
+        "totalBlocking": 3
+      }
+    },
+    "55": {
+      "number": 55,
+      "title": "真实 wrapper smoke：确定性进程收口与只读代际核验",
+      "state": "OPEN",
+      "stateReason": null,
+      "url": "https://github.com/Baker4real/unified-env/issues/55",
+      "updatedAt": "2026-08-14T15:43:20Z",
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 47,
+      "subIssues": [],
+      "subIssuesSummary": {
+        "total": 0,
+        "completed": 0
+      },
+      "blockedBy": [
+        54
+      ],
+      "blocking": [
+        50,
+        49
+      ],
+      "issueDependenciesSummary": {
+        "blockedBy": 1,
+        "blocking": 2,
+        "totalBlockedBy": 1,
+        "totalBlocking": 2
+      }
+    }
+  },
+  "plannedBlockedByEdges": [
+    {
+      "id": "19-blocks-22",
+      "kind": "blocked-by",
+      "section": "control-plane",
+      "from": 19,
+      "to": 22,
+      "planText": "#19 → #22",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "22-blocks-23",
+      "kind": "blocked-by",
+      "section": "control-plane",
+      "from": 22,
+      "to": 23,
+      "planText": "#22 → #23",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "23-blocks-24",
+      "kind": "blocked-by",
+      "section": "control-plane",
+      "from": 23,
+      "to": 24,
+      "planText": "#23 → #24",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "20-blocks-21",
+      "kind": "blocked-by",
+      "section": "control-plane",
+      "from": 20,
+      "to": 21,
+      "planText": "#20 → #21",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "22-blocks-24",
+      "kind": "blocked-by",
+      "section": "control-plane",
+      "from": 22,
+      "to": 24,
+      "planText": "#22 → #24",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "21-blocks-18",
+      "kind": "blocked-by",
+      "section": "control-plane",
+      "from": 21,
+      "to": 18,
+      "planText": "#21 → #18",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "24-blocks-18",
+      "kind": "blocked-by",
+      "section": "control-plane",
+      "from": 24,
+      "to": 18,
+      "planText": "#24 → #18",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "27-blocks-35",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 27,
+      "to": 35,
+      "planText": "#27 → #35",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "30-blocks-54",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 30,
+      "to": 54,
+      "planText": "#30 → #54",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "54-blocks-32",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 54,
+      "to": 32,
+      "planText": "#54 → #32",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "54-blocks-33",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 54,
+      "to": 33,
+      "planText": "#54 → #33",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "54-blocks-55",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 54,
+      "to": 55,
+      "planText": "#54 → #55",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "31-blocks-32",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 31,
+      "to": 32,
+      "planText": "#31 → #32",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "31-blocks-33",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 31,
+      "to": 33,
+      "planText": "#31 → #33",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "33-blocks-34",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 33,
+      "to": 34,
+      "planText": "#33 → #34",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "32-blocks-36",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 32,
+      "to": 36,
+      "planText": "#32 → #36",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "33-blocks-36",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 33,
+      "to": 36,
+      "planText": "#33 → #36",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "34-blocks-36",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 34,
+      "to": 36,
+      "planText": "#34 → #36",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "35-blocks-36",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 35,
+      "to": 36,
+      "planText": "#35 → #36",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "36-blocks-37",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 36,
+      "to": 37,
+      "planText": "#36 → #37",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "37-blocks-38",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 37,
+      "to": 38,
+      "planText": "#37 → #38",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "38-blocks-39",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 38,
+      "to": 39,
+      "planText": "#38 → #39",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "39-blocks-40",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 39,
+      "to": 40,
+      "planText": "#39 → #40",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "39-blocks-41",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 39,
+      "to": 41,
+      "planText": "#39 → #41",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "40-blocks-42",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 40,
+      "to": 42,
+      "planText": "#40 → #42",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "41-blocks-42",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 41,
+      "to": 42,
+      "planText": "#41 → #42",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "42-blocks-43",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 42,
+      "to": 43,
+      "planText": "#42 → #43",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "43-blocks-26",
+      "kind": "blocked-by",
+      "section": "performance",
+      "from": 43,
+      "to": 26,
+      "planText": "#43 → #26",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "48-blocks-49",
+      "kind": "blocked-by",
+      "section": "status-closeout",
+      "from": 48,
+      "to": 49,
+      "planText": "#48 → #49",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "55-blocks-49",
+      "kind": "blocked-by",
+      "section": "status-closeout",
+      "from": 55,
+      "to": 49,
+      "planText": "#55 → #49",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "55-blocks-50",
+      "kind": "blocked-by",
+      "section": "status-closeout",
+      "from": 55,
+      "to": 50,
+      "planText": "#55 → #50",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "50-blocks-47",
+      "kind": "blocked-by",
+      "section": "status-closeout",
+      "from": 50,
+      "to": 47,
+      "planText": "#50 → #47",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "47-blocks-52",
+      "kind": "blocked-by",
+      "section": "status-closeout",
+      "from": 47,
+      "to": 52,
+      "planText": "#47 → #52",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "50-blocks-52",
+      "kind": "blocked-by",
+      "section": "status-closeout",
+      "from": 50,
+      "to": 52,
+      "planText": "#50 → #52",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "52-blocks-53",
+      "kind": "blocked-by",
+      "section": "status-closeout",
+      "from": 52,
+      "to": 53,
+      "planText": "#52 → #53",
+      "native": {
+        "blockingOnFrom": true,
+        "blockedByOnTo": true
+      },
+      "status": "native-match"
+    }
+  ],
+  "plannedParentEdges": [
+    {
+      "id": "18-parent-of-19",
+      "kind": "parent",
+      "section": "control-plane",
+      "parent": 18,
+      "child": 19,
+      "planText": "#19 native sub-issue of #18",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "18-parent-of-20",
+      "kind": "parent",
+      "section": "control-plane",
+      "parent": 18,
+      "child": 20,
+      "planText": "#20 native sub-issue of #18",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "18-parent-of-21",
+      "kind": "parent",
+      "section": "control-plane",
+      "parent": 18,
+      "child": 21,
+      "planText": "#21 native sub-issue of #18",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "18-parent-of-22",
+      "kind": "parent",
+      "section": "control-plane",
+      "parent": 18,
+      "child": 22,
+      "planText": "#22 native sub-issue of #18",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "18-parent-of-23",
+      "kind": "parent",
+      "section": "control-plane",
+      "parent": 18,
+      "child": 23,
+      "planText": "#23 native sub-issue of #18",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "18-parent-of-24",
+      "kind": "parent",
+      "section": "control-plane",
+      "parent": 18,
+      "child": 24,
+      "planText": "#24 native sub-issue of #18",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "26-parent-of-54",
+      "kind": "parent",
+      "section": "performance",
+      "parent": 26,
+      "child": 54,
+      "planText": "#54 native sub-issue of #26",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "47-parent-of-55",
+      "kind": "parent",
+      "section": "status-closeout",
+      "parent": 47,
+      "child": 55,
+      "planText": "#55 native sub-issue of #47",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "45-parent-of-47",
+      "kind": "parent",
+      "section": "status-closeout",
+      "parent": 45,
+      "child": 47,
+      "planText": "#47 native sub-issue of #45",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "45-parent-of-50",
+      "kind": "parent",
+      "section": "status-closeout",
+      "parent": 45,
+      "child": 50,
+      "planText": "#50 native sub-issue of #45",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "45-parent-of-52",
+      "kind": "parent",
+      "section": "status-closeout",
+      "parent": 45,
+      "child": 52,
+      "planText": "#52 native sub-issue of #45",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "45-parent-of-53",
+      "kind": "parent",
+      "section": "status-closeout",
+      "parent": 45,
+      "child": 53,
+      "planText": "#53 native sub-issue of #45",
+      "native": {
+        "parentOnChild": true,
+        "subIssueOnParent": true
+      },
+      "status": "native-match"
+    }
+  ],
+  "negativeAssertions": [
+    {
+      "id": "49-not-child-of-45",
+      "kind": "negative",
+      "planText": "#49 is not a #45 child",
+      "live": {
+        "issue49Parent": null,
+        "issue45SubIssues": [
+          47,
+          50,
+          52,
+          53
+        ]
+      },
+      "status": "native-match"
+    },
+    {
+      "id": "49-not-blocker-of-45",
+      "kind": "negative",
+      "planText": "#49 is not a #45 blocker",
+      "live": {
+        "issue45BlockedBy": [],
+        "issue49Blocking": []
+      },
+      "status": "native-match"
+    }
+  ],
+  "extraNativeBlockedByEdges": [
+    {
+      "id": "27-blocks-31",
+      "kind": "blocked-by",
+      "from": 27,
+      "to": 31,
+      "status": "extra-unplanned",
+      "note": "GitHub native edge exists; not listed in #45 Final tracker plan"
+    },
+    {
+      "id": "27-blocks-28",
+      "kind": "blocked-by",
+      "from": 27,
+      "to": 28,
+      "status": "extra-unplanned",
+      "note": "GitHub native edge exists; not listed in #45 Final tracker plan"
+    },
+    {
+      "id": "30-blocks-33",
+      "kind": "blocked-by",
+      "from": 30,
+      "to": 33,
+      "status": "extra-unplanned",
+      "note": "GitHub native edge exists; not listed in #45 Final tracker plan"
+    },
+    {
+      "id": "30-blocks-32",
+      "kind": "blocked-by",
+      "from": 30,
+      "to": 32,
+      "status": "extra-unplanned",
+      "note": "GitHub native edge exists; not listed in #45 Final tracker plan"
+    },
+    {
+      "id": "29-blocks-30",
+      "kind": "blocked-by",
+      "from": 29,
+      "to": 30,
+      "status": "extra-unplanned",
+      "note": "GitHub native edge exists; not listed in #45 Final tracker plan"
+    },
+    {
+      "id": "39-blocks-42",
+      "kind": "blocked-by",
+      "from": 39,
+      "to": 42,
+      "status": "extra-unplanned",
+      "note": "GitHub native edge exists; not listed in #45 Final tracker plan"
+    }
+  ],
+  "extraNativeParentEdges": [
+    {
+      "id": "26-parent-of-27",
+      "kind": "parent",
+      "parent": 26,
+      "child": 27,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-28",
+      "kind": "parent",
+      "parent": 26,
+      "child": 28,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-29",
+      "kind": "parent",
+      "parent": 26,
+      "child": 29,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-30",
+      "kind": "parent",
+      "parent": 26,
+      "child": 30,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-31",
+      "kind": "parent",
+      "parent": 26,
+      "child": 31,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-32",
+      "kind": "parent",
+      "parent": 26,
+      "child": 32,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-33",
+      "kind": "parent",
+      "parent": 26,
+      "child": 33,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-34",
+      "kind": "parent",
+      "parent": 26,
+      "child": 34,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-35",
+      "kind": "parent",
+      "parent": 26,
+      "child": 35,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-36",
+      "kind": "parent",
+      "parent": 26,
+      "child": 36,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-37",
+      "kind": "parent",
+      "parent": 26,
+      "child": 37,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-38",
+      "kind": "parent",
+      "parent": 26,
+      "child": 38,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-39",
+      "kind": "parent",
+      "parent": 26,
+      "child": 39,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-40",
+      "kind": "parent",
+      "parent": 26,
+      "child": 40,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-41",
+      "kind": "parent",
+      "parent": 26,
+      "child": 41,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-42",
+      "kind": "parent",
+      "parent": 26,
+      "child": 42,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    },
+    {
+      "id": "26-parent-of-43",
+      "kind": "parent",
+      "parent": 26,
+      "child": 43,
+      "status": "extra-unplanned",
+      "note": "GitHub native parent exists; #45 plan did not call this pair out"
+    }
+  ],
+  "summary": {
+    "plannedBlockedBy": {
+      "total": 35,
+      "nativeMatch": 35,
+      "bodyOnly": 0
+    },
+    "plannedParent": {
+      "total": 12,
+      "nativeMatch": 12,
+      "bodyOnly": 0
+    },
+    "negativeAssertions": {
+      "total": 2,
+      "nativeMatch": 2,
+      "bodyOnly": 0
+    },
+    "extraNativeBlockedBy": 6,
+    "extraNativeParent": 17
+  },
+  "labels": {
+    "54": {
+      "readyForAgent": true,
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 26
+    },
+    "55": {
+      "readyForAgent": true,
+      "labels": [
+        "ready-for-agent"
+      ],
+      "parent": 47
+    }
+  },
+  "duplicateMarkerSearch": {
+    "stream-set leaf disposition in:title repo:Baker4real/unified-env": [
+      {
+        "labels": [
+          {
+            "id": "LA_kwDOTPWKQ88AAAACuOWHvg",
+            "name": "ready-for-agent",
+            "description": "规格充分，可交给 agent 处理",
+            "color": "1D76DB"
+          }
+        ],
+        "number": 54,
+        "state": "OPEN",
+        "title": "Purge：在同一 live freeze 下绑定完整 stream-set 与 leaf disposition"
+      }
+    ],
+    "真实 wrapper smoke in:title repo:Baker4real/unified-env": [
+      {
+        "labels": [
+          {
+            "id": "LA_kwDOTPWKQ88AAAACuOWHvg",
+            "name": "ready-for-agent",
+            "description": "规格充分，可交给 agent 处理",
+            "color": "1D76DB"
+          }
+        ],
+        "number": 55,
+        "state": "OPEN",
+        "title": "真实 wrapper smoke：确定性进程收口与只读代际核验"
+      }
+    ]
+  },
+  "ticketCorrectionProbes": {
+    "33": {
+      "contains": {
+        "invocation-local": true,
+        "跨进程": true,
+        "Plan 预填": true,
+        "首次访问": true
+      },
+      "bodyChars": 1802
+    },
+    "35": {
+      "contains": {
+        "RecommendParallel=false": true,
+        "RecommendParallel=true": true,
+        "SupportsFileId128=false": true,
+        "失败闭锁": true
+      },
+      "bodyChars": 1720
+    },
+    "45": {
+      "contains": {
+        "#49 is an independent successor": true,
+        "not a #45 child": true,
+        "Status and `-Mode BatchPurge` are explicitly out of scope": true,
+        "this tracker writeback closes no existing issue": true
+      },
+      "bodyChars": 2973
+    },
+    "49": {
+      "contains": {
+        "intentionally not a #45 sub-issue": true,
+        "does not block the #45 closeout": true,
+        "BatchPurge": true
+      },
+      "bodyChars": 1344
+    }
+  },
+  "issue35WaiverComments": [
+    {
+      "createdAt": "2026-08-15T14:11:19Z",
+      "author": "Baker4real",
+      "mentionsWaiverWord": false,
+      "mentionsNoLongerCloseGate": true
+    },
+    {
+      "createdAt": "2026-08-16T03:41:30Z",
+      "author": "Baker4real",
+      "mentionsWaiverWord": true,
+      "mentionsNoLongerCloseGate": false
+    }
+  ],
+  "childCloseGate": {
+    "parent": 45,
+    "requiredDirectChildren": [
+      47,
+      50,
+      52,
+      53
+    ],
+    "children": [
+      {
+        "number": 47,
+        "state": "OPEN",
+        "stateReason": null,
+        "closedCompleted": false
+      },
+      {
+        "number": 50,
+        "state": "OPEN",
+        "stateReason": null,
+        "closedCompleted": false
+      },
+      {
+        "number": 52,
+        "state": "OPEN",
+        "stateReason": null,
+        "closedCompleted": false
+      },
+      {
+        "number": 53,
+        "state": "OPEN",
+        "stateReason": null,
+        "closedCompleted": false
+      }
+    ],
+    "allClosedCompleted": false,
+    "thisGateClosesIssues": false
+  }
+}

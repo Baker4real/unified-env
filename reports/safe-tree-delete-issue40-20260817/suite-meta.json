@@ -1,0 +1,13 @@
+{
+  "suite": "Test-CodexSafeTreeDeleteParallelismBenchmark.ps1",
+  "issue": 40,
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "testPath": "D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteParallelismBenchmark.ps1",
+  "smokeOnly": false,
+  "skipBenchmark": true,
+  "startedAtUtc": "2026-08-16T20:43:18.9884100Z",
+  "finishedAtUtc": "2026-08-16T20:43:20.3361754Z",
+  "exitCode": 0,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue40-20260817\\Test-CodexSafeTreeDeleteParallelismBenchmark.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue40-20260817\\Test-CodexSafeTreeDeleteParallelismBenchmark.stderr.txt"
+}

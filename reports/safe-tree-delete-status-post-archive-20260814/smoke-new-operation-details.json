@@ -1,0 +1,57 @@
+[
+  {
+    "operationId": "20260813T200503Z-56d5dd42-5f0f-429c-87da-15e8518e4af9",
+    "files": [
+      "plan.json",
+      "transaction.json"
+    ],
+    "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-production-smoke-c7ec8a105bc249cdb8b3b0cefa744024",
+    "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
+    "txStatus": "purged",
+    "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\.codex-safe-delete-56d5dd42-5f0f-429c-87da-15e8518e4af9.quarantine"
+  },
+  {
+    "operationId": "20260813T200508Z-791fecd8-67af-49ce-95ae-891b42adf4c5",
+    "files": [
+      "plan.json",
+      "transaction.json"
+    ],
+    "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-0300bc97cc3344b3ba403c03cb99df9c\\old-a",
+    "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
+    "txStatus": "purged",
+    "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-0300bc97cc3344b3ba403c03cb99df9c\\.codex-safe-delete-791fecd8-67af-49ce-95ae-891b42adf4c5.quarantine"
+  },
+  {
+    "operationId": "20260813T200545Z-ec5af9d0-035a-4213-8033-9b1432225e14",
+    "files": [
+      "plan.json",
+      "transaction.json"
+    ],
+    "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-0300bc97cc3344b3ba403c03cb99df9c\\old-b",
+    "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
+    "txStatus": "purged",
+    "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-0300bc97cc3344b3ba403c03cb99df9c\\.codex-safe-delete-ec5af9d0-035a-4213-8033-9b1432225e14.quarantine"
+  },
+  {
+    "operationId": "20260813T200547Z-087a6e03-6f19-4711-b8b4-5e4177cdedf9",
+    "files": [
+      "plan.json",
+      "transaction.json"
+    ],
+    "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-0300bc97cc3344b3ba403c03cb99df9c",
+    "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
+    "txStatus": "purged",
+    "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\.codex-safe-delete-087a6e03-6f19-4711-b8b4-5e4177cdedf9.quarantine"
+  },
+  {
+    "operationId": "20260813T200553Z-03b8b4af-b466-4cce-9ff8-c977f3f48d93",
+    "files": [
+      "plan.json",
+      "transaction.json"
+    ],
+    "targetPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-leaf-fail-smoke-e0305afce208457f89602930e431e90e",
+    "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
+    "txStatus": "purged",
+    "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\.codex-safe-delete-03b8b4af-b466-4cce-9ff8-c977f3f48d93.quarantine"
+  }
+]

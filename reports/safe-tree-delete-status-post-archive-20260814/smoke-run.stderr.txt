@@ -1,0 +1,7 @@
+Add-CodexHookCapabilityDirectoryTreeSnapshotNode: D:\Codex\projects\统一环境\scripts\lib\CodexHostSafety.ps1:928
+Line |
+ 928 |          Add-CodexHookCapabilityDirectoryTreeSnapshotNode `
+     |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Exception calling "AcquireSafeTreeDeleteFileLease" with "2" argument(s): "Unable to acquire a safe-tree-delete
+     | file lease."
+Test-CodexSafeTreeDeleteProductionSmoke.ps1: The property 'purged' cannot be found on this object. Verify that the property exists.

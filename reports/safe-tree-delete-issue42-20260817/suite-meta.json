@@ -1,0 +1,9 @@
+{
+  "suite": "Test-CodexSafeTreeDeletePhase3Integration.ps1",
+  "issue": 42,
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "exitCode": 1,
+  "note": "Safety/coordinator/baseline passed. A.phase3-prod Apply failed Win32 32 on all retries. See baseline-partial.json and phase3-prod-attempts.json.",
+  "baselineElapsedMs": 513510,
+  "phase3ProdCompleted": false
+}

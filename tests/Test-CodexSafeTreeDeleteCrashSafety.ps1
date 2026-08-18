@@ -264,6 +264,75 @@ function New-ApplyCrashCase {
     }
 }
 
+function New-PublishCrashCase {
+    param([switch]$EmptyProjectState)
+
+    $caseRoot = Join-Path `
+        'D:\Codex\projects' `
+        ('.safe-tree-delete-publish-crash-{0}' -f [guid]::NewGuid().ToString('N'))
+    $targetPath = Join-Path $caseRoot 'build-output'
+    $evidenceRoot = Join-Path $caseRoot 'evidence'
+    $markerRoot = Join-Path $caseRoot 'markers'
+    $policyPath = Join-Path $caseRoot 'policy.json'
+    $purpose = 'rebuildable-build-output'
+    if ($EmptyProjectState) {
+        $targetPath = Join-Path $caseRoot '.codex'
+        [void][IO.Directory]::CreateDirectory((Join-Path $targetPath 'skill-state'))
+        $purpose = 'empty-project-state'
+    } else {
+        [void][IO.Directory]::CreateDirectory((Join-Path $targetPath 'obj'))
+        [IO.File]::WriteAllText(
+            (Join-Path $targetPath 'app.dll'),
+            'publish-crash-app',
+            [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText(
+            (Join-Path $targetPath 'obj\cache.bin'),
+            'publish-crash-cache',
+            [Text.UTF8Encoding]::new($false))
+    }
+    [void][IO.Directory]::CreateDirectory($markerRoot)
+    $policy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 3
+        entries = @([pscustomobject][ordered]@{
+            id = 'publish-crash-fixture'
+            capabilityRoot = $targetPath
+            minimumDescendantDepth = 0
+            rootDeletionPurpose = $purpose
+            deniedExactPaths = @()
+        })
+    }
+    [IO.File]::WriteAllText(
+        $policyPath,
+        ($policy | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $plan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $targetPath `
+        -CapabilityRoot $targetPath `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $apply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$plan.planPath) `
+        -ApprovedPlanSha256 ([string]$plan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    return [pscustomobject][ordered]@{
+        scenario = 'FailFastAfterLeafDispositionsPublish'
+        caseRoot = $caseRoot
+        targetPath = $targetPath
+        evidenceRoot = $evidenceRoot
+        markerRoot = $markerRoot
+        policyPath = $policyPath
+        plan = $plan
+        planDocument = Read-JsonDocument -Path ([string]$plan.planPath)
+        apply = $apply
+        runDirectory = Split-Path -Parent ([string]$apply.transactionPath)
+    }
+}
+
 function Invoke-CrashCaseProcess {
     param([Parameter(Mandatory)][object]$Case)
 
@@ -1022,6 +1091,208 @@ try {
 } finally {
     if ($null -ne $orphanCommitCase) {
         Remove-TestTree -Path ([string]$orphanCommitCase.caseRoot)
+    }
+}
+
+$publishCrashCase = $null
+try {
+    $publishCrashCase = New-PublishCrashCase
+    $publishCrashResult = Invoke-CrashCaseProcess -Case $publishCrashCase
+    Assert-True ($publishCrashResult.exitCode -ne 0) `
+        "publish crash fixture 必须非零退出：stdout=$($publishCrashResult.stdout) stderr=$($publishCrashResult.stderr)"
+    Assert-True `
+        ([IO.File]::Exists((Join-Path $publishCrashCase.markerRoot 'after-leaf-dispositions-publish.marker'))) `
+        'publish crash 必须命中 dispositions 发布后、purged 落盘前 seam'
+    Assert-True (-not [IO.Directory]::Exists([string]$publishCrashCase.apply.quarantinePath)) `
+        'publish crash 后 quarantine 必须已删净'
+    Assert-True (-not [IO.Directory]::Exists([string]$publishCrashCase.targetPath)) `
+        'publish crash 后目标必须已删除'
+    $wedgedTransaction = Read-JsonDocument -Path ([string]$publishCrashCase.apply.transactionPath)
+    Assert-True ($wedgedTransaction.status -ceq 'purging') `
+        'publish crash 必须留下停在 purging 的 transaction'
+    $publishDispositionsPath = Join-Path ([string]$publishCrashCase.runDirectory) 'leaf-dispositions.json'
+    Assert-True ([IO.File]::Exists($publishDispositionsPath)) `
+        'publish crash 必须已持久化 leaf dispositions'
+    [byte[]]$firstDispositionsBytes = [IO.File]::ReadAllBytes($publishDispositionsPath)
+    $firstDispositionsSha256 = Get-CodexHookBytesSha256 -Bytes $firstDispositionsBytes
+    $firstDispositions = Read-JsonDocument -Path $publishDispositionsPath
+    Assert-True ([string]$firstDispositions.streamSetSource -ceq 'plan.leafStreamSetV1') `
+        '首份 dispositions 必须声明 stream-set 来源'
+    $firstRows = @($firstDispositions.leaves)
+    Assert-True ($firstRows.Count -eq 2) '首份 dispositions 必须覆盖两个文件 leaf'
+    foreach ($row in $firstRows) {
+        Assert-True ([string]$row.disposition -ceq 'deleted') `
+            '首份 dispositions 必须记录真实 deleted 终态'
+        Assert-True ([string]$row.evidence -ceq 'exclusive-lease-reverification') `
+            '首份 dispositions 必须记录 lease 复验证据'
+    }
+
+    foreach ($bindingField in @(
+            'generationId',
+            'planSha256',
+            'transactionPath',
+            'quarantinePath',
+            'purgingTransactionUpdatedAtUtc',
+            'streamSetSource')) {
+        $tamperedDispositions = Read-JsonDocument -Path $publishDispositionsPath
+        $tamperedDispositions.$bindingField = "tampered-$bindingField"
+        [IO.File]::WriteAllText(
+            $publishDispositionsPath,
+            ($tamperedDispositions | ConvertTo-Json -Depth 32),
+            [Text.UTF8Encoding]::new($false))
+        try {
+            $tamperedTransactionSnapshot = Get-TransactionSnapshot `
+                -TransactionPath ([string]$publishCrashCase.apply.transactionPath)
+            $tamperedResumeError = Assert-Throws `
+                -Message "绑定字段 $bindingField 被篡改的既有 dispositions 必须拒绝收口" `
+                -Action {
+                    & $entryPath `
+                        -Mode Purge `
+                        -TransactionPath ([string]$publishCrashCase.apply.transactionPath) `
+                        -ApprovedTransactionSha256 ([string]$tamperedTransactionSnapshot.sha256) `
+                        -ConfirmPurge `
+                        -FixturePolicyPath ([string]$publishCrashCase.policyPath) `
+                        -FixtureEvidenceRoot ([string]$publishCrashCase.evidenceRoot)
+                }
+            Assert-True ($tamperedResumeError -match '绑定') `
+                "绑定字段 $bindingField 篡改必须以绑定不一致原因拒绝"
+            $stillWedged = Read-JsonDocument -Path ([string]$publishCrashCase.apply.transactionPath)
+            Assert-True ($stillWedged.status -ceq 'purging') `
+                "绑定字段 $bindingField 篡改拒绝不得伪造 purged transaction"
+        } finally {
+            [IO.File]::WriteAllBytes($publishDispositionsPath, $firstDispositionsBytes)
+        }
+    }
+
+    $resumeTransactionSnapshot = Get-TransactionSnapshot `
+        -TransactionPath ([string]$publishCrashCase.apply.transactionPath)
+    $publishCrashPurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$publishCrashCase.apply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$resumeTransactionSnapshot.sha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath ([string]$publishCrashCase.policyPath) `
+        -FixtureEvidenceRoot ([string]$publishCrashCase.evidenceRoot)
+    Assert-True ($publishCrashPurge.purged -eq $true) `
+        'publish 后崩溃的缺失 quarantine transaction 必须可收尾为 purged'
+    Assert-True ($publishCrashPurge.recoveredFromCommitJournal -eq $false) `
+        'dispositions 幂等收口未以 commit journal 为恢复依据，必须如实报告 $false'
+    Assert-True `
+        ([string]$publishCrashPurge.leafDispositionsSha256 -ceq [string]$firstDispositionsSha256) `
+        '收口必须复用首份 dispositions 的 SHA-256'
+    Assert-True `
+        ([Linq.Enumerable]::SequenceEqual(
+            [byte[]]$firstDispositionsBytes,
+            [byte[]][IO.File]::ReadAllBytes($publishDispositionsPath))) `
+        '收口不得改变首份 dispositions 的 bytes'
+    $purgedTransaction = Read-JsonDocument -Path ([string]$publishCrashCase.apply.transactionPath)
+    Assert-True ($purgedTransaction.status -ceq 'purged') `
+        '收口后 transaction 必须为 purged'
+    $adversarialScenarios++
+} finally {
+    if ($null -ne $publishCrashCase) {
+        Remove-TestTree -Path ([string]$publishCrashCase.caseRoot)
+    }
+}
+
+$emptyPublishCrashCase = $null
+try {
+    $emptyPublishCrashCase = New-PublishCrashCase -EmptyProjectState
+    $emptyPublishCrashResult = Invoke-CrashCaseProcess -Case $emptyPublishCrashCase
+    Assert-True ($emptyPublishCrashResult.exitCode -ne 0) `
+        "empty-project-state publish crash fixture 必须非零退出：stdout=$($emptyPublishCrashResult.stdout) stderr=$($emptyPublishCrashResult.stderr)"
+    Assert-True `
+        ([IO.File]::Exists((Join-Path $emptyPublishCrashCase.markerRoot 'after-leaf-dispositions-publish.marker'))) `
+        'empty-project-state publish crash 必须命中 dispositions 发布后、purged 落盘前 seam'
+    Assert-True (-not [IO.Directory]::Exists([string]$emptyPublishCrashCase.apply.quarantinePath)) `
+        'empty-project-state publish crash 后 quarantine 必须已删净'
+    Assert-True (-not [IO.Directory]::Exists([string]$emptyPublishCrashCase.targetPath)) `
+        'empty-project-state publish crash 后目标必须已删除'
+    $emptyWedgedTransaction = Read-JsonDocument -Path ([string]$emptyPublishCrashCase.apply.transactionPath)
+    Assert-True ($emptyWedgedTransaction.status -ceq 'purging') `
+        'empty-project-state publish crash 必须留下停在 purging 的 transaction'
+    $emptyRunDirectory = [string]$emptyPublishCrashCase.runDirectory
+    $emptyDispositionsPath = Join-Path $emptyRunDirectory 'leaf-dispositions.json'
+    Assert-True ([IO.File]::Exists($emptyDispositionsPath)) `
+        'empty-project-state publish crash 必须已持久化零行 leaf dispositions'
+    [byte[]]$emptyFirstDispositionsBytes = [IO.File]::ReadAllBytes($emptyDispositionsPath)
+    $emptyFirstDispositionsSha256 = Get-CodexHookBytesSha256 -Bytes $emptyFirstDispositionsBytes
+    $emptyFirstDispositions = Read-JsonDocument -Path $emptyDispositionsPath
+    Assert-True (@($emptyFirstDispositions.leaves).Count -eq 0) `
+        'empty-project-state 首份 dispositions 必须为零行'
+    Assert-True ([long]$emptyFirstDispositions.summary.plannedLeaves -eq 0L -and
+        [long]$emptyFirstDispositions.summary.deleted -eq 0L -and
+        [long]$emptyFirstDispositions.summary.absentAtPurgeResume -eq 0L) `
+        'empty-project-state 首份 dispositions summary 必须全零'
+
+    # 绑定有效的既有 dispositions 不豁免 empty-project-state 的 directory commit journal 完整性门禁。
+    $emptyCommitPaths = @([IO.Directory]::EnumerateFiles(
+            $emptyRunDirectory,
+            'directory-delete-*-commit.json',
+            [IO.SearchOption]::TopDirectoryOnly))
+    Assert-True ($emptyCommitPaths.Count -eq 2) `
+        'empty-project-state publish crash 必须为 root 与 skill-state 各发布一个 commit journal'
+    $emptyRootCommitPath = $null
+    foreach ($emptyCommitPathCandidate in $emptyCommitPaths) {
+        if ([string](Read-JsonDocument -Path $emptyCommitPathCandidate).relativePath -ceq '.') {
+            $emptyRootCommitPath = $emptyCommitPathCandidate
+        }
+    }
+    Assert-True ($null -ne $emptyRootCommitPath) `
+        'empty-project-state publish crash 必须有 root commit journal'
+    $emptyWithheldCommitPath = "$emptyRootCommitPath.withheld"
+    $emptyWedgedSnapshot = Get-TransactionSnapshot `
+        -TransactionPath ([string]$emptyPublishCrashCase.apply.transactionPath)
+    [IO.File]::Move($emptyRootCommitPath, $emptyWithheldCommitPath)
+    try {
+        $emptyMissingCommitError = Assert-Throws `
+            -Message '绑定有效 dispositions 不得豁免缺失 root commit journal 的收口拒绝' `
+            -Action {
+                & $entryPath `
+                    -Mode Purge `
+                    -TransactionPath ([string]$emptyPublishCrashCase.apply.transactionPath) `
+                    -ApprovedTransactionSha256 ([string]$emptyWedgedSnapshot.sha256) `
+                    -ConfirmPurge `
+                    -FixturePolicyPath ([string]$emptyPublishCrashCase.policyPath) `
+                    -FixtureEvidenceRoot ([string]$emptyPublishCrashCase.evidenceRoot)
+            }
+        Assert-True ($emptyMissingCommitError -match 'commit-authorized') `
+            '缺失 root commit journal 必须返回 commit-authorized 稳定拒绝原因'
+        $emptyStillWedged = Read-JsonDocument -Path ([string]$emptyPublishCrashCase.apply.transactionPath)
+        Assert-True ($emptyStillWedged.status -ceq 'purging') `
+            'journal 门禁拒绝不得伪造 purged transaction'
+    } finally {
+        [IO.File]::Move($emptyWithheldCommitPath, $emptyRootCommitPath)
+    }
+
+    $emptyResumeSnapshot = Get-TransactionSnapshot `
+        -TransactionPath ([string]$emptyPublishCrashCase.apply.transactionPath)
+    $emptyPublishCrashPurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$emptyPublishCrashCase.apply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$emptyResumeSnapshot.sha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath ([string]$emptyPublishCrashCase.policyPath) `
+        -FixtureEvidenceRoot ([string]$emptyPublishCrashCase.evidenceRoot)
+    Assert-True ($emptyPublishCrashPurge.purged -eq $true) `
+        'empty-project-state publish 后崩溃必须可幂等收口为 purged'
+    Assert-True ($emptyPublishCrashPurge.recoveredFromCommitJournal -eq $false) `
+        'empty-project-state dispositions 幂等收口未以 commit journal 为恢复依据，必须如实报告 $false'
+    Assert-True `
+        ([string]$emptyPublishCrashPurge.leafDispositionsSha256 -ceq [string]$emptyFirstDispositionsSha256) `
+        'empty-project-state 收口必须复用首份零行 dispositions 的 SHA-256'
+    Assert-True `
+        ([Linq.Enumerable]::SequenceEqual(
+            [byte[]]$emptyFirstDispositionsBytes,
+            [byte[]][IO.File]::ReadAllBytes($emptyDispositionsPath))) `
+        'empty-project-state 收口不得改变首份 dispositions 的 bytes'
+    $emptyPurgedTransaction = Read-JsonDocument -Path ([string]$emptyPublishCrashCase.apply.transactionPath)
+    Assert-True ($emptyPurgedTransaction.status -ceq 'purged') `
+        'empty-project-state 收口后 transaction 必须为 purged'
+    $adversarialScenarios++
+} finally {
+    if ($null -ne $emptyPublishCrashCase) {
+        Remove-TestTree -Path ([string]$emptyPublishCrashCase.caseRoot)
     }
 }
 

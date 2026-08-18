@@ -29,7 +29,8 @@ param(
     [string]$FixtureCandidatePolicyPath,
     [string]$FixtureApprovedCandidatePolicySha256,
     [Parameter(Mandatory)][string]$FixturePolicyPath,
-    [Parameter(Mandatory)][string]$FixtureEvidenceRoot
+    [Parameter(Mandatory)][string]$FixtureEvidenceRoot,
+    [object]$FixtureFileSystemCapabilities
 )
 
 Set-StrictMode -Version Latest
@@ -96,11 +97,16 @@ $result = switch ($Mode) {
         if ([string]::IsNullOrWhiteSpace($TargetPath) -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
             throw 'Plan 模式要求 TargetPath 与 CapabilityRoot。'
         }
-        New-CodexSafeTreeDeletePlan `
-            -TargetPath $TargetPath `
-            -CapabilityRoot $CapabilityRoot `
-            -PolicyPath $FixturePolicyPath `
-            -EvidenceRoot $FixtureEvidenceRoot
+        $planArguments = @{
+            TargetPath = $TargetPath
+            CapabilityRoot = $CapabilityRoot
+            PolicyPath = $FixturePolicyPath
+            EvidenceRoot = $FixtureEvidenceRoot
+        }
+        if ($null -ne $FixtureFileSystemCapabilities) {
+            $planArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
+        }
+        New-CodexSafeTreeDeletePlan @planArguments
     }
     'Apply' {
         if (-not $ConfirmApply) {
@@ -110,12 +116,17 @@ $result = switch ($Mode) {
         if ([string]::IsNullOrWhiteSpace($PlanPath) -or [string]::IsNullOrWhiteSpace($ApprovedPlanSha256)) {
             throw 'Apply 模式要求 PlanPath 与 ApprovedPlanSha256。'
         }
-        Invoke-CodexSafeTreeDeleteQuarantine `
-            -PlanPath $PlanPath `
-            -ApprovedPlanSha256 $ApprovedPlanSha256 `
-            -PolicyPath $FixturePolicyPath `
-            -EvidenceRoot $FixtureEvidenceRoot `
-            -FailAfterRenameForTest:$FixtureFailAfterRename
+        $applyArguments = @{
+            PlanPath = $PlanPath
+            ApprovedPlanSha256 = $ApprovedPlanSha256
+            PolicyPath = $FixturePolicyPath
+            EvidenceRoot = $FixtureEvidenceRoot
+            FailAfterRenameForTest = [bool]$FixtureFailAfterRename
+        }
+        if ($null -ne $FixtureFileSystemCapabilities) {
+            $applyArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
+        }
+        Invoke-CodexSafeTreeDeleteQuarantine @applyArguments
     }
     'Purge' {
         if (-not $ConfirmPurge) {
@@ -157,6 +168,9 @@ $result = switch ($Mode) {
         }
         if ($null -ne $FixtureLeafRetryDelay) {
             $purgeArguments.LeafRetryDelayForTest = $FixtureLeafRetryDelay
+        }
+        if ($null -ne $FixtureFileSystemCapabilities) {
+            $purgeArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
         }
         Invoke-CodexSafeTreeDeletePurge @purgeArguments
     }

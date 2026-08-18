@@ -4,7 +4,7 @@
   "codexHome": "D:\\Codex\\.codex",
   "managedRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks",
   "runtimes": {
-    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+    "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
     "python": "D:\\Codex\\tools\\python314-official\\python.exe",
     "pythonw": "D:\\Codex\\tools\\python314-official\\pythonw.exe",
     "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
@@ -209,7 +209,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -217,7 +217,7 @@
         ]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -279,7 +279,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -420,7 +420,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -476,7 +476,7 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -528,7 +528,7 @@
       "lifecycle": "retired",
       "lifecycleReason": "Codex payload does not expose acceptEdits/auto permission modes",
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-Command",
@@ -536,7 +536,7 @@
         ]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
           "-NoProfile",
           "-File",

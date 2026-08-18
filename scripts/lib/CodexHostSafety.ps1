@@ -796,6 +796,7 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
         [switch]$AllowInternalDirectoryJunctions,
         [string]$InternalDirectoryJunctionTargetRoot,
         [scriptblock]$MetricsObserver,
+        [scriptblock]$FileContentHashProvider,
         [string]$Name = 'capability directory-tree snapshot'
     )
 
@@ -910,12 +911,26 @@ function Get-CodexHookCapabilityDirectoryTreeSnapshot {
                         $childPath,
                         $AllowHardLinks.IsPresent)
                     $length = [long]$lease.Length
-                    [byte[]]$sha256 = $lease.ComputeSha256FromHandle()
+                    $fileIdentity = @([string]$lease.VolumeSerialNumber, [string]$lease.FileIndex)
+                    [byte[]]$sha256 = $null
+                    if ($null -ne $FileContentHashProvider) {
+                        $provided = & $FileContentHashProvider $childPath $childRelative $length $lease
+                        if ($provided -is [byte[]]) {
+                            $sha256 = $provided
+                        } elseif ($null -ne $provided) {
+                            $sha256 = [byte[]]@($provided)
+                        }
+                        if ($null -eq $sha256 -or $sha256.Length -ne 32) {
+                            throw "$Name FileContentHashProvider 必须返回 32 字节 SHA-256。"
+                        }
+                    } else {
+                        $sha256 = $lease.ComputeSha256FromHandle()
+                    }
                     $entries.Add([pscustomobject][ordered]@{
                         relativePath = $childRelative
                         kind = 'file'
                         sha256 = [Convert]::ToHexString($sha256).ToLowerInvariant()
-                        identity = @([string]$lease.VolumeSerialNumber, [string]$lease.FileIndex)
+                        identity = $fileIdentity
                     })
                     if ($null -ne $MetricsObserver) { & $MetricsObserver 'file' $length $length }
                 } finally {
@@ -1102,6 +1117,8 @@ function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
         [scriptblock]$MetricsObserver,
         [scriptblock]$DeleteCheckpointForTest,
         [scriptblock]$DeleteCommitCallback,
+        [scriptblock]$FileContentHashProvider,
+        [string]$RelativePath,
         [Parameter(Mandatory)][string]$Scope
     )
 
@@ -1123,7 +1140,23 @@ function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
                 $Path,
                 $AllowHardLinks.IsPresent)
             $length = [long]$targetLease.Length
-            [byte[]]$leasedSha256 = $targetLease.ComputeSha256FromHandle()
+            [byte[]]$leasedSha256 = $null
+            if ($null -ne $FileContentHashProvider) {
+                if ([string]::IsNullOrWhiteSpace($RelativePath)) {
+                    throw "$Scope FileContentHashProvider 删除哈希必须提供 relativePath。"
+                }
+                $provided = & $FileContentHashProvider $Path $RelativePath $length $targetLease
+                if ($provided -is [byte[]]) {
+                    $leasedSha256 = $provided
+                } elseif ($null -ne $provided) {
+                    $leasedSha256 = [byte[]]@($provided)
+                }
+                if ($null -eq $leasedSha256 -or $leasedSha256.Length -ne 32) {
+                    throw "$Scope FileContentHashProvider 必须返回 32 字节 SHA-256。"
+                }
+            } else {
+                $leasedSha256 = $targetLease.ComputeSha256FromHandle()
+            }
             if ($null -ne $MetricsObserver) { & $MetricsObserver 'hash-read' 0L $length }
             if ([Convert]::ToHexString($leasedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
                 throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope 临删前内容漂移。"
@@ -1132,7 +1165,20 @@ function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
                 -Expected $ExpectedIdentity `
                 -Actual @($targetLease.VolumeSerialNumber, $targetLease.FileIndex) `
                 -Scope "$Scope handle identity"
-            [byte[]]$confirmedSha256 = $targetLease.ComputeSha256FromHandle()
+            [byte[]]$confirmedSha256 = $null
+            if ($null -ne $FileContentHashProvider) {
+                $confirmed = & $FileContentHashProvider $Path $RelativePath $length $targetLease
+                if ($confirmed -is [byte[]]) {
+                    $confirmedSha256 = $confirmed
+                } elseif ($null -ne $confirmed) {
+                    $confirmedSha256 = [byte[]]@($confirmed)
+                }
+                if ($null -eq $confirmedSha256 -or $confirmedSha256.Length -ne 32) {
+                    throw "$Scope FileContentHashProvider 必须返回 32 字节 SHA-256。"
+                }
+            } else {
+                $confirmedSha256 = $targetLease.ComputeSha256FromHandle()
+            }
             if ($null -ne $MetricsObserver) { & $MetricsObserver 'hash-read' 0L $length }
             if ([Convert]::ToHexString($confirmedSha256).ToLowerInvariant() -cne $ExpectedSha256) {
                 throw "CODEX_HOOK_DIRECTORY_TREE_IDENTITY_DRIFT: $Scope handle identity 内容漂移。"
@@ -1363,7 +1409,8 @@ function Remove-CodexHookCapabilityDirectoryTree {
         [scriptblock]$LeafRetryDelayForTest,
         [scriptblock]$LeafDeleteCheckpointForTest,
         [scriptblock]$MetricsObserver,
-        [scriptblock]$DeleteCommitCallback
+        [scriptblock]$DeleteCommitCallback,
+        [scriptblock]$FileContentHashProvider
     )
 
     $leafRetryRuntime = if ($null -ne $LeafRetryPolicy) {
@@ -1703,6 +1750,8 @@ function Remove-CodexHookCapabilityDirectoryTree {
                 -MetricsObserver $MetricsObserver `
                 -DeleteCheckpointForTest $LeafDeleteCheckpointForTest `
                 -DeleteCommitCallback $DeleteCommitCallback `
+                -FileContentHashProvider $FileContentHashProvider `
+                -RelativePath ([string]$expectedChild.relativePath) `
                 -Scope "$NodeScope child"
         }
         if ($RejectNamedStreams) {

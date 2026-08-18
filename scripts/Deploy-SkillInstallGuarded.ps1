@@ -33,6 +33,18 @@ function Get-FileHashUpper {
     return (Get-FileHash -LiteralPath $PathValue -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
+function Get-FileIdentity {
+    param([Parameter(Mandatory = $true)][string]$PathValue)
+    if (-not (Test-Path -LiteralPath $PathValue -PathType Leaf)) { return $null }
+    $item = Get-Item -LiteralPath $PathValue -Force
+    return [ordered]@{
+        length = [int64]$item.Length
+        creationTimeUtcTicks = [int64]$item.CreationTimeUtc.Ticks
+        lastWriteTimeUtcTicks = [int64]$item.LastWriteTimeUtc.Ticks
+        attributes = [int]$item.Attributes
+    }
+}
+
 function Write-JsonAtomic {
     param(
         [Parameter(Mandatory = $true)][string]$PathValue,
@@ -59,7 +71,14 @@ $codexRootResolved = Resolve-DDrivePath $CodexRoot
 $evidenceRootResolved = Resolve-DDrivePath $EvidenceRoot
 $pythonPathResolved = Resolve-DDrivePath $PythonPath
 $targetRoot = Join-Path $codexRootResolved 'scripts'
-$sourceFiles = @('skill_source_record.py', 'generate_skill_catalog.py', 'install_skill_guarded.py', 'install-skill-guarded.cmd')
+$sourceFiles = @(
+    'skill_source_record.py',
+    'generate_skill_catalog.py',
+    'system_skill_provenance_repair.py',
+    'system_package_identity.py',
+    'install_skill_guarded.py',
+    'install-skill-guarded.cmd'
+)
 $evidenceDirectory = Join-Path $evidenceRootResolved ('deploy-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N'))
 $manifestPath = Join-Path $evidenceDirectory 'manifest.json'
 $records = @()
@@ -110,8 +129,11 @@ try {
             target = $target
             sourceSha256 = Get-FileHashUpper $source
             beforeExists = Test-Path -LiteralPath $target -PathType Leaf
+            beforeIdentity = Get-FileIdentity $target
             beforeSha256 = if (Test-Path -LiteralPath $target -PathType Leaf) { Get-FileHashUpper $target } else { $null }
             backup = $null
+            backupIdentity = $null
+            writtenIdentity = $null
             status = 'prepared'
         }
         $manifest.files += $record
@@ -121,16 +143,32 @@ try {
     foreach ($record in $manifest.files) {
         if (-not $PSCmdlet.ShouldProcess([string]$record.target, 'deploy guarded skill wrapper')) { continue }
         if ([bool]$record.beforeExists) {
+            if ((Get-FileIdentity ([string]$record.target) | ConvertTo-Json -Compress) -ne ([string]($record.beforeIdentity | ConvertTo-Json -Compress))) {
+                throw "部署目标 identity 在写入前漂移：$($record.target)"
+            }
+            if ((Get-FileHashUpper ([string]$record.target)) -ne [string]$record.beforeSha256) {
+                throw "部署目标 hash 在写入前漂移：$($record.target)"
+            }
             $backup = Join-Path $evidenceDirectory ('before-' + [IO.Path]::GetFileName([string]$record.target))
             Copy-Item -LiteralPath ([string]$record.target) -Destination $backup -Force
             $record.backup = $backup
+            $record.backupIdentity = Get-FileIdentity $backup
+        }
+        elseif (Test-Path -LiteralPath ([string]$record.target)) {
+            throw "部署目标在写入前从不存在变为已存在：$($record.target)"
         }
         $replaced += $record
         $temp = Join-Path $targetRoot ('.' + [IO.Path]::GetFileName([string]$record.target) + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
         try {
             Copy-Item -LiteralPath ([string]$record.source) -Destination $temp -Force
             if ((Get-FileHashUpper $temp) -ne [string]$record.sourceSha256) { throw "临时部署指纹不一致：$temp" }
-            Move-Item -LiteralPath $temp -Destination ([string]$record.target) -Force
+            if ([bool]$record.beforeExists) {
+                Move-Item -LiteralPath $temp -Destination ([string]$record.target) -Force
+            }
+            else {
+                [IO.File]::Move($temp, [string]$record.target, $false)
+            }
+            $record.writtenIdentity = Get-FileIdentity ([string]$record.target)
             if ((Get-FileHashUpper ([string]$record.target)) -ne [string]$record.sourceSha256) { throw "目标部署指纹不一致：$($record.target)" }
             $record.status = 'deployed'
         }
@@ -157,10 +195,41 @@ catch {
     $rollbackErrors = @()
     foreach ($record in @($replaced | Sort-Object -Property relative -Descending)) {
         try {
-            if ($record.backup) {
-                Copy-Item -LiteralPath ([string]$record.backup) -Destination ([string]$record.target) -Force
+            $currentIdentity = Get-FileIdentity ([string]$record.target)
+            $currentHash = if ($currentIdentity) { Get-FileHashUpper ([string]$record.target) } else { $null }
+            if ($record.writtenIdentity -and (
+                ($currentIdentity | ConvertTo-Json -Compress) -ne ([string]($record.writtenIdentity | ConvertTo-Json -Compress)) -or
+                $currentHash -ne [string]$record.sourceSha256
+            )) {
+                throw "部署目标在 rollback 前已被外部修改：$($record.target)"
             }
-            elseif (Test-Path -LiteralPath ([string]$record.target)) {
+            if ($record.backup) {
+                if (-not $record.writtenIdentity -and [bool]$record.beforeExists) {
+                    if (-not $currentIdentity -or
+                        ($currentIdentity | ConvertTo-Json -Compress) -ne ([string]($record.beforeIdentity | ConvertTo-Json -Compress)) -or
+                        $currentHash -ne [string]$record.beforeSha256
+                    ) {
+                        throw "部署 rollback 前目标已偏离 baseline：$($record.target)"
+                    }
+                }
+                if (-not (Test-Path -LiteralPath ([string]$record.backup) -PathType Leaf)) {
+                    throw "部署 rollback backup 缺失：$($record.target)"
+                }
+                if ($record.backupIdentity -and ((Get-FileIdentity ([string]$record.backup) | ConvertTo-Json -Compress) -ne ([string]($record.backupIdentity | ConvertTo-Json -Compress)))) {
+                    throw "部署 rollback backup identity 已漂移：$($record.target)"
+                }
+                if ((Get-FileHashUpper ([string]$record.backup)) -ne [string]$record.beforeSha256) {
+                    throw "部署 rollback backup hash 已漂移：$($record.target)"
+                }
+                Copy-Item -LiteralPath ([string]$record.backup) -Destination ([string]$record.target) -Force
+                if ((Get-FileHashUpper ([string]$record.target)) -ne [string]$record.beforeSha256) {
+                    throw "部署目标 rollback hash 校验失败：$($record.target)"
+                }
+            }
+            elseif ($record.writtenIdentity) {
+                if (-not (Test-Path -LiteralPath ([string]$record.target) -PathType Leaf)) {
+                    throw "部署 rollback 目标缺失：$($record.target)"
+                }
                 Remove-Item -LiteralPath ([string]$record.target) -Force
             }
         }

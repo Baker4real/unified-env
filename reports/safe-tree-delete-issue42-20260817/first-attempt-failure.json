@@ -1,0 +1,11 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-first-attempt-failure",
+  "attempt": 1,
+  "stageFailed": "scale-phase3-prod",
+  "baselineStageStartedUtc": "2026-08-16T20:50:03.1542003+00:00",
+  "phase3ProdStageStartedUtc": "2026-08-16T20:58:50.5461954+00:00",
+  "baselineWallClockApproxMs": 527392,
+  "note": "Baseline Plan\u2192Apply\u2192Purge finished. phase3-prod Apply GetHashSafely exclusive open failed, then quarantine rollback RenameToSibling failed. finally cleaned issue42 scale/fixture trees. Production leftover untouched. Not a 6x claim. Retry with sequential tree create so the phase3-prod tree is not idle during the 8min baseline.",
+  "errorExcerpt": "Failed to open path exclusively for hash reuse without following reparse points.; rollback: Unable to rename the verified directory to quarantine.",
+  "productionCodeChanged": false
+}

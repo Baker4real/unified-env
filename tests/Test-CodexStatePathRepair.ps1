@@ -16,7 +16,7 @@ function Invoke-PathCommand {
     param([Parameter(Mandatory)][string[]]$Arguments)
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
+    $startInfo.FileName = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $false
@@ -62,7 +62,7 @@ $helperEnd = $testSource.IndexOf('$testSource = Get-Content', $helperStart)
 if ($helperStart -lt 0 -or $helperEnd -le $helperStart) { throw 'hidden state path helper is unavailable' }
 $helperSource = $testSource.Substring($helperStart, $helperEnd - $helperStart)
 if ($helperSource -cnotmatch 'UseShellExecute\s*=\s*\$false' -or $helperSource -cnotmatch 'CreateNoWindow\s*=\s*\$true' -or $helperSource -cnotmatch 'StandardOutputEncoding\s*=' -or $helperSource -cnotmatch 'StandardErrorEncoding\s*=') { throw 'state path test process must preserve the UTF-8 protocol' }
-$directPwshPattern = '&\s*' + [regex]::Escape("'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'")
+$directPwshPattern = '&\s*' + [regex]::Escape("'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'")
 if ($testSource -cmatch $directPwshPattern) { throw 'state path test must not directly invoke pwsh' }
 
 try {

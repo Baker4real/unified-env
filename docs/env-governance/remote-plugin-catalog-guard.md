@@ -9,12 +9,12 @@ intent: 说明远端插件 catalog guard 的治理范围、入口和安全边界
 
 该 guard 只治理 `D:\Codex\.codex\cache\remote_plugin_catalog` 下文件名为 16 位小写十六进制的普通 JSON catalog。它精确移除 policy 中四组固定 `name` / `id`，不扫描、不删除插件或 skill 安装目录，也不会恢复或复制已退役的 Superpowers skill。
 
-治理入口固定为 `scripts\Invoke-CodexRemotePluginCatalogGuard.ps1`，目标身份的唯一配置来源是 `managed\remote-plugin-catalog-guard\policy.json`。本机调用只使用 `D:\Codex\tools\PowerShell\7.6.4\pwsh.exe`：
+治理入口固定为 `scripts\Invoke-CodexRemotePluginCatalogGuard.ps1`，目标身份的唯一配置来源是 `managed\remote-plugin-catalog-guard\policy.json`。本机调用只使用 `D:\Codex\tools\PowerShell\7.6.5\pwsh.exe`：
 
 ```powershell
-& 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -NoLogo -NoProfile -NonInteractive -File 'D:\Codex\projects\统一环境\scripts\Invoke-CodexRemotePluginCatalogGuard.ps1' -Mode Check -Json
-& 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -NoLogo -NoProfile -NonInteractive -File 'D:\Codex\projects\统一环境\scripts\Invoke-CodexRemotePluginCatalogGuard.ps1' -Mode Repair -Json
-& 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' -NoLogo -NoProfile -NonInteractive -File 'D:\Codex\projects\统一环境\scripts\Invoke-CodexRemotePluginCatalogGuard.ps1' -Mode Remove -Json
+& 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -NoLogo -NoProfile -NonInteractive -File 'D:\Codex\projects\统一环境\scripts\Invoke-CodexRemotePluginCatalogGuard.ps1' -Mode Check -Json
+& 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -NoLogo -NoProfile -NonInteractive -File 'D:\Codex\projects\统一环境\scripts\Invoke-CodexRemotePluginCatalogGuard.ps1' -Mode Repair -Json
+& 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -NoLogo -NoProfile -NonInteractive -File 'D:\Codex\projects\统一环境\scripts\Invoke-CodexRemotePluginCatalogGuard.ps1' -Mode Remove -Json
 ```
 
 - `-Mode Check -Json`：只读检查受管文件、当前用户登录任务、隐藏进程链、跨会话单实例 mutex、watcher state 与 live catalog。catalog/policy 解析直接复用 runtime 的 `Audit` validator；watcher state 使用严格 JSON parser，重复属性、类型转换、属性集合漂移和非精确 UTC `Z` 时间均被拒绝。`retrying`、非零 `pendingRetryCount`、失败或超过 45 秒的 `lastSweep`、陈旧 heartbeat、异常 state schema 都会使 Check 非零退出，即使当前目标计数已经为 0。

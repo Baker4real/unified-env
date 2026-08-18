@@ -1,0 +1,8 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue40-smoke",
+  "fileCount": 32,
+  "deletedCount": 32,
+  "failedCount": 0,
+  "elapsedMs": 85,
+  "maxDegreeOfParallelism": 4
+}

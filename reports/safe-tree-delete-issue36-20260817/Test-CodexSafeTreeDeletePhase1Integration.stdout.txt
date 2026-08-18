@@ -1,0 +1,21 @@
+STAGE runtime-check utc=2026-08-16T18:57:31.4600894+00:00
+STAGE fs-probe utc=2026-08-16T18:57:32.1610019+00:00
+STAGE safety-toctou-e2e utc=2026-08-16T18:57:32.2743836+00:00
+STAGE scale-create utc=2026-08-16T18:57:36.9708453+00:00
+STAGE scale-baseline utc=2026-08-16T18:57:50.6377764+00:00
+STAGE scale-phase1 utc=2026-08-16T19:06:38.5333582+00:00
+STAGE scale-record utc=2026-08-16T19:15:16.0280363+00:00
+STAGE done utc=2026-08-16T19:15:16.0357114+00:00
+
+ok                     : True
+suite                  : CodexSafeTreeDeletePhase1Integration
+fileCount              : 10000
+bytesPerFile           : 163840
+totalBytes             : 1638400000
+baselineElapsedMs      : 527846
+phase1ElapsedMs        : 517444
+speedup                : 1.02
+ratio                  : 0.98
+metTarget              : False
+fat32LiveE2eVerified   : False
+networkLiveE2eVerified : False

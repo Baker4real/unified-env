@@ -38,6 +38,18 @@ if str(_SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIRECTORY))
 
 from skill_source_record import CurrentSourceRecord, parse_current_source_record
+from system_skill_provenance_repair import (
+    SKILL_CREATOR_CRITICAL_FILES,
+    SKILL_CREATOR_OVERLAY_KIND,
+    SystemProvenanceRepairError,
+    _identity as system_path_identity,
+    _query_package_identity as query_system_package_identity,
+    _source_record as system_source_record,
+    skill_creator_overlay_ledger_projection,
+    system_skill_payload_inventory,
+    system_skill_integrity,
+    validate_skill_creator_compatibility_overlay,
+)
 
 
 DEFAULT_ACTIVE_ROOT = Path(r"D:\Codex\.codex\skills")
@@ -45,6 +57,9 @@ DEFAULT_PLUGIN_CACHE_ROOT = Path(r"D:\Codex\.codex\plugins\cache")
 DEFAULT_LEDGER = Path(r"D:\Codex\.codex\skills\.downloaded-skills-source-state.json")
 DEFAULT_CATALOG = Path(r"D:\Codex\.codex\skill-catalog\catalog.json")
 DEFAULT_GENERATOR = Path(__file__).absolute().with_name("generate_skill_catalog.py")
+DEFAULT_SYSTEM_PACKAGE_PROVIDER = Path(__file__).absolute().with_name(
+    "system_package_identity.py"
+)
 DEFAULT_CLOSURE = Path(
     r"D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py"
 )
@@ -676,6 +691,21 @@ def validate_decision_manifest(path: Path) -> dict[str, Any]:
         raise InstallError(
             "guard decision manifest 的 target_scope 必须是 active 或 system"
         )
+    overlay = data.get("system_provenance_overlay")
+    if overlay is not None:
+        if target_scope != "system" or decision != "update":
+            raise InstallError(
+                "system_provenance_overlay 只允许绑定 system scope 的 skill-creator update"
+            )
+        source = data.get("source")
+        if not isinstance(source, dict) or source.get("id") != "codex-bundled-system-skills":
+            raise InstallError(
+                "system_provenance_overlay 必须绑定 codex-bundled-system-skills source"
+            )
+        try:
+            validate_skill_creator_compatibility_overlay(overlay)
+        except SystemProvenanceRepairError as exc:
+            raise InstallError(str(exc)) from exc
     return data
 
 
@@ -696,6 +726,316 @@ def target_layout(
     if is_reparse(target_root) or not target_root.is_dir():
         raise InstallError(f"system skill root 必须是安全目录：{target_root}")
     return scope, target_root, [f".system/{name}" for name in names]
+
+
+def system_provenance_overlay_from_decision(
+    *,
+    decision: dict[str, Any],
+    target_scope: str,
+    names: list[str],
+) -> dict[str, Any] | None:
+    """Normalize the one candidate-driven system provenance overlay."""
+    raw = decision.get("system_provenance_overlay")
+    if raw is None:
+        if target_scope == "system" and names == ["skill-creator"] and decision.get("decision") == "update":
+            raise InstallError(
+                "system scope skill-creator update must bind system_provenance_overlay"
+            )
+        return None
+    try:
+        return validate_skill_creator_compatibility_overlay(raw)
+    except SystemProvenanceRepairError as exc:
+        raise InstallError(str(exc)) from exc
+
+
+def _system_source_entry(
+    *,
+    ledger: dict[str, Any],
+    active_root: Path,
+) -> tuple[dict[str, Any], int]:
+    """Validate the existing six-skill system provenance source before an update."""
+    matches = [
+        (index, entry)
+        for index, entry in enumerate(ledger.get("sources", []))
+        if isinstance(entry, dict) and entry.get("id") == "codex-bundled-system-skills"
+    ]
+    if len(matches) != 1:
+        raise InstallError("codex-bundled-system-skills source group must be unique")
+    index, entry = matches[0]
+    expected = {f".system/{name}" for name in ("imagegen", "openai-docs", "plugin-creator", "review-agent", "skill-creator", "skill-installer")}
+    skills = entry.get("skills")
+    source_root = str(entry.get("source_root", "")).replace("\\", "/").casefold()
+    if (
+        entry.get("type") != "codex-bundled-system"
+        or not isinstance(skills, list)
+        or set(skills) != expected
+        or len(skills) != len(expected)
+        or source_root != str(active_root / ".system").replace("\\", "/").casefold()
+    ):
+        raise InstallError("system source group type/skill set/source_root drifted")
+    provenance = entry.get("system_provenance")
+    if not isinstance(provenance, dict) or provenance.get("schema_version") != 1:
+        raise InstallError("system source group lacks managed system_provenance")
+    package = provenance.get("package_identity")
+    marker = provenance.get("marker")
+    records = provenance.get("skills")
+    if (
+        not isinstance(package, dict)
+        or not isinstance(marker, dict)
+        or marker.get("relative_path") != ".system/.codex-system-skills.marker"
+        or not isinstance(records, list)
+        or [item.get("name") if isinstance(item, dict) else None for item in records]
+        != ["imagegen", "openai-docs", "plugin-creator", "review-agent", "skill-creator", "skill-installer"]
+    ):
+        raise InstallError("system provenance skill/package/marker schema drifted")
+    for item in records:
+        if not isinstance(item, dict) or item.get("path") != f".system/{item.get('name')}":
+            raise InstallError("system provenance skill path binding drifted")
+        if not isinstance(item.get("official_integrity"), dict) or not isinstance(item.get("effective_integrity"), dict):
+            raise InstallError("system provenance integrity records are incomplete")
+    return entry, index
+
+
+def prepare_system_provenance_overlay(
+    *,
+    args: argparse.Namespace,
+    decision: dict[str, Any],
+    target_scope: str,
+    names: list[str],
+    active_root: Path,
+    ledger: dict[str, Any],
+) -> dict[str, Any] | None:
+    overlay = system_provenance_overlay_from_decision(
+        decision=decision, target_scope=target_scope, names=names
+    )
+    if overlay is None:
+        return None
+    entry, source_index = _system_source_entry(ledger=ledger, active_root=active_root)
+    provider = ensure_file(args.system_package_provider, label="Store package identity provider")
+    interpreter = ensure_file(args.interpreter, label="Python interpreter")
+    provider_bytes = provider.read_bytes()
+    if sha256_file(provider) != overlay["package_identity_provider_sha256"]:
+        raise InstallError("Store package identity provider SHA-256 does not match overlay")
+    provenance = entry["system_provenance"]
+    package = provenance["package_identity"]
+    try:
+        observed_package = query_system_package_identity(
+            interpreter=interpreter,
+            provider=provider,
+            expected=package,
+            evidence_dir=None,
+            label="system-overlay-package-preflight",
+        )
+    except SystemProvenanceRepairError as exc:
+        raise InstallError(str(exc)) from exc
+    marker = provenance["marker"]
+    marker_path = d_path(
+        active_root / Path(*str(marker["relative_path"]).split("/")),
+        label="system skill marker",
+        must_exist=True,
+    )
+    if sha256_file(marker_path) != marker.get("sha256"):
+        raise InstallError("system skill marker hash does not match ledger")
+    skill_root = d_path(active_root / ".system" / "skill-creator", label="skill-creator active root", must_exist=True)
+    baseline_integrity = system_skill_integrity(skill_root)
+    if baseline_integrity != overlay["official_integrity"]:
+        raise InstallError("skill-creator official integrity does not match active baseline")
+    baseline_inventory = system_skill_payload_inventory(skill_root)
+    return {
+        "overlay": overlay,
+        "source_index": source_index,
+        "source_entry_id": entry.get("id"),
+        "package": observed_package,
+        "provider": provider,
+        "provider_bytes": provider_bytes,
+        "provider_identity": system_path_identity(provider),
+        "interpreter": interpreter,
+        "marker_path": marker_path,
+        "marker_identity": system_path_identity(marker_path),
+        "marker_bytes": marker_path.read_bytes(),
+        "baseline_skill_root": skill_root,
+        "baseline_skill_identity": directory_identity(skill_root, label="skill-creator active root"),
+        "baseline_inventory": baseline_inventory,
+        "source_bytes": None,
+    }
+
+
+def _assert_system_overlay_baseline(
+    *,
+    overlay_context: dict[str, Any],
+    active_root: Path,
+    ledger_path: Path | None = None,
+) -> None:
+    skill_root = d_path(active_root / ".system" / "skill-creator", label="skill-creator active root", must_exist=True)
+    if directory_identity(skill_root, label="skill-creator active root") != overlay_context["baseline_skill_identity"]:
+        raise InstallError("skill-creator active directory identity changed during transaction")
+    if system_skill_integrity(skill_root) != overlay_context["overlay"]["official_integrity"]:
+        raise InstallError("skill-creator active payload changed during transaction")
+    if system_skill_payload_inventory(skill_root) != overlay_context["baseline_inventory"]:
+        raise InstallError("skill-creator active payload topology changed during transaction")
+    marker_path = overlay_context["marker_path"]
+    if (
+        system_path_identity(marker_path) != overlay_context["marker_identity"]
+        or marker_path.read_bytes() != overlay_context["marker_bytes"]
+    ):
+        raise InstallError("system marker changed during transaction")
+    provider = overlay_context["provider"]
+    if (
+        system_path_identity(provider) != overlay_context["provider_identity"]
+        or provider.read_bytes() != overlay_context["provider_bytes"]
+    ):
+        raise InstallError("Store package identity provider changed during transaction")
+
+
+def validate_staged_system_overlay(
+    *,
+    staged_root: Path,
+    overlay_context: dict[str, Any],
+    interpreter: Path,
+    evidence_dir: Path,
+) -> bytes:
+    """Validate candidate payload topology, hashes, and durable SOURCE bytes."""
+    overlay = overlay_context["overlay"]
+    target = d_path(staged_root / "skill-creator", label="staged skill-creator", must_exist=True)
+    actual = system_skill_integrity(target)
+    if actual != overlay["effective_integrity"]:
+        raise InstallError("skill-creator effective integrity does not match overlay")
+    candidate_inventory = system_skill_payload_inventory(target)
+    overlay_context["effective_inventory"] = candidate_inventory
+    baseline_inventory = overlay_context["baseline_inventory"]
+    if candidate_inventory["directories"] != baseline_inventory["directories"]:
+        raise InstallError("skill-creator overlay changed directory topology outside the managed payload")
+    changed = {
+        relative
+        for relative in set(baseline_inventory["files"]) | set(candidate_inventory["files"])
+        if baseline_inventory["files"].get(relative) != candidate_inventory["files"].get(relative)
+    }
+    if changed != set(SKILL_CREATOR_CRITICAL_FILES):
+        raise InstallError(
+            "skill-creator overlay changed files outside the exact quick_validate payload: "
+            + ", ".join(sorted(changed))
+        )
+    for relative in SKILL_CREATOR_CRITICAL_FILES:
+        path = target / Path(*relative.split("/"))
+        if not path.is_file() or sha256_file(path) != overlay["critical_files"][relative]:
+            raise InstallError(f"skill-creator critical payload hash mismatch: {relative}")
+    source_path = target / "SOURCE.md"
+    if not source_path.is_file():
+        raise InstallError("skill-creator staged SOURCE.md is missing")
+    return source_path.read_bytes()
+
+
+def verify_system_provenance_overlay_postcondition(
+    *,
+    active_root: Path,
+    ledger: dict[str, Any],
+    catalog_path: Path,
+    overlay_context: dict[str, Any],
+) -> dict[str, Any]:
+    overlay = overlay_context["overlay"]
+    try:
+        query_system_package_identity(
+            interpreter=overlay_context["interpreter"],
+            provider=overlay_context["provider"],
+            expected=overlay_context["package"],
+            evidence_dir=None,
+            label="system-overlay-package-postcheck",
+        )
+    except SystemProvenanceRepairError as exc:
+        raise InstallError(str(exc)) from exc
+    marker_path = overlay_context["marker_path"]
+    if (
+        system_path_identity(marker_path) != overlay_context["marker_identity"]
+        or marker_path.read_bytes() != overlay_context["marker_bytes"]
+    ):
+        raise InstallError("system marker changed during system overlay postcheck")
+    provider = overlay_context["provider"]
+    if (
+        system_path_identity(provider) != overlay_context["provider_identity"]
+        or provider.read_bytes() != overlay_context["provider_bytes"]
+    ):
+        raise InstallError("Store package identity provider changed during system overlay postcheck")
+    active_skill = d_path(
+        active_root / ".system" / "skill-creator",
+        label="active skill-creator",
+        must_exist=True,
+    )
+    if system_skill_integrity(active_skill) != overlay["effective_integrity"]:
+        raise InstallError("active skill-creator effective integrity postcheck failed")
+    if system_skill_payload_inventory(active_skill) != overlay_context["effective_inventory"]:
+        raise InstallError("active skill-creator payload topology postcheck failed")
+    for relative in SKILL_CREATOR_CRITICAL_FILES:
+        path = active_skill / Path(*relative.split("/"))
+        if sha256_file(path) != overlay["critical_files"][relative]:
+            raise InstallError(f"active skill-creator critical payload drifted: {relative}")
+    source_path = active_skill / "SOURCE.md"
+    source_hash = sha256_file(source_path)
+    entry, _ = _system_source_entry(ledger=ledger, active_root=active_root)
+    record = next(item for item in entry["system_provenance"]["skills"] if item.get("name") == "skill-creator")
+    if (
+        record.get("official_integrity") != overlay["official_integrity"]
+        or record.get("effective_integrity") != overlay["effective_integrity"]
+        or record.get("critical_files") != overlay["critical_files"]
+        or record.get("overlay") != skill_creator_overlay_ledger_projection(overlay)
+        or record.get("source_md_sha256") != source_hash
+    ):
+        raise InstallError("system provenance ledger overlay postcheck failed")
+    catalog = load_json(catalog_path, label="skill catalog")
+    matches = [
+        item for item in catalog.get("artifacts", [])
+        if isinstance(item, dict)
+        and item.get("scope") == "system"
+        and item.get("name") == "skill-creator"
+        and item.get("relative_path") == ".system/skill-creator/SKILL.md"
+    ]
+    if len(matches) != 1:
+        raise InstallError("catalog skill-creator system entry is not unique")
+    artifact = matches[0]
+    if artifact.get("integrity", {}).get("skill_md_sha256") != overlay["effective_integrity"]["skill_md_sha256"]:
+        raise InstallError("catalog skill-creator effective SKILL.md hash drifted")
+    if artifact.get("ledger_coverage") != "pass" or artifact.get("conflicts"):
+        raise InstallError("catalog skill-creator ledger coverage is not pass")
+    return {
+        "skill_md_sha256": overlay["effective_integrity"]["skill_md_sha256"],
+        "source_md_sha256": source_hash,
+        "overlay": skill_creator_overlay_ledger_projection(overlay),
+    }
+
+
+def apply_system_provenance_overlay_to_ledger(
+    *,
+    ledger: dict[str, Any],
+    overlay_context: dict[str, Any],
+    source_md_sha256: str,
+) -> dict[str, Any]:
+    updated = json.loads(json.dumps(ledger, ensure_ascii=False))
+    entry = updated["sources"][overlay_context["source_index"]]
+    provenance = entry["system_provenance"]
+    overlay = overlay_context["overlay"]
+    record = next(
+        item for item in provenance["skills"] if item.get("name") == "skill-creator"
+    )
+    record["official_integrity"] = json.loads(json.dumps(overlay["official_integrity"]))
+    record["effective_integrity"] = json.loads(json.dumps(overlay["effective_integrity"]))
+    record["critical_files"] = json.loads(json.dumps(overlay["critical_files"]))
+    record["overlay"] = skill_creator_overlay_ledger_projection(overlay)
+    record["source_md_sha256"] = source_md_sha256
+    changes = entry.setdefault("local_changes", [])
+    if not isinstance(changes, list):
+        raise InstallError("system source group local_changes must be an array")
+    summary = (
+        "guarded system provenance overlay: bound skill-creator quick_validate "
+        "argument-hint/disable-model-invocation compatibility payload."
+    )
+    if not any(
+        isinstance(item, dict)
+        and item.get("skill") == ".system/skill-creator"
+        and item.get("summary") == summary
+        for item in changes
+    ):
+        changes.append({"skill": ".system/skill-creator", "date": today(), "summary": summary})
+    updated["updated_at"] = today()
+    return updated
 
 
 def canonical_rename_spec(
@@ -1943,6 +2283,10 @@ def run_closure(
 
 def load_and_validate_manifest(path: Path, *, names: list[str]) -> dict[str, Any]:
     data = validate_decision_manifest(path)
+    if "system_provenance_overlay" in data and names != ["skill-creator"]:
+        raise InstallError(
+            "system_provenance_overlay 只允许绑定 system scope 的 skill-creator update"
+        )
     declared = data.get("skills")
     if declared is not None:
         if not isinstance(declared, list) or sorted(str(item) for item in declared) != sorted(names):
@@ -2174,25 +2518,38 @@ def stage_candidate(
         if actual_name != name:
             raise InstallError(f"SKILL.md name 与目标目录不一致：{actual_name!r} != {name!r}")
         validate_openai_display_name(target, label=f"staging skill {name}")
-        append_source_record(
-            target / "SOURCE.md",
-            skill_name=(name if target_scope == "active" else f".system/{name}"),
-            active_root=active_root,
-            upstream_path=upstream_path,
-            context=context,
-            command=guarded_retrieval(args),
-        )
-        if args.candidate:
-            validate_durable_source_record(
+        system_overlay_context = context.get("system_provenance_overlay")
+        if (
+            isinstance(system_overlay_context, dict)
+            and target_scope == "system"
+            and name == "skill-creator"
+        ):
+            source_bytes = system_overlay_context.get("source_bytes")
+            if not isinstance(source_bytes, bytes):
+                raise InstallError("skill-creator system provenance SOURCE bytes are missing")
+            atomic_write_bytes(target / "SOURCE.md", source_bytes)
+            if (target / "SOURCE.md").read_bytes() != source_bytes:
+                raise InstallError("skill-creator system provenance SOURCE staging hash mismatch")
+        else:
+            append_source_record(
                 target / "SOURCE.md",
-                durable_fields={
-                    "Local path": active_root / ledger_names[names.index(name)],
-                    "Active root": active_root,
-                    "Guarded transaction evidence": Path(context["evidence_path"]),
-                    "Decision manifest": Path(context["manifest_path"]),
-                },
-                transient_paths=[Path(args.candidate), Path(args.decision_manifest)],
+                skill_name=(name if target_scope == "active" else f".system/{name}"),
+                active_root=active_root,
+                upstream_path=upstream_path,
+                context=context,
+                command=guarded_retrieval(args),
             )
+            if args.candidate:
+                validate_durable_source_record(
+                    target / "SOURCE.md",
+                    durable_fields={
+                        "Local path": active_root / ledger_names[names.index(name)],
+                        "Active root": active_root,
+                        "Guarded transaction evidence": Path(context["evidence_path"]),
+                        "Decision manifest": Path(context["manifest_path"]),
+                    },
+                    transient_paths=[Path(args.candidate), Path(args.decision_manifest)],
+                )
     bundled_validation = validate_staged_bundled_skills(
         stage_root=stage_target_root,
         top_level_name=names[0],
@@ -2213,6 +2570,15 @@ def stage_candidate(
     staged_payloads = {
         name: tree_content_seal(stage_target_root / name) for name in names
     }
+    system_overlay_context = context.get("system_provenance_overlay")
+    if isinstance(system_overlay_context, dict):
+        source_bytes = validate_staged_system_overlay(
+            staged_root=stage_target_root,
+            overlay_context=system_overlay_context,
+            interpreter=interpreter,
+            evidence_dir=evidence_dir,
+        )
+        system_overlay_context["source_md_sha256"] = hashlib.sha256(source_bytes).hexdigest()
     return {
         "names": names,
         "closure": closure,
@@ -2873,6 +3239,29 @@ def restore_file(path: Path, backup: Path | None) -> None:
     os.replace(temporary, path)
 
 
+def restore_file_cas(
+    path: Path,
+    *,
+    before: bytes | None,
+    before_identity: dict[str, int] | None,
+    written: bytes | None,
+    written_identity: dict[str, int] | None,
+    backup: Path | None,
+) -> None:
+    if path.exists() and not path.is_file():
+        raise InstallError(f"rollback CAS target is not a regular file: {path}")
+    current = path.read_bytes() if path.exists() else None
+    current_identity = system_path_identity(path) if current is not None else None
+    if current == before and current_identity == before_identity:
+        return
+    if current != written or current_identity != written_identity:
+        raise InstallError(f"rollback CAS refused to overwrite concurrent state: {path}")
+    restore_file(path, backup)
+    restored = path.read_bytes() if path.exists() and path.is_file() else None
+    if restored != before:
+        raise InstallError(f"rollback CAS could not verify original bytes: {path}")
+
+
 def verify_catalog(
     *,
     catalog_path: Path,
@@ -3164,10 +3553,15 @@ def write_transaction_manifest(path: Path, payload: dict[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="通过事务 wrapper 安装并校验 Codex skill")
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--candidate", type=Path, help="已通过候选审查的本地 skill 目录")
     source.add_argument("--repo", help="GitHub owner/repo")
     source.add_argument("--url", help="GitHub skill tree/blob URL")
+    source.add_argument(
+        "--system-provenance-repair-plan",
+        type=Path,
+        help="精确六项 bundled .system provenance 原子修复计划",
+    )
     parser.add_argument("--path", dest="paths", nargs="+", help="GitHub repo 内的 skill path")
     parser.add_argument("--ref", default="main")
     parser.add_argument("--name", help="单个 skill 的 active name")
@@ -3187,6 +3581,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--generator", type=Path, default=DEFAULT_GENERATOR)
     parser.add_argument("--closure-script", type=Path, default=DEFAULT_CLOSURE)
     parser.add_argument("--system-installer", type=Path, default=DEFAULT_SYSTEM_INSTALLER)
+    parser.add_argument(
+        "--system-package-provider",
+        type=Path,
+        default=DEFAULT_SYSTEM_PACKAGE_PROVIDER,
+        help="返回当前 Codex Store package/signature identity 的受管 provider",
+    )
     parser.add_argument("--python", dest="interpreter", type=Path, default=DEFAULT_PYTHON)
     parser.add_argument("--temp-root", type=Path, default=DEFAULT_TEMP_ROOT)
     parser.add_argument("--lock-root", type=Path, default=DEFAULT_LOCK_ROOT)
@@ -3251,6 +3651,46 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         pass
     context = source_context(args, decision, specs)
     context["target_scope"] = target_scope
+    initial_ledger_bytes = ledger_path.read_bytes()
+    initial_ledger_identity = system_path_identity(ledger_path)
+    initial_catalog_bytes = catalog_path.read_bytes() if catalog_path.exists() else None
+    initial_catalog_identity = (
+        system_path_identity(catalog_path) if catalog_path.exists() else None
+    )
+    initial_ledger = load_json(ledger_path, label="source ledger")
+    system_overlay_context = prepare_system_provenance_overlay(
+        args=args,
+        decision=decision,
+        target_scope=target_scope,
+        names=names,
+        active_root=active_root,
+        ledger=initial_ledger,
+    )
+    if system_overlay_context is not None:
+        overlay = system_overlay_context["overlay"]
+        overlay_projection = skill_creator_overlay_ledger_projection(overlay)
+        system_overlay_context["source_bytes"] = system_source_record(
+            active_root=active_root,
+            source_group_id="codex-bundled-system-skills",
+            package=system_overlay_context["package"],
+            marker_sha256=initial_ledger["sources"][system_overlay_context["source_index"]]["system_provenance"]["marker"]["sha256"],
+            spec={
+                "name": "skill-creator",
+                "official_integrity": overlay["official_integrity"],
+                "effective_integrity": overlay["effective_integrity"],
+                "critical_files": overlay["critical_files"],
+                "overlay": overlay_projection,
+            },
+        )
+        context["system_provenance_overlay"] = system_overlay_context
+        # The managed provenance record below is the sole local-change entry for
+        # this payload; do not also emit the generic candidate overlay marker.
+        context["overlay_status"] = "none"
+        context["overlay_summary"] = ""
+        system_overlay_context["ledger_before_bytes"] = initial_ledger_bytes
+        system_overlay_context["ledger_before_identity"] = initial_ledger_identity
+        system_overlay_context["catalog_before_bytes"] = initial_catalog_bytes
+        system_overlay_context["catalog_before_identity"] = initial_catalog_identity
     context["bundled_skill_proofs"] = bundled_skill_specs(
         args=args,
         decision=decision,
@@ -3311,6 +3751,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     catalog_backup: Path | None = None
     state_backups_ready = False
     staged: dict[str, Any] | None = None
+    system_overlay_context = context.get("system_provenance_overlay")
     try:
         atomic_write_bytes(decision_snapshot_path, decision_snapshot_bytes)
         if sha256_file(decision_snapshot_path) != decision_snapshot["sha256"]:
@@ -3339,6 +3780,28 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             return result
 
         active_state = load_json(ledger_path, label="source ledger")
+        system_overlay_context = context.get("system_provenance_overlay")
+        if isinstance(system_overlay_context, dict):
+            if (
+                system_path_identity(ledger_path) != system_overlay_context["ledger_before_identity"]
+                or ledger_path.read_bytes() != system_overlay_context["ledger_before_bytes"]
+            ):
+                raise InstallError("source ledger changed while staging system overlay")
+            _assert_system_overlay_baseline(
+                overlay_context=system_overlay_context,
+                active_root=active_root,
+            )
+            # Re-read the signed package identity immediately before any active swap.
+            try:
+                query_system_package_identity(
+                    interpreter=interpreter,
+                    provider=system_overlay_context["provider"],
+                    expected=system_overlay_context["package"],
+                    evidence_dir=evidence_dir,
+                    label="system-overlay-package-prewrite",
+                )
+            except SystemProvenanceRepairError as exc:
+                raise InstallError(str(exc)) from exc
         if rename is not None:
             validate_canonical_rename_state(
                 args=args,
@@ -3399,6 +3862,17 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             payload_seals=staged["staged_payloads"],
             must_not_exist={rename["new_name"]} if rename is not None else None,
         )
+        if isinstance(system_overlay_context, dict):
+            skill_record = next(
+                record
+                for record in directory_records
+                if record.get("name") == "skill-creator"
+            )
+            backup_skill = Path(skill_record["backup"])
+            if system_skill_integrity(backup_skill) != system_overlay_context["overlay"]["official_integrity"]:
+                raise InstallError("skill-creator backup payload does not match the bound official baseline")
+            if system_skill_payload_inventory(backup_skill) != system_overlay_context["baseline_inventory"]:
+                raise InstallError("skill-creator backup topology does not match the bound official baseline")
         activation_readability = verify_activation_readability(
             active_root=target_root,
             names=names,
@@ -3406,7 +3880,26 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             evidence_dir=evidence_dir,
         )
         updated_ledger = update_ledger(active_state, names=ledger_names, context=context)
+        if isinstance(system_overlay_context, dict):
+            source_md_sha256 = system_overlay_context.get("source_md_sha256")
+            if not isinstance(source_md_sha256, str):
+                raise InstallError("skill-creator system provenance SOURCE hash is missing")
+            updated_ledger = apply_system_provenance_overlay_to_ledger(
+                ledger=updated_ledger,
+                overlay_context=system_overlay_context,
+                source_md_sha256=source_md_sha256,
+            )
+            if ledger_path.read_bytes() != system_overlay_context["ledger_before_bytes"]:
+                raise InstallError("source ledger changed before system overlay write")
         atomic_write_json(ledger_path, updated_ledger)
+        if isinstance(system_overlay_context, dict):
+            system_overlay_context["ledger_written_bytes"] = ledger_path.read_bytes()
+            system_overlay_context["ledger_written_identity"] = system_path_identity(ledger_path)
+        catalog_generation_output = (
+            stage_dir / "system-overlay-catalog.json"
+            if isinstance(system_overlay_context, dict)
+            else catalog_path
+        )
         run_process(
             [
                 str(interpreter),
@@ -3419,11 +3912,31 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 "--ledger",
                 str(ledger_path),
                 "--output",
-                str(catalog_path),
+                str(catalog_generation_output),
             ],
             evidence_dir=evidence_dir,
             label="catalog-generation",
         )
+        if isinstance(system_overlay_context, dict):
+            if (
+                system_path_identity(ledger_path) != system_overlay_context.get("ledger_written_identity")
+                or ledger_path.read_bytes() != system_overlay_context.get("ledger_written_bytes")
+            ):
+                raise InstallError("source ledger changed during system overlay catalog generation")
+            before_catalog_bytes = system_overlay_context["catalog_before_bytes"]
+            before_catalog_identity = system_overlay_context["catalog_before_identity"]
+            if before_catalog_bytes is None or before_catalog_identity is None:
+                if catalog_path.exists():
+                    raise InstallError("catalog appeared before system overlay CAS write")
+            elif (
+                system_path_identity(catalog_path) != before_catalog_identity
+                or catalog_path.read_bytes() != before_catalog_bytes
+            ):
+                raise InstallError("catalog changed before system overlay CAS write")
+            generated_catalog_bytes = catalog_generation_output.read_bytes()
+            atomic_write_bytes(catalog_path, generated_catalog_bytes)
+            system_overlay_context["catalog_written_bytes"] = generated_catalog_bytes
+            system_overlay_context["catalog_written_identity"] = system_path_identity(catalog_path)
         post_closure = run_closure(
             root=active_root,
             closure_script=closure_script,
@@ -3440,6 +3953,16 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             names=names,
             bundled_proofs=staged["bundled_skill_proofs"],
             target_scope=target_scope,
+        )
+        system_overlay_postcondition = (
+            verify_system_provenance_overlay_postcondition(
+                active_root=active_root,
+                ledger=persisted_ledger,
+                catalog_path=catalog_path,
+                overlay_context=system_overlay_context,
+            )
+            if isinstance(system_overlay_context, dict)
+            else None
         )
         merge_retirement_verification = (
             verify_merge_retirement_postcondition(
@@ -3461,6 +3984,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "activation_readability": activation_readability,
             "post_resource_closure": post_closure,
             "catalog_verification": catalog_verification,
+            "system_provenance_overlay_postcondition": system_overlay_postcondition,
             "merge_retirement_verification": merge_retirement_verification,
             "catalog_sha256": sha256_file(catalog_path),
             "evidence": str(evidence_dir),
@@ -3471,8 +3995,26 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         rollback_errors = rollback_directories(directory_records)
         if state_backups_ready:
             try:
-                restore_file(ledger_path, ledger_backup)
-                restore_file(catalog_path, catalog_backup)
+                if isinstance(system_overlay_context, dict):
+                    restore_file_cas(
+                        ledger_path,
+                        before=system_overlay_context["ledger_before_bytes"],
+                        before_identity=system_overlay_context["ledger_before_identity"],
+                        written=system_overlay_context.get("ledger_written_bytes"),
+                        written_identity=system_overlay_context.get("ledger_written_identity"),
+                        backup=ledger_backup,
+                    )
+                    restore_file_cas(
+                        catalog_path,
+                        before=system_overlay_context["catalog_before_bytes"],
+                        before_identity=system_overlay_context["catalog_before_identity"],
+                        written=system_overlay_context.get("catalog_written_bytes"),
+                        written_identity=system_overlay_context.get("catalog_written_identity"),
+                        backup=catalog_backup,
+                    )
+                else:
+                    restore_file(ledger_path, ledger_backup)
+                    restore_file(catalog_path, catalog_backup)
             except Exception as restore_exc:
                 rollback_errors.append(f"state restore: {restore_exc}")
         failure = {
@@ -3494,8 +4036,54 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(argv)
     try:
+        if args.system_provenance_repair_plan is not None:
+            ordinary_flags = {
+                "--system-installer",
+                "--ref",
+                "--method",
+            }
+            if (
+                args.candidate is not None
+                or args.repo is not None
+                or args.url is not None
+                or args.paths is not None
+                or args.name is not None
+                or args.decision_manifest is not None
+                or args.candidate_integrity_only
+                or args.update
+                or any(
+                    token in ordinary_flags
+                    or any(token.startswith(flag + "=") for flag in ordinary_flags)
+                    for token in raw_argv
+                )
+            ):
+                raise InstallError(
+                    "--system-provenance-repair-plan 不能与普通 install/update 参数混用"
+                )
+            from system_skill_provenance_repair import (
+                SystemProvenanceRepairError,
+                execute as execute_system_provenance_repair,
+            )
+
+            try:
+                with installation_lock(
+                    d_path(args.lock_root, label="skill install lock root")
+                    / "install.lock"
+                ):
+                    result = execute_system_provenance_repair(args)
+            except SystemProvenanceRepairError as exc:
+                raise InstallError(str(exc)) from exc
+            except Exception as exc:
+                raise InstallError(f"system provenance repair 输入或运行态无效：{exc}") from exc
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.candidate is None and args.repo is None and args.url is None:
+            raise InstallError(
+                "必须提供 --candidate、--repo、--url 或 --system-provenance-repair-plan"
+            )
         if args.candidate_integrity_only:
             if not args.candidate:
                 raise InstallError("--candidate-integrity-only 必须配合 --candidate")

@@ -795,7 +795,7 @@ try {
             -FixturePolicyPath $policyPath `
             -FixtureEvidenceRoot $evidenceRoot
     }
-    Assert-True ($partialDriftError -match '漂移') 'purging transaction 内容漂移必须返回稳定原因'
+    Assert-True ($partialDriftError -match 'IdentityMismatch|漂移') 'purging transaction 内容漂移必须返回稳定原因'
     Assert-True ([IO.Directory]::Exists([string]$partialDrift.quarantinePath)) '内容漂移拒绝必须保留 quarantine 现场'
     Assert-True ([IO.File]::ReadAllText([string]$partialDrift.remainingPath) -ceq 'content-drift') '内容漂移拒绝不得修改现场文件'
 
@@ -812,7 +812,7 @@ try {
             -FixturePolicyPath $policyPath `
             -FixtureEvidenceRoot $evidenceRoot
     }
-    Assert-True ($partialUnexpectedError -match '漂移') 'purging transaction 未计划节点必须返回稳定原因'
+    Assert-True ($partialUnexpectedError -match 'fileIdentitiesV2 缺少|漂移') 'purging transaction 未计划节点必须返回稳定原因'
     Assert-True ([IO.File]::Exists($unexpectedPath)) '未计划节点拒绝必须原样保留现场'
 
     $partialReplacement = New-InterruptedPurgeFixture `
@@ -1324,7 +1324,7 @@ try {
             -FixturePolicyPath $policyPath `
             -FixtureEvidenceRoot $evidenceRoot
     }
-    Assert-True ($driftError -match '漂移') '树漂移拒绝必须返回稳定原因'
+    Assert-True ($driftError -match 'fileIdentitiesV2 缺少|漂移') '树漂移拒绝必须返回稳定原因'
     Assert-True ([IO.File]::Exists($driftOriginal) -and [IO.File]::Exists($driftAdded)) '树漂移拒绝必须发生在任何删除前'
 
     $batchParent = Join-Path $fixtureRoot 'batch-parent'

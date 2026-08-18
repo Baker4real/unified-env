@@ -1,0 +1,3 @@
+wip: park remaining host-safety and host WIP off main
+
+Hold mixed in-progress safe-delete evidence, skill-install, and grok-hooks work on a branch so main stays mergeable later. Leave leftover 0ab1e1b6 quarantine and leftover 10k test trees untracked.

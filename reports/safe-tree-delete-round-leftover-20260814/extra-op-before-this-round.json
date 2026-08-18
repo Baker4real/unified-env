@@ -1,0 +1,20 @@
+{
+  "operationId": "20260814T012818Z-4f9b7a0c-f090-4609-9625-c0f03896290d",
+  "files": [
+    "plan.json",
+    "transaction.json"
+  ],
+  "markerExists": false,
+  "planTargetPath": "D:\\Codex\\projects\\i-have-adhd",
+  "planCapabilityRoot": "D:\\Codex\\projects\\i-have-adhd",
+  "policyEntryId": "i-have-adhd-retired-project-root",
+  "planSha256": "490c49b149490f4f6cf87b7e4e1bf58318773c770e94da07ebe3cef4ec6b06fd",
+  "status": "purged",
+  "schemaVersion": 2,
+  "targetPath": "D:\\Codex\\projects\\i-have-adhd",
+  "quarantinePath": "D:\\Codex\\projects\\.codex-safe-delete-4f9b7a0c-f090-4609-9625-c0f03896290d.quarantine",
+  "restoreJournalAnchors": null,
+  "targetPresent": false,
+  "quarantinePresent": false,
+  "transactionSha256": "e9bd7b83d291732d00b192467abd5178cbce3d338367f7fa7fedc3a2394781d5"
+}

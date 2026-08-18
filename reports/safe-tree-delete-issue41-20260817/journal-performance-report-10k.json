@@ -1,0 +1,12 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue41-report-10k",
+  "TotalFlushTimeMs": 7613,
+  "FlushCount": 20000,
+  "OverheadPercent": 15.75081723010717,
+  "IsWithinTarget": false,
+  "SlowFlushCount": 0,
+  "LastSlowFlushWarning": "",
+  "Warning": "Journal flush overhead is 15.751% (>= 10%). Consider reducing parallelism or checking disk performance.",
+  "TotalOperationTimeMs": 48334,
+  "analysis": "overhead% = TotalFlushTimeMs / Purge elapsedMs; target is <10%. Live number is recorded, not invented."
+}

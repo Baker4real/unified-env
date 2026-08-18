@@ -24,6 +24,19 @@ SPEC.loader.exec_module(module)
 
 
 class SkillSourceRecordMigrationTests(unittest.TestCase):
+    def test_runtime_closure_includes_system_repair_dependencies(self) -> None:
+        self.assertEqual(
+            set(module.RUNTIME_FILES),
+            {
+                "skill_source_record.py",
+                "generate_skill_catalog.py",
+                "system_skill_provenance_repair.py",
+                "system_package_identity.py",
+                "install_skill_guarded.py",
+                "install-skill-guarded.cmd",
+            },
+        )
+
     def write_complete_manifest(self, root: Path) -> tuple[Path, dict[str, object]]:
         active = root / "active"
         runtime = root / "runtime-target"
@@ -355,7 +368,7 @@ Source type: codex-bundled-system
             result = module.restore_backup(manifest)
 
             self.assertEqual(result["status"], "restored")
-            self.assertEqual(result["entry_count"], 7)
+            self.assertEqual(result["entry_count"], 9)
             self.assertEqual(target.read_bytes(), b"before")
             self.assertFalse(created.exists())
 
@@ -541,7 +554,7 @@ Source type: codex-bundled-system
             root = Path(temp)
             manifest, _ = self.write_complete_manifest(root)
             module._protect_acl(root)
-            self.assertEqual(module.verify_backup(manifest)["entry_count"], 7)
+            self.assertEqual(module.verify_backup(manifest)["entry_count"], 9)
 
             module._atomic_write(manifest, manifest.read_bytes())
             with self.assertRaisesRegex(module.MigrationError, "protected FullControl DACL"):

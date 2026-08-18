@@ -1,0 +1,8 @@
+
+ok                            : True
+suite                         : CodexSafeTreeDeletePurgeBatch
+scale10000SpeedupVsPhase1     : 0.997
+scale10000SpeedupVsBaseline   : 0.974
+scale10000MetTarget           : False
+scale10000MetTargetVsPhase1   : False
+scale10000MetTargetVsBaseline : False

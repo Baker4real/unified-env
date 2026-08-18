@@ -128,7 +128,7 @@ exit 23
 '@
 $powerShellEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($powerShellProbe))
 $powerShellResult = Invoke-LauncherProbe `
-    -TargetPath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+    -TargetPath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
     -TargetArguments @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $powerShellEncoded) `
     -InputText "probe-input`n"
 Assert-ProtocolProbe -Result $powerShellResult -ExpectedExitCode 23 -ExpectedStderr 'direct-powershell-stderr'
@@ -172,7 +172,7 @@ finally {
 '@
 $startJobEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($startJobProbe))
 $startJobResult = Invoke-HiddenProcess `
-    -FilePath 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe' `
+    -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
     -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $startJobEncoded)
 Assert-True ($startJobResult.exitCode -eq 0) "Start-Job hidden parent 探针失败：exit=$($startJobResult.exitCode), stderr=$($startJobResult.stderr)"
 Assert-True ([string]::IsNullOrWhiteSpace($startJobResult.stderr)) "Start-Job hidden parent 探针产生 stderr：$($startJobResult.stderr)"

@@ -17,7 +17,7 @@ $safeTreeLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.p
 $entryPath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteFixture.ps1'
 $crashFixturePath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteCrashFixture.ps1'
 $evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue34-20260817'
-$pwshPath = 'D:\Codex\tools\PowerShell\7.6.4\pwsh.exe'
+$pwshPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
 
 . $hostSafetyLibraryPath
 . $safeTreeLibraryPath

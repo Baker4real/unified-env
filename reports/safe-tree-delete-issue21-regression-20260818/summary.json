@@ -1,0 +1,346 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue21-fixture-regression",
+  "issue": 21,
+  "acceptanceCriterion": "既有全部 safe-tree-delete 测试保持通过",
+  "module": "host-safety",
+  "profile": "fixture",
+  "source": "modules/manifest.json host-safety.tests.fixture.powershell",
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "pwshVersion": "Core 7.6.4",
+  "repo": "D:\\Codex\\projects\\统一环境",
+  "startedAtUtc": "2026-08-17T17:00:03.493Z",
+  "generatedAtUtc": "2026-08-17T19:56:01.774Z",
+  "incomplete": false,
+  "manifestCount": 27,
+  "completedCount": 27,
+  "passCount": 24,
+  "failCount": 3,
+  "unexpectedFailCount": 2,
+  "leftoverTransactionSha256AtStart": "4e73aedc260c43c536ab9df3d3f6d5f73a065a8a17c26d1706998f583a0339d7",
+  "leftoverTransactionSha256AtEnd": "4e73aedc260c43c536ab9df3d3f6d5f73a065a8a17c26d1706998f583a0339d7",
+  "leftoverQuarantineExistsAtStart": true,
+  "leftoverQuarantineExistsAtEnd": true,
+  "leftoverUntouched": true,
+  "knownWaivers": [
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteFileSystem.ps1",
+      "reason": "FAT32/网络实卷 e2e 维护者 waiver（GitHub #35）。未提权 diskpart/VHD；红不改 DetectFileSystem。"
+    }
+  ],
+  "tests": [
+    {
+      "name": "tests/Test-CodexSafeTreeDelete.ps1",
+      "exit": 1,
+      "elapsedMs": 18518,
+      "startedAtUtc": "2026-08-17T17:00:03.497Z",
+      "endedAtUtc": "2026-08-17T17:00:22.015Z",
+      "stderrTail": "Exception: D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDelete.ps1:56\nLine |\n  56 |      if (-not $Condition) { throw $Message }\n     |                             ~~~~~~~~~~~~~~\n     | purging transaction 内容漂移必须返回稳定原因\n",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDelete.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDelete.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteBenchmark.ps1",
+      "exit": 0,
+      "elapsedMs": 20804,
+      "startedAtUtc": "2026-08-17T17:00:22.022Z",
+      "endedAtUtc": "2026-08-17T17:00:42.826Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteBenchmark.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteBenchmark.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
+      "exit": 0,
+      "elapsedMs": 108095,
+      "startedAtUtc": "2026-08-17T17:00:42.835Z",
+      "endedAtUtc": "2026-08-17T17:02:30.930Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteControlPlane.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteControlPlane.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteCrashSafety.ps1",
+      "exit": 0,
+      "elapsedMs": 43749,
+      "startedAtUtc": "2026-08-17T17:02:30.937Z",
+      "endedAtUtc": "2026-08-17T17:03:14.686Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteCrashSafety.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteCrashSafety.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteGrace.ps1",
+      "exit": 0,
+      "elapsedMs": 12867,
+      "startedAtUtc": "2026-08-17T17:03:14.694Z",
+      "endedAtUtc": "2026-08-17T17:03:27.561Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteGrace.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteGrace.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteHashCache.ps1",
+      "exit": 0,
+      "elapsedMs": 1311,
+      "startedAtUtc": "2026-08-17T17:03:27.569Z",
+      "endedAtUtc": "2026-08-17T17:03:28.880Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteHashCache.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteHashCache.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteHashReuse.ps1",
+      "exit": 0,
+      "elapsedMs": 1939586,
+      "startedAtUtc": "2026-08-17T17:03:28.888Z",
+      "endedAtUtc": "2026-08-17T17:35:48.474Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteHashReuse.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteHashReuse.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeletePurgeHashReuse.ps1",
+      "exit": 0,
+      "elapsedMs": 2416927,
+      "startedAtUtc": "2026-08-17T17:35:48.487Z",
+      "endedAtUtc": "2026-08-17T18:16:05.414Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePurgeHashReuse.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePurgeHashReuse.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteHashSafely.ps1",
+      "exit": 0,
+      "elapsedMs": 1528,
+      "startedAtUtc": "2026-08-17T18:16:05.422Z",
+      "endedAtUtc": "2026-08-17T18:16:06.950Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteHashSafely.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteHashSafely.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteIdentityV2.ps1",
+      "exit": 0,
+      "elapsedMs": 1164,
+      "startedAtUtc": "2026-08-17T18:16:06.958Z",
+      "endedAtUtc": "2026-08-17T18:16:08.122Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteIdentityV2.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteIdentityV2.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
+      "exit": 0,
+      "elapsedMs": 22243,
+      "startedAtUtc": "2026-08-17T18:16:08.132Z",
+      "endedAtUtc": "2026-08-17T18:16:30.375Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteMetricsEvidence.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteMetricsEvidence.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
+      "exit": 0,
+      "elapsedMs": 2131,
+      "startedAtUtc": "2026-08-17T18:16:30.385Z",
+      "endedAtUtc": "2026-08-17T18:16:32.516Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePlanIdentityV2.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePlanIdentityV2.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteRestore.ps1",
+      "exit": 0,
+      "elapsedMs": 48203,
+      "startedAtUtc": "2026-08-17T18:16:32.525Z",
+      "endedAtUtc": "2026-08-17T18:17:20.728Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteRestore.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteRestore.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteSchemaCompatibility.ps1",
+      "exit": 0,
+      "elapsedMs": 10461,
+      "startedAtUtc": "2026-08-17T18:17:20.729Z",
+      "endedAtUtc": "2026-08-17T18:17:31.190Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteSchemaCompatibility.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteSchemaCompatibility.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteStatus.ps1",
+      "exit": 0,
+      "elapsedMs": 43358,
+      "startedAtUtc": "2026-08-17T18:17:31.199Z",
+      "endedAtUtc": "2026-08-17T18:18:14.557Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteStatus.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteStatus.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexUserEnvironmentTransaction.ps1",
+      "exit": 0,
+      "elapsedMs": 1112,
+      "startedAtUtc": "2026-08-17T18:18:14.565Z",
+      "endedAtUtc": "2026-08-17T18:18:15.677Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexUserEnvironmentTransaction.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexUserEnvironmentTransaction.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-ReportArtifactPublisher.ps1",
+      "exit": 0,
+      "elapsedMs": 699,
+      "startedAtUtc": "2026-08-17T18:18:15.678Z",
+      "endedAtUtc": "2026-08-17T18:18:16.377Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-ReportArtifactPublisher.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-ReportArtifactPublisher.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteFileSystem.ps1",
+      "exit": 1,
+      "elapsedMs": 7786,
+      "startedAtUtc": "2026-08-17T18:18:16.386Z",
+      "endedAtUtc": "2026-08-17T18:18:24.172Z",
+      "stderrTail": "Exception: D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteFileSystem.ps1:740\nLine |\n 740 |                  throw (\n     |                  ~~~~~~~\n     | 无法创建一次性 FAT32 VHD 做实卷验收（未 skip）。盘清单=C:\\ type=Fixed ready=True fmt=NTFS; D:\\ type=Fixed ready=True fmt=NTFS; E:\\\n     | type=Fixed ready=True fmt=NTFS; F:\\ type=Fixed ready=True fmt=NTFS\n     | 原始错误=System.Management.Automation.ApplicationFailedException: Program 'diskpart.exe' failed to run: An error\n     | occurred trying to start process 'C:\\WINDOWS\\system32\\diskpart.exe' with working directory\n     | 'D:\\Codex\\projects\\统一环境'. 请求的操作需要提升。At D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeleteFileSystem.ps1:265\n     | char:19 +         $output = & diskpart.exe /s $scriptPath 2>&1 | Out-String +                  \n     | ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~.  ---> System.ComponentModel.Win32Exception (740): An error occurred trying\n     | to start process 'C:\\WINDOWS\\system32\\diskpart.exe' with working directory 'D:\\Codex\\projects\\统一环境'. 请求的操作需要提升。 \n     | at System.Diagnostics.Process.StartWithCreateProcess(ProcessStartInfo startInfo)    at\n     | System.Management.Automation.NativeCommandProcessor.InitNativeProcess()    --- End of inner exception stack\n     | trace ---    at System.Management.Automation.ExceptionHandlingOps.CheckActionPreference(FunctionContext\n     | funcContext, Exception exception)    at\n     | System.Management.Automation.Interpreter.ActionCallInstruction`2.Run(InterpretedFrame frame)    at\n     | System.Management.Automation.Interpreter.EnterTryCatchFinallyInstruction.Run(InterpretedFrame frame)    at\n     | System.Management.Automation.Interpreter.EnterTryCatchFinallyInstruction.Run(InterpretedFrame frame)    at\n     | System.Management.Automation.Interpreter.Interpreter.Run(InterpretedFrame frame)    at\n     | System.Management.Automation.Interpreter.LightLambda.RunVoid1[T0](T0 arg0)    at\n     | System.Management.Automation.PSScriptCmdlet.RunClause(Action`1 clause, Object dollarUnderbar, Object\n     | inputToProcess)    at System.Management.Automation.CommandProcessorBase.Complete()\n",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteFileSystem.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteFileSystem.ps1.stderr.txt",
+      "waiver": "github-35-fat32-network-live-volume"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+      "exit": 0,
+      "elapsedMs": 19242,
+      "startedAtUtc": "2026-08-17T18:18:24.188Z",
+      "endedAtUtc": "2026-08-17T18:18:43.430Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteLeafStreamSet.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteLeafStreamSet.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+      "exit": 0,
+      "elapsedMs": 10125,
+      "startedAtUtc": "2026-08-17T18:18:43.439Z",
+      "endedAtUtc": "2026-08-17T18:18:53.564Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteUncertainRecovery.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteUncertainRecovery.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeletePhase1Integration.ps1",
+      "exit": 0,
+      "elapsedMs": 2325952,
+      "startedAtUtc": "2026-08-17T18:18:53.574Z",
+      "endedAtUtc": "2026-08-17T18:57:39.526Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePhase1Integration.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePhase1Integration.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeletePurgeBatch.ps1",
+      "exit": 0,
+      "elapsedMs": 3112750,
+      "startedAtUtc": "2026-08-17T18:57:39.537Z",
+      "endedAtUtc": "2026-08-17T19:49:32.287Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePurgeBatch.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePurgeBatch.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteThreadJournal.ps1",
+      "exit": 0,
+      "elapsedMs": 1023,
+      "startedAtUtc": "2026-08-17T19:49:32.297Z",
+      "endedAtUtc": "2026-08-17T19:49:33.320Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteThreadJournal.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteThreadJournal.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1",
+      "exit": 0,
+      "elapsedMs": 42646,
+      "startedAtUtc": "2026-08-17T19:49:33.330Z",
+      "endedAtUtc": "2026-08-17T19:50:15.976Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1",
+      "exit": 0,
+      "elapsedMs": 42324,
+      "startedAtUtc": "2026-08-17T19:50:15.984Z",
+      "endedAtUtc": "2026-08-17T19:50:58.308Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteJournalPerformance.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteJournalPerformance.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1",
+      "exit": 0,
+      "elapsedMs": 287474,
+      "startedAtUtc": "2026-08-17T19:50:58.317Z",
+      "endedAtUtc": "2026-08-17T19:55:45.791Z",
+      "stderrTail": "",
+      "stdoutTail": "",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteParallelismBenchmark.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeleteParallelismBenchmark.ps1.stderr.txt"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1",
+      "exit": 1,
+      "elapsedMs": 10969,
+      "startedAtUtc": "2026-08-17T19:55:45.801Z",
+      "endedAtUtc": "2026-08-17T19:55:56.770Z",
+      "stderrTail": "Exception: D:\\Codex\\projects\\统一环境\\tests\\Test-CodexSafeTreeDeletePhase3Integration.ps1:59\nLine |\n  59 |      if (-not $Condition) { throw $Message }\n     |                             ~~~~~~~~~~~~~~\n     | #40 DOP4 wallClockMs 必须仍是 13255\n",
+      "stdoutTail": "STAGE runtime-check utc=2026-08-17T19:55:46.1614806+00:00\nSTAGE fs-probe utc=2026-08-17T19:55:47.0076306+00:00\nSTAGE safety-toctou-e2e utc=2026-08-17T19:55:47.0970802+00:00\nSTAGE coordinator-journal utc=2026-08-17T19:55:53.3341771+00:00\nSTAGE reuse-issue40-raw utc=2026-08-17T19:55:55.1155946+00:00\n",
+      "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePhase3Integration.ps1.stdout.txt",
+      "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818\\Test-CodexSafeTreeDeletePhase3Integration.ps1.stderr.txt"
+    }
+  ],
+  "unexpectedFails": [
+    "tests/Test-CodexSafeTreeDelete.ps1",
+    "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1"
+  ],
+  "failedNames": [
+    "tests/Test-CodexSafeTreeDelete.ps1",
+    "tests/Test-CodexSafeTreeDeleteFileSystem.ps1",
+    "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1"
+  ],
+  "totalElapsedMs": 10553047,
+  "acVerdict": "部分",
+  "notes": [
+    "Phase3 断言 #40 DOP4 wallClockMs==13255；本轮 ParallelismBenchmark 把 reports/safe-tree-delete-issue40-20260817/raw/small-10k-1kb-dop04.json 写成 wallClockMs=15356。未回写 issue40 证据。",
+    "未跑 ProductionSmoke / host-live。wrapper 非零证据仍以 origin/main reports/safe-tree-delete-issue55-20260816/leaf-delete-failed.json 为准。",
+    "未 Purge leftover 0ab1e1b6；transaction SHA-256 前后一致。"
+  ]
+}

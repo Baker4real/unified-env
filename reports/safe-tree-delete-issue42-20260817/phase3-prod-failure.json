@@ -1,0 +1,70 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-phase3-prod-failure",
+  "message": "Exception calling \"GetHashSafely\" with \"3\" argument(s): \"Failed to open path exclusively for hash reuse without following reparse points.\"",
+  "type": "System.Management.Automation.MethodInvocationException",
+  "chain": [
+    {
+      "type": "System.Management.Automation.MethodInvocationException",
+      "message": "Exception calling \"GetHashSafely\" with \"3\" argument(s): \"Failed to open path exclusively for hash reuse without following reparse points.\""
+    },
+    {
+      "type": "System.ComponentModel.Win32Exception",
+      "message": "Failed to open path exclusively for hash reuse without following reparse points.",
+      "nativeErrorCode": 32
+    }
+  ],
+  "bytesPerFile": 4096,
+  "attempts": [
+    {
+      "attempt": 1,
+      "ok": false,
+      "nativeErrorCode": 32,
+      "message": "Exception calling \"GetHashSafely\" with \"3\" argument(s): \"Failed to open path exclusively for hash reuse without following reparse points.\"",
+      "chain": [
+        {
+          "type": "System.Management.Automation.MethodInvocationException",
+          "message": "Exception calling \"GetHashSafely\" with \"3\" argument(s): \"Failed to open path exclusively for hash reuse without following reparse points.\""
+        },
+        {
+          "type": "System.ComponentModel.Win32Exception",
+          "message": "Failed to open path exclusively for hash reuse without following reparse points.",
+          "nativeErrorCode": 32
+        }
+      ]
+    },
+    {
+      "attempt": 2,
+      "ok": false,
+      "nativeErrorCode": 32,
+      "message": "Exception calling \"GetHashSafely\" with \"3\" argument(s): \"Failed to open path exclusively for hash reuse without following reparse points.\"",
+      "chain": [
+        {
+          "type": "System.Management.Automation.MethodInvocationException",
+          "message": "Exception calling \"GetHashSafely\" with \"3\" argument(s): \"Failed to open path exclusively for hash reuse without following reparse points.\""
+        },
+        {
+          "type": "System.ComponentModel.Win32Exception",
+          "message": "Failed to open path exclusively for hash reuse without following reparse points.",
+          "nativeErrorCode": 32
+        }
+      ]
+    },
+    {
+      "attempt": 3,
+      "ok": false,
+      "nativeErrorCode": 32,
+      "message": "Exception calling \"GetHashSafely\" with \"3\" argument(s): \"Failed to open path exclusively for hash reuse without following reparse points.\"",
+      "chain": [
+        {
+          "type": "System.Management.Automation.MethodInvocationException",
+          "message": "Exception calling \"GetHashSafely\" with \"3\" argument(s): \"Failed to open path exclusively for hash reuse without following reparse points.\""
+        },
+        {
+          "type": "System.ComponentModel.Win32Exception",
+          "message": "Failed to open path exclusively for hash reuse without following reparse points.",
+          "nativeErrorCode": 32
+        }
+      ]
+    }
+  ]
+}

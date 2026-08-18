@@ -1,0 +1,5 @@
+2026-08-16T13:43:45.5449524+00:00 lock-holder-start
+2026-08-16T13:43:46.7598930+00:00 parse-or-open-retry: Exception calling "ReadAllText" with "1" argument(s): "The process cannot access the file 'D:\Codex\.codex\run-evidence\safe-tree-delete\20260816T134343Z-d0de032c-7ed6-44b9-8222-91d2522f99c8\transaction.json' because it is being used by another process."
+2026-08-16T13:43:46.7693451+00:00 saw-purging
+2026-08-16T13:43:46.7735853+00:00 acquired
+2026-08-16T13:43:47.0798212+00:00 released

@@ -1,0 +1,23 @@
+Exception: D:\Codex\projects\统一环境\tests\Test-CodexSafeTreeDeleteFileSystem.ps1:740
+Line |
+ 740 |                  throw (
+     |                  ~~~~~~~
+     | 无法创建一次性 FAT32 VHD 做实卷验收（未 skip）。盘清单=C:\ type=Fixed ready=True fmt=NTFS; D:\ type=Fixed ready=True fmt=NTFS; E:\
+     | type=Fixed ready=True fmt=NTFS; F:\ type=Fixed ready=True fmt=NTFS
+     | 原始错误=System.Management.Automation.ApplicationFailedException: Program 'diskpart.exe' failed to run: An error
+     | occurred trying to start process 'C:\WINDOWS\system32\diskpart.exe' with working directory
+     | 'D:\Codex\projects\统一环境'. 请求的操作需要提升。At D:\Codex\projects\统一环境\tests\Test-CodexSafeTreeDeleteFileSystem.ps1:265
+     | char:19 +         $output = & diskpart.exe /s $scriptPath 2>&1 | Out-String +
+     | ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~.  ---> System.ComponentModel.Win32Exception (740): An error occurred trying
+     | to start process 'C:\WINDOWS\system32\diskpart.exe' with working directory 'D:\Codex\projects\统一环境'. 请求的操作需要提升。
+     | at System.Diagnostics.Process.StartWithCreateProcess(ProcessStartInfo startInfo)    at
+     | System.Management.Automation.NativeCommandProcessor.InitNativeProcess()    --- End of inner exception stack
+     | trace ---    at System.Management.Automation.ExceptionHandlingOps.CheckActionPreference(FunctionContext
+     | funcContext, Exception exception)    at
+     | System.Management.Automation.Interpreter.ActionCallInstruction`2.Run(InterpretedFrame frame)    at
+     | System.Management.Automation.Interpreter.EnterTryCatchFinallyInstruction.Run(InterpretedFrame frame)    at
+     | System.Management.Automation.Interpreter.EnterTryCatchFinallyInstruction.Run(InterpretedFrame frame)    at
+     | System.Management.Automation.Interpreter.Interpreter.Run(InterpretedFrame frame)    at
+     | System.Management.Automation.Interpreter.LightLambda.RunVoid1[T0](T0 arg0)    at
+     | System.Management.Automation.PSScriptCmdlet.RunClause(Action`1 clause, Object dollarUnderbar, Object
+     | inputToProcess)    at System.Management.Automation.CommandProcessorBase.Complete()

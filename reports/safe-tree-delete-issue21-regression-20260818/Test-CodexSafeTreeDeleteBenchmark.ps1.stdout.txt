@@ -1,0 +1,34 @@
+
+artifactType     : env-governance.codex-safe-tree-delete-benchmark
+schemaVersion    : 2
+capturedAtUtc    : 2026-08-17T17:00:42.4953126+00:00
+profile          : isolated-fixture
+machine          : @{osVersion=Microsoft Windows NT 10.0.26200.0; processorCount=20; powerShellVersion=7.6.4; osArchite
+                   cture=X64; processArchitecture=X64}
+artifacts        : @{sourceLibraryPath=D:\Codex\projects\统一环境\scripts\lib\CodexSafeTreeDelete.ps1; sourceLibrarySha
+                   256=e0aee22149fb0c2d894009880d2cc388139eb78313471aff04546052abf1d59e; sourceWrapperPath=D:\Codex\pro
+                   jects\统一环境\scripts\Invoke-CodexSafeTreeDelete.ps1; sourceWrapperSha256=c25019805b3b996e9d27c02af
+                   b88d7c7553988ec742f0bc694d054fe48ecaff9; sourceHostAdapterPath=D:\Codex\projects\统一环境\scripts\in
+                   voke-codex-safe-tree-delete-host.ps1; sourceHostAdapterSha256=636cb140720bf15681364459269c2d5dc4638e
+                   339f2589ad2a3a53b6e17b9373; liveWrapperPath=D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1; liv
+                   eWrapperSha256=636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373; liveWrapperStatus=m
+                   atched-source}
+execution        : @{command=pwsh -NoLogo -NoProfile -File "D:\Codex\projects\统一环境\scripts\Measure-CodexSafeTreeDel
+                   ete.ps1" -OutputPath "D:\Codex\projects\统一环境\reports\safe-tree-delete-benchmark-test-60f094c6f93
+                   448ecbd2ebebab3a03923.json" -SmallDatasetBytes 1024 -LargeDatasetBytes 1048576; exitCode=0; exitStat
+                   us=succeeded; cleanup=managed-fixture-tree-removed}
+retainedEvidence : @{path=D:\Codex\projects\统一环境\reports\safe-tree-delete-benchmark-test-60f094c6f93448ecbd2ebebab3
+                   a03923-evidence\benchmark-evidence.json; sha256=d85b56932e7c0d4b61a1ceeebbea3fffd05eece373ace591f308
+                   d628e32f2981; payloadBytesRetained=False}
+datasets         : {@{name=small; payloadBytes=1024; policySha256=96195a764274064e83bab713740f48b657a048ef84a2b2f2788e0
+                   d1b9bbb6567; fixture=; plan=; status=; apply=; restore=; purge=; retainedEvidence=}, @{name=large; p
+                   ayloadBytes=1048576; policySha256=4b2d6ed3a72114efbdb8b81d28a6f6ad527a2e196927e58773815ce81d1c201e;
+                   fixture=; plan=; status=; apply=; restore=; purge=; retainedEvidence=}}
+conclusion       : @{hashReuseDesignRecommendation=insufficient-evidence; hashReuseDesignDecision=do-not-open-with-curr
+                   ent-evidence; contentAuthenticatedContractChanged=False; note=Fixture measurements do not authorize
+                   metadata-only approval or transparent manifest replacement.}
+unverified       : {host wrapper deployment, live policy activation, real capability target deletion, 16 GiB dataset…}
+
+ok       : True
+suite    : CodexSafeTreeDeleteBenchmark
+datasets : 2
