@@ -1,0 +1,14 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue33-scale-10000",
+  "fileCount": 10000,
+  "bytesPerFile": 4096,
+  "method": "two sibling 10k trees; Purge with SessionHashCache vs -DisablePurgeHashReuseForTest; Apply setup used -DisableApplyHashReuseForTest",
+  "reuseElapsedMs": 208498,
+  "baselineElapsedMs": 202321,
+  "reuseBytesHashed": 137596412,
+  "baselineBytesHashed": 137596427,
+  "speedup": 0.97,
+  "targetRange": "report hash-reuse gain; ticket does not require 1.5-2x",
+  "metTarget": false,
+  "note": "bytesHashed on cache hit still accounts file length; not physical bytes read"
+}

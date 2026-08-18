@@ -68,6 +68,35 @@ namespace CodexSafeTreeDelete
         }
     }
 
+    public sealed class PurgeFileLeaf
+    {
+        public string LiteralPath { get; }
+
+        public string RelativePath { get; }
+
+        public FileIdentityV2 Identity { get; }
+
+        public PurgeFileLeaf(
+            string literalPath,
+            string relativePath,
+            FileIdentityV2 identity)
+        {
+            if (string.IsNullOrWhiteSpace(literalPath))
+            {
+                throw new ArgumentException("literalPath must be a non-empty file path.", nameof(literalPath));
+            }
+
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                throw new ArgumentException("relativePath must be a non-empty relative path.", nameof(relativePath));
+            }
+
+            LiteralPath = literalPath;
+            RelativePath = relativePath;
+            Identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        }
+    }
+
     public static class FileHashComputer
     {
         private const uint FileBegin = 0;

@@ -2,8 +2,69 @@ Set-StrictMode -Version Latest
 
 $codexSafeTreeDeleteFileIdentitySource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteFileIdentity.cs'
 $codexSafeTreeDeleteHashCacheSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteHashCache.cs'
+$codexSafeTreeDeleteThreadJournalSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteThreadJournal.cs'
+$codexSafeTreeDeleteParallelPurgeSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteParallelPurge.cs'
 if (-not ('CodexSafeTreeDelete.FileIdentityReader' -as [type])) {
-    Add-Type -Path $codexSafeTreeDeleteFileIdentitySource, $codexSafeTreeDeleteHashCacheSource -ErrorAction Stop
+    Add-Type -Path $codexSafeTreeDeleteFileIdentitySource, $codexSafeTreeDeleteHashCacheSource, $codexSafeTreeDeleteThreadJournalSource, $codexSafeTreeDeleteParallelPurgeSource -ErrorAction Stop
+}
+if (-not ('CodexSafeTreeDelete.StatusJsonTopLevelReader' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Text.Json;
+
+namespace CodexSafeTreeDelete {
+    public static class StatusJsonTopLevelReader {
+        public static Dictionary<string, JsonElement> ReadWanted(string jsonText, string[] names) {
+            if (jsonText == null) {
+                throw new ArgumentNullException("jsonText");
+            }
+            if (names == null) {
+                throw new ArgumentNullException("names");
+            }
+
+            HashSet<string> wanted = new HashSet<string>(names, StringComparer.Ordinal);
+            byte[] utf8 = Encoding.UTF8.GetBytes(jsonText);
+            Utf8JsonReader reader = new Utf8JsonReader(utf8, new JsonReaderOptions {
+                AllowTrailingCommas = false,
+                CommentHandling = JsonCommentHandling.Disallow,
+                MaxDepth = 128
+            });
+            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject) {
+                throw new InvalidOperationException("safe-delete Status JSON 必须是 object。");
+            }
+
+            Dictionary<string, JsonElement> map = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            while (reader.Read()) {
+                if (reader.TokenType == JsonTokenType.EndObject) {
+                    break;
+                }
+                if (reader.TokenType != JsonTokenType.PropertyName) {
+                    throw new InvalidOperationException("safe-delete Status JSON 属性名非法。");
+                }
+
+                string name = reader.GetString();
+                if (!reader.Read()) {
+                    throw new InvalidOperationException("safe-delete Status JSON 截断。");
+                }
+                if (wanted.Contains(name)) {
+                    if (map.ContainsKey(name)) {
+                        throw new InvalidOperationException("safe-delete Status JSON 顶层属性重复。");
+                    }
+                    using (JsonDocument valueDoc = JsonDocument.ParseValue(ref reader)) {
+                        map[name] = valueDoc.RootElement.Clone();
+                    }
+                } else {
+                    reader.Skip();
+                }
+            }
+
+            return map;
+        }
+    }
+}
+'@
 }
 
 function Get-CodexSafeTreeDeleteFileIdentityV2 {
@@ -160,6 +221,93 @@ function New-CodexSafeTreeDeletePlanFileIdentitiesV2 {
     return $records
 }
 
+function Get-CodexSafeTreeDeleteLeafStreamSet {
+    param(
+        [Parameter(Mandatory)]
+        [string]$LiteralPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LiteralPath)) {
+        throw 'LiteralPath 不得为空。'
+    }
+
+    return [CodexSafeTreeDelete.LeafStreamSetReader]::CaptureLeafStreamSet($LiteralPath)
+}
+
+function ConvertTo-CodexSafeTreeDeleteLeafAbsolutePath {
+    param(
+        [Parameter(Mandatory)][string]$TreePath,
+        [Parameter(Mandatory)][string]$RelativePath,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    Assert-CodexHookDirectoryTreeRelativePath -RelativePath $RelativePath -Scope $Scope
+    if ($RelativePath -ceq '.') { return $TreePath }
+    $absolutePath = $TreePath
+    foreach ($segment in $RelativePath.Split('/')) {
+        $absolutePath = Join-Path $absolutePath $segment
+    }
+    return $absolutePath
+}
+
+function New-CodexSafeTreeDeletePlanLeafStreamSet {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][object]$TreeManifest
+    )
+
+    $leaves = [Collections.Generic.List[object]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in @($TreeManifest.entries)) {
+        $relativePath = [string]$entry.relativePath
+        $kind = [string]$entry.kind
+        if (-not $seen.Add($relativePath)) {
+            throw "safe-delete plan leafStreamSetV1 relativePath 重复：$relativePath"
+        }
+        $absolutePath = ConvertTo-CodexSafeTreeDeleteLeafAbsolutePath `
+            -TreePath $TargetPath `
+            -RelativePath $relativePath `
+            -Scope 'safe-delete plan leafStreamSetV1'
+        $capture = Get-CodexSafeTreeDeleteLeafStreamSet -LiteralPath $absolutePath
+        $capturedKind = if ([bool]$capture.IsReparsePoint) {
+            'directory-junction'
+        } elseif ([bool]$capture.IsDirectory) {
+            'directory'
+        } else {
+            'file'
+        }
+        if ($capturedKind -cne $kind) {
+            throw "safe-delete plan leafStreamSetV1 leaf kind 漂移：$relativePath"
+        }
+        $streamNames = [string[]]@($capture.StreamNames)
+        if ($kind -ceq 'file' -and
+            -not ($streamNames.Count -eq 1 -and $streamNames[0] -ceq '::$DATA')) {
+            throw "safe-delete plan leafStreamSetV1 file leaf 不得携带命名流：$relativePath"
+        }
+        if ($kind -ceq 'directory-junction' -and $streamNames.Count -ne 0) {
+            throw "safe-delete plan leafStreamSetV1 junction leaf 不得携带命名流：$relativePath"
+        }
+        $leaves.Add([pscustomobject][ordered]@{
+            relativePath = $relativePath
+            kind = $kind
+            streamNames = @($streamNames)
+            hardLinkCount = [long]$capture.NumberOfLinks
+        })
+    }
+
+    return [pscustomobject][ordered]@{
+        schemaVersion = 1
+        consumptionBoundary = [pscustomobject][ordered]@{
+            apply = 'apply-locked-preflight'
+            purge = 'purge-locked-preflight'
+            streamDrift = 'fail-closed'
+            leafDrift = 'fail-closed'
+            requiresTreeManifestReverification = 'always'
+        }
+        leaves = @($leaves)
+    }
+}
+
 function New-CodexSafeTreeDeleteMetricsState {
     param([Parameter(Mandatory)][string]$Phase)
 
@@ -258,7 +406,7 @@ function Assert-CodexSafeTreeDeletePlanDocumentProperties {
         'policyPath', 'policySha256', 'policyEntryId', 'targetPath', 'capabilityRoot',
         'treeManifest', 'summary'
     )
-    $allowed = $required + @('fileIdentitiesV2')
+    $allowed = $required + @('fileIdentitiesV2', 'leafStreamSetV1')
     $actual = @($Plan.PSObject.Properties.Name)
     if (@($actual | Where-Object { $_ -notin $allowed }).Count -ne 0 -or
         @($required | Where-Object { $_ -notin $actual }).Count -ne 0) {
@@ -802,12 +950,34 @@ function New-CodexSafeTreeDeleteQuarantineTimeAnchor {
     }
 }
 
+function Assert-CodexSafeTreeDeleteDeletionAllowed {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [object]$FileSystemCapabilitiesForTest
+    )
+
+    $capabilities = $null
+    if ($null -ne $FileSystemCapabilitiesForTest) {
+        if ($FileSystemCapabilitiesForTest -isnot [CodexSafeTreeDelete.FileSystemCapabilities]) {
+            throw 'safe-delete FileSystemCapabilitiesForTest 必须是 FileSystemCapabilities。'
+        }
+        $capabilities = $FileSystemCapabilitiesForTest
+    } else {
+        $capabilities = [CodexSafeTreeDelete.FileSystemDetector]::DetectFileSystem($TargetPath)
+    }
+
+    if ($null -eq $capabilities -or -not [bool]$capabilities.DeletionAllowed) {
+        throw 'safe-delete 目标文件系统不允许删除：缺少 FILE_ID_INFO 或不支持的文件系统。'
+    }
+}
+
 function New-CodexSafeTreeDeletePlan {
     param(
         [Parameter(Mandatory)][string]$TargetPath,
         [Parameter(Mandatory)][string]$CapabilityRoot,
         [Parameter(Mandatory)][string]$PolicyPath,
-        [Parameter(Mandatory)][string]$EvidenceRoot
+        [Parameter(Mandatory)][string]$EvidenceRoot,
+        [object]$FileSystemCapabilitiesForTest
     )
 
     $metricsState = New-CodexSafeTreeDeleteMetricsState -Phase 'plan'
@@ -819,6 +989,9 @@ function New-CodexSafeTreeDeletePlan {
         -TargetPath $TargetPath `
         -CapabilityRoot $CapabilityRoot `
         -Policy $policy
+    Assert-CodexSafeTreeDeleteDeletionAllowed `
+        -TargetPath $target.targetPath `
+        -FileSystemCapabilitiesForTest $FileSystemCapabilitiesForTest
     $tree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
         -Path $target.targetPath `
         -CapabilityRoot $target.capabilityRoot `
@@ -840,6 +1013,9 @@ function New-CodexSafeTreeDeletePlan {
     $fileIdentitiesV2 = New-CodexSafeTreeDeletePlanFileIdentitiesV2 `
         -TargetPath $target.targetPath `
         -TreeManifest $tree
+    $leafStreamSetV1 = New-CodexSafeTreeDeletePlanLeafStreamSet `
+        -TargetPath $target.targetPath `
+        -TreeManifest $tree
     $document = [pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-safe-tree-delete-plan'
         schemaVersion = 1
@@ -853,6 +1029,7 @@ function New-CodexSafeTreeDeletePlan {
         capabilityRoot = $target.capabilityRoot
         treeManifest = $tree
         fileIdentitiesV2 = @($fileIdentitiesV2)
+        leafStreamSetV1 = $leafStreamSetV1
         summary = [pscustomobject][ordered]@{
             fileCount = @($tree.entries | Where-Object kind -ceq 'file').Count
             directoryCount = @($tree.entries | Where-Object kind -ceq 'directory').Count
@@ -1023,6 +1200,700 @@ function Read-CodexSafeTreeDeleteFileIdentityV2FromPlan {
         $ordered.Add($byPath[$relativePath])
     }
     return $ordered
+}
+
+function ConvertTo-CodexSafeTreeDeleteApplyFileIdentityMap {
+    param([Parameter(Mandatory)][object]$Plan)
+
+    $records = Read-CodexSafeTreeDeleteFileIdentityV2FromPlan -Plan $Plan
+    $map = [Collections.Generic.Dictionary[string, CodexSafeTreeDelete.FileIdentityV2]]::new(
+        [StringComparer]::Ordinal)
+    foreach ($record in $records) {
+        $map.Add([string]$record.relativePath, $record.identity)
+    }
+    return $map
+}
+
+function Invoke-CodexSafeTreeDeleteApplyFileHash {
+    param(
+        [Parameter(Mandatory)][string]$LiteralPath,
+        [Parameter(Mandatory)][string]$RelativePath,
+        [Parameter(Mandatory)][Collections.Generic.Dictionary[string, CodexSafeTreeDelete.FileIdentityV2]]$ExpectedIdentities,
+        [Parameter(Mandatory)][CodexSafeTreeDelete.SessionHashCache]$SessionCache,
+        [object]$Lease
+    )
+
+    $expected = $null
+    if (-not $ExpectedIdentities.TryGetValue($RelativePath, [ref]$expected) -or $null -eq $expected) {
+        throw "safe-delete apply fileIdentitiesV2 缺少：$RelativePath"
+    }
+    try {
+        if ($null -ne $Lease) {
+            $current = Get-CodexSafeTreeDeleteFileIdentityV2 -LiteralPath $LiteralPath
+            if ($current -ne $expected) {
+                throw [CodexSafeTreeDelete.IdentityMismatchException]::new($expected, $current)
+            }
+            $cached = $null
+            if ($SessionCache.TryGet($current, [ref]$cached)) {
+                return ,$cached
+            }
+            [byte[]]$hashFromLease = $Lease.ComputeSha256FromHandle()
+            $SessionCache.Set($current, $hashFromLease)
+            return ,$hashFromLease
+        }
+
+        [byte[]]$hash = Get-CodexSafeTreeDeleteHashSafely `
+            -LiteralPath $LiteralPath `
+            -ExpectedIdentity $expected `
+            -SessionCache $SessionCache
+        return ,$hash
+    } catch {
+        $currentException = $_.Exception
+        while ($null -ne $currentException) {
+            if ($currentException -is [CodexSafeTreeDelete.IdentityMismatchException]) {
+                throw [InvalidOperationException]::new(
+                    "safe-delete apply IdentityMismatch：$RelativePath",
+                    $currentException)
+            }
+            $currentException = $currentException.InnerException
+        }
+        throw
+    }
+}
+
+function New-CodexSafeTreeDeleteApplyFileHashProvider {
+    param(
+        [Parameter(Mandatory)][Collections.Generic.Dictionary[string, CodexSafeTreeDelete.FileIdentityV2]]$ExpectedIdentities,
+        [Parameter(Mandatory)][CodexSafeTreeDelete.SessionHashCache]$SessionCache
+    )
+
+    $invokeApplyHash = ${function:Invoke-CodexSafeTreeDeleteApplyFileHash}
+    $provider = {
+        param([string]$LiteralPath, [string]$RelativePath, [long]$Length, $Lease)
+        [byte[]]$hash = & $invokeApplyHash `
+            -LiteralPath $LiteralPath `
+            -RelativePath $RelativePath `
+            -ExpectedIdentities $ExpectedIdentities `
+            -SessionCache $SessionCache `
+            -Lease $Lease
+        return ,$hash
+    }
+    return $provider.GetNewClosure()
+}
+
+function Invoke-CodexSafeTreeDeletePurgeFileHash {
+    param(
+        [Parameter(Mandatory)][string]$LiteralPath,
+        [Parameter(Mandatory)][string]$RelativePath,
+        [Parameter(Mandatory)][Collections.Generic.Dictionary[string, CodexSafeTreeDelete.FileIdentityV2]]$ExpectedIdentities,
+        [Parameter(Mandatory)][CodexSafeTreeDelete.SessionHashCache]$SessionCache,
+        [object]$Lease
+    )
+
+    $expected = $null
+    if (-not $ExpectedIdentities.TryGetValue($RelativePath, [ref]$expected) -or $null -eq $expected) {
+        throw "safe-delete purge fileIdentitiesV2 缺少：$RelativePath"
+    }
+    try {
+        if ($null -ne $Lease) {
+            $current = Get-CodexSafeTreeDeleteFileIdentityV2 -LiteralPath $LiteralPath
+            if ($current -ne $expected) {
+                throw [CodexSafeTreeDelete.IdentityMismatchException]::new($expected, $current)
+            }
+            $cached = $null
+            if ($SessionCache.TryGet($current, [ref]$cached)) {
+                return ,$cached
+            }
+            [byte[]]$hashFromLease = $Lease.ComputeSha256FromHandle()
+            $SessionCache.Set($current, $hashFromLease)
+            return ,$hashFromLease
+        }
+
+        [byte[]]$hash = Get-CodexSafeTreeDeleteHashSafely `
+            -LiteralPath $LiteralPath `
+            -ExpectedIdentity $expected `
+            -SessionCache $SessionCache
+        return ,$hash
+    } catch {
+        $currentException = $_.Exception
+        while ($null -ne $currentException) {
+            if ($currentException -is [CodexSafeTreeDelete.IdentityMismatchException]) {
+                throw [InvalidOperationException]::new(
+                    "safe-delete purge IdentityMismatch：$RelativePath",
+                    $currentException)
+            }
+            $currentException = $currentException.InnerException
+        }
+        throw
+    }
+}
+
+function New-CodexSafeTreeDeletePurgeFileLeafBatch {
+    param(
+        [Parameter(Mandatory)][string]$TreePath,
+        [Parameter(Mandatory)][object]$TreeManifest,
+        [Parameter(Mandatory)][Collections.Generic.Dictionary[string, CodexSafeTreeDelete.FileIdentityV2]]$ExpectedIdentities
+    )
+
+    if ($null -eq $TreeManifest -or $null -eq $TreeManifest.PSObject) {
+        throw 'safe-delete purge batch treeManifest 不是对象。'
+    }
+    $batch = [Collections.Generic.List[CodexSafeTreeDelete.PurgeFileLeaf]]::new()
+    foreach ($entry in @($TreeManifest.entries)) {
+        if ([string]$entry.kind -cne 'file') {
+            continue
+        }
+        $relativePath = [string]$entry.relativePath
+        $expected = $null
+        if (-not $ExpectedIdentities.TryGetValue($relativePath, [ref]$expected) -or $null -eq $expected) {
+            throw "safe-delete purge batch fileIdentitiesV2 缺少：$relativePath"
+        }
+        $literalPath = ConvertTo-CodexSafeTreeDeleteAbsolutePathFromRelative `
+            -TargetPath $TreePath `
+            -RelativePath $relativePath
+        $batch.Add([CodexSafeTreeDelete.PurgeFileLeaf]::new($literalPath, $relativePath, $expected))
+    }
+    return ,$batch
+}
+
+function Invoke-CodexSafeTreeDeletePurgeFileLeafBatchValidation {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [Collections.Generic.IList[CodexSafeTreeDelete.PurgeFileLeaf]]$Leaves,
+        [Parameter(Mandatory)][Collections.Generic.Dictionary[string, CodexSafeTreeDelete.FileIdentityV2]]$ExpectedIdentities,
+        [Parameter(Mandatory)][CodexSafeTreeDelete.SessionHashCache]$SessionCache
+    )
+
+    foreach ($leaf in $Leaves) {
+        $expected = $null
+        if (-not $ExpectedIdentities.TryGetValue($leaf.RelativePath, [ref]$expected) -or $null -eq $expected) {
+            throw "safe-delete purge batch fileIdentitiesV2 缺少：$($leaf.RelativePath)"
+        }
+        try {
+            $current = Get-CodexSafeTreeDeleteFileIdentityV2 -LiteralPath $leaf.LiteralPath
+            if ($current -ne $expected) {
+                throw [CodexSafeTreeDelete.IdentityMismatchException]::new($expected, $current)
+            }
+            $cached = $null
+            if ($SessionCache.TryGet($current, [ref]$cached)) {
+                continue
+            }
+            [void](Invoke-CodexSafeTreeDeletePurgeFileHash `
+                -LiteralPath $leaf.LiteralPath `
+                -RelativePath $leaf.RelativePath `
+                -ExpectedIdentities $ExpectedIdentities `
+                -SessionCache $SessionCache)
+        } catch {
+            $currentException = $_.Exception
+            while ($null -ne $currentException) {
+                if ($currentException -is [CodexSafeTreeDelete.IdentityMismatchException]) {
+                    throw [InvalidOperationException]::new(
+                        "safe-delete purge IdentityMismatch：$($leaf.RelativePath)",
+                        $currentException)
+                }
+                $currentException = $currentException.InnerException
+            }
+            throw
+        }
+    }
+}
+
+function New-CodexSafeTreeDeletePurgeFileHashProvider {
+    param(
+        [Parameter(Mandatory)][Collections.Generic.Dictionary[string, CodexSafeTreeDelete.FileIdentityV2]]$ExpectedIdentities,
+        [Parameter(Mandatory)][CodexSafeTreeDelete.SessionHashCache]$SessionCache
+    )
+
+    $invokePurgeHash = ${function:Invoke-CodexSafeTreeDeletePurgeFileHash}
+    $provider = {
+        param([string]$LiteralPath, [string]$RelativePath, [long]$Length, $Lease)
+        [byte[]]$hash = & $invokePurgeHash `
+            -LiteralPath $LiteralPath `
+            -RelativePath $RelativePath `
+            -ExpectedIdentities $ExpectedIdentities `
+            -SessionCache $SessionCache `
+            -Lease $Lease
+        return ,$hash
+    }
+    return $provider.GetNewClosure()
+}
+
+function Read-CodexSafeTreeDeletePlanStreamSet {
+    param([Parameter(Mandatory)][object]$Plan)
+
+    if ($null -eq $Plan -or $null -eq $Plan.PSObject) {
+        throw 'safe-delete plan 不是对象。'
+    }
+    if ($Plan.artifactType -cne 'env-governance.codex-safe-tree-delete-plan') {
+        throw 'safe-delete plan artifact 非法。'
+    }
+    if (-not (@($Plan.PSObject.Properties.Name) -contains 'leafStreamSetV1')) {
+        throw 'safe-delete plan 缺少 leafStreamSetV1，拒绝在缺失完整 stream-set 记录时消费。'
+    }
+    $section = $Plan.leafStreamSetV1
+    Assert-CodexSafeTreeDeleteExactProperties `
+        -Value $section `
+        -Names @('schemaVersion', 'consumptionBoundary', 'leaves') `
+        -Scope 'safe-delete plan leafStreamSetV1'
+    if ($section.schemaVersion -isnot [long] -or [long]$section.schemaVersion -ne 1L) {
+        throw 'safe-delete plan leafStreamSetV1 schemaVersion 非法。'
+    }
+    $boundary = $section.consumptionBoundary
+    Assert-CodexSafeTreeDeleteExactProperties `
+        -Value $boundary `
+        -Names @('apply', 'purge', 'streamDrift', 'leafDrift', 'requiresTreeManifestReverification') `
+        -Scope 'safe-delete plan leafStreamSetV1 consumptionBoundary'
+    if ([string]$boundary.apply -cne 'apply-locked-preflight' -or
+        [string]$boundary.purge -cne 'purge-locked-preflight' -or
+        [string]$boundary.streamDrift -cne 'fail-closed' -or
+        [string]$boundary.leafDrift -cne 'fail-closed' -or
+        [string]$boundary.requiresTreeManifestReverification -cne 'always') {
+        throw 'safe-delete plan leafStreamSetV1 consumptionBoundary 非法：消费边界不得漂移。'
+    }
+    if ($section.leaves -isnot [Array]) {
+        throw 'safe-delete plan leafStreamSetV1 leaves 必须是 JSON array。'
+    }
+    if ($null -eq $Plan.treeManifest -or $null -eq $Plan.treeManifest.PSObject) {
+        throw 'safe-delete plan treeManifest 非法。'
+    }
+
+    $manifestKinds = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    $manifestOrder = [Collections.Generic.List[string]]::new()
+    foreach ($entry in @($Plan.treeManifest.entries)) {
+        $relativePath = [string]$entry.relativePath
+        if (-not $manifestKinds.TryAdd($relativePath, [string]$entry.kind)) {
+            throw "safe-delete plan treeManifest relativePath 重复：$relativePath"
+        }
+        $manifestOrder.Add($relativePath)
+    }
+
+    $leafByPath = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+    $index = 0
+    foreach ($leaf in @($section.leaves)) {
+        $scope = "safe-delete plan leafStreamSetV1 leaves[$index]"
+        Assert-CodexSafeTreeDeleteExactProperties `
+            -Value $leaf `
+            -Names @('relativePath', 'kind', 'streamNames', 'hardLinkCount') `
+            -Scope $scope
+        if ($leaf.relativePath -isnot [string]) {
+            throw "$scope relativePath 必须是 JSON string。"
+        }
+        $relativePath = [string]$leaf.relativePath
+        Assert-CodexHookDirectoryTreeRelativePath -RelativePath $relativePath -Scope $scope
+        $kind = [string]$leaf.kind
+        if ($kind -cnotin @('file', 'directory', 'directory-junction')) {
+            throw "$scope kind 非法：$kind"
+        }
+        if ($leaf.streamNames -isnot [Array]) {
+            throw "$scope streamNames 必须是 JSON array。"
+        }
+        $streamNames = [Collections.Generic.List[string]]::new()
+        $streamNameSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($streamName in @($leaf.streamNames)) {
+            if ($streamName -isnot [string] -or
+                ([string]$streamName -cnotmatch '^::\$DATA$' -and
+                    [string]$streamName -cnotmatch '^:[^:]+:\$DATA$')) {
+                throw "$scope streamNames 含非法 stream 名称。"
+            }
+            if (-not $streamNameSet.Add([string]$streamName)) {
+                throw "$scope streamNames 重复：$streamName"
+            }
+            $streamNames.Add([string]$streamName)
+        }
+        if ($kind -ceq 'file' -and
+            -not ($streamNames.Count -eq 1 -and $streamNames[0] -ceq '::$DATA')) {
+            throw "$scope streamNames 非法：file leaf 只能声明默认流。"
+        }
+        if ($kind -ceq 'directory-junction' -and $streamNames.Count -ne 0) {
+            throw "$scope streamNames 非法：junction leaf 不得声明命名流。"
+        }
+        if ($leaf.hardLinkCount -isnot [long] -and $leaf.hardLinkCount -isnot [int]) {
+            throw "$scope hardLinkCount 必须是 JSON integer。"
+        }
+        $hardLinkCount = [long]$leaf.hardLinkCount
+        if ($hardLinkCount -lt 1L) {
+            throw "$scope hardLinkCount 必须大于等于 1。"
+        }
+        if (-not $leafByPath.TryAdd($relativePath, [pscustomobject][ordered]@{
+                    relativePath = $relativePath
+                    kind = $kind
+                    streamNames = [string[]]@($streamNames)
+                    hardLinkCount = $hardLinkCount
+                })) {
+            throw "safe-delete plan leafStreamSetV1 relativePath 重复：$relativePath"
+        }
+        $index += 1
+    }
+    if ($leafByPath.Count -ne $manifestKinds.Count) {
+        throw 'safe-delete plan leafStreamSetV1 leaves 必须与 treeManifest 条目集合精确对应。'
+    }
+    foreach ($relativePath in $manifestOrder) {
+        if (-not $leafByPath.ContainsKey($relativePath) -or
+            [string]$leafByPath[$relativePath].kind -cne [string]$manifestKinds[$relativePath]) {
+            throw 'safe-delete plan leafStreamSetV1 leaves 必须与 treeManifest 条目集合精确对应。'
+        }
+    }
+
+    $identityByPath = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+    foreach ($record in @(Read-CodexSafeTreeDeleteFileIdentityV2FromPlan -Plan $Plan)) {
+        $identityByPath.Add([string]$record.relativePath, $record.identity)
+    }
+
+    $leaves = [Collections.Generic.List[object]]::new()
+    $byPath = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+    foreach ($relativePath in $manifestOrder) {
+        $leaf = $leafByPath[$relativePath]
+        $identity = $null
+        if ([string]$leaf.kind -ceq 'file') {
+            $identity = $identityByPath[$relativePath]
+        }
+        $row = [pscustomobject][ordered]@{
+            relativePath = [string]$leaf.relativePath
+            kind = [string]$leaf.kind
+            streamNames = [string[]]@($leaf.streamNames)
+            hardLinkCount = [long]$leaf.hardLinkCount
+            identity = $identity
+        }
+        $leaves.Add($row)
+        $byPath.Add([string]$leaf.relativePath, $row)
+    }
+
+    return [pscustomobject][ordered]@{
+        boundary = [pscustomobject][ordered]@{
+            apply = [string]$boundary.apply
+            purge = [string]$boundary.purge
+            streamDrift = [string]$boundary.streamDrift
+            leafDrift = [string]$boundary.leafDrift
+            requiresTreeManifestReverification = [string]$boundary.requiresTreeManifestReverification
+        }
+        leaves = @($leaves)
+        byPath = $byPath
+    }
+}
+
+function Assert-CodexSafeTreeDeleteLiveStreamSet {
+    param(
+        [Parameter(Mandatory)][object]$PlanStreamSet,
+        [Parameter(Mandatory)][object]$TreeManifest,
+        [Parameter(Mandatory)][string]$TreePath,
+        [Parameter(Mandatory)][ValidateSet('apply', 'purge')][string]$Phase,
+        [switch]$AllowMissingPlannedLeaves
+    )
+
+    $scope = "safe-delete $Phase locked preflight leaf stream-set"
+    $liveKinds = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in @($TreeManifest.entries)) {
+        $relativePath = [string]$entry.relativePath
+        if (-not $liveKinds.TryAdd($relativePath, [string]$entry.kind)) {
+            throw "$scope live tree relativePath 重复：$relativePath"
+        }
+        if (-not $PlanStreamSet.byPath.ContainsKey($relativePath)) {
+            throw "$scope 计划外 leaf 漂移：$relativePath"
+        }
+        if ([string]$PlanStreamSet.byPath[$relativePath].kind -cne [string]$entry.kind) {
+            throw "$scope leaf kind 漂移：$relativePath"
+        }
+    }
+    if (-not $AllowMissingPlannedLeaves) {
+        foreach ($leaf in @($PlanStreamSet.leaves)) {
+            if (-not $liveKinds.ContainsKey([string]$leaf.relativePath)) {
+                throw "$scope leaf 缺失漂移：$($leaf.relativePath)"
+            }
+        }
+    }
+
+    foreach ($entry in @($TreeManifest.entries)) {
+        $relativePath = [string]$entry.relativePath
+        $planned = $PlanStreamSet.byPath[$relativePath]
+        $absolutePath = ConvertTo-CodexSafeTreeDeleteLeafAbsolutePath `
+            -TreePath $TreePath `
+            -RelativePath $relativePath `
+            -Scope $scope
+        $capture = Get-CodexSafeTreeDeleteLeafStreamSet -LiteralPath $absolutePath
+        $capturedKind = if ([bool]$capture.IsReparsePoint) {
+            'directory-junction'
+        } elseif ([bool]$capture.IsDirectory) {
+            'directory'
+        } else {
+            'file'
+        }
+        if ($capturedKind -cne [string]$planned.kind) {
+            throw "$scope leaf kind 漂移：$relativePath"
+        }
+        $liveStreams = [string[]]@($capture.StreamNames)
+        if (($liveStreams -join "`n") -cne ([string[]]@($planned.streamNames) -join "`n")) {
+            throw "$scope stream 漂移：$relativePath"
+        }
+        if ([string]$planned.kind -ceq 'file') {
+            if ([long]$capture.NumberOfLinks -ne [long]$planned.hardLinkCount) {
+                throw "$scope leaf hardlink 计数漂移：$relativePath"
+            }
+            if ($capture.Identity -ne $planned.identity) {
+                throw "$scope leaf FileIdentityV2 identity 漂移：$relativePath"
+            }
+        }
+    }
+}
+
+function New-CodexSafeTreeDeleteLeafDispositionDocument {
+    param(
+        [Parameter(Mandatory)][object]$PlanStreamSet,
+        [Parameter(Mandatory)][string]$GenerationId,
+        [Parameter(Mandatory)][string]$PlanSha256,
+        [Parameter(Mandatory)][string]$TransactionPath,
+        [Parameter(Mandatory)][string]$QuarantinePath,
+        [Parameter(Mandatory)][string]$PurgingTransactionUpdatedAtUtc,
+        [AllowEmptyCollection()][object]$CommittedLeaves,
+        [Parameter(Mandatory)][object]$PreflightLiveLeafSet,
+        [string]$AbsentLeafEvidence = 'purging-subset-resume'
+    )
+
+    $deletedByPath = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    foreach ($committed in @($CommittedLeaves)) {
+        $committedPath = [string]$committed.path
+        $committedKind = [string]$committed.kind
+        $prefix = $QuarantinePath.TrimEnd('\') + '\'
+        if (-not $committedPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "safe-delete leaf disposition 删除路径越出 quarantine：$committedPath"
+        }
+        $relativePath = $committedPath.Substring($prefix.Length).Replace('\', '/')
+        Assert-CodexHookDirectoryTreeRelativePath `
+            -RelativePath $relativePath `
+            -Scope 'safe-delete leaf disposition'
+        if (-not $deletedByPath.TryAdd($relativePath, $committedKind)) {
+            throw "safe-delete leaf disposition 删除回调重复：$relativePath"
+        }
+    }
+
+    $rows = [Collections.Generic.List[object]]::new()
+    $deletedCount = 0L
+    $absentCount = 0L
+    foreach ($leaf in @($PlanStreamSet.leaves)) {
+        $relativePath = [string]$leaf.relativePath
+        $kind = [string]$leaf.kind
+        if ($kind -cnotin @('file', 'directory-junction')) { continue }
+        if ($deletedByPath.ContainsKey($relativePath)) {
+            if ([string]$deletedByPath[$relativePath] -cne $kind) {
+                throw "safe-delete leaf disposition 删除回调 kind 漂移：$relativePath"
+            }
+            $disposition = 'deleted'
+            $evidence = 'exclusive-lease-reverification'
+            $deletedCount += 1L
+        } elseif (-not $PreflightLiveLeafSet.Contains($relativePath)) {
+            $disposition = 'absent-at-purge-resume'
+            $evidence = $AbsentLeafEvidence
+            $absentCount += 1L
+        } else {
+            throw "safe-delete leaf disposition 无法证明最终状态：$relativePath 既未在本轮删除也不缺席。"
+        }
+        $rows.Add([pscustomobject][ordered]@{
+            relativePath = $relativePath
+            kind = $kind
+            disposition = $disposition
+            evidence = $evidence
+        })
+    }
+    foreach ($relativePath in $deletedByPath.Keys) {
+        if (-not $PlanStreamSet.byPath.ContainsKey($relativePath)) {
+            throw "safe-delete leaf disposition 删除回调越出计划 leaf：$relativePath"
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-leaf-dispositions'
+        schemaVersion = 1
+        generationId = $GenerationId
+        planSha256 = $PlanSha256
+        transactionPath = $TransactionPath
+        quarantinePath = $QuarantinePath
+        purgingTransactionUpdatedAtUtc = $PurgingTransactionUpdatedAtUtc
+        streamSetSource = 'plan.leafStreamSetV1'
+        liveFreeze = 'target-mutex-and-per-leaf-exclusive-lease'
+        leaves = @($rows)
+        summary = [pscustomobject][ordered]@{
+            plannedLeaves = [long]$rows.Count
+            deleted = $deletedCount
+            absentAtPurgeResume = $absentCount
+        }
+    }
+}
+
+function Publish-CodexSafeTreeDeleteLeafDispositions {
+    param(
+        [Parameter(Mandatory)][object]$Document,
+        [Parameter(Mandatory)][string]$RunDirectory
+    )
+
+    if ($null -eq $Document -or $null -eq $Document.PSObject -or
+        [string]$Document.artifactType -cne 'env-governance.codex-safe-tree-delete-leaf-dispositions' -or
+        ($Document.schemaVersion -isnot [long] -and $Document.schemaVersion -isnot [int]) -or
+        [long]$Document.schemaVersion -ne 1L) {
+        throw 'safe-delete leaf dispositions artifact/schema 非法。'
+    }
+    $path = Join-Path $RunDirectory 'leaf-dispositions.json'
+    [void](Assert-CodexHookCapabilityPath `
+        -Path $path `
+        -CapabilityRoot $RunDirectory `
+        -AllowedExactPaths @($path) `
+        -Name 'safe-delete leaf dispositions')
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($Document | ConvertTo-Json -Depth 100))
+    $sha256 = Get-CodexHookBytesSha256 -Bytes $bytes
+    $existing = Get-CodexHookCapabilityFileSnapshot `
+        -Path $path `
+        -CapabilityRoot $RunDirectory `
+        -AllowedExactPaths @($path) `
+        -Name 'safe-delete leaf dispositions before publish'
+    if ([bool]$existing.exists) {
+        if ([string]$existing.sha256 -ceq [string]$sha256) {
+            return [pscustomobject][ordered]@{
+                path = $path
+                sha256 = [string]$sha256
+            }
+        }
+        throw 'safe-delete leaf dispositions 漂移：已存在证据与本次内容不一致。'
+    }
+    [void](New-CodexHookCapabilityJson `
+        -Path $path `
+        -Document $Document `
+        -CapabilityRoot $RunDirectory `
+        -AllowedExactPaths @($path) `
+        -Scope 'safe-delete leaf dispositions publish')
+    $published = Get-CodexHookCapabilityFileSnapshot `
+        -Path $path `
+        -CapabilityRoot $RunDirectory `
+        -AllowedExactPaths @($path) `
+        -Name 'safe-delete leaf dispositions published'
+    return [pscustomobject][ordered]@{
+        path = $path
+        sha256 = [string]$published.sha256
+    }
+}
+
+function Read-CodexSafeTreeDeletePublishedLeafDispositions {
+    param(
+        [Parameter(Mandatory)][string]$RunDirectory,
+        [Parameter(Mandatory)][string]$GenerationId,
+        [Parameter(Mandatory)][string]$PlanSha256,
+        [Parameter(Mandatory)][string]$TransactionPath,
+        [Parameter(Mandatory)][string]$QuarantinePath,
+        [Parameter(Mandatory)][string]$PurgingTransactionUpdatedAtUtc,
+        [Parameter(Mandatory)][object]$PlanStreamSet
+    )
+
+    $path = Join-Path $RunDirectory 'leaf-dispositions.json'
+    $snapshot = Get-CodexHookCapabilityFileSnapshot `
+        -Path $path `
+        -CapabilityRoot $RunDirectory `
+        -AllowedExactPaths @($path) `
+        -Name 'safe-delete published leaf dispositions'
+    if (-not [bool]$snapshot.exists) { return $null }
+    if ([string]$snapshot.state -cne 'regular-file' -or $null -eq $snapshot.bytes) {
+        throw 'safe-delete 既有 leaf dispositions 不可安全读取。'
+    }
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    try {
+        $text = $utf8.GetString([byte[]]$snapshot.bytes)
+    } catch {
+        throw 'safe-delete 既有 leaf dispositions 不是严格 UTF-8。'
+    }
+    Assert-CodexHookStrictJsonText -JsonText $text
+    $document = $text | ConvertFrom-Json -Depth 100 -DateKind String -ErrorAction Stop
+    Assert-CodexSafeTreeDeleteExactProperties `
+        -Value $document `
+        -Names @(
+            'artifactType', 'schemaVersion', 'generationId', 'planSha256',
+            'transactionPath', 'quarantinePath', 'purgingTransactionUpdatedAtUtc',
+            'streamSetSource', 'liveFreeze', 'leaves', 'summary'
+        ) `
+        -Scope 'safe-delete published leaf dispositions'
+    if ([string]$document.artifactType -cne 'env-governance.codex-safe-tree-delete-leaf-dispositions' -or
+        ($document.schemaVersion -isnot [long] -and $document.schemaVersion -isnot [int]) -or
+        [long]$document.schemaVersion -ne 1L) {
+        throw 'safe-delete leaf dispositions artifact/schema 非法。'
+    }
+    if ([string]$document.generationId -cne $GenerationId -or
+        [string]$document.planSha256 -cne $PlanSha256 -or
+        [string]$document.transactionPath -cne $TransactionPath -or
+        [string]$document.quarantinePath -cne $QuarantinePath -or
+        [string]$document.purgingTransactionUpdatedAtUtc -cne $PurgingTransactionUpdatedAtUtc -or
+        [string]$document.streamSetSource -cne 'plan.leafStreamSetV1') {
+        throw 'safe-delete 既有 leaf dispositions 与本 transaction 绑定不一致。'
+    }
+    if ($document.leaves -isnot [Array]) {
+        throw 'safe-delete 既有 leaf dispositions leaves 必须是 JSON array。'
+    }
+    $expectedByPath = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    foreach ($streamLeaf in @($PlanStreamSet.leaves)) {
+        $streamLeafKind = [string]$streamLeaf.kind
+        if ($streamLeafKind -cnotin @('file', 'directory-junction')) { continue }
+        [void]$expectedByPath.Add([string]$streamLeaf.relativePath, $streamLeafKind)
+    }
+    $seenRows = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $deletedCount = 0L
+    $absentCount = 0L
+    $rowIndex = 0
+    foreach ($row in @($document.leaves)) {
+        $rowScope = "safe-delete published leaf dispositions leaves[$rowIndex]"
+        Assert-CodexSafeTreeDeleteExactProperties `
+            -Value $row `
+            -Names @('relativePath', 'kind', 'disposition', 'evidence') `
+            -Scope $rowScope
+        if ($row.relativePath -isnot [string]) {
+            throw "$rowScope relativePath 必须是 JSON string。"
+        }
+        $rowRelativePath = [string]$row.relativePath
+        Assert-CodexHookDirectoryTreeRelativePath -RelativePath $rowRelativePath -Scope $rowScope
+        $rowKind = [string]$row.kind
+        if ($rowKind -cnotin @('file', 'directory-junction')) {
+            throw "$rowScope kind 非法：$rowKind"
+        }
+        $rowDisposition = [string]$row.disposition
+        $rowEvidence = [string]$row.evidence
+        if ($rowDisposition -ceq 'deleted') {
+            if ($rowEvidence -cne 'exclusive-lease-reverification') {
+                throw "$rowScope disposition/evidence 配对非法：$rowDisposition/$rowEvidence"
+            }
+            $deletedCount += 1L
+        } elseif ($rowDisposition -ceq 'absent-at-purge-resume') {
+            if ($rowEvidence -cnotin @('purging-subset-resume', 'committed-missing-quarantine-journal')) {
+                throw "$rowScope disposition/evidence 配对非法：$rowDisposition/$rowEvidence"
+            }
+            $absentCount += 1L
+        } else {
+            throw "$rowScope disposition 非法：$rowDisposition"
+        }
+        if (-not $expectedByPath.ContainsKey($rowRelativePath) -or
+            [string]$expectedByPath[$rowRelativePath] -cne $rowKind) {
+            throw "$rowScope 越出 plan stream-set 计划 leaf：$rowRelativePath"
+        }
+        if (-not $seenRows.Add($rowRelativePath)) {
+            throw "$rowScope relativePath 重复：$rowRelativePath"
+        }
+        $rowIndex += 1
+    }
+    if ($seenRows.Count -ne $expectedByPath.Count) {
+        throw 'safe-delete 既有 leaf dispositions leaves 未精确覆盖 plan stream-set 的 file/junction leaf。'
+    }
+    Assert-CodexSafeTreeDeleteExactProperties `
+        -Value $document.summary `
+        -Names @('plannedLeaves', 'deleted', 'absentAtPurgeResume') `
+        -Scope 'safe-delete published leaf dispositions summary'
+    foreach ($summaryField in @('plannedLeaves', 'deleted', 'absentAtPurgeResume')) {
+        if ($document.summary.$summaryField -isnot [long] -and
+            $document.summary.$summaryField -isnot [int]) {
+            throw "safe-delete published leaf dispositions summary $summaryField 必须是 JSON integer。"
+        }
+    }
+    if ([long]$document.summary.plannedLeaves -ne [long]$document.leaves.Count -or
+        [long]$document.summary.deleted -ne $deletedCount -or
+        [long]$document.summary.absentAtPurgeResume -ne $absentCount) {
+        throw 'safe-delete 既有 leaf dispositions summary 与 leaves 行重述不一致。'
+    }
+    return [pscustomobject][ordered]@{
+        path = [string]$snapshot.path
+        sha256 = [string]$snapshot.sha256
+    }
 }
 
 function Get-CodexSafeTreeDeleteNamespaceState {
@@ -1519,19 +2390,591 @@ function Invoke-CodexSafeTreeDeleteArchive {
     }
 }
 
+function Add-CodexSafeTreeDeleteStatusElapsed {
+    param(
+        [AllowNull()][object]$State,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][long]$Milliseconds
+    )
+
+    if ($null -eq $State -or $null -eq $State.PSObject.Properties[$Name]) {
+        return
+    }
+    $State.$Name = [long]$State.$Name + $Milliseconds
+}
+
+function Resolve-CodexSafeTreeDeleteStatusManagedFilePath {
+    param(
+        [Parameter(Mandatory)][string]$RunDirectory,
+        [Parameter(Mandatory)][string]$FullEvidenceRoot,
+        [Parameter(Mandatory)][string]$FileName,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($FileName -cnotin @('plan.json', 'transaction.json', 'terminal-archive.json')) {
+        throw "$Name 不是 Status 受管 evidence 文件。"
+    }
+    $fullRun = Assert-CodexHookDPath -Value $RunDirectory -Name "$Name run"
+    if (-not (Test-CodexSafeTreeDeletePathEqual `
+            -Left (Split-Path -Parent $fullRun) `
+            -Right $FullEvidenceRoot)) {
+        throw "$Name 必须位于 evidence root 的直接 operation run 下。"
+    }
+    $fullPath = Assert-CodexHookDPath -Value (Join-Path $fullRun $FileName) -Name $Name
+    if ($fullPath.Substring(2).Contains(':')) {
+        throw "$Name 不得包含 NTFS alternate data stream。"
+    }
+    if (-not (Test-CodexHookPathWithin -Path $fullPath -ParentPath $fullRun) -or
+        (Test-CodexSafeTreeDeletePathEqual -Left $fullPath -Right $fullRun)) {
+        throw "$Name 越出 operation run。"
+    }
+    return $fullPath
+}
+
+function Read-CodexSafeTreeDeleteStatusManagedSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name,
+        [scriptblock]$MetricsObserver,
+        [AllowNull()][object]$MetricsState,
+        [ValidateSet('planTransactionRead', 'terminalArchiveAuth')]
+        [string]$ReadSegment = 'planTransactionRead'
+    )
+
+    $readWatch = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $native = [CodexHookGovernance.HandleBoundFileReader]::ReadAllBytes($Path)
+    } catch {
+        $leaf = Get-CodexHookInnermostException -Exception $_.Exception
+        if ($leaf -is [CodexHookGovernance.HandlePathMismatchException]) {
+            throw "$Name final path 与 lexical path 不一致。"
+        }
+        throw
+    }
+    $readWatch.Stop()
+    $hashWatch = [Diagnostics.Stopwatch]::StartNew()
+    [byte[]]$bytes = $native.Bytes
+    $sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    $hashWatch.Stop()
+    if ($null -ne $MetricsObserver) {
+        & $MetricsObserver 'hash-read' 0L ([long]$bytes.Length)
+    }
+    $readSegmentName = if ($ReadSegment -ceq 'terminalArchiveAuth') {
+        'segmentTerminalArchiveAuthMs'
+    } else {
+        'segmentPlanTransactionReadMs'
+    }
+    Add-CodexSafeTreeDeleteStatusElapsed -State $MetricsState -Name $readSegmentName -Milliseconds $readWatch.ElapsedMilliseconds
+    Add-CodexSafeTreeDeleteStatusElapsed -State $MetricsState -Name 'segmentSha256Ms' -Milliseconds $hashWatch.ElapsedMilliseconds
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xef -and $bytes[1] -eq 0xbb -and $bytes[2] -eq 0xbf
+    try {
+        $text = if ($hasBom) {
+            $utf8.GetString($bytes, 3, $bytes.Length - 3)
+        } else {
+            $utf8.GetString($bytes)
+        }
+    } catch {
+        throw "$Name 不是严格 UTF-8：$($_.Exception.Message)"
+    }
+    return [pscustomobject][ordered]@{
+        path = $Path
+        sha256 = $sha256
+        identity = @([string]$native.VolumeSerialNumber, [string]$native.FileIndex)
+        text = $text
+        bytes = $bytes
+    }
+}
+
+function Get-CodexSafeTreeDeleteStatusJsonBindings {
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [Parameter(Mandatory)][string[]]$Names,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    $extracted = [CodexSafeTreeDelete.StatusJsonTopLevelReader]::ReadWanted($Text, $Names)
+    $map = [ordered]@{}
+    foreach ($pair in $extracted.GetEnumerator()) {
+        $map[$pair.Key] = $pair.Value
+    }
+    return $map
+}
+
+function Get-CodexSafeTreeDeleteStatusJsonString {
+    param(
+        [Parameter(Mandatory)][object]$Map,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    if (-not $Map.Contains($Name)) {
+        throw "$Scope 缺少 $Name。"
+    }
+    $element = $Map[$Name]
+    if ($element.ValueKind -ne [Text.Json.JsonValueKind]::String) {
+        throw "$Scope $Name 必须是 JSON string。"
+    }
+    return [string]$element.GetString()
+}
+
+function Get-CodexSafeTreeDeleteStatusJsonInt64 {
+    param(
+        [Parameter(Mandatory)][object]$Map,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    if (-not $Map.Contains($Name)) {
+        throw "$Scope 缺少 $Name。"
+    }
+    $element = $Map[$Name]
+    $value = 0L
+    if ($element.ValueKind -ne [Text.Json.JsonValueKind]::Number -or
+        -not $element.TryGetInt64([ref]$value)) {
+        throw "$Scope $Name 必须是 JSON integer。"
+    }
+    return $value
+}
+
+function Get-CodexSafeTreeDeleteStatusJsonArrayCount {
+    param(
+        [Parameter(Mandatory)][object]$Map,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if (-not $Map.Contains($Name)) {
+        return 0L
+    }
+    $element = $Map[$Name]
+    if ($element.ValueKind -eq [Text.Json.JsonValueKind]::Null) {
+        return 0L
+    }
+    if ($element.ValueKind -ne [Text.Json.JsonValueKind]::Array) {
+        throw "safe-delete Status $Name 必须是 JSON array。"
+    }
+    return [long]$element.GetArrayLength()
+}
+
+function Get-CodexSafeTreeDeleteStatusJsonParseThrottleLimit {
+    $processorCount = [Math]::Max(1, [int][Environment]::ProcessorCount)
+    return [int][Math]::Min(4, [Math]::Max(1, $processorCount - 2))
+}
+
+function Read-CodexSafeTreeDeleteStatusUnarchivedPlanPrefetch {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$RunItems,
+        [Parameter(Mandatory)][string]$FullEvidenceRoot,
+        [Parameter(Mandatory)][scriptblock]$MetricsObserver,
+        [AllowNull()][object]$MetricsState
+    )
+
+    $cache = [Collections.Generic.Dictionary[string, object]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    $pending = [Collections.Generic.List[object]]::new()
+    foreach ($runItem in @($RunItems)) {
+        try {
+            if (-not $runItem.PSIsContainer -or
+                ($runItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                continue
+            }
+            if ([IO.File]::Exists((Join-Path $runItem.FullName 'terminal-archive.json'))) {
+                continue
+            }
+            if (-not [IO.File]::Exists((Join-Path $runItem.FullName 'plan.json'))) {
+                continue
+            }
+            $runDirectory = Assert-CodexHookDPath `
+                -Value $runItem.FullName `
+                -Name 'safe-delete status run'
+            [void](Assert-CodexHookCapabilityPath `
+                -Path $runDirectory `
+                -CapabilityRoot $FullEvidenceRoot `
+                -AllowedExactPaths @($runDirectory) `
+                -Name 'safe-delete status run')
+            $resolvedPlanPath = Resolve-CodexSafeTreeDeleteStatusManagedFilePath `
+                -RunDirectory $runDirectory `
+                -FullEvidenceRoot $FullEvidenceRoot `
+                -FileName 'plan.json' `
+                -Name 'safe-delete status unarchived plan'
+            $snapshot = Read-CodexSafeTreeDeleteStatusManagedSnapshot `
+                -Path $resolvedPlanPath `
+                -Name 'safe-delete status unarchived plan' `
+                -MetricsObserver $MetricsObserver `
+                -MetricsState $MetricsState `
+                -ReadSegment planTransactionRead
+            $pending.Add([pscustomobject]@{
+                    runDirectory = $runDirectory
+                    snapshot = [pscustomobject][ordered]@{
+                        sha256 = [string]$snapshot.sha256
+                        text = [string]$snapshot.text
+                    }
+                })
+        } catch {
+            continue
+        }
+    }
+
+    $throttle = Get-CodexSafeTreeDeleteStatusJsonParseThrottleLimit
+    foreach ($item in $pending) {
+        $cache[[string]$item.runDirectory] = [pscustomobject][ordered]@{
+            snapshot = $item.snapshot
+            document = $null
+        }
+    }
+    return [pscustomobject][ordered]@{
+        cache = $cache
+        throttleLimit = [int]$throttle
+        prefetchedCount = [long]$pending.Count
+        parsedCount = 0L
+    }
+}
+
+function Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 {
+    param(
+        [Parameter(Mandatory)][object]$PlanTreeManifest,
+        [Parameter(Mandatory)][string]$PlanSha256,
+        [AllowNull()][object]$Cache
+    )
+
+    if ($PlanSha256 -notmatch '^[0-9a-f]{64}$') {
+        return Get-CodexSafeTreeDeleteManifestSha256 -Manifest $PlanTreeManifest
+    }
+    if ($null -ne $Cache -and $Cache.ContainsKey($PlanSha256)) {
+        return [string]$Cache[$PlanSha256]
+    }
+    $sha = Get-CodexSafeTreeDeleteManifestSha256 -Manifest $PlanTreeManifest
+    if ($null -ne $Cache) {
+        $Cache[$PlanSha256] = $sha
+    }
+    return $sha
+}
+
+function Get-CodexSafeTreeDeleteStatusLiveManifestSha256 {
+    param([Parameter(Mandatory)][object]$Snapshot)
+
+    if ($null -ne $Snapshot.PSObject.Properties['statusLiveManifestSha256']) {
+        return [string]$Snapshot.statusLiveManifestSha256
+    }
+    $sha = Get-CodexSafeTreeDeleteManifestSha256 -Manifest $Snapshot
+    $Snapshot | Add-Member -NotePropertyName statusLiveManifestSha256 -NotePropertyValue $sha -Force
+    return $sha
+}
+
+function Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [Parameter(Mandatory)][string[]]$AllowedExactPaths,
+        [bool]$AllowHardLinks,
+        [bool]$AllowInternalDirectoryJunctions,
+        [string]$InternalDirectoryJunctionTargetRoot,
+        [scriptblock]$MetricsObserver,
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()][object]$StatusTreeCache,
+        [AllowNull()][object]$MetricsState
+    )
+
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $key = '{0}`n{1}`n{2}`n{3}`n{4}' -f @(
+            $Path.ToUpperInvariant(),
+            $CapabilityRoot.ToUpperInvariant(),
+            [int][bool]$AllowHardLinks,
+            [int][bool]$AllowInternalDirectoryJunctions,
+            $(if ([string]::IsNullOrWhiteSpace($InternalDirectoryJunctionTargetRoot)) {
+                ''
+            } else {
+                $InternalDirectoryJunctionTargetRoot.ToUpperInvariant()
+            })
+        )
+        if ($null -ne $StatusTreeCache -and $StatusTreeCache.ContainsKey($key)) {
+            $cached = $StatusTreeCache[$key]
+            if ([IO.Directory]::Exists($Path)) {
+                $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+                    $CapabilityRoot,
+                    $Path,
+                    $false)
+                try {
+                    $currentIdentity = @(
+                        [string]$guard.VolumeSerialNumber,
+                        [string]$guard.FileIndex)
+                    if (Test-CodexHookDirectoryTreeIdentityEqual `
+                            -Expected @($cached.rootIdentity) `
+                            -Actual $currentIdentity) {
+                        return $cached
+                    }
+                } finally {
+                    $guard.Dispose()
+                }
+            }
+        }
+        $snapshot = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+            -Path $Path `
+            -CapabilityRoot $CapabilityRoot `
+            -AllowedExactPaths $AllowedExactPaths `
+            -AllowHardLinks:$AllowHardLinks `
+            -AllowInternalDirectoryJunctions:$AllowInternalDirectoryJunctions `
+            -InternalDirectoryJunctionTargetRoot $InternalDirectoryJunctionTargetRoot `
+            -MetricsObserver $MetricsObserver `
+            -Name $Name
+        if ($null -ne $StatusTreeCache) {
+            $StatusTreeCache[$key] = $snapshot
+        }
+        return $snapshot
+    } finally {
+        $watch.Stop()
+        Add-CodexSafeTreeDeleteStatusElapsed `
+            -State $MetricsState `
+            -Name 'segmentTreeMaterializationMs' `
+            -Milliseconds $watch.ElapsedMilliseconds
+    }
+}
+
+function Read-CodexSafeTreeDeleteStatusTerminalArchive {
+    param(
+        [Parameter(Mandatory)][string]$RunDirectory,
+        [Parameter(Mandatory)][string]$EvidenceRoot,
+        [scriptblock]$MetricsObserver,
+        [AllowNull()][object]$MetricsState
+    )
+
+    $fullEvidenceRoot = Assert-CodexHookDPath -Value $EvidenceRoot -Name 'safe-delete status archive evidence root'
+    $archivePath = Resolve-CodexSafeTreeDeleteStatusManagedFilePath `
+        -RunDirectory $RunDirectory `
+        -FullEvidenceRoot $fullEvidenceRoot `
+        -FileName 'terminal-archive.json' `
+        -Name 'safe-delete status terminal archive'
+    $planPath = Resolve-CodexSafeTreeDeleteStatusManagedFilePath `
+        -RunDirectory $RunDirectory `
+        -FullEvidenceRoot $fullEvidenceRoot `
+        -FileName 'plan.json' `
+        -Name 'safe-delete status archive plan'
+    $transactionPath = Resolve-CodexSafeTreeDeleteStatusManagedFilePath `
+        -RunDirectory $RunDirectory `
+        -FullEvidenceRoot $fullEvidenceRoot `
+        -FileName 'transaction.json' `
+        -Name 'safe-delete status archive transaction'
+    $archiveSnapshot = Read-CodexSafeTreeDeleteStatusManagedSnapshot `
+        -Path $archivePath `
+        -Name 'safe-delete status terminal archive' `
+        -MetricsObserver $MetricsObserver `
+        -MetricsState $MetricsState `
+        -ReadSegment terminalArchiveAuth
+    $planSnapshot = Read-CodexSafeTreeDeleteStatusManagedSnapshot `
+        -Path $planPath `
+        -Name 'safe-delete status archive plan' `
+        -MetricsObserver $MetricsObserver `
+        -MetricsState $MetricsState `
+        -ReadSegment planTransactionRead
+    $transactionSnapshot = Read-CodexSafeTreeDeleteStatusManagedSnapshot `
+        -Path $transactionPath `
+        -Name 'safe-delete status archive transaction' `
+        -MetricsObserver $MetricsObserver `
+        -MetricsState $MetricsState `
+        -ReadSegment planTransactionRead
+    Assert-CodexHookStrictJsonText -JsonText $archiveSnapshot.text
+    $archive = $archiveSnapshot.text | ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
+    Assert-CodexSafeTreeDeleteExactProperties `
+        -Value $archive `
+        -Names @(
+            'artifactType', 'schemaVersion', 'generationId',
+            'planPath', 'planSha256', 'planIdentity',
+            'transactionPath', 'transactionSha256', 'transactionIdentity',
+            'transactionSchemaVersion', 'transactionStatus', 'transactionUpdatedAtUtc',
+            'targetPath', 'quarantinePath', 'quarantineAbsent',
+            'restoreJournalAnchorCount', 'archivedAtUtc'
+        ) `
+        -Scope 'safe-delete terminal archive'
+    foreach ($stringProperty in @(
+            'artifactType', 'generationId', 'planPath', 'planSha256',
+            'transactionPath', 'transactionSha256', 'transactionStatus',
+            'transactionUpdatedAtUtc', 'targetPath', 'quarantinePath', 'archivedAtUtc')) {
+        if ($archive.$stringProperty -isnot [string]) {
+            throw "safe-delete terminal archive $stringProperty 必须是 JSON string。"
+        }
+    }
+    $archivedAtUtc = [datetimeoffset]::MinValue
+    if ($archive.artifactType -cne 'env-governance.codex-safe-tree-delete-terminal-archive' -or
+        $archive.schemaVersion -isnot [long] -or [long]$archive.schemaVersion -ne 1L -or
+        $archive.transactionSchemaVersion -isnot [long] -or
+        [long]$archive.transactionSchemaVersion -notin @(1L, 2L, 3L) -or
+        $archive.quarantineAbsent -isnot [bool] -or -not [bool]$archive.quarantineAbsent -or
+        $archive.restoreJournalAnchorCount -isnot [long] -or
+        [long]$archive.restoreJournalAnchorCount -ne 0L -or
+        [string]$archive.transactionStatus -cne 'purged' -or
+        -not [datetimeoffset]::TryParseExact(
+            [string]$archive.archivedAtUtc,
+            'o',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind,
+            [ref]$archivedAtUtc)) {
+        throw 'safe-delete terminal archive schema 或判据声明非法。'
+    }
+    if (-not (Test-CodexSafeTreeDeletePathEqual -Left $archive.planPath -Right $planPath) -or
+        -not (Test-CodexSafeTreeDeletePathEqual -Left $archive.transactionPath -Right $transactionPath)) {
+        throw 'safe-delete terminal archive 引用越出 operation run。'
+    }
+    if ([string]$archive.planSha256 -cne [string]$planSnapshot.sha256 -or
+        [string]$archive.transactionSha256 -cne [string]$transactionSnapshot.sha256) {
+        throw 'safe-delete terminal archive 与当前受管 evidence 内容不一致。'
+    }
+    Assert-CodexHookDirectoryTreeIdentity `
+        -Expected @($archive.planIdentity) `
+        -Actual @($planSnapshot.identity) `
+        -Scope 'safe-delete terminal archive plan'
+    Assert-CodexHookDirectoryTreeIdentity `
+        -Expected @($archive.transactionIdentity) `
+        -Actual @($transactionSnapshot.identity) `
+        -Scope 'safe-delete terminal archive transaction'
+    $planBindings = Get-CodexSafeTreeDeleteStatusJsonBindings `
+        -Text $planSnapshot.text `
+        -Names @('artifactType', 'schemaVersion', 'generationId', 'targetPath', 'policySha256') `
+        -Scope 'safe-delete status archive plan'
+    $planArtifactType = Get-CodexSafeTreeDeleteStatusJsonString `
+        -Map $planBindings -Name 'artifactType' -Scope 'safe-delete status archive plan'
+    $planSchemaVersion = Get-CodexSafeTreeDeleteStatusJsonInt64 `
+        -Map $planBindings -Name 'schemaVersion' -Scope 'safe-delete status archive plan'
+    $planGenerationId = Get-CodexSafeTreeDeleteStatusJsonString `
+        -Map $planBindings -Name 'generationId' -Scope 'safe-delete status archive plan'
+    $planTargetPath = Get-CodexSafeTreeDeleteStatusJsonString `
+        -Map $planBindings -Name 'targetPath' -Scope 'safe-delete status archive plan'
+    $planPolicySha256 = Get-CodexSafeTreeDeleteStatusJsonString `
+        -Map $planBindings -Name 'policySha256' -Scope 'safe-delete status archive plan'
+    $planGuid = [guid]::Empty
+    if ($planArtifactType -cne 'env-governance.codex-safe-tree-delete-plan' -or
+        $planSchemaVersion -ne 1L -or
+        -not [guid]::TryParseExact($planGenerationId, 'D', [ref]$planGuid) -or
+        $planPolicySha256 -notmatch '^[0-9a-f]{64}$') {
+        throw 'safe-delete status archive plan artifact/schema 非法。'
+    }
+    $expectedTargetPath = Assert-CodexHookDPath `
+        -Value $planTargetPath `
+        -Name 'safe-delete status archive plan target'
+    $expectedQuarantinePath = Join-Path `
+        (Split-Path -Parent $expectedTargetPath) `
+        ('.codex-safe-delete-{0}.quarantine' -f $planGenerationId)
+    $transactionBindings = Get-CodexSafeTreeDeleteStatusJsonBindings `
+        -Text $transactionSnapshot.text `
+        -Names @(
+            'schemaVersion', 'status', 'updatedAtUtc', 'generationId',
+            'planPath', 'planSha256', 'targetPath', 'quarantinePath',
+            'restoreJournalAnchors'
+        ) `
+        -Scope 'safe-delete status archive transaction'
+    $transactionSchemaVersion = Get-CodexSafeTreeDeleteStatusJsonInt64 `
+        -Map $transactionBindings -Name 'schemaVersion' -Scope 'safe-delete status archive transaction'
+    if ($transactionSchemaVersion -notin @(1L, 2L, 3L)) {
+        throw 'safe-delete status archive transaction schemaVersion 必须是 JSON integer 1、2 或 3。'
+    }
+    if ($transactionSchemaVersion -eq 1L) {
+        $transaction = $transactionSnapshot.text |
+            ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
+        $observed = Read-CodexSafeTreeDeleteObservedV1Transaction `
+            -Document $transaction `
+            -TransactionPath $transactionPath `
+            -PlanPath $planPath `
+            -PlanSha256 ([string]$planSnapshot.sha256) `
+            -Plan ([pscustomobject][ordered]@{
+                artifactType = $planArtifactType
+                schemaVersion = $planSchemaVersion
+                generationId = $planGenerationId
+                targetPath = $expectedTargetPath
+            }) `
+            -ExpectedTargetPath $expectedTargetPath `
+            -ExpectedQuarantinePath $expectedQuarantinePath
+        $transactionStatus = [string]$observed.status
+        $transactionUpdatedAtUtc = [string]$observed.updatedAtUtc
+        $sourceTargetPath = [string]$observed.targetPath
+        $sourceQuarantinePath = [string]$observed.quarantinePath
+        $restoreJournalAnchorCount = 0L
+    } else {
+        $transactionStatus = Get-CodexSafeTreeDeleteStatusJsonString `
+            -Map $transactionBindings -Name 'status' -Scope 'safe-delete status archive transaction'
+        $transactionUpdatedAtUtc = Get-CodexSafeTreeDeleteStatusJsonString `
+            -Map $transactionBindings -Name 'updatedAtUtc' -Scope 'safe-delete status archive transaction'
+        $transactionGenerationId = Get-CodexSafeTreeDeleteStatusJsonString `
+            -Map $transactionBindings -Name 'generationId' -Scope 'safe-delete status archive transaction'
+        $transactionPlanPath = Get-CodexSafeTreeDeleteStatusJsonString `
+            -Map $transactionBindings -Name 'planPath' -Scope 'safe-delete status archive transaction'
+        $transactionPlanSha256 = Get-CodexSafeTreeDeleteStatusJsonString `
+            -Map $transactionBindings -Name 'planSha256' -Scope 'safe-delete status archive transaction'
+        $sourceTargetPath = Get-CodexSafeTreeDeleteStatusJsonString `
+            -Map $transactionBindings -Name 'targetPath' -Scope 'safe-delete status archive transaction'
+        $sourceQuarantinePath = Get-CodexSafeTreeDeleteStatusJsonString `
+            -Map $transactionBindings -Name 'quarantinePath' -Scope 'safe-delete status archive transaction'
+        if ($transactionGenerationId -cne $planGenerationId -or
+            [string]$transactionPlanSha256 -cne [string]$planSnapshot.sha256 -or
+            -not (Test-CodexSafeTreeDeletePathEqual -Left $transactionPlanPath -Right $planPath) -or
+            -not (Test-CodexSafeTreeDeletePathEqual -Left $sourceTargetPath -Right $expectedTargetPath) -or
+            -not (Test-CodexSafeTreeDeletePathEqual -Left $sourceQuarantinePath -Right $expectedQuarantinePath)) {
+            throw 'safe-delete terminal archive 与当前受管 evidence 内容不一致。'
+        }
+        $restoreJournalAnchorCount = Get-CodexSafeTreeDeleteStatusJsonArrayCount `
+            -Map $transactionBindings -Name 'restoreJournalAnchors'
+    }
+    if ([string]$archive.generationId -cne $planGenerationId -or
+        [long]$archive.transactionSchemaVersion -ne $transactionSchemaVersion -or
+        [string]$archive.transactionUpdatedAtUtc -cne $transactionUpdatedAtUtc -or
+        -not (Test-CodexSafeTreeDeletePathEqual -Left $archive.targetPath -Right $sourceTargetPath) -or
+        -not (Test-CodexSafeTreeDeletePathEqual -Left $archive.quarantinePath -Right $sourceQuarantinePath)) {
+        throw 'safe-delete terminal archive 与当前受管 evidence 内容不一致。'
+    }
+    if ($transactionStatus -cne 'purged') {
+        throw 'safe-delete terminal archive transaction status 已漂移。'
+    }
+    if ($restoreJournalAnchorCount -ne 0L) {
+        throw 'safe-delete terminal archive Restore journal anchors 已出现。'
+    }
+    $quarantineState = Get-CodexSafeTreeDeleteNamespaceState -Path $sourceQuarantinePath
+    if ([bool]$quarantineState.present) {
+        throw 'safe-delete terminal archive quarantine 已重新出现。'
+    }
+    $targetState = Get-CodexSafeTreeDeleteNamespaceState -Path $sourceTargetPath
+    return [pscustomobject][ordered]@{
+        path = $archivePath
+        sha256 = [string]$archiveSnapshot.sha256
+        identity = @($archiveSnapshot.identity)
+        document = $archive
+        source = [pscustomobject][ordered]@{
+            plan = [pscustomobject][ordered]@{
+                artifactType = $planArtifactType
+                schemaVersion = $planSchemaVersion
+                generationId = $planGenerationId
+                targetPath = $expectedTargetPath
+                policySha256 = $planPolicySha256
+            }
+            planSha256 = [string]$planSnapshot.sha256
+            planIdentity = @($planSnapshot.identity)
+            transactionSha256 = [string]$transactionSnapshot.sha256
+            transactionIdentity = @($transactionSnapshot.identity)
+            transactionSchemaVersion = $transactionSchemaVersion
+            transactionStatus = $transactionStatus
+            transactionUpdatedAtUtc = $transactionUpdatedAtUtc
+            targetPath = $sourceTargetPath
+            quarantinePath = $sourceQuarantinePath
+            restoreJournalAnchorCount = $restoreJournalAnchorCount
+        }
+        targetState = $targetState
+        quarantineState = $quarantineState
+    }
+}
+
 function Resolve-CodexSafeTreeDeleteArchivedStatusOperation {
     param(
         [Parameter(Mandatory)][object]$RunItem,
         [Parameter(Mandatory)][string]$CurrentPolicySha256,
         [Parameter(Mandatory)][string]$FullEvidenceRoot,
         [Parameter(Mandatory)][bool]$CandidatePolicyRequested,
-        [Parameter(Mandatory)][scriptblock]$MetricsObserver
+        [Parameter(Mandatory)][scriptblock]$MetricsObserver,
+        [AllowNull()][object]$MetricsState
     )
 
-    $archive = Read-CodexSafeTreeDeleteTerminalArchive `
+    $archive = Read-CodexSafeTreeDeleteStatusTerminalArchive `
         -RunDirectory ([string]$RunItem.FullName) `
         -EvidenceRoot $FullEvidenceRoot `
-        -MetricsObserver $MetricsObserver
+        -MetricsObserver $MetricsObserver `
+        -MetricsState $MetricsState
     $source = $archive.source
     $targetState = $archive.targetState
     $quarantineState = $archive.quarantineState
@@ -1581,7 +3024,11 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
         [Parameter(Mandatory)][bool]$CandidatePolicyRequested,
         [AllowNull()][object]$CandidatePolicy,
         [Parameter(Mandatory)][object]$MetricsState,
-        [Parameter(Mandatory)][scriptblock]$TreeMetricsObserver
+        [Parameter(Mandatory)][scriptblock]$TreeMetricsObserver,
+        [AllowNull()][object]$StatusTreeCache,
+        [AllowNull()][object]$LoadedPolicy,
+        [AllowNull()][object]$StatusPlanPrefetch,
+        [AllowNull()][object]$PlanManifestShaCache
     )
 
     $complete = $true
@@ -1622,7 +3069,8 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     -CurrentPolicySha256 $CurrentPolicySha256 `
                     -FullEvidenceRoot $FullEvidenceRoot `
                     -CandidatePolicyRequested $CandidatePolicyRequested `
-                    -MetricsObserver $TreeMetricsObserver
+                    -MetricsObserver $TreeMetricsObserver `
+                    -MetricsState $MetricsState
             }
             $planPath = Join-Path $runDirectory 'plan.json'
             $transactionPath = Join-Path $runDirectory 'transaction.json'
@@ -1637,13 +3085,25 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                 }
                 throw 'evidence record 缺少 plan.json。'
             }
-            $planSnapshot = Read-CodexHookSafeUtf8FileSnapshot `
-                -Path $planPath `
-                -Name 'safe-delete status plan' `
-                -AllowedExactPaths @($planPath)
-            $metricsState.bytesHashed = [long]$metricsState.bytesHashed + $planSnapshot.bytes.Length
+            $prefetchedPlan = $null
+            if ($null -ne $StatusPlanPrefetch -and $StatusPlanPrefetch.ContainsKey($runDirectory)) {
+                $prefetchedPlan = $StatusPlanPrefetch[$runDirectory]
+            }
+            if ($null -ne $prefetchedPlan -and $null -ne $prefetchedPlan.snapshot) {
+                $planSnapshot = $prefetchedPlan.snapshot
+            } else {
+                $planSnapshot = Read-CodexHookSafeUtf8FileSnapshot `
+                    -Path $planPath `
+                    -Name 'safe-delete status plan' `
+                    -AllowedExactPaths @($planPath)
+                $metricsState.bytesHashed = [long]$metricsState.bytesHashed + $planSnapshot.bytes.Length
+            }
             Assert-CodexHookStrictJsonText -JsonText $planSnapshot.text
-            $plan = $planSnapshot.text | ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
+            if ($null -ne $prefetchedPlan -and $null -ne $prefetchedPlan.document) {
+                $plan = $prefetchedPlan.document
+            } else {
+                $plan = $planSnapshot.text | ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
+            }
             $planSchemaVersion = [long]$plan.schemaVersion
             try {
                 $approvedPlan = Read-CodexSafeTreeDeleteApprovedPlan `
@@ -1654,7 +3114,11 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     -AllowMissingTarget `
                     -AllowExpiredPlan `
                     -AllowPolicyShaDrift `
-                    -MetricsObserver $treeMetricsObserver
+                    -MetricsObserver $treeMetricsObserver `
+                    -PreloadedSnapshot $planSnapshot `
+                    -PreparsedDocument $plan `
+                    -LoadedPolicy $LoadedPolicy `
+                    -PlanManifestShaCache $PlanManifestShaCache
             } catch {
                 $planApprovalError = $_.Exception.Message
                 if (-not [IO.File]::Exists($transactionPath)) { throw }
@@ -1668,28 +3132,70 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                 $transaction = $transactionSnapshot.text |
                     ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
                 $transactionSchemaVersion = [long]$transaction.schemaVersion
-                if ($transactionSchemaVersion -ne 1L) { throw }
+                if ($transactionSchemaVersion -notin @(1L, 2L, 3L)) { throw }
                 if ($plan.targetPath -isnot [string] -or $plan.generationId -isnot [string]) { throw }
                 $observedTargetPath = [string]$plan.targetPath
                 $observedQuarantinePath = Join-Path `
                     (Split-Path -Parent $observedTargetPath) `
                     ('.codex-safe-delete-{0}.quarantine' -f ([string]$plan.generationId))
-                $observedTransaction = Read-CodexSafeTreeDeleteObservedV1Transaction `
-                    -Document $transaction `
-                    -TransactionPath $transactionPath `
-                    -PlanPath $planPath `
-                    -PlanSha256 ([string]$planSnapshot.sha256) `
-                    -Plan $plan `
-                    -ExpectedTargetPath $observedTargetPath `
-                    -ExpectedQuarantinePath $observedQuarantinePath
+                if ($transactionSchemaVersion -eq 1L) {
+                    $observedTransaction = Read-CodexSafeTreeDeleteObservedV1Transaction `
+                        -Document $transaction `
+                        -TransactionPath $transactionPath `
+                        -PlanPath $planPath `
+                        -PlanSha256 ([string]$planSnapshot.sha256) `
+                        -Plan $plan `
+                        -ExpectedTargetPath $observedTargetPath `
+                        -ExpectedQuarantinePath $observedQuarantinePath
+                } else {
+                    $observedDocument = ConvertTo-CodexSafeTreeDeleteStrictTransactionDocument `
+                        -Document $transaction
+                    if ($plan.artifactType -cne 'env-governance.codex-safe-tree-delete-plan' -or
+                        $plan.schemaVersion -isnot [long] -or [long]$plan.schemaVersion -ne 1L) {
+                        throw 'safe-delete observed transaction 的 plan artifact/schema 非法。'
+                    }
+                    $observedPlanGenerationId = [guid]::Empty
+                    if (-not [guid]::TryParseExact(
+                            [string]$plan.generationId, 'D', [ref]$observedPlanGenerationId)) {
+                        throw 'safe-delete observed transaction 的 plan generationId 非法。'
+                    }
+                    if ([string]$observedDocument.generationId -cne [string]$plan.generationId -or
+                        -not (Test-CodexSafeTreeDeletePathEqual `
+                            -Left ([string]$observedDocument.planPath) `
+                            -Right $planPath) -or
+                        [string]$observedDocument.planSha256 -cne [string]$planSnapshot.sha256 -or
+                        -not (Test-CodexSafeTreeDeletePathEqual `
+                            -Left ([string]$observedDocument.targetPath) `
+                            -Right $observedTargetPath) -or
+                        -not (Test-CodexSafeTreeDeletePathEqual `
+                            -Left ([string]$observedDocument.quarantinePath) `
+                            -Right $observedQuarantinePath)) {
+                        throw "safe-delete observed transaction 与受管 plan 不一致：$transactionPath"
+                    }
+                    $observedTransaction = [pscustomobject][ordered]@{
+                        targetPath = [string]$observedDocument.targetPath
+                        quarantinePath = [string]$observedDocument.quarantinePath
+                        status = [string]$observedDocument.status
+                        updatedAtUtc = [string]$observedDocument.updatedAtUtc
+                    }
+                }
                 $targetPath = [string]$observedTransaction.targetPath
                 $quarantinePath = [string]$observedTransaction.quarantinePath
                 $transactionStatus = [string]$observedTransaction.status
                 $transactionUpdatedAtUtc = [string]$observedTransaction.updatedAtUtc
                 $schemaCompatible = $false
                 $journalStatus = 'unavailable'
+                $observedTargetState = Get-CodexSafeTreeDeleteNamespaceState -Path $targetPath
+                $observedQuarantineState = Get-CodexSafeTreeDeleteNamespaceState -Path $quarantinePath
+                $targetPresent = [bool]$observedTargetState.present
+                $quarantinePresent = [bool]$observedQuarantineState.present
+                $targetEntryType = [string]$observedTargetState.entryType
+                $quarantineEntryType = [string]$observedQuarantineState.entryType
                 $errors.Add("plan 当前语义拒绝：$planApprovalError")
-                throw 'transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。'
+                if ($transactionSchemaVersion -eq 1L) {
+                    throw 'transaction v1 仅支持 Status 只读观测；Purge/Restore 不可恢复且继续拒绝。'
+                }
+                throw 'plan 被当前 policy 拒绝；transaction 仅支持 Status 只读观测，Apply/Purge/Restore 继续拒绝。'
             }
             $policyCompatible = [string]$plan.policySha256 -ceq $CurrentPolicySha256
             $targetPath = [string]$approvedPlan.target.targetPath
@@ -1715,7 +3221,7 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                 $safeActions = if ($lifecycle -ceq 'planned') { @('apply') } else { @('manual-review') }
                 $journalStatus = 'not-started'
                 if ($lifecycle -ceq 'planned') {
-                    $plannedTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                    $plannedTree = Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot `
                         -Path $targetPath `
                         -CapabilityRoot ([string]$approvedPlan.target.capabilityRoot) `
                         -AllowedExactPaths @($targetPath) `
@@ -1723,9 +3229,14 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                         -AllowInternalDirectoryJunctions:([bool]$approvedPlan.target.allowInternalDirectoryJunctions) `
                         -InternalDirectoryJunctionTargetRoot $targetPath `
                         -MetricsObserver $treeMetricsObserver `
-                        -Name 'safe-delete status planned tree'
-                    if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plannedTree) -cne
-                        (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
+                        -Name 'safe-delete status planned tree' `
+                        -StatusTreeCache $StatusTreeCache `
+                        -MetricsState $MetricsState
+                    if ((Get-CodexSafeTreeDeleteStatusLiveManifestSha256 -Snapshot $plannedTree) -cne
+                        (Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 `
+                            -PlanTreeManifest $plan.treeManifest `
+                            -PlanSha256 ([string]$planSnapshot.sha256) `
+                            -Cache $PlanManifestShaCache)) {
                         throw 'safe-delete Status planned tree manifest 漂移。'
                     }
                 } else {
@@ -1820,7 +3331,7 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     if ($targetEntryType -ceq 'absent' -and $quarantineEntryType -ceq 'directory') {
                         $quarantineCapabilityRoot = Get-CodexSafeTreeDeleteQuarantineCapabilityRoot `
                             -Target $approvedTransaction.approvedPlan.target
-                        $quarantineTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                        $quarantineTree = Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot `
                             -Path $quarantinePath `
                             -CapabilityRoot $quarantineCapabilityRoot `
                             -AllowedExactPaths @($quarantinePath) `
@@ -1828,7 +3339,9 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                             -AllowInternalDirectoryJunctions:([bool]$approvedTransaction.approvedPlan.target.allowInternalDirectoryJunctions) `
                             -InternalDirectoryJunctionTargetRoot $targetPath `
                             -MetricsObserver $treeMetricsObserver `
-                            -Name 'safe-delete status purge-resumable tree'
+                            -Name 'safe-delete status purge-resumable tree' `
+                            -StatusTreeCache $StatusTreeCache `
+                            -MetricsState $MetricsState
                         Assert-CodexSafeTreeDeletePartialPurgeManifest `
                             -CurrentManifest $quarantineTree `
                             -PlannedManifest $plan.treeManifest
@@ -1906,7 +3419,7 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     if ($targetEntryType -cne 'directory' -or $quarantineEntryType -cne 'absent') {
                         throw "$transactionStatus transaction 的 live namespace 不一致。"
                     }
-                    $terminalTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                    $terminalTree = Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot `
                         -Path $targetPath `
                         -CapabilityRoot ([string]$approvedTransaction.approvedPlan.target.capabilityRoot) `
                         -AllowedExactPaths @($targetPath) `
@@ -1914,9 +3427,14 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                         -AllowInternalDirectoryJunctions:([bool]$approvedTransaction.approvedPlan.target.allowInternalDirectoryJunctions) `
                         -InternalDirectoryJunctionTargetRoot $targetPath `
                         -MetricsObserver $treeMetricsObserver `
-                        -Name 'safe-delete Status terminal restored tree'
-                    if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $terminalTree) -cne
-                        (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
+                        -Name 'safe-delete Status terminal restored tree' `
+                        -StatusTreeCache $StatusTreeCache `
+                        -MetricsState $MetricsState
+                    if ((Get-CodexSafeTreeDeleteStatusLiveManifestSha256 -Snapshot $terminalTree) -cne
+                        (Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 `
+                            -PlanTreeManifest $plan.treeManifest `
+                            -PlanSha256 ([string]$planSnapshot.sha256) `
+                            -Cache $PlanManifestShaCache)) {
                         throw "$transactionStatus transaction 的 target tree 漂移。"
                     }
                     if ($transactionStatus -ceq 'restored') {
@@ -1984,7 +3502,7 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     if ($targetEntryType -ceq 'absent' -and $quarantineEntryType -ceq 'directory') {
                         $quarantineCapabilityRoot = Get-CodexSafeTreeDeleteQuarantineCapabilityRoot `
                             -Target $approvedTransaction.approvedPlan.target
-                        $quarantineTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                        $quarantineTree = Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot `
                             -Path $quarantinePath `
                             -CapabilityRoot $quarantineCapabilityRoot `
                             -AllowedExactPaths @($quarantinePath) `
@@ -1992,9 +3510,14 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                             -AllowInternalDirectoryJunctions:([bool]$approvedTransaction.approvedPlan.target.allowInternalDirectoryJunctions) `
                             -InternalDirectoryJunctionTargetRoot $targetPath `
                             -MetricsObserver $treeMetricsObserver `
-                            -Name 'safe-delete status recoverable tree'
-                        if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $quarantineTree) -cne
-                            (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
+                            -Name 'safe-delete status recoverable tree' `
+                            -StatusTreeCache $StatusTreeCache `
+                            -MetricsState $MetricsState
+                        if ((Get-CodexSafeTreeDeleteStatusLiveManifestSha256 -Snapshot $quarantineTree) -cne
+                            (Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 `
+                                -PlanTreeManifest $plan.treeManifest `
+                                -PlanSha256 ([string]$planSnapshot.sha256) `
+                                -Cache $PlanManifestShaCache)) {
                             throw 'safe-delete Status recoverable tree manifest 漂移。'
                         }
                         $lifecycle = 'recoverable'
@@ -2103,6 +3626,21 @@ function Get-CodexSafeTreeDeleteStatus {
     )
 
     $metricsState = New-CodexSafeTreeDeleteMetricsState -Phase 'status'
+    Add-Member -InputObject $metricsState -NotePropertyMembers @{
+        segmentDirectoryEnumerationMs = 0L
+        segmentPlanTransactionReadMs = 0L
+        segmentTerminalArchiveAuthMs = 0L
+        segmentTreeMaterializationMs = 0L
+        segmentSha256Ms = 0L
+        segmentActiveResolveMs = 0L
+        segmentArchivedResolveMs = 0L
+        segmentPrefetchMs = 0L
+    } -Force
+    $statusTreeCache = [Collections.Generic.Dictionary[string, object]]::new(
+        [StringComparer]::Ordinal)
+    $planManifestShaCache = [Collections.Generic.Dictionary[string, string]]::new(
+        [StringComparer]::Ordinal)
+    $statusPlanPrefetch = $null
     $fullEvidenceRoot = Assert-CodexHookDPath -Value $EvidenceRoot -Name 'safe-delete status evidence root'
     if (-not [IO.Directory]::Exists($fullEvidenceRoot)) {
         throw 'safe-delete status evidence root 不存在。'
@@ -2141,10 +3679,24 @@ function Get-CodexSafeTreeDeleteStatus {
     }
     $operations = [Collections.Generic.List[object]]::new()
     $complete = $true
+    $enumWatch = [Diagnostics.Stopwatch]::StartNew()
+    $runItems = @(Get-ChildItem -LiteralPath $fullEvidenceRoot -Force -ErrorAction Stop |
+        Sort-Object -Property Name -CaseSensitive)
+    $enumWatch.Stop()
+    $metricsState.segmentDirectoryEnumerationMs = [long]$enumWatch.ElapsedMilliseconds
+    $prefetchWatch = [Diagnostics.Stopwatch]::StartNew()
+    $statusPlanPrefetch = Read-CodexSafeTreeDeleteStatusUnarchivedPlanPrefetch `
+        -RunItems $runItems `
+        -FullEvidenceRoot $fullEvidenceRoot `
+        -MetricsObserver $treeMetricsObserver `
+        -MetricsState $metricsState
+    $prefetchWatch.Stop()
+    $metricsState.segmentPrefetchMs = [long]$prefetchWatch.ElapsedMilliseconds
 
-    foreach ($runItem in @(Get-ChildItem -LiteralPath $fullEvidenceRoot -Force -ErrorAction Stop |
-            Sort-Object -Property Name -CaseSensitive)) {
+    foreach ($runItem in $runItems) {
         $metricsState.entriesScanned = [long]$metricsState.entriesScanned + 1L
+        $isArchived = [IO.File]::Exists((Join-Path $runItem.FullName 'terminal-archive.json'))
+        $activeWatch = [Diagnostics.Stopwatch]::StartNew()
         $operationStatus = Resolve-CodexSafeTreeDeleteStatusOperation `
             -RunItem $runItem `
             -PolicyPath $PolicyPath `
@@ -2153,7 +3705,19 @@ function Get-CodexSafeTreeDeleteStatus {
             -CandidatePolicyRequested $candidatePolicyRequested `
             -CandidatePolicy $candidatePolicy `
             -MetricsState $metricsState `
-            -TreeMetricsObserver $treeMetricsObserver
+            -TreeMetricsObserver $treeMetricsObserver `
+            -StatusTreeCache $statusTreeCache `
+            -LoadedPolicy $policy `
+            -StatusPlanPrefetch $statusPlanPrefetch.cache `
+            -PlanManifestShaCache $planManifestShaCache
+        $activeWatch.Stop()
+        if ($isArchived) {
+            $metricsState.segmentArchivedResolveMs =
+                [long]$metricsState.segmentArchivedResolveMs + $activeWatch.ElapsedMilliseconds
+        } else {
+            $metricsState.segmentActiveResolveMs =
+                [long]$metricsState.segmentActiveResolveMs + $activeWatch.ElapsedMilliseconds
+        }
         $operations.Add($operationStatus.operation)
         if (-not [bool]$operationStatus.complete) {
             $complete = $false
@@ -2172,7 +3736,7 @@ function Get-CodexSafeTreeDeleteStatus {
                 @($_.errors).Count -ne 0)
         } | ForEach-Object { [string]$_.operationId }
     })
-    return [pscustomobject][ordered]@{
+    $status = [pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-safe-tree-delete-status'
         schemaVersion = 1
         capturedAtUtc = [datetimeoffset]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
@@ -2195,6 +3759,37 @@ function Get-CodexSafeTreeDeleteStatus {
         operations = @($operations)
         metrics = Complete-CodexSafeTreeDeleteMetrics -State $metricsState
     }
+    if ($env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS -ceq '1') {
+        $status | Add-Member -NotePropertyName statusSegments -NotePropertyValue ([pscustomobject][ordered]@{
+            directoryEnumerationMs = [long]$metricsState.segmentDirectoryEnumerationMs
+            planTransactionReadMs = [long]$metricsState.segmentPlanTransactionReadMs
+            terminalArchiveAuthMs = [long]$metricsState.segmentTerminalArchiveAuthMs
+            treeMaterializationMs = [long]$metricsState.segmentTreeMaterializationMs
+            sha256Ms = [long]$metricsState.segmentSha256Ms
+            activeResolveMs = [long]$metricsState.segmentActiveResolveMs
+            archivedResolveMs = [long]$metricsState.segmentArchivedResolveMs
+            prefetchMs = [long]$metricsState.segmentPrefetchMs
+            statusTreeCacheEntries = [long]$statusTreeCache.Count
+            planManifestShaCacheEntries = [long]$planManifestShaCache.Count
+            unarchivedPlanPrefetchCount = if ($null -eq $statusPlanPrefetch) {
+                0L
+            } else {
+                [long]$statusPlanPrefetch.prefetchedCount
+            }
+            unarchivedPlanParsedCount = if ($null -eq $statusPlanPrefetch) {
+                0L
+            } else {
+                [long]$statusPlanPrefetch.parsedCount
+            }
+            jsonParseThrottleLimit = if ($null -eq $statusPlanPrefetch) {
+                0
+            } else {
+                [int]$statusPlanPrefetch.throttleLimit
+            }
+            consumptionBoundary = 'status-invocation-local-not-session-hash-cache'
+        })
+    }
+    return $status
 }
 
 function Get-CodexSafeTreeDeleteManifestSha256 {
@@ -2246,10 +3841,17 @@ function Read-CodexSafeTreeDeleteApprovedPlan {
         [switch]$AllowMissingTarget,
         [switch]$AllowExpiredPlan,
         [switch]$AllowPolicyShaDrift,
-        [scriptblock]$MetricsObserver
+        [scriptblock]$MetricsObserver,
+        [AllowNull()][object]$PreloadedSnapshot,
+        [AllowNull()][object]$PreparsedDocument,
+        [AllowNull()][object]$LoadedPolicy,
+        [AllowNull()][object]$PlanManifestShaCache
     )
 
     if ($ApprovedPlanSha256 -notmatch '^[0-9a-f]{64}$') { throw 'ApprovedPlanSha256 格式非法。' }
+    if ($null -ne $PreparsedDocument -and $null -eq $PreloadedSnapshot) {
+        throw 'safe-delete preparsed plan 必须绑定已哈希 snapshot。'
+    }
     $fullEvidenceRoot = Assert-CodexHookDPath -Value $EvidenceRoot -Name 'safe-delete evidence root'
     $fullPlanPath = Assert-CodexHookDPath -Value $PlanPath -Name 'safe-delete plan path'
     if ([IO.Path]::GetFileName($fullPlanPath) -cne 'plan.json' -or
@@ -2263,16 +3865,31 @@ function Read-CodexSafeTreeDeleteApprovedPlan {
         -CapabilityRoot $fullEvidenceRoot `
         -AllowedExactPaths @($fullPlanPath) `
         -Name 'safe-delete approved plan')
-    $snapshot = Read-CodexHookSafeUtf8FileSnapshot `
-        -Path $fullPlanPath `
-        -Name 'safe-delete approved plan' `
-        -AllowedExactPaths @($fullPlanPath)
-    if ($null -ne $MetricsObserver) {
-        & $MetricsObserver 'hash-read' 0L ([long]$snapshot.bytes.Length)
+    if ($null -ne $PreloadedSnapshot) {
+        $snapshot = $PreloadedSnapshot
+        if ($snapshot.sha256 -isnot [string] -or
+            [string]$snapshot.sha256 -cne $ApprovedPlanSha256) {
+            throw 'safe-delete approved plan SHA-256 不匹配。'
+        }
+        if ($snapshot.text -isnot [string]) {
+            throw 'safe-delete preloaded plan snapshot 缺少 text。'
+        }
+    } else {
+        $snapshot = Read-CodexHookSafeUtf8FileSnapshot `
+            -Path $fullPlanPath `
+            -Name 'safe-delete approved plan' `
+            -AllowedExactPaths @($fullPlanPath)
+        if ($null -ne $MetricsObserver) {
+            & $MetricsObserver 'hash-read' 0L ([long]$snapshot.bytes.Length)
+        }
+        if ($snapshot.sha256 -cne $ApprovedPlanSha256) { throw 'safe-delete approved plan SHA-256 不匹配。' }
+        Assert-CodexHookStrictJsonText -JsonText $snapshot.text
     }
-    if ($snapshot.sha256 -cne $ApprovedPlanSha256) { throw 'safe-delete approved plan SHA-256 不匹配。' }
-    Assert-CodexHookStrictJsonText -JsonText $snapshot.text
-    $plan = $snapshot.text | ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
+    if ($null -ne $PreparsedDocument) {
+        $plan = $PreparsedDocument
+    } else {
+        $plan = $snapshot.text | ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
+    }
     Assert-CodexSafeTreeDeletePlanDocumentProperties `
         -Plan $plan `
         -Scope 'safe-delete plan'
@@ -2288,9 +3905,22 @@ function Read-CodexSafeTreeDeleteApprovedPlan {
         -Scope 'safe-delete plan' `
         -AllowExpiredPlan:$AllowExpiredPlan
 
-    $policy = Read-CodexSafeTreeDeletePolicy `
-        -PolicyPath $PolicyPath `
-        -MetricsObserver $MetricsObserver
+    if ($null -ne $LoadedPolicy) {
+        $policy = $LoadedPolicy
+        $requestedPolicyPath = Assert-CodexHookDPath -Value $PolicyPath -Name 'safe-delete policy path'
+        if (-not (Test-CodexSafeTreeDeletePathEqual `
+                -Left $requestedPolicyPath `
+                -Right ([string]$policy.path))) {
+            throw 'safe-delete loaded policy path 与请求 path 不一致。'
+        }
+        if ($policy.sha256 -isnot [string] -or [string]$policy.sha256 -notmatch '^[0-9a-f]{64}$') {
+            throw 'safe-delete loaded policy SHA-256 非法。'
+        }
+    } else {
+        $policy = Read-CodexSafeTreeDeletePolicy `
+            -PolicyPath $PolicyPath `
+            -MetricsObserver $MetricsObserver
+    }
     if ($plan.policyPath -cne $policy.path -or
         (-not $AllowPolicyShaDrift -and $plan.policySha256 -cne $policy.sha256)) {
         throw 'safe-delete policy 自计划生成后已漂移。'
@@ -2325,7 +3955,10 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         [Parameter(Mandatory)][string]$EvidenceRoot,
         [switch]$FailAfterRenameForTest,
         [scriptblock]$BeforeQuarantineMutexForTest,
-        [scriptblock]$QuarantineCheckpointForTest
+        [scriptblock]$QuarantineCheckpointForTest,
+        [object]$FileSystemCapabilitiesForTest,
+        [CodexSafeTreeDelete.SessionHashCache]$SessionHashCacheForTest,
+        [switch]$DisableApplyHashReuseForTest
     )
 
     $metricsState = New-CodexSafeTreeDeleteMetricsState -Phase 'apply'
@@ -2341,6 +3974,23 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         -MetricsObserver $repeatMetricsObserver
     $plan = $approved.document
     $target = $approved.target
+    Assert-CodexSafeTreeDeleteDeletionAllowed `
+        -TargetPath $target.targetPath `
+        -FileSystemCapabilitiesForTest $FileSystemCapabilitiesForTest
+    $planStreamSet = Read-CodexSafeTreeDeletePlanStreamSet -Plan $plan
+    $sessionHashCache = $null
+    $applyFileIdentities = ConvertTo-CodexSafeTreeDeleteApplyFileIdentityMap -Plan $plan
+    $sessionHashCache = if ($null -ne $SessionHashCacheForTest) {
+        $SessionHashCacheForTest
+    } else {
+        [CodexSafeTreeDelete.SessionHashCache]::new()
+    }
+    $applyFileHashProvider = $null
+    if (-not $DisableApplyHashReuseForTest) {
+        $applyFileHashProvider = New-CodexSafeTreeDeleteApplyFileHashProvider `
+            -ExpectedIdentities $applyFileIdentities `
+            -SessionCache $sessionHashCache
+    }
     $quarantineCapabilityRoot = Get-CodexSafeTreeDeleteQuarantineCapabilityRoot -Target $target
     $currentTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
         -Path $target.targetPath `
@@ -2350,6 +4000,7 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
         -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
         -MetricsObserver $primaryMetricsObserver `
+        -FileContentHashProvider $applyFileHashProvider `
         -Name 'safe-delete apply preflight'
     Assert-CodexSafeTreeDeleteTargetTreePolicy `
         -Target $target `
@@ -2412,6 +4063,7 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
             -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
             -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
             -MetricsObserver $repeatMetricsObserver `
+            -FileContentHashProvider $applyFileHashProvider `
             -Name 'safe-delete apply locked preflight'
         Assert-CodexSafeTreeDeleteTargetTreePolicy `
             -Target $target `
@@ -2421,6 +4073,11 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
             (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
             throw 'safe-delete apply locked preflight tree manifest 漂移。'
         }
+        Assert-CodexSafeTreeDeleteLiveStreamSet `
+            -PlanStreamSet $planStreamSet `
+            -TreeManifest $lockedTree `
+            -TreePath ([string]$target.targetPath) `
+            -Phase 'apply'
         $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::AcquireForEmptyDelete(
             [string]$target.capabilityRoot,
             [string]$target.targetPath)
@@ -2459,6 +4116,7 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
             -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
             -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
             -MetricsObserver $repeatMetricsObserver `
+            -FileContentHashProvider $applyFileHashProvider `
             -Name 'safe-delete quarantine postcheck'
         Assert-CodexSafeTreeDeleteTargetTreePolicy `
             -Target $target `
@@ -2528,6 +4186,9 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         }
         throw $failure
     } finally {
+        if ($null -ne $sessionHashCache) {
+            $sessionHashCache.Clear()
+        }
         if ($held) { [void]$mutex.ReleaseMutex() }
         $mutex.Dispose()
     }
@@ -3834,19 +5495,50 @@ function Complete-CodexSafeTreeDeleteCommittedMissingQuarantine {
     $plan = $approvedPlan.document
     $target = $approvedPlan.target
     if ([string]$transaction.status -cne 'purging' -or
-        [string]$target.rootDeletionPurpose -cne 'empty-project-state' -or
         [IO.Directory]::Exists([string]$transaction.quarantinePath) -or
         [IO.File]::Exists([string]$transaction.quarantinePath)) {
         throw 'safe-delete 缺失 quarantine 不满足 commit journal 恢复条件。'
     }
-
     $runDirectory = Split-Path -Parent $ApprovedTransaction.path
-    [void](Assert-CodexSafeTreeDeleteAnchoredDirectoryJournal `
+    $planStreamSet = Read-CodexSafeTreeDeletePlanStreamSet -Plan $plan
+    # dispositions 发布先于 purged 落盘；崩溃落在窗口内时以绑定+载荷校验通过的既有证据为准幂等收口，不重建比对。
+    $publishedDispositions = Read-CodexSafeTreeDeletePublishedLeafDispositions `
         -RunDirectory $runDirectory `
-        -Transaction $transaction `
-        -Plan $plan `
-        -RequireComplete `
-        -MetricsObserver $MetricsObserver)
+        -GenerationId ([string]$plan.generationId) `
+        -PlanSha256 ([string]$approvedPlan.sha256) `
+        -TransactionPath ([string]$ApprovedTransaction.path) `
+        -QuarantinePath ([string]$transaction.quarantinePath) `
+        -PurgingTransactionUpdatedAtUtc ([string]$transaction.updatedAtUtc) `
+        -PlanStreamSet $planStreamSet
+    if ($null -eq $publishedDispositions -and
+        [string]$target.rootDeletionPurpose -cne 'empty-project-state') {
+        throw 'safe-delete 缺失 quarantine 不满足 commit journal 恢复条件。'
+    }
+    if ([string]$target.rootDeletionPurpose -ceq 'empty-project-state') {
+        [void](Assert-CodexSafeTreeDeleteAnchoredDirectoryJournal `
+            -RunDirectory $runDirectory `
+            -Transaction $transaction `
+            -Plan $plan `
+            -RequireComplete `
+            -MetricsObserver $MetricsObserver)
+    }
+    if ($null -ne $publishedDispositions) {
+        $leafDispositionPublication = $publishedDispositions
+    } else {
+        $leafDispositionDocument = New-CodexSafeTreeDeleteLeafDispositionDocument `
+            -PlanStreamSet $planStreamSet `
+            -GenerationId ([string]$plan.generationId) `
+            -PlanSha256 ([string]$approvedPlan.sha256) `
+            -TransactionPath ([string]$ApprovedTransaction.path) `
+            -QuarantinePath ([string]$transaction.quarantinePath) `
+            -PurgingTransactionUpdatedAtUtc ([string]$transaction.updatedAtUtc) `
+            -CommittedLeaves @() `
+            -PreflightLiveLeafSet ([Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)) `
+            -AbsentLeafEvidence 'committed-missing-quarantine-journal'
+        $leafDispositionPublication = Publish-CodexSafeTreeDeleteLeafDispositions `
+            -Document $leafDispositionDocument `
+            -RunDirectory $runDirectory
+    }
     $transaction.status = 'purged'
     $transaction.updatedAtUtc = [datetimeoffset]::UtcNow.ToString(
         'o',
@@ -3869,8 +5561,12 @@ function Complete-CodexSafeTreeDeleteCommittedMissingQuarantine {
         quarantinePath = [string]$transaction.quarantinePath
         transactionPath = $ApprovedTransaction.path
         transactionSha256 = $finalSnapshot.sha256
+        leafDispositionsPath = [string]$leafDispositionPublication.path
+        leafDispositionsSha256 = [string]$leafDispositionPublication.sha256
         recoverable = $false
-        recoveredFromCommitJournal = $true
+        # 仅缺失 dispositions、按完整 commit journal 重建收口的路径才算 journal 恢复；
+        # dispositions 幂等复用路径未以 journal 为恢复依据，必须如实报告 $false。
+        recoveredFromCommitJournal = ($null -eq $publishedDispositions)
         pendingFiles = @()
         uncertainFiles = @()
         namespaceAbsent = $true
@@ -3895,6 +5591,7 @@ function Invoke-CodexSafeTreeDeletePurge {
         [scriptblock]$DirectoryDeleteCheckpointForTest,
         [scriptblock]$LeafDeleteFaultForTest,
         [scriptblock]$LeafDeleteCheckpointForTest,
+        [scriptblock]$AfterLeafDispositionsPublishForTest,
         [object]$LeafRetryPolicyForTest,
         [scriptblock]$LeafRetryElapsedMillisecondsForTest,
         [scriptblock]$LeafRetryDelayForTest,
@@ -3903,10 +5600,20 @@ function Invoke-CodexSafeTreeDeletePurge {
         [string]$TrustedBootSessionId,
         [scriptblock]$TrustedBootSessionSourceForTest,
         [switch]$TrustedTimeRestartAmbiguous,
-        [switch]$ReturnFailureMetrics
+        [switch]$ReturnFailureMetrics,
+        [object]$FileSystemCapabilitiesForTest,
+        [CodexSafeTreeDelete.SessionHashCache]$SessionHashCacheForTest,
+        [switch]$DisablePurgeHashReuseForTest,
+        [switch]$DisablePurgeBatchForTest,
+        [scriptblock]$PurgeFileLeafBatchObserverForTest
     )
 
     $metricsState = New-CodexSafeTreeDeleteMetricsState -Phase 'purge'
+    $sessionHashCache = if ($null -ne $SessionHashCacheForTest) {
+        $SessionHashCacheForTest
+    } else {
+        [CodexSafeTreeDelete.SessionHashCache]::new()
+    }
     $metricsObserver = New-CodexSafeTreeDeleteMetricsObserver -State $metricsState
     $repeatMetricsObserver = New-CodexSafeTreeDeleteMetricsObserver `
         -State $metricsState `
@@ -3945,10 +5652,17 @@ function Invoke-CodexSafeTreeDeletePurge {
             }
         }
     }.GetNewClosure()
-    $deleteState = [pscustomobject][ordered]@{ anyCommit = $false }
+    $deleteState = [pscustomobject][ordered]@{
+        anyCommit = $false
+        committedLeaves = [Collections.Generic.List[object]]::new()
+    }
     $deleteCommitCallback = {
         param([string]$Path, [string]$Kind)
         $deleteState.anyCommit = $true
+        $deleteState.committedLeaves.Add([pscustomobject][ordered]@{
+            path = $Path
+            kind = $Kind
+        })
     }.GetNewClosure()
     $initialApproved = Read-CodexSafeTreeDeleteApprovedTransaction `
         -TransactionPath $TransactionPath `
@@ -3957,6 +5671,18 @@ function Invoke-CodexSafeTreeDeletePurge {
         -EvidenceRoot $EvidenceRoot `
         -MetricsObserver $repeatMetricsObserver
     $initialTarget = $initialApproved.approvedPlan.target
+    # Apply 后原 target 已不存在；DetectFileSystem 对缺路径会得到 DeletionAllowed=false。
+    # 根删除（empty-project-state）的 capabilityRoot 就是已搬走的 target，不能回退到它，
+    # 否则会挡住 committed-missing quarantine 恢复。改用仍存在的 quarantine capability root
+    #（根删除时是 parent）。
+    $deletionProbePath = [string]$initialApproved.document.quarantinePath
+    if (-not [IO.Directory]::Exists($deletionProbePath) -and
+        -not [IO.File]::Exists($deletionProbePath)) {
+        $deletionProbePath = Get-CodexSafeTreeDeleteQuarantineCapabilityRoot -Target $initialTarget
+    }
+    Assert-CodexSafeTreeDeleteDeletionAllowed `
+        -TargetPath $deletionProbePath `
+        -FileSystemCapabilitiesForTest $FileSystemCapabilitiesForTest
     if ($null -ne $BeforePurgeMutexForTest) {
         & $BeforePurgeMutexForTest $initialTarget.targetPath
     }
@@ -3975,6 +5701,14 @@ function Invoke-CodexSafeTreeDeletePurge {
         $transaction = $approved.document
         $plan = $approved.approvedPlan.document
         $target = $approved.approvedPlan.target
+        $planStreamSet = Read-CodexSafeTreeDeletePlanStreamSet -Plan $plan
+        $purgeFileIdentities = ConvertTo-CodexSafeTreeDeleteApplyFileIdentityMap -Plan $plan
+        $purgeFileHashProvider = $null
+        if (-not $DisablePurgeHashReuseForTest) {
+            $purgeFileHashProvider = New-CodexSafeTreeDeletePurgeFileHashProvider `
+                -ExpectedIdentities $purgeFileIdentities `
+                -SessionCache $sessionHashCache
+        }
         $quarantineCapabilityRoot = Get-CodexSafeTreeDeleteQuarantineCapabilityRoot -Target $target
         $quarantinePath = [string]$transaction.quarantinePath
         $runDirectory = Split-Path -Parent $approved.path
@@ -4013,6 +5747,7 @@ function Invoke-CodexSafeTreeDeletePurge {
             -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
             -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
             -MetricsObserver $metricsObserver `
+            -FileContentHashProvider $purgeFileHashProvider `
             -Name 'safe-delete purge locked preflight'
         Assert-CodexSafeTreeDeleteTargetTreePolicy `
             -Target $target `
@@ -4030,6 +5765,17 @@ function Invoke-CodexSafeTreeDeletePurge {
                 -PlannedManifest $plan.treeManifest
             $purgeManifest = $currentTree
         }
+        $purgeResumedFromPurging = [string]$transaction.status -ceq 'purging'
+        $preflightLiveLeafSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($entry in @($currentTree.entries)) {
+            [void]$preflightLiveLeafSet.Add([string]$entry.relativePath)
+        }
+        Assert-CodexSafeTreeDeleteLiveStreamSet `
+            -PlanStreamSet $planStreamSet `
+            -TreeManifest $currentTree `
+            -TreePath $quarantinePath `
+            -Phase 'purge' `
+            -AllowMissingPlannedLeaves:$purgeResumedFromPurging
 
         if ([long]$transaction.schemaVersion -eq 3L) {
             $trustedTimeArguments = @{
@@ -4181,6 +5927,33 @@ function Invoke-CodexSafeTreeDeletePurge {
                 -AllowedExactPaths @($approved.path) `
                 -Scope 'safe-delete transaction directory commit anchor'
         }
+        $enablePurgeBatch = -not $DisablePurgeBatchForTest
+        if ($enablePurgeBatch) {
+            # Pass 1: collect file leaves (path + FileIdentityV2) into List<T>.
+            # Pass 2: verify hashes via existing PurgeFileHash / GetHashSafely.
+            # Pass 3+4 stay in Remove-CodexHookCapabilityDirectoryTree: per
+            # directory freeze/commit journal, then handle-bound delete. Never
+            # write the whole tree pending and then delete the whole tree.
+            # HostSafety 删除循环保持原逐 leaf 路径，避免递归嵌套函数拆坏 freeze journal。
+            $purgeFileLeafBatch = New-CodexSafeTreeDeletePurgeFileLeafBatch `
+                -TreePath $quarantinePath `
+                -TreeManifest $purgeManifest `
+                -ExpectedIdentities $purgeFileIdentities
+            if ($null -ne $PurgeFileLeafBatchObserverForTest) {
+                & $PurgeFileLeafBatchObserverForTest $purgeFileLeafBatch 'collected'
+            }
+            if (-not $DisablePurgeHashReuseForTest) {
+                if ($purgeFileLeafBatch.Count -gt 0) {
+                    Invoke-CodexSafeTreeDeletePurgeFileLeafBatchValidation `
+                        -Leaves $purgeFileLeafBatch `
+                        -ExpectedIdentities $purgeFileIdentities `
+                        -SessionCache $sessionHashCache
+                }
+                if ($null -ne $PurgeFileLeafBatchObserverForTest) {
+                    & $PurgeFileLeafBatchObserverForTest $purgeFileLeafBatch 'validated'
+                }
+            }
+        }
         if ($null -ne $BeforeDirectoryTreeDeleteForTest) {
             & $BeforeDirectoryTreeDeleteForTest $quarantinePath
         }
@@ -4208,6 +5981,7 @@ function Invoke-CodexSafeTreeDeletePurge {
                 -LeafDeleteCheckpointForTest $LeafDeleteCheckpointForTest `
                 -MetricsObserver $repeatMetricsObserver `
                 -DeleteCommitCallback $deleteCommitCallback `
+                -FileContentHashProvider $purgeFileHashProvider `
                 -Scope 'safe-delete approved purge'
         } catch {
             $purgeFailure = $_
@@ -4223,6 +5997,7 @@ function Invoke-CodexSafeTreeDeletePurge {
                         -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
                         -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
                         -MetricsObserver $repeatMetricsObserver `
+                        -FileContentHashProvider $purgeFileHashProvider `
                         -Name 'safe-delete zero-commit purge rollback snapshot'
                     if ((Get-CodexSafeTreeDeleteManifestSha256 -Manifest $unchangedTree) -ceq
                         (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
@@ -4272,6 +6047,24 @@ function Invoke-CodexSafeTreeDeletePurge {
                 -MetricsObserver $repeatMetricsObserver)
         }
 
+        $leafDispositionDocument = New-CodexSafeTreeDeleteLeafDispositionDocument `
+            -PlanStreamSet $planStreamSet `
+            -GenerationId ([string]$plan.generationId) `
+            -PlanSha256 ([string]$approved.approvedPlan.sha256) `
+            -TransactionPath ([string]$approved.path) `
+            -QuarantinePath $quarantinePath `
+            -PurgingTransactionUpdatedAtUtc ([string]$transaction.updatedAtUtc) `
+            -CommittedLeaves $deleteState.committedLeaves `
+            -PreflightLiveLeafSet $preflightLiveLeafSet
+        $leafDispositionPublication = Publish-CodexSafeTreeDeleteLeafDispositions `
+            -Document $leafDispositionDocument `
+            -RunDirectory $runDirectory
+        if ($null -ne $AfterLeafDispositionsPublishForTest) {
+            & $AfterLeafDispositionsPublishForTest `
+                ([string]$leafDispositionPublication.path) `
+                ([string]$leafDispositionPublication.sha256)
+        }
+
         $transaction.status = 'purged'
         if ([long]$metricsState.retryAttempts -gt 0L) {
             $metricsState.retryResult = 'succeeded-after-retry'
@@ -4298,6 +6091,8 @@ function Invoke-CodexSafeTreeDeletePurge {
             quarantinePath = $quarantinePath
             transactionPath = $approved.path
             transactionSha256 = $finalSnapshot.sha256
+            leafDispositionsPath = [string]$leafDispositionPublication.path
+            leafDispositionsSha256 = [string]$leafDispositionPublication.sha256
             recoverable = $false
             pendingFiles = @()
             uncertainFiles = @()
@@ -4311,6 +6106,9 @@ function Invoke-CodexSafeTreeDeletePurge {
             metrics = Complete-CodexSafeTreeDeleteMetrics -State $metricsState
         }
     } finally {
+        if ($null -ne $sessionHashCache) {
+            $sessionHashCache.Clear()
+        }
         if ($held) { [void]$mutex.ReleaseMutex() }
         $mutex.Dispose()
     }
