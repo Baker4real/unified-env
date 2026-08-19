@@ -1,0 +1,56 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue32-profile",
+  "capturedAtUtc": "2026-08-18T19:03:16.3001634+00:00",
+  "fileCount": 200,
+  "bytesPerFile": 4096,
+  "primitiveIterations": 200,
+  "primitives": {
+    "identityV2Path": {
+      "totalMs": 17.639,
+      "perCallUs": 88.2,
+      "iterations": 200
+    },
+    "identityFromLeaseHandle": null,
+    "leaseHandlePropertyPresent": false,
+    "leaseDangerousGetHandlePresent": false,
+    "computeSha256FromLease4kb": {
+      "totalMs": 18.003,
+      "perCallUs": 90.0,
+      "iterations": 200
+    },
+    "sessionCacheTryGet": {
+      "totalMs": 16.525,
+      "perCallUs": 82.6,
+      "iterations": 200
+    },
+    "identityPathPlusEquals": {
+      "totalMs": 24.511,
+      "perCallUs": 122.6,
+      "iterations": 200
+    },
+    "leaseAcquireDispose": {
+      "totalMs": 29.931,
+      "perCallUs": 149.7,
+      "iterations": 200
+    },
+    "parentGuardAcquireDispose": {
+      "totalMs": 125.833,
+      "perCallUs": 629.2,
+      "iterations": 200
+    }
+  },
+  "snapshots": {
+    "noProviderMs": 1940.4,
+    "reuseColdMs": 1556.5,
+    "reuseHotMs": 1557.7,
+    "reuseHotVsNoProvider": 1.246,
+    "reuseColdVsNoProvider": 1.247
+  },
+  "apply": {
+    "reuseElapsedMs": 5638,
+    "baselineElapsedMs": 5437,
+    "speedup": 0.964,
+    "reuseBytesHashed": 2607791,
+    "baselineBytesHashed": 2607791
+  }
+}

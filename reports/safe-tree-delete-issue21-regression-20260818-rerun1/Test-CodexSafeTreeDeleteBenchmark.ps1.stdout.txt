@@ -1,0 +1,35 @@
+
+[32;1martifactType     : [0menv-governance.codex-safe-tree-delete-benchmark
+[32;1mschemaVersion    : [0m2
+[32;1mcapturedAtUtc    : [0m2026-08-18T15:58:58.8608110+00:00
+[32;1mprofile          : [0misolated-fixture
+[32;1mmachine          : [0m@{osVersion=Microsoft Windows NT 10.0.26200.0; processorCount=20; powerShellVersion=7.6.4; osArchite
+                   cture=X64; processArchitecture=X64}
+[32;1martifacts        : [0m@{sourceLibraryPath=D:\Codex\projects\Í³Ò»»·¾³\scripts\lib\CodexSafeTreeDelete.ps1; sourceLibrarySha
+                   256=42e136cbb435e4b4640c1e02b87211a5410efc2ef689851fae554fd08824a7ce; sourceWrapperPath=D:\Codex\pro
+                   jects\Í³Ò»»·¾³\scripts\Invoke-CodexSafeTreeDelete.ps1; sourceWrapperSha256=c25019805b3b996e9d27c02af
+                   b88d7c7553988ec742f0bc694d054fe48ecaff9; sourceHostAdapterPath=D:\Codex\projects\Í³Ò»»·¾³\scripts\in
+                   voke-codex-safe-tree-delete-host.ps1; sourceHostAdapterSha256=636cb140720bf15681364459269c2d5dc4638e
+                   339f2589ad2a3a53b6e17b9373; liveWrapperPath=D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1; liv
+                   eWrapperSha256=636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373; liveWrapperStatus=m
+                   atched-source}
+[32;1mexecution        : [0m@{command=pwsh -NoLogo -NoProfile -File "D:\Codex\projects\Í³Ò»»·¾³\scripts\Measure-CodexSafeTreeDel
+                   ete.ps1" -OutputPath "D:\Codex\projects\Í³Ò»»·¾³\reports\safe-tree-delete-benchmark-test-1722ea841b8
+                   b4ded8b7ff255853b5827.json" -SmallDatasetBytes 1024 -LargeDatasetBytes 1048576; exitCode=0; exitStat
+                   us=succeeded; cleanup=managed-fixture-tree-removed}
+[32;1mretainedEvidence : [0m@{path=D:\Codex\projects\Í³Ò»»·¾³\reports\safe-tree-delete-benchmark-test-1722ea841b8b4ded8b7ff25585
+                   3b5827-evidence\benchmark-evidence.json; sha256=89144c02909a86d739f9a07d15ddfad1a308a294e5c886e4fe09
+                   bf5eb3e9be90; payloadBytesRetained=False}
+[32;1mdatasets         : [0m{@{name=small; payloadBytes=1024; policySha256=0cf441c5d2c2438e13c0ccc337a467f981b92002483a50924d2dd
+                   5fec380c5f0; fixture=; plan=; status=; apply=; restore=; purge=; retainedEvidence=}, @{name=large; p
+                   ayloadBytes=1048576; policySha256=cf071c77873390f8c06b95cce53315e9cb90c0b420242eb1f588bbf662616866; 
+                   fixture=; plan=; status=; apply=; restore=; purge=; retainedEvidence=}}
+[32;1mconclusion       : [0m@{hashReuseDesignRecommendation=insufficient-evidence; hashReuseDesignDecision=do-not-open-with-curr
+                   ent-evidence; contentAuthenticatedContractChanged=False; note=Fixture measurements do not authorize 
+                   metadata-only approval or transparent manifest replacement.}
+[32;1munverified       : [0m{host wrapper deployment, live policy activation, real capability target deletion, 16 GiB dataset¡­}
+
+[32;1mok       : [0mTrue
+[32;1msuite    : [0mCodexSafeTreeDeleteBenchmark
+[32;1mdatasets : [0m2
+

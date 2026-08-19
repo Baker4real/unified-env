@@ -1,8 +1,41 @@
 Set-StrictMode -Version Latest
 
 $codexHookHandleBoundSource = Join-Path $PSScriptRoot 'CodexHookHandleBoundIO.cs'
+$codexSafeTreeDeleteFileIdentitySource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteFileIdentity.cs'
+$codexSafeTreeDeleteHashCacheSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteHashCache.cs'
+$codexSafeTreeDeleteApplySnapshotSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteApplySnapshot.cs'
+$codexSafeTreeDeleteThreadJournalSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteThreadJournal.cs'
+$codexSafeTreeDeleteParallelPurgeSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteParallelPurge.cs'
 if (-not ('CodexHookGovernance.HandleBoundFileReader' -as [type])) {
-    Add-Type -Path $codexHookHandleBoundSource -ErrorAction Stop
+    $hookAssemblyDirectory = [IO.Path]::Combine('D:\', 'Codex', 'temp', 'unified-env-addtype')
+    [void][IO.Directory]::CreateDirectory($hookAssemblyDirectory)
+    $hookAssemblyPath = Join-Path $hookAssemblyDirectory 'CodexHostSafetyNative.dll'
+    $nativeSources = @(
+        $codexHookHandleBoundSource,
+        $codexSafeTreeDeleteFileIdentitySource,
+        $codexSafeTreeDeleteHashCacheSource,
+        $codexSafeTreeDeleteApplySnapshotSource,
+        $codexSafeTreeDeleteThreadJournalSource,
+        $codexSafeTreeDeleteParallelPurgeSource
+    )
+    $assemblyStale = -not [IO.File]::Exists($hookAssemblyPath)
+    if (-not $assemblyStale) {
+        $assemblyWriteTime = [IO.File]::GetLastWriteTimeUtc($hookAssemblyPath)
+        foreach ($nativeSource in $nativeSources) {
+            if ([IO.File]::GetLastWriteTimeUtc($nativeSource) -gt $assemblyWriteTime) {
+                $assemblyStale = $true
+                break
+            }
+        }
+    }
+    if ($assemblyStale) {
+        Add-Type `
+            -Path $nativeSources `
+            -OutputAssembly $hookAssemblyPath `
+            -OutputType Library `
+            -ErrorAction Stop
+    }
+    Add-Type -Path $hookAssemblyPath -ErrorAction Stop
 }
 
 function Assert-CodexHookJsonElementUniqueProperties {

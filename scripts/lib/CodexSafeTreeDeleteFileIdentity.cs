@@ -281,13 +281,19 @@ namespace CodexSafeTreeDelete
 
         public bool DeletionAllowed { get; set; }
 
+        // #40 2026-08-19 remeasure (reports/safe-tree-delete-parallelism-benchmark-20260819):
+        // peak parallel efficiency (speedup/DOP) was 2 for all three fixture size classes.
+        // Ticket assumed small=4 / min(4, ProcessorCount-2); dataSupportsTicketSuggestion=false.
+        private const int SmallFilePeakEfficiencyDop = 2;
+        private const int MediumFilePeakEfficiencyDop = 2;
+        private const int LargeFilePeakEfficiencyDop = 2;
+        private const long MediumFileSizeThresholdBytes = 10L * 1024L;
+        private const long LargeFileSizeThresholdBytes = 1024L * 1024L;
+
         public static int RecommendOptimizeMaxParallelism()
         {
-            // #40 ParallelPurgeCoordinator fixture (reports/safe-tree-delete-issue40-20260817):
-            // 10k×1KB peak parallel efficiency is DOP 4 (4.48x, efficiency 1.12).
-            // Wall-clock still fell through DOP 16 (12.1x) with no <10% incremental plateau.
-            // Production default uses the efficiency peak, not the unbounded wall-clock min.
-            return 4;
+            // Size-unknown default follows the typical small-file peak, not wall-clock min (16).
+            return RecommendMaxParallelismForTypicalFileBytes(1024);
         }
 
         public static int RecommendMaxParallelismForTypicalFileBytes(long typicalFileBytes)
@@ -297,14 +303,17 @@ namespace CodexSafeTreeDelete
                 throw new ArgumentOutOfRangeException(nameof(typicalFileBytes));
             }
 
-            // #40: 1k x 1MB peak efficiency is DOP 2 (2.26x, efficiency 1.13); DOP 4+ <= 0.67.
-            if (typicalFileBytes >= 1024L * 1024L)
+            if (typicalFileBytes >= LargeFileSizeThresholdBytes)
             {
-                return 2;
+                return LargeFilePeakEfficiencyDop;
             }
 
-            // 10k×1KB and 5k×10KB both peaked at DOP 4.
-            return RecommendOptimizeMaxParallelism();
+            if (typicalFileBytes >= MediumFileSizeThresholdBytes)
+            {
+                return MediumFilePeakEfficiencyDop;
+            }
+
+            return SmallFilePeakEfficiencyDop;
         }
 
         public static FileSystemCapabilities FromDetection(
@@ -498,22 +507,32 @@ namespace CodexSafeTreeDelete
 
             using (handle)
             {
-                BY_HANDLE_FILE_INFORMATION fileInfo;
-                if (!GetFileInformationByHandle(handle, out fileInfo))
-                {
-                    int error = Marshal.GetLastWin32Error();
-                    throw new Win32Exception(error, "Failed to get leaf file information.");
-                }
-
-                return new LeafStreamSetV1
-                {
-                    Identity = FileIdentityReader.GetFileIdentityV2(handle),
-                    StreamNames = ReadStreamNames(handle),
-                    NumberOfLinks = fileInfo.nNumberOfLinks,
-                    IsDirectory = (fileInfo.dwFileAttributes & FileAttributeDirectory) != 0,
-                    IsReparsePoint = (fileInfo.dwFileAttributes & FileAttributeReparsePoint) != 0
-                };
+                return CaptureLeafStreamSet(handle);
             }
+        }
+
+        public static LeafStreamSetV1 CaptureLeafStreamSet(SafeFileHandle handle)
+        {
+            if (handle == null || handle.IsInvalid)
+            {
+                throw new ArgumentException("handle must be a valid leaf handle.", nameof(handle));
+            }
+
+            BY_HANDLE_FILE_INFORMATION fileInfo;
+            if (!GetFileInformationByHandle(handle, out fileInfo))
+            {
+                int error = Marshal.GetLastWin32Error();
+                throw new Win32Exception(error, "Failed to get leaf file information.");
+            }
+
+            return new LeafStreamSetV1
+            {
+                Identity = FileIdentityReader.GetFileIdentityV2(handle),
+                StreamNames = ReadStreamNames(handle),
+                NumberOfLinks = fileInfo.nNumberOfLinks,
+                IsDirectory = (fileInfo.dwFileAttributes & FileAttributeDirectory) != 0,
+                IsReparsePoint = (fileInfo.dwFileAttributes & FileAttributeReparsePoint) != 0
+            };
         }
 
         private static string[] ReadStreamNames(SafeFileHandle handle)

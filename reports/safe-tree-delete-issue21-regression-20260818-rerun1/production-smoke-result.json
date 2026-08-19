@@ -1,0 +1,20 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue21-production-smoke",
+  "issue": 21,
+  "name": "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+  "exit": 0,
+  "elapsedMs": 239786,
+  "startedAtUtc": "2026-08-18T18:42:09.007Z",
+  "endedAtUtc": "2026-08-18T18:46:08.793Z",
+  "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+  "harnessEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke",
+  "frozenLeafDeleteFailedPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\leaf-delete-failed.json",
+  "frozenLeafDeleteFailedSha256AtStart": "6e451a914a926dbf69d586c929ed87f3cd90c8b941959398e3f4bac0a4a04881",
+  "frozenLeafDeleteFailedSha256AtEnd": "6e451a914a926dbf69d586c929ed87f3cd90c8b941959398e3f4bac0a4a04881",
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\Test-CodexSafeTreeDeleteProductionSmoke.ps1.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\Test-CodexSafeTreeDeleteProductionSmoke.ps1.stderr.txt",
+  "stderrTail": "",
+  "stdoutTail": "\n\u001b[32;1mok                              : \u001b[0mTrue\n\u001b[32;1msuite                           : \u001b[0mCodexSafeTreeDeleteProductionSmoke\n\u001b[32;1mplanPath                        : \u001b[0mD:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260818T184503Z-0d0291ba-b9e8-4185-b3a\n                                  0-f4f6a4fd2657\\plan.json\n\u001b[32;1mtransactionPath                 : \u001b[0mD:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260818T184503Z-0d0291ba-b9e8-4185-b3a\n                                  0-f4f6a4fd2657\\transaction.json\n\u001b[32;1mtransactionSha256               : \u001b[0m0be127c544de0910aa8c1c28446eb49cc1dbac358d535611ec572ac8200961fc\n\u001b[32;1mbatchRecoveredCount             : \u001b[0m1\n\u001b[32;1mbatchParentPurged               : \u001b[0mTrue\n\u001b[32;1munconfirmedArchiveExitCode      : \u001b[0m0\n\u001b[32;1munconfirmedArchiveRefusalReason : \u001b[0mconfirm-archive-required\n\u001b[32;1mstatusZeroWrite                 : \u001b[0mTrue\n\u001b[32;1mstatusPolicyZeroWrite           : \u001b[0mTrue\n\u001b[32;1mstatusStdoutSha256              : \u001b[0mfce8dcf53125c9f11ffd03ca38cc4a18d67499476736d144142ca310d82db040\n\u001b[32;1mstatusOperationCount            : \u001b[0m2591\n\u001b[32;1mstatusOperationIdCount          : \u001b[0m2591\n\u001b[32;1mstatusGenerationIdCount         : \u001b[0m0\n\u001b[32;1mtimeoutTreeClosed               : \u001b[0mTrue\n\u001b[32;1mtimeoutIsHarnessContract        : \u001b[0mTrue\n\u001b[32;1mleafDeleteFailed                : \u001b[0mTrue\n\u001b[32;1mrevertForwardingProved          : \u001b[0mTrue\n\u001b[32;1mrevertForwardingExitCode        : \u001b[0m0\n\u001b[32;1mlivePs1Sha256Final              : \u001b[0m636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373\n\u001b[32;1mwrapperRestored                 : \u001b[0mTrue\n\u001b[32;1mleftover0ab1e1b6Untouched       : \u001b[0mTrue\n\u001b[32;1mnewInflightQuarantine           : \u001b[0m\n\u001b[32;1mevidenceDirectory               : \u001b[0mD:\\Codex\\projects\\ͳһ����\\reports\\safe-tree-delete-issue21-regression-20260818-rerun\n                                  1\\production-smoke\\issue55\n\u001b[32;1missue21EvidenceDirectory        : \u001b[0mD:\\Codex\\projects\\ͳһ����\\reports\\safe-tree-delete-issue21-regression-20260818-rerun\n                                  1\\production-smoke\\issue21\n\u001b[32;1mharnessEvidenceRoot             : \u001b[0mD:\\Codex\\projects\\ͳһ����\\reports\\safe-tree-delete-issue21-regression-20260818-rerun\n                                  1\\production-smoke\n\u001b[32;1mfrozenLeafDeleteFailedSha256    : \u001b[0m6e451a914a926dbf69d586c929ed87f3cd90c8b941959398e3f4bac0a4a04881\n\u001b[32;1mfrozenSnapshotsUntouched        : \u001b[0mTrue\n\n",
+  "spawnError": null,
+  "frozenSnapshotsUntouched": true
+}

@@ -1,0 +1,5 @@
+
+[32;1m  ok[0m[32;1m suite                                 [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                                 [0m [32;1m------[0m
+True CodexSafeTreeDeleteSchemaCompatibility     10
+

@@ -1,0 +1,8 @@
+
+[32;1mok                  : [0mTrue
+[32;1msuite               : [0mCodexSafeTreeDeleteHashReuse
+[32;1mskipScale           : [0mFalse
+[32;1mscale1000ElapsedMs  : [0m23922
+[32;1mscale10000Speedup   : [0m1.023
+[32;1mscale10000MetTarget : [0mFalse
+

@@ -1,0 +1,36 @@
+
+[32;1mok                              : [0mTrue
+[32;1msuite                           : [0mCodexSafeTreeDeleteProductionSmoke
+[32;1mplanPath                        : [0mD:\Codex\.codex\run-evidence\safe-tree-delete\20260818T184503Z-0d0291ba-b9e8-4185-b3a
+                                  0-f4f6a4fd2657\plan.json
+[32;1mtransactionPath                 : [0mD:\Codex\.codex\run-evidence\safe-tree-delete\20260818T184503Z-0d0291ba-b9e8-4185-b3a
+                                  0-f4f6a4fd2657\transaction.json
+[32;1mtransactionSha256               : [0m0be127c544de0910aa8c1c28446eb49cc1dbac358d535611ec572ac8200961fc
+[32;1mbatchRecoveredCount             : [0m1
+[32;1mbatchParentPurged               : [0mTrue
+[32;1munconfirmedArchiveExitCode      : [0m0
+[32;1munconfirmedArchiveRefusalReason : [0mconfirm-archive-required
+[32;1mstatusZeroWrite                 : [0mTrue
+[32;1mstatusPolicyZeroWrite           : [0mTrue
+[32;1mstatusStdoutSha256              : [0mfce8dcf53125c9f11ffd03ca38cc4a18d67499476736d144142ca310d82db040
+[32;1mstatusOperationCount            : [0m2591
+[32;1mstatusOperationIdCount          : [0m2591
+[32;1mstatusGenerationIdCount         : [0m0
+[32;1mtimeoutTreeClosed               : [0mTrue
+[32;1mtimeoutIsHarnessContract        : [0mTrue
+[32;1mleafDeleteFailed                : [0mTrue
+[32;1mrevertForwardingProved          : [0mTrue
+[32;1mrevertForwardingExitCode        : [0m0
+[32;1mlivePs1Sha256Final              : [0m636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373
+[32;1mwrapperRestored                 : [0mTrue
+[32;1mleftover0ab1e1b6Untouched       : [0mTrue
+[32;1mnewInflightQuarantine           : [0m
+[32;1mevidenceDirectory               : [0mD:\Codex\projects\Í³Ò»»·¾³\reports\safe-tree-delete-issue21-regression-20260818-rerun
+                                  1\production-smoke\issue55
+[32;1missue21EvidenceDirectory        : [0mD:\Codex\projects\Í³Ò»»·¾³\reports\safe-tree-delete-issue21-regression-20260818-rerun
+                                  1\production-smoke\issue21
+[32;1mharnessEvidenceRoot             : [0mD:\Codex\projects\Í³Ò»»·¾³\reports\safe-tree-delete-issue21-regression-20260818-rerun
+                                  1\production-smoke
+[32;1mfrozenLeafDeleteFailedSha256    : [0m6e451a914a926dbf69d586c929ed87f3cd90c8b941959398e3f4bac0a4a04881
+[32;1mfrozenSnapshotsUntouched        : [0mTrue
+

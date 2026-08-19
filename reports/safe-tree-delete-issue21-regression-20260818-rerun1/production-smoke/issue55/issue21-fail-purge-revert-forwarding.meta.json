@@ -1,0 +1,36 @@
+{
+  "name": "issue21-fail-purge-revert-forwarding",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Purge",
+    "-TransactionPath",
+    "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260818T184555Z-b6cd3fd8-af7a-4298-a2f1-9e7131888712\\transaction.json",
+    "-ApprovedTransactionSha256",
+    "7f78aebe0b0071d13fdc2d3ce55e4dbc150deea8130e133594298a86eb56391b",
+    "-ConfirmPurge",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-18T18:45:57.7341498+00:00",
+  "endedAtUtc": "2026-08-18T18:45:59.7121296+00:00",
+  "wallClockMs": 1978.0,
+  "timeoutMs": 180000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 38872,
+  "trackedPids": [
+    38872,
+    12744
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\issue21-fail-purge-revert-forwarding.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\issue21-fail-purge-revert-forwarding.stderr.txt",
+  "stdoutSha256": "ae5f0acddc9b278ffc3210522b81f564b9804ff792f758eb02f76d7be05b6193",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

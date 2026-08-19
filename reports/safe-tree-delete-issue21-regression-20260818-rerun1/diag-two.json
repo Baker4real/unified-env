@@ -1,0 +1,19 @@
+{
+  "generatedAtUtc": "2026-08-18T15:29:23.153Z",
+  "results": [
+    {
+      "name": "tests/Test-CodexSafeTreeDelete.ps1",
+      "exit": 0,
+      "elapsedMs": 26557,
+      "stderrTail": "",
+      "stdoutTail": "\n\u001b[32;1m  ok\u001b[0m\u001b[32;1m suite              \u001b[0m\u001b[32;1m slices\u001b[0m\n\u001b[32;1m  --\u001b[0m \u001b[32;1m-----              \u001b[0m \u001b[32;1m------\u001b[0m\nTrue CodexSafeTreeDelete     12\n\n"
+    },
+    {
+      "name": "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1",
+      "exit": 0,
+      "elapsedMs": 1275852,
+      "stderrTail": "",
+      "stdoutTail": "\n\u001b[32;1mok                            : \u001b[0mTrue\n\u001b[32;1msuite                         : \u001b[0mCodexSafeTreeDeletePhase3Integration\n\u001b[32;1mfileCount                     : \u001b[0m10000\n\u001b[32;1mbytesPerFile                  : \u001b[0m4096\n\u001b[32;1mproductionBaselineElapsedMs   : \u001b[0m534866\n\u001b[32;1mproductionPhase3ElapsedMs     : \u001b[0m562056\n\u001b[32;1mproductionSpeedup             : \u001b[0m0.952\n\u001b[32;1mproductionRatio               : \u001b[0m1.051\n\u001b[32;1mmetTargetBest                 : \u001b[0mFalse\n\u001b[32;1mmetTargetTypical              : \u001b[0mFalse\n\u001b[32;1mcoordinatorDop4Ms             : \u001b[0m15356\n\u001b[32;1mcoordinatorDop2Ms             : \u001b[0m29574\n\u001b[32;1mcoordinatorDop4SpeedupVsDop1  : \u001b[0m5.38\n\u001b[32;1mnetworkLiveE2eVerified        : \u001b[0mFalse\n\u001b[32;1mleftoverUntouched             : \u001b[0mTrue\n\u001b[32;1mjournalOverheadCited          : \u001b[0m15.7508172301072\n\u001b[32;1mjournalOverheadIsWithinTarget : \u001b[0mFalse\n\n"
+    }
+  ]
+}

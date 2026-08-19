@@ -1,0 +1,5 @@
+Exception: D:\Codex\projects\统一环境\tests\Test-CodexSafeTreeDeleteParallelismBenchmark.ps1:72
+Line |
+  72 |      if (-not $Condition) { throw $Message }
+     |                             ~~~~~~~~~~~~~~
+     | FromDetection optimize 必须等于本机小文件峰值效率 DOP 2，实际为 4

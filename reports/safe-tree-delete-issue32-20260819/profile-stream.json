@@ -1,0 +1,9 @@
+{
+  "fileCount": 2000,
+  "snap1ReuseMs": 534.0,
+  "snap2ReuseHotMs": 199.3,
+  "liveStreamSetMs": 464.9,
+  "snap3ReuseHotMs": 196.7,
+  "snapBaselineMs": 344.7,
+  "cacheCountAfterSnap1": 2000
+}

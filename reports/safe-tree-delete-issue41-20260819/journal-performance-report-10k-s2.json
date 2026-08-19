@@ -1,0 +1,16 @@
+{
+  "sampleIndex": 2,
+  "fileCount": 10000,
+  "elapsedMs": 4142,
+  "journalFileCount": 4,
+  "failedCount": 0,
+  "deletedCount": 10000,
+  "TotalFlushTimeMs": 258,
+  "FlushCount": 632,
+  "OverheadPercent": 6.228874939642685,
+  "IsWithinTarget": true,
+  "SlowFlushCount": 0,
+  "Warning": "",
+  "MaxDegreeOfParallelism": 2,
+  "GroupCommitSize": 32
+}

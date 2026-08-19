@@ -1,0 +1,15 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue41-git-restore",
+  "authorizedGitUsage": "git checkout -- only",
+  "restoredTrackedSnapshots": [
+    "reports/safe-tree-delete-issue34-20260817/integration-results.json",
+    "reports/safe-tree-delete-issue39-20260817/scale-10000.json"
+  ],
+  "reason": "UncertainRecovery / ParallelPurgeCoordinator 重写了历史 tracked 快照；按任务契约恢复。",
+  "notRestored": [
+    "scripts/lib/CodexSafeTreeDeleteParallelPurge.cs",
+    "tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1",
+    "tests/Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1",
+    "#32/#40 uncommitted files left intact"
+  ]
+}

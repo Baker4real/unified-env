@@ -820,8 +820,9 @@ try {
     Assert-True ($status.operations[0].quarantinePresent -eq $false) 'Status 必须读取 live quarantine presence'
     Assert-True ($status.metrics.schemaVersion -eq 1) 'Status 必须输出统一 metrics'
     Assert-MetricsContract -Metrics $status.metrics -Phase 'status'
-    Assert-True ($status.metrics.bytesHashed -eq ((2L * $policyBytes) + (2L * $planBytes) + 32L)) `
-        'Status metrics 必须精确累计 policy、plan 双重认证与 live payload 哈希读取'
+    $expectedStatusBytesHashed = $policyBytes + $planBytes + 32L
+    Assert-True ($status.metrics.bytesHashed -eq $expectedStatusBytesHashed) (
+        "Status metrics 必须精确累计一次 policy、一次 plan 与 live payload 哈希读取 actual=$($status.metrics.bytesHashed) expected=$expectedStatusBytesHashed")
     Assert-True (
         (($beforeStatus | ConvertTo-Json -Depth 8 -Compress) -ceq
             ($afterStatus | ConvertTo-Json -Depth 8 -Compress))) `

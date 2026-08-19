@@ -1,0 +1,26 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.issue55.status-generation-binding",
+  "schemaVersion": 1,
+  "statusCapturedAtUtc": "2026-08-18T18:44:57.7012540+00:00",
+  "policySha256": "01a22918150646bc37c5a51c9f4d1392750fa1e44501b5c651ca2d14f4362c90",
+  "complete": false,
+  "operationCount": 2591,
+  "operationIdCount": 2591,
+  "generationIdCount": 0,
+  "bindingField": "operations[].operationId",
+  "bindingNote": "Status 合同用 operationId（run 目录名 {timestampZ}-{guid}）绑定代际；operations[] 无 generationId。generationIdCount 只观测该缺口，不把缺失字段当成绑定成功。",
+  "operationIdSample": [
+    "20260724T105703Z-b2f1d552-3b4d-496e-8ea2-31c0b1f82a19",
+    "20260724T105808Z-0cff1c41-11bc-4da9-8ef8-a531f43e0bdd",
+    "20260724T110052Z-f8eaf097-664f-4758-86c6-587cc517d0c9"
+  ],
+  "stdoutSha256": "fce8dcf53125c9f11ffd03ca38cc4a18d67499476736d144142ca310d82db040",
+  "preDigestSha256": "aac8689e36ce83c98ecdcd8956a9256b1355d92dbeeb984dd000057cba1b90bd",
+  "postDigestSha256": "aac8689e36ce83c98ecdcd8956a9256b1355d92dbeeb984dd000057cba1b90bd",
+  "preCapturedAtUtc": "2026-08-18T18:42:55.5448497+00:00",
+  "postCapturedAtUtc": "2026-08-18T18:44:59.2993297+00:00",
+  "zeroWrite": true,
+  "policyPreDigestSha256": "a5ae6c0147b2779b004f2992c3fc122d1c0df5488d270a43a391ef7b997524a5",
+  "policyPostDigestSha256": "a5ae6c0147b2779b004f2992c3fc122d1c0df5488d270a43a391ef7b997524a5",
+  "policyZeroWrite": true
+}

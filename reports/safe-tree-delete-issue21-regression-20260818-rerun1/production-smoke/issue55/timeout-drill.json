@@ -1,0 +1,39 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.issue55.timeout-process-tree",
+  "schemaVersion": 1,
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Status",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-18T18:45:01.0934407+00:00",
+  "endedAtUtc": "2026-08-18T18:45:02.0188430+00:00",
+  "wallClockMs": 925.4,
+  "timeoutMs": 250,
+  "expectedOutcome": "timeout-then-process-tree-closed",
+  "sawPwshChild": true,
+  "processId": 12840,
+  "treeAtKill": [
+    {
+      "processId": 12840,
+      "parentProcessId": 54788,
+      "name": "cmd.exe",
+      "commandLine": "C:\\WINDOWS\\system32\\cmd.exe /c \"\"D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd\" -Mode Status -Json\"",
+      "isRoot": true
+    },
+    {
+      "processId": 49480,
+      "parentProcessId": 12840,
+      "name": "pwsh.exe",
+      "commandLine": "\"D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe\"  -NoLogo -NoProfile -NonInteractive -File \"D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1\" -Mode Status -Json",
+      "isRoot": false
+    }
+  ],
+  "taskkillExit": 0,
+  "actualExitCode": 1,
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\timeout-status.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\timeout-status.stderr.txt"
+}

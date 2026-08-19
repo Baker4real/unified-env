@@ -1,0 +1,38 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue32-scale-10000",
+  "fileCount": 10000,
+  "bytesPerFile": 4096,
+  "sampleCount": 2,
+  "method": "two sibling 10k trees x 4KB; reuse = C# ApplyTreeSnapshotBuilder + SessionHashCache identity-hit skip lease/hash; baseline = -DisableApplyHashReuseForTest HostSafety PS snapshot + lease ComputeSha256FromHandle (no cache)",
+  "samples": [
+    {
+      "sample": 1,
+      "reuseElapsedMs": 22444,
+      "baselineElapsedMs": 268993,
+      "reuseBytesHashed": 48317833,
+      "baselineBytesHashed": 130237839,
+      "speedup": 11.985,
+      "metTarget": true
+    },
+    {
+      "sample": 2,
+      "reuseElapsedMs": 22629,
+      "baselineElapsedMs": 267942,
+      "reuseBytesHashed": 48317833,
+      "baselineBytesHashed": 130237839,
+      "speedup": 11.841,
+      "metTarget": true
+    }
+  ],
+  "reuseElapsedMs": 22444,
+  "baselineElapsedMs": 268993,
+  "reuseBytesHashed": 48317833,
+  "baselineBytesHashed": 130237839,
+  "speedup": 11.985,
+  "targetRange": "1.5-2x vs no-reuse baseline",
+  "metTarget": true,
+  "flags": {
+    "reuse": "SessionHashCache + ApplyTreeSnapshotBuilder identity-hit skip lease/hash",
+    "baseline": "-DisableApplyHashReuseForTest HostSafety PS snapshot, no SessionHashCache"
+  }
+}

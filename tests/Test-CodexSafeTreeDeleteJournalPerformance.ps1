@@ -11,7 +11,8 @@ $ErrorActionPreference = 'Stop'
 # 3. Slow flush — single Flush >100ms is observable (SlowFlushCount / LastSlowFlushWarning)
 # 4. JournalPerformanceReport.FromTotals — overhead formula uses literals (200ms / 2000ms = 10%)
 # 5. ParallelPurgeCoordinator.Purge — aggregates writer flush time vs Purge wall clock
-# Observable: public counters, report fields, warning text, second-handle pending bytes.
+# 6. Group-commit — pending batch is durable before any delete; missing+pending-without-commit = uncertain
+# Observable: public counters, report fields, warning text, second-handle pending bytes, recovery class.
 # Not production Purge. Not Event Log.
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -19,7 +20,7 @@ $identitySourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteFil
 $hashCacheSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteHashCache.cs'
 $threadJournalSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteThreadJournal.cs'
 $parallelPurgeSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteParallelPurge.cs'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue41-20260817'
+$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue41-20260819'
 $fixtureRoot = Join-Path $evidenceHome ('fixtures-{0}' -f ([guid]::NewGuid().ToString('N')))
 $scaleJsonPath = Join-Path $evidenceHome 'scale-10000.json'
 $reportExamplePath = Join-Path $evidenceHome 'journal-performance-report-example.json'
@@ -94,6 +95,50 @@ function Remove-EmptyDirectories {
 
 function New-OptimizeCapabilities {
     return [CodexSafeTreeDelete.FileSystemCapabilities]::FromDetection('NTFS', $false, $true)
+}
+
+function Get-ThreadJournalRecovery {
+    param(
+        [Parameter(Mandatory)][string]$JournalPath,
+        [Parameter(Mandatory)][string]$TargetRoot
+    )
+
+    $pending = New-Object 'System.Collections.Generic.HashSet[string]'
+    $commit = New-Object 'System.Collections.Generic.HashSet[string]'
+    $lines = @(
+        (Read-JournalTextFromSecondHandle -LiteralPath $JournalPath) -split "`n" |
+            Where-Object { $_.Length -gt 0 }
+    )
+    foreach ($line in $lines) {
+        if ($line -like '{"op":"pending"*') {
+            [void]$pending.Add(($line -replace '^\{"op":"pending","path":"', '' -replace '"\}$', ''))
+        } elseif ($line -like '{"op":"commit"*') {
+            [void]$commit.Add(($line -replace '^\{"op":"commit","path":"', '' -replace '"\}$', ''))
+        } else {
+            throw "journal 只能含 pending/commit 行，实际为 $line"
+        }
+    }
+
+    $uncertain = New-Object 'System.Collections.Generic.List[string]'
+    $resumable = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($rel in $pending) {
+        if ($commit.Contains($rel)) {
+            continue
+        }
+        $full = Join-Path $TargetRoot ($rel.Replace('/', [string][IO.Path]::DirectorySeparatorChar))
+        if (Test-Path -LiteralPath $full -PathType Leaf) {
+            [void]$resumable.Add($rel)
+        } else {
+            [void]$uncertain.Add($rel)
+        }
+    }
+
+    return [pscustomobject]@{
+        PendingCount = $pending.Count
+        CommitCount = $commit.Count
+        Uncertain = @($uncertain)
+        Resumable = @($resumable)
+    }
 }
 
 function Write-JsonArtifact {
@@ -190,6 +235,61 @@ try {
     $pendingWriter.Dispose()
 }
 
+# --- Slice 2b: group-commit pending durability + uncertain recovery ---
+$groupRoot = Join-Path $fixtureRoot 'group-commit-crash'
+$groupFiles = @(
+    (Join-Path $groupRoot 'g0.txt'),
+    (Join-Path $groupRoot 'g1.txt'),
+    (Join-Path $groupRoot 'g2.txt'),
+    (Join-Path $groupRoot 'g3.txt')
+)
+foreach ($path in $groupFiles) {
+    New-FixtureFile -LiteralPath $path
+}
+$groupJournalPath = Join-Path $fixtureRoot 'group-commit-crash.jsonl'
+$groupWriter = [CodexSafeTreeDelete.ThreadJournalWriter]::new($groupJournalPath, 41, $evidenceHome)
+try {
+    $groupPending = @(
+        '{"op":"pending","path":"g0.txt"}',
+        '{"op":"pending","path":"g1.txt"}',
+        '{"op":"pending","path":"g2.txt"}',
+        '{"op":"pending","path":"g3.txt"}'
+    )
+    foreach ($line in $groupPending) {
+        $groupWriter.WriteEntry($line)
+    }
+    $groupWriter.Flush()
+    Assert-True ($groupWriter.FlushCount -eq 1) 'group-commit 四条 pending 必须只 durable flush 一次'
+    $groupSeen = Read-JournalTextFromSecondHandle -LiteralPath $groupJournalPath
+    foreach ($line in $groupPending) {
+        Assert-True ($groupSeen.Contains($line)) 'group pending Flush 后第二句柄必须能读到全部 pending'
+    }
+    foreach ($path in $groupFiles) {
+        Assert-True (Test-Path -LiteralPath $path -PathType Leaf) 'group pending Flush 后、delete 前全部目标必须仍在'
+    }
+    [IO.File]::Delete($groupFiles[0])
+    [IO.File]::Delete($groupFiles[1])
+    Assert-True (-not (Test-Path -LiteralPath $groupFiles[0] -PathType Leaf)) '崩溃窗口内已删文件必须不在'
+    Assert-True (Test-Path -LiteralPath $groupFiles[2] -PathType Leaf) '崩溃窗口内未删文件必须仍在'
+} finally {
+    $groupWriter.Dispose()
+}
+$groupRecovery = Get-ThreadJournalRecovery -JournalPath $groupJournalPath -TargetRoot $groupRoot
+Assert-True ($groupRecovery.PendingCount -eq 4) '崩溃后 journal 必须仍有 4 条 pending'
+Assert-True ($groupRecovery.CommitCount -eq 0) '崩溃在 commit flush 之前不得有 commit'
+Assert-True ($groupRecovery.Uncertain.Count -eq 2) 'pending 已落盘且文件已不在必须标 uncertain，不得当成已删除'
+Assert-True ($groupRecovery.Resumable.Count -eq 2) 'pending 已落盘且文件仍在必须 resumable'
+Assert-True ($groupRecovery.Uncertain -contains 'g0.txt') 'g0 已删无 commit 必须 uncertain'
+Assert-True ($groupRecovery.Uncertain -contains 'g1.txt') 'g1 已删无 commit 必须 uncertain'
+Assert-True ($groupRecovery.Resumable -contains 'g2.txt') 'g2 仍在必须 resumable'
+Assert-True ($groupRecovery.Resumable -contains 'g3.txt') 'g3 仍在必须 resumable'
+foreach ($path in $groupFiles) {
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        [IO.File]::Delete($path)
+    }
+}
+Remove-EmptyDirectories -LiteralPath $groupRoot
+
 # --- Slice 3: overhead formula uses independent literals ---
 $boundary = [CodexSafeTreeDelete.JournalPerformanceReport]::FromTotals(200, 4, 2000)
 Assert-True ($boundary.TotalFlushTimeMs -eq 200) 'FromTotals 必须保留字面 TotalFlushTimeMs=200'
@@ -255,7 +355,9 @@ Assert-True ($smallResult.FailedCount -eq 0) '小树不得失败'
 Assert-True ($null -ne $smallReport) 'AC: Purge 结果必须带 JournalPerformanceReport'
 Assert-True ($null -ne $lastReport) 'AC: coordinator.LastJournalPerformance 必须可读'
 Assert-True ([object]::ReferenceEquals($smallReport, $lastReport)) '结果上的报告与 LastJournalPerformance 必须是同一份'
-Assert-True ($smallReport.FlushCount -eq 8) '4 个文件各 pending+commit 两次 Flush，FlushCount 必须是 8'
+Assert-True ($smallReport.FlushCount -gt 0) '小树 FlushCount 必须入账'
+Assert-True ($smallReport.FlushCount -le 8) '小树 FlushCount 不得高于每文件两次的旧上限'
+Assert-True ($smallReport.FlushCount -eq 6) 'group-commit B>=2：3 个目录批各 pending+commit 各一次，FlushCount 必须是 6'
 Assert-True ($smallReport.TotalFlushTimeMs -ge 0) '汇总 TotalFlushTimeMs 必须非负'
 Assert-True ($smallResult.ElapsedMs -ge 0) 'Purge 墙钟必须入账'
 if ($smallResult.ElapsedMs -gt 0) {
@@ -271,100 +373,125 @@ if ($smallReport.OverheadPercent -ge 10) {
     Assert-True ([string]::IsNullOrEmpty($smallReport.Warning)) 'overhead <10% 时不得写 overhead 警告'
 }
 
-# --- Slice 5: 10k+ fixture; record live hit-disk overhead; do not fake <10% ---
-$scaleTree = Join-Path $fixtureRoot 'scale-10000-tree'
-$scaleJournal = Join-Path $fixtureRoot 'scale-10000-journal'
-[void][IO.Directory]::CreateDirectory($scaleJournal)
+# --- Slice 5: 10k+ fixture; live hit-disk overhead must be <10% at #40 DOP=2; two samples ---
 $scaleFileCount = 10000
 $filesPerDir = 2500
-for ($dirIndex = 0; $dirIndex -lt 4; $dirIndex++) {
-    $dirPath = Join-Path $scaleTree ('dir-{0}' -f $dirIndex)
-    [void][IO.Directory]::CreateDirectory($dirPath)
-    for ($fileIndex = 0; $fileIndex -lt $filesPerDir; $fileIndex++) {
-        $name = 'f-{0:D4}.txt' -f $fileIndex
-        [IO.File]::WriteAllText((Join-Path $dirPath $name), 'x', [Text.UTF8Encoding]::new($false))
+$groupCommitSize = [CodexSafeTreeDelete.ParallelPurgeCoordinator]::DefaultGroupCommitSize
+$expectedMaxFlushCount = 4 * 2 * [int][math]::Ceiling($filesPerDir / [double]$groupCommitSize)
+$scaleSamples = @()
+for ($sampleIndex = 1; $sampleIndex -le 2; $sampleIndex++) {
+    $scaleTree = Join-Path $fixtureRoot ('scale-10000-tree-s{0}' -f $sampleIndex)
+    $scaleJournal = Join-Path $fixtureRoot ('scale-10000-journal-s{0}' -f $sampleIndex)
+    [void][IO.Directory]::CreateDirectory($scaleJournal)
+    for ($dirIndex = 0; $dirIndex -lt 4; $dirIndex++) {
+        $dirPath = Join-Path $scaleTree ('dir-{0}' -f $dirIndex)
+        [void][IO.Directory]::CreateDirectory($dirPath)
+        for ($fileIndex = 0; $fileIndex -lt $filesPerDir; $fileIndex++) {
+            $name = 'f-{0:D4}.txt' -f $fileIndex
+            [IO.File]::WriteAllText((Join-Path $dirPath $name), 'x', [Text.UTF8Encoding]::new($false))
+        }
     }
-}
-$createdScale = @(Get-ChildItem -LiteralPath $scaleTree -Recurse -File).Count
-Assert-True ($createdScale -eq $scaleFileCount) "10k 树必须写出 10000 个文件，实际为 $createdScale"
+    $createdScale = @(Get-ChildItem -LiteralPath $scaleTree -Recurse -File).Count
+    Assert-True ($createdScale -eq $scaleFileCount) "10k 树必须写出 10000 个文件，实际为 $createdScale"
 
-$scaleCoordinator = [CodexSafeTreeDelete.ParallelPurgeCoordinator]::new(
-    $scaleTree,
-    $scaleJournal,
-    $evidenceHome,
-    (New-OptimizeCapabilities))
-try {
-    $scaleResult = $scaleCoordinator.Purge()
-    $scaleReport = $scaleResult.JournalPerformance
-} finally {
-    $scaleCoordinator.Dispose()
+    $scaleCaps = New-OptimizeCapabilities
+    Assert-True ($scaleCaps.RecommendedMaxParallelism -eq 2) '10k 集成必须用 #40 推荐 DOP=2'
+    $scaleCoordinator = [CodexSafeTreeDelete.ParallelPurgeCoordinator]::new(
+        $scaleTree,
+        $scaleJournal,
+        $evidenceHome,
+        $scaleCaps)
+    try {
+        Assert-True ($scaleCoordinator.MaxDegreeOfParallelism -eq 2) 'coordinator 实例 DOP 必须是 2'
+        Assert-True ($scaleCoordinator.GroupCommitSize -eq $groupCommitSize) '默认 group-commit 批次必须是 DefaultGroupCommitSize'
+        $scaleResult = $scaleCoordinator.Purge()
+        $scaleReport = $scaleResult.JournalPerformance
+    } finally {
+        $scaleCoordinator.Dispose()
+    }
+
+    $scaleRemaining = @(Get-RemainingFiles -LiteralPath $scaleTree)
+    Assert-True ($scaleResult.FileCount -eq $scaleFileCount) '10k 必须看到 10000 个文件'
+    Assert-True ($scaleResult.DeletedCount -eq $scaleFileCount) '10k 必须全部删除'
+    Assert-True ($scaleResult.FailedCount -eq 0) '10k 不得有失败'
+    Assert-True ($scaleRemaining.Count -eq 0) '10k 树不得剩余文件'
+    Assert-True ($null -ne $scaleReport) '10k 必须产出 JournalPerformanceReport'
+    Assert-True ($scaleReport.FlushCount -gt 0) '10k FlushCount 必须入账'
+    Assert-True ($scaleReport.FlushCount -le $expectedMaxFlushCount) "10k group-commit FlushCount 必须 ≤ $expectedMaxFlushCount，实际为 $($scaleReport.FlushCount)"
+    Assert-True ($scaleReport.FlushCount -lt (2 * $scaleFileCount)) '10k FlushCount 必须低于每文件两次的旧口径'
+    Assert-True ($scaleReport.TotalFlushTimeMs -ge 0) '10k TotalFlushTimeMs 必须入账'
+    Assert-True ($scaleResult.ElapsedMs -gt 0) '10k Purge 墙钟必须 >0'
+    $scaleExpectedOverhead = (100.0 * $scaleReport.TotalFlushTimeMs) / $scaleResult.ElapsedMs
+    Assert-True ($scaleReport.OverheadPercent -eq $scaleExpectedOverhead) '10k overhead% 必须用字面墙钟公式'
+    Assert-True ($scaleReport.IsWithinTarget -eq ($scaleReport.OverheadPercent -lt 10)) '10k IsWithinTarget 必须跟随 <10 规则'
+    Assert-True ($scaleReport.IsWithinTarget) "AC12: 10k sample $sampleIndex overhead 必须 <10%，实际为 $($scaleReport.OverheadPercent)%"
+    Assert-True ([string]::IsNullOrEmpty($scaleReport.Warning)) 'overhead <10% 时不得写 overhead 警告'
+
+    $sampleRecord = [ordered]@{
+        sampleIndex = [int]$sampleIndex
+        fileCount = [int]$scaleResult.FileCount
+        elapsedMs = [int64]$scaleResult.ElapsedMs
+        journalFileCount = [int]$scaleResult.JournalFileCount
+        failedCount = [int]$scaleResult.FailedCount
+        deletedCount = [int]$scaleResult.DeletedCount
+        TotalFlushTimeMs = [int64]$scaleReport.TotalFlushTimeMs
+        FlushCount = [int]$scaleReport.FlushCount
+        OverheadPercent = [double]$scaleReport.OverheadPercent
+        IsWithinTarget = [bool]$scaleReport.IsWithinTarget
+        SlowFlushCount = [int]$scaleReport.SlowFlushCount
+        Warning = [string]$scaleReport.Warning
+        MaxDegreeOfParallelism = 2
+        GroupCommitSize = [int]$groupCommitSize
+    }
+    $scaleSamples += $sampleRecord
+    Write-JsonArtifact -LiteralPath (Join-Path $evidenceHome ('journal-performance-report-10k-s{0}.json' -f $sampleIndex)) -Record $sampleRecord
+
+    foreach ($leftover in $scaleRemaining) {
+        [IO.File]::Delete($leftover)
+    }
+    Remove-EmptyDirectories -LiteralPath $scaleTree
+    Assert-True (-not (Test-Path -LiteralPath $scaleTree)) '测完必须删掉 10k 树，保留 journal/报告'
 }
 
-$scaleRemaining = @(Get-RemainingFiles -LiteralPath $scaleTree)
-Assert-True ($scaleResult.FileCount -eq $scaleFileCount) '10k 必须看到 10000 个文件'
-Assert-True ($scaleResult.DeletedCount -eq $scaleFileCount) '10k 必须全部删除'
-Assert-True ($scaleResult.FailedCount -eq 0) '10k 不得有失败'
-Assert-True ($scaleRemaining.Count -eq 0) '10k 树不得剩余文件'
-Assert-True ($null -ne $scaleReport) '10k 必须产出 JournalPerformanceReport'
-Assert-True ($scaleReport.FlushCount -eq 20000) '10k 各 2 次 Flush，FlushCount 必须是 20000'
-Assert-True ($scaleReport.TotalFlushTimeMs -ge 0) '10k TotalFlushTimeMs 必须入账'
-Assert-True ($scaleResult.ElapsedMs -gt 0) '10k Purge 墙钟必须 >0'
-$scaleExpectedOverhead = (100.0 * $scaleReport.TotalFlushTimeMs) / $scaleResult.ElapsedMs
-Assert-True ($scaleReport.OverheadPercent -eq $scaleExpectedOverhead) '10k overhead% 必须用字面墙钟公式'
-Assert-True ($scaleReport.IsWithinTarget -eq ($scaleReport.OverheadPercent -lt 10)) '10k IsWithinTarget 必须跟随 <10 规则'
-if ($scaleReport.OverheadPercent -ge 10) {
-    Assert-True (-not [string]::IsNullOrWhiteSpace($scaleReport.Warning)) '10k overhead ≥10% 必须有警告，不得失败闭锁删除'
-}
-
+$scaleResult = $scaleSamples[0]
+$scaleReport = [pscustomobject]$scaleSamples[0]
 $scaleRecord = [ordered]@{
     artifactType = 'env-governance.codex-safe-tree-delete-issue41-scale-10000'
-    fileCount = [int]$scaleResult.FileCount
-    elapsedMs = [int64]$scaleResult.ElapsedMs
-    journalFileCount = [int]$scaleResult.JournalFileCount
-    failedCount = [int]$scaleResult.FailedCount
-    deletedCount = [int]$scaleResult.DeletedCount
-    TotalFlushTimeMs = [int64]$scaleReport.TotalFlushTimeMs
-    FlushCount = [int]$scaleReport.FlushCount
-    OverheadPercent = [double]$scaleReport.OverheadPercent
-    IsWithinTarget = [bool]$scaleReport.IsWithinTarget
-    SlowFlushCount = [int]$scaleReport.SlowFlushCount
-    Warning = [string]$scaleReport.Warning
-    method = 'four top-level dirs x 2500 tiny files; ParallelPurgeCoordinator File.Delete on issue41 fixture tree only; not production Purge'
+    sampleCount = 2
+    samples = $scaleSamples
+    method = 'four top-level dirs x 2500 tiny files; ParallelPurgeCoordinator group-commit File.Delete on issue41 fixture tree only; DOP=2 from #40; not production Purge'
 }
 Write-JsonArtifact -LiteralPath $scaleJsonPath -Record $scaleRecord
 Write-JsonArtifact -LiteralPath $report10kPath -Record ([ordered]@{
     artifactType = 'env-governance.codex-safe-tree-delete-issue41-report-10k'
-    TotalFlushTimeMs = [int64]$scaleReport.TotalFlushTimeMs
-    FlushCount = [int]$scaleReport.FlushCount
-    OverheadPercent = [double]$scaleReport.OverheadPercent
-    IsWithinTarget = [bool]$scaleReport.IsWithinTarget
-    SlowFlushCount = [int]$scaleReport.SlowFlushCount
-    LastSlowFlushWarning = [string]$scaleReport.LastSlowFlushWarning
-    Warning = [string]$scaleReport.Warning
-    TotalOperationTimeMs = [int64]$scaleResult.ElapsedMs
-    analysis = 'overhead% = TotalFlushTimeMs / Purge elapsedMs; target is <10%. Live number is recorded, not invented.'
+    TotalFlushTimeMs = [int64]$scaleSamples[0].TotalFlushTimeMs
+    FlushCount = [int]$scaleSamples[0].FlushCount
+    OverheadPercent = [double]$scaleSamples[0].OverheadPercent
+    IsWithinTarget = [bool]$scaleSamples[0].IsWithinTarget
+    SlowFlushCount = [int]$scaleSamples[0].SlowFlushCount
+    Warning = [string]$scaleSamples[0].Warning
+    TotalOperationTimeMs = [int64]$scaleSamples[0].elapsedMs
+    sample2OverheadPercent = [double]$scaleSamples[1].OverheadPercent
+    sample2IsWithinTarget = [bool]$scaleSamples[1].IsWithinTarget
+    analysis = 'overhead% = TotalFlushTimeMs / Purge elapsedMs; target is <10%. Two live samples at DOP=2 after group-commit.'
 })
 Assert-True (Test-Path -LiteralPath $scaleJsonPath -PathType Leaf) '必须写出 scale-10000.json'
 Assert-True (Test-Path -LiteralPath $report10kPath -PathType Leaf) '必须写出 10k 性能报告'
-
-foreach ($leftover in $scaleRemaining) {
-    [IO.File]::Delete($leftover)
-}
-Remove-EmptyDirectories -LiteralPath $scaleTree
-Assert-True (-not (Test-Path -LiteralPath $scaleTree)) '测完必须删掉 10k 树，保留 journal/报告'
 
 [pscustomobject][ordered]@{
     ok = $true
     suite = 'CodexSafeTreeDeleteJournalPerformance'
     issue = 41
-    slices = 5
+    slices = 6
     smallFlushCount = [int]$smallReport.FlushCount
     smallOverheadPercent = [double]$smallReport.OverheadPercent
-    scaleFileCount = [int]$scaleResult.FileCount
-    scaleElapsedMs = [int64]$scaleResult.ElapsedMs
-    scaleTotalFlushTimeMs = [int64]$scaleReport.TotalFlushTimeMs
-    scaleFlushCount = [int]$scaleReport.FlushCount
-    scaleOverheadPercent = [double]$scaleReport.OverheadPercent
-    scaleIsWithinTarget = [bool]$scaleReport.IsWithinTarget
-    scaleSlowFlushCount = [int]$scaleReport.SlowFlushCount
+    scaleFileCount = [int]$scaleSamples[0].fileCount
+    scaleElapsedMs = [int64]$scaleSamples[0].elapsedMs
+    scaleTotalFlushTimeMs = [int64]$scaleSamples[0].TotalFlushTimeMs
+    scaleFlushCount = [int]$scaleSamples[0].FlushCount
+    scaleOverheadPercent = [double]$scaleSamples[0].OverheadPercent
+    scaleIsWithinTarget = [bool]$scaleSamples[0].IsWithinTarget
+    scale2OverheadPercent = [double]$scaleSamples[1].OverheadPercent
+    scale2IsWithinTarget = [bool]$scaleSamples[1].IsWithinTarget
+    scaleSlowFlushCount = [int]$scaleSamples[0].SlowFlushCount
 }

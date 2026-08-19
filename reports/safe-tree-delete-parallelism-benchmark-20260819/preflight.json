@@ -1,0 +1,29 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue40-preflight",
+  "measuredAtUtc": "2026-08-19T02:16:48.1017034Z",
+  "processorCount": 20,
+  "driveFormat": "NTFS",
+  "dFreeBytes": 396116893696,
+  "requiredFreeBytes": 3221225472,
+  "peakBytesEstimate": 2214592512,
+  "directoryCount": 32,
+  "degrees": [
+    1,
+    2,
+    4,
+    8,
+    16
+  ],
+  "sampleCount": 2,
+  "flushMetric": {
+    "available": true,
+    "memberKind": "result-JournalPerformance",
+    "isStatic": false,
+    "verified": true,
+    "reason": "ParallelPurgeResult.JournalPerformance 汇总 ThreadJournalWriter.TotalFlushTimeMs（#41）"
+  },
+  "evidenceHome": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-parallelism-benchmark-20260819",
+  "historicalEvidenceHome": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-parallelism-benchmark",
+  "frozenEvidenceHome": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue40-20260817",
+  "frozenRawRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue40-20260817\\raw"
+}

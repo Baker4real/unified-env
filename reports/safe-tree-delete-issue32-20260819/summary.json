@@ -1,0 +1,51 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue32-summary",
+  "capturedAtUtc": "2026-08-18T20:13:03.7438041+00:00",
+  "result": "PASS",
+  "scale1000": {
+    "artifactType": "env-governance.codex-safe-tree-delete-issue32-scale-1000",
+    "fileCount": 1000,
+    "logicalBytes": 64000,
+    "applyElapsedMs": 2623,
+    "applyBytesHashed": 800599,
+    "quarantined": true
+  },
+  "scale10000": {
+    "artifactType": "env-governance.codex-safe-tree-delete-issue32-scale-10000",
+    "fileCount": 10000,
+    "bytesPerFile": 4096,
+    "sampleCount": 2,
+    "method": "two sibling 10k trees x 4KB; reuse = C# ApplyTreeSnapshotBuilder + SessionHashCache identity-hit skip lease/hash; baseline = -DisableApplyHashReuseForTest HostSafety PS snapshot + lease ComputeSha256FromHandle (no cache)",
+    "samples": [
+      {
+        "sample": 1,
+        "reuseElapsedMs": 22444,
+        "baselineElapsedMs": 268993,
+        "reuseBytesHashed": 48317833,
+        "baselineBytesHashed": 130237839,
+        "speedup": 11.985,
+        "metTarget": true
+      },
+      {
+        "sample": 2,
+        "reuseElapsedMs": 22629,
+        "baselineElapsedMs": 267942,
+        "reuseBytesHashed": 48317833,
+        "baselineBytesHashed": 130237839,
+        "speedup": 11.841,
+        "metTarget": true
+      }
+    ],
+    "reuseElapsedMs": 22444,
+    "baselineElapsedMs": 268993,
+    "reuseBytesHashed": 48317833,
+    "baselineBytesHashed": 130237839,
+    "speedup": 11.985,
+    "targetRange": "1.5-2x vs no-reuse baseline",
+    "metTarget": true,
+    "flags": {
+      "reuse": "SessionHashCache + ApplyTreeSnapshotBuilder identity-hit skip lease/hash",
+      "baseline": "-DisableApplyHashReuseForTest HostSafety PS snapshot, no SessionHashCache"
+    }
+  }
+}

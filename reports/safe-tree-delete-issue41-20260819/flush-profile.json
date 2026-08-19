@@ -1,0 +1,113 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue41-flush-profile",
+  "measuredAtUtc": "2026-08-18T21:53:21.0515922Z",
+  "codeBaseline": "pre-group-commit working tree HEAD 5f7f597 plus #32/#40 uncommitted",
+  "oneLine": {
+    "entryCount": 2000,
+    "flushCount": 2000,
+    "totalFlushTimeMs": 466,
+    "wallMs": 521,
+    "meanFlushMs": 0.233
+  },
+  "groupCommitMicro": [
+    {
+      "batchSize": 4,
+      "entryCount": 2000,
+      "flushCount": 500,
+      "totalFlushTimeMs": 106,
+      "wallMs": 126,
+      "flushMsPerEntry": 0.053,
+      "wallMsPerEntry": 0.063
+    },
+    {
+      "batchSize": 8,
+      "entryCount": 2000,
+      "flushCount": 250,
+      "totalFlushTimeMs": 60,
+      "wallMs": 87,
+      "flushMsPerEntry": 0.03,
+      "wallMsPerEntry": 0.0435
+    },
+    {
+      "batchSize": 16,
+      "entryCount": 2000,
+      "flushCount": 125,
+      "totalFlushTimeMs": 29,
+      "wallMs": 44,
+      "flushMsPerEntry": 0.0145,
+      "wallMsPerEntry": 0.022
+    },
+    {
+      "batchSize": 32,
+      "entryCount": 2000,
+      "flushCount": 63,
+      "totalFlushTimeMs": 16,
+      "wallMs": 31,
+      "flushMsPerEntry": 0.008,
+      "wallMsPerEntry": 0.0155
+    },
+    {
+      "batchSize": 64,
+      "entryCount": 2000,
+      "flushCount": 32,
+      "totalFlushTimeMs": 7,
+      "wallMs": 21,
+      "flushMsPerEntry": 0.0035,
+      "wallMsPerEntry": 0.0105
+    }
+  ],
+  "verifySecondHandle": {
+    "iterations": 250,
+    "readToEndMs": 1167,
+    "meanReadMs": 4.668,
+    "note": "ReadToEnd after each of 250 durable flushes; cost is not in TotalFlushTimeMs"
+  },
+  "scale10k": [
+    {
+      "degree": 1,
+      "fileCount": 10000,
+      "deletedCount": 10000,
+      "failedCount": 0,
+      "remainingFiles": 0,
+      "elapsedMs": 121123,
+      "totalFlushTimeMs": 7482,
+      "flushCount": 20000,
+      "overheadPercent": 6.177191780256433,
+      "isWithinTarget": true,
+      "slowFlushCount": 0,
+      "warning": "",
+      "meanFlushMs": 0.3741
+    },
+    {
+      "degree": 2,
+      "fileCount": 10000,
+      "deletedCount": 10000,
+      "failedCount": 0,
+      "remainingFiles": 0,
+      "elapsedMs": 61946,
+      "totalFlushTimeMs": 7422,
+      "flushCount": 20000,
+      "overheadPercent": 11.981403157588868,
+      "isWithinTarget": false,
+      "slowFlushCount": 0,
+      "warning": "Journal flush overhead is 11.981% (>= 10%). Consider reducing parallelism or checking disk performance.",
+      "meanFlushMs": 0.3711
+    },
+    {
+      "degree": 4,
+      "fileCount": 10000,
+      "deletedCount": 10000,
+      "failedCount": 0,
+      "remainingFiles": 0,
+      "elapsedMs": 33789,
+      "totalFlushTimeMs": 7475,
+      "flushCount": 20000,
+      "overheadPercent": 22.122584272988252,
+      "isWithinTarget": false,
+      "slowFlushCount": 0,
+      "warning": "Journal flush overhead is 22.123% (>= 10%). Consider reducing parallelism or checking disk performance.",
+      "meanFlushMs": 0.37375
+    }
+  ],
+  "analysisHint": "Flush(true)/FlushFileBuffers dominates; group-commit of B pending then B commit should cut FlushCount from 2N to ~2N/B without deleting before pending durability."
+}

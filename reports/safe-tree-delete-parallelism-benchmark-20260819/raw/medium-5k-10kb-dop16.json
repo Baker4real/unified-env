@@ -1,0 +1,31 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue40-raw-aggregate",
+  "scenarioId": "medium-5k-10kb",
+  "label": "5k x 10KB",
+  "sizeClass": "medium",
+  "fileCount": 5000,
+  "bytesPerFile": 10240,
+  "directoryCount": 32,
+  "degree": 16,
+  "sampleCount": 2,
+  "sampleWallClockMs": [
+    227,
+    251
+  ],
+  "wallClockMs": 239,
+  "coordinatorElapsedMs": 238,
+  "totalProcessorTimeMs": 1360,
+  "cpuUtilizationRatio": 5.686,
+  "processorCount": 20,
+  "journalFileCount": 32,
+  "deletedCount": 5000,
+  "failedCount": 0,
+  "flushTimeMs": 186,
+  "flushOverheadPercent": 77.761,
+  "flushCount": 320,
+  "flushStatus": "measured",
+  "flushReason": "ParallelPurgeResult.JournalPerformance 汇总 ThreadJournalWriter.TotalFlushTimeMs（#41）",
+  "aggregation": "arithmetic-mean-of-all-recorded-samples",
+  "measuredAtUtc": "2026-08-19T02:19:06.0737807Z",
+  "method": "aggregate of recorded ParallelPurgeCoordinator samples; no discarded runs"
+}

@@ -1,0 +1,201 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue40-curve",
+  "measuredAtUtc": "2026-08-19T02:19:27.8709732Z",
+  "processorCount": 20,
+  "sampleCount": 2,
+  "aggregation": "arithmetic-mean-of-all-recorded-samples",
+  "decisionRule": "x = DOP, y = mean wall-clock ms; peakEfficiencyDegree is the recommended size-class DOP",
+  "scenarios": [
+    {
+      "scenarioId": "small-10k-1kb",
+      "label": "10k x 1KB",
+      "sizeClass": "small",
+      "peakEfficiencyDegree": 2,
+      "bestWallClockDegree": 16,
+      "conservativeKneeDegree": 16,
+      "diminishingReturns": null,
+      "efficiencyDrop": {
+        "afterDegree": 2,
+        "nextDegree": 8,
+        "nextEfficiency": 0.727,
+        "rule": "first DOP after peak efficiency whose parallelEfficiency < 0.85"
+      },
+      "points": [
+        {
+          "degree": 1,
+          "wallClockMs": 4874,
+          "speedupVsDop1": 1.0,
+          "parallelEfficiency": 1.0,
+          "cpuUtilizationRatio": 0.629,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 5.255
+        },
+        {
+          "degree": 2,
+          "wallClockMs": 2421,
+          "speedupVsDop1": 2.013,
+          "parallelEfficiency": 1.006,
+          "cpuUtilizationRatio": 1.103,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 10.401
+        },
+        {
+          "degree": 4,
+          "wallClockMs": 1218,
+          "speedupVsDop1": 4.002,
+          "parallelEfficiency": 1.0,
+          "cpuUtilizationRatio": 2.289,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 21.0
+        },
+        {
+          "degree": 8,
+          "wallClockMs": 838,
+          "speedupVsDop1": 5.816,
+          "parallelEfficiency": 0.727,
+          "cpuUtilizationRatio": 3.703,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 132.1
+        },
+        {
+          "degree": 16,
+          "wallClockMs": 585,
+          "speedupVsDop1": 8.332,
+          "parallelEfficiency": 0.521,
+          "cpuUtilizationRatio": 5.343,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 263.658
+        }
+      ]
+    },
+    {
+      "scenarioId": "medium-5k-10kb",
+      "label": "5k x 10KB",
+      "sizeClass": "medium",
+      "peakEfficiencyDegree": 2,
+      "bestWallClockDegree": 16,
+      "conservativeKneeDegree": 16,
+      "diminishingReturns": null,
+      "efficiencyDrop": {
+        "afterDegree": 2,
+        "nextDegree": 8,
+        "nextEfficiency": 0.758,
+        "rule": "first DOP after peak efficiency whose parallelEfficiency < 0.85"
+      },
+      "points": [
+        {
+          "degree": 1,
+          "wallClockMs": 2194,
+          "speedupVsDop1": 1.0,
+          "parallelEfficiency": 1.0,
+          "cpuUtilizationRatio": 0.667,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 5.43
+        },
+        {
+          "degree": 2,
+          "wallClockMs": 1034,
+          "speedupVsDop1": 2.122,
+          "parallelEfficiency": 1.061,
+          "cpuUtilizationRatio": 1.474,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 12.246
+        },
+        {
+          "degree": 4,
+          "wallClockMs": 540,
+          "speedupVsDop1": 4.063,
+          "parallelEfficiency": 1.016,
+          "cpuUtilizationRatio": 2.372,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 21.318
+        },
+        {
+          "degree": 8,
+          "wallClockMs": 362,
+          "speedupVsDop1": 6.061,
+          "parallelEfficiency": 0.758,
+          "cpuUtilizationRatio": 4.732,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 52.704
+        },
+        {
+          "degree": 16,
+          "wallClockMs": 239,
+          "speedupVsDop1": 9.18,
+          "parallelEfficiency": 0.574,
+          "cpuUtilizationRatio": 5.686,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 77.761
+        }
+      ]
+    },
+    {
+      "scenarioId": "large-1k-1mb",
+      "label": "1k x 1MB",
+      "sizeClass": "large",
+      "peakEfficiencyDegree": 2,
+      "bestWallClockDegree": 16,
+      "conservativeKneeDegree": 16,
+      "diminishingReturns": {
+        "afterDegree": 4,
+        "nextDegree": 8,
+        "incrementalGain": 0.0,
+        "rule": "first step whose wall-clock improvement vs previous DOP is < 10%"
+      },
+      "efficiencyDrop": {
+        "afterDegree": 2,
+        "nextDegree": 4,
+        "nextEfficiency": 0.819,
+        "rule": "first DOP after peak efficiency whose parallelEfficiency < 0.85"
+      },
+      "points": [
+        {
+          "degree": 1,
+          "wallClockMs": 524,
+          "speedupVsDop1": 1.0,
+          "parallelEfficiency": 1.0,
+          "cpuUtilizationRatio": 0.802,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 1.689
+        },
+        {
+          "degree": 2,
+          "wallClockMs": 224,
+          "speedupVsDop1": 2.339,
+          "parallelEfficiency": 1.17,
+          "cpuUtilizationRatio": 1.81,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 5.579
+        },
+        {
+          "degree": 4,
+          "wallClockMs": 160,
+          "speedupVsDop1": 3.275,
+          "parallelEfficiency": 0.819,
+          "cpuUtilizationRatio": 2.459,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 11.797
+        },
+        {
+          "degree": 8,
+          "wallClockMs": 160,
+          "speedupVsDop1": 3.275,
+          "parallelEfficiency": 0.409,
+          "cpuUtilizationRatio": 2.762,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 19.769
+        },
+        {
+          "degree": 16,
+          "wallClockMs": 63,
+          "speedupVsDop1": 8.317,
+          "parallelEfficiency": 0.52,
+          "cpuUtilizationRatio": 7.109,
+          "flushStatus": "measured",
+          "flushOverheadPercent": 81.1
+        }
+      ]
+    }
+  ]
+}

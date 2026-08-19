@@ -66,6 +66,11 @@ namespace CodexSafeTreeDelete
         {
             _hashes.Clear();
         }
+
+        public int Count
+        {
+            get { return _hashes.Count; }
+        }
     }
 
     public sealed class PurgeFileLeaf

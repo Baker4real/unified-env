@@ -1,0 +1,17 @@
+
+[32;1mok                           : [0mTrue
+[32;1msuite                        : [0mCodexSafeTreeDeleteParallelismBenchmark
+[32;1missue                        : [0m40
+[32;1mmode                         : [0mAll
+[32;1mprocessorCount               : [0m20
+[32;1msmallKnee                    : [0m16
+[32;1mmediumKnee                   : [0m16
+[32;1mlargeKnee                    : [0m16
+[32;1msmallPeak                    : [0m8
+[32;1mmediumPeak                   : [0m1
+[32;1mlargePeak                    : [0m4
+[32;1mdataSupportsTicketSuggestion : [0mFalse
+[32;1mflushVerified                : [0mTrue
+[32;1mrawCount                     : [0m15
+[32;1mwroteToFrozenIssue40Raw      : [0mFalse
+

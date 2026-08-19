@@ -6,7 +6,8 @@ $ErrorActionPreference = 'Stop'
 
 # Seams under test (ParallelPurgeCoordinator / #39):
 # 1. ParallelPurgeCoordinator — group by top-level directory, Parallel.ForEach, DOP from FileSystemCapabilities
-# 2. Per-file journal sequence — WriteEntry(pending) → Flush → File.Delete → WriteEntry(commit) → Flush
+# 2. Per-directory group-commit — durable pending batch → File.Delete → durable commit batch
+#    (pending must be visible before any delete in the batch; commit only for successful deletes)
 # 3. GetOrCreateThreadJournal — one writer per thread per top-level directory; independent journal files
 # 4. Partial failure — one file error is recorded; other files still delete; no fake all-success
 # Observable: fixture-tree file presence, journal literal lines, result counts. Not production Purge.
@@ -121,13 +122,13 @@ Assert-True ($null -ne $coordinatorType) 'AC1: ParallelPurgeCoordinator 类必�
 $optimizeCaps = New-OptimizeCapabilities
 $serialCaps = New-SerialCapabilities
 Assert-True ($optimizeCaps.RecommendParallel -eq $true) 'NTFS 本地应推荐并行'
-Assert-True ($optimizeCaps.RecommendedMaxParallelism -eq 4) 'optimize 时 RecommendedMaxParallelism 必须是 4'
+Assert-True ($optimizeCaps.RecommendedMaxParallelism -eq 2) 'optimize 时 RecommendedMaxParallelism 必须是 2（#40 20260819 峰值效率）'
 Assert-True ($serialCaps.RecommendParallel -eq $false) 'FAT32 不应推荐并行'
 Assert-True ($serialCaps.RecommendedMaxParallelism -eq 1) '非 optimize 时 RecommendedMaxParallelism 必须是 1'
 
 $optimizeDop = [CodexSafeTreeDelete.ParallelPurgeCoordinator]::ResolveMaxDegreeOfParallelism($optimizeCaps)
 $serialDop = [CodexSafeTreeDelete.ParallelPurgeCoordinator]::ResolveMaxDegreeOfParallelism($serialCaps)
-Assert-True ($optimizeDop -eq 4) 'AC4: optimize 时 MaxDegreeOfParallelism 必须来自 RecommendedMaxParallelism=4'
+Assert-True ($optimizeDop -eq 2) 'AC4: optimize 时 MaxDegreeOfParallelism 必须来自 RecommendedMaxParallelism=2'
 Assert-True ($serialDop -eq 1) 'AC4: RecommendParallel=false 时必须串行 DOP=1'
 
 $groupTree = Join-Path $fixtureRoot 'group-tree'
@@ -168,7 +169,7 @@ $coordinator = [CodexSafeTreeDelete.ParallelPurgeCoordinator]::new(
     $evidenceHome,
     $optimizeCaps)
 try {
-    Assert-True ($coordinator.MaxDegreeOfParallelism -eq 4) 'AC4: coordinator.MaxDegreeOfParallelism 必须是 4'
+    Assert-True ($coordinator.MaxDegreeOfParallelism -eq 2) 'AC4: coordinator.MaxDegreeOfParallelism 必须是 2'
     $multiResult = $coordinator.Purge()
 } finally {
     $coordinator.Dispose()
@@ -204,13 +205,18 @@ foreach ($journalPath in $journalFiles) {
         (Read-JournalTextFromSecondHandle -LiteralPath $journalPath) -split "`n" |
             Where-Object { $_.Length -gt 0 }
     )
-    for ($i = 0; $i -lt $lines.Count; $i += 2) {
-        Assert-True ($lines[$i] -like '{"op":"pending"*') "AC11: 字面行序必须是 pending，实际为 $($lines[$i])"
-        Assert-True (($i + 1) -lt $lines.Count) 'AC11: pending 之后必须有 commit'
-        Assert-True ($lines[$i + 1] -like '{"op":"commit"*') "AC11: pending 下一行必须是 commit，实际为 $($lines[$i + 1])"
-        $pendingPath = ($lines[$i] -replace '^\{"op":"pending","path":"', '' -replace '"\}$', '')
-        $commitPath = ($lines[$i + 1] -replace '^\{"op":"commit","path":"', '' -replace '"\}$', '')
-        Assert-True ($pendingPath -ceq $commitPath) "AC11: pending/commit 必须是同一路径，$pendingPath vs $commitPath"
+    $pendingSeen = @{}
+    foreach ($line in $lines) {
+        if ($line -like '{"op":"pending"*') {
+            $pendingPath = ($line -replace '^\{"op":"pending","path":"', '' -replace '"\}$', '')
+            Assert-True (-not $pendingSeen.ContainsKey($pendingPath)) "AC11: 同一路径不得重复 pending，$pendingPath"
+            $pendingSeen[$pendingPath] = $true
+        } elseif ($line -like '{"op":"commit"*') {
+            $commitPath = ($line -replace '^\{"op":"commit","path":"', '' -replace '"\}$', '')
+            Assert-True ($pendingSeen.ContainsKey($commitPath)) "AC11: commit 之前必须已有同一路径的 pending，$commitPath"
+        } else {
+            throw "AC11: journal 只能含 pending/commit 行，实际为 $line"
+        }
     }
 }
 

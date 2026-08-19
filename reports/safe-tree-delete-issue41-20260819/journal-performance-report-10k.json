@@ -1,0 +1,13 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue41-report-10k",
+  "TotalFlushTimeMs": 332,
+  "FlushCount": 632,
+  "OverheadPercent": 7.874762808349146,
+  "IsWithinTarget": true,
+  "SlowFlushCount": 0,
+  "Warning": "",
+  "TotalOperationTimeMs": 4216,
+  "sample2OverheadPercent": 6.228874939642685,
+  "sample2IsWithinTarget": true,
+  "analysis": "overhead% = TotalFlushTimeMs / Purge elapsedMs; target is <10%. Two live samples at DOP=2 after group-commit."
+}

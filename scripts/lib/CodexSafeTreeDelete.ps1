@@ -1,11 +1,20 @@
 Set-StrictMode -Version Latest
 
+$codexHookHandleBoundSource = Join-Path $PSScriptRoot 'CodexHookHandleBoundIO.cs'
 $codexSafeTreeDeleteFileIdentitySource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteFileIdentity.cs'
 $codexSafeTreeDeleteHashCacheSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteHashCache.cs'
+$codexSafeTreeDeleteApplySnapshotSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteApplySnapshot.cs'
 $codexSafeTreeDeleteThreadJournalSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteThreadJournal.cs'
 $codexSafeTreeDeleteParallelPurgeSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteParallelPurge.cs'
 if (-not ('CodexSafeTreeDelete.FileIdentityReader' -as [type])) {
-    Add-Type -Path $codexSafeTreeDeleteFileIdentitySource, $codexSafeTreeDeleteHashCacheSource, $codexSafeTreeDeleteThreadJournalSource, $codexSafeTreeDeleteParallelPurgeSource -ErrorAction Stop
+    Add-Type -Path @(
+        $codexHookHandleBoundSource,
+        $codexSafeTreeDeleteFileIdentitySource,
+        $codexSafeTreeDeleteHashCacheSource,
+        $codexSafeTreeDeleteApplySnapshotSource,
+        $codexSafeTreeDeleteThreadJournalSource,
+        $codexSafeTreeDeleteParallelPurgeSource
+    ) -ErrorAction Stop
 }
 if (-not ('CodexSafeTreeDelete.StatusJsonTopLevelReader' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -950,21 +959,31 @@ function New-CodexSafeTreeDeleteQuarantineTimeAnchor {
     }
 }
 
+function Get-CodexSafeTreeDeleteFileSystemCapabilities {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [object]$FileSystemCapabilitiesForTest
+    )
+
+    if ($null -ne $FileSystemCapabilitiesForTest) {
+        if ($FileSystemCapabilitiesForTest -isnot [CodexSafeTreeDelete.FileSystemCapabilities]) {
+            throw 'safe-delete FileSystemCapabilitiesForTest 必须是 FileSystemCapabilities。'
+        }
+        return $FileSystemCapabilitiesForTest
+    }
+
+    return [CodexSafeTreeDelete.FileSystemDetector]::DetectFileSystem($TargetPath)
+}
+
 function Assert-CodexSafeTreeDeleteDeletionAllowed {
     param(
         [Parameter(Mandatory)][string]$TargetPath,
         [object]$FileSystemCapabilitiesForTest
     )
 
-    $capabilities = $null
-    if ($null -ne $FileSystemCapabilitiesForTest) {
-        if ($FileSystemCapabilitiesForTest -isnot [CodexSafeTreeDelete.FileSystemCapabilities]) {
-            throw 'safe-delete FileSystemCapabilitiesForTest 必须是 FileSystemCapabilities。'
-        }
-        $capabilities = $FileSystemCapabilitiesForTest
-    } else {
-        $capabilities = [CodexSafeTreeDelete.FileSystemDetector]::DetectFileSystem($TargetPath)
-    }
+    $capabilities = Get-CodexSafeTreeDeleteFileSystemCapabilities `
+        -TargetPath $TargetPath `
+        -FileSystemCapabilitiesForTest $FileSystemCapabilitiesForTest
 
     if ($null -eq $capabilities -or -not [bool]$capabilities.DeletionAllowed) {
         throw 'safe-delete 目标文件系统不允许删除：缺少 FILE_ID_INFO 或不支持的文件系统。'
@@ -1229,7 +1248,7 @@ function Invoke-CodexSafeTreeDeleteApplyFileHash {
     }
     try {
         if ($null -ne $Lease) {
-            $current = Get-CodexSafeTreeDeleteFileIdentityV2 -LiteralPath $LiteralPath
+            $current = [CodexSafeTreeDelete.FileIdentityReader]::GetFileIdentityV2($Lease.Handle)
             if ($current -ne $expected) {
                 throw [CodexSafeTreeDelete.IdentityMismatchException]::new($expected, $current)
             }
@@ -1279,6 +1298,73 @@ function New-CodexSafeTreeDeleteApplyFileHashProvider {
         return ,$hash
     }
     return $provider.GetNewClosure()
+}
+
+function Get-CodexSafeTreeDeleteApplyTreeSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [switch]$AllowHardLinks,
+        [switch]$AllowInternalDirectoryJunctions,
+        [string]$InternalDirectoryJunctionTargetRoot,
+        [scriptblock]$MetricsObserver,
+        [Parameter(Mandatory)][CodexSafeTreeDelete.ApplySessionHashCoordinator]$Coordinator,
+        [string]$Name = 'safe-delete apply snapshot'
+    )
+
+    $fullPath = Assert-CodexHookCapabilityPath `
+        -Path $Path `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name $Name
+    $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Name capability root"
+    if ($AllowInternalDirectoryJunctions) {
+        if ([string]::IsNullOrWhiteSpace($InternalDirectoryJunctionTargetRoot)) {
+            throw "$Name 允许内部 junction 时必须提供 target root。"
+        }
+        $junctionTargetRoot = Assert-CodexHookDPath `
+            -Value $InternalDirectoryJunctionTargetRoot `
+            -Name "$Name internal junction target root"
+        if (-not (Test-CodexHookPathWithin -Path $junctionTargetRoot -ParentPath $capabilityRootPath)) {
+            throw "$Name internal junction target root 超出 capability root。"
+        }
+    }
+
+    $streamCaptures = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+    $native = [CodexSafeTreeDelete.ApplyTreeSnapshotBuilder]::Build(
+        [string]$fullPath,
+        [string]$capabilityRootPath,
+        [bool]$AllowHardLinks,
+        [bool]$AllowInternalDirectoryJunctions,
+        [string]$InternalDirectoryJunctionTargetRoot,
+        $Coordinator)
+    $entries = [Collections.Generic.List[object]]::new()
+    foreach ($entry in @($native.Entries)) {
+        $kind = [string]$entry.Kind
+        $entries.Add([pscustomobject][ordered]@{
+            relativePath = [string]$entry.RelativePath
+            kind = $kind
+            sha256 = $(if ($kind -ceq 'directory') { $null } else { [string]$entry.Sha256Hex })
+            identity = @([string]$entry.VolumeSerialNumber, [string]$entry.FileIndex)
+        })
+        if ([bool]$entry.StreamSetCaptured) {
+            $streamCaptures[[string]$entry.RelativePath] = $entry
+        }
+        if ($null -ne $MetricsObserver) {
+            & $MetricsObserver $kind ([long]$entry.LogicalBytes) ([long]$entry.HashedBytes)
+        }
+    }
+
+    $script:CodexSafeTreeDeleteLastStreamCaptures = $streamCaptures
+    return [pscustomobject][ordered]@{
+        schemaVersion = 2
+        rootIdentity = @(
+            [string]$native.RootVolumeSerialNumber,
+            [string]$native.RootFileIndex
+        )
+        entries = @($entries)
+    }
 }
 
 function Invoke-CodexSafeTreeDeletePurgeFileHash {
@@ -1578,7 +1664,8 @@ function Assert-CodexSafeTreeDeleteLiveStreamSet {
         [Parameter(Mandatory)][object]$TreeManifest,
         [Parameter(Mandatory)][string]$TreePath,
         [Parameter(Mandatory)][ValidateSet('apply', 'purge')][string]$Phase,
-        [switch]$AllowMissingPlannedLeaves
+        [switch]$AllowMissingPlannedLeaves,
+        [object]$CapturedStreamSets
     )
 
     $scope = "safe-delete $Phase locked preflight leaf stream-set"
@@ -1610,7 +1697,23 @@ function Assert-CodexSafeTreeDeleteLiveStreamSet {
             -TreePath $TreePath `
             -RelativePath $relativePath `
             -Scope $scope
-        $capture = Get-CodexSafeTreeDeleteLeafStreamSet -LiteralPath $absolutePath
+        $capture = $null
+        $usedAmortizedCapture = $false
+        if ($null -ne $CapturedStreamSets -and
+            $CapturedStreamSets.ContainsKey($relativePath) -and
+            [bool]$CapturedStreamSets[$relativePath].StreamSetCaptured) {
+            $usedAmortizedCapture = $true
+            $nativeCapture = $CapturedStreamSets[$relativePath]
+            $capture = [pscustomobject][ordered]@{
+                StreamNames = @($nativeCapture.StreamNames)
+                NumberOfLinks = [uint32]$nativeCapture.NumberOfLinks
+                IsDirectory = $false
+                IsReparsePoint = $false
+                Identity = $nativeCapture.IdentityV2
+            }
+        } else {
+            $capture = Get-CodexSafeTreeDeleteLeafStreamSet -LiteralPath $absolutePath
+        }
         $capturedKind = if ([bool]$capture.IsReparsePoint) {
             'directory-junction'
         } elseif ([bool]$capture.IsDirectory) {
@@ -1629,7 +1732,10 @@ function Assert-CodexSafeTreeDeleteLiveStreamSet {
             if ([long]$capture.NumberOfLinks -ne [long]$planned.hardLinkCount) {
                 throw "$scope leaf hardlink 计数漂移：$relativePath"
             }
-            if ($capture.Identity -ne $planned.identity) {
+            # Amortized capture comes from the same lease the C# walker already
+            # compared to fileIdentitiesV2. Re-comparing the PS-wrapped identity
+            # object uses -ne reference semantics and false-drifts.
+            if (-not $usedAmortizedCapture -and $capture.Identity -ne $planned.identity) {
                 throw "$scope leaf FileIdentityV2 identity 漂移：$relativePath"
             }
         }
@@ -3319,6 +3425,7 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     -RunDirectory $runDirectory `
                     -GenerationId ([string]$plan.generationId) `
                     -DirectoryCommitAnchors @($transaction.directoryCommitAnchors) `
+                    -QuarantinePath $quarantinePath `
                     -MetricsObserver $treeMetricsObserver
                 $pendingFiles = @($inFlightRecovery.pendingFiles)
                 $uncertainFiles = @($inFlightRecovery.uncertainFiles)
@@ -3985,23 +4092,34 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
     } else {
         [CodexSafeTreeDelete.SessionHashCache]::new()
     }
-    $applyFileHashProvider = $null
-    if (-not $DisableApplyHashReuseForTest) {
-        $applyFileHashProvider = New-CodexSafeTreeDeleteApplyFileHashProvider `
-            -ExpectedIdentities $applyFileIdentities `
-            -SessionCache $sessionHashCache
-    }
+    $applyReuseEnabled = -not $DisableApplyHashReuseForTest.IsPresent
+    $applyCoordinator = [CodexSafeTreeDelete.ApplySessionHashCoordinator]::new(
+        $applyFileIdentities,
+        $sessionHashCache,
+        $applyReuseEnabled)
     $quarantineCapabilityRoot = Get-CodexSafeTreeDeleteQuarantineCapabilityRoot -Target $target
-    $currentTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
-        -Path $target.targetPath `
-        -CapabilityRoot $target.capabilityRoot `
-        -AllowedExactPaths @($target.targetPath) `
-        -AllowHardLinks:([bool]$target.allowHardLinks) `
-        -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
-        -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
-        -MetricsObserver $primaryMetricsObserver `
-        -FileContentHashProvider $applyFileHashProvider `
-        -Name 'safe-delete apply preflight'
+    $currentTree = if ($applyReuseEnabled) {
+        Get-CodexSafeTreeDeleteApplyTreeSnapshot `
+            -Path $target.targetPath `
+            -CapabilityRoot $target.capabilityRoot `
+            -AllowedExactPaths @($target.targetPath) `
+            -AllowHardLinks:([bool]$target.allowHardLinks) `
+            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+            -MetricsObserver $primaryMetricsObserver `
+            -Coordinator $applyCoordinator `
+            -Name 'safe-delete apply preflight'
+    } else {
+        Get-CodexHookCapabilityDirectoryTreeSnapshot `
+            -Path $target.targetPath `
+            -CapabilityRoot $target.capabilityRoot `
+            -AllowedExactPaths @($target.targetPath) `
+            -AllowHardLinks:([bool]$target.allowHardLinks) `
+            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+            -MetricsObserver $primaryMetricsObserver `
+            -Name 'safe-delete apply preflight'
+    }
     Assert-CodexSafeTreeDeleteTargetTreePolicy `
         -Target $target `
         -TreeManifest $currentTree `
@@ -4055,16 +4173,28 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         if ([IO.Directory]::Exists($quarantinePath) -or [IO.File]::Exists($quarantinePath)) {
             throw 'safe-delete quarantine target 已存在。'
         }
-        $lockedTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
-            -Path $target.targetPath `
-            -CapabilityRoot $target.capabilityRoot `
-            -AllowedExactPaths @($target.targetPath) `
-            -AllowHardLinks:([bool]$target.allowHardLinks) `
-            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
-            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
-            -MetricsObserver $repeatMetricsObserver `
-            -FileContentHashProvider $applyFileHashProvider `
-            -Name 'safe-delete apply locked preflight'
+        $lockedTree = if ($applyReuseEnabled) {
+            Get-CodexSafeTreeDeleteApplyTreeSnapshot `
+                -Path $target.targetPath `
+                -CapabilityRoot $target.capabilityRoot `
+                -AllowedExactPaths @($target.targetPath) `
+                -AllowHardLinks:([bool]$target.allowHardLinks) `
+                -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                -MetricsObserver $repeatMetricsObserver `
+                -Coordinator $applyCoordinator `
+                -Name 'safe-delete apply locked preflight'
+        } else {
+            Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                -Path $target.targetPath `
+                -CapabilityRoot $target.capabilityRoot `
+                -AllowedExactPaths @($target.targetPath) `
+                -AllowHardLinks:([bool]$target.allowHardLinks) `
+                -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                -MetricsObserver $repeatMetricsObserver `
+                -Name 'safe-delete apply locked preflight'
+        }
         Assert-CodexSafeTreeDeleteTargetTreePolicy `
             -Target $target `
             -TreeManifest $lockedTree `
@@ -4073,11 +4203,13 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
             (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
             throw 'safe-delete apply locked preflight tree manifest 漂移。'
         }
+        $applyStreamCaptures = $script:CodexSafeTreeDeleteLastStreamCaptures
         Assert-CodexSafeTreeDeleteLiveStreamSet `
             -PlanStreamSet $planStreamSet `
             -TreeManifest $lockedTree `
             -TreePath ([string]$target.targetPath) `
-            -Phase 'apply'
+            -Phase 'apply' `
+            -CapturedStreamSets $applyStreamCaptures
         $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::AcquireForEmptyDelete(
             [string]$target.capabilityRoot,
             [string]$target.targetPath)
@@ -4108,16 +4240,28 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
         if ([IO.Directory]::Exists($target.targetPath)) {
             throw 'safe-delete quarantine 后原目标仍存在。'
         }
-        $quarantinedTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
-            -Path $quarantinePath `
-            -CapabilityRoot $quarantineCapabilityRoot `
-            -AllowedExactPaths @($quarantinePath) `
-            -AllowHardLinks:([bool]$target.allowHardLinks) `
-            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
-            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
-            -MetricsObserver $repeatMetricsObserver `
-            -FileContentHashProvider $applyFileHashProvider `
-            -Name 'safe-delete quarantine postcheck'
+        $quarantinedTree = if ($applyReuseEnabled) {
+            Get-CodexSafeTreeDeleteApplyTreeSnapshot `
+                -Path $quarantinePath `
+                -CapabilityRoot $quarantineCapabilityRoot `
+                -AllowedExactPaths @($quarantinePath) `
+                -AllowHardLinks:([bool]$target.allowHardLinks) `
+                -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                -MetricsObserver $repeatMetricsObserver `
+                -Coordinator $applyCoordinator `
+                -Name 'safe-delete quarantine postcheck'
+        } else {
+            Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                -Path $quarantinePath `
+                -CapabilityRoot $quarantineCapabilityRoot `
+                -AllowedExactPaths @($quarantinePath) `
+                -AllowHardLinks:([bool]$target.allowHardLinks) `
+                -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                -MetricsObserver $repeatMetricsObserver `
+                -Name 'safe-delete quarantine postcheck'
+        }
         Assert-CodexSafeTreeDeleteTargetTreePolicy `
             -Target $target `
             -TreeManifest $quarantinedTree `
@@ -5026,6 +5170,7 @@ function Get-CodexSafeTreeDeleteInFlightRecovery {
         [Parameter(Mandatory)][string]$RunDirectory,
         [Parameter(Mandatory)][string]$GenerationId,
         [AllowEmptyCollection()][object[]]$DirectoryCommitAnchors = @(),
+        [string]$QuarantinePath,
         [scriptblock]$MetricsObserver
     )
 
@@ -5128,6 +5273,95 @@ function Get-CodexSafeTreeDeleteInFlightRecovery {
             $pendingFiles.Add($directoryPath)
         } else {
             $uncertainFiles.Add($directoryPath)
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($QuarantinePath)) {
+        $parallelJournalRoots = @(
+            [IO.Directory]::EnumerateDirectories(
+                $fullRunDirectory,
+                'parallel-purge-journal*',
+                [IO.SearchOption]::TopDirectoryOnly)
+        )
+        if ($parallelJournalRoots.Count -gt 0) {
+            $quarantineFullPath = Assert-CodexHookDPath `
+                -Value $QuarantinePath `
+                -Name 'safe-delete in-flight parallel purge quarantine'
+            $lastOpByRelative = [Collections.Generic.Dictionary[string, string]]::new(
+                [StringComparer]::Ordinal)
+            foreach ($parallelJournalRoot in $parallelJournalRoots) {
+            foreach ($journalPathCandidate in @([IO.Directory]::EnumerateFiles(
+                    $parallelJournalRoot,
+                    '*.thread-*.jsonl',
+                    [IO.SearchOption]::TopDirectoryOnly))) {
+                $journalPath = Assert-CodexHookDPath `
+                    -Value $journalPathCandidate `
+                    -Name 'safe-delete in-flight parallel purge journal path'
+                [void](Assert-CodexHookCapabilityPath `
+                    -Path $journalPath `
+                    -CapabilityRoot $fullRunDirectory `
+                    -AllowedExactPaths @($journalPath) `
+                    -Name 'safe-delete in-flight parallel purge journal')
+                $journalName = [IO.Path]::GetFileName($journalPath)
+                if ($journalName -notmatch '^[A-Za-z0-9._-]+\.thread-\d+\.jsonl$') {
+                    throw "safe-delete in-flight parallel purge journal 命名非法：$journalName"
+                }
+
+                $journalSnapshot = Read-CodexHookSafeUtf8FileSnapshot `
+                    -Path $journalPath `
+                    -Name 'safe-delete in-flight parallel purge journal' `
+                    -AllowedExactPaths @($journalPath)
+                if ($null -ne $MetricsObserver) {
+                    & $MetricsObserver 'hash-read' 0L ([long]$journalSnapshot.bytes.Length)
+                }
+
+                $lines = @(([string]$journalSnapshot.text) -split "`n")
+                foreach ($rawLine in $lines) {
+                    $line = [string]$rawLine
+                    if ($line.Length -eq 0) { continue }
+                    if ($line -notmatch '^\{"op":"(pending|commit)","path":"([^"]+)"\}$') {
+                        throw "safe-delete in-flight parallel purge journal 行非法：$line"
+                    }
+
+                    $op = [string]$Matches[1]
+                    $relative = [string]$Matches[2]
+                    Assert-CodexHookDirectoryTreeRelativePath `
+                        -RelativePath $relative `
+                        -Scope 'safe-delete in-flight parallel purge journal path'
+                    $existingOp = $null
+                    if ($lastOpByRelative.TryGetValue($relative, [ref]$existingOp) -and
+                        [string]$existingOp -ceq 'commit') {
+                        continue
+                    }
+                    $lastOpByRelative[$relative] = $op
+                }
+            }
+            }
+
+            foreach ($pair in $lastOpByRelative.GetEnumerator()) {
+                $relative = [string]$pair.Key
+                $lastOp = [string]$pair.Value
+                $absolute = ConvertTo-CodexSafeTreeDeleteAbsolutePathFromRelative `
+                    -TargetPath $quarantineFullPath `
+                    -RelativePath $relative
+                $pathPresent = [IO.File]::Exists($absolute) -or [IO.Directory]::Exists($absolute)
+                if ($lastOp -ceq 'commit') {
+                    if ($pathPresent) {
+                        throw "safe-delete parallel purge commit 后路径仍在：$relative"
+                    }
+                    continue
+                }
+
+                if (-not $seenPaths.Add($absolute)) {
+                    throw "safe-delete in-flight parallel purge journal 路径重复：$relative"
+                }
+
+                if ($pathPresent) {
+                    $pendingFiles.Add($absolute)
+                } else {
+                    $uncertainFiles.Add($absolute)
+                }
+            }
         }
     }
 
@@ -5580,6 +5814,189 @@ function Complete-CodexSafeTreeDeleteCommittedMissingQuarantine {
     }
 }
 
+function Test-CodexSafeTreeDeleteParallelPurgeEligible {
+    param(
+        [Parameter(Mandatory)][object]$Capabilities,
+        [Parameter(Mandatory)][object]$Target,
+        [Parameter(Mandatory)][object]$TreeManifest,
+        [switch]$DisablePurgeHashReuseForTest,
+        [switch]$DisableParallelPurgeForTest,
+        [scriptblock]$LeafDeleteCheckpointForTest,
+        [scriptblock]$LeafDeleteFaultForTest,
+        [scriptblock]$DirectoryDeleteCheckpointForTest
+    )
+
+    if ($DisablePurgeHashReuseForTest -or $DisableParallelPurgeForTest) {
+        return $false
+    }
+
+    if ($null -eq $Capabilities -or -not [bool]$Capabilities.RecommendParallel) {
+        return $false
+    }
+
+    if ([string]$Target.rootDeletionPurpose -ceq 'empty-project-state') {
+        return $false
+    }
+
+    if ($null -ne $LeafDeleteCheckpointForTest -or
+        $null -ne $LeafDeleteFaultForTest -or
+        $null -ne $DirectoryDeleteCheckpointForTest) {
+        return $false
+    }
+
+    foreach ($entry in @($TreeManifest.entries)) {
+        if ([string]$entry.kind -ceq 'directory-junction') {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function New-CodexSafeTreeDeleteParallelPurgeDirectorySpecs {
+    param(
+        [Parameter(Mandatory)][string]$TreePath,
+        [Parameter(Mandatory)][object]$TreeManifest
+    )
+
+    $specs = [Collections.Generic.List[CodexSafeTreeDelete.HostSafetyParallelPurgeDirectorySpec]]::new()
+    foreach ($entry in @($TreeManifest.entries)) {
+        if ([string]$entry.kind -cne 'directory') {
+            continue
+        }
+
+        $relativePath = [string]$entry.relativePath
+        if ($relativePath -ceq '.') {
+            continue
+        }
+
+        $identity = @($entry.identity)
+        if ($identity.Count -ne 2) {
+            throw "safe-delete parallel purge 目录 identity 非法：$relativePath"
+        }
+
+        $spec = [CodexSafeTreeDelete.HostSafetyParallelPurgeDirectorySpec]::new()
+        $spec.LiteralPath = ConvertTo-CodexSafeTreeDeleteAbsolutePathFromRelative `
+            -TargetPath $TreePath `
+            -RelativePath $relativePath
+        $spec.RelativePath = $relativePath
+        $spec.VolumeSerialNumber = [string]$identity[0]
+        $spec.FileIndex = [string]$identity[1]
+        $specs.Add($spec)
+    }
+
+    return $specs
+}
+
+function New-CodexSafeTreeDeleteParallelPurgeLeafSpecs {
+    param(
+        [Parameter(Mandatory)][string]$TreePath,
+        [Parameter(Mandatory)][object]$TreeManifest,
+        [Parameter(Mandatory)][Collections.Generic.Dictionary[string, CodexSafeTreeDelete.FileIdentityV2]]$ExpectedIdentities
+    )
+
+    $specs = [Collections.Generic.Dictionary[string, CodexSafeTreeDelete.HostSafetyParallelPurgeLeafSpec]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @($TreeManifest.entries)) {
+        if ([string]$entry.kind -cne 'file') {
+            continue
+        }
+
+        $relativePath = [string]$entry.relativePath
+        $expected = $null
+        if (-not $ExpectedIdentities.TryGetValue($relativePath, [ref]$expected) -or $null -eq $expected) {
+            throw "safe-delete parallel purge fileIdentitiesV2 缺少：$relativePath"
+        }
+
+        $literalPath = ConvertTo-CodexSafeTreeDeleteAbsolutePathFromRelative `
+            -TargetPath $TreePath `
+            -RelativePath $relativePath
+        $sha256 = [string]$entry.sha256
+        if ($sha256 -notmatch '^[0-9a-f]{64}$') {
+            throw "safe-delete parallel purge 计划 SHA-256 非法：$relativePath"
+        }
+
+        $identity = @($entry.identity)
+        if ($identity.Count -ne 2) {
+            throw "safe-delete parallel purge 计划 identity 非法：$relativePath"
+        }
+
+        $spec = [CodexSafeTreeDelete.HostSafetyParallelPurgeLeafSpec]::new()
+        $spec.LiteralPath = $literalPath
+        $spec.RelativePath = $relativePath
+        $spec.Identity = $expected
+        $spec.VolumeSerialNumber = [string]$identity[0]
+        $spec.FileIndex = [string]$identity[1]
+        $spec.Sha256Hex = $sha256
+        $specs.Add($literalPath, $spec)
+    }
+
+    return $specs
+}
+
+function Remove-CodexSafeTreeDeleteEmptyDirectoryTreeAfterParallelPurge {
+    param(
+        [Parameter(Mandatory)][string]$TreePath,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [Parameter(Mandatory)][object]$TreeManifest,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @()
+    )
+
+    $fullTreePath = Assert-CodexHookCapabilityPath `
+        -Path $TreePath `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name 'safe-delete parallel purge empty-directory cleanup'
+    $directories = [Collections.Generic.List[object]]::new()
+    foreach ($entry in @($TreeManifest.entries)) {
+        if ([string]$entry.kind -ceq 'directory') {
+            $directories.Add($entry)
+        }
+    }
+
+    $ordered = @($directories | Sort-Object -Property @{
+        Expression = {
+            $relative = [string]$_.relativePath
+            if ($relative -ceq '.') { 0 } else { $relative.Length }
+        }
+        Descending = $true
+    })
+    foreach ($entry in $ordered) {
+        $relative = [string]$entry.relativePath
+        $directoryPath = if ($relative -ceq '.') {
+            $fullTreePath
+        } else {
+            ConvertTo-CodexSafeTreeDeleteAbsolutePathFromRelative `
+                -TargetPath $fullTreePath `
+                -RelativePath $relative
+        }
+        if (-not [IO.Directory]::Exists($directoryPath)) {
+            continue
+        }
+
+        [void](Assert-CodexHookCapabilityPath `
+            -Path $directoryPath `
+            -CapabilityRoot $CapabilityRoot `
+            -Name 'safe-delete parallel purge empty directory')
+        $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::AcquireForEmptyDelete(
+            $CapabilityRoot,
+            $directoryPath)
+        $deleted = $false
+        try {
+            Assert-CodexHookDirectoryTreeIdentity `
+                -Expected @($entry.identity) `
+                -Actual @($guard.VolumeSerialNumber, $guard.FileIndex) `
+                -Scope 'safe-delete parallel purge empty directory identity'
+            $guard.DeleteEmptyDirectory()
+            $deleted = $true
+        } finally {
+            if (-not $deleted) {
+                $guard.Dispose()
+            }
+        }
+    }
+}
+
 function Invoke-CodexSafeTreeDeletePurge {
     param(
         [Parameter(Mandatory)][string]$TransactionPath,
@@ -5605,7 +6022,11 @@ function Invoke-CodexSafeTreeDeletePurge {
         [CodexSafeTreeDelete.SessionHashCache]$SessionHashCacheForTest,
         [switch]$DisablePurgeHashReuseForTest,
         [switch]$DisablePurgeBatchForTest,
-        [scriptblock]$PurgeFileLeafBatchObserverForTest
+        [switch]$DisableParallelPurgeForTest,
+        [int]$PurgeMaxDegreeOfParallelismForTest = 0,
+        [scriptblock]$PurgeFileLeafBatchObserverForTest,
+        [scriptblock]$ParallelPurgeAfterPendingFlushedForTest,
+        [int]$ParallelPurgeFailAfterPendingCountForTest = 0
     )
 
     $metricsState = New-CodexSafeTreeDeleteMetricsState -Phase 'purge'
@@ -5683,6 +6104,9 @@ function Invoke-CodexSafeTreeDeletePurge {
     Assert-CodexSafeTreeDeleteDeletionAllowed `
         -TargetPath $deletionProbePath `
         -FileSystemCapabilitiesForTest $FileSystemCapabilitiesForTest
+    $purgeCapabilities = Get-CodexSafeTreeDeleteFileSystemCapabilities `
+        -TargetPath $deletionProbePath `
+        -FileSystemCapabilitiesForTest $FileSystemCapabilitiesForTest
     if ($null -ne $BeforePurgeMutexForTest) {
         & $BeforePurgeMutexForTest $initialTarget.targetPath
     }
@@ -5716,6 +6140,7 @@ function Invoke-CodexSafeTreeDeletePurge {
             -RunDirectory $runDirectory `
             -GenerationId ([string]$plan.generationId) `
             -DirectoryCommitAnchors @($transaction.directoryCommitAnchors) `
+            -QuarantinePath $quarantinePath `
             -MetricsObserver $repeatMetricsObserver
         if (@($inFlightRecovery.uncertainFiles).Count -gt 0) {
             return [pscustomobject][ordered]@{
@@ -5739,16 +6164,44 @@ function Invoke-CodexSafeTreeDeletePurge {
                 -MetricsState $metricsState `
                 -MetricsObserver $repeatMetricsObserver
         }
-        $currentTree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
-            -Path $quarantinePath `
-            -CapabilityRoot $quarantineCapabilityRoot `
-            -AllowedExactPaths @($quarantinePath) `
-            -AllowHardLinks:([bool]$target.allowHardLinks) `
-            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
-            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
-            -MetricsObserver $metricsObserver `
-            -FileContentHashProvider $purgeFileHashProvider `
-            -Name 'safe-delete purge locked preflight'
+        $purgeTimings = [pscustomobject][ordered]@{
+            snapshotMs = 0L
+            batchMs = 0L
+            coordinatorMs = 0L
+            emptyRootMs = 0L
+            snapshotKind = 'powershell'
+        }
+        $snapshotWatch = [Diagnostics.Stopwatch]::StartNew()
+        $currentTree = if (-not $DisablePurgeHashReuseForTest) {
+            $purgeTimings.snapshotKind = 'csharp-apply-walker'
+            $purgeSnapshotCoordinator = [CodexSafeTreeDelete.ApplySessionHashCoordinator]::new(
+                $purgeFileIdentities,
+                $sessionHashCache,
+                $true)
+            Get-CodexSafeTreeDeleteApplyTreeSnapshot `
+                -Path $quarantinePath `
+                -CapabilityRoot $quarantineCapabilityRoot `
+                -AllowedExactPaths @($quarantinePath) `
+                -AllowHardLinks:([bool]$target.allowHardLinks) `
+                -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                -MetricsObserver $metricsObserver `
+                -Coordinator $purgeSnapshotCoordinator `
+                -Name 'safe-delete purge locked preflight'
+        } else {
+            Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                -Path $quarantinePath `
+                -CapabilityRoot $quarantineCapabilityRoot `
+                -AllowedExactPaths @($quarantinePath) `
+                -AllowHardLinks:([bool]$target.allowHardLinks) `
+                -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                -MetricsObserver $metricsObserver `
+                -FileContentHashProvider $purgeFileHashProvider `
+                -Name 'safe-delete purge locked preflight'
+        }
+        $snapshotWatch.Stop()
+        $purgeTimings.snapshotMs = [long]$snapshotWatch.ElapsedMilliseconds
         Assert-CodexSafeTreeDeleteTargetTreePolicy `
             -Target $target `
             -TreeManifest $currentTree `
@@ -5770,12 +6223,14 @@ function Invoke-CodexSafeTreeDeletePurge {
         foreach ($entry in @($currentTree.entries)) {
             [void]$preflightLiveLeafSet.Add([string]$entry.relativePath)
         }
+        $purgeStreamCaptures = $script:CodexSafeTreeDeleteLastStreamCaptures
         Assert-CodexSafeTreeDeleteLiveStreamSet `
             -PlanStreamSet $planStreamSet `
             -TreeManifest $currentTree `
             -TreePath $quarantinePath `
             -Phase 'purge' `
-            -AllowMissingPlannedLeaves:$purgeResumedFromPurging
+            -AllowMissingPlannedLeaves:$purgeResumedFromPurging `
+            -CapturedStreamSets $purgeStreamCaptures
 
         if ([long]$transaction.schemaVersion -eq 3L) {
             $trustedTimeArguments = @{
@@ -5928,13 +6383,16 @@ function Invoke-CodexSafeTreeDeletePurge {
                 -Scope 'safe-delete transaction directory commit anchor'
         }
         $enablePurgeBatch = -not $DisablePurgeBatchForTest
-        if ($enablePurgeBatch) {
+        $csharpSnapshotFilledCache = [string]$purgeTimings.snapshotKind -ceq 'csharp-apply-walker'
+        if ($enablePurgeBatch -and
+            (-not $csharpSnapshotFilledCache -or $null -ne $PurgeFileLeafBatchObserverForTest)) {
             # Pass 1: collect file leaves (path + FileIdentityV2) into List<T>.
-            # Pass 2: verify hashes via existing PurgeFileHash / GetHashSafely.
-            # Pass 3+4 stay in Remove-CodexHookCapabilityDirectoryTree: per
-            # directory freeze/commit journal, then handle-bound delete. Never
-            # write the whole tree pending and then delete the whole tree.
-            # HostSafety 删除循环保持原逐 leaf 路径，避免递归嵌套函数拆坏 freeze journal。
+            # Pass 2: verify hashes via existing PurgeFileHash / GetHashSafely
+            # unless the C# preflight walker already filled the session cache.
+            # Pass 3+4 stay in Remove-CodexHookCapabilityDirectoryTree or the
+            # parallel HostSafety deleter. Never write the whole tree pending
+            # and then delete the whole tree.
+            $batchWatch = [Diagnostics.Stopwatch]::StartNew()
             $purgeFileLeafBatch = New-CodexSafeTreeDeletePurgeFileLeafBatch `
                 -TreePath $quarantinePath `
                 -TreeManifest $purgeManifest `
@@ -5949,40 +6407,194 @@ function Invoke-CodexSafeTreeDeletePurge {
                         -ExpectedIdentities $purgeFileIdentities `
                         -SessionCache $sessionHashCache
                 }
-                if ($null -ne $PurgeFileLeafBatchObserverForTest) {
-                    & $PurgeFileLeafBatchObserverForTest $purgeFileLeafBatch 'validated'
-                }
             }
+            if ($null -ne $PurgeFileLeafBatchObserverForTest) {
+                & $PurgeFileLeafBatchObserverForTest $purgeFileLeafBatch 'validated'
+            }
+            $batchWatch.Stop()
+            $purgeTimings.batchMs = [long]$batchWatch.ElapsedMilliseconds
         }
         if ($null -ne $BeforeDirectoryTreeDeleteForTest) {
             & $BeforeDirectoryTreeDeleteForTest $quarantinePath
         }
+        $parallelPurgeInfo = [pscustomobject][ordered]@{
+            used = $false
+            reason = 'serial-host-safety'
+            maxDegreeOfParallelism = 1
+            journalFileCount = 0
+            deletedCount = 0
+            failedCount = 0
+            elapsedMs = 0
+            journalOverheadPercent = $null
+            journalIsWithinTarget = $null
+            journalFlushCount = $null
+        }
+        $useParallelPurge = Test-CodexSafeTreeDeleteParallelPurgeEligible `
+            -Capabilities $purgeCapabilities `
+            -Target $target `
+            -TreeManifest $purgeManifest `
+            -DisablePurgeHashReuseForTest:$DisablePurgeHashReuseForTest `
+            -DisableParallelPurgeForTest:$DisableParallelPurgeForTest `
+            -LeafDeleteCheckpointForTest $LeafDeleteCheckpointForTest `
+            -LeafDeleteFaultForTest $LeafDeleteFaultForTest `
+            -DirectoryDeleteCheckpointForTest $DirectoryDeleteCheckpointForTest
         try {
-            Remove-CodexHookCapabilityDirectoryTree `
-                -Path $quarantinePath `
-                -CapabilityRoot $quarantineCapabilityRoot `
-                -AllowedExactPaths @($quarantinePath) `
-                -AllowHardLinks:([bool]$target.allowHardLinks) `
-                -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
-                -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
-                -ExpectedRootIdentity @($plan.treeManifest.rootIdentity) `
-                -ExpectedTreeManifest $purgeManifest `
-                -RejectNamedStreams:([string]$target.rootDeletionPurpose -ceq 'empty-project-state') `
-                -NamedStreamDeleteIntentRoot $runDirectory `
-                -NamedStreamDeleteGenerationId ([string]$plan.generationId) `
-                -NamedStreamDeleteJournalAnchors @($transaction.directoryCommitAnchors) `
-                -NamedStreamDeleteCommitAnchor $anchorDirectoryCommit `
-                -NamedStreamDeleteCheckpointForTest $DirectoryDeleteCheckpointForTest `
-                -LeafRetryPolicy $leafRetryPolicy `
-                -LeafRetryFaultForTest $LeafDeleteFaultForTest `
-                -LeafRetryObserver $retryObserver `
-                -LeafRetryElapsedMillisecondsForTest $LeafRetryElapsedMillisecondsForTest `
-                -LeafRetryDelayForTest $LeafRetryDelayForTest `
-                -LeafDeleteCheckpointForTest $LeafDeleteCheckpointForTest `
-                -MetricsObserver $repeatMetricsObserver `
-                -DeleteCommitCallback $deleteCommitCallback `
-                -FileContentHashProvider $purgeFileHashProvider `
-                -Scope 'safe-delete approved purge'
+            if ($useParallelPurge) {
+                $parallelCaps = [CodexSafeTreeDelete.FileSystemCapabilities]::FromDetection(
+                    [string]$purgeCapabilities.FileSystemType,
+                    [bool]$purgeCapabilities.IsRemote,
+                    [bool]$purgeCapabilities.SupportsFileId128)
+                if ($PurgeMaxDegreeOfParallelismForTest -ge 1) {
+                    $parallelCaps.RecommendedMaxParallelism = [int]$PurgeMaxDegreeOfParallelismForTest
+                }
+
+                $parallelJournalStamp = [guid]::NewGuid().ToString('N')
+                $parallelJournalRoot = Join-Path $runDirectory (
+                    'parallel-purge-journal-{0}' -f $parallelJournalStamp)
+                if (-not [IO.Directory]::Exists($parallelJournalRoot)) {
+                    [void][IO.Directory]::CreateDirectory($parallelJournalRoot)
+                }
+
+                $leafSpecs = New-CodexSafeTreeDeleteParallelPurgeLeafSpecs `
+                    -TreePath $quarantinePath `
+                    -TreeManifest $purgeManifest `
+                    -ExpectedIdentities $purgeFileIdentities
+                $directorySpecs = New-CodexSafeTreeDeleteParallelPurgeDirectorySpecs `
+                    -TreePath $quarantinePath `
+                    -TreeManifest $purgeManifest
+                $cacheLock = [object]::new()
+                $coordinator = [CodexSafeTreeDelete.ParallelPurgeCoordinator]::new(
+                    $quarantinePath,
+                    $parallelJournalRoot,
+                    $quarantineCapabilityRoot,
+                    $runDirectory,
+                    $parallelCaps)
+                try {
+                    $coordinator.CreateLeafDeleter =
+                        [CodexSafeTreeDelete.HostSafetyParallelPurgeLeafDeleter]::CreateFactory(
+                            $quarantineCapabilityRoot,
+                            $quarantinePath,
+                            [bool]$target.allowHardLinks,
+                            $leafSpecs,
+                            $directorySpecs,
+                            $sessionHashCache,
+                            $cacheLock)
+                    if ($null -ne $ParallelPurgeAfterPendingFlushedForTest) {
+                        $afterPending = $ParallelPurgeAfterPendingFlushedForTest
+                        $coordinator.AfterPendingFlushed = {
+                            param([string]$JournalFilePath, [string]$FilePath)
+                            & $afterPending $JournalFilePath $FilePath
+                        }.GetNewClosure()
+                    }
+                    if ($ParallelPurgeFailAfterPendingCountForTest -gt 0) {
+                        $coordinator.FailAfterPendingFlushedCount =
+                            [int]$ParallelPurgeFailAfterPendingCountForTest
+                    }
+
+                    $parallelResult = $coordinator.Purge()
+                } finally {
+                    $coordinator.Dispose()
+                }
+
+                $journalPerf = $parallelResult.JournalPerformance
+                $parallelPurgeInfo = [pscustomobject][ordered]@{
+                    used = $true
+                    reason = 'capabilities-recommend-parallel'
+                    maxDegreeOfParallelism = [int]$coordinator.MaxDegreeOfParallelism
+                    journalFileCount = [int]$parallelResult.JournalFileCount
+                    deletedCount = [int]$parallelResult.DeletedCount
+                    failedCount = [int]$parallelResult.FailedCount
+                    elapsedMs = [long]$parallelResult.ElapsedMs
+                    journalOverheadPercent = $(if ($null -ne $journalPerf) {
+                        [double]$journalPerf.OverheadPercent
+                    } else { $null })
+                    journalIsWithinTarget = $(if ($null -ne $journalPerf) {
+                        [bool]$journalPerf.IsWithinTarget
+                    } else { $null })
+                    journalFlushCount = $(if ($null -ne $journalPerf) {
+                        [int]$journalPerf.FlushCount
+                    } else { $null })
+                    usedHostSafetyDeleter = [bool]$parallelResult.UsedHostSafetyDeleter
+                    timings = $purgeTimings
+                }
+                foreach ($relative in @($parallelResult.DeletedRelativePaths)) {
+                    $deletedPath = ConvertTo-CodexSafeTreeDeleteAbsolutePathFromRelative `
+                        -TargetPath $quarantinePath `
+                        -RelativePath $relative
+                    & $deleteCommitCallback $deletedPath 'file'
+                }
+
+                if ([int]$parallelResult.FailedCount -gt 0) {
+                    $firstError = if (@($parallelResult.Errors).Count -gt 0) {
+                        [string]$parallelResult.Errors[0]
+                    } else {
+                        'parallel purge failed without an error message'
+                    }
+                    throw "safe-delete parallel purge 失败：$firstError"
+                }
+
+                if ([int]$parallelResult.DeletedCount -ne $leafSpecs.Count) {
+                    throw (
+                        "safe-delete parallel purge 删除计数不一致：" +
+                        "$($parallelResult.DeletedCount)/$($leafSpecs.Count)"
+                    )
+                }
+
+                $purgeTimings.coordinatorMs = [long]$parallelResult.ElapsedMs
+                $emptyRootWatch = [Diagnostics.Stopwatch]::StartNew()
+                if ([IO.Directory]::Exists($quarantinePath)) {
+                    $rootEntry = @($purgeManifest.entries | Where-Object {
+                        [string]$_.kind -ceq 'directory' -and [string]$_.relativePath -ceq '.'
+                    })
+                    if ($rootEntry.Count -ne 1) {
+                        throw 'safe-delete parallel purge 缺少根目录 manifest 条目。'
+                    }
+                    $rootGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::AcquireForEmptyDelete(
+                        $quarantineCapabilityRoot,
+                        $quarantinePath)
+                    $rootDeleted = $false
+                    try {
+                        Assert-CodexHookDirectoryTreeIdentity `
+                            -Expected @($rootEntry[0].identity) `
+                            -Actual @($rootGuard.VolumeSerialNumber, $rootGuard.FileIndex) `
+                            -Scope 'safe-delete parallel purge empty root identity'
+                        $rootGuard.DeleteEmptyDirectory()
+                        $rootDeleted = $true
+                    } finally {
+                        if (-not $rootDeleted) {
+                            $rootGuard.Dispose()
+                        }
+                    }
+                }
+                $emptyRootWatch.Stop()
+                $purgeTimings.emptyRootMs = [long]$emptyRootWatch.ElapsedMilliseconds
+            } else {
+                Remove-CodexHookCapabilityDirectoryTree `
+                    -Path $quarantinePath `
+                    -CapabilityRoot $quarantineCapabilityRoot `
+                    -AllowedExactPaths @($quarantinePath) `
+                    -AllowHardLinks:([bool]$target.allowHardLinks) `
+                    -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                    -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                    -ExpectedRootIdentity @($plan.treeManifest.rootIdentity) `
+                    -ExpectedTreeManifest $purgeManifest `
+                    -RejectNamedStreams:([string]$target.rootDeletionPurpose -ceq 'empty-project-state') `
+                    -NamedStreamDeleteIntentRoot $runDirectory `
+                    -NamedStreamDeleteGenerationId ([string]$plan.generationId) `
+                    -NamedStreamDeleteJournalAnchors @($transaction.directoryCommitAnchors) `
+                    -NamedStreamDeleteCommitAnchor $anchorDirectoryCommit `
+                    -NamedStreamDeleteCheckpointForTest $DirectoryDeleteCheckpointForTest `
+                    -LeafRetryPolicy $leafRetryPolicy `
+                    -LeafRetryFaultForTest $LeafDeleteFaultForTest `
+                    -LeafRetryObserver $retryObserver `
+                    -LeafRetryElapsedMillisecondsForTest $LeafRetryElapsedMillisecondsForTest `
+                    -LeafRetryDelayForTest $LeafRetryDelayForTest `
+                    -LeafDeleteCheckpointForTest $LeafDeleteCheckpointForTest `
+                    -MetricsObserver $repeatMetricsObserver `
+                    -DeleteCommitCallback $deleteCommitCallback `
+                    -FileContentHashProvider $purgeFileHashProvider `
+                    -Scope 'safe-delete approved purge'
+            }
         } catch {
             $purgeFailure = $_
             if (-not [bool]$deleteState.anyCommit -and
@@ -6103,6 +6715,7 @@ function Invoke-CodexSafeTreeDeletePurge {
             deletionOutcome = New-CodexSafeTreeDeleteOutcome `
                 -NamespaceAbsent $true `
                 -LogicalCompletion $true
+            parallelPurge = $parallelPurgeInfo
             metrics = Complete-CodexSafeTreeDeleteMetrics -State $metricsState
         }
     } finally {

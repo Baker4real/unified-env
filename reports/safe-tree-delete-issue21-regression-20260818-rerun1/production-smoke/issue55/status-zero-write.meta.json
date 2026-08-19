@@ -1,0 +1,31 @@
+{
+  "name": "status-zero-write",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Status",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-18T18:42:55.5668258+00:00",
+  "endedAtUtc": "2026-08-18T18:44:58.3692630+00:00",
+  "wallClockMs": 122802.4,
+  "timeoutMs": 900000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 49224,
+  "trackedPids": [
+    49224,
+    44904
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\status-zero-write.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\status-zero-write.stderr.txt",
+  "stdoutSha256": "fce8dcf53125c9f11ffd03ca38cc4a18d67499476736d144142ca310d82db040",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

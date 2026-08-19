@@ -1,0 +1,39 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.issue55.source-identity",
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-08-18T18:42:10.1921696+00:00",
+  "runtime": {
+    "psEdition": "Core",
+    "psVersion": "7.6.4",
+    "processPath": "D:\\Codex\\tools\\PowerShell\\7.6.4\\pwsh.exe",
+    "pwshExe": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe"
+  },
+  "wrappers": {
+    "liveCmd": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+    "sourceCmd": "D:\\Codex\\projects\\统一环境\\scripts\\invoke-codex-safe-tree-delete.cmd",
+    "liveCmdSha256": "62957269bbe6b96417d7959140103f59e737f50337725bc249fd7fef71862310",
+    "sourceCmdSha256": "62957269bbe6b96417d7959140103f59e737f50337725bc249fd7fef71862310",
+    "livePs1": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1",
+    "sourcePs1": "D:\\Codex\\projects\\统一环境\\scripts\\invoke-codex-safe-tree-delete-host.ps1",
+    "livePs1Sha256": "636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373",
+    "sourcePs1Sha256": "636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373",
+    "cmdEqual": true,
+    "ps1Equal": true
+  },
+  "forbiddenLeftover": {
+    "quarantinePath": "D:\\Codex\\projects\\统一环境\\reports\\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine",
+    "transactionPath": "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete\\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\\transaction.json",
+    "quarantineExistsAtStart": true,
+    "transactionExistsAtStart": true,
+    "transactionSha256AtStart": "4e73aedc260c43c536ab9df3d3f6d5f73a065a8a17c26d1706998f583a0339d7",
+    "note": "属 #45/#50 清空集。本票不得 Resume/Purge/Restore。"
+  },
+  "frozenSnapshots": {
+    "issue55Dir": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816",
+    "issue21Dir": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-20260816",
+    "leafDeleteFailedPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue55-20260816\\leaf-delete-failed.json",
+    "leafDeleteFailedSha256AtStart": "6e451a914a926dbf69d586c929ed87f3cd90c8b941959398e3f4bac0a4a04881",
+    "harnessEvidenceRoot": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke",
+    "note": "历史 issue55/issue21 快照只读。本票 harness 证据只写 harnessEvidenceRoot。"
+  }
+}

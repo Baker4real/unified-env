@@ -222,6 +222,24 @@ try {
         ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
     $identityMap = ConvertTo-CodexSafeTreeDeleteApplyFileIdentityMap -Plan $plan
     Assert-True ($identityMap.Count -eq 2) 'Apply 必须从 Plan fileIdentitiesV2 读出每个 file 身份'
+    Assert-True (
+        $null -ne ('CodexSafeTreeDelete.ApplyTreeSnapshotBuilder' -as [type])
+    ) 'Apply C# snapshot builder 必须存在'
+    $parityCache = [CodexSafeTreeDelete.SessionHashCache]::new()
+    $parityCoordinator = [CodexSafeTreeDelete.ApplySessionHashCoordinator]::new(
+        $identityMap,
+        $parityCache,
+        $false)
+    $parityTree = Get-CodexSafeTreeDeleteApplyTreeSnapshot `
+        -Path $targetPath `
+        -CapabilityRoot $fixtureRoot `
+        -AllowedExactPaths @($targetPath) `
+        -Coordinator $parityCoordinator `
+        -Name 'safe-delete apply hash reuse snapshot parity'
+    Assert-True (
+        (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $parityTree) -ceq
+        (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)
+    ) 'Apply C# snapshot 必须与 Plan treeManifest 精确同形'
 
     $sessionCache = [CodexSafeTreeDelete.SessionHashCache]::new()
     $payloadIdentity = $identityMap['payload.txt']

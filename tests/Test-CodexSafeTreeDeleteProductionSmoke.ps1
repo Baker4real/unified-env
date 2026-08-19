@@ -4,9 +4,12 @@ param()
 # 完整 ProductionSmoke 会在 reports/ 下创建一次性 fixture，并经 live
 # invoke-safe-tree-delete.cmd 在 D:\Codex\.codex\run-evidence\safe-tree-delete\
 # 留下新 operation。这是 live 链的固有依赖，不是对 leftover 或 #22 候选的
-# 写入。隔离：capability 目标只在 reports/ 独立 guid 目录；本票 fixture
-# 事后受管 resume Purge；禁止 Purge/Restore leftover 0ab1e1b6；不读写
-# #22 的 Status/Archive 候选。
+# 写入。隔离：capability 目标只在 reports/ 独立 guid 目录；harness 证据写到
+# SAFE_TREE_DELETE_SMOKE_EVIDENCE_ROOT 或新 guid 目录，不改写
+# reports/safe-tree-delete-issue55-20260816/ 与
+# reports/safe-tree-delete-issue21-20260816/ 历史快照（含 leaf-delete-failed.json）。
+# 本票 fixture 事后受管 resume Purge；禁止 Purge/Restore leftover 0ab1e1b6；
+# 不读写 #22 的 Status/Archive 候选。
 #
 # #55：真实 .cmd → 宿主 .ps1 → 生产脚本 的 smoke seam。成功 / 超时 / 失败
 # 都要收口进程树；leaf-delete-failed 必须打到生产 JSON；Status 用 pre/post
@@ -33,8 +36,16 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $reportsRoot = Join-Path $projectRoot 'reports'
 $evidenceRoot = 'D:\Codex\.codex\run-evidence\safe-tree-delete'
 $policyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
-$issue55Dir = Join-Path $reportsRoot 'safe-tree-delete-issue55-20260816'
-$issue21Dir = Join-Path $reportsRoot 'safe-tree-delete-issue21-20260816'
+$frozenIssue55Dir = Join-Path $reportsRoot 'safe-tree-delete-issue55-20260816'
+$frozenIssue21Dir = Join-Path $reportsRoot 'safe-tree-delete-issue21-20260816'
+$frozenLeafDeleteFailedPath = Join-Path $frozenIssue55Dir 'leaf-delete-failed.json'
+$harnessEvidenceRoot = if (-not [string]::IsNullOrWhiteSpace($env:SAFE_TREE_DELETE_SMOKE_EVIDENCE_ROOT)) {
+    [string]$env:SAFE_TREE_DELETE_SMOKE_EVIDENCE_ROOT
+} else {
+    Join-Path $reportsRoot ('safe-tree-delete-production-smoke-harness-{0}' -f ([guid]::NewGuid().ToString('N')))
+}
+$issue55Dir = Join-Path $harnessEvidenceRoot 'issue55'
+$issue21Dir = Join-Path $harnessEvidenceRoot 'issue21'
 $expectedLivePs1Sha256 = '636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373'
 $fixtureRoot = Join-Path $reportsRoot ("safe-tree-delete-production-smoke-{0}" -f ([guid]::NewGuid().ToString('N')))
 $payloadPath = Join-Path $fixtureRoot 'readonly-payload.txt'
@@ -78,6 +89,7 @@ $newInflightQuarantine = $null
 $leftoverUntouched = $false
 $inflightCleanupError = $null
 $revertEvidence = $null
+$frozenLeafDeleteFailedSha256AtStart = $null
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -107,6 +119,19 @@ function Write-Issue55Json {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][object]$Document
     )
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    foreach ($frozenRoot in @($frozenIssue55Dir, $frozenIssue21Dir)) {
+        $frozenFull = [IO.Path]::GetFullPath($frozenRoot)
+        $prefix = if ($frozenFull.EndsWith([IO.Path]::DirectorySeparatorChar)) {
+            $frozenFull
+        } else {
+            $frozenFull + [IO.Path]::DirectorySeparatorChar
+        }
+        if ($fullPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.Equals($frozenFull, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "ProductionSmoke 禁止写入历史快照：$fullPath"
+        }
+    }
     [IO.File]::WriteAllText(
         $Path,
         ($Document | ConvertTo-Json -Depth 16),
@@ -696,6 +721,21 @@ function Invoke-LiveSafeDeleteTracked {
     }
 }
 
+$issue55Full = [IO.Path]::GetFullPath($issue55Dir)
+$issue21Full = [IO.Path]::GetFullPath($issue21Dir)
+$frozenIssue55Full = [IO.Path]::GetFullPath($frozenIssue55Dir)
+$frozenIssue21Full = [IO.Path]::GetFullPath($frozenIssue21Dir)
+Assert-True (
+    -not $issue55Full.Equals($frozenIssue55Full, [StringComparison]::OrdinalIgnoreCase) -and
+    -not $issue55Full.StartsWith($frozenIssue55Full + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+) 'issue55 harness 目录不得落在历史 issue55 快照内'
+Assert-True (
+    -not $issue21Full.Equals($frozenIssue21Full, [StringComparison]::OrdinalIgnoreCase) -and
+    -not $issue21Full.StartsWith($frozenIssue21Full + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+) 'issue21 harness 目录不得落在历史 issue21 快照内'
+Assert-True ([IO.File]::Exists($frozenLeafDeleteFailedPath)) (
+    "历史 leaf-delete-failed.json 必须仍在：$frozenLeafDeleteFailedPath")
+$frozenLeafDeleteFailedSha256AtStart = Get-LowerSha256 -Path $frozenLeafDeleteFailedPath
 [void][IO.Directory]::CreateDirectory($issue55Dir)
 [void][IO.Directory]::CreateDirectory($issue21Dir)
 
@@ -737,6 +777,14 @@ $identity = [ordered]@{
                 $null
             })
         note = '属 #45/#50 清空集。本票不得 Resume/Purge/Restore。'
+    }
+    frozenSnapshots = [ordered]@{
+        issue55Dir = $frozenIssue55Dir
+        issue21Dir = $frozenIssue21Dir
+        leafDeleteFailedPath = $frozenLeafDeleteFailedPath
+        leafDeleteFailedSha256AtStart = $frozenLeafDeleteFailedSha256AtStart
+        harnessEvidenceRoot = $harnessEvidenceRoot
+        note = '历史 issue55/issue21 快照只读。本票 harness 证据只写 harnessEvidenceRoot。'
     }
 }
 $identity.wrappers.cmdEqual = (
@@ -1524,7 +1572,19 @@ try {
         statusZeroWrite = $(if ($null -ne $statusBinding) { [bool]$statusBinding.zeroWrite } else { $null })
         timeoutIsHarnessContract = $true
         timeoutContractPath = (Join-Path $issue55Dir 'timeout-contract.json')
+        harnessEvidenceRoot = $harnessEvidenceRoot
+        frozenLeafDeleteFailedPath = $frozenLeafDeleteFailedPath
+        frozenLeafDeleteFailedSha256AtStart = $frozenLeafDeleteFailedSha256AtStart
+        frozenLeafDeleteFailedSha256AtEnd = $(
+            if ([IO.File]::Exists($frozenLeafDeleteFailedPath)) {
+                Get-LowerSha256 -Path $frozenLeafDeleteFailedPath
+            } else {
+                $null
+            })
+        frozenSnapshotsUntouched = $false
     }
+    $summary.frozenSnapshotsUntouched = (
+        [string]$summary.frozenLeafDeleteFailedSha256AtStart -ceq [string]$summary.frozenLeafDeleteFailedSha256AtEnd)
     Write-Issue55Json -Path (Join-Path $issue55Dir 'invocations.json') -Document @($invocationRecords)
     Write-Issue55Json -Path (Join-Path $issue55Dir 'summary.json') -Document $summary
 }
@@ -1549,6 +1609,13 @@ if (-not $revertForwardingProved) {
 }
 if ([string]$livePs1Sha256Final -cne $expectedLivePs1Sha256) {
     throw ("live wrapper 最终 SHA 未恢复 expected=$expectedLivePs1Sha256 actual=$livePs1Sha256Final")
+}
+if (-not [IO.File]::Exists($frozenLeafDeleteFailedPath)) {
+    throw "历史 leaf-delete-failed.json 丢失：$frozenLeafDeleteFailedPath"
+}
+$frozenLeafDeleteFailedSha256AtEnd = Get-LowerSha256 -Path $frozenLeafDeleteFailedPath
+if ([string]$frozenLeafDeleteFailedSha256AtEnd -cne [string]$frozenLeafDeleteFailedSha256AtStart) {
+    throw ("历史 leaf-delete-failed.json 被改写 start=$frozenLeafDeleteFailedSha256AtStart end=$frozenLeafDeleteFailedSha256AtEnd")
 }
 
 [pscustomobject][ordered]@{
@@ -1578,4 +1645,7 @@ if ([string]$livePs1Sha256Final -cne $expectedLivePs1Sha256) {
     newInflightQuarantine = $newInflightQuarantine
     evidenceDirectory = $issue55Dir
     issue21EvidenceDirectory = $issue21Dir
+    harnessEvidenceRoot = $harnessEvidenceRoot
+    frozenLeafDeleteFailedSha256 = $frozenLeafDeleteFailedSha256AtEnd
+    frozenSnapshotsUntouched = $true
 }

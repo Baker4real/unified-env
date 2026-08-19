@@ -1,0 +1,35 @@
+{
+  "name": "batch-pre-plan",
+  "invokedVia": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "arguments": [
+    "-Mode",
+    "Plan",
+    "-TargetPath",
+    "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-batch-smoke-90fd84b25eb54207a98ab6b3d07a2b30\\old-a",
+    "-CapabilityRoot",
+    "D:\\Codex\\projects\\统一环境\\reports",
+    "-Json"
+  ],
+  "startedAtUtc": "2026-08-18T18:45:07.4462951+00:00",
+  "endedAtUtc": "2026-08-18T18:45:08.8614776+00:00",
+  "wallClockMs": 1415.2,
+  "timeoutMs": 180000,
+  "expectedExitCode": 0,
+  "actualExitCode": 0,
+  "timedOut": false,
+  "allowTimeout": false,
+  "processId": 21632,
+  "trackedPids": [
+    21632,
+    46976
+  ],
+  "remainingDescendantCount": 0,
+  "remainingDescendants": [],
+  "taskkillExit": null,
+  "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\batch-pre-plan.stdout.txt",
+  "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\batch-pre-plan.stderr.txt",
+  "stdoutSha256": "aad72390fa7e595abe16e14954ee34288f0375d7a2b1d04c174d37e512f7d25b",
+  "stderrBytes": 0,
+  "jsonError": null,
+  "lastExitCodeCheckedImmediately": true
+}

@@ -1,0 +1,39 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue41-scale-10000",
+  "sampleCount": 2,
+  "samples": [
+    {
+      "sampleIndex": 1,
+      "fileCount": 10000,
+      "elapsedMs": 4216,
+      "journalFileCount": 4,
+      "failedCount": 0,
+      "deletedCount": 10000,
+      "TotalFlushTimeMs": 332,
+      "FlushCount": 632,
+      "OverheadPercent": 7.874762808349146,
+      "IsWithinTarget": true,
+      "SlowFlushCount": 0,
+      "Warning": "",
+      "MaxDegreeOfParallelism": 2,
+      "GroupCommitSize": 32
+    },
+    {
+      "sampleIndex": 2,
+      "fileCount": 10000,
+      "elapsedMs": 4142,
+      "journalFileCount": 4,
+      "failedCount": 0,
+      "deletedCount": 10000,
+      "TotalFlushTimeMs": 258,
+      "FlushCount": 632,
+      "OverheadPercent": 6.228874939642685,
+      "IsWithinTarget": true,
+      "SlowFlushCount": 0,
+      "Warning": "",
+      "MaxDegreeOfParallelism": 2,
+      "GroupCommitSize": 32
+    }
+  ],
+  "method": "four top-level dirs x 2500 tiny files; ParallelPurgeCoordinator group-commit File.Delete on issue41 fixture tree only; DOP=2 from #40; not production Purge"
+}

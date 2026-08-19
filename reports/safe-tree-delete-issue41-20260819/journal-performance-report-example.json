@@ -1,0 +1,10 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue41-report-example",
+  "source": "JournalPerformanceReport.FromTotals(200, 4, 2000)",
+  "TotalFlushTimeMs": 200,
+  "FlushCount": 4,
+  "OverheadPercent": 10.0,
+  "IsWithinTarget": false,
+  "Warning": "Journal flush overhead is 10% (>= 10%). Consider reducing parallelism or checking disk performance.",
+  "analysis": "200ms journal flush / 2000ms operation = 10% overhead; target is <10%, so this is out of target and must warn."
+}

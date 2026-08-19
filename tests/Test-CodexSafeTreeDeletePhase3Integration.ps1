@@ -9,19 +9,19 @@ $ErrorActionPreference = 'Stop'
 # Seams under test (Phase 3 integration / #42):
 # 1. Production Plan→Apply→Purge: New-CodexSafeTreeDeletePlan →
 #    Invoke-CodexSafeTreeDeleteQuarantine → Invoke-CodexSafeTreeDeletePurge
-#    (serial HostSafety). Baseline disables hash reuse + purge batch.
+#    (capability-gated ParallelPurgeCoordinator + HostSafety deleter).
+#    Baseline disables hash reuse (and therefore parallel).
 # 2. ParallelPurgeCoordinator File.Delete on issue42 fixture trees only.
 #    10k DOP 2/4 reused from #40 raw JSON after path/fileCount/degree verify;
 #    do not pin wallClockMs or #41 OverheadPercent snapshots.
 # 3. Observable: wall clock layers A vs B, IdentityMismatch, leafDispositions,
 #    journal jsonl parse, RecommendParallel=false → DOP=1, leftover untouched.
-# Not tested: wiring coordinator into production Purge, leftover Purge/Restore,
-# ProductionSmoke, #36 1.526 GiB rerun.
+# Not tested: leftover Purge/Restore, ProductionSmoke, #36 1.526 GiB rerun.
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $hostSafetyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1'
 $libraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue42-20260817'
+$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue42-20260819'
 $fixtureRoot = Join-Path $evidenceHome ('fixtures-{0}' -f ([guid]::NewGuid().ToString('N')))
 $targetPath = Join-Path $fixtureRoot 'candidate'
 $nestedPath = Join-Path $targetPath 'nested'
@@ -320,6 +320,9 @@ function Invoke-Pipeline {
         elapsedMs = $planMs + $applyMs + $purgeMs
         applyBytesHashed = [long]$apply.metrics.bytesHashed
         purgeBytesHashed = [long]$purge.metrics.bytesHashed
+        parallelPurge = $(if ($null -ne $purge.PSObject.Properties['parallelPurge']) {
+            $purge.parallelPurge
+        } else { $null })
     }
 }
 
@@ -372,7 +375,7 @@ Assert-True (
 ) 'Invoke-CodexSafeTreeDeletePurge 必须存在'
 Assert-True (
     $null -ne ('CodexSafeTreeDelete.ParallelPurgeCoordinator' -as [type])
-) 'ParallelPurgeCoordinator 类型必须已由库加载（夹具对照，不接入生产 Purge）'
+) 'ParallelPurgeCoordinator 类型必须已由库加载（生产 Purge 按能力门控接入）'
 
 Write-Stage -Name 'fs-probe'
 $capabilities = [CodexSafeTreeDelete.FileSystemDetector]::DetectFileSystem($evidenceHome)
@@ -608,7 +611,7 @@ try {
         $evidenceHome,
         $optimizeCaps)
     try {
-        Assert-True ($coordinator.MaxDegreeOfParallelism -eq 4) 'optimize coordinator DOP 必须是 4'
+        Assert-True ($coordinator.MaxDegreeOfParallelism -eq 2) 'optimize coordinator DOP 必须是 2（#40 20260819 峰值效率）'
         $multiResult = $coordinator.Purge()
     } finally {
         $coordinator.Dispose()
@@ -924,6 +927,9 @@ try {
     $phase3Dispositions = Read-JsonDocument -Path ([string]$phase3Prod.purge.leafDispositionsPath)
     Assert-True ([long]$phase3Dispositions.summary.deleted -eq [long]$scaleFileCount) `
         'phase3-prod leafDispositions.deleted 必须对齐 fileCount'
+    Assert-True (
+        $null -ne $phase3Prod.parallelPurge -and [bool]$phase3Prod.parallelPurge.used
+    ) 'phase3-prod 必须走生产 ParallelPurgeCoordinator'
 
     Write-Stage -Name 'scale-record'
     $baselineMs = [double]$baseline.elapsedMs
@@ -950,7 +956,7 @@ try {
             'sequential 10k x 4KB trees (baseline then phase3-prod; 4KB matches #32/#37 proven Apply hash-reuse size after 1KB exclusive-open failures); same working tree and library; A=production Plan→Apply→Purge (serial HostSafety); B=coordinator File.Delete 10k x 1KB reused from #40 raw. Do not add B into A. phase3-prod retries ERROR_SHARING_VIOLATION (32) up to 3 times with a fresh tree.'
         })
         A_production = [pscustomobject][ordered]@{
-            path = 'Plan→Apply→Purge via Invoke-CodexSafeTreeDelete*; Purge = serial HostSafety Remove-CodexHookCapabilityDirectoryTree; not ParallelPurgeCoordinator'
+            path = 'Plan→Apply→Purge via Invoke-CodexSafeTreeDelete*; Purge = capability-gated ParallelPurgeCoordinator + HostSafety deleter when RecommendParallel'
             baseline = [pscustomobject][ordered]@{
                 flags = @(
                     'DisableApplyHashReuseForTest',
@@ -971,8 +977,9 @@ try {
                 flags = @(
                     'default hash reuse',
                     'default purge batch collect',
-                    'serial HostSafety Purge'
+                    'production ParallelPurgeCoordinator when RecommendParallel'
                 )
+                parallelPurge = $phase3Prod.parallelPurge
                 completed = $true
                 planElapsedMs = [long]$phase3Prod.planElapsedMs
                 applyElapsedMs = [long]$phase3Prod.applyElapsedMs
@@ -1010,7 +1017,7 @@ try {
                 degree = 4
                 speedupVsDop1 = [Math]::Round($dop4Speedup, 3)
             }
-            note = 'Do not add these speedups into A. Coordinator is not wired to production Purge.'
+            note = 'Fixture File.Delete speedups stay in B. Production A uses HostSafety deleter, not these numbers.'
         }
         citations = [pscustomobject][ordered]@{
             issue36 = [pscustomobject][ordered]@{

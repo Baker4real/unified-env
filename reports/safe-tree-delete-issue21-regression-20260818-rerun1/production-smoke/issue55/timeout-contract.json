@@ -1,0 +1,40 @@
+{
+  "artifactType": "unified-environment.safe-tree-delete.issue55.timeout-contract",
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-08-18T18:45:02.0524000+00:00",
+  "note": "超时是 harness 合同，不是 wrapper 合同。禁止给 live wrapper 或 CodexSafeTreeDelete.ps1 加 timeout 参数。",
+  "wrapperHasTimeoutParameter": false,
+  "wrapperTimeoutParameterNames": [],
+  "productionEntryParamNames": [
+    "Mode",
+    "TargetPath",
+    "TargetPaths",
+    "CapabilityRoot",
+    "PlanPath",
+    "ApprovedPlanSha256",
+    "ConfirmApply",
+    "TransactionPath",
+    "ApprovedTransactionSha256",
+    "ConfirmPurge",
+    "ConfirmRestore",
+    "ConfirmArchive",
+    "Json"
+  ],
+  "liveWrapperParamNames": [],
+  "liveWrapper": "D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.cmd",
+  "liveWrapperSha256": "62957269bbe6b96417d7959140103f59e737f50337725bc249fd7fef71862310",
+  "livePs1Sha256": "636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373",
+  "unexpectedTimeoutFailsSmoke": true,
+  "unexpectedTimeoutPreservesStdoutStderrMeta": true,
+  "harnessAllowTimeoutNeverPassedOnTrackedCalls": true,
+  "controlledDrill": {
+    "method": "taskkill /F /T",
+    "timeoutMs": 250,
+    "evidence": "timeout-drill.json",
+    "proves": "process-tree-closed",
+    "remainingDescendantCount": 0,
+    "taskkillExit": 0,
+    "stdoutPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\timeout-status.stdout.txt",
+    "stderrPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue21-regression-20260818-rerun1\\production-smoke\\issue55\\timeout-status.stderr.txt"
+  }
+}

@@ -508,8 +508,8 @@ try {
     Assert-True ($capabilities.RecommendHashReuse -eq $true) '本机 NTFS/ReFS RecommendHashReuse 必须为 true'
     Assert-True ($capabilities.RecommendParallel -eq $true) '本机 NTFS/ReFS RecommendParallel 必须为 true'
     Assert-True (
-        $capabilities.RecommendedMaxParallelism -eq 4
-    ) "本机 NTFS/ReFS RecommendedMaxParallelism 必须为 4，实际为 $($capabilities.RecommendedMaxParallelism)"
+        $capabilities.RecommendedMaxParallelism -eq 2
+    ) "本机 NTFS/ReFS RecommendedMaxParallelism 必须为 2（#40 20260819 小文件峰值效率），实际为 $($capabilities.RecommendedMaxParallelism)"
     Assert-True (
         $capabilities.DeletionAllowed -eq $true
     ) '本机 NTFS/ReFS 且支持 FILE_ID_INFO 时 DeletionAllowed 必须为 true'
@@ -530,7 +530,7 @@ try {
         -SupportsFileId128 $true `
         -RecommendHashReuse $true `
         -RecommendParallel $true `
-        -RecommendedMaxParallelism 4 `
+        -RecommendedMaxParallelism 2 `
         -DeletionAllowed $true
     Assert-Recommendation `
         -FileSystemType 'ReFS' `
@@ -538,7 +538,7 @@ try {
         -SupportsFileId128 $true `
         -RecommendHashReuse $true `
         -RecommendParallel $true `
-        -RecommendedMaxParallelism 4 `
+        -RecommendedMaxParallelism 2 `
         -DeletionAllowed $true
     Assert-Recommendation `
         -FileSystemType 'NTFS' `

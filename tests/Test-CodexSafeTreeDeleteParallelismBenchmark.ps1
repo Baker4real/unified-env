@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [switch]$SmokeOnly,
-    [switch]$SkipBenchmark
+    [switch]$SkipBenchmark,
+    [string]$EvidenceHome,
+    [int]$SampleCount = 2
 )
 
 Set-StrictMode -Version Latest
@@ -11,7 +13,8 @@ $ErrorActionPreference = 'Stop'
 # 1. ParallelPurgeCoordinator — constructor-injected allowedRoot + FileSystemCapabilities; Purge() on fixture trees only
 # 2. FileSystemCapabilities.RecommendParallel + RecommendedMaxParallelism — one capabilities object per DOP 1/2/4/8/16
 # Observable: wall-clock, Process.TotalProcessorTime, per-run JSON, tree files gone after Purge.
-# Live writes go to reports/safe-tree-delete-parallelism-benchmark/; must not overwrite
+# Live writes go to reports/safe-tree-delete-parallelism-benchmark-20260819/ by default.
+# Must not overwrite reports/safe-tree-delete-parallelism-benchmark/ or
 # reports/safe-tree-delete-issue40-20260817/raw/ historical evidence.
 # Not production Purge. Not ThreadJournal / ParallelPurge source edits.
 
@@ -23,7 +26,13 @@ $parallelPurgeSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDele
 $frozenEvidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue40-20260817'
 $frozenRawRoot = Join-Path $frozenEvidenceHome 'raw'
 $frozenAnalysisPath = Join-Path $frozenEvidenceHome 'analysis.json'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-parallelism-benchmark'
+$historicalEvidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-parallelism-benchmark'
+$defaultEvidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-parallelism-benchmark-20260819'
+if ([string]::IsNullOrWhiteSpace($EvidenceHome)) {
+    $evidenceHome = $defaultEvidenceHome
+} else {
+    $evidenceHome = [IO.Path]::GetFullPath($EvidenceHome)
+}
 $workRoot = Join-Path $evidenceHome 'work'
 $rawRoot = Join-Path $evidenceHome 'raw'
 $forbiddenQuarantine = Join-Path $projectRoot 'reports\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine'
@@ -76,8 +85,9 @@ function Test-PathIsUnderRoot {
 
 function Assert-AllowedFixturePath {
     param([Parameter(Mandatory)][string]$LiteralPath)
-    Assert-True (Test-PathIsUnderRoot -LiteralPath $LiteralPath -Root $evidenceHome) "夹具路径必须在 parallelism-benchmark 运行根下：$LiteralPath"
+    Assert-True (Test-PathIsUnderRoot -LiteralPath $LiteralPath -Root $evidenceHome) "夹具路径必须在本次 evidenceHome 下：$LiteralPath"
     Assert-True (-not (Test-PathIsUnderRoot -LiteralPath $LiteralPath -Root $frozenEvidenceHome)) "禁止覆盖 #40 历史证据：$LiteralPath"
+    Assert-True (-not (Test-PathIsUnderRoot -LiteralPath $LiteralPath -Root $historicalEvidenceHome)) "禁止覆盖历史 parallelism-benchmark 证据：$LiteralPath"
     $full = [IO.Path]::GetFullPath($LiteralPath)
     Assert-True ($full -ne [IO.Path]::GetFullPath($forbiddenQuarantine)) '禁止碰生产 leftover quarantine'
     Assert-True ($full -ne [IO.Path]::GetFullPath($forbiddenTx)) '禁止碰生产 leftover transaction.json'
@@ -201,35 +211,53 @@ function Write-JsonFile {
 function Get-RawJsonPath {
     param(
         [Parameter(Mandatory)][string]$ScenarioId,
-        [Parameter(Mandatory)][int]$Degree
+        [Parameter(Mandatory)][int]$Degree,
+        [int]$SampleIndex = 0
     )
-    $path = Join-Path $rawRoot ('{0}-dop{1:D2}.json' -f $ScenarioId, $Degree)
+    $name = if ($SampleIndex -gt 0) {
+        '{0}-dop{1:D2}-s{2}.json' -f $ScenarioId, $Degree, $SampleIndex
+    } else {
+        '{0}-dop{1:D2}.json' -f $ScenarioId, $Degree
+    }
+    $path = Join-Path $rawRoot $name
     Assert-True (-not (Test-PathIsUnderRoot -LiteralPath $path -Root $frozenRawRoot)) (
         "live raw 不得指向 #40 历史 raw: $path"
+    )
+    Assert-True (-not (Test-PathIsUnderRoot -LiteralPath $path -Root $historicalEvidenceHome)) (
+        "live raw 不得指向历史 parallelism-benchmark: $path"
     )
     return $path
 }
 
-$script:frozenIssue40Hashes = [ordered]@{}
+$script:frozenEvidenceHashes = [ordered]@{}
+
+function Snapshot-ProtectedEvidenceFiles {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Label
+    )
+    Assert-True (Test-Path -LiteralPath $Root -PathType Container) "$Label 目录必须存在且不得作为本测试写入目标"
+    $files = @(
+        Get-ChildItem -LiteralPath $Root -File -Recurse -Force |
+            Where-Object { $_.Extension -in @('.json', '.md') -and $_.DirectoryName -notmatch '\\work(\\|$)' }
+    )
+    foreach ($file in $files) {
+        $script:frozenEvidenceHashes[$file.FullName] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+    }
+}
 
 function Snapshot-FrozenIssue40Evidence {
-    Assert-True (Test-Path -LiteralPath $frozenRawRoot -PathType Container) '#40 历史 raw 目录必须存在且不得作为本测试写入目标'
-    $files = @(Get-ChildItem -LiteralPath $frozenRawRoot -File -Filter '*.json')
-    if (Test-Path -LiteralPath $frozenAnalysisPath -PathType Leaf) {
-        $files += Get-Item -LiteralPath $frozenAnalysisPath
-    }
-    $script:frozenIssue40Hashes.Clear()
-    foreach ($file in $files) {
-        $script:frozenIssue40Hashes[$file.FullName] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-    }
-    Assert-True ($script:frozenIssue40Hashes.Count -gt 0) '必须快照到 #40 历史证据文件'
+    $script:frozenEvidenceHashes.Clear()
+    Snapshot-ProtectedEvidenceFiles -Root $frozenEvidenceHome -Label '#40 历史证据'
+    Snapshot-ProtectedEvidenceFiles -Root $historicalEvidenceHome -Label '历史 parallelism-benchmark'
+    Assert-True ($script:frozenEvidenceHashes.Count -gt 0) '必须快照到受保护的历史证据文件'
 }
 
 function Assert-FrozenIssue40EvidenceUnchanged {
-    foreach ($path in @($script:frozenIssue40Hashes.Keys)) {
-        Assert-True (Test-Path -LiteralPath $path -PathType Leaf) "禁止删除 #40 历史证据: $path"
+    foreach ($path in @($script:frozenEvidenceHashes.Keys)) {
+        Assert-True (Test-Path -LiteralPath $path -PathType Leaf) "禁止删除历史证据: $path"
         $after = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-        Assert-True ($after -ceq $script:frozenIssue40Hashes[$path]) "禁止覆盖 #40 历史证据: $path"
+        Assert-True ($after -ceq $script:frozenEvidenceHashes[$path]) "禁止覆盖历史证据: $path"
     }
 }
 
@@ -247,12 +275,23 @@ Assert-True (Test-Path -LiteralPath $hashCacheSourcePath -PathType Leaf) 'CodexS
 Assert-True (Test-Path -LiteralPath $threadJournalSourcePath -PathType Leaf) 'CodexSafeTreeDeleteThreadJournal.cs 必须存在'
 Assert-True (Test-Path -LiteralPath $parallelPurgeSourcePath -PathType Leaf) 'ParallelPurgeCoordinator 源必须存在（#39）'
 
+$evidenceHomeFull = [IO.Path]::GetFullPath($evidenceHome).TrimEnd('\')
+$historicalFull = [IO.Path]::GetFullPath($historicalEvidenceHome).TrimEnd('\')
+$frozenFull = [IO.Path]::GetFullPath($frozenEvidenceHome).TrimEnd('\')
+Assert-True ($evidenceHomeFull -ne $historicalFull) 'evidenceHome 不得指向历史 parallelism-benchmark 目录'
+Assert-True ($evidenceHomeFull -ne $frozenFull) 'evidenceHome 不得指向 #40 历史证据目录'
 Assert-True (-not (Test-PathIsUnderRoot -LiteralPath $evidenceHome -Root $frozenEvidenceHome)) (
     '本测试运行根不得落在 #40 历史证据目录内'
+)
+Assert-True (-not (Test-PathIsUnderRoot -LiteralPath $evidenceHome -Root $historicalEvidenceHome)) (
+    '本测试运行根不得落在历史 parallelism-benchmark 目录内'
 )
 Assert-True (-not (Test-PathIsUnderRoot -LiteralPath $rawRoot -Root $frozenRawRoot)) (
     '本测试 raw 根不得落在 #40 历史 raw 内'
 )
+if (-not $SmokeOnly -and -not $SkipBenchmark) {
+    Assert-True ($SampleCount -ge 2) "每组至少 2 次取样，实际 SampleCount=$SampleCount"
+}
 Snapshot-FrozenIssue40Evidence
 [void][IO.Directory]::CreateDirectory($evidenceHome)
 [void][IO.Directory]::CreateDirectory($workRoot)
@@ -375,8 +414,10 @@ $preflight = [ordered]@{
     peakBytesEstimate = [int64]$peakBytes
     directoryCount = $directoryCount
     degrees = $degrees
+    sampleCount = [int]$SampleCount
     flushMetric = $flushMeta
     evidenceHome = $evidenceHome
+    historicalEvidenceHome = $historicalEvidenceHome
     frozenEvidenceHome = $frozenEvidenceHome
     frozenRawRoot = $frozenRawRoot
 }
@@ -437,12 +478,13 @@ function Invoke-ScenarioDegree {
     param(
         [Parameter(Mandatory)]$Scenario,
         [Parameter(Mandatory)][int]$Degree,
+        [Parameter(Mandatory)][int]$SampleIndex,
         [Parameter(Mandatory)][string]$TemplateRoot,
         $FlushAvailability
     )
 
-    $runTree = Join-Path $workRoot ('{0}-dop{1:D2}-tree' -f $Scenario.id, $Degree)
-    $runJournal = Join-Path $workRoot ('{0}-dop{1:D2}-journal' -f $Scenario.id, $Degree)
+    $runTree = Join-Path $workRoot ('{0}-dop{1:D2}-s{2}-tree' -f $Scenario.id, $Degree, $SampleIndex)
+    $runJournal = Join-Path $workRoot ('{0}-dop{1:D2}-s{2}-journal' -f $Scenario.id, $Degree, $SampleIndex)
     Remove-FixtureFilesThenEmptyDirs -LiteralPath $runTree | Out-Null
     Remove-FixtureFilesThenEmptyDirs -LiteralPath $runJournal | Out-Null
     [void][IO.Directory]::CreateDirectory($runJournal)
@@ -505,6 +547,7 @@ function Invoke-ScenarioDegree {
         bytesPerFile = [int]$Scenario.bytesPerFile
         directoryCount = $directoryCount
         degree = $Degree
+        sampleIndex = [int]$SampleIndex
         wallClockMs = $wallMs
         coordinatorElapsedMs = [int64]$result.ElapsedMs
         totalProcessorTimeMs = $cpuMs
@@ -521,11 +564,68 @@ function Invoke-ScenarioDegree {
         measuredAtUtc = [DateTime]::UtcNow.ToString('o')
         targetRoot = $runTree
         journalRoot = $runJournal
-        method = 'ParallelPurgeCoordinator File.Delete on issue40 fixture tree only; capabilities RecommendedMaxParallelism injected; not production Purge'
+        method = 'ParallelPurgeCoordinator File.Delete on issue40 fixture tree only; capabilities RecommendedMaxParallelism injected; not production Purge; every sample recorded'
     }
-    Write-JsonFile -LiteralPath (Get-RawJsonPath -ScenarioId $Scenario.id -Degree $Degree) -Value $record
+    Write-JsonFile -LiteralPath (Get-RawJsonPath -ScenarioId $Scenario.id -Degree $Degree -SampleIndex $SampleIndex) -Value $record
     Remove-EmptyDirectories -LiteralPath $runTree
     return $record
+}
+
+function New-AggregateRecord {
+    param(
+        [Parameter(Mandatory)]$Scenario,
+        [Parameter(Mandatory)][int]$Degree,
+        [Parameter(Mandatory)]$Samples
+    )
+    $n = @($Samples).Count
+    Assert-True ($n -ge 1) ("{0} DOP{1} 必须至少有 1 条取样" -f $Scenario.id, $Degree)
+    $wallValues = @($Samples | ForEach-Object { [int64]$_.wallClockMs })
+    $cpuValues = @($Samples | ForEach-Object { [int64]$_.totalProcessorTimeMs })
+    $cpuRatioValues = @($Samples | ForEach-Object { [double]$_.cpuUtilizationRatio })
+    $flushValues = @($Samples | Where-Object { $null -ne $_.flushTimeMs } | ForEach-Object { [int64]$_.flushTimeMs })
+    $flushPctValues = @($Samples | Where-Object { $null -ne $_.flushOverheadPercent } | ForEach-Object { [double]$_.flushOverheadPercent })
+    $coordValues = @($Samples | ForEach-Object { [int64]$_.coordinatorElapsedMs })
+    $mean = {
+        param([double[]]$Values)
+        if ($Values.Count -eq 0) { return $null }
+        return [math]::Round((($Values | Measure-Object -Average).Average), 3)
+    }
+    $wallMean = [int64][math]::Round((& $mean $wallValues), 0)
+    $flushStatus = [string]$Samples[0].flushStatus
+    $flushMs = $null
+    $flushPct = $null
+    if ($flushValues.Count -eq $n) {
+        $flushMs = [int64][math]::Round((& $mean $flushValues), 0)
+        $flushPct = [math]::Round((& $mean $flushPctValues), 3)
+    }
+    return [ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-issue40-raw-aggregate'
+        scenarioId = [string]$Scenario.id
+        label = [string]$Scenario.label
+        sizeClass = [string]$Scenario.sizeClass
+        fileCount = [int]$Scenario.fileCount
+        bytesPerFile = [int]$Scenario.bytesPerFile
+        directoryCount = $directoryCount
+        degree = $Degree
+        sampleCount = [int]$n
+        sampleWallClockMs = @($wallValues)
+        wallClockMs = $wallMean
+        coordinatorElapsedMs = [int64][math]::Round((& $mean $coordValues), 0)
+        totalProcessorTimeMs = [int64][math]::Round((& $mean $cpuValues), 0)
+        cpuUtilizationRatio = [math]::Round((& $mean $cpuRatioValues), 4)
+        processorCount = $processorCount
+        journalFileCount = [int]$Samples[0].journalFileCount
+        deletedCount = [int]$Samples[0].deletedCount
+        failedCount = [int]$Samples[0].failedCount
+        flushTimeMs = $flushMs
+        flushOverheadPercent = $flushPct
+        flushCount = $Samples[0].flushCount
+        flushStatus = $flushStatus
+        flushReason = [string]$Samples[0].flushReason
+        aggregation = 'arithmetic-mean-of-all-recorded-samples'
+        measuredAtUtc = [DateTime]::UtcNow.ToString('o')
+        method = 'aggregate of recorded ParallelPurgeCoordinator samples; no discarded runs'
+    }
 }
 
 function Get-ScenarioAnalysis {
@@ -605,6 +705,7 @@ function Get-ScenarioAnalysis {
 }
 
 $allRows = @()
+$allSamples = @()
 if (-not $SkipBenchmark) {
     foreach ($scenario in $scenarios) {
         $templateRoot = Join-Path $workRoot ('{0}-template' -f $scenario.id)
@@ -617,7 +718,20 @@ if (-not $SkipBenchmark) {
         Assert-True ($created -eq [int]$scenario.fileCount) ("{0} 模板必须写出 {1} 个文件，实际为 {2}" -f $scenario.id, $scenario.fileCount, $created)
 
         foreach ($degree in $degrees) {
-            $row = Invoke-ScenarioDegree -Scenario $scenario -Degree $degree -TemplateRoot $templateRoot -FlushAvailability $flushMeta
+            $samples = @()
+            for ($sampleIndex = 1; $sampleIndex -le $SampleCount; $sampleIndex++) {
+                $sample = Invoke-ScenarioDegree `
+                    -Scenario $scenario `
+                    -Degree $degree `
+                    -SampleIndex $sampleIndex `
+                    -TemplateRoot $templateRoot `
+                    -FlushAvailability $flushMeta
+                $samples += $sample
+                $allSamples += $sample
+            }
+            Assert-True ($samples.Count -eq $SampleCount) ("{0} DOP{1} 必须记录 {2} 次取样" -f $scenario.id, $degree, $SampleCount)
+            $row = New-AggregateRecord -Scenario $scenario -Degree $degree -Samples $samples
+            Write-JsonFile -LiteralPath (Get-RawJsonPath -ScenarioId $scenario.id -Degree $degree) -Value $row
             $allRows += $row
         }
 
@@ -630,6 +744,13 @@ if (-not $SkipBenchmark) {
             $path = Get-RawJsonPath -ScenarioId $scenario.id -Degree $degree
             Assert-True (Test-Path -LiteralPath $path -PathType Leaf) "SkipBenchmark 需要已有 $path"
             $allRows += (Get-Content -LiteralPath $path -Raw -Encoding utf8 | ConvertFrom-Json)
+            $sampleIndex = 1
+            while ($true) {
+                $samplePath = Get-RawJsonPath -ScenarioId $scenario.id -Degree $degree -SampleIndex $sampleIndex
+                if (-not (Test-Path -LiteralPath $samplePath -PathType Leaf)) { break }
+                $allSamples += (Get-Content -LiteralPath $samplePath -Raw -Encoding utf8 | ConvertFrom-Json)
+                $sampleIndex++
+            }
         }
     }
 }
@@ -665,9 +786,23 @@ $dataSupportsTicket = (
     $largePeak -ge 1 -and $largePeak -le 2
 )
 $wallClockPlateaued = ($smallKnee -lt 16 -or $mediumKnee -lt 16 -or $largeKnee -lt 16)
+$optimizeDefault = [CodexSafeTreeDelete.FileSystemCapabilities]::FromDetection('NTFS', $false, $true)
+$fromDetectionValue = [int]$optimizeDefault.RecommendedMaxParallelism
+$fromDetectionMatchesPeaks = (
+    $fromDetectionValue -eq $smallPeak -and
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendOptimizeMaxParallelism() -eq $smallPeak -and
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1024) -eq $smallPeak -and
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(10240) -eq $mediumPeak -and
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1048576) -eq $largePeak
+)
+$ticketMismatchNote = if ($dataSupportsTicket) {
+    '本机峰值效率与票面建议一致'
+} else {
+    '与票面假设不符 + 数据支撑：票面小文件 4 / min(4, ProcessorCount-2)，本机三场景峰值效率以实测 DOP 为准'
+}
 
 $recommendation = [ordered]@{
-    decisionRule = 'peak parallel efficiency (speedup / DOP); wall-clock-within-10% is reported but did not plateau in 1..16'
+    decisionRule = 'peak parallel efficiency (speedup / DOP) per size class; FromDetection unknown-size default = typical small-file peak; wall-clock-within-10% is reported separately'
     typicalSmallFilePeakEfficiency = $smallPeak
     mediumPeakEfficiency = $mediumPeak
     largePeakEfficiency = $largePeak
@@ -675,12 +810,20 @@ $recommendation = [ordered]@{
     mediumKnee = $mediumKnee
     largeKnee = $largeKnee
     hostFormulaMin4ProcessorMinus2 = $formulaValue
-    fromDetectionValue = 4
-    fromDetectionReason = '10k×1KB 峰值效率在 DOP 4（4.48x / efficiency 1.12）。墙钟最佳是 16 但 1..16 无 <10% 台阶；生产默认取效率峰值而不是无上界墙钟最小。既有 FileSystem/coordinator 测试也锁 4。'
+    fromDetectionValue = $fromDetectionValue
+    fromDetectionReason = ('本机小/中/大峰值效率 DOP={0}/{1}/{2}。FromDetection 未知规模时取典型小文件峰值 {0}，不取墙钟最快 {3}，也不再钉票面 4。{4}' -f @(
+        $smallPeak
+        $mediumPeak
+        $largePeak
+        [int]$smallAnalysis.bestDegree
+        $ticketMismatchNote
+    ))
     dataSupportsTypicalFour = [bool]$dataSupportsTypicalFour
     dataSupportsTicketSuggestion = [bool]$dataSupportsTicket
+    fromDetectionMatchesMeasuredPeaks = [bool]$fromDetectionMatchesPeaks
     wallClockPlateauedInRange = [bool]$wallClockPlateaued
     ticketSuggestion = $ticketSuggestion
+    sampleCount = [int]$SampleCount
     flushVerified = [bool]$flushMeta.verified
     flushNote = 'JournalPerformance.TotalFlushTimeMs 是线程 flush 时间求和，DOP>1 时可超过墙钟 100%'
 }
@@ -743,24 +886,26 @@ function Format-ScenarioTable {
 $reportLines = @(
     '# Safe-tree-delete #40 并行度基准'
     ''
-    '夹具树只打 `ParallelPurgeCoordinator`，新跑写入 `reports/safe-tree-delete-parallelism-benchmark/`。不得覆盖 `reports/safe-tree-delete-issue40-20260817/raw/` 历史证据。不是生产 Purge。不是 GitHub 关单授权。'
+    '夹具树只打 `ParallelPurgeCoordinator`，新跑写入 `reports/safe-tree-delete-parallelism-benchmark-20260819/`。不得覆盖 `reports/safe-tree-delete-parallelism-benchmark/` 与 `reports/safe-tree-delete-issue40-20260817/raw/` 历史证据。不是生产 Purge。不是 GitHub 关单授权。'
     ''
     ('- 测量时间（UTC）：{0}' -f $analysisDoc.measuredAtUtc)
     ('- ProcessorCount：{0}' -f $processorCount)
     ('- D: 预检可用：{0} bytes' -f $freeBytes)
     ('- 顶级目录数：{0}（目录级并行，供 DOP 16 饱和）' -f $directoryCount)
+    ('- 每组取样次数：{0}（全部落盘，算术平均后画曲线）' -f $SampleCount)
     ('- flush 指标：{0}' -f $flushMeta.reason)
     ''
     '## 收益递减与推荐'
     ''
-    '决策规则：生产推荐取并行效率（speedup/DOP）峰值。墙钟 10% 膝点与 <10% 增量台阶一并报告；本机 1..16 墙钟未平台。'
+    '决策规则：生产推荐取各场景并行效率（speedup/DOP）峰值。墙钟 10% 膝点与 <10% 增量台阶一并报告。未知规模的 `FromDetection` 取典型小文件峰值，不取无上界墙钟最小，也不再钉票面 4。'
     ''
     ('- 小文件峰值效率 DOP：{0}；墙钟最佳 / 10%膝点：{1} / {2}' -f $smallPeak, $smallAnalysis.bestDegree, $smallKnee)
     ('- 中等峰值效率 DOP：{0}；墙钟最佳 / 10%膝点：{1} / {2}' -f $mediumPeak, $mediumAnalysis.bestDegree, $mediumKnee)
     ('- 大文件峰值效率 DOP：{0}；墙钟最佳 / 10%膝点：{1} / {2}' -f $largePeak, $largeAnalysis.bestDegree, $largeKnee)
     ('- 票面建议：小 4 / 中 2-4 / 大 1-2；按峰值效率，{0}票面建议。' -f $(if ($dataSupportsTicket) { '支持' } else { '不支持' }))
     ('- `min(4, ProcessorCount-2)` 在本机 = {0}。' -f $formulaValue)
-    '- 生产 `FromDetection` optimize 取峰值效率 4，不取墙钟 16：1..16 没有墙钟平台，且 flush 线程求和随 DOP 线性上升。'
+    ('- `FromDetection` optimize 当前值：{0}；是否对齐本机峰值：{1}。' -f $fromDetectionValue, $fromDetectionMatchesPeaks)
+    ('- {0}' -f $ticketMismatchNote)
     ''
 )
 foreach ($analysis in $analyses) {
@@ -787,27 +932,79 @@ $reportPath = Join-Path $evidenceHome 'REPORT.md'
 Assert-AllowedFixturePath -LiteralPath $reportPath
 [IO.File]::WriteAllText($reportPath, (($reportLines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
 
+$curveDoc = [ordered]@{
+    artifactType = 'env-governance.codex-safe-tree-delete-issue40-curve'
+    measuredAtUtc = $analysisDoc.measuredAtUtc
+    processorCount = $processorCount
+    sampleCount = [int]$SampleCount
+    aggregation = 'arithmetic-mean-of-all-recorded-samples'
+    decisionRule = 'x = DOP, y = mean wall-clock ms; peakEfficiencyDegree is the recommended size-class DOP'
+    scenarios = @(
+        foreach ($analysis in $analyses) {
+            [ordered]@{
+                scenarioId = [string]$analysis.scenarioId
+                label = [string]$analysis.label
+                sizeClass = [string]$analysis.sizeClass
+                peakEfficiencyDegree = [int]$analysis.peakEfficiencyDegree
+                bestWallClockDegree = [int]$analysis.bestDegree
+                conservativeKneeDegree = [int]$analysis.conservativeKneeDegree
+                diminishingReturns = $analysis.diminishingReturns
+                efficiencyDrop = $analysis.efficiencyDrop
+                points = @($analysis.points)
+            }
+        }
+    )
+}
+Write-JsonFile -LiteralPath (Join-Path $evidenceHome 'curve.json') -Value $curveDoc
+
 $payloadLeft = @(Get-ChildItem -LiteralPath $workRoot -Recurse -File -Filter '*.bin' -ErrorAction SilentlyContinue)
 Assert-True ($payloadLeft.Count -eq 0) ("测完不得剩夹具 payload，实际为 {0}" -f $payloadLeft.Count)
-$optimizeDefault = [CodexSafeTreeDelete.FileSystemCapabilities]::FromDetection('NTFS', $false, $true)
-Assert-True ($optimizeDefault.RecommendedMaxParallelism -eq 4) 'FromDetection optimize 必须保持 4'
+Assert-True ($optimizeDefault.RecommendParallel -eq $true) 'NTFS 本地 FromDetection 必须仍推荐并行'
+Assert-True ($optimizeDefault.RecommendedMaxParallelism -eq $smallPeak) (
+    "FromDetection optimize 必须等于本机小文件峰值效率 DOP $smallPeak，实际为 $fromDetectionValue"
+)
+$fatCaps = [CodexSafeTreeDelete.FileSystemCapabilities]::FromDetection('FAT32', $false, $false)
+$netCaps = [CodexSafeTreeDelete.FileSystemCapabilities]::FromDetection('NTFS', $true, $true)
+Assert-True ($fatCaps.RecommendParallel -eq $false) 'FAT32 RecommendParallel 必须仍为 false'
+Assert-True ($fatCaps.RecommendedMaxParallelism -eq 1) 'FAT32 RecommendedMaxParallelism 必须仍为 1'
+Assert-True ($netCaps.RecommendParallel -eq $false) '网络卷 RecommendParallel 必须仍为 false'
+Assert-True ($netCaps.RecommendedMaxParallelism -eq 1) '网络卷 RecommendedMaxParallelism 必须仍为 1'
 $recommendType = [CodexSafeTreeDelete.FileSystemCapabilities]
 $optimizeMethod = $recommendType.GetMethod('RecommendOptimizeMaxParallelism')
 $sizeMethod = $recommendType.GetMethod('RecommendMaxParallelismForTypicalFileBytes')
 Assert-True ($null -ne $optimizeMethod) '必须有 RecommendOptimizeMaxParallelism'
 Assert-True ($null -ne $sizeMethod) '必须有 RecommendMaxParallelismForTypicalFileBytes'
-Assert-True ([CodexSafeTreeDelete.FileSystemCapabilities]::RecommendOptimizeMaxParallelism() -eq 4) '典型小文件推荐必须是峰值效率 4'
-Assert-True ([CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1024) -eq 4) '1KB 必须推荐 4'
-Assert-True ([CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(10240) -eq 4) '10KB 必须推荐 4'
-Assert-True ([CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1048576) -eq 2) '1MB 必须推荐峰值效率 2'
+Assert-True (
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendOptimizeMaxParallelism() -eq $smallPeak
+) "典型小文件推荐必须是本机峰值效率 $smallPeak"
+Assert-True (
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1024) -eq $smallPeak
+) "1KB 必须推荐本机小文件峰值 $smallPeak"
+Assert-True (
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(10240) -eq $mediumPeak
+) "10KB 必须推荐本机中等峰值 $mediumPeak"
+Assert-True (
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1048576) -eq $largePeak
+) "1MB 必须推荐本机大文件峰值 $largePeak"
 
 foreach ($scenario in $scenarios) {
     foreach ($degree in $degrees) {
-        Assert-True (Test-Path -LiteralPath (Get-RawJsonPath -ScenarioId $scenario.id -Degree $degree) -PathType Leaf) '每个场景×DOP 必须有原始 JSON'
+        Assert-True (Test-Path -LiteralPath (Get-RawJsonPath -ScenarioId $scenario.id -Degree $degree) -PathType Leaf) '每个场景×DOP 必须有聚合 JSON'
+        $expectedSamples = if ($SkipBenchmark) { 1 } else { $SampleCount }
+        if (-not $SkipBenchmark) {
+            for ($sampleIndex = 1; $sampleIndex -le $SampleCount; $sampleIndex++) {
+                Assert-True (
+                    Test-Path -LiteralPath (Get-RawJsonPath -ScenarioId $scenario.id -Degree $degree -SampleIndex $sampleIndex) -PathType Leaf
+                ) ("每个场景×DOP 必须有第 {0} 次取样 JSON" -f $sampleIndex)
+            }
+        } else {
+            Assert-True ($expectedSamples -ge 1) 'SkipBenchmark 至少能读到聚合记录'
+        }
     }
 }
 Assert-True (Test-Path -LiteralPath $reportPath -PathType Leaf) '必须写出 REPORT.md'
 Assert-True (Test-Path -LiteralPath (Join-Path $evidenceHome 'analysis.json') -PathType Leaf) '必须写出 analysis.json'
+Assert-True (Test-Path -LiteralPath (Join-Path $evidenceHome 'curve.json') -PathType Leaf) '必须写出 curve.json'
 Assert-FrozenIssue40EvidenceUnchanged
 
 [pscustomobject][ordered]@{
@@ -815,15 +1012,21 @@ Assert-FrozenIssue40EvidenceUnchanged
     suite = 'CodexSafeTreeDeleteParallelismBenchmark'
     issue = 40
     mode = $(if ($SkipBenchmark) { 'SkipBenchmark' } else { 'All' })
+    evidenceHome = $evidenceHome
     processorCount = $processorCount
+    sampleCount = [int]$SampleCount
     smallKnee = $smallKnee
     mediumKnee = $mediumKnee
     largeKnee = $largeKnee
     smallPeak = $smallPeak
     mediumPeak = $mediumPeak
     largePeak = $largePeak
+    fromDetectionValue = $fromDetectionValue
+    fromDetectionMatchesMeasuredPeaks = [bool]$fromDetectionMatchesPeaks
     dataSupportsTicketSuggestion = [bool]$dataSupportsTicket
     flushVerified = [bool]$flushMeta.verified
     rawCount = $allRows.Count
+    sampleRawCount = $allSamples.Count
     wroteToFrozenIssue40Raw = $false
+    wroteToHistoricalParallelismBenchmark = $false
 }
