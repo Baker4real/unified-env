@@ -1,0 +1,13 @@
+STAGE baseline-s1 utc=2026-08-18T22:39:03.9063140+00:00
+SAMPLE baseline-s1 total=576238 plan=89150 apply=265487 purge=221601 parallel=False dop=1 journal%=-1
+STAGE baseline-s2 utc=2026-08-18T22:48:43.7929580+00:00
+SAMPLE baseline-s2 total=579452 plan=97119 apply=270370 purge=211963 parallel=False dop=1 journal%=-1
+STAGE typical-dop2-s1 utc=2026-08-18T22:58:27.5695296+00:00
+SAMPLE typical-dop2-s1 total=232112 plan=88769 apply=22129 purge=121214 parallel=True dop=2 journal%=7.175456389452332
+STAGE typical-dop2-s2 utc=2026-08-18T23:02:23.8864599+00:00
+SAMPLE typical-dop2-s2 total=243245 plan=95753 apply=22252 purge=125240 parallel=True dop=2 journal%=9.603960396039604
+STAGE best-dop4-s1 utc=2026-08-18T23:06:31.5528298+00:00
+SAMPLE best-dop4-s1 total=236024 plan=96070 apply=21984 purge=117970 parallel=True dop=4 journal%=16.741573033707866
+STAGE best-dop4-s2 utc=2026-08-18T23:10:31.9019874+00:00
+SAMPLE best-dop4-s2 total=233293 plan=90467 apply=22985 purge=119841 parallel=True dop=4 journal%=20.411055988660525
+BENCH baseline=576238 typical=232112 (2.483x) best=233293 (2.47x) journal%=7.175456389452332 metTypical=False metBest=False

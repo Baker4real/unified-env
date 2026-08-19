@@ -1,0 +1,130 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-scale-phase3",
+  "fileCount": 10000,
+  "bytesPerFile": 4096,
+  "totalBytes": 40960000,
+  "doNotSynthesize6x": true,
+  "blocked": false,
+  "baselineReused": false,
+  "phase3ProdAttempts": [
+    {
+      "attempt": 1,
+      "ok": true,
+      "elapsedMs": 152713
+    }
+  ],
+  "method": "sequential 10k x 4KB trees (baseline then phase3-prod; 4KB matches #32/#37 proven Apply hash-reuse size after 1KB exclusive-open failures); same working tree and library; A=production Plan→Apply→Purge (serial HostSafety); B=coordinator File.Delete 10k x 1KB reused from #40 raw. Do not add B into A. phase3-prod retries ERROR_SHARING_VIOLATION (32) up to 3 times with a fresh tree.",
+  "A_production": {
+    "path": "Plan→Apply→Purge via Invoke-CodexSafeTreeDelete*; Purge = capability-gated ParallelPurgeCoordinator + HostSafety deleter when RecommendParallel",
+    "baseline": {
+      "flags": [
+        "DisableApplyHashReuseForTest",
+        "DisablePurgeHashReuseForTest",
+        "DisablePurgeBatchForTest"
+      ],
+      "reused": false,
+      "source": "reports/safe-tree-delete-issue42-20260817/baseline-partial.json",
+      "planElapsedMs": 88120,
+      "applyElapsedMs": 269208,
+      "purgeElapsedMs": 228192,
+      "elapsedMs": 585520,
+      "applyBytesHashed": 130237787,
+      "purgeBytesHashed": 137596430,
+      "leafDispositionsDeleted": 10000
+    },
+    "phase3Prod": {
+      "flags": [
+        "default hash reuse",
+        "default purge batch collect",
+        "production ParallelPurgeCoordinator when RecommendParallel"
+      ],
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 2,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 4016,
+        "journalOverheadPercent": 8.092629482071713,
+        "journalIsWithinTarget": true,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 2876,
+          "batchMs": 0,
+          "coordinatorMs": 4016,
+          "emptyRootMs": 32,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "completed": true,
+      "planElapsedMs": 94967,
+      "applyElapsedMs": 23238,
+      "purgeElapsedMs": 34508,
+      "elapsedMs": 152713,
+      "applyBytesHashed": 48317793,
+      "purgeBytesHashed": 55676445,
+      "leafDispositionsDeleted": 10000
+    },
+    "ratio": 0.261,
+    "speedup": 3.834,
+    "targetBest": "A.phase3Prod/A.baseline <= 0.17 (>=6x) — production wall clock only",
+    "targetTypical": "A.phase3Prod/A.baseline <= 0.25 (>=4x) — production wall clock only",
+    "metTargetBest": false,
+    "metTargetTypical": false
+  },
+  "B_coordinator": {
+    "path": "ParallelPurgeCoordinator File.Delete on fixture trees only; not production Purge",
+    "reusedFrom": "#40",
+    "rawVerified": true,
+    "dop1": {
+      "wallClockMs": 82617,
+      "rawPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue40-20260817\\raw\\small-10k-1kb-dop01.json",
+      "degree": 1
+    },
+    "dop2Typical": {
+      "wallClockMs": 29574,
+      "rawPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue40-20260817\\raw\\small-10k-1kb-dop02.json",
+      "degree": 2,
+      "speedupVsDop1": 2.794
+    },
+    "dop4Best": {
+      "wallClockMs": 15356,
+      "rawPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue40-20260817\\raw\\small-10k-1kb-dop04.json",
+      "degree": 4,
+      "speedupVsDop1": 5.38
+    },
+    "note": "Fixture File.Delete speedups stay in B. Production A uses HostSafety deleter, not these numbers."
+  },
+  "citations": {
+    "issue36": {
+      "speedup": 0.633,
+      "metTarget": false,
+      "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue36-20260817\\scale-phase1.json",
+      "note": "10k x 160KiB production Plan→Apply→Purge cited from current scale-phase1.json; metTarget=false; not a regression pin"
+    },
+    "issue37": {
+      "speedupVsBaseline": 0.974,
+      "metTarget": false,
+      "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue37-20260817\\scale-10000.json",
+      "note": "10k x 4KB Purge batch cited from current scale-10000.json; metTarget=false; not a regression pin"
+    },
+    "issue40": {
+      "analysisPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue40-20260817\\analysis.json",
+      "smallDop4Ms": 15356,
+      "smallDop1Ms": 82617,
+      "smallDop4Speedup": 5.38,
+      "smallDop2Ms": 29574,
+      "smallDop2Speedup": 2.794,
+      "note": "coordinator fixture table from current #40 raw files; not production Purge; wall-clock is cited not pinned"
+    },
+    "issue41": {
+      "overheadPercent": 15.75081723010717,
+      "isWithinTarget": false,
+      "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue41-20260817\\scale-10000.json",
+      "formula": "TotalFlushTimeMs / elapsedMs * 100; thread-sum flush, not wall-clock disguise",
+      "note": "OverheadPercent cited from current scale-10000.json; IsWithinTarget=false; do not pin a historical percentage"
+    }
+  }
+}

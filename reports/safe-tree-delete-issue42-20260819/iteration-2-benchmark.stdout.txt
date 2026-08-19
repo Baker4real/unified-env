@@ -1,0 +1,9 @@
+STAGE typical-dop2-s1 utc=2026-08-19T01:27:27.8765599+00:00
+SAMPLE typical-dop2-s1 total=146476 plan=88729 apply=22565 purge=35182 snap=2742 batch=1818 coord=3019 root=27 kind=csharp-apply-walker
+STAGE typical-dop2-s2 utc=2026-08-19T01:29:58.1067784+00:00
+SAMPLE typical-dop2-s2 total=145975 plan=92682 apply=21002 purge=32291 snap=2741 batch=1219 coord=2050 root=29 kind=csharp-apply-walker
+STAGE best-dop4-s1 utc=2026-08-19T01:32:27.3595765+00:00
+SAMPLE best-dop4-s1 total=147535 plan=94936 apply=20757 purge=31842 snap=2500 batch=1130 coord=1623 root=31 kind=csharp-apply-walker
+STAGE best-dop4-s2 utc=2026-08-19T01:34:57.9902175+00:00
+SAMPLE best-dop4-s2 total=142232 plan=88451 apply=21799 purge=31982 snap=2655 batch=1140 coord=1839 root=26 kind=csharp-apply-walker
+ITER2 typical=145975 (3.948x) best=142232 (4.051x) metTypical=False metBest=False

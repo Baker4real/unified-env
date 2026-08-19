@@ -1,0 +1,19 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-git-checkout-restore",
+  "utc": "2026-08-19T01:16:58.1353738+00:00",
+  "restored": [
+    "managed/grok-hooks/host-lifecycle.json",
+    "reports/safe-tree-delete-issue32-20260817/scale-1000.json",
+    "reports/safe-tree-delete-issue32-20260817/scale-10000.json",
+    "reports/safe-tree-delete-issue33-20260817/scale-1000.json",
+    "reports/safe-tree-delete-issue33-20260817/scale-10000.json",
+    "reports/safe-tree-delete-issue34-20260817/integration-results.json",
+    "reports/safe-tree-delete-issue36-20260817/filesystem-probe.json",
+    "reports/safe-tree-delete-issue36-20260817/scale-phase1.json",
+    "reports/safe-tree-delete-issue37-20260817/scale-10000.json",
+    "reports/safe-tree-delete-issue39-20260817/scale-10000.json",
+    "tests/Test-GrokHostHooks.ps1"
+  ],
+  "statusAfter": [],
+  "note": "Only restored tracked snapshots dirtied by AC13 tests. Did not revert implementation or prior-wave sources."
+}

@@ -1,0 +1,5 @@
+STAGE typical-dop2-s1 utc=2026-08-19T08:56:33.0537023+00:00
+SAMPLE typical-dop2-s1 total=148175 plan=93032 apply=22126 purge=33017 snap=2923 batch=0 coord=3638 root=42 kind=csharp-apply-walker
+STAGE typical-dop2-s2 utc=2026-08-19T08:59:06.0997095+00:00
+SAMPLE typical-dop2-s2 total=147075 plan=93236 apply=22161 purge=31678 snap=2992 batch=0 coord=2588 root=33 kind=csharp-apply-walker
+ITER2 typical=147075 (3.918x) metTypical=False

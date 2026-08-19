@@ -1,0 +1,51 @@
+ M reports/safe-tree-delete-issue39-20260817/scale-10000.json
+ M scripts/lib/CodexHookHandleBoundIO.cs
+ M scripts/lib/CodexHostSafety.ps1
+ M scripts/lib/CodexSafeTreeDelete.ps1
+ M scripts/lib/CodexSafeTreeDeleteFileIdentity.cs
+ M scripts/lib/CodexSafeTreeDeleteHashCache.cs
+ M scripts/lib/CodexSafeTreeDeleteParallelPurge.cs
+ M tests/Test-CodexSafeTreeDeleteControlPlane.ps1
+ M tests/Test-CodexSafeTreeDeleteFileSystem.ps1
+ M tests/Test-CodexSafeTreeDeleteHashReuse.ps1
+ M tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1
+ M tests/Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1
+ M tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1
+ M tests/Test-CodexSafeTreeDeletePhase3Integration.ps1
+ M tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1
+?? reports/.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine/
+?? reports/safe-tree-delete-control-plane-metrics-probe-0647efc141594987becc159ea83e3130/
+?? reports/safe-tree-delete-issue21-regression-20260818-rerun1/
+?? reports/safe-tree-delete-issue32-20260817/fixtures-7f708262197f4e698d6179aa248d7fae/
+?? reports/safe-tree-delete-issue32-20260819/
+?? reports/safe-tree-delete-issue37-20260817/fixtures-2bbcf497e6d04c3899b6afad80ded7eb/
+?? reports/safe-tree-delete-issue38-20260817/fixtures-438db249b91c402aa692ab478a0894b5/
+?? reports/safe-tree-delete-issue38-20260817/fixtures-4625510b8b464373abff5a633cc2c83b/
+?? reports/safe-tree-delete-issue38-20260817/fixtures-68dc2c101167475b8d279ca7d545622f/
+?? reports/safe-tree-delete-issue39-20260817/fixtures-045b3d7403ce4a9d8005ea0b23a6a70a/
+?? reports/safe-tree-delete-issue39-20260817/fixtures-3291685fbef24a80a6564ed6bfa0cf6a/
+?? reports/safe-tree-delete-issue39-20260817/fixtures-cc31d0cf34d24b67b8e5fb0d840749d3/
+?? reports/safe-tree-delete-issue39-20260817/fixtures-efb768e9d1e34f6d86cdec02eb7688e6/
+?? reports/safe-tree-delete-issue40-20260817/work/
+?? reports/safe-tree-delete-issue41-20260817/fixtures-7b18009307a1432db60604dcc3a27773/
+?? reports/safe-tree-delete-issue41-20260819/
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/dir-a.thread-16.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/dir-b.thread-16.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/dir-b.thread-24.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/dir-b.thread-6.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/dir-c.thread-19.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/dir-c.thread-8.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/dir-d.thread-15.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/dir-d.thread-19.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/dir-d.thread-23.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/fail-dir-lock.thread-16.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/fail-dir-ok.thread-19.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/fail-dir-ok.thread-24.jsonl
+?? reports/safe-tree-delete-issue42-20260817/coordinator-journals/fail-dir-other.thread-8.jsonl
+?? reports/safe-tree-delete-issue42-20260819/
+?? reports/safe-tree-delete-issue48-v3-probe-ab07107de042445693dbbb2d64a3ec01/
+?? reports/safe-tree-delete-issue48-v3-quarantine-probe-18653f43595743599196985ae8564162/
+?? reports/safe-tree-delete-parallelism-benchmark-20260819/
+?? reports/safe-tree-delete-parallelism-benchmark/work/
+?? scripts/lib/CodexSafeTreeDeleteApplySnapshot.cs
+?? tests/Test-CodexSafeTreeDeletePhase3Production.ps1

@@ -1,0 +1,92 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-coordinator-journal",
+  "method": "ParallelPurgeCoordinator File.Delete on issue42 fixture trees only; not production Purge",
+  "liveMulti": {
+    "fileCount": 6,
+    "deletedCount": 6,
+    "failedCount": 0,
+    "elapsedMs": 19,
+    "journalFileCount": 4,
+    "parseable": [
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\fixtures-a13300ba31d941909502af111d65db1a\\coordinator\\multi-journal\\dir-a.thread-16.jsonl",
+        "lineCount": 4,
+        "parsedCount": 4,
+        "parseable": true
+      },
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\fixtures-a13300ba31d941909502af111d65db1a\\coordinator\\multi-journal\\dir-b.thread-16.jsonl",
+        "lineCount": 4,
+        "parsedCount": 4,
+        "parseable": true
+      },
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\fixtures-a13300ba31d941909502af111d65db1a\\coordinator\\multi-journal\\dir-c.thread-8.jsonl",
+        "lineCount": 2,
+        "parsedCount": 2,
+        "parseable": true
+      },
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\fixtures-a13300ba31d941909502af111d65db1a\\coordinator\\multi-journal\\dir-d.thread-8.jsonl",
+        "lineCount": 2,
+        "parsedCount": 2,
+        "parseable": true
+      }
+    ]
+  },
+  "liveFailAfterLock": {
+    "deletedCount": 2,
+    "failedCount": 1,
+    "journalsStillParseable": true,
+    "parseable": [
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\fixtures-a13300ba31d941909502af111d65db1a\\coordinator\\fail-journal\\dir-lock.thread-16.jsonl",
+        "lineCount": 1,
+        "parsedCount": 1,
+        "parseable": true
+      },
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\fixtures-a13300ba31d941909502af111d65db1a\\coordinator\\fail-journal\\dir-ok.thread-8.jsonl",
+        "lineCount": 2,
+        "parsedCount": 2,
+        "parseable": true
+      },
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\fixtures-a13300ba31d941909502af111d65db1a\\coordinator\\fail-journal\\dir-other.thread-16.jsonl",
+        "lineCount": 2,
+        "parsedCount": 2,
+        "parseable": true
+      }
+    ]
+  },
+  "issue39ScaleJournals": {
+    "directory": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue39-20260817\\fixtures-fc0b2f39ab6a401e961dde5c68d1cd22\\scale-10000-journal",
+    "fileCount": 4,
+    "parseable": [
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue39-20260817\\fixtures-fc0b2f39ab6a401e961dde5c68d1cd22\\scale-10000-journal\\dir-0.thread-16.jsonl",
+        "lineCount": 5000,
+        "parsedCount": 5000,
+        "parseable": true
+      },
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue39-20260817\\fixtures-fc0b2f39ab6a401e961dde5c68d1cd22\\scale-10000-journal\\dir-1.thread-6.jsonl",
+        "lineCount": 5000,
+        "parsedCount": 5000,
+        "parseable": true
+      },
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue39-20260817\\fixtures-fc0b2f39ab6a401e961dde5c68d1cd22\\scale-10000-journal\\dir-2.thread-15.jsonl",
+        "lineCount": 5000,
+        "parsedCount": 5000,
+        "parseable": true
+      },
+      {
+        "path": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue39-20260817\\fixtures-fc0b2f39ab6a401e961dde5c68d1cd22\\scale-10000-journal\\dir-3.thread-8.jsonl",
+        "lineCount": 5000,
+        "parsedCount": 5000,
+        "parseable": true
+      }
+    ]
+  }
+}

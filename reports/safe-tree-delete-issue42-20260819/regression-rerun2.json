@@ -1,0 +1,54 @@
+{
+  "utc": "2026-08-19T01:15:29.4045338+00:00",
+  "results": [
+    {
+      "name": "Test-CodexSafeTreeDeleteBenchmark.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 14284
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteHashSafely.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 1182
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 13080
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 14164
+    },
+    {
+      "name": "Test-CodexSafeTreeDeletePurgeBatch.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 1923648
+    },
+    {
+      "name": "Test-CodexSafeTreeDeletePurgeHashReuse.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 1327572
+    },
+    {
+      "name": "Test-CodexSafeTreeDeletePhase1Integration.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 873225
+    },
+    {
+      "name": "Test-CodexSafeTreeDeletePhase3Integration.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 1041225
+    }
+  ],
+  "failed": []
+}

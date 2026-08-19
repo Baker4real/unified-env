@@ -1,0 +1,31 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-production-safety",
+  "ok": true,
+  "slices": [
+    {
+      "id": "AC8-AC10-e2e",
+      "ok": true,
+      "dop": 2
+    },
+    {
+      "id": "AC12-network-serial",
+      "ok": true
+    },
+    {
+      "id": "AC9-toctou",
+      "ok": true,
+      "message": "Exception calling \"Build\" with \"6\" argument(s): \"safe-delete apply IdentityMismatch：dir-a/a1.txt\""
+    },
+    {
+      "id": "AC7-interrupt-resume",
+      "ok": true,
+      "pendingCount": 6,
+      "uncertainCount": 0
+    },
+    {
+      "id": "disable-parallel-flag",
+      "ok": true
+    }
+  ],
+  "leftoverUntouched": true
+}

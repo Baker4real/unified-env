@@ -1,0 +1,99 @@
+{
+  "utc": "2026-08-18T23:45:43.0133281+00:00",
+  "results": [
+    {
+      "name": "Test-CodexSafeTreeDeleteBenchmark.ps1",
+      "exitCode": 1,
+      "ok": false,
+      "elapsedMs": 8889
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteHashSafely.ps1",
+      "exitCode": 1,
+      "ok": false,
+      "elapsedMs": 1050
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+      "exitCode": 1,
+      "ok": false,
+      "elapsedMs": 7011
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
+      "exitCode": 1,
+      "ok": false,
+      "elapsedMs": 6960
+    },
+    {
+      "name": "Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 1814
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteRestore.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 34552
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteSchemaCompatibility.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 8149
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteStatus.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 34251
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 7426
+    },
+    {
+      "name": "Test-CodexSafeTreeDeletePurgeBatch.ps1",
+      "exitCode": 1,
+      "ok": false,
+      "elapsedMs": 3344
+    },
+    {
+      "name": "Test-CodexSafeTreeDeletePurgeHashReuse.ps1",
+      "exitCode": 1,
+      "ok": false,
+      "elapsedMs": 2889
+    },
+    {
+      "name": "Test-CodexSafeTreeDeletePhase1Integration.ps1",
+      "exitCode": 1,
+      "ok": false,
+      "elapsedMs": 2472
+    },
+    {
+      "name": "Test-CodexSafeTreeDeletePhase3Integration.ps1",
+      "exitCode": 1,
+      "ok": false,
+      "elapsedMs": 2475
+    },
+    {
+      "name": "Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+      "exitCode": 0,
+      "ok": true,
+      "elapsedMs": 222785
+    }
+  ],
+  "failed": [
+    "Test-CodexSafeTreeDeleteBenchmark.ps1",
+    "Test-CodexSafeTreeDeleteHashSafely.ps1",
+    "Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+    "Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
+    "Test-CodexSafeTreeDeletePurgeBatch.ps1",
+    "Test-CodexSafeTreeDeletePurgeHashReuse.ps1",
+    "Test-CodexSafeTreeDeletePhase1Integration.ps1",
+    "Test-CodexSafeTreeDeletePhase3Integration.ps1"
+  ]
+}

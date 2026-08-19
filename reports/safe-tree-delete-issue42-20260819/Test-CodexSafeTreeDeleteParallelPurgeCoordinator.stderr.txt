@@ -1,0 +1,7 @@
+Add-Type: D:\Codex\projects\统一环境\tests\Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1:116
+Line |
+ 116 |      Add-Type -Path $identitySourcePath, $hashCacheSourcePath, $thread …
+     |      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | D:\Codex\projects\统一环境\scripts\lib\CodexSafeTreeDeleteParallelPurge.cs(10,7): error CS0246: The type or
+     | namespace name 'CodexHookGovernance' could not be found (are you missing a using directive or an assembly
+     | reference?) using CodexHookGovernance;       ^

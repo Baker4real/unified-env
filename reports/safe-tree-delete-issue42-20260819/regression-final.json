@@ -1,0 +1,29 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-regression-final",
+  "utc": "2026-08-19T01:20:00Z",
+  "fixtureListed": 27,
+  "productionSmoke": true,
+  "fileSystemWaiver": "Test-CodexSafeTreeDeleteFileSystem.ps1 #35",
+  "firstPassUnexpected": 14,
+  "firstPassUnexpectedCause": "nested/root HostSafety lease conflict plus stale CodexHostSafetyNative.dll Add-Type already exists",
+  "rerun1Passed": [
+    "Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
+    "Test-CodexSafeTreeDeleteRestore.ps1",
+    "Test-CodexSafeTreeDeleteSchemaCompatibility.ps1",
+    "Test-CodexSafeTreeDeleteStatus.ps1",
+    "Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+    "Test-CodexSafeTreeDeleteProductionSmoke.ps1"
+  ],
+  "rerun2Passed": [
+    "Test-CodexSafeTreeDeleteBenchmark.ps1",
+    "Test-CodexSafeTreeDeleteHashSafely.ps1",
+    "Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+    "Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
+    "Test-CodexSafeTreeDeletePurgeBatch.ps1",
+    "Test-CodexSafeTreeDeletePurgeHashReuse.ps1",
+    "Test-CodexSafeTreeDeletePhase1Integration.ps1",
+    "Test-CodexSafeTreeDeletePhase3Integration.ps1"
+  ],
+  "unexpectedRemaining": [],
+  "allOkOrWaived": true
+}

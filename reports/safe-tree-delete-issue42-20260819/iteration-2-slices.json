@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Test-GrokHostHooks.ps1",
+    "exitCode": 0,
+    "ok": true,
+    "elapsedMs": 4290
+  },
+  {
+    "name": "Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1",
+    "exitCode": 0,
+    "ok": true,
+    "elapsedMs": 9806
+  },
+  {
+    "name": "Test-CodexSafeTreeDeleteLeafStreamSet.ps1",
+    "exitCode": 0,
+    "ok": true,
+    "elapsedMs": 12975
+  },
+  {
+    "name": "Test-CodexSafeTreeDeletePhase3Production.ps1",
+    "exitCode": 0,
+    "ok": true,
+    "elapsedMs": 9925
+  },
+  {
+    "name": "Test-CodexSafeTreeDeleteBenchmark.ps1",
+    "exitCode": 0,
+    "ok": true,
+    "elapsedMs": 12834
+  },
+  {
+    "name": "Test-CodexSafeTreeDeleteUncertainRecovery.ps1",
+    "exitCode": 0,
+    "ok": true,
+    "elapsedMs": 15613
+  }
+]

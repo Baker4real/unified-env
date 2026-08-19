@@ -1,0 +1,141 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue42-iteration2-partial",
+  "samples": [
+    {
+      "scenario": "typical-dop2-s1",
+      "utc": "2026-08-19T01:47:34.6698206+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 88030,
+      "applyElapsedMs": 21374,
+      "purgeElapsedMs": 32645,
+      "elapsedMs": 142049,
+      "applyBytesHashed": 48317831,
+      "purgeBytesHashed": 55676540,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 2,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 3213,
+        "journalOverheadPercent": 8.465608465608465,
+        "journalIsWithinTarget": true,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 2973,
+          "batchMs": 0,
+          "coordinatorMs": 3213,
+          "emptyRootMs": 31,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "leafDispositionsPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\bench-scale-iter2\\evidence\\20260819T014633Z-40834714-54fc-46fe-aeb2-20d7243c3990\\leaf-dispositions.json",
+      "sampleIndex": 1,
+      "scenarioName": "typical-dop2"
+    },
+    {
+      "scenario": "typical-dop2-s2",
+      "utc": "2026-08-19T01:50:01.0993699+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 90357,
+      "applyElapsedMs": 21499,
+      "purgeElapsedMs": 31359,
+      "elapsedMs": 143215,
+      "applyBytesHashed": 48317831,
+      "purgeBytesHashed": 55676540,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 2,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 1970,
+        "journalOverheadPercent": 13.045685279187817,
+        "journalIsWithinTarget": false,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 2965,
+          "batchMs": 0,
+          "coordinatorMs": 1970,
+          "emptyRootMs": 28,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "leafDispositionsPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\bench-scale-iter2\\evidence\\20260819T014901Z-25a87ea2-5591-4ef0-8253-4b6631fdb62a\\leaf-dispositions.json",
+      "sampleIndex": 2,
+      "scenarioName": "typical-dop2"
+    },
+    {
+      "scenario": "best-dop4-s1",
+      "utc": "2026-08-19T01:52:30.8416677+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 95810,
+      "applyElapsedMs": 20973,
+      "purgeElapsedMs": 29944,
+      "elapsedMs": 146727,
+      "applyBytesHashed": 48317825,
+      "purgeBytesHashed": 55676525,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 4,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 1703,
+        "journalOverheadPercent": 17.733411626541397,
+        "journalIsWithinTarget": false,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 2855,
+          "batchMs": 0,
+          "coordinatorMs": 1703,
+          "emptyRootMs": 34,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "leafDispositionsPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\bench-scale-iter2\\evidence\\20260819T015133Z-1e852020-51a3-41d9-8c81-92ae2eeb392f\\leaf-dispositions.json",
+      "sampleIndex": 1,
+      "scenarioName": "best-dop4"
+    },
+    {
+      "scenario": "best-dop4-s2",
+      "utc": "2026-08-19T01:54:59.6273539+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 91792,
+      "applyElapsedMs": 21767,
+      "purgeElapsedMs": 31867,
+      "elapsedMs": 145426,
+      "applyBytesHashed": 48317825,
+      "purgeBytesHashed": 55676525,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 4,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 1626,
+        "journalOverheadPercent": 16.482164821648215,
+        "journalIsWithinTarget": false,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 2798,
+          "batchMs": 0,
+          "coordinatorMs": 1626,
+          "emptyRootMs": 26,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "leafDispositionsPath": "D:\\Codex\\projects\\统一环境\\reports\\safe-tree-delete-issue42-20260819\\bench-scale-iter2\\evidence\\20260819T015359Z-c896eb47-7408-4fb4-a952-f1b35efba4aa\\leaf-dispositions.json",
+      "sampleIndex": 2,
+      "scenarioName": "best-dop4"
+    }
+  ]
+}

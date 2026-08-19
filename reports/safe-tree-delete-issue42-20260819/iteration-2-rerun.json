@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Test-CodexSafeTreeDeleteHashReuse.ps1",
+    "exitCode": 0,
+    "ok": true
+  },
+  {
+    "name": "Test-CodexSafeTreeDeletePhase3Integration.ps1",
+    "exitCode": 0,
+    "ok": true
+  },
+  {
+    "name": "Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+    "exitCode": 0,
+    "ok": true
+  }
+]

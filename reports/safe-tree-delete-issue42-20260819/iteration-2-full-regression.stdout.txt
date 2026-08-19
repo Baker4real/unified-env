@@ -1,0 +1,56 @@
+REGRESS start Test-CodexSafeTreeDelete.ps1 utc=2026-08-19T01:56:48.5095145+00:00
+REGRESS done Test-CodexSafeTreeDelete.ps1 exit=0 ms=33839
+REGRESS start Test-CodexSafeTreeDeleteBenchmark.ps1 utc=2026-08-19T01:57:22.3793369+00:00
+REGRESS done Test-CodexSafeTreeDeleteBenchmark.ps1 exit=0 ms=14811
+REGRESS start Test-CodexSafeTreeDeleteControlPlane.ps1 utc=2026-08-19T01:57:37.1928171+00:00
+REGRESS done Test-CodexSafeTreeDeleteControlPlane.ps1 exit=0 ms=118551
+REGRESS start Test-CodexSafeTreeDeleteCrashSafety.ps1 utc=2026-08-19T01:59:35.7455719+00:00
+REGRESS done Test-CodexSafeTreeDeleteCrashSafety.ps1 exit=0 ms=69782
+REGRESS start Test-CodexSafeTreeDeleteFileSystem.ps1 utc=2026-08-19T02:00:45.5289545+00:00
+REGRESS done Test-CodexSafeTreeDeleteFileSystem.ps1 exit=1 ms=6822
+REGRESS start Test-CodexSafeTreeDeleteGrace.ps1 utc=2026-08-19T02:00:52.3603941+00:00
+REGRESS done Test-CodexSafeTreeDeleteGrace.ps1 exit=0 ms=26951
+REGRESS start Test-CodexSafeTreeDeleteHashCache.ps1 utc=2026-08-19T02:01:19.3129283+00:00
+REGRESS done Test-CodexSafeTreeDeleteHashCache.ps1 exit=0 ms=1343
+REGRESS start Test-CodexSafeTreeDeleteHashReuse.ps1 utc=2026-08-19T02:01:20.6579551+00:00
+REGRESS done Test-CodexSafeTreeDeleteHashReuse.ps1 exit=1 ms=867099
+REGRESS start Test-CodexSafeTreeDeleteHashSafely.ps1 utc=2026-08-19T02:15:47.7583473+00:00
+REGRESS done Test-CodexSafeTreeDeleteHashSafely.ps1 exit=0 ms=1970
+REGRESS start Test-CodexSafeTreeDeleteIdentityV2.ps1 utc=2026-08-19T02:15:49.7296403+00:00
+REGRESS done Test-CodexSafeTreeDeleteIdentityV2.ps1 exit=0 ms=1497
+REGRESS start Test-CodexSafeTreeDeleteJournalPerformance.ps1 utc=2026-08-19T02:15:51.2279352+00:00
+REGRESS done Test-CodexSafeTreeDeleteJournalPerformance.ps1 exit=0 ms=19356
+REGRESS start Test-CodexSafeTreeDeleteLeafStreamSet.ps1 utc=2026-08-19T02:16:10.5858769+00:00
+REGRESS done Test-CodexSafeTreeDeleteLeafStreamSet.ps1 exit=0 ms=19375
+REGRESS start Test-CodexSafeTreeDeleteMetricsEvidence.ps1 utc=2026-08-19T02:16:29.9617047+00:00
+REGRESS done Test-CodexSafeTreeDeleteMetricsEvidence.ps1 exit=0 ms=16823
+REGRESS start Test-CodexSafeTreeDeleteParallelismBenchmark.ps1 utc=2026-08-19T02:16:46.7865029+00:00
+REGRESS done Test-CodexSafeTreeDeleteParallelismBenchmark.ps1 exit=0 ms=161272
+REGRESS start Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1 utc=2026-08-19T02:19:28.0597357+00:00
+REGRESS done Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1 exit=0 ms=10320
+REGRESS start Test-CodexSafeTreeDeletePhase1Integration.ps1 utc=2026-08-19T02:19:38.3817969+00:00
+REGRESS done Test-CodexSafeTreeDeletePhase1Integration.ps1 exit=0 ms=1044771
+REGRESS start Test-CodexSafeTreeDeletePhase3Integration.ps1 utc=2026-08-19T02:37:03.1547464+00:00
+REGRESS done Test-CodexSafeTreeDeletePhase3Integration.ps1 exit=1 ms=9730
+REGRESS start Test-CodexSafeTreeDeletePlanIdentityV2.ps1 utc=2026-08-19T02:37:12.8861526+00:00
+REGRESS done Test-CodexSafeTreeDeletePlanIdentityV2.ps1 exit=0 ms=1792
+REGRESS start Test-CodexSafeTreeDeletePurgeBatch.ps1 utc=2026-08-19T02:37:14.6791914+00:00
+REGRESS done Test-CodexSafeTreeDeletePurgeBatch.ps1 exit=0 ms=1556915
+REGRESS start Test-CodexSafeTreeDeletePurgeHashReuse.ps1 utc=2026-08-19T03:03:11.5957192+00:00
+REGRESS done Test-CodexSafeTreeDeletePurgeHashReuse.ps1 exit=0 ms=979963
+REGRESS start Test-CodexSafeTreeDeleteRestore.ps1 utc=2026-08-19T03:19:31.5599839+00:00
+REGRESS done Test-CodexSafeTreeDeleteRestore.ps1 exit=0 ms=31072
+REGRESS start Test-CodexSafeTreeDeleteSchemaCompatibility.ps1 utc=2026-08-19T03:20:02.6332514+00:00
+REGRESS done Test-CodexSafeTreeDeleteSchemaCompatibility.ps1 exit=0 ms=7065
+REGRESS start Test-CodexSafeTreeDeleteStatus.ps1 utc=2026-08-19T03:20:09.6992386+00:00
+REGRESS done Test-CodexSafeTreeDeleteStatus.ps1 exit=0 ms=28335
+REGRESS start Test-CodexSafeTreeDeleteThreadJournal.ps1 utc=2026-08-19T03:20:38.0354363+00:00
+REGRESS done Test-CodexSafeTreeDeleteThreadJournal.ps1 exit=0 ms=984
+REGRESS start Test-CodexSafeTreeDeleteUncertainRecovery.ps1 utc=2026-08-19T03:20:39.0210369+00:00
+REGRESS done Test-CodexSafeTreeDeleteUncertainRecovery.ps1 exit=0 ms=17024
+REGRESS start Test-CodexUserEnvironmentTransaction.ps1 utc=2026-08-19T03:20:56.0462368+00:00
+REGRESS done Test-CodexUserEnvironmentTransaction.ps1 exit=0 ms=1056
+REGRESS start Test-ReportArtifactPublisher.ps1 utc=2026-08-19T03:20:57.1030474+00:00
+REGRESS done Test-ReportArtifactPublisher.ps1 exit=0 ms=663
+REGRESS start ProductionSmoke utc=2026-08-19T03:20:57.7669614+00:00
+REGRESS summary unexpected=3 allOkOrWaived=False
