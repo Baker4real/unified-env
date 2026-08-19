@@ -11,6 +11,8 @@ priority: P0
 
 ## Implementation status (2026-08-13)
 
+（本节是 2026-08-13 时点快照；2026-08-19 起的现役状态以下文「Implementation status update (2026-08-19)」与「操作者指南」为准。）
+
 Phase 1 的**库与 Plan 采集**部分已随 `e2064a3` 进入 `main`（GitHub #27–#31）：`FileIdentityV2`、`SessionHashCache`、`GetHashSafely`、Plan 并列 `fileIdentitiesV2`。2026-08-15 起（#54）Plan 再并列 `leafStreamSetV1`，Apply/Purge 在各自 locked preflight freeze 内逐 leaf 复验 stream 集、FileIdentityV2 与 hardlink 计数，并在 Purge 发布 `leaf-dispositions.json`。工作树 Apply 已接入 `GetHashSafely` + 会话级 `SessionHashCache`（#32，10k 0.868x）；Purge 已接入 invocation-local `SessionHashCache`（#33，10k 0.921x）。两者单独墙钟均未加速。#42 已改为 snapshot 持有 lease 时从同一 handle 算哈希。Crash recovery uncertain 已接入（#34）：尚未 commit-authorized 的 freeze 按路径是否仍在分为 `pendingFiles` / `uncertainFiles`，uncertain 不得收成 `purged`。#36 完整 Plan→Apply→Purge（10k×160KiB，每树 1.526 GiB）baseline 527846ms / Phase 1 517444ms = **1.02x**，未达 3x。#37 Purge 先收集 `List<PurgeFileLeaf>` 再 `GetHashSafely` 验证，删除仍走 HostSafety 逐 leaf freeze/commit；10k×4KB batch/Phase1/baseline = 187157/190905/180384ms（1.02x / 0.964x）。该 10k 墙钟测于一度尝试的 HostSafety collect-then-process，随后已撤回，未重跑。#38 已落地 `ThreadJournalWriter` / `ThreadJournalOwner`。#39 已落地 `ParallelPurgeCoordinator`（`scripts/lib/CodexSafeTreeDeleteParallelPurge.cs`）：夹具树上目录级 `Parallel.ForEach` + 每文件 pending→Flush→`File.Delete`→commit；10k 小文件 31339ms / 4 journal / 0 失败。允许根为构造注入；2-arg 仍默认 issue38 测试根。生产 `Invoke-CodexSafeTreeDeletePurge` 未接线。#40 在 coordinator 夹具上测完 1/2/4/8/16：10k×1KB 效率峰值 DOP 4（13255ms，4.48x），墙钟最佳 DOP 16（4926ms）；`FromDetection` optimize 仍为 4。#41 10k journal overhead **18.659%**。#42 生产路径 10k×4KB：baseline 513510ms / phase3-prod 534034ms = **0.962x**（未达 4x/6x）。snapshot 有 provider 时不再先放 lease，Apply/Purge 有 lease 时从同一 handle 算哈希。Coordinator 夹具 DOP4=4.48x 未计入生产倍率。生产 Purge 仍走 HostSafety，未接 `ParallelPurgeCoordinator`。操作者指南见下文「操作者指南」。不要把本 spec 的 4–6x 目标读成已上线性能。
 
 2026-08-15 复核补丁（#54 跟进）：`leafStreamSetV1.consumptionBoundary` 增加
@@ -22,7 +24,11 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 崩溃窗口由绑定校验后的幂等收口覆盖，详见
 `docs/specs/2026-07-24-safe-tree-delete-capability.md`。
 
-史诗收口（#26）：实现关口 `DONE_WITH_CONCERNS`（生产倍率未达票面 4–6x）。子票表与证据见 `reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md`。
+## Implementation status update (2026-08-19)
+
+#42 已把 `ParallelPurgeCoordinator` 接入生产 `Invoke-CodexSafeTreeDeletePurge`（能力门控 + HostSafety lease 删除器，非 `File.Delete`），并把 locked preflight 换成 Apply 同款 C# walker（`scripts/lib/CodexSafeTreeDeleteApplySnapshot.cs`）。同批收口：#32（Apply C# walker + 哈希复用：对 PS baseline ≈11.9x，主要来自 walker；同 walker 复用净效 1.10–1.12x）、#40（复测效率峰值 DOP=2，`RecommendOptimizeMaxParallelism` 已改 2/2/2）、#41（夹具 DOP2 journal 7.875% / 6.229%，勘误旧 18.659% 口径）。生产 10k×4KB 全管线对 baseline 576238ms：典型 DOP2 迭代 2b 轮 **4.057x / 4.023x**，AC11 复跑轮 **3.889x / 3.918x**（4x 边界摆动，Plan 相位噪声）；最佳 DOP4 **3.927x / 3.962x**。6x 在 #42 范围结构性不可达（Plan 单相位 88–96s 已占满 96s 预算），移交 #56（Plan 阶段并行哈希，方案草案未授权实施）。生产 journal overhead（典型 DOP2）三轮六样本 7.175–13.045%，3/6 ≥10%，边界不稳，稳健性复测归 #56。证据：`reports/safe-tree-delete-issue42-20260819/`、`reports/safe-tree-delete-parallelism-benchmark-20260819/`、`reports/safe-tree-delete-issue32-20260819/`、`reports/safe-tree-delete-issue41-20260819/`。
+
+史诗收口（#26）：实现关口 `DONE_WITH_CONCERNS`。子票 #32/#40/#41/#42 已于 2026-08-19 按结论评论关闭（典型 4x 边界、6x 移交 #56）；#37/#43 仍 OPEN。2026-08-17 时点的子票表见 `reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md`（快照，不是现役状态）。
 
 ## 操作者指南
 
@@ -32,11 +38,11 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 
 | 阶段 | 已落地 | 生产接线 | 已测墙钟 |
 | --- | --- | --- | --- |
-| Phase 1 哈希复用 | `FileIdentityV2`、Plan `fileIdentitiesV2`、`GetHashSafely`、invocation-local `SessionHashCache`（Apply #32、Purge #33） | 已接 Apply/Purge | #36 完整 Plan→Apply→Purge 10k×160KiB = **1.02x**，未达 3x |
+| Phase 1 哈希复用 | `FileIdentityV2`、Plan `fileIdentitiesV2`、`GetHashSafely`、invocation-local `SessionHashCache`（Apply #32、Purge #33） | 已接 Apply/Purge | #36 完整 Plan→Apply→Purge 10k×160KiB = **0.633x**（现役 `scale-phase1.json`；早前叙事 1.02x 出自另一轮未版本化测量，已被现役 JSON 取代），未达 3x |
 | Phase 2 批量 | Purge 先收集 `List<PurgeFileLeaf>` 再验证（#37） | 验证已接；删除仍走 HostSafety 逐 leaf freeze/commit | 10k×4KB batch vs Phase1 **1.02x** / vs baseline **0.964x** |
-| Phase 3 并行 | `ParallelPurgeCoordinator` + `ThreadJournalWriter`（#38–#41） | **未接**生产 `Invoke-CodexSafeTreeDeletePurge` | 生产 #42 10k×4KB = **0.962x**，未达 4x/6x |
+| Phase 3 并行 | `ParallelPurgeCoordinator` + `ThreadJournalWriter` + C# preflight walker（#38–#42） | **已接**生产 `Invoke-CodexSafeTreeDeletePurge`（#42，2026-08-19；能力门控 + HostSafety lease 删除器） | 生产 10k×4KB 对 baseline 576238ms：典型 DOP2 **4.057x/4.023x**（iter2b）与 **3.889x/3.918x**（AC11 复跑），最佳 DOP4 **3.927x/3.962x**；4x 边界、6x 未达（→#56） |
 
-生产 Purge 没有接 `ParallelPurgeCoordinator`。夹具上的并行墙钟不能当成删除加速。
+生产 Purge 已按能力门控接入 `ParallelPurgeCoordinator`（见下节）；`RecommendParallel=false`、网络卷、empty-project-state、junction、CrashSafety 钩子在场时保持串行 HostSafety。
 
 ### FILE_ID_INFO
 
@@ -50,50 +56,63 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 
 有 snapshot/Purge lease 时：先按路径复验 identity，命中缓存则跳过哈希；未命中则在同一 lease 上 `ComputeSha256FromHandle`，再写入缓存。
 
-### 并行仅夹具
+### 生产并行接线（#42，2026-08-19）
 
-`ParallelPurgeCoordinator` 只在夹具树上做目录级 `Parallel.ForEach`，每文件 `pending → Flush → File.Delete → commit`。`FileSystemCapabilities.RecommendParallel == false` 时 `ResolveMaxDegreeOfParallelism` 返回 1。生产删除仍是 HostSafety 串行 Purge。
+生产 `Invoke-CodexSafeTreeDeletePurge` 在满足门控时走 `ParallelPurgeCoordinator`：`RecommendParallel == true`、未用 `-DisablePurgeHashReuseForTest` / `-DisableParallelPurgeForTest`（任一在场即回退串行）、非 empty-project-state、无 junction、无叶子测试钩子。删除器是 HostSafety lease（顶级目录 `AcquireForEmptyDelete`、嵌套 `AcquireChildDirectoryForEmptyDelete`），不是夹具 `File.Delete`；根文件组在子目录组之后串行，避免祖先/后代 DELETE lease 冲突。默认 DOP=2（#40 2026-08-19 复测效率峰值），`-PurgeMaxDegreeOfParallelismForTest` 只改推荐值。journal 根为 `<runDirectory>\parallel-purge-journal-<guid>`，恢复扫描全部此类目录（pending 无 commit + 路径在 → pending；路径不在 → uncertain）。失败不写 `purged`；CrashSafety 钩子在场时保持原串行 HostSafety。`FileSystemCapabilities.RecommendParallel == false` 时 `ResolveMaxDegreeOfParallelism` 返回 1，生产与夹具都串行。
 
 ### 文件系统探测
 
 `FileSystemDetector.DetectFileSystem` 读 `DriveInfo.DriveFormat`、`DriveType == Network`，并对目标路径试 `GetFileIdentityV2`。`FromDetection` 现役规则：
 
 - FAT32 / exFAT：`SupportsFileId128` 强制为 false，`DeletionAllowed` 为 false。
-- 本地 NTFS / ReFS 且探测到 `FILE_ID_INFO`：`RecommendHashReuse` / `RecommendParallel` 为 true，`RecommendedMaxParallelism` 为 4（#40 效率峰值，不是墙钟最快的 16）。
+- 本地 NTFS / ReFS 且探测到 `FILE_ID_INFO`：`RecommendHashReuse` / `RecommendParallel` 为 true，`RecommendedMaxParallelism` 为 2（#40 2026-08-19 复测效率峰值 2/2/2，取代旧值 4；不是墙钟最快的 16）。
 - 网络卷或非 NTFS 族：两项 Recommend 为 false，并行度建议为 1；只要 `FILE_ID_INFO` 可用且非 FAT 族，`DeletionAllowed` 仍可为 true。
 
-生产 Plan / Apply / Purge 只把 `DeletionAllowed` 当硬门（`Assert-CodexSafeTreeDeleteDeletionAllowed`）。`RecommendHashReuse` / `RecommendParallel` **不**关掉生产哈希复用；后者只约束夹具 coordinator。FAT32 / 网络实卷 e2e 有维护者 waiver，未提权验证（#35）。
+生产 Plan / Apply / Purge 只把 `DeletionAllowed` 当硬门（`Assert-CodexSafeTreeDeleteDeletionAllowed`）。`RecommendHashReuse` **不**关掉生产哈希复用；`RecommendParallel` 自 #42 起门控生产 Purge 并行（false → 串行 HostSafety），也约束夹具 coordinator。FAT32 / 网络实卷 e2e 有维护者 waiver，未提权验证（#35）。
 
-### 实测性能（未达票面 4x/6x）
+### 实测性能（典型 4x 边界，6x 未达 → #56）
 
-**生产 Plan→Apply→Purge（HostSafety 串行 Purge）**
+**生产 Plan→Apply→Purge（2026-08-19 接线后，HostSafety lease 删除器）**
 
 | 来源 | 场景 | 墙钟 | 倍率 | 是否达票面 |
 | --- | --- | --- | --- | --- |
-| #36 | 10k×160KiB 完整流水线 | baseline 527846ms / Phase1 517444ms | **1.02x** | 未达 3x |
-| #42 | 10k×4KB 完整流水线 | baseline 513510ms / phase3-prod 534034ms | **0.962x** | 未达 4x/6x |
-| #32 | Apply 10k×4KB | reuse 349164ms / baseline 302992ms | **0.868x** | 未达 1.5–2x |
+| #42 iter2b | 10k×4KB 完整流水线，典型 DOP2 | 142049 / 143215ms（baseline 576238ms） | **4.057x / 4.023x** | 达 4x（当轮） |
+| #42 AC11 复跑 | 同上 | 148175 / 147075ms | **3.889x / 3.918x** | 4x 边界摆动（Plan 相位 88→93s 噪声） |
+| #42 iter2b | 同上，最佳 DOP4 | 146727 / 145426ms | **3.927x / 3.962x** | 未达 6x（→#56） |
+
+JSON：`reports/safe-tree-delete-issue42-20260819/iteration-2-benchmark.json`、`ac11-rerun-benchmark.json`（后者内部 `artifactType` 沿用 iteration2 命名，按文件名区分轮次）。
+
+**接线前历史（HostSafety 串行 Purge）**
+
+| 来源 | 场景 | 墙钟 | 倍率 | 是否达票面 |
+| --- | --- | --- | --- | --- |
+| #36 | 10k×160KiB 完整流水线 | baseline 598198ms / Phase1 944302ms | **0.633x**（现役 `scale-phase1.json`；早前叙事 1.02x 出自另一轮未版本化测量） | 未达 3x |
+| #42 0817 | 10k×4KB 完整流水线（接线前） | baseline 513510ms / phase3-prod 534034ms | **0.962x** | 未达 4x/6x |
+| #32 0817 | Apply 10k×4KB（PS 走树） | reuse 349164ms / baseline 302992ms | **0.868x** | 未达 1.5–2x |
+| #32 0819 | Apply 10k×4KB（C# walker） | 对 PS baseline ≈**11.9x**（主要来自 walker）；同 walker 复用净效 **1.10–1.12x** | 见 `issue32-20260819/scale-10000.json` | 复用票面达标口径见该票结论评论 |
 | #33 | Purge 10k×4KB | reuse 224320ms / baseline 206496ms | **0.921x** | 未加速 |
 | #37 | Purge batch 10k×4KB | batch 187157 / Phase1 190905 / baseline 180384ms | **1.02x** / **0.964x** | 未达 1.2x / 3.5–4x |
 
-JSON：`reports/safe-tree-delete-issue36-20260817/scale-phase1.json`、`reports/safe-tree-delete-issue42-20260817/scale-phase3.json`、`reports/safe-tree-delete-issue32-20260817/scale-10000.json`、`reports/safe-tree-delete-issue33-20260817/scale-10000.json`、`reports/safe-tree-delete-issue37-20260817/scale-10000.json`。#37 的 10k 墙钟测于一度尝试的 HostSafety collect-then-process，随后已撤回，未重跑。
+JSON：`reports/safe-tree-delete-issue36-20260817/scale-phase1.json`、`reports/safe-tree-delete-issue42-20260817/scale-phase3.json`、`reports/safe-tree-delete-issue32-20260817/scale-10000.json`、`reports/safe-tree-delete-issue32-20260819/scale-10000.json`、`reports/safe-tree-delete-issue33-20260817/scale-10000.json`、`reports/safe-tree-delete-issue37-20260817/scale-10000.json`。#37 的 10k 墙钟测于一度尝试的 HostSafety collect-then-process，随后已撤回，未重跑。
 
-**Coordinator 夹具（`File.Delete`，未接生产 Purge）**
+**Coordinator 夹具与 journal**
 
-| 来源 | 场景 | 墙钟 | 倍率 | 备注 |
-| --- | --- | --- | --- | --- |
-| #40 | 10k×1KB DOP4 / DOP1 | 13255ms / 59439ms | **4.48x** | 效率峰值 DOP4；DOP2=2.17x；墙钟最快 DOP16=4926ms |
-| #41 | 10k journal flush | TotalFlushTimeMs 6144 / elapsed 32927ms | overhead **18.659%** | 线程求和，`IsWithinTarget=false` |
+| 来源 | 场景 | 结果 | 备注 |
+| --- | --- | --- | --- |
+| #40 20260819 | 生产删除器 DOP 扫描 | 效率峰值 **DOP2**（小/中/大文件 2/2/2），数据不支持升 DOP4 | `parallelism-benchmark-20260819/analysis.json`；`RecommendOptimizeMaxParallelism` 已按此改 2 |
+| #40 20260817 | `File.Delete` 夹具 10k×1KB | DOP4 4.48x；墙钟最快 DOP16 | 已被 20260819 生产删除器复测取代，不再作推荐依据 |
+| #41 20260819 | 夹具 DOP2 journal overhead | **7.875% / 6.229%**（<10%） | 旧叙事 18.659% / 6.166% / 6.397% 已在 #41 关单勘误 |
+| #42 生产 journal | 典型 DOP2 三轮六样本 | 7.175 / 9.604 / 8.47 / 13.045 / 7.614 / 10.510% | **3/6 ≥10%，边界不稳**；稳健性复测归 #56 |
 
-JSON：`reports/safe-tree-delete-issue40-20260817/analysis.json`、`reports/safe-tree-delete-issue41-20260817/scale-10000.json`。#35 FAT32/网络实卷 e2e 有维护者 waiver，未提权验证，不列入倍率表。
+#35 FAT32/网络实卷 e2e 有维护者 waiver，未提权验证，不列入倍率表。
 
 ### 故障排查
 
 | 触发 | 先做什么 | 仍失败 |
 | --- | --- | --- |
-| 目标在网络卷，或担心并行 | 生产 Purge 本来就是 HostSafety 串行，没有可关的并行开关。夹具 coordinator 在 `RecommendParallel=false` 时 DOP=1 | 网络实卷 e2e 未提权验证（#35）。无 `FILE_ID_INFO` 时新 Plan 失败关闭，不要改走未受管删除 |
+| 目标在网络卷，或担心并行 | 网络卷 `RecommendParallel=false`，生产 Purge 自动回退串行 HostSafety；无独立"关并行"开关，测试面用 `-DisableParallelPurgeForTest` | 网络实卷 e2e 未提权验证（#35）。无 `FILE_ID_INFO` 时新 Plan 失败关闭，不要改走未受管删除 |
 | 非 NTFS，或报 `FILE_ID_INFO` / `DeletionAllowed` | 读抛错：FAT32/exFAT 与探测失败都会让新 Plan 失败关闭 | 换到支持 `FILE_ID_INFO` 的本地 NTFS/ReFS 后重新 Plan。不要注入 `FileSystemCapabilitiesForTest` 绕过生产门闩 |
-| journal flush 慢、overhead ≥10% | 只出现在 coordinator 夹具。#41 10k 为 18.659%，`IsWithinTarget=false`。先看磁盘延迟，再降低夹具 DOP | 生产 HostSafety journal 是串行 create-only，没有这条 flush 占比合同 |
+| journal flush 慢、overhead ≥10% | 生产并行 Purge 有 thread journal（`parallel-purge-journal-*`）：典型 DOP2 六样本 3/6 ≥10%，边界不稳属已知状态（#56 复测），单次超线不代表故障。夹具 DOP2 口径为 7.875%/6.229% | 持续显著超线先看磁盘延迟；串行 HostSafety 回退路径无此 flush 占比合同 |
 | 恢复列出 `uncertainFiles`，或 Status 为 `manual-review` / `inconsistent` | 按能力 spec 的 pending / uncertain 段：路径已不在且尚未 `commit-authorized` 的 freeze 不得当成已删除，也不得收成 `purged`。手工核验该路径后重新 Plan，或保持 `manual-review` | 缺 `leafStreamSetV1` 的在途会 wedge。不要 Purge leftover |
 
 ### 迁移
@@ -104,9 +123,9 @@ Apply/Purge 读到旧 Plan 缺 `fileIdentitiesV2` 或 `leafStreamSetV1` 时失�
 
 ### 发布说明
 
-- **已测生产倍率**：#36 = 1.02x；#42 = 0.962x。未达票面 3x / 4x / 6x。
-- **已接生产**：128-bit `FILE_ID_INFO`、`fileIdentitiesV2`、`leafStreamSetV1`、Apply/Purge 会话哈希复用、Purge 批量收集验证、lease 同句柄哈希。
-- **仅夹具**：`ParallelPurgeCoordinator`（`File.Delete`）。#40 DOP4=4.48x 与 #41 journal 18.659% 都不是生产删除加速。
+- **已测生产倍率（2026-08-19）**：#42 10k×4KB 典型 DOP2 = 4.057x/4.023x（iter2b）与 3.889x/3.918x（复跑），4x 边界；最佳 DOP4 = 3.927x/3.962x，未达 6x（→#56）。#36 10k×160KiB = 0.633x（现役 JSON），未达 3x。
+- **已接生产**：128-bit `FILE_ID_INFO`、`fileIdentitiesV2`、`leafStreamSetV1`、Apply/Purge 会话哈希复用、C# preflight walker、`ParallelPurgeCoordinator`（HostSafety lease 删除器，默认 DOP=2）、thread journal 恢复扫描、lease 同句柄哈希。
+- **仅夹具**：`File.Delete` 版 coordinator 基准（#40 20260817 的 4.48x）不代表生产删除加速；生产口径以 20260819 证据为准。
 - **破坏性**：缺 `fileIdentitiesV2` / `leafStreamSetV1` 的旧 Plan 必须重新 Plan。缺 `leafStreamSetV1` 的在途会 wedge。
 
 ### API 契约
@@ -134,8 +153,8 @@ Apply/Purge 读到旧 Plan 缺 `fileIdentitiesV2` 或 `leafStreamSetV1` 时失�
 | `IsRemote` | `DriveType == Network` |
 | `SupportsFileId128` | 探测到 `FILE_ID_INFO` 且非 FAT32/exFAT |
 | `RecommendHashReuse` | 仅本地 NTFS/ReFS 且 `SupportsFileId128`；生产 Apply/Purge 不读此字段 |
-| `RecommendParallel` | 同上；夹具 coordinator 在 false 时 DOP=1 |
-| `RecommendedMaxParallelism` | 可优化时为 4，否则 1 |
+| `RecommendParallel` | 同上；false 时生产 Purge 与夹具 coordinator 都串行（DOP=1） |
+| `RecommendedMaxParallelism` | 可优化时为 2（#40 2026-08-19 复测修订，原 4），否则 1 |
 | `DeletionAllowed` | 等于 `SupportsFileId128`；生产硬门 |
 
 ## Problem Statement

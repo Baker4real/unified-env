@@ -33,6 +33,9 @@ function collectRepositoryFiles(projectRoot = PROJECT_ROOT) {
     cwd: projectRoot,
     encoding: 'utf8',
     windowsHide: true,
+    // Default 1MiB maxBuffer truncates git ls-files (--others includes every
+    // untracked evidence/fixture path) and fails the gate with ENOBUFS.
+    maxBuffer: 64 * 1024 * 1024,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {

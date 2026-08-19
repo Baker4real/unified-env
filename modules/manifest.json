@@ -145,6 +145,9 @@
           "managed/remote-plugin-catalog-guard/",
           "reports/codex-hook-deployment-plan/",
           "reports/codex-hook-inventory/",
+          "reports/serena-issue44-20260817/",
+          "reports/serena-issue46-20260817/",
+          "reports/serena-issue51-20260817/",
           "tests/lib/"
         ]
       },
@@ -233,6 +236,7 @@
         ],
         "prefixes": [
           ".scratch/goal-first/",
+          ".scratch/subagent-orchestration-update-20260818/",
           ".scratch/upstream-stable-skill-sync-20260713/",
           "modules/skill-supply-chain/implementation/",
           "modules/skill-supply-chain/tests/"
@@ -304,6 +308,7 @@
           "scripts/lib/CodexHostSafety.ps1",
           "scripts/lib/CodexSafeTreeDelete.ps1",
           "scripts/lib/CodexSafeTreeDeleteFileIdentity.cs",
+          "scripts/lib/CodexSafeTreeDeleteApplySnapshot.cs",
           "scripts/lib/CodexSafeTreeDeleteHashCache.cs",
           "scripts/lib/CodexSafeTreeDeleteThreadJournal.cs",
           "scripts/lib/CodexSafeTreeDeleteParallelPurge.cs",
@@ -339,7 +344,8 @@
           "tests/Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1",
           "tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1",
           "tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1",
-          "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1"
+          "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1",
+          "tests/Test-CodexSafeTreeDeletePhase3Production.ps1"
         ],
         "prefixes": [
           ".scratch/safe-tree-delete-perf/",
@@ -365,7 +371,29 @@
           "reports/safe-tree-delete-control-plane-closeout-20260814/",
           "reports/safe-tree-delete-closeout-20260816/",
           "reports/safe-tree-delete-round-leftover-20260814/",
-          "reports/safe-tree-delete-window-bypass-20260814/"
+          "reports/safe-tree-delete-window-bypass-20260814/",
+          "reports/safe-tree-delete-issue-status-20260817/",
+          "reports/safe-tree-delete-issue-status-20260817-pm/",
+          "reports/safe-tree-delete-issue-status-20260818/",
+          "reports/safe-tree-delete-issue-status-20260818-close-criteria/",
+          "reports/safe-tree-delete-issue20-comment-20260815/",
+          "reports/safe-tree-delete-issue21-20260816/",
+          "reports/safe-tree-delete-issue21-regression-20260818/",
+          "reports/safe-tree-delete-issue21-regression-20260818-rerun1/",
+          "reports/safe-tree-delete-issue22-comment-20260815/",
+          "reports/safe-tree-delete-issue23-20260816/",
+          "reports/safe-tree-delete-issue24-20260816/",
+          "reports/safe-tree-delete-issue32-20260819/",
+          "reports/safe-tree-delete-issue35-comment-20260815/",
+          "reports/safe-tree-delete-issue35-livefs-20260815/",
+          "reports/safe-tree-delete-issue41-20260819/",
+          "reports/safe-tree-delete-issue42-20260819/",
+          "reports/safe-tree-delete-issue45-20260817/",
+          "reports/safe-tree-delete-issue47-20260816/",
+          "reports/safe-tree-delete-issue50-20260816/",
+          "reports/safe-tree-delete-issue52-20260817/",
+          "reports/safe-tree-delete-issue55-20260816/",
+          "reports/safe-tree-delete-parallelism-benchmark-20260819/"
         ]
       },
       "tests": {
@@ -404,7 +432,8 @@
         },
         "host-live": {
           "powershell": [
-            "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1"
+            "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1",
+            "tests/Test-CodexSafeTreeDeletePhase3Production.ps1"
           ],
           "python": [],
           "node": []

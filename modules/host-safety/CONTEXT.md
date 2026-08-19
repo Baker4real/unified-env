@@ -18,11 +18,11 @@ safe delete 的宿主公开入口仍是 `D:\Codex\.codex\scripts\invoke-safe-tre
 ## 权威合同
 
 - 删除语义与生产 policy：`docs/specs/2026-07-24-safe-tree-delete-capability.md`
-- 性能优化（实现已落地、倍率未达）：`docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`
+- 性能优化（生产并行 Purge 已接线；典型 4x 边界、6x 移交 #56）：`docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`
 
-性能史诗 #26 已汇总，详见 `reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md` 与性能 spec「操作者指南」。
+性能史诗 #26 子票 #32/#40/#41/#42 已于 2026-08-19 关闭，现役状态与实测数字以性能 spec「操作者指南」为准；`reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md` 是 2026-08-17 时点快照。
 
-控制面收尾（Archive、退出码传递、`complete` 聚合）以 `docs/specs/2026-07-24-safe-tree-delete-capability.md` 为准：归档合格 terminal 不蕴含 `complete=true`；受管中间层必须转发 `$LASTEXITCODE`。2026-08-13 现场快照见 `reports/safe-tree-delete-control-plane-closeout-20260814/REPORT.md`，不是现役计数。GitHub #18–#24 仍 OPEN。#49 Status 冷启动三次 189.2 / 184.4 / 181.6s，未达 60s，见 `reports/safe-tree-delete-issue49-20260817/`。
+控制面收尾（Archive、退出码传递、`complete` 聚合）以 `docs/specs/2026-07-24-safe-tree-delete-capability.md` 为准：归档合格 terminal 不蕴含 `complete=true`；受管中间层必须转发 `$LASTEXITCODE`。2026-08-13 现场快照见 `reports/safe-tree-delete-control-plane-closeout-20260814/REPORT.md`，不是现役计数。控制面收尾票（#18 系列）状态以 GitHub live tracker 为准，不在本文缓存。#49 Status 冷启动三次 189.2 / 184.4 / 181.6s，未达 60s，见 `reports/safe-tree-delete-issue49-20260817/`。
 
 Status 冷启动（#49）协议与三次测量见 `reports/safe-tree-delete-issue49-20260817/`。2026-08-17 三次冷启动墙钟 189/184/182s，**未**达到 60s SLA，不得把秒级返回写成已上线。#26–#43 的 Apply/Purge `SessionHashCache` 不是 Status 优化。
 
