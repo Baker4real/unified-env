@@ -1,0 +1,109 @@
+RUNNER_START head=cd7661f17f6fec06791cf50d53a76548b8718dd0 count=27 resumed=0 pwsh=Core 7.6.4
+START tests/Test-CodexSafeTreeDelete.ps1
+COMPLETED tests/Test-CodexSafeTreeDelete.ps1 exit=0 elapsedMs=43123
+START tests/Test-CodexSafeTreeDeleteBenchmark.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteBenchmark.ps1 exit=0 elapsedMs=12682
+START tests/Test-CodexSafeTreeDeleteControlPlane.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteControlPlane.ps1 exit=0 elapsedMs=100199
+START tests/Test-CodexSafeTreeDeleteCrashSafety.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteCrashSafety.ps1 exit=0 elapsedMs=48096
+START tests/Test-CodexSafeTreeDeleteGrace.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteGrace.ps1 exit=0 elapsedMs=14934
+START tests/Test-CodexSafeTreeDeleteHashCache.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteHashCache.ps1 exit=0 elapsedMs=1498
+START tests/Test-CodexSafeTreeDeleteHashReuse.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteHashReuse.ps1 exit=0 elapsedMs=1096845
+START tests/Test-CodexSafeTreeDeletePurgeHashReuse.ps1
+COMPLETED tests/Test-CodexSafeTreeDeletePurgeHashReuse.ps1 exit=0 elapsedMs=1550200
+START tests/Test-CodexSafeTreeDeleteHashSafely.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteHashSafely.ps1 exit=0 elapsedMs=1436
+START tests/Test-CodexSafeTreeDeleteIdentityV2.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteIdentityV2.ps1 exit=0 elapsedMs=1242
+START tests/Test-CodexSafeTreeDeleteMetricsEvidence.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteMetricsEvidence.ps1 exit=0 elapsedMs=15450
+START tests/Test-CodexSafeTreeDeletePlanIdentityV2.ps1
+COMPLETED tests/Test-CodexSafeTreeDeletePlanIdentityV2.ps1 exit=0 elapsedMs=1645
+START tests/Test-CodexSafeTreeDeleteRestore.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteRestore.ps1 exit=0 elapsedMs=37799
+START tests/Test-CodexSafeTreeDeleteSchemaCompatibility.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteSchemaCompatibility.ps1 exit=0 elapsedMs=8275
+START tests/Test-CodexSafeTreeDeleteStatus.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteStatus.ps1 exit=0 elapsedMs=36774
+START tests/Test-CodexUserEnvironmentTransaction.ps1
+COMPLETED tests/Test-CodexUserEnvironmentTransaction.ps1 exit=0 elapsedMs=1054
+START tests/Test-ReportArtifactPublisher.ps1
+COMPLETED tests/Test-ReportArtifactPublisher.ps1 exit=0 elapsedMs=664
+START tests/Test-CodexSafeTreeDeleteFileSystem.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteFileSystem.ps1 exit=1 elapsedMs=5947
+START tests/Test-CodexSafeTreeDeleteLeafStreamSet.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteLeafStreamSet.ps1 exit=0 elapsedMs=14589
+START tests/Test-CodexSafeTreeDeleteUncertainRecovery.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteUncertainRecovery.ps1 exit=0 elapsedMs=11909
+START tests/Test-CodexSafeTreeDeletePhase1Integration.ps1
+RUNNER_START head=cd7661f17f6fec06791cf50d53a76548b8718dd0 count=27 resumed=20 pwsh=Core 7.6.4
+SKIP_RESUMED tests/Test-CodexSafeTreeDelete.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteBenchmark.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteControlPlane.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteCrashSafety.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteGrace.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteHashCache.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteHashReuse.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeletePurgeHashReuse.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteHashSafely.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteIdentityV2.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteMetricsEvidence.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeletePlanIdentityV2.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteRestore.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteSchemaCompatibility.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteStatus.ps1
+SKIP_RESUMED tests/Test-CodexUserEnvironmentTransaction.ps1
+SKIP_RESUMED tests/Test-ReportArtifactPublisher.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteFileSystem.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteLeafStreamSet.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteUncertainRecovery.ps1
+START tests/Test-CodexSafeTreeDeletePhase1Integration.ps1
+COMPLETED tests/Test-CodexSafeTreeDeletePhase1Integration.ps1 exit=0 elapsedMs=1540295
+START tests/Test-CodexSafeTreeDeletePurgeBatch.ps1
+COMPLETED tests/Test-CodexSafeTreeDeletePurgeBatch.ps1 exit=0 elapsedMs=1787465
+START tests/Test-CodexSafeTreeDeleteThreadJournal.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteThreadJournal.ps1 exit=0 elapsedMs=1039
+START tests/Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1 exit=0 elapsedMs=11438
+START tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1 exit=0 elapsedMs=21488
+START tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1 exit=1 elapsedMs=178830
+START tests/Test-CodexSafeTreeDeletePhase3Integration.ps1
+COMPLETED tests/Test-CodexSafeTreeDeletePhase3Integration.ps1 exit=1 elapsedMs=10052
+RUNNER_DONE
+RUNNER_START head=cd7661f17f6fec06791cf50d53a76548b8718dd0 count=27 resumed=25 pwsh=Core 7.6.4
+SKIP_RESUMED tests/Test-CodexSafeTreeDelete.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteBenchmark.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteControlPlane.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteCrashSafety.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteGrace.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteHashCache.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteHashReuse.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeletePurgeHashReuse.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteHashSafely.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteIdentityV2.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteMetricsEvidence.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeletePlanIdentityV2.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteRestore.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteSchemaCompatibility.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteStatus.ps1
+SKIP_RESUMED tests/Test-CodexUserEnvironmentTransaction.ps1
+SKIP_RESUMED tests/Test-ReportArtifactPublisher.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteFileSystem.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteLeafStreamSet.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteUncertainRecovery.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeletePhase1Integration.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeletePurgeBatch.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteThreadJournal.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1
+SKIP_RESUMED tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1
+START tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1
+COMPLETED tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1 exit=0 elapsedMs=184034
+START tests/Test-CodexSafeTreeDeletePhase3Integration.ps1
+COMPLETED tests/Test-CodexSafeTreeDeletePhase3Integration.ps1 exit=0 elapsedMs=984991
+RUNNER_DONE

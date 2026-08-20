@@ -1,0 +1,31 @@
+STAGE runtime-check utc=2026-08-19T17:22:52.7658757+00:00
+STAGE fs-probe utc=2026-08-19T17:22:53.0866311+00:00
+STAGE safety-toctou-e2e utc=2026-08-19T17:22:53.1298933+00:00
+STAGE coordinator-journal utc=2026-08-19T17:22:58.0232712+00:00
+STAGE reuse-issue40-raw utc=2026-08-19T17:22:59.9795780+00:00
+STAGE citations utc=2026-08-19T17:22:59.9875795+00:00
+STAGE scale-create utc=2026-08-19T17:22:59.9913761+00:00
+STAGE scale-baseline-prod utc=2026-08-19T17:23:04.8712488+00:00
+STAGE scale-phase3-create-1 utc=2026-08-19T17:35:57.1304224+00:00
+STAGE scale-phase3-prod-1 utc=2026-08-19T17:36:02.1621393+00:00
+STAGE scale-record utc=2026-08-19T17:39:11.8268525+00:00
+STAGE done utc=2026-08-19T17:39:11.8360841+00:00
+
+[32;1mok                            : [0mTrue
+[32;1msuite                         : [0mCodexSafeTreeDeletePhase3Integration
+[32;1mfileCount                     : [0m10000
+[32;1mbytesPerFile                  : [0m4096
+[32;1mproductionBaselineElapsedMs   : [0m772179
+[32;1mproductionPhase3ElapsedMs     : [0m189596
+[32;1mproductionSpeedup             : [0m4.073
+[32;1mproductionRatio               : [0m0.246
+[32;1mmetTargetBest                 : [0mFalse
+[32;1mmetTargetTypical              : [0mTrue
+[32;1mcoordinatorDop4Ms             : [0m15356
+[32;1mcoordinatorDop2Ms             : [0m29574
+[32;1mcoordinatorDop4SpeedupVsDop1  : [0m5.38
+[32;1mnetworkLiveE2eVerified        : [0mFalse
+[32;1mleftoverUntouched             : [0mTrue
+[32;1mjournalOverheadCited          : [0m15.7508172301072
+[32;1mjournalOverheadIsWithinTarget : [0mFalse
+

@@ -1,0 +1,22 @@
+STAGE runtime-check utc=2026-08-19T16:12:54.9483795+00:00
+STAGE fs-probe utc=2026-08-19T16:12:55.4473817+00:00
+STAGE safety-toctou-e2e utc=2026-08-19T16:12:55.4852754+00:00
+STAGE scale-create utc=2026-08-19T16:13:00.5667310+00:00
+STAGE scale-baseline utc=2026-08-19T16:17:35.1632694+00:00
+STAGE scale-phase1 utc=2026-08-19T16:30:36.4314553+00:00
+STAGE scale-record utc=2026-08-19T16:33:59.6912411+00:00
+STAGE done utc=2026-08-19T16:33:59.7010108+00:00
+
+[32;1mok                     : [0mTrue
+[32;1msuite                  : [0mCodexSafeTreeDeletePhase1Integration
+[32;1mfileCount              : [0m10000
+[32;1mbytesPerFile           : [0m163840
+[32;1mtotalBytes             : [0m1638400000
+[32;1mbaselineElapsedMs      : [0m781183
+[32;1mphase1ElapsedMs        : [0m203175
+[32;1mspeedup                : [0m3.845
+[32;1mratio                  : [0m0.26
+[32;1mmetTarget              : [0mTrue
+[32;1mfat32LiveE2eVerified   : [0mFalse
+[32;1mnetworkLiveE2eVerified : [0mFalse
+

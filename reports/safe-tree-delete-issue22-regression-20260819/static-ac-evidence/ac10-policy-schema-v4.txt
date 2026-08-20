@@ -1,0 +1,10 @@
+# AC10: managed policy schema check at HEAD cd7661f (2026-08-19)
+3:  "schemaVersion": 4,
+
+# v5 activation scan (managed/ 全目录，零命中):
+(no v5 anywhere under managed/)
+
+# policy.json git history (最后变更为 5f7f597，其 diff 仅新增无关条目 clock-countdown-intermediate-ui-references；codex-run-evidence 条目与 schemaVersion 未动):
+5f7f597 wip: park remaining host-safety and host WIP off main
+ec05faf feat: govern .NET bundle cache cleanup
+af25e34 chore: extend guarded build cleanup

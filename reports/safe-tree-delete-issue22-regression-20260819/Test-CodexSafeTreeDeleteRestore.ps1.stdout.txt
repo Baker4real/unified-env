@@ -1,0 +1,1 @@
+Safe tree delete Restore tests passed: confirmation/SHA, quarantined/prepared, fail-closed drift, 4 crash phases, full-tree replay, journals, mutex/idempotency, Archive strict anchors.

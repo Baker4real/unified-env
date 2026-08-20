@@ -1,0 +1,9 @@
+
+[32;1mok                            : [0mTrue
+[32;1msuite                         : [0mCodexSafeTreeDeletePurgeBatch
+[32;1mscale10000SpeedupVsPhase1     : [0m1.006
+[32;1mscale10000SpeedupVsBaseline   : [0m6.72
+[32;1mscale10000MetTarget           : [0mFalse
+[32;1mscale10000MetTargetVsPhase1   : [0mFalse
+[32;1mscale10000MetTargetVsBaseline : [0mTrue
+

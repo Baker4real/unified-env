@@ -1,0 +1,9 @@
+# Validate-ModuleBoundaries 结果（2026-08-19，HEAD cd7661f + 本目录证据 + manifest 前缀一行）
+
+## 加前缀后（本票最终状态）:
+reports/.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine/locked-payload.txt: no owner
+exit=1
+
+## 对照：git stash 掉本票 manifest 改动后（= HEAD 状态）：同样报 quarantine leftover no owner，另加本目录未登记文件
+#（已于现场执行 git stash push/pop 验证，输出要点：reports/.codex-safe-delete-0ab1e1b6-...quarantine/locked-payload.txt: no owner 在两种状态下均出现，即该失败先于本票存在，属 #53 leftover 管辖，本票禁止触碰。）
+# 本票改动引入的文件在加前缀后全部有唯一 owner；validator 唯一剩余失败与 5f7f597..HEAD 四个 commit 及本票均无关。

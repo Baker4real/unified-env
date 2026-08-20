@@ -1,0 +1,17 @@
+
+[32;1mok                    : [0mTrue
+[32;1msuite                 : [0mCodexSafeTreeDeleteJournalPerformance
+[32;1missue                 : [0m41
+[32;1mslices                : [0m6
+[32;1msmallFlushCount       : [0m6
+[32;1msmallOverheadPercent  : [0m176.25
+[32;1mscaleFileCount        : [0m10000
+[32;1mscaleElapsedMs        : [0m4574
+[32;1mscaleTotalFlushTimeMs : [0m264
+[32;1mscaleFlushCount       : [0m632
+[32;1mscaleOverheadPercent  : [0m5.77175338871885
+[32;1mscaleIsWithinTarget   : [0mTrue
+[32;1mscale2OverheadPercent : [0m5.83700440528634
+[32;1mscale2IsWithinTarget  : [0mTrue
+[32;1mscaleSlowFlushCount   : [0m0
+

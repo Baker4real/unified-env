@@ -960,8 +960,12 @@ Write-JsonFile -LiteralPath (Join-Path $evidenceHome 'curve.json') -Value $curve
 $payloadLeft = @(Get-ChildItem -LiteralPath $workRoot -Recurse -File -Filter '*.bin' -ErrorAction SilentlyContinue)
 Assert-True ($payloadLeft.Count -eq 0) ("测完不得剩夹具 payload，实际为 {0}" -f $payloadLeft.Count)
 Assert-True ($optimizeDefault.RecommendParallel -eq $true) 'NTFS 本地 FromDetection 必须仍推荐并行'
-Assert-True ($optimizeDefault.RecommendedMaxParallelism -eq $smallPeak) (
-    "FromDetection optimize 必须等于本机小文件峰值效率 DOP $smallPeak，实际为 $fromDetectionValue"
+# 推荐合同钉 #40 2026-08-19 复测结论 2/2/2（scripts/lib/CodexSafeTreeDeleteFileIdentity.cs 常量、
+# 性能 spec「操作者指南」）。本机实测峰值（$smallPeak 等）随机器状态浮动（#42 当轮测得 2、
+# 2026-08-19 回归轮测得 4），只作为证据记录进 analysis.json 的 fromDetectionMatchesMeasuredPeaks，
+# 不再作为断言口径。
+Assert-True ($optimizeDefault.RecommendedMaxParallelism -eq 2) (
+    "FromDetection optimize 必须等于 #40 复测钉定的 2（本机实测小文件峰值 DOP=$smallPeak 仅记录，不作合同），实际为 $fromDetectionValue"
 )
 $fatCaps = [CodexSafeTreeDelete.FileSystemCapabilities]::FromDetection('FAT32', $false, $false)
 $netCaps = [CodexSafeTreeDelete.FileSystemCapabilities]::FromDetection('NTFS', $true, $true)
@@ -975,17 +979,17 @@ $sizeMethod = $recommendType.GetMethod('RecommendMaxParallelismForTypicalFileByt
 Assert-True ($null -ne $optimizeMethod) '必须有 RecommendOptimizeMaxParallelism'
 Assert-True ($null -ne $sizeMethod) '必须有 RecommendMaxParallelismForTypicalFileBytes'
 Assert-True (
-    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendOptimizeMaxParallelism() -eq $smallPeak
-) "典型小文件推荐必须是本机峰值效率 $smallPeak"
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendOptimizeMaxParallelism() -eq 2
+) "典型小文件推荐必须是 #40 复测钉定的 2（本机实测 $smallPeak 仅记录）"
 Assert-True (
-    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1024) -eq $smallPeak
-) "1KB 必须推荐本机小文件峰值 $smallPeak"
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1024) -eq 2
+) "1KB 必须推荐 #40 复测钉定的 2（本机实测 $smallPeak 仅记录）"
 Assert-True (
-    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(10240) -eq $mediumPeak
-) "10KB 必须推荐本机中等峰值 $mediumPeak"
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(10240) -eq 2
+) "10KB 必须推荐 #40 复测钉定的 2（本机实测 $mediumPeak 仅记录）"
 Assert-True (
-    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1048576) -eq $largePeak
-) "1MB 必须推荐本机大文件峰值 $largePeak"
+    [CodexSafeTreeDelete.FileSystemCapabilities]::RecommendMaxParallelismForTypicalFileBytes(1048576) -eq 2
+) "1MB 必须推荐 #40 复测钉定的 2（本机实测 $largePeak 仅记录）"
 
 foreach ($scenario in $scenarios) {
     foreach ($degree in $degrees) {

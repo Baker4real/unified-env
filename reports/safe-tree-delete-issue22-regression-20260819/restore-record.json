@@ -1,0 +1,82 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue22-regression-restore-record",
+  "issue": 22,
+  "capturedAtUtc": "2026-08-19T17:55:00Z",
+  "gitHead": "cd7661f17f6fec06791cf50d53a76548b8718dd0",
+  "baselineGitStatus": [
+    " M managed/grok-hooks/host-lifecycle.json",
+    " M tests/Test-GrokHostHooks.ps1",
+    "?? reports/.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine/"
+  ],
+  "restoredViaGitCheckout": [
+    "reports/safe-tree-delete-issue32-20260817/scale-1000.json",
+    "reports/safe-tree-delete-issue32-20260817/scale-10000.json",
+    "reports/safe-tree-delete-issue33-20260817/scale-1000.json",
+    "reports/safe-tree-delete-issue33-20260817/scale-10000.json",
+    "reports/safe-tree-delete-issue34-20260817/integration-results.json",
+    "reports/safe-tree-delete-issue36-20260817/filesystem-probe.json",
+    "reports/safe-tree-delete-issue36-20260817/scale-phase1.json",
+    "reports/safe-tree-delete-issue37-20260817/scale-10000.json",
+    "reports/safe-tree-delete-issue39-20260817/scale-10000.json",
+    "reports/safe-tree-delete-issue41-20260819/journal-performance-report-10k-s1.json",
+    "reports/safe-tree-delete-issue41-20260819/journal-performance-report-10k-s2.json",
+    "reports/safe-tree-delete-issue41-20260819/journal-performance-report-10k.json",
+    "reports/safe-tree-delete-issue41-20260819/scale-10000.json",
+    "reports/safe-tree-delete-issue42-20260819/baseline-partial.json",
+    "reports/safe-tree-delete-issue42-20260819/coordinator-journal.json",
+    "reports/safe-tree-delete-issue42-20260819/filesystem-probe.json",
+    "reports/safe-tree-delete-issue42-20260819/scale-phase3.json",
+    "reports/safe-tree-delete-parallelism-benchmark-20260819/REPORT.md",
+    "reports/safe-tree-delete-parallelism-benchmark-20260819/analysis.json",
+    "reports/safe-tree-delete-parallelism-benchmark-20260819/curve.json",
+    "reports/safe-tree-delete-parallelism-benchmark-20260819/preflight.json",
+    "reports/safe-tree-delete-parallelism-benchmark-20260819/smoke.json",
+    "reports/safe-tree-delete-parallelism-benchmark-20260819/raw/*.json (54 files: large/medium/small x dop01/02/04/08/16 x {,-s1,-s2})"
+  ],
+  "restoreNote": "全部上述 tracked 快照在跑前基线 git status 中均为 clean（跑前已核对 issue32/33/34/36/37/39/42 目录），由本目录 runner 执行的 27 项 fixture 测试按已知耦合债务硬编码覆写；恢复命令为 git checkout -- <paths>，恢复后 git status 中上述路径全部消失。",
+  "untrackedLeftInPlace": [
+    {
+      "path": "reports/safe-tree-delete-issue36-20260817/fixtures-9cc0ebeb9db448e3ac44a33bf2982585/",
+      "origin": "首轮 Phase1Integration 被 kill 中断（2026-08-19T16:02Z）留下的 fixture 与 evidence",
+      "contains": "3 条 fixture 事务：e70f20e8(purged)、7e6ea812(quarantined 但 quarantine 目录已不在)、44d10002(purged)；无 production evidence root 记录",
+      "disposition": "保留并上报：受管 Purge/Restore 对 quarantine 已消失的 quarantined 事务失败闭锁，无法经 fixture 入口清理；本票契约禁止生产控制面写操作，且全局规则禁止非受管递归删除。建议后续按 managed 控制面单独立项清理（policy entry environment-reports 覆盖 D:\\Codex\\projects\\统一环境\\reports，minimumDescendantDepth=1）。"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue38-20260817/fixtures-8f7a1a293818402a80612c622164dfc4/",
+      "origin": "Test-CodexSafeTreeDeleteThreadJournal fixture 输出（11 个 jsonl journal）",
+      "disposition": "保留并上报（同上删除授权约束）"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue39-20260817/fixtures-535f6418c6e046d2a772d52683282081/",
+      "origin": "Test-CodexSafeTreeDeletePurgeHashReuse / JournalPerformance fixture 输出",
+      "disposition": "保留并上报（同上）"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue41-20260819/fixtures-e30d52c830ed4fadabc9606ac2e2d221/",
+      "origin": "Test-CodexSafeTreeDeleteJournalPerformance fixture 输出",
+      "disposition": "保留并上报（同上）"
+    },
+    {
+      "path": "reports/safe-tree-delete-issue42-20260819/coordinator-journals/",
+      "origin": "Test-CodexSafeTreeDeletePhase3Integration 重跑输出的 10 个 coordinator journal jsonl（该测试每次运行重建）",
+      "disposition": "保留并上报（同上）"
+    },
+    {
+      "path": "reports/safe-tree-delete-parallelism-benchmark-20260819/work/",
+      "origin": "Test-CodexSafeTreeDeleteParallelismBenchmark 重跑的 benchmark 工作目录（992 个 journal/payload 文件）",
+      "disposition": "保留并上报（同上；与 #42 commit 5f7f597 留下过的 leftover 10k test trees 同类）"
+    }
+  ],
+  "finalTrackedDiffVsBaseline": [
+    "modules/manifest.json（本票授权：host-safety ownership.prefixes 追加一行 reports/safe-tree-delete-issue22-regression-20260819/）",
+    "tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1（意外红修复，diff 见 static-ac-evidence/unexpected-red-fixes.diff）",
+    "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1（意外红修复，同上）",
+    "managed/grok-hooks/host-lifecycle.json、tests/Test-GrokHostHooks.ps1（用户既有未提交改动，全程 bit-for-bit 未动：SHA-256 与战役开始时一致 8376adca…/4a5dbed3…）"
+  ],
+  "quarantineLeftoverUntouched": {
+    "dir": "reports/.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine/",
+    "transactionSha256": "4e73aedc260c43c536ab9df3d3f6d5f73a065a8a17c26d1706998f583a0339d7",
+    "startEndConsistent": true,
+    "note": "#53 管辖，本票未触碰"
+  }
+}

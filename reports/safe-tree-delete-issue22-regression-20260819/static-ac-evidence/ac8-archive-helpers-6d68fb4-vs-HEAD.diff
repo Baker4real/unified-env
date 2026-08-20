@@ -1,0 +1,36 @@
+--- /tmp/helpers-6d68fb4.ps1	2026-08-19 23:18:11.550053700 +0800
++++ /tmp/helpers-HEAD.ps1	2026-08-19 23:18:11.596732400 +0800
+@@ -38,13 +38,8 @@
+     }
+     Assert-CodexHookStrictJsonText -JsonText $planSnapshot.text
+     $plan = $planSnapshot.text | ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
+-    Assert-CodexSafeTreeDeleteExactProperties `
+-        -Value $plan `
+-        -Names @(
+-            'artifactType', 'schemaVersion', 'generationId', 'createdAtUtc', 'expiresAtUtc',
+-            'policyPath', 'policySha256', 'policyEntryId', 'targetPath', 'capabilityRoot',
+-            'treeManifest', 'summary'
+-        ) `
++    Assert-CodexSafeTreeDeletePlanDocumentProperties `
++        -Plan $plan `
+         -Scope 'safe-delete archive plan'
+     if ($plan.artifactType -cne 'env-governance.codex-safe-tree-delete-plan' -or
+         $plan.schemaVersion -isnot [long] -or [long]$plan.schemaVersion -ne 1L) {
+@@ -255,3 +250,17 @@
+     }
+ }
+ 
++function New-CodexSafeTreeDeleteArchiveRefusal {
++    param(
++        [Parameter(Mandatory)][string]$Reason,
++        [Parameter(Mandatory)][object]$MetricsState
++    )
++
++    return [pscustomobject][ordered]@{
++        archived = $false
++        alreadyArchived = $false
++        refusalReason = $Reason
++        metrics = Complete-CodexSafeTreeDeleteMetrics -State $MetricsState
++    }
++}
++

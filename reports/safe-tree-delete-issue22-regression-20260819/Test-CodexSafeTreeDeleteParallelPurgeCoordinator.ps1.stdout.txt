@@ -1,0 +1,10 @@
+
+[32;1mok                    : [0mTrue
+[32;1msuite                 : [0mCodexSafeTreeDeleteParallelPurgeCoordinator
+[32;1missue                 : [0m39
+[32;1mslices                : [0m5
+[32;1mscaleFileCount        : [0m10000
+[32;1mscaleElapsedMs        : [0m4630
+[32;1mscaleJournalFileCount : [0m4
+[32;1mscaleFailedCount      : [0m0
+

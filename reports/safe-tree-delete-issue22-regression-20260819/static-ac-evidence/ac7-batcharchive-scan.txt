@@ -1,0 +1,48 @@
+# AC7: rg -i "batcharchive" across scripts/ tests/ modules/ docs/specs/ managed/ (run at HEAD cd7661f, 2026-08-19)
+# 命中解释：全部位于 tests/Test-CodexSafeTreeDeleteControlPlane.ps1，是 AC11 错误隔离 fixture 的测试局部变量名（$batchArchiveEvidenceRoot、$batchArchiveSpecs、$batchArchiveCandidates、$batchArchiveResults 等）。
+# 该测试逐条循环调用既有单笔 Mode Archive（每条自带 -TransactionPath + -ApprovedTransactionSha256 + -ConfirmArchive），不存在任何批量入口模式。
+# scripts/ 生产代码零命中。
+
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1283:    $batchArchiveEvidenceRoot = Join-Path $fixtureRoot 'batch-archive-isolation-evidence'
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1284:    $batchArchiveSpecs = @(
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1289:    $batchArchiveCandidates = [Collections.Generic.List[object]]::new()
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1290:    foreach ($batchSpec in $batchArchiveSpecs) {
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1302:            -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1309:            -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1319:                -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1324:        $batchArchiveCandidates.Add([pscustomobject][ordered]@{
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1335:    $batchArchiveResults = [Collections.Generic.List[object]]::new()
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1336:    foreach ($batchCandidate in $batchArchiveCandidates) {
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1337:        $batchArchiveError = $null
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1338:        $batchArchive = $null
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1340:            $batchArchive = & $entryPath `
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1346:                -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1348:            $batchArchiveError = $_.Exception.Message
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1352:        $batchHasRefusal = $null -ne $batchArchive -and
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1353:            @($batchArchive.PSObject.Properties.Name) -contains 'refusalReason'
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1358:            archived = if ($null -ne $batchArchive) { [bool]$batchArchive.archived } else { $false }
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1359:            alreadyArchived = if ($null -ne $batchArchive) { [bool]$batchArchive.alreadyArchived } else { $false }
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1360:            refusalReason = if ($batchHasRefusal) { [string]$batchArchive.refusalReason } else { $null }
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1361:            error = $batchArchiveError
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1362:            archivePath = if ($null -ne $batchArchive -and
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1363:                @($batchArchive.PSObject.Properties.Name) -contains 'archivePath') {
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1364:                [string]$batchArchive.archivePath
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1368:        $batchArchiveResults.Add($batchResult)
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1404:    Assert-True ($batchArchiveResults.Count -eq 3 -and
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1405:        [string]$batchArchiveResults[0].name -ceq 'batch-archive-good-a' -and
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1406:        [string]$batchArchiveResults[1].name -ceq 'batch-archive-bad' -and
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1407:        [string]$batchArchiveResults[2].name -ceq 'batch-archive-good-b' -and
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1408:        $batchArchiveResults[0].archived -eq $true -and
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1409:        $batchArchiveResults[1].archived -eq $false -and
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1410:        $batchArchiveResults[2].archived -eq $true) `
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1412:    $batchArchiveStatus = & $entryPath `
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1415:        -FixtureEvidenceRoot $batchArchiveEvidenceRoot
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1417:        $batchArchiveCandidates |
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1421:    $batchArchivedOperations = @($batchArchiveStatus.operations | Where-Object {
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1424:    $batchRefusedOperation = @($batchArchiveStatus.operations | Where-Object {
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1425:        [string]$_.operationId -ceq [string]$batchArchiveCandidates[1].operationId
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1427:    Assert-True ($batchArchivedOperations.Count -eq 2 -and
+tests/Test-CodexSafeTreeDeleteControlPlane.ps1:1428:        (@($batchArchivedOperations | Where-Object { [string]$_.lifecycle -ceq 'terminal' }).Count -eq 2) -and
+
+# scripts/ only:
+(scripts 零命中，上一命令无输出)

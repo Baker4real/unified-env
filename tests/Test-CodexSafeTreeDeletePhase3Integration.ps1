@@ -746,12 +746,15 @@ try {
     $issue37 = Read-JsonDocument -Path $issue37ScalePath
     $issue41 = Read-JsonDocument -Path $issue41ScalePath
     Assert-True (Test-HasJsonProperty -Object $issue36 -Name 'speedup') '#36 报告必须含 speedup 字段（不钉历史 1.02）'
-    Assert-True ([bool]$issue36.metTarget -eq $false) '#36 metTarget 必须仍是 false（未达 3x）'
+    Assert-True ((Test-HasJsonProperty -Object $issue36 -Name 'metTarget') -and $issue36.metTarget -is [bool]) `
+        '#36 报告必须含 bool metTarget（不钉达成状态；本套件先跑的 Phase1Integration 会用当前生产管线重写该快照，#42 并行 Purge 落地后新测可合法翻 true，见性能 spec 操作者指南）'
     [void][double]$issue36.speedup
     Assert-True (Test-HasJsonProperty -Object $issue37 -Name 'speedupVsBaseline') '#37 报告必须含 speedupVsBaseline 字段（不钉历史 0.964）'
-    Assert-True ([bool]$issue37.metTarget -eq $false) '#37 metTarget 必须仍是 false（未达票面倍率）'
+    Assert-True ((Test-HasJsonProperty -Object $issue37 -Name 'metTarget') -and $issue37.metTarget -is [bool]) `
+        '#37 报告必须含 bool metTarget（不钉达成状态；PurgeBatch 重测可改写该快照的达成状态）'
     [void][double]$issue37.speedupVsBaseline
-    Assert-True ([bool]$issue41.IsWithinTarget -eq $false) '#41 IsWithinTarget 必须仍是 false'
+    Assert-True ((Test-HasJsonProperty -Object $issue41 -Name 'IsWithinTarget') -and $issue41.IsWithinTarget -is [bool]) `
+        '#41 报告必须含 bool IsWithinTarget（不钉达成状态；重测可改写该快照的达成状态）'
     Assert-True (Test-HasJsonProperty -Object $issue41 -Name 'OverheadPercent') `
         '#41 报告必须含 OverheadPercent 字段（不钉 18.659 或后续重测百分比）'
     [void][double]$issue41.OverheadPercent
