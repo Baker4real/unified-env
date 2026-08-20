@@ -28,7 +28,7 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 
 #42 已把 `ParallelPurgeCoordinator` 接入生产 `Invoke-CodexSafeTreeDeletePurge`（能力门控 + HostSafety lease 删除器，非 `File.Delete`），并把 locked preflight 换成 Apply 同款 C# walker（`scripts/lib/CodexSafeTreeDeleteApplySnapshot.cs`）。同批收口：#32（Apply C# walker + 哈希复用：对 PS baseline ≈11.9x，主要来自 walker；同 walker 复用净效 1.10–1.12x）、#40（复测效率峰值 DOP=2，`RecommendOptimizeMaxParallelism` 已改 2/2/2）、#41（夹具 DOP2 journal 7.875% / 6.229%，勘误旧 18.659% 口径）。生产 10k×4KB 全管线对 baseline 576238ms：典型 DOP2 迭代 2b 轮 **4.057x / 4.023x**，AC11 复跑轮 **3.889x / 3.918x**（4x 边界摆动，Plan 相位噪声）；最佳 DOP4 **3.927x / 3.962x**。6x 在 #42 范围结构性不可达（Plan 单相位 88–96s 已占满 96s 预算），移交 #56（Plan 阶段并行哈希，方案草案未授权实施）。生产 journal overhead（典型 DOP2）三轮六样本 7.175–13.045%，3/6 ≥10%，边界不稳，稳健性复测归 #56。证据：`reports/safe-tree-delete-issue42-20260819/`、`reports/safe-tree-delete-parallelism-benchmark-20260819/`、`reports/safe-tree-delete-issue32-20260819/`、`reports/safe-tree-delete-issue41-20260819/`。
 
-史诗收口（#26）：实现关口 `DONE_WITH_CONCERNS`。子票 #32/#40/#41/#42 已于 2026-08-19 按结论评论关闭（典型 4x 边界、6x 移交 #56）；#37/#43 仍 OPEN。2026-08-17 时点的子票表见 `reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md`（快照，不是现役状态）。
+史诗收口（#26）：实现关口 `DONE_WITH_CONCERNS`。子票 #32/#40/#41/#42 已于 2026-08-19 按结论评论关闭（典型 4x 边界、6x 移交 #56）；#36/#37/#43 已于 2026-08-20 按结论评论关闭（#36 按现役证据、#37 按被 #42 取代、#43 文档 16/16 落点）；#35 仍 OPEN（FAT32/网络实卷 waiver）。2026-08-17 时点的子票表见 `reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md`（快照，不是现役状态）。
 
 ## 操作者指南
 
@@ -38,8 +38,8 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 
 | 阶段 | 已落地 | 生产接线 | 已测墙钟 |
 | --- | --- | --- | --- |
-| Phase 1 哈希复用 | `FileIdentityV2`、Plan `fileIdentitiesV2`、`GetHashSafely`、invocation-local `SessionHashCache`（Apply #32、Purge #33） | 已接 Apply/Purge | #36 完整 Plan→Apply→Purge 10k×160KiB = **0.633x**（现役 `scale-phase1.json`；早前叙事 1.02x 出自另一轮未版本化测量，已被现役 JSON 取代），未达 3x |
-| Phase 2 批量 | Purge 先收集 `List<PurgeFileLeaf>` 再验证（#37） | 验证已接；删除仍走 HostSafety 逐 leaf freeze/commit | 10k×4KB batch vs Phase1 **1.02x** / vs baseline **0.964x** |
+| Phase 1 哈希复用 | `FileIdentityV2`、Plan `fileIdentitiesV2`、`GetHashSafely`、invocation-local `SessionHashCache`（Apply #32、Purge #33） | 已接 Apply/Purge | #36 完整 Plan→Apply→Purge 10k×160KiB：版本化 `scale-phase1.json` = **0.633x**（钉 2026-08-17 已退役管线；早前叙事 1.02x 出自另一轮未版本化测量）；2026-08-19 现役管线（含 `ParallelPurgeCoordinator`）同协议重跑 = **3.845x**（ratio 0.26，metTarget=true；stdout 与守护哈希链见 `reports/safe-tree-delete-issue22-regression-20260819/`），#36 已于 2026-08-20 按此关闭 |
+| Phase 2 批量 | Purge 先收集 `List<PurgeFileLeaf>` 再验证（#37） | 验证已接但生产默认被 C# walker 旁路（#42，见 Phase 3 行）；删除仍走 HostSafety 逐 leaf freeze/commit | 10k×4KB batch vs Phase1 **1.02x** / vs baseline **0.964x**（测于已撤回路径、未重跑，勘误见下文历史表注；版本化 `reports/safe-tree-delete-issue37-20260817/scale-10000.json` = **0.997x / 0.974x**），#37 已于 2026-08-20 按被 #42 取代关闭 |
 | Phase 3 并行 | `ParallelPurgeCoordinator` + `ThreadJournalWriter` + C# preflight walker（#38–#42） | **已接**生产 `Invoke-CodexSafeTreeDeletePurge`（#42，2026-08-19；能力门控 + HostSafety lease 删除器） | 生产 10k×4KB 对 baseline 576238ms：典型 DOP2 **4.057x/4.023x**（iter2b）与 **3.889x/3.918x**（AC11 复跑），最佳 DOP4 **3.927x/3.962x**；4x 边界、6x 未达（→#56） |
 
 生产 Purge 已按能力门控接入 `ParallelPurgeCoordinator`（见下节）；`RecommendParallel=false`、网络卷、empty-project-state、junction、CrashSafety 钩子在场时保持串行 HostSafety。
@@ -123,7 +123,7 @@ Apply/Purge 读到旧 Plan 缺 `fileIdentitiesV2` 或 `leafStreamSetV1` 时失�
 
 ### 发布说明
 
-- **已测生产倍率（2026-08-19）**：#42 10k×4KB 典型 DOP2 = 4.057x/4.023x（iter2b）与 3.889x/3.918x（复跑），4x 边界；最佳 DOP4 = 3.927x/3.962x，未达 6x（→#56）。#36 10k×160KiB = 0.633x（现役 JSON），未达 3x。
+- **已测生产倍率（2026-08-19）**：#42 10k×4KB 典型 DOP2 = 4.057x/4.023x（iter2b）与 3.889x/3.918x（复跑），4x 边界；最佳 DOP4 = 3.927x/3.962x，未达 6x（→#56）。#36 10k×160KiB：版本化 JSON = 0.633x（钉 2026-08-17 已退役管线）；现役管线同协议重跑 = **3.845x**（metTarget=true，证据见 `reports/safe-tree-delete-issue22-regression-20260819/`），#36 已于 2026-08-20 按此关闭。
 - **已接生产**：128-bit `FILE_ID_INFO`、`fileIdentitiesV2`、`leafStreamSetV1`、Apply/Purge 会话哈希复用、C# preflight walker、`ParallelPurgeCoordinator`（HostSafety lease 删除器，默认 DOP=2）、thread journal 恢复扫描、lease 同句柄哈希。
 - **仅夹具**：`File.Delete` 版 coordinator 基准（#40 20260817 的 4.48x）不代表生产删除加速；生产口径以 20260819 证据为准。
 - **破坏性**：缺 `fileIdentitiesV2` / `leafStreamSetV1` 的旧 Plan 必须重新 Plan。缺 `leafStreamSetV1` 的在途会 wedge。

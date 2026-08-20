@@ -40,7 +40,7 @@ intent: 说明统一环境项目的能力、入口和当前治理边界
 - Codex 主机钩子治理：`docs/specs/2026-07-11-host-hook-reconciliation-design.md`
 - Codex Hook 治理设计：`docs/specs/2026-07-11-codex-hook-governance-design.md`
 - 功能钩子分层恢复设计/计划：`docs/specs/2026-07-13-functional-hook-preflight-design.md`、`docs/plans/2026-07-13-functional-hook-preflight.md`
-- 受管安全树删除：`docs/specs/2026-07-24-safe-tree-delete-capability.md`。2026-08-13 起 Plan 会写 `fileIdentitiesV2`，Apply/Purge 仍走 `treeManifest` 认证；未完成项见 `docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md` 与 GitHub #32 起。
+- 受管安全树删除：`docs/specs/2026-07-24-safe-tree-delete-capability.md`。2026-08-13 起 Plan 会写 `fileIdentitiesV2`，Apply/Purge 仍走 `treeManifest` 认证；未完成项见 `docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md` 与 GitHub Issues live tracker。
 - Git `main`-only 现役政策与历史 default-branch overlay：`docs/specs/2026-07-13-github-default-branch-skill-policy-design.md`、`docs/plans/2026-07-13-github-default-branch-skill-policy-implementation.md`
 - 现役 tracker/spec/tickets：GitHub Issues，约定见 `docs/agents/issue-tracker.md`；`.scratch/unified-env/` 保留为历史记录，不作为新事项模板。
 - 可信盘点设计：`docs/specs/2026-07-10-environment-inventory-trust-design.md`
