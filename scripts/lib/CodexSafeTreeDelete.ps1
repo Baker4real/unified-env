@@ -6541,6 +6541,18 @@ function Invoke-CodexSafeTreeDeletePurge {
                 }
 
                 $purgeTimings.coordinatorMs = [long]$parallelResult.ElapsedMs
+                # C# coordinator 只按文件枚举分组：不含任何文件的顶层分支（含整树
+                # 纯空目录）不会产生分组，其目录必须在这里按 manifest 先叶后根补删
+                #（幂等，跳过 coordinator 已删除的目录），否则根删除的 empty 断言
+                # 会稳定失败并让 transaction 停在 purging/quarantined。resume-from-
+                # purging 时 $purgeManifest 是当前存活子集，其目录 identity 与现场
+                # 一致；非 resume 时 Apply 改名不改变目录 identity，plan manifest
+                # 条目仍然有效。
+                Remove-CodexSafeTreeDeleteEmptyDirectoryTreeAfterParallelPurge `
+                    -TreePath $quarantinePath `
+                    -CapabilityRoot $quarantineCapabilityRoot `
+                    -TreeManifest $purgeManifest `
+                    -AllowedExactPaths @($quarantinePath)
                 $emptyRootWatch = [Diagnostics.Stopwatch]::StartNew()
                 if ([IO.Directory]::Exists($quarantinePath)) {
                     $rootEntry = @($purgeManifest.entries | Where-Object {

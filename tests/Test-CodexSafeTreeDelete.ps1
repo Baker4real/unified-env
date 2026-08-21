@@ -1427,6 +1427,160 @@ try {
     Assert-True (-not [IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) 'BatchPurge 必须清理既有 quarantine'
     Assert-True (-not [IO.Directory]::Exists([string]$batchPartial.quarantinePath)) 'BatchPurge 必须清理 purging 部分删除 quarantine'
 
+    # 并行 Purge 分支对不含文件的顶层分支（含整树纯空目录）的回归覆盖。
+    # C# coordinator 按文件枚举分组，纯空目录分支不产生分组；PowerShell 侧必须在
+    # 根删除前按 manifest 先叶后根补删空目录，否则根 guard 的 empty 断言会让
+    # BatchPurge 稳定失败。不得注入 DirectoryDeleteCheckpointForTest 等测试钩子，
+    # 否则 Test-CodexSafeTreeDeleteParallelPurgeEligible 会禁用并行路径，测不到缺陷。
+    $emptyTreeTarget = Join-Path $fixtureRoot 'parallel-empty-dir-tree'
+    [void][IO.Directory]::CreateDirectory((Join-Path $emptyTreeTarget 'branch-a\nested\deep'))
+    [void][IO.Directory]::CreateDirectory((Join-Path $emptyTreeTarget 'branch-b'))
+    $emptyTreeBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($emptyTreeTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($emptyTreeBatch.completed -eq $true) '纯空目录树 BatchPurge 必须完成（并行 purge 空目录补删）'
+    Assert-True ($emptyTreeBatch.purgedCount -eq 1) '纯空目录树必须作为单个目标完成 purge'
+    Assert-True (-not [IO.Directory]::Exists($emptyTreeTarget)) '纯空目录树 BatchPurge 后原 target 不得存在'
+    foreach ($emptyTreeItem in @($emptyTreeBatch.results)) {
+        Assert-True ($emptyTreeItem.purged -eq $true) '纯空目录树每个目标必须 purged=true'
+        $emptyTreeTransaction = Get-Content -Raw -LiteralPath ([string]$emptyTreeItem.transactionPath) |
+            ConvertFrom-Json -Depth 32 -DateKind String
+        Assert-True ([string]$emptyTreeTransaction.status -ceq 'purged') '纯空目录树 transaction 必须终结为 purged'
+        Assert-True (-not [IO.Directory]::Exists([string]$emptyTreeTransaction.quarantinePath)) '纯空目录树 quarantine 不得残留'
+    }
+
+    # manifest 仅 '.' 的边界：target 本身是完全空目录（无子目录、无文件）。
+    $bareEmptyTarget = Join-Path $fixtureRoot 'parallel-bare-empty-dir'
+    [void][IO.Directory]::CreateDirectory($bareEmptyTarget)
+    $bareEmptyBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($bareEmptyTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($bareEmptyBatch.completed -eq $true) '仅根空目录（manifest 只有 "."）BatchPurge 必须完成'
+    Assert-True ($bareEmptyBatch.purgedCount -eq 1) '仅根空目录必须作为单个目标完成 purge'
+    Assert-True (-not [IO.Directory]::Exists($bareEmptyTarget)) '仅根空目录 BatchPurge 后原 target 不得存在'
+
+    $mixedTreeTarget = Join-Path $fixtureRoot 'parallel-mixed-tree'
+    [void][IO.Directory]::CreateDirectory((Join-Path $mixedTreeTarget 'with-files\inner'))
+    [IO.File]::WriteAllText(
+        (Join-Path $mixedTreeTarget 'with-files\inner\payload.txt'),
+        'mixed-payload',
+        [Text.UTF8Encoding]::new($false))
+    [void][IO.Directory]::CreateDirectory((Join-Path $mixedTreeTarget 'empty-branch\a\b'))
+    $mixedTreeBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($mixedTreeTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($mixedTreeBatch.completed -eq $true) '含纯空目录顶层分支的混合树 BatchPurge 必须完成'
+    Assert-True ($mixedTreeBatch.purgedCount -eq 1) '混合树必须作为单个目标完成 purge'
+    Assert-True (-not [IO.Directory]::Exists($mixedTreeTarget)) '混合树 BatchPurge 后原 target 不得存在'
+    foreach ($mixedTreeItem in @($mixedTreeBatch.results)) {
+        Assert-True ($mixedTreeItem.purged -eq $true) '混合树每个目标必须 purged=true'
+        $mixedTreeTransaction = Get-Content -Raw -LiteralPath ([string]$mixedTreeItem.transactionPath) |
+            ConvertFrom-Json -Depth 32 -DateKind String
+        Assert-True ([string]$mixedTreeTransaction.status -ceq 'purged') '混合树 transaction 必须终结为 purged'
+        Assert-True (-not [IO.Directory]::Exists([string]$mixedTreeTransaction.quarantinePath)) '混合树 quarantine 不得残留'
+    }
+
+    # resume-from-purging：复现并行 purge 已删完全部文件、目录阶段中断的现场
+    #（quarantine 只剩空目录，transaction 停在 purging）。
+    $resumeEmptyTarget = Join-Path $fixtureRoot 'parallel-resume-empty-dirs'
+    [void][IO.Directory]::CreateDirectory((Join-Path $resumeEmptyTarget 'empty-branch\a\b'))
+    [void][IO.Directory]::CreateDirectory((Join-Path $resumeEmptyTarget 'with-files'))
+    [IO.File]::WriteAllText(
+        (Join-Path $resumeEmptyTarget 'with-files\payload.txt'),
+        'resume-payload',
+        [Text.UTF8Encoding]::new($false))
+    $resumeEmptyPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $resumeEmptyTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $resumeEmptyApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$resumeEmptyPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$resumeEmptyPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $resumeEmptyTransaction = Get-Content -Raw -LiteralPath ([string]$resumeEmptyApply.transactionPath) |
+        ConvertFrom-Json -Depth 32 -DateKind String
+    $resumeEmptyTransaction.status = 'purging'
+    $resumeEmptyTransaction.updatedAtUtc = [datetimeoffset]::UtcNow.ToString(
+        'o',
+        [Globalization.CultureInfo]::InvariantCulture)
+    Set-CodexHookCapabilityJson `
+        -Path ([string]$resumeEmptyApply.transactionPath) `
+        -Document $resumeEmptyTransaction `
+        -CapabilityRoot (Split-Path -Parent ([string]$resumeEmptyApply.transactionPath)) `
+        -AllowedExactPaths @([string]$resumeEmptyApply.transactionPath) `
+        -Scope 'safe-delete parallel resume fixture transaction'
+    [IO.File]::Delete((Join-Path ([string]$resumeEmptyApply.quarantinePath) 'with-files\payload.txt'))
+    $resumeEmptyBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($resumeEmptyTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($resumeEmptyBatch.completed -eq $true) 'purging 中断只剩空目录的 quarantine 必须可恢复完成'
+    Assert-True ($resumeEmptyBatch.recoveredCount -eq 1) 'purging 中间态必须按 recovered-purged 恢复'
+    Assert-True (-not [IO.Directory]::Exists($resumeEmptyApply.quarantinePath)) '恢复后 quarantine 空目录树不得残留'
+    Assert-True (-not [IO.Directory]::Exists($resumeEmptyTarget)) '恢复后原 target 不得存在'
+    $resumeEmptyFinalTransaction = Get-Content -Raw -LiteralPath ([string]$resumeEmptyApply.transactionPath) |
+        ConvertFrom-Json -Depth 32 -DateKind String
+    Assert-True ([string]$resumeEmptyFinalTransaction.status -ceq 'purged') 'purging 中断恢复后 transaction 必须终结为 purged'
+
+    # 并行路径自证：BatchPurge 响应不透出 parallelPurge 信息，且在不推荐并行的卷上
+    # 会静默退回本来就正确的串行路径，前面的 BatchPurge 用例无法证明走了并行分支。
+    # 这里用 Plan→Apply→Purge 手动序列，并在 Purge 阶段注入 NTFS capabilities（只覆盖
+    # capabilities 检测结果，identity/hash/journal 门槛全部真实执行），断言纯空目录
+    # 树确实由 ParallelPurgeCoordinator 处理后仍能补删完成。
+    $purgeModeTarget = Join-Path $fixtureRoot 'parallel-purge-mode-empty-tree'
+    [void][IO.Directory]::CreateDirectory((Join-Path $purgeModeTarget 'branch-a\nested\deep'))
+    [void][IO.Directory]::CreateDirectory((Join-Path $purgeModeTarget 'branch-b'))
+    $purgeModePlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $purgeModeTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $purgeModeApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$purgeModePlan.planPath) `
+        -ApprovedPlanSha256 ([string]$purgeModePlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $purgeModeCaps = [CodexSafeTreeDelete.FileSystemCapabilities]::FromDetection('NTFS', $false, $true)
+    $purgeModeResult = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$purgeModeApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$purgeModeApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot `
+        -FixtureFileSystemCapabilities $purgeModeCaps
+    Assert-True ($purgeModeResult.purged -eq $true) 'Purge 模式纯空目录树必须成功'
+    Assert-True ([bool]$purgeModeResult.parallelPurge.used) 'Purge 模式纯空目录树必须走 ParallelPurgeCoordinator（并行路径自证）'
+    Assert-True (-not [IO.Directory]::Exists($purgeModeTarget)) 'Purge 模式纯空目录树原 target 不得存在'
+    Assert-True (-not [IO.Directory]::Exists([string]$purgeModeApply.quarantinePath)) 'Purge 模式纯空目录树 quarantine 不得残留'
+
     $junctionTarget = Join-Path $fixtureRoot 'junction-candidate'
     $junctionExternal = Join-Path $fixtureRoot 'junction-external'
     $junctionPath = Join-Path $junctionTarget 'linked'
