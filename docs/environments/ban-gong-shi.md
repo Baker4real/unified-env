@@ -41,10 +41,58 @@ intent: 记录办公室设备的受控环境事实与差异
 
 CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在运行不等于登录后托盘进程已就绪。重启验收必须同时检查配置、注册入口、进程、窗口状态与必要监听端口。
 
+## 办公网、v2rayN 与 Tailscale
+
+2026-08-21 办公室订阅故障处置，以及 2026-08-22 01:23 从家里经正式 SSH 的只读复核。连接方向、identity 与 known-hosts 以 `D:\Codex\.codex\docs\agent-guidance\ssh-mesh.md` 为准；本文只记办公室本机事实。
+
+### 办公网
+
+- 当前出口是移动 `cmcc.wifi`，没有全局 IPv6 路由。
+- 对部分境外目标按 IP 在 TLS 阶段重置：TCP 能握手，随后连接被杀。2026-08-22 01:23 直连 `controlplane.tailscale.com` 仍是此模式。
+- 同一出口对机场订阅 IP 的封锁会变。2026-08-21 晚 `blogzone.me` 直连 TLS 被杀，2026-08-22 01:23 直连 HTTP 200。把直连偶然通畅写成已经解封，或因此改回直连节点，都会误判。
+- 网卡 DNS 已固定 `223.5.5.5` 与 `119.29.29.29`。原路由器 DNS 对外部域名普遍超时。
+- 在这台机器上用 Windows curl 测境外站须加 `--ssl-no-revoke`，否则 `CRYPT_E_REVOCATION_OFFLINE` 会看起来像连不上。
+
+### v2rayN
+
+- 安装根是 `D:\v2rayN-windows-64\`：`v2rayN.exe` 在该根下，配置在 `guiConfigs\`，核心是 `bin\xray\xray.exe`。不要按嵌套路径 `v2rayN-windows-64\v2rayN-windows-64` 查找。
+- `127.0.0.1:10808` 由 xray 监听。2026-08-22 01:23：v2rayN 与 xray 均在交互会话 1。
+- 激活节点必须是机场香港/台湾中转（`*.nwncd.com`）。这台 Wi-Fi 没有 IPv6，IPv6-only 节点（例如曾出现的 `hkac02-ipv6`）会让“通过代理更新”秒死。
+- `import_sub` 已开 30 分钟自动更新；更新会重绑激活条目。2026-08-22 01:23 快照：备注 `A Series - HK 25`，`newazhk25.nwncd.com:443`，VLESS/REALITY。节点名会随自动更新改变，约束是中转域名，不是这一条备注。
+- 计划任务 `Codex Office v2rayN Autostart`：Highest + Interactive，启动 `D:\v2rayN-windows-64\v2rayN.exe`。进程不退出时 `LastTaskResult=267009`（`SCHED_S_TASK_RUNNING`）表示任务仍在跑，不是失败。
+- 2026-08-22 01:23 经 socks `10808`：gstatic 与 google 均为 HTTP 204。
+
+### Tailscale 对本机代理的依赖
+
+- Tailscale 服务 `HKLM\SYSTEM\CurrentControlSet\Services\Tailscale` 的 `Environment` 含 `HTTPS_PROXY=socks5://127.0.0.1:10808` 与 `HTTP_PROXY=socks5://127.0.0.1:10808`。控制面走本地 socks；数据面在代理恢复后可再协商 UDP 直连。
+- v2rayN 或 10808 停止后，办公室 Tailscale 控制面会掉线，正式 SSH mesh 随之不可用。这种掉线先查本机代理，不要先当成密钥或 sshd 损坏。
+
+### 提权看门狗
+
+- 计划任务 `Codex Office Proxy FailSafe`：HighestAvailable，脚本 `D:\Codex\.codex\tools\office-v2rayn\Ensure-ProxyFailSafe.ps1`。UU 远程会话是中完整性，杀不掉提权的 v2rayN，也写不了 HKLM；一次性提权修复要借用该任务写入自解除块，跑完还原原件。
+- 2026-08-22 01:19 该任务 `LastTaskResult=0`、状态 `Ready`。本次只读探测没有打开脚本正文，不能声称它会在 10808 挂掉时自动拉起 v2rayN。
+
+### 回滚材料（办公室本机）
+
+- 2026-08-22 01:23 仍在：`D:\v2rayN-windows-64\guiConfigs\guiNConfig.json.bak-uu`、`guiNDB.db.bak-uu`。
+- 2026-08-21 记录、本次未再列目录：`D:\Codex\.codex\tools\office-v2rayn\Ensure-ProxyFailSafe.ps1.bak-uu`。
+
+### 办公室 mesh 不通时
+
+| 触发 | 先做 | 仍失败 |
+|---|---|---|
+| 10808 未监听，或 v2rayN/xray 不在 | 看 Autostart 与 FailSafe 任务状态；需要提权则走 FailSafe 脚本通道 | 按 ssh-mesh 用 UU 做 bootstrap/救援，不改正式 SSH 密钥 |
+| Tailscale 在线但 SSH 失败 | 复核 sshd 与 TCP 22 | 同上 |
+| 激活节点变成 IPv6-only 或被出口拉黑的直连 IP | 切回 `*.nwncd.com` 香港/台湾中转 | 中转入口也会轮换；全面超时先等几分钟再改配置 |
+
 ## 远端操作边界
 
-- 正式远端操作使用严格 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。
+- 正式远端操作使用严格 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。办公室 Tailscale 控制面依赖本机 v2rayN 的 10808，见上一节。
 - 不从本文推断当前 IP、密钥、host-key 或账号；这些均从调用端受控配置现场读取。
 - 设备级运行证据位于 `D:\Codex\.codex\run-evidence\office-win11-upgrade-20260728\`。关键终态包括 `updates\scan-final-01.json`、`cleanup\final-current-audit.json`、`cleanup\startup-memory-final-current.json`、`cleanup\backup-removal-verification.json` 与 `cleanup\volume-labels-unified.json`。
 
-除另有注明外，本页事实审计日期为 2026-07-28；更新数量、服务、进程、监听、许可证与登录态均可能变化，操作前必须实时复核。
+## 事实审计
+
+- Windows 版本、更新扫描、许可证、磁盘、Codex 记忆、CC Switch、v2rayN `AutoHideStartup`、UU 的 HKCU Run：2026-07-28 现场，本次未复核。
+- sshd / Tailscale / GameViewerService、v2rayN / xray / 10808、DNS、Tailscale 服务代理环境变量、计划任务、当前中转节点与 socks 验收：2026-08-22 01:23 从家里经正式 SSH 只读复核。
+- 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
