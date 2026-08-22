@@ -8,6 +8,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $productionEntryPath = Join-Path $projectRoot 'scripts\Invoke-CodexSafeTreeDelete.ps1'
 $entryPath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteFixture.ps1'
 $hostSafetyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1'
+$safeTreeDeleteLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1'
 $productionPolicyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
 $fixtureRoot = Join-Path $projectRoot ("reports\safe-tree-delete-test-{0}" -f ([guid]::NewGuid().ToString('N')))
 $targetPath = Join-Path $fixtureRoot 'candidate'
@@ -312,6 +313,7 @@ function New-InterruptedPurgeFixture {
 }
 
 . $hostSafetyLibraryPath
+. $safeTreeDeleteLibraryPath
 
 $gitIgnoreLines = @([IO.File]::ReadAllLines((Join-Path $projectRoot '.gitignore')))
 Assert-True (
@@ -1426,6 +1428,124 @@ try {
     Assert-True (-not [IO.Directory]::Exists($batchD)) 'BatchPurge 后原 batchD 不得存在'
     Assert-True (-not [IO.Directory]::Exists([string]$batchPreApply.quarantinePath)) 'BatchPurge 必须清理既有 quarantine'
     Assert-True (-not [IO.Directory]::Exists([string]$batchPartial.quarantinePath)) 'BatchPurge 必须清理 purging 部分删除 quarantine'
+
+    # already-absent 防御性复核回归（2026-08 BatchPurge 首目标 Exists 瞬态假阴性误判修复）。
+    # 诚实约束：瞬态假阴性无法稳定复现，红→绿不可行；此处固定两层语义：
+    # 1) 真缺席目标经复核后仍必须精确返回 already-absent（响应字段不变）；
+    # 2) 存在目标照常 planned-applied-purged（复核不得把存在误判为缺席或反向）。
+    # 复核函数本身的存在/缺席/父枚举/非目录叶子路径由下方直接单测覆盖；
+    # 模拟瞬态需要生产注入钩子，按 anti-overdefense 不加（no correct seam）。
+    $batchMixedAbsentTarget = Join-Path $batchParent 'never-created-absent-target'
+    $batchMixedPresentA = Join-Path $batchParent 'recheck-present-a'
+    $batchMixedPresentB = Join-Path $batchParent 'recheck-present-b'
+    foreach ($batchMixedPresentPath in @($batchMixedPresentA, $batchMixedPresentB)) {
+        [void][IO.Directory]::CreateDirectory($batchMixedPresentPath)
+        [IO.File]::WriteAllText(
+            (Join-Path $batchMixedPresentPath 'payload.txt'),
+            $batchMixedPresentPath,
+            [Text.UTF8Encoding]::new($false))
+    }
+    Assert-True (-not [IO.Directory]::Exists($batchMixedAbsentTarget)) 'already-absent 回归夹具必须真缺席'
+    $batchMixedResult = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($batchMixedAbsentTarget, $batchMixedPresentA, $batchMixedPresentB) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($batchMixedResult.completed -eq $true) '含真缺席目标的批量必须完成'
+    Assert-True ($batchMixedResult.targetCount -eq 3) '含缺席目标的批量必须报告全部目标数'
+    Assert-True ($batchMixedResult.alreadyAbsentCount -eq 1) '真缺席目标复核后仍必须报 already-absent'
+    Assert-True ($batchMixedResult.purgedCount -eq 2) '存在目标不得被复核误判为缺席'
+    $batchMixedAbsentEntries = @($batchMixedResult.results |
+        Where-Object targetPath -ceq $batchMixedAbsentTarget)
+    Assert-True ($batchMixedAbsentEntries.Count -ge 1) '批量结果必须包含缺席目标条目'
+    $batchMixedAbsentEntry = $batchMixedAbsentEntries[0]
+    Assert-True ([string]$batchMixedAbsentEntry.action -ceq 'already-absent') '缺席条目 action 字段必须保持 already-absent'
+    Assert-True ($batchMixedAbsentEntry.purged -eq $false) '缺席条目 purged 必须保持 false'
+    Assert-True ($null -eq $batchMixedAbsentEntry.transactionPath) '缺席条目 transactionPath 必须保持 null'
+    foreach ($batchMixedPresentEntry in @($batchMixedResult.results |
+        Where-Object { $_.targetPath -ceq $batchMixedPresentA -or $_.targetPath -ceq $batchMixedPresentB })) {
+        Assert-True ([string]$batchMixedPresentEntry.action -ceq 'planned-applied-purged') '存在条目必须照常 planned-applied-purged'
+        Assert-True ($batchMixedPresentEntry.purged -eq $true) '存在条目必须 purged=true'
+        Assert-True (-not [string]::IsNullOrEmpty([string]$batchMixedPresentEntry.transactionPath)) '存在条目必须携带 transaction'
+    }
+    Assert-True (-not [IO.Directory]::Exists($batchMixedPresentA)) '复核批量后存在目标 A 不得残留'
+    Assert-True (-not [IO.Directory]::Exists($batchMixedPresentB)) '复核批量后存在目标 B 不得残留'
+
+    # 复核函数直接单测：存在目录、真缺席、父枚举旁证、父目录缺失、同名文件叶子。
+    $recheckUnitPresent = Join-Path $batchParent 'recheck-unit-present'
+    $recheckUnitFile = Join-Path $batchParent 'recheck-unit-file.txt'
+    $recheckUnitAbsent = Join-Path $batchParent 'recheck-unit-absent'
+    $recheckUnitOrphan = Join-Path (Join-Path $batchParent 'recheck-unit-orphan') 'missing-child'
+    [void][IO.Directory]::CreateDirectory($recheckUnitPresent)
+    [IO.File]::WriteAllText($recheckUnitFile, 'not-a-dir', [Text.UTF8Encoding]::new($false))
+    Assert-True (Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck -TargetPath $recheckUnitPresent) '复核函数必须立即确认存在目录'
+    Assert-True (-not (Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck -TargetPath $recheckUnitAbsent)) '复核函数必须确认真缺席目录'
+    Assert-True (-not (Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck -TargetPath $recheckUnitFile)) '复核不得把同名文件提升为存在目录'
+    Assert-True (Test-CodexSafeTreeDeleteTargetDirListedInParent -TargetPath $recheckUnitPresent) '父枚举旁证必须命中存在目录'
+    Assert-True (Test-CodexSafeTreeDeleteTargetDirListedInParent -TargetPath ($recheckUnitPresent + '\')) '尾部分隔符不得破坏父枚举旁证的 parent/leaf 语义'
+    Assert-True (-not (Test-CodexSafeTreeDeleteTargetDirListedInParent -TargetPath $recheckUnitAbsent)) '父枚举旁证不得命中缺席目录'
+    Assert-True (-not (Test-CodexSafeTreeDeleteTargetDirListedInParent -TargetPath $recheckUnitOrphan)) '父目录缺失时旁证必须返回未见'
+    Assert-True (-not (Test-CodexSafeTreeDeleteTargetDirListedInParent -TargetPath $recheckUnitFile)) '父枚举旁证不得把同名文件误判为目录'
+    [IO.File]::Delete($recheckUnitFile)
+    [void][IO.Directory]::Delete($recheckUnitPresent)
+
+    # stale quarantined 事务 + 目标实际存在（Find-CodexSafeTreeDeleteRecoverableTransaction
+    # 存在性判定复核化的回归）：目标存在时必须跳过该事务、不得恢复
+    # （瞬态 Exists 假阴性下会误报 recovered-purged 但真实目标树未删——
+    # 同族缺陷的非瞬态语义固定；假阴性本身不可稳定复现）。断言走正常
+    # planned-applied-purged、recoveredCount=0、旧 quarantine 不被触碰。
+    $staleTxnTarget = Join-Path $batchParent 'stale-quarantine-target'
+    [void][IO.Directory]::CreateDirectory($staleTxnTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $staleTxnTarget 'payload.txt'),
+        'stale-txn-payload',
+        [Text.UTF8Encoding]::new($false))
+    $staleTxnPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $staleTxnTarget `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $staleTxnApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$staleTxnPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$staleTxnPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($staleTxnApply.quarantined -eq $true) 'stale 事务夹具必须制造 quarantined 中间态'
+    Assert-True (-not [IO.Directory]::Exists($staleTxnTarget)) 'Apply 后原目标必须已隔离'
+    [void][IO.Directory]::CreateDirectory($staleTxnTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $staleTxnTarget 'rebuilt-payload.txt'),
+        'rebuilt',
+        [Text.UTF8Encoding]::new($false))
+    $staleTxnBatch = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($staleTxnTarget) `
+        -CapabilityRoot $fixtureRoot `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($staleTxnBatch.completed -eq $true) 'stale 事务场景批量必须完成'
+    Assert-True ($staleTxnBatch.recoveredCount -eq 0) '目标实际存在时不得恢复 stale quarantined 事务'
+    Assert-True ($staleTxnBatch.purgedCount -eq 1) '重建目标必须走正常 purge'
+    Assert-True (@($staleTxnBatch.results).Count -eq 1) 'stale 事务场景必须只有单目标条目'
+    Assert-True ([string]@($staleTxnBatch.results)[0].action -ceq 'planned-applied-purged') 'stale 事务场景必须走正常 planned-applied-purged'
+    Assert-True (-not [IO.Directory]::Exists($staleTxnTarget)) '重建目标批量后不得残留'
+    Assert-True ([IO.Directory]::Exists([string]$staleTxnApply.quarantinePath)) '正常 purge 不得触碰旧 quarantine'
+    $staleTxnPurge = & $entryPath `
+        -Mode Purge `
+        -TransactionPath ([string]$staleTxnApply.transactionPath) `
+        -ApprovedTransactionSha256 ([string]$staleTxnApply.transactionSha256) `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($staleTxnPurge.purged -eq $true) '旧 quarantine 事务必须可受管清理'
 
     # 并行 Purge 分支对不含文件的顶层分支（含整树纯空目录）的回归覆盖。
     # C# coordinator 按文件枚举分组，纯空目录分支不产生分组；PowerShell 侧必须在

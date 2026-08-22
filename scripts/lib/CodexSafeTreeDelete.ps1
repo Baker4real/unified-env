@@ -6756,6 +6756,14 @@ function Find-CodexSafeTreeDeleteRecoverableTransaction {
     $fullEvidenceRoot = Initialize-CodexSafeTreeDeleteEvidenceRoot -EvidenceRoot $EvidenceRoot
     $matches = [Collections.Generic.List[object]]::new()
     $unsupportedMatches = [Collections.Generic.List[object]]::new()
+    # 目标存在性判定只做一次并缓存（lazy 到首个路径匹配的事务才求值）：
+    # 与 BatchPurge already-absent 分支同理，Directory.Exists 的
+    # GetFileAttributesEx 瞬态假阴性会把 stale quarantined/purging 事务误判
+    # 为可恢复，BatchPurge 随之报 recovered-purged 但真实目标树未删。Exists
+    # 命中即真，未命中走防御性复核；不在循环内逐事务重判（evidence 事务数
+    # 大会叠加 N×400ms），也不在扫描前无条件复核（无匹配事务的纯缺席目标
+    # 不必支付该延迟）。
+    $targetPresentAfterRecheck = $null
     foreach ($transactionPath in [IO.Directory]::EnumerateFiles($fullEvidenceRoot, 'transaction.json', [IO.SearchOption]::AllDirectories)) {
         $transactionFullPath = Assert-CodexHookDPath -Value $transactionPath -Name 'safe-delete recover transaction path'
         [void](Assert-CodexHookCapabilityPath `
@@ -6774,7 +6782,12 @@ function Find-CodexSafeTreeDeleteRecoverableTransaction {
         if (-not (Test-CodexSafeTreeDeletePathEqual `
                 -Left ([string]$transaction.targetPath) `
                 -Right ([string]$target.targetPath))) { continue }
-        if ([IO.Directory]::Exists($target.targetPath)) { continue }
+        if ($null -eq $targetPresentAfterRecheck) {
+            $targetPresentAfterRecheck = [IO.Directory]::Exists($target.targetPath) -or
+                (Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck `
+                    -TargetPath ([string]$target.targetPath))
+        }
+        if ($targetPresentAfterRecheck) { continue }
         $quarantineExists = [IO.Directory]::Exists([string]$transaction.quarantinePath) -and
             -not [IO.File]::Exists([string]$transaction.quarantinePath)
         if (-not $quarantineExists -and $status -cne 'purging') { continue }
@@ -6855,6 +6868,63 @@ function New-CodexSafeTreeDeleteProducerLease {
     }
 }
 
+function Test-CodexSafeTreeDeleteTargetDirListedInParent {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath
+    )
+
+    # 独立于目标路径属性查询的存在性旁证：直接枚举父目录（Windows 上的
+    # NtQueryDirectoryFile 通道），命中同名目录项即视为目标可见。
+    # 路径计算或枚举的任何异常一律按"未见"处理，不抛出：本函数是旁证通道，
+    # 失败不放大，由上层探测循环的 Directory.Exists 重试兜底，全部探测均
+    # 未见才允许 already-absent 判定。
+    try {
+        # 尾部分隔符必须先剪除：GetDirectoryName('D:\a\b\') 会退化返回目标
+        # 自身而非其父目录，破坏 parent/leaf 语义（GetFullPath 保留尾部斜杠，
+        # 该形态可从调用方真实到达）。
+        $trimmedTargetPath = ([string]$TargetPath).TrimEnd('\', '/')
+        $parentPath = [IO.Path]::GetDirectoryName($trimmedTargetPath)
+        $leafName = [IO.Path]::GetFileName($trimmedTargetPath)
+        if ([string]::IsNullOrEmpty($parentPath) -or [string]::IsNullOrEmpty($leafName)) {
+            return $false
+        }
+        if (-not [IO.Directory]::Exists($parentPath)) { return $false }
+        foreach ($entry in [IO.DirectoryInfo]::new($parentPath).EnumerateFileSystemInfos()) {
+            if ($entry -is [IO.DirectoryInfo] -and
+                [string]::Equals($entry.Name, $leafName, [StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+        return $false
+    } catch {
+        return $false
+    }
+}
+
+function Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath
+    )
+
+    # BatchPurge already-absent 防御性复核（2026-08 批量误判修复）。
+    # Directory.Exists 走目标路径元数据查询，杀毒/过滤器驱动瞬时占用可把
+    # 物理存在的目录误报为 false，曾导致 BatchPurge 把第一个真实目标静默判为
+    # already-absent。复核共 3 次探测、间隔 200ms：立即一次、退避两次，最长
+    # 额外等待 400ms/目标，低于本仓库 leaf-delete retry 1000ms 总预算的既有
+    # 先例；200ms 足以跨过常见亚百毫秒级过滤器瞬态窗口。代价按缺席目标数
+    # 线性叠加（每条 ~400ms，50 条缺席 ≈ 20s 级），存在目标零额外开销；
+    # 当前典型批量量级（10 条级）实际影响在秒级以内。每次探测同时用父目录
+    # 枚举做旁证（见 Test-CodexSafeTreeDeleteTargetDirListedInParent）。
+    foreach ($probeIndex in 0..2) {
+        if ($probeIndex -gt 0) { Start-Sleep -Milliseconds 200 }
+        if ([IO.Directory]::Exists($TargetPath)) { return $true }
+        if (Test-CodexSafeTreeDeleteTargetDirListedInParent -TargetPath $TargetPath) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Invoke-CodexSafeTreeDeleteBatchPurge {
     param(
         [Parameter(Mandatory)][string[]]$TargetPaths,
@@ -6931,7 +7001,8 @@ function Invoke-CodexSafeTreeDeleteBatchPurge {
                 })
                 continue
             }
-            if (-not [IO.Directory]::Exists($targetPath)) {
+            if (-not [IO.Directory]::Exists($targetPath) -and
+                -not (Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck -TargetPath $targetPath)) {
                 $results.Add([pscustomobject][ordered]@{
                     targetPath = $targetPath
                     action = 'already-absent'
