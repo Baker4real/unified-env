@@ -312,6 +312,7 @@
           "scripts/lib/CodexSafeTreeDeleteHashCache.cs",
           "scripts/lib/CodexSafeTreeDeleteThreadJournal.cs",
           "scripts/lib/CodexSafeTreeDeleteParallelPurge.cs",
+          "scripts/lib/CodexSafeTreeDeleteStatusScan.cs",
           "scripts/lib/CodexUserEnvironmentTransaction.cs",
           "scripts/lib/EnvPathSafety.ps1",
           "scripts/lib/ReportArtifactPublisher.ps1",
@@ -394,7 +395,8 @@
           "reports/safe-tree-delete-issue52-20260817/",
           "reports/safe-tree-delete-issue55-20260816/",
           "reports/safe-tree-delete-parallelism-benchmark-20260819/",
-          "reports/safe-tree-delete-issue22-regression-20260819/"
+          "reports/safe-tree-delete-issue22-regression-20260819/",
+          "reports/safe-tree-delete-issue49-20260823/"
         ]
       },
       "tests": {

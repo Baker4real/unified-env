@@ -6,6 +6,7 @@ $codexSafeTreeDeleteHashCacheSource = Join-Path $PSScriptRoot 'CodexSafeTreeDele
 $codexSafeTreeDeleteApplySnapshotSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteApplySnapshot.cs'
 $codexSafeTreeDeleteThreadJournalSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteThreadJournal.cs'
 $codexSafeTreeDeleteParallelPurgeSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteParallelPurge.cs'
+$codexSafeTreeDeleteStatusScanSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteStatusScan.cs'
 if (-not ('CodexSafeTreeDelete.FileIdentityReader' -as [type])) {
     Add-Type -Path @(
         $codexHookHandleBoundSource,
@@ -13,67 +14,90 @@ if (-not ('CodexSafeTreeDelete.FileIdentityReader' -as [type])) {
         $codexSafeTreeDeleteHashCacheSource,
         $codexSafeTreeDeleteApplySnapshotSource,
         $codexSafeTreeDeleteThreadJournalSource,
-        $codexSafeTreeDeleteParallelPurgeSource
+        $codexSafeTreeDeleteParallelPurgeSource,
+        $codexSafeTreeDeleteStatusScanSource
     ) -ErrorAction Stop
 }
-if (-not ('CodexSafeTreeDelete.StatusJsonTopLevelReader' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Text.Json;
-
-namespace CodexSafeTreeDelete {
-    public static class StatusJsonTopLevelReader {
-        public static Dictionary<string, JsonElement> ReadWanted(string jsonText, string[] names) {
-            if (jsonText == null) {
-                throw new ArgumentNullException("jsonText");
+# The host-safety native assembly cache usually preloads CodexSafeTreeDelete.FileIdentityReader,
+# so the batch above is skipped and the Status fast scanner needs its own compilation unit.
+# CodexSafeTreeDeleteStatusScan.cs is self-contained (BCL + local P/Invoke only) for exactly
+# this reason and follows the same assembly cache contract. Staleness is bound to the exact
+# .cs source content: the sidecar .sha256 records the source SHA-256 the cached DLL was
+# compiled from, so an mtime-only refresh can never mask a content change.
+if (-not ('CodexSafeTreeDelete.StatusScanCoordinator' -as [type])) {
+    $statusScanAssemblyDirectory = [IO.Path]::Combine('D:\', 'Codex', 'temp', 'unified-env-addtype')
+    [void][IO.Directory]::CreateDirectory($statusScanAssemblyDirectory)
+    $statusScanAssemblyPath = Join-Path $statusScanAssemblyDirectory 'CodexSafeTreeDeleteStatusScan.dll'
+    $statusScanMetadataPath = "$statusScanAssemblyPath.sha256"
+    $statusScanSourceSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+        [IO.File]::ReadAllBytes($codexSafeTreeDeleteStatusScanSource))).ToLowerInvariant()
+    $statusScanCachedSha256 = if ([IO.File]::Exists($statusScanMetadataPath)) {
+        ([IO.File]::ReadAllText($statusScanMetadataPath)).Trim()
+    } else {
+        $null
+    }
+    $statusScanStale = -not [IO.File]::Exists($statusScanAssemblyPath) -or
+        [string]::IsNullOrEmpty($statusScanCachedSha256) -or
+        $statusScanCachedSha256 -cne $statusScanSourceSha256
+    if ($statusScanStale) {
+        # Compile into a same-directory temp file, then atomically rename it over the cache
+        # so concurrent Status processes never observe a removed-then-half-written DLL.
+        $statusScanTempAssemblyPath = Join-Path $statusScanAssemblyDirectory (
+            '{0}.tmp' -f ([IO.Path]::GetRandomFileName()))
+        $statusScanTempMetadataPath = "$statusScanTempAssemblyPath.sha256"
+        try {
+            Add-Type `
+                -Path @($codexSafeTreeDeleteStatusScanSource) `
+                -OutputAssembly $statusScanTempAssemblyPath `
+                -OutputType Library `
+                -ErrorAction Stop
+            $statusScanLiveSha256 = if ([IO.File]::Exists($statusScanMetadataPath)) {
+                ([IO.File]::ReadAllText($statusScanMetadataPath)).Trim()
+            } else {
+                $null
             }
-            if (names == null) {
-                throw new ArgumentNullException("names");
-            }
-
-            HashSet<string> wanted = new HashSet<string>(names, StringComparer.Ordinal);
-            byte[] utf8 = Encoding.UTF8.GetBytes(jsonText);
-            Utf8JsonReader reader = new Utf8JsonReader(utf8, new JsonReaderOptions {
-                AllowTrailingCommas = false,
-                CommentHandling = JsonCommentHandling.Disallow,
-                MaxDepth = 128
-            });
-            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject) {
-                throw new InvalidOperationException("safe-delete Status JSON 必须是 object。");
-            }
-
-            Dictionary<string, JsonElement> map = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-            while (reader.Read()) {
-                if (reader.TokenType == JsonTokenType.EndObject) {
-                    break;
-                }
-                if (reader.TokenType != JsonTokenType.PropertyName) {
-                    throw new InvalidOperationException("safe-delete Status JSON 属性名非法。");
-                }
-
-                string name = reader.GetString();
-                if (!reader.Read()) {
-                    throw new InvalidOperationException("safe-delete Status JSON 截断。");
-                }
-                if (wanted.Contains(name)) {
-                    if (map.ContainsKey(name)) {
-                        throw new InvalidOperationException("safe-delete Status JSON 顶层属性重复。");
+            if (-not ($statusScanLiveSha256 -ceq $statusScanSourceSha256 -and
+                    [IO.File]::Exists($statusScanAssemblyPath))) {
+                # A concurrent process may have published the same source hash while we
+                # compiled; that DLL already is the valid new version, so only replace
+                # when nobody else did. Publish the DLL first and the sidecar second: a
+                # torn publish merely recompiles on the next run instead of certifying
+                # a stale DLL as fresh.
+                [IO.File]::WriteAllText(
+                    $statusScanTempMetadataPath,
+                    $statusScanSourceSha256,
+                    [Text.UTF8Encoding]::new($false))
+                try {
+                    Move-Item `
+                        -LiteralPath $statusScanTempAssemblyPath `
+                        -Destination $statusScanAssemblyPath `
+                        -Force -ErrorAction Stop
+                    Move-Item `
+                        -LiteralPath $statusScanTempMetadataPath `
+                        -Destination $statusScanMetadataPath `
+                        -Force -ErrorAction Stop
+                } catch {
+                    $statusScanWinnerSha256 = if ([IO.File]::Exists($statusScanMetadataPath)) {
+                        ([IO.File]::ReadAllText($statusScanMetadataPath)).Trim()
+                    } else {
+                        $null
                     }
-                    using (JsonDocument valueDoc = JsonDocument.ParseValue(ref reader)) {
-                        map[name] = valueDoc.RootElement.Clone();
+                    if (-not ($statusScanWinnerSha256 -ceq $statusScanSourceSha256 -and
+                            [IO.File]::Exists($statusScanAssemblyPath))) {
+                        throw
                     }
-                } else {
-                    reader.Skip();
                 }
             }
-
-            return map;
+        } finally {
+            foreach ($statusScanTempPath in @(
+                    $statusScanTempAssemblyPath, $statusScanTempMetadataPath)) {
+                if ([IO.File]::Exists($statusScanTempPath)) {
+                    Remove-Item -LiteralPath $statusScanTempPath -Force -ErrorAction SilentlyContinue
+                }
+            }
         }
     }
-}
-'@
+    Add-Type -Path $statusScanAssemblyPath -ErrorAction Stop
 }
 
 function Get-CodexSafeTreeDeleteFileIdentityV2 {
@@ -512,7 +536,7 @@ function Read-CodexSafeTreeDeletePolicy {
             throw 'safe-delete policy entry id 非法或重复。'
         }
         $root = Assert-CodexHookDPath -Value ([string]$entry.capabilityRoot) -Name "safe-delete policy $id root"
-        if ($root -in @('D:\', 'D:\Codex', 'D:\Codex\.codex', 'D:\Codex\projects')) {
+        if ($root -in @('D:\', 'D:\Codex', 'D:\Codex\.codex', 'D:\Codex\projects', 'D:\agents', 'D:\agents\projects')) {
             throw "safe-delete policy $id root 过宽。"
         }
         if (-not $roots.Add($root)) { throw 'safe-delete policy capabilityRoot 重复。' }
@@ -535,19 +559,19 @@ function Read-CodexSafeTreeDeletePolicy {
             throw "safe-delete policy $id 非 root 删除条目的 purpose 必须为 none。"
         }
         if ($rootDeletionPurpose -ceq 'rebuildable-build-output' -and
-            $root -notmatch '^D:\\Codex\\projects\\[^\\]+\\.+$') {
+            $root -notmatch '^D:\\(Codex|agents)\\projects\\[^\\]+\\.+$') {
             throw "safe-delete policy $id 可重建构建产物必须位于项目根之下。"
         }
         if ($rootDeletionPurpose -ceq 'rebuildable-build-output' -and
-            $root -match '^D:\\Codex\\projects\\[^\\]+\\\.codex$') {
+            $root -match '^D:\\(Codex|agents)\\projects\\[^\\]+\\\.codex$') {
             throw "safe-delete policy $id 项目 .codex 不得声明为可重建构建产物。"
         }
         if ($rootDeletionPurpose -ceq 'empty-project-state' -and
-            $root -notmatch '^D:\\Codex\\projects\\[^\\]+\\\.codex$') {
+            $root -notmatch '^D:\\(Codex|agents)\\projects\\[^\\]+\\\.codex$') {
             throw "safe-delete policy $id 空项目状态必须精确指向项目 .codex 根。"
         }
         if ($rootDeletionPurpose -ceq 'retired-project-root' -and
-            $root -notmatch '^D:\\Codex\\projects\\[^\\]+$') {
+            $root -notmatch '^D:\\(Codex|agents)\\projects\\[^\\]+$') {
             throw "safe-delete policy $id 退役项目必须精确指向项目根。"
         }
         $allowHardLinks = $false
@@ -2667,6 +2691,137 @@ function Get-CodexSafeTreeDeleteStatusJsonParseThrottleLimit {
     return [int][Math]::Min(4, [Math]::Max(1, $processorCount - 2))
 }
 
+function Test-CodexSafeTreeDeleteStatusFastScanEnabled {
+    return $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN -cne '0'
+}
+
+function Invoke-CodexSafeTreeDeleteStatusFastScan {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$RunItems,
+        [Parameter(Mandatory)][object]$Policy,
+        [Parameter(Mandatory)][string]$FullEvidenceRoot,
+        [AllowNull()][object]$MetricsState,
+        [Parameter(Mandatory)][int]$DegreeOfParallelism
+    )
+
+    $runs = [Collections.Generic.List[CodexSafeTreeDelete.StatusScanRunInput]]::new()
+    $index = 0
+    foreach ($runItem in @($RunItems)) {
+        $runInput = [CodexSafeTreeDelete.StatusScanRunInput]::new()
+        $runInput.Index = $index
+        $runInput.Name = [string]$runItem.Name
+        $runInput.FullName = [string]$runItem.FullName
+        $runInput.IsContainer = [bool]$runItem.PSIsContainer
+        $runInput.IsReparsePoint = (($runItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+        $runs.Add($runInput)
+        $index++
+    }
+    $scanPolicy = [CodexSafeTreeDelete.StatusScanPolicy]@{
+        Path = [string]$Policy.path
+        Sha256 = [string]$Policy.sha256
+        Entries = [Collections.Generic.List[CodexSafeTreeDelete.StatusScanPolicyEntry]]::new()
+    }
+    foreach ($entry in @($Policy.entries)) {
+        $scanEntry = [CodexSafeTreeDelete.StatusScanPolicyEntry]::new()
+        $scanEntry.Id = [string]$entry.id
+        $scanEntry.CapabilityRoot = [string]$entry.capabilityRoot
+        $scanEntry.MinimumDescendantDepth = [long]$entry.minimumDescendantDepth
+        $scanEntry.RootDeletionPurpose = [string]$entry.rootDeletionPurpose
+        $scanEntry.AllowHardLinks = [bool]$entry.allowHardLinks
+        $scanEntry.AllowInternalDirectoryJunctions = [bool]$entry.allowInternalDirectoryJunctions
+        $scanEntry.DeniedExactPaths = [Collections.Generic.List[string]]::new()
+        foreach ($denied in @([string[]]$entry.deniedExactPaths)) {
+            $scanEntry.DeniedExactPaths.Add([string]$denied)
+        }
+        $scanPolicy.Entries.Add($scanEntry)
+    }
+    $scanResults = [CodexSafeTreeDelete.StatusScanCoordinator]::Scan(
+        $runs, $scanPolicy, $FullEvidenceRoot, $DegreeOfParallelism)
+    $byPath = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($scanResult in @($scanResults)) {
+        $runInput = $runs[$scanResult.Index]
+        $byPath[[string]$runInput.FullName] = $scanResult
+        # Handled results carry their own reads; unhandled active results with a plan
+        # snapshot get injected into the prefetch cache below, so their single plan read
+        # is counted here instead of a second PowerShell read.
+        if ([bool]$scanResult.Handled -or $null -ne $scanResult.PlanSha256) {
+            $metricsState.bytesHashed = [long]$metricsState.bytesHashed + [long]$scanResult.BytesHashed
+            $metricsState.logicalBytes = [long]$metricsState.logicalBytes + [long]$scanResult.LogicalBytes
+            Add-CodexSafeTreeDeleteStatusElapsed `
+                -State $MetricsState `
+                -Name 'segmentPlanTransactionReadMs' `
+                -Milliseconds ([long]$scanResult.PlanTransactionReadMs)
+            Add-CodexSafeTreeDeleteStatusElapsed `
+                -State $MetricsState `
+                -Name 'segmentTerminalArchiveAuthMs' `
+                -Milliseconds ([long]$scanResult.TerminalArchiveAuthMs)
+            Add-CodexSafeTreeDeleteStatusElapsed `
+                -State $MetricsState `
+                -Name 'segmentSha256Ms' `
+                -Milliseconds ([long]$scanResult.Sha256Ms)
+        }
+    }
+    return $byPath
+}
+
+function New-CodexSafeTreeDeleteStatusOperationFromScan {
+    param(
+        [Parameter(Mandatory)][object]$ScanResult,
+        [Parameter(Mandatory)][bool]$CandidatePolicyRequested
+    )
+
+    $namespaceAbsent = if ([bool]$ScanResult.HasNamespace) { [bool]$ScanResult.NamespaceAbsent } else { $null }
+    $deletionOutcome = New-CodexSafeTreeDeleteOutcome `
+        -NamespaceAbsent $namespaceAbsent `
+        -LogicalCompletion ([bool]$ScanResult.LogicalCompletion)
+    $planSchemaVersion = if ([bool]$ScanResult.HasPlanSchemaVersion) {
+        [long]$ScanResult.PlanSchemaVersion
+    } else {
+        $null
+    }
+    $transactionSchemaVersion = if ([bool]$ScanResult.HasTransactionSchemaVersion) {
+        [long]$ScanResult.TransactionSchemaVersion
+    } else {
+        $null
+    }
+    $operation = [pscustomobject][ordered]@{
+        operationId = [string]$ScanResult.OperationId
+        runDirectory = [string]$ScanResult.RunDirectory
+        lifecycle = [string]$ScanResult.Lifecycle
+        safeActions = [string[]]$ScanResult.SafeActions
+        targetPath = $ScanResult.TargetPath
+        quarantinePath = $ScanResult.QuarantinePath
+        targetPresent = if ([bool]$ScanResult.HasNamespace) { [bool]$ScanResult.TargetPresent } else { $null }
+        quarantinePresent = if ([bool]$ScanResult.HasNamespace) { [bool]$ScanResult.QuarantinePresent } else { $null }
+        targetEntryType = [string]$ScanResult.TargetEntryType
+        quarantineEntryType = [string]$ScanResult.QuarantineEntryType
+        namespaceAbsent = $deletionOutcome.namespaceAbsent
+        logicalCompletion = $deletionOutcome.logicalCompletion
+        physicalReclaimStatus = $deletionOutcome.physicalReclaimStatus
+        physicalReclaimReason = $deletionOutcome.physicalReclaimReason
+        deletionOutcome = $deletionOutcome
+        policyCompatible = [bool]$ScanResult.PolicyCompatible
+        schemaCompatible = [bool]$ScanResult.SchemaCompatible
+        candidatePolicyCompatible = if ($CandidatePolicyRequested) {
+            [bool]$ScanResult.Archived
+        } else {
+            $null
+        }
+        planSchemaVersion = $planSchemaVersion
+        transactionSchemaVersion = $transactionSchemaVersion
+        transactionStatus = $ScanResult.TransactionStatus
+        transactionUpdatedAtUtc = $ScanResult.TransactionUpdatedAtUtc
+        journalStatus = [string]$ScanResult.JournalStatus
+        pendingFiles = @()
+        uncertainFiles = @()
+        errors = [string[]]$ScanResult.Errors
+    }
+    return [pscustomobject][ordered]@{
+        complete = -not ([string]$ScanResult.Lifecycle -ceq 'manual-review')
+        operation = $operation
+    }
+}
+
 function Read-CodexSafeTreeDeleteStatusUnarchivedPlanPrefetch {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$RunItems,
@@ -3742,6 +3897,7 @@ function Get-CodexSafeTreeDeleteStatus {
         segmentActiveResolveMs = 0L
         segmentArchivedResolveMs = 0L
         segmentPrefetchMs = 0L
+        segmentFastScanMs = 0L
     } -Force
     $statusTreeCache = [Collections.Generic.Dictionary[string, object]]::new(
         [StringComparer]::Ordinal)
@@ -3791,39 +3947,90 @@ function Get-CodexSafeTreeDeleteStatus {
         Sort-Object -Property Name -CaseSensitive)
     $enumWatch.Stop()
     $metricsState.segmentDirectoryEnumerationMs = [long]$enumWatch.ElapsedMilliseconds
-    $prefetchWatch = [Diagnostics.Stopwatch]::StartNew()
-    $statusPlanPrefetch = Read-CodexSafeTreeDeleteStatusUnarchivedPlanPrefetch `
-        -RunItems $runItems `
-        -FullEvidenceRoot $fullEvidenceRoot `
-        -MetricsObserver $treeMetricsObserver `
-        -MetricsState $metricsState
-    $prefetchWatch.Stop()
-    $metricsState.segmentPrefetchMs = [long]$prefetchWatch.ElapsedMilliseconds
+    $fastScanEnabled = Test-CodexSafeTreeDeleteStatusFastScanEnabled
+    $fastResults = $null
+    $fastScanMs = 0L
+    $fastDop = Get-CodexSafeTreeDeleteStatusJsonParseThrottleLimit
+    $fastHandled = 0L
+    $fastFallback = 0L
+    if ($fastScanEnabled) {
+        $fastWatch = [Diagnostics.Stopwatch]::StartNew()
+        $fastResults = Invoke-CodexSafeTreeDeleteStatusFastScan `
+            -RunItems $runItems `
+            -Policy $policy `
+            -FullEvidenceRoot $fullEvidenceRoot `
+            -MetricsState $metricsState `
+            -DegreeOfParallelism $fastDop
+        $fastWatch.Stop()
+        $fastScanMs = [long]$fastWatch.ElapsedMilliseconds
+        $metricsState.segmentFastScanMs = $fastScanMs
+        $statusPlanPrefetch = [pscustomobject][ordered]@{
+            cache = [Collections.Generic.Dictionary[string, object]]::new(
+                [StringComparer]::OrdinalIgnoreCase)
+            throttleLimit = [int]$fastDop
+            prefetchedCount = 0L
+            parsedCount = 0L
+        }
+    } else {
+        $prefetchWatch = [Diagnostics.Stopwatch]::StartNew()
+        $statusPlanPrefetch = Read-CodexSafeTreeDeleteStatusUnarchivedPlanPrefetch `
+            -RunItems $runItems `
+            -FullEvidenceRoot $fullEvidenceRoot `
+            -MetricsObserver $treeMetricsObserver `
+            -MetricsState $metricsState
+        $prefetchWatch.Stop()
+        $metricsState.segmentPrefetchMs = [long]$prefetchWatch.ElapsedMilliseconds
+    }
 
     foreach ($runItem in $runItems) {
         $metricsState.entriesScanned = [long]$metricsState.entriesScanned + 1L
         $isArchived = [IO.File]::Exists((Join-Path $runItem.FullName 'terminal-archive.json'))
-        $activeWatch = [Diagnostics.Stopwatch]::StartNew()
-        $operationStatus = Resolve-CodexSafeTreeDeleteStatusOperation `
-            -RunItem $runItem `
-            -PolicyPath $PolicyPath `
-            -CurrentPolicySha256 ([string]$policy.sha256) `
-            -FullEvidenceRoot $fullEvidenceRoot `
-            -CandidatePolicyRequested $candidatePolicyRequested `
-            -CandidatePolicy $candidatePolicy `
-            -MetricsState $metricsState `
-            -TreeMetricsObserver $treeMetricsObserver `
-            -StatusTreeCache $statusTreeCache `
-            -LoadedPolicy $policy `
-            -StatusPlanPrefetch $statusPlanPrefetch.cache `
-            -PlanManifestShaCache $planManifestShaCache
-        $activeWatch.Stop()
-        if ($isArchived) {
-            $metricsState.segmentArchivedResolveMs =
-                [long]$metricsState.segmentArchivedResolveMs + $activeWatch.ElapsedMilliseconds
+        $fastResult = $null
+        if ($null -ne $fastResults) {
+            $fastResult = $fastResults[[string]$runItem.FullName]
+        }
+        if ($null -ne $fastResult -and [bool]$fastResult.Handled) {
+            $fastHandled = $fastHandled + 1L
+            $operationStatus = New-CodexSafeTreeDeleteStatusOperationFromScan `
+                -ScanResult $fastResult `
+                -CandidatePolicyRequested $candidatePolicyRequested
         } else {
-            $metricsState.segmentActiveResolveMs =
-                [long]$metricsState.segmentActiveResolveMs + $activeWatch.ElapsedMilliseconds
+            $fastFallback = $fastFallback + 1L
+            if ($null -ne $fastResult -and
+                $null -ne $fastResult.PlanSha256 -and
+                -not $statusPlanPrefetch.cache.ContainsKey([string]$runItem.FullName)) {
+                # The scanner already read plan.json; hand the snapshot to the reference
+                # resolver so fallback records keep the single-read contract.
+                $statusPlanPrefetch.cache[[string]$runItem.FullName] = [pscustomobject][ordered]@{
+                    snapshot = [pscustomobject][ordered]@{
+                        sha256 = [string]$fastResult.PlanSha256
+                        text = [string]$fastResult.PlanText
+                    }
+                    document = $null
+                }
+            }
+            $activeWatch = [Diagnostics.Stopwatch]::StartNew()
+            $operationStatus = Resolve-CodexSafeTreeDeleteStatusOperation `
+                -RunItem $runItem `
+                -PolicyPath $PolicyPath `
+                -CurrentPolicySha256 ([string]$policy.sha256) `
+                -FullEvidenceRoot $fullEvidenceRoot `
+                -CandidatePolicyRequested $candidatePolicyRequested `
+                -CandidatePolicy $candidatePolicy `
+                -MetricsState $metricsState `
+                -TreeMetricsObserver $treeMetricsObserver `
+                -StatusTreeCache $statusTreeCache `
+                -LoadedPolicy $policy `
+                -StatusPlanPrefetch $statusPlanPrefetch.cache `
+                -PlanManifestShaCache $planManifestShaCache
+            $activeWatch.Stop()
+            if ($isArchived) {
+                $metricsState.segmentArchivedResolveMs =
+                    [long]$metricsState.segmentArchivedResolveMs + $activeWatch.ElapsedMilliseconds
+            } else {
+                $metricsState.segmentActiveResolveMs =
+                    [long]$metricsState.segmentActiveResolveMs + $activeWatch.ElapsedMilliseconds
+            }
         }
         $operations.Add($operationStatus.operation)
         if (-not [bool]$operationStatus.complete) {
@@ -3876,6 +4083,11 @@ function Get-CodexSafeTreeDeleteStatus {
             activeResolveMs = [long]$metricsState.segmentActiveResolveMs
             archivedResolveMs = [long]$metricsState.segmentArchivedResolveMs
             prefetchMs = [long]$metricsState.segmentPrefetchMs
+            fastScanMs = [long]$metricsState.segmentFastScanMs
+            fastScanHandled = [long]$fastHandled
+            fastScanFallback = [long]$fastFallback
+            fastScanDop = if ($fastScanEnabled) { [int]$fastDop } else { 0 }
+            fastScanConsumption = 'status-invocation-local-not-session-hash-cache'
             statusTreeCacheEntries = [long]$statusTreeCache.Count
             planManifestShaCacheEntries = [long]$planManifestShaCache.Count
             unarchivedPlanPrefetchCount = if ($null -eq $statusPlanPrefetch) {

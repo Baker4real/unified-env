@@ -964,10 +964,132 @@ try {
     Assert-True ($postArchiveQuarantinedOperation.lifecycle -ceq 'manual-review') `
         '#48 未终结 quarantined 观测语义不得被本票改掉。'
 
+    # #49 复核回归（MED-1a/MED-1b）：非 producer 规范形态的 plan 输入必须与参考路径
+    # 逐字节一致（fast scan 回退，由 PowerShell 参考语义裁决）。
+    $medRoot = Join-Path $fixtureRoot 'med-boundary'
+    $medEvidence = Join-Path $medRoot 'evidence'
+    $medPolicyPath = Join-Path $medRoot 'policy.json'
+    $medTarget = Join-Path $medRoot 'target'
+    [void][IO.Directory]::CreateDirectory($medEvidence)
+    [void][IO.Directory]::CreateDirectory($medTarget)
+    [IO.File]::WriteAllText(
+        (Join-Path $medTarget 'payload.txt'),
+        'med-boundary',
+        [Text.UTF8Encoding]::new($false))
+    $medPolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 4
+        entries = @(
+            [pscustomobject][ordered]@{
+                id = 'status-med-boundary'
+                capabilityRoot = $medRoot
+                minimumDescendantDepth = 1
+                rootDeletionPurpose = 'none'
+                allowHardLinks = $false
+                allowInternalDirectoryJunctions = $false
+                deniedExactPaths = @()
+            }
+        )
+    }
+    [IO.File]::WriteAllText(
+        $medPolicyPath,
+        ($medPolicy | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $medPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $medTarget `
+        -CapabilityRoot $medRoot `
+        -FixturePolicyPath $medPolicyPath `
+        -FixtureEvidenceRoot $medEvidence
+    $medRunDirectory = Split-Path -Parent ([string]$medPlan.planPath)
+    $medPlanPath = [string]$medPlan.planPath
+    $medPlanDocument = [IO.File]::ReadAllText($medPlanPath) |
+        ConvertFrom-Json -Depth 128 -DateKind String
+
+    function Get-MedOperation {
+        param([Parameter(Mandatory)][object]$Status, [Parameter(Mandatory)][string]$OperationId)
+        $operation = @($Status.operations) | Where-Object operationId -ceq $OperationId
+        Assert-True ($null -ne $operation) "MED 边界 slice 必须找到 operation：$OperationId"
+        return $operation | ConvertTo-Json -Depth 8 -Compress
+    }
+
+    # MED-1a：缺失必需属性 targetPath 且存在 transaction —— 参考路径在拒绝 catch 内
+    # 触发 StrictMode PropertyNotFoundException；fast scan 必须回退并逐字节一致。
+    $med1aRun = Join-Path $medEvidence '20260823T000001Z-med1a'
+    [void][IO.Directory]::CreateDirectory($med1aRun)
+    $med1aPlanObject = [ordered]@{}
+    foreach ($property in $medPlanDocument.PSObject.Properties) {
+        if ($property.Name -ceq 'targetPath') { continue }
+        $med1aPlanObject[$property.Name] = $property.Value
+    }
+    $med1aPlanJson = $med1aPlanObject | ConvertTo-Json -Depth 100
+    [IO.File]::WriteAllText(
+        (Join-Path $med1aRun 'plan.json'), $med1aPlanJson, [Text.UTF8Encoding]::new($false))
+    $med1aPlanSha256 = [Security.Cryptography.SHA256]::HashData(
+        [Text.Encoding]::UTF8.GetBytes($med1aPlanJson)) | ForEach-Object { $_.ToString('x2') }
+    $med1aPlanSha256 = [string]::Concat(@($med1aPlanSha256))
+    $med1aTransaction = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-transaction'
+        schemaVersion = 2
+        generationId = [string]$medPlanDocument.generationId
+        planPath = (Join-Path $med1aRun 'plan.json')
+        planSha256 = $med1aPlanSha256
+        targetPath = [string]$medPlan.targetPath
+        quarantinePath = Join-Path $medRoot (
+            '.codex-safe-delete-{0}.quarantine' -f [string]$medPlanDocument.generationId)
+        directoryCommitAnchors = @()
+        status = 'purged'
+        updatedAtUtc = '2026-08-01T00:00:00.0000000+00:00'
+    }
+    [IO.File]::WriteAllText(
+        (Join-Path $med1aRun 'transaction.json'),
+        ($med1aTransaction | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+
+    # MED-1b：属性名大小写变体（summary → Summary）——参考属性集合检查与成员访问
+    # 不区分大小写；fast scan 必须回退并逐字节一致（slow 应正常走 approved/planned）。
+    $med1bRun = Join-Path $medEvidence '20260823T000002Z-med1b'
+    [void][IO.Directory]::CreateDirectory($med1bRun)
+    $med1bPlanObject = [ordered]@{}
+    foreach ($property in $medPlanDocument.PSObject.Properties) {
+        if ($property.Name -ceq 'summary') {
+            $med1bPlanObject['Summary'] = $property.Value
+        } else {
+            $med1bPlanObject[$property.Name] = $property.Value
+        }
+    }
+    [IO.File]::WriteAllText(
+        (Join-Path $med1bRun 'plan.json'),
+        ($med1bPlanObject | ConvertTo-Json -Depth 100),
+        [Text.UTF8Encoding]::new($false))
+
+    $medFastStatus = & $entryPath -Mode Status `
+        -FixturePolicyPath $medPolicyPath -FixtureEvidenceRoot $medEvidence
+    $medSlowStatus = $null
+    try {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '0'
+        $medSlowStatus = & $entryPath -Mode Status `
+            -FixturePolicyPath $medPolicyPath -FixtureEvidenceRoot $medEvidence
+    } finally {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = $null
+    }
+    $med1aFast = Get-MedOperation -Status $medFastStatus -OperationId '20260823T000001Z-med1a'
+    $med1aSlow = Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000001Z-med1a'
+    Assert-True ($med1aFast -ceq $med1aSlow) `
+        'MED-1a（缺失必需属性）fast scan 必须与参考路径逐字节一致。'
+    Assert-True (@((Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000001Z-med1a' | ConvertFrom-Json).errors)[0] -cmatch 'targetPath') `
+        'MED-1a 参考路径必须以 StrictMode PropertyNotFound 语义记录错误。'
+    $med1bFast = Get-MedOperation -Status $medFastStatus -OperationId '20260823T000002Z-med1b'
+    $med1bSlow = Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000002Z-med1b'
+    Assert-True ($med1bFast -ceq $med1bSlow) `
+        'MED-1b（属性名大小写变体）fast scan 必须与参考路径逐字节一致。'
+    Assert-True (((Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000002Z-med1b' | ConvertFrom-Json).lifecycle) -ceq 'planned') `
+        'MED-1b 参考路径必须按大小写不敏感属性检查正常分类为 planned。'
+
     [pscustomobject][ordered]@{
         ok = $true
         suite = 'CodexSafeTreeDeleteStatus'
-        slices = 22
+        slices = 24
     }
 } finally {
     if ($null -ne $lockedStream) { $lockedStream.Dispose() }

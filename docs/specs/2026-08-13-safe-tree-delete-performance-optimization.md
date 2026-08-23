@@ -3,7 +3,7 @@ type: reference
 title: 受管安全树删除性能优化
 tags: [performance, safe-delete, hash-reuse, parallelization]
 date: 2026-08-13
-status: landed-below-target
+status: landed-mixed（Plan/Apply/Purge 全管线典型 4x 边界、6x 移交 #56；Status 冷启动 SLA 已达：<60s）
 priority: P0
 ---
 
@@ -28,7 +28,7 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 
 #42 已把 `ParallelPurgeCoordinator` 接入生产 `Invoke-CodexSafeTreeDeletePurge`（能力门控 + HostSafety lease 删除器，非 `File.Delete`），并把 locked preflight 换成 Apply 同款 C# walker（`scripts/lib/CodexSafeTreeDeleteApplySnapshot.cs`）。同批收口：#32（Apply C# walker + 哈希复用：对 PS baseline ≈11.9x，主要来自 walker；同 walker 复用净效 1.10–1.12x）、#40（复测效率峰值 DOP=2，`RecommendOptimizeMaxParallelism` 已改 2/2/2）、#41（夹具 DOP2 journal 7.875% / 6.229%，勘误旧 18.659% 口径）。生产 10k×4KB 全管线对 baseline 576238ms：典型 DOP2 迭代 2b 轮 **4.057x / 4.023x**，AC11 复跑轮 **3.889x / 3.918x**（4x 边界摆动，Plan 相位噪声）；最佳 DOP4 **3.927x / 3.962x**。6x 在 #42 范围结构性不可达（Plan 单相位 88–96s 已占满 96s 预算），移交 #56（Plan 阶段并行哈希，方案草案未授权实施）。生产 journal overhead（典型 DOP2）三轮六样本 7.175–13.045%，3/6 ≥10%，边界不稳，稳健性复测归 #56。证据：`reports/safe-tree-delete-issue42-20260819/`、`reports/safe-tree-delete-parallelism-benchmark-20260819/`、`reports/safe-tree-delete-issue32-20260819/`、`reports/safe-tree-delete-issue41-20260819/`。
 
-史诗收口（#26）：实现关口 `DONE_WITH_CONCERNS`。子票 #32/#40/#41/#42 已于 2026-08-19 按结论评论关闭（典型 4x 边界、6x 移交 #56）；#36/#37/#43 已于 2026-08-20 按结论评论关闭（#36 按现役证据、#37 按被 #42 取代、#43 文档 16/16 落点）；#35 仍 OPEN（FAT32/网络实卷 waiver）。2026-08-17 时点的子票表见 `reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md`（快照，不是现役状态）。
+史诗收口（#26）：实现关口 `DONE_WITH_CONCERNS`。子票 #32/#40/#41/#42 已于 2026-08-19 按结论评论关闭（典型 4x 边界、6x 移交 #56）；#36/#37/#43 已于 2026-08-20 按结论评论关闭（#36 按现役证据、#37 按被 #42 取代、#43 文档 16/16 落点）；#35 已于 2026-08-23 关闭（FAT32/网络实卷 waiver）。2026-08-17 时点的子票表见 `reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md`（快照，不是现役状态）。
 
 ## 操作者指南
 
@@ -59,6 +59,12 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 ### 生产并行接线（#42，2026-08-19）
 
 生产 `Invoke-CodexSafeTreeDeletePurge` 在满足门控时走 `ParallelPurgeCoordinator`：`RecommendParallel == true`、未用 `-DisablePurgeHashReuseForTest` / `-DisableParallelPurgeForTest`（任一在场即回退串行）、非 empty-project-state、无 junction、无叶子测试钩子。删除器是 HostSafety lease（顶级目录 `AcquireForEmptyDelete`、嵌套 `AcquireChildDirectoryForEmptyDelete`），不是夹具 `File.Delete`；根文件组在子目录组之后串行，避免祖先/后代 DELETE lease 冲突。默认 DOP=2（#40 2026-08-19 复测效率峰值），`-PurgeMaxDegreeOfParallelismForTest` 只改推荐值。journal 根为 `<runDirectory>\parallel-purge-journal-<guid>`，恢复扫描全部此类目录（pending 无 commit + 路径在 → pending；路径不在 → uncertain）。失败不写 `purged`；CrashSafety 钩子在场时保持原串行 HostSafety。`FileSystemCapabilities.RecommendParallel == false` 时 `ResolveMaxDegreeOfParallelism` 返回 1，生产与夹具都串行。coordinator 按顶层目录分组时只枚举文件，不含任何文件的顶层分支（含整树纯空目录）不产生分组；其目录由 PowerShell 侧 `Remove-CodexSafeTreeDeleteEmptyDirectoryTreeAfterParallelPurge` 在计数检查后、根删除前按 manifest 先叶后根幂等补删，逐目录保留 capability 与 identity 断言（resume 时 manifest 为存活子集）。该补删层于 2026-08-21 接线，修复此前该场景事务稳定卡在 purging/quarantined 的缺陷；回归测试覆盖纯空树、含空分支混合树、purging 中断恢复、Purge-mode 并行路径自证与仅 '.' 边界。
+
+### Status 冷启动（#49，2026-08-23）
+
+生产 `Get-CodexSafeTreeDeleteStatus` 自 #49 起默认走 C# 并行 fast scan（`scripts/lib/CodexSafeTreeDeleteStatusScan.cs`，`StatusScanCoordinator`，DOP = `Get-CodexSafeTreeDeleteStatusJsonParseThrottleLimit` = min(4, cores-2)）：归档记录在 C# 内逐条复刻 terminal-archive 内容认证（marker 17 字段精确属性 + plan/tx SHA/identity/generation/path 绑定 + 现场 namespace probe，不跳过任何一步）；未归档记录在 C# 内按参考顺序判定 plan 拒绝并完成 #48 拒绝后只读观测链（错误消息逐条与 PowerShell 参考路径一致）。fast scan 只处理 producer 规范形态输入（plan/transaction/treeManifest 属性名与 canonical 键 ordinal 一致、必需属性齐全、schemaVersion 在 Int32 范围内）；plan 被批准、JSON 类型异常、深度超限、读失败、非规范属性形态等一律回退原 `Resolve-CodexSafeTreeDeleteStatusOperation`（回退记录的已读 plan snapshot 注入调用内 prefetch cache，保持单次读取合同）。fast scan 是 Status 调用内、随进程死亡的只读复用，不是 Apply/Purge `SessionHashCache`，不落盘哈希缓存；其程序集按 CodexHostSafety 同款 staleness 检查缓存在 `D:\Codex\temp\unified-env-addtype\CodexSafeTreeDeleteStatusScan.dll`。排障开关：`CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN=0` 强制全量参考路径；`CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS=1` 输出 `statusSegments`（含 `fastScanMs` / `fastScanHandled` / `fastScanFallback` / `fastScanDop`）。
+
+实测（协议 `reports/safe-tree-delete-issue49-20260823/protocol.md`，从属 20260817 协议）：正式 AC 三联（MED 修复后 cold-5/6/7，`cold-summary-post-fix.json`）三次独立冷启动墙钟 **9.762 / 9.791 / 9.237 s**（2960 operations 现场，优化前同日基线 199.357s；修复前三联 13.279/13.378/13.256 s 为历史样本，见 `cold-summary.json`），`metTarget=true`；fast 与参考路径对全部 operations 逐条对比零差异、blocking 集一致、evidence root 零写入、leftover transaction SHA 不变（等价性边界=producer 规范形态输入，非规范输入类回退参考路径，见协议）。证据：`reports/safe-tree-delete-issue49-20260823/`。
 
 ### 文件系统探测
 
