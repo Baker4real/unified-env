@@ -320,8 +320,8 @@ function New-LiveDisposableFat32Volume {
     }
     $disk = $newDisks[0]
     $state.diskNumber = [int]$disk.Number
-    if ($state.diskNumber -in @(0, 1, 2)) {
-        throw ("拒绝格式化系统/已有磁盘：VHD DiskNumber=$($state.diskNumber)")
+    if ($existingDiskNumbers.Contains($state.diskNumber)) {
+        throw ("拒绝格式化 attach 前已存在的磁盘：VHD DiskNumber=$($state.diskNumber)")
     }
     if ([long]$disk.Size -gt 128MB) {
         throw ("拒绝格式化超标磁盘：Size=$($disk.Size)")
