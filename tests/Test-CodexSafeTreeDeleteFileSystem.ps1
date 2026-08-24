@@ -725,85 +725,104 @@ try {
     Assert-True ($liveDriveInventory.Count -gt 0) 'GetDrives 必须返回至少一个盘符'
     $liveFatFamilyDrives = @(Find-LiveFatFamilyDrives -Inventory $liveDriveInventory)
     $liveNetworkDrives = @(Find-LiveNetworkDrives -Inventory $liveDriveInventory)
+    $liveIsElevatedProcess = [bool][Security.Principal.WindowsPrincipal]::new(
+        [Security.Principal.WindowsIdentity]::GetCurrent()
+    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     $liveVhd = $null
     $liveFatSource = 'existing-volume'
+    $liveFsLeg = 'native-volume'
+    $liveFsSkipNote = $null
     $livePlan = $null
     $liveFolderPlan = $null
     $liveNetworkNote = $null
     $liveCapabilities = $null
+    if ($liveFatFamilyDrives.Count -eq 0 -and -not $liveIsElevatedProcess) {
+        $liveFsLeg = 'skipped-non-elevated'
+        $liveFatSource = $null
+        $liveFsSkipNote = (
+            '[SKIP] CodexSafeTreeDeleteFileSystem 实卷段显式记名 skip：liveFsLeg=skipped-non-elevated。' +
+            '原因：当前进程非提权（IsInRole(Administrator)=False）且本机无原生 FAT32/exFAT 卷，' +
+            '按设计不尝试 diskpart/一次性 FAT32 VHD。确定性 7 个 slices 已全部通过；' +
+            '以管理员（提权）重跑本套件可覆盖实卷段（liveFsLeg=native-volume 或 vhd）。'
+        )
+        Write-Output $liveFsSkipNote
+    }
     try {
-        if ($liveFatFamilyDrives.Count -eq 0) {
-            $liveFatSource = 'disposable-vhd'
-            try {
-                $liveVhd = New-LiveDisposableFat32Volume
-            } catch {
-                throw (
-                    '无法创建一次性 FAT32 VHD 做实卷验收（未 skip）。盘清单=' + (
-                        ($liveDriveInventory | ForEach-Object {
-                            '{0} type={1} ready={2} fmt={3}' -f $_.name, $_.driveType, $_.isReady, $_.driveFormat
-                        }) -join '; '
-                    ) + ' 原始错误=' + $_.Exception.ToString()
-                )
-            }
-            $liveDriveInventory = @(Get-LiveDriveInventory)
-            $liveFatFamilyDrives = @(Find-LiveFatFamilyDrives -Inventory $liveDriveInventory)
-        }
-        Assert-True (
-            $liveFatFamilyDrives.Count -gt 0
-        ) ('本机仍无真实 FAT32/exFAT 卷，实卷切片不能标绿。盘清单=' + (
-            ($liveDriveInventory | ForEach-Object {
-                '{0} type={1} ready={2} fmt={3}' -f $_.name, $_.driveType, $_.isReady, $_.driveFormat
-            }) -join '; '
-        ))
-
-        $liveFat = $liveFatFamilyDrives[0]
-        $letterProbe = New-LiveVolumeProbeDirectory -Root $liveFat.root
-        $liveCapabilities = Assert-LiveUnsupportedFileSystem `
-            -ProbeRoot $letterProbe `
-            -ExpectedFileSystemType ([string]$liveFat.driveFormat) `
-            -ExpectRemote $false
-        $livePlan = Invoke-LiveUnsupportedPlan `
-            -ProbeRoot $letterProbe `
-            -CandidatePath (Join-Path $letterProbe 'candidate')
-
-        if ($null -ne $liveVhd -and [bool]$liveVhd.folderMounted) {
-            $folderProbe = New-LiveVolumeProbeDirectory -Root ([string]$liveVhd.folderRoot)
-            $folderCandidate = Join-Path $folderProbe 'candidate'
-            $folderCaps = [CodexSafeTreeDelete.FileSystemDetector]::DetectFileSystem($folderCandidate)
-            Assert-True ($folderCaps.DeletionAllowed -eq $false) 'D 盘挂载点上的实卷 DeletionAllowed 必须为 false'
-            $folderAssertError = Assert-Throws -Message 'D 盘挂载点共同闭锁必须失败' -Action {
-                Assert-CodexSafeTreeDeleteDeletionAllowed -TargetPath $folderCandidate
+        if ($null -eq $liveFsSkipNote) {
+            if ($liveFatFamilyDrives.Count -eq 0) {
+                $liveFatSource = 'disposable-vhd'
+                $liveFsLeg = 'vhd'
+                try {
+                    $liveVhd = New-LiveDisposableFat32Volume
+                } catch {
+                    throw (
+                        '无法创建一次性 FAT32 VHD 做实卷验收（未 skip）。盘清单=' + (
+                            ($liveDriveInventory | ForEach-Object {
+                                '{0} type={1} ready={2} fmt={3}' -f $_.name, $_.driveType, $_.isReady, $_.driveFormat
+                            }) -join '; '
+                        ) + ' 原始错误=' + $_.Exception.ToString()
+                    )
+                }
+                $liveDriveInventory = @(Get-LiveDriveInventory)
+                $liveFatFamilyDrives = @(Find-LiveFatFamilyDrives -Inventory $liveDriveInventory)
             }
             Assert-True (
-                $folderAssertError -match $deletionDeniedPattern
-            ) "D 盘挂载点共同闭锁必须稳定拒绝，实际为 $folderAssertError"
-            $liveFolderPlan = Invoke-LiveUnsupportedPlan `
-                -ProbeRoot $folderProbe `
-                -CandidatePath $folderCandidate
-        }
+                $liveFatFamilyDrives.Count -gt 0
+            ) ('本机仍无真实 FAT32/exFAT 卷，实卷切片不能标绿。盘清单=' + (
+                ($liveDriveInventory | ForEach-Object {
+                    '{0} type={1} ready={2} fmt={3}' -f $_.name, $_.driveType, $_.isReady, $_.driveFormat
+                }) -join '; '
+            ))
 
-        if ($liveNetworkDrives.Count -eq 0) {
-            $liveNetworkNote = '本机无网络卷，未验证'
-        } else {
-            $networkProbe = New-LiveVolumeProbeDirectory -Root $liveNetworkDrives[0].root
-            $networkCandidate = Join-Path $networkProbe 'candidate'
-            $networkCaps = [CodexSafeTreeDelete.FileSystemDetector]::DetectFileSystem($networkCandidate)
-            Assert-True ($networkCaps.IsRemote -eq $true) '网络卷 DetectFileSystem.IsRemote 必须为 true'
-            Assert-True ($networkCaps.RecommendHashReuse -eq $false) '网络卷 RecommendHashReuse 必须为 false'
-            Assert-True ($networkCaps.RecommendParallel -eq $false) '网络卷 RecommendParallel 必须为 false'
-            Assert-True (
-                $networkCaps.RecommendedMaxParallelism -eq 1
-            ) '网络卷 RecommendedMaxParallelism 必须为 1'
-            if ($networkCaps.DeletionAllowed -eq $false) {
-                $networkPlan = Invoke-LiveUnsupportedPlan `
-                    -ProbeRoot $networkProbe `
-                    -CandidatePath $networkCandidate
+            $liveFat = $liveFatFamilyDrives[0]
+            $letterProbe = New-LiveVolumeProbeDirectory -Root $liveFat.root
+            $liveCapabilities = Assert-LiveUnsupportedFileSystem `
+                -ProbeRoot $letterProbe `
+                -ExpectedFileSystemType ([string]$liveFat.driveFormat) `
+                -ExpectRemote $false
+            $livePlan = Invoke-LiveUnsupportedPlan `
+                -ProbeRoot $letterProbe `
+                -CandidatePath (Join-Path $letterProbe 'candidate')
+
+            if ($null -ne $liveVhd -and [bool]$liveVhd.folderMounted) {
+                $folderProbe = New-LiveVolumeProbeDirectory -Root ([string]$liveVhd.folderRoot)
+                $folderCandidate = Join-Path $folderProbe 'candidate'
+                $folderCaps = [CodexSafeTreeDelete.FileSystemDetector]::DetectFileSystem($folderCandidate)
+                Assert-True ($folderCaps.DeletionAllowed -eq $false) 'D 盘挂载点上的实卷 DeletionAllowed 必须为 false'
+                $folderAssertError = Assert-Throws -Message 'D 盘挂载点共同闭锁必须失败' -Action {
+                    Assert-CodexSafeTreeDeleteDeletionAllowed -TargetPath $folderCandidate
+                }
                 Assert-True (
-                    $networkPlan.layer -ceq 'deletion-allowed'
-                ) "网络且无 FileId 时 Plan 必须因 DeletionAllowed 拒绝，实际层=$($networkPlan.layer) 错误=$($networkPlan.error)"
-                $liveNetworkNote = 'network-deletion-denied'
+                    $folderAssertError -match $deletionDeniedPattern
+                ) "D 盘挂载点共同闭锁必须稳定拒绝，实际为 $folderAssertError"
+                $liveFolderPlan = Invoke-LiveUnsupportedPlan `
+                    -ProbeRoot $folderProbe `
+                    -CandidatePath $folderCandidate
+            }
+
+            if ($liveNetworkDrives.Count -eq 0) {
+                $liveNetworkNote = '本机无网络卷，未验证'
             } else {
-                $liveNetworkNote = 'network-fileid-allowed-not-denied'
+                $networkProbe = New-LiveVolumeProbeDirectory -Root $liveNetworkDrives[0].root
+                $networkCandidate = Join-Path $networkProbe 'candidate'
+                $networkCaps = [CodexSafeTreeDelete.FileSystemDetector]::DetectFileSystem($networkCandidate)
+                Assert-True ($networkCaps.IsRemote -eq $true) '网络卷 DetectFileSystem.IsRemote 必须为 true'
+                Assert-True ($networkCaps.RecommendHashReuse -eq $false) '网络卷 RecommendHashReuse 必须为 false'
+                Assert-True ($networkCaps.RecommendParallel -eq $false) '网络卷 RecommendParallel 必须为 false'
+                Assert-True (
+                    $networkCaps.RecommendedMaxParallelism -eq 1
+                ) '网络卷 RecommendedMaxParallelism 必须为 1'
+                if ($networkCaps.DeletionAllowed -eq $false) {
+                    $networkPlan = Invoke-LiveUnsupportedPlan `
+                        -ProbeRoot $networkProbe `
+                        -CandidatePath $networkCandidate
+                    Assert-True (
+                        $networkPlan.layer -ceq 'deletion-allowed'
+                    ) "网络且无 FileId 时 Plan 必须因 DeletionAllowed 拒绝，实际层=$($networkPlan.layer) 错误=$($networkPlan.error)"
+                    $liveNetworkNote = 'network-deletion-denied'
+                } else {
+                    $liveNetworkNote = 'network-fileid-allowed-not-denied'
+                }
             }
         }
     } finally {
@@ -817,9 +836,11 @@ try {
         suite = 'CodexSafeTreeDeleteFileSystem'
         slices = 7
         liveDriveInventory = $liveDriveInventory
+        liveFsLeg = $liveFsLeg
+        liveFsSkipNote = $liveFsSkipNote
         liveFatSource = $liveFatSource
-        liveFatFileSystemType = [string]$liveCapabilities.FileSystemType
-        liveFatDeletionAllowed = [bool]$liveCapabilities.DeletionAllowed
+        liveFatFileSystemType = $(if ($null -eq $liveCapabilities) { $null } else { [string]$liveCapabilities.FileSystemType })
+        liveFatDeletionAllowed = $(if ($null -eq $liveCapabilities) { $null } else { [bool]$liveCapabilities.DeletionAllowed })
         livePlanLayer = $(if ($null -eq $livePlan) { $null } else { [string]$livePlan.layer })
         livePlanError = $(if ($null -eq $livePlan) { $null } else { [string]$livePlan.error })
         liveFolderPlanLayer = $(if ($null -eq $liveFolderPlan) { $null } else { [string]$liveFolderPlan.layer })
