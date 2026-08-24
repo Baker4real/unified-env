@@ -17,7 +17,24 @@ $safeTreeLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.p
 $entryPath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteFixture.ps1'
 $crashFixturePath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteCrashFixture.ps1'
 $evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue34-20260817'
-$pwshPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
+# pwsh resolution: pinned host runtime first (deterministic anchor), then PATH lookup
+# (GitHub runners preinstall pwsh), then the running $PSHOME; fail closed when all miss.
+$pwshPinPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
+$pwshOnPath = Get-Command pwsh -ErrorAction SilentlyContinue
+$pwshPathCandidates = @(
+    $pwshPinPath
+    if ($null -ne $pwshOnPath) { [string]$pwshOnPath.Source }
+    (Join-Path $PSHOME 'pwsh.exe')
+)
+$pwshPath = $pwshPathCandidates |
+    Where-Object { $_ -and [IO.File]::Exists($_) } |
+    Select-Object -First 1
+if (-not $pwshPath) {
+    throw ("无法解析 pwsh 可执行文件，候选全部缺失：pin={0}；Get-Command={1}；PSHOME={2}" -f
+        $pwshPinPath,
+        $(if ($null -ne $pwshOnPath) { [string]$pwshOnPath.Source } else { '<missing>' }),
+        (Join-Path $PSHOME 'pwsh.exe'))
+}
 
 . $hostSafetyLibraryPath
 . $safeTreeLibraryPath
@@ -386,7 +403,7 @@ function Remove-PendingPathOutOfBand {
 
 $pendingCase = $null
 $uncertainCase = $null
-$integrationResults = [ordered]@{}
+$integrationResults = [ordered]@{ pwshSource = $pwshPath }
 try {
     $pendingCase = New-UncertainCrashCase
     $pendingCrash = Invoke-UncertainCrashProcess -Case $pendingCase
