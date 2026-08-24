@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$FixtureSourceRoot,
     [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$FixtureCodexHome,
     [Parameter(Mandatory, ParameterSetName = 'Fixture')][ValidateSet('registration-repair', 'full')][string]$Mode,
-    [Parameter(ParameterSetName = 'Fixture')][string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan',
+    [Parameter(ParameterSetName = 'Fixture')][string]$OutputDir = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan',
     [Parameter(ParameterSetName = 'Fixture')][scriptblock]$EnvironmentReadValue,
     [Parameter(Mandatory, ParameterSetName = 'ProductionRegistrationRepair')][switch]$ProductionRegistrationRepair,
     [Parameter(Mandatory, ParameterSetName = 'ProductionFull')][switch]$ProductionFull
@@ -38,8 +38,8 @@ if (
 
 $outputPath = Assert-CodexHookDPath -Value $OutputDir -Name 'OutputDir'
 $allowedOutputRoots = @(
-    'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan',
-    'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+    'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan',
+    'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
 )
 if (-not @($allowedOutputRoots | Where-Object { Test-CodexHookPathWithin -Path $outputPath -ParentPath $_ }).Count) {
     throw 'OutputDir 不在固定 deployment plan 报告根。'

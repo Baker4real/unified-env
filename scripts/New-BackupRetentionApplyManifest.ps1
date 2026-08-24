@@ -17,7 +17,7 @@ function Test-BackupRetentionApplySubPath { param([string]$Path,[string]$BasePat
 }
 function Assert-BackupRetentionApplyEvidencePath { param([string]$Path,[string]$Name)
     $full=Assert-BackupRetentionDPath -Path $Path -Name $Name
-    $allowed=@('D:\Codex\projects\统一环境\reports','D:\Codex\.codex\run-evidence\env-governance')
+    $allowed=@('D:\agents\projects\统一环境\reports','D:\Codex\.codex\run-evidence\env-governance')
     if(@($allowed|Where-Object{Test-BackupRetentionApplySubPath $full $_}).Count-eq0){throw "$Name 不在允许的 env-governance 证据根中：$full"}
     return $full
 }
@@ -55,7 +55,7 @@ Test-BackupRetentionDryRunFreshness -Document $dryRun -MaxDryRunAgeHours $MaxDry
 $context=New-BackupRetentionPolicyContext -ArtifactMode production -CodexRoot 'D:\Codex\.codex' -DDriveRoot 'D:\Codex' -RetainCount 5
 
 # 6. 先确定但不创建 OutputDir；final gate 会在最终复算前后检查完整父链。
-if([string]::IsNullOrWhiteSpace($OutputDir)){$OutputDir="D:\Codex\projects\统一环境\reports\backup-retention-apply-manifest-$(Get-Date -Format 'yyyyMMdd-HHmmss')"}
+if([string]::IsNullOrWhiteSpace($OutputDir)){$OutputDir="D:\agents\projects\统一环境\reports\backup-retention-apply-manifest-$(Get-Date -Format 'yyyyMMdd-HHmmss')"}
 $OutputDir=Assert-BackupRetentionApplyEvidencePath -Path $OutputDir -Name 'OutputDir'
 
 # 7. 完整初检、candidate 当前校验与最终全门复算；正式入口不暴露 phase hook。

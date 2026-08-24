@@ -188,10 +188,10 @@ finally {
     if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
 }
 
-$guardFixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-serena-behavior-fixture'
+$guardFixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-serena-behavior-fixture'
 $guardFixtureHome = Join-Path $guardFixtureRoot '.serena'
-$guardHealthRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-health-test'
-$runtimePath = 'D:\Codex\projects\统一环境\managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
+$guardHealthRoot = 'D:\agents\projects\统一环境\reports\codex-hook-health-test'
+$runtimePath = 'D:\agents\projects\统一环境\managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
 if (Test-Path -LiteralPath $guardFixtureRoot) { Remove-Item -LiteralPath $guardFixtureRoot -Recurse -Force }
 if (Test-Path -LiteralPath $guardHealthRoot) { Remove-Item -LiteralPath $guardHealthRoot -Recurse -Force }
 [IO.Directory]::CreateDirectory($guardFixtureRoot) | Out-Null
@@ -219,7 +219,7 @@ try {
     Assert-Equal $mutexAlias $mutexName 'session mutex 名称必须对 Windows 路径和 session id 大小写等价。'
     # 固定测试向量：期望锁名钉死当前算法的真实输出；若回归删掉 GetFullPath/TrimEnd/大写不变式，本断言必须变红。
     $vectorSession = 'Session-Vector-Redacted_09'
-    $expectedVectorMutex = 'Local\CodexSerenaSession-E783D2590782B2A12551B3F479B6CF273373AF18363EF336A7524435DF69C877'
+    $expectedVectorMutex = 'Local\CodexSerenaSession-9EE577DEB07F6BC4F5C29161054D270A0EB2FE3FBE172318C0063203276785E4'
     Assert-Equal (Get-CodexSerenaSessionMutexName -SerenaHome $guardFixtureHome -SessionId $vectorSession) $expectedVectorMutex 'session mutex 名称必须匹配固定测试向量。'
     Assert-Equal (Get-CodexSerenaSessionMutexName -SerenaHome ($guardFixtureHome -replace '\\', '/') -SessionId $vectorSession) $expectedVectorMutex '/ 与 \ 等价拼写必须产生同一锁名。'
     Assert-Equal (Get-CodexSerenaSessionMutexName -SerenaHome ($guardFixtureHome + '\') -SessionId $vectorSession) $expectedVectorMutex '尾部斜杠等价拼写必须产生同一锁名。'

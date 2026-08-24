@@ -1,9 +1,9 @@
 param(
     [ValidateSet("Execute", "Rollback")]
     [string]$Mode = "Execute",
-    [string]$MigrationPlanPath = "D:\Codex\projects\统一环境\reports\env-migration-plan\plan.json",
+    [string]$MigrationPlanPath = "D:\agents\projects\统一环境\reports\env-migration-plan\plan.json",
     [string]$MigrationId = "migration-01-python-cache",
-    [string]$EvidenceDir = "D:\Codex\projects\统一环境\reports\env-migration-execution\pip-cache",
+    [string]$EvidenceDir = "D:\agents\projects\统一环境\reports\env-migration-execution\pip-cache",
     [string]$StatePath,
     [ValidateSet("Process", "User")]
     [string]$EnvironmentScope = "Process",

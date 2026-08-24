@@ -11,7 +11,7 @@ intent: 记录办公室设备的受控环境事实与差异
 
 - 设备标识：`ban-gong-shi`
 - Windows 主机名：`PC-20250421IVIW`
-- 统一环境仓库：`D:\Codex\projects\统一环境`
+- 统一环境仓库：`D:\agents\projects\统一环境`
 - Codex 受管根：`D:\Codex\.codex`
 
 网络地址、SSH 用户、密钥路径、登录态和凭据属于调用端本地事实，不写入仓库；连接前必须从当前设备的本地配置重新确认。

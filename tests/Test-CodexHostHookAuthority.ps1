@@ -42,8 +42,8 @@ $fullProfile = Get-CodexHookProductionFullProfile
 $registrationProfile = Get-CodexHookProductionRegistrationRepairProfile
 $unreadEvidence = 'D:\Codex\.codex\run-evidence\must-not-be-read'
 
-Assert-True ($fullProfile.manifestPath -ceq 'D:\Codex\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json') 'ProductionFull 非 fixture profile 不得绑定 legacy fixture manifest'
-Assert-True ($registrationProfile.manifestPath -ceq 'D:\Codex\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json') 'RegistrationRepair 非 fixture profile 不得绑定 legacy fixture manifest'
+Assert-True ($fullProfile.manifestPath -ceq 'D:\agents\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json') 'ProductionFull 非 fixture profile 不得绑定 legacy fixture manifest'
+Assert-True ($registrationProfile.manifestPath -ceq 'D:\agents\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json') 'RegistrationRepair 非 fixture profile 不得绑定 legacy fixture manifest'
 Assert-Superseded { New-CodexHookProductionFullState -Profile ([pscustomobject]@{ isFixtureAdapter = $false }) -EnvironmentReadValue $readEnvironment } 'ProductionFull state 必须在 profile/manifest/live 读取前拒绝非 fixture 调用'
 Assert-Superseded { New-CodexHookProductionRegistrationRepairState -Profile ([pscustomobject]@{ isFixtureAdapter = $false }) } 'RegistrationRepair state 必须在 profile/manifest/live 读取前拒绝非 fixture 调用'
 

@@ -19,7 +19,7 @@ import uuid
 from typing import Any
 
 
-PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
+PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
 LIVE_CODEX_HOME = Path(r"D:\Codex\.codex")
 MANIFEST_PATH = PROJECT_ROOT / "managed" / "codex-hooks" / "host-preflight-manifest.json"
 DATABASE_RELATIVE_PATH = Path("usage_evidence") / "ccswitch" / "cc-switch-latest.db"

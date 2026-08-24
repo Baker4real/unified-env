@@ -12,7 +12,7 @@ namespace CodexSafeTreeDelete
     {
         // 2-arg ctor default only: keep #38 tests working. New callers inject allowedRoot.
         internal const string LegacyAllowedJournalRootForTests =
-            @"D:\Codex\projects\统一环境\reports\safe-tree-delete-issue38-20260817";
+            @"D:\agents\projects\统一环境\reports\safe-tree-delete-issue38-20260817";
 
         private readonly string _allowedJournalRoot;
         private FileStream _fileStream;
@@ -158,11 +158,6 @@ namespace CodexSafeTreeDelete
             {
                 _disposed = true;
             }
-        }
-
-        internal static string NormalizeAllowedJournalPath(string path, string paramName)
-        {
-            return NormalizeAllowedJournalPath(path, LegacyAllowedJournalRootForTests, paramName);
         }
 
         internal static string NormalizeAllowedJournalPath(

@@ -63,13 +63,13 @@ function Get-CodexHookProductionRegistrationRepairProfile {
     return [pscustomobject][ordered]@{
         profileId = 'codex-hook-production-registration-repair-v1'
         mode = 'registration-repair'
-        manifestPath = 'D:\Codex\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
-        sourceRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks'
+        manifestPath = 'D:\agents\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
+        sourceRoot = 'D:\agents\projects\统一环境\managed\codex-hooks'
         codexHome = 'D:\Codex\.codex'
         hooksRoot = 'D:\Codex\.codex\hooks'
         registryPath = 'D:\Codex\.codex\hooks.json'
-        planOutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan'
-        planPath = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan\plan.json'
+        planOutputDir = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan'
+        planPath = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan\plan.json'
         evidenceRoot = 'D:\Codex\.codex\run-evidence\env-governance'
         mutexName = 'Local\CodexHookProductionRegistrationRepairV1'
         isFixtureAdapter = $false
@@ -80,7 +80,7 @@ function Get-CodexHookProductionRegistrationRepairFixtureProfile {
     [CmdletBinding()]
     param()
 
-    $root = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test\production-registration-repair'
+    $root = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test\production-registration-repair'
     return [pscustomobject][ordered]@{
         profileId = 'codex-hook-production-registration-repair-v1'
         mode = 'registration-repair'
@@ -146,7 +146,7 @@ function Assert-CodexHookProductionRegistrationRepairProfile {
         if (-not $AllowFixtureAdapter) {
             throw 'production entrypoint 不接受 fixture adapter。'
         }
-        $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+        $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
         foreach ($name in @(
             'manifestPath', 'sourceRoot', 'codexHome', 'hooksRoot', 'registryPath',
             'planOutputDir', 'planPath', 'evidenceRoot'

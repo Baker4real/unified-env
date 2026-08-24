@@ -19,7 +19,7 @@ intent: 约束 D 盘布局、迁移授权、验证与回滚边界
 | `D:\Codex\envs` | 可复用共享环境根，例如跨项目使用的通用 Python/Node/Rust 工作环境。 | 只放明确跨项目复用、没有项目锁文件强绑定的环境。 |
 | `D:\Codex\.cache` | 共享缓存根，例如 pip、npm、NuGet、Maven、Gradle 等缓存的统一候选位置。 | 优先迁移低风险缓存；真实迁移必须先有 dry-run。 |
 | `D:\Codex\.cargo` 和 `D:\Codex\.rustup` | Rust 工具链、cargo 工具和缓存状态。 | 保持官方工具链机制管理，不直接搬目录。 |
-| `D:\Codex\projects\统一环境\reports\` | 本项目的盘点、迁移计划、更新准备等报告。 | 作为项目内事实基线，不放真实迁移副本。 |
+| `D:\agents\projects\统一环境\reports\` | 本项目的盘点、迁移计划、更新准备等报告。 | 作为项目内事实基线，不放真实迁移副本。 |
 | `D:\Codex\.codex\run-evidence\env-governance\` | 跨项目或本机级迁移证据、前后对比和回滚记录。 | 真实迁移时保存证据；项目内只放摘要或链接。 |
 
 已有历史路径可以暂时保留，例如 `D:\Codex\.pip-cache`、`D:\Codex\tools\npm-cache`、`D:\uv\cache`。后续如要统一到 `D:\Codex\.cache`，必须单独开 issue，不能靠批量搬目录完成。

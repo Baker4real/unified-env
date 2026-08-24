@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CI_PROJECT_ROOT: D:\Codex\projects\统一环境
+  CI_PROJECT_ROOT: D:\agents\projects\统一环境
 
 jobs:
   module-boundaries:

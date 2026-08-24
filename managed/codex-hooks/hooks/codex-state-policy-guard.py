@@ -35,7 +35,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.11+ is required in pr
 
 PRODUCTION_CODEX_HOME = Path(r"D:\Codex\.codex")
 PRODUCTION_HEALTH_ROOT = Path(r"D:\Codex\.codex\run-evidence\codex-hook-health")
-FIXTURE_HEALTH_ROOT = Path(r"D:\Codex\projects\统一环境\reports\codex-state-policy-test\health")
+FIXTURE_HEALTH_ROOT = Path(r"D:\agents\projects\统一环境\reports\codex-state-policy-test\health")
 MUTEX_NAME = r"Local\CodexGlobalStatePolicy"
 MUTEX_TIMEOUT_MS = 1500
 MAX_GLOBAL_ATTEMPTS = 3

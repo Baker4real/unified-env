@@ -11,7 +11,7 @@ intent: 记录自习室设备的受控环境事实与差异
 
 - 设备标识：`zi-xi-shi`
 - Windows 主机名：`Baker`
-- 统一环境仓库：`D:\Codex\projects\统一环境`
+- 统一环境仓库：`D:\agents\projects\统一环境`
 - Codex 受管根：`D:\Codex\.codex`
 
 网络地址、SSH 用户、密钥路径、登录态和凭据属于调用端本地事实，不写入仓库；连接前必须从当前设备的本地配置重新确认。
@@ -38,7 +38,7 @@ intent: 记录自习室设备的受控环境事实与差异
   conhost 或 Windows Terminal 窗口为 `0`。
 - 2026-08-16 本机 Cursor 用户级 hooks 现役文件为
   `%USERPROFILE%\.cursor\hooks.json`，源在
-  `D:\Codex\projects\统一环境\managed\cursor-hooks\`。事件映射以
+  `D:\agents\projects\统一环境\managed\cursor-hooks\`。事件映射以
   `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 的 Cursor Host Hooks
   为准；不要把 Cursor 注册写进 Codex `hooks.json` 或 Cursor `settings.json`。
 - 同日 `wsl.exe --list --verbose` 返回 `Ubuntu` 与 `docker-desktop`，两者均为

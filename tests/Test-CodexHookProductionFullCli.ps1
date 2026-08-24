@@ -24,7 +24,7 @@ foreach($command in @($new,$invoke,$restore)){
     }
 }
 
-$isolatedRoot = Join-Path 'D:\Codex\projects\统一环境\.scratch' "production-full-cli-retirement-$([guid]::NewGuid().ToString('N'))"
+$isolatedRoot = Join-Path 'D:\agents\projects\统一环境\.scratch' "production-full-cli-retirement-$([guid]::NewGuid().ToString('N'))"
 [void](New-Item -ItemType Directory -Path $isolatedRoot)
 try {
     foreach ($scriptName in @('New-CodexHookDeploymentPlan.ps1','Invoke-CodexHookDeployment.ps1','Restore-CodexHookDeployment.ps1')) {

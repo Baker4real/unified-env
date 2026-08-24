@@ -41,6 +41,27 @@ $scaleHeadroomBytes = 256L * 1024L * 1024L
 $scaleRequiredBytes = (2L * $scaleTotalBytes) + $scaleHeadroomBytes
 $forbiddenQuarantine = Join-Path $projectRoot 'reports\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine'
 $forbiddenTransaction = 'D:\Codex\.codex\run-evidence\safe-tree-delete\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\transaction.json'
+# leftover guard 语义：测试不得创建/删除 leftover quarantine（存在性前后不得变化），
+# 不是「世界必须永远包含它」。该 quarantine 已随 projects 根迁移消失（非测试行为），
+# 故按 start 快照对齐；transaction.json 仍必须存在。
+$leftoverQuarantineExistsAtStart = [IO.Directory]::Exists($forbiddenQuarantine)
+
+function Get-LeftoverQuarantineDigest {
+    # absent → $null；存在时绑定直接子项名与直接子文件 SHA-256（只读快照）。
+    if (-not [IO.Directory]::Exists($forbiddenQuarantine)) { return $null }
+    $parts = foreach ($entry in @(Get-ChildItem -LiteralPath $forbiddenQuarantine -Force |
+                Sort-Object -Property Name)) {
+        if ($entry.PSIsContainer) {
+            'd:{0}' -f $entry.Name
+        } else {
+            'f:{0}:{1}' -f $entry.Name, (Get-FileHash `
+                -LiteralPath $entry.FullName `
+                -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    return ($parts -join ';')
+}
+$leftoverQuarantineDigestAtStart = Get-LeftoverQuarantineDigest
 $issue36ScalePath = Join-Path $projectRoot 'reports\safe-tree-delete-issue36-20260817\scale-phase1.json'
 $issue37ScalePath = Join-Path $projectRoot 'reports\safe-tree-delete-issue37-20260817\scale-10000.json'
 $issue40AnalysisPath = Join-Path $projectRoot 'reports\safe-tree-delete-issue40-20260817\analysis.json'
@@ -204,8 +225,22 @@ function Get-LiveDriveInventory {
 function Assert-LeftoverUntouched {
     param([Parameter(Mandatory)][string]$When)
 
-    Assert-True ([IO.Directory]::Exists($forbiddenQuarantine)) (
-        "生产 leftover quarantine 必须仍在 ($When): $forbiddenQuarantine"
+    # quarantine 断言语义 = 存在性与直接子项摘要相对 start 快照不得变化（start 在/不在都要保持）：
+    # 测试期间任何创建/删除/改动 leftover 直接子项的行为都会红；transaction.json 仍必须存在。
+    Assert-True (([IO.Directory]::Exists($forbiddenQuarantine) -eq $leftoverQuarantineExistsAtStart)) (
+        ("生产 leftover quarantine 存在性在测试期间不得变化 ({0}): " +
+            "start={1} now={2} path={3}") -f $When,
+            $leftoverQuarantineExistsAtStart,
+            [IO.Directory]::Exists($forbiddenQuarantine),
+            $forbiddenQuarantine
+    )
+    $digestNow = Get-LeftoverQuarantineDigest
+    Assert-True (([string]$digestNow -ceq [string]$leftoverQuarantineDigestAtStart)) (
+        ("生产 leftover quarantine 直接子项摘要相对 start 不得变化 ({0}): " +
+            "startDigest={1} nowDigest={2} path={3}") -f $When,
+            [string]$leftoverQuarantineDigestAtStart,
+            [string]$digestNow,
+            $forbiddenQuarantine
     )
     Assert-True ([IO.File]::Exists($forbiddenTransaction)) (
         "生产 leftover transaction.json 必须仍在 ($When): $forbiddenTransaction"
@@ -1055,13 +1090,22 @@ try {
     }
     Write-JsonFile -Path (Join-Path $evidenceHome 'scale-phase3.json') -Document $scaleRecord
 
+    $leftoverQuarantineDigestAtEnd = Get-LeftoverQuarantineDigest
     $leftoverGuard = [pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-safe-tree-delete-issue42-leftover-guard'
+        quarantineExistsAtStart = $leftoverQuarantineExistsAtStart
         quarantineExists = [IO.Directory]::Exists($forbiddenQuarantine)
+        quarantineExistsUnchanged = (
+            [IO.Directory]::Exists($forbiddenQuarantine) -eq $leftoverQuarantineExistsAtStart)
+        quarantineDigestAtStart = $leftoverQuarantineDigestAtStart
+        quarantineDigest = $leftoverQuarantineDigestAtEnd
         transactionExists = [IO.File]::Exists($forbiddenTransaction)
         quarantinePath = $forbiddenQuarantine
         transactionPath = $forbiddenTransaction
-        touched = $false
+        touched = (
+            ([IO.Directory]::Exists($forbiddenQuarantine) -ne $leftoverQuarantineExistsAtStart) -or
+            ([string]$leftoverQuarantineDigestAtEnd -cne [string]$leftoverQuarantineDigestAtStart))
+        note = 'guard 语义：quarantine 存在性与直接子项摘要相对 start 不得变化（迁移后 start 即 absent，摘要记 null）；transaction.json 必须仍在。'
     }
     Write-JsonFile -Path (Join-Path $evidenceHome 'leftover-guard.json') -Document $leftoverGuard
     Assert-LeftoverUntouched -When 'after-scale'

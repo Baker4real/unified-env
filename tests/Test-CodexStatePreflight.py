@@ -15,7 +15,7 @@ import uuid
 from unittest import mock
 
 
-PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
+PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
 HOOK_ROOT = PROJECT_ROOT / "managed" / "codex-hooks" / "hooks"
 PREFLIGHT = HOOK_ROOT / "codex-state-preflight.py"
 WRAPPER = HOOK_ROOT / "codex-state-preflight.cmd"

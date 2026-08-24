@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 
-PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
+PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
 MODULE_PATH = PROJECT_ROOT / "managed" / "codex-hooks" / "hooks" / "codex-state-policy-guard.py"
 FIXTURE_ROOT = PROJECT_ROOT / "reports" / "codex-state-path-inventory-test"
 CANONICAL_CANDIDATE_ROOT = Path(r"D:\Documents\Codex")

@@ -10,6 +10,7 @@ if (-not ('CodexHookGovernance.HandleBoundFileReader' -as [type])) {
     $hookAssemblyDirectory = [IO.Path]::Combine('D:\', 'Codex', 'temp', 'unified-env-addtype')
     [void][IO.Directory]::CreateDirectory($hookAssemblyDirectory)
     $hookAssemblyPath = Join-Path $hookAssemblyDirectory 'CodexHostSafetyNative.dll'
+    $hookAssemblyMetadataPath = "$hookAssemblyPath.sha256"
     $nativeSources = @(
         $codexHookHandleBoundSource,
         $codexSafeTreeDeleteFileIdentitySource,
@@ -18,22 +19,80 @@ if (-not ('CodexHookGovernance.HandleBoundFileReader' -as [type])) {
         $codexSafeTreeDeleteThreadJournalSource,
         $codexSafeTreeDeleteParallelPurgeSource
     )
-    $assemblyStale = -not [IO.File]::Exists($hookAssemblyPath)
-    if (-not $assemblyStale) {
-        $assemblyWriteTime = [IO.File]::GetLastWriteTimeUtc($hookAssemblyPath)
-        foreach ($nativeSource in $nativeSources) {
-            if ([IO.File]::GetLastWriteTimeUtc($nativeSource) -gt $assemblyWriteTime) {
-                $assemblyStale = $true
-                break
+    # Staleness is bound to the exact .cs source content, never to mtime: each participating
+    # source is hashed in fixed order and the per-file digests are folded into one composite
+    # SHA-256, which the sidecar .sha256 records for the cached DLL. An mtime-only refresh can
+    # never mask a content change, and any source edit forces a rebuild.
+    $nativeSourceDigests = foreach ($nativeSource in $nativeSources) {
+        [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+            [IO.File]::ReadAllBytes($nativeSource))).ToLowerInvariant()
+    }
+    $hookSourceSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+        [Text.UTF8Encoding]::new($false).GetBytes($nativeSourceDigests -join "`n"))).ToLowerInvariant()
+    $hookCachedSha256 = if ([IO.File]::Exists($hookAssemblyMetadataPath)) {
+        ([IO.File]::ReadAllText($hookAssemblyMetadataPath)).Trim()
+    } else {
+        $null
+    }
+    $hookAssemblyStale = -not [IO.File]::Exists($hookAssemblyPath) -or
+        [string]::IsNullOrEmpty($hookCachedSha256) -or
+        $hookCachedSha256 -cne $hookSourceSha256
+    if ($hookAssemblyStale) {
+        # Compile into a same-directory temp file, then atomically rename it over the cache
+        # so concurrent hook processes never observe a removed-then-half-written DLL.
+        $hookTempAssemblyPath = Join-Path $hookAssemblyDirectory (
+            '{0}.tmp' -f ([IO.Path]::GetRandomFileName()))
+        $hookTempMetadataPath = "$hookTempAssemblyPath.sha256"
+        try {
+            Add-Type `
+                -Path $nativeSources `
+                -OutputAssembly $hookTempAssemblyPath `
+                -OutputType Library `
+                -ErrorAction Stop
+            $hookLiveSha256 = if ([IO.File]::Exists($hookAssemblyMetadataPath)) {
+                ([IO.File]::ReadAllText($hookAssemblyMetadataPath)).Trim()
+            } else {
+                $null
+            }
+            if (-not ($hookLiveSha256 -ceq $hookSourceSha256 -and
+                    [IO.File]::Exists($hookAssemblyPath))) {
+                # A concurrent process may have published the same source hash while we
+                # compiled; that DLL already is the valid new version, so only replace
+                # when nobody else did. Publish the DLL first and the sidecar second: a
+                # torn publish merely recompiles on the next run instead of certifying
+                # a stale DLL as fresh.
+                [IO.File]::WriteAllText(
+                    $hookTempMetadataPath,
+                    $hookSourceSha256,
+                    [Text.UTF8Encoding]::new($false))
+                try {
+                    Move-Item `
+                        -LiteralPath $hookTempAssemblyPath `
+                        -Destination $hookAssemblyPath `
+                        -Force -ErrorAction Stop
+                    Move-Item `
+                        -LiteralPath $hookTempMetadataPath `
+                        -Destination $hookAssemblyMetadataPath `
+                        -Force -ErrorAction Stop
+                } catch {
+                    $hookWinnerSha256 = if ([IO.File]::Exists($hookAssemblyMetadataPath)) {
+                        ([IO.File]::ReadAllText($hookAssemblyMetadataPath)).Trim()
+                    } else {
+                        $null
+                    }
+                    if (-not ($hookWinnerSha256 -ceq $hookSourceSha256 -and
+                            [IO.File]::Exists($hookAssemblyPath))) {
+                        throw
+                    }
+                }
+            }
+        } finally {
+            foreach ($hookTempPath in @($hookTempAssemblyPath, $hookTempMetadataPath)) {
+                if ([IO.File]::Exists($hookTempPath)) {
+                    Remove-Item -LiteralPath $hookTempPath -Force -ErrorAction SilentlyContinue
+                }
             }
         }
-    }
-    if ($assemblyStale) {
-        Add-Type `
-            -Path $nativeSources `
-            -OutputAssembly $hookAssemblyPath `
-            -OutputType Library `
-            -ErrorAction Stop
     }
     Add-Type -Path $hookAssemblyPath -ErrorAction Stop
 }

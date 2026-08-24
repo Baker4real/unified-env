@@ -1,5 +1,5 @@
 param(
-    [string]$ProjectRoot = "D:\Codex\projects\统一环境",
+    [string]$ProjectRoot = "D:\agents\projects\统一环境",
     [switch]$KeepOutputs,
     [switch]$OnlyFeatureDisableVariants,
     [string]$OnlyFeatureDisableVariant,
@@ -991,12 +991,12 @@ try {
     Assert-True -Condition (-not ($config -match '(?m)^hooks\s*=')) -Message "Repair 不得把默认启用的 features.hooks 写成显式配置"
     Assert-True -Condition (-not ($config -match '(?m)^unified_exec\s*=')) -Message "Repair 不得改写 Windows unified_exec 默认值"
     foreach ($trustedProject in @(
-        'D:\Codex\projects\时钟倒计时',
-        'D:\Codex\projects\统一环境',
-        'D:\Codex\projects\杨杨子',
+        'D:\agents\projects\时钟倒计时',
+        'D:\agents\projects\统一环境',
+        'D:\agents\projects\杨杨子',
         'D:\Codex\projects\codex-account-switch',
         'D:\Codex\projects\CodexProviderSync',
-        'D:\Codex\projects\minmin-calendar'
+        'D:\agents\projects\minmin-calendar'
     )) {
         $header = [regex]::Escape("[projects.'$($trustedProject.ToLowerInvariant())']")
         Assert-True -Condition ([regex]::IsMatch($config, "(?m)^$header\s*\r?\ntrust_level\s*=\s*`"trusted`"\s*$")) -Message "项目 trust 未收敛：$trustedProject"

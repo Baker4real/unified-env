@@ -1,5 +1,5 @@
 param(
-    [string]$ProjectRoot = 'D:\Codex\projects\统一环境',
+    [string]$ProjectRoot = 'D:\agents\projects\统一环境',
     [ValidateSet('acl','legacy','final')][string]$OnlyPostPhase,
     [switch]$OnlyRestoreContract,
     [switch]$OnlyRestoreThirdVersion,

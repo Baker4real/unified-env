@@ -14,7 +14,7 @@ import sys
 import uuid
 
 
-PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
+PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
 REPORTS_ROOT = PROJECT_ROOT / "reports"
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "Invoke-RetiredProjectUsageEvidenceConfigPurger.py"
 RETIRED_ID = "codex-gsd-codex-c-skill"

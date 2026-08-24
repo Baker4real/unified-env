@@ -18,7 +18,7 @@ import unittest
 from unittest import mock
 
 
-PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
+PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
 FIXTURE_ROOT = PROJECT_ROOT / "reports" / "codex-state-policy-test"
 MODULE_PATH = PROJECT_ROOT / "managed" / "codex-hooks" / "hooks" / "codex-state-policy-guard.py"
 

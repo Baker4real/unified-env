@@ -25,11 +25,11 @@ function Assert-BackupRetentionOutputDirectory {
 
     $fullPath = Assert-BackupRetentionDPath -Path $Path -Name 'OutputDir'
     $allowedRoots = @(
-        'D:\Codex\projects\统一环境\reports',
+        'D:\agents\projects\统一环境\reports',
         'D:\Codex\.codex\run-evidence\env-governance'
     )
     if (@($allowedRoots | Where-Object { Test-BackupRetentionOutputSubPath -Path $fullPath -BasePath $_ }).Count -eq 0) {
-        throw 'OutputDir 必须位于允许的报告目录：D:\Codex\projects\统一环境\reports 或 D:\Codex\.codex\run-evidence\env-governance。'
+        throw 'OutputDir 必须位于允许的报告目录：D:\agents\projects\统一环境\reports 或 D:\Codex\.codex\run-evidence\env-governance。'
     }
     return $fullPath
 }

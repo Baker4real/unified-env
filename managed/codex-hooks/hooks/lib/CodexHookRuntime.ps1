@@ -274,11 +274,11 @@ function Write-CodexHookLatestHealthCore {
     )
     $json=Assert-CodexHookHealthPayload -HookId $HookId -Payload $Payload
     $fixedRoot='D:\Codex\.codex\run-evidence\codex-hook-health'
-    $fixtureRoot='D:\Codex\projects\统一环境\reports\codex-hook-health-test'
+    $fixtureRoot='D:\agents\projects\统一环境\reports\codex-hook-health-test'
     $root=[IO.Path]::GetFullPath($HealthRoot)
     if($AllowFixtureRoot){
         $reconcilerFixture=$false
-        if($root -cmatch '^D:\\Codex\\projects\\统一环境\\\.scratch\\host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\\run-evidence\\codex-hook-health\z'){
+        if($root -cmatch '^D:\\agents\\projects\\统一环境\\\.scratch\\host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\\run-evidence\\codex-hook-health\z'){
             $codexHome=[IO.Directory]::GetParent([IO.Directory]::GetParent($root).FullName).FullName
             $marker=Join-Path $codexHome '.codex-host-hook-reconciliation-fixture'
             $reconcilerFixture=(Test-Path -LiteralPath $marker -PathType Leaf)-and((Get-Content -LiteralPath $marker -Raw).Trim()-ceq'codex-host-hook-reconciliation-fixture-v1')

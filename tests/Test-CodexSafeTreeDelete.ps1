@@ -438,37 +438,37 @@ try {
         },
         [pscustomobject]@{
             id = 'environment-hook-pycache'
-            capabilityRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks\hooks\__pycache__'
+            capabilityRoot = 'D:\agents\projects\统一环境\managed\codex-hooks\hooks\__pycache__'
             minimumDescendantDepth = 0
             rootDeletionPurpose = 'rebuildable-build-output'
         },
         [pscustomobject]@{
             id = 'environment-hook-lib-pycache'
-            capabilityRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks\hooks\lib\__pycache__'
+            capabilityRoot = 'D:\agents\projects\统一环境\managed\codex-hooks\hooks\lib\__pycache__'
             minimumDescendantDepth = 0
             rootDeletionPurpose = 'rebuildable-build-output'
         },
         [pscustomobject]@{
             id = 'environment-scripts-pycache'
-            capabilityRoot = 'D:\Codex\projects\统一环境\scripts\__pycache__'
+            capabilityRoot = 'D:\agents\projects\统一环境\scripts\__pycache__'
             minimumDescendantDepth = 0
             rootDeletionPurpose = 'rebuildable-build-output'
         },
         [pscustomobject]@{
             id = 'environment-tests-pycache'
-            capabilityRoot = 'D:\Codex\projects\统一环境\tests\__pycache__'
+            capabilityRoot = 'D:\agents\projects\统一环境\tests\__pycache__'
             minimumDescendantDepth = 0
             rootDeletionPurpose = 'rebuildable-build-output'
         },
         [pscustomobject]@{
             id = 'environment-retired-project-state'
-            capabilityRoot = 'D:\Codex\projects\统一环境\.codex'
+            capabilityRoot = 'D:\agents\projects\统一环境\.codex'
             minimumDescendantDepth = 0
             rootDeletionPurpose = 'empty-project-state'
         },
         [pscustomobject]@{
             id = 'environment-remote-attachments'
-            capabilityRoot = 'D:\Codex\projects\统一环境\.codex-remote-attachments'
+            capabilityRoot = 'D:\agents\projects\统一环境\.codex-remote-attachments'
             minimumDescendantDepth = 1
             rootDeletionPurpose = 'none'
         }
@@ -513,22 +513,22 @@ try {
         },
         [pscustomobject]@{
             id = 'cc-switch-rust-target'
-            root = 'D:\Codex\projects\cc-switch\src-tauri\target'
+            root = 'D:\agents\projects\cc-switch\src-tauri\target'
             junctions = $false
         },
         [pscustomobject]@{
             id = 'cc-switch-node-modules'
-            root = 'D:\Codex\projects\cc-switch\node_modules'
+            root = 'D:\agents\projects\cc-switch\node_modules'
             junctions = $true
         },
         [pscustomobject]@{
             id = 'sub2api-frontend-node-modules'
-            root = 'D:\Codex\projects\开源分发 api\sub2api\frontend\node_modules'
+            root = 'D:\agents\projects\开源分发 api\sub2api\frontend\node_modules'
             junctions = $true
         },
         [pscustomobject]@{
             id = 'serena-python-venv'
-            root = 'D:\Codex\projects\serena\.venv'
+            root = 'D:\agents\projects\serena\.venv'
             junctions = $false
         }
     )
@@ -581,8 +581,8 @@ try {
     $attachmentRootError = Assert-Throws -Message '生产策略必须拒绝删除 remote attachments 根' -Action {
         & $entryPath `
             -Mode Plan `
-            -TargetPath 'D:\Codex\projects\统一环境\.codex-remote-attachments' `
-            -CapabilityRoot 'D:\Codex\projects\统一环境\.codex-remote-attachments' `
+            -TargetPath 'D:\agents\projects\统一环境\.codex-remote-attachments' `
+            -CapabilityRoot 'D:\agents\projects\统一环境\.codex-remote-attachments' `
             -FixturePolicyPath $productionPolicyPath `
             -FixtureEvidenceRoot $evidenceRoot
     }
@@ -1211,7 +1211,7 @@ try {
         schemaVersion = 3
         entries = @([pscustomobject][ordered]@{
             id = 'invalid-empty-project-state-root'
-            capabilityRoot = 'D:\Codex\projects\统一环境\.codex-remote-attachments'
+            capabilityRoot = 'D:\agents\projects\统一环境\.codex-remote-attachments'
             minimumDescendantDepth = 0
             rootDeletionPurpose = 'empty-project-state'
             deniedExactPaths = @()
@@ -1224,8 +1224,8 @@ try {
     $invalidEmptyProjectStateRootError = Assert-Throws -Message '非 .codex 根不得声明 empty-project-state' -Action {
         & $entryPath `
             -Mode Plan `
-            -TargetPath 'D:\Codex\projects\统一环境\.codex-remote-attachments' `
-            -CapabilityRoot 'D:\Codex\projects\统一环境\.codex-remote-attachments' `
+            -TargetPath 'D:\agents\projects\统一环境\.codex-remote-attachments' `
+            -CapabilityRoot 'D:\agents\projects\统一环境\.codex-remote-attachments' `
             -FixturePolicyPath $invalidEmptyProjectStateRootPolicyPath `
             -FixtureEvidenceRoot $evidenceRoot
     }

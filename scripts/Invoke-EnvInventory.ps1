@@ -1,5 +1,5 @@
 param(
-    [string]$OutputDir = "D:\Codex\projects\统一环境\reports\env-inventory",
+    [string]$OutputDir = "D:\agents\projects\统一环境\reports\env-inventory",
     [string[]]$ProjectRoots = @("D:\Codex\projects"),
     [object[]]$ProjectRootFacts,
     [string[]]$ToolOwnerRoots = @("D:\Codex\projects", "D:\hermes-data\hermes-agent"),

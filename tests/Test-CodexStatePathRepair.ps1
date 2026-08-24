@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ProjectRoot = 'D:\Codex\projects\统一环境'
+$ProjectRoot = 'D:\agents\projects\统一环境'
 $ScriptPath = Join-Path $ProjectRoot 'scripts\Get-CodexStatePathInventory.ps1'
 $FixtureParent = Join-Path $ProjectRoot 'reports\codex-state-path-repair-test'
 $FixtureRoot = Join-Path $FixtureParent ([guid]::NewGuid().ToString('N'))

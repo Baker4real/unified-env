@@ -59,119 +59,119 @@
     },
     {
       "id": "environment-reports",
-      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\reports",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\reports",
       "minimumDescendantDepth": 1,
       "rootDeletionPurpose": "none",
       "deniedExactPaths": []
     },
     {
       "id": "environment-hook-pycache",
-      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\__pycache__",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\managed\\codex-hooks\\hooks\\__pycache__",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "environment-hook-lib-pycache",
-      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\hooks\\lib\\__pycache__",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\managed\\codex-hooks\\hooks\\lib\\__pycache__",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "environment-scripts-pycache",
-      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\scripts\\__pycache__",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\scripts\\__pycache__",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "environment-tests-pycache",
-      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\tests\\__pycache__",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\tests\\__pycache__",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "environment-scratch",
-      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.scratch",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\.scratch",
       "minimumDescendantDepth": 1,
       "rootDeletionPurpose": "none",
       "deniedExactPaths": []
     },
     {
       "id": "environment-retired-project-state",
-      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.codex",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\.codex",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "empty-project-state",
       "deniedExactPaths": []
     },
     {
       "id": "environment-remote-attachments",
-      "capabilityRoot": "D:\\Codex\\projects\\统一环境\\.codex-remote-attachments",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\.codex-remote-attachments",
       "minimumDescendantDepth": 1,
       "rootDeletionPurpose": "none",
       "deniedExactPaths": []
     },
     {
       "id": "clock-countdown-app-build",
-      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\app",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\app",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "clock-countdown-verification-build",
-      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\verification",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\verification",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "clock-countdown-core-bin",
-      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "clock-countdown-core-obj",
-      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\obj",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\obj",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "clock-countdown-app-bin",
-      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "clock-countdown-app-obj",
-      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown\\obj",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown\\obj",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "clock-countdown-verification-bin",
-      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "clock-countdown-verification-obj",
-      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\obj",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\obj",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "deniedExactPaths": []
     },
     {
       "id": "clock-countdown-intermediate-ui-references",
-      "capabilityRoot": "D:\\Codex\\projects\\时钟倒计时\\assets\\ui-references",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\assets\\ui-references",
       "minimumDescendantDepth": 3,
       "rootDeletionPurpose": "none",
       "deniedExactPaths": []
@@ -214,7 +214,7 @@
     },
     {
       "id": "cc-switch-rust-target",
-      "capabilityRoot": "D:\\Codex\\projects\\cc-switch\\src-tauri\\target",
+      "capabilityRoot": "D:\\agents\\projects\\cc-switch\\src-tauri\\target",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "allowHardLinks": true,
@@ -223,7 +223,7 @@
     },
     {
       "id": "cc-switch-node-modules",
-      "capabilityRoot": "D:\\Codex\\projects\\cc-switch\\node_modules",
+      "capabilityRoot": "D:\\agents\\projects\\cc-switch\\node_modules",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "allowHardLinks": true,
@@ -232,7 +232,7 @@
     },
     {
       "id": "sub2api-frontend-node-modules",
-      "capabilityRoot": "D:\\Codex\\projects\\开源分发 api\\sub2api\\frontend\\node_modules",
+      "capabilityRoot": "D:\\agents\\projects\\开源分发 api\\sub2api\\frontend\\node_modules",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "allowHardLinks": true,
@@ -241,7 +241,7 @@
     },
     {
       "id": "serena-python-venv",
-      "capabilityRoot": "D:\\Codex\\projects\\serena\\.venv",
+      "capabilityRoot": "D:\\agents\\projects\\serena\\.venv",
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "allowHardLinks": true,

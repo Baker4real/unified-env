@@ -157,7 +157,7 @@ Assert-True ((ConvertTo-CodexHookRedactedUri 'http://user:secret@example.com:808
 Assert-CodexSerenaSessionStartOutputBytes -Bytes $reorderedSerenaOutput
 Assert-True ($runtimeSource.Contains('function Receive-CodexHookBoundedProcessStream')) 'shared runtime 必须在 timeout/kill 后使用有界 stdout/stderr drain helper'
 
-$fixtureRoot='D:\Codex\projects\统一环境\reports\codex-hook-runtime-test'
+$fixtureRoot='D:\agents\projects\统一环境\reports\codex-hook-runtime-test'
 if(Test-Path -LiteralPath $fixtureRoot){Remove-Item -LiteralPath $fixtureRoot -Recurse -Force}
 [IO.Directory]::CreateDirectory($fixtureRoot)|Out-Null
 $target=Join-Path $fixtureRoot 'config.toml';$backups=Join-Path $fixtureRoot 'backups';[IO.Directory]::CreateDirectory($backups)|Out-Null
@@ -247,7 +247,7 @@ try{for($i=0;$i -lt 40 -and -not(Test-Path $abandonedMarker);$i++){Start-Sleep -
 $process=Invoke-CodexHookProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -ArgumentList @('-NoProfile','-Command','[Console]::Out.Write("ok")')
 Assert-True ($process.exitCode -eq 0 -and $process.stdout -ceq 'ok') 'process helper 必须捕获输出与退出码'
 
-$serenaFixtureRoot='D:\Codex\projects\统一环境\reports\codex-hook-serena-fixture'
+$serenaFixtureRoot='D:\agents\projects\统一环境\reports\codex-hook-serena-fixture'
 if(Test-Path -LiteralPath $serenaFixtureRoot){Remove-Item -LiteralPath $serenaFixtureRoot -Recurse -Force}
 [IO.Directory]::CreateDirectory($serenaFixtureRoot)|Out-Null
 $serenaFixtureScript=Join-Path $serenaFixtureRoot 'serena-hooks-fixture.ps1'
@@ -275,7 +275,7 @@ $bytes=[Text.UTF8Encoding]::new($false).GetBytes($output)
 '@
 [IO.File]::WriteAllText($serenaFixtureScript,$fixtureSource,[Text.UTF8Encoding]::new($false))
 $serenaScript=Join-Path $projectRoot 'tests\lib\Invoke-SerenaActivateFixture.ps1'
-$serenaHealthRoot='D:\Codex\projects\统一环境\reports\codex-hook-health-test'
+$serenaHealthRoot='D:\agents\projects\统一环境\reports\codex-hook-health-test'
 $serenaChildPidPath=Join-Path $serenaFixtureRoot 'inherited-child.pid'
 function Invoke-SerenaActivateFixture([string]$Mode){
     if(Test-Path -LiteralPath $serenaHealthRoot){Remove-Item -LiteralPath $serenaHealthRoot -Recurse -Force}
@@ -312,7 +312,7 @@ Assert-True (-not $serenaSource.Contains('$stdoutTask.GetAwaiter().GetResult()')
 Assert-True (-not $serenaSource.Contains('$stderrTask.GetAwaiter().GetResult()')) 'Serena activate 不得在 WaitForExit 后无界等待 stderr task'
 Remove-Item -LiteralPath $serenaFixtureRoot -Recurse -Force
 
-$syntheticRoot='D:\Codex\projects\统一环境\reports\codex-hook-serena-synthetic'
+$syntheticRoot='D:\agents\projects\统一环境\reports\codex-hook-serena-synthetic'
 if(Test-Path -LiteralPath $syntheticRoot){Remove-Item -LiteralPath $syntheticRoot -Recurse -Force}
 [IO.Directory]::CreateDirectory($syntheticRoot)|Out-Null
 $syntheticHome=Join-Path $syntheticRoot '.serena'
@@ -347,7 +347,7 @@ $cleanup=@(Invoke-SerenaVendor @('cleanup','--client=codex') ("{`"session_id`":`
 Assert-True ($cleanup.exitCode -eq 0 -and -not(Test-Path -LiteralPath (Join-Path $syntheticHome "hook_data\$syntheticSession"))) 'Serena vendor cleanup 必须清除 fixture session state'
 Remove-Item -LiteralPath $syntheticRoot -Recurse -Force
 
-$healthRoot=[IO.Path]::GetFullPath('D:\Codex\projects\统一环境\reports\codex-hook-health-test')
+$healthRoot=[IO.Path]::GetFullPath('D:\agents\projects\统一环境\reports\codex-hook-health-test')
 $reportsRoot=[IO.Path]::GetFullPath((Join-Path $projectRoot 'reports') + '\')
 Assert-True ($healthRoot.StartsWith($reportsRoot,[StringComparison]::OrdinalIgnoreCase) -and $healthRoot -ieq (Join-Path $reportsRoot 'codex-hook-health-test')) 'health fixture 必须严格位于项目 reports 固定目录'
 try{

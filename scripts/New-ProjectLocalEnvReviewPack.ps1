@@ -1,7 +1,7 @@
 param(
-    [string]$InventoryPath = "D:\Codex\projects\统一环境\reports\env-inventory\inventory.json",
+    [string]$InventoryPath = "D:\agents\projects\统一环境\reports\env-inventory\inventory.json",
     [string]$InventoryMarkdownPath,
-    [string]$OutputDir = "D:\Codex\projects\统一环境\reports\project-local-env-review"
+    [string]$OutputDir = "D:\agents\projects\统一环境\reports\project-local-env-review"
 )
 
 $ErrorActionPreference = "Stop"
@@ -89,7 +89,7 @@ function Assert-AllowedOutputDir {
     param([string]$Path)
 
     $allowedRoots = @(
-        "D:\Codex\projects\统一环境\reports",
+        "D:\agents\projects\统一环境\reports",
         "D:\Codex\.codex\run-evidence\env-governance"
     )
 
@@ -99,7 +99,7 @@ function Assert-AllowedOutputDir {
         }
     }
 
-    throw "OutputDir 必须位于允许的报告目录：D:\Codex\projects\统一环境\reports 或 D:\Codex\.codex\run-evidence\env-governance。当前值：$Path"
+    throw "OutputDir 必须位于允许的报告目录：D:\agents\projects\统一环境\reports 或 D:\Codex\.codex\run-evidence\env-governance。当前值：$Path"
 }
 
 function Assert-ExistingLeafIsNotReparsePoint {

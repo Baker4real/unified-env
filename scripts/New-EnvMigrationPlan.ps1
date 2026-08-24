@@ -1,7 +1,7 @@
 param(
-    [string]$InventoryPath = "D:\Codex\projects\统一环境\reports\env-inventory\inventory.json",
+    [string]$InventoryPath = "D:\agents\projects\统一环境\reports\env-inventory\inventory.json",
     [string]$InventoryMarkdownPath,
-    [string]$OutputDir = "D:\Codex\projects\统一环境\reports\env-migration-plan"
+    [string]$OutputDir = "D:\agents\projects\统一环境\reports\env-migration-plan"
 )
 
 $ErrorActionPreference = "Stop"

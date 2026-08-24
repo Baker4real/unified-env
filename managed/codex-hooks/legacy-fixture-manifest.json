@@ -2,7 +2,7 @@
   "artifactType": "env-governance.codex-hook-manifest",
   "schemaVersion": 1,
   "codexHome": "D:\\Codex\\.codex",
-  "managedRoot": "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks",
+  "managedRoot": "D:\\agents\\projects\\统一环境\\managed\\codex-hooks",
   "runtimes": {
     "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
     "python": "D:\\Codex\\tools\\python314-official\\python.exe",
@@ -540,14 +540,14 @@
         "arguments": [
           "-NoProfile",
           "-File",
-          "D:\\Codex\\projects\\统一环境\\scripts\\Get-CodexHookInventory.ps1",
+          "D:\\agents\\projects\\统一环境\\scripts\\Get-CodexHookInventory.ps1",
           "-LegacyFixtureManifest",
           "-ManifestPath",
-          "D:\\Codex\\projects\\统一环境\\managed\\codex-hooks\\legacy-fixture-manifest.json",
+          "D:\\agents\\projects\\统一环境\\managed\\codex-hooks\\legacy-fixture-manifest.json",
           "-CodexHome",
           "D:\\Codex\\.codex",
           "-OutputDir",
-          "D:\\Codex\\projects\\统一环境\\reports\\codex-hook-inventory",
+          "D:\\agents\\projects\\统一环境\\reports\\codex-hook-inventory",
           "-RequireNoRetiredRegistrations"
         ]
       }
@@ -557,7 +557,7 @@
     {
       "relativePath": "hooks/codex-github-cli-guard.cmd",
       "liveRelativePath": "codex-github-cli-guard.cmd",
-      "sha256": "e2612d82b1f05572ed244afc8c3261cd3abefcb086e0864bc175d0dfb38996c9",
+      "sha256": "0ebb2bc8b62884c6fa8329008e3ffefdffdfd6ad783baab15a6ed9fe9a98d907",
       "lifecycle": "active",
       "ownerHookIds": [
         "github-cli"
@@ -614,7 +614,7 @@
     {
       "relativePath": "hooks/codex-state-policy-guard.py",
       "liveRelativePath": "codex-state-policy-guard.py",
-      "sha256": "1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8",
+      "sha256": "e819633dfa0147c3e41a15584c2f3b0da1ec899d71a8d5e7f8c7d0ef3bfa8a9b",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
@@ -623,7 +623,7 @@
     {
       "relativePath": "hooks/codex-provider-stability-guard.cmd",
       "liveRelativePath": "codex-provider-stability-guard.cmd",
-      "sha256": "feeb68d28ae3bdf174bdd695322de2bdfeaf297115d706e91d07cf8e0f04715f",
+      "sha256": "3da3c4db553047989363aca6d63a22c0c54abd26eb934d2a0b09de67d98a22ba",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability"
@@ -641,7 +641,7 @@
     {
       "relativePath": "hooks/serena-activate-guarded.cmd",
       "liveRelativePath": "serena-activate-guarded.cmd",
-      "sha256": "2758f7df015aff835fb89f57d1375ef4d80b4d0ab993dea66cac804479f598e1",
+      "sha256": "c92e28f018feafa77c6504200766970dc22b4e9b06f5e910eeebd7c487cc5319",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"
@@ -659,7 +659,7 @@
     {
       "relativePath": "hooks/serena-dashboard-guard.cmd",
       "liveRelativePath": "serena-dashboard-guard.cmd",
-      "sha256": "642c9a760ddf9e4e339fd2e4559748aeadb9a52c517de186294da9720bbd1584",
+      "sha256": "8023c5b65e3d3f80fcc1f3ead3c73e6d316714d560e1d4e866023801b391feaa",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-dashboard"
@@ -677,7 +677,7 @@
     {
       "relativePath": "hooks/lib/CodexHookRuntime.ps1",
       "liveRelativePath": "lib/CodexHookRuntime.ps1",
-      "sha256": "a6ecb01a6c57dafa23f62ed9efb59febd06c6059bfde83fd4c59ddbad2abacb4",
+      "sha256": "84b525b5bad28523193bab574d4395b187cfc825a95701eaa15e43e74b1a5ec9",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",

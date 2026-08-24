@@ -15,10 +15,10 @@ import uuid
 
 PRODUCTION_CODEX_HOME = Path(r"D:\Codex\.codex")
 PRODUCTION_HEALTH_ROOT = PRODUCTION_CODEX_HOME / "run-evidence" / "codex-hook-health"
-FIXTURE_PARENT = Path(r"D:\Codex\projects\统一环境\reports\codex-state-preflight-test")
+FIXTURE_PARENT = Path(r"D:\agents\projects\统一环境\reports\codex-state-preflight-test")
 FIXTURE_MARKER = ".codex-state-preflight-fixture"
 FIXTURE_MARKER_VALUE = "codex-state-preflight-test-v1\n"
-EXPECTED_STATE_CORE_SHA256 = "1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8"
+EXPECTED_STATE_CORE_SHA256 = "e819633dfa0147c3e41a15584c2f3b0da1ec899d71a8d5e7f8c7d0ef3bfa8a9b"
 FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
 FORBIDDEN_ARGUMENT = re.compile(r"(?i)(?:https?://|--check-(?:network|auth)\b|--(?:url|proxy)\b)")
 

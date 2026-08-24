@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference='Stop'
-$entry='D:\Codex\projects\统一环境\managed\codex-hooks\hooks\lib\CodexGitHubCliGuardEntry.ps1'
+$entry='D:\agents\projects\统一环境\managed\codex-hooks\hooks\lib\CodexGitHubCliGuardEntry.ps1'
 . $entry
 $operation={
     param($state)

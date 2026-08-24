@@ -21,7 +21,7 @@ Assert-True `
     ($wrapperSource.Contains('Path(__file__).absolute().with_name("generate_skill_catalog.py")', [StringComparison]::Ordinal)) `
     'installer default generator must resolve beside the deployed wrapper'
 Assert-True `
-    (-not $wrapperSource.Contains('D:\Codex\projects\统一环境\scripts\generate_skill_catalog.py', [StringComparison]::OrdinalIgnoreCase)) `
+    (-not $wrapperSource.Contains('D:\agents\projects\统一环境\scripts\generate_skill_catalog.py', [StringComparison]::OrdinalIgnoreCase)) `
     'installer must not depend on the source repository generator path'
 Assert-True (Test-Path -LiteralPath $sourceRecordPath -PathType Leaf) 'deployment source is missing the shared SOURCE.md parser'
 Assert-True (Test-Path -LiteralPath $systemRepairPath -PathType Leaf) 'deployment source is missing the system provenance repair module'

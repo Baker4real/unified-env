@@ -1,7 +1,7 @@
 param(
-    [string]$ReadinessPath = "D:\Codex\projects\统一环境\reports\env-update-readiness\readiness.json",
+    [string]$ReadinessPath = "D:\agents\projects\统一环境\reports\env-update-readiness\readiness.json",
     [string]$ReadinessMarkdownPath,
-    [string]$OutputDir = "D:\Codex\projects\统一环境\reports\stale-path-entry-cleanup-dry-run"
+    [string]$OutputDir = "D:\agents\projects\统一环境\reports\stale-path-entry-cleanup-dry-run"
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,7 +67,7 @@ function Assert-AllowedOutputDir {
     param([string]$Path)
 
     $allowedRoots = @(
-        "D:\Codex\projects\统一环境\reports",
+        "D:\agents\projects\统一环境\reports",
         "D:\Codex\.codex\run-evidence\env-governance"
     )
 
@@ -77,7 +77,7 @@ function Assert-AllowedOutputDir {
         }
     }
 
-    throw "OutputDir 必须位于允许的报告目录：D:\Codex\projects\统一环境\reports 或 D:\Codex\.codex\run-evidence\env-governance。当前值：$Path"
+    throw "OutputDir 必须位于允许的报告目录：D:\agents\projects\统一环境\reports 或 D:\Codex\.codex\run-evidence\env-governance。当前值：$Path"
 }
 
 function Assert-ReadableDFile {

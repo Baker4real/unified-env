@@ -13,7 +13,7 @@ import sys
 import uuid
 
 
-PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
+PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
 REPORTS_ROOT = PROJECT_ROOT / "reports"
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "Invoke-RetiredProjectThreadStateSanitizer.py"
 RETIRED_ID = "codex-gsd-codex-c-skill"
@@ -69,8 +69,8 @@ def create_database(home: Path, *, active_retired: bool = False, missing_column:
             ("retired-root", RETIRED_EXTENDED_ROOT, 1, "sha-root", "main", RETIRED_ORIGIN, "retired title must survive", "retired first user message must survive", "retired preview must survive", "retired-root-sentinel"),
             ("retired-descendant", RETIRED_EXTENDED_ROOT + r"\child", 1, "sha-desc", "feature", None, "descendant title", "descendant message", "descendant preview", "retired-desc-sentinel"),
             ("retired-forward-slash", RETIRED_ROOT.replace("\\", "/"), 1, None, None, RETIRED_ORIGIN, "forward title", "forward message", "forward preview", "retired-forward-sentinel"),
-            ("safe-user-text", r"\\?\D:\Codex\projects\统一环境", 1, "safe-sha", "safe-branch", "https://github.com/Baker4real/unified-env.git", f"title mentions {RETIRED_ID}", f"prompt mentions {RETIRED_ROOT}", f"preview mentions {RETIRED_ID}", "safe-user-text-sentinel"),
-            ("safe", r"\\?\D:\Codex\projects\统一环境", 1, "safe-sha-2", "safe-branch-2", None, "safe", "safe", "safe", "safe-sentinel"),
+            ("safe-user-text", r"\\?\D:\agents\projects\统一环境", 1, "safe-sha", "safe-branch", "https://github.com/Baker4real/unified-env.git", f"title mentions {RETIRED_ID}", f"prompt mentions {RETIRED_ROOT}", f"preview mentions {RETIRED_ID}", "safe-user-text-sentinel"),
+            ("safe", r"\\?\D:\agents\projects\统一环境", 1, "safe-sha-2", "safe-branch-2", None, "safe", "safe", "safe", "safe-sentinel"),
         ]
         if active_retired:
             rows.append(("retired-active", RETIRED_EXTENDED_ROOT, 0, "active-sha", "main", RETIRED_ORIGIN, "active title", "active message", "active preview", "active-sentinel"))
@@ -170,7 +170,7 @@ def test_valid_apply() -> None:
             assert_true(all(row[1] == neutral for row in retired_rows), "退休 cwd 未转为中性 cwd")
             assert_true(all(row[2] is None and row[3] is None and row[4] is None for row in retired_rows), "退休 git 元数据未完全清除")
             user_text = connection.execute("SELECT cwd,git_sha,git_branch,git_origin_url,title,first_user_message,preview,sentinel FROM threads WHERE id='safe-user-text'").fetchone()
-            assert_true(user_text[0] == r"\\?\D:\Codex\projects\统一环境", "安全 thread cwd 被误改")
+            assert_true(user_text[0] == r"\\?\D:\agents\projects\统一环境", "安全 thread cwd 被误改")
             assert_true(user_text[1:4] == ("safe-sha", "safe-branch", "https://github.com/Baker4real/unified-env.git"), "安全 git 元数据被误改")
             assert_true(RETIRED_ID in user_text[4] and RETIRED_ROOT in user_text[5] and RETIRED_ID in user_text[6], "用户 title/prompt/preview 被误删")
             assert_true(user_text[7] == "safe-user-text-sentinel", "无关列被误改")

@@ -12,7 +12,7 @@ import sys
 import uuid
 
 
-PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
+PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
 REPORTS_ROOT = PROJECT_ROOT / "reports"
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "Invoke-RetiredProjectProcessRegistryPurger.py"
 RETIRED_ID = "codex-gsd-codex-c-skill"
@@ -103,7 +103,7 @@ def test_happy_path() -> None:
         records = [
             record(identifier="retired-both", cwd=retired_cwd(), command=f"codex --cwd {retired_cwd()}", os_pid=None, process_id=None),
             record(identifier="retired-cwd", cwd=retired_cwd(), command="codex resume", os_pid=0, process_id=None),
-            record(identifier="safe", cwd=r"\\?\D:\Codex\projects\统一环境", command="codex", os_pid=None, process_id=None),
+            record(identifier="safe", cwd=r"\\?\D:\agents\projects\统一环境", command="codex", os_pid=None, process_id=None),
         ]
         write_registry(home, records)
         before = read_registry(home)
@@ -133,7 +133,7 @@ def test_large_replacement_uses_stdin_transport() -> None:
     try:
         retained = record(
             identifier="large-safe",
-            cwd=r"\\?\D:\Codex\projects\统一环境",
+            cwd=r"\\?\D:\agents\projects\统一环境",
             command="codex " + ("x" * 40_000),
             os_pid=None,
             process_id=None,
@@ -175,7 +175,7 @@ def test_fail_closed() -> None:
         ),
         (
             "command-only",
-            [record(identifier="command", cwd=r"\\?\D:\Codex\projects\统一环境", command=f"codex --project {RETIRED_ID}", os_pid=None, process_id=None)],
+            [record(identifier="command", cwd=r"\\?\D:\agents\projects\统一环境", command=f"codex --project {RETIRED_ID}", os_pid=None, process_id=None)],
         ),
     ]:
         home = fixture_home()

@@ -1,5 +1,5 @@
 param(
-    [string]$ProjectRoot = 'D:\Codex\projects\统一环境',
+    [string]$ProjectRoot = 'D:\agents\projects\统一环境',
     [switch]$KeepOutputs
 )
 
@@ -10,7 +10,7 @@ $scriptPath = Join-Path $ProjectRoot 'scripts\Invoke-RetiredProjectSnapshotSanit
 $pwshPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
 $retiredProject = 'codex-gsd-codex-c-skill'
 $retiredRoot = "D:\Codex\projects\$retiredProject"
-$safeRoot = 'D:\Codex\projects\统一环境'
+$safeRoot = 'D:\agents\projects\统一环境'
 
 function Assert-True {
     param(
@@ -627,7 +627,7 @@ try {
     ) -join [Environment]::NewLine
     Write-Utf8Text -Path $unicodeYamlPath -Content $unicodeYaml
     $unicodeJsonPath = Join-Path $unicodeHome '.codex-global-state.json'
-    $unicodeJson = '{"electron-saved-workspace-roots":["D:\\Codex\\projects\\\u0063odex-gsd-codex-c-skill","D:\\Codex\\projects\\统一环境"]}'
+    $unicodeJson = '{"electron-saved-workspace-roots":["D:\\Codex\\projects\\\u0063odex-gsd-codex-c-skill","D:\\agents\\projects\\统一环境"]}'
     Write-Utf8Text -Path $unicodeJsonPath -Content $unicodeJson
     foreach ($path in @($unicodeTomlPath, $unicodeYamlPath, $unicodeJsonPath)) {
         Assert-True -Condition (-not [IO.File]::ReadAllText($path).Contains($retiredProject, [StringComparison]::OrdinalIgnoreCase)) -Message "Unicode fixture 不得包含原始 retired marker：$path"

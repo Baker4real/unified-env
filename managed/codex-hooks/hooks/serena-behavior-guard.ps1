@@ -418,9 +418,9 @@ function Invoke-CodexSerenaBehaviorGuardCore {
     $productionHome = 'D:\Codex\.serena'
     $productionRuntime = 'D:\Codex\.codex\hooks\lib\CodexHookRuntime.ps1'
     $productionHealth = 'D:\Codex\.codex\run-evidence\codex-hook-health'
-    $fixtureHome = 'D:\Codex\projects\统一环境\reports\codex-hook-serena-behavior-fixture\.serena'
-    $fixtureRuntime = 'D:\Codex\projects\统一环境\managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
-    $fixtureHealth = 'D:\Codex\projects\统一环境\reports\codex-hook-health-test'
+    $fixtureHome = 'D:\agents\projects\统一环境\reports\codex-hook-serena-behavior-fixture\.serena'
+    $fixtureRuntime = 'D:\agents\projects\统一环境\managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
+    $fixtureHealth = 'D:\agents\projects\统一环境\reports\codex-hook-health-test'
     if ($VendorPath -ine $productionVendor) { throw 'Serena behavior vendor capability 非法。' }
     if ($AllowFixture) {
         $legacyFixture = $SerenaHome -ieq $fixtureHome -and $RuntimePath -ieq $fixtureRuntime -and $HealthRoot -ieq $fixtureHealth
@@ -432,7 +432,7 @@ function Invoke-CodexSerenaBehaviorGuardCore {
         if ($null -ne $codexHome -and $hookRoot.FullName -ieq (Join-Path $codexHome.FullName 'hooks')) {
             $marker = Join-Path $codexHome.FullName '.codex-host-hook-reconciliation-fixture'
             $reconcilerFixture = (
-                $codexHome.FullName -cmatch '^D:\\Codex\\projects\\统一环境\\\.scratch\\host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\z' -and
+                $codexHome.FullName -cmatch '^D:\\agents\\projects\\统一环境\\\.scratch\\host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\z' -and
                 (Test-Path -LiteralPath $marker -PathType Leaf) -and
                 (Get-Content -LiteralPath $marker -Raw).Trim() -ceq 'codex-host-hook-reconciliation-fixture-v1' -and
                 $RuntimePath -ieq (Join-Path $codexHome.FullName 'hooks\lib\CodexHookRuntime.ps1') -and
@@ -627,7 +627,7 @@ function Get-CodexSerenaBehaviorExecutionConfig {
             allowFixture = $false
         }
     }
-    if ($fullRoot -cnotmatch '^D:\\Codex\\projects\\统一环境\\\.scratch\\host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\\hooks\z') {
+    if ($fullRoot -cnotmatch '^D:\\agents\\projects\\统一环境\\\.scratch\\host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\\hooks\z') {
         throw 'Serena behavior guard 只允许 live root 或项目专用 fixture root'
     }
     $codexHome = [IO.Directory]::GetParent($fullRoot).FullName

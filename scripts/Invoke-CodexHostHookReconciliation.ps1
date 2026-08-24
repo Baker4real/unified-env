@@ -1595,11 +1595,17 @@ function ConvertTo-CanonicalManagedProjectTrustPath {
     } catch {
         throw "$Role 路径无法规范化：$ProjectPath"
     }
-    if (-not $canonicalPath.StartsWith('D:\Codex\projects\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw "$Role 路径不在项目根下：$ProjectPath"
+    $managedProjectRoots = @('D:\Codex\projects', 'D:\agents\projects')
+    $canonicalInManagedRoot = $false
+    foreach ($managedProjectRoot in $managedProjectRoots) {
+        if (-not $canonicalPath.Equals($managedProjectRoot, [StringComparison]::OrdinalIgnoreCase) -and
+            $canonicalPath.StartsWith("$managedProjectRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+            $canonicalInManagedRoot = $true
+            break
+        }
     }
-    if ($canonicalPath.Equals('D:\Codex\projects', [StringComparison]::OrdinalIgnoreCase)) {
-        throw "$Role 不得使用 projects 集合根。"
+    if (-not $canonicalInManagedRoot) {
+        throw "$Role 路径不在项目根下（D:\Codex\projects 或 D:\agents\projects 的非集合根）：$ProjectPath"
     }
     return $canonicalPath
 }

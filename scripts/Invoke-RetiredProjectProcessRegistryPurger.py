@@ -14,7 +14,7 @@ import sys
 from typing import Any
 
 
-PROJECT_ROOT = Path(r"D:\Codex\projects\统一环境")
+PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
 LIVE_CODEX_HOME = Path(r"D:\Codex\.codex")
 MANIFEST_PATH = PROJECT_ROOT / "managed" / "codex-hooks" / "host-preflight-manifest.json"
 HANDLE_BOUND_POLICY_PATH = PROJECT_ROOT / "scripts" / "lib" / "CodexHookPolicy.ps1"

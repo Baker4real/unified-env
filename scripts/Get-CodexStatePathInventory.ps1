@@ -31,7 +31,7 @@ trap {
     throw $_
 }
 
-$ProjectRoot = 'D:\Codex\projects\统一环境'
+$ProjectRoot = 'D:\agents\projects\统一环境'
 $FixtureParent = Join-Path $ProjectRoot 'reports\codex-state-path-repair-test'
 $ProductionCodexHome = 'D:\Codex\.codex'
 $ProductionEvidenceRoot = 'D:\Codex\.codex\run-evidence\env-governance\codex-state-preflight'

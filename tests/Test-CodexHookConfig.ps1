@@ -44,7 +44,7 @@ $quotedYamlOut=Update-SerenaYamlPolicyText -Text $quotedYaml -Values $values
 Assert-True ($quotedYamlOut -match '(?m)^web_dashboard: true # old$') 'quoted scalar 必须收敛为 desired 并保留 inline comment'
 Assert-True ($quotedYamlOut -match '(?m)^  web_dashboard: false # nested$') '嵌套同名键与 inline comment 必须保留'
 
-$fixture='D:\Codex\projects\统一环境\reports\codex-hook-config-test';if(Test-Path $fixture){Remove-Item $fixture -Recurse -Force};[IO.Directory]::CreateDirectory($fixture)|Out-Null
+$fixture='D:\agents\projects\统一环境\reports\codex-hook-config-test';if(Test-Path $fixture){Remove-Item $fixture -Recurse -Force};[IO.Directory]::CreateDirectory($fixture)|Out-Null
 $toml=Join-Path $fixture 'fixture.toml';[IO.File]::WriteAllText($toml,$output,[Text.UTF8Encoding]::new($false));$python='D:\Codex\tools\python314-official\python.exe'
 $tomlResult=Invoke-HiddenProcess $python @('-c','import pathlib,sys,tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))',$toml);if($tomlResult.exitCode -ne 0){throw 'Python tomllib 验证失败'}
 $yamlPath=Join-Path $fixture 'fixture.yml';[IO.File]::WriteAllText($yamlPath,$yamlOut,[Text.UTF8Encoding]::new($false));$serenaPython='D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'

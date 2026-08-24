@@ -3,7 +3,7 @@ param(
     [string]$ManifestPath,
     [switch]$LegacyFixtureManifest,
     [string]$CodexHome = 'D:\Codex\.codex',
-    [string]$OutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-inventory',
+    [string]$OutputDir = 'D:\agents\projects\统一环境\reports\codex-hook-inventory',
     [switch]$RequireNoRetiredRegistrations
 )
 
@@ -120,7 +120,7 @@ if ($codexHomePath -ine $manifestCodexHome) {
     throw "CodexHome 与 manifest.codexHome 不一致：$codexHomePath"
 }
 
-$projectReportsRoot = 'D:\Codex\projects\统一环境\reports'
+$projectReportsRoot = 'D:\agents\projects\统一环境\reports'
 $allowedOutputRoots = @(
     Join-Path $projectReportsRoot 'codex-hook-inventory'
     Join-Path $projectReportsRoot 'codex-hook-inventory-test'

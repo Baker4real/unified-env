@@ -10,9 +10,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $fixtureVendor = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
-$fixtureVendorScript = 'D:\Codex\projects\统一环境\reports\codex-hook-serena-fixture\serena-hooks-fixture.ps1'
-$fixtureRuntime = 'D:\Codex\projects\统一环境\managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
-$fixtureHealth = 'D:\Codex\projects\统一环境\reports\codex-hook-health-test'
+$fixtureVendorScript = 'D:\agents\projects\统一环境\reports\codex-hook-serena-fixture\serena-hooks-fixture.ps1'
+$fixtureRuntime = 'D:\agents\projects\统一环境\managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
+$fixtureHealth = 'D:\agents\projects\统一环境\reports\codex-hook-health-test'
 if (-not $AllowFixture -or $VendorPath -ine $fixtureVendor -or $FixtureVendorScriptPath -ine $fixtureVendorScript -or $RuntimePath -ine $fixtureRuntime -or $HealthRoot -ine $fixtureHealth) { throw 'Serena activate fixture capability 路径非法。' }
 . $RuntimePath
 

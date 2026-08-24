@@ -4,20 +4,20 @@ function Get-CodexHookProductionFullProfile {
     [pscustomobject][ordered]@{
         profileId = 'codex-hook-production-full-v1'
         isFixtureAdapter = $false
-        manifestPath = 'D:\Codex\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
-        sourceRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks'
+        manifestPath = 'D:\agents\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
+        sourceRoot = 'D:\agents\projects\统一环境\managed\codex-hooks'
         codexHome = 'D:\Codex\.codex'
         hooksRoot = 'D:\Codex\.codex\hooks'
         registryPath = 'D:\Codex\.codex\hooks.json'
-        planOutputDir = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan'
-        planPath = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-plan\plan.json'
+        planOutputDir = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan'
+        planPath = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan\plan.json'
         evidenceRoot = 'D:\Codex\.codex\run-evidence\env-governance'
         mutexName = 'Local\CodexHookProductionFullV1'
     }
 }
 
 function Get-CodexHookProductionFullFixtureProfile {
-    $root = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test\production-full'
+    $root = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test\production-full'
     [pscustomobject][ordered]@{
         profileId = 'codex-hook-production-full-v1'
         isFixtureAdapter = $true
@@ -53,7 +53,7 @@ function Assert-CodexHookProductionFullProfile {
             if ($Profile.$name -cne $expected.$name) { throw "production full fixed profile 漂移：$name" }
         }
     } else {
-        $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test\production-full'
+        $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test\production-full'
         foreach ($name in @('manifestPath','sourceRoot','codexHome','hooksRoot','registryPath','planOutputDir','planPath','evidenceRoot')) {
             if (-not (Test-CodexHookPathWithin -Path ([string]$Profile.$name) -ParentPath $fixtureRoot)) { throw "production full fixture path 越界：$name" }
         }

@@ -84,7 +84,7 @@ function New-ValidManifest {
         artifactType = 'env-governance.codex-hook-manifest'
         schemaVersion = 1
         codexHome = 'D:\Codex\.codex'
-        managedRoot = 'D:\Codex\projects\统一环境\managed\codex-hooks'
+        managedRoot = 'D:\agents\projects\统一环境\managed\codex-hooks'
         runtimes = [pscustomobject][ordered]@{
             pwsh = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
             python = 'D:\Codex\tools\python314-official\python.exe'
@@ -354,12 +354,12 @@ Assert-True (
 [void](Read-CodexHookHostPreflightManifest)
 [void](Read-CodexHookLegacyFixtureManifest)
 $expectedTrustedProjects = @(
-    'D:\Codex\projects\时钟倒计时',
-    'D:\Codex\projects\统一环境',
-    'D:\Codex\projects\杨杨子',
+    'D:\agents\projects\时钟倒计时',
+    'D:\agents\projects\统一环境',
+    'D:\agents\projects\杨杨子',
     'D:\Codex\projects\codex-account-switch',
     'D:\Codex\projects\CodexProviderSync',
-    'D:\Codex\projects\minmin-calendar'
+    'D:\agents\projects\minmin-calendar'
 )
 Assert-True ((@($hostPreflightManifest.trustedProjects) -join "`0") -ceq ($expectedTrustedProjects -join "`0")) 'host-preflight manifest 必须只声明当前六个精确项目根的 trust 投影'
 Assert-True (-not (@($hostPreflightManifest.trustedProjects) -ccontains 'D:\Codex\projects')) 'host-preflight manifest 不得信任 projects 集合根'
@@ -527,7 +527,7 @@ Assert-True (
 ) 'Serena auto-approve 必须以精确原因声明为 retired'
 Assert-True (
     $autoApprove[0].fullAcceptanceCommand.commandPath -ceq 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -and
-    @($autoApprove[0].fullAcceptanceCommand.arguments) -ccontains 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1' -and
+    @($autoApprove[0].fullAcceptanceCommand.arguments) -ccontains 'D:\agents\projects\统一环境\scripts\Get-CodexHookInventory.ps1' -and
     $autoApprove[0].fullAcceptanceCommand.arguments[-1] -ceq '-RequireNoRetiredRegistrations' -and
     -not (($autoApprove[0].fullAcceptanceCommand.arguments -join ' ').Contains('Get-Content'))
 ) 'auto-approve full acceptance 必须走带 retirement 断言的结构化 inventory 入口而非 grep registry 原文'

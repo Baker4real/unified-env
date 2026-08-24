@@ -808,13 +808,13 @@ function Resolve-PolicyPath {
         Throw-CatalogGuardFailure 'policy-override-denied' '生产模式禁止覆盖 policy 路径。'
     }
     $fullPolicyPath = [IO.Path]::GetFullPath($PolicyPath)
-    $expectedSource = 'D:\Codex\projects\统一环境\managed\remote-plugin-catalog-guard\policy.json'
+    $expectedSource = 'D:\agents\projects\统一环境\managed\remote-plugin-catalog-guard\policy.json'
     if ($fullPolicyPath.Equals($expectedSource, [StringComparison]::OrdinalIgnoreCase)) { return $expectedSource }
     if ([string]::IsNullOrWhiteSpace($FixtureRoot)) {
         Throw-CatalogGuardFailure 'policy-override-denied' 'fixture policy 路径不在 allowlist。'
     }
     $fullFixtureRoot = [IO.Path]::GetFullPath($FixtureRoot)
-    $reportsRoot = 'D:\Codex\projects\统一环境\reports'
+    $reportsRoot = 'D:\agents\projects\统一环境\reports'
     $relative = [IO.Path]::GetRelativePath($reportsRoot, $fullFixtureRoot)
     $marker = Join-Path $fullFixtureRoot $fixtureMarkerName
     if (
@@ -874,12 +874,12 @@ function Resolve-HandleIoSource {
     $deployed = Join-Path $PSScriptRoot 'CodexHookHandleBoundIO.cs'
     if ([IO.File]::Exists($deployed)) { return (Assert-NoReparsePath -Path $deployed -RequireLeaf) }
     if ([Environment]::GetEnvironmentVariable($testModeEnvironment) -ceq '1') {
-        $source = 'D:\Codex\projects\统一环境\scripts\lib\CodexHookHandleBoundIO.cs'
+        $source = 'D:\agents\projects\统一环境\scripts\lib\CodexHookHandleBoundIO.cs'
         return (Assert-NoReparsePath -Path $source -RequireLeaf)
     }
-    $canonicalSourceRoot = 'D:\Codex\projects\统一环境\managed\remote-plugin-catalog-guard'
+    $canonicalSourceRoot = 'D:\agents\projects\统一环境\managed\remote-plugin-catalog-guard'
     if ([IO.Path]::GetFullPath($PSScriptRoot).Equals($canonicalSourceRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        $source = 'D:\Codex\projects\统一环境\scripts\lib\CodexHookHandleBoundIO.cs'
+        $source = 'D:\agents\projects\统一环境\scripts\lib\CodexHookHandleBoundIO.cs'
         return (Assert-NoReparsePath -Path $source -RequireLeaf)
     }
     Throw-CatalogGuardFailure 'runtime-dependency-missing' 'handle-bound runtime 依赖不存在。'
@@ -903,7 +903,7 @@ function Resolve-RuntimeScope {
         Throw-CatalogGuardFailure 'fixture-mode-denied' 'FixtureRoot 仅允许受控测试进程。'
     }
     $fullRoot = [IO.Path]::GetFullPath($FixtureRoot)
-    $reportsRoot = 'D:\Codex\projects\统一环境\reports'
+    $reportsRoot = 'D:\agents\projects\统一环境\reports'
     $relative = [IO.Path]::GetRelativePath($reportsRoot, $fullRoot)
     if ($relative -notmatch '^catalog-guard-tests-[0-9a-f]{32}\\\.codex$') {
         Throw-CatalogGuardFailure 'fixture-root-denied' 'FixtureRoot 不符合固定 reports fixture 形状。'

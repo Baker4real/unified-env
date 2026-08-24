@@ -1,4 +1,4 @@
-param([string]$ProjectRoot='D:\Codex\projects\统一环境',[switch]$KeepOutputs)
+param([string]$ProjectRoot='D:\agents\projects\统一环境',[switch]$KeepOutputs)
 $ErrorActionPreference='Stop'
 function Assert-True{param([bool]$Condition,[string]$Message)if(-not$Condition){throw $Message}}
 function Assert-RejectedWithoutOutput{param([scriptblock]$Action,[string]$OutputDir,[string]$Label)

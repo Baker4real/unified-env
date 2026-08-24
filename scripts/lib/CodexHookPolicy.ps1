@@ -280,7 +280,7 @@ function Assert-CodexHookManifest {
     }
 
     $codexHome = Assert-CodexHookExactPath -Value $Manifest.codexHome -Expected 'D:\Codex\.codex' -Name 'codexHome'
-    [void](Assert-CodexHookExactPath -Value $Manifest.managedRoot -Expected 'D:\Codex\projects\统一环境\managed\codex-hooks' -Name 'managedRoot')
+    [void](Assert-CodexHookExactPath -Value $Manifest.managedRoot -Expected 'D:\agents\projects\统一环境\managed\codex-hooks' -Name 'managedRoot')
 
     $runtimeNames = @('pwsh', 'python', 'pythonw', 'serenaPython', 'serenaHooks')
     $expectedRuntimes = [ordered]@{
@@ -448,18 +448,18 @@ function Assert-CodexHookManifest {
         Assert-CodexHookDeclaredCommand -Command $hook.fullAcceptanceCommand -Name "hooks[$($hook.id)].fullAcceptanceCommand"
         $allowedAcceptanceCommands = @($commandPath) + @($expectedRuntimes.Values | ForEach-Object { [IO.Path]::GetFullPath([string]$_) })
         $legacyInventoryAcceptanceArguments = @(
-            '-NoProfile', '-File', 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1',
+            '-NoProfile', '-File', 'D:\agents\projects\统一环境\scripts\Get-CodexHookInventory.ps1',
             '-LegacyFixtureManifest',
-            '-ManifestPath', 'D:\Codex\projects\统一环境\managed\codex-hooks\legacy-fixture-manifest.json',
+            '-ManifestPath', 'D:\agents\projects\统一环境\managed\codex-hooks\legacy-fixture-manifest.json',
             '-CodexHome', 'D:\Codex\.codex',
-            '-OutputDir', 'D:\Codex\projects\统一环境\reports\codex-hook-inventory',
+            '-OutputDir', 'D:\agents\projects\统一环境\reports\codex-hook-inventory',
             '-RequireNoRetiredRegistrations'
         )
         $compatibilityInventoryAcceptanceArguments = @(
-            '-NoProfile', '-File', 'D:\Codex\projects\统一环境\scripts\Get-CodexHookInventory.ps1',
-            '-ManifestPath', 'D:\Codex\projects\统一环境\managed\codex-hooks\manifest.json',
+            '-NoProfile', '-File', 'D:\agents\projects\统一环境\scripts\Get-CodexHookInventory.ps1',
+            '-ManifestPath', 'D:\agents\projects\统一环境\managed\codex-hooks\manifest.json',
             '-CodexHome', 'D:\Codex\.codex',
-            '-OutputDir', 'D:\Codex\projects\统一环境\reports\codex-hook-inventory',
+            '-OutputDir', 'D:\agents\projects\统一环境\reports\codex-hook-inventory',
             '-RequireNoRetiredRegistrations'
         )
         foreach ($declaredCommand in @($hook.quickHealthCheck, $hook.fullAcceptanceCommand)) {
@@ -674,8 +674,8 @@ function Read-CodexHookManifest {
         -Path $fullPath `
         -Name 'manifest' `
         -AllowedRoots @(
-            'D:\Codex\projects\统一环境\managed\codex-hooks',
-            'D:\Codex\projects\统一环境\reports'
+            'D:\agents\projects\统一环境\managed\codex-hooks',
+            'D:\agents\projects\统一环境\reports'
         )
     Assert-CodexHookStrictJsonText -JsonText $jsonText
     $manifest = $jsonText | ConvertFrom-Json -Depth 128 -ErrorAction Stop
@@ -684,11 +684,11 @@ function Read-CodexHookManifest {
 }
 
 function Get-CodexHookHostPreflightManifestPath {
-    return 'D:\Codex\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
+    return 'D:\agents\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
 }
 
 function Get-CodexHookLegacyFixtureManifestPath {
-    return 'D:\Codex\projects\统一环境\managed\codex-hooks\legacy-fixture-manifest.json'
+    return 'D:\agents\projects\统一环境\managed\codex-hooks\legacy-fixture-manifest.json'
 }
 
 function Assert-CodexHookHostPreflightManifest {
@@ -712,15 +712,20 @@ function Assert-CodexHookHostPreflightManifest {
         throw 'host-preflight manifest 必须同时声明 trustedProjects 与 retiredProjectTrusts。'
     }
 
-    $projectRoot = 'D:\Codex\projects'
+    $projectRoots = @('D:\Codex\projects', 'D:\agents\projects')
     $trustedProjectPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($projectPath in @($Manifest.trustedProjects)) {
         $canonicalPath = (Assert-CodexHookDPath -Value $projectPath -Name 'host-preflight trusted project').TrimEnd('\', '/')
-        if (
-            $canonicalPath.Equals($projectRoot, [StringComparison]::OrdinalIgnoreCase) -or
-            -not $canonicalPath.StartsWith("$projectRoot\", [StringComparison]::OrdinalIgnoreCase)
-        ) {
-            throw 'host-preflight manifest trusted project 必须是 D:\Codex\projects 下的非集合根路径。'
+        $trustedInProjectRoot = $false
+        foreach ($projectRoot in $projectRoots) {
+            if (-not $canonicalPath.Equals($projectRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                $canonicalPath.StartsWith("$projectRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+                $trustedInProjectRoot = $true
+                break
+            }
+        }
+        if (-not $trustedInProjectRoot) {
+            throw 'host-preflight manifest trusted project 必须是 D:\Codex\projects 或 D:\agents\projects 下的非集合根路径。'
         }
         if (-not $trustedProjectPaths.Add($canonicalPath)) {
             throw "host-preflight manifest trusted project 重复：$canonicalPath"
@@ -730,11 +735,16 @@ function Assert-CodexHookHostPreflightManifest {
     $retiredProjectPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($projectPath in @($Manifest.retiredProjectTrusts)) {
         $canonicalPath = (Assert-CodexHookDPath -Value $projectPath -Name 'host-preflight retired project trust').TrimEnd('\', '/')
-        if (
-            $canonicalPath.Equals($projectRoot, [StringComparison]::OrdinalIgnoreCase) -or
-            -not $canonicalPath.StartsWith("$projectRoot\", [StringComparison]::OrdinalIgnoreCase)
-        ) {
-            throw 'host-preflight manifest retired project trust 必须是 D:\Codex\projects 下的非集合根路径。'
+        $retiredInProjectRoot = $false
+        foreach ($projectRoot in $projectRoots) {
+            if (-not $canonicalPath.Equals($projectRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                $canonicalPath.StartsWith("$projectRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+                $retiredInProjectRoot = $true
+                break
+            }
+        }
+        if (-not $retiredInProjectRoot) {
+            throw 'host-preflight manifest retired project trust 必须是 D:\Codex\projects 或 D:\agents\projects 下的非集合根路径。'
         }
         if (-not $retiredProjectPaths.Add($canonicalPath)) {
             throw "host-preflight manifest retired project trust 重复：$canonicalPath"
@@ -745,12 +755,12 @@ function Assert-CodexHookHostPreflightManifest {
     }
 
     $expectedTrustedProjects = @(
-        'D:\Codex\projects\时钟倒计时',
-        'D:\Codex\projects\统一环境',
-        'D:\Codex\projects\杨杨子',
+        'D:\agents\projects\时钟倒计时',
+        'D:\agents\projects\统一环境',
+        'D:\agents\projects\杨杨子',
         'D:\Codex\projects\codex-account-switch',
         'D:\Codex\projects\CodexProviderSync',
-        'D:\Codex\projects\minmin-calendar'
+        'D:\agents\projects\minmin-calendar'
     )
     $actualTrustedProjects = @($Manifest.trustedProjects)
     if (-not (Test-CodexHookExactStringSequence -Actual $actualTrustedProjects -Expected $expectedTrustedProjects)) {
@@ -807,15 +817,15 @@ function Assert-CodexHookHostPreflightManifest {
     }
 
     $expectedFiles = @{
-        'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', '1c1985c66c0c3ef49e24ba919333d6f1aeb7c06f75c5861404c3b916496298f8', 'codex-state-preflight')
-        'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', 'cf6b251500b2417aa928709d8632a1b26a9ee14ca327f35037db7a841089fbe3', 'codex-state-preflight')
+        'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', 'e819633dfa0147c3e41a15584c2f3b0da1ec899d71a8d5e7f8c7d0ef3bfa8a9b', 'codex-state-preflight')
+        'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', '72612c77be19dc632bd57c0446e9f2deeca1cf0068d97424c26acfe2cfdb1aaf', 'codex-state-preflight')
         'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '14e46a0309e74b8415dd6d6ea626611b5015272dab3849ff6fb864138cf4f9f9', 'codex-state-preflight')
         'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', '30750335c561fc7a3f7d5ed40eabe528a554caa49c66efa73b296dcddf84e95f', 'serena-reminder')
         'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '25706cc4ae08e954c2b9f35a49225c94479b0267b8313c9951acb23ef277a572', 'serena-cleanup')
-        'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '85d78b8533a47f8a9f3419e1bc4db33e3351522d7e8c1fe1aa861c0399f4ea3a', 'serena-reminder', 'serena-cleanup', 'serena-activate')
+        'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '6c977d95f5fcf373c2b86e2a407d8aa5df98502e5ee6dae4d241d2a1c8647c28', 'serena-reminder', 'serena-cleanup', 'serena-activate')
         'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', '6a9d1abca43d05426ffa9d18ae0e65e51357d9e9aad70f3d77364d4ecdad4eb2', 'serena-activate')
         'lib/hidden-console-launcher.py' = @('hooks/lib/hidden-console-launcher.py', 'c0a95d83b106dbba904af187b1a9f88102894317f163afb6c284114cf358973e', 'codex-state-preflight', 'serena-activate', 'serena-cleanup', 'serena-reminder')
-        'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', 'a6ecb01a6c57dafa23f62ed9efb59febd06c6059bfde83fd4c59ddbad2abacb4', 'serena-activate', 'serena-cleanup', 'serena-reminder')
+        'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', '84b525b5bad28523193bab574d4395b187cfc825a95701eaa15e43e74b1a5ec9', 'serena-activate', 'serena-cleanup', 'serena-reminder')
     }
     if (@($Manifest.files).Count -ne $expectedFiles.Count) {
         throw "host-preflight manifest file 闭包不精确：$(@($Manifest.files).Count)"
@@ -1733,7 +1743,7 @@ function Get-CodexHookRegistryFacts {
         -Path $fullPath `
         -Name 'hook registry' `
         -AllowedExactPaths @((Join-Path ([string]$Manifest.codexHome) 'hooks.json')) `
-        -AllowedRoots @('D:\Codex\projects\统一环境\reports')
+        -AllowedRoots @('D:\agents\projects\统一环境\reports')
     $jsonText = $registrySnapshot.text
     Assert-CodexHookStrictJsonText -JsonText $jsonText
     $registry = $jsonText | ConvertFrom-Json -Depth 128 -ErrorAction Stop
@@ -2159,7 +2169,7 @@ function Assert-CodexHookFixturePath {
     )
 
     $fullPath = Assert-CodexHookDPath -Value $Path -Name $Name
-    $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+    $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
     if (-not (Test-CodexHookPathWithin -Path $fullPath -ParentPath $fixtureRoot)) {
         throw "$Name 必须位于固定 deployment fixture 根：$fullPath"
     }
@@ -2178,7 +2188,7 @@ function Enter-CodexHookFixtureDirectoryChainGuard {
     )
 
     $fullPath = Assert-CodexHookFixturePath -Path $DirectoryPath -Name 'fixture directory chain guard'
-    $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+    $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
     return [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
         $fixtureRoot,
         $fullPath,
@@ -2194,7 +2204,7 @@ function New-CodexHookFixtureDirectory {
     )
 
     $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Name
-    $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+    $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
     $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
         $fixtureRoot,
         $fullPath,
@@ -2251,7 +2261,7 @@ function Get-CodexHookFixtureLifecyclePaths {
 
     $identity = Assert-CodexHookMappingIdentity -Value $MappingIdentity
     $generation = Assert-CodexHookGenerationId -Value $GenerationId
-    $fixtureRoot = 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test'
+    $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
     $lifecycleRoot = Join-Path $fixtureRoot '.deployment-state'
     $mappingRoot = Join-Path (Join-Path $lifecycleRoot 'mappings') $identity
     $claimsRoot = Join-Path $mappingRoot 'claims'
@@ -2727,7 +2737,7 @@ function Set-CodexHookAtomicFileBytes {
         -ExpectedExists $ExpectedExists `
         -ExpectedSha256 $ExpectedSha256 `
         -AfterSha256 $AfterSha256 `
-        -CapabilityRoot 'D:\Codex\projects\统一环境\reports\codex-hook-deployment-test' `
+        -CapabilityRoot 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test' `
         -AllowedExactPaths @($fullPath) `
         -Scope $Scope `
         -BeforeMove $BeforeMove `

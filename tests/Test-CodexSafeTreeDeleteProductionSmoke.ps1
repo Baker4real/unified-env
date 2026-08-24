@@ -46,7 +46,12 @@ $harnessEvidenceRoot = if (-not [string]::IsNullOrWhiteSpace($env:SAFE_TREE_DELE
 }
 $issue55Dir = Join-Path $harnessEvidenceRoot 'issue55'
 $issue21Dir = Join-Path $harnessEvidenceRoot 'issue21'
-$expectedLivePs1Sha256 = '636cb140720bf15681364459269c2d5dc4638e339f2589ad2a3a53b6e17b9373'
+# Pin 更新于 2026-08-23 projects 根迁移（D:\Codex\projects → D:\agents\projects）：
+# 现役 live .ps1 与仓库 scripts\invoke-codex-safe-tree-delete-host.ps1 字节一致（由
+# 上方 identity 断言 live/source SHA 相等先行证明），唯一内容差异是转发目标行
+# 指向 D:\agents\projects\统一环境\scripts\Invoke-CodexSafeTreeDelete.ps1，属迁移
+# 后的合法当前生产入口，不是漂移/篡改。
+$expectedLivePs1Sha256 = 'ec14e863460b70a6ed14c56aa0b9dc6546a3efe141599a51005d3aee373aee7a'
 $fixtureRoot = Join-Path $reportsRoot ("safe-tree-delete-production-smoke-{0}" -f ([guid]::NewGuid().ToString('N')))
 $payloadPath = Join-Path $fixtureRoot 'readonly-payload.txt'
 $batchParent = Join-Path $reportsRoot ("safe-tree-delete-batch-smoke-{0}" -f ([guid]::NewGuid().ToString('N')))
@@ -197,7 +202,15 @@ function Get-UsnCaptureDiff {
 }
 
 function Get-ProcessTree {
-    param([Parameter(Mandatory)][int]$RootId)
+    param(
+        [Parameter(Mandatory)][int]$RootId,
+        # 被测 wrapper 实际派生进程的最早创建时刻（wrapper 启动前记录的 UTC）。
+        # Win32_Process 的 ParentProcessId 只是快照值：无关进程的已退出父进程
+        # 持有的 PID 被 wrapper 进程复用后，会以陈旧父链被误认成后代。真后代
+        # 必然晚于其父（及 wrapper 启动时刻）创建，据此把归属判据收窄到
+        # 「创建序可证明的 wrapper 子树」；不放宽任何收口断言。
+        [Parameter(Mandatory)][datetimeoffset]$EarliestDescendantUtc
+    )
     $all = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
     $byParent = @{}
     foreach ($item in $all) {
@@ -207,6 +220,7 @@ function Get-ProcessTree {
         }
         $byParent[$parentId].Add($item)
     }
+    $cutoffUtc = $EarliestDescendantUtc.UtcDateTime.AddSeconds(-5)
     $nodes = [Collections.Generic.List[object]]::new()
     $queue = [Collections.Generic.Queue[int]]::new()
     $seen = [Collections.Generic.HashSet[int]]::new()
@@ -215,22 +229,66 @@ function Get-ProcessTree {
         $id = $queue.Dequeue()
         if (-not $seen.Add($id)) { continue }
         $match = @($all | Where-Object { [int]$_.ProcessId -eq $id } | Select-Object -First 1)
+        $parentCreatedUtc = $null
         if ($match.Count -eq 1) {
+            if ($null -ne $match[0].CreationDate) {
+                $parentCreatedUtc = [datetimeoffset]::new([datetime]$match[0].CreationDate).UtcDateTime
+            }
             $nodes.Add([pscustomobject][ordered]@{
                 processId = [int]$match[0].ProcessId
                 parentProcessId = [int]$match[0].ParentProcessId
                 name = [string]$match[0].Name
                 commandLine = [string]$match[0].CommandLine
+                creationDateUtc = $parentCreatedUtc
                 isRoot = ([int]$match[0].ProcessId -eq $RootId)
             })
         }
         if ($byParent.ContainsKey($id)) {
             foreach ($child in $byParent[$id]) {
+                if ($null -eq $child.CreationDate) { continue }
+                $childCreatedUtc = [datetimeoffset]::new([datetime]$child.CreationDate).UtcDateTime
+                if ($childCreatedUtc -lt $cutoffUtc) { continue }
+                if ($null -ne $parentCreatedUtc -and
+                    $childCreatedUtc -lt $parentCreatedUtc.AddSeconds(-2)) { continue }
                 $queue.Enqueue([int]$child.ProcessId)
             }
         }
     }
     return @($nodes)
+}
+
+function Get-RemainingTrackedProcesses {
+    param([Parameter(Mandatory)][object[]]$TrackedNodes)
+    # 「仍在运行」= 采样时归属到 wrapper 子树的同一进程实例仍在运行。tracked
+    # PID 可能在收口检查前退出并被无关进程复用；同名 + 创建时间一致才算同一
+    # 实例。StartTime 不可读（权限）时保守视为同一实例：宁可误报也不漏报。
+    $remaining = [Collections.Generic.List[object]]::new()
+    foreach ($node in @($TrackedNodes)) {
+        $alive = Get-Process -Id ([int]$node.processId) -ErrorAction SilentlyContinue
+        if ($null -eq $alive -or $alive.HasExited) { continue }
+        $sameInstance = $true
+        if ($null -ne $node.name) {
+            $trackedName = ([string]$node.name) -replace '\.exe$', ''
+            if ($trackedName -ne ([string]$alive.Name)) { $sameInstance = $false }
+        }
+        if ($sameInstance -and $null -ne $node.creationDateUtc) {
+            try {
+                $aliveStartUtc = ([datetime]$alive.StartTime).ToUniversalTime()
+                if ([math]::Abs(($aliveStartUtc - [datetime]$node.creationDateUtc).TotalSeconds) -gt 2) {
+                    $sameInstance = $false
+                }
+            } catch {
+                # StartTime 读取失败：保守保持 sameInstance = true。
+            }
+        }
+        if ($sameInstance) {
+            $remaining.Add([pscustomobject][ordered]@{
+                processId = [int]$alive.Id
+                name = [string]$alive.Name
+            })
+        }
+    }
+    return @($remaining)
 }
 
 function Stop-ProcessTree {
@@ -593,11 +651,17 @@ function Invoke-LiveSafeDeleteTracked {
         -NoNewWindow `
         -PassThru
     Assert-True ($null -ne $proc) "未能启动 live wrapper：$Name"
+    $trackedNodes = @([pscustomobject][ordered]@{
+        processId = [int]$proc.Id
+        name = $null
+        creationDateUtc = $null
+    })
     $trackedPids = @([int]$proc.Id)
     $treeLive = @()
     $treeDeadline = [datetime]::UtcNow.AddMilliseconds(400)
     while ([datetime]::UtcNow -lt $treeDeadline -and -not $proc.HasExited) {
-        $treeLive = @(Get-ProcessTree -RootId ([int]$proc.Id))
+        $treeLive = @(Get-ProcessTree -RootId ([int]$proc.Id) -EarliestDescendantUtc $startedAtUtc)
+        if ($treeLive.Count -gt 0) { $trackedNodes = @($treeLive) }
         $trackedPids = @($treeLive | ForEach-Object { [int]$_.processId } | Select-Object -Unique)
         if ($trackedPids.Count -gt 1) { break }
         Start-Sleep -Milliseconds 20
@@ -615,32 +679,12 @@ function Invoke-LiveSafeDeleteTracked {
     }
 
     $endedAtUtc = [datetimeoffset]::UtcNow
-    $stillAlive = [Collections.Generic.List[object]]::new()
-    foreach ($id in @($trackedPids)) {
-        $alive = Get-Process -Id $id -ErrorAction SilentlyContinue
-        if ($null -ne $alive -and -not $alive.HasExited) {
-            $stillAlive.Add([pscustomobject][ordered]@{
-                processId = [int]$alive.Id
-                name = [string]$alive.Name
-            })
-        }
-    }
-    $remaining = @($stillAlive)
+    $remaining = @(Get-RemainingTrackedProcesses -TrackedNodes $trackedNodes)
     if ($timedOut) {
         $deadline = [datetime]::UtcNow.AddSeconds(8)
         while ([datetime]::UtcNow -lt $deadline -and $remaining.Count -gt 0) {
             Start-Sleep -Milliseconds 50
-            $stillAlive = [Collections.Generic.List[object]]::new()
-            foreach ($id in @($trackedPids)) {
-                $alive = Get-Process -Id $id -ErrorAction SilentlyContinue
-                if ($null -ne $alive -and -not $alive.HasExited) {
-                    $stillAlive.Add([pscustomobject][ordered]@{
-                        processId = [int]$alive.Id
-                        name = [string]$alive.Name
-                    })
-                }
-            }
-            $remaining = @($stillAlive)
+            $remaining = @(Get-RemainingTrackedProcesses -TrackedNodes $trackedNodes)
         }
     }
 
@@ -979,7 +1023,7 @@ try {
     $treeAtKill = @()
     $childDeadline = [datetime]::UtcNow.AddSeconds(30)
     while ([datetime]::UtcNow -lt $childDeadline -and -not $timeoutProc.HasExited) {
-        $tree = @(Get-ProcessTree -RootId ([int]$timeoutProc.Id))
+        $tree = @(Get-ProcessTree -RootId ([int]$timeoutProc.Id) -EarliestDescendantUtc $timeoutStartedAtUtc)
         $pwshNodes = @($tree | Where-Object { [string]$_.name -match 'pwsh' -and -not $_.isRoot })
         if ($pwshNodes.Count -gt 0) {
             $sawPwsh = $true
@@ -996,29 +1040,11 @@ try {
     [void]$timeoutProc.WaitForExit(15000)
     $timeoutEndedAtUtc = [datetimeoffset]::UtcNow
     $trackedTimeoutPids = @($treeAtKill | ForEach-Object { [int]$_.processId } | Select-Object -Unique)
-    $timeoutRemaining = [Collections.Generic.List[object]]::new()
-    foreach ($id in @($trackedTimeoutPids)) {
-        $alive = Get-Process -Id $id -ErrorAction SilentlyContinue
-        if ($null -ne $alive -and -not $alive.HasExited) {
-            $timeoutRemaining.Add([pscustomobject][ordered]@{
-                processId = [int]$alive.Id
-                name = [string]$alive.Name
-            })
-        }
-    }
+    $timeoutRemaining = @(Get-RemainingTrackedProcesses -TrackedNodes $treeAtKill)
     $orphanDeadline = [datetime]::UtcNow.AddSeconds(8)
     while ([datetime]::UtcNow -lt $orphanDeadline -and $timeoutRemaining.Count -gt 0) {
         Start-Sleep -Milliseconds 50
-        $timeoutRemaining = [Collections.Generic.List[object]]::new()
-        foreach ($id in @($trackedTimeoutPids)) {
-            $alive = Get-Process -Id $id -ErrorAction SilentlyContinue
-            if ($null -ne $alive -and -not $alive.HasExited) {
-                $timeoutRemaining.Add([pscustomobject][ordered]@{
-                    processId = [int]$alive.Id
-                    name = [string]$alive.Name
-                })
-            }
-        }
+        $timeoutRemaining = @(Get-RemainingTrackedProcesses -TrackedNodes $treeAtKill)
     }
     $timeoutExit = $null
     try {
