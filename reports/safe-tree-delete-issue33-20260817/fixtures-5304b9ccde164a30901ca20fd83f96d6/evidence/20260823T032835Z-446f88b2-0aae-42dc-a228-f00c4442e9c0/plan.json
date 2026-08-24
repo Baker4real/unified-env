@@ -1,0 +1,123 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-plan",
+  "schemaVersion": 1,
+  "generationId": "446f88b2-0aae-42dc-a228-f00c4442e9c0",
+  "createdAtUtc": "2026-08-23T03:28:35.9270078+00:00",
+  "expiresAtUtc": "2026-08-23T03:58:35.9270078+00:00",
+  "policyPath": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6\\policy.json",
+  "policySha256": "d2285d06c13cdd97f100fcbfbe9f2926217e8cfb535159cee3861cf4d27813e8",
+  "policyEntryId": "purge-hash-reuse-fixture",
+  "targetPath": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6\\candidate",
+  "capabilityRoot": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6",
+  "treeManifest": {
+    "schemaVersion": 2,
+    "rootIdentity": [
+      "5d26df61",
+      "002000000001f4b2"
+    ],
+    "entries": [
+      {
+        "relativePath": ".",
+        "kind": "directory",
+        "sha256": null,
+        "identity": [
+          "5d26df61",
+          "002000000001f4b2"
+        ]
+      },
+      {
+        "relativePath": "nested",
+        "kind": "directory",
+        "sha256": null,
+        "identity": [
+          "5d26df61",
+          "02d800000009a9a2"
+        ]
+      },
+      {
+        "relativePath": "nested/child.bin",
+        "kind": "file",
+        "sha256": "1febabb6b6b4991af80e7212d9df4dc03cf606e98611db5a8f5ba7ecc6852ef7",
+        "identity": [
+          "5d26df61",
+          "001e0000001f7963"
+        ]
+      },
+      {
+        "relativePath": "payload.txt",
+        "kind": "file",
+        "sha256": "e186c18ed8742346827d51cedd74e710c0a88ed1cbded06cc8fcbefd69f0f6ee",
+        "identity": [
+          "5d26df61",
+          "001b0000001f7956"
+        ]
+      }
+    ]
+  },
+  "fileIdentitiesV2": [
+    {
+      "relativePath": "nested/child.bin",
+      "volumeSerialNumber": 8555615876427472737,
+      "fileId128": "Y3kfAAAAHgAAAAAAAAAAAA==",
+      "fileSize": 22,
+      "lastWriteTimeUtc": "2026-08-23T03:28:35.8681427+00:00",
+      "capturedAtUtc": "2026-08-23T03:28:35.9276829+00:00"
+    },
+    {
+      "relativePath": "payload.txt",
+      "volumeSerialNumber": 8555615876427472737,
+      "fileId128": "VnkfAAAAGwAAAAAAAAAAAA==",
+      "fileSize": 24,
+      "lastWriteTimeUtc": "2026-08-23T03:28:35.8681427+00:00",
+      "capturedAtUtc": "2026-08-23T03:28:35.9281459+00:00"
+    }
+  ],
+  "leafStreamSetV1": {
+    "schemaVersion": 1,
+    "consumptionBoundary": {
+      "apply": "apply-locked-preflight",
+      "purge": "purge-locked-preflight",
+      "streamDrift": "fail-closed",
+      "leafDrift": "fail-closed",
+      "requiresTreeManifestReverification": "always"
+    },
+    "leaves": [
+      {
+        "relativePath": ".",
+        "kind": "directory",
+        "streamNames": [],
+        "hardLinkCount": 1
+      },
+      {
+        "relativePath": "nested",
+        "kind": "directory",
+        "streamNames": [],
+        "hardLinkCount": 1
+      },
+      {
+        "relativePath": "nested/child.bin",
+        "kind": "file",
+        "streamNames": [
+          "::$DATA"
+        ],
+        "hardLinkCount": 1
+      },
+      {
+        "relativePath": "payload.txt",
+        "kind": "file",
+        "streamNames": [
+          "::$DATA"
+        ],
+        "hardLinkCount": 1
+      }
+    ]
+  },
+  "summary": {
+    "fileCount": 2,
+    "directoryCount": 2,
+    "topLevelEntries": [
+      "nested",
+      "payload.txt"
+    ]
+  }
+}

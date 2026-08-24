@@ -1,18 +1,18 @@
 {
   "pending": {
-    "pendingPath": "D:\\Codex\\projects\\.safe-tree-delete-uncertain-49979bfbbc3848a9a738c0367737326c\\.codex-safe-delete-1563d6aa-e201-4ee9-ae00-ffd6bb485e23.quarantine",
+    "pendingPath": "D:\\Codex\\projects\\.safe-tree-delete-uncertain-ddfe484eac0742caaefa01ce11a7242c\\.codex-safe-delete-15a50ecf-78c2-4771-baa1-7a765b8cfbde.quarantine",
     "pendingFiles": [
-      "D:\\Codex\\projects\\.safe-tree-delete-uncertain-49979bfbbc3848a9a738c0367737326c\\.codex-safe-delete-1563d6aa-e201-4ee9-ae00-ffd6bb485e23.quarantine"
+      "D:\\Codex\\projects\\.safe-tree-delete-uncertain-ddfe484eac0742caaefa01ce11a7242c\\.codex-safe-delete-15a50ecf-78c2-4771-baa1-7a765b8cfbde.quarantine"
     ],
     "uncertainFiles": [],
     "statusLifecycle": "purge-resumable",
     "crashExitCode": -2146232797
   },
   "uncertain": {
-    "uncertainPath": "D:\\Codex\\projects\\.safe-tree-delete-uncertain-f0040ebc40ce40ea9e9660369b666b17\\.codex-safe-delete-e7750de3-3a00-42ae-a66c-7d5b93179b1b.quarantine",
+    "uncertainPath": "D:\\Codex\\projects\\.safe-tree-delete-uncertain-00c0532494c443e4a26d7e9faad3a9e1\\.codex-safe-delete-629bb194-4bbe-4bf4-b97d-5a65f05bcd9d.quarantine",
     "pendingFiles": [],
     "uncertainFiles": [
-      "D:\\Codex\\projects\\.safe-tree-delete-uncertain-f0040ebc40ce40ea9e9660369b666b17\\.codex-safe-delete-e7750de3-3a00-42ae-a66c-7d5b93179b1b.quarantine"
+      "D:\\Codex\\projects\\.safe-tree-delete-uncertain-00c0532494c443e4a26d7e9faad3a9e1\\.codex-safe-delete-629bb194-4bbe-4bf4-b97d-5a65f05bcd9d.quarantine"
     ],
     "statusLifecycle": "manual-review",
     "purgePurged": false,

@@ -9,23 +9,23 @@
   "degree": 4,
   "sampleCount": 2,
   "sampleWallClockMs": [
-    133,
-    188
+    137,
+    134
   ],
-  "wallClockMs": 160,
-  "coordinatorElapsedMs": 160,
-  "totalProcessorTimeMs": 375,
-  "cpuUtilizationRatio": 2.459,
+  "wallClockMs": 136,
+  "coordinatorElapsedMs": 135,
+  "totalProcessorTimeMs": 422,
+  "cpuUtilizationRatio": 3.116,
   "processorCount": 20,
   "journalFileCount": 32,
   "deletedCount": 1000,
   "failedCount": 0,
-  "flushTimeMs": 18,
-  "flushOverheadPercent": 11.797,
+  "flushTimeMs": 11,
+  "flushOverheadPercent": 8.095,
   "flushCount": 64,
   "flushStatus": "measured",
   "flushReason": "ParallelPurgeResult.JournalPerformance 汇总 ThreadJournalWriter.TotalFlushTimeMs（#41）",
   "aggregation": "arithmetic-mean-of-all-recorded-samples",
-  "measuredAtUtc": "2026-08-19T02:19:19.8030165Z",
+  "measuredAtUtc": "2026-08-23T02:22:54.5090708Z",
   "method": "aggregate of recorded ParallelPurgeCoordinator samples; no discarded runs"
 }

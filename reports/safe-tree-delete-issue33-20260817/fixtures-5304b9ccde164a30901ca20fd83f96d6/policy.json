@@ -1,0 +1,15 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-policy",
+  "schemaVersion": 3,
+  "entries": [
+    {
+      "id": "purge-hash-reuse-fixture",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6\\evidence"
+      ]
+    }
+  ]
+}

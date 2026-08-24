@@ -1,0 +1,12 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-transaction",
+  "schemaVersion": 2,
+  "generationId": "69e65ef1-59e7-46ae-a387-d2dc4bb9e08b",
+  "planPath": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6\\evidence\\20260823T032837Z-69e65ef1-59e7-46ae-a387-d2dc4bb9e08b\\plan.json",
+  "planSha256": "9576f8eb6c2ff6745c82f4c11758b1636b189dd7158c4cb233783593058339ae",
+  "targetPath": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6\\candidate",
+  "quarantinePath": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6\\.codex-safe-delete-69e65ef1-59e7-46ae-a387-d2dc4bb9e08b.quarantine",
+  "directoryCommitAnchors": [],
+  "status": "quarantined",
+  "updatedAtUtc": "2026-08-23T03:28:37.4511428+00:00"
+}

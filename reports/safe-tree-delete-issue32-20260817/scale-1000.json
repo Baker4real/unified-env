@@ -2,7 +2,7 @@
   "artifactType": "env-governance.codex-safe-tree-delete-issue32-scale-1000",
   "fileCount": 1000,
   "logicalBytes": 64000,
-  "applyElapsedMs": 34692,
-  "applyBytesHashed": 928527,
+  "applyElapsedMs": 3991,
+  "applyBytesHashed": 800535,
   "quarantined": true
 }

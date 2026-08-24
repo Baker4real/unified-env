@@ -2,7 +2,7 @@
   "artifactType": "env-governance.codex-safe-tree-delete-issue36-filesystem-probe",
   "driveFormat": "NTFS",
   "driveType": "Fixed",
-  "availableFreeBytes": 397016760320,
+  "availableFreeBytes": 386948636672,
   "requiredBytes": 5424283648,
   "fileIdInfoSupported": true,
   "detector": {
@@ -29,28 +29,28 @@
       "driveType": "Fixed",
       "isReady": true,
       "driveFormat": "NTFS",
-      "availableFreeBytes": 45566963712
+      "availableFreeBytes": 44422475776
     },
     {
       "name": "D:\\",
       "driveType": "Fixed",
       "isReady": true,
       "driveFormat": "NTFS",
-      "availableFreeBytes": 397015986176
+      "availableFreeBytes": 386948636672
     },
     {
       "name": "E:\\",
       "driveType": "Fixed",
       "isReady": true,
       "driveFormat": "NTFS",
-      "availableFreeBytes": 234144219136
+      "availableFreeBytes": 614203482112
     },
     {
       "name": "F:\\",
       "driveType": "Fixed",
       "isReady": true,
       "driveFormat": "NTFS",
-      "availableFreeBytes": 178027872256
+      "availableFreeBytes": 245517725696
     }
   ]
 }

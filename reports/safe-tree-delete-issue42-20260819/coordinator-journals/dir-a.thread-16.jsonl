@@ -1,0 +1,4 @@
+{"op":"pending","path":"dir-a/a1.txt"}
+{"op":"pending","path":"dir-a/a2.txt"}
+{"op":"commit","path":"dir-a/a1.txt"}
+{"op":"commit","path":"dir-a/a2.txt"}

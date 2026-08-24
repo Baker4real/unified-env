@@ -1,0 +1,30 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-leaf-dispositions",
+  "schemaVersion": 1,
+  "generationId": "446f88b2-0aae-42dc-a228-f00c4442e9c0",
+  "planSha256": "ae51a953ecce7e767edff61e0b2ed35cca42677fa41c44f6f1566e538cf56d82",
+  "transactionPath": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6\\evidence\\20260823T032835Z-446f88b2-0aae-42dc-a228-f00c4442e9c0\\transaction.json",
+  "quarantinePath": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue33-20260817\\fixtures-5304b9ccde164a30901ca20fd83f96d6\\.codex-safe-delete-446f88b2-0aae-42dc-a228-f00c4442e9c0.quarantine",
+  "purgingTransactionUpdatedAtUtc": "2026-08-23T03:28:36.6348499+00:00",
+  "streamSetSource": "plan.leafStreamSetV1",
+  "liveFreeze": "target-mutex-and-per-leaf-exclusive-lease",
+  "leaves": [
+    {
+      "relativePath": "nested/child.bin",
+      "kind": "file",
+      "disposition": "deleted",
+      "evidence": "exclusive-lease-reverification"
+    },
+    {
+      "relativePath": "payload.txt",
+      "kind": "file",
+      "disposition": "deleted",
+      "evidence": "exclusive-lease-reverification"
+    }
+  ],
+  "summary": {
+    "plannedLeaves": 2,
+    "deleted": 2,
+    "absentAtPurgeResume": 0
+  }
+}

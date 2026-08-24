@@ -1,11 +1,11 @@
 {
   "artifactType": "env-governance.codex-safe-tree-delete-issue42-baseline-partial",
-  "planElapsedMs": 88120,
-  "applyElapsedMs": 269208,
-  "purgeElapsedMs": 228192,
-  "elapsedMs": 585520,
-  "applyBytesHashed": 130237787,
-  "purgeBytesHashed": 137596430,
+  "planElapsedMs": 200586,
+  "applyElapsedMs": 562004,
+  "purgeElapsedMs": 378457,
+  "elapsedMs": 1141047,
+  "applyBytesHashed": 130237795,
+  "purgeBytesHashed": 137596449,
   "leafDispositionsDeleted": 10000,
   "fileCount": 10000,
   "bytesPerFile": 4096

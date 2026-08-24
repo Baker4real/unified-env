@@ -1,7 +1,7 @@
 {
   "artifactType": "env-governance.codex-safe-tree-delete-issue39-scale-10000",
   "fileCount": 10000,
-  "elapsedMs": 46591,
+  "elapsedMs": 4111,
   "journalFileCount": 4,
   "failedCount": 0,
   "deletedCount": 10000,

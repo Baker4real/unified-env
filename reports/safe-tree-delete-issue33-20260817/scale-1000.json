@@ -2,9 +2,9 @@
   "artifactType": "env-governance.codex-safe-tree-delete-issue33-scale-1000",
   "fileCount": 1000,
   "logicalBytes": 64000,
-  "applyElapsedMs": 29011,
-  "purgeElapsedMs": 19622,
-  "purgeBytesHashed": 1665895,
+  "applyElapsedMs": 3859,
+  "purgeElapsedMs": 5602,
+  "purgeBytesHashed": 1537914,
   "purged": true,
   "leafDispositionsDeleted": 1000,
   "streamSetSource": "plan.leafStreamSetV1"
