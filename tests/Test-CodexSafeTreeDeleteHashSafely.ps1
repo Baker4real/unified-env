@@ -247,6 +247,12 @@ namespace CodexSafeTreeDeleteHashSafelyTests
                     state.Denied = true;
                     return;
                 }
+
+                // 探针两次写入尝试之间留出空档：无间隔的 open/close 紧密循环会让
+                // GENERIC_WRITE 探针句柄长时间处于被持有状态，GetHashSafely 入口的
+                // 独占 open 可能恰好撞上而得到 32（夹具自身竞态，非被测行为）。
+                // 哈希独占窗口（256MB/1GB 稀疏文件）远大于本间隔，探测不因此漏检。
+                Thread.Sleep(20);
             }
         }
     }
@@ -280,10 +286,26 @@ function Invoke-HashSafelyWhileProbingWriters {
         }
         Assert-True $state.Ready 'sharing 探测线程必须在哈希前进入自旋'
         try {
-            [void](Get-CodexSafeTreeDeleteHashSafely `
-                -LiteralPath $LiteralPath `
-                -ExpectedIdentity $currentIdentity `
-                -SessionCache $sessionCache)
+            # 本调用预期成功，但写探针仍可能瞬时持有 GENERIC_WRITE 句柄，使入口的
+            # 独占 open 得到 sharing violation 32。该失败只反映夹具自身编排竞态，
+            # 不涉及被测合同：仅当错误码确为 32 时做有界重试吸收；其他异常立即
+            # 上抛，重试耗尽仍 32 也上抛——不把 fail-closed 行为重试成通过。
+            $exclusiveOpenRetries = 0
+            while ($true) {
+                try {
+                    [void](Get-CodexSafeTreeDeleteHashSafely `
+                        -LiteralPath $LiteralPath `
+                        -ExpectedIdentity $currentIdentity `
+                        -SessionCache $sessionCache)
+                    break
+                } catch {
+                    if ((Get-NativeErrorCode -ErrorRecord $_) -ne 32 -or $exclusiveOpenRetries -ge 3) {
+                        throw
+                    }
+                    $exclusiveOpenRetries++
+                    Start-Sleep -Milliseconds 200
+                }
+            }
         } finally {
             $state.Stop = $true
             $null = $probe.EndInvoke($async)
