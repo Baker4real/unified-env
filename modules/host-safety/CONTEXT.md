@@ -32,6 +32,12 @@ Status 冷启动（#49）2026-08-23 达标关闭：正式三联 9.762 / 9.791 / 
 node .\scripts\Run-PowerShellTests.cjs --module host-safety --list
 ```
 
+约定（2026-08-24 CI 首次全绿后固化）：
+
+- CI 按字母序执行套件且 fail-fast：字母序后段的套件问题只会在前段修复后显形，新增套件的宿主耦合（绝对本机路径、生产 evidence 依赖）要在本地非宿主视角自检。
+- 绝对性能阈值在 fixture profile 一律 record-only（`metTarget*=False` 不影响 `ok`，先例 Phase3Integration/PurgeBatch/JournalPerformance）；硬断言只留给确定性/一致性判据，且按环境（如 `GITHUB_ACTIONS`）分支。
+- `Test-CodexSafeTreeDeleteFileSystem.ps1` 实卷段提权感知：非提权且无原生 FAT32/exFAT 卷自动记名 skip（`liveFsLeg=skipped-non-elevated`），提权/有原生卷走真实实卷断言。
+
 ## 依赖方向
 
 `scripts/lib/CodexHostSafety.ps1` 是通用 capability I/O、路径校验、原子发布和严格 JSON 属性合同的唯一实现。`CodexHookPolicy.ps1`、state path inventory、repair transaction 与 safe-delete 入口分别直接加载它；本模块不依赖 hook policy。
