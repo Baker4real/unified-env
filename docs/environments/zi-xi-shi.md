@@ -107,7 +107,7 @@ intent: 记录自习室设备的受控环境事实与差异
 - 受守卫安装入口：`D:\Codex\.codex\scripts\install-skill-guarded.cmd`
 - 项目部署入口：`scripts\Deploy-SkillInstallGuarded.ps1`
 - 本机 catalog：`D:\Codex\.codex\skill-catalog\catalog.json`
-- 运行证据：`D:\Codex\.codex\run-evidence\skill-install-guarded\`
+- 运行证据：`D:\agents\run-evidence\skill-install-guarded\`（2026-08-26 起从旧根 `D:\Codex\.codex\run-evidence\` 迁移至此）
 
 不得把安装后的回写职责放入被安装的 skill，也不得直接修改 bundled `.system` 安装器。新安装或更新必须经过 decision manifest、`writing-for-agents` 证据、SOURCE/ledger、严格资源闭包和 catalog 后置校验；任一门槛失败都应回滚。
 
@@ -117,13 +117,13 @@ intent: 记录自习室设备的受控环境事实与差异
 - 2026-07-24 22:07 的当前验收先发现 `config` 单项 drift，随后通过 reconciler Repair 恢复；首轮 Repair 为 `ok=true`、`changed=true`、`driftCount=0`，证据位于 `D:\Codex\.codex\run-evidence\host-hook-remediation\20260724T140626.793Z-c015fdca`。第二轮 Repair 为 `changed=false`，最终只读 Check 为 `ok=true`、`changed=false`、`driftCount=0`，8 项检查全部通过。后续操作前仍须重新运行 Check，不能把本条快照当作永久状态。
 - 只有 reconciler 可以修复受管 Serena section 与 hook registration；不得依据历史 evidence 或本文手工重建它们，也不得手工写入 `approval_policy` 或 `sandbox_mode`。若 Repair 结果的 `registrationProjection` 出现 `restartRequired=true`，完整退出并重启 Codex 应用后再做运行时验收。
 
-## 每日 Codex 生态组件更新（2026-08-20）
+## 每日 Codex 生态组件更新（2026-08-26）
 
-- 本机日更已改由 Cursor Agent CLI 本机计划任务执行，不再由 Codex Desktop 自动化触发。
-- Codex 侧 `D:\Codex\.codex\automations\codex\automation.toml` 必须保持 `PAUSED`，不要重新启用。
-- 计划任务名：`Cursor Daily Codex Ecosystem Update`，每天 02:00。调度、CLI 路径、隐藏启动链和 Desktop 查看入口以 `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 的「Cursor Daily Codex Ecosystem Update」为准。
-- 结果固定入口：`D:\Codex\.codex\run-evidence\daily-codex-ecosystem-update\LATEST.md`。CLI 会话不会出现在 Cursor Desktop 的 Agent 历史里。
-- PATH 上的 `agent` 是 Grok CLI；本机 Cursor CLI 入口是 `D:\Codex\tools\bin\cursor-agent.cmd`，不要安装成 `%LOCALAPPDATA%\cursor-agent\agent.exe`。
+- 本机日更已改由 ZCode Desktop 自动化 `每日更新` 执行，不再由 Cursor 计划任务或 Codex Desktop 自动化触发。
+- Codex 侧 `D:\Codex\.codex\automations\codex\automation.toml` 必须保持 `PAUSED`。Windows 任务 `Cursor Daily Codex Ecosystem Update` 必须保持 Disabled。
+- 调度、证据入口和授权边界以 `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 的「Daily Codex Ecosystem Update」为准。
+- 结果固定入口：`D:\agents\run-evidence\daily-codex-ecosystem-update\LATEST.md`。
+- PATH 上的 `agent` 是 Grok CLI，禁止当执行器调用。
 
 ## GitHub CLI
 
