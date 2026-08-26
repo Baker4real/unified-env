@@ -60,8 +60,7 @@ $wrappers = @(
     @{ name = 'cursor-serena-cleanup.cmd'; mode = 'Cleanup'; serena = $true },
     @{ name = 'cursor-serena-reminder.cmd'; mode = 'Reminder'; serena = $true },
     @{ name = 'cursor-serena-auto-approve.cmd'; mode = 'AutoApprove'; serena = $true },
-    @{ name = 'cursor-github-cli.cmd'; mode = 'GitHubCli'; serena = $false },
-    @{ name = 'cursor-serena-dashboard.cmd'; mode = 'SerenaDashboard'; serena = $false }
+    @{ name = 'cursor-github-cli.cmd'; mode = 'GitHubCli'; serena = $false }
 )
 foreach ($wrapper in $wrappers) {
     $path = Join-Path $managedRoot $wrapper.name
@@ -98,7 +97,9 @@ Assert-True ([string]$registry.hooks.sessionStart[0].command).EndsWith('\cursor-
 Assert-True ([string]$registry.hooks.sessionEnd[0].command).EndsWith('\cursor-serena-cleanup.cmd') 'sessionEnd 必须指向 cleanup wrapper。'
 Assert-True ([string]$registry.hooks.beforeMCPExecution[0].command).EndsWith('\cursor-serena-auto-approve.cmd') 'beforeMCPExecution 必须指向 auto-approve wrapper。'
 Assert-True ([string]$registry.hooks.workspaceOpen[0].command).EndsWith('\cursor-github-cli.cmd') 'workspaceOpen[0] 必须指向 github-cli wrapper。'
-Assert-True ([string]$registry.hooks.workspaceOpen[1].command).EndsWith('\cursor-serena-dashboard.cmd') 'workspaceOpen[1] 必须指向 dashboard wrapper。'
+Assert-Equal ([int]@($registry.hooks.workspaceOpen).Count) 1 'workspaceOpen 必须只保留 github-cli。'
+Assert-True ($managedJson -notmatch 'serena-dashboard') 'Cursor hooks.json 不得注册已退役的 serena-dashboard。'
+Assert-True (-not (Test-Path -LiteralPath (Join-Path $managedRoot 'cursor-serena-dashboard.cmd'))) '已退役的 cursor-serena-dashboard.cmd 不得保留。'
 
 $failOpen = Invoke-ChildProcess -FilePath $python -Arguments @('-I', '-S', '-B', '-X', 'utf8', $adapterPath, 'Reminder') -InputText '{not-json}'
 Assert-Equal $failOpen.exitCode 0 '非法 payload 必须 fail open。'

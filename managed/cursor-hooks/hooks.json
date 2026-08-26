@@ -5,10 +5,6 @@
       {
         "command": "cmd.exe /c D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-github-cli.cmd",
         "timeout": 10
-      },
-      {
-        "command": "cmd.exe /c D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-dashboard.cmd",
-        "timeout": 15
       }
     ],
     "sessionStart": [

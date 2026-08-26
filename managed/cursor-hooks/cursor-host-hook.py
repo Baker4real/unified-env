@@ -13,12 +13,11 @@ PWSH = Path(r"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe")
 GUARD = Path(r"D:\Codex\.codex\hooks\serena-behavior-guard.ps1")
 SERENA_HOOKS = Path(r"D:\Codex\tools\uv\bin\serena-hooks.exe")
 GITHUB_CLI = Path(r"D:\Codex\.codex\hooks\codex-github-cli-guard.ps1")
-SERENA_DASHBOARD = Path(r"D:\Codex\.codex\hooks\serena-dashboard-guard.ps1")
 SERENA_HOME = r"D:\Codex\.serena"
 SESSION_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]{0,127}\z")
 CREATE_NO_WINDOW = 0x08000000
 MODES = frozenset(
-    {"Activation", "Cleanup", "Reminder", "AutoApprove", "GitHubCli", "SerenaDashboard"}
+    {"Activation", "Cleanup", "Reminder", "AutoApprove", "GitHubCli"}
 )
 SERENA_TOOL_NAMES = frozenset(
     {
@@ -425,12 +424,6 @@ def main(argv: list[str]) -> int:
     if mode == "GitHubCli":
         try:
             return run_host_utility(GITHUB_CLI)
-        except Exception:
-            _emit_empty()
-            return 0
-    if mode == "SerenaDashboard":
-        try:
-            return run_host_utility(SERENA_DASHBOARD)
         except Exception:
             _emit_empty()
             return 0
