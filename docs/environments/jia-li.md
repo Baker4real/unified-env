@@ -51,10 +51,8 @@ intent: 记录家里设备的受控环境事实与差异
   的 Grok Host Hooks 为准；不要把 Grok 注册写进 Codex `hooks.json`。
 - 2026-08-26 本机 live 已从 Grok `SessionStart` 和 Cursor `workspaceOpen`
   拿掉 `serena-dashboard`；Grok live 也没有 `codex-state-preflight`。
-  `managed/grok-hooks/host-lifecycle.json` 在本机是 skip-worktree overlay，
-  `git show HEAD:managed/grok-hooks/host-lifecycle.json` 仍含旧
-  `D:\Codex\projects\统一环境` 路径、`codex-state-preflight` 和
-  `serena-dashboard`，不能当现役。权威是 live 文件与 host-runbook。
+  `managed/grok-hooks/host-lifecycle.json` 与 live 一致，命令路径为
+  `D:\agents\projects\统一环境`。权威是 live 文件与 host-runbook。
 - 同日 `wsl.exe --list --verbose` 返回 `Ubuntu` 与 `docker-desktop`，两者均为
   WSL2；这已经推翻旧 README 中“WSL 未安装、未启用、未初始化”的历史判断。运行时
   `Running` / `Stopped` 状态属于易变事实，使用前现场复核；D-Radar 的 WSL/Docker

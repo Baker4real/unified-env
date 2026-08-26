@@ -5,26 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
+            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-github-cli.cmd",
             "timeout": 10
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-github-cli.cmd",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-dashboard.cmd",
-            "timeout": 15
           }
         ]
       },
@@ -33,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-activation.cmd",
+            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-activation.cmd",
             "timeout": 10
           }
         ]
@@ -44,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-cleanup.cmd",
+            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-cleanup.cmd",
             "timeout": 10
           }
         ]
@@ -56,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-reminder.cmd",
+            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-reminder.cmd",
             "timeout": 10
           }
         ]
@@ -66,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\Codex\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-auto-approve.cmd",
+            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-auto-approve.cmd",
             "timeout": 10
           }
         ]

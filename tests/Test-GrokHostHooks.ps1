@@ -63,6 +63,15 @@ Assert-Equal $selfTest.exitCode 0 "adapter --self-test 必须成功。 stderr=$(
 $managedJson = Get-Content -LiteralPath $managedHooksPath -Raw
 $liveJson = Get-Content -LiteralPath $liveHooksPath -Raw
 Assert-Equal $liveJson.Trim() $managedJson.Trim() 'live ~/.grok/hooks/host-lifecycle.json 必须与受管源一致（忽略首尾空白）。'
+Assert-True ($managedJson -notmatch 'codex-state-preflight') 'Grok host-lifecycle 不得注册 Codex state preflight。'
+Assert-True ($managedJson -notmatch 'serena-dashboard') 'Grok host-lifecycle 不得注册已退役的 serena-dashboard。'
+Assert-True (-not (Test-Path -LiteralPath (Join-Path $managedRoot 'grok-serena-dashboard.cmd'))) '已退役的 grok-serena-dashboard.cmd 不得保留。'
+$registry = $managedJson | ConvertFrom-Json
+$sessionStart = @($registry.hooks.SessionStart)
+Assert-Equal ([int]$sessionStart.Count) 2 'SessionStart 必须只保留 github-cli 与 activation。'
+Assert-True ([string]$sessionStart[0].hooks[0].command).EndsWith('\grok-github-cli.cmd') 'session_start[0] 必须指向 github-cli。'
+Assert-Equal ([string]$sessionStart[1].matcher) 'startup|resume' 'activation matcher 必须为 startup|resume。'
+Assert-True ([string]$sessionStart[1].hooks[0].command).EndsWith('\grok-serena-activation.cmd') 'session_start[1] 必须指向 activation。'
 
 $payload = @{
     hookEventName = 'pre_tool_use'
