@@ -11,7 +11,9 @@ intent: 记录办公室设备的受控环境事实与差异
 
 - 设备标识：`ban-gong-shi`
 - Windows 主机名：`PC-20250421IVIW`
-- 统一环境仓库：`D:\agents\projects\统一环境`
+- 统一环境仓库：登记为 `D:\agents\projects\统一环境`，但 2026-08-26 经 SSH 现场审计该机
+  `D:\agents\projects` 不存在（仓库未部署到该机；SSH 会话中 git 不在 PATH）。同步该机仓库
+  属另立任务；审计同期确认 `D:\Codex\.codex\docs\agent-guidance\` 已同步在机。
 - Codex 受管根：`D:\Codex\.codex`
 
 网络地址、SSH 用户、密钥路径、登录态和凭据属于调用端本地事实，不写入仓库；连接前必须从当前设备的本地配置重新确认。

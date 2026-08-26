@@ -452,7 +452,7 @@
       "interfaces": [
         "docs/env-governance/sub2api-update-policy.md",
         "docs/environments/ban-gong-shi.md",
-        "docs/environments/zi-xi-shi.md"
+        "docs/environments/jia-li.md"
       ],
       "dependsOn": [],
       "transitionalDependencies": [],
