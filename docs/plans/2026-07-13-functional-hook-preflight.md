@@ -7,7 +7,7 @@ intent: 记录 Codex 功能钩子分层恢复的历史实施过程
 
 # 功能钩子分层恢复实施计划
 
-> **历史实施计划（已取代）：** 本文保留 2026-07-15 前的任务拆分和测试来源，不是当前 live runbook。当前唯一生产入口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`，本机 live 状态见 `docs/environments/zi-xi-shi.md`。
+> **历史实施计划（已取代）：** 本文保留 2026-07-15 前的任务拆分和测试来源，不是当前 live runbook。当前唯一生产入口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`，本机 live 状态见 `docs/environments/jia-li.md`。
 
 > **当前边界（2026-07-16）：** 历史中的 live registration、`Check → Repair(no-op) → Check` 与 canonical path repair 不是当前健康证明。所有复选框只记录过去过程，不是待办；不得根据本文执行 live `Repair`、`Restore` 或 fresh lifecycle canary。fixture 回归可独立运行，live 写入仍需配置所有者明确 Serena 配置及权限策略来源。
 

@@ -7,7 +7,7 @@ intent: 说明 Codex 功能钩子分层恢复的历史设计和现役边界
 
 # 本机 Codex 功能钩子分层恢复设计
 
-> **历史设计（已取代）：** 本文保留分层恢复的设计来源和 fixture 测试背景，不构成 live registration、`Repair`、`Restore` 或 lifecycle canary 的执行授权。当前唯一生产入口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`；本机 live 状态见 `docs/environments/zi-xi-shi.md`。
+> **历史设计（已取代）：** 本文保留分层恢复的设计来源和 fixture 测试背景，不构成 live registration、`Repair`、`Restore` 或 lifecycle canary 的执行授权。当前唯一生产入口与安全边界见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`；本机 live 状态见 `docs/environments/jia-li.md`。
 
 ## 状态
 
