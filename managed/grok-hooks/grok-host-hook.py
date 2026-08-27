@@ -20,6 +20,33 @@ GROK_ACTIVATION_CONTEXT = (
     "serena__initial_instructions unless you need the full manual; it is optional "
     "and must not block other work."
 )
+# Serena vendor omits additionalContext for --client=codex and --client=grok.
+# Restore the agent-visible symbolic-tool nudge on Grok reminder deny.
+REMINDER_ADDITIONAL_CONTEXT = (
+    (
+        "Too many consecutive grep calls",
+        (
+            "You were using many grep calls recently. Consider using Serena's symbolic "
+            "mcp tools instead for more code-centric search. You can continue using grep now if needed, the counter was reset."
+        ),
+    ),
+    (
+        "Too many consecutive read calls",
+        (
+            "You were using many read calls on files recently. Consider using Serena's symbolic "
+            "mcp tools instead for more targeted reads. You can continue using read now if needed, the counter was reset."
+        ),
+    ),
+    (
+        "Too many consecutive non-symbolic",
+        (
+            "You were alternating between grep and read file calls recently without using "
+            "Serena's symbolic mcp tools. Consider using symbolic search and targeted symbol "
+            "reads instead for more code-centric exploration. You can continue using these tools "
+            "now if needed, the counter was reset."
+        ),
+    ),
+)
 CREATE_NO_WINDOW = 0x08000000
 SERENA_TOOL_RE = re.compile(r"(?:^|__)serena(?:__|$)")
 
@@ -118,6 +145,34 @@ def _invoke_guard(mode: str, raw: bytes) -> subprocess.CompletedProcess[bytes]:
     )
 
 
+def _reminder_additional_context(reason: object, specific: object) -> str | None:
+    if isinstance(specific, dict):
+        existing = specific.get("additionalContext")
+        if isinstance(existing, str) and existing.strip():
+            return existing
+    if not isinstance(reason, str) or not reason:
+        return None
+    for prefix, context in REMINDER_ADDITIONAL_CONTEXT:
+        if reason.startswith(prefix):
+            return context
+    return None
+
+
+def _permission_output(decision: str, reason: object, specific: object = None) -> dict[str, object]:
+    if isinstance(reason, str) and reason:
+        rendered: dict[str, object] = {"decision": decision, "reason": reason}
+    else:
+        rendered = {"decision": decision}
+    if decision == "deny":
+        context = _reminder_additional_context(reason, specific)
+        if context:
+            rendered["hookSpecificOutput"] = {
+                "hookEventName": "PreToolUse",
+                "additionalContext": context,
+            }
+    return rendered
+
+
 def _translate_permission_decision(stdout: bytes) -> bytes:
     if not stdout.strip():
         return b""
@@ -126,11 +181,7 @@ def _translate_permission_decision(stdout: bytes) -> bytes:
         return stdout
     decision = payload.get("decision")
     if decision in ("deny", "allow"):
-        reason = payload.get("reason")
-        if isinstance(reason, str) and reason:
-            rendered = {"decision": decision, "reason": reason}
-        else:
-            rendered = {"decision": decision}
+        rendered = _permission_output(decision, payload.get("reason"), payload.get("hookSpecificOutput"))
         return (json.dumps(rendered, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
     specific = payload.get("hookSpecificOutput")
     if not isinstance(specific, dict):
@@ -138,7 +189,7 @@ def _translate_permission_decision(stdout: bytes) -> bytes:
     permission = specific.get("permissionDecision")
     reason = specific.get("permissionDecisionReason")
     if permission in ("deny", "allow") and isinstance(reason, str) and reason:
-        rendered = {"decision": permission, "reason": reason}
+        rendered = _permission_output(permission, reason, specific)
         return (json.dumps(rendered, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
     return stdout
 
@@ -214,21 +265,74 @@ def run_auto_approve(raw: bytes) -> int:
 
 
 def _self_test() -> int:
+    grep_context = REMINDER_ADDITIONAL_CONTEXT[0][1]
+    read_context = REMINDER_ADDITIONAL_CONTEXT[1][1]
+    mixed_context = REMINDER_ADDITIONAL_CONTEXT[2][1]
     translated = _translate_permission_decision(
         json.dumps(
             {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
-                    "permissionDecisionReason": "Too many consecutive grep calls",
+                    "permissionDecisionReason": "Too many consecutive grep calls without using symbolic tools. You can continue using grep now if needed, the counter was reset.",
                 }
             },
             separators=(",", ":"),
         ).encode("utf-8")
     )
-    expected = {"decision": "deny", "reason": "Too many consecutive grep calls"}
+    expected = {
+        "decision": "deny",
+        "reason": "Too many consecutive grep calls without using symbolic tools. You can continue using grep now if needed, the counter was reset.",
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": grep_context,
+        },
+    }
     if json.loads(translated.decode("utf-8")) != expected:
         raise SystemExit("reminder translation failed")
+    if "symbolic mcp tools" not in grep_context:
+        raise SystemExit("grep additionalContext lost Serena symbolic-tool nudge")
+    grok_native = _translate_permission_decision(
+        json.dumps(
+            {"decision": "deny", "reason": "Too many consecutive read calls of files without using symbolic tools."},
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    if json.loads(grok_native.decode("utf-8")) != {
+        "decision": "deny",
+        "reason": "Too many consecutive read calls of files without using symbolic tools.",
+        "hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": read_context},
+    }:
+        raise SystemExit("grok-native read reminder translation failed")
+    mixed = _translate_permission_decision(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Too many consecutive non-symbolic tool calls (mixed grep and read).",
+                }
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    if json.loads(mixed.decode("utf-8")).get("hookSpecificOutput", {}).get("additionalContext") != mixed_context:
+        raise SystemExit("mixed reminder additionalContext translation failed")
+    preserved = _translate_permission_decision(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Too many consecutive grep calls",
+                    "additionalContext": "Use serena__find_symbol instead of grep.",
+                }
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    if json.loads(preserved.decode("utf-8"))["hookSpecificOutput"]["additionalContext"] != "Use serena__find_symbol instead of grep.":
+        raise SystemExit("existing additionalContext must win")
     if _translate_permission_decision(b"") != b"":
         raise SystemExit("empty reminder translation failed")
     already = json.dumps({"decision": "deny", "reason": "x"}, separators=(",", ":")).encode("utf-8")
