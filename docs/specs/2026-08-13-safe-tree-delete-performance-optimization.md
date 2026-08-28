@@ -3,7 +3,7 @@ type: reference
 title: 受管安全树删除性能优化
 tags: [performance, safe-delete, hash-reuse, parallelization]
 date: 2026-08-13
-status: landed-mixed（Plan C# 单遍 walker 已落地：AC1 双口径达标；端到端 6x 验收阻塞于环境锚点重跑，见 #56；Status 冷启动 SLA 已达：<60s）
+status: landed-mixed（Plan C# 单遍 walker 已落地并部署：AC1 候补达标；正式性能认证未完成，#56 由维护者按现状关闭 2026-08-28；Status 冷启动 SLA 已达：<60s）
 priority: P0
 ---
 

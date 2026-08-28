@@ -62,3 +62,11 @@ fixture #35 waiver 沿用（FileSystem 结构化 skip tuple：非提权且无原
 ## 回滚
 
 plan.json schema 不变，新旧 producer 产物可互换；env=0 运行时回退（base generation 不读 PlanSnapshot source）；§9 部署子系统提供 shim cutover/marker/drain/RecoverRollback 全矩阵（测试全绿）。**生产 BootstrapGate/Deploy 执行、commit/push、结论评论与关票均待用户分别授权。**
+
+## 终态（2026-08-28 收口）
+
+- **发布**：实现与证据以 commit `fc73c05` 推送到 main（bulky run evidence 外置 `D:gentsun-evidence\safe-tree-delete\issue56-formal\`，原位指针+SHA）。
+- **生产**：deployment `wave-a-20260828` BootstrapGate→Deploy complete；生产入口（cmd→gate shim→repo entry）live 冒烟通过；回退=env `CODEX_SAFE_TREE_DELETE_PLAN_CSHARP_WALKER=0`（fresh process）。
+- **正式认证**：未完成。三轮 formal-round 全部 BENCH_INVALID（会话中断×1、baseline 锚点 +29%/+68%/+110%×2），维护者决定不再安排安静窗口重跑。
+- **关票**：#56 于 2026-08-28T08:57:50Z 关闭，结论评论 issuecomment-5450518070（如实记录达成/未达成；G8 pre-close 保持 NOT_READY，关闭属维护者决定路径）。
+- **重跑入口**（如需正式认证）：`pwsh -NoProfile -File reports\safe-tree-delete-issue56-20260827\Invoke-Issue56FormalBenchmark.ps1`，退出码 0 后走 `Invoke-Issue56CloseGate.ps1`。

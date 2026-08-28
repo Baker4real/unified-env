@@ -7,6 +7,8 @@ intent: 记录 GitHub issue #56 的 Wave A/Wave B 实施方案、验收协议，
 
 # 实施计划（审查通过，待授权）：safe-tree-delete #56 Plan 阶段 C# 单遍 walker
 
+> **终态（2026-08-28）：Wave A 已实施、部署并收口；正式性能认证未完成，#56 由维护者决定关闭。** 实现/测试/文档以 commit `fc73c05` 发布到 main；生产 deployment `wave-a-20260828` BootstrapGate→Deploy complete（gate 链路 live 冒烟通过，回退=env `CODEX_SAFE_TREE_DELETE_PLAN_CSHARP_WALKER=0`）；回归矩阵 5 profile 全绿。正式基准轮三轮全部 BENCH_INVALID（轮 1 宿主会话中断；轮 2/3 baseline 锚点 +29%/+68%/+110%，本机无法提供安静测量窗口），维护者决定不再安排重跑、按现状关闭 #56（结论评论 issuecomment-5450518070；G8 保持 NOT_READY，属决定路径而非协议完成路径）。候补参考：AC1 max=11231ms、typical≈7.11x、best≈7.32x。重跑命令与证据：`reports/safe-tree-delete-issue56-20260827/REPORT.md`。本文其余内容为实施前方案与审查记录。
+
 > **状态（2026-08-27）：** 方案沿原 C# 单遍 walker + 条件 Wave B 路线完成多轮“fresh reviewer → independent verifier → 修订”闭环；最终两轴 reviewer 均为 `DONE`，独立 verifier 为 `FINAL_PASS`，无剩余 BLOCKER/MAJOR。**实施未授权**：票面原文“方案草案，未授权实施，实施前需另行确认”仍然有效。任何 #56 评论、commit、push、部署或 Wave A 实施均须另行明确授权；若 live issue、现行源码、权威合同或 loader/生产入口发生漂移，须重新打开方案审查。
 >
 > 本轮最终方案补齐 directory guard 同句柄 metadata seam、native compilation-unit/loader/deployment/recovery 边界、benchmark/fixture ownership、source/live-authority closure、typical/best 预注册、TOCTOU 负控、Wave B 生命周期及 AC/G1–G8 证据链。审查记录只说明计划成熟度，不构成实现、发布或关票证据。
