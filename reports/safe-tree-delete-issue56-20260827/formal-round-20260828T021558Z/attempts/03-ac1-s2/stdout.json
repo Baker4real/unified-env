@@ -1,0 +1,24 @@
+{
+  "kind": "plan",
+  "resolvedAlgorithm": "csharp-plan-snapshot",
+  "loadedVariant": "default",
+  "psVersion": "7.6.5",
+  "processorCount": 20,
+  "attemptUtc": "2026-08-28T02:38:08.7795785+00:00",
+  "result": {
+    "walkerKind": "csharp-plan-snapshot",
+    "planElapsedMs": 9698,
+    "entriesScanned": 10101,
+    "fileCount": 10000,
+    "walker": "csharp",
+    "walkerTotalMs": 3882,
+    "hashMs": 2,
+    "streamSetMs": 3,
+    "capturesMs": 2987,
+    "identityPassMs": 0,
+    "streamSetPassMs": 0,
+    "documentMs": 105,
+    "publishMs": 1716,
+    "readbackMs": 654
+  }
+}

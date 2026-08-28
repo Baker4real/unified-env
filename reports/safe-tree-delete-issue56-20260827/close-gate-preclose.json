@@ -1,0 +1,17 @@
+{
+  "mode": "PreClose",
+  "utc": "2026-08-28T07:23:39.1922158+00:00",
+  "benchRound": "formal-round-20260828T021558Z",
+  "benchVerdict": "BENCH_INVALID",
+  "regressionEvidence": [
+    "fixture-regression-csharp.log",
+    "fixture-regression-powershell.log",
+    "fixture-regression-powershell-suffix.log",
+    "host-live-regression-csharp.log"
+  ],
+  "evidenceIndexSha256": null,
+  "invalidReasons": [
+    "正式轮 verdict=BENCH_INVALID"
+  ],
+  "outcome": "NOT_READY"
+}

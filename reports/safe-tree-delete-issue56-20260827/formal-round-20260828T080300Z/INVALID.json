@@ -1,0 +1,4 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue56-formal-round-invalid",
+  "reason": "baseline-pre 1212184ms (+110% vs 576238ms) - environment still heavily loaded; runner stopped by operator before schedule completion."
+}

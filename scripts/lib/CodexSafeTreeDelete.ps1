@@ -1,23 +1,11 @@
 Set-StrictMode -Version Latest
 
-$codexHookHandleBoundSource = Join-Path $PSScriptRoot 'CodexHookHandleBoundIO.cs'
-$codexSafeTreeDeleteFileIdentitySource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteFileIdentity.cs'
-$codexSafeTreeDeleteHashCacheSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteHashCache.cs'
-$codexSafeTreeDeleteApplySnapshotSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteApplySnapshot.cs'
-$codexSafeTreeDeleteThreadJournalSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteThreadJournal.cs'
-$codexSafeTreeDeleteParallelPurgeSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteParallelPurge.cs'
+# #56 §4.3：native 装配统一经 CodexHostSafetyNativeLoader.ps1（变体 source 集、内容寻址
+# generation、registry、Assembly.Load(byte[])）。本文件不再维护第二套编译清单；StatusScan
+# 保持自带独立缓存（自包含源，见下）。
+. (Join-Path $PSScriptRoot 'CodexHostSafetyNativeLoader.ps1')
+[void](Invoke-CodexHostSafetyNativeLoad -RequestedVariant (Get-CodexHostSafetyNativeRequestedVariant))
 $codexSafeTreeDeleteStatusScanSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteStatusScan.cs'
-if (-not ('CodexSafeTreeDelete.FileIdentityReader' -as [type])) {
-    Add-Type -Path @(
-        $codexHookHandleBoundSource,
-        $codexSafeTreeDeleteFileIdentitySource,
-        $codexSafeTreeDeleteHashCacheSource,
-        $codexSafeTreeDeleteApplySnapshotSource,
-        $codexSafeTreeDeleteThreadJournalSource,
-        $codexSafeTreeDeleteParallelPurgeSource,
-        $codexSafeTreeDeleteStatusScanSource
-    ) -ErrorAction Stop
-}
 # The host-safety native assembly cache usually preloads CodexSafeTreeDelete.FileIdentityReader,
 # so the batch above is skipped and the Status fast scanner needs its own compilation unit.
 # CodexSafeTreeDeleteStatusScan.cs is self-contained (BCL + local P/Invoke only) for exactly
@@ -325,6 +313,177 @@ function New-CodexSafeTreeDeletePlanLeafStreamSet {
             kind = $kind
             streamNames = @($streamNames)
             hardLinkCount = [long]$capture.NumberOfLinks
+        })
+    }
+
+    return [pscustomobject][ordered]@{
+        schemaVersion = 1
+        consumptionBoundary = [pscustomobject][ordered]@{
+            apply = 'apply-locked-preflight'
+            purge = 'purge-locked-preflight'
+            streamDrift = 'fail-closed'
+            leafDrift = 'fail-closed'
+            requiresTreeManifestReverification = 'always'
+        }
+        leaves = @($leaves)
+    }
+}
+
+# #56 Wave A：Plan 阶段 C# 单遍 walker 的 PowerShell 包装与捕获派生器。
+# 合同：manifest 形状、metrics 事件回放、fail-closed 消息与三遍 PowerShell 路径逐字对齐；
+# 依据 docs/plans/2026-08-27-safe-tree-delete-issue56-implementation.md §4。
+function Get-CodexSafeTreeDeletePlanTreeSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [switch]$AllowHardLinks,
+        [switch]$AllowInternalDirectoryJunctions,
+        [string]$InternalDirectoryJunctionTargetRoot,
+        [scriptblock]$MetricsObserver,
+        [scriptblock]$PlanWalkerCheckpointForTest,
+        [string]$Name = 'safe-delete plan snapshot'
+    )
+
+    $fullPath = Assert-CodexHookCapabilityPath `
+        -Path $Path `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name $Name
+    $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Name capability root"
+    if ($AllowInternalDirectoryJunctions) {
+        if ([string]::IsNullOrWhiteSpace($InternalDirectoryJunctionTargetRoot)) {
+            throw "$Name 允许内部 junction 时必须提供 target root。"
+        }
+        $junctionTargetRoot = Assert-CodexHookDPath `
+            -Value $InternalDirectoryJunctionTargetRoot `
+            -Name "$Name internal junction target root"
+        if (-not (Test-CodexHookPathWithin -Path $junctionTargetRoot -ParentPath $capabilityRootPath)) {
+            throw "$Name internal junction target root 超出 capability root。"
+        }
+    }
+
+    # C# walker 的 .NET 异常解包后以 PS 字符串错误抛出，保持与 PowerShell 走树
+    # 相同的错误消息形态（否则 PS 会包一层 MethodException 调用上下文）。
+    try {
+        if ($null -ne $PlanWalkerCheckpointForTest) {
+            # 库层测试入口（plan §4.1）：checkpoint 异常不吞；生产 CLI 不透传该参数。
+            $checkpointAction = [Action[string, CodexSafeTreeDelete.PlanWalkerCheckpointEvent]]{
+                param([string]$checkpointKind, [CodexSafeTreeDelete.PlanWalkerCheckpointEvent]$event)
+                & $PlanWalkerCheckpointForTest $checkpointKind $event
+            }
+            $native = [CodexSafeTreeDelete.PlanTreeSnapshotBuilder]::BuildForTest(
+                [string]$fullPath,
+                [string]$capabilityRootPath,
+                [bool]$AllowHardLinks.IsPresent,
+                [bool]$AllowInternalDirectoryJunctions.IsPresent,
+                [string]$InternalDirectoryJunctionTargetRoot,
+                $checkpointAction)
+        } else {
+            $native = [CodexSafeTreeDelete.PlanTreeSnapshotBuilder]::Build(
+                [string]$fullPath,
+                [string]$capabilityRootPath,
+                [bool]$AllowHardLinks.IsPresent,
+                [bool]$AllowInternalDirectoryJunctions.IsPresent,
+                [string]$InternalDirectoryJunctionTargetRoot)
+        }
+    } catch {
+        $walkerMessage = [string]$_.Exception.Message
+        if ($null -ne $_.Exception.InnerException -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.Exception.InnerException.Message)) {
+            $walkerMessage = [string]$_.Exception.InnerException.Message
+        }
+        throw $walkerMessage
+    }
+    $entries = [Collections.Generic.List[object]]::new()
+    $captures = [Collections.Generic.List[object]]::new()
+    foreach ($entry in @($native.Entries)) {
+        $kind = [string]$entry.Kind
+        $entries.Add([pscustomobject][ordered]@{
+            relativePath = [string]$entry.RelativePath
+            kind = $kind
+            sha256 = $(if ($kind -ceq 'directory') { $null } else { [string]$entry.Sha256Hex })
+            identity = @([string]$entry.VolumeSerialNumber, [string]$entry.FileIndex)
+        })
+        $captures.Add($entry)
+        if ($null -ne $MetricsObserver) {
+            & $MetricsObserver $kind ([long]$entry.LogicalBytes) ([long]$entry.HashedBytes)
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        manifest = [pscustomobject][ordered]@{
+            schemaVersion = 2
+            rootIdentity = @([string]$native.RootVolumeSerialNumber, [string]$native.RootFileIndex)
+            entries = @($entries)
+        }
+        captures = @($captures)
+        timings = $native.Timings
+    }
+}
+
+function New-CodexSafeTreeDeletePlanFileIdentitiesV2FromCaptures {
+    param(
+        [Parameter(Mandatory)][object]$Captures,
+        [Parameter(Mandatory)][string]$TargetPath
+    )
+
+    $records = [Collections.Generic.List[object]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in @($Captures)) {
+        if ([string]$entry.Kind -cne 'file') { continue }
+        $relativePath = [string]$entry.RelativePath
+        if (-not $seen.Add($relativePath)) {
+            throw "safe-delete plan fileIdentitiesV2 relativePath 重复：$relativePath"
+        }
+        [void](ConvertTo-CodexSafeTreeDeleteAbsolutePathFromRelative `
+            -TargetPath $TargetPath `
+            -RelativePath $relativePath)
+        $records.Add((
+            ConvertTo-CodexSafeTreeDeleteFileIdentityV2Record `
+                -RelativePath $relativePath `
+                -Identity $entry.IdentityV2
+        ))
+    }
+    return $records
+}
+
+function New-CodexSafeTreeDeletePlanLeafStreamSetFromCaptures {
+    param(
+        [Parameter(Mandatory)][object]$Captures,
+        [Parameter(Mandatory)][string]$TargetPath
+    )
+
+    $leaves = [Collections.Generic.List[object]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in @($Captures)) {
+        $relativePath = [string]$entry.RelativePath
+        $kind = [string]$entry.Kind
+        if (-not $seen.Add($relativePath)) {
+            throw "safe-delete plan leafStreamSetV1 relativePath 重复：$relativePath"
+        }
+        [void](ConvertTo-CodexSafeTreeDeleteLeafAbsolutePath `
+            -TreePath $TargetPath `
+            -RelativePath $relativePath `
+            -Scope 'safe-delete plan leafStreamSetV1')
+        $capturedKind = [string]$entry.CapturedKind
+        if ($capturedKind -cne $kind) {
+            throw "safe-delete plan leafStreamSetV1 leaf kind 漂移：$relativePath"
+        }
+        $streamNames = [string[]]@($entry.StreamNames)
+        if ($kind -ceq 'file' -and
+            -not ($streamNames.Count -eq 1 -and $streamNames[0] -ceq '::$DATA')) {
+            throw "safe-delete plan leafStreamSetV1 file leaf 不得携带命名流：$relativePath"
+        }
+        if ($kind -ceq 'directory-junction' -and $streamNames.Count -ne 0) {
+            throw "safe-delete plan leafStreamSetV1 junction leaf 不得携带命名流：$relativePath"
+        }
+        $leaves.Add([pscustomobject][ordered]@{
+            relativePath = $relativePath
+            kind = $kind
+            streamNames = @($streamNames)
+            hardLinkCount = [long]$entry.NumberOfLinks
         })
     }
 
@@ -1020,7 +1179,9 @@ function New-CodexSafeTreeDeletePlan {
         [Parameter(Mandatory)][string]$CapabilityRoot,
         [Parameter(Mandatory)][string]$PolicyPath,
         [Parameter(Mandatory)][string]$EvidenceRoot,
-        [object]$FileSystemCapabilitiesForTest
+        [object]$FileSystemCapabilitiesForTest,
+        [switch]$DisablePlanCSharpWalkerForTest,
+        [scriptblock]$PlanWalkerCheckpointForTest
     )
 
     $metricsState = New-CodexSafeTreeDeleteMetricsState -Phase 'plan'
@@ -1035,30 +1196,90 @@ function New-CodexSafeTreeDeletePlan {
     Assert-CodexSafeTreeDeleteDeletionAllowed `
         -TargetPath $target.targetPath `
         -FileSystemCapabilitiesForTest $FileSystemCapabilitiesForTest
-    $tree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
-        -Path $target.targetPath `
-        -CapabilityRoot $target.capabilityRoot `
-        -AllowedExactPaths @($target.targetPath) `
-        -AllowHardLinks:([bool]$target.allowHardLinks) `
-        -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
-        -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
-        -MetricsObserver $metricsObserver `
-        -Name 'safe-delete plan snapshot'
+    $planSegments = [pscustomobject][ordered]@{
+        walker = $null
+        walkerTotalMs = $null
+        hashMs = $null
+        streamSetMs = $null
+        capturesMs = $null
+        identityPassMs = $null
+        streamSetPassMs = $null
+        documentMs = $null
+        publishMs = $null
+        readbackMs = $null
+        utc = [datetimeoffset]::UtcNow.ToString('o')
+    }
+    $planWalkerAlgorithm = Get-CodexHostSafetyNativeResolvedWalkerAlgorithm
+    $usePlanCSharpWalker = (-not $DisablePlanCSharpWalkerForTest.IsPresent) -and
+        ($planWalkerAlgorithm -ceq 'csharp-plan-snapshot')
+    $planTree = $null
+    if ($usePlanCSharpWalker) {
+        $planSegments.walker = 'csharp'
+        $walkerWatch = [Diagnostics.Stopwatch]::StartNew()
+        $planTree = Get-CodexSafeTreeDeletePlanTreeSnapshot `
+            -Path $target.targetPath `
+            -CapabilityRoot $target.capabilityRoot `
+            -AllowedExactPaths @($target.targetPath) `
+            -AllowHardLinks:([bool]$target.allowHardLinks) `
+            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+            -MetricsObserver $metricsObserver `
+            -PlanWalkerCheckpointForTest $PlanWalkerCheckpointForTest `
+            -Name 'safe-delete plan snapshot'
+        $walkerWatch.Stop()
+        $planSegments.walkerTotalMs = [long]$walkerWatch.ElapsedMilliseconds
+        $planSegments.hashMs = [long]$planTree.timings.HashMs
+        $planSegments.streamSetMs = [long]$planTree.timings.StreamSetMs
+        $tree = $planTree.manifest
+    } else {
+        $planSegments.walker = 'powershell'
+        $walkerWatch = [Diagnostics.Stopwatch]::StartNew()
+        $tree = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+            -Path $target.targetPath `
+            -CapabilityRoot $target.capabilityRoot `
+            -AllowedExactPaths @($target.targetPath) `
+            -AllowHardLinks:([bool]$target.allowHardLinks) `
+            -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+            -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+            -MetricsObserver $metricsObserver `
+            -Name 'safe-delete plan snapshot'
+        $walkerWatch.Stop()
+        $planSegments.walkerTotalMs = [long]$walkerWatch.ElapsedMilliseconds
+    }
     Assert-CodexSafeTreeDeleteTargetTreePolicy `
         -Target $target `
         -TreeManifest $tree `
         -TreePath $target.targetPath
     $generationId = [guid]::NewGuid().ToString('D')
     $now = [datetimeoffset]::UtcNow
+    if ($usePlanCSharpWalker) {
+        $capturesWatch = [Diagnostics.Stopwatch]::StartNew()
+        $fileIdentitiesV2 = New-CodexSafeTreeDeletePlanFileIdentitiesV2FromCaptures `
+            -Captures $planTree.captures `
+            -TargetPath $target.targetPath
+        $leafStreamSetV1 = New-CodexSafeTreeDeletePlanLeafStreamSetFromCaptures `
+            -Captures $planTree.captures `
+            -TargetPath $target.targetPath
+        $capturesWatch.Stop()
+        $planSegments.capturesMs = [long]$capturesWatch.ElapsedMilliseconds
+    } else {
+        $identityWatch = [Diagnostics.Stopwatch]::StartNew()
+        $fileIdentitiesV2 = New-CodexSafeTreeDeletePlanFileIdentitiesV2 `
+            -TargetPath $target.targetPath `
+            -TreeManifest $tree
+        $identityWatch.Stop()
+        $planSegments.identityPassMs = [long]$identityWatch.ElapsedMilliseconds
+        $streamSetWatch = [Diagnostics.Stopwatch]::StartNew()
+        $leafStreamSetV1 = New-CodexSafeTreeDeletePlanLeafStreamSet `
+            -TargetPath $target.targetPath `
+            -TreeManifest $tree
+        $streamSetWatch.Stop()
+        $planSegments.streamSetPassMs = [long]$streamSetWatch.ElapsedMilliseconds
+    }
+    $documentWatch = [Diagnostics.Stopwatch]::StartNew()
     $topLevelEntries = @($tree.entries | Where-Object {
         $_.relativePath -cne '.' -and $_.relativePath -notmatch '/'
     } | ForEach-Object { [string]$_.relativePath })
-    $fileIdentitiesV2 = New-CodexSafeTreeDeletePlanFileIdentitiesV2 `
-        -TargetPath $target.targetPath `
-        -TreeManifest $tree
-    $leafStreamSetV1 = New-CodexSafeTreeDeletePlanLeafStreamSet `
-        -TargetPath $target.targetPath `
-        -TreeManifest $tree
     $document = [pscustomobject][ordered]@{
         artifactType = 'env-governance.codex-safe-tree-delete-plan'
         schemaVersion = 1
@@ -1079,7 +1300,10 @@ function New-CodexSafeTreeDeletePlan {
             topLevelEntries = $topLevelEntries
         }
     }
+    $documentWatch.Stop()
+    $planSegments.documentMs = [long]$documentWatch.ElapsedMilliseconds
 
+    $publishWatch = [Diagnostics.Stopwatch]::StartNew()
     $evidenceRootPath = Initialize-CodexSafeTreeDeleteEvidenceRoot -EvidenceRoot $EvidenceRoot
     $runDirectory = Join-Path $evidenceRootPath ("{0}-{1}" -f $now.ToString('yyyyMMddTHHmmssZ'), $generationId)
     [void](New-CodexHookCapabilityDirectory `
@@ -1094,12 +1318,18 @@ function New-CodexSafeTreeDeletePlan {
         -CapabilityRoot $runDirectory `
         -AllowedExactPaths @($planPath) `
         -Scope 'safe-delete plan publish'
+    $publishWatch.Stop()
+    $planSegments.publishMs = [long]$publishWatch.ElapsedMilliseconds
+    $readbackWatch = [Diagnostics.Stopwatch]::StartNew()
     $planSnapshot = Get-CodexHookCapabilityFileSnapshot `
         -Path $planPath `
         -CapabilityRoot $runDirectory `
         -AllowedExactPaths @($planPath) `
         -Name 'safe-delete plan published'
+    $readbackWatch.Stop()
+    $planSegments.readbackMs = [long]$readbackWatch.ElapsedMilliseconds
     & $metricsObserver 'hash-read' 0L ([long]$planSnapshot.bytes.Length)
+    $script:CodexSafeTreeDeleteLastPlanSegments = $planSegments
 
     return [pscustomobject][ordered]@{
         planned = $true
@@ -4415,7 +4645,7 @@ function Invoke-CodexSafeTreeDeleteQuarantine {
             (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $plan.treeManifest)) {
             throw 'safe-delete apply locked preflight tree manifest 漂移。'
         }
-        $applyStreamCaptures = $script:CodexSafeTreeDeleteLastStreamCaptures
+        $applyStreamCaptures = if (Test-Path Variable:Script:CodexSafeTreeDeleteLastStreamCaptures) { $script:CodexSafeTreeDeleteLastStreamCaptures } else { $null }
         Assert-CodexSafeTreeDeleteLiveStreamSet `
             -PlanStreamSet $planStreamSet `
             -TreeManifest $lockedTree `
@@ -6435,7 +6665,7 @@ function Invoke-CodexSafeTreeDeletePurge {
         foreach ($entry in @($currentTree.entries)) {
             [void]$preflightLiveLeafSet.Add([string]$entry.relativePath)
         }
-        $purgeStreamCaptures = $script:CodexSafeTreeDeleteLastStreamCaptures
+        $purgeStreamCaptures = if (Test-Path Variable:Script:CodexSafeTreeDeleteLastStreamCaptures) { $script:CodexSafeTreeDeleteLastStreamCaptures } else { $null }
         Assert-CodexSafeTreeDeleteLiveStreamSet `
             -PlanStreamSet $planStreamSet `
             -TreeManifest $currentTree `

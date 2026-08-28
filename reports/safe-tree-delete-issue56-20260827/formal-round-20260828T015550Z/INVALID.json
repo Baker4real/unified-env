@@ -1,0 +1,4 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue56-formal-round-invalid",
+  "reason": "host session interruption killed runner+child; attempt 01 has started-without-terminal (orphan). Kept as invalid per protocol; rerun in new round directory."
+}

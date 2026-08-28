@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "sequence": 1,
+  "label": "baseline-pre",
+  "attemptUuid": "924cbfd3d34145fda672b7db132c2d1a",
+  "utc": "2026-08-28T01:55:51.1796596+00:00",
+  "closureSha256": "b70aa6a3a71949bd7bdb8955d65598e3077961c0f2c1d6dd6d6700c149c72805",
+  "kind": "baseline",
+  "purgeDop": 0
+}

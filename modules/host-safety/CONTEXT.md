@@ -18,7 +18,9 @@ safe delete 的宿主公开入口仍是 `D:\Codex\.codex\scripts\invoke-safe-tre
 ## 权威合同
 
 - 删除语义与生产 policy：`docs/specs/2026-07-24-safe-tree-delete-capability.md`
-- 性能优化（生产并行 Purge 已接线；典型 4x 边界、6x 移交 #56）：`docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`
+- 性能优化（Plan C# 单遍 walker 已落地、AC1 达标；生产并行 Purge 已接线；端到端 6x 正式验收待环境安静窗口重跑，见 #56）：`docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`
+
+Plan 阶段自 2026-08-27（#56 Wave A）默认走 C# 单遍 walker（`scripts/lib/CodexSafeTreeDeletePlanSnapshot.cs`）；plan.json 合同不变，等价性与双模式回归见 `reports/safe-tree-delete-issue56-20260827/`。生产排障回退：env `CODEX_SAFE_TREE_DELETE_PLAN_CSHARP_WALKER=0` 强制回 PowerShell 三遍路径（仅字符串 '0' 生效）。
 
 性能史诗 #26 子票 #32/#40/#41/#42 已于 2026-08-19 关闭，现役状态与实测数字以性能 spec「操作者指南」为准；`reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md` 是 2026-08-17 时点快照。
 

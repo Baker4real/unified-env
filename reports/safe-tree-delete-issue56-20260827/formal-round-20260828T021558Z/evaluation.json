@@ -1,0 +1,260 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue56-formal-round",
+  "roundUtc": "20260828T021558Z",
+  "baselineConstantMedianMs": 576238,
+  "closureBefore": "b70aa6a3a71949bd7bdb8955d65598e3077961c0f2c1d6dd6d6700c149c72805",
+  "closureAfter": "b70aa6a3a71949bd7bdb8955d65598e3077961c0f2c1d6dd6d6700c149c72805",
+  "protocolValid": false,
+  "protocolInvalidReasons": [
+    "baseline baseline-pre=745207ms 超出 ±10%（仅环境 sanity，不换分母）",
+    "baseline baseline-post=966023ms 超出 ±10%（仅环境 sanity，不换分母）"
+  ],
+  "fileCount": 10000,
+  "bytesPerFile": 4096,
+  "psVersion": "7.6.5",
+  "processorCount": 20,
+  "attempts": [
+    {
+      "sequence": 1,
+      "label": "baseline-pre",
+      "kind": "baseline",
+      "purgeDop": 0,
+      "attemptUuid": "dd03dd167f254aa0a953788fc00ee94d",
+      "exitCode": 0,
+      "walkerKind": "powershell-three-pass",
+      "result": {
+        "walkerKind": "powershell-three-pass",
+        "planElapsedMs": 114573,
+        "applyElapsedMs": 362748,
+        "purgeElapsedMs": 267886,
+        "endToEndElapsedMs": 745207,
+        "baselineMode": true
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 2,
+      "label": "ac1-s1",
+      "kind": "plan",
+      "purgeDop": 0,
+      "attemptUuid": "42414be338264393b01b99635ad9c6dd",
+      "exitCode": 0,
+      "walkerKind": "csharp-plan-snapshot",
+      "result": {
+        "walkerKind": "csharp-plan-snapshot",
+        "planElapsedMs": 11231,
+        "entriesScanned": 10101,
+        "fileCount": 10000,
+        "walker": "csharp",
+        "walkerTotalMs": 4567,
+        "hashMs": 5,
+        "streamSetMs": 4,
+        "capturesMs": 3784,
+        "identityPassMs": 0,
+        "streamSetPassMs": 0,
+        "documentMs": 127,
+        "publishMs": 1706,
+        "readbackMs": 695
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 3,
+      "label": "ac1-s2",
+      "kind": "plan",
+      "purgeDop": 0,
+      "attemptUuid": "1db9077fcf1e48de9a92eb2eeb65ef61",
+      "exitCode": 0,
+      "walkerKind": "csharp-plan-snapshot",
+      "result": {
+        "walkerKind": "csharp-plan-snapshot",
+        "planElapsedMs": 9698,
+        "entriesScanned": 10101,
+        "fileCount": 10000,
+        "walker": "csharp",
+        "walkerTotalMs": 3882,
+        "hashMs": 2,
+        "streamSetMs": 3,
+        "capturesMs": 2987,
+        "identityPassMs": 0,
+        "streamSetPassMs": 0,
+        "documentMs": 105,
+        "publishMs": 1716,
+        "readbackMs": 654
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 4,
+      "label": "ac1-s3",
+      "kind": "plan",
+      "purgeDop": 0,
+      "attemptUuid": "34cb335710c4492c88c4d4e2daea4164",
+      "exitCode": 0,
+      "walkerKind": "csharp-plan-snapshot",
+      "result": {
+        "walkerKind": "csharp-plan-snapshot",
+        "planElapsedMs": 10296,
+        "entriesScanned": 10101,
+        "fileCount": 10000,
+        "walker": "csharp",
+        "walkerTotalMs": 3403,
+        "hashMs": 3,
+        "streamSetMs": 4,
+        "capturesMs": 4072,
+        "identityPassMs": 0,
+        "streamSetPassMs": 0,
+        "documentMs": 109,
+        "publishMs": 1779,
+        "readbackMs": 664
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 5,
+      "label": "dop2-s1",
+      "kind": "e2e",
+      "purgeDop": 0,
+      "attemptUuid": "d71512e7113c44be9508f0301348b9e7",
+      "exitCode": 0,
+      "walkerKind": "csharp-plan-snapshot",
+      "result": {
+        "walkerKind": "csharp-plan-snapshot",
+        "planElapsedMs": 8908,
+        "applyElapsedMs": 28392,
+        "purgeElapsedMs": 41275,
+        "endToEndElapsedMs": 78575,
+        "purgeDopRequested": 0,
+        "parallelPurgeUsed": true,
+        "coordinatorMs": 3554,
+        "journalOverheadPercent": 8.610539067231981
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 6,
+      "label": "dop4-s1",
+      "kind": "e2e",
+      "purgeDop": 4,
+      "attemptUuid": "90d4cb3bc80e460d899033ca93515137",
+      "exitCode": 0,
+      "walkerKind": "csharp-plan-snapshot",
+      "result": {
+        "walkerKind": "csharp-plan-snapshot",
+        "planElapsedMs": 9408,
+        "applyElapsedMs": 29548,
+        "purgeElapsedMs": 38863,
+        "endToEndElapsedMs": 77819,
+        "purgeDopRequested": 4,
+        "parallelPurgeUsed": true,
+        "coordinatorMs": 1509,
+        "journalOverheadPercent": 3.882870596711525
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 7,
+      "label": "dop2-s2",
+      "kind": "e2e",
+      "purgeDop": 0,
+      "attemptUuid": "bcf10bc5ed0641dd8859df1fe7023252",
+      "exitCode": 0,
+      "walkerKind": "csharp-plan-snapshot",
+      "result": {
+        "walkerKind": "csharp-plan-snapshot",
+        "planElapsedMs": 9855,
+        "applyElapsedMs": 28572,
+        "purgeElapsedMs": 42658,
+        "endToEndElapsedMs": 81085,
+        "purgeDopRequested": 0,
+        "parallelPurgeUsed": true,
+        "coordinatorMs": 2739,
+        "journalOverheadPercent": 6.420835482207323
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 8,
+      "label": "dop4-s2",
+      "kind": "e2e",
+      "purgeDop": 4,
+      "attemptUuid": "6c32c89a2caf42cbb4f45743e665e434",
+      "exitCode": 0,
+      "walkerKind": "csharp-plan-snapshot",
+      "result": {
+        "walkerKind": "csharp-plan-snapshot",
+        "planElapsedMs": 10287,
+        "applyElapsedMs": 28082,
+        "purgeElapsedMs": 39674,
+        "endToEndElapsedMs": 78043,
+        "purgeDopRequested": 4,
+        "parallelPurgeUsed": true,
+        "coordinatorMs": 1562,
+        "journalOverheadPercent": 3.937087261178606
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 9,
+      "label": "dop2-s3",
+      "kind": "e2e",
+      "purgeDop": 0,
+      "attemptUuid": "a752f0e82d274d698e18c0ab89836ec8",
+      "exitCode": 0,
+      "walkerKind": "csharp-plan-snapshot",
+      "result": {
+        "walkerKind": "csharp-plan-snapshot",
+        "planElapsedMs": 9368,
+        "applyElapsedMs": 27938,
+        "purgeElapsedMs": 38101,
+        "endToEndElapsedMs": 75407,
+        "purgeDopRequested": 0,
+        "parallelPurgeUsed": true,
+        "coordinatorMs": 2526,
+        "journalOverheadPercent": 6.629747250728327
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 10,
+      "label": "dop4-s3",
+      "kind": "e2e",
+      "purgeDop": 4,
+      "attemptUuid": "d2ffd72f55884b9891ed54fcd640ccf3",
+      "exitCode": 0,
+      "walkerKind": "csharp-plan-snapshot",
+      "result": {
+        "walkerKind": "csharp-plan-snapshot",
+        "planElapsedMs": 9758,
+        "applyElapsedMs": 28343,
+        "purgeElapsedMs": 40594,
+        "endToEndElapsedMs": 78695,
+        "purgeDopRequested": 4,
+        "parallelPurgeUsed": true,
+        "coordinatorMs": 1421,
+        "journalOverheadPercent": 3.500517317830221
+      },
+      "stderr": ""
+    },
+    {
+      "sequence": 11,
+      "label": "baseline-post",
+      "kind": "baseline",
+      "purgeDop": 0,
+      "attemptUuid": "a77286360f0840e982096a515b4c99a2",
+      "exitCode": 0,
+      "walkerKind": "powershell-three-pass",
+      "result": {
+        "walkerKind": "powershell-three-pass",
+        "planElapsedMs": 127991,
+        "applyElapsedMs": 486481,
+        "purgeElapsedMs": 351551,
+        "endToEndElapsedMs": 966023,
+        "baselineMode": true
+      },
+      "stderr": ""
+    }
+  ],
+  "verdict": "BENCH_INVALID",
+  "acResults": null
+}

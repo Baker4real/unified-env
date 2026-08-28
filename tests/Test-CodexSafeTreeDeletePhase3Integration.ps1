@@ -40,8 +40,9 @@ $scaleTotalBytes = [long]$scaleFileCount * [long]$scaleBytesPerFile
 $scaleHeadroomBytes = 256L * 1024L * 1024L
 $scaleRequiredBytes = (2L * $scaleTotalBytes) + $scaleHeadroomBytes
 $forbiddenQuarantine = Join-Path $projectRoot 'reports\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine'
-$productionRunEvidenceRoot = 'D:\Codex\.codex\run-evidence\safe-tree-delete'
-$forbiddenTransaction = Join-Path $productionRunEvidenceRoot '20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\transaction.json'
+$productionRunEvidenceRoot = 'D:\agents\run-evidence\safe-tree-delete'
+$leftoverEvidenceRoot = 'D:\Codex\.codex\run-evidence\safe-tree-delete'
+$forbiddenTransaction = Join-Path $leftoverEvidenceRoot '20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\transaction.json'
 # leftover guard 语义：测试不得创建/删除 leftover quarantine（存在性前后不得变化），
 # 不是「世界必须永远包含它」。该 quarantine 已随 projects 根迁移消失（非测试行为），
 # 故按 start 快照对齐；transaction.json 仍必须存在。
@@ -50,10 +51,10 @@ $forbiddenTransaction = Join-Path $productionRunEvidenceRoot '20260816T021845Z-0
 # （语义是「本环境有没有生产证据」，宿主本地误设 CI 变量不得降级）。根不存在 →
 # leftoverGuardMode=absent-environment，leftover 三断言记名跳过；根存在 → production-host，
 # 三断言（transaction 必须在 / quarantine 存在性不变 / digest 不变）全部照旧强制。
-$leftoverGuardMode = if ([IO.Directory]::Exists($productionRunEvidenceRoot)) { 'production-host' } else { 'absent-environment' }
+$leftoverGuardMode = if ([IO.Directory]::Exists($leftoverEvidenceRoot)) { 'production-host' } else { 'absent-environment' }
 if ($leftoverGuardMode -ceq 'absent-environment') {
-    Write-Output ("[SKIP] leftover guard: 生产 run-evidence 根不存在，leftoverGuardMode=absent-environment，" +
-        "跳过 leftover 三断言（transaction 必须在 / quarantine 存在性不变 / digest 不变）: $productionRunEvidenceRoot")
+    Write-Output ("[SKIP] leftover guard: 生产 leftover 根不存在，leftoverGuardMode=absent-environment，" +
+        "跳过 leftover 三断言（transaction 必须在 / quarantine 存在性不变 / digest 不变）: $leftoverEvidenceRoot")
 }
 $leftoverQuarantineExistsAtStart = [IO.Directory]::Exists($forbiddenQuarantine)
 
@@ -1123,7 +1124,9 @@ try {
         touched = (
             ([IO.Directory]::Exists($forbiddenQuarantine) -ne $leftoverQuarantineExistsAtStart) -or
             ([string]$leftoverQuarantineDigestAtEnd -cne [string]$leftoverQuarantineDigestAtStart))
-        note = 'guard 语义：quarantine 存在性与直接子项摘要相对 start 不得变化（迁移后 start 即 absent，摘要记 null）；transaction.json 必须仍在。leftoverGuardMode=absent-environment（生产 run-evidence 根不存在，如 GitHub runner）时三断言记名跳过，本文件字段仍如实记录现场值。'
+historicalLeftoverObservation = $(if ([IO.Directory]::Exists($leftoverEvidenceRoot)) { 'present' } else { 'absent' })
+        # #56 par7.5: historical leftover is observation-only (present|absent), never a gate skip/waiver/PASS condition.
+                note = 'guard 语义：quarantine 存在性与直接子项摘要相对 start 不得变化（迁移后 start 即 absent，摘要记 null）；transaction.json 必须仍在。leftoverGuardMode=absent-environment（生产 run-evidence 根不存在，如 GitHub runner）时三断言记名跳过，本文件字段仍如实记录现场值。'
     }
     Write-JsonFile -Path (Join-Path $evidenceHome 'leftover-guard.json') -Document $leftoverGuard
     Assert-LeftoverUntouched -When 'after-scale'

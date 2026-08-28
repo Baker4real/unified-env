@@ -1,0 +1,19 @@
+{
+  "kind": "e2e",
+  "resolvedAlgorithm": "csharp-plan-snapshot",
+  "loadedVariant": "default",
+  "psVersion": "7.6.5",
+  "processorCount": 20,
+  "attemptUtc": "2026-08-28T03:02:16.0001491+00:00",
+  "result": {
+    "walkerKind": "csharp-plan-snapshot",
+    "planElapsedMs": 9368,
+    "applyElapsedMs": 27938,
+    "purgeElapsedMs": 38101,
+    "endToEndElapsedMs": 75407,
+    "purgeDopRequested": 0,
+    "parallelPurgeUsed": true,
+    "coordinatorMs": 2526,
+    "journalOverheadPercent": 6.629747250728327
+  }
+}

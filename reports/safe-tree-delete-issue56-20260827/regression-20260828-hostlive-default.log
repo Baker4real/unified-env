@@ -1,0 +1,39 @@
+Running Test-CodexSafeTreeDeletePhase3Production.ps1
+ok=True slices=5
+Running Test-CodexSafeTreeDeleteProductionSmoke.ps1
+
+[32;1mok                              : [0mTrue
+[32;1msuite                           : [0mCodexSafeTreeDeleteProductionSmoke
+[32;1mplanPath                        : [0mD:\agents\run-evidence\safe-tree-delete\20260828T071124Z-c06bc0ef-753f-4e15-9687-e5cf
+                                  cbf06d3a\plan.json
+[32;1mtransactionPath                 : [0mD:\agents\run-evidence\safe-tree-delete\20260828T071124Z-c06bc0ef-753f-4e15-9687-e5cf
+                                  cbf06d3a\transaction.json
+[32;1mtransactionSha256               : [0mf278cfb38805461383a65d199e6251ef11ff05190b7b9a4f6aa81a51477b50e9
+[32;1mbatchRecoveredCount             : [0m1
+[32;1mbatchParentPurged               : [0mTrue
+[32;1munconfirmedArchiveExitCode      : [0m0
+[32;1munconfirmedArchiveRefusalReason : [0mconfirm-archive-required
+[32;1mstatusZeroWrite                 : [0mTrue
+[32;1mstatusPolicyZeroWrite           : [0mTrue
+[32;1mstatusStdoutSha256              : [0m110c345a108d550fedf40aacf4738730cf09403a77b44e7085f9475f378420f9
+[32;1mstatusOperationCount            : [0m3446
+[32;1mstatusOperationIdCount          : [0m3446
+[32;1mstatusGenerationIdCount         : [0m0
+[32;1mtimeoutTreeClosed               : [0mTrue
+[32;1mtimeoutIsHarnessContract        : [0mTrue
+[32;1mleafDeleteFailed                : [0mTrue
+[32;1mrevertForwardingProved          : [0mTrue
+[32;1mrevertForwardingExitCode        : [0m0
+[32;1mlivePs1Sha256Final              : [0mec14e863460b70a6ed14c56aa0b9dc6546a3efe141599a51005d3aee373aee7a
+[32;1mwrapperRestored                 : [0mTrue
+[32;1mleftover0ab1e1b6Untouched       : [0mTrue
+[32;1mnewInflightQuarantine           : [0m
+[32;1mevidenceDirectory               : [0mD:\agents\projects\统一环境\reports\safe-tree-delete-production-smoke-harness-aaf67b5
+                                  93370466bb0639cd0a4527075\issue55
+[32;1missue21EvidenceDirectory        : [0mD:\agents\projects\统一环境\reports\safe-tree-delete-production-smoke-harness-aaf67b5
+                                  93370466bb0639cd0a4527075\issue21
+[32;1mharnessEvidenceRoot             : [0mD:\agents\projects\统一环境\reports\safe-tree-delete-production-smoke-harness-aaf67b5
+                                  93370466bb0639cd0a4527075
+[32;1mfrozenLeafDeleteFailedSha256    : [0m6e451a914a926dbf69d586c929ed87f3cd90c8b941959398e3f4bac0a4a04881
+[32;1mfrozenSnapshotsUntouched        : [0mTrue
+

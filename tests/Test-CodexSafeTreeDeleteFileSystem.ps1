@@ -728,6 +728,7 @@ try {
     $liveIsElevatedProcess = [bool][Security.Principal.WindowsPrincipal]::new(
         [Security.Principal.WindowsIdentity]::GetCurrent()
     ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $liveProcess = [Diagnostics.Process]::GetCurrentProcess()
     $liveVhd = $null
     $liveFatSource = 'existing-volume'
     $liveFsLeg = 'native-volume'
@@ -847,6 +848,15 @@ try {
         liveFolderPlanError = $(if ($null -eq $liveFolderPlan) { $null } else { [string]$liveFolderPlan.error })
         liveNetworkDriveCount = $liveNetworkDrives.Count
         liveNetworkNote = $liveNetworkNote
+        # #56 par7.5 structured skip metadata (evaluator recomputes FAT-family count from liveDriveInventory).
+        # Only allowed skip tuple: {suite=CodexSafeTreeDeleteFileSystem, leg=skipped-non-elevated,
+        # condition=(isElevatedProcess=false && nativeFatFamilyDriveCount=0), waiverIssue=35}
+        processId = $PID
+        processStartTimeUtc = $liveProcess.StartTime.ToUniversalTime().ToString('o')
+        isElevatedProcess = [bool]$liveIsElevatedProcess
+        nativeFatFamilyDriveCount = [int]$liveFatFamilyDrives.Count
+        skipReason = $(if ($liveFsLeg -ceq 'skipped-non-elevated') { 'skipped-non-elevated' } else { $null })
+        waiverIssue = $(if ($liveFsLeg -ceq 'skipped-non-elevated') { 35 } else { $null })
     }
 } finally {
     if ([IO.Directory]::Exists($fixtureRoot)) {

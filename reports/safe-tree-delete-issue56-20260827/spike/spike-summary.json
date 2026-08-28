@@ -1,0 +1,39 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue56-serialization-spike",
+  "utc": "2026-08-27T06:03:07.3151756+00:00",
+  "walkerMode": "powershell-three-pass (pre-change)",
+  "fileCount": 10000,
+  "bytesPerFile": 4096,
+  "processorCount": 20,
+  "note": "probeSerializeMs 为对已发布 plan.json 解析后再 ConvertTo-Json -Depth 100 的探针成本，量级代表 lib 内序列化段；probeReadbackMs 为读回+SHA256。",
+  "samples": [
+    {
+      "sampleIndex": 1,
+      "utc": "2026-08-27T05:52:59.1868567+00:00",
+      "planElapsedMs": 154097,
+      "entriesScanned": 10101,
+      "logicalBytes": 40960000,
+      "bytesHashed": 48316881,
+      "planBytes": 7356385,
+      "probeReadTextMs": 64,
+      "probeParseMs": 615,
+      "probeSerializeMs": 457,
+      "probeReadbackMs": 7,
+      "processCpuSecondsDelta": 152.156
+    },
+    {
+      "sampleIndex": 2,
+      "utc": "2026-08-27T05:56:39.7624814+00:00",
+      "planElapsedMs": 159345,
+      "entriesScanned": 10101,
+      "logicalBytes": 40960000,
+      "bytesHashed": 48316881,
+      "planBytes": 7356385,
+      "probeReadTextMs": 173,
+      "probeParseMs": 456,
+      "probeSerializeMs": 583,
+      "probeReadbackMs": 6,
+      "processCpuSecondsDelta": 157.172
+    }
+  ]
+}

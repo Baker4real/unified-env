@@ -1,0 +1,53 @@
+Running Test-CodexSafeTreeDeletePlanWalkerEquivalence.ps1
+ENV ps=7.6.5 culture=zh-CN uiculture=zh-CN
+EQUIVALENCE OK
+PLAN-WALKER-EQUIVALENCE DONE
+Running Test-CodexSafeTreeDeletePurgeBatch.ps1
+
+[32;1mok                            : [0mTrue
+[32;1msuite                         : [0mCodexSafeTreeDeletePurgeBatch
+[32;1mscale10000SpeedupVsPhase1     : [0m0.776
+[32;1mscale10000SpeedupVsBaseline   : [0m5.092
+[32;1mscale10000MetTarget           : [0mFalse
+[32;1mscale10000MetTargetVsPhase1   : [0mFalse
+[32;1mscale10000MetTargetVsBaseline : [0mTrue
+
+Running Test-CodexSafeTreeDeletePurgeHashReuse.ps1
+
+[32;1mok                  : [0mTrue
+[32;1msuite               : [0mCodexSafeTreeDeletePurgeHashReuse
+[32;1mscale1000ElapsedMs  : [0m5105
+[32;1mscale10000Speedup   : [0m6.405
+[32;1mscale10000MetTarget : [0mTrue
+
+Running Test-CodexSafeTreeDeleteRestore.ps1
+Safe tree delete Restore tests passed: confirmation/SHA, quarantined/prepared, fail-closed drift, 4 crash phases, full-tree replay, journals, mutex/idempotency, Archive strict anchors.
+Running Test-CodexSafeTreeDeleteSchemaCompatibility.ps1
+
+[32;1m  ok[0m[32;1m suite                                 [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                                 [0m [32;1m------[0m
+True CodexSafeTreeDeleteSchemaCompatibility     10
+
+Running Test-CodexSafeTreeDeleteStatus.ps1
+
+[32;1m  ok[0m[32;1m suite                    [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                    [0m [32;1m------[0m
+True CodexSafeTreeDeleteStatus     24
+
+Running Test-CodexSafeTreeDeleteThreadJournal.ps1
+
+[32;1m  ok[0m[32;1m suite                           [0m[32;1m issue[0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                           [0m [32;1m-----[0m [32;1m------[0m
+True CodexSafeTreeDeleteThreadJournal    38      6
+
+Running Test-CodexSafeTreeDeleteUncertainRecovery.ps1
+unit-recovery-classification: passed
+integration-failfast-recovery: passed
+Running Test-CodexUserEnvironmentTransaction.ps1
+Running Test-ReportArtifactPublisher.ps1
+
+[32;1m  ok[0m
+[32;1m  --[0m
+True
+
+SUFFIX-ALL-GREEN

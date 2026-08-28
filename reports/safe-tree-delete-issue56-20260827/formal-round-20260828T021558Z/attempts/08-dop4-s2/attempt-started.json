@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "sequence": 8,
+  "label": "dop4-s2",
+  "attemptUuid": "6c32c89a2caf42cbb4f45743e665e434",
+  "utc": "2026-08-28T02:59:52.9640100+00:00",
+  "closureSha256": "b70aa6a3a71949bd7bdb8955d65598e3077961c0f2c1d6dd6d6700c149c72805",
+  "kind": "e2e",
+  "purgeDop": 4
+}

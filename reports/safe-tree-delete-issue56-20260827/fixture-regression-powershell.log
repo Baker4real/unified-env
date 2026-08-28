@@ -1,0 +1,253 @@
+Running Test-CodexSafeTreeDelete.ps1
+
+[32;1m  ok[0m[32;1m suite              [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----              [0m [32;1m------[0m
+True CodexSafeTreeDelete     12
+
+Running Test-CodexSafeTreeDeleteBenchmark.ps1
+
+[32;1martifactType     : [0menv-governance.codex-safe-tree-delete-benchmark
+[32;1mschemaVersion    : [0m2
+[32;1mcapturedAtUtc    : [0m2026-08-27T09:14:27.2117409+00:00
+[32;1mprofile          : [0misolated-fixture
+[32;1mmachine          : [0m@{osVersion=Microsoft Windows NT 10.0.26200.0; processorCount=20; powerShellVersion=7.6.5; osArchite
+                   cture=X64; processArchitecture=X64}
+[32;1martifacts        : [0m@{sourceLibraryPath=D:\agents\projects\Í³Ò»»·¾³\scripts\lib\CodexSafeTreeDelete.ps1; sourceLibrarySh
+                   a256=5e990f162352d2d03893169978879a7f885c4bdd1d46f6f7cbfb925d0bad7297; sourceWrapperPath=D:\agents\p
+                   rojects\Í³Ò»»·¾³\scripts\Invoke-CodexSafeTreeDelete.ps1; sourceWrapperSha256=11040c2108d3d3441f7839c
+                   46cc6ebab93723d65be3dde55fbf20aedf44a7dc7; sourceHostAdapterPath=D:\agents\projects\Í³Ò»»·¾³\scripts
+                   \invoke-codex-safe-tree-delete-host.ps1; sourceHostAdapterSha256=ec14e863460b70a6ed14c56aa0b9dc6546a
+                   3efe141599a51005d3aee373aee7a; liveWrapperPath=D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1; 
+                   liveWrapperSha256=ec14e863460b70a6ed14c56aa0b9dc6546a3efe141599a51005d3aee373aee7a; liveWrapperStatu
+                   s=matched-source}
+[32;1mexecution        : [0m@{command=pwsh -NoLogo -NoProfile -File "D:\agents\projects\Í³Ò»»·¾³\scripts\Measure-CodexSafeTreeDe
+                   lete.ps1" -OutputPath "D:\agents\projects\Í³Ò»»·¾³\reports\safe-tree-delete-benchmark-test-0a21acf08
+                   e9645adb282bca43a2070b1.json" -SmallDatasetBytes 1024 -LargeDatasetBytes 1048576; exitCode=0; exitSt
+                   atus=succeeded; cleanup=managed-fixture-tree-removed}
+[32;1mretainedEvidence : [0m@{path=D:\agents\projects\Í³Ò»»·¾³\reports\safe-tree-delete-benchmark-test-0a21acf08e9645adb282bca43
+                   a2070b1-evidence\benchmark-evidence.json; sha256=7201d229bd2ce5a740310e4557fa45fd9dd9a03b6756ccbe6cb
+                   f7aa0bd13a787; payloadBytesRetained=False}
+[32;1mdatasets         : [0m{@{name=small; payloadBytes=1024; policySha256=b3629dc7454ca04c72fdafef366e4e89343c5895b9ff00490c04c
+                   0f435d078b9; fixture=; plan=; status=; apply=; restore=; purge=; retainedEvidence=}, @{name=large; p
+                   ayloadBytes=1048576; policySha256=d9c12ae36feb08a297250bd2c4b7d9925a8f64acb55820ef43fa648a31becd30; 
+                   fixture=; plan=; status=; apply=; restore=; purge=; retainedEvidence=}}
+[32;1mconclusion       : [0m@{hashReuseDesignRecommendation=insufficient-evidence; hashReuseDesignDecision=do-not-open-with-curr
+                   ent-evidence; contentAuthenticatedContractChanged=False; note=Fixture measurements do not authorize 
+                   metadata-only approval or transparent manifest replacement.}
+[32;1munverified       : [0m{host wrapper deployment, live policy activation, real capability target deletion, 16 GiB dataset¡­}
+
+[32;1mok       : [0mTrue
+[32;1msuite    : [0mCodexSafeTreeDeleteBenchmark
+[32;1mdatasets : [0m2
+
+Running Test-CodexSafeTreeDeleteControlPlane.ps1
+
+[32;1m  ok[0m[32;1m suite                          [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                          [0m [32;1m------[0m
+True CodexSafeTreeDeleteControlPlane     10
+
+Running Test-CodexSafeTreeDeleteCrashSafety.ps1
+
+[32;1m  ok[0m[32;1m suite                         [0m[32;1m scenarios[0m
+[32;1m  --[0m [32;1m-----                         [0m [32;1m---------[0m
+True CodexSafeTreeDeleteCrashSafety        13
+
+Running Test-CodexSafeTreeDeleteFileSystem.ps1
+[SKIP] CodexSafeTreeDeleteFileSystem Êµ¾í¶ÎÏÔÊ½¼ÇÃû skip£ºliveFsLeg=skipped-non-elevated¡£Ô­Òò£ºµ±Ç°½ø³Ì·ÇÌáÈ¨£¨IsInRole(Administrator)=False£©ÇÒ±¾»úÎÞÔ­Éú FAT32/exFAT ¾í£¬°´Éè¼Æ²»³¢ÊÔ diskpart/Ò»´ÎÐÔ FAT32 VHD¡£È·¶¨ÐÔ 7 ¸ö slices ÒÑÈ«²¿Í¨¹ý£»ÒÔ¹ÜÀíÔ±£¨ÌáÈ¨£©ÖØÅÜ±¾Ì×¼þ¿É¸²¸ÇÊµ¾í¶Î£¨liveFsLeg=native-volume »ò vhd£©¡£
+
+[32;1mok                     : [0mTrue
+[32;1msuite                  : [0mCodexSafeTreeDeleteFileSystem
+[32;1mslices                 : [0m7
+[32;1mliveDriveInventory     : [0m{@{name=C:\; root=C:\; driveType=Fixed; isReady=True; driveFormat=NTFS; volumeLabel=Ó¦ÓÃ}, @{n
+                         ame=D:\; root=D:\; driveType=Fixed; isReady=True; driveFormat=NTFS; volumeLabel=Ó¦ÓÃ}, @{name=
+                         E:\; root=E:\; driveType=Fixed; isReady=True; driveFormat=NTFS; volumeLabel=ÓÎÏ·}, @{name=F:\;
+                          root=F:\; driveType=Fixed; isReady=True; driveFormat=NTFS; volumeLabel=ÓÎÏ·}}
+[32;1mliveFsLeg              : [0mskipped-non-elevated
+[32;1mliveFsSkipNote         : [0m[SKIP] CodexSafeTreeDeleteFileSystem Êµ¾í¶ÎÏÔÊ½¼ÇÃû skip£ºliveFsLeg=skipped-non-elevated¡£Ô­Òò
+                         £ºµ±Ç°½ø³Ì·ÇÌáÈ¨£¨IsInRole(Administrator)=False£©ÇÒ±¾»úÎÞÔ­Éú FAT32/exFAT ¾í£¬°´Éè¼Æ²»³¢ÊÔ dis
+                         kpart/Ò»´ÎÐÔ FAT32 VHD¡£È·¶¨ÐÔ 7 ¸ö slices ÒÑÈ«²¿Í¨¹ý£»ÒÔ¹ÜÀíÔ±£¨ÌáÈ¨£©ÖØÅÜ±¾Ì×¼þ¿É¸²¸ÇÊµ¾í¶Î
+                         £¨liveFsLeg=native-volume »ò vhd£©¡£
+[32;1mliveFatSource          : [0m
+[32;1mliveFatFileSystemType  : [0m
+[32;1mliveFatDeletionAllowed : [0m
+[32;1mlivePlanLayer          : [0m
+[32;1mlivePlanError          : [0m
+[32;1mliveFolderPlanLayer    : [0m
+[32;1mliveFolderPlanError    : [0m
+[32;1mliveNetworkDriveCount  : [0m0
+[32;1mliveNetworkNote        : [0m
+
+Running Test-CodexSafeTreeDeleteGrace.ps1
+
+[32;1m  ok[0m[32;1m suite                   [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                   [0m [32;1m------[0m
+True CodexSafeTreeDeleteGrace     10
+
+Running Test-CodexSafeTreeDeleteHashCache.ps1
+
+[32;1m  ok[0m[32;1m suite                       [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                       [0m [32;1m------[0m
+True CodexSafeTreeDeleteHashCache      5
+
+Running Test-CodexSafeTreeDeleteHashReuse.ps1
+
+[32;1mok                  : [0mTrue
+[32;1msuite               : [0mCodexSafeTreeDeleteHashReuse
+[32;1mskipScale           : [0mFalse
+[32;1mscale1000ElapsedMs  : [0m2286
+[32;1mscale10000Speedup   : [0m10.905
+[32;1mscale10000MetTarget : [0mTrue
+
+Running Test-CodexSafeTreeDeleteHashSafely.ps1
+
+[32;1m  ok[0m[32;1m suite                        [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                        [0m [32;1m------[0m
+True CodexSafeTreeDeleteHashSafely      7
+
+Running Test-CodexSafeTreeDeleteIdentityV2.ps1
+
+[32;1m  ok[0m[32;1m suite                        [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                        [0m [32;1m------[0m
+True CodexSafeTreeDeleteIdentityV2      6
+
+Running Test-CodexSafeTreeDeleteJournalPerformance.ps1
+
+[32;1mok                    : [0mTrue
+[32;1msuite                 : [0mCodexSafeTreeDeleteJournalPerformance
+[32;1missue                 : [0m41
+[32;1mslices                : [0m6
+[32;1msmallFlushCount       : [0m6
+[32;1msmallOverheadPercent  : [0m9.09090909090909
+[32;1mscaleFileCount        : [0m10000
+[32;1mscaleElapsedMs        : [0m3569
+[32;1mscaleTotalFlushTimeMs : [0m199
+[32;1mscaleFlushCount       : [0m632
+[32;1mscaleOverheadPercent  : [0m5.57579153824601
+[32;1mscaleIsWithinTarget   : [0mTrue
+[32;1mscale2OverheadPercent : [0m6.36980241816573
+[32;1mscale2IsWithinTarget  : [0mTrue
+[32;1mscaleSlowFlushCount   : [0m0
+[32;1mperfGates             : [0menforced
+[32;1mac12Enforced          : [0mTrue
+[32;1mscaleAc12MetTarget    : [0mTrue
+[32;1mscale2Ac12MetTarget   : [0mTrue
+
+Running Test-CodexSafeTreeDeleteLeafStreamSet.ps1
+
+[32;1m  ok[0m[32;1m suite                           [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                           [0m [32;1m------[0m
+True CodexSafeTreeDeleteLeafStreamSet      4
+
+Running Test-CodexSafeTreeDeleteMetricsEvidence.ps1
+
+[32;1m  ok[0m[32;1m suite                             [0m[32;1m datasets[0m[32;1m stagesPerDataset[0m
+[32;1m  --[0m [32;1m-----                             [0m [32;1m--------[0m [32;1m----------------[0m
+True CodexSafeTreeDeleteMetricsEvidence        2                9
+
+Running Test-CodexSafeTreeDeleteParallelismBenchmark.ps1
+
+[32;1mok                                    : [0mTrue
+[32;1msuite                                 : [0mCodexSafeTreeDeleteParallelismBenchmark
+[32;1missue                                 : [0m40
+[32;1mmode                                  : [0mAll
+[32;1mevidenceHome                          : [0mD:\agents\projects\Í³Ò»»·¾³\reports\safe-tree-delete-parallelism-benchmark-2026
+                                        0819
+[32;1mprocessorCount                        : [0m20
+[32;1msampleCount                           : [0m2
+[32;1msmallKnee                             : [0m16
+[32;1mmediumKnee                            : [0m16
+[32;1mlargeKnee                             : [0m16
+[32;1msmallPeak                             : [0m1
+[32;1mmediumPeak                            : [0m1
+[32;1mlargePeak                             : [0m2
+[32;1mfromDetectionValue                    : [0m2
+[32;1mfromDetectionMatchesMeasuredPeaks     : [0mFalse
+[32;1mdataSupportsTicketSuggestion          : [0mFalse
+[32;1mflushVerified                         : [0mTrue
+[32;1mrawCount                              : [0m15
+[32;1msampleRawCount                        : [0m30
+[32;1mwroteToFrozenIssue40Raw               : [0mFalse
+[32;1mwroteToHistoricalParallelismBenchmark : [0mFalse
+
+Running Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1
+
+[32;1mok                    : [0mTrue
+[32;1msuite                 : [0mCodexSafeTreeDeleteParallelPurgeCoordinator
+[32;1missue                 : [0m39
+[32;1mslices                : [0m5
+[32;1mscaleFileCount        : [0m10000
+[32;1mscaleElapsedMs        : [0m3427
+[32;1mscaleJournalFileCount : [0m4
+[32;1mscaleFailedCount      : [0m0
+
+Running Test-CodexSafeTreeDeletePhase1Integration.ps1
+STAGE runtime-check utc=2026-08-27T09:37:05.9366956+00:00
+STAGE fs-probe utc=2026-08-27T09:37:06.1394431+00:00
+STAGE safety-toctou-e2e utc=2026-08-27T09:37:06.2117206+00:00
+STAGE scale-create utc=2026-08-27T09:37:10.1005395+00:00
+STAGE scale-baseline utc=2026-08-27T09:37:21.4151044+00:00
+STAGE scale-phase1 utc=2026-08-27T09:49:08.0635501+00:00
+STAGE scale-record utc=2026-08-27T09:54:42.4898941+00:00
+STAGE done utc=2026-08-27T09:54:42.5047351+00:00
+
+[32;1mok                     : [0mTrue
+[32;1msuite                  : [0mCodexSafeTreeDeletePhase1Integration
+[32;1mfileCount              : [0m10000
+[32;1mbytesPerFile           : [0m163840
+[32;1mtotalBytes             : [0m1638400000
+[32;1mbaselineElapsedMs      : [0m706556
+[32;1mphase1ElapsedMs        : [0m334341
+[32;1mspeedup                : [0m2.113
+[32;1mratio                  : [0m0.473
+[32;1mmetTarget              : [0mFalse
+[32;1mfat32LiveE2eVerified   : [0mFalse
+[32;1mnetworkLiveE2eVerified : [0mFalse
+
+Running Test-CodexSafeTreeDeletePhase3Integration.ps1
+[SKIP] leftover guard: Éú²ú leftover ¸ù²»´æÔÚ£¬leftoverGuardMode=absent-environment£¬Ìø¹ý leftover Èý¶ÏÑÔ£¨transaction ±ØÐëÔÚ / quarantine ´æÔÚÐÔ²»±ä / digest ²»±ä£©: D:\Codex\.codex\run-evidence\safe-tree-delete
+STAGE runtime-check utc=2026-08-27T09:54:48.4709341+00:00
+STAGE fs-probe utc=2026-08-27T09:54:49.0229084+00:00
+STAGE safety-toctou-e2e utc=2026-08-27T09:54:49.0897358+00:00
+STAGE coordinator-journal utc=2026-08-27T09:54:54.6686524+00:00
+STAGE reuse-issue40-raw utc=2026-08-27T09:54:57.2018236+00:00
+STAGE citations utc=2026-08-27T09:54:57.2506301+00:00
+STAGE scale-create utc=2026-08-27T09:54:57.2738104+00:00
+STAGE scale-baseline-prod utc=2026-08-27T09:55:01.5683142+00:00
+STAGE scale-phase3-create-1 utc=2026-08-27T10:12:24.4484366+00:00
+STAGE scale-phase3-prod-1 utc=2026-08-27T10:12:28.7881594+00:00
+STAGE scale-record utc=2026-08-27T10:16:56.0694859+00:00
+STAGE done utc=2026-08-27T10:16:56.0813101+00:00
+
+[32;1mok                            : [0mTrue
+[32;1msuite                         : [0mCodexSafeTreeDeletePhase3Integration
+[32;1mfileCount                     : [0m10000
+[32;1mbytesPerFile                  : [0m4096
+[32;1mproductionBaselineElapsedMs   : [0m1042779
+[32;1mproductionPhase3ElapsedMs     : [0m267216
+[32;1mproductionSpeedup             : [0m3.902
+[32;1mproductionRatio               : [0m0.256
+[32;1mmetTargetBest                 : [0mFalse
+[32;1mmetTargetTypical              : [0mFalse
+[32;1mcoordinatorDop4Ms             : [0m15356
+[32;1mcoordinatorDop2Ms             : [0m29574
+[32;1mcoordinatorDop4SpeedupVsDop1  : [0m5.38
+[32;1mnetworkLiveE2eVerified        : [0mFalse
+[32;1mleftoverUntouched             : [0mTrue
+[32;1mleftoverGuardMode             : [0mabsent-environment
+[32;1mjournalOverheadCited          : [0m15.7508172301072
+[32;1mjournalOverheadIsWithinTarget : [0mFalse
+
+Running Test-CodexSafeTreeDeletePlanIdentityV2.ps1
+
+[32;1m  ok[0m[32;1m suite                            [0m[32;1m slices[0m
+[32;1m  --[0m [32;1m-----                            [0m [32;1m------[0m
+True CodexSafeTreeDeletePlanIdentityV2      3
+
+Running Test-CodexSafeTreeDeletePlanWalkerEquivalence.ps1
+ENV ps=7.6.5 culture=zh-CN uiculture=zh-CN
+[31;1mException: [0mD:\agents\projects\Í³Ò»»·¾³\tests\Test-CodexSafeTreeDeletePlanWalkerEquivalence.ps1:22[0m
+[31;1m[0m[36;1mLine |[0m
+[31;1m[0m[36;1m[36;1m  22 | [0m     if (-not $Condition) { [36;1mthrow $Message[0m }[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m                            ~~~~~~~~~~~~~~[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mÄ¬ÈÏ±ØÐë×ß csharp walker[0m
+Test-CodexSafeTreeDeletePlanWalkerEquivalence.ps1 failed with exit code 1

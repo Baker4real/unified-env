@@ -1,0 +1,14 @@
+Running Test-CodexHookDirectoryGuard.ps1
+
+[32;1m  ok[0m[32;1m suite[0m
+[32;1m  --[0m [32;1m-----[0m
+True CodexHookDirectoryGuard
+
+Running Test-CodexRemotePluginCatalogGuard.ps1
+PASS Test-CodexRemotePluginCatalogGuard sweep=1 inplace=3 create=3 atomic=3 malformedRetry=1 fingerprintRetry=1 unchangedRead=0 singleInstance=1 crossSessionNamespace=1
+Running Test-CodexRemotePluginCatalogGuardDeployment.ps1
+PASS Test-CodexRemotePluginCatalogGuardDeployment contracts=35 targets=4 canonicalLiveRoot=1 crossSessionCurrentUser=1 crashRecovery=1 strictState=1
+Running Test-CodexRemotePluginCatalogGuardHardening.ps1
+PASS Test-CodexRemotePluginCatalogGuardHardening malformed=1 pair=1 schema=3 policySchemaParity=1 catalogSchemaParity=1 stateHealth=4 strictState=7 hardlink=1 hashRace=1 identityRace=1 stagingCrash=6 durableRenameCrash=6 durablePublicationProbe=3 canonicalLeaseProbe=10 publishIoRecovery=1 crashRecovery=1 vendorAbortCrash=5 vendorAbortStageCrash=3 vendorAbortDurableCrash=3 vendorAbortDrift=1 markerReplacement=3 artifactIdentityReplacement=3 artifactInPlaceRewrite=5 integrityAnchorMutation=21 sealFailure=6 eaSameName=1 transientSharingRetry=1 transactionUnknown=3 caseVariantUnknown=5 transactionRecovery=2 transactionConflict=1 transactionIdempotent=1 casRace=1 fingerprintRace=1 reparse=2 unsupported=1 sentinel=2
+Running Test-CodexRemotePluginCatalogGuardVendorAbortStress.ps1
+PASS Test-CodexRemotePluginCatalogGuardVendorAbortStress iterations=50 failures=0 evidence=D:\agents\run-evidence\remote-plugin-catalog-guard\20260828T072053Z-vendor-abort-after-clear-stress-013c78b7528b464291eec45268b9f6cf\summary.json

@@ -1,0 +1,200 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue56-plan-benchmark",
+  "utc": "2026-08-27T06:52:20.7854474+00:00",
+  "fileCount": 10000,
+  "bytesPerFile": 4096,
+  "samplesPerMode": 3,
+  "processorCount": 20,
+  "psVersion": "7.6.5",
+  "culture": "zh-CN",
+  "aggregator": "min-and-max",
+  "warm": {
+    "walker": "csharp",
+    "planElapsedMs": 439,
+    "wallMs": 448
+  },
+  "csharpSinglePassWalker": {
+    "mode": "csharp",
+    "samples": [
+      10286,
+      9166,
+      10855
+    ],
+    "minMs": 9166,
+    "maxMs": 10855,
+    "medianMs": 10286
+  },
+  "powershellThreePass": {
+    "mode": "powershell",
+    "samples": [
+      131640,
+      143609,
+      138905
+    ],
+    "minMs": 131640,
+    "maxMs": 143609,
+    "medianMs": 138905
+  },
+  "speedupPsOverCsharpMedian": 13.504,
+  "metDesignPointCsharpMaxLe32s": true,
+  "metHardCapCsharpMaxLe40s": true,
+  "note": "判定口径以 issue 预注册状态为准：未确认按票面 40s，确认后按 32s 设计运行点（max）；两套 min/max 并报。",
+  "samples": [
+    {
+      "mode": "csharp",
+      "sampleIndex": 1,
+      "utc": "2026-08-27T06:12:49.7140607+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 10286,
+      "entriesScanned": 10101,
+      "logicalBytes": 40960000,
+      "bytesHashed": 48316920,
+      "planBytes": 7356409,
+      "treeBuildMs": 3833,
+      "processCpuSecondsDelta": 12.125,
+      "segments": {
+        "walker": "csharp",
+        "walkerTotalMs": 3513,
+        "hashMs": 7,
+        "streamSetMs": 1,
+        "capturesMs": 3826,
+        "identityPassMs": null,
+        "streamSetPassMs": null,
+        "documentMs": 137,
+        "publishMs": 2030,
+        "readbackMs": 663,
+        "utc": "2026-08-27T06:12:39.4572406+00:00"
+      }
+    },
+    {
+      "mode": "csharp",
+      "sampleIndex": 2,
+      "utc": "2026-08-27T06:18:38.6616176+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 9166,
+      "entriesScanned": 10101,
+      "logicalBytes": 40960000,
+      "bytesHashed": 48316920,
+      "planBytes": 7356409,
+      "treeBuildMs": 4524,
+      "processCpuSecondsDelta": 9.203,
+      "segments": {
+        "walker": "csharp",
+        "walkerTotalMs": 3155,
+        "hashMs": 0,
+        "streamSetMs": 0,
+        "capturesMs": 3574,
+        "identityPassMs": null,
+        "streamSetPassMs": null,
+        "documentMs": 81,
+        "publishMs": 1500,
+        "readbackMs": 762,
+        "utc": "2026-08-27T06:18:29.5187038+00:00"
+      }
+    },
+    {
+      "mode": "csharp",
+      "sampleIndex": 3,
+      "utc": "2026-08-27T06:24:25.1815167+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 10855,
+      "entriesScanned": 10101,
+      "logicalBytes": 40960000,
+      "bytesHashed": 48316920,
+      "planBytes": 7356409,
+      "treeBuildMs": 4410,
+      "processCpuSecondsDelta": 10.891,
+      "segments": {
+        "walker": "csharp",
+        "walkerTotalMs": 4169,
+        "hashMs": 20,
+        "streamSetMs": 0,
+        "capturesMs": 4208,
+        "identityPassMs": null,
+        "streamSetPassMs": null,
+        "documentMs": 85,
+        "publishMs": 1672,
+        "readbackMs": 625,
+        "utc": "2026-08-27T06:24:14.3283642+00:00"
+      }
+    },
+    {
+      "mode": "powershell",
+      "sampleIndex": 1,
+      "utc": "2026-08-27T06:32:00.8270146+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 131640,
+      "entriesScanned": 10101,
+      "logicalBytes": 40960000,
+      "bytesHashed": 48316924,
+      "planBytes": 7356413,
+      "treeBuildMs": 4365,
+      "processCpuSecondsDelta": 129.922,
+      "segments": {
+        "walker": "powershell",
+        "walkerTotalMs": 122933,
+        "hashMs": null,
+        "streamSetMs": null,
+        "capturesMs": null,
+        "identityPassMs": 3486,
+        "streamSetPassMs": 3000,
+        "documentMs": 77,
+        "publishMs": 1399,
+        "readbackMs": 684,
+        "utc": "2026-08-27T06:29:49.2071834+00:00"
+      }
+    },
+    {
+      "mode": "powershell",
+      "sampleIndex": 2,
+      "utc": "2026-08-27T06:39:56.2243098+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 143609,
+      "entriesScanned": 10101,
+      "logicalBytes": 40960000,
+      "bytesHashed": 48316924,
+      "planBytes": 7356413,
+      "treeBuildMs": 4400,
+      "processCpuSecondsDelta": 141.812,
+      "segments": {
+        "walker": "powershell",
+        "walkerTotalMs": 133576,
+        "hashMs": null,
+        "streamSetMs": null,
+        "capturesMs": null,
+        "identityPassMs": 4083,
+        "streamSetPassMs": 3386,
+        "documentMs": 78,
+        "publishMs": 1743,
+        "readbackMs": 683,
+        "utc": "2026-08-27T06:37:32.6356619+00:00"
+      }
+    },
+    {
+      "mode": "powershell",
+      "sampleIndex": 3,
+      "utc": "2026-08-27T06:47:57.8214742+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 138905,
+      "entriesScanned": 10101,
+      "logicalBytes": 40960000,
+      "bytesHashed": 48316924,
+      "planBytes": 7356413,
+      "treeBuildMs": 4552,
+      "processCpuSecondsDelta": 136.625,
+      "segments": {
+        "walker": "powershell",
+        "walkerTotalMs": 129497,
+        "hashMs": null,
+        "streamSetMs": null,
+        "capturesMs": null,
+        "identityPassMs": 3902,
+        "streamSetPassMs": 3154,
+        "documentMs": 115,
+        "publishMs": 1528,
+        "readbackMs": 643,
+        "utc": "2026-08-27T06:45:38.9439896+00:00"
+      }
+    }
+  ]
+}

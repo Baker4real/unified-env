@@ -1,0 +1,239 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue56-e2e-benchmark",
+  "utc": "2026-08-27T07:27:49.4440421+00:00",
+  "baselineFromIssue42Iter1": {
+    "s1": 576238,
+    "s2": 579452,
+    "median": 576238
+  },
+  "aggregator": "min-and-max",
+  "processorCount": 20,
+  "psVersion": "7.6.5",
+  "typicalDop2": {
+    "name": "typical-dop2",
+    "samples": [
+      63713,
+      89208,
+      87821
+    ],
+    "minMs": 63713,
+    "maxMs": 89208,
+    "minSpeedupVsBaselineConstant": 9.044,
+    "maxSpeedupVsBaselineConstant": 6.459
+  },
+  "bestDop4": {
+    "name": "best-dop4",
+    "samples": [
+      84829,
+      93814,
+      108540
+    ],
+    "minMs": 84829,
+    "maxMs": 108540,
+    "minSpeedupVsBaselineConstant": 6.793,
+    "maxSpeedupVsBaselineConstant": 5.309
+  },
+  "baselineValidation": {
+    "elapsedMs": 901576,
+    "planElapsedMs": 139042,
+    "applyElapsedMs": 423244,
+    "purgeElapsedMs": 339290,
+    "baselineConstantMedianMs": 576238,
+    "deltaPercent": 56.459,
+    "withinTolerancePlusMinus10Percent": false,
+    "note": "验证样本只锚定环境，不参与 AC 判定；越界须停止验收查环境，不得换分母。"
+  },
+  "metTargetTypicalMinAggregator4x": true,
+  "metTargetTypicalMaxAggregator4x": true,
+  "metTargetBestMinAggregator6x": true,
+  "metTargetBestMaxAggregator6x": false,
+  "note": "判定口径以 issue 预注册状态为准：未确认=票面逐场景 min 双线；确认后按预注册口径。两套并报。",
+  "samples": [
+    {
+      "scenario": "typical-dop2-s1",
+      "utc": "2026-08-27T06:56:38.3256143+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 8117,
+      "applyElapsedMs": 24445,
+      "purgeElapsedMs": 31151,
+      "elapsedMs": 63713,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 2,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 2794,
+        "journalOverheadPercent": 7.265569076592699,
+        "journalIsWithinTarget": true,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 2832,
+          "batchMs": 0,
+          "coordinatorMs": 2794,
+          "emptyRootMs": 0,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "sampleIndex": 1,
+      "scenarioName": "typical-dop2"
+    },
+    {
+      "scenario": "typical-dop2-s2",
+      "utc": "2026-08-27T06:59:11.6922746+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 8881,
+      "applyElapsedMs": 30459,
+      "purgeElapsedMs": 49868,
+      "elapsedMs": 89208,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 2,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 3243,
+        "journalOverheadPercent": 8.973172987974099,
+        "journalIsWithinTarget": true,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 5095,
+          "batchMs": 0,
+          "coordinatorMs": 3243,
+          "emptyRootMs": 0,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "sampleIndex": 2,
+      "scenarioName": "typical-dop2"
+    },
+    {
+      "scenario": "typical-dop2-s3",
+      "utc": "2026-08-27T07:01:43.9042129+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 10505,
+      "applyElapsedMs": 35914,
+      "purgeElapsedMs": 41402,
+      "elapsedMs": 87821,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 2,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 2477,
+        "journalOverheadPercent": 10.052482842147759,
+        "journalIsWithinTarget": false,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 3075,
+          "batchMs": 0,
+          "coordinatorMs": 2477,
+          "emptyRootMs": 0,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "sampleIndex": 3,
+      "scenarioName": "typical-dop2"
+    },
+    {
+      "scenario": "best-dop4-s1",
+      "utc": "2026-08-27T07:04:12.9686177+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 10647,
+      "applyElapsedMs": 29225,
+      "purgeElapsedMs": 44957,
+      "elapsedMs": 84829,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 4,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 1714,
+        "journalOverheadPercent": 17.269544924154026,
+        "journalIsWithinTarget": false,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 4702,
+          "batchMs": 0,
+          "coordinatorMs": 1714,
+          "emptyRootMs": 0,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "sampleIndex": 1,
+      "scenarioName": "best-dop4"
+    },
+    {
+      "scenario": "best-dop4-s2",
+      "utc": "2026-08-27T07:06:49.9449234+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 7226,
+      "applyElapsedMs": 22960,
+      "purgeElapsedMs": 63628,
+      "elapsedMs": 93814,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 4,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 2182,
+        "journalOverheadPercent": 13.519706691109075,
+        "journalIsWithinTarget": false,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 8716,
+          "batchMs": 0,
+          "coordinatorMs": 2182,
+          "emptyRootMs": 0,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "sampleIndex": 2,
+      "scenarioName": "best-dop4"
+    },
+    {
+      "scenario": "best-dop4-s3",
+      "utc": "2026-08-27T07:09:42.8289006+00:00",
+      "fileCount": 10000,
+      "planElapsedMs": 10937,
+      "applyElapsedMs": 44459,
+      "purgeElapsedMs": 53144,
+      "elapsedMs": 108540,
+      "parallelPurge": {
+        "used": true,
+        "reason": "capabilities-recommend-parallel",
+        "maxDegreeOfParallelism": 4,
+        "journalFileCount": 100,
+        "deletedCount": 10000,
+        "failedCount": 0,
+        "elapsedMs": 2097,
+        "journalOverheadPercent": 14.30615164520744,
+        "journalIsWithinTarget": false,
+        "journalFlushCount": 800,
+        "usedHostSafetyDeleter": true,
+        "timings": {
+          "snapshotMs": 6154,
+          "batchMs": 0,
+          "coordinatorMs": 2097,
+          "emptyRootMs": 0,
+          "snapshotKind": "csharp-apply-walker"
+        }
+      },
+      "sampleIndex": 3,
+      "scenarioName": "best-dop4"
+    }
+  ]
+}

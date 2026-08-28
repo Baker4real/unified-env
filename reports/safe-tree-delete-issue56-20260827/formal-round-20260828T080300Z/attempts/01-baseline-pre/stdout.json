@@ -1,0 +1,16 @@
+{
+  "kind": "baseline",
+  "resolvedAlgorithm": "csharp-plan-snapshot",
+  "loadedVariant": "default",
+  "psVersion": "7.6.5",
+  "processorCount": 20,
+  "attemptUtc": "2026-08-28T08:03:06.9463718+00:00",
+  "result": {
+    "walkerKind": "powershell-three-pass",
+    "planElapsedMs": 220160,
+    "applyElapsedMs": 574026,
+    "purgeElapsedMs": 417998,
+    "endToEndElapsedMs": 1212184,
+    "baselineMode": true
+  }
+}

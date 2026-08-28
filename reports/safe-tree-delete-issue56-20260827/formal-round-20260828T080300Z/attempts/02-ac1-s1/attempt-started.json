@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "sequence": 2,
+  "label": "ac1-s1",
+  "attemptUuid": "63162392a4bf445c84db52b1a8c930ab",
+  "utc": "2026-08-28T08:25:26.2090156+00:00",
+  "closureSha256": "48d56f7d7566b418d1a38273e488c6974dbe486698940597f666c175dcb3ed0b",
+  "kind": "plan",
+  "purgeDop": 0
+}

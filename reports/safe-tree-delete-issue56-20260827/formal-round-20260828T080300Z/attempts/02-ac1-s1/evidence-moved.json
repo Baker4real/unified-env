@@ -1,0 +1,11 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-issue56-evidence-moved",
+  "destinationRoot": "D:\\agents\\run-evidence\\safe-tree-delete\\issue56-formal",
+  "runs": [
+    {
+      "runId": "20260828T082543Z-b8a12194-95c5-435d-ac4a-5e09bee9e493",
+      "destination": "D:\\agents\\run-evidence\\safe-tree-delete\\issue56-formal\\formal-round-20260828T080300Z\\02-ac1-s1\\20260828T082543Z-b8a12194-95c5-435d-ac4a-5e09bee9e493",
+      "planJsonSha256": "279462db96916031e159f7ee8759af0b5c3d7352d68c66a831ca77e5bc52d502"
+    }
+  ]
+}

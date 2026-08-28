@@ -3,7 +3,7 @@ type: reference
 title: 受管安全树删除性能优化
 tags: [performance, safe-delete, hash-reuse, parallelization]
 date: 2026-08-13
-status: landed-mixed（Plan/Apply/Purge 全管线典型 4x 边界、6x 移交 #56；Status 冷启动 SLA 已达：<60s）
+status: landed-mixed（Plan C# 单遍 walker 已落地：AC1 双口径达标；端到端 6x 验收阻塞于环境锚点重跑，见 #56；Status 冷启动 SLA 已达：<60s）
 priority: P0
 ---
 
@@ -26,7 +26,11 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 
 ## Implementation status update (2026-08-19)
 
-#42 已把 `ParallelPurgeCoordinator` 接入生产 `Invoke-CodexSafeTreeDeletePurge`（能力门控 + HostSafety lease 删除器，非 `File.Delete`），并把 locked preflight 换成 Apply 同款 C# walker（`scripts/lib/CodexSafeTreeDeleteApplySnapshot.cs`）。同批收口：#32（Apply C# walker + 哈希复用：对 PS baseline ≈11.9x，主要来自 walker；同 walker 复用净效 1.10–1.12x）、#40（复测效率峰值 DOP=2，`RecommendOptimizeMaxParallelism` 已改 2/2/2）、#41（夹具 DOP2 journal 7.875% / 6.229%，勘误旧 18.659% 口径）。生产 10k×4KB 全管线对 baseline 576238ms：典型 DOP2 迭代 2b 轮 **4.057x / 4.023x**，AC11 复跑轮 **3.889x / 3.918x**（4x 边界摆动，Plan 相位噪声）；最佳 DOP4 **3.927x / 3.962x**。6x 在 #42 范围结构性不可达（Plan 单相位 88–96s 已占满 96s 预算），移交 #56（Plan 阶段并行哈希，方案草案未授权实施）。生产 journal overhead（典型 DOP2）三轮六样本 7.175–13.045%，3/6 ≥10%，边界不稳，稳健性复测归 #56。证据：`reports/safe-tree-delete-issue42-20260819/`、`reports/safe-tree-delete-parallelism-benchmark-20260819/`、`reports/safe-tree-delete-issue32-20260819/`、`reports/safe-tree-delete-issue41-20260819/`。
+#42 已把 `ParallelPurgeCoordinator` 接入生产 `Invoke-CodexSafeTreeDeletePurge`（能力门控 + HostSafety lease 删除器，非 `File.Delete`），并把 locked preflight 换成 Apply 同款 C# walker（`scripts/lib/CodexSafeTreeDeleteApplySnapshot.cs`）。同批收口：#32（Apply C# walker + 哈希复用：对 PS baseline ≈11.9x，主要来自 walker；同 walker 复用净效 1.10–1.12x）、#40（复测效率峰值 DOP=2，`RecommendOptimizeMaxParallelism` 已改 2/2/2）、#41（夹具 DOP2 journal 7.875% / 6.229%，勘误旧 18.659% 口径）。生产 10k×4KB 全管线对 baseline 576238ms：典型 DOP2 迭代 2b 轮 **4.057x / 4.023x**，AC11 复跑轮 **3.889x / 3.918x**（4x 边界摆动，Plan 相位噪声）；最佳 DOP4 **3.927x / 3.962x**。6x 在 #42 范围结构性不可达（Plan 单相位 88–96s 已占满 96s 预算），移交 #56（Plan 阶段并行哈希，方案草案未授权实施）。生产 journal overhead（典型 DOP2）三轮六样本 7.175–13.046%，2/6 ≥10%，边界不稳，稳健性复测归 #56（2026-08-27 勘误：原误记 3/6，原始 JSON 实为 2/6，超线样本 13.0457%/10.5100%；13.045% 为截断值，统一为 13.046% 四舍五入口径）。证据：`reports/safe-tree-delete-issue42-20260819/`、`reports/safe-tree-delete-parallelism-benchmark-20260819/`、`reports/safe-tree-delete-issue32-20260819/`、`reports/safe-tree-delete-issue41-20260819/`。
+
+## Implementation status update (2026-08-27)
+
+#56 Wave A 已落地：Plan 阶段默认走 C# 单遍 walker `scripts/lib/CodexSafeTreeDeletePlanSnapshot.cs`（`PlanTreeSnapshotBuilder`，串行 lease 哈希保留句柄复验；file leaf 同一 lease 句柄完成 identity+SHA-256+stream-set；directory/junction/'.' root 的 stream-set 走 per-path 重开与原 PS 第三遍同源；稳定 OrderBy+CurrentCultureIgnoreCase 平局保枚举序）。plan.json schema/字段/顺序/metrics 合同不变；wrapper（`Get-CodexSafeTreeDeletePlanTreeSnapshot` + 两个 FromCaptures 派生器）保持全部 fail-closed 消息逐字对齐。回退：库层 `-DisablePlanCSharpWalkerForTest` 与生产 env `CODEX_SAFE_TREE_DELETE_PLAN_CSHARP_WALKER=0`（任一信号即回 PS 三遍）。实测（10k×4KB，2026-08-27，当日磁盘偏慢 ~1.5×）：Plan 相位 C# min/med/max **9166/10286/10855ms**（≤32s 设计点与 ≤40s 硬顶双口径达标；PS 对照 131.6–143.6s，同盘加速中位 13.5×）；端到端暂定 typical 6.46–9.04×、best 5.31–6.79×，**正式 AC2 验收阻塞于环境锚点**（同轮 baseline 验证样本 901576ms，超 576238ms 常量 +56.5%，按计划作废计时样本待安静窗口重跑）。序列化 spike 判定 C# 序列化不触发（ConvertTo-Json 探针 0.46–0.58s）。Wave B（并行哈希）未触发。方案、四轮对抗审查与全部证据：`docs/plans/2026-08-27-safe-tree-delete-issue56-implementation.md`、`reports/safe-tree-delete-issue56-20260827/`。
 
 史诗收口（#26）：实现关口 `DONE_WITH_CONCERNS`。子票 #32/#40/#41/#42 已于 2026-08-19 按结论评论关闭（典型 4x 边界、6x 移交 #56）；#36/#37/#43 已于 2026-08-20 按结论评论关闭（#36 按现役证据、#37 按被 #42 取代、#43 文档 16/16 落点）；#35 已于 2026-08-23 关闭（FAT32/网络实卷 waiver）。2026-08-17 时点的子票表见 `reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md`（快照，不是现役状态）。
 
@@ -108,7 +112,7 @@ JSON：`reports/safe-tree-delete-issue36-20260817/scale-phase1.json`、`reports/
 | #40 20260819 | 生产删除器 DOP 扫描 | 效率峰值 **DOP2**（小/中/大文件 2/2/2），数据不支持升 DOP4 | `parallelism-benchmark-20260819/analysis.json`；`RecommendOptimizeMaxParallelism` 已按此改 2 |
 | #40 20260817 | `File.Delete` 夹具 10k×1KB | DOP4 4.48x；墙钟最快 DOP16 | 已被 20260819 生产删除器复测取代，不再作推荐依据 |
 | #41 20260819 | 夹具 DOP2 journal overhead | **7.875% / 6.229%**（<10%） | 旧叙事 18.659% / 6.166% / 6.397% 已在 #41 关单勘误 |
-| #42 生产 journal | 典型 DOP2 三轮六样本 | 7.175 / 9.604 / 8.47 / 13.045 / 7.614 / 10.510% | **3/6 ≥10%，边界不稳**；稳健性复测归 #56 |
+| #42 生产 journal | 典型 DOP2 三轮六样本 | 7.175 / 9.604 / 8.47 / 13.046 / 7.614 / 10.510% | **2/6 ≥10%，边界不稳**（2026-08-27 勘误：原误记 3/6，原始 JSON 实为 2/6）；稳健性复测归 #56 |
 
 #35 FAT32/网络实卷 e2e 有维护者 waiver，未提权验证，不列入倍率表。
 
@@ -118,7 +122,7 @@ JSON：`reports/safe-tree-delete-issue36-20260817/scale-phase1.json`、`reports/
 | --- | --- | --- |
 | 目标在网络卷，或担心并行 | 网络卷 `RecommendParallel=false`，生产 Purge 自动回退串行 HostSafety；无独立"关并行"开关，测试面用 `-DisableParallelPurgeForTest` | 网络实卷 e2e 未提权验证（#35）。无 `FILE_ID_INFO` 时新 Plan 失败关闭，不要改走未受管删除 |
 | 非 NTFS，或报 `FILE_ID_INFO` / `DeletionAllowed` | 读抛错：FAT32/exFAT 与探测失败都会让新 Plan 失败关闭 | 换到支持 `FILE_ID_INFO` 的本地 NTFS/ReFS 后重新 Plan。不要注入 `FileSystemCapabilitiesForTest` 绕过生产门闩 |
-| journal flush 慢、overhead ≥10% | 生产并行 Purge 有 thread journal（`parallel-purge-journal-*`）：典型 DOP2 六样本 3/6 ≥10%，边界不稳属已知状态（#56 复测），单次超线不代表故障。夹具 DOP2 口径为 7.875%/6.229% | 持续显著超线先看磁盘延迟；串行 HostSafety 回退路径无此 flush 占比合同 |
+| journal flush 慢、overhead ≥10% | 生产并行 Purge 有 thread journal（`parallel-purge-journal-*`）：典型 DOP2 六样本 2/6 ≥10%（2026-08-27 勘误：原误记 3/6），边界不稳属已知状态（#56 复测），单次超线不代表故障。夹具 DOP2 口径为 7.875%/6.229% | 持续显著超线先看磁盘延迟；串行 HostSafety 回退路径无此 flush 占比合同 |
 | 恢复列出 `uncertainFiles`，或 Status 为 `manual-review` / `inconsistent` | 按能力 spec 的 pending / uncertain 段：路径已不在且尚未 `commit-authorized` 的 freeze 不得当成已删除，也不得收成 `purged`。手工核验该路径后重新 Plan，或保持 `manual-review` | 缺 `leafStreamSetV1` 的在途会 wedge。不要 Purge leftover |
 
 ### 迁移
@@ -445,10 +449,10 @@ Specific test additions:
 ## Out of Scope
 
 **Not included in this optimization:**
-- Optimizing Plan phase (still 1x hash read per file) — Plan is run once, Apply/Purge are run repeatedly
+- Optimizing Plan phase (still 1x hash read per file) — Plan is run once, Apply/Purge are run repeatedly（2026-08-27 起由 #56 Wave A 修订：Plan 阶段已换 C# 单遍 walker，串行 lease 哈希，见「Implementation status update (2026-08-27)」与 `reports/safe-tree-delete-issue56-20260827/`）
 - Cross-session persistent hash cache — too complex, invalidation unclear
-- File-level parallelization — journal coordination complexity too high
-- C# rewrite of hot path — PowerShell boundary already established, I/O is the bottleneck
+- File-level parallelization — journal coordination complexity too high（#56 Wave B 若触发须先修订本条与 L468 并满足 `docs/plans/2026-08-27-safe-tree-delete-issue56-implementation.md` §4 前置硬门）
+- C# rewrite of hot path — PowerShell boundary already established, I/O is the bottleneck（2026-08-27 起由 #56 Wave A 修订：仅限 Plan 只读走树+哈希面；承载 journal/删除语义的热路径仍保持 PS 边界与 lease 纪律）
 - Optimizing other phases (Status, BatchPurge) — not on critical path for user pain
 - Supporting file systems other than NTFS/ReFS — FAT32 and network drives get conservative fallback
 - Windows 7 support — FILE_ID_INFO requires Windows 8+, older systems fall back to no optimization

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 3,
+  "entries": [
+    {
+      "minimumDescendantDepth": 1,
+      "deniedExactPaths": [
+        "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue56-20260827\\formal-round-20260828T080300Z\\attempts\\02-ac1-s1\\evidence"
+      ],
+      "rootDeletionPurpose": "none",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\reports\\safe-tree-delete-issue56-20260827\\formal-round-20260828T080300Z\\attempts\\02-ac1-s1",
+      "id": "issue56-formal"
+    }
+  ],
+  "artifactType": "env-governance.codex-safe-tree-delete-policy"
+}
