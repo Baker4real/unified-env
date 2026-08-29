@@ -20,11 +20,11 @@
     },
     {
       "id": "codex-run-evidence",
-      "capabilityRoot": "D:\\Codex\\.codex\\run-evidence",
+      "capabilityRoot": "D:\\agents\\run-evidence",
       "minimumDescendantDepth": 2,
       "rootDeletionPurpose": "none",
       "deniedExactPaths": [
-        "D:\\Codex\\.codex\\run-evidence\\safe-tree-delete"
+        "D:\\agents\\run-evidence\\safe-tree-delete"
       ]
     },
     {
@@ -245,6 +245,24 @@
       "minimumDescendantDepth": 0,
       "rootDeletionPurpose": "rebuildable-build-output",
       "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "kimi-switch-rust-target",
+      "capabilityRoot": "D:\\agents\\projects\\kimi-switch\\target",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "kimi-switch-dist",
+      "capabilityRoot": "D:\\agents\\projects\\kimi-switch\\dist",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": false,
       "allowInternalDirectoryJunctions": false,
       "deniedExactPaths": []
     }

@@ -530,6 +530,11 @@ try {
             id = 'serena-python-venv'
             root = 'D:\agents\projects\serena\.venv'
             junctions = $false
+        },
+        [pscustomobject]@{
+            id = 'kimi-switch-rust-target'
+            root = 'D:\agents\projects\kimi-switch\target'
+            junctions = $false
         }
     )
     foreach ($expectedLinkAwareEntry in $linkAwareProductionExpectations) {
@@ -560,6 +565,10 @@ try {
         [pscustomobject]@{
             id = 'codex-account-switch-tauri-gen'
             root = 'D:\Codex\projects\codex-account-switch\src-tauri\gen'
+        },
+        [pscustomobject]@{
+            id = 'kimi-switch-dist'
+            root = 'D:\agents\projects\kimi-switch\dist'
         }
     )
     foreach ($expectedPlainBuildOutputEntry in $accountSwitchPlainBuildOutputExpectations) {
