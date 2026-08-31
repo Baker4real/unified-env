@@ -396,12 +396,12 @@ Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $mutatedHostHook
 $mutatedHostFileClosure = Copy-TestDocument $hostPreflightManifest
 @($mutatedHostFileClosure.files | Where-Object liveRelativePath -ceq 'serena-reminder-guarded.cmd')[0].sha256 = ('0' * 64)
 Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $mutatedHostFileClosure | Out-Null } 'host manifest 必须冻结 8-file closure 的精确 hash map'
-$expectedProductionHookIds = @('codex-state-preflight', 'serena-activate', 'serena-cleanup', 'serena-reminder')
+$expectedProductionHookIds = @('codex-state-preflight', 'serena-activate', 'github-cli', 'serena-cleanup', 'serena-reminder')
 Assert-True (
     (@($hostPreflightManifest.hooks | ForEach-Object id | Sort-Object) -join ',') -ceq
     (@($expectedProductionHookIds | Sort-Object) -join ',')
-) 'production manifest 只能声明 state preflight 与三项 Serena 行为 hook'
-foreach ($forbiddenHookId in @('provider-stability', 'serena-dashboard', 'github-cli', 'serena-auto-approve')) {
+) 'production manifest 必须声明 state preflight、github-cli 与三项 Serena 行为 hook'
+foreach ($forbiddenHookId in @('provider-stability', 'serena-dashboard', 'serena-auto-approve')) {
     Assert-True (@($hostPreflightManifest.hooks | Where-Object id -ceq $forbiddenHookId).Count -eq 0) "production manifest 不得包含旧/显式维护 identity：$forbiddenHookId"
 }
 $productionStateHook = @($hostPreflightManifest.hooks | Where-Object id -ceq 'codex-state-preflight')[0]
@@ -562,8 +562,8 @@ Assert-True (@($serenaActivate.readResources | Where-Object { $_.kind -ceq 'path
 Assert-WriteResource $provider 'D:\Codex\.codex\backups_state\provider-stability-guard' 'provider manifest 必须声明 config rollback backup 写资源'
 Assert-WriteResource $dashboard 'D:\Codex\.codex\backups_state\serena-dashboard-guard\toml' 'dashboard manifest 必须声明 TOML rollback backup 写资源'
 Assert-WriteResource $dashboard 'D:\Codex\.codex\backups_state\serena-dashboard-guard\yaml' 'dashboard manifest 必须声明 YAML rollback backup 写资源'
-foreach($hook in @($provider,$serenaActivate,$dashboard,$github)){Assert-WriteResource $hook 'D:\Codex\.codex\run-evidence\codex-hook-health\.backups' "$($hook.id) manifest 必须声明 latest-health backup 写资源"}
-Assert-WriteResource $serenaActivate 'D:\Codex\.codex\run-evidence\codex-hook-health\serena-activate.json' 'Serena activate manifest 必须声明独立 health 写资源'
+foreach($hook in @($provider,$serenaActivate,$dashboard,$github)){Assert-WriteResource $hook 'D:\agents\run-evidence\codex-hook-health\.backups' "$($hook.id) manifest 必须声明 latest-health backup 写资源"}
+Assert-WriteResource $serenaActivate 'D:\agents\run-evidence\codex-hook-health\serena-activate.json' 'Serena activate manifest 必须声明独立 health 写资源'
 Assert-True (($provider.fullAcceptanceCommand.arguments -join ',') -ceq '-Json,-CheckNetwork') 'provider full acceptance 必须保留 Task 8 实际 network 验收；Task 7 另走 CheckOnly'
 $expectedSerenaActivateAcceptance = @('-NoProfile','-File','D:\Codex\.codex\hooks\serena-behavior-guard.ps1','-Mode','ActivationAcceptance')
 Assert-True ((@($serenaActivate.fullAcceptanceCommand.arguments) -join "`0") -ceq ($expectedSerenaActivateAcceptance -join "`0")) 'Serena activation reminder acceptance 必须调用固定无残留验收模式'

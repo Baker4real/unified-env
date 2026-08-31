@@ -367,7 +367,7 @@ function Initialize-FixtureTestSeams {
         if ((@($replace.PSObject.Properties.Name) -join ',') -cne 'targetParent,externalParent') { throw 'fixture-only evidence ancestor replacement schema 无效' }
         $targetParent = [IO.Path]::GetFullPath([string]$replace.targetParent).TrimEnd('\')
         $externalParent = [IO.Path]::GetFullPath([string]$replace.externalParent).TrimEnd('\')
-        $expectedRoot = [IO.Path]::GetFullPath((Join-Path $ResolvedCodexHome 'run-evidence\host-hook-remediation')).TrimEnd('\')
+        $expectedRoot = (Resolve-CodexHostHookEvidenceScope -ResolvedCodexHome $ResolvedCodexHome).remediationRoot.TrimEnd('\')
         $fixtureRoot = [IO.Directory]::GetParent([IO.Directory]::GetParent($ResolvedCodexHome).FullName).FullName
         if ($targetParent -ine $expectedRoot -or -not $externalParent.StartsWith("$fixtureRoot\", [StringComparison]::OrdinalIgnoreCase) -or $externalParent.StartsWith("$ResolvedCodexHome\", [StringComparison]::OrdinalIgnoreCase)) { throw 'fixture-only evidence ancestor replacement capability 非法' }
         Assert-NoReparsePath -Path $externalParent -RequireLeaf | Out-Null
@@ -535,6 +535,13 @@ function Write-AtomicText {
             }
             $preserveBackup = $true
             try {
+                # File.Replace keeps the replacement file's ACL. A temp created
+                # while elevated is owned by Administrators, which then fails
+                # the published-ACL restore because the lease cannot change owner.
+                $currentTargetAcl = Get-Acl -LiteralPath $Path
+                $tempAcl = [System.Security.AccessControl.FileSecurity]::new()
+                $tempAcl.SetSecurityDescriptorSddlForm([string]$currentTargetAcl.Sddl)
+                Set-Acl -LiteralPath $tempPath -AclObject $tempAcl
                 [System.IO.File]::Replace($tempPath, $Path, $replaceBackupPath, $false)
                 if (
                     $script:FixtureCasFailureMode -eq "replace" -and
@@ -586,6 +593,7 @@ function Write-AtomicText {
                 $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire($directory, $directory, $false)
                 $publishedLease = $null
                 try {
+                    Set-AclOwnerAndGroupFromSddl -Path $Path -Sddl $ExpectedCurrentSddl
                     $publishedLease = $guard.AcquireAclTargetLease($Path)
                     $publishedSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
                     if (-not (Test-CodexSddlEquivalent -Actual $publishedSddl -Expected $ExpectedCurrentSddl)) {
@@ -753,7 +761,7 @@ function Assert-ValidToml {
     param([string]$Content)
 
     $pythonPath = Resolve-TomlParserPython
-    $pycacheRoot = Assert-NoReparsePath -Path "D:\Codex\.codex\run-evidence" -RequireLeaf
+    $pycacheRoot = Assert-NoReparsePath -Path (Resolve-CodexHostHookEvidenceScope -ForceProduction).runEvidenceRoot -RequireLeaf
     if (-not (Test-Path -LiteralPath $pycacheRoot -PathType Container)) {
         throw "TOML parser pycache 隔离根不存在"
     }
@@ -2468,6 +2476,47 @@ function Test-ProtectedAcl {
     }
 }
 
+function Set-ProtectedAclCurrentUserOwner {
+    param([string]$Path)
+
+    $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $acl = Get-Acl -LiteralPath $Path
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+    if ($null -eq $owner -or $owner.Value -ne $currentSid.Value) {
+        $acl.SetOwner($currentSid)
+        Set-Acl -LiteralPath $Path -AclObject $acl
+    }
+}
+
+function Set-AclOwnerAndGroupFromSddl {
+    param(
+        [string]$Path,
+        [string]$Sddl
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Sddl)) { return }
+    $probe = [System.Security.AccessControl.FileSecurity]::new()
+    $sections = [Security.AccessControl.AccessControlSections]::Owner -bor [Security.AccessControl.AccessControlSections]::Group
+    $probe.SetSecurityDescriptorSddlForm($Sddl, $sections)
+    $desiredOwner = $probe.GetOwner([System.Security.Principal.SecurityIdentifier])
+    $desiredGroup = $probe.GetGroup([System.Security.Principal.SecurityIdentifier])
+    $acl = Get-Acl -LiteralPath $Path
+    $changed = $false
+    $currentOwner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+    $currentGroup = $acl.GetGroup([System.Security.Principal.SecurityIdentifier])
+    if ($null -ne $desiredOwner -and ($null -eq $currentOwner -or $currentOwner.Value -ne $desiredOwner.Value)) {
+        $acl.SetOwner($desiredOwner)
+        $changed = $true
+    }
+    if ($null -ne $desiredGroup -and ($null -eq $currentGroup -or $currentGroup.Value -ne $desiredGroup.Value)) {
+        $acl.SetGroup($desiredGroup)
+        $changed = $true
+    }
+    if ($changed) {
+        Set-Acl -LiteralPath $Path -AclObject $acl
+    }
+}
+
 function Get-ProtectedAclSddl {
     param(
         [string]$CurrentSddl,
@@ -2565,6 +2614,7 @@ function Set-ProtectedAclWithCapability {
     $parentGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire($CapabilityRoot, [IO.Path]::GetDirectoryName($fullPath), $false)
     $lease = $null
     try {
+        Set-ProtectedAclCurrentUserOwner -Path $fullPath
         $lease = $parentGuard.AcquireAclTargetLease($fullPath)
         $currentSddl = [string]$lease.GetSecurityDescriptorSddl()
         $desiredSddl = Get-ProtectedAclSddl -CurrentSddl $currentSddl -IsDirectory ([bool]$lease.IsDirectory)
@@ -2926,6 +2976,7 @@ function Write-NewOnlyProtectedBytes {
         Invoke-FixtureEvidenceAncestorReplace -ProtectedParent $parent
         $temp = $guard.CreateTempFile($tempPath)
         $temp.WriteAndFlush($Bytes)
+        Set-ProtectedAclCurrentUserOwner -Path $tempPath
         $currentSddl = [string]$temp.GetSecurityDescriptorSddl()
         $desiredSddl = Get-ProtectedAclSddl -CurrentSddl $currentSddl -IsDirectory $false
         if ($currentSddl -cne $desiredSddl) { $temp.SetSecurityDescriptorSddl($currentSddl, $desiredSddl) }
@@ -2967,7 +3018,7 @@ function New-HostHookRestoreContract {
     $sourceFiles = @($script:HostPreflightManifest.files | ForEach-Object {
         [ordered]@{ relativePath=[string]$_.relativePath; liveRelativePath=[string]$_.liveRelativePath; sha256=([string]$_.sha256).ToLowerInvariant() }
     })
-    if ($sourceFiles.Count -ne 9) { throw 'restore contract 必须绑定固定9个 source 文件' }
+    if ($sourceFiles.Count -ne 12) { throw 'restore contract 必须绑定固定12个 source 文件' }
     $actionOrder = [Collections.Generic.List[string]]::new()
     if (@($Manifest.committedResources) -ccontains 'hooks.json') { $actionOrder.Add('hooks.json') }
     if (@($Manifest.committedResources) -ccontains 'environment:SERENA_HOME') { $actionOrder.Add('environment:SERENA_HOME') }
@@ -3006,9 +3057,10 @@ function New-HostHookRestoreContract {
     $contractSha = (Write-NewOnlyProtectedJson -Path $contractPath -Value $envelope -CapabilityRoot $canonicalEvidence).ToLowerInvariant()
     $evidenceRoot = [IO.Path]::GetDirectoryName($canonicalEvidence)
     $claimsRoot = Join-Path $evidenceRoot '.claims'
-    [void](New-CodexHookCapabilityDirectory -Path $claimsRoot -CapabilityRoot $ResolvedCodexHome -Name 'restore claims root')
+    $claimScope = Resolve-CodexHostHookEvidenceScope -ResolvedCodexHome $ResolvedCodexHome
+    [void](New-CodexHookCapabilityDirectory -Path $claimsRoot -CapabilityRoot $claimScope.capabilityRoot -Name 'restore claims root')
     Assert-NoReparsePath -Path $claimsRoot -RequireLeaf | Out-Null
-    Set-ProtectedAclWithCapability -Path $claimsRoot -CapabilityRoot $ResolvedCodexHome
+    Set-ProtectedAclWithCapability -Path $claimsRoot -CapabilityRoot $claimScope.capabilityRoot
     $claim = [ordered]@{ artifactType='env-governance.codex-host-hook-restore-claim'; schemaVersion=1; runId=$runId; evidencePath=$canonicalEvidence; restoreContractSha256=$contractSha }
     $claimPath = Join-Path $claimsRoot "$runId.json"
     $claimSha = (Write-NewOnlyProtectedJson -Path $claimPath -Value $claim -CapabilityRoot $claimsRoot).ToLowerInvariant()
@@ -3043,8 +3095,8 @@ function Read-HostHookRestoreContract {
     if ($claim.artifactType -cne 'env-governance.codex-host-hook-restore-claim' -or [int]$claim.schemaVersion -ne 1 -or $claim.runId -cne $runId -or $claim.evidencePath -cne [string]$Evidence.path -or $claim.restoreContractSha256 -cne $contractSha) { throw 'host hook restore claim binding 非法' }
     $hostManifestSnapshot = Get-RequiredCapabilitySnapshot -Path $script:HostPreflightManifestPath -CapabilityRoot $script:ProjectRoot -Name 'restore current host manifest snapshot'
     if ($payload.hostManifestSha256 -cne ([string]$hostManifestSnapshot.sha256).ToLowerInvariant()) { throw 'host hook restore contract host manifest 漂移' }
-    if (@($payload.sourceFiles).Count -ne 9) { throw 'host hook restore contract source closure 非法' }
-    for ($i=0; $i -lt 9; $i++) {
+    if (@($payload.sourceFiles).Count -ne 12) { throw 'host hook restore contract source closure 非法' }
+    for ($i=0; $i -lt 12; $i++) {
         $expected = $script:HostPreflightManifest.files[$i]
         $actual = $payload.sourceFiles[$i]
         Assert-CodexHookExactProperties $actual @('relativePath','liveRelativePath','sha256') "host hook restore source[$i]"
@@ -3098,8 +3150,8 @@ function Invoke-Repair {
     $managedTargetPaths = @($InitialState.managedFileStates | ForEach-Object { [string]$_.targetPath })
     $managedTargetSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($managedTargetPath in $managedTargetPaths) { [void]$managedTargetSet.Add([IO.Path]::GetFullPath($managedTargetPath)) }
-    if ($managedTargetPaths.Count -ne 9 -or $managedTargetSet.Count -ne 9) {
-        throw '受管 hook 发布 capability 必须精确包含9个唯一目标。'
+    if ($managedTargetPaths.Count -ne 12 -or $managedTargetSet.Count -ne 12) {
+        throw '受管 hook 发布 capability 必须精确包含12个唯一目标。'
     }
     $createdManagedDirectories = @{}
 
@@ -3343,8 +3395,9 @@ function Invoke-Repair {
                             -Scope "rollback $($fileState.liveRelativePath)" `
                             -AfterRename {
                                 param($publishedLease, $publishedPath)
-                                $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
                                 $beforeSddl = [string]$backup.sddl
+                                Set-AclOwnerAndGroupFromSddl -Path $publishedPath -Sddl $beforeSddl
+                                $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
                                 if ($currentSddl -cne $beforeSddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, $beforeSddl) }
                                 if ([string]$publishedLease.GetSecurityDescriptorSddl() -cne $beforeSddl) { throw 'managed rollback ACL same-handle postcheck 失败' }
                             }
@@ -3420,6 +3473,7 @@ function Invoke-Repair {
         foreach ($path in $aclTargets) {
             Assert-NoReparsePath -Path $path -RequireLeaf | Out-Null
             if ($null -ne $script:FixtureForbiddenAclPath -and $path.Equals($script:FixtureForbiddenAclPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'fixture-only retired path ACL mutation forbidden' }
+            Set-ProtectedAclCurrentUserOwner -Path $path
             $aclRecord = New-RestoreAclTargetLease -ResolvedCodexHome $ResolvedCodexHome -Path $path
             try {
                 $currentSddl = [string]$aclRecord.currentSddl
@@ -3521,7 +3575,9 @@ function Invoke-Repair {
                 Invoke-FixtureRollbackAclCasReplace -TargetPath $Path
                 if ([string]$aclRecord.lease.GetSecurityDescriptorSddl() -cne $currentSddl) { throw 'Repair rollback ACL same-handle prewrite CAS 发现竞争 ACL' }
                 if ($currentSddl -cne $appliedSddl) { throw '检测到第三方 ACL，拒绝覆盖' }
-                $aclRecord.lease.SetSecurityDescriptorSddl($appliedSddl, $originalSddl)
+                Set-AclOwnerAndGroupFromSddl -Path $Path -Sddl $originalSddl
+                $currentSddl = [string]$aclRecord.lease.GetSecurityDescriptorSddl()
+                $aclRecord.lease.SetSecurityDescriptorSddl($currentSddl, $originalSddl)
                 if ([string]$aclRecord.lease.GetSecurityDescriptorSddl() -cne $originalSddl) { throw 'ACL 恢复后校验失败' }
             } catch {
                 $rollbackErrors.Add("acl:${Path}: $($_.Exception.Message)")
@@ -3579,6 +3635,7 @@ function Invoke-Repair {
                     [byte[]]$backupBytes = [IO.File]::ReadAllBytes([string]$backup.backupPath)
                     Set-CodexHookAtomicFileBytesWithCapability -Path ([string]$fileState.targetPath) -Bytes $backupBytes -ExpectedExists $true -ExpectedSha256 ([string]$fileState.sourceRawSha256) -AfterSha256 ([string]$backup.sha256) -CapabilityRoot $InitialState.hookDirectory -AllowedExactPaths $managedTargetPaths -Scope "post-commit rollback $($fileState.liveRelativePath)" -AfterRename {
                         param($publishedLease, $publishedPath)
+                        Set-AclOwnerAndGroupFromSddl -Path $publishedPath -Sddl ([string]$backup.sddl)
                         $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
                         if ($currentSddl -cne [string]$backup.sddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, [string]$backup.sddl) }
                         if ([string]$publishedLease.GetSecurityDescriptorSddl() -cne [string]$backup.sddl) { throw 'post-commit managed rollback ACL same-handle postcheck 失败' }
@@ -3639,7 +3696,7 @@ function Resolve-RestoreEvidencePath {
     if ([string]::IsNullOrWhiteSpace($Value) -or -not [IO.Path]::IsPathFullyQualified($Value)) {
         throw 'Restore 必须提供绝对 EvidencePath'
     }
-    $evidenceRoot = [IO.Path]::GetFullPath((Join-Path $ResolvedCodexHome 'run-evidence\host-hook-remediation')).TrimEnd('\')
+    $evidenceRoot = (Resolve-CodexHostHookEvidenceScope -ResolvedCodexHome $ResolvedCodexHome).remediationRoot.TrimEnd('\')
     $resolvedEvidence = [IO.Path]::GetFullPath($Value).TrimEnd('\')
     if (-not [string]::Equals([IO.Path]::GetDirectoryName($resolvedEvidence), $evidenceRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'EvidencePath 必须是当前 CodexHome 固定 evidence root 的直接子目录'
@@ -3818,6 +3875,7 @@ function Write-RestoreManifestCas {
         -AfterRename {
             param($publishedLease, $publishedPath)
             Invoke-FixtureRestorePathReplace -Fixture $script:FixtureRestoreManifestAclReplace -TargetPath $publishedPath
+            Set-ProtectedAclCurrentUserOwner -Path $publishedPath
             $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
             $desiredSddl = Get-ProtectedAclSddl -CurrentSddl $currentSddl -IsDirectory $false
             if ($currentSddl -cne $desiredSddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, $desiredSddl) }
@@ -4165,6 +4223,7 @@ function Invoke-EvidenceRestore {
                 -BeforeMove { param($targetPath) Invoke-FixtureRestorePathReplace -Fixture $script:FixtureRestoreContentParentReplace -TargetPath (Split-Path -Parent $targetPath) } `
                 -AfterRename {
                     param($publishedLease, $publishedPath)
+                    Set-AclOwnerAndGroupFromSddl -Path $publishedPath -Sddl ([string]$item.beforeSddl)
                     $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
                     if ($currentSddl -cne [string]$item.beforeSddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, [string]$item.beforeSddl) }
                     if ([string]$publishedLease.GetSecurityDescriptorSddl() -cne [string]$item.beforeSddl) { throw "Restore content ACL same-handle postcheck 失败：$($item.name)" }
@@ -4188,6 +4247,7 @@ function Invoke-EvidenceRestore {
             if ([bool]$item.before.existed) {
                 Set-CodexHookAtomicFileBytesWithCapability -Path $item.path -Bytes ([byte[]]$item.backupBytes) -ExpectedExists $true -ExpectedSha256 $item.deployedSha -AfterSha256 ([string]$item.before.sha256) -CapabilityRoot $hookDirectory -AllowedExactPaths $managedTargetPaths -Scope "restore $($item.name)" -AfterRename {
                     param($publishedLease, $publishedPath)
+                    Set-AclOwnerAndGroupFromSddl -Path $publishedPath -Sddl ([string]$item.before.sddl)
                     $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
                     if ($currentSddl -cne [string]$item.before.sddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, [string]$item.before.sddl) }
                     if ([string]$publishedLease.GetSecurityDescriptorSddl() -cne [string]$item.before.sddl) { throw "Restore managed ACL same-handle postcheck 失败：$($item.name)" }
@@ -4213,6 +4273,7 @@ function Invoke-EvidenceRestore {
                 -BeforeMove { param($targetPath) Invoke-FixtureRestorePathReplace -Fixture $script:FixtureRestoreContentParentReplace -TargetPath (Split-Path -Parent $targetPath) } `
                 -AfterRename {
                     param($publishedLease, $publishedPath)
+                    Set-AclOwnerAndGroupFromSddl -Path $publishedPath -Sddl ([string]$item.beforeSddl)
                     $currentSddl = [string]$publishedLease.GetSecurityDescriptorSddl()
                     if ($currentSddl -cne [string]$item.beforeSddl) { $publishedLease.SetSecurityDescriptorSddl($currentSddl, [string]$item.beforeSddl) }
                     if ([string]$publishedLease.GetSecurityDescriptorSddl() -cne [string]$item.beforeSddl) { throw "Restore content ACL same-handle postcheck 失败：$($item.name)" }
@@ -4226,7 +4287,9 @@ function Invoke-EvidenceRestore {
         if ($item.state -ceq 'deployed') {
             $record = New-RestoreAclTargetLease -ResolvedCodexHome $ResolvedCodexHome -Path ([string]$item.path)
             try {
-                $record.lease.SetSecurityDescriptorSddl([string]$item.deployedSddl, [string]$item.beforeSddl)
+                Set-AclOwnerAndGroupFromSddl -Path ([string]$item.path) -Sddl ([string]$item.beforeSddl)
+                $currentSddl = [string]$record.lease.GetSecurityDescriptorSddl()
+                $record.lease.SetSecurityDescriptorSddl($currentSddl, [string]$item.beforeSddl)
                 if ([string]$record.lease.GetSecurityDescriptorSddl() -cne [string]$item.beforeSddl) { throw "Restore parent ACL same-handle postcheck 失败：$($item.name)" }
                 $item.state = 'before'
             } finally { Close-RestoreAclTargetLease -Record $record }
@@ -4270,7 +4333,9 @@ function Invoke-EvidenceRestore {
 
         foreach ($item in @($preflight | Where-Object { $_.kind -ceq 'acl' } | Sort-Object depth,ordinal)) {
             if ($item.state -ceq 'deployed') {
-                $item.aclLease.lease.SetSecurityDescriptorSddl([string]$item.deployedSddl, [string]$item.beforeSddl)
+                Set-AclOwnerAndGroupFromSddl -Path ([string]$item.path) -Sddl ([string]$item.beforeSddl)
+                $currentSddl = [string]$item.aclLease.lease.GetSecurityDescriptorSddl()
+                $item.aclLease.lease.SetSecurityDescriptorSddl($currentSddl, [string]$item.beforeSddl)
                 if ([string]$item.aclLease.lease.GetSecurityDescriptorSddl() -cne [string]$item.beforeSddl) { throw "Restore ACL same-handle postcheck 失败：$($item.name)" }
             }
             Complete-RestoreAction -Name $item.name -Progress $progress -Manifest $manifest -ManifestState $manifestState

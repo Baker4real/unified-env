@@ -16,6 +16,7 @@ reports/safe-tree-delete-test-*/
 reports/safe-tree-delete-production-smoke-*/
 reports/safe-tree-delete-batch-smoke-*/
 reports/run-evidence-migration-*/
+.scratch/host-hook-reconciliation-tests-*/
 .serena/
 .codex-remote-attachments/
 .codex/skill-state/

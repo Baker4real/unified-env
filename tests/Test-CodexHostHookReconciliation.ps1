@@ -67,6 +67,20 @@ function Assert-SafeTestRoot {
     }
 }
 
+. (Join-Path $ProjectRoot 'modules\codex-host\CodexHostHookEvidence.ps1')
+$liveScope = Resolve-CodexHostHookEvidenceScope -ResolvedCodexHome 'D:\Codex\.codex'
+Assert-True -Condition ($liveScope.isLive -eq $true -and $liveScope.isFixture -eq $false) -Message 'live CodexHome 必须解析为 production scope'
+Assert-True -Condition ($liveScope.runEvidenceRoot -eq ([IO.Path]::GetFullPath('D:\agents\run-evidence'))) -Message 'live runEvidenceRoot 必须锚定新根'
+Assert-True -Condition ($liveScope.remediationRoot -eq ([IO.Path]::GetFullPath('D:\agents\run-evidence\host-hook-remediation'))) -Message 'live remediationRoot 必须锚定新根'
+Assert-True -Condition ($liveScope.capabilityRoot -eq $liveScope.runEvidenceRoot) -Message 'live capabilityRoot 必须与 runEvidenceRoot 配对'
+$fxHome = 'D:\agents\projects\统一环境\.scratch\host-hook-reconciliation-tests-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\case\.codex'
+$fxScope = Resolve-CodexHostHookEvidenceScope -ResolvedCodexHome $fxHome
+Assert-True -Condition ($fxScope.isFixture -eq $true -and $fxScope.isLive -eq $false) -Message '非 live CodexHome 必须解析为 fixture scope'
+Assert-True -Condition ($fxScope.runEvidenceRoot -eq ([IO.Path]::GetFullPath((Join-Path $fxHome 'run-evidence')))) -Message 'fixture runEvidenceRoot 必须仍派生自 fixture CodexHome'
+Assert-True -Condition ($fxScope.capabilityRoot -eq ([IO.Path]::GetFullPath($fxHome))) -Message 'fixture capabilityRoot 必须保持 fixture CodexHome'
+$productionPycacheScope = Resolve-CodexHostHookEvidenceScope -ForceProduction
+Assert-True -Condition ($productionPycacheScope.runEvidenceRoot -eq ([IO.Path]::GetFullPath('D:\agents\run-evidence'))) -Message 'TOML pycache production scope 必须使用新根'
+
 function Remove-OwnedHostHookReconciliationFixture {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -974,7 +988,7 @@ try {
     Assert-True -Condition ($hooksRaw -match '"hugeNumber"\s*:\s*1e400') -Message "hooks.json 改写了未知大数值"
     Assert-True -Condition ($hooks.hooks -is [System.Collections.IDictionary]) -Message "hooks 必须是 JSON 对象，不能是数组或 null"
     Assert-True -Condition ($hooks.hooks.Keys.Count -eq 3) -Message "hooks.json 必须只包含三个受管事件"
-    Assert-True -Condition (@($hooks.hooks.SessionStart).Count -eq 2) -Message "SessionStart 必须包含 state preflight 与 activation reminder"
+    Assert-True -Condition (@($hooks.hooks.SessionStart).Count -eq 3) -Message "SessionStart 必须包含 state preflight、activation reminder 与 github-cli"
     Assert-True -Condition ($hooks.hooks.PreToolUse.matcher -ceq 'Bash') -Message "PreToolUse 必须只注册 Bash reminder"
     Assert-True -Condition (@($hooks.hooks.Stop).Count -eq 1) -Message "Stop 必须只注册 cleanup"
 

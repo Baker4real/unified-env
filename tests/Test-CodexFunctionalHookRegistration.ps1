@@ -164,13 +164,14 @@ function Invoke-PublicWrapper([string]$Path, [string]$InputText, [string[]]$Argu
 
 $manifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-Assert-True (@($manifest.hooks).Count -eq 4) 'production manifest 必须精确包含4个功能 hook'
-Assert-True (@($manifest.files).Count -eq 9) 'production manifest 必须精确包含9个 active 文件'
+Assert-True (@($manifest.hooks).Count -eq 5) 'production manifest 必须精确包含5个功能 hook'
+Assert-True (@($manifest.files).Count -eq 12) 'production manifest 必须精确包含12个 active 文件'
 Assert-True (@($manifest.environment).Count -eq 1 -and $manifest.environment[0].name -ceq 'SERENA_HOME') 'production manifest 必须精确包含 User SERENA_HOME action'
 $hookIds = @($manifest.hooks | ForEach-Object id)
-foreach ($retiredId in @('serena-auto-approve','provider-stability','codex-state-policy','serena-dashboard','github-cli')) {
+foreach ($retiredId in @('serena-auto-approve','provider-stability','codex-state-policy','serena-dashboard')) {
     Assert-True ($hookIds -cnotcontains $retiredId) "production manifest 不得包含退役 hook：$retiredId"
 }
+Assert-True ($hookIds -ccontains 'github-cli') 'production manifest 必须重新注册 github-cli'
 $sourceHashesBefore = @{}
 foreach ($file in @($manifest.files)) {
     $sourceHashesBefore[$file.relativePath] = Get-Sha256 (Join-Path $ProjectRoot "managed\codex-hooks\$($file.relativePath)")
@@ -246,11 +247,16 @@ try {
         'trustRequired', 'restartRequired'
     )
     Assert-True ($check.PSObject.Properties.Name -ccontains 'registrationProjection') 'Check 必须输出确定性的 per-hook registration projection'
-    Assert-True (@($check.registrationProjection).Count -eq 4) 'Check registration projection 必须精确包含4个 hook'
+    Assert-True (@($check.registrationProjection).Count -eq 5) 'Check registration projection 必须精确包含5个 hook'
     foreach ($projection in @($check.registrationProjection)) {
         Assert-True ((@($projection.PSObject.Properties.Name) -join ',') -ceq ($expectedProjectionFields -join ',')) "registration projection schema 非法：$($projection.id)"
         foreach ($hashName in @('identity','sourceSha256','wrapperSha256','implementationSha256','runtimeSha256','launcherImplementationSha256','launcherRuntimeSha256')) {
-            Assert-True ([string]$projection.$hashName -cmatch '^[0-9a-f]{64}$') "registration projection $hashName 必须为脱敏 SHA-256：$($projection.id)"
+            $hashValue = $projection.$hashName
+            if ($hashName -cin @('launcherImplementationSha256', 'launcherRuntimeSha256') -and $null -eq $hashValue) {
+                Assert-True ($projection.id -ceq 'github-cli') "无 launcher 的 production hook 只能是 github-cli：$($projection.id)"
+                continue
+            }
+            Assert-True ([string]$hashValue -cmatch '^[0-9a-f]{64}$') "registration projection $hashName 必须为脱敏 SHA-256：$($projection.id)"
         }
     }
     $checkFingerprintAfter = @(
@@ -485,16 +491,18 @@ try {
     Assert-True ([int]$registry.schemaVersion -eq 9 -and $registry.owner -ceq 'unknown-owner-must-survive') 'registry 顶层未知字段必须保留'
     Assert-True (@($registry.hooks.UnknownEvent).Count -eq 1) '未知 event 必须保留'
     $session = @($registry.hooks.SessionStart)
-    Assert-True ($session.Count -eq 3) 'SessionStart 必须保留未知组并注册两个受管组'
+    Assert-True ($session.Count -eq 4) 'SessionStart 必须保留未知组并注册三个受管组'
     Assert-True ($session[0].customGroup -ceq 'unknown-group-must-survive') '未知 SessionStart 组顺序和扩展字段必须保留'
     Assert-True ($session[1].hooks[0].command -ceq 'D:\Codex\.codex\hooks\codex-state-preflight.cmd') 'state preflight identity/order 错误'
     Assert-True ($session[2].matcher -ceq 'startup|resume' -and $session[2].hooks[0].command -ceq 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd') 'activation reminder identity/matcher 错误'
+    Assert-True ($session[3].hooks[0].command -ceq 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd') 'github-cli identity/order 错误'
     Assert-True ($registry.hooks.PreToolUse -is [System.Array]) 'PreToolUse 必须序列化为 matcher group 数组'
     Assert-True ($registry.hooks.Stop -is [System.Array]) 'Stop 必须序列化为 matcher group 数组'
     Assert-True ($registry.hooks.PreToolUse.matcher -ceq 'Bash' -and $registry.hooks.PreToolUse.hooks[0].command -ceq 'D:\Codex\.codex\hooks\serena-reminder-guarded.cmd') 'reminder identity/matcher 错误'
     Assert-True ($registry.hooks.Stop.hooks[0].command -ceq 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd') 'cleanup identity 错误'
     Assert-True ([int]$session[1].hooks[0].timeout -eq 10) 'state preflight timeout 必须精确为10秒'
     Assert-True ([int]$session[2].hooks[0].timeout -eq 10) 'activation reminder timeout 必须精确为10秒'
+    Assert-True ([int]$session[3].hooks[0].timeout -eq 10) 'github-cli timeout 必须精确为10秒'
     Assert-True ([int]$registry.hooks.PreToolUse.hooks[0].timeout -eq 10) 'Serena reminder timeout 必须精确为10秒'
     Assert-True ([int]$registry.hooks.Stop.hooks[0].timeout -eq 10) 'Serena cleanup timeout 必须精确为10秒'
     $registryText = $registry | ConvertTo-Json -Depth 30 -Compress

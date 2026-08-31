@@ -696,7 +696,7 @@ function Assert-CodexHookHostPreflightManifest {
     param([Parameter(Mandatory)][object]$Manifest)
 
     [void](Assert-CodexHookManifest -Manifest $Manifest)
-    $expectedIds = @('codex-state-preflight', 'serena-activate', 'serena-cleanup', 'serena-reminder')
+    $expectedIds = @('codex-state-preflight', 'serena-activate', 'github-cli', 'serena-cleanup', 'serena-reminder')
     $actualIds = @($Manifest.hooks | ForEach-Object { [string]$_.id } | Sort-Object)
     if (($actualIds -join "`0") -cne (@($expectedIds | Sort-Object) -join "`0")) {
         throw "host-preflight manifest hook 集合不精确：$($actualIds -join ',')"
@@ -782,10 +782,11 @@ function Assert-CodexHookHostPreflightManifest {
     }
 
     $expectedHookIdentityHashes = @{
-        'codex-state-preflight' = 'b08e99107b7cebe8f63520f9f16a5e0f2abd23d2e00ecff31de20b8fa40da608'
-        'serena-activate' = '264091f59cabd08049dd0b228671a28cbe967eebe4c2d9413e512ffcc5e878f9'
-        'serena-cleanup' = '27a7d3efd76fa6d1d70db9a6e16e7af5067c8f98494aad9e27f12bca866c9c8b'
-        'serena-reminder' = '73eb560b3607efba4473e65e340c19a12dbab8361b3fe1722dd227e108e09c3e'
+        'codex-state-preflight' = '3e27adf34b6eb0ad3fd2cdfd14b4a7bedd20bc196c04c3dadf7d9d98456b5028'
+        'serena-activate' = '79f82bbd3a0cb8b42edce5511cc648361ef639f9003e3c84c148cce322f717cf'
+        'github-cli' = '1cc78184c6c8c43d93afaf7f3cfb75bde205d29890907ca17c56a25a7585786c'
+        'serena-cleanup' = '4cba2cbb038ba2428a0a50ef2957fcc4c735676d923e9a705897c5449dd1b93b'
+        'serena-reminder' = '9bb36c582936f9d7f477b73cbf7f342c661995c59faef3ef45470f2f7649cd20'
     }
     foreach ($hook in @($Manifest.hooks)) {
         $identity = [ordered]@{
@@ -817,15 +818,18 @@ function Assert-CodexHookHostPreflightManifest {
     }
 
     $expectedFiles = @{
-        'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', 'e819633dfa0147c3e41a15584c2f3b0da1ec899d71a8d5e7f8c7d0ef3bfa8a9b', 'codex-state-preflight')
-        'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', '72612c77be19dc632bd57c0446e9f2deeca1cf0068d97424c26acfe2cfdb1aaf', 'codex-state-preflight')
+        'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', '51076559bcaa7ca573b4c81b8af5856d83db654aebce8932bc05bf06cff521e9', 'codex-state-preflight')
+        'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', 'daa401d467867a2cf1201c2db95198bb6c3d5b96d19406bfa9a61b9766222a0e', 'codex-state-preflight')
         'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '14e46a0309e74b8415dd6d6ea626611b5015272dab3849ff6fb864138cf4f9f9', 'codex-state-preflight')
         'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', '30750335c561fc7a3f7d5ed40eabe528a554caa49c66efa73b296dcddf84e95f', 'serena-reminder')
         'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '25706cc4ae08e954c2b9f35a49225c94479b0267b8313c9951acb23ef277a572', 'serena-cleanup')
-        'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '6c977d95f5fcf373c2b86e2a407d8aa5df98502e5ee6dae4d241d2a1c8647c28', 'serena-reminder', 'serena-cleanup', 'serena-activate')
+        'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '3915184068b711f1cc51f2d710f4c287c1289158f18be44d74fc77e0a86a7a85', 'serena-reminder', 'serena-cleanup', 'serena-activate')
         'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', '6a9d1abca43d05426ffa9d18ae0e65e51357d9e9aad70f3d77364d4ecdad4eb2', 'serena-activate')
+        'codex-github-cli-guard.cmd' = @('hooks/codex-github-cli-guard.cmd', '0ac0f5526f517ace8a3a23a48a32df32284f3bd8459bb4eeadcc2eca682193d9', 'github-cli')
+        'codex-github-cli-guard.ps1' = @('hooks/codex-github-cli-guard.ps1', '0a41c9d42e8c80ab1793d0c4554da8772c32e8fdd4b7dbd61065a02b8670212e', 'github-cli')
+        'lib/CodexGitHubCliGuardEntry.ps1' = @('hooks/lib/CodexGitHubCliGuardEntry.ps1', 'bf7239c8e24ca33d410e6f1c36855f187703f90a35e212a86386d9723740bad2', 'github-cli')
         'lib/hidden-console-launcher.py' = @('hooks/lib/hidden-console-launcher.py', 'c0a95d83b106dbba904af187b1a9f88102894317f163afb6c284114cf358973e', 'codex-state-preflight', 'serena-activate', 'serena-cleanup', 'serena-reminder')
-        'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', '84b525b5bad28523193bab574d4395b187cfc825a95701eaa15e43e74b1a5ec9', 'serena-activate', 'serena-cleanup', 'serena-reminder')
+        'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', 'c1a540c3768c491a863028ee8861d094346e300c73ce992e8b1b19d44a04c12a', 'serena-activate', 'serena-cleanup', 'serena-reminder', 'github-cli')
     }
     if (@($Manifest.files).Count -ne $expectedFiles.Count) {
         throw "host-preflight manifest file 闭包不精确：$(@($Manifest.files).Count)"
@@ -1721,7 +1725,6 @@ function Get-CodexHookKnownRetiredRegistrationManifest {
             [pscustomobject]@{ id = 'codex-state-policy'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\codex-projectless-root-d.cmd'; arguments = @(); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-activate-legacy'; event = 'SessionStart'; matcher = 'startup|resume'; commandPath = 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd'; arguments = @(); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-dashboard'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\serena-dashboard-guard.cmd'; arguments = @(); lifecycle = 'retired' }
-            [pscustomobject]@{ id = 'github-cli'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd'; arguments = @(); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-auto-approve'; event = 'PreToolUse'; matcher = 'mcp__serena__.*|mcp__serena\..*'; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('auto-approve', '--client=codex'); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-reminder-direct'; event = 'PreToolUse'; matcher = 'Bash'; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('remind', '--client=codex'); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-cleanup-direct'; event = 'Stop'; matcher = $null; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('cleanup', '--client=codex'); lifecycle = 'retired' }
