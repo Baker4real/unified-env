@@ -228,7 +228,8 @@ function fixturePath(surface, role) {
 const surfaces = [
   { root: '.tmp/plugins/plugins/github', variant: 'local' },
   { root: 'plugins/cache/openai-curated/github/27126220', variant: 'local' },
-  { root: 'plugins/cache/openai-curated-remote/github/0.1.8-2841cf9749ae', variant: 'remote' },
+  // 远端 curated surface 自 0.1.12 起不再落盘 SKILL.md，已从现役合同移除；
+  // 见 scripts/Apply-GitHubDefaultBranchSkillOverlay.cjs 的 EXPECTED_SURFACE_RELATIVES。
 ];
 
 removeTree(evidenceRoot);
@@ -256,11 +257,11 @@ for (const surface of surfaces) {
 const discovered = overlay.discoverTargets(fixtureRoot);
 assert.equal(discovered.errors?.length ?? 0, 0);
 const targets = discovered.targets ?? discovered;
-assert.equal(targets.length, 6);
+assert.equal(targets.length, 4);
 
 const plan = overlay.buildChangePlan(discovered, fixtureCatalog);
 assert.equal(plan.errors.length, 0);
-assert.equal(plan.changes.length, 6);
+assert.equal(plan.changes.length, 4);
 
 const dryRun = overlay.applyChangePlan(plan, fixtureApplyOptions({ dryRun: true }));
 assert.equal(dryRun.changed, 0);
@@ -268,9 +269,9 @@ assert.equal(dryRun.failed, 0);
 assert.equal(dryRun.skipped, 0);
 
 const applied = overlay.applyChangePlan(plan, fixtureApplyOptions({ dryRun: false }));
-assert.equal(applied.changed, 6);
+assert.equal(applied.changed, 4);
 assert.equal(applied.failed, 0);
-assert.ok(applied.evidencePaths?.length >= 6);
+assert.ok(applied.evidencePaths?.length >= 4);
 const appliedManifest = JSON.parse(fs.readFileSync(applied.manifestPath, 'utf8'));
 assert.equal(appliedManifest.catalogPath, fixtureCatalogPath);
 assert.equal(appliedManifest.catalogSha256, sha256(fs.readFileSync(fixtureCatalogPath)));
@@ -279,11 +280,11 @@ assert.equal(
   appliedManifest.catalogSha256,
 );
 assert.equal(appliedManifest.inventory.digest, plan.inventory.digest);
-assert.equal(appliedManifest.inventory.targets.length, 6);
+assert.equal(appliedManifest.inventory.targets.length, 4);
 assert.equal(appliedManifest.sourceInputs.catalog.path, fixtureCatalogPath);
 assert.equal(appliedManifest.sourceInputs.catalog.sha256, appliedManifest.catalogSha256);
-assert.equal(appliedManifest.sourceInputs.targets.length, 6);
-assert.equal(appliedManifest.sourceInputs.changes.length, 6);
+assert.equal(appliedManifest.sourceInputs.targets.length, 4);
+assert.equal(appliedManifest.sourceInputs.changes.length, 4);
 assert.equal(appliedManifest.sourceInputs.skipped.length, 0);
 
 const secondPlan = overlay.buildChangePlan(
@@ -295,25 +296,24 @@ assert.equal(secondPlan.changes.length, 0);
 const idempotent = overlay.applyChangePlan(secondPlan, fixtureApplyOptions({ dryRun: false }));
 assert.equal(idempotent.changed, 0);
 assert.equal(idempotent.failed, 0);
-assert.equal(idempotent.skipped, 6);
+assert.equal(idempotent.skipped, 4);
 
-// Mixed state is valid: five targets are already patched and one target is
-// upstream. The complete inventory is still six, so apply changes only one.
+// Mixed state is valid: three targets are already patched and one target is
+// upstream. The complete inventory is still four, so apply changes only one.
 const mixedTarget = targets[0];
-const mixedVariant = mixedTarget.surfaceDirectory.includes('0.1.8-') ? 'remote' : 'local';
-fs.writeFileSync(mixedTarget.path, fixtureUpstream[mixedTarget.role][mixedVariant], 'utf8');
+fs.writeFileSync(mixedTarget.path, fixtureUpstream[mixedTarget.role].local, 'utf8');
 const mixedDiscovery = overlay.discoverTargets(fixtureRoot);
 const mixedPlan = overlay.buildChangePlan(mixedDiscovery, fixtureCatalogPath);
 assert.equal(mixedPlan.changes.length, 1);
-assert.equal(mixedPlan.skipped.length, 5);
+assert.equal(mixedPlan.skipped.length, 3);
 const mixedApply = overlay.applyChangePlan(mixedPlan, fixtureApplyOptions({ dryRun: false }));
 assert.equal(mixedApply.changed, 1);
 assert.equal(mixedApply.failed, 0);
 const mixedManifest = JSON.parse(fs.readFileSync(mixedApply.manifestPath, 'utf8'));
 assert.equal(mixedManifest.inventory.digest, mixedPlan.inventory.digest);
-assert.equal(mixedManifest.sourceInputs.targets.length, 6);
+assert.equal(mixedManifest.sourceInputs.targets.length, 4);
 assert.equal(mixedManifest.sourceInputs.changes.length, 1);
-assert.equal(mixedManifest.sourceInputs.skipped.length, 5);
+assert.equal(mixedManifest.sourceInputs.skipped.length, 3);
 
 // A skipped entry is not trusted merely because it is marked skipped.
 const forgedSkippedPlan = JSON.parse(JSON.stringify(secondPlan));
@@ -585,10 +585,9 @@ const postWriteFailure = overlay.applyChangePlan(postWritePlan, fixtureApplyOpti
 }));
 assert.equal(postWriteFailure.status, 'rolled-back');
 for (const target of postWriteDiscovery.targets) {
-  const variant = target.surfaceDirectory.includes('0.1.8-') ? 'remote' : 'local';
   assert.equal(
     sha256(fs.readFileSync(target.path)),
-    sha256(fixtureUpstream[target.role][variant]),
+    sha256(fixtureUpstream[target.role].local),
     `post-write failure left a changed target: ${target.path}`,
   );
 }
@@ -598,10 +597,9 @@ const manifestFailure = overlay.applyChangePlan(postWritePlan, fixtureApplyOptio
 }));
 assert.equal(manifestFailure.status, 'rolled-back');
 for (const target of postWriteDiscovery.targets) {
-  const variant = target.surfaceDirectory.includes('0.1.8-') ? 'remote' : 'local';
   assert.equal(
     sha256(fs.readFileSync(target.path)),
-    sha256(fixtureUpstream[target.role][variant]),
+    sha256(fixtureUpstream[target.role].local),
     `manifest failure left a changed target: ${target.path}`,
   );
 }
@@ -609,7 +607,7 @@ for (const target of postWriteDiscovery.targets) {
 // A concurrent actor may restore the original bytes but touch the mtime. It
 // must not be treated as an already-restored entry during rollback.
 const rollbackMtimeApply = overlay.applyChangePlan(postWritePlan, fixtureApplyOptions({ dryRun: false }));
-assert.equal(rollbackMtimeApply.changed, 6);
+assert.equal(rollbackMtimeApply.changed, 4);
 const rollbackMtimeManifest = JSON.parse(fs.readFileSync(rollbackMtimeApply.manifestPath, 'utf8'));
 const rollbackMtimeEntry = rollbackMtimeManifest.entries[0];
 const rollbackMtimeTarget = rollbackMtimeEntry.path;

@@ -18,10 +18,12 @@ const CODEX_ROOT = 'D:\\Codex\\.codex';
 const CONTROLLED_EVIDENCE_ROOT = DEFAULT_EVIDENCE_ROOT;
 const CATALOG_VERSION = 2;
 const CATALOG_POLICY = 'main-only-publish-v2';
+// 2026-08-31 起远端 curated cache（openai-curated-remote/github/0.1.12+）不再落盘
+// skills 文件，只有本机安装与本地 curated 两个 surface 携带 github/yeet SKILL.md；
+// 远端若重新落盘会以 unexpected-plugin-surface 失败闭锁并要求重新适配。
 const EXPECTED_SURFACE_RELATIVES = Object.freeze([
   '.tmp/plugins/plugins/github',
   'plugins/cache/openai-curated/github/27126220',
-  'plugins/cache/openai-curated-remote/github/0.1.8-2841cf9749ae',
 ]);
 const EXPECTED_SURFACE_COUNT = EXPECTED_SURFACE_RELATIVES.length;
 const EXPECTED_TARGET_COUNT = EXPECTED_SURFACE_COUNT * EXPECTED_ROLES.length;

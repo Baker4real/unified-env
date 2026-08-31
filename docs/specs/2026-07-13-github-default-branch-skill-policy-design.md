@@ -103,7 +103,7 @@ neat-freak 的 reference 是 Git clean closeout 的唯一行为真源；任何 w
 
 ### 4. GitHub 发布插件的现役 v2 overlay
 
-GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本地 skill 根。现役 v2 overlay 以当前 upstream 为基线，保留 connector-first、PR creation、current-branch discovery、GitHub Actions logs 与 `gh` fallback，同时把普通发布固定为当前任务明确授权、用户拥有 remote 和 `main`。3 个 surface、6 个目标只通过版本化 source、deployer 和 runtime 覆盖器写入；不得直接手改 cache。下列 2026-07-13 条目解释覆盖器机制，发布语义以本段和版本化 catalog 为准：
+GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本地 skill 根。现役 v2 overlay 以当前 upstream 为基线，保留 connector-first、PR creation、current-branch discovery、GitHub Actions logs 与 `gh` fallback，同时把普通发布固定为当前任务明确授权、用户拥有 remote 和 `main`。2026-08-31 起远端 curated cache（openai-curated-remote/github 0.1.12+）不再落盘 skills 文件，现役合同收敛为本机安装与本地 curated 两个 surface、4 个目标；远端 surface 若重新落盘 SKILL.md 会以 unexpected-plugin-surface 失败闭锁并要求重新适配。现役目标只通过版本化 source、deployer 和 runtime 覆盖器写入；不得直接手改 cache。下列 2026-07-13 条目解释覆盖器机制，发布语义以本段和版本化 catalog 为准：
 
 1. 在 D:\Codex\.codex\scripts 下增加一个专用覆盖器和声明式补丁清单。
 2. 覆盖器只发现 GitHub 插件的 marketplace source、已安装 cache 与当前可见 remote cache 中的 github 和 yeet SKILL.md。

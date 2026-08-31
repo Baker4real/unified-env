@@ -35,7 +35,6 @@ const retiredFinishingPath = path.join(codexRoot, 'skills', 'finishing-a-develop
 const githubPluginSurfaces = [
   '.tmp/plugins/plugins/github',
   'plugins/cache/openai-curated/github/27126220',
-  'plugins/cache/openai-curated-remote/github/0.1.8-2841cf9749ae',
 ];
 
 const failures = [];
