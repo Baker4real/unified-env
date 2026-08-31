@@ -417,7 +417,7 @@ function Invoke-CodexSerenaBehaviorGuardCore {
     $productionVendor = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
     $productionHome = 'D:\Codex\.serena'
     $productionRuntime = 'D:\Codex\.codex\hooks\lib\CodexHookRuntime.ps1'
-    $productionHealth = 'D:\Codex\.codex\run-evidence\codex-hook-health'
+    $productionHealth = 'D:\agents\run-evidence\codex-hook-health'
     $fixtureHome = 'D:\agents\projects\统一环境\reports\codex-hook-serena-behavior-fixture\.serena'
     $fixtureRuntime = 'D:\agents\projects\统一环境\managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
     $fixtureHealth = 'D:\agents\projects\统一环境\reports\codex-hook-health-test'
@@ -623,7 +623,7 @@ function Get-CodexSerenaBehaviorExecutionConfig {
             vendorPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
             serenaHome = 'D:\Codex\.serena'
             runtimePath = 'D:\Codex\.codex\hooks\lib\CodexHookRuntime.ps1'
-            healthRoot = 'D:\Codex\.codex\run-evidence\codex-hook-health'
+            healthRoot = 'D:\agents\run-evidence\codex-hook-health'
             allowFixture = $false
         }
     }

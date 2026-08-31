@@ -20,7 +20,7 @@ intent: 约束 D 盘布局、迁移授权、验证与回滚边界
 | `D:\Codex\.cache` | 共享缓存根，例如 pip、npm、NuGet、Maven、Gradle 等缓存的统一候选位置。 | 优先迁移低风险缓存；真实迁移必须先有 dry-run。 |
 | `D:\Codex\.cargo` 和 `D:\Codex\.rustup` | Rust 工具链、cargo 工具和缓存状态。 | 保持官方工具链机制管理，不直接搬目录。 |
 | `D:\agents\projects\统一环境\reports\` | 本项目的盘点、迁移计划、更新准备等报告。 | 作为项目内事实基线，不放真实迁移副本。 |
-| `D:\Codex\.codex\run-evidence\env-governance\` | 跨项目或本机级迁移证据、前后对比和回滚记录。 | 真实迁移时保存证据；项目内只放摘要或链接。 |
+| `D:\agents\run-evidence\env-governance\` | 跨项目或本机级迁移证据、前后对比和回滚记录。 | 真实迁移时保存证据；项目内只放摘要或链接。 |
 
 已有历史路径可以暂时保留，例如 `D:\Codex\.pip-cache`、`D:\Codex\tools\npm-cache`、`D:\uv\cache`。后续如要统一到 `D:\Codex\.cache`，必须单独开 issue，不能靠批量搬目录完成。
 
@@ -103,7 +103,7 @@ intent: 约束 D 盘布局、迁移授权、验证与回滚边界
 5. 迁移计划包含回滚步骤：恢复配置、恢复旧路径、保留旧副本、重新验证。
 6. 来源、目标、输出路径及其所有已存在父级都不能穿过 junction、symlink 或 reparse point；命中时必须停在人工审查。
 7. 输出路径必须位于 D 盘。
-8. 迁移证据写入 `D:\Codex\.codex\run-evidence\env-governance\` 或本项目 `reports\`，不得写到 C 盘。
+8. 迁移证据写入 `D:\agents\run-evidence\env-governance\` 或本项目 `reports\`，不得写到 C 盘。
 
 同样的门槛适用于全局管理器更新、Machine/User PATH 改写、默认解释器切换和工具 shim 调整；这些操作即使不移动目录，也会改变后续进程的默认行为。
 

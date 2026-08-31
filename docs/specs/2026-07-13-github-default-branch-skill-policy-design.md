@@ -146,4 +146,4 @@ GitHub overlay 漂移只有在以下条件全部满足后才可关闭；2026-08-
 
 ## 回滚
 
-变更前把所有会被覆盖的本地 skill、插件 source/cache 目标、账本和覆盖清单复制到带时间戳的 D:\Codex\.codex\run-evidence\ 目录，并生成哈希 manifest。覆盖器支持基于该 manifest 的精确还原；若验证失败，先恢复本次备份，再重新运行闭包和行为测试。任何 Git 分支删除都不属于本次 skill 配置变更的自动回滚范围。
+变更前把所有会被覆盖的本地 skill、插件 source/cache 目标、账本和覆盖清单复制到带时间戳的 D:\agents\run-evidence\ 目录，并生成哈希 manifest。覆盖器支持基于该 manifest 的精确还原；若验证失败，先恢复本次备份，再重新运行闭包和行为测试。任何 Git 分支删除都不属于本次 skill 配置变更的自动回滚范围。

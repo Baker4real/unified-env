@@ -66,7 +66,7 @@ function Assert-AllowedOutputDir {
 
     $allowedRoots = @(
         "D:\agents\projects\统一环境\reports",
-        "D:\Codex\.codex\run-evidence\env-governance"
+        "D:\agents\run-evidence\env-governance"
     )
 
     foreach ($allowedRoot in $allowedRoots) {
@@ -75,7 +75,7 @@ function Assert-AllowedOutputDir {
         }
     }
 
-    throw "OutputDir 必须位于允许的报告目录：D:\agents\projects\统一环境\reports 或 D:\Codex\.codex\run-evidence\env-governance。当前值：$Path"
+    throw "OutputDir 必须位于允许的报告目录：D:\agents\projects\统一环境\reports 或 D:\agents\run-evidence\env-governance。当前值：$Path"
 }
 
 function Assert-AllowedReviewPath {
@@ -83,7 +83,7 @@ function Assert-AllowedReviewPath {
 
     $allowedRoots = @(
         "D:\agents\projects\统一环境\reports\project-local-env-review",
-        "D:\Codex\.codex\run-evidence\env-governance"
+        "D:\agents\run-evidence\env-governance"
     )
 
     foreach ($allowedRoot in $allowedRoots) {
@@ -92,7 +92,7 @@ function Assert-AllowedReviewPath {
         }
     }
 
-    throw "ReviewPath 必须位于允许的审查包目录：D:\agents\projects\统一环境\reports\project-local-env-review 或 D:\Codex\.codex\run-evidence\env-governance。当前值：$Path"
+    throw "ReviewPath 必须位于允许的审查包目录：D:\agents\projects\统一环境\reports\project-local-env-review 或 D:\agents\run-evidence\env-governance。当前值：$Path"
 }
 
 function Assert-ExistingLeafIsNotReparsePoint {

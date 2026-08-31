@@ -211,6 +211,7 @@ try {
         "D:\Codex\.codex\account_backup\windows\refresh_runtime\.tmp",
         "D:\Codex\.codex\account_backup\_autosave",
         "D:\Codex\.codex\run-evidence",
+        "D:\agents\run-evidence",
         "D:\Codex\.codex\backups",
         "D:\Codex\.codex-c-backups"
     )) {
@@ -225,6 +226,7 @@ try {
     foreach ($expectedManual in @(
         "D:\Codex\.codex\account_backup\_autosave",
         "D:\Codex\.codex\run-evidence",
+        "D:\agents\run-evidence",
         "D:\Codex\.codex-c-backups"
     )) {
         if (Test-Path -LiteralPath $expectedManual) {

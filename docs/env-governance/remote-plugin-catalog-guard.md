@@ -47,7 +47,7 @@ publish 失败且 canonical 仍为空时，guard 用 quarantine 的原 identity/
 
 每次启动和周期 sweep 都会在处理 canonical `*.json` 前 reconcile `.txn/.publish/.quarantine/.vendor-abort` 与可识别 staging。inventory 枚举全部 filesystem entries；artifact 合法名称保持严格小写，但 Windows stem 冲突映射不区分大小写，因此受管前缀下的大小写变体、目录、junction/reparse、非普通文件和未知 staging 一律作为 `catalog-transaction-unknown-artifact` 报红，并阻止对应 stem canonical 被处理。canonical 为空时可继续已验证 publish 或恢复旧 quarantine；已成功发布、合法完整 staging 或 vendor-abort 清理中断时可幂等收敛；marker 非法、artifact 无 marker、内容/identity 漂移或 canonical 冲突时一律不删除、不恢复、不覆盖。runtime `Audit` 和治理 `Check` 对任何未解决 transaction/quarantine/staging 都报红，不能因剩余 canonical 看似干净而假健康。处理后的 fingerprint 只有在路径对象 identity 与内容 SHA-256 仍等于实际处理对象时才缓存；后置替换会清除旧缓存并重试。
 
-Repair/Remove 的变更证据位于 `D:\Codex\.codex\run-evidence\remote-plugin-catalog-guard\<run-id>\evidence.json`。运行日志只记录 catalog 文件 basename、SHA-256、计数和脱敏错误码，位于 `D:\Codex\.codex\logs\remote-plugin-catalog-guard.jsonl`。
+Repair/Remove 的变更证据位于 `D:\agents\run-evidence\remote-plugin-catalog-guard\<run-id>\evidence.json`。运行日志只记录 catalog 文件 basename、SHA-256、计数和脱敏错误码，位于 `D:\Codex\.codex\logs\remote-plugin-catalog-guard.jsonl`。
 
 `tests\Test-CodexRemotePluginCatalogGuardVendorAbortStress.ps1` 是独立的 `vendor-abort:after-clear` 定向 stress，不运行完整 hardening。它每轮使用两个公开 Sweep 子进程和真实 NTFS fixture，首个失败立即停止；逐操作 evidence 位于同一 guard evidence 根下的 `stress-events.jsonl`，只记录 stderr、异常/栈、API/native code、进程阶段及 artifact leaf/type/identity/hash/attributes，不记录 catalog payload。连续零失败只证明该次运行未复现，不能表述为历史间歇 I/O 根因已经修复，也不能据此加入整轮重试。Hardening 另用真实共享句柄确定性制造第一次 `AcquirePreparedTempFile` 的 native code 32，并要求同一 Sweep 内收敛及日志证据存在。
 

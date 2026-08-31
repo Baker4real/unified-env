@@ -679,6 +679,13 @@ function Get-BackupRetentionGuardrailItems {
     $legacyErrors = if ($legacyChain.status -ceq 'reparse') { @("protected path ancestor is reparse point: $($legacyChain.reparseAncestor)") } elseif ($legacyChain.status -ceq 'error') { @([string]$legacyChain.error) } else { @() }
     $legacyIsReparse = if ($legacyChain.status -ceq 'reparse') { $true } elseif ($legacyChain.status -ceq 'error') { $null } else { $false }
     $items.Add((New-BackupRetentionCoverageItem -Path $legacy -ScanRoot $null -ItemType 'policy-path' -PathExists $legacyChain.exists -Disposition 'protected' -Reason '历史迁移备份可能有审计价值，仅人工审查。' -Manual $true -Blocks $legacyFailed -Risk '高' -Stats $legacyStats -CoverageOrigin 'policy-guardrail' -MetadataStatus $legacyChain.status -IsReparsePoint $legacyIsReparse -ReparseAncestor $legacyChain.reparseAncestor -ReparseTarget $legacyChain.reparseTarget -Errors $legacyErrors))
+    $agentsEvidence = 'D:\agents\run-evidence'
+    $agentsChain = Resolve-BackupRetentionPathChainState -Path $agentsEvidence -TrustedRoot 'D:\agents' -PathChainResolver $PathChainResolver
+    $agentsStats = if ($agentsChain.status -ceq 'ok') { $null } else { [pscustomobject]@{ exists = if ($agentsChain.exists -is [bool]) { $agentsChain.exists } else { $null }; bytes = [int64]0; mb = 0.0; files = 0; dirs = 0; skillMd = 0; newestUtc = $null; oldestUtc = $null; reparsePointsSkipped = if ($agentsChain.status -ceq 'reparse') { 1 } else { 0 }; inaccessibleItems = if ($agentsChain.status -ceq 'error') { 1 } else { 0 }; treeSha256 = $null } }
+    $agentsFailed = $agentsChain.status -cne 'ok'
+    $agentsErrors = if ($agentsChain.status -ceq 'reparse') { @("protected path ancestor is reparse point: $($agentsChain.reparseAncestor)") } elseif ($agentsChain.status -ceq 'error') { @([string]$agentsChain.error) } else { @() }
+    $agentsIsReparse = if ($agentsChain.status -ceq 'reparse') { $true } elseif ($agentsChain.status -ceq 'error') { $null } else { $false }
+    $items.Add((New-BackupRetentionCoverageItem -Path $agentsEvidence -ScanRoot $null -ItemType 'policy-path' -PathExists $agentsChain.exists -Disposition 'protected' -Reason '迁移后运行证据根不得自动清理，仅人工审查。' -Manual $true -Blocks $agentsFailed -Risk '高' -Stats $agentsStats -CoverageOrigin 'policy-guardrail' -MetadataStatus $agentsChain.status -IsReparsePoint $agentsIsReparse -ReparseAncestor $agentsChain.reparseAncestor -ReparseTarget $agentsChain.reparseTarget -Errors $agentsErrors))
     return [object[]]$items.ToArray()
 }
 

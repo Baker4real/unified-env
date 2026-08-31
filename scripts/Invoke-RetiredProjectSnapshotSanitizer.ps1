@@ -357,8 +357,15 @@ function Resolve-Scope {
 
     $fixtureRoot = Get-CanonicalDPath -Path $RequestedFixtureRoot
     $productionRoot = Get-CanonicalDPath -Path $script:ProductionCodexRoot
+    $agentsRoot = Get-CanonicalDPath -Path 'D:\agents'
+    $agentsEvidenceRoot = Get-CanonicalDPath -Path 'D:\agents\run-evidence'
     if ($fixtureRoot.Equals($productionRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'FixtureRoot 不得指向 live D:\Codex\.codex。'
+    }
+    if ($fixtureRoot.Equals($agentsRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $fixtureRoot.Equals($agentsEvidenceRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $fixtureRoot.StartsWith("$agentsEvidenceRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'FixtureRoot 不得指向 live D:\agents 或 D:\agents\run-evidence。'
     }
 
     $reportsRoot = Assert-PhysicalDirectory -Path (Join-Path $script:ProjectRoot 'reports')
@@ -367,7 +374,7 @@ function Resolve-Scope {
     }
     $fixtureRoot = Assert-PhysicalDirectory -Path $fixtureRoot
     $relative = [IO.Path]::GetRelativePath($reportsRoot, $fixtureRoot).Replace('/', '\')
-    if ($relative -notmatch '^retired-project-snapshot-sanitizer-tests-[0-9a-f]{32}(?:\\[a-z0-9-]+)?\\\.codex$') {
+    if ($relative -notmatch '^retired-project-snapshot-sanitizer-tests-[0-9a-f]{32}(?:\\[a-z0-9-]+)?(?:\\\.codex|\\agents)$') {
         throw 'FixtureRoot 不在专用 retired-project-snapshot-sanitizer-tests fixture 根内。'
     }
 
@@ -536,6 +543,49 @@ function Get-SnapshotTargets {
         $statePath = Join-Path $root $stateFileName
         if (Test-Path -LiteralPath $statePath) {
             Add-SnapshotTarget -Targets $targets -Seen $seen -Path $statePath -Kind json
+        }
+    }
+
+    if (-not $Scope.fixture) {
+        $secondRoot = Get-CanonicalDPath -Path 'D:\agents'
+        foreach ($relativeRoot in @(
+            'run-evidence\host-hook-remediation',
+            'run-evidence\codex-project-trust-repair',
+            'run-evidence\wss-enable'
+        )) {
+            Add-RecursiveSnapshotTargets -Targets $targets -Seen $seen -Root (Join-Path $secondRoot $relativeRoot)
+        }
+        $replicatorRoot = Join-Path $secondRoot 'run-evidence\replicator'
+        if (Test-Path -LiteralPath $replicatorRoot) {
+            $replicatorRoot = Assert-PhysicalDirectory -Path $replicatorRoot
+            foreach ($item in @(Get-ChildItem -LiteralPath $replicatorRoot -Force -ErrorAction Stop)) {
+                if ($item.Name -notlike 'serena-runtime-repair-*' -and $item.Name -notlike 'remote-provider-*') {
+                    continue
+                }
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "受控 replicator 快照根是 reparse point：$($item.FullName)"
+                }
+                if (-not $item.PSIsContainer) {
+                    throw "受控 replicator 快照根必须是目录：$($item.FullName)"
+                }
+                Add-RecursiveSnapshotTargets -Targets $targets -Seen $seen -Root $item.FullName
+            }
+        }
+        $runEvidenceRoot = Join-Path $secondRoot 'run-evidence'
+        if (Test-Path -LiteralPath $runEvidenceRoot) {
+            $runEvidenceRoot = Assert-PhysicalDirectory -Path $runEvidenceRoot
+            foreach ($item in @(Get-ChildItem -LiteralPath $runEvidenceRoot -Force -ErrorAction Stop)) {
+                if ($item.Name -notlike 'sidebar-recovery-*') {
+                    continue
+                }
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "受控 sidebar recovery 快照根是 reparse point：$($item.FullName)"
+                }
+                if (-not $item.PSIsContainer) {
+                    throw "受控 sidebar recovery 快照根必须是目录：$($item.FullName)"
+                }
+                Add-RecursiveSnapshotTargets -Targets $targets -Seen $seen -Root $item.FullName
+            }
         }
     }
 

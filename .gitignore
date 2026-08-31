@@ -15,6 +15,7 @@ reports/catalog-guard-tests-*/
 reports/safe-tree-delete-test-*/
 reports/safe-tree-delete-production-smoke-*/
 reports/safe-tree-delete-batch-smoke-*/
+reports/run-evidence-migration-*/
 .serena/
 .codex-remote-attachments/
 .codex/skill-state/

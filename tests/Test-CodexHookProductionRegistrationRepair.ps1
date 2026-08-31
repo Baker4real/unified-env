@@ -40,12 +40,12 @@ Assert-True ($profile.sourceRoot -ceq 'D:\agents\projects\统一环境\managed\c
 Assert-True ($profile.codexHome -ceq 'D:\Codex\.codex') 'codex home 必须固定'
 Assert-True ($profile.registryPath -ceq 'D:\Codex\.codex\hooks.json') 'registry path 必须固定'
 Assert-True ($profile.planPath -ceq 'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan\plan.json') 'plan path 必须固定'
-Assert-True ($profile.evidenceRoot -ceq 'D:\Codex\.codex\run-evidence\env-governance') 'evidence root 必须固定'
+Assert-True ($profile.evidenceRoot -ceq 'D:\agents\run-evidence\env-governance') 'evidence root 必须固定'
 Assert-True ($profile.mutexName -ceq 'Local\CodexHookProductionRegistrationRepairV1') 'production mutex 必须固定'
 $lifecycleGeneration = '11111111-1111-4111-8111-111111111111'
 $productionLifecycle = Get-CodexHookProductionRegistrationRepairLifecyclePaths -Profile $profile -GenerationId $lifecycleGeneration
-Assert-True ($productionLifecycle.claimPath -ceq "D:\Codex\.codex\run-evidence\env-governance\.claims\$lifecycleGeneration.json") 'production claim path 必须固定'
-Assert-True ($productionLifecycle.evidenceDirectory -ceq "D:\Codex\.codex\run-evidence\env-governance\deployment-$lifecycleGeneration") 'production evidence directory 必须是直接子目录'
+Assert-True ($productionLifecycle.claimPath -ceq "D:\agents\run-evidence\env-governance\.claims\$lifecycleGeneration.json") 'production claim path 必须固定'
+Assert-True ($productionLifecycle.evidenceDirectory -ceq "D:\agents\run-evidence\env-governance\deployment-$lifecycleGeneration") 'production evidence directory 必须是直接子目录'
 
 $newPlanCommand = Get-Command -Name (Join-Path $ProjectRoot 'scripts\New-CodexHookDeploymentPlan.ps1')
 $newPlanScriptText = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'scripts\New-CodexHookDeploymentPlan.ps1'))

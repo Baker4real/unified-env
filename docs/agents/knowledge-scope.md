@@ -18,7 +18,7 @@ intent: 区分统一环境项目中长期知识、设备事实和临时证据的
 | `device` | 只对某台设备成立，但其他设备需要知道 | `docs/environments/<device-id>.md` |
 | `local` | 只对当前机器有用，且不应提交 | `.local/`、`*.local.md` 或 `.env.local` |
 | `agent` | 下次 AI 写代码必须遵守 | `AGENTS.md` |
-| `evidence` | 一次性验证、日志、截图或 run output | `D:\Codex\.codex\run-evidence\` 或项目 `reports/` |
+| `evidence` | 一次性验证、日志、截图或 run output | 原始运行输出：`D:\agents\run-evidence\`；一次性任务收口包：`D:\agents\evidence\<task-slug>`；项目内报告：`reports/` |
 
 ## 默认判断
 

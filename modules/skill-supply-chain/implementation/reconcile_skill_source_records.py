@@ -38,7 +38,7 @@ LEGACY_ADOPTED_SCHEMA1_MANIFEST_SHA256 = (
 )
 DEFAULT_BACKUP_PARENT = Path(r"D:\Codex\.codex\backups_state\skill-source-schema")
 DEFAULT_EVIDENCE_PARENT = Path(
-    r"D:\Codex\.codex\run-evidence\daily-codex-ecosystem-update"
+    r"D:\agents\run-evidence\daily-codex-ecosystem-update"
 )
 RUNTIME_FILES = (
     "skill_source_record.py",

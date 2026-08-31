@@ -614,7 +614,7 @@
     {
       "relativePath": "hooks/codex-state-policy-guard.py",
       "liveRelativePath": "codex-state-policy-guard.py",
-      "sha256": "e819633dfa0147c3e41a15584c2f3b0da1ec899d71a8d5e7f8c7d0ef3bfa8a9b",
+      "sha256": "51076559bcaa7ca573b4c81b8af5856d83db654aebce8932bc05bf06cff521e9",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-policy"
@@ -677,7 +677,7 @@
     {
       "relativePath": "hooks/lib/CodexHookRuntime.ps1",
       "liveRelativePath": "lib/CodexHookRuntime.ps1",
-      "sha256": "84b525b5bad28523193bab574d4395b187cfc825a95701eaa15e43e74b1a5ec9",
+      "sha256": "c1a540c3768c491a863028ee8861d094346e300c73ce992e8b1b19d44a04c12a",
       "lifecycle": "active",
       "ownerHookIds": [
         "provider-stability",

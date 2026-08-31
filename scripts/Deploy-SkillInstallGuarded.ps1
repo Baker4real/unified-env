@@ -2,7 +2,7 @@
 param(
     [string]$SourceRoot = '',
     [string]$CodexRoot = 'D:\Codex\.codex',
-    [string]$EvidenceRoot = 'D:\Codex\.codex\run-evidence\skill-install-guarded-deployment',
+    [string]$EvidenceRoot = 'D:\agents\run-evidence\skill-install-guarded-deployment',
     [string]$PythonPath = 'D:\Codex\tools\python314-official\python.exe'
 )
 

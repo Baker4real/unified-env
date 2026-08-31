@@ -2,7 +2,7 @@
 param()
 
 # 完整 ProductionSmoke 会在 reports/ 下创建一次性 fixture，并经 live
-# invoke-safe-tree-delete.cmd 在 D:\Codex\.codex\run-evidence\safe-tree-delete\
+# invoke-safe-tree-delete.cmd 在 D:\agents\run-evidence\safe-tree-delete\
 # 留下新 operation。这是 live 链的固有依赖，不是对 leftover 或 #22 候选的
 # 写入。隔离：capability 目标只在 reports/ 独立 guid 目录；harness 证据写到
 # SAFE_TREE_DELETE_SMOKE_EVIDENCE_ROOT 或新 guid 目录，不改写
@@ -34,7 +34,7 @@ if ([int]$PSVersionTable.PSVersion.Major -lt 7) {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $reportsRoot = Join-Path $projectRoot 'reports'
-$evidenceRoot = 'D:\Codex\.codex\run-evidence\safe-tree-delete'
+$evidenceRoot = 'D:\agents\run-evidence\safe-tree-delete'
 $policyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
 $frozenIssue55Dir = Join-Path $reportsRoot 'safe-tree-delete-issue55-20260816'
 $frozenIssue21Dir = Join-Path $reportsRoot 'safe-tree-delete-issue21-20260816'

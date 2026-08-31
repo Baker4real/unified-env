@@ -34,7 +34,7 @@ trap {
 $ProjectRoot = 'D:\agents\projects\统一环境'
 $FixtureParent = Join-Path $ProjectRoot 'reports\codex-state-path-repair-test'
 $ProductionCodexHome = 'D:\Codex\.codex'
-$ProductionEvidenceRoot = 'D:\Codex\.codex\run-evidence\env-governance\codex-state-preflight'
+$ProductionEvidenceRoot = 'D:\agents\run-evidence\env-governance\codex-state-preflight'
 $CorePath = Join-Path $ProjectRoot 'managed\codex-hooks\hooks\codex-state-policy-guard.py'
 $PythonPath = 'D:\Codex\tools\python314-official\python.exe'
 $FixtureMarker = '.codex-state-path-repair-fixture'

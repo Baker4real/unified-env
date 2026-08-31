@@ -26,10 +26,10 @@ function Assert-BackupRetentionOutputDirectory {
     $fullPath = Assert-BackupRetentionDPath -Path $Path -Name 'OutputDir'
     $allowedRoots = @(
         'D:\agents\projects\统一环境\reports',
-        'D:\Codex\.codex\run-evidence\env-governance'
+        'D:\agents\run-evidence\env-governance'
     )
     if (@($allowedRoots | Where-Object { Test-BackupRetentionOutputSubPath -Path $fullPath -BasePath $_ }).Count -eq 0) {
-        throw 'OutputDir 必须位于允许的报告目录：D:\agents\projects\统一环境\reports 或 D:\Codex\.codex\run-evidence\env-governance。'
+        throw 'OutputDir 必须位于允许的报告目录：D:\agents\projects\统一环境\reports 或 D:\agents\run-evidence\env-governance。'
     }
     return $fullPath
 }
@@ -47,7 +47,7 @@ $context = New-BackupRetentionPolicyContext `
     -RetainCount $RetainCount
 
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-    $OutputDir = "D:\Codex\.codex\run-evidence\env-governance\backup-retention-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    $OutputDir = "D:\agents\run-evidence\env-governance\backup-retention-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 }
 $OutputDir = Assert-BackupRetentionOutputDirectory -Path $OutputDir
 

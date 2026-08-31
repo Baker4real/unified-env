@@ -40,7 +40,7 @@ intent: 说明 Codex 主机钩子 reconciler 的目标状态和安全边界
 受 evidence 约束的恢复（仅在已明确授权时）：
 
 ```powershell
-& .\scripts\Invoke-CodexHostHookReconciliation.ps1 -Mode Restore -EvidencePath 'D:\Codex\.codex\run-evidence\host-hook-remediation\<run-id>' -Json
+& .\scripts\Invoke-CodexHostHookReconciliation.ps1 -Mode Restore -EvidencePath 'D:\agents\run-evidence\host-hook-remediation\<run-id>' -Json
 ```
 
 `Restore` 必须使用当前 Codex home 固定 evidence root 的绝对直接子目录，并与 `Repair` 共用受管 home 授权；它不把旧 evidence 当作配置或权限策略来源，且不会重建任何退役资源。

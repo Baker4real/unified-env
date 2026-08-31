@@ -36,7 +36,7 @@ if ([string]::IsNullOrWhiteSpace($EvidenceHome)) {
 $workRoot = Join-Path $evidenceHome 'work'
 $rawRoot = Join-Path $evidenceHome 'raw'
 $forbiddenQuarantine = Join-Path $projectRoot 'reports\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine'
-$forbiddenTx = 'D:\Codex\.codex\run-evidence\safe-tree-delete\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\transaction.json'
+$forbiddenTx = 'D:\agents\run-evidence\safe-tree-delete\20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\transaction.json'
 
 $degrees = @(1, 2, 4, 8, 16)
 $directoryCount = 32

@@ -91,8 +91,8 @@ $guardedFiles = @(
     'D:\Codex\.codex\config.toml',
     'D:\Codex\.codex\hooks.json',
     'D:\Codex\tools\bin\gh.exe',
-    'D:\Codex\.codex\run-evidence\codex-hook-health\provider-stability.json',
-    'D:\Codex\.codex\run-evidence\codex-hook-health\github-cli.json'
+    'D:\agents\run-evidence\codex-hook-health\provider-stability.json',
+    'D:\agents\run-evidence\codex-hook-health\github-cli.json'
 )
 $fileBefore = @($guardedFiles | ForEach-Object { Get-FileFingerprint $_ })
 $environmentBefore = Get-EnvironmentFingerprint

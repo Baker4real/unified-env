@@ -87,6 +87,16 @@ $legacySourceFacts = @(Get-CodexHookFileFacts `
     -LiveHooksRoot $FixtureLiveHooksRoot `
     -ManifestHashMode Raw)
 Assert-True (@($legacySourceFacts | Where-Object { -not $_.managedMatchesManifest }).Count -eq 0) 'legacy fixture manifest 必须覆盖当前受管 source 的 raw SHA-256'
+$legacyTampered = Copy-TestDocument (Read-CodexHookLegacyFixtureManifest -Path $legacyManifestPath)
+$legacyHashTarget = @($legacyTampered.files | Where-Object relativePath -ceq 'hooks/codex-state-policy-guard.py')[0]
+Assert-True ($null -ne $legacyHashTarget) 'legacy fixture 必须包含 policy-guard source'
+$legacyHashTarget.sha256 = 'e819633dfa0147c3e41a15584c2f3b0da1ec899d71a8d5e7f8c7d0ef3bfa8a9b'
+$legacyTamperedFacts = @(Get-CodexHookFileFacts `
+    -Manifest $legacyTampered `
+    -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks') `
+    -LiveHooksRoot $FixtureLiveHooksRoot `
+    -ManifestHashMode Raw)
+Assert-True (@($legacyTamperedFacts | Where-Object { -not $_.managedMatchesManifest }).Count -gt 0) 'legacy fixture 注入已知旧 raw hash 必须使 inventory 变红'
 $missingTargetManifest = Copy-TestDocument $manifest
 $missingActivate = @($missingTargetManifest.hooks | Where-Object id -ceq 'serena-activate')[0]
 $missingActivate.commandPath = 'D:\Codex\.codex\hooks\missing-serena-activate.cmd'

@@ -33,7 +33,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDelete.ps1')
 
 $policyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
-$evidenceRoot = 'D:\Codex\.codex\run-evidence\safe-tree-delete'
+$evidenceRoot = 'D:\agents\run-evidence\safe-tree-delete'
 
 switch ($Mode) {
     'Status' {

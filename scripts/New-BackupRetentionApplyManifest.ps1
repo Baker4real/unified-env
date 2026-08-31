@@ -17,7 +17,7 @@ function Test-BackupRetentionApplySubPath { param([string]$Path,[string]$BasePat
 }
 function Assert-BackupRetentionApplyEvidencePath { param([string]$Path,[string]$Name)
     $full=Assert-BackupRetentionDPath -Path $Path -Name $Name
-    $allowed=@('D:\agents\projects\统一环境\reports','D:\Codex\.codex\run-evidence\env-governance')
+    $allowed=@('D:\agents\projects\统一环境\reports','D:\agents\run-evidence\env-governance')
     if(@($allowed|Where-Object{Test-BackupRetentionApplySubPath $full $_}).Count-eq0){throw "$Name 不在允许的 env-governance 证据根中：$full"}
     return $full
 }

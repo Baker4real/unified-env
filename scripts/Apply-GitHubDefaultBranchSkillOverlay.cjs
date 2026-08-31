@@ -13,7 +13,7 @@ const path = require('node:path');
 
 const EXPECTED_ROLES = Object.freeze(['github', 'yeet']);
 const STABLE_MARKER = '<!-- codex-github-main-only-overlay: v2 -->';
-const DEFAULT_EVIDENCE_ROOT = 'D:\\Codex\\.codex\\run-evidence\\github-default-branch-skill-policy';
+const DEFAULT_EVIDENCE_ROOT = 'D:\\agents\\run-evidence\\github-default-branch-skill-policy';
 const CODEX_ROOT = 'D:\\Codex\\.codex';
 const CONTROLLED_EVIDENCE_ROOT = DEFAULT_EVIDENCE_ROOT;
 const CATALOG_VERSION = 2;

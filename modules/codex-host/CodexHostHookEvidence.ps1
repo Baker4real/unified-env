@@ -4,6 +4,43 @@
 # transaction precondition snapshot so evidence creation, protected writes,
 # and the manifest closure stay local to codex-host.
 
+function Resolve-CodexHostHookEvidenceScope {
+    param(
+        [string]$ResolvedCodexHome,
+        [switch]$ForceProduction
+    )
+
+    $liveHome = [IO.Path]::GetFullPath('D:\Codex\.codex').TrimEnd('\')
+    if ($ForceProduction -and [string]::IsNullOrWhiteSpace($ResolvedCodexHome)) {
+        $ResolvedCodexHome = $liveHome
+    }
+    if ([string]::IsNullOrWhiteSpace($ResolvedCodexHome)) {
+        throw 'Resolve-CodexHostHookEvidenceScope 需要 ResolvedCodexHome 或 -ForceProduction'
+    }
+    $resolved = [IO.Path]::GetFullPath($ResolvedCodexHome).TrimEnd('\')
+    $isLive = $resolved.Equals($liveHome, [StringComparison]::OrdinalIgnoreCase)
+    $useProduction = $ForceProduction -or $isLive
+    if ($useProduction) {
+        $runEvidenceRoot = [IO.Path]::GetFullPath('D:\agents\run-evidence')
+        return [pscustomobject]@{
+            runEvidenceRoot = $runEvidenceRoot
+            remediationRoot = [IO.Path]::GetFullPath((Join-Path $runEvidenceRoot 'host-hook-remediation'))
+            capabilityRoot = $runEvidenceRoot
+            isFixture = $false
+            isLive = $isLive
+        }
+    }
+
+    $runEvidenceRoot = [IO.Path]::GetFullPath((Join-Path $resolved 'run-evidence'))
+    [pscustomobject]@{
+        runEvidenceRoot = $runEvidenceRoot
+        remediationRoot = [IO.Path]::GetFullPath((Join-Path $runEvidenceRoot 'host-hook-remediation'))
+        capabilityRoot = $resolved
+        isFixture = $true
+        isLive = $false
+    }
+}
+
 function New-CodexHostHookEvidenceSnapshot {
     param(
         [Parameter(Mandatory)][string]$ResolvedCodexHome,
@@ -11,20 +48,22 @@ function New-CodexHostHookEvidenceSnapshot {
         [Parameter(Mandatory)][string[]]$RetiredProjectTrusts
     )
 
-    $runEvidenceRoot = Join-Path $ResolvedCodexHome "run-evidence"
-    [void](New-CodexHookCapabilityDirectory -Path $runEvidenceRoot -CapabilityRoot $ResolvedCodexHome -Name 'run evidence root')
+    $scope = Resolve-CodexHostHookEvidenceScope -ResolvedCodexHome $ResolvedCodexHome
+    $runEvidenceRoot = $scope.runEvidenceRoot
+    $capabilityRoot = $scope.capabilityRoot
+    $evidenceRoot = $scope.remediationRoot
+    [void](New-CodexHookCapabilityDirectory -Path $runEvidenceRoot -CapabilityRoot $capabilityRoot -Name 'run evidence root')
     Assert-NoReparsePath -Path $runEvidenceRoot -RequireLeaf | Out-Null
 
-    $evidenceRoot = Join-Path $runEvidenceRoot "host-hook-remediation"
-    [void](New-CodexHookCapabilityDirectory -Path $evidenceRoot -CapabilityRoot $ResolvedCodexHome -Name 'host hook evidence root')
+    [void](New-CodexHookCapabilityDirectory -Path $evidenceRoot -CapabilityRoot $capabilityRoot -Name 'host hook evidence root')
     Assert-NoReparsePath -Path $evidenceRoot -RequireLeaf | Out-Null
-    Set-ProtectedAclWithCapability -Path $evidenceRoot -CapabilityRoot $ResolvedCodexHome
+    Set-ProtectedAclWithCapability -Path $evidenceRoot -CapabilityRoot $capabilityRoot
 
     $runId = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmss.fffZ") + "-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
     $evidencePath = Join-Path $evidenceRoot $runId
-    [void](New-CodexHookCapabilityDirectory -Path $evidencePath -CapabilityRoot $ResolvedCodexHome -Name 'host hook evidence run' -RequireMissing)
+    [void](New-CodexHookCapabilityDirectory -Path $evidencePath -CapabilityRoot $capabilityRoot -Name 'host hook evidence run' -RequireMissing)
     $script:CurrentEvidencePath = $evidencePath
-    Set-ProtectedAclWithCapability -Path $evidencePath -CapabilityRoot $ResolvedCodexHome
+    Set-ProtectedAclWithCapability -Path $evidencePath -CapabilityRoot $capabilityRoot
     $configEvidencePath = Join-Path $evidencePath "config.toml"
     $hooksEvidencePath = Join-Path $evidencePath "hooks.json"
     $serenaContextEvidencePath = Join-Path $evidencePath "codex-file-tools.yml"

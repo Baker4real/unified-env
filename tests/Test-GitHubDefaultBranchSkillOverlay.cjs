@@ -39,8 +39,7 @@ assert.equal(typeof overlay.parseCliArgs, 'function');
 
 const codexRoot = 'D:\\Codex\\.codex';
 const evidenceRoot = path.join(
-  codexRoot,
-  'run-evidence',
+  'D:\\agents\\run-evidence',
   'github-default-branch-skill-policy',
   'overlay-test',
 );
@@ -48,20 +47,20 @@ const fixtureRoot = path.join(evidenceRoot, 'fixture-codex-root');
 
 const parsedNamedArgs = overlay.parseCliArgs([
   '--codex-root', codexRoot,
-  '--evidence-root', 'D:\\Codex\\.codex\\run-evidence\\github-default-branch-skill-policy',
+  '--evidence-root', 'D:\\agents\\run-evidence\\github-default-branch-skill-policy',
   '--catalog-path', catalogPath,
   '--dry-run',
   '--json',
 ]);
 assert.equal(parsedNamedArgs.ok, true);
 assert.equal(parsedNamedArgs.options.codexRoot, codexRoot);
-assert.equal(parsedNamedArgs.options.evidenceRoot, 'D:\\Codex\\.codex\\run-evidence\\github-default-branch-skill-policy');
+assert.equal(parsedNamedArgs.options.evidenceRoot, 'D:\\agents\\run-evidence\\github-default-branch-skill-policy');
 assert.equal(parsedNamedArgs.options.catalogPath, catalogPath);
 assert.equal(parsedNamedArgs.options.dryRun, true);
 assert.equal(parsedNamedArgs.options.json, true);
 assert.deepEqual(overlay.parseCliArgs([codexRoot, catalogPath, '--dry-run']).options, {
   codexRoot,
-  evidenceRoot: 'D:\\Codex\\.codex\\run-evidence\\github-default-branch-skill-policy',
+  evidenceRoot: 'D:\\agents\\run-evidence\\github-default-branch-skill-policy',
   catalogPath,
   dryRun: true,
   json: false,
@@ -738,7 +737,7 @@ const deploymentReport = JSON.parse(deploymentProcess.stdout.trim());
 assert.equal(deploymentReport.status, 'rolled-back');
 assert.equal(deploymentReport.rolledBack, true);
 assert.ok(deploymentReport.manifestPath.startsWith(
-  path.join(codexRoot, 'run-evidence', 'github-default-branch-skill-policy'),
+  'D:\\agents\\run-evidence\\github-default-branch-skill-policy',
 ));
 assert.equal(
   fs.existsSync(path.join(deploymentCodexRoot, 'scripts', 'Apply-GitHubDefaultBranchSkillOverlay.cjs')),

@@ -11,7 +11,7 @@ function Get-CodexHookProductionFullProfile {
         registryPath = 'D:\Codex\.codex\hooks.json'
         planOutputDir = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan'
         planPath = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan\plan.json'
-        evidenceRoot = 'D:\Codex\.codex\run-evidence\env-governance'
+        evidenceRoot = 'D:\agents\run-evidence\env-governance'
         mutexName = 'Local\CodexHookProductionFullV1'
     }
 }

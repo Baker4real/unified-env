@@ -44,7 +44,7 @@ function Test-PathWithin {
 function Resolve-ControlledEvidencePath {
     param([Parameter(Mandatory = $true)][string] $PathValue)
     $resolved = Resolve-DPath -PathValue $PathValue
-    $controlledRoot = Resolve-DPath -PathValue 'D:\Codex\.codex\run-evidence\github-default-branch-skill-policy'
+    $controlledRoot = Resolve-DPath -PathValue 'D:\agents\run-evidence\github-default-branch-skill-policy'
     if (-not (Test-PathWithin -RootPath $controlledRoot -CandidatePath $resolved)) {
         throw "EvidenceRoot 必须位于 $controlledRoot：$PathValue"
     }

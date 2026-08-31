@@ -69,7 +69,7 @@ DEFAULT_SYSTEM_INSTALLER = Path(
 DEFAULT_PYTHON = Path(r"D:\Codex\tools\python314-official\python.exe")
 DEFAULT_TEMP_ROOT = Path(r"D:\Codex\tmp\skill-install-guarded")
 DEFAULT_LOCK_ROOT = Path(r"D:\Codex\.codex\skill-install")
-DEFAULT_EVIDENCE_ROOT = Path(r"D:\Codex\.codex\run-evidence\skill-install-guarded")
+DEFAULT_EVIDENCE_ROOT = Path(r"D:\agents\run-evidence\skill-install-guarded")
 
 SAFE_SKILL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 TARGET_SCOPES = frozenset({"active", "system"})

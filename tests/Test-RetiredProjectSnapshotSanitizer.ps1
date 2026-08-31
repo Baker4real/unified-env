@@ -727,6 +727,10 @@ try {
 
     $liveRootRefusal = Invoke-Sanitizer -FixtureRoot 'D:\Codex\.codex'
     Assert-True -Condition ($liveRootRefusal.exitCode -eq 1 -and $liveRootRefusal.result.error -match 'live') -Message 'FixtureRoot=live Codex root 必须被拒绝。'
+    $liveAgentsRefusal = Invoke-Sanitizer -FixtureRoot 'D:\agents'
+    Assert-True -Condition ($liveAgentsRefusal.exitCode -eq 1 -and $liveAgentsRefusal.result.error -match 'live') -Message 'FixtureRoot=live D:\agents 必须被拒绝。'
+    $liveAgentsEvidenceRefusal = Invoke-Sanitizer -FixtureRoot 'D:\agents\run-evidence'
+    Assert-True -Condition ($liveAgentsEvidenceRefusal.exitCode -eq 1 -and $liveAgentsEvidenceRefusal.result.error -match 'live') -Message 'FixtureRoot=live D:\agents\run-evidence 必须被拒绝。'
     $outsideAllowlistRefusal = Invoke-Sanitizer -FixtureRoot $ProjectRoot
     Assert-True -Condition ($outsideAllowlistRefusal.exitCode -eq 1 -and $outsideAllowlistRefusal.result.error -match 'reports') -Message 'allowlist 外 FixtureRoot 必须被拒绝。'
 

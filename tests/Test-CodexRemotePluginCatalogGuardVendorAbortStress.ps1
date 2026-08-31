@@ -2,7 +2,7 @@
 param(
     [ValidateRange(50, 500)]
     [int]$Iterations = 50,
-    [string]$EvidenceRoot = 'D:\Codex\.codex\run-evidence\remote-plugin-catalog-guard'
+    [string]$EvidenceRoot = 'D:\agents\run-evidence\remote-plugin-catalog-guard'
 )
 
 Set-StrictMode -Version Latest

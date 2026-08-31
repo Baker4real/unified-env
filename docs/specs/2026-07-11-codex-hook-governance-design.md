@@ -98,7 +98,7 @@ tests/
 
 `managed/codex-hooks/hooks/` 保存本机自定义 wrapper、实现和共享库。live 目标继续是
 `D:\Codex\.codex\hooks\`。真实备份、前后 hash、apply 日志与 rollback 状态写入
-`D:\Codex\.codex\run-evidence\env-governance\codex-hooks-<UTC timestamp>\`；
+`D:\agents\run-evidence\env-governance\codex-hooks-<UTC timestamp>\`；
 项目报告只保存脱敏摘要和证据路径。
 
 ## Manifest 模型

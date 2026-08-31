@@ -273,7 +273,7 @@ function Write-CodexHookLatestHealthCore {
         [switch]$AllowFixtureRoot
     )
     $json=Assert-CodexHookHealthPayload -HookId $HookId -Payload $Payload
-    $fixedRoot='D:\Codex\.codex\run-evidence\codex-hook-health'
+    $fixedRoot='D:\agents\run-evidence\codex-hook-health'
     $fixtureRoot='D:\agents\projects\统一环境\reports\codex-hook-health-test'
     $root=[IO.Path]::GetFullPath($HealthRoot)
     if($AllowFixtureRoot){
@@ -310,5 +310,5 @@ function Write-CodexHookLatestHealthCore {
 
 function Write-CodexHookLatestHealth {
     param([Parameter(Mandatory)][string]$HookId, [Parameter(Mandatory)][object]$Payload)
-    Write-CodexHookLatestHealthCore -HookId $HookId -Payload $Payload -HealthRoot 'D:\Codex\.codex\run-evidence\codex-hook-health'
+    Write-CodexHookLatestHealthCore -HookId $HookId -Payload $Payload -HealthRoot 'D:\agents\run-evidence\codex-hook-health'
 }
