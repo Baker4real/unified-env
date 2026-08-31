@@ -31,8 +31,11 @@
       "ownership": {
         "files": [
           "docs/env-governance/d-drive-layout-and-migration-policy.md",
+          "docs/handoffs/20260826-033540-run-evidence-migration-closeout.md",
           "docs/plans/2026-07-10-environment-inventory-trust-implementation.md",
           "docs/specs/2026-07-10-environment-inventory-trust-design.md",
+          "docs/plans/2026-08-24-run-evidence-migration-plan.md",
+          "docs/plans/2026-08-26-run-evidence-migration-plan-zi-xi-shi-ban-gong-shi.md",
           "scripts/lib/BackupRetentionPolicy.ps1",
           "scripts/lib/BackupRetentionValidation.ps1",
           "scripts/lib/EnvInventoryTrust.ps1",
@@ -509,7 +512,8 @@
       "interfaces": [
         "docs/env-governance/sub2api-update-policy.md",
         "docs/environments/ban-gong-shi.md",
-        "docs/environments/jia-li.md"
+        "docs/environments/jia-li.md",
+        "docs/environments/zi-xi-shi.md"
       ],
       "dependsOn": [],
       "transitionalDependencies": [],
