@@ -423,7 +423,7 @@ args = [ "start-mcp-server", "--project-from-cwd" ]
         $config = $config -replace '(?m)^command\s*=.*$', 'command = "D:\\hermes-data\\serena-wrapper.cmd"'
     } elseif ($Variant -eq "SingleQuotedSerenaArgs") {
         $literalContext = $serenaContextPath
-        $config = $config -replace '(?m)^args\s*=.*$', "args = ['start-mcp-server', '--context=$literalContext', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
+        $config = $config -replace '(?m)^args\s*=.*$', "args = ['/c', 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', 'start-mcp-server', '--context=$literalContext', '--project-from-cwd', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
     } elseif ($Variant -eq "DuplicateSerenaArgs") {
         $config = $config -replace '(?m)^(args\s*=.*)$', ('$1' + "`n" + '$1')
     } elseif ($Variant -eq "DuplicateSerenaCommand") {
@@ -993,7 +993,7 @@ try {
     Assert-True -Condition (@($hooks.hooks.Stop).Count -eq 1) -Message "Stop 必须只注册 cleanup"
 
     $config = Get-Content -LiteralPath (Join-Path $healthyHome "config.toml") -Raw
-    Assert-True -Condition (-not ($config -match '"--project-from-cwd(?:=|"\s*,)')) -Message "Serena 仍包含不可靠的 --project-from-cwd"
+    Assert-True -Condition ($config -match '"--project-from-cwd"\s*,') -Message "官方包装 canonical 必须保留 --project-from-cwd"
     Assert-True -Condition (-not ($config -match '"--project"\s*,')) -Message "Serena 仍包含固定 --project"
     Assert-True -Condition (-not ($config -match '"--project-file(?:=|"\s*,)')) -Message "Serena 仍包含 --project-file"
     Assert-True -Condition $config.Contains("codex-file-tools.yml") -Message "Serena custom context 被误删"
@@ -1262,7 +1262,7 @@ try {
     Assert-True -Condition (@(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count -eq $runtimeFailureEvidenceCount) -Message 'launcher runtime Repair 拒绝后仍创建 evidence'
 
     $vendorAclSddl = (Get-Acl -LiteralPath $configPath).Sddl
-    $vendorDriftedConfig = [System.IO.File]::ReadAllText($configPath).Replace('command = "D:\\Codex\\.codex\\scripts\\start-serena-mcp.cmd"', 'command = "D:\\fixture\\serena-wrapper.cmd"')
+    $vendorDriftedConfig = [System.IO.File]::ReadAllText($configPath).Replace('command = "cmd.exe"', 'command = "D:\\fixture\\serena-wrapper.cmd"')
     [System.IO.File]::WriteAllText($configPath, $vendorDriftedConfig, [System.Text.UTF8Encoding]::new($false))
     $vendorDriftCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
     Assert-True -Condition (-not [bool](Get-CheckResult -Result $vendorDriftCheck -Name "config").ok) -Message "vendor 语义漂移未让 config 检查变红"
@@ -1765,11 +1765,11 @@ try {
         $serenaConfigRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $serenaConfigHome
         Assert-True -Condition ([bool]$serenaConfigRepair.ok -and [bool]$serenaConfigRepair.changed) -Message "$($serenaConfigCase.Name) 未被 Repair 收敛"
         $serenaConfigText = Get-Content -Raw -LiteralPath (Join-Path $serenaConfigHome "config.toml")
-        Assert-True -Condition ($serenaConfigText -match '(?m)^command\s*=\s*"D:\\\\Codex\\\\\.codex\\\\scripts\\\\start-serena-mcp\.cmd"\s*$') -Message "$($serenaConfigCase.Name) command 未规范为固定 wrapper"
+        Assert-True -Condition ($serenaConfigText -match '(?m)^command\s*=\s*"cmd\.exe"\s*$') -Message "$($serenaConfigCase.Name) command 未规范为官方 cmd.exe 包装"
         $argsMatch = [regex]::Match($serenaConfigText, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$')
         Assert-True -Condition $argsMatch.Success -Message "$($serenaConfigCase.Name) 缺少 canonical args"
         $argsTokens = @((ConvertFrom-Json -InputObject $argsMatch.Groups['rhs'].Value -NoEnumerate))
-        $expectedArgs = @("start-mcp-server", "--context=$serenaConfigContextPath", "--enable-web-dashboard=true", "--open-web-dashboard=false")
+        $expectedArgs = @("/c", 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', "start-mcp-server", "--context=$serenaConfigContextPath", "--project-from-cwd", "--enable-web-dashboard=true", "--open-web-dashboard=false")
         Assert-True -Condition (($argsTokens -join "`n") -ceq ($expectedArgs -join "`n")) -Message "$($serenaConfigCase.Name) args 目标不精确"
         foreach ($sentinel in @('startup_timeout_sec = 60', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true')) {
             Assert-True -Condition $serenaConfigText.Contains($sentinel) -Message "$($serenaConfigCase.Name) 未保留 Serena/全文件未知 key：$sentinel"
@@ -1781,11 +1781,11 @@ try {
     $singleQuotedArgsHome = Join-Path $testRoot 'single-quoted-serena-args-command-drift\.codex'
     New-FixtureCodexHome -Root $singleQuotedArgsHome -Variant 'SingleQuotedSerenaArgs'
     $singleQuotedArgsContextPath = Join-Path ([System.IO.Directory]::GetParent($singleQuotedArgsHome).FullName) '.serena\contexts\codex-file-tools.yml'
-    $singleQuotedArgsExpectedLine = "args = ['start-mcp-server', '--context=$singleQuotedArgsContextPath', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
+    $singleQuotedArgsExpectedLine = "args = ['/c', 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', 'start-mcp-server', '--context=$singleQuotedArgsContextPath', '--project-from-cwd', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
     $singleQuotedArgsRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedArgsHome
     Assert-True -Condition ([bool]$singleQuotedArgsRepair.ok -and [bool]$singleQuotedArgsRepair.changed) -Message 'single-quoted Serena args fixture 未修复真实 command drift'
     $singleQuotedArgsText = Get-Content -Raw -LiteralPath (Join-Path $singleQuotedArgsHome 'config.toml')
-    Assert-True -Condition ($singleQuotedArgsText -match '(?m)^command\s*=\s*"D:\\\\Codex\\\\\.codex\\\\scripts\\\\start-serena-mcp\.cmd"\s*$') -Message 'single-quoted Serena args fixture 未修复 command'
+    Assert-True -Condition ($singleQuotedArgsText -match '(?m)^command\s*=\s*"cmd\.exe"\s*$') -Message 'single-quoted Serena args fixture 未修复 command'
     Assert-True -Condition $singleQuotedArgsText.Contains($singleQuotedArgsExpectedLine) -Message '真实 command drift Repair 不得改写已正确的 single-quoted Serena args'
     $singleQuotedArgsSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedArgsHome
     Assert-True -Condition ([bool]$singleQuotedArgsSecond.ok -and -not [bool]$singleQuotedArgsSecond.changed) -Message 'single-quoted Serena args command Repair 后第二次不是 no-op'
@@ -1796,8 +1796,8 @@ try {
     $singleQuotedCanonicalBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedCanonicalHome
     Assert-True -Condition ([bool]$singleQuotedCanonicalBaselineRepair.ok -and [bool]$singleQuotedCanonicalBaselineRepair.changed) -Message 'single-quoted canonical Serena values fixture 未先收敛到健康基线'
     $singleQuotedCanonicalContextPath = Join-Path ([System.IO.Directory]::GetParent($singleQuotedCanonicalHome).FullName) '.serena\contexts\codex-file-tools.yml'
-    $singleQuotedCanonicalCommandLine = "command = 'D:\Codex\.codex\scripts\start-serena-mcp.cmd'"
-    $singleQuotedCanonicalArgsLine = "args = ['start-mcp-server', '--context=$singleQuotedCanonicalContextPath', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
+    $singleQuotedCanonicalCommandLine = "command = 'cmd.exe'"
+    $singleQuotedCanonicalArgsLine = "args = ['/c', 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', 'start-mcp-server', '--context=$singleQuotedCanonicalContextPath', '--project-from-cwd', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
     $singleQuotedCanonicalText = Get-Content -Raw -LiteralPath $singleQuotedCanonicalConfigPath
     Assert-True -Condition ([regex]::Matches($singleQuotedCanonicalText, '(?m)^command\s*=').Count -eq 1 -and [regex]::Matches($singleQuotedCanonicalText, '(?m)^args\s*=').Count -eq 1) -Message 'single-quoted canonical Serena values fixture 未形成唯一 Serena command/args 基线'
     $singleQuotedCanonicalText = [regex]::Replace($singleQuotedCanonicalText, '(?m)^command\s*=[^\r\n]*', $singleQuotedCanonicalCommandLine)
@@ -1827,7 +1827,7 @@ try {
         Assert-True -Condition $emptySerenaConfig.Contains($sentinel) -Message "EOF 插入改写了无关/root 状态：$sentinel"
     }
     $emptySerenaArgs = [regex]::Match($emptySerenaConfig, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$').Groups['rhs'].Value | ConvertFrom-Json -NoEnumerate
-    Assert-True -Condition (@($emptySerenaArgs).Count -eq 4 -and @($emptySerenaArgs)[1] -ceq "--context=$emptySerenaContextPath") -Message "EOF 空 Serena section canonical args 不精确"
+    Assert-True -Condition (@($emptySerenaArgs).Count -eq 7 -and @($emptySerenaArgs)[3] -ceq "--context=$emptySerenaContextPath") -Message "EOF 空 Serena section canonical args 不精确"
     $emptySerenaSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $emptySerenaHome
     Assert-True -Condition ([bool]$emptySerenaSecond.ok -and -not [bool]$emptySerenaSecond.changed) -Message "EOF 空 Serena section 第二次 Repair 不是 no-op"
 
@@ -1874,11 +1874,11 @@ try {
     $missingSerenaSection = [regex]::Match($missingSerenaConfig, '(?ms)^\[mcp_servers\.serena\]\r?\n(?<body>.*?)(?=^\s*\[|\z)')
     Assert-True -Condition ($missingSerenaSection.Success -and [regex]::Matches($missingSerenaConfig, '(?m)^\[mcp_servers\.serena\]\s*$').Count -eq 1) -Message "缺失 Serena section Repair 后未精确插入唯一 canonical section"
     $missingSerenaBody = $missingSerenaSection.Groups['body'].Value
-    Assert-True -Condition ([regex]::Matches($missingSerenaBody, '(?m)^command\s*=\s*"D:\\\\Codex\\\\\.codex\\\\scripts\\\\start-serena-mcp\.cmd"\s*$').Count -eq 1) -Message "缺失 Serena section Repair 后 command 不精确"
+    Assert-True -Condition ([regex]::Matches($missingSerenaBody, '(?m)^command\s*=\s*"cmd\.exe"\s*$').Count -eq 1) -Message "缺失 Serena section Repair 后 command 不精确"
     $missingSerenaArgsMatch = [regex]::Match($missingSerenaBody, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$')
     Assert-True -Condition $missingSerenaArgsMatch.Success -Message "缺失 Serena section Repair 后缺少 canonical args"
     $missingSerenaArgs = @((ConvertFrom-Json -InputObject $missingSerenaArgsMatch.Groups['rhs'].Value -NoEnumerate))
-    $expectedMissingSerenaArgs = @("start-mcp-server", "--context=$missingSerenaContextPath", "--enable-web-dashboard=true", "--open-web-dashboard=false")
+    $expectedMissingSerenaArgs = @("/c", 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', "start-mcp-server", "--context=$missingSerenaContextPath", "--project-from-cwd", "--enable-web-dashboard=true", "--open-web-dashboard=false")
     Assert-True -Condition (($missingSerenaArgs -join "`n") -ceq ($expectedMissingSerenaArgs -join "`n")) -Message "缺失 Serena section Repair 后 args 不精确"
     foreach ($sentinel in @('fixture-model-must-survive', 'fixture_unicode = "中文必须通过"', 'fixture_feature_sentinel = true', 'array-table-must-survive', 'fixture_network_sentinel = "must-survive"')) {
         Assert-True -Condition $missingSerenaConfig.Contains($sentinel) -Message "缺失 Serena section Repair 改写了无关 TOML 内容：$sentinel"

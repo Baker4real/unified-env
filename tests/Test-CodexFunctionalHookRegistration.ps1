@@ -121,8 +121,8 @@ approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 
 [mcp_servers.serena]
-command = "D:\\Codex\\.codex\\scripts\\start-serena-mcp.cmd"
-args = [ "start-mcp-server", "--context=$escapedContext", "--enable-web-dashboard=true", "--open-web-dashboard=false" ]
+command = "cmd.exe"
+args = [ "/c", 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', "start-mcp-server", '--context=$contextPath', "--project-from-cwd", "--enable-web-dashboard=true", "--open-web-dashboard=false" ]
 
 [mcp_servers.serena.env]
 SERENA_HOME = "D:\\Codex\\.serena"

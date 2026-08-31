@@ -1508,8 +1508,18 @@ function Convert-SerenaArgs {
     } catch {
         throw "Serena args 必须是单行 TOML 字符串数组：$($_.Exception.Message)"
     }
-    if ($tokens.Count -eq 0 -or $tokens[0] -cne "start-mcp-server") {
-        throw "Serena args 必须以 start-mcp-server 开头"
+    # Codex Desktop 26.825 起官方把 .cmd 形态的 MCP 条目迁移为
+    # cmd.exe /c <受管 wrapper> start-mcp-server ...；两种入口形态都接受，
+    # canonical 输出统一为官方包装形态。
+    $wrapperScript = 'D:\Codex\.codex\scripts\start-serena-mcp.cmd'
+    $serenaStartIndex = -1
+    if ($tokens.Count -gt 0 -and [string]$tokens[0] -ceq "start-mcp-server") {
+        $serenaStartIndex = 0
+    } elseif ($tokens.Count -ge 3 -and [string]$tokens[0] -ceq "/c" -and [string]$tokens[1] -ceq $wrapperScript -and [string]$tokens[2] -ceq "start-mcp-server") {
+        $serenaStartIndex = 2
+    }
+    if ($serenaStartIndex -lt 0) {
+        throw "Serena args 必须以 start-mcp-server 开头（官方 cmd.exe /c 受管包装亦可）"
     }
     foreach ($token in $tokens) {
         if ($token -isnot [string]) {
@@ -1519,12 +1529,9 @@ function Convert-SerenaArgs {
 
     $result = [System.Collections.Generic.List[string]]::new()
     $contextValues = [System.Collections.Generic.List[string]]::new()
-    for ($index = 0; $index -lt $tokens.Count; $index++) {
+    for ($index = $serenaStartIndex; $index -lt $tokens.Count; $index++) {
         $token = [string]$tokens[$index]
-        if ($token -ceq "--project-from-cwd") {
-            continue
-        }
-        if ($token.StartsWith("--project-from-cwd=", [System.StringComparison]::Ordinal)) {
+        if ($token.StartsWith("--project-from-cwd=", [StringComparison]::Ordinal)) {
             throw "--project-from-cwd 不接受值"
         }
         if ($token -ceq "--context") {
@@ -1573,6 +1580,8 @@ function Convert-SerenaArgs {
         throw "Serena --context 未指向受保护的 codex-file-tools.yml"
     }
 
+    $result.Insert(0, $wrapperScript)
+    $result.Insert(0, "/c")
     ConvertTo-Json -InputObject $result.ToArray() -Compress
 }
 
@@ -2141,9 +2150,12 @@ function Get-DesiredConfig {
         }
     }
 
-    $canonicalCommandValue = 'D:\Codex\.codex\scripts\start-serena-mcp.cmd'
-    $canonicalCommandLiteral = '"D:\\Codex\\.codex\\scripts\\start-serena-mcp.cmd"'
-    $canonicalArgs = @("start-mcp-server", "--context=$ExpectedSerenaContextPath", "--enable-web-dashboard=true", "--open-web-dashboard=false")
+    # 2026-08-31 起 Codex Desktop 26.825 官方把 .cmd 形态的 MCP 条目迁移为
+    # cmd.exe /c 包装并附带 --project-from-cwd；canonical 跟随官方形态，
+    # 旧直连形态由 Convert-SerenaArgs 接受并收敛。
+    $canonicalCommandValue = 'cmd.exe'
+    $canonicalCommandLiteral = '"cmd.exe"'
+    $canonicalArgs = @("/c", 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', "start-mcp-server", "--context=$ExpectedSerenaContextPath", "--project-from-cwd", "--enable-web-dashboard=true", "--open-web-dashboard=false")
     $canonicalArgsLiteral = ConvertTo-Json -InputObject $canonicalArgs -Compress
     $serena = Get-UniqueSectionRange -Document $document -Name "mcp_servers.serena" -AllowMissing
     if ($null -eq $serena) {
