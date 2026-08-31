@@ -42,8 +42,10 @@ intent: 记录家里设备的受控环境事实与差异
   `integratedTerminalShell = "powershell"`。这表示 Codex 的集成终端使用 PowerShell；
   Codex 内部 PTY 和后台命令仍在应用内或隐藏运行，不应为每条命令新开外部 Windows
   Terminal 窗口。
-- 2026-07-23 已在本机复现并修复 lifecycle hook/test 的 PowerShell 闪窗；当前 4 个
-  live wrapper 已采用受管 hidden-console launcher。实现、标准流与最终子进程无窗口验收
+- 2026-07-23 已在本机复现并修复 lifecycle hook/test 的 PowerShell 闪窗；当前
+  `codex-state-preflight` 与三项 Serena live wrapper 已采用受管 hidden-console
+  launcher。2026-08-27 起 `github-cli` 再次注册为 Codex `SessionStart` 生命周期钩，
+  仍走现有 pwsh `.cmd`，不走 hidden-console launcher。实现、标准流与最终子进程无窗口验收
   合同见 `docs/specs/2026-07-11-host-hook-reconciliation-design.md`，本文不复制项目机制。
   实际 Codex Desktop 重启后的独立 180 秒观察窗内，新增可见 cmd、PowerShell、pwsh、
   conhost 或 Windows Terminal 窗口为 `0`。
