@@ -20,6 +20,13 @@ intent: 记录家里设备的受控环境事实与差异
 
 网络地址、SSH 用户、密钥路径、登录态和凭据属于调用端本地事实，不写入仓库；连接前必须从当前设备的本地配置重新确认。
 
+## UU 远程（2026-08-31 现场）
+
+- 安装根：`D:\Program Files\Netease\GameViewer`。2026-08-31 现场核验：`bin\GameViewer.exe` 与 `bin\Upgrade.exe` 均为 `4.38.3.9325`，`GameViewerService` 为 Running，主进程已拉起。
+- UU 远程设备名：`家里`；设备 ID：`aeawutisfya4t4ev`。
+- 正式命令与文件传输走 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。
+- 本机 `bak\` 下没有 `Upgrade.exe` / `aria2c.exe`（2026-08-31）。应用内更新从 `bin` 启动下载器。自习室的 `bak` 回退约束见 `docs/environments/zi-xi-shi.md`，不要套到本机。
+
 ## Windows Terminal、PowerShell 与 WSL
 
 - 2026-07-20 实测 Windows Terminal `1.24.11911.0` 已设为系统默认终端；其

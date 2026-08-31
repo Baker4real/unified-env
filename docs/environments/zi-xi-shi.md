@@ -36,7 +36,6 @@ intent: 记录自习室设备的受控环境事实与差异
 - 正式命令与文件传输走 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。
 - 应用内「检查更新」由未提权 GUI 启动。它会把 `Upgrade.exe` 拷进 `bak\`，在 Program Files 上会得到拒绝访问（Win32 `ec=5`），随后运行已有的 `bak\upgrade.exe`。
 - 该升级器在**自身所在目录**启动 `aria2c.exe`。`aria2c.exe` 只在 `bin\`、不在 `bak\` 时，界面报下载失败，即使更新接口和 `a56.gdl.netease.com` 都通。
-- 2026-08-31 已把当时的 `bin\aria2c.exe` 补进 `bak\` 后，下载与安装完成。安装成功后 `bin` 已是 `4.38.3.9325`，`bak\Upgrade.exe` 仍可能落后（当日仍为 `4.37.0.9232`）。下次应用内更新仍会走 `bak` 回退：先确认 `bak\aria2c.exe` 存在，再点检查更新。
-- 旧版 `4.35` 的 `bak\Upgrade.exe` 备份在该机 `D:\Codex\.codex\tmp\uu-upgrade-bak-backup-20260831\`，不是现役入口。
+- 2026-08-31 已把 `bin\aria2c.exe` 补进 `bak\` 后完成下载安装。同日稍后已将 `bak\Upgrade.exe` 与 `bak\aria2c.exe` 对齐为 `4.38.3.9325`（与 `bin` SHA-256 一致）。未提权 GUI 仍会回退到 `bak`；回退目录必须继续与 `bin` 的升级器及 `aria2c.exe` 对齐。
 
 本页身份与 PowerShell 路径审计日期为 2026-08-26；UU 版本与更新约束审计日期为 2026-08-31。数量、进程和任务状态属易变事实，操作前必须实时复核。
