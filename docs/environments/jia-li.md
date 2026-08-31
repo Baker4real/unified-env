@@ -38,6 +38,19 @@ intent: 记录家里设备的受控环境事实与差异
   `D:\Codex\tools\PowerShell\7.6.5` 放在首位。2026-08-18 新进程复核：
   `Get-Command pwsh.exe` 解析到该目录的 `pwsh.exe`，版本为 `7.6.5`；当前 Codex
   任务仍由既有 7.6.4 进程承载，需重启 Codex 后才会采用新 runtime。
+- 2026-08-31 pwsh 7.6.5 收敛：计划任务 `Reconcile CC Switch Skill Links`、
+  Windows Terminal 默认 profile、`.codex\scripts` 三处本机引用
+  （`purge-explicit-retired-artifacts.cjs`、`retired-skill-menu-surface.cjs`、
+  `Invoke-UuHeartbeatWatchdog.ps1`）、`sub2api-local-deploy` 三处启动/诊断脚本与
+  Claude `settings.local.json` 已全部重指向 7.6.5；`PowerShell\7.6.3` 已经受管安全树删除
+  清除。`PowerShell\7.6.4` 仅剩承载会话的宿主终端进程持锁，Apply 改名被锁闭锁，待该窗口
+  关闭后按同一受管流程清除；证据见
+  `D:\agents\run-evidence\env-governance\20260831-pwsh-765-consolidation\`。
+  `Invoke-UuHeartbeatWatchdog.ps1` 的 `$remotePwsh` 指向远端主机上的 7.6.3 路径，
+  属对端设备事实，不随本机收敛改动。
+- 2026-08-31 同日：`D:\Codex\tools\python314-official-3.14.6`（零引用旧版副本）已经
+  受管安全树删除清除；现役 `python314-official` 实测为 3.14.7。悬空用户级 `GSD_HOME`
+  （指向已不存在的 `D:\Codex\.gsd`）已删除。
 - `D:\Codex\.codex\config.toml` 已设
   `integratedTerminalShell = "powershell"`。这表示 Codex 的集成终端使用 PowerShell；
   Codex 内部 PTY 和后台命令仍在应用内或隐藏运行，不应为每条命令新开外部 Windows
@@ -77,6 +90,9 @@ intent: 记录家里设备的受控环境事实与差异
 - 本机没有可复用的官方 `10.0.301` 安装包或缓存。恢复必须按 D 盘迁移政策另行取得
   对 `.NET 10.0.301` 的具体授权：从微软官方源安装到全新 staging，校验版本与哈希后
   可回滚切换，并单独处理 PATH；不得在残缺 live 根上原地覆盖，也不得删除 C 盘后备入口。
+- 2026-08-31 核验：`D:\Codex\.dotnet-cli` 不是 `.dotnet` 的陈旧重复——
+  `start-serena-mcp.cmd` 以它为 `DOTNET_CLI_HOME`，User PATH 含其 `.dotnet\tools`，
+  遥测文件当日仍有写入。不得以去重为名删除；两目录并存是现役状态。
 
 ## 显示输出与窗口恢复
 
