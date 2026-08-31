@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -542,7 +543,17 @@ Source type: codex-bundled-system
             module._protect_acl(root)
             self.assertEqual(module._verify_acl(root)["verified_item_count"], 2)
 
+            # os.replace 在 NTFS 上保留目标的显式 DACL，原子重写不构成 ACL 漂移。
             module._atomic_write(manifest, b"rewritten-after-protection")
+            self.assertEqual(module._verify_acl(root)["verified_item_count"], 2)
+
+            # 真实漂移 = 保护后新增第四个主体；验证器必须拒绝。
+            drift = subprocess.run(
+                ["icacls.exe", str(manifest), "/grant", r"BUILTIN\Users:(RX)"],
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(drift.returncode, 0, drift.stderr)
             with self.assertRaisesRegex(module.MigrationError, "protected FullControl DACL"):
                 module._verify_acl(root)
 
@@ -557,6 +568,13 @@ Source type: codex-bundled-system
             self.assertEqual(module.verify_backup(manifest)["entry_count"], 9)
 
             module._atomic_write(manifest, manifest.read_bytes())
+            self.assertEqual(module.verify_backup(manifest)["entry_count"], 9)
+            drift = subprocess.run(
+                ["icacls.exe", str(manifest), "/grant", r"BUILTIN\Users:(RX)"],
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(drift.returncode, 0, drift.stderr)
             with self.assertRaisesRegex(module.MigrationError, "protected FullControl DACL"):
                 module.verify_backup(manifest)
             module._protect_acl(root)

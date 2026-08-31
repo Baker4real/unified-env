@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import locale
 import os
 import re
 import shutil
@@ -435,6 +436,33 @@ def _backup_entry(target: Path, backup_root: Path, backup_relative: Path) -> dic
     return entry
 
 
+def _run_localized_tool(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """运行按活动代码页输出的本机 Windows 工具（icacls 等）。
+
+    icacls 会用控制台代码页回显路径与本地化消息；zh-CN 主机上是 GBK，
+    严格 UTF-8 解码在调用方检查退出码之前就抛 UnicodeDecodeError。
+    先按 UTF-8 解码，失败后回退到本机首选编码。
+    """
+    raw = subprocess.run(command, capture_output=True, check=False)
+
+    def _decode(data: bytes | str | None) -> str:
+        if isinstance(data, str):
+            return data
+        if not data:
+            return ""
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode(locale.getpreferredencoding(False), errors="replace")
+
+    return subprocess.CompletedProcess(
+        args=command,
+        returncode=raw.returncode,
+        stdout=_decode(raw.stdout),
+        stderr=_decode(raw.stderr),
+    )
+
+
 def _protect_acl(path: Path) -> dict[str, Any]:
     whoami = subprocess.run(
         ["whoami.exe", "/user", "/fo", "csv", "/nh"],
@@ -511,11 +539,8 @@ foreach ($item in $items) {
         acl_summary = json.loads(acl_result.stdout)
     except json.JSONDecodeError as exc:
         raise MigrationError("回滚点 ACL exact-DACL 输出不是有效 JSON") from exc
-    verify_result = subprocess.run(
+    verify_result = _run_localized_tool(
         ["icacls.exe", str(path), "/verify", "/T", "/C"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
     )
     if verify_result.returncode != 0:
         raise MigrationError(f"回滚点 ACL verify 失败，exit={verify_result.returncode}")
@@ -798,11 +823,8 @@ def restore_backup(manifest_path: Path) -> dict[str, Any]:
 
 
 def _verify_acl(path: Path, *, recursive: bool = True) -> dict[str, Any]:
-    verify = subprocess.run(
+    verify = _run_localized_tool(
         ["icacls.exe", str(path), "/verify", "/T", "/C"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
     )
     if verify.returncode != 0:
         raise MigrationError(f"ACL verify 失败，exit={verify.returncode}：{path}")
@@ -821,11 +843,8 @@ def _verify_acl(path: Path, *, recursive: bool = True) -> dict[str, Any]:
     for candidate in candidates:
         if _is_reparse(candidate):
             raise MigrationError(f"ACL 闭包包含 reparse point：{candidate}")
-        listing_result = subprocess.run(
+        listing_result = _run_localized_tool(
             ["icacls.exe", str(candidate)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
         )
         if listing_result.returncode != 0:
             raise MigrationError(f"ACL listing 失败，exit={listing_result.returncode}：{candidate}")
