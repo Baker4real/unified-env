@@ -265,6 +265,31 @@
       "allowHardLinks": false,
       "allowInternalDirectoryJunctions": false,
       "deniedExactPaths": []
+    },
+    {
+      "id": "codex-user-temp",
+      "capabilityRoot": "D:\\Codex\\temp",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\Codex\\temp\\.net"
+      ]
+    },
+    {
+      "id": "codex-visualizations",
+      "capabilityRoot": "D:\\Codex\\.codex\\visualizations",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-memories",
+      "capabilityRoot": "D:\\Codex\\.codex\\memories",
+      "minimumDescendantDepth": 2,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\Codex\\.codex\\memories\\extensions\\ad_hoc"
+      ]
     }
   ]
 }

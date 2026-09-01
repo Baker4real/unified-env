@@ -47,6 +47,20 @@ adapter 未漂移，不代表新的 policy schema 已激活。真实目标操作
 `D:\Codex\temp\.net\CodexProviderSync`。每个其他后代仍须单独完成受管计划与确认；
 该条目不授权删除 `.net` 根或被拒绝的同级缓存。
 
+用户 TEMP 以 `D:\Codex\temp` 为 capability root，最小后代深度为 1、root 删除用途为
+`none`，并精确拒绝 `D:\Codex\temp\.net`（该子树只走上面的专用条目）。该条目不授权删除
+TEMP 根本身；每个子目录仍须单独完成受管计划与确认。
+
+Codex visualize 产物以 `D:\Codex\.codex\visualizations` 为 capability root，最小后代
+深度为 1、root 删除用途为 `none`。该条目不授权删除 visualizations 根本身。
+
+Codex memories 的过期子树退役以 `D:\Codex\.codex\memories` 为 capability root，最小后代
+深度为 2、root 删除用途为 `none`，并精确拒绝
+`D:\Codex\.codex\memories\extensions\ad_hoc`：该子树的 instructions.md 规定
+"Never delete a note file"，其 notes 与 instructions.md 永不删除；denylist 只向下生效，
+拒绝 `extensions` 不足以保护 `ad_hoc` 子树。该条目不授权删除 memories 根或 `docs`
+等一级子目录本身；每个深度不低于 2 的候选后代仍须单独完成受管计划与确认。
+
 解析器接受 policy schema v3、v4 与 v5；仓库当前生产 policy 仍是 v4，v5 激活尚未执行。
 不得用 v5 fixture、benchmark 或源码存在推断生产 policy 已迁移。`schemaVersion` 与
 `minimumDescendantDepth` 必须是真正的 JSON integer，不接受字符串或小数强转；v3 条目继续

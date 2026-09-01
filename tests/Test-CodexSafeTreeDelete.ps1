@@ -429,6 +429,34 @@ try {
         (@($dotnetCacheEntry.deniedExactPaths).Count -eq 1 -and
             $dotnetCacheEntry.deniedExactPaths[0] -ceq 'D:\Codex\temp\.net\CodexProviderSync') `
         '.NET bundle extraction cache capability 必须精确拒绝 CodexProviderSync'
+    $userTempEntries = @($productionPolicy.entries | Where-Object { $_.id -ceq 'codex-user-temp' })
+    Assert-True ($userTempEntries.Count -eq 1) '生产策略必须唯一声明 user temp capability root'
+    $userTempEntry = $userTempEntries[0]
+    Assert-True `
+        ($userTempEntry.capabilityRoot -ceq 'D:\Codex\temp') `
+        'user temp capability root 必须精确指向 D:\Codex\temp'
+    Assert-True `
+        ($userTempEntry.minimumDescendantDepth -eq 1 -and
+            $userTempEntry.rootDeletionPurpose -ceq 'none') `
+        'user temp capability 不得授权删除根目录自身'
+    Assert-True `
+        (@($userTempEntry.deniedExactPaths).Count -eq 1 -and
+            $userTempEntry.deniedExactPaths[0] -ceq 'D:\Codex\temp\.net') `
+        'user temp capability 必须精确拒绝 .net 子树，改走专用 .NET cache 条目'
+    $memoriesEntries = @($productionPolicy.entries | Where-Object { $_.id -ceq 'codex-memories' })
+    Assert-True ($memoriesEntries.Count -eq 1) '生产策略必须唯一声明 codex memories capability root'
+    $memoriesEntry = $memoriesEntries[0]
+    Assert-True `
+        ($memoriesEntry.capabilityRoot -ceq 'D:\Codex\.codex\memories') `
+        'codex memories capability root 必须精确指向 D:\Codex\.codex\memories'
+    Assert-True `
+        ($memoriesEntry.minimumDescendantDepth -eq 2 -and
+            $memoriesEntry.rootDeletionPurpose -ceq 'none') `
+        'codex memories capability 不得授权删除根目录或一级子目录自身'
+    Assert-True `
+        (@($memoriesEntry.deniedExactPaths).Count -eq 1 -and
+            $memoriesEntry.deniedExactPaths[0] -ceq 'D:\Codex\.codex\memories\extensions\ad_hoc') `
+        'codex memories capability 必须精确拒绝 extensions\ad_hoc 子树（notes 永不删除）'
     $productionPolicyExpectations = @(
         [pscustomobject]@{
             id = 'codex-managed-temp'
@@ -469,6 +497,12 @@ try {
         [pscustomobject]@{
             id = 'environment-remote-attachments'
             capabilityRoot = 'D:\agents\projects\统一环境\.codex-remote-attachments'
+            minimumDescendantDepth = 1
+            rootDeletionPurpose = 'none'
+        },
+        [pscustomobject]@{
+            id = 'codex-visualizations'
+            capabilityRoot = 'D:\Codex\.codex\visualizations'
             minimumDescendantDepth = 1
             rootDeletionPurpose = 'none'
         }
