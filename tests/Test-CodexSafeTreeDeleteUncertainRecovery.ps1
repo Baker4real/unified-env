@@ -12,11 +12,12 @@ $ErrorActionPreference = 'Stop'
 # Not tested: SessionHashCache internals, leaf-dispositions uncertain pairing, production leftover Purge
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $hostSafetyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1'
 $safeTreeLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1'
 $entryPath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteFixture.ps1'
 $crashFixturePath = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteCrashFixture.ps1'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue34-20260817'
+$evidenceHome = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'uncertainrecovery'
 # pwsh resolution: pinned host runtime first (deterministic anchor), then PATH lookup
 # (GitHub runners preinstall pwsh), then the running $PSHOME; fail closed when all miss.
 $pwshPinPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'

@@ -19,9 +19,11 @@ $ErrorActionPreference = 'Stop'
 # Not tested: leftover Purge/Restore, ProductionSmoke, #36 1.526 GiB rerun.
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $hostSafetyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1'
 $libraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue42-20260819'
+$frozenEvidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue42-20260819'
+$evidenceHome = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'phase3integration'
 $fixtureRoot = Join-Path $evidenceHome ('fixtures-{0}' -f ([guid]::NewGuid().ToString('N')))
 $targetPath = Join-Path $fixtureRoot 'candidate'
 $nestedPath = Join-Path $targetPath 'nested'
@@ -41,7 +43,7 @@ $scaleHeadroomBytes = 256L * 1024L * 1024L
 $scaleRequiredBytes = (2L * $scaleTotalBytes) + $scaleHeadroomBytes
 $forbiddenQuarantine = Join-Path $projectRoot 'reports\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine'
 $productionRunEvidenceRoot = 'D:\agents\run-evidence\safe-tree-delete'
-$leftoverEvidenceRoot = 'D:\Codex\.codex\run-evidence\safe-tree-delete'
+$leftoverEvidenceRoot = $productionRunEvidenceRoot
 $forbiddenTransaction = Join-Path $leftoverEvidenceRoot '20260816T021845Z-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e\transaction.json'
 # leftover guard 语义：测试不得创建/删除 leftover quarantine（存在性前后不得变化），
 # 不是「世界必须永远包含它」。该 quarantine 已随 projects 根迁移消失（非测试行为），
@@ -52,6 +54,7 @@ $forbiddenTransaction = Join-Path $leftoverEvidenceRoot '20260816T021845Z-0ab1e1
 # leftoverGuardMode=absent-environment，leftover 三断言记名跳过；根存在 → production-host，
 # 三断言（transaction 必须在 / quarantine 存在性不变 / digest 不变）全部照旧强制。
 $leftoverGuardMode = if ([IO.Directory]::Exists($leftoverEvidenceRoot)) { 'production-host' } else { 'absent-environment' }
+Write-Output ("leftoverGuardMode=$leftoverGuardMode leftoverEvidenceRoot=$leftoverEvidenceRoot leftoverAssertionsEnforced=$($leftoverGuardMode -ceq 'production-host')")
 if ($leftoverGuardMode -ceq 'absent-environment') {
     Write-Output ("[SKIP] leftover guard: 生产 leftover 根不存在，leftoverGuardMode=absent-environment，" +
         "跳过 leftover 三断言（transaction 必须在 / quarantine 存在性不变 / digest 不变）: $leftoverEvidenceRoot")
@@ -387,6 +390,15 @@ Assert-True (
     $runtimeMajor -gt 7 -or
     ($runtimeMajor -eq 7 -and $runtimeMinor -ge 6)
 ) "本测试要求 PowerShell 7.6+，实际为 $($PSVersionTable.PSVersion)"
+
+Assert-True ($leftoverEvidenceRoot -ceq $productionRunEvidenceRoot) (
+    'leftover guard 必须观察 productionRunEvidenceRoot，不得指向已迁移走的 Codex run-evidence 根')
+Assert-True ($leftoverEvidenceRoot -ceq 'D:\agents\run-evidence\safe-tree-delete') (
+    'leftover guard 必须观察迁移后的生产 run-evidence 根 D:\agents\run-evidence\safe-tree-delete')
+if ([IO.Directory]::Exists($productionRunEvidenceRoot)) {
+    Assert-True ($leftoverGuardMode -ceq 'production-host') (
+        "本机生产 leftover 根存在时 leftoverGuardMode 必须是 production-host，实际为 $leftoverGuardMode")
+}
 
 $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($projectRoot))
 Assert-True (
@@ -799,14 +811,14 @@ try {
     $issue41 = Read-JsonDocument -Path $issue41ScalePath
     Assert-True (Test-HasJsonProperty -Object $issue36 -Name 'speedup') '#36 报告必须含 speedup 字段（不钉历史 1.02）'
     Assert-True ((Test-HasJsonProperty -Object $issue36 -Name 'metTarget') -and $issue36.metTarget -is [bool]) `
-        '#36 报告必须含 bool metTarget（不钉达成状态；本套件先跑的 Phase1Integration 会用当前生产管线重写该快照，#42 并行 Purge 落地后新测可合法翻 true，见性能 spec 操作者指南）'
+        '#36 报告必须含 bool metTarget（不钉达成状态；冻结 snapshot 只读，live 重测写到 .scratch）'
     [void][double]$issue36.speedup
     Assert-True (Test-HasJsonProperty -Object $issue37 -Name 'speedupVsBaseline') '#37 报告必须含 speedupVsBaseline 字段（不钉历史 0.964）'
     Assert-True ((Test-HasJsonProperty -Object $issue37 -Name 'metTarget') -and $issue37.metTarget -is [bool]) `
-        '#37 报告必须含 bool metTarget（不钉达成状态；PurgeBatch 重测可改写该快照的达成状态）'
+        '#37 报告必须含 bool metTarget（不钉达成状态；冻结 snapshot 只读，live 重测写到 .scratch）'
     [void][double]$issue37.speedupVsBaseline
     Assert-True ((Test-HasJsonProperty -Object $issue41 -Name 'IsWithinTarget') -and $issue41.IsWithinTarget -is [bool]) `
-        '#41 报告必须含 bool IsWithinTarget（不钉达成状态；重测可改写该快照的达成状态）'
+        '#41 报告必须含 bool IsWithinTarget（不钉达成状态；冻结 snapshot 只读，live 重测写到 .scratch）'
     Assert-True (Test-HasJsonProperty -Object $issue41 -Name 'OverheadPercent') `
         '#41 报告必须含 OverheadPercent 字段（不钉 18.659 或后续重测百分比）'
     [void][double]$issue41.OverheadPercent
@@ -821,15 +833,16 @@ try {
         -CapabilityRoot $scaleRoot `
         -DeniedPath $scaleEvidenceRoot `
         -Id 'phase3-integration-scale'
+    $frozenBaselinePartialPath = Join-Path $frozenEvidenceHome 'baseline-partial.json'
     $baselinePartialPath = Join-Path $evidenceHome 'baseline-partial.json'
     $baselineReused = $false
     if ($SkipBaseline) {
-        Assert-True ([IO.File]::Exists($baselinePartialPath)) (
-            'SkipBaseline 必须能读到已有 baseline-partial.json'
+        Assert-True ([IO.File]::Exists($frozenBaselinePartialPath)) (
+            'SkipBaseline 必须能读到冻结 snapshot 中的 baseline-partial.json'
         )
-        $baselinePartial = Read-JsonDocument -Path $baselinePartialPath
-        Assert-True ([long]$baselinePartial.elapsedMs -eq 513510) (
-            'SkipBaseline 复用的 baseline 合计必须仍是 513510ms'
+        $baselinePartial = Read-JsonDocument -Path $frozenBaselinePartialPath
+        Assert-True ([long]$baselinePartial.elapsedMs -eq 1141047) (
+            'SkipBaseline 复用的冻结 baseline-partial.json 合计必须仍是 1141047ms'
         )
         Assert-True ([int]$baselinePartial.fileCount -eq $scaleFileCount) (
             'SkipBaseline 复用的 baseline fileCount 必须是 10000'
@@ -1006,7 +1019,7 @@ try {
         baselineReused = [bool]$baselineReused
         phase3ProdAttempts = @($phase3Attempts)
         method = $(if ($baselineReused) {
-            'phase3-prod 10k x 4KB Plan→Apply→Purge after snapshot/Apply lease-reuse fix; A.baseline reused from baseline-partial.json (513510ms; trees were cleaned after that run, not rerun). A=production serial HostSafety. B=coordinator File.Delete 10k x 1KB reused from #40 raw. Do not add B into A.'
+            'phase3-prod 10k x 4KB Plan→Apply→Purge after snapshot/Apply lease-reuse fix; A.baseline reused from frozen reports/safe-tree-delete-issue42-20260819/baseline-partial.json (1141047ms). A=production serial HostSafety. B=coordinator File.Delete 10k x 1KB reused from #40 raw. Do not add B into A.'
         } else {
             'sequential 10k x 4KB trees (baseline then phase3-prod; 4KB matches #32/#37 proven Apply hash-reuse size after 1KB exclusive-open failures); same working tree and library; A=production Plan→Apply→Purge (serial HostSafety); B=coordinator File.Delete 10k x 1KB reused from #40 raw. Do not add B into A. phase3-prod retries ERROR_SHARING_VIOLATION (32) up to 3 times with a fresh tree.'
         })
@@ -1019,7 +1032,7 @@ try {
                     'DisablePurgeBatchForTest'
                 )
                 reused = [bool]$baselineReused
-                source = 'reports/safe-tree-delete-issue42-20260817/baseline-partial.json'
+                source = 'reports/safe-tree-delete-issue42-20260819/baseline-partial.json'
                 planElapsedMs = [long]$baseline.planElapsedMs
                 applyElapsedMs = [long]$baseline.applyElapsedMs
                 purgeElapsedMs = [long]$baseline.purgeElapsedMs

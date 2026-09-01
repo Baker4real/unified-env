@@ -339,6 +339,7 @@
           "scripts/lib/ReportArtifactPublisher.ps1",
           "scripts/lib/TrustedReportInput.ps1",
           "tests/Invoke-CodexSafeTreeDeleteFixture.ps1",
+          "tests/New-CodexSafeTreeDeleteTestScratchRoot.ps1",
           "tests/Invoke-CodexSafeTreeDeleteApplyCrashFixture.ps1",
           "tests/Invoke-CodexSafeTreeDeleteCrashFixture.ps1",
           "tests/Invoke-CodexSafeTreeDeleteRestoreCrashFixture.ps1",
@@ -369,7 +370,8 @@
           "tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1",
           "tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1",
           "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1",
-          "tests/Test-CodexSafeTreeDeletePhase3Production.ps1"
+          "tests/Test-CodexSafeTreeDeletePhase3Production.ps1",
+          "tests/Test-CodexSafeTreeDeleteScratchResidue.ps1"
         ],
         "prefixes": [
           ".scratch/safe-tree-delete-perf/",
@@ -454,7 +456,8 @@
             "tests/Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1",
             "tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1",
             "tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1",
-            "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1"
+            "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1",
+            "tests/Test-CodexSafeTreeDeleteScratchResidue.ps1"
           ],
           "python": [],
           "node": []
@@ -488,7 +491,8 @@
             "tests/Test-CodexSafeTreeDeleteParallelPurgeCoordinator.ps1",
             "tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1",
             "tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1",
-            "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1"
+            "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1",
+            "tests/Test-CodexSafeTreeDeleteScratchResidue.ps1"
           ],
           "python": [],
           "node": []

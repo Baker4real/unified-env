@@ -27,11 +27,12 @@ $isCiRunner = (
 $ac12GateMode = if ($isCiRunner) { 'ci-record-only' } else { 'enforced' }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $identitySourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteFileIdentity.cs'
 $hashCacheSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteHashCache.cs'
 $threadJournalSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteThreadJournal.cs'
 $parallelPurgeSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteParallelPurge.cs'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue41-20260819'
+$evidenceHome = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'journalperformance'
 $fixtureRoot = Join-Path $evidenceHome ('fixtures-{0}' -f ([guid]::NewGuid().ToString('N')))
 $scaleJsonPath = Join-Path $evidenceHome 'scale-10000.json'
 $reportExamplePath = Join-Path $evidenceHome 'journal-performance-report-example.json'

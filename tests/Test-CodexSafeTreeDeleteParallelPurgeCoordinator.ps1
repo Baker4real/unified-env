@@ -13,11 +13,12 @@ $ErrorActionPreference = 'Stop'
 # Observable: fixture-tree file presence, journal literal lines, result counts. Not production Purge.
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $identitySourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteFileIdentity.cs'
 $hashCacheSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteHashCache.cs'
 $threadJournalSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteThreadJournal.cs'
 $parallelPurgeSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteParallelPurge.cs'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue39-20260817'
+$evidenceHome = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'parallelpurgecoordinator'
 $fixtureRoot = Join-Path $evidenceHome ('fixtures-{0}' -f ([guid]::NewGuid().ToString('N')))
 $scaleJsonPath = Join-Path $evidenceHome 'scale-10000.json'
 

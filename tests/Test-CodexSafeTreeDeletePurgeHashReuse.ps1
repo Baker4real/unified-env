@@ -10,9 +10,10 @@ $ErrorActionPreference = 'Stop'
 # 3. Observable Purge success / rejection and leaf dispositions, not SessionHashCache internals
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $hostSafetyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1'
 $libraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue33-20260817'
+$evidenceHome = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'purgehashreuse'
 $fixtureRoot = Join-Path $evidenceHome ('fixtures-{0}' -f ([guid]::NewGuid().ToString('N')))
 $targetPath = Join-Path $fixtureRoot 'candidate'
 $nestedPath = Join-Path $targetPath 'nested'

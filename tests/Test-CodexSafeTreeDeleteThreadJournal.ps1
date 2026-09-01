@@ -12,10 +12,11 @@ $ErrorActionPreference = 'Stop'
 # Observable: journal bytes, exclusive-open lock probe, distinct instances/paths. Not Purge.
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $identitySourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteFileIdentity.cs'
 $hashCacheSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteHashCache.cs'
 $threadJournalSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteThreadJournal.cs'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue38-20260817'
+$evidenceHome = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'threadjournal'
 $fixtureRoot = Join-Path $evidenceHome ('fixtures-{0}' -f ([guid]::NewGuid().ToString('N')))
 $pendingLiteral = '{"op":"pending","path":"leaf.txt"}'
 $commitLiteral = '{"op":"commit","path":"leaf.txt"}'
@@ -103,6 +104,10 @@ Assert-True (Test-Path -LiteralPath $identitySourcePath -PathType Leaf) 'CodexSa
 Assert-True (Test-Path -LiteralPath $hashCacheSourcePath -PathType Leaf) 'CodexSafeTreeDeleteHashCache.cs 必须存在'
 Assert-True (Test-Path -LiteralPath $threadJournalSourcePath -PathType Leaf) 'RED: CodexSafeTreeDeleteThreadJournal.cs 尚不存在'
 
+$scratchPrefix = [IO.Path]::GetFullPath((Join-Path $projectRoot '.scratch')).TrimEnd('\') + '\safe-tree-delete-tests-'
+Assert-True ($fixtureRoot.StartsWith($scratchPrefix, [StringComparison]::OrdinalIgnoreCase)) (
+    "ThreadJournal fixture 必须位于项目 .scratch/safe-tree-delete-tests-* 下：$fixtureRoot")
+
 [void][IO.Directory]::CreateDirectory($fixtureRoot)
 
 if (-not ('CodexSafeTreeDelete.ThreadJournalWriter' -as [type])) {
@@ -110,7 +115,7 @@ if (-not ('CodexSafeTreeDelete.ThreadJournalWriter' -as [type])) {
 }
 
 $directPath = Join-Path $fixtureRoot 'direct.thread-42.jsonl'
-$writer = [CodexSafeTreeDelete.ThreadJournalWriter]::new($directPath, 42)
+$writer = [CodexSafeTreeDelete.ThreadJournalWriter]::new($directPath, 42, $evidenceHome)
 try {
     Assert-True ($writer.ThreadId -eq 42) '构造函数必须保存传入的 threadId'
     Assert-True ($writer.JournalFilePath -ceq $directPath) '构造函数必须保存 journalFilePath'
@@ -131,7 +136,7 @@ Assert-True (Test-ExclusiveOpen -LiteralPath $directPath) 'Dispose 后必须能�
 
 $recreateFailed = $false
 try {
-    $ignored = [CodexSafeTreeDelete.ThreadJournalWriter]::new($directPath, 42)
+    $ignored = [CodexSafeTreeDelete.ThreadJournalWriter]::new($directPath, 42, $evidenceHome)
     $ignored.Dispose()
 } catch [IO.IOException] {
     $recreateFailed = $true
@@ -143,8 +148,8 @@ $dirB = Join-Path $fixtureRoot 'dir-b'
 [void][IO.Directory]::CreateDirectory($dirA)
 [void][IO.Directory]::CreateDirectory($dirB)
 
-$ownerA = [CodexSafeTreeDelete.ThreadJournalOwner]::new($dirA, 'dir-a')
-$ownerB = [CodexSafeTreeDelete.ThreadJournalOwner]::new($dirB, 'dir-b')
+$ownerA = [CodexSafeTreeDelete.ThreadJournalOwner]::new($dirA, 'dir-a', $evidenceHome)
+$ownerB = [CodexSafeTreeDelete.ThreadJournalOwner]::new($dirB, 'dir-b', $evidenceHome)
 try {
     $sameThreadFirst = $ownerA.GetOrCreateThreadJournal()
     $sameThreadSecond = $ownerA.GetOrCreateThreadJournal()
@@ -175,7 +180,7 @@ try {
 
 $multiRoot = Join-Path $fixtureRoot 'multi'
 [void][IO.Directory]::CreateDirectory($multiRoot)
-$multiOwner = [CodexSafeTreeDelete.ThreadJournalOwner]::new($multiRoot, 'dir-multi')
+$multiOwner = [CodexSafeTreeDelete.ThreadJournalOwner]::new($multiRoot, 'dir-multi', $evidenceHome)
 try {
     $workerIds = $multiOwner.GetOrCreateOnNewThreads(4, $pendingLiteral, $false)
     Assert-True ($workerIds.Length -eq 4) '必须启动 4 个工作线程'
@@ -210,7 +215,7 @@ foreach ($journalPath in $afterMulti) {
 
 $throwRoot = Join-Path $fixtureRoot 'throw'
 [void][IO.Directory]::CreateDirectory($throwRoot)
-$throwOwner = [CodexSafeTreeDelete.ThreadJournalOwner]::new($throwRoot, 'dir-throw')
+$throwOwner = [CodexSafeTreeDelete.ThreadJournalOwner]::new($throwRoot, 'dir-throw', $evidenceHome)
 $workFailed = $false
 $throwPath = $null
 try {
@@ -239,7 +244,7 @@ Assert-True (
 
 $workerThrowRoot = Join-Path $fixtureRoot 'worker-throw'
 [void][IO.Directory]::CreateDirectory($workerThrowRoot)
-$workerThrowOwner = [CodexSafeTreeDelete.ThreadJournalOwner]::new($workerThrowRoot, 'dir-wthrow')
+$workerThrowOwner = [CodexSafeTreeDelete.ThreadJournalOwner]::new($workerThrowRoot, 'dir-wthrow', $evidenceHome)
 $workerFailed = $false
 try {
     try {

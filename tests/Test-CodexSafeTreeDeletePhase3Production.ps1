@@ -12,9 +12,10 @@ $ErrorActionPreference = 'Stop'
 # Not tested: leftover Purge/Restore, 10k wall-clock (see evidence runner).
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $hostSafetyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1'
 $libraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue42-20260819'
+$evidenceHome = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'phase3production'
 $fixtureRoot = Join-Path $evidenceHome ('prod-safety-{0}' -f ([guid]::NewGuid().ToString('N')))
 $forbiddenQuarantine = Join-Path $projectRoot 'reports\.codex-safe-delete-0ab1e1b6-dd25-47b4-8def-0f1c1f6e8e3e.quarantine'
 

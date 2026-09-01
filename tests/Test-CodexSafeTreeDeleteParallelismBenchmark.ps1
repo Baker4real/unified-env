@@ -13,12 +13,14 @@ $ErrorActionPreference = 'Stop'
 # 1. ParallelPurgeCoordinator — constructor-injected allowedRoot + FileSystemCapabilities; Purge() on fixture trees only
 # 2. FileSystemCapabilities.RecommendParallel + RecommendedMaxParallelism — one capabilities object per DOP 1/2/4/8/16
 # Observable: wall-clock, Process.TotalProcessorTime, per-run JSON, tree files gone after Purge.
-# Live writes go to reports/safe-tree-delete-parallelism-benchmark-20260819/ by default.
+# Live writes go to .scratch/safe-tree-delete-tests-parallelismbenchmark-* by default.
 # Must not overwrite reports/safe-tree-delete-parallelism-benchmark/ or
 # reports/safe-tree-delete-issue40-20260817/raw/ historical evidence.
+# -EvidenceHome overrides the live write root.
 # Not production Purge. Not ThreadJournal / ParallelPurge source edits.
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $identitySourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteFileIdentity.cs'
 $hashCacheSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteHashCache.cs'
 $threadJournalSourcePath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteThreadJournal.cs'
@@ -27,7 +29,7 @@ $frozenEvidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue40-2
 $frozenRawRoot = Join-Path $frozenEvidenceHome 'raw'
 $frozenAnalysisPath = Join-Path $frozenEvidenceHome 'analysis.json'
 $historicalEvidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-parallelism-benchmark'
-$defaultEvidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-parallelism-benchmark-20260819'
+$defaultEvidenceHome = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'parallelismbenchmark'
 if ([string]::IsNullOrWhiteSpace($EvidenceHome)) {
     $evidenceHome = $defaultEvidenceHome
 } else {
@@ -278,6 +280,11 @@ Assert-True (Test-Path -LiteralPath $parallelPurgeSourcePath -PathType Leaf) 'Pa
 $evidenceHomeFull = [IO.Path]::GetFullPath($evidenceHome).TrimEnd('\')
 $historicalFull = [IO.Path]::GetFullPath($historicalEvidenceHome).TrimEnd('\')
 $frozenFull = [IO.Path]::GetFullPath($frozenEvidenceHome).TrimEnd('\')
+if ([string]::IsNullOrWhiteSpace($EvidenceHome)) {
+    $scratchPrefix = [IO.Path]::GetFullPath((Join-Path $projectRoot '.scratch')).TrimEnd('\') + '\safe-tree-delete-tests-'
+    Assert-True ($evidenceHomeFull.StartsWith($scratchPrefix, [StringComparison]::OrdinalIgnoreCase)) (
+        "默认 live evidenceHome 必须位于项目 .scratch/safe-tree-delete-tests-* 下：$evidenceHomeFull")
+}
 Assert-True ($evidenceHomeFull -ne $historicalFull) 'evidenceHome 不得指向历史 parallelism-benchmark 目录'
 Assert-True ($evidenceHomeFull -ne $frozenFull) 'evidenceHome 不得指向 #40 历史证据目录'
 Assert-True (-not (Test-PathIsUnderRoot -LiteralPath $evidenceHome -Root $frozenEvidenceHome)) (
@@ -886,7 +893,7 @@ function Format-ScenarioTable {
 $reportLines = @(
     '# Safe-tree-delete #40 并行度基准'
     ''
-    '夹具树只打 `ParallelPurgeCoordinator`，新跑写入 `reports/safe-tree-delete-parallelism-benchmark-20260819/`。不得覆盖 `reports/safe-tree-delete-parallelism-benchmark/` 与 `reports/safe-tree-delete-issue40-20260817/raw/` 历史证据。不是生产 Purge。不是 GitHub 关单授权。'
+    '夹具树只打 `ParallelPurgeCoordinator`，新跑默认写入 `.scratch/safe-tree-delete-tests-*/`。不得覆盖 `reports/safe-tree-delete-parallelism-benchmark/` 与 `reports/safe-tree-delete-issue40-20260817/raw/` 历史证据。不是生产 Purge。不是 GitHub 关单授权。'
     ''
     ('- 测量时间（UTC）：{0}' -f $analysisDoc.measuredAtUtc)
     ('- ProcessorCount：{0}' -f $processorCount)

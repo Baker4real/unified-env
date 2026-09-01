@@ -1,12 +1,12 @@
 [CmdletBinding()]
 param()
 
-# 完整 ProductionSmoke 会在 reports/ 下创建一次性 fixture，并经 live
-# invoke-safe-tree-delete.cmd 在 D:\agents\run-evidence\safe-tree-delete\
-# 留下新 operation。这是 live 链的固有依赖，不是对 leftover 或 #22 候选的
-# 写入。隔离：capability 目标只在 reports/ 独立 guid 目录；harness 证据写到
-# SAFE_TREE_DELETE_SMOKE_EVIDENCE_ROOT 或新 guid 目录，不改写
-# reports/safe-tree-delete-issue55-20260816/ 与
+# 完整 ProductionSmoke 会在 .scratch/safe-tree-delete-tests-productionsmoke-* 下
+# 创建一次性 fixture，并经 live invoke-safe-tree-delete.cmd 在
+# D:\agents\run-evidence\safe-tree-delete\ 留下新 operation。这是 live 链的固有
+# 依赖，不是对 leftover 或 #22 候选的写入。隔离：capability 目标只在项目
+# .scratch 专用前缀；harness 证据写到 SAFE_TREE_DELETE_SMOKE_EVIDENCE_ROOT 或
+# 同一 scratch 树，不改写 reports/safe-tree-delete-issue55-20260816/ 与
 # reports/safe-tree-delete-issue21-20260816/ 历史快照（含 leaf-delete-failed.json）。
 # 本票 fixture 事后受管 resume Purge；禁止 Purge/Restore leftover 0ab1e1b6；
 # 不读写 #22 的 Status/Archive 候选。
@@ -33,7 +33,10 @@ if ([int]$PSVersionTable.PSVersion.Major -lt 7) {
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $reportsRoot = Join-Path $projectRoot 'reports'
+$scratchCapabilityRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot '.scratch'))
+$scratchRoot = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'productionsmoke'
 $evidenceRoot = 'D:\agents\run-evidence\safe-tree-delete'
 $policyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
 $frozenIssue55Dir = Join-Path $reportsRoot 'safe-tree-delete-issue55-20260816'
@@ -42,7 +45,7 @@ $frozenLeafDeleteFailedPath = Join-Path $frozenIssue55Dir 'leaf-delete-failed.js
 $harnessEvidenceRoot = if (-not [string]::IsNullOrWhiteSpace($env:SAFE_TREE_DELETE_SMOKE_EVIDENCE_ROOT)) {
     [string]$env:SAFE_TREE_DELETE_SMOKE_EVIDENCE_ROOT
 } else {
-    Join-Path $reportsRoot ('safe-tree-delete-production-smoke-harness-{0}' -f ([guid]::NewGuid().ToString('N')))
+    Join-Path $scratchRoot 'harness'
 }
 $issue55Dir = Join-Path $harnessEvidenceRoot 'issue55'
 $issue21Dir = Join-Path $harnessEvidenceRoot 'issue21'
@@ -52,14 +55,14 @@ $issue21Dir = Join-Path $harnessEvidenceRoot 'issue21'
 # 指向 D:\agents\projects\统一环境\scripts\Invoke-CodexSafeTreeDelete.ps1，属迁移
 # 后的合法当前生产入口，不是漂移/篡改。
 $expectedLivePs1Sha256 = 'ec14e863460b70a6ed14c56aa0b9dc6546a3efe141599a51005d3aee373aee7a'
-$fixtureRoot = Join-Path $reportsRoot ("safe-tree-delete-production-smoke-{0}" -f ([guid]::NewGuid().ToString('N')))
+$fixtureRoot = Join-Path $scratchRoot 'production-smoke'
 $payloadPath = Join-Path $fixtureRoot 'readonly-payload.txt'
-$batchParent = Join-Path $reportsRoot ("safe-tree-delete-batch-smoke-{0}" -f ([guid]::NewGuid().ToString('N')))
+$batchParent = Join-Path $scratchRoot 'batch-smoke'
 $batchA = Join-Path $batchParent 'old-a'
 $batchB = Join-Path $batchParent 'old-b'
-$failFixtureRoot = Join-Path $reportsRoot ("safe-tree-delete-issue55-livefail-{0}" -f ([guid]::NewGuid().ToString('N')))
+$failFixtureRoot = Join-Path $scratchRoot 'issue55-livefail'
 $failPayloadPath = Join-Path $failFixtureRoot 'issue55-locked-payload.txt'
-$issue21FailFixtureRoot = Join-Path $reportsRoot ("safe-tree-delete-issue21-livefail-{0}" -f ([guid]::NewGuid().ToString('N')))
+$issue21FailFixtureRoot = Join-Path $scratchRoot 'issue21-livefail'
 $issue21FailPayloadPath = Join-Path $issue21FailFixtureRoot 'issue21-locked-payload.txt'
 $liveWrapper = 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd'
 $sourceWrapper = Join-Path $projectRoot 'scripts\invoke-codex-safe-tree-delete.cmd'
@@ -1146,7 +1149,7 @@ try {
     $plan = Invoke-LiveSafeDeleteTracked -Name 'success-plan' -Arguments @(
         '-Mode', 'Plan'
         '-TargetPath', $fixtureRoot
-        '-CapabilityRoot', $reportsRoot
+        '-CapabilityRoot', $scratchCapabilityRoot
         '-Json'
     ) -TimeoutMs 180000 -ExpectedExitCode 0 -RequireJson
     Assert-True ($plan.document.planned -eq $true) 'live Plan 必须成功'
@@ -1181,7 +1184,7 @@ try {
     $batchPrePlan = Invoke-LiveSafeDeleteTracked -Name 'batch-pre-plan' -Arguments @(
         '-Mode', 'Plan'
         '-TargetPath', $batchA
-        '-CapabilityRoot', $reportsRoot
+        '-CapabilityRoot', $scratchCapabilityRoot
         '-Json'
     ) -TimeoutMs 180000 -ExpectedExitCode 0 -RequireJson
     $batchPreApply = Invoke-LiveSafeDeleteTracked -Name 'batch-pre-apply' -Arguments @(
@@ -1196,7 +1199,7 @@ try {
     $batch = Invoke-LiveSafeDeleteTracked -Name 'batch-purge' -Arguments @(
         '-Mode', 'BatchPurge'
         '-TargetPaths', ('{0}::{1}' -f $batchA, $batchB)
-        '-CapabilityRoot', $reportsRoot
+        '-CapabilityRoot', $scratchCapabilityRoot
         '-ConfirmApply'
         '-ConfirmPurge'
         '-Json'
@@ -1211,7 +1214,7 @@ try {
     $batchParentPlan = Invoke-LiveSafeDeleteTracked -Name 'batch-parent-plan' -Arguments @(
         '-Mode', 'Plan'
         '-TargetPath', $batchParent
-        '-CapabilityRoot', $reportsRoot
+        '-CapabilityRoot', $scratchCapabilityRoot
         '-Json'
     ) -TimeoutMs 180000 -ExpectedExitCode 0 -RequireJson
     $batchParentApply = Invoke-LiveSafeDeleteTracked -Name 'batch-parent-apply' -Arguments @(
@@ -1237,7 +1240,7 @@ try {
     $failPlan = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-plan' -Arguments @(
         '-Mode', 'Plan'
         '-TargetPath', $issue21FailFixtureRoot
-        '-CapabilityRoot', $reportsRoot
+        '-CapabilityRoot', $scratchCapabilityRoot
         '-Json'
     ) -TimeoutMs 180000 -ExpectedExitCode 0 -RequireJson
     Assert-True ($failPlan.document.planned -eq $true) 'issue21 负向路径 Plan 必须成功'
@@ -1416,7 +1419,7 @@ try {
     $failPlan = Invoke-LiveSafeDeleteTracked -Name 'fail-plan' -Arguments @(
         '-Mode', 'Plan'
         '-TargetPath', $failFixtureRoot
-        '-CapabilityRoot', $reportsRoot
+        '-CapabilityRoot', $scratchCapabilityRoot
         '-Json'
     ) -TimeoutMs 180000 -ExpectedExitCode 0 -RequireJson
     Assert-True ($failPlan.document.planned -eq $true) '负向路径 Plan 必须成功'

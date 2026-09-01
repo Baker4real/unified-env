@@ -16,9 +16,10 @@ $ErrorActionPreference = 'Stop'
 # -SkipScale skips the 1k/10k Apply wall-clock slices.
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 $hostSafetyLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1'
 $libraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1'
-$evidenceHome = Join-Path $projectRoot 'reports\safe-tree-delete-issue32-20260817'
+$evidenceHome = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'hashreuse'
 $fixtureRoot = Join-Path $evidenceHome ('fixtures-{0}' -f ([guid]::NewGuid().ToString('N')))
 $targetPath = Join-Path $fixtureRoot 'candidate'
 $nestedPath = Join-Path $targetPath 'nested'
