@@ -20,6 +20,7 @@ intent: 定义设备事实、跨设备验收和宿主集成政策的文档边界
 ## 权威合同
 
 - `docs/environments/jia-li.md`
+- `docs/environments/zi-xi-shi.md`
 - `docs/environments/ban-gong-shi.md`
 - `docs/env-governance/sub2api-update-policy.md`
 
