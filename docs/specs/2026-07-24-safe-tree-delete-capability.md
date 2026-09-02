@@ -16,7 +16,8 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 
 ## 固定入口
 
-- 宿主入口：`D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd`
+- 宿主入口（2026-09-03 入口契约，canonical）：gate shim `D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1`，POSIX shell 经托管 pwsh `-File` 直调，不经 cmd.exe；门禁失败契约与调用注意见 `D:\Codex\.codex\docs\agent-guidance\host-runbook\safe-tree-delete.md` 首节
+- 宿主 cmd 语境兼容启动器：`D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd`（只 pin pwsh 再调 shim；仓库源 `scripts\invoke-codex-safe-tree-delete.cmd`）
 - 生产脚本：`scripts\Invoke-CodexSafeTreeDelete.ps1`
 - 实现：`scripts\lib\CodexSafeTreeDelete.ps1`
 - allowlist：`managed\safe-tree-delete\policy.json`

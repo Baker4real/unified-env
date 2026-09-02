@@ -13,7 +13,7 @@ intent: 定义通用 I/O、路径安全、原子发布和树删除的内部平�
 
 ## 接口
 
-safe delete 的宿主公开入口仍是 `D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd`；仓库源入口是 `scripts/invoke-codex-safe-tree-delete.cmd`。仓库内部模块只通过 manifest 登记的 `scripts/lib/` 稳定 seam 使用 handle-bound I/O、用户环境事务、路径安全、可信输入和原子报告发布；`modules/host-safety/lib/` 是实现目录，不是跨模块入口。调用者不应跨过这些 seam 调用内部删除函数。
+safe delete 的宿主公开入口是 gate shim `D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1`（2026-09-03 入口契约：canonical，POSIX shell 经托管 pwsh 直调；仓库源是 `scripts/invoke-codex-safe-tree-delete-gate-shim.ps1`）；`D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd` 是 cmd 语境（任务计划、cmd 脚本）兼容启动器，只 pin pwsh 再调 shim（仓库源是 `scripts/invoke-codex-safe-tree-delete.cmd`）。仓库内部模块只通过 manifest 登记的 `scripts/lib/` 稳定 seam 使用 handle-bound I/O、用户环境事务、路径安全、可信输入和原子报告发布；`modules/host-safety/lib/` 是实现目录，不是跨模块入口。调用者不应跨过这些 seam 调用内部删除函数。
 
 ## 权威合同
 
