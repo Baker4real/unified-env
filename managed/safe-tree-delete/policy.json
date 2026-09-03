@@ -35,6 +35,13 @@
       "deniedExactPaths": []
     },
     {
+      "id": "agents-temp",
+      "capabilityRoot": "D:\\agents\\tmp",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
       "id": "codex-legacy-temp",
       "capabilityRoot": "D:\\Codex\\.tmp",
       "minimumDescendantDepth": 1,
