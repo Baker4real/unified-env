@@ -104,9 +104,9 @@ intent: 记录家里设备的受控环境事实与差异
 ## Aura 风扇灯自动关闭
 
 - 登录后通过 `C:\Users\WINDOWS\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\aura-lights-off.lnk` 运行；该快捷方式只承载 Startup 兼容配置，目标为 `C:\Windows\System32\wscript.exe`。
-- 实际载荷位于 D 盘：`D:\Codex\.codex\scripts\Start-AuraLightsOffHidden.vbs`；它以隐藏窗口运行 `D:\hermes-data\hermes-agent\venv-new\Scripts\python.exe D:\hermes-data\scripts\turn_off_aura_hid_startup.py`。这个解释器含有必需的 `hidapi`。
-- 此自动化只关闭 ASUS Aura / 风扇 RGB，不改变风扇转速或散热策略；不要在常规 Startup/Hermes 清理中删除或改写快捷方式与 D 盘载荷。
-- 2026-07-15 验证：启动器退出码为 `0`、未新建 Windows Terminal 进程，且用户已目视确认灯光保持熄灭。若修复或迁移，仍须同时核对启动器退出码与实际灯光状态。
+- 实际载荷位于 D 盘：`D:\Codex\.codex\scripts\Start-AuraLightsOffHidden.vbs`；它以隐藏窗口运行 `D:\Codex\tools\asus-aura-hid\.venv\Scripts\python.exe D:\Codex\tools\asus-aura-hid\turn_off_aura_hid_startup.py`。这个解释器含有必需的 `hidapi`。
+- 此自动化只关闭 ASUS Aura / 风扇 RGB，不改变风扇转速或散热策略；不要在常规 Startup 清理中删除或改写快捷方式与 D 盘载荷。
+- 2026-09-02：关灯运行时已从退役的 Hermes 树迁出。2026-09-02 迁移后现场 HID 运行退出码为 `0`；灯光是否熄灭仍须用户目视确认。若修复或迁移，仍须同时核对启动器退出码与实际灯光状态。
 
 ## Codex provider 代理（后台）
 
@@ -114,12 +114,12 @@ intent: 记录家里设备的受控环境事实与差异
 - 入口源码位于 `D:\Codex\tools\codex-launcher\`，现役入口为 `D:\Codex\tools\bin\codex.exe`。修改脚本或 launcher 后必须重新发布并核验现役入口，不能改动官方 Store/AppX Codex 二进制。
 - launcher 只在 stdin、stdout、stderr 都连接真实终端，且 `TERM` 缺失或为 `dumb` 时，为官方 Codex 子进程设置 `TERM=xterm-256color`；重定向、GUI 和后台入口必须保留原值。修改该契约后运行 `tests\Test-CodexLauncherTerminalEnvironment.ps1`，并在不显式覆盖 `TERM` 的真实 PTY 中复验 `codex doctor --json`。
 - 服务子进程必须以 `pythonw.exe` 和 `CREATE_NO_WINDOW` 后台启动；验收时检查 `/health`、`/v1/models`、窗口句柄为零且没有 `conhost.exe` 后代，不能通过关闭用户终端来掩盖问题。
-- 不得把 proxy 或其日志放回 `D:\hermes-data`。`D:\hermes-data\.npm-global` 仅用于排除旧 npm shim，与该代理无关，不能作为迁移副作用修改。
+- 不得把 proxy 或其日志放进已退役的 Hermes 树。`D:\hermes-data` 已于 2026-09-02 退役删除。
 
 ## 共享工具判定根
 
 - 环境盘点的 canonical shared roots 为 `D:\Codex\tools`、`D:\Codex\envs` 和 `D:\uv`。
-- `D:\hermes-data\.local` 与 `D:\hermes-data\.npm-global` 已从共享工具根分类中退役；仍存在的 Hermes 专属内容按 Hermes authority 保留，旧报告或历史测试中的引用不能作为恢复共享入口的依据。
+- `D:\hermes-data\.local` 与 `D:\hermes-data\.npm-global` 已随 Hermes 于 2026-09-02 退役删除；不得把它们恢复为共享工具根。
 
 ## CodeGraph 与 Serena
 

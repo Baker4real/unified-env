@@ -283,6 +283,20 @@
       "deniedExactPaths": []
     },
     {
+      "id": "hermes-retired-staging",
+      "capabilityRoot": "D:\\agents\\projects\\hermes-retired",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "hermes-retired-data-children",
+      "capabilityRoot": "D:\\agents\\projects\\hermes-retired\\hermes-data",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
       "id": "codex-memories",
       "capabilityRoot": "D:\\Codex\\.codex\\memories",
       "minimumDescendantDepth": 2,

@@ -17,6 +17,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# PlainText 渲染：重定向捕获的错误文本不夹 ANSI/VT 序列，调用方可安全按词分类
+# （结构化结果仍以 -Json 的 stdout 为准；stderr 仅作诊断）。
+if ($null -ne $PSStyle) { $PSStyle.OutputRendering = 'PlainText' }
 
 function Resolve-TargetPathArguments {
     param([string[]]$Values)
