@@ -328,6 +328,22 @@ try {
     $terminalOperation = Get-Operation -Status $terminalStatus -TransactionPath $terminal.transactionPath
     Assert-True ($terminalOperation.lifecycle -ceq 'terminal') `
         'purged transaction 的 live namespace 一致时必须分类为 terminal。'
+    $previousTerminalFastScan = $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN
+    try {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '1'
+        $terminalFastStatus = & $entryPath -Mode Status `
+            -FixturePolicyPath $policyPath -FixtureEvidenceRoot $evidenceRoot
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '0'
+        $terminalSlowStatus = & $entryPath -Mode Status `
+            -FixturePolicyPath $policyPath -FixtureEvidenceRoot $evidenceRoot
+    } finally {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = $previousTerminalFastScan
+    }
+    $terminalFastOperation = Get-Operation -Status $terminalFastStatus -TransactionPath $terminal.transactionPath
+    $terminalSlowOperation = Get-Operation -Status $terminalSlowStatus -TransactionPath $terminal.transactionPath
+    Assert-True (($terminalFastOperation | ConvertTo-Json -Depth 100 -Compress) -ceq
+        ($terminalSlowOperation | ConvertTo-Json -Depth 100 -Compress)) `
+        'approved purged terminal fast scan 必须与参考路径逐字节一致。'
     [IO.File]::WriteAllText($terminalTarget, 'terminal-drift', [Text.UTF8Encoding]::new($false))
     $terminalDriftStatus = & $entryPath -Mode Status `
         -FixturePolicyPath $policyPath -FixtureEvidenceRoot $evidenceRoot
@@ -1059,6 +1075,34 @@ try {
     $archivedPlanPath = Join-Path $archivedRunDirectory 'plan.json'
     $intactMarker = [IO.File]::ReadAllText($archivedMarkerPath)
     $intactPlan = [IO.File]::ReadAllBytes($archivedPlanPath)
+
+    $escapedMarkerDocument = $intactMarker | ConvertFrom-Json -Depth 32 -DateKind String
+    $escapedMarkerDocument.planPath = Join-Path $fixtureRoot 'outside-plan.json'
+    $escapedMarker = $escapedMarkerDocument | ConvertTo-Json -Depth 32
+    try {
+        [IO.File]::WriteAllText($archivedMarkerPath, $escapedMarker, [Text.UTF8Encoding]::new($false))
+        $previousArchiveFastScan = $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN
+        try {
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '1'
+            $escapedArchiveFastStatus = & $entryPath -Mode Status `
+                -FixturePolicyPath $revokedPolicyPath -FixtureEvidenceRoot $revokedEvidenceRoot
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '0'
+            $escapedArchiveSlowStatus = & $entryPath -Mode Status `
+                -FixturePolicyPath $revokedPolicyPath -FixtureEvidenceRoot $revokedEvidenceRoot
+        } finally {
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = $previousArchiveFastScan
+        }
+        $escapedArchiveFastOperation = Get-Operation `
+            -Status $escapedArchiveFastStatus -TransactionPath ([string]$revokedV2Purge.transactionPath)
+        $escapedArchiveSlowOperation = Get-Operation `
+            -Status $escapedArchiveSlowStatus -TransactionPath ([string]$revokedV2Purge.transactionPath)
+        Assert-True (($escapedArchiveFastOperation | ConvertTo-Json -Depth 100 -Compress) -ceq
+            ($escapedArchiveSlowOperation | ConvertTo-Json -Depth 100 -Compress)) `
+            'terminal-archive 越界引用 fast scan 必须与参考路径逐字节一致。'
+    } finally {
+        [IO.File]::WriteAllText($archivedMarkerPath, $intactMarker, [Text.UTF8Encoding]::new($false))
+    }
+
     $tamperedMarkerDocument = $intactMarker | ConvertFrom-Json -Depth 32 -DateKind String
     $tamperedMarkerDocument.transactionStatus = 'quarantined'
     $tamperedMarker = $tamperedMarkerDocument | ConvertTo-Json -Depth 32
@@ -1335,7 +1379,7 @@ try {
     [pscustomobject][ordered]@{
         ok = $true
         suite = 'CodexSafeTreeDeleteStatus'
-        slices = 32
+        slices = 34
     }
 } finally {
     if ($null -ne $lockedStream) { $lockedStream.Dispose() }

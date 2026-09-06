@@ -141,6 +141,9 @@ namespace CodexSafeTreeDelete
         public bool Handled;
         public bool Archived;
         public string FallbackReason;
+        public bool RequiresRebuiltTargetIdentity;
+        public string[] ExpectedTargetRootIdentity;
+        public string CapabilityRoot;
         // The canonical approved-plan checks completed before handing the record to the
         // PowerShell resolver. The resolver may reuse only the matching plan snapshot.
         public StatusPlanValidationReceipt ApprovedPlanValidation { get; internal set; }
@@ -371,6 +374,22 @@ namespace CodexSafeTreeDelete
                 }
                 catch (StatusScanUserException user)
                 {
+                    // This archive rejection is already the reference path's complete
+                    // per-operation result. Keep the exact error and avoid re-reading the
+                    // same three archive files through PowerShell; other user exceptions
+                    // still fall back because their reference state may require more context.
+                    if (string.Equals(
+                            user.Message,
+                            "safe-delete terminal archive 引用越出 operation run。",
+                            StringComparison.Ordinal))
+                    {
+                        FinishRejectedOutcome(
+                            result, runs[index], new string[] { user.Message },
+                            null, null, null, null, "unknown", "unknown",
+                            false, 0L, false, 0L, null, null, "not-evaluated");
+                        results[index] = result;
+                        return;
+                    }
                     // Only the archived flow lets user exceptions escape per-record; it always
                     // falls back so PowerShell reproduces the exact message.
                     result.Handled = false;
@@ -769,8 +788,19 @@ namespace CodexSafeTreeDelete
                         plan, planPath, policy);
                     if (approval.Approved)
                     {
+                        if (TryBuildApprovedMissingTransactionOutcome(
+                                plan, run, policy, transactionPath, result))
+                        {
+                            return;
+                        }
+                        if (TryBuildApprovedTerminalOutcome(
+                                plan, run, policy, planPath, transactionPath, planSnapshot, result))
+                        {
+                            return;
+                        }
                         // Approved plans continue through the PowerShell reference path for
-                        // namespace handling, transaction semantics, and tree materialization.
+                        // non-terminal states, namespace handling, transaction semantics, and
+                        // tree materialization.
                         // Its manifest structure has already been validated against this exact
                         // snapshot and can be reused without a second O(n) PowerShell walk.
                         result.ApprovedPlanValidation = new StatusPlanValidationReceipt(
@@ -787,6 +817,236 @@ namespace CodexSafeTreeDelete
                     run, plan, planSnapshot, planApprovalError, planPath, transactionPath, result,
                     planSchemaVersion, true);
             }
+        }
+
+        private static bool TryBuildApprovedTerminalOutcome(
+            JsonElement plan,
+            StatusScanRunInput run,
+            StatusScanPolicy policy,
+            string planPath,
+            string transactionPath,
+            StatusScanFileSnapshot planSnapshot,
+            StatusScanResult result)
+        {
+            if (!File.Exists(transactionPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                StatusScanFileSnapshot transactionSnapshot = ReadFileChecked(
+                    transactionPath,
+                    "safe-delete status approved transaction",
+                    false,
+                    result);
+                if (AssertStrictJsonText(transactionSnapshot.Text) > 60)
+                {
+                    return false;
+                }
+
+                using (JsonDocument transactionDocument = ParseJsonDocument(transactionSnapshot.Text))
+                {
+                    JsonElement transaction = transactionDocument.RootElement;
+                    if (transaction.ValueKind != JsonValueKind.Object)
+                    {
+                        return false;
+                    }
+                    long transactionSchemaVersion;
+                    if (!TryGetInt64(transaction, "schemaVersion", out transactionSchemaVersion) ||
+                        transactionSchemaVersion < 2L || transactionSchemaVersion > 3L ||
+                        !HasCanonicalTransactionShape(transaction, transactionSchemaVersion))
+                    {
+                        return false;
+                    }
+                    ValidateStrictTransactionDocument(transaction, transactionSchemaVersion);
+
+                    if (GetString(transaction, "status") != "purged")
+                    {
+                        return false;
+                    }
+                    JsonElement restoreAnchors;
+                    if (!transaction.TryGetProperty("directoryCommitAnchors", out JsonElement directoryAnchors) ||
+                        directoryAnchors.ValueKind != JsonValueKind.Array ||
+                        directoryAnchors.GetArrayLength() != 0 ||
+                        (transactionSchemaVersion == 3L &&
+                            (!transaction.TryGetProperty("restoreJournalAnchors", out restoreAnchors) ||
+                             restoreAnchors.ValueKind != JsonValueKind.Array ||
+                             restoreAnchors.GetArrayLength() != 0)))
+                    {
+                        return false;
+                    }
+
+                    string generationId = GetString(plan, "generationId");
+                    string targetPath = GetString(plan, "targetPath");
+                    string quarantinePath = DeriveQuarantinePath(targetPath, generationId);
+                    if (GetString(transaction, "generationId") != generationId ||
+                        !PathEqual(GetString(transaction, "planPath"), planPath) ||
+                        GetString(transaction, "planSha256") != planSnapshot.Sha256 ||
+                        !PathEqual(GetString(transaction, "targetPath"), targetPath) ||
+                        !PathEqual(GetString(transaction, "quarantinePath"), quarantinePath))
+                    {
+                        return false;
+                    }
+
+                    string capabilityRoot = AssertDPathQuiet(GetStringOrNull(plan, "capabilityRoot"));
+                    StatusScanPolicyEntry policyEntry = null;
+                    foreach (StatusScanPolicyEntry candidate in policy.Entries)
+                    {
+                        if (string.Equals(candidate.CapabilityRoot, capabilityRoot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            policyEntry = candidate;
+                            break;
+                        }
+                    }
+                    if (policyEntry == null ||
+                        policyEntry.RootDeletionPurpose == "empty-project-state")
+                    {
+                        return false;
+                    }
+
+                    NamespaceState quarantineState = ProbeNamespace(quarantinePath);
+                    NamespaceState targetState = ProbeNamespace(targetPath);
+                    if (quarantineState.Present ||
+                        (targetState.Present && targetState.EntryType != "directory"))
+                    {
+                        return false;
+                    }
+
+                    bool requiresRebuiltTargetIdentity =
+                        targetState.Present &&
+                        policyEntry.RootDeletionPurpose == "rebuildable-build-output";
+                    if (requiresRebuiltTargetIdentity && transactionSchemaVersion != 2L)
+                    {
+                        return false;
+                    }
+                    if (transactionSchemaVersion == 2L)
+                    {
+                        foreach (string journalPath in Directory.EnumerateFiles(
+                                run.FullName,
+                                "directory-delete-*-freeze.json",
+                                SearchOption.TopDirectoryOnly))
+                        {
+                            return false;
+                        }
+                        foreach (string journalPath in Directory.EnumerateFiles(
+                                run.FullName,
+                                "directory-delete-*-commit.json",
+                                SearchOption.TopDirectoryOnly))
+                        {
+                            return false;
+                        }
+                    }
+                    string[] expectedTargetRootIdentity = null;
+                    if (requiresRebuiltTargetIdentity)
+                    {
+                        if (!plan.TryGetProperty("treeManifest", out JsonElement treeManifest) ||
+                            treeManifest.ValueKind != JsonValueKind.Object ||
+                            !treeManifest.TryGetProperty("rootIdentity", out JsonElement rootIdentity) ||
+                            rootIdentity.ValueKind != JsonValueKind.Array ||
+                            rootIdentity.GetArrayLength() != 2)
+                        {
+                            return false;
+                        }
+                        expectedTargetRootIdentity = new string[2];
+                        int identityIndex = 0;
+                        foreach (JsonElement identityPart in rootIdentity.EnumerateArray())
+                        {
+                            if (identityPart.ValueKind != JsonValueKind.String)
+                            {
+                                return false;
+                            }
+                            expectedTargetRootIdentity[identityIndex++] = identityPart.GetString();
+                        }
+                    }
+
+                    result.Handled = true;
+                    result.Archived = false;
+                    result.OperationId = run.Name;
+                    result.RunDirectory = run.FullName;
+                    result.Lifecycle = requiresRebuiltTargetIdentity
+                        ? "rebuildable-terminal-identity-pending"
+                        : "terminal";
+                    result.SafeActions = new string[0];
+                    result.TargetPath = targetPath;
+                    result.QuarantinePath = quarantinePath;
+                    result.HasNamespace = true;
+                    result.TargetPresent = targetState.Present;
+                    result.QuarantinePresent = false;
+                    result.TargetEntryType = targetState.EntryType;
+                    result.QuarantineEntryType = quarantineState.EntryType;
+                    result.NamespaceAbsent = !targetState.Present;
+                    result.LogicalCompletion = !requiresRebuiltTargetIdentity;
+                    result.PolicyCompatible = string.Equals(
+                        GetString(plan, "policySha256"), policy.Sha256, StringComparison.Ordinal);
+                    result.SchemaCompatible = true;
+                    result.HasPlanSchemaVersion = true;
+                    result.PlanSchemaVersion = 1L;
+                    result.HasTransactionSchemaVersion = true;
+                    result.TransactionSchemaVersion = transactionSchemaVersion;
+                    result.TransactionStatus = GetString(transaction, "status");
+                    result.TransactionUpdatedAtUtc = GetString(transaction, "updatedAtUtc");
+                    result.JournalStatus = "not-applicable";
+                    result.Errors = new string[0];
+                    result.RequiresRebuiltTargetIdentity = requiresRebuiltTargetIdentity;
+                    result.ExpectedTargetRootIdentity = expectedTargetRootIdentity;
+                    result.CapabilityRoot = capabilityRoot;
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                // Any ambiguity keeps the existing PowerShell reference path authoritative.
+                return false;
+            }
+        }
+
+        private static bool TryBuildApprovedMissingTransactionOutcome(
+            JsonElement plan,
+            StatusScanRunInput run,
+            StatusScanPolicy policy,
+            string transactionPath,
+            StatusScanResult result)
+        {
+            if (File.Exists(transactionPath))
+            {
+                return false;
+            }
+
+            string targetPath = CoerceStringForPath(plan, "targetPath", "safe-delete target");
+            string quarantinePath = DeriveQuarantinePath(targetPath, GetString(plan, "generationId"));
+            NamespaceState targetState = ProbeNamespace(targetPath);
+            NamespaceState quarantineState = ProbeNamespace(quarantinePath);
+            if (targetState.Present ||
+                (quarantineState.Present && quarantineState.EntryType != "directory"))
+            {
+                return false;
+            }
+
+            result.Handled = true;
+            result.Archived = false;
+            result.OperationId = run.Name;
+            result.RunDirectory = run.FullName;
+            result.Lifecycle = "inconsistent";
+            result.SafeActions = new string[] { "manual-review" };
+            result.TargetPath = targetPath;
+            result.QuarantinePath = quarantinePath;
+            result.HasNamespace = true;
+            result.TargetPresent = false;
+            result.QuarantinePresent = quarantineState.Present;
+            result.TargetEntryType = targetState.EntryType;
+            result.QuarantineEntryType = quarantineState.EntryType;
+            result.NamespaceAbsent = true;
+            result.LogicalCompletion = false;
+            result.PolicyCompatible = string.Equals(
+                GetString(plan, "policySha256"), policy.Sha256, StringComparison.Ordinal);
+            result.SchemaCompatible = true;
+            result.HasPlanSchemaVersion = true;
+            result.PlanSchemaVersion = 1L;
+            result.JournalStatus = "not-started";
+            result.Errors = new string[] {
+                "planned operation 的 target/quarantine namespace 不一致。" };
+            return true;
         }
 
         private static void BuildRejectedPlanOutcome(

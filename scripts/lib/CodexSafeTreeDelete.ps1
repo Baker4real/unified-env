@@ -3001,9 +3001,50 @@ function New-CodexSafeTreeDeleteStatusOperationFromScan {
     )
 
     $namespaceAbsent = if ([bool]$ScanResult.HasNamespace) { [bool]$ScanResult.NamespaceAbsent } else { $null }
+    $lifecycle = [string]$ScanResult.Lifecycle
+    $safeActions = [string[]]$ScanResult.SafeActions
+    $logicalCompletion = [bool]$ScanResult.LogicalCompletion
+    $errors = [string[]]$ScanResult.Errors
+    if ([bool]$ScanResult.RequiresRebuiltTargetIdentity) {
+        $identityMatches = $false
+        try {
+            $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+                [string]$ScanResult.CapabilityRoot,
+                [string]$ScanResult.TargetPath,
+                $false)
+            try {
+                $actualIdentity = @(
+                    [string]$guard.VolumeSerialNumber,
+                    [string]$guard.FileIndex)
+                $identityMatches = Test-CodexHookDirectoryTreeIdentityEqual `
+                    -Expected @([string[]]$ScanResult.ExpectedTargetRootIdentity) `
+                    -Actual $actualIdentity
+            } finally {
+                $guard.Dispose()
+            }
+        } catch {
+            $lifecycle = 'manual-review'
+            $safeActions = @('manual-review')
+            $logicalCompletion = $false
+            $errors = @($_.Exception.Message)
+        }
+        if ($lifecycle -ceq 'rebuildable-terminal-identity-pending') {
+            if ($identityMatches) {
+                $lifecycle = 'manual-review'
+                $safeActions = @('manual-review')
+                $logicalCompletion = $false
+                $errors = @(
+                    'purged rebuildable-build-output transaction 的 target identity 未变化，无法证明曾完成删除。')
+            } else {
+                $lifecycle = 'terminal'
+                $safeActions = @()
+                $logicalCompletion = $true
+            }
+        }
+    }
     $deletionOutcome = New-CodexSafeTreeDeleteOutcome `
         -NamespaceAbsent $namespaceAbsent `
-        -LogicalCompletion ([bool]$ScanResult.LogicalCompletion)
+        -LogicalCompletion $logicalCompletion
     $planSchemaVersion = if ([bool]$ScanResult.HasPlanSchemaVersion) {
         [long]$ScanResult.PlanSchemaVersion
     } else {
@@ -3017,8 +3058,8 @@ function New-CodexSafeTreeDeleteStatusOperationFromScan {
     $operation = [pscustomobject][ordered]@{
         operationId = [string]$ScanResult.OperationId
         runDirectory = [string]$ScanResult.RunDirectory
-        lifecycle = [string]$ScanResult.Lifecycle
-        safeActions = [string[]]$ScanResult.SafeActions
+        lifecycle = $lifecycle
+        safeActions = $safeActions
         targetPath = $ScanResult.TargetPath
         quarantinePath = $ScanResult.QuarantinePath
         targetPresent = if ([bool]$ScanResult.HasNamespace) { [bool]$ScanResult.TargetPresent } else { $null }
@@ -3033,7 +3074,7 @@ function New-CodexSafeTreeDeleteStatusOperationFromScan {
         policyCompatible = [bool]$ScanResult.PolicyCompatible
         schemaCompatible = [bool]$ScanResult.SchemaCompatible
         candidatePolicyCompatible = if ($CandidatePolicyRequested) {
-            [bool]$ScanResult.Archived
+            $lifecycle -ceq 'terminal'
         } else {
             $null
         }
@@ -3044,10 +3085,10 @@ function New-CodexSafeTreeDeleteStatusOperationFromScan {
         journalStatus = [string]$ScanResult.JournalStatus
         pendingFiles = @()
         uncertainFiles = @()
-        errors = [string[]]$ScanResult.Errors
+        errors = $errors
     }
     return [pscustomobject][ordered]@{
-        complete = -not ([string]$ScanResult.Lifecycle -ceq 'manual-review')
+        complete = [string]$ScanResult.Lifecycle -notin @('manual-review', 'inconsistent')
         operation = $operation
     }
 }
