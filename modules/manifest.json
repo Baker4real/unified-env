@@ -30,6 +30,7 @@
       "transitionalDependencies": [],
       "ownership": {
         "files": [
+          ".scratch/run-evidence/env-governance/2026-08-31-codex-root-dedup-cleanup.md",
           "docs/env-governance/d-drive-layout-and-migration-policy.md",
           "docs/handoffs/20260826-033540-run-evidence-migration-closeout.md",
           "docs/plans/2026-07-10-environment-inventory-trust-implementation.md",
@@ -297,6 +298,7 @@
       "transitionalDependencies": [],
       "ownership": {
         "files": [
+          "docs/handoffs/20260902T164751Z-safe-tree-delete-status-slow-path.md",
           "docs/plans/2026-08-27-safe-tree-delete-issue56-implementation.md",
           "docs/specs/2026-07-24-safe-tree-delete-capability.md",
           "docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md",
@@ -423,6 +425,7 @@
           "reports/safe-tree-delete-parallelism-benchmark-20260819/",
           "reports/safe-tree-delete-issue22-regression-20260819/",
           "reports/safe-tree-delete-issue49-20260823/",
+          "reports/safe-tree-delete-status-slowpath-20260903/",
           "reports/issue58-20260906/"
         ]
       },

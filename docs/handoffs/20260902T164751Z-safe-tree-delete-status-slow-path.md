@@ -1,3 +1,10 @@
+---
+type: report
+title: safe-tree-delete Status 慢路径排查交接快照
+tags: [safe-delete, performance, handoff]
+intent: 保留 2026-09-03 的排查输入与证据；当前修复状态以性能 spec 和 GitHub issue 58 为准
+---
+
 # Handoff: safe-tree-delete Status 慢路径排查（09-02 30 分钟反常）
 
 不可变时间点快照，创建于 2026-09-03（UTC 2026-09-02T16:47Z）。给接手的会话：目标是查清

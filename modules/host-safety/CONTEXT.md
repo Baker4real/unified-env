@@ -26,7 +26,9 @@ Plan 阶段自 2026-08-27（#56 Wave A）默认走 C# 单遍 walker（`scripts/l
 
 控制面收尾（Archive、退出码传递、`complete` 聚合）以 `docs/specs/2026-07-24-safe-tree-delete-capability.md` 为准：归档合格 terminal 不蕴含 `complete=true`；受管中间层必须转发 `$LASTEXITCODE`。2026-08-13 现场快照见 `reports/safe-tree-delete-control-plane-closeout-20260814/REPORT.md`，不是现役计数。控制面收尾票（#18 系列）状态以 GitHub live tracker 为准，不在本文缓存。
 
-Status 冷启动（#49）2026-08-23 达标关闭：正式三联 9.762 / 9.791 / 9.237s（同日基线 199.357s），协议与证据见 `reports/safe-tree-delete-issue49-20260823/`（优化前基线 189/184/182s 见 20260817 目录）。实现为 C# 并行 fast scan（`scripts/lib/CodexSafeTreeDeleteStatusScan.cs`，DOP=4，kill switch `CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN=0`）：只裁决 producer 规范形态输入，其余一律回退 `Resolve-CodexSafeTreeDeleteStatusOperation`；改认证链时须同步复刻或依赖回退并重跑 fast-vs-slow 对照。#26–#43 的 Apply/Purge `SessionHashCache` 不是 Status 优化。
+Status 的 C# fast scan 只裁决 producer 规范形态输入，其余回退 `Resolve-CodexSafeTreeDeleteStatusOperation`；`CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN=0` 强制参考路径。改认证链时须保留 fast/slow 等价验证。#49 的 2026-08-23 验收是历史样本，不覆盖 #58 的巨型 plan 回归。
+
+处理 Status 性能、approved-plan receipt 或部署验收时，读性能 spec 的「Status 冷启动与大 plan 回退（#49 / #58）」节：该处维护 receipt 复用、live plan/policy 重读边界和当前未达标状态。Apply/Purge 的 `SessionHashCache` 不属于此优化；源码发布、宿主委托路径和正式部署验收分别核验。
 
 ## 测试
 

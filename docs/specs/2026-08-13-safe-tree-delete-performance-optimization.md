@@ -3,7 +3,7 @@ type: reference
 title: 受管安全树删除性能优化
 tags: [performance, safe-delete, hash-reuse, parallelization]
 date: 2026-08-13
-status: landed-mixed（Plan C# 单遍 walker 已落地并部署：AC1 候补达标；正式性能认证未完成，#56 由维护者按现状关闭 2026-08-28；Status 冷启动 SLA 已达：<60s）
+status: landed-mixed（Plan C# 单遍 walker 已落地；#56 按现状关闭；Status 的 #49 历史达标，#58 巨型 plan 回归仍未通过全量验收）
 priority: P0
 ---
 
@@ -64,11 +64,25 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 
 生产 `Invoke-CodexSafeTreeDeletePurge` 在满足门控时走 `ParallelPurgeCoordinator`：`RecommendParallel == true`、未用 `-DisablePurgeHashReuseForTest` / `-DisableParallelPurgeForTest`（任一在场即回退串行）、非 empty-project-state、无 junction、无叶子测试钩子。删除器是 HostSafety lease（顶级目录 `AcquireForEmptyDelete`、嵌套 `AcquireChildDirectoryForEmptyDelete`），不是夹具 `File.Delete`；根文件组在子目录组之后串行，避免祖先/后代 DELETE lease 冲突。默认 DOP=2（#40 2026-08-19 复测效率峰值），`-PurgeMaxDegreeOfParallelismForTest` 只改推荐值。journal 根为 `<runDirectory>\parallel-purge-journal-<guid>`，恢复扫描全部此类目录（pending 无 commit + 路径在 → pending；路径不在 → uncertain）。失败不写 `purged`；CrashSafety 钩子在场时保持原串行 HostSafety。`FileSystemCapabilities.RecommendParallel == false` 时 `ResolveMaxDegreeOfParallelism` 返回 1，生产与夹具都串行。coordinator 按顶层目录分组时只枚举文件，不含任何文件的顶层分支（含整树纯空目录）不产生分组；其目录由 PowerShell 侧 `Remove-CodexSafeTreeDeleteEmptyDirectoryTreeAfterParallelPurge` 在计数检查后、根删除前按 manifest 先叶后根幂等补删，逐目录保留 capability 与 identity 断言（resume 时 manifest 为存活子集）。该补删层于 2026-08-21 接线，修复此前该场景事务稳定卡在 purging/quarantined 的缺陷；回归测试覆盖纯空树、含空分支混合树、purging 中断恢复、Purge-mode 并行路径自证与仅 '.' 边界。
 
-### Status 冷启动（#49，2026-08-23）
+### Status 冷启动与大 plan 回退（#49 / #58）
 
-生产 `Get-CodexSafeTreeDeleteStatus` 自 #49 起默认走 C# 并行 fast scan（`scripts/lib/CodexSafeTreeDeleteStatusScan.cs`，`StatusScanCoordinator`，DOP = `Get-CodexSafeTreeDeleteStatusJsonParseThrottleLimit` = min(4, cores-2)）：归档记录在 C# 内逐条复刻 terminal-archive 内容认证（marker 17 字段精确属性 + plan/tx SHA/identity/generation/path 绑定 + 现场 namespace probe，不跳过任何一步）；未归档记录在 C# 内按参考顺序判定 plan 拒绝并完成 #48 拒绝后只读观测链（错误消息逐条与 PowerShell 参考路径一致）。fast scan 只处理 producer 规范形态输入（plan/transaction/treeManifest 属性名与 canonical 键 ordinal 一致、必需属性齐全、schemaVersion 在 Int32 范围内）；plan 被批准、JSON 类型异常、深度超限、读失败、非规范属性形态等一律回退原 `Resolve-CodexSafeTreeDeleteStatusOperation`（回退记录的已读 plan snapshot 注入调用内 prefetch cache，保持单次读取合同）。fast scan 是 Status 调用内、随进程死亡的只读复用，不是 Apply/Purge `SessionHashCache`，不落盘哈希缓存；其程序集按 CodexHostSafety 同款 staleness 检查缓存在 `D:\Codex\temp\unified-env-addtype\CodexSafeTreeDeleteStatusScan.dll`。排障开关：`CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN=0` 强制全量参考路径；`CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS=1` 输出 `statusSegments`（含 `fastScanMs` / `fastScanHandled` / `fastScanFallback` / `fastScanDop`）。
+生产 `Get-CodexSafeTreeDeleteStatus` 自 #49 起默认走 C# 并行 fast scan（`scripts/lib/CodexSafeTreeDeleteStatusScan.cs`，`StatusScanCoordinator`，DOP 为 min(4, cores-2)）。归档记录复刻 terminal-archive 内容认证；未归档记录按参考顺序判定 plan 拒绝并保留 #48 拒绝后的只读观测链。fast scan 只处理 producer 规范形态输入；approved plan、异常 JSON 类型、深度超限、读失败和非规范属性形态仍回退 `Resolve-CodexSafeTreeDeleteStatusOperation`，不会把 approved plan 直接判为 terminal。
+
+首次 plan snapshot 可注入调用内 prefetch，避免 fallback 开头重复读取；transaction approval 仍重新读取 plan/hash 与 policy，以检测首次扫描后的漂移。这不是整条认证链只读一次的合同。Status 复用随调用/进程结束，不使用 Apply/Purge 的 `SessionHashCache`，不持久化验证 receipt；程序集仍沿既有 Add-Type staleness 检查加载。
+
+排障开关：`CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN=0` 强制全量参考路径；`CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS=1` 输出 `statusSegments`。其中 `fastScanMs` 是完整扫描阶段计时，不能用内部 I/O 子段替代；`approvedPlanValidationReuseCount` 只表示 receipt 内容验证复用，不代表全量完成或性能达标。
 
 实测（协议 `reports/safe-tree-delete-issue49-20260823/protocol.md`，从属 20260817 协议）：正式 AC 三联（MED 修复后 cold-5/6/7，`cold-summary-post-fix.json`）三次独立冷启动墙钟 **9.762 / 9.791 / 9.237 s**（2960 operations 现场，优化前同日基线 199.357s；修复前三联 13.279/13.378/13.256 s 为历史样本，见 `cold-summary.json`），`metTarget=true`；fast 与参考路径对全部 operations 逐条对比零差异、blocking 集一致、evidence root 零写入、leftover transaction SHA 不变（等价性边界=producer 规范形态输入，非规范输入类回退参考路径，见协议）。证据：`reports/safe-tree-delete-issue49-20260823/`。
+
+#### #58 内容验证复用与验收边界
+
+`f6183ff` 的仓库源码引入 `StatusPlanValidationReceipt`，仅对已完成规范校验的 schema 1 plan 签发；receipt 绑定 plan 路径、SHA-256 和原文。Status 的 approved-plan reader 在只读审批模式、没有传入可变的 `PreparsedDocument` 且绑定匹配时复用严格 JSON 与 manifest 校验，由 reader 解析一次；异常分支按需解析。
+
+v2/v3 transaction approval 可透传匹配 receipt，但保留 live plan read/hash 和 policy read。v2 policy SHA 漂移仍拒绝，v3 仍要求 schema 5 policy 并执行 namespace/journal 验证。非规范嵌套属性大小写回退参考路径，不改变 manifest SHA 对键名的敏感性；Apply/Purge/Restore 不消费此 receipt。
+
+2026-09-06 的状态为 **源码已推送、全量验收失败**：6,039,074-byte plan 的局部探针结果等价；Status 32 项回归、基线与回滚各 24 项通过。但三次独立冷启动 `<60s` 验收在首轮 60.295s 超时并确认停止，后两轮未执行，没有完整 Status 输出。前后 evidence/policy 内容与 identity 相同，不等于期间零写事件审计。验收与计时勘误见 `reports/issue58-20260906/VERIFICATION.txt`；当前票状态以 [GitHub #58](https://github.com/Baker4real/unified-env/issues/58) 为准，#49 的历史数字不覆盖此规模。
+
+宿主 gate shim 直接委托本仓库入口，源码落盘会改变后续调用可加载的代码；“未执行 Deploy”不表示新源码与宿主隔离。正式部署记录和真实入口验收分别按 capability spec 的部署合同核验，本次局部测试与 Git 发布不代替这些步骤。
 
 ### 文件系统探测
 
@@ -452,8 +466,8 @@ Specific test additions:
 - Optimizing Plan phase (still 1x hash read per file) — Plan is run once, Apply/Purge are run repeatedly（2026-08-27 起由 #56 Wave A 修订：Plan 阶段已换 C# 单遍 walker，串行 lease 哈希，见「Implementation status update (2026-08-27)」与 `reports/safe-tree-delete-issue56-20260827/`）
 - Cross-session persistent hash cache — too complex, invalidation unclear
 - File-level parallelization — journal coordination complexity too high（#56 Wave B 若触发须先修订本条与 L468 并满足 `docs/plans/2026-08-27-safe-tree-delete-issue56-implementation.md` §4 前置硬门）
-- C# rewrite of hot path — PowerShell boundary already established, I/O is the bottleneck（2026-08-27 起由 #56 Wave A 修订：仅限 Plan 只读走树+哈希面；承载 journal/删除语义的热路径仍保持 PS 边界与 lease 纪律）
-- Optimizing other phases (Status, BatchPurge) — not on critical path for user pain
+- C# rewrite of deletion/journal semantics remains excluded; Plan #56 and Status #49/#58 cover their documented read-only traversal and validation work, retaining PowerShell ownership and lease boundaries for mutations.
+- BatchPurge optimization remains separate. The original Status exclusion was superseded by #49 and the #58 regression work documented in the operator guide.
 - Supporting file systems other than NTFS/ReFS — FAT32 and network drives get conservative fallback
 - Windows 7 support — FILE_ID_INFO requires Windows 8+, older systems fall back to no optimization
 - Symlink or external junction optimization — complexity not justified by user scenarios
