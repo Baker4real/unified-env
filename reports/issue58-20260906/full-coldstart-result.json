@@ -1,0 +1,167 @@
+{
+  "artifactType": "issue58.full-coldstart-acceptance",
+  "startedAtUtc": "2026-09-05T17:21:26.3477368+00:00",
+  "deadlineMs": 60000,
+  "requiredRunCount": 3,
+  "entry": "D:\\agents\\projects\\统一环境\\scripts\\Invoke-CodexSafeTreeDelete.ps1",
+  "evidenceRoot": "D:\\agents\\run-evidence\\safe-tree-delete",
+  "policyPath": "D:\\agents\\projects\\统一环境\\managed\\safe-tree-delete\\policy.json",
+  "outputPath": "D:\\agents\\projects\\统一环境\\reports\\issue58-20260906\\full-coldstart-result.json",
+  "checkpointPath": "D:\\agents\\projects\\统一环境\\reports\\issue58-20260906\\full-coldstart-result.json.checkpoint.json",
+  "status": "failed",
+  "stage": "acceptance",
+  "before": {
+    "manifestSha256": "03a837bc09bd2cf9c25658d9928023e12bdd12b869a9e31ee885d2c0d281b13a",
+    "rootIdentity": [
+      "5d26df61",
+      "001900000009a9f2"
+    ],
+    "entryCount": 23663
+  },
+  "policyBefore": {
+    "path": "D:\\agents\\projects\\统一环境\\managed\\safe-tree-delete\\policy.json",
+    "sha256": "6acba1e816fd75572f25d26ee5a353a6583b1cc48969e566eec7191fe75c7fcc",
+    "length": 10752,
+    "identity": [
+      "5d26df61",
+      "006d000000013cba"
+    ],
+    "sddl": "O:S-1-5-21-3628056009-2446576831-3345793000-1005G:S-1-5-21-3628056009-2446576831-3345793000-513D:AI(A;ID;0x1301bf;;;S-1-5-21-2442881143-4209791813-338540719-2652166894)(A;ID;0x1301bf;;;S-1-5-21-3628056009-2446576831-3345793000-1006)(A;ID;0x1301bf;;;S-1-5-21-2027602104-2315828502-4151595253-2236078795)(A;ID;FA;;;BA)(A;ID;FA;;;SY)(A;ID;0x1301bf;;;AU)(A;ID;0x1200a9;;;BU)"
+  },
+  "runs": [
+    {
+      "run": 1,
+      "processId": 49652,
+      "processStartedAtUtc": "2026-09-05T17:23:35.4656373Z",
+      "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+      "arguments": [
+        "-NoLogo",
+        "-NoProfile",
+        "-File",
+        "D:\\agents\\projects\\统一环境\\scripts\\Invoke-CodexSafeTreeDelete.ps1",
+        "-Mode",
+        "Status",
+        "-Json"
+      ],
+      "elapsedMs": 60295,
+      "timedOut": true,
+      "stopConfirmed": true,
+      "exitCode": -1,
+      "stdoutBytes": 0,
+      "stderr": "",
+      "parseSucceeded": false,
+      "complete": null,
+      "operationCount": null,
+      "statusSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "semanticSha256": null,
+      "error": "Cold Status exceeded the 60000 ms deadline.",
+      "passed": false
+    }
+  ],
+  "after": {
+    "manifestSha256": "03a837bc09bd2cf9c25658d9928023e12bdd12b869a9e31ee885d2c0d281b13a",
+    "rootIdentity": [
+      "5d26df61",
+      "001900000009a9f2"
+    ],
+    "entryCount": 23663
+  },
+  "policyAfter": {
+    "path": "D:\\agents\\projects\\统一环境\\managed\\safe-tree-delete\\policy.json",
+    "sha256": "6acba1e816fd75572f25d26ee5a353a6583b1cc48969e566eec7191fe75c7fcc",
+    "length": 10752,
+    "identity": [
+      "5d26df61",
+      "006d000000013cba"
+    ],
+    "sddl": "O:S-1-5-21-3628056009-2446576831-3345793000-1005G:S-1-5-21-3628056009-2446576831-3345793000-513D:AI(A;ID;0x1301bf;;;S-1-5-21-2442881143-4209791813-338540719-2652166894)(A;ID;0x1301bf;;;S-1-5-21-3628056009-2446576831-3345793000-1006)(A;ID;0x1301bf;;;S-1-5-21-2027602104-2315828502-4151595253-2236078795)(A;ID;FA;;;BA)(A;ID;FA;;;SY)(A;ID;0x1301bf;;;AU)(A;ID;0x1200a9;;;BU)"
+  },
+  "evidenceUnchanged": true,
+  "policyUnchanged": true,
+  "operationCountStable": false,
+  "semanticResultStable": false,
+  "passed": false,
+  "failures": [
+    "cold-status-1 failed: Cold Status exceeded the 60000 ms deadline.",
+    "Expected 3 runs; executed 1.",
+    "Operation counts were not verified stable across 3 successful runs.",
+    "Semantic results were not verified stable across 3 successful runs."
+  ],
+  "events": [
+    {
+      "stage": "load-libraries",
+      "state": "started",
+      "atUtc": "2026-09-05T17:21:26.3516669+00:00"
+    },
+    {
+      "stage": "load-libraries",
+      "state": "completed",
+      "atUtc": "2026-09-05T17:21:26.7271886+00:00"
+    },
+    {
+      "stage": "fingerprint-before-policy",
+      "state": "started",
+      "atUtc": "2026-09-05T17:21:26.7279680+00:00"
+    },
+    {
+      "stage": "fingerprint-before-policy",
+      "state": "completed",
+      "atUtc": "2026-09-05T17:21:26.8113478+00:00"
+    },
+    {
+      "stage": "fingerprint-before-evidence",
+      "state": "started",
+      "atUtc": "2026-09-05T17:21:26.8119949+00:00"
+    },
+    {
+      "stage": "fingerprint-before-evidence",
+      "state": "completed",
+      "atUtc": "2026-09-05T17:23:35.4173226+00:00"
+    },
+    {
+      "stage": "cold-status-1",
+      "state": "started",
+      "atUtc": "2026-09-05T17:23:35.4626191+00:00"
+    },
+    {
+      "stage": "cold-status-1",
+      "state": "process-started",
+      "atUtc": "2026-09-05T17:23:35.6919307+00:00"
+    },
+    {
+      "stage": "cold-status-1",
+      "state": "deadline-exceeded-stopping",
+      "atUtc": "2026-09-05T17:24:35.4861483+00:00"
+    },
+    {
+      "stage": "cold-status-1",
+      "state": "failed",
+      "atUtc": "2026-09-05T17:24:35.7746147+00:00"
+    },
+    {
+      "stage": "fingerprint-after-evidence",
+      "state": "started",
+      "atUtc": "2026-09-05T17:24:35.7774687+00:00"
+    },
+    {
+      "stage": "fingerprint-after-evidence",
+      "state": "completed",
+      "atUtc": "2026-09-05T17:26:20.0288819+00:00"
+    },
+    {
+      "stage": "fingerprint-after-policy",
+      "state": "started",
+      "atUtc": "2026-09-05T17:26:20.0299765+00:00"
+    },
+    {
+      "stage": "fingerprint-after-policy",
+      "state": "completed",
+      "atUtc": "2026-09-05T17:26:20.0473247+00:00"
+    },
+    {
+      "stage": "acceptance",
+      "state": "failed",
+      "atUtc": "2026-09-05T17:26:20.0514542+00:00"
+    }
+  ]
+}

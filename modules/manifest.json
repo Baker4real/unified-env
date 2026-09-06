@@ -422,7 +422,8 @@
           "reports/safe-tree-delete-issue55-20260816/",
           "reports/safe-tree-delete-parallelism-benchmark-20260819/",
           "reports/safe-tree-delete-issue22-regression-20260819/",
-          "reports/safe-tree-delete-issue49-20260823/"
+          "reports/safe-tree-delete-issue49-20260823/",
+          "reports/issue58-20260906/"
         ]
       },
       "tests": {

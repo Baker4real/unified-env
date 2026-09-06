@@ -3589,13 +3589,34 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     -AllowedExactPaths @($planPath)
                 $metricsState.bytesHashed = [long]$metricsState.bytesHashed + $planSnapshot.bytes.Length
             }
-            Assert-CodexHookStrictJsonText -JsonText $planSnapshot.text
-            if ($null -ne $prefetchedPlan -and $null -ne $prefetchedPlan.document) {
+            $statusPlanValidationMatches = $false
+            if ($null -ne $prefetchedPlan -and
+                $prefetchedPlan.PSObject.Properties.Name -contains 'approvedPlanValidation' -and
+                $prefetchedPlan.approvedPlanValidation -is [CodexSafeTreeDelete.StatusPlanValidationReceipt] -and
+                $null -eq $prefetchedPlan.document) {
+                $statusPlanValidationMatches =
+                    $prefetchedPlan.approvedPlanValidation.MatchesSnapshot(
+                        [string]$planSnapshot.sha256,
+                        [string]$planSnapshot.text)
+            }
+            if (-not $statusPlanValidationMatches) {
+                Assert-CodexHookStrictJsonText -JsonText $planSnapshot.text
+            }
+            if ($statusPlanValidationMatches) {
+                # The receipt is issued only for schema 1; the reader owns the sole parse.
+                $plan = $null
+                $planSchemaVersion = 1L
+            } elseif ($null -ne $prefetchedPlan -and $null -ne $prefetchedPlan.document) {
                 $plan = $prefetchedPlan.document
             } else {
                 $plan = $planSnapshot.text | ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
             }
-            $planSchemaVersion = [long]$plan.schemaVersion
+            if ($null -ne $plan) { $planSchemaVersion = [long]$plan.schemaVersion }
+            $statusPlanValidation = $null
+            if ($statusPlanValidationMatches) {
+                $statusPlanValidation = $prefetchedPlan.approvedPlanValidation
+            }
+            $approvedPreparsedDocument = if ($null -eq $statusPlanValidation) { $plan } else { $null }
             try {
                 $approvedPlan = Read-CodexSafeTreeDeleteApprovedPlan `
                     -PlanPath $planPath `
@@ -3607,12 +3628,23 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     -AllowPolicyShaDrift `
                     -MetricsObserver $treeMetricsObserver `
                     -PreloadedSnapshot $planSnapshot `
-                    -PreparsedDocument $plan `
+                    -PreparsedDocument $approvedPreparsedDocument `
                     -LoadedPolicy $LoadedPolicy `
-                    -PlanManifestShaCache $PlanManifestShaCache
+                    -PlanManifestShaCache $PlanManifestShaCache `
+                    -StatusPlanValidation $statusPlanValidation
+                $plan = $approvedPlan.document
+                if ($null -ne $statusPlanValidation -and
+                    $statusPlanValidation.MatchesSnapshot([string]$planSnapshot.sha256, [string]$planSnapshot.text) -and
+                    $MetricsState.PSObject.Properties.Name -contains 'approvedPlanValidationReuseCount') {
+                    $MetricsState.approvedPlanValidationReuseCount =
+                        [long]$MetricsState.approvedPlanValidationReuseCount + 1L
+                }
             } catch {
                 $planApprovalError = $_.Exception.Message
                 if (-not [IO.File]::Exists($transactionPath)) { throw }
+                if ($null -eq $plan) {
+                    $plan = $planSnapshot.text | ConvertFrom-Json -Depth 128 -DateKind String -ErrorAction Stop
+                }
                 $transactionSnapshot = Read-CodexHookSafeUtf8FileSnapshot `
                     -Path $transactionPath `
                     -Name 'safe-delete status observed transaction after plan rejection' `
@@ -3795,7 +3827,8 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     -PolicyPath $PolicyPath `
                     -EvidenceRoot $fullEvidenceRoot `
                     -AllowRestoreState `
-                    -MetricsObserver $treeMetricsObserver
+                    -MetricsObserver $treeMetricsObserver `
+                    -StatusPlanValidation $statusPlanValidation
                 $transaction = $approvedTransaction.document
                 $transactionSchemaVersion = [long]$transaction.schemaVersion
                 $schemaCompatible = $true
@@ -4128,6 +4161,7 @@ function Get-CodexSafeTreeDeleteStatus {
         segmentArchivedResolveMs = 0L
         segmentPrefetchMs = 0L
         segmentFastScanMs = 0L
+        approvedPlanValidationReuseCount = 0L
     } -Force
     $statusTreeCache = [Collections.Generic.Dictionary[string, object]]::new(
         [StringComparer]::Ordinal)
@@ -4237,6 +4271,7 @@ function Get-CodexSafeTreeDeleteStatus {
                         text = [string]$fastResult.PlanText
                     }
                     document = $null
+                    approvedPlanValidation = $fastResult.ApprovedPlanValidation
                 }
             }
             $activeWatch = [Diagnostics.Stopwatch]::StartNew()
@@ -4314,6 +4349,7 @@ function Get-CodexSafeTreeDeleteStatus {
             archivedResolveMs = [long]$metricsState.segmentArchivedResolveMs
             prefetchMs = [long]$metricsState.segmentPrefetchMs
             fastScanMs = [long]$metricsState.segmentFastScanMs
+            approvedPlanValidationReuseCount = [long]$metricsState.approvedPlanValidationReuseCount
             fastScanHandled = [long]$fastHandled
             fastScanFallback = [long]$fastFallback
             fastScanDop = if ($fastScanEnabled) { [int]$fastDop } else { 0 }
@@ -4394,7 +4430,8 @@ function Read-CodexSafeTreeDeleteApprovedPlan {
         [AllowNull()][object]$PreloadedSnapshot,
         [AllowNull()][object]$PreparsedDocument,
         [AllowNull()][object]$LoadedPolicy,
-        [AllowNull()][object]$PlanManifestShaCache
+        [AllowNull()][object]$PlanManifestShaCache,
+        [AllowNull()][CodexSafeTreeDelete.StatusPlanValidationReceipt]$StatusPlanValidation
     )
 
     if ($ApprovedPlanSha256 -notmatch '^[0-9a-f]{64}$') { throw 'ApprovedPlanSha256 格式非法。' }
@@ -4432,6 +4469,12 @@ function Read-CodexSafeTreeDeleteApprovedPlan {
             & $MetricsObserver 'hash-read' 0L ([long]$snapshot.bytes.Length)
         }
         if ($snapshot.sha256 -cne $ApprovedPlanSha256) { throw 'safe-delete approved plan SHA-256 不匹配。' }
+    }
+    $reuseStatusPlanValidation = $AllowMissingTarget -and $AllowExpiredPlan -and
+        $null -eq $PreparsedDocument -and $null -ne $StatusPlanValidation -and
+        $StatusPlanValidation.MatchesPlanPath($fullPlanPath) -and
+        $StatusPlanValidation.MatchesSnapshot([string]$snapshot.sha256, [string]$snapshot.text)
+    if ($null -eq $PreloadedSnapshot -and -not $reuseStatusPlanValidation) {
         Assert-CodexHookStrictJsonText -JsonText $snapshot.text
     }
     if ($null -ne $PreparsedDocument) {
@@ -4482,9 +4525,12 @@ function Read-CodexSafeTreeDeleteApprovedPlan {
     if ($target.policyEntryId -cne [string]$plan.policyEntryId) {
         throw 'safe-delete plan policy entry 漂移。'
     }
-    [void](ConvertTo-CodexHookExpectedDirectoryTreeManifest `
-        -Manifest $plan.treeManifest `
-        -Scope 'safe-delete approved plan')
+    # Only Status's read-only approval mode can consume the scanner's snapshot-bound receipt.
+    if (-not $reuseStatusPlanValidation) {
+        [void](ConvertTo-CodexHookExpectedDirectoryTreeManifest `
+            -Manifest $plan.treeManifest `
+            -Scope 'safe-delete approved plan')
+    }
     Assert-CodexSafeTreeDeleteTargetTreePolicy -Target $target -TreeManifest $plan.treeManifest
 
     return [pscustomobject][ordered]@{
@@ -5004,7 +5050,8 @@ function Read-CodexSafeTreeDeleteApprovedTransaction {
         [Parameter(Mandatory)][string]$PolicyPath,
         [Parameter(Mandatory)][string]$EvidenceRoot,
         [switch]$AllowRestoreState,
-        [scriptblock]$MetricsObserver
+        [scriptblock]$MetricsObserver,
+        [AllowNull()][CodexSafeTreeDelete.StatusPlanValidationReceipt]$StatusPlanValidation
     )
 
     if ($ApprovedTransactionSha256 -notmatch '^[0-9a-f]{64}$') {
@@ -5042,6 +5089,14 @@ function Read-CodexSafeTreeDeleteApprovedTransaction {
         throw 'safe-delete transaction 不是可 Purge 状态。'
     }
 
+    $statusPlanArguments = @{}
+    # Keep the live plan/policy reads to detect drift; reuse only content validation.
+    if ($AllowRestoreState -and $null -ne $StatusPlanValidation -and
+        $StatusPlanValidation.MatchesPlanPath([string]$transaction.planPath)) {
+        $statusPlanArguments = @{
+            StatusPlanValidation = $StatusPlanValidation
+        }
+    }
     $approvedPlan = Read-CodexSafeTreeDeleteApprovedPlan `
         -PlanPath ([string]$transaction.planPath) `
         -ApprovedPlanSha256 ([string]$transaction.planSha256) `
@@ -5050,7 +5105,7 @@ function Read-CodexSafeTreeDeleteApprovedTransaction {
         -AllowMissingTarget `
         -AllowExpiredPlan `
         -AllowPolicyShaDrift:($transactionSchemaVersion -eq 3L) `
-        -MetricsObserver $MetricsObserver
+        -MetricsObserver $MetricsObserver @statusPlanArguments
     $plan = $approvedPlan.document
     if ($transactionSchemaVersion -eq 3L -and
         [long]$approvedPlan.target.policySchemaVersion -ne 5L) {

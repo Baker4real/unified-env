@@ -110,12 +110,40 @@ namespace CodexSafeTreeDelete
         public bool IsReparsePoint { get; set; }
     }
 
+    public sealed class StatusPlanValidationReceipt
+    {
+        private readonly string planSha256;
+        private readonly string planText;
+        private readonly string planPath;
+
+        internal StatusPlanValidationReceipt(string planSha256, string planText, string planPath)
+        {
+            this.planSha256 = planSha256;
+            this.planText = planText;
+            this.planPath = planPath;
+        }
+
+        public bool MatchesSnapshot(string sha256, string text)
+        {
+            return string.Equals(planSha256, sha256, StringComparison.Ordinal) &&
+                string.Equals(planText, text, StringComparison.Ordinal);
+        }
+
+        public bool MatchesPlanPath(string path)
+        {
+            return string.Equals(planPath, path, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     public sealed class StatusScanResult
     {
         public int Index;
         public bool Handled;
         public bool Archived;
         public string FallbackReason;
+        // The canonical approved-plan checks completed before handing the record to the
+        // PowerShell resolver. The resolver may reuse only the matching plan snapshot.
+        public StatusPlanValidationReceipt ApprovedPlanValidation { get; internal set; }
         // Plan snapshot for PowerShell fallback reuse (avoids a second read of plan.json).
         public string PlanSha256;
         public string PlanText;
@@ -176,6 +204,7 @@ namespace CodexSafeTreeDelete
         private const uint FileNameNormalized = 0x0;
         private const int ErrorFileNotFound = 2;
         private const int ErrorPathNotFound = 3;
+        private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
 
         private static readonly Regex LowerHex64 = new Regex("^[0-9a-f]{64}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex LowerHex8 = new Regex("^[0-9a-f]{8}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -740,8 +769,12 @@ namespace CodexSafeTreeDelete
                         plan, planPath, policy);
                     if (approval.Approved)
                     {
-                        // Approved plans continue through the PowerShell reference path
-                        // (namespace handling, transaction semantics, tree materialization).
+                        // Approved plans continue through the PowerShell reference path for
+                        // namespace handling, transaction semantics, and tree materialization.
+                        // Its manifest structure has already been validated against this exact
+                        // snapshot and can be reused without a second O(n) PowerShell walk.
+                        result.ApprovedPlanValidation = new StatusPlanValidationReceipt(
+                            planSnapshot.Sha256, planSnapshot.Text, planPath);
                         throw new StatusScanFallbackException("plan-approved");
                     }
                     planApprovalError = approval.Error;
@@ -1212,9 +1245,17 @@ namespace CodexSafeTreeDelete
             {
                 return scope + " manifest 属性集合非法。";
             }
-            if (manifest.ValueKind != JsonValueKind.Object ||
-                !HasExactProperties(manifest, new string[] { "schemaVersion", "rootIdentity", "entries" }))
+            string[] manifestNames = new string[] { "schemaVersion", "rootIdentity", "entries" };
+            if (manifest.ValueKind != JsonValueKind.Object)
             {
+                return scope + " manifest 属性集合非法。";
+            }
+            if (!HasExactProperties(manifest, manifestNames))
+            {
+                if (HasAllPropertiesOrdinalIgnoreCase(manifest, manifestNames))
+                {
+                    throw new StatusScanFallbackException("manifest-shape-non-canonical");
+                }
                 return scope + " manifest 属性集合非法。";
             }
             long manifestSchemaVersion;
@@ -1249,11 +1290,19 @@ namespace CodexSafeTreeDelete
                 new Dictionary<string, ManifestEntryScan>(StringComparer.OrdinalIgnoreCase);
             string rootEntryKind = null;
             string[] rootEntryIdentity = null;
+            string[] manifestEntryNames = new string[] { "relativePath", "kind", "sha256", "identity" };
             foreach (JsonElement entryElement in entriesElement.EnumerateArray())
             {
-                if (entryElement.ValueKind != JsonValueKind.Object ||
-                    !HasExactProperties(entryElement, new string[] { "relativePath", "kind", "sha256", "identity" }))
+                if (entryElement.ValueKind != JsonValueKind.Object)
                 {
+                    return scope + " manifest entry 属性集合非法。";
+                }
+                if (!HasExactProperties(entryElement, manifestEntryNames))
+                {
+                    if (HasAllPropertiesOrdinalIgnoreCase(entryElement, manifestEntryNames))
+                    {
+                        throw new StatusScanFallbackException("manifest-entry-shape-non-canonical");
+                    }
                     return scope + " manifest entry 属性集合非法。";
                 }
                 if (!HasOnlyCanonicalPropertyNames(entryElement, ManifestEntryCanonicalNames))
@@ -2019,6 +2068,25 @@ namespace CodexSafeTreeDelete
             return true;
         }
 
+        private static bool HasAllPropertiesOrdinalIgnoreCase(JsonElement element, string[] names)
+        {
+            if (element.ValueKind != JsonValueKind.Object) { return false; }
+            foreach (string name in names)
+            {
+                bool found = false;
+                foreach (JsonProperty property in element.EnumerateObject())
+                {
+                    if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) { return false; }
+            }
+            return true;
+        }
+
         private static bool HasCanonicalPlanShape(JsonElement plan)
         {
             if (!HasOnlyCanonicalPropertyNames(plan, PlanCanonicalNames)) { return false; }
@@ -2222,15 +2290,7 @@ namespace CodexSafeTreeDelete
 
         private static int IndexOfAnyInvalidFileNameChar(string segment)
         {
-            foreach (char c in segment)
-            {
-                if (c == '"' || c == '<' || c == '>' || c == '|' || c == '\0' ||
-                    (c >= '\x01' && c <= '\x1f'))
-                {
-                    return segment.IndexOf(c);
-                }
-            }
-            return -1;
+            return segment.IndexOfAny(InvalidFileNameChars);
         }
     }
 }

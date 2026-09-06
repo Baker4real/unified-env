@@ -1,0 +1,35 @@
+{
+  "run": "20260902T092255Z-311486d4-5406-4e07-ab78-cfaaaaa3ca9b",
+  "planBytes": 6039074,
+  "fastScanMs": 287,
+  "fallbackReason": "plan-approved",
+  "control": [
+    {
+      "withReceipt": false,
+      "resolveMs": 9731,
+      "lifecycle": "manual-review",
+      "reuseCount": 0,
+      "planRereadCount": 1,
+      "strictPlanCount": 2,
+      "operation": "{\"operationId\":\"20260902T092255Z-311486d4-5406-4e07-ab78-cfaaaaa3ca9b\",\"runDirectory\":\"D:\\\\agents\\\\run-evidence\\\\safe-tree-delete\\\\20260902T092255Z-311486d4-5406-4e07-ab78-cfaaaaa3ca9b\",\"lifecycle\":\"manual-review\",\"safeActions\":[\"manual-review\"],\"targetPath\":\"D:\\\\agents\\\\projects\\\\hermes-retired\\\\hermes-data\\\\context-mode\",\"quarantinePath\":\"D:\\\\agents\\\\projects\\\\hermes-retired\\\\hermes-data\\\\.codex-safe-delete-311486d4-5406-4e07-ab78-cfaaaaa3ca9b.quarantine\",\"targetPresent\":false,\"quarantinePresent\":false,\"targetEntryType\":\"absent\",\"quarantineEntryType\":\"absent\",\"namespaceAbsent\":true,\"logicalCompletion\":false,\"physicalReclaimStatus\":\"unknown\",\"physicalReclaimReason\":\"independent-filesystem-allocation-evidence-unavailable\",\"deletionOutcome\":{\"schemaVersion\":1,\"namespaceAbsent\":true,\"logicalCompletion\":false,\"physicalReclaimStatus\":\"unknown\",\"physicalReclaimReason\":\"independent-filesystem-allocation-evidence-unavailable\"},\"policyCompatible\":false,\"schemaCompatible\":false,\"candidatePolicyCompatible\":null,\"planSchemaVersion\":1,\"transactionSchemaVersion\":2,\"transactionStatus\":\"purged\",\"transactionUpdatedAtUtc\":\"2026-09-02T09:24:49.2402523+00:00\",\"journalStatus\":\"invalid\",\"pendingFiles\":[],\"uncertainFiles\":[],\"errors\":[\"safe-delete policy 自计划生成后已漂移。\"]}"
+    }
+  ],
+  "optimized": [
+    {
+      "withReceipt": true,
+      "resolveMs": 1961,
+      "lifecycle": "manual-review",
+      "reuseCount": 1,
+      "planRereadCount": 1,
+      "strictPlanCount": 0,
+      "operation": "{\"operationId\":\"20260902T092255Z-311486d4-5406-4e07-ab78-cfaaaaa3ca9b\",\"runDirectory\":\"D:\\\\agents\\\\run-evidence\\\\safe-tree-delete\\\\20260902T092255Z-311486d4-5406-4e07-ab78-cfaaaaa3ca9b\",\"lifecycle\":\"manual-review\",\"safeActions\":[\"manual-review\"],\"targetPath\":\"D:\\\\agents\\\\projects\\\\hermes-retired\\\\hermes-data\\\\context-mode\",\"quarantinePath\":\"D:\\\\agents\\\\projects\\\\hermes-retired\\\\hermes-data\\\\.codex-safe-delete-311486d4-5406-4e07-ab78-cfaaaaa3ca9b.quarantine\",\"targetPresent\":false,\"quarantinePresent\":false,\"targetEntryType\":\"absent\",\"quarantineEntryType\":\"absent\",\"namespaceAbsent\":true,\"logicalCompletion\":false,\"physicalReclaimStatus\":\"unknown\",\"physicalReclaimReason\":\"independent-filesystem-allocation-evidence-unavailable\",\"deletionOutcome\":{\"schemaVersion\":1,\"namespaceAbsent\":true,\"logicalCompletion\":false,\"physicalReclaimStatus\":\"unknown\",\"physicalReclaimReason\":\"independent-filesystem-allocation-evidence-unavailable\"},\"policyCompatible\":false,\"schemaCompatible\":false,\"candidatePolicyCompatible\":null,\"planSchemaVersion\":1,\"transactionSchemaVersion\":2,\"transactionStatus\":\"purged\",\"transactionUpdatedAtUtc\":\"2026-09-02T09:24:49.2402523+00:00\",\"journalStatus\":\"invalid\",\"pendingFiles\":[],\"uncertainFiles\":[],\"errors\":[\"safe-delete policy 自计划生成后已漂移。\"]}"
+    }
+  ],
+  "inputHashes": [
+    "8A130777478F57909BA2B3798974D1981B9EA57E0B210D003A1A5508E9348CF1",
+    "3188265C16D90E57B716467B5D4B275DECA15FE9889E192572BD6A2380B17181",
+    "6ACBA1E816FD75572F25D26EE5A353A6583B1CC48969E566EEC7191FE75C7FCC"
+  ],
+  "inputUnchanged": true,
+  "operationsEqual": true
+}

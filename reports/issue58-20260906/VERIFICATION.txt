@@ -1,0 +1,176 @@
+Issue #58 验证记录，2026-09-06
+
+当前结果：局部实现及回滚复验通过；全量 Status 冷启动验收失败。Issue 保持 OPEN。
+分支：main
+基线 commit：52b8897c3b02b3db1f75fed40b6cf0c265a6c7e6
+仓库：D:\agents\projects\统一环境
+实施验收快照：上一阶段未执行 commit、push、宿主部署或 issue close。本次提交/推送授权与发布前复核见文末；历史验收结果不因发布而转为性能达标。
+
+改动字段与行为
+- StatusPlanValidationReceipt 绑定 plan 路径、SHA-256 与原文。
+- Status fallback 对匹配 receipt 复用严格 JSON/manifest 内容校验；approved-plan reader 负责解析，异常分支按需解析。
+- v2/v3 transaction approval 透传匹配 receipt，但保留第二次 live plan read/hash 与 policy read。
+- v2 policy SHA 漂移仍拒绝；v3 policy schema 5、namespace 和 journal 校验保持原语义。
+- 嵌套 manifest/entry 非规范属性大小写回退 PowerShell；参考路径因键名敏感的 manifest SHA 返回 manual-review。
+- Windows 无效文件名字符采用 Path.GetInvalidFileNameChars()，包含 * 与 ?。
+- modules/manifest.json 为 reports/issue58-20260906/ 登记 host-safety owner。
+
+四份产物
+MODIFIED_FILE: D:\agents\projects\统一环境\reports\issue58-20260906\MODIFIED_FILE.cs
+DIFF_FILE: D:\agents\projects\统一环境\reports\issue58-20260906\DIFF_FILE.diff
+VERIFICATION.txt: D:\agents\projects\统一环境\reports\issue58-20260906\VERIFICATION.txt
+ROLLBACK.sh: D:\agents\projects\统一环境\reports\issue58-20260906\ROLLBACK.sh
+
+SHA-256
+BASELINE_FILE.cs = 7D2C0D23C444DE32722659658C73B504786221B33F12A51F46D5EC0DF7FDEAD6
+MODIFIED_FILE.cs = F5E5DCF0026D57B7866D17134B7C2D4EFAC7F9D9449B85031E43AA631026F9E9
+ROLLBACK_TEST_COPY.cs = 7D2C0D23C444DE32722659658C73B504786221B33F12A51F46D5EC0DF7FDEAD6
+DIFF_FILE.diff = BA610D276E571E7E77D8F9A2EB8FDE565AB84B778E3885950FF2F5472FB8165F
+scripts/lib/CodexSafeTreeDelete.ps1 = 2009FA319666FBDB7ADE8A5708BBA243D3271C7C211BE2F4B54DDF1F93E02993
+tests/Test-CodexSafeTreeDeleteStatus.ps1 = 5A4E33916E6D173546871C7155AF1486E301792E80B60916268FDE8D44C30934
+modules/manifest.json = F16B1E2C6F5F62ECDECC13F81DA40035848C10B36CBBB6ADCD2C45FD16132EA3
+
+BASELINE
+Command:
+pwsh -NoLogo -NoProfile -Command "Add-Type -Path './scripts/lib/CodexSafeTreeDeleteStatusScan.cs'; & './tests/Test-CodexSafeTreeDeleteStatus.ps1'"
+exit $LASTEXITCODE
+Input/cwd: D:\agents\projects\统一环境\.scratch\safe-tree-delete-tests-issue58-baseline-866d5d257bd249ccb66c1438e7961036
+Input source: 基线 git archive 原始字节副本，非重新编码的 Get-Content 输出。
+Literal output:
+  ok suite                     slices
+  -- -----                     ------
+True CodexSafeTreeDeleteStatus     24
+Exit status: 0
+
+MODIFIED
+Command:
+pwsh -NoLogo -NoProfile -File './tests/Test-CodexSafeTreeDeleteStatus.ps1'
+exit $LASTEXITCODE
+Input/cwd: D:\agents\projects\统一环境，当前四个受跟踪文件的工作树改动。
+Literal output:
+  ok suite                     slices
+  -- -----                     ------
+True CodexSafeTreeDeleteStatus     32
+Exit status: 0
+新增覆盖：live plan 漂移、跨 run 路径、同 SHA 字段但不同原文、v2 policy SHA 漂移、* 和 ?、嵌套属性大小写、三组完整 fast/slow 语义等价。
+
+ROLLBACK
+Command:
+Copy-Item -LiteralPath './MODIFIED_FILE.cs' -Destination './ROLLBACK_TEST_COPY.cs' -Force
+bash ./ROLLBACK.sh ./ROLLBACK_TEST_COPY.cs ./BASELINE_FILE.cs
+Input/cwd: D:\agents\projects\统一环境\reports\issue58-20260906
+Input: 独立的修改版 ROLLBACK_TEST_COPY.cs；基线原始字节 BASELINE_FILE.cs。
+Literal output:
+7d2c0d23c444de32722659658c73b504786221b33f12a51f46d5ec0df7fdead6  ./ROLLBACK_TEST_COPY.cs
+Exit status: 0
+Command: bash -c 'test -x ./ROLLBACK.sh'
+Literal output: (empty)
+Exit status: 0
+独立哈希回读结果：
+rollbackCopyHash=7D2C0D23C444DE32722659658C73B504786221B33F12A51F46D5EC0DF7FDEAD6
+modifiedFileHash=F5E5DCF0026D57B7866D17134B7C2D4EFAC7F9D9449B85031E43AA631026F9E9
+rollbackExecutable=true
+
+ROLLBACK BEHAVIOR
+Command:
+$baselineRoot = 'D:/agents/projects/统一环境/.scratch/safe-tree-delete-tests-issue58-baseline-866d5d257bd249ccb66c1438e7961036'
+Copy-Item -LiteralPath 'D:/agents/projects/统一环境/reports/issue58-20260906/ROLLBACK_TEST_COPY.cs' -Destination (Join-Path $baselineRoot 'scripts/lib/CodexSafeTreeDeleteStatusScan.cs') -Force
+pwsh -NoLogo -NoProfile -Command "Add-Type -Path './scripts/lib/CodexSafeTreeDeleteStatusScan.cs'; & './tests/Test-CodexSafeTreeDeleteStatus.ps1'"
+exit $LASTEXITCODE
+Input/cwd: 与 BASELINE 相同的独立基线目录，C# 源文件来自真实回滚后的副本。
+Literal output:
+  ok suite                     slices
+  -- -----                     ------
+True CodexSafeTreeDeleteStatus     24
+Exit status: 0
+恢复结果：副本恢复基线字节与 24 项 Status 行为；仓库源文件和 MODIFIED_FILE.cs 保持修改态。没有回滚宿主或当前工作树。
+
+基线副本位置与早先失败
+- 初始完整归档曾放在报告目录，随后移到 D:\agents\tmp\issue58-baseline-repo-866d5d257bd249ccb66c1438e7961036。
+- 普通启动曾因共享 StatusScan DLL 缓存发布冲突失败，exit 1，错误片段：Move-Item ... 当文件已存在时，无法创建该文件。
+- 预加载基线 C# 后，tmp 位置仍触发 fixture 项目根校验，exit 1，错误片段：safe-delete policy status-rebuildable-build-output 可重建构建产物必须位于项目根之下。
+- 已核对真实路径与 .gitignore 第 20 行后，无损移动到上述 .scratch/safe-tree-delete-tests-issue58-baseline-* 目录；源路径消失，C# 移动前后哈希相同。未放宽 policy，未修改基线测试。
+- 当前基线与回滚复验均在独立 pwsh 预加载归档 C#，不竞争发布共享缓存。未修改宿主缓存实现。
+- 本记录替代旧版本中的 26 slices、旧副本路径和重新编码产生的旧哈希。
+
+真实输入热点探针
+Command:
+pwsh -NoLogo -NoProfile -File './reports/issue58-20260906/status-receipt-probe.ps1' -AssertNoDuplicatePlanValidation
+exit $LASTEXITCODE
+Input/cwd: D:\agents\projects\统一环境
+Input: run 20260902T092255Z-311486d4-5406-4e07-ab78-cfaaaaa3ca9b；plan.json 6039074 bytes。
+Literal output:
+withReceipt resolveMs reuseCount planRereadCount strictPlanCount lifecycle
+----------- --------- ---------- --------------- --------------- ---------
+      False      9731          0               1               2 manual-review
+       True      1961          1               1               0 manual-review
+fastScanMs=287 inputUnchanged=True operationsEqual=True
+Exit status: 0
+证据：reports/issue58-20260906/receipt-probe-result.json。
+红色快照 receipt-probe-red.json：optimized strictPlanCount=1、planRereadCount=1，原探针断言失败。
+绿色结果消除重复 strict JSON，仍有一次 fallback 内 live plan reread；控制与修改版 operation 完全一致，三个输入 SHA 前后不变。
+以上 resolve 计时带命令断点，不作为无插桩的全量性能结论。
+已保留无断点组件快照 receipt-probe-components.json：optimized resolveMs=2226，完整 fastScanMs=288，inputUnchanged=true。
+计时勘误：旧远端评论中的 fast scan=7ms 是 I/O 子段，非完整 fast scan。完整扫描实测为 287/288ms。
+
+全量冷启动验收：FAILED
+现有失败记录：reports/issue58-20260906/full-coldstart-result.json。
+复跑命令（本次恢复阶段未重复执行）：
+pwsh -NoLogo -NoProfile -File './reports/issue58-20260906/full-coldstart-acceptance.ps1' -OutputPath './reports/issue58-20260906/full-coldstart-result.json'
+实际 Status 子命令：
+pwsh -NoLogo -NoProfile -File 'D:/agents/projects/统一环境/scripts/Invoke-CodexSafeTreeDelete.ps1' -Mode Status -Json
+Input: D:\agents\run-evidence\safe-tree-delete；仓库 managed/safe-tree-delete/policy.json。
+Literal result: elapsedMs=60295; timedOut=true; stopConfirmed=true; exitCode=-1; stdoutBytes=0; parseSucceeded=false; passed=false.
+Literal error: Cold Status exceeded the 60000 ms deadline.
+Harness exit status: 1。首轮失败后停止后两轮，没有完整 Status 输出，不满足三次独立冷启动均 <60s 的合同。
+Evidence before/after: entryCount=23663，manifestSha256=03a837bc09bd2cf9c25658d9928023e12bdd12b869a9e31ee885d2c0d281b13a。
+Policy before/after SHA-256: 6acba1e816fd75572f25d26ee5a353a6583b1cc48969e566eec7191fe75c7fcc。
+evidenceUnchanged=true; policyUnchanged=true。这些是内容与 identity 前后相同的证据，不是期间零写事件审计。
+更早无界等待首轮超过 774 秒的旧 harness 也已停止；未把旧等待结果用作成功证据。
+
+评审与补充回归
+- Spec reviewer：核心 receipt 实现无新增阻断性问题；性能合同仍未达到。
+- Standards reviewer：核心实现 no findings；发现 harness 可能接受三次稳定空 operations。
+- 已修复 harness，从独立 snapshot 第一层 child 得到预期 ID count/digest，拒绝非空 evidence 的空输出、重复 ID 和错误 ID 集。
+- reviewer 的内存 coverage 验证：empty=false，duplicate=false，wrong-id=false，same-id-set-reordered=true；IN_MEMORY_COVERAGE_TESTS=4 PASSED，exit 0。
+- 当前 harness 语法回读：PARSE_OK，exit 0。SHA-256=601D9F617C0401F3C8BED66BB42367E97F82816210EC8581DD9FE682E0779B46。
+- 覆盖校验修补后未重跑全量；既有超时失败结论保持不变。
+- 本任务较早阶段回归：CodexSafeTreeDelete 12 slices、Restore、SchemaCompatibility 10 slices、UncertainRecovery unit/integration 均通过，exit 0；恢复阶段未重复这些套件。
+
+模块边界
+Command: node scripts/Validate-ModuleBoundaries.cjs --json
+Literal result: {"ok":false,"files":3047,"modules":5,"errors":[".scratch/run-evidence/env-governance/2026-08-31-codex-root-dedup-cleanup.md: no owner","docs/handoffs/20260902T164751Z-safe-tree-delete-status-slow-path.md: no owner","reports/safe-tree-delete-status-slowpath-20260903/findings.md: no owner","reports/safe-tree-delete-status-slowpath-20260903/status-bigplan-probe.ps1: no owner","reports/safe-tree-delete-status-slowpath-20260903/status-sample-probe.ps1: no owner"]}
+Exit status: 1。本票 ownership 错误为 0；5 个既有未登记文件保留，未顺手修改。
+Command: git diff --check
+Literal output: (empty)
+Exit status: 0
+
+远端与后续
+当前回读：Baker4real/unified-env#58 为 OPEN，标签 bug、needs-triage。
+已发布本轮进展与 7ms 勘误：https://github.com/Baker4real/unified-env/issues/58#issuecomment-5553616672
+发布命令：gh issue comment 58 --repo Baker4real/unified-env --body-file 'D:/agents/projects/统一环境/reports/issue58-20260906/issue-comment.md'
+Literal output: https://github.com/Baker4real/unified-env/issues/58#issuecomment-5553616672
+Exit status: 0
+独立回读命令：gh api repos/Baker4real/unified-env/issues/comments/5553616672
+结果：bodyMatches=true；远端正文与本地 issue-comment.md 一致，exit 0。
+Issue 回读命令：gh issue view 58 --repo Baker4real/unified-env --json 'number,state,labels,url'
+Literal result: state=OPEN; labels=[bug,needs-triage]。Exit status: 0。
+全部 14 份报告产物已逐个重新打开计算 SHA-256，JSON 已重新解析；四份主产物正文已回读。
+下一步：沿原修正版 B 分段定位剩余大 plan 读取、解析和 policy/target-tree 校验成本；不取消 live plan/policy 漂移检查，不用局部通过代替全量验收。
+
+2026-09-06 发布前复核
+- 用户明确要求先将现有情况写回 issue，再提交推送。本批仅发布当前实现、测试、manifest ownership 与 issue58-20260906 证据，不继续扩大实现，不部署、不关闭 issue。
+- 发布目标：当前账户 Baker4real，私有仓库 Baker4real/unified-env，viewerPermission=ADMIN；GitHub defaultBranchRef 与 git ls-remote --symref origin HEAD 均确认 main。
+- origin fetch/push URL 均为 https://github.com/Baker4real/unified-env.git；没有额外 pushRemote、pushDefault 或 pushInsteadOf。
+- git fetch origin main 后，HEAD...origin/main 的 ahead/behind 为 0/0；merge-base 为 52b8897c3b02b3db1f75fed40b6cf0c265a6c7e6。
+- 四个受跟踪改动的 SHA-256 与上列验收记录相同；报告归类为 evidence，忽略的基线测试目录不纳入提交。
+- 发布前重跑：pwsh -NoLogo -NoProfile -File './tests/Test-CodexSafeTreeDeleteStatus.ps1'
+  Literal output: True CodexSafeTreeDeleteStatus     32
+  Exit status: 0
+- 模块 gate 当前检查 3049 files，exit 1；仍为上列同一组 5 个既有 no owner，不涉及本票路径。此次是阶段性源码/证据发布，不声称全量 gate 或性能验收通过。
+- pre-commit 现行入口指向 D:/Codex/tools/PowerShell/7.6.4/pwsh.exe，文件存在；未修改或跳过 hook。
+- 待提交内容的高置信凭据格式扫描无命中；独立 rollback 副本和原始 baseline 保留。
+- 发布完成的 commit SHA 与远端一致性结果记录在 #58 后续评论和 Git 历史中，避免向本提交写入自引用 SHA。
+- 已先行写回发布检查点：https://github.com/Baker4real/unified-env/issues/58#issuecomment-5556480150；gh api 独立回读与 publish-comment.md 正文相同，exit 0。
+- 首次 git diff --cached --check 为 exit 2，DIFF_FILE.diff 的 12 个空白上下文行被识别为 trailing whitespace。已从同一组四文件暂存 diff 重新导出 --unified=0，未改源码、测试或验证语义；上列 DIFF_FILE SHA 为重新导出后的值。此证据 patch 重放时使用 git apply --unidiff-zero。
+- 修正后 git diff --cached --check 输出为空，exit 0；git apply --check --reverse --unidiff-zero reports/issue58-20260906/DIFF_FILE.diff 通过，exit 0；ROLLBACK.sh 暂存模式为 100755。

@@ -116,6 +116,29 @@ function Get-Operation {
     return $matches[0]
 }
 
+function ConvertTo-StatusSemanticJson {
+    param([Parameter(Mandatory)][object]$Status)
+
+    $semantic = [ordered]@{}
+    foreach ($property in $Status.PSObject.Properties) {
+        if ($property.Name -cin @('capturedAtUtc', 'metrics', 'statusSegments')) { continue }
+        $semantic[$property.Name] = $property.Value
+    }
+    return $semantic | ConvertTo-Json -Depth 100 -Compress
+}
+
+function Assert-ReceiptReadRejected {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Read,
+        [Parameter(Mandatory)][string]$ExpectedError,
+        [Parameter(Mandatory)][string]$Message
+    )
+
+    $actualError = $null
+    try { & $Read | Out-Null } catch { $actualError = $_.Exception.Message }
+    Assert-True ($null -ne $actualError -and $actualError -ceq $ExpectedError) $Message
+}
+
 try {
     [void][IO.Directory]::CreateDirectory($evidenceRoot)
     $rebuildableTarget = Join-Path $fixtureRoot 'rebuildable-build-output'
@@ -906,8 +929,14 @@ try {
         -CapabilityRoot $cacheRoot `
         -FixturePolicyPath $cachePolicyPath `
         -FixtureEvidenceRoot $cacheEvidence
-    $sharedStatus = & $entryPath -Mode Status `
-        -FixturePolicyPath $cachePolicyPath -FixtureEvidenceRoot $cacheEvidence
+    $previousSegments = $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS
+    try {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS = '1'
+        $sharedStatus = & $entryPath -Mode Status `
+            -FixturePolicyPath $cachePolicyPath -FixtureEvidenceRoot $cacheEvidence
+    } finally {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS = $previousSegments
+    }
     $sharedOp1 = Get-Operation -Status $sharedStatus -TransactionPath ([string]$sharedPlan1.planPath)
     $sharedOp2 = Get-Operation -Status $sharedStatus -TransactionPath ([string]$sharedPlan2.planPath)
     Assert-True ($sharedOp1.lifecycle -ceq 'planned' -and $sharedOp2.lifecycle -ceq 'planned') `
@@ -916,6 +945,114 @@ try {
         'Status 必须至少哈希一次共享 live 树。'
     Assert-True ([long]$sharedStatus.metrics.bytesHashed -lt (2L * [long]$sharedPayload.Length)) `
         '同一 Status 调用不得把同一 live 树再哈希一遍；这不是 Apply/Purge SessionHashCache。'
+    Assert-True ([long]$sharedStatus.statusSegments.approvedPlanValidationReuseCount -gt 0L) `
+        'canonical approved plan 的 Status fallback 必须复用 C# 已完成的 manifest validation。'
+
+    # #58: real scanner receipts must not suppress fresh transaction plan/policy checks.
+    . (Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1')
+    $receiptApply = & $entryPath -Mode Apply `
+        -PlanPath ([string]$sharedPlan1.planPath) `
+        -ApprovedPlanSha256 ([string]$sharedPlan1.planSha256) `
+        -ConfirmApply -FixturePolicyPath $cachePolicyPath -FixtureEvidenceRoot $cacheEvidence
+    $receiptPlanPath = [string]$sharedPlan1.planPath
+    $receiptRun = Get-Item -LiteralPath (Split-Path -Parent $receiptPlanPath) -Force
+    $receiptPolicy = Read-CodexSafeTreeDeletePolicy -PolicyPath $cachePolicyPath
+    $receiptMetrics = New-CodexSafeTreeDeleteMetricsState -Phase 'status'
+    $receiptScan = Invoke-CodexSafeTreeDeleteStatusFastScan `
+        -RunItems @($receiptRun) -Policy $receiptPolicy -FullEvidenceRoot $cacheEvidence `
+        -MetricsState $receiptMetrics -DegreeOfParallelism 1
+    $receiptResult = $receiptScan[[string]$receiptRun.FullName]
+    $receipt = $receiptResult.ApprovedPlanValidation
+    Assert-True ($null -ne $receipt -and $receiptResult.FallbackReason -ceq 'plan-approved') `
+        'quarantined v2 fixture 必须取得真实 scanner receipt。'
+    $receiptTransactionArguments = @{
+        TransactionPath = [string]$receiptApply.transactionPath
+        ApprovedTransactionSha256 = [string]$receiptApply.transactionSha256
+        PolicyPath = $cachePolicyPath
+        EvidenceRoot = $cacheEvidence
+        AllowRestoreState = $true
+    }
+    $receiptControl = Read-CodexSafeTreeDeleteApprovedTransaction @receiptTransactionArguments
+    $receiptOptimized = Read-CodexSafeTreeDeleteApprovedTransaction @receiptTransactionArguments `
+        -StatusPlanValidation $receipt
+    Assert-True ([long]$receiptControl.document.schemaVersion -eq 2L -and
+        (($receiptControl | ConvertTo-Json -Depth 100 -Compress) -ceq
+            ($receiptOptimized | ConvertTo-Json -Depth 100 -Compress))) `
+        '匹配 receipt 的 transaction reader 必须与参考路径返回相同 v2 审批结果。'
+
+    $receiptPlanBytes = [IO.File]::ReadAllBytes($receiptPlanPath)
+    try {
+        [IO.File]::WriteAllBytes($receiptPlanPath, ($receiptPlanBytes + [byte[]]@(0x20)))
+        foreach ($validation in @($null, $receipt)) {
+            Assert-ReceiptReadRejected -Read {
+                Read-CodexSafeTreeDeleteApprovedTransaction @receiptTransactionArguments `
+                    -StatusPlanValidation $validation
+            } -ExpectedError 'safe-delete approved plan SHA-256 不匹配。' `
+                -Message '扫描后 live plan 改变时，有无 receipt 都必须拒绝 transaction 的旧 SHA。'
+        }
+    } finally {
+        [IO.File]::WriteAllBytes($receiptPlanPath, $receiptPlanBytes)
+    }
+
+    $receiptPlanArguments = @{
+        PlanPath = $receiptPlanPath
+        ApprovedPlanSha256 = [string]$receiptResult.PlanSha256
+        PolicyPath = $cachePolicyPath
+        EvidenceRoot = $cacheEvidence
+        AllowMissingTarget = $true
+        AllowExpiredPlan = $true
+        AllowPolicyShaDrift = $true
+    }
+    $otherPlanPath = [string]$sharedPlan2.planPath
+    $otherPlanBytes = [IO.File]::ReadAllBytes($otherPlanPath)
+    try {
+        [IO.File]::WriteAllBytes($otherPlanPath, $receiptPlanBytes)
+        Assert-True (-not $receipt.MatchesPlanPath($otherPlanPath) -and
+            $receipt.MatchesSnapshot([string]$receiptResult.PlanSha256, [string]$receiptResult.PlanText)) `
+            '相同内容与 SHA 不得把 receipt 的路径绑定转移到另一 evidence run。'
+        $otherPlanArguments = $receiptPlanArguments.Clone()
+        $otherPlanArguments.PlanPath = $otherPlanPath
+        $otherControl = Read-CodexSafeTreeDeleteApprovedPlan @otherPlanArguments
+        $otherOptimized = Read-CodexSafeTreeDeleteApprovedPlan @otherPlanArguments `
+            -StatusPlanValidation $receipt
+        Assert-True (($otherControl | ConvertTo-Json -Depth 100 -Compress) -ceq
+            ($otherOptimized | ConvertTo-Json -Depth 100 -Compress)) `
+            '跨 run receipt 必须回到参考审批，不得改变另一 run 的结果。'
+    } finally {
+        [IO.File]::WriteAllBytes($otherPlanPath, $otherPlanBytes)
+    }
+
+    $changedTextPlan = [string]$receiptResult.PlanText | ConvertFrom-Json -Depth 128 -DateKind String
+    $changedTextFile = @($changedTextPlan.treeManifest.entries | Where-Object kind -ceq 'file')[0]
+    $changedTextFile.relativePath = 'payload?.txt'
+    $changedTextSnapshot = [pscustomobject]@{
+        sha256 = [string]$receiptResult.PlanSha256
+        text = ($changedTextPlan | ConvertTo-Json -Depth 100)
+    }
+    Assert-True (-not $receipt.MatchesSnapshot(
+        [string]$changedTextSnapshot.sha256, [string]$changedTextSnapshot.text)) `
+        '复用原 SHA 字段但改变原文的 snapshot 必须失去 receipt。'
+    foreach ($validation in @($null, $receipt)) {
+        Assert-ReceiptReadRejected -Read {
+            Read-CodexSafeTreeDeleteApprovedPlan @receiptPlanArguments `
+                -PreloadedSnapshot $changedTextSnapshot -StatusPlanValidation $validation
+        } -ExpectedError 'safe-delete approved plan manifest entry relativePath 含不安全路径段。' `
+            -Message '原文不匹配 receipt 时必须重新验证 manifest 并拒绝非法路径。'
+    }
+
+    $receiptPolicyBytes = [IO.File]::ReadAllBytes($cachePolicyPath)
+    try {
+        [IO.File]::WriteAllBytes($cachePolicyPath, ($receiptPolicyBytes + [byte[]]@(0x20)))
+        foreach ($validation in @($null, $receipt)) {
+            Assert-ReceiptReadRejected -Read {
+                Read-CodexSafeTreeDeleteApprovedTransaction @receiptTransactionArguments `
+                    -StatusPlanValidation $validation
+            } -ExpectedError 'safe-delete policy 自计划生成后已漂移。' `
+                -Message 'v2 transaction 不得借 receipt 接受扫描后 policy SHA 漂移。'
+        }
+    } finally {
+        [IO.File]::WriteAllBytes($cachePolicyPath, $receiptPolicyBytes)
+    }
 
     $archivedRunDirectory = Split-Path -Parent ([string]$revokedV2Purge.transactionPath)
     $archivedMarkerPath = Join-Path $archivedRunDirectory 'terminal-archive.json'
@@ -1063,15 +1200,82 @@ try {
         ($med1bPlanObject | ConvertTo-Json -Depth 100),
         [Text.UTF8Encoding]::new($false))
 
-    $medFastStatus = & $entryPath -Mode Status `
-        -FixturePolicyPath $medPolicyPath -FixtureEvidenceRoot $medEvidence
+    # MED-1c：Windows invalid filename chars（* / ?）必须与参考路径保持逐字节一致。
+    $med1cRun = Join-Path $medEvidence '20260823T000003Z-med1c'
+    [void][IO.Directory]::CreateDirectory($med1cRun)
+    $med1cPlan = $medPlanDocument | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 128 -DateKind String
+    $med1cFileEntry = @($med1cPlan.treeManifest.entries | Where-Object kind -ceq 'file') | Select-Object -First 1
+    $med1cFileEntry.relativePath = 'payload*.txt'
+    [IO.File]::WriteAllText(
+        (Join-Path $med1cRun 'plan.json'),
+        ($med1cPlan | ConvertTo-Json -Depth 100),
+        [Text.UTF8Encoding]::new($false))
+    $med1fRun = Join-Path $medEvidence '20260823T000006Z-med1f'
+    [void][IO.Directory]::CreateDirectory($med1fRun)
+    $med1cFileEntry.relativePath = 'payload?.txt'
+    [IO.File]::WriteAllText(
+        (Join-Path $med1fRun 'plan.json'),
+        ($med1cPlan | ConvertTo-Json -Depth 100),
+        [Text.UTF8Encoding]::new($false))
+
+    # MED-1d：manifest 嵌套属性名大小写变体必须回退到参考路径。
+    $med1dRun = Join-Path $medEvidence '20260823T000004Z-med1d'
+    [void][IO.Directory]::CreateDirectory($med1dRun)
+    $med1dPlan = $medPlanDocument | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 128 -DateKind String
+    $med1dManifestObject = [ordered]@{}
+    foreach ($property in $med1dPlan.treeManifest.PSObject.Properties) {
+        if ($property.Name -ceq 'entries') {
+            $med1dManifestObject['Entries'] = $property.Value
+        } else {
+            $med1dManifestObject[$property.Name] = $property.Value
+        }
+    }
+    $med1dPlan.treeManifest = [pscustomobject]$med1dManifestObject
+    [IO.File]::WriteAllText(
+        (Join-Path $med1dRun 'plan.json'),
+        ($med1dPlan | ConvertTo-Json -Depth 100),
+        [Text.UTF8Encoding]::new($false))
+
+    # MED-1e：manifest entry 嵌套属性名大小写变体必须回退到参考路径。
+    $med1eRun = Join-Path $medEvidence '20260823T000005Z-med1e'
+    [void][IO.Directory]::CreateDirectory($med1eRun)
+    $med1ePlan = $medPlanDocument | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 128 -DateKind String
+    $med1eEntry = @($med1ePlan.treeManifest.entries | Where-Object kind -ceq 'file') | Select-Object -First 1
+    $med1eEntryObject = [ordered]@{}
+    foreach ($property in $med1eEntry.PSObject.Properties) {
+        if ($property.Name -ceq 'relativePath') {
+            $med1eEntryObject['RelativePath'] = $property.Value
+        } else {
+            $med1eEntryObject[$property.Name] = $property.Value
+        }
+    }
+    $med1eEntries = [Collections.Generic.List[object]]::new()
+    foreach ($entry in @($med1ePlan.treeManifest.entries)) {
+        if ([string]$entry.relativePath -ceq [string]$med1eEntry.relativePath -and
+            [string]$entry.kind -ceq 'file') {
+            $med1eEntries.Add([pscustomobject]$med1eEntryObject)
+        } else {
+            $med1eEntries.Add($entry)
+        }
+    }
+    $med1ePlan.treeManifest.entries = $med1eEntries.ToArray()
+    [IO.File]::WriteAllText(
+        (Join-Path $med1eRun 'plan.json'),
+        ($med1ePlan | ConvertTo-Json -Depth 100),
+        [Text.UTF8Encoding]::new($false))
+
+    $previousFastScan = $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN
+    $medFastStatus = $null
     $medSlowStatus = $null
     try {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '1'
+        $medFastStatus = & $entryPath -Mode Status `
+            -FixturePolicyPath $medPolicyPath -FixtureEvidenceRoot $medEvidence
         $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '0'
         $medSlowStatus = & $entryPath -Mode Status `
             -FixturePolicyPath $medPolicyPath -FixtureEvidenceRoot $medEvidence
     } finally {
-        $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = $null
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = $previousFastScan
     }
     $med1aFast = Get-MedOperation -Status $medFastStatus -OperationId '20260823T000001Z-med1a'
     $med1aSlow = Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000001Z-med1a'
@@ -1085,11 +1289,53 @@ try {
         'MED-1b（属性名大小写变体）fast scan 必须与参考路径逐字节一致。'
     Assert-True (((Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000002Z-med1b' | ConvertFrom-Json).lifecycle) -ceq 'planned') `
         'MED-1b 参考路径必须按大小写不敏感属性检查正常分类为 planned。'
+    $med1cFast = Get-MedOperation -Status $medFastStatus -OperationId '20260823T000003Z-med1c'
+    $med1cSlow = Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000003Z-med1c'
+    Assert-True ($med1cFast -ceq $med1cSlow) `
+        'MED-1c（Windows invalid filename chars）fast scan 必须与参考路径逐字节一致。'
+    Assert-True (@((Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000003Z-med1c' | ConvertFrom-Json).errors)[0] -cmatch '不安全路径段') `
+        'MED-1c 参考路径必须拒绝 * 文件名字符。'
+    $med1fFast = Get-MedOperation -Status $medFastStatus -OperationId '20260823T000006Z-med1f'
+    $med1fSlow = Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000006Z-med1f'
+    Assert-True ($med1fFast -ceq $med1fSlow -and
+        @((ConvertFrom-Json $med1fSlow).errors)[0] -cmatch '不安全路径段') `
+        'MED-1f fast scan 与参考路径必须一致拒绝 ? 文件名字符。'
+    foreach ($operationId in @('20260823T000004Z-med1d', '20260823T000005Z-med1e')) {
+        $fastOperation = Get-MedOperation -Status $medFastStatus -OperationId $operationId
+        $slowOperation = Get-MedOperation -Status $medSlowStatus -OperationId $operationId
+        Assert-True ($fastOperation -ceq $slowOperation) `
+            "$operationId 嵌套非 canonical 属性必须与参考路径逐字节一致。"
+        $caseVariantOperation = ConvertFrom-Json $slowOperation
+        Assert-True ($caseVariantOperation.lifecycle -ceq 'manual-review' -and
+            @($caseVariantOperation.errors)[0] -ceq 'safe-delete Status planned tree manifest 漂移。') `
+            "$operationId 嵌套大小写变体必须保留参考路径 manifest SHA 漂移语义。"
+    }
+
+    Assert-True ((ConvertTo-StatusSemanticJson $medFastStatus) -ceq
+        (ConvertTo-StatusSemanticJson $medSlowStatus)) `
+        '混合有效和畸形 plan 的完整 Status 语义输出必须 fast/slow 等价。'
+    foreach ($statusFixture in @(
+            @{ policy = $cachePolicyPath; evidence = $cacheEvidence },
+            @{ policy = $revokedPolicyPath; evidence = $revokedEvidenceRoot })) {
+        try {
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '1'
+            $fastStatus = & $entryPath -Mode Status `
+                -FixturePolicyPath $statusFixture.policy -FixtureEvidenceRoot $statusFixture.evidence
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '0'
+            $slowStatus = & $entryPath -Mode Status `
+                -FixturePolicyPath $statusFixture.policy -FixtureEvidenceRoot $statusFixture.evidence
+        } finally {
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = $previousFastScan
+        }
+        Assert-True ((ConvertTo-StatusSemanticJson $fastStatus) -ceq
+            (ConvertTo-StatusSemanticJson $slowStatus)) `
+            'transaction 与 archive/policy 拒绝记录的完整 Status 语义输出必须 fast/slow 等价。'
+    }
 
     [pscustomobject][ordered]@{
         ok = $true
         suite = 'CodexSafeTreeDeleteStatus'
-        slices = 24
+        slices = 32
     }
 } finally {
     if ($null -ne $lockedStream) { $lockedStream.Dispose() }
