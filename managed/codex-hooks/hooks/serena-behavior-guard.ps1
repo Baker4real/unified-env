@@ -475,6 +475,13 @@ function Invoke-CodexSerenaBehaviorGuardCore {
             [byte[]]$bytes = [Text.UTF8Encoding]::new($false).GetBytes($activationJson + "`r`n")
         }
         else {
+            # Serena reminders are useful for semantic code navigation, but a
+            # Markdown/provenance read should remain a normal read. Do not let
+            # the reminder counter turn documentation review into a blocked
+            # workflow.
+            if ($Behavior -ceq 'Reminder' -and $InputText -match '(?i)(AGENTS\.md|CLAUDE\.md|SKILL\.md|SOURCE\.md|\.md\b|\.txt\b|Get-Content|Select-String)') {
+                return [pscustomobject][ordered]@{ ok = $true; exitCode = 0; stdout = [byte[]]@(); error = $null }
+            }
             $mutexName = Get-CodexSerenaSessionMutexName -SerenaHome $SerenaHome -SessionId $sessionId
             # Leave startup/drain/cleanup headroom inside the host's 10s hook
             # budget while still covering the vendor's 5s bounded drain.

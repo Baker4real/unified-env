@@ -287,6 +287,28 @@ finally {
         $mutexHolder.Dispose()
     }
 
+    # Markdown/provenance 读取豁免（2026-09-07 裁决采纳）：Reminder 输入命中
+    # AGENTS.md/CLAUDE.md/SKILL.md/SOURCE.md/.md/.txt/Get-Content/Select-String
+    # 时直接静默放行，不拿 session 互斥、不建 session state、不触 vendor。
+    $markdownSession = 'session-markdown-exempt-redacted'
+    $markdownSessionPath = Join-Path $guardFixtureHome "hook_data\$markdownSession"
+    $markdownPayload = [pscustomobject][ordered]@{
+        session_id = $markdownSession
+        tool_name = 'Read'
+        tool_input = [pscustomobject][ordered]@{ file_path = 'D:\agents\projects\统一环境\CONTEXT.md' }
+    } | ConvertTo-Json -Compress -Depth 5
+    $markdownResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+        -InputText $markdownPayload `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($markdownResult.ok -and $markdownResult.exitCode -eq 0 -and $markdownResult.stdout.Length -eq 0) 'Markdown/provenance Reminder 必须静默放行。'
+    Assert-True (-not (Test-Path -LiteralPath $markdownSessionPath)) 'Markdown/provenance 豁免不得创建或修改 session state。'
+    # 豁免只作用于命中的输入：同一 session 的非豁免输入仍走正常 reminder 路径。
+    $markdownNormalResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+        -InputText (New-ReminderPayload $markdownSession 'Bash') `
+        -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($markdownNormalResult.ok -and $markdownNormalResult.exitCode -eq 0) '非豁免输入的 Reminder 不得被豁免分支缩水。'
+    Assert-True (Test-Path -LiteralPath $markdownSessionPath -PathType Container) '非豁免输入必须正常建立 session state。'
+
     # Stop/Cleanup may wait for an in-flight reminder, but must still finish
     # within the outer 10s hook budget and remove the now-safe session state.
     $cleanupMutexSession = 'cleanup-mutex-held-redacted'

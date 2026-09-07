@@ -823,7 +823,7 @@ function Assert-CodexHookHostPreflightManifest {
         'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '14e46a0309e74b8415dd6d6ea626611b5015272dab3849ff6fb864138cf4f9f9', 'codex-state-preflight')
         'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', '30750335c561fc7a3f7d5ed40eabe528a554caa49c66efa73b296dcddf84e95f', 'serena-reminder')
         'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '25706cc4ae08e954c2b9f35a49225c94479b0267b8313c9951acb23ef277a572', 'serena-cleanup')
-        'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '3915184068b711f1cc51f2d710f4c287c1289158f18be44d74fc77e0a86a7a85', 'serena-reminder', 'serena-cleanup', 'serena-activate')
+        'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '428bb01fccaac52e8bca2c8ffefe3430c35c155ae5ae40a7824ea5c58890ae65', 'serena-reminder', 'serena-cleanup', 'serena-activate')
         'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', '6a9d1abca43d05426ffa9d18ae0e65e51357d9e9aad70f3d77364d4ecdad4eb2', 'serena-activate')
         'codex-github-cli-guard.cmd' = @('hooks/codex-github-cli-guard.cmd', '0ac0f5526f517ace8a3a23a48a32df32284f3bd8459bb4eeadcc2eca682193d9', 'github-cli')
         'codex-github-cli-guard.ps1' = @('hooks/codex-github-cli-guard.ps1', '0a41c9d42e8c80ab1793d0c4554da8772c32e8fdd4b7dbd61065a02b8670212e', 'github-cli')
