@@ -97,6 +97,25 @@ function Read-PlanDocument {
     return (Get-Content -Raw -LiteralPath $PlanPath | ConvertFrom-Json -Depth 128 -DateKind String)
 }
 
+function ConvertTo-EquivalenceUInt64Text {
+    param(
+        [Parameter(Mandatory)][AllowNull()]$Value,
+        [Parameter(Mandatory)][string]$Scope
+    )
+
+    if ($null -eq $Value -or $Value -is [string] -or
+        ($Value -isnot [long] -and $Value -isnot [int] -and
+            $Value -isnot [UInt64] -and $Value -isnot [Numerics.BigInteger])) {
+        throw "$Scope 必须是 uint64 范围内的 JSON number。"
+    }
+    $bigValue = [Numerics.BigInteger]$Value
+    if ($bigValue -lt [Numerics.BigInteger]::Zero -or
+        $bigValue -gt [Numerics.BigInteger][UInt64]::MaxValue) {
+        throw "$Scope 必须是 uint64 范围内的 JSON number。"
+    }
+    return $bigValue.ToString([Globalization.CultureInfo]::InvariantCulture)
+}
+
 function Compare-PlanDocuments {
     param(
         [Parameter(Mandatory)][object]$CSharpPlanPath,
@@ -167,10 +186,11 @@ function Compare-PlanDocuments {
         if ([string]$left.lastWriteTimeUtc -cne [string]$right.lastWriteTimeUtc) {
             throw "等价性失败：$($left.relativePath) lastWriteTimeUtc 不一致"
         }
-        if ([long]$left.volumeSerialNumber -ne [long]$right.volumeSerialNumber) {
+        $serialLeft = ConvertTo-EquivalenceUInt64Text -Value $left.volumeSerialNumber -Scope "fileIdentitiesV2[$index] volumeSerialNumber"
+        $serialRight = ConvertTo-EquivalenceUInt64Text -Value $right.volumeSerialNumber -Scope "fileIdentitiesV2[$index] volumeSerialNumber"
+        if ([string]$serialLeft -cne [string]$serialRight) {
             throw "等价性失败：$($left.relativePath) volumeSerialNumber 不一致"
         }
-        Assert-True ($left.volumeSerialNumber -is [long]) 'volumeSerialNumber 必须是 JSON number'
         Assert-True ([Convert]::FromBase64String([string]$left.fileId128).Length -eq 16) 'fileId128 必须是 16 字节 Base64'
     }
 
