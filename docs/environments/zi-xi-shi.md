@@ -39,12 +39,17 @@ intent: 记录自习室设备的受控环境事实与差异
 - 未封锁 Windows 收件箱 Chat 再次预装 Teams。若 Teams 又出现，属另立任务。
 - 运行证据：`D:\agents\run-evidence\replicator\study-teams-20260901\`、`D:\agents\run-evidence\replicator\study-workplace-leave-20260901\`。
 
-## UU 远程（2026-08-31 现场）
+## UU 远程
 
-- 安装根：`D:\Program Files\Netease\GameViewer`。2026-08-31 09:27 经正式 SSH 核验：`bin\GameViewer.exe` 与 `bin\Upgrade.exe` 均为 `4.38.3.9325`，`GameViewerService` 为 Running，主进程已拉起。
-- 正式命令与文件传输走 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。
-- 应用内「检查更新」由未提权 GUI 启动。它会把 `Upgrade.exe` 拷进 `bak\`，在 Program Files 上会得到拒绝访问（Win32 `ec=5`），随后运行已有的 `bak\upgrade.exe`。
-- 该升级器在**自身所在目录**启动 `aria2c.exe`。`aria2c.exe` 只在 `bin\`、不在 `bak\` 时，界面报下载失败，即使更新接口和 `a56.gdl.netease.com` 都通。
-- 2026-08-31 已把 `bin\aria2c.exe` 补进 `bak\` 后完成下载安装。同日稍后已将 `bak\Upgrade.exe` 与 `bak\aria2c.exe` 对齐为 `4.38.3.9325`（与 `bin` SHA-256 一致）。未提权 GUI 仍会回退到 `bak`；回退目录必须继续与 `bin` 的升级器及 `aria2c.exe` 对齐。
+- 安装根：`D:\Program Files\Netease\GameViewer`。正式命令与文件传输走 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。
+- 应用内「检查更新」由未提权（Medium IL）GUI 启动：先把 `bin\Upgrade.exe` 拷到 `bak\Upgrade.exe`，拷失败（Win32 `ec=5`）就运行已有的 `bak\upgrade.exe`。升级器在**自身所在目录**启动 `aria2c.exe`；bak 缺该文件时界面报下载失败。
+- 2026-08-31 只对齐过一次文件，未改 bak 文件 ACL。之后 GUI 仍拷不进去，bak 停在旧升级器，更新再次失败。2026-09-07 现场：`bin` 为 `4.39.1.1375`，`bak\Upgrade.exe` 仍为 `4.38.3.9325`，Users 对 bak 文件只有 `RX`。
+- 2026-09-07 已做防复发：把 `bak\Upgrade.exe` 与 `bak\aria2c.exe` 对齐到当时的 `bin`（`4.39.1.1375`），并授予 Users/Authenticated Users `Modify`（含继承）。未提权 GUI 必须能打开 `bak\Upgrade.exe` 写入，否则会复发。同日稍后复核：`bin` 已到 `4.39.2.1561`，`bak` 停在 `4.39.1.1375`，aria2c 哈希仍对齐、计划任务 Ready——这是成功升级后 bak 落后一代的预期态，不是 Users `RX` / `4.38.3` 复发。
+- 受管入口：`D:\Codex\.codex\scripts\uu-bak-align\Invoke-UuBakUpgradeAlign.ps1`（该机 pwsh `D:\Codex\tools\PowerShell\7.6.3\pwsh.exe`）。计划任务 `Codex UU Bak Upgrade Align`（SYSTEM、Highest、开机 + 每小时）在哈希不一致或 ACL 漂移时重对齐。状态：`D:\Codex\.codex\logs\uu-bak-align\last.json`。不要在 bak 不存在的机器上创建 bak。
+- 版本、进程、任务状态属易变事实；操作前复核 `bin`/`bak` 文件版本、SHA-256 与 Users 是否仍有 `Modify`。
 
-本页身份审计日期为 2026-08-26；PowerShell 7.6.3 路径于 2026-09-01 再核；UU 版本与更新约束审计日期为 2026-08-31；Teams 与工作账户处置日期为 2026-09-01。数量、进程和任务状态属易变事实，操作前必须实时复核。
+## UniGetUI（2026-09-07）
+
+- 安装树：`D:\UniGetUI\UniGetUI.exe`（2026.2.7.0，从家里同路径拷入）。桌面快捷方式：`D:\桌面\UniGetUI.lnk`，目标即上述 exe。该机当时没有 tailcat 二进制，传输走 tar+scp 回退。
+
+本页身份审计日期为 2026-08-26；PowerShell 7.6.3 路径于 2026-09-01 再核；Teams 与工作账户处置日期为 2026-09-01；UU 更新约束与防复发于 2026-09-07 再核。数量、进程和任务状态属易变事实，操作前必须实时复核。
