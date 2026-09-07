@@ -44,8 +44,7 @@ function Resolve-CodexHostHookEvidenceScope {
 function New-CodexHostHookEvidenceSnapshot {
     param(
         [Parameter(Mandatory)][string]$ResolvedCodexHome,
-        [Parameter(Mandatory)][object]$State,
-        [Parameter(Mandatory)][string[]]$RetiredProjectTrusts
+        [Parameter(Mandatory)][object]$State
     )
 
     $scope = Resolve-CodexHostHookEvidenceScope -ResolvedCodexHome $ResolvedCodexHome
@@ -64,20 +63,12 @@ function New-CodexHostHookEvidenceSnapshot {
     [void](New-CodexHookCapabilityDirectory -Path $evidencePath -CapabilityRoot $capabilityRoot -Name 'host hook evidence run' -RequireMissing)
     $script:CurrentEvidencePath = $evidencePath
     Set-ProtectedAclWithCapability -Path $evidencePath -CapabilityRoot $capabilityRoot
-    $configEvidencePath = Join-Path $evidencePath "config.toml"
     $hooksEvidencePath = Join-Path $evidencePath "hooks.json"
     $serenaContextEvidencePath = Join-Path $evidencePath "codex-file-tools.yml"
-    # Evidence may omit retired trust blocks, while live CAS must bind the
-    # untouched state captured before this transaction.
     $livePreconditionHashes = [ordered]@{
-        "config.toml" = Get-TextSha256 -Content ([string]$State.configContent)
         "hooks.json" = Get-TextSha256 -Content ([string]$State.hooksContent)
         "codex-file-tools.yml" = Get-TextSha256 -Content ([string]$State.serenaContextContent)
     }
-    $sanitizedConfigEvidence = Remove-RetiredProjectTrustFromContent `
-        -Content ([string]$State.configContent) `
-        -RetiredProjectTrusts $RetiredProjectTrusts
-    [void](Write-NewOnlyProtectedBytes -Path $configEvidencePath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($sanitizedConfigEvidence)) -CapabilityRoot $evidencePath)
     [void](Write-NewOnlyProtectedBytes -Path $hooksEvidencePath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes([string]$State.hooksContent)) -CapabilityRoot $evidencePath)
     [void](Write-NewOnlyProtectedBytes -Path $serenaContextEvidencePath -Bytes ([Text.UTF8Encoding]::new($false).GetBytes([string]$State.serenaContextContent)) -CapabilityRoot $evidencePath)
 
@@ -105,7 +96,7 @@ function New-CodexHostHookEvidenceSnapshot {
     }
 
     $aclBefore = [ordered]@{}
-    foreach ($path in @($State.configPath, $State.hooksPath, $State.serenaContextPath) + @($State.hookTreePaths)) {
+    foreach ($path in @($State.hooksPath, $State.serenaContextPath) + @($State.hookTreePaths)) {
         $aclBefore[$path] = (Get-Acl -LiteralPath $path).Sddl
     }
     $aclBeforePath = Join-Path $evidencePath "acl-before.json"
@@ -125,7 +116,6 @@ function New-CodexHostHookEvidenceSnapshot {
         codexHome = $ResolvedCodexHome
         status = "prepared"
         originalHashes = [ordered]@{
-            "config.toml" = Get-Sha256 -Path $configEvidencePath
             "hooks.json" = Get-Sha256 -Path $hooksEvidencePath
             "codex-file-tools.yml" = Get-Sha256 -Path $serenaContextEvidencePath
             "acl-before.json" = Get-Sha256 -Path $aclBeforePath
@@ -135,7 +125,6 @@ function New-CodexHostHookEvidenceSnapshot {
         preservedHookTree = @($State.preservedHookTree)
         intendedResources = [ordered]@{
             "codex-file-tools.yml" = if ($State.desiredSerenaContext.changed) { Get-TextSha256 -Content $State.desiredSerenaContext.content } else { $null }
-            "config.toml" = if ($State.desiredConfig.changed) { Get-TextSha256 -Content $State.desiredConfig.content } else { $null }
             "hooks.json" = if ($State.desiredHooks.changed) { Get-TextSha256 -Content $State.desiredHooks.content } else { $null }
             managedHooks = [ordered]@{}
             environment = [ordered]@{ SERENA_HOME = 'D:\Codex\.serena' }

@@ -22,6 +22,8 @@ intent: 定义 Codex hooks、state、代码智能运行时与 remote catalog 守
 - `docs/specs/2026-07-11-host-hook-reconciliation-design.md`
 - `docs/env-governance/remote-plugin-catalog-guard.md`
 
+2026-09-06 起 reconciler 的 `config` 检查与 `config.toml` 语义收敛已退役（用户裁决）：不再读取/规范化/改写 `config.toml`，Check 无 config 检查项，Repair 为 Serena context + `hooks.json` 两资源事务，Restore 对含 `config.toml` 的历史 evidence fail closed。根因与边界见 spec 的「config reconciliation 退役」节。
+
 旧 hook 设计和 functional preflight 文档仍被 fixture 与历史拒绝合同引用，本阶段不移动或归档。
 
 ## 内部实现

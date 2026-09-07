@@ -179,7 +179,7 @@ function Resolve-CodexHome {
         throw "CodexHome 必须是目录：$fullPath"
     }
 
-    foreach ($relative in @("config.toml", "hooks.json", "hooks")) {
+    foreach ($relative in @("hooks.json", "hooks")) {
         $requiredPath = Join-Path $fullPath $relative
         if (-not (Test-Path -LiteralPath $requiredPath)) {
             throw "CodexHome 缺少必要路径：$requiredPath"
@@ -621,306 +621,6 @@ function Write-AtomicText {
     }
 }
 
-function ConvertFrom-TomlDottedKeyName {
-    param([string]$Name)
-
-    $match = [regex]::Match(
-        $Name,
-        '^\s*(?<key>' + $script:TomlKeyPattern + ')\s*(?:\.\s*(?<key>' + $script:TomlKeyPattern + ')\s*)*$'
-    )
-    if (-not $match.Success) {
-        throw "当前安全 parser 无法解析 TOML dotted key：$Name"
-    }
-
-    $segments = [System.Collections.Generic.List[string]]::new()
-    foreach ($capture in $match.Groups['key'].Captures) {
-        $token = $capture.Value
-        if ($token.StartsWith('"', [System.StringComparison]::Ordinal)) {
-            try {
-                $decoded = ConvertFrom-Json -InputObject $token -NoEnumerate
-            } catch {
-                throw "当前安全 parser 无法解析 TOML quoted key：$token"
-            }
-            if ($decoded -isnot [string]) {
-                throw "TOML quoted key 必须解析为字符串：$token"
-            }
-            $segments.Add($decoded)
-        } elseif ($token.StartsWith("'", [System.StringComparison]::Ordinal)) {
-            $segments.Add($token.Substring(1, $token.Length - 2))
-        } else {
-            $segments.Add($token)
-        }
-    }
-    $segments.ToArray()
-}
-
-function Test-TomlKeySegmentsEqual {
-    param(
-        [string[]]$Left,
-        [string[]]$Right
-    )
-
-    if ($Left.Count -ne $Right.Count) {
-        return $false
-    }
-    for ($index = 0; $index -lt $Left.Count; $index++) {
-        if ($Left[$index] -cne $Right[$index]) {
-            return $false
-        }
-    }
-    $true
-}
-
-function Get-TomlAssignmentKeySegments {
-    param([string]$Line)
-
-    $match = [regex]::Match(
-        $Line,
-        '^\s*(?<name>' + $script:TomlKeyPattern + '(?:\s*\.\s*' + $script:TomlKeyPattern + ')*)\s*='
-    )
-    if (-not $match.Success) {
-        return
-    }
-    ConvertFrom-TomlDottedKeyName -Name $match.Groups['name'].Value
-}
-
-function Get-TomlAssignmentParts {
-    param([string]$Line)
-
-    $match = [regex]::Match(
-        $Line,
-        '^\s*(?<name>' + $script:TomlKeyPattern + '(?:\s*\.\s*' + $script:TomlKeyPattern + ')*)\s*=(?<value>.*)$'
-    )
-    if (-not $match.Success) {
-        return $null
-    }
-
-    [pscustomobject]@{
-        segments = @(ConvertFrom-TomlDottedKeyName -Name $match.Groups['name'].Value)
-        value = [string]$match.Groups['value'].Value
-    }
-}
-
-function Resolve-TomlParserPython {
-    $runtimeRoot = Assert-NoReparsePath -Path "D:\Codex\tools\python314-official" -RequireLeaf
-    foreach ($relativePath in @("Lib", "Lib\tomllib")) {
-        $directoryPath = Assert-NoReparsePath -Path (Join-Path $runtimeRoot $relativePath) -RequireLeaf
-        if (-not (Test-Path -LiteralPath $directoryPath -PathType Container)) {
-            throw "TOML parser Python runtime 目录缺失"
-        }
-    }
-    foreach ($relativePath in @(
-        "python.exe",
-        "python3.dll",
-        "python314.dll",
-        "Lib\tomllib\__init__.py",
-        "Lib\tomllib\_parser.py",
-        "Lib\tomllib\_re.py",
-        "Lib\tomllib\_types.py"
-    )) {
-        $filePath = Assert-NoReparsePath -Path (Join-Path $runtimeRoot $relativePath) -RequireLeaf
-        if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
-            throw "TOML parser Python runtime 文件缺失"
-        }
-    }
-
-    $pythonPath = Join-Path $runtimeRoot "python.exe"
-    $python = Get-Item -LiteralPath $pythonPath -Force
-    if ($python.VersionInfo.ProductVersion -notmatch '^3\.14\.') {
-        throw "TOML parser Python 版本不符合固定的 3.14 runtime 边界"
-    }
-    $signature = Get-AuthenticodeSignature -LiteralPath $pythonPath
-    if (
-        $signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
-        $null -eq $signature.SignerCertificate -or
-        $signature.SignerCertificate.Subject -notmatch '(^|,\s*)CN=Python Software Foundation(,|$)'
-    ) {
-        throw "TOML parser Python 未通过 Python Software Foundation 签名验证"
-    }
-    $pythonPath
-}
-
-function Wait-TomlParserTask {
-    param(
-        [System.Threading.Tasks.Task]$Task,
-        [System.Diagnostics.Stopwatch]$Clock,
-        [int]$TimeoutMilliseconds
-    )
-
-    while (-not $Task.IsCompleted) {
-        $remaining = $TimeoutMilliseconds - [int]$Clock.ElapsedMilliseconds
-        if ($remaining -le 0) {
-            throw "TOML parser Python 超时"
-        }
-        Start-Sleep -Milliseconds ([Math]::Min(10, $remaining))
-    }
-    $Task.GetAwaiter().GetResult()
-}
-
-function Assert-ValidToml {
-    param([string]$Content)
-
-    $pythonPath = Resolve-TomlParserPython
-    $pycacheRoot = Assert-NoReparsePath -Path (Resolve-CodexHostHookEvidenceScope -ForceProduction).runEvidenceRoot -RequireLeaf
-    if (-not (Test-Path -LiteralPath $pycacheRoot -PathType Container)) {
-        throw "TOML parser pycache 隔离根不存在"
-    }
-    $pycachePrefix = Assert-NoReparsePath -Path (Join-Path $pycacheRoot (".toml-parser-pycache-{0}" -f ([guid]::NewGuid().ToString("N"))))
-    if (Test-Path -LiteralPath $pycachePrefix) {
-        throw "TOML parser pycache 隔离路径必须不存在"
-    }
-
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $pythonPath
-    foreach ($argument in @(
-        "-B",
-        "-I",
-        "-S",
-        "-X",
-        "utf8",
-        "-X",
-        "pycache_prefix=$pycachePrefix",
-        "-c",
-        'import sys, tomllib; tomllib.loads(sys.stdin.read())'
-    )) {
-        $startInfo.ArgumentList.Add($argument)
-    }
-    $startInfo.WorkingDirectory = "D:\Codex"
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.RedirectStandardInput = $true
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
-    $startInfo.StandardInputEncoding = $utf8
-    $startInfo.StandardOutputEncoding = $utf8
-    $startInfo.StandardErrorEncoding = $utf8
-
-    $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
-    $started = $false
-    $clock = [System.Diagnostics.Stopwatch]::StartNew()
-    $timeoutMilliseconds = 5000
-    try {
-        $started = $process.Start()
-        if (-not $started) {
-            throw "TOML parser Python 未启动"
-        }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        $writeTask = $process.StandardInput.WriteAsync($Content)
-        Wait-TomlParserTask -Task $writeTask -Clock $clock -TimeoutMilliseconds $timeoutMilliseconds | Out-Null
-        $flushTask = $process.StandardInput.FlushAsync()
-        Wait-TomlParserTask -Task $flushTask -Clock $clock -TimeoutMilliseconds $timeoutMilliseconds | Out-Null
-        $process.StandardInput.Close()
-        $remaining = $timeoutMilliseconds - [int]$clock.ElapsedMilliseconds
-        if ($remaining -le 0 -or -not $process.WaitForExit($remaining)) {
-            throw "TOML parser Python 超时"
-        }
-        Wait-TomlParserTask -Task $stdoutTask -Clock $clock -TimeoutMilliseconds $timeoutMilliseconds | Out-Null
-        Wait-TomlParserTask -Task $stderrTask -Clock $clock -TimeoutMilliseconds $timeoutMilliseconds | Out-Null
-        if ($process.ExitCode -ne 0) {
-            throw "config.toml 未通过完整 TOML 语法验证"
-        }
-    } catch {
-        switch -Exact ($_.Exception.Message) {
-            "TOML parser Python 未启动" { throw "完整 TOML 语法验证失败：TOML parser Python 未启动" }
-            "TOML parser Python 超时" { throw "完整 TOML 语法验证失败：TOML parser Python 超时" }
-            "config.toml 未通过完整 TOML 语法验证" { throw "完整 TOML 语法验证失败：config.toml 未通过完整 TOML 语法验证" }
-            default { throw "完整 TOML 语法验证失败：TOML parser I/O 失败" }
-        }
-    } finally {
-        if ($started -and -not $process.HasExited) {
-            try {
-                $process.StandardInput.BaseStream.Dispose()
-            } catch {
-            }
-            try {
-                $process.Kill($true)
-            } catch {
-            }
-            $process.WaitForExit(1000) | Out-Null
-        }
-        $process.Dispose()
-    }
-}
-
-function Assert-NoHeaderLikeTomlContainerLine {
-    param([string[]]$Lines)
-
-    $arrayDepth = 0
-    $inlineTableDepth = 0
-    $tableHeaderPattern = '^\s*\[(?<name>[^\[\]]+)\]\s*(?:#.*)?$'
-    $arrayTableHeaderPattern = '^\s*\[\[(?<name>[^\[\]]+)\]\]\s*(?:#.*)?$'
-    foreach ($line in $Lines) {
-        $looksLikeTableHeader = [regex]::IsMatch($line, $tableHeaderPattern)
-        $looksLikeArrayTableHeader = [regex]::IsMatch($line, $arrayTableHeaderPattern)
-        if (
-            ($arrayDepth -gt 0 -or $inlineTableDepth -gt 0) -and
-            ($looksLikeTableHeader -or $looksLikeArrayTableHeader)
-        ) {
-            throw 'TOML 多行容器包含 header-like 元素；当前定向 parser 无法安全区分，拒绝写入'
-        }
-        if ($arrayDepth -eq 0 -and $inlineTableDepth -eq 0 -and ($looksLikeTableHeader -or $looksLikeArrayTableHeader)) {
-            continue
-        }
-
-        $quote = [char]0
-        $escaped = $false
-        for ($column = 0; $column -lt $line.Length; $column++) {
-            $character = $line[$column]
-            if ($quote -ne [char]0) {
-                if ($quote -eq '"' -and $escaped) {
-                    $escaped = $false
-                    continue
-                }
-                if ($quote -eq '"' -and $character -eq '\') {
-                    $escaped = $true
-                    continue
-                }
-                if ($character -eq $quote) {
-                    $quote = [char]0
-                }
-                continue
-            }
-            if ($character -eq '#') {
-                break
-            }
-            if ($character -eq '"' -or $character -eq "'") {
-                $quote = $character
-                continue
-            }
-            if ($character -eq '[') {
-                $arrayDepth++
-                continue
-            }
-            if ($character -eq ']') {
-                $arrayDepth--
-                if ($arrayDepth -lt 0) {
-                    throw 'TOML array container 边界非法'
-                }
-                continue
-            }
-            if ($character -eq '{') {
-                $inlineTableDepth++
-                continue
-            }
-            if ($character -eq '}') {
-                $inlineTableDepth--
-                if ($inlineTableDepth -lt 0) {
-                    throw 'TOML inline table container 边界非法'
-                }
-            }
-        }
-        if ($quote -ne [char]0) {
-            throw '当前安全 parser 不处理跨行或未终止 TOML string；拒绝写入'
-        }
-    }
-    if ($arrayDepth -ne 0 -or $inlineTableDepth -ne 0) {
-        throw 'TOML container 边界未闭合；拒绝写入'
-    }
-}
-
 function Invoke-FixturePostCommitFailure {
     param([ValidateSet("managed", "environment", "registry", "acl", "legacy", "final")][string]$Phase)
 
@@ -928,94 +628,6 @@ function Invoke-FixturePostCommitFailure {
         $script:FixturePostCommitFailurePhase = $null
         throw "fixture-only post-commit $Phase failure"
     }
-}
-
-function Get-TomlDocument {
-    param([string]$Content)
-
-    Assert-ValidToml -Content $Content
-    if ($Content.Contains("'''") -or $Content.Contains('"""')) {
-        throw "当前安全 parser 不处理 TOML 多行字符串；为避免把正文误判为 section，拒绝写入"
-    }
-
-    $newLine = if ($Content.Contains("`r`n")) { "`r`n" } else { "`n" }
-    $lines = [regex]::Split($Content, "\r?\n")
-    Assert-NoHeaderLikeTomlContainerLine -Lines $lines
-    $headers = [System.Collections.Generic.List[object]]::new()
-    $tomlDottedKeyPattern = $script:TomlKeyPattern + '(?:\s*\.\s*' + $script:TomlKeyPattern + ')*'
-    $tableHeaderPattern = '^\s*\[(?<name>' + $tomlDottedKeyPattern + ')\]\s*(?:#.*)?$'
-    $arrayTableHeaderPattern = '^\s*\[\[(?<name>' + $tomlDottedKeyPattern + ')\]\]\s*(?:#.*)?$'
-    for ($index = 0; $index -lt $lines.Count; $index++) {
-        $match = [regex]::Match($lines[$index], $tableHeaderPattern)
-        if ($match.Success) {
-            $segments = @(ConvertFrom-TomlDottedKeyName -Name $match.Groups['name'].Value)
-            $headers.Add([pscustomobject]@{
-                index = $index
-                name = $match.Groups['name'].Value
-                segments = $segments
-                kind = "table"
-            })
-            continue
-        }
-        $arrayMatch = [regex]::Match($lines[$index], $arrayTableHeaderPattern)
-        if ($arrayMatch.Success) {
-            $segments = @(ConvertFrom-TomlDottedKeyName -Name $arrayMatch.Groups['name'].Value)
-            $headers.Add([pscustomobject]@{
-                index = $index
-                name = $arrayMatch.Groups['name'].Value
-                segments = $segments
-                kind = "array-table"
-            })
-        }
-    }
-
-    [pscustomobject]@{
-        lines = $lines
-        newLine = $newLine
-        headers = $headers.ToArray()
-    }
-}
-
-function Get-UniqueSectionRange {
-    param(
-        [object]$Document,
-        [string]$Name,
-        [switch]$AllowMissing
-    )
-
-    $expectedSegments = @($Name.Split('.'))
-    $matchingSectionHeaders = @($Document.headers | Where-Object {
-        $_.kind -ceq "table" -and (Test-TomlKeySegmentsEqual -Left @($_.segments) -Right $expectedSegments)
-    })
-    if ($matchingSectionHeaders.Count -eq 0 -and $AllowMissing) {
-        return $null
-    }
-    if ($matchingSectionHeaders.Count -ne 1) {
-        throw "TOML section 必须恰好出现一次：[$Name]；实际 $($matchingSectionHeaders.Count)"
-    }
-
-    $header = $matchingSectionHeaders[0]
-    $next = @($Document.headers | Where-Object { $_.index -gt $header.index } | Sort-Object index | Select-Object -First 1)
-    [pscustomobject]@{
-        start = $header.index + 1
-        end = if ($next.Count -eq 1) { $next[0].index } else { $Document.lines.Count }
-    }
-}
-
-function Get-UniqueKeyIndex {
-    param(
-        [object]$Document,
-        [string]$Key,
-        [int]$Start,
-        [int]$End
-    )
-
-    $keyIndices = @(Get-TomlKeyIndices -Document $Document -Key $Key -Start $Start -End $End)
-    if ($keyIndices.Count -ne 1) {
-        throw "TOML key 必须在目标作用域恰好出现一次：$Key；实际 $($keyIndices.Count)"
-    }
-
-    $keyIndices[0]
 }
 
 function New-FixtureJunction {
@@ -1368,956 +980,6 @@ function Set-SerenaEnvironmentValue {
     }
     $after = Get-SerenaEnvironmentState -ResolvedCodexHome $ResolvedCodexHome
     if ([string]$after.value -cne [string]$Value -or [string]$after.valueKind -cne $ValueKind) { throw 'SERENA_HOME 写后校验失败' }
-}
-
-function Get-TomlKeyIndices {
-    param([object]$Document,[string]$Key,[int]$Start,[int]$End)
-    $expectedSegments = @($Key)
-    @(
-        for ($index = $Start; $index -lt $End; $index++) {
-            $segments = @(Get-TomlAssignmentKeySegments -Line $Document.lines[$index])
-            if (Test-TomlKeySegmentsEqual -Left $segments -Right $expectedSegments) { $index }
-        }
-    )
-}
-
-function Get-OptionalTomlBooleanKeyValue {
-    param(
-        [object]$Document,
-        [string]$Key,
-        [int]$Start,
-        [int]$End,
-        [string]$Scope
-    )
-
-    $indices = @(Get-TomlKeyIndices -Document $Document -Key $Key -Start $Start -End $End)
-    if ($indices.Count -gt 1) {
-        throw "TOML boolean key 在 $Scope 中重复：$Key"
-    }
-    if ($indices.Count -eq 0) { return $null }
-
-    $line = [string]$Document.lines[$indices[0]]
-    $equalsIndex = $line.IndexOf('=')
-    if ($equalsIndex -lt 0) { throw "无法解析 TOML boolean key：$Key" }
-    $match = [regex]::Match($line.Substring($equalsIndex + 1).Trim(), '^(?<value>true|false)\s*(?:#.*)?$')
-    if (-not $match.Success) {
-        throw "TOML boolean key 必须为 true 或 false：$Scope.$Key"
-    }
-    return [bool]::Parse($match.Groups['value'].Value)
-}
-
-function Set-TomlKeyLiteral {
-    param(
-        [object]$Document,
-        [int]$Index,
-        [string]$Key,
-        [string]$Literal
-    )
-
-    $match = [regex]::Match($Document.lines[$Index], '^(?<indent>\s*)')
-    if (-not $match.Success) {
-        throw "无法定位 TOML key：$Key"
-    }
-    $Document.lines[$Index] = "$($match.Groups['indent'].Value)$Key = $Literal"
-}
-
-function ConvertFrom-SingleLineTomlStringArray {
-    param([string]$Literal)
-
-    $text = $Literal.Trim()
-    if (-not $text.StartsWith('[') -or -not $text.EndsWith(']')) {
-        throw 'TOML 字符串数组必须使用单行 []。'
-    }
-
-    $items = [Collections.Generic.List[string]]::new()
-    $index = 1
-    while ($index -lt ($text.Length - 1)) {
-        while ($index -lt ($text.Length - 1) -and [char]::IsWhiteSpace($text[$index])) { $index++ }
-        if ($index -ge ($text.Length - 1)) { break }
-        if ($text[$index] -eq ',') { throw 'TOML 字符串数组包含空元素。' }
-
-        $quote = $text[$index]
-        if ($quote -ne "'" -and $quote -ne '"') {
-            throw 'TOML 字符串数组只能包含字符串元素。'
-        }
-        $start = $index
-        $index++
-
-        if ($quote -eq "'") {
-            $valueStart = $index
-            while ($index -lt $text.Length -and $text[$index] -ne "'") {
-                if ($text[$index] -eq "`r" -or $text[$index] -eq "`n") { throw 'TOML 字符串数组必须是单行。' }
-                $index++
-            }
-            if ($index -ge $text.Length) { throw 'TOML literal string 未闭合。' }
-            $items.Add($text.Substring($valueStart, $index - $valueStart))
-            $index++
-        } else {
-            $escaped = $false
-            while ($index -lt $text.Length) {
-                $ch = $text[$index]
-                if ($ch -eq "`r" -or $ch -eq "`n") { throw 'TOML 字符串数组必须是单行。' }
-                if ($escaped) {
-                    $escaped = $false
-                } elseif ($ch -eq '\') {
-                    $escaped = $true
-                } elseif ($ch -eq '"') {
-                    break
-                }
-                $index++
-            }
-            if ($index -ge $text.Length) { throw 'TOML basic string 未闭合。' }
-            $jsonString = $text.Substring($start, ($index - $start) + 1)
-            try {
-                $items.Add([string](ConvertFrom-Json -InputObject $jsonString -NoEnumerate))
-            } catch {
-                throw "TOML basic string escape 非法：$($_.Exception.Message)"
-            }
-            $index++
-        }
-
-        while ($index -lt ($text.Length - 1) -and [char]::IsWhiteSpace($text[$index])) { $index++ }
-        if ($index -ge ($text.Length - 1)) { break }
-        if ($text[$index] -ne ',') { throw 'TOML 字符串数组元素之间必须用逗号分隔。' }
-        $index++
-        while ($index -lt ($text.Length - 1) -and [char]::IsWhiteSpace($text[$index])) { $index++ }
-        if ($index -ge ($text.Length - 1)) { throw 'TOML 字符串数组不得有尾随逗号。' }
-    }
-
-    return [string[]]$items.ToArray()
-}
-
-function ConvertFrom-SingleLineTomlString {
-    param([string]$Literal)
-
-    $items = @(ConvertFrom-SingleLineTomlStringArray -Literal ("[$Literal]"))
-    if ($items.Count -ne 1) {
-        throw 'TOML value 必须是单个字符串。'
-    }
-    [string]$items[0]
-}
-
-function Convert-SerenaArgs {
-    param(
-        [string]$RightHandSide,
-        [string]$ExpectedContextPath
-    )
-
-    try {
-        $tokens = @(ConvertFrom-SingleLineTomlStringArray -Literal $RightHandSide)
-    } catch {
-        throw "Serena args 必须是单行 TOML 字符串数组：$($_.Exception.Message)"
-    }
-    # Codex Desktop 26.825 起官方把 .cmd 形态的 MCP 条目迁移为
-    # cmd.exe /c <受管 wrapper> start-mcp-server ...；两种入口形态都接受，
-    # canonical 输出统一为官方包装形态。
-    $wrapperScript = 'D:\Codex\.codex\scripts\start-serena-mcp.cmd'
-    $serenaStartIndex = -1
-    if ($tokens.Count -gt 0 -and [string]$tokens[0] -ceq "start-mcp-server") {
-        $serenaStartIndex = 0
-    } elseif ($tokens.Count -ge 3 -and [string]$tokens[0] -ceq "/c" -and [string]$tokens[1] -ceq $wrapperScript -and [string]$tokens[2] -ceq "start-mcp-server") {
-        $serenaStartIndex = 2
-    }
-    if ($serenaStartIndex -lt 0) {
-        throw "Serena args 必须以 start-mcp-server 开头（官方 cmd.exe /c 受管包装亦可）"
-    }
-    foreach ($token in $tokens) {
-        if ($token -isnot [string]) {
-            throw "Serena args 只能包含字符串"
-        }
-    }
-
-    $result = [System.Collections.Generic.List[string]]::new()
-    $contextValues = [System.Collections.Generic.List[string]]::new()
-    for ($index = $serenaStartIndex; $index -lt $tokens.Count; $index++) {
-        $token = [string]$tokens[$index]
-        if ($token.StartsWith("--project-from-cwd=", [StringComparison]::Ordinal)) {
-            throw "--project-from-cwd 不接受值"
-        }
-        if ($token -ceq "--context") {
-            if ($index + 1 -ge $tokens.Count -or
-                [string]::IsNullOrWhiteSpace([string]$tokens[$index + 1]) -or
-                ([string]$tokens[$index + 1]).StartsWith("--", [System.StringComparison]::Ordinal)) {
-                throw "--context 缺少参数值"
-            }
-            $contextValues.Add([string]$tokens[$index + 1])
-        }
-        if ($token.StartsWith("--context=", [System.StringComparison]::Ordinal)) {
-            $contextValue = $token.Substring("--context=".Length)
-            if ([string]::IsNullOrWhiteSpace($contextValue)) {
-                throw "--context 缺少参数值"
-            }
-            $contextValues.Add($contextValue)
-        }
-        if ($token -ceq "--project" -or $token -ceq "--project-file") {
-            if ($index + 1 -ge $tokens.Count -or
-                [string]::IsNullOrWhiteSpace([string]$tokens[$index + 1]) -or
-                ([string]$tokens[$index + 1]).StartsWith("--", [System.StringComparison]::Ordinal)) {
-                throw "$token 缺少参数值"
-            }
-            $index++
-            continue
-        }
-        if ($token.StartsWith("--project=", [System.StringComparison]::Ordinal) -or $token.StartsWith("--project-file=", [System.StringComparison]::Ordinal)) {
-            if ([string]::IsNullOrWhiteSpace($token.Substring($token.IndexOf('=') + 1))) {
-                throw "$($token.Substring(0, $token.IndexOf('='))) 缺少参数值"
-            }
-            continue
-        }
-
-        $result.Add($token)
-    }
-
-    if ($contextValues.Count -ne 1) {
-        throw "Serena args 必须恰好包含一个 --context；实际 $($contextValues.Count)"
-    }
-    if (-not [System.IO.Path]::IsPathFullyQualified($contextValues[0])) {
-        throw "Serena --context 必须是绝对路径：$($contextValues[0])"
-    }
-    $resolvedContext = [System.IO.Path]::GetFullPath($contextValues[0]).TrimEnd('\', '/')
-    $resolvedExpected = [System.IO.Path]::GetFullPath($ExpectedContextPath).TrimEnd('\', '/')
-    if (-not $resolvedContext.Equals($resolvedExpected, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Serena --context 未指向受保护的 codex-file-tools.yml"
-    }
-
-    $result.Insert(0, $wrapperScript)
-    $result.Insert(0, "/c")
-    ConvertTo-Json -InputObject $result.ToArray() -Compress
-}
-
-function Test-ProjectTrustPathUsesExtendedOrDevicePrefix {
-    param([Parameter(Mandatory)][string]$Path)
-
-    # Windows accepts slash and mixed-separator spellings for extended/device
-    # paths. Normalize separators before testing so GetFullPath never receives
-    # an alias that can evade this fail-closed boundary.
-    $normalizedPath = $Path.Replace('/', '\')
-    return (
-        $normalizedPath.StartsWith('\\?\', [StringComparison]::Ordinal) -or
-        $normalizedPath.StartsWith('\\.\', [StringComparison]::Ordinal)
-    )
-}
-
-function ConvertTo-CanonicalManagedProjectTrustPath {
-    param(
-        [Parameter(Mandatory)][string]$ProjectPath,
-        [Parameter(Mandatory)][string]$Role
-    )
-
-    if (Test-ProjectTrustPathUsesExtendedOrDevicePrefix -Path $ProjectPath) {
-        throw 'unsupported-extended-project-trust-path'
-    }
-    try {
-        $canonicalPath = [IO.Path]::GetFullPath($ProjectPath).TrimEnd('\', '/')
-    } catch {
-        throw "$Role 路径无法规范化：$ProjectPath"
-    }
-    $managedProjectRoots = @('D:\Codex\projects', 'D:\agents\projects')
-    $canonicalInManagedRoot = $false
-    foreach ($managedProjectRoot in $managedProjectRoots) {
-        if (-not $canonicalPath.Equals($managedProjectRoot, [StringComparison]::OrdinalIgnoreCase) -and
-            $canonicalPath.StartsWith("$managedProjectRoot\", [StringComparison]::OrdinalIgnoreCase)) {
-            $canonicalInManagedRoot = $true
-            break
-        }
-    }
-    if (-not $canonicalInManagedRoot) {
-        throw "$Role 路径不在项目根下（D:\Codex\projects 或 D:\agents\projects 的非集合根）：$ProjectPath"
-    }
-    return $canonicalPath
-}
-
-function Get-CanonicalRetiredProjectTrustPaths {
-    param([Parameter(Mandatory)][string[]]$RetiredProjectTrusts)
-
-    $retiredProjectPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($projectPath in $RetiredProjectTrusts) {
-        $canonicalPath = ConvertTo-CanonicalManagedProjectTrustPath -ProjectPath $projectPath -Role '退役 project trust'
-        if (-not $retiredProjectPaths.Add($canonicalPath)) {
-            throw "退役 project trust 路径重复：$canonicalPath"
-        }
-    }
-    Write-Output -NoEnumerate $retiredProjectPaths
-}
-
-function Test-IsRetiredProjectTrustPathSegments {
-    param(
-        [Parameter(Mandatory)][string[]]$Segments,
-        [Parameter(Mandatory)][Collections.Generic.HashSet[string]]$RetiredProjectPaths
-    )
-
-    if ($Segments.Count -lt 2 -or [string]$Segments[0] -cne 'projects') {
-        return $false
-    }
-
-    $candidatePath = [string]$Segments[1]
-    if (Test-ProjectTrustPathUsesExtendedOrDevicePrefix -Path $candidatePath) {
-        throw 'unsupported-extended-project-trust-path'
-    }
-    if (-not [IO.Path]::IsPathFullyQualified($candidatePath)) {
-        return $false
-    }
-    try {
-        $candidatePath = [IO.Path]::GetFullPath($candidatePath).TrimEnd('\', '/')
-    } catch {
-        return $false
-    }
-    return $RetiredProjectPaths.Contains($candidatePath)
-}
-
-function Get-TomlInlineTableTopLevelEntries {
-    param([Parameter(Mandatory)][string]$Value)
-
-    $text = $Value.Trim()
-    if (-not $text.StartsWith('{', [StringComparison]::Ordinal)) {
-        return @()
-    }
-
-    # The whole document has already passed tomllib validation. This lexer
-    # identifies inline-table keys semantically instead of raw-path searching.
-    $entries = [Collections.Generic.List[object]]::new()
-    $index = 1
-    $closed = $false
-    while (-not $closed) {
-        while ($index -lt $text.Length -and [char]::IsWhiteSpace($text[$index])) {
-            $index++
-        }
-        if ($index -ge $text.Length) {
-            throw 'unsupported-inline-retired-project-trust'
-        }
-        if ($text[$index] -eq [char]'}') {
-            $index++
-            $closed = $true
-            break
-        }
-
-        $keyStart = $index
-        $inBasicString = $false
-        $inLiteralString = $false
-        $escaped = $false
-        $foundEquals = $false
-        while ($index -lt $text.Length) {
-            $character = $text[$index]
-            if ($inBasicString) {
-                if ($escaped) {
-                    $escaped = $false
-                } elseif ($character -eq [char]'\') {
-                    $escaped = $true
-                } elseif ($character -eq [char]'"') {
-                    $inBasicString = $false
-                }
-            } elseif ($inLiteralString) {
-                if ($character -eq [char]"'") {
-                    $inLiteralString = $false
-                }
-            } else {
-                if ($character -eq [char]'"') {
-                    $inBasicString = $true
-                } elseif ($character -eq [char]"'") {
-                    $inLiteralString = $true
-                } elseif ($character -eq [char]'=') {
-                    $foundEquals = $true
-                    break
-                } elseif ($character -eq [char]',' -or $character -eq [char]'}') {
-                    throw 'unsupported-inline-retired-project-trust'
-                }
-            }
-            $index++
-        }
-        if (-not $foundEquals) {
-            throw 'unsupported-inline-retired-project-trust'
-        }
-
-        $keyText = $text.Substring($keyStart, $index - $keyStart).Trim()
-        if ([string]::IsNullOrWhiteSpace($keyText)) {
-            throw 'unsupported-inline-retired-project-trust'
-        }
-        $entries.Add([pscustomobject]@{
-            segments = @(ConvertFrom-TomlDottedKeyName -Name $keyText)
-        })
-
-        $index++
-        $nestedBraces = 0
-        $squareDepth = 0
-        $inBasicString = $false
-        $inLiteralString = $false
-        $escaped = $false
-        $entryTerminated = $false
-        while ($index -lt $text.Length) {
-            $character = $text[$index]
-            if ($inBasicString) {
-                if ($escaped) {
-                    $escaped = $false
-                } elseif ($character -eq [char]'\') {
-                    $escaped = $true
-                } elseif ($character -eq [char]'"') {
-                    $inBasicString = $false
-                }
-                $index++
-                continue
-            }
-            if ($inLiteralString) {
-                if ($character -eq [char]"'") {
-                    $inLiteralString = $false
-                }
-                $index++
-                continue
-            }
-
-            if ($character -eq [char]'"') {
-                $inBasicString = $true
-                $index++
-                continue
-            }
-            if ($character -eq [char]"'") {
-                $inLiteralString = $true
-                $index++
-                continue
-            }
-            if ($character -eq [char]'{') {
-                $nestedBraces++
-                $index++
-                continue
-            }
-            if ($character -eq [char]'}') {
-                if ($nestedBraces -gt 0) {
-                    $nestedBraces--
-                    $index++
-                    continue
-                }
-                if ($squareDepth -ne 0) {
-                    throw 'unsupported-inline-retired-project-trust'
-                }
-                $index++
-                $entryTerminated = $true
-                $closed = $true
-                break
-            }
-            if ($character -eq [char]'[') {
-                $squareDepth++
-                $index++
-                continue
-            }
-            if ($character -eq [char]']') {
-                if ($squareDepth -le 0) {
-                    throw 'unsupported-inline-retired-project-trust'
-                }
-                $squareDepth--
-                $index++
-                continue
-            }
-            if ($character -eq [char]',' -and $nestedBraces -eq 0 -and $squareDepth -eq 0) {
-                $index++
-                $entryTerminated = $true
-                break
-            }
-            if ($character -eq [char]'#' -and $nestedBraces -eq 0 -and $squareDepth -eq 0) {
-                throw 'unsupported-inline-retired-project-trust'
-            }
-            $index++
-        }
-        if (-not $entryTerminated) {
-            throw 'unsupported-inline-retired-project-trust'
-        }
-    }
-
-    $trailing = $text.Substring($index).Trim()
-    if (-not [string]::IsNullOrWhiteSpace($trailing) -and -not $trailing.StartsWith('#', [StringComparison]::Ordinal)) {
-        throw 'unsupported-inline-retired-project-trust'
-    }
-    return $entries.ToArray()
-}
-
-function Test-InlineProjectsValueContainsRetiredProjectTrust {
-    param(
-        [Parameter(Mandatory)][string]$Value,
-        [Parameter(Mandatory)][Collections.Generic.HashSet[string]]$RetiredProjectPaths
-    )
-
-    if (-not $Value.TrimStart().StartsWith('{', [StringComparison]::Ordinal)) {
-        return $false
-    }
-    foreach ($entry in @(Get-TomlInlineTableTopLevelEntries -Value $Value)) {
-        $effectiveSegments = @('projects') + @($entry.segments)
-        if (Test-IsRetiredProjectTrustPathSegments -Segments $effectiveSegments -RetiredProjectPaths $RetiredProjectPaths) {
-            return $true
-        }
-    }
-    return $false
-}
-
-function Assert-RetiredProjectTrustAssignmentIsSingleLine {
-    param([Parameter(Mandatory)][string]$Line)
-
-    # Deleting only the first line of a multiline value could orphan a TOML
-    # continuation, so accept a targeted dotted assignment only when it parses
-    # as a complete standalone TOML document.
-    try {
-        Assert-ValidToml -Content $Line
-    } catch {
-        throw 'unsupported-multiline-retired-project-trust'
-    }
-}
-
-function Test-IsRetiredProjectTrustHeader {
-    param(
-        [Parameter(Mandatory)][object]$Header,
-        [Parameter(Mandatory)][Collections.Generic.HashSet[string]]$RetiredProjectPaths
-    )
-
-    if ($Header.kind -cne 'table' -and $Header.kind -cne 'array-table') {
-        return $false
-    }
-    return Test-IsRetiredProjectTrustPathSegments -Segments @($Header.segments) -RetiredProjectPaths $RetiredProjectPaths
-}
-
-function Remove-RetiredProjectTrustBlocks {
-    param(
-        [Parameter(Mandatory)][string]$Content,
-        [Parameter(Mandatory)][Collections.Generic.HashSet[string]]$RetiredProjectPaths
-    )
-
-    $document = Get-TomlDocument -Content $Content
-    $headers = @($document.headers | Sort-Object index)
-    $lineStarts = [Collections.Generic.List[int]]::new()
-    $lineStarts.Add(0)
-    for ($offset = 0; $offset -lt $Content.Length; $offset++) {
-        if ($Content[$offset] -eq "`n") {
-            $lineStarts.Add($offset + 1)
-        }
-    }
-    if ($lineStarts.Count -ne $document.lines.Count) {
-        throw 'TOML 行偏移与结构化 header 索引不一致，拒绝删除退役 project trust。'
-    }
-
-    $removeLines = [bool[]]::new($document.lines.Count)
-    for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
-        $header = $headers[$headerIndex]
-        if (-not (Test-IsRetiredProjectTrustHeader -Header $header -RetiredProjectPaths $RetiredProjectPaths)) {
-            continue
-        }
-        $startLine = [int]$header.index
-        $endLine = if ($headerIndex + 1 -lt $headers.Count) { [int]$headers[$headerIndex + 1].index } else { $document.lines.Count }
-        if ($startLine -lt 0 -or $endLine -lt $startLine -or $startLine -ge $lineStarts.Count -or $endLine -gt $lineStarts.Count) {
-            throw '退役 project trust 的 TOML header 范围非法。'
-        }
-        for ($lineIndex = $startLine; $lineIndex -lt $endLine; $lineIndex++) {
-            $removeLines[$lineIndex] = $true
-        }
-    }
-
-    # TOML permits the same project path to appear as a dotted assignment
-    # instead of a table header. Resolve each assignment against its current
-    # header context, then remove only complete single-line assignments that
-    # semantically belong to a retired project. Do not raw-search paths.
-    $currentHeader = $null
-    $nextHeaderIndex = 0
-    for ($lineIndex = 0; $lineIndex -lt $document.lines.Count; $lineIndex++) {
-        while ($nextHeaderIndex -lt $headers.Count -and [int]$headers[$nextHeaderIndex].index -le $lineIndex) {
-            $currentHeader = $headers[$nextHeaderIndex]
-            $nextHeaderIndex++
-        }
-        if ($removeLines[$lineIndex]) {
-            continue
-        }
-
-        $assignment = Get-TomlAssignmentParts -Line $document.lines[$lineIndex]
-        if ($null -eq $assignment) {
-            continue
-        }
-        $assignmentSegments = @($assignment.segments)
-        if ($assignmentSegments.Count -eq 0) {
-            continue
-        }
-        $effectiveSegments = if ($null -eq $currentHeader) {
-            @($assignmentSegments)
-        } else {
-            @($currentHeader.segments) + @($assignmentSegments)
-        }
-        if (Test-IsRetiredProjectTrustPathSegments -Segments $effectiveSegments -RetiredProjectPaths $RetiredProjectPaths) {
-            Assert-RetiredProjectTrustAssignmentIsSingleLine -Line $document.lines[$lineIndex]
-            $removeLines[$lineIndex] = $true
-            continue
-        }
-
-        # A root projects inline table can mix retired and unrelated entries.
-        # Rewriting it would risk discarding a user entry, so reject it rather
-        # than silently preserving a retired trust or normalizing user data.
-        if (
-            $null -eq $currentHeader -and
-            (Test-TomlKeySegmentsEqual -Left $assignmentSegments -Right @('projects')) -and
-            (Test-InlineProjectsValueContainsRetiredProjectTrust -Value ([string]$assignment.value) -RetiredProjectPaths $RetiredProjectPaths)
-        ) {
-            throw 'unsupported-inline-retired-project-trust'
-        }
-    }
-
-    $ranges = [Collections.Generic.List[object]]::new()
-    $lineIndex = 0
-    while ($lineIndex -lt $removeLines.Count) {
-        if (-not $removeLines[$lineIndex]) {
-            $lineIndex++
-            continue
-        }
-        $startLine = $lineIndex
-        while ($lineIndex -lt $removeLines.Count -and $removeLines[$lineIndex]) {
-            $lineIndex++
-        }
-        $endLine = $lineIndex
-        $ranges.Add([pscustomobject]@{
-            start = [int]$lineStarts[$startLine]
-            end = if ($endLine -lt $lineStarts.Count) { [int]$lineStarts[$endLine] } else { $Content.Length }
-        })
-    }
-    if ($ranges.Count -eq 0) {
-        return $Content
-    }
-
-    # Keep every non-retired byte unchanged; this is a sanitizer, not config normalization.
-    $rebuilt = [Text.StringBuilder]::new($Content.Length)
-    $cursor = 0
-    foreach ($range in $ranges) {
-        if ($range.start -lt $cursor -or $range.end -lt $range.start) {
-            throw '退役 project trust 的 TOML 删除范围重叠或倒置。'
-        }
-        if ($range.start -gt $cursor) {
-            [void]$rebuilt.Append($Content.Substring($cursor, $range.start - $cursor))
-        }
-        $cursor = $range.end
-    }
-    if ($cursor -lt $Content.Length) {
-        [void]$rebuilt.Append($Content.Substring($cursor))
-    }
-    $sanitized = $rebuilt.ToString()
-    Assert-ValidToml -Content $sanitized
-    return $sanitized
-}
-
-function Remove-RetiredProjectTrustFromContent {
-    param(
-        [Parameter(Mandatory)][string]$Content,
-        [Parameter(Mandatory)][string[]]$RetiredProjectTrusts
-    )
-
-    [Collections.Generic.HashSet[string]]$retiredProjectPaths = Get-CanonicalRetiredProjectTrustPaths -RetiredProjectTrusts $RetiredProjectTrusts
-    return Remove-RetiredProjectTrustBlocks -Content $Content -RetiredProjectPaths $retiredProjectPaths
-}
-
-function Set-DesiredProjectTrust {
-    param(
-        [Parameter(Mandatory)][string]$Content,
-        [Parameter(Mandatory)][string[]]$TrustedProjects,
-        [Parameter(Mandatory)][string[]]$RetiredProjectTrusts
-    )
-
-    $document = Get-TomlDocument -Content $Content
-    $canonicalTrustedProjects = [Collections.Generic.List[string]]::new()
-    $trustedProjectPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($projectPath in $TrustedProjects) {
-        $canonicalPath = ConvertTo-CanonicalManagedProjectTrustPath -ProjectPath $projectPath -Role '受管 project trust'
-        if (-not $trustedProjectPaths.Add($canonicalPath)) {
-            throw "受管 project trust 路径重复：$canonicalPath"
-        }
-        [void]$canonicalTrustedProjects.Add($canonicalPath)
-    }
-
-    [Collections.Generic.HashSet[string]]$retiredProjectPaths = Get-CanonicalRetiredProjectTrustPaths -RetiredProjectTrusts $RetiredProjectTrusts
-    foreach ($canonicalPath in $retiredProjectPaths) {
-        if ($trustedProjectPaths.Contains($canonicalPath)) {
-            throw "退役 project trust 不得与受管 project trust 重叠：$canonicalPath"
-        }
-    }
-
-    $Content = Remove-RetiredProjectTrustBlocks -Content $Content -RetiredProjectPaths $retiredProjectPaths
-    $document = Get-TomlDocument -Content $Content
-
-    $missingProjects = [Collections.Generic.List[string]]::new()
-    $missingTrustIndices = [Collections.Generic.HashSet[int]]::new()
-    foreach ($canonicalPath in $canonicalTrustedProjects) {
-        $segments = @('projects', $canonicalPath.ToLowerInvariant())
-        $matchingProjectTrustHeaders = @($document.headers | Where-Object {
-            $_.kind -ceq 'table' -and (Test-TomlKeySegmentsEqual -Left @($_.segments) -Right $segments)
-        })
-        if ($matchingProjectTrustHeaders.Count -gt 1) {
-            throw "项目 trust section 重复：$canonicalPath"
-        }
-        if ($matchingProjectTrustHeaders.Count -eq 0) {
-            [void]$missingProjects.Add($canonicalPath.ToLowerInvariant())
-            continue
-        }
-
-        $header = $matchingProjectTrustHeaders[0]
-        $next = @($document.headers | Where-Object { $_.index -gt $header.index } | Sort-Object index | Select-Object -First 1)
-        $end = if ($next.Count -eq 1) { $next[0].index } else { $document.lines.Count }
-        $trustIndices = @(Get-TomlKeyIndices -Document $document -Key 'trust_level' -Start ($header.index + 1) -End $end)
-        if ($trustIndices.Count -gt 1) {
-            throw "项目 trust_level 重复：$canonicalPath"
-        }
-        if ($trustIndices.Count -eq 0) {
-            [void]$missingTrustIndices.Add([int]$header.index)
-            continue
-        }
-        Set-TomlKeyLiteral -Document $document -Index $trustIndices[0] -Key 'trust_level' -Literal '"trusted"'
-        $Content = [string]::Join($document.newLine, $document.lines)
-        $document = Get-TomlDocument -Content $Content
-    }
-    $rebuilt = [Collections.Generic.List[string]]::new()
-    for ($index = 0; $index -lt $document.lines.Count; $index++) {
-        [void]$rebuilt.Add($document.lines[$index])
-        if ($missingTrustIndices.Contains($index)) {
-            [void]$rebuilt.Add('trust_level = "trusted"')
-        }
-    }
-    $desired = [string]::Join($document.newLine, $rebuilt)
-    if ($missingProjects.Count -gt 0) {
-        if (-not $desired.EndsWith($document.newLine, [StringComparison]::Ordinal)) {
-            $desired += $document.newLine
-        }
-        foreach ($projectPath in $missingProjects) {
-            $desired += $document.newLine + "[projects.'$projectPath']" + $document.newLine + 'trust_level = "trusted"' + $document.newLine
-        }
-    }
-    Assert-ValidToml -Content $desired
-    return $desired
-}
-
-function Get-DesiredConfig {
-    param(
-        [string]$Content,
-        [string]$ExpectedSerenaContextPath
-    )
-
-    $document = Get-TomlDocument -Content $Content
-    $firstSectionIndex = if ($document.headers.Count -gt 0) { ($document.headers | Sort-Object index | Select-Object -First 1).index } else { $document.lines.Count }
-    $rootFeatureFlags = @{}
-    for ($index = 0; $index -lt $firstSectionIndex; $index++) {
-        $segments = @(Get-TomlAssignmentKeySegments -Line $document.lines[$index])
-        if ($segments.Count -gt 0 -and $segments[0] -ceq "hooks") {
-            throw "根级 TOML dotted hook key 不受支持，拒绝写入"
-        }
-        if ($segments.Count -eq 0 -or $segments[0] -cne 'features') { continue }
-        if ($segments.Count -ne 2 -or ($segments[1] -cne 'hooks' -and $segments[1] -cne 'codex_hooks')) {
-            throw '根级 features assignment 无法安全解释；拒绝写入'
-        }
-        $featureKey = [string]$segments[1]
-        if ($rootFeatureFlags.ContainsKey($featureKey)) { throw "根级 features boolean key 重复：$featureKey" }
-        $equalsIndex = ([string]$document.lines[$index]).IndexOf('=')
-        if ($equalsIndex -lt 0) { throw "无法解析根级 features boolean key：$featureKey" }
-        $featureValue = [regex]::Match(([string]$document.lines[$index]).Substring($equalsIndex + 1).Trim(), '^(?<value>true|false)\s*(?:#.*)?$')
-        if (-not $featureValue.Success) { throw "根级 features boolean key 必须为 true 或 false：$featureKey" }
-        $rootFeatureFlags[$featureKey] = [bool]::Parse($featureValue.Groups['value'].Value)
-    }
-    $rootHooksEnabled = if ($rootFeatureFlags.ContainsKey('hooks')) { [bool]$rootFeatureFlags['hooks'] } else { $null }
-    $rootDeprecatedHooksEnabled = if ($rootFeatureFlags.ContainsKey('codex_hooks')) { [bool]$rootFeatureFlags['codex_hooks'] } else { $null }
-    if ($rootHooksEnabled -eq $false -or $rootDeprecatedHooksEnabled -eq $false) {
-        throw '根级 features.hooks 或已弃用的 features.codex_hooks 被显式关闭；拒绝修改配置'
-    }
-    if ($null -ne $rootHooksEnabled -and $null -ne $rootDeprecatedHooksEnabled -and $rootHooksEnabled -ne $rootDeprecatedHooksEnabled) {
-        throw '根级 features.hooks 与已弃用的 features.codex_hooks 冲突；拒绝修改配置'
-    }
-
-    $nestedHookFeatureHeaders = @($document.headers | Where-Object {
-        $segments = @($_.segments)
-        $segments.Count -ge 2 -and
-        $segments[0] -ceq 'features' -and
-        ($segments[1] -ceq 'hooks' -or $segments[1] -ceq 'codex_hooks')
-    })
-    if ($nestedHookFeatureHeaders.Count -gt 0) {
-        throw 'features.hooks 或已弃用的 features.codex_hooks 不得作为 TOML table 或 array-table；拒绝修改配置'
-    }
-
-    $featureHeaders = @($document.headers | Where-Object {
-        Test-TomlKeySegmentsEqual -Left @($_.segments) -Right @('features')
-    })
-    if ($featureHeaders.Count -gt 1 -or ($featureHeaders.Count -eq 1 -and $featureHeaders[0].kind -cne 'table')) {
-        throw 'features TOML section 必须是唯一普通 table'
-    }
-    if ($featureHeaders.Count -eq 1) {
-        $features = Get-UniqueSectionRange -Document $document -Name 'features'
-        for ($index = $features.start; $index -lt $features.end; $index++) {
-            $segments = @(Get-TomlAssignmentKeySegments -Line $document.lines[$index])
-            if ($segments.Count -gt 1 -and ($segments[0] -ceq 'hooks' -or $segments[0] -ceq 'codex_hooks')) {
-                throw 'features.hooks 或已弃用的 features.codex_hooks 不得使用 dotted descendant key；拒绝修改配置'
-            }
-        }
-        $hooksEnabled = Get-OptionalTomlBooleanKeyValue -Document $document -Key 'hooks' -Start $features.start -End $features.end -Scope 'features'
-        $deprecatedHooksEnabled = Get-OptionalTomlBooleanKeyValue -Document $document -Key 'codex_hooks' -Start $features.start -End $features.end -Scope 'features'
-        if ($hooksEnabled -eq $false -or $deprecatedHooksEnabled -eq $false) {
-            throw 'features.hooks 或已弃用的 features.codex_hooks 被显式关闭；拒绝修改配置'
-        }
-        if ($null -ne $hooksEnabled -and $null -ne $deprecatedHooksEnabled -and $hooksEnabled -ne $deprecatedHooksEnabled) {
-            throw 'features.hooks 与已弃用的 features.codex_hooks 冲突；拒绝修改配置'
-        }
-    }
-
-    # 2026-08-31 起 Codex Desktop 26.825 官方把 .cmd 形态的 MCP 条目迁移为
-    # cmd.exe /c 包装并附带 --project-from-cwd；canonical 跟随官方形态，
-    # 旧直连形态由 Convert-SerenaArgs 接受并收敛。
-    $canonicalCommandValue = 'cmd.exe'
-    $canonicalCommandLiteral = '"cmd.exe"'
-    $canonicalArgs = @("/c", 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', "start-mcp-server", "--context=$ExpectedSerenaContextPath", "--project-from-cwd", "--enable-web-dashboard=true", "--open-web-dashboard=false")
-    $canonicalArgsLiteral = ConvertTo-Json -InputObject $canonicalArgs -Compress
-    $serena = Get-UniqueSectionRange -Document $document -Name "mcp_servers.serena" -AllowMissing
-    if ($null -eq $serena) {
-        $serenaSegments = @("mcp_servers", "serena")
-        $insertAt = $document.lines.Count
-        foreach ($header in @($document.headers | Sort-Object index)) {
-            if (@($header.segments).Count -le $serenaSegments.Count) {
-                continue
-            }
-
-            $isSerenaDescendant = $true
-            for ($segmentIndex = 0; $segmentIndex -lt $serenaSegments.Count; $segmentIndex++) {
-                if ([string]$header.segments[$segmentIndex] -cne $serenaSegments[$segmentIndex]) {
-                    $isSerenaDescendant = $false
-                    break
-                }
-            }
-            if ($isSerenaDescendant) {
-                $insertAt = [int]$header.index
-                break
-            }
-        }
-
-        $insertLines = @(
-            "[mcp_servers.serena]",
-            "command = $canonicalCommandLiteral",
-            "args = $canonicalArgsLiteral"
-        )
-        $rebuilt = [System.Collections.Generic.List[string]]::new()
-        for ($index = 0; $index -lt $document.lines.Count; $index++) {
-            if ($index -eq $insertAt) {
-                foreach ($line in $insertLines) { [void]$rebuilt.Add($line) }
-            }
-            [void]$rebuilt.Add($document.lines[$index])
-        }
-        if ($insertAt -eq $document.lines.Count) {
-            foreach ($line in $insertLines) { [void]$rebuilt.Add($line) }
-        }
-        $insertedContent = [string]::Join($document.newLine, $rebuilt)
-        if ($insertedContent.Equals($Content, [System.StringComparison]::Ordinal)) {
-            throw "Serena section 缺失插入未取得进展"
-        }
-        Assert-ValidToml -Content $insertedContent
-        $normalizedAfterInsert = Get-DesiredConfig -Content $insertedContent -ExpectedSerenaContextPath $ExpectedSerenaContextPath
-        return [pscustomobject]@{
-            content = [string]$normalizedAfterInsert.content
-            changed = -not $Content.Equals([string]$normalizedAfterInsert.content, [System.StringComparison]::Ordinal)
-        }
-    }
-
-    $commandIndices = @(Get-TomlKeyIndices -Document $document -Key "command" -Start $serena.start -End $serena.end)
-    $argsIndices = @(Get-TomlKeyIndices -Document $document -Key "args" -Start $serena.start -End $serena.end)
-    if ($commandIndices.Count -gt 1) { throw "Serena command 最多出现一次；实际 $($commandIndices.Count)" }
-    if ($argsIndices.Count -gt 1) { throw "Serena args 最多出现一次；实际 $($argsIndices.Count)" }
-    if ($commandIndices.Count -eq 0 -or $argsIndices.Count -eq 0) {
-        $insertLines = [System.Collections.Generic.List[string]]::new()
-        if ($commandIndices.Count -eq 0) { [void]$insertLines.Add("command = $canonicalCommandLiteral") }
-        if ($argsIndices.Count -eq 0) { [void]$insertLines.Add("args = $canonicalArgsLiteral") }
-        $rebuilt = [System.Collections.Generic.List[string]]::new()
-        for ($index = 0; $index -lt $document.lines.Count; $index++) {
-            if ($index -eq $serena.start) { foreach ($line in $insertLines) { [void]$rebuilt.Add($line) } }
-            [void]$rebuilt.Add($document.lines[$index])
-        }
-        if ($serena.start -eq $document.lines.Count) {
-            foreach ($line in $insertLines) { [void]$rebuilt.Add($line) }
-        }
-        $insertedContent = [string]::Join($document.newLine, $rebuilt)
-        if ($insertedContent.Equals($Content, [System.StringComparison]::Ordinal)) {
-            throw "Serena command/args 缺失插入未取得进展"
-        }
-        Assert-ValidToml -Content $insertedContent
-        $normalizedAfterInsert = Get-DesiredConfig -Content $insertedContent -ExpectedSerenaContextPath $ExpectedSerenaContextPath
-        return [pscustomobject]@{
-            content = [string]$normalizedAfterInsert.content
-            changed = -not $Content.Equals([string]$normalizedAfterInsert.content, [System.StringComparison]::Ordinal)
-        }
-    }
-
-    $commandIndex = $commandIndices[0]
-    $commandLine = [string]$document.lines[$commandIndex]
-    $commandEqualsIndex = $commandLine.IndexOf('=')
-    if ($commandEqualsIndex -lt 0) {
-        throw "无法解析 Serena command"
-    }
-    $commandAlreadyDesired = $false
-    try {
-        $commandValue = ConvertFrom-SingleLineTomlString -Literal $commandLine.Substring($commandEqualsIndex + 1).Trim()
-        $commandAlreadyDesired = $commandValue -ceq $canonicalCommandValue
-    } catch {
-        # Keep the existing repair behavior for values outside the narrow safe parser.
-        $commandAlreadyDesired = $false
-    }
-    if (-not $commandAlreadyDesired) {
-        Set-TomlKeyLiteral -Document $document -Index $commandIndex -Key "command" -Literal $canonicalCommandLiteral
-    }
-
-    $argsIndex = $argsIndices[0]
-    $argsLine = $document.lines[$argsIndex]
-    $equalsIndex = $argsLine.IndexOf('=')
-    if ($equalsIndex -lt 0) {
-        throw "无法解析 Serena args"
-    }
-    $argsRightHandSide = $argsLine.Substring($equalsIndex + 1).Trim()
-    $argsLiteral = Convert-SerenaArgs -RightHandSide $argsRightHandSide -ExpectedContextPath $ExpectedSerenaContextPath
-    $actualArgs = @(ConvertFrom-SingleLineTomlStringArray -Literal $argsRightHandSide)
-    $normalizedArgs = @((ConvertFrom-Json -InputObject $argsLiteral -NoEnumerate))
-    $argsAlreadyDesired = $actualArgs.Count -eq $normalizedArgs.Count
-    if ($argsAlreadyDesired) {
-        for ($argsIndexValue = 0; $argsIndexValue -lt $normalizedArgs.Count; $argsIndexValue++) {
-            if ([string]$actualArgs[$argsIndexValue] -cne [string]$normalizedArgs[$argsIndexValue]) {
-                $argsAlreadyDesired = $false
-                break
-            }
-        }
-    }
-    if (-not $argsAlreadyDesired) {
-        Set-TomlKeyLiteral -Document $document -Index $argsIndex -Key "args" -Literal $argsLiteral
-    }
-
-    $keep = [bool[]]::new($document.lines.Count)
-    [array]::Fill($keep, $true)
-    $headers = @($document.headers | Sort-Object index)
-    for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
-        $header = $headers[$headerIndex]
-        if (@($header.segments).Count -lt 2 -or $header.segments[0] -cne 'hooks' -or $header.segments[1] -cne 'state') {
-            continue
-        }
-        $end = if ($headerIndex + 1 -lt $headers.Count) { $headers[$headerIndex + 1].index } else { $document.lines.Count }
-        for ($lineIndex = $header.index; $lineIndex -lt $end; $lineIndex++) {
-            $keep[$lineIndex] = $false
-        }
-    }
-    for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
-        $header = $headers[$headerIndex]
-        if ($header.kind -cne 'table' -or -not (Test-TomlKeySegmentsEqual -Left @($header.segments) -Right @('hooks'))) {
-            continue
-        }
-        $end = if ($headerIndex + 1 -lt $headers.Count) { $headers[$headerIndex + 1].index } else { $document.lines.Count }
-        $hasUserContent = $false
-        for ($lineIndex = $header.index + 1; $lineIndex -lt $end; $lineIndex++) {
-            if ($keep[$lineIndex] -and -not [string]::IsNullOrWhiteSpace([string]$document.lines[$lineIndex])) {
-                $hasUserContent = $true
-                break
-            }
-        }
-        if (-not $hasUserContent) { $keep[$header.index] = $false }
-    }
-
-    $keptLines = [System.Collections.Generic.List[string]]::new()
-    for ($index = 0; $index -lt $document.lines.Count; $index++) {
-        if ($keep[$index]) {
-            $keptLines.Add($document.lines[$index])
-        }
-    }
-    $desired = [string]::Join($document.newLine, $keptLines)
-    $desired = Set-DesiredProjectTrust -Content $desired -TrustedProjects @($script:HostPreflightManifest.trustedProjects) -RetiredProjectTrusts @($script:HostPreflightManifest.retiredProjectTrusts)
-    Assert-ValidToml -Content $desired
-
-    [pscustomobject]@{
-        content = $desired
-        changed = -not $Content.Equals($desired, [System.StringComparison]::Ordinal)
-    }
 }
 
 function Remove-KnownRetiredHookRegistrations {
@@ -2735,20 +1397,17 @@ function Get-DesiredSerenaContext {
 function Get-ReconciliationState {
     param([string]$ResolvedCodexHome)
 
-    $configPath = Join-Path $ResolvedCodexHome "config.toml"
     $hooksPath = Join-Path $ResolvedCodexHome "hooks.json"
     $hookDirectory = Join-Path $ResolvedCodexHome "hooks"
     $hostRoot = [System.IO.Directory]::GetParent($ResolvedCodexHome).FullName
     $serenaContextDirectory = Join-Path $hostRoot ".serena\contexts"
     $serenaContextPath = Join-Path $serenaContextDirectory "codex-file-tools.yml"
-    foreach ($path in @($configPath, $hooksPath, $hookDirectory, $serenaContextDirectory, $serenaContextPath)) {
+    foreach ($path in @($hooksPath, $hookDirectory, $serenaContextDirectory, $serenaContextPath)) {
         Assert-NoReparsePath -Path $path -RequireLeaf | Out-Null
     }
-    $configContent = Read-Text -Path $configPath
     $hooksContent = Read-Text -Path $hooksPath
     $serenaContextContent = Read-Text -Path $serenaContextPath
     $desiredSerenaContext = Get-DesiredSerenaContext -Content $serenaContextContent
-    $desiredConfig = Get-DesiredConfig -Content $configContent -ExpectedSerenaContextPath $serenaContextPath
     $desiredHooks = Get-DesiredHooksJson -Content $hooksContent
     $managedFileStates = @(Get-ManagedHookFileStates -ResolvedCodexHome $ResolvedCodexHome)
     $runtimeDependencyStates = @(Get-HostRuntimeDependencyStates -ResolvedCodexHome $ResolvedCodexHome)
@@ -2774,10 +1433,6 @@ function Get-ReconciliationState {
         Assert-NoReparsePath -Path $item.FullName -RequireLeaf | Out-Null
     }
     $preservedHookTree = @(Get-PreservedHookTreeInventory -HookDirectory $hookDirectory -HookTree $hookTree)
-    # config.toml is a vendor-owned volatile artifact: Codex Desktop may replace
-    # the file atomically, so its leaf ACL is not a durable policy boundary.
-    # Keep its contents under semantic reconciliation, and reserve ACL health
-    # for the stable hook and Serena surfaces owned by this reconciler.
     $aclStates = @(
         Test-ProtectedAcl -Path $hooksPath
         Test-ProtectedAcl -Path $serenaContextPath
@@ -2786,7 +1441,6 @@ function Get-ReconciliationState {
 
     $checks = @(
         [pscustomobject]@{ name = "serenaContext"; ok = -not $desiredSerenaContext.changed },
-        [pscustomobject]@{ name = "config"; ok = -not $desiredConfig.changed },
         [pscustomobject]@{ name = "registrations"; ok = -not $desiredHooks.changed },
         [pscustomobject]@{ name = "managedFiles"; ok = @($managedFileStates | Where-Object { -not $_.ok }).Count -eq 0; driftedTargetCount = @($managedFileStates | Where-Object { -not $_.ok }).Count },
         [pscustomobject]@{ name = "runtimeDependencies"; ok = @($runtimeDependencyStates | Where-Object { -not $_.ok }).Count -eq 0; unavailableRuntimeIds = @($runtimeDependencyStates | Where-Object { -not $_.ok } | ForEach-Object { [string]$_.id }) },
@@ -2797,7 +1451,6 @@ function Get-ReconciliationState {
     $driftCount = @($checks | Where-Object { -not $_.ok }).Count
 
     [pscustomobject]@{
-        configPath = $configPath
         hooksPath = $hooksPath
         hookDirectory = $hookDirectory
         serenaContextDirectory = $serenaContextDirectory
@@ -2806,9 +1459,7 @@ function Get-ReconciliationState {
         desiredSerenaContext = $desiredSerenaContext
         hookTreePaths = @($hookTree | ForEach-Object { $_.FullName })
         preservedHookTree = $preservedHookTree
-        configContent = $configContent
         hooksContent = $hooksContent
-        desiredConfig = $desiredConfig
         desiredHooks = $desiredHooks
         managedFileStates = $managedFileStates
         runtimeDependencyStates = $runtimeDependencyStates
@@ -3038,7 +1689,7 @@ function New-HostHookRestoreContract {
         $id = "managed:$($file.liveRelativePath)"
         if (@($Manifest.committedResources) -ccontains $id) { $actionOrder.Add($id) }
     }
-    foreach ($id in @('config.toml','codex-file-tools.yml')) { if (@($Manifest.committedResources) -ccontains $id) { $actionOrder.Add($id) } }
+    foreach ($id in @('codex-file-tools.yml')) { if (@($Manifest.committedResources) -ccontains $id) { $actionOrder.Add($id) } }
     $hookRootPath = [IO.Path]::GetFullPath((Join-Path $ResolvedCodexHome 'hooks')).TrimEnd('\')
     $aclActionOrdinal = 0
     $orderedAclActions = @($Manifest.aclTargets | ForEach-Object {
@@ -3126,8 +1777,7 @@ function New-EvidenceSnapshot {
 
     $snapshot = New-CodexHostHookEvidenceSnapshot `
         -ResolvedCodexHome $ResolvedCodexHome `
-        -State $State `
-        -RetiredProjectTrusts @($script:HostPreflightManifest.retiredProjectTrusts)
+        -State $State
     $script:CurrentEvidencePath = $snapshot.path
     $snapshot
 }
@@ -3146,15 +1796,8 @@ function Invoke-Repair {
         throw "受管 hook runtime dependency 不可用，Repair 在 evidence 前拒绝：$($unavailableRuntimeIds -join ',')"
     }
 
-    $originalConfigAcl = Get-Acl -LiteralPath $InitialState.configPath
     $originalHooksAcl = Get-Acl -LiteralPath $InitialState.hooksPath
     $originalSerenaContextAcl = Get-Acl -LiteralPath $InitialState.serenaContextPath
-    # A rollback must never resurrect an explicitly retired project trust.
-    # Keep every other original config byte unchanged so the transaction still
-    # restores the pre-Repair state as narrowly as possible.
-    $rollbackConfigContent = Remove-RetiredProjectTrustFromContent `
-        -Content ([string]$InitialState.configContent) `
-        -RetiredProjectTrusts @($script:HostPreflightManifest.retiredProjectTrusts)
     $snapshot = New-EvidenceSnapshot -ResolvedCodexHome $ResolvedCodexHome -State $InitialState
     $manifest = $snapshot.manifest
     $committed = [System.Collections.Generic.List[string]]::new()
@@ -3188,30 +1831,6 @@ function Invoke-Repair {
             $manifest.committedResources = $committed.ToArray()
             Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
         }
-        if ($InitialState.desiredConfig.changed) {
-            if ((Get-Sha256 -Path $InitialState.configPath) -ne $snapshot.livePreconditionHashes["config.toml"]) {
-                throw "config.toml 在修复前置校验后发生并发变化"
-            }
-            $attempted.Add("config.toml") | Out-Null
-            $manifest.attemptedResources = @($attempted)
-            Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
-            Write-AtomicText `
-                -Path $InitialState.configPath `
-                -Content $InitialState.desiredConfig.content `
-                -ExpectedCurrentSha256 $snapshot.livePreconditionHashes["config.toml"] `
-                -ExpectedCurrentSddl $originalConfigAcl.Sddl
-            $validatedConfig = Get-DesiredConfig -Content (Read-Text -Path $InitialState.configPath) -ExpectedSerenaContextPath $InitialState.serenaContextPath
-            if ($validatedConfig.changed) {
-                throw "config.toml 原子替换后未通过自验证"
-            }
-            # The reconciler owns selected config semantics, not the vendor
-            # file's long-term ACL policy. Preserve the metadata observed at
-            # transaction start instead of silently widening or hardening it.
-            $committed.Add("config.toml")
-            $manifest.committedResources = $committed.ToArray()
-            Write-Manifest -Path $snapshot.manifestPath -Manifest $manifest
-        }
-
         $managedPublishStates = @(Get-OrderedManagedHookItems -Items @($InitialState.managedFileStates | Where-Object { -not $_.ok }) -Direction Repair)
         foreach ($fileState in $managedPublishStates) {
             $resourceName = "managed:$($fileState.liveRelativePath)"
@@ -3322,28 +1941,6 @@ function Invoke-Repair {
             }
         } elseif ($attempted.Contains("codex-file-tools.yml")) {
             $rollbackErrors.Add("codex-file-tools.yml: 并发版本已保留，拒绝用旧快照覆盖")
-        }
-        if ($attempted.Contains("config.toml") -and -not $concurrentReplacePath.Equals($InitialState.configPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-            try {
-                $currentConfig = Read-Text -Path $InitialState.configPath
-                if ($currentConfig.Equals($InitialState.desiredConfig.content, [System.StringComparison]::Ordinal)) {
-                    Write-AtomicText `
-                        -Path $InitialState.configPath `
-                        -Content $rollbackConfigContent `
-                        -ExpectedCurrentSha256 $manifest.intendedResources["config.toml"] `
-                        -ExpectedCurrentSddl $originalConfigAcl.Sddl
-                } elseif (-not $currentConfig.Equals($rollbackConfigContent, [System.StringComparison]::Ordinal)) {
-                    throw "检测到非本次 Repair 写入的并发内容，拒绝覆盖"
-                }
-            } catch {
-                $rollbackConcurrent = Get-ConcurrentReplaceRecord -Exception $_.Exception
-                if ($null -ne $rollbackConcurrent) {
-                    $manifest.rollbackConcurrentReplaces = @($manifest.rollbackConcurrentReplaces) + @($rollbackConcurrent)
-                }
-                $rollbackErrors.Add("config.toml: $($_.Exception.Message)")
-            }
-        } elseif ($attempted.Contains("config.toml")) {
-            $rollbackErrors.Add("config.toml: 并发版本已保留，拒绝用旧快照覆盖")
         }
         if ($attempted.Contains("hooks.json") -and -not $concurrentReplacePath.Equals($InitialState.hooksPath, [System.StringComparison]::OrdinalIgnoreCase)) {
             try {
@@ -3462,10 +2059,9 @@ function Invoke-Repair {
 
     try {
         $postCommitSerenaContext = Get-DesiredSerenaContext -Content (Read-Text -Path $InitialState.serenaContextPath)
-        $postCommitConfig = Get-DesiredConfig -Content (Read-Text -Path $InitialState.configPath) -ExpectedSerenaContextPath $InitialState.serenaContextPath
         $postCommitHooks = Get-DesiredHooksJson -Content (Read-Text -Path $InitialState.hooksPath)
-        if ($postCommitSerenaContext.changed -or $postCommitConfig.changed -or $postCommitHooks.changed) {
-            throw "三资源提交完成后目标状态被并发改写"
+        if ($postCommitSerenaContext.changed -or $postCommitHooks.changed) {
+            throw "两资源提交完成后目标状态被并发改写"
         }
 
         $retiredPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -3604,7 +2200,6 @@ function Invoke-Repair {
 
         foreach ($resource in @(
             [pscustomobject]@{ name='codex-file-tools.yml'; path=$InitialState.serenaContextPath; desired=$InitialState.desiredSerenaContext.content; original=$InitialState.serenaContextContent; intended=$manifest.intendedResources['codex-file-tools.yml']; acl=$originalSerenaContextAcl.Sddl },
-            [pscustomobject]@{ name='config.toml'; path=$InitialState.configPath; desired=$InitialState.desiredConfig.content; original=$rollbackConfigContent; intended=$manifest.intendedResources['config.toml']; acl=$originalConfigAcl.Sddl },
             [pscustomobject]@{ name='hooks.json'; path=$InitialState.hooksPath; desired=$InitialState.desiredHooks.content; original=$InitialState.hooksContent; intended=$manifest.intendedResources['hooks.json']; acl=$originalHooksAcl.Sddl }
         )) {
             if (-not $attempted.Contains([string]$resource.name)) { continue }
@@ -4027,7 +2622,10 @@ function Assert-RestoreContractClosure {
     Assert-CodexHookExactProperties $state @('runId','codexHome','originalHashes','preservedHookTree','intendedResources','committedResources','retiredResources','aclTargets','aclAppliedStates') 'host hook restore immutable state'
     $repairManagedIds = @(Get-OrderedManagedHookItems -Items @($script:HostPreflightManifest.files) -Direction Repair | ForEach-Object { "managed:$($_.liveRelativePath)" })
     $restoreManagedIds = @(Get-OrderedManagedHookItems -Items @($script:HostPreflightManifest.files) -Direction Restore | ForEach-Object { "managed:$($_.liveRelativePath)" })
-    [string[]]$allowedCommitted = @('codex-file-tools.yml','config.toml') + $repairManagedIds + @('environment:SERENA_HOME','hooks.json')
+    if (@($state.committedResources) -ccontains 'config.toml') {
+        throw 'config.toml reconciliation 已于 2026-09-06 退役；该 evidence 绑定的 config.toml 资源不再支持恢复'
+    }
+    [string[]]$allowedCommitted = @('codex-file-tools.yml') + $repairManagedIds + @('environment:SERENA_HOME','hooks.json')
     Assert-OrderedUniqueSubsequence -Actual @($state.committedResources) -Allowed $allowedCommitted -Name 'committedResources'
     if (@($state.committedResources) -ccontains 'hooks.json' -and @($state.committedResources)[-1] -cne 'hooks.json') { throw 'committedResources 的 hooks.json 必须最后' }
     if (@($state.retiredResources).Count -ne 0) {
@@ -4063,7 +2661,7 @@ function Assert-RestoreContractClosure {
     if (@($state.committedResources) -ccontains 'hooks.json') { $expectedActions.Add('hooks.json') }
     if (@($state.committedResources) -ccontains 'environment:SERENA_HOME') { $expectedActions.Add('environment:SERENA_HOME') }
     foreach ($id in $restoreManagedIds) { if (@($state.committedResources) -ccontains $id) { $expectedActions.Add($id) } }
-    foreach ($id in @('config.toml','codex-file-tools.yml')) { if (@($state.committedResources) -ccontains $id) { $expectedActions.Add($id) } }
+    foreach ($id in @('codex-file-tools.yml')) { if (@($state.committedResources) -ccontains $id) { $expectedActions.Add($id) } }
     $hookRootPath = [IO.Path]::GetFullPath((Join-Path $ResolvedCodexHome 'hooks')).TrimEnd('\')
     $aclActionOrdinal = 0
     $orderedAclActions = @($state.aclTargets | ForEach-Object {
@@ -4073,24 +2671,6 @@ function Assert-RestoreContractClosure {
     foreach ($aclAction in @($orderedAclActions | Where-Object { [IO.Path]::GetFullPath([string]$_.path).TrimEnd('\').Equals($hookRootPath, [StringComparison]::OrdinalIgnoreCase) })) { if ($AclBefore.Contains($aclAction.path)) { $expectedActions.Add("acl:$($aclAction.path)") } }
     foreach ($aclAction in @($orderedAclActions | Where-Object { -not [IO.Path]::GetFullPath([string]$_.path).TrimEnd('\').Equals($hookRootPath, [StringComparison]::OrdinalIgnoreCase) })) { if ($AclBefore.Contains($aclAction.path)) { $expectedActions.Add("acl:$($aclAction.path)") } }
     if ((@($Contract.actionOrder) -join "`n") -cne ($expectedActions.ToArray() -join "`n")) { throw 'restore contract actionOrder 与固定 profile closure 不一致' }
-}
-
-function Assert-RestoreEvidenceExcludesRetiredProjectTrust {
-    param([Parameter(Mandatory)][string]$EvidencePath)
-
-    $configEvidencePath = Join-Path $EvidencePath 'config.toml'
-    $snapshot = Get-RequiredCapabilitySnapshot -Path $configEvidencePath -CapabilityRoot $EvidencePath -Name 'Restore config evidence snapshot'
-    $content = Convert-StrictUtf8SnapshotText -Snapshot $snapshot -Name 'Restore config evidence'
-    try {
-        $sanitized = Remove-RetiredProjectTrustFromContent `
-            -Content $content `
-            -RetiredProjectTrusts @($script:HostPreflightManifest.retiredProjectTrusts)
-    } catch {
-        throw "Restore config evidence 无法结构化验证退役 project trust：$($_.Exception.Message)"
-    }
-    if (-not $content.Equals($sanitized, [StringComparison]::Ordinal)) {
-        throw 'Restore config evidence 含退役 project trust；拒绝恢复。请先通过 retired project snapshot sanitizer 清理历史快照。'
-    }
 }
 
 function Invoke-EvidenceRestore {
@@ -4110,7 +2690,6 @@ function Invoke-EvidenceRestore {
         throw 'Restore evidence 未绑定当前 CodexHome'
     }
     $restoreContract = Read-HostHookRestoreContract -ResolvedCodexHome $ResolvedCodexHome -Evidence $evidence -Manifest $manifest
-    Assert-RestoreEvidenceExcludesRetiredProjectTrust -EvidencePath ([string]$evidence.path)
     $authority = $restoreContract.immutableState
     $hookDirectory = Join-Path $ResolvedCodexHome 'hooks'
     $managedTargetPaths = @($script:HostPreflightManifest.files | ForEach-Object { Join-Path $hookDirectory ([string]$_.liveRelativePath) })
@@ -4131,7 +2710,6 @@ function Invoke-EvidenceRestore {
 
     $contentSpecs = @(
         [pscustomobject]@{ name='hooks.json'; path=(Join-Path $ResolvedCodexHome 'hooks.json'); backup=(Join-Path $evidence.path 'hooks.json'); capabilityRoot=$ResolvedCodexHome },
-        [pscustomobject]@{ name='config.toml'; path=(Join-Path $ResolvedCodexHome 'config.toml'); backup=(Join-Path $evidence.path 'config.toml'); capabilityRoot=$ResolvedCodexHome },
         [pscustomobject]@{ name='codex-file-tools.yml'; path=(Join-Path ([IO.Directory]::GetParent($ResolvedCodexHome).FullName) '.serena\contexts\codex-file-tools.yml'); backup=(Join-Path $evidence.path 'codex-file-tools.yml'); capabilityRoot=([IO.Directory]::GetParent($ResolvedCodexHome).FullName) }
     )
     foreach ($spec in $contentSpecs) {

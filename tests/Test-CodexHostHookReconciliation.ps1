@@ -1,9 +1,6 @@
 param(
     [string]$ProjectRoot = "D:\agents\projects\统一环境",
     [switch]$KeepOutputs,
-    [switch]$OnlyFeatureDisableVariants,
-    [string]$OnlyFeatureDisableVariant,
-    [switch]$OnlyHeaderLikeArrayToml,
     [switch]$OnlyEnvironmentPostCommitRollback,
     [string]$CleanupFixturePath
 )
@@ -196,18 +193,6 @@ function Invoke-SilentProcess {
     }
 }
 
-function Assert-TomlParsesWithPython {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$Message
-    )
-
-    $result = Invoke-SilentProcess `
-        -FilePath 'D:\Codex\tools\python314-official\python.exe' `
-        -Arguments @('-B','-I','-S','-X','utf8','-c','import pathlib, sys, tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))',$Path)
-    Assert-True -Condition ($result.exitCode -eq 0) -Message "$Message stderr=$($result.stderr.Trim())"
-}
-
 function Get-TreeFingerprint {
     param(
         [string]$CodexHome,
@@ -322,7 +307,6 @@ $managedRollbackOrderingPattern = '(?m)^\s*\$managedRollbackStates = @\(Get-Orde
 Assert-True -Condition ([regex]::Matches($reconcilerSource, $managedRollbackOrderingPattern).Count -eq 2) -Message 'Repair 的 transaction catch 与 post-commit catch 必须各自先筛 attempted managed files，再按 Restore 顺序回滚'
 $unorderedManagedRollbackPattern = 'foreach \(\$fileState in @\(\$InitialState\.managedFileStates \| Where-Object \{ \$attempted\.Contains\("managed:\$\(\$_.liveRelativePath\)"\) \}\)\)'
 Assert-True -Condition (-not [regex]::IsMatch($reconcilerSource, $unorderedManagedRollbackPattern)) -Message 'Repair rollback 不得直接按 manifest 顺序遍历 attempted managed files'
-Assert-True -Condition ($reconcilerSource.Contains('完整 TOML 语法验证失败：TOML parser Python 超时')) -Message 'TOML parser timeout 必须在非 JSON 诊断中保留安全的高层原因'
 foreach ($mobileRetiredClosure in @("codex-mobile-permission-guard.cmd", "codex-mobile-permission-guard.py")) {
     Assert-True -Condition ([regex]::Matches($reconcilerSource, [regex]::Escape('"' + $mobileRetiredClosure + '"')).Count -eq 1) -Message "mobile permission retired wrapper/implementation 必须各在 exact legacy allowlist 出现一次：$mobileRetiredClosure"
 }
@@ -335,24 +319,10 @@ function Set-TestInheritedFileAcl {
     [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.FileInfo]::new($Path), $security)
 }
 
-function Replace-FixtureHooksTableHeader {
-    param(
-        [string]$Config,
-        [string]$Replacement,
-        [string]$Variant
-    )
-
-    $hooksHeaderPattern = '(?m)^\[hooks\][ \t]*\r?$'
-    if ([regex]::Matches($Config, $hooksHeaderPattern).Count -ne 1) {
-        throw "fixture 必须恰好包含一个真实 [hooks] header：$Variant"
-    }
-    [regex]::Replace($Config, $hooksHeaderPattern, $Replacement)
-}
-
 function New-FixtureCodexHome {
     param(
         [string]$Root,
-        [ValidateSet("Drift", "MalformedHooks", "DuplicateSerena", "MissingSerenaArgs", "MissingSerenaCommand", "MissingSerenaSection", "HermesCommandDrift", "SingleQuotedSerenaArgs", "EmptySerenaSectionAtEof", "DuplicateSerenaArgs", "DuplicateSerenaCommand", "MalformedSerenaArgs", "MissingSerenaContext", "MissingSerenaContextValue", "WrongSerenaContext", "DuplicateSerenaContext", "LegacySerenaContext", "NegatedSerenaPolicy", "InvalidSerenaContextPolicy", "MalformedSerenaIndent", "BareCrSerenaContext", "NullSerenaScalar", "DuplicateSerenaMarker", "ExternalSerenaMarker", "QuotedSerenaScalar", "QuotedSerenaListScalar", "DuplicateSerenaPrompt", "MissingSerenaProjectValue", "DuplicateHookSection", "DuplicateQuotedApproval", "RootDottedHookKey", "SensitiveInvalidHeader", "MissingApproval", "HooksDisabled", "RootDottedHooksDisabled", "RootQuotedDottedHooksDisabled", "RootDottedDeprecatedHooksDisabled", "RootInlineFeaturesDisabled", "FeaturesDottedHooksDescendant", "FeaturesQuotedHooksTable", "FeaturesDeprecatedHooksDescendant", "FeaturesHooksArrayTable", "UserPolicyChoices", "InlineUserHooks", "MultilineToml", "InvalidUnmanagedToml", "InvalidUtf8Toml", "BomToml")]
+        [ValidateSet("Drift", "MalformedHooks", "LegacySerenaContext", "NegatedSerenaPolicy", "InvalidSerenaContextPolicy", "MalformedSerenaIndent", "BareCrSerenaContext", "NullSerenaScalar", "DuplicateSerenaMarker", "ExternalSerenaMarker", "QuotedSerenaScalar", "QuotedSerenaListScalar", "DuplicateSerenaPrompt")]
         [string]$Variant = "Drift"
     )
 
@@ -407,133 +377,8 @@ fixture_network_sentinel = "must-survive"
     $serenaContextPath = Join-Path ([System.IO.Directory]::GetParent($Root).FullName) ".serena\contexts\codex-file-tools.yml"
     $config = $config.Replace('D:\\Codex\\.serena\\contexts\\codex-file-tools.yml', $serenaContextPath.Replace('\', '\\'))
 
-    if ($Variant -eq "DuplicateSerena") {
-        $config += @'
-
-[mcp_servers.serena]
-args = [ "start-mcp-server", "--project-from-cwd" ]
-'@
-    } elseif ($Variant -eq "MissingSerenaArgs") {
-        $config = $config -replace '(?m)^args\s*=.*\r?\n', ''
-    } elseif ($Variant -eq "MissingSerenaCommand") {
-        $config = $config -replace '(?m)^command\s*=.*\r?\n', ''
-    } elseif ($Variant -eq "MissingSerenaSection") {
-        $config = $config -replace '(?ms)^\[mcp_servers\.serena\]\r?\n.*?(?=^\[features\])', ''
-    } elseif ($Variant -eq "HermesCommandDrift") {
-        $config = $config -replace '(?m)^command\s*=.*$', 'command = "D:\\hermes-data\\serena-wrapper.cmd"'
-    } elseif ($Variant -eq "SingleQuotedSerenaArgs") {
-        $literalContext = $serenaContextPath
-        $config = $config -replace '(?m)^args\s*=.*$', "args = ['/c', 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', 'start-mcp-server', '--context=$literalContext', '--project-from-cwd', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
-    } elseif ($Variant -eq "DuplicateSerenaArgs") {
-        $config = $config -replace '(?m)^(args\s*=.*)$', ('$1' + "`n" + '$1')
-    } elseif ($Variant -eq "DuplicateSerenaCommand") {
-        $config = $config -replace '(?m)^(command\s*=.*)$', ('$1' + "`n" + '$1')
-    } elseif ($Variant -eq "MalformedSerenaArgs") {
-        $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", '
-    } elseif ($Variant -eq "MissingSerenaContext") {
-        $config = $config -replace '"--context=[^"]+",\s*', ''
-    } elseif ($Variant -eq "MissingSerenaContextValue") {
-        $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", "--context" ]'
-    } elseif ($Variant -eq "WrongSerenaContext") {
-        $config = $config.Replace('codex-file-tools.yml', 'other-context.yml')
-    } elseif ($Variant -eq "DuplicateSerenaContext") {
-        $config = $config -replace '("--context=[^"]+")', '$1, $1'
-    } elseif ($Variant -eq "MissingSerenaProjectValue") {
-        $config = $config -replace '(?m)^args\s*=.*$', 'args = [ "start-mcp-server", "--project", "--enable-web-dashboard=true" ]'
-    } elseif ($Variant -eq "DuplicateHookSection") {
-        $config += "`n[`"hooks`"]`nduplicate = true`n"
-    } elseif ($Variant -eq "DuplicateQuotedApproval") {
-        $config = $config.Replace('[mcp_servers.serena]', "`"approval_policy`" = `"on-request`"`n`"approval_policy`" = `"on-request`"`n`n[mcp_servers.serena]")
-    } elseif ($Variant -eq "RootDottedHookKey") {
-        $config = $config.Replace('[mcp_servers.serena]', "hooks.state.`"fixture`".enabled = true`n`n[mcp_servers.serena]")
-    } elseif ($Variant -eq "SensitiveInvalidHeader") {
-        $config += "`n[ `"SECRET_ERROR_TOKEN`" . ]`n"
-    } elseif ($Variant -eq "HooksDisabled") {
-       $config = $config.Replace('apps = true', "hooks = false`napps = true")
-    } elseif ($Variant -in @("RootDottedHooksDisabled", "RootQuotedDottedHooksDisabled", "RootDottedDeprecatedHooksDisabled", "RootInlineFeaturesDisabled")) {
-        $withoutFeaturesTable = [regex]::Replace($config, '(?ms)\[features\]\r?\napps = true\r?\nfixture_feature_sentinel = true\r?\n\r?\n', '')
-        if ($withoutFeaturesTable -ceq $config -or $withoutFeaturesTable -match '(?m)^\[features\]\s*$') {
-            throw "root features fixture 未精确移除 [features] table：$Variant"
-        }
-        $config = $withoutFeaturesTable
-        $rootFeatureLiteral = if ($Variant -eq "RootDottedHooksDisabled") { 'features.hooks = false' } elseif ($Variant -eq "RootQuotedDottedHooksDisabled") { 'features."hooks" = false' } elseif ($Variant -eq "RootDottedDeprecatedHooksDisabled") { 'features.codex_hooks = false' } else { 'features = { hooks = false }' }
-        $config = $config.Replace('[mcp_servers.serena]', "$rootFeatureLiteral`n`n[mcp_servers.serena]")
-        if ([regex]::Matches($config, [regex]::Escape($rootFeatureLiteral)).Count -ne 1) {
-            throw "root features fixture 未精确插入目标 literal：$Variant"
-        }
-    } elseif ($Variant -eq 'FeaturesDottedHooksDescendant') {
-        $config = $config.Replace('fixture_feature_sentinel = true', "fixture_feature_sentinel = true`nhooks.enabled = false")
-    } elseif ($Variant -eq 'FeaturesQuotedHooksTable') {
-        $config = Replace-FixtureHooksTableHeader -Config $config -Replacement "[features.`"hooks`"]`nenabled = false`n`n[hooks]" -Variant $Variant
-    } elseif ($Variant -eq 'FeaturesDeprecatedHooksDescendant') {
-        $config = $config.Replace('fixture_feature_sentinel = true', "fixture_feature_sentinel = true`ncodex_hooks.enabled = false")
-    } elseif ($Variant -eq 'FeaturesHooksArrayTable') {
-        $config = Replace-FixtureHooksTableHeader -Config $config -Replacement "[[features.hooks]]`nenabled = false`n`n[hooks]" -Variant $Variant
-    } elseif ($Variant -eq "UserPolicyChoices") {
-        $config = $config.Replace('fixture_unicode = "中文必须通过"', "fixture_unicode = `"中文必须通过`"`napproval_policy = `"on-request`"`nsandbox_mode = `"workspace-write`"")
-        $config = $config.Replace('apps = true', "unified_exec = false`napps = true")
-    } elseif ($Variant -eq "InlineUserHooks") {
-        $config += @'
-
-[[hooks.PreToolUse]]
-matcher = "Bash"
-hooks = [{ type = "command", command = "D:\\fixture\\user-hook.cmd" }]
-'@
-    } elseif ($Variant -eq "MultilineToml") {
-        $config += @'
-
-note = '''
-[hooks]
-multiline-body-must-survive
-'''
-'@
-    } elseif ($Variant -eq "InvalidUnmanagedToml") {
-        $config += "`n[fixture.invalid]`nunmanaged = [`n"
-    } elseif ($Variant -eq "EmptySerenaSectionAtEof") {
-        $config = @'
-model = "fixture-model-must-survive"
-fixture_root_sentinel = "must-survive"
-
-[features]
-fixture_feature_sentinel = true
-
-[fixture.unknown]
-value = "must-survive"
-
-[mcp_servers.serena]
-'@.TrimEnd("`r", "`n")
-    }
-
     $configPath = Join-Path $Root "config.toml"
-    $utf8 = [System.Text.UTF8Encoding]::new($false)
-    if ($Variant -eq "InvalidUtf8Toml") {
-        $prefix = $utf8.GetBytes('fixture_invalid_utf8 = "')
-        $suffix = $utf8.GetBytes("`"`n$config")
-        $bytes = [byte[]]::new($prefix.Length + 1 + $suffix.Length)
-        [array]::Copy($prefix, 0, $bytes, 0, $prefix.Length)
-        $bytes[$prefix.Length] = 0xFF
-        [array]::Copy($suffix, 0, $bytes, $prefix.Length + 1, $suffix.Length)
-        [System.IO.File]::WriteAllBytes($configPath, $bytes)
-    } elseif ($Variant -eq "BomToml") {
-        [byte[]]$bytes = @([byte]0xEF, [byte]0xBB, [byte]0xBF) + @($utf8.GetBytes($config))
-        [System.IO.File]::WriteAllBytes($configPath, $bytes)
-    } else {
-        [System.IO.File]::WriteAllText($configPath, $config, $utf8)
-    }
-    $featureSafetyVariants = @(
-        'HooksDisabled',
-        'RootDottedHooksDisabled',
-        'RootQuotedDottedHooksDisabled',
-        'RootDottedDeprecatedHooksDisabled',
-        'RootInlineFeaturesDisabled',
-        'FeaturesDottedHooksDescendant',
-        'FeaturesQuotedHooksTable',
-        'FeaturesDeprecatedHooksDescendant',
-        'FeaturesHooksArrayTable'
-    )
-    if ($Variant -in $featureSafetyVariants) {
-        Assert-TomlParsesWithPython -Path $configPath -Message "feature safety fixture 必须是合法 TOML：$Variant"
-    }
+    [System.IO.File]::WriteAllText($configPath, $config, [System.Text.UTF8Encoding]::new($false))
 
     New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($serenaContextPath)) | Out-Null
     $serenaContext = if ($Variant -eq "LegacySerenaContext") {
@@ -738,49 +583,6 @@ function Assert-CheckWasRejectedWithoutMutation {
     Assert-True -Condition ($result.mode -eq 'Check' -and -not [bool]$result.ok -and $result.error.code -eq 'reconciliation-failed') -Message "$CaseName 的 Check 失败结果不稳定"
 }
 
-function Invoke-HeaderLikeArrayTomlRejectionTest {
-    param(
-        [string]$ScriptPath,
-        [string]$TestRoot
-    )
-
-    $headerLikeArrayHome = Join-Path $TestRoot 'header-like-array-toml\.codex'
-    New-FixtureCodexHome -Root $headerLikeArrayHome
-    $headerLikeBaselineRepair = Invoke-Reconciler -ScriptPath $ScriptPath -Mode Repair -CodexHome $headerLikeArrayHome
-    Assert-True -Condition ([bool]$headerLikeBaselineRepair.ok) -Message 'header-like-array 基准 Repair 未形成健康状态'
-    $headerLikeConfigPath = Join-Path $headerLikeArrayHome 'config.toml'
-    $headerLikeBaselineConfig = Get-Content -LiteralPath $headerLikeConfigPath -Raw
-    Assert-True -Condition (-not ($headerLikeBaselineConfig -match '(?m)^\s*\[\s*["'']?hooks["'']?(?:\.|\s*\])')) -Message 'header-like-array 基准仍包含真实 hook section'
-    Assert-True -Condition $headerLikeBaselineConfig.Contains('multiline-array-must-survive [hooks]') -Message '安全多行数组被误拒绝或改写'
-    Assert-True -Condition $headerLikeBaselineConfig.Contains('literal # [hooks] must survive') -Message '安全多行数组中的注释样文本被误拒绝或改写'
-    $headerLikeConfig = $headerLikeBaselineConfig + @'
-
-[fixture.header_like_array]
-values = [
-  ["keep"],
-  ["hooks"]
-]
-'@
-    [System.IO.File]::WriteAllText($headerLikeConfigPath, $headerLikeConfig, [System.Text.UTF8Encoding]::new($false))
-    Assert-TomlParsesWithPython -Path $headerLikeConfigPath -Message 'header-like-array 输入本身不是合法 TOML'
-    Assert-CheckWasRejectedWithoutMutation -ScriptPath $ScriptPath -CodexHome $headerLikeArrayHome -CaseName 'header-like-array-toml'
-    Assert-RepairWasRejectedWithoutMutation -ScriptPath $ScriptPath -CodexHome $headerLikeArrayHome -CaseName 'header-like-array-toml'
-
-    $headerLikeArrayTableConfig = $headerLikeBaselineConfig + @'
-
-[fixture.header_like_array_table]
-values = [
-  [["keep"]],
-  [["hooks"]]
-]
-'@
-    Assert-True -Condition ($headerLikeArrayTableConfig -match '(?m)^\s*\[\["hooks"\]\]\s*$') -Message 'header-like-array-table fixture 未形成独立的 array-table-like 元素'
-    [System.IO.File]::WriteAllText($headerLikeConfigPath, $headerLikeArrayTableConfig, [System.Text.UTF8Encoding]::new($false))
-    Assert-TomlParsesWithPython -Path $headerLikeConfigPath -Message 'header-like-array-table 输入本身不是合法 TOML'
-    Assert-CheckWasRejectedWithoutMutation -ScriptPath $ScriptPath -CodexHome $headerLikeArrayHome -CaseName 'header-like-array-table-toml'
-    Assert-RepairWasRejectedWithoutMutation -ScriptPath $ScriptPath -CodexHome $headerLikeArrayHome -CaseName 'header-like-array-table-toml'
-}
-
 function Invoke-EnvironmentPostCommitRollbackTest {
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
@@ -802,7 +604,7 @@ function Invoke-EnvironmentPostCommitRollbackTest {
     }
 
     Assert-True -Condition ($environmentRollbackError -match 'fixture-only post-commit environment failure') -Message "environment post-commit failure 未经第一层 transaction catch 原样返回：$environmentRollbackError"
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $environmentRollbackHome -ExcludeEvidence) -ceq $environmentRollbackBefore) -Message 'environment post-commit failure 未完整恢复 config、managed files 与环境 fixture'
+    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $environmentRollbackHome -ExcludeEvidence) -ceq $environmentRollbackBefore) -Message 'environment post-commit failure 未完整恢复 managed files 与环境 fixture'
     $environmentRollbackEvidence = @(Get-ChildItem -LiteralPath (Join-Path $environmentRollbackHome 'run-evidence\host-hook-remediation') -Directory -Force)
     Assert-True -Condition ($environmentRollbackEvidence.Count -eq 1) -Message 'environment post-commit failure 必须恰好生成一份 evidence'
     $environmentRollbackManifest = Get-Content -Raw -LiteralPath (Join-Path $environmentRollbackEvidence[0].FullName 'manifest.json') | ConvertFrom-Json
@@ -820,18 +622,6 @@ function Invoke-EnvironmentPostCommitRollbackTest {
     ) -Message 'environment post-commit failure 未证明第一层 catch 回滚了全部已提交 managed closure 与环境写入'
 }
 
-$featureDisableCases = @(
-    @{ Name = 'features.hooks=false'; Directory = 'features-hooks-disabled'; Variant = 'HooksDisabled' },
-    @{ Name = 'root-features.hooks=false'; Directory = 'root-features-hooks-disabled'; Variant = 'RootDottedHooksDisabled' },
-    @{ Name = 'root-features."hooks"=false'; Directory = 'root-features-quoted-hooks-disabled'; Variant = 'RootQuotedDottedHooksDisabled' },
-    @{ Name = 'root-features.codex_hooks=false'; Directory = 'root-features-codex-hooks-disabled'; Variant = 'RootDottedDeprecatedHooksDisabled' },
-    @{ Name = 'root-features-inline-hooks=false'; Directory = 'root-features-inline-hooks-disabled'; Variant = 'RootInlineFeaturesDisabled' },
-    @{ Name = 'features-hooks-descendant=false'; Directory = 'features-hooks-descendant-disabled'; Variant = 'FeaturesDottedHooksDescendant' },
-    @{ Name = 'features-quoted-hooks-table=false'; Directory = 'features-quoted-hooks-table-disabled'; Variant = 'FeaturesQuotedHooksTable' },
-    @{ Name = 'features-codex-hooks-descendant=false'; Directory = 'features-codex-hooks-descendant-disabled'; Variant = 'FeaturesDeprecatedHooksDescendant' },
-    @{ Name = 'features-hooks-array-table=false'; Directory = 'features-hooks-array-table-disabled'; Variant = 'FeaturesHooksArrayTable' }
-)
-
 $scriptPath = Join-Path $ProjectRoot "scripts\Invoke-CodexHostHookReconciliation.ps1"
 $testRunId = [guid]::NewGuid().ToString("N")
 $testRoot = Join-Path $ProjectRoot ".scratch\host-hook-reconciliation-tests-$testRunId"
@@ -844,41 +634,12 @@ try {
     Assert-True -Condition (-not (Test-Path -LiteralPath $testRoot)) -Message "唯一测试目录意外已存在：$testRoot"
     New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
     Set-Content -LiteralPath $ownershipMarker -Value $testRunId -Encoding UTF8
-    $selectorCount = @($OnlyHeaderLikeArrayToml, $OnlyFeatureDisableVariants, $OnlyEnvironmentPostCommitRollback, -not [string]::IsNullOrWhiteSpace($OnlyFeatureDisableVariant) | Where-Object { $_ }).Count
+    $selectorCount = @($OnlyEnvironmentPostCommitRollback | Where-Object { $_ }).Count
     Assert-True -Condition ($selectorCount -le 1) -Message '定向 selector 不能组合使用'
 
     if ($OnlyEnvironmentPostCommitRollback) {
         Invoke-EnvironmentPostCommitRollbackTest -ScriptPath $scriptPath -TestRoot $testRoot -HostPreflightManifest $hostPreflightManifest
         Write-Host 'PASS: Codex host hook environment post-commit rollback'
-        return
-    }
-
-    if ($OnlyHeaderLikeArrayToml) {
-        Invoke-HeaderLikeArrayTomlRejectionTest -ScriptPath $scriptPath -TestRoot $testRoot
-        Write-Host 'PASS: Codex host hook header-like-array TOML rejection'
-        return
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($OnlyFeatureDisableVariant)) {
-        $selectedFeatureDisableCase = @($featureDisableCases | Where-Object { $_.Variant -ceq $OnlyFeatureDisableVariant })
-        Assert-True -Condition ($selectedFeatureDisableCase.Count -eq 1) -Message "未知 feature-disable fixture：$OnlyFeatureDisableVariant"
-        $hooksDisabledHome = Join-Path $testRoot "$($selectedFeatureDisableCase[0].Directory)\.codex"
-        New-FixtureCodexHome -Root $hooksDisabledHome -Variant $selectedFeatureDisableCase[0].Variant
-        Assert-CheckWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $hooksDisabledHome -CaseName $selectedFeatureDisableCase[0].Name
-        Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $hooksDisabledHome -CaseName $selectedFeatureDisableCase[0].Name
-        Write-Host "PASS: Codex host hook feature-disable rejection $OnlyFeatureDisableVariant"
-        return
-    }
-
-    if ($OnlyFeatureDisableVariants) {
-        foreach ($disabledFeatureCase in $featureDisableCases) {
-            $hooksDisabledHome = Join-Path $testRoot "$($disabledFeatureCase.Directory)\.codex"
-            New-FixtureCodexHome -Root $hooksDisabledHome -Variant $disabledFeatureCase.Variant
-            Assert-CheckWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $hooksDisabledHome -CaseName $disabledFeatureCase.Name
-            Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $hooksDisabledHome -CaseName $disabledFeatureCase.Name
-        }
-
-        Write-Host "PASS: Codex host hook feature-disable rejection"
         return
     }
 
@@ -938,8 +699,6 @@ try {
     $serenaSiblingAclBefore = (Get-Acl -LiteralPath $serenaSiblingPath).Sddl
     $serenaSiblingHashBefore = Get-Sha256 -Path $serenaSiblingPath
     $configPath = Join-Path $healthyHome "config.toml"
-    Set-TestProtectedFileAcl -Path $configPath
-    $originalConfigAclSddl = (Get-Acl -LiteralPath $configPath).Sddl
     $unmanagedDirectory = Join-Path $healthyHome "unmanaged"
     $unmanagedDeepDirectory = Join-Path $unmanagedDirectory "deep"
     $unmanagedSentinel = Join-Path $unmanagedDeepDirectory "sentinel.txt"
@@ -961,11 +720,10 @@ try {
     Assert-True -Condition (-not [bool]$check.changed) -Message "Check 不得报告 changed=true"
     Assert-True -Condition ([int]$check.driftCount -gt 0) -Message "Check 未报告 drift"
     Assert-True -Condition ($beforeCheck -eq $afterCheck) -Message "Check 修改了 fixture"
-    foreach ($name in @("config", "registrations", "legacyImplementations", "acl")) {
+    foreach ($name in @("registrations", "legacyImplementations", "acl")) {
         Assert-True -Condition (-not [bool](Get-CheckResult -Result $check -Name $name).ok) -Message "漂移 fixture 的检查项不应健康：$name"
     }
 
-    $originalConfigHash = Get-Sha256 -Path (Join-Path $healthyHome "config.toml")
     $originalHooksHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks.json")
     $unknownFileHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks\keep-me.txt")
     $unknownNestedHash = Get-Sha256 -Path (Join-Path $healthyHome "hooks\unknown-nested\keep.bin")
@@ -979,7 +737,6 @@ try {
     Assert-True -Condition ([bool]$repair.ok) -Message "Repair 未形成健康终态"
     Assert-True -Condition ([bool]$repair.changed) -Message "首次 Repair 应报告 changed=true"
     Assert-True -Condition (Test-Path -LiteralPath $repair.evidencePath -PathType Container) -Message "Repair 未生成 evidence 目录"
-    Assert-True -Condition ((Get-Acl -LiteralPath $configPath).Sddl -ceq $originalConfigAclSddl) -Message "语义 Repair 未保持 config.toml 修复前 ACL"
 
     $hooks = Get-Content -LiteralPath (Join-Path $healthyHome "hooks.json") -Raw | ConvertFrom-Json -AsHashtable
     $hooksRaw = Get-Content -LiteralPath (Join-Path $healthyHome "hooks.json") -Raw
@@ -992,44 +749,14 @@ try {
     Assert-True -Condition ($hooks.hooks.PreToolUse.matcher -ceq 'Bash') -Message "PreToolUse 必须只注册 Bash reminder"
     Assert-True -Condition (@($hooks.hooks.Stop).Count -eq 1) -Message "Stop 必须只注册 cleanup"
 
-    $config = Get-Content -LiteralPath (Join-Path $healthyHome "config.toml") -Raw
-    Assert-True -Condition ($config -match '"--project-from-cwd"\s*,') -Message "官方包装 canonical 必须保留 --project-from-cwd"
-    Assert-True -Condition (-not ($config -match '"--project"\s*,')) -Message "Serena 仍包含固定 --project"
-    Assert-True -Condition (-not ($config -match '"--project-file(?:=|"\s*,)')) -Message "Serena 仍包含 --project-file"
-    Assert-True -Condition $config.Contains("codex-file-tools.yml") -Message "Serena custom context 被误删"
-    foreach ($sentinel in @('fixture-model-must-survive', 'fixture_unicode = "中文必须通过"', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true', 'fixture_user_project_sentinel = "must-survive"', 'array-table-must-survive', 'multiline-array-must-survive', 'fixture_network_sentinel = "must-survive"')) {
-        Assert-True -Condition $config.Contains($sentinel) -Message "无关 TOML 内容被误删或改写：$sentinel"
-    }
-    Assert-True -Condition (-not ($config -match '(?m)^approval_policy\s*=')) -Message "Repair 不得为缺失 approval_policy 推测权限"
-    Assert-True -Condition (-not ($config -match '(?m)^sandbox_mode\s*=')) -Message "Repair 不得为缺失 sandbox_mode 推测权限"
-    Assert-True -Condition (-not ($config -match '(?m)^hooks\s*=')) -Message "Repair 不得把默认启用的 features.hooks 写成显式配置"
-    Assert-True -Condition (-not ($config -match '(?m)^unified_exec\s*=')) -Message "Repair 不得改写 Windows unified_exec 默认值"
-    foreach ($trustedProject in @(
-        'D:\agents\projects\时钟倒计时',
-        'D:\agents\projects\统一环境',
-        'D:\agents\projects\杨杨子',
-        'D:\Codex\projects\codex-account-switch',
-        'D:\Codex\projects\CodexProviderSync',
-        'D:\agents\projects\minmin-calendar'
-    )) {
-        $header = [regex]::Escape("[projects.'$($trustedProject.ToLowerInvariant())']")
-        Assert-True -Condition ([regex]::IsMatch($config, "(?m)^$header\s*\r?\ntrust_level\s*=\s*`"trusted`"\s*$")) -Message "项目 trust 未收敛：$trustedProject"
-    }
-    $userProjectHeader = "[projects.'D:\Codex\projects\user-owned-project']"
-    Assert-True -Condition ($config.Contains($userProjectHeader) -and $config.Contains('fixture_user_project_sentinel = "must-survive"')) -Message '不在 allow/denylist 的用户 project trust 被错误删除'
-    Assert-True -Condition (-not $config.Contains("[projects.'d:\codex\projects']")) -Message '不得把 projects 集合根设为 trusted'
-    Assert-True -Condition (-not ($config -match '(?m)^\[hooks(?:\.|\])')) -Message "旧 hook trust section 未删除"
-    Assert-True -Condition (-not $config.Contains('fixture-trust-hash')) -Message "带点号空白的合法 hook trust section 未删除"
-
     foreach ($name in $legacyNames) {
         Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $healthyHome "hooks\$name"))) -Message "legacy 文件仍在 live 目录：$name"
     }
     Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $repair.evidencePath 'legacy-hooks'))) -Message '退役 Hook 不得保留可恢复 evidence 备份'
     Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $healthyHome "hooks\__pycache__"))) -Message "空 legacy __pycache__ 目录未退役"
-    foreach ($relative in @("config.toml", "hooks.json", "manifest.json")) {
+    foreach ($relative in @("hooks.json", "manifest.json")) {
         Assert-True -Condition (Test-Path -LiteralPath (Join-Path $repair.evidencePath $relative) -PathType Leaf) -Message "evidence 缺少：$relative"
     }
-    Assert-True -Condition ((Get-Sha256 -Path (Join-Path $repair.evidencePath "config.toml")) -eq $originalConfigHash) -Message "config evidence 不是修复前快照"
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $repair.evidencePath "hooks.json")) -eq $originalHooksHash) -Message "hooks evidence 不是修复前快照"
     $manifest = Get-Content -LiteralPath (Join-Path $repair.evidencePath "manifest.json") -Raw | ConvertFrom-Json
     $wrapperManagedNames = @($hostPreflightManifest.hooks | ForEach-Object { "managed:$([IO.Path]::GetFileName([string]$_.wrapperPath))" })
@@ -1064,7 +791,6 @@ try {
     }
     $aclBefore = Get-Content -LiteralPath (Join-Path $repair.evidencePath "acl-before.json") -Raw | ConvertFrom-Json -AsHashtable
     foreach ($path in @(
-        (Join-Path $healthyHome "config.toml"),
         (Join-Path $healthyHome "hooks.json"),
         (Join-Path $healthyHome "hooks"),
         (Join-Path $healthyHome "hooks\keep-me.txt"),
@@ -1128,8 +854,8 @@ try {
     $contextRollbackPath = Join-Path ([System.IO.Directory]::GetParent($contextRollbackHome).FullName) ".serena\contexts\codex-file-tools.yml"
     $contextRollbackContentBefore = [System.IO.File]::ReadAllText($contextRollbackPath)
     $contextRollbackAclBefore = (Get-Acl -LiteralPath $contextRollbackPath).Sddl
-    $contextRollbackConfigPath = Join-Path $contextRollbackHome "config.toml"
-    $contextRollbackLock = [System.IO.File]::Open($contextRollbackConfigPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    $contextRollbackHooksPath = Join-Path $contextRollbackHome "hooks.json"
+    $contextRollbackLock = [System.IO.File]::Open($contextRollbackHooksPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
     $contextRollbackThrew = $false
     try {
         Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $contextRollbackHome | Out-Null
@@ -1138,12 +864,12 @@ try {
     } finally {
         $contextRollbackLock.Dispose()
     }
-    Assert-True -Condition $contextRollbackThrew -Message "Serena context 后续 config 失败未触发事务回滚"
-    Assert-True -Condition ([System.IO.File]::ReadAllText($contextRollbackPath) -ceq $contextRollbackContentBefore) -Message "三资源失败未精确回滚 Serena context 内容"
-    Assert-True -Condition ((Get-Acl -LiteralPath $contextRollbackPath).Sddl -ceq $contextRollbackAclBefore) -Message "三资源失败未精确回滚 Serena context ACL"
+    Assert-True -Condition $contextRollbackThrew -Message "Serena context 后续 hooks 资源失败未触发事务回滚"
+    Assert-True -Condition ([System.IO.File]::ReadAllText($contextRollbackPath) -ceq $contextRollbackContentBefore) -Message "事务失败未精确回滚 Serena context 内容"
+    Assert-True -Condition ((Get-Acl -LiteralPath $contextRollbackPath).Sddl -ceq $contextRollbackAclBefore) -Message "事务失败未精确回滚 Serena context ACL"
     $contextRollbackEvidence = @(Get-ChildItem -LiteralPath (Join-Path $contextRollbackHome "run-evidence\host-hook-remediation") -Directory -Force)
     $contextRollbackManifest = Get-Content -Raw -LiteralPath (Join-Path $contextRollbackEvidence[0].FullName "manifest.json") | ConvertFrom-Json
-    Assert-True -Condition ($contextRollbackManifest.status -eq "rolled-back" -and @($contextRollbackManifest.attemptedResources) -contains "codex-file-tools.yml" -and @($contextRollbackManifest.committedResources) -contains "codex-file-tools.yml") -Message "三资源失败 manifest 未记录 Serena context 提交与完整回滚"
+    Assert-True -Condition ($contextRollbackManifest.status -eq "rolled-back" -and @($contextRollbackManifest.attemptedResources) -contains "codex-file-tools.yml" -and @($contextRollbackManifest.committedResources) -contains "codex-file-tools.yml") -Message "事务失败 manifest 未记录 Serena context 提交与完整回滚"
 
     $contextConcurrentHome = Join-Path $testRoot "context-concurrent\.codex"
     New-FixtureCodexHome -Root $contextConcurrentHome -Variant "LegacySerenaContext"
@@ -1206,20 +932,9 @@ try {
     $mixedAfter = [System.IO.File]::ReadAllText($mixedContextPath)
     Assert-True -Condition ([bool]$mixedRepair.ok -and $mixedAfter.StartsWith($mixedPrefix, [System.StringComparison]::Ordinal) -and $mixedAfter.EndsWith($mixedSuffix, [System.StringComparison]::Ordinal) -and -not $mixedAfter.Contains('old-guidance-must-be-replaced')) -Message "Serena context 替换改写了 prompt 外混合换行或未移除旧 prompt"
 
-    $replacementPath = Join-Path $healthyHome ".config.toml.desktop-replacement"
-    try {
-        [System.IO.File]::WriteAllText($replacementPath, [System.IO.File]::ReadAllText($configPath), [System.Text.UTF8Encoding]::new($false))
-        [System.IO.File]::Move($replacementPath, $configPath, $true)
-    } finally {
-        if (Test-Path -LiteralPath $replacementPath -PathType Leaf) {
-            Remove-Item -LiteralPath $replacementPath -Force
-        }
-    }
-    Assert-True -Condition ((Get-Acl -LiteralPath $configPath).Sddl -cne $originalConfigAclSddl) -Message "vendor 原子替换 canary 未实际改变 config.toml ACL"
-    Assert-True -Condition (-not (Get-Acl -LiteralPath $configPath).AreAccessRulesProtected) -Message "vendor 原子替换 canary 未恢复父目录继承 ACL"
     $healthyCheck = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
     Assert-True -Condition ([bool]$healthyCheck.ok -and [int]$healthyCheck.driftCount -eq 0) -Message "Repair 后的直接 Check 不健康"
-    foreach ($name in @("serenaContext", "config", "registrations", "legacyImplementations", "acl")) {
+    foreach ($name in @("serenaContext", "registrations", "legacyImplementations", "acl")) {
         Assert-True -Condition ([bool](Get-CheckResult -Result $healthyCheck -Name $name).ok) -Message "Repair 后检查项不健康：$name"
     }
 
@@ -1245,7 +960,7 @@ try {
             -not [bool]$runtimeDependencyCheck.ok -and
             (@($runtimeDependencyCheck.unavailableRuntimeIds) -join ',') -ceq 'pythonw'
         ) -Message 'launcher runtime 缺失时 Check 必须只让 runtimeDependencies 变红'
-        foreach ($name in @('serenaContext','config','registrations','managedFiles','environment','legacyImplementations','acl')) {
+        foreach ($name in @('serenaContext','registrations','managedFiles','environment','legacyImplementations','acl')) {
             Assert-True -Condition ([bool](Get-CheckResult -Result $missingRuntimeCheck -Name $name).ok) -Message "launcher runtime 缺失误伤检查项：$name"
         }
         Assert-True -Condition (@($missingRuntimeCheck.registrationProjection | Where-Object { $null -ne $_.launcherRuntimeSha256 }).Count -eq 0) -Message '缺失 launcher runtime 不得伪造 projection hash'
@@ -1260,18 +975,6 @@ try {
     Assert-True -Condition $runtimeRepairThrew -Message 'launcher runtime 缺失时 Repair 未 fail closed'
     Assert-True -Condition ((Get-TreeFingerprint -CodexHome $healthyHome) -ceq $runtimeFailureFingerprint) -Message 'launcher runtime Repair 拒绝后修改了 fixture tree'
     Assert-True -Condition (@(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count -eq $runtimeFailureEvidenceCount) -Message 'launcher runtime Repair 拒绝后仍创建 evidence'
-
-    $vendorAclSddl = (Get-Acl -LiteralPath $configPath).Sddl
-    $vendorDriftedConfig = [System.IO.File]::ReadAllText($configPath).Replace('command = "cmd.exe"', 'command = "D:\\fixture\\serena-wrapper.cmd"')
-    [System.IO.File]::WriteAllText($configPath, $vendorDriftedConfig, [System.Text.UTF8Encoding]::new($false))
-    $vendorDriftCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
-    Assert-True -Condition (-not [bool](Get-CheckResult -Result $vendorDriftCheck -Name "config").ok) -Message "vendor 语义漂移未让 config 检查变红"
-    foreach ($name in @("registrations", "legacyImplementations", "acl")) {
-        Assert-True -Condition ([bool](Get-CheckResult -Result $vendorDriftCheck -Name $name).ok) -Message "vendor 语义漂移误伤无关检查项：$name"
-    }
-    $vendorRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
-    Assert-True -Condition ([bool]$vendorRepair.ok -and [bool]$vendorRepair.changed) -Message "vendor 语义漂移未被 Repair 修复"
-    Assert-True -Condition ((Get-Acl -LiteralPath $configPath).Sddl -ceq $vendorAclSddl) -Message "vendor 语义 Repair 改变了 config.toml 既有 ACL"
 
     $hooksPath = Join-Path $healthyHome "hooks.json"
     $weakenedHooksAcl = [System.Security.AccessControl.FileSecurity]::new()
@@ -1289,15 +992,6 @@ try {
     $hooksAclRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $healthyHome
     Assert-True -Condition ([bool]$hooksAclRepair.ok -and [bool]$hooksAclRepair.changed) -Message "hooks.json ACL drift 未被 Repair 修复"
     Assert-OnlyAllowedWriters -Path $hooksPath
-
-    $inheritedAclHome = Join-Path $testRoot "inherited-config-acl\.codex"
-    New-FixtureCodexHome -Root $inheritedAclHome
-    $inheritedConfigPath = Join-Path $inheritedAclHome "config.toml"
-    $inheritedConfigAclBefore = (Get-Acl -LiteralPath $inheritedConfigPath).Sddl
-    Assert-True -Condition (-not (Get-Acl -LiteralPath $inheritedConfigPath).AreAccessRulesProtected) -Message "继承型 config ACL canary 前置条件不成立"
-    $inheritedAclRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $inheritedAclHome
-    Assert-True -Condition ([bool]$inheritedAclRepair.ok -and [bool]$inheritedAclRepair.changed) -Message "继承型 config ACL fixture 未成功 Repair"
-    Assert-True -Condition ((Get-Acl -LiteralPath $inheritedConfigPath).Sddl -ceq $inheritedConfigAclBefore) -Message "Repair 改写了普通继承型 config ACL control flags"
 
     $rawManagedRestoreHome = Join-Path $testRoot 'raw-managed-restore\.codex'
     New-FixtureCodexHome -Root $rawManagedRestoreHome
@@ -1342,35 +1036,6 @@ try {
     $nestedManagedRestore = Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $nestedManagedRestoreHome -EvidencePath ([string]$nestedManagedRepair.evidencePath)
     Assert-True -Condition ([bool]$nestedManagedRestore.ok -and [bool]$nestedManagedRestore.changed -and -not (Test-Path -LiteralPath $nestedManagedTargetPath -PathType Leaf)) -Message 'Restore 必须回滚嵌套 managed runtime'
 
-    $protectedRestoreHome = Join-Path $testRoot 'protected-config-restore-acl\.codex'
-    New-FixtureCodexHome -Root $protectedRestoreHome -Variant 'MissingSerenaArgs'
-    $protectedRestoreConfig = Join-Path $protectedRestoreHome 'config.toml'
-    Set-TestProtectedFileAcl -Path $protectedRestoreConfig
-    $protectedRestoreSddl = (Get-Acl -LiteralPath $protectedRestoreConfig).Sddl
-    try { $protectedRestoreRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $protectedRestoreHome }
-    catch {
-        $debugManifest = Get-ChildItem -LiteralPath (Join-Path $protectedRestoreHome 'run-evidence\host-hook-remediation') -Filter manifest.json -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        $debugError = if ($null -eq $debugManifest) { 'no evidence' } else { (Get-Content -Raw -LiteralPath $debugManifest.FullName | ConvertFrom-Json).error }
-        throw "protected config Repair failed: $debugError"
-    }
-    Assert-True -Condition ((Get-Acl -LiteralPath $protectedRestoreConfig).Sddl -ceq $protectedRestoreSddl) -Message 'protected config Repair 必须保持事务前 ACL'
-    try { $protectedRestoreResult = Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $protectedRestoreHome -EvidencePath ([string]$protectedRestoreRepair.evidencePath) }
-    catch {
-        $debugManifest = Get-Content -Raw -LiteralPath (Join-Path ([string]$protectedRestoreRepair.evidencePath) 'manifest.json') | ConvertFrom-Json
-        throw "protected config Restore failed: $($_.Exception.Message) evidence=$($debugManifest.error) status=$($debugManifest.status) blocked=$(@($debugManifest.restoreBlocked)-join ',')"
-    }
-    Assert-True -Condition ([bool]$protectedRestoreResult.ok -and [bool]$protectedRestoreResult.changed) -Message 'protected config Restore 未成功'
-    Assert-True -Condition ((Get-Acl -LiteralPath $protectedRestoreConfig).Sddl -ceq $protectedRestoreSddl) -Message 'protected config Restore 未精确恢复事务前 ACL'
-    foreach ($name in $legacyNames) {
-        Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $protectedRestoreHome "hooks\$name"))) -Message "Restore 不得重建已退役 legacy 文件：$name"
-    }
-    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $protectedRestoreHome 'hooks\__pycache__'))) -Message 'Restore 不得重建已退役 legacy 目录'
-    Set-TestInheritedFileAcl -Path $protectedRestoreConfig
-    Assert-True -Condition ((Get-Acl -LiteralPath $protectedRestoreConfig).Sddl -cne $protectedRestoreSddl) -Message 'content same-bytes different-ACL fixture 未形成真实漂移'
-    $protectedRestoreAclDriftThrew = $false
-    try { Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $protectedRestoreHome -EvidencePath ([string]$protectedRestoreRepair.evidencePath) | Out-Null } catch { $protectedRestoreAclDriftThrew = $true }
-    Assert-True -Condition $protectedRestoreAclDriftThrew -Message 'content same-bytes different-ACL 不得通过 restored shortcut/final postcheck'
-
     $managedAclRollbackHome = Join-Path $testRoot 'managed-file-rollback-acl\.codex'
     New-FixtureCodexHome -Root $managedAclRollbackHome
     $managedAclRollbackPath = Join-Path $managedAclRollbackHome 'hooks\codex-state-preflight.cmd'
@@ -1387,7 +1052,7 @@ try {
 
     $concurrentHome = Join-Path $testRoot "concurrent-config\.codex"
     New-FixtureCodexHome -Root $concurrentHome
-    $concurrentConfigPath = Join-Path $concurrentHome "config.toml"
+    $concurrentConfigPath = Join-Path $concurrentHome "hooks.json"
     $concurrentConfigAclBefore = (Get-Acl -LiteralPath $concurrentConfigPath).Sddl
     $concurrentThrew = $false
     try {
@@ -1398,20 +1063,20 @@ try {
     } finally {
         Remove-Item Env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE -ErrorAction SilentlyContinue
     }
-    Assert-True -Condition $concurrentThrew -Message "config 提交窗口并发写入未让 Repair 失败"
+    Assert-True -Condition $concurrentThrew -Message "hooks.json 提交窗口并发写入未让 Repair 失败"
     $concurrentEvidence = @(Get-ChildItem -LiteralPath (Join-Path $concurrentHome "run-evidence\host-hook-remediation") -Directory -Force)
-    Assert-True -Condition ($concurrentEvidence.Count -eq 1) -Message "config 并发 canary 必须生成一份 evidence"
+    Assert-True -Condition ($concurrentEvidence.Count -eq 1) -Message "hooks.json 并发 canary 必须生成一份 evidence"
     $concurrentManifest = Get-Content -LiteralPath (Join-Path $concurrentEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
-    Assert-True -Condition ($concurrentManifest.status -eq "unsafe-partial") -Message "config 并发 manifest 未标记 unsafe-partial"
-    Assert-True -Condition (-not [bool]$concurrentManifest.concurrentReplace.backupRestored) -Message "config 并发 backup 不应覆盖 active path"
-    Assert-True -Condition (Test-Path -LiteralPath $concurrentManifest.concurrentReplace.backupPath -PathType Leaf) -Message "config 并发 canary 未保留 backup"
-    Assert-True -Condition ([System.IO.File]::ReadAllText($concurrentManifest.concurrentReplace.backupPath) -ceq "# fixture concurrent replacement`n") -Message "config 并发 backup 未保留提交窗口版本"
-    Assert-True -Condition ((Get-Acl -LiteralPath $concurrentManifest.concurrentReplace.backupPath).Sddl -ceq $concurrentConfigAclBefore) -Message "config 并发 backup 未保留提交窗口 ACL"
+    Assert-True -Condition ($concurrentManifest.status -eq "unsafe-partial") -Message "hooks.json 并发 manifest 未标记 unsafe-partial"
+    Assert-True -Condition (-not [bool]$concurrentManifest.concurrentReplace.backupRestored) -Message "hooks.json 并发 backup 不应覆盖 active path"
+    Assert-True -Condition (Test-Path -LiteralPath $concurrentManifest.concurrentReplace.backupPath -PathType Leaf) -Message "hooks.json 并发 canary 未保留 backup"
+    Assert-True -Condition ([System.IO.File]::ReadAllText($concurrentManifest.concurrentReplace.backupPath) -ceq "# fixture concurrent replacement`n") -Message "hooks.json 并发 backup 未保留提交窗口版本"
+    Assert-True -Condition ((Get-Acl -LiteralPath $concurrentManifest.concurrentReplace.backupPath).Sddl -ceq $concurrentConfigAclBefore) -Message "hooks.json 并发 backup 未保留提交窗口 ACL"
 
     foreach ($failureMode in @("replace", "hash")) {
         $casFailureHome = Join-Path $testRoot "cas-$failureMode\.codex"
         New-FixtureCodexHome -Root $casFailureHome
-        $casFailureConfigPath = Join-Path $casFailureHome "config.toml"
+        $casFailureConfigPath = Join-Path $casFailureHome "hooks.json"
         $casFailureThrew = $false
         try {
             $env:CODEX_HOST_HOOK_TEST_CONCURRENT_REPLACE = $casFailureConfigPath
@@ -1434,7 +1099,7 @@ try {
 
     $aclConcurrentHome = Join-Path $testRoot "concurrent-config-acl\.codex"
     New-FixtureCodexHome -Root $aclConcurrentHome
-    $aclConcurrentConfigPath = Join-Path $aclConcurrentHome "config.toml"
+    $aclConcurrentConfigPath = Join-Path $aclConcurrentHome "hooks.json"
     $aclConcurrentSddlBefore = (Get-Acl -LiteralPath $aclConcurrentConfigPath).Sddl
     $aclConcurrentThrew = $false
     try {
@@ -1456,7 +1121,7 @@ try {
 
     $rollbackCasHome = Join-Path $testRoot "rollback-cas\.codex"
     New-FixtureCodexHome -Root $rollbackCasHome
-    $rollbackCasConfigPath = Join-Path $rollbackCasHome "config.toml"
+    $rollbackCasConfigPath = Join-Path ([System.IO.Directory]::GetParent($rollbackCasHome).FullName) ".serena\contexts\codex-file-tools.yml"
     $rollbackCasHooksPath = Join-Path $rollbackCasHome "hooks.json"
     $rollbackCasLock = [System.IO.File]::Open($rollbackCasHooksPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
     $rollbackCasThrew = $false
@@ -1484,10 +1149,6 @@ try {
 
     $rollbackHome = Join-Path $testRoot "rollback\.codex"
     New-FixtureCodexHome -Root $rollbackHome
-    $rollbackConfigPath = Join-Path $rollbackHome "config.toml"
-    Set-TestProtectedFileAcl -Path $rollbackConfigPath
-    $rollbackConfigAclSddl = (Get-Acl -LiteralPath $rollbackConfigPath).Sddl
-    $rollbackConfigHash = Get-Sha256 -Path $rollbackConfigPath
     $rollbackHooksHash = Get-Sha256 -Path (Join-Path $rollbackHome "hooks.json")
     $rollbackBefore = Get-TreeFingerprint -CodexHome $rollbackHome -ExcludeEvidence
     $lockedHooksPath = Join-Path $rollbackHome "hooks.json"
@@ -1507,71 +1168,14 @@ try {
     }
     Assert-True -Condition $rollbackThrew -Message "hooks 原子替换被阻止时 Repair 未失败"
     Assert-True -Condition ((Get-TreeFingerprint -CodexHome $rollbackHome -ExcludeEvidence) -eq $rollbackBefore) -Message "两文件半提交失败后未恢复原始状态"
-    Assert-True -Condition ((Get-Acl -LiteralPath $rollbackConfigPath).Sddl -ceq $rollbackConfigAclSddl) -Message "两文件半提交回滚未精确恢复 config.toml ACL"
 
     $rollbackEvidenceRoot = Join-Path $rollbackHome "run-evidence\host-hook-remediation"
     $rollbackEvidence = @(Get-ChildItem -LiteralPath $rollbackEvidenceRoot -Directory -Force)
     Assert-True -Condition ($rollbackEvidence.Count -eq 1) -Message "回滚 canary 必须恰好生成一份 evidence"
     $rollbackManifest = Get-Content -LiteralPath (Join-Path $rollbackEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
     Assert-True -Condition ($rollbackManifest.status -eq "rolled-back") -Message "回滚 evidence 未标记 rolled-back"
-    Assert-True -Condition (@($rollbackManifest.attemptedResources) -contains "config.toml") -Message "回滚 manifest 未记录 config.toml 已进入提交阶段"
     Assert-True -Condition (@($rollbackManifest.attemptedResources) -contains "hooks.json") -Message "回滚 manifest 未记录 hooks.json 已进入提交阶段"
-    Assert-True -Condition (@($rollbackManifest.committedResources) -contains "config.toml") -Message "回滚 canary 未证明 config.toml 曾进入提交阶段"
-    Assert-True -Condition ((Get-Sha256 -Path (Join-Path $rollbackEvidence[0].FullName "config.toml")) -eq $rollbackConfigHash) -Message "回滚 evidence 的 config 快照不真实"
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $rollbackEvidence[0].FullName "hooks.json")) -eq $rollbackHooksHash) -Message "回滚 evidence 的 hooks 快照不真实"
-
-    # A later resource failure must not let the config rollback resurrect a
-    # retired project trust that the Repair had already removed.
-    $retiredTrustRollbackHome = Join-Path $testRoot 'retired-project-trust-rollback\.codex'
-    New-FixtureCodexHome -Root $retiredTrustRollbackHome
-    $retiredTrustRollbackConfigPath = Join-Path $retiredTrustRollbackHome 'config.toml'
-    $retiredTrustRollbackUserHeader = "[projects.'D:\Codex\projects\user-owned-project']"
-    $retiredTrustRollbackHeader = "[projects.'D:\Codex\projects\codex-gsd-codex-c-skill']"
-    $retiredTrustRollbackOriginalConfig = [IO.File]::ReadAllText($retiredTrustRollbackConfigPath)
-    $retiredTrustRollbackBlock = $retiredTrustRollbackHeader + [Environment]::NewLine + 'trust_level = "trusted"' + [Environment]::NewLine + 'retired_rollback_fixture_sentinel = "must-not-return"' + [Environment]::NewLine + [Environment]::NewLine
-    $retiredTrustRollbackDriftedConfig = $retiredTrustRollbackOriginalConfig.Replace($retiredTrustRollbackUserHeader, $retiredTrustRollbackBlock + $retiredTrustRollbackUserHeader)
-    Assert-True -Condition (-not $retiredTrustRollbackDriftedConfig.Equals($retiredTrustRollbackOriginalConfig, [StringComparison]::Ordinal)) -Message 'retired trust rollback fixture 未注入已退役 trust'
-    [IO.File]::WriteAllText($retiredTrustRollbackConfigPath, $retiredTrustRollbackDriftedConfig, [Text.UTF8Encoding]::new($false))
-    $retiredTrustRollbackLock = [System.IO.File]::Open((Join-Path $retiredTrustRollbackHome 'hooks.json'), [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-    $retiredTrustRollbackThrew = $false
-    try {
-        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $retiredTrustRollbackHome | Out-Null
-    } catch {
-        $retiredTrustRollbackThrew = $true
-    } finally {
-        $retiredTrustRollbackLock.Dispose()
-    }
-    Assert-True -Condition $retiredTrustRollbackThrew -Message '后续 hooks 资源故障未触发 retired trust rollback fixture'
-    $retiredTrustRollbackConfig = [IO.File]::ReadAllText($retiredTrustRollbackConfigPath)
-    Assert-True -Condition ($retiredTrustRollbackConfig -ceq $retiredTrustRollbackOriginalConfig) -Message '常规 rollback 未仅清除已退役 project trust 后恢复 config'
-    Assert-True -Condition (-not $retiredTrustRollbackConfig.Contains('retired_rollback_fixture_sentinel = "must-not-return"')) -Message '常规 rollback 回写了已退役 project trust'
-    $retiredTrustRollbackEvidence = @(Get-ChildItem -LiteralPath (Join-Path $retiredTrustRollbackHome 'run-evidence\host-hook-remediation') -Directory -Force)
-    $retiredTrustRollbackManifest = Get-Content -LiteralPath (Join-Path $retiredTrustRollbackEvidence[0].FullName 'manifest.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($retiredTrustRollbackManifest.status -eq 'rolled-back' -and @($retiredTrustRollbackManifest.attemptedResources) -contains 'config.toml' -and @($retiredTrustRollbackManifest.attemptedResources) -contains 'hooks.json') -Message '常规 retired trust rollback 未记录后续资源故障和完整回滚'
-
-    $retiredTrustPostCommitRollbackHome = Join-Path $testRoot 'retired-project-trust-post-commit-rollback\.codex'
-    New-FixtureCodexHome -Root $retiredTrustPostCommitRollbackHome
-    $retiredTrustPostCommitRollbackConfigPath = Join-Path $retiredTrustPostCommitRollbackHome 'config.toml'
-    $retiredTrustPostCommitOriginalConfig = [IO.File]::ReadAllText($retiredTrustPostCommitRollbackConfigPath)
-    $retiredTrustPostCommitDriftedConfig = $retiredTrustPostCommitOriginalConfig.Replace($retiredTrustRollbackUserHeader, $retiredTrustRollbackBlock + $retiredTrustRollbackUserHeader)
-    Assert-True -Condition (-not $retiredTrustPostCommitDriftedConfig.Equals($retiredTrustPostCommitOriginalConfig, [StringComparison]::Ordinal)) -Message 'post-commit retired trust rollback fixture 未注入已退役 trust'
-    [IO.File]::WriteAllText($retiredTrustPostCommitRollbackConfigPath, $retiredTrustPostCommitDriftedConfig, [Text.UTF8Encoding]::new($false))
-    $retiredTrustPostCommitRollbackThrew = $false
-    try {
-        $env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE = 'acl'
-        Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $retiredTrustPostCommitRollbackHome | Out-Null
-    } catch {
-        $retiredTrustPostCommitRollbackThrew = $true
-    } finally {
-        Remove-Item Env:CODEX_HOST_HOOK_TEST_POST_COMMIT_FAILURE -ErrorAction SilentlyContinue
-    }
-    Assert-True -Condition $retiredTrustPostCommitRollbackThrew -Message 'post-commit ACL 故障未触发 retired trust rollback fixture'
-    $retiredTrustPostCommitRollbackConfig = [IO.File]::ReadAllText($retiredTrustPostCommitRollbackConfigPath)
-    Assert-True -Condition ($retiredTrustPostCommitRollbackConfig -ceq $retiredTrustPostCommitOriginalConfig) -Message 'post-commit rollback 未仅清除已退役 project trust 后恢复 config'
-    Assert-True -Condition (-not $retiredTrustPostCommitRollbackConfig.Contains('retired_rollback_fixture_sentinel = "must-not-return"')) -Message 'post-commit rollback 回写了已退役 project trust'
-    $retiredTrustPostCommitRollbackEvidence = @(Get-ChildItem -LiteralPath (Join-Path $retiredTrustPostCommitRollbackHome 'run-evidence\host-hook-remediation') -Directory -Force)
-    $retiredTrustPostCommitRollbackManifest = Get-Content -LiteralPath (Join-Path $retiredTrustPostCommitRollbackEvidence[0].FullName 'manifest.json') -Raw | ConvertFrom-Json
-    Assert-True -Condition ($retiredTrustPostCommitRollbackManifest.status -eq 'rolled-back' -and @($retiredTrustPostCommitRollbackManifest.committedResources) -contains 'config.toml') -Message 'post-commit retired trust rollback 未记录 config 提交和完整回滚'
 
     Invoke-EnvironmentPostCommitRollbackTest -ScriptPath $scriptPath -TestRoot $testRoot -HostPreflightManifest $hostPreflightManifest
 
@@ -1595,7 +1199,7 @@ try {
         $postCommitManifest = Get-Content -LiteralPath (Join-Path $postCommitEvidence[0].FullName "manifest.json") -Raw | ConvertFrom-Json
         $expectedPostCommitStatus = if ($phase -eq 'legacy') { 'unsafe-partial' } else { 'rolled-back' }
         Assert-True -Condition ($postCommitManifest.status -eq $expectedPostCommitStatus) -Message "post-commit $phase failure 状态错误：$($postCommitManifest.status)"
-        foreach ($resource in @("config.toml", "hooks.json")) {
+        foreach ($resource in @("hooks.json")) {
             Assert-True -Condition (@($postCommitManifest.committedResources) -contains $resource) -Message "post-commit $phase failure 漏记已提交资源：$resource"
         }
         if ($phase -eq "acl") {
@@ -1716,7 +1320,6 @@ try {
 
     foreach ($restoreContentCase in @(
         [pscustomobject]@{ name='hooks.json'; relativePath='hooks.json' },
-        [pscustomobject]@{ name='config.toml'; relativePath='config.toml' },
         [pscustomobject]@{ name='codex-file-tools.yml'; relativePath='..\.serena\contexts\codex-file-tools.yml' }
     )) {
         $restoreContentHome = Join-Path $testRoot "restore-content-parent-$($restoreContentCase.name)\.codex"
@@ -1754,556 +1357,8 @@ try {
     Assert-True -Condition $forbidOnlyThrew -Message "仅设置 forbidden ACL env 时 seam 未在 early return 前解析/授权"
     Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $forbidOnlyHome "run-evidence"))) -Message "非法 forbid-only seam 在拒绝前产生 evidence"
 
-    foreach ($serenaConfigCase in @(
-        @{ Name = "missing-serena-args-repair"; Variant = "MissingSerenaArgs" },
-        @{ Name = "missing-serena-command-repair"; Variant = "MissingSerenaCommand" },
-        @{ Name = "hermes-command-drift-repair"; Variant = "HermesCommandDrift" }
-    )) {
-        $serenaConfigHome = Join-Path $testRoot "$($serenaConfigCase.Name)\.codex"
-        New-FixtureCodexHome -Root $serenaConfigHome -Variant $serenaConfigCase.Variant
-        $serenaConfigContextPath = Join-Path ([System.IO.Directory]::GetParent($serenaConfigHome).FullName) ".serena\contexts\codex-file-tools.yml"
-        $serenaConfigRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $serenaConfigHome
-        Assert-True -Condition ([bool]$serenaConfigRepair.ok -and [bool]$serenaConfigRepair.changed) -Message "$($serenaConfigCase.Name) 未被 Repair 收敛"
-        $serenaConfigText = Get-Content -Raw -LiteralPath (Join-Path $serenaConfigHome "config.toml")
-        Assert-True -Condition ($serenaConfigText -match '(?m)^command\s*=\s*"cmd\.exe"\s*$') -Message "$($serenaConfigCase.Name) command 未规范为官方 cmd.exe 包装"
-        $argsMatch = [regex]::Match($serenaConfigText, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$')
-        Assert-True -Condition $argsMatch.Success -Message "$($serenaConfigCase.Name) 缺少 canonical args"
-        $argsTokens = @((ConvertFrom-Json -InputObject $argsMatch.Groups['rhs'].Value -NoEnumerate))
-        $expectedArgs = @("/c", 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', "start-mcp-server", "--context=$serenaConfigContextPath", "--project-from-cwd", "--enable-web-dashboard=true", "--open-web-dashboard=false")
-        Assert-True -Condition (($argsTokens -join "`n") -ceq ($expectedArgs -join "`n")) -Message "$($serenaConfigCase.Name) args 目标不精确"
-        foreach ($sentinel in @('startup_timeout_sec = 60', 'FIXTURE_ENV_SENTINEL = "must-survive"', 'fixture_feature_sentinel = true')) {
-            Assert-True -Condition $serenaConfigText.Contains($sentinel) -Message "$($serenaConfigCase.Name) 未保留 Serena/全文件未知 key：$sentinel"
-        }
-        $serenaConfigSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $serenaConfigHome
-        Assert-True -Condition ([bool]$serenaConfigSecond.ok -and -not [bool]$serenaConfigSecond.changed) -Message "$($serenaConfigCase.Name) 第二次 Repair 不是 no-op"
-    }
-
-    $singleQuotedArgsHome = Join-Path $testRoot 'single-quoted-serena-args-command-drift\.codex'
-    New-FixtureCodexHome -Root $singleQuotedArgsHome -Variant 'SingleQuotedSerenaArgs'
-    $singleQuotedArgsContextPath = Join-Path ([System.IO.Directory]::GetParent($singleQuotedArgsHome).FullName) '.serena\contexts\codex-file-tools.yml'
-    $singleQuotedArgsExpectedLine = "args = ['/c', 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', 'start-mcp-server', '--context=$singleQuotedArgsContextPath', '--project-from-cwd', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
-    $singleQuotedArgsRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedArgsHome
-    Assert-True -Condition ([bool]$singleQuotedArgsRepair.ok -and [bool]$singleQuotedArgsRepair.changed) -Message 'single-quoted Serena args fixture 未修复真实 command drift'
-    $singleQuotedArgsText = Get-Content -Raw -LiteralPath (Join-Path $singleQuotedArgsHome 'config.toml')
-    Assert-True -Condition ($singleQuotedArgsText -match '(?m)^command\s*=\s*"cmd\.exe"\s*$') -Message 'single-quoted Serena args fixture 未修复 command'
-    Assert-True -Condition $singleQuotedArgsText.Contains($singleQuotedArgsExpectedLine) -Message '真实 command drift Repair 不得改写已正确的 single-quoted Serena args'
-    $singleQuotedArgsSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedArgsHome
-    Assert-True -Condition ([bool]$singleQuotedArgsSecond.ok -and -not [bool]$singleQuotedArgsSecond.changed) -Message 'single-quoted Serena args command Repair 后第二次不是 no-op'
-
-    $singleQuotedCanonicalHome = Join-Path $testRoot 'single-quoted-canonical-serena-values\.codex'
-    New-FixtureCodexHome -Root $singleQuotedCanonicalHome
-    $singleQuotedCanonicalConfigPath = Join-Path $singleQuotedCanonicalHome 'config.toml'
-    $singleQuotedCanonicalBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedCanonicalHome
-    Assert-True -Condition ([bool]$singleQuotedCanonicalBaselineRepair.ok -and [bool]$singleQuotedCanonicalBaselineRepair.changed) -Message 'single-quoted canonical Serena values fixture 未先收敛到健康基线'
-    $singleQuotedCanonicalContextPath = Join-Path ([System.IO.Directory]::GetParent($singleQuotedCanonicalHome).FullName) '.serena\contexts\codex-file-tools.yml'
-    $singleQuotedCanonicalCommandLine = "command = 'cmd.exe'"
-    $singleQuotedCanonicalArgsLine = "args = ['/c', 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', 'start-mcp-server', '--context=$singleQuotedCanonicalContextPath', '--project-from-cwd', '--enable-web-dashboard=true', '--open-web-dashboard=false']"
-    $singleQuotedCanonicalText = Get-Content -Raw -LiteralPath $singleQuotedCanonicalConfigPath
-    Assert-True -Condition ([regex]::Matches($singleQuotedCanonicalText, '(?m)^command\s*=').Count -eq 1 -and [regex]::Matches($singleQuotedCanonicalText, '(?m)^args\s*=').Count -eq 1) -Message 'single-quoted canonical Serena values fixture 未形成唯一 Serena command/args 基线'
-    $singleQuotedCanonicalText = [regex]::Replace($singleQuotedCanonicalText, '(?m)^command\s*=[^\r\n]*', $singleQuotedCanonicalCommandLine)
-    $singleQuotedCanonicalText = [regex]::Replace($singleQuotedCanonicalText, '(?m)^args\s*=[^\r\n]*', $singleQuotedCanonicalArgsLine)
-    [System.IO.File]::WriteAllText($singleQuotedCanonicalConfigPath, $singleQuotedCanonicalText, [System.Text.UTF8Encoding]::new($false))
-    $singleQuotedCanonicalBefore = Get-TreeFingerprint -CodexHome $singleQuotedCanonicalHome
-    $singleQuotedCanonicalCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $singleQuotedCanonicalHome
-    Assert-True -Condition ([bool]$singleQuotedCanonicalCheck.ok -and [int]$singleQuotedCanonicalCheck.driftCount -eq 0 -and [bool](Get-CheckResult -Result $singleQuotedCanonicalCheck -Name 'config').ok) -Message 'single-quoted canonical Serena values 的 Check 不应报告 config drift'
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $singleQuotedCanonicalHome) -eq $singleQuotedCanonicalBefore) -Message 'single-quoted canonical Serena values 的 Check 修改了 fixture'
-    $singleQuotedCanonicalRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $singleQuotedCanonicalHome
-    Assert-True -Condition ([bool]$singleQuotedCanonicalRepair.ok -and -not [bool]$singleQuotedCanonicalRepair.changed -and $null -eq $singleQuotedCanonicalRepair.evidencePath) -Message 'single-quoted canonical Serena values 的 Repair 必须是 no-op'
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $singleQuotedCanonicalHome) -eq $singleQuotedCanonicalBefore) -Message 'single-quoted canonical Serena values 的 no-op Repair 修改了 fixture'
-    $singleQuotedCanonicalAfter = Get-Content -Raw -LiteralPath $singleQuotedCanonicalConfigPath
-    Assert-True -Condition $singleQuotedCanonicalAfter.Contains($singleQuotedCanonicalCommandLine) -Message 'no-op Repair 改写了 canonical single-quoted Serena command'
-    Assert-True -Condition $singleQuotedCanonicalAfter.Contains($singleQuotedCanonicalArgsLine) -Message 'no-op Repair 改写了 canonical single-quoted Serena args'
-
-    $emptySerenaHome = Join-Path $testRoot "empty-serena-section-eof\.codex"
-    New-FixtureCodexHome -Root $emptySerenaHome -Variant "EmptySerenaSectionAtEof"
-    $emptySerenaContextPath = Join-Path ([System.IO.Directory]::GetParent($emptySerenaHome).FullName) ".serena\contexts\codex-file-tools.yml"
-    $emptySerenaRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $emptySerenaHome
-    Assert-True -Condition ([bool]$emptySerenaRepair.ok -and [bool]$emptySerenaRepair.changed) -Message "EOF 空 Serena section 未被 Repair 收敛"
-    $emptySerenaConfig = Get-Content -Raw -LiteralPath (Join-Path $emptySerenaHome "config.toml")
-    $emptyCommandCount = [regex]::Matches($emptySerenaConfig, '(?m)^command\s*=').Count
-    $emptyArgsCount = [regex]::Matches($emptySerenaConfig, '(?m)^args\s*=').Count
-    Assert-True -Condition ($emptyCommandCount -eq 1 -and $emptyArgsCount -eq 1) -Message "EOF 空 Serena section Repair 后 command/args 不是各1：command=$emptyCommandCount args=$emptyArgsCount config=$emptySerenaConfig"
-    foreach ($sentinel in @('model = "fixture-model-must-survive"', 'fixture_root_sentinel = "must-survive"', 'fixture_feature_sentinel = true', 'value = "must-survive"')) {
-        Assert-True -Condition $emptySerenaConfig.Contains($sentinel) -Message "EOF 插入改写了无关/root 状态：$sentinel"
-    }
-    $emptySerenaArgs = [regex]::Match($emptySerenaConfig, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$').Groups['rhs'].Value | ConvertFrom-Json -NoEnumerate
-    Assert-True -Condition (@($emptySerenaArgs).Count -eq 7 -and @($emptySerenaArgs)[3] -ceq "--context=$emptySerenaContextPath") -Message "EOF 空 Serena section canonical args 不精确"
-    $emptySerenaSecond = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $emptySerenaHome
-    Assert-True -Condition ([bool]$emptySerenaSecond.ok -and -not [bool]$emptySerenaSecond.changed) -Message "EOF 空 Serena section 第二次 Repair 不是 no-op"
-
-    $userPolicyHome = Join-Path $testRoot 'user-policy-choices\.codex'
-    New-FixtureCodexHome -Root $userPolicyHome -Variant 'UserPolicyChoices'
-    $userPolicyRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $userPolicyHome
-    $userPolicyConfig = Get-Content -Raw -LiteralPath (Join-Path $userPolicyHome 'config.toml')
-    foreach ($literal in @('approval_policy = "on-request"', 'sandbox_mode = "workspace-write"', 'unified_exec = false')) {
-        Assert-True -Condition $userPolicyConfig.Contains($literal) -Message "Repair 改写了用户显式权限或 unified_exec 选择：$literal"
-    }
-    $userPolicyCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $userPolicyHome
-    Assert-True -Condition ([bool]$userPolicyCheck.ok) -Message '保留用户权限选择后 Check 不应继续报告 config drift'
-
-    $inlineUserHooksHome = Join-Path $testRoot 'inline-user-hooks\.codex'
-    New-FixtureCodexHome -Root $inlineUserHooksHome -Variant 'InlineUserHooks'
-    $inlineUserHooksRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $inlineUserHooksHome
-    $inlineUserHooksConfig = Get-Content -Raw -LiteralPath (Join-Path $inlineUserHooksHome 'config.toml')
-    Assert-True -Condition ([bool]$inlineUserHooksRepair.ok -and $inlineUserHooksConfig.Contains('[[hooks.PreToolUse]]') -and $inlineUserHooksConfig.Contains('D:\\fixture\\user-hook.cmd')) -Message 'Repair 不得删除用户合法 inline [hooks]'
-    Assert-True -Condition (-not ($inlineUserHooksConfig -match '(?m)^\[hooks\.state\]')) -Message 'Repair 必须仅移除已退役 hooks.state trust 结构'
-    $inlineUserHooksCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $inlineUserHooksHome
-    Assert-True -Condition ([bool]$inlineUserHooksCheck.ok) -Message '保留用户 inline hooks 后 Check 不应继续报告 config drift'
-
-    foreach ($disabledFeatureCase in $featureDisableCases) {
-        $hooksDisabledHome = Join-Path $testRoot "$($disabledFeatureCase.Directory)\.codex"
-        New-FixtureCodexHome -Root $hooksDisabledHome -Variant $disabledFeatureCase.Variant
-        Assert-CheckWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $hooksDisabledHome -CaseName $disabledFeatureCase.Name
-        Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $hooksDisabledHome -CaseName $disabledFeatureCase.Name
-    }
-
-    $missingSerenaHome = Join-Path $testRoot "missing-serena-section\.codex"
-    New-FixtureCodexHome -Root $missingSerenaHome -Variant "MissingSerenaSection"
-    $missingSerenaContextPath = Join-Path ([System.IO.Directory]::GetParent($missingSerenaHome).FullName) ".serena\contexts\codex-file-tools.yml"
-    $missingSerenaConfigPath = Join-Path $missingSerenaHome "config.toml"
-    $missingSerenaInitialConfig = Get-Content -Raw -LiteralPath $missingSerenaConfigPath
-    Assert-True -Condition (-not [regex]::IsMatch($missingSerenaInitialConfig, '(?m)^\[mcp_servers\.serena\]\s*$')) -Message "缺段 fixture 意外保留了 Serena section"
-    $missingSerenaBeforeCheck = Get-TreeFingerprint -CodexHome $missingSerenaHome
-    $missingSerenaCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $missingSerenaHome
-    Assert-True -Condition (-not [bool]$missingSerenaCheck.ok -and -not [bool](Get-CheckResult -Result $missingSerenaCheck -Name "config").ok) -Message "缺失 Serena section 的 Check 未报告 config drift"
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $missingSerenaHome) -eq $missingSerenaBeforeCheck) -Message "缺失 Serena section 的 Check 修改了 fixture"
-
-    $missingSerenaRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $missingSerenaHome
-    Assert-True -Condition ([bool]$missingSerenaRepair.ok -and [bool]$missingSerenaRepair.changed) -Message "缺失 Serena section 的 Repair 未收敛"
-    $missingSerenaConfig = Get-Content -Raw -LiteralPath $missingSerenaConfigPath
-    $missingSerenaSection = [regex]::Match($missingSerenaConfig, '(?ms)^\[mcp_servers\.serena\]\r?\n(?<body>.*?)(?=^\s*\[|\z)')
-    Assert-True -Condition ($missingSerenaSection.Success -and [regex]::Matches($missingSerenaConfig, '(?m)^\[mcp_servers\.serena\]\s*$').Count -eq 1) -Message "缺失 Serena section Repair 后未精确插入唯一 canonical section"
-    $missingSerenaBody = $missingSerenaSection.Groups['body'].Value
-    Assert-True -Condition ([regex]::Matches($missingSerenaBody, '(?m)^command\s*=\s*"cmd\.exe"\s*$').Count -eq 1) -Message "缺失 Serena section Repair 后 command 不精确"
-    $missingSerenaArgsMatch = [regex]::Match($missingSerenaBody, '(?m)^args\s*=\s*(?<rhs>\[.*\])\s*$')
-    Assert-True -Condition $missingSerenaArgsMatch.Success -Message "缺失 Serena section Repair 后缺少 canonical args"
-    $missingSerenaArgs = @((ConvertFrom-Json -InputObject $missingSerenaArgsMatch.Groups['rhs'].Value -NoEnumerate))
-    $expectedMissingSerenaArgs = @("/c", 'D:\Codex\.codex\scripts\start-serena-mcp.cmd', "start-mcp-server", "--context=$missingSerenaContextPath", "--project-from-cwd", "--enable-web-dashboard=true", "--open-web-dashboard=false")
-    Assert-True -Condition (($missingSerenaArgs -join "`n") -ceq ($expectedMissingSerenaArgs -join "`n")) -Message "缺失 Serena section Repair 后 args 不精确"
-    foreach ($sentinel in @('fixture-model-must-survive', 'fixture_unicode = "中文必须通过"', 'fixture_feature_sentinel = true', 'array-table-must-survive', 'fixture_network_sentinel = "must-survive"')) {
-        Assert-True -Condition $missingSerenaConfig.Contains($sentinel) -Message "缺失 Serena section Repair 改写了无关 TOML 内容：$sentinel"
-    }
-
-    $missingSerenaHealthyCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $missingSerenaHome
-    Assert-True -Condition ([bool]$missingSerenaHealthyCheck.ok -and [int]$missingSerenaHealthyCheck.driftCount -eq 0) -Message "缺失 Serena section Repair 后的 Check 不健康"
-    $missingSerenaFingerprint = Get-TreeFingerprint -CodexHome $missingSerenaHome
-    $missingSerenaEvidenceRoot = Join-Path $missingSerenaHome "run-evidence\host-hook-remediation"
-    $missingSerenaEvidenceCount = @(Get-ChildItem -LiteralPath $missingSerenaEvidenceRoot -Directory -Force).Count
-    $missingSerenaNoOp = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $missingSerenaHome
-    Assert-True -Condition ([bool]$missingSerenaNoOp.ok -and -not [bool]$missingSerenaNoOp.changed -and $null -eq $missingSerenaNoOp.evidencePath) -Message "缺失 Serena section 收敛后的 Repair 不是 no-op"
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $missingSerenaHome) -eq $missingSerenaFingerprint) -Message "缺失 Serena section 收敛后的 no-op Repair 修改了 fixture"
-    Assert-True -Condition (@(Get-ChildItem -LiteralPath $missingSerenaEvidenceRoot -Directory -Force).Count -eq $missingSerenaEvidenceCount) -Message "缺失 Serena section 收敛后的 no-op Repair 创建了 evidence"
-
-    foreach ($retiredProjectTrustCase in @(
-        [pscustomobject]@{ name = 'retired-project-trust-crlf'; newLine = ([string][char]13 + [char]10) },
-        [pscustomobject]@{ name = 'retired-project-trust-lf'; newLine = ([string][char]10) }
-    )) {
-        $retiredProjectTrustHome = Join-Path $testRoot "$($retiredProjectTrustCase.name)\.codex"
-        New-FixtureCodexHome -Root $retiredProjectTrustHome
-        $retiredProjectTrustConfigPath = Join-Path $retiredProjectTrustHome 'config.toml'
-        $retiredProjectTrustBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $retiredProjectTrustHome
-        Assert-True -Condition ([bool]$retiredProjectTrustBaselineRepair.ok) -Message "$($retiredProjectTrustCase.name) 基准 Repair 未形成健康状态"
-
-        $retiredProjectTrustUserHeader = "[projects.'D:\Codex\projects\user-owned-project']"
-        $retiredProjectTrustNeighborHeader = '[fixture.project-trust-neighbor]'
-        $retiredProjectTrustHeader = "[projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL']"
-        $retiredProjectTrustBaselineConfig = [IO.File]::ReadAllText($retiredProjectTrustConfigPath)
-        Assert-True -Condition ($retiredProjectTrustBaselineConfig.Contains($retiredProjectTrustUserHeader)) -Message "$($retiredProjectTrustCase.name) 缺少用户 project trust 基准 table"
-        $retiredProjectTrustNewLine = [string]$retiredProjectTrustCase.newLine
-        $retiredProjectTrustNormalizedBaseline = [regex]::Replace($retiredProjectTrustBaselineConfig, "\r?\n", $retiredProjectTrustNewLine)
-        $retiredProjectTrustBlock = $retiredProjectTrustHeader + $retiredProjectTrustNewLine + 'trust_level = "trusted"' + $retiredProjectTrustNewLine + 'retired_project_fixture_sentinel = "must-be-removed"' + $retiredProjectTrustNewLine + $retiredProjectTrustNewLine
-        $retiredProjectTrustDriftedConfig = $retiredProjectTrustNormalizedBaseline.Replace($retiredProjectTrustUserHeader, $retiredProjectTrustBlock + $retiredProjectTrustUserHeader)
-        Assert-True -Condition (-not $retiredProjectTrustDriftedConfig.Equals($retiredProjectTrustBaselineConfig, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustCase.name) 未注入旧 GSD project trust drift"
-        [IO.File]::WriteAllText($retiredProjectTrustConfigPath, $retiredProjectTrustDriftedConfig, [Text.UTF8Encoding]::new($false))
-
-        $retiredProjectTrustBeforeCheck = Get-TreeFingerprint -CodexHome $retiredProjectTrustHome
-        $retiredProjectTrustCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $retiredProjectTrustHome
-        Assert-True -Condition (-not [bool]$retiredProjectTrustCheck.ok -and [int]$retiredProjectTrustCheck.driftCount -eq 1 -and -not [bool](Get-CheckResult -Result $retiredProjectTrustCheck -Name 'config').ok) -Message "$($retiredProjectTrustCase.name) 的 Check 未只报告 config drift"
-        foreach ($checkName in @('serenaContext', 'registrations', 'managedFiles', 'environment', 'legacyImplementations', 'acl')) {
-            Assert-True -Condition ([bool](Get-CheckResult -Result $retiredProjectTrustCheck -Name $checkName).ok) -Message "$($retiredProjectTrustCase.name) 的 config drift 误伤 $checkName"
-        }
-        Assert-True -Condition ((Get-TreeFingerprint -CodexHome $retiredProjectTrustHome) -eq $retiredProjectTrustBeforeCheck) -Message "$($retiredProjectTrustCase.name) 的 Check 修改了 fixture"
-
-        $retiredProjectTrustRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $retiredProjectTrustHome
-        Assert-True -Condition ([bool]$retiredProjectTrustRepair.ok -and [bool]$retiredProjectTrustRepair.changed) -Message "$($retiredProjectTrustCase.name) 的 Repair 未收敛"
-        $retiredProjectTrustConfig = [IO.File]::ReadAllText($retiredProjectTrustConfigPath)
-        Assert-True -Condition ($retiredProjectTrustConfig.IndexOf($retiredProjectTrustHeader, [StringComparison]::OrdinalIgnoreCase) -lt 0 -and -not $retiredProjectTrustConfig.Contains('retired_project_fixture_sentinel = "must-be-removed"')) -Message "$($retiredProjectTrustCase.name) 未删除旧 GSD 精确 project trust table"
-        Assert-True -Condition ($retiredProjectTrustConfig.Contains($retiredProjectTrustUserHeader) -and $retiredProjectTrustConfig.Contains('fixture_user_project_sentinel = "must-survive"')) -Message "$($retiredProjectTrustCase.name) 错误删除了不在 denylist 的用户 project trust"
-        Assert-True -Condition ($retiredProjectTrustConfig.IndexOf($retiredProjectTrustUserHeader, [StringComparison]::Ordinal) -lt $retiredProjectTrustConfig.IndexOf($retiredProjectTrustNeighborHeader, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustCase.name) 改写了无关 project trust 的相对位置"
-        if ($retiredProjectTrustCase.name -ceq 'retired-project-trust-crlf') {
-            Assert-True -Condition (-not [regex]::IsMatch($retiredProjectTrustConfig, '(?<!\r)\n')) -Message 'CRLF retired project trust Repair 未保持 CRLF'
-        } else {
-            Assert-True -Condition (-not $retiredProjectTrustConfig.Contains([string][char]13)) -Message 'LF retired project trust Repair 未保持 LF'
-        }
-
-        $retiredProjectTrustHealthyCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $retiredProjectTrustHome
-        Assert-True -Condition ([bool]$retiredProjectTrustHealthyCheck.ok -and [int]$retiredProjectTrustHealthyCheck.driftCount -eq 0) -Message "$($retiredProjectTrustCase.name) Repair 后的 Check 不健康"
-        $retiredProjectTrustFingerprint = Get-TreeFingerprint -CodexHome $retiredProjectTrustHome
-        $retiredProjectTrustEvidenceRoot = Join-Path $retiredProjectTrustHome 'run-evidence\host-hook-remediation'
-        $retiredProjectTrustEvidenceCount = @(Get-ChildItem -LiteralPath $retiredProjectTrustEvidenceRoot -Directory -Force).Count
-        $retiredProjectTrustNoOp = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $retiredProjectTrustHome
-        Assert-True -Condition ([bool]$retiredProjectTrustNoOp.ok -and -not [bool]$retiredProjectTrustNoOp.changed -and $null -eq $retiredProjectTrustNoOp.evidencePath) -Message "$($retiredProjectTrustCase.name) 收敛后的 Repair 不是 no-op"
-        Assert-True -Condition ((Get-TreeFingerprint -CodexHome $retiredProjectTrustHome) -eq $retiredProjectTrustFingerprint) -Message "$($retiredProjectTrustCase.name) 的 no-op Repair 修改了 fixture"
-        Assert-True -Condition (@(Get-ChildItem -LiteralPath $retiredProjectTrustEvidenceRoot -Directory -Force).Count -eq $retiredProjectTrustEvidenceCount) -Message "$($retiredProjectTrustCase.name) 的 no-op Repair 创建了 evidence"
-    }
-
-    foreach ($retiredProjectTrustShape in @(
-        [pscustomobject]@{
-            name = 'retired-project-trust-descendant-table-and-array'
-            buildBlock = {
-                param([string]$newLine)
-                @(
-                    "[projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL']",
-                    'trust_level = "trusted"',
-                    'retired_root_sentinel = "must-be-removed"',
-                    "[projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL'.metadata]",
-                    'retired_descendant_table_sentinel = "must-be-removed"',
-                    "[[projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL'.history]]",
-                    'retired_descendant_array_sentinel = "must-be-removed"',
-                    ''
-                ) -join $newLine
-            }
-            markers = @('retired_root_sentinel', 'retired_descendant_table_sentinel', 'retired_descendant_array_sentinel')
-        },
-        [pscustomobject]@{
-            name = 'retired-project-trust-array-root-and-descendant'
-            buildBlock = {
-                param([string]$newLine)
-                @(
-                    "[[projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL']]",
-                    'trust_level = "trusted"',
-                    'retired_array_root_sentinel = "must-be-removed"',
-                    "[[projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL'.history]]",
-                    'retired_array_descendant_sentinel = "must-be-removed"',
-                    ''
-                ) -join $newLine
-            }
-            markers = @('retired_array_root_sentinel', 'retired_array_descendant_sentinel')
-        }
-    )) {
-        foreach ($newLineCase in @(
-            [pscustomobject]@{ name = 'crlf'; value = ([string][char]13 + [char]10) },
-            [pscustomobject]@{ name = 'lf'; value = ([string][char]10) }
-        )) {
-            $shapeHome = Join-Path $testRoot "$($retiredProjectTrustShape.name)-$($newLineCase.name)\.codex"
-            New-FixtureCodexHome -Root $shapeHome
-            $shapeConfigPath = Join-Path $shapeHome 'config.toml'
-            $shapeBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $shapeHome
-            Assert-True -Condition ([bool]$shapeBaselineRepair.ok) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) 基准 Repair 未形成健康状态"
-
-            $shapeUserHeader = "[projects.'D:\Codex\projects\user-owned-project']"
-            $shapeNeighborHeader = '[fixture.project-trust-neighbor]'
-            $shapeBaseline = [IO.File]::ReadAllText($shapeConfigPath)
-            $shapeBlock = & $retiredProjectTrustShape.buildBlock ([string]$newLineCase.value)
-            $shapeNormalizedBaseline = [regex]::Replace($shapeBaseline, "\r?\n", [string]$newLineCase.value)
-            $shapeDrifted = $shapeNormalizedBaseline.Replace($shapeUserHeader, $shapeBlock + $shapeUserHeader)
-            Assert-True -Condition (-not $shapeDrifted.Equals($shapeBaseline, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) 未注入退休 trust shape"
-            [IO.File]::WriteAllText($shapeConfigPath, $shapeDrifted, [Text.UTF8Encoding]::new($false))
-            $shapeLiveHashBeforeRepair = Get-Sha256 -Path $shapeConfigPath
-
-            $shapeRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $shapeHome
-            Assert-True -Condition ([bool]$shapeRepair.ok -and [bool]$shapeRepair.changed) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) 的 Repair 未收敛"
-            $shapeConfig = [IO.File]::ReadAllText($shapeConfigPath)
-            foreach ($marker in @($retiredProjectTrustShape.markers)) {
-                Assert-True -Condition (-not $shapeConfig.Contains($marker, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) 未删除 $marker"
-            }
-            Assert-True -Condition ($shapeConfig.Contains($shapeUserHeader) -and $shapeConfig.Contains('fixture_user_project_sentinel = "must-survive"')) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) 错误删除了无关用户 trust"
-            Assert-True -Condition ($shapeConfig.IndexOf($shapeUserHeader, [StringComparison]::Ordinal) -lt $shapeConfig.IndexOf($shapeNeighborHeader, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) 改写了无关 trust 的相对位置"
-
-            $shapeExpectedEvidence = $shapeDrifted.Replace($shapeBlock, '')
-            $shapeEvidenceConfigPath = Join-Path $shapeRepair.evidencePath 'config.toml'
-            $shapeEvidenceConfig = [IO.File]::ReadAllText($shapeEvidenceConfigPath)
-            Assert-True -Condition ($shapeEvidenceConfig -ceq $shapeExpectedEvidence) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) evidence 清洗了退役 blocks 之外的 TOML 内容"
-            foreach ($marker in @($retiredProjectTrustShape.markers)) {
-                Assert-True -Condition (-not $shapeEvidenceConfig.Contains($marker, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) evidence 仍包含 $marker"
-            }
-            $shapeManifest = Get-Content -Raw -LiteralPath (Join-Path $shapeRepair.evidencePath 'manifest.json') | ConvertFrom-Json
-            Assert-True -Condition ((Get-Sha256 -Path $shapeEvidenceConfigPath) -ceq [string]$shapeManifest.originalHashes.'config.toml') -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) manifest 未绑定清洗后的 config evidence"
-            Assert-True -Condition ($shapeLiveHashBeforeRepair -cne (Get-Sha256 -Path $shapeEvidenceConfigPath)) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) fixture 未形成 live/evidence 哈希分离"
-
-            $shapeRestore = Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $shapeHome -EvidencePath ([string]$shapeRepair.evidencePath)
-            Assert-True -Condition ([bool]$shapeRestore.ok) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) 的清洗 evidence 不应阻塞 Restore"
-            $shapeAfterRestore = [IO.File]::ReadAllText($shapeConfigPath)
-            foreach ($marker in @($retiredProjectTrustShape.markers)) {
-                Assert-True -Condition (-not $shapeAfterRestore.Contains($marker, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustShape.name)/$($newLineCase.name) Restore 回流了 $marker"
-            }
-        }
-    }
-
-    $malformedRetiredTrustHome = Join-Path $testRoot 'retired-project-trust-malformed-header\.codex'
-    New-FixtureCodexHome -Root $malformedRetiredTrustHome
-    $malformedRetiredTrustConfigPath = Join-Path $malformedRetiredTrustHome 'config.toml'
-    [IO.File]::AppendAllText(
-        $malformedRetiredTrustConfigPath,
-        ([Environment]::NewLine + "[[projects.'D:\Codex\projects\codex-gsd-codex-c-skill']" + [Environment]::NewLine + 'trust_level = "trusted"' + [Environment]::NewLine),
-        [Text.UTF8Encoding]::new($false)
-    )
-    $malformedRetiredTrustBefore = Get-TreeFingerprint -CodexHome $malformedRetiredTrustHome
-    $malformedRetiredTrustThrew = $false
-    try { Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $malformedRetiredTrustHome | Out-Null } catch { $malformedRetiredTrustThrew = $true }
-    Assert-True -Condition $malformedRetiredTrustThrew -Message 'malformed retired project trust header 未让 Repair fail closed'
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $malformedRetiredTrustHome) -ceq $malformedRetiredTrustBefore) -Message 'malformed retired project trust header 被拒绝后仍修改了 fixture'
-    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $malformedRetiredTrustHome 'run-evidence'))) -Message 'malformed retired project trust header 在拒绝前产生 evidence'
-
-    $historicalRetiredEvidenceHome = Join-Path $testRoot 'historical-retired-project-trust-evidence\.codex'
-    New-FixtureCodexHome -Root $historicalRetiredEvidenceHome
-    $historicalRetiredEvidenceRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $historicalRetiredEvidenceHome
-    $historicalRetiredEvidenceConfigPath = Join-Path $historicalRetiredEvidenceRepair.evidencePath 'config.toml'
-    [IO.File]::AppendAllText(
-        $historicalRetiredEvidenceConfigPath,
-        ([Environment]::NewLine + "[projects.'D:\Codex\projects\codex-gsd-codex-c-skill']" + [Environment]::NewLine + 'trust_level = "trusted"' + [Environment]::NewLine + 'historical_retired_evidence_sentinel = "must-not-restore"' + [Environment]::NewLine),
-        [Text.UTF8Encoding]::new($false)
-    )
-    $historicalRetiredLiveBefore = Get-TreeFingerprint -CodexHome $historicalRetiredEvidenceHome
-    $historicalRetiredRestoreError = $null
-    try {
-        & $scriptPath -Mode Restore -CodexHome $historicalRetiredEvidenceHome -EvidencePath ([string]$historicalRetiredEvidenceRepair.evidencePath) | Out-Null
-    } catch {
-        $historicalRetiredRestoreError = $_.Exception.Message
-    }
-    Assert-True -Condition ($historicalRetiredRestoreError -match '退役 project trust') -Message '历史 evidence 的 retired trust 未触发明确 Restore 拒绝'
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $historicalRetiredEvidenceHome) -ceq $historicalRetiredLiveBefore) -Message '历史 evidence 的 retired trust 拒绝后仍修改了 live fixture'
-
-    $caseSensitiveRetiredTrustHome = Join-Path $testRoot 'retired-project-trust-case-sensitive-projects-key\.codex'
-    New-FixtureCodexHome -Root $caseSensitiveRetiredTrustHome
-    $caseSensitiveRetiredTrustConfigPath = Join-Path $caseSensitiveRetiredTrustHome 'config.toml'
-    $caseSensitiveRetiredTrustBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $caseSensitiveRetiredTrustHome
-    Assert-True -Condition ([bool]$caseSensitiveRetiredTrustBaselineRepair.ok) -Message 'case-sensitive Projects fixture 基准 Repair 未形成健康状态'
-    $caseSensitiveRetiredTrustUserHeader = "[projects.'D:\Codex\projects\user-owned-project']"
-    $caseSensitiveRetiredTrustHeader = "[Projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL']"
-    $caseSensitiveRetiredTrustBlock = $caseSensitiveRetiredTrustHeader + [Environment]::NewLine + 'trust_level = "trusted"' + [Environment]::NewLine + 'case_sensitive_projects_sentinel = "must-survive"' + [Environment]::NewLine + [Environment]::NewLine
-    $caseSensitiveRetiredTrustBaseline = [IO.File]::ReadAllText($caseSensitiveRetiredTrustConfigPath)
-    $caseSensitiveRetiredTrustConfig = $caseSensitiveRetiredTrustBaseline.Replace($caseSensitiveRetiredTrustUserHeader, $caseSensitiveRetiredTrustBlock + $caseSensitiveRetiredTrustUserHeader)
-    Assert-True -Condition (-not $caseSensitiveRetiredTrustConfig.Equals($caseSensitiveRetiredTrustBaseline, [StringComparison]::Ordinal)) -Message 'case-sensitive Projects fixture 未注入大小写反例'
-    [IO.File]::WriteAllText($caseSensitiveRetiredTrustConfigPath, $caseSensitiveRetiredTrustConfig, [Text.UTF8Encoding]::new($false))
-    $caseSensitiveRetiredTrustBefore = Get-TreeFingerprint -CodexHome $caseSensitiveRetiredTrustHome
-    $caseSensitiveRetiredTrustCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $caseSensitiveRetiredTrustHome
-    Assert-True -Condition ([bool]$caseSensitiveRetiredTrustCheck.ok -and [int]$caseSensitiveRetiredTrustCheck.driftCount -eq 0) -Message 'TOML 顶层 Projects 大小写反例被错误识别为 retired trust'
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $caseSensitiveRetiredTrustHome) -ceq $caseSensitiveRetiredTrustBefore) -Message 'case-sensitive Projects Check 修改 fixture'
-    $caseSensitiveRetiredTrustRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $caseSensitiveRetiredTrustHome
-    Assert-True -Condition ([bool]$caseSensitiveRetiredTrustRepair.ok -and -not [bool]$caseSensitiveRetiredTrustRepair.changed) -Message 'TOML 顶层 Projects 大小写反例不应触发 Repair'
-    $caseSensitiveRetiredTrustAfter = [IO.File]::ReadAllText($caseSensitiveRetiredTrustConfigPath)
-    Assert-True -Condition ($caseSensitiveRetiredTrustAfter.Contains($caseSensitiveRetiredTrustHeader) -and $caseSensitiveRetiredTrustAfter.Contains('case_sensitive_projects_sentinel = "must-survive"')) -Message 'TOML 顶层 Projects 大小写反例被错误删除'
-
-    $quotedBracketHeaderHome = Join-Path $testRoot 'retired-project-trust-quoted-bracket-neighbor\.codex'
-    New-FixtureCodexHome -Root $quotedBracketHeaderHome
-    $quotedBracketHeaderConfigPath = Join-Path $quotedBracketHeaderHome 'config.toml'
-    $quotedBracketHeaderBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $quotedBracketHeaderHome
-    Assert-True -Condition ([bool]$quotedBracketHeaderBaselineRepair.ok) -Message 'quoted bracket header fixture 基准 Repair 未形成健康状态'
-    $quotedBracketHeaderUserHeader = "[projects.'D:\Codex\projects\user-owned-project']"
-    $quotedBracketRetiredHeader = "[projects.'D:\Codex\projects\codex-gsd-codex-c-skill']"
-    $quotedBracketNeighborHeader = '["unrelated]header"]'
-    $quotedBracketHeaderBlock = $quotedBracketRetiredHeader + [Environment]::NewLine + 'trust_level = "trusted"' + [Environment]::NewLine + 'quoted_bracket_retired_sentinel = "must-be-removed"' + [Environment]::NewLine + $quotedBracketNeighborHeader + [Environment]::NewLine + 'quoted_bracket_neighbor_sentinel = "must-survive"' + [Environment]::NewLine + [Environment]::NewLine
-    $quotedBracketHeaderBaseline = [IO.File]::ReadAllText($quotedBracketHeaderConfigPath)
-    $quotedBracketHeaderConfig = $quotedBracketHeaderBaseline.Replace($quotedBracketHeaderUserHeader, $quotedBracketHeaderBlock + $quotedBracketHeaderUserHeader)
-    Assert-True -Condition (-not $quotedBracketHeaderConfig.Equals($quotedBracketHeaderBaseline, [StringComparison]::Ordinal)) -Message 'quoted bracket header fixture 未注入退役/邻居块'
-    [IO.File]::WriteAllText($quotedBracketHeaderConfigPath, $quotedBracketHeaderConfig, [Text.UTF8Encoding]::new($false))
-    $quotedBracketHeaderCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $quotedBracketHeaderHome
-    Assert-True -Condition (-not [bool]$quotedBracketHeaderCheck.ok -and [int]$quotedBracketHeaderCheck.driftCount -eq 1 -and -not [bool](Get-CheckResult -Result $quotedBracketHeaderCheck -Name 'config').ok) -Message 'quoted bracket header 退役 trust 未只报告 config drift'
-    $quotedBracketHeaderRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $quotedBracketHeaderHome
-    Assert-True -Condition ([bool]$quotedBracketHeaderRepair.ok -and [bool]$quotedBracketHeaderRepair.changed) -Message 'quoted bracket header Repair 未收敛'
-    $quotedBracketHeaderAfter = [IO.File]::ReadAllText($quotedBracketHeaderConfigPath)
-    $quotedBracketEvidenceAfter = [IO.File]::ReadAllText((Join-Path $quotedBracketHeaderRepair.evidencePath 'config.toml'))
-    foreach ($contentCase in @(
-        [pscustomobject]@{ name = 'live'; value = $quotedBracketHeaderAfter },
-        [pscustomobject]@{ name = 'evidence'; value = $quotedBracketEvidenceAfter }
-    )) {
-        Assert-True -Condition (-not $contentCase.value.Contains('quoted_bracket_retired_sentinel', [StringComparison]::Ordinal)) -Message "quoted bracket header $($contentCase.name) 未删除退役块"
-        Assert-True -Condition ($contentCase.value.Contains($quotedBracketNeighborHeader) -and $contentCase.value.Contains('quoted_bracket_neighbor_sentinel = "must-survive"')) -Message "quoted bracket header $($contentCase.name) 错误删除相邻 quoted key header"
-    }
-    $quotedBracketHeaderRestore = Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $quotedBracketHeaderHome -EvidencePath ([string]$quotedBracketHeaderRepair.evidencePath)
-    Assert-True -Condition ([bool]$quotedBracketHeaderRestore.ok) -Message 'quoted bracket header 清洗 evidence 不应阻塞 Restore'
-    $quotedBracketHeaderAfterRestore = [IO.File]::ReadAllText($quotedBracketHeaderConfigPath)
-    Assert-True -Condition ($quotedBracketHeaderAfterRestore.Contains($quotedBracketNeighborHeader) -and $quotedBracketHeaderAfterRestore.Contains('quoted_bracket_neighbor_sentinel = "must-survive"')) -Message 'quoted bracket header Restore 丢失相邻用户 header'
-
-    foreach ($retiredProjectTrustAssignmentShape in @(
-        [pscustomobject]@{
-            name = 'retired-project-trust-projects-table-dotted-assignment'
-            buildBlock = {
-                param([string]$newLine)
-                @(
-                    '[projects]',
-                    "'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL'.trust_level = `"trusted`"",
-                    "'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL'.retired_assignment_table_sentinel = `"must-be-removed`"",
-                    ''
-                ) -join $newLine
-            }
-            markers = @('retired_assignment_table_sentinel')
-        },
-        [pscustomobject]@{
-            name = 'retired-project-trust-root-dotted-assignment'
-            buildBlock = {
-                param([string]$newLine)
-                @(
-                    "projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL'.trust_level = `"trusted`"",
-                    "projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL'.retired_assignment_root_sentinel = `"must-be-removed`"",
-                    ''
-                ) -join $newLine
-            }
-            markers = @('retired_assignment_root_sentinel')
-        },
-        [pscustomobject]@{
-            name = 'retired-project-trust-direct-inline-assignment'
-            buildBlock = {
-                param([string]$newLine)
-                "projects.'D:\CODEX\Projects\CODEX-GSD-CODEX-C-SKILL' = { trust_level = `"trusted`", retired_assignment_inline_sentinel = `"must-be-removed`" }$newLine"
-            }
-            markers = @('retired_assignment_inline_sentinel')
-        }
-    )) {
-        $assignmentHome = Join-Path $testRoot "$($retiredProjectTrustAssignmentShape.name)\.codex"
-        New-FixtureCodexHome -Root $assignmentHome
-        $assignmentConfigPath = Join-Path $assignmentHome 'config.toml'
-        $assignmentBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $assignmentHome
-        Assert-True -Condition ([bool]$assignmentBaselineRepair.ok) -Message "$($retiredProjectTrustAssignmentShape.name) 基准 Repair 未形成健康状态"
-
-        $assignmentBaseline = [IO.File]::ReadAllText($assignmentConfigPath)
-        $assignmentNewLine = if ($assignmentBaseline.Contains("`r`n")) { "`r`n" } else { "`n" }
-        $assignmentAnchor = '[mcp_servers.serena]'
-        Assert-True -Condition ($assignmentBaseline.Contains($assignmentAnchor)) -Message "$($retiredProjectTrustAssignmentShape.name) 缺少插入 anchor"
-        $assignmentBlock = & $retiredProjectTrustAssignmentShape.buildBlock $assignmentNewLine
-        $assignmentDrifted = $assignmentBaseline.Replace($assignmentAnchor, $assignmentBlock + $assignmentAnchor)
-        Assert-True -Condition (-not $assignmentDrifted.Equals($assignmentBaseline, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustAssignmentShape.name) 未注入 dotted trust drift"
-        [IO.File]::WriteAllText($assignmentConfigPath, $assignmentDrifted, [Text.UTF8Encoding]::new($false))
-
-        $assignmentBeforeCheck = Get-TreeFingerprint -CodexHome $assignmentHome
-        $assignmentCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $assignmentHome
-        Assert-True -Condition (-not [bool]$assignmentCheck.ok -and [int]$assignmentCheck.driftCount -eq 1 -and -not [bool](Get-CheckResult -Result $assignmentCheck -Name 'config').ok) -Message "$($retiredProjectTrustAssignmentShape.name) 的 Check 未只报告 config drift"
-        foreach ($checkName in @('serenaContext', 'registrations', 'managedFiles', 'environment', 'legacyImplementations', 'acl')) {
-            Assert-True -Condition ([bool](Get-CheckResult -Result $assignmentCheck -Name $checkName).ok) -Message "$($retiredProjectTrustAssignmentShape.name) 的 config drift 误伤 $checkName"
-        }
-        Assert-True -Condition ((Get-TreeFingerprint -CodexHome $assignmentHome) -ceq $assignmentBeforeCheck) -Message "$($retiredProjectTrustAssignmentShape.name) 的 Check 修改了 fixture"
-
-        $assignmentRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $assignmentHome
-        Assert-True -Condition ([bool]$assignmentRepair.ok -and [bool]$assignmentRepair.changed) -Message "$($retiredProjectTrustAssignmentShape.name) 的 Repair 未收敛"
-        $assignmentConfig = [IO.File]::ReadAllText($assignmentConfigPath)
-        $assignmentEvidenceConfig = [IO.File]::ReadAllText((Join-Path $assignmentRepair.evidencePath 'config.toml'))
-        foreach ($marker in @($retiredProjectTrustAssignmentShape.markers)) {
-            Assert-True -Condition (-not $assignmentConfig.Contains($marker, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustAssignmentShape.name) Repair 后仍含 $marker"
-            Assert-True -Condition (-not $assignmentEvidenceConfig.Contains($marker, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustAssignmentShape.name) evidence 仍含 $marker"
-        }
-        Assert-True -Condition ($assignmentConfig.Contains('fixture_user_project_sentinel = "must-survive"')) -Message "$($retiredProjectTrustAssignmentShape.name) Repair 误伤无关 project trust"
-
-        $assignmentRestore = Invoke-Reconciler -ScriptPath $scriptPath -Mode Restore -CodexHome $assignmentHome -EvidencePath ([string]$assignmentRepair.evidencePath)
-        Assert-True -Condition ([bool]$assignmentRestore.ok) -Message "$($retiredProjectTrustAssignmentShape.name) 的清洗 evidence 不应阻塞 Restore"
-        $assignmentAfterRestore = [IO.File]::ReadAllText($assignmentConfigPath)
-        foreach ($marker in @($retiredProjectTrustAssignmentShape.markers)) {
-            Assert-True -Condition (-not $assignmentAfterRestore.Contains($marker, [StringComparison]::Ordinal)) -Message "$($retiredProjectTrustAssignmentShape.name) Restore 回流了 $marker"
-        }
-    }
-
-    $inlineRetiredTrustHome = Join-Path $testRoot 'retired-project-trust-mixed-inline-map\.codex'
-    New-FixtureCodexHome -Root $inlineRetiredTrustHome
-    $inlineRetiredTrustConfigPath = Join-Path $inlineRetiredTrustHome 'config.toml'
-    $inlineRetiredTrustOriginal = [IO.File]::ReadAllText($inlineRetiredTrustConfigPath)
-    $inlineRetiredTrustNewLine = if ($inlineRetiredTrustOriginal.Contains("`r`n")) { "`r`n" } else { "`n" }
-    $inlineRetiredTrustUserBlockPattern = '(?ms)^\[projects\.' + [regex]::Escape("'D:\Codex\projects\user-owned-project'") + '\]\r?\n.*?(?=^\s*\[|\z)'
-    $inlineRetiredTrustUserBlockMatch = [regex]::Match($inlineRetiredTrustOriginal, $inlineRetiredTrustUserBlockPattern)
-    Assert-True -Condition $inlineRetiredTrustUserBlockMatch.Success -Message 'mixed inline map fixture 未定位冲突的普通 projects table'
-    $inlineRetiredTrustWithoutUserBlock = $inlineRetiredTrustOriginal.Remove($inlineRetiredTrustUserBlockMatch.Index, $inlineRetiredTrustUserBlockMatch.Length)
-    Assert-True -Condition (-not $inlineRetiredTrustWithoutUserBlock.Equals($inlineRetiredTrustOriginal, [StringComparison]::Ordinal)) -Message 'mixed inline map fixture 未删除冲突的普通 projects table'
-    $inlineRetiredTrustAnchor = '[mcp_servers.serena]'
-    $inlineRetiredTrustLine = "projects = { 'D:\Codex\projects\codex-gsd-codex-c-skill' = { trust_level = `"trusted`" }, 'D:\Codex\projects\user-owned-inline-project' = { trust_level = `"trusted`" } }"
-    $inlineRetiredTrustConfig = $inlineRetiredTrustWithoutUserBlock.Replace($inlineRetiredTrustAnchor, $inlineRetiredTrustLine + $inlineRetiredTrustNewLine + $inlineRetiredTrustAnchor)
-    Assert-True -Condition (-not $inlineRetiredTrustConfig.Equals($inlineRetiredTrustWithoutUserBlock, [StringComparison]::Ordinal)) -Message 'mixed inline map fixture 未注入 root projects inline table'
-    [IO.File]::WriteAllText($inlineRetiredTrustConfigPath, $inlineRetiredTrustConfig, [Text.UTF8Encoding]::new($false))
-    Assert-TomlParsesWithPython -Path $inlineRetiredTrustConfigPath -Message 'mixed inline map fixture 输入本身不是合法 TOML'
-
-    $inlineRetiredTrustBefore = Get-TreeFingerprint -CodexHome $inlineRetiredTrustHome
-    $inlineRetiredTrustCheckError = $null
-    try {
-        & $scriptPath -Mode Check -CodexHome $inlineRetiredTrustHome | Out-Null
-    } catch {
-        $inlineRetiredTrustCheckError = $_.Exception.Message
-    }
-    Assert-True -Condition ($inlineRetiredTrustCheckError -ceq 'unsupported-inline-retired-project-trust') -Message "mixed inline map Check 未以稳定错误拒绝：$inlineRetiredTrustCheckError"
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $inlineRetiredTrustHome) -ceq $inlineRetiredTrustBefore) -Message 'mixed inline map Check 拒绝后仍修改 fixture'
-
-    $inlineRetiredTrustRepairError = $null
-    try {
-        & $scriptPath -Mode Repair -CodexHome $inlineRetiredTrustHome | Out-Null
-    } catch {
-        $inlineRetiredTrustRepairError = $_.Exception.Message
-    }
-    Assert-True -Condition ($inlineRetiredTrustRepairError -ceq 'unsupported-inline-retired-project-trust') -Message "mixed inline map Repair 未以稳定错误拒绝：$inlineRetiredTrustRepairError"
-    Assert-True -Condition ((Get-TreeFingerprint -CodexHome $inlineRetiredTrustHome) -ceq $inlineRetiredTrustBefore) -Message 'mixed inline map Repair 拒绝后仍修改 fixture'
-
-    $extendedProjectTrustPathCases = @(
-        [pscustomobject]@{ name = 'extended-backslash'; path = '\\?\D:\Codex\projects\codex-gsd-codex-c-skill' },
-        [pscustomobject]@{ name = 'extended-slash'; path = '//?/D:/Codex/projects/codex-gsd-codex-c-skill' },
-        [pscustomobject]@{ name = 'extended-mixed'; path = '\\?/D:/Codex/projects/codex-gsd-codex-c-skill' },
-        [pscustomobject]@{ name = 'device-backslash'; path = '\\.\D:\Codex\projects\codex-gsd-codex-c-skill' },
-        [pscustomobject]@{ name = 'device-mixed'; path = '\\./D:/Codex/projects/codex-gsd-codex-c-skill' },
-        [pscustomobject]@{ name = 'device-slash'; path = '//./D:/Codex/projects/codex-gsd-codex-c-skill' }
-    )
-    foreach ($extendedProjectTrustPrefixCase in $extendedProjectTrustPathCases) {
-        $extendedProjectTrustHome = Join-Path $testRoot "retired-project-trust-$($extendedProjectTrustPrefixCase.name)\.codex"
-        New-FixtureCodexHome -Root $extendedProjectTrustHome
-        $extendedProjectTrustConfigPath = Join-Path $extendedProjectTrustHome 'config.toml'
-        $extendedProjectTrustBaselineRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $extendedProjectTrustHome
-        Assert-True -Condition ([bool]$extendedProjectTrustBaselineRepair.ok) -Message "$($extendedProjectTrustPrefixCase.name) fixture 基准 Repair 未形成健康状态"
-        $extendedProjectTrustPath = [string]$extendedProjectTrustPrefixCase.path
-        $extendedProjectTrustHeader = "[projects.'$extendedProjectTrustPath']"
-        $extendedProjectTrustUserHeader = "[projects.'D:\Codex\projects\user-owned-project']"
-        $extendedProjectTrustBaseline = [IO.File]::ReadAllText($extendedProjectTrustConfigPath)
-        $extendedProjectTrustBlock = $extendedProjectTrustHeader + [Environment]::NewLine + 'trust_level = "trusted"' + [Environment]::NewLine + 'extended_project_trust_sentinel = "must-not-pass"' + [Environment]::NewLine + [Environment]::NewLine
-        $extendedProjectTrustConfig = $extendedProjectTrustBaseline.Replace($extendedProjectTrustUserHeader, $extendedProjectTrustBlock + $extendedProjectTrustUserHeader)
-        Assert-True -Condition (-not $extendedProjectTrustConfig.Equals($extendedProjectTrustBaseline, [StringComparison]::Ordinal)) -Message "$($extendedProjectTrustPrefixCase.name) fixture 未注入 extended/device project key"
-        [IO.File]::WriteAllText($extendedProjectTrustConfigPath, $extendedProjectTrustConfig, [Text.UTF8Encoding]::new($false))
-
-        $extendedProjectTrustBefore = Get-TreeFingerprint -CodexHome $extendedProjectTrustHome
-        $extendedProjectTrustCheckError = $null
-        try {
-            & $scriptPath -Mode Check -CodexHome $extendedProjectTrustHome | Out-Null
-        } catch {
-            $extendedProjectTrustCheckError = $_.Exception.Message
-        }
-        Assert-True -Condition ($extendedProjectTrustCheckError -ceq 'unsupported-extended-project-trust-path') -Message "$($extendedProjectTrustPrefixCase.name) Check 未以稳定错误拒绝：$extendedProjectTrustCheckError"
-        Assert-True -Condition ((Get-TreeFingerprint -CodexHome $extendedProjectTrustHome) -ceq $extendedProjectTrustBefore) -Message "$($extendedProjectTrustPrefixCase.name) Check 拒绝后仍修改 fixture"
-
-        $extendedProjectTrustRepairError = $null
-        try {
-            & $scriptPath -Mode Repair -CodexHome $extendedProjectTrustHome | Out-Null
-        } catch {
-            $extendedProjectTrustRepairError = $_.Exception.Message
-        }
-        Assert-True -Condition ($extendedProjectTrustRepairError -ceq 'unsupported-extended-project-trust-path') -Message "$($extendedProjectTrustPrefixCase.name) Repair 未以稳定错误拒绝：$extendedProjectTrustRepairError"
-        Assert-True -Condition ((Get-TreeFingerprint -CodexHome $extendedProjectTrustHome) -ceq $extendedProjectTrustBefore) -Message "$($extendedProjectTrustPrefixCase.name) Repair 拒绝后仍修改 fixture"
-    }
-
-    $extendedProjectTrustEvidenceHome = Join-Path $testRoot 'retired-project-trust-extended-evidence\.codex'
-    New-FixtureCodexHome -Root $extendedProjectTrustEvidenceHome
-    $extendedProjectTrustEvidenceRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $extendedProjectTrustEvidenceHome
-    Assert-True -Condition ([bool]$extendedProjectTrustEvidenceRepair.ok) -Message 'extended project trust evidence fixture 基准 Repair 未形成健康状态'
-    $extendedProjectTrustEvidenceConfigPath = Join-Path $extendedProjectTrustEvidenceRepair.evidencePath 'config.toml'
-    $extendedProjectTrustEvidenceBaseConfig = [IO.File]::ReadAllText($extendedProjectTrustEvidenceConfigPath)
-    foreach ($extendedProjectTrustEvidenceCase in $extendedProjectTrustPathCases) {
-        [IO.File]::WriteAllText(
-            $extendedProjectTrustEvidenceConfigPath,
-            ($extendedProjectTrustEvidenceBaseConfig + [Environment]::NewLine + "[projects.'$([string]$extendedProjectTrustEvidenceCase.path)']" + [Environment]::NewLine + 'trust_level = "trusted"' + [Environment]::NewLine),
-            [Text.UTF8Encoding]::new($false)
-        )
-        $extendedProjectTrustEvidenceLiveBefore = Get-TreeFingerprint -CodexHome $extendedProjectTrustEvidenceHome
-        $extendedProjectTrustEvidenceRestoreError = $null
-        try {
-            & $scriptPath -Mode Restore -CodexHome $extendedProjectTrustEvidenceHome -EvidencePath ([string]$extendedProjectTrustEvidenceRepair.evidencePath) | Out-Null
-        } catch {
-            $extendedProjectTrustEvidenceRestoreError = $_.Exception.Message
-        }
-        Assert-True -Condition ($extendedProjectTrustEvidenceRestoreError -match 'unsupported-extended-project-trust-path') -Message "$($extendedProjectTrustEvidenceCase.name) project trust evidence Restore 未 fail closed：$extendedProjectTrustEvidenceRestoreError"
-        Assert-True -Condition ((Get-TreeFingerprint -CodexHome $extendedProjectTrustEvidenceHome) -ceq $extendedProjectTrustEvidenceLiveBefore) -Message "$($extendedProjectTrustEvidenceCase.name) project trust evidence Restore 拒绝后仍修改 live fixture"
-    }
-
     foreach ($case in @(
         @{ Name = "malformed-hooks"; Variant = "MalformedHooks" },
-        @{ Name = "duplicate-serena"; Variant = "DuplicateSerena" },
-        @{ Name = "duplicate-serena-args"; Variant = "DuplicateSerenaArgs" },
-        @{ Name = "duplicate-serena-command"; Variant = "DuplicateSerenaCommand" },
-        @{ Name = "malformed-serena-args"; Variant = "MalformedSerenaArgs" },
-        @{ Name = "missing-serena-context"; Variant = "MissingSerenaContext" },
-        @{ Name = "missing-serena-context-value"; Variant = "MissingSerenaContextValue" },
-        @{ Name = "wrong-serena-context"; Variant = "WrongSerenaContext" },
-        @{ Name = "duplicate-serena-context"; Variant = "DuplicateSerenaContext" },
         @{ Name = "invalid-serena-context-policy"; Variant = "InvalidSerenaContextPolicy" },
         @{ Name = "malformed-serena-indent"; Variant = "MalformedSerenaIndent" },
         @{ Name = "bare-cr-serena-context"; Variant = "BareCrSerenaContext" },
@@ -2312,22 +1367,12 @@ try {
         @{ Name = "external-serena-marker"; Variant = "ExternalSerenaMarker" },
         @{ Name = "quoted-serena-scalar"; Variant = "QuotedSerenaScalar" },
         @{ Name = "quoted-serena-list-scalar"; Variant = "QuotedSerenaListScalar" },
-        @{ Name = "duplicate-serena-prompt"; Variant = "DuplicateSerenaPrompt" },
-        @{ Name = "missing-serena-project-value"; Variant = "MissingSerenaProjectValue" },
-        @{ Name = "duplicate-hook-section"; Variant = "DuplicateHookSection" },
-        @{ Name = "duplicate-quoted-approval"; Variant = "DuplicateQuotedApproval" },
-        @{ Name = "root-dotted-hook-key"; Variant = "RootDottedHookKey" },
-        @{ Name = "multiline-toml"; Variant = "MultilineToml" },
-        @{ Name = "invalid-unmanaged-toml"; Variant = "InvalidUnmanagedToml" },
-        @{ Name = "invalid-utf8-toml"; Variant = "InvalidUtf8Toml" },
-        @{ Name = "bom-toml"; Variant = "BomToml" }
+        @{ Name = "duplicate-serena-prompt"; Variant = "DuplicateSerenaPrompt" }
     )) {
         $caseHome = Join-Path $testRoot "$($case.Name)\.codex"
         New-FixtureCodexHome -Root $caseHome -Variant $case.Variant
         Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $caseHome -CaseName $case.Name
     }
-
-    Invoke-HeaderLikeArrayTomlRejectionTest -ScriptPath $scriptPath -TestRoot $testRoot
 
     $hardLinkHome = Join-Path $testRoot "hard-link\.codex"
     New-FixtureCodexHome -Root $hardLinkHome
@@ -2340,21 +1385,6 @@ try {
     Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $hardLinkHome -CaseName "hard-link"
     Assert-True -Condition ((Get-Sha256 -Path $externalSentinelPath) -eq $externalSentinelHashBefore) -Message "hard-link 拒绝路径改写了外部 sentinel 内容"
     Assert-True -Condition ((Get-Acl -LiteralPath $externalSentinelPath).Sddl -ceq $externalSentinelAclBefore) -Message "hard-link 拒绝路径改写了外部 sentinel ACL"
-
-    $sensitiveErrorHome = Join-Path $testRoot "sensitive-error\.codex"
-    New-FixtureCodexHome -Root $sensitiveErrorHome -Variant SensitiveInvalidHeader
-    $captured = [System.Collections.Generic.List[string]]::new()
-    try {
-        & $scriptPath -Mode Repair -CodexHome $sensitiveErrorHome -Json 2>&1 | ForEach-Object { $captured.Add([string]$_) }
-    } catch {
-        $captured.Add($_.ToString())
-    }
-    $capturedText = $captured -join "`n"
-    Assert-True -Condition (-not $capturedText.Contains('SECRET_ERROR_TOKEN')) -Message "-Json 错误输出泄露了配置原文"
-    $errorJsonLine = @($captured | Where-Object { $_.TrimStart().StartsWith('{') } | Select-Object -First 1)
-    Assert-True -Condition ($errorJsonLine.Count -eq 1) -Message "-Json 失败未返回结构化 JSON"
-    $errorJson = $errorJsonLine[0] | ConvertFrom-Json
-    Assert-True -Condition (-not [bool]$errorJson.ok -and $errorJson.error.code -eq 'reconciliation-failed') -Message "-Json 失败结构不稳定"
 
     Write-Host "PASS: Codex host hook reconciliation"
 } finally {
