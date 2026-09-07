@@ -497,7 +497,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = 'PROJECT_ROOT_PLACEHOLDER'
 . (Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1')
 . (Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1')
-$root = Join-Path ([IO.Path]::GetTempPath()) ('std-validation-' + [guid]::NewGuid().ToString('N'))
+$root = Join-Path 'D:\Codex\temp' ('std-validation-' + [guid]::NewGuid().ToString('N'))
 $cap = Join-Path $root 'cap'; $ev = Join-Path $cap 'evidence'
 [void][IO.Directory]::CreateDirectory((Join-Path $cap 'tree'))
 [void][IO.Directory]::CreateDirectory($ev)
