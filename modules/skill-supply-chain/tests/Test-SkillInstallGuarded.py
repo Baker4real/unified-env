@@ -837,7 +837,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(result["target_scope"], "system")
         self.assertEqual(Path(result["target_root"]), self.active / ".system")
 
-    def prepare_system_provenance_repair(self) -> dict[str, object]:
+    def prepare_system_provenance_repair(self, *, include_creator_scripts: bool = False) -> dict[str, object]:
         names = [
             "imagegen",
             "openai-docs",
@@ -865,6 +865,11 @@ class SkillInstallGuardedTests(unittest.TestCase):
             skill_path = skill_root / "SKILL.md"
             skill_path.write_text(skill_text, encoding="utf-8")
             baseline_skill_bytes[name] = skill_path.read_bytes()
+            if name == "skill-creator" and include_creator_scripts:
+                scripts = skill_root / "scripts"
+                scripts.mkdir()
+                (scripts / "quick_validate.py").write_text("# official quick validator\nLEGACY = True\n", encoding="utf-8")
+                (scripts / "test_quick_validate.py").write_text("# official quick validator tests\nLEGACY = True\n", encoding="utf-8")
             if name == "review-agent":
                 agents = skill_root / "agents"
                 agents.mkdir()
@@ -1045,33 +1050,197 @@ class SkillInstallGuardedTests(unittest.TestCase):
             str(self.temp / "evidence"),
         ]
 
-    def prepare_skill_creator_compatibility_overlay(self) -> dict[str, object]:
-        state = self.prepare_system_provenance_repair()
+    def prepare_system_display_reconcile(self, *, include_creator_scripts: bool = False) -> dict[str, object]:
+        state = self.prepare_system_provenance_repair(include_creator_scripts=include_creator_scripts)
+        bootstrap = json.loads(Path(state["plan"]).read_text(encoding="utf-8"))
+        for spec in bootstrap["skills"]:
+            root = Path(state["system_root"]) / spec["name"]
+            agents = root / "agents"
+            agents.mkdir(exist_ok=True)
+            agent_file = agents / "openai.yaml"
+            text = agent_file.read_text(encoding="utf-8") if agent_file.exists() else "interface:\n"
+            agent_file.write_text(
+                text.replace("interface:\n", 'interface:\n  short_description: "Original menu text"\n  default_prompt: "Original prompt"\n'),
+                encoding="utf-8",
+            )
+            spec["official_integrity"] = REPAIR.system_skill_integrity(root)
+            spec["effective_integrity"] = spec["official_integrity"]
+            if spec["name"] == "review-agent":
+                spec["critical_files"]["agents/openai.yaml"] = WRAPPER.sha256_file(agent_file)
+                spec["effective_integrity"] = REPAIR._tree_integrity(root, overrides={
+                    "SKILL.md": REPAIR._review_overlay_bytes(root / "SKILL.md", (root / "SKILL.md").read_bytes()),
+                })
+        Path(state["plan"]).write_text(json.dumps(bootstrap), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(WRAPPER.main(self.system_provenance_repair_args(state)), 0)
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        records = ledger["sources"][0]["system_provenance"]["skills"]
+        plan = json.loads(Path(state["plan"]).read_text(encoding="utf-8"))
+        plan["mode"] = "atomic-six-skill-display-reconcile"
+        for spec, previous in zip(plan["skills"], records):
+            root = Path(state["system_root"]) / spec["name"]
+            baseline = {"SKILL.md": (root / "SKILL.md").read_bytes().decode("utf-8")}
+            if (root / "agents/openai.yaml").exists():
+                baseline["agents/openai.yaml"] = (root / "agents/openai.yaml").read_bytes().decode("utf-8")
+            (root / "SKILL.md").write_bytes(
+                baseline["SKILL.md"].replace(
+                    f"description: System repair fixture for {spec['name']}.",
+                    'description: "Display text translated for this fixture."',
+                ).encode("utf-8")
+            )
+            agent_file = root / "agents/openai.yaml"
+            agent_file.write_bytes(
+                agent_file.read_bytes().replace(b"Original menu text", b"Translated menu text")
+                .replace(b"Original prompt", b"Translated prompt")
+            )
+            spec["critical_files"] = {
+                relative: WRAPPER.sha256_file(root / relative)
+                for relative in previous["critical_files"]
+            }
+            spec["source_before_sha256"] = WRAPPER.sha256_file(root / "SOURCE.md")
+            spec["effective_integrity"] = REPAIR.system_skill_integrity(root)
+            spec["overlay"] = {
+                "kind": "display-only",
+                "baseline_files": baseline,
+                "base_overlay": previous["overlay"],
+            }
+        plan["ledger_before_sha256"] = WRAPPER.sha256_file(self.ledger)
+        plan["catalog_before_sha256"] = WRAPPER.sha256_file(Path(state["catalog"]))
+        Path(state["plan"]).write_text(json.dumps(plan), encoding="utf-8")
+        state["previous_records"] = records
+        return state
+
+    def test_system_display_reconcile_preserves_payload_and_official_baseline(self) -> None:
+        state = self.prepare_system_display_reconcile()
+        root = Path(state["system_root"])
+        payload_before = {
+            p: (p.read_bytes(), p.stat().st_ino, p.stat().st_mtime_ns)
+            for p in root.rglob("*") if p.is_file() and p.name != "SOURCE.md"
+        }
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.system_provenance_repair_args(state))
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "succeeded")
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        after = ledger["sources"][0]["system_provenance"]["skills"]
+        for old, new in zip(state["previous_records"], after):
+            self.assertEqual(old["official_integrity"], new["official_integrity"])
+            self.assertEqual(new["effective_integrity"], REPAIR.system_skill_integrity(root / new["name"]))
+            self.assertEqual(new["overlay"]["kind"], "display-only")
+            self.assertNotIn("baseline_files", new["overlay"])
+        for path, value in payload_before.items():
+            self.assertEqual((path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns), value)
+
+    def system_display_state_bytes(self, state: dict[str, object]) -> dict[Path, bytes]:
+        paths = [self.ledger, Path(state["catalog"])]
+        paths.extend(p for p in Path(state["system_root"]).rglob("*") if p.is_file())
+        return {p: p.read_bytes() for p in paths}
+
+    def test_system_display_reconcile_dry_run_is_read_only(self) -> None:
+        state = self.prepare_system_display_reconcile()
+        before = self.system_display_state_bytes(state)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = WRAPPER.main(self.system_provenance_repair_args(state) + ["--dry-run"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "dry-run-pass")
+        self.assertEqual(self.system_display_state_bytes(state), before)
+
+    def test_system_display_reconcile_rejects_non_display_and_forged_baselines(self) -> None:
+        for case in (
+            "body", "name", "duplicate-key", "policy", "resource", "official", "baseline",
+            "underlying-overlay", "comment", "agent-comment", "removed-field", "field-type",
+            "delimiter", "bom",
+        ):
+            with self.subTest(case=case):
+                state = self.prepare_system_display_reconcile()
+                plan = json.loads(Path(state["plan"]).read_text(encoding="utf-8"))
+                spec = plan["skills"][0]
+                root = Path(state["system_root"]) / spec["name"]
+                skill = root / "SKILL.md"
+                if case == "body":
+                    skill.write_bytes(skill.read_bytes() + b"\nUnapproved body change.\n")
+                elif case == "name":
+                    skill.write_bytes(skill.read_bytes().replace(b"name: imagegen", b"name: renamed"))
+                elif case == "duplicate-key":
+                    skill.write_bytes(skill.read_bytes().replace(b"name: imagegen", b"name: imagegen\nname: imagegen"))
+                elif case == "policy":
+                    spec = plan["skills"][3]
+                    root = Path(state["system_root"]) / spec["name"]
+                    yaml_path = root / "agents/openai.yaml"
+                    yaml_path.write_bytes(yaml_path.read_bytes().replace(b": false", b": true"))
+                    spec["critical_files"]["agents/openai.yaml"] = WRAPPER.sha256_file(yaml_path)
+                elif case == "resource":
+                    (root / "new-script.py").write_bytes(b"print('unapproved')\n")
+                elif case == "official":
+                    spec["official_integrity"]["tree_sha256"] = "a" * 64
+                elif case == "baseline":
+                    spec["overlay"]["baseline_files"]["SKILL.md"] += "\nForged old body.\n"
+                elif case == "comment":
+                    skill.write_bytes(skill.read_bytes().replace(b"name: imagegen", b"name: imagegen\n# New instruction"))
+                elif case == "delimiter":
+                    lines = skill.read_bytes().splitlines(keepends=True)
+                    end = next(i for i in range(1, len(lines)) if lines[i].strip() == b"---")
+                    lines[end] = lines[end].replace(b"---", b"...")
+                    skill.write_bytes(b"".join(lines))
+                elif case == "bom":
+                    skill.write_bytes(b"\xef\xbb\xbf" + skill.read_bytes())
+                elif case in {"agent-comment", "removed-field", "field-type"}:
+                    path = root / "agents/openai.yaml"
+                    value = path.read_bytes()
+                    if case == "agent-comment":
+                        value += b"# New instruction\n"
+                    elif case == "removed-field":
+                        value = b"".join(
+                            line for line in value.splitlines(keepends=True)
+                            if not line.startswith(b"  default_prompt:")
+                        )
+                    else:
+                        value = value.replace(b'  default_prompt: "Translated prompt"', b"  default_prompt: false")
+                    self.assertNotEqual(value, path.read_bytes())
+                    path.write_bytes(value)
+                else:
+                    spec["overlay"]["base_overlay"] = {"kind": "arbitrary-code"}
+                spec["effective_integrity"] = REPAIR.system_skill_integrity(root)
+                Path(state["plan"]).write_text(json.dumps(plan), encoding="utf-8")
+                before = self.system_display_state_bytes(state)
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    code = WRAPPER.main(self.system_provenance_repair_args(state))
+                self.assertEqual(code, 2)
+                self.assertEqual(self.system_display_state_bytes(state), before)
+
+    def test_system_display_reconcile_failure_restores_all_metadata(self) -> None:
+        state = self.prepare_system_display_reconcile()
+        before = self.system_display_state_bytes(state)
+        failing_generator = self.temp / "display-failing-generator.py"
+        failing_generator.write_text("raise SystemExit(23)\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = WRAPPER.main(self.system_provenance_repair_args(state, generator=failing_generator))
+        self.assertEqual(code, 2)
+        self.assertEqual(self.system_display_state_bytes(state), before)
+        transaction = max((self.temp / "evidence").glob("system-provenance-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "rolled-back")
+        self.assertEqual(len(result["backups"]), 8)
+        self.assertEqual(result["rollback_errors"], [])
+
+    def prepare_skill_creator_compatibility_overlay(self, *, localized: bool = False) -> dict[str, object]:
+        state = (
+            self.prepare_system_display_reconcile(include_creator_scripts=True)
+            if localized else self.prepare_system_provenance_repair(include_creator_scripts=True)
+        )
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(
                 WRAPPER.main(self.system_provenance_repair_args(state)),
                 0,
             )
         active_skill = Path(state["system_root"]) / "skill-creator"
-        scripts = active_skill / "scripts"
-        scripts.mkdir()
-        (scripts / "quick_validate.py").write_text(
-            "# official quick validator\nLEGACY = True\n",
-            encoding="utf-8",
-        )
-        (scripts / "test_quick_validate.py").write_text(
-            "# official quick validator tests\nLEGACY = True\n",
-            encoding="utf-8",
-        )
         candidate = self.temp / "candidate-skill-creator"
         shutil.copytree(active_skill, candidate)
         (candidate / "SKILL.md").write_text(
-            "---\n"
-            "name: skill-creator\n"
-            "description: fixture\n"
-            "argument-hint: \"What should this skill do?\"\n"
-            "disable-model-invocation: false\n"
-            "---\n\n# skill-creator\n",
+            (active_skill / "SKILL.md").read_text(encoding="utf-8")
+            + "\nCompatible metadata: argument-hint and disable-model-invocation.\n",
             encoding="utf-8",
         )
         (candidate / "scripts" / "quick_validate.py").write_text(
@@ -1084,7 +1253,9 @@ class SkillInstallGuardedTests(unittest.TestCase):
             "assert {'argument-hint', 'disable-model-invocation'}\n",
             encoding="utf-8",
         )
-        official = REPAIR.system_skill_integrity(active_skill)
+        ledger_before = json.loads(self.ledger.read_text(encoding="utf-8"))
+        record_before = next(item for item in ledger_before["sources"][0]["system_provenance"]["skills"] if item["name"] == "skill-creator")
+        official = record_before["official_integrity"]
         effective = REPAIR.system_skill_integrity(candidate)
         critical = {
             relative: hashlib.sha256(
@@ -1127,7 +1298,114 @@ class SkillInstallGuardedTests(unittest.TestCase):
             "official": official,
             "effective": effective,
             "critical": critical,
+            "ledger_before": ledger_before,
+            "record_before": record_before,
+            "source_before": (active_skill / "SOURCE.md").read_bytes(),
         }
+
+    def test_skill_creator_compatibility_preserves_display_provenance(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay(localized=True)
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(state["args"])
+        self.assertEqual(code, 0, stderr.getvalue())
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        source = ledger["sources"][0]
+        record = next(item for item in source["system_provenance"]["skills"] if item["name"] == "skill-creator")
+        before = state["record_before"]
+        self.assertNotEqual(before["official_integrity"], before["effective_integrity"])
+        self.assertEqual(record["official_integrity"], before["official_integrity"])
+        self.assertEqual(record["overlay"]["base_overlay"], before["overlay"])
+        self.assertEqual(record["overlay"]["baseline_integrity"], before["effective_integrity"])
+        for old in state["ledger_before"]["sources"][0]["system_provenance"]["skills"]:
+            if old["name"] != "skill-creator":
+                self.assertIn(old, source["system_provenance"]["skills"])
+        for old in state["ledger_before"]["sources"][0]["local_changes"]:
+            self.assertIn(old, source["local_changes"])
+        active = Path(state["state"]["system_root"]) / "skill-creator"
+        source_bytes = (active / "SOURCE.md").read_bytes()
+        self.assertTrue(source_bytes.startswith(state["source_before"].rstrip(b"\r\n")))
+        current = WRAPPER.current_source_record(active / "SOURCE.md")
+        self.assertIn("display-only", source_bytes.decode("utf-8").split("# Current Source Record")[-1])
+        self.assertIn(before["official_integrity"]["tree_sha256"], source_bytes.decode("utf-8").split("# Current Source Record")[-1])
+        self.assertFalse(current.conflicts)
+
+    def test_skill_creator_display_baseline_drift_fails_before_activation(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay(localized=True)
+        active = Path(state["state"]["system_root"]) / "skill-creator"
+        manifest = Path(state["manifest"])
+        original_manifest = manifest.read_bytes()
+        original_ledger = self.ledger.read_bytes()
+        original_skill = (active / "SKILL.md").read_bytes()
+        for label in ("localized-as-official", "payload-drift", "source-drift", "unknown-base"):
+            with self.subTest(label=label):
+                manifest.write_bytes(original_manifest)
+                self.ledger.write_bytes(original_ledger)
+                (active / "SKILL.md").write_bytes(original_skill)
+                (active / "SOURCE.md").write_bytes(state["source_before"])
+                if label == "localized-as-official":
+                    decision = json.loads(original_manifest)
+                    decision["system_provenance_overlay"]["official_integrity"] = state["record_before"]["effective_integrity"]
+                    manifest.write_text(json.dumps(decision), encoding="utf-8")
+                elif label == "payload-drift":
+                    (active / "SKILL.md").write_bytes(original_skill + b"\nDrift.\n")
+                elif label == "source-drift":
+                    (active / "SOURCE.md").write_bytes(state["source_before"] + b"\nDrift.\n")
+                else:
+                    ledger = json.loads(original_ledger)
+                    record = next(item for item in ledger["sources"][0]["system_provenance"]["skills"] if item["name"] == "skill-creator")
+                    record["overlay"]["base_overlay"] = {"kind": "unknown"}
+                    self.ledger.write_text(json.dumps(ledger), encoding="utf-8")
+                before = self.system_display_state_bytes(state["state"])
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    code = WRAPPER.main(state["args"])
+                self.assertEqual(code, 2)
+                self.assertEqual(self.system_display_state_bytes(state["state"]), before)
+                self.assertFalse(list((self.temp / "evidence").glob("install-*/manifest.json")))
+
+    def test_display_reconcile_preserves_creator_compatibility_and_prior_display_chain(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay(localized=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(WRAPPER.main(state["args"]), 0)
+        system_state = state["state"]
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        records = ledger["sources"][0]["system_provenance"]["skills"]
+        creator_before = next(item for item in records if item["name"] == "skill-creator")
+        plan = json.loads(Path(system_state["plan"]).read_text(encoding="utf-8"))
+        for spec, previous in zip(plan["skills"], records):
+            root = Path(system_state["system_root"]) / spec["name"]
+            baseline = {
+                relative: (root / relative).read_bytes().decode("utf-8")
+                for relative in ("SKILL.md", "agents/openai.yaml")
+                if (root / relative).is_file()
+            }
+            (root / "SKILL.md").write_bytes(
+                baseline["SKILL.md"].replace("Display text translated for this fixture.", "Updated display translation.").encode("utf-8")
+            )
+            spec["source_before_sha256"] = WRAPPER.sha256_file(root / "SOURCE.md")
+            spec["official_integrity"] = previous["official_integrity"]
+            spec["effective_integrity"] = REPAIR.system_skill_integrity(root)
+            spec["critical_files"] = {relative: WRAPPER.sha256_file(root / relative) for relative in previous["critical_files"]}
+            previous_overlay = previous["overlay"]
+            spec["overlay"] = {
+                "kind": "display-only",
+                "baseline_files": baseline,
+                "base_overlay": previous_overlay["base_overlay"] if previous_overlay["kind"] == "display-only" else previous_overlay,
+            }
+        plan["ledger_before_sha256"] = WRAPPER.sha256_file(self.ledger)
+        plan["catalog_before_sha256"] = WRAPPER.sha256_file(Path(system_state["catalog"]))
+        Path(system_state["plan"]).write_text(json.dumps(plan), encoding="utf-8")
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.system_provenance_repair_args(system_state))
+        self.assertEqual(code, 0, stderr.getvalue())
+        after = json.loads(self.ledger.read_text(encoding="utf-8"))["sources"][0]["system_provenance"]["skills"]
+        creator_after = next(item for item in after if item["name"] == "skill-creator")
+        self.assertEqual(creator_after["official_integrity"], creator_before["official_integrity"])
+        self.assertEqual(creator_after["overlay"]["base_overlay"], creator_before["overlay"])
+        self.assertEqual(creator_after["overlay"]["base_overlay"]["base_overlay"], state["record_before"]["overlay"])
+        for relative in ("scripts/quick_validate.py", "scripts/test_quick_validate.py"):
+            self.assertEqual(creator_after["critical_files"][relative], creator_before["critical_files"][relative])
 
     def test_system_provenance_repair_commits_six_skills_atomically(self) -> None:
         state = self.prepare_system_provenance_repair()
@@ -1242,7 +1520,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 self.assertIn("overlay", stderr.getvalue())
 
     def test_skill_creator_overlay_generator_failure_rolls_back_payload_and_state(self) -> None:
-        state = self.prepare_skill_creator_compatibility_overlay()
+        state = self.prepare_skill_creator_compatibility_overlay(localized=True)
         active_skill = Path(state["state"]["system_root"]) / "skill-creator"
         before = {
             "skill": REPAIR.system_skill_payload_inventory(active_skill),
@@ -1258,6 +1536,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             code = WRAPPER.main(args)
         self.assertEqual(code, 2)
         self.assertEqual(REPAIR.system_skill_payload_inventory(active_skill), before["skill"])
+        self.assertEqual((active_skill / "SOURCE.md").read_bytes(), state["source_before"])
         self.assertEqual(self.ledger.read_bytes(), before["ledger"])
         self.assertEqual(Path(state["state"]["catalog"]).read_bytes(), before["catalog"])
         transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
@@ -1292,6 +1571,34 @@ class SkillInstallGuardedTests(unittest.TestCase):
             (active_skill / "scripts" / "quick_validate.py").read_text(encoding="utf-8"),
             "# concurrent mutation\n",
         )
+
+    def test_skill_creator_source_change_after_precheck_rolls_back_without_losing_change(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay(localized=True)
+        active = Path(state["state"]["system_root"]) / "skill-creator"
+        external_source = state["source_before"] + b"\nExternal provenance annotation.\n"
+        before_ledger = self.ledger.read_bytes()
+        before_catalog = Path(state["state"]["catalog"]).read_bytes()
+        original_activate = WRAPPER.activate_directories
+
+        def change_source_then_activate(*args: object, **kwargs: object) -> None:
+            (active / "SOURCE.md").write_bytes(external_source)
+            original_activate(*args, **kwargs)
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(WRAPPER, "activate_directories", side_effect=change_source_then_activate),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            code = WRAPPER.main(state["args"])
+        self.assertEqual(code, 2, stderr.getvalue())
+        self.assertIn("backup SOURCE.md", stderr.getvalue())
+        self.assertEqual((active / "SOURCE.md").read_bytes(), external_source)
+        self.assertEqual(REPAIR.system_skill_integrity(active), state["record_before"]["effective_integrity"])
+        self.assertEqual(self.ledger.read_bytes(), before_ledger)
+        self.assertEqual(Path(state["state"]["catalog"]).read_bytes(), before_catalog)
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        self.assertEqual(json.loads(transaction.read_text(encoding="utf-8"))["status"], "rolled-back")
 
     def test_skill_creator_overlay_live_readback_catches_post_generation_payload_drift(self) -> None:
         state = self.prepare_skill_creator_compatibility_overlay()

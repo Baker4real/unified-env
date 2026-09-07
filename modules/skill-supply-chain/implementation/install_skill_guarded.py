@@ -837,12 +837,42 @@ def prepare_system_provenance_overlay(
     if sha256_file(marker_path) != marker.get("sha256"):
         raise InstallError("system skill marker hash does not match ledger")
     skill_root = d_path(active_root / ".system" / "skill-creator", label="skill-creator active root", must_exist=True)
+    record = next(item for item in provenance["skills"] if item["name"] == "skill-creator")
+    if record["official_integrity"] != overlay["official_integrity"]:
+        raise InstallError("skill-creator official integrity does not match recorded official baseline")
     baseline_integrity = system_skill_integrity(skill_root)
-    if baseline_integrity != overlay["official_integrity"]:
-        raise InstallError("skill-creator official integrity does not match active baseline")
+    if baseline_integrity != record["effective_integrity"]:
+        raise InstallError("skill-creator active integrity does not match recorded effective baseline")
+    source_path = ensure_file(skill_root / "SOURCE.md", label="skill-creator baseline SOURCE.md")
+    source_before = source_path.read_bytes()
+    if hashlib.sha256(source_before).hexdigest() != record.get("source_md_sha256"):
+        raise InstallError("skill-creator baseline SOURCE.md does not match ledger")
+    prior_overlay = record.get("overlay")
+    projection = skill_creator_overlay_ledger_projection(overlay)
+    if prior_overlay == {"kind": "none"}:
+        if baseline_integrity != record["official_integrity"]:
+            raise InstallError("skill-creator unmodified baseline differs from official integrity")
+    elif isinstance(prior_overlay, dict) and prior_overlay.get("kind") == "display-only":
+        hashes = prior_overlay.get("baseline_file_sha256")
+        if (
+            set(prior_overlay) != {"kind", "base_overlay", "baseline_file_sha256"}
+            or prior_overlay.get("base_overlay") != {"kind": "none"}
+            or not isinstance(hashes, dict)
+            or "SKILL.md" not in hashes
+            or not set(hashes).issubset({"SKILL.md", "agents/openai.yaml"})
+            or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes.values())
+        ):
+            raise InstallError("skill-creator prior display overlay provenance is invalid")
+        projection["base_overlay"] = json.loads(json.dumps(prior_overlay))
+        projection["baseline_integrity"] = json.loads(json.dumps(baseline_integrity))
+    else:
+        raise InstallError("skill-creator prior overlay is not a supported compatibility baseline")
     baseline_inventory = system_skill_payload_inventory(skill_root)
     return {
         "overlay": overlay,
+        "overlay_projection": projection,
+        "baseline_integrity": baseline_integrity,
+        "source_before": source_before,
         "source_index": source_index,
         "source_entry_id": entry.get("id"),
         "package": observed_package,
@@ -869,8 +899,10 @@ def _assert_system_overlay_baseline(
     skill_root = d_path(active_root / ".system" / "skill-creator", label="skill-creator active root", must_exist=True)
     if directory_identity(skill_root, label="skill-creator active root") != overlay_context["baseline_skill_identity"]:
         raise InstallError("skill-creator active directory identity changed during transaction")
-    if system_skill_integrity(skill_root) != overlay_context["overlay"]["official_integrity"]:
+    if system_skill_integrity(skill_root) != overlay_context["baseline_integrity"]:
         raise InstallError("skill-creator active payload changed during transaction")
+    if (skill_root / "SOURCE.md").read_bytes() != overlay_context["source_before"]:
+        raise InstallError("skill-creator baseline SOURCE.md changed during transaction")
     if system_skill_payload_inventory(skill_root) != overlay_context["baseline_inventory"]:
         raise InstallError("skill-creator active payload topology changed during transaction")
     marker_path = overlay_context["marker_path"]
@@ -969,6 +1001,8 @@ def verify_system_provenance_overlay_postcondition(
         if sha256_file(path) != overlay["critical_files"][relative]:
             raise InstallError(f"active skill-creator critical payload drifted: {relative}")
     source_path = active_skill / "SOURCE.md"
+    if source_path.read_bytes() != overlay_context["source_bytes"]:
+        raise InstallError("skill-creator SOURCE.md provenance postcheck failed")
     source_hash = sha256_file(source_path)
     entry, _ = _system_source_entry(ledger=ledger, active_root=active_root)
     record = next(item for item in entry["system_provenance"]["skills"] if item.get("name") == "skill-creator")
@@ -976,7 +1010,7 @@ def verify_system_provenance_overlay_postcondition(
         record.get("official_integrity") != overlay["official_integrity"]
         or record.get("effective_integrity") != overlay["effective_integrity"]
         or record.get("critical_files") != overlay["critical_files"]
-        or record.get("overlay") != skill_creator_overlay_ledger_projection(overlay)
+        or record.get("overlay") != overlay_context["overlay_projection"]
         or record.get("source_md_sha256") != source_hash
     ):
         raise InstallError("system provenance ledger overlay postcheck failed")
@@ -998,7 +1032,7 @@ def verify_system_provenance_overlay_postcondition(
     return {
         "skill_md_sha256": overlay["effective_integrity"]["skill_md_sha256"],
         "source_md_sha256": source_hash,
-        "overlay": skill_creator_overlay_ledger_projection(overlay),
+        "overlay": overlay_context["overlay_projection"],
     }
 
 
@@ -1015,10 +1049,9 @@ def apply_system_provenance_overlay_to_ledger(
     record = next(
         item for item in provenance["skills"] if item.get("name") == "skill-creator"
     )
-    record["official_integrity"] = json.loads(json.dumps(overlay["official_integrity"]))
     record["effective_integrity"] = json.loads(json.dumps(overlay["effective_integrity"]))
     record["critical_files"] = json.loads(json.dumps(overlay["critical_files"]))
-    record["overlay"] = skill_creator_overlay_ledger_projection(overlay)
+    record["overlay"] = json.loads(json.dumps(overlay_context["overlay_projection"]))
     record["source_md_sha256"] = source_md_sha256
     changes = entry.setdefault("local_changes", [])
     if not isinstance(changes, list):
@@ -3668,8 +3701,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     )
     if system_overlay_context is not None:
         overlay = system_overlay_context["overlay"]
-        overlay_projection = skill_creator_overlay_ledger_projection(overlay)
-        system_overlay_context["source_bytes"] = system_source_record(
+        overlay_projection = system_overlay_context["overlay_projection"]
+        new_source = system_source_record(
             active_root=active_root,
             source_group_id="codex-bundled-system-skills",
             package=system_overlay_context["package"],
@@ -3681,6 +3714,11 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 "critical_files": overlay["critical_files"],
                 "overlay": overlay_projection,
             },
+        )
+        system_overlay_context["source_bytes"] = (
+            system_overlay_context["source_before"].rstrip(b"\r\n")
+            + b"\n\n---\n"
+            + new_source.split(b"---\n", 1)[1]
         )
         context["system_provenance_overlay"] = system_overlay_context
         # The managed provenance record below is the sole local-change entry for
@@ -3869,10 +3907,12 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 if record.get("name") == "skill-creator"
             )
             backup_skill = Path(skill_record["backup"])
-            if system_skill_integrity(backup_skill) != system_overlay_context["overlay"]["official_integrity"]:
-                raise InstallError("skill-creator backup payload does not match the bound official baseline")
+            if system_skill_integrity(backup_skill) != system_overlay_context["baseline_integrity"]:
+                raise InstallError("skill-creator backup payload does not match the bound effective baseline")
             if system_skill_payload_inventory(backup_skill) != system_overlay_context["baseline_inventory"]:
-                raise InstallError("skill-creator backup topology does not match the bound official baseline")
+                raise InstallError("skill-creator backup topology does not match the bound effective baseline")
+            if (backup_skill / "SOURCE.md").read_bytes() != system_overlay_context["source_before"]:
+                raise InstallError("skill-creator backup SOURCE.md does not match the bound baseline")
         activation_readability = verify_activation_readability(
             active_root=target_root,
             names=names,
