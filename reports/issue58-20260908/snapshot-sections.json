@@ -1,0 +1,66 @@
+{
+  "artifactType": "issue58.n1-snapshot-sections",
+  "capturedAtUtc": "2026-09-08T04:54:25.4170346+00:00",
+  "repoHead": "518a5c3a0c6d6671f542eed79989b6d2661aaab9",
+  "note": "Instrumented replica of CodexHostSafety.ps1 Get-CodexHookCapabilityDirectoryTreeSnapshot recursion (lines 789-955); identical library calls, stopwatches added per section. MetricsObserver scriptblock calls omitted (measured separately as observerMs in production via segment deltas).",
+  "ops": [
+    {
+      "runName": "20260902T091741Z-8fd7a020-d26c-4b3a-9756-a3580880e79a",
+      "treeKind": "planned-target",
+      "treePath": "D:\\agents\\projects\\hermes-retired\\hermes-data\\cache",
+      "totalSnapshotMs": 20761,
+      "sectionSumMs": 17848,
+      "residualMs": 2913,
+      "sections": {
+        "dirGetItemMs": 521,
+        "dirEntryAddMs": 2,
+        "enumChildrenMs": 1090,
+        "childGetItemMs": 503,
+        "assertChildPathMs": 15411,
+        "dirGuardAcquireMs": 185,
+        "fileGuardAcquireMs": 105,
+        "leaseAcquireMs": 2,
+        "sha256Ms": 28,
+        "fileEntryAddMs": 1,
+        "observerMs": 0,
+        "junctionMs": 0,
+        "directories": 734,
+        "files": 393,
+        "junctions": 0,
+        "bytesHashed": 38603171
+      },
+      "entryCount": 1127,
+      "avgDepth": 6.35,
+      "maxDepth": 8
+    },
+    {
+      "runName": "20260905T115125Z-55f5ecb4-77ab-43a5-aa25-0efbc07a6de6",
+      "treeKind": "planned-target",
+      "treePath": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "totalSnapshotMs": 7117,
+      "sectionSumMs": 6095,
+      "residualMs": 1022,
+      "sections": {
+        "dirGetItemMs": 13,
+        "dirEntryAddMs": 1,
+        "enumChildrenMs": 32,
+        "childGetItemMs": 13,
+        "assertChildPathMs": 5794,
+        "dirGuardAcquireMs": 7,
+        "fileGuardAcquireMs": 116,
+        "leaseAcquireMs": 1,
+        "sha256Ms": 117,
+        "fileEntryAddMs": 1,
+        "observerMs": 0,
+        "junctionMs": 0,
+        "directories": 23,
+        "files": 512,
+        "junctions": 0,
+        "bytesHashed": 189329625
+      },
+      "entryCount": 535,
+      "avgDepth": 4.45,
+      "maxDepth": 6
+    }
+  ]
+}

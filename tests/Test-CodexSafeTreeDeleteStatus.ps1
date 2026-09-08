@@ -946,12 +946,17 @@ try {
         -FixturePolicyPath $cachePolicyPath `
         -FixtureEvidenceRoot $cacheEvidence
     $previousSegments = $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS
+    $previousParallelFallback = $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK
     try {
         $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS = '1'
+        # 单树去重合同由串行参考路径持有；并行 fallback 按 worker 持有独立树缓存，
+        # 共享树至多多哈希 workerCount-1 次（语义输出不受影响，另有并行等价 slice 覆盖）。
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = '0'
         $sharedStatus = & $entryPath -Mode Status `
             -FixturePolicyPath $cachePolicyPath -FixtureEvidenceRoot $cacheEvidence
     } finally {
         $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS = $previousSegments
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = $previousParallelFallback
     }
     $sharedOp1 = Get-Operation -Status $sharedStatus -TransactionPath ([string]$sharedPlan1.planPath)
     $sharedOp2 = Get-Operation -Status $sharedStatus -TransactionPath ([string]$sharedPlan2.planPath)
@@ -1309,17 +1314,22 @@ try {
         [Text.UTF8Encoding]::new($false))
 
     $previousFastScan = $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN
+    $previousParallelFallback = $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK
     $medFastStatus = $null
     $medSlowStatus = $null
     try {
         $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '1'
         $medFastStatus = & $entryPath -Mode Status `
             -FixturePolicyPath $medPolicyPath -FixtureEvidenceRoot $medEvidence
+        # N5 L4：slow 腿同时钉死并行 fallback，保证参考侧是纯串行基线（不依赖 FAST_SCAN=0
+        # 对 fallback 输入的间接清空）。
         $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '0'
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = '0'
         $medSlowStatus = & $entryPath -Mode Status `
             -FixturePolicyPath $medPolicyPath -FixtureEvidenceRoot $medEvidence
     } finally {
         $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = $previousFastScan
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = $previousParallelFallback
     }
     $med1aFast = Get-MedOperation -Status $medFastStatus -OperationId '20260823T000001Z-med1a'
     $med1aSlow = Get-MedOperation -Status $medSlowStatus -OperationId '20260823T000001Z-med1a'
@@ -1365,21 +1375,692 @@ try {
             $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '1'
             $fastStatus = & $entryPath -Mode Status `
                 -FixturePolicyPath $statusFixture.policy -FixtureEvidenceRoot $statusFixture.evidence
+            # N5 L4：slow 腿同时钉死并行 fallback（纯串行基线）。
             $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = '0'
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = '0'
             $slowStatus = & $entryPath -Mode Status `
                 -FixturePolicyPath $statusFixture.policy -FixtureEvidenceRoot $statusFixture.evidence
         } finally {
             $env:CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN = $previousFastScan
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = $previousParallelFallback
         }
         Assert-True ((ConvertTo-StatusSemanticJson $fastStatus) -ceq
             (ConvertTo-StatusSemanticJson $slowStatus)) `
             'transaction 与 archive/policy 拒绝记录的完整 Status 语义输出必须 fast/slow 等价。'
     }
 
+    # Slice 35（issue #58）：C# 快速树快照必须与 PS 参考路径逐字节等价
+    # （嵌套/非 ASCII/排序敏感名/深树/空文件），聚合 metrics 与逐 entry observer 簿记一致。
+    $snapRoot = Join-Path $fixtureRoot 'fastpath-snapshot-equiv'
+    $snapTree = Join-Path $snapRoot 'tree'
+    [void][IO.Directory]::CreateDirectory($snapTree)
+    foreach ($snapDir in @('a-b', 'ab', '_a', '-x', '中文 目录', "子'目录",
+            'deep\deeper\deepest\nested\leaf', 'empty-dir')) {
+        [void][IO.Directory]::CreateDirectory((Join-Path $snapTree $snapDir))
+    }
+    [IO.File]::WriteAllText((Join-Path $snapTree 'a-b\file one.txt'), 'payload-1', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $snapTree 'ab\中文 文件.txt'), '中文内容', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $snapTree '_a\x.bin'), '', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $snapTree '中文 目录\a&b.dat'), ('x' * 5000), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $snapTree 'deep\deeper\deepest\nested\leaf\deep.txt'), 'deep', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $snapTree 'root.txt'), 'root', [Text.UTF8Encoding]::new($false))
+    $snapRefMetrics = New-CodexSafeTreeDeleteMetricsState -Phase 'status'
+    $snapRef = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+        -Path $snapTree -CapabilityRoot $snapRoot -AllowedExactPaths @($snapTree) `
+        -MetricsObserver (New-CodexSafeTreeDeleteMetricsObserver -State $snapRefMetrics) `
+        -Name 'safe-delete Status fastpath equivalence snapshot'
+    $snapFastMetrics = New-CodexSafeTreeDeleteMetricsState -Phase 'status'
+    $snapFast = Get-CodexSafeTreeDeleteStatusTreeSnapshotFast `
+        -Path $snapTree -CapabilityRoot $snapRoot -AllowedExactPaths @($snapTree) `
+        -AllowHardLinks:$false -AllowInternalDirectoryJunctions:$false `
+        -MetricsState $snapFastMetrics `
+        -Name 'safe-delete Status fastpath equivalence snapshot' `
+        -AttachLiveManifestSha256
+    $snapAttachedSha = [string]$snapFast.statusLiveManifestSha256
+    $snapFast.PSObject.Properties.Remove('statusLiveManifestSha256')
+    Assert-True (($snapRef | ConvertTo-Json -Depth 100 -Compress) -ceq
+        ($snapFast | ConvertTo-Json -Depth 100 -Compress)) `
+        'C# 快速树快照必须与 PS 参考快照逐字节等价。'
+    Assert-True ($snapAttachedSha -ceq (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $snapRef)) `
+        '快速快照附挂的 live manifest SHA 必须与参考计算一致。'
+    Assert-True ([long]$snapRefMetrics.entriesScanned -eq [long]$snapFastMetrics.entriesScanned -and
+        [long]$snapRefMetrics.logicalBytes -eq [long]$snapFastMetrics.logicalBytes -and
+        [long]$snapRefMetrics.bytesHashed -eq [long]$snapFastMetrics.bytesHashed) `
+        '快速快照的聚合 metrics 必须与参考路径逐 entry observer 簿记一致。'
+
+    # Slice 36（issue #58）：未授权 reparse point 必须触发类型化回退，最终错误与参考路径一致。
+    $reparseEquivRoot = Join-Path $fixtureRoot 'fastpath-reparse-fallback'
+    $reparseEquivTree = Join-Path $reparseEquivRoot 'tree'
+    $reparseEquivTarget = Join-Path $reparseEquivRoot 'target'
+    [void][IO.Directory]::CreateDirectory($reparseEquivTree)
+    [void][IO.Directory]::CreateDirectory($reparseEquivTarget)
+    [IO.File]::WriteAllText((Join-Path $reparseEquivTarget 'inner.txt'), 'inner', [Text.UTF8Encoding]::new($false))
+    $reparseEquivLink = Join-Path $reparseEquivTree 'link'
+    try {
+        [void](New-Item -ItemType Junction -Path $reparseEquivLink -Target $reparseEquivTarget -ErrorAction Stop)
+        $reparseFallbackError = $null
+        try {
+            [void][CodexSafeTreeDelete.StatusTreeSnapshotScanner]::Scan($reparseEquivTree, $false, $false, $null)
+        } catch [CodexSafeTreeDelete.StatusFastPathFallbackException] {
+            $reparseFallbackError = $_.Exception.Message
+        }
+        Assert-True (-not [string]::IsNullOrEmpty($reparseFallbackError)) `
+            '未授权 reparse point 必须让 C# 扫描器抛 StatusFastPathFallbackException。'
+        $previousTreeFast = $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST
+        try {
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST = '1'
+            $reparseFastMessage = $null
+            try {
+                [void](Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot `
+                    -Path $reparseEquivTree -CapabilityRoot $reparseEquivRoot `
+                    -AllowedExactPaths @($reparseEquivTree) `
+                    -AllowHardLinks:$false -AllowInternalDirectoryJunctions:$false `
+                    -MetricsObserver (New-CodexSafeTreeDeleteMetricsObserver -State (
+                        New-CodexSafeTreeDeleteMetricsState -Phase 'status')) `
+                    -Name 'safe-delete Status reparse fallback snapshot' `
+                    -MetricsState (New-CodexSafeTreeDeleteMetricsState -Phase 'status'))
+            } catch { $reparseFastMessage = $_.Exception.Message }
+        } finally {
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST = $previousTreeFast
+        }
+        $reparseRefMessage = $null
+        try {
+            [void](Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                -Path $reparseEquivTree -CapabilityRoot $reparseEquivRoot `
+                -AllowedExactPaths @($reparseEquivTree) `
+                -Name 'safe-delete Status reparse fallback snapshot')
+        } catch { $reparseRefMessage = $_.Exception.Message }
+        Assert-True ($null -ne $reparseFastMessage -and $reparseFastMessage -ceq $reparseRefMessage) `
+            '未授权 reparse point 回退后的错误消息必须与 PS 参考路径逐字节一致。'
+    } finally {
+        if ([IO.Directory]::Exists($reparseEquivLink)) { [IO.Directory]::Delete($reparseEquivLink) }
+    }
+
+    # Slice 37（issue #58）：授权内部 junction 快速快照与参考逐字节等价；target root 越界同错误回退。
+    $junctionRoot = Join-Path $fixtureRoot 'fastpath-junction'
+    $junctionTree = Join-Path $junctionRoot 'tree'
+    [void][IO.Directory]::CreateDirectory((Join-Path $junctionTree 'target-sub\inner'))
+    [IO.File]::WriteAllText((Join-Path $junctionTree 'target-sub\inner\j.txt'), 'junction-payload', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $junctionTree 'f.txt'), 'f', [Text.UTF8Encoding]::new($false))
+    $junctionLink = Join-Path $junctionTree 'jlink'
+    try {
+        [void](New-Item -ItemType Junction -Path $junctionLink `
+            -Target (Join-Path $junctionTree 'target-sub') -ErrorAction Stop)
+        $junctionRef = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+            -Path $junctionTree -CapabilityRoot $junctionRoot -AllowedExactPaths @($junctionTree) `
+            -AllowInternalDirectoryJunctions -InternalDirectoryJunctionTargetRoot $junctionTree `
+            -Name 'safe-delete Status junction equivalence snapshot'
+        $junctionFast = Get-CodexSafeTreeDeleteStatusTreeSnapshotFast `
+            -Path $junctionTree -CapabilityRoot $junctionRoot -AllowedExactPaths @($junctionTree) `
+            -AllowHardLinks:$false -AllowInternalDirectoryJunctions:$true `
+            -InternalDirectoryJunctionTargetRoot $junctionTree `
+            -MetricsState (New-CodexSafeTreeDeleteMetricsState -Phase 'status') `
+            -Name 'safe-delete Status junction equivalence snapshot'
+        Assert-True (($junctionRef | ConvertTo-Json -Depth 100 -Compress) -ceq
+            ($junctionFast | ConvertTo-Json -Depth 100 -Compress)) `
+            '授权内部 junction 的快速快照必须与 PS 参考快照逐字节等价。'
+        Assert-True (@($junctionFast.entries | Where-Object kind -ceq 'directory-junction').Count -eq 1) `
+            '等价快照必须恰好包含一个 junction 条目。'
+        $junctionOutOfRootFallback = $null
+        try {
+            [void][CodexSafeTreeDelete.StatusTreeSnapshotScanner]::Scan(
+                $junctionTree, $false, $true, (Join-Path $junctionTree 'sub-none'))
+        } catch [CodexSafeTreeDelete.StatusFastPathFallbackException] {
+            $junctionOutOfRootFallback = $_.Exception.Message
+        }
+        Assert-True (-not [string]::IsNullOrEmpty($junctionOutOfRootFallback)) `
+            'junction target root 越界必须让 C# 扫描器抛 StatusFastPathFallbackException。'
+        $junctionOutFastMessage = $null
+        $previousTreeFast = $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST
+        try {
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST = '1'
+            try {
+                [void](Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot `
+                    -Path $junctionTree -CapabilityRoot $junctionRoot -AllowedExactPaths @($junctionTree) `
+                    -AllowHardLinks:$false -AllowInternalDirectoryJunctions:$true `
+                    -InternalDirectoryJunctionTargetRoot (Join-Path $junctionTree 'sub-none') `
+                    -MetricsObserver (New-CodexSafeTreeDeleteMetricsObserver -State (
+                        New-CodexSafeTreeDeleteMetricsState -Phase 'status')) `
+                    -Name 'safe-delete Status junction out-of-root snapshot' `
+                    -MetricsState (New-CodexSafeTreeDeleteMetricsState -Phase 'status'))
+            } catch { $junctionOutFastMessage = $_.Exception.Message }
+        } finally {
+            $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST = $previousTreeFast
+        }
+        $junctionOutRefMessage = $null
+        try {
+            [void](Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                -Path $junctionTree -CapabilityRoot $junctionRoot -AllowedExactPaths @($junctionTree) `
+                -AllowInternalDirectoryJunctions `
+                -InternalDirectoryJunctionTargetRoot (Join-Path $junctionTree 'sub-none') `
+                -Name 'safe-delete Status junction out-of-root snapshot')
+        } catch { $junctionOutRefMessage = $_.Exception.Message }
+        Assert-True ($null -ne $junctionOutFastMessage -and
+            $junctionOutFastMessage -ceq $junctionOutRefMessage) `
+            'junction target root 越界时，缓存封装回退后的错误消息必须与参考路径一致。'
+    } finally {
+        if ([IO.Directory]::Exists($junctionLink)) { [IO.Directory]::Delete($junctionLink) }
+    }
+
+    # Slice 38（issue #58）：plan 文本流式 manifest SHA 与 ConvertFrom/ConvertTo 参考计算等价；
+    # 大小写变体与属性重排保持一致；manifest 内非规范数字必须类型化回退且回退后结果等价。
+    $shaPlan = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-plan'
+        schemaVersion = 1
+        treeManifest = [pscustomobject][ordered]@{
+            schemaVersion = 2
+            rootIdentity = @('5d26df61', '001900000009a9f2')
+            entries = @(
+                [pscustomobject][ordered]@{
+                    relativePath = '.'
+                    kind = 'directory'
+                    sha256 = $null
+                    identity = @('5d26df61', '001900000009a9f2')
+                },
+                [pscustomobject][ordered]@{
+                    relativePath = '中文 目录/a&b.dat'
+                    kind = 'file'
+                    sha256 = 'a' * 64
+                    identity = @('5d26df61', '00070000000700ae')
+                }
+            )
+        }
+        summary = 'x'
+    }
+    $shaPlanText = $shaPlan | ConvertTo-Json -Depth 100 -Compress
+    $shaReference = {
+        param([string]$Text)
+        $shaDocument = $Text | ConvertFrom-Json -Depth 128 -DateKind String
+        return Get-CodexSafeTreeDeleteManifestSha256 -Manifest $shaDocument.treeManifest
+    }
+    $shaBaseline = & $shaReference $shaPlanText
+    Assert-True ([CodexSafeTreeDelete.StatusPlanManifestSha256]::ComputeFromPlanText($shaPlanText) -ceq
+        $shaBaseline) 'plan 文本流式 manifest SHA 必须与参考计算一致。'
+    $shaReorderedPlan = [pscustomobject][ordered]@{
+        summary = 'x'
+        treeManifest = $shaPlan.treeManifest
+        schemaVersion = 1
+        artifactType = 'env-governance.codex-safe-tree-delete-plan'
+    }
+    $shaReorderedText = $shaReorderedPlan | ConvertTo-Json -Depth 100 -Compress
+    Assert-True ([CodexSafeTreeDelete.StatusPlanManifestSha256]::ComputeFromPlanText($shaReorderedText) -ceq
+        (& $shaReference $shaReorderedText)) '顶层属性重排的 plan 文本必须与参考计算一致。'
+    $shaCaseText = $shaPlanText.Replace('"treeManifest"', '"TreeManifest"')
+    Assert-True ([CodexSafeTreeDelete.StatusPlanManifestSha256]::ComputeFromPlanText($shaCaseText) -ceq
+        (& $shaReference $shaCaseText)) 'treeManifest 键大小写变体必须与参考计算一致。'
+    $shaNonCanonicalText = $shaPlanText.Replace('"schemaVersion":2', '"schemaVersion":2.0')
+    $shaNonCanonicalFallback = $null
+    try {
+        [void][CodexSafeTreeDelete.StatusPlanManifestSha256]::ComputeFromPlanText($shaNonCanonicalText)
+    } catch [CodexSafeTreeDelete.StatusFastPathFallbackException] {
+        $shaNonCanonicalFallback = $_.Exception.Message
+    }
+    Assert-True (-not [string]::IsNullOrEmpty($shaNonCanonicalFallback)) `
+        'manifest 内非规范数字必须让 C# 流式计算抛 StatusFastPathFallbackException。'
+    $shaNonCanonicalDocument = $shaNonCanonicalText | ConvertFrom-Json -Depth 128 -DateKind String
+    $previousTreeFast = $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST
+    try {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST = '1'
+        $shaWrapped = Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 `
+            -PlanTreeManifest $shaNonCanonicalDocument.treeManifest `
+            -PlanSha256 ('b' * 64) -Cache $null -PlanText $shaNonCanonicalText
+    } finally {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST = $previousTreeFast
+    }
+    Assert-True ($shaWrapped -ceq
+        (Get-CodexSafeTreeDeleteManifestSha256 -Manifest $shaNonCanonicalDocument.treeManifest)) `
+        '非规范数字回退后，缓存封装返回的 manifest SHA 必须与参考计算一致。'
+
+    # Slice 39（issue #58）：并行 fallback 必须实际接管全部 fallback op，且与串行参考路径语义全等。
+    $parRoot = Join-Path $fixtureRoot 'fastpath-parallel'
+    $parEvidence = Join-Path $parRoot 'evidence'
+    $parPolicyPath = Join-Path $parRoot 'policy.json'
+    [void][IO.Directory]::CreateDirectory($parEvidence)
+    $parPolicy = [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'
+        schemaVersion = 4
+        entries = @(
+            [pscustomobject][ordered]@{
+                id = 'fastpath-parallel'
+                capabilityRoot = $parRoot
+                minimumDescendantDepth = 1
+                rootDeletionPurpose = 'none'
+                allowHardLinks = $false
+                allowInternalDirectoryJunctions = $false
+                deniedExactPaths = @($parEvidence)
+            }
+        )
+    }
+    [IO.File]::WriteAllText(
+        $parPolicyPath,
+        ($parPolicy | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    foreach ($parTargetSpec in @(@('target-a', 'alpha'), @('target-b', 'bravo'))) {
+        $parTarget = Join-Path $parRoot ([string]$parTargetSpec[0])
+        [void][IO.Directory]::CreateDirectory($parTarget)
+        [IO.File]::WriteAllText(
+            (Join-Path $parTarget 'payload.txt'),
+            [string]$parTargetSpec[1],
+            [Text.UTF8Encoding]::new($false))
+        [void](& $entryPath -Mode Plan -TargetPath $parTarget -CapabilityRoot $parRoot `
+            -FixturePolicyPath $parPolicyPath -FixtureEvidenceRoot $parEvidence)
+    }
+    $parBrokenRun = Join-Path $parEvidence 'zz-broken-plan'
+    [void][IO.Directory]::CreateDirectory($parBrokenRun)
+    [IO.File]::WriteAllText((Join-Path $parBrokenRun 'plan.json'), '{', [Text.UTF8Encoding]::new($false))
+    $previousParallelFallback = $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK
+    $previousSegments = $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS
+    $previousTreeFast = $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST
+    try {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS = '1'
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = '1'
+        $parStatus = & $entryPath -Mode Status `
+            -FixturePolicyPath $parPolicyPath -FixtureEvidenceRoot $parEvidence
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = '0'
+        $parSerialStatus = & $entryPath -Mode Status `
+            -FixturePolicyPath $parPolicyPath -FixtureEvidenceRoot $parEvidence
+        # N5 L4：TREE_FAST=0 整轮——worker 内树快照与 plan manifest SHA 都走 PS 参考实现，
+        # 并行 fallback 仍接管；必须与串行控制输出逐字节等价。
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = '1'
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST = '0'
+        $parTreeRefStatus = & $entryPath -Mode Status `
+            -FixturePolicyPath $parPolicyPath -FixtureEvidenceRoot $parEvidence
+    } finally {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = $previousParallelFallback
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS = $previousSegments
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST = $previousTreeFast
+    }
+    Assert-True ((ConvertTo-StatusSemanticJson $parStatus) -ceq
+        (ConvertTo-StatusSemanticJson $parSerialStatus)) `
+        '并行 fallback 的完整 Status 语义输出必须与串行参考路径逐字节等价。'
+    Assert-True ([long]$parSerialStatus.statusSegments.parallelFallbackResolved -eq 0L) `
+        '串行参考路径不得报告并行 fallback 接管。'
+    if ([int]$parStatus.statusSegments.fastScanDop -ge 2) {
+        Assert-True ([long]$parStatus.statusSegments.parallelFallbackResolved -eq
+            [long]$parStatus.statusSegments.fastScanFallback -and
+            [long]$parStatus.statusSegments.fastScanFallback -ge 2L) `
+            '并行 fallback 必须实际接管全部 fast scan 未处理的 op。'
+    }
+    Assert-True ([long]$parStatus.metrics.bytesHashed -eq [long]$parSerialStatus.metrics.bytesHashed -and
+        [long]$parStatus.metrics.entriesScanned -eq [long]$parSerialStatus.metrics.entriesScanned) `
+        '互斥 target 的并行/串行运行必须保持 metrics 计数一致（无共享树重复哈希）。'
+    Assert-True ((ConvertTo-StatusSemanticJson $parTreeRefStatus) -ceq
+        (ConvertTo-StatusSemanticJson $parSerialStatus)) `
+        'TREE_FAST=0 整轮（worker 内 PS 参考树快照）语义输出必须与串行参考路径逐字节等价。'
+    Assert-True ([long]$parTreeRefStatus.metrics.bytesHashed -eq [long]$parSerialStatus.metrics.bytesHashed -and
+        [long]$parTreeRefStatus.metrics.entriesScanned -eq [long]$parSerialStatus.metrics.entriesScanned) `
+        'TREE_FAST=0 整轮必须保持 metrics 计数与串行参考一致。'
+
+    # Slice 40（issue #58 N3）：receipt 门控 fallback 快路径必须与串行参考路径逐字节等价。
+    # 覆盖 planned 干净/树漂移/命名空间不一致、planned+policy 漂移覆盖（:4214）、
+    # transaction v2 policy 漂移（T1 观测塌缩）、transaction 严格校验失败记录与 v1 回退。
+    $n3Root = Join-Path $fixtureRoot 'receipt-fastpath'
+    $n3Evidence = Join-Path $n3Root 'evidence'
+    $n3PolicyPath = Join-Path $n3Root 'policy.json'
+    [void][IO.Directory]::CreateDirectory($n3Evidence)
+    $n3PolicyEntry = [pscustomobject][ordered]@{
+        id = 'receipt-fastpath'
+        capabilityRoot = $n3Root
+        minimumDescendantDepth = 1
+        rootDeletionPurpose = 'none'
+        allowHardLinks = $false
+        allowInternalDirectoryJunctions = $false
+        deniedExactPaths = @($n3Evidence)
+    }
+    [IO.File]::WriteAllText(
+        $n3PolicyPath,
+        ([pscustomobject][ordered]@{
+            artifactType = 'env-governance.codex-safe-tree-delete-policy'
+            schemaVersion = 4
+            entries = @($n3PolicyEntry)
+        } | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    function New-N3PlannedRun {
+        param([Parameter(Mandatory)][string]$Name)
+        $target = Join-Path $n3Root $Name
+        [void][IO.Directory]::CreateDirectory($target)
+        [IO.File]::WriteAllText(
+            (Join-Path $target 'payload.txt'), "payload-$Name", [Text.UTF8Encoding]::new($false))
+        $n3Plan = & $entryPath -Mode Plan -TargetPath $target -CapabilityRoot $n3Root `
+            -FixturePolicyPath $n3PolicyPath -FixtureEvidenceRoot $n3Evidence
+        $n3PlanPath = [string]$n3Plan.planPath
+        $n3RunDirectory = Split-Path -Parent $n3PlanPath
+        $n3PlanText = [IO.File]::ReadAllText($n3PlanPath)
+        $n3PlanDocument = $n3PlanText | ConvertFrom-Json -Depth 128 -DateKind String
+        $n3PlanShaParts = [Security.Cryptography.SHA256]::HashData(
+            [Text.Encoding]::UTF8.GetBytes($n3PlanText)) | ForEach-Object { $_.ToString('x2') }
+        return [pscustomobject][ordered]@{
+            name = [string](Split-Path -Leaf $n3RunDirectory)
+            runDirectory = $n3RunDirectory
+            targetPath = $target
+            planDocument = $n3PlanDocument
+            planSha256 = [string]::Concat(@($n3PlanShaParts))
+            quarantinePath = Join-Path $n3Root (
+                '.codex-safe-delete-{0}.quarantine' -f [string]$n3PlanDocument.generationId)
+        }
+    }
+    function New-N3Transaction {
+        param(
+            [Parameter(Mandatory)][object]$Run,
+            [Parameter(Mandatory)][long]$SchemaVersion,
+            [Parameter(Mandatory)][string]$Status
+        )
+        $n3Transaction = [pscustomobject][ordered]@{
+            artifactType = 'env-governance.codex-safe-tree-delete-transaction'
+            schemaVersion = $SchemaVersion
+            generationId = [string]$Run.planDocument.generationId
+            planPath = (Join-Path $Run.runDirectory 'plan.json')
+            planSha256 = [string]$Run.planSha256
+            targetPath = [string]$Run.planDocument.targetPath
+            quarantinePath = [string]$Run.quarantinePath
+            status = $Status
+            updatedAtUtc = '2026-08-01T00:00:00.0000000+00:00'
+        }
+        if ($SchemaVersion -ge 2L) {
+            $n3Transaction = [pscustomobject][ordered]@{
+                artifactType = $n3Transaction.artifactType
+                schemaVersion = $n3Transaction.schemaVersion
+                generationId = $n3Transaction.generationId
+                planPath = $n3Transaction.planPath
+                planSha256 = $n3Transaction.planSha256
+                targetPath = $n3Transaction.targetPath
+                quarantinePath = $n3Transaction.quarantinePath
+                directoryCommitAnchors = @()
+                status = $n3Transaction.status
+                updatedAtUtc = $n3Transaction.updatedAtUtc
+            }
+        }
+        [IO.File]::WriteAllText(
+            (Join-Path $Run.runDirectory 'transaction.json'),
+            ($n3Transaction | ConvertTo-Json -Depth 16),
+            [Text.UTF8Encoding]::new($false))
+    }
+
+    # policy v1 时代的 run：T1 漂移、broken transaction、v1 回退、planned+漂移覆盖。
+    $n3RunT1 = New-N3PlannedRun -Name 'target-txn-drift'
+    New-N3Transaction -Run $n3RunT1 -SchemaVersion 2 -Status 'purging'
+    $n3RunBroken = New-N3PlannedRun -Name 'target-txn-broken'
+    [IO.File]::WriteAllText(
+        (Join-Path $n3RunBroken.runDirectory 'transaction.json'), '{', [Text.UTF8Encoding]::new($false))
+    $n3RunV1 = New-N3PlannedRun -Name 'target-txn-v1'
+    New-N3Transaction -Run $n3RunV1 -SchemaVersion 1 -Status 'quarantined'
+    $n3RunPlannedDrift = New-N3PlannedRun -Name 'target-planned-drift'
+    # N4：v1 policy 时代的 planned run，plan 生成后删除 target——命中 C# 直出分支
+    # （planned 无 transaction + namespace 不一致 + policy 漂移）。冻结基线对该分支的
+    # 编码为 inconsistent + 单错误（N2 注记称"生产未命中"，N4 取证证伪：基线内 23 个
+    # 生产 op 命中）；纯参考解析器分叉为 manual-review + 双错误（:4214 覆盖）。
+    $n3RunInconsistentDrift = New-N3PlannedRun -Name 'target-planned-inconsistent-drift'
+    Remove-TestTree -Path $n3RunInconsistentDrift.targetPath
+
+    # policy bump：追加无关 entry 使 sha 漂移，既有 plan 的 target 解析不变。
+    $n3InertRoot = Join-Path $fixtureRoot 'receipt-fastpath-inert'
+    [void][IO.Directory]::CreateDirectory($n3InertRoot)
+    [IO.File]::WriteAllText(
+        $n3PolicyPath,
+        ([pscustomobject][ordered]@{
+            artifactType = 'env-governance.codex-safe-tree-delete-policy'
+            schemaVersion = 4
+            entries = @(
+                $n3PolicyEntry,
+                [pscustomobject][ordered]@{
+                    id = 'receipt-fastpath-inert'
+                    capabilityRoot = $n3InertRoot
+                    minimumDescendantDepth = 1
+                    rootDeletionPurpose = 'none'
+                    allowHardLinks = $false
+                    allowInternalDirectoryJunctions = $false
+                    deniedExactPaths = @()
+                }
+            )
+        } | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+
+    # 当前 policy 下的 planned 三态（无 policy 漂移）。
+    $n3RunClean = New-N3PlannedRun -Name 'target-planned-clean'
+    $n3RunTreeDrift = New-N3PlannedRun -Name 'target-planned-treedrift'
+    [IO.File]::AppendAllText((Join-Path $n3RunTreeDrift.targetPath 'payload.txt'), '-drift')
+    $n3RunInconsistent = New-N3PlannedRun -Name 'target-planned-inconsistent'
+    [void][IO.Directory]::CreateDirectory($n3RunInconsistent.quarantinePath)
+
+    # Slice 42（issue #58 N5 L4）：plan 生成后 target 被普通文件替换。C# ProbeNamespace 对
+    # 非目录/非 reparse 条目一律回退（namespace-entry-type-other，发生在 receipt 签发之前），
+    # 该 op 由并行 fallback 的参考重放产出 record A 形状；PS 快路径 record A 分支本身是
+    # 扫描→worker 执行间 TOCTOU 窗口的防御，由下方直调钉确定性覆盖。
+    $n3RunRecordA = New-N3PlannedRun -Name 'target-replaced-by-file'
+    Remove-TestTree -Path $n3RunRecordA.targetPath
+    [IO.File]::WriteAllText($n3RunRecordA.targetPath, 'not-a-directory', [Text.UTF8Encoding]::new($false))
+
+    $previousParallelFallback = $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK
+    $previousSegments = $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS
+    try {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS = '1'
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = '1'
+        $n3Status = & $entryPath -Mode Status `
+            -FixturePolicyPath $n3PolicyPath -FixtureEvidenceRoot $n3Evidence
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = '0'
+        $n3SerialStatus = & $entryPath -Mode Status `
+            -FixturePolicyPath $n3PolicyPath -FixtureEvidenceRoot $n3Evidence
+    } finally {
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK = $previousParallelFallback
+        $env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS = $previousSegments
+    }
+    Assert-True ((ConvertTo-StatusSemanticJson $n3Status) -ceq
+        (ConvertTo-StatusSemanticJson $n3SerialStatus)) `
+        'receipt 快路径的完整 Status 语义输出必须与串行参考路径逐字节等价。'
+    Assert-True ([long]$n3Status.metrics.bytesHashed -eq [long]$n3SerialStatus.metrics.bytesHashed -and
+        [long]$n3Status.metrics.entriesScanned -eq [long]$n3SerialStatus.metrics.entriesScanned) `
+        'receipt 快路径必须保持 metrics 计数与串行参考一致。'
+    if ([int]$n3Status.statusSegments.fastScanDop -ge 2) {
+        Assert-True ([long]$n3Status.statusSegments.parallelFallbackResolved -eq 8L -and
+            [long]$n3Status.statusSegments.fastScanFallback -eq 8L) `
+            '本 fixture 全部 8 个 op 都必须经 fallback 解析。'
+        Assert-True ([long]$n3Status.statusSegments.parallelFallbackReceiptFastResolved -eq 6L) `
+            'receipt 快路径必须实际接管 6 个 op（v1 transaction 与 record A 命名空间回退参考路径）。'
+    }
+    Assert-True ([long]$n3SerialStatus.statusSegments.parallelFallbackReceiptFastResolved -eq 0L) `
+        '串行参考路径不得报告 receipt 快路径接管。'
+    $n3Ops = @{}
+    foreach ($n3Op in @($n3Status.operations)) { $n3Ops[[string]$n3Op.operationId] = $n3Op }
+    $n3T1Op = $n3Ops[[string]$n3RunT1.name]
+    Assert-True ($null -ne $n3T1Op -and
+        [string]$n3T1Op.lifecycle -ceq 'manual-review' -and
+        [string]$n3T1Op.journalStatus -ceq 'invalid' -and
+        -not [bool]$n3T1Op.schemaCompatible -and
+        -not [bool]$n3T1Op.policyCompatible -and
+        [long]$n3T1Op.transactionSchemaVersion -eq 2L -and
+        [string]$n3T1Op.transactionStatus -ceq 'purging' -and
+        [string]$n3T1Op.transactionUpdatedAtUtc -ceq '2026-08-01T00:00:00.0000000+00:00' -and
+        @($n3T1Op.errors).Count -eq 1 -and
+        [string]$n3T1Op.errors[0] -ceq 'safe-delete policy 自计划生成后已漂移。') `
+        'T1（transaction v2 + policy 漂移）记录必须与参考观测塌缩一致。'
+    $n3BrokenOp = $n3Ops[[string]$n3RunBroken.name]
+    Assert-True ($null -ne $n3BrokenOp -and
+        [string]$n3BrokenOp.lifecycle -ceq 'manual-review' -and
+        [string]$n3BrokenOp.journalStatus -ceq 'invalid' -and
+        $null -eq $n3BrokenOp.transactionSchemaVersion -and
+        @($n3BrokenOp.errors).Count -eq 1) `
+        'broken transaction 必须保持参考路径的严格校验错误记录形状。'
+    $n3V1Op = $n3Ops[[string]$n3RunV1.name]
+    Assert-True ($null -ne $n3V1Op -and @($n3V1Op.errors).Count -ge 1) `
+        'v1 transaction 必须经参考路径产出观测错误记录。'
+    $n3CleanOp = $n3Ops[[string]$n3RunClean.name]
+    Assert-True ($null -ne $n3CleanOp -and
+        [string]$n3CleanOp.lifecycle -ceq 'planned' -and
+        @($n3CleanOp.safeActions).Count -eq 1 -and
+        [string]$n3CleanOp.safeActions[0] -ceq 'apply' -and
+        @($n3CleanOp.errors).Count -eq 0 -and
+        [bool]$n3CleanOp.policyCompatible -and
+        [bool]$n3CleanOp.schemaCompatible -and
+        [string]$n3CleanOp.journalStatus -ceq 'not-started') `
+        'planned 干净 op 必须保持 planned/apply 记录。'
+    $n3TreeDriftOp = $n3Ops[[string]$n3RunTreeDrift.name]
+    Assert-True ($null -ne $n3TreeDriftOp -and
+        [string]$n3TreeDriftOp.lifecycle -ceq 'manual-review' -and
+        @($n3TreeDriftOp.errors).Count -eq 1 -and
+        [string]$n3TreeDriftOp.errors[0] -ceq 'safe-delete Status planned tree manifest 漂移。' -and
+        [string]$n3TreeDriftOp.journalStatus -ceq 'not-started') `
+        'planned 树漂移 op 必须只带 manifest 漂移错误（无 policy 漂移追加）。'
+    $n3InconsistentOp = $n3Ops[[string]$n3RunInconsistent.name]
+    Assert-True ($null -ne $n3InconsistentOp -and
+        [string]$n3InconsistentOp.lifecycle -ceq 'inconsistent' -and
+        @($n3InconsistentOp.errors).Count -eq 1 -and
+        [string]$n3InconsistentOp.errors[0] -ceq 'planned operation 的 target/quarantine namespace 不一致。' -and
+        [bool]$n3InconsistentOp.policyCompatible) `
+        'planned 命名空间不一致 op 必须保持 inconsistent 记录（无漂移覆盖）。'
+    $n3RecordAOp = $n3Ops[[string]$n3RunRecordA.name]
+    Assert-True ($null -ne $n3RecordAOp -and
+        [string]$n3RecordAOp.lifecycle -ceq 'manual-review' -and
+        @($n3RecordAOp.errors).Count -eq 1 -and
+        [string]$n3RecordAOp.errors[0] -ceq 'safe-delete Status target/quarantine namespace entry 不是普通目录。' -and
+        @($n3RecordAOp.safeActions).Count -eq 1 -and
+        [string]$n3RecordAOp.safeActions[0] -ceq 'manual-review' -and
+        [string]$n3RecordAOp.journalStatus -ceq 'not-evaluated' -and
+        -not [bool]$n3RecordAOp.schemaCompatible -and
+        [bool]$n3RecordAOp.targetPresent -and
+        [string]$n3RecordAOp.targetEntryType -ceq 'file' -and
+        $null -eq $n3RecordAOp.transactionSchemaVersion) `
+        'record A（target 为文件）op 必须保持命名空间类型错误记录形状（journal/schema 初值）。'
+    $n3PlannedDriftOp = $n3Ops[[string]$n3RunPlannedDrift.name]
+    Assert-True ($null -ne $n3PlannedDriftOp -and
+        [string]$n3PlannedDriftOp.lifecycle -ceq 'manual-review' -and
+        @($n3PlannedDriftOp.errors).Count -eq 1 -and
+        [string]$n3PlannedDriftOp.errors[0] -ceq 'plan policy SHA 已漂移；当前严格写路径不可执行该计划。' -and
+        [string]$n3PlannedDriftOp.journalStatus -ceq 'not-started' -and
+        [bool]$n3PlannedDriftOp.schemaCompatible -and
+        -not [bool]$n3PlannedDriftOp.policyCompatible) `
+        'planned+policy 漂移 op 必须保持 :4214 覆盖后的记录形状。'
+    $n3InconsistentDriftOp = $n3Ops[[string]$n3RunInconsistentDrift.name]
+    Assert-True ($null -ne $n3InconsistentDriftOp -and
+        [string]$n3InconsistentDriftOp.lifecycle -ceq 'inconsistent' -and
+        @($n3InconsistentDriftOp.errors).Count -eq 1 -and
+        [string]$n3InconsistentDriftOp.errors[0] -ceq 'planned operation 的 target/quarantine namespace 不一致。' -and
+        @($n3InconsistentDriftOp.safeActions).Count -eq 1 -and
+        [string]$n3InconsistentDriftOp.safeActions[0] -ceq 'manual-review' -and
+        [string]$n3InconsistentDriftOp.journalStatus -ceq 'not-started' -and
+        [bool]$n3InconsistentDriftOp.schemaCompatible -and
+        -not [bool]$n3InconsistentDriftOp.policyCompatible -and
+        $null -eq $n3InconsistentDriftOp.transactionSchemaVersion -and
+        -not [bool]$n3InconsistentDriftOp.targetPresent -and
+        -not [bool]$n3InconsistentDriftOp.quarantinePresent -and
+        [bool]$n3InconsistentDriftOp.namespaceAbsent) `
+        'planned+inconsistent+policy 漂移 op 的管线输出必须保持冻结基线语义（inconsistent + 单错误）。'
+    # 分叉钉：纯参考解析器（仅 FAST_SCAN=0 诊断模式可达）对同一 run 产出 :4214 覆盖后的
+    # manual-review + 双错误。两侧差异是有意保留的基线合同；任一侧改向都会在此变红。
+    # 方向裁决见 reports/issue58-20260908/IMPLEMENTATION.md N4 段。
+    $n3RefPolicy = Read-CodexSafeTreeDeletePolicy -PolicyPath $n3PolicyPath
+    $n3RefMetrics = New-CodexSafeTreeDeleteMetricsState -Phase 'status'
+    $n3RefOp = Resolve-CodexSafeTreeDeleteStatusOperation `
+        -RunItem (Get-Item -LiteralPath $n3RunInconsistentDrift.runDirectory) `
+        -PolicyPath $n3PolicyPath `
+        -CurrentPolicySha256 ([string]$n3RefPolicy.sha256) `
+        -FullEvidenceRoot $n3Evidence `
+        -CandidatePolicyRequested $false `
+        -CandidatePolicy $null `
+        -MetricsState $n3RefMetrics `
+        -TreeMetricsObserver (New-CodexSafeTreeDeleteMetricsObserver -State $n3RefMetrics) `
+        -StatusTreeCache ([Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)) `
+        -LoadedPolicy $n3RefPolicy `
+        -StatusPlanPrefetch $null `
+        -PlanManifestShaCache ([Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal))
+    Assert-True ($null -ne $n3RefOp -and
+        [string]$n3RefOp.operation.lifecycle -ceq 'manual-review' -and
+        @($n3RefOp.operation.errors).Count -eq 2 -and
+        [string]$n3RefOp.operation.errors[0] -ceq 'planned operation 的 target/quarantine namespace 不一致。' -and
+        [string]$n3RefOp.operation.errors[1] -ceq 'plan policy SHA 已漂移；当前严格写路径不可执行该计划。') `
+        '纯参考解析器对该 run 必须产出 :4214 覆盖形状（分叉钉；变红即参考路径已改向）。'
+
+    # Slice 42（续）：PS 快路径 record A 分支直调钉。receipt 在 target 仍是目录时签发，
+    # 随后 target 被文件替换（模拟扫描→worker 执行间的 TOCTOU 窗口）；直调必须命中
+    # record A 分支直接提交命名空间类型错误记录，而不是回退参考路径。
+    $n3RunRecordADirect = New-N3PlannedRun -Name 'target-replaced-by-file-direct'
+    $n3RecordAMetrics = New-CodexSafeTreeDeleteMetricsState -Phase 'status'
+    Add-Member -InputObject $n3RecordAMetrics -NotePropertyMembers @{
+        segmentDirectoryEnumerationMs = 0L
+        segmentPlanTransactionReadMs = 0L
+        segmentTerminalArchiveAuthMs = 0L
+        segmentTreeMaterializationMs = 0L
+        segmentSha256Ms = 0L
+        segmentActiveResolveMs = 0L
+        segmentArchivedResolveMs = 0L
+        segmentPrefetchMs = 0L
+        segmentFastScanMs = 0L
+        approvedPlanValidationReuseCount = 0L
+    } -Force
+    $n3RecordAScan = Invoke-CodexSafeTreeDeleteStatusFastScan `
+        -RunItems @(Get-Item -LiteralPath $n3RunRecordADirect.runDirectory -Force) `
+        -Policy $n3RefPolicy -FullEvidenceRoot $n3Evidence `
+        -MetricsState $n3RecordAMetrics -DegreeOfParallelism 1
+    $n3RecordAScanResult = $n3RecordAScan[[string]$n3RunRecordADirect.runDirectory]
+    Assert-True ($null -ne $n3RecordAScanResult -and
+        -not [bool]$n3RecordAScanResult.Handled -and
+        [string]$n3RecordAScanResult.FallbackReason -ceq 'plan-approved' -and
+        $null -ne $n3RecordAScanResult.ApprovedPlanValidation) `
+        'record A 直调 fixture 必须在 target 仍是目录时取得 plan-approved receipt。'
+    [IO.File]::Delete((Join-Path $n3RunRecordADirect.targetPath 'payload.txt'))
+    [IO.Directory]::Delete($n3RunRecordADirect.targetPath, $false)
+    [IO.File]::WriteAllText(
+        $n3RunRecordADirect.targetPath, 'not-a-directory', [Text.UTF8Encoding]::new($false))
+    $n3RecordAPrefetch = [Collections.Generic.Dictionary[string, object]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    $n3RecordAPrefetch[[string]$n3RunRecordADirect.runDirectory] = [pscustomobject][ordered]@{
+        snapshot = [pscustomobject][ordered]@{
+            sha256 = [string]$n3RecordAScanResult.PlanSha256
+            text = [string]$n3RecordAScanResult.PlanText
+        }
+        document = $null
+        approvedPlanValidation = $n3RecordAScanResult.ApprovedPlanValidation
+        planManifestSha256 = if ($null -ne $n3RecordAScanResult.PlanManifestSha256) {
+            [string]$n3RecordAScanResult.PlanManifestSha256
+        } else {
+            $null
+        }
+        receiptPlanTargetPath = if ($null -ne $n3RecordAScanResult.ReceiptPlanTargetPath) {
+            [string]$n3RecordAScanResult.ReceiptPlanTargetPath
+        } else {
+            $null
+        }
+        receiptPlanQuarantinePath = if ($null -ne $n3RecordAScanResult.ReceiptPlanQuarantinePath) {
+            [string]$n3RecordAScanResult.ReceiptPlanQuarantinePath
+        } else {
+            $null
+        }
+        receiptPlanCapabilityRoot = if ($null -ne $n3RecordAScanResult.ReceiptPlanCapabilityRoot) {
+            [string]$n3RecordAScanResult.ReceiptPlanCapabilityRoot
+        } else {
+            $null
+        }
+        receiptPlanPolicySha256 = if ($null -ne $n3RecordAScanResult.ReceiptPlanPolicySha256) {
+            [string]$n3RecordAScanResult.ReceiptPlanPolicySha256
+        } else {
+            $null
+        }
+        scanResult = $n3RecordAScanResult
+    }
+    $n3RecordAFast = Resolve-CodexSafeTreeDeleteStatusReceiptFastOperation `
+        -RunItem (Get-Item -LiteralPath $n3RunRecordADirect.runDirectory -Force) `
+        -CurrentPolicySha256 ([string]$n3RefPolicy.sha256) `
+        -FullEvidenceRoot $n3Evidence `
+        -MetricsState $n3RecordAMetrics `
+        -TreeMetricsObserver (New-CodexSafeTreeDeleteMetricsObserver -State $n3RecordAMetrics) `
+        -StatusTreeCache ([Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)) `
+        -LoadedPolicy $n3RefPolicy `
+        -StatusPlanPrefetch $n3RecordAPrefetch `
+        -PlanManifestShaCache ([Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal))
+    Assert-True ($null -ne $n3RecordAFast -and
+        -not [bool]$n3RecordAFast.complete -and
+        [string]$n3RecordAFast.operation.lifecycle -ceq 'manual-review' -and
+        @($n3RecordAFast.operation.errors).Count -eq 1 -and
+        [string]$n3RecordAFast.operation.errors[0] -ceq 'safe-delete Status target/quarantine namespace entry 不是普通目录。' -and
+        [string]$n3RecordAFast.operation.journalStatus -ceq 'not-evaluated' -and
+        -not [bool]$n3RecordAFast.operation.schemaCompatible -and
+        [bool]$n3RecordAFast.operation.targetPresent -and
+        [string]$n3RecordAFast.operation.targetEntryType -ceq 'file') `
+        'PS 快路径 record A 分支必须直接提交命名空间类型错误记录（TOCTOU 防御）。'
+
     [pscustomobject][ordered]@{
         ok = $true
         suite = 'CodexSafeTreeDeleteStatus'
-        slices = 34
+        slices = 42
     }
 } finally {
     if ($null -ne $lockedStream) { $lockedStream.Dispose() }

@@ -66,11 +66,11 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 
 ### Status 冷启动与大 plan 回退（#49 / #58）
 
-生产 `Get-CodexSafeTreeDeleteStatus` 自 #49 起默认走 C# 并行 fast scan（`scripts/lib/CodexSafeTreeDeleteStatusScan.cs`，`StatusScanCoordinator`，DOP 为 min(4, cores-2)）。归档记录复刻 terminal-archive 内容认证；未归档记录按参考顺序判定 plan 拒绝并保留 #48 拒绝后的只读观测链。fast scan 只处理 producer 规范形态输入；approved plan、异常 JSON 类型、深度超限、读失败和非规范属性形态仍回退 `Resolve-CodexSafeTreeDeleteStatusOperation`，不会把 approved plan 直接判为 terminal。
+生产 `Get-CodexSafeTreeDeleteStatus` 自 #49 起默认走 C# 并行 fast scan（`scripts/lib/CodexSafeTreeDeleteStatusScan.cs`，`StatusScanCoordinator`，DOP 为 min(4, cores-2)；2026-09-08 的 #58 工作区改动把共享 throttle 上限提至 min(8, cores-2)，该改动截至当日未提交）。归档记录复刻 terminal-archive 内容认证；未归档记录按参考顺序判定 plan 拒绝并保留 #48 拒绝后的只读观测链。fast scan 只处理 producer 规范形态输入；approved plan、异常 JSON 类型、深度超限、读失败和非规范属性形态仍回退 `Resolve-CodexSafeTreeDeleteStatusOperation`，不会把 approved plan 直接判为 terminal。
 
 首次 plan snapshot 可注入调用内 prefetch，避免 fallback 开头重复读取；transaction approval 仍重新读取 plan/hash 与 policy，以检测首次扫描后的漂移。这不是整条认证链只读一次的合同。Status 复用随调用/进程结束，不使用 Apply/Purge 的 `SessionHashCache`，不持久化验证 receipt；程序集仍沿既有 Add-Type staleness 检查加载。
 
-排障开关：`CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN=0` 强制全量参考路径；`CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS=1` 输出 `statusSegments`。其中 `fastScanMs` 是完整扫描阶段计时，不能用内部 I/O 子段替代；`approvedPlanValidationReuseCount` 只表示 receipt 内容验证复用，不代表全量完成或性能达标。
+排障开关：`CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN=0` 强制全量参考路径；`CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS=1` 输出 `statusSegments`。其中 `fastScanMs` 是完整扫描阶段计时，不能用内部 I/O 子段替代；`approvedPlanValidationReuseCount` 只表示 receipt 内容验证复用，不代表全量完成或性能达标。2026-09-08 的 #58 工作区新增 `CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST=0` 与 `CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK=0` 两个开关，回滚组合见下文 #58 段。
 
 实测（协议 `reports/safe-tree-delete-issue49-20260823/protocol.md`，从属 20260817 协议）：正式 AC 三联（MED 修复后 cold-5/6/7，`cold-summary-post-fix.json`）三次独立冷启动墙钟 **9.762 / 9.791 / 9.237 s**（2960 operations 现场，优化前同日基线 199.357s；修复前三联 13.279/13.378/13.256 s 为历史样本，见 `cold-summary.json`），`metTarget=true`；fast 与参考路径对全部 operations 逐条对比零差异、blocking 集一致、evidence root 零写入、leftover transaction SHA 不变（等价性边界=producer 规范形态输入，非规范输入类回退参考路径，见协议）。证据：`reports/safe-tree-delete-issue49-20260823/`。
 
@@ -81,6 +81,8 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 v2/v3 transaction approval 可透传匹配 receipt，但保留 live plan read/hash 和 policy read。v2 policy SHA 漂移仍拒绝，v3 仍要求 schema 5 policy 并执行 namespace/journal 验证。非规范嵌套属性大小写回退参考路径，不改变 manifest SHA 对键名的敏感性；Apply/Purge/Restore 不消费此 receipt。
 
 2026-09-06 的状态为 **源码已推送、全量验收失败**：6,039,074-byte plan 的局部探针结果等价；Status 32 项回归、基线与回滚各 24 项通过。但三次独立冷启动 `<60s` 验收在首轮 60.295s 超时并确认停止，后两轮未执行，没有完整 Status 输出。前后 evidence/policy 内容与 identity 相同，不等于期间零写事件审计。验收与计时勘误见 `reports/issue58-20260906/VERIFICATION.txt`；当前票状态以 [GitHub #58](https://github.com/Baker4real/unified-env/issues/58) 为准，#49 的历史数字不覆盖此规模。
+
+2026-09-08 的状态为 **优化在工作区未提交、正式验收仍未通过**。本轮首次测出真实全量冷启动全程 84.6 分钟（4467 ops，exit 0；09-06 的 60.295s 是 deadline 截断值而非近似达标），主导热点是树快照递归内逐 entry 的 `Assert-CodexHookCapabilityPath`（`CodexHostSafety.ps1:884-887`，占总时 96.37%，O(entries×depth)）；SHA-256 内容哈希不是瓶颈（实测 1.4-1.6GB/s）。工作区改动（host-safety 所有权内 4 个跟踪文件 + `.gitignore`，宿主 gate shim 委托本仓库入口故工作区即运行态）：C# 树快照扫描器下沉（异常类型化回退 PS 参考路径）、receipt 快路径（commit 前 plan/txn/policy 三重 live 复核）、并行 fallback（runspace pool，前缀并查分组防嵌套树 lease 冲突，metrics 全缓冲合并）、plan manifest SHA 流式计算、免封送 receipt 核验（消除 PowerShell 方法绑定器对大 string 实参的整串深拷贝）。安静窗口实测 42.7s/54.2s；独立 verifier 正式三次冷启动 88.3/91.6/99.6s 均超 60s（本机慢态，I/O 分段膨胀），逐 op 等价 4467/4467、evidence 零写入、四套件（Status 42 项）全绿均 PASS。完全回旧串行行为需 `FAST_SCAN=0` + `PARALLEL_FALLBACK=0` + `TREE_FAST=0` 三开关全关。已知分叉：23 个生产 op 上纯参考解析器输出与冻结基线（C# fast scan 形状）不一致，修复与逐 op 等价验收冲突，已回退并双侧钉住（slice 41），方向待 issue owner 裁决。证据：`reports/issue58-20260908/`（FINDINGS.md、IMPLEMENTATION.md、acceptance-*；提交前为未跟踪）。
 
 宿主 gate shim 直接委托本仓库入口，源码落盘会改变后续调用可加载的代码；“未执行 Deploy”不表示新源码与宿主隔离。正式部署记录和真实入口验收分别按 capability spec 的部署合同核验，本次局部测试与 Git 发布不代替这些步骤。
 

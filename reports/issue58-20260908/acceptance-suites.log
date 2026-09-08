@@ -1,0 +1,25 @@
+=== Test-CodexSafeTreeDeleteStatus.ps1 ===
+
+  ok suite                     slices
+  -- -----                     ------
+True CodexSafeTreeDeleteStatus     42
+
+exit_status=0
+=== Test-CodexSafeTreeDeleteUncertainRecovery.ps1 ===
+unit-recovery-classification: passed
+integration-failfast-recovery: passed
+exit_uncertain=0
+=== Test-CodexSafeTreeDeleteRestore.ps1 ===
+Safe tree delete Restore tests passed: confirmation/SHA, quarantined/prepared, fail-closed drift, 4 crash phases, full-tree replay, journals, mutex/idempotency, Archive strict anchors.
+exit_restore=0
+=== Test-CodexSafeTreeDeleteSchemaCompatibility.ps1 ===
+
+  ok suite                                  slices
+  -- -----                                  ------
+True CodexSafeTreeDeleteSchemaCompatibility     10
+
+exit_schema=0
+=== Validate-ModuleBoundaries.cjs ===
+PASS Validate-ModuleBoundaries files=3122 modules=5
+exit_boundaries=0
+SUITES-DONE

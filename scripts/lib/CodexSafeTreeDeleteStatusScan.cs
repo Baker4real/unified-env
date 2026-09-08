@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Enumeration;
+using System.Management.Automation;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -125,8 +128,22 @@ namespace CodexSafeTreeDelete
 
         public bool MatchesSnapshot(string sha256, string text)
         {
-            return string.Equals(planSha256, sha256, StringComparison.Ordinal) &&
-                string.Equals(planText, text, StringComparison.Ordinal);
+            // issue #58 N4: PowerShell's method binder deep-copies large string
+            // arguments (~2 UTF-16 copies per argument before the method body runs;
+            // a 109M-char plan snapshot cost ~12s per call). Receipt gates on big
+            // snapshots must therefore run inside C# on the same instances the
+            // scanner validated; the reference shortcut keeps that O(1).
+            return (ReferenceEquals(planSha256, sha256) ||
+                    string.Equals(planSha256, sha256, StringComparison.Ordinal)) &&
+                (ReferenceEquals(planText, text) ||
+                    string.Equals(planText, text, StringComparison.Ordinal));
+        }
+
+        // issue #58 N4: short-argument content binding for the marshaling-free gate;
+        // the plan SHA-256 is the content identity the whole approval chain relies on.
+        public bool MatchesPlanSha256(string sha256)
+        {
+            return string.Equals(planSha256, sha256, StringComparison.Ordinal);
         }
 
         public bool MatchesPlanPath(string path)
@@ -150,6 +167,18 @@ namespace CodexSafeTreeDelete
         // Plan snapshot for PowerShell fallback reuse (avoids a second read of plan.json).
         public string PlanSha256;
         public string PlanText;
+        // issue #58 N3: precomputed treeManifest SHA for planned (no-transaction) fallback ops,
+        // spread across scan workers instead of the single fallback worker owning the tree
+        // scan; null when not computed (transaction present, or streaming SHA fell back).
+        public string PlanManifestSha256;
+        // issue #58 N4: plan field values from the same JsonDocument the receipt validation
+        // parsed, so the receipt-gated fallback fast path never re-parses multi-MB plan text.
+        // Normalized with AssertDPath where applicable; any null entry makes the fast path
+        // decline to the reference resolver (which owns full semantics).
+        public string ReceiptPlanTargetPath;
+        public string ReceiptPlanQuarantinePath;
+        public string ReceiptPlanCapabilityRoot;
+        public string ReceiptPlanPolicySha256;
         // Operation payload (mirrors Resolve-CodexSafeTreeDeleteStatusOperation output shape).
         public string OperationId;
         public string RunDirectory;
@@ -180,6 +209,18 @@ namespace CodexSafeTreeDelete
         public long PlanTransactionReadMs;
         public long TerminalArchiveAuthMs;
         public long Sha256Ms;
+
+        // issue #58 N4: marshaling-free receipt gate. The PowerShell resolvers hand
+        // back only this object reference (property reads are copy-free, while a
+        // 109M-char string argument would be deep-copied by the method binder); the
+        // receipt/snapshot compare runs here on the same instances the scanner
+        // validated.
+        public bool ValidateReceiptAgainstOwnSnapshot()
+        {
+            StatusPlanValidationReceipt receipt = ApprovedPlanValidation;
+            return receipt != null &&
+                receipt.MatchesSnapshot(PlanSha256, PlanText);
+        }
     }
 
     internal sealed class StatusScanFileSnapshot
@@ -805,6 +846,49 @@ namespace CodexSafeTreeDelete
                         // snapshot and can be reused without a second O(n) PowerShell walk.
                         result.ApprovedPlanValidation = new StatusPlanValidationReceipt(
                             planSnapshot.Sha256, planSnapshot.Text, planPath);
+                        // issue #58 N3: planned (no-transaction) fallback ops need the plan
+                        // treeManifest SHA for the drift compare; computing it here spreads the
+                        // streaming re-normalization across scan workers instead of the single
+                        // fallback worker that owns the tree scan. Only the manifest SHA value
+                        // is shared; the fallback resolver recomputes nothing semantically new.
+                        if (!File.Exists(transactionPath))
+                        {
+                            try
+                            {
+                                result.PlanManifestSha256 =
+                                    StatusPlanManifestSha256.ComputeFromPlanText(planSnapshot.Text);
+                            }
+                            catch (StatusFastPathFallbackException)
+                            {
+                                result.PlanManifestSha256 = null;
+                            }
+                        }
+                        // 并行 fallback 分派的路由提示：参考路径对该记录至多扫 target 或
+                        // quarantine 一棵树。尽力而为，缺失只损失并行度，语义由参考路径自重放。
+                        // N4：同一次 JsonDocument 解析顺带导出 receipt 快路径所需 plan 字段
+                        // （AssertDPath 规范化）；任一项失败仅该项为 null，worker 自行回退。
+                        try
+                        {
+                            string routeTargetPath = GetString(plan, "targetPath");
+                            string routeGenerationId = GetString(plan, "generationId");
+                            if (!string.IsNullOrEmpty(routeTargetPath) &&
+                                !string.IsNullOrEmpty(routeGenerationId))
+                            {
+                                result.TargetPath = routeTargetPath;
+                                result.QuarantinePath = DeriveQuarantinePath(
+                                    routeTargetPath, routeGenerationId);
+                                result.ReceiptPlanTargetPath = AssertDPath(
+                                    routeTargetPath, "safe-delete target");
+                                result.ReceiptPlanCapabilityRoot = AssertDPath(
+                                    GetString(plan, "capabilityRoot"), "safe-delete capability root");
+                                result.ReceiptPlanQuarantinePath = DeriveQuarantinePath(
+                                    result.ReceiptPlanTargetPath, routeGenerationId);
+                                result.ReceiptPlanPolicySha256 = GetString(plan, "policySha256");
+                            }
+                        }
+                        catch (Exception)
+                        {
+                        }
                         throw new StatusScanFallbackException("plan-approved");
                     }
                     planApprovalError = approval.Error;
@@ -1027,6 +1111,11 @@ namespace CodexSafeTreeDelete
             result.Archived = false;
             result.OperationId = run.Name;
             result.RunDirectory = run.FullName;
+            // issue #58 N4 取证：此分支刻意不应用参考路径 :4214 的 policy 漂移覆盖
+            // （inconsistent + 单错误）。冻结基线 cold-run-stdout.json 对该分支的 23 个
+            // 生产 op 编码的即本形状；纯 PS 参考解析器（仅 FAST_SCAN=0 诊断可达）产出
+            // manual-review + 双错误，与基线分叉。方向待 issue owner 裁决，见
+            // reports/issue58-20260908/IMPLEMENTATION.md N4 段。Status slice 41 钉住两侧。
             result.Lifecycle = "inconsistent";
             result.SafeActions = new string[] { "manual-review" };
             result.TargetPath = targetPath;
@@ -1851,6 +1940,87 @@ namespace CodexSafeTreeDelete
             return Path.Combine(parent, ".codex-safe-delete-" + generationId + ".quarantine");
         }
 
+        // issue #58 N3: v2 transaction strict-document replica
+        // (ConvertTo-CodexSafeTreeDeleteStrictTransactionDocument, schemaVersion 2 branch).
+        // Returns true only when the strict conversion is guaranteed to accept the document;
+        // every other input returns false so the caller falls back and PowerShell owns the
+        // exact error message. Duplicate-free input is a caller prerequisite (strict JSON
+        // text validation runs before this in both paths).
+        public static bool TestStatusTransactionV2StrictShape(string transactionText)
+        {
+            if (transactionText == null)
+            {
+                return false;
+            }
+            try
+            {
+                using (JsonDocument document = JsonDocument.Parse(transactionText, new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = 32
+                }))
+                {
+                    JsonElement transaction = document.RootElement;
+                    if (transaction.ValueKind != JsonValueKind.Object)
+                    {
+                        return false;
+                    }
+                    if (!transaction.TryGetProperty("schemaVersion", out JsonElement schemaElement) ||
+                        schemaElement.ValueKind != JsonValueKind.Number ||
+                        !schemaElement.TryGetInt64(out long schemaVersion) ||
+                        schemaVersion != 2L)
+                    {
+                        return false;
+                    }
+                    if (!HasCanonicalTransactionShape(transaction, 2L))
+                    {
+                        return false;
+                    }
+                    foreach (string name in new string[] {
+                        "artifactType", "generationId", "planPath", "planSha256",
+                        "targetPath", "quarantinePath", "status", "updatedAtUtc" })
+                    {
+                        if (!transaction.TryGetProperty(name, out JsonElement value) ||
+                            value.ValueKind != JsonValueKind.String)
+                        {
+                            return false;
+                        }
+                    }
+                    if (!DateTimeOffset.TryParseExact(
+                            transaction.GetProperty("updatedAtUtc").GetString(), "o",
+                            CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind,
+                            out DateTimeOffset updatedAt))
+                    {
+                        return false;
+                    }
+                    string status = transaction.GetProperty("status").GetString();
+                    if (transaction.GetProperty("artifactType").GetString() !=
+                            "env-governance.codex-safe-tree-delete-transaction" ||
+                        (status != "prepared" && status != "quarantined" && status != "purging" &&
+                            status != "purged" && status != "restored" && status != "rolled-back"))
+                    {
+                        return false;
+                    }
+                    JsonElement anchors = transaction.GetProperty("directoryCommitAnchors");
+                    if (anchors.ValueKind != JsonValueKind.Array)
+                    {
+                        return false;
+                    }
+                    if (status == "prepared" && anchors.GetArrayLength() != 0)
+                    {
+                        return false;
+                    }
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+
         private static StatusScanFileSnapshot ReadFileChecked(
             string path, string name, bool terminalArchiveSegment, StatusScanResult metrics)
         {
@@ -2551,6 +2721,1218 @@ namespace CodexSafeTreeDelete
         private static int IndexOfAnyInvalidFileNameChar(string segment)
         {
             return segment.IndexOfAny(InvalidFileNameChars);
+        }
+    }
+
+    // ===== issue #58: Status 树快照 / manifest SHA 快速路径 =====
+    // 与 Get-CodexHookCapabilityDirectoryTreeSnapshot（CodexHostSafety.ps1:789-955）逐一同构的
+    // C# 单次遍历：entry schema、walk 顺序（深度优先、兄弟按 Sort-Object Name 语义排序）、
+    // reparse/junction 政策、handle/identity/SHA 校验全部等价。任何无法证明与 PS 参考路径
+    // 逐字节等价的情形（IO 错误、非规范名称、排序并列、异常 reparse 载荷等）一律抛
+    // StatusFastPathFallbackException，由 PowerShell 参考路径重放并产出精确的原生错误消息。
+
+    public sealed class StatusFastPathFallbackException : Exception
+    {
+        public StatusFastPathFallbackException(string reason) : base(reason) { }
+    }
+
+    public sealed class StatusTreeSnapshotEntry
+    {
+        public string RelativePath;
+        public string Kind;
+        public string Sha256;
+        public string IdentityVolume;
+        public string IdentityIndex;
+    }
+
+    public sealed class StatusTreeSnapshotResult
+    {
+        public StatusTreeSnapshotEntry[] Entries;
+        public string RootIdentityVolume;
+        public string RootIdentityIndex;
+        public string ManifestSha256;
+        public long FileContentBytes;
+        public long ReparseDataBytes;
+
+        // issue #58：逐 entry 的 PS 物化（[pscustomobject][ordered]）在数万 entry 的树上
+        // 是 wrapper 内最大 CPU 项；这里用 SMA 直建同形状 PSObject（四个 note property、
+        // identity 为 string[2]、sha256 允许 null），与参考路径 schema 逐属性一致。
+        public PSObject[] MaterializeEntries()
+        {
+            StatusTreeSnapshotEntry[] entries = Entries;
+            PSObject[] result = new PSObject[entries.Length];
+            for (int i = 0; i < entries.Length; i++)
+            {
+                StatusTreeSnapshotEntry entry = entries[i];
+                PSObject obj = new PSObject();
+                obj.Properties.Add(new PSNoteProperty("relativePath", entry.RelativePath));
+                obj.Properties.Add(new PSNoteProperty("kind", entry.Kind));
+                obj.Properties.Add(new PSNoteProperty("sha256", entry.Sha256));
+                obj.Properties.Add(new PSNoteProperty(
+                    "identity",
+                    new string[2] { entry.IdentityVolume, entry.IdentityIndex }));
+                result[i] = obj;
+            }
+            return result;
+        }
+    }
+
+    internal static class StatusCanonicalJson
+    {
+        // PowerShell 7 ConvertTo-Json 的字符串转义规则（本机 7.6.5 实测）：只有 '"'、'\'、
+        // \b \t \n \f \r 走短转义，其余控制字符走小写 \u00xx，非 ASCII（含代理项对）原样输出。
+        internal static void WriteJsonString(StringBuilder builder, string value)
+        {
+            builder.Append('"');
+            foreach (char c in value)
+            {
+                switch (c)
+                {
+                    case '"': builder.Append("\\\""); break;
+                    case '\\': builder.Append("\\\\"); break;
+                    case '\b': builder.Append("\\b"); break;
+                    case '\t': builder.Append("\\t"); break;
+                    case '\n': builder.Append("\\n"); break;
+                    case '\f': builder.Append("\\f"); break;
+                    case '\r': builder.Append("\\r"); break;
+                    default:
+                        if (c < 0x20)
+                        {
+                            builder.Append("\\u");
+                            builder.Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                        }
+                        else
+                        {
+                            builder.Append(c);
+                        }
+                        break;
+                }
+            }
+            builder.Append('"');
+        }
+
+        internal static string HashUtf8(string text)
+        {
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                return Convert.ToHexString(sha256.ComputeHash(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+            }
+        }
+    }
+
+    public static class StatusTreeSnapshotScanner
+    {
+        private const uint GenericRead = 0x80000000;
+        private const uint FileWriteAttributesAccess = 0x00000100;
+        private const uint DeleteAccess = 0x00010000;
+        private const uint OpenExisting = 3;
+        private const uint FileAttributeNormal = 0x80;
+        private const uint FileFlagBackupSemantics = 0x02000000;
+        private const uint FileFlagOpenReparsePoint = 0x00200000;
+        private const uint FileAttributeDirectory = 0x10;
+        private const uint FileAttributeReparsePoint = 0x400;
+        private const uint FileNameNormalized = 0x0;
+        private const int ErrorMoreData = 234;
+        private const int ErrorHandleEof = 38;
+        private const uint FsctlGetReparsePoint = 0x000900A8;
+        private const uint IoReparseTagMountPoint = 0xA0000003;
+        private const int FileStreamInformationClass = 7;
+        private const int MaximumReparseDataBufferSize = 16 * 1024;
+
+        private static readonly Regex ReservedSegmentName = new Regex(
+            "^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$", RegexOptions.Compiled);
+        private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeFileTime
+        {
+            public uint LowDateTime;
+            public uint HighDateTime;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ByHandleFileInformation
+        {
+            public uint FileAttributes;
+            public NativeFileTime CreationTime;
+            public NativeFileTime LastAccessTime;
+            public NativeFileTime LastWriteTime;
+            public uint VolumeSerialNumber;
+            public uint FileSizeHigh;
+            public uint FileSizeLow;
+            public uint NumberOfLinks;
+            public uint FileIndexHigh;
+            public uint FileIndexLow;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFileW(
+            string fileName,
+            uint desiredAccess,
+            FileShare shareMode,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandle(
+            SafeFileHandle fileHandle,
+            out ByHandleFileInformation fileInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandleEx(
+            SafeFileHandle fileHandle,
+            int fileInformationClass,
+            IntPtr fileInformation,
+            uint bufferLength);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandleW(
+            SafeFileHandle fileHandle,
+            StringBuilder filePath,
+            uint filePathLength,
+            uint flags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeviceIoControl(
+            SafeFileHandle device,
+            uint ioControlCode,
+            IntPtr inBuffer,
+            uint inBufferSize,
+            IntPtr outBuffer,
+            uint outBufferSize,
+            out uint bytesReturned,
+            IntPtr overlapped);
+
+        private struct ChildItem
+        {
+            public string Name;
+            public uint Attributes;
+        }
+
+        [ThreadStatic]
+        private static string currentStage;
+
+        private sealed class SiblingNameComparer : IComparer<ChildItem>
+        {
+            internal static readonly SiblingNameComparer Instance = new SiblingNameComparer();
+            // Sort-Object -Property Name（不带 -CaseSensitive）的实测语义 = 当前 culture 忽略大小写。
+            private static readonly StringComparer CultureComparer =
+                StringComparer.Create(CultureInfo.CurrentCulture, true);
+
+            public int Compare(ChildItem left, ChildItem right)
+            {
+                int result = CultureComparer.Compare(left.Name, right.Name);
+                if (result == 0 && !string.Equals(left.Name, right.Name, StringComparison.Ordinal))
+                {
+                    // culture 并列但 ordinal 不等（PS 排序稳定性无法复刻）→ 交还参考路径。
+                    throw new StatusFastPathFallbackException("sibling-name-collation-tie");
+                }
+                return result;
+            }
+        }
+
+        private sealed class ScanContext
+        {
+            internal bool AllowHardLinks;
+            internal bool AllowInternalDirectoryJunctions;
+            internal string JunctionTargetRoot;
+            internal List<StatusTreeSnapshotEntry> Entries = new List<StatusTreeSnapshotEntry>();
+            internal List<PendingFile> PendingFiles = new List<PendingFile>();
+            internal long FileContentBytes;
+            internal long ReparseDataBytes;
+        }
+
+        // issue #58：冷盘单文件 lease 是 IO 延迟bound（实测 ~1.5-5ms/entry，队列深度 1；
+        // node_modules 类树目录小批次 <8 文件使目录级并行失效，68K 树串行实测 104s）。
+        // 文件核验+哈希改为全树一批并行填充：串行 DFS 只追加 skeleton entry（位置固定，
+        // 条目顺序不变），walk 结束后一次性 Parallel.ForEach。目录句柄窗口不再覆盖填充段；
+        // 补偿不变量：rootGuard 由 PS 调用方全程持有，每文件 open 仍有 reparse/finalpath/
+        // identity 双验，漂移一律 fail-closed 回退 PS 重放（参考路径产出精确错误）。
+        private sealed class PendingFile
+        {
+            internal StatusTreeSnapshotEntry Entry;
+            internal string Path;
+            internal long SizeBytes;
+            internal Exception Failure;
+        }
+
+        public static StatusTreeSnapshotResult Scan(
+            string rootPath,
+            bool allowHardLinks,
+            bool allowInternalDirectoryJunctions,
+            string junctionTargetRoot)
+        {
+            try
+            {
+                return ScanCore(rootPath, allowHardLinks, allowInternalDirectoryJunctions, junctionTargetRoot);
+            }
+            catch (StatusFastPathFallbackException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                int? code = (ex as Win32Exception)?.NativeErrorCode;
+                throw new StatusFastPathFallbackException(
+                    "tree-scan-" + ex.GetType().Name +
+                    (code.HasValue ? ("-" + code.Value.ToString(CultureInfo.InvariantCulture)) : "") +
+                    ":" + ex.Message + " @" + (currentStage ?? "?"));
+            }
+        }
+
+        private static StatusTreeSnapshotResult ScanCore(
+            string rootPath,
+            bool allowHardLinks,
+            bool allowInternalDirectoryJunctions,
+            string junctionTargetRoot)
+        {
+            if (string.IsNullOrEmpty(rootPath))
+            {
+                throw new StatusFastPathFallbackException("empty-root");
+            }
+            ScanContext context = new ScanContext();
+            context.AllowHardLinks = allowHardLinks;
+            context.AllowInternalDirectoryJunctions = allowInternalDirectoryJunctions;
+            if (allowInternalDirectoryJunctions)
+            {
+                if (string.IsNullOrWhiteSpace(junctionTargetRoot))
+                {
+                    throw new StatusFastPathFallbackException("junction-root-missing");
+                }
+                context.JunctionTargetRoot = TrimDirectoryEnding(Path.GetFullPath(junctionTargetRoot));
+            }
+            string normalizedRoot = TrimDirectoryEnding(Path.GetFullPath(rootPath));
+            WalkDirectory(context, normalizedRoot, ".");
+            FillPendingFiles(context, context.PendingFiles);
+
+            string rootVolume = context.Entries[0].IdentityVolume;
+            string rootIndex = context.Entries[0].IdentityIndex;
+            StringBuilder full = new StringBuilder();
+            full.Append("{\"schemaVersion\":2,\"rootIdentity\":[");
+            StatusCanonicalJson.WriteJsonString(full, rootVolume);
+            full.Append(',');
+            StatusCanonicalJson.WriteJsonString(full, rootIndex);
+            full.Append("],\"entries\":[");
+            bool firstEntry = true;
+            foreach (StatusTreeSnapshotEntry entry in context.Entries)
+            {
+                if (!firstEntry)
+                {
+                    full.Append(',');
+                }
+                firstEntry = false;
+                AppendManifestEntry(full, entry);
+            }
+            full.Append("]}");
+
+            StatusTreeSnapshotResult result = new StatusTreeSnapshotResult();
+            result.Entries = context.Entries.ToArray();
+            result.RootIdentityVolume = rootVolume;
+            result.RootIdentityIndex = rootIndex;
+            result.ManifestSha256 = StatusCanonicalJson.HashUtf8(full.ToString());
+            result.FileContentBytes = context.FileContentBytes;
+            result.ReparseDataBytes = context.ReparseDataBytes;
+            return result;
+        }
+
+        private static void WalkDirectory(ScanContext context, string directoryPath, string relativePath)
+        {
+            SafeFileHandle handle = OpenVerifiedDirectory(directoryPath);
+            try
+            {
+                string volume;
+                string index;
+                GetIdentityFromHandle(handle, out volume, out index);
+                AppendEntry(context, relativePath, "directory", null, volume, index);
+                List<ChildItem> children = EnumerateChildren(directoryPath);
+                children.Sort(SiblingNameComparer.Instance);
+                foreach (ChildItem child in children)
+                {
+                    AssertCanonicalChildName(child.Name);
+                    string childPath = CombinePath(directoryPath, child.Name);
+                    string childRelative = string.Equals(relativePath, ".", StringComparison.Ordinal)
+                        ? child.Name
+                        : relativePath + "/" + child.Name;
+                    bool isReparse = (child.Attributes & FileAttributeReparsePoint) != 0;
+                    bool isDirectory = (child.Attributes & FileAttributeDirectory) != 0;
+                    if (isReparse)
+                    {
+                        if (!context.AllowInternalDirectoryJunctions || !isDirectory)
+                        {
+                            // 参考路径在此抛精确错误；回退由 PS 重放该错误。
+                            throw new StatusFastPathFallbackException("unauthorized-reparse-point");
+                        }
+                        ProcessJunction(context, childPath, childRelative);
+                        continue;
+                    }
+                    if (isDirectory)
+                    {
+                        WalkDirectory(context, childPath, childRelative);
+                        continue;
+                    }
+                    QueueFile(context, childPath, childRelative);
+                }
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+
+        private static void QueueFile(
+            ScanContext context,
+            string filePath,
+            string relativePath)
+        {
+            StatusTreeSnapshotEntry entry = new StatusTreeSnapshotEntry();
+            entry.RelativePath = relativePath;
+            entry.Kind = "file";
+            context.Entries.Add(entry);
+            PendingFile file = new PendingFile();
+            file.Entry = entry;
+            file.Path = filePath;
+            context.PendingFiles.Add(file);
+        }
+
+        private static void FillPendingFiles(ScanContext context, List<PendingFile> pendingFiles)
+        {
+            if (pendingFiles.Count == 0)
+            {
+                return;
+            }
+            if (pendingFiles.Count < 8)
+            {
+                foreach (PendingFile file in pendingFiles)
+                {
+                    FillFile(context, file);
+                }
+            }
+            else
+            {
+                System.Threading.Tasks.Parallel.ForEach(
+                    pendingFiles,
+                    new System.Threading.Tasks.ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = Math.Min(32, Math.Max(4, Environment.ProcessorCount * 2))
+                    },
+                    file => FillFile(context, file));
+            }
+            // 失败按 DFS 序抛首个，保持回退原因确定性；一切异常最终由 Scan() 包成 typed fallback。
+            foreach (PendingFile file in pendingFiles)
+            {
+                if (file.Failure != null)
+                {
+                    throw file.Failure;
+                }
+                context.FileContentBytes += file.SizeBytes;
+            }
+            pendingFiles.Clear();
+        }
+
+        private static void FillFile(ScanContext context, PendingFile file)
+        {
+            try
+            {
+                currentStage = "file-open:" + file.Path;
+                SafeFileHandle handle = CreateFileW(
+                    ToExtendedPath(file.Path),
+                    GenericRead | FileWriteAttributesAccess | DeleteAccess,
+                    FileShare.Read,
+                    IntPtr.Zero,
+                    OpenExisting,
+                    FileAttributeNormal | FileFlagOpenReparsePoint,
+                    IntPtr.Zero);
+                if (handle.IsInvalid)
+                {
+                    int openError = Marshal.GetLastWin32Error();
+                    handle.Dispose();
+                    throw new Win32Exception(openError);
+                }
+                try
+                {
+                    currentStage = "file-verify";
+                    ByHandleFileInformation info = VerifyFileHandle(handle, file.Path, context.AllowHardLinks);
+                    string volume = info.VolumeSerialNumber.ToString("x8", CultureInfo.InvariantCulture);
+                    string index = info.FileIndexHigh.ToString("x8", CultureInfo.InvariantCulture) +
+                        info.FileIndexLow.ToString("x8", CultureInfo.InvariantCulture);
+                    // ComputeSha256FromHandle 语义：哈希前整柄重验 + identity 不变断言。
+                    ByHandleFileInformation verifyInfo = VerifyFileHandle(handle, file.Path, context.AllowHardLinks);
+                    string verifyVolume = verifyInfo.VolumeSerialNumber.ToString("x8", CultureInfo.InvariantCulture);
+                    string verifyIndex = verifyInfo.FileIndexHigh.ToString("x8", CultureInfo.InvariantCulture) +
+                        verifyInfo.FileIndexLow.ToString("x8", CultureInfo.InvariantCulture);
+                    if (!string.Equals(volume, verifyVolume, StringComparison.Ordinal) ||
+                        !string.Equals(index, verifyIndex, StringComparison.Ordinal))
+                    {
+                        throw new StatusFastPathFallbackException("file-identity-drift");
+                    }
+                    currentStage = "file-hash";
+                    byte[] hash = HashHandleContents(handle);
+                    file.Entry.Sha256 = Convert.ToHexString(hash).ToLowerInvariant();
+                    file.Entry.IdentityVolume = volume;
+                    file.Entry.IdentityIndex = index;
+                    file.SizeBytes = ((long)info.FileSizeHigh << 32) | info.FileSizeLow;
+                }
+                finally
+                {
+                    handle.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                file.Failure = ex;
+            }
+        }
+
+        private static void ProcessJunction(ScanContext context, string junctionPath, string relativePath)
+        {
+            SafeFileHandle handle = CreateFileW(
+                ToExtendedPath(junctionPath),
+                GenericRead | FileWriteAttributesAccess | DeleteAccess,
+                FileShare.Read,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int openError = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(openError);
+            }
+            try
+            {
+                ByHandleFileInformation info = GetInfo(handle);
+                if ((info.FileAttributes & FileAttributeReparsePoint) == 0 ||
+                    (info.FileAttributes & FileAttributeDirectory) == 0)
+                {
+                    throw new StatusFastPathFallbackException("junction-not-a-directory-reparse-point");
+                }
+                AssertFinalPathMatches(handle, junctionPath, true);
+                AssertDirectoryHasNoAlternateDataStreams(handle);
+                byte[] reparseData = ReadReparseData(handle);
+                uint reparseTag = ReadUInt32(reparseData, 0);
+                if (reparseTag != IoReparseTagMountPoint)
+                {
+                    throw new StatusFastPathFallbackException("junction-not-mount-point");
+                }
+                string targetPath = ParseMountPointTarget(reparseData);
+                AssertJunctionTarget(targetPath, context.JunctionTargetRoot);
+                byte[] reparseHash;
+                using (SHA256 sha256 = SHA256.Create())
+                {
+                    reparseHash = sha256.ComputeHash(reparseData);
+                }
+                string volume = info.VolumeSerialNumber.ToString("x8", CultureInfo.InvariantCulture);
+                string index = info.FileIndexHigh.ToString("x8", CultureInfo.InvariantCulture) +
+                    info.FileIndexLow.ToString("x8", CultureInfo.InvariantCulture);
+                AppendEntry(context, relativePath, "directory-junction",
+                    Convert.ToHexString(reparseHash).ToLowerInvariant(), volume, index);
+                context.ReparseDataBytes += reparseData.Length;
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+
+        private static void AppendEntry(
+            ScanContext context,
+            string relativePath,
+            string kind,
+            string sha256,
+            string volume,
+            string index)
+        {
+            StatusTreeSnapshotEntry entry = new StatusTreeSnapshotEntry();
+            entry.RelativePath = relativePath;
+            entry.Kind = kind;
+            entry.Sha256 = sha256;
+            entry.IdentityVolume = volume;
+            entry.IdentityIndex = index;
+            context.Entries.Add(entry);
+        }
+
+        // manifest JSON 在全部条目（含并行填充的文件 sha/identity）就绪后串行拼装，
+        // 属性序与条目序和参考 ConvertTo-Json 输出逐字节一致。
+        private static void AppendManifestEntry(StringBuilder builder, StatusTreeSnapshotEntry entry)
+        {
+            builder.Append("{\"relativePath\":");
+            StatusCanonicalJson.WriteJsonString(builder, entry.RelativePath);
+            builder.Append(",\"kind\":");
+            StatusCanonicalJson.WriteJsonString(builder, entry.Kind);
+            builder.Append(",\"sha256\":");
+            if (entry.Sha256 == null)
+            {
+                builder.Append("null");
+            }
+            else
+            {
+                StatusCanonicalJson.WriteJsonString(builder, entry.Sha256);
+            }
+            builder.Append(",\"identity\":[");
+            StatusCanonicalJson.WriteJsonString(builder, entry.IdentityVolume);
+            builder.Append(',');
+            StatusCanonicalJson.WriteJsonString(builder, entry.IdentityIndex);
+            builder.Append("]}");
+        }
+
+        private static SafeFileHandle OpenVerifiedDirectory(string directoryPath)
+        {
+            SafeFileHandle handle = CreateFileW(
+                ToExtendedPath(directoryPath),
+                GenericRead,
+                FileShare.Read,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int openError = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(openError);
+            }
+            try
+            {
+                ByHandleFileInformation info = GetInfo(handle);
+                if ((info.FileAttributes & FileAttributeReparsePoint) != 0 ||
+                    (info.FileAttributes & FileAttributeDirectory) == 0)
+                {
+                    throw new StatusFastPathFallbackException("not-a-plain-directory");
+                }
+                AssertFinalPathMatches(handle, directoryPath, true);
+                return handle;
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        private static ByHandleFileInformation VerifyFileHandle(
+            SafeFileHandle handle,
+            string filePath,
+            bool allowHardLinks)
+        {
+            ByHandleFileInformation info = GetInfo(handle);
+            if ((info.FileAttributes & FileAttributeReparsePoint) != 0 ||
+                (info.FileAttributes & FileAttributeDirectory) != 0 ||
+                info.NumberOfLinks == 0 ||
+                (!allowHardLinks && info.NumberOfLinks != 1))
+            {
+                throw new StatusFastPathFallbackException("file-handle-verification");
+            }
+            AssertFinalPathMatches(handle, filePath, false);
+            AssertFileHasNoAlternateDataStreams(handle);
+            return info;
+        }
+
+        private static ByHandleFileInformation GetInfo(SafeFileHandle handle)
+        {
+            ByHandleFileInformation info;
+            if (!GetFileInformationByHandle(handle, out info))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return info;
+        }
+
+        private static void GetIdentityFromHandle(SafeFileHandle handle, out string volume, out string index)
+        {
+            ByHandleFileInformation info = GetInfo(handle);
+            volume = info.VolumeSerialNumber.ToString("x8", CultureInfo.InvariantCulture);
+            index = info.FileIndexHigh.ToString("x8", CultureInfo.InvariantCulture) +
+                info.FileIndexLow.ToString("x8", CultureInfo.InvariantCulture);
+        }
+
+        private static byte[] HashHandleContents(SafeFileHandle handle)
+        {
+            const int bufferSize = 1024 * 1024;
+            byte[] buffer = new byte[bufferSize];
+            IncrementalHash incremental = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            try
+            {
+                long offset = 0L;
+                while (true)
+                {
+                    int read = RandomAccess.Read(handle, buffer, offset);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+                    incremental.AppendData(buffer, 0, read);
+                    offset += read;
+                }
+                return incremental.GetHashAndReset();
+            }
+            finally
+            {
+                incremental.Dispose();
+            }
+        }
+
+        private static List<ChildItem> EnumerateChildren(string directoryPath)
+        {
+            EnumerationOptions options = new EnumerationOptions
+            {
+                RecurseSubdirectories = false,
+                AttributesToSkip = 0,
+                ReturnSpecialDirectories = false,
+                IgnoreInaccessible = false,
+                BufferSize = 65536
+            };
+            FileSystemEnumerable<ChildItem> enumerable = new FileSystemEnumerable<ChildItem>(
+                ToExtendedPath(directoryPath),
+                (ref FileSystemEntry entry) => new ChildItem
+                {
+                    Name = entry.FileName.ToString(),
+                    Attributes = (uint)entry.Attributes
+                },
+                options);
+            List<ChildItem> children = new List<ChildItem>();
+            foreach (ChildItem child in enumerable)
+            {
+                children.Add(child);
+            }
+            return children;
+        }
+
+        private static void AssertCanonicalChildName(string name)
+        {
+            // 等效 Assert-CodexHookDPath 的 segment 级校验（祖先段在各自入栈时已校验，
+            // 根路径由调用方 PS 校验）；命中即回退，由参考路径抛出精确消息。
+            if (name.Length == 0 ||
+                name.IndexOfAny(InvalidFileNameChars) >= 0 ||
+                name.EndsWith(".", StringComparison.Ordinal) ||
+                name.EndsWith(" ", StringComparison.Ordinal) ||
+                ReservedSegmentName.IsMatch(Path.GetFileNameWithoutExtension(name)))
+            {
+                throw new StatusFastPathFallbackException("non-canonical-child-name");
+            }
+        }
+
+        private static void AssertJunctionTarget(string targetPath, string junctionTargetRoot)
+        {
+            // 等效 Assert-CodexHookDPath + Test-CodexHookPathWithin（target root 已由 PS 校验）。
+            if (string.IsNullOrWhiteSpace(targetPath) || !Path.IsPathFullyQualified(targetPath))
+            {
+                throw new StatusFastPathFallbackException("junction-target-not-absolute");
+            }
+            if (targetPath.Length > 2)
+            {
+                string tail = targetPath.Substring(2);
+                if (tail.IndexOfAny(new char[] { ':', '*', '?', '<', '>', '"', '|' }) >= 0 ||
+                    tail.IndexOfAny(EnumerableRange0To1F()) >= 0)
+                {
+                    throw new StatusFastPathFallbackException("junction-target-illegal-char");
+                }
+            }
+            string fullTarget = Path.GetFullPath(targetPath);
+            if (!string.Equals(Path.GetPathRoot(fullTarget), "D:\\", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new StatusFastPathFallbackException("junction-target-not-on-d");
+            }
+            foreach (string segment in fullTarget.Substring(3).Split(
+                new char[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (segment.EndsWith(".", StringComparison.Ordinal) ||
+                    segment.EndsWith(" ", StringComparison.Ordinal) ||
+                    ReservedSegmentName.IsMatch(Path.GetFileNameWithoutExtension(segment)))
+                {
+                    throw new StatusFastPathFallbackException("junction-target-reserved-segment");
+                }
+            }
+            if (!PathWithin(fullTarget, junctionTargetRoot))
+            {
+                throw new StatusFastPathFallbackException("junction-target-out-of-root");
+            }
+        }
+
+        private static char[] EnumerableRange0To1F()
+        {
+            char[] chars = new char[32];
+            for (int i = 0; i < 32; i++) { chars[i] = (char)i; }
+            return chars;
+        }
+
+        private static bool PathWithin(string path, string parentPath)
+        {
+            string candidate = TrimDirectoryEnding(Path.GetFullPath(path));
+            string parent = TrimDirectoryEnding(Path.GetFullPath(parentPath));
+            return candidate.Equals(parent, StringComparison.OrdinalIgnoreCase) ||
+                candidate.StartsWith(parent + "\\", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string CombinePath(string parent, string name)
+        {
+            if (parent.EndsWith("\\", StringComparison.Ordinal))
+            {
+                return parent + name;
+            }
+            return parent + "\\" + name;
+        }
+
+        private static string TrimDirectoryEnding(string path)
+        {
+            return path.TrimEnd('\\', '/');
+        }
+
+        private static string ToExtendedPath(string path)
+        {
+            if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) { return path; }
+            if (path.StartsWith(@"\\", StringComparison.Ordinal)) { return @"\\?\UNC\" + path.Substring(2); }
+            return @"\\?\" + path;
+        }
+
+        private static void AssertFinalPathMatches(SafeFileHandle handle, string lexicalPath, bool trimDirectoryEnding)
+        {
+            string openedPath = GetFinalPath(handle);
+            string expected = Path.GetFullPath(lexicalPath);
+            string actual = Path.GetFullPath(openedPath);
+            if (trimDirectoryEnding)
+            {
+                expected = TrimDirectoryEnding(expected);
+                actual = TrimDirectoryEnding(actual);
+            }
+            if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new StatusFastPathFallbackException("final-path-mismatch");
+            }
+        }
+
+        private static string GetFinalPath(SafeFileHandle handle)
+        {
+            uint capacity = 512;
+            while (true)
+            {
+                StringBuilder buffer = new StringBuilder(checked((int)capacity));
+                uint result = GetFinalPathNameByHandleW(handle, buffer, capacity, FileNameNormalized);
+                if (result == 0)
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                if (result < capacity)
+                {
+                    return NormalizeFinalPath(buffer.ToString());
+                }
+                capacity = checked(result + 1);
+            }
+        }
+
+        private static string NormalizeFinalPath(string path)
+        {
+            const string uncPrefix = @"\\?\UNC\";
+            const string devicePrefix = @"\\?\";
+            if (path.StartsWith(uncPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return @"\\" + path.Substring(uncPrefix.Length);
+            }
+            if (path.StartsWith(devicePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return path.Substring(devicePrefix.Length);
+            }
+            return path;
+        }
+
+        private static void AssertFileHasNoAlternateDataStreams(SafeFileHandle handle)
+        {
+            const int headerLength = 24;
+            int bufferLength = 4096;
+            while (true)
+            {
+                IntPtr buffer = Marshal.AllocHGlobal(bufferLength);
+                try
+                {
+                    if (!GetFileInformationByHandleEx(
+                            handle, FileStreamInformationClass, buffer, checked((uint)bufferLength)))
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        if (error == ErrorMoreData && bufferLength < 1024 * 1024)
+                        {
+                            bufferLength = checked(bufferLength * 2);
+                            continue;
+                        }
+                        throw new Win32Exception(error);
+                    }
+                    int offset = 0;
+                    int defaultStreamCount = 0;
+                    while (true)
+                    {
+                        if (offset < 0 || offset + headerLength > bufferLength)
+                        {
+                            throw new StatusFastPathFallbackException("stream-record-invalid");
+                        }
+                        int nextOffset = Marshal.ReadInt32(buffer, offset);
+                        int nameLength = Marshal.ReadInt32(buffer, offset + 4);
+                        if (nameLength < 0 || (nameLength & 1) != 0 ||
+                            offset + headerLength + nameLength > bufferLength)
+                        {
+                            throw new StatusFastPathFallbackException("stream-name-invalid");
+                        }
+                        string streamName = Marshal.PtrToStringUni(
+                            IntPtr.Add(buffer, offset + headerLength), nameLength / 2);
+                        if (!string.Equals(streamName, "::$DATA", StringComparison.Ordinal))
+                        {
+                            throw new StatusFastPathFallbackException("alternate-data-stream");
+                        }
+                        defaultStreamCount++;
+                        if (nextOffset == 0)
+                        {
+                            break;
+                        }
+                        if (nextOffset < headerLength || (nextOffset & 7) != 0 ||
+                            offset + nextOffset > bufferLength)
+                        {
+                            throw new StatusFastPathFallbackException("stream-offset-invalid");
+                        }
+                        offset += nextOffset;
+                    }
+                    if (defaultStreamCount != 1)
+                    {
+                        throw new StatusFastPathFallbackException("default-stream-count");
+                    }
+                    return;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+        }
+
+        private static void AssertDirectoryHasNoAlternateDataStreams(SafeFileHandle handle)
+        {
+            const int bufferLength = 4096;
+            IntPtr buffer = Marshal.AllocHGlobal(bufferLength);
+            try
+            {
+                if (GetFileInformationByHandleEx(
+                        handle, FileStreamInformationClass, buffer, bufferLength))
+                {
+                    throw new StatusFastPathFallbackException("directory-alternate-data-stream");
+                }
+                int error = Marshal.GetLastWin32Error();
+                if (error != ErrorHandleEof)
+                {
+                    throw new Win32Exception(error);
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        private static byte[] ReadReparseData(SafeFileHandle handle)
+        {
+            IntPtr buffer = Marshal.AllocHGlobal(MaximumReparseDataBufferSize);
+            try
+            {
+                uint bytesReturned;
+                if (!DeviceIoControl(
+                        handle,
+                        FsctlGetReparsePoint,
+                        IntPtr.Zero,
+                        0,
+                        buffer,
+                        MaximumReparseDataBufferSize,
+                        out bytesReturned,
+                        IntPtr.Zero))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                if (bytesReturned < 16 || bytesReturned > MaximumReparseDataBufferSize)
+                {
+                    throw new StatusFastPathFallbackException("reparse-payload-length");
+                }
+                byte[] bytes = new byte[checked((int)bytesReturned)];
+                Marshal.Copy(buffer, bytes, 0, bytes.Length);
+                int declaredLength = bytes[4] | (bytes[5] << 8);
+                if (declaredLength < 8 || declaredLength + 8 != bytes.Length)
+                {
+                    throw new StatusFastPathFallbackException("reparse-payload-header");
+                }
+                return bytes;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        private static string ParseMountPointTarget(byte[] reparseData)
+        {
+            const int pathBufferOffset = 16;
+            int reparseDataLength = ReadUInt16(reparseData, 4);
+            int pathBufferLength = checked(reparseDataLength - 8);
+            int substituteNameOffset = ReadUInt16(reparseData, 8);
+            int substituteNameLength = ReadUInt16(reparseData, 10);
+            int printNameOffset = ReadUInt16(reparseData, 12);
+            int printNameLength = ReadUInt16(reparseData, 14);
+            ValidateReparseNameRange(substituteNameOffset, substituteNameLength, pathBufferLength);
+            ValidateReparseNameRange(printNameOffset, printNameLength, pathBufferLength);
+            string substituteName = Encoding.Unicode.GetString(
+                reparseData,
+                checked(pathBufferOffset + substituteNameOffset),
+                substituteNameLength);
+            if (string.IsNullOrWhiteSpace(substituteName) || substituteName.IndexOf('\0') >= 0)
+            {
+                throw new StatusFastPathFallbackException("junction-target-malformed");
+            }
+            return NormalizeMountPointTarget(substituteName);
+        }
+
+        private static void ValidateReparseNameRange(int offset, int length, int pathBufferLength)
+        {
+            if ((offset & 1) != 0 || (length & 1) != 0 ||
+                offset < 0 || length < 0 || offset > pathBufferLength - length)
+            {
+                throw new StatusFastPathFallbackException("reparse-name-range");
+            }
+        }
+
+        private static string NormalizeMountPointTarget(string substituteName)
+        {
+            const string ntPrefix = @"\??\";
+            const string extendedPrefix = @"\\?\";
+            string target = substituteName;
+            if (target.StartsWith(ntPrefix + "UNC\\", StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFullPath(@"\\" + target.Substring((ntPrefix + "UNC\\").Length));
+            }
+            if (target.StartsWith(ntPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                string remainder = target.Substring(ntPrefix.Length);
+                if (remainder.Length >= 3 && char.IsLetter(remainder[0]) &&
+                    remainder[1] == ':' && remainder[2] == '\\')
+                {
+                    return Path.GetFullPath(remainder);
+                }
+                if (remainder.StartsWith("Volume{", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Path.GetFullPath(extendedPrefix + remainder);
+                }
+                throw new StatusFastPathFallbackException("junction-target-unsupported-nt-path");
+            }
+            if (target.StartsWith(extendedPrefix + "UNC\\", StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFullPath(@"\\" + target.Substring((extendedPrefix + "UNC\\").Length));
+            }
+            if (target.StartsWith(extendedPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFullPath(target);
+            }
+            throw new StatusFastPathFallbackException("junction-target-not-absolute-nt");
+        }
+
+        private static ushort ReadUInt16(byte[] bytes, int offset)
+        {
+            if (bytes == null || offset < 0 || offset > bytes.Length - sizeof(ushort))
+            {
+                throw new StatusFastPathFallbackException("reparse-payload-truncated");
+            }
+            return checked((ushort)(bytes[offset] | (bytes[offset + 1] << 8)));
+        }
+
+        private static uint ReadUInt32(byte[] bytes, int offset)
+        {
+            if (bytes == null || offset < 0 || offset > bytes.Length - sizeof(uint))
+            {
+                throw new StatusFastPathFallbackException("reparse-payload-truncated");
+            }
+            return (uint)(
+                bytes[offset] |
+                (bytes[offset + 1] << 8) |
+                (bytes[offset + 2] << 16) |
+                (bytes[offset + 3] << 24));
+        }
+    }
+
+    // plan 文本流式提取 treeManifest 并按 ConvertTo-Json -Compress 规则重规范化后直接算 SHA-256，
+    // 替代 Get-CodexSafeTreeDeleteManifestSha256 里 60MB 级 manifest 的 ConvertTo-Json 序列化。
+    public static class StatusPlanManifestSha256
+    {
+        private static readonly Regex CanonicalInteger = new Regex(
+            "^(0|-?[1-9][0-9]*)$", RegexOptions.Compiled);
+
+        public static string ComputeFromPlanText(string planText)
+        {
+            try
+            {
+                return ComputeCore(planText);
+            }
+            catch (StatusFastPathFallbackException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new StatusFastPathFallbackException("plan-manifest-" + ex.GetType().Name);
+            }
+        }
+
+        private static string ComputeCore(string planText)
+        {
+            if (planText == null)
+            {
+                throw new StatusFastPathFallbackException("null-plan-text");
+            }
+            byte[] utf8 = Encoding.UTF8.GetBytes(planText);
+            Utf8JsonReader reader = new Utf8JsonReader(utf8, new JsonReaderOptions
+            {
+                AllowTrailingCommas = false,
+                CommentHandling = JsonCommentHandling.Disallow,
+                MaxDepth = 128
+            });
+            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+            {
+                throw new StatusFastPathFallbackException("plan-not-object");
+            }
+            StringBuilder manifestJson = new StringBuilder();
+            int found = 0;
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndObject)
+                {
+                    break;
+                }
+                if (reader.TokenType != JsonTokenType.PropertyName)
+                {
+                    throw new StatusFastPathFallbackException("plan-property-expected");
+                }
+                string name = reader.GetString();
+                if (!reader.Read())
+                {
+                    throw new StatusFastPathFallbackException("plan-truncated");
+                }
+                if (string.Equals(name, "treeManifest", StringComparison.OrdinalIgnoreCase))
+                {
+                    // PS 属性访问大小写不敏感：唯一大小写不敏感命中才等价；大小写变体重复回退。
+                    found++;
+                    if (found > 1)
+                    {
+                        throw new StatusFastPathFallbackException("treeManifest-duplicated");
+                    }
+                    WriteCanonicalValue(ref reader, manifestJson, 0);
+                }
+                else
+                {
+                    reader.Skip();
+                }
+            }
+            if (found != 1)
+            {
+                throw new StatusFastPathFallbackException("treeManifest-missing");
+            }
+            return StatusCanonicalJson.HashUtf8(manifestJson.ToString());
+        }
+
+        private static void WriteCanonicalValue(ref Utf8JsonReader reader, StringBuilder builder, int depth)
+        {
+            depth++;
+            if (depth > 100)
+            {
+                throw new StatusFastPathFallbackException("manifest-depth");
+            }
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.StartObject:
+                {
+                    builder.Append('{');
+                    HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+                    bool firstProperty = true;
+                    while (reader.Read())
+                    {
+                        if (reader.TokenType == JsonTokenType.EndObject)
+                        {
+                            builder.Append('}');
+                            return;
+                        }
+                        if (reader.TokenType != JsonTokenType.PropertyName)
+                        {
+                            throw new StatusFastPathFallbackException("manifest-property-expected");
+                        }
+                        string propertyName = reader.GetString();
+                        if (!seen.Add(propertyName))
+                        {
+                            throw new StatusFastPathFallbackException("manifest-duplicate-property");
+                        }
+                        if (!firstProperty)
+                        {
+                            builder.Append(',');
+                        }
+                        firstProperty = false;
+                        StatusCanonicalJson.WriteJsonString(builder, propertyName);
+                        builder.Append(':');
+                        if (!reader.Read())
+                        {
+                            throw new StatusFastPathFallbackException("manifest-truncated");
+                        }
+                        WriteCanonicalValue(ref reader, builder, depth);
+                    }
+                    throw new StatusFastPathFallbackException("manifest-truncated");
+                }
+                case JsonTokenType.StartArray:
+                {
+                    builder.Append('[');
+                    bool firstElement = true;
+                    while (reader.Read())
+                    {
+                        if (reader.TokenType == JsonTokenType.EndArray)
+                        {
+                            builder.Append(']');
+                            return;
+                        }
+                        if (!firstElement)
+                        {
+                            builder.Append(',');
+                        }
+                        firstElement = false;
+                        WriteCanonicalValue(ref reader, builder, depth);
+                    }
+                    throw new StatusFastPathFallbackException("manifest-truncated");
+                }
+                case JsonTokenType.String:
+                    StatusCanonicalJson.WriteJsonString(builder, reader.GetString());
+                    return;
+                case JsonTokenType.Number:
+                    AppendCanonicalInteger(ref reader, builder);
+                    return;
+                case JsonTokenType.True:
+                    builder.Append("true");
+                    return;
+                case JsonTokenType.False:
+                    builder.Append("false");
+                    return;
+                case JsonTokenType.Null:
+                    builder.Append("null");
+                    return;
+                default:
+                    throw new StatusFastPathFallbackException("manifest-token-" + reader.TokenType);
+            }
+        }
+
+        private static void AppendCanonicalInteger(ref Utf8JsonReader reader, StringBuilder builder)
+        {
+            if (reader.HasValueSequence)
+            {
+                throw new StatusFastPathFallbackException("manifest-number-sequence");
+            }
+            string raw = Encoding.UTF8.GetString(reader.ValueSpan.ToArray());
+            long ignored;
+            if (!CanonicalInteger.IsMatch(raw) ||
+                !long.TryParse(raw, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out ignored))
+            {
+                // 非规范整数（小数/指数/超 Int64）的 PS 往返序列化不保证逐字节等价 → 回退。
+                throw new StatusFastPathFallbackException("manifest-number-format");
+            }
+            builder.Append(raw);
         }
     }
 }

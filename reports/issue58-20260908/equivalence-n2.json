@@ -1,0 +1,16 @@
+{
+  "artifactType": "issue58.n2-equivalence",
+  "capturedAtUtc": "2026-09-08T09:14:57.3908801+00:00",
+  "topLevelEqualExcludingOperations": true,
+  "baselineOperationCount": 4467,
+  "candidateOperationCount": 4467,
+  "addedOperationIds": [],
+  "removedOperationIds": [],
+  "changedOperationIds": [
+    "20260902T105854Z-0e2c914c-c15d-420b-b6fe-9c308fa3be52"
+  ],
+  "identicalOperationCount": 4466,
+  "blockingRecordsEqual": true,
+  "equal": false,
+  "error": null
+}

@@ -1,0 +1,26 @@
+{
+  "artifactType": "issue58.n1-evidence-fingerprint",
+  "label": "after",
+  "capturedAtUtc": "2026-09-08T13:48:33.4304357+00:00",
+  "elapsedMs": 231197,
+  "evidence": {
+    "manifestSha256": "8f25b06fdf35e7b5cee423dd0a115b20930af92429af3a8ab6ebed81ed81effa",
+    "rootIdentity": [
+      "5d26df61",
+      "001900000009a9f2"
+    ],
+    "entryCount": 25863,
+    "operationCount": 4467,
+    "operationIdsSha256": "3a78029c3bca23940bfa8782932625b81784a6b7ad46880f059eee76950cdc53"
+  },
+  "policy": {
+    "path": "D:\\agents\\projects\\统一环境\\managed\\safe-tree-delete\\policy.json",
+    "sha256": "6acba1e816fd75572f25d26ee5a353a6583b1cc48969e566eec7191fe75c7fcc",
+    "length": 10752,
+    "identity": [
+      "5d26df61",
+      "006d000000013cba"
+    ],
+    "sddl": "O:S-1-5-21-3628056009-2446576831-3345793000-1005G:S-1-5-21-3628056009-2446576831-3345793000-513D:AI(A;ID;0x1301bf;;;S-1-5-21-2442881143-4209791813-338540719-2652166894)(A;ID;0x1301bf;;;S-1-5-21-3628056009-2446576831-3345793000-1006)(A;ID;0x1301bf;;;S-1-5-21-2027602104-2315828502-4151595253-2236078795)(A;ID;FA;;;BA)(A;ID;FA;;;SY)(A;ID;0x1301bf;;;AU)(A;ID;0x1200a9;;;BU)"
+  }
+}

@@ -8,8 +8,8 @@ Set-StrictMode -Version Latest
 $codexSafeTreeDeleteStatusScanSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteStatusScan.cs'
 # The host-safety native assembly cache usually preloads CodexSafeTreeDelete.FileIdentityReader,
 # so the batch above is skipped and the Status fast scanner needs its own compilation unit.
-# CodexSafeTreeDeleteStatusScan.cs is self-contained (BCL + local P/Invoke only) for exactly
-# this reason and follows the same assembly cache contract. Staleness is bound to the exact
+# CodexSafeTreeDeleteStatusScan.cs is self-contained (BCL + System.Management.Automation +
+# local P/Invoke only) for exactly this reason and follows the same assembly cache contract. Staleness is bound to the exact
 # .cs source content: the sidecar .sha256 records the source SHA-256 the cached DLL was
 # compiled from, so an mtime-only refresh can never mask a content change.
 if (-not ('CodexSafeTreeDelete.StatusScanCoordinator' -as [type])) {
@@ -2918,7 +2918,7 @@ function Get-CodexSafeTreeDeleteStatusJsonArrayCount {
 
 function Get-CodexSafeTreeDeleteStatusJsonParseThrottleLimit {
     $processorCount = [Math]::Max(1, [int][Environment]::ProcessorCount)
-    return [int][Math]::Min(4, [Math]::Max(1, $processorCount - 2))
+    return [int][Math]::Min(8, [Math]::Max(1, $processorCount - 2))
 }
 
 function Test-CodexSafeTreeDeleteStatusFastScanEnabled {
@@ -3166,7 +3166,8 @@ function Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 {
     param(
         [Parameter(Mandatory)][object]$PlanTreeManifest,
         [Parameter(Mandatory)][string]$PlanSha256,
-        [AllowNull()][object]$Cache
+        [AllowNull()][object]$Cache,
+        [AllowNull()][string]$PlanText
     )
 
     if ($PlanSha256 -notmatch '^[0-9a-f]{64}$') {
@@ -3175,7 +3176,19 @@ function Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 {
     if ($null -ne $Cache -and $Cache.ContainsKey($PlanSha256)) {
         return [string]$Cache[$PlanSha256]
     }
-    $sha = Get-CodexSafeTreeDeleteManifestSha256 -Manifest $PlanTreeManifest
+    $sha = $null
+    # issue #58：plan 文本流式重规范化 + SHA，与 ConvertFrom-Json→ConvertTo-Json 往返逐字节等价；
+    # 非规范内容（重复属性、非规范数字、深度溢出、缺失/歧义 treeManifest）回退 PS 计算。
+    if ($null -ne $PlanText -and $env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST -cne '0') {
+        try {
+            $sha = [CodexSafeTreeDelete.StatusPlanManifestSha256]::ComputeFromPlanText($PlanText)
+        } catch [CodexSafeTreeDelete.StatusFastPathFallbackException] {
+            $sha = $null
+        }
+    }
+    if ($null -eq $sha) {
+        $sha = Get-CodexSafeTreeDeleteManifestSha256 -Manifest $PlanTreeManifest
+    }
     if ($null -ne $Cache) {
         $Cache[$PlanSha256] = $sha
     }
@@ -3193,6 +3206,77 @@ function Get-CodexSafeTreeDeleteStatusLiveManifestSha256 {
     return $sha
 }
 
+function Get-CodexSafeTreeDeleteStatusTreeSnapshotFast {
+    # issue #58：Get-CodexHookCapabilityDirectoryTreeSnapshot 的 C# 单次遍历等价路径。
+    # 前置校验、root guard 获取与 PS 参考路径逐句一致；C# 侧任何无法证明逐字节等价的
+    # 情形抛 StatusFastPathFallbackException，由调用方回退到 PS 参考路径重放。
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [AllowEmptyCollection()][string[]]$AllowedExactPaths = @(),
+        [bool]$AllowHardLinks,
+        [bool]$AllowInternalDirectoryJunctions,
+        [AllowNull()][string]$InternalDirectoryJunctionTargetRoot,
+        [Parameter(Mandatory)][object]$MetricsState,
+        [Parameter(Mandatory)][string]$Name,
+        [switch]$AttachLiveManifestSha256
+    )
+
+    $fullPath = Assert-CodexHookCapabilityPath `
+        -Path $Path `
+        -CapabilityRoot $CapabilityRoot `
+        -AllowedExactPaths $AllowedExactPaths `
+        -Name $Name
+    $capabilityRootPath = Assert-CodexHookDPath -Value $CapabilityRoot -Name "$Name capability root"
+    $junctionTargetRoot = $null
+    if ($AllowInternalDirectoryJunctions) {
+        if ([string]::IsNullOrWhiteSpace($InternalDirectoryJunctionTargetRoot)) {
+            throw "$Name 允许内部 junction 时必须提供 target root。"
+        }
+        $junctionTargetRoot = Assert-CodexHookDPath `
+            -Value $InternalDirectoryJunctionTargetRoot `
+            -Name "$Name internal junction target root"
+        if (-not (Test-CodexHookPathWithin -Path $junctionTargetRoot -ParentPath $capabilityRootPath)) {
+            throw "$Name internal junction target root 超出 capability root。"
+        }
+    }
+    $rootGuard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
+        $capabilityRootPath,
+        $fullPath,
+        $false)
+    try {
+        $fast = [CodexSafeTreeDelete.StatusTreeSnapshotScanner]::Scan(
+            $fullPath,
+            $AllowHardLinks,
+            $AllowInternalDirectoryJunctions,
+            $junctionTargetRoot)
+        if ([string]$rootGuard.VolumeSerialNumber -cne [string]$fast.RootIdentityVolume -or
+            [string]$rootGuard.FileIndex -cne [string]$fast.RootIdentityIndex) {
+            throw [CodexSafeTreeDelete.StatusFastPathFallbackException]::new('root-identity-mismatch')
+        }
+        $entries = $fast.MaterializeEntries()
+        $snapshot = [pscustomobject][ordered]@{
+            schemaVersion = 2
+            rootIdentity = @([string]$fast.RootIdentityVolume, [string]$fast.RootIdentityIndex)
+            entries = $entries
+        }
+        # 与参考路径逐 entry 触发 MetricsObserver 等价的聚合簿记（observer 仅累计这三个计数器）。
+        $MetricsState.entriesScanned = [long]$MetricsState.entriesScanned + [long]$fast.Entries.Length
+        $MetricsState.logicalBytes = [long]$MetricsState.logicalBytes + [long]$fast.FileContentBytes
+        $MetricsState.bytesHashed =
+            [long]$MetricsState.bytesHashed + [long]$fast.FileContentBytes + [long]$fast.ReparseDataBytes
+        if ($AttachLiveManifestSha256) {
+            $snapshot | Add-Member `
+                -NotePropertyName statusLiveManifestSha256 `
+                -NotePropertyValue ([string]$fast.ManifestSha256) `
+                -Force
+        }
+        return $snapshot
+    } finally {
+        $rootGuard.Dispose()
+    }
+}
+
 function Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -3204,7 +3288,8 @@ function Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot {
         [scriptblock]$MetricsObserver,
         [Parameter(Mandatory)][string]$Name,
         [AllowNull()][object]$StatusTreeCache,
-        [AllowNull()][object]$MetricsState
+        [AllowNull()][object]$MetricsState,
+        [switch]$AttachLiveManifestSha256
     )
 
     $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -3241,15 +3326,36 @@ function Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot {
                 }
             }
         }
-        $snapshot = Get-CodexHookCapabilityDirectoryTreeSnapshot `
-            -Path $Path `
-            -CapabilityRoot $CapabilityRoot `
-            -AllowedExactPaths $AllowedExactPaths `
-            -AllowHardLinks:$AllowHardLinks `
-            -AllowInternalDirectoryJunctions:$AllowInternalDirectoryJunctions `
-            -InternalDirectoryJunctionTargetRoot $InternalDirectoryJunctionTargetRoot `
-            -MetricsObserver $MetricsObserver `
-            -Name $Name
+        $snapshot = $null
+        if ($env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST -cne '0' -and
+            $null -ne $MetricsState) {
+            try {
+                $snapshot = Get-CodexSafeTreeDeleteStatusTreeSnapshotFast `
+                    -Path $Path `
+                    -CapabilityRoot $CapabilityRoot `
+                    -AllowedExactPaths $AllowedExactPaths `
+                    -AllowHardLinks:$AllowHardLinks `
+                    -AllowInternalDirectoryJunctions:$AllowInternalDirectoryJunctions `
+                    -InternalDirectoryJunctionTargetRoot $InternalDirectoryJunctionTargetRoot `
+                    -MetricsState $MetricsState `
+                    -Name $Name `
+                    -AttachLiveManifestSha256:$AttachLiveManifestSha256
+            } catch [CodexSafeTreeDelete.StatusFastPathFallbackException] {
+                # 非规范/异常输入回退：PS 参考路径重放，含精确的校验错误消息。
+                $snapshot = $null
+            }
+        }
+        if ($null -eq $snapshot) {
+            $snapshot = Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                -Path $Path `
+                -CapabilityRoot $CapabilityRoot `
+                -AllowedExactPaths $AllowedExactPaths `
+                -AllowHardLinks:$AllowHardLinks `
+                -AllowInternalDirectoryJunctions:$AllowInternalDirectoryJunctions `
+                -InternalDirectoryJunctionTargetRoot $InternalDirectoryJunctionTargetRoot `
+                -MetricsObserver $MetricsObserver `
+                -Name $Name
+        }
         if ($null -ne $StatusTreeCache) {
             $StatusTreeCache[$key] = $snapshot
         }
@@ -3635,10 +3741,31 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                 $prefetchedPlan.PSObject.Properties.Name -contains 'approvedPlanValidation' -and
                 $prefetchedPlan.approvedPlanValidation -is [CodexSafeTreeDelete.StatusPlanValidationReceipt] -and
                 $null -eq $prefetchedPlan.document) {
-                $statusPlanValidationMatches =
-                    $prefetchedPlan.approvedPlanValidation.MatchesSnapshot(
-                        [string]$planSnapshot.sha256,
-                        [string]$planSnapshot.text)
+                # issue #58 N4：大 plan 文本跨 PS 方法边界会被绑定器整串复制
+                # （109M 字符 ≈12s/次）；prefetch 快照与 scanResult 同源（同对象、
+                # receipt 同一实例）时内容比对收进 C# 同实例完成，sha256 短串比对
+                # 维持快照到 receipt 的内容绑定。其余来源沿用全文比对。
+                $prefetchScanResult = if ($prefetchedPlan.PSObject.Properties.Name -contains 'scanResult') {
+                    $prefetchedPlan.scanResult
+                } else {
+                    $null
+                }
+                if ($null -ne $prefetchScanResult -and
+                    $prefetchScanResult -is [CodexSafeTreeDelete.StatusScanResult] -and
+                    [object]::ReferenceEquals($planSnapshot, $prefetchedPlan.snapshot) -and
+                    [object]::ReferenceEquals(
+                        $prefetchedPlan.approvedPlanValidation,
+                        $prefetchScanResult.ApprovedPlanValidation) -and
+                    $prefetchedPlan.approvedPlanValidation.MatchesPlanSha256(
+                        [string]$planSnapshot.sha256)) {
+                    $statusPlanValidationMatches =
+                        $prefetchScanResult.ValidateReceiptAgainstOwnSnapshot()
+                } else {
+                    $statusPlanValidationMatches =
+                        $prefetchedPlan.approvedPlanValidation.MatchesSnapshot(
+                            [string]$planSnapshot.sha256,
+                            [string]$planSnapshot.text)
+                }
             }
             if (-not $statusPlanValidationMatches) {
                 Assert-CodexHookStrictJsonText -JsonText $planSnapshot.text
@@ -3675,7 +3802,7 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                     -StatusPlanValidation $statusPlanValidation
                 $plan = $approvedPlan.document
                 if ($null -ne $statusPlanValidation -and
-                    $statusPlanValidation.MatchesSnapshot([string]$planSnapshot.sha256, [string]$planSnapshot.text) -and
+                    $statusPlanValidationMatches -and
                     $MetricsState.PSObject.Properties.Name -contains 'approvedPlanValidationReuseCount') {
                     $MetricsState.approvedPlanValidationReuseCount =
                         [long]$MetricsState.approvedPlanValidationReuseCount + 1L
@@ -3795,12 +3922,14 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                         -MetricsObserver $treeMetricsObserver `
                         -Name 'safe-delete status planned tree' `
                         -StatusTreeCache $StatusTreeCache `
-                        -MetricsState $MetricsState
+                        -MetricsState $MetricsState `
+                        -AttachLiveManifestSha256
                     if ((Get-CodexSafeTreeDeleteStatusLiveManifestSha256 -Snapshot $plannedTree) -cne
                         (Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 `
                             -PlanTreeManifest $plan.treeManifest `
                             -PlanSha256 ([string]$planSnapshot.sha256) `
-                            -Cache $PlanManifestShaCache)) {
+                            -Cache $PlanManifestShaCache `
+                            -PlanText ([string]$planSnapshot.text))) {
                         throw 'safe-delete Status planned tree manifest 漂移。'
                     }
                 } else {
@@ -3995,12 +4124,14 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                         -MetricsObserver $treeMetricsObserver `
                         -Name 'safe-delete Status terminal restored tree' `
                         -StatusTreeCache $StatusTreeCache `
-                        -MetricsState $MetricsState
+                        -MetricsState $MetricsState `
+                        -AttachLiveManifestSha256
                     if ((Get-CodexSafeTreeDeleteStatusLiveManifestSha256 -Snapshot $terminalTree) -cne
                         (Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 `
                             -PlanTreeManifest $plan.treeManifest `
                             -PlanSha256 ([string]$planSnapshot.sha256) `
-                            -Cache $PlanManifestShaCache)) {
+                            -Cache $PlanManifestShaCache `
+                            -PlanText ([string]$planSnapshot.text))) {
                         throw "$transactionStatus transaction 的 target tree 漂移。"
                     }
                     if ($transactionStatus -ceq 'restored') {
@@ -4078,12 +4209,14 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                             -MetricsObserver $treeMetricsObserver `
                             -Name 'safe-delete status recoverable tree' `
                             -StatusTreeCache $StatusTreeCache `
-                            -MetricsState $MetricsState
+                            -MetricsState $MetricsState `
+                            -AttachLiveManifestSha256
                         if ((Get-CodexSafeTreeDeleteStatusLiveManifestSha256 -Snapshot $quarantineTree) -cne
                             (Get-CodexSafeTreeDeleteStatusCachedPlanManifestSha256 `
                                 -PlanTreeManifest $plan.treeManifest `
                                 -PlanSha256 ([string]$planSnapshot.sha256) `
-                                -Cache $PlanManifestShaCache)) {
+                                -Cache $PlanManifestShaCache `
+                                -PlanText ([string]$planSnapshot.text))) {
                             throw 'safe-delete Status recoverable tree manifest 漂移。'
                         }
                         $lifecycle = 'recoverable'
@@ -4183,6 +4316,715 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
         }
     }
 
+function Resolve-CodexSafeTreeDeleteStatusReceiptFastOperation {
+    # issue #58 N3：receipt 门控的 fallback 快路径。fast scan 已对快照绑定的 plan 完成受管
+    # 批准校验（receipt 可证明），本函数只在该结论覆盖、且参考路径可达结果塌缩为唯一记录
+    # 的分支上直接组装记录；其余一切输入返回 $null，由调用方回退
+    # Resolve-CodexSafeTreeDeleteStatusOperation 参考路径重放。
+    # N5 L1：planned 分支的树扫描与 T1 复核读会向 MetricsState 计数，函数主体整体包在
+    # try/catch 内——任何未预期异常都把 7 个数值 metrics 字段回滚到入口快照、逐出本调用
+    # 新增的树缓存项，然后返回 $null 按单 op 降级（参考重放重新计数，metrics 与纯串行
+    # 逐字段一致；不再拖垮整个 worker 触发整批串行重放）。PlanManifestShaCache 的写入是
+    # 确定性值，参考重放命中同键同值，保留不回滚。
+    param(
+        [Parameter(Mandatory)][object]$RunItem,
+        [Parameter(Mandatory)][string]$CurrentPolicySha256,
+        [Parameter(Mandatory)][string]$FullEvidenceRoot,
+        [Parameter(Mandatory)][object]$MetricsState,
+        [Parameter(Mandatory)][scriptblock]$TreeMetricsObserver,
+        [Parameter(Mandatory)][object]$StatusTreeCache,
+        [Parameter(Mandatory)][object]$LoadedPolicy,
+        [AllowNull()][object]$StatusPlanPrefetch,
+        [AllowNull()][object]$PlanManifestShaCache
+    )
+
+    $metricsOnEntry = @{
+        entriesScanned = [long]$MetricsState.entriesScanned
+        logicalBytes = [long]$MetricsState.logicalBytes
+        bytesHashed = [long]$MetricsState.bytesHashed
+        segmentPlanTransactionReadMs = [long]$MetricsState.segmentPlanTransactionReadMs
+        segmentTerminalArchiveAuthMs = [long]$MetricsState.segmentTerminalArchiveAuthMs
+        segmentTreeMaterializationMs = [long]$MetricsState.segmentTreeMaterializationMs
+        segmentSha256Ms = [long]$MetricsState.segmentSha256Ms
+    }
+    $statusTreeCacheKeysOnEntry = @($StatusTreeCache.Keys)
+    try {
+        if ($env:CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST -ceq '0') { return $null }
+        if (-not $RunItem.PSIsContainer -or
+            ($RunItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            return $null
+        }
+        if ($null -eq $StatusPlanPrefetch) { return $null }
+        try {
+            $runDirectory = Assert-CodexHookDPath -Value $RunItem.FullName -Name 'safe-delete status run'
+            [void](Assert-CodexHookCapabilityPath `
+                -Path $runDirectory `
+                -CapabilityRoot $FullEvidenceRoot `
+                -AllowedExactPaths @($runDirectory) `
+                -Name 'safe-delete status run')
+        } catch { return $null }
+        if ([IO.File]::Exists((Join-Path $runDirectory 'terminal-archive.json'))) { return $null }
+        $planPath = Join-Path $runDirectory 'plan.json'
+        if (-not [IO.File]::Exists($planPath)) { return $null }
+        if (-not $StatusPlanPrefetch.ContainsKey($runDirectory)) { return $null }
+        $prefetchedPlan = $StatusPlanPrefetch[$runDirectory]
+        if ($null -eq $prefetchedPlan -or
+            $null -eq $prefetchedPlan.snapshot -or
+            $prefetchedPlan.PSObject.Properties.Name -notcontains 'approvedPlanValidation' -or
+            $prefetchedPlan.approvedPlanValidation -isnot [CodexSafeTreeDelete.StatusPlanValidationReceipt] -or
+            $null -ne $prefetchedPlan.document) {
+            return $null
+        }
+        $planSnapshot = $prefetchedPlan.snapshot
+        $receipt = $prefetchedPlan.approvedPlanValidation
+        try {
+            $fullPlanPath = Assert-CodexHookDPath -Value $planPath -Name 'safe-delete plan path'
+        } catch { return $null }
+        # issue #58 N4：大 plan 文本不作为 .NET 方法实参跨边界（PS 绑定器整串复制，
+        # 实测 109M 字符单参 ≈6-12s）。prefetch 快照与 receipt 同源（同一
+        # StatusScanResult）时，内容比对收进 C# 同实例完成；sha256 短串比对把
+        # pscustomobject 快照绑定到 receipt 校验过的内容。
+        $prefetchScanResult = if ($prefetchedPlan.PSObject.Properties.Name -contains 'scanResult') {
+            $prefetchedPlan.scanResult
+        } else {
+            $null
+        }
+        if ($null -eq $prefetchScanResult -or
+            $prefetchScanResult -isnot [CodexSafeTreeDelete.StatusScanResult] -or
+            -not [object]::ReferenceEquals($receipt, $prefetchScanResult.ApprovedPlanValidation) -or
+            -not $receipt.MatchesPlanSha256([string]$planSnapshot.sha256) -or
+            -not $receipt.MatchesPlanPath($fullPlanPath) -or
+            -not $prefetchScanResult.ValidateReceiptAgainstOwnSnapshot()) {
+            return $null
+        }
+        $planTargetPath = if ($prefetchedPlan.PSObject.Properties.Name -contains 'receiptPlanTargetPath') {
+            $prefetchedPlan.receiptPlanTargetPath
+        } else {
+            $null
+        }
+        $planCapabilityRoot = if ($prefetchedPlan.PSObject.Properties.Name -contains 'receiptPlanCapabilityRoot') {
+            $prefetchedPlan.receiptPlanCapabilityRoot
+        } else {
+            $null
+        }
+        $planPolicySha256 = if ($prefetchedPlan.PSObject.Properties.Name -contains 'receiptPlanPolicySha256') {
+            $prefetchedPlan.receiptPlanPolicySha256
+        } else {
+            $null
+        }
+        $planQuarantinePath = if ($prefetchedPlan.PSObject.Properties.Name -contains 'receiptPlanQuarantinePath') {
+            $prefetchedPlan.receiptPlanQuarantinePath
+        } else {
+            $null
+        }
+        if ([string]::IsNullOrEmpty($planTargetPath) -or
+            [string]::IsNullOrEmpty($planCapabilityRoot) -or
+            [string]::IsNullOrEmpty($planPolicySha256) -or
+            [string]::IsNullOrEmpty($planQuarantinePath)) {
+            return $null
+        }
+        $policyEntry = @($LoadedPolicy.entries | Where-Object {
+            Test-CodexSafeTreeDeletePathEqual `
+                -Left ([string]$_.capabilityRoot) `
+                -Right ([string]$planCapabilityRoot)
+        })
+        if ($policyEntry.Count -ne 1) { return $null }
+
+        $policyCompatible = [string]$planPolicySha256 -ceq $CurrentPolicySha256
+        $targetPath = [string]$planTargetPath
+        $quarantinePath = [string]$planQuarantinePath
+        $targetState = Get-CodexSafeTreeDeleteNamespaceState -Path $targetPath
+        $quarantineState = Get-CodexSafeTreeDeleteNamespaceState -Path $quarantinePath
+        $targetPresent = [bool]$targetState.present
+        $quarantinePresent = [bool]$quarantineState.present
+        $targetEntryType = [string]$targetState.entryType
+        $quarantineEntryType = [string]$quarantineState.entryType
+
+        $complete = $true
+        $errors = [Collections.Generic.List[string]]::new()
+        $lifecycle = 'manual-review'
+        $safeActions = @('manual-review')
+        $schemaCompatible = $false
+        $journalStatus = 'not-evaluated'
+        $transactionSchemaVersion = $null
+        $transactionStatus = $null
+        $transactionUpdatedAtUtc = $null
+
+        if ($targetEntryType -cin @('file', 'reparse-point', 'other') -or
+            $quarantineEntryType -cin @('file', 'reparse-point', 'other')) {
+            # 参考路径命名空间类型 throw 分支：journal/schema 保持初值。
+            $complete = $false
+            $errors.Add('safe-delete Status target/quarantine namespace entry 不是普通目录。')
+        } elseif (-not [IO.File]::Exists((Join-Path $runDirectory 'transaction.json'))) {
+            # planned 分支：树扫描与 manifest 比对沿用参考 wrapper（缓存与 metrics 逐句一致）。
+            $schemaCompatible = $true
+            $journalStatus = 'not-started'
+            $lifecycle = if ($targetEntryType -ceq 'directory' -and
+                $quarantineEntryType -ceq 'absent') { 'planned' } else { 'inconsistent' }
+            $safeActions = if ($lifecycle -ceq 'planned') { @('apply') } else { @('manual-review') }
+            if ($lifecycle -ceq 'planned') {
+                # N4：cache key 取 receipt 已绑定的 scanResult plan SHA（属性读取免封送）。
+                $planShaKey = [string]$prefetchScanResult.PlanSha256
+                $planManifestSha = $null
+                if ($null -ne $PlanManifestShaCache -and $PlanManifestShaCache.ContainsKey($planShaKey)) {
+                    $planManifestSha = [string]$PlanManifestShaCache[$planShaKey]
+                } else {
+                    if ($prefetchedPlan.PSObject.Properties.Name -contains 'planManifestSha256' -and
+                        -not [string]::IsNullOrEmpty($prefetchedPlan.planManifestSha256)) {
+                        $planManifestSha = [string]$prefetchedPlan.planManifestSha256
+                    }
+                    if ($null -eq $planManifestSha) {
+                        # C# 侧对同一快照的流式 SHA 已确定性失败；在此重试只会把大 plan
+                        # 文本再跨一次方法边界（整串复制）。回退参考路径自行解析并计算。
+                        return $null
+                    }
+                    if ($null -ne $PlanManifestShaCache) {
+                        $PlanManifestShaCache[$planShaKey] = $planManifestSha
+                    }
+                }
+                $plannedTree = Get-CodexSafeTreeDeleteStatusCachedTreeSnapshot `
+                    -Path $targetPath `
+                    -CapabilityRoot ([string]$planCapabilityRoot) `
+                    -AllowedExactPaths @($targetPath) `
+                    -AllowHardLinks:([bool]$policyEntry[0].allowHardLinks) `
+                    -AllowInternalDirectoryJunctions:([bool]$policyEntry[0].allowInternalDirectoryJunctions) `
+                    -InternalDirectoryJunctionTargetRoot $targetPath `
+                    -MetricsObserver $TreeMetricsObserver `
+                    -Name 'safe-delete status planned tree' `
+                    -StatusTreeCache $StatusTreeCache `
+                    -MetricsState $MetricsState `
+                    -AttachLiveManifestSha256
+                if ((Get-CodexSafeTreeDeleteStatusLiveManifestSha256 -Snapshot $plannedTree) -cne
+                    $planManifestSha) {
+                    # 参考路径此处 throw 越过 policy 漂移检查，记录只带 manifest 漂移错误。
+                    $complete = $false
+                    $lifecycle = 'manual-review'
+                    $safeActions = @('manual-review')
+                    $errors.Add('safe-delete Status planned tree manifest 漂移。')
+                }
+            } else {
+                $complete = $false
+                $errors.Add('planned operation 的 target/quarantine namespace 不一致。')
+            }
+            if ($complete -and -not $policyCompatible) {
+                # 参考路径 :4214 的 policy 漂移覆盖（仅 planned 干净分支可达：inconsistent 与
+                # manifest 漂移已置 complete=$false，参考语义下漂移错误仍会追加）。
+                $complete = $false
+                $lifecycle = 'manual-review'
+                $safeActions = @('manual-review')
+                $errors.Add('plan policy SHA 已漂移；当前严格写路径不可执行该计划。')
+            } elseif (-not $complete -and -not $policyCompatible -and
+                $errors.Count -eq 1 -and
+                $errors[0] -ceq 'planned operation 的 target/quarantine namespace 不一致。') {
+                $lifecycle = 'manual-review'
+                $safeActions = @('manual-review')
+                $errors.Add('plan policy SHA 已漂移；当前严格写路径不可执行该计划。')
+            }
+        } else {
+            # T1 分支：transaction v2 + plan policy SHA 漂移的观测结果塌缩为唯一记录。
+            $journalStatus = 'invalid'
+            $transactionPath = Join-Path $runDirectory 'transaction.json'
+            $transactionSnapshot = $null
+            try {
+                $transactionSnapshot = Read-CodexHookSafeUtf8FileSnapshot `
+                    -Path $transactionPath `
+                    -Name 'safe-delete status transaction' `
+                    -AllowedExactPaths @($transactionPath)
+                Assert-CodexHookStrictJsonText -JsonText $transactionSnapshot.text
+                $transaction = $transactionSnapshot.text |
+                    ConvertFrom-Json -Depth 64 -DateKind String -ErrorAction Stop
+                $transactionSchemaVersion = [long]$transaction.schemaVersion
+            } catch {
+                # 参考路径在 transaction 读取/严格校验/解析/schemaVersion 提取上的 throw 记录。
+                if ($null -ne $transactionSnapshot) {
+                    $MetricsState.bytesHashed =
+                        [long]$MetricsState.bytesHashed + [long]$transactionSnapshot.bytes.Length
+                }
+                $complete = $false
+                $transactionSchemaVersion = $null
+                $errors.Add($_.Exception.Message)
+                $transaction = $null
+            }
+            if ($null -ne $transaction) {
+                if ($transaction.PSObject.Properties['status'] -and $transaction.status -is [string]) {
+                    $transactionStatus = [string]$transaction.status
+                }
+                if ($transaction.PSObject.Properties['updatedAtUtc'] -and
+                    $transaction.updatedAtUtc -is [string]) {
+                    $transactionUpdatedAtUtc = [string]$transaction.updatedAtUtc
+                }
+                $committed = $false
+                if ([long]$transactionSchemaVersion -eq 2L -and
+                    [CodexSafeTreeDelete.StatusScanCoordinator]::TestStatusTransactionV2StrictShape(
+                        [string]$transactionSnapshot.text)) {
+                    try {
+                        $transactionPlanPath = Assert-CodexHookDPath `
+                            -Value ([string]$transaction.planPath) `
+                            -Name 'safe-delete plan path'
+                    } catch { $transactionPlanPath = $null }
+                    if ($null -ne $transactionPlanPath -and
+                        [IO.Path]::GetFileName($transactionPlanPath) -ceq 'plan.json' -and
+                        (Test-CodexSafeTreeDeletePathEqual -Left $transactionPlanPath -Right $fullPlanPath) -and
+                        [string]$transaction.planSha256 -ceq [string]$planSnapshot.sha256) {
+                        try {
+                            [void](Assert-CodexHookCapabilityPath `
+                                -Path $fullPlanPath `
+                                -CapabilityRoot $FullEvidenceRoot `
+                                -AllowedExactPaths @($fullPlanPath) `
+                                -Name 'safe-delete approved plan')
+                            [void](Assert-CodexHookCapabilityPath `
+                                -Path $transactionPath `
+                                -CapabilityRoot $FullEvidenceRoot `
+                                -AllowedExactPaths @($transactionPath) `
+                                -Name 'safe-delete approved transaction')
+                            # 参考路径在 Read-ApprovedTransaction 内实时重读 plan/transaction，
+                            # 并在内层 Read-ApprovedPlan 重新加载 policy（三项均经 observer 计数）；
+                            # 快照漂移时参考结果不再是漂移错误，回退由其自重放。
+                            $planVerify = Read-CodexHookSafeUtf8FileSnapshot `
+                                -Path $fullPlanPath `
+                                -Name 'safe-delete approved plan' `
+                                -AllowedExactPaths @($fullPlanPath)
+                            $transactionVerify = Read-CodexHookSafeUtf8FileSnapshot `
+                                -Path $transactionPath `
+                                -Name 'safe-delete approved transaction' `
+                                -AllowedExactPaths @($transactionPath)
+                            $policyVerify = Read-CodexHookSafeUtf8FileSnapshot `
+                                -Path ([string]$LoadedPolicy.path) `
+                                -Name 'safe-delete policy' `
+                                -AllowedExactPaths @([string]$LoadedPolicy.path)
+                            if ([string]$planVerify.sha256 -ceq [string]$planSnapshot.sha256 -and
+                                [string]$transactionVerify.sha256 -ceq [string]$transactionSnapshot.sha256 -and
+                                [string]$policyVerify.sha256 -ceq $CurrentPolicySha256 -and
+                                -not $policyCompatible) {
+                                $committed = $true
+                                $MetricsState.bytesHashed = [long]$MetricsState.bytesHashed +
+                                    (2 * [long]$transactionSnapshot.bytes.Length) +
+                                    [long]$planVerify.bytes.Length +
+                                    [long]$policyVerify.bytes.Length
+                                $complete = $false
+                                $errors.Add('safe-delete policy 自计划生成后已漂移。')
+                            }
+                        } catch { $committed = $false }
+                    }
+                }
+                if (-not $committed) { return $null }
+            }
+        }
+
+        $deletionOutcome = New-CodexSafeTreeDeleteOutcome `
+            -NamespaceAbsent (-not [bool]$targetPresent) `
+            -LogicalCompletion $false
+        $operation = [pscustomobject][ordered]@{
+            operationId = [string]$RunItem.Name
+            runDirectory = [string]$RunItem.FullName
+            lifecycle = $lifecycle
+            safeActions = @($safeActions)
+            targetPath = $targetPath
+            quarantinePath = $quarantinePath
+            targetPresent = $targetPresent
+            quarantinePresent = $quarantinePresent
+            targetEntryType = $targetEntryType
+            quarantineEntryType = $quarantineEntryType
+            namespaceAbsent = $deletionOutcome.namespaceAbsent
+            logicalCompletion = $deletionOutcome.logicalCompletion
+            physicalReclaimStatus = $deletionOutcome.physicalReclaimStatus
+            physicalReclaimReason = $deletionOutcome.physicalReclaimReason
+            deletionOutcome = $deletionOutcome
+            policyCompatible = $policyCompatible
+            schemaCompatible = $schemaCompatible
+            candidatePolicyCompatible = $null
+            planSchemaVersion = 1L
+            transactionSchemaVersion = $transactionSchemaVersion
+            transactionStatus = $transactionStatus
+            transactionUpdatedAtUtc = $transactionUpdatedAtUtc
+            journalStatus = $journalStatus
+            pendingFiles = @()
+            uncertainFiles = @()
+            errors = @($errors)
+        }
+        return [pscustomobject][ordered]@{
+            complete = $complete
+            operation = $operation
+        }
+    } catch {
+        # L1 降级：本 op 回退参考路径重放。7 个数值字段回滚到入口快照，重放重新计数；
+        # 本调用新增的树缓存项一并逐出（缓存项内容完整，但其扫描计数已回滚，若让重放
+        # 命中缓存会少计一遍树扫描）。
+        $MetricsState.entriesScanned = [long]$metricsOnEntry.entriesScanned
+        $MetricsState.logicalBytes = [long]$metricsOnEntry.logicalBytes
+        $MetricsState.bytesHashed = [long]$metricsOnEntry.bytesHashed
+        $MetricsState.segmentPlanTransactionReadMs = [long]$metricsOnEntry.segmentPlanTransactionReadMs
+        $MetricsState.segmentTerminalArchiveAuthMs = [long]$metricsOnEntry.segmentTerminalArchiveAuthMs
+        $MetricsState.segmentTreeMaterializationMs = [long]$metricsOnEntry.segmentTreeMaterializationMs
+        $MetricsState.segmentSha256Ms = [long]$metricsOnEntry.segmentSha256Ms
+        foreach ($cacheKey in @($StatusTreeCache.Keys)) {
+            if ($cacheKey -cnotin $statusTreeCacheKeysOnEntry) {
+                [void]$StatusTreeCache.Remove($cacheKey)
+            }
+        }
+        return $null
+    }
+}
+
+function Invoke-CodexSafeTreeDeleteStatusParallelFallback {
+    # issue #58：fallback 逐 op resolve 相互独立，分区到 runspace pool。分区先按"扫描树"
+    # 分组：共享同一 target/quarantine 树的 op 进同一组（lease 打开互不兼容，跨 worker 并发
+    # 扫同一棵树会 ERROR_SHARING_VIOLATION），组按首现顺序 round-robin 到 worker（确定性）。
+    # 每个 worker 持有独立的 metricsState/tree 缓存/manifest SHA 缓存（无共享可变状态），
+    # LoadedPolicy/候选 policy/prefetch 快照与 receipt 只读共享；worker 自身读 policy 不计
+    # observer（主 runspace 的 policy 读取已计数）。任何基础设施失败由调用方整体回退串行。
+    param(
+        [Parameter(Mandatory)][object]$Inputs,
+        [Parameter(Mandatory)][string]$PolicyPath,
+        [Parameter(Mandatory)][string]$CurrentPolicySha256,
+        [Parameter(Mandatory)][string]$FullEvidenceRoot,
+        [Parameter(Mandatory)][bool]$CandidatePolicyRequested,
+        [AllowNull()][object]$CandidatePolicy,
+        [Parameter(Mandatory)][object]$LoadedPolicy,
+        [Parameter(Mandatory)][object]$PrefetchCache,
+        [Parameter(Mandatory)][object]$MetricsState,
+        [Parameter(Mandatory)][int]$DegreeOfParallelism
+    )
+
+    # 分组按"扫描树"冲突并查：路由路径（target/quarantine 去尾 \）相等或互为目录前缀的
+    # op 必同组——quarantine 与子目录 target 常嵌套在父 target 树内（实测确认），精确匹配
+    # 分组会导致跨 worker 并发扫嵌套树触发 ERROR_SHARING_VIOLATION。组按首现顺序确定性
+    # 合并后 round-robin 到 worker；无路由键的 op 各自成组。
+    $groups = [Collections.Generic.List[object]]::new()
+    foreach ($input in $Inputs) {
+        $opPaths = [Collections.Generic.List[string]]::new()
+        foreach ($routePath in @($input.RouteTargetPath, $input.RouteQuarantinePath)) {
+            if (-not [string]::IsNullOrEmpty($routePath)) {
+                $opPaths.Add([string]$routePath.TrimEnd('\'))
+            }
+        }
+        $hit = $null
+        if ($opPaths.Count -gt 0) {
+            foreach ($group in $groups) {
+                if ([bool]$group.merged) { continue }
+                $conflict = $false
+                foreach ($existing in $group.paths) {
+                    foreach ($candidate in $opPaths) {
+                        if ([string]::Equals($existing, $candidate, [StringComparison]::OrdinalIgnoreCase) -or
+                            $existing.StartsWith("$candidate\", [StringComparison]::OrdinalIgnoreCase) -or
+                            $candidate.StartsWith("$existing\", [StringComparison]::OrdinalIgnoreCase)) {
+                            $conflict = $true
+                            break
+                        }
+                    }
+                    if ($conflict) { break }
+                }
+                if ($conflict) {
+                    if ($null -eq $hit) {
+                        $hit = $group
+                    } else {
+                        foreach ($mergedPath in $group.paths) {
+                            if (-not $hit.paths.Contains($mergedPath)) { $hit.paths.Add($mergedPath) }
+                        }
+                        foreach ($mergedItem in $group.items) { $hit.items.Add($mergedItem) }
+                        $group.merged = $true
+                    }
+                }
+            }
+        }
+        if ($null -eq $hit) {
+            $hit = [pscustomobject]@{
+                paths = [Collections.Generic.List[string]]::new()
+                items = [Collections.Generic.List[object]]::new()
+                merged = $false
+            }
+            $groups.Add($hit)
+        }
+        foreach ($opPath in $opPaths) {
+            if (-not $hit.paths.Contains($opPath)) { $hit.paths.Add($opPath) }
+        }
+        $hit.items.Add($input)
+    }
+    $activeGroups = @($groups | Where-Object { -not [bool]$_.merged })
+    $workerCount = [Math]::Min($DegreeOfParallelism, [int]$activeGroups.Count)
+    $chunks = @()
+    for ($workerIndex = 0; $workerIndex -lt $workerCount; $workerIndex++) {
+        $chunks += ,([Collections.Generic.List[object]]::new())
+    }
+    for ($groupIndex = 0; $groupIndex -lt $activeGroups.Count; $groupIndex++) {
+        foreach ($input in $activeGroups[$groupIndex].items) {
+            $chunks[$groupIndex % $workerCount].Add($input)
+        }
+    }
+    # worker runspace 有独立 session state，但 native 装配与 Add-Type 类型进程级共享。
+    # 预置主 runspace 的 loader registry，避免 worker 走 compat registry（loadedVariant=$null）
+    # 后在第二次 dot-source 时触发“未知转移”拒绝；registry 缺位则失败，由调用方回退串行。
+    $nativeRegistry = $global:CodexHostSafetyNativeLoaderRegistry
+    if ($null -eq $nativeRegistry -or $null -eq $nativeRegistry.assembly) {
+        throw 'parallel fallback 要求主 runspace 持有真实 native loader registry。'
+    }
+    $context = [pscustomobject][ordered]@{
+        LibDirectory = $PSScriptRoot
+        PolicyPath = $PolicyPath
+        CurrentPolicySha256 = $CurrentPolicySha256
+        FullEvidenceRoot = $FullEvidenceRoot
+        CandidatePolicyRequested = $CandidatePolicyRequested
+        CandidatePolicy = $CandidatePolicy
+        LoadedPolicy = $LoadedPolicy
+        PrefetchCache = $PrefetchCache
+        NativeRegistryLoadedVariant = [string]$nativeRegistry.loadedVariant
+        NativeRegistryCompileCompositeSha256 = [string]$nativeRegistry.compileCompositeSha256
+        NativeRegistryAssemblySha256 = [string]$nativeRegistry.assemblySha256
+        NativeRegistryAssembly = $nativeRegistry.assembly
+        NativeRegistryRequestedAlgorithm = [string]$nativeRegistry.requestedAlgorithm
+    }
+    $workerScript = @'
+param($chunk, $context)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$global:CodexHostSafetyNativeLoaderRegistry = [pscustomobject]@{
+    loadedVariant = $context.NativeRegistryLoadedVariant
+    compileCompositeSha256 = $context.NativeRegistryCompileCompositeSha256
+    assemblySha256 = $context.NativeRegistryAssemblySha256
+    assembly = $context.NativeRegistryAssembly
+    requestedAlgorithm = $context.NativeRegistryRequestedAlgorithm
+}
+. (Join-Path $context.LibDirectory 'CodexHostSafety.ps1')
+. (Join-Path $context.LibDirectory 'CodexSafeTreeDelete.ps1')
+$metricsState = New-CodexSafeTreeDeleteMetricsState -Phase 'status'
+Add-Member -InputObject $metricsState -NotePropertyMembers @{
+    segmentDirectoryEnumerationMs = 0L
+    segmentPlanTransactionReadMs = 0L
+    segmentTerminalArchiveAuthMs = 0L
+    segmentTreeMaterializationMs = 0L
+    segmentSha256Ms = 0L
+    segmentActiveResolveMs = 0L
+    segmentArchivedResolveMs = 0L
+    segmentPrefetchMs = 0L
+    segmentFastScanMs = 0L
+    approvedPlanValidationReuseCount = 0L
+} -Force
+$treeMetricsObserver = New-CodexSafeTreeDeleteMetricsObserver -State $metricsState
+$statusTreeCache = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
+$planManifestShaCache = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+$workerPolicy = Read-CodexSafeTreeDeletePolicy -PolicyPath $context.PolicyPath
+if ([string]$workerPolicy.sha256 -cne $context.CurrentPolicySha256) {
+    throw 'parallel fallback worker policy SHA-256 与主 runspace 不一致。'
+}
+$results = [Collections.Generic.List[object]]::new()
+foreach ($item in $chunk) {
+    $runItem = [pscustomobject][ordered]@{
+        Name = [string]$item.Name
+        FullName = [string]$item.FullName
+        PSIsContainer = [bool]$item.PSIsContainer
+        Attributes = [IO.FileAttributes]([long]$item.Attributes)
+    }
+    $activeWatch = [Diagnostics.Stopwatch]::StartNew()
+    $operationStatus = $null
+    $receiptFast = $false
+    if (-not $context.CandidatePolicyRequested) {
+        # N3：receipt 门控快路径；$null = 回退参考路径重放（无副作用，永远安全）。
+        $operationStatus = Resolve-CodexSafeTreeDeleteStatusReceiptFastOperation `
+            -RunItem $runItem `
+            -CurrentPolicySha256 $context.CurrentPolicySha256 `
+            -FullEvidenceRoot $context.FullEvidenceRoot `
+            -MetricsState $metricsState `
+            -TreeMetricsObserver $treeMetricsObserver `
+            -StatusTreeCache $statusTreeCache `
+            -LoadedPolicy $context.LoadedPolicy `
+            -StatusPlanPrefetch $context.PrefetchCache `
+            -PlanManifestShaCache $planManifestShaCache
+        $receiptFast = $null -ne $operationStatus
+    }
+    if ($null -eq $operationStatus) {
+        $operationStatus = Resolve-CodexSafeTreeDeleteStatusOperation `
+            -RunItem $runItem `
+            -PolicyPath $context.PolicyPath `
+            -CurrentPolicySha256 $context.CurrentPolicySha256 `
+            -FullEvidenceRoot $context.FullEvidenceRoot `
+            -CandidatePolicyRequested $context.CandidatePolicyRequested `
+            -CandidatePolicy $context.CandidatePolicy `
+            -MetricsState $metricsState `
+            -TreeMetricsObserver $treeMetricsObserver `
+            -StatusTreeCache $statusTreeCache `
+            -LoadedPolicy $context.LoadedPolicy `
+            -StatusPlanPrefetch $context.PrefetchCache `
+            -PlanManifestShaCache $planManifestShaCache
+    }
+    $activeWatch.Stop()
+    $results.Add([pscustomobject][ordered]@{
+        index = [int]$item.Index
+        archived = [bool]$item.IsArchived
+        elapsedMs = [long]$activeWatch.ElapsedMilliseconds
+        complete = [bool]$operationStatus.complete
+        operation = $operationStatus.operation
+        receiptFast = $receiptFast
+    })
+}
+[pscustomobject][ordered]@{
+    results = $results.ToArray()
+    metrics = [pscustomobject][ordered]@{
+        entriesScanned = [long]$metricsState.entriesScanned
+        logicalBytes = [long]$metricsState.logicalBytes
+        bytesHashed = [long]$metricsState.bytesHashed
+        segmentPlanTransactionReadMs = [long]$metricsState.segmentPlanTransactionReadMs
+        segmentTerminalArchiveAuthMs = [long]$metricsState.segmentTerminalArchiveAuthMs
+        segmentTreeMaterializationMs = [long]$metricsState.segmentTreeMaterializationMs
+        segmentSha256Ms = [long]$metricsState.segmentSha256Ms
+        approvedPlanValidationReuseCount = [long]$metricsState.approvedPlanValidationReuseCount
+        statusTreeCacheEntries = [long]$statusTreeCache.Count
+        planManifestShaCacheEntries = [long]$planManifestShaCache.Count
+    }
+}
+'@
+    $pool = [runspacefactory]::CreateRunspacePool(1, $workerCount)
+    $pool.Open()
+    $jobs = [Collections.Generic.List[object]]::new()
+    try {
+        foreach ($chunk in $chunks) {
+            $worker = [powershell]::Create()
+            $worker.RunspacePool = $pool
+            [void]$worker.AddScript($workerScript).AddArgument($chunk).AddArgument($context)
+            $jobs.Add([pscustomobject][ordered]@{
+                PowerShell = $worker
+                Async = $worker.BeginInvoke()
+            })
+        }
+        $resultByIndex = [Collections.Generic.Dictionary[int, object]]::new()
+        $resolved = 0L
+        $debugOpTimings = $null
+        if ($env:CODEX_SAFE_TREE_DELETE_STATUS_DEBUG_OP_TIMING -ceq '1') {
+            $debugOpTimings = [Collections.Generic.List[string]]::new()
+        }
+        # N5 M1：worker 全部成功前只合入本地缓冲，不写共享 MetricsState。任一 worker 失败
+        # （EndInvoke/错误流/形状/计数校验 throw）时共享 metrics 保持零污染，调用方 catch
+        # 归零计数后的串行重放不会与已合入的 worker 簿记双计。
+        $mergedReceiptFastResolved = 0L
+        $mergedActiveResolveMs = 0L
+        $mergedArchivedResolveMs = 0L
+        $mergedEntriesScanned = 0L
+        $mergedLogicalBytes = 0L
+        $mergedBytesHashed = 0L
+        $mergedPlanTransactionReadMs = 0L
+        $mergedTerminalArchiveAuthMs = 0L
+        $mergedTreeMaterializationMs = 0L
+        $mergedSha256Ms = 0L
+        $mergedApprovedPlanValidationReuseCount = 0L
+        $mergedStatusTreeCacheEntries = 0L
+        $mergedPlanManifestShaCacheEntries = 0L
+        foreach ($job in $jobs) {
+            $output = $null
+            try {
+                $output = $job.PowerShell.EndInvoke($job.Async)
+            } catch {
+                throw "parallel fallback worker 失败：$($_.Exception.Message)"
+            }
+            if ($job.PowerShell.Streams.Error.Count -gt 0) {
+                throw "parallel fallback worker 报错：$($job.PowerShell.Streams.Error[0].Exception.Message)"
+            }
+            if ($null -eq $output -or $output.Count -ne 1) {
+                throw 'parallel fallback worker 返回形状非法。'
+            }
+            $workerResult = $output[0]
+            foreach ($item in @($workerResult.results)) {
+                $resultByIndex[[int]$item.index] = [pscustomobject][ordered]@{
+                    complete = [bool]$item.complete
+                    operation = $item.operation
+                }
+                $resolved++
+                if ([bool]$item.receiptFast) {
+                    $mergedReceiptFastResolved = [long]$mergedReceiptFastResolved + 1L
+                }
+                if ($null -ne $debugOpTimings) {
+                    [void]$debugOpTimings.Add(
+                        "$([int]$item.index)|$([bool]$item.archived)|$([long]$item.elapsedMs)")
+                }
+                if ([bool]$item.archived) {
+                    $mergedArchivedResolveMs =
+                        [long]$mergedArchivedResolveMs + [long]$item.elapsedMs
+                } else {
+                    $mergedActiveResolveMs =
+                        [long]$mergedActiveResolveMs + [long]$item.elapsedMs
+                }
+            }
+            $workerMetrics = $workerResult.metrics
+            $mergedEntriesScanned =
+                [long]$mergedEntriesScanned + [long]$workerMetrics.entriesScanned
+            $mergedLogicalBytes =
+                [long]$mergedLogicalBytes + [long]$workerMetrics.logicalBytes
+            $mergedBytesHashed =
+                [long]$mergedBytesHashed + [long]$workerMetrics.bytesHashed
+            $mergedPlanTransactionReadMs =
+                [long]$mergedPlanTransactionReadMs + [long]$workerMetrics.segmentPlanTransactionReadMs
+            $mergedTerminalArchiveAuthMs =
+                [long]$mergedTerminalArchiveAuthMs + [long]$workerMetrics.segmentTerminalArchiveAuthMs
+            $mergedTreeMaterializationMs =
+                [long]$mergedTreeMaterializationMs + [long]$workerMetrics.segmentTreeMaterializationMs
+            $mergedSha256Ms =
+                [long]$mergedSha256Ms + [long]$workerMetrics.segmentSha256Ms
+            $mergedApprovedPlanValidationReuseCount =
+                [long]$mergedApprovedPlanValidationReuseCount +
+                [long]$workerMetrics.approvedPlanValidationReuseCount
+            $mergedStatusTreeCacheEntries =
+                [long]$mergedStatusTreeCacheEntries + [long]$workerMetrics.statusTreeCacheEntries
+            $mergedPlanManifestShaCacheEntries =
+                [long]$mergedPlanManifestShaCacheEntries + [long]$workerMetrics.planManifestShaCacheEntries
+        }
+        if ($resolved -ne $Inputs.Count) {
+            throw "parallel fallback 结果数不完整：$resolved / $($Inputs.Count)。"
+        }
+        # 全部 worker 成功且结果数完整：一次性合入共享 MetricsState（加法可交换，成功路径
+        # 的最终值与逐条合入完全一致；合入点之后不再 throw）。
+        $MetricsState.parallelFallbackReceiptFastResolved =
+            [long]$MetricsState.parallelFallbackReceiptFastResolved + $mergedReceiptFastResolved
+        Add-CodexSafeTreeDeleteStatusElapsed `
+            -State $MetricsState `
+            -Name 'segmentActiveResolveMs' `
+            -Milliseconds $mergedActiveResolveMs
+        Add-CodexSafeTreeDeleteStatusElapsed `
+            -State $MetricsState `
+            -Name 'segmentArchivedResolveMs' `
+            -Milliseconds $mergedArchivedResolveMs
+        $MetricsState.entriesScanned =
+            [long]$MetricsState.entriesScanned + $mergedEntriesScanned
+        $MetricsState.logicalBytes =
+            [long]$MetricsState.logicalBytes + $mergedLogicalBytes
+        $MetricsState.bytesHashed =
+            [long]$MetricsState.bytesHashed + $mergedBytesHashed
+        Add-CodexSafeTreeDeleteStatusElapsed `
+            -State $MetricsState `
+            -Name 'segmentPlanTransactionReadMs' `
+            -Milliseconds $mergedPlanTransactionReadMs
+        Add-CodexSafeTreeDeleteStatusElapsed `
+            -State $MetricsState `
+            -Name 'segmentTerminalArchiveAuthMs' `
+            -Milliseconds $mergedTerminalArchiveAuthMs
+        Add-CodexSafeTreeDeleteStatusElapsed `
+            -State $MetricsState `
+            -Name 'segmentTreeMaterializationMs' `
+            -Milliseconds $mergedTreeMaterializationMs
+        Add-CodexSafeTreeDeleteStatusElapsed `
+            -State $MetricsState `
+            -Name 'segmentSha256Ms' `
+            -Milliseconds $mergedSha256Ms
+        $MetricsState.approvedPlanValidationReuseCount =
+            [long]$MetricsState.approvedPlanValidationReuseCount +
+            $mergedApprovedPlanValidationReuseCount
+        $MetricsState.parallelFallbackStatusTreeCacheEntries =
+            [long]$MetricsState.parallelFallbackStatusTreeCacheEntries +
+            $mergedStatusTreeCacheEntries
+        $MetricsState.parallelFallbackPlanManifestShaCacheEntries =
+            [long]$MetricsState.parallelFallbackPlanManifestShaCacheEntries +
+            $mergedPlanManifestShaCacheEntries
+        if ($null -ne $debugOpTimings) {
+            Add-Member -InputObject $MetricsState -NotePropertyName debugOpTimings `
+                -NotePropertyValue $debugOpTimings.ToArray() -Force
+        }
+        return [pscustomobject][ordered]@{
+            resultByIndex = $resultByIndex
+            workerCount = $workerCount
+        }
+    } finally {
+        foreach ($job in $jobs) { $job.PowerShell.Dispose() }
+        $pool.Dispose()
+    }
+}
+
 function Get-CodexSafeTreeDeleteStatus {
     param(
         [Parameter(Mandatory)][string]$PolicyPath,
@@ -4203,6 +5045,11 @@ function Get-CodexSafeTreeDeleteStatus {
         segmentPrefetchMs = 0L
         segmentFastScanMs = 0L
         approvedPlanValidationReuseCount = 0L
+        parallelFallbackStatusTreeCacheEntries = 0L
+        parallelFallbackPlanManifestShaCacheEntries = 0L
+        parallelFallbackWorkers = 0L
+        parallelFallbackResolved = 0L
+        parallelFallbackReceiptFastResolved = 0L
     } -Force
     $statusTreeCache = [Collections.Generic.Dictionary[string, object]]::new(
         [StringComparer]::Ordinal)
@@ -4287,8 +5134,14 @@ function Get-CodexSafeTreeDeleteStatus {
         $metricsState.segmentPrefetchMs = [long]$prefetchWatch.ElapsedMilliseconds
     }
 
+    # issue #58：两遍结构。第一遍完成 fast-handled 转换与 fallback 描述符收集（含 plan 快照
+    # 注入 prefetch，保持单读合同）；fallback 子集相互独立，可走 runspace pool 并行（默认开，
+    # CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK=0 关闭；并行基础设施失败整体回退串行）。
+    $parallelFallbackEnabled = $env:CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK -cne '0'
+    $fastOperationByIndex = [Collections.Generic.Dictionary[int, object]]::new()
+    $fallbackInputs = [Collections.Generic.List[object]]::new()
+    $runItemIndex = 0
     foreach ($runItem in $runItems) {
-        $metricsState.entriesScanned = [long]$metricsState.entriesScanned + 1L
         $isArchived = [IO.File]::Exists((Join-Path $runItem.FullName 'terminal-archive.json'))
         $fastResult = $null
         if ($null -ne $fastResults) {
@@ -4296,7 +5149,7 @@ function Get-CodexSafeTreeDeleteStatus {
         }
         if ($null -ne $fastResult -and [bool]$fastResult.Handled) {
             $fastHandled = $fastHandled + 1L
-            $operationStatus = New-CodexSafeTreeDeleteStatusOperationFromScan `
+            $fastOperationByIndex[$runItemIndex] = New-CodexSafeTreeDeleteStatusOperationFromScan `
                 -ScanResult $fastResult `
                 -CandidatePolicyRequested $candidatePolicyRequested
         } else {
@@ -4313,8 +5166,94 @@ function Get-CodexSafeTreeDeleteStatus {
                     }
                     document = $null
                     approvedPlanValidation = $fastResult.ApprovedPlanValidation
+                    # N3：无 transaction 的 receipt op 由 fast scan 并行预算的 manifest SHA；
+                    # 未计算（有 transaction 或流式回退）时为 $null，worker 自行计算。
+                    planManifestSha256 = if ($null -ne $fastResult.PlanManifestSha256) {
+                        [string]$fastResult.PlanManifestSha256
+                    } else {
+                        $null
+                    }
+                    # N4：receipt 快路径的 plan 字段直出（C# 侧 receipt 校验的同一
+                    # JsonDocument；AssertDPath 规范化），worker 不再重解析大 plan 文本。
+                    receiptPlanTargetPath = if ($null -ne $fastResult.ReceiptPlanTargetPath) {
+                        [string]$fastResult.ReceiptPlanTargetPath
+                    } else {
+                        $null
+                    }
+                    receiptPlanQuarantinePath = if ($null -ne $fastResult.ReceiptPlanQuarantinePath) {
+                        [string]$fastResult.ReceiptPlanQuarantinePath
+                    } else {
+                        $null
+                    }
+                    receiptPlanCapabilityRoot = if ($null -ne $fastResult.ReceiptPlanCapabilityRoot) {
+                        [string]$fastResult.ReceiptPlanCapabilityRoot
+                    } else {
+                        $null
+                    }
+                    receiptPlanPolicySha256 = if ($null -ne $fastResult.ReceiptPlanPolicySha256) {
+                        [string]$fastResult.ReceiptPlanPolicySha256
+                    } else {
+                        $null
+                    }
+                    # N4：receipt 校验的免封送入口。大 plan 文本作为 .NET 方法实参会被
+                    # PS 绑定器整串复制（实测 109M 字符 ≈12s/次）；receipt↔快照比对收进
+                    # C# 同实例完成（ValidateReceiptAgainstOwnSnapshot）。
+                    scanResult = $fastResult
                 }
             }
+            $fallbackInputs.Add([pscustomobject][ordered]@{
+                Index = $runItemIndex
+                Name = [string]$runItem.Name
+                FullName = [string]$runItem.FullName
+                PSIsContainer = [bool]$runItem.PSIsContainer
+                Attributes = [long][IO.FileAttributes]$runItem.Attributes
+                IsArchived = [bool]$isArchived
+                # 共享树路由提示（缺失则不参与分组）。N5 L2：分组键必须用 receipt 携带的
+                # AssertDPath 规范化值，不用 raw plan 字符串——同一棵树的不同拼写（相对段、
+                # 分隔符、尾斜杠）若落到不同组，worker 实际打开的规范化路径会跨组并发扫同一棵
+                # 树触发 lease 冲突。raw TargetPath/QuarantinePath 仅作 operation payload 保留。
+                RouteTargetPath = if ($null -ne $fastResult) { [string]$fastResult.ReceiptPlanTargetPath } else { $null }
+                RouteQuarantinePath = if ($null -ne $fastResult) { [string]$fastResult.ReceiptPlanQuarantinePath } else { $null }
+            })
+        }
+        $runItemIndex++
+    }
+    $fallbackResultByIndex = $null
+    if ($parallelFallbackEnabled -and $fallbackInputs.Count -ge 2 -and $fastDop -ge 2) {
+        try {
+            $parallelResult = Invoke-CodexSafeTreeDeleteStatusParallelFallback `
+                -Inputs $fallbackInputs `
+                -PolicyPath $PolicyPath `
+                -CurrentPolicySha256 ([string]$policy.sha256) `
+                -FullEvidenceRoot $fullEvidenceRoot `
+                -CandidatePolicyRequested $candidatePolicyRequested `
+                -CandidatePolicy $candidatePolicy `
+                -LoadedPolicy $policy `
+                -PrefetchCache $statusPlanPrefetch.cache `
+                -MetricsState $metricsState `
+                -DegreeOfParallelism $fastDop
+            $fallbackResultByIndex = $parallelResult.resultByIndex
+            $metricsState.parallelFallbackWorkers = [long]$parallelResult.workerCount
+            $metricsState.parallelFallbackResolved = [long]$fallbackInputs.Count
+        } catch {
+            # 并行基础设施失败不改变语义：整体回退到串行参考路径重放。
+            $fallbackResultByIndex = $null
+            $metricsState.parallelFallbackWorkers = 0L
+            $metricsState.parallelFallbackResolved = 0L
+        }
+    }
+    $runItemIndex = 0
+    foreach ($runItem in $runItems) {
+        $metricsState.entriesScanned = [long]$metricsState.entriesScanned + 1L
+        $operationStatus = $null
+        if ($fastOperationByIndex.ContainsKey($runItemIndex)) {
+            $operationStatus = $fastOperationByIndex[$runItemIndex]
+        } elseif ($null -ne $fallbackResultByIndex -and
+            $fallbackResultByIndex.ContainsKey($runItemIndex)) {
+            $operationStatus = $fallbackResultByIndex[$runItemIndex]
+        }
+        if ($null -eq $operationStatus) {
+            $isArchived = [IO.File]::Exists((Join-Path $runItem.FullName 'terminal-archive.json'))
             $activeWatch = [Diagnostics.Stopwatch]::StartNew()
             $operationStatus = Resolve-CodexSafeTreeDeleteStatusOperation `
                 -RunItem $runItem `
@@ -4342,6 +5281,7 @@ function Get-CodexSafeTreeDeleteStatus {
         if (-not [bool]$operationStatus.complete) {
             $complete = $false
         }
+        $runItemIndex++
     }
 
     $blockingRecords = @(if ($candidatePolicyRequested) {
@@ -4395,8 +5335,14 @@ function Get-CodexSafeTreeDeleteStatus {
             fastScanFallback = [long]$fastFallback
             fastScanDop = if ($fastScanEnabled) { [int]$fastDop } else { 0 }
             fastScanConsumption = 'status-invocation-local-not-session-hash-cache'
-            statusTreeCacheEntries = [long]$statusTreeCache.Count
-            planManifestShaCacheEntries = [long]$planManifestShaCache.Count
+            statusTreeCacheEntries =
+                [long]$statusTreeCache.Count + [long]$metricsState.parallelFallbackStatusTreeCacheEntries
+            planManifestShaCacheEntries =
+                [long]$planManifestShaCache.Count + [long]$metricsState.parallelFallbackPlanManifestShaCacheEntries
+            parallelFallbackWorkers = [long]$metricsState.parallelFallbackWorkers
+            parallelFallbackResolved = [long]$metricsState.parallelFallbackResolved
+            parallelFallbackReceiptFastResolved =
+                [long]$metricsState.parallelFallbackReceiptFastResolved
             unarchivedPlanPrefetchCount = if ($null -eq $statusPlanPrefetch) {
                 0L
             } else {
@@ -4414,6 +5360,11 @@ function Get-CodexSafeTreeDeleteStatus {
             }
             consumptionBoundary = 'status-invocation-local-not-session-hash-cache'
         })
+        if ($env:CODEX_SAFE_TREE_DELETE_STATUS_DEBUG_OP_TIMING -ceq '1' -and
+            $null -ne $metricsState.PSObject.Properties['debugOpTimings']) {
+            $status.statusSegments | Add-Member -NotePropertyName debugOpTimings `
+                -NotePropertyValue $metricsState.debugOpTimings -Force
+        }
     }
     return $status
 }

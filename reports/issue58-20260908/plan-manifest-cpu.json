@@ -1,0 +1,37 @@
+{
+  "artifactType": "issue58.n1-plan-manifest-cpu",
+  "capturedAtUtc": "2026-09-08T04:57:50.3742382+00:00",
+  "repoHead": "518a5c3a0c6d6671f542eed79989b6d2661aaab9",
+  "ops": [
+    {
+      "runName": "20260902T105854Z-0e2c914c-c15d-420b-b6fe-9c308fa3be52",
+      "treeKind": "planned-target",
+      "planJsonBytes": 63240972,
+      "stages": {
+        "planReadHashMs": 139,
+        "planStrictJsonMs": 27894,
+        "planConvertFromJsonMs": 1968,
+        "planManifestConvertMs": 24881,
+        "planManifestJsonShaMs": 1655,
+        "manifestJsonShaRepeatMs": 3270
+      },
+      "planManifestEntryCount": 68771,
+      "planManifestSha256": "f25c56a355993a758e683d81146e0df9b7ba55d3baf428b9f4d4c4e56ec5ff15"
+    },
+    {
+      "runName": "20260902T104843Z-f414024c-7be1-4166-bf64-6858b96d99fb",
+      "treeKind": "planned-target",
+      "planJsonBytes": 60475346,
+      "stages": {
+        "planReadHashMs": 211,
+        "planStrictJsonMs": 29860,
+        "planConvertFromJsonMs": 2421,
+        "planManifestConvertMs": 26234,
+        "planManifestJsonShaMs": 1261,
+        "manifestJsonShaRepeatMs": 1241
+      },
+      "planManifestEntryCount": 68507,
+      "planManifestSha256": "a508322b62fe85675a505a8550b517fa9297dd54247bcb6b7478896fe5e1dfb8"
+    }
+  ]
+}

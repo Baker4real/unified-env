@@ -1,0 +1,11 @@
+{
+  "artifactType": "issue58.n1-serialize-bench",
+  "capturedAtUtc": "2026-09-08T04:57:51.5540931+00:00",
+  "inputBytes": 5419997,
+  "readMs": 17,
+  "parseMs": 250,
+  "serializeMs": 229,
+  "outputBytes": 5419995,
+  "operationCount": 4467,
+  "note": "Re-serialization of the parsed cold-run payload approximates production serialization of live PSObjects; same cmdlet/depth/payload size."
+}
