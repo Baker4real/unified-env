@@ -45,6 +45,12 @@ intent: 记录自习室设备的受控环境事实与差异
 - 2026-09-08 防复发评估（只读，未变更）：官方「移除后不被 Windows 更新装回」机制 `AppxAllUserStore\Deprovisioned\MSTeams_8wekyb3d8bbwe` 已存在；但该机是家庭版（`CoreCountrySpecific`），`CloudContent` 与 `Windows Chat` 策略均不在支持版本内，且本机 `PolicyDefinitions` 仅 33 个 ADMX、`Taskbar.admx`/`CloudContent.admx` 不存在，写入也不会有组件读取。结论是保持现状，不追加未文档化注册表键。中国区 Teams 消费版桌面/网页自 2026-08-17 起已不可用。评估报告：`D:\agents\run-evidence\replicator\study-teams-recurrence-20260908\ASSESSMENT.md`。
 - 运行证据：`D:\agents\run-evidence\replicator\study-teams-20260901\`、`D:\agents\run-evidence\replicator\study-workplace-leave-20260901\`、`D:\agents\run-evidence\replicator\study-teams-20260908\`、`D:\agents\run-evidence\replicator\study-teams-recurrence-20260908\`。
 
+## 飞书（2026-09-09）
+
+- 安装根 `D:\Feishu`（另有 `%LOCALAPPDATA%\Feishu`、`%LOCALAPPDATA%\Lark` 残留目录）。唯一自启动注册点是 HKCU Run `Feishu = "D:\Feishu\Feishu.exe"`；无服务、计划任务、启动文件夹项或 Appx 启动任务。
+- 2026-09-09 已关自启动：`Explorer\StartupApproved\Run` 写入同名 12 字节禁用标志（`03` + 11 字节 0），Run 值保留，任务管理器同款可逆。当场经 7.6.3 显式路径回读确认；跨重启复验未做（当时设备使用中，未重启）。
+- 证据：`D:\agents\run-evidence\feishu-autostart-off-study-20260909T013741Z\`。
+
 ## UU 远程
 
 - 安装根：`D:\Program Files\Netease\GameViewer`。正式命令与文件传输走 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。
