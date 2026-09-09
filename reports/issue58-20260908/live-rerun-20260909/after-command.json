@@ -1,0 +1,25 @@
+{
+  "name": "after",
+  "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+  "arguments": [
+    "-NoLogo",
+    "-NoProfile",
+    "-File",
+    "D:\\agents\\projects\\统一环境\\reports\\issue58-20260908\\live-rerun-20260909\\evidence-fingerprint.ps1",
+    "-Label",
+    "after",
+    "-OutputPath",
+    "D:\\agents\\projects\\统一环境\\reports\\issue58-20260908\\live-rerun-20260909\\after.json"
+  ],
+  "startedAtUtc": "2026-09-08T16:56:23.0791902+00:00",
+  "processId": 59704,
+  "exitCode": 0,
+  "watchdogTimedOut": false,
+  "observedStatusChild": null,
+  "observationError": null,
+  "error": null,
+  "stdout": "label=after elapsedMs=230043 entryCount=25863 operationCount=4467 manifestSha256=8f25b06fdf35e7b5cee423dd0a115b20930af92429af3a8ab6ebed81ed81effa\r\nfingerprint-done\r\n",
+  "stderr": "",
+  "elapsedMs": 231611,
+  "finishedAtUtc": "2026-09-08T17:00:14.6895009+00:00"
+}

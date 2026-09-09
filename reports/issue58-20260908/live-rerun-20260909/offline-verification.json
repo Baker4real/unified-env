@@ -1,0 +1,23 @@
+{
+  "artifactType": "issue58.offline-source-and-process-verification",
+  "capturedAtUtc": "2026-09-08T17:02:23.5567722+00:00",
+  "commit": "97b7c23133be0106e212db79d35ca07497b35e71",
+  "additionalStatusRuns": 0,
+  "exitCode": 1,
+  "preliminaryReadOnlyProbe": {
+    "exitCode": 1,
+    "reason": "Get-Command git returned multiple applications; corrected invocation selects the first application explicitly.",
+    "processStarted": false
+  },
+  "sourceFiles": [],
+  "fingerprintCopy": null,
+  "processes": [],
+  "taskResidue": [],
+  "checks": {
+    "noOfflineVerificationErrors": false
+  },
+  "errors": [
+    "The property 'sha256' cannot be found on this object. Verify that the property exists."
+  ],
+  "acknowledgedDriverRisk": "The original driver has unbounded post-exit pipe reads and does not prove subtree exit in finally. This is an exceptional-path risk, not an observed failure; individual process exit is checked below."
+}

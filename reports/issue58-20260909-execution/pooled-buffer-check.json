@@ -1,0 +1,115 @@
+{
+  "clearArraySource": true,
+  "poolCounts": {
+    "rentAfter": 19,
+    "returnBefore": 18,
+    "rentBefore": 18,
+    "returnAfter": 19
+  },
+  "errorFinally": "HashHandleContents has hasher creation and read in try; ArrayPool Return(buffer, clearArray:true) in nested finally.",
+  "returnedOnException": true,
+  "sizes": [
+    0,
+    1,
+    1048575,
+    1048576,
+    1048593,
+    2097165
+  ],
+  "concurrentFiles": 12,
+  "rows": [
+    {
+      "name": "0.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches": true
+    },
+    {
+      "name": "1.bin",
+      "sha256": "ca358758f6d27e6cf45272937977a748fd88391db679ceda7dc7bf1f005ee879",
+      "matches": true
+    },
+    {
+      "name": "1048575.bin",
+      "sha256": "14446dd49471dd263c478a8bd520ff2c4838ba97b15b4b53aaec61356f27b038",
+      "matches": true
+    },
+    {
+      "name": "1048576.bin",
+      "sha256": "1c59b8670027384143781a8a8bff2f3b44bd8818d0f53b13b064c2375a1afe38",
+      "matches": true
+    },
+    {
+      "name": "1048593.bin",
+      "sha256": "016dda9740d1ce7161d4e53fd1f5eea4558b0a1c8429ac4961dc11338f2bc348",
+      "matches": true
+    },
+    {
+      "name": "2097165.bin",
+      "sha256": "3eaf2e7d737fccc166460c331946fd49c2b4e1bec353c216eecd442412e7b510",
+      "matches": true
+    },
+    {
+      "name": "concurrent-0.bin",
+      "sha256": "8a60d7c2c106707ca42105493881468151316dc4bad4b2796b87f33694775ed6",
+      "matches": true
+    },
+    {
+      "name": "concurrent-1.bin",
+      "sha256": "789d7c3e7fb7dc283458f0709e8e90594130596bde7b3e46b968387bcd96c833",
+      "matches": true
+    },
+    {
+      "name": "concurrent-10.bin",
+      "sha256": "1ad2debab6436653fc07eb1c8bfc93349b6d2541b1d8419101dfcbff4bc5c50f",
+      "matches": true
+    },
+    {
+      "name": "concurrent-11.bin",
+      "sha256": "f67f1e42b8d728f5104a6631284e53adf59fac2692b2fff8948255b7ff8aef87",
+      "matches": true
+    },
+    {
+      "name": "concurrent-2.bin",
+      "sha256": "9983d59ba6cad76b6489c1f8b3337041a53c5edb45c9b1bda588045431f1fa62",
+      "matches": true
+    },
+    {
+      "name": "concurrent-3.bin",
+      "sha256": "87ac95df9280d67eb4c68deaaf85796c2c12534351938dfd8dedcf919f323426",
+      "matches": true
+    },
+    {
+      "name": "concurrent-4.bin",
+      "sha256": "c5f380e7ed404b56a2c9d73dd6b1994959ce4bd5436f4e4be8de1d7f8841dea0",
+      "matches": true
+    },
+    {
+      "name": "concurrent-5.bin",
+      "sha256": "33bac761466bca569aef3a9a1633598a856394dcfcb3678570228cdd09554019",
+      "matches": true
+    },
+    {
+      "name": "concurrent-6.bin",
+      "sha256": "64f55300fba65fab44822c46be42ba988f0f11b50c7b2a0cd0b8f8fe3a990fd0",
+      "matches": true
+    },
+    {
+      "name": "concurrent-7.bin",
+      "sha256": "94239a4d738da56d6df69b6d99e0ea71faa93c6b4404bf7a9c9973231254c770",
+      "matches": true
+    },
+    {
+      "name": "concurrent-8.bin",
+      "sha256": "0d8698141bcac9cabae51cc4807815c26399b6fc01c6b494c0a72689013bcd17",
+      "matches": true
+    },
+    {
+      "name": "concurrent-9.bin",
+      "sha256": "25c674bf4aae952e39f5008cf79c7e9e871b7806c506d1878dfd90e44eb97e7d",
+      "matches": true
+    }
+  ],
+  "entries": 19,
+  "exceptionThrown": true,
+  "passed": true
+}

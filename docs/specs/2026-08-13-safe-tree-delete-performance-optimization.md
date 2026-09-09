@@ -3,7 +3,7 @@ type: reference
 title: 受管安全树删除性能优化
 tags: [performance, safe-delete, hash-reuse, parallelization]
 date: 2026-08-13
-status: landed-mixed（Plan C# 单遍 walker 已落地；#56 按现状关闭；Status 的 #49 历史达标，#58 巨型 plan 回归仍未通过全量验收）
+status: landed-mixed（Plan C# 单遍 walker 已落地；#56 按现状关闭；Status 的 #49 历史达标；#58 巨型 plan 优化已完成实现、三次 C# 冷启动和正式部署/live smoke 验收，完整参考 oracle、性能 A/B 与 live semantic digest 仍保留限制）
 priority: P0
 ---
 
@@ -83,6 +83,8 @@ v2/v3 transaction approval 可透传匹配 receipt，但保留 live plan read/ha
 2026-09-06 的状态为 **源码已推送、全量验收失败**：6,039,074-byte plan 的局部探针结果等价；Status 32 项回归、基线与回滚各 24 项通过。但三次独立冷启动 `<60s` 验收在首轮 60.295s 超时并确认停止，后两轮未执行，没有完整 Status 输出。前后 evidence/policy 内容与 identity 相同，不等于期间零写事件审计。验收与计时勘误见 `reports/issue58-20260906/VERIFICATION.txt`；当前票状态以 [GitHub #58](https://github.com/Baker4real/unified-env/issues/58) 为准，#49 的历史数字不覆盖此规模。
 
 2026-09-08 的状态为 **优化在工作区未提交、正式验收仍未通过**。本轮首次测出真实全量冷启动全程 84.6 分钟（4467 ops，exit 0；09-06 的 60.295s 是 deadline 截断值而非近似达标），主导热点是树快照递归内逐 entry 的 `Assert-CodexHookCapabilityPath`（`CodexHostSafety.ps1:884-887`，占总时 96.37%，O(entries×depth)）；SHA-256 内容哈希不是瓶颈（实测 1.4-1.6GB/s）。工作区改动（host-safety 所有权内 4 个跟踪文件 + `.gitignore`，宿主 gate shim 委托本仓库入口故工作区即运行态）：C# 树快照扫描器下沉（异常类型化回退 PS 参考路径）、receipt 快路径（commit 前 plan/txn/policy 三重 live 复核）、并行 fallback（runspace pool，前缀并查分组防嵌套树 lease 冲突，metrics 全缓冲合并）、plan manifest SHA 流式计算、免封送 receipt 核验（消除 PowerShell 方法绑定器对大 string 实参的整串深拷贝）。安静窗口实测 42.7s/54.2s；独立 verifier 正式三次冷启动 88.3/91.6/99.6s 均超 60s（本机慢态，I/O 分段膨胀），逐 op 等价 4467/4467、evidence 零写入、四套件（Status 42 项）全绿均 PASS。完全回旧串行行为需 `FAST_SCAN=0` + `PARALLEL_FALLBACK=0` + `TREE_FAST=0` 三开关全关。已知分叉：23 个生产 op 上纯参考解析器输出与冻结基线（C# fast scan 形状）不一致，修复与逐 op 等价验收冲突，已回退并双侧钉住（slice 41），方向待 issue owner 裁决。证据：`reports/issue58-20260908/`（FINDINGS.md、IMPLEMENTATION.md、acceptance-*；提交前为未跟踪）。
+
+2026-09-09 的最终验收状态为 **DONE_WITH_CONCERNS**：最终源码完成三次独立 C# 冷启动，墙钟 **45.613 / 23.643 / 24.364 s**，三次均 exit 0、解析成功、job 为空，4467 operations 的 operation ID 与 semantic SHA 一致；Status 回归、buffer 归还边界、部署 fixture、模块边界和 `git diff --check` 均通过。正式 Bootstrap/Deploy 均 exit 0，receipt 为 `complete`，live closure SHA 为 `95d60477f6740b43ab2a17f43649bba8b4fc2e679aa276fbb3a261a9081b4d8f`（110 rows），marker 已清除，live Status smoke exit 0。完整 PS reference 在 180 秒边界内超时，未形成完整慢 oracle 输出；性能 A/B 只有一次方向性证据，live operation ID digest 为截断值且 semantic comparison 对编码敏感，均不作更强声明。最终证据汇总见 `reports/issue58-20260909-execution/final-acceptance-20260909.json`，部署回读见同目录 `live-deployment-20260909.readback.json`。
 
 宿主 gate shim 直接委托本仓库入口，源码落盘会改变后续调用可加载的代码；“未执行 Deploy”不表示新源码与宿主隔离。正式部署记录和真实入口验收分别按 capability spec 的部署合同核验，本次局部测试与 Git 发布不代替这些步骤。
 

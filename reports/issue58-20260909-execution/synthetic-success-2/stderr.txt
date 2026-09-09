@@ -1,0 +1,1 @@
+child-gate.ps1: Cannot validate argument on parameter 'Mode'. The argument "" does not belong to the set "success,timeout,bad-json,pipe-timeout" specified by the ValidateSet attribute. Supply an argument that is in the set and then try the command again.

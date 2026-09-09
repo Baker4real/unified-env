@@ -1,0 +1,60 @@
+{
+  "executableSha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139",
+  "nativeCache": {
+    "scannerSourceMatches": true,
+    "scannerDllSha256": "6491401c391e8a4e5c911803bbfe84526e032738b438dd8d22b997218967e57b",
+    "manifestSha256": "4bbefe9fe0160ed2aa2e9cf23e98fa81e071d82d04b55adea92d699ceddec2d9",
+    "valid": true,
+    "variant": "default",
+    "dllSha256": "fc21ccd4f0765a2b5d543ab16ea65f4ad00cacdd9a5abc9ef9dca8044853b5d1",
+    "generation": "D:\\Codex\\temp\\unified-env-addtype\\default\\ccbb049130c67d7a8a3a69fa46c6cbdc27a5636baeebc5466fa21e7c9017deb1"
+  },
+  "currentExecutable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+  "sources": {
+    "head": "97b7c23133be0106e212db79d35ca07497b35e71",
+    "sha256": {
+      "scripts\\Invoke-CodexSafeTreeDelete.ps1": "18cafa665dd67cac7f55e694424c4c277364d7090606ee41e7cd38b69cfd5c98",
+      "scripts\\lib\\CodexHostSafety.ps1": "1465655d6d1f1096066180a5edff61db3c03ae08bfc5afb4294462089eb995a2",
+      "scripts\\lib\\CodexSafeTreeDelete.ps1": "c747275d225ab91847a2b0b9cc21534c670ac29b2df26e79dbcf22566d4248d2",
+      "scripts\\lib\\CodexHostSafetyNativeLoader.ps1": "5b8187960929fc7949024418bda6fe51b4b080256871d70cde74044a0541d7ad",
+      "scripts\\lib\\CodexSafeTreeDeleteStatusScan.cs": "e0881ca569f88111728a7a880f301faa99df70112bdde978ce5ea7d0e1d13f39",
+      "scripts\\lib\\CodexSafeTreeDeleteClosure.ps1": "1e95a23cb4447b32ea229bfe4a19eea8f58ad1c8c10f6811a27a3ed06aa07597",
+      "reports\\issue58-20260908\\cold-run.ps1": "c12f890504618966511a32ac31730ece1f55f44154fb66589e8058f3e0768ad3",
+      "reports\\issue58-20260908\\evidence-fingerprint.ps1": "883da8be41e2b86349327f62aaebcf437cd889713830bda31220ac0ec8a5a259",
+      "scripts\\lib\\CodexHookHandleBoundIO.cs": "101a321f524b66c793d96eae463f487e20d91fc6625cef6fc57e07f86d6fbe77",
+      "scripts\\lib\\CodexSafeTreeDeleteFileIdentity.cs": "e4a23fb6c183e6002ecd7120bddb521f62783c05c48ebe53ad2d0ca6ed7bd48b",
+      "scripts\\lib\\CodexSafeTreeDeleteHashCache.cs": "9a3f51938cf4cb0709e7f3fb247d25cbc5c881c1e36aefe593ce86577e144fd6",
+      "scripts\\lib\\CodexSafeTreeDeleteApplySnapshot.cs": "8de7b8539d0faa11b07342219bc6d2396583a7463559a9cbc90481c9d4e0624c",
+      "scripts\\lib\\CodexSafeTreeDeleteHostSafetyPurgeAdapter.cs": "31edbbf553bfaac92572457f5c8aabaf34ef9890250ed442930ac5161932c814",
+      "scripts\\lib\\CodexSafeTreeDeleteThreadJournal.cs": "37cfdea7e5097c12d6fb3776ec1f5a76c9f3fc859b7bbf51fdb4936a1422d9a0",
+      "scripts\\lib\\CodexSafeTreeDeleteParallelPurge.cs": "e506b005bc877dc8d2646f4760c52c7baacbdfaaa70c2a92a4e7d1d5e621b2d1",
+      "scripts\\lib\\CodexSafeTreeDeletePlanSnapshot.cs": "d653d11ccd7f70dbed2cbec556621e96852aed1cbcea93a437c011365eeb8015"
+    },
+    "headCommandExitCode": 0
+  },
+  "resolvedChildExecutable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+  "capturedAtUtc": "2026-09-08T17:00:14.7461837+00:00",
+  "environment": [
+    {
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN",
+      "Process": null,
+      "User": null,
+      "Machine": null
+    },
+    {
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK",
+      "Process": null,
+      "User": null,
+      "Machine": null
+    },
+    {
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST",
+      "Process": null,
+      "User": null,
+      "Machine": null
+    }
+  ],
+  "psVersion": "7.6.5",
+  "allThreeSwitchesUnsetAtAllScopes": true,
+  "psEdition": "Core"
+}

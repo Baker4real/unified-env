@@ -1,0 +1,2 @@
+GATE-PROOF OK（部署者持锁期间新调用被 gate 等待）
+BOOTSTRAP-GATE OK deploymentId=issue58-20260909 targetClosure=95d60477f6740b43ab2a17f43649bba8b4fc2e679aa276fbb3a261a9081b4d8f

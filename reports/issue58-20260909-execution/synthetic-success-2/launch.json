@@ -1,0 +1,43 @@
+{
+  "artifactType": "issue58.n1-bounded-process",
+  "ownerTokenSha256": "0c14cd7b9c65076aa440924615d082870018f40884918c7e5b71f396fac5805b",
+  "tokenIssuedAtUtc": "2026-09-09T01:23:20.2829025+00:00",
+  "lifetime": "task-scoped",
+  "tokenChannel": "child-process-environment",
+  "status": "running",
+  "processState": "not-started",
+  "launchIntent": {
+    "expectedExitCode": 0,
+    "arguments": [
+      "-NoLogo",
+      "-NoProfile",
+      "-File",
+      "D:\\agents\\projects\\统一环境\\reports\\issue58-20260909-execution\\child-gate.ps1",
+      "-Payload",
+      "D:/agents/projects/统一环境/reports/issue58-20260909-execution/synthetic-child.ps1"
+    ],
+    "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+    "cwd": "D:\\agents\\projects\\统一环境",
+    "deadlineMs": 10000,
+    "readiness": "token/PID/starttime/exe/hash/parent receipt",
+    "readinessTimeoutMs": 10000
+  },
+  "processId": null,
+  "osStartTimeUtc": null,
+  "osExecutable": null,
+  "osObservation": "unverified",
+  "identityVerified": false,
+  "childReceipt": null,
+  "exitCode": null,
+  "timedOut": false,
+  "elapsedMs": null,
+  "cleanupMs": null,
+  "jobEmpty": false,
+  "residualPids": [],
+  "parseSucceeded": false,
+  "complete": null,
+  "operationCount": null,
+  "error": null,
+  "stdout": "stdout.json",
+  "stderr": "stderr.txt"
+}

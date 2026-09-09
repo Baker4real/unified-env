@@ -1,0 +1,93 @@
+Status: DONE_WITH_CONCERNS
+正式验收通过: false
+最终聚合: comparison-corrected-v2.json（退出码 1）
+离线源码与进程证据: offline-verification-v2.json（退出码 1）
+HEAD: 97b7c23133be0106e212db79d35ca07497b35e71
+Status 执行次数: 恰好 3 次；未重跑，也未额外执行 Status。
+
+轮次 | elapsedMs | timedOut | 子进程退出码 | parseSucceeded | complete | ops | PID
+1   | 79489     | false    | 0          | true           | false    | 4467 | 59636
+2   | 106006    | false    | 0          | true           | false    | 4467 | 63460
+3   | 50970     | false    | 0          | true           | false    | 4467 | 26872
+所有 error 均为 null。complete 为 JSON boolean，等于冻结基线的 false。
+三轮冻结管线语义 SHA-256 均为:
+88d4b67943d7d451931c024ad031a591efcffd528df9acbcb5e0d566d5938ad6
+独立 before 指纹中的 operation 数量: 4467
+独立 before 指纹中的 operation ID 摘要:
+3a78029c3bca23940bfa8782932625b81784a6b7ad46880f059eee76950cdc53
+每轮均无空 ID、无重复 ID，数量及完整排序 ID 集的摘要均匹配。
+性能要求 elapsedMs < 60000: 失败、失败、通过。
+
+before/after 的 evidence 与 policy 逐字段一致，字段集合也一致。
+结论边界: 仅证明内容与 identity 前后一致，不是期间零写事件审计。
+范围: 仅覆盖仓库 Status 入口及冻结管线基线。
+未证明: 宿主 gate 验收或全量 fast/slow 等价性（已知存在 23 个 operation 的分叉）。
+FAST_SCAN/PARALLEL_FALLBACK/TREE_FAST: 全部 5 次观测中，Process/User/Machine 层均未设置。
+运行时: 记录的子进程 executable 为 D:\Codex\tools\PowerShell\7.6.5\pwsh.exe；
+PowerShell Core 7.6.5；executable 文件版本为 7.6.5.500，前后 SHA 稳定。
+第 2 轮 OS 独立 executable 观测: unverified（未验证；GetVersionInfo 收到了空路径）。
+第 2 轮启动器记录的 executable/PID 与离线版本/哈希证据已分别保留。
+3 个 Status PID 及全部 8 个已记录进程均已退出；未发现已知的本任务进程残留。
+原包装器的管道读取无截止时间、finally 未确认进程子树退出，属于异常路径风险，并非已观察到的故障。
+
+16 个源码/输入文件的 SHA 在 preflight、全部采样、postflight 及离线回读中均保持稳定。
+独立 git cat-file 对照: 11 个与提交原始字节完全一致；5 个仅有 CRLF/LF 差异。
+仅有 CRLF/LF 差异的路径: scripts/lib/CodexHostSafety.ps1; scripts/lib/CodexHookHandleBoundIO.cs;
+scripts/lib/CodexSafeTreeDeleteFileIdentity.cs; scripts/lib/CodexSafeTreeDeleteThreadJournal.cs;
+scripts/lib/CodexSafeTreeDeleteParallelPurge.cs。本 worker 未改变任何源码字节。
+fingerprint 原件/副本 SHA-256（字节完全一致）:
+883da8be41e2b86349327f62aaebcf437cd889713830bda31220ac0ec8a5a259
+修正后的负例校验: 15/15 通过。git diff --check: 退出码 0。
+
+原始命令退出码:
+before fingerprint=0；cold-run 包装器=0/0/0；实际 Status 子进程=0/0/0；after fingerprint=0。
+原始聚合=1；首次修正聚合=1（空观测值处理错误，结果已保留）；
+corrected-v2 聚合=1（性能失败且缺失 OS 观测，无聚合异常）。
+初始离线探测=1（git executable 选择存在歧义，未启动子进程，调用已修正）。
+首次离线验证=1（管道任务返回值混入函数输出，结果已保留）；
+offline-v2=1（5 个仅有 CRLF/LF 差异的路径未通过严格提交原始字节相等检查）。
+全部 16 次离线 git blob 读取=0；其余源码/identity/进程检查通过。
+
+新建文件清单，全部位于 D:\agents\projects\统一环境\reports\issue58-20260908\live-rerun-20260909\:
+after-command.json
+after.json
+before-command.json
+before.json
+cold-run-1-command.json
+cold-run-1-preflight.json
+cold-run-1-stdout.json
+cold-run-1.json
+cold-run-2-command.json
+cold-run-2-preflight.json
+cold-run-2-stdout.json
+cold-run-2.json
+cold-run-3-command.json
+cold-run-3-preflight.json
+cold-run-3-stdout.json
+cold-run-3.json
+comparison-corrected-v2.json
+comparison-corrected.json
+comparison.json
+evidence-fingerprint.ps1
+offline-verification-v2.json
+offline-verification.json
+postflight.json
+preflight.json
+reaggregate.ps1
+run-acceptance.ps1
+verify-offline.ps1
+verification.txt
+
+既有源码、测试、manifest、git 配置和任务开始前已有的证据均未修改。
+未执行 commit/push、部署、GitHub 写入、GUI 或浏览器操作。
+完整 stdout 仅保留在本地，不包含在本摘要中。
+
+最终范围内检查（2026-09-09，Asia/Shanghai）:
+PS ParseFile: 退出码 0；检查了 4 个脚本；解析错误 0 个。
+脚本: evidence-fingerprint.ps1, run-acceptance.ps1, reaggregate.ps1, verify-offline.ps1。
+node scripts/Validate-ModuleBoundaries.cjs: 退出码 0；PASS files=3151 modules=5。
+git diff --check: 退出码 0。
+最终进程检查: 退出码 0，检查时间 2026-09-08T17:07:38.8332026+00:00；
+全部 8 个已记录 PID 均不存在；无本任务脚本进程残留。
+以上文件清单完整，共 28 个文件，均位于原 ownership 内。
+未额外执行 Status、四套件回归或无关检查。

@@ -1,0 +1,254 @@
+{
+  "artifactType": "issue58.live-rerun-comparison-corrected",
+  "capturedAtUtc": "2026-09-08T17:01:32.9376594+00:00",
+  "status": "BLOCKED",
+  "aggregateExitCode": 1,
+  "additionalColdRuns": 0,
+  "correction": "complete is a business-state boolean, not sampling completion. Require boolean false matching the frozen pipeline baseline; retain first erroneous aggregation unchanged.",
+  "originalComparisonSha256": "1b3e602668a63f1f4931db8c8d3d12ffee4772d9d43134587d5231da2533c4d9",
+  "originalAggregateExitCode": 1,
+  "expectedHead": "97b7c23133be0106e212db79d35ca07497b35e71",
+  "frozenPipelineSemanticSha256": "88d4b67943d7d451931c024ad031a591efcffd528df9acbcb5e0d566d5938ad6",
+  "expectedComplete": false,
+  "expectedOperationCount": 4467,
+  "expectedOperationIdsSha256": "3a78029c3bca23940bfa8782932625b81784a6b7ad46880f059eee76950cdc53",
+  "fingerprintClaim": "Evidence and policy content/identity before-after comparison only; not an intervening zero-write-event audit.",
+  "scope": "Repository Status entry only; frozen pipeline baseline equivalence only; not host gate acceptance or full fast/slow equivalence.",
+  "runs": [
+    {
+      "run": 1,
+      "passed": false,
+      "elapsedMs": 79489,
+      "timedOut": false,
+      "exitCode": 0,
+      "parseSucceeded": true,
+      "complete": false,
+      "operationCount": 4467,
+      "semanticSha256": "88d4b67943d7d451931c024ad031a591efcffd528df9acbcb5e0d566d5938ad6",
+      "error": null,
+      "coverage": {
+        "count": 4467,
+        "operationIdsSha256": "3a78029c3bca23940bfa8782932625b81784a6b7ad46880f059eee76950cdc53",
+        "duplicateIdCount": 0,
+        "invalidIdCount": 0
+      },
+      "child": {
+        "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+        "processId": 59636,
+        "fileVersion": "7.6.5.500",
+        "productVersion": "7.6.5 SHA: ea554a8f9c6085f54fb2828f7ea286c65c35599f+ea554a8f9c6085f54fb2828f7ea286c65c35599f",
+        "executableSha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139"
+      },
+      "checks": {
+        "errorIsNull": true,
+        "childExitCodeZero": true,
+        "notTimedOut": true,
+        "parseSucceeded": true,
+        "completeBooleanMatchesFrozenBaseline": true,
+        "elapsedBelow60000": false,
+        "frozenPipelineSemanticMatch": true,
+        "nonemptyCoverage": true,
+        "validIds": true,
+        "noDuplicateIds": true,
+        "countMatchesBefore": true,
+        "completeIdSetMatchesBefore": true,
+        "wrapperExitCodeZero": true,
+        "observedActualChild": true,
+        "stdoutSchemaValid": true,
+        "stdoutCompleteBooleanMatchesFrozenBaseline": true,
+        "stdoutRawShaMatches": true,
+        "independentSemanticShaMatches": true
+      },
+      "failedChecks": [
+        "elapsedBelow60000"
+      ]
+    },
+    {
+      "run": 2,
+      "passed": false,
+      "elapsedMs": 106006,
+      "timedOut": false,
+      "exitCode": 0,
+      "parseSucceeded": true,
+      "complete": false,
+      "operationCount": 4467,
+      "semanticSha256": "88d4b67943d7d451931c024ad031a591efcffd528df9acbcb5e0d566d5938ad6",
+      "error": null,
+      "coverage": {
+        "count": 4467,
+        "operationIdsSha256": "3a78029c3bca23940bfa8782932625b81784a6b7ad46880f059eee76950cdc53",
+        "duplicateIdCount": 0,
+        "invalidIdCount": 0
+      },
+      "child": null,
+      "checks": {
+        "errorIsNull": true,
+        "childExitCodeZero": true,
+        "notTimedOut": true,
+        "parseSucceeded": true,
+        "completeBooleanMatchesFrozenBaseline": true,
+        "elapsedBelow60000": false,
+        "frozenPipelineSemanticMatch": true,
+        "nonemptyCoverage": true,
+        "validIds": true,
+        "noDuplicateIds": true,
+        "countMatchesBefore": true,
+        "completeIdSetMatchesBefore": true,
+        "wrapperExitCodeZero": true,
+        "observedActualChild": false,
+        "stdoutSchemaValid": true,
+        "stdoutCompleteBooleanMatchesFrozenBaseline": true,
+        "stdoutRawShaMatches": true,
+        "independentSemanticShaMatches": true
+      },
+      "failedChecks": [
+        "elapsedBelow60000",
+        "observedActualChild"
+      ]
+    },
+    {
+      "run": 3,
+      "passed": true,
+      "elapsedMs": 50970,
+      "timedOut": false,
+      "exitCode": 0,
+      "parseSucceeded": true,
+      "complete": false,
+      "operationCount": 4467,
+      "semanticSha256": "88d4b67943d7d451931c024ad031a591efcffd528df9acbcb5e0d566d5938ad6",
+      "error": null,
+      "coverage": {
+        "count": 4467,
+        "operationIdsSha256": "3a78029c3bca23940bfa8782932625b81784a6b7ad46880f059eee76950cdc53",
+        "duplicateIdCount": 0,
+        "invalidIdCount": 0
+      },
+      "child": {
+        "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+        "processId": 26872,
+        "fileVersion": "7.6.5.500",
+        "productVersion": "7.6.5 SHA: ea554a8f9c6085f54fb2828f7ea286c65c35599f+ea554a8f9c6085f54fb2828f7ea286c65c35599f",
+        "executableSha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139"
+      },
+      "checks": {
+        "errorIsNull": true,
+        "childExitCodeZero": true,
+        "notTimedOut": true,
+        "parseSucceeded": true,
+        "completeBooleanMatchesFrozenBaseline": true,
+        "elapsedBelow60000": true,
+        "frozenPipelineSemanticMatch": true,
+        "nonemptyCoverage": true,
+        "validIds": true,
+        "noDuplicateIds": true,
+        "countMatchesBefore": true,
+        "completeIdSetMatchesBefore": true,
+        "wrapperExitCodeZero": true,
+        "observedActualChild": true,
+        "stdoutSchemaValid": true,
+        "stdoutCompleteBooleanMatchesFrozenBaseline": true,
+        "stdoutRawShaMatches": true,
+        "independentSemanticShaMatches": true
+      },
+      "failedChecks": []
+    }
+  ],
+  "fingerprintFieldEquality": {
+    "evidence": {
+      "manifestSha256": true,
+      "rootIdentity": true,
+      "entryCount": true,
+      "operationCount": true,
+      "operationIdsSha256": true,
+      "sameFieldSet": true
+    },
+    "policy": {
+      "path": true,
+      "sha256": true,
+      "length": true,
+      "identity": true,
+      "sddl": true,
+      "sameFieldSet": true
+    }
+  },
+  "sourceFieldEquality": {
+    "scripts\\Invoke-CodexSafeTreeDelete.ps1": true,
+    "scripts\\lib\\CodexHostSafety.ps1": true,
+    "scripts\\lib\\CodexSafeTreeDelete.ps1": true,
+    "scripts\\lib\\CodexHostSafetyNativeLoader.ps1": true,
+    "scripts\\lib\\CodexSafeTreeDeleteStatusScan.cs": true,
+    "scripts\\lib\\CodexSafeTreeDeleteClosure.ps1": true,
+    "reports\\issue58-20260908\\cold-run.ps1": true,
+    "reports\\issue58-20260908\\evidence-fingerprint.ps1": true,
+    "scripts\\lib\\CodexHookHandleBoundIO.cs": true,
+    "scripts\\lib\\CodexSafeTreeDeleteFileIdentity.cs": true,
+    "scripts\\lib\\CodexSafeTreeDeleteHashCache.cs": true,
+    "scripts\\lib\\CodexSafeTreeDeleteApplySnapshot.cs": true,
+    "scripts\\lib\\CodexSafeTreeDeleteHostSafetyPurgeAdapter.cs": true,
+    "scripts\\lib\\CodexSafeTreeDeleteThreadJournal.cs": true,
+    "scripts\\lib\\CodexSafeTreeDeleteParallelPurge.cs": true,
+    "scripts\\lib\\CodexSafeTreeDeletePlanSnapshot.cs": true,
+    "sameFieldSet": true
+  },
+  "checks": {
+    "exactlyThreeOriginalRuns": true,
+    "allRunsPassed": false,
+    "noReaggregationErrors": false
+  },
+  "negativeControls": {
+    "validFalseCompleteAccepted": true,
+    "errorRejected": true,
+    "exitCodeRejected": true,
+    "timedOutRejected": true,
+    "parseSucceededRejected": true,
+    "trueCompleteRejected": true,
+    "stringCompleteRejected": true,
+    "nullCompleteRejected": true,
+    "elapsedThresholdRejected": true,
+    "semanticShaRejected": true,
+    "operationCountRejected": true,
+    "emptyIdRejected": true,
+    "duplicateIdRejected": true,
+    "wrongIdSameCountRejected": true,
+    "emptySetRejected": true
+  },
+  "commandExitCodes": [
+    {
+      "name": "before",
+      "watchdogTimedOut": false,
+      "error": null,
+      "exitCode": 0
+    },
+    {
+      "name": "cold-run-1",
+      "watchdogTimedOut": false,
+      "error": null,
+      "exitCode": 0
+    },
+    {
+      "name": "cold-run-2",
+      "watchdogTimedOut": false,
+      "error": null,
+      "exitCode": 0
+    },
+    {
+      "name": "cold-run-3",
+      "watchdogTimedOut": false,
+      "error": null,
+      "exitCode": 0
+    },
+    {
+      "name": "after",
+      "watchdogTimedOut": false,
+      "error": null,
+      "exitCode": 0
+    }
+  ],
+  "errors": [
+    "The property 'processId' cannot be found on this object. Verify that the property exists."
+  ],
+  "failedChecks": [
+    "allRunsPassed",
+    "noReaggregationErrors"
+  ]
+}

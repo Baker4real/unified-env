@@ -1,0 +1,52 @@
+{
+  "artifactType": "issue58.n1-bounded-process",
+  "ownerTokenSha256": "7372a6a0eca2bff9ba618c302ff02c6fc99db7d9749d4bc7dce6fd41fa1c276b",
+  "tokenIssuedAtUtc": "2026-09-09T01:22:35.2664093+00:00",
+  "lifetime": "task-scoped",
+  "tokenChannel": "child-process-environment",
+  "status": "manual-review",
+  "processState": "exited",
+  "launchIntent": {
+    "expectedExitCode": 0,
+    "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+    "arguments": [
+      "-NoLogo",
+      "-NoProfile",
+      "-File",
+      "D:\\agents\\projects\\统一环境\\reports\\issue58-20260909-execution\\child-gate.ps1",
+      "-Payload",
+      "D:/agents/projects/统一环境/reports/issue58-20260909-execution/synthetic-child.ps1"
+    ],
+    "deadlineMs": 10000,
+    "readiness": "token/PID/starttime/exe/hash/parent receipt",
+    "readinessTimeoutMs": 10000,
+    "cwd": "D:\\agents\\projects\\统一环境"
+  },
+  "processId": 52836,
+  "osStartTimeUtc": "2026-09-09T01:22:35.2978448Z",
+  "osExecutable": null,
+  "osObservation": "unverified",
+  "identityVerified": false,
+  "childReceipt": {
+    "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+    "tokenSha256": "7372a6a0eca2bff9ba618c302ff02c6fc99db7d9749d4bc7dce6fd41fa1c276b",
+    "version": "7.6.5",
+    "parentProcessId": 54932,
+    "executableSha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139",
+    "processId": 52836,
+    "startTimeUtc": "2026-09-09T01:22:35.2978448Z"
+  },
+  "exitCode": 97,
+  "timedOut": false,
+  "elapsedMs": 683,
+  "cleanupMs": 60,
+  "jobEmpty": true,
+  "residualPids": [],
+  "parseSucceeded": false,
+  "complete": null,
+  "operationCount": null,
+  "error": "子进程 owner token 或身份绑定不匹配。",
+  "stdout": "stdout.json",
+  "stderr": "stderr.txt",
+  "wrapperExitCode": 1
+}

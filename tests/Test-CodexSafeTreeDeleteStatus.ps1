@@ -1945,8 +1945,8 @@ try {
         [bool]$n3InconsistentDriftOp.namespaceAbsent) `
         'planned+inconsistent+policy 漂移 op 的管线输出必须保持冻结基线语义（inconsistent + 单错误）。'
     # 分叉钉：纯参考解析器（仅 FAST_SCAN=0 诊断模式可达）对同一 run 产出 :4214 覆盖后的
-    # manual-review + 双错误。两侧差异是有意保留的基线合同；任一侧改向都会在此变红。
-    # 方向裁决见 reports/issue58-20260908/IMPLEMENTATION.md N4 段。
+    # 双 absent namespace 是唯一收窄的 PS/reference 分叉；其他 policy-only drift 和
+    # namespace 反例仍由严格 policy-drift 覆盖处理。
     $n3RefPolicy = Read-CodexSafeTreeDeletePolicy -PolicyPath $n3PolicyPath
     $n3RefMetrics = New-CodexSafeTreeDeleteMetricsState -Phase 'status'
     $n3RefOp = Resolve-CodexSafeTreeDeleteStatusOperation `
@@ -1963,11 +1963,27 @@ try {
         -StatusPlanPrefetch $null `
         -PlanManifestShaCache ([Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal))
     Assert-True ($null -ne $n3RefOp -and
-        [string]$n3RefOp.operation.lifecycle -ceq 'manual-review' -and
-        @($n3RefOp.operation.errors).Count -eq 2 -and
+        [string]$n3RefOp.operation.lifecycle -ceq 'inconsistent' -and
+        @($n3RefOp.operation.errors).Count -eq 1 -and
         [string]$n3RefOp.operation.errors[0] -ceq 'planned operation 的 target/quarantine namespace 不一致。' -and
-        [string]$n3RefOp.operation.errors[1] -ceq 'plan policy SHA 已漂移；当前严格写路径不可执行该计划。') `
-        '纯参考解析器对该 run 必须产出 :4214 覆盖形状（分叉钉；变红即参考路径已改向）。'
+        @($n3RefOp.operation.safeActions).Count -eq 1 -and
+        [string]$n3RefOp.operation.safeActions[0] -ceq 'manual-review' -and
+        -not [bool]$n3RefOp.operation.policyCompatible -and
+        $null -eq $n3RefOp.operation.transactionSchemaVersion -and
+        -not [bool]$n3RefOp.operation.targetPresent -and
+        -not [bool]$n3RefOp.operation.quarantinePresent) `
+        '纯参考解析器对 approved plan + 无 transaction + 双 absent namespace 必须与生产 C# 保持 inconsistent 单错误。'
+
+    # C# approved-missing fast path 反例：quarantine directory 存在时必须回退，
+    # 不得把它误判为双 absent namespace。
+    [void][IO.Directory]::CreateDirectory($n3RunInconsistentDrift.quarantinePath)
+    $n3QuarantineDirectoryScan = Invoke-CodexSafeTreeDeleteStatusFastScan `
+        -RunItems @(Get-Item -LiteralPath $n3RunInconsistentDrift.runDirectory -Force) `
+        -Policy $n3RefPolicy -FullEvidenceRoot $n3Evidence `
+        -MetricsState (New-CodexSafeTreeDeleteMetricsState -Phase 'status') -DegreeOfParallelism 1
+    $n3QuarantineDirectoryResult = $n3QuarantineDirectoryScan[[string]$n3RunInconsistentDrift.runDirectory]
+    Assert-True (-not [bool]$n3QuarantineDirectoryResult.Handled) `
+        'approved-missing fast path 在 quarantine directory 存在时必须 fallback。'
 
     # Slice 42（续）：PS 快路径 record A 分支直调钉。receipt 在 target 仍是目录时签发，
     # 随后 target 被文件替换（模拟扫描→worker 执行间的 TOCTOU 窗口）；直调必须命中

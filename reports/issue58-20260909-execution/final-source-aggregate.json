@@ -1,0 +1,53 @@
+{
+  "status": "DONE_WITH_CONCERNS",
+  "scannerSha256": "eb85ca87ea26fd07a03d853d4aa54e60629c3268aa0bed673b6c49e2898399fe",
+  "runs": [
+    {
+      "semanticSha256": "a28c4eeca93d992a08b7f4ebf13e08884d8695cb6f9e4b72a0ac12ec2ee81c63",
+      "residualPids": [],
+      "complete": false,
+      "operationCount": 4467,
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "parseSucceeded": true,
+      "statusElapsedMs": 43543,
+      "elapsedMs": 45613,
+      "name": "final-csharp-cold-1",
+      "jobEmpty": true
+    },
+    {
+      "semanticSha256": "a28c4eeca93d992a08b7f4ebf13e08884d8695cb6f9e4b72a0ac12ec2ee81c63",
+      "residualPids": [],
+      "complete": false,
+      "operationCount": 4467,
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "parseSucceeded": true,
+      "statusElapsedMs": 22108,
+      "elapsedMs": 23643,
+      "name": "final-csharp-cold-2",
+      "jobEmpty": true
+    },
+    {
+      "semanticSha256": "a28c4eeca93d992a08b7f4ebf13e08884d8695cb6f9e4b72a0ac12ec2ee81c63",
+      "residualPids": [],
+      "complete": false,
+      "operationCount": 4467,
+      "exitCode": 0,
+      "wrapperExitCode": 0,
+      "parseSucceeded": true,
+      "statusElapsedMs": 22782,
+      "elapsedMs": 24364,
+      "name": "final-csharp-cold-3",
+      "jobEmpty": true
+    }
+  ],
+  "allColdPassed": true,
+  "semanticSame": true,
+  "moduleBoundaryExitCode": 0,
+  "gitDiffCheckExitCode": 0,
+  "oldExecutionN1": "historical DONE_WITH_CONCERNS, not final evidence",
+  "oldComparisonN1": "historical DONE_WITH_CONCERNS, not final evidence",
+  "reference": "known slow oracle limitation; not retried",
+  "deployment": "not deployed"
+}

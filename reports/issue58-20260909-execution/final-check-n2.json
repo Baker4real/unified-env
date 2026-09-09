@@ -1,0 +1,24 @@
+{
+  "capturedAtUtc": "2026-09-09T02:08:35.8172214+00:00",
+  "psParse": {
+    "files": 17,
+    "exitCode": 0,
+    "errors": []
+  },
+  "moduleBoundaries": {
+    "exitCode": 1,
+    "log": "final-module-boundaries.txt"
+  },
+  "gitDiffCheck": {
+    "exitCode": 0,
+    "log": "final-git-diff-check.txt"
+  },
+  "pooledSource": {
+    "path": "scripts/lib/CodexSafeTreeDeleteStatusScan.cs",
+    "sha256": "692648f55bca38ff733ae941fa8b76f853854ae155d3159c5a3b8db7acdb39fd",
+    "strategy": "ArrayPool<byte>.Shared; Return(buffer,true) in nested finally; no pooled experiment switch; no diagnostic counters"
+  },
+  "pooledEvidence": "pooled-buffer-check-final.json",
+  "formalColdRunsStarted": false,
+  "deployStarted": false
+}

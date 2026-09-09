@@ -1,0 +1,69 @@
+{
+  "artifactType": "issue58.n1-bounded-process",
+  "ownerTokenSha256": "d64ae1e90145885b7a3ce5755c4b3ea04f543a84d5b87086eb1db3614e98d5b3",
+  "tokenIssuedAtUtc": "2026-09-09T01:28:30.1970334+00:00",
+  "lifetime": "task-scoped",
+  "tokenChannel": "child-process-environment",
+  "status": "failed",
+  "processState": "exited",
+  "launchIntent": {
+    "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+    "expectedExitCode": 0,
+    "readiness": "token/PID/starttime/exe/hash/parent receipt",
+    "arguments": [
+      "-NoLogo",
+      "-NoProfile",
+      "-File",
+      "D:\\agents\\projects\\统一环境\\reports\\issue58-20260909-execution\\child-gate.ps1",
+      "-Payload",
+      "D:\\agents\\projects\\统一环境\\reports\\issue58-20260909-execution\\synthetic-child.ps1",
+      "-PayloadArguments",
+      "pipe-timeout"
+    ],
+    "cwd": "D:\\agents\\projects\\统一环境",
+    "readinessTimeoutMs": 10000,
+    "deadlineMs": 3500
+  },
+  "processId": 67128,
+  "osStartTimeUtc": "2026-09-09T01:28:30.2156090Z",
+  "osExecutable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+  "osParentProcessId": 35960,
+  "osObservation": "verified",
+  "identityVerified": true,
+  "childReceipt": {
+    "executableSha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139",
+    "parentProcessId": 35960,
+    "startTimeUtc": "2026-09-09T01:28:30.2156090Z",
+    "tokenSha256": "d64ae1e90145885b7a3ce5755c4b3ea04f543a84d5b87086eb1db3614e98d5b3",
+    "version": "7.6.5",
+    "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+    "processId": 67128
+  },
+  "exitCode": 0,
+  "timedOut": true,
+  "elapsedMs": 3511,
+  "completedBeforeDeadline": false,
+  "completionObservedMs": null,
+  "cleanupMs": 60,
+  "jobEmpty": true,
+  "residualPids": [],
+  "parseSucceeded": false,
+  "complete": null,
+  "operationCount": null,
+  "error": null,
+  "stdout": "stdout.json",
+  "stderr": "stderr.txt",
+  "cleanupIdentities": [
+    {
+      "startTimeUtc": "2026-09-09T01:28:30.8601539Z",
+      "verified": true,
+      "processId": 62796
+    },
+    {
+      "startTimeUtc": "2026-09-09T01:28:31.0574533Z",
+      "verified": false,
+      "processId": 64116
+    }
+  ],
+  "wrapperExitCode": 1
+}

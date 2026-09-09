@@ -1,0 +1,26 @@
+{
+  "leafCalls": 126141,
+  "setupMs": 943,
+  "writeOperations": 59957,
+  "readBytes": 5294033455,
+  "leafWorkMs": 304527.5763,
+  "activeLeaves": 0,
+  "gcPauseMs": 3526.616,
+  "cpuMs": 110437.5,
+  "allocatedBytes": 21806151968,
+  "scannerSourceSha256": "c32325dd668c5077f53876a24615245dd26b173e966460ab915dcc6f4d791705",
+  "readOperations": 290124,
+  "pooledBuffer": true,
+  "writeBytes": 5587555,
+  "gcCollections": [
+    854,
+    182,
+    15
+  ],
+  "entryExitCode": 0,
+  "mode": "pooled",
+  "note": "仅 buffer 租借策略变化；read/hash/identity 与 DOP/组/缓存保持不变。",
+  "peakLeaves": 23,
+  "statusElapsedMs": 37447,
+  "peakWorkingSetBytes": 5942898688
+}

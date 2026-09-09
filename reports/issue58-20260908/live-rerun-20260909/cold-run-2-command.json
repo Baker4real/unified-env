@@ -1,0 +1,27 @@
+{
+  "name": "cold-run-2",
+  "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+  "arguments": [
+    "-NoLogo",
+    "-NoProfile",
+    "-File",
+    "D:\\agents\\projects\\统一环境\\reports\\issue58-20260908\\cold-run.ps1",
+    "-DeadlineMs",
+    "180000",
+    "-OutputPath",
+    "D:\\agents\\projects\\统一环境\\reports\\issue58-20260908\\live-rerun-20260909\\cold-run-2.json",
+    "-StdoutPath",
+    "D:\\agents\\projects\\统一环境\\reports\\issue58-20260908\\live-rerun-20260909\\cold-run-2-stdout.json"
+  ],
+  "startedAtUtc": "2026-09-08T16:53:41.0539964+00:00",
+  "processId": 55108,
+  "exitCode": 0,
+  "watchdogTimedOut": false,
+  "observedStatusChild": null,
+  "observationError": "Exception calling \"GetVersionInfo\" with \"1\" argument(s): \"The path is empty. (Parameter 'path')\"",
+  "error": null,
+  "stdout": "elapsedMs=106006 timedOut=False exitCode=0 stdoutBytes=5420097 ops=4467 error=\r\ncold-run-done\r\n",
+  "stderr": "",
+  "elapsedMs": 108583,
+  "finishedAtUtc": "2026-09-08T16:55:29.6373191+00:00"
+}

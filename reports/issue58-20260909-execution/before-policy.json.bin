@@ -1,0 +1,316 @@
+{
+  "artifactType": "env-governance.codex-safe-tree-delete-policy",
+  "schemaVersion": 4,
+  "entries": [
+    {
+      "id": "active-local-skills",
+      "capabilityRoot": "D:\\Codex\\.codex\\skills",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\Codex\\.codex\\skills\\.system"
+      ]
+    },
+    {
+      "id": "codex-backup-state",
+      "capabilityRoot": "D:\\Codex\\.codex\\backups_state",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-run-evidence",
+      "capabilityRoot": "D:\\agents\\run-evidence",
+      "minimumDescendantDepth": 2,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\agents\\run-evidence\\safe-tree-delete"
+      ]
+    },
+    {
+      "id": "codex-temp",
+      "capabilityRoot": "D:\\Codex\\tmp",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "agents-temp",
+      "capabilityRoot": "D:\\agents\\tmp",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-legacy-temp",
+      "capabilityRoot": "D:\\Codex\\.tmp",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-managed-temp",
+      "capabilityRoot": "D:\\Codex\\.codex\\tmp",
+      "minimumDescendantDepth": 2,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "dotnet-bundle-extraction-cache",
+      "capabilityRoot": "D:\\Codex\\temp\\.net",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\Codex\\temp\\.net\\CodexProviderSync"
+      ]
+    },
+    {
+      "id": "environment-reports",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\reports",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-hook-pycache",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\managed\\codex-hooks\\hooks\\__pycache__",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-hook-lib-pycache",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\managed\\codex-hooks\\hooks\\lib\\__pycache__",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-scripts-pycache",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\scripts\\__pycache__",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-tests-pycache",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\tests\\__pycache__",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-scratch",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\.scratch",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-retired-project-state",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\.codex",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "empty-project-state",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "environment-remote-attachments",
+      "capabilityRoot": "D:\\agents\\projects\\统一环境\\.codex-remote-attachments",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-app-build",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-verification-build",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-core-bin",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-core-obj",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-app-bin",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-app-obj",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-verification-bin",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-verification-obj",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-intermediate-ui-references",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\assets\\ui-references",
+      "minimumDescendantDepth": 3,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-account-switch-rust-target",
+      "capabilityRoot": "D:\\Codex\\projects\\codex-account-switch\\src-tauri\\target",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-account-switch-node-modules",
+      "capabilityRoot": "D:\\Codex\\projects\\codex-account-switch\\node_modules",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": false,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-account-switch-dist",
+      "capabilityRoot": "D:\\Codex\\projects\\codex-account-switch\\dist",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": false,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-account-switch-tauri-gen",
+      "capabilityRoot": "D:\\Codex\\projects\\codex-account-switch\\src-tauri\\gen",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": false,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "cc-switch-rust-target",
+      "capabilityRoot": "D:\\agents\\projects\\cc-switch\\src-tauri\\target",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "cc-switch-node-modules",
+      "capabilityRoot": "D:\\agents\\projects\\cc-switch\\node_modules",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": true,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "sub2api-frontend-node-modules",
+      "capabilityRoot": "D:\\agents\\projects\\开源分发 api\\sub2api\\frontend\\node_modules",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": true,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "serena-python-venv",
+      "capabilityRoot": "D:\\agents\\projects\\serena\\.venv",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "kimi-switch-rust-target",
+      "capabilityRoot": "D:\\agents\\projects\\kimi-switch\\target",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": true,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "kimi-switch-dist",
+      "capabilityRoot": "D:\\agents\\projects\\kimi-switch\\dist",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "allowHardLinks": false,
+      "allowInternalDirectoryJunctions": false,
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-user-temp",
+      "capabilityRoot": "D:\\Codex\\temp",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\Codex\\temp\\.net"
+      ]
+    },
+    {
+      "id": "codex-visualizations",
+      "capabilityRoot": "D:\\Codex\\.codex\\visualizations",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "hermes-retired-staging",
+      "capabilityRoot": "D:\\agents\\projects\\hermes-retired",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "hermes-retired-data-children",
+      "capabilityRoot": "D:\\agents\\projects\\hermes-retired\\hermes-data",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "codex-memories",
+      "capabilityRoot": "D:\\Codex\\.codex\\memories",
+      "minimumDescendantDepth": 2,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\Codex\\.codex\\memories\\extensions\\ad_hoc"
+      ]
+    }
+  ]
+}

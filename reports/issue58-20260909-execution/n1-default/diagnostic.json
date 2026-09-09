@@ -1,0 +1,26 @@
+{
+  "leafWorkMs": 1918199.7782,
+  "entryExitCode": 0,
+  "peakWorkingSetBytes": 6013829120,
+  "readOperations": 290124,
+  "peakLeaves": 32,
+  "gcPauseMs": 5315.645,
+  "writeOperations": 59952,
+  "statusElapsedMs": 104702,
+  "writeBytes": 5587000,
+  "innerDop": 32,
+  "gcCollections": [
+    949,
+    278,
+    121
+  ],
+  "allocatedBytes": 155755243512,
+  "logicalProcessors": 20,
+  "cpuMs": 196078.125,
+  "setupMs": 914,
+  "leafCalls": 126141,
+  "readBytes": 5294033455,
+  "note": "leafWorkMs 为并行累计工作量，不是墙钟；进程 IO 包含 stdout，不代表 evidence 写入。",
+  "observedThreadCountAtEnd": 49,
+  "activeLeaves": 0
+}

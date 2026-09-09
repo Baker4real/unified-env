@@ -1,0 +1,1 @@
+{"command":"pwsh -NoLogo -NoProfile -NonInteractive -File .\\tests\\Test-CodexSafeTreeDeleteStatus.ps1","exitCode":0,"stdout":"reports/issue58-20260909-execution/status-final-source-20260909.stdout.txt","stderr":"reports/issue58-20260909-execution/status-final-source-20260909.stderr.txt"}

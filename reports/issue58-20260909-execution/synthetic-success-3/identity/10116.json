@@ -1,0 +1,9 @@
+{
+  "tokenSha256": "7dc0780dbf7c907ec32fae1b8dfbdfa7c1132f3d614e032a06fdaf38ee492eb3",
+  "parentProcessId": 53812,
+  "version": "7.6.5",
+  "executableSha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139",
+  "processId": 10116,
+  "executable": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+  "startTimeUtc": "2026-09-09T01:24:05.5873332Z"
+}

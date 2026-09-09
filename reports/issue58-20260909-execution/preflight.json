@@ -1,0 +1,85 @@
+{
+  "phase": "N1",
+  "rawExitCodes": {},
+  "error": null,
+  "observation": null,
+  "environment": [
+    {
+      "value": null,
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN",
+      "target": "Process",
+      "default": true
+    },
+    {
+      "value": null,
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN",
+      "target": "User",
+      "default": true
+    },
+    {
+      "value": null,
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN",
+      "target": "Machine",
+      "default": true
+    },
+    {
+      "value": null,
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK",
+      "target": "Process",
+      "default": true
+    },
+    {
+      "value": null,
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK",
+      "target": "User",
+      "default": true
+    },
+    {
+      "value": null,
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK",
+      "target": "Machine",
+      "default": true
+    },
+    {
+      "value": null,
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST",
+      "target": "Process",
+      "default": true
+    },
+    {
+      "value": null,
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST",
+      "target": "User",
+      "default": true
+    },
+    {
+      "value": null,
+      "name": "CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST",
+      "target": "Machine",
+      "default": true
+    }
+  ],
+  "source": [
+    {
+      "sha256": "f4efae344c995a88f25f1117a92440c20f3a3809b5c82302fee0521614648e5a",
+      "path": "scripts/lib/CodexSafeTreeDelete.ps1"
+    },
+    {
+      "sha256": "d11ac7cb480e15af1cf2bfeaf4550244441cc0aa7e1bd74c906b18ce8d0c6fd0",
+      "path": "scripts/lib/CodexSafeTreeDeleteStatusScan.cs"
+    },
+    {
+      "sha256": "5b8187960929fc7949024418bda6fe51b4b080256871d70cde74044a0541d7ad",
+      "path": "scripts/lib/CodexHostSafetyNativeLoader.ps1"
+    },
+    {
+      "sha256": "18cafa665dd67cac7f55e694424c4c277364d7090606ee41e7cd38b69cfd5c98",
+      "path": "scripts/Invoke-CodexSafeTreeDelete.ps1"
+    },
+    {
+      "sha256": "883da8be41e2b86349327f62aaebcf437cd889713830bda31220ac0ec8a5a259",
+      "path": "reports/issue58-20260908/evidence-fingerprint.ps1"
+    }
+  ],
+  "scope": "仓库直接入口诊断，不是宿主 gate 验收；仅比较冻结管线基线，保留已知 23-op 分叉。"
+}

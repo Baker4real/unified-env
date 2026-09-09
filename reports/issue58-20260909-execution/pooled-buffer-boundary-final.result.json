@@ -1,0 +1,1 @@
+{"command":"pwsh -NoLogo -NoProfile -NonInteractive -File reports/issue58-20260909-execution/test-pooled-buffer.ps1","exitCode":0,"stdout":"reports/issue58-20260909-execution/pooled-buffer-boundary-final.stdout.txt","stderr":"reports/issue58-20260909-execution/pooled-buffer-boundary-final.stderr.txt"}

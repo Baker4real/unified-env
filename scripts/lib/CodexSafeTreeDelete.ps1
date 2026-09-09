@@ -4232,7 +4232,8 @@ function Resolve-CodexSafeTreeDeleteStatusOperation {
                 }
                 }
             }
-            if (-not $policyCompatible -and $null -eq $transactionSchemaVersion) {
+            if (-not $policyCompatible -and $null -eq $transactionSchemaVersion -and
+                -not ($targetEntryType -ceq 'absent' -and $quarantineEntryType -ceq 'absent')) {
                 $complete = $false
                 $lifecycle = 'manual-review'
                 $safeActions = @('manual-review')

@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -1101,8 +1102,7 @@ namespace CodexSafeTreeDelete
             string quarantinePath = DeriveQuarantinePath(targetPath, GetString(plan, "generationId"));
             NamespaceState targetState = ProbeNamespace(targetPath);
             NamespaceState quarantineState = ProbeNamespace(quarantinePath);
-            if (targetState.Present ||
-                (quarantineState.Present && quarantineState.EntryType != "directory"))
+            if (targetState.Present || quarantineState.Present)
             {
                 return false;
             }
@@ -3354,14 +3354,15 @@ namespace CodexSafeTreeDelete
         private static byte[] HashHandleContents(SafeFileHandle handle)
         {
             const int bufferSize = 1024 * 1024;
-            byte[] buffer = new byte[bufferSize];
-            IncrementalHash incremental = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
+            IncrementalHash incremental = null;
             try
             {
+                incremental = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                 long offset = 0L;
                 while (true)
                 {
-                    int read = RandomAccess.Read(handle, buffer, offset);
+                    int read = RandomAccess.Read(handle, buffer.AsSpan(0, bufferSize), offset);
                     if (read == 0)
                     {
                         break;
@@ -3373,7 +3374,14 @@ namespace CodexSafeTreeDelete
             }
             finally
             {
-                incremental.Dispose();
+                try
+                {
+                    if (incremental != null) incremental.Dispose();
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer, true);
+                }
             }
         }
 

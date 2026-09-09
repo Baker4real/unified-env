@@ -1,0 +1,8 @@
+STEP s1-bootstrap
+STEP s1-deploy
+STEP s2-bootstrap
+STEP s2-recover
+S3 takeover-after-recovery OK
+STEP s4-deploy30
+DEPLOYMENT-TESTS OK
+DEPLOYMENT DONE

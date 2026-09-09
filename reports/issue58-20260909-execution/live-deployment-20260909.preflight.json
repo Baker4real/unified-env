@@ -1,0 +1,11 @@
+{
+  "closureSha256": "95d60477f6740b43ab2a17f43649bba8b4fc2e679aa276fbb3a261a9081b4d8f",
+  "closureRowCount": 110,
+  "expectedClosure": "95d60477f6740b43ab2a17f43649bba8b4fc2e679aa276fbb3a261a9081b4d8f",
+  "markerPresent": false,
+  "deploymentRunPresent": false,
+  "latestReceiptPath": "D:\\Codex\\.codex\\state\\safe-tree-delete-deployment\\deployments\\gate-failure-hardening-20260902\\final-receipt.json",
+  "latestTargetClosure": "7794e88271ff4e391289960d927f0432b51fba727f40709d75b4c138df588e5c",
+  "expectedPrevious": "7794e88271ff4e391289960d927f0432b51fba727f40709d75b4c138df588e5c",
+  "preconditions": true
+}

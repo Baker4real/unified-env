@@ -28,7 +28,7 @@ Plan 阶段自 2026-08-27（#56 Wave A）默认走 C# 单遍 walker（`scripts/l
 
 Status 的 C# fast scan 只裁决 producer 规范形态输入，其余回退 `Resolve-CodexSafeTreeDeleteStatusOperation`；`CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN=0` 强制参考路径。改认证链时须保留 fast/slow 等价验证。#49 的 2026-08-23 验收是历史样本，不覆盖 #58 的巨型 plan 回归。
 
-处理 Status 性能、approved-plan receipt 或部署验收时，读性能 spec 的「Status 冷启动与大 plan 回退（#49 / #58）」节：该处维护 receipt 复用、live plan/policy 重读边界和当前未达标状态。Apply/Purge 的 `SessionHashCache` 不属于此优化；源码发布、宿主委托路径和正式部署验收分别核验。
+处理 Status 性能、approved-plan receipt 或部署验收时，读性能 spec 的「Status 冷启动与大 plan 回退（#49 / #58）」节：该处维护 receipt 复用、live plan/policy 重读边界、#58 的 `DONE_WITH_CONCERNS` 验收状态和剩余限制。Apply/Purge 的 `SessionHashCache` 不属于此优化；源码发布、宿主委托路径和正式部署验收分别核验。
 
 ## 测试
 

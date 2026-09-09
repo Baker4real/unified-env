@@ -1,0 +1,23 @@
+{
+  "receiptPath": "D:\\Codex\\.codex\\state\\safe-tree-delete-deployment\\deployments\\issue58-20260909\\final-receipt.json",
+  "receiptExists": true,
+  "phaseJournal": [
+    "10-gate-bootstrap-started.json",
+    "20-shim-cutover.json",
+    "30-marker-active.json",
+    "40-legacy-drained.json",
+    "50-source-switch-started.json",
+    "60-source-switched.json",
+    "70-validation-passed.json",
+    "80-complete.json"
+  ],
+  "markerPresent": false,
+  "liveShimSha256": "54dbcd78b2e763f6ed0c78faf6d5d31747a3603bffb6993925a6312602f4aa24",
+  "smokeExitCode": 0,
+  "smokeStdout": "reports/issue58-20260909-execution/live-shim-status-20260909.stdout.json",
+  "smokeStderr": "reports/issue58-20260909-execution/live-shim-status-20260909.stderr.txt",
+  "liveClosureSha256": "95d60477f6740b43ab2a17f43649bba8b4fc2e679aa276fbb3a261a9081b4d8f",
+  "liveClosureRows": 110,
+  "liveIdsSha256": "3a78029c...cdc53",
+  "liveSemanticComparison": "encoding-sensitive-not-claimed"
+}

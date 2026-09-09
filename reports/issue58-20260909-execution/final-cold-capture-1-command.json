@@ -1,0 +1,1 @@
+{"command":"invoke-bounded final-cold-payload final-cold-capture-1 DeadlineMs=180000","exitCode":0,"payload":"reports/issue58-20260909-execution/final-cold-payload.ps1"}

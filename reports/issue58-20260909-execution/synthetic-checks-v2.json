@@ -1,0 +1,60 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "case": "success",
+      "childExitCode": 0,
+      "passed": true,
+      "rawExitCode": 0,
+      "jobEmpty": true
+    },
+    {
+      "case": "timeout",
+      "childExitCode": -1,
+      "passed": true,
+      "rawExitCode": 1,
+      "jobEmpty": true
+    },
+    {
+      "case": "bad-json",
+      "childExitCode": 0,
+      "passed": true,
+      "rawExitCode": 1,
+      "jobEmpty": true
+    },
+    {
+      "case": "pipe-timeout",
+      "childExitCode": 0,
+      "passed": true,
+      "rawExitCode": 1,
+      "jobEmpty": true
+    },
+    {
+      "case": "missing-os",
+      "childExitCode": 0,
+      "passed": true,
+      "rawExitCode": 1,
+      "jobEmpty": true
+    },
+    {
+      "case": "fixture-write-restore-create-delete-rename",
+      "counts": [
+        8,
+        1,
+        1,
+        1
+      ],
+      "scratch": "D:\\agents\\projects\\统一环境\\.scratch\\safe-tree-delete-tests-issue58-n1-ea9f65bcc5034fda8f637a8c04472104",
+      "passed": true
+    },
+    {
+      "case": "overflow-invalid",
+      "injected": true,
+      "passed": true
+    },
+    {
+      "passed": true,
+      "case": "watcher-unavailable-invalid"
+    }
+  ]
+}

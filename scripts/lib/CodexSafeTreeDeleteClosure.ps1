@@ -24,6 +24,8 @@ function Get-CodexSafeTreeDeleteClosureFixedPaths {
         'scripts/lib/CodexSafeTreeDeletePlanSnapshot.cs',
         'scripts/lib/CodexSafeTreeDeleteThreadJournal.cs',
         'scripts/lib/CodexSafeTreeDeleteParallelPurge.cs',
+        'scripts/lib/CodexSafeTreeDeleteClosure.ps1',
+        'scripts/lib/CodexSafeTreeDeleteStatusScan.cs',
         'managed/safe-tree-delete/policy.json',
         'scripts/Deploy-CodexSafeTreeDelete.ps1',
         'scripts/invoke-codex-safe-tree-delete-gate-shim.ps1'

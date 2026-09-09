@@ -1,0 +1,89 @@
+{
+  "status": "DONE_WITH_CONCERNS",
+  "acceptanceDate": "2026-09-09",
+  "source": {
+    "statusScanSha256": "eb85ca87ea26fd07a03d853d4aa54e60629c3268aa0bed673b6c49e2898399fe",
+    "closureSha256": "95d60477f6740b43ab2a17f43649bba8b4fc2e679aa276fbb3a261a9081b4d8f",
+    "modifiedFiles": [
+      "modules/manifest.json",
+      "scripts/lib/CodexSafeTreeDelete.ps1",
+      "scripts/lib/CodexSafeTreeDeleteClosure.ps1",
+      "scripts/lib/CodexSafeTreeDeleteStatusScan.cs",
+      "tests/Test-CodexSafeTreeDeleteStatus.ps1",
+      "reports/issue58-20260909-execution/final-cold-payload.ps1",
+      "reports/issue58-20260909-execution/final-reference-payload.ps1"
+    ],
+    "preservedUserModifiedFile": "docs/environments/zi-xi-shi.md"
+  },
+  "commandEvidence": [
+    {
+      "command": "pwsh -NoLogo -NoProfile -NonInteractive -File tests/Test-CodexSafeTreeDeleteStatus.ps1",
+      "exitCode": 0,
+      "evidence": "reports/issue58-20260909-execution/status-final-csharp-20260909.result.json"
+    },
+    {
+      "command": "pwsh -NoLogo -NoProfile -NonInteractive -File reports/issue58-20260909-execution/test-pooled-buffer.ps1",
+      "exitCode": 0,
+      "evidence": "reports/issue58-20260909-execution/pooled-buffer-boundary-final.result.json",
+      "limit": "源码边界证明 Return(buffer,true)，非运行时数组清零观测"
+    },
+    {
+      "command": "pwsh -NoLogo -NoProfile -NonInteractive -File tests/Test-CodexSafeTreeDeleteDeployment.ps1",
+      "exitCode": 0,
+      "evidence": "reports/issue58-20260909-execution/deployment-final-20260909.result.json"
+    },
+    {
+      "command": "node scripts/Validate-ModuleBoundaries.cjs --json; git diff --check",
+      "exitCode": 0,
+      "evidence": [
+        "reports/issue58-20260909-execution/module-boundaries-final-source.json",
+        "reports/issue58-20260909-execution/git-diff-check-final-source.txt"
+      ],
+      "result": "3372 files / 5 modules"
+    }
+  ],
+  "coldRuns": {
+    "operationCount": 4467,
+    "wrapperCompleted": true,
+    "statusComplete": false,
+    "handled": 4345,
+    "fallback": 122,
+    "semanticSha256": "a28c4eeca93d992a08b7f4ebf13e08884d8695cb6f9e4b72a0ac12ec2ee81c63",
+    "operationIds一致": true,
+    "runs": [
+      { "name": "final-csharp-cold-1", "result": "reports/issue58-20260909-execution/final-csharp-cold-1/result.json", "statusElapsedMs": 43543, "elapsedMs": 45613, "exitCode": 0, "parseSucceeded": true, "jobEmpty": true },
+      { "name": "final-csharp-cold-2", "result": "reports/issue58-20260909-execution/final-csharp-cold-2/result.json", "statusElapsedMs": 22108, "elapsedMs": 23643, "exitCode": 0, "parseSucceeded": true, "jobEmpty": true },
+      { "name": "final-csharp-cold-3", "result": "reports/issue58-20260909-execution/final-csharp-cold-3/result.json", "statusElapsedMs": 22782, "elapsedMs": 24364, "exitCode": 0, "parseSucceeded": true, "jobEmpty": true }
+    ]
+  },
+  "reference": {
+    "result": "reports/issue58-20260909-execution/final-reference-1/result.json",
+    "outcome": "timed out full reference",
+    "cleanup": { "timedOut": true, "cleanupMs": 226, "jobEmpty": true, "residualPids": [], "cleanupIdentities": "verified" },
+    "knownLimit": "bounded cleanup receipt valid; complete slow-oracle output was not formed"
+  },
+  "staleEvidence": [
+    "reports/issue58-20260909-execution/final-check-n2.json",
+    "reports/issue58-20260909-execution/comparison-n1.json",
+    "reports/issue58-20260909-execution/execution-n1.json"
+  ],
+  "deployment": {
+    "status": "deployed",
+    "deploymentId": "issue58-20260909",
+    "targetClosureSha256": "95d60477f6740b43ab2a17f43649bba8b4fc2e679aa276fbb3a261a9081b4d8f",
+    "preflight": "reports/issue58-20260909-execution/live-deployment-20260909.preflight.json",
+    "bootstrap": { "exitCode": 0, "result": "reports/issue58-20260909-execution/live-deployment-20260909.bootstrap.result.json" },
+    "deploy": { "exitCode": 0, "result": "reports/issue58-20260909-execution/live-deployment-20260909.deploy.result.json" },
+    "receipt": "D:/Codex/.codex/state/safe-tree-delete-deployment/deployments/issue58-20260909/final-receipt.json",
+    "phaseJournal": "D:/Codex/.codex/state/safe-tree-delete-deployment/deployments/issue58-20260909/phase-journal/",
+    "markerPresent": false,
+    "liveShimSha256": "54dbcd78b2e763f6ed0c78faf6d5d31747a3603bffb6993925a6312602f4aa24",
+    "liveClosureSha256": "95d60477f6740b43ab2a17f43649bba8b4fc2e679aa276fbb3a261a9081b4d8f",
+    "liveClosureRows": 110,
+    "statusSmoke": { "exitCode": 0, "parseSucceeded": true, "operationCount": 4467, "complete": false, "operationIdsSha256": "3a78029c...cdc53", "fullSemanticSha256": "not-claimed", "liveSemanticComparison": "encoding-sensitive-not-claimed", "stdout": "reports/issue58-20260909-execution/live-shim-status-20260909.stdout.json", "stderr": "reports/issue58-20260909-execution/live-shim-status-20260909.stderr.txt" },
+    "readback": "reports/issue58-20260909-execution/live-deployment-20260909.readback.json"
+  },
+  "unverified": [
+    "性能 A/B 仅为一次方向性证据，不代表稳定百分比"
+  ]
+}

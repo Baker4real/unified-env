@@ -1,0 +1,42 @@
+{
+  "capturedAtUtc": "2026-09-09T01:35:10.0556022+00:00",
+  "files": [
+    {
+      "name": "invoke-bounded.ps1",
+      "length": 9870,
+      "sha256": "1cdee725c6bf61d6e7ca1b679b6cdc74ee135c3c9b212e2cf674ce6b6cb6fbf0"
+    },
+    {
+      "name": "child-gate.ps1",
+      "length": 1193,
+      "sha256": "00447651eea6540c0062598143eef39935c0a5a69714a80c978a815cb05edd9b"
+    },
+    {
+      "name": "ProcessObservation.cs",
+      "length": 6388,
+      "sha256": "0faec186ac9df8a037b1dc8570e3ad863fbc4af6953bc61f896f2e0752f4a326"
+    },
+    {
+      "name": "prepare-runtime.ps1",
+      "length": 813,
+      "sha256": "8c4c6fc594b62b6420449c2a19e14218898b212bca7f4e865a1a0cece26bb9cc"
+    },
+    {
+      "name": "diagnostic-payload.ps1",
+      "length": 2259,
+      "sha256": "6337d9c76b0fa3976522abf5cc4d3837d7aff3a0e90787b65b0cd3338c700d18"
+    },
+    {
+      "name": "fingerprint-payload.ps1",
+      "length": 366,
+      "sha256": "b1a61135a0cbf47896171e584bed602688908b5084d6aca11a881227e9f3b4d8"
+    },
+    {
+      "name": "run-n1.ps1",
+      "length": 3395,
+      "sha256": "5e454b9e60bfa35a7d13cc3540994494e6c2b743c482902fba1b1f80bec9ac9e"
+    }
+  ],
+  "syntheticChecksSha256": "da40f40b419ac778f475842356e10fe03e1e795dc7fad6a2340bdc185106ddf0",
+  "phase": "before 指纹进行中；真实 Status 尚未启动"
+}
