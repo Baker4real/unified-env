@@ -18,7 +18,7 @@ safe delete 的宿主公开入口是 gate shim `D:\Codex\.codex\scripts\invoke-s
 ## 权威合同
 
 - 删除语义与生产 policy：`docs/specs/2026-07-24-safe-tree-delete-capability.md`
-- `retired-evidence-root` 独立合同：`docs/specs/2026-09-15-safe-tree-delete-retired-evidence-root.md`。#59 子票实现已闭环：生产 policy 零本用途条目；GitHub 关闭待用户授权，不在本文缓存 live tracker。
+- `retired-evidence-root` 独立合同：`docs/specs/2026-09-15-safe-tree-delete-retired-evidence-root.md`。本用途条目只作一次性许可；生产 policy 不得残留（测试钉死）。live tracker 以 GitHub Issues 为准，不在本文缓存。
 - 性能优化（Plan C# 单遍 walker 已落地、AC1 达标；生产并行 Purge 已接线；端到端 6x 正式验收待环境安静窗口重跑，见 #56）：`docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`
 
 Plan 阶段自 2026-08-27（#56 Wave A）默认走 C# 单遍 walker（`scripts/lib/CodexSafeTreeDeletePlanSnapshot.cs`）；plan.json 合同不变，等价性与双模式回归见 `reports/safe-tree-delete-issue56-20260827/`。生产排障回退：env `CODEX_SAFE_TREE_DELETE_PLAN_CSHARP_WALKER=0` 强制回 PowerShell 三遍路径（仅字符串 '0' 生效）。

@@ -14,7 +14,7 @@ intent: 定义 retired-evidence-root 的安全边界、状态机、一次性授�
 ## 安全边界
 
 - 新用途只允许登记在受管 run-evidence capability 根 `D:\agents\run-evidence` 之下的明确一级目录。每个获批目录是**独立** capability 条目：`minimumDescendantDepth=0`、`rootDeletionPurpose=retired-evidence-root`，运行目标只允许精确 capability root。
-- 解析器识别本用途时，`capabilityRoot` 必须是 run-evidence 父根下的明确一级目录。生产父根是 `D:\agents\run-evidence`；可复现 fixture 必须消费 `tests/New-CodexSafeTreeDeleteRetiredEvidenceRootFixture.ps1` 写出的 `run-evidence-analog` scratch analog。不得把 empty-project-state / retired-project-root 的生产形项目正则套到本用途。生产「只许登记在受管 run-evidence 之下」由生产 policy 与后续撤销票约束，不靠本用途写死唯一绝对父路径。
+- 解析器识别本用途时，`capabilityRoot` 必须是 run-evidence 父根下的明确一级目录。生产父根是 `D:\agents\run-evidence`；可复现 fixture 必须消费 `tests/New-CodexSafeTreeDeleteRetiredEvidenceRootFixture.ps1` 写出的 `run-evidence-analog` scratch analog。不得把 empty-project-state / retired-project-root 的生产形项目正则套到本用途。生产「只许登记在受管 run-evidence 之下」由生产 policy 与同一维护任务中的撤销约束，不靠本用途写死唯一绝对父路径。
 - 父条目 `codex-run-evidence` 保持 `minimumDescendantDepth=2`、`rootDeletionPurpose=none`，并继续精确拒绝 `D:\agents\run-evidence\safe-tree-delete`。不得把 run-evidence 的默认最小后代深度从 2 改为 1。
 - 不得把下列路径登记为本用途：`run-evidence 根`、`safe-tree-delete evidence 根`、任一项目根、workspace 根、其他宽路径，或获批根的后代。同级未登记目录不因邻居获批而获得权限。
 - 生产 CLI 仍不接受 policy/evidence override。本用途的 fixture 只存在于测试 scratch，不得把生产 `D:\agents\run-evidence\` 当 fixture。
@@ -23,7 +23,7 @@ intent: 定义 retired-evidence-root 的安全边界、状态机、一次性授�
 ## 精确目标
 
 - 许可只对登记的完整目录生效。Plan / Apply / Purge / Restore / Status 的运行目标必须精确等于该条目的 `capabilityRoot`，只允许精确 capability root，不授权其后代作为独立目标。
-- 生产将登记两个已获批、已完成使命的一级 evidence 目录；**本文件不写出这两条生产路径**。路径以当时获授权的 live policy 登记为准，不得从历史报告或本文件猜测。
+- 生产只允许把已获批、已完成使命的一级 evidence 目录临时登记为本用途；每次登记的路径以当时获授权的 live policy 为准，**本文件不写出也不缓存生产路径**。不得从历史报告或本文件猜测目标。完成、取消或撤销后，生产 policy 不得残留本用途条目。
 - 目标解析必须同时检查：capability root、精确目标、祖先保护规则、denylist、reparse point、named stream、file identity、目录 identity 和完整 tree manifest。任一失败则失败闭锁。
 
 ## 一次性授权
@@ -90,8 +90,8 @@ Fixture 还提供：
 
 - `parent-only-policy.json`：只含现有四种用途（父条目深度 2 / `none`），供证明一级目录默认被拒绝。
 - `grant-policy.json`：含 `retired-evidence-root` 条目，供策略解析票消费；测试不得把生产 `D:\agents\run-evidence\` 当 fixture。
-- `fixture-manifest.json`：记录路径、policy 路径和身份十六进制，供后续票复用同一 seam。
+- `fixture-manifest.json`：记录路径、policy 路径和身份十六进制，供本用途测试复用同一 seam。
 
 禁止把 fixture 写进生产 `D:\agents\run-evidence\` 或生产 `D:\agents\run-evidence\safe-tree-delete\`。
 
-后续票（Plan 身份绑定、Apply/Purge、生产登记与撤销）必须消费本 seam，不得另起一套目标布局。策略解析票必须让 parser 接受本 seam 的 `grant-policy.json`。不改生产 policy，不 live Apply/Purge。
+本用途的 parser / Plan / Apply / Purge / Restore / Status 与消费许可测试必须消费本 seam，不得另起一套目标布局。策略解析必须接受本 seam 的 `grant-policy.json`。测试不改生产 policy，也不对生产目标 live Apply/Purge。
