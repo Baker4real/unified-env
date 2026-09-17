@@ -539,6 +539,12 @@ try {
     Assert-True `
         ($productionRetiredProjectEntries.Count -eq 0) `
         '完成退役删除后，生产策略不得残留 retired-project-root 授权'
+    $productionRetiredEvidenceEntries = @($productionPolicy.entries | Where-Object {
+        $_.rootDeletionPurpose -ceq 'retired-evidence-root'
+    })
+    Assert-True `
+        ($productionRetiredEvidenceEntries.Count -eq 0) `
+        '完成退役证据删除后，生产策略不得残留 retired-evidence-root 授权'
     $linkAwareProductionExpectations = @(
         [pscustomobject]@{
             id = 'codex-account-switch-rust-target'

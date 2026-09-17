@@ -70,7 +70,7 @@ boolean；v4 缺失时为 `false`，v5 必须显式提供。任一为 `true` 时
 `minimumDescendantDepth=0`、
 `rootDeletionPurpose=rebuildable-build-output`，且运行目标必须精确等于 capability root。
 `minimumDescendantDepth` 通常至少为 1，且
-`rootDeletionPurpose` 必须为 `none`。root 删除只允许三种精确用途：
+`rootDeletionPurpose` 必须为 `none`。现役精确 root 删除用途为：
 
 - capability root 自身是项目根之下的可重建构建产物根时，可设为 0 和
   `rebuildable-build-output`；项目 `.codex` 根不得冒充构建产物。
@@ -81,6 +81,8 @@ boolean；v4 缺失时为 `false`，v5 必须显式提供。任一为 `true` 时
 - capability root 精确匹配 `D:\Codex\projects\<project>` 且该项目已明确退役时，可设为 0 和
   `retired-project-root`。该用途只授权 policy 中逐项登记的 capability root 自身，不授权其
   后代作为独立目标，也不授权其他项目根。
+
+第四种精确 root 删除用途 `retired-evidence-root` 不改写以上三条与 `none` 的语义；其安全边界、状态机、一次性授权、身份绑定、撤销语义与失败闭锁见 `docs/specs/2026-09-15-safe-tree-delete-retired-evidence-root.md`。
 
 生产 policy 只为本项目退役的 `.codex` 精确声明 `empty-project-state`；
 `retired-project-root` 只作为明确退役任务中的临时精确许可，成功 Purge 后必须在同一任务中

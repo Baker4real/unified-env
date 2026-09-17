@@ -1491,7 +1491,8 @@ namespace CodexSafeTreeDelete
             }
             bool targetIsRoot = string.Equals(fullTarget, fullRoot, StringComparison.OrdinalIgnoreCase);
             if ((entry.RootDeletionPurpose == "empty-project-state" ||
-                 entry.RootDeletionPurpose == "retired-project-root") &&
+                 entry.RootDeletionPurpose == "retired-project-root" ||
+                 entry.RootDeletionPurpose == "retired-evidence-root") &&
                 !targetIsRoot)
             {
                 return "safe-delete root 删除用途只允许精确 capability root。";
