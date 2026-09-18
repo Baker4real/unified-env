@@ -311,6 +311,53 @@
       "deniedExactPaths": [
         "D:\\Codex\\.codex\\memories\\extensions\\ad_hoc"
       ]
+    },
+    {
+      "id": "misc-root-artifact-cleanup",
+      "capabilityRoot": "D:\\agents\\projects\\misc",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\agents\\projects\\misc\\AGENTS.md",
+        "D:\\agents\\projects\\misc\\.zcode",
+        "D:\\agents\\projects\\misc\\outputs"
+      ]
+    },
+    {
+      "id": "misc-output-snapshots-cleanup",
+      "capabilityRoot": "D:\\agents\\projects\\misc\\outputs",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": [
+        "D:\\agents\\projects\\misc\\outputs\\20260904-电信用户申诉书-杨俊杰-提交缩写.txt",
+        "D:\\agents\\projects\\misc\\outputs\\20260904-电信用户申诉书-杨俊杰-完整附件.txt",
+        "D:\\agents\\projects\\misc\\outputs\\离职证明-平整.png",
+        "D:\\agents\\projects\\misc\\outputs\\appx-default-volume.log",
+        "D:\\agents\\projects\\misc\\outputs\\check-heihe-uninstall-context.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\clock-countdown-issues-20260915",
+        "D:\\agents\\projects\\misc\\outputs\\dsh-readme-zh.md",
+        "D:\\agents\\projects\\misc\\outputs\\dsh-release.json",
+        "D:\\agents\\projects\\misc\\outputs\\dsh-upload-plan.ts",
+        "D:\\agents\\projects\\misc\\outputs\\final-verify-heihe-removal.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\find-heihe-voice-app.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\heihe-removal-evidence-system.txt",
+        "D:\\agents\\projects\\misc\\outputs\\heihe-removal-evidence-user.txt",
+        "D:\\agents\\projects\\misc\\outputs\\heihe-uninstall-result.txt",
+        "D:\\agents\\projects\\misc\\outputs\\henshin-dark-tech.mp4",
+        "D:\\agents\\projects\\misc\\outputs\\identify-stuck-uninstaller.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\inspect-heihe-leftovers.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\mac-storage-report-final.html",
+        "D:\\agents\\projects\\misc\\outputs\\pelican-seaside.html",
+        "D:\\agents\\projects\\misc\\outputs\\remove-heihe-system-leftovers.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\remove-heihe-user-leftovers.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\run-heihe-uninstall.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\seascape-grayblue-teal-4k.png",
+        "D:\\agents\\projects\\misc\\outputs\\subagent-orchestration-review-record.md",
+        "D:\\agents\\projects\\misc\\outputs\\switch-appx-volume.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\ultraman-battle-4k.png",
+        "D:\\agents\\projects\\misc\\outputs\\verify-heihe-voice-removal.ps1",
+        "D:\\agents\\projects\\misc\\outputs\\visual-qa-agent.md"
+      ]
     }
   ]
 }
