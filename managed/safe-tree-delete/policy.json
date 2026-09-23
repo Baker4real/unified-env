@@ -97,7 +97,9 @@
       "capabilityRoot": "D:\\agents\\knowledge-base\\scripts",
       "minimumDescendantDepth": 1,
       "rootDeletionPurpose": "none",
-      "deniedExactPaths": []
+      "deniedExactPaths": [
+        "D:\\agents\\knowledge-base\\scripts\\dispositions"
+      ]
     },
     {
       "id": "environment-tests-pycache",
