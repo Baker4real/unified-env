@@ -93,6 +93,13 @@
       "deniedExactPaths": []
     },
     {
+      "id": "knowledge-base-scripts-pycache",
+      "capabilityRoot": "D:\\agents\\knowledge-base\\scripts",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
       "id": "environment-tests-pycache",
       "capabilityRoot": "D:\\agents\\projects\\统一环境\\tests\\__pycache__",
       "minimumDescendantDepth": 0,
