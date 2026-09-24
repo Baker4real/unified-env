@@ -58,10 +58,19 @@ intent: 记录自习室设备的受控环境事实与差异
 - 2026-08-31 只对齐过一次文件，未改 bak 文件 ACL。之后 GUI 仍拷不进去，bak 停在旧升级器，更新再次失败。2026-09-07 现场：`bin` 为 `4.39.1.1375`，`bak\Upgrade.exe` 仍为 `4.38.3.9325`，Users 对 bak 文件只有 `RX`。
 - 2026-09-07 已做防复发：把 `bak\Upgrade.exe` 与 `bak\aria2c.exe` 对齐到当时的 `bin`（`4.39.1.1375`），并授予 Users/Authenticated Users `Modify`（含继承）。未提权 GUI 必须能打开 `bak\Upgrade.exe` 写入，否则会复发。同日稍后复核：`bin` 已到 `4.39.2.1561`，`bak` 停在 `4.39.1.1375`，aria2c 哈希仍对齐、计划任务 Ready——这是成功升级后 bak 落后一代的预期态，不是 Users `RX` / `4.38.3` 复发。
 - 受管入口：`D:\Codex\.codex\scripts\uu-bak-align\Invoke-UuBakUpgradeAlign.ps1`（该机 pwsh `D:\Codex\tools\PowerShell\7.6.3\pwsh.exe`）。计划任务 `Codex UU Bak Upgrade Align`（SYSTEM、Highest、开机 + 每小时）在哈希不一致或 ACL 漂移时重对齐。状态：`D:\Codex\.codex\logs\uu-bak-align\last.json`。不要在 bak 不存在的机器上创建 bak。
+
+### 2026-09-24 更新失败：持久代理环境变量 + 代理客户端不自启动
+
+- 9-07 的 bak/ACL 防复发全程正常（当轮 bin 4.40.1.2090 与 bak 哈希一致、任务每小时跑通），本次失败是**新根因**：该机用户级环境变量 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY=http://127.0.0.1:10808` 持久指向 v2rayN，而 v2rayN（7.24.8，`D:\下载\v2rayN-windows-64-SelfContained\v2rayN-windows-64-SelfContained\v2rayN.exe`）平时不自启动；UU 升级器拉起的 `aria2c` 读这些环境变量，代理端口没人监听时下载安装包失败（aria2 走代理超时，`UUREMOTE_SETUP_*` Prefetch 不出现）。2026-09-18 两次、09-24 14:49 一次失败均为此模式；09-24 用户手动打开 v2rayN 后立即更新成功（4.40.1.2090 → 4.42.0.2770，14:58 装入）。
+- 实测排除的方案：aria2 1.23.0 的环境变量 `no_proxy` **只做精确主机名匹配**（写 `netease.com` 后缀不生效，写精确主机名才绕过代理；对照实验在本证据目录），UU 下载 CDN 节点主机名不固定，白名单不可行。删除用户代理环境变量会破坏用户终端代理习惯，未采用。
+- 防复发（2026-09-24）：计划任务 `Codex v2rayN Autostart`——`baker\14224` 登录触发、延迟 90 秒（PT1M30S）、Interactive + Highest（wintun/TUN 需管理员）、无执行时限（PT0S，GUI 常驻不被 72h 限制杀）、`IgnoreNew` 防多实例。开机即拉起 v2rayN，10808 常活，aria2c 走代理稳定成功。不改任何用户环境变量与 v2rayN 配置。回滚：删除该计划任务。
+- 边缘事实：v2rayN 运行中（vgate0 TUN 网卡存在）时，aria2c 直连分支的 c-ares DNS 会报 "Could not contact DNS servers"（系统 resolver 正常，nslookup 经 192.168.1.1 全通）——在该机上做 aria2 直连类实验须避开 TUN 干扰。
+- 仍有效的自救路径：更新失败时手动打开 v2rayN 再点一次「检查更新」（两次实证）。bak 对齐当轮已收敛到 4.42.0.2770。
+- 证据：`D:\agents\run-evidence\uu-remote-update\20260924T065633Z\`（诊断 JSON、aria2 对照实验、任务注册回读）。
 - 版本、进程、任务状态属易变事实；操作前复核 `bin`/`bak` 文件版本、SHA-256 与 Users 是否仍有 `Modify`。
 
 ## UniGetUI（2026-09-07）
 
 - 安装树：`D:\UniGetUI\UniGetUI.exe`（2026.2.7.0，从家里同路径拷入）。桌面快捷方式：`D:\桌面\UniGetUI.lnk`，目标即上述 exe。该机当时没有 tailcat 二进制，传输走 tar+scp 回退。
 
-本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核。数量、进程和任务状态属易变事实，操作前必须实时复核。
+本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核，2026-09-24 增补代理环境变量根因与 v2rayN 自启防复发。数量、进程和任务状态属易变事实，操作前必须实时复核。
