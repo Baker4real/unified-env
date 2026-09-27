@@ -178,6 +178,12 @@ intent: 记录家里设备的受控环境事实与差异
 - 若未来需要手机调试，先取得单独授权安装并记录真实 D 盘入口与版本；安装前不执行任何 `adb` 操作。
 - 手机型号、序列号、当前授权状态、已安装应用版本和密钥位置属于本地易变或敏感事实，不写入仓库，也不能从本页推断当前可访问范围。
 
+## ASUS AI Suite 登录任务（2026-09-27）
+
+- 登录弹窗「无法启动服务」和「远程过程调用失败」来自计划任务 `\ASUS\ASUS AISuiteIII`、`\ASUS\ASUS DIPAwayMode`，不是 Run 键。
+- 2026-09-27 21:42 回读：这两项是 Disabled。`asComSvc` 仍是 Disabled。`LightingService` 仍是 Running / Auto。不要为了消弹窗把 `asComSvc` 改回自动启动。
+- 禁用之后尚未重启，下次登录是否不再弹窗还没复核。回读：`D:\agents\run-evidence\aisuite-logon-popup-20260927\state.md`。
+
 ## 跨设备同步与验收
 
 1. 先同步本仓库的已提交默认分支，不复制调用端的 dirty worktree。
