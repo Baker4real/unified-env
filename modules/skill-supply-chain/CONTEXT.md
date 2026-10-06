@@ -26,7 +26,7 @@ intent: 定义 Skill 来源、安装、catalog、ledger 和发布政策的责任
 
 ## 接口与测试
 
-对外接口是 `scripts/install-skill-guarded.cmd`、根目录 Python adapters、`scripts/Deploy-SkillInstallGuarded.ps1` 和受管 overlay/deploy 入口。六文件安装闭包的 Python 实现与热点测试位于本模块的 `implementation/`、`tests/`；command adapter 仍由根 `scripts/install-skill-guarded.cmd` 提供，部署脚本从 module implementation 加载 Python 文件并绑定该 command adapter。`--system-provenance-repair-plan` 为精确六项 bundled `.system` 提供官方刷新 bootstrap 与保留既有 payload 的 display reconcile；两者的基线证明、schema、CAS、rollback 和部署顺序统一见 wrapper spec 的 `Bundled system provenance atomic repair` 节。跨来源职责合并通过 installer 的 `merge_retirement` decision manifest 字段完成；成功 backup 必须在独立验收后由受管安全树删除入口清理。专项测试列在 `modules/manifest.json` 的 `python` 和 `node` 清单中。
+对外接口是 `scripts/install-skill-guarded.cmd`、根目录 Python adapters、`scripts/Deploy-SkillInstallGuarded.ps1` 和受管 overlay/deploy 入口。六文件安装闭包的 Python 实现与热点测试位于本模块的 `implementation/`、`tests/`；command adapter 仍由根 `scripts/install-skill-guarded.cmd` 提供，部署脚本从 module implementation 加载 Python 文件并绑定该 command adapter。`--system-provenance-repair-plan` 为精确五项 bundled `.system` 提供官方刷新 bootstrap 与保留既有 payload 的 display reconcile；两者的基线证明、schema、CAS、rollback 和部署顺序统一见 wrapper spec 的 `Bundled system provenance atomic repair` 节。跨来源职责合并通过 installer 的 `merge_retirement` decision manifest 字段完成；成功 backup 必须在独立验收后由受管安全树删除入口清理。专项测试列在 `modules/manifest.json` 的 `python` 和 `node` 清单中。
 
 旧 `SOURCE.md` 末尾记录的 schema 迁移只允许使用
 `scripts/reconcile_skill_source_records.py`：它在隔离镜像达到 strict

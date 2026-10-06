@@ -22,7 +22,6 @@ import yaml
 EXPECTED_SKILLS = (
     "imagegen",
     "openai-docs",
-    "plugin-creator",
     "review-agent",
     "skill-creator",
     "skill-installer",
@@ -800,7 +799,7 @@ def _validate_plan(path: Path) -> dict[str, Any]:
         raise SystemProvenanceRepairError("stability_check 至少需要两次非负间隔观测")
     raw_skills = data.get("skills")
     if not isinstance(raw_skills, list) or [item.get("name") if isinstance(item, dict) else None for item in raw_skills] != list(EXPECTED_SKILLS):
-        raise SystemProvenanceRepairError("repair plan 必须精确绑定六项 system skill")
+        raise SystemProvenanceRepairError("repair plan 必须精确绑定五项 system skill")
     for index, item in enumerate(raw_skills):
         if not isinstance(item, dict) or set(item) != SKILL_FIELDS:
             raise SystemProvenanceRepairError(f"skills[{index}] 字段不符合 schema")
@@ -1009,12 +1008,12 @@ def _updated_ledger(
     if not isinstance(changes, list):
         raise SystemProvenanceRepairError("system source group local_changes 必须是数组")
     summary = (
-        "guarded system provenance repair: atomically bound six bundled skills to the "
+        "guarded system provenance repair: atomically bound five bundled skills to the "
         "signed Store package and restored review-agent disable-model-invocation parity."
     )
     if plan["mode"] == DISPLAY_RECONCILE_MODE:
         summary = (
-            "guarded display-only provenance reconciliation: preserved all six official "
+            "guarded display-only provenance reconciliation: preserved all five official "
             "baselines and payload bytes; verified display fields against prior effective trees."
         )
     if not any(
@@ -1258,7 +1257,7 @@ def execute(args: Any) -> dict[str, Any]:
     if _sha256_file(catalog_path) != plan["catalog_before_sha256"]:
         raise SystemProvenanceRepairError("skill catalog 在 repair plan 后漂移")
     if (
-        active_root == Path(r"D:\Codex\.codex\skills")
+        active_root == Path(r"D:\agents\skills-manager\skills")
         and plan["stability_check"]["interval_seconds"] < 10
     ):
         raise SystemProvenanceRepairError("live repair stability interval 不能小于 10 秒")

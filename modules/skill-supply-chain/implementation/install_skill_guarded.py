@@ -52,19 +52,19 @@ from system_skill_provenance_repair import (
 )
 
 
-DEFAULT_ACTIVE_ROOT = Path(r"D:\Codex\.codex\skills")
+DEFAULT_ACTIVE_ROOT = Path(r"D:\agents\skills-manager\skills")
 DEFAULT_PLUGIN_CACHE_ROOT = Path(r"D:\Codex\.codex\plugins\cache")
-DEFAULT_LEDGER = Path(r"D:\Codex\.codex\skills\.downloaded-skills-source-state.json")
+DEFAULT_LEDGER = Path(r"D:\agents\skills-manager\skills\.downloaded-skills-source-state.json")
 DEFAULT_CATALOG = Path(r"D:\Codex\.codex\skill-catalog\catalog.json")
 DEFAULT_GENERATOR = Path(__file__).absolute().with_name("generate_skill_catalog.py")
 DEFAULT_SYSTEM_PACKAGE_PROVIDER = Path(__file__).absolute().with_name(
     "system_package_identity.py"
 )
 DEFAULT_CLOSURE = Path(
-    r"D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py"
+    r"D:\agents\skills-manager\skills\skill-install-guard\scripts\skill_resource_closure.py"
 )
 DEFAULT_SYSTEM_INSTALLER = Path(
-    r"D:\Codex\.codex\skills\.system\skill-installer\scripts\install-skill-from-github.py"
+    r"D:\agents\skills-manager\skills\.system\skill-installer\scripts\install-skill-from-github.py"
 )
 DEFAULT_PYTHON = Path(r"D:\Codex\tools\python314-official\python.exe")
 DEFAULT_TEMP_ROOT = Path(r"D:\Codex\tmp\skill-install-guarded")
@@ -76,6 +76,25 @@ TARGET_SCOPES = frozenset({"active", "system"})
 REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$")
 SHA256_HEX = re.compile(r"^[0-9a-fA-F]{64}$")
 ASCII_DISPLAY_NAME = re.compile(r"^[\x20-\x7e]+$")
+CJK_TEXT = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+LATIN_TEXT = re.compile(r"[A-Za-z]")
+
+
+class UniqueSafeLoader(yaml.SafeLoader):
+    pass
+
+
+def _unique_mapping(loader: yaml.SafeLoader, node: yaml.nodes.MappingNode, deep: bool = False) -> dict:
+    result = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in result:
+            raise yaml.YAMLError(f"duplicate key: {key}")
+        result[key] = loader.construct_object(value_node, deep=deep)
+    return result
+
+
+UniqueSafeLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _unique_mapping)
 CANDIDATE_TREE_HASH_ALGORITHM = (
     "sha256(utf8(concat(sorted_unicode_codepoint("
     "D + tab + relative_posix_directory + lf, or "
@@ -508,7 +527,7 @@ def validate_openai_display_name(skill_dir: Path, *, label: str) -> None:
     if is_reparse(path) or not path.is_file():
         raise InstallError(f"{label} agents/openai.yaml 必须是安全的普通文件：{path}")
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
+        data = yaml.load(path.read_text(encoding="utf-8-sig"), Loader=UniqueSafeLoader)
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
         raise InstallError(f"{label} agents/openai.yaml 不是合法 YAML：{path}：{exc}") from exc
     if data is None:
@@ -532,6 +551,57 @@ def validate_openai_display_name(skill_dir: Path, *, label: str) -> None:
             f"{label} agents/openai.yaml interface.display_name 必须保留英文，"
             f"只能中文化 short_description 和 default_prompt：{path}：{display_name!r}"
         )
+
+
+def _chinese_dominant(value: str) -> bool:
+    text = value.strip()
+    cjk = len(CJK_TEXT.findall(text))
+    latin = len(LATIN_TEXT.findall(text))
+    return cjk >= 2 and (latin == 0 or cjk / (cjk + latin) >= 0.20) and bool(text and CJK_TEXT.match(text[0]))
+
+
+def _frontmatter_value(skill_md: Path, key: str) -> str | None:
+    lines = skill_md.read_text(encoding="utf-8-sig").splitlines()
+    in_frontmatter = bool(lines and lines[0].strip() == "---")
+    if not in_frontmatter:
+        return None
+    index = 1
+    while index < len(lines):
+        line = lines[index]
+        if line.strip() in {"---", "..."}:
+            break
+        match = re.match(rf"^\s*{re.escape(key)}\s*:\s*(.*?)\s*$", line)
+        if match:
+            raw = match.group(1).strip()
+            if not raw or raw in {">", ">-", ">+", "|", "|-", "|+"}:
+                parts = []
+                index += 1
+                while index < len(lines) and (lines[index].startswith(" ") or not lines[index].strip()):
+                    parts.append(lines[index].strip())
+                    index += 1
+                raw = " ".join(parts)
+            return strip_scalar(raw)
+        index += 1
+    return None
+
+
+def validate_chinese_display_metadata(skill_dir: Path, *, label: str) -> None:
+    """Require Chinese-first user-facing metadata while preserving ASCII identity."""
+    skill_md = d_path(skill_dir / "SKILL.md", label=f"{label} SKILL.md", must_exist=True)
+    description = _frontmatter_value(skill_md, "description")
+    if not description or not _chinese_dominant(description):
+        raise InstallError(f"{label} SKILL.md description 必须以中文为主体：{skill_md}")
+    path = skill_dir / "agents" / "openai.yaml"
+    if not path.exists():
+        return
+    data = yaml.load(path.read_text(encoding="utf-8-sig"), Loader=UniqueSafeLoader) or {}
+    interface = data.get("interface") if isinstance(data, dict) else None
+    if not isinstance(interface, dict):
+        return
+    for field in ("short_description", "default_prompt"):
+        value = interface.get(field)
+        if value is not None and (not isinstance(value, str) or not _chinese_dominant(value)):
+            raise InstallError(f"{label} agents/openai.yaml interface.{field} 必须以中文为主体：{path}")
 
 
 def current_source_record(path: Path) -> CurrentSourceRecord:
@@ -753,7 +823,7 @@ def _system_source_entry(
     ledger: dict[str, Any],
     active_root: Path,
 ) -> tuple[dict[str, Any], int]:
-    """Validate the existing six-skill system provenance source before an update."""
+    """Validate the existing five-skill system provenance source before an update."""
     matches = [
         (index, entry)
         for index, entry in enumerate(ledger.get("sources", []))
@@ -762,7 +832,7 @@ def _system_source_entry(
     if len(matches) != 1:
         raise InstallError("codex-bundled-system-skills source group must be unique")
     index, entry = matches[0]
-    expected = {f".system/{name}" for name in ("imagegen", "openai-docs", "plugin-creator", "review-agent", "skill-creator", "skill-installer")}
+    expected = {f".system/{name}" for name in ("imagegen", "openai-docs", "review-agent", "skill-creator", "skill-installer")}
     skills = entry.get("skills")
     source_root = str(entry.get("source_root", "")).replace("\\", "/").casefold()
     if (
@@ -785,7 +855,7 @@ def _system_source_entry(
         or marker.get("relative_path") != ".system/.codex-system-skills.marker"
         or not isinstance(records, list)
         or [item.get("name") if isinstance(item, dict) else None for item in records]
-        != ["imagegen", "openai-docs", "plugin-creator", "review-agent", "skill-creator", "skill-installer"]
+        != ["imagegen", "openai-docs", "review-agent", "skill-creator", "skill-installer"]
     ):
         raise InstallError("system provenance skill/package/marker schema drifted")
     for item in records:
@@ -2423,6 +2493,7 @@ def validate_staged_bundled_skills(
                 f"{actual_name!r} != {proof.name!r}"
             )
         validate_openai_display_name(target, label=f"bundled skill {proof.name}")
+        validate_chinese_display_metadata(target, label=f"bundled skill {proof.name}")
         source_md = target / "SOURCE.md"
         if not source_md.is_file() or is_reparse(source_md):
             raise InstallError(f"bundled skill 缺少安全的 SOURCE.md：{source_md}")
@@ -2551,6 +2622,7 @@ def stage_candidate(
         if actual_name != name:
             raise InstallError(f"SKILL.md name 与目标目录不一致：{actual_name!r} != {name!r}")
         validate_openai_display_name(target, label=f"staging skill {name}")
+        validate_chinese_display_metadata(target, label=f"staging skill {name}")
         system_overlay_context = context.get("system_provenance_overlay")
         if (
             isinstance(system_overlay_context, dict)
@@ -3593,7 +3665,7 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument(
         "--system-provenance-repair-plan",
         type=Path,
-        help="精确六项 bundled .system provenance 原子修复计划",
+        help="精确五项 bundled .system provenance 原子修复计划",
     )
     parser.add_argument("--path", dest="paths", nargs="+", help="GitHub repo 内的 skill path")
     parser.add_argument("--ref", default="main")

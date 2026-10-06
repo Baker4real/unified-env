@@ -31,13 +31,13 @@ from skill_source_record import parse_current_source_record
 SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
-DEFAULT_ACTIVE_ROOT = Path(r"D:\Codex\.codex\skills")
+DEFAULT_ACTIVE_ROOT = Path(r"D:\agents\skills-manager\skills")
 DEFAULT_PLUGIN_CACHE_ROOT = Path(r"D:\Codex\.codex\plugins\cache")
 DEFAULT_LEDGER_PATH = Path(
-    r"D:\Codex\.codex\skills\.downloaded-skills-source-state.json"
+    r"D:\agents\skills-manager\skills\.downloaded-skills-source-state.json"
 )
 DEFAULT_CLOSURE_SCRIPT = Path(
-    r"D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py"
+    r"D:\agents\skills-manager\skills\skill-install-guard\scripts\skill_resource_closure.py"
 )
 DEFAULT_OUTPUT = Path(r"D:\Codex\.codex\skill-catalog\catalog.json")
 

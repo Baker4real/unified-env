@@ -26,7 +26,7 @@ from typing import Any, Iterable
 from skill_source_record import normalize_field_name, parse_current_source_record, strip_scalar
 
 
-DEFAULT_ACTIVE_ROOT = Path(r"D:\Codex\.codex\skills")
+DEFAULT_ACTIVE_ROOT = Path(r"D:\agents\skills-manager\skills")
 DEFAULT_PLUGIN_CACHE_ROOT = Path(r"D:\Codex\.codex\plugins\cache")
 DEFAULT_LEDGER = DEFAULT_ACTIVE_ROOT / ".downloaded-skills-source-state.json"
 DEFAULT_CATALOG = Path(r"D:\Codex\.codex\skill-catalog\catalog.json")

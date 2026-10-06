@@ -63,7 +63,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         )
         self.generator = IMPLEMENTATION_ROOT / "generate_skill_catalog.py"
         self.closure = Path(
-            r"D:\Codex\.codex\skills\skill-install-guard\scripts\skill_resource_closure.py"
+            r"D:\agents\skills-manager\skills\skill-install-guard\scripts\skill_resource_closure.py"
         )
         self.interpreter = Path(sys.executable).resolve()
 
@@ -224,7 +224,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         bundled = candidate.joinpath(*relative_path.split("/"))
         bundled.mkdir(parents=True)
         (bundled / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: bundled fixture\n---\n\n# {name}\n",
+            f"---\nname: {name}\ndescription: 捆绑夹具技能描述\n---\n\n# {name}\n",
             encoding="utf-8",
         )
         if include_source:
@@ -335,7 +335,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         old_skill = self.active / old_name
         old_skill.mkdir()
         (old_skill / "SKILL.md").write_text(
-            f"---\nname: {old_name}\ndescription: baseline\n---\n\n# baseline\n",
+            f"---\nname: {old_name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
             encoding="utf-8",
         )
         (old_skill / "SOURCE.md").write_text(
@@ -383,7 +383,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        candidate = self.write_candidate(new_name, "canonical successor")
+        candidate = self.write_candidate(new_name, "规范后继夹具")
         (candidate / "SOURCE.md").write_text(
             "\n".join(
                 [
@@ -476,7 +476,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             root = self.active / name
             root.mkdir()
             (root / "SKILL.md").write_text(
-                f"---\nname: {name}\ndescription: fixture\n---\n\n# {body}\n",
+                f"---\nname: {name}\ndescription: 夹具技能描述\n---\n\n# {body}\n",
                 encoding="utf-8",
             )
             skill_hash = WRAPPER.sha256_file(root / "SKILL.md")
@@ -544,7 +544,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        candidate = self.write_candidate(target_name, "merged survivor target")
+        candidate = self.write_candidate(target_name, "合并幸存目标夹具")
         candidate_sha256 = WRAPPER.sha256_file(candidate / "SKILL.md")
         other_survivor_sha256 = WRAPPER.sha256_file(other_survivor / "SKILL.md")
         retired_sha256 = WRAPPER.sha256_file(retired_active / "SKILL.md")
@@ -724,7 +724,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 self.assertFalse((self.active / str(state["new_name"])).exists())
 
     def test_install_updates_source_ledger_and_catalog(self) -> None:
-        candidate = self.write_candidate("test-skill-wrapper", "测试 guarded wrapper")
+        candidate = self.write_candidate("test-skill-wrapper", "受管包装器的安装测试夹具")
         manifest = self.write_manifest(
             "test-skill-wrapper",
             "install",
@@ -781,7 +781,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
     def test_system_scope_installs_under_system_and_verifies_catalog(self) -> None:
         name = "test-system-skill"
         (self.active / ".system").mkdir()
-        candidate = self.write_candidate(name, "测试 system scope")
+        candidate = self.write_candidate(name, "系统作用域安装测试夹具")
         manifest = self.write_manifest(
             name,
             "install",
@@ -841,7 +841,6 @@ class SkillInstallGuardedTests(unittest.TestCase):
         names = [
             "imagegen",
             "openai-docs",
-            "plugin-creator",
             "review-agent",
             "skill-creator",
             "skill-installer",
@@ -858,7 +857,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             skill_root = system_root / name
             skill_root.mkdir()
             skill_text = (
-                f"---\nname: {name}\ndescription: System repair fixture for {name}.\n"
+                f"---\nname: {name}\ndescription: 系统修复夹具技能：{name}。\n"
                 "---\n\n"
                 f"# {name}\n"
             )
@@ -1060,7 +1059,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             agent_file = agents / "openai.yaml"
             text = agent_file.read_text(encoding="utf-8") if agent_file.exists() else "interface:\n"
             agent_file.write_text(
-                text.replace("interface:\n", 'interface:\n  short_description: "Original menu text"\n  default_prompt: "Original prompt"\n'),
+                text.replace("interface:\n", 'interface:\n  short_description: "原始菜单文本"\n  default_prompt: "原始提示词"\n'),
                 encoding="utf-8",
             )
             spec["official_integrity"] = REPAIR.system_skill_integrity(root)
@@ -1084,14 +1083,14 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 baseline["agents/openai.yaml"] = (root / "agents/openai.yaml").read_bytes().decode("utf-8")
             (root / "SKILL.md").write_bytes(
                 baseline["SKILL.md"].replace(
-                    f"description: System repair fixture for {spec['name']}.",
-                    'description: "Display text translated for this fixture."',
+                    f"description: 系统修复夹具技能：{spec['name']}。",
+                    'description: "本夹具已重放的中文展示文本。"',
                 ).encode("utf-8")
             )
             agent_file = root / "agents/openai.yaml"
             agent_file.write_bytes(
-                agent_file.read_bytes().replace(b"Original menu text", b"Translated menu text")
-                .replace(b"Original prompt", b"Translated prompt")
+                agent_file.read_bytes().replace("原始菜单文本".encode("utf-8"), "翻译后的菜单文本".encode("utf-8"))
+                .replace("原始提示词".encode("utf-8"), "翻译后的提示词".encode("utf-8"))
             )
             spec["critical_files"] = {
                 relative: WRAPPER.sha256_file(root / relative)
@@ -1197,7 +1196,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                             if not line.startswith(b"  default_prompt:")
                         )
                     else:
-                        value = value.replace(b'  default_prompt: "Translated prompt"', b"  default_prompt: false")
+                        value = value.replace('  default_prompt: "翻译后的提示词"'.encode("utf-8"), b"  default_prompt: false")
                     self.assertNotEqual(value, path.read_bytes())
                     path.write_bytes(value)
                 else:
@@ -1222,7 +1221,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         transaction = max((self.temp / "evidence").glob("system-provenance-*/manifest.json"))
         result = json.loads(transaction.read_text(encoding="utf-8"))
         self.assertEqual(result["status"], "rolled-back")
-        self.assertEqual(len(result["backups"]), 8)
+        self.assertEqual(len(result["backups"]), 7)
         self.assertEqual(result["rollback_errors"], [])
 
     def prepare_skill_creator_compatibility_overlay(self, *, localized: bool = False) -> dict[str, object]:
@@ -1380,7 +1379,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 if (root / relative).is_file()
             }
             (root / "SKILL.md").write_bytes(
-                baseline["SKILL.md"].replace("Display text translated for this fixture.", "Updated display translation.").encode("utf-8")
+                baseline["SKILL.md"].replace("本夹具已重放的中文展示文本。", "更新后的中文展示译文。").encode("utf-8")
             )
             spec["source_before_sha256"] = WRAPPER.sha256_file(root / "SOURCE.md")
             spec["official_integrity"] = previous["official_integrity"]
@@ -1407,7 +1406,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         for relative in ("scripts/quick_validate.py", "scripts/test_quick_validate.py"):
             self.assertEqual(creator_after["critical_files"][relative], creator_before["critical_files"][relative])
 
-    def test_system_provenance_repair_commits_six_skills_atomically(self) -> None:
+    def test_system_provenance_repair_commits_five_skills_atomically(self) -> None:
         state = self.prepare_system_provenance_repair()
 
         with contextlib.redirect_stdout(io.StringIO()):
@@ -1425,14 +1424,14 @@ class SkillInstallGuardedTests(unittest.TestCase):
         source = ledger["sources"][0]
         self.assertEqual(source["id"], "codex-bundled-system-skills")
         self.assertEqual(source["system_provenance"]["schema_version"], 1)
-        self.assertEqual(len(source["system_provenance"]["skills"]), 6)
+        self.assertEqual(len(source["system_provenance"]["skills"]), 5)
         catalog = json.loads(Path(state["catalog"]).read_text(encoding="utf-8"))
         repaired = [
             item
             for item in catalog["artifacts"]
             if item.get("relative_path", "").startswith(".system/")
         ]
-        self.assertEqual(len(repaired), 6)
+        self.assertEqual(len(repaired), 5)
         self.assertTrue(all(item["ledger_coverage"] == "pass" for item in repaired))
         review = next(item for item in repaired if item["name"] == "review-agent")
         self.assertEqual(review["invocation"]["mode"], "user-invoked")
@@ -1813,7 +1812,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         transaction = max((self.temp / "evidence").glob("system-provenance-*/manifest.json"))
         result = json.loads(transaction.read_text(encoding="utf-8"))
         self.assertEqual(result["status"], "rolled-back")
-        self.assertEqual(len(result["backups"]), 9)
+        self.assertEqual(len(result["backups"]), 8)
         self.assertEqual(result["rollback_errors"], [])
 
     def test_system_provenance_repair_rejects_post_generation_state_drift(self) -> None:
@@ -1882,7 +1881,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
     def test_review_overlay_preserves_utf8_bom(self) -> None:
         state = self.prepare_system_provenance_repair()
         path = Path(state["system_root"]) / "review-agent" / "SKILL.md"
-        baseline = b"\xef\xbb\xbf---\nname: review-agent\ndescription: fixture\n---\n\n# review-agent\n"
+        baseline = "\ufeff---\nname: review-agent\ndescription: \u57fa\u7ebf\u5939\u5177\u6280\u80fd\u63cf\u8ff0\n---\n\n# review-agent\n".encode("utf-8")
         path.write_bytes(baseline)
         patched = REPAIR._review_overlay_bytes(path, baseline)
         self.assertTrue(patched.startswith(b"\xef\xbb\xbf"))
@@ -2017,7 +2016,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         name = "test-skill-wrapper"
         relative_path = "node_modules/example-runtime/lib/skills/trace"
         bundled_name = "example-trace"
-        candidate = self.write_candidate(name, "bundled skill transaction")
+        candidate = self.write_candidate(name, "捆绑事务夹具")
         self.write_bundled_skill(candidate, relative_path, bundled_name)
         manifest = self.write_manifest(name, "install")
         payload = json.loads(manifest.read_text(encoding="utf-8"))
@@ -2102,8 +2101,8 @@ class SkillInstallGuardedTests(unittest.TestCase):
         active_skill = self.active / ledger_key / "SKILL.md"
         active_skill.write_text(
             active_skill.read_text(encoding="utf-8").replace(
-                "bundled fixture",
-                "modified bundled fixture",
+                "捆绑夹具技能描述",
+                "已被修改的捆绑夹具描述",
             ),
             encoding="utf-8",
         )
@@ -2364,7 +2363,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
     def test_bundled_skill_rejects_parent_traversal_path(self) -> None:
         name = "test-skill-wrapper"
-        candidate = self.write_candidate(name, "reject bundled traversal")
+        candidate = self.write_candidate(name, "拒绝捆绑路径穿越的夹具")
         manifest = self.write_manifest(name, "install")
         payload = json.loads(manifest.read_text(encoding="utf-8"))
         payload["bundled_skills"] = [
@@ -2383,7 +2382,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
     def test_bundled_skill_requires_source_record(self) -> None:
         name = "test-skill-wrapper"
         relative_path = "vendor/runtime/skill"
-        candidate = self.write_candidate(name, "require bundled source")
+        candidate = self.write_candidate(name, "需要捆绑来源的夹具")
         self.write_bundled_skill(
             candidate,
             relative_path,
@@ -2409,7 +2408,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
     def test_bundled_skill_frontmatter_name_must_match_manifest(self) -> None:
         name = "test-skill-wrapper"
         relative_path = "vendor/runtime/skill"
-        candidate = self.write_candidate(name, "bind bundled name")
+        candidate = self.write_candidate(name, "绑定捆绑名称的夹具")
         self.write_bundled_skill(candidate, relative_path, "actual-runtime")
         manifest = self.write_manifest(name, "install")
         payload = json.loads(manifest.read_text(encoding="utf-8"))
@@ -2431,7 +2430,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         name = "test-skill-wrapper"
         bundled_name = "vendor-runtime"
         relative_path = "vendor/runtime/skill"
-        candidate = self.write_candidate(name, "reject bundled Chinese identity")
+        candidate = self.write_candidate(name, "拒绝捆绑中文身份的夹具")
         bundled = self.write_bundled_skill(candidate, relative_path, bundled_name)
         self.write_openai_yaml(bundled, "供应商运行时")
         manifest = self.write_manifest(name, "install")
@@ -2458,7 +2457,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
     def test_bundled_skill_rejects_casefold_collision_with_top_level_name(self) -> None:
         name = "test-skill-wrapper"
-        candidate = self.write_candidate(name, "reject bundle name collision")
+        candidate = self.write_candidate(name, "拒绝捆绑名称冲突的夹具")
         self.write_bundled_skill(candidate, "vendor/runtime/skill", "Test-Skill-Wrapper")
         manifest = self.write_manifest(name, "install")
         payload = json.loads(manifest.read_text(encoding="utf-8"))
@@ -2487,7 +2486,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         for index, invalid_url in enumerate(invalid_urls):
             with self.subTest(source_repository=invalid_url):
                 name = f"test-skill-wrapper-{index}"
-                candidate = self.write_candidate(name, "reject unsafe bundle source")
+                candidate = self.write_candidate(name, "拒绝不安全捆绑来源的夹具")
                 bundled = self.write_bundled_skill(
                     candidate,
                     relative_path,
@@ -2525,7 +2524,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
     def test_candidate_source_uses_only_final_record(self) -> None:
         name = "test-skill-wrapper"
-        candidate = self.write_candidate(name, "current source record")
+        candidate = self.write_candidate(name, "当前来源记录夹具")
         (candidate / "SOURCE.md").write_text(
             "\n".join(
                 [
@@ -2554,7 +2553,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
     def test_candidate_source_normalizes_quoted_current_identity(self) -> None:
         name = "test-skill-wrapper"
-        candidate = self.write_candidate(name, "quoted current source identity")
+        candidate = self.write_candidate(name, "带引号的当前来源身份夹具")
         (candidate / "SOURCE.md").write_text(
             "\n".join(
                 [
@@ -2575,7 +2574,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
     def test_candidate_source_blank_current_identity_fails_closed(self) -> None:
         name = "test-skill-wrapper"
-        candidate = self.write_candidate(name, "blank current source identity")
+        candidate = self.write_candidate(name, "空白当前来源身份的夹具")
         (candidate / "SOURCE.md").write_text(
             "\n".join(
                 [
@@ -2599,7 +2598,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
     def test_candidate_source_without_current_identity_fails_closed(self) -> None:
         name = "test-skill-wrapper"
-        candidate = self.write_candidate(name, "unknown current source record")
+        candidate = self.write_candidate(name, "未知当前来源记录的夹具")
         (candidate / "SOURCE.md").write_text(
             "Arbitrary note: value\n",
             encoding="utf-8",
@@ -2616,7 +2615,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
     def test_candidate_source_empty_final_record_fails_closed(self) -> None:
         name = "test-skill-wrapper"
-        candidate = self.write_candidate(name, "empty final source record")
+        candidate = self.write_candidate(name, "空白的最终来源记录夹具")
         source = candidate / "SOURCE.md"
         source.write_text(
             f"Skill: `{name}`\nStatus: source-review\n---\n",
@@ -2634,7 +2633,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
     def test_candidate_source_current_conflict_fails_closed(self) -> None:
         name = "test-skill-wrapper"
-        candidate = self.write_candidate(name, "conflicting current source record")
+        candidate = self.write_candidate(name, "冲突的当前来源记录夹具")
         (candidate / "SOURCE.md").write_text(
             "\n".join(
                 [
@@ -2664,7 +2663,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
     def test_bundled_skill_source_current_conflict_fails_closed(self) -> None:
         name = "test-skill-wrapper"
         relative_path = "vendor/runtime/skill"
-        candidate = self.write_candidate(name, "conflicting bundled source record")
+        candidate = self.write_candidate(name, "冲突的捆绑来源记录夹具")
         bundled = self.write_bundled_skill(candidate, relative_path, "runtime-skill")
         source = bundled / "SOURCE.md"
         source.write_text(
@@ -2689,7 +2688,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertFalse((self.active / name).exists())
 
     def test_candidate_activation_records_durable_decision_evidence(self) -> None:
-        candidate = self.write_candidate("test-skill-wrapper", "持久 provenance")
+        candidate = self.write_candidate("test-skill-wrapper", "持久的来源记录夹具")
         manifest = self.write_manifest("test-skill-wrapper", "install")
 
         with contextlib.redirect_stdout(io.StringIO()):
@@ -2777,7 +2776,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(decision_snapshot.read_bytes(), manifest.read_bytes())
 
     def test_manifest_disappearing_after_validation_returns_governed_error(self) -> None:
-        candidate = self.write_candidate("test-skill-wrapper", "decision manifest race")
+        candidate = self.write_candidate("test-skill-wrapper", "决策清单竞态夹具")
         manifest = self.write_manifest("test-skill-wrapper", "install")
         original_load = WRAPPER.load_and_validate_manifest
 
@@ -2910,7 +2909,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         candidate = self.write_candidate("test-skill-wrapper", "候选漂移")
         manifest = self.write_manifest("test-skill-wrapper", "install")
         (candidate / "SKILL.md").write_text(
-            "---\nname: test-skill-wrapper\ndescription: drifted\n---\n\n# drifted\n",
+            "---\nname: test-skill-wrapper\ndescription: 已漂移的夹具描述\n---\n\n# drifted\n",
             encoding="utf-8",
         )
 
@@ -3024,7 +3023,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         (active_skill / ".git").mkdir(parents=True)
         (active_skill / ".git" / "sentinel").write_text("old-history\n", encoding="utf-8")
         (active_skill / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: baseline\n---\n\n# baseline\n",
+            f"---\nname: {name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
             encoding="utf-8",
         )
         (active_skill / "SOURCE.md").write_text(
@@ -3045,7 +3044,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        candidate = self.write_candidate(name, "replacement")
+        candidate = self.write_candidate(name, "替换后的夹具描述")
         (candidate / ".git").mkdir()
         (candidate / ".git" / "candidate-sentinel").write_text(
             "candidate-history\n", encoding="utf-8"
@@ -3072,7 +3071,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         pack_file.write_bytes(b"read-only-pack\n")
         pack_file.chmod(stat.S_IREAD)
         (active_skill / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: baseline\n---\n\n# baseline\n",
+            f"---\nname: {name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
             encoding="utf-8",
         )
         (active_skill / "SOURCE.md").write_text(
@@ -3093,7 +3092,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        candidate = self.write_candidate(name, "replacement")
+        candidate = self.write_candidate(name, "替换后的夹具描述")
         manifest = self.write_manifest(name, "update")
         args = self.wrapper_args(candidate, manifest)
         args.insert(2, "--update")
@@ -3131,7 +3130,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         sentinel = old_git / "sentinel"
         sentinel.write_text("old-history\n", encoding="utf-8")
         (active_skill / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: baseline\n---\n\n# baseline\n",
+            f"---\nname: {name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
             encoding="utf-8",
         )
         (active_skill / "SOURCE.md").write_text(
@@ -3152,7 +3151,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        candidate = self.write_candidate(name, "replacement")
+        candidate = self.write_candidate(name, "替换后的夹具描述")
         manifest = self.write_manifest(name, "update")
         args = self.wrapper_args(candidate, manifest)
         args.insert(2, "--update")
@@ -3181,7 +3180,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         active_skill = self.active / name
         active_skill.mkdir()
         (active_skill / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: baseline\n---\n\n# baseline\n",
+            f"---\nname: {name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
             encoding="utf-8",
         )
         (active_skill / "SOURCE.md").write_text(
@@ -3202,7 +3201,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        candidate = self.write_candidate(name, "replacement")
+        candidate = self.write_candidate(name, "替换后的夹具描述")
         manifest = self.write_manifest(name, "update")
         args = self.wrapper_args(candidate, manifest)
         args.insert(2, "--update")
@@ -3234,7 +3233,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         active_skill = self.active / name
         active_skill.mkdir()
         (active_skill / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: baseline\n---\n\n# baseline\n",
+            f"---\nname: {name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
             encoding="utf-8",
         )
         (active_skill / "SOURCE.md").write_text(
@@ -3255,7 +3254,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        candidate = self.write_candidate(name, "replacement")
+        candidate = self.write_candidate(name, "替换后的夹具描述")
         manifest = self.write_manifest(name, "update")
         args = self.wrapper_args(candidate, manifest)
         args.insert(2, "--update")
@@ -3276,7 +3275,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
 
         self.assertEqual(code, 2)
         self.assertTrue(active_skill.is_dir())
-        self.assertIn("replacement", (active_skill / "SKILL.md").read_text(encoding="utf-8"))
+        self.assertIn("替换后的夹具描述", (active_skill / "SKILL.md").read_text(encoding="utf-8"))
         transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
         result = json.loads(transaction.read_text(encoding="utf-8"))
         self.assertEqual(result["status"], "rollback-failed")
@@ -3293,7 +3292,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         first_read_only.chmod(stat.S_IREAD)
         second_read_only.chmod(stat.S_IREAD)
         (active_skill / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: baseline\n---\n\n# baseline\n",
+            f"---\nname: {name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
             encoding="utf-8",
         )
         (active_skill / "SOURCE.md").write_text(
@@ -3314,7 +3313,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        candidate = self.write_candidate(name, "replacement")
+        candidate = self.write_candidate(name, "替换后的夹具描述")
         manifest = self.write_manifest(name, "update")
         args = self.wrapper_args(candidate, manifest)
         args.insert(2, "--update")
@@ -3625,7 +3624,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         active_skill = self.active / name
         active_skill.mkdir()
         (active_skill / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: baseline\n---\n\n# baseline\n",
+            f"---\nname: {name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
             encoding="utf-8",
         )
         (active_skill / "SOURCE.md").write_text(
@@ -3644,7 +3643,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        candidate = self.write_candidate(name, "replacement")
+        candidate = self.write_candidate(name, "替换后的夹具描述")
         manifest = self.write_manifest(name, "update")
         failing_generator = self.temp / "failing-generator.py"
         failing_generator.write_text("import sys\nsys.exit(7)\n", encoding="utf-8")
@@ -3662,7 +3661,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         active_skill = self.active / name
         active_skill.mkdir()
         (active_skill / "SKILL.md").write_text(
-            f"---\nname: {name}\ndescription: baseline\n---\n\n# baseline\n",
+            f"---\nname: {name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
             encoding="utf-8",
         )
         (active_skill / "SOURCE.md").write_text(
@@ -3683,7 +3682,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         )
         before_acl = self.acl_state(active_skill)
         before_ledger = self.ledger.read_bytes()
-        candidate = self.write_candidate(name, "replacement")
+        candidate = self.write_candidate(name, "替换后的夹具描述")
         manifest = self.write_manifest(name, "update")
         args = self.wrapper_args(candidate, manifest)
         args.insert(2, "--update")
@@ -3716,7 +3715,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         candidate = target / "candidate-through-junction"
         candidate.mkdir()
         (candidate / "SKILL.md").write_text(
-            "---\nname: junction-candidate\ndescription: reject parent junction\n---\n",
+            "---\nname: junction-candidate\ndescription: 拒绝父级 junction 的夹具\n---\n",
             encoding="utf-8",
         )
         sentinel = target / "sentinel.txt"
@@ -3743,7 +3742,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         (target / "active").mkdir()
         sentinel = target / "sentinel.txt"
         sentinel.write_text("outside-preserved\n", encoding="utf-8")
-        candidate = self.write_candidate("test-skill-wrapper", "reject active parent junction")
+        candidate = self.write_candidate("test-skill-wrapper", "拒绝激活父级 junction 夹具")
         manifest = self.write_manifest("test-skill-wrapper", "install")
         args = self.wrapper_args(candidate, manifest)
         active_index = args.index("--active-root")
@@ -4296,7 +4295,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 manifest = Path(state["manifest"])
                 if mismatch_kind == "candidate":
                     (candidate / "SKILL.md").write_text(
-                        "---\nname: wrong-successor\ndescription: mismatch\n---\n",
+                        "---\nname: wrong-successor\ndescription: 不匹配的夹具\n---\n",
                         encoding="utf-8",
                     )
                     payload = json.loads(manifest.read_text(encoding="utf-8"))
@@ -4308,7 +4307,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
                     )
                 elif mismatch_kind == "old_name":
                     (Path(state["old_skill"]) / "SKILL.md").write_text(
-                        "---\nname: wrong-predecessor\ndescription: mismatch\n---\n",
+                        "---\nname: wrong-predecessor\ndescription: 不匹配的夹具\n---\n",
                         encoding="utf-8",
                     )
                 elif mismatch_kind == "source":

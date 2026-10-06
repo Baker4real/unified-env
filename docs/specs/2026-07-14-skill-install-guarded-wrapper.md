@@ -17,7 +17,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 | 层 | 唯一职责 | 入口 |
 | --- | --- | --- |
-| 候选治理 | 来源、采用度、重叠、`writing-for-agents` 和 install/update 决策 | `D:\Codex\.codex\skills\skill-install-guard\SKILL.md` |
+| 候选治理 | 来源、采用度、重叠、`writing-for-agents` 和 install/update 决策 | `D:\agents\skills-manager\skills\skill-install-guard\SKILL.md` |
 | 事务执行 | 暂存、备份、激活、台账写入、回滚和后置校验 | `D:\Codex\.codex\scripts\install-skill-guarded.cmd` |
 | 派生目录 | 从 active root、`SOURCE.md` 和 ledger 重新扫描生成 catalog | `modules\skill-supply-chain\implementation\generate_skill_catalog.py`（根 adapter：`scripts\generate_skill_catalog.py`） |
 | 上游下载 | 只提供候选下载/复制能力 | `.system\skill-installer` |
@@ -31,7 +31,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 3. wrapper 在事务身份建立后把已验证的 decision manifest 原子快照到持久 transaction evidence，并写入/保留 `SOURCE.md` 和 staging ledger。受管追加记录用 transaction evidence 与快照替代本地 candidate 和原始 decision manifest 输入路径；repo/ref/upstream、active path 等持久来源字段继续保留。候选已有记录仍包含当前输入路径或本机临时根时在激活前失败闭锁。父 skill 内会被运行时发现的 bundled skill 必须由 `bundled_skills` 逐项绑定安全相对路径和 frontmatter 名称，并各自保留可验证的 `SOURCE.md`；wrapper 把其 active-root 相对目录写入同一事务 ledger。随后运行严格资源闭包检查。
 4. wrapper 在 active root 下重新创建候选内容，不移动 staging 目录，也不复制 staging 的 owner、DACL 或 SACL；目标目录和文件必须继承本机 active root 的权限。
 5. wrapper 备份旧 active skill，再原子换入候选；Windows 备份移动前清除旧树只读位，该属性规范化本身也必须位于同一恢复边界内。若属性规范化或复制式移动在清理阶段失败，则合并源树与事务备份、恢复原只读属性，并按旧树内容 seal 证明恢复。回滚已有 active skill 时，删除当前 active 前必须先证明事务备份存在且匹配旧树 seal；删除已换入目录前还必须证明当前路径同时匹配本事务换入前捕获的目录 identity（volume/file index）与 payload seal。缺失、不匹配或路径消失时保留现状并标记 `rollback-failed`。无法证明恢复时状态必须为 `rollback-failed`。canonical rename 在 preflight、旧名退场后和真正换入前持续断言 successor 不存在，并使用 Windows 原子 no-replace rename；竞争产生的意外 successor 原样保留，既不备份成普通 update，也不覆盖或删除。换入后立即在独立子进程中枚举并读取全部文件，同时验证目标树不存在受保护 ACL。任一项失败都回滚，事务不得标记成功。
-6. wrapper 更新 `D:\Codex\.codex\skills\.downloaded-skills-source-state.json`；只有 decision manifest 明确提供且通过白名单校验的来源元数据才可覆盖既有字段。
+6. wrapper 更新 `D:\agents\skills-manager\skills\.downloaded-skills-source-state.json`；只有 decision manifest 明确提供且通过白名单校验的来源元数据才可覆盖既有字段。
 7. wrapper 调用 `generate_skill_catalog.py --write`，再运行闭包、catalog 条目、ledger coverage 和 `SKILL.md` SHA-256 复核。
 8. 事务身份建立后的任一步失败都恢复 active 目录和状态文件，并把失败/回滚结果写入 `D:\agents\run-evidence\skill-install-guarded\`。事务 manifest 记录 decision 快照的持久路径和 SHA-256，成功、dry-run 与事务内失败结果使用同一证据身份。decision 输入在事务身份建立前消失、不可读或变化时返回受管错误，但不声称已生成事务 evidence。
 
@@ -94,16 +94,16 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 ### Bundled system provenance atomic repair
 
-`--system-provenance-repair-plan <json>` 是独立的 bootstrap/repair 模式，不进入普通 candidate install/update 分支，也不改变其 full-root closure。它只接受固定顺序的 `imagegen`、`openai-docs`、`plugin-creator`、`review-agent`、`skill-creator`、`skill-installer` 六项，并要求 `codex-bundled-system-skills` 在 unified ledger 中唯一覆盖该精确集合。
+`--system-provenance-repair-plan <json>` 是独立的 bootstrap/repair 模式，不进入普通 candidate install/update 分支，也不改变其 full-root closure。它只接受固定顺序的 `imagegen`、`openai-docs`、`review-agent`、`skill-creator`、`skill-installer` 五项（2026-10-07 起五项化：`plugin-creator` 已被 Codex Desktop 26.928+ 官方刷新从 `.system` 移除，其 stale ledger 条目按上游移除摘除），并要求 `codex-bundled-system-skills` 在 unified ledger 中唯一覆盖该精确集合。`atomic-six-skill-*` 模式名是历史 schema 标识，按 `schema_version` 兼容保留。
 
-Repair plan 必须精确绑定 schema/mode、受管 `system_package_identity.py` 的 SHA-256、当前 `OpenAI.Codex` Store package full name/family/version/publisher、`SignatureKind=Store`、签名 `Valid`、AppX `Ok`、install location、`AppxManifest.xml` 与 `AppxSignature.p7x` 路径和 SHA-256、`.codex-system-skills.marker` 路径和 SHA-256、ledger/catalog 原始 SHA-256，以及六项各自排除 sibling `SOURCE.md` 后的 official/effective tree 与 `SKILL.md` hash。按漂移来源选择 mode：
+Repair plan 必须精确绑定 schema/mode、受管 `system_package_identity.py` 的 SHA-256、当前 `OpenAI.Codex` Store package full name/family/version/publisher、`SignatureKind=Store`、签名 `Valid`、AppX `Ok`、install location、`AppxManifest.xml` 与 `AppxSignature.p7x` 路径和 SHA-256、`.codex-system-skills.marker` 路径和 SHA-256、ledger/catalog 原始 SHA-256，以及五项各自排除 sibling `SOURCE.md` 后的 official/effective tree 与 `SKILL.md` hash。按漂移来源选择 mode：
 
-- `atomic-six-skill-bootstrap`：官方刷新后重建来源。`review-agent` 绑定 `agents/openai.yaml` hash 与 `allow_implicit_invocation: false`，payload 只插入 `disable-model-invocation: true`；其余五项 official/effective integrity 相同。
+- `atomic-six-skill-bootstrap`：官方刷新后重建来源。`review-agent` 绑定 `agents/openai.yaml` hash 与 `allow_implicit_invocation: false`，payload 只插入 `disable-model-invocation: true`；其余四项 official/effective integrity 相同。
 - `atomic-six-skill-display-reconcile`：已有来源记录且只发生展示中文化后对账。每项 `overlay` 包含 `kind: "display-only"`、`baseline_files`（旧有效态 `SKILL.md` 和存在时的 `agents/openai.yaml` 完整 UTF-8 文本）及 `base_overlay`。将这些旧文本覆盖到当前树后，整树必须精确命中旧 ledger 的 effective integrity；official integrity、SOURCE 前哈希、critical file 键集合和底层 overlay 必须继承旧记录。旧记录已是 display-only 时继承其 `base_overlay`，不嵌套 display overlay。
 
 Display 对账只接受 `SKILL.md` frontmatter `description` 和 `agents/openai.yaml` 的 `interface.short_description/default_prompt` 字符串值变化。YAML 解析拒绝重复键、非字符串键和字段存在性/类型变化；屏蔽展示 scalar 后还比较原文，正文、调用策略、注释及其他资源必须保持。ledger 保存 baseline 文件哈希投影而非原文，分别记录保留的 official baseline、本次 effective tree 和底层 overlay。缺少可验证的旧有效态时保留 pending，不把翻译后的树重新归因为官方原始树。
 
-事务在写前两次核验 repair plan/provider 的 identity+bytes、Store package 路径 identity+hash、marker identity+hash、六目录 identity+tree、critical payload、SOURCE baseline、ledger 和 catalog。Bootstrap 联合备份六个 SOURCE、`review-agent/SKILL.md`、ledger、catalog；display reconcile 只备份和写入六个 SOURCE、ledger、catalog 共八个 metadata 文件，payload 不 stage、不替换。随后运行 catalog `--write`、strict closure、catalog/ledger/SOURCE/hash/parity postcondition，并按 plan 执行至少两次稳定性观测。默认 live active root 的观测间隔不得低于 10 秒；该门槛只证明 bounded stability，不把 Codex runtime 进程停掉或改造成受管对象。菜单工具后续再次改写展示字段时，需以新现场事实重复对账。
+事务在写前两次核验 repair plan/provider 的 identity+bytes、Store package 路径 identity+hash、marker identity+hash、五目录 identity+tree、critical payload、SOURCE baseline、ledger 和 catalog。Bootstrap 联合备份五个 SOURCE、`review-agent/SKILL.md`、ledger、catalog；display reconcile 只备份和写入五个 SOURCE、ledger、catalog 共七个 metadata 文件，payload 不 stage、不替换。随后运行 catalog `--write`、strict closure、catalog/ledger/SOURCE/hash/parity postcondition，并按 plan 执行至少两次稳定性观测。默认 live active root 的观测间隔不得低于 10 秒；该门槛只证明 bounded stability，不把 Codex runtime 进程停掉或改造成受管对象。菜单工具后续再次改写展示字段时，需以新现场事实重复对账。
 
 任一 schema、package、marker、tree、critical payload、CAS、catalog、closure、postcondition 或稳定性检查失败时，按每个目标的 original/current/written bytes 做 CAS 联合回滚。目标已回到 original bytes 视为已恢复；目标既非 original 也非本事务 written bytes 时保留现场、标记 `rollback-failed` 并写入 evidence。Repair 生成的 SOURCE 只记录已观察的 Store package/marker/hash 与 ledger source-group 事实，不声明未知的 public upstream repo/commit；review-agent 的 SOURCE 与 ledger 同时区分 official baseline 和本机 invocation parity overlay。
 
@@ -119,7 +119,7 @@ inventory、marker/provider CAS 和 catalog/ledger postcondition 复核；任一
 按目录与 state CAS 回滚，外部并发字节不被覆盖。ledger 只保存 overlay 的 hash
 projection，不保存候选临时路径或 payload 字节。
 
-受管发布顺序是：源码定向/模块测试通过；`Deploy-SkillInstallGuarded.ps1 -WhatIf` 证明六文件部署闭包；独立 review 通过后才实际部署六文件并核验 deployment manifest/hash；再从当时 live facts 生成新的 repair plan，先 dry-run 后 apply；最后复核稳定性、strict closure、catalog、ledger、六个 SOURCE 与 review parity。只有这些 live 验收通过后，后续任务才可激活依赖该能力的 `subagent-orchestration`；源码存在、WhatIf 或 fixture green 都不等于已部署/已激活。
+受管发布顺序是：源码定向/模块测试通过；`Deploy-SkillInstallGuarded.ps1 -WhatIf` 证明六文件部署闭包；独立 review 通过后才实际部署六文件并核验 deployment manifest/hash；再从当时 live facts 生成新的 repair plan，先 dry-run 后 apply；最后复核稳定性、strict closure、catalog、ledger、五个 SOURCE 与 review parity。只有这些 live 验收通过后，后续任务才可激活依赖该能力的 `subagent-orchestration`；源码存在、WhatIf 或 fixture green 都不等于已部署/已激活。
 
 ## Canonical rename
 
