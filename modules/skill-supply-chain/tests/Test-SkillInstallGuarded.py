@@ -4455,7 +4455,8 @@ class SkillInstallGuardedTests(unittest.TestCase):
         def fail_post_closure(*arguments: object, **keywords: object) -> dict[str, object]:
             nonlocal closure_calls
             closure_calls += 1
-            if closure_calls == 2:
+            # baseline-resource-closure is call 1; post-resource-closure is call 3.
+            if closure_calls == 3:
                 raise WRAPPER.InstallError("injected rename closure failure")
             return original_run_closure(*arguments, **keywords)
 
@@ -4467,7 +4468,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             code = WRAPPER.main(args)
 
         self.assertEqual(code, 2)
-        self.assertEqual(closure_calls, 2)
+        self.assertEqual(closure_calls, 3)
         self.assert_canonical_rename_rollback(
             state,
             ledger_before=ledger_before,
@@ -4850,7 +4851,8 @@ class SkillInstallGuardedTests(unittest.TestCase):
             nonlocal closure_calls
             closure_calls += 1
             result = original_run_closure(*arguments, **keywords)
-            if closure_calls == 2:
+            # baseline-resource-closure is call 1; post-resource-closure is call 3.
+            if closure_calls == 3:
                 persisted = json.loads(self.ledger.read_text(encoding="utf-8"))
                 persisted["notes"].append("injected ledger drift")
                 self.ledger.write_text(
@@ -4878,7 +4880,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
             code = WRAPPER.main(args)
 
         self.assertEqual(code, 2)
-        self.assertEqual(closure_calls, 2)
+        self.assertEqual(closure_calls, 3)
         self.assertEqual(self.ledger.read_bytes(), ledger_before)
         self.assertEqual(Path(state["catalog"]).read_bytes(), catalog_before)
         self.assertEqual(

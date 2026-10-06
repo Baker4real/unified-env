@@ -25,3 +25,8 @@ intent: 定义设备事实、跨设备验收和宿主集成政策的文档边界
 - `docs/env-governance/sub2api-update-policy.md`
 
 设备页是时间点快照；变更其他设备的记录必须有该设备的直接证据。
+
+## 每日更新自动化
+
+- `docs/automation/daily-update-prompt.md` 是 ZCode「每日更新」自动化提示词的可审阅源文本；运行时生效的是 ZCode 任务库 `automations.prompt`，改动后须写库并读回比对 sha256。
+- `scripts/daily-update/` 是该自动化的受管辅助脚本（ledger TSV、上游 ls-remote 差分 sweep、MCP smoke），调用方式见同目录 `README.md`；自动化不得在证据目录重写这些脚本。

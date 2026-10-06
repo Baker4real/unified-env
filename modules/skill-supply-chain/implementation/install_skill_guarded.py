@@ -38,6 +38,14 @@ if str(_SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIRECTORY))
 
 from skill_source_record import CurrentSourceRecord, parse_current_source_record
+from generate_skill_catalog import (
+    CLOSURE_FINDING_KEY_FIELDS,
+    CatalogError,
+    classify_closure_findings,
+    closure_finding_key,
+    finding_hits_targets,
+    verify_catalog_closure_check,
+)
 from system_skill_provenance_repair import (
     SKILL_CREATOR_CRITICAL_FILES,
     SKILL_CREATOR_OVERLAY_KIND,
@@ -2361,6 +2369,12 @@ def run_closure(
     evidence_dir: Path,
     label: str,
 ) -> dict[str, Any]:
+    """Run strict closure and return a structurally validated JSON payload.
+
+    Exit 0 (clean) and 1 (strict findings) are normal outcomes; findings are
+    judged by ``evaluate_closure_gate``.  Any other exit code, invalid JSON or
+    an inconsistent payload is a hard failure.
+    """
     result = run_process(
         [
             str(interpreter),
@@ -2373,15 +2387,89 @@ def run_closure(
         ],
         evidence_dir=evidence_dir,
         label=label,
+        check=False,
     )
+    if result.returncode not in (0, 1):
+        raise InstallError(
+            f"{label} 异常退出，退出码 {result.returncode}；详见 {evidence_dir}"
+        )
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise InstallError(f"{label} 未返回合法 JSON：{exc}") from exc
     summary = payload.get("summary") if isinstance(payload, dict) else None
-    if not isinstance(summary, dict) or summary.get("finding_count") != 0:
-        raise InstallError(f"{label} 有硬失败：{json.dumps(summary, ensure_ascii=False)}")
+    findings = payload.get("findings") if isinstance(payload, dict) else None
+    if not isinstance(summary, dict) or not isinstance(findings, list):
+        raise InstallError(f"{label} 结果缺少 summary 或 findings")
+    if summary.get("finding_count") != len(findings):
+        raise InstallError(f"{label} finding_count 与 findings 数量不一致")
+    for finding in findings:
+        if not isinstance(finding, dict) or any(
+            not isinstance(finding.get(field), str) for field in CLOSURE_FINDING_KEY_FIELDS
+        ):
+            raise InstallError(f"{label} finding 结构无效：{finding!r}")
+    if (result.returncode == 0) != (not findings):
+        raise InstallError(
+            f"{label} 退出码 {result.returncode} 与 finding 数量 {len(findings)} 不一致"
+        )
     return payload
+
+
+def evaluate_closure_gate(
+    *,
+    payload: dict[str, Any],
+    baseline: dict[str, Any] | None,
+    targets: Sequence[str],
+    label: str,
+) -> dict[str, Any]:
+    """Baseline-diff + target-scoped closure gate.
+
+    Blocks on findings absent from the pre-transaction baseline and on every
+    finding attributed to a transaction target (pre-existing or not).
+    Pre-existing findings outside the targets are reported, not blocking.
+    ``baseline=None`` means no baseline exists, so every finding is new.
+    """
+    gate = {
+        "label": label,
+        **classify_closure_findings(
+            payload["findings"],
+            baseline_findings=None if baseline is None else baseline["findings"],
+            targets=targets,
+        ),
+    }
+    new_findings = gate["new_findings"]
+    target_findings = gate["target_findings"]
+    preexisting_findings = gate["preexisting_findings"]
+    if gate["status"] != "pass":
+        raise InstallError(
+            f"{label} 门禁失败：新增 finding {len(new_findings)} 条，"
+            f"target finding {len(target_findings)} 条："
+            + json.dumps(
+                {"new_findings": new_findings, "target_findings": target_findings},
+                ensure_ascii=False,
+            )
+        )
+    if preexisting_findings:
+        print(
+            f"[{label}] 既有非 target closure finding {len(preexisting_findings)} 条"
+            "（不阻塞本事务，全根 strict 仍为红，见返回 payload 的 preexisting_findings）",
+            file=sys.stderr,
+        )
+    return gate
+
+
+def transaction_closure_targets(
+    *,
+    ledger_names: Sequence[str],
+    rename: dict[str, Any] | None,
+    merge_retirement: dict[str, Any] | None,
+) -> list[str]:
+    targets = list(ledger_names)
+    if rename is not None:
+        targets.append(str(rename["old_name"]))
+    if merge_retirement is not None:
+        targets.append(str(merge_retirement["retired"]["name"]))
+    return targets
 
 
 def load_and_validate_manifest(path: Path, *, names: list[str]) -> dict[str, Any]:
@@ -2672,6 +2760,14 @@ def stage_candidate(
         evidence_dir=evidence_dir,
         label="staged-resource-closure",
     )
+    # The staging root only holds this transaction's skills: no baseline, so
+    # every staged finding blocks (equivalent to zero-finding strict).
+    staged_gate = evaluate_closure_gate(
+        payload=closure,
+        baseline=None,
+        targets=ledger_names,
+        label="staged-resource-closure",
+    )
     staged_payloads = {
         name: tree_content_seal(stage_target_root / name) for name in names
     }
@@ -2687,6 +2783,7 @@ def stage_candidate(
     return {
         "names": names,
         "closure": closure,
+        "closure_gate": staged_gate,
         "candidate_integrity": candidate_integrity,
         "bundled_skill_proofs": bundled_validation,
         "staged_payloads": staged_payloads,
@@ -3374,12 +3471,24 @@ def verify_catalog(
     names: list[str],
     bundled_proofs: Sequence[BundledSkillProof],
     target_scope: str = "active",
+    closure_targets: Sequence[str] | None = None,
+    baseline_findings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     catalog = load_json(catalog_path, label="skill catalog")
     if not isinstance(catalog, dict) or not isinstance(catalog.get("artifacts"), list):
         raise InstallError("skill catalog 缺少 artifacts 数组")
-    if catalog.get("checks", {}).get("resource_closure", {}).get("status") != "pass":
-        raise InstallError("skill catalog 的资源闭包检查不是 pass")
+    if closure_targets is None:
+        closure_targets = [
+            name if target_scope == "active" else f".system/{name}" for name in names
+        ]
+    try:
+        closure_check = verify_catalog_closure_check(
+            catalog.get("checks", {}).get("resource_closure"),
+            targets=closure_targets,
+            baseline_findings=baseline_findings,
+        )
+    except CatalogError as exc:
+        raise InstallError(f"skill catalog 的资源闭包检查不可接受：{exc}") from exc
     verified: list[dict[str, Any]] = []
 
     def verify_target(
@@ -3456,7 +3565,11 @@ def verify_catalog(
         )
     for proof in bundled_proofs:
         verify_target(path=proof.ledger_key, name=proof.name, proof=proof)
-    return {"generated_at": catalog.get("generated_at"), "skills": verified}
+    return {
+        "generated_at": catalog.get("generated_at"),
+        "skills": verified,
+        "resource_closure": closure_check,
+    }
 
 
 def verify_merge_retirement_postcondition(
@@ -3862,7 +3975,24 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     state_backups_ready = False
     staged: dict[str, Any] | None = None
     system_overlay_context = context.get("system_provenance_overlay")
+    closure_targets = transaction_closure_targets(
+        ledger_names=ledger_names,
+        rename=rename,
+        merge_retirement=merge_retirement,
+    )
+    baseline_closure: dict[str, Any] | None = None
     try:
+        # Baseline before any staging or active-root write; post-write closure
+        # is judged against it (new findings + target findings block).
+        baseline_closure = run_closure(
+            root=active_root,
+            closure_script=closure_script,
+            interpreter=interpreter,
+            evidence_dir=evidence_dir,
+            label="baseline-resource-closure",
+        )
+        baseline_closure_path = evidence_dir / "baseline-resource-closure.json"
+        atomic_write_json(baseline_closure_path, baseline_closure)
         atomic_write_bytes(decision_snapshot_path, decision_snapshot_bytes)
         if sha256_file(decision_snapshot_path) != decision_snapshot["sha256"]:
             raise InstallError("decision manifest 事务快照指纹不一致")
@@ -3883,6 +4013,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 **plan,
                 "status": "dry-run-pass",
                 "completed_at": utc_now(),
+                "baseline_resource_closure": baseline_closure,
                 "staged": staged_result_projection(staged),
                 "evidence": str(evidence_dir),
             }
@@ -4025,6 +4156,13 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 str(ledger_path),
                 "--output",
                 str(catalog_generation_output),
+                "--closure-baseline",
+                str(baseline_closure_path),
+                *[
+                    argument
+                    for target in closure_targets
+                    for argument in ("--closure-target", target)
+                ],
             ],
             evidence_dir=evidence_dir,
             label="catalog-generation",
@@ -4056,6 +4194,12 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             evidence_dir=evidence_dir,
             label="post-resource-closure",
         )
+        post_closure_gate = evaluate_closure_gate(
+            payload=post_closure,
+            baseline=baseline_closure,
+            targets=closure_targets,
+            label="post-resource-closure",
+        )
         persisted_ledger = load_json(ledger_path, label="postcondition source ledger")
         if merge_retirement is not None and persisted_ledger != updated_ledger:
             raise InstallError("merge retirement 写入后的 source ledger 发生漂移")
@@ -4065,6 +4209,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             names=names,
             bundled_proofs=staged["bundled_skill_proofs"],
             target_scope=target_scope,
+            closure_targets=closure_targets,
+            baseline_findings=baseline_closure["findings"],
         )
         system_overlay_postcondition = (
             verify_system_provenance_overlay_postcondition(
@@ -4094,7 +4240,10 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "staged": staged_result_projection(staged),
             "directory_records": directory_records,
             "activation_readability": activation_readability,
+            "baseline_resource_closure": baseline_closure,
             "post_resource_closure": post_closure,
+            "post_resource_closure_gate": post_closure_gate,
+            "preexisting_findings": post_closure_gate["preexisting_findings"],
             "catalog_verification": catalog_verification,
             "system_provenance_overlay_postcondition": system_overlay_postcondition,
             "merge_retirement_verification": merge_retirement_verification,
@@ -4135,6 +4284,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "completed_at": utc_now(),
             "error": str(exc),
             "rollback_errors": rollback_errors,
+            "baseline_resource_closure": baseline_closure,
             "staged": staged_result_projection(staged),
             "evidence": str(evidence_dir),
         }

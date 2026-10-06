@@ -12,11 +12,23 @@ import re
 import subprocess
 import tempfile
 import time
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+_SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+if str(_SCRIPT_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIRECTORY))
+
+from generate_skill_catalog import (  # noqa: E402
+    CatalogError,
+    classify_closure_findings,
+    parse_closure_output,
+    verify_catalog_closure_check,
+)
 
 
 EXPECTED_SKILLS = (
@@ -515,7 +527,25 @@ def _review_overlay_bytes(path: Path, baseline: bytes) -> bytes:
     return patched
 
 
-def _run_process(command: list[str], *, evidence_dir: Path, label: str) -> str:
+def _run_process(
+    command: list[str],
+    *,
+    evidence_dir: Path,
+    label: str,
+    allowed_returncodes: tuple[int, ...] = (0,),
+) -> str:
+    completed = _run_process_raw(command, evidence_dir=evidence_dir, label=label)
+    if completed.returncode not in allowed_returncodes:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise SystemProvenanceRepairError(
+            f"{label} 失败，exit={completed.returncode}：{detail}"
+        )
+    return completed.stdout
+
+
+def _run_process_raw(
+    command: list[str], *, evidence_dir: Path, label: str
+) -> subprocess.CompletedProcess[str]:
     completed = subprocess.run(
         command,
         capture_output=True,
@@ -531,12 +561,75 @@ def _run_process(command: list[str], *, evidence_dir: Path, label: str) -> str:
     (evidence_dir / f"{label}.stderr.txt").write_text(
         completed.stderr, encoding="utf-8"
     )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout).strip()
+    return completed
+
+
+def system_closure_targets() -> list[str]:
+    return [f".system/{name}" for name in EXPECTED_SKILLS]
+
+
+def _run_strict_closure(
+    *,
+    interpreter: Path,
+    closure_script: Path,
+    active_root: Path,
+    evidence_dir: Path,
+    label: str,
+) -> dict[str, Any]:
+    """Run strict closure; exit 0/1 are results, crashes and bad JSON fail closed."""
+
+    completed = _run_process_raw(
+        [
+            str(interpreter),
+            "-X",
+            "utf8",
+            "-I",
+            str(closure_script),
+            "--root",
+            str(active_root),
+            "--strict",
+            "--format",
+            "json",
+        ],
+        evidence_dir=evidence_dir,
+        label=label,
+    )
+    try:
+        return parse_closure_output(completed.stdout, completed.returncode, label=label)
+    except CatalogError as exc:
+        raise SystemProvenanceRepairError(str(exc)) from exc
+
+
+def evaluate_system_closure_gate(
+    *,
+    payload: dict[str, Any],
+    baseline: dict[str, Any],
+    targets: list[str],
+    label: str,
+) -> dict[str, Any]:
+    """Same baseline-diff + target rule as install_skill_guarded.evaluate_closure_gate."""
+
+    gate = {
+        "label": label,
+        **classify_closure_findings(
+            payload["findings"],
+            baseline_findings=baseline["findings"],
+            targets=targets,
+        ),
+    }
+    if gate["status"] != "pass":
         raise SystemProvenanceRepairError(
-            f"{label} 失败，exit={completed.returncode}：{detail}"
+            f"{label} 门禁失败：新增 finding {len(gate['new_findings'])} 条，"
+            f"target finding {len(gate['target_findings'])} 条："
+            + json.dumps(
+                {
+                    "new_findings": gate["new_findings"],
+                    "target_findings": gate["target_findings"],
+                },
+                ensure_ascii=False,
+            )
         )
-    return completed.stdout
+    return gate
 
 
 def _query_package_identity(
@@ -1038,13 +1131,20 @@ def _verify_catalog(
     catalog_path: Path,
     active_root: Path,
     plan: dict[str, Any],
+    baseline_findings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     catalog = _read_json(catalog_path, label="skill catalog")
     artifacts = catalog.get("artifacts") if isinstance(catalog, dict) else None
     if not isinstance(artifacts, list):
         raise SystemProvenanceRepairError("skill catalog 缺少 artifacts 数组")
-    if catalog.get("checks", {}).get("resource_closure", {}).get("status") != "pass":
-        raise SystemProvenanceRepairError("skill catalog strict closure 不是 pass")
+    try:
+        closure_check = verify_catalog_closure_check(
+            catalog.get("checks", {}).get("resource_closure"),
+            targets=system_closure_targets(),
+            baseline_findings=baseline_findings,
+        )
+    except CatalogError as exc:
+        raise SystemProvenanceRepairError(f"skill catalog 资源闭包检查不可接受：{exc}") from exc
     verified: list[dict[str, Any]] = []
     for spec in plan["skills"]:
         name = spec["name"]
@@ -1086,7 +1186,11 @@ def _verify_catalog(
                 "source_md_sha256": source.get("integrity", {}).get("sha256"),
             }
         )
-    return {"generated_at": catalog.get("generated_at"), "skills": verified}
+    return {
+        "generated_at": catalog.get("generated_at"),
+        "skills": verified,
+        "resource_closure": closure_check,
+    }
 
 
 def _observe_state(
@@ -1427,7 +1531,26 @@ def execute(args: Any) -> dict[str, Any]:
     _atomic_write_json(manifest_path, transaction)
 
     stage_dir = Path(tempfile.mkdtemp(prefix="system-provenance-", dir=temp_root))
+    closure_targets = system_closure_targets()
     try:
+        baseline_closure = _run_strict_closure(
+            interpreter=interpreter,
+            closure_script=closure_script,
+            active_root=active_root,
+            evidence_dir=evidence_dir,
+            label="baseline-resource-closure",
+        )
+        baseline_closure_path = evidence_dir / "baseline-resource-closure.json"
+        _atomic_write_json(baseline_closure_path, baseline_closure)
+        closure_gate_arguments = [
+            "--closure-baseline",
+            str(baseline_closure_path),
+            *[
+                argument
+                for target in closure_targets
+                for argument in ("--closure-target", target)
+            ],
+        ]
         for name, data in source_written.items():
             staged = stage_dir / name / "SOURCE.md"
             staged.parent.mkdir(parents=True, exist_ok=True)
@@ -1505,6 +1628,7 @@ def execute(args: Any) -> dict[str, Any]:
                 str(ledger_path),
                 "--output",
                 str(generated_catalog_path),
+                *closure_gate_arguments,
             ],
             evidence_dir=evidence_dir,
             label="catalog-generation",
@@ -1526,29 +1650,19 @@ def execute(args: Any) -> dict[str, Any]:
         _atomic_write_bytes(catalog_path, projected_catalog_bytes)
         written_values["catalog"] = projected_catalog_bytes
         written_identities["catalog"] = _identity(catalog_path)
-        closure_stdout = _run_process(
-            [
-                str(interpreter),
-                "-X",
-                "utf8",
-                "-I",
-                str(closure_script),
-                "--root",
-                str(active_root),
-                "--strict",
-                "--format",
-                "json",
-            ],
+        closure = _run_strict_closure(
+            interpreter=interpreter,
+            closure_script=closure_script,
+            active_root=active_root,
             evidence_dir=evidence_dir,
             label="post-resource-closure",
         )
-        try:
-            closure = json.loads(closure_stdout)
-        except json.JSONDecodeError as exc:
-            raise SystemProvenanceRepairError("strict closure 未返回合法 JSON") from exc
-        closure_summary = closure.get("summary") if isinstance(closure, dict) else None
-        if not isinstance(closure_summary, dict) or closure_summary.get("finding_count") != 0:
-            raise SystemProvenanceRepairError("post-write strict closure 未通过")
+        closure_gate = evaluate_system_closure_gate(
+            payload=closure,
+            baseline=baseline_closure,
+            targets=closure_targets,
+            label="post-resource-closure",
+        )
         post_catalog_path = stage_dir / "post-catalog.json"
         _run_process(
             [
@@ -1566,6 +1680,7 @@ def execute(args: Any) -> dict[str, Any]:
                 str(ledger_path),
                 "--output",
                 str(post_catalog_path),
+                *closure_gate_arguments,
             ],
             evidence_dir=evidence_dir,
             label="post-catalog-generation",
@@ -1587,6 +1702,7 @@ def execute(args: Any) -> dict[str, Any]:
             catalog_path=catalog_path,
             active_root=active_root,
             plan=plan,
+            baseline_findings=baseline_closure["findings"],
         )
         observations: list[dict[str, Any]] = []
         for index in range(plan["stability_check"]["observations"]):
@@ -1625,7 +1741,10 @@ def execute(args: Any) -> dict[str, Any]:
             "catalog_sha256": _sha256_file(catalog_path),
             "projected_catalog_sha256": projected_catalog_hash,
             "catalog_verification": catalog_verification,
+            "baseline_resource_closure": baseline_closure,
             "post_resource_closure": closure,
+            "post_resource_closure_gate": closure_gate,
+            "preexisting_findings": closure_gate["preexisting_findings"],
             "stability_observations": observations,
             "evidence": str(evidence_dir),
         }

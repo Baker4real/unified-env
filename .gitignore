@@ -30,3 +30,4 @@ reports/run-evidence-migration-*/
 *.tmp
 *.temp
 __pycache__/
+debug.log

@@ -528,13 +528,18 @@
         "docs/env-governance/sub2api-update-policy.md",
         "docs/environments/ban-gong-shi.md",
         "docs/environments/jia-li.md",
-        "docs/environments/zi-xi-shi.md"
+        "docs/environments/zi-xi-shi.md",
+        "docs/automation/daily-update-prompt.md",
+        "scripts/daily-update/README.md"
       ],
       "dependsOn": [],
       "transitionalDependencies": [],
       "ownership": {
         "files": [],
-        "prefixes": []
+        "prefixes": [
+          "docs/automation/",
+          "scripts/daily-update/"
+        ]
       },
       "tests": {
         "fixture": {

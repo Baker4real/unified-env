@@ -1,0 +1,5 @@
+# sweep-lsremote.sh 跳过的账本来源（每行一个 repo 键，与 TSV 第一列完全一致；# 开头为注释）。
+# 只排除依据证据确认的非 GitHub 必败源；真实上游失败必须查清原因，不得加入此处。
+# 依据: 20261006-231243/lsremote-results.tsv 中 LSREMOTE-FAILED 且 lsremote-errors.log 显示
+#   "github.com/https://www.heygen.com/ not found"（账本 repo 是官网 URL，不是 GitHub 仓库）。
+https://www.heygen.com/

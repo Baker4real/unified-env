@@ -94,7 +94,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 ### Bundled system provenance atomic repair
 
-`--system-provenance-repair-plan <json>` 是独立的 bootstrap/repair 模式，不进入普通 candidate install/update 分支，也不改变其 full-root closure。它只接受固定顺序的 `imagegen`、`openai-docs`、`review-agent`、`skill-creator`、`skill-installer` 五项（2026-10-07 起五项化：`plugin-creator` 已被 Codex Desktop 26.928+ 官方刷新从 `.system` 移除，其 stale ledger 条目按上游移除摘除），并要求 `codex-bundled-system-skills` 在 unified ledger 中唯一覆盖该精确集合。`atomic-six-skill-*` 模式名是历史 schema 标识，按 `schema_version` 兼容保留。
+`--system-provenance-repair-plan <json>` 是独立的 bootstrap/repair 模式，不进入普通 candidate install/update 分支，与其共用下述 closure 门禁。它只接受固定顺序的 `imagegen`、`openai-docs`、`review-agent`、`skill-creator`、`skill-installer` 五项（2026-10-07 起五项化：`plugin-creator` 已被 Codex Desktop 26.928+ 官方刷新从 `.system` 移除，其 stale ledger 条目按上游移除摘除），并要求 `codex-bundled-system-skills` 在 unified ledger 中唯一覆盖该精确集合。`atomic-six-skill-*` 模式名是历史 schema 标识，按 `schema_version` 兼容保留。
 
 Repair plan 必须精确绑定 schema/mode、受管 `system_package_identity.py` 的 SHA-256、当前 `OpenAI.Codex` Store package full name/family/version/publisher、`SignatureKind=Store`、签名 `Valid`、AppX `Ok`、install location、`AppxManifest.xml` 与 `AppxSignature.p7x` 路径和 SHA-256、`.codex-system-skills.marker` 路径和 SHA-256、ledger/catalog 原始 SHA-256，以及五项各自排除 sibling `SOURCE.md` 后的 official/effective tree 与 `SKILL.md` hash。按漂移来源选择 mode：
 
@@ -104,6 +104,8 @@ Repair plan 必须精确绑定 schema/mode、受管 `system_package_identity.py`
 Display 对账只接受 `SKILL.md` frontmatter `description` 和 `agents/openai.yaml` 的 `interface.short_description/default_prompt` 字符串值变化。YAML 解析拒绝重复键、非字符串键和字段存在性/类型变化；屏蔽展示 scalar 后还比较原文，正文、调用策略、注释及其他资源必须保持。ledger 保存 baseline 文件哈希投影而非原文，分别记录保留的 official baseline、本次 effective tree 和底层 overlay。缺少可验证的旧有效态时保留 pending，不把翻译后的树重新归因为官方原始树。
 
 事务在写前两次核验 repair plan/provider 的 identity+bytes、Store package 路径 identity+hash、marker identity+hash、五目录 identity+tree、critical payload、SOURCE baseline、ledger 和 catalog。Bootstrap 联合备份五个 SOURCE、`review-agent/SKILL.md`、ledger、catalog；display reconcile 只备份和写入五个 SOURCE、ledger、catalog 共七个 metadata 文件，payload 不 stage、不替换。随后运行 catalog `--write`、strict closure、catalog/ledger/SOURCE/hash/parity postcondition，并按 plan 执行至少两次稳定性观测。默认 live active root 的观测间隔不得低于 10 秒；该门槛只证明 bounded stability，不把 Codex runtime 进程停掉或改造成受管对象。菜单工具后续再次改写展示字段时，需以新现场事实重复对账。
+
+Closure 门禁（2026-10-07 起，installer、catalog 生成器与本 repair 共用 `generate_skill_catalog.py` 中的实现）采用"基线差分 + target 作用域"：写入前对 active root 跑 strict closure 作 baseline；写入后的 closure、带 `--closure-baseline`/`--closure-target` 的 catalog 生成和 catalog 验收，只在出现 baseline 没有的新 finding（key = `kind`+`skill`+`source`+`reference`）或任何 finding 落在本事务 target（含 `.system/<name>`、rename 旧名、merge 退役名）上时失败。既有非 target finding 不阻塞，catalog 记为 `preexisting-findings` 并在 payload 的 `preexisting_findings` 中列出；closure 非法 JSON、结构不一致或退出码不是 0/1 一律硬失败；不带 baseline 调用 catalog 生成器时仍要求全根零 finding。全根 strict closure 仍是日检口径，有 finding 即报红。
 
 任一 schema、package、marker、tree、critical payload、CAS、catalog、closure、postcondition 或稳定性检查失败时，按每个目标的 original/current/written bytes 做 CAS 联合回滚。目标已回到 original bytes 视为已恢复；目标既非 original 也非本事务 written bytes 时保留现场、标记 `rollback-failed` 并写入 evidence。Repair 生成的 SOURCE 只记录已观察的 Store package/marker/hash 与 ledger source-group 事实，不声明未知的 public upstream repo/commit；review-agent 的 SOURCE 与 ledger 同时区分 official baseline 和本机 invocation parity overlay。
 

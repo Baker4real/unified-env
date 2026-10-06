@@ -80,6 +80,150 @@ class CatalogError(RuntimeError):
     """Raised when the local catalog cannot make a safe, explicit claim."""
 
 
+# --- Scoped closure gate (shared by install_skill_guarded and the system
+# provenance repair).  A finding is identified by these fields; ``line`` and
+# ``resolved`` are excluded because they drift on unrelated edits and differ
+# between staging and active roots.
+CLOSURE_FINDING_KEY_FIELDS = ("kind", "skill", "source", "reference")
+
+
+def parse_closure_output(stdout: str, returncode: int, *, label: str) -> dict[str, Any]:
+    """Validate strict closure output; exit 0/1 are results, anything else crashes."""
+
+    if returncode not in (0, 1):
+        raise CatalogError(f"{label} 异常退出，退出码 {returncode}")
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise CatalogError(f"{label} 未返回合法 JSON：{exc}") from exc
+    summary = payload.get("summary") if isinstance(payload, dict) else None
+    findings = payload.get("findings") if isinstance(payload, dict) else None
+    if not isinstance(summary, dict) or not isinstance(findings, list):
+        raise CatalogError(f"{label} 结果缺少 summary 或 findings")
+    if summary.get("finding_count") != len(findings):
+        raise CatalogError(f"{label} finding_count 与 findings 数量不一致")
+    validate_closure_findings(findings, label=label)
+    if (returncode == 0) != (not findings):
+        raise CatalogError(
+            f"{label} 退出码 {returncode} 与 finding 数量 {len(findings)} 不一致"
+        )
+    return payload
+
+
+def validate_closure_findings(findings: Any, *, label: str) -> list[dict[str, Any]]:
+    if not isinstance(findings, list):
+        raise CatalogError(f"{label} findings 不是数组")
+    for finding in findings:
+        if not isinstance(finding, dict) or any(
+            not isinstance(finding.get(field), str) for field in CLOSURE_FINDING_KEY_FIELDS
+        ):
+            raise CatalogError(f"{label} finding 结构无效：{finding!r}")
+    return findings
+
+
+def closure_finding_key(finding: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(str(finding[field]) for field in CLOSURE_FINDING_KEY_FIELDS)
+
+
+def finding_hits_targets(finding: dict[str, Any], targets: Iterable[str]) -> bool:
+    skill = str(finding.get("skill", ""))
+    return any(skill == target or skill.startswith(target + "/") for target in targets)
+
+
+def classify_closure_findings(
+    findings: list[dict[str, Any]],
+    *,
+    baseline_findings: list[dict[str, Any]] | None,
+    targets: Iterable[str],
+) -> dict[str, Any]:
+    """Split findings into new / target / preexisting (non-blocking) buckets.
+
+    ``baseline_findings=None`` means there is no baseline: every finding is new.
+    Blocking = any new finding or any finding on a target (pre-existing or not).
+    """
+
+    target_list = list(targets)
+    baseline_keys = {closure_finding_key(item) for item in baseline_findings or []}
+    new_findings: list[dict[str, Any]] = []
+    target_findings: list[dict[str, Any]] = []
+    preexisting_findings: list[dict[str, Any]] = []
+    for finding in findings:
+        is_new = closure_finding_key(finding) not in baseline_keys
+        on_target = finding_hits_targets(finding, target_list)
+        if is_new:
+            new_findings.append(finding)
+        if on_target:
+            target_findings.append(finding)
+        if not is_new and not on_target:
+            preexisting_findings.append(finding)
+    return {
+        "status": "fail" if new_findings or target_findings else "pass",
+        "key_fields": list(CLOSURE_FINDING_KEY_FIELDS),
+        "targets": target_list,
+        "baseline_finding_count": None if baseline_findings is None else len(baseline_findings),
+        "finding_count": len(findings),
+        "new_findings": new_findings,
+        "target_findings": target_findings,
+        "preexisting_findings": preexisting_findings,
+    }
+
+
+def verify_catalog_closure_check(
+    check: Any,
+    *,
+    targets: Iterable[str],
+    baseline_findings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Accept ``pass`` or ``preexisting-findings`` that block nothing for ``targets``.
+
+    Used by install_skill_guarded.verify_catalog and the system provenance
+    repair; it re-derives the verdict instead of trusting the recorded gate.
+    """
+
+    if not isinstance(check, dict):
+        raise CatalogError("catalog checks.resource_closure 缺失")
+    status = check.get("status")
+    if status == "pass":
+        if check.get("finding_count") != 0:
+            raise CatalogError("catalog resource_closure=pass 但 finding_count 不为 0")
+        return {"status": "pass", "finding_count": 0, "preexisting_findings": []}
+    if status != "preexisting-findings":
+        raise CatalogError(f"catalog resource_closure 状态不可接受：{status!r}")
+    gate = check.get("gate")
+    if not isinstance(gate, dict):
+        raise CatalogError("catalog resource_closure 缺少 gate 判定")
+    if gate.get("new_findings") != [] or gate.get("target_findings") != []:
+        raise CatalogError("catalog resource_closure gate 含新增或 target finding")
+    preexisting = validate_closure_findings(
+        gate.get("preexisting_findings"), label="catalog resource_closure"
+    )
+    if not preexisting or check.get("finding_count") != len(preexisting):
+        raise CatalogError("catalog resource_closure finding_count 与既有 finding 不一致")
+    target_list = list(targets)
+    gate_targets = gate.get("targets")
+    if not isinstance(gate_targets, list) or not set(target_list) <= set(gate_targets):
+        raise CatalogError("catalog resource_closure gate 未覆盖本事务 targets")
+    on_target = [item for item in preexisting if finding_hits_targets(item, target_list)]
+    if on_target:
+        raise CatalogError(
+            "catalog resource_closure 有落在 target 上的 finding："
+            + json.dumps(on_target, ensure_ascii=False)
+        )
+    if baseline_findings is not None:
+        baseline_keys = {closure_finding_key(item) for item in baseline_findings}
+        new = [item for item in preexisting if closure_finding_key(item) not in baseline_keys]
+        if new:
+            raise CatalogError(
+                "catalog resource_closure 有 baseline 外的新 finding："
+                + json.dumps(new, ensure_ascii=False)
+            )
+    return {
+        "status": "preexisting-findings",
+        "finding_count": len(preexisting),
+        "preexisting_findings": preexisting,
+    }
+
+
 def _utc_now() -> str:
     return _datetime.datetime.now(_datetime.timezone.utc).isoformat().replace(
         "+00:00", "Z"
@@ -651,8 +795,18 @@ def _load_ledger(path: Path) -> tuple[dict[str, Any], dict[str, list[dict[str, s
 
 
 def _validate_closure(
-    result: dict[str, Any], *, active_root: Path, active_count: int
+    result: dict[str, Any],
+    *,
+    active_root: Path,
+    active_count: int,
+    closure_gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Validate closure; strict (zero findings) unless ``closure_gate`` is given.
+
+    ``closure_gate`` = {"baseline_findings": [...], "targets": [...]} enables the
+    baseline-diff + target-scoped rule: new or target findings still fail,
+    pre-existing non-target findings yield status ``preexisting-findings``.
+    """
     if not isinstance(result, dict):
         raise CatalogError("资源闭包结果必须是 JSON 对象")
     summary = result.get("summary")
@@ -674,6 +828,31 @@ def _validate_closure(
         )
     if summary["finding_count"] != len(findings):
         raise CatalogError("资源闭包 finding_count 与 findings 数量不一致")
+    if closure_gate is not None:
+        validate_closure_findings(findings, label="资源闭包结果")
+        gate = classify_closure_findings(
+            findings,
+            baseline_findings=closure_gate["baseline_findings"],
+            targets=closure_gate["targets"],
+        )
+        if gate["status"] != "pass":
+            raise CatalogError(
+                "资源闭包门禁未通过："
+                + json.dumps(
+                    {
+                        "new_findings": gate["new_findings"],
+                        "target_findings": gate["target_findings"],
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        return {
+            "status": "preexisting-findings" if findings else "pass",
+            "coverage": "heuristic",
+            "summary": summary,
+            "finding_count": len(findings),
+            "gate": gate,
+        }
     failure_fields = [key for key in _CLOSURE_SUMMARY_KEYS[3:] if summary[key] != 0]
     if summary["finding_count"] or failure_fields:
         raise CatalogError(
@@ -719,16 +898,11 @@ def _run_resource_closure(active_root: Path) -> dict[str, Any]:
         )
     except OSError as exc:
         raise CatalogError(f"无法运行本地资源闭包脚本：{exc}") from exc
-    if completed.returncode != 0:
+    if completed.returncode not in (0, 1):
         detail = (completed.stderr or completed.stdout).strip()
         raise CatalogError(f"资源闭包脚本失败（exit {completed.returncode}）：{detail}")
-    try:
-        result = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise CatalogError("资源闭包脚本没有输出合法 JSON") from exc
-    if not isinstance(result, dict):
-        raise CatalogError("资源闭包脚本输出不是 JSON 对象")
-    return result
+    # exit 1 = strict findings; whether they block is decided by _validate_closure.
+    return parse_closure_output(completed.stdout, completed.returncode, label="资源闭包脚本")
 
 
 def _identity_fields(
@@ -789,6 +963,7 @@ def _artifact(
     read_only: bool,
     ledger_states: dict[str, list[dict[str, str]]],
     closure_status: str,
+    closure_finding_skills: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     data, stat_result = _read_stable(skill_path, label="SKILL.md")
     frontmatter = _parse_frontmatter(data, path=skill_path)
@@ -885,7 +1060,13 @@ def _artifact(
             "modified_at": _timestamp(stat_result.st_mtime),
             "read_consistency": "stable",
         },
-        "resource_closure": "validated" if closure_status == "pass" and scope != "plugin-cache" else "not-run",
+        "resource_closure": (
+            "not-run"
+            if scope == "plugin-cache" or closure_status not in {"pass", "preexisting-findings"}
+            else "preexisting-findings"
+            if skill_path.parent.relative_to(root).as_posix() in closure_finding_skills
+            else "validated"
+        ),
         "runtime_verification": "unverified",
     }
 
@@ -918,6 +1099,7 @@ def build_catalog(
     ledger_path: Path,
     resource_closure: dict[str, Any] | None = None,
     generated_at: str | None = None,
+    closure_gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a catalog without writing any file or contacting a remote service."""
 
@@ -962,7 +1144,13 @@ def build_catalog(
             resource_closure,
             active_root=active,
             active_count=active_count,
+            closure_gate=closure_gate,
         )
+    closure_finding_skills = frozenset(
+        str(item.get("skill"))
+        for item in (resource_closure or {}).get("findings", [])
+        if isinstance(item, dict)
+    )
 
     artifacts: list[dict[str, Any]] = []
     for path in active_paths:
@@ -975,6 +1163,7 @@ def build_catalog(
                 read_only=False,
                 ledger_states=ledger_states,
                 closure_status=closure_info["status"],
+                closure_finding_skills=closure_finding_skills,
             )
         )
     for path in cache_paths:
@@ -1156,7 +1345,34 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plugin-cache-root", type=Path, default=DEFAULT_PLUGIN_CACHE_ROOT)
     parser.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--closure-baseline",
+        type=Path,
+        help="事务写入前的 strict closure JSON；提供后按基线差分 + target 作用域判定",
+    )
+    parser.add_argument(
+        "--closure-target",
+        action="append",
+        default=[],
+        help="本事务 target skill（相对 active root，如 .system/imagegen），可重复",
+    )
     return parser
+
+
+def _load_closure_gate(baseline_path: Path | None, targets: list[str]) -> dict[str, Any] | None:
+    if baseline_path is None:
+        if targets:
+            raise CatalogError("--closure-target 必须与 --closure-baseline 一起使用")
+        return None
+    path = _normalize_file(baseline_path, label="closure baseline")
+    try:
+        payload = json.loads(path.read_bytes().decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CatalogError(f"closure baseline 不是合法 UTF-8 JSON：{path}") from exc
+    if not isinstance(payload, dict):
+        raise CatalogError("closure baseline 必须是 JSON 对象")
+    findings = validate_closure_findings(payload.get("findings"), label="closure baseline")
+    return {"baseline_findings": findings, "targets": list(targets)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1168,12 +1384,14 @@ def main(argv: list[str] | None = None) -> int:
         cache = _normalize_root(args.plugin_cache_root, required=True, label="plugin cache root")
         ledger = _normalize_file(args.ledger, label="source-state ledger")
         output = _safe_output_path(args.output, active_root=active, cache_root=cache)
+        closure_gate = _load_closure_gate(args.closure_baseline, args.closure_target)
         closure = _run_resource_closure(active)
         catalog = build_catalog(
             active_root=active,
             plugin_cache_root=cache,
             ledger_path=ledger,
             resource_closure=closure,
+            closure_gate=closure_gate,
         )
         if catalog["checks"]["ledger"]["status"] == "conflict":
             raise CatalogError("ledger 与 SOURCE.md 存在冲突，拒绝写入")
