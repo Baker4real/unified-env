@@ -42,6 +42,13 @@
       "deniedExactPaths": []
     },
     {
+      "id": "agents-staging",
+      "capabilityRoot": "D:\\agents\\staging",
+      "minimumDescendantDepth": 1,
+      "rootDeletionPurpose": "none",
+      "deniedExactPaths": []
+    },
+    {
       "id": "codex-legacy-temp",
       "capabilityRoot": "D:\\Codex\\.tmp",
       "minimumDescendantDepth": 1,
