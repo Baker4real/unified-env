@@ -18,6 +18,7 @@ intent: 说明 Codex 主机钩子 reconciler 的目标状态和安全边界
 - hidden launcher 复制当前进程有效的 Windows stdin/stdout/stderr 句柄，缺失流才定向到 `DEVNULL`，并原样返回最终子进程退出码。窗口隐藏不得破坏 hook JSON 协议流、错误流或失败状态。
 - wrapper 依赖校验将 `%~dp0<relative>` 只相对该 wrapper 的实际目录安全展开；其他 `%` 变量、绝对替代、父目录逃逸或无法证明位于 wrapper 目录内的 token 均不得匹配。三个 Serena wrapper 的最终 `-Mode` 分别固定为 `Activation`、`Cleanup`、`Reminder`，不能因共用同一 PowerShell implementation 而互相冒充。
 - Serena 不固定项目，也不根据 MCP 进程 cwd 推断项目。任务需要语义工具时，按当前 `environment_context` 的绝对 workspace root 显式激活。
+- Serena activation 提示仅面向需要 symbol/LSP 导航的任务；检查配置后只汇报活动项目与 readiness，配置漂移排障时才展开详情。Reminder 对静态、显式数据文件路径的只读查询保持静默：识别 Markdown、文本、日志、JSON/JSONL、CSV/TSV 等后缀，以及受限的 `rg`、`grep`、`Get-Content`、`Select-String` 和数字裁剪 `Select-Object` 管线。分类检查实际操作数，不采信 description、查询模式或 session ID；目录搜索、源码路径、动态表达式、重定向及未知选项继续走原 reminder。该豁免只控制语义导航提醒，不授予 shell 权限，也不覆盖更高优先级指令。
 - `approval_policy`、`sandbox_mode`、`features.hooks` 与 `unified_exec` 属于用户或受管策略边界，reconciler 不推断缺失值也不强写它们。官方默认 `hooks=true`；Windows 上省略 `unified_exec` 时默认关闭。
 - Projectless 路径、线程数据库、heartbeat、Store、IFEO、代理和其他 Windows guard 不由本 reconciler 接管。
 

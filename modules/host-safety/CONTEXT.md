@@ -18,6 +18,7 @@ safe delete 的宿主公开入口是 gate shim `D:\Codex\.codex\scripts\invoke-s
 ## 权威合同
 
 - 删除语义与生产 policy：`docs/specs/2026-07-24-safe-tree-delete-capability.md`
+- 批量清理状态、崩溃恢复、策略快照与目录身份验收：`docs/specs/2026-10-10-safe-cleanup-job.md`。入口 `scripts/Invoke-SafeCleanupJob.ps1`；状态不扫描全部历史交易。
 - `retired-evidence-root` 独立合同：`docs/specs/2026-09-15-safe-tree-delete-retired-evidence-root.md`。本用途条目只作一次性许可；生产 policy 不得残留（测试钉死）。live tracker 以 GitHub Issues 为准，不在本文缓存。
 - 性能优化（Plan C# 单遍 walker 已落地、AC1 达标；生产并行 Purge 已接线；端到端 6x 正式验收待环境安静窗口重跑，见 #56）：`docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md`
 

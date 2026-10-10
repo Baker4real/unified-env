@@ -322,6 +322,72 @@ function Assert-CodexSerenaBehaviorOutput {
     finally { $document.Dispose() }
 }
 
+function Test-CodexSerenaDataQuery {
+    param([Parameter(Mandatory)][string]$InputText)
+
+    # This is a semantic-navigation reminder exemption, not shell authorization.
+    # Inspect actual query operands, never a description, pattern, or session ID.
+    $payload = $InputText | ConvertFrom-Json -AsHashtable
+    if ($payload['tool_input'] -isnot [System.Collections.IDictionary]) { return $false }
+    $inputData = $payload['tool_input']
+    $dataPath = '(?i)\.(md|txt|log|json|jsonl|ndjson|csv|tsv)$'
+    if ($payload['tool_name'] -in @('Read', 'read_file')) {
+        return ($inputData['file_path'] -is [string] -and $inputData['file_path'] -match $dataPath)
+    }
+    if ($payload['tool_name'] -notin @('Bash', 'exec_command')) { return $false }
+    $command = if ($inputData['command'] -is [string]) { $inputData['command'] } else { $inputData['cmd'] }
+    if ($command -isnot [string]) { return $false }
+    $parseErrors = $null
+    $tokens = $null
+    $ast = [Management.Automation.Language.Parser]::ParseInput($command, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count -gt 0) { return $false }
+    $commands = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true))
+    if ($commands.Count -eq 0) { return $false }
+    $queryCount = 0
+    foreach ($query in $commands) {
+        $name = $query.GetCommandName()
+        if ($name -notin @('rg', 'grep', 'Get-Content', 'Select-String', 'Select-Object')) { return $false }
+        if ($query.Redirections.Count -gt 0) { return $false }
+        $operands = [Collections.Generic.List[string]]::new()
+        foreach ($element in @($query.CommandElements | Select-Object -Skip 1)) {
+            if ($element -is [Management.Automation.Language.StringConstantExpressionAst]) { $operands.Add($element.Value) }
+            elseif ($element -is [Management.Automation.Language.ConstantExpressionAst] -and $element.Value -is [ValueType]) { $operands.Add([string]$element.Value) }
+            elseif ($element -is [Management.Automation.Language.CommandParameterAst] -and $null -eq $element.Argument) { $operands.Add($element.Extent.Text) }
+            else { return $false }
+        }
+        if ($name -eq 'Select-Object') {
+            if ($operands.Count -eq 0) { return $false }
+            for ($i = 0; $i -lt $operands.Count; $i += 2) {
+                if ($operands[$i] -notin @('-First', '-Last', '-Skip', '-SkipLast', '-Index') -or
+                    $i + 1 -ge $operands.Count -or $operands[$i + 1] -notmatch '^\d+$') { return $false }
+            }
+            continue
+        }
+        $paths = [Collections.Generic.List[string]]::new()
+        $hasPattern = $name -eq 'Get-Content'
+        for ($i = 0; $i -lt $operands.Count; $i++) {
+            $operand = $operands[$i]
+            if ($operand -in @('-e', '--regexp', '-Pattern')) {
+                $i++
+                if ($i -ge $operands.Count) { return $false }
+                $hasPattern = $true
+            }
+            elseif ($operand -in @('-n', '--line-number', '-i', '--ignore-case', '-l', '--files-with-matches', '-F', '--fixed-strings', '-Raw', '-SimpleMatch', '-LiteralPath', '-Path', '--')) { continue }
+            elseif ($operand -in @('-TotalCount', '-Tail', '-Encoding', '-m', '--max-count')) {
+                $i++
+                if ($i -ge $operands.Count) { return $false }
+            }
+            elseif ($operand.StartsWith('-')) { return $false }
+            elseif (-not $hasPattern) { $hasPattern = $true }
+            else { $paths.Add($operand) }
+        }
+        if ($paths.Count -eq 0) { return $false }
+        foreach ($path in $paths) { if ($path -notmatch $dataPath) { return $false } }
+        $queryCount++
+    }
+    return $queryCount -gt 0
+}
+
 function Get-CodexSerenaSessionMutexName {
     param(
         [Parameter(Mandatory)][string]$SerenaHome,
@@ -470,16 +536,16 @@ function Invoke-CodexSerenaBehaviorGuardCore {
     try {
         $sessionId = Assert-CodexSerenaSessionInput -InputText $InputText
         if ($Behavior -ceq 'Activation') {
-            $context = 'Use the absolute workspace root from environment_context to call mcp__serena__activate_project, then call mcp__serena__get_current_config to verify the active project. Do not infer the project from cwd.'
+            $context = 'For work requiring symbol or LSP navigation, use the absolute workspace root from environment_context to call mcp__serena__activate_project, then call mcp__serena__get_current_config to verify the active project. Do not infer the project from cwd. Read-only log, JSON, documentation, cleanup-status and host-evidence queries do not require Serena activation unless a higher-priority instruction explicitly requires it. Inspect the returned configuration, but report only the active project and readiness unless diagnosing configuration drift; do not repeat the full configuration in progress updates.'
             $activationJson = [pscustomobject][ordered]@{ hookSpecificOutput = [pscustomobject][ordered]@{ hookEventName = 'SessionStart'; additionalContext = $context } } | ConvertTo-Json -Compress -Depth 4
             [byte[]]$bytes = [Text.UTF8Encoding]::new($false).GetBytes($activationJson + "`r`n")
         }
         else {
             # Serena reminders are useful for semantic code navigation, but a
-            # Markdown/provenance read should remain a normal read. Do not let
+            # documentation, log or JSON read should remain a normal read. Do not let
             # the reminder counter turn documentation review into a blocked
             # workflow.
-            if ($Behavior -ceq 'Reminder' -and $InputText -match '(?i)(AGENTS\.md|CLAUDE\.md|SKILL\.md|SOURCE\.md|\.md\b|\.txt\b|Get-Content|Select-String)') {
+            if ($Behavior -ceq 'Reminder' -and (Test-CodexSerenaDataQuery -InputText $InputText)) {
                 return [pscustomobject][ordered]@{ ok = $true; exitCode = 0; stdout = [byte[]]@(); error = $null }
             }
             $mutexName = Get-CodexSerenaSessionMutexName -SerenaHome $SerenaHome -SessionId $sessionId

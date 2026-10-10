@@ -284,6 +284,9 @@
       "context": "modules/host-safety/CONTEXT.md",
       "summary": "句柄绑定 I/O、路径/reparse 校验、原子发布与受管安全树删除。",
       "interfaces": [
+        "scripts/Invoke-SafeCleanupJob.ps1",
+        "scripts/lib/SafeCleanupJob.ps1",
+        "scripts/Measure-CodexSafeTreeDeleteHistory.ps1",
         "scripts/lib/CodexHookHandleBoundIO.cs",
         "scripts/lib/CodexHostSafety.ps1",
         "scripts/lib/CodexUserEnvironmentTransaction.cs",
@@ -299,6 +302,12 @@
       "ownership": {
         "files": [
           "docs/handoffs/20260902T164751Z-safe-tree-delete-status-slow-path.md",
+          "docs/specs/2026-10-10-safe-cleanup-job.md",
+          "scripts/Invoke-SafeCleanupJob.ps1",
+          "scripts/lib/SafeCleanupJob.ps1",
+          "scripts/Measure-CodexSafeTreeDeleteHistory.ps1",
+          "tests/Test-SafeCleanupJob.ps1",
+          "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
           "docs/plans/2026-08-27-safe-tree-delete-issue56-implementation.md",
           "docs/specs/2026-07-24-safe-tree-delete-capability.md",
           "docs/specs/2026-08-13-safe-tree-delete-performance-optimization.md",
@@ -438,6 +447,8 @@
         "fixture": {
           "powershell": [
             "tests/Test-CodexSafeTreeDelete.ps1",
+            "tests/Test-SafeCleanupJob.ps1",
+            "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeleteBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
             "tests/Test-CodexSafeTreeDeleteDeployment.ps1",
@@ -474,6 +485,8 @@
         },
         "fixture-base": {
           "powershell": [
+            "tests/Test-SafeCleanupJob.ps1",
+            "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
             "tests/Test-CodexSafeTreeDelete.ps1",
             "tests/Test-CodexSafeTreeDeleteBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",

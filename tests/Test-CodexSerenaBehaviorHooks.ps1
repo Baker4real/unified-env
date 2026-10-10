@@ -287,9 +287,39 @@ finally {
         $mutexHolder.Dispose()
     }
 
-    # Markdown/provenance 读取豁免（2026-09-07 裁决采纳）：Reminder 输入命中
-    # AGENTS.md/CLAUDE.md/SKILL.md/SOURCE.md/.md/.txt/Get-Content/Select-String
-    # 时直接静默放行，不拿 session 互斥、不建 session state、不触 vendor。
+    # 文档/结构化数据/日志的实际查询目标不适合符号导航，不消耗 reminder 计数。
+    # 描述、查询 pattern 或源码查询中夹带数据文件名不能触发豁免。
+    foreach ($case in @(
+        @{ command = 'rg -n failed D:/evidence/ledger.json'; expected = $true },
+        @{ command = "Get-Content 'D:/agents/projects/统一环境/modules/manifest.json' -TotalCount 510 | Select-Object -Last 234; Get-Content 'D:/Codex/.codex/docs/agent-guidance/host-runbook/safe-tree-delete.md' -TotalCount 110; Get-Content 'D:/Codex/.codex/memories/MEMORY.md' -TotalCount 93 | Select-Object -Last 23"; expected = $true },
+        @{ command = 'Get-Content ledger.json | Select-Object -Skip 3 -First 10'; expected = $true },
+        @{ command = 'Get-Content source.ps1 | Select-Object -First 10'; expected = $false },
+        @{ command = 'Get-Content ledger.json | Select-Object -First $count'; expected = $false },
+        @{ command = 'Get-Content ledger.json | Select-Object -Property { Get-Content source.ps1 }'; expected = $false },
+        @{ command = 'Get-Content ledger.json | Select-Object -First 10; Get-Content source.ps1'; expected = $false },
+        @{ command = 'rg -i error "D:/evidence/driver log.log"'; expected = $true },
+        @{ command = 'grep -n status D:/evidence/events.jsonl'; expected = $true },
+        @{ command = 'Get-Content -LiteralPath D:/docs/AGENTS.md -TotalCount 80'; expected = $true },
+        @{ command = 'Select-String -Pattern failed -LiteralPath D:/evidence/driver.log'; expected = $true },
+        @{ command = 'rg -n hook file.ps1'; expected = $false },
+        @{ command = 'rg -n "README.md" file.ps1'; expected = $false },
+        @{ command = 'rg -n hook README.md file.ps1'; expected = $false },
+        @{ command = 'rg -n hook README.md; rg -n hook file.ps1'; expected = $false },
+        @{ command = 'Get-Content file.ps1'; expected = $false },
+        @{ command = 'rg -n hook'; expected = $false },
+        @{ command = 'rg -n hook $target'; expected = $false },
+        @{ command = 'rg -n hook data.json > result.txt'; expected = $false }
+    )) {
+        $queryPayload = @{ session_id = 'session-README.md'; tool_name = 'Bash'; tool_input = @{ command = $case.command; description = 'read README.md' } } | ConvertTo-Json -Compress -Depth 5
+        Assert-Equal (Test-CodexSerenaDataQuery -InputText $queryPayload) $case.expected "数据查询分类错误：$($case.command)"
+    }
+    $dataSession = 'session-data-query-exempt-redacted'
+    foreach ($dataCommand in @('rg -n status ledger.json', 'rg -n failed driver.log', 'rg -n error events.jsonl', 'rg -n owner CONTEXT.md', 'Get-Content ledger.json -TotalCount 50 | Select-Object -Last 10; Get-Content CONTEXT.md | Select-Object -Skip 2 -First 8')) {
+        $dataPayload = @{ session_id = $dataSession; tool_name = 'Bash'; tool_input = @{ command = $dataCommand } } | ConvertTo-Json -Compress -Depth 5
+        $dataResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText $dataPayload -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        Assert-True ($dataResult.ok -and $dataResult.stdout.Length -eq 0) '连续四次数据查询不得触发源码导航拒绝。'
+    }
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data/$dataSession"))) '数据查询不得创建 vendor 计数状态。'
     $markdownSession = 'session-markdown-exempt-redacted'
     $markdownSessionPath = Join-Path $guardFixtureHome "hook_data\$markdownSession"
     $markdownPayload = [pscustomobject][ordered]@{
@@ -626,6 +656,9 @@ exit 0
     Assert-True $activationContext.Contains('mcp__serena__activate_project') 'activation reminder 必须要求显式 activate_project。'
     Assert-True $activationContext.Contains('mcp__serena__get_current_config') 'activation reminder 必须要求 get_current_config 复验。'
     Assert-True $activationContext.Contains('Do not infer the project from cwd') 'activation reminder 不得按 cwd 自动激活。'
+    Assert-True $activationContext.Contains('report only the active project and readiness') 'activation reminder 必须限制复述配置全文，不削弱工具调用和复验。'
+    Assert-True $activationContext.Contains('For work requiring symbol or LSP navigation') 'activation 必须限于需要语义导航的任务。'
+    Assert-True $activationContext.Contains('unless a higher-priority instruction explicitly requires it') 'activation 分类不得覆盖更高优先指令。'
 
     $failedGuard = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText '{not-json}' `
         -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
