@@ -72,7 +72,7 @@ jobs:
       - uses: actions/setup-python@v6
         if: matrix.module == 'skill-supply-chain'
         with:
-          python-version: '3.14'
+          python-version: '3.15'
 
       - name: Prepare canonical project path
         shell: pwsh
@@ -92,7 +92,7 @@ jobs:
           $pipExit = $LASTEXITCODE
           if ($pipExit -ne 0) { exit $pipExit }
 
-          $managedPythonRoot = 'D:\Codex\tools\python314-official'
+          $managedPythonRoot = 'D:\Codex\tools\python315-official'
           $managedToolsRoot = Split-Path -Parent $managedPythonRoot
           New-Item -ItemType Directory -Path $managedToolsRoot -Force | Out-Null
           New-Item -ItemType Directory -Path $managedPythonRoot -Force | Out-Null
