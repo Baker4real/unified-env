@@ -1,92 +1,10 @@
 Set-StrictMode -Version Latest
 
-# #56 §4.3：native 装配统一经 CodexHostSafetyNativeLoader.ps1（变体 source 集、内容寻址
-# generation、registry、Assembly.Load(byte[])）。本文件不再维护第二套编译清单；StatusScan
-# 保持自带独立缓存（自包含源，见下）。
+# #56 §4.3 / #86：本 lib 编译的全部 C# 组件（含 Status fast scan 与 Plan walker）只经
+# CodexHostSafetyNativeLoader.ps1 装配：变体 source 集、内容寻址 generation（不覆盖已发布文件）、
+# registry、Assembly.Load(byte[])。本文件不维护编译清单，也不再有固定路径程序集缓存。
 . (Join-Path $PSScriptRoot 'CodexHostSafetyNativeLoader.ps1')
 [void](Invoke-CodexHostSafetyNativeLoad -RequestedVariant (Get-CodexHostSafetyNativeRequestedVariant))
-$codexSafeTreeDeleteStatusScanSource = Join-Path $PSScriptRoot 'CodexSafeTreeDeleteStatusScan.cs'
-# The host-safety native assembly cache usually preloads CodexSafeTreeDelete.FileIdentityReader,
-# so the batch above is skipped and the Status fast scanner needs its own compilation unit.
-# CodexSafeTreeDeleteStatusScan.cs is self-contained (BCL + System.Management.Automation +
-# local P/Invoke only) for exactly this reason and follows the same assembly cache contract. Staleness is bound to the exact
-# .cs source content: the sidecar .sha256 records the source SHA-256 the cached DLL was
-# compiled from, so an mtime-only refresh can never mask a content change.
-if (-not ('CodexSafeTreeDelete.StatusScanCoordinator' -as [type])) {
-    $statusScanAssemblyDirectory = [IO.Path]::Combine('D:\', 'Codex', 'temp', 'unified-env-addtype')
-    [void][IO.Directory]::CreateDirectory($statusScanAssemblyDirectory)
-    $statusScanAssemblyPath = Join-Path $statusScanAssemblyDirectory 'CodexSafeTreeDeleteStatusScan.dll'
-    $statusScanMetadataPath = "$statusScanAssemblyPath.sha256"
-    $statusScanSourceSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
-        [IO.File]::ReadAllBytes($codexSafeTreeDeleteStatusScanSource))).ToLowerInvariant()
-    $statusScanCachedSha256 = if ([IO.File]::Exists($statusScanMetadataPath)) {
-        ([IO.File]::ReadAllText($statusScanMetadataPath)).Trim()
-    } else {
-        $null
-    }
-    $statusScanStale = -not [IO.File]::Exists($statusScanAssemblyPath) -or
-        [string]::IsNullOrEmpty($statusScanCachedSha256) -or
-        $statusScanCachedSha256 -cne $statusScanSourceSha256
-    if ($statusScanStale) {
-        # Compile into a same-directory temp file, then atomically rename it over the cache
-        # so concurrent Status processes never observe a removed-then-half-written DLL.
-        $statusScanTempAssemblyPath = Join-Path $statusScanAssemblyDirectory (
-            '{0}.tmp' -f ([IO.Path]::GetRandomFileName()))
-        $statusScanTempMetadataPath = "$statusScanTempAssemblyPath.sha256"
-        try {
-            Add-Type `
-                -Path @($codexSafeTreeDeleteStatusScanSource) `
-                -OutputAssembly $statusScanTempAssemblyPath `
-                -OutputType Library `
-                -ErrorAction Stop
-            $statusScanLiveSha256 = if ([IO.File]::Exists($statusScanMetadataPath)) {
-                ([IO.File]::ReadAllText($statusScanMetadataPath)).Trim()
-            } else {
-                $null
-            }
-            if (-not ($statusScanLiveSha256 -ceq $statusScanSourceSha256 -and
-                    [IO.File]::Exists($statusScanAssemblyPath))) {
-                # A concurrent process may have published the same source hash while we
-                # compiled; that DLL already is the valid new version, so only replace
-                # when nobody else did. Publish the DLL first and the sidecar second: a
-                # torn publish merely recompiles on the next run instead of certifying
-                # a stale DLL as fresh.
-                [IO.File]::WriteAllText(
-                    $statusScanTempMetadataPath,
-                    $statusScanSourceSha256,
-                    [Text.UTF8Encoding]::new($false))
-                try {
-                    Move-Item `
-                        -LiteralPath $statusScanTempAssemblyPath `
-                        -Destination $statusScanAssemblyPath `
-                        -Force -ErrorAction Stop
-                    Move-Item `
-                        -LiteralPath $statusScanTempMetadataPath `
-                        -Destination $statusScanMetadataPath `
-                        -Force -ErrorAction Stop
-                } catch {
-                    $statusScanWinnerSha256 = if ([IO.File]::Exists($statusScanMetadataPath)) {
-                        ([IO.File]::ReadAllText($statusScanMetadataPath)).Trim()
-                    } else {
-                        $null
-                    }
-                    if (-not ($statusScanWinnerSha256 -ceq $statusScanSourceSha256 -and
-                            [IO.File]::Exists($statusScanAssemblyPath))) {
-                        throw
-                    }
-                }
-            }
-        } finally {
-            foreach ($statusScanTempPath in @(
-                    $statusScanTempAssemblyPath, $statusScanTempMetadataPath)) {
-                if ([IO.File]::Exists($statusScanTempPath)) {
-                    Remove-Item -LiteralPath $statusScanTempPath -Force -ErrorAction SilentlyContinue
-                }
-            }
-        }
-    }
-    Add-Type -Path $statusScanAssemblyPath -ErrorAction Stop
-}
 
 function Get-CodexSafeTreeDeleteFileIdentityV2 {
     param(

@@ -25,6 +25,8 @@ safe delete 的宿主公开入口是 gate shim `D:\Codex\.codex\scripts\invoke-s
 
 Plan 阶段自 2026-08-27（#56 Wave A）默认走 C# 单遍 walker（`scripts/lib/CodexSafeTreeDeletePlanSnapshot.cs`）；plan.json 合同不变，等价性与双模式回归见 `reports/safe-tree-delete-issue56-20260827/`。生产排障回退：env `CODEX_SAFE_TREE_DELETE_PLAN_CSHARP_WALKER=0` 强制回 PowerShell 三遍路径（仅字符串 '0' 生效）。
 
+safe-tree-delete lib 编译的全部 C# 组件（Status fast scan、Plan walker 与其余 native 组件）只经 `scripts/lib/CodexHostSafetyNativeLoader.ps1` 加载（#86）：source 变化只发布新的内容寻址 generation（`<variant>\<compositeSha256>\`），不改写已发布文件，所以工作树与生产互不干扰。env=0 的 base variant 不含 PlanSnapshot，但仍含 Status fast scan。新增 C# 组件只加入 loader 的 source 集，不另建缓存。旧的固定路径 `CodexSafeTreeDeleteStatusScan.dll` 及其 `.sha256` 不再被读写或加载。回归见 `tests/Test-CodexSafeTreeDeleteNativeLoading.ps1`。
+
 性能史诗 #26 子票 #32/#40/#41/#42 已于 2026-08-19 关闭，现役状态与实测数字以性能 spec「操作者指南」为准；`reports/safe-tree-delete-issue26-20260817/CLOSEABLE.md` 是 2026-08-17 时点快照。
 
 控制面收尾（Archive、退出码传递、`complete` 聚合）以 `docs/specs/2026-07-24-safe-tree-delete-capability.md` 为准：归档合格 terminal 不蕴含 `complete=true`；受管中间层必须转发 `$LASTEXITCODE`。2026-08-13 现场快照见 `reports/safe-tree-delete-control-plane-closeout-20260814/REPORT.md`，不是现役计数。控制面收尾票（#18 系列）状态以 GitHub live tracker 为准，不在本文缓存。
