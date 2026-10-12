@@ -72,7 +72,8 @@ reconciler 只维护以下状态：
 ## 修复保证
 
 - 所有路径必须位于 D 盘，且受管路径不得穿过 reparse point；受管文件不得是 NTFS hard link。
-- TOML 固定由 `D:\Codex\tools\python314-official\python.exe`（ProductVersion 3.14、PSF 签名）及其标准库 `tomllib` 做完整语法验证，再由定向 parser 识别受管 section/key，生成结果也必须在写前复验；输入、输出与进程退出共用 5 秒截止时间。多行 array 或 inline table 内出现形似 table / array-table header 的元素时，定向 parser 无法安全判定其来源语义，必须 fail closed，而不是误作 section；不具该歧义的无关多行容器仍原样保留。runtime 根、必要 DLL 与 `Lib\tomllib` 源文件不得经过 reparse point 或 hard link；`-B` 配合唯一且确认不存在的 D 盘 `pycache_prefix`，强制从已检查源码加载且不生成 bytecode cache。启动器签名不是标准库内容证明，验证器继承现有 `D:\Codex\tools` runtime 的主机信任边界。JSON 在写入前严格解析。Serena context 使用仓库内可审计的受限 YAML 验证器，只接受唯一顶层 mapping、无引号简单 scalar/list、`{}` 空 mapping 和唯一 literal prompt；tab、重复 key、引号、反斜杠转义、未知标点/缩进、anchor/alias/tag/directive/document marker 均 fail closed。生成结果必须再次通过同一验证器与 canonical prompt 精确比较。
+- 历史 TOML 验证链随 2026-09-06 config reconciliation 一并退役；旧 Python 3.14 / `tomllib` 约束不再代表现役 reconciler 运行时。旧合同保留于 Git 历史与 legacy fixture，生产 runtime 以 `managed/codex-hooks/host-preflight-manifest.json` 为准。
+- JSON 在写入前严格解析。Serena context 使用仓库内可审计的受限 YAML 验证器，只接受唯一顶层 mapping、无引号简单 scalar/list、`{}` 空 mapping 和唯一 literal prompt；tab、重复 key、引号、反斜杠转义、未知标点/缩进、anchor/alias/tag/directive/document marker 均 fail closed。生成结果必须再次通过同一验证器与 canonical prompt 精确比较。
 - 写入前保存受保护 evidence，随后按 Serena context → `hooks.json` 的顺序，使用同卷临时文件、原子替换、内容与 ACL 的 CAS 校验完成两资源提交。
 - 历史 config evidence 与退役 trust 的清洗合同随 config reconciliation 一并退役；`scripts\Invoke-RetiredProjectSnapshotSanitizer.ps1` 仍是历史快照的受控清理入口（`-Mode Audit -Json` 后按 `-ConfirmRetiredProject` 显式确认才 `-Mode Apply -Json`），但不再由 reconciler 的 evidence/Restore 流程触发。
 - 并发替换或文件提交、ACL 加固、legacy 退役中的不安全部分提交不会用旧 snapshot 覆盖较新 active state；可定位 backup 和 manifest 会被保留，状态按 `unsafe-partial` 报告。

@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $managedRoot = Join-Path $projectRoot 'managed\cursor-hooks'
-$python = 'D:\Codex\tools\python314-official\python.exe'
+$python = 'D:\Codex\tools\python315-official\python.exe'
 $liveHooksPath = Join-Path $env:USERPROFILE '.cursor\hooks.json'
 $managedHooksPath = Join-Path $managedRoot 'hooks.json'
 $adapterPath = Join-Path $managedRoot 'cursor-host-hook.py'
@@ -66,7 +66,7 @@ foreach ($wrapper in $wrappers) {
     $path = Join-Path $managedRoot $wrapper.name
     Assert-True (Test-Path -LiteralPath $path -PathType Leaf) "缺少 wrapper：$($wrapper.name)"
     $source = Get-Content -LiteralPath $path -Raw
-    Assert-True ($source.Contains('D:\Codex\tools\python314-official\pythonw.exe') -and $source.Contains('lib\hidden-console-launcher.py')) "$($wrapper.name) 必须通过 hidden launcher 启动。"
+    Assert-True ($source.Contains('D:\Codex\tools\python315-official\pythonw.exe') -and $source.Contains('lib\hidden-console-launcher.py')) "$($wrapper.name) 必须通过 hidden launcher 启动。"
     Assert-True $source.Contains("%~dp0cursor-host-hook.py`" $($wrapper.mode)") "$($wrapper.name) 必须固定 adapter mode。"
     Assert-True (-not $source.Contains('%*')) "$($wrapper.name) 不得接受外部参数覆盖固定命令。"
     if ([bool]$wrapper.serena) {

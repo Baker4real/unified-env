@@ -344,6 +344,10 @@ Assert-True (
 ) 'hidden console launcher 必须由 Git 属性固定为 text eol=lf'
 $legacyFixtureManifest = Read-CodexHookManifest -Path $legacyFixtureManifestPath
 $hostPreflightManifest = Read-CodexHookManifest -Path $hostPreflightManifestPath
+Assert-True ($hostPreflightManifest.runtimes.python -ceq 'D:\Codex\tools\python315-official\python.exe') '现役 preflight 必须固定 Python 3.15。'
+$oldHostRuntime = Copy-TestDocument $hostPreflightManifest
+$oldHostRuntime.runtimes.python = 'D:\Codex\tools\python314-official\python.exe'
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $oldHostRuntime | Out-Null } '现役 preflight 不得退回 Python 3.14。'
 $hostHiddenLauncherFile = @($hostPreflightManifest.files | Where-Object relativePath -ceq 'hooks/lib/hidden-console-launcher.py')
 Assert-True ($hostHiddenLauncherFile.Count -eq 1) 'host-preflight manifest 必须唯一声明 hidden console launcher'
 [byte[]]$hiddenLauncherRawBytes = [IO.File]::ReadAllBytes($hiddenLauncherSourcePath)

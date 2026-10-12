@@ -290,6 +290,11 @@ function Assert-CodexHookManifest {
         serenaPython = 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
         serenaHooks = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
     }
+    # The active preflight uses the current host runtime; legacy fixture contracts stay pinned.
+    if (@($Manifest.hooks | Where-Object id -ceq 'codex-state-preflight').Count -gt 0) {
+        $expectedRuntimes.python = 'D:\Codex\tools\python315-official\python.exe'
+        $expectedRuntimes.pythonw = 'D:\Codex\tools\python315-official\pythonw.exe'
+    }
     Assert-CodexHookExactProperties -Value $Manifest.runtimes -Names $runtimeNames -Scope 'runtimes'
     foreach ($name in $runtimeNames) {
         [void](Assert-CodexHookExactPath -Value $Manifest.runtimes.$name -Expected $expectedRuntimes[$name] -Name "runtimes.$name")
@@ -820,11 +825,11 @@ function Assert-CodexHookHostPreflightManifest {
     $expectedFiles = @{
         'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', '51076559bcaa7ca573b4c81b8af5856d83db654aebce8932bc05bf06cff521e9', 'codex-state-preflight')
         'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', 'daa401d467867a2cf1201c2db95198bb6c3d5b96d19406bfa9a61b9766222a0e', 'codex-state-preflight')
-        'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', '14e46a0309e74b8415dd6d6ea626611b5015272dab3849ff6fb864138cf4f9f9', 'codex-state-preflight')
-        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', '30750335c561fc7a3f7d5ed40eabe528a554caa49c66efa73b296dcddf84e95f', 'serena-reminder')
-        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '25706cc4ae08e954c2b9f35a49225c94479b0267b8313c9951acb23ef277a572', 'serena-cleanup')
+        'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', 'db79142562e8bb7aa0cbd5bd6a8155ec93c06f092621e96839fc63c2dcfb3f2f', 'codex-state-preflight')
+        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', '0beb898476ab063b1f8d06509618e8a636ebca1f86180f11b3e986a67cf2a21e', 'serena-reminder')
+        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '7cfe6d9d4da2a851e104bed3fc457caa4302fb46cbd3fee001c77f4da36cba84', 'serena-cleanup')
         'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', 'aed9491a4e543adce87b0557d25b9179717f9b91ce29e417267a60c98bab7317', 'serena-reminder', 'serena-cleanup', 'serena-activate')
-        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', '6a9d1abca43d05426ffa9d18ae0e65e51357d9e9aad70f3d77364d4ecdad4eb2', 'serena-activate')
+        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', 'ff052774ff1b6dbfc628b83ed9625b9d78ef9f58a0ab854de21bbe0123e55487', 'serena-activate')
         'codex-github-cli-guard.cmd' = @('hooks/codex-github-cli-guard.cmd', '0ac0f5526f517ace8a3a23a48a32df32284f3bd8459bb4eeadcc2eca682193d9', 'github-cli')
         'codex-github-cli-guard.ps1' = @('hooks/codex-github-cli-guard.ps1', '0a41c9d42e8c80ab1793d0c4554da8772c32e8fdd4b7dbd61065a02b8670212e', 'github-cli')
         'lib/CodexGitHubCliGuardEntry.ps1' = @('hooks/lib/CodexGitHubCliGuardEntry.ps1', 'bf7239c8e24ca33d410e6f1c36855f187703f90a35e212a86386d9723740bad2', 'github-cli')

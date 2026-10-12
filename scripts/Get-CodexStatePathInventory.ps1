@@ -36,7 +36,7 @@ $FixtureParent = Join-Path $ProjectRoot 'reports\codex-state-path-repair-test'
 $ProductionCodexHome = 'D:\Codex\.codex'
 $ProductionEvidenceRoot = 'D:\agents\run-evidence\env-governance\codex-state-preflight'
 $CorePath = Join-Path $ProjectRoot 'managed\codex-hooks\hooks\codex-state-policy-guard.py'
-$PythonPath = 'D:\Codex\tools\python314-official\python.exe'
+$PythonPath = 'D:\Codex\tools\python315-official\python.exe'
 $FixtureMarker = '.codex-state-path-repair-fixture'
 $FixtureMarkerValue = 'codex-state-path-repair-test-v1'
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHostSafety.ps1')

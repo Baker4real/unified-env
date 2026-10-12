@@ -16,8 +16,8 @@
   ],
   "runtimes": {
     "pwsh": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
-    "python": "D:\\Codex\\tools\\python314-official\\python.exe",
-    "pythonw": "D:\\Codex\\tools\\python314-official\\pythonw.exe",
+    "python": "D:\\Codex\\tools\\python315-official\\python.exe",
+    "pythonw": "D:\\Codex\\tools\\python315-official\\pythonw.exe",
     "serenaPython": "D:\\Codex\\tools\\uv\\tools\\serena-agent\\Scripts\\python.exe",
     "serenaHooks": "D:\\Codex\\tools\\uv\\bin\\serena-hooks.exe"
   },
@@ -394,7 +394,7 @@
     {
       "relativePath": "hooks/codex-state-preflight.cmd",
       "liveRelativePath": "codex-state-preflight.cmd",
-      "sha256": "14e46a0309e74b8415dd6d6ea626611b5015272dab3849ff6fb864138cf4f9f9",
+      "sha256": "db79142562e8bb7aa0cbd5bd6a8155ec93c06f092621e96839fc63c2dcfb3f2f",
       "lifecycle": "active",
       "ownerHookIds": [
         "codex-state-preflight"
@@ -403,7 +403,7 @@
     {
       "relativePath": "hooks/serena-reminder-guarded.cmd",
       "liveRelativePath": "serena-reminder-guarded.cmd",
-      "sha256": "30750335c561fc7a3f7d5ed40eabe528a554caa49c66efa73b296dcddf84e95f",
+      "sha256": "0beb898476ab063b1f8d06509618e8a636ebca1f86180f11b3e986a67cf2a21e",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-reminder"
@@ -412,7 +412,7 @@
     {
       "relativePath": "hooks/serena-cleanup-guarded.cmd",
       "liveRelativePath": "serena-cleanup-guarded.cmd",
-      "sha256": "25706cc4ae08e954c2b9f35a49225c94479b0267b8313c9951acb23ef277a572",
+      "sha256": "7cfe6d9d4da2a851e104bed3fc457caa4302fb46cbd3fee001c77f4da36cba84",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-cleanup"
@@ -432,7 +432,7 @@
     {
       "relativePath": "hooks/serena-activation-reminder.cmd",
       "liveRelativePath": "serena-activation-reminder.cmd",
-      "sha256": "6a9d1abca43d05426ffa9d18ae0e65e51357d9e9aad70f3d77364d4ecdad4eb2",
+      "sha256": "ff052774ff1b6dbfc628b83ed9625b9d78ef9f58a0ab854de21bbe0123e55487",
       "lifecycle": "active",
       "ownerHookIds": [
         "serena-activate"

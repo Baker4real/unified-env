@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $managedRoot = Join-Path $projectRoot 'managed\grok-hooks'
-$python = 'D:\Codex\tools\python314-official\python.exe'
+$python = 'D:\Codex\tools\python315-official\python.exe'
 $liveHooksPath = Join-Path $env:USERPROFILE '.grok\hooks\host-lifecycle.json'
 $managedHooksPath = Join-Path $managedRoot 'host-lifecycle.json'
 $adapterPath = Join-Path $managedRoot 'grok-host-hook.py'

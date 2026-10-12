@@ -25,7 +25,7 @@ foreach ($required in @(
     "[ValidateSet('Check', 'Repair', 'Remove')]",
     'D:\Codex\.codex\catalog-guard',
     'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe',
-    'D:\Codex\tools\python314-official\pythonw.exe',
+    'D:\Codex\tools\python315-official\pythonw.exe',
     'Codex Remote Plugin Catalog Guard',
     'New-ScheduledTaskTrigger -AtLogOn',
     'CreateNoWindow'

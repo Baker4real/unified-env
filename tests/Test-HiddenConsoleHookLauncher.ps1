@@ -60,7 +60,7 @@ function Invoke-LauncherProbe {
     )
 
     Invoke-HiddenProcess `
-        -FilePath 'D:\Codex\tools\python314-official\pythonw.exe' `
+        -FilePath 'D:\Codex\tools\python315-official\pythonw.exe' `
         -ArgumentList (@('-I', '-S', '-B', '-X', 'utf8', $launcherPath, $TargetPath) + $TargetArguments) `
         -InputText $InputText `
         -Environment $Environment
@@ -135,7 +135,7 @@ Assert-ProtocolProbe -Result $powerShellResult -ExpectedExitCode 23 -ExpectedStd
 
 $pythonProbe = 'import ctypes,json,sys; sys.stdout.write(json.dumps({"input":sys.stdin.readline().strip(),"windowHandle":ctypes.windll.kernel32.GetConsoleWindow()})); sys.stderr.write("direct-python-stderr"); raise SystemExit(24)'
 $pythonResult = Invoke-LauncherProbe `
-    -TargetPath 'D:\Codex\tools\python314-official\python.exe' `
+    -TargetPath 'D:\Codex\tools\python315-official\python.exe' `
     -TargetArguments @('-I', '-S', '-B', '-X', 'utf8', '-c', $pythonProbe) `
     -InputText "probe-input`n"
 Assert-ProtocolProbe -Result $pythonResult -ExpectedExitCode 24 -ExpectedStderr 'direct-python-stderr'
@@ -186,7 +186,7 @@ Assert-True ($missingResult.exitCode -eq 127) "launcher 启动不存在的 targe
 Assert-True ($missingResult.stderr -cmatch 'FileNotFoundError: \[WinError 2\]') "launcher 启动失败必须在 stderr 给出稳定诊断：$($missingResult.stderr)"
 
 $missingArgumentsResult = Invoke-HiddenProcess `
-    -FilePath 'D:\Codex\tools\python314-official\pythonw.exe' `
+    -FilePath 'D:\Codex\tools\python315-official\pythonw.exe' `
     -ArgumentList @('-I', '-S', '-B', '-X', 'utf8', $launcherPath)
 Assert-True ($missingArgumentsResult.exitCode -eq 127) "launcher 缺少 target 时必须返回 127：$($missingArgumentsResult.exitCode)"
 Assert-True ($missingArgumentsResult.stderr -cmatch 'ValueError: target executable is required') "launcher 缺少 target 时必须在 stderr 给出稳定诊断：$($missingArgumentsResult.stderr)"
@@ -203,7 +203,7 @@ ctypes.windll.kernel32.SetStdHandle(-11, ctypes.c_void_p(1))
 raise SystemExit(module.main([sys.executable, "-I", "-S", "-B", "-X", "utf8", "-c", "pass"]))
 '@
 $invalidStdoutResult = Invoke-HiddenProcess `
-    -FilePath 'D:\Codex\tools\python314-official\python.exe' `
+    -FilePath 'D:\Codex\tools\python315-official\python.exe' `
     -ArgumentList @('-I', '-S', '-B', '-X', 'utf8', '-c', $invalidStdoutProbe, $launcherPath)
 Assert-True ($invalidStdoutResult.exitCode -eq 127) "launcher 标准句柄初始化失败时必须返回 127：$($invalidStdoutResult.exitCode)"
 Assert-True ($invalidStdoutResult.stderr -cmatch 'OSError: \[WinError 6\]') "launcher 标准句柄初始化失败时必须尽力写入 stderr：$($invalidStdoutResult.stderr)"

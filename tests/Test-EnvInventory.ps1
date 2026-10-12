@@ -70,12 +70,12 @@ $pathReparseOutput = Join-Path $testRoot "path-reparse"
 $deviceNamespaceOutput = Join-Path $testRoot "device-namespace"
 $unsafeEnvBaseOutput = Join-Path $testRoot "unsafe-env-base"
 $managedPythonCmd = "D:\Codex\tools\bin\python.cmd"
-$managedPythonRuntime = "D:\Codex\tools\python314-official\python.exe"
+$managedPythonRuntime = "D:\Codex\tools\python315-official\python.exe"
 $managedPythonAliases = @(
     $managedPythonCmd,
     "D:\Codex\tools\bin\python3.cmd",
-    "D:\Codex\tools\bin\python3.14.cmd",
-    "D:\Codex\tools\bin\python314.cmd"
+    "D:\Codex\tools\bin\python3.15.cmd",
+    "D:\Codex\tools\bin\python315.cmd"
 )
 
 $testSource = Get-Content -Raw -LiteralPath $PSCommandPath
@@ -327,7 +327,7 @@ try {
         $aliasRun = Invoke-HiddenProcess -FilePath $managedPythonRuntime -Arguments @('--version')
         Assert-True -Condition ($aliasRun.ExitCode -eq 0) -Message "受控 Python runtime 版本探测失败：$managedPythonAlias => $($aliasRun.Text)"
         $aliasVersion = $aliasRun.Text.Trim()
-        Assert-True -Condition ([string]$aliasVersion -like 'Python 3.14.*') -Message "受控 Python alias 版本探测失败：$managedPythonAlias => $aliasVersion"
+        Assert-True -Condition ([string]$aliasVersion -like 'Python 3.15.*') -Message "受控 Python alias 版本探测失败：$managedPythonAlias => $aliasVersion"
     }
     $fullResult = & $scriptPath -OutputDir $fullOutput
 } finally {

@@ -49,7 +49,7 @@ intent: 记录家里设备的受控环境事实与差异
   `Invoke-UuHeartbeatWatchdog.ps1` 的 `$remotePwsh` 指向远端主机上的 7.6.3 路径，
   属对端设备事实，不随本机收敛改动。
 - 2026-08-31 同日：`D:\Codex\tools\python314-official-3.14.6`（零引用旧版副本）已经
-  受管安全树删除清除；现役 `python314-official` 实测为 3.14.7。悬空用户级 `GSD_HOME`
+  受管安全树删除清除；当时的 `python314-official` 实测为 3.14.7。现役 Python 入口与兼容例外见 `D:\Codex\.codex\docs\agent-guidance\host-runbook\shell-and-runtime.md`。悬空用户级 `GSD_HOME`
   （指向已不存在的 `D:\Codex\.gsd`）已删除。
 - `D:\Codex\.codex\config.toml` 已设
   `integratedTerminalShell = "powershell"`。这表示 Codex 的集成终端使用 PowerShell；
@@ -110,7 +110,7 @@ intent: 记录家里设备的受控环境事实与差异
 
 ## Codex provider 代理（后台）
 
-- 此代理是 Codex 主机服务，不属于 Hermes 项目。脚本固定为 `D:\Codex\.codex\scripts\codex-provider-proxy.py`，日志固定为 `D:\Codex\.codex\logs\codex-provider-proxy.log`，运行时使用官方 `D:\Codex\tools\python314-official\pythonw.exe`。
+- 此代理是 Codex 主机服务，不属于 Hermes 项目。脚本固定为 `D:\Codex\.codex\scripts\codex-provider-proxy.py`，日志固定为 `D:\Codex\.codex\logs\codex-provider-proxy.log`；现役官方 Python 运行时及验收入口以 `D:\Codex\.codex\docs\agent-guidance\host-runbook\shell-and-runtime.md` 为准。
 - 入口源码位于 `D:\Codex\tools\codex-launcher\`，现役入口为 `D:\Codex\tools\bin\codex.exe`。修改脚本或 launcher 后必须重新发布并核验现役入口，不能改动官方 Store/AppX Codex 二进制。
 - launcher 只在 stdin、stdout、stderr 都连接真实终端，且 `TERM` 缺失或为 `dumb` 时，为官方 Codex 子进程设置 `TERM=xterm-256color`；重定向、GUI 和后台入口必须保留原值。修改该契约后运行 `tests\Test-CodexLauncherTerminalEnvironment.ps1`，并在不显式覆盖 `TERM` 的真实 PTY 中复验 `codex doctor --json`。
 - 服务子进程必须以 `pythonw.exe` 和 `CREATE_NO_WINDOW` 后台启动；验收时检查 `/health`、`/v1/models`、窗口句柄为零且没有 `conhost.exe` 后代，不能通过关闭用户终端来掩盖问题。

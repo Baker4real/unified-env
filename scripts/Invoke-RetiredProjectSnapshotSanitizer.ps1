@@ -1129,7 +1129,7 @@ function Get-Sanitization {
 function Assert-ValidToml {
     param([Parameter(Mandatory)][string]$Content)
 
-    $pythonPath = Assert-PhysicalFile -Path 'D:\Codex\tools\python314-official\python.exe'
+    $pythonPath = Assert-PhysicalFile -Path 'D:\Codex\tools\python315-official\python.exe'
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $pythonPath
     foreach ($argument in @('-B', '-I', '-S', '-X', 'utf8', '-c', 'import sys, tomllib; tomllib.loads(sys.stdin.read())')) {

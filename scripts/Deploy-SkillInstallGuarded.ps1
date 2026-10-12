@@ -3,7 +3,7 @@ param(
     [string]$SourceRoot = '',
     [string]$CodexRoot = 'D:\Codex\.codex',
     [string]$EvidenceRoot = 'D:\agents\run-evidence\skill-install-guarded-deployment',
-    [string]$PythonPath = 'D:\Codex\tools\python314-official\python.exe'
+    [string]$PythonPath = 'D:\Codex\tools\python315-official\python.exe'
 )
 
 Set-StrictMode -Version Latest

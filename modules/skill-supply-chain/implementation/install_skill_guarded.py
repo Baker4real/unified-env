@@ -74,7 +74,7 @@ DEFAULT_CLOSURE = Path(
 DEFAULT_SYSTEM_INSTALLER = Path(
     r"D:\agents\skills-manager\skills\.system\skill-installer\scripts\install-skill-from-github.py"
 )
-DEFAULT_PYTHON = Path(r"D:\Codex\tools\python314-official\python.exe")
+DEFAULT_PYTHON = Path(r"D:\Codex\tools\python315-official\python.exe")
 DEFAULT_TEMP_ROOT = Path(r"D:\Codex\tmp\skill-install-guarded")
 DEFAULT_LOCK_ROOT = Path(r"D:\Codex\.codex\skill-install")
 DEFAULT_EVIDENCE_ROOT = Path(r"D:\agents\run-evidence\skill-install-guarded")
