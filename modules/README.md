@@ -14,7 +14,7 @@ intent: 说明单仓模块边界、接口、依赖与迁移顺序
 | `dev-environment` | 盘点、dry-run 迁移、PATH、备份与报告 | `Invoke-EnvInventory.ps1` 及 `New-*` 计划/报告入口 |
 | `codex-host` | Hooks、state preflight、Serena/CodeGraph 运行时、remote catalog guard | `Invoke-CodexHostHookReconciliation.ps1` 与 `Invoke-CodexRemotePluginCatalogGuard.ps1` |
 | `skill-supply-chain` | Skill 来源、安装事务、catalog、ledger 与 Git overlay | `install-skill-guarded.cmd`、catalog 生成器与部署入口 |
-| `host-safety` | 句柄绑定 I/O、路径安全、原子发布、safe delete | manifest 登记的 `scripts/lib/` seam 与 `invoke-codex-safe-tree-delete.cmd` |
+| `host-safety` | 句柄绑定 I/O、路径安全、原子发布、安全诊断与恢复、safe delete | manifest 登记的 `scripts/lib/` seam、主机诊断入口与 `invoke-codex-safe-tree-delete.cmd` |
 | `workstation-operations` | 设备事实、跨设备验收与工作站集成政策 | 设备文档与 Sub2API 更新政策 |
 
 ## 依赖方向
