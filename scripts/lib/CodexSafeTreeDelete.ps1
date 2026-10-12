@@ -1185,7 +1185,8 @@ function Assert-CodexSafeTreeDeleteDeletionAllowed {
 function Resolve-CodexSafeTreeDeleteTargetPathArguments {
     param([string[]]$Values)
 
-    # 宿主 .cmd 链只能传单个字符串：多个 BatchPurge 目标以 '::' 连接，在这里拆回数组。
+    # 宿主 .cmd 链只能传单个字符串：BatchPurge 的多个目标、多组 Archive 的 transaction path 与
+    # approved SHA-256 都以 '::' 连接，在这里拆回数组。
     $items = @($Values)
     if ($items.Count -eq 1 -and [string]$items[0] -match '::') {
         $items = @(([string]$items[0]).Split([string[]]@('::'), [StringSplitOptions]::RemoveEmptyEntries))
@@ -1220,6 +1221,8 @@ function Invoke-CodexSafeTreeDeleteMode {
     [switch]$ConfirmApply = [bool]$EntryParameters['ConfirmApply']
     [string]$TransactionPath = $EntryParameters['TransactionPath']
     [string]$ApprovedTransactionSha256 = $EntryParameters['ApprovedTransactionSha256']
+    [string[]]$TransactionPaths = $EntryParameters['TransactionPaths']
+    [string[]]$ApprovedTransactionSha256s = $EntryParameters['ApprovedTransactionSha256s']
     [switch]$ConfirmPurge = [bool]$EntryParameters['ConfirmPurge']
     [switch]$ConfirmRestore = [bool]$EntryParameters['ConfirmRestore']
     [switch]$ConfirmArchive = [bool]$EntryParameters['ConfirmArchive']
@@ -1257,6 +1260,31 @@ function Invoke-CodexSafeTreeDeleteMode {
         'Archive' {
             if (-not $ConfirmArchive) {
                 return [pscustomobject][ordered]@{ archived = $false; refusalReason = 'confirm-archive-required' }
+            }
+            # 多组：TransactionPaths 与 ApprovedTransactionSha256s 按位置配对，宿主链传入的 '::' 连接串在这里
+            # 拆开。请求级校验全部先于任何一组的处理，校验失败整体抛错、不写 evidence。
+            if ($null -ne $TransactionPaths -or $null -ne $ApprovedTransactionSha256s) {
+                if (-not [string]::IsNullOrWhiteSpace($TransactionPath) -or
+                    -not [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
+                    throw ('Archive 不能同时使用单组参数（TransactionPath / ApprovedTransactionSha256）' +
+                        '与多组参数（TransactionPaths / ApprovedTransactionSha256s）。')
+                }
+                $resolvedTransactionPaths = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $TransactionPaths)
+                $resolvedApprovedSha256s = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $ApprovedTransactionSha256s)
+                if ($null -eq $TransactionPaths -or
+                    $null -eq $ApprovedTransactionSha256s -or
+                    $resolvedTransactionPaths.Count -eq 0 -or
+                    $resolvedTransactionPaths.Count -ne $resolvedApprovedSha256s.Count -or
+                    @($resolvedTransactionPaths + $resolvedApprovedSha256s |
+                        Where-Object { [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
+                    throw 'Archive 多组模式要求 TransactionPaths 与 ApprovedTransactionSha256s 一一对应且均不为空。'
+                }
+                $libraryArguments = @{
+                    TransactionPaths = $resolvedTransactionPaths
+                    ApprovedTransactionSha256s = $resolvedApprovedSha256s
+                    EvidenceRoot = $EvidenceRoot
+                } + $testArguments
+                return Invoke-CodexSafeTreeDeleteArchiveBatch @libraryArguments
             }
             if ([string]::IsNullOrWhiteSpace($TransactionPath) -or
                 [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
@@ -3188,6 +3216,57 @@ function Invoke-CodexSafeTreeDeleteArchive {
     } finally {
         if ($held) { [void]$mutex.ReleaseMutex() }
         $mutex.Dispose()
+    }
+}
+
+function Invoke-CodexSafeTreeDeleteArchiveBatch {
+    # #85：一次调用归档多组 terminal 记录。每组原样走单组 Invoke-CodexSafeTreeDeleteArchive：独立认证
+    # （approved SHA-256、evidence run 位置与内容绑定）、独立 target mutex、独立 create-only 发布。
+    # 按输入顺序逐组处理；某组抛错只记入该组结果（archive-operation-failed + 原异常消息），不影响
+    # 其他组。成功与结构化拒绝的结果行就是单组返回对象，前面加上本组 transactionPath。
+    param(
+        [Parameter(Mandatory)][string[]]$TransactionPaths,
+        [Parameter(Mandatory)][string[]]$ApprovedTransactionSha256s,
+        [Parameter(Mandatory)][string]$EvidenceRoot
+    )
+
+    if ($TransactionPaths.Count -ne $ApprovedTransactionSha256s.Count) {
+        throw 'safe-delete archive batch 的 transaction path 与 approved SHA-256 必须一一对应。'
+    }
+    $results = [Collections.Generic.List[object]]::new()
+    for ($index = 0; $index -lt $TransactionPaths.Count; $index++) {
+        $transactionPath = [string]$TransactionPaths[$index]
+        try {
+            $archive = Invoke-CodexSafeTreeDeleteArchive `
+                -TransactionPath $transactionPath `
+                -ApprovedTransactionSha256 ([string]$ApprovedTransactionSha256s[$index]) `
+                -EvidenceRoot $EvidenceRoot
+            $row = [ordered]@{ transactionPath = $transactionPath }
+            foreach ($property in $archive.PSObject.Properties) {
+                $row[$property.Name] = $property.Value
+            }
+            $results.Add([pscustomobject]$row)
+        } catch {
+            $results.Add([pscustomobject][ordered]@{
+                transactionPath = $transactionPath
+                archived = $false
+                alreadyArchived = $false
+                refusalReason = 'archive-operation-failed'
+                error = [string]$_.Exception.Message
+            })
+        }
+    }
+
+    $archivedCount = @($results | Where-Object { $_.archived -eq $true }).Count
+    $failedCount = @($results | Where-Object { $null -ne $_.PSObject.Properties['error'] }).Count
+    return [pscustomobject][ordered]@{
+        completed = $archivedCount -eq $results.Count
+        transactionCount = $results.Count
+        archivedCount = $archivedCount
+        alreadyArchivedCount = @($results | Where-Object { $_.alreadyArchived -eq $true }).Count
+        refusedCount = $results.Count - $archivedCount - $failedCount
+        failedCount = $failedCount
+        results = @($results)
     }
 }
 
