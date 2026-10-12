@@ -331,7 +331,6 @@ function Assert-HistoryScanShape {
         "$Scope canonicalFiles + fallbackFiles 必须等于 enumeratedFiles"
 }
 
-$records = [Collections.Generic.List[object]]::new()
 try {
     # --- 切片 1：historyScan 字段、fast 模式 scanCount 恒为 1、kill switch 只认 '0' ---
     $switchFixture = New-HistoryFixture -Name 'switch'
@@ -371,6 +370,33 @@ try {
     foreach ($value in @('1', 'false', ' 0', '00', 'off')) {
         $notSwitched = Invoke-BatchPurge -Fixture $switchFixture -TargetPaths @($switchTargets[1]) -KillSwitchValue $value
         Assert-True ([string]$notSwitched.historyScan.mode -ceq 'fast') "kill switch 值 '$value' 不得关闭 fast 模式"
+    }
+
+    # 目标去重是 OrdinalIgnoreCase 且不做 Unicode 规范化，两种模式相同：只差大小写的目标按重复
+    # 拒绝整批；NFC 与 NFD 写法是两个不同目标。
+    $caseVariantTarget = Join-Path $switchFixture.targetsRoot 'ABSENT-1'
+    $nfcTarget = Join-Path $switchFixture.targetsRoot ('caf' + [string][char]0x00E9)
+    $nfdTarget = Join-Path $switchFixture.targetsRoot ('cafe' + [string][char]0x0301)
+    foreach ($dedupCase in @(
+            [pscustomobject]@{ name = 'fast'; killSwitch = $null },
+            [pscustomobject]@{ name = 'reference'; killSwitch = '0' })) {
+        $duplicateError = $null
+        try {
+            [void](Invoke-BatchPurge `
+                -Fixture $switchFixture `
+                -TargetPaths @($switchTargets[0], $caseVariantTarget) `
+                -KillSwitchValue $dedupCase.killSwitch)
+        } catch {
+            $duplicateError = [string]$_.Exception.Message
+        }
+        Assert-True ($null -ne $duplicateError -and $duplicateError.Contains('重复')) `
+            "只差大小写的目标在 $($dedupCase.name) 模式下必须按重复拒绝整批：$duplicateError"
+        $unicodeVariants = Invoke-BatchPurge `
+            -Fixture $switchFixture `
+            -TargetPaths @($nfcTarget, $nfdTarget) `
+            -KillSwitchValue $dedupCase.killSwitch
+        Assert-True ($unicodeVariants.targetCount -eq 2 -and $unicodeVariants.alreadyAbsentCount -eq 2) `
+            "NFC 与 NFD 写法在 $($dedupCase.name) 模式下必须是两个不同目标"
     }
 
     # --- 切片 2：快慢等价（同一份 evidence 布局各建一份，分别以 reference / fast 跑同一批）---
