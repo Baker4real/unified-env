@@ -68,7 +68,7 @@ preflight 为界，assert 与逐 leaf 删除之间的命名流增删不再复检
 
 生产 `Get-CodexSafeTreeDeleteStatus` 自 #49 起默认走 C# 并行 fast scan（`scripts/lib/CodexSafeTreeDeleteStatusScan.cs`，`StatusScanCoordinator`，DOP 为 min(4, cores-2)；2026-09-08 的 #58 工作区改动把共享 throttle 上限提至 min(8, cores-2)，该改动截至当日未提交）。归档记录复刻 terminal-archive 内容认证；未归档记录按参考顺序判定 plan 拒绝并保留 #48 拒绝后的只读观测链。fast scan 只处理 producer 规范形态输入；approved plan、异常 JSON 类型、深度超限、读失败和非规范属性形态仍回退 `Resolve-CodexSafeTreeDeleteStatusOperation`，不会把 approved plan 直接判为 terminal。
 
-首次 plan snapshot 可注入调用内 prefetch，避免 fallback 开头重复读取；transaction approval 仍重新读取 plan/hash 与 policy，以检测首次扫描后的漂移。这不是整条认证链只读一次的合同。Status 复用随调用/进程结束，不使用 Apply/Purge 的 `SessionHashCache`，不持久化验证 receipt；程序集仍沿既有 Add-Type staleness 检查加载。
+首次 plan snapshot 可注入调用内 prefetch，避免 fallback 开头重复读取；transaction approval 仍重新读取 plan/hash 与 policy，以检测首次扫描后的漂移。这不是整条认证链只读一次的合同。Status 复用随调用/进程结束，不使用 Apply/Purge 的 `SessionHashCache`，不持久化验证 receipt。fast scan 程序集自 #86 起与其余 native 组件同经 `scripts/lib/CodexHostSafetyNativeLoader.ps1` 的内容寻址 generation 加载（base 与 default variant 都含），不再使用固定路径 `CodexSafeTreeDeleteStatusScan.dll` 缓存。
 
 排障开关：`CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN=0` 强制全量参考路径；`CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS=1` 输出 `statusSegments`。其中 `fastScanMs` 是完整扫描阶段计时，不能用内部 I/O 子段替代；`approvedPlanValidationReuseCount` 只表示 receipt 内容验证复用，不代表全量完成或性能达标。2026-09-08 的 #58 工作区新增 `CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST=0` 与 `CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK=0` 两个开关，回滚组合见下文 #58 段。
 
