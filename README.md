@@ -13,7 +13,7 @@ intent: 说明统一环境项目的能力、入口和当前治理边界
 
 仓库当前按五个模块维护：`dev-environment`、`codex-host`、`skill-supply-chain`、`host-safety` 和 `workstation-operations`。导航、依赖与迁移规则见 `modules/README.md`；机器可校验的 ownership/interface/test 真源是 `modules/manifest.json`。当前处于保留现役路径的 `expand` 阶段，尚未拆 Git 仓库。
 
-主机诊断工具的源码、部署和验收见 [主机诊断与安全恢复](docs/env-governance/host-diagnostics.md)：提供有界日志投影、PowerShell 执行预检、NVIDIA 下载状态与任务栏快照，以及默认只读计划的 Explorer 恢复入口。
+主机诊断工具的源码、部署和验收见 [主机诊断与安全恢复](docs/env-governance/host-diagnostics.md)：提供浏览器语言/隐私复测、有界日志与 Markdown 章节投影、PowerShell 执行预检、NVIDIA 下载状态与任务栏快照，以及默认只读计划的 Explorer 恢复入口。
 
 ## 当前能力
 

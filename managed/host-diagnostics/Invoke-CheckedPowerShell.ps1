@@ -33,6 +33,8 @@ PowerShell 自身的参数绑定错误也可能返回 1。
 本入口不创建临时文件。普通目标输出由调用者控制，不能作为自动脱敏保证。
 后台后代由目标脚本自行管理生命周期。根进程退出后若仍有后代持有输出管道，
 本入口在 5 秒后以 124 失败；Process API 无法保证收束该类后代，它们可能继续运行。
+此分支额外输出 output-state 字段，区分目标退出与输出关闭；retrySafe=false 表示
+不得仅因 CLI 失败就重复启动。先按调用者的所有权和 readiness 合同核对后台状态。
 不通过全局进程扫描推定或终止已失去可靠归属的进程。
 #>
 [CmdletBinding(DefaultParameterSetName = 'File')]
@@ -147,6 +149,7 @@ try {
         }
         if (-not [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), 5000)) {
             [Console]::Error.WriteLine('CheckedPowerShell timeout: redirected output did not close; descendants may remain.')
+            [Console]::Error.WriteLine(('CheckedPowerShell output-state: targetExited=true targetExitCode={0} outputClosed=false descendantsMayRemain=true retrySafe=false' -f $process.ExitCode))
             exit 124
         }
         $targetExitCode = $process.ExitCode

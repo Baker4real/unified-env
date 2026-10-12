@@ -70,7 +70,7 @@ jobs:
           node-version: '24.19.0'
 
       - uses: actions/setup-python@v6
-        if: matrix.module == 'skill-supply-chain'
+        if: matrix.module == 'skill-supply-chain' || matrix.module == 'host-safety'
         with:
           python-version: '3.15'
 

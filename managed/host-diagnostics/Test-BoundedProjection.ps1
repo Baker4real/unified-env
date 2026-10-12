@@ -41,6 +41,136 @@ function Invoke-Case([string]$Name, [object[]]$Sources, [int]$Budget) {
     return @{ result = ($json | ConvertFrom-Json -AsHashtable); json = $json; exitCode = $code }
 }
 
+$markdownPath = Join-Path $runRoot 'sections.md'
+@(
+    '# 指南',
+    '章节外前言',
+    '## 目标章节 ###',
+    '正文',
+    '### 子节',
+    '子节正文',
+    '#### 更深',
+    '深层正文',
+    '## 目标章节补充',
+    '章节外后文',
+    '# 最后',
+    '文末'
+) | Set-Content -LiteralPath $markdownPath -Encoding utf8
+$section = Invoke-Case 'markdown-section-hierarchy' @(@{
+    path = $markdownPath; format = 'markdown'; section = '目标章节'; maxRows = 50
+}) 2500
+if ($section.exitCode -ne 0) { throw 'Markdown section selection failed.' }
+$sectionSource = $section.result.sources[0]
+if ($sectionSource.status -ne 'read' -or $sectionSource.lineCount -ne 12 -or
+    $sectionSource.sectionMatches -ne 1 -or $sectionSource.sectionStartLine -ne 3 -or $sectionSource.sectionEndLine -ne 8 -or
+    $sectionSource.matchedRows -ne 6 -or $sectionSource.emittedRows -ne 6 -or $sectionSource.omittedRows -ne 0 -or
+    ($sectionSource.rows.line -join ',') -ne '3,4,5,6,7,8' -or
+    $sectionSource.rows[1].text -ne '正文' -or $section.json.Contains('章节外')) { throw 'Markdown section lost exact title, hierarchy, Chinese text or source lines.' }
+$checks.Add(@{ name = 'markdown-exact-section-with-descendants-and-source-lines'; status = 'pass' })
+
+$fencedMarkdownPath = Join-Path $runRoot 'fenced-sections.md'
+@(
+    '# Guide',
+    '```md',
+    '## 目标章节',
+    '```',
+    '## 目标章节',
+    '正文',
+    '````md',
+    '## 截断伪标题',
+    '```',
+    '仍在长围栏内',
+    '````',
+    '~~~text',
+    '## 目标章节',
+    '~~~',
+    '### 子节',
+    '子节正文',
+    '## 真正边界',
+    '章节外后文'
+) | Set-Content -LiteralPath $fencedMarkdownPath -Encoding utf8
+$fencedSection = Invoke-Case 'markdown-fenced-headings' @(@{
+    path = $fencedMarkdownPath; format = 'markdown'; section = '目标章节'; maxRows = 50
+}) 3000
+if ($fencedSection.exitCode -ne 0) { throw 'Markdown treated a fenced heading as a real section.' }
+$fencedSource = $fencedSection.result.sources[0]
+if ($fencedSource.sectionMatches -ne 1 -or $fencedSource.sectionStartLine -ne 5 -or $fencedSource.sectionEndLine -ne 16 -or
+    $fencedSource.matchedRows -ne 12 -or $fencedSource.emittedRows -ne 12 -or
+    ($fencedSource.rows.line -join ',') -ne '5,6,7,8,9,10,11,12,13,14,15,16' -or
+    $fencedSection.json.Contains('章节外')) { throw 'Markdown fence length, delimiter or section boundary failed.' }
+$checks.Add(@{ name = 'markdown-backtick-and-tilde-fences-preserve-section-boundaries'; status = 'pass' })
+
+$wrongFormat = Invoke-Case 'markdown-section-requires-format' @(@{
+    path = $markdownPath; format = 'text'; section = '目标章节'
+}) 2500
+if ($wrongFormat.exitCode -ne 2 -or $wrongFormat.result.status -ne 'invalid-input-or-budget' -or
+    $wrongFormat.json.Contains('章节外')) { throw 'A section selector silently fell back to whole-file text.' }
+$noSection = Invoke-Case 'markdown-requires-title' @(@{ path = $markdownPath; format = 'markdown' }) 512
+if ($noSection.exitCode -ne 2 -or $noSection.result.status -ne 'invalid-input-or-budget') { throw 'Markdown allowed a missing section title.' }
+$checks.Add(@{ name = 'markdown-requires-explicit-format-and-title'; status = 'pass' })
+
+$duplicateMarkdownPath = Join-Path $runRoot 'duplicate-sections.md'
+@(
+    '# Guide',
+    '## 重复章节',
+    'FIRST_MATCH_MUST_NOT_RETURN',
+    '### 子节',
+    '子节正文',
+    '## 重复章节',
+    'SECOND_MATCH_MUST_NOT_RETURN'
+) | Set-Content -LiteralPath $duplicateMarkdownPath -Encoding utf8
+$duplicateSection = Invoke-Case 'markdown-ambiguous-section' @(@{
+    path = $duplicateMarkdownPath; format = 'markdown'; section = '重复章节'; maxRows = 1
+}) 1000
+if ($duplicateSection.exitCode -ne 1 -or $duplicateSection.result.sources[0].status -ne 'section-ambiguous' -or
+    $duplicateSection.result.sources[0].sectionMatches -ne 2 -or $duplicateSection.result.sources[0].lineCount -ne 7 -or
+    $duplicateSection.result.sources[0].selectedRows -ne 0 -or $duplicateSection.result.sources[0].emittedRows -ne 0 -or
+    $duplicateSection.result.sources[0].matchedRows -ne 0 -or $duplicateSection.result.sources[0].sectionStartLine -ne 0 -or
+    $duplicateSection.result.sources[0].sectionEndLine -ne 0 -or $duplicateSection.json.Contains('MUST_NOT_RETURN')) { throw 'Ambiguous Markdown emitted an arbitrary match or stopped scanning at the row cap.' }
+$missingSection = Invoke-Case 'markdown-missing-section' @(@{
+    path = $fencedMarkdownPath; format = 'markdown'; section = '截断伪标题'
+}) 1000
+if ($missingSection.exitCode -ne 1 -or $missingSection.result.sources[0].status -ne 'section-not-found' -or
+    $missingSection.result.sources[0].sectionMatches -ne 0 -or $missingSection.result.sources[0].rows.Count -ne 0 -or
+    $missingSection.result.sources[0].matchedRows -ne 0 -or $missingSection.result.sources[0].sectionStartLine -ne 0 -or
+    $missingSection.result.sources[0].sectionEndLine -ne 0) { throw 'A missing or fence-only Markdown title fell back to whole-file text.' }
+$checks.Add(@{ name = 'markdown-missing-and-ambiguous-titles-fail-without-content'; status = 'pass' })
+
+$directSectionOutput = @(& $pwsh -NoProfile -NonInteractive -File $script -LiteralPath $markdownPath -MarkdownSection '目标章节' -StartLine 4 -Contains '正文' -MaxRows 1 -MaxTotalBytes 1000)
+$directSectionCode = $LASTEXITCODE
+$directSectionJson = $directSectionOutput -join [Environment]::NewLine
+if ($directSectionCode -ne 0) { throw 'Direct Markdown section entry failed.' }
+$directSection = $directSectionJson | ConvertFrom-Json -AsHashtable
+if ([Text.Encoding]::UTF8.GetByteCount($directSectionJson) + 2 -gt 1000 -or $directSection.sources.Count -ne 1 -or
+    $directSection.sources[0].sectionStartLine -ne 3 -or $directSection.sources[0].sectionEndLine -ne 8 -or
+    $directSection.sources[0].matchedRows -ne 3 -or $directSection.sources[0].emittedRows -ne 1 -or
+    $directSection.sources[0].omittedRows -ne 2 -or $directSection.sources[0].rows[0].line -ne 4) { throw 'Direct Markdown selection lost original line window, filter or omission counts.' }
+$checks.Add(@{ name = 'direct-markdown-section-composes-with-existing-window-filter-and-row-cap'; status = 'pass' })
+
+$largeMarkdownPath = Join-Path $runRoot 'large-sections.md'
+@(
+    '# Guide',
+    '## 预算章节',
+    'Authorization:',
+    'SYNTH_MARKDOWN_SECRET_184',
+    '    SYNTH_MARKDOWN_FOLDED_295'
+) | Set-Content -LiteralPath $largeMarkdownPath -Encoding utf8
+1..20 | ForEach-Object { '中文正文' + ('测' * 60) } | Add-Content -LiteralPath $largeMarkdownPath -Encoding utf8
+Add-Content -LiteralPath $largeMarkdownPath -Value '## 章节外' -Encoding utf8
+$sectionBatch = Invoke-Case 'markdown-aggregate-budget' @(
+    @{ path = $largeMarkdownPath; format = 'markdown'; section = '预算章节'; startLine = 4; maxRows = 50 },
+    @{ path = $largeMarkdownPath; format = 'markdown'; section = '预算章节'; startLine = 4; maxRows = 50 }
+) 1800
+if ($sectionBatch.exitCode -ne 0 -or $sectionBatch.result.sources.Count -ne 2 -or $sectionBatch.json.Contains('SYNTH_')) { throw 'Markdown batch failed or exposed a sensitive continuation.' }
+foreach ($source in $sectionBatch.result.sources) {
+    if ($source.sectionStartLine -ne 2 -or $source.sectionEndLine -ne 25 -or $source.lineCount -ne 26 -or
+        $source.matchedRows -ne 22 -or $source.emittedRows -lt 3 -or $source.omittedRows -lt 1 -or
+        $source.emittedRows + $source.omittedRows -ne $source.matchedRows -or
+        $source.rows[0].line -ne 4 -or $source.rows[0].text -ne '[redacted continuation]' -or
+        $source.rows[1].text -ne '[redacted continuation]' -or -not $source.rows[2].text.StartsWith('中文正文')) { throw 'Markdown lost whole-batch byte budget, Chinese text, redaction before filtering or omission counts.' }
+}
+$checks.Add(@{ name = 'markdown-multiple-sources-share-byte-budget-redaction-and-counts'; status = 'pass'; outputBytes = [Text.Encoding]::UTF8.GetByteCount($sectionBatch.json) + 2; budget = 1800 })
+
 $textPath = Join-Path $runRoot 'large.txt'
 1..250 | ForEach-Object { ('line-{0:D3}:' -f $_) + ('x' * 500) } | Set-Content -LiteralPath $textPath -Encoding utf8
 $jsonlPath = Join-Path $runRoot 'events.jsonl'

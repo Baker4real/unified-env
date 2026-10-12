@@ -81,11 +81,11 @@ function Start-NoWindowProcess {
     return $process
 }
 
-function New-ReminderPayload([string]$SessionId, [string]$ToolName) {
+function New-ReminderPayload([string]$SessionId, [string]$ToolName, [string]$Command = 'rg -n hook file.ps1') {
     [pscustomobject][ordered]@{
         session_id = $SessionId
         tool_name = $ToolName
-        tool_input = [pscustomobject][ordered]@{ command = 'rg -n hook file.ps1' }
+        tool_input = [pscustomobject][ordered]@{ command = $Command }
     } | ConvertTo-Json -Compress -Depth 5
 }
 
@@ -103,7 +103,7 @@ $activationSource = Get-Content -LiteralPath $activationPath -Raw
 $behaviorGuardSource = Get-Content -LiteralPath $behaviorGuardPath -Raw
 foreach ($source in @($reminderSource, $cleanupSource, $activationSource)) {
     Assert-True $source.Contains('set "SERENA_HOME=D:\Codex\.serena"') 'wrapper 必须覆盖外部 SERENA_HOME。'
-    Assert-True ($source.Contains('D:\Codex\tools\python314-official\pythonw.exe') -and $source.Contains('lib\hidden-console-launcher.py')) 'wrapper 必须通过 hidden launcher 启动。'
+    Assert-True ($source.Contains('D:\Codex\tools\python315-official\pythonw.exe') -and $source.Contains('lib\hidden-console-launcher.py')) 'wrapper 必须通过 hidden launcher 启动。'
     Assert-True (-not $source.Contains('%*')) 'wrapper 不得接受外部参数覆盖固定命令。'
 }
 Assert-True $reminderSource.Contains('"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Reminder') 'reminder 必须固定 sibling 受控 guard 和 Mode。'
@@ -290,6 +290,24 @@ finally {
     # 文档/结构化数据/日志的实际查询目标不适合符号导航，不消耗 reminder 计数。
     # 描述、查询 pattern 或源码查询中夹带数据文件名不能触发豁免。
     foreach ($case in @(
+        @{ command = "Get-Content -LiteralPath 'D:/agents/projects/统一环境/CONTEXT.md' -Raw; Get-Content -LiteralPath 'D:/agents/projects/统一环境/modules/README.md' -Raw; Test-Path -LiteralPath 'D:/agents/projects/统一环境/.codegraph'; Get-Content -LiteralPath 'D:/agents/projects/统一环境/modules/manifest.json' -Raw"; expected = $true },
+        @{ command = "rg --files 'D:/Codex/.codex/sessions/2026/10/12' | rg 'redacted-session'"; expected = $true },
+        @{ command = 'Test-Path -LiteralPath D:/repo/.codegraph -PathType Container'; expected = $true },
+        @{ command = 'rg --files src | rg -n Controller | Select-Object -First 4'; expected = $true },
+        @{ command = 'rg --files --glob *.ps1 src'; expected = $true },
+        @{ command = 'rg --glob --files symbol source.ps1'; expected = $false },
+        @{ command = 'rg --regexp --files source.ps1'; expected = $false },
+        @{ command = 'rg --files --glob --files src'; expected = $true },
+        @{ command = 'rg --files src | rg Controller source.ps1'; expected = $false },
+        @{ command = 'rg --files src | Select-String -LiteralPath source.ps1 -Pattern symbol'; expected = $false },
+        @{ command = 'Get-Content ledger.json | Select-String -Pattern failed'; expected = $true },
+        @{ command = 'Select-String -LiteralPath ledger.json -Pattern failed'; expected = $true },
+        @{ command = 'rg --files src | Get-Content'; expected = $false },
+        @{ command = 'rg --files --pre source.ps1 src'; expected = $false },
+        @{ command = 'Test-Path -LiteralPath $target'; expected = $false },
+        @{ command = 'Test-Path -LiteralPath source.ps1; rg symbol source.ps1'; expected = $false },
+        @{ command = 'Get-Content ledger.json; [IO.File]::ReadAllText("source.ps1")'; expected = $false },
+        @{ command = 'Get-Content ledger.json; [pscustomobject]@{threadId=$env:CODEX_THREAD_ID} | ConvertTo-Json -Compress'; expected = $false },
         @{ command = 'rg -n failed D:/evidence/ledger.json'; expected = $true },
         @{ command = "Get-Content 'D:/agents/projects/统一环境/modules/manifest.json' -TotalCount 510 | Select-Object -Last 234; Get-Content 'D:/Codex/.codex/docs/agent-guidance/host-runbook/safe-tree-delete.md' -TotalCount 110; Get-Content 'D:/Codex/.codex/memories/MEMORY.md' -TotalCount 93 | Select-Object -Last 23"; expected = $true },
         @{ command = 'Get-Content ledger.json | Select-Object -Skip 3 -First 10'; expected = $true },
@@ -314,12 +332,41 @@ finally {
         Assert-Equal (Test-CodexSerenaDataQuery -InputText $queryPayload) $case.expected "数据查询分类错误：$($case.command)"
     }
     $dataSession = 'session-data-query-exempt-redacted'
-    foreach ($dataCommand in @('rg -n status ledger.json', 'rg -n failed driver.log', 'rg -n error events.jsonl', 'rg -n owner CONTEXT.md', 'Get-Content ledger.json -TotalCount 50 | Select-Object -Last 10; Get-Content CONTEXT.md | Select-Object -Skip 2 -First 8')) {
+    foreach ($dataCommand in @('rg -n status ledger.json', 'rg -n failed driver.log', 'rg -n error events.jsonl', 'rg -n owner CONTEXT.md', 'Get-Content ledger.json -TotalCount 50 | Select-Object -Last 10; Test-Path -LiteralPath D:/repo/.codegraph; Get-Content CONTEXT.md | Select-Object -Skip 2 -First 8', 'rg --files D:/evidence | rg session | Select-Object -First 5')) {
         $dataPayload = @{ session_id = $dataSession; tool_name = 'Bash'; tool_input = @{ command = $dataCommand } } | ConvertTo-Json -Compress -Depth 5
         $dataResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText $dataPayload -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
-        Assert-True ($dataResult.ok -and $dataResult.stdout.Length -eq 0) '连续四次数据查询不得触发源码导航拒绝。'
+        Assert-True ($dataResult.ok -and $dataResult.stdout.Length -eq 0) '连续数据读取及文件定位不得触发源码导航拒绝。'
     }
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data/$dataSession"))) '数据查询不得创建 vendor 计数状态。'
+
+    $mixedSession = 'session-mixed-query-counter-redacted'
+    foreach ($command in @('rg symbol README.md source.ps1', 'rg status ledger.json; [pscustomobject]@{threadId=$env:CODEX_THREAD_ID} | ConvertTo-Json -Compress')) {
+        $mixedResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $mixedSession 'Bash' $command) -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        Assert-True ($mixedResult.ok -and $mixedResult.stdout.Length -eq 0) '源码混合及未知命令必须保留原 reminder 计数。'
+    }
+    foreach ($command in @('Get-Content ledger.json; Test-Path -LiteralPath D:/repo/.codegraph', 'rg --files D:/repo | rg source', 'Get-Content events.jsonl | Select-Object -Last 8')) {
+        $exemptResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $mixedSession 'Bash' $command) -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        Assert-True ($exemptResult.ok -and $exemptResult.stdout.Length -eq 0) '已经积累源码计数时，文档及文件定位查询仍必须静默。'
+    }
+    $mixedThird = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $mixedSession 'Bash' 'rg symbol source.ps1; Test-Path D:/repo/.codegraph') -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True $mixedThird.ok '第三次源码查询必须成功返回 reminder 协议。'
+    Assert-Equal (([Text.Encoding]::UTF8.GetString($mixedThird.stdout) | ConvertFrom-Json).hookSpecificOutput.permissionDecision) 'deny' '数据豁免不得清空已有计数，第三次源码查询仍应提醒。'
+    # Use a fresh session: the vendor deliberately rate-limits reminders after
+    # a deny, and that cooldown must not be mistaken for a successful reset.
+    $resetSession = 'session-guard-symbol-reset-redacted'
+    foreach ($attempt in 1..2) {
+        $beforeGuardReset = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $resetSession 'Bash') -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        Assert-True ($beforeGuardReset.ok -and $beforeGuardReset.stdout.Length -eq 0) '符号工具重置 fixture 必须先积累两次源码查询。'
+    }
+    $guardReset = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $resetSession 'mcp__serena__get_symbols_overview') -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True ($guardReset.ok -and $guardReset.stdout.Length -eq 0) 'Serena 符号工具必须通过 guard 保留 vendor 的计数重置。'
+    foreach ($attempt in 1..2) {
+        $afterGuardReset = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $resetSession 'Bash') -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        Assert-True ($afterGuardReset.ok -and $afterGuardReset.stdout.Length -eq 0) '符号工具重置后前两次源码查询必须静默。'
+    }
+    $afterGuardResetThird = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $resetSession 'Bash') -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+    Assert-True $afterGuardResetThird.ok '重置后第三次源码查询必须成功返回 reminder 协议。'
+    Assert-Equal (([Text.Encoding]::UTF8.GetString($afterGuardResetThird.stdout) | ConvertFrom-Json).hookSpecificOutput.permissionDecision) 'deny' '符号工具重置不得关闭后续的源码导航提醒。'
     $markdownSession = 'session-markdown-exempt-redacted'
     $markdownSessionPath = Join-Path $guardFixtureHome "hook_data\$markdownSession"
     $markdownPayload = [pscustomobject][ordered]@{

@@ -289,6 +289,7 @@
         "scripts/Deploy-HostDiagnostics.ps1",
         "managed/host-diagnostics/Read-BoundedProjection.ps1",
         "managed/host-diagnostics/Invoke-CheckedPowerShell.ps1",
+        "managed/host-diagnostics/BrowserPrivacyProbe.py",
         "managed/host-diagnostics/Get-NvidiaDownloadStatus.ps1",
         "managed/host-diagnostics/Get-TaskbarSnapshot.ps1",
         "managed/host-diagnostics/Restart-ExplorerShell.ps1",

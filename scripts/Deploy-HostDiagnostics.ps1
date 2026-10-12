@@ -22,6 +22,7 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 $allowlist = @(
     'Read-BoundedProjection.ps1','Test-BoundedProjection.ps1',
     'Invoke-CheckedPowerShell.ps1','Test-CheckedPowerShell.ps1',
+    'BrowserPrivacyProbe.py','Test-BrowserPrivacyProbe.py',
     'Get-NvidiaDownloadStatus.ps1','Test-NvidiaDownloadStatus.ps1',
     'Get-TaskbarSnapshot.ps1','Restart-ExplorerShell.ps1',
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',

@@ -7,6 +7,8 @@ param(
     [Parameter(ParameterSetName = 'Paths')][ValidateRange(1, 1000)][int]$MaxRows = 20,
     [Parameter(ParameterSetName = 'Paths')][ValidateRange(1, 2000)][int]$MaxValueChars = 200,
     [Parameter(ParameterSetName = 'Paths')][switch]$HttpLog,
+    # Exact, case-sensitive ATX heading title; includes descendants and excludes fenced headings.
+    [Parameter(ParameterSetName = 'Paths')][ValidateNotNullOrEmpty()][string]$MarkdownSection,
     [ValidateRange(512, 30000)][int]$MaxTotalBytes = 6000
 )
 
@@ -98,9 +100,12 @@ function Get-HttpDiagnostic([string]$Line, [int]$Limit) {
 
 try {
     if ($PSCmdlet.ParameterSetName -eq 'Paths') {
+        if ($HttpLog -and $PSBoundParameters.ContainsKey('MarkdownSection')) { throw 'Incompatible projection formats.' }
         $spec = @{ sources = @(foreach ($sourcePath in $LiteralPath) {
-            @{ path = $sourcePath; format = $(if ($HttpLog) { 'http-log' } else { 'text' }); contains = $Contains; startLine = $StartLine
-               maxRows = $MaxRows; maxValueChars = $MaxValueChars }
+            $entry = @{ path = $sourcePath; format = $(if ($HttpLog) { 'http-log' } elseif ($PSBoundParameters.ContainsKey('MarkdownSection')) { 'markdown' } else { 'text' })
+               contains = $Contains; startLine = $StartLine; maxRows = $MaxRows; maxValueChars = $MaxValueChars }
+            if ($PSBoundParameters.ContainsKey('MarkdownSection')) { $entry.section = $MarkdownSection }
+            $entry
         }) }
     }
     else {
@@ -118,7 +123,10 @@ try {
             -not $inputSource.ContainsKey('path') -or -not $inputSource.ContainsKey('format')) { throw 'Invalid source.' }
         $path = [string]$inputSource.path
         $format = [string]$inputSource.format
-        if (-not [IO.Path]::IsPathFullyQualified($path) -or $path.Length -gt 512 -or $format -notin @('text', 'jsonl', 'http-log')) { throw 'Invalid source.' }
+        if (-not [IO.Path]::IsPathFullyQualified($path) -or $path.Length -gt 512 -or $format -notin @('text', 'jsonl', 'http-log', 'markdown')) { throw 'Invalid source.' }
+        $section = if ($inputSource.ContainsKey('section')) { $inputSource.section } else { $null }
+        if ($format -ne 'markdown' -and $inputSource.ContainsKey('section')) { throw 'Section selection requires Markdown format.' }
+        if ($format -eq 'markdown' -and ($section -isnot [string] -or [string]::IsNullOrWhiteSpace($section) -or $section.Length -gt 2000)) { throw 'Markdown requires an exact section title.' }
         $fields = @(if ($inputSource.ContainsKey('fields')) { $inputSource.fields })
         if ($format -eq 'jsonl' -and ($fields.Count -lt 1 -or $fields.Count -gt 32)) { throw 'JSONL requires fields.' }
         foreach ($field in $fields) {
@@ -137,11 +145,18 @@ try {
         if ($format -eq 'http-log') {
             $source.sensitiveRows = 0; $source.unrecognizedRows = 0; $source.replacementCharacterRows = 0
         }
+        if ($format -eq 'markdown') {
+            $source.sectionMatches = 0; $source.sectionStartLine = 0; $source.sectionEndLine = 0
+        }
         $candidates = [System.Collections.Generic.List[object]]::new()
         $reader = $null
         $stream = $null
         $sensitiveContinuation = $false
         $pendingSensitiveValue = $false
+        $insideSection = $false
+        $sectionLevel = 0
+        $fenceMarker = ''
+        $fenceLength = 0
         try {
             # Active log writers and rotation may retain write/delete access.
             # This handle remains read-only and is owned by the outer finally.
@@ -151,6 +166,43 @@ try {
             $reader = [IO.StreamReader]::new($stream, [Text.UTF8Encoding]::new($false, ($format -ne 'http-log')), ($format -ne 'http-log'), 1024, $true)
             while ($null -ne ($line = $reader.ReadLine())) {
                 $source.lineCount++
+                if ($format -eq 'markdown') {
+                    $heading = $null
+                    if ($fenceLength -gt 0) {
+                        if ([regex]::IsMatch($line, '^ {0,3}' + [regex]::Escape($fenceMarker) + '{' + $fenceLength + ',}[ \t]*$')) {
+                            $fenceLength = 0
+                        }
+                    }
+                    else {
+                        $fence = [regex]::Match($line, '^ {0,3}(?<fence>`{3,}|~{3,})(?<info>.*)$')
+                        if ($fence.Success -and ($fence.Groups['fence'].Value[0] -eq '~' -or $fence.Groups['info'].Value.IndexOf('`') -lt 0)) {
+                            $fenceMarker = $fence.Groups['fence'].Value.Substring(0, 1)
+                            $fenceLength = $fence.Groups['fence'].Length
+                        }
+                        else { $heading = [regex]::Match($line, '^ {0,3}(?<marks>#{1,6})(?:[ \t]+(?<heading>.*))?$') }
+                    }
+                    if ($null -ne $heading -and $heading.Success) {
+                        $level = $heading.Groups['marks'].Length
+                        $title = [regex]::Replace($heading.Groups['heading'].Value, '[ \t]+#+[ \t]*$', '').Trim()
+                        if ($insideSection -and $level -le $sectionLevel) {
+                            $insideSection = $false
+                            $source.sectionEndLine = $source.lineCount - 1
+                        }
+                        if ([string]::Equals($title, $section, [StringComparison]::Ordinal)) {
+                            $source.sectionMatches++
+                            if ($source.sectionMatches -eq 1) {
+                                $insideSection = $true; $sectionLevel = $level
+                                $source.sectionStartLine = $source.lineCount
+                            }
+                            else {
+                                # A unique title cannot be proved until EOF. Never
+                                # emit the first match after a later duplicate.
+                                $insideSection = $false; $candidates.Clear(); $source.matchedRows = 0
+                                $source.sectionStartLine = 0; $source.sectionEndLine = 0
+                            }
+                        }
+                    }
+                }
                 if ($format -eq 'http-log' -and $line.IndexOf([char]0xFFFD) -ge 0) {
                     # Count all damaged rows before filtering; they cannot be
                     # classified or included in matchedRows. Withhold any folded
@@ -162,7 +214,7 @@ try {
                 }
                 $record = $null
                 $projectedText = $line
-                if ($format -in @('text', 'http-log')) {
+                if ($format -in @('text', 'http-log', 'markdown')) {
                     # Track preceding headers even outside the requested window.
                     $startsSensitive = [regex]::IsMatch($line, $sensitiveAssignment)
                     $continuedSensitive = $pendingSensitiveValue -or
@@ -175,7 +227,7 @@ try {
                     try { $record = ConvertFrom-Json -InputObject $line -AsHashtable -ErrorAction Stop }
                     catch { $source.invalidJsonLines++; continue }
                 }
-                if ($source.lineCount -lt $startLine -or
+                if (($format -eq 'markdown' -and -not $insideSection) -or $source.lineCount -lt $startLine -or
                     ($contains.Length -gt 0 -and $line.IndexOf($contains, [StringComparison]::OrdinalIgnoreCase) -lt 0)) { continue }
                 $source.matchedRows++
                 if ($format -eq 'http-log') {
@@ -185,7 +237,7 @@ try {
                 }
                 if ($candidates.Count -ge $maxRows) { continue }
                 $row = [ordered]@{ line = $source.lineCount }
-                if ($format -eq 'text') { $row.text = Limit-Value $projectedText $maxValueChars }
+                if ($format -in @('text', 'markdown')) { $row.text = Limit-Value $projectedText $maxValueChars }
                 elseif ($format -eq 'http-log') {
                     foreach ($key in $httpEvent.Keys) { $row[$key] = $httpEvent[$key] }
                 }
@@ -199,8 +251,19 @@ try {
             if ($format -eq 'http-log' -and $source.replacementCharacterRows -gt 0) {
                 $source.status = 'read-with-encoding-omissions'
             }
+            if ($format -eq 'markdown') {
+                if ($insideSection) { $source.sectionEndLine = $source.lineCount }
+                if ($source.sectionMatches -eq 0) { $source.status = 'section-not-found' }
+                elseif ($source.sectionMatches -gt 1) { $source.status = 'section-ambiguous' }
+            }
         }
-        catch { $source.status = 'read-failed' }
+        catch {
+            $source.status = 'read-failed'
+            if ($format -eq 'markdown') {
+                $candidates.Clear(); $source.matchedRows = 0
+                $source.sectionStartLine = 0; $source.sectionEndLine = 0
+            }
+        }
         finally {
             try { if ($null -ne $reader) { $reader.Dispose() } }
             finally { if ($null -ne $stream) { $stream.Dispose() } }

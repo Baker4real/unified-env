@@ -341,49 +341,100 @@ function Test-CodexSerenaDataQuery {
     $tokens = $null
     $ast = [Management.Automation.Language.Parser]::ParseInput($command, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { return $false }
-    $commands = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true))
-    if ($commands.Count -eq 0) { return $false }
+    # Only classify complete, static pipelines. Walking CommandAst nodes alone
+    # misses method calls and other expressions beside an otherwise safe read.
+    if ($null -ne $ast.ParamBlock -or $null -ne $ast.BeginBlock -or $null -ne $ast.ProcessBlock -or
+        $null -ne $ast.CleanBlock -or $ast.UsingStatements.Count -gt 0 -or $null -eq $ast.EndBlock -or
+        ($null -ne $ast.EndBlock.Traps -and $ast.EndBlock.Traps.Count -gt 0)) { return $false }
     $queryCount = 0
-    foreach ($query in $commands) {
-        $name = $query.GetCommandName()
-        if ($name -notin @('rg', 'grep', 'Get-Content', 'Select-String', 'Select-Object')) { return $false }
-        if ($query.Redirections.Count -gt 0) { return $false }
-        $operands = [Collections.Generic.List[string]]::new()
-        foreach ($element in @($query.CommandElements | Select-Object -Skip 1)) {
-            if ($element -is [Management.Automation.Language.StringConstantExpressionAst]) { $operands.Add($element.Value) }
-            elseif ($element -is [Management.Automation.Language.ConstantExpressionAst] -and $element.Value -is [ValueType]) { $operands.Add([string]$element.Value) }
-            elseif ($element -is [Management.Automation.Language.CommandParameterAst] -and $null -eq $element.Argument) { $operands.Add($element.Extent.Text) }
-            else { return $false }
-        }
-        if ($name -eq 'Select-Object') {
-            if ($operands.Count -eq 0) { return $false }
-            for ($i = 0; $i -lt $operands.Count; $i += 2) {
-                if ($operands[$i] -notin @('-First', '-Last', '-Skip', '-SkipLast', '-Index') -or
-                    $i + 1 -ge $operands.Count -or $operands[$i + 1] -notmatch '^\d+$') { return $false }
+    foreach ($pipeline in $ast.EndBlock.Statements) {
+        if ($pipeline -isnot [Management.Automation.Language.PipelineAst] -or $pipeline.Background) { return $false }
+        $hasInput = $false
+        foreach ($query in $pipeline.PipelineElements) {
+            if ($query -isnot [Management.Automation.Language.CommandAst]) { return $false }
+            $name = $query.GetCommandName()
+            if ($name -notin @('rg', 'grep', 'Get-Content', 'Select-String', 'Select-Object', 'Test-Path')) { return $false }
+            if ($query.Redirections.Count -gt 0 -or $query.InvocationOperator -ne 'Unknown') { return $false }
+            $operands = [Collections.Generic.List[string]]::new()
+            foreach ($element in @($query.CommandElements | Select-Object -Skip 1)) {
+                if ($element -is [Management.Automation.Language.StringConstantExpressionAst]) { $operands.Add($element.Value) }
+                elseif ($element -is [Management.Automation.Language.ConstantExpressionAst] -and $element.Value -is [ValueType]) { $operands.Add([string]$element.Value) }
+                elseif ($element -is [Management.Automation.Language.CommandParameterAst] -and $null -eq $element.Argument) { $operands.Add($element.Extent.Text) }
+                else { return $false }
             }
-            continue
-        }
-        $paths = [Collections.Generic.List[string]]::new()
-        $hasPattern = $name -eq 'Get-Content'
-        for ($i = 0; $i -lt $operands.Count; $i++) {
-            $operand = $operands[$i]
-            if ($operand -in @('-e', '--regexp', '-Pattern')) {
-                $i++
-                if ($i -ge $operands.Count) { return $false }
-                $hasPattern = $true
+            if ($name -eq 'Select-Object') {
+                if (-not $hasInput -or $operands.Count -eq 0) { return $false }
+                for ($i = 0; $i -lt $operands.Count; $i += 2) {
+                    if ($operands[$i] -notin @('-First', '-Last', '-Skip', '-SkipLast', '-Index') -or
+                        $i + 1 -ge $operands.Count -or $operands[$i + 1] -notmatch '^\d+$') { return $false }
+                }
+                continue
             }
-            elseif ($operand -in @('-n', '--line-number', '-i', '--ignore-case', '-l', '--files-with-matches', '-F', '--fixed-strings', '-Raw', '-SimpleMatch', '-LiteralPath', '-Path', '--')) { continue }
-            elseif ($operand -in @('-TotalCount', '-Tail', '-Encoding', '-m', '--max-count')) {
-                $i++
-                if ($i -ge $operands.Count) { return $false }
+            if ($name -eq 'Test-Path') {
+                $pathCount = 0
+                for ($i = 0; $i -lt $operands.Count; $i++) {
+                    $operand = $operands[$i]
+                    if ($operand -in @('-LiteralPath', '-Path')) { continue }
+                    if ($operand -eq '-PathType') {
+                        $i++
+                        if ($i -ge $operands.Count -or $operands[$i] -notin @('Any', 'Leaf', 'Container')) { return $false }
+                    }
+                    elseif ($operand.StartsWith('-')) { return $false }
+                    elseif (-not [string]::IsNullOrWhiteSpace($operand)) { $pathCount++ }
+                }
+                if ($pathCount -eq 0) { return $false }
+                $queryCount++
+                $hasInput = $true
+                continue
             }
-            elseif ($operand.StartsWith('-')) { return $false }
-            elseif (-not $hasPattern) { $hasPattern = $true }
-            else { $paths.Add($operand) }
+            if ($name -eq 'rg' -and $operands.Contains('--files')) {
+                # File-name discovery reads no source contents. A subsequent rg may
+                # filter this known stream, but cannot add source-file operands.
+                $listsFiles = $false
+                for ($i = 0; $i -lt $operands.Count; $i++) {
+                    $operand = $operands[$i]
+                    if ($operand -ceq '--files') { $listsFiles = $true; continue }
+                    if ($operand -in @('--hidden', '--no-ignore', '--no-ignore-vcs')) { continue }
+                    if ($operand -in @('-g', '--glob', '--iglob', '-t', '--type', '-T', '--type-not')) {
+                        $i++
+                        if ($i -ge $operands.Count) { return $false }
+                    }
+                    elseif ($operand.StartsWith('-')) { return $false }
+                }
+                if (-not $listsFiles) { return $false }
+                $queryCount++
+                $hasInput = $true
+                continue
+            }
+            $paths = [Collections.Generic.List[string]]::new()
+            $hasPattern = $name -eq 'Get-Content'
+            for ($i = 0; $i -lt $operands.Count; $i++) {
+                $operand = $operands[$i]
+                if ($operand -in @('-e', '--regexp', '-Pattern')) {
+                    $i++
+                    if ($i -ge $operands.Count) { return $false }
+                    $hasPattern = $true
+                }
+                elseif ($operand -in @('-LiteralPath', '-Path')) {
+                    if ($name -notin @('Get-Content', 'Select-String')) { return $false }
+                    $i++
+                    if ($i -ge $operands.Count) { return $false }
+                    $paths.Add($operands[$i])
+                }
+                elseif ($operand -in @('-n', '--line-number', '-i', '--ignore-case', '-l', '--files-with-matches', '-F', '--fixed-strings', '-Raw', '-SimpleMatch', '--')) { continue }
+                elseif ($operand -in @('-TotalCount', '-Tail', '-Encoding', '-m', '--max-count')) {
+                    $i++
+                    if ($i -ge $operands.Count) { return $false }
+                }
+                elseif ($operand.StartsWith('-')) { return $false }
+                elseif (-not $hasPattern) { $hasPattern = $true }
+                else { $paths.Add($operand) }
+            }
+            if (-not $hasPattern -or ($paths.Count -eq 0 -and ($name -eq 'Get-Content' -or -not $hasInput))) { return $false }
+            foreach ($path in $paths) { if ($path -notmatch $dataPath) { return $false } }
+            $queryCount++
+            $hasInput = $true
         }
-        if ($paths.Count -eq 0) { return $false }
-        foreach ($path in $paths) { if ($path -notmatch $dataPath) { return $false } }
-        $queryCount++
     }
     return $queryCount -gt 0
 }

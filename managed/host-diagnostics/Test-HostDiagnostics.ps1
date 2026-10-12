@@ -18,18 +18,24 @@ $runRoot = Join-Path $fullRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') 
 $files = @(
     'Read-BoundedProjection.ps1','Test-BoundedProjection.ps1',
     'Invoke-CheckedPowerShell.ps1','Test-CheckedPowerShell.ps1',
+    'BrowserPrivacyProbe.py','Test-BrowserPrivacyProbe.py',
     'Get-NvidiaDownloadStatus.ps1','Test-NvidiaDownloadStatus.ps1',
     'Get-TaskbarSnapshot.ps1','Restart-ExplorerShell.ps1',
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',
     'Test-HostDiagnostics.ps1'
 )
+$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $syntax = foreach ($file in $files) {
     $path = Join-Path $PSScriptRoot $file
     $tokens = $null; $parseErrors = $null
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         [pscustomobject]@{file=$file;status='missing';errors=@();sha256=$null}; continue
     }
-    [void][Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$parseErrors)
+    if ([IO.Path]::GetExtension($file) -eq '.py') {
+        & $python -B -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $path
+        $parseErrors = if ($LASTEXITCODE -eq 0) { @() } else { @([pscustomobject]@{ErrorId='PythonSyntax';Extent=@{StartLineNumber=0}}) }
+    }
+    else { [void][Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$parseErrors) }
     [pscustomobject]@{
         file=$file
         status=$(if ($parseErrors.Count -eq 0) { 'passed' } else { 'failed' })
@@ -41,17 +47,22 @@ $suiteDefinitions = @(
     @{name='projection';file='Test-BoundedProjection.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'projection'))},
     @{name='powershell';file='Test-CheckedPowerShell.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'powershell'))},
     @{name='nvidia';file='Test-NvidiaDownloadStatus.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'nvidia'))},
-    @{name='explorer';file='Test-ExplorerShellRecovery.ps1';args=@('-EvidenceDirectory',(Join-Path $runRoot 'explorer'))}
+    @{name='explorer';file='Test-ExplorerShellRecovery.ps1';args=@('-EvidenceDirectory',(Join-Path $runRoot 'explorer'))},
+    @{name='browser';file='Test-BrowserPrivacyProbe.py';args=@()}
 )
 if ($SkipLiveSnapshot) { $suiteDefinitions[3].args += '-SkipLiveSnapshot' }
 $suites = [Collections.Generic.List[object]]::new()
 if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
     foreach ($suite in $suiteDefinitions) {
-        $psi = [Diagnostics.ProcessStartInfo]::new((Join-Path $PSHOME 'pwsh.exe'))
+        $isPython = [IO.Path]::GetExtension($suite.file) -eq '.py'
+        $runtime = if ($isPython) { $python } else { Join-Path $PSHOME 'pwsh.exe' }
+        $psi = [Diagnostics.ProcessStartInfo]::new($runtime)
         $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
         $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
         $psi.StandardOutputEncoding = $utf8; $psi.StandardErrorEncoding = $utf8
-        foreach ($argument in (@('-NoProfile','-NonInteractive','-File',(Join-Path $PSScriptRoot $suite.file)) + $suite.args)) {
+        $entryArguments = if ($isPython) { @('-B',(Join-Path $PSScriptRoot $suite.file)) } else { @('-NoProfile','-NonInteractive','-File',(Join-Path $PSScriptRoot $suite.file)) }
+        if ($isPython) { $psi.Environment['BROWSER_PROBE_TEST_ROOT'] = Join-Path $runRoot 'browser' }
+        foreach ($argument in ($entryArguments + $suite.args)) {
             $psi.ArgumentList.Add([string]$argument)
         }
         $child = [Diagnostics.Process]::Start($psi)
@@ -86,6 +97,11 @@ if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
                 'nvidia' {
                     $passedChecks = @($parsed.cases | Where-Object passed -EQ $true).Count
                     $contractPassed = $parsed.passed -eq $true -and $passedChecks -gt 0 -and $passedChecks -eq @($parsed.cases).Count
+                }
+                'browser' {
+                    $passedChecks = if ($parsed.status -eq 'passed') { $parsed.cases } else { 0 }
+                    $contractPassed = $parsed.status -eq 'passed' -and $parsed.cases -gt 0 -and
+                        $parsed.failures -eq 0 -and $parsed.errors -eq 0 -and $parsed.browserTouched -eq $false
                 }
                 'explorer' {
                     $passedChecks = @($parsed.Results | Where-Object Status -EQ 'passed').Count

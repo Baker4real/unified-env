@@ -18,7 +18,7 @@ $wrapper = Join-Path $PSScriptRoot 'Invoke-CheckedPowerShell.ps1'
 $cases = [System.Collections.Generic.List[object]]::new()
 
 function Invoke-PublicCli {
-    param([string[]]$CliArguments)
+    param([string[]]$CliArguments, [scriptblock]$AfterExit)
     $psi = [Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = Join-Path $PSHOME 'pwsh.exe'
     $psi.UseShellExecute = $false
@@ -38,6 +38,12 @@ function Invoke-PublicCli {
             $process.Kill($true)
             $null = $process.WaitForExit(5000)
             throw 'Public CLI exceeded its 15-second test timeout.'
+        }
+        # An inherited-handle fixture may also hold this controller's capture pipes.
+        # Observe CLI exit and reclaim only its handshaken worker before draining them.
+        if ($AfterExit) { & $AfterExit }
+        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), 5000)) {
+            throw 'Public CLI exited but its test capture pipes did not close.'
         }
         return [pscustomobject]@{
             exitCode = $process.ExitCode
@@ -183,6 +189,132 @@ Assert-Case 'timeout terminates the owned child and returns 124' {
     if (-not (Test-Path -LiteralPath $pidPath)) { throw 'Timeout fixture never entered target execution.' }
     $ownedPid = [int][IO.File]::ReadAllText($pidPath)
     if (Get-Process -Id $ownedPid -ErrorAction SilentlyContinue) { throw 'Owned target child survived timeout.' }
+}
+
+Assert-Case 'exited target with inherited output reports unsafe retry while the owned worker remains ready' {
+    $ownerToken = [guid]::NewGuid().ToString('N')
+    $ownerHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($utf8.GetBytes($ownerToken)))
+    $readyPath = Join-Path $fixture 'CheckedPowerShell-worker-ready.json'
+    $stopPath = Join-Path $fixture 'CheckedPowerShell-worker-stop.txt'
+    $exitPath = Join-Path $fixture 'CheckedPowerShell-worker-exit.json'
+    $launchPath = Join-Path $fixture 'CheckedPowerShell-worker-launch.json'
+    $workerPath = Join-Path $fixture 'CheckedPowerShell-worker.ps1'
+    $parentPath = Join-Path $fixture 'CheckedPowerShell-launch-worker.ps1'
+    [IO.File]::WriteAllText($workerPath, @'
+param($OwnerToken, $ReadyPath, $StopPath, $ExitPath)
+$ErrorActionPreference = 'Stop'
+$utf8 = [Text.UTF8Encoding]::new($false)
+$self = Get-Process -Id $PID
+$parentId = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
+$ownerHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($utf8.GetBytes($OwnerToken)))
+$ready = [ordered]@{
+    ownerTokenSha256 = $ownerHash; processId = $PID; parentProcessId = $parentId
+    startTimeUtcTicks = $self.StartTime.ToUniversalTime().Ticks; executable = $self.Path
+    ready = $true
+}
+[IO.File]::WriteAllText($ReadyPath, ($ready | ConvertTo-Json -Compress), $utf8)
+[Console]::Out.WriteLine('synthetic-worker-output-do-not-echo')
+$deadline = [Diagnostics.Stopwatch]::StartNew()
+$gracefulStop = $false
+while ($deadline.Elapsed.TotalSeconds -lt 20) {
+    if ([IO.File]::Exists($StopPath) -and [IO.File]::ReadAllText($StopPath) -ceq $ownerHash) {
+        $gracefulStop = $true
+        break
+    }
+    Start-Sleep -Milliseconds 25
+}
+$receipt = [ordered]@{ ownerTokenSha256 = $ownerHash; processId = $PID; gracefulStop = $gracefulStop; exitCode = 0 }
+[IO.File]::WriteAllText($ExitPath, ($receipt | ConvertTo-Json -Compress), $utf8)
+exit 0
+'@, $utf8)
+    [IO.File]::WriteAllText($parentPath, @'
+param($WorkerPath, $OwnerToken, $ReadyPath, $StopPath, $ExitPath, $LaunchPath)
+$utf8 = [Text.UTF8Encoding]::new($false)
+$psi = [Diagnostics.ProcessStartInfo]::new()
+$psi.FileName = Join-Path $PSHOME 'pwsh.exe'
+$psi.UseShellExecute = $false
+$psi.CreateNoWindow = $true
+# Deliberately inherit the target's stdout/stderr. This reproduces the reported failure.
+foreach ($arg in @('-NoProfile', '-NonInteractive', '-File', $WorkerPath, $OwnerToken, $ReadyPath, $StopPath, $ExitPath)) {
+    $psi.ArgumentList.Add($arg)
+}
+$worker = [Diagnostics.Process]::Start($psi)
+try {
+    $launch = [ordered]@{
+        processId = $worker.Id; parentProcessId = $PID
+        startTimeUtcTicks = $worker.StartTime.ToUniversalTime().Ticks; executable = $psi.FileName
+    }
+    [IO.File]::WriteAllText($LaunchPath, ($launch | ConvertTo-Json -Compress), $utf8)
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while (-not [IO.File]::Exists($ReadyPath) -and $deadline.Elapsed.TotalSeconds -lt 5 -and -not $worker.HasExited) {
+        Start-Sleep -Milliseconds 25
+    }
+    if (-not [IO.File]::Exists($ReadyPath)) { throw 'Owned worker did not become ready.' }
+} finally { $worker.Dispose() }
+exit 0
+'@, $utf8)
+    $launchIntent = [ordered]@{
+        ownershipMode = 'task-scoped'; ownerTokenSha256 = $ownerHash
+        ownerTokenIssuedUtc = [DateTime]::UtcNow.ToString('o'); ownerTokenChannel = 'isolated worker argv'
+        task = 'checked-powershell-inherited-output'; workingDirectory = $PWD.ProviderPath
+        executable = Join-Path $PSHOME 'pwsh.exe'; script = $workerPath
+        readiness = 'matching owner handshake and process identity'; readinessTimeoutSeconds = 5
+        expectedExitCode = 0; lifetimeSeconds = 20; gracefulStopTimeoutSeconds = 5
+    }
+    [IO.File]::WriteAllText((Join-Path $fixture 'CheckedPowerShell-worker-intent.json'), ($launchIntent | ConvertTo-Json), $utf8)
+    $result = Invoke-PublicCli -CliArguments @('-ScriptPath', $parentPath, $workerPath, $ownerToken, $readyPath, $stopPath, $exitPath, $launchPath) -AfterExit {
+        $ownedWorker = $null
+        $ownershipVerified = $false
+        try {
+            if (-not [IO.File]::Exists($readyPath) -or -not [IO.File]::Exists($launchPath)) { throw 'Owned worker handshake is missing.' }
+            $ready = [IO.File]::ReadAllText($readyPath) | ConvertFrom-Json
+            $launch = [IO.File]::ReadAllText($launchPath) | ConvertFrom-Json
+            $ownedWorker = [Diagnostics.Process]::GetProcessById([int]$ready.processId)
+            # Retain the OS handle so exit-code evidence survives process termination.
+            $null = $ownedWorker.Handle
+            if ($ready.ownerTokenSha256 -cne $ownerHash -or -not $ready.ready -or
+                $ready.processId -ne $launch.processId -or $ready.parentProcessId -ne $launch.parentProcessId -or
+                $ready.startTimeUtcTicks -ne $launch.startTimeUtcTicks -or
+                $ownedWorker.StartTime.ToUniversalTime().Ticks -ne $ready.startTimeUtcTicks -or
+                $ownedWorker.MainModule.FileName -ine $ready.executable -or $ready.executable -ine $launch.executable) {
+                $ownedWorker.Dispose()
+                $ownedWorker = $null
+                throw 'Owned worker identity or owner token changed; no control action is allowed.'
+            }
+            $ownershipVerified = $true
+        } finally {
+            if ($null -ne $ownedWorker) {
+                try {
+                    if ($ownershipVerified) {
+                        [IO.File]::WriteAllText($stopPath, $ownerHash, $utf8)
+                        if (-not $ownedWorker.WaitForExit(5000)) {
+                            $ownedWorker.Kill()
+                            $null = $ownedWorker.WaitForExit(5000)
+                            throw 'Owned worker did not stop gracefully within its declared budget.'
+                        }
+                        $receipt = [IO.File]::ReadAllText($exitPath) | ConvertFrom-Json
+                        if ($receipt.ownerTokenSha256 -cne $ownerHash -or $receipt.processId -ne $ownedWorker.Id -or
+                            -not $receipt.gracefulStop -or $receipt.exitCode -ne 0 -or $ownedWorker.ExitCode -ne 0) {
+                            throw 'Owned worker shutdown was not proven.'
+                        }
+                        $closed = [ordered]@{
+                            ownerTokenSha256 = $ownerHash; identity = $ready; processState = 'stopped'
+                            wasReadyAfterCliExit = $true; exitCode = $ownedWorker.ExitCode
+                        }
+                        [IO.File]::WriteAllText((Join-Path $fixture 'CheckedPowerShell-worker-stopped.json'), ($closed | ConvertTo-Json -Depth 4), $utf8)
+                    }
+                } finally { $ownedWorker.Dispose() }
+            }
+        }
+    }
+    [IO.File]::WriteAllText((Join-Path $fixture 'CheckedPowerShell-worker-cli.json'), ($result | ConvertTo-Json), $utf8)
+    if ($result.exitCode -ne 124 -or $result.stderr -notmatch 'redirected output did not close; descendants may remain') {
+        throw 'Inherited output did not preserve the synchronous timeout contract.'
+    }
+    if ($result.stderr -notmatch 'targetExited=true targetExitCode=0 outputClosed=false descendantsMayRemain=true retrySafe=false') {
+        throw 'Timeout did not distinguish an exited target from a stopped service or a safe retry.'
+    }
+    if ($result.stdout -or $result.stderr.Contains('synthetic-worker-output-do-not-echo')) { throw 'An incomplete output stream was exposed.' }
 }
 
 $failed = @($cases | Where-Object status -eq 'failed')

@@ -13,13 +13,59 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 
 | 入口 | 行为与完成边界 |
 |---|---|
-| `Read-BoundedProjection.ps1` | 文本、字段白名单 JSONL 与 `-HttpLog` 共用整批默认 6000 UTF-8 字节预算。已知敏感字段在裁剪前处理；HTTP 模式只输出固定事件与安全字段。活动日志允许写入/轮转；含 UTF-8 替换字符的行整行跳过，计 `replacementCharacterRows`，返回 `read-with-encoding-omissions` 和退出 1。未知行不回显，计数不是零错误证明。 |
-| `Invoke-CheckedPowerShell.ps1` | PowerShell Core 7.4+；Parser 预检后才执行，`-CheckOnly` 只解析。`-RequiredJsonFields` 验证单份 JSON 对象的指定路径存在且非 null，保留 false/0。语法/输入拒绝 2、JSON 拒绝 3、超时 124，原生非零透传。它是同步显式入口，不拦截所有宿主 exec；目标先退出但后代持有输出管道时，不能保证后代已退出。 |
+| `Read-BoundedProjection.ps1` | 文本、Markdown 章节、字段白名单 JSONL 与 `-HttpLog` 共用整批默认 6000 UTF-8 字节预算。已知敏感字段在裁剪前处理；HTTP 模式只输出固定事件与安全字段。活动日志允许写入/轮转；含 UTF-8 替换字符的行整行跳过，计 `replacementCharacterRows`，返回 `read-with-encoding-omissions` 和退出 1。未知行不回显，计数不是零错误证明。 |
+| `Invoke-CheckedPowerShell.ps1` | PowerShell Core 7.4+；Parser 预检后才执行，`-CheckOnly` 只解析。`-RequiredJsonFields` 验证单份 JSON 对象的指定路径存在且非 null，保留 false/0。语法/输入拒绝 2、JSON 拒绝 3、超时 124，原生非零透传。目标已退出而后代占用输出管道时，stderr 另报 `targetExited=true targetExitCode=<code> outputClosed=false descendantsMayRemain=true retrySafe=false`；先核对既有实例，再决定处置。 |
+| `BrowserPrivacyProbe.py` | Windows、Python 3.12+ 标准库；仅启动本机环回验证服务，浏览器由用户打开。独立 run/attempt、服务器接收时间、完整报告校验和持久手动路线防止旧结果误判与重复自动启动。验收固定为英语语言/Intl、三组 ICE 无候选且完成无错误、本地字体 API denied；Canvas 字体仅观察。 |
 | `Get-NvidiaDownloadStatus.ps1` | 原生下载计数、任务关联、进程/用户/机器代理摘要；进程代理凭据和完整环境不输出。`-Offline` 只读状态文件；单点零速不证明卡住，`bytes-complete` 不证明包完整性或已安装。Windows x64 PEB 无法读取时明确 unavailable。NO_PROXY 不绕过 TUN。 |
 | `Get-TaskbarSnapshot.ps1` | 当前 shell 身份、窗口响应、固定项聚合哈希；不返回窗口标题或快捷方式目标。窗口就绪不能证明图标视觉正常。 |
 | `Restart-ExplorerShell.ps1` | Core 7.5+；默认 Plan，Apply 必须消费 120 秒内计划，核对 PID/启动时间/路径/会话、固定项和窗口。会话互斥覆盖停止至验收；停止前保存路径，先观察自动恢复，再有限创建。计划预算为 5–60 秒。工具层成功要求 ready、桌面/任务栏就绪和固定项一致，视觉验收单独完成。 |
 
 参数与返回结构以各脚本帮助/源码为准。活动日志不是原子快照；命名模式脱敏不保证发现任意秘密，仍要缩小敏感来源与字段范围。需要复核某条失败时保留来源、行窗口和退出码，不输出完整日志。
+
+## 按章节读取
+
+已知标题时直接选 ATX 章节，保留原文件行号、子标题内容、脱敏与总预算：
+
+```powershell
+& 'D:/Codex/.codex/scripts/Read-BoundedProjection.ps1' -LiteralPath 'D:/agents/projects/统一环境/docs/env-governance/host-diagnostics.md' -MarkdownSection '工具合同' -MaxRows 80 -MaxValueChars 1000
+```
+
+spec 对应 `{"path":"D:/path/reference.md","format":"markdown","section":"标题"}`。标题精确区分大小写，忽略代码围栏中的伪标题；只支持 ATX，不解释 Setext。缺失或重复标题分别返回 `section-not-found`、`section-ambiguous` 和退出 1，来源内容不输出。命中总预算或单行裁剪时按返回的行号续读，不把省略部分当作已读。
+
+## 浏览器语言与隐私复测
+
+维护 Edge 语言、Intl、字体权限或 WebRTC 前，先用下表确定设置层；真实网页是验收来源。浏览器 locale 与系统显示语言分开设置；除非任务明确要求，保留当前系统显示语言和系统字体。
+
+| 目标 | 设置入口与验收 |
+|---|---|
+| 网站语言与请求头 | `edge://settings/languages` 的 Preferred languages。按任务目标选择首选语言，再读取 `navigator.languages`、Worker 和服务端 `Accept-Language`。离线 Preferences 写入可能被重开后的状态覆盖；出现覆盖时改走正式设置入口。 |
+| Intl 日期与数字 locale | Edge 显示语言/应用 locale 可独立于 Windows 显示语言；选择目标语言、按 Edge 提示重开后实测主线程和 Worker。配置值或界面语言本身不能代替 Intl 结果。 |
+| 字体 | Local Font Access 权限控制枚举 API；普通 Profile 和禁止该权限都不能隔离 Canvas/CSS 字体宽度探测。用户接受日常 Edge 的这一限制时，字体检测保留为观察项。 |
+| WebRTC | 先确认当前版本支持的设置入口；没有适用 setter 时，完整退出后只改目标 Profile 的 `webrtc.ip_handling_policy=disable_non_proxied_udp`。先备份、最小 diff、重开回读，再实测三组 ICE。零候选只证明所测场景，不代表 RTCPeerConnection API 被禁用。 |
+
+离线编辑只用于已核实的当前 Profile/Local State 字段，且浏览器及其后台进程已完整退出。记录文件哈希、原值和回退范围；重开后字段被覆盖时改走正式设置入口，不循环重写整个 Profile。浏览器自动启动/调试出现网页超时或反复许可时，记录失败并转手动路线；单次故障与恢复不足以唯一确定根因，归因和恢复记录留在对应运行证据。
+
+先查询持久路线。出现故障时记录在宿主 evidence，后续任务沿用，正常手动复测不会自动解锁：
+
+```powershell
+python -B 'D:/Codex/.codex/scripts/BrowserPrivacyProbe.py' route --browser edge
+python -B 'D:/Codex/.codex/scripts/BrowserPrivacyProbe.py' record-failure --browser edge --reason navigation-timeout
+```
+
+默认路线文件为 `D:/agents/run-evidence/browser-privacy-routing/state.json`。`automationAllowed=false` 时停止该浏览器的自动启动/附着重试，保留设置，由用户从开始菜单/桌面启动；工具对 `start --transport automation` 返回退出 5，不创建服务目录。这是受管工作流入口的约束，不是对任意 CDP 客户端的系统拦截。只有独立隔离试验证明故障路径已修复后，才另行维护该路线状态。
+
+每轮使用新的 D 盘 run 目录；以下 `<new-run>` 必须替换为该轮目录：
+
+```powershell
+python -B 'D:/Codex/.codex/scripts/BrowserPrivacyProbe.py' start --run-dir 'D:/agents/run-evidence/browser-privacy/<new-run>'
+python -B 'D:/Codex/.codex/scripts/BrowserPrivacyProbe.py' prepare --run-dir 'D:/agents/run-evidence/browser-privacy/<new-run>'
+python -B 'D:/Codex/.codex/scripts/BrowserPrivacyProbe.py' status --run-dir 'D:/agents/run-evidence/browser-privacy/<new-run>'
+python -B 'D:/Codex/.codex/scripts/BrowserPrivacyProbe.py' stop --run-dir 'D:/agents/run-evidence/browser-privacy/<new-run>'
+```
+
+`start` 返回首次 attempt 和 URL；请用户在日常浏览器普通窗口打开 URL，等待“检查完成”，再查 `status`。每次后续设置修改/复测，先 `prepare` 建立新 attempt，再请用户刷新同一 URL。等待用户操作时不要打开自动化通道。每个 attempt 只接收一份完整报告；旧标签的迟到结果、重复提交或空的 ICE/Worker/Intl 字段不能变成成功。`status` 退出码：0 已通过、1 完整但不达标、2 输入/身份/证据错误、3 等待当前结果；`start --transport automation` 被持久路线拒绝时退出 5。其他动作的退出 0 仅表示该动作成功。“检查完成”仅表示保存了报告，最终判断仍用 `status`；内置通过条件固定为英语环境，其他 locale 目标应按原始观察结果单独验收。
+
+服务使用随机 owner 握手、OS 进程身份、独立输出文件和 readiness 核对，默认 900 秒后退出。`start` 遇到已有实例返回同一 PID；退出后的目录不能复用。同步 wrapper 报 124 时先核对原实例，不立即再起一个服务。`stop` 只控制身份匹配实例并回读退出；run 目录保留每次结果及生命周期证据。请求限于同源环回；保存候选地址的类型和 IPv4/IPv6 分类，不保存原始 IP、Cookie 或 Profile 内容。页面会联系 Cloudflare/Google STUN，无媒体权限请求。
 
 ## 部署
 
@@ -43,7 +89,7 @@ node ./tests/Test-ModuleBoundaries.cjs
 git diff --check
 ```
 
-仓库 fixture 运行合成日志、语法/JSON 合同、NVIDIA 状态与带所有权握手的隔离恢复用例，显式跳过真实桌面快照。部署后使用完整入口检查实际宿主只读面：
+仓库 fixture 运行合成日志、语法/JSON 合同、NVIDIA 状态、浏览器 CLI/HTTP 合成报告与带所有权握手的隔离恢复用例，显式跳过真实桌面快照。浏览器 suite 不启动或附着真实浏览器，不能代替真实页面验收。CI 为 host-safety 配置 Python；本机测试从 PATH 解析 `python.exe`。部署后使用完整入口检查实际宿主只读面：
 
 ```powershell
 & 'D:/Codex/.codex/scripts/Test-HostDiagnostics.ps1'
