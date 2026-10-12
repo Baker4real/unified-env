@@ -5,6 +5,9 @@ Set-StrictMode -Version Latest
 # Invoke-CodexHostSafetyNativeLoad；禁止在别处复制第二套 cache 算法。
 #
 # 合同要点（docs/plans/2026-08-27-safe-tree-delete-issue56-implementation.md §4.3）：
+# - source 集覆盖 safe-tree-delete lib 编译的全部 C# 组件（#86）：Status fast scan
+#   （CodexSafeTreeDeleteStatusScan.cs）在两个 variant 都有，Plan walker 只在 default。新增组件
+#   只加入本 source 集，不另建固定路径缓存。
 # - env CODEX_SAFE_TREE_DELETE_PLAN_CSHARP_WALKER=0 必须在任何 PlanSnapshot source 的
 #   读取/散列/编译之前判定：env=0 选 base source 集（不含 PlanSnapshot），默认选 base+PlanSnapshot。
 # - cache 为不可变内容寻址 generation：<productionRoot>/<variant>/<compileCompositeSha>/，
@@ -38,7 +41,8 @@ function Get-CodexHostSafetyNativeSourceSet {
         'CodexSafeTreeDeleteApplySnapshot.cs',
         'CodexSafeTreeDeleteHostSafetyPurgeAdapter.cs',
         'CodexSafeTreeDeleteThreadJournal.cs',
-        'CodexSafeTreeDeleteParallelPurge.cs'
+        'CodexSafeTreeDeleteParallelPurge.cs',
+        'CodexSafeTreeDeleteStatusScan.cs'
     )
     $sources = [Collections.Generic.List[string]]::new()
     foreach ($name in $baseNames) {
