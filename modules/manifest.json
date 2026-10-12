@@ -359,6 +359,7 @@
           "scripts/lib/CodexSafeTreeDeleteHostSafetyPurgeAdapter.cs",
           "scripts/lib/CodexHostSafetyNativeLoader.ps1",
           "scripts/lib/CodexSafeTreeDeleteClosure.ps1",
+          "scripts/lib/CodexSafeTreeDeleteGateHolder.ps1",
           "scripts/lib/CodexSafeTreeDeleteStatusScan.cs",
           "scripts/lib/CodexUserEnvironmentTransaction.cs",
           "scripts/lib/EnvPathSafety.ps1",
@@ -470,6 +471,7 @@
         "fixture": {
           "powershell": [
             "tests/Test-CodexSafeTreeDelete.ps1",
+            "tests/Test-CodexSafeTreeDeleteModeDispatch.ps1",
             "tests/Test-HostDiagnostics.ps1",
             "tests/Test-SafeCleanupJob.ps1",
             "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
@@ -516,6 +518,7 @@
             "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeleteRealHistoryBenchmark.ps1",
             "tests/Test-CodexSafeTreeDelete.ps1",
+            "tests/Test-CodexSafeTreeDeleteModeDispatch.ps1",
             "tests/Test-CodexSafeTreeDeleteBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
             "tests/Test-CodexSafeTreeDeleteBatchHistoryScan.ps1",

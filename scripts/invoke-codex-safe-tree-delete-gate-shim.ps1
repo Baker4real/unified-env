@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 if ($null -ne $PSStyle) { $PSStyle.OutputRendering = 'PlainText' }
 
 # #56 §9 gate-aware shim：部署工具（Deploy-CodexSafeTreeDelete.ps1）把本文件原子安装为
-# D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1。每次调用在任何 dot-source 之前
+# D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1。每次调用在加载任何仓库代码之前
 # 取得 current-user cross-session deployment mutex、检查 maintenance marker，并持锁到
 # child/本进程退出。marker 在场时新调用失败闭锁；abandoned marker 不自动清除。
 #
@@ -12,6 +12,13 @@ if ($null -ne $PSStyle) { $PSStyle.OutputRendering = 'PlainText' }
 # 仍未获得锁时，向 stdout 输出 ASCII-only 结构化 JSON 并以 exit 1 结束，调用方按
 # JSON + 退出码分类，不要 grep stderr 短语（历史缺陷：VT 转义码穿插 + 控制台 GBK
 # 编码会打断多词短语匹配）。PlainText 渲染消除残余错误文本中的 ANSI 序列。
+#
+# #77 持锁者面包屑：取锁后、委托 repo entry 前在 state root 写 gate-holder.json，释放锁前
+# 删除；等锁超时的 JSON 追加 holder 字段（ok、refusalReason 与 exit 1 不变）。写、读与
+# stale 判定只在 scripts\lib\CodexSafeTreeDeleteGateHolder.ps1 实现一次：部署工具安装时把
+# 下面这一行 dot-source 原样替换为该文件内容，已安装 shim 自包含（超时路径不持锁，不能
+# 加载可能正在切换的仓库代码）；直接从仓库运行时按相对路径加载同一文件。
+. (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDeleteGateHolder.ps1')
 
 $codexSafeTreeDeleteDeploymentStateRoot = 'D:\Codex\.codex\state\safe-tree-delete-deployment'
 $codexSafeTreeDeleteMaintenanceMarker = Join-Path $codexSafeTreeDeleteDeploymentStateRoot 'maintenance.json'
@@ -37,10 +44,15 @@ if (-not $codexSafeTreeDeleteGateAcquired) {
     [pscustomobject][ordered]@{
         ok = $false
         refusalReason = 'deployment-mutex-acquire-timeout'
-    } | ConvertTo-Json -Compress
+        holder = (Read-CodexSafeTreeDeleteGateHolder -StateRoot $codexSafeTreeDeleteDeploymentStateRoot)
+    } | ConvertTo-Json -Compress -Depth 4 -EscapeHandling EscapeNonAscii
     exit 1
 }
 try {
+    # 有意降级：面包屑写失败（目录不可写、磁盘满等）只会让等锁超时方读到 {state:"unknown"}
+    # 或残留的 stale 记录；写函数吞掉全部异常，绝不阻塞本次调用。
+    [void](Write-CodexSafeTreeDeleteGateHolder -StateRoot $codexSafeTreeDeleteDeploymentStateRoot `
+        -Mode (Get-CodexSafeTreeDeleteGateHolderMode -Arguments $args))
     if (Test-Path -LiteralPath $codexSafeTreeDeleteMaintenanceMarker) {
         [pscustomobject][ordered]@{
             ok = $false
@@ -51,6 +63,7 @@ try {
     & $codexSafeTreeDeleteRepositoryEntry @args
     exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
 } finally {
+    Remove-CodexSafeTreeDeleteGateHolder -StateRoot $codexSafeTreeDeleteDeploymentStateRoot
     [void]$codexSafeTreeDeleteGateMutex.ReleaseMutex()
     $codexSafeTreeDeleteGateMutex.Dispose()
 }
