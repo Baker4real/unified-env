@@ -718,7 +718,8 @@ function Read-CodexSafeTreeDeletePolicy {
             throw "safe-delete policy $id 非 root 删除条目的 purpose 必须为 none。"
         }
         if ($rootDeletionPurpose -ceq 'rebuildable-build-output' -and
-            $root -notmatch '^D:\\(Codex|agents)\\projects\\[^\\]+\\.+$') {
+            $root -notmatch '^D:\\(Codex|agents)\\projects\\[^\\]+\\.+$' -and
+            $root -notmatch '^D:\\agents\\worktrees\\prd-210\\[^\\]+\\.+$') {
             throw "safe-delete policy $id 可重建构建产物必须位于项目根之下。"
         }
         if ($rootDeletionPurpose -ceq 'rebuildable-build-output' -and

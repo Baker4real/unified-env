@@ -193,6 +193,454 @@
       "deniedExactPaths": []
     },
     {
+      "id": "clock-countdown-integration-app-build",
+      "capabilityRoot": "D:\\agents\\projects\\clock-countdown-integration\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-integration-verification-build",
+      "capabilityRoot": "D:\\agents\\projects\\clock-countdown-integration\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-integration-core-bin",
+      "capabilityRoot": "D:\\agents\\projects\\clock-countdown-integration\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-integration-core-obj",
+      "capabilityRoot": "D:\\agents\\projects\\clock-countdown-integration\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-integration-app-bin",
+      "capabilityRoot": "D:\\agents\\projects\\clock-countdown-integration\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-integration-app-obj",
+      "capabilityRoot": "D:\\agents\\projects\\clock-countdown-integration\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-integration-verification-bin",
+      "capabilityRoot": "D:\\agents\\projects\\clock-countdown-integration\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-integration-verification-obj",
+      "capabilityRoot": "D:\\agents\\projects\\clock-countdown-integration\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t231-app-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t231\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t231-verification-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t231\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t231-core-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t231\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t231-core-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t231\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t231-app-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t231\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t231-app-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t231\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t231-verification-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t231\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t231-verification-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t231\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t212-app-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t212\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t212-verification-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t212\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t212-core-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t212\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t212-core-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t212\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t212-app-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t212\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t212-app-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t212\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t212-verification-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t212\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-t212-verification-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t212\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t215-app-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t215\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t215-verification-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t215\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t215-core-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t215\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t215-core-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t215\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t215-app-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t215\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t215-app-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t215\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t215-verification-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t215\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t215-verification-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t215\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t213-app-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t213\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t213-verification-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t213\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t213-core-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t213\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t213-core-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t213\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t213-app-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t213\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t213-app-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t213\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t213-verification-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t213\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t213-verification-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t213\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t214-app-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t214\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t214-verification-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t214\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t214-core-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t214\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t214-core-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t214\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t214-app-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t214\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t214-app-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t214\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t214-verification-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t214\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t214-verification-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t214\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t216-app-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t216\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t216-verification-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t216\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t216-core-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t216\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t216-core-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t216\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t216-app-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t216\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t216-app-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t216\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t216-verification-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t216\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-t216-verification-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\t216\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-integration-app-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\integration\\app",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-integration-verification-build",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\integration\\verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-integration-core-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\integration\\src\\MinminCountdown.Core\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-integration-core-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\integration\\src\\MinminCountdown.Core\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-integration-app-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\integration\\src\\MinminCountdown\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-integration-app-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\integration\\src\\MinminCountdown\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-integration-verification-bin",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\integration\\src\\MinminCountdown.Verification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "prd-210-integration-verification-obj",
+      "capabilityRoot": "D:\\agents\\worktrees\\prd-210\\integration\\src\\MinminCountdown.Verification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
       "id": "clock-countdown-intermediate-ui-references",
       "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\assets\\ui-references",
       "minimumDescendantDepth": 3,
