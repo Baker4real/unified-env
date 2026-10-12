@@ -298,6 +298,21 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
 policy v5 下，`BatchPurge` 还要求 capability 的 `producerFenceMode=os-handle-required`；
 `manual-only` 条目必须逐笔处理。
 
+只读预检使用 `Check`（#81）：输入 `TargetPath` 或 `TargetPaths` 二者择一（`TargetPaths` 同样接受 `::`
+连接），`CapabilityRoot` 可省略。每个目标运行与 `Plan` 同一份目标解析判定
+`Get-CodexSafeTreeDeleteTargetDecision`（`Resolve-CodexSafeTreeDeleteTarget` 只是把拒绝原样抛出的包装）：
+路径合法、allowlist、root 包含、根删除用途与 link-aware 只允许精确 root、最小后代深度、denylist、
+capability 路径校验、现存普通目录。每个目标返回 `{targetPath, allowed, policyEntryId, capabilityRoot,
+depth, refusalReason, refusalMessage, candidates?}`，`refusalMessage` 与同一 CapabilityRoot 下 Plan 抛出的
+拒绝原文逐字相同。省略 CapabilityRoot 时对每条条目运行同一判定，root 包含目标的条目都是候选：恰好一条放行
+才采用；零条以 `no-capability-root`、多条以 `ambiguous-capability-root` 拒绝，并在 `candidates` 列出全部
+候选及各自判定；目标路径本身非法时仍以 `invalid-target-path` 拒绝。Check 只读 policy 与目标路径的文件系统
+属性，不读历史、不写 evidence、不建 run 目录；拒绝都在 JSON 里表达，顶层没有 `refusalReason`，退出码约定
+不变；缺目标或两者都给是普通 throw 的用法错误。它只预报目标解析这一层：Plan 随后还会核对
+retired-evidence-root 一次性授权是否已消费（读历史）、目标卷的 `FILE_ID_INFO` 能力和完整子树（未授权的
+reparse point 或 hardlink、file leaf 的命名流、`empty-project-state` 的文件等），这些拒绝 Check 不预报。
+Plan、Apply、Purge 仍要求显式 `CapabilityRoot`。
+
 计划 30 分钟过期。缺少确认、哈希不匹配、policy 漂移、目标重新出现、目录内容或 identity
 漂移、恢复时出现未计划节点或既有节点的 kind/SHA-256/file identity/root identity 漂移、
 未授权或越界的 hardlink/junction/symlink/reparse point、越界路径以及并发 mutex 冲突均失败关闭。

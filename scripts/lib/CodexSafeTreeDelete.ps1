@@ -813,6 +813,118 @@ function Read-CodexSafeTreeDeletePolicy {
     }
 }
 
+function Set-CodexSafeTreeDeleteTargetRefusal {
+    param(
+        [Parameter(Mandatory)][object]$Decision,
+        [Parameter(Mandatory)][string]$Reason,
+        # 自有规则传拒绝原文；host-safety 断言抛出的拒绝传其 ErrorRecord，留给 Resolve 原样重抛。
+        [Parameter(Mandatory)][object]$Refusal
+    )
+
+    $Decision.refusalReason = $Reason
+    if ($Refusal -is [Management.Automation.ErrorRecord]) {
+        $Decision.refusalErrorRecord = $Refusal
+        $Decision.refusalMessage = [string]$Refusal.Exception.Message
+    } else {
+        $Decision.refusalMessage = [string]$Refusal
+    }
+    return $Decision
+}
+
+function Get-CodexSafeTreeDeleteTargetDecision {
+    # Plan（经 Resolve-CodexSafeTreeDeleteTarget）与 Check 共用的目标解析判定，规则只在这里维护。
+    # 按固定顺序逐条校验，第一条不通过的规则给出稳定的 refusalReason 和 Plan 会抛出的拒绝原文；不抛出
+    # 拒绝，也不读写 evidence，只查询目标路径自身及其祖先的文件系统属性。depth 在通过 root 包含与
+    # 两项精确 root 校验后才计算，此前拒绝的判定 depth 为 $null。
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [Parameter(Mandatory)][object]$Policy,
+        [bool]$RequireExisting = $true
+    )
+
+    $decision = [pscustomobject][ordered]@{
+        allowed = $false
+        refusalReason = $null
+        refusalMessage = $null
+        refusalErrorRecord = $null
+        targetPath = $TargetPath
+        capabilityRoot = $CapabilityRoot
+        depth = $null
+        entry = $null
+    }
+    try {
+        $fullTarget = Assert-CodexHookDPath -Value $TargetPath -Name 'safe-delete target'
+    } catch {
+        return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision -Reason 'invalid-target-path' -Refusal $_
+    }
+    $decision.targetPath = $fullTarget
+    try {
+        $fullRoot = Assert-CodexHookDPath -Value $CapabilityRoot -Name 'safe-delete capability root'
+    } catch {
+        return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision -Reason 'invalid-capability-root' -Refusal $_
+    }
+    $decision.capabilityRoot = $fullRoot
+    $entry = @($Policy.entries | Where-Object {
+        Test-CodexSafeTreeDeletePathEqual -Left ([string]$_.capabilityRoot) -Right $fullRoot
+    })
+    if ($entry.Count -ne 1) {
+        return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision `
+            -Reason 'capability-root-not-allowlisted' `
+            -Refusal 'safe-delete capability root 不在受管 allowlist。'
+    }
+    $decision.entry = $entry[0]
+    if (-not (Test-CodexHookPathWithin -Path $fullTarget -ParentPath $fullRoot)) {
+        return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision `
+            -Reason 'target-outside-capability-root' `
+            -Refusal 'safe-delete target 必须位于 capability root 内。'
+    }
+    if ([string]$entry[0].rootDeletionPurpose -cin @('empty-project-state', 'retired-project-root', 'retired-evidence-root') -and
+        -not (Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $fullRoot)) {
+        return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision `
+            -Reason 'root-deletion-requires-exact-root' `
+            -Refusal 'safe-delete root 删除用途只允许精确 capability root。'
+    }
+    if (([bool]$entry[0].allowHardLinks -or [bool]$entry[0].allowInternalDirectoryJunctions) -and
+        -not (Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $fullRoot)) {
+        return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision `
+            -Reason 'link-aware-requires-exact-root' `
+            -Refusal 'safe-delete link-aware 能力只允许精确 capability root。'
+    }
+    $relative = $fullTarget.Substring($fullRoot.Length).TrimStart('\', '/')
+    $decision.depth = @($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 }).Count
+    if ($decision.depth -lt [int]$entry[0].minimumDescendantDepth) {
+        return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision `
+            -Reason 'below-minimum-depth' `
+            -Refusal 'safe-delete target 未达到策略要求的最小后代深度。'
+    }
+    foreach ($deniedPath in @($entry[0].deniedExactPaths)) {
+        if ((Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $deniedPath) -or
+            (Test-CodexHookPathWithin -Path $fullTarget -ParentPath $deniedPath)) {
+            return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision `
+                -Reason 'target-denied' `
+                -Refusal 'safe-delete target 命中 denylist。'
+        }
+    }
+    try {
+        [void](Assert-CodexHookCapabilityPath `
+            -Path $fullTarget `
+            -CapabilityRoot $fullRoot `
+            -AllowedExactPaths @($fullTarget) `
+            -Name 'safe-delete target')
+    } catch {
+        return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision -Reason 'capability-path-refused' -Refusal $_
+    }
+    if ($RequireExisting -and -not [IO.Directory]::Exists($fullTarget)) {
+        return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision `
+            -Reason 'target-not-existing-directory' `
+            -Refusal 'safe-delete target 必须是现存普通目录。'
+    }
+
+    $decision.allowed = $true
+    return $decision
+}
+
 function Resolve-CodexSafeTreeDeleteTarget {
     param(
         [Parameter(Mandatory)][string]$TargetPath,
@@ -821,53 +933,129 @@ function Resolve-CodexSafeTreeDeleteTarget {
         [bool]$RequireExisting = $true
     )
 
-    $fullTarget = Assert-CodexHookDPath -Value $TargetPath -Name 'safe-delete target'
-    $fullRoot = Assert-CodexHookDPath -Value $CapabilityRoot -Name 'safe-delete capability root'
-    $entry = @($Policy.entries | Where-Object {
-        Test-CodexSafeTreeDeletePathEqual -Left ([string]$_.capabilityRoot) -Right $fullRoot
-    })
-    if ($entry.Count -ne 1) { throw 'safe-delete capability root 不在受管 allowlist。' }
-    if (-not (Test-CodexHookPathWithin -Path $fullTarget -ParentPath $fullRoot)) {
-        throw 'safe-delete target 必须位于 capability root 内。'
+    $decision = Get-CodexSafeTreeDeleteTargetDecision `
+        -TargetPath $TargetPath `
+        -CapabilityRoot $CapabilityRoot `
+        -Policy $Policy `
+        -RequireExisting $RequireExisting
+    if (-not $decision.allowed) {
+        # 原样重抛：自有规则抛拒绝原文，host-safety 断言抛原 ErrorRecord；消息、异常类型与错误标识都与
+        # 判定拆出之前相同。
+        if ($null -ne $decision.refusalErrorRecord) { throw $decision.refusalErrorRecord }
+        throw $decision.refusalMessage
     }
-    if ([string]$entry[0].rootDeletionPurpose -cin @('empty-project-state', 'retired-project-root', 'retired-evidence-root') -and
-        -not (Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $fullRoot)) {
-        throw 'safe-delete root 删除用途只允许精确 capability root。'
+
+    $entry = $decision.entry
+    return [pscustomobject][ordered]@{
+        targetPath = $decision.targetPath
+        capabilityRoot = $decision.capabilityRoot
+        policyEntryId = [string]$entry.id
+        rootDeletionPurpose = [string]$entry.rootDeletionPurpose
+        allowHardLinks = [bool]$entry.allowHardLinks
+        allowInternalDirectoryJunctions = [bool]$entry.allowInternalDirectoryJunctions
+        minimumQuarantineAgeMinutes = [long]$entry.minimumQuarantineAgeMinutes
+        producerFenceMode = [string]$entry.producerFenceMode
+        policySchemaVersion = [long]$Policy.schemaVersion
     }
-    if (([bool]$entry[0].allowHardLinks -or [bool]$entry[0].allowInternalDirectoryJunctions) -and
-        -not (Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $fullRoot)) {
-        throw 'safe-delete link-aware 能力只允许精确 capability root。'
+}
+
+function ConvertTo-CodexSafeTreeDeleteCheckRow {
+    param([Parameter(Mandatory)][object]$Decision)
+
+    return [pscustomobject][ordered]@{
+        targetPath = [string]$Decision.targetPath
+        allowed = [bool]$Decision.allowed
+        policyEntryId = if ($null -ne $Decision.entry) { [string]$Decision.entry.id } else { $null }
+        capabilityRoot = $Decision.capabilityRoot
+        depth = $Decision.depth
+        refusalReason = $Decision.refusalReason
+        refusalMessage = $Decision.refusalMessage
     }
-    $relative = $fullTarget.Substring($fullRoot.Length).TrimStart('\', '/')
-    $depth = @($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 }).Count
-    if ($depth -lt [int]$entry[0].minimumDescendantDepth) {
-        throw 'safe-delete target 未达到策略要求的最小后代深度。'
-    }
-    foreach ($deniedPath in @($entry[0].deniedExactPaths)) {
-        if ((Test-CodexSafeTreeDeletePathEqual -Left $fullTarget -Right $deniedPath) -or
-            (Test-CodexHookPathWithin -Path $fullTarget -ParentPath $deniedPath)) {
-            throw 'safe-delete target 命中 denylist。'
+}
+
+function Get-CodexSafeTreeDeleteCheckAutoRow {
+    # 省略 CapabilityRoot 时的自动解析：对 policy 的每条条目运行同一判定，root 包含目标的条目是候选。
+    # 候选中恰好一条放行才采用它；零条或多条都拒绝，并列出全部候选及各自的判定，不替调用方做授权选择。
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][object]$Policy
+    )
+
+    # 加载器保证 policy 至少一条条目、root 互不相同，所以每条条目的 root 都能通过 allowlist 查找。
+    $candidates = [Collections.Generic.List[object]]::new()
+    $canonicalTarget = $TargetPath
+    foreach ($entry in @($Policy.entries)) {
+        $decision = Get-CodexSafeTreeDeleteTargetDecision `
+            -TargetPath $TargetPath `
+            -CapabilityRoot ([string]$entry.capabilityRoot) `
+            -Policy $Policy
+        if ($decision.refusalReason -ceq 'invalid-target-path') {
+            # 目标先于 root 校验，目标非法与选哪条 root 无关：给出与显式 root 相同的拒绝，不列候选。
+            $decision.capabilityRoot = $null
+            return ConvertTo-CodexSafeTreeDeleteCheckRow -Decision $decision
         }
+        $canonicalTarget = $decision.targetPath
+        if ($decision.refusalReason -cne 'target-outside-capability-root') { $candidates.Add($decision) }
     }
-    [void](Assert-CodexHookCapabilityPath `
-        -Path $fullTarget `
-        -CapabilityRoot $fullRoot `
-        -AllowedExactPaths @($fullTarget) `
-        -Name 'safe-delete target')
-    if ($RequireExisting -and -not [IO.Directory]::Exists($fullTarget)) {
-        throw 'safe-delete target 必须是现存普通目录。'
+
+    $legal = @($candidates | Where-Object { $_.allowed })
+    if ($legal.Count -eq 1) { return ConvertTo-CodexSafeTreeDeleteCheckRow -Decision $legal[0] }
+    if ($legal.Count -eq 0) {
+        $reason = 'no-capability-root'
+        $message = 'safe-delete target 没有能合法覆盖它的 capability root。'
+    } else {
+        $reason = 'ambiguous-capability-root'
+        $message = 'safe-delete target 有多条能合法覆盖它的 capability root，须显式指定 CapabilityRoot。'
+    }
+    return [pscustomobject][ordered]@{
+        targetPath = [string]$canonicalTarget
+        allowed = $false
+        policyEntryId = $null
+        capabilityRoot = $null
+        depth = $null
+        refusalReason = $reason
+        refusalMessage = $message
+        candidates = @($candidates | ForEach-Object {
+                [pscustomobject][ordered]@{
+                    policyEntryId = [string]$_.entry.id
+                    capabilityRoot = [string]$_.capabilityRoot
+                    allowed = [bool]$_.allowed
+                    depth = $_.depth
+                    refusalReason = $_.refusalReason
+                    refusalMessage = $_.refusalMessage
+                }
+            })
+    }
+}
+
+function Invoke-CodexSafeTreeDeleteCheck {
+    # 只读预检：读 policy，对每个目标运行与 Plan 相同的目标解析判定（Get-CodexSafeTreeDeleteTargetDecision）；
+    # 省略 CapabilityRoot 时按 Get-CodexSafeTreeDeleteCheckAutoRow 自动解析。不接收 evidence 根，因此不读
+    # 历史、不写 evidence、不建 run 目录。
+    param(
+        [Parameter(Mandatory)][string[]]$TargetPaths,
+        [string]$CapabilityRoot,
+        [Parameter(Mandatory)][string]$PolicyPath
+    )
+
+    $policy = Read-CodexSafeTreeDeletePolicy -PolicyPath $PolicyPath
+    $results = [Collections.Generic.List[object]]::new()
+    foreach ($targetPath in @($TargetPaths)) {
+        if ([string]::IsNullOrWhiteSpace($CapabilityRoot)) {
+            $results.Add((Get-CodexSafeTreeDeleteCheckAutoRow -TargetPath $targetPath -Policy $policy))
+            continue
+        }
+        $decision = Get-CodexSafeTreeDeleteTargetDecision `
+            -TargetPath $targetPath `
+            -CapabilityRoot $CapabilityRoot `
+            -Policy $policy
+        $results.Add((ConvertTo-CodexSafeTreeDeleteCheckRow -Decision $decision))
     }
 
     return [pscustomobject][ordered]@{
-        targetPath = $fullTarget
-        capabilityRoot = $fullRoot
-        policyEntryId = [string]$entry[0].id
-        rootDeletionPurpose = [string]$entry[0].rootDeletionPurpose
-        allowHardLinks = [bool]$entry[0].allowHardLinks
-        allowInternalDirectoryJunctions = [bool]$entry[0].allowInternalDirectoryJunctions
-        minimumQuarantineAgeMinutes = [long]$entry[0].minimumQuarantineAgeMinutes
-        producerFenceMode = [string]$entry[0].producerFenceMode
-        policySchemaVersion = [long]$Policy.schemaVersion
+        allowed = @($results | Where-Object { -not $_.allowed }).Count -eq 0
+        targetCount = $results.Count
+        results = $results.ToArray()
     }
 }
 
@@ -1280,6 +1468,23 @@ function Invoke-CodexSafeTreeDeleteMode {
                 EvidenceRoot = $EvidenceRoot
             } + $testArguments
             New-CodexSafeTreeDeletePlan @libraryArguments
+        }
+        'Check' {
+            # 只读预检：TargetPath 与 TargetPaths 二者择一（TargetPaths 同样接受 '::' 连接）；CapabilityRoot 可省略。
+            $checkTargets = @()
+            if ($null -ne $TargetPaths) { $checkTargets = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $TargetPaths) }
+            $hasTargetPath = -not [string]::IsNullOrWhiteSpace($TargetPath)
+            if ($hasTargetPath -eq ($checkTargets.Count -gt 0) -or
+                @($checkTargets | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+                throw 'Check 模式要求 TargetPath 或 TargetPaths（二者择一）。'
+            }
+            if ($hasTargetPath) { $checkTargets = @($TargetPath) }
+            $libraryArguments = @{
+                TargetPaths = $checkTargets
+                CapabilityRoot = $CapabilityRoot
+                PolicyPath = $PolicyPath
+            } + $testArguments
+            Invoke-CodexSafeTreeDeleteCheck @libraryArguments
         }
         'Apply' {
             if (-not $ConfirmApply) {
