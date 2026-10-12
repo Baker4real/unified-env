@@ -446,6 +446,11 @@ exit 3
     Assert-True ([string]$deployBreadcrumb.mode -ceq 'deploy' -and [int]$deployBreadcrumb.pid -eq $PID) `
         "部署工具面包屑必须是 mode=deploy 且 pid 为部署进程：$(Get-Content -Raw -LiteralPath $deployObserved)"
     Assert-True (-not [IO.File]::Exists((Join-Path $gateLive.StateRoot 'gate-holder.json'))) '部署工具释放锁前必须删除面包屑'
+    # 同源安装：已安装 shim 内联 gate holder lib 原文、不再 dot-source（fixture shim 旁没有 lib\）。
+    $installedShimText = [IO.File]::ReadAllText($gateLive.ShimPath, [Text.UTF8Encoding]::new($false))
+    $holderLibText = [IO.File]::ReadAllText((Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteGateHolder.ps1'), [Text.UTF8Encoding]::new($false))
+    Assert-True ($installedShimText.Contains($holderLibText.TrimEnd()) -and
+        -not $installedShimText.Contains("'lib\CodexSafeTreeDeleteGateHolder.ps1'")) '安装的 gate shim 必须内联同源 gate holder lib 且不再 dot-source'
     Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'gate-holder' -Scenario $gateStale -PreviousClosureSha256 ('0' * 64) | Out-Null
     Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'gate-holder' -Scenario $gateUnwritable -PreviousClosureSha256 ('0' * 64) | Out-Null
 
