@@ -131,15 +131,24 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
 无法承载这类探测；既有 Apply/Purge/Restore crash fixture 已建立同等先例。新增退出码或持锁
 断言应挂在既有 fixture 或 ProductionSmoke 上，不得另开生产入口。
 
+生产入口与主 fixture（`tests\Invoke-CodexSafeTreeDeleteFixture.ps1`）共用库内同一个 mode 分发
+`Invoke-CodexSafeTreeDeleteMode`（#74）：确认拒绝对象、参数校验与库函数调用只在这里维护，入口只给出
+各自的 policy / evidence 根，并负责输出与退出码。两个入口仍各自声明同一套 CLI 参数（Mode 的
+ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同时声明，分发逻辑只改一处。fixture 钩子
+按 mode 经 `-ModeArgumentsForTest` 追加，生产入口不传。CLI 合同一致与分发形状由
+`tests\Test-CodexSafeTreeDeleteModeDispatch.ps1` 钉住。
+
 ## 部署门与维护窗口（2026-08-27，#56 Wave A）
 
 宿主 wrapper 自 #56 起为 gate-aware shim（`scripts\invoke-codex-safe-tree-delete-gate-shim.ps1` 的受管安装）：每次调用在任何 dot-source 之前取得 current-user cross-session deployment mutex（名称内嵌 owner SID 命名空间实现用户隔离），检查固定 `D:\Codex\.codex\state\safe-tree-delete-deployment\maintenance.json`，并持锁到 child/本进程退出。marker 在场时新调用以可观察错误拒绝；abandoned marker 不被自动清除。
+
+等锁超时报告持锁者（#77）：持锁者（gate shim 与部署工具）取锁后在同一状态根原子写 `gate-holder.json` 面包屑、释放锁前删除。内容只有 ASCII 的 `pid/processStartUtc/mode/acquiredAtUtc`：shim 的 `mode` 只取自 `-Mode` 参数（缺失或不合规为 `unknown`），部署工具为 `deploy`；不记录目标路径或其它参数。面包屑写失败是有意降级，不阻塞调用；前持有者被杀（mutex abandoned）留下的残留由下一个获得者覆盖。shim 等锁超时的 JSON 保持 `ok=false`、`refusalReason=deployment-mutex-acquire-timeout`、exit 1 与 ASCII-only，追加 `holder:{pid,mode,acquiredAtUtc,heldSeconds,stale}`（PID 不存在或启动时间不符时 `stale=true`；面包屑缺失、不可读或格式不符时为 `{state:"unknown"}`）；部署工具等锁超时的消息保留 `deployment mutex acquire timeout` 前缀并追加 `holder=<同结构 JSON>`。写、读与 stale 判定只在 `scripts\lib\CodexSafeTreeDeleteGateHolder.ps1` 实现一次（后续 policy 维护工具复用同一文件）：仓库 shim 源只以一行 dot-source 引用它，部署工具安装时把这一行替换为同一 project root 下该 lib 的原文，所以已安装 shim 自包含，取锁前不加载任何仓库代码。该 lib 属于 source closure 固定清单。
 
 唯一部署 owner 是 `scripts\Deploy-CodexSafeTreeDelete.ps1`，只接受 `BootstrapGate | Deploy | RecoverRollback`，不复用业务 Mode，也不 commit/push。状态根固定为上述目录：`deployments/<deploymentId>/{00-intent.json, shim-backup.bin(+meta), phase-journal/, invocations/, final-receipt.json}` 与根级 marker。intent 为 create-only 且预绑定 `{deploymentId, ownerSid, previousClosureSha256, targetClosureSha256, shimBeforeSha256, shimTargetSha256}`；phase journal 为 create-only、前序 SHA 链接，顺序 `10 gate-bootstrap-started → 20 shim-cutover → 30 marker-active → 40 legacy-drained → 50 source-switch-started → 60 source-switched → 70 validation-passed → 80 complete`（或对应 `*-rollback-started/complete`），未知/重复/缺序/漂移均失败闭锁。
 
 `BootstrapGate` 只推进到 shim cutover 并以"部署者持锁时新 invocation 必须等待"证明 gate 生效；`Deploy` 消费同 deploymentId 的已认证 bootstrap，写 marker、legacy drain（按 executable+PID+starttime+commandline 枚举旧版 safe-delete 调用进程，等待两次稳定零清单）、source switch（校验 live closure 等于 intent.targetClosureSha256；仓库工作树内容不属部署工具可写面，回滚由版本控制完成，工具只做"已就位"认证）、validation（native default variant 加载 + 小树 Plan 走 C# walker）后完成并删除 marker。marker-presence 矩阵是 `RecoverRollback` 的唯一 selector：phase 10–20 marker 必须缺席；30–70/rollback-in-progress 必须在场且四字段（schemaVersion/deploymentId/runPath/intentSha256）匹配；`complete`/`rollback-complete` 时 marker present 则验证后删除，absent 则验证 terminal phase 与 live 现场后幂等补 final receipt；其它组合失败闭锁。手工删 marker、raw cache/source 替换或另写临时恢复命令均不构成恢复。
 
-`-StateRootForTest/-ShimPathForTest/-ProjectRootForTest/-MutexNameForTest/-StopAfterPhaseForTest` 是唯一测试 seam，仅进程内显式传参、生产调用不传递；部署测试（`tests\Test-CodexSafeTreeDeleteDeployment.ps1`）在 fixture state root/shim/mutex 上重放全矩阵且不触碰生产状态根。
+`-StateRootForTest/-ShimPathForTest/-ProjectRootForTest/-MutexNameForTest/-StopAfterPhaseForTest` 是唯一测试 seam，仅进程内显式传参、生产调用不传递；部署测试（`tests\Test-CodexSafeTreeDeleteDeployment.ps1`）在 fixture state root/shim/mutex 上重放全矩阵且不触碰生产状态根；其 S10 经 fixture project root（仓库 gate shim 源、gate holder lib 与替身 entry）安装 gate shim，验证等锁超时带 holder（存活、持锁者被杀后 `stale=true`、目录不可写时 `{state:"unknown"}` 且调用照常完成）以及部署工具超时消息带 holder。
 
 ## 控制面与状态机
 

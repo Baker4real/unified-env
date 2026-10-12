@@ -20,6 +20,7 @@ param(
     [object]$FixtureLeafRetryPolicy,
     [scriptblock]$FixtureLeafRetryElapsedMilliseconds,
     [scriptblock]$FixtureLeafRetryDelay,
+    [scriptblock]$FixtureAfterBatchHistoryScan,
     [switch]$Json,
     [Nullable[datetimeoffset]]$FixtureTrustedNowUtc,
     [Nullable[long]]$FixtureTrustedElapsedNowMilliseconds,
@@ -36,160 +37,79 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Resolve-TargetPathArguments {
-    param([string[]]$Values)
-
-    $items = @($Values)
-    if ($items.Count -eq 1 -and [string]$items[0] -match '::') {
-        $items = @(([string]$items[0]).Split([string[]]@('::'), [StringSplitOptions]::RemoveEmptyEntries))
-    }
-    return @($items)
-}
-
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $projectRoot 'scripts\lib\CodexHostSafety.ps1')
 . (Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDelete.ps1')
 
-$result = switch ($Mode) {
-    'Status' {
-        $statusArguments = @{
-            PolicyPath = $FixturePolicyPath
-            EvidenceRoot = $FixtureEvidenceRoot
-        }
-        if (-not [string]::IsNullOrWhiteSpace($FixtureCandidatePolicyPath)) {
-            $statusArguments.CandidatePolicyPath = $FixtureCandidatePolicyPath
-        }
-        if (-not [string]::IsNullOrWhiteSpace($FixtureApprovedCandidatePolicySha256)) {
-            $statusArguments.ApprovedCandidatePolicySha256 = $FixtureApprovedCandidatePolicySha256
-        }
-        Get-CodexSafeTreeDeleteStatus @statusArguments
-    }
-    'Restore' {
-        if (-not $ConfirmRestore) {
-            [pscustomobject][ordered]@{ restored = $false; refusalReason = 'confirm-restore-required' }
-            break
-        }
-        if ([string]::IsNullOrWhiteSpace($TransactionPath) -or
-            [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
-            throw 'Restore 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
-        }
-        Invoke-CodexSafeTreeDeleteRestore `
-            -TransactionPath $TransactionPath `
-            -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
-            -PolicyPath $FixturePolicyPath `
-            -EvidenceRoot $FixtureEvidenceRoot
-    }
-    'Archive' {
-        if (-not $ConfirmArchive) {
-            [pscustomobject][ordered]@{ archived = $false; refusalReason = 'confirm-archive-required' }
-            break
-        }
-        if ([string]::IsNullOrWhiteSpace($TransactionPath) -or
-            [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
-            throw 'Archive 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
-        }
-        Invoke-CodexSafeTreeDeleteArchive `
-            -TransactionPath $TransactionPath `
-            -ApprovedTransactionSha256 $ApprovedTransactionSha256 `
-            -EvidenceRoot $FixtureEvidenceRoot
-    }
-    'Plan' {
-        if ([string]::IsNullOrWhiteSpace($TargetPath) -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
-            throw 'Plan 模式要求 TargetPath 与 CapabilityRoot。'
-        }
-        $planArguments = @{
-            TargetPath = $TargetPath
-            CapabilityRoot = $CapabilityRoot
-            PolicyPath = $FixturePolicyPath
-            EvidenceRoot = $FixtureEvidenceRoot
-        }
-        if ($null -ne $FixtureFileSystemCapabilities) {
-            $planArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
-        }
-        New-CodexSafeTreeDeletePlan @planArguments
-    }
-    'Apply' {
-        if (-not $ConfirmApply) {
-            [pscustomobject][ordered]@{ quarantined = $false; refusalReason = 'confirm-apply-required' }
-            break
-        }
-        if ([string]::IsNullOrWhiteSpace($PlanPath) -or [string]::IsNullOrWhiteSpace($ApprovedPlanSha256)) {
-            throw 'Apply 模式要求 PlanPath 与 ApprovedPlanSha256。'
-        }
-        $applyArguments = @{
-            PlanPath = $PlanPath
-            ApprovedPlanSha256 = $ApprovedPlanSha256
-            PolicyPath = $FixturePolicyPath
-            EvidenceRoot = $FixtureEvidenceRoot
-            FailAfterRenameForTest = [bool]$FixtureFailAfterRename
-        }
-        if ($null -ne $FixtureFileSystemCapabilities) {
-            $applyArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
-        }
-        Invoke-CodexSafeTreeDeleteQuarantine @applyArguments
-    }
-    'Purge' {
-        if (-not $ConfirmPurge) {
-            [pscustomobject][ordered]@{ purged = $false; refusalReason = 'confirm-purge-required' }
-            break
-        }
-        if ([string]::IsNullOrWhiteSpace($TransactionPath) -or [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
-            throw 'Purge 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
-        }
-        $purgeArguments = @{
-            TransactionPath = $TransactionPath
-            ApprovedTransactionSha256 = $ApprovedTransactionSha256
-            PolicyPath = $FixturePolicyPath
-            EvidenceRoot = $FixtureEvidenceRoot
-            BeforePurgeMutexForTest = $FixtureBeforePurgeMutex
-            BeforeDirectoryTreeDeleteForTest = $FixtureBeforeDirectoryTreeDelete
-            DirectoryDeleteCheckpointForTest = $FixtureDirectoryDeleteCheckpoint
-            LeafDeleteFaultForTest = $FixtureLeafDeleteFault
-            TrustedTimeRestartAmbiguous = [bool]$FixtureTrustedTimeRestartAmbiguous
-            ReturnFailureMetrics = [bool]$Json
-        }
-        if ($null -ne $FixtureTrustedNowUtc) {
-            $purgeArguments.TrustedNowUtc = [datetimeoffset]$FixtureTrustedNowUtc
-        }
-        if ($null -ne $FixtureTrustedElapsedNowMilliseconds) {
-            $purgeArguments.TrustedElapsedNowMilliseconds = [long]$FixtureTrustedElapsedNowMilliseconds
-        }
-        if (-not [string]::IsNullOrWhiteSpace($FixtureTrustedBootSessionId)) {
-            $purgeArguments.TrustedBootSessionId = $FixtureTrustedBootSessionId
-        }
-        if ($null -ne $FixtureTrustedBootSessionSource) {
-            $purgeArguments.TrustedBootSessionSourceForTest = $FixtureTrustedBootSessionSource
-        }
-        if ($null -ne $FixtureLeafRetryPolicy) {
-            $purgeArguments.LeafRetryPolicyForTest = $FixtureLeafRetryPolicy
-        }
-        if ($null -ne $FixtureLeafRetryElapsedMilliseconds) {
-            $purgeArguments.LeafRetryElapsedMillisecondsForTest = $FixtureLeafRetryElapsedMilliseconds
-        }
-        if ($null -ne $FixtureLeafRetryDelay) {
-            $purgeArguments.LeafRetryDelayForTest = $FixtureLeafRetryDelay
-        }
-        if ($null -ne $FixtureFileSystemCapabilities) {
-            $purgeArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
-        }
-        Invoke-CodexSafeTreeDeletePurge @purgeArguments
-    }
-    'BatchPurge' {
-        if (-not $ConfirmApply -or -not $ConfirmPurge) {
-            [pscustomobject][ordered]@{ completed = $false; refusalReason = 'confirm-apply-and-purge-required' }
-            break
-        }
-        $resolvedTargets = @(Resolve-TargetPathArguments -Values $TargetPaths)
-        if ($resolvedTargets.Count -eq 0 -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
-            throw 'BatchPurge 模式要求 TargetPaths 与 CapabilityRoot。'
-        }
-        Invoke-CodexSafeTreeDeleteBatchPurge `
-            -TargetPaths $resolvedTargets `
-            -CapabilityRoot $CapabilityRoot `
-            -PolicyPath $FixturePolicyPath `
-            -EvidenceRoot $FixtureEvidenceRoot
-    }
+# 确认拒绝、参数校验与库函数调用都在共享分发 Invoke-CodexSafeTreeDeleteMode 里，与生产入口同一份。
+# 本入口只换上 fixture policy / evidence 根，并按 mode 追加 fixture 钩子。
+$statusTestArguments = @{}
+if (-not [string]::IsNullOrWhiteSpace($FixtureCandidatePolicyPath)) {
+    $statusTestArguments.CandidatePolicyPath = $FixtureCandidatePolicyPath
 }
+if (-not [string]::IsNullOrWhiteSpace($FixtureApprovedCandidatePolicySha256)) {
+    $statusTestArguments.ApprovedCandidatePolicySha256 = $FixtureApprovedCandidatePolicySha256
+}
+
+$planTestArguments = @{}
+if ($null -ne $FixtureFileSystemCapabilities) {
+    $planTestArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
+}
+
+$applyTestArguments = @{
+    FailAfterRenameForTest = [bool]$FixtureFailAfterRename
+}
+if ($null -ne $FixtureFileSystemCapabilities) {
+    $applyTestArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
+}
+
+$purgeTestArguments = @{
+    BeforePurgeMutexForTest = $FixtureBeforePurgeMutex
+    BeforeDirectoryTreeDeleteForTest = $FixtureBeforeDirectoryTreeDelete
+    DirectoryDeleteCheckpointForTest = $FixtureDirectoryDeleteCheckpoint
+    LeafDeleteFaultForTest = $FixtureLeafDeleteFault
+    TrustedTimeRestartAmbiguous = [bool]$FixtureTrustedTimeRestartAmbiguous
+}
+if ($null -ne $FixtureTrustedNowUtc) {
+    $purgeTestArguments.TrustedNowUtc = [datetimeoffset]$FixtureTrustedNowUtc
+}
+if ($null -ne $FixtureTrustedElapsedNowMilliseconds) {
+    $purgeTestArguments.TrustedElapsedNowMilliseconds = [long]$FixtureTrustedElapsedNowMilliseconds
+}
+if (-not [string]::IsNullOrWhiteSpace($FixtureTrustedBootSessionId)) {
+    $purgeTestArguments.TrustedBootSessionId = $FixtureTrustedBootSessionId
+}
+if ($null -ne $FixtureTrustedBootSessionSource) {
+    $purgeTestArguments.TrustedBootSessionSourceForTest = $FixtureTrustedBootSessionSource
+}
+if ($null -ne $FixtureLeafRetryPolicy) {
+    $purgeTestArguments.LeafRetryPolicyForTest = $FixtureLeafRetryPolicy
+}
+if ($null -ne $FixtureLeafRetryElapsedMilliseconds) {
+    $purgeTestArguments.LeafRetryElapsedMillisecondsForTest = $FixtureLeafRetryElapsedMilliseconds
+}
+if ($null -ne $FixtureLeafRetryDelay) {
+    $purgeTestArguments.LeafRetryDelayForTest = $FixtureLeafRetryDelay
+}
+if ($null -ne $FixtureFileSystemCapabilities) {
+    $purgeTestArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
+}
+
+$batchPurgeTestArguments = @{
+    AfterBatchHistoryScanForTest = $FixtureAfterBatchHistoryScan
+}
+
+$result = Invoke-CodexSafeTreeDeleteMode `
+    -EntryParameters $PSBoundParameters `
+    -PolicyPath $FixturePolicyPath `
+    -EvidenceRoot $FixtureEvidenceRoot `
+    -ModeArgumentsForTest @{
+        Status = $statusTestArguments
+        Plan = $planTestArguments
+        Apply = $applyTestArguments
+        Purge = $purgeTestArguments
+        BatchPurge = $batchPurgeTestArguments
+    }
 
 if ($Json) {
     $result | ConvertTo-Json -Depth 12 -Compress

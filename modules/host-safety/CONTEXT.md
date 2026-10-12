@@ -35,6 +35,13 @@ Status 的 C# fast scan 只裁决 producer 规范形态输入，其余回退 `Re
 
 处理 Status 性能、approved-plan receipt 或部署验收时，读性能 spec 的「Status 冷启动与大 plan 回退（#49 / #58）」节：该处维护 receipt 复用、live plan/policy 重读边界、#58 的 `DONE_WITH_CONCERNS` 验收状态和剩余限制。Apply/Purge 的 `SessionHashCache` 不属于此优化；源码发布、宿主委托路径和正式部署验收分别核验。
 
+BatchPurge 历史查找（spec #73「实现决策 › BatchPurge 单次历史扫描」）默认走 fast 模式：目标去重后、处理第一个目标前整批只扫一次历史，得到只在本次调用内存中有效的「目标（OrdinalIgnoreCase，不做 Unicode 规范化）→ 候选」索引；处理到某个目标时，先对它的候选重做完整参考认证并要求 SHA-256 与扫描时一致，再进入原有分支（多匹配报错、schema 非 2/3 skipAction、3 次存在性探测和隔离目录检查的时机都不变）。`CODEX_SAFE_TREE_DELETE_BATCH_HISTORY_SCAN=0` 退回逐目标参考查找（仅字符串 '0' 生效）。
+
+- **等价前提**：fast 与 reference 等价，依赖 gate 的独占串行，即批处理期间只有本调用写 evidence；本批写入的记录只指向本批已去重的目标，不会成为其他目标的候选。gate 若改成共享锁或允许并发写 evidence，必须先重新论证这个前提，再保留 fast 模式。
+- **失败语义**：扫描阶段任何异常使全批 skipped-target-error、`completed=false`；处理阶段候选重新认证失败视为扫描后历史被外部改动，当前及剩余目标 skipped-target-error，已完成目标保留结果。两种模式只在一种组合下错误文本可能不同、动作相同：reference 模式下某目标自身匹配记录的裁决异常若先于全局坏记录被枚举，该目标 `error` 取前者，fast 模式取扫描失败消息。
+- **`historyScan` 结果字段**：`mode`、`scanCount`、`enumeratedFiles`、`canonicalFiles`、`fallbackFiles`、`excludedByPrefilter`、`fullyAuthenticated`、`elapsedMs`，失败时另有 `failure`（`phase` 为 `scan` 或 `reauthentication`）。fast 模式 `scanCount` 恒为 1；reference 模式等于目标数，各计数为逐目标累计。C# 预筛属于 #78，落地前扫描阶段逐文件完整认证、`excludedByPrefilter` 恒为 0，`canonicalFiles` 只按位置（run 目录第一层的 `transaction.json`）分类；`fullyAuthenticated` 不含处理阶段的重新认证。
+- **测试钩子**：扫描后篡改候选的钩子只在 fixture 入口暴露（`-FixtureAfterBatchHistoryScan`），只在 fast 模式扫描成功后调用；生产入口没有可达路径。回归套件是 `tests/Test-CodexSafeTreeDeleteBatchHistoryScan.ps1`。
+
 ## 测试
 
 ```powershell
