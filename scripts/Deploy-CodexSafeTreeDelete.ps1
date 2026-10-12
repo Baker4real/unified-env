@@ -64,6 +64,7 @@ if ($DeploymentId -cnotmatch '^[a-z0-9][a-z0-9-]{0,63}$') {
 }
 
 . (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDeleteClosure.ps1')
+. (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDeleteGateHolder.ps1')
 
 $deploymentsRoot = Join-Path $stateRoot 'deployments'
 $runPath = Join-Path $deploymentsRoot $DeploymentId
@@ -207,11 +208,25 @@ function Assert-DeploymentIdentity {
 }
 
 function Get-GateShimContent {
-    # 测试 seam：把 shim 的生产常量重写为测试值；生产安装逐字节使用仓库 gate shim。
+    # 安装内容 = 仓库 gate shim，其中唯一一行 gate holder lib dot-source 替换为同一 project
+    # root 下该 lib 的原文（#77：已安装 shim 自包含，取锁前不加载任何仓库代码；面包屑的写、
+    # 读与 stale 判定仍只有 scripts\lib\CodexSafeTreeDeleteGateHolder.ps1 一份源码）。生产
+    # 安装除此内联外不做其它改写；测试 seam 再把 shim 的生产常量重写为测试值。
+    $utf8 = [Text.UTF8Encoding]::new($false)
     $shimSource = Join-Path $projectRoot 'scripts\invoke-codex-safe-tree-delete-gate-shim.ps1'
-    $content = [IO.File]::ReadAllText($shimSource, [Text.UTF8Encoding]::new($false))
+    $holderLibSource = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteGateHolder.ps1'
+    $content = [IO.File]::ReadAllText($shimSource, $utf8)
+    $holderInclude = ". (Join-Path `$PSScriptRoot 'lib\CodexSafeTreeDeleteGateHolder.ps1')"
+    $includeCount = [regex]::Matches($content, [regex]::Escape($holderInclude)).Count
+    if ($includeCount -ne 1) {
+        throw "gate shim 必须恰好含一行 gate holder lib dot-source（实际 $includeCount 处），拒绝安装。"
+    }
+    $content = $content.Replace($holderInclude, (
+        "# >>> inlined: scripts/lib/CodexSafeTreeDeleteGateHolder.ps1`n" +
+        [IO.File]::ReadAllText($holderLibSource, $utf8).TrimEnd() +
+        "`n# <<< inlined: scripts/lib/CodexSafeTreeDeleteGateHolder.ps1"))
     if (-not $testSeamActive) {
-        return [Text.UTF8Encoding]::new($false).GetBytes($content)
+        return $utf8.GetBytes($content)
     }
     $content = $content.Replace(
         "'D:\Codex\.codex\state\safe-tree-delete-deployment'",
@@ -372,9 +387,14 @@ function Stop-IfRequested {
 [void][IO.Directory]::CreateDirectory($stateRoot)
 $mutex = Open-DeploymentMutex -Name (Get-DeploymentMutexName -BaseName $mutexName)
 if (-not $mutex.WaitOne([TimeSpan]::FromMinutes(5))) {
-    throw 'deployment mutex acquire timeout。'
+    # #77：超时消息前缀不变，追加持锁者（ASCII JSON；读不到时为 {"state":"unknown"}）。
+    throw ('deployment mutex acquire timeout。holder={0}' -f (
+        (Read-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot) |
+            ConvertTo-Json -Compress -Depth 4 -EscapeHandling EscapeNonAscii))
 }
 try {
+    # #77：持锁期间留 mode=deploy 面包屑；写失败是有意降级，不阻塞部署。
+    [void](Write-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot -Mode 'deploy')
     Write-InvocationReceipt
     $state = Get-CertifiedState
 
@@ -662,6 +682,7 @@ Remove-Item -LiteralPath $root -Recurse -Force
         }
     }
 } finally {
+    Remove-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot
     [void]$mutex.ReleaseMutex()
     $mutex.Dispose()
 }

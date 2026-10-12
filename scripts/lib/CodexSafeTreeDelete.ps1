@@ -8749,23 +8749,120 @@ function Invoke-CodexSafeTreeDeletePurge {
     }
 }
 
-function Find-CodexSafeTreeDeleteRecoverableTransaction {
+function Test-CodexSafeTreeDeleteBatchHistoryScanEnabled {
+    # kill switch：只有字符串 '0' 生效，退回逐目标参考查找（Find-CodexSafeTreeDeleteRecoverableTransaction）。
+    return $env:CODEX_SAFE_TREE_DELETE_BATCH_HISTORY_SCAN -cne '0'
+}
+
+function New-CodexSafeTreeDeleteHistoryScanMetrics {
+    param([Parameter(Mandatory)][ValidateSet('fast', 'reference')][string]$Mode)
+
+    # BatchPurge 结果的 historyScan 字段。canonicalFiles 只按位置分类（run 目录第一层的
+    # transaction.json），是 C# 预筛（#78）可裁决的范围；fallbackFiles 是其余位置，永远走
+    # 参考认证链。本实现不做预筛：excludedByPrefilter 恒为 0，扫描阶段每个文件都完整认证。
+    # fullyAuthenticated 只计扫描阶段，不含处理阶段的候选重新认证。reference 模式各计数为
+    # 逐目标扫描的累计值。
+    return [pscustomobject][ordered]@{
+        mode = $Mode
+        scanCount = 0L
+        enumeratedFiles = 0L
+        canonicalFiles = 0L
+        fallbackFiles = 0L
+        excludedByPrefilter = 0L
+        fullyAuthenticated = 0L
+        elapsedMs = 0L
+    }
+}
+
+function Add-CodexSafeTreeDeleteHistoryScanEnumeratedFile {
     param(
-        [Parameter(Mandatory)][string]$TargetPath,
-        [Parameter(Mandatory)][string]$CapabilityRoot,
-        [Parameter(Mandatory)][string]$PolicyPath,
-        [Parameter(Mandatory)][string]$EvidenceRoot
+        [Parameter(Mandatory)][object]$Metrics,
+        [Parameter(Mandatory)][string]$FullEvidenceRoot,
+        [Parameter(Mandatory)][string]$TransactionPath
     )
 
-    $policy = Read-CodexSafeTreeDeletePolicy -PolicyPath $PolicyPath
-    $target = Resolve-CodexSafeTreeDeleteTarget `
-        -TargetPath $TargetPath `
-        -CapabilityRoot $CapabilityRoot `
-        -Policy $policy `
-        -RequireExisting:$false
-    $fullEvidenceRoot = Initialize-CodexSafeTreeDeleteEvidenceRoot -EvidenceRoot $EvidenceRoot
-    $matches = [Collections.Generic.List[object]]::new()
-    $unsupportedMatches = [Collections.Generic.List[object]]::new()
+    $Metrics.enumeratedFiles = [long]$Metrics.enumeratedFiles + 1L
+    $rootPrefix = $FullEvidenceRoot.TrimEnd('\', '/')
+    $canonical = $false
+    if ($TransactionPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $relative = $TransactionPath.Substring($rootPrefix.Length)
+        $segments = @($relative.Split([char[]]@('\', '/'), [StringSplitOptions]::RemoveEmptyEntries))
+        $canonical = $segments.Count -eq 2
+    }
+    if ($canonical) {
+        $Metrics.canonicalFiles = [long]$Metrics.canonicalFiles + 1L
+    } else {
+        $Metrics.fallbackFiles = [long]$Metrics.fallbackFiles + 1L
+    }
+}
+
+function Set-CodexSafeTreeDeleteHistoryScanFailure {
+    param(
+        [Parameter(Mandatory)][object]$Metrics,
+        [Parameter(Mandatory)][ValidateSet('scan', 'reauthentication')][string]$Phase,
+        [AllowNull()][string]$TargetPath,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Message
+    )
+
+    # 只记录首个失败；后续失败不覆盖。
+    if ($null -ne $Metrics.PSObject.Properties['failure']) { return }
+    $Metrics | Add-Member -NotePropertyName failure -NotePropertyValue ([pscustomobject][ordered]@{
+        phase = $Phase
+        targetPath = if ([string]::IsNullOrEmpty($TargetPath)) { $null } else { $TargetPath }
+        message = $Message
+    })
+}
+
+function Read-CodexSafeTreeDeleteRecoverableHistoryRecord {
+    param(
+        [Parameter(Mandatory)][string]$TransactionPath,
+        [Parameter(Mandatory)][string]$FullEvidenceRoot
+    )
+
+    # 历史 transaction 的完整参考认证链：D 盘路径、capability 路径链（含 reparse 祖先）、
+    # 句柄绑定读取与 SHA、严格 JSON、解析。逐目标参考查找、整批扫描与处理阶段的候选重新
+    # 认证共用本函数，错误信息（-Name）因此在两种模式下逐字相同。
+    $transactionFullPath = Assert-CodexHookDPath -Value $TransactionPath -Name 'safe-delete recover transaction path'
+    [void](Assert-CodexHookCapabilityPath `
+        -Path $transactionFullPath `
+        -CapabilityRoot $FullEvidenceRoot `
+        -AllowedExactPaths @($transactionFullPath) `
+        -Name 'safe-delete recover transaction')
+    $snapshot = Read-CodexHookSafeUtf8FileSnapshot `
+        -Path $transactionFullPath `
+        -Name 'safe-delete recover transaction' `
+        -AllowedExactPaths @($transactionFullPath)
+    Assert-CodexHookStrictJsonText -JsonText $snapshot.text
+    $transaction = $snapshot.text | ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
+    return [pscustomobject][ordered]@{
+        transactionPath = $transactionFullPath
+        sha256 = [string]$snapshot.sha256
+        status = [string]$transaction.status
+        document = $transaction
+    }
+}
+
+function New-CodexSafeTreeDeleteRecoverableAdjudication {
+    param([Parameter(Mandatory)][string]$TargetPath)
+
+    return [pscustomobject][ordered]@{
+        targetPath = $TargetPath
+        supportedMatches = [Collections.Generic.List[object]]::new()
+        unsupportedMatches = [Collections.Generic.List[object]]::new()
+        targetPresentAfterRecheck = $null
+    }
+}
+
+function Add-CodexSafeTreeDeleteRecoverableCandidate {
+    param(
+        [Parameter(Mandatory)][object]$Adjudication,
+        [Parameter(Mandatory)][object]$Record
+    )
+
+    # 调用方已确认：status 属于 prepared/quarantined/purging，且 targetPath 与目标
+    # OrdinalIgnoreCase 相等（不做 Unicode 规范化）。
+    $transaction = $Record.document
+    $status = [string]$Record.status
     # 目标存在性判定只做一次并缓存（lazy 到首个路径匹配的事务才求值）：
     # 与 BatchPurge already-absent 分支同理，Directory.Exists 的
     # GetFileAttributesEx 瞬态假阴性会把 stale quarantined/purging 事务误判
@@ -8773,51 +8870,38 @@ function Find-CodexSafeTreeDeleteRecoverableTransaction {
     # 命中即真，未命中走防御性复核；不在循环内逐事务重判（evidence 事务数
     # 大会叠加 N×400ms），也不在扫描前无条件复核（无匹配事务的纯缺席目标
     # 不必支付该延迟）。
-    $targetPresentAfterRecheck = $null
-    foreach ($transactionPath in [IO.Directory]::EnumerateFiles($fullEvidenceRoot, 'transaction.json', [IO.SearchOption]::AllDirectories)) {
-        $transactionFullPath = Assert-CodexHookDPath -Value $transactionPath -Name 'safe-delete recover transaction path'
-        [void](Assert-CodexHookCapabilityPath `
-            -Path $transactionFullPath `
-            -CapabilityRoot $fullEvidenceRoot `
-            -AllowedExactPaths @($transactionFullPath) `
-            -Name 'safe-delete recover transaction')
-        $snapshot = Read-CodexHookSafeUtf8FileSnapshot `
-            -Path $transactionFullPath `
-            -Name 'safe-delete recover transaction' `
-            -AllowedExactPaths @($transactionFullPath)
-        Assert-CodexHookStrictJsonText -JsonText $snapshot.text
-        $transaction = $snapshot.text | ConvertFrom-Json -Depth 32 -DateKind String -ErrorAction Stop
-        $status = [string]$transaction.status
-        if ($status -cnotin @('prepared', 'quarantined', 'purging')) { continue }
-        if (-not (Test-CodexSafeTreeDeletePathEqual `
-                -Left ([string]$transaction.targetPath) `
-                -Right ([string]$target.targetPath))) { continue }
-        if ($null -eq $targetPresentAfterRecheck) {
-            $targetPresentAfterRecheck = [IO.Directory]::Exists($target.targetPath) -or
-                (Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck `
-                    -TargetPath ([string]$target.targetPath))
-        }
-        if ($targetPresentAfterRecheck) { continue }
-        $quarantineExists = [IO.Directory]::Exists([string]$transaction.quarantinePath) -and
-            -not [IO.File]::Exists([string]$transaction.quarantinePath)
-        if (-not $quarantineExists -and $status -cne 'purging') { continue }
-        if ($transaction.schemaVersion -isnot [long] -or
-            [long]$transaction.schemaVersion -notin @(2L, 3L)) {
-            $unsupportedMatches.Add([pscustomobject][ordered]@{
-                transactionPath = $transactionFullPath
-                schemaVersion = $transaction.schemaVersion
-            })
-            continue
-        }
-        $matches.Add([pscustomobject][ordered]@{
-            transactionPath = $transactionFullPath
-            transactionSha256 = $snapshot.sha256
-            quarantinePath = [string]$transaction.quarantinePath
-            updatedAtUtc = [string]$transaction.updatedAtUtc
-        })
+    if ($null -eq $Adjudication.targetPresentAfterRecheck) {
+        $Adjudication.targetPresentAfterRecheck = [IO.Directory]::Exists([string]$Adjudication.targetPath) -or
+            (Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck `
+                -TargetPath ([string]$Adjudication.targetPath))
     }
+    if ($Adjudication.targetPresentAfterRecheck) { return }
+    $quarantineExists = [IO.Directory]::Exists([string]$transaction.quarantinePath) -and
+        -not [IO.File]::Exists([string]$transaction.quarantinePath)
+    if (-not $quarantineExists -and $status -cne 'purging') { return }
+    if ($transaction.schemaVersion -isnot [long] -or
+        [long]$transaction.schemaVersion -notin @(2L, 3L)) {
+        $Adjudication.unsupportedMatches.Add([pscustomobject][ordered]@{
+            transactionPath = [string]$Record.transactionPath
+            schemaVersion = $transaction.schemaVersion
+        })
+        return
+    }
+    $Adjudication.supportedMatches.Add([pscustomobject][ordered]@{
+        transactionPath = [string]$Record.transactionPath
+        transactionSha256 = [string]$Record.sha256
+        quarantinePath = [string]$transaction.quarantinePath
+        updatedAtUtc = [string]$transaction.updatedAtUtc
+    })
+}
+
+function Complete-CodexSafeTreeDeleteRecoverableAdjudication {
+    param([Parameter(Mandatory)][object]$Adjudication)
+
+    $supportedMatches = $Adjudication.supportedMatches
+    $unsupportedMatches = $Adjudication.unsupportedMatches
     if ($unsupportedMatches.Count -ne 0) {
-        $hasSupportedMatch = $matches.Count -ne 0
+        $hasSupportedMatch = $supportedMatches.Count -ne 0
         return [pscustomobject][ordered]@{
             transactionPath = [string]$unsupportedMatches[0].transactionPath
             transactionSha256 = $null
@@ -8833,13 +8917,157 @@ function Find-CodexSafeTreeDeleteRecoverableTransaction {
                 'transaction-schema-unsupported'
             }
             schemaVersion = $unsupportedMatches[0].schemaVersion
-            supportedTransactionCount = $matches.Count
+            supportedTransactionCount = $supportedMatches.Count
             unsupportedTransactionCount = $unsupportedMatches.Count
         }
     }
-    if ($matches.Count -gt 1) { throw 'safe-delete recoverable transaction 不唯一。' }
-    if ($matches.Count -eq 0) { return $null }
-    return $matches[0]
+    if ($supportedMatches.Count -gt 1) { throw 'safe-delete recoverable transaction 不唯一。' }
+    if ($supportedMatches.Count -eq 0) { return $null }
+    return $supportedMatches[0]
+}
+
+function Get-CodexSafeTreeDeleteRecoverableTransactionCandidates {
+    param(
+        [Parameter(Mandatory)][string]$FullEvidenceRoot,
+        [Parameter(Mandatory)][string[]]$TargetPaths,
+        [Parameter(Mandatory)][object]$Metrics
+    )
+
+    # BatchPurge 整批一次的历史扫描：产出只在本次调用内存中有效的索引
+    # 目标（OrdinalIgnoreCase，不做 Unicode 规范化）→ 候选记录（保持枚举顺序）。
+    # 每个文件的认证、status 过滤与 targetPath 比较和逐目标参考查找逐字相同；
+    # 任何异常都向上抛出，由调用方按「扫描阶段失败」处理整批。
+    $candidates = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($targetPath in @($TargetPaths)) {
+        $candidates[$targetPath] = [Collections.Generic.List[object]]::new()
+    }
+    $Metrics.scanCount = [long]$Metrics.scanCount + 1L
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        foreach ($transactionPath in [IO.Directory]::EnumerateFiles($FullEvidenceRoot, 'transaction.json', [IO.SearchOption]::AllDirectories)) {
+            Add-CodexSafeTreeDeleteHistoryScanEnumeratedFile `
+                -Metrics $Metrics `
+                -FullEvidenceRoot $FullEvidenceRoot `
+                -TransactionPath $transactionPath
+            $record = Read-CodexSafeTreeDeleteRecoverableHistoryRecord `
+                -TransactionPath $transactionPath `
+                -FullEvidenceRoot $FullEvidenceRoot
+            $Metrics.fullyAuthenticated = [long]$Metrics.fullyAuthenticated + 1L
+            if ($record.status -cnotin @('prepared', 'quarantined', 'purging')) { continue }
+            foreach ($targetPath in @($TargetPaths)) {
+                if (Test-CodexSafeTreeDeletePathEqual `
+                        -Left ([string]$record.document.targetPath) `
+                        -Right $targetPath) {
+                    $candidates[$targetPath].Add($record)
+                    break
+                }
+            }
+        }
+    } finally {
+        $watch.Stop()
+        $Metrics.elapsedMs = [long]$Metrics.elapsedMs + [long]$watch.ElapsedMilliseconds
+    }
+    return , $candidates
+}
+
+function Confirm-CodexSafeTreeDeleteRecoverableTransactionCandidates {
+    param(
+        [Parameter(Mandatory)][string]$FullEvidenceRoot,
+        [Parameter(Mandatory)][AllowEmptyCollection()][Collections.Generic.List[object]]$Candidates
+    )
+
+    # 处理到目标时的候选重新认证：完整参考认证链再走一遍，并要求字节与扫描时相同
+    # （SHA-256 一致）。任何异常或 SHA 不一致都向上抛出，由调用方视为「扫描后历史被
+    # 外部改动」。
+    $confirmed = [Collections.Generic.List[object]]::new()
+    foreach ($candidate in $Candidates) {
+        $record = Read-CodexSafeTreeDeleteRecoverableHistoryRecord `
+            -TransactionPath ([string]$candidate.transactionPath) `
+            -FullEvidenceRoot $FullEvidenceRoot
+        if ([string]$record.sha256 -cne [string]$candidate.sha256) {
+            throw "safe-delete BatchPurge 历史候选内容在扫描后发生变化：$([string]$record.transactionPath)"
+        }
+        $confirmed.Add($record)
+    }
+    return , $confirmed
+}
+
+function Resolve-CodexSafeTreeDeleteRecoverableTransactionFromCandidates {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][AllowEmptyCollection()][Collections.Generic.List[object]]$Candidates
+    )
+
+    # 与逐目标参考查找相同的裁决步骤与时机：目标存在性复查与隔离目录存在性检查都在
+    # 处理到本目标时才执行。
+    $adjudication = New-CodexSafeTreeDeleteRecoverableAdjudication -TargetPath $TargetPath
+    foreach ($record in $Candidates) {
+        Add-CodexSafeTreeDeleteRecoverableCandidate -Adjudication $adjudication -Record $record
+    }
+    return Complete-CodexSafeTreeDeleteRecoverableAdjudication -Adjudication $adjudication
+}
+
+function Find-CodexSafeTreeDeleteRecoverableTransaction {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][string]$CapabilityRoot,
+        [Parameter(Mandatory)][string]$PolicyPath,
+        [Parameter(Mandatory)][string]$EvidenceRoot,
+        [AllowNull()][object]$HistoryScanMetrics
+    )
+
+    # 逐目标参考查找（kill switch 生效时 BatchPurge 的行为）：每次调用完整扫描一遍历史，
+    # 匹配记录在枚举过程中就地裁决。
+    $policy = Read-CodexSafeTreeDeletePolicy -PolicyPath $PolicyPath
+    $target = Resolve-CodexSafeTreeDeleteTarget `
+        -TargetPath $TargetPath `
+        -CapabilityRoot $CapabilityRoot `
+        -Policy $policy `
+        -RequireExisting:$false
+    $fullEvidenceRoot = Initialize-CodexSafeTreeDeleteEvidenceRoot -EvidenceRoot $EvidenceRoot
+    $metrics = if ($null -ne $HistoryScanMetrics) {
+        $HistoryScanMetrics
+    } else {
+        New-CodexSafeTreeDeleteHistoryScanMetrics -Mode 'reference'
+    }
+    $adjudication = New-CodexSafeTreeDeleteRecoverableAdjudication -TargetPath ([string]$target.targetPath)
+    $metrics.scanCount = [long]$metrics.scanCount + 1L
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    # 只有扫描步骤（枚举、认证、status/targetPath 过滤）的异常记为 historyScan.failure；
+    # 匹配记录的裁决异常（例如不唯一）属于目标结果，不记为扫描失败。
+    $inScanStep = $true
+    try {
+        foreach ($transactionPath in [IO.Directory]::EnumerateFiles($fullEvidenceRoot, 'transaction.json', [IO.SearchOption]::AllDirectories)) {
+            Add-CodexSafeTreeDeleteHistoryScanEnumeratedFile `
+                -Metrics $metrics `
+                -FullEvidenceRoot $fullEvidenceRoot `
+                -TransactionPath $transactionPath
+            $record = Read-CodexSafeTreeDeleteRecoverableHistoryRecord `
+                -TransactionPath $transactionPath `
+                -FullEvidenceRoot $fullEvidenceRoot
+            $metrics.fullyAuthenticated = [long]$metrics.fullyAuthenticated + 1L
+            if ($record.status -cnotin @('prepared', 'quarantined', 'purging')) { continue }
+            if (-not (Test-CodexSafeTreeDeletePathEqual `
+                    -Left ([string]$record.document.targetPath) `
+                    -Right ([string]$target.targetPath))) { continue }
+            $inScanStep = $false
+            Add-CodexSafeTreeDeleteRecoverableCandidate -Adjudication $adjudication -Record $record
+            $inScanStep = $true
+        }
+    } catch {
+        if ($inScanStep) {
+            Set-CodexSafeTreeDeleteHistoryScanFailure `
+                -Metrics $metrics `
+                -Phase 'scan' `
+                -TargetPath ([string]$target.targetPath) `
+                -Message ([string]$_.Exception.Message)
+        }
+        throw
+    } finally {
+        $watch.Stop()
+        $metrics.elapsedMs = [long]$metrics.elapsedMs + [long]$watch.ElapsedMilliseconds
+    }
+    return Complete-CodexSafeTreeDeleteRecoverableAdjudication -Adjudication $adjudication
 }
 
 function New-CodexSafeTreeDeleteProducerLease {
@@ -8935,12 +9163,31 @@ function Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck {
     return $false
 }
 
+function New-CodexSafeTreeDeleteBatchTargetSkippedResult {
+    param(
+        [Parameter(Mandatory)][string]$TargetPath,
+        [Parameter(Mandatory)][string]$Message
+    )
+
+    return [pscustomobject][ordered]@{
+        targetPath = $TargetPath
+        action = 'skipped-target-error'
+        reason = 'target-operation-failed'
+        error = $Message
+        purged = $false
+        transactionPath = $null
+    }
+}
+
 function Invoke-CodexSafeTreeDeleteBatchPurge {
     param(
         [Parameter(Mandatory)][string[]]$TargetPaths,
         [Parameter(Mandatory)][string]$CapabilityRoot,
         [Parameter(Mandatory)][string]$PolicyPath,
-        [Parameter(Mandatory)][string]$EvidenceRoot
+        [Parameter(Mandatory)][string]$EvidenceRoot,
+        # 只供 fixture 入口注入：fast 模式扫描成功后、处理第一个目标前调用，参数是
+        # {targetPaths, candidates[{targetPath, transactionPath}]}。生产入口不传。
+        [scriptblock]$AfterBatchHistoryScanForTest
     )
 
     $policy = Read-CodexSafeTreeDeletePolicy -PolicyPath $PolicyPath
@@ -8968,19 +9215,109 @@ function Invoke-CodexSafeTreeDeleteBatchPurge {
         }
         $canonicalTargets.Add([string]$target.targetPath)
     }
-    [void](Initialize-CodexSafeTreeDeleteEvidenceRoot -EvidenceRoot $EvidenceRoot)
+    $fullEvidenceRoot = Initialize-CodexSafeTreeDeleteEvidenceRoot -EvidenceRoot $EvidenceRoot
+
+    # 历史查找的两种方式（结果除 historyScan 外逐字段相同）：
+    # - fast（默认）：目标去重后、处理第一个目标前整批只扫一次历史，得到只在本次调用内存中
+    #   有效的「目标 → 候选记录」索引；处理到某个目标时，先对它的候选做完整参考认证并要求
+    #   字节与扫描时相同，再按与参考查找相同的步骤裁决。
+    # - reference（CODEX_SAFE_TREE_DELETE_BATCH_HISTORY_SCAN='0'）：逐目标调用
+    #   Find-CodexSafeTreeDeleteRecoverableTransaction，每个目标各扫一遍历史（改造前的行为）。
+    # 前提：两种方式等价，依赖 safe-delete gate 的独占串行，即批处理期间只有本调用会写
+    # evidence。本批自己写入的记录 targetPath 都是本批某个目标，而目标已按 OrdinalIgnoreCase
+    # 去重，所以这些记录不会成为其他目标的候选；本批对候选的唯一改动是处理该目标时 Purge
+    # 改写它自己的 transaction，此后不再查找该目标。gate 若改成共享锁或允许并发写入
+    # evidence，必须先重新论证这个前提，再保留 fast 模式。
+    $fastHistoryScan = Test-CodexSafeTreeDeleteBatchHistoryScanEnabled
+    $historyScan = New-CodexSafeTreeDeleteHistoryScanMetrics `
+        -Mode $(if ($fastHistoryScan) { 'fast' } else { 'reference' })
+    $candidateIndex = $null
+    $historyScanFailureMessage = $null
+    if ($fastHistoryScan) {
+        try {
+            $candidateIndex = Get-CodexSafeTreeDeleteRecoverableTransactionCandidates `
+                -FullEvidenceRoot $fullEvidenceRoot `
+                -TargetPaths @($canonicalTargets) `
+                -Metrics $historyScan
+        } catch {
+            # 扫描阶段任何异常（含候选首次认证失败）：本批每个目标都 skipped-target-error。
+            $historyScanFailureMessage = [string]$_.Exception.Message
+            Set-CodexSafeTreeDeleteHistoryScanFailure `
+                -Metrics $historyScan `
+                -Phase 'scan' `
+                -TargetPath $null `
+                -Message $historyScanFailureMessage
+        }
+        if ($null -eq $historyScanFailureMessage -and $null -ne $AfterBatchHistoryScanForTest) {
+            $hookCandidates = [Collections.Generic.List[object]]::new()
+            foreach ($targetPath in @($canonicalTargets)) {
+                foreach ($candidate in $candidateIndex[$targetPath]) {
+                    $hookCandidates.Add([pscustomobject][ordered]@{
+                        targetPath = $targetPath
+                        transactionPath = [string]$candidate.transactionPath
+                    })
+                }
+            }
+            & $AfterBatchHistoryScanForTest ([pscustomobject][ordered]@{
+                targetPaths = @($canonicalTargets)
+                candidates = @($hookCandidates)
+            })
+        }
+    }
 
     $results = [Collections.Generic.List[object]]::new()
+    $historyInvalidatedMessage = $null
     foreach ($targetPath in @($canonicalTargets)) {
+        if ($null -ne $historyScanFailureMessage) {
+            $results.Add((New-CodexSafeTreeDeleteBatchTargetSkippedResult `
+                -TargetPath $targetPath `
+                -Message $historyScanFailureMessage))
+            continue
+        }
+        if ($null -ne $historyInvalidatedMessage) {
+            $results.Add((New-CodexSafeTreeDeleteBatchTargetSkippedResult `
+                -TargetPath $targetPath `
+                -Message $historyInvalidatedMessage))
+            continue
+        }
+        $confirmedCandidates = $null
+        if ($fastHistoryScan) {
+            try {
+                $confirmedCandidates = Confirm-CodexSafeTreeDeleteRecoverableTransactionCandidates `
+                    -FullEvidenceRoot $fullEvidenceRoot `
+                    -Candidates $candidateIndex[$targetPath]
+            } catch {
+                # 候选重新认证失败：视为扫描后历史被外部改动，当前目标和剩余目标全部
+                # skipped-target-error；已完成目标的结果保持不变。
+                $historyInvalidatedMessage =
+                    "safe-delete BatchPurge 历史候选重新认证失败，视为扫描后历史被外部改动：$([string]$_.Exception.Message)"
+                Set-CodexSafeTreeDeleteHistoryScanFailure `
+                    -Metrics $historyScan `
+                    -Phase 'reauthentication' `
+                    -TargetPath $targetPath `
+                    -Message $historyInvalidatedMessage
+                $results.Add((New-CodexSafeTreeDeleteBatchTargetSkippedResult `
+                    -TargetPath $targetPath `
+                    -Message $historyInvalidatedMessage))
+                continue
+            }
+        }
         $recoverable = $null
         $activeTransactionPath = $null
         $activeQuarantinePath = $null
         try {
-            $recoverable = Find-CodexSafeTreeDeleteRecoverableTransaction `
-                -TargetPath $targetPath `
-                -CapabilityRoot $CapabilityRoot `
-                -PolicyPath $PolicyPath `
-                -EvidenceRoot $EvidenceRoot
+            if ($fastHistoryScan) {
+                $recoverable = Resolve-CodexSafeTreeDeleteRecoverableTransactionFromCandidates `
+                    -TargetPath $targetPath `
+                    -Candidates $confirmedCandidates
+            } else {
+                $recoverable = Find-CodexSafeTreeDeleteRecoverableTransaction `
+                    -TargetPath $targetPath `
+                    -CapabilityRoot $CapabilityRoot `
+                    -PolicyPath $PolicyPath `
+                    -EvidenceRoot $EvidenceRoot `
+                    -HistoryScanMetrics $historyScan
+            }
             if ($null -ne $recoverable -and
                 $null -ne $recoverable.PSObject.Properties['skipAction']) {
                 $results.Add([pscustomobject][ordered]@{
@@ -9147,5 +9484,6 @@ function Invoke-CodexSafeTreeDeleteBatchPurge {
         skippedCount = $skippedCount
         failedCount = $failedCount
         results = @($results)
+        historyScan = $historyScan
     }
 }

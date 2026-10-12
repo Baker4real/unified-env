@@ -20,6 +20,7 @@ param(
     [object]$FixtureLeafRetryPolicy,
     [scriptblock]$FixtureLeafRetryElapsedMilliseconds,
     [scriptblock]$FixtureLeafRetryDelay,
+    [scriptblock]$FixtureAfterBatchHistoryScan,
     [switch]$Json,
     [Nullable[datetimeoffset]]$FixtureTrustedNowUtc,
     [Nullable[long]]$FixtureTrustedElapsedNowMilliseconds,
@@ -94,6 +95,10 @@ if ($null -ne $FixtureFileSystemCapabilities) {
     $purgeTestArguments.FileSystemCapabilitiesForTest = $FixtureFileSystemCapabilities
 }
 
+$batchPurgeTestArguments = @{
+    AfterBatchHistoryScanForTest = $FixtureAfterBatchHistoryScan
+}
+
 $result = Invoke-CodexSafeTreeDeleteMode `
     -EntryParameters $PSBoundParameters `
     -PolicyPath $FixturePolicyPath `
@@ -103,6 +108,7 @@ $result = Invoke-CodexSafeTreeDeleteMode `
         Plan = $planTestArguments
         Apply = $applyTestArguments
         Purge = $purgeTestArguments
+        BatchPurge = $batchPurgeTestArguments
     }
 
 if ($Json) {
