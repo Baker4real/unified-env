@@ -143,6 +143,7 @@
         ],
         "prefixes": [
           ".scratch/host-stable-upgrade-20260712/",
+          "managed/claude-hooks/",
           "managed/codex-hooks/",
           "managed/cursor-hooks/",
           "managed/grok-hooks/",
@@ -158,6 +159,7 @@
       "tests": {
         "fixture": {
           "powershell": [
+          "tests/Test-ClaudeHostHooks.ps1",
           "tests/Test-CodexFunctionalHookRegistration.ps1",
           "tests/Test-CodexHookConfig.ps1",
           "tests/Test-CodexHookDeployment.ps1",

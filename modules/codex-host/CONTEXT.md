@@ -9,7 +9,7 @@ intent: 定义 Codex hooks、state、代码智能运行时与 remote catalog 守
 
 ## 范围
 
-本模块拥有 Codex hook reconciler、state preflight、github-cli SessionStart、Serena/CodeGraph 宿主运行时、retired project 清理和 remote plugin catalog guard。`managed/grok-hooks/` 与 `managed/cursor-hooks/` 也归本模块落盘，但不进入 `Invoke-CodexHostHookReconciliation.ps1`；现役 Grok/Cursor 注册以 host-runbook 的 Grok Host Hooks 与 Cursor Host Hooks 为准。
+本模块拥有 Codex hook reconciler、state preflight、github-cli SessionStart、Serena/CodeGraph 宿主运行时、retired project 清理和 remote plugin catalog guard。`managed/grok-hooks/`、`managed/cursor-hooks/` 与 `managed/claude-hooks/` 也归本模块落盘，但不进入 `Invoke-CodexHostHookReconciliation.ps1`；现役 Grok/Cursor/Claude Code 注册以 host-runbook 的 Grok Host Hooks、Cursor Host Hooks 与 Claude Code Host Hooks 为准。
 
 ## 不属于本模块
 
