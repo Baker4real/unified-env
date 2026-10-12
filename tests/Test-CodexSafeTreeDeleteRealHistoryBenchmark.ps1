@@ -38,6 +38,13 @@ function Get-ScratchEntryNames {
     return @([IO.Directory]::EnumerateFileSystemEntries($scratchBase) | ForEach-Object { [IO.Path]::GetFileName($_) })
 }
 
+function Get-WorktreeChanges {
+    # Tracked and untracked non-ignored paths: a write outside gitignored scratch shows up here.
+    $lines = @(& git --no-optional-locks -C $projectRoot status --porcelain=v1 --untracked-files=all)
+    if ($LASTEXITCODE -ne 0) { throw 'git status failed.' }
+    return ($lines -join "`n")
+}
+
 function Set-CiVariables([string]$GitHubActions, [string]$Ci) {
     [Environment]::SetEnvironmentVariable('GITHUB_ACTIONS', $GitHubActions)
     [Environment]::SetEnvironmentVariable('CI', $Ci)
@@ -94,6 +101,7 @@ try {
 
     $evidenceBefore = Get-TreeManifest $evidence
     $scratchBefore = Get-ScratchEntryNames
+    $worktreeBefore = Get-WorktreeChanges
 
     # The real-history profile owns its output location; isolated-fixture options are rejected.
     $mixedRejected = $false
@@ -116,6 +124,7 @@ try {
     Assert-RealHistory (-not [IO.Directory]::Exists($absentEvidence)) 'Skip must not create the evidence root.'
     Assert-RealHistory ((Get-TreeManifest $evidence) -ceq $evidenceBefore) 'Skips must not touch evidence.'
     Assert-RealHistory (@(Compare-Object $scratchBefore (Get-ScratchEntryNames)).Count -eq 0) 'Skips must not write artifacts.'
+    Assert-RealHistory ((Get-WorktreeChanges) -ceq $worktreeBefore) 'Skips must not write into the worktree.'
 
     $report = & $benchmark -RealHistory -EvidenceRoot $evidence -ShimPath $standIn
     Assert-RealHistory ((Get-TreeManifest $evidence) -ceq $evidenceBefore) 'Real-history profile must leave evidence byte-for-byte unchanged.'
@@ -133,6 +142,7 @@ try {
     $measurementPath = Join-Path $runRoot 'measurement.json'
     & git -C $projectRoot check-ignore -q -- $measurementPath
     Assert-RealHistory ($LASTEXITCODE -eq 0) 'Run artifacts must be gitignored.'
+    Assert-RealHistory ((Get-WorktreeChanges) -ceq $worktreeBefore) 'Real-history profile must not write outside gitignored scratch.'
 
     foreach ($phase in @('before', 'after')) {
         $scale = $report.historyScale.$phase
