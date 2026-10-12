@@ -197,6 +197,15 @@ if (Test-Path -LiteralPath $guardHealthRoot) { Remove-Item -LiteralPath $guardHe
 [IO.Directory]::CreateDirectory($guardFixtureRoot) | Out-Null
 try {
     . $behaviorGuardPath
+    # 实际 retro 排查命令：文档检索和文件名清单混合时仍是非源码查询。
+    $metadataReadCommand = "rg -n 'validate|check|testProfiles|codex-hooks|local-health|state-preflight' 'D:\agents\projects\统一环境\modules\manifest.json' 'D:\agents\projects\统一环境\modules\README.md'; Get-ChildItem -LiteralPath 'D:\agents\projects\统一环境\.github\workflows','D:\agents\projects\统一环境\.githooks' -File -ErrorAction SilentlyContinue | Select-Object FullName | Format-Table -AutoSize; rg -n 'config|read|write|retir' 'D:\Codex\.codex\docs\agent-guidance\host-runbook\codex-startup-health.md'"
+    foreach ($attempt in 1..4) {
+        $metadataRead = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder `
+            -InputText (New-ReminderPayload 'metadata-read-regression' 'Bash' $metadataReadCommand) `
+            -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        Assert-True ($metadataRead.ok -and $metadataRead.stdout.Length -eq 0) '文档查询混合文件元数据投影不得触发符号导航提醒。'
+    }
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $guardFixtureHome 'hook_data/metadata-read-regression'))) '文件元数据读取不得建立 vendor 计数状态。'
     # holder 子进程继承本进程环境；防御性清除同名变量，持锁时长一律由下方显式注入。
     Remove-Item Env:CODEX_TEST_SERENA_MUTEX_HOLD_SECONDS -ErrorAction SilentlyContinue
     $outsideSentinel = Join-Path $guardFixtureRoot 'outside-sentinel.txt'
@@ -290,6 +299,17 @@ finally {
     # 文档/结构化数据/日志的实际查询目标不适合符号导航，不消耗 reminder 计数。
     # 描述、查询 pattern 或源码查询中夹带数据文件名不能触发豁免。
     foreach ($case in @(
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Select-Object FullName | Format-Table -AutoSize'; expected = $true },
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Select-Object -First 5 | Select-Object FullName'; expected = $true },
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Get-Content'; expected = $false },
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Select-Object FullName; rg symbol source.ps1'; expected = $false },
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Select-Object FullName | rg symbol source.ps1'; expected = $false },
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Select-Object { Get-Content source.ps1 }'; expected = $false },
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src,$target -File'; expected = $false },
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File -UnknownOption'; expected = $false },
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Format-Table { Get-Content source.ps1 }'; expected = $false },
+        @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File > result.txt'; expected = $false },
+        @{ command = 'Get-Content source.ps1 | Select-Object FullName | Format-Table -AutoSize'; expected = $false },
         @{ command = "Get-Content -LiteralPath 'D:/agents/projects/统一环境/CONTEXT.md' -Raw; Get-Content -LiteralPath 'D:/agents/projects/统一环境/modules/README.md' -Raw; Test-Path -LiteralPath 'D:/agents/projects/统一环境/.codegraph'; Get-Content -LiteralPath 'D:/agents/projects/统一环境/modules/manifest.json' -Raw"; expected = $true },
         @{ command = "rg --files 'D:/Codex/.codex/sessions/2026/10/12' | rg 'redacted-session'"; expected = $true },
         @{ command = 'Test-Path -LiteralPath D:/repo/.codegraph -PathType Container'; expected = $true },
@@ -344,7 +364,7 @@ finally {
         $mixedResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $mixedSession 'Bash' $command) -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
         Assert-True ($mixedResult.ok -and $mixedResult.stdout.Length -eq 0) '源码混合及未知命令必须保留原 reminder 计数。'
     }
-    foreach ($command in @('Get-Content ledger.json; Test-Path -LiteralPath D:/repo/.codegraph', 'rg --files D:/repo | rg source', 'Get-Content events.jsonl | Select-Object -Last 8')) {
+    foreach ($command in @('Get-Content ledger.json; Test-Path -LiteralPath D:/repo/.codegraph', 'rg --files D:/repo | rg source', 'Get-Content events.jsonl | Select-Object -Last 8', $metadataReadCommand)) {
         $exemptResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $mixedSession 'Bash' $command) -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
         Assert-True ($exemptResult.ok -and $exemptResult.stdout.Length -eq 0) '已经积累源码计数时，文档及文件定位查询仍必须静默。'
     }

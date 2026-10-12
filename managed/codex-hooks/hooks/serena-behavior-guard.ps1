@@ -350,26 +350,64 @@ function Test-CodexSerenaDataQuery {
     foreach ($pipeline in $ast.EndBlock.Statements) {
         if ($pipeline -isnot [Management.Automation.Language.PipelineAst] -or $pipeline.Background) { return $false }
         $hasInput = $false
+        $hasFileMetadata = $false
         foreach ($query in $pipeline.PipelineElements) {
             if ($query -isnot [Management.Automation.Language.CommandAst]) { return $false }
             $name = $query.GetCommandName()
-            if ($name -notin @('rg', 'grep', 'Get-Content', 'Select-String', 'Select-Object', 'Test-Path')) { return $false }
+            if ($name -notin @('rg', 'grep', 'Get-Content', 'Select-String', 'Select-Object', 'Test-Path', 'Get-ChildItem', 'Format-Table')) { return $false }
             if ($query.Redirections.Count -gt 0 -or $query.InvocationOperator -ne 'Unknown') { return $false }
             $operands = [Collections.Generic.List[string]]::new()
             foreach ($element in @($query.CommandElements | Select-Object -Skip 1)) {
                 if ($element -is [Management.Automation.Language.StringConstantExpressionAst]) { $operands.Add($element.Value) }
+                elseif ($name -eq 'Get-ChildItem' -and $element -is [Management.Automation.Language.ArrayLiteralAst]) {
+                    foreach ($item in $element.Elements) {
+                        if ($item -isnot [Management.Automation.Language.StringConstantExpressionAst]) { return $false }
+                        $operands.Add($item.Value)
+                    }
+                }
                 elseif ($element -is [Management.Automation.Language.ConstantExpressionAst] -and $element.Value -is [ValueType]) { $operands.Add([string]$element.Value) }
                 elseif ($element -is [Management.Automation.Language.CommandParameterAst] -and $null -eq $element.Argument) { $operands.Add($element.Extent.Text) }
                 else { return $false }
             }
             if ($name -eq 'Select-Object') {
                 if (-not $hasInput -or $operands.Count -eq 0) { return $false }
+                if ($hasFileMetadata -and $operands.Count -eq 1 -and $operands[0] -eq 'FullName') { continue }
                 for ($i = 0; $i -lt $operands.Count; $i += 2) {
                     if ($operands[$i] -notin @('-First', '-Last', '-Skip', '-SkipLast', '-Index') -or
                         $i + 1 -ge $operands.Count -or $operands[$i + 1] -notmatch '^\d+$') { return $false }
                 }
                 continue
             }
+            if ($name -eq 'Format-Table') {
+                if (-not $hasFileMetadata -or $operands.Count -ne 1 -or $operands[0] -ne '-AutoSize') { return $false }
+                $hasFileMetadata = $false
+                continue
+            }
+            if ($name -eq 'Get-ChildItem') {
+                # Only a static file listing is metadata. Do not evaluate expressions
+                # or treat subsequent file-content reads as metadata projections.
+                if ($hasInput -or $operands.Count -lt 3 -or $operands[0] -ne '-LiteralPath') { return $false }
+                $pathCount = 0
+                $fileOnly = $false
+                $inOptions = $false
+                for ($i = 1; $i -lt $operands.Count; $i++) {
+                    $operand = $operands[$i]
+                    if ($operand -eq '-File') { $fileOnly = $true; $inOptions = $true }
+                    elseif ($operand -eq '-ErrorAction') {
+                        $inOptions = $true
+                        $i++
+                        if ($i -ge $operands.Count -or $operands[$i] -ne 'SilentlyContinue') { return $false }
+                    }
+                    elseif ($inOptions -or $operand.StartsWith('-') -or [string]::IsNullOrWhiteSpace($operand)) { return $false }
+                    else { $pathCount++ }
+                }
+                if ($pathCount -eq 0 -or -not $fileOnly) { return $false }
+                $queryCount++
+                $hasInput = $true
+                $hasFileMetadata = $true
+                continue
+            }
+            $hasFileMetadata = $false
             if ($name -eq 'Test-Path') {
                 $pathCount = 0
                 for ($i = 0; $i -lt $operands.Count; $i++) {

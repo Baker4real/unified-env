@@ -46,6 +46,17 @@ jobs:
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) { exit $testExit }
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Verify read-only Codex config checker
+        shell: pwsh
+        working-directory: ${{ env.CI_PROJECT_ROOT }}
+        run: |
+          python -B tests/Test-CodexConfig.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   fixtures:
     name: ${{ matrix.module }} fixtures
     runs-on: windows-latest

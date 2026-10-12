@@ -526,7 +526,7 @@ try {
         Assert-True ($wrapper -notmatch '(?i)https?://|curl|check[-_]?network|check[-_]?auth') "生命周期 wrapper 含网络/认证能力：$wrapperName"
     }
     $stateWrapper = Get-Content -LiteralPath (Join-Path $codexHome 'hooks\codex-state-preflight.cmd') -Raw
-    Assert-True ($stateWrapper.Contains('D:\Codex\tools\python314-official\python.exe', [System.StringComparison]::OrdinalIgnoreCase)) 'state wrapper 未固定官方 Python'
+    Assert-True ($stateWrapper.Contains([string]$manifest.runtimes.python, [System.StringComparison]::OrdinalIgnoreCase)) 'state wrapper 未固定 manifest 登记的官方 Python'
     Assert-True ($stateWrapper.Contains('pythonw.exe', [System.StringComparison]::OrdinalIgnoreCase) -and $stateWrapper.Contains('lib\hidden-console-launcher.py', [System.StringComparison]::OrdinalIgnoreCase)) 'state wrapper 未通过 hidden launcher 启动'
     Assert-True ($stateWrapper -notmatch '(?i)https?://|curl|check[-_]?network|check[-_]?auth') 'state lifecycle wrapper 含网络/认证能力'
 
@@ -544,7 +544,7 @@ try {
         $sqlitePath = Join-Path $stateFixtureHome 'state_5.sqlite'
         $sqliteSetup = 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("create table threads (id text primary key, source text, thread_source text, approval_mode text, sandbox_policy text, sentinel text)"); c.commit(); c.close()'
         $sqliteSetupResult = Invoke-HiddenChildProcess `
-            -FilePath 'D:\Codex\tools\python314-official\python.exe' `
+            -FilePath ([string]$manifest.runtimes.python) `
             -ArgumentList @('-I','-S','-B','-X','utf8','-c',$sqliteSetup,$sqlitePath)
         Assert-True ($sqliteSetupResult.exitCode -eq 0) "state preflight SQLite fixture 创建失败：$($sqliteSetupResult.stderr)"
         $stateBefore = @(

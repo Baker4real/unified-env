@@ -129,6 +129,7 @@
       "ownership": {
         "files": [
           "docs/env-governance/remote-plugin-catalog-guard.md",
+          "docs/env-governance/codex-config-diagnostics.md",
           "docs/plans/2026-07-11-codex-hook-governance-implementation.md",
           "docs/plans/2026-07-13-functional-hook-preflight.md",
           "docs/specs/2026-07-11-codex-hook-governance-design.md",
@@ -136,6 +137,7 @@
           "docs/specs/2026-07-13-functional-hook-preflight-design.md",
           "reports/sdd/task-2-missing-sidecar-implementer.md",
           "modules/codex-host/CodexHostHookEvidence.ps1",
+          "modules/codex-host/Check-CodexConfig.py",
           "scripts/lib/CodexHookPolicy.ps1",
           "scripts/lib/CodexHookProductionFull.ps1",
           "scripts/lib/CodexHookProductionRegistrationRepair.ps1",
@@ -188,6 +190,7 @@
           ],
           "python": [
           "tests/Test-CodexStatePathInventory.py",
+          "tests/Test-CodexConfig.py",
           "tests/Test-CodexStatePolicy.py",
           "tests/Test-CodexStatePreflight.py",
           "tests/Test-RetiredProjectProcessRegistryPurger.py",

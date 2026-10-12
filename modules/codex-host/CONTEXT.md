@@ -32,6 +32,8 @@ intent: 定义 Codex hooks、state、代码智能运行时与 remote catalog 守
 
 ## 接口与测试
 
+配置告警走 [只读检查入口](../../docs/env-governance/codex-config-diagnostics.md)：`Check-CodexConfig.py` 分别报告文件、运行时与桌面会话的验证范围，不恢复 config reconciliation。
+
 主接口是 `scripts/Invoke-CodexHostHookReconciliation.ps1` 和 `scripts/Invoke-CodexRemotePluginCatalogGuard.ps1`。定向测试清单：
 
 ```powershell
