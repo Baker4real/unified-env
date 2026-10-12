@@ -1182,6 +1182,158 @@ function Assert-CodexSafeTreeDeleteDeletionAllowed {
     }
 }
 
+function Resolve-CodexSafeTreeDeleteTargetPathArguments {
+    param([string[]]$Values)
+
+    # 宿主 .cmd 链只能传单个字符串：多个 BatchPurge 目标以 '::' 连接，在这里拆回数组。
+    $items = @($Values)
+    if ($items.Count -eq 1 -and [string]$items[0] -match '::') {
+        $items = @(([string]$items[0]).Split([string[]]@('::'), [StringSplitOptions]::RemoveEmptyEntries))
+    }
+    return @($items)
+}
+
+function Invoke-CodexSafeTreeDeleteMode {
+    # 生产入口与 fixture 入口共用的 mode 分发：确认拒绝对象、参数校验与库函数调用只在这里维护。
+    # 两个入口各自声明同一套 CLI 参数（Mode 的 ValidateSet 在参数绑定阶段、加载本库之前生效；两边的
+    # 合同由 tests/Test-CodexSafeTreeDeleteModeDispatch.ps1 钉住），把 $PSBoundParameters 原样作为
+    # EntryParameters 传进来，自己负责 policy / evidence 根、输出与退出码。
+    # 新增 mode：两个入口的 ValidateSet 同时加上，再在下面的 switch 加分支。
+    # 新增 CLI 参数：两个入口同时声明，再在下面按入口声明的类型重建。
+    # ModeArgumentsForTest 只由 fixture 入口传入：键是 mode 名，值是追加到该 mode 库函数调用上的测试
+    # 参数（*ForTest 钩子等）。与基础参数重名时哈希表相加直接抛错，所以测试参数只能追加，不能改写
+    # policy / evidence 根。生产入口不传它，因此没有任何途径注入 fixture 钩子。
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$EntryParameters,
+        [Parameter(Mandatory)][string]$PolicyPath,
+        [Parameter(Mandatory)][string]$EvidenceRoot,
+        [hashtable]$ModeArgumentsForTest
+    )
+
+    # 按入口声明的类型重建入口参数：未绑定的 [string] 为 ''，[string[]] 为 $null，[switch] 为未出现。
+    [string]$Mode = $EntryParameters['Mode']
+    [string]$TargetPath = $EntryParameters['TargetPath']
+    [string[]]$TargetPaths = $EntryParameters['TargetPaths']
+    [string]$CapabilityRoot = $EntryParameters['CapabilityRoot']
+    [string]$PlanPath = $EntryParameters['PlanPath']
+    [string]$ApprovedPlanSha256 = $EntryParameters['ApprovedPlanSha256']
+    [switch]$ConfirmApply = [bool]$EntryParameters['ConfirmApply']
+    [string]$TransactionPath = $EntryParameters['TransactionPath']
+    [string]$ApprovedTransactionSha256 = $EntryParameters['ApprovedTransactionSha256']
+    [switch]$ConfirmPurge = [bool]$EntryParameters['ConfirmPurge']
+    [switch]$ConfirmRestore = [bool]$EntryParameters['ConfirmRestore']
+    [switch]$ConfirmArchive = [bool]$EntryParameters['ConfirmArchive']
+    [switch]$Json = [bool]$EntryParameters['Json']
+
+    $testArguments = @{}
+    if ($null -ne $ModeArgumentsForTest -and $null -ne $ModeArgumentsForTest[$Mode]) {
+        $testArguments = $ModeArgumentsForTest[$Mode]
+    }
+
+    switch ($Mode) {
+        'Status' {
+            $libraryArguments = @{
+                PolicyPath = $PolicyPath
+                EvidenceRoot = $EvidenceRoot
+            } + $testArguments
+            Get-CodexSafeTreeDeleteStatus @libraryArguments
+        }
+        'Restore' {
+            if (-not $ConfirmRestore) {
+                return [pscustomobject][ordered]@{ restored = $false; refusalReason = 'confirm-restore-required' }
+            }
+            if ([string]::IsNullOrWhiteSpace($TransactionPath) -or
+                [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
+                throw 'Restore 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
+            }
+            $libraryArguments = @{
+                TransactionPath = $TransactionPath
+                ApprovedTransactionSha256 = $ApprovedTransactionSha256
+                PolicyPath = $PolicyPath
+                EvidenceRoot = $EvidenceRoot
+            } + $testArguments
+            Invoke-CodexSafeTreeDeleteRestore @libraryArguments
+        }
+        'Archive' {
+            if (-not $ConfirmArchive) {
+                return [pscustomobject][ordered]@{ archived = $false; refusalReason = 'confirm-archive-required' }
+            }
+            if ([string]::IsNullOrWhiteSpace($TransactionPath) -or
+                [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
+                throw 'Archive 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
+            }
+            $libraryArguments = @{
+                TransactionPath = $TransactionPath
+                ApprovedTransactionSha256 = $ApprovedTransactionSha256
+                EvidenceRoot = $EvidenceRoot
+            } + $testArguments
+            Invoke-CodexSafeTreeDeleteArchive @libraryArguments
+        }
+        'Plan' {
+            if ([string]::IsNullOrWhiteSpace($TargetPath) -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
+                throw 'Plan 模式要求 TargetPath 与 CapabilityRoot。'
+            }
+            $libraryArguments = @{
+                TargetPath = $TargetPath
+                CapabilityRoot = $CapabilityRoot
+                PolicyPath = $PolicyPath
+                EvidenceRoot = $EvidenceRoot
+            } + $testArguments
+            New-CodexSafeTreeDeletePlan @libraryArguments
+        }
+        'Apply' {
+            if (-not $ConfirmApply) {
+                return [pscustomobject][ordered]@{ quarantined = $false; refusalReason = 'confirm-apply-required' }
+            }
+            if ([string]::IsNullOrWhiteSpace($PlanPath) -or [string]::IsNullOrWhiteSpace($ApprovedPlanSha256)) {
+                throw 'Apply 模式要求 PlanPath 与 ApprovedPlanSha256。'
+            }
+            $libraryArguments = @{
+                PlanPath = $PlanPath
+                ApprovedPlanSha256 = $ApprovedPlanSha256
+                PolicyPath = $PolicyPath
+                EvidenceRoot = $EvidenceRoot
+            } + $testArguments
+            Invoke-CodexSafeTreeDeleteQuarantine @libraryArguments
+        }
+        'Purge' {
+            if (-not $ConfirmPurge) {
+                return [pscustomobject][ordered]@{ purged = $false; refusalReason = 'confirm-purge-required' }
+            }
+            if ([string]::IsNullOrWhiteSpace($TransactionPath) -or [string]::IsNullOrWhiteSpace($ApprovedTransactionSha256)) {
+                throw 'Purge 模式要求 TransactionPath 与 ApprovedTransactionSha256。'
+            }
+            $libraryArguments = @{
+                TransactionPath = $TransactionPath
+                ApprovedTransactionSha256 = $ApprovedTransactionSha256
+                PolicyPath = $PolicyPath
+                EvidenceRoot = $EvidenceRoot
+                ReturnFailureMetrics = [bool]$Json
+            } + $testArguments
+            Invoke-CodexSafeTreeDeletePurge @libraryArguments
+        }
+        'BatchPurge' {
+            if (-not $ConfirmApply -or -not $ConfirmPurge) {
+                return [pscustomobject][ordered]@{ completed = $false; refusalReason = 'confirm-apply-and-purge-required' }
+            }
+            $resolvedTargets = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $TargetPaths)
+            if ($resolvedTargets.Count -eq 0 -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
+                throw 'BatchPurge 模式要求 TargetPaths 与 CapabilityRoot。'
+            }
+            $libraryArguments = @{
+                TargetPaths = $resolvedTargets
+                CapabilityRoot = $CapabilityRoot
+                PolicyPath = $PolicyPath
+                EvidenceRoot = $EvidenceRoot
+            } + $testArguments
+            Invoke-CodexSafeTreeDeleteBatchPurge @libraryArguments
+        }
+        default {
+            throw "safe-delete mode 分发缺少分支：$Mode"
+        }
+    }
+}
+
 function New-CodexSafeTreeDeletePlan {
     param(
         [Parameter(Mandatory)][string]$TargetPath,

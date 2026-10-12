@@ -131,6 +131,13 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
 无法承载这类探测；既有 Apply/Purge/Restore crash fixture 已建立同等先例。新增退出码或持锁
 断言应挂在既有 fixture 或 ProductionSmoke 上，不得另开生产入口。
 
+生产入口与主 fixture（`tests\Invoke-CodexSafeTreeDeleteFixture.ps1`）共用库内同一个 mode 分发
+`Invoke-CodexSafeTreeDeleteMode`（#74）：确认拒绝对象、参数校验与库函数调用只在这里维护，入口只给出
+各自的 policy / evidence 根，并负责输出与退出码。两个入口仍各自声明同一套 CLI 参数（Mode 的
+ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同时声明，分发逻辑只改一处。fixture 钩子
+按 mode 经 `-ModeArgumentsForTest` 追加，生产入口不传。CLI 合同一致与分发形状由
+`tests\Test-CodexSafeTreeDeleteModeDispatch.ps1` 钉住。
+
 ## 部署门与维护窗口（2026-08-27，#56 Wave A）
 
 宿主 wrapper 自 #56 起为 gate-aware shim（`scripts\invoke-codex-safe-tree-delete-gate-shim.ps1` 的受管安装）：每次调用在任何 dot-source 之前取得 current-user cross-session deployment mutex（名称内嵌 owner SID 命名空间实现用户隔离），检查固定 `D:\Codex\.codex\state\safe-tree-delete-deployment\maintenance.json`，并持锁到 child/本进程退出。marker 在场时新调用以可观察错误拒绝；abandoned marker 不被自动清除。
