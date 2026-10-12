@@ -20,6 +20,7 @@ param(
     [object]$FixtureLeafRetryPolicy,
     [scriptblock]$FixtureLeafRetryElapsedMilliseconds,
     [scriptblock]$FixtureLeafRetryDelay,
+    [scriptblock]$FixtureAfterBatchHistoryScan,
     [switch]$Json,
     [Nullable[datetimeoffset]]$FixtureTrustedNowUtc,
     [Nullable[long]]$FixtureTrustedElapsedNowMilliseconds,
@@ -187,7 +188,8 @@ $result = switch ($Mode) {
             -TargetPaths $resolvedTargets `
             -CapabilityRoot $CapabilityRoot `
             -PolicyPath $FixturePolicyPath `
-            -EvidenceRoot $FixtureEvidenceRoot
+            -EvidenceRoot $FixtureEvidenceRoot `
+            -AfterBatchHistoryScanForTest $FixtureAfterBatchHistoryScan
     }
 }
 
