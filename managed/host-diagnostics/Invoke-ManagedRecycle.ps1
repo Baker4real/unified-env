@@ -133,6 +133,11 @@ function Get-BinFacts([string]$Root, [long]$TargetBytes) {
         $policy = Get-ItemProperty -LiteralPath "$hive\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer" -Name 'NoRecycleFiles' -ErrorAction SilentlyContinue
         if ($null -ne $policy -and [int]$policy.NoRecycleFiles -ne 0) { $problems.Add("no-recycle-files-policy: $hive") }
     }
+    # Query before reading settings: a fresh profile (a CI runner) has no BitBucket settings for a volume until its bin
+    # is first used, and the shell writes them on this query. Settings still missing afterwards stay a refusal.
+    $query = [ManagedRecycle.Native]::QueryBin($Root)
+    if ($query[0] -ne 0) { $problems.Add(('bin-query-failed: 0x{0:x}' -f $query[0])) }
+    else { $facts.binBytes = $query[1]; $facts.binItems = $query[2] }
     if (-not $facts.volumeGuid) { $problems.Add('volume-guid-unavailable') }
     else {
         $settings = Get-ItemProperty -LiteralPath "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\$($facts.volumeGuid)" -ErrorAction SilentlyContinue
@@ -145,9 +150,6 @@ function Get-BinFacts([string]$Root, [long]$TargetBytes) {
             if ($facts.nukeOnDelete -ne 0) { $problems.Add('nuke-on-delete') }
         }
     }
-    $query = [ManagedRecycle.Native]::QueryBin($Root)
-    if ($query[0] -ne 0) { $problems.Add(('bin-query-failed: 0x{0:x}' -f $query[0])) }
-    else { $facts.binBytes = $query[1]; $facts.binItems = $query[2] }
     if ($null -ne $facts.maxCapacityBytes -and $null -ne $facts.binBytes) {
         $facts.headroomLimitBytes = [long][math]::Floor($facts.maxCapacityBytes * $headroomRatio)
         $facts.bytesAfterRecycle = $facts.binBytes + $TargetBytes

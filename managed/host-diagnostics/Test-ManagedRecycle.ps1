@@ -29,6 +29,14 @@ $cases = [Collections.Generic.List[object]]::new()
 $junctions = [Collections.Generic.List[string]]::new()
 $expectedManifest = @("D`tempty", "D`tsub", "F`ta.txt`t5", "F`tsub\b.bin`t1024")
 $liveCase = 'live recycle moves the exact tree to the bin and the test restores it'
+# Whether the fixture volume had bin settings before the first Check/Plan; a fresh profile (a CI runner) has none, which
+# makes a CI pass prove the entry's query-first order rather than an earlier shell use.
+$fixtureVolume = try { [string](Get-CimInstance Win32_Volume -Filter "DriveLetter='$([IO.Path]::GetPathRoot($fullEvidenceRoot).TrimEnd('\'))'").DeviceID } catch { '' }
+$binSettings = Get-ItemProperty -LiteralPath ('HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\' +
+    ($fixtureVolume -replace '^\\\\\?\\Volume|\\$', '')) -ErrorAction SilentlyContinue
+$binSettingsAtStart = if (-not $fixtureVolume) { $null } else {
+    $null -ne $binSettings -and $null -ne $binSettings.PSObject.Properties['MaxCapacity'] -and $null -ne $binSettings.PSObject.Properties['NukeOnDelete']
+}
 
 function Invoke-Entry {
     param([string[]]$EntryArguments)
@@ -270,6 +278,7 @@ $report = [ordered]@{
     failures = $failed.Count
     skipped = $skipped.Count
     fixture = $runRoot
+    binSettingsAtStart = $binSettingsAtStart
     runtime = $PSVersionTable.PSVersion.ToString()
     entrySha256 = (Get-FileHash -LiteralPath $entry -Algorithm SHA256).Hash
     testSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
