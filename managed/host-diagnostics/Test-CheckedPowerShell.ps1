@@ -155,6 +155,21 @@ Assert-Case 'required JSON fields accept false zero and a nested path' {
     }
 }
 
+Assert-Case 'required JSON fields accept native comma-separated argv values and identify the missing path' {
+    $valid = Invoke-PublicCli @(
+        '-CommandText', '''{"Status":"ok","Target":"x","Backup":"b"}''',
+        '-RequiredJsonFields', 'Status,Target,Backup'
+    )
+    if ($valid.exitCode -ne 0) { throw "Comma-separated required fields were rejected: $($valid.stderr)" }
+    $missing = Invoke-PublicCli @(
+        '-CommandText', '''{"Status":"ok"}''',
+        '-RequiredJsonFields', 'Status,Target'
+    )
+    if ($missing.exitCode -ne 3 -or $missing.stderr -notmatch 'field=Target') {
+        throw "Missing field diagnostic did not identify Target: $($missing.stderr)"
+    }
+}
+
 Assert-Case 'CheckOnly validates file and text without executing either' {
     $checkMarker = Join-Path $fixture 'CheckedPowerShell-check-only.executed'
     $checkSource = '[IO.File]::WriteAllText(''{0}'', ''ran'')' -f $checkMarker.Replace("'", "''")

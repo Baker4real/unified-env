@@ -59,6 +59,15 @@ $ErrorActionPreference = 'Stop'
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $OutputEncoding = $utf8
+$RequiredJsonFields = @(
+    foreach ($fieldValue in @($RequiredJsonFields)) {
+        # Native pwsh callers pass comma-separated values as one argv token.
+        # Accept that form while retaining array binding for in-process callers.
+        foreach ($fieldPart in ([string] $fieldValue -split ',')) {
+            $fieldPart.Trim().Trim([char[]] @([char] 39, [char] 34))
+        }
+    }
+)
 if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -ne 7) {
     [Console]::Error.WriteLine('CheckedPowerShell runtime-required: PowerShell Core 7.')
     exit 2
@@ -183,16 +192,17 @@ if ($RequiredJsonFields.Count) {
         }
         for ($fieldIndex = 0; $fieldIndex -lt $RequiredJsonFields.Count; $fieldIndex++) {
             $current = $document.RootElement
-            foreach ($segment in $RequiredJsonFields[$fieldIndex].Split('.')) {
+            $fieldPath = [string] $RequiredJsonFields[$fieldIndex]
+            foreach ($segment in $fieldPath.Split('.')) {
                 $next = [System.Text.Json.JsonElement]::new()
                 if ($current.ValueKind -ne [System.Text.Json.JsonValueKind]::Object -or -not $current.TryGetProperty($segment, [ref]$next)) {
-                    [Console]::Error.WriteLine(('CheckedPowerShell json-error reason=missing-field field-index={0}' -f $fieldIndex))
+                    [Console]::Error.WriteLine(('CheckedPowerShell json-error reason=missing-field field-index={0} field={1}' -f $fieldIndex, $fieldPath))
                     exit 3
                 }
                 $current = $next
             }
             if ($current.ValueKind -eq [System.Text.Json.JsonValueKind]::Null) {
-                [Console]::Error.WriteLine(('CheckedPowerShell json-error reason=null-field field-index={0}' -f $fieldIndex))
+                [Console]::Error.WriteLine(('CheckedPowerShell json-error reason=null-field field-index={0} field={1}' -f $fieldIndex, $fieldPath))
                 exit 3
             }
         }
