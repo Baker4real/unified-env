@@ -2424,6 +2424,218 @@ class SkillInstallGuardedTests(unittest.TestCase):
             ],
         )
 
+    def group_checkpoint_context(self, **overrides: object) -> dict[str, object]:
+        context: dict[str, object] = {
+            "source_id": "shared-source",
+            "repo": "https://github.com/example/shared-source",
+            "commit": "2222222222222222",
+            "advance_group_checkpoint": False,
+        }
+        context.update(overrides)
+        return context
+
+    def group_checkpoint_ledger(
+        self,
+        *,
+        skills: list[str],
+        checkpoint: str = "1111111111",
+    ) -> dict[str, object]:
+        return {
+            "sources": [
+                {
+                    "id": "shared-source",
+                    "repo": "https://github.com/example/shared-source",
+                    "skills": skills,
+                    "last_checked_commit": checkpoint,
+                    "catalog_ref": checkpoint,
+                }
+            ],
+            "unresolved": [],
+            "deleted": [],
+        }
+
+    def test_group_checkpoint_rejects_partial_group_advance(self) -> None:
+        ledger = self.group_checkpoint_ledger(skills=["skill-a", "skill-b", "skill-c"])
+
+        with self.assertRaisesRegex(WRAPPER.InstallError, "advance_group_checkpoint") as raised:
+            WRAPPER.validate_group_checkpoint_advance(
+                ledger,
+                names=["skill-a"],
+                context=self.group_checkpoint_context(),
+            )
+
+        message = str(raised.exception)
+        self.assertIn("1111111111", message)
+        self.assertIn("skill-b", message)
+        self.assertIn("skill-c", message)
+        self.assertIn("删掉 commit", message)
+
+    def test_group_checkpoint_rename_counts_old_name_and_requires_declaration(self) -> None:
+        ledger = self.group_checkpoint_ledger(skills=["skill-old", "skill-b"])
+
+        with self.assertRaisesRegex(WRAPPER.InstallError, "canonical rename 必须带 commit") as raised:
+            WRAPPER.validate_group_checkpoint_advance(
+                ledger,
+                names=["skill-new"],
+                context=self.group_checkpoint_context(
+                    canonical_rename={"old_name": "skill-old", "new_name": "skill-new"}
+                ),
+            )
+
+        message = str(raised.exception)
+        self.assertIn("另有 1 个 skill", message)
+        self.assertNotIn("删掉 commit", message)
+
+    def test_group_checkpoint_merge_retirement_counts_retired_name_and_skips_repo_match(self) -> None:
+        ledger = self.group_checkpoint_ledger(skills=["skill-old", "skill-new"])
+        retirement = {"retired": {"name": "skill-old"}}
+
+        WRAPPER.validate_group_checkpoint_advance(
+            ledger,
+            names=["skill-new"],
+            context=self.group_checkpoint_context(merge_retirement=retirement),
+        )
+        WRAPPER.validate_group_checkpoint_advance(
+            self.group_checkpoint_ledger(skills=["skill-a", "skill-b"]),
+            names=["skill-a"],
+            context=self.group_checkpoint_context(
+                source_id="successor-source",
+                merge_retirement=retirement,
+            ),
+        )
+
+    def test_group_checkpoint_allows_same_commit_by_hash_prefix(self) -> None:
+        ledger = self.group_checkpoint_ledger(
+            skills=["skill-a", "skill-b"],
+            checkpoint="49dd158d10",
+        )
+
+        WRAPPER.validate_group_checkpoint_advance(
+            ledger,
+            names=["skill-a"],
+            context=self.group_checkpoint_context(
+                commit="49dd158d1076134a641b33efb035946536778336"
+            ),
+        )
+
+    def test_group_checkpoint_allows_declared_whole_group_check(self) -> None:
+        ledger = self.group_checkpoint_ledger(skills=["skill-a", "skill-b"])
+
+        WRAPPER.validate_group_checkpoint_advance(
+            ledger,
+            names=["skill-a"],
+            context=self.group_checkpoint_context(advance_group_checkpoint=True),
+        )
+
+    def test_group_checkpoint_allows_transaction_covering_whole_group(self) -> None:
+        ledger = self.group_checkpoint_ledger(
+            skills=["skill-a", "Skill-B", "skill-a/vendor/bundled"]
+        )
+
+        WRAPPER.validate_group_checkpoint_advance(
+            ledger,
+            names=["skill-a", "skill-b"],
+            context=self.group_checkpoint_context(),
+        )
+
+    def test_group_checkpoint_ignores_missing_commit_and_new_group(self) -> None:
+        ledger = self.group_checkpoint_ledger(skills=["skill-a", "skill-b"])
+
+        WRAPPER.validate_group_checkpoint_advance(
+            ledger,
+            names=["skill-a"],
+            context=self.group_checkpoint_context(commit=None),
+        )
+        WRAPPER.validate_group_checkpoint_advance(
+            ledger,
+            names=["skill-a"],
+            context=self.group_checkpoint_context(
+                source_id="other-source",
+                repo="https://github.com/example/other-source",
+            ),
+        )
+
+    def test_group_checkpoint_matches_group_by_repo_and_revisions_exactly(self) -> None:
+        ledger = self.group_checkpoint_ledger(skills=["skill-a", "skill-b"], checkpoint="v1.7")
+
+        with self.assertRaisesRegex(WRAPPER.InstallError, "advance_group_checkpoint"):
+            WRAPPER.validate_group_checkpoint_advance(
+                ledger,
+                names=["skill-a"],
+                context=self.group_checkpoint_context(source_id="renamed-id", commit="v1.7.2"),
+            )
+
+    def test_source_context_validates_advance_group_checkpoint(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "组级检查点字段夹具")
+        manifest = self.write_manifest("test-skill-wrapper", "update")
+        args = WRAPPER.build_parser().parse_args(self.wrapper_args(candidate, manifest))
+        specs = [("test-skill-wrapper", str(candidate))]
+
+        def decision(**source: object) -> dict[str, object]:
+            return {"decision": "update", "source": {"id": "shared-source", "ref": "main", **source}}
+
+        context = WRAPPER.source_context(
+            args,
+            decision(commit="2222222222222222", advance_group_checkpoint=True),
+            specs,
+        )
+        self.assertTrue(context["advance_group_checkpoint"])
+        self.assertFalse(WRAPPER.source_context(args, decision(), specs)["advance_group_checkpoint"])
+        with self.assertRaisesRegex(WRAPPER.InstallError, "布尔值"):
+            WRAPPER.source_context(
+                args,
+                decision(commit="2222222222222222", advance_group_checkpoint="yes"),
+                specs,
+            )
+        with self.assertRaisesRegex(WRAPPER.InstallError, "需要同时提供"):
+            WRAPPER.source_context(args, decision(advance_group_checkpoint=True), specs)
+
+    def write_group_checkpoint_fixture(self, *, advance: bool) -> tuple[Path, Path]:
+        candidate = self.write_candidate("test-skill-wrapper", "组级检查点夹具")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["source"]["commit"] = "2222222222222222"
+        if advance:
+            payload["source"]["advance_group_checkpoint"] = True
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        ledger["sources"].append(
+            {
+                "id": "local-test",
+                "type": "local-candidate",
+                "repo": "local candidate",
+                "ref": "local",
+                "skills": ["sibling-skill"],
+                "last_checked_commit": "1111111111",
+                "catalog_ref": "1111111111",
+            }
+        )
+        self.ledger.write_text(json.dumps(ledger, ensure_ascii=False), encoding="utf-8")
+        return candidate, manifest
+
+    def test_dry_run_rejects_partial_group_checkpoint_before_evidence(self) -> None:
+        candidate, manifest = self.write_group_checkpoint_fixture(advance=False)
+        ledger_before = self.ledger.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest) + ["--dry-run"])
+
+        self.assertEqual(code, 2, stderr.getvalue())
+        self.assertIn("advance_group_checkpoint", stderr.getvalue())
+        self.assertIn("sibling-skill", stderr.getvalue())
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertEqual(list((self.temp / "evidence").glob("install-*")), [])
+
+    def test_dry_run_accepts_declared_group_checkpoint_advance(self) -> None:
+        candidate, manifest = self.write_group_checkpoint_fixture(advance=True)
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest) + ["--dry-run"])
+
+        self.assertEqual(code, 0, stderr.getvalue())
+
     def test_bundled_skill_rejects_parent_traversal_path(self) -> None:
         name = "test-skill-wrapper"
         candidate = self.write_candidate(name, "拒绝捆绑路径穿越的夹具")

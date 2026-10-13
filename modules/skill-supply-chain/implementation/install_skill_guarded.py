@@ -1612,6 +1612,13 @@ def source_context(
             source_id = f"local-candidate-{specs[0][0]}"
     ref = source.get("ref") or args.ref or "main"
     commit = source.get("commit") or source.get("catalog_ref") or source.get("revision")
+    advance_group_checkpoint = source.get("advance_group_checkpoint", False)
+    if not isinstance(advance_group_checkpoint, bool):
+        raise InstallError("source.advance_group_checkpoint 必须是布尔值")
+    if advance_group_checkpoint and not commit:
+        raise InstallError(
+            "source.advance_group_checkpoint 需要同时提供 source.commit、catalog_ref 或 revision"
+        )
     writing_gate = decision.get("writing_for_agents")
     if isinstance(writing_gate, dict):
         writing_revision = writing_gate.get("revision") or "no-change"
@@ -1635,6 +1642,7 @@ def source_context(
         "repo": repo_url,
         "ref": str(ref),
         "commit": str(commit) if commit else None,
+        "advance_group_checkpoint": advance_group_checkpoint,
         "writing_revision": str(writing_revision),
         "overlay_status": str(overlay_status),
         "overlay_summary": str(overlay_summary),
@@ -2147,6 +2155,114 @@ def validate_durable_source_record(
         )
 
 
+GIT_COMMIT_PREFIX = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def checkpoint_matches(recorded: Any, commit: str) -> bool:
+    """Treat ledger checkpoints as equal by exact text or a shared hex-hash prefix.
+
+    Older ledger values keep 10-character short hashes, so a full hash and its
+    prefix name the same upstream commit.
+    """
+    if not isinstance(recorded, str) or not recorded.strip():
+        return False
+    left = recorded.strip().casefold()
+    right = commit.strip().casefold()
+    if left == right:
+        return True
+    return bool(
+        GIT_COMMIT_PREFIX.fullmatch(left)
+        and GIT_COMMIT_PREFIX.fullmatch(right)
+        and (left.startswith(right) or right.startswith(left))
+    )
+
+
+def find_ledger_source(
+    sources: Sequence[Any],
+    *,
+    source_id: str,
+    repo: str | None,
+    match_repo: bool,
+) -> dict[str, Any] | None:
+    """Return the ledger source entry a transaction writes to: by id, else by repo."""
+    for entry in sources:
+        if isinstance(entry, dict) and entry.get("id") == source_id:
+            return entry
+    if match_repo and repo:
+        for entry in sources:
+            if isinstance(entry, dict) and normalize_repo(entry.get("repo")) == normalize_repo(repo):
+                return entry
+    return None
+
+
+def validate_group_checkpoint_advance(
+    ledger: Any,
+    *,
+    names: Sequence[str],
+    context: dict[str, Any],
+) -> None:
+    """Fail closed before a partial-group transaction moves the group checkpoint.
+
+    ``last_checked_commit``/``catalog_ref`` record that the whole source group is
+    aligned with upstream at that commit.  A transaction may move them only when
+    it covers every skill in the group, or when the decision sets
+    ``source.advance_group_checkpoint`` after checking the whole group.
+    """
+    commit = context.get("commit")
+    if not commit or context.get("advance_group_checkpoint"):
+        return
+    if not isinstance(ledger, dict) or not isinstance(ledger.get("sources"), list):
+        raise InstallError("source ledger 的 sources 不是数组，无法核对组级检查点")
+    merge_retirement = context.get("merge_retirement")
+    group = find_ledger_source(
+        ledger["sources"],
+        source_id=str(context["source_id"]),
+        repo=context.get("repo"),
+        match_repo=not isinstance(merge_retirement, dict),
+    )
+    if group is None:
+        return
+    managed_roots = {name.casefold() for name in names}
+    rename = context.get("canonical_rename")
+    if isinstance(rename, dict) and isinstance(rename.get("old_name"), str):
+        managed_roots.add(rename["old_name"].casefold())
+    if isinstance(merge_retirement, dict):
+        retired = merge_retirement.get("retired")
+        if isinstance(retired, dict) and isinstance(retired.get("name"), str):
+            managed_roots.add(retired["name"].casefold())
+    group_skills = group.get("skills")
+    others = sorted(
+        skill
+        for skill in (group_skills if isinstance(group_skills, list) else [])
+        if isinstance(skill, str)
+        and not any(
+            skill.casefold() == root or skill.casefold().startswith(f"{root}/")
+            for root in managed_roots
+        )
+    )
+    if not others:
+        return
+    recorded = group.get("last_checked_commit") or group.get("catalog_ref")
+    if checkpoint_matches(recorded, str(commit)):
+        return
+    shown = "、".join(others[:5]) + (" 等" if len(others) > 5 else "")
+    if isinstance(rename, dict):
+        remedy = (
+            "canonical rename 必须带 commit：先按这个 commit 核对整组，"
+            '再在 source 里写 "advance_group_checkpoint": true。'
+        )
+    else:
+        remedy = (
+            "只改本机 overlay 时从 source 删掉 commit、catalog_ref 和 revision；"
+            '已按这个 commit 核对过整组时，在 source 里写 "advance_group_checkpoint": true。'
+        )
+    raise InstallError(
+        f"source.commit {commit} 会把来源组 {group.get('id') or context['source_id']} 的上游检查点"
+        f"从 {recorded or '（未记录）'} 推进过去，但组内另有 {len(others)} 个 skill 不在本事务里"
+        f"（{shown}）。{remedy}"
+    )
+
+
 def update_ledger(
     data: dict[str, Any],
     *,
@@ -2251,24 +2367,12 @@ def update_ledger(
 
     source_id = str(context["source_id"])
     source_repo = context["repo"]
-    target_source: dict[str, Any] | None = None
-    for entry in data["sources"]:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("id") == source_id:
-            target_source = entry
-            break
-    if (
-        target_source is None
-        and source_repo
-        and not isinstance(merge_retirement, dict)
-    ):
-        for entry in data["sources"]:
-            if not isinstance(entry, dict):
-                continue
-            if normalize_repo(entry.get("repo")) == normalize_repo(source_repo):
-                target_source = entry
-                break
+    target_source = find_ledger_source(
+        data["sources"],
+        source_id=source_id,
+        repo=source_repo,
+        match_repo=not isinstance(merge_retirement, dict),
+    )
 
     if target_source is None:
         target_source = {
@@ -4017,6 +4121,11 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             names=names,
             retirement=merge_retirement,
         )
+    validate_group_checkpoint_advance(
+        load_json(ledger_path, label="source ledger"),
+        names=ledger_names,
+        context=context,
+    )
     transaction_id = uuid.uuid4().hex
     evidence_dir = evidence_root / f"install-{_datetime.datetime.now().strftime('%Y%m%dT%H%M%S')}-{transaction_id}"
     ensure_dir(evidence_dir, label="transaction evidence directory")
@@ -4137,6 +4246,9 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 names=names,
                 retirement=merge_retirement,
             )
+        # Re-check against the ledger this transaction will write; writers
+        # outside the install lock may have moved the checkpoint during staging.
+        validate_group_checkpoint_advance(active_state, names=ledger_names, context=context)
         backup_root = evidence_dir / "backups"
         ensure_dir(backup_root, label="transaction backup root")
         ledger_backup = backup_file(ledger_path, backup_root, "source-state-before.json")

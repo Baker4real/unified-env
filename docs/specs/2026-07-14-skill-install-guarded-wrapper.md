@@ -82,6 +82,8 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 `source.upstream_path` 只用于已审查的 `--candidate`：它把本地暂存候选映射回真实仓库子路径，确保新写入的 `SOURCE.md` 可精确追溯。仓库根使用精确值 `.`；其他值必须是仓库内的 POSIX 相对路径，不接受绝对路径、反斜杠、反引号、不可打印字符、空段、`.` 或 `..` 路径段。省略时为兼容旧调用仍回退到候选目录名。它与 `source.ledger_updates.path` 不同，后者是统一来源台账已有的本地路径字段。
 
+`source.commit`、`source.catalog_ref`、`source.revision` 按此顺序取第一个非空值，写进目标来源组的 `last_checked_commit` 和 `catalog_ref`。这个检查点表示整组已按该上游版本核对过，所以组内还有本事务没覆盖的 skill、且该值与组内已记录的检查点不同时，wrapper 失败闭锁：创建 evidence 目录前核对一次，暂存完成、重新读入台账后、备份之前再核对一次。覆盖范围是 `manifest.skills`、canonical rename 的旧名、merge retirement 的被退役名，以及它们之下的 bundled 路径。两个值都是 7 到 40 位十六进制、且一方是另一方前缀时视为同一 commit；其他 revision 去首尾空白、忽略大小写后按精确值比较。只改本机 overlay 时省略这三个字段；已按该值核对过整组时，写布尔值 `source.advance_group_checkpoint: true` 放行，它必须与这三个字段之一同时出现。canonical rename 必须带 commit，组内还有其他 skill 时只能先核对整组再声明。
+
 `decision=update` 才允许替换已有 active skill。直接调用 `.system\skill-installer`、手工复制到 active root 或跳过 decision manifest，都不算完成的安装流程。
 
 本机允许重放的官方 `.system` local overlay 使用同一事务入口，并在 manifest 中显式绑定 `target_scope: "system"`。该分支只接受经过 `candidate_integrity` 绑定的本地 candidate；frontmatter 与 `manifest.skills` 仍使用 canonical basename，目录换入、`SOURCE.md` identity、ledger key 和 catalog postcheck 使用 `.system/<name>`。catalog 生成与 strict resource closure 始终以顶层 active root 为输入，禁止把 `.system` 子目录伪装成新的 active root。该分支当前不承载 canonical rename、merge retirement 或 bundled skill。
