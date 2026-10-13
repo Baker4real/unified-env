@@ -96,8 +96,8 @@ $runRoot = Join-Path $scratchRoot ('{0}-{1}' -f $runPrefix, [guid]::NewGuid().To
 
 function Get-RealHistoryScale([string]$Root) {
     # Metadata only (no file opens): counts plus a fingerprint that changes on any write.
-    # runCount: top-level directories named like producer runs; transaction and plan files
-    # count at any depth, as the reference lookup scans them.
+    # runCount: top-level directories named like producer runs, judged as Lint judges them;
+    # transaction and plan files count at any depth, as the reference lookup scans them.
     $runCount = 0L; $nonRunTopLevelEntries = 0L; $transactionCount = 0L; $planFileCount = 0L; $planTotalBytes = 0L
     $lines = [Collections.Generic.List[string]]::new()
     $lines.Add(('root|{0}' -f [IO.Directory]::GetLastWriteTimeUtc($Root).Ticks))
@@ -107,7 +107,7 @@ function Get-RealHistoryScale([string]$Root) {
         $relative = [IO.Path]::GetRelativePath($Root, $entry.FullName)
         $isDirectory = $entry -is [IO.DirectoryInfo]
         if ($relative.IndexOf('\') -lt 0) {
-            if ($isDirectory -and $entry.Name -cmatch '^\d{8}T\d{6}Z-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+            if ($isDirectory -and (Test-CodexSafeTreeDeleteRunDirectoryName -Name $entry.Name)) {
                 $runCount++
             } else { $nonRunTopLevelEntries++ }
         }

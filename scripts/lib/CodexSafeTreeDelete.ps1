@@ -665,6 +665,15 @@ function Get-CodexSafeTreeDeletePolicyEntryOwner {
     return [pscustomobject][ordered]@{ kind = 'host'; path = $null; levelsAboveRoot = $null }
 }
 
+function Test-CodexSafeTreeDeleteRunDirectoryName {
+    # producer run id（Plan 在 evidence 根下建的 run 目录名：UTC 时间戳 yyyyMMddTHHmmssZ-generationId）的唯一
+    # 判定，Lint 与历史规模测量（scripts/Measure-CodexSafeTreeDeleteHistory.ps1）共用。只认 ASCII 数字：
+    # .NET 的 \d 还匹配其他文字的十进制数字。
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Name)
+
+    return $Name -cmatch '^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+}
+
 function Get-CodexSafeTreeDeleteLintEvidenceLayout {
     # 只读枚举已校验的 evidence 根：不读文件内容，不跟随 reparse point（计入非 run 顶层目录，但不进入）。
     # run 目录：顶层、非 reparse、名字为 producer run id（UTC 时间戳-generationId）的目录。
@@ -673,14 +682,13 @@ function Get-CodexSafeTreeDeleteLintEvidenceLayout {
     # 其余位置的 transaction.json 计入非规范，位置按「最近的 run 祖先」描述，不回显非 run 目录名。
     param([Parameter(Mandatory)][string]$FullEvidenceRoot)
 
-    $runNamePattern = '^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
     $rootPrefix = $FullEvidenceRoot.TrimEnd('\', '/')
     $rootInfo = [IO.DirectoryInfo]::new($FullEvidenceRoot)
     $runDirectories = 0L
     $nonRunTopLevelDirectories = 0L
     foreach ($topLevel in $rootInfo.EnumerateDirectories()) {
         $isReparsePoint = ($topLevel.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
-        if (-not $isReparsePoint -and $topLevel.Name -cmatch $runNamePattern) {
+        if (-not $isReparsePoint -and (Test-CodexSafeTreeDeleteRunDirectoryName -Name $topLevel.Name)) {
             $runDirectories++
         } else {
             $nonRunTopLevelDirectories++
@@ -702,7 +710,7 @@ function Get-CodexSafeTreeDeleteLintEvidenceLayout {
             # 最近的 run 祖先：从文件所在目录往上找名字为 run id 的段。
             $runSegmentIndex = -1
             for ($index = $segments.Count - 2; $index -ge 0; $index--) {
-                if ($segments[$index] -cmatch $runNamePattern) {
+                if (Test-CodexSafeTreeDeleteRunDirectoryName -Name $segments[$index]) {
                     $runSegmentIndex = $index
                     break
                 }
@@ -2148,6 +2156,7 @@ function New-CodexSafeTreeDeletePlan {
 
     $publishWatch = [Diagnostics.Stopwatch]::StartNew()
     $evidenceRootPath = Initialize-CodexSafeTreeDeleteEvidenceRoot -EvidenceRoot $EvidenceRoot
+    # 目录名即 producer run id；读侧判定见 Test-CodexSafeTreeDeleteRunDirectoryName，两处须同口径。
     $runDirectory = Join-Path $evidenceRootPath ("{0}-{1}" -f $now.ToString('yyyyMMddTHHmmssZ'), $generationId)
     [void](New-CodexHookCapabilityDirectory `
         -Path $runDirectory `

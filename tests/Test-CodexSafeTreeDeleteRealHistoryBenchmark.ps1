@@ -82,8 +82,12 @@ try {
     }
     $purge = & $fixtureEntry -Mode Purge -TransactionPath $applies[0].transactionPath -ApprovedTransactionSha256 $applies[0].transactionSha256 -ConfirmPurge @common
     Assert-RealHistory ([bool]$purge.purged -and [bool]$applies[1].quarantined) 'Fixture history must hold one purged and one quarantined operation.'
-    # Production history also has non-run top-level directories holding stray transactions.
-    $strayDirectory = Join-Path $evidence 'legacy-layout\nested'
+    # Production history also has non-run top-level directories holding stray transactions. This
+    # one is named like a producer run id written in fullwidth digits; run ids have ASCII digits
+    # only (.NET \d also matches other decimal digits), so it is not a run.
+    $lookalikeTimestamp = -join @('20260101T000000Z'.ToCharArray() | ForEach-Object {
+            if ([char]::IsAsciiDigit($_)) { [char](0xFF10 + [int]$_ - [int][char]'0') } else { $_ } })
+    $strayDirectory = Join-Path $evidence ('{0}-{1}\nested' -f $lookalikeTimestamp, [guid]::NewGuid())
     [void][IO.Directory]::CreateDirectory($strayDirectory)
     [IO.File]::Copy($purge.transactionPath, (Join-Path $strayDirectory 'transaction.json'))
 
@@ -148,7 +152,7 @@ try {
 
     foreach ($phase in @('before', 'after')) {
         $scale = $report.historyScale.$phase
-        Assert-RealHistory ($scale.runCount -eq 2 -and $scale.nonRunTopLevelEntries -eq 1 -and $scale.transactionCount -eq 3) "History scale $phase must count runs and transactions."
+        Assert-RealHistory ($scale.runCount -eq 2 -and $scale.nonRunTopLevelEntries -eq 1 -and $scale.transactionCount -eq 3) ("History scale $phase must count runs and transactions: " + ($scale | ConvertTo-Json -Compress))
         Assert-RealHistory ($scale.planTotalBytes -eq $expectedPlanBytes) "History scale $phase must sum plan bytes."
     }
     Assert-RealHistory ([bool]$report.historyScale.stable) 'Fixture history must stay stable during the run.'
