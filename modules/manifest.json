@@ -15,6 +15,7 @@
       "interfaces": [
         "scripts/Invoke-EnvInventory.ps1",
         "scripts/Invoke-PipCacheMigration.ps1",
+        "scripts/Invoke-StagingManifestLint.ps1",
         "scripts/New-BackupRetentionApplyManifest.ps1",
         "scripts/New-BackupRetentionDryRun.ps1",
         "scripts/New-CodexAccountSwitchDependencyUpdateDryRun.ps1",
@@ -78,6 +79,7 @@
           "tests/Test-PipCacheMigration.ps1",
           "tests/Test-ProjectLocalEnvRebuildDryRunPlan.ps1",
           "tests/Test-ProjectLocalEnvReviewPack.ps1",
+          "tests/Test-StagingManifestLint.ps1",
           "tests/Test-StalePathEntryCleanupDryRun.ps1"
           ],
           "python": [],
@@ -96,6 +98,7 @@
             "tests/Test-EnvUpdateReadinessPolicy.ps1",
             "tests/Test-PipCacheMigration.ps1",
             "tests/Test-ProjectLocalEnvRebuildDryRunPlan.ps1",
+            "tests/Test-StagingManifestLint.ps1",
             "tests/Test-StalePathEntryCleanupDryRun.ps1"
           ],
           "python": [],
