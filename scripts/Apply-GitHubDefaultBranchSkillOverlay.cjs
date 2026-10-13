@@ -19,10 +19,10 @@ const CONTROLLED_EVIDENCE_ROOT = DEFAULT_EVIDENCE_ROOT;
 const CATALOG_VERSION = 2;
 const CATALOG_POLICY = 'main-only-publish-v2';
 // 2026-08-31 起远端 curated cache（openai-curated-remote/github/0.1.12+）不再落盘
-// skills 文件，只有本机安装与本地 curated 两个 surface 携带 github/yeet SKILL.md；
-// 远端若重新落盘会以 unexpected-plugin-surface 失败闭锁并要求重新适配。
+// skills 文件；2026-09-09 同步的本地 curated marketplace（.tmp/plugins/plugins/github）
+// 也不再携带 skills，只剩本机安装 cache 一个 surface 携带 github/yeet SKILL.md。
+// 任一已移除 surface 重新落盘都会以 unexpected-plugin-surface 失败闭锁并要求重新适配。
 const EXPECTED_SURFACE_RELATIVES = Object.freeze([
-  '.tmp/plugins/plugins/github',
   'plugins/cache/openai-curated/github/27126220',
 ]);
 const EXPECTED_SURFACE_COUNT = EXPECTED_SURFACE_RELATIVES.length;
