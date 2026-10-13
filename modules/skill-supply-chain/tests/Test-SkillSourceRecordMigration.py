@@ -543,8 +543,10 @@ Source type: codex-bundled-system
             module._protect_acl(root)
             self.assertEqual(module._verify_acl(root)["verified_item_count"], 2)
 
-            # os.replace 在 NTFS 上保留目标的显式 DACL，原子重写不构成 ACL 漂移。
+            # os.replace 让目标改用临时文件自己的 DACL；受保护目录没有可继承 ACE，这份 DACL
+            # 来自创建进程 token 的默认 DACL，不保证是三主体。生产路径重写后都会重新保护。
             module._atomic_write(manifest, b"rewritten-after-protection")
+            module._protect_acl(root)
             self.assertEqual(module._verify_acl(root)["verified_item_count"], 2)
 
             # 真实漂移 = 保护后新增第四个主体；验证器必须拒绝。
@@ -567,8 +569,6 @@ Source type: codex-bundled-system
             module._protect_acl(root)
             self.assertEqual(module.verify_backup(manifest)["entry_count"], 9)
 
-            module._atomic_write(manifest, manifest.read_bytes())
-            self.assertEqual(module.verify_backup(manifest)["entry_count"], 9)
             drift = subprocess.run(
                 ["icacls.exe", str(manifest), "/grant", r"BUILTIN\Users:(RX)"],
                 capture_output=True,
