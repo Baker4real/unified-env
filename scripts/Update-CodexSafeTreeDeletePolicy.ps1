@@ -89,14 +89,27 @@ function Write-ToolResult {
     exit $(if ([bool]$script:result.ok) { 0 } else { 1 })
 }
 
+function ConvertTo-RedactedToolMessage {
+    # 输出不回显路径。规则与 Lint 的 ConvertTo-CodexSafeTreeDeleteLintRedactedText 相同：库与宿主库把出错的值
+    # 接在全角冒号之后，只保留冒号前的规则含义；残留的盘符路径（.NET 异常文本等）替换为 <path>。库在持锁且
+    # 确认无 marker 之后才加载，锁前的拒绝也要脱敏，所以工具自带这一份。
+    param([AllowNull()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $cut = $Text.IndexOf([char]0xFF1A)
+    if ($cut -ge 0) { $Text = $Text.Substring(0, $cut) }
+    return ($Text -replace '(?i)(?<![a-z0-9])[a-z]:[\\/][^\s''"，。；]*', '<path>').Trim()
+}
+
 function Stop-WithRefusal {
     param(
         [Parameter(Mandatory)][string]$RefusalReason,
         [string]$Message
     )
+    $redacted = ConvertTo-RedactedToolMessage -Text $Message
     $script:result.ok = $false
     $script:result.refusalReason = $RefusalReason
-    $script:result.message = $(if ([string]::IsNullOrEmpty($Message)) { $null } else { $Message })
+    $script:result.message = $(if ([string]::IsNullOrEmpty($redacted)) { $null } else { $redacted })
     Write-ToolResult
 }
 
@@ -547,7 +560,7 @@ try {
 
     if ($Mode -ceq 'DryRun' -and -not [string]::IsNullOrEmpty($ApprovedCandidatePolicySha256)) {
         Stop-WithRefusal -RefusalReason 'invalid-arguments' `
-            -Message 'DryRun 不接受 ApprovedCandidatePolicySha256：先 DryRun 取得 candidatePolicySha256，再以 Apply 提交。'
+            -Message 'DryRun 不接受 ApprovedCandidatePolicySha256；先 DryRun 取得 candidatePolicySha256，再以 Apply 提交。'
     }
     if ($Mode -ceq 'Apply' -and $ApprovedCandidatePolicySha256 -cnotmatch '^[0-9a-f]{64}\z') {
         Stop-WithRefusal -RefusalReason 'invalid-arguments' `
@@ -561,9 +574,12 @@ try {
         $confirmationValues = ([string]$confirmationValues[0]).Split([string[]]@('::'), [StringSplitOptions]::RemoveEmptyEntries)
     }
     $confirmedOperationIds = [Collections.Generic.List[string]]::new()
-    foreach ($operationId in $confirmationValues) {
+    for ($position = 1; $position -le $confirmationValues.Count; $position++) {
+        $operationId = [string]$confirmationValues[$position - 1]
         if ($operationId -cnotmatch '^[0-9A-Za-z][0-9A-Za-z._-]{0,127}\z') {
-            Stop-WithRefusal -RefusalReason 'invalid-arguments' -Message "ConfirmManualReviewOperationIds 含非法 operation id：$operationId"
+            # 只报位置，不回显取值。
+            Stop-WithRefusal -RefusalReason 'invalid-arguments' `
+                -Message "ConfirmManualReviewOperationIds 的第 $position 个值不是合法 operation id。"
         }
         if (-not $confirmedOperationIds.Contains($operationId)) { $confirmedOperationIds.Add($operationId) }
     }

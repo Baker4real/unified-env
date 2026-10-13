@@ -923,6 +923,46 @@ try {
         'failure-json-unexpected: 场景目录必须零写入（面包屑已删除）'
     Write-Output 'failure-json OK'
 
+    # ---- 18. 输出不回显路径：错误文本里带路径的失败（参数值、变更集与现役 policy 的校验信息、.NET 异常
+    # 文本）拒绝时 message 只保留规则含义，原始 JSON 里没有盘符路径 ----
+    Write-Output 'STEP no-path-output'
+    $noPath = New-Scenario -Name 'no-path-output'
+    $wildcardPath = Join-Path $noPath.TargetsRoot 'k*eep'
+    $pathCases = @(
+        @{ label = 'operation-id-path'; reason = 'invalid-arguments'; message = 'operation id'
+            invoke = { Invoke-PolicyTool -Scenario $noPath -Mode 'DryRun' -ConfirmManualReviewOperationIds @($noPath.TargetsRoot) } },
+        @{ label = 'approved-sha-path'; reason = 'invalid-arguments'; message = 'candidatePolicySha256'
+            invoke = { Invoke-PolicyTool -Scenario $noPath -Mode 'Apply' -ApprovedCandidatePolicySha256 $noPath.TargetsRoot } },
+        @{ label = 'change-set-path'; reason = 'change-set-invalid'; message = '通配符'
+            changes = @([pscustomobject][ordered]@{ op = 'add-deny'; entryId = 'fixture-main'; path = $wildcardPath }) },
+        @{ label = 'live-policy-path'; reason = 'live-policy-invalid'; message = '通配符'; corruptLivePolicy = $true },
+        @{ label = 'exception-text-path'; reason = 'unexpected-error'; message = '<path>'
+            invoke = { Invoke-PolicyTool -Scenario $noPath -Mode 'DryRun' -ExtraArguments @{
+                    PauseAfterPhaseForTest = 10
+                    PauseSignalDirectoryForTest = (Join-Path $noPath.Root 'no-such-signals') } } }
+    )
+    foreach ($case in $pathCases) {
+        $changes = if ($case.ContainsKey('changes')) { $case.changes } else {
+            @([pscustomobject][ordered]@{ op = 'add-deny'; entryId = 'fixture-main'; path = (Join-Path $noPath.TargetsRoot 'protected') })
+        }
+        Set-ChangeSet -Scenario $noPath -Changes $changes
+        $livePolicyTemplate = if ($case.ContainsKey('corruptLivePolicy')) {
+            $basePolicyTemplate.Replace('"{TARGETS}\\keep"', '"{TARGETS}\\k*eep"')
+        } else {
+            $basePolicyTemplate
+        }
+        [IO.File]::WriteAllBytes($noPath.PolicyPath, $utf8.GetBytes((Expand-PolicyTemplate -Scenario $noPath -Template $livePolicyTemplate)))
+        $caseResult = if ($case.ContainsKey('invoke')) { & $case.invoke } else { Invoke-PolicyTool -Scenario $noPath -Mode 'DryRun' }
+        Assert-Refusal -Result $caseResult -RefusalReason $case.reason -Label "no-path-$($case.label)"
+        Assert-True (([string]$caseResult.Json.message).Contains([string]$case.message)) `
+            "no-path-$($case.label): message 必须保留规则含义（含 '$($case.message)'）：$($caseResult.Json.message)"
+        # JSON 里的反斜杠转义为 \\；worktree 路径的非 ASCII 段按 EscapeNonAscii 转义，另用 scratch 根的 ASCII 叶名作针。
+        Assert-True ($caseResult.Text -notmatch '(?i)(?<![a-z0-9])[a-z]:(\\\\|/)' -and
+            $caseResult.Text.IndexOf((Split-Path -Leaf $scratchRoot), [StringComparison]::OrdinalIgnoreCase) -lt 0) `
+            "no-path-$($case.label): 输出不得包含路径：$($caseResult.Text)"
+    }
+    Write-Output 'no-path-output OK'
+
     Write-Output 'POLICY-MAINTENANCE-TESTS OK'
 } finally {
     foreach ($call in $childProcesses) {
