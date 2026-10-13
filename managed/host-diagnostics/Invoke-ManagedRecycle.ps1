@@ -3,11 +3,13 @@
 .SYNOPSIS
 Move one file or directory tree to its volume's Recycle Bin against an exact, SHA-256-pinned manifest.
 .DESCRIPTION
-Plan scans the target and writes <EvidenceRoot>/<run>/plan.json with the relative path and size of every
-entry, the bin facts, the purpose and the user's authorization. Apply consumes that plan by SHA-256 within
-30 minutes, reruns every preflight check, rescans the target, recycles it with SHFileOperationW
-(FOF_ALLOWUNDO | FOF_WANTNUKEWARNING, no UI) and compares the bin copy with the plan, recording the outcome
-once in result.json next to the plan. Output is one JSON object; exit 0 only for planned or recycled.
+Check runs the preflight below read-only, needs no purpose or authorization and writes no evidence, so an
+agent can tell whether a target is recyclable before asking the user. Plan scans the target and writes
+<EvidenceRoot>/<run>/plan.json with the relative path and size of every entry, the bin facts, the purpose
+and the user's authorization. Apply consumes that plan by SHA-256 within 30 minutes, reruns every preflight
+check, rescans the target, recycles it with SHFileOperationW (FOF_ALLOWUNDO | FOF_WANTNUKEWARNING, no UI)
+and compares the bin copy with the plan, recording the outcome once in result.json next to the plan. Output
+is one JSON object; exit 0 only for checked, planned or recycled.
 
 Preflight fails closed on: paths that are not drive paths on a fixed NTFS volume, volume roots, protected
 roots and their ancestors, system subtrees, reparse points on the path or inside the tree, hard links,
@@ -17,12 +19,13 @@ would make Windows evict older bin items). Nothing is deleted permanently and th
 both stay with the user. Agents use this entry only for targets the user explicitly authorized in the
 current task, quoted in -Authorization.
 .EXAMPLE
+& 'D:/Codex/.codex/scripts/Invoke-ManagedRecycle.ps1' -Mode Check -TargetPath 'C:/Users/me/AppData/Local/pip/cache'
 & 'D:/Codex/.codex/scripts/Invoke-ManagedRecycle.ps1' -Mode Plan -TargetPath 'C:/Users/me/AppData/Local/pip/cache' -Purpose 'pip cache' -Authorization '<user words>'
 & 'D:/Codex/.codex/scripts/Invoke-ManagedRecycle.ps1' -Mode Apply -PlanPath '<planPath>' -ApprovedPlanSha256 '<planSha256>' -ConfirmRecycle
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Plan', 'Apply')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Check', 'Plan', 'Apply')][string]$Mode,
     [string]$TargetPath,
     [string]$Purpose,
     [string]$Authorization,
@@ -55,7 +58,7 @@ function Save-Result([string]$Path) {
 function Complete {
     if ($result.Contains('resultPath') -and -not [IO.File]::Exists($result.resultPath)) { Save-Result $result.resultPath }
     $result | ConvertTo-Json -Depth 8 -Compress
-    exit $(if ($result.status -in @('planned', 'recycled')) { 0 } else { 1 })
+    exit $(if ($result.status -in @('checked', 'planned', 'recycled')) { 0 } else { 1 })
 }
 
 function Stop-Refused([string]$Reason) {
@@ -81,6 +84,11 @@ function Get-ReparseOnPath([string]$Path) {
 
 function Get-ManifestSha256($Scan) {
     [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($utf8.GetBytes([string]::Join("`n", $Scan.Lines))))
+}
+
+function Get-TopLevel($Scan) {
+    $Scan.Top.GetEnumerator() | Sort-Object { $_.Value[0] } -Descending | Select-Object -First 15 |
+        ForEach-Object { [ordered]@{ name = $_.Key; bytes = $_.Value[0]; files = $_.Value[1] } }
 }
 
 # Losing these is never a cache cleanup: volume roots, profile and program containers, the agent roots, and
@@ -181,8 +189,20 @@ function Invoke-Preflight([string]$Path, [string]$EvidenceFull) {
     $result.directoryCount = $scan.Directories
     $result.totalBytes = $scan.Bytes
     $binName = (Get-UserBinDirectory $root).Length + 9 + [IO.Path]::GetExtension($full).Length
-    $result.longestPath = [math]::Max($full.Length, $binName) + $(if ($scan.MaxRelativeLength -gt 0) { 1 + $scan.MaxRelativeLength } else { 0 })
-    if ($result.longestPath -gt $maxShellPath) { Stop-Refused 'path-too-long' }
+    $tail = if ($scan.MaxRelativeLength -gt 0) { 1 + $scan.MaxRelativeLength } else { 0 }
+    $result.longestPath = [math]::Max($full.Length, $binName) + $tail
+    if ($result.longestPath -gt $maxShellPath) {
+        # Name the entries over the limit: a shorter parent fixes the in-place side; only a shorter target name
+        # or a narrower target fixes the bin side.
+        $result.inPlaceLongestPath = $full.Length + $tail
+        $result.inBinLongestPath = $binName + $tail
+        $limit = $maxShellPath - [math]::Max($full.Length, $binName) - 1
+        $tooLong = @($scan.Lines | ForEach-Object { $_.Split("`t")[1] } | Where-Object { $_ -and $_.Length -gt $limit } |
+            Sort-Object Length -Descending)
+        $result.tooLongCount = $tooLong.Count
+        $result.tooLong = @($tooLong | Select-Object -First 20)
+        Stop-Refused 'path-too-long'
+    }
     if ($scan.ProblemCount -gt 0) {
         $result.problemCount = $scan.ProblemCount
         $result.problems = @($scan.Problems)
@@ -449,6 +469,13 @@ namespace ManagedRecycle
         Stop-Refused 'evidence-root-not-on-d'
     }
 
+    if ($Mode -eq 'Check') {
+        $checked = Invoke-Preflight $TargetPath $evidenceFull
+        $result.status = 'checked'
+        $result.topLevel = @(Get-TopLevel $checked.scan)
+        Complete
+    }
+
     if ($Mode -eq 'Plan') {
         if ([string]::IsNullOrWhiteSpace($Purpose) -or [string]::IsNullOrWhiteSpace($Authorization)) {
             Stop-Refused 'purpose-and-authorization-required'
@@ -457,8 +484,7 @@ namespace ManagedRecycle
         $runDir = Join-Path $evidenceFull ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         [void][IO.Directory]::CreateDirectory($runDir)
         if (Get-ReparseOnPath $runDir) { Stop-Refused 'evidence-path-has-reparse-point' }
-        $topLevel = @($checked.scan.Top.GetEnumerator() | Sort-Object { $_.Value[0] } -Descending | Select-Object -First 15 |
-            ForEach-Object { [ordered]@{ name = $_.Key; bytes = $_.Value[0]; files = $_.Value[1] } })
+        $topLevel = @(Get-TopLevel $checked.scan)
         $manifestSha256 = Get-ManifestSha256 $checked.scan
         $plan = [ordered]@{
             artifactType = 'managed-recycle-plan'

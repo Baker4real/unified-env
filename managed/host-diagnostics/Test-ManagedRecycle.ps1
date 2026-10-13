@@ -3,7 +3,7 @@
 .SYNOPSIS
 Exercise Invoke-ManagedRecycle through its public process interface on D: fixtures.
 .DESCRIPTION
-Refusal and plan cases never touch the Recycle Bin. The live case recycles one fixture tree into the D: bin,
+Check, refusal and plan cases never touch the Recycle Bin. The live case recycles one fixture tree into the D: bin,
 then restores it the way Explorer does, without deleting anything: the $R content moves back to its path and
 the $I index record moves into this run's evidence. -SkipLiveRecycle reports that case as skipped.
 #>
@@ -150,17 +150,38 @@ try {
 
     Assert-Case 'plan refuses paths the shell cannot move' {
         [void][IO.Directory]::CreateDirectory($longTree)
-        $script:longFile = Join-Path $longTree ('x' * (262 - $longTree.Length - 1))
+        $name = 'x' * (262 - $longTree.Length - 1)
+        $script:longFile = Join-Path $longTree $name
         [IO.File]::WriteAllText($script:longFile, 'long', $utf8)
         $response = Invoke-Plan $longTree
         Assert-Refused $response 'path-too-long'
         if ($response.json.longestPath -le 259) { throw 'The longest path was not measured.' }
+        $binDirectory = 'D:\$Recycle.Bin\' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        if ($response.json.inPlaceLongestPath -ne 262 -or $response.json.inBinLongestPath -ne $binDirectory.Length + 10 + $name.Length) {
+            throw 'The in-place and in-bin lengths were not reported.'
+        }
+        if ($response.json.tooLongCount -ne 1 -or [string]::Join('|', $response.json.tooLong) -cne $name) { throw 'The entry over the limit was not named.' }
     }
 
     Assert-Case 'plan requires purpose and authorization' {
         $tree = New-Tree 'tree-unauthorized'
         Assert-Refused (Invoke-Entry @('-Mode', 'Plan', '-TargetPath', $tree, '-Purpose', 'managed recycle test')) 'purpose-and-authorization-required'
         if (@(Get-ChildItem -LiteralPath $entryEvidence -Filter 'plan.json' -Recurse).Count -ne 0) { throw 'A refused plan wrote plan.json.' }
+    }
+
+    Assert-Case 'check shares the preflight without purpose or authorization' {
+        Assert-Refused (Invoke-Entry @('-Mode', 'Check', '-TargetPath', (Join-Path $fixtures 'missing'))) 'target-missing'
+        Assert-Refused (Invoke-Entry @('-Mode', 'Check', '-TargetPath', 'D:\agents\projects')) 'protected-location'
+    }
+
+    Assert-Case 'check reports a recyclable tree and writes no evidence' {
+        $tree = New-Tree 'tree-check'
+        $before = @(Get-ChildItem -LiteralPath $entryEvidence -Recurse).Count
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree)
+        if ($response.exitCode -ne 0 -or $response.json.status -ne 'checked' -or $response.stderr) { throw "Check failed: $($response.stdout)" }
+        if ($response.json.fileCount -ne 2 -or $response.json.directoryCount -ne 2 -or $response.json.totalBytes -ne 1029) { throw 'Check totals changed.' }
+        if (@($response.json.topLevel).Count -ne 3 -or $response.json.ContainsKey('planPath')) { throw 'Check did not report the top level, or reported a plan.' }
+        if (@(Get-ChildItem -LiteralPath $entryEvidence -Recurse).Count -ne $before) { throw 'Check wrote evidence.' }
     }
 
     Assert-Case 'plan writes the exact manifest pinned by the plan hash' {
