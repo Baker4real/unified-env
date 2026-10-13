@@ -92,11 +92,19 @@ node .\scripts\Validate-ModuleBoundaries.cjs --json
 node .\tests\Test-ModuleBoundaries.cjs
 ```
 
-仓库还包含 Python 与 Node 专项测试；使用已验证的 Python/Node 入口分别运行：
+manifest 登记的 Python 与 Node 测试（默认取各 owner 的 `fixture` profile，`--kind python|node` 只跑其中一种）同样由 Node 编排：Python 文件以 `python -B` 运行，Node 文件用当前 Node 运行，结尾汇总，任一失败即非零退出。Node 不经 shell 启动解释器，只在 PATH 中查找 `python.exe`，会跳过 `.cmd` shim；需要固定解释器时用 `PYTHON_PATH` 指定完整路径：
 
 ```powershell
-python -B .\tests\Test-CodexStatePathInventory.py
-python -B .\tests\Test-CodexStatePolicy.py
+node .\scripts\Run-ManifestTests.cjs
+node .\scripts\Run-ManifestTests.cjs --module skill-supply-chain --list
+node .\scripts\Run-ManifestTests.cjs --module codex-host --profile host-live
+```
+
+断言真实宿主状态的测试（如 `D:\Documents\Codex` 目录、`D:\Codex\.codex` 已部署的 skills）登记在 `host-live` profile，只在显式选择时运行。CI 的 Python and Node fixtures job 加 `--exclude-host-bound`：用临时 fixture、但要启动本仓库之外宿主脚本的 fixture 测试登记在 `scripts/Run-ManifestTests.cjs` 的 `HOST_BOUND_TESTS` 中并附原因，CI 只报告、不运行；本机不加该参数即全量执行。
+
+其余专项入口：
+
+```powershell
 python -B .\scripts\generate_skill_catalog.py --dry-run
 node .\tests\Test-GitDefaultBranchSkillPolicy.cjs
 node .\tests\Test-GitHubDefaultBranchSkillOverlay.cjs

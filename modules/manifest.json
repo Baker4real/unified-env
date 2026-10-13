@@ -192,7 +192,6 @@
           "tests/Test-RetiredProjectSnapshotSanitizer.ps1"
           ],
           "python": [
-          "tests/Test-CodexStatePathInventory.py",
           "tests/Test-CodexConfig.py",
           "tests/Test-CodexStatePolicy.py",
           "tests/Test-CodexStatePreflight.py",
@@ -219,7 +218,9 @@
             "tests/Test-CodexRemotePluginCatalogGuardVendorAbortStress.ps1",
             "tests/Test-PowerShellIfeoRouterCodexStoreHost.ps1"
           ],
-          "python": [],
+          "python": [
+            "tests/Test-CodexStatePathInventory.py"
+          ],
           "node": [
             "tests/Test-ExplicitRetiredArtifactPurge.cjs"
           ]
@@ -279,10 +280,16 @@
           "modules/skill-supply-chain/tests/Test-SkillsRepoPreCommit.py"
           ],
           "node": [
-          "tests/Test-GitDefaultBranchSkillPolicy.cjs",
           "tests/Test-GitHubDefaultBranchSkillOverlay.cjs",
-          "tests/Test-RetiredSkillBackupManifestPurger.cjs",
-          "tests/Test-SuperpowersSkillRetirement.cjs"
+          "tests/Test-RetiredSkillBackupManifestPurger.cjs"
+          ]
+        },
+        "host-live": {
+          "powershell": [],
+          "python": [],
+          "node": [
+            "tests/Test-GitDefaultBranchSkillPolicy.cjs",
+            "tests/Test-SuperpowersSkillRetirement.cjs"
           ]
         }
       }
@@ -605,6 +612,7 @@
         "README.md",
         "modules/README.md",
         "modules/manifest.json",
+        "scripts/Run-ManifestTests.cjs",
         "scripts/Run-PowerShellTests.cjs",
         "scripts/Validate-ModuleBoundaries.cjs"
       ],

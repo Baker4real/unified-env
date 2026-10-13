@@ -9,6 +9,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 const MANIFEST_PATH = path.join(PROJECT_ROOT, 'modules', 'manifest.json');
 const VALIDATOR_PATH = path.join(PROJECT_ROOT, 'scripts', 'Validate-ModuleBoundaries.cjs');
 const POWERSHELL_RUNNER_PATH = path.join(PROJECT_ROOT, 'scripts', 'Run-PowerShellTests.cjs');
+const MANIFEST_RUNNER_PATH = path.join(PROJECT_ROOT, 'scripts', 'Run-ManifestTests.cjs');
 
 assert.equal(fs.existsSync(VALIDATOR_PATH), true, 'module boundary validator must exist');
 
@@ -95,6 +96,68 @@ for (const hostInventoryTest of [
   'Test-ProjectLocalEnvReviewPack.ps1',
 ]) {
   assert.equal(devEnvironmentCiTestNames.has(hostInventoryTest), false);
+}
+
+function runManifestRunner(args, env = {}) {
+  return spawnSync(process.execPath, [MANIFEST_RUNNER_PATH, ...args], {
+    cwd: PROJECT_ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, GITHUB_ACTIONS: '', ...env },
+    windowsHide: true,
+  });
+}
+
+function listManifestTests(...args) {
+  const result = runManifestRunner([...args, '--list']);
+  assert.equal(result.status, 0, String(result.stderr || result.stdout));
+  return result.stdout.trim().split(/\r?\n/);
+}
+
+const { HOST_BOUND_TESTS, buildTestPlan } = require(MANIFEST_RUNNER_PATH);
+for (const kind of ['python', 'node']) {
+  assert.deepEqual(
+    listManifestTests('--kind', kind).sort(),
+    [manifest.shared, ...manifest.modules].flatMap((owner) => owner.tests?.fixture?.[kind] ?? []).sort(),
+    `manifest runner must list every ${kind} fixture test`,
+  );
+}
+
+const ciList = runManifestRunner(['--list', '--exclude-host-bound'], { GITHUB_ACTIONS: 'true' });
+assert.equal(ciList.status, 0, String(ciList.stderr || ciList.stdout));
+const ciLines = ciList.stdout.trim().split(/\r?\n/);
+assert.ok(Object.keys(HOST_BOUND_TESTS).length > 0);
+for (const [testPath, reason] of Object.entries(HOST_BOUND_TESTS)) {
+  const report = `Not run (host-bound): ${testPath} - ${reason}`;
+  assert.equal(ciLines.includes(testPath), false, `${testPath} must not run on CI`);
+  assert.ok(ciLines.includes(report), `${testPath} must be reported as host-bound with its reason`);
+  assert.ok(
+    ciLines.includes(`::warning title=Host-bound test not run::${report}`),
+    `${testPath} must raise a GitHub Actions warning`,
+  );
+}
+
+const fixtureScriptTests = new Set(listManifestTests());
+for (const [moduleId, liveStateTest] of [
+  ['codex-host', 'tests/Test-CodexStatePathInventory.py'],
+  ['skill-supply-chain', 'tests/Test-GitDefaultBranchSkillPolicy.cjs'],
+  ['skill-supply-chain', 'tests/Test-SuperpowersSkillRetirement.cjs'],
+]) {
+  assert.equal(fixtureScriptTests.has(liveStateTest), false, `${liveStateTest} reads live host state`);
+  assert.ok(listManifestTests('--module', moduleId, '--profile', 'host-live').includes(liveStateTest));
+}
+
+assert.throws(
+  () => buildTestPlan(manifest, { hostBoundTests: { 'tests/Test-Missing.py': 'removed test' } }),
+  /not a manifest python or node test: tests\/Test-Missing\.py/,
+  'a stale host-bound entry must fail closed',
+);
+for (const [args, message] of [
+  [['--module', 'missing-module', '--list'], /Unknown module: missing-module/],
+  [['--kind', 'powershell', '--list'], /Unknown test kind: powershell/],
+]) {
+  const rejected = runManifestRunner(args);
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, message);
 }
 
 const hostSafetyModule = manifest.modules.find((entry) => entry.id === 'host-safety');
