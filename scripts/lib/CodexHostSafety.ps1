@@ -371,6 +371,23 @@ function Get-CodexHookHandleBoundFileSnapshot {
     }
 }
 
+function ConvertFrom-CodexHookStrictUtf8Bytes {
+    # 严格 UTF-8 解码（非法序列即失败），去掉开头的 UTF-8 BOM；Name 只用于错误消息。
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $hasBom = $Bytes.Length -ge 3 -and $Bytes[0] -eq 0xef -and $Bytes[1] -eq 0xbb -and $Bytes[2] -eq 0xbf
+    try {
+        if ($hasBom) { return $utf8.GetString($Bytes, 3, $Bytes.Length - 3) }
+        return $utf8.GetString($Bytes)
+    } catch {
+        throw "$Name 不是严格 UTF-8：$($_.Exception.Message)"
+    }
+}
+
 function Read-CodexHookSafeUtf8FileSnapshot {
     [CmdletBinding()]
     param(
@@ -392,13 +409,7 @@ function Read-CodexHookSafeUtf8FileSnapshot {
     } finally {
         $sha.Dispose()
     }
-    $utf8 = [Text.UTF8Encoding]::new($false, $true)
-    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xef -and $bytes[1] -eq 0xbb -and $bytes[2] -eq 0xbf
-    try {
-        $text = if ($hasBom) { $utf8.GetString($bytes, 3, $bytes.Length - 3) } else { $utf8.GetString($bytes) }
-    } catch {
-        throw "$Name 不是严格 UTF-8：$($_.Exception.Message)"
-    }
+    $text = ConvertFrom-CodexHookStrictUtf8Bytes -Bytes $bytes -Name $Name
 
     return [pscustomobject][ordered]@{
         probe = $snapshot.probe

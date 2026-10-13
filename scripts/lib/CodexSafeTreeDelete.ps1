@@ -1022,16 +1022,29 @@ function Invoke-CodexSafeTreeDeleteLint {
 }
 
 function Read-CodexSafeTreeDeletePolicy {
+    [CmdletBinding(DefaultParameterSetName = 'Path')]
     param(
-        [Parameter(Mandatory)][string]$PolicyPath,
+        [Parameter(Mandatory, ParameterSetName = 'Path')][string]$PolicyPath,
+        # #82 policy 维护工具的候选只在内存里（DryRun 不落盘）：与磁盘 policy 同一套严格 UTF-8 解码与
+        # 校验，SHA-256 按原始字节计算；结果的 path 为 $null。
+        [Parameter(Mandatory, ParameterSetName = 'Bytes')][AllowEmptyCollection()][byte[]]$PolicyBytes,
         [scriptblock]$MetricsObserver
     )
 
-    $fullPolicyPath = Assert-CodexHookDPath -Value $PolicyPath -Name 'safe-delete policy path'
-    $snapshot = Read-CodexHookSafeUtf8FileSnapshot `
-        -Path $fullPolicyPath `
-        -Name 'safe-delete policy' `
-        -AllowedExactPaths @($fullPolicyPath)
+    if ($PSCmdlet.ParameterSetName -ceq 'Bytes') {
+        $fullPolicyPath = $null
+        $snapshot = [pscustomobject]@{
+            sha256 = Get-CodexHookBytesSha256 -Bytes $PolicyBytes
+            text = ConvertFrom-CodexHookStrictUtf8Bytes -Bytes $PolicyBytes -Name 'safe-delete policy'
+            bytes = $PolicyBytes
+        }
+    } else {
+        $fullPolicyPath = Assert-CodexHookDPath -Value $PolicyPath -Name 'safe-delete policy path'
+        $snapshot = Read-CodexHookSafeUtf8FileSnapshot `
+            -Path $fullPolicyPath `
+            -Name 'safe-delete policy' `
+            -AllowedExactPaths @($fullPolicyPath)
+    }
     if ($null -ne $MetricsObserver) {
         & $MetricsObserver 'hash-read' 0L ([long]$snapshot.bytes.Length)
     }
@@ -6247,6 +6260,9 @@ function Get-CodexSafeTreeDeleteStatus {
         [Parameter(Mandatory)][string]$PolicyPath,
         [Parameter(Mandatory)][string]$EvidenceRoot,
         [string]$CandidatePolicyPath,
+        # #82：policy 维护工具以内存中的候选字节代替 CandidatePolicyPath（二者只能给一个），DryRun 因此不落盘；
+        # 输出的 migrationReadiness.candidatePolicyPath 为 $null。
+        [byte[]]$CandidatePolicyBytes,
         [string]$ApprovedCandidatePolicySha256,
         # #80 范围查询：只对 targetPath 与任一目标按 OrdinalIgnoreCase 相等（不做 Unicode 规范化，
         # 与 BatchPurge 一致）的记录作答，祖先与后代路径不算命中；无法确定 targetPath 的记录计入
@@ -6313,20 +6329,27 @@ function Get-CodexSafeTreeDeleteStatus {
         -PolicyPath $PolicyPath `
         -MetricsObserver $treeMetricsObserver
     $candidatePolicy = $null
+    $candidatePolicyPathGiven = -not [string]::IsNullOrWhiteSpace($CandidatePolicyPath)
+    $candidatePolicyBytesGiven = $null -ne $CandidatePolicyBytes
     $candidatePolicyRequested =
-        -not [string]::IsNullOrWhiteSpace($CandidatePolicyPath) -or
+        $candidatePolicyPathGiven -or $candidatePolicyBytesGiven -or
         -not [string]::IsNullOrWhiteSpace($ApprovedCandidatePolicySha256)
     if ($candidatePolicyRequested) {
-        if ([string]::IsNullOrWhiteSpace($CandidatePolicyPath) -or
+        if ($candidatePolicyPathGiven -and $candidatePolicyBytesGiven) {
+            throw 'safe-delete candidate policy preflight 只接受 path 或字节之一。'
+        }
+        if ((-not $candidatePolicyPathGiven -and -not $candidatePolicyBytesGiven) -or
             [string]::IsNullOrWhiteSpace($ApprovedCandidatePolicySha256)) {
             throw 'safe-delete candidate policy preflight 要求 path 与 approved SHA-256。'
         }
         if ($ApprovedCandidatePolicySha256 -notmatch '^[0-9a-f]{64}$') {
             throw 'safe-delete candidate policy approved SHA-256 格式非法。'
         }
-        $candidatePolicy = Read-CodexSafeTreeDeletePolicy `
-            -PolicyPath $CandidatePolicyPath `
-            -MetricsObserver $treeMetricsObserver
+        $candidatePolicy = if ($candidatePolicyBytesGiven) {
+            Read-CodexSafeTreeDeletePolicy -PolicyBytes $CandidatePolicyBytes -MetricsObserver $treeMetricsObserver
+        } else {
+            Read-CodexSafeTreeDeletePolicy -PolicyPath $CandidatePolicyPath -MetricsObserver $treeMetricsObserver
+        }
         if ([string]$candidatePolicy.sha256 -cne $ApprovedCandidatePolicySha256) {
             throw 'safe-delete candidate policy approved SHA-256 不匹配。'
         }
@@ -6580,7 +6603,7 @@ function Get-CodexSafeTreeDeleteStatus {
         policySchemaVersion = [long]$policy.schemaVersion
         migrationReadiness = [pscustomobject][ordered]@{
             evaluated = $candidatePolicyRequested
-            candidatePolicyPath = if ($null -eq $candidatePolicy) { $null } else { [string]$candidatePolicy.path }
+            candidatePolicyPath = if ($null -eq $candidatePolicy -or $null -eq $candidatePolicy.path) { $null } else { [string]$candidatePolicy.path }
             candidatePolicySha256 = if ($null -eq $candidatePolicy) { $null } else { [string]$candidatePolicy.sha256 }
             candidatePolicySchemaVersion = if ($null -eq $candidatePolicy) { $null } else { [long]$candidatePolicy.schemaVersion }
             ready = if ($candidatePolicyRequested) {

@@ -23,7 +23,8 @@ $ErrorActionPreference = 'Stop'
 # （mode=policy-maintenance），因此与 shim 调用、部署互斥。两种 Mode 都持锁执行同一条检查链：
 # 读现役 policy → 按声明式变更集生成候选 → 现有加载器加载候选、结构规则不新增违例 → 在途检查
 # （进程内调用 Status 的候选 policy 预检）。DryRun 到此输出候选 SHA；Apply 要求同一候选 SHA，
-# 再以同目录临时文件原子替换落盘。候选与在途检查都按磁盘原始字节计算。
+# 再以同目录临时文件原子替换落盘。候选只在内存里：加载器与 Status 预检读同一份候选原始字节，
+# DryRun 不写任何文件。
 
 $productionPolicyPath = 'D:\agents\projects\统一环境\managed\safe-tree-delete\policy.json'
 $productionEvidenceRoot = 'D:\agents\run-evidence\safe-tree-delete'
@@ -480,7 +481,7 @@ function Get-InFlightAssessment {
     # 只有绑定现役 policy、且会因候选失去兼容的非 terminal 记录参与阻止。
     param(
         [Parameter(Mandatory)][string]$LivePolicySha256,
-        [Parameter(Mandatory)][string]$CandidatePolicyPath,
+        [Parameter(Mandatory)][byte[]]$CandidatePolicyBytes,
         [Parameter(Mandatory)][string]$CandidatePolicySha256,
         [Parameter(Mandatory)][object]$CandidatePolicy,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$AffectedPaths,
@@ -491,7 +492,7 @@ function Get-InFlightAssessment {
     $status = Get-CodexSafeTreeDeleteStatus `
         -PolicyPath $policyPath `
         -EvidenceRoot $fullEvidenceRoot `
-        -CandidatePolicyPath $CandidatePolicyPath `
+        -CandidatePolicyBytes $CandidatePolicyBytes `
         -ApprovedCandidatePolicySha256 $CandidatePolicySha256
     if ([string]$status.policySha256 -cne $LivePolicySha256) {
         throw 'Status 读到的现役 policy 与本次读取的不一致（policy 在检查期间被改动）。'
@@ -585,7 +586,6 @@ if (-not $acquired) {
     $result['holder'] = Read-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot
     Stop-WithRefusal -RefusalReason 'deployment-mutex-acquire-timeout'
 }
-$stagedCandidatePath = $null
 try {
     # #77：持锁期间留 mode=policy-maintenance 面包屑；写失败是有意降级，不阻塞。
     [void](Write-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot -Mode 'policy-maintenance')
@@ -645,21 +645,9 @@ try {
     Stop-IfRequested -Sequence 40
 
     # 5. 候选必须能被现有加载器加载，且按结构规则不新增违例（现役已有的违例列入输出，不阻止）。
-    # 候选按原始字节暂存在 policy 同目录（*.tmp，结束前删除），加载器与 Status 预检读同一份字节。
-    $policyDirectory = Split-Path -Parent $policyFullPath
-    $stagedCandidatePath = Join-Path $policyDirectory ('.codex-policy-maintenance-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
-    $stagedStream = [IO.FileStream]::new($stagedCandidatePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    # 加载器与 Status 预检读同一份内存中的候选原始字节，不落盘。
     try {
-        $stagedStream.Write($candidateBytes, 0, $candidateBytes.Length)
-        $stagedStream.Flush($true)
-    } finally {
-        $stagedStream.Dispose()
-    }
-    try {
-        $candidatePolicy = Read-CodexSafeTreeDeletePolicy -PolicyPath $stagedCandidatePath
-        if ([string]$candidatePolicy.sha256 -cne $candidateSha256) {
-            throw '暂存候选的字节与生成的候选不一致。'
-        }
+        $candidatePolicy = Read-CodexSafeTreeDeletePolicy -PolicyBytes $candidateBytes
     } catch {
         Stop-WithRefusal -RefusalReason 'candidate-policy-invalid' -Message $_.Exception.Message
     }
@@ -675,7 +663,7 @@ try {
     try {
         $inFlight = Get-InFlightAssessment `
             -LivePolicySha256 ([string]$livePolicy.sha256) `
-            -CandidatePolicyPath $stagedCandidatePath `
+            -CandidatePolicyBytes $candidateBytes `
             -CandidatePolicySha256 $candidateSha256 `
             -CandidatePolicy $candidatePolicy `
             -AffectedPaths @(Get-ResolutionAffectedPaths -LiveEntries @($livePolicy.entries) -CandidateEntries @($candidatePolicy.entries)) `
@@ -684,8 +672,6 @@ try {
         Stop-WithRefusal -RefusalReason 'in-flight-check-failed' -Message $_.Exception.Message
     }
     $result.inFlight = $inFlight
-    [IO.File]::Delete($stagedCandidatePath)
-    $stagedCandidatePath = $null
     if (@($inFlight.blocking).Count -ne 0) {
         Stop-WithRefusal -RefusalReason 'in-flight-records-blocking' `
             -Message '有绑定现役 policy、会因本次变更失去兼容的在途记录，见 inFlight.blocking。'
@@ -698,6 +684,7 @@ try {
     }
 
     # 7. 原子替换落盘：同目录临时文件写入批准的候选字节，换名前复核现役字节未变，换名后复核候选 SHA。
+    $policyDirectory = Split-Path -Parent $policyFullPath
     try {
         Set-CodexHookAtomicFileBytesWithCapability `
             -Path $policyFullPath `
@@ -720,9 +707,6 @@ try {
     $result.notice = 'policy 已对宿主立即生效，git 提交需另行完成'
     Write-ToolResult
 } finally {
-    if ($null -ne $stagedCandidatePath) {
-        try { [IO.File]::Delete($stagedCandidatePath) } catch { }
-    }
     Remove-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot
     [void]$mutex.ReleaseMutex()
     $mutex.Dispose()

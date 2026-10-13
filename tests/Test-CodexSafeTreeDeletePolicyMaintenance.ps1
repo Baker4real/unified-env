@@ -461,8 +461,9 @@ function Resume-PausedPolicyTool {
     }
     return [pscustomobject]@{
         ExitCode = $done.ExitCode
-        Text = "$text$($done.Stderr)"
+        Text = $text
         Json = $json
+        Stderr = $done.Stderr
     }
 }
 
@@ -499,16 +500,29 @@ try {
     }
     Write-Output 'marker OK'
 
-    # ---- 2. DryRun：给出候选 SHA、变更摘要与现役结构违例，磁盘零写入 ----
+    # ---- 2. DryRun：给出候选 SHA、变更摘要与现役结构违例，不写任何文件。工具在子进程里运行，在阶段 50
+    # （候选已被加载器接受、在途检查之前，仍持锁）暂停：此刻与结束后 policy 目录和 evidence 根都与调用前
+    # 相同，候选只在内存里 ----
     Write-Output 'STEP dry-run'
     $dry = New-Scenario -Name 'dryrun'
+    # 一条 terminal 记录：evidence 根非空，Status 预检确实读它；变更不影响该记录，DryRun 照常放行。
+    [void](New-FixtureRecord -Scenario $dry -Name 'done' -Stage 'purged')
     $baseBytes = [IO.File]::ReadAllBytes($dry.PolicyPath)
     $expectedAddDenyBytes = $utf8.GetBytes((Expand-PolicyTemplate -Scenario $dry -Template $addDenyPolicyTemplate))
     Set-ChangeSet -Scenario $dry -Changes @(
         [pscustomobject][ordered]@{ op = 'add-deny'; entryId = 'fixture-main'; path = (Join-Path $dry.TargetsRoot 'protected') })
     $dryBefore = Get-TreeState -Path $dry.Root
-    $dryResult = Invoke-PolicyTool -Scenario $dry -Mode 'DryRun'
-    Assert-True ($dryResult.ExitCode -eq 0) "dry-run: 可放行的变更必须 exit 0（实际 $($dryResult.ExitCode)）：$($dryResult.Text)"
+    $dryPolicyDirectoryBefore = Get-TreeState -Path $dry.PolicyDirectory
+    $dryEvidenceBefore = Get-TreeState -Path $dry.EvidenceRoot
+    $drySignals = Join-Path $scratchRoot 'dryrun-signals'
+    $dryCall = Start-PausedPolicyTool -Scenario $dry -Mode 'DryRun' -PauseAfterPhase 50 -SignalDirectory $drySignals -Label 'dry-run'
+    $dryPolicyDirectoryPaused = Get-TreeState -Path $dry.PolicyDirectory
+    $dryEvidencePaused = Get-TreeState -Path $dry.EvidenceRoot
+    $dryResult = Resume-PausedPolicyTool -Call $dryCall -SignalDirectory $drySignals
+    Assert-True ($dryPolicyDirectoryPaused -ceq $dryPolicyDirectoryBefore) `
+        "dry-run: 持锁期间 policy 目录必须与调用前相同（不得暂存候选）：$($dryPolicyDirectoryPaused.Replace("`n", ' ; '))"
+    Assert-True ($dryEvidencePaused -ceq $dryEvidenceBefore) 'dry-run: 持锁期间 evidence 根必须与调用前相同'
+    Assert-True ($dryResult.ExitCode -eq 0) "dry-run: 可放行的变更必须 exit 0（实际 $($dryResult.ExitCode)）：$($dryResult.Text)$($dryResult.Stderr)"
     Assert-True ($dryResult.Text -cmatch '\A[\x00-\x7F]+\z') "dry-run: 输出必须 ASCII-only：$($dryResult.Text)"
     Assert-True ($dryResult.Json.ok -eq $true -and [string]$dryResult.Json.mode -ceq 'DryRun' -and
         $null -eq $dryResult.Json.refusalReason) "dry-run: 必须 ok=true：$($dryResult.Text)"
@@ -535,7 +549,9 @@ try {
     # 输出按 EscapeNonAscii 转义，worktree 路径里的非 ASCII 段不会原样出现；用 scratch 根的 ASCII 叶名作针。
     Assert-True ($dryResult.Text.IndexOf((Split-Path -Leaf $scratchRoot), [StringComparison]::OrdinalIgnoreCase) -lt 0) `
         "dry-run: 输出不得包含 policy 路径值：$($dryResult.Text)"
-    Assert-True ((Get-TreeState -Path $dry.Root) -ceq $dryBefore) 'dry-run: 场景目录必须零写入（policy、evidence、状态目录与暂存文件）'
+    Assert-True ((Get-TreeState -Path $dry.PolicyDirectory) -ceq $dryPolicyDirectoryBefore) 'dry-run: 结束后 policy 目录必须与调用前相同'
+    Assert-True ((Get-TreeState -Path $dry.EvidenceRoot) -ceq $dryEvidenceBefore) 'dry-run: 结束后 evidence 根必须与调用前相同'
+    Assert-True ((Get-TreeState -Path $dry.Root) -ceq $dryBefore) 'dry-run: 场景目录必须零写入（policy、evidence、状态目录与面包屑）'
     Write-Output 'dry-run OK'
 
     # ---- 3. Apply：带 DryRun 的候选 SHA，原子替换落盘，磁盘字节等于手写期望候选 ----
@@ -572,7 +588,7 @@ try {
     Assert-True ((Get-TreeState -Path $mismatch.Root) -ceq $mismatchBefore) 'sha-mismatch: 拒绝后场景目录必须零写入'
     Write-Output 'sha-mismatch OK'
 
-    # ---- 5. 用阶段停止模拟中途失败：候选已暂存（50、60）或临时文件已写入、尚未换名（65），磁盘仍是完整旧 policy ----
+    # ---- 5. 用阶段停止模拟中途失败：候选已通过检查（50、60）或临时文件已写入、尚未换名（65），磁盘仍是完整旧 policy ----
     Write-Output 'STEP phase-stop'
     $stop = New-Scenario -Name 'phase-stop'
     Set-ChangeSet -Scenario $stop -Changes @(
@@ -584,7 +600,7 @@ try {
         Assert-True ($stopResult.ExitCode -eq 0 -and $stopResult.Text -ceq "STOPPED-AFTER-PHASE $phase") `
             "phase-stop-${phase}: 必须在该阶段停止：$($stopResult.Text)"
         Assert-True ((Get-TreeState -Path $stop.Root) -ceq $stopBefore) `
-            "phase-stop-${phase}: 磁盘必须仍是完整旧 policy，且不残留暂存、临时文件或面包屑"
+            "phase-stop-${phase}: 磁盘必须仍是完整旧 policy，且不残留临时文件或面包屑"
     }
     Write-Output 'phase-stop OK'
 
@@ -765,7 +781,7 @@ try {
         [string]@($addEntryJob.addedEntryIds)[0] -ceq 'fixture-extra') "op-add-entry: SafeCleanupJob 视角必须只是新增：$($addEntryDry.Text)"
     Write-Output 'op-add-entry OK'
 
-    # ---- 14. 拒绝：变更集非法、候选无法加载、候选新增结构违例；每种都不落盘、不留暂存文件 ----
+    # ---- 14. 拒绝：变更集非法、候选无法加载、候选新增结构违例；每种都不写任何文件 ----
     Write-Output 'STEP refusals'
     $refuse = New-Scenario -Name 'refusals'
     $protectedPath = Join-Path $refuse.TargetsRoot 'protected'
@@ -862,7 +878,8 @@ try {
     $observedText = [IO.File]::ReadAllText($crumbPath)
     Assert-True (-not (Test-GateMutexFree -BaseName $crumb.MutexName)) 'breadcrumb: 暂停期间工具必须仍持有 deployment mutex'
     $crumbResult = Resume-PausedPolicyTool -Call $crumbCall -SignalDirectory $crumbSignals
-    Assert-True ($crumbResult.ExitCode -eq 0 -and $crumbResult.Json.ok -eq $true) "breadcrumb: DryRun 必须成功：$($crumbResult.Text)"
+    Assert-True ($crumbResult.ExitCode -eq 0 -and $crumbResult.Json.ok -eq $true) `
+        "breadcrumb: DryRun 必须成功：$($crumbResult.Text)$($crumbResult.Stderr)"
     $observed = $observedText | ConvertFrom-Json -DateKind String
     Assert-True ([string]$observed.mode -ceq 'policy-maintenance' -and [int]$observed.pid -eq $crumbCall.Process.Id) `
         "breadcrumb: 面包屑必须是 mode=policy-maintenance 且 pid 为工具进程：$observedText"
