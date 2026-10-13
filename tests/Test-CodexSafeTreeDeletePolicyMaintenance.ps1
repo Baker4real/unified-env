@@ -279,7 +279,9 @@ function Invoke-PolicyTool {
         [Parameter(Mandatory)][string]$Mode,
         [string]$ApprovedCandidatePolicySha256,
         [string[]]$ConfirmManualReviewOperationIds = @(),
-        [int]$StopAfterPhase = 0
+        [int]$StopAfterPhase = 0,
+        # 其余测试 seam 参数（例如暂停 seam）原样传入；四个必备 seam 总是由场景给出。
+        [hashtable]$ExtraArguments = @{}
     )
     $arguments = @{
         Mode = $Mode
@@ -289,6 +291,7 @@ function Invoke-PolicyTool {
         MutexNameForTest = $Scenario.MutexName
         MarkerPathForTest = $Scenario.MarkerPath
     }
+    foreach ($name in $ExtraArguments.Keys) { $arguments[$name] = $ExtraArguments[$name] }
     if (-not [string]::IsNullOrWhiteSpace($ApprovedCandidatePolicySha256)) {
         $arguments.ApprovedCandidatePolicySha256 = $ApprovedCandidatePolicySha256
     }
@@ -886,6 +889,39 @@ try {
     Assert-True (@([IO.Directory]::GetFileSystemEntries($crumb.StateRoot)).Count -eq 0) 'breadcrumb: 释放锁前必须删除面包屑'
     Assert-True (Test-GateMutexFree -BaseName $crumb.MutexName) 'breadcrumb: 工具退出后 mutex 必须已释放'
     Write-Output 'breadcrumb OK'
+
+    # ---- 17. 脚本主体里的任何失败都输出那一行 JSON：参数检查（取锁之前）拒绝为 invalid-arguments，持锁后的
+    # 意外异常为 unexpected-error；都 exit 1，场景目录零写入。参数绑定错误不经脚本主体，不在此列 ----
+    Write-Output 'STEP failure-json'
+    $failure = New-Scenario -Name 'failure-json'
+    Set-ChangeSet -Scenario $failure -Changes @(
+        [pscustomobject][ordered]@{ op = 'add-deny'; entryId = 'fixture-main'; path = (Join-Path $failure.TargetsRoot 'protected') })
+    $failureBefore = Get-TreeState -Path $failure.Root
+    $argumentCases = @(
+        @{ label = 'apply-without-sha'; mode = 'Apply'; sha = $null; ids = @(); extra = @{} },
+        @{ label = 'dry-run-with-sha'; mode = 'DryRun'; sha = ('0' * 64); ids = @(); extra = @{} },
+        @{ label = 'illegal-operation-id'; mode = 'DryRun'; sha = $null; ids = @('not an id'); extra = @{} },
+        @{ label = 'pause-without-signal-directory'; mode = 'DryRun'; sha = $null; ids = @()
+            extra = @{ PauseAfterPhaseForTest = 10 } }
+    )
+    foreach ($case in $argumentCases) {
+        $caseResult = Invoke-PolicyTool -Scenario $failure -Mode $case.mode -ApprovedCandidatePolicySha256 $case.sha `
+            -ConfirmManualReviewOperationIds $case.ids -ExtraArguments $case.extra
+        Assert-Refusal -Result $caseResult -RefusalReason 'invalid-arguments' -Label "failure-json-$($case.label)"
+        Assert-True (-not [string]::IsNullOrWhiteSpace([string]$caseResult.Json.message)) `
+            "failure-json-$($case.label): message 必须说明哪个参数不合法：$($caseResult.Text)"
+        Assert-True ((Get-TreeState -Path $failure.Root) -ceq $failureBefore) `
+            "failure-json-$($case.label): 参数拒绝发生在取锁之前，场景目录必须零写入"
+    }
+    # 持锁后的意外失败：暂停 seam 的信号目录不存在，写 paused-10 时抛出 .NET 异常。
+    $unexpected = Invoke-PolicyTool -Scenario $failure -Mode 'DryRun' -ExtraArguments @{
+        PauseAfterPhaseForTest = 10
+        PauseSignalDirectoryForTest = (Join-Path $failure.Root 'no-such-signals')
+    }
+    Assert-Refusal -Result $unexpected -RefusalReason 'unexpected-error' -Label 'failure-json-unexpected'
+    Assert-True ((Get-TreeState -Path $failure.Root) -ceq $failureBefore) `
+        'failure-json-unexpected: 场景目录必须零写入（面包屑已删除）'
+    Write-Output 'failure-json OK'
 
     Write-Output 'POLICY-MAINTENANCE-TESTS OK'
 } finally {

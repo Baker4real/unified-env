@@ -31,55 +31,6 @@ $productionEvidenceRoot = 'D:\agents\run-evidence\safe-tree-delete'
 $productionMutexName = 'Global\CodexSafeTreeDeleteDeployment'
 $productionMarkerPath = 'D:\Codex\.codex\state\safe-tree-delete-deployment\maintenance.json'
 
-$seamValues = @($PolicyPathForTest, $EvidenceRootForTest, $MutexNameForTest, $MarkerPathForTest)
-$seamCount = @($seamValues | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-if ($seamCount -ne 0 -and $seamCount -ne $seamValues.Count) {
-    throw 'policy 维护工具的测试 seam（PolicyPathForTest、EvidenceRootForTest、MutexNameForTest、MarkerPathForTest）必须同时给出。'
-}
-$testSeamActive = ($seamCount -eq $seamValues.Count)
-$pauseRequested = -not [string]::IsNullOrWhiteSpace($PauseSignalDirectoryForTest)
-if (-not $testSeamActive -and ($StopAfterPhaseForTest -ne 0 -or $GateWaitSecondsForTest -ne 0 -or
-        $PauseAfterPhaseForTest -ne 0 -or $pauseRequested)) {
-    throw 'StopAfterPhaseForTest、GateWaitSecondsForTest 与暂停 seam 只在测试 seam 生效时可用。'
-}
-if (($PauseAfterPhaseForTest -gt 0) -ne $pauseRequested) {
-    throw 'PauseAfterPhaseForTest 与 PauseSignalDirectoryForTest 必须同时给出。'
-}
-$testPauseDone = $false
-
-if ($Mode -ceq 'DryRun' -and -not [string]::IsNullOrEmpty($ApprovedCandidatePolicySha256)) {
-    throw 'DryRun 不接受 ApprovedCandidatePolicySha256：先 DryRun 取得 candidatePolicySha256，再以 Apply 提交。'
-}
-if ($Mode -ceq 'Apply' -and $ApprovedCandidatePolicySha256 -cnotmatch '^[0-9a-f]{64}\z') {
-    throw 'Apply 必须给出 DryRun 输出的 candidatePolicySha256（64 位小写十六进制）。'
-}
-# 宿主 .cmd 链只能传单个字符串：单个含 '::' 的值按 '::' 拆成多个 operation id。
-$confirmationValues = @($ConfirmManualReviewOperationIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-if ($confirmationValues.Count -eq 1 -and ([string]$confirmationValues[0]).Contains('::')) {
-    $confirmationValues = ([string]$confirmationValues[0]).Split([string[]]@('::'), [StringSplitOptions]::RemoveEmptyEntries)
-}
-$confirmedOperationIds = [Collections.Generic.List[string]]::new()
-foreach ($operationId in $confirmationValues) {
-    if ($operationId -cnotmatch '^[0-9A-Za-z][0-9A-Za-z._-]{0,127}\z') {
-        throw "ConfirmManualReviewOperationIds 含非法 operation id：$operationId"
-    }
-    if (-not $confirmedOperationIds.Contains($operationId)) { $confirmedOperationIds.Add($operationId) }
-}
-
-$policyPath = if ($testSeamActive) { $PolicyPathForTest } else { $productionPolicyPath }
-$evidenceRoot = if ($testSeamActive) { $EvidenceRootForTest } else { $productionEvidenceRoot }
-$mutexBaseName = if ($testSeamActive) { $MutexNameForTest } else { $productionMutexName }
-$markerPath = if ($testSeamActive) { $MarkerPathForTest } else { $productionMarkerPath }
-# 面包屑与 marker 同目录（state root），与 shim、部署工具一致。
-$stateRoot = Split-Path -Parent $markerPath
-$gateWait = if ($GateWaitSecondsForTest -gt 0) {
-    [TimeSpan]::FromSeconds($GateWaitSecondsForTest)
-} else {
-    [TimeSpan]::FromMinutes(5)
-}
-
-. (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDeleteGateHolder.ps1')
-
 $result = [ordered]@{
     ok = $false
     mode = $Mode
@@ -89,7 +40,7 @@ $result = [ordered]@{
     livePolicySchemaVersion = $null
     liveFormat = $null
     candidatePolicySha256 = $null
-    approvedCandidatePolicySha256 = $(if ($Mode -ceq 'Apply') { $ApprovedCandidatePolicySha256 } else { $null })
+    approvedCandidatePolicySha256 = $null
     changes = @()
     entryCount = $null
     structure = $null
@@ -570,144 +521,208 @@ function Get-InFlightAssessment {
 }
 
 # ---------------- main ----------------
-$mutex = [System.Threading.Mutex]::new($false, (Get-PolicyMaintenanceMutexName -BaseName $mutexBaseName))
-$acquired = $false
-foreach ($attempt in 1..2) {
-    try {
-        $acquired = $mutex.WaitOne($gateWait)
-        break
-    } catch [System.Threading.AbandonedMutexException] {
-        # 所有权已转移给本进程：释放后重试一次（与 shim 同款，阻止 abandoned 级联）。
-        try { [void]$mutex.ReleaseMutex() } catch { }
-    }
-}
-if (-not $acquired) {
-    $mutex.Dispose()
-    $result['holder'] = Read-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot
-    Stop-WithRefusal -RefusalReason 'deployment-mutex-acquire-timeout'
-}
+# 脚本主体的任何失败都以同一行 JSON 结束（ok=false、exit 1）：参数检查在取锁之前拒绝为 invalid-arguments，
+# 其余异常由最外层 catch 报告为 unexpected-error。Stop-WithRefusal 与 Write-ToolResult 以 exit 结束，exit
+# 不被 catch 截获；持锁段的 finally 照常删除面包屑、释放锁。参数绑定错误（未知参数、类型转换、ValidateSet、
+# 缺少必需参数）发生在主体运行之前，由 PowerShell 报错，不经这里。
 try {
-    # #77：持锁期间留 mode=policy-maintenance 面包屑；写失败是有意降级，不阻塞。
-    [void](Write-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot -Mode 'policy-maintenance')
-    Stop-IfRequested -Sequence 10
-    if (Test-Path -LiteralPath $markerPath) {
-        Stop-WithRefusal -RefusalReason 'deployment-maintenance-marker-present'
+    $seamValues = @($PolicyPathForTest, $EvidenceRootForTest, $MutexNameForTest, $MarkerPathForTest)
+    $seamCount = @($seamValues | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+    if ($seamCount -ne 0 -and $seamCount -ne $seamValues.Count) {
+        Stop-WithRefusal -RefusalReason 'invalid-arguments' `
+            -Message 'policy 维护工具的测试 seam（PolicyPathForTest、EvidenceRootForTest、MutexNameForTest、MarkerPathForTest）必须同时给出。'
     }
-    # 库在持锁且确认无 maintenance marker 之后才加载（与 shim 委托 repo entry 的时机一致）。
-    . (Join-Path $PSScriptRoot 'lib\CodexHostSafety.ps1')
-    . (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDelete.ps1')
-    Stop-IfRequested -Sequence 20
+    $testSeamActive = ($seamCount -eq $seamValues.Count)
+    $pauseRequested = -not [string]::IsNullOrWhiteSpace($PauseSignalDirectoryForTest)
+    if (-not $testSeamActive -and ($StopAfterPhaseForTest -ne 0 -or $GateWaitSecondsForTest -ne 0 -or
+            $PauseAfterPhaseForTest -ne 0 -or $pauseRequested)) {
+        Stop-WithRefusal -RefusalReason 'invalid-arguments' `
+            -Message 'StopAfterPhaseForTest、GateWaitSecondsForTest 与暂停 seam 只在测试 seam 生效时可用。'
+    }
+    if (($PauseAfterPhaseForTest -gt 0) -ne $pauseRequested) {
+        Stop-WithRefusal -RefusalReason 'invalid-arguments' `
+            -Message 'PauseAfterPhaseForTest 与 PauseSignalDirectoryForTest 必须同时给出。'
+    }
+    $testPauseDone = $false
 
-    # 3. 读取并校验现役 policy：加载器校验，同时取同一份原始字节作为候选的起点。
-    try {
-        $policyFullPath = Assert-CodexHookDPath -Value $policyPath -Name 'safe-delete policy path'
-        $liveSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $policyFullPath -Name 'safe-delete policy' `
-            -AllowedExactPaths @($policyFullPath)
-        $livePolicy = Read-CodexSafeTreeDeletePolicy -PolicyPath $policyFullPath
-        if ([string]$livePolicy.sha256 -cne [string]$liveSnapshot.sha256) {
-            throw '现役 policy 在读取期间被改动。'
+    if ($Mode -ceq 'DryRun' -and -not [string]::IsNullOrEmpty($ApprovedCandidatePolicySha256)) {
+        Stop-WithRefusal -RefusalReason 'invalid-arguments' `
+            -Message 'DryRun 不接受 ApprovedCandidatePolicySha256：先 DryRun 取得 candidatePolicySha256，再以 Apply 提交。'
+    }
+    if ($Mode -ceq 'Apply' -and $ApprovedCandidatePolicySha256 -cnotmatch '^[0-9a-f]{64}\z') {
+        Stop-WithRefusal -RefusalReason 'invalid-arguments' `
+            -Message 'Apply 必须给出 DryRun 输出的 candidatePolicySha256（64 位小写十六进制）。'
+    }
+    # 只回显通过校验的批准值。
+    if ($Mode -ceq 'Apply') { $result.approvedCandidatePolicySha256 = $ApprovedCandidatePolicySha256 }
+    # 宿主 .cmd 链只能传单个字符串：单个含 '::' 的值按 '::' 拆成多个 operation id。
+    $confirmationValues = @($ConfirmManualReviewOperationIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($confirmationValues.Count -eq 1 -and ([string]$confirmationValues[0]).Contains('::')) {
+        $confirmationValues = ([string]$confirmationValues[0]).Split([string[]]@('::'), [StringSplitOptions]::RemoveEmptyEntries)
+    }
+    $confirmedOperationIds = [Collections.Generic.List[string]]::new()
+    foreach ($operationId in $confirmationValues) {
+        if ($operationId -cnotmatch '^[0-9A-Za-z][0-9A-Za-z._-]{0,127}\z') {
+            Stop-WithRefusal -RefusalReason 'invalid-arguments' -Message "ConfirmManualReviewOperationIds 含非法 operation id：$operationId"
         }
-        $liveDocument = $liveSnapshot.text | ConvertFrom-Json -Depth 32 -DateKind String
-    } catch {
-        Stop-WithRefusal -RefusalReason 'live-policy-invalid' -Message $_.Exception.Message
+        if (-not $confirmedOperationIds.Contains($operationId)) { $confirmedOperationIds.Add($operationId) }
     }
-    [byte[]]$liveBytes = $liveSnapshot.bytes
-    $result.livePolicySha256 = [string]$livePolicy.sha256
-    $result.livePolicySchemaVersion = [long]$livePolicy.schemaVersion
-    $liveText = [Text.Encoding]::UTF8.GetString($liveBytes)
-    $result.liveFormat = [pscustomobject][ordered]@{
-        reserializesIdentically = [Linq.Enumerable]::SequenceEqual($liveBytes, [byte[]](ConvertTo-PolicyBytes -Document $liveDocument))
-        crlfLineCount = [regex]::Matches($liveText, "`r`n").Count
-        utf8Bom = ($liveBytes.Length -ge 3 -and $liveBytes[0] -eq 0xEF -and $liveBytes[1] -eq 0xBB -and $liveBytes[2] -eq 0xBF)
-    }
-    Stop-IfRequested -Sequence 30
 
-    # 4. 生成候选 policy。
+    $policyPath = if ($testSeamActive) { $PolicyPathForTest } else { $productionPolicyPath }
+    $evidenceRoot = if ($testSeamActive) { $EvidenceRootForTest } else { $productionEvidenceRoot }
+    $mutexBaseName = if ($testSeamActive) { $MutexNameForTest } else { $productionMutexName }
+    $markerPath = if ($testSeamActive) { $MarkerPathForTest } else { $productionMarkerPath }
+    # 面包屑与 marker 同目录（state root），与 shim、部署工具一致。
+    $stateRoot = Split-Path -Parent $markerPath
+    $gateWait = if ($GateWaitSecondsForTest -gt 0) {
+        [TimeSpan]::FromSeconds($GateWaitSecondsForTest)
+    } else {
+        [TimeSpan]::FromMinutes(5)
+    }
+
+    . (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDeleteGateHolder.ps1')
+
+    $mutex = [System.Threading.Mutex]::new($false, (Get-PolicyMaintenanceMutexName -BaseName $mutexBaseName))
+    $acquired = $false
+    foreach ($attempt in 1..2) {
+        try {
+            $acquired = $mutex.WaitOne($gateWait)
+            break
+        } catch [System.Threading.AbandonedMutexException] {
+            # 所有权已转移给本进程：释放后重试一次（与 shim 同款，阻止 abandoned 级联）。
+            try { [void]$mutex.ReleaseMutex() } catch { }
+        }
+    }
+    if (-not $acquired) {
+        $mutex.Dispose()
+        $result['holder'] = Read-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot
+        Stop-WithRefusal -RefusalReason 'deployment-mutex-acquire-timeout'
+    }
     try {
-        $changes = @(Read-PolicyChangeSet -Path $ChangeSetPath)
-        $candidateDocument = $liveSnapshot.text | ConvertFrom-Json -Depth 32 -DateKind String
-        $result.changes = @(Invoke-PolicyChangeSet -Document $candidateDocument -Changes $changes)
-    } catch {
-        Stop-WithRefusal -RefusalReason 'change-set-invalid' -Message $_.Exception.Message
-    }
-    [byte[]]$candidateBytes = ConvertTo-PolicyBytes -Document $candidateDocument
-    $candidateSha256 = Get-CodexHookBytesSha256 -Bytes $candidateBytes
-    $result.candidatePolicySha256 = $candidateSha256
-    $result.entryCount = [pscustomobject][ordered]@{
-        before = @($liveDocument.entries).Count
-        after = @($candidateDocument.entries).Count
-    }
-    $result.safeCleanupJob = Get-SafeCleanupJobImpact -LiveEntries @($liveDocument.entries) -CandidateEntries @($candidateDocument.entries)
-    if ($Mode -ceq 'Apply' -and $candidateSha256 -cne $ApprovedCandidatePolicySha256) {
-        Stop-WithRefusal -RefusalReason 'candidate-sha-mismatch' `
-            -Message '本次生成的候选 policy SHA-256 与批准的不一致；重新 DryRun 并复核。'
-    }
-    Stop-IfRequested -Sequence 40
+        # #77：持锁期间留 mode=policy-maintenance 面包屑；写失败是有意降级，不阻塞。
+        [void](Write-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot -Mode 'policy-maintenance')
+        Stop-IfRequested -Sequence 10
+        if (Test-Path -LiteralPath $markerPath) {
+            Stop-WithRefusal -RefusalReason 'deployment-maintenance-marker-present'
+        }
+        # 库在持锁且确认无 maintenance marker 之后才加载（与 shim 委托 repo entry 的时机一致）。
+        . (Join-Path $PSScriptRoot 'lib\CodexHostSafety.ps1')
+        . (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDelete.ps1')
+        Stop-IfRequested -Sequence 20
 
-    # 5. 候选必须能被现有加载器加载，且按结构规则不新增违例（现役已有的违例列入输出，不阻止）。
-    # 加载器与 Status 预检读同一份内存中的候选原始字节，不落盘。
-    try {
-        $candidatePolicy = Read-CodexSafeTreeDeletePolicy -PolicyBytes $candidateBytes
-    } catch {
-        Stop-WithRefusal -RefusalReason 'candidate-policy-invalid' -Message $_.Exception.Message
-    }
-    $structure = Get-StructureComparison -LiveEntries @($livePolicy.entries) -CandidateEntries @($candidatePolicy.entries)
-    $result.structure = $structure
-    if (@($structure.newViolations).Count -ne 0) {
-        Stop-WithRefusal -RefusalReason 'candidate-adds-structure-violations' `
-            -Message '候选 policy 按结构规则新增了违例，见 structure.newViolations。'
-    }
-    Stop-IfRequested -Sequence 50
+        # 3. 读取并校验现役 policy：加载器校验，同时取同一份原始字节作为候选的起点。
+        try {
+            $policyFullPath = Assert-CodexHookDPath -Value $policyPath -Name 'safe-delete policy path'
+            $liveSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $policyFullPath -Name 'safe-delete policy' `
+                -AllowedExactPaths @($policyFullPath)
+            $livePolicy = Read-CodexSafeTreeDeletePolicy -PolicyPath $policyFullPath
+            if ([string]$livePolicy.sha256 -cne [string]$liveSnapshot.sha256) {
+                throw '现役 policy 在读取期间被改动。'
+            }
+            $liveDocument = $liveSnapshot.text | ConvertFrom-Json -Depth 32 -DateKind String
+        } catch {
+            Stop-WithRefusal -RefusalReason 'live-policy-invalid' -Message $_.Exception.Message
+        }
+        [byte[]]$liveBytes = $liveSnapshot.bytes
+        $result.livePolicySha256 = [string]$livePolicy.sha256
+        $result.livePolicySchemaVersion = [long]$livePolicy.schemaVersion
+        $liveText = [Text.Encoding]::UTF8.GetString($liveBytes)
+        $result.liveFormat = [pscustomobject][ordered]@{
+            reserializesIdentically = [Linq.Enumerable]::SequenceEqual($liveBytes, [byte[]](ConvertTo-PolicyBytes -Document $liveDocument))
+            crlfLineCount = [regex]::Matches($liveText, "`r`n").Count
+            utf8Bom = ($liveBytes.Length -ge 3 -and $liveBytes[0] -eq 0xEF -and $liveBytes[1] -eq 0xBB -and $liveBytes[2] -eq 0xBF)
+        }
+        Stop-IfRequested -Sequence 30
 
-    # 6. 在途检查。
-    try {
-        $inFlight = Get-InFlightAssessment `
-            -LivePolicySha256 ([string]$livePolicy.sha256) `
-            -CandidatePolicyBytes $candidateBytes `
-            -CandidatePolicySha256 $candidateSha256 `
-            -CandidatePolicy $candidatePolicy `
-            -AffectedPaths @(Get-ResolutionAffectedPaths -LiveEntries @($livePolicy.entries) -CandidateEntries @($candidatePolicy.entries)) `
-            -ConfirmedOperationIds $confirmedOperationIds.ToArray()
-    } catch {
-        Stop-WithRefusal -RefusalReason 'in-flight-check-failed' -Message $_.Exception.Message
-    }
-    $result.inFlight = $inFlight
-    if (@($inFlight.blocking).Count -ne 0) {
-        Stop-WithRefusal -RefusalReason 'in-flight-records-blocking' `
-            -Message '有绑定现役 policy、会因本次变更失去兼容的在途记录，见 inFlight.blocking。'
-    }
-    Stop-IfRequested -Sequence 60
+        # 4. 生成候选 policy。
+        try {
+            $changes = @(Read-PolicyChangeSet -Path $ChangeSetPath)
+            $candidateDocument = $liveSnapshot.text | ConvertFrom-Json -Depth 32 -DateKind String
+            $result.changes = @(Invoke-PolicyChangeSet -Document $candidateDocument -Changes $changes)
+        } catch {
+            Stop-WithRefusal -RefusalReason 'change-set-invalid' -Message $_.Exception.Message
+        }
+        [byte[]]$candidateBytes = ConvertTo-PolicyBytes -Document $candidateDocument
+        $candidateSha256 = Get-CodexHookBytesSha256 -Bytes $candidateBytes
+        $result.candidatePolicySha256 = $candidateSha256
+        $result.entryCount = [pscustomobject][ordered]@{
+            before = @($liveDocument.entries).Count
+            after = @($candidateDocument.entries).Count
+        }
+        $result.safeCleanupJob = Get-SafeCleanupJobImpact -LiveEntries @($liveDocument.entries) -CandidateEntries @($candidateDocument.entries)
+        if ($Mode -ceq 'Apply' -and $candidateSha256 -cne $ApprovedCandidatePolicySha256) {
+            Stop-WithRefusal -RefusalReason 'candidate-sha-mismatch' `
+                -Message '本次生成的候选 policy SHA-256 与批准的不一致；重新 DryRun 并复核。'
+        }
+        Stop-IfRequested -Sequence 40
 
-    if ($Mode -ceq 'DryRun') {
+        # 5. 候选必须能被现有加载器加载，且按结构规则不新增违例（现役已有的违例列入输出，不阻止）。
+        # 加载器与 Status 预检读同一份内存中的候选原始字节，不落盘。
+        try {
+            $candidatePolicy = Read-CodexSafeTreeDeletePolicy -PolicyBytes $candidateBytes
+        } catch {
+            Stop-WithRefusal -RefusalReason 'candidate-policy-invalid' -Message $_.Exception.Message
+        }
+        $structure = Get-StructureComparison -LiveEntries @($livePolicy.entries) -CandidateEntries @($candidatePolicy.entries)
+        $result.structure = $structure
+        if (@($structure.newViolations).Count -ne 0) {
+            Stop-WithRefusal -RefusalReason 'candidate-adds-structure-violations' `
+                -Message '候选 policy 按结构规则新增了违例，见 structure.newViolations。'
+        }
+        Stop-IfRequested -Sequence 50
+
+        # 6. 在途检查。
+        try {
+            $inFlight = Get-InFlightAssessment `
+                -LivePolicySha256 ([string]$livePolicy.sha256) `
+                -CandidatePolicyBytes $candidateBytes `
+                -CandidatePolicySha256 $candidateSha256 `
+                -CandidatePolicy $candidatePolicy `
+                -AffectedPaths @(Get-ResolutionAffectedPaths -LiveEntries @($livePolicy.entries) -CandidateEntries @($candidatePolicy.entries)) `
+                -ConfirmedOperationIds $confirmedOperationIds.ToArray()
+        } catch {
+            Stop-WithRefusal -RefusalReason 'in-flight-check-failed' -Message $_.Exception.Message
+        }
+        $result.inFlight = $inFlight
+        if (@($inFlight.blocking).Count -ne 0) {
+            Stop-WithRefusal -RefusalReason 'in-flight-records-blocking' `
+                -Message '有绑定现役 policy、会因本次变更失去兼容的在途记录，见 inFlight.blocking。'
+        }
+        Stop-IfRequested -Sequence 60
+
+        if ($Mode -ceq 'DryRun') {
+            $result.ok = $true
+            Write-ToolResult
+        }
+
+        # 7. 原子替换落盘：同目录临时文件写入批准的候选字节，换名前复核现役字节未变，换名后复核候选 SHA。
+        $policyDirectory = Split-Path -Parent $policyFullPath
+        try {
+            Set-CodexHookAtomicFileBytesWithCapability `
+                -Path $policyFullPath `
+                -Bytes $candidateBytes `
+                -ExpectedExists $true `
+                -ExpectedSha256 ([string]$livePolicy.sha256) `
+                -AfterSha256 $candidateSha256 `
+                -CapabilityRoot $policyDirectory `
+                -AllowedExactPaths @($policyFullPath) `
+                -Scope 'safe-delete policy maintenance' `
+                -BeforeRename { Stop-IfRequested -Sequence 65 }
+        } catch {
+            Stop-WithRefusal -RefusalReason 'policy-write-failed' -Message $_.Exception.Message
+        }
+        $result.written = $true
+        Stop-IfRequested -Sequence 70
+
+        # 8. 输出结果。
         $result.ok = $true
+        $result.notice = 'policy 已对宿主立即生效，git 提交需另行完成'
         Write-ToolResult
+    } finally {
+        Remove-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot
+        [void]$mutex.ReleaseMutex()
+        $mutex.Dispose()
     }
-
-    # 7. 原子替换落盘：同目录临时文件写入批准的候选字节，换名前复核现役字节未变，换名后复核候选 SHA。
-    $policyDirectory = Split-Path -Parent $policyFullPath
-    try {
-        Set-CodexHookAtomicFileBytesWithCapability `
-            -Path $policyFullPath `
-            -Bytes $candidateBytes `
-            -ExpectedExists $true `
-            -ExpectedSha256 ([string]$livePolicy.sha256) `
-            -AfterSha256 $candidateSha256 `
-            -CapabilityRoot $policyDirectory `
-            -AllowedExactPaths @($policyFullPath) `
-            -Scope 'safe-delete policy maintenance' `
-            -BeforeRename { Stop-IfRequested -Sequence 65 }
-    } catch {
-        Stop-WithRefusal -RefusalReason 'policy-write-failed' -Message $_.Exception.Message
-    }
-    $result.written = $true
-    Stop-IfRequested -Sequence 70
-
-    # 8. 输出结果。
-    $result.ok = $true
-    $result.notice = 'policy 已对宿主立即生效，git 提交需另行完成'
-    Write-ToolResult
-} finally {
-    Remove-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot
-    [void]$mutex.ReleaseMutex()
-    $mutex.Dispose()
+} catch {
+    Stop-WithRefusal -RefusalReason 'unexpected-error' -Message $_.Exception.Message
 }
