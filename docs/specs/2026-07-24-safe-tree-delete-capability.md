@@ -183,7 +183,7 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
 - `policyCompatible=true` 且 `candidatePolicyCompatible=false` 的记录按 lifecycle 处理：
   - `planned`：按 plan.json 的 `expiresAtUtc` 判断。未过期的阻止（`unexpired-plan`）；读不出过期时间的阻止（`plan-expiry-unreadable`）；已过期的只列入 `expiredPlans`，因为它不能再 Apply，变更后 Status 会把它报告为 `manual-review`。
   - `recoverable`、`purge-resumable`：阻止（`resumable-transaction`）。
-  - `manual-review`、`inconsistent`：阻止（`manual-review-unconfirmed`），除非 operation id 列在 `-ConfirmManualReviewOperationIds` 中。已确认的列入 `confirmedManualReview`；找不到对应记录的确认列入 `unmatchedConfirmations`，不阻止。
+  - `manual-review`、`inconsistent`：阻止（`manual-review-unconfirmed`），除非 operation id 列在 `-ConfirmManualReviewOperationIds` 中。已确认的列入 `confirmedManualReview`；没有用上的确认（无对应记录，或对应记录本就无需确认）列入 `unmatchedConfirmations`，不阻止。
   - 其他 lifecycle：阻止（`policy-bound-record`）。
 - `policyCompatible=false` 的记录已绑定其他 policy 字节，只计入 `boundToOtherPolicyCount`。
 - 阻止项列在 `inFlight.blocking[{operationId, lifecycle, transactionStatus, reason}]`。
