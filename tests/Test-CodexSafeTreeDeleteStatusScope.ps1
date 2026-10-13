@@ -228,6 +228,19 @@ function ConvertTo-ScopeAgreementJson {
     return $semantic | ConvertTo-Json -Depth 100 -Compress
 }
 
+function Get-FixtureTreeFingerprint {
+    # fixture 根（policy、evidence、目标）下全部目录与文件：相对路径、长度与 SHA-256。
+    $entries = foreach ($item in @(Get-ChildItem -LiteralPath $fixtureRoot -Recurse -Force)) {
+        $relative = [IO.Path]::GetRelativePath($fixtureRoot, $item.FullName)
+        if ($item.PSIsContainer) {
+            "d|$relative"
+        } else {
+            "f|$relative|$($item.Length)|$((Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash)"
+        }
+    }
+    return (@($entries) | Sort-Object -CaseSensitive) -join "`n"
+}
+
 function Assert-ScopedMatchesFiltered {
     # 范围结果与「全量结果按 targetPath 过滤」逐字段相等：命中记录（targetPath 与任一目标按
     # OrdinalIgnoreCase 相等）一条不少、一条不多、顺序与内容都相同。
@@ -461,7 +474,9 @@ try {
         'zeta 范围必须只保留声明为 zeta 的截断 plan'
 
     # 8. 范围查询下现有 kill switch 照常生效，且不改变范围结果：分别关闭 fast scan、tree fast、
-    #    parallel fallback 以及三者全关时，范围结果与默认路径相同（含预筛排除的截断 plan）。
+    #    parallel fallback 以及三者全关时，范围结果与默认路径相同（含预筛排除的截断 plan）。这些
+    #    范围查询都不在 fixture 根下写入任何内容（不持久化 receipt）。
+    $treeBeforeSwitches = Get-FixtureTreeFingerprint
     $fastScanSwitch = 'CODEX_SAFE_TREE_DELETE_STATUS_FAST_SCAN'
     $treeFastSwitch = 'CODEX_SAFE_TREE_DELETE_STATUS_TREE_FAST'
     $parallelFallbackSwitch = 'CODEX_SAFE_TREE_DELETE_STATUS_PARALLEL_FALLBACK'
@@ -500,6 +515,8 @@ try {
             }
         }
     }
+    Assert-True ((Get-FixtureTreeFingerprint) -ceq $treeBeforeSwitches) `
+        '范围 Status 不得在 fixture 根下创建或改动任何文件（不持久化 receipt）'
 
     # 9. 不带 TargetPaths 时输出与改动前相同：没有 scope，顶层与 migrationReadiness 字段及顺序不变。
     #    范围覆盖全部目标时，去掉 scope 后与全量结果的语义 JSON 相同。
