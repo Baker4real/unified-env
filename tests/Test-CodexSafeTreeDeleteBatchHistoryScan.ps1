@@ -4,10 +4,13 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Seams under test (GitHub #76，spec #73「BatchPurge 单次历史扫描」):
+# Seams under test (GitHub #76 / #78，spec #73「BatchPurge 单次历史扫描」):
 # 1. 唯一接缝：fixture 入口 tests\Invoke-CodexSafeTreeDeleteFixture.ps1 的 BatchPurge mode；
 #    只观察结果字段（含新增 historyScan）与 evidence / 目标命名空间的前后状态。
 # 2. kill switch：CODEX_SAFE_TREE_DELETE_BATCH_HISTORY_SCAN 只有字符串 '0' 退回逐目标参考查找。
+# 3. C# 预筛（#78）：只裁决 run 目录第一层、producer 规范形态的 transaction；能证明与本批
+#    任何目标都不匹配的才排除，其余（含非规范、读取或解析异常）一律走参考认证链。
+#    快慢等价逐字段比较（historyScan 除外），预筛的裁决只体现在 historyScan 计数上。
 # 性能数字只记录不设阈值；本套件不读写生产 evidence 根。
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -265,6 +268,75 @@ function New-NestedFixture {
     return $fixture
 }
 
+function New-ProducerTransactionProperties {
+    param(
+        [Parameter(Mandatory)][object]$Fixture,
+        [Parameter(Mandatory)][ValidateRange(1, 3)][int]$SchemaVersion,
+        [Parameter(Mandatory)][object]$Status,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$TargetPath
+    )
+
+    # producer 规范形态（schemaVersion 1 / 2 / 3 各自的属性名集合）的 transaction 属性。
+    # 预筛与参考链在扫描阶段都只看 status 与 targetPath，其余值是占位，不是真实删除证据；
+    # quarantinePath 永不存在，所以 live 记录只有 status 为 purging 时才继续裁决 schema。
+    $properties = [ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-transaction'
+        schemaVersion = $SchemaVersion
+        generationId = 'history-record'
+        planPath = Join-Path $Fixture.root 'history-record-plan.json'
+        planSha256 = '0' * 64
+        targetPath = $TargetPath
+        quarantinePath = Join-Path $Fixture.root 'history-record-quarantine'
+    }
+    if ($SchemaVersion -ge 2) { $properties['directoryCommitAnchors'] = @() }
+    $properties['status'] = $Status
+    $properties['updatedAtUtc'] = '2026-01-01T00:00:00.0000000Z'
+    if ($SchemaVersion -eq 3) {
+        $properties['quarantineTimeAnchor'] = $null
+        $properties['restoreJournalAnchors'] = @()
+    }
+    return $properties
+}
+
+function Write-HistoryRecord {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][Collections.Specialized.OrderedDictionary]$Properties,
+        [string]$RawAnchors,
+        [switch]$Bom,
+        [switch]$InvalidUtf8
+    )
+
+    # RawAnchors 原样作为 directoryCommitAnchors 的值写入，用来构造 ConvertTo-Json 写不出的
+    # 严格 JSON（同一对象内只差大小写的属性名、超长整数字面量等）；InvalidUtf8 把
+    # generationId 的值换成非法 UTF-8 字节序列。
+    $anchorsMarker = 'RAW-ANCHORS-MARKER'
+    $invalidMarker = 'INVALID-UTF8-MARKER'
+    $document = [ordered]@{}
+    foreach ($key in $Properties.Keys) { $document[$key] = $Properties[$key] }
+    if ($PSBoundParameters.ContainsKey('RawAnchors')) { $document['directoryCommitAnchors'] = $anchorsMarker }
+    if ($InvalidUtf8) { $document['generationId'] = $invalidMarker }
+    $text = [pscustomobject]$document | ConvertTo-Json -Depth 8
+    if ($PSBoundParameters.ContainsKey('RawAnchors')) {
+        Assert-True ($text.Contains("`"$anchorsMarker`"")) 'RawAnchors 占位必须写入 directoryCommitAnchors'
+        $text = $text.Replace("`"$anchorsMarker`"", $RawAnchors)
+    }
+    $utf8 = [Text.UTF8Encoding]::new($false)
+    $bytes = [Collections.Generic.List[byte]]::new()
+    if ($Bom) { $bytes.AddRange([byte[]]@(0xEF, 0xBB, 0xBF)) }
+    if ($InvalidUtf8) {
+        $markerIndex = $text.IndexOf($invalidMarker, [StringComparison]::Ordinal)
+        Assert-True ($markerIndex -ge 0) 'InvalidUtf8 占位必须写入 generationId'
+        $bytes.AddRange($utf8.GetBytes($text.Substring(0, $markerIndex)))
+        $bytes.AddRange([byte[]]@(0xC3, 0x28))
+        $bytes.AddRange($utf8.GetBytes($text.Substring($markerIndex + $invalidMarker.Length)))
+    } else {
+        $bytes.AddRange($utf8.GetBytes($text))
+    }
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Path))
+    [IO.File]::WriteAllBytes($Path, $bytes.ToArray())
+}
+
 function New-TerminalHistoryRecord {
     param(
         [Parameter(Mandatory)][object]$Fixture,
@@ -272,15 +344,14 @@ function New-TerminalHistoryRecord {
         [Parameter(Mandatory)][string]$TargetPath
     )
 
-    # 终态记录只需通过参考认证链（严格 JSON），随后被 status 过滤；不是真实删除证据。
-    Write-Utf8File `
+    # producer 规范 v2 形态的终态记录。
+    Write-HistoryRecord `
         -Path (Join-Path $Fixture.evidenceRoot $RelativePath) `
-        -Text ([pscustomobject][ordered]@{
-            artifactType = 'env-governance.codex-safe-tree-delete-transaction'
-            schemaVersion = 2
-            targetPath = $TargetPath
-            status = 'purged'
-        } | ConvertTo-Json -Depth 4)
+        -Properties (New-ProducerTransactionProperties `
+            -Fixture $Fixture `
+            -SchemaVersion 2 `
+            -Status 'purged' `
+            -TargetPath $TargetPath)
 }
 
 function Invoke-BatchPurge {
@@ -323,8 +394,16 @@ function Assert-HistoryScanShape {
             "$Scope historyScan.$counter 必须是整数"
         Assert-True ([long]$historyScan.$counter -ge 0) "$Scope historyScan.$counter 不得为负"
     }
-    Assert-True ([long]$historyScan.excludedByPrefilter -eq 0) `
-        "$Scope 本 ticket 不做 C# 预筛，excludedByPrefilter 必须恒为 0"
+    Assert-True ([long]$historyScan.excludedByPrefilter -le [long]$historyScan.canonicalFiles) `
+        "$Scope 只有预筛裁决过的规范文件才能被排除：excludedByPrefilter 不得大于 canonicalFiles"
+    Assert-True (
+        [long]$historyScan.fullyAuthenticated -le
+            [long]$historyScan.enumeratedFiles - [long]$historyScan.excludedByPrefilter) `
+        "$Scope 被预筛排除的文件不得再计入 fullyAuthenticated"
+    if ([string]$historyScan.mode -ceq 'reference') {
+        Assert-True ([long]$historyScan.canonicalFiles -eq 0 -and [long]$historyScan.excludedByPrefilter -eq 0) `
+            "$Scope reference 模式不做预筛：canonicalFiles 与 excludedByPrefilter 必须为 0"
+    }
     Assert-True (
         [long]$historyScan.canonicalFiles + [long]$historyScan.fallbackFiles -eq
             [long]$historyScan.enumeratedFiles) `
@@ -349,9 +428,10 @@ try {
     Assert-True ([string]$singleFast.historyScan.mode -ceq 'fast') 'kill switch 未设置时必须走 fast 模式'
     Assert-True ([long]$singleFast.historyScan.scanCount -eq 1) '单目标 fast 模式 scanCount 必须为 1'
     Assert-True ([long]$singleFast.historyScan.enumeratedFiles -eq 3) 'fast 模式必须枚举全部 3 个历史文件'
-    Assert-True ([long]$singleFast.historyScan.canonicalFiles -eq 2) 'run 目录第一层的 2 个文件是规范位置'
+    Assert-True ([long]$singleFast.historyScan.canonicalFiles -eq 2) 'run 目录第一层的 2 个规范形态文件由预筛裁决'
+    Assert-True ([long]$singleFast.historyScan.excludedByPrefilter -eq 2) '规范形态的终态记录必须被预筛排除'
     Assert-True ([long]$singleFast.historyScan.fallbackFiles -eq 1) '嵌套位置的 1 个文件走回退'
-    Assert-True ([long]$singleFast.historyScan.fullyAuthenticated -eq 3) '本 ticket 每个历史文件都必须完整参考认证'
+    Assert-True ([long]$singleFast.historyScan.fullyAuthenticated -eq 1) '只有回退的文件需要在扫描阶段完整参考认证'
     Assert-True ($null -eq $singleFast.historyScan.PSObject.Properties['failure']) '成功扫描不得带 failure'
 
     $multiFast = Invoke-BatchPurge -Fixture $switchFixture -TargetPaths $switchTargets -KillSwitchValue $null
@@ -365,7 +445,10 @@ try {
     Assert-HistoryScanShape -Result $multiReference -Scope '三目标 reference'
     Assert-True ([string]$multiReference.historyScan.mode -ceq 'reference') "kill switch='0' 必须退回 reference 模式"
     Assert-True ([long]$multiReference.historyScan.scanCount -eq 3) 'reference 模式 scanCount 必须等于目标数'
-    Assert-True ([long]$multiReference.historyScan.enumeratedFiles -eq 9) 'reference 模式逐目标各扫一遍历史'
+    Assert-True ([long]$multiReference.historyScan.enumeratedFiles -eq 9 -and
+        [long]$multiReference.historyScan.fallbackFiles -eq 9 -and
+        [long]$multiReference.historyScan.fullyAuthenticated -eq 9) `
+        'reference 模式逐目标各扫一遍历史，每个文件都走参考认证链'
 
     foreach ($value in @('1', 'false', ' 0', '00', 'off')) {
         $notSwitched = Invoke-BatchPurge -Fixture $switchFixture -TargetPaths @($switchTargets[1]) -KillSwitchValue $value
@@ -480,12 +563,15 @@ try {
         '存在目标必须各自新建 run 并 purge 到终态'
     Assert-True ([string]$referenceRich.historyScan.mode -ceq 'reference' -and
         [long]$referenceRich.historyScan.scanCount -eq 7) 'reference 模式 scanCount 必须等于目标数 7'
+    # 规范位置 4 个（Recover-Case、café NFC、schema-one、multi）；café NFC 是 live 记录但与
+    # 本批（NFD 写法）任何目标都不匹配，被预筛排除；nested\copy 与 legacy\deep 走回退。
     Assert-True ([string]$fastRich.historyScan.mode -ceq 'fast' -and
         [long]$fastRich.historyScan.scanCount -eq 1 -and
         [long]$fastRich.historyScan.enumeratedFiles -eq 6 -and
         [long]$fastRich.historyScan.canonicalFiles -eq 4 -and
+        [long]$fastRich.historyScan.excludedByPrefilter -eq 1 -and
         [long]$fastRich.historyScan.fallbackFiles -eq 2 -and
-        [long]$fastRich.historyScan.fullyAuthenticated -eq 6) `
+        [long]$fastRich.historyScan.fullyAuthenticated -eq 5) `
         "fast 模式等价夹具的扫描计数不符：$($fastRich.historyScan | ConvertTo-Json -Compress)"
 
     # --- 切片 4：故障钩子在扫描与处理之间改写候选（仍是合法 JSON，只是字节变了）---
@@ -590,6 +676,201 @@ try {
         "生产入口不得暴露 fixture 或测试钩子参数：$($exposedTestParameters -join ',')"
     Assert-True (-not [IO.File]::ReadAllText($productionEntryPath).Contains('AfterBatchHistoryScan')) `
         '生产入口不得把 BatchPurge 扫描后钩子传给库函数'
+
+    # --- 切片 8：预筛的三种裁决（全部位于规范位置，目标都不存在，批处理不写任何东西）---
+    # 排除：v3 终态、targetPath 不在本批的 live 记录、带 BOM 的终态。候选：targetPath 只差
+    # 大小写的 live 记录。回退：多余属性、属性名只差大小写、schemaVersion 4、缺属性、status
+    # 含可忽略字符（参考链的 -cnotin 按文化比较，仍视为 live）、status 是数组（参考链转成
+    # 字符串后仍是 live）。候选与回退的记录 schemaVersion 都不受支持，结果是
+    # skipped-unsupported-transaction-schema，被错误排除时会变成 already-absent。
+    $prefilterFixture = New-HistoryFixture -Name 'prefilter'
+    $prefilterNames = @(
+        'terminal', 'case-candidate', 'extra-property', 'status-case',
+        'schema-four', 'missing-property', 'soft-hyphen', 'status-array')
+    $prefilterTarget = @{}
+    foreach ($name in $prefilterNames) {
+        $prefilterTarget[$name] = Join-Path $prefilterFixture.targetsRoot $name
+    }
+    $prefilterRecords = @(
+        [pscustomobject]@{
+            run = 'run-01-terminal-v3'
+            properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 3 -Status 'purged' -TargetPath $prefilterTarget['terminal']
+            bom = $false
+        },
+        [pscustomobject]@{
+            run = 'run-02-live-elsewhere'
+            properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 2 -Status 'quarantined' -TargetPath (Join-Path $prefilterFixture.targetsRoot 'not-in-batch')
+            bom = $false
+        },
+        [pscustomobject]@{
+            run = 'run-03-case-candidate'
+            properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 1 -Status 'purging' -TargetPath (Join-Path $prefilterFixture.targetsRoot 'CASE-Candidate')
+            bom = $false
+        },
+        [pscustomobject]@{
+            run = 'run-04-extra-property'
+            properties = & {
+                $properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 1 -Status 'purging' -TargetPath $prefilterTarget['extra-property']
+                $properties['note'] = 'not a producer property'
+                $properties
+            }
+            bom = $false
+        },
+        [pscustomobject]@{
+            run = 'run-05-status-case'
+            properties = & {
+                $properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 1 -Status 'purging' -TargetPath $prefilterTarget['status-case']
+                $properties.Remove('status')
+                $properties['Status'] = 'purging'
+                $properties
+            }
+            bom = $false
+        },
+        [pscustomobject]@{
+            run = 'run-06-schema-four'
+            properties = & {
+                $properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 2 -Status 'purging' -TargetPath $prefilterTarget['schema-four']
+                $properties['schemaVersion'] = 4
+                $properties
+            }
+            bom = $false
+        },
+        [pscustomobject]@{
+            run = 'run-07-missing-property'
+            properties = & {
+                $properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 1 -Status 'purging' -TargetPath $prefilterTarget['missing-property']
+                $properties.Remove('updatedAtUtc')
+                $properties
+            }
+            bom = $false
+        },
+        [pscustomobject]@{
+            run = 'run-08-soft-hyphen'
+            properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 1 -Status ('pur' + [string][char]0x00AD + 'ging') -TargetPath $prefilterTarget['soft-hyphen']
+            bom = $false
+        },
+        [pscustomobject]@{
+            run = 'run-09-status-array'
+            properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 1 -Status @('purging') -TargetPath $prefilterTarget['status-array']
+            bom = $false
+        },
+        [pscustomobject]@{
+            run = 'run-10-bom-terminal'
+            properties = New-ProducerTransactionProperties -Fixture $prefilterFixture -SchemaVersion 2 -Status 'purged' -TargetPath $prefilterTarget['terminal']
+            bom = $true
+        })
+    foreach ($record in $prefilterRecords) {
+        Write-HistoryRecord `
+            -Path (Join-Path $prefilterFixture.evidenceRoot "$($record.run)\transaction.json") `
+            -Properties $record.properties `
+            -Bom:$record.bom
+    }
+    $prefilterTargets = @($prefilterNames | ForEach-Object { $prefilterTarget[$_] })
+    $prefilterStateBefore = Get-ComparableFixtureState -Fixture $prefilterFixture
+    $prefilterReference = Invoke-BatchPurge -Fixture $prefilterFixture -TargetPaths $prefilterTargets -KillSwitchValue '0'
+    $prefilterFast = Invoke-BatchPurge -Fixture $prefilterFixture -TargetPaths $prefilterTargets -KillSwitchValue $null
+    Assert-HistoryScanShape -Result $prefilterReference -Scope '预筛 reference'
+    Assert-HistoryScanShape -Result $prefilterFast -Scope '预筛 fast'
+    $prefilterExpectedActions = @('already-absent') + @('skipped-unsupported-transaction-schema') * 7
+    Assert-True ((@($prefilterReference.results.action) -join ',') -ceq ($prefilterExpectedActions -join ',')) `
+        "预筛夹具 reference 模式的逐目标 action 不符：$(@($prefilterReference.results.action) -join ',')"
+    $prefilterReferenceComparable = ConvertTo-ComparableBatchResult -Result $prefilterReference -Fixture $prefilterFixture
+    $prefilterFastComparable = ConvertTo-ComparableBatchResult -Result $prefilterFast -Fixture $prefilterFixture
+    Assert-True ($prefilterReferenceComparable -ceq $prefilterFastComparable) (
+        "预筛夹具 fast 与 reference 结果除 historyScan 外必须逐字段相等`nreference=$prefilterReferenceComparable`nfast=$prefilterFastComparable")
+    Assert-True ((Get-ComparableFixtureState -Fixture $prefilterFixture) -ceq $prefilterStateBefore) `
+        '预筛夹具的批处理不得写入 evidence 或目标命名空间'
+    Assert-True ([long]$prefilterReference.historyScan.scanCount -eq 8 -and
+        [long]$prefilterReference.historyScan.enumeratedFiles -eq 80 -and
+        [long]$prefilterReference.historyScan.fallbackFiles -eq 80 -and
+        [long]$prefilterReference.historyScan.fullyAuthenticated -eq 80) `
+        "预筛夹具 reference 模式的扫描计数不符：$($prefilterReference.historyScan | ConvertTo-Json -Compress)"
+    Assert-True ([long]$prefilterFast.historyScan.scanCount -eq 1 -and
+        [long]$prefilterFast.historyScan.enumeratedFiles -eq 10 -and
+        [long]$prefilterFast.historyScan.canonicalFiles -eq 4 -and
+        [long]$prefilterFast.historyScan.excludedByPrefilter -eq 3 -and
+        [long]$prefilterFast.historyScan.fallbackFiles -eq 6 -and
+        [long]$prefilterFast.historyScan.fullyAuthenticated -eq 7) `
+        "预筛夹具 fast 模式的扫描计数不符（排除 3、候选 1、回退 6）：$($prefilterFast.historyScan | ConvertTo-Json -Compress)"
+
+    # --- 切片 9：参考链一定失败的规范位置记录：预筛必须回退而不是排除，两种模式都在扫描阶段
+    # fail-closed，且结果逐字段相等。每条坏记录除了一处缺陷都是规范形态的终态记录（或 live 但
+    # targetPath 为空），缺少对应防线的预筛会把它排除，fast 模式随之「成功」。---
+    $badFixture = New-HistoryFixture -Name 'prefilter-bad'
+    $badTargets = @(
+        (Join-Path $badFixture.targetsRoot 'absent-1'),
+        (Join-Path $badFixture.targetsRoot 'absent-2'))
+    New-TerminalHistoryRecord -Fixture $badFixture -RelativePath 'run-a\transaction.json' -TargetPath $badTargets[0]
+    $badRunDirectory = Join-Path $badFixture.evidenceRoot 'zz-bad'
+    $badRecordPath = Join-Path $badRunDirectory 'transaction.json'
+    $badStateBefore = Get-ComparableFixtureState -Fixture $badFixture
+    $hugeInteger = '1' + ('0' * 399)
+    $badCases = @(
+        [pscustomobject]@{ name = '非严格 UTF-8'; status = 'purged'; targetPath = $badTargets[1]; rawAnchors = $null; invalidUtf8 = $true; layout = 'file' },
+        [pscustomobject]@{ name = '嵌套对象内属性名只差大小写'; status = 'purged'; targetPath = $badTargets[1]; rawAnchors = '[{"anchor":1,"Anchor":2}]'; invalidUtf8 = $false; layout = 'file' },
+        [pscustomobject]@{ name = '嵌套对象使用 PSObject 保留名'; status = 'purged'; targetPath = $badTargets[1]; rawAnchors = '[{"PSObject":1}]'; invalidUtf8 = $false; layout = 'file' },
+        [pscustomobject]@{ name = '嵌套对象有空属性名'; status = 'purged'; targetPath = $badTargets[1]; rawAnchors = '[{"":1}]'; invalidUtf8 = $false; layout = 'file' },
+        [pscustomobject]@{ name = '嵌套超过 ConvertFrom-Json 深度'; status = 'purged'; targetPath = $badTargets[1]; rawAnchors = ('[' * 40) + (']' * 40); invalidUtf8 = $false; layout = 'file' },
+        [pscustomobject]@{ name = '400 位整数'; status = 'purged'; targetPath = $badTargets[1]; rawAnchors = "[$hugeInteger]"; invalidUtf8 = $false; layout = 'file' },
+        [pscustomobject]@{ name = 'live 记录 targetPath 为空'; status = 'quarantined'; targetPath = ''; rawAnchors = $null; invalidUtf8 = $false; layout = 'file' },
+        [pscustomobject]@{ name = '硬链接'; status = 'purged'; targetPath = $badTargets[1]; rawAnchors = $null; invalidUtf8 = $false; layout = 'hard-link' },
+        [pscustomobject]@{ name = '读取时被独占打开'; status = 'purged'; targetPath = $badTargets[1]; rawAnchors = $null; invalidUtf8 = $false; layout = 'locked' })
+    foreach ($badCase in $badCases) {
+        $writeParameters = @{
+            Properties = New-ProducerTransactionProperties `
+                -Fixture $badFixture `
+                -SchemaVersion 2 `
+                -Status $badCase.status `
+                -TargetPath $badCase.targetPath
+            InvalidUtf8 = [bool]$badCase.invalidUtf8
+        }
+        if ($null -ne $badCase.rawAnchors) { $writeParameters['RawAnchors'] = [string]$badCase.rawAnchors }
+        $hardLinkSource = Join-Path $badFixture.root 'hard-link-source.json'
+        if ($badCase.layout -ceq 'hard-link') {
+            Write-HistoryRecord -Path $hardLinkSource @writeParameters
+            [void][IO.Directory]::CreateDirectory($badRunDirectory)
+            [void](New-Item -ItemType HardLink -Path $badRecordPath -Value $hardLinkSource -ErrorAction Stop)
+        } else {
+            Write-HistoryRecord -Path $badRecordPath @writeParameters
+        }
+        $lock = $null
+        try {
+            if ($badCase.layout -ceq 'locked') {
+                $lock = [IO.File]::Open($badRecordPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+            }
+            $caseReference = Invoke-BatchPurge -Fixture $badFixture -TargetPaths $badTargets -KillSwitchValue '0'
+            $caseFast = Invoke-BatchPurge -Fixture $badFixture -TargetPaths $badTargets -KillSwitchValue $null
+        } finally {
+            if ($null -ne $lock) { $lock.Dispose() }
+        }
+        foreach ($caseRun in @(
+                [pscustomobject]@{ mode = 'reference'; result = $caseReference },
+                [pscustomobject]@{ mode = 'fast'; result = $caseFast })) {
+            $scope = "坏记录「$($badCase.name)」$($caseRun.mode)"
+            Assert-HistoryScanShape -Result $caseRun.result -Scope $scope
+            Assert-True ($caseRun.result.completed -eq $false -and
+                $caseRun.result.skippedCount -eq 2 -and
+                @($caseRun.result.results | Where-Object { [string]$_.action -cne 'skipped-target-error' }).Count -eq 0) `
+                "$scope 必须整批 skipped-target-error：$(@($caseRun.result.results.action) -join ',')"
+            Assert-True ($null -ne $caseRun.result.historyScan.PSObject.Properties['failure'] -and
+                [string]$caseRun.result.historyScan.failure.phase -ceq 'scan') `
+                "$scope historyScan 必须带 scan 阶段 failure"
+        }
+        Assert-True ([long]$caseFast.historyScan.excludedByPrefilter -eq 1 -and
+            [long]$caseFast.historyScan.fallbackFiles -eq 1) `
+            "坏记录「$($badCase.name)」不得被预筛排除：$($caseFast.historyScan | ConvertTo-Json -Compress)"
+        $caseReferenceComparable = ConvertTo-ComparableBatchResult -Result $caseReference -Fixture $badFixture
+        $caseFastComparable = ConvertTo-ComparableBatchResult -Result $caseFast -Fixture $badFixture
+        Assert-True ($caseReferenceComparable -ceq $caseFastComparable) (
+            "坏记录「$($badCase.name)」fast 与 reference 结果必须逐字段相等`nreference=$caseReferenceComparable`nfast=$caseFastComparable")
+        if ($badCase.layout -ceq 'hard-link') {
+            [IO.File]::Delete($badRecordPath)
+            [IO.File]::Delete($hardLinkSource)
+        }
+        Remove-TestTree -Path $badRunDirectory
+        Assert-True ((Get-ComparableFixtureState -Fixture $badFixture) -ceq $badStateBefore) `
+            "坏记录「$($badCase.name)」批次不得写入 evidence 或目标命名空间"
+    }
 
     [pscustomobject][ordered]@{
         ok = $true

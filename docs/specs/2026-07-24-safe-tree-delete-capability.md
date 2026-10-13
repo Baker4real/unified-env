@@ -386,7 +386,8 @@ capability root（规范化后大小写不敏感）与深度 0 未声明 root �
 owner 不写入 policy）、deny 指向现存文件、deny 指向不存在的路径。evidence 根不存在时只报告、不创建；存在时
 先过与 `Status` 相同的只读路径校验再枚举，不读文件内容、不跟随 reparse point。run 目录是 evidence 根顶层、
 名字为 producer run id 的普通目录；规范 transaction 位置是 `<evidence 根>\<顶层目录>\transaction.json`（与
-`BatchPurge` 历史扫描的 `canonicalFiles` 同口径），其余位置只按数量与相对 run 目录的位置报告，非 run 顶层
+`BatchPurge` 历史扫描 C# 预筛的规范位置同口径；预筛的 `canonicalFiles` 另要求 producer 规范形态且读取、解析
+成功），其余位置只按数量与相对 run 目录的位置报告，非 run 顶层
 目录只报数量。每条 finding 为 `{rule, severity, entryId, denyIndex?, detail}`；deny 类只给条目 id 与 deny
 序号，detail 不回显 policy 中的任何路径，也不回显非 run 目录名。
 

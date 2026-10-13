@@ -668,7 +668,8 @@ function Get-CodexSafeTreeDeletePolicyEntryOwner {
 function Get-CodexSafeTreeDeleteLintEvidenceLayout {
     # 只读枚举已校验的 evidence 根：不读文件内容，不跟随 reparse point（计入非 run 顶层目录，但不进入）。
     # run 目录：顶层、非 reparse、名字为 producer run id（UTC 时间戳-generationId）的目录。
-    # 规范位置：<evidence 根>\<顶层目录>\transaction.json，与 BatchPurge historyScan.canonicalFiles 同口径；
+    # 规范位置：<evidence 根>\<顶层目录>\transaction.json，与 BatchPurge 历史扫描 C# 预筛的规范位置同口径
+    # （预筛的 historyScan.canonicalFiles 另要求 producer 规范形态且读取、解析成功）；
     # 其余位置的 transaction.json 计入非规范，位置按「最近的 run 祖先」描述，不回显非 run 目录名。
     param([Parameter(Mandatory)][string]$FullEvidenceRoot)
 
@@ -9455,11 +9456,13 @@ function Test-CodexSafeTreeDeleteBatchHistoryScanEnabled {
 function New-CodexSafeTreeDeleteHistoryScanMetrics {
     param([Parameter(Mandatory)][ValidateSet('fast', 'reference')][string]$Mode)
 
-    # BatchPurge 结果的 historyScan 字段。canonicalFiles 只按位置分类（run 目录第一层的
-    # transaction.json），是 C# 预筛（#78）可裁决的范围；fallbackFiles 是其余位置，永远走
-    # 参考认证链。本实现不做预筛：excludedByPrefilter 恒为 0，扫描阶段每个文件都完整认证。
-    # fullyAuthenticated 只计扫描阶段，不含处理阶段的候选重新认证。reference 模式各计数为
-    # 逐目标扫描的累计值。
+    # BatchPurge 结果的 historyScan 字段。fast 模式每个枚举到的文件先过 C# 预筛（#78，
+    # StatusScanCoordinator.ClassifyBatchHistoryTransaction）：canonicalFiles 是预筛裁决了的
+    # 文件（run 目录第一层、producer 规范形态，且路径链、读取与解析都成功），其中能证明与本批
+    # 任何目标都不匹配的计入 excludedByPrefilter 并跳过；fallbackFiles 是预筛不裁决、回退到
+    # 参考认证链的文件。fullyAuthenticated 是扫描阶段走完参考认证链的文件数（成功扫描时等于
+    # enumeratedFiles - excludedByPrefilter），不含处理阶段的候选重新认证。reference 模式不做
+    # 预筛：每个文件都计入 fallbackFiles，各计数为逐目标扫描的累计值。
     return [pscustomobject][ordered]@{
         mode = $Mode
         scanCount = 0L
@@ -9469,28 +9472,6 @@ function New-CodexSafeTreeDeleteHistoryScanMetrics {
         excludedByPrefilter = 0L
         fullyAuthenticated = 0L
         elapsedMs = 0L
-    }
-}
-
-function Add-CodexSafeTreeDeleteHistoryScanEnumeratedFile {
-    param(
-        [Parameter(Mandatory)][object]$Metrics,
-        [Parameter(Mandatory)][string]$FullEvidenceRoot,
-        [Parameter(Mandatory)][string]$TransactionPath
-    )
-
-    $Metrics.enumeratedFiles = [long]$Metrics.enumeratedFiles + 1L
-    $rootPrefix = $FullEvidenceRoot.TrimEnd('\', '/')
-    $canonical = $false
-    if ($TransactionPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        $relative = $TransactionPath.Substring($rootPrefix.Length)
-        $segments = @($relative.Split([char[]]@('\', '/'), [StringSplitOptions]::RemoveEmptyEntries))
-        $canonical = $segments.Count -eq 2
-    }
-    if ($canonical) {
-        $Metrics.canonicalFiles = [long]$Metrics.canonicalFiles + 1L
-    } else {
-        $Metrics.fallbackFiles = [long]$Metrics.fallbackFiles + 1L
     }
 }
 
@@ -9633,20 +9614,35 @@ function Get-CodexSafeTreeDeleteRecoverableTransactionCandidates {
 
     # BatchPurge 整批一次的历史扫描：产出只在本次调用内存中有效的索引
     # 目标（OrdinalIgnoreCase，不做 Unicode 规范化）→ 候选记录（保持枚举顺序）。
-    # 每个文件的认证、status 过滤与 targetPath 比较和逐目标参考查找逐字相同；
+    # 每个文件先过 C# 预筛（#78）：只有它能证明「参考认证链必然成功、且与本批任何目标都
+    # 不匹配」的文件被排除；其余文件的认证、status 过滤与 targetPath 比较和逐目标参考查找
+    # 逐字相同。被排除的文件不会让参考链抛错，所以首个失败文件与 reference 模式相同；
     # 任何异常都向上抛出，由调用方按「扫描阶段失败」处理整批。
     $candidates = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($targetPath in @($TargetPaths)) {
         $candidates[$targetPath] = [Collections.Generic.List[object]]::new()
     }
+    $prefilterTargets = [string[]]@($TargetPaths)
+    $fallbackDecision = [CodexSafeTreeDelete.BatchHistoryPrefilterDecision]::Fallback
+    $excludedDecision = [CodexSafeTreeDelete.BatchHistoryPrefilterDecision]::Excluded
     $Metrics.scanCount = [long]$Metrics.scanCount + 1L
     $watch = [Diagnostics.Stopwatch]::StartNew()
     try {
         foreach ($transactionPath in [IO.Directory]::EnumerateFiles($FullEvidenceRoot, 'transaction.json', [IO.SearchOption]::AllDirectories)) {
-            Add-CodexSafeTreeDeleteHistoryScanEnumeratedFile `
-                -Metrics $Metrics `
-                -FullEvidenceRoot $FullEvidenceRoot `
-                -TransactionPath $transactionPath
+            $Metrics.enumeratedFiles = [long]$Metrics.enumeratedFiles + 1L
+            $decision = [CodexSafeTreeDelete.StatusScanCoordinator]::ClassifyBatchHistoryTransaction(
+                $transactionPath,
+                $FullEvidenceRoot,
+                $prefilterTargets)
+            if ($decision -eq $fallbackDecision) {
+                $Metrics.fallbackFiles = [long]$Metrics.fallbackFiles + 1L
+            } else {
+                $Metrics.canonicalFiles = [long]$Metrics.canonicalFiles + 1L
+                if ($decision -eq $excludedDecision) {
+                    $Metrics.excludedByPrefilter = [long]$Metrics.excludedByPrefilter + 1L
+                    continue
+                }
+            }
             $record = Read-CodexSafeTreeDeleteRecoverableHistoryRecord `
                 -TransactionPath $transactionPath `
                 -FullEvidenceRoot $FullEvidenceRoot
@@ -9736,10 +9732,9 @@ function Find-CodexSafeTreeDeleteRecoverableTransaction {
     $inScanStep = $true
     try {
         foreach ($transactionPath in [IO.Directory]::EnumerateFiles($fullEvidenceRoot, 'transaction.json', [IO.SearchOption]::AllDirectories)) {
-            Add-CodexSafeTreeDeleteHistoryScanEnumeratedFile `
-                -Metrics $metrics `
-                -FullEvidenceRoot $fullEvidenceRoot `
-                -TransactionPath $transactionPath
+            # reference 模式不做预筛：每个文件都走参考认证链。
+            $metrics.enumeratedFiles = [long]$metrics.enumeratedFiles + 1L
+            $metrics.fallbackFiles = [long]$metrics.fallbackFiles + 1L
             $record = Read-CodexSafeTreeDeleteRecoverableHistoryRecord `
                 -TransactionPath $transactionPath `
                 -FullEvidenceRoot $fullEvidenceRoot

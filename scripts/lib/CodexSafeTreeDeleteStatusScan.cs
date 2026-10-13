@@ -242,6 +242,14 @@ namespace CodexSafeTreeDelete
             "The opened file handle resolved to a different final path.") { }
     }
 
+    /// <summary>BatchPurge 历史预筛（#78）对单个 transaction 文件的裁决。</summary>
+    public enum BatchHistoryPrefilterDecision
+    {
+        Fallback = 0,
+        Candidate = 1,
+        Excluded = 2
+    }
+
     public static class StatusScanCoordinator
     {
         private const uint InvalidFileAttributes = 0xFFFFFFFF;
@@ -2021,6 +2029,201 @@ namespace CodexSafeTreeDelete
             }
         }
 
+        // ---------------------------------------------------------------- BatchPurge history prefilter (#78)
+
+        private static readonly string[] BatchHistoryLiveStatuses = new string[] {
+            "prepared", "quarantined", "purging"
+        };
+        private static readonly string[] BatchHistoryTerminalStatuses = new string[] {
+            "purged", "restored", "rolled-back"
+        };
+        // PSObject 的保留成员名（比较不区分大小写）：ConvertFrom-Json 物化属性时拒绝。
+        private static readonly string[] PowerShellReservedMemberNames = new string[] {
+            "psbase", "psadapted", "psextended", "psobject", "pstypenames"
+        };
+
+        /// <summary>
+        /// BatchPurge fast 模式对单个历史 transaction 的预筛裁决（#78），只在能证明时下结论。
+        /// Excluded：参考认证链（Read-CodexSafeTreeDeleteRecoverableHistoryRecord 加 status /
+        /// targetPath 过滤）对该文件一定成功，且它不会成为本批任何目标的候选。Candidate：同样一定
+        /// 成功，且 targetPath 与某个目标 OrdinalIgnoreCase 相等。其余一律 Fallback：非规范位置或
+        /// 形态、路径链 / 读取 / 解码 / 解析异常、ConvertFrom-Json 会拒绝的输入、非 producer 的
+        /// status 写法。调用方对 Candidate 与 Fallback 都走完整参考认证链，只有 Excluded 跳过它。
+        /// 规范位置与形态沿用 Status fast scan 的定义：ResolveManagedFilePath（evidence 根的直接
+        /// run 目录下的 transaction.json）与 HasCanonicalTransactionShape（schemaVersion 1..3 的
+        /// producer 属性名，ordinal 精确匹配）；内容只读 schemaVersion、status、targetPath。
+        /// </summary>
+        public static BatchHistoryPrefilterDecision ClassifyBatchHistoryTransaction(
+            string transactionPath, string fullEvidenceRoot, string[] targetPaths)
+        {
+            try
+            {
+                return ClassifyBatchHistoryTransactionCore(transactionPath, fullEvidenceRoot, targetPaths);
+            }
+            catch (Exception)
+            {
+                return BatchHistoryPrefilterDecision.Fallback;
+            }
+        }
+
+        private static BatchHistoryPrefilterDecision ClassifyBatchHistoryTransactionCore(
+            string transactionPath, string fullEvidenceRoot, string[] targetPaths)
+        {
+            const string name = "safe-delete recover transaction";
+            if (transactionPath == null || fullEvidenceRoot == null || targetPaths == null)
+            {
+                return BatchHistoryPrefilterDecision.Fallback;
+            }
+            foreach (string target in targetPaths)
+            {
+                // 参考链的 Test-CodexSafeTreeDeletePathEqual 参数是 Mandatory [string]，空串绑定即抛错。
+                if (string.IsNullOrEmpty(target))
+                {
+                    return BatchHistoryPrefilterDecision.Fallback;
+                }
+            }
+
+            // 位置：只裁决 evidence 根的直接 run 目录下的 transaction.json。
+            string fullPath = AssertDPath(transactionPath, name + " path");
+            string fullRoot = AssertDPath(fullEvidenceRoot, name + " evidence root");
+            string runDirectory = Path.GetDirectoryName(fullPath);
+            if (string.IsNullOrEmpty(runDirectory) ||
+                !PathEqual(ResolveManagedFilePath(runDirectory, fullRoot, "transaction.json", name), fullPath))
+            {
+                return BatchHistoryPrefilterDecision.Fallback;
+            }
+
+            // 路径链：与参考链 Assert-CodexHookCapabilityPath 相同的检查（D 盘、capability 范围、
+            // ADS、精确路径、reparse 祖先）。
+            AssertCapabilityPath(fullPath, fullRoot, fullPath, name);
+
+            // 读取：直接调用参考链所用的 governance 句柄绑定读取（final path、硬链接、reparse 与
+            // ACL 目标校验都在其中；#86 起它与本文件编译进同一程序集），再按
+            // Read-CodexHookSafeUtf8FileSnapshot 的规则做严格 UTF-8 解码（可带 BOM）。
+            byte[] bytes = CodexHookGovernance.HandleBoundFileReader.ReadAllBytes(fullPath).Bytes;
+            UTF8Encoding utf8 = new UTF8Encoding(false, true);
+            bool hasBom = bytes.Length >= 3 &&
+                bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2] == 0xbf;
+            string text = hasBom ? utf8.GetString(bytes, 3, bytes.Length - 3) : utf8.GetString(bytes);
+
+            // 解析：严格 JSON 之后参考链还要过 ConvertFrom-Json -Depth 32；深度阈值与 Status
+            // 归档快路径相同，留出余量。
+            if (AssertStrictJsonText(text) > 28)
+            {
+                return BatchHistoryPrefilterDecision.Fallback;
+            }
+            using (JsonDocument document = ParseJsonDocument(text))
+            {
+                JsonElement transaction = document.RootElement;
+                if (transaction.ValueKind != JsonValueKind.Object ||
+                    !IsConvertFromJsonCompatible(transaction))
+                {
+                    return BatchHistoryPrefilterDecision.Fallback;
+                }
+                long schemaVersion;
+                if (!TryGetInt64(transaction, "schemaVersion", out schemaVersion) ||
+                    schemaVersion < 1L || schemaVersion > 3L ||
+                    !HasCanonicalTransactionShape(transaction, schemaVersion) ||
+                    !IsStringProperty(transaction, "status") ||
+                    !IsStringProperty(transaction, "targetPath"))
+                {
+                    return BatchHistoryPrefilterDecision.Fallback;
+                }
+
+                // status：参考链用 PowerShell -cnotin，区分大小写但按文化比较（可忽略字符不计），
+                // 这里只认 ordinal 精确的 producer 取值，其余写法回退。
+                string status = GetString(transaction, "status");
+                if (ContainsOrdinal(BatchHistoryTerminalStatuses, status))
+                {
+                    return BatchHistoryPrefilterDecision.Excluded;
+                }
+                if (!ContainsOrdinal(BatchHistoryLiveStatuses, status))
+                {
+                    return BatchHistoryPrefilterDecision.Fallback;
+                }
+                string recordTargetPath = GetString(transaction, "targetPath");
+                if (recordTargetPath.Length == 0)
+                {
+                    return BatchHistoryPrefilterDecision.Fallback;
+                }
+                foreach (string target in targetPaths)
+                {
+                    if (PathEqual(recordTargetPath, target))
+                    {
+                        return BatchHistoryPrefilterDecision.Candidate;
+                    }
+                }
+                return BatchHistoryPrefilterDecision.Excluded;
+            }
+        }
+
+        /// <summary>
+        /// ConvertFrom-Json（Newtonsoft 解析后物化为 PSObject）在严格 JSON 之外还会拒绝的输入：
+        /// 空属性名、同一对象内只差大小写的属性名（OrdinalIgnoreCase）、PSObject 保留成员名，以及
+        /// Newtonsoft 解析不了的超长整数字面量。命中任一项返回 false。调用方已限制嵌套深度。
+        /// </summary>
+        private static bool IsConvertFromJsonCompatible(JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (JsonProperty property in element.EnumerateObject())
+                    {
+                        string propertyName = property.Name;
+                        if (propertyName.Length == 0 || !seen.Add(propertyName))
+                        {
+                            return false;
+                        }
+                        foreach (string reserved in PowerShellReservedMemberNames)
+                        {
+                            if (string.Equals(propertyName, reserved, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return false;
+                            }
+                        }
+                        if (!IsConvertFromJsonCompatible(property.Value))
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                case JsonValueKind.Array:
+                    foreach (JsonElement item in element.EnumerateArray())
+                    {
+                        if (!IsConvertFromJsonCompatible(item))
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                case JsonValueKind.Number:
+                    // 整数写法只接受 Int64 / UInt64 范围；小数或指数写法只接受有限 double。
+                    long signedValue;
+                    ulong unsignedValue;
+                    if (element.TryGetInt64(out signedValue) || element.TryGetUInt64(out unsignedValue))
+                    {
+                        return true;
+                    }
+                    double floatingValue;
+                    return element.GetRawText().IndexOfAny(new char[] { '.', 'e', 'E' }) >= 0 &&
+                        element.TryGetDouble(out floatingValue) && double.IsFinite(floatingValue);
+                default:
+                    return true;
+            }
+        }
+
+        private static bool ContainsOrdinal(string[] values, string value)
+        {
+            foreach (string candidate in values)
+            {
+                if (string.Equals(candidate, value, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         private static StatusScanFileSnapshot ReadFileChecked(
             string path, string name, bool terminalArchiveSegment, StatusScanResult metrics)

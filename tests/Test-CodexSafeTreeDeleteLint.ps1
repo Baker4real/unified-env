@@ -491,7 +491,7 @@ try {
     Assert-True (-not $hostRun.text.Contains('personal-note', [StringComparison]::OrdinalIgnoreCase)) '宿主规则发现回显了 deny 文件名'
 
     # 9. evidence 布局：run 目录是 evidence 根顶层、名字为 producer run id 的普通目录；规范位置是
-    #    <evidence 根>\<顶层目录>\transaction.json（与 BatchPurge historyScan.canonicalFiles 同口径）。
+    #    <evidence 根>\<顶层目录>\transaction.json（与 BatchPurge 历史扫描 C# 预筛的规范位置同口径）。
     #    其余位置的 transaction 只给数量和相对 run 的位置，不回显非 run 目录名；非 run 顶层目录只给数量。
     #    不跟随 reparse point。
     $layoutRoot = Join-Path $scratchRoot 'evidence-layout'
