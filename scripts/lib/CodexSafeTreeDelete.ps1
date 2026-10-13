@@ -1832,6 +1832,15 @@ function Invoke-CodexSafeTreeDeleteMode {
                 PolicyPath = $PolicyPath
                 EvidenceRoot = $EvidenceRoot
             } + $testArguments
+            # 范围查询（#80）：TargetPaths 同样接受 '::' 连接；不带 TargetPaths 时与全量 Status 完全相同。
+            if ($null -ne $TargetPaths) {
+                $scopeTargets = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $TargetPaths)
+                if ($scopeTargets.Count -eq 0 -or
+                    @($scopeTargets | Where-Object { [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
+                    throw 'Status 范围查询要求 TargetPaths 至少一个目标且均不为空。'
+                }
+                $libraryArguments.TargetPaths = $scopeTargets
+            }
             Get-CodexSafeTreeDeleteStatus @libraryArguments
         }
         'Lint' {
@@ -4131,6 +4140,46 @@ function Invoke-CodexSafeTreeDeleteStatusFastScan {
     return $byPath
 }
 
+function Select-CodexSafeTreeDeleteStatusScopeRunItems {
+    # #80 范围查询在枚举阶段的预筛，fast scan 开关打开或关闭时都执行，所以两条路径的范围结果相同。
+    # 每条规范形态记录只读 terminal-archive.json（存在时）或 plan.json 开头直到顶层 targetPath
+    # 的一段，作为未经认证的归属声明。声明是合法的 D 盘路径，且原样和规范化后都不与任何范围目标
+    # 按 OrdinalIgnoreCase 相等时，记录被排除：不读完整 plan，不进 fast scan，也不进参考路径。
+    # 其余记录（非规范形态、读不到或读不全声明、声明不是合法路径）全部保留，交给完整认证和结果过滤。
+    # 完整认证得到的 targetPath 与这份声明原样或规范化后按 OrdinalIgnoreCase 相等，所以被排除的
+    # 记录在全量 Status 中也不会命中范围。代价：声明可读但完整认证会失败的范围外记录（例如
+    # targetPath 之后被截断的 plan）不会作为无法归属的记录出现在范围结果里。
+    # 前提：safe-delete gate 独占串行，Status 运行期间没有其他调用写 evidence。gate 若改成共享锁
+    # 或允许并发写入 evidence，必须先重新论证这个前提，再保留预筛。
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$RunItems,
+        [Parameter(Mandatory)][string[]]$ScopeTargets,
+        [Parameter(Mandatory)][string]$FullEvidenceRoot,
+        [Parameter(Mandatory)][int]$DegreeOfParallelism
+    )
+
+    # 输入形态与 Invoke-CodexSafeTreeDeleteStatusFastScan 相同。
+    $runs = [Collections.Generic.List[CodexSafeTreeDelete.StatusScanRunInput]]::new()
+    $index = 0
+    foreach ($runItem in @($RunItems)) {
+        $runInput = [CodexSafeTreeDelete.StatusScanRunInput]::new()
+        $runInput.Index = $index
+        $runInput.Name = [string]$runItem.Name
+        $runInput.FullName = [string]$runItem.FullName
+        $runInput.IsContainer = [bool]$runItem.PSIsContainer
+        $runInput.IsReparsePoint = (($runItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+        $runs.Add($runInput)
+        $index++
+    }
+    $keep = [CodexSafeTreeDelete.StatusScanCoordinator]::SelectScopeCandidates(
+        $runs, $ScopeTargets, $FullEvidenceRoot, $DegreeOfParallelism)
+    for ($index = 0; $index -lt $runs.Count; $index++) {
+        if ($keep[$index]) {
+            $RunItems[$index]
+        }
+    }
+}
+
 function New-CodexSafeTreeDeleteStatusOperationFromScan {
     param(
         [Parameter(Mandatory)][object]$ScanResult,
@@ -6197,8 +6246,33 @@ function Get-CodexSafeTreeDeleteStatus {
         [Parameter(Mandatory)][string]$PolicyPath,
         [Parameter(Mandatory)][string]$EvidenceRoot,
         [string]$CandidatePolicyPath,
-        [string]$ApprovedCandidatePolicySha256
+        [string]$ApprovedCandidatePolicySha256,
+        # #80 范围查询：只对 targetPath 与任一目标按 OrdinalIgnoreCase 相等（不做 Unicode 规范化，
+        # 与 BatchPurge 一致）的记录作答，祖先与后代路径不算命中；无法确定 targetPath 的记录计入
+        # 范围（manual-review，fail-closed）。不传时行为与输出与全量 Status 完全相同。
+        [string[]]$TargetPaths
     )
+
+    # 范围目标先于任何 evidence / policy 访问规范化（与 BatchPurge 目标同一 D 盘全路径形态）；
+    # 重复目标与 BatchPurge 一样直接报错。
+    $scopeTargets = $null
+    $scopeTargetSet = $null
+    if ($null -ne $TargetPaths) {
+        if ($TargetPaths.Count -eq 0) {
+            throw 'safe-delete status scope 至少需要一个目标。'
+        }
+        $scopeTargets = [Collections.Generic.List[string]]::new()
+        $scopeTargetSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($scopeTarget in $TargetPaths) {
+            $fullScopeTarget = Assert-CodexHookDPath -Value $scopeTarget -Name 'safe-delete status scope target'
+            if (-not $scopeTargetSet.Add($fullScopeTarget)) {
+                throw 'safe-delete status scope target 重复。'
+            }
+            $scopeTargets.Add($fullScopeTarget)
+        }
+    }
+    $scopeMatchedRecords = 0L
+    $scopeUnattributableRecords = 0L
 
     $metricsState = New-CodexSafeTreeDeleteMetricsState -Phase 'status'
     Add-Member -InputObject $metricsState -NotePropertyMembers @{
@@ -6270,6 +6344,13 @@ function Get-CodexSafeTreeDeleteStatus {
     $fastResults = $null
     $fastScanMs = 0L
     $fastDop = Get-CodexSafeTreeDeleteStatusJsonParseThrottleLimit
+    if ($null -ne $scopeTargets) {
+        $runItems = @(Select-CodexSafeTreeDeleteStatusScopeRunItems `
+            -RunItems $runItems `
+            -ScopeTargets $scopeTargets.ToArray() `
+            -FullEvidenceRoot $fullEvidenceRoot `
+            -DegreeOfParallelism $fastDop)
+    }
     $fastHandled = 0L
     $fastFallback = 0L
     if ($fastScanEnabled) {
@@ -6454,6 +6535,19 @@ function Get-CodexSafeTreeDeleteStatus {
                     [long]$metricsState.segmentActiveResolveMs + $activeWatch.ElapsedMilliseconds
             }
         }
+        if ($null -ne $scopeTargetSet) {
+            # 范围按完整认证后的 targetPath 判定；范围外的记录既不输出，也不影响 complete 与
+            # blockingRecords。targetPath 无法确定的记录一律计入范围。
+            $operationTargetPath = [string]$operationStatus.operation.targetPath
+            if ([string]::IsNullOrEmpty($operationTargetPath)) {
+                $scopeUnattributableRecords++
+            } elseif ($scopeTargetSet.Contains($operationTargetPath)) {
+                $scopeMatchedRecords++
+            } else {
+                $runItemIndex++
+                continue
+            }
+        }
         $operations.Add($operationStatus.operation)
         if (-not [bool]$operationStatus.complete) {
             $complete = $false
@@ -6473,7 +6567,7 @@ function Get-CodexSafeTreeDeleteStatus {
                 @($_.errors).Count -ne 0)
         } | ForEach-Object { [string]$_.operationId }
     })
-    $status = [pscustomobject][ordered]@{
+    $statusFields = [ordered]@{
         artifactType = 'env-governance.codex-safe-tree-delete-status'
         schemaVersion = 1
         capturedAtUtc = [datetimeoffset]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
@@ -6496,6 +6590,16 @@ function Get-CodexSafeTreeDeleteStatus {
         operations = @($operations)
         metrics = Complete-CodexSafeTreeDeleteMetrics -State $metricsState
     }
+    if ($null -ne $scopeTargets) {
+        # scope 紧挨 complete 之前：complete、blockingRecords 与 ready 都只针对范围内的记录。
+        $statusFields.Insert(3, 'scope', [pscustomobject][ordered]@{
+            kind = 'targets'
+            targets = @($scopeTargets)
+            matchedRecords = $scopeMatchedRecords
+            unattributableRecords = $scopeUnattributableRecords
+        })
+    }
+    $status = [pscustomobject]$statusFields
     if ($env:CODEX_SAFE_TREE_DELETE_STATUS_SEGMENTS -ceq '1') {
         $status | Add-Member -NotePropertyName statusSegments -NotePropertyValue ([pscustomobject][ordered]@{
             directoryEnumerationMs = [long]$metricsState.segmentDirectoryEnumerationMs

@@ -461,6 +461,184 @@ namespace CodexSafeTreeDelete
             return list;
         }
 
+        // ---------------------------------------------------------------- #80 scope prefilter
+
+        private const int ScopeClaimInitialBytes = 4096;
+        private const int ScopeClaimMaxBytes = 65536;
+
+        /// <summary>
+        /// Status 范围查询的枚举阶段预筛（语义与前提见 PowerShell 侧
+        /// Select-CodexSafeTreeDeleteStatusScopeRunItems）。返回与 runs 等长的保留标记：只有能证明
+        /// 在范围外的规范形态记录得到 false。只读；任何异常都按保留处理。
+        /// </summary>
+        public static bool[] SelectScopeCandidates(
+            List<StatusScanRunInput> runs,
+            string[] scopeTargets,
+            string evidenceRoot,
+            int maxDegreeOfParallelism)
+        {
+            if (runs == null) { throw new ArgumentNullException("runs"); }
+            if (scopeTargets == null) { throw new ArgumentNullException("scopeTargets"); }
+            if (string.IsNullOrWhiteSpace(evidenceRoot)) { throw new ArgumentNullException("evidenceRoot"); }
+
+            string fullEvidenceRoot = AssertDPath(evidenceRoot, "safe-delete status evidence root");
+            string[] targets = (string[])scopeTargets.Clone();
+            bool[] keep = new bool[runs.Count];
+            ParallelOptions options = new ParallelOptions();
+            options.MaxDegreeOfParallelism = maxDegreeOfParallelism < 1 ? 1 : maxDegreeOfParallelism;
+            Parallel.For(0, runs.Count, options, delegate(int index)
+            {
+                bool keepRun = true;
+                try
+                {
+                    keepRun = !IsScopeClaimOutside(runs[index], targets, fullEvidenceRoot);
+                }
+                catch (Exception)
+                {
+                    keepRun = true;
+                }
+                keep[index] = keepRun;
+            });
+            return keep;
+        }
+
+        private static bool IsScopeClaimOutside(
+            StatusScanRunInput run, string[] scopeTargets, string fullEvidenceRoot)
+        {
+            // 规范形态判定与 ScanOne、参考路径相同；不满足的记录由完整认证报告为 manual-review。
+            if (run == null || !run.IsContainer || run.IsReparsePoint)
+            {
+                return false;
+            }
+            string runDirectory = AssertDPath(run.FullName, "safe-delete status run");
+            AssertCapabilityPath(runDirectory, fullEvidenceRoot, runDirectory, "safe-delete status run");
+            // 与完整认证选同一份文件：有 terminal-archive.json 时走 archived 认证，否则读 plan.json。
+            string claimPath = Path.Combine(runDirectory, "terminal-archive.json");
+            if (!File.Exists(claimPath))
+            {
+                claimPath = Path.Combine(runDirectory, "plan.json");
+                if (!File.Exists(claimPath))
+                {
+                    return false;
+                }
+            }
+            string claim = ReadScopeClaim(claimPath);
+            if (claim == null)
+            {
+                return false;
+            }
+            string fullClaim = AssertDPathQuiet(claim);
+            if (fullClaim == null)
+            {
+                return false;
+            }
+            foreach (string target in scopeTargets)
+            {
+                if (PathEqual(claim, target) || PathEqual(fullClaim, target))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // 读文件开头至多 ScopeClaimMaxBytes 字节，取顶层对象里第一个属性名（按 ordinal）为
+        // targetPath 的 JSON string。读不到、读不全或任何解析错误都返回 null。
+        private static string ReadScopeClaim(string path)
+        {
+            string lexicalPath = Path.GetFullPath(path);
+            using (SafeFileHandle handle = OpenVerifiedReadHandleLocal(lexicalPath))
+            using (FileStream stream = new FileStream(handle, FileAccess.Read, 1))
+            {
+                long fileLength = stream.Length;
+                int limit = (int)Math.Min(fileLength, (long)ScopeClaimMaxBytes);
+                byte[] buffer = new byte[limit];
+                int length = 0;
+                int want = Math.Min(limit, ScopeClaimInitialBytes);
+                while (true)
+                {
+                    while (length < want)
+                    {
+                        int read = stream.Read(buffer, length, want - length);
+                        if (read <= 0)
+                        {
+                            return null;
+                        }
+                        length += read;
+                    }
+                    bool needMore;
+                    string claim = TryReadScopeClaim(buffer, length, length == fileLength, out needMore);
+                    if (!needMore)
+                    {
+                        return claim;
+                    }
+                    if (length >= limit)
+                    {
+                        return null;
+                    }
+                    want = (int)Math.Min((long)limit, (long)want * 2);
+                }
+            }
+        }
+
+        private static string TryReadScopeClaim(
+            byte[] buffer, int length, bool isFinalBlock, out bool needMore)
+        {
+            needMore = false;
+            int offset = length >= 3 && buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF ? 3 : 0;
+            JsonReaderOptions readerOptions = new JsonReaderOptions {
+                AllowTrailingCommas = false,
+                CommentHandling = JsonCommentHandling.Disallow,
+                MaxDepth = 128
+            };
+            Utf8JsonReader reader = new Utf8JsonReader(
+                new ReadOnlySpan<byte>(buffer, offset, length - offset),
+                isFinalBlock,
+                new JsonReaderState(readerOptions));
+            try
+            {
+                if (!reader.Read())
+                {
+                    needMore = !isFinalBlock;
+                    return null;
+                }
+                if (reader.TokenType != JsonTokenType.StartObject)
+                {
+                    return null;
+                }
+                while (reader.Read())
+                {
+                    if (reader.TokenType != JsonTokenType.PropertyName)
+                    {
+                        // 顶层对象已结束，没有 targetPath。
+                        return null;
+                    }
+                    bool isTargetPath = reader.ValueTextEquals("targetPath");
+                    if (!reader.Read())
+                    {
+                        needMore = !isFinalBlock;
+                        return null;
+                    }
+                    if (isTargetPath)
+                    {
+                        return reader.TokenType == JsonTokenType.String ? reader.GetString() : null;
+                    }
+                    if (!reader.TrySkip())
+                    {
+                        needMore = !isFinalBlock;
+                        return null;
+                    }
+                }
+                needMore = !isFinalBlock;
+                return null;
+            }
+            catch (Exception)
+            {
+                needMore = false;
+                return null;
+            }
+        }
+
         private static void ScanOne(
             StatusScanRunInput run,
             StatusScanPolicy policy,

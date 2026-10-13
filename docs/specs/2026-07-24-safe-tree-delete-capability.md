@@ -175,6 +175,27 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
    v1 缺少 `directoryCommitAnchors`，不可由受管写入路径恢复或清理，也绝不通过补写空 anchors
    冒充 v2。
 
+   范围查询（#80）：`Status` 可带 `TargetPaths`（经 `.cmd` wrapper 调用时同样以单个 `::` 分隔字符串
+   传入），只回答这些目标。目标先于任何 policy / evidence 访问规范化为 D 盘全路径；拆分后为空或含
+   空白、路径非法、规范化后重复（`OrdinalIgnoreCase`）都是普通 throw 的用法错误。记录完整认证后的
+   `targetPath` 与任一目标按 `OrdinalIgnoreCase` 相等才算命中，不做 Unicode 规范化，与 `BatchPurge`
+   一致；目标的祖先路径与后代路径都不算命中。命中记录照常完整认证并给出 lifecycle；无法确定
+   `targetPath` 的记录（plan 解析失败、认证失败、空 run、evidence 根下的文件等）一律计入范围，为
+   `manual-review`。结果在 `capturedAtUtc` 之后多出 `scope: {kind:"targets", targets[],
+   matchedRecords, unattributableRecords}`，`targets` 是规范化后的目标、按传入顺序；`complete`、
+   `blockingRecords` 与 `ready` 只针对范围内的记录。不带 `TargetPaths` 时输出与全量 `Status` 相同，
+   没有 `scope` 字段。范围查询不持久化任何 receipt。
+
+   范围查询在枚举阶段按声明预筛：run 目录有 `terminal-archive.json` 时读它，否则读 `plan.json`，只读到
+   顶层 `targetPath` 为止（最多 64 KiB）。声明是合法 D 盘路径、且原样与规范化后都不等于任何目标时，
+   该记录不读完整 plan、不做认证、不进参考路径，也不计入 `entriesScanned` 与 `bytesHashed`；读不到
+   声明的记录一律保留并完整认证。完整认证得出的 `targetPath` 总与声明原样或规范化后相等，所以预筛
+   不会漏掉命中记录，但声明只用于排除，不能代替认证。代价是：声明可读、完整认证却会失败的范围外
+   记录（例如在 `targetPath` 之后被截断的 plan）不出现在范围结果里，全量 `Status` 仍把它报为
+   `manual-review`。预筛依赖 safe-delete gate 的独占串行，即读声明与完整认证之间没有其他写入者，与
+   `BatchPurge` 单次历史扫描的前提相同。fast scan 开或关都执行同一预筛；现有 kill switch（fast
+   scan、tree fast、parallel fallback）照常生效，且不改变范围结果。
+
 2. `Archive`：要求 `ConfirmArchive`、精确 transaction path 与 approved SHA-256，只为同时满足
    `status=purged`、quarantine 当前不存在、`restoreJournalAnchors` 为空的历史 transaction，在其
    operation run 内发布固定的 create-only `terminal-archive.json`。任一判据不满足时，以稳定原因
