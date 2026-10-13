@@ -151,9 +151,10 @@ try {
     }
     Assert-RealHistory ([bool]$report.historyScale.stable) 'Fixture history must stay stable during the run.'
 
-    Assert-RealHistory ((@($report.items | ForEach-Object { $_.id }) -join ',') -ceq 'status-full-cold-start,reference-lookup-miss') 'Unexpected measurement items.'
+    $expectedItems = 'status-full-cold-start,reference-lookup-miss,status-scope-1-target,status-scope-10-targets'
+    Assert-RealHistory ((@($report.items | ForEach-Object { $_.id }) -join ',') -ceq $expectedItems) 'Unexpected measurement items.'
     $persisted = Get-Content -LiteralPath $measurementPath -Raw | ConvertFrom-Json -Depth 64
-    for ($itemIndex = 0; $itemIndex -lt 2; $itemIndex++) {
+    for ($itemIndex = 0; $itemIndex -lt 4; $itemIndex++) {
         $item = $report.items[$itemIndex]
         $samples = @($item.samples)
         Assert-RealHistory ($samples.Count -eq 3 -and (@($samples | ForEach-Object { $_.run }) -join ',') -ceq '1,2,3') "$($item.id) must keep three samples."
@@ -166,8 +167,18 @@ try {
             if ($item.id -ceq 'status-full-cold-start') {
                 Assert-RealHistory ($sample.exitCode -eq 0 -and $sample.operationCount -eq 3) 'Status sample must cover the whole fixture history.'
                 Assert-RealHistory ($sample.statusElapsedMs -le $sample.wallMs) 'Status time must nest inside process wall time.'
-            } else {
+            } elseif ($item.id -ceq 'reference-lookup-miss') {
                 Assert-RealHistory ($sample.found -eq $false) 'Reference lookup must miss.'
+            } else {
+                # Scope items (#80): history holds two targets and one unattributable top-level
+                # entry; targets beyond the two history ones are never-existing probe targets.
+                $expectedTargets = if ($item.id -ceq 'status-scope-1-target') { 1 } else { 10 }
+                $expectedHistoryTargets = [Math]::Min($expectedTargets, 2)
+                Assert-RealHistory ($sample.exitCode -eq 0 -and $sample.targetCount -eq $expectedTargets -and
+                    $sample.historyTargets -eq $expectedHistoryTargets) "$($item.id) must query $expectedTargets targets, $expectedHistoryTargets of them from history."
+                Assert-RealHistory ($sample.matchedRecords -eq $expectedHistoryTargets -and $sample.unattributableRecords -eq 1 -and
+                    $sample.operationCount -eq $expectedHistoryTargets + 1) "$($item.id) must match each history target's record and keep the unattributable entry."
+                Assert-RealHistory ($sample.statusElapsedMs -le $sample.wallMs) 'Status time must nest inside process wall time.'
             }
         }
     }
