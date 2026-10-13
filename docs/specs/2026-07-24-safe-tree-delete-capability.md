@@ -381,6 +381,35 @@ preflight 看不到的两处只列出、不阻止：
 policy v5 下，`BatchPurge` 还要求 capability 的 `producerFenceMode=os-handle-required`；
 `manual-only` 条目必须逐笔处理。
 
+`BatchPurge` 的历史查找（#76）默认是单次历史扫描（fast 模式）：目标去重后、处理第一个目标前整批只扫一次
+历史，得到只在本次调用内存中有效的「目标（`OrdinalIgnoreCase`，不做 Unicode 规范化）→ 候选」索引；处理到
+某个目标时，先对它的候选重做完整参考认证并要求 SHA-256 与扫描时一致，再进入原有分支（多匹配报错、schema
+非 2/3 的 skipAction、3 次存在性探测和隔离目录检查的时机都不变）。`CODEX_SAFE_TREE_DELETE_BATCH_HISTORY_SCAN=0`
+退回逐目标参考查找（reference 模式），只有字符串 `0` 生效。两种模式等价依赖 gate 的独占串行，这一前提及
+改动 gate 前的要求见 `modules/host-safety/CONTEXT.md`。
+
+失败语义：扫描阶段任何异常使全批 `skipped-target-error`、`completed=false`；处理阶段候选重新认证失败视为
+扫描后历史被外部改动，当前及剩余目标 `skipped-target-error`，已完成目标保留结果。两种模式只在一种组合下
+错误文本可能不同、动作相同：reference 模式下某目标自身匹配记录的裁决异常若先于全局坏记录被枚举，该目标
+`error` 取前者，fast 模式取扫描失败消息。
+
+预筛（#78）：fast 扫描对每个枚举到的 `transaction.json` 先调 `StatusScanCoordinator.ClassifyBatchHistoryTransaction`
+（`scripts/lib/CodexSafeTreeDeleteStatusScan.cs`，随原生加载器编译）。它沿用 Status fast scan 的规范位置
+（evidence 根直接 run 目录下的 `transaction.json`）与规范形态（schemaVersion 1..3 的 producer 属性集，ordinal
+精确）定义，路径链校验与句柄绑定读取和参考链相同，内容只读 `schemaVersion`、`status`、`targetPath`。只排除
+能证明参考认证链必然成功、且不会成为本批任何目标候选的记录：ordinal 终态 status，或 ordinal 在途 status 且
+非空 `targetPath` 与本批目标都不 `OrdinalIgnoreCase` 相等。在途且匹配的记录，以及非规范位置或形态、读取/
+解码/解析异常、`ConvertFrom-Json` 会拒绝的输入、非 producer 的 status 写法、空 `targetPath`、嵌套过深，都走
+完整参考认证链。
+
+结果的 `historyScan` 字段：`mode`、`scanCount`、`enumeratedFiles`、`canonicalFiles`、`fallbackFiles`、
+`excludedByPrefilter`、`fullyAuthenticated`、`elapsedMs`，失败时另有 `failure`（`phase` 为 `scan` 或
+`reauthentication`）。fast 模式 `scanCount` 恒为 1，`enumeratedFiles` 分成 `canonicalFiles`（预筛裁决了的
+文件，其中排除的计入 `excludedByPrefilter`）与 `fallbackFiles`（回退参考链的文件），扫描成功时
+`fullyAuthenticated` 等于 `enumeratedFiles - excludedByPrefilter`。reference 模式不做预筛：每个文件计入
+`fallbackFiles`，`canonicalFiles` 与 `excludedByPrefilter` 为 0，`scanCount` 等于目标数，各计数为逐目标
+累计。`fullyAuthenticated` 不含处理阶段的重新认证。
+
 只读预检使用 `Check`（#81）：输入 `TargetPath` 或 `TargetPaths` 二者择一（`TargetPaths` 同样接受 `::`
 连接），`CapabilityRoot` 可省略。每个目标运行与 `Plan` 同一份目标解析判定
 `Get-CodexSafeTreeDeleteTargetDecision`（`Resolve-CodexSafeTreeDeleteTarget` 只是把拒绝原样抛出的包装）：
