@@ -151,9 +151,9 @@ try {
     }
     Assert-RealHistory ([bool]$report.historyScale.stable) 'Fixture history must stay stable during the run.'
 
-    Assert-RealHistory ((@($report.items | ForEach-Object { $_.id }) -join ',') -ceq 'status-full-cold-start,reference-lookup-miss') 'Unexpected measurement items.'
+    Assert-RealHistory ((@($report.items | ForEach-Object { $_.id }) -join ',') -ceq 'status-full-cold-start,reference-lookup-miss,batch-scan-direct') 'Unexpected measurement items.'
     $persisted = Get-Content -LiteralPath $measurementPath -Raw | ConvertFrom-Json -Depth 64
-    for ($itemIndex = 0; $itemIndex -lt 2; $itemIndex++) {
+    for ($itemIndex = 0; $itemIndex -lt 3; $itemIndex++) {
         $item = $report.items[$itemIndex]
         $samples = @($item.samples)
         Assert-RealHistory ($samples.Count -eq 3 -and (@($samples | ForEach-Object { $_.run }) -join ',') -ceq '1,2,3') "$($item.id) must keep three samples."
@@ -166,8 +166,17 @@ try {
             if ($item.id -ceq 'status-full-cold-start') {
                 Assert-RealHistory ($sample.exitCode -eq 0 -and $sample.operationCount -eq 3) 'Status sample must cover the whole fixture history.'
                 Assert-RealHistory ($sample.statusElapsedMs -le $sample.wallMs) 'Status time must nest inside process wall time.'
-            } else {
+            } elseif ($item.id -ceq 'reference-lookup-miss') {
                 Assert-RealHistory ($sample.found -eq $false) 'Reference lookup must miss.'
+            } else {
+                # Both producer runs sit at canonical locations and match no probe target (one
+                # terminal, one live for another target): the prefilter excludes them. The stray
+                # copy is at a non-canonical location and falls back to reference authentication.
+                Assert-RealHistory ($sample.candidateCount -eq 0) 'Batch scan must find no candidate for the probe target.'
+                Assert-RealHistory ($sample.enumeratedFiles -eq 3 -and $sample.canonicalFiles -eq 2 -and
+                    $sample.excludedByPrefilter -eq 2 -and $sample.fallbackFiles -eq 1 -and
+                    $sample.fullyAuthenticated -eq 1) ('Batch scan counters must reflect the prefilter: ' + ($sample | ConvertTo-Json -Compress))
+                Assert-RealHistory ($sample.scanElapsedMs -le $sample.wallMs) 'Scan time must nest inside the item wall time.'
             }
         }
     }

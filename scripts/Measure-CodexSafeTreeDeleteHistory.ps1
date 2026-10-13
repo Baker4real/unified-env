@@ -159,6 +159,24 @@ if ($RealHistory) {
                 [ordered]@{ wallMs = $watch.Elapsed.TotalMilliseconds; found = $false }
             }
         }
+        [pscustomobject]@{
+            id = 'batch-scan-direct'
+            boundary = 'in-process Get-CodexSafeTreeDeleteRecoverableTransactionCandidates called directly, not through the delete path (the BatchPurge fast history scan with the C# prefilter, #78) for the same absent target: full transaction.json enumeration, prefilter, reference authentication of every file the prefilter does not exclude; no policy read, target resolve or gate held'
+            measure = {
+                $scanMetrics = New-CodexSafeTreeDeleteHistoryScanMetrics -Mode 'fast'
+                $watch = [Diagnostics.Stopwatch]::StartNew()
+                $candidates = Get-CodexSafeTreeDeleteRecoverableTransactionCandidates -FullEvidenceRoot $evidenceFull -TargetPaths @($lookupTarget) -Metrics $scanMetrics
+                $watch.Stop()
+                $candidateCount = $candidates[$lookupTarget].Count
+                if ($candidateCount -ne 0) { throw 'Batch scan probe target unexpectedly has history candidates.' }
+                [ordered]@{
+                    wallMs = $watch.Elapsed.TotalMilliseconds; candidateCount = $candidateCount
+                    enumeratedFiles = [long]$scanMetrics.enumeratedFiles; canonicalFiles = [long]$scanMetrics.canonicalFiles
+                    fallbackFiles = [long]$scanMetrics.fallbackFiles; excludedByPrefilter = [long]$scanMetrics.excludedByPrefilter
+                    fullyAuthenticated = [long]$scanMetrics.fullyAuthenticated; scanElapsedMs = [long]$scanMetrics.elapsedMs
+                }
+            }
+        }
     )
     $killSwitches = [ordered]@{}
     foreach ($name in @([Environment]::GetEnvironmentVariables().Keys | Where-Object { $_ -like 'CODEX_SAFE_TREE_DELETE_*' } | Sort-Object)) {
@@ -187,7 +205,7 @@ if ($RealHistory) {
         repetitions = $repetitions
         historyScale = [ordered]@{ before = $scaleBefore; after = $scaleAfter; stable = $stable }
         items = @($itemResults)
-        unmeasured = @('OS file cache state (not controlled; sample 1 may be cold)', 'gate wait apart from Status work (both inside the Status wall time)', 'BatchPurge work other than the per-target lookup')
+        unmeasured = @('OS file cache state (not controlled; sample 1 may be cold)', 'gate wait apart from Status work (both inside the Status wall time)', 'BatchPurge work other than the history lookup (per-target reference lookup or one batch scan)')
     }
     $outputFull = Join-Path $runRoot 'measurement.json'
     [void](Set-CodexHookCapabilityJson -Path $outputFull -Document $report -CapabilityRoot $runRoot -AllowedExactPaths @($outputFull) -Scope 'real-history benchmark report')
