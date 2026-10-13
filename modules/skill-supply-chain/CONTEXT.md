@@ -43,3 +43,5 @@ catalog 和六文件 runtime 建立受 ACL 保护的联合回滚点。迁移不�
 ## 已知漂移
 
 仓库源中的六文件部署闭包由 shared SOURCE parser、catalog generator、system provenance repair、Store identity provider、installer 与 command wrapper 组成；这些实现从部署目录加载受管依赖，不依赖项目源仓库路径。现役 `D:\Codex\.codex\scripts\` 是否已包含该闭包只以受管部署 manifest 与现场 hash 为准，不能由仓库源存在推断。后续源文件变更、移动或拆分仓库前必须重新执行受管部署并核验 hash。当前仍依赖 active `skill-install-guard` 的 closure 脚本和官方 system installer，且事务内部还有待迁移的递归删除。在这些依赖、独立 fixture 和受管删除全部收敛前，本模块不拆出独立 Git 仓库。
+
+部署目录曾有一份不在部署闭包内、`MODULE_PATH` 指向部署副本的 `test_install_skill_guarded.py`，该漂移已于 2026-10-13 闭合：按行为对照后，本模块尚未覆盖的行为迁入 `Test-SkillInstallGuarded.py`（`ScopedClosureGateTests`，以及 canonical rename 的旧 active SOURCE 身份、英文开头 description 两个用例）和 `Test-SkillCatalog.py`（四个 closure gate 用例），其余用例已有等价覆盖或价值低；部署副本及其 `__pycache__` 字节码经受管回收移入回收站，证据在 `D:\agents\run-evidence\managed-recycle\20261013T114802Z-082266b5\` 和 `20261013T114830Z-ba618232\`。

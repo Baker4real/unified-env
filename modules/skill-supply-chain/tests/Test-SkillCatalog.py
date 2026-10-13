@@ -85,6 +85,35 @@ def _closure_result(active_root: Path, active_skill_count: int) -> dict:
     }
 
 
+def _closure_finding(kind: str, skill: str) -> dict:
+    return {
+        "kind": kind,
+        "skill": skill,
+        "source": "SKILL.md",
+        "line": 1,
+        "reference": "description",
+        "resolved": "x",
+    }
+
+
+def _closure_with_findings(active_root: Path, active_skill_count: int, *findings: dict) -> dict:
+    closure = _closure_result(active_root, active_skill_count)
+    closure["summary"]["finding_count"] = len(findings)
+    closure["findings"] = list(findings)
+    return closure
+
+
+def _scoped_closure_fixture(base: Path) -> tuple[Path, Path, Path]:
+    active = base / "active"
+    cache = base / "cache"
+    cache.mkdir()
+    _write_skill(active, "animate", name="animate", description="动画效果")
+    _write_skill(active, ".system/imagegen", name="imagegen", description="生成图片")
+    ledger = base / "ledger.json"
+    ledger.write_text(json.dumps({"sources": []}), encoding="utf-8")
+    return active, cache, ledger
+
+
 def _create_directory_alias(alias: Path, target: Path) -> None:
     alias.parent.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
@@ -1270,6 +1299,96 @@ else:
                         ledger_path=ledger,
                         resource_closure=closure,
                     )
+
+        def test_closure_gate_marks_preexisting_non_target_findings(self) -> None:
+            other = _closure_finding("non-chinese-display", "animate")
+            with tempfile.TemporaryDirectory() as temp:
+                active, cache, ledger = _scoped_closure_fixture(Path(temp))
+                catalog = catalog_module.build_catalog(
+                    active_root=active,
+                    plugin_cache_root=cache,
+                    ledger_path=ledger,
+                    resource_closure=_closure_with_findings(active, 2, other),
+                    closure_gate={"baseline_findings": [other], "targets": [".system/imagegen"]},
+                )
+
+            check = catalog["checks"]["resource_closure"]
+            self.assertEqual(check["status"], "preexisting-findings")
+            self.assertEqual(check["finding_count"], 1)
+            self.assertEqual(check["gate"]["preexisting_findings"], [other])
+            per_skill = {
+                item["relative_path"]: item["resource_closure"] for item in catalog["artifacts"]
+            }
+            self.assertEqual(per_skill["animate/SKILL.md"], "preexisting-findings")
+            self.assertEqual(per_skill[".system/imagegen/SKILL.md"], "validated")
+            verdict = catalog_module.verify_catalog_closure_check(
+                check,
+                targets=[".system/imagegen"],
+                baseline_findings=[other],
+            )
+            self.assertEqual(verdict["status"], "preexisting-findings")
+            # Verification re-derives the verdict for its own transaction.
+            with self.assertRaisesRegex(catalog_module.CatalogError, "未覆盖本事务 targets"):
+                catalog_module.verify_catalog_closure_check(check, targets=["animate"])
+            with self.assertRaisesRegex(catalog_module.CatalogError, "baseline 外"):
+                catalog_module.verify_catalog_closure_check(
+                    check,
+                    targets=[".system/imagegen"],
+                    baseline_findings=[],
+                )
+
+        def test_closure_gate_rejects_new_or_target_findings(self) -> None:
+            other = _closure_finding("non-chinese-display", "animate")
+            target = _closure_finding("missing-source", ".system/imagegen")
+            for finding, baseline in ((other, []), (target, [target])):
+                with self.subTest(skill=finding["skill"]):
+                    with tempfile.TemporaryDirectory() as temp:
+                        active, cache, ledger = _scoped_closure_fixture(Path(temp))
+                        with self.assertRaisesRegex(catalog_module.CatalogError, "资源闭包门禁未通过"):
+                            catalog_module.build_catalog(
+                                active_root=active,
+                                plugin_cache_root=cache,
+                                ledger_path=ledger,
+                                resource_closure=_closure_with_findings(active, 2, finding),
+                                closure_gate={
+                                    "baseline_findings": baseline,
+                                    "targets": [".system/imagegen"],
+                                },
+                            )
+
+        def test_closure_check_verification_rejects_unknown_status(self) -> None:
+            with self.assertRaisesRegex(catalog_module.CatalogError, "状态不可接受"):
+                catalog_module.verify_catalog_closure_check(
+                    {"status": "not-run", "finding_count": None},
+                    targets=["animate"],
+                )
+
+        def test_cli_closure_target_requires_baseline(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                active, cache, ledger = _scoped_closure_fixture(Path(temp))
+                stderr = io.StringIO()
+                with mock.patch.object(
+                    catalog_module,
+                    "_run_resource_closure",
+                    return_value=_closure_result(active, 2),
+                ):
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+                        exit_code = catalog_module.main(
+                            [
+                                "--dry-run",
+                                "--active-root",
+                                str(active),
+                                "--plugin-cache-root",
+                                str(cache),
+                                "--ledger",
+                                str(ledger),
+                                "--closure-target",
+                                "animate",
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("--closure-target 必须与 --closure-baseline 一起使用", stderr.getvalue())
 
         def test_dry_run_does_not_use_network(self) -> None:
             with tempfile.TemporaryDirectory() as temp:

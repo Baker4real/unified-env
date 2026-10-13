@@ -723,6 +723,41 @@ class SkillInstallGuardedTests(unittest.TestCase):
                 self.assertTrue(Path(state["old_skill"]).is_dir())
                 self.assertFalse((self.active / str(state["new_name"])).exists())
 
+    def test_canonical_rename_rejects_old_active_source_outside_predecessor_identity(
+        self,
+    ) -> None:
+        state = self.prepare_canonical_rename()
+        old_source = Path(state["old_skill"]) / "SOURCE.md"
+        old_text = old_source.read_text(encoding="utf-8")
+        drifted_text = old_text.replace(
+            "Commit or revision: `0123456789abcdef`",
+            "Commit or revision: `fedcba9876543210`",
+        )
+        self.assertNotEqual(drifted_text, old_text)
+        old_source.write_text(drifted_text, encoding="utf-8")
+        ledger_before = self.ledger.read_bytes()
+        catalog_before = Path(state["catalog"]).read_bytes()
+        args = self.wrapper_args(
+            Path(state["candidate"]),
+            Path(state["manifest"]),
+            name=str(state["new_name"]),
+        )
+        args.extend(["--update", "--dry-run"])
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(args)
+
+        self.assertEqual(code, 2, stderr.getvalue())
+        self.assertIn(
+            "旧 active SOURCE.md 与 canonical predecessor source identity 不一致",
+            stderr.getvalue(),
+        )
+        self.assertTrue(Path(state["old_skill"]).is_dir())
+        self.assertFalse((self.active / str(state["new_name"])).exists())
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertEqual(Path(state["catalog"]).read_bytes(), catalog_before)
+
     def test_install_updates_source_ledger_and_catalog(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "受管包装器的安装测试夹具")
         manifest = self.write_manifest(
@@ -1990,6 +2025,28 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertEqual(catalog.read_bytes(), catalog_before)
         transaction = max((self.temp / "evidence").glob("install-*"))
         self.assertFalse((transaction / "backups").exists())
+
+    def test_install_rejects_english_first_description_before_activation(self) -> None:
+        # Technical tokens may outnumber CJK characters if the text starts in Chinese.
+        accepted = self.write_candidate("display-accepted", "使用 React、GSAP 和 PowerShell 实现界面")
+        WRAPPER.validate_chinese_display_metadata(accepted, label="candidate")
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "English 中文")
+        manifest = self.write_manifest(name, "install")
+        catalog = self.temp / "catalog.json"
+        catalog.write_bytes(b'{"artifacts":[{"name":"existing"}]}\n')
+        ledger_before = self.ledger.read_bytes()
+        catalog_before = catalog.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertIn("description 必须以中文为主体", stderr.getvalue())
+        self.assertFalse((self.active / name).exists())
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertEqual(catalog.read_bytes(), catalog_before)
 
     def test_install_rejects_malformed_openai_yaml_before_backups(self) -> None:
         name = "test-skill-wrapper"
@@ -5113,6 +5170,304 @@ class SkillInstallGuardedTests(unittest.TestCase):
         transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
         result = json.loads(transaction.read_text(encoding="utf-8"))
         self.assertEqual(result["status"], "rolled-back")
+
+
+def closure_finding(
+    kind: str, skill: str, *, line: int = 1, resolved: str = "x"
+) -> dict[str, object]:
+    return {
+        "kind": kind,
+        "skill": skill,
+        "source": "SKILL.md",
+        "line": line,
+        "reference": "description",
+        "resolved": resolved,
+    }
+
+
+def closure_payload(*findings: dict[str, object]) -> dict[str, object]:
+    return {
+        "summary": {"finding_count": len(findings)},
+        "findings": [dict(item) for item in findings],
+    }
+
+
+def preexisting_closure_catalog(
+    *findings: dict[str, object], targets: list[str]
+) -> dict[str, object]:
+    return {
+        "artifacts": [],
+        "checks": {
+            "resource_closure": {
+                "status": "preexisting-findings",
+                "finding_count": len(findings),
+                "gate": {
+                    "targets": targets,
+                    "new_findings": [],
+                    "target_findings": [],
+                    "preexisting_findings": list(findings),
+                },
+            }
+        },
+    }
+
+
+class ScopedClosureGateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temp_parent = Path(r"D:\Codex\tmp")
+        temp_parent.mkdir(parents=True, exist_ok=True)
+        self.temp = Path(tempfile.mkdtemp(prefix="skill-closure-gate-test-", dir=temp_parent))
+        self.addCleanup(shutil.rmtree, self.temp)
+
+    def evaluate(
+        self,
+        *,
+        baseline: dict[str, object] | None,
+        post: dict[str, object],
+        targets: list[str],
+    ) -> tuple[dict[str, object], str]:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            gate = WRAPPER.evaluate_closure_gate(
+                payload=post,
+                baseline=baseline,
+                targets=targets,
+                label="post-resource-closure",
+            )
+        return gate, stderr.getvalue()
+
+    def fake_closure(self, *, stdout: str, exit_code: int) -> Path:
+        script = self.temp / "fake_closure.py"
+        script.write_text(
+            f"import sys\nsys.stdout.write({stdout!r})\nraise SystemExit({exit_code})\n",
+            encoding="utf-8",
+        )
+        return script
+
+    def run_fake_closure(self, *, stdout: str, exit_code: int) -> dict[str, object]:
+        return WRAPPER.run_closure(
+            root=self.temp,
+            closure_script=self.fake_closure(stdout=stdout, exit_code=exit_code),
+            interpreter=Path(sys.executable).resolve(),
+            evidence_dir=self.temp,
+            label="baseline-resource-closure",
+        )
+
+    def test_preexisting_non_target_findings_are_reported_without_blocking(self) -> None:
+        other = closure_finding("non-chinese-display", "animate")
+        system = closure_finding("missing-source", ".system/imagegen")
+        gate, stderr = self.evaluate(
+            baseline=closure_payload(other, system),
+            # line/resolved drift must not turn an existing finding into a new one.
+            post=closure_payload(
+                closure_finding("non-chinese-display", "animate", line=9, resolved="y"),
+                system,
+            ),
+            targets=[".system/skill-creator"],
+        )
+
+        self.assertEqual(gate["status"], "pass")
+        self.assertEqual(gate["new_findings"], [])
+        self.assertEqual(gate["target_findings"], [])
+        self.assertEqual(len(gate["preexisting_findings"]), 2)
+        self.assertIn("既有非 target closure finding 2 条", stderr)
+
+    def test_new_finding_target_finding_or_missing_baseline_blocks(self) -> None:
+        other = closure_finding("non-chinese-display", "animate")
+        target = closure_finding("non-chinese-display", "new-skill")
+        cases = {
+            "new-non-target": (
+                closure_payload(other),
+                closure_payload(other, closure_finding("stale-ledger", "unrelated")),
+                "新增 finding 1 条，target finding 0 条",
+            ),
+            "preexisting-target": (
+                closure_payload(target),
+                closure_payload(target),
+                "新增 finding 0 条，target finding 1 条",
+            ),
+            "missing-baseline": (
+                None,
+                closure_payload(closure_finding("missing-source", "other")),
+                "新增 finding 1 条，target finding 0 条",
+            ),
+        }
+        for case, (baseline, post, message) in cases.items():
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(WRAPPER.InstallError, message):
+                    self.evaluate(baseline=baseline, post=post, targets=["new-skill"])
+
+    def test_target_match_is_exact_or_nested(self) -> None:
+        sibling = closure_finding("missing-source", "new-skill-extra")
+        gate, _ = self.evaluate(
+            baseline=closure_payload(sibling),
+            post=closure_payload(sibling),
+            targets=["new-skill"],
+        )
+        self.assertEqual(gate["preexisting_findings"], [sibling])
+
+        nested = closure_finding("missing-resource", "new-skill/sub")
+        with self.assertRaisesRegex(WRAPPER.InstallError, "target finding 1 条"):
+            self.evaluate(
+                baseline=closure_payload(nested),
+                post=closure_payload(nested),
+                targets=["new-skill"],
+            )
+
+    def test_rename_and_retirement_names_are_targets(self) -> None:
+        self.assertEqual(
+            WRAPPER.transaction_closure_targets(
+                ledger_names=["new-orchestration"],
+                rename={"old_name": "old-orchestration"},
+                merge_retirement={"retired": {"name": "retired-bridge"}},
+            ),
+            ["new-orchestration", "old-orchestration", "retired-bridge"],
+        )
+
+    def test_run_closure_returns_strict_findings(self) -> None:
+        payload = closure_payload(closure_finding("non-chinese-display", "animate"))
+
+        result = self.run_fake_closure(stdout=json.dumps(payload), exit_code=1)
+
+        self.assertEqual(result["findings"], payload["findings"])
+
+    def test_run_closure_rejects_crash_or_inconsistent_output(self) -> None:
+        cases = (
+            ("not json", 1, "未返回合法 JSON"),
+            (json.dumps(closure_payload()), 2, "异常退出，退出码 2"),
+            (json.dumps({"summary": {"finding_count": 0}}), 0, "缺少 summary 或 findings"),
+            (json.dumps(closure_payload()), 1, "退出码 1 与 finding 数量 0 不一致"),
+        )
+        for stdout, exit_code, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(WRAPPER.InstallError, message):
+                    self.run_fake_closure(stdout=stdout, exit_code=exit_code)
+
+    def test_install_catalog_verification_rejects_preexisting_target_finding(self) -> None:
+        catalog_path = self.temp / "catalog.json"
+        catalog_path.write_text(
+            json.dumps(
+                preexisting_closure_catalog(
+                    closure_finding("non-chinese-display", "new-skill"),
+                    targets=["new-skill"],
+                )
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(
+            WRAPPER.InstallError, "资源闭包检查不可接受：.*落在 target 上"
+        ):
+            WRAPPER.verify_catalog(
+                catalog_path=catalog_path,
+                active_root=self.temp,
+                names=["new-skill"],
+                bundled_proofs=(),
+            )
+
+    def test_system_repair_targets_are_bundled_system_skills(self) -> None:
+        self.assertEqual(
+            REPAIR.system_closure_targets(),
+            [
+                ".system/imagegen",
+                ".system/openai-docs",
+                ".system/review-agent",
+                ".system/skill-creator",
+                ".system/skill-installer",
+            ],
+        )
+
+    def test_system_repair_gate_allows_only_preexisting_non_system_findings(self) -> None:
+        others = [
+            closure_finding("non-chinese-display", name) for name in ("animate", "apple-design")
+        ]
+        residual = closure_finding("missing-source", ".system/imagegen")
+        gate = REPAIR.evaluate_system_closure_gate(
+            payload=closure_payload(*others),
+            baseline=closure_payload(residual, *others),
+            targets=REPAIR.system_closure_targets(),
+            label="post-resource-closure",
+        )
+        self.assertEqual(gate["status"], "pass")
+        self.assertEqual(gate["preexisting_findings"], others)
+
+        cases = {
+            "residual-target": (
+                closure_payload(residual),
+                closure_payload(residual),
+                "新增 finding 0 条，target finding 1 条",
+            ),
+            "new-non-target": (
+                closure_payload(),
+                closure_payload(closure_finding("stale-ledger", "animate")),
+                "新增 finding 1 条，target finding 0 条",
+            ),
+        }
+        for case, (baseline, post, message) in cases.items():
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(REPAIR.SystemProvenanceRepairError, message):
+                    REPAIR.evaluate_system_closure_gate(
+                        payload=post,
+                        baseline=baseline,
+                        targets=REPAIR.system_closure_targets(),
+                        label="post-resource-closure",
+                    )
+
+    def test_system_repair_strict_closure_returns_findings_and_fails_closed(self) -> None:
+        def run(stdout: str, exit_code: int) -> dict[str, object]:
+            return REPAIR._run_strict_closure(
+                interpreter=Path(sys.executable).resolve(),
+                closure_script=self.fake_closure(stdout=stdout, exit_code=exit_code),
+                active_root=self.temp,
+                evidence_dir=self.temp,
+                label="post-resource-closure",
+            )
+
+        payload = closure_payload(closure_finding("non-chinese-display", "animate"))
+        self.assertEqual(run(json.dumps(payload), 1)["findings"], payload["findings"])
+        cases = (
+            ("nope", 1, "未返回合法 JSON"),
+            (json.dumps(closure_payload()), 3, "异常退出，退出码 3"),
+        )
+        for stdout, exit_code, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(REPAIR.SystemProvenanceRepairError, message):
+                    run(stdout, exit_code)
+
+    def test_system_repair_catalog_verification_scopes_preexisting_findings(self) -> None:
+        catalog_path = self.temp / "catalog.json"
+        other = closure_finding("non-chinese-display", "animate")
+        catalog_path.write_text(
+            json.dumps(
+                preexisting_closure_catalog(other, targets=REPAIR.system_closure_targets())
+            ),
+            encoding="utf-8",
+        )
+        verified = REPAIR._verify_catalog(
+            catalog_path=catalog_path,
+            active_root=self.temp,
+            plan={"skills": []},
+            baseline_findings=[other],
+        )
+        self.assertEqual(verified["resource_closure"]["preexisting_findings"], [other])
+
+        catalog_path.write_text(
+            json.dumps(
+                preexisting_closure_catalog(
+                    closure_finding("missing-source", ".system/imagegen"),
+                    targets=REPAIR.system_closure_targets(),
+                )
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            REPAIR.SystemProvenanceRepairError, "资源闭包检查不可接受：.*落在 target 上"
+        ):
+            REPAIR._verify_catalog(
+                catalog_path=catalog_path,
+                active_root=self.temp,
+                plan={"skills": []},
+            )
 
 
 if __name__ == "__main__":
