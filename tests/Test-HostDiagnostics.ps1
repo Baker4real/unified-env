@@ -157,6 +157,8 @@ Assert-True ([IO.Path]::GetFullPath($powershell.fixture).StartsWith($runRootPref
     suites = $report.suites.Count
     passedChecks = $report.passedChecks
     skippedChecks = $report.skippedChecks
+    # False on a fresh runner means the passing Check/Plan cases created the bin settings themselves.
+    recycleBinSettingsAtStart = $recycle.binSettingsAtStart
     deploymentChecks = $deploymentReport.cases.Count
     deploymentEvidence = $deploymentResultPath
     evidenceDirectory = $report.evidenceDirectory
