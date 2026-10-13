@@ -6255,8 +6255,10 @@ function Get-CodexSafeTreeDeleteStatus {
         if ([string]$candidatePolicy.sha256 -cne $ApprovedCandidatePolicySha256) {
             throw 'safe-delete candidate policy approved SHA-256 不匹配。'
         }
-        if ([long]$candidatePolicy.schemaVersion -ne 5L) {
-            throw 'safe-delete candidate policy activation preflight 只接受 schema v5。'
+        # v5 激活预检之外，#82 policy 维护工具用同一预检检查与现役 policy 同 schema 的候选。
+        if ([long]$candidatePolicy.schemaVersion -ne 5L -and
+            [long]$candidatePolicy.schemaVersion -ne [long]$policy.schemaVersion) {
+            throw 'safe-delete candidate policy preflight 只接受 schema v5 或与现役 policy 同 schema 的候选。'
         }
     }
     $operations = [Collections.Generic.List[object]]::new()
