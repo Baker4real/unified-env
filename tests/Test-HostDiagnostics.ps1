@@ -145,6 +145,9 @@ $recycle = Get-Content -LiteralPath $recycleSuite.evidence -Raw | ConvertFrom-Js
 $recycleSkipped = @($recycle.results | Where-Object status -eq 'skipped')
 Assert-True ($recycleSkipped.Count -eq 1 -and $recycleSkipped[0].name -like 'live recycle*' -and $recycleSkipped[0].reason -eq 'SkipLiveRecycle') 'CI must not touch the real Recycle Bin.'
 Assert-True ($recycle.failures -eq 0 -and @($recycle.results | Where-Object status -eq 'passed').Count -eq $recycle.cases - 1) 'All isolated managed recycle cases must still pass.'
+if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
+    Assert-True ($recycle.binSettingsCheck.beforeCheck -eq $false -and $recycle.binSettingsCheck.afterCheck -eq $true) 'On a GitHub-hosted runner the passing Check case must start without bin settings and leave them created.'
+}
 Assert-True ($explorerSuite.skippedChecks -eq 1 -and $recycleSuite.skippedChecks -eq 1 -and $report.skippedChecks -eq 2) 'Skipped checks must be counted separately from passes.'
 Assert-True (-not (Test-Path -LiteralPath (Join-Path $explorer.EvidenceDirectory 'real-before.json'))) 'CI must not capture the real Explorer snapshot.'
 $powershellSuite = @($report.suites | Where-Object name -eq 'powershell')[0]
@@ -159,6 +162,8 @@ Assert-True ([IO.Path]::GetFullPath($powershell.fixture).StartsWith($runRootPref
     skippedChecks = $report.skippedChecks
     # False on a fresh runner means the passing Check/Plan cases created the bin settings themselves.
     recycleBinSettingsAtStart = $recycle.binSettingsAtStart
+    # On a GitHub-hosted runner beforeCheck=false and afterCheck=true prove the query-first order; reset says the test removed them.
+    recycleBinSettingsCheck = $recycle.binSettingsCheck
     deploymentChecks = $deploymentReport.cases.Count
     deploymentEvidence = $deploymentResultPath
     evidenceDirectory = $report.evidenceDirectory
