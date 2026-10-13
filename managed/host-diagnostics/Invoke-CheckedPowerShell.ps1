@@ -5,6 +5,7 @@
 .DESCRIPTION
 使用当前受管 Core 7.4+ 运行时的独立无窗口进程，关闭 profile，设置 UTF-8，
 并启用 ErrorActionPreference=Stop 与 PSNativeCommandUseErrorActionPreference。
+子进程固定为 STA，需要 STA 的 Shell/COM 调用（如 SHFileOperationW）可直接运行。
 stdout/stderr 在子进程结束后输出。启用 JSON 字段校验时，失败不回显输出正文。
 .PARAMETER ScriptPath
 待检查和执行的 .ps1 文件，与 CommandText 互斥。保留目标 PSScriptRoot 与调用目录。
@@ -133,7 +134,7 @@ $psi.StandardOutputEncoding = $utf8
 $psi.StandardErrorEncoding = $utf8
 $psi.WorkingDirectory = $PWD.ProviderPath
 $inputValue = if ($PSCmdlet.ParameterSetName -eq 'File') { $resolvedPath } else { $CommandText }
-foreach ($argument in @('-NoProfile', '-NonInteractive', '-CommandWithArgs', $bootstrap, $PSCmdlet.ParameterSetName, $inputValue) + $ScriptArgument) {
+foreach ($argument in @('-NoProfile', '-NonInteractive', '-STA', '-CommandWithArgs', $bootstrap, $PSCmdlet.ParameterSetName, $inputValue) + $ScriptArgument) {
     $psi.ArgumentList.Add($argument)
 }
 try {

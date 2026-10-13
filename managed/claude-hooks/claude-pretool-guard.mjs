@@ -1,15 +1,25 @@
 // Claude Code PreToolUse guard (matcher PowerShell|Bash).
-// Denies three mechanical mistakes before the command runs:
+// Denies mechanical mistakes before the command runs:
 //   1. recursive directory deletes that bypass the managed safe-tree-delete entry;
-//   2. PowerShell native-CLI flags followed by an unquoted comma list, which PowerShell splits into an array;
-//   3. `git clone` from a local path without --no-hardlinks: git hardlinks the source's .git/objects into the
-//      clone, and safe-tree-delete refuses hardlinked files, so the clone can never be deleted afterwards.
+//   2. Recycle Bin moves outside the managed recycle entry, inline or inside a .ps1/.psm1 the command runs;
+//   3. emptying the Recycle Bin, which is permanent deletion and stays with the user;
+//   4. PowerShell native-CLI flags followed by an unquoted comma list, which PowerShell splits into an array;
+//   5. `git clone` from a local path without --no-hardlinks: git hardlinks the source's .git/objects into the
+//      clone, and safe-tree-delete refuses hardlinked files, so the clone can never be deleted afterwards;
+//   6. Bash commands containing two backslashes in a row: the Bash tool transport turns them into one before
+//      bash runs, while this hook still sees both;
+//   7. Bash payloads for pwsh/powershell/python/node/perl/ruby/psx (inline or an unquoted heredoc) in which bash
+//      would substitute $VAR, $(...) or backticks before the interpreter sees them.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
 // Any internal error allows the command: the registration keeps onFailure=continue, so a broken guard
 // never locks the shell.
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
+import { win32 } from 'node:path'
 
 const MANAGED_DELETE = 'D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1'
+const MANAGED_RECYCLE = 'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1'
+const GUIDANCE = 'D:\\Codex\\.codex\\docs\\agent-guidance'
+const TEXT_ONLY_HINT = '如果命令里的写法只是文本（搜索模式、提交信息），改用 Grep 工具，或把关键词拆开写。'
 
 const RECURSIVE_DELETE_PATTERNS = [
   // PowerShell Remove-Item and its aliases with -Recurse (or an unambiguous prefix such as -r / -rec).
@@ -27,6 +37,73 @@ const RECURSIVE_DELETE_PATTERNS = [
   /\bshutil\.rmtree\s*\(/i,
   /\brimraf\b/i
 ]
+
+// Recycle Bin moves, matched in call form so prose that only names an API (help text, comments) passes.
+// VB FileSystem.DeleteDirectory is either a recursive delete or a recycle, so every call form is denied.
+const RECYCLE_PATTERNS = [
+  /\bSHFileOperation[AW]?\s*\(/i,
+  /\bFileSystem\]?(?:::|\.)DeleteDirectory\s*\(/i,
+  /\b(?:SendToRecycleBin|RecycleOption)\b/i,
+  /\.InvokeVerb(?:Ex)?\s*\(\s*['"]delete['"]/i,
+  /\bNamespace\s*\(\s*(?:10|0x0?a)\s*\)[\s\S]*?\.MoveHere\s*\(/i,
+  /\b(?:from|import)\s+send2trash\b|\bsend2trash\s*\(/i
+]
+const EMPTY_BIN_PATTERNS = [/\bClear-RecycleBin\b/i, /\bSHEmptyRecycleBin[AW]?\s*\(/i]
+// Deleting inside $Recycle.Bin is emptying it by hand.
+const RECYCLE_BIN_PATH = /\$Recycle\.Bin/i
+const DELETE_VERB = /\b(?:remove-item|ri|rm|del|erase|rd|rmdir|unlink)\b|\bdelete\s*\(/i
+
+// .ps1/.psm1 files the command runs or dot-sources: single-quoted, double-quoted or bare.
+const SCRIPT_REFERENCE = /'([^'\r\n]+?\.psm?1)'|"([^"\r\n]+?\.psm?1)"|([^\s'"`;|&(){}<>]+?\.psm?1)(?![\w.])/gi
+const MAX_SCRIPT_BYTES = 1024 * 1024
+const MAX_SCRIPTS = 5
+
+const defaultIo = {
+  read(path) {
+    try {
+      const stat = statSync(path)
+      return stat.isFile() && stat.size <= MAX_SCRIPT_BYTES ? readFileSync(path, 'utf8') : null
+    } catch {
+      return null
+    }
+  }
+}
+
+// Absolute paths of up to MAX_SCRIPTS referenced scripts; Git Bash /d/x becomes D:/x, relative paths use cwd.
+function referencedScripts(command, cwd) {
+  const paths = []
+  for (const match of command.matchAll(SCRIPT_REFERENCE)) {
+    const raw = (match[1] || match[2] || match[3]).replace(/^\/([a-z])(?=\/)/i, (_, drive) => `${drive}:`)
+    const path = win32.resolve(cwd || '.', raw)
+    if (!paths.some(seen => seen.toLowerCase() === path.toLowerCase())) paths.push(path)
+    if (paths.length === MAX_SCRIPTS) break
+  }
+  return paths
+}
+
+function recycleReason(where) {
+  return `${where}回收站移动只能走受管入口 ${MANAGED_RECYCLE}：先 -Mode Plan，用户在本任务里明确授权后再 -Mode Apply` +
+    `（说明见 ${GUIDANCE}\\host-runbook\\safe-tree-delete.md 的受管回收一节）。${TEXT_ONLY_HINT}`
+}
+
+function emptyBinReason(where) {
+  return `${where}清空回收站或删除 $Recycle.Bin 里的内容是永久删除，Agent 不执行；请用户自己清空回收站。${TEXT_ONLY_HINT}`
+}
+
+// Returns a deny reason when the command, or a script it references, recycles or empties the bin.
+function recycleDecision(command, cwd, io) {
+  if (EMPTY_BIN_PATTERNS.some(pattern => pattern.test(command)) ||
+    (RECYCLE_BIN_PATH.test(command) && DELETE_VERB.test(command))) return emptyBinReason('')
+  if (RECYCLE_PATTERNS.some(pattern => pattern.test(command))) return recycleReason('')
+  for (const script of referencedScripts(command, cwd)) {
+    if (win32.basename(script).toLowerCase() === 'invoke-managedrecycle.ps1') continue
+    const text = io.read(script)
+    if (!text) continue
+    if (EMPTY_BIN_PATTERNS.some(pattern => pattern.test(text))) return emptyBinReason(`脚本 ${script} 里：`)
+    if (RECYCLE_PATTERNS.some(pattern => pattern.test(text))) return recycleReason(`脚本 ${script} 里调用了回收站 API。`)
+  }
+  return null
+}
 
 // A double-dash flag followed by a bare token containing a comma: PowerShell turns a,b into two argv items.
 // Quoted values, variables ($x), subexpressions and splats are skipped.
@@ -105,6 +182,212 @@ function hardlinkingCloneSource(command) {
   return null
 }
 
+// Characters after `$` that make bash substitute: a name, ${...}, $(...), a digit or a special parameter.
+const EXPANSION_START = /[A-Za-z_{(0-9?!#@*$-]/
+
+// Index just past the `)` or `}` that closes s[i], or past the backtick that closes the one at s[i].
+function skipSubstitution(s, i) {
+  const open = s[i]
+  const close = open === '(' ? ')' : open === '{' ? '}' : '`'
+  let depth = 0
+  for (let j = i; j < s.length; j++) {
+    const ch = s[j]
+    if (ch === '\\') j++
+    else if (open === '`') { if (j > i && ch === '`') return j + 1 }
+    else if (ch === "'" || ch === '"') {
+      let k = j + 1
+      while (k < s.length && s[k] !== ch) k += ch === '"' && s[k] === '\\' ? 2 : 1
+      j = k
+    } else if (ch === open) depth++
+    else if (ch === close && --depth === 0) return j + 1
+  }
+  return s.length
+}
+
+function hasExpansion(text) {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\\') i++
+    else if (text[i] === '`' || (text[i] === '$' && EXPANSION_START.test(text[i + 1] || ''))) return true
+  }
+  return false
+}
+
+// Reads the bodies of pending heredocs, which start at s[i]; returns the index after the last delimiter line.
+function readHeredocBodies(s, i, pending) {
+  while (pending.length && i < s.length) {
+    const doc = pending.shift()
+    let body = ''
+    while (i < s.length) {
+      let end = s.indexOf('\n', i)
+      if (end < 0) end = s.length
+      const line = s.slice(i, end).replace(/\r$/, '')
+      i = end + 1
+      if ((doc.stripTabs ? line.replace(/^\t+/, '') : line) === doc.delimiter) break
+      body += line + '\n'
+    }
+    doc.expands = !doc.quoted && hasExpansion(body)
+  }
+  return Math.min(i, s.length)
+}
+
+// A bash model for rule 7: simple commands of words { text, expands }, plus the heredocs each command opens.
+// `expands` marks an unescaped $-substitution or backtick outside single quotes, which bash replaces before
+// the program sees the word.
+function bashCommands(s) {
+  const commands = []
+  const pending = []
+  let words = []
+  let heredocs = []
+  let word = null
+  const add = (text, expands = false) => {
+    if (!word) word = { text: '', expands: false }
+    word.text += text
+    if (expands) word.expands = true
+  }
+  const endWord = () => { if (word) words.push(word); word = null }
+  const endCommand = () => {
+    endWord()
+    if (words.length || heredocs.length) commands.push({ words, heredocs })
+    words = []
+    heredocs = []
+  }
+  const substitution = start => {
+    const end = s[start] === '`' ? skipSubstitution(s, start)
+      : s[start + 1] === '(' || s[start + 1] === '{' ? skipSubstitution(s, start + 1) : start + 2
+    add(s.slice(start, end), true)
+    return end
+  }
+  let i = 0
+  while (i < s.length) {
+    const ch = s[i]
+    if (ch === '\\') {
+      if (s[i + 1] !== '\n') add(s[i + 1] || '') // backslash-newline continues the line
+      i += 2
+    } else if (ch === "'") {
+      const end = s.indexOf("'", i + 1)
+      const stop = end < 0 ? s.length : end
+      add(s.slice(i + 1, stop))
+      i = stop + 1
+    } else if (ch === '$' && s[i + 1] === "'") { // ANSI-C quoting substitutes nothing
+      let j = i + 2
+      while (j < s.length && s[j] !== "'") j += s[j] === '\\' ? 2 : 1
+      add(s.slice(i + 2, j))
+      i = j + 1
+    } else if (ch === '"') {
+      add('')
+      let j = i + 1
+      while (j < s.length && s[j] !== '"') {
+        const c = s[j]
+        if (c === '\\') {
+          add('$`"\\\n'.includes(s[j + 1]) ? s[j + 1] : c + (s[j + 1] || ''))
+          j += 2
+        } else if (c === '`' || (c === '$' && EXPANSION_START.test(s[j + 1] || ''))) j = substitution(j)
+        else { add(c); j++ }
+      }
+      i = j + 1
+    } else if (ch === '`' || (ch === '$' && EXPANSION_START.test(s[i + 1] || ''))) {
+      i = substitution(i)
+    } else if (ch === '#' && !word) {
+      while (i < s.length && s[i] !== '\n') i++
+    } else if (ch === '\n') {
+      endCommand()
+      i = readHeredocBodies(s, i + 1, pending)
+    } else if (ch === '<' && s[i + 1] === '<' && s[i + 2] !== '<') {
+      endWord()
+      let j = i + 2
+      const stripTabs = s[j] === '-'
+      if (stripTabs) j++
+      while (s[j] === ' ' || s[j] === '\t') j++
+      let delimiter = ''
+      let quoted = false
+      while (j < s.length && !/[\s;&|()<>]/.test(s[j])) {
+        if (s[j] === "'" || s[j] === '"') {
+          const end = s.indexOf(s[j], j + 1)
+          const stop = end < 0 ? s.length : end
+          delimiter += s.slice(j + 1, stop)
+          quoted = true
+          j = stop + 1
+        } else if (s[j] === '\\') {
+          delimiter += s[j + 1] || ''
+          quoted = true
+          j += 2
+        } else delimiter += s[j++]
+      }
+      const doc = { delimiter, quoted, stripTabs, expands: false }
+      heredocs.push(doc)
+      pending.push(doc)
+      i = j
+    } else if (ch === '<' || ch === '>' || (ch === '&' && s[i + 1] === '>')) {
+      endWord() // redirection operators, including <<<, >>, &>, 2>&1 and >&2
+      i++
+      while (s[i] === '<' || s[i] === '>' || s[i] === '&' || s[i] === '|') i++
+    } else if (/[;&|()]/.test(ch)) {
+      endCommand()
+      i++
+    } else if (/\s/.test(ch)) {
+      endWord()
+      i++
+    } else {
+      add(ch)
+      i++
+    }
+  }
+  endCommand()
+  return commands
+}
+
+const INTERPRETERS = new Set(['pwsh', 'powershell', 'python', 'python3', 'py', 'node', 'perl', 'ruby', 'psx'])
+const SCRIPT_FILE = /\.(?:ps1|psm1|py|js|mjs|cjs)$/i
+// pwsh / Windows PowerShell options that take the next word as their value.
+const PWSH_VALUE_OPTION = /^-(?:config(?:urationname)?|configurationfile|custompipename|e(?:c|ncodedcommand)?|e[xp]|executionpolicy|inp|if|inputformat|o(?:f|utputformat)?|settings(?:file)?|w(?:indowstyle)?|wd|workingdirectory|psconsolefile|version)$/i
+
+// The argument words an interpreter runs as code: everything after -Command, or the word after -c / -e.
+function payloadWords(interpreter, args) {
+  if (interpreter === 'psx') return args
+  if (interpreter === 'pwsh' || interpreter === 'powershell') {
+    for (let i = 0; i < args.length; i++) {
+      const text = args[i].text
+      if (/^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i.test(text)) return args.slice(i + 1)
+      if (/^-(?:cwa|commandwithargs)$/i.test(text)) return args.slice(i + 1, i + 2)
+      if (/^-f(?:ile)?$/i.test(text)) return []
+      if (PWSH_VALUE_OPTION.test(text)) i++
+      else if (!text.startsWith('-')) return interpreter === 'powershell' ? args.slice(i) : [] // 5.1 runs it as a command
+    }
+    return []
+  }
+  const code = {
+    python: /^-[A-Za-z]*c$/, python3: /^-[A-Za-z]*c$/, py: /^-[A-Za-z]*c$/,
+    node: /^(?:-e|--eval|-p|--print|-pe)$/, perl: /^-[A-Za-z]*[eE]$/, ruby: /^-[A-Za-z]*e$/
+  }[interpreter]
+  for (let i = 0; i < args.length; i++) {
+    const text = args[i].text
+    if (code.test(text)) return args.slice(i + 1, i + 2)
+    if (interpreter === 'node' && /^--(?:eval|print)=/.test(text)) return [args[i]]
+    if (/^(?:-[XWr]|--require|--import|--loader)$/.test(text)) i++
+    else if (!text.startsWith('-') || text === '-' || text === '--') return []
+  }
+  return []
+}
+
+// Returns { target, text } for the first payload bash would rewrite before the interpreter or file gets it.
+function expandingPayload(command) {
+  for (const { words, heredocs } of bashCommands(command)) {
+    let i = 0
+    while (i < words.length && (/^[A-Za-z_]\w*=/.test(words[i].text) || /^(?:env|exec|command|time|nohup)$/.test(words[i].text))) i++
+    const name = (words[i] ? words[i].text : '').split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase()
+    const interpreter = INTERPRETERS.has(name) ? name : ''
+    if (interpreter) {
+      const payload = payloadWords(interpreter, words.slice(i + 1)).find(w => w.expands)
+      if (payload) return { target: interpreter, text: payload.text }
+    }
+    const doc = heredocs.find(d => d.expands)
+    if (doc && (interpreter || words.some(w => SCRIPT_FILE.test(w.text)))) {
+      return { target: interpreter || '写入的脚本文件', text: `<<${doc.delimiter} heredoc` }
+    }
+  }
+  return null
+}
+
 function deny(reason) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
@@ -115,14 +398,30 @@ function deny(reason) {
   }))
 }
 
-export function evaluate(payload) {
+export function evaluate(payload, io = defaultIo) {
   const tool = String(payload?.tool_name || '')
   const command = String(payload?.tool_input?.command || '')
   if (!command || (tool !== 'PowerShell' && tool !== 'Bash')) return null
 
   if (!/invoke-safe-tree-delete/i.test(command) && RECURSIVE_DELETE_PATTERNS.some(pattern => pattern.test(command))) {
-    return `递归删除目录只能走受管入口 ${MANAGED_DELETE}（Plan → Apply → Purge，说明见 D:\\Codex\\.codex\\docs\\agent-guidance\\host-runbook\\safe-tree-delete.md）。` +
+    return `递归删除目录只能走受管入口 ${MANAGED_DELETE}（Plan → Apply → Purge，说明见 ${GUIDANCE}\\host-runbook\\safe-tree-delete.md）。` +
       '删除单个文件不受影响。如果命令里的删除写法只是文本（搜索模式、提交信息），改用 Grep 工具，或把关键词拆开写。'
+  }
+
+  const recycle = recycleDecision(command, payload?.cwd, io)
+  if (recycle) return recycle
+
+  if (tool === 'Bash' && command.includes('\\\\')) {
+    return 'Bash 工具在命令进 bash 之前会把两个连续反斜杠吞成一个（单引号、双引号、带引号的 heredoc 都一样），实际执行的命令和写的不一样。' +
+      `路径改用正斜杠（/d/...）；必须带反斜杠的正则、Windows 路径或 payload 改用 PowerShell 工具，或写成文件再执行（${GUIDANCE}\\windows-pwsh-command-guidelines.md「从 Git Bash 调用 PowerShell」）。`
+  }
+
+  if (tool === 'Bash') {
+    const payloadHit = expandingPayload(command)
+    if (payloadHit) {
+      return `Bash 会先替换双引号、未加引号文本和不带引号 heredoc 里的 $变量、$(...) 和反引号，${payloadHit.target} 收到的已经不是原文（${payloadHit.text.slice(0, 80)}）。` +
+        `把代码放进单引号或带引号的 heredoc（<<'EOF'），写成文件再执行，或改用 PowerShell 工具（${GUIDANCE}\\windows-pwsh-command-guidelines.md「从 Git Bash 调用 PowerShell」）。`
+    }
   }
 
   if (tool === 'PowerShell') {
@@ -192,11 +491,68 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', 'git clone --reference D:\\agents\\knowledge-base https://example.com/r.git D:\\x', false],
     ['PowerShell', 'git clone $src $dst', false],
     ['Bash', 'git commit -m "note: git clone /d/repo out"', false],
-    ['Bash', 'echo git clone /d/repo out', false]
+    ['Bash', 'echo git clone /d/repo out', false],
+    // Recycle Bin moves and emptying the bin, inline and in referenced scripts (stubbed below, cwd D:\repo).
+    ['PowerShell', "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, 'OnlyErrorDialogs', 'SendToRecycleBin')", true],
+    ['PowerShell', "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)", true],
+    ['PowerShell', "(New-Object -ComObject Shell.Application).Namespace('D:\\x').ParseName('a.txt').InvokeVerb('delete')", true],
+    ['PowerShell', "(New-Object -ComObject Shell.Application).Namespace(10).MoveHere('D:\\x\\a.txt')", true],
+    ['PowerShell', 'Add-Type -TypeDefinition $src; [Native]::SHFileOperationW([ref]$op)', true],
+    ['Bash', 'python -c "from send2trash import send2trash; send2trash(p)"', true],
+    ['PowerShell', 'Clear-RecycleBin -DriveLetter D -Force', true],
+    ['PowerShell', "Remove-Item -LiteralPath 'D:\\$Recycle.Bin\\S-1-5-21-1\\$RABC123.txt' -Force", true],
+    ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\recycle.ps1'", true],
+    ['Bash', 'pwsh -NoProfile -File /d/repo/tools/empty-bin.ps1', true],
+    ['PowerShell', '. .\\lib\\shell.ps1', true],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1' -Mode Plan -TargetPath D:\\x -Purpose cache -Authorization 'user said yes'", false],
+    ['PowerShell', "Get-ChildItem -LiteralPath 'D:\\$Recycle.Bin' -Force", false],
+    ['PowerShell', "pwsh -File 'D:\\repo\\tools\\harmless.ps1'", false],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1' -ScriptPath D:\\repo\\tools\\harmless.ps1", false],
+    ['Bash', 'git commit -m "docs: name SHFileOperationW in the help text"', false],
+    // Two backslashes in a row reach bash as one.
+    ['Bash', String.raw`grep -E 'a\\.b' notes.txt`, true],
+    ['Bash', String.raw`ls 'D:\\agents'`, true],
+    ['Bash', "cat > x.txt <<'EOF'\n" + String.raw`C:\\x` + '\nEOF', true],
+    ['PowerShell', String.raw`Get-ChildItem 'D:\\agents'`, false],
+    ['Bash', String.raw`printf 'a\nb'`, false],
+    ['Bash', 'ls /d/agents', false],
+    // Bash would substitute $ or backticks inside an interpreter payload.
+    ['Bash', 'pwsh -NoProfile -Command "Get-Item $env:TEMP"', true],
+    ['Bash', 'powershell -c "Write-Output a`tb"', true],
+    ['Bash', 'pwsh -c "$x = 1; $x"', true],
+    ['Bash', 'python -c "print($HOME)"', true],
+    ['Bash', 'node -e "console.log(${x})"', true],
+    ['Bash', 'perl -e "print $0"', true],
+    ['Bash', 'pwsh -Command - <<EOF\nGet-Item $env:TEMP\nEOF', true],
+    ['Bash', 'cat > x.ps1 <<EOF\n$a = 1\nEOF', true],
+    ['Bash', 'pwsh -cwa "Write-Output $args" x', true],
+    ['Bash', 'psx "Get-Item $env:TEMP"', true],
+    ['Bash', 'cd /d/x && pwsh -c Get-Item $env:TEMP', true],
+    ['Bash', 'pwsh -File ./x.ps1 "$HOME"', false],
+    ['Bash', 'powershell -ExecutionPolicy Bypass -File x.ps1 "$HOME"', false],
+    ['Bash', 'echo "$HOME"', false],
+    ['Bash', "pwsh -c 'Get-Item $env:TEMP'", false],
+    ['Bash', 'pwsh -c "Get-Item \\$env:TEMP"', false],
+    ['Bash', "pwsh -Command - <<'EOF'\nGet-Item $env:TEMP\nEOF", false],
+    ['Bash', 'python -c "import sys; print(sys.argv[1])" "$VAR"', false],
+    ['Bash', 'pwsh -cwa "Write-Output hi" "$HOME"', false],
+    ['Bash', 'git commit -m "fix: $x"', false],
+    ['Bash', 'cat > notes.txt <<EOF\n$x\nEOF', false],
+    ['Bash', 'pwsh -c "Get-Date" # costs $5', false],
+    ['PowerShell', 'pwsh -c "Get-Item $env:TEMP"', false]
   ]
+  const scripts = new Map(Object.entries({
+    'D:\\repo\\tools\\recycle.ps1': 'Add-Type -TypeDefinition $src\n[Native]::SHFileOperationW([ref]$op)',
+    'D:\\repo\\tools\\empty-bin.ps1': 'Clear-RecycleBin -DriveLetter D -Force',
+    'D:\\repo\\lib\\shell.ps1': '$shell = New-Object -ComObject Shell.Application\n$shell.Namespace(10).MoveHere($path)',
+    'D:\\repo\\tools\\harmless.ps1': 'Get-ChildItem -LiteralPath $PSScriptRoot',
+    'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1': 'code = SHFileOperationW(ref op);',
+    'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1': 'STA (SHFileOperationW) works here.'
+  }).map(([path, text]) => [path.toLowerCase(), text]))
+  const io = { read: path => scripts.get(win32.normalize(path).toLowerCase()) ?? null }
   let failed = 0
   for (const [tool, command, shouldDeny] of cases) {
-    const denied = evaluate({ tool_name: tool, tool_input: { command } }) !== null
+    const denied = evaluate({ tool_name: tool, tool_input: { command }, cwd: 'D:\\repo' }, io) !== null
     if (denied !== shouldDeny) {
       failed++
       console.error(`FAIL ${tool}: ${command} -> ${denied ? 'deny' : 'allow'}`)

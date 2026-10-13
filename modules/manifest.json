@@ -296,6 +296,7 @@
         "managed/host-diagnostics/Get-NvidiaDownloadStatus.ps1",
         "managed/host-diagnostics/Get-TaskbarSnapshot.ps1",
         "managed/host-diagnostics/Restart-ExplorerShell.ps1",
+        "managed/host-diagnostics/Invoke-ManagedRecycle.ps1",
         "scripts/Invoke-SafeCleanupJob.ps1",
         "scripts/lib/SafeCleanupJob.ps1",
         "scripts/Measure-CodexSafeTreeDeleteHistory.ps1",

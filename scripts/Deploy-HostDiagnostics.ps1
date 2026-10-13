@@ -26,6 +26,7 @@ $allowlist = @(
     'Get-NvidiaDownloadStatus.ps1','Test-NvidiaDownloadStatus.ps1',
     'Get-TaskbarSnapshot.ps1','Restart-ExplorerShell.ps1',
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',
+    'Invoke-ManagedRecycle.ps1','Test-ManagedRecycle.ps1',
     'Test-HostDiagnostics.ps1'
 )
 

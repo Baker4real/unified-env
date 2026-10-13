@@ -22,6 +22,7 @@ $files = @(
     'Get-NvidiaDownloadStatus.ps1','Test-NvidiaDownloadStatus.ps1',
     'Get-TaskbarSnapshot.ps1','Restart-ExplorerShell.ps1',
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',
+    'Invoke-ManagedRecycle.ps1','Test-ManagedRecycle.ps1',
     'Test-HostDiagnostics.ps1'
 )
 $python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
@@ -48,9 +49,13 @@ $suiteDefinitions = @(
     @{name='powershell';file='Test-CheckedPowerShell.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'powershell'))},
     @{name='nvidia';file='Test-NvidiaDownloadStatus.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'nvidia'))},
     @{name='explorer';file='Test-ExplorerShellRecovery.ps1';args=@('-EvidenceDirectory',(Join-Path $runRoot 'explorer'))},
-    @{name='browser';file='Test-BrowserPrivacyProbe.py';args=@()}
+    @{name='browser';file='Test-BrowserPrivacyProbe.py';args=@()},
+    @{name='recycle';file='Test-ManagedRecycle.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'recycle'))}
 )
-if ($SkipLiveSnapshot) { $suiteDefinitions[3].args += '-SkipLiveSnapshot' }
+if ($SkipLiveSnapshot) {
+    $suiteDefinitions[3].args += '-SkipLiveSnapshot'
+    $suiteDefinitions[5].args += '-SkipLiveRecycle'
+}
 $suites = [Collections.Generic.List[object]]::new()
 if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
     foreach ($suite in $suiteDefinitions) {
@@ -102,6 +107,18 @@ if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
                     $passedChecks = if ($parsed.status -eq 'passed') { $parsed.cases } else { 0 }
                     $contractPassed = $parsed.status -eq 'passed' -and $parsed.cases -gt 0 -and
                         $parsed.failures -eq 0 -and $parsed.errors -eq 0 -and $parsed.browserTouched -eq $false
+                }
+                'recycle' {
+                    $passedChecks = @($parsed.results | Where-Object status -EQ 'passed').Count
+                    $skippedChecks = @($parsed.results | Where-Object status -EQ 'skipped').Count
+                    $live = @($parsed.results | Where-Object name -Like 'live recycle*')
+                    $expectedStatus = if ($SkipLiveSnapshot) { 'passed-with-skips' } else { 'passed' }
+                    $livePassed = $live.Count -eq 1 -and $(
+                        if ($SkipLiveSnapshot) { $live[0].status -eq 'skipped' -and $live[0].reason -eq 'SkipLiveRecycle' -and $skippedChecks -eq 1 }
+                        else { $live[0].status -eq 'passed' -and $skippedChecks -eq 0 }
+                    )
+                    $contractPassed = $parsed.status -eq $expectedStatus -and $parsed.failures -eq 0 -and $livePassed -and
+                        $passedChecks -gt 0 -and $passedChecks + $skippedChecks -eq $parsed.cases
                 }
                 'explorer' {
                     $passedChecks = @($parsed.Results | Where-Object Status -EQ 'passed').Count

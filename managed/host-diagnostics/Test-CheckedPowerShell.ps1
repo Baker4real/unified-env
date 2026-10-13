@@ -93,6 +93,7 @@ $argumentScript = Join-Path $fixture "CheckedPowerShell-合法 ' space.ps1"
     arguments = @($args)
     edition = $PSVersionTable.PSEdition
     major = $PSVersionTable.PSVersion.Major
+    apartment = [Threading.Thread]::CurrentThread.GetApartmentState().ToString()
     scriptRoot = $PSScriptRoot
 } | ConvertTo-Json -Compress
 '@, $utf8)
@@ -106,6 +107,7 @@ Assert-Case 'script arguments preserve spaces commas Unicode dollars quotes and 
         if ($received.arguments[$index] -cne $expected[$index]) { throw "Argument changed at index $index." }
     }
     if ($received.edition -ne 'Core' -or $received.major -ne 7) { throw 'Execution did not use Core 7.' }
+    if ($received.apartment -ne 'STA') { throw 'Execution did not run in an STA thread.' }
     if ($received.scriptRoot -ne $fixture) { throw 'Target PSScriptRoot changed.' }
 }
 
