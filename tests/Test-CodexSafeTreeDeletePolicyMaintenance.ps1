@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 # Seams under test (GitHub #82，spec #73「policy 维护工具」):
 # 次接缝 2：维护工具 scripts\Update-CodexSafeTreeDeletePolicy.ps1 的测试专用参数（policy 路径、evidence 根、
-# mutex 名、marker 路径、阶段停止、等锁上限）。只观察工具输出的 JSON 与退出码、落盘后的 policy 字节，
+# mutex 名、marker 路径、阶段停止、阶段暂停、等锁上限）。只观察工具输出的 JSON 与退出码、落盘后的 policy 字节，
 # 以及 fixture 目录树在调用前后的快照；在途记录经 fixture 入口 tests\Invoke-CodexSafeTreeDeleteFixture.ps1
 # 的 Plan/Apply/Purge 构造。本套件不读写生产 policy、生产 evidence 根或部署状态目录，也不执行生产入口。
 
@@ -417,6 +417,72 @@ function Complete-ChildPwsh {
     }
 }
 
+function Start-PausedPolicyTool {
+    # 子进程运行维护工具（四个 seam 齐全），在第一个不小于 PauseAfterPhase 的阶段边界暂停：工具仍持锁，
+    # 在信号目录写 paused-<阶段>，等到 resume 出现再继续。返回时工具已到达暂停点。
+    param(
+        [Parameter(Mandatory)][object]$Scenario,
+        [Parameter(Mandatory)][string]$Mode,
+        [Parameter(Mandatory)][int]$PauseAfterPhase,
+        [Parameter(Mandatory)][string]$SignalDirectory,
+        [Parameter(Mandatory)][string]$Label
+    )
+    [void][IO.Directory]::CreateDirectory($SignalDirectory)
+    $call = Start-ChildPwsh -File $toolPath -Arguments @(
+        '-Mode', $Mode, '-ChangeSetPath', $Scenario.ChangeSetPath,
+        '-PolicyPathForTest', $Scenario.PolicyPath, '-EvidenceRootForTest', $Scenario.EvidenceRoot,
+        '-MutexNameForTest', $Scenario.MutexName, '-MarkerPathForTest', $Scenario.MarkerPath,
+        '-PauseAfterPhaseForTest', [string]$PauseAfterPhase, '-PauseSignalDirectoryForTest', $SignalDirectory)
+    $pausedPath = Join-Path $SignalDirectory ('paused-{0}' -f $PauseAfterPhase)
+    $deadline = [datetime]::UtcNow.AddSeconds(90)
+    while (-not [IO.File]::Exists($pausedPath)) {
+        if ($call.Process.HasExited) {
+            $early = Complete-ChildPwsh -Call $call
+            throw "${Label}: 工具未到达阶段 $PauseAfterPhase 的暂停点就退出（exit $($early.ExitCode)）：$($early.Stdout)$($early.Stderr)"
+        }
+        Assert-True ([datetime]::UtcNow -lt $deadline) "${Label}: 工具未在 90s 内到达阶段 $PauseAfterPhase 的暂停点"
+        Start-Sleep -Milliseconds 50
+    }
+    return $call
+}
+
+function Resume-PausedPolicyTool {
+    # 放行暂停中的工具，等它退出；返回形状与 Invoke-PolicyTool 相同。
+    param(
+        [Parameter(Mandatory)][object]$Call,
+        [Parameter(Mandatory)][string]$SignalDirectory
+    )
+    [IO.File]::WriteAllBytes((Join-Path $SignalDirectory 'resume'), [byte[]]@())
+    $done = Complete-ChildPwsh -Call $Call
+    $text = $done.Stdout.Trim()
+    $json = $null
+    if ($text.StartsWith('{', [StringComparison]::Ordinal)) {
+        $json = $text | ConvertFrom-Json -Depth 32 -DateKind String
+    }
+    return [pscustomobject]@{
+        ExitCode = $done.ExitCode
+        Text = "$text$($done.Stderr)"
+        Json = $json
+    }
+}
+
+function Test-GateMutexFree {
+    # 本进程以 0 超时探测同名 mutex：取得即释放并返回 $true；被另一进程持有时返回 $false。
+    param([Parameter(Mandatory)][string]$BaseName)
+    $probe = [Threading.Mutex]::new($false, ('{0}-u-{1}' -f $BaseName, $sidSuffix))
+    try {
+        try {
+            $acquired = $probe.WaitOne(0)
+        } catch [Threading.AbandonedMutexException] {
+            $acquired = $true
+        }
+        if ($acquired) { $probe.ReleaseMutex() }
+        return $acquired
+    } finally {
+        $probe.Dispose()
+    }
+}
+
 try {
     # ---- 1. maintenance marker 在场：取锁后拒绝，policy、evidence 与状态目录零写入 ----
     Write-Output 'STEP marker'
@@ -783,50 +849,25 @@ try {
     Write-Output 'gate-timeout OK'
 
     # ---- 16. 持锁面包屑：工具持锁期间在 state root 留 mode=policy-maintenance、pid=工具进程的面包屑，
-    # 释放锁前删除。工具在本进程内运行，另起子进程轮询面包屑（部署套件 S10 同款）----
+    # 释放锁前删除。工具在子进程里运行，在阶段 10（已取锁、已写面包屑）暂停：暂停期间读面包屑，并以
+    # 同名 mutex 仍被占用证明工具持锁，再放行 ----
     Write-Output 'STEP breadcrumb'
     $crumb = New-Scenario -Name 'breadcrumb'
     Set-ChangeSet -Scenario $crumb -Changes @(
         [pscustomobject][ordered]@{ op = 'add-deny'; entryId = 'fixture-main'; path = (Join-Path $crumb.TargetsRoot 'protected') })
-    $signalRoot = Join-Path $crumb.Root 'signals'
-    [void][IO.Directory]::CreateDirectory($signalRoot)
-    $pollerScript = Join-Path $signalRoot 'poll-gate-holder.ps1'
-    [IO.File]::WriteAllText($pollerScript, @'
-param([string]$BreadcrumbPath, [string]$OutputPath, [string]$ReadyPath, [string]$StopPath)
-[IO.File]::WriteAllText($ReadyPath, '')
-$deadline = [datetime]::UtcNow.AddMinutes(3)
-while ([datetime]::UtcNow -lt $deadline -and -not [IO.File]::Exists($StopPath)) {
-    try {
-        $stream = [IO.FileStream]::new($BreadcrumbPath, [IO.FileMode]::Open, [IO.FileAccess]::Read,
-            ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
-        try { $text = [IO.StreamReader]::new($stream).ReadToEnd() } finally { $stream.Dispose() }
-        if ($text.Length -gt 0) { [IO.File]::WriteAllText($OutputPath, $text); exit 0 }
-    } catch {
-    }
-    Start-Sleep -Milliseconds 20
-}
-exit 3
-'@, $utf8)
-    $observedPath = Join-Path $signalRoot 'holder-observed.json'
-    $pollerReady = Join-Path $signalRoot 'poller-ready'
-    $pollerStop = Join-Path $signalRoot 'poller-stop'
-    $poller = Start-ChildPwsh -File $pollerScript -Arguments @(
-        '-BreadcrumbPath', (Join-Path $crumb.StateRoot 'gate-holder.json'),
-        '-OutputPath', $observedPath, '-ReadyPath', $pollerReady, '-StopPath', $pollerStop)
-    $pollerDeadline = [datetime]::UtcNow.AddSeconds(90)
-    while (-not [IO.File]::Exists($pollerReady)) {
-        Assert-True (-not $poller.Process.HasExited -and [datetime]::UtcNow -lt $pollerDeadline) 'breadcrumb: 面包屑观察进程未就绪'
-        Start-Sleep -Milliseconds 100
-    }
-    $crumbResult = Invoke-PolicyTool -Scenario $crumb -Mode 'DryRun'
-    [IO.File]::WriteAllText($pollerStop, '')
-    [void](Complete-ChildPwsh -Call $poller -TimeoutSeconds 60)
+    $crumbSignals = Join-Path $crumb.Root 'signals'
+    $crumbCall = Start-PausedPolicyTool -Scenario $crumb -Mode 'DryRun' -PauseAfterPhase 10 -SignalDirectory $crumbSignals -Label 'breadcrumb'
+    $crumbPath = Join-Path $crumb.StateRoot 'gate-holder.json'
+    Assert-True ([IO.File]::Exists($crumbPath)) 'breadcrumb: 工具持锁期间必须写面包屑'
+    $observedText = [IO.File]::ReadAllText($crumbPath)
+    Assert-True (-not (Test-GateMutexFree -BaseName $crumb.MutexName)) 'breadcrumb: 暂停期间工具必须仍持有 deployment mutex'
+    $crumbResult = Resume-PausedPolicyTool -Call $crumbCall -SignalDirectory $crumbSignals
     Assert-True ($crumbResult.ExitCode -eq 0 -and $crumbResult.Json.ok -eq $true) "breadcrumb: DryRun 必须成功：$($crumbResult.Text)"
-    Assert-True ([IO.File]::Exists($observedPath)) 'breadcrumb: 工具持锁期间必须写面包屑'
-    $observed = Get-Content -Raw -LiteralPath $observedPath | ConvertFrom-Json -DateKind String
-    Assert-True ([string]$observed.mode -ceq 'policy-maintenance' -and [int]$observed.pid -eq $PID) `
-        "breadcrumb: 面包屑必须是 mode=policy-maintenance 且 pid 为工具进程：$(Get-Content -Raw -LiteralPath $observedPath)"
+    $observed = $observedText | ConvertFrom-Json -DateKind String
+    Assert-True ([string]$observed.mode -ceq 'policy-maintenance' -and [int]$observed.pid -eq $crumbCall.Process.Id) `
+        "breadcrumb: 面包屑必须是 mode=policy-maintenance 且 pid 为工具进程：$observedText"
     Assert-True (@([IO.Directory]::GetFileSystemEntries($crumb.StateRoot)).Count -eq 0) 'breadcrumb: 释放锁前必须删除面包屑'
+    Assert-True (Test-GateMutexFree -BaseName $crumb.MutexName) 'breadcrumb: 工具退出后 mutex 必须已释放'
     Write-Output 'breadcrumb OK'
 
     Write-Output 'POLICY-MAINTENANCE-TESTS OK'

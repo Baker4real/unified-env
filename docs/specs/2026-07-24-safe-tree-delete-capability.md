@@ -194,7 +194,7 @@ preflight 看不到的两处只列出、不阻止：
 - **terminal 记录。** preflight 把 terminal 一律视为兼容。工具只检查未归档的 terminal：target 落在本次变更影响的路径内时（被移除、换 root 或改设置的条目 root，以及新增的 deny），用候选 policy 复核其 plan；不再解析的列入 `inFlight.terminalRecordsLosingResolution[{operationId, refusalReason}]`。变更后 Status 会把它们改报为 `manual-review`，所以 Apply 前先归档或接受这一结果。
 - **SafeCleanupJob 描述符。** 它不在工具视野内。`safeCleanupJob` 按 job 的 policy 比对口径（原有条目全部不变，新增条目不与 job 的 capability root 重叠）列出 `changedExistingEntryIds` 与 `addedEntryIds`。仍需要的 job 先完成 Verify，再 Apply。
 
-`-PolicyPathForTest/-EvidenceRootForTest/-MutexNameForTest/-MarkerPathForTest` 必须同时给出，`-StopAfterPhaseForTest` 与 `-GateWaitSecondsForTest` 只在这四个 seam 生效时可用。阶段序号是 10、20、30、40、50、60、65（换名前）和 70。这六个参数是该工具仅有的测试 seam，生产调用不传。回归套件 `tests\Test-CodexSafeTreeDeletePolicyMaintenance.ps1` 只在 fixture policy、evidence、mutex 与状态根上运行。
+`-PolicyPathForTest/-EvidenceRootForTest/-MutexNameForTest/-MarkerPathForTest` 必须同时给出，`-StopAfterPhaseForTest`、`-GateWaitSecondsForTest` 与暂停 seam 只在这四个 seam 生效时可用。阶段序号是 10、20、30、40、50、60、65（换名前）和 70。暂停 seam 的 `-PauseAfterPhaseForTest` 与 `-PauseSignalDirectoryForTest` 必须同时给出：工具在第一个不小于该序号的阶段边界（仍持锁）在信号目录写 `paused-<阶段>`，等到同目录出现 `resume` 再继续，2 分钟内未放行即失败；测试据此在工具持锁期间观察面包屑与磁盘。这八个参数是该工具仅有的测试 seam，生产调用不传。回归套件 `tests\Test-CodexSafeTreeDeletePolicyMaintenance.ps1` 只在 fixture policy、evidence、mutex 与状态根上运行。
 
 ## 控制面与状态机
 

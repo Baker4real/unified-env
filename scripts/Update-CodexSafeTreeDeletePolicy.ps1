@@ -10,7 +10,9 @@ param(
     [string]$MutexNameForTest,
     [string]$MarkerPathForTest,
     [int]$StopAfterPhaseForTest = 0,
-    [int]$GateWaitSecondsForTest = 0
+    [int]$GateWaitSecondsForTest = 0,
+    [int]$PauseAfterPhaseForTest = 0,
+    [string]$PauseSignalDirectoryForTest
 )
 
 Set-StrictMode -Version Latest
@@ -34,9 +36,15 @@ if ($seamCount -ne 0 -and $seamCount -ne $seamValues.Count) {
     throw 'policy 维护工具的测试 seam（PolicyPathForTest、EvidenceRootForTest、MutexNameForTest、MarkerPathForTest）必须同时给出。'
 }
 $testSeamActive = ($seamCount -eq $seamValues.Count)
-if (-not $testSeamActive -and ($StopAfterPhaseForTest -ne 0 -or $GateWaitSecondsForTest -ne 0)) {
-    throw 'StopAfterPhaseForTest 与 GateWaitSecondsForTest 只在测试 seam 生效时可用。'
+$pauseRequested = -not [string]::IsNullOrWhiteSpace($PauseSignalDirectoryForTest)
+if (-not $testSeamActive -and ($StopAfterPhaseForTest -ne 0 -or $GateWaitSecondsForTest -ne 0 -or
+        $PauseAfterPhaseForTest -ne 0 -or $pauseRequested)) {
+    throw 'StopAfterPhaseForTest、GateWaitSecondsForTest 与暂停 seam 只在测试 seam 生效时可用。'
 }
+if (($PauseAfterPhaseForTest -gt 0) -ne $pauseRequested) {
+    throw 'PauseAfterPhaseForTest 与 PauseSignalDirectoryForTest 必须同时给出。'
+}
+$testPauseDone = $false
 
 if ($Mode -ceq 'DryRun' -and -not [string]::IsNullOrEmpty($ApprovedCandidatePolicySha256)) {
     throw 'DryRun 不接受 ApprovedCandidatePolicySha256：先 DryRun 取得 candidatePolicySha256，再以 Apply 提交。'
@@ -98,8 +106,25 @@ function Get-PolicyMaintenanceMutexName {
     return ('{0}-u-{1}' -f $BaseName, ($sid -replace '[^0-9]', ''))
 }
 
-function Stop-IfRequested {
+function Wait-IfPauseRequested {
+    # 测试暂停 seam：在第一个不小于 PauseAfterPhaseForTest 的阶段边界（仍持锁）暂停一次，在信号目录
+    # 写 paused-<阶段>，等到同目录出现 resume 再继续；超过 2 分钟未放行则失败。
     param([Parameter(Mandatory)][int]$Sequence)
+    if ($PauseAfterPhaseForTest -le 0 -or $Sequence -lt $PauseAfterPhaseForTest -or $script:testPauseDone) { return }
+    $script:testPauseDone = $true
+    [IO.File]::WriteAllBytes((Join-Path $PauseSignalDirectoryForTest ('paused-{0}' -f $Sequence)), [byte[]]@())
+    $resumePath = Join-Path $PauseSignalDirectoryForTest 'resume'
+    $deadline = [datetime]::UtcNow.AddMinutes(2)
+    while (-not [IO.File]::Exists($resumePath)) {
+        if ([datetime]::UtcNow -ge $deadline) { throw '测试暂停超过 2 分钟未收到 resume。' }
+        Start-Sleep -Milliseconds 20
+    }
+}
+
+function Stop-IfRequested {
+    # 阶段边界：先按暂停 seam 暂停，再按 StopAfterPhaseForTest 停止。
+    param([Parameter(Mandatory)][int]$Sequence)
+    Wait-IfPauseRequested -Sequence $Sequence
     if ($StopAfterPhaseForTest -gt 0 -and $Sequence -ge $StopAfterPhaseForTest) {
         Write-Output ('STOPPED-AFTER-PHASE {0}' -f $Sequence)
         exit 0
