@@ -42,6 +42,8 @@ BatchPurge 历史查找（spec #73「实现决策 › BatchPurge 单次历史扫
 - **`historyScan` 结果字段**：`mode`、`scanCount`、`enumeratedFiles`、`canonicalFiles`、`fallbackFiles`、`excludedByPrefilter`、`fullyAuthenticated`、`elapsedMs`，失败时另有 `failure`（`phase` 为 `scan` 或 `reauthentication`）。fast 模式 `scanCount` 恒为 1；reference 模式等于目标数，各计数为逐目标累计。C# 预筛属于 #78，落地前扫描阶段逐文件完整认证、`excludedByPrefilter` 恒为 0，`canonicalFiles` 只按位置（run 目录第一层的 `transaction.json`）分类；`fullyAuthenticated` 不含处理阶段的重新认证。
 - **测试钩子**：扫描后篡改候选的钩子只在 fixture 入口暴露（`-FixtureAfterBatchHistoryScan`），只在 fast 模式扫描成功后调用；生产入口没有可达路径。回归套件是 `tests/Test-CodexSafeTreeDeleteBatchHistoryScan.ps1`。
 
+Lint mode（#79，spec #73「实现决策 › Lint 模式」）是只读体检：不需要确认、不使用目标参数、不写 evidence、不创建 evidence 根、不改 policy；结果没有 `refusalReason`，JSON 模式退出 0，只报告、不拦截。结构问题记 `error`（加载器裁决 `policy-load-refused`、逐条的重复 id / 重复 root / 深度 0 未声明用途、三条加载器结构规则），宿主漂移（root 或推导 owner 缺失、deny 指向文件或不存在）与 evidence 布局（非规范 transaction 位置、非 run 顶层目录数）记 `warning`；deny 类 finding 只给条目 id 与 deny 序号，不回显路径。三条结构规则只在纯函数 `Get-CodexSafeTreeDeletePolicyStructureViolations` 实现一次（返回 `violations` 与 `nestedRoots`），加载器接入并 fail-closed 属于 #84，本票不改加载器行为。合同见 capability spec 的 `Lint` 段，回归套件是 `tests/Test-CodexSafeTreeDeleteLint.ps1`。
+
 ## 测试
 
 ```powershell

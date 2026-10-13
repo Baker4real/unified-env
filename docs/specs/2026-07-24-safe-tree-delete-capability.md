@@ -327,6 +327,21 @@ retired-evidence-root 一次性授权是否已消费（读历史）、目标卷�
 reparse point 或 hardlink、file leaf 的命名流、`empty-project-state` 的文件等），这些拒绝 Check 不预报。
 Plan、Apply、Purge 仍要求显式 `CapabilityRoot`。
 
+只读体检使用 `Lint`（#79）：不需要确认参数、不使用目标参数，只报告、不拦截。它另读一次 policy 原文并调用
+现役加载器：加载器拒绝时报 `policy-load-refused`（加载器停在第一条违例），另按条目逐条报告重复 id、重复
+capability root（规范化后大小写不敏感）与深度 0 未声明 root 删除用途。三条加载器结构规则只在
+`Get-CodexSafeTreeDeletePolicyStructureViolations` 实现一次：deny 深度（与 Plan 同一口径，即 root 之后的路径
+段数）不得大于最小后代深度；最小后代深度为 0 的条目不得带 deny；一条 root 严格位于另一条 root 之内时，父条目
+必须有 deny 精确等于子 root。Lint 直接调用该函数，加载器的 fail-closed 执行属于 #84。以上都记 `error`；结果的
+`nestedRoots` 列出全部严格嵌套对及其是否被覆盖。宿主规则记 `warning`：capability root 不存在（或是文件）、按
+固定路径前缀推导的 owner 不存在（`Get-CodexSafeTreeDeletePolicyEntryOwner`；推导不出的为 host 级，不检查；
+owner 不写入 policy）、deny 指向现存文件、deny 指向不存在的路径。evidence 根不存在时只报告、不创建；存在时
+先过与 `Status` 相同的只读路径校验再枚举，不读文件内容、不跟随 reparse point。run 目录是 evidence 根顶层、
+名字为 producer run id 的普通目录；规范 transaction 位置是 `<evidence 根>\<顶层目录>\transaction.json`（与
+`BatchPurge` 历史扫描的 `canonicalFiles` 同口径），其余位置只按数量与相对 run 目录的位置报告，非 run 顶层
+目录只报数量。每条 finding 为 `{rule, severity, entryId, denyIndex?, detail}`；deny 类只给条目 id 与 deny
+序号，detail 不回显 policy 中的任何路径，也不回显非 run 目录名。
+
 计划 30 分钟过期。缺少确认、哈希不匹配、policy 漂移、目标重新出现、目录内容或 identity
 漂移、恢复时出现未计划节点或既有节点的 kind/SHA-256/file identity/root identity 漂移、
 未授权或越界的 hardlink/junction/symlink/reparse point、越界路径以及并发 mutex 冲突均失败关闭。
@@ -347,6 +362,12 @@ sharing violation、lock violation 与 busy 做有界重试；生产合同最多
 0 处理。缺少确认的结构化 refusal 仍是 exit 0，只修传递、不改取值。`leaf-delete-failed` 的
 非零退出码以生产脚本在发出该 JSON 后 `exit 1` 为准。持锁或 lease 失败若在发出该 JSON 前抛
 错，不属于已证明的生产 Purge 失败观测，不得用未打出该 JSON 的路径声称合同已 live 验收。
+
+`Lint` 不返回 metrics schema v1，结果为 `errorCount`、`warningCount`、`policy`（path、sha256、
+schemaVersion、entryCount、evaluatedEntryCount、loadable）、`evidence`（root、exists、runDirectories、
+nonRunTopLevelDirectories、transactionFiles、nonCanonicalTransactionFiles）、`nestedRoots` 与 `findings`。
+结果没有 `refusalReason`，所以产出结果时按上述 JSON 合同退出 0：有 error 也不拦截，调用方按 `errorCount`
+判断。policy 在两次读取之间发生变化、evidence 根未通过路径校验或 evidence 无法枚举时抛错，不给部分结果。
 
 Purge/Status 的 `deletionOutcome` 必须分开表达 namespace 与存储事实：`namespaceAbsent=true` 和
 `logicalCompletion=true` 只证明受管名称空间删除完成。没有独立文件系统 allocation 证据时，

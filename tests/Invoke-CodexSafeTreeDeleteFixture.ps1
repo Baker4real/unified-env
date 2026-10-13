@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Plan', 'Check', 'Apply', 'Purge', 'BatchPurge', 'Status', 'Restore', 'Archive')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Plan', 'Check', 'Apply', 'Purge', 'BatchPurge', 'Status', 'Restore', 'Archive', 'Lint')][string]$Mode,
     [string]$TargetPath,
     [string[]]$TargetPaths,
     [string]$CapabilityRoot,
