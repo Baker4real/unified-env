@@ -271,10 +271,12 @@
             "tests/Test-SkillInstallGuardedDeployment.ps1"
           ],
           "python": [
+          "modules/skill-supply-chain/tests/Test-CommitExactFiles.py",
           "modules/skill-supply-chain/tests/Test-SkillCatalog.py",
           "modules/skill-supply-chain/tests/Test-SkillInstallGuarded.py",
           "tests/Test-SkillOpenAIYamlParity.py",
-          "modules/skill-supply-chain/tests/Test-SkillSourceRecordMigration.py"
+          "modules/skill-supply-chain/tests/Test-SkillSourceRecordMigration.py",
+          "modules/skill-supply-chain/tests/Test-SkillsRepoPreCommit.py"
           ],
           "node": [
           "tests/Test-GitDefaultBranchSkillPolicy.cjs",

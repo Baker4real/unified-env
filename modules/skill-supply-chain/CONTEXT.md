@@ -11,6 +11,10 @@ intent: 定义 Skill 来源、安装、catalog、ledger 和发布政策的责任
 
 本模块拥有 guarded install、跨来源 merge retirement、`SOURCE.md`/ledger 一致性、资源闭包、本机 Skill Catalog 和 GitHub default-branch overlay 政策。
 
+## 导航
+
+`implementation/install_skill_guarded.py` 与 `tests/Test-SkillInstallGuarded.py` 各有数千行，整文件读取会挤占上下文：先按符号定位（仓库有 `.codegraph/`，用 CodeGraph 查符号名；或 `rg -n "^def |^class "` 列大纲），再只读目标函数。事务主体是 `execute()`，成功结果与 `source_state_after` 快照在它末尾构造。
+
 ## 不属于本模块
 
 - Codex hook 注册和 remote available catalog 的目录守卫属于 `codex-host`。
@@ -27,6 +31,8 @@ intent: 定义 Skill 来源、安装、catalog、ledger 和发布政策的责任
 ## 接口与测试
 
 对外接口是 `scripts/install-skill-guarded.cmd`、根目录 Python adapters、`scripts/Deploy-SkillInstallGuarded.ps1` 和受管 overlay/deploy 入口。六文件安装闭包的 Python 实现与热点测试位于本模块的 `implementation/`、`tests/`；command adapter 仍由根 `scripts/install-skill-guarded.cmd` 提供，部署脚本从 module implementation 加载 Python 文件并绑定该 command adapter。`--system-provenance-repair-plan` 为精确五项 bundled `.system` 提供官方刷新 bootstrap 与保留既有 payload 的 display reconcile；两者的基线证明、schema、CAS、rollback 和部署顺序统一见 wrapper spec 的 `Bundled system provenance atomic repair` 节。跨来源职责合并通过 installer 的 `merge_retirement` decision manifest 字段完成；成功 backup 必须在独立验收后由受管安全树删除入口清理。专项测试列在 `modules/manifest.json` 的 `python` 和 `node` 清单中。
+
+在共享工作树（skills 根）里只提交某次事务的确切字节，用 `implementation/commit_exact_files.py`（`--help`）：它在私有 index 里从 expected HEAD 构建提交，hook 照常运行，之后只刷新所提交路径的共享 index。live ledger 已被后续事务改动时，用 `--file-from` 提交 wrapper 成功事务的 `backups/source-state-after.json`（事务 manifest 的 `source_state_after` 记录其路径与 sha256）。skills 仓库的 pre-commit 守卫是 `implementation/skills_repo_pre_commit.py`：拦截暂存文本里的 C0 控制字符和非规范 ledger JSON；`install --repo` 把检查器副本和 shim 装进该仓库的 hooks 目录，改源后重新安装。这两个工具从源路径运行，不属于六文件部署闭包。
 
 旧 `SOURCE.md` 末尾记录的 schema 迁移只允许使用
 `scripts/reconcile_skill_source_records.py`：它在隔离镜像达到 strict

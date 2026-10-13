@@ -760,6 +760,12 @@ class SkillInstallGuardedTests(unittest.TestCase):
         artifact = next(item for item in catalog["artifacts"] if item.get("name") == "test-skill-wrapper")
         self.assertEqual(artifact["ledger_coverage"], "pass")
         self.assertEqual(catalog["checks"]["resource_closure"]["status"], "pass")
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        snapshot = json.loads(transaction.read_text(encoding="utf-8"))["source_state_after"]
+        ledger_bytes = self.ledger.read_bytes()
+        self.assertEqual(Path(snapshot["path"]), transaction.parent / "backups" / "source-state-after.json")
+        self.assertEqual(Path(snapshot["path"]).read_bytes(), ledger_bytes)
+        self.assertEqual(snapshot["sha256"], hashlib.sha256(ledger_bytes).hexdigest())
 
         artifact["source"]["status"] = "unknown"
         artifact["source"]["conflicts"] = []
@@ -3835,6 +3841,7 @@ class SkillInstallGuardedTests(unittest.TestCase):
         self.assertIn("baseline", (active_skill / "SKILL.md").read_text(encoding="utf-8"))
         ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
         self.assertEqual(ledger["sources"][0]["skills"], [name])
+        self.assertEqual(list((self.temp / "evidence").glob("install-*/backups/source-state-after.json")), [])
 
     def test_activation_readability_failure_restores_content_acl_and_ledger(self) -> None:
         name = "test-skill-wrapper"

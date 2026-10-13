@@ -7,6 +7,10 @@ candidate, writes provenance and the unified ledger, runs resource closure,
 regenerates the local catalog, verifies the postcondition, and rolls back on
 failure.  The bundled system installer remains an upstream helper and is not
 modified.
+
+Source: ``D:/agents/projects/统一环境/modules/skill-supply-chain/implementation``.
+Edit it there, then run that repo's ``scripts/Deploy-SkillInstallGuarded.ps1``
+to copy it into ``D:/Codex/.codex/scripts``.
 """
 
 from __future__ import annotations
@@ -487,11 +491,12 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def json_document_bytes(value: Any) -> bytes:
+    return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
 def atomic_write_json(path: Path, value: Any) -> None:
-    atomic_write_bytes(
-        path,
-        (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-    )
+    atomic_write_bytes(path, json_document_bytes(value))
 
 
 def load_json(path: Path, *, label: str) -> Any:
@@ -4207,7 +4212,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             )
             if ledger_path.read_bytes() != system_overlay_context["ledger_before_bytes"]:
                 raise InstallError("source ledger changed before system overlay write")
-        atomic_write_json(ledger_path, updated_ledger)
+        ledger_after_bytes = json_document_bytes(updated_ledger)
+        atomic_write_bytes(ledger_path, ledger_after_bytes)
         if isinstance(system_overlay_context, dict):
             system_overlay_context["ledger_written_bytes"] = ledger_path.read_bytes()
             system_overlay_context["ledger_written_identity"] = system_path_identity(ledger_path)
@@ -4305,6 +4311,9 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             if merge_retirement is not None
             else None
         )
+        # Other sessions may edit the shared live ledger later; keep the bytes this transaction wrote.
+        source_state_after_path = backup_root / "source-state-after.json"
+        atomic_write_bytes(source_state_after_path, ledger_after_bytes)
         result = {
             **plan,
             "status": "succeeded",
@@ -4320,6 +4329,10 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "catalog_verification": catalog_verification,
             "system_provenance_overlay_postcondition": system_overlay_postcondition,
             "merge_retirement_verification": merge_retirement_verification,
+            "source_state_after": {
+                "path": str(source_state_after_path),
+                "sha256": hashlib.sha256(ledger_after_bytes).hexdigest(),
+            },
             "catalog_sha256": sha256_file(catalog_path),
             "evidence": str(evidence_dir),
         }
