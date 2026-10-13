@@ -9,6 +9,8 @@ param(
     [switch]$ConfirmApply,
     [string]$TransactionPath,
     [string]$ApprovedTransactionSha256,
+    [string[]]$TransactionPaths,
+    [string[]]$ApprovedTransactionSha256s,
     [switch]$ConfirmPurge,
     [switch]$ConfirmRestore,
     [switch]$ConfirmArchive,

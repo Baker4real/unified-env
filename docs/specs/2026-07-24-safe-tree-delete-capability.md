@@ -196,6 +196,20 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
    operation run 内已绑定的 plan 与 evidence，不把当前 policy SHA 或 policy entry 可执行性混入判断，
    因此 current-policy 漂移不会永久阻断历史 v1/v2 Archive；`Purge`/`Restore` 仍须通过当前 policy
    可执行性校验，且其严格 transaction reader 仍只接受 schema v2/v3。
+
+   多组 Archive（#85）用 `TransactionPaths` 与 `ApprovedTransactionSha256s` 按位置一一配对，一次归档
+   多条 terminal 记录；经 `.cmd` wrapper 调用时，两者与 `TargetPaths` 一样各以单个 `::` 分隔字符串
+   传入。多组参数不得与单组 `TransactionPath`/`ApprovedTransactionSha256` 混用；只给一半、拆分后组数
+   不等、含空白组或拆分后为空时，在处理任何一组之前整体抛错且不写 evidence；缺少 `ConfirmArchive`
+   时返回与单组相同的 `confirm-archive-required`。各组按输入顺序原样执行单组 Archive：独立认证
+   approved SHA-256 与 operation run 绑定、独立持目标 mutex、独立 create-only 发布；任一组失败不影响
+   其他组，失败的组不产生 marker。结果的 `results` 逐组给出 `transactionPath` 加单组返回字段，单组
+   抛错收敛为 `refusalReason=archive-operation-failed`，并在 `error` 保留原异常消息。顶层只有
+   `completed`（每组都处于已归档状态时为 `true`）、`transactionCount`、`archivedCount`（含
+   `alreadyArchived`）、`alreadyArchivedCount`、`refusedCount`、`failedCount` 与 `results`，没有顶层
+   `refusalReason`，因此 JSON 模式即使有组被拒绝或失败也 exit 0，由 `completed`、`refusedCount` 与
+   `failedCount` 表达。多组参数只传一组时同样返回多组形状；单组参数的用法、输出与退出码不变，`terminal-archive.json` 格式不变。
+   多组调用不放宽生产授权：对生产真实记录批量归档仍须用户另行授权。
 3. `Plan`：规范化目标与 capability root，校验固定 allowlist、最小后代深度、denylist、
    root 删除用途、父链与完整子树；未授权 reparse point 一律拒绝，获准的内部 directory junction
    以 manifest schema v2 的不可遍历叶节点记录；`empty-project-state` 还会在发布计划前确认
