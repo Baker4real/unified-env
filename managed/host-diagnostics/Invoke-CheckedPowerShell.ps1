@@ -5,6 +5,7 @@
 .DESCRIPTION
 使用当前受管 Core 7.4+ 运行时的独立无窗口进程，关闭 profile，设置 UTF-8，
 并启用 ErrorActionPreference=Stop 与 PSNativeCommandUseErrorActionPreference。
+子进程固定为 STA，需要 STA 的 Shell/COM 调用（如 SHFileOperationW）可直接运行。
 stdout/stderr 在子进程结束后输出。启用 JSON 字段校验时，失败不回显输出正文。
 .PARAMETER ScriptPath
 待检查和执行的 .ps1 文件，与 CommandText 互斥。保留目标 PSScriptRoot 与调用目录。
@@ -58,6 +59,15 @@ $ErrorActionPreference = 'Stop'
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $OutputEncoding = $utf8
+$RequiredJsonFields = @(
+    foreach ($fieldValue in @($RequiredJsonFields)) {
+        # Native pwsh callers pass comma-separated values as one argv token.
+        # Accept that form while retaining array binding for in-process callers.
+        foreach ($fieldPart in ([string] $fieldValue -split ',')) {
+            $fieldPart.Trim().Trim([char[]] @([char] 39, [char] 34))
+        }
+    }
+)
 if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -ne 7) {
     [Console]::Error.WriteLine('CheckedPowerShell runtime-required: PowerShell Core 7.')
     exit 2
@@ -133,7 +143,7 @@ $psi.StandardOutputEncoding = $utf8
 $psi.StandardErrorEncoding = $utf8
 $psi.WorkingDirectory = $PWD.ProviderPath
 $inputValue = if ($PSCmdlet.ParameterSetName -eq 'File') { $resolvedPath } else { $CommandText }
-foreach ($argument in @('-NoProfile', '-NonInteractive', '-CommandWithArgs', $bootstrap, $PSCmdlet.ParameterSetName, $inputValue) + $ScriptArgument) {
+foreach ($argument in @('-NoProfile', '-NonInteractive', '-STA', '-CommandWithArgs', $bootstrap, $PSCmdlet.ParameterSetName, $inputValue) + $ScriptArgument) {
     $psi.ArgumentList.Add($argument)
 }
 try {
@@ -182,16 +192,17 @@ if ($RequiredJsonFields.Count) {
         }
         for ($fieldIndex = 0; $fieldIndex -lt $RequiredJsonFields.Count; $fieldIndex++) {
             $current = $document.RootElement
-            foreach ($segment in $RequiredJsonFields[$fieldIndex].Split('.')) {
+            $fieldPath = [string] $RequiredJsonFields[$fieldIndex]
+            foreach ($segment in $fieldPath.Split('.')) {
                 $next = [System.Text.Json.JsonElement]::new()
                 if ($current.ValueKind -ne [System.Text.Json.JsonValueKind]::Object -or -not $current.TryGetProperty($segment, [ref]$next)) {
-                    [Console]::Error.WriteLine(('CheckedPowerShell json-error reason=missing-field field-index={0}' -f $fieldIndex))
+                    [Console]::Error.WriteLine(('CheckedPowerShell json-error reason=missing-field field-index={0} field={1}' -f $fieldIndex, $fieldPath))
                     exit 3
                 }
                 $current = $next
             }
             if ($current.ValueKind -eq [System.Text.Json.JsonValueKind]::Null) {
-                [Console]::Error.WriteLine(('CheckedPowerShell json-error reason=null-field field-index={0}' -f $fieldIndex))
+                [Console]::Error.WriteLine(('CheckedPowerShell json-error reason=null-field field-index={0} field={1}' -f $fieldIndex, $fieldPath))
                 exit 3
             }
         }

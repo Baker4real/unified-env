@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string]$FixtureRoot = 'D:/agents/run-evidence/claude-host-hooks-fixtures')
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -49,11 +49,16 @@ Assert-True (Test-Path -LiteralPath $managedHooksPath -PathType Leaf) '缺少受
 $selfTest = & $node $guardPath --self-test
 Assert-Equal $LASTEXITCODE 0 "guard --self-test 必须成功：$selfTest"
 
+# 回收站 API 名拆开拼接：本文件经 pwsh -File 运行时，guard 会扫描它的内容。
 $denyCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Remove-Item -Recurse -Force D:\tmp\x' } },
     @{ tool_name = 'Bash'; tool_input = @{ command = 'rm -rf node_modules' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'gh issue view 1 --json number,title' } },
-    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git clone D:\agents\knowledge-base D:\agents\tmp\kb' } }
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git clone D:\agents\knowledge-base D:\agents\tmp\kb' } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = ('[Native]::SHFile' + 'OperationW([ref]$op)') } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = ('Clear-' + 'RecycleBin -DriveLetter D -Force') } },
+    @{ tool_name = 'Bash'; tool_input = @{ command = "ls 'D:\\agents'" } },
+    @{ tool_name = 'Bash'; tool_input = @{ command = 'pwsh -NoProfile -Command "Get-Item $env:TEMP"' } }
 )
 foreach ($case in $denyCases) {
     $result = Invoke-Guard ($case | ConvertTo-Json -Compress)
@@ -67,12 +72,34 @@ $allowCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1' -Mode Plan" } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = "gh issue view 1 --json 'number,title'" } },
     @{ tool_name = 'Bash'; tool_input = @{ command = 'git status' } },
-    @{ tool_name = 'Bash'; tool_input = @{ command = 'git clone --no-hardlinks /d/agents/knowledge-base /d/agents/tmp/kb' } }
+    @{ tool_name = 'Bash'; tool_input = @{ command = 'git clone --no-hardlinks /d/agents/knowledge-base /d/agents/tmp/kb' } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'D:\Codex\.codex\scripts\Invoke-ManagedRecycle.ps1' -Mode Plan -TargetPath D:\x" } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Get-ChildItem -Force -LiteralPath ''D:\$Recycle.Bin''' } },
+    @{ tool_name = 'Bash'; tool_input = @{ command = 'pwsh -NoProfile -File ./x.ps1 "$HOME"' } }
 )
 foreach ($case in $allowCases) {
     $result = Invoke-Guard ($case | ConvertTo-Json -Compress)
     Assert-Equal $result.exitCode 0 "放行路径必须 exit 0：$($case.tool_input.command)"
     Assert-Equal $result.stdout.Trim() '' "放行时不得输出决定：$($case.tool_input.command)"
+}
+
+# 引用脚本扫描走真实文件读取：含回收站调用的 .ps1 被拦，无害内容放行。
+$fixtureDir = Join-Path $FixtureRoot ([guid]::NewGuid().ToString('N'))
+$fixture = Join-Path $fixtureDir 'recycle.ps1'
+$scriptCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = "pwsh -NoProfile -File '$fixture'" } } | ConvertTo-Json -Compress
+[void][IO.Directory]::CreateDirectory($fixtureDir)
+try {
+    [IO.File]::WriteAllText($fixture, ('[Native]::SHFile' + 'OperationW([ref]$op)'), [Text.UTF8Encoding]::new($false))
+    $result = Invoke-Guard $scriptCase
+    Assert-Equal $result.exitCode 0 '引用脚本 deny 也必须 exit 0。'
+    Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' '引用脚本里的回收站调用必须拦截。'
+    [IO.File]::WriteAllText($fixture, 'Get-ChildItem -LiteralPath $PSScriptRoot', [Text.UTF8Encoding]::new($false))
+    $result = Invoke-Guard $scriptCase
+    Assert-Equal $result.stdout.Trim() '' '无害的引用脚本必须放行。'
+}
+finally {
+    if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture }
+    if (Test-Path -LiteralPath $fixtureDir) { [IO.Directory]::Delete($fixtureDir) }
 }
 
 $garbage = Invoke-Guard 'not json'

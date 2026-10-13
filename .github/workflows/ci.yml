@@ -58,7 +58,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   fixtures:
-    name: ${{ matrix.module }} fixtures
+    name: ${{ matrix.name || format('{0} fixtures', matrix.module) }}
     runs-on: windows-latest
     timeout-minutes: 90
     strategy:
@@ -73,6 +73,10 @@ jobs:
             profile: fixture
           - module: host-safety
             profile: fixture
+          # Host diagnostics finish in minutes; a separate job keeps their feedback off the ~90-minute safe-delete run.
+          - module: host-safety
+            profile: diagnostics
+            name: host-safety diagnostics
     steps:
       - uses: actions/checkout@v6
 

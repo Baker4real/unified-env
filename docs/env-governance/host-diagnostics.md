@@ -19,6 +19,7 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 | `Get-NvidiaDownloadStatus.ps1` | 原生下载计数、任务关联、进程/用户/机器代理摘要；进程代理凭据和完整环境不输出。`-Offline` 只读状态文件；单点零速不证明卡住，`bytes-complete` 不证明包完整性或已安装。Windows x64 PEB 无法读取时明确 unavailable。NO_PROXY 不绕过 TUN。 |
 | `Get-TaskbarSnapshot.ps1` | 当前 shell 身份、窗口响应、固定项聚合哈希；不返回窗口标题或快捷方式目标。窗口就绪不能证明图标视觉正常。 |
 | `Restart-ExplorerShell.ps1` | Core 7.5+；默认 Plan，Apply 必须消费 120 秒内计划，核对 PID/启动时间/路径/会话、固定项和窗口。会话互斥覆盖停止至验收；停止前保存路径，先观察自动恢复，再有限创建。计划预算为 5–60 秒。工具层成功要求 ready、桌面/任务栏就绪和固定项一致，视觉验收单独完成。 |
+| `Invoke-ManagedRecycle.ps1` | Core 7.4+；把单个文件或目录树移入所在卷的回收站。Check 只读运行同一套预检，不需要用途和授权，也不写 evidence；Plan 把逐项相对路径清单、回收站状态、用途和用户授权原话写入 D 盘 evidence 的 `plan.json`；Apply 须在 30 分钟内凭 plan SHA-256 与 `-ConfirmRecycle` 执行，重跑预检并比对清单后调用 `SHFileOperationW`，再读回 `$I`/`$R` 记录、比对回收站副本。结果只写一次 `result.json`，同一 plan 不能重放；只有 `checked`/`planned`/`recycled` 退出 0。卷根、受保护根及其祖先、系统子树、链接、超长路径（拒绝时分列原位与回收站内长度并点名超长条目）、NoRecycleFiles/NukeOnDelete 和回收站余量不足一律拒绝；不做永久删除，也不清空回收站。Agent 使用边界见宿主 `host-runbook/safe-tree-delete.md` 的受管回收节。 |
 
 参数与返回结构以各脚本帮助/源码为准。活动日志不是原子快照；命名模式脱敏不保证发现任意秘密，仍要缩小敏感来源与字段范围。需要复核某条失败时保留来源、行窗口和退出码，不输出完整日志。
 
@@ -89,7 +90,7 @@ node ./tests/Test-ModuleBoundaries.cjs
 git diff --check
 ```
 
-仓库 fixture 运行合成日志、语法/JSON 合同、NVIDIA 状态、浏览器 CLI/HTTP 合成报告与带所有权握手的隔离恢复用例，显式跳过真实桌面快照。浏览器 suite 不启动或附着真实浏览器，不能代替真实页面验收。CI 为 host-safety 配置 Python；本机测试从 PATH 解析 `python.exe`。部署后使用完整入口检查实际宿主只读面：
+仓库 fixture 运行合成日志、语法/JSON 合同、NVIDIA 状态、浏览器 CLI/HTTP 合成报告、带所有权握手的隔离恢复用例与 D 盘 fixture 上的回收入口拒绝/计划用例，显式跳过真实桌面快照和真实回收站移入（`-SkipLiveRecycle`）。宿主完整入口会把一个 D 盘 fixture 树移入 D 盘回收站，再像资源管理器还原那样移回，`$I` 记录归入本轮 evidence，不永久删除任何内容。浏览器 suite 不启动或附着真实浏览器，不能代替真实页面验收。CI 为 host-safety 配置 Python；本机测试从 PATH 解析 `python.exe`。部署后使用完整入口检查实际宿主只读面：
 
 ```powershell
 & 'D:/Codex/.codex/scripts/Test-HostDiagnostics.ps1'
