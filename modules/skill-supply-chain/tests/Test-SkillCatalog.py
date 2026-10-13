@@ -1310,7 +1310,7 @@ else:
         def test_defaults_are_d_drive_host_paths(self) -> None:
             self.assertEqual(
                 str(catalog_module.DEFAULT_ACTIVE_ROOT),
-                r"D:\Codex\.codex\skills",
+                r"D:\agents\skills-manager\skills",
             )
             self.assertEqual(
                 str(catalog_module.DEFAULT_PLUGIN_CACHE_ROOT),
