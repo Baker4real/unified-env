@@ -10005,7 +10005,10 @@ function Test-CodexSafeTreeDeleteTargetDirPresentAfterRecheck {
 function New-CodexSafeTreeDeleteBatchTargetSkippedResult {
     param(
         [Parameter(Mandatory)][string]$TargetPath,
-        [Parameter(Mandatory)][string]$Message
+        # 异常文本可能为空串，照原样记录。
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Message,
+        # 失败前已找到的目标 transaction 路径；没有则为 $null（[string] 会把 $null 变成空串，故不限定类型）。
+        [object]$TransactionPath = $null
     )
 
     return [pscustomobject][ordered]@{
@@ -10014,7 +10017,7 @@ function New-CodexSafeTreeDeleteBatchTargetSkippedResult {
         reason = 'target-operation-failed'
         error = $Message
         purged = $false
-        transactionPath = $null
+        transactionPath = $TransactionPath
     }
 }
 
@@ -10301,14 +10304,10 @@ function Invoke-CodexSafeTreeDeleteBatchPurge {
                 $null -ne $recoverable.PSObject.Properties['transactionPath']) {
                 $failedTransactionPath = [string]$recoverable.transactionPath
             }
-            $results.Add([pscustomobject][ordered]@{
-                targetPath = $targetPath
-                action = 'skipped-target-error'
-                reason = 'target-operation-failed'
-                error = $targetFailureMessage
-                purged = $false
-                transactionPath = $failedTransactionPath
-            })
+            $results.Add((New-CodexSafeTreeDeleteBatchTargetSkippedResult `
+                -TargetPath $targetPath `
+                -Message $targetFailureMessage `
+                -TransactionPath $failedTransactionPath))
         }
     }
 
