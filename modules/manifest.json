@@ -593,7 +593,6 @@
     "ownership": {
       "files": [
         ".github/workflows/ci.yml",
-        ".github/workflows/host-diagnostics-repro.yml",
         ".codegraph/.gitignore",
         ".gitattributes",
         ".gitignore",
