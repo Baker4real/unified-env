@@ -42,6 +42,28 @@ function Invoke-PublicScript([string]$Path, [string[]]$Arguments) {
     finally { $child.Dispose() }
 }
 
+function Get-Excerpt([string]$Text, [int]$MaxChars = 4000) {
+    if ($Text.Length -le $MaxChars) { return $Text }
+    $Text.Substring(0,$MaxChars) + '...[' + ($Text.Length - $MaxChars) + ' more chars]'
+}
+
+# CI discards the evidence directory, so the message carries the stdout suite report and each failed suite's evidence.
+function Format-DiagnosticsFailure($Result) {
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add('Managed host diagnostics failed: exit=' + $Result.exitCode)
+    $lines.Add('report: ' + (Get-Excerpt $Result.stdout))
+    try {
+        $report = $Result.stdout | ConvertFrom-Json -ErrorAction Stop
+        foreach ($suite in @($report.suites | Where-Object status -eq 'failed')) {
+            $detail = if ($suite.evidence) { Get-Content -LiteralPath $suite.evidence -Raw | ConvertFrom-Json -ErrorAction Stop | ConvertTo-Json -Depth 20 -Compress } else { 'no JSON evidence' }
+            $lines.Add('failed suite ' + $suite.name + ': ' + (Get-Excerpt $detail))
+        }
+    }
+    catch { $lines.Add('suite evidence unavailable: ' + $_.Exception.Message) }
+    if (-not [string]::IsNullOrWhiteSpace($Result.stderr)) { $lines.Add('stderr: ' + (Get-Excerpt $Result.stderr)) }
+    $lines -join "`n"
+}
+
 Assert-True (Test-Path -LiteralPath $entry -PathType Leaf) 'The managed host diagnostics entry must exist.'
 $deployEntry = Join-Path $projectRoot 'scripts/Deploy-HostDiagnostics.ps1'
 Assert-True (Test-Path -LiteralPath $deployEntry -PathType Leaf) 'The host diagnostics deployment entry must exist.'
@@ -106,7 +128,7 @@ $deploymentResultPath = Join-Path $deployRoot 'deployment-result.json'
 [IO.File]::WriteAllText($deploymentResultPath,($deploymentReport | ConvertTo-Json -Depth 4),$utf8)
 
 $result = Invoke-PublicScript $entry @('-EvidenceRoot',$EvidenceRoot,'-SkipLiveSnapshot')
-Assert-True ($result.exitCode -eq 0) ('Managed host diagnostics failed: exit=' + $result.exitCode + '; ' + $result.stderr)
+if ($result.exitCode -ne 0) { throw (Format-DiagnosticsFailure $result) }
 Assert-True ([string]::IsNullOrWhiteSpace($result.stderr)) 'Managed host diagnostics wrote unexpected stderr.'
 $report = $result.stdout | ConvertFrom-Json -ErrorAction Stop
 Assert-True ($report.status -eq 'passed-with-skips') 'CI must report its live snapshot omission explicitly.'
