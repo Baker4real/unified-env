@@ -1797,11 +1797,11 @@ function Assert-CodexSafeTreeDeleteDeletionAllowed {
     }
 }
 
-function Resolve-CodexSafeTreeDeleteTargetPathArguments {
+function Split-CodexSafeTreeDeleteListArgument {
     param([string[]]$Values)
 
-    # 宿主 .cmd 链只能传单个字符串：BatchPurge 的多个目标、多组 Archive 的 transaction path 与
-    # approved SHA-256 都以 '::' 连接，在这里拆回数组。
+    # 宿主 .cmd 链只能传单个字符串：BatchPurge、Status 范围查询与 Check 的多个目标，多组 Archive 的
+    # transaction path 与 approved SHA-256，都以 '::' 连接，在这里拆回数组。只拆分，不解析路径。
     $items = @($Values)
     if ($items.Count -eq 1 -and [string]$items[0] -match '::') {
         $items = @(([string]$items[0]).Split([string[]]@('::'), [StringSplitOptions]::RemoveEmptyEntries))
@@ -1856,7 +1856,7 @@ function Invoke-CodexSafeTreeDeleteMode {
             } + $testArguments
             # 范围查询（#80）：TargetPaths 同样接受 '::' 连接；不带 TargetPaths 时与全量 Status 完全相同。
             if ($null -ne $TargetPaths) {
-                $scopeTargets = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $TargetPaths)
+                $scopeTargets = @(Split-CodexSafeTreeDeleteListArgument -Values $TargetPaths)
                 if ($scopeTargets.Count -eq 0 -or
                     @($scopeTargets | Where-Object { [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
                     throw 'Status 范围查询要求 TargetPaths 至少一个目标且均不为空。'
@@ -1900,8 +1900,8 @@ function Invoke-CodexSafeTreeDeleteMode {
                     throw ('Archive 不能同时使用单组参数（TransactionPath / ApprovedTransactionSha256）' +
                         '与多组参数（TransactionPaths / ApprovedTransactionSha256s）。')
                 }
-                $resolvedTransactionPaths = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $TransactionPaths)
-                $resolvedApprovedSha256s = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $ApprovedTransactionSha256s)
+                $resolvedTransactionPaths = @(Split-CodexSafeTreeDeleteListArgument -Values $TransactionPaths)
+                $resolvedApprovedSha256s = @(Split-CodexSafeTreeDeleteListArgument -Values $ApprovedTransactionSha256s)
                 if ($null -eq $TransactionPaths -or
                     $null -eq $ApprovedTransactionSha256s -or
                     $resolvedTransactionPaths.Count -eq 0 -or
@@ -1943,7 +1943,7 @@ function Invoke-CodexSafeTreeDeleteMode {
         'Check' {
             # 只读预检：TargetPath 与 TargetPaths 二者择一（TargetPaths 同样接受 '::' 连接）；CapabilityRoot 可省略。
             $checkTargets = @()
-            if ($null -ne $TargetPaths) { $checkTargets = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $TargetPaths) }
+            if ($null -ne $TargetPaths) { $checkTargets = @(Split-CodexSafeTreeDeleteListArgument -Values $TargetPaths) }
             $hasTargetPath = -not [string]::IsNullOrWhiteSpace($TargetPath)
             if ($hasTargetPath -eq ($checkTargets.Count -gt 0) -or
                 @($checkTargets | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
@@ -1992,7 +1992,7 @@ function Invoke-CodexSafeTreeDeleteMode {
             if (-not $ConfirmApply -or -not $ConfirmPurge) {
                 return [pscustomobject][ordered]@{ completed = $false; refusalReason = 'confirm-apply-and-purge-required' }
             }
-            $resolvedTargets = @(Resolve-CodexSafeTreeDeleteTargetPathArguments -Values $TargetPaths)
+            $resolvedTargets = @(Split-CodexSafeTreeDeleteListArgument -Values $TargetPaths)
             if ($resolvedTargets.Count -eq 0 -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
                 throw 'BatchPurge 模式要求 TargetPaths 与 CapabilityRoot。'
             }
