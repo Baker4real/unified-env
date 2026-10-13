@@ -6386,10 +6386,20 @@ function Get-CodexSafeTreeDeleteStatus {
         $runItemIndex++
     }
     $fallbackResultByIndex = $null
-    if ($parallelFallbackEnabled -and $fallbackInputs.Count -ge 2 -and $fastDop -ge 2) {
+    # issue #58：没有路由键的 fallback op 可能扫描任意一棵树，无法按树做冲突分组，只留给下方
+    # 主 runspace 的串行循环解析。该循环在全部 worker 结束后才运行，不会与 worker 对同一棵树
+    # 并发持有 lease（FAST_SCAN=0 时所有 op 都没有路由键，Status 因此整轮串行）。
+    $parallelInputs = [Collections.Generic.List[object]]::new()
+    foreach ($fallbackInput in $fallbackInputs) {
+        if (-not [string]::IsNullOrEmpty([string]$fallbackInput.RouteTargetPath) -or
+            -not [string]::IsNullOrEmpty([string]$fallbackInput.RouteQuarantinePath)) {
+            $parallelInputs.Add($fallbackInput)
+        }
+    }
+    if ($parallelFallbackEnabled -and $parallelInputs.Count -ge 2 -and $fastDop -ge 2) {
         try {
             $parallelResult = Invoke-CodexSafeTreeDeleteStatusParallelFallback `
-                -Inputs $fallbackInputs `
+                -Inputs $parallelInputs `
                 -PolicyPath $PolicyPath `
                 -CurrentPolicySha256 ([string]$policy.sha256) `
                 -FullEvidenceRoot $fullEvidenceRoot `
@@ -6401,7 +6411,7 @@ function Get-CodexSafeTreeDeleteStatus {
                 -DegreeOfParallelism $fastDop
             $fallbackResultByIndex = $parallelResult.resultByIndex
             $metricsState.parallelFallbackWorkers = [long]$parallelResult.workerCount
-            $metricsState.parallelFallbackResolved = [long]$fallbackInputs.Count
+            $metricsState.parallelFallbackResolved = [long]$parallelInputs.Count
         } catch {
             # 并行基础设施失败不改变语义：整体回退到串行参考路径重放。
             $fallbackResultByIndex = $null
