@@ -142,7 +142,7 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
 
 宿主 wrapper 自 #56 起为 gate-aware shim（`scripts\invoke-codex-safe-tree-delete-gate-shim.ps1` 的受管安装）：每次调用在任何 dot-source 之前取得 current-user cross-session deployment mutex（名称内嵌 owner SID 命名空间实现用户隔离），检查固定 `D:\Codex\.codex\state\safe-tree-delete-deployment\maintenance.json`，并持锁到 child/本进程退出。marker 在场时新调用以可观察错误拒绝；abandoned marker 不被自动清除。
 
-等锁超时报告持锁者（#77）：持锁者（gate shim 与部署工具）取锁后在同一状态根原子写 `gate-holder.json` 面包屑、释放锁前删除。内容只有 ASCII 的 `pid/processStartUtc/mode/acquiredAtUtc`：shim 的 `mode` 只取自 `-Mode` 参数（缺失或不合规为 `unknown`），部署工具为 `deploy`；不记录目标路径或其它参数。面包屑写失败是有意降级，不阻塞调用；前持有者被杀（mutex abandoned）留下的残留由下一个获得者覆盖。shim 等锁超时的 JSON 保持 `ok=false`、`refusalReason=deployment-mutex-acquire-timeout`、exit 1 与 ASCII-only，追加 `holder:{pid,mode,acquiredAtUtc,heldSeconds,stale}`（PID 不存在或启动时间不符时 `stale=true`；面包屑缺失、不可读或格式不符时为 `{state:"unknown"}`）；部署工具等锁超时的消息保留 `deployment mutex acquire timeout` 前缀并追加 `holder=<同结构 JSON>`。写、读与 stale 判定只在 `scripts\lib\CodexSafeTreeDeleteGateHolder.ps1` 实现一次（后续 policy 维护工具复用同一文件）：仓库 shim 源只以一行 dot-source 引用它，部署工具安装时把这一行替换为同一 project root 下该 lib 的原文，所以已安装 shim 自包含，取锁前不加载任何仓库代码。该 lib 属于 source closure 固定清单。
+等锁超时报告持锁者（#77）：持锁者（gate shim、部署工具与 policy 维护工具）取锁后在同一状态根原子写 `gate-holder.json` 面包屑、释放锁前删除。内容只有 ASCII 的 `pid/processStartUtc/mode/acquiredAtUtc`：shim 的 `mode` 只取自 `-Mode` 参数（缺失或不合规为 `unknown`），部署工具为 `deploy`，policy 维护工具为 `policy-maintenance`；不记录目标路径或其它参数。面包屑写失败是有意降级，不阻塞调用；前持有者被杀（mutex abandoned）留下的残留由下一个获得者覆盖。shim 等锁超时的 JSON 保持 `ok=false`、`refusalReason=deployment-mutex-acquire-timeout`、exit 1 与 ASCII-only，追加 `holder:{pid,mode,acquiredAtUtc,heldSeconds,stale}`（PID 不存在或启动时间不符时 `stale=true`；面包屑缺失、不可读或格式不符时为 `{state:"unknown"}`）；部署工具等锁超时的消息保留 `deployment mutex acquire timeout` 前缀并追加 `holder=<同结构 JSON>`。写、读与 stale 判定只在 `scripts\lib\CodexSafeTreeDeleteGateHolder.ps1` 实现一次（policy 维护工具复用同一文件）：仓库 shim 源只以一行 dot-source 引用它，部署工具安装时把这一行替换为同一 project root 下该 lib 的原文，所以已安装 shim 自包含，取锁前不加载任何仓库代码。该 lib 属于 source closure 固定清单。
 
 唯一部署 owner 是 `scripts\Deploy-CodexSafeTreeDelete.ps1`，只接受 `BootstrapGate | Deploy | RecoverRollback`，不复用业务 Mode，也不 commit/push。状态根固定为上述目录：`deployments/<deploymentId>/{00-intent.json, shim-backup.bin(+meta), phase-journal/, invocations/, final-receipt.json}` 与根级 marker。intent 为 create-only 且预绑定 `{deploymentId, ownerSid, previousClosureSha256, targetClosureSha256, shimBeforeSha256, shimTargetSha256}`；phase journal 为 create-only、前序 SHA 链接，顺序 `10 gate-bootstrap-started → 20 shim-cutover → 30 marker-active → 40 legacy-drained → 50 source-switch-started → 60 source-switched → 70 validation-passed → 80 complete`（或对应 `*-rollback-started/complete`），未知/重复/缺序/漂移均失败闭锁。
 
@@ -150,13 +150,61 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
 
 `-StateRootForTest/-ShimPathForTest/-ProjectRootForTest/-MutexNameForTest/-StopAfterPhaseForTest` 是唯一测试 seam，仅进程内显式传参、生产调用不传递；部署测试（`tests\Test-CodexSafeTreeDeleteDeployment.ps1`）在 fixture state root/shim/mutex 上重放全矩阵且不触碰生产状态根；其 S10 经 fixture project root（仓库 gate shim 源、gate holder lib 与替身 entry）安装 gate shim，验证等锁超时带 holder（存活、持锁者被杀后 `stale=true`、目录不可写时 `{state:"unknown"}` 且调用照常完成）以及部署工具超时消息带 holder。
 
+## policy 维护工具（#82，spec #73）
+
+`scripts\Update-CodexSafeTreeDeletePolicy.ps1` 维护同 schema 的 policy 条目与 deny：独立脚本，不经 gate shim，不是生产入口的 Mode，也不属于 source closure，从仓库工作树运行。它与 shim、部署工具共用同名 deployment mutex（current-user 命名空间，等锁上限 5 分钟）与同一 maintenance marker，持锁期间写 `mode=policy-maintenance` 面包屑。等锁超时的 JSON 与 shim 同形：`ok=false`、`refusalReason=deployment-mutex-acquire-timeout`、exit 1，并附 `holder`。
+
+参数：`-Mode DryRun|Apply`、`-ChangeSetPath`、Apply 必需的 `-ApprovedCandidatePolicySha256`（DryRun 输出的 `candidatePolicySha256`），以及可选的 `-ConfirmManualReviewOperationIds`。宿主 `.cmd` 链只能传单个字符串，所以单个值含 `::` 时按 `::` 拆成多个 operation id。变更集是 `{artifactType:"env-governance.codex-safe-tree-delete-policy-change-set", schemaVersion:1, changes:[...]}`，按声明顺序作用到现役 policy 原文：
+
+| op | 字段 | 规则 |
+|---|---|---|
+| `add-deny` | `entryId`、`path` | 条目里不得已有同一路径（OrdinalIgnoreCase） |
+| `remove-deny` | `entryId`、`path` | 必须恰好匹配一条 |
+| `add-entry` | `entry` | 属性限于加载器的条目字段；`id` 是新的，`capabilityRoot` 不与现有 root 重复。新条目按仓库 policy 的字段顺序追加在末尾 |
+| `retire-entry` | `entryId` | 移除整条，不改用途重用 |
+
+变更集里的路径必须已是规范的 D 盘绝对路径：无相对段、无 `/`、无尾随分隔符。候选按仓库 policy 的书写格式序列化：`ConvertTo-Json -Depth 32` 两空格缩进、LF、末尾换行、UTF-8 无 BOM。现役文件不是这一格式时（`liveFormat.reserializesIdentically=false`，例如 CRLF），第一次 Apply 会顺带把它规范化。
+
+两种 Mode 持锁执行同一条检查链，括号里是对应的拒绝代码：
+
+1. 取锁，写面包屑。
+2. 检查 marker（`deployment-maintenance-marker-present`）。
+3. 用加载器读取并校验现役 policy（`live-policy-invalid`）。
+4. 生成候选（`change-set-invalid`）。Apply 时候选 SHA 必须等于批准值（`candidate-sha-mismatch`）。
+5. 把候选原始字节暂存在 policy 同目录的 `.codex-policy-maintenance-<guid>.tmp`，结束前删除。候选必须被加载器接受（`candidate-policy-invalid`），且按 `Get-CodexSafeTreeDeletePolicyStructureViolations` 不新增结构违例（`candidate-adds-structure-violations`）。现役已有的违例列入 `structure.liveViolations`，不阻止。
+6. 在途检查（`in-flight-check-failed`、`in-flight-records-blocking`），规则见下。
+7. DryRun 到此结束，输出 `ok=true` 与候选 SHA，不写 policy。Apply 用同目录临时文件原子替换：换名前复核现役字节未变，换名后复核候选 SHA（失败为 `policy-write-failed`）。成功时输出 `written=true` 与提示「policy 已对宿主立即生效，git 提交需另行完成」。
+8. 删除面包屑，释放锁。
+
+输出只有一行 ASCII-only JSON，`ok=false` 时 exit 1。字段有 `ok`、`mode`、`refusalReason`、`message`、`livePolicySha256`、`livePolicySchemaVersion`、`liveFormat`、`candidatePolicySha256`、`approvedCandidatePolicySha256`、`changes`、`entryCount`、`structure`、`inFlight`、`safeCleanupJob`、`written`、`notice`，超时另有 `holder`。输出只回显条目 id 与 operation id，不回显路径。
+
+在途检查在进程内调用 Status 的 candidate-policy preflight（暂存候选加候选 SHA），逐条读取 `policyCompatible` 与 `candidatePolicyCompatible`：
+
+- `policyCompatible=true` 且 `candidatePolicyCompatible=false` 的记录按 lifecycle 处理：
+  - `planned`：按 plan.json 的 `expiresAtUtc` 判断。未过期的阻止（`unexpired-plan`）；读不出过期时间的阻止（`plan-expiry-unreadable`）；已过期的只列入 `expiredPlans`，因为它不能再 Apply，变更后 Status 会把它报告为 `manual-review`。
+  - `recoverable`、`purge-resumable`：阻止（`resumable-transaction`）。
+  - `manual-review`、`inconsistent`：阻止（`manual-review-unconfirmed`），除非 operation id 列在 `-ConfirmManualReviewOperationIds` 中。已确认的列入 `confirmedManualReview`；找不到对应记录的确认列入 `unmatchedConfirmations`，不阻止。
+  - 其他 lifecycle：阻止（`policy-bound-record`）。
+- `policyCompatible=false` 的记录已绑定其他 policy 字节，只计入 `boundToOtherPolicyCount`。
+- 阻止项列在 `inFlight.blocking[{operationId, lifecycle, transactionStatus, reason}]`。
+- 不把 schema 2 transaction 重新解析成兼容。schema 4 policy 下 Apply 写的是 schema 2 transaction，所以任何变更都会阻止绑定现役 policy 的未过期 planned 与可恢复记录。
+
+preflight 看不到的两处只列出、不阻止：
+
+- **terminal 记录。** preflight 把 terminal 一律视为兼容。工具只检查未归档的 terminal：target 落在本次变更影响的路径内时（被移除、换 root 或改设置的条目 root，以及新增的 deny），用候选 policy 复核其 plan；不再解析的列入 `inFlight.terminalRecordsLosingResolution[{operationId, refusalReason}]`。变更后 Status 会把它们改报为 `manual-review`，所以 Apply 前先归档或接受这一结果。
+- **SafeCleanupJob 描述符。** 它不在工具视野内。`safeCleanupJob` 按 job 的 policy 比对口径（原有条目全部不变，新增条目不与 job 的 capability root 重叠）列出 `changedExistingEntryIds` 与 `addedEntryIds`。仍需要的 job 先完成 Verify，再 Apply。
+
+`-PolicyPathForTest/-EvidenceRootForTest/-MutexNameForTest/-MarkerPathForTest` 必须同时给出，`-StopAfterPhaseForTest` 与 `-GateWaitSecondsForTest` 只在这四个 seam 生效时可用。阶段序号是 10、20、30、40、50、60、65（换名前）和 70。这六个参数是该工具仅有的测试 seam，生产调用不传。回归套件 `tests\Test-CodexSafeTreeDeletePolicyMaintenance.ps1` 只在 fixture policy、evidence、mutex 与状态根上运行。
+
 ## 控制面与状态机
 
 1. `Status`：只读枚举 evidence run，重新验证 plan、transaction、当前 policy、目标与 quarantine
    namespace、tree manifest 和 journal，逐项输出 `planned`、`recoverable`、`purge-resumable`、
    `terminal` 或 `manual-review` 等 lifecycle 及允许的下一步。异常或不完整记录必须隔离为
    `manual-review`，不能让单个坏记录掩盖其他健康记录。库内 candidate-policy preflight 只接受
-   v5 与精确 approved SHA-256；生产 CLI 不接受 policy override，迁移仍须走受管激活流程。
+   v5 或与现役 policy 同 schema 的候选，且必须给出精确 approved SHA-256；同 schema 候选只由
+   policy 维护工具（#82）进程内调用。生产 CLI 不接受 policy override，schema 迁移仍须走受管激活
+   流程，同 schema 的条目与 deny 变更走 policy 维护工具。
 
    `complete` 是整次扫描的聚合：仅当没有任何未终结、不一致或未解析 residual 时才为 `true`。
    可信 Archive 让合格历史记录退出 `blockingRecords` 并标为 `lifecycle=terminal`，但不蕴含
