@@ -87,13 +87,15 @@ try {
     [void][IO.Directory]::CreateDirectory($strayDirectory)
     [IO.File]::Copy($purge.transactionPath, (Join-Path $strayDirectory 'transaction.json'))
 
-    # Stand-in for the gate shim: same calling convention (forwards its arguments), fixture
-    # policy and evidence. Its name must not match the deploy tool's legacy-caller drain.
+    # Stand-in for the gate shim: same calling convention (names its repository entry in
+    # $codexSafeTreeDeleteRepositoryEntry and forwards its arguments), fixture policy and
+    # evidence. Its name must not match the deploy tool's legacy-caller drain.
     $standIn = Join-Path $testRoot 'status-entry-standin.ps1'
     $standInText = @(
         '$ErrorActionPreference = ''Stop'''
-        ("& '{0}' @args -FixturePolicyPath '{1}' -FixtureEvidenceRoot '{2}'" -f @(
-            $fixtureEntry.Replace("'", "''"), $policyPath.Replace("'", "''"), $evidence.Replace("'", "''")))
+        ('$codexSafeTreeDeleteRepositoryEntry = ''{0}''' -f $fixtureEntry.Replace("'", "''"))
+        ("& `$codexSafeTreeDeleteRepositoryEntry @args -FixturePolicyPath '{0}' -FixtureEvidenceRoot '{1}'" -f @(
+            $policyPath.Replace("'", "''"), $evidence.Replace("'", "''")))
         'exit 0'
     ) -join "`n"
     [IO.File]::WriteAllText($standIn, $standInText, [Text.UTF8Encoding]::new($false))
@@ -151,10 +153,16 @@ try {
     }
     Assert-RealHistory ([bool]$report.historyScale.stable) 'Fixture history must stay stable during the run.'
 
-    $expectedItems = 'status-full-cold-start,reference-lookup-miss,batch-scan-direct,status-scope-1-target,status-scope-10-targets'
+    # The stand-in names the fixture entry, so the library it delegates to is this worktree's.
+    $libraryRoot = Join-Path $projectRoot 'scripts\lib'
+    Assert-RealHistory ($report.delegatedLibraryRoot -ceq $libraryRoot) 'Report must name the library the shim delegates to.'
+    Assert-RealHistory ($report.delegatedLibrarySha256 -ceq (Get-FileHash -LiteralPath (Join-Path $libraryRoot 'CodexSafeTreeDelete.ps1') -Algorithm SHA256).Hash) 'Report must fingerprint the delegated library.'
+    $expectedVariant = if ([Environment]::GetEnvironmentVariable('CODEX_SAFE_TREE_DELETE_PLAN_CSHARP_WALKER') -ceq '0') { 'base' } else { 'default' }
+
+    $expectedItems = 'status-full-cold-start,reference-lookup-miss,batch-scan-direct,status-scope-1-target,status-scope-10-targets,library-load-cold-start'
     Assert-RealHistory ((@($report.items | ForEach-Object { $_.id }) -join ',') -ceq $expectedItems) 'Unexpected measurement items.'
     $persisted = Get-Content -LiteralPath $measurementPath -Raw | ConvertFrom-Json -Depth 64
-    for ($itemIndex = 0; $itemIndex -lt 5; $itemIndex++) {
+    for ($itemIndex = 0; $itemIndex -lt $expectedItems.Split(',').Count; $itemIndex++) {
         $item = $report.items[$itemIndex]
         $samples = @($item.samples)
         Assert-RealHistory ($samples.Count -eq 3 -and (@($samples | ForEach-Object { $_.run }) -join ',') -ceq '1,2,3') "$($item.id) must keep three samples."
@@ -178,6 +186,17 @@ try {
                     $sample.excludedByPrefilter -eq 2 -and $sample.fallbackFiles -eq 1 -and
                     $sample.fullyAuthenticated -eq 1) ('Batch scan counters must reflect the prefilter: ' + ($sample | ConvertTo-Json -Compress))
                 Assert-RealHistory ($sample.scanElapsedMs -le $sample.wallMs) 'Scan time must nest inside the item wall time.'
+            } elseif ($item.id -ceq 'library-load-cold-start') {
+                # Since #86 every C# component of this library loads as one assembly, the shared
+                # native generation; the Plan walker is in it only in the default variant.
+                $components = @($sample.components)
+                Assert-RealHistory ($sample.exitCode -eq 0 -and $sample.nativeVariant -ceq $expectedVariant) 'Library load must report the native variant it loaded.'
+                Assert-RealHistory ($components.Count -eq 1 -and $components[0].phase -ceq 'native-generation' -and
+                    $components[0].statusFastScan -eq $true -and $components[0].planWalker -eq ($expectedVariant -ceq 'default') -and
+                    $components[0].typeCount -gt 0) ('Every C# component must load with the native generation: ' + ($components | ConvertTo-Json -Compress))
+                $phaseSum = [double]$sample.nativeGenerationLoadMs + [double]$sample.hostSafetyLibraryMs + [double]$sample.safeTreeDeleteLibraryMs
+                Assert-RealHistory ($sample.nativeGenerationLoadMs -gt 0 -and $sample.hostSafetyLibraryMs -gt 0 -and $sample.safeTreeDeleteLibraryMs -gt 0 -and
+                    $phaseSum -le [double]$sample.libraryLoadMs -and [double]$sample.libraryLoadMs -le [double]$sample.wallMs) 'Library load phases must nest inside the library load and the process wall time.'
             } else {
                 # Scope items (#80): history holds two targets and one unattributable top-level
                 # entry; targets beyond the two history ones are never-existing probe targets.

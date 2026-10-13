@@ -60,7 +60,7 @@ node .\scripts\Run-PowerShellTests.cjs --module host-safety --list
 - `Test-CodexSafeTreeDeleteFileSystem.ps1` 实卷段提权感知：非提权且无原生 FAT32/exFAT 卷自动记名 skip（`liveFsLeg=skipped-non-elevated`），提权/有原生卷走真实实卷断言。
 - 2026-09-01（#57）：safe-tree-delete issue/scale 套件的 ephemeral fixture、journal、work、livefail 与默认 benchmark live JSON 写到 gitignored `.scratch/safe-tree-delete-tests-*`。`reports/safe-tree-delete-issue*` 与冻结 benchmark 目录只作只读输入。
 - Phase3 leftover 根是 `D:\agents\run-evidence\safe-tree-delete`：目录存在则 `leftoverGuardMode=production-host` 并执行三断言；不存在则记名 skip `absent-environment`。
-- #75 真实历史档位 `Measure-CodexSafeTreeDeleteHistory.ps1 -RealHistory` 默认只读生产 evidence，并经生产 gate shim 跑 Status，只在与用户确认的安静窗口手动运行。`GITHUB_ACTIONS`/`CI` 为 `true` 时记名 skip `ci-environment`，evidence 根不存在时记名 skip `evidence-root-absent`；产物只写 `.scratch/safe-tree-delete-tests-real-history-*`。fixture 套件显式传入 fixture evidence 和替身 shim；新增测量项追加到脚本的 `$items` 列表。
+- #75 真实历史档位 `Measure-CodexSafeTreeDeleteHistory.ps1 -RealHistory` 默认只读生产 evidence，并经生产 gate shim 跑 Status，只在与用户确认的安静窗口手动运行。`GITHUB_ACTIONS`/`CI` 为 `true` 时记名 skip `ci-environment`，evidence 根不存在时记名 skip `evidence-root-absent`；产物只写 `.scratch/safe-tree-delete-tests-real-history-*`。fixture 套件显式传入 fixture evidence 和替身 shim；新增测量项追加到脚本的 `$items` 列表。`library-load-cold-start`（#86）在新进程里用 `-ColdStartProbe -LibraryRoot` 加载 shim 委托的仓库 lib（按 shim 的 `$codexSafeTreeDeleteRepositoryEntry` 推出，所以替身 shim 也要给出这个变量），不持 gate、不读 evidence；它分三段计时（native generation、`CodexHostSafety.ps1`、`CodexSafeTreeDelete.ps1`），并把每个 C# 组件程序集归到加载它的那一段。#86 之前 Status fast scan 是 `CodexSafeTreeDelete.ps1` 段里单独加载的程序集，没有自己的加载耗时，前后只能按段比较。
 
 ## 依赖方向
 

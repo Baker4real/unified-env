@@ -3,6 +3,8 @@ param(
     [Parameter(ParameterSetName = 'IsolatedFixture')][string]$OutputPath,
     [Parameter(ParameterSetName = 'IsolatedFixture')][ValidateRange(0, 10000)][int[]]$HistoryCounts = @(0, 100, 1000),
     [Parameter(ParameterSetName = 'IsolatedFixture')][switch]$ColdStartProbe,
+    # -ColdStartProbe only: the scripts\lib directory to load instead of this script's own.
+    [Parameter(ParameterSetName = 'IsolatedFixture')][string]$LibraryRoot,
     # Real-history profile (#75): read-only measurements against production evidence. Run it
     # only in a quiet window agreed with the user: Status samples hold the deployment gate.
     [Parameter(ParameterSetName = 'RealHistory', Mandatory)][switch]$RealHistory,
@@ -26,15 +28,60 @@ if ($RealHistory) {
         }
     }
 }
-$libraryPath = Join-Path $PSScriptRoot 'lib/CodexSafeTreeDelete.ps1'
-$loadWatch = [Diagnostics.Stopwatch]::StartNew()
-. (Join-Path $PSScriptRoot 'lib/CodexHostSafety.ps1')
-. $libraryPath
-$loadWatch.Stop()
+if (-not $ColdStartProbe -and $PSBoundParameters.ContainsKey('LibraryRoot')) { throw '-LibraryRoot applies only to -ColdStartProbe.' }
 if ($ColdStartProbe) {
-    [pscustomobject]@{ libraryLoadMs = $loadWatch.Elapsed.TotalMilliseconds } | ConvertTo-Json -Compress
+    # Cold-start probe, run in a fresh process (#86). It times the load of a library in three
+    # phases: the shared native generation through the library's own loader (what
+    # CodexHostSafety.ps1 does first; the library's later loader calls then hit the registry),
+    # CodexHostSafety.ps1, and CodexSafeTreeDelete.ps1. Each C# component assembly (one that
+    # defines types in the libraries' namespaces) is attributed to the phase that loaded it. A
+    # component loaded inside a library file, as the Status fast scan was before #86, has no
+    # load time of its own: it is part of that file's phase.
+    $probeRoot = if ([string]::IsNullOrWhiteSpace($LibraryRoot)) { Join-Path $PSScriptRoot 'lib' } else { $LibraryRoot }
+    $assembliesBefore = [AppDomain]::CurrentDomain.GetAssemblies()
+    $phaseMs = [ordered]@{}
+    $phaseAssemblies = [ordered]@{}
+    $libraryWatch = [Diagnostics.Stopwatch]::StartNew()
+    $phaseWatch = [Diagnostics.Stopwatch]::StartNew()
+    . (Join-Path $probeRoot 'CodexHostSafetyNativeLoader.ps1')
+    [void](Invoke-CodexHostSafetyNativeLoad -RequestedVariant (Get-CodexHostSafetyNativeRequestedVariant))
+    $phaseMs['native-generation'] = $phaseWatch.Elapsed.TotalMilliseconds
+    $phaseAssemblies['native-generation'] = [AppDomain]::CurrentDomain.GetAssemblies()
+    $phaseWatch.Restart()
+    . (Join-Path $probeRoot 'CodexHostSafety.ps1')
+    $phaseMs['host-safety-library'] = $phaseWatch.Elapsed.TotalMilliseconds
+    $phaseAssemblies['host-safety-library'] = [AppDomain]::CurrentDomain.GetAssemblies()
+    $phaseWatch.Restart()
+    . (Join-Path $probeRoot 'CodexSafeTreeDelete.ps1')
+    $phaseMs['safe-tree-delete-library'] = $phaseWatch.Elapsed.TotalMilliseconds
+    $libraryWatch.Stop()
+    $phaseAssemblies['safe-tree-delete-library'] = [AppDomain]::CurrentDomain.GetAssemblies()
+    $seenAssemblies = [Collections.Generic.HashSet[Reflection.Assembly]]::new([Reflection.Assembly[]]$assembliesBefore)
+    $components = foreach ($phase in $phaseAssemblies.Keys) {
+        foreach ($assembly in $phaseAssemblies[$phase]) {
+            if (-not $seenAssemblies.Add($assembly) -or $assembly.IsDynamic) { continue }
+            $types = try { $assembly.GetTypes() } catch [Reflection.ReflectionTypeLoadException] { @($_.Exception.Types | Where-Object { $null -ne $_ }) }
+            $componentTypes = @($types | Where-Object { $_.Namespace -ceq 'CodexSafeTreeDelete' -or $_.Namespace -ceq 'CodexHookGovernance' })
+            if ($componentTypes.Count -eq 0) { continue }
+            [ordered]@{
+                phase = $phase; typeCount = $componentTypes.Count
+                statusFastScan = $null -ne $assembly.GetType('CodexSafeTreeDelete.StatusScanCoordinator', $false)
+                planWalker = $null -ne $assembly.GetType('CodexSafeTreeDelete.PlanTreeSnapshotBuilder', $false)
+            }
+        }
+    }
+    [pscustomobject][ordered]@{
+        libraryLoadMs = $libraryWatch.Elapsed.TotalMilliseconds
+        nativeGenerationLoadMs = $phaseMs['native-generation']; hostSafetyLibraryMs = $phaseMs['host-safety-library']
+        safeTreeDeleteLibraryMs = $phaseMs['safe-tree-delete-library']
+        nativeVariant = [string](Get-CodexHostSafetyNativeLoaderRegistryState).loadedVariant
+        components = @($components)
+    } | ConvertTo-Json -Compress -Depth 4
     return
 }
+$libraryPath = Join-Path $PSScriptRoot 'lib/CodexSafeTreeDelete.ps1'
+. (Join-Path $PSScriptRoot 'lib/CodexHostSafety.ps1')
+. $libraryPath
 if ($HistoryCounts.Count -eq 0) { throw 'HistoryCounts must not be empty.' }
 for ($i = 1; $i -lt $HistoryCounts.Count; $i++) {
     if ($HistoryCounts[$i] -le $HistoryCounts[$i - 1]) { throw 'HistoryCounts must be strictly increasing.' }
@@ -79,16 +126,38 @@ function Get-RealHistoryScale([string]$Root) {
         metadataSha256 = Get-CodexHookTextSha256 -Text ($lines -join "`n")
     }
 }
-function Invoke-RealHistoryShimSample([string]$ShimArguments) {
-    # Literal parameter tokens keep the shim's @args forwarding identical to a real caller;
-    # the prelude makes the child's redirected stdout UTF-8.
-    $command = "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(`$false); & '{0}' {1}; exit `$LASTEXITCODE" -f $shimFull.Replace("'", "''"), $ShimArguments
+function Get-RealHistoryDelegatedLibraryRoot([string]$Shim) {
+    # The library the gate shim delegates to: scripts\lib under the project root of the
+    # repository entry the shim names in $codexSafeTreeDeleteRepositoryEntry. The production
+    # entry sits in scripts\ and the fixture entry in tests\, one level below that root.
+    $tokens = $null; $parseErrors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile($Shim, [ref]$tokens, [ref]$parseErrors)
+    $assignments = @($ast.FindAll({
+                param($node)
+                $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+                $node.Left.VariablePath.UserPath -ceq 'codexSafeTreeDeleteRepositoryEntry'
+            }, $true))
+    $entry = if ($assignments.Count -eq 1 -and $assignments[0].Right -is [Management.Automation.Language.CommandExpressionAst] -and
+        $assignments[0].Right.Expression -is [Management.Automation.Language.StringConstantExpressionAst]) {
+        $assignments[0].Right.Expression.Value
+    } else { $null }
+    if (@($parseErrors).Count -ne 0 -or [string]::IsNullOrEmpty($entry)) {
+        throw 'Gate shim must assign its repository entry once, as a string constant, to $codexSafeTreeDeleteRepositoryEntry.'
+    }
+    $entryFull = Assert-CodexHookDPath -Value $entry -Name 'gate shim repository entry'
+    $root = Join-Path (Split-Path -Parent (Split-Path -Parent $entryFull)) 'scripts\lib'
+    if (-not [IO.File]::Exists((Join-Path $root 'CodexSafeTreeDelete.ps1'))) { throw "Delegated library not found: $root" }
+    return $root
+}
+function Invoke-RealHistoryChildProcess([string[]]$ArgumentList) {
+    # Fresh pwsh child with redirected UTF-8 output; wall time from process start to exit.
     $startInfo = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
     $startInfo.UseShellExecute = $false; $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true; $startInfo.RedirectStandardError = $true
     $startInfo.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
     $startInfo.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
-    foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-Command', $command)) { [void]$startInfo.ArgumentList.Add($argument) }
+    foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive') + $ArgumentList) { [void]$startInfo.ArgumentList.Add($argument) }
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $process = [Diagnostics.Process]::Start($startInfo)
     try {
@@ -99,6 +168,28 @@ function Invoke-RealHistoryShimSample([string]$ShimArguments) {
             stdout = $stdoutTask.GetAwaiter().GetResult(); stderr = $stderrTask.GetAwaiter().GetResult()
         }
     } finally { $process.Dispose() }
+}
+function Invoke-RealHistoryShimSample([string]$ShimArguments) {
+    # Literal parameter tokens keep the shim's @args forwarding identical to a real caller;
+    # the prelude makes the child's redirected stdout UTF-8.
+    $command = "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(`$false); & '{0}' {1}; exit `$LASTEXITCODE" -f $shimFull.Replace("'", "''"), $ShimArguments
+    Invoke-RealHistoryChildProcess -ArgumentList @('-Command', $command)
+}
+function Invoke-RealHistoryLibraryLoadSample {
+    # #86: this script's cold-start probe in a fresh process, against the delegated library.
+    $sample = Invoke-RealHistoryChildProcess -ArgumentList @('-File', $PSCommandPath, '-ColdStartProbe', '-LibraryRoot', $delegatedLibraryRoot)
+    $lastLine = @($sample.stdout -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -Last 1)
+    $probe = $null
+    if ($lastLine.Count -eq 1) { try { $probe = $lastLine[0] | ConvertFrom-Json -Depth 8 } catch { $probe = $null } }
+    if ($sample.exitCode -ne 0 -or $null -eq $probe -or $null -eq $probe.PSObject.Properties['libraryLoadMs']) {
+        throw ('Library load sample failed: exit {0}; stderr: {1}' -f $sample.exitCode, $sample.stderr)
+    }
+    [ordered]@{
+        wallMs = $sample.wallMs; exitCode = $sample.exitCode
+        libraryLoadMs = $probe.libraryLoadMs; nativeGenerationLoadMs = $probe.nativeGenerationLoadMs
+        hostSafetyLibraryMs = $probe.hostSafetyLibraryMs; safeTreeDeleteLibraryMs = $probe.safeTreeDeleteLibraryMs
+        nativeVariant = $probe.nativeVariant; components = @($probe.components)
+    }
 }
 function ConvertFrom-RealHistoryStatusSample([object]$Sample) {
     $lastLine = @($Sample.stdout -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -Last 1)
@@ -140,6 +231,7 @@ if ($RealHistory) {
     $evidenceFull = Assert-CodexHookDPath -Value $EvidenceRoot -Name 'real-history evidence root'
     $shimFull = Assert-CodexHookDPath -Value $ShimPath -Name 'real-history gate shim'
     if (-not [IO.File]::Exists($shimFull)) { throw "Gate shim not found: $shimFull" }
+    $delegatedLibraryRoot = Get-RealHistoryDelegatedLibraryRoot $shimFull
     # The lookup probe target lives in this run directory and never exists, so it is absent
     # from history; its policy is generated here and never carries production policy values.
     $lookupTarget = Join-Path $runRoot 'lookup-probe-target'
@@ -220,6 +312,11 @@ if ($RealHistory) {
             boundary = 'as status-full-cold-start, with -TargetPaths holding ten targets joined by :: (the latest distinct targetPaths in history, padded with never-existing probe targets): scope prefilter, Status for in-scope and unattributable records, JSON output'
             measure = { Invoke-RealHistoryScopeSample -TargetCount 10 }
         }
+        [pscustomobject]@{
+            id = 'library-load-cold-start'
+            boundary = 'fresh pwsh running this script with -ColdStartProbe against the library the gate shim delegates to (delegatedLibraryRoot); no gate held, no evidence read: wall from process start to exit; in-process phases: the shared native generation through the library''s own loader, then CodexHostSafety.ps1, then CodexSafeTreeDelete.ps1; components lists each C# component assembly with the phase that loaded it (#86)'
+            measure = { Invoke-RealHistoryLibraryLoadSample }
+        }
     )
     $killSwitches = [ordered]@{}
     foreach ($name in @([Environment]::GetEnvironmentVariables().Keys | Where-Object { $_ -like 'CODEX_SAFE_TREE_DELETE_*' } | Sort-Object)) {
@@ -244,11 +341,13 @@ if ($RealHistory) {
         evidenceRoot = $evidenceFull; shimPath = $shimFull
         shimSha256 = (Get-FileHash -LiteralPath $shimFull -Algorithm SHA256).Hash
         sourceLibrarySha256 = (Get-FileHash -LiteralPath $libraryPath -Algorithm SHA256).Hash
+        delegatedLibraryRoot = $delegatedLibraryRoot
+        delegatedLibrarySha256 = (Get-FileHash -LiteralPath (Join-Path $delegatedLibraryRoot 'CodexSafeTreeDelete.ps1') -Algorithm SHA256).Hash
         powerShellVersion = $PSVersionTable.PSVersion.ToString(); killSwitchEnvironment = $killSwitches
         repetitions = $repetitions
         historyScale = [ordered]@{ before = $scaleBefore; after = $scaleAfter; stable = $stable }
         items = @($itemResults)
-        unmeasured = @('OS file cache state (not controlled; sample 1 may be cold)', 'gate wait apart from Status work (both inside the Status wall time)', 'BatchPurge work other than the history lookup (per-target reference lookup or one batch scan)')
+        unmeasured = @('OS file cache state (not controlled; sample 1 may be cold)', 'gate wait apart from Status work (both inside the Status wall time)', 'BatchPurge work other than the history lookup (per-target reference lookup or one batch scan)', 'load time of one C# source inside an assembly, and of a component assembly loaded inside a library file (before #86 the Status fast scan, inside the CodexSafeTreeDelete.ps1 phase)')
     }
     $outputFull = Join-Path $runRoot 'measurement.json'
     [void](Set-CodexHookCapabilityJson -Path $outputFull -Document $report -CapabilityRoot $runRoot -AllowedExactPaths @($outputFull) -Scope 'real-history benchmark report')
