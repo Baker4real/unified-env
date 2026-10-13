@@ -668,7 +668,8 @@ function Get-CodexSafeTreeDeletePolicyEntryOwner {
 function Get-CodexSafeTreeDeleteLintEvidenceLayout {
     # 只读枚举已校验的 evidence 根：不读文件内容，不跟随 reparse point（计入非 run 顶层目录，但不进入）。
     # run 目录：顶层、非 reparse、名字为 producer run id（UTC 时间戳-generationId）的目录。
-    # 规范位置：<evidence 根>\<顶层目录>\transaction.json，与 BatchPurge historyScan.canonicalFiles 同口径；
+    # 规范位置：<evidence 根>\<顶层目录>\transaction.json，与 BatchPurge 历史扫描 C# 预筛的规范位置同口径
+    # （预筛的 historyScan.canonicalFiles 另要求 producer 规范形态且读取、解析成功）；
     # 其余位置的 transaction.json 计入非规范，位置按「最近的 run 祖先」描述，不回显非 run 目录名。
     param([Parameter(Mandatory)][string]$FullEvidenceRoot)
 
