@@ -1,0 +1,177 @@
+[CmdletBinding()]
+param()
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# #75 real-history profile, exercised only against fixture evidence and a stand-in for the
+# gate shim. Every invocation passes -EvidenceRoot and -ShimPath explicitly, so this suite
+# never reads production evidence or runs the production shim, even on the host.
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$benchmark = Join-Path $projectRoot 'scripts/Measure-CodexSafeTreeDeleteHistory.ps1'
+$fixtureEntry = Join-Path $PSScriptRoot 'Invoke-CodexSafeTreeDeleteFixture.ps1'
+. (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
+
+function Assert-RealHistory([bool]$Condition, [string]$Message) {
+    if (-not $Condition) { throw $Message }
+}
+
+function Get-TreeManifest([string]$Root) {
+    # Names, sizes, content hashes and write times of every entry: any write shows up.
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add(('root|{0}' -f [IO.Directory]::GetLastWriteTimeUtc($Root).Ticks))
+    foreach ($entry in [IO.DirectoryInfo]::new($Root).EnumerateFileSystemInfos('*', [IO.SearchOption]::AllDirectories)) {
+        $entry.Refresh() # listings carry lazily updated copies of sizes and times
+        $relative = [IO.Path]::GetRelativePath($Root, $entry.FullName)
+        if ($entry -is [IO.DirectoryInfo]) {
+            $lines.Add(('d|{0}|{1}' -f $relative, $entry.LastWriteTimeUtc.Ticks))
+        } else {
+            $hash = (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash
+            $lines.Add(('f|{0}|{1}|{2}|{3}' -f $relative, $entry.Length, $entry.LastWriteTimeUtc.Ticks, $hash))
+        }
+    }
+    $lines.Sort([StringComparer]::Ordinal)
+    return ($lines -join "`n")
+}
+
+$scratchBase = Join-Path $projectRoot '.scratch'
+function Get-ScratchEntryNames {
+    return @([IO.Directory]::EnumerateFileSystemEntries($scratchBase) | ForEach-Object { [IO.Path]::GetFileName($_) })
+}
+
+function Get-WorktreeChanges {
+    # Tracked and untracked non-ignored paths: a write outside gitignored scratch shows up here.
+    $lines = @(& git --no-optional-locks -C $projectRoot status --porcelain=v1 --untracked-files=all)
+    if ($LASTEXITCODE -ne 0) { throw 'git status failed.' }
+    return ($lines -join "`n")
+}
+
+function Set-CiVariables([string]$GitHubActions, [string]$Ci) {
+    [Environment]::SetEnvironmentVariable('GITHUB_ACTIONS', $GitHubActions)
+    [Environment]::SetEnvironmentVariable('CI', $Ci)
+}
+
+$savedGitHubActions = [Environment]::GetEnvironmentVariable('GITHUB_ACTIONS')
+$savedCi = [Environment]::GetEnvironmentVariable('CI')
+try {
+    # Fixture evidence: one purged and one quarantined operation produced by the real flows.
+    $testRoot = New-CodexSafeTreeDeleteTestScratchRoot -ProjectRoot $projectRoot -SuiteName 'RealHistoryBenchmark'
+    $evidence = Join-Path $testRoot 'evidence'
+    $policyPath = Join-Path $testRoot 'policy.json'
+    $targets = @((Join-Path $testRoot 'targets\purged'), (Join-Path $testRoot 'targets\quarantined'))
+    [void][IO.Directory]::CreateDirectory($evidence)
+    $entries = foreach ($index in 0..1) {
+        [void][IO.Directory]::CreateDirectory($targets[$index])
+        [IO.File]::WriteAllBytes((Join-Path $targets[$index] 'payload.bin'), [byte[]]::new(512))
+        [ordered]@{
+            id = "real-history-fixture-$index"; capabilityRoot = $targets[$index]; minimumDescendantDepth = 0
+            rootDeletionPurpose = 'rebuildable-build-output'; allowHardLinks = $false
+            allowInternalDirectoryJunctions = $false; minimumQuarantineAgeMinutes = 0
+            producerFenceMode = 'os-handle-required'; deniedExactPaths = @()
+        }
+    }
+    $policyJson = [ordered]@{
+        artifactType = 'env-governance.codex-safe-tree-delete-policy'; schemaVersion = 5; entries = @($entries)
+    } | ConvertTo-Json -Depth 8
+    [IO.File]::WriteAllText($policyPath, $policyJson, [Text.UTF8Encoding]::new($false))
+    $common = @{ FixturePolicyPath = $policyPath; FixtureEvidenceRoot = $evidence }
+    $expectedPlanBytes = 0L
+    $applies = foreach ($target in $targets) {
+        $plan = & $fixtureEntry -Mode Plan -TargetPath $target -CapabilityRoot $target @common
+        $expectedPlanBytes += ([IO.FileInfo]::new($plan.planPath)).Length
+        & $fixtureEntry -Mode Apply -PlanPath $plan.planPath -ApprovedPlanSha256 $plan.planSha256 -ConfirmApply @common
+    }
+    $purge = & $fixtureEntry -Mode Purge -TransactionPath $applies[0].transactionPath -ApprovedTransactionSha256 $applies[0].transactionSha256 -ConfirmPurge @common
+    Assert-RealHistory ([bool]$purge.purged -and [bool]$applies[1].quarantined) 'Fixture history must hold one purged and one quarantined operation.'
+    # Production history also has non-run top-level directories holding stray transactions.
+    $strayDirectory = Join-Path $evidence 'legacy-layout\nested'
+    [void][IO.Directory]::CreateDirectory($strayDirectory)
+    [IO.File]::Copy($purge.transactionPath, (Join-Path $strayDirectory 'transaction.json'))
+
+    # Stand-in for the gate shim: same calling convention (forwards its arguments), fixture
+    # policy and evidence. Its name must not match the deploy tool's legacy-caller drain.
+    $standIn = Join-Path $testRoot 'status-entry-standin.ps1'
+    $standInText = @(
+        '$ErrorActionPreference = ''Stop'''
+        ("& '{0}' @args -FixturePolicyPath '{1}' -FixtureEvidenceRoot '{2}'" -f @(
+            $fixtureEntry.Replace("'", "''"), $policyPath.Replace("'", "''"), $evidence.Replace("'", "''")))
+        'exit 0'
+    ) -join "`n"
+    [IO.File]::WriteAllText($standIn, $standInText, [Text.UTF8Encoding]::new($false))
+    $absentEvidence = Join-Path $testRoot 'absent-evidence'
+
+    $evidenceBefore = Get-TreeManifest $evidence
+    $scratchBefore = Get-ScratchEntryNames
+    $worktreeBefore = Get-WorktreeChanges
+
+    # The real-history profile owns its output location; isolated-fixture options are rejected.
+    $mixedRejected = $false
+    try {
+        & $benchmark -RealHistory -EvidenceRoot $absentEvidence -ShimPath $standIn -OutputPath (Join-Path $testRoot 'mixed.json') | Out-Null
+    } catch { $mixedRejected = $true }
+    Assert-RealHistory $mixedRejected 'RealHistory must not accept -OutputPath.'
+
+    # CI never runs the profile, even where evidence exists.
+    foreach ($ciCase in @(@('true', $null), @($null, 'true'))) {
+        Set-CiVariables -GitHubActions $ciCase[0] -Ci $ciCase[1]
+        $skip = & $benchmark -RealHistory -EvidenceRoot $evidence -ShimPath $standIn
+        Assert-RealHistory ($skip.profile -ceq 'real-history' -and $skip.skipped -and $skip.skipReason -ceq 'ci-environment') 'CI must skip the real-history profile by name.'
+    }
+
+    # Named skip when the evidence root is absent; the profile must not create it.
+    Set-CiVariables -GitHubActions $null -Ci $null
+    $skip = & $benchmark -RealHistory -EvidenceRoot $absentEvidence -ShimPath $standIn
+    Assert-RealHistory ($skip.skipped -and $skip.skipReason -ceq 'evidence-root-absent') 'Absent evidence must skip the real-history profile by name.'
+    Assert-RealHistory (-not [IO.Directory]::Exists($absentEvidence)) 'Skip must not create the evidence root.'
+    Assert-RealHistory ((Get-TreeManifest $evidence) -ceq $evidenceBefore) 'Skips must not touch evidence.'
+    Assert-RealHistory (@(Compare-Object $scratchBefore (Get-ScratchEntryNames)).Count -eq 0) 'Skips must not write artifacts.'
+    Assert-RealHistory ((Get-WorktreeChanges) -ceq $worktreeBefore) 'Skips must not write into the worktree.'
+
+    $report = & $benchmark -RealHistory -EvidenceRoot $evidence -ShimPath $standIn
+    Assert-RealHistory ((Get-TreeManifest $evidence) -ceq $evidenceBefore) 'Real-history profile must leave evidence byte-for-byte unchanged.'
+    Assert-RealHistory ($report.ok -and -not $report.skipped -and $report.profile -ceq 'real-history') 'Real-history profile must complete against fixture evidence.'
+    Assert-RealHistory ($report.thresholdPolicy -ceq 'record-only') 'Timing must never decide correctness.'
+
+    # Artifacts: exactly one new gitignored run directory under .scratch, holding only the
+    # probe policy and the report.
+    $newScratch = @(Get-ScratchEntryNames | Where-Object { $_ -notin $scratchBefore })
+    Assert-RealHistory ($newScratch.Count -eq 1 -and $newScratch[0] -cmatch '^safe-tree-delete-tests-real-history-[0-9a-f]{32}$') 'Profile must write one scratch run directory.'
+    $runRoot = Join-Path $scratchBase $newScratch[0]
+    Assert-RealHistory ($report.runRoot -ceq $runRoot) 'Report must name its run directory.'
+    $runFiles = @(Get-ChildItem -LiteralPath $runRoot -Recurse -Force | ForEach-Object { [IO.Path]::GetRelativePath($runRoot, $_.FullName) } | Sort-Object)
+    Assert-RealHistory (($runFiles -join '|') -ceq 'lookup-probe-policy.json|measurement.json') ('Unexpected run artifacts: ' + ($runFiles -join '|'))
+    $measurementPath = Join-Path $runRoot 'measurement.json'
+    & git -C $projectRoot check-ignore -q -- $measurementPath
+    Assert-RealHistory ($LASTEXITCODE -eq 0) 'Run artifacts must be gitignored.'
+    Assert-RealHistory ((Get-WorktreeChanges) -ceq $worktreeBefore) 'Real-history profile must not write outside gitignored scratch.'
+
+    foreach ($phase in @('before', 'after')) {
+        $scale = $report.historyScale.$phase
+        Assert-RealHistory ($scale.runCount -eq 2 -and $scale.nonRunTopLevelEntries -eq 1 -and $scale.transactionCount -eq 3) "History scale $phase must count runs and transactions."
+        Assert-RealHistory ($scale.planTotalBytes -eq $expectedPlanBytes) "History scale $phase must sum plan bytes."
+    }
+    Assert-RealHistory ([bool]$report.historyScale.stable) 'Fixture history must stay stable during the run.'
+
+    Assert-RealHistory ((@($report.items | ForEach-Object { $_.id }) -join ',') -ceq 'status-full-cold-start,reference-lookup-miss') 'Unexpected measurement items.'
+    $persisted = Get-Content -LiteralPath $measurementPath -Raw | ConvertFrom-Json -Depth 64
+    for ($itemIndex = 0; $itemIndex -lt 2; $itemIndex++) {
+        $item = $report.items[$itemIndex]
+        $samples = @($item.samples)
+        Assert-RealHistory ($samples.Count -eq 3 -and (@($samples | ForEach-Object { $_.run }) -join ',') -ceq '1,2,3') "$($item.id) must keep three samples."
+        $persistedSamples = @($persisted.items[$itemIndex].samples)
+        Assert-RealHistory ($persistedSamples.Count -eq 3) "$($item.id) must persist three samples."
+        for ($run = 0; $run -lt 3; $run++) {
+            $sample = $samples[$run]
+            Assert-RealHistory ($sample.wallMs -gt 0) "$($item.id) sample must record a raw wall time."
+            Assert-RealHistory ([math]::Abs([double]$persistedSamples[$run].wallMs - [double]$sample.wallMs) -lt 0.001) "$($item.id) must persist raw values."
+            if ($item.id -ceq 'status-full-cold-start') {
+                Assert-RealHistory ($sample.exitCode -eq 0 -and $sample.operationCount -eq 3) 'Status sample must cover the whole fixture history.'
+                Assert-RealHistory ($sample.statusElapsedMs -le $sample.wallMs) 'Status time must nest inside process wall time.'
+            } else {
+                Assert-RealHistory ($sample.found -eq $false) 'Reference lookup must miss.'
+            }
+        }
+    }
+    [pscustomobject]@{ ok = $true; suite = 'CodexSafeTreeDeleteRealHistoryBenchmark'; evidence = $measurementPath }
+} finally {
+    Set-CiVariables -GitHubActions $savedGitHubActions -Ci $savedCi
+}
