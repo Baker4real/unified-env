@@ -2279,10 +2279,7 @@ namespace CodexSafeTreeDelete
             // ACL 目标校验都在其中；#86 起它与本文件编译进同一程序集），再按
             // Read-CodexHookSafeUtf8FileSnapshot 的规则做严格 UTF-8 解码（可带 BOM）。
             byte[] bytes = CodexHookGovernance.HandleBoundFileReader.ReadAllBytes(fullPath).Bytes;
-            UTF8Encoding utf8 = new UTF8Encoding(false, true);
-            bool hasBom = bytes.Length >= 3 &&
-                bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2] == 0xbf;
-            string text = hasBom ? utf8.GetString(bytes, 3, bytes.Length - 3) : utf8.GetString(bytes);
+            string text = DecodeStrictUtf8(bytes);
 
             // 解析：严格 JSON 之后参考链还要过 ConvertFrom-Json -Depth 32；深度阈值与 Status
             // 归档快路径相同，留出余量。
@@ -2465,10 +2462,7 @@ namespace CodexSafeTreeDelete
             string text;
             try
             {
-                UTF8Encoding utf8 = new UTF8Encoding(false, true);
-                bool hasBom = bytes.Length >= 3 &&
-                    bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2] == 0xbf;
-                text = hasBom ? utf8.GetString(bytes, 3, bytes.Length - 3) : utf8.GetString(bytes);
+                text = DecodeStrictUtf8(bytes);
             }
             catch (Exception ex)
             {
@@ -2495,6 +2489,16 @@ namespace CodexSafeTreeDelete
                 metrics.PlanTransactionReadMs += readWatch.ElapsedMilliseconds;
             }
             return snapshot;
+        }
+
+        // Read-CodexHookSafeUtf8FileSnapshot 的解码规则：严格 UTF-8（非法序列抛 DecoderFallbackException），
+        // 可带 BOM。Status 快照读取与 BatchPurge 历史预筛共用。
+        private static string DecodeStrictUtf8(byte[] bytes)
+        {
+            UTF8Encoding utf8 = new UTF8Encoding(false, true);
+            bool hasBom = bytes.Length >= 3 &&
+                bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2] == 0xbf;
+            return hasBom ? utf8.GetString(bytes, 3, bytes.Length - 3) : utf8.GetString(bytes);
         }
 
         private static JsonDocument ParseJsonDocument(string text)
