@@ -469,7 +469,6 @@
         "fixture": {
           "powershell": [
             "tests/Test-CodexSafeTreeDelete.ps1",
-            "tests/Test-HostDiagnostics.ps1",
             "tests/Test-SafeCleanupJob.ps1",
             "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeleteBenchmark.ps1",
