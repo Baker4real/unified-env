@@ -151,9 +151,10 @@ try {
     }
     Assert-RealHistory ([bool]$report.historyScale.stable) 'Fixture history must stay stable during the run.'
 
-    Assert-RealHistory ((@($report.items | ForEach-Object { $_.id }) -join ',') -ceq 'status-full-cold-start,reference-lookup-miss,batch-scan-direct') 'Unexpected measurement items.'
+    $expectedItems = 'status-full-cold-start,reference-lookup-miss,batch-scan-direct,status-scope-1-target,status-scope-10-targets'
+    Assert-RealHistory ((@($report.items | ForEach-Object { $_.id }) -join ',') -ceq $expectedItems) 'Unexpected measurement items.'
     $persisted = Get-Content -LiteralPath $measurementPath -Raw | ConvertFrom-Json -Depth 64
-    for ($itemIndex = 0; $itemIndex -lt 3; $itemIndex++) {
+    for ($itemIndex = 0; $itemIndex -lt 5; $itemIndex++) {
         $item = $report.items[$itemIndex]
         $samples = @($item.samples)
         Assert-RealHistory ($samples.Count -eq 3 -and (@($samples | ForEach-Object { $_.run }) -join ',') -ceq '1,2,3') "$($item.id) must keep three samples."
@@ -168,7 +169,7 @@ try {
                 Assert-RealHistory ($sample.statusElapsedMs -le $sample.wallMs) 'Status time must nest inside process wall time.'
             } elseif ($item.id -ceq 'reference-lookup-miss') {
                 Assert-RealHistory ($sample.found -eq $false) 'Reference lookup must miss.'
-            } else {
+            } elseif ($item.id -ceq 'batch-scan-direct') {
                 # Both producer runs sit at canonical locations and match no probe target (one
                 # terminal, one live for another target): the prefilter excludes them. The stray
                 # copy is at a non-canonical location and falls back to reference authentication.
@@ -177,6 +178,16 @@ try {
                     $sample.excludedByPrefilter -eq 2 -and $sample.fallbackFiles -eq 1 -and
                     $sample.fullyAuthenticated -eq 1) ('Batch scan counters must reflect the prefilter: ' + ($sample | ConvertTo-Json -Compress))
                 Assert-RealHistory ($sample.scanElapsedMs -le $sample.wallMs) 'Scan time must nest inside the item wall time.'
+            } else {
+                # Scope items (#80): history holds two targets and one unattributable top-level
+                # entry; targets beyond the two history ones are never-existing probe targets.
+                $expectedTargets = if ($item.id -ceq 'status-scope-1-target') { 1 } else { 10 }
+                $expectedHistoryTargets = [Math]::Min($expectedTargets, 2)
+                Assert-RealHistory ($sample.exitCode -eq 0 -and $sample.targetCount -eq $expectedTargets -and
+                    $sample.historyTargets -eq $expectedHistoryTargets) "$($item.id) must query $expectedTargets targets, $expectedHistoryTargets of them from history."
+                Assert-RealHistory ($sample.matchedRecords -eq $expectedHistoryTargets -and $sample.unattributableRecords -eq 1 -and
+                    $sample.operationCount -eq $expectedHistoryTargets + 1) "$($item.id) must match each history target's record and keep the unattributable entry."
+                Assert-RealHistory ($sample.statusElapsedMs -le $sample.wallMs) 'Status time must nest inside process wall time.'
             }
         }
     }

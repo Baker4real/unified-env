@@ -1358,7 +1358,7 @@ try {
         $fastOperation = Get-MedOperation -Status $medFastStatus -OperationId $operationId
         $slowOperation = Get-MedOperation -Status $medSlowStatus -OperationId $operationId
         Assert-True ($fastOperation -ceq $slowOperation) `
-            "$operationId 嵌套非 canonical 属性必须与参考路径逐字节一致。"
+            "$operationId 嵌套非 canonical 属性必须与参考路径逐字节一致。`nfast=$fastOperation`nslow=$slowOperation"
         $caseVariantOperation = ConvertFrom-Json $slowOperation
         Assert-True ($caseVariantOperation.lifecycle -ceq 'manual-review' -and
             @($caseVariantOperation.errors)[0] -ceq 'safe-delete Status planned tree manifest 漂移。') `
@@ -1851,7 +1851,8 @@ try {
         [long]$n3Status.metrics.entriesScanned -eq [long]$n3SerialStatus.metrics.entriesScanned) `
         'receipt 快路径必须保持 metrics 计数与串行参考一致。'
     if ([int]$n3Status.statusSegments.fastScanDop -ge 2) {
-        Assert-True ([long]$n3Status.statusSegments.parallelFallbackResolved -eq 8L -and
+        # record A（namespace-entry-type-other）在 receipt 签发前回退、没有路由键，留在串行尾段解析，不进并行池。
+        Assert-True ([long]$n3Status.statusSegments.parallelFallbackResolved -eq 7L -and
             [long]$n3Status.statusSegments.fastScanFallback -eq 8L) `
             '本 fixture 全部 8 个 op 都必须经 fallback 解析。'
         Assert-True ([long]$n3Status.statusSegments.parallelFallbackReceiptFastResolved -eq 6L) `

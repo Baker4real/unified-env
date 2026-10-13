@@ -111,6 +111,30 @@ function ConvertFrom-RealHistoryStatusSample([object]$Sample) {
     }
     return $status
 }
+function Invoke-RealHistoryScopeSample([int]$TargetCount) {
+    # Scope query (#80): the latest distinct targets of the last status-full-cold-start sample,
+    # padded with never-existing probe targets in this run directory when history holds fewer.
+    $targets = [Collections.Generic.List[string]]::new()
+    foreach ($target in @($script:scopeHistoryTargets | Select-Object -First $TargetCount)) { $targets.Add($target) }
+    $historyTargets = $targets.Count
+    for ($probe = 0; $targets.Count -lt $TargetCount; $probe++) {
+        $targets.Add((Join-Path $runRoot ('scope-probe-target-{0}' -f $probe)))
+    }
+    $sample = Invoke-RealHistoryShimSample -ShimArguments ("-Mode Status -Json -TargetPaths '{0}'" -f ($targets -join '::').Replace("'", "''"))
+    $status = ConvertFrom-RealHistoryStatusSample $sample
+    if ($null -eq $status.PSObject.Properties['scope'] -or @($status.scope.targets).Count -ne $TargetCount) {
+        throw ('Scope Status sample must report {0} targets.' -f $TargetCount)
+    }
+    [ordered]@{
+        wallMs = $sample.wallMs; exitCode = $sample.exitCode
+        stdoutBytes = [Text.Encoding]::UTF8.GetByteCount($sample.stdout)
+        statusElapsedMs = [long]$status.metrics.elapsedMs
+        operationCount = @($status.operations).Count; complete = [bool]$status.complete
+        targetCount = $TargetCount; historyTargets = $historyTargets
+        matchedRecords = [long]$status.scope.matchedRecords
+        unattributableRecords = [long]$status.scope.unattributableRecords
+    }
+}
 
 if ($RealHistory) {
     $evidenceFull = Assert-CodexHookDPath -Value $EvidenceRoot -Name 'real-history evidence root'
@@ -133,6 +157,8 @@ if ($RealHistory) {
     # entry: id, what its wall time covers, and a scriptblock returning one sample as an
     # ordered dictionary with wallMs plus any item-specific raw fields.
     $repetitions = 3
+    # Latest distinct targetPaths of the last full Status sample; the scope items query them.
+    $scopeHistoryTargets = @()
     $items = @(
         [pscustomobject]@{
             id = 'status-full-cold-start'
@@ -140,6 +166,12 @@ if ($RealHistory) {
             measure = {
                 $sample = Invoke-RealHistoryShimSample -ShimArguments '-Mode Status -Json'
                 $status = ConvertFrom-RealHistoryStatusSample $sample
+                $operations = @($status.operations)
+                $seenTargets = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                $script:scopeHistoryTargets = @(for ($index = $operations.Count - 1; $index -ge 0; $index--) {
+                        $targetPath = [string]$operations[$index].targetPath
+                        if (-not [string]::IsNullOrEmpty($targetPath) -and $seenTargets.Add($targetPath)) { $targetPath }
+                    })
                 [ordered]@{
                     wallMs = $sample.wallMs; exitCode = $sample.exitCode
                     stdoutBytes = [Text.Encoding]::UTF8.GetByteCount($sample.stdout)
@@ -176,6 +208,17 @@ if ($RealHistory) {
                     fullyAuthenticated = [long]$scanMetrics.fullyAuthenticated; scanElapsedMs = [long]$scanMetrics.elapsedMs
                 }
             }
+        }
+        # Scope items (#80) must follow status-full-cold-start: they take its latest targets.
+        [pscustomobject]@{
+            id = 'status-scope-1-target'
+            boundary = 'as status-full-cold-start, with -TargetPaths holding one target (the latest targetPath in history, else a never-existing probe target): scope prefilter, Status for in-scope and unattributable records, JSON output'
+            measure = { Invoke-RealHistoryScopeSample -TargetCount 1 }
+        }
+        [pscustomobject]@{
+            id = 'status-scope-10-targets'
+            boundary = 'as status-full-cold-start, with -TargetPaths holding ten targets joined by :: (the latest distinct targetPaths in history, padded with never-existing probe targets): scope prefilter, Status for in-scope and unattributable records, JSON output'
+            measure = { Invoke-RealHistoryScopeSample -TargetCount 10 }
         }
     )
     $killSwitches = [ordered]@{}
