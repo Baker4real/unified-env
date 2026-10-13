@@ -86,6 +86,9 @@ SHA256_HEX = re.compile(r"^[0-9a-fA-F]{64}$")
 ASCII_DISPLAY_NAME = re.compile(r"^[\x20-\x7e]+$")
 CJK_TEXT = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 LATIN_TEXT = re.compile(r"[A-Za-z]")
+# C0 controls except tab/LF/CR; e.g. a non-raw "D:\agents" literal yields BEL.
+SOURCE_RECORD_FORBIDDEN_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+DRIVE_ABSOLUTE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 
 
 class UniqueSafeLoader(yaml.SafeLoader):
@@ -612,15 +615,63 @@ def validate_chinese_display_metadata(skill_dir: Path, *, label: str) -> None:
             raise InstallError(f"{label} agents/openai.yaml interface.{field} 必须以中文为主体：{path}")
 
 
-def current_source_record(path: Path) -> CurrentSourceRecord:
+def read_source_text(path: Path) -> str:
     path = d_path(path, label="SOURCE.md", must_exist=True)
     if is_reparse(path) or not path.is_file():
         raise InstallError(f"SOURCE.md 必须是安全的普通文件：{path}")
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        return path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError) as exc:
         raise InstallError(f"无法读取 SOURCE.md：{path}：{exc}") from exc
-    record = parse_current_source_record(text)
+
+
+def reject_source_control_characters(text: str, *, label: str) -> None:
+    locations = []
+    for match in SOURCE_RECORD_FORBIDDEN_CONTROL.finditer(text):
+        line_number = text.count("\n", 0, match.start()) + 1
+        locations.append(f"第 {line_number} 行 U+{ord(match.group()):04X}")
+    if locations:
+        shown = "、".join(locations[:10])
+        more = f" 等 {len(locations)} 处" if len(locations) > 10 else ""
+        raise InstallError(
+            f"{label} 含有 TAB/LF/CR 以外的 C0 控制字符：{shown}{more}"
+        )
+
+
+def same_filesystem_location(recorded: str, actual: Path) -> bool:
+    expected = os.path.normcase(os.path.normpath(actual))
+    if os.path.normcase(os.path.normpath(recorded)) == expected:
+        return True
+    # Resolve only local drive paths, so a junction alias such as the legacy
+    # D:\Codex\.codex\skills root matches while UNC/device paths never trigger
+    # a remote lookup.
+    if not DRIVE_ABSOLUTE_PATH.match(recorded):
+        return False
+    try:
+        return os.path.normcase(os.path.realpath(recorded)) == os.path.normcase(
+            os.path.realpath(actual)
+        )
+    except OSError:
+        return False
+
+
+def validate_source_record_paths(
+    record: CurrentSourceRecord,
+    *,
+    label: str,
+    local_path: Path,
+    active_root: Path,
+) -> None:
+    for field, actual in (("Local path", local_path), ("Active root", active_root)):
+        for value in record.values_for(field):
+            if not same_filesystem_location(value, actual):
+                raise InstallError(
+                    f"{label} 当前记录的 {field} 与实际路径不一致：`{value}` != `{actual}`"
+                )
+
+
+def current_source_record(path: Path) -> CurrentSourceRecord:
+    record = parse_current_source_record(read_source_text(path))
     if record.conflicts:
         raise InstallError(
             "SOURCE.md 当前记录存在冲突：" + record.conflict_description()
@@ -2002,6 +2053,7 @@ def append_source_record(
     )
     if path.exists():
         existing = path.read_text(encoding="utf-8-sig")
+        reject_source_control_characters(existing, label=f"候选 SOURCE.md（{path}）")
         record = parse_current_source_record(existing)
         if record.conflicts:
             raise InstallError(
@@ -2012,9 +2064,19 @@ def append_source_record(
             raise InstallError(f"候选 SOURCE.md 当前记录缺少 Skill identity：{path}")
         if any(name != skill_name for name in recorded_names):
             raise InstallError(f"候选 SOURCE.md 的 Skill 与目录不一致：{path}")
+        validate_source_record_paths(
+            record,
+            label="候选 SOURCE.md",
+            local_path=active_root / skill_name,
+            active_root=active_root,
+        )
         content = existing.rstrip() + "\n\n---\n\n" + generated
     else:
         content = generated
+    reject_source_control_characters(
+        generated,
+        label="受管追加的 SOURCE.md 记录（来自 decision manifest 或安装参数）",
+    )
     atomic_write_bytes(path, (content.rstrip() + "\n").encode("utf-8"))
 
 
@@ -2559,6 +2621,7 @@ def bundled_skill_specs(
 def validate_staged_bundled_skills(
     *,
     stage_root: Path,
+    active_root: Path,
     top_level_name: str,
     bundled_proofs: Sequence[BundledSkillProof],
     args: argparse.Namespace,
@@ -2585,6 +2648,15 @@ def validate_staged_bundled_skills(
         source_md = target / "SOURCE.md"
         if not source_md.is_file() or is_reparse(source_md):
             raise InstallError(f"bundled skill 缺少安全的 SOURCE.md：{source_md}")
+        source_label = f"bundled skill {proof.name} SOURCE.md"
+        reject_source_control_characters(read_source_text(source_md), label=source_label)
+        # No wrapper record is appended here, so this record stays current.
+        validate_source_record_paths(
+            current_source_record(source_md),
+            label=source_label,
+            local_path=active_root / top_level_name / Path(*proof.path.split("/")),
+            active_root=active_root,
+        )
         recorded_names = source_record_values(source_md, "Skill")
         if not recorded_names or any(value != proof.name for value in recorded_names):
             raise InstallError(
@@ -2745,6 +2817,7 @@ def stage_candidate(
                 )
     bundled_validation = validate_staged_bundled_skills(
         stage_root=stage_target_root,
+        active_root=active_root,
         top_level_name=names[0],
         bundled_proofs=context.get("bundled_skill_proofs", ()),
         args=args,
