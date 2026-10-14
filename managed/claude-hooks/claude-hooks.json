@@ -11,6 +11,15 @@
           ],
           "timeout": 10,
           "onFailure": "continue"
+        },
+        {
+          "type": "command",
+          "command": "D:\\Codex\\tools\\bin\\node.exe",
+          "args": [
+            "D:\\agents\\projects\\统一环境\\managed\\claude-hooks\\claude-public-push-guard.mjs"
+          ],
+          "timeout": 30,
+          "onFailure": "continue"
         }
       ]
     }

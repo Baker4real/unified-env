@@ -9,6 +9,7 @@ $managedRoot = Join-Path $projectRoot 'managed\claude-hooks'
 $node = 'D:\Codex\tools\bin\node.exe'
 $guardPath = Join-Path $managedRoot 'claude-pretool-guard.mjs'
 $stopHookPath = Join-Path $managedRoot 'claude-stop-handoff-lint.mjs'
+$pushGuardPath = Join-Path $managedRoot 'claude-public-push-guard.mjs'
 $managedHooksPath = Join-Path $managedRoot 'claude-hooks.json'
 $liveSettingsPath = Join-Path $env:USERPROFILE '.claude\settings.json'
 
@@ -142,6 +143,34 @@ foreach ($allowStop in @(
 $stopGarbage = Invoke-Guard 'not json' -ScriptPath $stopHookPath
 Assert-Equal $stopGarbage.stdout.Trim() '' 'stop hook 遇到非 JSON 输入必须放行。'
 
+# 公开仓库推送 guard：夹具仓库建一次后保留复用（不递归删除），提交里埋一个 Tailscale 地址（拼接写，本文件推到公开仓库
+# 时不被自己拦下），远端指向不存在的 GitHub 仓库。gh 读不到可见性按公开处理，所以联网与否都应拦下；--dry-run 和确认标记放行。
+Assert-True (Test-Path -LiteralPath $pushGuardPath -PathType Leaf) '缺少 claude-public-push-guard.mjs。'
+$pushSelfTest = & $node $pushGuardPath --self-test
+Assert-Equal $LASTEXITCODE 0 "push guard --self-test 必须成功：$pushSelfTest"
+$pushRepo = Join-Path $FixtureRoot 'public-push-guard-repo'
+if (-not (Test-Path -LiteralPath (Join-Path $pushRepo '.git'))) {
+    [void][IO.Directory]::CreateDirectory($pushRepo)
+    git -C $pushRepo init -q -b main
+    git -C $pushRepo config core.autocrlf false
+    [IO.File]::WriteAllText((Join-Path $pushRepo 'hosts.md'), ('- node: 100.' + "101.2.3`n"), [Text.UTF8Encoding]::new($false))
+    git -C $pushRepo add hosts.md
+    git -C $pushRepo -c user.name=probe -c user.email=1+probe@users.noreply.github.com commit -q -m 'docs: hosts'
+    git -C $pushRepo remote add origin 'https://github.com/Baker4real/push-guard-probe-nonexistent.git'
+}
+$pushCommand = "git -C '$pushRepo' push origin main"
+$pushDenied = Invoke-Guard (@{ tool_name = 'PowerShell'; tool_input = @{ command = $pushCommand } } | ConvertTo-Json -Compress) -ScriptPath $pushGuardPath
+Assert-Equal $pushDenied.exitCode 0 'push guard 拦截也必须 exit 0。'
+$pushDecision = ($pushDenied.stdout | ConvertFrom-Json).hookSpecificOutput
+Assert-Equal $pushDecision.permissionDecision 'deny' '推到公开或可见性未知的 GitHub 仓库时，新提交里的 Tailscale 地址必须拦下。'
+Assert-True ($pushDecision.permissionDecisionReason -match 'fp=aec3a99b70' -and $pushDecision.permissionDecisionReason -notmatch ('100\.' + '101\.2\.3')) '拦截理由必须给指纹并遮掩原值。'
+foreach ($pushAllowed in @("$pushCommand --dry-run", "$pushCommand # PUSH_PRIVACY_ACK=aec3a99b70")) {
+    $result = Invoke-Guard (@{ tool_name = 'PowerShell'; tool_input = @{ command = $pushAllowed } } | ConvertTo-Json -Compress) -ScriptPath $pushGuardPath
+    Assert-Equal $result.stdout.Trim() '' "push guard 必须放行：$pushAllowed"
+}
+$pushGarbage = Invoke-Guard 'not json' -ScriptPath $pushGuardPath
+Assert-Equal $pushGarbage.stdout.Trim() '' 'push guard 遇到非 JSON 输入必须放行。'
+
 $managed = Get-Content -LiteralPath $managedHooksPath -Raw | ConvertFrom-Json
 $registration = @($managed.PreToolUse)
 Assert-Equal $registration.Count 1 '受管注册只含一条 PreToolUse。'
@@ -150,6 +179,12 @@ $hook = @($registration[0].hooks)[0]
 Assert-Equal $hook.command $node 'hook 必须用受管 node 的 exec 形式。'
 Assert-Equal @($hook.args)[0] $guardPath 'hook 参数必须指向受管 guard。'
 Assert-Equal $hook.onFailure 'continue' 'guard 自身故障必须放行（onFailure=continue）。'
+Assert-Equal @($registration[0].hooks).Count 2 'PreToolUse 只挂 guard 与 push guard 两个 hook。'
+$pushHook = @($registration[0].hooks)[1]
+Assert-Equal $pushHook.command $node 'push guard 必须用受管 node 的 exec 形式。'
+Assert-Equal @($pushHook.args)[0] $pushGuardPath 'push guard 参数必须指向受管脚本。'
+Assert-Equal $pushHook.onFailure 'continue' 'push guard 自身故障必须放行（onFailure=continue）。'
+Assert-Equal $pushHook.timeout 30 'push guard 要给流式扫描和 gh 可见性查询留 30 秒。'
 $stopRegistration = @($managed.Stop)
 Assert-Equal $stopRegistration.Count 1 '受管注册只含一条 Stop。'
 $stopHook = @($stopRegistration[0].hooks)[0]
