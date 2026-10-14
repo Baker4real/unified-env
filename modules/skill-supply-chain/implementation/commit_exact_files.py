@@ -22,6 +22,12 @@ A guarded install transaction's ledger can be committed from its
 ``backups/source-state-after.json`` snapshot with ``--file-from`` when the live
 ledger has changed since; the transaction manifest's ``source_state_after``
 records that snapshot's path and SHA-256.
+
+A pre-commit hook that checks the whole work tree still sees other sessions'
+unstaged edits and untracked files.  The knowledge base's hook runs
+``scripts/check.py --staged``, which requires the work tree to equal the index,
+so there a partial commit fails until those edits are committed or included;
+that repository has one owner commit every finished ingest together.
 """
 
 from __future__ import annotations
