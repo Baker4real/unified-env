@@ -63,7 +63,9 @@ $denyCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = ('[Native]::SHFile' + 'OperationW([ref]$op)') } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = ('Clear-' + 'RecycleBin -DriveLetter D -Force') } },
     @{ tool_name = 'Bash'; tool_input = @{ command = "ls 'D:\\agents'" } },
-    @{ tool_name = 'Bash'; tool_input = @{ command = 'pwsh -NoProfile -Command "Get-Item $env:TEMP"' } }
+    @{ tool_name = 'Bash'; tool_input = @{ command = 'pwsh -NoProfile -Command "Get-Item $env:TEMP"' } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -n foo D:\agents\x\*.ps1' } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git status --porcelain | Where-Object { $_ -like ''??*'' }' } }
 )
 foreach ($case in $denyCases) {
     $result = Invoke-Guard ($case | ConvertTo-Json -Compress)
@@ -80,7 +82,9 @@ $allowCases = @(
     @{ tool_name = 'Bash'; tool_input = @{ command = 'git clone --no-hardlinks /d/agents/knowledge-base /d/agents/tmp/kb' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'D:\Codex\.codex\scripts\Invoke-ManagedRecycle.ps1' -Mode Plan -TargetPath D:\x" } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Get-ChildItem -Force -LiteralPath ''D:\$Recycle.Bin''' } },
-    @{ tool_name = 'Bash'; tool_input = @{ command = 'pwsh -NoProfile -File ./x.ps1 "$HOME"' } }
+    @{ tool_name = 'Bash'; tool_input = @{ command = 'pwsh -NoProfile -File ./x.ps1 "$HOME"' } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -n foo D:\agents\x -g ''*.ps1''' } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git status --porcelain | Where-Object { $_.StartsWith(''??'') }' } }
 )
 foreach ($case in $allowCases) {
     $result = Invoke-Guard ($case | ConvertTo-Json -Compress)

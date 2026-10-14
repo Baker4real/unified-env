@@ -13,6 +13,10 @@
 //   8. under Claude Desktop (CLAUDE_CODE_ENTRYPOINT starts with claude-desktop), HKCU writes and deletes, inline or
 //      inside a .ps1/.psm1 the command runs: MSIX copy-on-write sends them to the package's private layer, so the
 //      command succeeds and the same shell reads the change back while the real registry stays unchanged.
+//   9. PowerShell `rg` path arguments containing * or ?: PowerShell passes wildcards to native commands verbatim,
+//      so rg gets a literal path and fails (os error 123 on Windows);
+//  10. PowerShell -like / -notlike patterns starting with ??: ? is a one-character wildcard, so '??*' matches every
+//      string of two or more characters instead of the literal ?? that git status --porcelain prints.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
 // Any internal error allows the command: the registration keeps onFailure=continue, so a broken guard
 // never locks the shell.
@@ -225,6 +229,60 @@ function hardlinkingCloneSource(command) {
   }
   return null
 }
+
+// Rule 9. rg options that take a separate value, so the value is not read as a path.
+const RG_VALUE_SHORT = 'ABCdEefgjMmrTt'
+const RG_VALUE_LONG = new Set([
+  '--after-context', '--before-context', '--context', '--max-depth', '--encoding', '--regexp', '--file', '--glob',
+  '--iglob', '--threads', '--max-columns', '--max-count', '--replace', '--type', '--type-not', '--type-add',
+  '--type-clear', '--sort', '--sortr', '--max-filesize', '--path-separator', '--pre', '--pre-glob', '--colors',
+  '--color', '--context-separator', '--field-context-separator', '--field-match-separator', '--dfa-size-limit',
+  '--regex-size-limit', '--engine', '--ignore-file', '--hostname-bin', '--hyperlink-format', '--generate'
+])
+
+// Returns the first rg path argument containing * or ?, or null. The first positional word is the pattern unless
+// -e/--regexp or -f/--file supplies the patterns, or --files needs none.
+function rgWildcardPath(command) {
+  for (const words of simpleCommands(command)) {
+    if ((words[0] || '').split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase() !== 'rg') continue
+    const positional = []
+    let patternGiven = false
+    for (let i = 1; i < words.length; i++) {
+      const word = words[i]
+      if (word === '--') { positional.push(...words.slice(i + 1)); break }
+      if (word.includes('>')) continue // redirections such as *>$null and 2>$null
+      if (word.startsWith('--')) {
+        const name = word.split('=')[0]
+        if (name === '--regexp' || name === '--file' || name === '--files') patternGiven = true
+        if (!word.includes('=') && RG_VALUE_LONG.has(name)) i++
+      } else if (word.length > 1 && word.startsWith('-')) {
+        // In a short cluster such as -nA3 or -nA 3, the first value-taking letter takes the rest or the next word.
+        for (let k = 1; k < word.length; k++) {
+          if (!RG_VALUE_SHORT.includes(word[k])) continue
+          if (word[k] === 'e' || word[k] === 'f') patternGiven = true
+          if (k === word.length - 1) i++
+          break
+        }
+      } else positional.push(word)
+    }
+    const path = positional.slice(patternGiven ? 0 : 1).find(word => /[*?]/.test(word))
+    if (path) return path
+  }
+  return null
+}
+
+function rgWildcardReason(path) {
+  const wildcard = path.search(/[*?]/)
+  const sep = Math.max(path.lastIndexOf('\\', wildcard), path.lastIndexOf('/', wildcard))
+  const prefix = path.slice(0, sep + 1)
+  const dir = sep < 0 ? '.' : /^(?:[a-z]:)?[\\/]$/i.test(prefix) ? prefix : prefix.slice(0, -1)
+  return `PowerShell 不替原生命令展开通配符：rg 收到的是字面路径 ${path}，在 Windows 上报 os error 123（文件名、目录名或卷标语法不正确）。` +
+    `目录作路径参数、通配部分改用 -g：rg <模式> ${dir} -g '${path.slice(sep + 1).replace(/\\/g, '/')}'（只搜这一层再加 --max-depth 1），` +
+    `或先用 Get-ChildItem 展开成真实路径（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 6 条）。`
+}
+
+// Rule 10. In -like, ? matches any one character: '??*' matches every string of two or more characters.
+const LIKE_DOUBLE_QUESTION = /-[ic]?(?:not)?like\s+['"]\?\?/i
 
 // Characters after `$` that make bash substitute: a name, ${...}, $(...), a digit or a special parameter.
 const EXPANSION_START = /[A-Za-z_{(0-9?!#@*$-]/
@@ -477,6 +535,12 @@ export function evaluate(payload, io = defaultIo) {
     if (match) {
       return `PowerShell 会把未加引号的逗号列表拆成多个参数：${match[1]} ${match[2]} 要写成 ${match[1]} '${match[2]}'，或先放进变量再传入（D:\\Codex\\.codex\\docs\\agent-guidance\\windows-pwsh-command-guidelines.md 第 9 条）。`
     }
+    const wildPath = rgWildcardPath(command)
+    if (wildPath) return rgWildcardReason(wildPath)
+    if (LIKE_DOUBLE_QUESTION.test(command)) {
+      return "-like 里的 ? 是单字符通配符：'??*' 匹配任何至少两个字符的字符串，筛不出 git status --porcelain 的未跟踪行（字面 ??）。" +
+        "改用 .StartsWith('??')，或在模式里转义成 '`?`?*'。" + TEXT_ONLY_HINT
+    }
   }
 
   const source = hardlinkingCloneSource(command)
@@ -590,6 +654,30 @@ if (process.argv.includes('--self-test')) {
     ['Bash', 'cat > notes.txt <<EOF\n$x\nEOF', false],
     ['Bash', 'pwsh -c "Get-Date" # costs $5', false],
     ['PowerShell', 'pwsh -c "Get-Item $env:TEMP"', false],
+    // PowerShell hands rg its wildcards verbatim; in -like, ? is a one-character wildcard.
+    ['PowerShell', 'rg -n "Invoke-Guard" D:\\agents\\x\\*.ps1', true],
+    ['PowerShell', 'rg foo src/*.cs', true],
+    ['PowerShell', "& 'C:\\tools\\rg.exe' -l foo tools\\*.psm1", true],
+    ['PowerShell', "rg -e 'a.*b' 'D:\\x\\*.md'", true],
+    ['PowerShell', 'rg --files D:\\x\\*.json', true],
+    ['PowerShell', 'rg -nA 3 foo src\\**\\*.cs', true],
+    ['PowerShell', 'rg -n x -- *.ps1', true],
+    ['PowerShell', 'Get-ChildItem | ForEach-Object { rg -l foo $_\\*.txt }', true],
+    ['PowerShell', "rg -n 'foo.*bar?' D:\\agents\\x", false],
+    ['PowerShell', "rg -n foo D:\\agents\\x -g '*.ps1'", false],
+    ['PowerShell', 'rg -n foo -g *.ps1 --iglob !*.min.js D:\\x', false],
+    ['PowerShell', 'rg --glob=*.ps1 -nA3 "a*" src', false],
+    ['PowerShell', "rg -e 'x*' -e 'y?' src *>$null", false],
+    ['PowerShell', "git ls-files | rg '\\.ps1$'", false],
+    ['PowerShell', "Write-Output 'rg foo *.ps1'", false],
+    ['Bash', 'rg foo src/*.cs', false],
+    ['PowerShell', "git status --porcelain | Where-Object { $_ -like '??*' }", true],
+    ['PowerShell', "@($s | Where-Object { $_ -notlike '??*' }).Count", true],
+    ['PowerShell', 'Where-Object { $_ -clike "?? *" }', true],
+    ['PowerShell', "$s | Where-Object { $_.StartsWith('??') }", false],
+    ['PowerShell', "$s | Where-Object { $_ -like '`?`?*' }", false],
+    ['PowerShell', "Get-ChildItem | Where-Object Name -like '?.txt'", false],
+    ['Bash', "grep -c -- \"-like '??\" notes.txt", false],
     // HKCU writes under Claude Desktop land in the MSIX private layer, inline and in referenced scripts.
     ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", true, desktop],
     ['PowerShell', "$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\\Classes\\CLSID\\X\\DefaultIcon', $true); $k.SetValue('', 'D:\\a.exe,0')", true, desktop],
