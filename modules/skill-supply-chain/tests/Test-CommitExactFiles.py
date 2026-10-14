@@ -170,6 +170,57 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(self.show("HEAD:a.txt"), b"a2\n")
         self.assertEqual(self.status(), [])
 
+    def list_hunks(self, path: str) -> tuple[int, str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = HELPER.main(["--repo", str(self.repo), "--list-hunks", path])
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def commit_base(self, name: str, data: bytes) -> None:
+        self.write(name, data)
+        self.git("commit", "-q", "-am", f"base {name}")
+        self.base = self.head()
+
+    def test_hunks_commit_selected_hunks_at_their_head_lines(self) -> None:
+        lines = [f"line{number}\n".encode() for number in range(1, 21)]
+        self.commit_base("a.txt", b"".join(lines))
+        mine = lines[:10] + [b"mine after line10\n"] + lines[10:14] + [b"line15 mine\n"] + lines[15:]
+        edited = b"".join(mine[:2] + [b"other session\n"] * 5 + mine[2:])
+        self.write("a.txt", edited)
+        code, listing, error = self.list_hunks("a.txt")
+        self.assertEqual(code, 0, error)
+        self.assertIn(f"sha256={sha256(edited)} hunks=3", listing)
+        code, error = self.run_helper("--hunks", "a.txt", sha256(edited), "1", "2")
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.show("HEAD:a.txt"), b"".join(mine))
+        self.assertEqual(self.status(), [" M a.txt"])
+        left = [
+            line
+            for line in self.git("diff", "-U0", "HEAD", "--", "a.txt").split("\n")
+            if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+        ]
+        self.assertEqual(left, ["+other session"] * 5)
+
+    def test_hunks_refuse_changed_work_tree_and_unknown_hunk(self) -> None:
+        self.write("a.txt", b"a1\nmine\n")
+        code, error = self.run_helper("--hunks", "a.txt", sha256(b"a1\nreviewed\n"), "0")
+        self.assertEqual(code, 1)
+        self.assertIn("重新 --list-hunks", error)
+        code, error = self.run_helper("--hunks", "a.txt", sha256(b"a1\nmine\n"), "1")
+        self.assertEqual(code, 1)
+        self.assertIn("没有第 1 个改动块", error)
+        self.assertEqual(self.head(), self.base)
+        self.assertEqual(self.status(), [" M a.txt"])
+
+    def test_hunks_keep_a_missing_final_newline(self) -> None:
+        self.commit_base("b.txt", b"x\ny")
+        edited = b"w\nx\ny\nz"
+        self.write("b.txt", edited)
+        code, error = self.run_helper("--hunks", "b.txt", sha256(edited), "1")
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.show("HEAD:b.txt"), b"x\ny\nz")
+        self.assertEqual(self.status(), [" M b.txt"])
+
 
 if __name__ == "__main__":
     unittest.main()
