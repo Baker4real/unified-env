@@ -28,6 +28,7 @@ stdout 必须是单个 JSON 对象，每个字段必须存在且不为 null。�
 .NOTES
 退出码：0 成功；2 输入/语法预检拒绝；3 JSON 断言失败；124 超时；1 执行异常。
 原生程序非零码保留，因此数值可能重合；以 stderr 的稳定状态前缀区分。
+执行异常的 stderr 只报异常类型、错误分类和失败位置（script/line/column），不回显消息或源码。
 PowerShell 自身的参数绑定错误也可能返回 1。
 这是显式 CLI 入口，不是宿主 exec 拦截器或安全沙箱。静态语法检查不验证运行语义；
 字段断言只检查调用者指定的字段。目标可主动处理异常或改写错误偏好。
@@ -129,7 +130,22 @@ try {
         [Console]::Error.WriteLine(('CheckedPowerShell native-exit code={0}' -f $_.Exception.ExitCode))
         exit $_.Exception.ExitCode
     }
-    [Console]::Error.WriteLine('CheckedPowerShell runtime-error: target execution failed.')
+    # Locate the failure without echoing payload: exception messages and throw-derived error
+    # ids can carry it. The first script stack frame names the failing line; InvocationInfo
+    # adds a column only when it points at that same line.
+    $scriptName = '-'
+    $line = 0
+    $column = '-'
+    $frame = [regex]::Match([string] $_.ScriptStackTrace, '^at .*?, (?<file>.*): line (?<line>\d+)\r?$', 'Multiline')
+    if ($frame.Success) {
+        if ($frame.Groups['file'].Value -ne '<No file>') { $scriptName = [IO.Path]::GetFileName($frame.Groups['file'].Value) }
+        $line = [int] $frame.Groups['line'].Value
+        $invocation = $_.InvocationInfo
+        $invocationScript = if ($invocation -and $invocation.ScriptName) { [IO.Path]::GetFileName($invocation.ScriptName) } else { '-' }
+        if ($invocation -and $invocation.ScriptLineNumber -eq $line -and $invocationScript -eq $scriptName) { $column = $invocation.OffsetInLine }
+    }
+    [Console]::Error.WriteLine(('CheckedPowerShell runtime-error type={0} category={1} script={2} line={3} column={4}' -f
+        $_.Exception.GetType().FullName, $_.CategoryInfo.Category, $scriptName, $line, $column))
     exit 1
 }
 '@
