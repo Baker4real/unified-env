@@ -7,7 +7,7 @@ intent: 说明 Git 默认分支发布与收尾 Skill 策略的设计和现役边
 
 # Git 默认分支发布与收尾 Skill 统一策略设计
 
-> 状态：2026-07-13 的默认分支统一方案是历史实现。2026-07-23 起，全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）的唯一现役合同固定为用户拥有远端的 `main`；commit、push 或 PR 还必须由当前任务明确授权。GitHub plugin overlay 已于 2026-08-07 完成新版 upstream 适配和六目标 live 验收；兼容 wrapper 的独立状态仍以第 3 节为准。本文保留历史设计，当前执行面以第 3、4 节和“验证与验收”为准。
+> 状态：2026-07-13 的默认分支统一方案是历史实现。2026-07-23 起，全部普通 closeout/push skill（包括 GitHub `github:yeet` 与 `neat-freak`）的唯一现役合同固定为用户拥有远端的 `main`；commit、push 或 PR 还必须由当前任务明确授权。GitHub plugin overlay 已于 2026-08-07 完成新版 upstream 适配和 live 验收，此后 surface 与目标数随 upstream 落盘收敛，现役值见第 4 节；兼容 wrapper 的独立状态仍以第 3 节为准。本文保留历史设计，当前执行面以第 3、4 节和“验证与验收”为准。
 
 > 退役说明（2026-07-16）：本文保留实施时的历史路径和设计决策。已删除来源的 skill 路径、来源和 overlay 描述不代表当前安装，也不授权恢复。
 
@@ -103,7 +103,7 @@ neat-freak 的 reference 是 Git clean closeout 的唯一行为真源；任何 w
 
 ### 4. GitHub 发布插件的现役 v2 overlay
 
-GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本地 skill 根。现役 v2 overlay 以当前 upstream 为基线，保留 connector-first、PR creation、current-branch discovery、GitHub Actions logs 与 `gh` fallback，同时把普通发布固定为当前任务明确授权、用户拥有 remote 和 `main`。2026-08-31 起远端 curated cache（openai-curated-remote/github 0.1.12+）不再落盘 skills 文件，现役合同收敛为本机安装与本地 curated 两个 surface、4 个目标；远端 surface 若重新落盘 SKILL.md 会以 unexpected-plugin-surface 失败闭锁并要求重新适配。现役目标只通过版本化 source、deployer 和 runtime 覆盖器写入；不得直接手改 cache。下列 2026-07-13 条目解释覆盖器机制，发布语义以本段和版本化 catalog 为准：
+GitHub 的 yeet 与 github skill 来自插件 source/cache，不属于活跃本地 skill 根。现役 v2 overlay 以当前 upstream 为基线，保留 connector-first、PR creation、current-branch discovery、GitHub Actions logs 与 `gh` fallback，同时把普通发布固定为当前任务明确授权、用户拥有 remote 和 `main`。2026-08-31 起远端 curated cache（openai-curated-remote/github 0.1.12+）、2026-09-09 同步起本地 curated marketplace（`.tmp/plugins/plugins/github`）先后不再落盘 skills 文件，现役合同收敛为本机安装 cache 一个 surface、2 个目标（精确路径以 `scripts/Apply-GitHubDefaultBranchSkillOverlay.cjs` 的 `EXPECTED_SURFACE_RELATIVES` 为准）；任一已移除 surface 若重新落盘 SKILL.md 会以 unexpected-plugin-surface 失败闭锁并要求重新适配。现役目标只通过版本化 source、deployer 和 runtime 覆盖器写入；不得直接手改 cache。下列 2026-07-13 条目解释覆盖器机制，发布语义以本段和版本化 catalog 为准：
 
 1. 在 D:\Codex\.codex\scripts 下增加一个专用覆盖器和声明式补丁清单。
 2. 覆盖器只发现 GitHub 插件的 marketplace source、已安装 cache 与当前可见 remote cache 中的 github 和 yeet SKILL.md。
