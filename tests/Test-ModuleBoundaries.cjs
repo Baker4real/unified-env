@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
@@ -14,14 +15,16 @@ const MANIFEST_RUNNER_PATH = path.join(PROJECT_ROOT, 'scripts', 'Run-ManifestTes
 assert.equal(fs.existsSync(VALIDATOR_PATH), true, 'module boundary validator must exist');
 
 const {
-  collectRepositoryFiles,
   validateCrossModuleCodeReferences,
   validateManifest,
   validateOwnership,
+  validateRepository,
+  workTree,
 } = require(VALIDATOR_PATH);
 
 const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
-const repositoryFiles = collectRepositoryFiles(PROJECT_ROOT);
+const tree = workTree(PROJECT_ROOT);
+const repositoryFiles = tree.files;
 const expectedModules = [
   'codex-host',
   'dev-environment',
@@ -36,7 +39,7 @@ assert.deepEqual(
   'manifest must define the five approved modules',
 );
 assert.deepEqual(
-  validateManifest(manifest, PROJECT_ROOT),
+  validateManifest(manifest, tree),
   [],
   'module manifest structure must be valid',
 );
@@ -46,7 +49,7 @@ assert.deepEqual(
   'every repository file must have exactly one owner',
 );
 assert.deepEqual(
-  validateCrossModuleCodeReferences(manifest, repositoryFiles, PROJECT_ROOT),
+  validateCrossModuleCodeReferences(manifest, repositoryFiles, tree),
   [],
   'cross-module code references must use declared dependency interfaces',
 );
@@ -177,7 +180,7 @@ assert.match(
       'scripts/Invoke-CodexRemotePluginCatalogGuard.ps1',
       'scripts/lib/CodexHookHandleBoundIO.cs',
     ],
-    PROJECT_ROOT,
+    tree,
   ).join('\n'),
   /undeclared host-safety interface: codexhookhandleboundio\.cs/i,
   'an undeclared cross-module code seam must fail closed',
@@ -295,5 +298,84 @@ const hostReconcilerSource = fs.readFileSync(
 assert.equal(fs.existsSync(hostEvidenceModulePath), true, 'codex-host evidence lifecycle must be module-local');
 assert.match(hostReconcilerSource, /CodexHostHookEvidence\.ps1/);
 assert.match(hostReconcilerSource, /New-CodexHostHookEvidenceSnapshot/);
+
+// --rev checks the files, code text and manifest of a commit, not the work tree around it.
+const revisionRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'module-boundaries-rev-'));
+try {
+  const fixtureGit = (...args) => {
+    const result = spawnSync('git', [
+      '-c', 'core.autocrlf=false',
+      '-c', 'user.name=Test',
+      '-c', 'user.email=test@example.invalid',
+      '-c', 'commit.gpgsign=false',
+      ...args,
+    ], { cwd: revisionRoot, encoding: 'utf8', windowsHide: true });
+    assert.equal(result.status, 0, String(result.stderr || result.stdout));
+  };
+  const write = (repositoryPath, text) => {
+    const fullPath = path.join(revisionRoot, ...repositoryPath.split('/'));
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, text);
+  };
+  const fixtureModule = (id) => ({
+    id,
+    summary: id,
+    context: `modules/${id}/CONTEXT.md`,
+    interfaces: [`modules/${id}/${id}_api.py`],
+    dependsOn: [],
+    tests: { fixture: { powershell: [], python: [], node: [] } },
+    ownership: { prefixes: [`modules/${id}/`] },
+  });
+  const committedManifest = {
+    schemaVersion: 1,
+    modules: [fixtureModule('alpha'), fixtureModule('beta')],
+    shared: { ownership: { files: ['modules/manifest.json'] } },
+  };
+  write('modules/manifest.json', JSON.stringify(committedManifest));
+  write('modules/alpha/CONTEXT.md', '# alpha\n');
+  write('modules/alpha/alpha_api.py', 'VALUE = 1\n');
+  write('modules/beta/CONTEXT.md', '# beta\n');
+  write('modules/beta/beta_api.py', '# loads alpha_api.py\n');
+  write('stray.txt', 'unowned\n');
+  fixtureGit('init', '-q');
+  fixtureGit('add', '-A');
+  fixtureGit('commit', '-q', '-m', 'base');
+
+  // The work tree fixes both committed violations and owns an untracked file in an uncommitted manifest edit.
+  fs.unlinkSync(path.join(revisionRoot, 'stray.txt'));
+  write('modules/beta/beta_api.py', 'VALUE = 2\n');
+  write('untracked.txt', 'owned by the work-tree manifest only\n');
+  write('modules/manifest.json', JSON.stringify({
+    ...committedManifest,
+    shared: { ownership: { files: ['modules/manifest.json', 'untracked.txt'] } },
+  }));
+
+  assert.deepEqual(validateRepository(revisionRoot), { ok: true, files: 6, modules: 2, errors: [] });
+  assert.deepEqual(validateRepository(revisionRoot, { revision: 'HEAD' }), {
+    ok: false,
+    files: 6,
+    modules: 2,
+    errors: [
+      'stray.txt: no owner',
+      'modules/beta/beta_api.py references alpha_api.py without dependency beta -> alpha',
+    ],
+  });
+} finally {
+  fs.rmSync(revisionRoot, { recursive: true, force: true, maxRetries: 3 });
+}
+
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+for (const [args, message] of [
+  [['--rev'], /--rev requires a commit or tree/],
+  [['--rev', EMPTY_TREE], new RegExp(`modules/manifest\\.json is not in ${EMPTY_TREE}`)],
+]) {
+  const rejected = spawnSync(process.execPath, [VALIDATOR_PATH, ...args], {
+    cwd: PROJECT_ROOT,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, message);
+}
 
 console.log(`PASS Test-ModuleBoundaries files=${repositoryFiles.length} modules=${manifest.modules.length}`);
