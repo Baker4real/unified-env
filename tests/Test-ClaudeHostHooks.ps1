@@ -19,9 +19,12 @@ function Assert-Equal([object]$Actual, [object]$Expected, [string]$Message) {
     if ($Actual -cne $Expected) { throw "$Message actual=[$Actual] expected=[$Expected]" }
 }
 
-function Invoke-Guard([AllowEmptyString()][string]$InputText) {
+# 不给 -Entrypoint 时从子进程环境里去掉 CLAUDE_CODE_ENTRYPOINT，结果不随运行本测试的宿主变化。
+function Invoke-Guard([AllowEmptyString()][string]$InputText, [string]$Entrypoint) {
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $node
+    if ($Entrypoint) { $startInfo.Environment['CLAUDE_CODE_ENTRYPOINT'] = $Entrypoint }
+    else { [void]$startInfo.Environment.Remove('CLAUDE_CODE_ENTRYPOINT') }
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true
@@ -101,6 +104,15 @@ finally {
     if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture }
     if (Test-Path -LiteralPath $fixtureDir) { [IO.Directory]::Delete($fixtureDir) }
 }
+
+# Claude Desktop 下的 HKCU 写入只在入口变量以 claude-desktop 开头时拦截。写法拆开拼接：
+# 本文件经 pwsh -File 运行时，guard 会扫描它的内容。
+$hkcuCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = ('Set-Item' + 'Property -LiteralPath ''HK' + 'CU:\Software\X'' -Name a -Value 1') } } | ConvertTo-Json -Compress
+$result = Invoke-Guard $hkcuCase -Entrypoint 'claude-desktop'
+Assert-Equal $result.exitCode 0 'HKCU 写入 deny 也必须 exit 0。'
+Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' 'Claude Desktop 下的 HKCU 写入必须拦截。'
+$result = Invoke-Guard $hkcuCase
+Assert-Equal $result.stdout.Trim() '' '没有 Claude Desktop 入口变量时 HKCU 写入放行。'
 
 $garbage = Invoke-Guard 'not json'
 Assert-Equal $garbage.exitCode 0 '非 JSON 输入必须放行。'
