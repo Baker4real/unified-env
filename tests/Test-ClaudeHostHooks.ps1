@@ -8,6 +8,7 @@ $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $managedRoot = Join-Path $projectRoot 'managed\claude-hooks'
 $node = 'D:\Codex\tools\bin\node.exe'
 $guardPath = Join-Path $managedRoot 'claude-pretool-guard.mjs'
+$stopHookPath = Join-Path $managedRoot 'claude-stop-handoff-lint.mjs'
 $managedHooksPath = Join-Path $managedRoot 'claude-hooks.json'
 $liveSettingsPath = Join-Path $env:USERPROFILE '.claude\settings.json'
 
@@ -20,7 +21,7 @@ function Assert-Equal([object]$Actual, [object]$Expected, [string]$Message) {
 }
 
 # 不给 -Entrypoint 时从子进程环境里去掉 CLAUDE_CODE_ENTRYPOINT，结果不随运行本测试的宿主变化。
-function Invoke-Guard([AllowEmptyString()][string]$InputText, [string]$Entrypoint) {
+function Invoke-Guard([AllowEmptyString()][string]$InputText, [string]$ScriptPath = $guardPath, [string]$Entrypoint) {
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $node
     if ($Entrypoint) { $startInfo.Environment['CLAUDE_CODE_ENTRYPOINT'] = $Entrypoint }
@@ -32,11 +33,11 @@ function Invoke-Guard([AllowEmptyString()][string]$InputText, [string]$Entrypoin
     $startInfo.RedirectStandardError = $true
     $startInfo.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
     $startInfo.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
-    [void]$startInfo.ArgumentList.Add($guardPath)
+    [void]$startInfo.ArgumentList.Add($ScriptPath)
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     try {
-        Assert-True $process.Start() "guard 无法启动：$guardPath"
+        Assert-True $process.Start() "hook 无法启动：$ScriptPath"
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $process.StandardInput.Write($InputText)
         $process.StandardInput.Close()
@@ -118,6 +119,29 @@ $garbage = Invoke-Guard 'not json'
 Assert-Equal $garbage.exitCode 0 '非 JSON 输入必须放行。'
 Assert-Equal $garbage.stdout.Trim() '' '非 JSON 输入不得输出决定。'
 
+# Stop hook：交给用户的命令要同时能被 bash 和 PowerShell 解析，否则拦一次；stop_hook_active 时放行。
+Assert-True (Test-Path -LiteralPath $stopHookPath -PathType Leaf) '缺少 claude-stop-handoff-lint.mjs。'
+$stopSelfTest = & $node $stopHookPath --self-test
+Assert-Equal $LASTEXITCODE 0 "stop hook --self-test 必须成功：$stopSelfTest"
+$fence = '```'
+$badReply = $fence + "bash`n'D:/x/run.cmd' --dry-run`n" + $fence
+$goodReply = $fence + "bash`nD:/x/run.cmd --candidate 'D:/y' --dry-run`n" + $fence
+$blocked = Invoke-Guard (@{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = $badReply } | ConvertTo-Json -Compress) -ScriptPath $stopHookPath
+Assert-Equal $blocked.exitCode 0 'stop hook 拦截也必须 exit 0。'
+$decision = $blocked.stdout | ConvertFrom-Json
+Assert-Equal $decision.decision 'block' '引号路径开头又跟参数的命令必须拦下。'
+Assert-True ($decision.reason -match 'ParserError') '拦截原因必须说明 PowerShell 报 ParserError。'
+foreach ($allowStop in @(
+        @{ hook_event_name = 'Stop'; stop_hook_active = $true; last_assistant_message = $badReply },
+        @{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = $goodReply }
+    )) {
+    $result = Invoke-Guard ($allowStop | ConvertTo-Json -Compress) -ScriptPath $stopHookPath
+    Assert-Equal $result.exitCode 0 'stop hook 放行必须 exit 0。'
+    Assert-Equal $result.stdout.Trim() '' "stop hook 放行时不得输出决定：stop_hook_active=$($allowStop.stop_hook_active)"
+}
+$stopGarbage = Invoke-Guard 'not json' -ScriptPath $stopHookPath
+Assert-Equal $stopGarbage.stdout.Trim() '' 'stop hook 遇到非 JSON 输入必须放行。'
+
 $managed = Get-Content -LiteralPath $managedHooksPath -Raw | ConvertFrom-Json
 $registration = @($managed.PreToolUse)
 Assert-Equal $registration.Count 1 '受管注册只含一条 PreToolUse。'
@@ -126,6 +150,11 @@ $hook = @($registration[0].hooks)[0]
 Assert-Equal $hook.command $node 'hook 必须用受管 node 的 exec 形式。'
 Assert-Equal @($hook.args)[0] $guardPath 'hook 参数必须指向受管 guard。'
 Assert-Equal $hook.onFailure 'continue' 'guard 自身故障必须放行（onFailure=continue）。'
+$stopRegistration = @($managed.Stop)
+Assert-Equal $stopRegistration.Count 1 '受管注册只含一条 Stop。'
+$stopHook = @($stopRegistration[0].hooks)[0]
+Assert-Equal $stopHook.command $node 'Stop hook 必须用受管 node 的 exec 形式。'
+Assert-Equal @($stopHook.args)[0] $stopHookPath 'Stop hook 参数必须指向受管 lint。'
 
 if (Test-Path -LiteralPath $liveSettingsPath -PathType Leaf) {
     $live = Get-Content -LiteralPath $liveSettingsPath -Raw | ConvertFrom-Json
