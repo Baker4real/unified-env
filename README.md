@@ -37,7 +37,7 @@ intent: 说明统一环境项目的能力、入口和当前治理边界
 - 迁移政策：`docs/env-governance/d-drive-layout-and-migration-policy.md`
 - Codex 远端插件 catalog guard：`docs/env-governance/remote-plugin-catalog-guard.md`
 - Skill Catalog 仓库源：`modules/skill-supply-chain/implementation/generate_skill_catalog.py`、`scripts/generate_skill_catalog.py`、`docs/plans/2026-07-13-local-skill-catalog-implementation.md`
-- Skill 安装事务的仓库源由 module implementation 中的共享 `SOURCE.md` 解析器、catalog generator、installer 与根 command adapter 组成四文件部署闭包；现役 `D:\Codex\.codex\scripts\` 是受管部署产物，installer 从同目录解析其依赖，不依赖项目源仓库路径。后续源文件变更、移动或拆分仓库前必须通过 `scripts/Deploy-SkillInstallGuarded.ps1` 重新部署并核验 hash；现役入口仍是 `D:\Codex\.codex\scripts\install-skill-guarded.cmd`；设计见 `docs/specs/2026-07-14-skill-install-guarded-wrapper.md`。
+- Skill 安装事务的仓库源由 module implementation 中的共享 `SOURCE.md` 解析器、catalog generator、system provenance repair、Store identity provider、installer 入口及其模块与根 command adapter 组成部署闭包（完整清单见 `scripts/Deploy-SkillInstallGuarded.ps1` 的 `$sourceFiles`）；现役 `D:\Codex\.codex\scripts\` 是受管部署产物，installer 从同目录解析其依赖，不依赖项目源仓库路径。后续源文件变更、移动或拆分仓库前必须通过 `scripts/Deploy-SkillInstallGuarded.ps1` 重新部署并核验 hash；现役入口仍是 `D:\Codex\.codex\scripts\install-skill-guarded.cmd`；设计见 `docs/specs/2026-07-14-skill-install-guarded-wrapper.md`。
 - Codex 主机钩子治理：`docs/specs/2026-07-11-host-hook-reconciliation-design.md`
 - Codex Hook 治理设计：`docs/specs/2026-07-11-codex-hook-governance-design.md`
 - 功能钩子分层恢复设计/计划：`docs/specs/2026-07-13-functional-hook-preflight-design.md`、`docs/plans/2026-07-13-functional-hook-preflight.md`

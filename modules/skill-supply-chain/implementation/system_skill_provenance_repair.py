@@ -607,7 +607,7 @@ def evaluate_system_closure_gate(
     targets: list[str],
     label: str,
 ) -> dict[str, Any]:
-    """Same baseline-diff + target rule as install_skill_guarded.evaluate_closure_gate."""
+    """Same baseline-diff + target rule as install_skill_guarded_closure.evaluate_closure_gate."""
 
     gate = {
         "label": label,

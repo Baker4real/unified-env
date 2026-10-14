@@ -123,7 +123,7 @@ inventory、marker/provider CAS 和 catalog/ledger postcondition 复核；任一
 按目录与 state CAS 回滚，外部并发字节不被覆盖。ledger 只保存 overlay 的 hash
 projection，不保存候选临时路径或 payload 字节。
 
-受管发布顺序是：源码定向/模块测试通过；`Deploy-SkillInstallGuarded.ps1 -WhatIf` 证明六文件部署闭包；独立 review 通过后才实际部署六文件并核验 deployment manifest/hash；再从当时 live facts 生成新的 repair plan，先 dry-run 后 apply；最后复核稳定性、strict closure、catalog、ledger、五个 SOURCE 与 review parity。只有这些 live 验收通过后，后续任务才可激活依赖该能力的 `subagent-orchestration`；源码存在、WhatIf 或 fixture green 都不等于已部署/已激活。
+受管发布顺序是：源码定向/模块测试通过；`Deploy-SkillInstallGuarded.ps1 -WhatIf` 证明完整部署闭包；独立 review 通过后才实际部署该闭包并核验 deployment manifest/hash；再从当时 live facts 生成新的 repair plan，先 dry-run 后 apply；最后复核稳定性、strict closure、catalog、ledger、五个 SOURCE 与 review parity。只有这些 live 验收通过后，后续任务才可激活依赖该能力的 `subagent-orchestration`；源码存在、WhatIf 或 fixture green 都不等于已部署/已激活。
 
 ## Canonical rename
 
@@ -212,4 +212,4 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
 
 部署入口必须以隔离模式验证目标受管 Python 可以导入 PyYAML，并确认 `yaml.safe_load` 可调用；真实 `install-skill-guarded.cmd` 也必须用 `python -X utf8 -I` 启动 wrapper，使部署探针与运行态保持相同的导入隔离，并避免非 UTF-8 Windows runner 在输出中文帮助时触发编码失败。缺失、同名模块劫持或 API 不兼容时不得报告部署成功。
 
-项目源部署闭包的 Python 实现位于 `modules\skill-supply-chain\implementation\`，由 `skill_source_record.py`、`generate_skill_catalog.py`、`system_skill_provenance_repair.py`、`system_package_identity.py`、`install_skill_guarded.py` 组成，command adapter 仍位于根 `scripts\install-skill-guarded.cmd`；根目录 `scripts\` 同时保留稳定 Python adapters，部署脚本从 module implementation 复制 Python runtime 并绑定 command adapter。部署后 installer、catalog 与 system repair 从同目录加载各自受管依赖，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁 module implementation、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。
+项目源部署闭包的 Python 实现位于 `modules\skill-supply-chain\implementation\`，由 `skill_source_record.py`、`generate_skill_catalog.py`、`system_skill_provenance_repair.py`、`system_package_identity.py`、installer 入口 `install_skill_guarded.py` 及其 `install_skill_guarded_*.py` 模块组成（完整清单以部署脚本的 `$sourceFiles` 为准，`reconcile_skill_source_records.py` 的 `RUNTIME_FILES` 与之一致，由 `Test-SkillInstallGuardedStructure.py` 校验），command adapter 仍位于根 `scripts\install-skill-guarded.cmd`；根目录 `scripts\` 同时保留稳定 Python adapters，部署脚本从 module implementation 复制 Python runtime 并绑定 command adapter。部署后 installer、catalog 与 system repair 从同目录加载各自受管依赖，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁 module implementation、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。

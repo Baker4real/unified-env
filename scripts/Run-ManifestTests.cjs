@@ -11,11 +11,20 @@ const TEST_KINDS = Object.freeze(['python', 'node']);
 // Fixture tests that build temporary fixtures but launch a host script kept outside this repository,
 // which CI runners do not have. They keep running locally; --exclude-host-bound reports each one with
 // its reason instead of running it. Tests that read live host state belong in the host-live profile.
+const SKILL_RESOURCE_CLOSURE = 'runs the resource closure script '
+  + 'D:\\agents\\skills-manager\\skills\\skill-install-guard\\scripts\\skill_resource_closure.py '
+  + 'from the skills repository';
 const HOST_BOUND_TESTS = Object.freeze({
-  'modules/skill-supply-chain/tests/Test-SkillInstallGuarded.py':
-    'runs the resource closure script '
-    + 'D:\\agents\\skills-manager\\skills\\skill-install-guard\\scripts\\skill_resource_closure.py '
-    + 'from the skills repository',
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuarded.py': SKILL_RESOURCE_CLOSURE,
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuardedBundled.py': SKILL_RESOURCE_CLOSURE,
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuardedCanonicalRename.py': SKILL_RESOURCE_CLOSURE,
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuardedDecision.py': SKILL_RESOURCE_CLOSURE,
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuardedLedger.py': SKILL_RESOURCE_CLOSURE,
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuardedMergeRetirement.py': SKILL_RESOURCE_CLOSURE,
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuardedPayload.py': SKILL_RESOURCE_CLOSURE,
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuardedSourceRecord.py': SKILL_RESOURCE_CLOSURE,
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemOverlay.py': SKILL_RESOURCE_CLOSURE,
+  'modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemRepair.py': SKILL_RESOURCE_CLOSURE,
   'tests/Test-RetiredSkillBackupManifestPurger.cjs':
     'runs the deployed D:\\Codex\\.codex\\scripts\\purge-retired-skill-backups.cjs, '
     + 'whose source is not in this repository',
