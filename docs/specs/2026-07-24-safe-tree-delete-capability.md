@@ -92,6 +92,21 @@ boolean；v4 缺失时为 `false`，v5 必须显式提供。任一为 `true` 时
 同父、随机 generation 绑定的 quarantine。Purge 仍校验原计划、transaction、当前树与文件
 identity；只有 `purging` 中断恢复允许当前树成为原计划的未变子集，其他路径仍要求完整清单。
 
+加载器在逐条校验之后执行三条结构规则（#84，spec #73「实现决策 › 加载器结构规则」），任一违例都让整个
+policy 失败关闭，不部分采用：
+
+- `deny-deeper-than-minimum-depth`：deny 相对所属 root 的深度（与 Plan 同一口径，即 root 之后的路径段数）
+  不得大于该条目的最小后代深度；更深的 deny 可以经删除它的祖先目录绕过。
+- `deny-on-depth-zero-entry`：最小后代深度为 0 的条目不得带 deny，deny 会随 root 一起被删掉。
+- `nested-root-not-denied`：一条 root 严格位于另一条 root 之内时（大小写不敏感、忽略尾随分隔符；只共享
+  字符串前缀的兄弟目录不算），父条目必须有一条 deny 精确等于子 root，否则传入父 root 就能绕过子条目更严格
+  的约束。这条 deny 同样受第一条规则约束，所以子 root 相对父 root 的深度不得大于父条目的最小后代深度。深度
+  0 的子 root 也不例外：在已有条目覆盖的父根下登记 `retired-evidence-root` 这类精确 root 删除条目时，父条目
+  必须同时精确 deny 该 root。
+
+拒绝原文给出第一处违例的规则名、条目 id 与 deny 序号（嵌套违例没有 deny 序号），多于一处时另给违例总数；
+不回显 root 或 deny 路径。全部违例用 `Lint` 逐条查看。
+
 `rootDeletionPurpose` 在 Plan、Status、Apply、Restore 与 Purge 复验时都从**当前 policy 的对应
 entry**读取，不从 plan 或 transaction 快照取值。plan 只持久化 `policyEntryId` 以及当时的
 policy path/SHA，不写入 purpose 值。因此修改某 entry 的 purpose 会追溯翻转所有引用该 entry
@@ -418,7 +433,8 @@ capability 路径校验、现存普通目录。每个目标返回 `{targetPath, 
 depth, refusalReason, refusalMessage, candidates?}`，`refusalMessage` 与同一 CapabilityRoot 下 Plan 抛出的
 拒绝原文逐字相同。省略 CapabilityRoot 时对每条条目运行同一判定，root 包含目标的条目都是候选：恰好一条放行
 才采用；零条以 `no-capability-root`、多条以 `ambiguous-capability-root` 拒绝，并在 `candidates` 列出全部
-候选及各自判定；目标路径本身非法时仍以 `invalid-target-path` 拒绝。Check 只读 policy 与目标路径的文件系统
+候选及各自判定；目标路径本身非法时仍以 `invalid-target-path` 拒绝。结构规则 `nested-root-not-denied` 要求
+父条目精确 deny 子 root，所以嵌套 root 下的目标只有子条目能放行。Check 只读 policy 与目标路径的文件系统
 属性，不读历史、不写 evidence、不建 run 目录；拒绝都在 JSON 里表达，顶层没有 `refusalReason`，退出码约定
 不变；缺目标或两者都给是普通 throw 的用法错误。它只预报目标解析这一层：Plan 随后还会核对
 retired-evidence-root 一次性授权是否已消费（读历史）、目标卷的 `FILE_ID_INFO` 能力和完整子树（未授权的
@@ -427,12 +443,14 @@ Plan、Apply、Purge 仍要求显式 `CapabilityRoot`。
 
 只读体检使用 `Lint`（#79）：不需要确认参数、不使用目标参数，只报告、不拦截。它另读一次 policy 原文并调用
 现役加载器：加载器拒绝时报 `policy-load-refused`（加载器停在第一条违例），另按条目逐条报告重复 id、重复
-capability root（规范化后大小写不敏感）与深度 0 未声明 root 删除用途。三条加载器结构规则只在
-`Get-CodexSafeTreeDeletePolicyStructureViolations` 实现一次：deny 深度（与 Plan 同一口径，即 root 之后的路径
-段数）不得大于最小后代深度；最小后代深度为 0 的条目不得带 deny；一条 root 严格位于另一条 root 之内时，父条目
-必须有 deny 精确等于子 root。Lint 直接调用该函数，加载器的 fail-closed 执行属于 #84。以上都记 `error`；结果的
-`nestedRoots` 列出全部严格嵌套对及其是否被覆盖。宿主规则记 `warning`：capability root 不存在（或是文件）、按
-固定路径前缀推导的 owner 不存在（`Get-CodexSafeTreeDeletePolicyEntryOwner`；推导不出的为 host 级，不检查；
+capability root（规范化后大小写不敏感）与深度 0 未声明 root 删除用途；条目 id、最小后代深度与深度 0 用途
+集合的取值规则与加载器共用同一实现。三条加载器结构规则（见「固定入口」段）只在
+`Get-CodexSafeTreeDeletePolicyStructureViolations` 实现一次，加载器与 Lint 都调用它：加载器任一违例即拒绝
+整个 policy，Lint 逐条报告全部违例（这时同时有 `policy-load-refused`）。以上都记 `error`，合称结构部分
+`Get-CodexSafeTreeDeletePolicyStructureLint`：只读 policy 文件本身，不探测 root、deny、owner 或 evidence，
+结论与宿主无关；CI 以仓库 policy 为输入运行它（`tests/Test-CodexSafeTreeDeletePolicyStructure.ps1`，必须零
+finding）。结果的 `nestedRoots` 列出全部严格嵌套对及其是否被覆盖。
+宿主规则记 `warning`：capability root 不存在（或是文件）、按固定路径前缀推导的 owner 不存在（`Get-CodexSafeTreeDeletePolicyEntryOwner`；推导不出的为 host 级，不检查；
 owner 不写入 policy）、deny 指向现存文件、deny 指向不存在的路径。evidence 根不存在时只报告、不创建；存在时
 先过与 `Status` 相同的只读路径校验再枚举，不读文件内容、不跟随 reparse point。run 目录是 evidence 根顶层、
 名字为 producer run id 的普通目录；规范 transaction 位置是 `<evidence 根>\<顶层目录>\transaction.json`（与
