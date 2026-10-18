@@ -536,6 +536,13 @@ try {
     $dryChanges = @($dryResult.Json.changes)
     Assert-True ($dryChanges.Count -eq 1 -and [string]$dryChanges[0].op -ceq 'add-deny' -and
         [string]$dryChanges[0].entryId -ceq 'fixture-main') "dry-run: changes 摘要不符：$($dryResult.Text)"
+    # structure 字段按既有输出合同保留：加载器已对现役与候选执行三条结构规则（#84），三个列表恒为空。
+    $dryStructure = $dryResult.Json.structure
+    Assert-True ($null -ne $dryStructure -and
+        (@($dryStructure.PSObject.Properties.Name) -join ',') -ceq 'liveViolations,newViolations,resolvedViolations' -and
+        @($dryStructure.liveViolations).Count -eq 0 -and
+        @($dryStructure.newViolations).Count -eq 0 -and
+        @($dryStructure.resolvedViolations).Count -eq 0) "dry-run: structure 必须保留且三个列表为空：$($dryResult.Text)"
     # gap 3：SafeCleanupJob 描述符不在工具视野内，输出按 job 的 policy 比对口径报告条目变化。
     $cleanupJob = $dryResult.Json.safeCleanupJob
     Assert-True (@($cleanupJob.changedExistingEntryIds).Count -eq 1 -and
