@@ -1406,10 +1406,14 @@ try {
         [string]$parentAnalogEntries[0].rootDeletionPurpose -ceq 'none' -and
         [string]$parentAnalogEntries[0].capabilityRoot -ceq $capabilityRoot
     ) '合成父条目必须是深度 2 / none，且不降低 analog 默认深度'
+    # 结构规则 3（#84）：父条目除 safe-tree-delete analog 外，还必须精确 deny 每个获批的子 root。
+    $expectedParentDenies = @($protectedEvidenceRoot) + @($approvedTargets | ForEach-Object {
+            [IO.Path]::GetFullPath([string]$_.path)
+        })
     Assert-True (
-        @($parentAnalogEntries[0].deniedExactPaths).Count -eq 1 -and
-        [string]$parentAnalogEntries[0].deniedExactPaths[0] -ceq $protectedEvidenceRoot
-    ) '合成父条目必须精确拒绝 safe-tree-delete analog'
+        (@($parentAnalogEntries[0].deniedExactPaths | ForEach-Object { [string]$_ }) -join "`n") -ceq
+            ($expectedParentDenies -join "`n")
+    ) '合成父条目必须精确拒绝 safe-tree-delete analog 与每个获批子 root'
 
     foreach ($approved in $approvedTargets) {
         $approvedPath = [IO.Path]::GetFullPath([string]$approved.path)

@@ -534,8 +534,8 @@ function Test-CodexSafeTreeDeletePathEqual {
 }
 
 function Get-CodexSafeTreeDeletePathDepthWithin {
-    # 与 Resolve-CodexSafeTreeDeleteTarget 同一深度口径：root 之后的非空路径段数。
-    # 调用方保证 Path 位于 Root 之内（Test-CodexHookPathWithin）；两端的尾随分隔符不计段。
+    # 深度口径的唯一实现：root 之后的非空路径段数。目标判定（Get-CodexSafeTreeDeleteTargetDecision）与
+    # 结构规则 1 都调用它。调用方保证 Path 位于 Root 之内（Test-CodexHookPathWithin）；两端的尾随分隔符不计段。
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Root
@@ -548,8 +548,30 @@ function Get-CodexSafeTreeDeletePathDepthWithin {
     return [long]@($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 }).Count
 }
 
+# 以下三条 policy 条目取值规则各只实现一次，加载器（Read-CodexSafeTreeDeletePolicy）与 Lint 都调用它们。
+function Test-CodexSafeTreeDeletePolicyEntryId {
+    param([AllowNull()][object]$Value)
+
+    return $Value -is [string] -and $Value -match '^[a-z0-9][a-z0-9-]{0,63}$'
+}
+
+function Test-CodexSafeTreeDeletePolicyMinimumDepth {
+    # minimumDescendantDepth：JSON integer，0 到 16。
+    param([AllowNull()][object]$Value)
+
+    return $Value -is [long] -and [long]$Value -ge 0 -and [long]$Value -le 16
+}
+
+function Test-CodexSafeTreeDeletePolicyRootDeletionPurposeUndeclared {
+    # 深度 0 的条目必须声明其中一种 root 删除用途；不是其中之一（含非 string）即为未声明。
+    param([AllowNull()][object]$Value)
+
+    return $Value -isnot [string] -or
+        [string]$Value -cnotin @('rebuildable-build-output', 'empty-project-state', 'retired-project-root', 'retired-evidence-root')
+}
+
 function Get-CodexSafeTreeDeletePolicyStructureViolations {
-    # spec #73「加载器结构规则」的唯一实现。Lint 的结构部分直接调用；#84 让加载器调用同一函数并 fail-closed。
+    # spec #73「加载器结构规则」的唯一实现。加载器（任一违例即 fail-closed）与 Lint 的结构部分都调用它。
     # Entries：已规范化的条目（id、capabilityRoot、minimumDescendantDepth、deniedExactPaths；路径已过
     # Assert-CodexHookDPath）。纯字符串运算，不访问文件系统，不抛错。
     # 返回 violations（rule、entryId、denyIndex、detail；detail 不含路径）与 nestedRoots（parentEntryId、
@@ -593,18 +615,57 @@ function Get-CodexSafeTreeDeletePolicyStructureViolations {
     # 规则 3：条目按 CapabilityRoot 精确匹配选择，子 root 若没有被父条目的 deny 精确覆盖，传入父 root
     # 就能绕过子条目更严格的约束。按字面对所有「严格位于另一条 root 之内」的组合检查（含多级嵌套）；
     # 相等的 root 是重复 root，由既有加载约束报告。路径比较大小写不敏感、忽略尾随分隔符。
+    # 包含关系与 Test-CodexHookPathWithin 同一口径；加载器每次加载都调用本函数，所以按「子 root 本身及其
+    # 每个祖先前缀」查表找父条目，不做两两比较。结果按（父条目序号，子条目序号）排列。
     $nestedRoots = [Collections.Generic.List[object]]::new()
     $entryList = @($Entries)
-    foreach ($parent in $entryList) {
-        $parentRoot = [string]$parent.capabilityRoot
-        foreach ($child in $entryList) {
-            $childRoot = [string]$child.capabilityRoot
-            if ([StringComparer]::OrdinalIgnoreCase.Equals($parentRoot.TrimEnd('\', '/'), $childRoot.TrimEnd('\', '/')) -or
-                -not (Test-CodexHookPathWithin -Path $childRoot -ParentPath $parentRoot)) {
-                continue
+    $entryCount = $entryList.Count
+    $literalRoots = [string[]]::new($entryCount)
+    $fullRoots = [string[]]::new($entryCount)
+    $indexesByFullRoot = [Collections.Generic.Dictionary[string, Collections.Generic.List[int]]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    for ($index = 0; $index -lt $entryCount; $index++) {
+        $root = [string]$entryList[$index].capabilityRoot
+        $literalRoots[$index] = $root.TrimEnd('\', '/')
+        $fullRoot = [IO.Path]::GetFullPath($root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+        $fullRoots[$index] = $fullRoot
+        if (-not $indexesByFullRoot.ContainsKey($fullRoot)) {
+            $indexesByFullRoot[$fullRoot] = [Collections.Generic.List[int]]::new()
+        }
+        $indexesByFullRoot[$fullRoot].Add($index)
+    }
+    $childIndexesByParent = [object[]]::new($entryCount)
+    for ($childIndex = 0; $childIndex -lt $entryCount; $childIndex++) {
+        $childFullRoot = $fullRoots[$childIndex]
+        $prefixes = [Collections.Generic.List[string]]::new()
+        $prefixes.Add($childFullRoot)
+        $separator = $childFullRoot.IndexOf([IO.Path]::DirectorySeparatorChar)
+        while ($separator -ge 0) {
+            $prefixes.Add($childFullRoot.Substring(0, $separator))
+            $separator = $childFullRoot.IndexOf([IO.Path]::DirectorySeparatorChar, $separator + 1)
+        }
+        foreach ($prefix in $prefixes) {
+            $parentIndexes = $null
+            if (-not $indexesByFullRoot.TryGetValue($prefix, [ref]$parentIndexes)) { continue }
+            foreach ($parentIndex in $parentIndexes) {
+                if ([StringComparer]::OrdinalIgnoreCase.Equals($literalRoots[$parentIndex], $literalRoots[$childIndex])) {
+                    continue
+                }
+                if ($null -eq $childIndexesByParent[$parentIndex]) {
+                    $childIndexesByParent[$parentIndex] = [Collections.Generic.List[int]]::new()
+                }
+                $childIndexesByParent[$parentIndex].Add($childIndex)
             }
+        }
+    }
+    for ($parentIndex = 0; $parentIndex -lt $entryCount; $parentIndex++) {
+        if ($null -eq $childIndexesByParent[$parentIndex]) { continue }
+        $parent = $entryList[$parentIndex]
+        foreach ($childIndex in $childIndexesByParent[$parentIndex]) {
+            $child = $entryList[$childIndex]
+            $childRoot = $literalRoots[$childIndex]
             $covered = @(@($parent.deniedExactPaths) | Where-Object {
-                    [StringComparer]::OrdinalIgnoreCase.Equals(([string]$_).TrimEnd('\', '/'), $childRoot.TrimEnd('\', '/'))
+                    [StringComparer]::OrdinalIgnoreCase.Equals(([string]$_).TrimEnd('\', '/'), $childRoot)
                 }).Count -gt 0
             $nestedRoots.Add([pscustomobject][ordered]@{
                 parentEntryId = [string]$parent.id
@@ -755,16 +816,16 @@ function ConvertTo-CodexSafeTreeDeleteLintRedactedText {
 }
 
 function ConvertTo-CodexSafeTreeDeleteLintEntry {
-    # 把一条原文条目规范成结构规则的输入。字段类型、id、深度与路径校验与加载器同口径；任何一项
-    # 不合规都返回 $null，该条目不参与结构规则，由加载器裁决（policy-load-refused）报告。
+    # 把一条原文条目规范成结构规则的输入。id 与深度调用加载器同一组取值规则，字段类型与路径校验与加载器
+    # 同口径；任何一项不合规都返回 $null，该条目不参与结构规则，由加载器裁决（policy-load-refused）报告。
     param([AllowNull()][object]$RawEntry)
 
     $id = Get-CodexSafeTreeDeleteLintJsonProperty -Object $RawEntry -Name 'id'
     $capabilityRoot = Get-CodexSafeTreeDeleteLintJsonProperty -Object $RawEntry -Name 'capabilityRoot'
     $minimumDepth = Get-CodexSafeTreeDeleteLintJsonProperty -Object $RawEntry -Name 'minimumDescendantDepth'
     $deniedExactPaths = Get-CodexSafeTreeDeleteLintJsonProperty -Object $RawEntry -Name 'deniedExactPaths'
-    if ($id -isnot [string] -or $id -notmatch '^[a-z0-9][a-z0-9-]{0,63}$' -or
-        $minimumDepth -isnot [long] -or [long]$minimumDepth -lt 0 -or [long]$minimumDepth -gt 16 -or
+    if (-not (Test-CodexSafeTreeDeletePolicyEntryId -Value $id) -or
+        -not (Test-CodexSafeTreeDeletePolicyMinimumDepth -Value $minimumDepth) -or
         $deniedExactPaths -isnot [Array]) {
         return $null
     }
@@ -788,17 +849,14 @@ function ConvertTo-CodexSafeTreeDeleteLintEntry {
     }
 }
 
-function Invoke-CodexSafeTreeDeleteLint {
-    # Lint mode（#79，spec #73「实现决策 › Lint 模式」）：只读体检，只报告、不拦截。
-    # 结构问题记 error，宿主漂移与 evidence 布局问题记 warning；不写 evidence、不创建 evidence 根、
-    # 不改 policy。结果以 JSON 表达，没有 refusalReason，所以入口退出码恒按既有 JSON 约定为 0。
-    param(
-        [Parameter(Mandatory)][string]$PolicyPath,
-        [Parameter(Mandatory)][string]$EvidenceRoot
-    )
+function Get-CodexSafeTreeDeletePolicyStructureLint {
+    # Lint 的结构部分（spec #73「实现决策 › Lint 模式」）：只读 policy 文件本身，不探测 root、deny、owner 或
+    # evidence，结论与宿主无关；CI 以仓库 policy 为输入运行它（tests\Test-CodexSafeTreeDeletePolicyStructure.ps1）。
+    # 加载器裁决之外，按条目逐条报告重复 id、重复 root、深度 0 未声明用途与三条结构规则，全部记 error。
+    # evaluatedEntries 是参与结构规则的规范化条目（含 root 与 deny），只供 Lint 的宿主规则使用，不输出。
+    param([Parameter(Mandatory)][string]$PolicyPath)
 
     $fullPolicyPath = Assert-CodexHookDPath -Value $PolicyPath -Name 'safe-delete lint policy path'
-    $fullEvidenceRoot = Assert-CodexHookDPath -Value $EvidenceRoot -Name 'safe-delete lint evidence root'
     $findings = [Collections.Generic.List[object]]::new()
 
     # 加载器在第一条违例处抛错；Lint 另读一次原文，才能在 policy 不可加载时仍逐条报告。
@@ -851,7 +909,7 @@ function Invoke-CodexSafeTreeDeleteLint {
         $rawEntry = $rawEntryList[$entryIndex]
         $rawId = Get-CodexSafeTreeDeleteLintJsonProperty -Object $rawEntry -Name 'id'
         $entryId = $null
-        if ($rawId -is [string] -and $rawId -match '^[a-z0-9][a-z0-9-]{0,63}$') { $entryId = [string]$rawId }
+        if (Test-CodexSafeTreeDeletePolicyEntryId -Value $rawId) { $entryId = [string]$rawId }
         $entryIds.Add($entryId)
         if ($null -ne $entryId) {
             if ($firstIndexById.ContainsKey($entryId)) {
@@ -890,8 +948,7 @@ function Invoke-CodexSafeTreeDeleteLint {
         $rawDepth = Get-CodexSafeTreeDeleteLintJsonProperty -Object $rawEntry -Name 'minimumDescendantDepth'
         $rawPurpose = Get-CodexSafeTreeDeleteLintJsonProperty -Object $rawEntry -Name 'rootDeletionPurpose'
         if ($rawDepth -is [long] -and [long]$rawDepth -eq 0 -and
-            ($rawPurpose -isnot [string] -or
-                [string]$rawPurpose -cnotin @('rebuildable-build-output', 'empty-project-state', 'retired-project-root', 'retired-evidence-root'))) {
+            (Test-CodexSafeTreeDeletePolicyRootDeletionPurposeUndeclared -Value $rawPurpose)) {
             $findings.Add([pscustomobject][ordered]@{
                 rule = 'depth-zero-purpose-required'
                 severity = 'error'
@@ -919,8 +976,40 @@ function Invoke-CodexSafeTreeDeleteLint {
         $findings.Add([pscustomobject]$finding)
     }
 
+    return [pscustomobject][ordered]@{
+        policy = [pscustomobject][ordered]@{
+            path = $fullPolicyPath
+            sha256 = $rawSha256
+            schemaVersion = if ($rawSchemaVersion -is [long]) { [long]$rawSchemaVersion } else { $null }
+            entryCount = $rawEntryList.Count
+            evaluatedEntryCount = $evaluableEntries.Count
+            loadable = $null -ne $loadedPolicy
+        }
+        nestedRoots = @($structure.nestedRoots)
+        findings = $findings.ToArray()
+        evaluatedEntries = $evaluableEntries.ToArray()
+    }
+}
+
+function Invoke-CodexSafeTreeDeleteLint {
+    # Lint mode（#79，spec #73「实现决策 › Lint 模式」）：只读体检，只报告、不拦截。
+    # 结构问题记 error，宿主漂移与 evidence 布局问题记 warning；不写 evidence、不创建 evidence 根、
+    # 不改 policy。结果以 JSON 表达，没有 refusalReason，所以入口退出码恒按既有 JSON 约定为 0。
+    param(
+        [Parameter(Mandatory)][string]$PolicyPath,
+        [Parameter(Mandatory)][string]$EvidenceRoot
+    )
+
+    $fullPolicyPath = Assert-CodexHookDPath -Value $PolicyPath -Name 'safe-delete lint policy path'
+    $fullEvidenceRoot = Assert-CodexHookDPath -Value $EvidenceRoot -Name 'safe-delete lint evidence root'
+
+    # 结构部分不依赖宿主，与 CI 以仓库 policy 为输入运行的是同一个函数。
+    $structureLint = Get-CodexSafeTreeDeletePolicyStructureLint -PolicyPath $fullPolicyPath
+    $findings = [Collections.Generic.List[object]]::new()
+    foreach ($structureFinding in @($structureLint.findings)) { $findings.Add($structureFinding) }
+
     # 宿主规则：只读的存在性检查，全部记 warning。deny 类发现只给条目 id 与 deny 序号，不回显路径。
-    foreach ($entry in $evaluableEntries) {
+    foreach ($entry in @($structureLint.evaluatedEntries)) {
         $root = [string]$entry.capabilityRoot
         if (-not [IO.Directory]::Exists($root)) {
             $findings.Add([pscustomobject][ordered]@{
@@ -1008,14 +1097,7 @@ function Invoke-CodexSafeTreeDeleteLint {
     return [pscustomobject][ordered]@{
         errorCount = @($findings | Where-Object { [string]$_.severity -ceq 'error' }).Count
         warningCount = @($findings | Where-Object { [string]$_.severity -ceq 'warning' }).Count
-        policy = [pscustomobject][ordered]@{
-            path = $fullPolicyPath
-            sha256 = $rawSha256
-            schemaVersion = if ($rawSchemaVersion -is [long]) { [long]$rawSchemaVersion } else { $null }
-            entryCount = $rawEntryList.Count
-            evaluatedEntryCount = $evaluableEntries.Count
-            loadable = $null -ne $loadedPolicy
-        }
+        policy = $structureLint.policy
         evidence = [pscustomobject][ordered]@{
             root = $fullEvidenceRoot
             exists = $evidenceExists
@@ -1024,7 +1106,7 @@ function Invoke-CodexSafeTreeDeleteLint {
             transactionFiles = [long]$layout.transactionFiles
             nonCanonicalTransactionFiles = [long]@($layout.nonCanonicalTransactions).Count
         }
-        nestedRoots = @($structure.nestedRoots)
+        nestedRoots = @($structureLint.nestedRoots)
         findings = $findings.ToArray()
     }
 }
@@ -1118,7 +1200,7 @@ function Read-CodexSafeTreeDeletePolicy {
             throw 'safe-delete policy entry id、capabilityRoot 与 rootDeletionPurpose 必须是 JSON string。'
         }
         $id = [string]$entry.id
-        if ($id -notmatch '^[a-z0-9][a-z0-9-]{0,63}$' -or -not $ids.Add($id)) {
+        if (-not (Test-CodexSafeTreeDeletePolicyEntryId -Value $id) -or -not $ids.Add($id)) {
             throw 'safe-delete policy entry id 非法或重复。'
         }
         $root = Assert-CodexHookDPath -Value ([string]$entry.capabilityRoot) -Name "safe-delete policy $id root"
@@ -1130,15 +1212,14 @@ function Read-CodexSafeTreeDeletePolicy {
             throw "safe-delete policy $id minimumDescendantDepth 必须是 JSON integer。"
         }
         $minimumDepth = [long]$entry.minimumDescendantDepth
-        if ($minimumDepth -lt 0 -or $minimumDepth -gt 16) {
+        if (-not (Test-CodexSafeTreeDeletePolicyMinimumDepth -Value $minimumDepth)) {
             throw "safe-delete policy $id minimumDescendantDepth 非法。"
         }
         $rootDeletionPurpose = [string]$entry.rootDeletionPurpose
         if ($rootDeletionPurpose -notin @('none', 'rebuildable-build-output', 'empty-project-state', 'retired-project-root', 'retired-evidence-root')) {
             throw "safe-delete policy $id rootDeletionPurpose 非法。"
         }
-        if ($minimumDepth -eq 0 -and
-            $rootDeletionPurpose -cnotin @('rebuildable-build-output', 'empty-project-state', 'retired-project-root', 'retired-evidence-root')) {
+        if ($minimumDepth -eq 0 -and (Test-CodexSafeTreeDeletePolicyRootDeletionPurposeUndeclared -Value $rootDeletionPurpose)) {
             throw "safe-delete policy $id 深度 0 必须显式限定 root 删除用途。"
         }
         if ($minimumDepth -gt 0 -and $rootDeletionPurpose -cne 'none') {
@@ -1232,6 +1313,21 @@ function Read-CodexSafeTreeDeletePolicy {
         })
     }
 
+    # spec #73「加载器结构规则」（#84）：与 Lint 结构部分同一实现。任一违例都让整个 policy fail-closed。
+    # 拒绝原文给出第一处违例的规则名、条目 id 与 deny 序号，以及违例总数；不回显 root 或 deny（deny 可能是
+    # 个人路径），也不用全角冒号（Lint 与维护工具转述加载器拒绝时只保留全角冒号之前的部分）。
+    $structureViolations = @((Get-CodexSafeTreeDeletePolicyStructureViolations -Entries $canonicalEntries.ToArray()).violations)
+    if ($structureViolations.Count -ne 0) {
+        $firstViolation = $structureViolations[0]
+        $location = "条目 $([string]$firstViolation.entryId)"
+        if ($null -ne $firstViolation.denyIndex) { $location += "，deniedExactPaths[$([long]$firstViolation.denyIndex)]" }
+        $refusal = "safe-delete policy 违反结构规则 $([string]$firstViolation.rule)（$location）。$([string]$firstViolation.detail)"
+        if ($structureViolations.Count -gt 1) {
+            $refusal += "共 $($structureViolations.Count) 处结构违例，Lint mode 逐条列出。"
+        }
+        throw $refusal
+    }
+
     return [pscustomobject][ordered]@{
         path = $fullPolicyPath
         sha256 = [string]$snapshot.sha256
@@ -1318,8 +1414,7 @@ function Get-CodexSafeTreeDeleteTargetDecision {
             -Reason 'link-aware-requires-exact-root' `
             -Refusal 'safe-delete link-aware 能力只允许精确 capability root。'
     }
-    $relative = $fullTarget.Substring($fullRoot.Length).TrimStart('\', '/')
-    $decision.depth = @($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 }).Count
+    $decision.depth = Get-CodexSafeTreeDeletePathDepthWithin -Path $fullTarget -Root $fullRoot
     if ($decision.depth -lt [int]$entry[0].minimumDescendantDepth) {
         return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision `
             -Reason 'below-minimum-depth' `

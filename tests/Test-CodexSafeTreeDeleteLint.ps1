@@ -234,7 +234,8 @@ try {
     }
 
     # 2. 规则 1：deny 相对所属 root 的深度 ≤ 最小后代深度。等于、浅于都合规；更深的 deny 是 error，
-    #    只报条目 id 与 deny 序号。加载器本票不执行新规则，所以 policy 仍可加载。
+    #    只报条目 id 与 deny 序号。加载器执行同一组结构规则（#84），拒绝整个 policy：另有一条
+    #    policy-load-refused 转述加载器原文（规则名与条目 id，不含路径）。规则 2、3 同理。
     $rule1Root = Join-Path $scratchRoot 'rule1'
     $rule1A = Join-Path $rule1Root 'root-a'
     $rule1B = Join-Path $rule1Root 'root-b'
@@ -254,10 +255,14 @@ try {
     )
     $rule1Run = Invoke-Lint -PolicyPath $rule1PolicyPath -EvidenceRoot $rule1Evidence
     Assert-FindingKeys -Result $rule1Run.result -Scope '规则 1' -Expected @(
+        'policy-load-refused|error||',
         'deny-deeper-than-minimum-depth|error|lint-rule1-a|1'
     )
-    Assert-True ($rule1Run.result.errorCount -eq 1 -and $rule1Run.result.warningCount -eq 0) '规则 1 计数不符'
-    Assert-True ($rule1Run.result.policy.loadable -eq $true) '本票不改加载器：只违反新规则的 policy 仍可加载'
+    Assert-True ($rule1Run.result.errorCount -eq 2 -and $rule1Run.result.warningCount -eq 0) '规则 1 计数不符'
+    Assert-True ($rule1Run.result.policy.loadable -eq $false) '加载器必须拒绝违反规则 1 的 policy'
+    $rule1Refusal = @(Get-Findings -Result $rule1Run.result -Rule 'policy-load-refused')[0]
+    Assert-True ([string]$rule1Refusal.detail -clike '*deny-deeper-than-minimum-depth（条目 lint-rule1-a，deniedExactPaths`[1`]）*') (
+        "加载器拒绝发现必须保留规则名、条目 id 与 deny 序号：$($rule1Refusal.detail)")
     Assert-TextExcludesPath -Text $rule1Run.text -Path $rule1DeepDeny -Scope '规则 1 发现'
 
     # 3. 规则 2：最小后代深度为 0 的条目不得带 deny，逐条 deny 报告。deny 等于 root 只违反规则 2；
@@ -278,11 +283,12 @@ try {
     )
     $rule2Run = Invoke-Lint -PolicyPath $rule2PolicyPath -EvidenceRoot $rule2Evidence
     Assert-FindingKeys -Result $rule2Run.result -Scope '规则 2' -Expected @(
+        'policy-load-refused|error||',
         'deny-on-depth-zero-entry|error|lint-rule2-a|0',
         'deny-on-depth-zero-entry|error|lint-rule2-b|0',
         'deny-deeper-than-minimum-depth|error|lint-rule2-b|0'
     )
-    Assert-True ($rule2Run.result.policy.loadable -eq $true) '本票不改加载器：只违反规则 2 的 policy 仍可加载'
+    Assert-True ($rule2Run.result.policy.loadable -eq $false) '加载器必须拒绝违反规则 2 的 policy'
     Assert-TextExcludesPath -Text $rule2Run.text -Path (Join-Path $rule2B 'cache') -Scope '规则 2 发现'
 
     # 4. 规则 3：某条 root 严格位于另一条 root 之内时，父条目必须有一条 deny 精确等于子 root。
@@ -305,6 +311,7 @@ try {
     )
     $rule3Run = Invoke-Lint -PolicyPath $rule3PolicyPath -EvidenceRoot $rule3Evidence
     Assert-FindingKeys -Result $rule3Run.result -Scope '规则 3' -Expected @(
+        'policy-load-refused|error||',
         'nested-root-not-denied|error|lint-rule3-parent|'
     )
     $rule3Finding = @(Get-Findings -Result $rule3Run.result -Rule 'nested-root-not-denied')[0]
@@ -314,7 +321,7 @@ try {
         })
     Assert-True (($nested -join ';') -ceq 'lint-rule3-parent>lint-rule3-covered:true;lint-rule3-parent>lint-rule3-uncovered:false') (
         "嵌套关系清单不符：$($nested -join ';')")
-    Assert-True ($rule3Run.result.policy.loadable -eq $true) '本票不改加载器：只违反规则 3 的 policy 仍可加载'
+    Assert-True ($rule3Run.result.policy.loadable -eq $false) '加载器必须拒绝违反规则 3 的 policy'
     Assert-TextExcludesPath -Text $rule3Run.text -Path $rule3Covered -Scope '规则 3 结果'
     Assert-TextExcludesPath -Text $rule3Run.text -Path $rule3Uncovered -Scope '规则 3 结果'
 
@@ -553,24 +560,29 @@ try {
 
     # 10. 全程只读，只报告不拦截：policy 有 error、evidence 有 warning 时，Lint 前后整个 fixture 树
     #     （policy、evidence、junction 指向的外部目录、capability root）逐项不变；结果没有 refusalReason，
-    #     生产入口按既有 JSON 合同（只有 leaf-delete-failed 退出 1）退出 0。
+    #     生产入口按既有 JSON 合同（只有 leaf-delete-failed 退出 1）退出 0。有结构 error 的 policy 会被
+    #     加载器拒绝（#84），所以同一段只读证明里再跑一遍可加载的 layout policy，覆盖加载成功的路径。
     $readOnlyPolicyPath = Join-Path $layoutRoot 'policy-with-errors.json'
     Write-LintPolicy -Path $readOnlyPolicyPath -Entries @(
         (New-PolicyEntry -Id 'lint-readonly' -Root $layoutCapabilityRoot -Depth 0 -Purpose 'rebuildable-build-output' -Deny @((Join-Path $layoutCapabilityRoot 'kept')))
     )
     $stateBefore = Get-TreeState -Root $layoutRoot
     $readOnlyRun = Invoke-Lint -PolicyPath $readOnlyPolicyPath -EvidenceRoot $layoutEvidence
+    $loadableRun = Invoke-Lint -PolicyPath $layoutPolicyPath -EvidenceRoot $layoutEvidence
     $stateAfter = Get-TreeState -Root $layoutRoot
     if ($stateAfter -cne $stateBefore) {
         $changedLines = @(Compare-Object -ReferenceObject ($stateBefore -split "`n") -DifferenceObject ($stateAfter -split "`n") -CaseSensitive |
             ForEach-Object { '{0} {1}' -f $_.SideIndicator, $_.InputObject })
         throw "Lint 改动了 policy 或 evidence：$($changedLines -join '; ')"
     }
-    Assert-True ($readOnlyRun.result.policy.loadable -eq $true) '只读 fixture 的 policy 应能被现役加载器加载'
+    Assert-True ($readOnlyRun.result.policy.loadable -eq $false) '有结构 error 的 policy 必须被加载器拒绝'
+    Assert-True ($loadableRun.result.policy.loadable -eq $true) 'layout policy 必须可加载，覆盖加载成功时的只读路径'
     Assert-True ($readOnlyRun.result.errorCount -gt 0 -and $readOnlyRun.result.warningCount -gt 0) (
         "只读 fixture 应同时有 error 与 warning：$(Format-Findings -Result $readOnlyRun.result)")
-    Assert-True ($readOnlyRun.result.PSObject.Properties.Name -cnotcontains 'refusalReason') (
-        'Lint 结果不得带 refusalReason：Lint 只报告、不拦截，入口退出码必须为 0')
+    foreach ($run in @($readOnlyRun, $loadableRun)) {
+        Assert-True ($run.result.PSObject.Properties.Name -cnotcontains 'refusalReason') (
+            'Lint 结果不得带 refusalReason：Lint 只报告、不拦截，入口退出码必须为 0')
+    }
 } finally {
     foreach ($junctionPath in $junctionPaths) {
         if ([IO.Directory]::Exists($junctionPath)) { & $env:ComSpec /d /c rmdir $junctionPath | Out-Null }

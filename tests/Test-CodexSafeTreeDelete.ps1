@@ -12,11 +12,13 @@ $safeTreeDeleteLibraryPath = Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDe
 $productionPolicyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
 $fixtureRoot = Join-Path $projectRoot ("reports\safe-tree-delete-test-{0}" -f ([guid]::NewGuid().ToString('N')))
 $targetPath = Join-Path $fixtureRoot 'candidate'
-$rootTargetParent = Join-Path $fixtureRoot 'root-target-parent'
-$rootTargetPath = Join-Path $rootTargetParent 'build-output'
-$rollbackRootParent = Join-Path $fixtureRoot 'rollback-root-parent'
-$rollbackRootTarget = Join-Path $rollbackRootParent 'build-output'
-$rollbackSiblingPath = Join-Path $rollbackRootParent 'must-survive.txt'
+# 两个深度 0 构建产物根直接放在 fixture 根下（深度 1），由 fixture 条目逐个精确 deny：结构规则 3 要求嵌套 root
+# 被父条目精确覆盖，规则 1 又要求该 deny 不深于父条目的最小后代深度（#84）。
+$rootTargetParent = $fixtureRoot
+$rootTargetPath = Join-Path $rootTargetParent 'root-target-build-output'
+$rollbackRootParent = $fixtureRoot
+$rollbackRootTarget = Join-Path $rollbackRootParent 'rollback-build-output'
+$rollbackSiblingPath = Join-Path $rollbackRootParent 'rollback-must-survive.txt'
 $evidenceRoot = Join-Path $fixtureRoot 'evidence'
 $policyPath = Join-Path $fixtureRoot 'policy.json'
 $invalidProjectRootPolicyPath = Join-Path $fixtureRoot 'invalid-project-root-policy.json'
@@ -343,7 +345,7 @@ $policy = [pscustomobject][ordered]@{
             capabilityRoot = $fixtureRoot
             minimumDescendantDepth = 1
             rootDeletionPurpose = 'none'
-            deniedExactPaths = @($evidenceRoot)
+            deniedExactPaths = @($evidenceRoot, $rootTargetPath, $rollbackRootTarget)
         },
         [pscustomobject][ordered]@{
             id = 'fixture-root-target'

@@ -153,7 +153,8 @@ try {
                 rootDeletionPurpose = 'none'
                 allowHardLinks = $false
                 allowInternalDirectoryJunctions = $false
-                deniedExactPaths = @($evidenceRoot)
+                # 结构规则 3（#84）：嵌套的构建产物根必须被父条目精确 deny。
+                deniedExactPaths = @($evidenceRoot, $rebuildableTarget)
             },
             [pscustomobject][ordered]@{
                 id = 'status-rebuildable-build-output'
