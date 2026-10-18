@@ -615,40 +615,49 @@ function Get-CodexSafeTreeDeletePolicyStructureViolations {
     # 规则 3：条目按 CapabilityRoot 精确匹配选择，子 root 若没有被父条目的 deny 精确覆盖，传入父 root
     # 就能绕过子条目更严格的约束。按字面对所有「严格位于另一条 root 之内」的组合检查（含多级嵌套）；
     # 相等的 root 是重复 root，由既有加载约束报告。路径比较大小写不敏感、忽略尾随分隔符。
-    # 包含关系与 Test-CodexHookPathWithin 同一口径；加载器每次加载都调用本函数，所以按「子 root 本身及其
-    # 每个祖先前缀」查表找父条目，不做两两比较。结果按（父条目序号，子条目序号）排列。
+    # 包含关系只由 Test-CodexHookPathWithin 判定（CodexHostSafety 是路径检查的唯一实现）。加载器每次加载都调用
+    # 本函数，所以先按「子 root 本身及其每个祖先前缀」查表找候选父条目，不做两两比较；查表只缩小候选，每一对
+    # 候选仍经 Test-CodexHookPathWithin 确认。结果按（父条目序号，子条目序号）排列。
     $nestedRoots = [Collections.Generic.List[object]]::new()
     $entryList = @($Entries)
     $entryCount = $entryList.Count
+    $capabilityRoots = [string[]]::new($entryCount)
     $literalRoots = [string[]]::new($entryCount)
-    $fullRoots = [string[]]::new($entryCount)
-    $indexesByFullRoot = [Collections.Generic.Dictionary[string, Collections.Generic.List[int]]]::new(
+    $lookupKeys = [string[]]::new($entryCount)
+    $indexesByLookupKey = [Collections.Generic.Dictionary[string, Collections.Generic.List[int]]]::new(
         [StringComparer]::OrdinalIgnoreCase)
     for ($index = 0; $index -lt $entryCount; $index++) {
         $root = [string]$entryList[$index].capabilityRoot
+        $capabilityRoots[$index] = $root
         $literalRoots[$index] = $root.TrimEnd('\', '/')
-        $fullRoot = [IO.Path]::GetFullPath($root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-        $fullRoots[$index] = $fullRoot
-        if (-not $indexesByFullRoot.ContainsKey($fullRoot)) {
-            $indexesByFullRoot[$fullRoot] = [Collections.Generic.List[int]]::new()
+        # 查表键只用来找候选。它与 Test-CodexHookPathWithin 比较前的规范化一致，所以每个真正的父 root 都是
+        # 子 root 键的某个分隔符前缀，候选不会漏。
+        $lookupKey = [IO.Path]::GetFullPath($root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+        $lookupKeys[$index] = $lookupKey
+        if (-not $indexesByLookupKey.ContainsKey($lookupKey)) {
+            $indexesByLookupKey[$lookupKey] = [Collections.Generic.List[int]]::new()
         }
-        $indexesByFullRoot[$fullRoot].Add($index)
+        $indexesByLookupKey[$lookupKey].Add($index)
     }
     $childIndexesByParent = [object[]]::new($entryCount)
     for ($childIndex = 0; $childIndex -lt $entryCount; $childIndex++) {
-        $childFullRoot = $fullRoots[$childIndex]
+        $childKey = $lookupKeys[$childIndex]
         $prefixes = [Collections.Generic.List[string]]::new()
-        $prefixes.Add($childFullRoot)
-        $separator = $childFullRoot.IndexOf([IO.Path]::DirectorySeparatorChar)
+        $prefixes.Add($childKey)
+        $separator = $childKey.IndexOf([IO.Path]::DirectorySeparatorChar)
         while ($separator -ge 0) {
-            $prefixes.Add($childFullRoot.Substring(0, $separator))
-            $separator = $childFullRoot.IndexOf([IO.Path]::DirectorySeparatorChar, $separator + 1)
+            $prefixes.Add($childKey.Substring(0, $separator))
+            $separator = $childKey.IndexOf([IO.Path]::DirectorySeparatorChar, $separator + 1)
         }
         foreach ($prefix in $prefixes) {
             $parentIndexes = $null
-            if (-not $indexesByFullRoot.TryGetValue($prefix, [ref]$parentIndexes)) { continue }
+            if (-not $indexesByLookupKey.TryGetValue($prefix, [ref]$parentIndexes)) { continue }
             foreach ($parentIndex in $parentIndexes) {
+                # 相等的 root（大小写不敏感、忽略尾随分隔符）是重复 root，不算嵌套。
                 if ([StringComparer]::OrdinalIgnoreCase.Equals($literalRoots[$parentIndex], $literalRoots[$childIndex])) {
+                    continue
+                }
+                if (-not (Test-CodexHookPathWithin -Path $capabilityRoots[$childIndex] -ParentPath $capabilityRoots[$parentIndex])) {
                     continue
                 }
                 if ($null -eq $childIndexesByParent[$parentIndex]) {
