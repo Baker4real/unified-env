@@ -534,8 +534,8 @@ function Test-CodexSafeTreeDeletePathEqual {
 }
 
 function Get-CodexSafeTreeDeletePathDepthWithin {
-    # 与 Resolve-CodexSafeTreeDeleteTarget 同一深度口径：root 之后的非空路径段数。
-    # 调用方保证 Path 位于 Root 之内（Test-CodexHookPathWithin）；两端的尾随分隔符不计段。
+    # 深度口径的唯一实现：root 之后的非空路径段数。目标判定（Get-CodexSafeTreeDeleteTargetDecision）与
+    # 结构规则 1 都调用它。调用方保证 Path 位于 Root 之内（Test-CodexHookPathWithin）；两端的尾随分隔符不计段。
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Root
@@ -546,6 +546,28 @@ function Get-CodexSafeTreeDeletePathDepthWithin {
     if ($trimmedPath.Length -le $trimmedRoot.Length) { return 0L }
     $relative = $trimmedPath.Substring($trimmedRoot.Length).TrimStart('\', '/')
     return [long]@($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 }).Count
+}
+
+# 以下三条 policy 条目取值规则各只实现一次，加载器（Read-CodexSafeTreeDeletePolicy）与 Lint 都调用它们。
+function Test-CodexSafeTreeDeletePolicyEntryId {
+    param([AllowNull()][object]$Value)
+
+    return $Value -is [string] -and $Value -match '^[a-z0-9][a-z0-9-]{0,63}$'
+}
+
+function Test-CodexSafeTreeDeletePolicyMinimumDepth {
+    # minimumDescendantDepth：JSON integer，0 到 16。
+    param([AllowNull()][object]$Value)
+
+    return $Value -is [long] -and [long]$Value -ge 0 -and [long]$Value -le 16
+}
+
+function Test-CodexSafeTreeDeletePolicyRootDeletionPurposeUndeclared {
+    # 深度 0 的条目必须声明其中一种 root 删除用途；不是其中之一（含非 string）即为未声明。
+    param([AllowNull()][object]$Value)
+
+    return $Value -isnot [string] -or
+        [string]$Value -cnotin @('rebuildable-build-output', 'empty-project-state', 'retired-project-root', 'retired-evidence-root')
 }
 
 function Get-CodexSafeTreeDeletePolicyStructureViolations {
@@ -794,16 +816,16 @@ function ConvertTo-CodexSafeTreeDeleteLintRedactedText {
 }
 
 function ConvertTo-CodexSafeTreeDeleteLintEntry {
-    # 把一条原文条目规范成结构规则的输入。字段类型、id、深度与路径校验与加载器同口径；任何一项
-    # 不合规都返回 $null，该条目不参与结构规则，由加载器裁决（policy-load-refused）报告。
+    # 把一条原文条目规范成结构规则的输入。id 与深度调用加载器同一组取值规则，字段类型与路径校验与加载器
+    # 同口径；任何一项不合规都返回 $null，该条目不参与结构规则，由加载器裁决（policy-load-refused）报告。
     param([AllowNull()][object]$RawEntry)
 
     $id = Get-CodexSafeTreeDeleteLintJsonProperty -Object $RawEntry -Name 'id'
     $capabilityRoot = Get-CodexSafeTreeDeleteLintJsonProperty -Object $RawEntry -Name 'capabilityRoot'
     $minimumDepth = Get-CodexSafeTreeDeleteLintJsonProperty -Object $RawEntry -Name 'minimumDescendantDepth'
     $deniedExactPaths = Get-CodexSafeTreeDeleteLintJsonProperty -Object $RawEntry -Name 'deniedExactPaths'
-    if ($id -isnot [string] -or $id -notmatch '^[a-z0-9][a-z0-9-]{0,63}$' -or
-        $minimumDepth -isnot [long] -or [long]$minimumDepth -lt 0 -or [long]$minimumDepth -gt 16 -or
+    if (-not (Test-CodexSafeTreeDeletePolicyEntryId -Value $id) -or
+        -not (Test-CodexSafeTreeDeletePolicyMinimumDepth -Value $minimumDepth) -or
         $deniedExactPaths -isnot [Array]) {
         return $null
     }
@@ -887,7 +909,7 @@ function Get-CodexSafeTreeDeletePolicyStructureLint {
         $rawEntry = $rawEntryList[$entryIndex]
         $rawId = Get-CodexSafeTreeDeleteLintJsonProperty -Object $rawEntry -Name 'id'
         $entryId = $null
-        if ($rawId -is [string] -and $rawId -match '^[a-z0-9][a-z0-9-]{0,63}$') { $entryId = [string]$rawId }
+        if (Test-CodexSafeTreeDeletePolicyEntryId -Value $rawId) { $entryId = [string]$rawId }
         $entryIds.Add($entryId)
         if ($null -ne $entryId) {
             if ($firstIndexById.ContainsKey($entryId)) {
@@ -926,8 +948,7 @@ function Get-CodexSafeTreeDeletePolicyStructureLint {
         $rawDepth = Get-CodexSafeTreeDeleteLintJsonProperty -Object $rawEntry -Name 'minimumDescendantDepth'
         $rawPurpose = Get-CodexSafeTreeDeleteLintJsonProperty -Object $rawEntry -Name 'rootDeletionPurpose'
         if ($rawDepth -is [long] -and [long]$rawDepth -eq 0 -and
-            ($rawPurpose -isnot [string] -or
-                [string]$rawPurpose -cnotin @('rebuildable-build-output', 'empty-project-state', 'retired-project-root', 'retired-evidence-root'))) {
+            (Test-CodexSafeTreeDeletePolicyRootDeletionPurposeUndeclared -Value $rawPurpose)) {
             $findings.Add([pscustomobject][ordered]@{
                 rule = 'depth-zero-purpose-required'
                 severity = 'error'
@@ -1179,7 +1200,7 @@ function Read-CodexSafeTreeDeletePolicy {
             throw 'safe-delete policy entry id、capabilityRoot 与 rootDeletionPurpose 必须是 JSON string。'
         }
         $id = [string]$entry.id
-        if ($id -notmatch '^[a-z0-9][a-z0-9-]{0,63}$' -or -not $ids.Add($id)) {
+        if (-not (Test-CodexSafeTreeDeletePolicyEntryId -Value $id) -or -not $ids.Add($id)) {
             throw 'safe-delete policy entry id 非法或重复。'
         }
         $root = Assert-CodexHookDPath -Value ([string]$entry.capabilityRoot) -Name "safe-delete policy $id root"
@@ -1191,15 +1212,14 @@ function Read-CodexSafeTreeDeletePolicy {
             throw "safe-delete policy $id minimumDescendantDepth 必须是 JSON integer。"
         }
         $minimumDepth = [long]$entry.minimumDescendantDepth
-        if ($minimumDepth -lt 0 -or $minimumDepth -gt 16) {
+        if (-not (Test-CodexSafeTreeDeletePolicyMinimumDepth -Value $minimumDepth)) {
             throw "safe-delete policy $id minimumDescendantDepth 非法。"
         }
         $rootDeletionPurpose = [string]$entry.rootDeletionPurpose
         if ($rootDeletionPurpose -notin @('none', 'rebuildable-build-output', 'empty-project-state', 'retired-project-root', 'retired-evidence-root')) {
             throw "safe-delete policy $id rootDeletionPurpose 非法。"
         }
-        if ($minimumDepth -eq 0 -and
-            $rootDeletionPurpose -cnotin @('rebuildable-build-output', 'empty-project-state', 'retired-project-root', 'retired-evidence-root')) {
+        if ($minimumDepth -eq 0 -and (Test-CodexSafeTreeDeletePolicyRootDeletionPurposeUndeclared -Value $rootDeletionPurpose)) {
             throw "safe-delete policy $id 深度 0 必须显式限定 root 删除用途。"
         }
         if ($minimumDepth -gt 0 -and $rootDeletionPurpose -cne 'none') {
@@ -1394,8 +1414,7 @@ function Get-CodexSafeTreeDeleteTargetDecision {
             -Reason 'link-aware-requires-exact-root' `
             -Refusal 'safe-delete link-aware 能力只允许精确 capability root。'
     }
-    $relative = $fullTarget.Substring($fullRoot.Length).TrimStart('\', '/')
-    $decision.depth = @($relative -split '[\\/]' | Where-Object { $_.Length -gt 0 }).Count
+    $decision.depth = Get-CodexSafeTreeDeletePathDepthWithin -Path $fullTarget -Root $fullRoot
     if ($decision.depth -lt [int]$entry[0].minimumDescendantDepth) {
         return Set-CodexSafeTreeDeleteTargetRefusal -Decision $decision `
             -Reason 'below-minimum-depth' `

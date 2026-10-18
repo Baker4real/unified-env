@@ -30,6 +30,8 @@ $buildOutputRoot = Join-Path $scratchRoot 'build-output'
 $retiredEvidenceRoot = Join-Path $scratchRoot 'run-evidence\retired-root'
 $outsideRoot = Join-Path $scratchRoot 'outside'
 $strayPath = Join-Path $outsideRoot 'stray'
+# policy 里以分隔符结尾登记的 root；不带分隔符的同一目录与 root 同深度。
+$separatorRootPath = Join-Path $scratchRoot 'separator-root'
 
 $nestRoot = Join-Path $scratchRoot 'nest'
 $nestInnerRoot = Join-Path $nestRoot 'inner'
@@ -271,8 +273,10 @@ function Assert-VerdictAgreesWithPlan {
 
 $cleanupError = $null
 try {
-    # 主 fixture policy：普通后代条目（带一条 deny）、link-aware 深度 0 构建产物根、退役证据根（只允许精确 root）。
+    # 主 fixture policy：普通后代条目（带一条 deny）、link-aware 深度 0 构建产物根、退役证据根（只允许精确 root）、
+    # root 以分隔符结尾登记的普通后代条目。
     foreach ($directory in @(
+            $separatorRootPath,
             $candidatePath,
             $deepPath,
             (Join-Path $deniedPath 'child'),
@@ -292,7 +296,8 @@ try {
     Write-PolicyFile -Path $policyPath -Entries @(
         (New-PolicyEntry -Id 'check-workspace' -Root $workspaceRoot -MinimumDepth 1 -Denied @($deniedPath)),
         (New-PolicyEntry -Id 'check-build-output' -Root $buildOutputRoot -MinimumDepth 0 -Purpose 'rebuildable-build-output' -AllowHardLinks),
-        (New-PolicyEntry -Id 'check-retired-evidence' -Root $retiredEvidenceRoot -MinimumDepth 0 -Purpose 'retired-evidence-root')
+        (New-PolicyEntry -Id 'check-retired-evidence' -Root $retiredEvidenceRoot -MinimumDepth 0 -Purpose 'retired-evidence-root'),
+        (New-PolicyEntry -Id 'check-separator-root' -Root "$separatorRootPath\" -MinimumDepth 1)
     )
 
     # 1. 显式 CapabilityRoot：每个放行与拒绝用例都先跑 Check（evidence 根此时尚不存在），再对同一目标、
@@ -331,6 +336,12 @@ try {
         },
         @{
             label = '低于最小深度'; target = $workspaceRoot; root = $workspaceRoot; allowed = $false; entry = 'check-workspace'; depth = 0
+            reason = 'below-minimum-depth'; message = 'safe-delete target 未达到策略要求的最小后代深度。'
+        },
+        @{
+            # 深度与结构规则 1 同一口径：两端的尾随分隔符不计段。
+            label = '低于最小深度（root 以分隔符结尾）'; target = $separatorRootPath; root = "$separatorRootPath\"; allowed = $false
+            entry = 'check-separator-root'; depth = 0
             reason = 'below-minimum-depth'; message = 'safe-delete target 未达到策略要求的最小后代深度。'
         },
         @{
