@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 # #82（spec #73）safe-tree-delete policy 维护工具。独立脚本：不经 gate shim、不是生产入口的 Mode。
 # 与部署工具共用同名 deployment mutex、同一 maintenance marker 与 #77 持锁者面包屑
 # （mode=policy-maintenance），因此与 shim 调用、部署互斥。两种 Mode 都持锁执行同一条检查链：
-# 读现役 policy → 按声明式变更集生成候选 → 现有加载器加载候选、结构规则不新增违例 → 在途检查
+# 读现役 policy → 按声明式变更集生成候选 → 加载器加载候选（加载器执行三条结构规则，候选必须零违例）→ 在途检查
 # （进程内调用 Status 的候选 policy 预检）。DryRun 到此输出候选 SHA；Apply 要求同一候选 SHA，
 # 再以同目录临时文件原子替换落盘。候选只在内存里：加载器与 Status 预检读同一份候选原始字节，
 # DryRun 不写任何文件。
@@ -43,7 +43,6 @@ $result = [ordered]@{
     approvedCandidatePolicySha256 = $null
     changes = @()
     entryCount = $null
-    structure = $null
     inFlight = $null
     safeCleanupJob = $null
     written = $false
@@ -291,42 +290,6 @@ function Get-SafeCleanupJobImpact {
         changedExistingEntryIds = $changed.ToArray()
         addedEntryIds = @($CandidateEntries | ForEach-Object { [string]$_.id } | Where-Object { $liveIds -cnotcontains $_ })
         note = 'SafeCleanupJob 描述符不在本工具视野内：job 的 policy 比对要求原有条目全部不变、新增条目不与 job 的 capability root 重叠。仍需要的 job 先完成 Verify，再 Apply。'
-    }
-}
-
-function Get-StructureViolationKey {
-    # deny 类违例按（规则、条目、deny 路径）识别，嵌套类按（规则、父条目、detail 中的子条目）识别；
-    # denyIndex 会随增删移动，不能用作身份。
-    param(
-        [Parameter(Mandatory)][object]$Violation,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries
-    )
-    if ($null -ne $Violation.denyIndex) {
-        $entry = @($Entries | Where-Object { [string]$_.id -ceq [string]$Violation.entryId })[0]
-        $deniedPath = [string]@($entry.deniedExactPaths)[[int]$Violation.denyIndex]
-        return ('{0}|{1}|{2}' -f $Violation.rule, $Violation.entryId, $deniedPath.TrimEnd('\', '/'))
-    }
-    return ('{0}|{1}|{2}' -f $Violation.rule, $Violation.entryId, $Violation.detail)
-}
-
-function Get-StructureComparison {
-    param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LiveEntries,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$CandidateEntries
-    )
-
-    $live = @((Get-CodexSafeTreeDeletePolicyStructureViolations -Entries $LiveEntries).violations)
-    $candidate = @((Get-CodexSafeTreeDeletePolicyStructureViolations -Entries $CandidateEntries).violations)
-    $liveKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($violation in $live) { [void]$liveKeys.Add((Get-StructureViolationKey -Violation $violation -Entries $LiveEntries)) }
-    $candidateKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($violation in $candidate) { [void]$candidateKeys.Add((Get-StructureViolationKey -Violation $violation -Entries $CandidateEntries)) }
-    return [pscustomobject][ordered]@{
-        liveViolations = @($live)
-        newViolations = @($candidate | Where-Object {
-                -not $liveKeys.Contains((Get-StructureViolationKey -Violation $_ -Entries $CandidateEntries)) })
-        resolvedViolations = @($live | Where-Object {
-                -not $candidateKeys.Contains((Get-StructureViolationKey -Violation $_ -Entries $LiveEntries)) })
     }
 }
 
@@ -626,7 +589,8 @@ try {
         . (Join-Path $PSScriptRoot 'lib\CodexSafeTreeDelete.ps1')
         Stop-IfRequested -Sequence 20
 
-        # 3. 读取并校验现役 policy：加载器校验，同时取同一份原始字节作为候选的起点。
+        # 3. 读取并校验现役 policy：加载器校验（含三条结构规则，现役有违例也拒绝），同时取同一份原始字节
+        # 作为候选的起点。
         try {
             $policyFullPath = Assert-CodexHookDPath -Value $policyPath -Name 'safe-delete policy path'
             $liveSnapshot = Read-CodexHookSafeUtf8FileSnapshot -Path $policyFullPath -Name 'safe-delete policy' `
@@ -672,18 +636,12 @@ try {
         }
         Stop-IfRequested -Sequence 40
 
-        # 5. 候选必须能被现有加载器加载，且按结构规则不新增违例（现役已有的违例列入输出，不阻止）。
+        # 5. 候选必须能被加载器加载。加载器执行三条结构规则，所以候选必须零违例（#84）。
         # 加载器与 Status 预检读同一份内存中的候选原始字节，不落盘。
         try {
             $candidatePolicy = Read-CodexSafeTreeDeletePolicy -PolicyBytes $candidateBytes
         } catch {
             Stop-WithRefusal -RefusalReason 'candidate-policy-invalid' -Message $_.Exception.Message
-        }
-        $structure = Get-StructureComparison -LiveEntries @($livePolicy.entries) -CandidateEntries @($candidatePolicy.entries)
-        $result.structure = $structure
-        if (@($structure.newViolations).Count -ne 0) {
-            Stop-WithRefusal -RefusalReason 'candidate-adds-structure-violations' `
-                -Message '候选 policy 按结构规则新增了违例，见 structure.newViolations。'
         }
         Stop-IfRequested -Sequence 50
 

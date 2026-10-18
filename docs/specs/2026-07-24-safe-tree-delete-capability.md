@@ -169,14 +169,14 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
 
 1. 取锁，写面包屑。
 2. 检查 marker（`deployment-maintenance-marker-present`）。
-3. 用加载器读取并校验现役 policy（`live-policy-invalid`）。
+3. 用加载器读取并校验现役 policy（`live-policy-invalid`）。加载器执行三条结构规则（#84），现役 policy 有结构违例同样拒绝；这时先按 Lint 的报告修好 policy。
 4. 生成候选（`change-set-invalid`）。Apply 时候选 SHA 必须等于批准值（`candidate-sha-mismatch`）。
-5. 候选原始字节只在内存里，不落盘。候选必须被加载器接受（`candidate-policy-invalid`），且按 `Get-CodexSafeTreeDeletePolicyStructureViolations` 不新增结构违例（`candidate-adds-structure-violations`）。现役已有的违例列入 `structure.liveViolations`，不阻止。
+5. 候选原始字节只在内存里，不落盘。候选必须被加载器接受（`candidate-policy-invalid`）；加载器执行三条结构规则，所以候选必须零违例，拒绝原文给出第一处违例的规则名、条目 id 与 deny 序号。
 6. 在途检查（`in-flight-check-failed`、`in-flight-records-blocking`），规则见下。
 7. DryRun 到此结束，输出 `ok=true` 与候选 SHA；除第 1 步的面包屑外不写任何文件，policy 目录与 evidence 根保持原样。Apply 用 policy 同目录临时文件原子替换：换名前复核现役字节未变，换名后复核候选 SHA（失败为 `policy-write-failed`）。成功时输出 `written=true` 与提示「policy 已对宿主立即生效，git 提交需另行完成」。
 8. 删除面包屑，释放锁。
 
-输出只有一行 ASCII-only JSON，`ok=false` 时 exit 1。字段有 `ok`、`mode`、`refusalReason`、`message`、`livePolicySha256`、`livePolicySchemaVersion`、`liveFormat`、`candidatePolicySha256`、`approvedCandidatePolicySha256`、`changes`、`entryCount`、`structure`、`inFlight`、`safeCleanupJob`、`written`、`notice`，超时另有 `holder`。脚本主体里的任何失败都输出这一行：参数检查在取锁之前进行，不合法时拒绝为 `invalid-arguments`；检查链之外的意外异常为 `unexpected-error`。参数绑定错误（未知参数、类型转换失败、`-Mode` 不在 `ValidateSet` 内、缺少必需参数）发生在脚本主体运行之前，由 PowerShell 报错，不产生这一行 JSON。`approvedCandidatePolicySha256` 只回显通过校验的批准值。输出只回显条目 id 与 operation id，不回显路径，也不回显不合法的参数值：每条 `message` 输出前都经过与 Lint 转述加载器裁决相同的脱敏，截掉全角冒号（`：`）之后接的值，残留的盘符路径（例如 .NET 异常文本里的）替换为 `<path>`。
+输出只有一行 ASCII-only JSON，`ok=false` 时 exit 1。字段有 `ok`、`mode`、`refusalReason`、`message`、`livePolicySha256`、`livePolicySchemaVersion`、`liveFormat`、`candidatePolicySha256`、`approvedCandidatePolicySha256`、`changes`、`entryCount`、`inFlight`、`safeCleanupJob`、`written`、`notice`，超时另有 `holder`。脚本主体里的任何失败都输出这一行：参数检查在取锁之前进行，不合法时拒绝为 `invalid-arguments`；检查链之外的意外异常为 `unexpected-error`。参数绑定错误（未知参数、类型转换失败、`-Mode` 不在 `ValidateSet` 内、缺少必需参数）发生在脚本主体运行之前，由 PowerShell 报错，不产生这一行 JSON。`approvedCandidatePolicySha256` 只回显通过校验的批准值。输出只回显条目 id 与 operation id，不回显路径，也不回显不合法的参数值：每条 `message` 输出前都经过与 Lint 转述加载器裁决相同的脱敏，截掉全角冒号（`：`）之后接的值，残留的盘符路径（例如 .NET 异常文本里的）替换为 `<path>`。
 
 在途检查在进程内调用 Status 的 candidate-policy preflight（内存中的候选字节加候选 SHA，库参数 `-CandidatePolicyBytes` 代替 `-CandidatePolicyPath`），逐条读取 `policyCompatible` 与 `candidatePolicyCompatible`：
 

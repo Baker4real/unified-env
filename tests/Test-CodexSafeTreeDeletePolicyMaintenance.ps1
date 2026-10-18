@@ -922,7 +922,12 @@ try {
             invoke = { Invoke-PolicyTool -Scenario $noPath -Mode 'Apply' -ApprovedCandidatePolicySha256 $noPath.TargetsRoot } },
         @{ label = 'change-set-path'; reason = 'change-set-invalid'; message = '通配符'
             changes = @([pscustomobject][ordered]@{ op = 'add-deny'; entryId = 'fixture-main'; path = $wildcardPath }) },
-        @{ label = 'live-policy-path'; reason = 'live-policy-invalid'; message = '通配符'; corruptLivePolicy = $true },
+        @{ label = 'live-policy-path'; reason = 'live-policy-invalid'; message = '通配符'
+            liveTemplate = $basePolicyTemplate.Replace('"{TARGETS}\\keep"', '"{TARGETS}\\k*eep"') },
+        # 现役 policy 有结构违例也不再放行（#84 删除了「现役已有违例不阻止变更」）：加载器拒绝现役 policy。
+        @{ label = 'live-policy-structure'; reason = 'live-policy-invalid'
+            message = 'deny-deeper-than-minimum-depth（条目 fixture-spare，deniedExactPaths[0]）'
+            liveTemplate = $basePolicyTemplate.Replace('"{SPARE}\\nested"', '"{SPARE}\\nested\\deep"') },
         @{ label = 'exception-text-path'; reason = 'unexpected-error'; message = '<path>'
             invoke = { Invoke-PolicyTool -Scenario $noPath -Mode 'DryRun' -ExtraArguments @{
                     PauseAfterPhaseForTest = 10
@@ -933,11 +938,7 @@ try {
             @([pscustomobject][ordered]@{ op = 'add-deny'; entryId = 'fixture-main'; path = (Join-Path $noPath.TargetsRoot 'protected') })
         }
         Set-ChangeSet -Scenario $noPath -Changes $changes
-        $livePolicyTemplate = if ($case.ContainsKey('corruptLivePolicy')) {
-            $basePolicyTemplate.Replace('"{TARGETS}\\keep"', '"{TARGETS}\\k*eep"')
-        } else {
-            $basePolicyTemplate
-        }
+        $livePolicyTemplate = if ($case.ContainsKey('liveTemplate')) { $case.liveTemplate } else { $basePolicyTemplate }
         [IO.File]::WriteAllBytes($noPath.PolicyPath, $utf8.GetBytes((Expand-PolicyTemplate -Scenario $noPath -Template $livePolicyTemplate)))
         $caseResult = if ($case.ContainsKey('invoke')) { & $case.invoke } else { Invoke-PolicyTool -Scenario $noPath -Mode 'DryRun' }
         Assert-Refusal -Result $caseResult -RefusalReason $case.reason -Label "no-path-$($case.label)"
