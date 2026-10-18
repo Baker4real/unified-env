@@ -4,12 +4,14 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Seams under test (GitHub #84，spec #73「实现决策 › 加载器结构规则」):
-# 加载器 Read-CodexSafeTreeDeletePolicy 读 fixture policy 文件，以及 fixture 入口
-# tests\Invoke-CodexSafeTreeDeleteFixture.ps1 的 Check mode。三条结构规则各有一份合规、一份违规的 fixture
-# policy；违规时整个 policy fail-closed，拒绝原文含规则名、条目 id 与 deny 序号，不含任何路径。
+# Seams under test (GitHub #84，spec #73「实现决策 › 加载器结构规则」「Lint 模式」):
+# 1. 加载器 Read-CodexSafeTreeDeletePolicy 读 fixture policy 文件，以及 fixture 入口
+#    tests\Invoke-CodexSafeTreeDeleteFixture.ps1 的 Check mode。三条结构规则各有一份合规、一份违规的 fixture
+#    policy；违规时整个 policy fail-closed，拒绝原文含规则名、条目 id 与 deny 序号，不含任何路径。
+# 2. Lint 的结构部分 Get-CodexSafeTreeDeletePolicyStructureLint：CI 以仓库 policy 为输入运行，只读 policy 文件
+#    本身，不探测 root、deny 或 evidence。
 # CI 在仓库副本里按字母序 fail-fast 运行本套件，所以先从非宿主视角自检：读写的路径全部由本文件位置推导、
-# 位于仓库内，不依赖宿主上的 root、owner 或 evidence。
+# 位于仓库内，结构 lint 的结论不依赖宿主上的 root、owner 或 evidence。
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
@@ -141,6 +143,17 @@ try {
     }
     Assert-True ([IO.File]::ReadAllText($PSCommandPath) -notmatch '(?i)(?<![a-z0-9])[a-z]:\\') (
         '自检：本套件源码不得写死盘符绝对路径，路径一律由本文件位置推导')
+    # 结构 lint 不看宿主：root 与 deny 都不存在的合规 policy 零 finding（没有 root-missing 之类的宿主规则），
+    # 也不创建它们。CI 上仓库 policy 的 root 都不存在，结论必须与宿主上相同。
+    $absentBase = Join-Path $scratchRoot 'absent'
+    $absentPolicyPath = Join-Path $scratchRoot 'absent-policy.json'
+    Write-Policy -Path $absentPolicyPath -Entries @(
+        (New-PolicyEntry -Id 'structure-absent' -Root (Join-Path $absentBase 'root') -Depth 1 -Deny @((Join-Path $absentBase "root\$denyToken")))
+    )
+    $absentLint = Get-CodexSafeTreeDeletePolicyStructureLint -PolicyPath $absentPolicyPath
+    Assert-True (@($absentLint.findings).Count -eq 0 -and $absentLint.policy.loadable -eq $true) (
+        "自检：结构 lint 不得报告宿主规则：$(@($absentLint.findings) | ConvertTo-Json -Depth 6 -Compress)")
+    Assert-True (-not [IO.Directory]::Exists($absentBase)) '自检：结构 lint 不得创建 root 或 deny'
 
     # 1. 规则 1（deny-deeper-than-minimum-depth）：deny 相对所属 root 的深度 ≤ 最小后代深度。深度等于
     #    最小后代深度的 deny 合规；更深的 deny 能经删除其祖先目录绕过，整个 policy 拒绝加载。
@@ -237,6 +250,17 @@ try {
         -Expected 'deny-deeper-than-minimum-depth（条目 structure-rule1，deniedExactPaths[1]）' `
         -TargetPath $rule3Leaf -CapabilityRoot $rule3Child
     Assert-True ($combinedMessage.Contains('共 3 处结构违例')) "多处违例：拒绝原文必须给出违例总数：$combinedMessage"
+
+    # 5. CI 结构 lint：以仓库 policy 为输入跑 Lint 的结构部分（加载器裁决、逐条的既有加载约束与三条结构
+    #    规则）。仓库 policy 必须零 finding、可被加载器加载，且每个条目都参与了结构规则。失败信息只有 finding
+    #    （规则、条目 id、deny 序号与不含路径的说明）。
+    $repoLint = Get-CodexSafeTreeDeletePolicyStructureLint -PolicyPath $repoPolicyPath
+    Assert-True (@($repoLint.findings).Count -eq 0) (
+        "仓库 policy 必须零结构 finding：$(@($repoLint.findings) | ConvertTo-Json -Depth 6 -Compress)")
+    Assert-True ($repoLint.policy.loadable -eq $true -and
+        $repoLint.policy.entryCount -gt 0 -and
+        $repoLint.policy.evaluatedEntryCount -eq $repoLint.policy.entryCount) (
+        "仓库 policy 必须可加载且全部条目参与结构规则：$($repoLint.policy.evaluatedEntryCount)/$($repoLint.policy.entryCount)")
 } finally {
     Remove-TestTree -Path $scratchRoot
 }

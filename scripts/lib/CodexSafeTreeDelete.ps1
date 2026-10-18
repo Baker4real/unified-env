@@ -827,17 +827,14 @@ function ConvertTo-CodexSafeTreeDeleteLintEntry {
     }
 }
 
-function Invoke-CodexSafeTreeDeleteLint {
-    # Lint mode（#79，spec #73「实现决策 › Lint 模式」）：只读体检，只报告、不拦截。
-    # 结构问题记 error，宿主漂移与 evidence 布局问题记 warning；不写 evidence、不创建 evidence 根、
-    # 不改 policy。结果以 JSON 表达，没有 refusalReason，所以入口退出码恒按既有 JSON 约定为 0。
-    param(
-        [Parameter(Mandatory)][string]$PolicyPath,
-        [Parameter(Mandatory)][string]$EvidenceRoot
-    )
+function Get-CodexSafeTreeDeletePolicyStructureLint {
+    # Lint 的结构部分（spec #73「实现决策 › Lint 模式」）：只读 policy 文件本身，不探测 root、deny、owner 或
+    # evidence，结论与宿主无关；CI 以仓库 policy 为输入运行它（tests\Test-CodexSafeTreeDeletePolicyStructure.ps1）。
+    # 加载器裁决之外，按条目逐条报告重复 id、重复 root、深度 0 未声明用途与三条结构规则，全部记 error。
+    # evaluatedEntries 是参与结构规则的规范化条目（含 root 与 deny），只供 Lint 的宿主规则使用，不输出。
+    param([Parameter(Mandatory)][string]$PolicyPath)
 
     $fullPolicyPath = Assert-CodexHookDPath -Value $PolicyPath -Name 'safe-delete lint policy path'
-    $fullEvidenceRoot = Assert-CodexHookDPath -Value $EvidenceRoot -Name 'safe-delete lint evidence root'
     $findings = [Collections.Generic.List[object]]::new()
 
     # 加载器在第一条违例处抛错；Lint 另读一次原文，才能在 policy 不可加载时仍逐条报告。
@@ -958,8 +955,40 @@ function Invoke-CodexSafeTreeDeleteLint {
         $findings.Add([pscustomobject]$finding)
     }
 
+    return [pscustomobject][ordered]@{
+        policy = [pscustomobject][ordered]@{
+            path = $fullPolicyPath
+            sha256 = $rawSha256
+            schemaVersion = if ($rawSchemaVersion -is [long]) { [long]$rawSchemaVersion } else { $null }
+            entryCount = $rawEntryList.Count
+            evaluatedEntryCount = $evaluableEntries.Count
+            loadable = $null -ne $loadedPolicy
+        }
+        nestedRoots = @($structure.nestedRoots)
+        findings = $findings.ToArray()
+        evaluatedEntries = $evaluableEntries.ToArray()
+    }
+}
+
+function Invoke-CodexSafeTreeDeleteLint {
+    # Lint mode（#79，spec #73「实现决策 › Lint 模式」）：只读体检，只报告、不拦截。
+    # 结构问题记 error，宿主漂移与 evidence 布局问题记 warning；不写 evidence、不创建 evidence 根、
+    # 不改 policy。结果以 JSON 表达，没有 refusalReason，所以入口退出码恒按既有 JSON 约定为 0。
+    param(
+        [Parameter(Mandatory)][string]$PolicyPath,
+        [Parameter(Mandatory)][string]$EvidenceRoot
+    )
+
+    $fullPolicyPath = Assert-CodexHookDPath -Value $PolicyPath -Name 'safe-delete lint policy path'
+    $fullEvidenceRoot = Assert-CodexHookDPath -Value $EvidenceRoot -Name 'safe-delete lint evidence root'
+
+    # 结构部分不依赖宿主，与 CI 以仓库 policy 为输入运行的是同一个函数。
+    $structureLint = Get-CodexSafeTreeDeletePolicyStructureLint -PolicyPath $fullPolicyPath
+    $findings = [Collections.Generic.List[object]]::new()
+    foreach ($structureFinding in @($structureLint.findings)) { $findings.Add($structureFinding) }
+
     # 宿主规则：只读的存在性检查，全部记 warning。deny 类发现只给条目 id 与 deny 序号，不回显路径。
-    foreach ($entry in $evaluableEntries) {
+    foreach ($entry in @($structureLint.evaluatedEntries)) {
         $root = [string]$entry.capabilityRoot
         if (-not [IO.Directory]::Exists($root)) {
             $findings.Add([pscustomobject][ordered]@{
@@ -1047,14 +1076,7 @@ function Invoke-CodexSafeTreeDeleteLint {
     return [pscustomobject][ordered]@{
         errorCount = @($findings | Where-Object { [string]$_.severity -ceq 'error' }).Count
         warningCount = @($findings | Where-Object { [string]$_.severity -ceq 'warning' }).Count
-        policy = [pscustomobject][ordered]@{
-            path = $fullPolicyPath
-            sha256 = $rawSha256
-            schemaVersion = if ($rawSchemaVersion -is [long]) { [long]$rawSchemaVersion } else { $null }
-            entryCount = $rawEntryList.Count
-            evaluatedEntryCount = $evaluableEntries.Count
-            loadable = $null -ne $loadedPolicy
-        }
+        policy = $structureLint.policy
         evidence = [pscustomobject][ordered]@{
             root = $fullEvidenceRoot
             exists = $evidenceExists
@@ -1063,7 +1085,7 @@ function Invoke-CodexSafeTreeDeleteLint {
             transactionFiles = [long]$layout.transactionFiles
             nonCanonicalTransactionFiles = [long]@($layout.nonCanonicalTransactions).Count
         }
-        nestedRoots = @($structure.nestedRoots)
+        nestedRoots = @($structureLint.nestedRoots)
         findings = $findings.ToArray()
     }
 }
