@@ -76,6 +76,20 @@ $sourceFiles = @(
     'generate_skill_catalog.py',
     'system_skill_provenance_repair.py',
     'system_package_identity.py',
+    # Installer modules deploy before the entry that imports them.
+    'install_skill_guarded_base.py',
+    'install_skill_guarded_tree.py',
+    'install_skill_guarded_activation.py',
+    'install_skill_guarded_payload.py',
+    'install_skill_guarded_source_record.py',
+    'install_skill_guarded_bundled.py',
+    'install_skill_guarded_closure.py',
+    'install_skill_guarded_decision.py',
+    'install_skill_guarded_ledger.py',
+    'install_skill_guarded_rename.py',
+    'install_skill_guarded_retirement.py',
+    'install_skill_guarded_system_overlay.py',
+    'install_skill_guarded_staging.py',
     'install_skill_guarded.py',
     'install-skill-guarded.cmd'
 )

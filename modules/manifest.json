@@ -192,7 +192,6 @@
           "tests/Test-RetiredProjectSnapshotSanitizer.ps1"
           ],
           "python": [
-          "tests/Test-CodexStatePathInventory.py",
           "tests/Test-CodexConfig.py",
           "tests/Test-CodexStatePolicy.py",
           "tests/Test-CodexStatePreflight.py",
@@ -219,7 +218,9 @@
             "tests/Test-CodexRemotePluginCatalogGuardVendorAbortStress.ps1",
             "tests/Test-PowerShellIfeoRouterCodexStoreHost.ps1"
           ],
-          "python": [],
+          "python": [
+            "tests/Test-CodexStatePathInventory.py"
+          ],
           "node": [
             "tests/Test-ExplicitRetiredArtifactPurge.cjs"
           ]
@@ -271,16 +272,35 @@
             "tests/Test-SkillInstallGuardedDeployment.ps1"
           ],
           "python": [
+          "modules/skill-supply-chain/tests/Test-CommitExactFiles.py",
           "modules/skill-supply-chain/tests/Test-SkillCatalog.py",
           "modules/skill-supply-chain/tests/Test-SkillInstallGuarded.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedBundled.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedCanonicalRename.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedClosure.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedDecision.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedLedger.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedMergeRetirement.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedPayload.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedSourceRecord.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedStructure.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemOverlay.py",
+          "modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemRepair.py",
           "tests/Test-SkillOpenAIYamlParity.py",
-          "modules/skill-supply-chain/tests/Test-SkillSourceRecordMigration.py"
+          "modules/skill-supply-chain/tests/Test-SkillSourceRecordMigration.py",
+          "modules/skill-supply-chain/tests/Test-SkillsRepoPreCommit.py"
           ],
           "node": [
-          "tests/Test-GitDefaultBranchSkillPolicy.cjs",
           "tests/Test-GitHubDefaultBranchSkillOverlay.cjs",
-          "tests/Test-RetiredSkillBackupManifestPurger.cjs",
-          "tests/Test-SuperpowersSkillRetirement.cjs"
+          "tests/Test-RetiredSkillBackupManifestPurger.cjs"
+          ]
+        },
+        "host-live": {
+          "powershell": [],
+          "python": [],
+          "node": [
+            "tests/Test-GitDefaultBranchSkillPolicy.cjs",
+            "tests/Test-SuperpowersSkillRetirement.cjs"
           ]
         }
       }
@@ -629,6 +649,7 @@
         "README.md",
         "modules/README.md",
         "modules/manifest.json",
+        "scripts/Run-ManifestTests.cjs",
         "scripts/Run-PowerShellTests.cjs",
         "scripts/Validate-ModuleBoundaries.cjs"
       ],

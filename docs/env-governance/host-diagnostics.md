@@ -14,7 +14,7 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 | 入口 | 行为与完成边界 |
 |---|---|
 | `Read-BoundedProjection.ps1` | 文本、Markdown 章节、字段白名单 JSONL 与 `-HttpLog` 共用整批默认 6000 UTF-8 字节预算。已知敏感字段在裁剪前处理；HTTP 模式只输出固定事件与安全字段。活动日志允许写入/轮转；含 UTF-8 替换字符的行整行跳过，计 `replacementCharacterRows`，返回 `read-with-encoding-omissions` 和退出 1。未知行不回显，计数不是零错误证明。 |
-| `Invoke-CheckedPowerShell.ps1` | PowerShell Core 7.4+；Parser 预检后才执行，`-CheckOnly` 只解析。`-RequiredJsonFields` 验证单份 JSON 对象的指定路径存在且非 null，保留 false/0。语法/输入拒绝 2、JSON 拒绝 3、超时 124，原生非零透传。目标已退出而后代占用输出管道时，stderr 另报 `targetExited=true targetExitCode=<code> outputClosed=false descendantsMayRemain=true retrySafe=false`；先核对既有实例，再决定处置。 |
+| `Invoke-CheckedPowerShell.ps1` | PowerShell Core 7.4+；Parser 预检后才执行，`-CheckOnly` 只解析。`-RequiredJsonFields` 验证单份 JSON 对象的指定路径存在且非 null，保留 false/0。语法/输入拒绝 2、JSON 拒绝 3、超时 124，原生非零透传；执行异常退出 1，stderr 报 `runtime-error type=… category=… script=… line=… column=…`，不回显异常消息或源码（`throw` 的文本还会进 error id，故也不输出 id）。目标已退出而后代占用输出管道时，stderr 另报 `targetExited=true targetExitCode=<code> outputClosed=false descendantsMayRemain=true retrySafe=false`；先核对既有实例，再决定处置。 |
 | `BrowserPrivacyProbe.py` | Windows、Python 3.12+ 标准库；仅启动本机环回验证服务，浏览器由用户打开。独立 run/attempt、服务器接收时间、完整报告校验和持久手动路线防止旧结果误判与重复自动启动。验收固定为英语语言/Intl、三组 ICE 无候选且完成无错误、本地字体 API denied；Canvas 字体仅观察。 |
 | `Get-NvidiaDownloadStatus.ps1` | 原生下载计数、任务关联、进程/用户/机器代理摘要；进程代理凭据和完整环境不输出。`-Offline` 只读状态文件；单点零速不证明卡住，`bytes-complete` 不证明包完整性或已安装。Windows x64 PEB 无法读取时明确 unavailable。NO_PROXY 不绕过 TUN。 |
 | `Get-TaskbarSnapshot.ps1` | 当前 shell 身份、窗口响应、固定项聚合哈希；不返回窗口标题或快捷方式目标。窗口就绪不能证明图标视觉正常。 |

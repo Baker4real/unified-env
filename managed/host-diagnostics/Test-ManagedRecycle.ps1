@@ -29,6 +29,21 @@ $cases = [Collections.Generic.List[object]]::new()
 $junctions = [Collections.Generic.List[string]]::new()
 $expectedManifest = @("D`tempty", "D`tsub", "F`ta.txt`t5", "F`tsub\b.bin`t1024")
 $liveCase = 'live recycle moves the exact tree to the bin and the test restores it'
+# Whether the fixture volume has bin settings; a fresh profile (a CI runner) has none until the volume's bin is first used.
+$fixtureVolume = try { [string](Get-CimInstance Win32_Volume -Filter "DriveLetter='$([IO.Path]::GetPathRoot($fullEvidenceRoot).TrimEnd('\'))'").DeviceID } catch { '' }
+$binSettingsKey = if ($fixtureVolume) {
+    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\' + ($fixtureVolume -replace '^\\\\\?\\Volume|\\$', '')
+}
+function Test-BinSettings {
+    if (-not $binSettingsKey) { return $null }
+    $settings = Get-ItemProperty -LiteralPath $binSettingsKey -ErrorAction SilentlyContinue
+    $null -ne $settings -and $null -ne $settings.PSObject.Properties['MaxCapacity'] -and $null -ne $settings.PSObject.Properties['NukeOnDelete']
+}
+$binSettingsAtStart = Test-BinSettings
+# Earlier suites can create the settings first. Only on a disposable GitHub-hosted runner, the Check case removes them right
+# before it calls the entry, so a pass always proves that the entry's query-first order recreates them.
+$resetBinSettings = $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted' -and [bool]$binSettingsKey
+$binSettingsCheck = [ordered]@{ reset = $false; removed = $null; beforeCheck = $null; afterCheck = $null }
 
 function Invoke-Entry {
     param([string[]]$EntryArguments)
@@ -177,7 +192,15 @@ try {
     Assert-Case 'check reports a recyclable tree and writes no evidence' {
         $tree = New-Tree 'tree-check'
         $before = @(Get-ChildItem -LiteralPath $entryEvidence -Recurse).Count
+        if ($resetBinSettings -and (Test-BinSettings)) {
+            $settings = Get-ItemProperty -LiteralPath $binSettingsKey
+            $binSettingsCheck.removed = [ordered]@{ MaxCapacity = $settings.MaxCapacity; NukeOnDelete = $settings.NukeOnDelete }
+            Remove-Item -LiteralPath $binSettingsKey -Recurse
+            $binSettingsCheck.reset = $true
+        }
+        $binSettingsCheck.beforeCheck = Test-BinSettings
         $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree)
+        $binSettingsCheck.afterCheck = Test-BinSettings
         if ($response.exitCode -ne 0 -or $response.json.status -ne 'checked' -or $response.stderr) { throw "Check failed: $($response.stdout)" }
         if ($response.json.fileCount -ne 2 -or $response.json.directoryCount -ne 2 -or $response.json.totalBytes -ne 1029) { throw 'Check totals changed.' }
         if (@($response.json.topLevel).Count -ne 3 -or $response.json.ContainsKey('planPath')) { throw 'Check did not report the top level, or reported a plan.' }
@@ -270,6 +293,8 @@ $report = [ordered]@{
     failures = $failed.Count
     skipped = $skipped.Count
     fixture = $runRoot
+    binSettingsAtStart = $binSettingsAtStart
+    binSettingsCheck = $binSettingsCheck
     runtime = $PSVersionTable.PSVersion.ToString()
     entrySha256 = (Get-FileHash -LiteralPath $entry -Algorithm SHA256).Hash
     testSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash

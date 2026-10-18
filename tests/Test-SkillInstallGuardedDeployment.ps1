@@ -15,13 +15,17 @@ $systemRepairPath = Join-Path $implementationRoot 'system_skill_provenance_repai
 $systemPackageProviderPath = Join-Path $implementationRoot 'system_package_identity.py'
 $sourceRoot = $implementationRoot
 $wrapperSource = Get-Content -LiteralPath $wrapperPath -Raw
+$installerModules = @(Get-ChildItem -LiteralPath $implementationRoot -Filter 'install_skill_guarded_*.py' -File | ForEach-Object Name)
+$installerSource = (@($wrapperPath) + @($installerModules | ForEach-Object { Join-Path $implementationRoot $_ }) |
+    ForEach-Object { Get-Content -LiteralPath $_ -Raw }) -join "`n"
 $commandWrapperSource = Get-Content -LiteralPath $commandWrapperPath -Raw
 
+Assert-True ($installerModules.Count -gt 0) 'installer modules beside the entry are missing'
 Assert-True `
     ($wrapperSource.Contains('Path(__file__).absolute().with_name("generate_skill_catalog.py")', [StringComparison]::Ordinal)) `
     'installer default generator must resolve beside the deployed wrapper'
 Assert-True `
-    (-not $wrapperSource.Contains('D:\agents\projects\统一环境\scripts\generate_skill_catalog.py', [StringComparison]::OrdinalIgnoreCase)) `
+    (-not $installerSource.Contains('D:\agents\projects\统一环境\scripts\generate_skill_catalog.py', [StringComparison]::OrdinalIgnoreCase)) `
     'installer must not depend on the source repository generator path'
 Assert-True (Test-Path -LiteralPath $sourceRecordPath -PathType Leaf) 'deployment source is missing the shared SOURCE.md parser'
 Assert-True (Test-Path -LiteralPath $systemRepairPath -PathType Leaf) 'deployment source is missing the system provenance repair module'
@@ -73,7 +77,10 @@ Assert-True `
 $relativeFiles = @($result.files | ForEach-Object { [string]$_.relative })
 Assert-True ($result.status -ceq 'what-if') 'deployment fixture must remain a WhatIf'
 Assert-True ($result.yamlDependency -ceq 'passed') 'deployment must verify the managed Python PyYAML dependency'
-Assert-True ($relativeFiles.Count -eq 6) 'deployment bundle must contain exactly six runtime files'
+Assert-True ($relativeFiles.Count -eq 6 + $installerModules.Count) 'deployment bundle must contain the six base runtime files plus every installer module'
+foreach ($installerModule in $installerModules) {
+    Assert-True ($relativeFiles -contains $installerModule) "deployment bundle is missing installer module $installerModule"
+}
 Assert-True ($relativeFiles -contains 'skill_source_record.py') 'deployment bundle is missing the shared SOURCE.md parser'
 Assert-True ($relativeFiles -contains 'install_skill_guarded.py') 'deployment bundle is missing the Python wrapper'
 Assert-True ($relativeFiles -contains 'install-skill-guarded.cmd') 'deployment bundle is missing the command wrapper'
@@ -95,6 +102,26 @@ foreach ($record in @($realResult.files)) {
 }
 $realManifest = Get-Content -LiteralPath (Join-Path ([string]$realResult.evidence) 'manifest.json') -Raw | ConvertFrom-Json
 Assert-True ($realManifest.status -ceq 'succeeded') 'real deployment manifest must be succeeded'
+# The installer modules load from the deployed directory, but a yaml.py there must never shadow PyYAML.
+$deployedYamlShadow = Join-Path $realCodexRoot 'scripts\yaml.py'
+[IO.File]::WriteAllText(
+    $deployedYamlShadow,
+    "raise RuntimeError('untrusted yaml shadow imported')`n",
+    [Text.UTF8Encoding]::new($false)
+)
+try {
+    $deployedHelpOutput = @(& (Join-Path $realCodexRoot 'scripts\install-skill-guarded.cmd') --help 2>&1)
+    $deployedHelpExitCode = $LASTEXITCODE
+}
+finally {
+    Remove-Item -LiteralPath $deployedYamlShadow -Force -ErrorAction SilentlyContinue
+}
+Assert-True `
+    ($deployedHelpExitCode -eq 0) `
+    "deployed command wrapper must load every installer module from its own directory and ignore a yaml.py there; exit=$deployedHelpExitCode output=$($deployedHelpOutput | Out-String)"
+Assert-True `
+    (-not (Test-Path -LiteralPath (Join-Path $realCodexRoot 'scripts\__pycache__'))) `
+    'deployed installer must not write bytecode beside itself'
 
 $rollbackId = [guid]::NewGuid().ToString('N')
 $rollbackCodexRoot = Join-Path 'D:\Codex\tmp\skill-install-guarded-deployment-fixture' ("rollback-$rollbackId-codex")
@@ -152,4 +179,4 @@ finally {
     Remove-Item -LiteralPath $failureRuntimeRoot -Force -ErrorAction SilentlyContinue
 }
 
-Write-Output 'PASS Test-SkillInstallGuardedDeployment files=6 whatIf=1 real=1 rollback=1 yamlDependency=passed runtimeIsolation=passed missingYamlFailure=passed repositoryPathDependency=0'
+Write-Output "PASS Test-SkillInstallGuardedDeployment files=$($relativeFiles.Count) whatIf=1 real=1 deployedHelp=passed rollback=1 yamlDependency=passed runtimeIsolation=passed missingYamlFailure=passed repositoryPathDependency=0"

@@ -46,6 +46,19 @@ RUNTIME_FILES = (
     "generate_skill_catalog.py",
     "system_skill_provenance_repair.py",
     "system_package_identity.py",
+    "install_skill_guarded_base.py",
+    "install_skill_guarded_tree.py",
+    "install_skill_guarded_activation.py",
+    "install_skill_guarded_payload.py",
+    "install_skill_guarded_source_record.py",
+    "install_skill_guarded_bundled.py",
+    "install_skill_guarded_closure.py",
+    "install_skill_guarded_decision.py",
+    "install_skill_guarded_ledger.py",
+    "install_skill_guarded_rename.py",
+    "install_skill_guarded_retirement.py",
+    "install_skill_guarded_system_overlay.py",
+    "install_skill_guarded_staging.py",
     "install_skill_guarded.py",
     "install-skill-guarded.cmd",
 )
@@ -703,7 +716,7 @@ def verify_backup(manifest_path: Path) -> dict[str, Any]:
         or not required_runtime.issubset(relatives)
         or len(entries) != len(source_entries) + len(required_state) + len(required_runtime)
     ):
-        raise MigrationError("rollback manifest 缺少 SOURCE、ledger、catalog 或六文件 runtime 闭包")
+        raise MigrationError("rollback manifest 缺少 SOURCE、ledger、catalog 或 runtime 闭包文件")
     verified = 0
     for entry in entries:
         target = Path(entry["target"])

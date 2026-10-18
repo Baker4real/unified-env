@@ -9,7 +9,14 @@
 //   6. Bash commands containing two backslashes in a row: the Bash tool transport turns them into one before
 //      bash runs, while this hook still sees both;
 //   7. Bash payloads for pwsh/powershell/python/node/perl/ruby/psx (inline or an unquoted heredoc) in which bash
-//      would substitute $VAR, $(...) or backticks before the interpreter sees them.
+//      would substitute $VAR, $(...) or backticks before the interpreter sees them;
+//   8. under Claude Desktop (CLAUDE_CODE_ENTRYPOINT starts with claude-desktop), HKCU writes and deletes, inline or
+//      inside a .ps1/.psm1 the command runs: MSIX copy-on-write sends them to the package's private layer, so the
+//      command succeeds and the same shell reads the change back while the real registry stays unchanged.
+//   9. PowerShell `rg` path arguments containing * or ?: PowerShell passes wildcards to native commands verbatim,
+//      so rg gets a literal path and fails (os error 123 on Windows);
+//  10. PowerShell -like / -notlike patterns starting with ??: ? is a one-character wildcard, so '??*' matches every
+//      string of two or more characters instead of the literal ?? that git status --porcelain prints.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
 // Any internal error allows the command: the registration keeps onFailure=continue, so a broken guard
 // never locks the shell.
@@ -20,6 +27,7 @@ const MANAGED_DELETE = 'D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1'
 const MANAGED_RECYCLE = 'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1'
 const GUIDANCE = 'D:\\Codex\\.codex\\docs\\agent-guidance'
 const TEXT_ONLY_HINT = '如果命令里的写法只是文本（搜索模式、提交信息），改用 Grep 工具，或把关键词拆开写。'
+const MSIX_HKCU_PAGE = 'D:\\agents\\knowledge-base\\wiki\\concepts\\Claude Desktop 里 Claude Code 的 HKCU 与 AppData 写入被 MSIX 虚拟化.md'
 
 const RECURSIVE_DELETE_PATTERNS = [
   // PowerShell Remove-Item and its aliases with -Recurse (or an unambiguous prefix such as -r / -rec).
@@ -59,6 +67,7 @@ const MAX_SCRIPT_BYTES = 1024 * 1024
 const MAX_SCRIPTS = 5
 
 const defaultIo = {
+  env: process.env,
   read(path) {
     try {
       const stat = statSync(path)
@@ -101,6 +110,45 @@ function recycleDecision(command, cwd, io) {
     if (!text) continue
     if (EMPTY_BIN_PATTERNS.some(pattern => pattern.test(text))) return emptyBinReason(`脚本 ${script} 里：`)
     if (RECYCLE_PATTERNS.some(pattern => pattern.test(text))) return recycleReason(`脚本 ${script} 里调用了回收站 API。`)
+  }
+  return null
+}
+
+// Rule 8. *-ItemProperty and .NET writes count when an HKCU reference appears anywhere in the same text, because
+// scripts keep the key path in a variable (docker_off.ps1: $runKey = 'HKCU:\...', then Remove-ItemProperty $runKey).
+// Item verbs need the HKCU path in the same statement, so `Remove-Item $tmp; Get-ItemProperty HKCU:\x` passes.
+const HKCU_PATH = /\bHKCU:|\bHKEY_CURRENT_USER\b|\bRegistry::HKCU\b/i
+const HKCU_WRITE_PATTERNS = [
+  /\b(?:New-Item|Remove-Item|Set-Item|Copy-Item|Move-Item|Rename-Item|Clear-Item|ni|ri|rm|del|erase|rd|rmdir)\b[^\n;|&]*?(?:\bHKCU:|\bHKEY_CURRENT_USER\b|\bRegistry::HKCU\b)/i,
+  /\breg(?:\.exe)?['"]?\s+(?:add|delete|copy|restore|load|unload)\b[^\n;|&]*?\b(?:HKCU|HKEY_CURRENT_USER)\b/i,
+  // A .reg file names its hives inside the file; any HKCU section in it lands in the private layer.
+  /\breg(?:\.exe)?['"]?\s+import\b/i,
+  /SetEnvironmentVariable\s*\([^)]*(?:['"]User['"]|EnvironmentVariableTarget\]?::User)/i,
+  /(?:^|[\s;&|(])setx(?:\.exe)?\s/i
+]
+const HKCU_PROPERTY_VERB = /\b(?:Set|New|Remove|Rename|Clear|Copy|Move)-ItemProperty\b/i
+const DOTNET_CURRENT_USER = /\bRegistry(?:Hive)?\]?(?:::|\.)CurrentUser\b/i
+const DOTNET_REGISTRY_WRITE = /\.(?:SetValue|CreateSubKey|DeleteSubKey|DeleteSubKeyTree|DeleteValue)\s*\(/i
+
+function writesHkcu(text) {
+  return HKCU_WRITE_PATTERNS.some(pattern => pattern.test(text)) ||
+    (HKCU_PROPERTY_VERB.test(text) && HKCU_PATH.test(text)) ||
+    (DOTNET_CURRENT_USER.test(text) && DOTNET_REGISTRY_WRITE.test(text))
+}
+
+function hkcuReason(where) {
+  return `${where}Claude Desktop 里工具 shell 对 HKCU 的写入和删除只进 MSIX 包私有层：命令照样成功，同一个 shell 读回也对，真实注册表和资源管理器看不到。` +
+    '改用 WMI StdRegProv 写（Invoke-CimMethod -Namespace root/default -ClassName StdRegProv，HKCU 的 hDefKey 是 [uint32]2147483649），写完也用 StdRegProv 读回；' +
+    `要用户本人执行的，请用户在 Claude Desktop 的 Terminal 面板里跑。说明见 ${MSIX_HKCU_PAGE}。${TEXT_ONLY_HINT}`
+}
+
+// Returns a deny reason when, under Claude Desktop, the command or a script it references writes HKCU.
+function hkcuDecision(command, cwd, io) {
+  if (!/^claude-desktop/i.test(String(io.env?.CLAUDE_CODE_ENTRYPOINT || ''))) return null
+  if (writesHkcu(command)) return hkcuReason('')
+  for (const script of referencedScripts(command, cwd)) {
+    const text = io.read(script)
+    if (text && writesHkcu(text)) return hkcuReason(`脚本 ${script} 里：`)
   }
   return null
 }
@@ -181,6 +229,60 @@ function hardlinkingCloneSource(command) {
   }
   return null
 }
+
+// Rule 9. rg options that take a separate value, so the value is not read as a path.
+const RG_VALUE_SHORT = 'ABCdEefgjMmrTt'
+const RG_VALUE_LONG = new Set([
+  '--after-context', '--before-context', '--context', '--max-depth', '--encoding', '--regexp', '--file', '--glob',
+  '--iglob', '--threads', '--max-columns', '--max-count', '--replace', '--type', '--type-not', '--type-add',
+  '--type-clear', '--sort', '--sortr', '--max-filesize', '--path-separator', '--pre', '--pre-glob', '--colors',
+  '--color', '--context-separator', '--field-context-separator', '--field-match-separator', '--dfa-size-limit',
+  '--regex-size-limit', '--engine', '--ignore-file', '--hostname-bin', '--hyperlink-format', '--generate'
+])
+
+// Returns the first rg path argument containing * or ?, or null. The first positional word is the pattern unless
+// -e/--regexp or -f/--file supplies the patterns, or --files needs none.
+function rgWildcardPath(command) {
+  for (const words of simpleCommands(command)) {
+    if ((words[0] || '').split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase() !== 'rg') continue
+    const positional = []
+    let patternGiven = false
+    for (let i = 1; i < words.length; i++) {
+      const word = words[i]
+      if (word === '--') { positional.push(...words.slice(i + 1)); break }
+      if (word.includes('>')) continue // redirections such as *>$null and 2>$null
+      if (word.startsWith('--')) {
+        const name = word.split('=')[0]
+        if (name === '--regexp' || name === '--file' || name === '--files') patternGiven = true
+        if (!word.includes('=') && RG_VALUE_LONG.has(name)) i++
+      } else if (word.length > 1 && word.startsWith('-')) {
+        // In a short cluster such as -nA3 or -nA 3, the first value-taking letter takes the rest or the next word.
+        for (let k = 1; k < word.length; k++) {
+          if (!RG_VALUE_SHORT.includes(word[k])) continue
+          if (word[k] === 'e' || word[k] === 'f') patternGiven = true
+          if (k === word.length - 1) i++
+          break
+        }
+      } else positional.push(word)
+    }
+    const path = positional.slice(patternGiven ? 0 : 1).find(word => /[*?]/.test(word))
+    if (path) return path
+  }
+  return null
+}
+
+function rgWildcardReason(path) {
+  const wildcard = path.search(/[*?]/)
+  const sep = Math.max(path.lastIndexOf('\\', wildcard), path.lastIndexOf('/', wildcard))
+  const prefix = path.slice(0, sep + 1)
+  const dir = sep < 0 ? '.' : /^(?:[a-z]:)?[\\/]$/i.test(prefix) ? prefix : prefix.slice(0, -1)
+  return `PowerShell 不替原生命令展开通配符：rg 收到的是字面路径 ${path}，在 Windows 上报 os error 123（文件名、目录名或卷标语法不正确）。` +
+    `目录作路径参数、通配部分改用 -g：rg <模式> ${dir} -g '${path.slice(sep + 1).replace(/\\/g, '/')}'（只搜这一层再加 --max-depth 1），` +
+    `或先用 Get-ChildItem 展开成真实路径（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 6 条）。`
+}
+
+// Rule 10. In -like, ? matches any one character: '??*' matches every string of two or more characters.
+const LIKE_DOUBLE_QUESTION = /-[ic]?(?:not)?like\s+['"]\?\?/i
 
 // Characters after `$` that make bash substitute: a name, ${...}, $(...), a digit or a special parameter.
 const EXPANSION_START = /[A-Za-z_{(0-9?!#@*$-]/
@@ -403,6 +505,10 @@ export function evaluate(payload, io = defaultIo) {
   const command = String(payload?.tool_input?.command || '')
   if (!command || (tool !== 'PowerShell' && tool !== 'Bash')) return null
 
+  // First, so `Remove-Item HKCU:\x -Recurse` gets the registry reason rather than the safe-tree-delete one.
+  const hkcu = hkcuDecision(command, payload?.cwd, io)
+  if (hkcu) return hkcu
+
   if (!/invoke-safe-tree-delete/i.test(command) && RECURSIVE_DELETE_PATTERNS.some(pattern => pattern.test(command))) {
     return `递归删除目录只能走受管入口 ${MANAGED_DELETE}（Plan → Apply → Purge，说明见 ${GUIDANCE}\\host-runbook\\safe-tree-delete.md）。` +
       '删除单个文件不受影响。如果命令里的删除写法只是文本（搜索模式、提交信息），改用 Grep 工具，或把关键词拆开写。'
@@ -429,6 +535,12 @@ export function evaluate(payload, io = defaultIo) {
     if (match) {
       return `PowerShell 会把未加引号的逗号列表拆成多个参数：${match[1]} ${match[2]} 要写成 ${match[1]} '${match[2]}'，或先放进变量再传入（D:\\Codex\\.codex\\docs\\agent-guidance\\windows-pwsh-command-guidelines.md 第 9 条）。`
     }
+    const wildPath = rgWildcardPath(command)
+    if (wildPath) return rgWildcardReason(wildPath)
+    if (LIKE_DOUBLE_QUESTION.test(command)) {
+      return "-like 里的 ? 是单字符通配符：'??*' 匹配任何至少两个字符的字符串，筛不出 git status --porcelain 的未跟踪行（字面 ??）。" +
+        "改用 .StartsWith('??')，或在模式里转义成 '`?`?*'。" + TEXT_ONLY_HINT
+    }
   }
 
   const source = hardlinkingCloneSource(command)
@@ -451,6 +563,8 @@ function main() {
 }
 
 if (process.argv.includes('--self-test')) {
+  // Rule 8 only runs under Claude Desktop; a case's fourth element is the environment it sees.
+  const desktop = { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }
   const cases = [
     ['PowerShell', 'Remove-Item -Recurse -Force D:\\x', true],
     ['PowerShell', 'rm -r .\\build', true],
@@ -539,23 +653,70 @@ if (process.argv.includes('--self-test')) {
     ['Bash', 'git commit -m "fix: $x"', false],
     ['Bash', 'cat > notes.txt <<EOF\n$x\nEOF', false],
     ['Bash', 'pwsh -c "Get-Date" # costs $5', false],
-    ['PowerShell', 'pwsh -c "Get-Item $env:TEMP"', false]
+    ['PowerShell', 'pwsh -c "Get-Item $env:TEMP"', false],
+    // PowerShell hands rg its wildcards verbatim; in -like, ? is a one-character wildcard.
+    ['PowerShell', 'rg -n "Invoke-Guard" D:\\agents\\x\\*.ps1', true],
+    ['PowerShell', 'rg foo src/*.cs', true],
+    ['PowerShell', "& 'C:\\tools\\rg.exe' -l foo tools\\*.psm1", true],
+    ['PowerShell', "rg -e 'a.*b' 'D:\\x\\*.md'", true],
+    ['PowerShell', 'rg --files D:\\x\\*.json', true],
+    ['PowerShell', 'rg -nA 3 foo src\\**\\*.cs', true],
+    ['PowerShell', 'rg -n x -- *.ps1', true],
+    ['PowerShell', 'Get-ChildItem | ForEach-Object { rg -l foo $_\\*.txt }', true],
+    ['PowerShell', "rg -n 'foo.*bar?' D:\\agents\\x", false],
+    ['PowerShell', "rg -n foo D:\\agents\\x -g '*.ps1'", false],
+    ['PowerShell', 'rg -n foo -g *.ps1 --iglob !*.min.js D:\\x', false],
+    ['PowerShell', 'rg --glob=*.ps1 -nA3 "a*" src', false],
+    ['PowerShell', "rg -e 'x*' -e 'y?' src *>$null", false],
+    ['PowerShell', "git ls-files | rg '\\.ps1$'", false],
+    ['PowerShell', "Write-Output 'rg foo *.ps1'", false],
+    ['Bash', 'rg foo src/*.cs', false],
+    ['PowerShell', "git status --porcelain | Where-Object { $_ -like '??*' }", true],
+    ['PowerShell', "@($s | Where-Object { $_ -notlike '??*' }).Count", true],
+    ['PowerShell', 'Where-Object { $_ -clike "?? *" }', true],
+    ['PowerShell', "$s | Where-Object { $_.StartsWith('??') }", false],
+    ['PowerShell', "$s | Where-Object { $_ -like '`?`?*' }", false],
+    ['PowerShell', "Get-ChildItem | Where-Object Name -like '?.txt'", false],
+    ['Bash', "grep -c -- \"-like '??\" notes.txt", false],
+    // HKCU writes under Claude Desktop land in the MSIX private layer, inline and in referenced scripts.
+    ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", true, desktop],
+    ['PowerShell', "$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\\Classes\\CLSID\\X\\DefaultIcon', $true); $k.SetValue('', 'D:\\a.exe,0')", true, desktop],
+    ['PowerShell', "$cu = [Microsoft.Win32.Registry]::CurrentUser\n$k = $cu.CreateSubKey('Software\\X')", true, desktop],
+    ['PowerShell', 'reg add HKCU\\Software\\X /v a /d 1 /f', true, desktop],
+    ['PowerShell', "& 'C:\\Windows\\System32\\reg.exe' delete 'HKCU\\Software\\X' /f", true, desktop],
+    ['PowerShell', 'reg import D:\\backup\\before-clsid.reg', true, desktop],
+    ['PowerShell', "Remove-Item -LiteralPath 'HKCU:\\Software\\X'", true, desktop],
+    ['PowerShell', 'Remove-Item -Path HKCU:\\Software\\X -Recurse', true, desktop],
+    ['PowerShell', "[Environment]::SetEnvironmentVariable('DOTNET_ROOT', $null, 'User')", true, desktop],
+    ['PowerShell', 'setx DOTNET_ROOT ""', true, desktop],
+    ['Bash', "MSYS_NO_PATHCONV=1 reg delete 'HKCU\\Software\\X' /f", true, desktop],
+    ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\docker_off.ps1'", true, desktop],
+    ['PowerShell', "Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'", false, desktop],
+    ['PowerShell', "Invoke-CimMethod -Namespace root/default -ClassName StdRegProv -MethodName SetStringValue -Arguments @{ hDefKey = [uint32]2147483649; sSubKeyName = 'Software\\X'; sValueName = 'a'; sValue = '1' }", false, desktop],
+    ['PowerShell', 'reg query HKCU\\Software\\X', false, desktop],
+    ['PowerShell', "Remove-Item -LiteralPath D:\\x\\a.txt; Get-ItemProperty -LiteralPath 'HKCU:\\Console'", false, desktop],
+    ['PowerShell', "[Environment]::SetEnvironmentVariable('CI', $Ci)", false, desktop],
+    ['Bash', "grep -nE 'Set-ItemProperty|New-ItemProperty|HKCU|HKLM' tools/x.ps1", false, desktop],
+    ['PowerShell', "pwsh -File 'D:\\repo\\tools\\harmless.ps1'", false, desktop],
+    ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false, { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
+    ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false]
   ]
   const scripts = new Map(Object.entries({
     'D:\\repo\\tools\\recycle.ps1': 'Add-Type -TypeDefinition $src\n[Native]::SHFileOperationW([ref]$op)',
     'D:\\repo\\tools\\empty-bin.ps1': 'Clear-RecycleBin -DriveLetter D -Force',
     'D:\\repo\\lib\\shell.ps1': '$shell = New-Object -ComObject Shell.Application\n$shell.Namespace(10).MoveHere($path)',
     'D:\\repo\\tools\\harmless.ps1': 'Get-ChildItem -LiteralPath $PSScriptRoot',
+    'D:\\repo\\tools\\docker_off.ps1': "$runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'\nif ($null -ne $runVal) { Remove-ItemProperty -LiteralPath $runKey -Name $name }",
     'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1': 'code = SHFileOperationW(ref op);',
     'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1': 'STA (SHFileOperationW) works here.'
   }).map(([path, text]) => [path.toLowerCase(), text]))
   const io = { read: path => scripts.get(win32.normalize(path).toLowerCase()) ?? null }
   let failed = 0
-  for (const [tool, command, shouldDeny] of cases) {
-    const denied = evaluate({ tool_name: tool, tool_input: { command }, cwd: 'D:\\repo' }, io) !== null
+  for (const [tool, command, shouldDeny, env] of cases) {
+    const denied = evaluate({ tool_name: tool, tool_input: { command }, cwd: 'D:\\repo' }, env ? { ...io, env } : io) !== null
     if (denied !== shouldDeny) {
       failed++
-      console.error(`FAIL ${tool}: ${command} -> ${denied ? 'deny' : 'allow'}`)
+      console.error(`FAIL ${tool}${env ? ` [${env.CLAUDE_CODE_ENTRYPOINT}]` : ''}: ${command} -> ${denied ? 'deny' : 'allow'}`)
     }
   }
   console.log(`self-test: ${cases.length - failed}/${cases.length} passed`)

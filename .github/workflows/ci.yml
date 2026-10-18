@@ -126,3 +126,70 @@ jobs:
           node .\scripts\Run-PowerShellTests.cjs --module '${{ matrix.module }}' --profile '${{ matrix.profile }}'
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) { exit $testExit }
+
+  python-node-fixtures:
+    name: Python and Node fixtures
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.19.0'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.15'
+
+      - name: Prepare canonical project path
+        shell: pwsh
+        run: |
+          $projectParent = Split-Path -Parent $env:CI_PROJECT_ROOT
+          New-Item -ItemType Directory -Path $projectParent -Force | Out-Null
+          New-Item -ItemType Directory -Path $env:CI_PROJECT_ROOT -Force | Out-Null
+          Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force |
+            Copy-Item -Destination $env:CI_PROJECT_ROOT -Recurse -Force
+
+      # The tests pin the managed Python and pwsh entrypoints and use D:\Codex\tmp as their fixture parent.
+      - name: Prepare managed host paths
+        shell: pwsh
+        run: |
+          $sourcePython = Join-Path $env:pythonLocation 'python.exe'
+          & $sourcePython -I -m pip install 'PyYAML==6.0.3'
+          $pipExit = $LASTEXITCODE
+          if ($pipExit -ne 0) { exit $pipExit }
+
+          $managedPythonRoot = 'D:\Codex\tools\python315-official'
+          New-Item -ItemType Directory -Path $managedPythonRoot -Force | Out-Null
+          Get-ChildItem -LiteralPath $env:pythonLocation -Force |
+            Copy-Item -Destination $managedPythonRoot -Recurse -Force
+          & (Join-Path $managedPythonRoot 'python.exe') -I -c 'import yaml; assert callable(yaml.safe_load)'
+          $probeExit = $LASTEXITCODE
+          if ($probeExit -ne 0) { exit $probeExit }
+
+          # Tests launch this pwsh path to create junctions and run the overlay deployment fixture; the runner's PowerShell 7 stands in.
+          $managedPwshRoot = 'D:\Codex\tools\PowerShell\7.6.5'
+          New-Item -ItemType Directory -Path $managedPwshRoot -Force | Out-Null
+          Get-ChildItem -LiteralPath $PSHOME -Force |
+            Copy-Item -Destination $managedPwshRoot -Recurse -Force
+          & (Join-Path $managedPwshRoot 'pwsh.exe') -NoProfile -NonInteractive -Command '"Managed pwsh stand-in: PowerShell $($PSVersionTable.PSVersion)"'
+          $pwshExit = $LASTEXITCODE
+          if ($pwshExit -ne 0) { exit $pwshExit }
+
+          New-Item -ItemType Directory -Path 'D:\Codex\tmp' -Force | Out-Null
+          New-Item -ItemType Directory -Path 'D:\Codex\temp' -Force | Out-Null
+
+      # Host-bound tests are listed with their reasons in scripts/Run-ManifestTests.cjs and reported as warnings, not run.
+      - name: Run manifest Python and Node fixture tests
+        shell: pwsh
+        env:
+          PYTHON_PATH: D:\Codex\tools\python315-official\python.exe
+          # The skill catalog generator only accepts D: paths, so fixture temp roots must not land on the C: runner temp.
+          TEMP: D:\Codex\temp
+          TMP: D:\Codex\temp
+        run: |
+          Set-Location -LiteralPath $env:CI_PROJECT_ROOT
+          node .\scripts\Run-ManifestTests.cjs --exclude-host-bound
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) { exit $testExit }

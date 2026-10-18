@@ -176,7 +176,7 @@ def verify_catalog_closure_check(
 ) -> dict[str, Any]:
     """Accept ``pass`` or ``preexisting-findings`` that block nothing for ``targets``.
 
-    Used by install_skill_guarded.verify_catalog and the system provenance
+    Used by install_skill_guarded_closure.verify_catalog and the system provenance
     repair; it re-derives the verdict instead of trusting the recorded gate.
     """
 

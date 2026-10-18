@@ -33,9 +33,11 @@ const sourceLedger = JSON.parse(
 );
 const retiredFinishingPath = path.join(codexRoot, 'skills', 'finishing-a-development-branch');
 const githubPluginSurfaces = [
-  '.tmp/plugins/plugins/github',
   'plugins/cache/openai-curated/github/27126220',
 ];
+// 本地 curated marketplace 自 2026-09-09 同步起不再携带 github/yeet skills，已移出 overlay 合同；
+// 重新落盘时必须先重新适配 scripts/Apply-GitHubDefaultBranchSkillOverlay.cjs。
+const retiredGithubPluginSurfaces = ['.tmp/plugins/plugins/github'];
 
 const failures = [];
 function check(name, callback) {
@@ -125,6 +127,15 @@ check('all GitHub plugin surfaces must preserve hybrid capabilities behind main-
     assert.match(yeet.text, /`gh`[\s\S]{0,80}(?:fallback|兜底)/i, yeet.file);
     assert.match(yeet.text, /发布前门禁[\s\S]{0,700}git\s+fetch\s+--prune\s+<targetRemote>[\s\S]{0,300}(?:ahead|diverged)/i, yeet.file);
     assert.match(yeet.text, /只有[\s\S]{0,180}用户确认[\s\S]{0,180}git\s+push\s+--set-upstream\s+<targetRemote>\s+<temporaryBranch>/i, yeet.file);
+  }
+});
+
+check('retired GitHub plugin surfaces must not ship skills outside the overlay contract', () => {
+  for (const surface of retiredGithubPluginSurfaces) {
+    for (const role of ['github', 'yeet']) {
+      const file = path.join(codexRoot, ...surface.split('/'), 'skills', role, 'SKILL.md');
+      assert.equal(fs.existsSync(file), false, `${file} 重新落盘，需要先重新适配 overlay 合同`);
+    }
   }
 });
 

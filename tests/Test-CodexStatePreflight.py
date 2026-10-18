@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
 HOOK_ROOT = PROJECT_ROOT / "managed" / "codex-hooks" / "hooks"
 PREFLIGHT = HOOK_ROOT / "codex-state-preflight.py"
 WRAPPER = HOOK_ROOT / "codex-state-preflight.cmd"
-PYTHON = Path(r"D:\Codex\tools\python314-official\python.exe")
+PYTHON = Path(r"D:\Codex\tools\python315-official\python.exe")
 FIXTURE_ROOT = PROJECT_ROOT / "reports" / "codex-state-preflight-test"
 SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
@@ -71,7 +71,7 @@ class CodexStatePreflightTests(unittest.TestCase):
         text = WRAPPER.read_text(encoding="utf-8")
 
         self.assertIn(
-            r'"D:\Codex\tools\python314-official\python.exe"',
+            r'"D:\Codex\tools\python315-official\python.exe"',
             text,
         )
         self.assertIn(

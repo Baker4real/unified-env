@@ -122,9 +122,18 @@ Assert-Case 'native nonzero exit is preserved and cannot be hidden by later outp
     if ($result.stderr -notmatch 'native-exit code=23') { throw 'Native failure status was not identifiable.' }
 }
 
-Assert-Case 'PowerShell execution errors do not expose exception payloads' {
-    $result = Invoke-PublicCli @('-CommandText', "throw 'synthetic-exception-do-not-echo'")
-    if ($result.exitCode -ne 1 -or $result.stderr -notmatch 'runtime-error') { throw 'Runtime failure was not reported.' }
+Assert-Case 'PowerShell execution errors report type and location without exception payloads' {
+    $result = Invoke-PublicCli @('-CommandText', "`$null = 1; throw 'synthetic-exception-do-not-echo'")
+    if ($result.exitCode -ne 1 -or $result.stderr -notmatch 'runtime-error type=System\.Management\.Automation\.RuntimeException category=OperationStopped script=- line=1 column=12') {
+        throw 'Runtime failure was not reported with its type and location.'
+    }
+    if ($result.stderr.Contains('synthetic-exception-do-not-echo')) { throw 'Runtime failure exposed its exception payload.' }
+    $failingScript = Join-Path $fixture 'CheckedPowerShell-runtime.ps1'
+    [IO.File]::WriteAllText($failingScript, "`$null = 1`nfunction Invoke-Inner { Write-Error 'synthetic-exception-do-not-echo' }`nInvoke-Inner`n", $utf8)
+    $result = Invoke-PublicCli @('-ScriptPath', $failingScript)
+    if ($result.exitCode -ne 1 -or $result.stderr -notmatch 'runtime-error type=Microsoft\.PowerShell\.Commands\.WriteErrorException category=NotSpecified script=CheckedPowerShell-runtime\.ps1 line=2 column=-') {
+        throw 'Runtime failure inside a script function was not located at its own line.'
+    }
     if ($result.stderr.Contains('synthetic-exception-do-not-echo')) { throw 'Runtime failure exposed its exception payload.' }
 }
 

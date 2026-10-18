@@ -33,6 +33,19 @@ class SkillSourceRecordMigrationTests(unittest.TestCase):
                 "generate_skill_catalog.py",
                 "system_skill_provenance_repair.py",
                 "system_package_identity.py",
+                "install_skill_guarded_base.py",
+                "install_skill_guarded_tree.py",
+                "install_skill_guarded_activation.py",
+                "install_skill_guarded_payload.py",
+                "install_skill_guarded_source_record.py",
+                "install_skill_guarded_bundled.py",
+                "install_skill_guarded_closure.py",
+                "install_skill_guarded_decision.py",
+                "install_skill_guarded_ledger.py",
+                "install_skill_guarded_rename.py",
+                "install_skill_guarded_retirement.py",
+                "install_skill_guarded_system_overlay.py",
+                "install_skill_guarded_staging.py",
                 "install_skill_guarded.py",
                 "install-skill-guarded.cmd",
             },
@@ -369,7 +382,7 @@ Source type: codex-bundled-system
             result = module.restore_backup(manifest)
 
             self.assertEqual(result["status"], "restored")
-            self.assertEqual(result["entry_count"], 9)
+            self.assertEqual(result["entry_count"], 3 + len(module.RUNTIME_FILES))
             self.assertEqual(target.read_bytes(), b"before")
             self.assertFalse(created.exists())
 
@@ -543,8 +556,10 @@ Source type: codex-bundled-system
             module._protect_acl(root)
             self.assertEqual(module._verify_acl(root)["verified_item_count"], 2)
 
-            # os.replace 在 NTFS 上保留目标的显式 DACL，原子重写不构成 ACL 漂移。
+            # os.replace 让目标改用临时文件自己的 DACL；受保护目录没有可继承 ACE，这份 DACL
+            # 来自创建进程 token 的默认 DACL，不保证是三主体。生产路径重写后都会重新保护。
             module._atomic_write(manifest, b"rewritten-after-protection")
+            module._protect_acl(root)
             self.assertEqual(module._verify_acl(root)["verified_item_count"], 2)
 
             # 真实漂移 = 保护后新增第四个主体；验证器必须拒绝。
@@ -565,10 +580,10 @@ Source type: codex-bundled-system
             root = Path(temp)
             manifest, _ = self.write_complete_manifest(root)
             module._protect_acl(root)
-            self.assertEqual(module.verify_backup(manifest)["entry_count"], 9)
+            self.assertEqual(
+                module.verify_backup(manifest)["entry_count"], 3 + len(module.RUNTIME_FILES)
+            )
 
-            module._atomic_write(manifest, manifest.read_bytes())
-            self.assertEqual(module.verify_backup(manifest)["entry_count"], 9)
             drift = subprocess.run(
                 ["icacls.exe", str(manifest), "/grant", r"BUILTIN\Users:(RX)"],
                 capture_output=True,

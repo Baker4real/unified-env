@@ -5,7 +5,6 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
-const DEFAULT_MANIFEST_PATH = path.join(PROJECT_ROOT, 'modules', 'manifest.json');
 const TEST_KINDS = Object.freeze(['powershell', 'python', 'node']);
 const CODE_FILE_PATTERN = /\.(?:cjs|cmd|cs|js|mjs|ps1|py)$/i;
 
@@ -22,32 +21,85 @@ function normalizeRepositoryPath(value, label = 'path') {
   return normalized;
 }
 
+function runGit(projectRoot, args, options = {}) {
+  const result = spawnSync('git', args, {
+    cwd: projectRoot,
+    windowsHide: true,
+    // Default 1MiB maxBuffer truncates git ls-files (--others includes every
+    // untracked evidence/fixture path) and fails the gate with ENOBUFS.
+    maxBuffer: 256 * 1024 * 1024,
+    ...options,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`git ${args[0]} failed: ${String(result.stderr || result.stdout || '').trim()}`);
+  }
+  return result.stdout;
+}
+
 function collectRepositoryFiles(projectRoot = PROJECT_ROOT) {
-  const result = spawnSync('git', [
+  return String(runGit(projectRoot, [
     'ls-files',
     '--cached',
     '--others',
     '--exclude-standard',
     '-z',
-  ], {
-    cwd: projectRoot,
-    encoding: 'utf8',
-    windowsHide: true,
-    // Default 1MiB maxBuffer truncates git ls-files (--others includes every
-    // untracked evidence/fixture path) and fails the gate with ENOBUFS.
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`git ls-files failed: ${String(result.stderr || result.stdout || '').trim()}`);
-  }
-
-  return String(result.stdout || '')
+  ], { encoding: 'utf8' }))
     .split('\0')
     .filter(Boolean)
     .map((entry) => normalizeRepositoryPath(entry, 'repository file'))
     .filter((entry) => fs.existsSync(path.join(projectRoot, ...entry.split('/'))))
     .sort((left, right) => left.localeCompare(right));
+}
+
+// A tree is what the validator checks: its files, whether a file or directory
+// exists, and the text of a list of files.  The work tree is the default;
+// --rev checks a commit (or tree) without exporting it.
+function workTree(projectRoot = PROJECT_ROOT) {
+  const fullPath = (repositoryPath) => path.join(projectRoot, ...repositoryPath.split('/'));
+  return {
+    files: collectRepositoryFiles(projectRoot),
+    exists: (repositoryPath) => fs.existsSync(fullPath(repositoryPath)),
+    readTexts: (repositoryPaths) => repositoryPaths.map((entry) => fs.readFileSync(fullPath(entry), 'utf8')),
+  };
+}
+
+function revisionTree(projectRoot, revision) {
+  const blobs = new Map();
+  const directories = new Set();
+  for (const entry of String(runGit(projectRoot, ['ls-tree', '-r', '-z', revision], { encoding: 'utf8' })).split('\0')) {
+    if (!entry) continue;
+    const tab = entry.indexOf('\t');
+    const repositoryPath = normalizeRepositoryPath(entry.slice(tab + 1), 'repository file');
+    blobs.set(repositoryPath, entry.slice(0, tab).split(' ')[2]);
+    for (let slash = repositoryPath.indexOf('/'); slash !== -1; slash = repositoryPath.indexOf('/', slash + 1)) {
+      directories.add(repositoryPath.slice(0, slash));
+    }
+  }
+
+  function readTexts(repositoryPaths) {
+    const objects = repositoryPaths.map((repositoryPath) => {
+      if (!blobs.has(repositoryPath)) throw new Error(`${repositoryPath} is not in ${revision}`);
+      return blobs.get(repositoryPath);
+    });
+    if (objects.length === 0) return [];
+    const output = runGit(projectRoot, ['cat-file', '--batch'], { input: `${objects.join('\n')}\n` });
+    let offset = 0;
+    return objects.map((object) => {
+      const headerEnd = output.indexOf(0x0a, offset);
+      const [, type, size] = output.toString('utf8', offset, headerEnd).split(' ');
+      if (type !== 'blob') throw new Error(`git cat-file: ${object} is ${type}`);
+      const start = headerEnd + 1;
+      offset = start + Number(size) + 1;
+      return output.toString('utf8', start, start + Number(size));
+    });
+  }
+
+  return {
+    files: [...blobs.keys()].sort((left, right) => left.localeCompare(right)),
+    exists: (repositoryPath) => blobs.has(repositoryPath) || directories.has(repositoryPath),
+    readTexts,
+  };
 }
 
 function testPaths(owner) {
@@ -101,7 +153,7 @@ function validateOwnership(manifest, repositoryFiles) {
   return errors;
 }
 
-function validateCrossModuleCodeReferences(manifest, repositoryFiles, projectRoot = PROJECT_ROOT) {
+function validateCrossModuleCodeReferences(manifest, repositoryFiles, tree) {
   const errors = [];
   const modules = new Map(manifest.modules.map((module) => [module.id, module]));
   const codeFiles = repositoryFiles
@@ -119,13 +171,11 @@ function validateCrossModuleCodeReferences(manifest, repositoryFiles, projectRoo
     targetsByBasename.get(basename).push(target);
   }
 
-  for (const source of codeFiles) {
-    if (!/^(?:managed|modules|scripts)\//.test(source.repositoryPath)) continue;
+  const sources = codeFiles.filter(({ repositoryPath }) => /^(?:managed|modules|scripts)\//.test(repositoryPath));
+  const sourceTexts = tree.readTexts(sources.map(({ repositoryPath }) => repositoryPath));
+  for (const [index, source] of sources.entries()) {
     const consumer = modules.get(source.owners[0]);
-    const sourceText = fs.readFileSync(
-      path.join(projectRoot, ...source.repositoryPath.split('/')),
-      'utf8',
-    ).toLowerCase();
+    const sourceText = sourceTexts[index].toLowerCase();
 
     for (const [basename, targets] of targetsByBasename) {
       if (!sourceText.includes(basename)) continue;
@@ -149,7 +199,7 @@ function validateCrossModuleCodeReferences(manifest, repositoryFiles, projectRoo
   return errors;
 }
 
-function validateOwnedPath(projectRoot, owner, repositoryPath, role, errors) {
+function validateOwnedPath(tree, owner, repositoryPath, role, errors) {
   let normalized;
   try {
     normalized = normalizeRepositoryPath(repositoryPath, `${owner.id} ${role}`);
@@ -157,7 +207,7 @@ function validateOwnedPath(projectRoot, owner, repositoryPath, role, errors) {
     errors.push(error.message);
     return;
   }
-  if (!fs.existsSync(path.join(projectRoot, ...normalized.split('/')))) {
+  if (!tree.exists(normalized)) {
     errors.push(`${owner.id} ${role} does not exist: ${normalized}`);
   }
 }
@@ -201,7 +251,7 @@ function validateDependencyGraph(modules, errors) {
   for (const id of graph.keys()) visit(id);
 }
 
-function validateManifest(manifest, projectRoot = PROJECT_ROOT) {
+function validateManifest(manifest, tree) {
   const errors = [];
   if (!manifest || manifest.schemaVersion !== 1) {
     return ['manifest schemaVersion must be 1'];
@@ -227,12 +277,12 @@ function validateManifest(manifest, projectRoot = PROJECT_ROOT) {
     if (!Array.isArray(module.interfaces) || module.interfaces.length === 0) {
       errors.push(`${module.id} must expose at least one interface`);
     }
-    validateOwnedPath(projectRoot, module, module.context, 'context', errors);
+    validateOwnedPath(tree, module, module.context, 'context', errors);
     for (const interfacePath of module.interfaces || []) {
-      validateOwnedPath(projectRoot, module, interfacePath, 'interface', errors);
+      validateOwnedPath(tree, module, interfacePath, 'interface', errors);
     }
     for (const testPath of testPaths(module)) {
-      validateOwnedPath(projectRoot, module, testPath, 'test', errors);
+      validateOwnedPath(tree, module, testPath, 'test', errors);
     }
     if (!module.tests || !module.tests.fixture) {
       errors.push(`${module.id} must define a fixture test profile`);
@@ -251,14 +301,14 @@ function validateManifest(manifest, projectRoot = PROJECT_ROOT) {
 
   for (const owner of [...manifest.modules, { id: 'shared', ...manifest.shared }]) {
     for (const ownedPath of owner.ownership?.files || []) {
-      validateOwnedPath(projectRoot, owner, ownedPath, 'owned file', errors);
+      validateOwnedPath(tree, owner, ownedPath, 'owned file', errors);
     }
     for (const ownedPrefix of owner.ownership?.prefixes || []) {
       const normalized = normalizeRepositoryPath(
         String(ownedPrefix).replace(/\/$/, ''),
         `${owner.id} owned prefix`,
       );
-      if (!fs.existsSync(path.join(projectRoot, ...normalized.split('/')))) {
+      if (!tree.exists(normalized)) {
         errors.push(`${owner.id} owned prefix does not exist: ${normalized}/`);
       }
     }
@@ -268,9 +318,29 @@ function validateManifest(manifest, projectRoot = PROJECT_ROOT) {
   return errors;
 }
 
+// The manifest comes from the checked tree unless --manifest names a file.
+function validateRepository(projectRoot, { revision, manifestPath } = {}) {
+  const tree = revision ? revisionTree(projectRoot, revision) : workTree(projectRoot);
+  const manifest = JSON.parse(manifestPath
+    ? fs.readFileSync(manifestPath, 'utf8')
+    : tree.readTexts(['modules/manifest.json'])[0]);
+  const errors = [
+    ...validateManifest(manifest, tree),
+    ...validateOwnership(manifest, tree.files),
+    ...validateCrossModuleCodeReferences(manifest, tree.files, tree),
+  ];
+  return {
+    ok: errors.length === 0,
+    files: tree.files.length,
+    modules: manifest.modules.length,
+    errors,
+  };
+}
+
 function parseArguments(args) {
   let json = false;
-  let manifestPath = DEFAULT_MANIFEST_PATH;
+  let manifestPath;
+  let revision;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--json') {
@@ -279,45 +349,38 @@ function parseArguments(args) {
       index += 1;
       if (index >= args.length) throw new Error('--manifest requires a path');
       manifestPath = path.resolve(args[index]);
+    } else if (argument === '--rev') {
+      index += 1;
+      if (index >= args.length || args[index].startsWith('-')) throw new Error('--rev requires a commit or tree');
+      revision = args[index];
     } else {
-      throw new Error('Usage: node scripts/Validate-ModuleBoundaries.cjs [--json] [--manifest <path>]');
+      throw new Error('Usage: node scripts/Validate-ModuleBoundaries.cjs [--json] [--manifest <path>] [--rev <commit-or-tree>]');
     }
   }
-  return { json, manifestPath };
+  return { json, manifestPath, revision };
 }
 
 function main(args) {
   const options = parseArguments(args);
-  const manifest = JSON.parse(fs.readFileSync(options.manifestPath, 'utf8'));
-  const repositoryFiles = collectRepositoryFiles(PROJECT_ROOT);
-  const errors = [
-    ...validateManifest(manifest, PROJECT_ROOT),
-    ...validateOwnership(manifest, repositoryFiles),
-    ...validateCrossModuleCodeReferences(manifest, repositoryFiles, PROJECT_ROOT),
-  ];
-  const result = {
-    ok: errors.length === 0,
-    files: repositoryFiles.length,
-    modules: manifest.modules.length,
-    errors,
-  };
+  const result = validateRepository(PROJECT_ROOT, options);
 
   if (options.json) {
     console.log(JSON.stringify(result));
   } else if (result.ok) {
     console.log(`PASS Validate-ModuleBoundaries files=${result.files} modules=${result.modules}`);
   } else {
-    for (const error of errors) console.error(error);
+    for (const error of result.errors) console.error(error);
   }
   if (!result.ok) process.exitCode = 1;
 }
 
 module.exports = {
-  collectRepositoryFiles,
   ownersForPath,
   validateCrossModuleCodeReferences,
   validateManifest,
   validateOwnership,
+  validateRepository,
+  workTree,
 };
 
 if (require.main === module) {
