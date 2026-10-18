@@ -186,7 +186,7 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
 2. 检查 marker（`deployment-maintenance-marker-present`）。
 3. 用加载器读取并校验现役 policy（`live-policy-invalid`）。加载器执行三条结构规则（#84），现役 policy 有结构违例同样拒绝：这时除 Lint 外的各 Mode 都已失败关闭，维护工具也不能用来修复它，须先按 Lint 的报告修好 policy。
 4. 生成候选（`change-set-invalid`）。Apply 时候选 SHA 必须等于批准值（`candidate-sha-mismatch`）。
-5. 候选原始字节只在内存里，不落盘。候选必须被加载器接受（`candidate-policy-invalid`）；加载器执行三条结构规则，所以候选必须零违例，拒绝原文给出第一处违例的规则名、条目 id 与 deny 序号。输出的 `structure`（`liveViolations`、`newViolations`、`resolvedViolations`）按既有输出合同保留，现役与候选都已零违例，三个列表恒为空。
+5. 候选原始字节只在内存里，不落盘。候选必须被加载器接受（`candidate-policy-invalid`）；加载器执行三条结构规则，所以候选必须零违例，拒绝原文见「固定入口」段的结构规则。输出的 `structure`（`liveViolations`、`newViolations`、`resolvedViolations`）按既有输出合同保留，现役与候选都已零违例，三个列表恒为空。
 6. 在途检查（`in-flight-check-failed`、`in-flight-records-blocking`），规则见下。
 7. DryRun 到此结束，输出 `ok=true` 与候选 SHA；除第 1 步的面包屑外不写任何文件，policy 目录与 evidence 根保持原样。Apply 用 policy 同目录临时文件原子替换：换名前复核现役字节未变，换名后复核候选 SHA（失败为 `policy-write-failed`）。成功时输出 `written=true` 与提示「policy 已对宿主立即生效，git 提交需另行完成」。
 8. 删除面包屑，释放锁。
