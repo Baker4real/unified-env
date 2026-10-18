@@ -15,7 +15,7 @@ intent: 定义 retired-evidence-root 的安全边界、状态机、一次性授�
 
 - 新用途只允许登记在受管 run-evidence capability 根 `D:\agents\run-evidence` 之下的明确一级目录。每个获批目录是**独立** capability 条目：`minimumDescendantDepth=0`、`rootDeletionPurpose=retired-evidence-root`，运行目标只允许精确 capability root。
 - 解析器识别本用途时，`capabilityRoot` 必须是 run-evidence 父根下的明确一级目录。生产父根是 `D:\agents\run-evidence`；可复现 fixture 必须消费 `tests/New-CodexSafeTreeDeleteRetiredEvidenceRootFixture.ps1` 写出的 `run-evidence-analog` scratch analog。不得把 empty-project-state / retired-project-root 的生产形项目正则套到本用途。生产「只许登记在受管 run-evidence 之下」由生产 policy 与同一维护任务中的撤销约束，不靠本用途写死唯一绝对父路径。
-- 父条目 `codex-run-evidence` 保持 `minimumDescendantDepth=2`、`rootDeletionPurpose=none`，并继续精确拒绝 `D:\agents\run-evidence\safe-tree-delete`。不得把 run-evidence 的默认最小后代深度从 2 改为 1。
+- 父条目 `codex-run-evidence` 保持 `minimumDescendantDepth=2`、`rootDeletionPurpose=none`，并继续精确拒绝 `D:\agents\run-evidence\safe-tree-delete`。不得把 run-evidence 的默认最小后代深度从 2 改为 1。登记本用途条目时，父条目还须在同一次 policy 变更中精确 deny 该获批 root：这是 `docs/specs/2026-07-24-safe-tree-delete-capability.md`「固定入口」段结构规则 `nested-root-not-denied` 的要求。
 - 不得把下列路径登记为本用途：`run-evidence 根`、`safe-tree-delete evidence 根`、任一项目根、workspace 根、其他宽路径，或获批根的后代。同级未登记目录不因邻居获批而获得权限。
 - 生产 CLI 仍不接受 policy/evidence override。本用途的 fixture 只存在于测试 scratch，不得把生产 `D:\agents\run-evidence\` 当 fixture。
 - 删除仍只走受管 safe-tree-delete 控制面。Remove-Item、Directory.Delete、cmd rmdir 或其他旁路不是本用途的合法实现。
@@ -43,7 +43,7 @@ intent: 定义 retired-evidence-root 的安全边界、状态机、一次性授�
 ## 撤销语义
 
 - 成功 Purge、Restore、显式取消或事务以失败闭锁结束并停止重试之后，许可即消费完毕。
-- 生产清理必须在同一受管维护流程中撤销临时 policy 条目，并验证生产 policy 恢复原始语义：`codex-run-evidence` 仍为深度 2 / `none`，且没有残留的 `retired-evidence-root` 条目。
+- 生产清理必须在同一受管维护流程中撤销临时 policy 条目，同时移除父条目为它加的精确 deny，并验证生产 policy 恢复原始语义：`codex-run-evidence` 仍为深度 2 / `none`，没有残留的 `retired-evidence-root` 条目，父条目也没有残留指向已撤销 root 的 deny。
 - 删除证据保留在受管 `D:\agents\run-evidence\safe-tree-delete\` 中，不随目标目录消失。撤销的是许可，不是审计记录。
 - 撤销后的重放（同一路径、新 identity、旧 Plan/transaction SHA）必须拒绝。
 
@@ -53,12 +53,12 @@ intent: 定义 retired-evidence-root 的安全边界、状态机、一次性授�
 
 | grant 状态 | 观察 | 下一步 |
 |---|---|---|
-| ungranted | 无本用途 policy 条目 | 只在获授权维护流程中登记精确条目 |
+| ungranted | 无本用途 policy 条目 | 只在获授权维护流程中登记精确条目，父条目同时精确 deny 该 root |
 | granted | 条目存在且尚未消费 | `Plan`（绑定当前身份与树清单） |
 | planned | 受管 plan 仍有效 | `Apply`，或过期/取消 |
 | applied | 目标已原子改名到同父 quarantine | `Purge` 或 `Restore` |
-| consumed | `purged` / restored / cancelled | 撤销 policy 条目 |
-| revoked | 生产 policy 不再含该条目 | 同路径新目录需要全新许可 |
+| consumed | `purged` / restored / cancelled | 撤销 policy 条目，并移除父条目对该 root 的 deny |
+| revoked | 生产 policy 不再含该条目，父条目也不再 deny 该 root | 同路径新目录需要全新许可 |
 | fail-closed / manual-review | 身份、树清单、policy SHA 或保护规则漂移 | 停止自动推进，不得旁路 |
 
 Restore、Status 和 crash recovery 必须识别本用途。`purging` 中断恢复仍只允许当前树成为原计划的未变子集；其他路径仍要求完整清单。
