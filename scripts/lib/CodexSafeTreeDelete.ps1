@@ -593,18 +593,57 @@ function Get-CodexSafeTreeDeletePolicyStructureViolations {
     # 规则 3：条目按 CapabilityRoot 精确匹配选择，子 root 若没有被父条目的 deny 精确覆盖，传入父 root
     # 就能绕过子条目更严格的约束。按字面对所有「严格位于另一条 root 之内」的组合检查（含多级嵌套）；
     # 相等的 root 是重复 root，由既有加载约束报告。路径比较大小写不敏感、忽略尾随分隔符。
+    # 包含关系与 Test-CodexHookPathWithin 同一口径；加载器每次加载都调用本函数，所以按「子 root 本身及其
+    # 每个祖先前缀」查表找父条目，不做两两比较。结果按（父条目序号，子条目序号）排列。
     $nestedRoots = [Collections.Generic.List[object]]::new()
     $entryList = @($Entries)
-    foreach ($parent in $entryList) {
-        $parentRoot = [string]$parent.capabilityRoot
-        foreach ($child in $entryList) {
-            $childRoot = [string]$child.capabilityRoot
-            if ([StringComparer]::OrdinalIgnoreCase.Equals($parentRoot.TrimEnd('\', '/'), $childRoot.TrimEnd('\', '/')) -or
-                -not (Test-CodexHookPathWithin -Path $childRoot -ParentPath $parentRoot)) {
-                continue
+    $entryCount = $entryList.Count
+    $literalRoots = [string[]]::new($entryCount)
+    $fullRoots = [string[]]::new($entryCount)
+    $indexesByFullRoot = [Collections.Generic.Dictionary[string, Collections.Generic.List[int]]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    for ($index = 0; $index -lt $entryCount; $index++) {
+        $root = [string]$entryList[$index].capabilityRoot
+        $literalRoots[$index] = $root.TrimEnd('\', '/')
+        $fullRoot = [IO.Path]::GetFullPath($root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+        $fullRoots[$index] = $fullRoot
+        if (-not $indexesByFullRoot.ContainsKey($fullRoot)) {
+            $indexesByFullRoot[$fullRoot] = [Collections.Generic.List[int]]::new()
+        }
+        $indexesByFullRoot[$fullRoot].Add($index)
+    }
+    $childIndexesByParent = [object[]]::new($entryCount)
+    for ($childIndex = 0; $childIndex -lt $entryCount; $childIndex++) {
+        $childFullRoot = $fullRoots[$childIndex]
+        $prefixes = [Collections.Generic.List[string]]::new()
+        $prefixes.Add($childFullRoot)
+        $separator = $childFullRoot.IndexOf([IO.Path]::DirectorySeparatorChar)
+        while ($separator -ge 0) {
+            $prefixes.Add($childFullRoot.Substring(0, $separator))
+            $separator = $childFullRoot.IndexOf([IO.Path]::DirectorySeparatorChar, $separator + 1)
+        }
+        foreach ($prefix in $prefixes) {
+            $parentIndexes = $null
+            if (-not $indexesByFullRoot.TryGetValue($prefix, [ref]$parentIndexes)) { continue }
+            foreach ($parentIndex in $parentIndexes) {
+                if ([StringComparer]::OrdinalIgnoreCase.Equals($literalRoots[$parentIndex], $literalRoots[$childIndex])) {
+                    continue
+                }
+                if ($null -eq $childIndexesByParent[$parentIndex]) {
+                    $childIndexesByParent[$parentIndex] = [Collections.Generic.List[int]]::new()
+                }
+                $childIndexesByParent[$parentIndex].Add($childIndex)
             }
+        }
+    }
+    for ($parentIndex = 0; $parentIndex -lt $entryCount; $parentIndex++) {
+        if ($null -eq $childIndexesByParent[$parentIndex]) { continue }
+        $parent = $entryList[$parentIndex]
+        foreach ($childIndex in $childIndexesByParent[$parentIndex]) {
+            $child = $entryList[$childIndex]
+            $childRoot = $literalRoots[$childIndex]
             $covered = @(@($parent.deniedExactPaths) | Where-Object {
-                    [StringComparer]::OrdinalIgnoreCase.Equals(([string]$_).TrimEnd('\', '/'), $childRoot.TrimEnd('\', '/'))
+                    [StringComparer]::OrdinalIgnoreCase.Equals(([string]$_).TrimEnd('\', '/'), $childRoot)
                 }).Count -gt 0
             $nestedRoots.Add([pscustomobject][ordered]@{
                 parentEntryId = [string]$parent.id
