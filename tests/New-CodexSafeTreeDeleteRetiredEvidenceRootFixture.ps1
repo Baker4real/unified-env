@@ -45,7 +45,8 @@ function New-CodexSafeTreeDeleteRetiredEvidenceRootFixture {
                 capabilityRoot = $capabilityRoot
                 minimumDescendantDepth = 2
                 rootDeletionPurpose = 'none'
-                deniedExactPaths = [string[]]@($protectedEvidenceRoot)
+                # 结构规则 3（#84）：父条目还必须精确 deny 每个登记为 retired-evidence-root 的一级子 root。
+                deniedExactPaths = [string[]]@($protectedEvidenceRoot, $approvedA, $approvedB, $approvedC, $approvedD)
             },
             [pscustomobject][ordered]@{
                 id = 'approved-retired-evidence-a'

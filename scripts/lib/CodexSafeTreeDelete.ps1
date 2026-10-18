@@ -549,7 +549,7 @@ function Get-CodexSafeTreeDeletePathDepthWithin {
 }
 
 function Get-CodexSafeTreeDeletePolicyStructureViolations {
-    # spec #73「加载器结构规则」的唯一实现。Lint 的结构部分直接调用；#84 让加载器调用同一函数并 fail-closed。
+    # spec #73「加载器结构规则」的唯一实现。加载器（任一违例即 fail-closed）与 Lint 的结构部分都调用它。
     # Entries：已规范化的条目（id、capabilityRoot、minimumDescendantDepth、deniedExactPaths；路径已过
     # Assert-CodexHookDPath）。纯字符串运算，不访问文件系统，不抛错。
     # 返回 violations（rule、entryId、denyIndex、detail；detail 不含路径）与 nestedRoots（parentEntryId、
@@ -1269,6 +1269,21 @@ function Read-CodexSafeTreeDeletePolicy {
             producerFenceMode = $producerFenceMode
             deniedExactPaths = @($denied)
         })
+    }
+
+    # spec #73「加载器结构规则」（#84）：与 Lint 结构部分同一实现。任一违例都让整个 policy fail-closed。
+    # 拒绝原文给出第一处违例的规则名、条目 id 与 deny 序号，以及违例总数；不回显 root 或 deny（deny 可能是
+    # 个人路径），也不用全角冒号（Lint 与维护工具转述加载器拒绝时只保留全角冒号之前的部分）。
+    $structureViolations = @((Get-CodexSafeTreeDeletePolicyStructureViolations -Entries $canonicalEntries.ToArray()).violations)
+    if ($structureViolations.Count -ne 0) {
+        $firstViolation = $structureViolations[0]
+        $location = "条目 $([string]$firstViolation.entryId)"
+        if ($null -ne $firstViolation.denyIndex) { $location += "，deniedExactPaths[$([long]$firstViolation.denyIndex)]" }
+        $refusal = "safe-delete policy 违反结构规则 $([string]$firstViolation.rule)（$location）。$([string]$firstViolation.detail)"
+        if ($structureViolations.Count -gt 1) {
+            $refusal += "共 $($structureViolations.Count) 处结构违例，Lint mode 逐条列出。"
+        }
+        throw $refusal
     }
 
     return [pscustomobject][ordered]@{

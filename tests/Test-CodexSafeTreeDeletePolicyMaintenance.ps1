@@ -22,8 +22,7 @@ $sidSuffix = (([string][System.Security.Principal.WindowsIdentity]::GetCurrent()
 $childProcesses = [Collections.Generic.List[object]]::new()
 
 # 与仓库 managed/safe-tree-delete/policy.json 同一书写格式：UTF-8 无 BOM、LF、两空格缩进、末尾换行。
-# {TARGETS} 与 {SPARE} 是场景内 JSON 转义后的 root。fixture-spare 的 deny 比最小后代深度更深，是现役
-# policy 已有的结构违例（规则 1）。
+# {TARGETS} 与 {SPARE} 是场景内 JSON 转义后的 root。现役 policy 符合三条结构规则：加载器拒绝任何违例（#84）。
 $basePolicyTemplate = @'
 {
   "artifactType": "env-governance.codex-safe-tree-delete-policy",
@@ -46,7 +45,7 @@ $basePolicyTemplate = @'
       "allowHardLinks": false,
       "allowInternalDirectoryJunctions": false,
       "deniedExactPaths": [
-        "{SPARE}\\nested\\deep"
+        "{SPARE}\\nested"
       ]
     }
   ]
@@ -77,7 +76,7 @@ $addDenyPolicyTemplate = @'
       "allowHardLinks": false,
       "allowInternalDirectoryJunctions": false,
       "deniedExactPaths": [
-        "{SPARE}\\nested\\deep"
+        "{SPARE}\\nested"
       ]
     }
   ]
@@ -124,7 +123,7 @@ $removeDenyPolicyTemplate = @'
       "allowHardLinks": false,
       "allowInternalDirectoryJunctions": false,
       "deniedExactPaths": [
-        "{SPARE}\\nested\\deep"
+        "{SPARE}\\nested"
       ]
     }
   ]
@@ -154,7 +153,7 @@ $addEntryPolicyTemplate = @'
       "allowHardLinks": false,
       "allowInternalDirectoryJunctions": false,
       "deniedExactPaths": [
-        "{SPARE}\\nested\\deep"
+        "{SPARE}\\nested"
       ]
     },
     {
@@ -503,7 +502,7 @@ try {
     }
     Write-Output 'marker OK'
 
-    # ---- 2. DryRun：给出候选 SHA、变更摘要与现役结构违例，不写任何文件。工具在子进程里运行，在阶段 50
+    # ---- 2. DryRun：给出候选 SHA 与变更摘要，不写任何文件。工具在子进程里运行，在阶段 50
     # （候选已被加载器接受、在途检查之前，仍持锁）暂停：此刻与结束后 policy 目录和 evidence 根都与调用前
     # 相同，候选只在内存里 ----
     Write-Output 'STEP dry-run'
@@ -537,12 +536,6 @@ try {
     $dryChanges = @($dryResult.Json.changes)
     Assert-True ($dryChanges.Count -eq 1 -and [string]$dryChanges[0].op -ceq 'add-deny' -and
         [string]$dryChanges[0].entryId -ceq 'fixture-main') "dry-run: changes 摘要不符：$($dryResult.Text)"
-    $liveViolations = @($dryResult.Json.structure.liveViolations)
-    Assert-True ($liveViolations.Count -eq 1 -and
-        [string]$liveViolations[0].rule -ceq 'deny-deeper-than-minimum-depth' -and
-        [string]$liveViolations[0].entryId -ceq 'fixture-spare' -and
-        $liveViolations[0].denyIndex -eq 0) "dry-run: 现役结构违例必须列入输出：$($dryResult.Text)"
-    Assert-True (@($dryResult.Json.structure.newViolations).Count -eq 0) 'dry-run: 不得报告新增违例'
     # gap 3：SafeCleanupJob 描述符不在工具视野内，输出按 job 的 policy 比对口径报告条目变化。
     $cleanupJob = $dryResult.Json.safeCleanupJob
     Assert-True (@($cleanupJob.changedExistingEntryIds).Count -eq 1 -and
@@ -731,7 +724,7 @@ try {
         "terminal-resolution: 只列出未归档且在候选下不再解析的 terminal 记录：$($terminalDry.Text)"
     Write-Output 'terminal-resolution OK'
 
-    # ---- 11. retire-entry：整条移除；现役违例随条目消失时列入 resolvedViolations ----
+    # ---- 11. retire-entry：整条移除 ----
     Write-Output 'STEP op-retire-entry'
     $retire = New-Scenario -Name 'op-retire-entry'
     Set-ChangeSet -Scenario $retire -Changes @([pscustomobject][ordered]@{ op = 'retire-entry'; entryId = 'fixture-spare' })
@@ -742,9 +735,6 @@ try {
         "op-retire-entry: 候选必须等于手写期望：$($retireDry.Text)"
     Assert-True ([long]$retireDry.Json.entryCount.before -eq 2 -and [long]$retireDry.Json.entryCount.after -eq 1) `
         'op-retire-entry: entryCount 必须为 2 -> 1'
-    $resolved = @($retireDry.Json.structure.resolvedViolations)
-    Assert-True ($resolved.Count -eq 1 -and [string]$resolved[0].entryId -ceq 'fixture-spare') `
-        "op-retire-entry: 随条目消失的违例必须列入 resolvedViolations：$($retireDry.Text)"
     $retireChanges = (@($retireDry.Json.changes) | ForEach-Object { '{0}:{1}' -f $_.op, $_.entryId }) -join ','
     Assert-True ($retireChanges -ceq 'retire-entry:fixture-spare') "op-retire-entry: changes 摘要不符：$($retireDry.Text)"
     Write-Output 'op-retire-entry OK'
@@ -784,7 +774,7 @@ try {
         [string]@($addEntryJob.addedEntryIds)[0] -ceq 'fixture-extra') "op-add-entry: SafeCleanupJob 视角必须只是新增：$($addEntryDry.Text)"
     Write-Output 'op-add-entry OK'
 
-    # ---- 14. 拒绝：变更集非法、候选无法加载、候选新增结构违例；每种都不写任何文件 ----
+    # ---- 14. 拒绝：变更集非法、候选无法加载（含违反结构规则：候选必须零违例）；每种都不写任何文件 ----
     Write-Output 'STEP refusals'
     $refuse = New-Scenario -Name 'refusals'
     $protectedPath = Join-Path $refuse.TargetsRoot 'protected'
@@ -811,7 +801,8 @@ try {
             changes = @([pscustomobject][ordered]@{ op = 'add-entry'; entry = [pscustomobject][ordered]@{
                         id = 'fixture-extra'; capabilityRoot = $refuse.ExtraRoot; minimumDescendantDepth = 1
                         rootDeletionPurpose = 'bogus'; deniedExactPaths = @() } }) },
-        @{ label = 'deny-deeper-than-minimum-depth'; reason = 'candidate-adds-structure-violations'; message = 'structure.newViolations'
+        @{ label = 'deny-deeper-than-minimum-depth'; reason = 'candidate-policy-invalid'
+            message = 'deny-deeper-than-minimum-depth（条目 fixture-main，deniedExactPaths[1]）'
             changes = @([pscustomobject][ordered]@{ op = 'add-deny'; entryId = 'fixture-main'; path = (Join-Path $refuse.TargetsRoot 'a\b') }) }
     )
     foreach ($case in $refusalCases) {
@@ -823,10 +814,6 @@ try {
             "refusals-$($case.label): message 必须说明拒绝原因（含 '$($case.message)'）：$($caseResult.Json.message)"
         Assert-True ((Get-TreeState -Path $refuse.Root) -ceq $caseBefore) "refusals-$($case.label): 拒绝后场景目录必须零写入"
     }
-    $structureResult = $caseResult
-    $newViolations = @($structureResult.Json.structure.newViolations)
-    Assert-True ($newViolations.Count -eq 1 -and [string]$newViolations[0].rule -ceq 'deny-deeper-than-minimum-depth' -and
-        [string]$newViolations[0].entryId -ceq 'fixture-main') "refusals: 新增违例必须列入 structure.newViolations：$($structureResult.Text)"
     Assert-True ([Linq.Enumerable]::SequenceEqual([byte[]][IO.File]::ReadAllBytes($refuse.PolicyPath),
             [byte[]]$utf8.GetBytes((Expand-PolicyTemplate -Scenario $refuse -Template $basePolicyTemplate)))) 'refusals: policy 必须保持原字节'
     Write-Output 'refusals OK'

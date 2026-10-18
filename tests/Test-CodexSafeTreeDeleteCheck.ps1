@@ -34,14 +34,13 @@ $strayPath = Join-Path $outsideRoot 'stray'
 $nestRoot = Join-Path $scratchRoot 'nest'
 $nestInnerRoot = Join-Path $nestRoot 'inner'
 $nestLeafPath = Join-Path $nestInnerRoot 'leaf'
-$ambiguousPolicyPath = Join-Path $scratchRoot 'nested-ambiguous-policy.json'
+$uncoveredPolicyPath = Join-Path $scratchRoot 'nested-uncovered-policy.json'
 $coveredPolicyPath = Join-Path $scratchRoot 'nested-covered-policy.json'
 
 $topLevelFields = @('allowed', 'targetCount', 'results')
 $rowFields = @('targetPath', 'allowed', 'policyEntryId', 'capabilityRoot', 'depth', 'refusalReason', 'refusalMessage')
 $candidateFields = @('policyEntryId', 'capabilityRoot', 'allowed', 'depth', 'refusalReason', 'refusalMessage')
 $noCapabilityRootMessage = 'safe-delete target 没有能合法覆盖它的 capability root。'
-$ambiguousCapabilityRootMessage = 'safe-delete target 有多条能合法覆盖它的 capability root，须显式指定 CapabilityRoot。'
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -397,12 +396,8 @@ try {
     }
 
     # 3. 省略 CapabilityRoot：对每条条目运行同一判定，root 包含目标的条目是候选；候选中恰好一条放行才采用，
-    #    否则拒绝并列出全部候选及各自的判定。嵌套 root 用两份 policy：父条目没有 deny 覆盖子 root 时两条都
-    #    能合法覆盖子 root 下的目标（歧义）；父条目 deny 精确等于子 root 时只有子条目合法（唯一）。
-    Write-PolicyFile -Path $ambiguousPolicyPath -Entries @(
-        (New-PolicyEntry -Id 'check-outer' -Root $nestRoot -MinimumDepth 1),
-        (New-PolicyEntry -Id 'check-inner' -Root $nestInnerRoot -MinimumDepth 1)
-    )
+    #    否则拒绝并列出全部候选及各自的判定。嵌套 root：父条目 deny 精确等于子 root 时只有子条目合法（唯一）。
+    #    父条目没有 deny 覆盖子 root、两条都能合法覆盖子 root 下目标的 policy 违反结构规则 3，见 3b。
     Write-PolicyFile -Path $coveredPolicyPath -Entries @(
         (New-PolicyEntry -Id 'check-outer' -Root $nestRoot -MinimumDepth 1 -Denied @($nestInnerRoot)),
         (New-PolicyEntry -Id 'check-inner' -Root $nestInnerRoot -MinimumDepth 1)
@@ -428,14 +423,6 @@ try {
             )
         },
         @{
-            label = '自动解析歧义：父条目未 deny 子 root'; policy = $ambiguousPolicyPath; target = $nestLeafPath; allowed = $false
-            entry = $null; expectedRoot = $null; depth = $null
-            reason = 'ambiguous-capability-root'; message = $ambiguousCapabilityRootMessage; candidates = @(
-                @{ entry = 'check-outer'; root = $nestRoot; allowed = $true; depth = 2 },
-                @{ entry = 'check-inner'; root = $nestInnerRoot; allowed = $true; depth = 1 }
-            )
-        },
-        @{
             label = '自动解析：目标不是绝对路径'; target = 'relative\candidate'; allowed = $false; entry = $null; expectedRoot = $null; depth = $null
             reason = 'invalid-target-path'; message = 'safe-delete target 必须是 D 盘绝对路径：relative\candidate'
         }
@@ -455,6 +442,31 @@ try {
             Assert-VerdictAgreesWithPlan -TargetPath $case.target -Verdict $verdict -PolicyPath $casePolicyPath -Label (
                 "$($case.label)（$($verdict.policyEntryId)）")
         }
+    }
+
+    # 3b. 父条目没有 deny 覆盖子 root：两条都能合法覆盖子 root 下的目标，Check 不得从中选一条。加载器按结构
+    #     规则 3 拒绝整个 policy（#84），所以这种歧义到不了自动解析：Check 以含规则名与父条目 id、不含路径的
+    #     原文拒绝且不改动 evidence，两个 CapabilityRoot 下的 Plan 都以同一原文拒绝。
+    Write-PolicyFile -Path $uncoveredPolicyPath -Entries @(
+        (New-PolicyEntry -Id 'check-outer' -Root $nestRoot -MinimumDepth 1),
+        (New-PolicyEntry -Id 'check-inner' -Root $nestInnerRoot -MinimumDepth 1)
+    )
+    $uncoveredBefore = Get-EvidenceSnapshot
+    $uncoveredMessage = $null
+    try {
+        & $entryPath -Mode Check -TargetPath $nestLeafPath -Json `
+            -FixturePolicyPath $uncoveredPolicyPath -FixtureEvidenceRoot $evidenceRoot | Out-Null
+    } catch {
+        $uncoveredMessage = [string]$_.Exception.Message
+    }
+    Assert-True ($null -ne $uncoveredMessage -and $uncoveredMessage.Contains('nested-root-not-denied（条目 check-outer）')) (
+        "父条目未覆盖子 root：Check 必须因结构规则 3 拒绝整个 policy，实际：$uncoveredMessage")
+    Assert-True ($uncoveredMessage -notmatch '(?i)(?<![a-z0-9])[a-z]:[\\/]') "父条目未覆盖子 root：拒绝原文不得含路径：$uncoveredMessage"
+    Assert-True ((Get-EvidenceSnapshot) -ceq $uncoveredBefore) '父条目未覆盖子 root：Check 不得改动 evidence 目录树'
+    foreach ($nest in @(@{ id = 'check-outer'; root = $nestRoot }, @{ id = 'check-inner'; root = $nestInnerRoot })) {
+        $plan = Invoke-PlanOutcome -TargetPath $nestLeafPath -CapabilityRoot $nest.root -PolicyPath $uncoveredPolicyPath
+        Assert-True (-not $plan.planned -and $plan.message -ceq $uncoveredMessage) (
+            "父条目未覆盖子 root：以 $($nest.id) 的 root 为 CapabilityRoot 的 Plan 必须以同一原文拒绝，实际：$($plan.message)")
     }
 
     # 4. 多目标：TargetPaths 按输入顺序逐个返回，每行与该目标单独 Check 的结果相同；顶层 allowed 只在全部放行时
