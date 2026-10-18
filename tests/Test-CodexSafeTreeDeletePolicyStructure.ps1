@@ -143,13 +143,11 @@ function Invoke-CheckAllowed {
 }
 
 try {
-    # 0. 自检（非宿主视角）：仓库 policy、fixture 入口与 scratch 根都由本文件位置推导并位于仓库内；
-    #    本套件源码不写任何盘符绝对路径，fixture policy 的 root 与 deny 全部建在 scratch 根下。
+    # 0. 自检（非宿主视角）：仓库 policy 与 fixture 入口由本文件位置拼出，必然位于仓库内；scratch 根来自 helper，
+    #    须核对它也在仓库内。本套件源码不写任何盘符绝对路径，fixture policy 的 root 与 deny 全部建在 scratch 根下。
     $repoPolicyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
     Assert-True ([IO.File]::Exists($repoPolicyPath)) '自检：仓库 policy 必须位于本文件所在仓库内的固定位置'
-    foreach ($ownPath in @($repoPolicyPath, $entryPath, $scratchRoot)) {
-        Assert-True (Test-CodexHookPathWithin -Path $ownPath -ParentPath $projectRoot) '自检：本套件读写的路径必须位于仓库内'
-    }
+    Assert-True (Test-CodexHookPathWithin -Path $scratchRoot -ParentPath $projectRoot) '自检：scratch 根必须位于仓库内'
     Assert-True ([IO.File]::ReadAllText($PSCommandPath) -notmatch '(?i)(?<![a-z0-9])[a-z]:\\') (
         '自检：本套件源码不得写死盘符绝对路径，路径一律由本文件位置推导')
     # 结构 lint 不看宿主：root 与 deny 都不存在的合规 policy 零 finding（没有 root-missing 之类的宿主规则），
