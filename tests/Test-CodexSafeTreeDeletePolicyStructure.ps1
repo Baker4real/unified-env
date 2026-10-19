@@ -7,9 +7,12 @@ $ErrorActionPreference = 'Stop'
 # Seams under test (GitHub #84，spec #73「实现决策 › 加载器结构规则」「Lint 模式」):
 # 1. 加载器 Read-CodexSafeTreeDeletePolicy 读 fixture policy 文件，以及 fixture 入口
 #    tests\Invoke-CodexSafeTreeDeleteFixture.ps1 的 Check mode。三条结构规则各有一份合规、一份违规的 fixture
-#    policy；违规时整个 policy fail-closed，拒绝原文含规则名、条目 id 与 deny 序号，不含任何路径。
+#    policy；违规时整个 policy fail-closed，拒绝原文含规则名、条目 id 与 deny 序号，不含任何路径。规则 3 不把相等的
+#    root 算作嵌套，所以同一接缝上还钉住加载器把只差尾随分隔符或大小写的 root 按重复拒绝。
 # 2. Lint 的结构部分 Get-CodexSafeTreeDeletePolicyStructureLint：CI 以仓库 policy 为输入运行，只读 policy 文件
 #    本身，不探测 root、deny 或 evidence。
+# 3. 结构规则的纯函数 Get-CodexSafeTreeDeletePolicyStructureViolations：规则 3 的嵌套判定与两两调用
+#    Test-CodexHookPathWithin（CodexHostSafety 是路径包含判定的唯一实现）得出的结果一致。
 # CI 在仓库副本里按字母序 fail-fast 运行本套件，所以先从非宿主视角自检：读写的路径全部由本文件位置推导、
 # 位于仓库内，结构 lint 的结论不依赖宿主上的 root、owner 或 evidence。
 
@@ -117,6 +120,13 @@ function Assert-StructureRefusal {
     return $loaderMessage
 }
 
+function Test-OracleSameRoot {
+    # oracle 的「相等 root」：大小写不敏感、忽略尾随分隔符。相等的 root 是重复 root，不算嵌套。
+    param([Parameter(Mandatory)][string]$Left, [Parameter(Mandatory)][string]$Right)
+
+    return [string]::Equals($Left.TrimEnd('\', '/'), $Right.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)
+}
+
 function Invoke-CheckAllowed {
     # 合规 policy：fixture 入口的 Check 放行目标，并由预期条目覆盖。
     param(
@@ -134,13 +144,11 @@ function Invoke-CheckAllowed {
 }
 
 try {
-    # 0. 自检（非宿主视角）：仓库 policy、fixture 入口与 scratch 根都由本文件位置推导并位于仓库内；
-    #    本套件源码不写任何盘符绝对路径，fixture policy 的 root 与 deny 全部建在 scratch 根下。
+    # 0. 自检（非宿主视角）：仓库 policy 与 fixture 入口由本文件位置拼出，必然位于仓库内；scratch 根来自 helper，
+    #    须核对它也在仓库内。本套件源码不写任何盘符绝对路径，fixture policy 的 root 与 deny 全部建在 scratch 根下。
     $repoPolicyPath = Join-Path $projectRoot 'managed\safe-tree-delete\policy.json'
     Assert-True ([IO.File]::Exists($repoPolicyPath)) '自检：仓库 policy 必须位于本文件所在仓库内的固定位置'
-    foreach ($ownPath in @($repoPolicyPath, $entryPath, $scratchRoot)) {
-        Assert-True (Test-CodexHookPathWithin -Path $ownPath -ParentPath $projectRoot) '自检：本套件读写的路径必须位于仓库内'
-    }
+    Assert-True (Test-CodexHookPathWithin -Path $scratchRoot -ParentPath $projectRoot) '自检：scratch 根必须位于仓库内'
     Assert-True ([IO.File]::ReadAllText($PSCommandPath) -notmatch '(?i)(?<![a-z0-9])[a-z]:\\') (
         '自检：本套件源码不得写死盘符绝对路径，路径一律由本文件位置推导')
     # 结构 lint 不看宿主：root 与 deny 都不存在的合规 policy 零 finding（没有 root-missing 之类的宿主规则），
@@ -238,6 +246,57 @@ try {
     Assert-True ($rule3Message.Contains('子条目 structure-rule3-child')) "规则 3 违规：拒绝原文必须指明未被覆盖的子条目：$rule3Message"
     Assert-True (-not $rule3Message.Contains('deniedExactPaths[')) "规则 3 违规：嵌套违例没有 deny 序号：$rule3Message"
 
+    # 多级嵌套：规则 3 检查每一对严格嵌套的 root，不只直接父子。祖父条目只 deny 父 root、没有 deny 孙 root 时，
+    # 传入祖父 root 仍能绕过孙条目，整个 policy 拒绝加载；祖父同时 deny 两者才合规（孙 root 相对祖父的深度 2
+    # 不大于祖父的最小后代深度，符合规则 1）。
+    $rule3Top = Join-Path $scratchRoot 'rule3-multilevel\top'
+    $rule3Middle = Join-Path $rule3Top 'middle'
+    $rule3Bottom = Join-Path $rule3Middle 'bottom'
+    $rule3BottomLeaf = Join-Path $rule3Bottom 'leaf'
+    [void][IO.Directory]::CreateDirectory($rule3BottomLeaf)
+    $rule3MultilevelCompliantPath = Join-Path $scratchRoot 'rule3-multilevel\compliant-policy.json'
+    $rule3MultilevelViolatingPath = Join-Path $scratchRoot 'rule3-multilevel\violating-policy.json'
+    Write-Policy -Path $rule3MultilevelCompliantPath -Entries @(
+        (New-PolicyEntry -Id 'structure-rule3-top' -Root $rule3Top -Depth 2 -Deny @($rule3Middle, $rule3Bottom)),
+        (New-PolicyEntry -Id 'structure-rule3-middle' -Root $rule3Middle -Depth 1 -Deny @($rule3Bottom)),
+        (New-PolicyEntry -Id 'structure-rule3-bottom' -Root $rule3Bottom -Depth 1)
+    )
+    Write-Policy -Path $rule3MultilevelViolatingPath -Entries @(
+        (New-PolicyEntry -Id 'structure-rule3-top' -Root $rule3Top -Depth 2 -Deny @($rule3Middle)),
+        (New-PolicyEntry -Id 'structure-rule3-middle' -Root $rule3Middle -Depth 1 -Deny @($rule3Bottom)),
+        (New-PolicyEntry -Id 'structure-rule3-bottom' -Root $rule3Bottom -Depth 1)
+    )
+    Assert-True (@((Read-CodexSafeTreeDeletePolicy -PolicyPath $rule3MultilevelCompliantPath).entries).Count -eq 3) (
+        '规则 3 多级嵌套合规：祖父条目同时 deny 父 root 与孙 root 的 policy 必须可加载')
+    Invoke-CheckAllowed -PolicyPath $rule3MultilevelCompliantPath -ExpectedEntryId 'structure-rule3-bottom' `
+        -Label '规则 3 多级嵌套合规' -Arguments @{ TargetPath = $rule3BottomLeaf }
+    $rule3MultilevelMessage = Assert-StructureRefusal -PolicyPath $rule3MultilevelViolatingPath -Label '规则 3 多级嵌套违规' `
+        -Expected 'nested-root-not-denied（条目 structure-rule3-top）' `
+        -TargetPath $rule3BottomLeaf -CapabilityRoot $rule3Bottom
+    Assert-True ($rule3MultilevelMessage.Contains('子条目 structure-rule3-bottom')) (
+        "规则 3 多级嵌套违规：拒绝原文必须指明祖父条目没有覆盖的孙条目：$rule3MultilevelMessage")
+    Assert-True (-not $rule3MultilevelMessage.Contains('共 ')) (
+        "规则 3 多级嵌套违规：只有祖父与孙这一对未覆盖，不得报告总数：$rule3MultilevelMessage")
+
+    # 规则 3 不把相等的 root 算作嵌套，相等的 root 由加载器按重复 root 拒绝。比较键与 Test-CodexHookPathWithin
+    # 同一规范化（GetFullPath 后去掉尾随分隔符、大小写不敏感），所以只差尾随分隔符或只差大小写的两条 root
+    # 也是重复，整个 policy 拒绝加载，拒绝原文不变、不含路径。
+    $duplicateRoot = Join-Path $scratchRoot 'duplicate\root'
+    $duplicateLeaf = Join-Path $duplicateRoot 'leaf'
+    [void][IO.Directory]::CreateDirectory($duplicateLeaf)
+    foreach ($variant in @(
+            @{ name = 'trailing-separator'; label = '只差尾随分隔符'; root = "$duplicateRoot\" },
+            @{ name = 'case'; label = '只差大小写'; root = (Join-Path $scratchRoot 'duplicate\ROOT') }
+        )) {
+        $duplicatePolicyPath = Join-Path $scratchRoot "duplicate\$($variant.name)-policy.json"
+        Write-Policy -Path $duplicatePolicyPath -Entries @(
+            (New-PolicyEntry -Id 'structure-duplicate-a' -Root $duplicateRoot -Depth 1),
+            (New-PolicyEntry -Id 'structure-duplicate-b' -Root $variant.root -Depth 1)
+        )
+        [void](Assert-StructureRefusal -PolicyPath $duplicatePolicyPath -Label "重复 root（$($variant.label)）" `
+                -Expected 'safe-delete policy capabilityRoot 重复。' -TargetPath $duplicateLeaf -CapabilityRoot $duplicateRoot)
+    }
+
     # 4. 多处违例：拒绝原文给出第一处违例（条目顺序下先规则 1、2，再规则 3）和违例总数。
     $combinedPath = Join-Path $scratchRoot 'combined-policy.json'
     Write-Policy -Path $combinedPath -Entries @(
@@ -261,6 +320,79 @@ try {
         $repoLint.policy.entryCount -gt 0 -and
         $repoLint.policy.evaluatedEntryCount -eq $repoLint.policy.entryCount) (
         "仓库 policy 必须可加载且全部条目参与结构规则：$($repoLint.policy.evaluatedEntryCount)/$($repoLint.policy.entryCount)")
+
+    # 6. 规则 3 的包含判定只用 CodexHostSafety：纯函数的 nestedRoots 与 violations 必须等于一个两两比较的 oracle，
+    #    oracle 只用 Test-CodexHookPathWithin 加「相等 root 不算嵌套」，顺序按（父条目序号，子条目序号）。合成 root
+    #    只参与字符串运算、不落盘，与调用方一样先过 Assert-CodexHookDPath；覆盖三级嵌套、只共享字符串前缀的兄弟
+    #    （a 与 ab）、大小写差异、带尾随分隔符的子 root，以及大小写与尾随分隔符都不同的重复 root。
+    $oracleBase = Join-Path $scratchRoot 'oracle'
+    $oracleEntries = @(@(
+            @{ Id = 'oracle-top'; Root = 'a'; Depth = 2; Deny = @('a\b') },
+            @{ Id = 'oracle-middle'; Root = 'a\b'; Depth = 1; Deny = @('a\b\c') },
+            @{ Id = 'oracle-bottom'; Root = 'a\b\c\'; Depth = 1; Deny = @() },
+            @{ Id = 'oracle-sibling'; Root = 'ab'; Depth = 1; Deny = @() },
+            @{ Id = 'oracle-case'; Root = 'A\B\D'; Depth = 1; Deny = @() },
+            @{ Id = 'oracle-duplicate'; Root = 'A\'; Depth = 2; Deny = @('A\B') }
+        ) | ForEach-Object {
+            $spec = $_
+            [pscustomobject][ordered]@{
+                id = [string]$spec.Id
+                capabilityRoot = Assert-CodexHookDPath -Value (Join-Path $oracleBase $spec.Root) -Name 'oracle root'
+                minimumDescendantDepth = [long]$spec.Depth
+                deniedExactPaths = [string[]]@(@($spec.Deny) | ForEach-Object {
+                        Assert-CodexHookDPath -Value (Join-Path $oracleBase $_) -Name 'oracle deny'
+                    })
+            }
+        })
+    foreach ($trailingId in @('oracle-bottom', 'oracle-duplicate')) {
+        $trailingRoot = [string]@($oracleEntries | Where-Object { $_.id -ceq $trailingId })[0].capabilityRoot
+        Assert-True ($trailingRoot.EndsWith('\')) "oracle：$trailingId 的 root 必须保留尾随分隔符"
+    }
+    $oracleNested = [Collections.Generic.List[string]]::new()
+    $oracleViolations = [Collections.Generic.List[object]]::new()
+    foreach ($parent in $oracleEntries) {
+        foreach ($child in $oracleEntries) {
+            if (Test-OracleSameRoot -Left $parent.capabilityRoot -Right $child.capabilityRoot) { continue }
+            if (-not (Test-CodexHookPathWithin -Path $child.capabilityRoot -ParentPath $parent.capabilityRoot)) { continue }
+            $covered = @(@($parent.deniedExactPaths) | Where-Object {
+                    Test-OracleSameRoot -Left $_ -Right $child.capabilityRoot
+                }).Count -gt 0
+            $oracleNested.Add(('{0}>{1}:{2}' -f $parent.id, $child.id, $covered))
+            if (-not $covered) { $oracleViolations.Add([pscustomobject]@{ parentId = $parent.id; childId = $child.id }) }
+        }
+    }
+    # oracle 先给出可手算核对的结论，确认合成集确实覆盖了上面每一类，相等比较不会空转。
+    foreach ($expectedPair in @(
+            'oracle-top>oracle-bottom:False',       # 三级嵌套：祖父对孙同样检查
+            'oracle-middle>oracle-bottom:True',     # 带尾随分隔符的子 root 被不带分隔符的 deny 覆盖
+            'oracle-top>oracle-case:False',         # 大小写不同仍是嵌套
+            'oracle-duplicate>oracle-middle:True'   # 大小写不同的 deny 仍覆盖
+        )) {
+        Assert-True ($oracleNested -ccontains $expectedPair) "oracle 必须给出 $expectedPair：$($oracleNested -join ';')"
+    }
+    Assert-True (@($oracleNested | Where-Object { $_ -cmatch 'oracle-sibling' }).Count -eq 0) (
+        "oracle：只共享字符串前缀的兄弟不算嵌套：$($oracleNested -join ';')")
+    Assert-True (@($oracleNested | Where-Object { $_ -cmatch '^oracle-(top|duplicate)>oracle-(top|duplicate):' }).Count -eq 0) (
+        "oracle：相等的 root 不算嵌套：$($oracleNested -join ';')")
+
+    $oracleStructure = Get-CodexSafeTreeDeletePolicyStructureViolations -Entries $oracleEntries
+    $actualNested = @(@($oracleStructure.nestedRoots) | ForEach-Object {
+            '{0}>{1}:{2}' -f $_.parentEntryId, $_.childEntryId, $_.covered
+        })
+    Assert-True (($actualNested -join ';') -ceq ($oracleNested -join ';')) (
+        "规则 3 的 nestedRoots 必须等于 oracle。实际：$($actualNested -join ';')；oracle：$($oracleNested -join ';')")
+    $actualViolations = @($oracleStructure.violations)
+    Assert-True ($actualViolations.Count -eq $oracleViolations.Count) (
+        "规则 3 的 violations 数必须等于 oracle：实际 $($actualViolations.Count)，oracle $($oracleViolations.Count)")
+    for ($violationIndex = 0; $violationIndex -lt $actualViolations.Count; $violationIndex++) {
+        $actual = $actualViolations[$violationIndex]
+        $expected = $oracleViolations[$violationIndex]
+        Assert-True ([string]$actual.rule -ceq 'nested-root-not-denied' -and
+            [string]$actual.entryId -ceq $expected.parentId -and
+            $null -eq $actual.denyIndex -and
+            ([string]$actual.detail).Contains("子条目 $($expected.childId) 的")) (
+            "规则 3 的 violations[$violationIndex] 必须是 $($expected.parentId) 未覆盖 $($expected.childId)：$($actual | ConvertTo-Json -Compress)")
+    }
 } finally {
     Remove-TestTree -Path $scratchRoot
 }

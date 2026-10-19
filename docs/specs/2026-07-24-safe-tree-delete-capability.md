@@ -186,7 +186,7 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
 2. 检查 marker（`deployment-maintenance-marker-present`）。
 3. 用加载器读取并校验现役 policy（`live-policy-invalid`）。加载器执行三条结构规则（#84），现役 policy 有结构违例同样拒绝：这时除 Lint 外的各 Mode 都已失败关闭，维护工具也不能用来修复它，须先按 Lint 的报告修好 policy。
 4. 生成候选（`change-set-invalid`）。Apply 时候选 SHA 必须等于批准值（`candidate-sha-mismatch`）。
-5. 候选原始字节只在内存里，不落盘。候选必须被加载器接受（`candidate-policy-invalid`）；加载器执行三条结构规则，所以候选必须零违例，拒绝原文给出第一处违例的规则名、条目 id 与 deny 序号。输出的 `structure`（`liveViolations`、`newViolations`、`resolvedViolations`）按既有输出合同保留，现役与候选都已零违例，三个列表恒为空。
+5. 候选原始字节只在内存里，不落盘。候选必须被加载器接受（`candidate-policy-invalid`）；加载器执行三条结构规则，所以候选必须零违例，拒绝原文见「固定入口」段的结构规则。输出的 `structure`（`liveViolations`、`newViolations`、`resolvedViolations`）按既有输出合同保留，现役与候选都已零违例，三个列表恒为空。
 6. 在途检查（`in-flight-check-failed`、`in-flight-records-blocking`），规则见下。
 7. DryRun 到此结束，输出 `ok=true` 与候选 SHA；除第 1 步的面包屑外不写任何文件，policy 目录与 evidence 根保持原样。Apply 用 policy 同目录临时文件原子替换：换名前复核现役字节未变，换名后复核候选 SHA（失败为 `policy-write-failed`）。成功时输出 `written=true` 与提示「policy 已对宿主立即生效，git 提交需另行完成」。
 8. 删除面包屑，释放锁。
@@ -434,7 +434,9 @@ depth, refusalReason, refusalMessage, candidates?}`，`refusalMessage` 与同一
 拒绝原文逐字相同。省略 CapabilityRoot 时对每条条目运行同一判定，root 包含目标的条目都是候选：恰好一条放行
 才采用；零条以 `no-capability-root`、多条以 `ambiguous-capability-root` 拒绝，并在 `candidates` 列出全部
 候选及各自判定；目标路径本身非法时仍以 `invalid-target-path` 拒绝。结构规则 `nested-root-not-denied` 要求
-父条目精确 deny 子 root，所以嵌套 root 下的目标只有子条目能放行。Check 只读 policy 与目标路径的文件系统
+父条目精确 deny 子 root，所以嵌套 root 下的目标只有子条目能放行。加载器还把相等的 root（大小写不敏感、忽略尾随
+分隔符）按重复拒绝，所以加载器接受的 policy 产生不了 `ambiguous-capability-root`，这一分支只作 fail-closed
+安全网保留。Check 只读 policy 与目标路径的文件系统
 属性，不读历史、不写 evidence、不建 run 目录；拒绝都在 JSON 里表达，顶层没有 `refusalReason`，退出码约定
 不变；缺目标或两者都给是普通 throw 的用法错误。它只预报目标解析这一层：Plan 随后还会核对
 retired-evidence-root 一次性授权是否已消费（读历史）、目标卷的 `FILE_ID_INFO` 能力和完整子树（未授权的

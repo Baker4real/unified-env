@@ -359,6 +359,31 @@ try {
     $duplicateRoot = @(Get-Findings -Result $legacyRun.result -Rule 'duplicate-capability-root')[0]
     Assert-True ([string]$duplicateRoot.detail -clike '*lint-dup*') '重复 root 发现必须指明先出现的条目 id'
 
+    # 5b. 重复 root 与加载器用同一比较键（GetFullPath 后去掉尾随分隔符、大小写不敏感）：只差尾随分隔符的两条 root
+    #     同样报 duplicate-capability-root，加载器也拒绝整个 policy；相等的 root 不算嵌套。
+    $trailingRoot = Join-Path $scratchRoot 'trailing'
+    $trailingCapabilityRoot = Join-Path $trailingRoot 'root'
+    $trailingEvidence = Join-Path $trailingRoot 'evidence'
+    $trailingPolicyPath = Join-Path $trailingRoot 'policy.json'
+    foreach ($directory in @($trailingCapabilityRoot, $trailingEvidence)) {
+        [void][IO.Directory]::CreateDirectory($directory)
+    }
+    Write-LintPolicy -Path $trailingPolicyPath -Entries @(
+        (New-PolicyEntry -Id 'lint-trailing-a' -Root $trailingCapabilityRoot -Depth 1),
+        (New-PolicyEntry -Id 'lint-trailing-b' -Root "$trailingCapabilityRoot\" -Depth 1)
+    )
+    $trailingRun = Invoke-Lint -PolicyPath $trailingPolicyPath -EvidenceRoot $trailingEvidence
+    Assert-FindingKeys -Result $trailingRun.result -Severity 'error' -Scope '只差尾随分隔符的重复 root' -Expected @(
+        'policy-load-refused|error||',
+        'duplicate-capability-root|error|lint-trailing-b|'
+    )
+    $trailingDuplicate = @(Get-Findings -Result $trailingRun.result -Rule 'duplicate-capability-root')[0]
+    Assert-True ([string]$trailingDuplicate.detail -clike '*lint-trailing-a*') (
+        '只差尾随分隔符的重复 root 发现必须指明先出现的条目 id')
+    Assert-True ($trailingRun.result.policy.loadable -eq $false) '加载器必须拒绝只差尾随分隔符的重复 root'
+    Assert-True (@($trailingRun.result.nestedRoots).Count -eq 0) '相等的 root 不算嵌套'
+    Assert-TextExcludesPath -Text $trailingRun.text -Path $trailingCapabilityRoot -Scope '只差尾随分隔符的重复 root 结果'
+
     # 6. 加载器的拒绝信息可能回显路径：Lint 转述时去掉路径，只留规则含义。deny 不合规的条目不参与
     #    新规则评估（evaluatedEntryCount 如实少计）。
     $redactRoot = Join-Path $scratchRoot 'redact'

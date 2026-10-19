@@ -646,7 +646,7 @@ try {
         }
         # structure 字段按既有输出合同保留：加载器已对现役与候选执行三条结构规则，两者都零违例，
         # 三个列表恒为空。
-        $result.structure = [ordered]@{ liveViolations = @(); newViolations = @(); resolvedViolations = @() }
+        $result.structure = [pscustomobject][ordered]@{ liveViolations = @(); newViolations = @(); resolvedViolations = @() }
         Stop-IfRequested -Sequence 50
 
         # 6. 在途检查。
