@@ -34,6 +34,8 @@ guarded installer 按职责拆成入口 `implementation/install_skill_guarded.py
 
 在共享工作树（skills 根）里只提交某次事务的确切字节，用 `implementation/commit_exact_files.py`（`--help`）：它在私有 index 里从 expected HEAD 构建提交，hook 照常运行，之后只刷新所提交路径的共享 index。live ledger 已被后续事务改动时，用 `--file-from` 提交 wrapper 成功事务的 `backups/source-state-after.json`（事务 manifest 的 `source_state_after` 记录其路径与 sha256）。skills 仓库的 pre-commit 守卫是 `implementation/skills_repo_pre_commit.py`：拦截暂存文本里的 C0 控制字符和非规范 ledger JSON；`install --repo` 把检查器副本和 shim 装进该仓库的 hooks 目录，改源后重新安装。这两个工具从源路径运行，不属于部署闭包。
 
+退休清理的两个运行时脚本以仓库为源：`scripts/retired-skill-menu-surface.cjs` 审计并清理退休 skill/plugin 的菜单、插件容器与 catalog 表面，`scripts/purge-retired-skill-backups.cjs` 处理 ledger 里失效的 cleanup manifest 和精确 payload target。两者由 `scripts/Deploy-RetiredSkillCleanup.ps1` 逐字节部署到 `D:\Codex\.codex\scripts\`，evidence 与部署前副本在 `D:\agents\run-evidence\retired-skill-cleanup\`；现役副本是否与源码一致，以 host-live 测试 `tests/Test-SuperpowersSkillRetirement.cjs` 的逐字节比对为准。账本和 active skills 的边界是统一实体根 `D:\agents\skills-manager\skills`；menu 脚本还要求 `D:\Codex\.codex\skills` 是解析到该根的 junction，否则以 `skills-alias-mismatch` 失败关闭。menu 默认审计只覆盖已安装面：active skills 和每个 `plugins\cache\<marketplace>` 容器（含 `account_backup` 里的两份运行时）；`.tmp` 下由应用同步的本地 marketplace 副本和远端 catalog 只列出可安装项，分别用 `--include-local-marketplace`、`--include-remote-catalog` 显式审计和清理，host-live 测试也只断言 Superpowers 未安装、未启用、不在 active root。它的 handle-bound 快照、删除和原子写来自 host-safety 的 `scripts/lib/CodexHostSafety.ps1`，部署副本运行时从本仓库工作树加载该文件。
+
 旧 `SOURCE.md` 末尾记录的 schema 迁移只允许使用
 `scripts/reconcile_skill_source_records.py`：它在隔离镜像达到 strict
 zero-conflict 后，仅追加规范 current record，并为整批 SOURCE、统一 ledger、

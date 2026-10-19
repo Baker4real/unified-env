@@ -236,16 +236,21 @@
       "interfaces": [
         "scripts/Apply-GitHubDefaultBranchSkillOverlay.cjs",
         "scripts/Deploy-GitHubDefaultBranchSkillOverlay.ps1",
+        "scripts/Deploy-RetiredSkillCleanup.ps1",
         "scripts/Deploy-SkillInstallGuarded.ps1",
         "scripts/generate_skill_catalog.py",
         "scripts/install-skill-guarded.cmd",
         "scripts/install_skill_guarded.py",
+        "scripts/purge-retired-skill-backups.cjs",
         "scripts/reconcile_skill_source_records.py",
+        "scripts/retired-skill-menu-surface.cjs",
         "scripts/verify_skill_openai_yaml_parity.py",
         "modules/skill-supply-chain/implementation/system_skill_provenance_repair.py",
         "modules/skill-supply-chain/implementation/system_package_identity.py"
       ],
-      "dependsOn": [],
+      "dependsOn": [
+        "host-safety"
+      ],
       "transitionalDependencies": [],
       "ownership": {
         "files": [
@@ -292,7 +297,9 @@
           ],
           "node": [
           "tests/Test-GitHubDefaultBranchSkillOverlay.cjs",
-          "tests/Test-RetiredSkillBackupManifestPurger.cjs"
+          "tests/Test-RetiredSkillBackupManifestPurger.cjs",
+          "tests/Test-RetiredSkillCleanupDeployment.cjs",
+          "tests/Test-RetiredSkillMenuSurface.cjs"
           ]
         },
         "host-live": {

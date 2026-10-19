@@ -25,9 +25,6 @@ const HOST_BOUND_TESTS = Object.freeze({
   'modules/skill-supply-chain/tests/Test-SkillInstallGuardedSourceRecord.py': SKILL_RESOURCE_CLOSURE,
   'modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemOverlay.py': SKILL_RESOURCE_CLOSURE,
   'modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemRepair.py': SKILL_RESOURCE_CLOSURE,
-  'tests/Test-RetiredSkillBackupManifestPurger.cjs':
-    'runs the deployed D:\\Codex\\.codex\\scripts\\purge-retired-skill-backups.cjs, '
-    + 'whose source is not in this repository',
 });
 
 function getOwners(manifest, moduleId) {

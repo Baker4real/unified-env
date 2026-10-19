@@ -6,7 +6,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
-const scriptPath = 'D:/Codex/.codex/scripts/purge-retired-skill-backups.cjs';
+const scriptPath = path.join(projectRoot, 'scripts', 'purge-retired-skill-backups.cjs');
 const fixturePrefix = '.tmp-retired-skill-backup-fixture-';
 const fixtureMarkerName = '.retired-skill-backup-fixture.json';
 const fixturePayloadMarkerName = '.retired-skill-backup-payload.json';
@@ -67,7 +67,8 @@ function writePayloadTarget(fixtureRoot) {
 }
 
 const fixtureRoot = fs.mkdtempSync(path.join(projectRoot, fixturePrefix));
-const ledgerPath = path.join(fixtureRoot, 'skills', '.downloaded-skills-source-state.json');
+// The ledger lives in the fixture's physical skills root, as it does live.
+const ledgerPath = path.join(fixtureRoot, 'skills-manager', 'skills', '.downloaded-skills-source-state.json');
 const staleManifest = path.join(fixtureRoot, 'removed-evidence', 'delete-manifest.json');
 const staleReason = `Historical cleanup evidence: ${staleManifest}`;
 const collisionPath = path.join(fixtureRoot, 'payload', 'retired-name-collision');
@@ -222,7 +223,25 @@ try {
   assert.equal(finalAudit.staleBackupCleanupManifestCount, 0);
   assert.equal(finalAudit.remainingStaleBackupCleanupManifestCount, 0);
 
-  console.log('Retired skill backup manifest purger: PASS (fixed root, fixture gates, exact allowlist, reparse refusal, scoped ledger apply)');
+  // The ledger root itself, or a directory above it, turning into a junction
+  // must fail closed before the ledger is read or rewritten.
+  const ledgerRoot = path.dirname(ledgerPath);
+  const repairedLedger = fs.readFileSync(ledgerPath, 'utf8');
+  for (const linkPath of [ledgerRoot, path.dirname(ledgerRoot)]) {
+    const realPath = `${linkPath}-real`;
+    fs.renameSync(linkPath, realPath);
+    fs.symlinkSync(realPath, linkPath, 'junction');
+    try {
+      const refused = runPurger(fixtureRoot, ['--apply'], 1);
+      assert.match(refused.error, /reparse point/i, `${path.basename(linkPath)} 是 junction 时必须拒绝`);
+      assert.equal(fs.readFileSync(ledgerPath, 'utf8'), repairedLedger, 'junction 拒绝时不得改写 ledger');
+    } finally {
+      fs.unlinkSync(linkPath);
+      fs.renameSync(realPath, linkPath);
+    }
+  }
+
+  console.log('Retired skill backup manifest purger: PASS (fixed roots, fixture gates, exact allowlist, reparse refusal, physical ledger root, scoped ledger apply)');
 } finally {
   fs.rmSync(fixtureRoot, { recursive: true, force: true, maxRetries: 3 });
 }
