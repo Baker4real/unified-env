@@ -179,6 +179,23 @@ Assert-Case 'required JSON fields accept native comma-separated argv values and 
     }
 }
 
+Assert-Case 'required JSON fields forward a failing target''s output and exit code' {
+    $failingReport = Join-Path $fixture 'CheckedPowerShell-failing-report.ps1'
+    [IO.File]::WriteAllText($failingReport, @'
+[pscustomobject]@{ ok = $false; reason = 'synthetic-target-failure' } | ConvertTo-Json -Compress
+[Console]::Error.Write('synthetic-target-stderr')
+exit 4
+'@, $utf8)
+    $result = Invoke-PublicCli @('-ScriptPath', $failingReport, '-RequiredJsonFields', 'ok')
+    if ($result.exitCode -ne 4) { throw "Expected target exit 4; received $($result.exitCode)." }
+    $received = ConvertFrom-Json -InputObject $result.stdout -ErrorAction Stop
+    if ($received.ok -ne $false -or $received.reason -cne 'synthetic-target-failure') { throw 'The failing target''s report was not forwarded.' }
+    if (-not $result.stderr.Contains('synthetic-target-stderr')) { throw 'The failing target''s stderr was not forwarded.' }
+    if ($result.stderr -notmatch '(?m)^CheckedPowerShell target-exit code=4; JSON validation not performed\.') {
+        throw 'Target failure status was not identifiable on its own line.'
+    }
+}
+
 Assert-Case 'CheckOnly validates file and text without executing either' {
     $checkMarker = Join-Path $fixture 'CheckedPowerShell-check-only.executed'
     $checkSource = '[IO.File]::WriteAllText(''{0}'', ''ran'')' -f $checkMarker.Replace("'", "''")
