@@ -7,7 +7,8 @@ $ErrorActionPreference = 'Stop'
 # Seams under test (GitHub #84，spec #73「实现决策 › 加载器结构规则」「Lint 模式」):
 # 1. 加载器 Read-CodexSafeTreeDeletePolicy 读 fixture policy 文件，以及 fixture 入口
 #    tests\Invoke-CodexSafeTreeDeleteFixture.ps1 的 Check mode。三条结构规则各有一份合规、一份违规的 fixture
-#    policy；违规时整个 policy fail-closed，拒绝原文含规则名、条目 id 与 deny 序号，不含任何路径。
+#    policy；违规时整个 policy fail-closed，拒绝原文含规则名、条目 id 与 deny 序号，不含任何路径。规则 3 不把相等的
+#    root 算作嵌套，所以同一接缝上还钉住加载器把只差尾随分隔符或大小写的 root 按重复拒绝。
 # 2. Lint 的结构部分 Get-CodexSafeTreeDeletePolicyStructureLint：CI 以仓库 policy 为输入运行，只读 policy 文件
 #    本身，不探测 root、deny 或 evidence。
 # 3. 结构规则的纯函数 Get-CodexSafeTreeDeletePolicyStructureViolations：规则 3 的嵌套判定与两两调用
@@ -276,6 +277,25 @@ try {
         "规则 3 多级嵌套违规：拒绝原文必须指明祖父条目没有覆盖的孙条目：$rule3MultilevelMessage")
     Assert-True (-not $rule3MultilevelMessage.Contains('共 ')) (
         "规则 3 多级嵌套违规：只有祖父与孙这一对未覆盖，不得报告总数：$rule3MultilevelMessage")
+
+    # 规则 3 不把相等的 root 算作嵌套，相等的 root 由加载器按重复 root 拒绝。比较键与 Test-CodexHookPathWithin
+    # 同一规范化（GetFullPath 后去掉尾随分隔符、大小写不敏感），所以只差尾随分隔符或只差大小写的两条 root
+    # 也是重复，整个 policy 拒绝加载，拒绝原文不变、不含路径。
+    $duplicateRoot = Join-Path $scratchRoot 'duplicate\root'
+    $duplicateLeaf = Join-Path $duplicateRoot 'leaf'
+    [void][IO.Directory]::CreateDirectory($duplicateLeaf)
+    foreach ($variant in @(
+            @{ name = 'trailing-separator'; label = '只差尾随分隔符'; root = "$duplicateRoot\" },
+            @{ name = 'case'; label = '只差大小写'; root = (Join-Path $scratchRoot 'duplicate\ROOT') }
+        )) {
+        $duplicatePolicyPath = Join-Path $scratchRoot "duplicate\$($variant.name)-policy.json"
+        Write-Policy -Path $duplicatePolicyPath -Entries @(
+            (New-PolicyEntry -Id 'structure-duplicate-a' -Root $duplicateRoot -Depth 1),
+            (New-PolicyEntry -Id 'structure-duplicate-b' -Root $variant.root -Depth 1)
+        )
+        [void](Assert-StructureRefusal -PolicyPath $duplicatePolicyPath -Label "重复 root（$($variant.label)）" `
+                -Expected 'safe-delete policy capabilityRoot 重复。' -TargetPath $duplicateLeaf -CapabilityRoot $duplicateRoot)
+    }
 
     # 4. 多处违例：拒绝原文给出第一处违例（条目顺序下先规则 1、2，再规则 3）和违例总数。
     $combinedPath = Join-Path $scratchRoot 'combined-policy.json'

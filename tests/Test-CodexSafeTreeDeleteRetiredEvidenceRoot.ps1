@@ -1847,6 +1847,29 @@ try {
     Assert-True ($illegalWidePath -match '过宽') (
         "宽路径登记必须失败闭锁: $illegalWidePath")
 
+    # 过宽 root 与 Test-CodexHookPathWithin 同一规范化比较（GetFullPath 后去掉尾随分隔符、大小写不敏感），带尾随
+    # 分隔符的宽路径同样过宽。用普通后代条目：这种写法不触发任何用途规则，只有过宽检查能拒绝它；用只读的 Check，
+    # 不写 evidence。
+    $widePathTrailingPolicyPath = Join-Path $scratchRoot 'illegal-wide-path-trailing-separator-policy.json'
+    Write-ScratchPolicy -Path $widePathTrailingPolicyPath -Entries @(
+        (New-RetiredEvidencePolicyEntry `
+            -Id 'illegal-wide-path-trailing-separator' `
+            -CapabilityRoot 'D:\agents\' `
+            -MinimumDescendantDepth 1L `
+            -RootDeletionPurpose 'none')
+    )
+    $illegalWidePathTrailing = Assert-Throws -Message '带尾随分隔符的宽路径必须被加载器拒绝' -Action {
+        & $fixtureCli `
+            -Mode Check `
+            -TargetPath $approvedStablePath `
+            -CapabilityRoot 'D:\agents\' `
+            -Json `
+            -FixturePolicyPath $widePathTrailingPolicyPath `
+            -FixtureEvidenceRoot $operationEvidenceRoot
+    }
+    Assert-True ($illegalWidePathTrailing -match '过宽') (
+        "带尾随分隔符的宽路径必须以过宽失败闭锁: $illegalWidePathTrailing")
+
     $linkAwarePolicyPath = Join-Path $scratchRoot 'illegal-link-aware-policy.json'
     Write-ScratchPolicy -Path $linkAwarePolicyPath -Entries @(
         (New-RetiredEvidencePolicyEntry `

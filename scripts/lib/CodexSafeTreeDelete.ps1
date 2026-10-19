@@ -533,6 +533,17 @@ function Test-CodexSafeTreeDeletePathEqual {
     return [StringComparer]::OrdinalIgnoreCase.Equals($Left, $Right)
 }
 
+function Get-CodexSafeTreeDeletePolicyRootKey {
+    # policy root 的比较键：先 GetFullPath 再去掉尾随分隔符，与 Test-CodexHookPathWithin 比较前的规范化相同；
+    # 调用方按 OrdinalIgnoreCase 比较键。加载器的过宽 root 与重复 root 检查、Lint 的重复 root 发现，以及结构规则 3
+    # 的前缀查表与相等 root 判断都用它，所以这些地方的「同一 root」与 Test-CodexHookPathWithin 一致。包含关系仍只由
+    # Test-CodexHookPathWithin 判定：规则 3 的查表只找候选。顺序不能反：先去分隔符会把 'D:\' 变成 'D:'，而
+    # GetFullPath('D:') 解析为当前目录。
+    param([Parameter(Mandatory)][string]$Path)
+
+    return [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+}
+
 function Get-CodexSafeTreeDeletePathDepthWithin {
     # 深度口径的唯一实现：root 之后的非空路径段数。目标判定（Get-CodexSafeTreeDeleteTargetDecision）与
     # 结构规则 1 都调用它。调用方保证 Path 位于 Root 之内（Test-CodexHookPathWithin）；两端的尾随分隔符不计段。
@@ -614,7 +625,8 @@ function Get-CodexSafeTreeDeletePolicyStructureViolations {
 
     # 规则 3：条目按 CapabilityRoot 精确匹配选择，子 root 若没有被父条目的 deny 精确覆盖，传入父 root
     # 就能绕过子条目更严格的约束。按字面对所有「严格位于另一条 root 之内」的组合检查（含多级嵌套）；
-    # 相等的 root 是重复 root，由既有加载约束报告。路径比较大小写不敏感、忽略尾随分隔符。
+    # 相等的 root 是重复 root，由既有加载约束报告。root 的比较键是 Get-CodexSafeTreeDeletePolicyRootKey（大小写
+    # 不敏感、忽略尾随分隔符），与加载器的重复 root 检查相同。
     # 包含关系只由 Test-CodexHookPathWithin 判定（CodexHostSafety 是路径检查的唯一实现）。加载器每次加载都调用
     # 本函数，所以先按「子 root 本身及其每个祖先前缀」查表找候选父条目，不做两两比较；查表只缩小候选，每一对
     # 候选仍经 Test-CodexHookPathWithin 确认。结果按（父条目序号，子条目序号）排列。
@@ -622,26 +634,24 @@ function Get-CodexSafeTreeDeletePolicyStructureViolations {
     $entryList = @($Entries)
     $entryCount = $entryList.Count
     $capabilityRoots = [string[]]::new($entryCount)
-    $literalRoots = [string[]]::new($entryCount)
-    $lookupKeys = [string[]]::new($entryCount)
-    $indexesByLookupKey = [Collections.Generic.Dictionary[string, Collections.Generic.List[int]]]::new(
+    $entryRootKeys = [string[]]::new($entryCount)
+    $indexesByRootKey = [Collections.Generic.Dictionary[string, Collections.Generic.List[int]]]::new(
         [StringComparer]::OrdinalIgnoreCase)
     for ($index = 0; $index -lt $entryCount; $index++) {
         $root = [string]$entryList[$index].capabilityRoot
         $capabilityRoots[$index] = $root
-        $literalRoots[$index] = $root.TrimEnd('\', '/')
-        # 查表键只用来找候选。它与 Test-CodexHookPathWithin 比较前的规范化一致，所以每个真正的父 root 都是
-        # 子 root 键的某个分隔符前缀，候选不会漏。
-        $lookupKey = [IO.Path]::GetFullPath($root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-        $lookupKeys[$index] = $lookupKey
-        if (-not $indexesByLookupKey.ContainsKey($lookupKey)) {
-            $indexesByLookupKey[$lookupKey] = [Collections.Generic.List[int]]::new()
+        # 键与 Test-CodexHookPathWithin 比较前的规范化一致，所以每个真正的父 root 都是子 root 键的某个分隔符前缀，
+        # 查表找候选不会漏。
+        $rootKey = Get-CodexSafeTreeDeletePolicyRootKey -Path $root
+        $entryRootKeys[$index] = $rootKey
+        if (-not $indexesByRootKey.ContainsKey($rootKey)) {
+            $indexesByRootKey[$rootKey] = [Collections.Generic.List[int]]::new()
         }
-        $indexesByLookupKey[$lookupKey].Add($index)
+        $indexesByRootKey[$rootKey].Add($index)
     }
     $childIndexesByParent = [object[]]::new($entryCount)
     for ($childIndex = 0; $childIndex -lt $entryCount; $childIndex++) {
-        $childKey = $lookupKeys[$childIndex]
+        $childKey = $entryRootKeys[$childIndex]
         $prefixes = [Collections.Generic.List[string]]::new()
         $prefixes.Add($childKey)
         $separator = $childKey.IndexOf([IO.Path]::DirectorySeparatorChar)
@@ -651,10 +661,10 @@ function Get-CodexSafeTreeDeletePolicyStructureViolations {
         }
         foreach ($prefix in $prefixes) {
             $parentIndexes = $null
-            if (-not $indexesByLookupKey.TryGetValue($prefix, [ref]$parentIndexes)) { continue }
+            if (-not $indexesByRootKey.TryGetValue($prefix, [ref]$parentIndexes)) { continue }
             foreach ($parentIndex in $parentIndexes) {
-                # 相等的 root（大小写不敏感、忽略尾随分隔符）是重复 root，不算嵌套。
-                if ([StringComparer]::OrdinalIgnoreCase.Equals($literalRoots[$parentIndex], $literalRoots[$childIndex])) {
+                # 相等的 root 是重复 root，不算嵌套。
+                if ([StringComparer]::OrdinalIgnoreCase.Equals($entryRootKeys[$parentIndex], $childKey)) {
                     continue
                 }
                 if (-not (Test-CodexHookPathWithin -Path $capabilityRoots[$childIndex] -ParentPath $capabilityRoots[$parentIndex])) {
@@ -672,9 +682,9 @@ function Get-CodexSafeTreeDeletePolicyStructureViolations {
         $parent = $entryList[$parentIndex]
         foreach ($childIndex in $childIndexesByParent[$parentIndex]) {
             $child = $entryList[$childIndex]
-            $childRoot = $literalRoots[$childIndex]
+            $childKey = $entryRootKeys[$childIndex]
             $covered = @(@($parent.deniedExactPaths) | Where-Object {
-                    [StringComparer]::OrdinalIgnoreCase.Equals(([string]$_).TrimEnd('\', '/'), $childRoot)
+                    [StringComparer]::OrdinalIgnoreCase.Equals((Get-CodexSafeTreeDeletePolicyRootKey -Path ([string]$_)), $childKey)
                 }).Count -gt 0
             $nestedRoots.Add([pscustomobject][ordered]@{
                 parentEntryId = [string]$parent.id
@@ -909,7 +919,8 @@ function Get-CodexSafeTreeDeletePolicyStructureLint {
     if ($rawEntries -is [Array]) { $rawEntryList = @($rawEntries) }
     $rawSchemaVersion = Get-CodexSafeTreeDeleteLintJsonProperty -Object $rawDocument -Name 'schemaVersion'
 
-    # 既有加载约束，逐条报告：重复 id（Ordinal）、重复 root（规范化后大小写不敏感）、深度 0 未声明用途。
+    # 既有加载约束，逐条报告：重复 id（Ordinal）、重复 root（与加载器同一比较键 Get-CodexSafeTreeDeletePolicyRootKey，
+    # 大小写不敏感、忽略尾随分隔符）、深度 0 未声明用途。
     # entryId 只用通过加载器 id 规则的值；其余条目以 entries 序号指代，不回显原文。
     $firstIndexById = [Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
     $firstIndexByRoot = [Collections.Generic.Dictionary[string, int]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -941,8 +952,9 @@ function Get-CodexSafeTreeDeletePolicyStructureLint {
             $canonicalRoot = $null
         }
         if ($null -ne $canonicalRoot) {
-            if ($firstIndexByRoot.ContainsKey($canonicalRoot)) {
-                $firstIndex = $firstIndexByRoot[$canonicalRoot]
+            $rootKey = Get-CodexSafeTreeDeletePolicyRootKey -Path $canonicalRoot
+            if ($firstIndexByRoot.ContainsKey($rootKey)) {
+                $firstIndex = $firstIndexByRoot[$rootKey]
                 $firstLabel = if ($null -ne $entryIds[$firstIndex]) { [string]$entryIds[$firstIndex] } else { "entries[$firstIndex]" }
                 $findings.Add([pscustomobject][ordered]@{
                     rule = 'duplicate-capability-root'
@@ -951,7 +963,7 @@ function Get-CodexSafeTreeDeletePolicyStructureLint {
                     detail = "entries[$entryIndex] 的 capabilityRoot 与条目 $firstLabel 重复（大小写不敏感）。"
                 })
             } else {
-                $firstIndexByRoot[$canonicalRoot] = $entryIndex
+                $firstIndexByRoot[$rootKey] = $entryIndex
             }
         }
         $rawDepth = Get-CodexSafeTreeDeleteLintJsonProperty -Object $rawEntry -Name 'minimumDescendantDepth'
@@ -1167,7 +1179,13 @@ function Read-CodexSafeTreeDeletePolicy {
     if (@($policy.entries).Count -eq 0) { throw 'safe-delete policy 不得为空。' }
 
     $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    $roots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    # 过宽 root 与重复 root 都按 Get-CodexSafeTreeDeletePolicyRootKey 比较（大小写不敏感、忽略尾随分隔符），
+    # 带尾随分隔符的写法绕不过这两项检查。
+    $rootKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $tooWideRootKeys = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($tooWideRoot in @('D:\', 'D:\Codex', 'D:\Codex\.codex', 'D:\Codex\projects', 'D:\agents', 'D:\agents\projects')) {
+        [void]$tooWideRootKeys.Add((Get-CodexSafeTreeDeletePolicyRootKey -Path $tooWideRoot))
+    }
     $canonicalEntries = [Collections.Generic.List[object]]::new()
     foreach ($entry in @($policy.entries)) {
         $baseEntryProperties = @(
@@ -1213,10 +1231,11 @@ function Read-CodexSafeTreeDeletePolicy {
             throw 'safe-delete policy entry id 非法或重复。'
         }
         $root = Assert-CodexHookDPath -Value ([string]$entry.capabilityRoot) -Name "safe-delete policy $id root"
-        if ($root -in @('D:\', 'D:\Codex', 'D:\Codex\.codex', 'D:\Codex\projects', 'D:\agents', 'D:\agents\projects')) {
+        $rootKey = Get-CodexSafeTreeDeletePolicyRootKey -Path $root
+        if ($tooWideRootKeys.Contains($rootKey)) {
             throw "safe-delete policy $id root 过宽。"
         }
-        if (-not $roots.Add($root)) { throw 'safe-delete policy capabilityRoot 重复。' }
+        if (-not $rootKeys.Add($rootKey)) { throw 'safe-delete policy capabilityRoot 重复。' }
         if ($entry.minimumDescendantDepth -isnot [long]) {
             throw "safe-delete policy $id minimumDescendantDepth 必须是 JSON integer。"
         }
