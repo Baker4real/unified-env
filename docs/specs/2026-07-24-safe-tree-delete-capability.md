@@ -434,7 +434,9 @@ depth, refusalReason, refusalMessage, candidates?}`，`refusalMessage` 与同一
 拒绝原文逐字相同。省略 CapabilityRoot 时对每条条目运行同一判定，root 包含目标的条目都是候选：恰好一条放行
 才采用；零条以 `no-capability-root`、多条以 `ambiguous-capability-root` 拒绝，并在 `candidates` 列出全部
 候选及各自判定；目标路径本身非法时仍以 `invalid-target-path` 拒绝。结构规则 `nested-root-not-denied` 要求
-父条目精确 deny 子 root，所以嵌套 root 下的目标只有子条目能放行。Check 只读 policy 与目标路径的文件系统
+父条目精确 deny 子 root，所以嵌套 root 下的目标只有子条目能放行。加载器还把相等的 root（大小写不敏感、忽略尾随
+分隔符）按重复拒绝，所以加载器接受的 policy 产生不了 `ambiguous-capability-root`，这一分支只作 fail-closed
+安全网保留。Check 只读 policy 与目标路径的文件系统
 属性，不读历史、不写 evidence、不建 run 目录；拒绝都在 JSON 里表达，顶层没有 `refusalReason`，退出码约定
 不变；缺目标或两者都给是普通 throw 的用法错误。它只预报目标解析这一层：Plan 随后还会核对
 retired-evidence-root 一次性授权是否已消费（读历史）、目标卷的 `FILE_ID_INFO` 能力和完整子树（未授权的

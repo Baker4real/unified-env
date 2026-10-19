@@ -5,10 +5,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Seams under test (GitHub #81，spec #73「Check 模式」):
-# 唯一接缝：fixture 入口 tests\Invoke-CodexSafeTreeDeleteFixture.ps1 的 Check mode，对照同一目标、同一
+# 主接缝：fixture 入口 tests\Invoke-CodexSafeTreeDeleteFixture.ps1 的 Check mode，对照同一目标、同一
 # CapabilityRoot 下的 Plan。只观察 Check 的 JSON 结果、Plan 的结果或抛出的拒绝原文，以及 fixture evidence
 # 目录树的前后快照。全部 policy、目标与 evidence 都在本套件的 scratch 根下；不读写生产 evidence 根，
 # 也不执行生产入口。
+# 唯一例外是 3c：加载器接受的 policy 产生不了 ambiguous-capability-root，这个 fail-closed 分支只能在库层用内存里
+# 的 policy 对象调用自动解析 Get-CodexSafeTreeDeleteCheckAutoRow 来覆盖。
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
@@ -43,6 +45,7 @@ $topLevelFields = @('allowed', 'targetCount', 'results')
 $rowFields = @('targetPath', 'allowed', 'policyEntryId', 'capabilityRoot', 'depth', 'refusalReason', 'refusalMessage')
 $candidateFields = @('policyEntryId', 'capabilityRoot', 'allowed', 'depth', 'refusalReason', 'refusalMessage')
 $noCapabilityRootMessage = 'safe-delete target 没有能合法覆盖它的 capability root。'
+$ambiguousCapabilityRootMessage = 'safe-delete target 有多条能合法覆盖它的 capability root，须显式指定 CapabilityRoot。'
 
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
@@ -408,7 +411,7 @@ try {
 
     # 3. 省略 CapabilityRoot：对每条条目运行同一判定，root 包含目标的条目是候选；候选中恰好一条放行才采用，
     #    否则拒绝并列出全部候选及各自的判定。嵌套 root：父条目 deny 精确等于子 root 时只有子条目合法（唯一）。
-    #    父条目没有 deny 覆盖子 root、两条都能合法覆盖子 root 下目标的 policy 违反结构规则 3，见 3b。
+    #    父条目没有 deny 覆盖子 root、两条都能合法覆盖子 root 下目标的 policy 违反结构规则 3，见 3b；歧义分支见 3c。
     Write-PolicyFile -Path $coveredPolicyPath -Entries @(
         (New-PolicyEntry -Id 'check-outer' -Root $nestRoot -MinimumDepth 1 -Denied @($nestInnerRoot)),
         (New-PolicyEntry -Id 'check-inner' -Root $nestInnerRoot -MinimumDepth 1)
@@ -479,6 +482,23 @@ try {
         Assert-True (-not $plan.planned -and $plan.message -ceq $uncoveredMessage) (
             "父条目未覆盖子 root：以 $($nest.id) 的 root 为 CapabilityRoot 的 Plan 必须以同一原文拒绝，实际：$($plan.message)")
     }
+
+    # 3c. ambiguous-capability-root 是 fail-closed 安全网，加载器接受的 policy 产生不了它。包含同一目标的两条 root
+    #     要么相等：加载器按重复 root 拒绝，比较键与 Test-CodexHookPathWithin 同一规范化，只差尾随分隔符或大小写
+    #     也算重复。要么严格嵌套：结构规则 3 要求父条目精确 deny 子 root，父条目因此拒绝子 root 下的目标（3、3b）。
+    #     所以只能在库这一层覆盖：取加载器对 3 那份合规 policy 的结果，在内存里去掉父条目覆盖子 root 的 deny，两条
+    #     都能合法覆盖目标。自动解析不得从中选一条，必须拒绝并按条目顺序列出两个候选。
+    $ambiguousPolicy = Read-CodexSafeTreeDeletePolicy -PolicyPath $coveredPolicyPath
+    $ambiguousOuter = @($ambiguousPolicy.entries | Where-Object { [string]$_.id -ceq 'check-outer' })[0]
+    $ambiguousOuter.deniedExactPaths = @()
+    $ambiguousRow = Get-CodexSafeTreeDeleteCheckAutoRow -TargetPath $nestLeafPath -Policy $ambiguousPolicy
+    Assert-CheckRow -Row $ambiguousRow -Label '自动解析歧义（内存 policy）' -Expected (Get-ExpectedRow -Case @{
+            target = $nestLeafPath; allowed = $false; entry = $null; expectedRoot = $null; depth = $null
+            reason = 'ambiguous-capability-root'; message = $ambiguousCapabilityRootMessage; candidates = @(
+                @{ entry = 'check-outer'; root = $nestRoot; allowed = $true; depth = 2 },
+                @{ entry = 'check-inner'; root = $nestInnerRoot; allowed = $true; depth = 1 }
+            )
+        })
 
     # 4. 多目标：TargetPaths 按输入顺序逐个返回，每行与该目标单独 Check 的结果相同；顶层 allowed 只在全部放行时
     #    为 true。宿主 .cmd 链只能传单个字符串，'::' 连接的形式与数组形式结果逐字节相同。
