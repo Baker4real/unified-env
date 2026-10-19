@@ -53,7 +53,7 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 
 ## 办公网、v2rayN 与 Tailscale
 
-2026-08-21 办公室订阅故障处置，以及 2026-08-22 01:23 从家里经正式 SSH 的只读复核。连接方向、identity 与 known-hosts 以 `D:\Codex\.codex\docs\agent-guidance\ssh-mesh.md` 为准；本文只记办公室本机事实。
+2026-08-21 办公室订阅故障处置、2026-08-22 01:23 从家里经正式 SSH 的只读复核，以及 2026-10-19 的 v2rayN 升级、新界订阅与 OpenAI 分组改造（23:17 经正式 SSH 回读）。连接方向、identity 与 known-hosts 以 `D:\Codex\.codex\docs\agent-guidance\ssh-mesh.md` 为准；本文只记办公室本机事实。
 
 ### 办公网
 
@@ -65,12 +65,31 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 
 ### v2rayN
 
-- 安装根是 `D:\v2rayN-windows-64\`：`v2rayN.exe` 在该根下，配置在 `guiConfigs\`，核心是 `bin\xray\xray.exe`。不要按嵌套路径 `v2rayN-windows-64\v2rayN-windows-64` 查找。
-- `127.0.0.1:10808` 由 xray 监听。2026-08-22 01:23：v2rayN 与 xray 均在交互会话 1。
-- 激活节点必须是机场香港/台湾中转（`*.nwncd.com`）。这台 Wi-Fi 没有 IPv6，IPv6-only 节点（例如曾出现的 `hkac02-ipv6`）会让“通过代理更新”秒死。
-- `import_sub` 已开 30 分钟自动更新；更新会重绑激活条目。2026-08-22 01:23 快照：备注 `A Series - HK 25`，`newazhk25.nwncd.com:443`，VLESS/REALITY。节点名会随自动更新改变，约束是中转域名，不是这一条备注。
-- 计划任务 `Codex Office v2rayN Autostart`：Highest + Interactive，启动 `D:\v2rayN-windows-64\v2rayN.exe`。进程不退出时 `LastTaskResult=267009`（`SCHED_S_TASK_RUNNING`）表示任务仍在跑，不是失败。
-- 2026-08-22 01:23 经 socks `10808`：gstatic 与 google 均为 HTTP 204。
+- 安装根是 `D:\v2rayN-windows-64\`：`v2rayN.exe` 在该根下，配置在 `guiConfigs\`，核心在 `bin\xray\` 与 `bin\sing_box\`。不要按嵌套路径 `v2rayN-windows-64\v2rayN-windows-64` 查找。
+- 2026-10-19 23:17：v2rayN `7.25.6`（同晚由 `7.24.9` 升级），Xray `26.10.10`，sing-box `1.14.3`。`7.25.6` 生成的 sing-box DNS 规则要求 sing-box ≥ 1.14；反过来 `7.24.9` 配 1.14 不保证可用。
+- 激活条目是策略组 `OpenAI`（IndexId `office-openai`，sing-box urltest，`MultipleLoad=0` 最低延迟）。`127.0.0.1:10808` 与 Clash API `127.0.0.1:10813` 由 sing-box 监听，v2rayN 与 sing-box 在交互会话 1。
+- OpenAI 组按备注正则从新界订阅选成员，正则在 `D:\Codex\.codex\tools\office-v2rayn\openai-filter.txt`：排除香港（保留“香港中转”到其他地区的线路）、澳门、中国大陆、俄罗斯、白俄、伊朗、朝鲜、叙利亚、古巴、委内瑞拉，以及 IPv6、剩余/到期/订阅更新、故障、“将在…恢复”条目。2026-10-19 结果：120 条中 72 条入组（AnyTLS 19、Trojan 11、VLESS 42），选中 `China Taiwan B02`，`chatgpt.com/cdn-cgi/trace` 为 `loc=TW`。
+- 探测间隔由 v2rayN 写死：sing-box urltest 用默认 3 分钟、50 ms 容差、`www.gstatic.com/generate_204`（Xray leastPing 同为 3 分钟）。改成 5 分钟只能改 v2rayN 本身。
+- 2026-10-19 23:17 的一轮探测：72 个成员中 64 个有成功延迟，最快约 148 ms，8 个没有成功记录。其中包括非 `*.nwncd.com` 的直连节点，所以“激活节点必须是香港/台湾中转”已不是当前事实。出口封锁会变，改由分组自动择优，不再手工固定节点。
+- 这台 Wi-Fi 没有 IPv6，IPv6-only 节点会让“通过代理更新”秒死；OpenAI 组已按正则排除这些节点。
+- 订阅 `新界`（SubItem Id `5419959239927671091`，原名 `import_sub`）指向 `6691fe61.neworld.digital`，完整链接只存 v2rayN 数据库。原 `blogzone.me` 链接约自 10-10 起返回 404，此后节点列表一直没刷新。`AutoUpdateInterval=1440`，另由 03:00 任务强制刷新；订阅更新不会删除 `IsSub=0` 的策略组。
+- 策略组 `办公室 - 自动最低延迟`（`office-auto-lowest-latency`，Xray，2026-10-12 建）仍在，未激活，本次未改。
+- 计划任务 `Codex Office v2rayN Autostart`：Highest + Interactive，启动 `D:\v2rayN-windows-64\v2rayN.exe`。进程不退出时 `LastTaskResult=267009`（`SCHED_S_TASK_RUNNING`）表示任务仍在跑，不是失败。维护脚本都经它重启 v2rayN。
+- 2026-10-19 23:17 经 socks `10808`：google HTTP 204；`api.openai.com/v1/models` 未带 key 时返回 401，说明可达，且没有出现地区拒绝。
+- v2rayN 日志里成组出现的 `open connection to <本机以太网 IP>:443 using outbound/direct ... actively refused` 是无害噪声。2026-10-20 抓到的来源是腾讯视频的 `hardwarecheck.exe`：它经 10808 的 SOCKS 去连本机自己的以太网 IP（DHCP 分配，会变）的 443 端口，本机没有监听，所以被拒。它自己走 SOCKS，不受系统代理的局域网例外约束。不用为此改路由；嫌吵就关掉腾讯视频的后台服务。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261020-local-ip-443-refused\`。
+
+### v2rayN 定时维护（2026-10-19 起）
+
+- 脚本在 `D:\Codex\.codex\tools\office-v2rayn\`：`V2rayNOps.ps1`（公共函数）、`v2rayn_db.py`（SQLite 与配置读写，不输出订阅链接）、`Update-V2rayN.ps1`、`Update-V2rayNSubscription.ps1`、`Enable-OpenAIGroup.ps1`（一次性启用 OpenAI 组，可重跑）和 `openai-filter.txt`。三个任务都是 Administrator、Interactive、Highest：只在管理员已登录时运行，与 v2rayN 同会话。
+- `Codex Office v2rayN Daily Update` 每天 02:00 运行。它查询 GitHub 最新稳定版，按发布摘要校验 `v2rayN-windows-64.zip` 的 SHA-256。和 AmazTool 一样，已存在的 `bin` 文件保持不动；例外是安装包自带的 xray 或 sing-box 比现有版本新时，整个对应核心目录会被替换。安装后检查 10808 代理，失败则回滚程序文件和配置。首次运行在 2026-10-19 23:09–23:10，从 7.24.9 升到 7.25.6，停机约 11 秒。
+- `Codex Office v2rayN Subscription Refresh` 每天 03:00 运行。它把新界订阅的 `UpdateTime` 置 0，由 v2rayN 自己的每分钟调度执行更新；成功后 v2rayN 会重载核心。代理检查不通过时，恢复更新前的数据库与配置。2026-10-19 23:15 试跑成功：仍为 120 条、72 个成员，`LastTaskResult=0`。
+- 维护期间会暂停 `Codex Office Proxy FailSafe`，避免它在 10808 短暂断开时清掉系统代理；结束后再恢复。三个脚本共用 `D:\Codex\.codex\cache\office-v2rayn-update\maint.lock` 互斥。
+- 日志与每类任务的最新摘要（`*-last.json`）在 `D:\agents\run-evidence\office-v2rayn-maint\`，超过 90 天的日志会被删除。下载包和回滚备份在 `D:\Codex\.codex\cache\office-v2rayn-update\`，程序备份保留 2 份，订阅更新前的数据库备份保留 7 份。
+
+### 2026-10-19 断线根因
+
+- 14:38:50 v2rayN 日志记录“运行 Core 失败”：核心进程启动后 100 ms 内就退出了。v2rayN 不会自动重试，核心一直停到 22:24 用户手动切换节点。期间 15:28 本机连 10808 被拒，Tailscale 约从 14:41 起离线。
+- 推断（未证实）：当时选中的条目走 sing-box，而 sing-box 1.14.0 不接受 v2rayN 7.24.9 生成的配置。失败配置已被覆盖，无法回看。升级到 7.25.6 + sing-box 1.14.3 后不再是这种组合。
 
 ### Tailscale 对本机代理的依赖
 
@@ -80,20 +99,24 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 ### 提权看门狗
 
 - 计划任务 `Codex Office Proxy FailSafe`：HighestAvailable，脚本 `D:\Codex\.codex\tools\office-v2rayn\Ensure-ProxyFailSafe.ps1`。UU 远程会话是中完整性，杀不掉提权的 v2rayN，也写不了 HKLM；一次性提权修复要借用该任务写入自解除块，跑完还原原件。
-- 2026-08-22 01:19 该任务 `LastTaskResult=0`、状态 `Ready`。本次只读探测没有打开脚本正文，不能声称它会在 10808 挂掉时自动拉起 v2rayN。
+- 2026-08-22 01:19 该任务 `LastTaskResult=0`、状态 `Ready`。
+- 2026-10-19 读过脚本正文：每 5 分钟检查一次。10808 在听时写 Machine 级 `HTTP_PROXY`/`HTTPS_PROXY`；不在听时清掉指向 10808 的 HKCU 系统代理和环境变量。它不会拉起 v2rayN 或核心。
 
 ### 回滚材料（办公室本机）
 
 - 2026-08-22 01:23 仍在：`D:\v2rayN-windows-64\guiConfigs\guiNConfig.json.bak-uu`、`guiNDB.db.bak-uu`。
-- 2026-08-21 记录、本次未再列目录：`D:\Codex\.codex\tools\office-v2rayn\Ensure-ProxyFailSafe.ps1.bak-uu`。
+- 2026-10-19 23:17 列目录确认：`D:\Codex\.codex\tools\office-v2rayn\Ensure-ProxyFailSafe.ps1.bak-uu`。
+- 2026-10-19 改造前的配置与数据库：`D:\v2rayN-windows-64\guiConfigs\backup-openai-20261019-225135\`（`integrity_check=ok`，含旧订阅链接，只留本机）。启用 OpenAI 组前的状态：`D:\Codex\.codex\cache\office-v2rayn-update\openai-20261019-231214-guiNDB.db` 与同名 `guiNConfig.json`。7.24.9 程序文件：同目录 `app-backup-7.24.9-20261019-230949.zip`。`openai-*` 文件不会被脚本自动清理；程序备份 zip 再经过两次程序更新后会被轮换掉。
+- 回滚 OpenAI 组：先停 v2rayN 及其核心，确认 10808 已释放，有 `guiNDB.db-journal` 先移开；再把 `openai-20261019-231214-guiNDB.db`、`openai-20261019-231214-guiNConfig.json` 分别拷回为 `guiConfigs\guiNDB.db`、`guiConfigs\guiNConfig.json`，最后启动 Autostart 任务。
 
 ### 办公室 mesh 不通时
 
 | 触发 | 先做 | 仍失败 |
 |---|---|---|
-| 10808 未监听，或 v2rayN/xray 不在 | 看 Autostart 与 FailSafe 任务状态；需要提权则走 FailSafe 脚本通道 | 按 ssh-mesh 用 UU 做 bootstrap/救援，不改正式 SSH 密钥 |
+| 10808 未监听，或 v2rayN/核心（sing-box 或 xray）不在 | 看 Autostart 与 FailSafe 任务状态；需要提权则走 FailSafe 脚本通道 | 按 ssh-mesh 用 UU 做 bootstrap/救援，不改正式 SSH 密钥 |
 | Tailscale 在线但 SSH 失败 | 复核 sshd 与 TCP 22 | 同上 |
-| 激活节点变成 IPv6-only 或被出口拉黑的直连 IP | 切回 `*.nwncd.com` 香港/台湾中转 | 中转入口也会轮换；全面超时先等几分钟再改配置 |
+| 10808 在听但代理不通 | 看 Clash API `127.0.0.1:10813` 中 `proxy-auto` 的当前选择与成员延迟，以及 `office-v2rayn-maint\*-last.json` | 中转入口会轮换；全面超时先等几分钟再改配置 |
+| 02:00/03:00 任务后不通 | 读 `app-update-last.json` / `sub-update-last.json` 的 `result` 与日志；脚本失败时会自动回滚 | 用上一节的回滚材料手工恢复 |
 
 ## 远端操作边界
 
@@ -105,4 +128,5 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 
 - Windows 版本、更新扫描、许可证、磁盘、Codex 记忆、CC Switch、v2rayN `AutoHideStartup`、UU 的 HKCU Run：2026-07-28 现场，本次未复核。
 - sshd / Tailscale / GameViewerService、v2rayN / xray / 10808、DNS、Tailscale 服务代理环境变量、计划任务、当前中转节点与 socks 验收：2026-08-22 01:23 从家里经正式 SSH 只读复核。
+- v2rayN 版本与核心、新界订阅、OpenAI 组成员与探测、02:00/03:00 任务、系统代理（`ProxyEnable=1`，`127.0.0.1:10808`）、Machine 级 `HTTP(S)_PROXY`、Tailscale `Running online=True`：2026-10-19 23:17 从家里经正式 SSH 回读。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261019\`。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
