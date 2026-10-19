@@ -6,6 +6,10 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $managedRoot = Join-Path $projectRoot 'managed\claude-hooks'
+# 注册与 live settings.json 跑的是正式检出里的 hook（CI 也先把仓库复制到这个路径），注册路径按它核对；
+# 从导出快照等其他位置运行时，行为测试用的是本目录下的副本。
+$productionProjectRoot = 'D:\agents\projects\统一环境'
+$registeredRoot = Join-Path $productionProjectRoot 'managed\claude-hooks'
 $node = 'D:\Codex\tools\bin\node.exe'
 $guardPath = Join-Path $managedRoot 'claude-pretool-guard.mjs'
 $stopHookPath = Join-Path $managedRoot 'claude-stop-handoff-lint.mjs'
@@ -181,21 +185,23 @@ Assert-Equal $registration.Count 1 '受管注册只含一条 PreToolUse。'
 Assert-Equal $registration[0].matcher 'PowerShell|Bash' 'matcher 必须覆盖 PowerShell 与 Bash。'
 $hook = @($registration[0].hooks)[0]
 Assert-Equal $hook.command $node 'hook 必须用受管 node 的 exec 形式。'
-Assert-Equal @($hook.args)[0] $guardPath 'hook 参数必须指向受管 guard。'
+Assert-Equal @($hook.args)[0] (Join-Path $registeredRoot 'claude-pretool-guard.mjs') 'hook 参数必须指向受管 guard。'
 Assert-Equal $hook.onFailure 'continue' 'guard 自身故障必须放行（onFailure=continue）。'
 Assert-Equal @($registration[0].hooks).Count 2 'PreToolUse 只挂 guard 与 push guard 两个 hook。'
 $pushHook = @($registration[0].hooks)[1]
 Assert-Equal $pushHook.command $node 'push guard 必须用受管 node 的 exec 形式。'
-Assert-Equal @($pushHook.args)[0] $pushGuardPath 'push guard 参数必须指向受管脚本。'
+Assert-Equal @($pushHook.args)[0] (Join-Path $registeredRoot 'claude-public-push-guard.mjs') 'push guard 参数必须指向受管脚本。'
 Assert-Equal $pushHook.onFailure 'continue' 'push guard 自身故障必须放行（onFailure=continue）。'
 Assert-Equal $pushHook.timeout 30 'push guard 要给流式扫描和 gh 可见性查询留 30 秒。'
 $stopRegistration = @($managed.Stop)
 Assert-Equal $stopRegistration.Count 1 '受管注册只含一条 Stop。'
 $stopHook = @($stopRegistration[0].hooks)[0]
 Assert-Equal $stopHook.command $node 'Stop hook 必须用受管 node 的 exec 形式。'
-Assert-Equal @($stopHook.args)[0] $stopHookPath 'Stop hook 参数必须指向受管 lint。'
+Assert-Equal @($stopHook.args)[0] (Join-Path $registeredRoot 'claude-stop-handoff-lint.mjs') 'Stop hook 参数必须指向受管 lint。'
 
-if (Test-Path -LiteralPath $liveSettingsPath -PathType Leaf) {
+if (-not $projectRoot.Equals($productionProjectRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    Write-Output "Test-ClaudeHostHooks: 本次从 $projectRoot 运行，不是正式检出，跳过 live settings.json 比对。"
+} elseif (Test-Path -LiteralPath $liveSettingsPath -PathType Leaf) {
     $live = Get-Content -LiteralPath $liveSettingsPath -Raw | ConvertFrom-Json
     Assert-True ($null -ne $live.hooks) 'live settings.json 缺少 hooks。'
     $liveJson = ($live.hooks | ConvertTo-Json -Depth 10 -Compress)
