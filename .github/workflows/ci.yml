@@ -12,7 +12,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # On main a run in progress always finishes; GitHub keeps one pending run per group, so a newer push replaces
+  # only the pending one. Cancelling in-progress main runs left most pushes without a result behind the ~90-minute job.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CI_PROJECT_ROOT: D:\agents\projects\统一环境
