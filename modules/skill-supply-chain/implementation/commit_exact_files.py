@@ -15,13 +15,19 @@ same hunks, in the same order, as ``git diff -U0 HEAD -- PATH``); ``--hunks
 PATH SHA256 INDEX...`` commits HEAD's content plus only those hunks, each placed
 by its HEAD line numbers, and the other hunks stay as unstaged edits.  ``git
 apply --cached --unidiff-zero`` with a subset of hunks is no substitute: it
-places zero-context hunks by their new-side numbers, so every hunk after a
-skipped one lands shifted while the apply still succeeds.
+starts each zero-context hunk's search at its new-side line number, so after a
+skipped hunk every pure insertion lands shifted and a replacement edits the
+nearest copy of its old lines, the wrong one when that text repeats, while the
+apply still succeeds.
 
-A guarded install transaction's ledger can be committed from its
-``backups/source-state-after.json`` snapshot with ``--file-from`` when the live
-ledger has changed since; the transaction manifest's ``source_state_after``
-records that snapshot's path and SHA-256.
+``--file-from PATH SOURCE SHA256`` commits bytes prepared outside the work
+tree.  When two sessions edit adjacent lines, ``git diff -U0`` merges the edits
+into one hunk that ``--hunks`` cannot split; write HEAD's content plus only your
+edit to SOURCE instead, and the other edit stays unstaged.  A guarded install
+transaction's ledger can be committed the same way from its
+``backups/source-state-after.json`` snapshot when the live ledger has changed
+since; the transaction manifest's ``source_state_after`` records that
+snapshot's path and SHA-256.
 
 A pre-commit hook that checks the whole work tree still sees other sessions'
 unstaged edits and untracked files.  The knowledge base's hook runs
@@ -258,7 +264,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=[],
         metavar="ITEM",
         help="PATH SHA256 INDEX [INDEX ...]: commit HEAD's PATH plus only hunks INDEX..., numbered as "
-        "--list-hunks prints them for work-tree bytes hashing to SHA256",
+        "--list-hunks prints them for work-tree bytes hashing to SHA256; a hunk that also holds another "
+        "session's edit needs --file-from",
     )
     parser.add_argument(
         "--list-hunks",
