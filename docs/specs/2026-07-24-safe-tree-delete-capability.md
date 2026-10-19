@@ -297,8 +297,13 @@ preflight 看不到的两处只列出、不阻止：
 3. `Plan`：规范化目标与 capability root，校验固定 allowlist、最小后代深度、denylist、
    root 删除用途、父链与完整子树；未授权 reparse point 一律拒绝，获准的内部 directory junction
    以 manifest schema v2 的不可遍历叶节点记录；`empty-project-state` 还会在发布计划前确认
-   文件计数为零，并拒绝所有目录 NTFS named stream。通过后生成句柄绑定的文件 identity、
-   SHA-256 和目录清单。
+   文件计数为零，并拒绝所有目录 NTFS named stream。Purge 删除每个目录前要冻结它的 DACL，所以
+   Plan 在发布计划前对每个计划目录（含目标本身）做一次与 Purge 相同的目录链 guard 打开
+   （`READ_CONTROL`、`WRITE_DAC`、`DELETE`），打开后立即释放：任一目录以 `ERROR_ACCESS_DENIED`
+   打不开时拒绝，按相对目标的路径点名（最多列 20 个），不写 evidence；其他打开失败原样抛出。
+   典型场景是提权进程创建、owner 为 `BUILTIN\Administrators` 的子目录：未提权的 Plan 与 Apply
+   照常通过，Purge 却会删到一半失败，transaction 停在 `purging` 且不能 Restore（2026-10-13）。
+   通过后生成句柄绑定的文件 identity、SHA-256 和目录清单。
 4. `Apply`：要求 `ConfirmApply` 与精确 `ApprovedPlanSha256`；复算完整树清单无漂移后，
    并再次确认 `empty-project-state` 没有 named stream，才通过目录句柄原子改名到同父
    `.codex-safe-delete-<generation>.quarantine`。此时可恢复。v5 Apply 生成 transaction schema v3，
@@ -440,7 +445,8 @@ depth, refusalReason, refusalMessage, candidates?}`，`refusalMessage` 与同一
 属性，不读历史、不写 evidence、不建 run 目录；拒绝都在 JSON 里表达，顶层没有 `refusalReason`，退出码约定
 不变；缺目标或两者都给是普通 throw 的用法错误。它只预报目标解析这一层：Plan 随后还会核对
 retired-evidence-root 一次性授权是否已消费（读历史）、目标卷的 `FILE_ID_INFO` 能力和完整子树（未授权的
-reparse point 或 hardlink、file leaf 的命名流、`empty-project-state` 的文件等），这些拒绝 Check 不预报。
+reparse point 或 hardlink、file leaf 的命名流、`empty-project-state` 的文件等），以及每个计划目录能否以
+Purge 需要的访问打开，这些拒绝 Check 不预报。
 Plan、Apply、Purge 仍要求显式 `CapabilityRoot`。
 
 只读体检使用 `Lint`（#79）：不需要确认参数、不使用目标参数，只报告、不拦截。它另读一次 policy 原文并调用

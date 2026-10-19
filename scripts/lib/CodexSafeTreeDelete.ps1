@@ -1647,6 +1647,46 @@ function Assert-CodexSafeTreeDeleteTargetTreePolicy {
     }
 }
 
+function Assert-CodexSafeTreeDeleteDirectoryDeleteAccess {
+    # Purge 删除每个目录前要冻结它的 DACL，目录链 guard 因此对每个计划目录请求 READ_CONTROL、WRITE_DAC 与 DELETE。
+    # Plan 对每个目录做同一次打开并立即释放：打不开就在任何改动之前拒绝，而不是等 Purge 删到一半、transaction
+    # 停在 purging 且不能 Restore。只有 ERROR_ACCESS_DENIED 归为本拒绝，其余打开失败原样抛出。
+    param(
+        [Parameter(Mandatory)][object]$Target,
+        [Parameter(Mandatory)][object]$TreeManifest
+    )
+
+    $deniedRelativePaths = [Collections.Generic.List[string]]::new()
+    foreach ($entry in @($TreeManifest.entries | Where-Object kind -ceq 'directory')) {
+        $relativePath = [string]$entry.relativePath
+        $directoryPath = if ($relativePath -ceq '.') {
+            [string]$Target.targetPath
+        } else {
+            Join-Path ([string]$Target.targetPath) $relativePath.Replace('/', '\')
+        }
+        try {
+            [CodexHookGovernance.VerifiedDirectoryChainGuard]::AcquireForEmptyDelete(
+                [string]$Target.capabilityRoot,
+                $directoryPath).Dispose()
+        } catch {
+            $win32Exception = $_.Exception
+            while ($null -ne $win32Exception -and $win32Exception -isnot [ComponentModel.Win32Exception]) {
+                $win32Exception = $win32Exception.InnerException
+            }
+            if ($null -eq $win32Exception -or $win32Exception.NativeErrorCode -ne 5) { throw }
+            $deniedRelativePaths.Add($relativePath)
+        }
+    }
+    if ($deniedRelativePaths.Count -eq 0) { return }
+
+    $deniedCount = $deniedRelativePaths.Count
+    $listed = @($deniedRelativePaths | Select-Object -First 20) -join '、'
+    $omittedText = if ($deniedCount -gt 20) { "，另有 $($deniedCount - 20) 个未列出" } else { '' }
+    throw ("safe-delete 当前进程对 $deniedCount 个计划目录拿不到 Purge 删除目录所需的 READ_CONTROL、WRITE_DAC 与 DELETE " +
+        "访问（ERROR_ACCESS_DENIED），Plan 在改动前拒绝：${listed}${omittedText}（相对目标路径，. 是目标本身）。目录 owner " +
+        '不是当前用户时（常见是提权进程创建的 BUILTIN\Administrators），在提权上下文执行，或先把 owner 改回当前用户。')
+}
+
 function Get-CodexSafeTreeDeleteQuarantineCapabilityRoot {
     param([Parameter(Mandatory)][object]$Target)
 
@@ -2164,6 +2204,7 @@ function New-CodexSafeTreeDeletePlan {
         walkerTotalMs = $null
         hashMs = $null
         streamSetMs = $null
+        directoryAccessMs = $null
         capturesMs = $null
         identityPassMs = $null
         streamSetPassMs = $null
@@ -2213,6 +2254,12 @@ function New-CodexSafeTreeDeletePlan {
         -Target $target `
         -TreeManifest $tree `
         -TreePath $target.targetPath
+    $directoryAccessWatch = [Diagnostics.Stopwatch]::StartNew()
+    Assert-CodexSafeTreeDeleteDirectoryDeleteAccess `
+        -Target $target `
+        -TreeManifest $tree
+    $directoryAccessWatch.Stop()
+    $planSegments.directoryAccessMs = [long]$directoryAccessWatch.ElapsedMilliseconds
     $generationId = [guid]::NewGuid().ToString('D')
     $now = [datetimeoffset]::UtcNow
     if ($usePlanCSharpWalker) {
