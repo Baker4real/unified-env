@@ -20,7 +20,7 @@ $targetsRoot = Join-Path $fixtureRoot 'targets'
 $policyPath = Join-Path $fixtureRoot 'policy.json'
 $utf8 = [Text.UTF8Encoding]::new($false)
 $shaMismatchMessage = 'safe-delete archive approved transaction SHA-256 不匹配。'
-# 改动前（c553bb0）单组 Archive 返回对象与 terminal-archive.json 的字段顺序。
+# 改动前（c22e7e0）单组 Archive 返回对象与 terminal-archive.json 的字段顺序。
 $singleArchivedFields = 'archived|alreadyArchived|archivePath|archiveSha256|archivedAtUtc|metrics'
 $singleRefusalFields = 'archived|alreadyArchived|refusalReason|metrics'
 $markerFields = 'artifactType|schemaVersion|generationId|planPath|planSha256|planIdentity|' +
@@ -559,7 +559,7 @@ try {
         [IO.File]::Exists($childValid.markerPath)) `
         "含失败组的多组 JSON 调用必须逐组返回结果：$($childProcess.stdout)"
 
-    # 5. 单组调用不变：结构化拒绝的字段、JSON 输出形状与退出码都与改动前（c553bb0）一致。
+    # 5. 单组调用不变：结构化拒绝的字段、JSON 输出形状与退出码都与改动前（c22e7e0）一致。
     $singleRefusal = & $entryPath `
         -Mode Archive `
         -TransactionPath $quarantined.transactionPath `

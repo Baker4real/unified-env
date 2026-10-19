@@ -18,7 +18,7 @@ $evidenceRoot = Join-Path $fixtureRoot 'evidence'
 $targetsRoot = Join-Path $fixtureRoot 'targets'
 $policyPath = Join-Path $fixtureRoot 'policy.json'
 $utf8 = [Text.UTF8Encoding]::new($false)
-# 改动前（1fbfd2f）Status 的顶层与 migrationReadiness 字段顺序；带 TargetPaths 时只在 capturedAtUtc
+# 改动前（e29877a）Status 的顶层与 migrationReadiness 字段顺序；带 TargetPaths 时只在 capturedAtUtc
 # 之后多出 scope。
 $statusFields = 'artifactType|schemaVersion|capturedAtUtc|complete|policyPath|policySha256|' +
     'policySchemaVersion|migrationReadiness|operations|metrics'
