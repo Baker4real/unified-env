@@ -30,6 +30,8 @@ intent: 定义环境盘点、dry-run 迁移、PATH 与报告链的责任边界
 node .\scripts\Run-PowerShellTests.cjs --module dev-environment --list
 ```
 
+`D:\Codex\.codex\scripts` 里每个文件的 owner 登记在 `managed/codex-scripts/ownership.json`，`scripts/Invoke-CodexScriptsOwnershipLint.ps1` 只读核对：未登记的文件、`source` 不在仓库里、部署脚本没点名该文件都是 error，本机缺登记条目、部署副本与源不一致是 warning。往这个目录部署、手工放入或清理文件时，同时改登记表并跑一次 lint。部署时会改写内容的条目不登记 `source`（`invoke-safe-tree-delete.ps1`：部署工具把 gate holder 库内联进 shim），由部署工具自己的回执核对。
+
 ## 依赖
 
 本模块依赖 `host-safety` 提供的路径安全、可信输入和原子报告发布实现。
