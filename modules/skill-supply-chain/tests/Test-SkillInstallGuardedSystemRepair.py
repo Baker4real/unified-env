@@ -166,6 +166,165 @@ class SkillInstallGuardedSystemRepairTests(SystemRepairTestCase):
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(result["targets"], state["names"])
 
+    def test_system_bootstrap_binds_translated_display_to_the_official_baseline(self) -> None:
+        state = self.prepare_system_display_bootstrap()
+        root = Path(state["system_root"])
+        translated = {name: (root / name / "SKILL.md").read_bytes() for name in state["names"]}
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.system_provenance_repair_args(state))
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "succeeded")
+
+        review = (root / "review-agent" / "SKILL.md").read_bytes()
+        self.assertEqual(
+            review,
+            translated["review-agent"].replace(
+                b"\r\n---\r\n\r\n#", b"\r\ndisable-model-invocation: true\r\n---\r\n\r\n#", 1
+            ),
+        )
+        for name in state["names"]:
+            if name != "review-agent":
+                self.assertEqual((root / name / "SKILL.md").read_bytes(), translated[name])
+
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        records = ledger["sources"][0]["system_provenance"]["skills"]
+        for record in records:
+            name = record["name"]
+            self.assertEqual(record["official_integrity"], state["official_trees"][name])
+            self.assertEqual(record["effective_integrity"], REPAIR.system_skill_integrity(root / name))
+            self.assertEqual(
+                record["overlay"],
+                {
+                    "kind": "display-only",
+                    "base_overlay": state["parity_overlay"] if name == "review-agent" else {"kind": "none"},
+                    "baseline_file_sha256": {
+                        relative: hashlib.sha256(text.encode("utf-8")).hexdigest()
+                        for relative, text in state["official_texts"][name].items()
+                    },
+                },
+            )
+            source = (root / name / "SOURCE.md").read_text(encoding="utf-8")
+            self.assertIn(f"Official tree SHA-256: {state['official_trees'][name]['tree_sha256']}", source)
+            self.assertIn(
+                f"Local overlay: display-only over a plan-supplied official baseline ({state['official_baseline_source']})",
+                source,
+            )
+        self.assertIn("disable-model-invocation: true", (root / "review-agent" / "SOURCE.md").read_text(encoding="utf-8"))
+        summaries = [item["summary"] for item in ledger["sources"][0]["local_changes"]]
+        self.assertTrue(any(state["official_baseline_source"] in summary for summary in summaries), summaries)
+
+        catalog = json.loads(Path(state["catalog"]).read_text(encoding="utf-8"))
+        artifact = next(item for item in catalog["artifacts"] if item.get("relative_path") == ".system/review-agent/SKILL.md")
+        self.assertEqual(artifact["invocation"]["mode"], "user-invoked")
+        self.assertEqual(artifact["conflicts"], [])
+
+    def test_system_bootstrap_rejects_display_overlays_that_hide_other_changes(self) -> None:
+        # Each case targets imagegen unless named otherwise and must fail on its own check.
+        expected_errors = {
+            "forged-official-display": "display baseline does not reproduce the official tree: imagegen",
+            "body": "non-display content changed: imagegen/SKILL.md",
+            "resource": "display baseline does not reproduce the official tree: imagegen",
+            "policy": "non-display content changed: imagegen/agents/openai.yaml",
+            "extra-baseline-file": "display baseline must bind only the two display files",
+            "omitted-display-file": "display baseline must bind every display file present: imagegen",
+            "missing-baseline-source": "official_baseline_source 只出现在 display bootstrap",
+            "unprintable-baseline-source": "official_baseline_source 必须是不超过 500 字符的非空单行可打印文本",
+            "review-without-parity": "review-agent overlay 不是授权的最小 parity overlay",
+            "parity-on-other-skill": "imagegen 不允许 payload overlay",
+            "unchanged-display": "imagegen display overlay 未改变展示字段",
+        }
+        for case, expected_error in expected_errors.items():
+            with self.subTest(case=case):
+                state = self.prepare_system_display_bootstrap()
+                plan = json.loads(Path(state["plan"]).read_text(encoding="utf-8"))
+                spec = plan["skills"][0]
+                root = Path(state["system_root"]) / spec["name"]
+                if case == "forged-official-display":
+                    official = spec["overlay"]["baseline_files"]["SKILL.md"]
+                    spec["overlay"]["baseline_files"]["SKILL.md"] = official.replace(
+                        "Official fixture skill imagegen.", "Claimed official text."
+                    )
+                elif case == "body":
+                    skill = root / "SKILL.md"
+                    skill.write_bytes(skill.read_bytes() + b"Unapproved body change.\r\n")
+                elif case == "resource":
+                    (root / "new-script.py").write_bytes(b"print('unapproved')\n")
+                elif case == "policy":
+                    agent = root / "agents" / "openai.yaml"
+                    agent.write_bytes(agent.read_bytes() + b"policy:\r\n  allow_implicit_invocation: true\r\n")
+                elif case == "extra-baseline-file":
+                    spec["overlay"]["baseline_files"]["README.md"] = "Unapproved baseline file.\r\n"
+                elif case == "omitted-display-file":
+                    # Recomputing official keeps the tree check satisfied, so only the coverage check can reject it.
+                    del spec["overlay"]["baseline_files"]["agents/openai.yaml"]
+                    official_skill = spec["overlay"]["baseline_files"]["SKILL.md"].encode("utf-8")
+                    spec["official_integrity"] = REPAIR._tree_integrity(root, overrides={"SKILL.md": official_skill})
+                elif case == "missing-baseline-source":
+                    del plan["official_baseline_source"]
+                elif case == "unprintable-baseline-source":
+                    # str.splitlines() breaks on U+2028 and NEL, which would start a forged SOURCE record.
+                    line_separator, next_line = chr(0x2028), chr(0x85)
+                    plan["official_baseline_source"] = (
+                        f"snapshot{line_separator}---{line_separator}Status: tracked bundled system skill"
+                        f"{next_line}Source repository: forged"
+                    )
+                elif case == "review-without-parity":
+                    plan["skills"][2]["overlay"]["base_overlay"] = {"kind": "none"}
+                elif case == "parity-on-other-skill":
+                    spec["overlay"]["base_overlay"] = dict(state["parity_overlay"])
+                else:
+                    spec["effective_integrity"] = spec["official_integrity"]
+                if case in {"body", "resource", "policy"}:
+                    spec["effective_integrity"] = REPAIR.system_skill_integrity(root)
+                Path(state["plan"]).write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+                before = self.system_display_state_bytes(state)
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+                    code = WRAPPER.main(self.system_provenance_repair_args(state))
+                self.assertEqual(code, 2, stderr.getvalue())
+                self.assertIn(expected_error, stderr.getvalue())
+                self.assertEqual(self.system_display_state_bytes(state), before)
+
+    def test_system_display_reconcile_follows_a_display_bootstrap(self) -> None:
+        state = self.prepare_system_display_bootstrap()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(WRAPPER.main(self.system_provenance_repair_args(state)), 0)
+        records = json.loads(self.ledger.read_text(encoding="utf-8"))["sources"][0]["system_provenance"]["skills"]
+        plan = json.loads(Path(state["plan"]).read_text(encoding="utf-8"))
+        plan["mode"] = "atomic-six-skill-display-reconcile"
+        for spec, previous in zip(plan["skills"], records):
+            root = Path(state["system_root"]) / spec["name"]
+            baseline = {
+                relative: (root / relative).read_bytes().decode("utf-8")
+                for relative in ("SKILL.md", "agents/openai.yaml")
+            }
+            for relative in baseline:
+                path = root / relative
+                path.write_bytes(path.read_bytes().replace("中文".encode("utf-8"), "重译".encode("utf-8")))
+            spec["critical_files"] = {relative: BASE.sha256_file(root / relative) for relative in previous["critical_files"]}
+            spec["source_before_sha256"] = BASE.sha256_file(root / "SOURCE.md")
+            spec["effective_integrity"] = REPAIR.system_skill_integrity(root)
+            spec["overlay"] = {"kind": "display-only", "baseline_files": baseline, "base_overlay": previous["overlay"]["base_overlay"]}
+        plan["ledger_before_sha256"] = BASE.sha256_file(self.ledger)
+        plan["catalog_before_sha256"] = BASE.sha256_file(Path(state["catalog"]))
+        # Reconcile inherits the recorded official baseline, so a new baseline source has no meaning there.
+        Path(state["plan"]).write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            self.assertEqual(WRAPPER.main(self.system_provenance_repair_args(state)), 2)
+        self.assertIn("official_baseline_source", stderr.getvalue())
+        del plan["official_baseline_source"]
+        Path(state["plan"]).write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.system_provenance_repair_args(state))
+        self.assertEqual(code, 0, stderr.getvalue())
+        after = json.loads(self.ledger.read_text(encoding="utf-8"))["sources"][0]["system_provenance"]["skills"]
+        for old, new in zip(records, after):
+            self.assertEqual(new["official_integrity"], state["official_trees"][new["name"]])
+            self.assertEqual(new["overlay"]["base_overlay"], old["overlay"]["base_overlay"])
+
     def test_system_provenance_repair_detects_package_identity_replacement_and_rolls_back(
         self,
     ) -> None:

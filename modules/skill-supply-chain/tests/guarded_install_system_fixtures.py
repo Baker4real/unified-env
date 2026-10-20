@@ -225,6 +225,71 @@ class SystemRepairTestCase(GuardedInstallTestCase):
             str(self.temp / "evidence"),
         ]
 
+    def prepare_system_display_bootstrap(self, *, include_creator_scripts: bool = False) -> dict[str, object]:
+        """An official refresh dropped every SOURCE.md, then the menu tool translated the display fields."""
+        state = self.prepare_system_provenance_repair(include_creator_scripts=include_creator_scripts)
+        system_root = Path(state["system_root"])
+        plan = json.loads(Path(state["plan"]).read_text(encoding="utf-8"))
+        parity = next(spec["overlay"] for spec in plan["skills"] if spec["name"] == "review-agent")
+        official_texts: dict[str, dict[str, str]] = {}
+        official_trees: dict[str, dict[str, object]] = {}
+        for spec in plan["skills"]:
+            name = spec["name"]
+            root = system_root / name
+            skill = root / "SKILL.md"
+            agent = root / "agents" / "openai.yaml"
+            agent.parent.mkdir(exist_ok=True)
+            policy = "policy:\r\n  allow_implicit_invocation: false\r\n" if name == "review-agent" else ""
+            skill.write_bytes(
+                f"---\r\nname: {name}\r\ndescription: Official fixture skill {name}.\r\n---\r\n\r\n# {name}\r\n".encode("utf-8")
+            )
+            agent.write_bytes(
+                (
+                    "interface:\r\n"
+                    f'  display_name: "{name}"\r\n'
+                    '  short_description: "Official menu text"\r\n'
+                    '  default_prompt: "Official prompt"\r\n' + policy
+                ).encode("utf-8")
+            )
+            official_texts[name] = {
+                "SKILL.md": skill.read_bytes().decode("utf-8"),
+                "agents/openai.yaml": agent.read_bytes().decode("utf-8"),
+            }
+            official_trees[name] = PAYLOAD.candidate_integrity_payload(root)
+            skill.write_bytes(
+                f'---\r\nname: {name}\r\ndescription: "本夹具的中文展示文本：{name}。"\r\n---\r\n\r\n# {name}\r\n'.encode("utf-8")
+            )
+            agent.write_bytes(
+                agent.read_bytes()
+                .replace(b"Official menu text", "中文菜单文本".encode("utf-8"))
+                .replace(b"Official prompt", "中文提示词".encode("utf-8"))
+            )
+            spec["official_integrity"] = official_trees[name]
+            spec["effective_integrity"] = PAYLOAD.candidate_integrity_payload(root)
+            spec["critical_files"] = {}
+            base_overlay: dict[str, object] = {"kind": "none"}
+            if name == "review-agent":
+                spec["critical_files"] = {"agents/openai.yaml": BASE.sha256_file(agent)}
+                localized = skill.read_bytes()
+                skill.write_bytes(
+                    localized.replace(b"\r\n---\r\n\r\n#", b"\r\ndisable-model-invocation: true\r\n---\r\n\r\n#", 1)
+                )
+                spec["effective_integrity"] = PAYLOAD.candidate_integrity_payload(root)
+                skill.write_bytes(localized)
+                base_overlay = dict(parity)
+            spec["overlay"] = {
+                "kind": "display-only",
+                "baseline_files": official_texts[name],
+                "base_overlay": base_overlay,
+            }
+        plan["official_baseline_source"] = "fixture skills snapshot taken before the menu translation"
+        Path(state["plan"]).write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+        state["official_baseline_source"] = plan["official_baseline_source"]
+        state["official_texts"] = official_texts
+        state["official_trees"] = official_trees
+        state["parity_overlay"] = parity
+        return state
+
     def prepare_system_display_reconcile(self, *, include_creator_scripts: bool = False) -> dict[str, object]:
         state = self.prepare_system_provenance_repair(include_creator_scripts=include_creator_scripts)
         bootstrap = json.loads(Path(state["plan"]).read_text(encoding="utf-8"))
