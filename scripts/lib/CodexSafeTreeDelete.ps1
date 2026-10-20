@@ -1526,9 +1526,11 @@ function ConvertTo-CodexSafeTreeDeleteCheckRow {
 function Get-CodexSafeTreeDeleteCheckAutoRow {
     # 省略 CapabilityRoot 时的自动解析：对 policy 的每条条目运行同一判定，root 包含目标的条目是候选。
     # 候选中恰好一条放行才采用它；零条或多条都拒绝，并列出全部候选及各自的判定，不替调用方做授权选择。
+    # RequireExisting 与 Resolve-CodexSafeTreeDeleteTarget 同义：BatchPurge 传 $false，已 quarantine 的目标也能解析。
     param(
         [Parameter(Mandatory)][string]$TargetPath,
-        [Parameter(Mandatory)][object]$Policy
+        [Parameter(Mandatory)][object]$Policy,
+        [bool]$RequireExisting = $true
     )
 
     # 加载器保证 policy 至少一条条目、root 互不相同，所以每条条目的 root 都能通过 allowlist 查找。
@@ -1538,7 +1540,8 @@ function Get-CodexSafeTreeDeleteCheckAutoRow {
         $decision = Get-CodexSafeTreeDeleteTargetDecision `
             -TargetPath $TargetPath `
             -CapabilityRoot ([string]$entry.capabilityRoot) `
-            -Policy $Policy
+            -Policy $Policy `
+            -RequireExisting $RequireExisting
         if ($decision.refusalReason -ceq 'invalid-target-path') {
             # 目标先于 root 校验，目标非法与选哪条 root 无关：给出与显式 root 相同的拒绝，不列候选。
             $decision.capabilityRoot = $null
@@ -1607,6 +1610,31 @@ function Invoke-CodexSafeTreeDeleteCheck {
         targetCount = $results.Count
         results = $results.ToArray()
     }
+}
+
+function Resolve-CodexSafeTreeDeleteBatchCapabilityRoot {
+    # BatchPurge 省略 CapabilityRoot 时：每个目标按 Check 的自动解析找唯一合法条目（不要求目标仍存在），
+    # 全部目标须落在同一条目下。这里只选出 root；BatchPurge 随后照常用它重新解析并校验每个目标。
+    param(
+        [Parameter(Mandatory)][string[]]$TargetPaths,
+        [Parameter(Mandatory)][string]$PolicyPath
+    )
+
+    $policy = Read-CodexSafeTreeDeletePolicy -PolicyPath $PolicyPath
+    $rootsByEntryId = [ordered]@{}
+    foreach ($targetPath in @($TargetPaths)) {
+        $row = Get-CodexSafeTreeDeleteCheckAutoRow -TargetPath $targetPath -Policy $policy -RequireExisting $false
+        if (-not $row.allowed) {
+            throw ('safe-delete BatchPurge 无法为目标自动解析 CapabilityRoot（{0}）：{1}。用 -Mode Check -TargetPath 查看候选条目，或显式传 -CapabilityRoot。' -f
+                $row.refusalReason, $row.targetPath)
+        }
+        $rootsByEntryId[[string]$row.policyEntryId] = [string]$row.capabilityRoot
+    }
+    if ($rootsByEntryId.Count -ne 1) {
+        throw ('safe-delete BatchPurge 的目标分属多条 policy 条目（{0}），须按 capability root 分批调用。' -f
+            (@($rootsByEntryId.Keys) -join '、'))
+    }
+    return @($rootsByEntryId.Values)[0]
 }
 
 function Assert-CodexSafeTreeDeleteTargetTreePolicy {
@@ -2156,8 +2184,14 @@ function Invoke-CodexSafeTreeDeleteMode {
                 return [pscustomobject][ordered]@{ completed = $false; refusalReason = 'confirm-apply-and-purge-required' }
             }
             $resolvedTargets = @(Split-CodexSafeTreeDeleteListArgument -Values $TargetPaths)
-            if ($resolvedTargets.Count -eq 0 -or [string]::IsNullOrWhiteSpace($CapabilityRoot)) {
-                throw 'BatchPurge 模式要求 TargetPaths 与 CapabilityRoot。'
+            if ($resolvedTargets.Count -eq 0) {
+                throw 'BatchPurge 模式要求 TargetPaths。'
+            }
+            # CapabilityRoot 可省略：与 Check 一样自动解析唯一条目，解析不出或分属多条时抛错。
+            if ([string]::IsNullOrWhiteSpace($CapabilityRoot)) {
+                $CapabilityRoot = Resolve-CodexSafeTreeDeleteBatchCapabilityRoot `
+                    -TargetPaths $resolvedTargets `
+                    -PolicyPath $PolicyPath
             }
             $libraryArguments = @{
                 TargetPaths = $resolvedTargets

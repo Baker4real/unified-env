@@ -1525,6 +1525,77 @@ try {
     Assert-True (-not [IO.Directory]::Exists($batchMixedPresentA)) '复核批量后存在目标 A 不得残留'
     Assert-True (-not [IO.Directory]::Exists($batchMixedPresentB)) '复核批量后存在目标 B 不得残留'
 
+    # 省略 CapabilityRoot：与 Check 一样为每个目标自动解析唯一条目（目标可已 quarantine 或缺席），全部目标须
+    # 同属一条；解析不出或分属多条时，在写任何 evidence 之前抛出固定原文。
+    $autoRootPresent = Join-Path $batchParent 'auto-root-present'
+    $autoRootQuarantined = Join-Path $batchParent 'auto-root-quarantined'
+    $autoRootAbsent = Join-Path $batchParent 'auto-root-absent'
+    foreach ($autoRootPath in @($autoRootPresent, $autoRootQuarantined)) {
+        [void][IO.Directory]::CreateDirectory($autoRootPath)
+        [IO.File]::WriteAllText((Join-Path $autoRootPath 'payload.txt'), $autoRootPath, [Text.UTF8Encoding]::new($false))
+    }
+    $autoRootPlan = & $entryPath `
+        -Mode Plan `
+        -TargetPath $autoRootQuarantined `
+        -CapabilityRoot $fixtureRoot `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    $autoRootApply = & $entryPath `
+        -Mode Apply `
+        -PlanPath ([string]$autoRootPlan.planPath) `
+        -ApprovedPlanSha256 ([string]$autoRootPlan.planSha256) `
+        -ConfirmApply `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($autoRootApply.quarantined -eq $true -and -not [IO.Directory]::Exists($autoRootQuarantined)) (
+        '自动解析夹具必须先制造已 quarantine 的目标')
+    $autoRootResult = & $entryPath `
+        -Mode BatchPurge `
+        -TargetPaths @($autoRootPresent, $autoRootQuarantined, $autoRootAbsent) `
+        -ConfirmApply `
+        -ConfirmPurge `
+        -FixturePolicyPath $policyPath `
+        -FixtureEvidenceRoot $evidenceRoot
+    Assert-True ($autoRootResult.completed -eq $true -and
+        $autoRootResult.purgedCount -eq 2 -and
+        $autoRootResult.recoveredCount -eq 1 -and
+        $autoRootResult.alreadyAbsentCount -eq 1) (
+        "省略 CapabilityRoot 的 BatchPurge 必须 purge 存在目标、接续 quarantine 目标并报告缺席目标：$($autoRootResult | ConvertTo-Json -Compress -Depth 6)")
+    Assert-True (-not [IO.Directory]::Exists($autoRootPresent) -and
+        -not [IO.Directory]::Exists([string]$autoRootApply.quarantinePath)) '省略 CapabilityRoot 的 BatchPurge 不得残留目标或 quarantine'
+
+    $evidenceEntryCountBeforeAutoRefusal = @([IO.Directory]::GetFileSystemEntries($evidenceRoot)).Count
+    $autoRootRefusals = @(
+        @{
+            label = '目标分属多条'
+            targets = @((Join-Path $batchParent 'auto-root-mixed'), $rootTargetPath)
+            pattern = '^safe-delete BatchPurge 的目标分属多条 policy 条目（fixture、fixture-root-target），须按 capability root 分批调用。$'
+        },
+        @{
+            label = '没有合法条目'
+            targets = @((Join-Path (Split-Path -Parent $fixtureRoot) 'auto-root-outside'))
+            pattern = '^safe-delete BatchPurge 无法为目标自动解析 CapabilityRoot（no-capability-root）：'
+        }
+    )
+    foreach ($autoRootRefusal in $autoRootRefusals) {
+        $autoRootRefusalMessage = $null
+        try {
+            & $entryPath `
+                -Mode BatchPurge `
+                -TargetPaths $autoRootRefusal.targets `
+                -ConfirmApply `
+                -ConfirmPurge `
+                -FixturePolicyPath $policyPath `
+                -FixtureEvidenceRoot $evidenceRoot | Out-Null
+        } catch {
+            $autoRootRefusalMessage = [string]$_.Exception.Message
+        }
+        Assert-True ($null -ne $autoRootRefusalMessage -and $autoRootRefusalMessage -match $autoRootRefusal.pattern) (
+            "省略 CapabilityRoot 且$($autoRootRefusal.label)时必须拒绝，实际：$autoRootRefusalMessage")
+    }
+    Assert-True (@([IO.Directory]::GetFileSystemEntries($evidenceRoot)).Count -eq $evidenceEntryCountBeforeAutoRefusal) (
+        '自动解析拒绝不得写入 evidence')
+
     # 复核函数直接单测：存在目录、真缺席、父枚举旁证、父目录缺失、同名文件叶子。
     $recheckUnitPresent = Join-Path $batchParent 'recheck-unit-present'
     $recheckUnitFile = Join-Path $batchParent 'recheck-unit-file.txt'

@@ -151,7 +151,9 @@ policy v5 还要求每个条目显式提供非负 JSON integer `minimumQuarantin
 各自的 policy / evidence 根，并负责输出与退出码。两个入口仍各自声明同一套 CLI 参数（Mode 的
 ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同时声明，分发逻辑只改一处。fixture 钩子
 按 mode 经 `-ModeArgumentsForTest` 追加，生产入口不传。CLI 合同一致与分发形状由
-`tests\Test-CodexSafeTreeDeleteModeDispatch.ps1` 钉住。
+`tests\Test-CodexSafeTreeDeleteModeDispatch.ps1` 钉住。生产入口自 2026-10-20 起一律按 `-Json` 运行（分发看到的
+`Json` 恒为真）并输出单行 JSON，`-Json` 只为兼容既有调用方保留；fixture 入口仍只在带 `-Json` 时输出 JSON，
+不带时返回对象供套件断言。
 
 ## 部署门与维护窗口（2026-08-27，#56 Wave A）
 
@@ -391,7 +393,10 @@ preflight 看不到的两处只列出、不阻止：
    全部在途事务收尾清空（呼应 #45/#50 的上线排序）。
 
 批量清理使用 `BatchPurge`，调用方一次传入同一 capability root 下的多个 `TargetPaths`，并同时提供
-`ConfirmApply` 与 `ConfirmPurge`。入口对每个目标仍逐项执行相同的 `Plan` / `Apply` / `Purge` 校验；
+`ConfirmApply` 与 `ConfirmPurge`。省略 `CapabilityRoot` 时（2026-10-20 起），分发层先用 Check 的自动解析为每个目标选
+唯一合法条目，但不要求目标仍存在（与 `BatchPurge` 解析目标时的 `RequireExisting=false` 一致，已 quarantine 的目标照样
+能接续）；任一目标解析不出，或全部目标不属于同一条目时抛错，此时尚未初始化 evidence 根。选出的 root 与显式传入等价，
+之后的逐目标解析与校验不变。入口对每个目标仍逐项执行相同的 `Plan` / `Apply` / `Purge` 校验；
 如果发现同一目标已有 `quarantined` 或 `purging` transaction，且原路径不存在、quarantine 仍存在，
 则先按该 transaction 完成 `Purge`，再继续后续目标。这样批量调用中断后可以从受控 evidence 恢复，不需要
 调用方手写循环、重新计算 transaction hash 或手工删除 quarantine。恢复匹配使用
