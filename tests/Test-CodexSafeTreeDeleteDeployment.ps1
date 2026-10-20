@@ -9,6 +9,9 @@ $ErrorActionPreference = 'Stop'
 # 的 RecoverRollback 矩阵、complete 的两种收尾、错 owner/marker/journal 篡改拒绝、
 # 终态/在途 run 的二次操作拒绝、部署者持锁时 gate 阻断负控，以及 #77 等锁超时带
 # holder（fixture 项目根 + 替身 entry，经 BootstrapGate 安装的 gate shim）。
+# #93：等锁时长测试 seam（GateWaitSecondsForTest / InstalledShimGateWaitSecondsForTest，
+# S10 不再真等 5/2 分钟；生产默认不变）与 legacy drain 范围 seam（S11：命令行含入口标记
+# 但不含本次 state root 的外部进程不阻塞 fixture 部署，含 state root 的仍阻塞）。
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $deployTool = Join-Path $projectRoot 'scripts\Deploy-CodexSafeTreeDelete.ps1'
@@ -65,7 +68,9 @@ function Invoke-DeployTool {
         [Parameter(Mandatory)][string]$DeploymentId,
         [Parameter(Mandatory)][object]$Scenario,
         [string]$PreviousClosureSha256,
-        [int]$StopAfterPhase = 0
+        [int]$StopAfterPhase = 0,
+        [int]$GateWaitSeconds = 0,
+        [int]$InstalledShimGateWaitSeconds = 0
     )
     $arguments = @{
         Mode = $Mode
@@ -80,6 +85,12 @@ function Invoke-DeployTool {
     }
     if ($StopAfterPhase -gt 0) {
         $arguments.StopAfterPhaseForTest = $StopAfterPhase
+    }
+    if ($GateWaitSeconds -gt 0) {
+        $arguments.GateWaitSecondsForTest = $GateWaitSeconds
+    }
+    if ($InstalledShimGateWaitSeconds -gt 0) {
+        $arguments.InstalledShimGateWaitSecondsForTest = $InstalledShimGateWaitSeconds
     }
     & $deployTool @arguments
 }
@@ -266,6 +277,8 @@ try {
     $gateShimText = [IO.File]::ReadAllText($s1.ShimPath)
     Assert-True ($gateShimText -cmatch 'CodexSafeTreeDeleteDeployment' -or
         $gateShimText -cmatch [regex]::Escape($s1.MutexName)) 'cutover 后 shim 必须是 gate-aware 版本'
+    # #93：不传 InstalledShimGateWaitSecondsForTest 时，安装的 shim 保持生产默认等锁 2 分钟。
+    Assert-True ($gateShimText.Contains('[TimeSpan]::FromMinutes(2)')) '未传等锁覆盖时安装的 shim 必须保持生产默认 2 分钟'
     Write-Output 'STEP s1-deploy'
     Invoke-DeployTool -Mode Deploy -DeploymentId 'full-run' -Scenario $s1 | Out-Null
     Assert-True (-not [IO.File]::Exists((Join-Path $s1.StateRoot 'maintenance.json'))) 'complete 后 marker 必须删除'
@@ -402,7 +415,16 @@ try {
     [void][IO.File]::Delete($markerPath9)
     Invoke-DeployTool -Mode RecoverRollback -DeploymentId 'gate-proof' -Scenario $s9 | Out-Null
 
-    # ---- S10：#77 等锁超时报告持锁者（gate holder 面包屑）----
+    # ---- S10：#77 等锁超时报告持锁者（gate holder 面包屑）；#93 起等锁时长走测试 seam ----
+    # 等锁覆盖 seam 不带测试 seam 时必须拒绝（生产入口无可达路径）。
+    $misuseWait = Assert-Throws -Message 'GateWaitSecondsForTest 不带测试 seam 必须拒绝' -Action {
+        & $deployTool -Mode Deploy -DeploymentId 'seam-misuse' -GateWaitSecondsForTest 5 | Out-Null
+    }
+    Assert-True ($misuseWait -match '测试 seam') "等锁覆盖 seam 滥用拒绝必须指向测试 seam：$misuseWait"
+    $misuseShimWait = Assert-Throws -Message 'InstalledShimGateWaitSecondsForTest 不带测试 seam 必须拒绝' -Action {
+        & $deployTool -Mode Deploy -DeploymentId 'seam-misuse' -InstalledShimGateWaitSecondsForTest 5 | Out-Null
+    }
+    Assert-True ($misuseShimWait -match '测试 seam') "shim 等锁覆盖 seam 滥用拒绝必须指向测试 seam：$misuseShimWait"
     $gateProject = New-GateHolderProjectRoot
     $gateLive = New-GateHolderScenario -Name 'gh-live' -GateProjectRoot $gateProject
     $gateStale = New-GateHolderScenario -Name 'gh-stale' -GateProjectRoot $gateProject
@@ -438,7 +460,7 @@ exit 3
         Assert-True (-not $poller.Process.HasExited -and [datetime]::UtcNow -lt $pollerDeadline) '面包屑观察进程未就绪'
         Start-Sleep -Milliseconds 100
     }
-    Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'gate-holder' -Scenario $gateLive -PreviousClosureSha256 ('0' * 64) | Out-Null
+    Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'gate-holder' -Scenario $gateLive -PreviousClosureSha256 ('0' * 64) -InstalledShimGateWaitSeconds 10 | Out-Null
     [IO.File]::WriteAllText($pollerStop, '')
     [void](Complete-FixturePwsh -Call $poller -TimeoutSeconds 60)
     Assert-True ([IO.File]::Exists($deployObserved)) '部署工具持锁期间必须写面包屑'
@@ -451,8 +473,11 @@ exit 3
     $holderLibText = [IO.File]::ReadAllText((Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteGateHolder.ps1'), [Text.UTF8Encoding]::new($false))
     Assert-True ($installedShimText.Contains($holderLibText.TrimEnd()) -and
         -not $installedShimText.Contains("'lib\CodexSafeTreeDeleteGateHolder.ps1'")) '安装的 gate shim 必须内联同源 gate holder lib 且不再 dot-source'
-    Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'gate-holder' -Scenario $gateStale -PreviousClosureSha256 ('0' * 64) | Out-Null
-    Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'gate-holder' -Scenario $gateUnwritable -PreviousClosureSha256 ('0' * 64) | Out-Null
+    # #93：经 InstalledShimGateWaitSecondsForTest 安装的 shim 等锁上限被重写为测试值。
+    Assert-True ($installedShimText.Contains('[TimeSpan]::FromSeconds(10)') -and
+        -not $installedShimText.Contains('[TimeSpan]::FromMinutes(2)')) '经测试 seam 安装的 shim 等锁上限必须重写为 10 秒'
+    Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'gate-holder' -Scenario $gateStale -PreviousClosureSha256 ('0' * 64) -InstalledShimGateWaitSeconds 10 | Out-Null
+    Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'gate-holder' -Scenario $gateUnwritable -PreviousClosureSha256 ('0' * 64) -InstalledShimGateWaitSeconds 10 | Out-Null
 
     # 存活持锁者：面包屑只含四个字段，mode 来自 -Mode，不记录其它参数值。
     Write-Output 'STEP s10-holders'
@@ -499,13 +524,13 @@ exit 3
     Wait-GateShimEntered -Scenario $gateUnwritable -Call $unwritableHolder
     Assert-True (@([IO.Directory]::GetFiles($gateUnwritable.StateRoot)).Count -eq 0) '不可写目录下不得留下面包屑或临时文件'
 
-    # 三路 shim 等待者（2 分钟超时）与进程内部署工具（5 分钟超时）并行等锁。
+    # 三路 shim 等待者（经 #93 seam 安装为 10 秒超时）与进程内部署工具（6 秒超时）并行等锁。
     Write-Output 'STEP s10-waiters'
     $liveWaiter = Start-FixturePwsh -File $gateLive.ShimPath -Arguments @('-Mode', 'Status', '-SignalRoot', $gateLive.SignalRoot)
     $staleWaiter = Start-FixturePwsh -File $gateStale.ShimPath -Arguments @('-Mode', 'Status', '-SignalRoot', $gateStale.SignalRoot)
     $unknownWaiter = Start-FixturePwsh -File $gateUnwritable.ShimPath -Arguments @('-Mode', 'Status', '-SignalRoot', $gateUnwritable.SignalRoot)
     $deployTimeout = Assert-Throws -Message '外部持锁时部署工具必须等锁超时' -Action {
-        Invoke-DeployTool -Mode Deploy -DeploymentId 'gate-holder-wait' -Scenario $gateLive | Out-Null
+        Invoke-DeployTool -Mode Deploy -DeploymentId 'gate-holder-wait' -Scenario $gateLive -GateWaitSeconds 6 | Out-Null
     }
     Assert-True ($deployTimeout.StartsWith('deployment mutex acquire timeout', [StringComparison]::Ordinal)) `
         "部署工具超时消息前缀不得改变：$deployTimeout"
@@ -520,7 +545,7 @@ exit 3
     Assert-True ([int]$liveTimeoutHolder.pid -eq $liveHolder.ProcessId -and [string]$liveTimeoutHolder.mode -ceq 'Purge') `
         'holder 必须指向持锁 shim 及其 -Mode'
     Assert-True ([string]$liveTimeoutHolder.acquiredAtUtc -ceq [string]$liveBreadcrumb.acquiredAtUtc) 'holder.acquiredAtUtc 必须来自面包屑'
-    Assert-True ([long]$liveTimeoutHolder.heldSeconds -ge 110) "heldSeconds 必须反映持锁时长：$($liveTimeoutHolder.heldSeconds)"
+    Assert-True ([long]$liveTimeoutHolder.heldSeconds -ge 8) "heldSeconds 必须反映持锁时长：$($liveTimeoutHolder.heldSeconds)"
     Assert-True ($liveTimeoutHolder.stale -eq $false) '存活持锁者 stale 必须为 false'
 
     $staleTimeoutHolder = Get-GateTimeoutHolder -Result (Complete-FixturePwsh -Call $staleWaiter) -Label 'gh-stale'
@@ -542,7 +567,86 @@ exit 3
     $liveResult = Complete-FixturePwsh -Call $liveHolder -TimeoutSeconds 90
     Assert-True ($liveResult.ExitCode -eq 7) "持锁 shim 必须透传 entry 退出码：$($liveResult.ExitCode)"
     Assert-True (-not [IO.File]::Exists($liveBreadcrumbPath)) '持锁 shim 释放锁前必须删除面包屑'
-    Write-Output 'S10 gate-holder OK'
+    # ---- S11：#93 legacy drain 范围 seam（其他会话的受管调用不阻塞 fixture 部署）----
+    # 模拟进程的命令行带入口标记（既有 drain 的全机匹配条件）：生产 drain 会把它们计入。
+    # 测试 seam 生效时 drain 只认命令行同时含本次 state root 的进程。
+    Write-Output 'STEP s11-drain-scope'
+    $drainSimScript = Join-Path $fixtureRoot 'invoke-safe-tree-delete-foreign-sim.ps1'
+    [IO.File]::WriteAllText($drainSimScript, @'
+param([string]$SignalRoot, [string]$Marker)
+Set-StrictMode -Version Latest
+[IO.File]::WriteAllText((Join-Path $SignalRoot ('sim-entered-{0}.txt' -f $PID)), [string]$PID)
+$simDeadline = [datetime]::UtcNow.AddMinutes(5)
+while (-not [IO.File]::Exists((Join-Path $SignalRoot 'sim-release'))) {
+    if ([datetime]::UtcNow -gt $simDeadline) { exit 9 }
+    Start-Sleep -Milliseconds 100
+}
+exit 0
+'@, [Text.UTF8Encoding]::new($false))
+
+    function Wait-DrainSimEntered {
+        param([Parameter(Mandatory)][string]$SignalRoot, [Parameter(Mandatory)][object]$Call)
+        $enteredPath = Join-Path $SignalRoot ('sim-entered-{0}.txt' -f $Call.ProcessId)
+        $enteredDeadline = [datetime]::UtcNow.AddSeconds(60)
+        while (-not [IO.File]::Exists($enteredPath)) {
+            if ($Call.Process.HasExited) { throw ('drain 模拟进程未进入即退出（exit={0}）' -f $Call.Process.ExitCode) }
+            if ([datetime]::UtcNow -gt $enteredDeadline) { throw 'drain 模拟进程 60s 内未进入' }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+
+    function Start-FixtureDeploy {
+        param([Parameter(Mandatory)][object]$Scenario, [Parameter(Mandatory)][string]$DeploymentId)
+        return Start-FixturePwsh -File $deployTool -Arguments @(
+            '-Mode', 'Deploy', '-DeploymentId', $DeploymentId,
+            '-StateRootForTest', $Scenario.StateRoot, '-ShimPathForTest', $Scenario.ShimPath,
+            '-ProjectRootForTest', $Scenario.ProjectRoot, '-MutexNameForTest', $Scenario.MutexName)
+    }
+
+    # Leg A：命令行含入口标记、但不含本次 state root 的外部进程（模拟其他会话经 shim 调用）
+    # 不得阻塞 fixture 部署；部署完成时它仍在运行。
+    $s11a = New-ScenarioRoot -Name 's11a'
+    Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'drain-foreign' -Scenario $s11a -PreviousClosureSha256 $currentClosure | Out-Null
+    $s11aSignals = Join-Path $s11a.Root 'signals'
+    [void][IO.Directory]::CreateDirectory($s11aSignals)
+    $foreign = Start-FixturePwsh -File $drainSimScript -Arguments @('-SignalRoot', $s11aSignals)
+    Wait-DrainSimEntered -SignalRoot $s11aSignals -Call $foreign
+    $deployForeign = Start-FixtureDeploy -Scenario $s11a -DeploymentId 'drain-foreign'
+    $deployForeignResult = Complete-FixturePwsh -Call $deployForeign -TimeoutSeconds 150
+    Assert-True ($deployForeignResult.ExitCode -eq 0) "外部进程在场时 fixture 部署必须成功：$($deployForeignResult.Stdout)$($deployForeignResult.Stderr)"
+    Assert-True (-not $foreign.Process.HasExited) '部署完成时外部进程必须仍在运行（部署没有等它结束）'
+    [IO.File]::WriteAllText((Join-Path $s11aSignals 'sim-release'), '')
+    $foreignResult = Complete-FixturePwsh -Call $foreign -TimeoutSeconds 60
+    Assert-True ($foreignResult.ExitCode -eq 0) "外部模拟进程必须正常退出：$($foreignResult.Stderr)"
+
+    # Leg B：命令行含入口标记且含本次 state root 的进程仍阻塞 drain（seam 不是关掉 drain）；
+    # 它退出后 drain 收敛、部署完成。
+    $s11b = New-ScenarioRoot -Name 's11b'
+    Invoke-DeployTool -Mode BootstrapGate -DeploymentId 'drain-marked' -Scenario $s11b -PreviousClosureSha256 $currentClosure | Out-Null
+    $s11bSignals = Join-Path $s11b.Root 'signals'
+    [void][IO.Directory]::CreateDirectory($s11bSignals)
+    $marked = Start-FixturePwsh -File $drainSimScript -Arguments @('-SignalRoot', $s11bSignals, '-Marker', $s11b.StateRoot)
+    Wait-DrainSimEntered -SignalRoot $s11bSignals -Call $marked
+    $deployMarked = Start-FixtureDeploy -Scenario $s11b -DeploymentId 'drain-marked'
+    $markedJournal = Join-Path $s11b.StateRoot 'deployments\drain-marked\phase-journal'
+    $markerActivePath = Join-Path $markedJournal '30-marker-active.json'
+    $drainedPath = Join-Path $markedJournal '40-legacy-drained.json'
+    $drainDeadline = [datetime]::UtcNow.AddSeconds(90)
+    while (-not [IO.File]::Exists($markerActivePath)) {
+        if ($deployMarked.Process.HasExited) { throw 's11b 部署在进入 drain 前退出' }
+        if ([datetime]::UtcNow -gt $drainDeadline) { throw 's11b 部署 90s 内未进入 drain（30-marker-active 缺失）' }
+        Start-Sleep -Milliseconds 100
+    }
+    # 三个 drain 轮次窗口（每轮 = 一次全机进程枚举 + 5s 间隔）：seam 若失效（标记进程被
+    # 忽略），两轮稳定零清单约 10s 内就会写出 40-legacy-drained。
+    Start-Sleep -Seconds 18
+    Assert-True (-not [IO.File]::Exists($drainedPath)) '带 state root 标记的进程必须仍然阻塞 legacy drain'
+    [IO.File]::WriteAllText((Join-Path $s11bSignals 'sim-release'), '')
+    $deployMarkedResult = Complete-FixturePwsh -Call $deployMarked -TimeoutSeconds 150
+    Assert-True ($deployMarkedResult.ExitCode -eq 0) "标记进程退出后部署必须完成：$($deployMarkedResult.Stdout)$($deployMarkedResult.Stderr)"
+    Assert-True ([IO.File]::Exists($drainedPath)) '标记进程退出后 40-legacy-drained 必须落盘'
+    [void](Complete-FixturePwsh -Call $marked -TimeoutSeconds 60)
+    Write-Output 'S11 drain-scope OK'
 
     Write-Output 'DEPLOYMENT-TESTS OK'
 } finally {

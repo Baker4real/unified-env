@@ -8,7 +8,11 @@ param(
     [string]$ShimPathForTest,
     [string]$ProjectRootForTest,
     [string]$MutexNameForTest,
-    [int]$StopAfterPhaseForTest = 0
+    [int]$StopAfterPhaseForTest = 0,
+    # #93：等锁时长测试覆盖。只在上述测试 seam 生效时可用；缺省保持生产默认
+    # （部署工具 5 分钟、安装的 gate shim 2 分钟）。
+    [int]$GateWaitSecondsForTest = 0,
+    [int]$InstalledShimGateWaitSecondsForTest = 0
 )
 
 Set-StrictMode -Version Latest
@@ -35,6 +39,12 @@ $testSeamActive = -not [string]::IsNullOrWhiteSpace($StateRootForTest) -or
     -not [string]::IsNullOrWhiteSpace($ShimPathForTest) -or
     -not [string]::IsNullOrWhiteSpace($ProjectRootForTest) -or
     -not [string]::IsNullOrWhiteSpace($MutexNameForTest)
+
+# #93：等锁覆盖只在测试 seam 生效时可用；生产调用路径（不带测试 seam）传它们直接拒绝，
+# 且拒绝发生在任何 I/O（状态根创建、取锁）之前。
+if (-not $testSeamActive -and ($GateWaitSecondsForTest -ne 0 -or $InstalledShimGateWaitSecondsForTest -ne 0)) {
+    throw 'GateWaitSecondsForTest 与 InstalledShimGateWaitSecondsForTest 只在测试 seam 生效时可用。'
+}
 
 $stateRoot = if (-not [string]::IsNullOrWhiteSpace($StateRootForTest)) { $StateRootForTest } else { $productionStateRoot }
 $shimPath = if (-not [string]::IsNullOrWhiteSpace($ShimPathForTest)) { $ShimPathForTest } else { $productionShimPath }
@@ -237,6 +247,16 @@ function Get-GateShimContent {
     $content = $content.Replace(
         "'Global\CodexSafeTreeDeleteDeployment'",
         ('''' + $mutexName + ''''))
+    if ($InstalledShimGateWaitSecondsForTest -gt 0) {
+        # #93：测试 seam 安装时把 shim 的生产等锁上限重写为测试秒数；字面量必须恰好一处，
+        # 否则说明 shim 源漂移，失败闭锁而不是静默跳过。
+        $productionShimWait = '[TimeSpan]::FromMinutes(2)'
+        $waitLiteralCount = [regex]::Matches($content, [regex]::Escape($productionShimWait)).Count
+        if ($waitLiteralCount -ne 1) {
+            throw "gate shim 必须恰好含一处生产等锁时长字面量（实际 $waitLiteralCount 处），拒绝安装。"
+        }
+        $content = $content.Replace($productionShimWait, ('[TimeSpan]::FromSeconds({0})' -f $InstalledShimGateWaitSecondsForTest))
+    }
     return [Text.UTF8Encoding]::new($false).GetBytes($content)}
 
 function Invoke-ShimCutover {
@@ -310,6 +330,8 @@ function Get-LegacyInventory {
     # 按 executable+PID+starttime+commandline 枚举可能经旧 wrapper/repo entry 启动的
     # safe-delete/native-compile 进程；command line 不可读即失败闭锁。当前进程及其
     # 祖先链（部署工具/测试宿主）不属"旧版调用"，排除。
+    # #93：测试 seam 生效时只计命令行同时含本次 state root 的进程（fixture 部署不被
+    # 其他会话的受管调用阻塞）；生产不带测试 seam，仍全机枚举，行为不变。
     $all = @(Get-CimInstance Win32_Process)
     $byId = @{}
     foreach ($process in $all) { $byId[[int]$process.ProcessId] = $process }
@@ -331,6 +353,10 @@ function Get-LegacyInventory {
         if ([string]::IsNullOrWhiteSpace($commandLine)) { continue }
         if ($commandLine -cmatch 'invoke-safe-tree-delete' -or
             $commandLine -cmatch 'Invoke-CodexSafeTreeDelete') {
+            if ($testSeamActive -and
+                $commandLine.IndexOf([string]$stateRoot, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                continue
+            }
             $rows += [pscustomobject]@{
                 executable = [string]$process.ExecutablePath
                 processId = [int]$process.ProcessId
@@ -385,8 +411,14 @@ function Stop-IfRequested {
 
 # ---------------- main ----------------
 [void][IO.Directory]::CreateDirectory($stateRoot)
+# #93：等锁上限默认 5 分钟（生产不变）；GateWaitSecondsForTest 只在测试 seam 生效时可用。
+$gateWaitTimeout = if ($GateWaitSecondsForTest -gt 0) {
+    [TimeSpan]::FromSeconds($GateWaitSecondsForTest)
+} else {
+    [TimeSpan]::FromMinutes(5)
+}
 $mutex = Open-DeploymentMutex -Name (Get-DeploymentMutexName -BaseName $mutexName)
-if (-not $mutex.WaitOne([TimeSpan]::FromMinutes(5))) {
+if (-not $mutex.WaitOne($gateWaitTimeout)) {
     # #77：超时消息前缀不变，追加持锁者（ASCII JSON；读不到时为 {"state":"unknown"}）。
     throw ('deployment mutex acquire timeout。holder={0}' -f (
         (Read-CodexSafeTreeDeleteGateHolder -StateRoot $stateRoot) |
