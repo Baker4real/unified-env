@@ -425,6 +425,7 @@
           "tests/Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
           "tests/Test-CodexSafeTreeDeletePlanWalkerEquivalence.ps1",
           "tests/Test-CodexSafeTreeDeleteNativeLoading.ps1",
+          "tests/Test-CodexSafeTreeDeleteNativePublishRace.ps1",
           "tests/Test-CodexSafeTreeDeleteRestore.ps1",
           "tests/Test-CodexSafeTreeDeleteArchiveBatch.ps1",
           "tests/Test-CodexSafeTreeDeleteRetiredEvidenceRoot.ps1",
