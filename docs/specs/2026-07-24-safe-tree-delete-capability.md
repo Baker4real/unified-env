@@ -259,6 +259,14 @@ preflight 看不到的两处只列出、不阻止：
    `BatchPurge` 单次历史扫描的前提相同。fast scan 开或关都执行同一预筛；现有 kill switch（fast
    scan、tree fast、parallel fallback）照常生效，且不改变范围结果。
 
+   异常 JSON 等价（#90）：fast scan 只对能证明参考路径必然成功的文档做裁决。裁决前先过两道门：
+   严格 JSON 词法校验（拒绝尾逗号与注释，两侧错误文本统一为 `严格 JSON 词法校验失败：` 加内层
+   `JsonException` 消息，不经 PowerShell 方法调用包装）与 `ConvertFrom-Json` 兼容门（空属性名、
+   同一对象内只差大小写的重名、`psbase`/`psadapted`/`psextended`/`psobject`/`pstypenames` 保留名、
+   超出 Int64/UInt64 范围的整数字面量一律回退参考路径，由 PowerShell 侧裁决）。兼容门作用于 fast
+   scan 的全部裁决点：被拒 plan 结论、被拒 plan 后的观测 transaction、approved terminal 判定与
+   approved 缺 transaction 判定；归档路径的所有异常本来就把该记录回退参考路径，不另设门。
+
 2. `Archive`：要求 `ConfirmArchive`、精确 transaction path 与 approved SHA-256，只为同时满足
    `status=purged`、quarantine 当前不存在、`restoreJournalAnchors` 为空的历史 transaction，在其
    operation run 内发布固定的 create-only `terminal-archive.json`。任一判据不满足时，以稳定原因

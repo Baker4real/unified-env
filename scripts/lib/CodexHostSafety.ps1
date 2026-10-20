@@ -39,7 +39,9 @@ function Assert-CodexHookStrictJsonText {
     try {
         $document = [System.Text.Json.JsonDocument]::Parse($JsonText, $options)
     } catch {
-        throw "严格 JSON 词法校验失败：$($_.Exception.Message)"
+        # #90：PS 调静态方法的异常是 MethodInvocationException 包装；与 native Status fast
+        # scan 的同名检查输出同一内层 JsonException 消息，两侧逐字节一致。
+        throw "严格 JSON 词法校验失败：$((Get-CodexHookInnermostException -Exception $_.Exception).Message)"
     }
 
     try {
