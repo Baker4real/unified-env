@@ -122,13 +122,13 @@ class BrowserProbeTests(unittest.TestCase):
     def test_network_addresses_are_classified_and_timeout_cannot_pass(self):
         attempt = self.start()
         value = payload(attempt)
-        value['probes'][1]['candidates'] = [{'type': 'srflx', 'address': '203.0.113.42', 'relatedAddress': '192.168.1.23'}]
+        value['probes'][1]['candidates'] = [{'type': 'srflx', 'address': '203.0.113.42', 'relatedAddress': '192.0.2.23'}]
         self.post(value)
         failed = self.cli('status', expected=1)
         self.assertFalse(failed['webrtcNoCandidates'])
         saved = Path(failed['evidence']).read_text(encoding='utf-8')
         self.assertNotIn('203.0.113.42', saved)
-        self.assertNotIn('192.168.1.23', saved)
+        self.assertNotIn('192.0.2.23', saved)
         attempt = self.cli('prepare')
         value = payload(attempt)
         value['probes'][0].update(completed=False, stopReason='timeout')

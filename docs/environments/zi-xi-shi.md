@@ -64,7 +64,7 @@ intent: 记录自习室设备的受控环境事实与差异
 - 9-07 的 bak/ACL 防复发全程正常（当轮 bin 4.40.1.2090 与 bak 哈希一致、任务每小时跑通），本次失败是**新根因**：该机用户级环境变量 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY=http://127.0.0.1:10808` 持久指向 v2rayN，而 v2rayN（7.24.8，`D:\下载\v2rayN-windows-64-SelfContained\v2rayN-windows-64-SelfContained\v2rayN.exe`）平时不自启动；UU 升级器拉起的 `aria2c` 读这些环境变量，代理端口没人监听时下载安装包失败（aria2 走代理超时，`UUREMOTE_SETUP_*` Prefetch 不出现）。2026-09-18 两次、09-24 14:49 一次失败均为此模式；09-24 用户手动打开 v2rayN 后立即更新成功（4.40.1.2090 → 4.42.0.2770，14:58 装入）。
 - 实测排除的方案：aria2 1.23.0 的环境变量 `no_proxy` **只做精确主机名匹配**（写 `netease.com` 后缀不生效，写精确主机名才绕过代理；对照实验在本证据目录），UU 下载 CDN 节点主机名不固定，白名单不可行。删除用户代理环境变量会破坏用户终端代理习惯，未采用。
 - 防复发（2026-09-24）：计划任务 `Codex v2rayN Autostart`——`baker\14224` 登录触发、延迟 90 秒（PT1M30S）、Interactive + Highest（wintun/TUN 需管理员）、无执行时限（PT0S，GUI 常驻不被 72h 限制杀）、`IgnoreNew` 防多实例。开机即拉起 v2rayN，10808 常活，aria2c 走代理稳定成功。不改任何用户环境变量与 v2rayN 配置。回滚：删除该计划任务。
-- 边缘事实：v2rayN 运行中（vgate0 TUN 网卡存在）时，aria2c 直连分支的 c-ares DNS 会报 "Could not contact DNS servers"（系统 resolver 正常，nslookup 经 192.168.1.1 全通）——在该机上做 aria2 直连类实验须避开 TUN 干扰。
+- 边缘事实：v2rayN 运行中（vgate0 TUN 网卡存在）时，aria2c 直连分支的 c-ares DNS 会报 "Could not contact DNS servers"（系统 resolver 正常，nslookup 经局域网 DNS 服务器全通）——在该机上做 aria2 直连类实验须避开 TUN 干扰。
 - 仍有效的自救路径：更新失败时手动打开 v2rayN 再点一次「检查更新」（两次实证）。bak 对齐当轮已收敛到 4.42.0.2770。
 - 证据：`D:\agents\run-evidence\uu-remote-update\20260924T065633Z\`（诊断 JSON、aria2 对照实验、任务注册回读）。
 - 版本、进程、任务状态属易变事实；操作前复核 `bin`/`bak` 文件版本、SHA-256 与 Users 是否仍有 `Modify`。
