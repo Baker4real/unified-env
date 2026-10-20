@@ -12,7 +12,10 @@ Set-StrictMode -Version Latest
 #   读取/散列/编译之前判定：env=0 选 base source 集（不含 PlanSnapshot），默认选 base+PlanSnapshot。
 # - cache 为不可变内容寻址 generation：<productionRoot>/<variant>/<compileCompositeSha>/，
 #   composite 绑定 variant、有序 source SHA、loader contract version、PowerShell/.NET identity
-#   与编译选项；任一变化产生新 generation。发布用 no-replace rename，不覆盖已认证 generation。
+#   与编译选项；任一变化产生新 generation。#87：整个 generation 在唯一 staging 目录内完成
+#   编译与最终布局后，一次 no-replace 目录改名发布（不再用固定临时文件名分两次 Move）；
+#   并发输家只复验赢家、绝不动赢家文件。校验失败/不完整的 generation 经严格形状核验后
+#   原子改名隔离并尽力删除（自愈），形状不符一律失败闭锁、报可操作错误。
 # - 源文件以 FileShare.Read（deny write/delete）句柄读取同一句柄字节，staging 完成前保持租约；
 #   编译子进程只读 staging 副本。加载一律 Assembly.Load(byte[])（verify 后不按 path 重开）。
 # - 进程 registry：{loadedVariant, compileCompositeSha, assemblySha256, assembly, requestedAlgorithm}。
@@ -171,29 +174,66 @@ function Write-CodexHostSafetyNativeStagingCopy {
 }
 
 function Publish-CodexHostSafetyNativeGeneration {
+    # #87 原子发布：staging 目录已是最终布局的完整 generation，一次 no-replace 目录改名到位。
+    # 目标已存在（并发赢家）时改名失败返回 $false，调用方只复验赢家、绝不动赢家文件；
+    # 目标不存在的其它 IO 失败照常抛出。
     param(
-        [Parameter(Mandatory)][string]$GenerationDirectory,
-        [Parameter(Mandatory)][string]$DllPath,
-        [Parameter(Mandatory)][string]$ManifestPath
+        [Parameter(Mandatory)][string]$StagingDirectory,
+        [Parameter(Mandatory)][string]$GenerationDirectory
     )
 
-    [void][IO.Directory]::CreateDirectory($GenerationDirectory)
-    $publishedDll = Join-Path $GenerationDirectory 'CodexHostSafetyNative.dll'
-    $publishedManifest = Join-Path $GenerationDirectory 'generation-manifest.json'
-    $dllTemp = Join-Path $GenerationDirectory 'CodexHostSafetyNative.dll.tmp'
-    $manifestTemp = Join-Path $GenerationDirectory 'generation-manifest.json.tmp'
-    [IO.File]::WriteAllBytes($dllTemp, [IO.File]::ReadAllBytes($DllPath))
-    [IO.File]::WriteAllText($manifestTemp, [IO.File]::ReadAllText($ManifestPath, [Text.UTF8Encoding]::new($false)), [Text.UTF8Encoding]::new($false))
     try {
-        [IO.File]::Move($dllTemp, $publishedDll)
-        [IO.File]::Move($manifestTemp, $publishedManifest)
+        [IO.Directory]::Move($StagingDirectory, $GenerationDirectory)
+        return $true
     } catch {
-        foreach ($temp in @($dllTemp, $manifestTemp)) {
-            if ([IO.File]::Exists($temp)) { [void][IO.File]::Delete($temp) }
+        if ([IO.Directory]::Exists($GenerationDirectory)) { return $false }
+        throw
+    }
+}
+
+function Repair-CodexHostSafetyNativeBrokenGeneration {
+    # #87 自愈：校验失败/不完整的 generation 不再每次重编译再失败。先严格核验目录形状
+    # （只含 loader 产物、无子目录、无 reparse），再原子改名到同父 quarantine 让位给重新发布，
+    # 最后尽力删除隔离副本；形状不符或让位失败一律失败闭锁并给出可操作错误。
+    param(
+        [Parameter(Mandatory)][string]$GenerationDirectory,
+        [Parameter(Mandatory)][string]$ExpectedCompositeSha256
+    )
+
+    if ([IO.Path]::GetFileName($GenerationDirectory) -cne $ExpectedCompositeSha256) {
+        throw "native generation 自愈目标与 compile composite 不符，拒绝：$GenerationDirectory"
+    }
+    if (-not [IO.Directory]::Exists($GenerationDirectory)) { return }
+    Assert-CodexHostSafetyNativeNormalDirectory -Path $GenerationDirectory -Scope 'native broken generation'
+    $allowedNames = @(
+        'CodexHostSafetyNative.dll',
+        'generation-manifest.json',
+        'CodexHostSafetyNative.dll.tmp',
+        'generation-manifest.json.tmp'
+    )
+    $unexpected = [Collections.Generic.List[string]]::new()
+    foreach ($entry in [IO.Directory]::GetFileSystemEntries($GenerationDirectory)) {
+        $name = [IO.Path]::GetFileName($entry)
+        $isFile = [IO.File]::Exists($entry)
+        $isReparse = (([IO.File]::GetAttributes($entry) -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+        if (-not $isFile -or $isReparse -or $name -cnotin $allowedNames) {
+            $unexpected.Add($name)
         }
-        if (-not ([IO.File]::Exists($publishedDll) -and [IO.File]::Exists($publishedManifest))) {
-            throw
-        }
+    }
+    if ($unexpected.Count -gt 0) {
+        throw "native generation 校验失败且包含非 loader 产物，拒绝自愈：$GenerationDirectory（意外条目：$($unexpected -join ', ')）。请人工核查并移走该目录后重试。"
+    }
+    $quarantineDirectory = Join-Path (Split-Path -Parent $GenerationDirectory) ('quarantine-{0}' -f ([IO.Path]::GetRandomFileName()))
+    try {
+        [IO.Directory]::Move($GenerationDirectory, $quarantineDirectory)
+    } catch {
+        if (-not [IO.Directory]::Exists($GenerationDirectory)) { return }
+        throw "无法隔离校验失败的 native generation（可能被占用）：$GenerationDirectory。请关闭占用进程并人工移走该目录后重试。原始错误：$($_.Exception.Message)"
+    }
+    try {
+        [IO.Directory]::Delete($quarantineDirectory, $true)
+    } catch {
+        # 隔离副本已离开规范 generation 路径，删除失败不阻塞加载。
     }
 }
 
@@ -207,13 +247,18 @@ function Test-CodexHostSafetyNativeGenerationValid {
     $manifestPath = Join-Path $GenerationDirectory 'generation-manifest.json'
     $dllPath = Join-Path $GenerationDirectory 'CodexHostSafetyNative.dll'
     if (-not ([IO.File]::Exists($manifestPath) -and [IO.File]::Exists($dllPath))) { return $false }
-    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json -Depth 16
-    if ([string]$manifest.variant -cne $ExpectedVariant -or
-        [string]$manifest.compileCompositeSha256 -cne $ExpectedCompositeSha256) {
+    try {
+        $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json -Depth 16
+        if ([string]$manifest.variant -cne $ExpectedVariant -or
+            [string]$manifest.compileCompositeSha256 -cne $ExpectedCompositeSha256) {
+            return $false
+        }
+        $actualDllSha = Get-CodexHostSafetyNativeFileSha256Hex -Path $dllPath
+        return ([string]$manifest.dllSha256 -ceq $actualDllSha)
+    } catch {
+        # 损坏/半写的 manifest 或 DLL 一律视为无效 generation，交调用方自愈。
         return $false
     }
-    $actualDllSha = Get-CodexHostSafetyNativeFileSha256Hex -Path $dllPath
-    return ([string]$manifest.dllSha256 -ceq $actualDllSha)
 }
 
 function Invoke-CodexHostSafetyNativeCompileGeneration {
@@ -226,90 +271,105 @@ function Invoke-CodexHostSafetyNativeCompileGeneration {
     $compositeSha = Get-CodexHostSafetyNativeCompileCompositeSha256 -Sources $Sources -Variant $Variant
     $variantRoot = Join-Path $ProductionRoot $Variant
     $generationDirectory = Join-Path $variantRoot $compositeSha
-    if (Test-CodexHostSafetyNativeGenerationValid `
-            -GenerationDirectory $generationDirectory `
-            -ExpectedCompositeSha256 $compositeSha `
-            -ExpectedVariant $Variant) {
-        return [pscustomobject]@{
-            GenerationDirectory = $generationDirectory
-            CompileCompositeSha256 = $compositeSha
-            CompiledHere = $false
-        }
-    }
 
-    $stagingDirectory = Join-Path $variantRoot ('staging-{0}' -f ([IO.Path]::GetRandomFileName()))
-    [void][IO.Directory]::CreateDirectory($stagingDirectory)
+    $stagingDirectory = $null
     $reads = $null
-    $stagedPaths = [Collections.Generic.List[string]]::new()
+    $compiledHere = $false
+    $repairs = 0
     try {
-        # deny-write 租约读取 + staging 副本；编译只读 staging。
-        $reads = Read-CodexHostSafetyNativeSourceBytesUnderLease -Sources $Sources
-        foreach ($read in $reads) {
-            $stagedPaths.Add((Write-CodexHostSafetyNativeStagingCopy -Read $read -StagingDirectory $stagingDirectory))
-        }
-        foreach ($read in $reads) { $read.Stream.Dispose() }
-        $reads = $null
+        while ($true) {
+            if ([IO.Directory]::Exists($generationDirectory)) {
+                Assert-CodexHostSafetyNativeNormalDirectory -Path $generationDirectory -Scope 'native generation'
+                if (Test-CodexHostSafetyNativeGenerationValid `
+                        -GenerationDirectory $generationDirectory `
+                        -ExpectedCompositeSha256 $compositeSha `
+                        -ExpectedVariant $Variant) {
+                    return [pscustomobject]@{
+                        GenerationDirectory = $generationDirectory
+                        CompileCompositeSha256 = $compositeSha
+                        CompiledHere = $compiledHere
+                    }
+                }
+                # 校验失败/不完整的 generation（含旧实现的并发事故残留）：自愈让位后重发。
+                if ($repairs -ge 2) {
+                    throw "native generation 连续自愈后仍校验失败：$generationDirectory。请人工移走该目录后重试。"
+                }
+                Repair-CodexHostSafetyNativeBrokenGeneration `
+                    -GenerationDirectory $generationDirectory `
+                    -ExpectedCompositeSha256 $compositeSha
+                $repairs++
+                continue
+            }
 
-        $outputDll = Join-Path $stagingDirectory 'output.dll'
-        Add-Type -Path ([string[]]$stagedPaths.ToArray()) `
-            -OutputAssembly $outputDll `
-            -OutputType Library `
-            -ErrorAction Stop
-        $manifest = [pscustomobject][ordered]@{
-            schemaVersion = 1
-            variant = $Variant
-            compileCompositeSha256 = $compositeSha
-            contractVersion = $global:CodexHostSafetyNativeLoaderContractVersion
-            identity = [pscustomobject][ordered]@{}
-            dllSha256 = (Get-CodexHostSafetyNativeFileSha256Hex -Path $outputDll)
-            sources = @()
-        }
-        $identityTable = [ordered]@{}
-        foreach ($identityPart in (Get-CodexHostSafetyNativeCompileIdentityParts)) {
-            $key, $value = $identityPart -split '=', 2
-            $identityTable[$key] = $value
-        }
-        $manifest.identity = $identityTable
-        $sourceRows = [Collections.Generic.List[object]]::new()
-        foreach ($source in $Sources) {
-            $sourceRows.Add([pscustomobject][ordered]@{
-                fileName = [IO.Path]::GetFileName($source)
-                sha256 = (Get-CodexHostSafetyNativeFileSha256Hex -Path $source)
-            })
-        }
-        $manifest.sources = @($sourceRows)
-        $manifestPath = Join-Path $stagingDirectory 'generation-manifest.json'
-        [IO.File]::WriteAllText(
-            $manifestPath,
-            ($manifest | ConvertTo-Json -Depth 8),
-            [Text.UTF8Encoding]::new($false))
+            if (-not $compiledHere) {
+                $stagingDirectory = Join-Path $variantRoot ('staging-{0}' -f ([IO.Path]::GetRandomFileName()))
+                [void][IO.Directory]::CreateDirectory($stagingDirectory)
+                $stagedPaths = [Collections.Generic.List[string]]::new()
+                # deny-write 租约读取 + staging 副本；编译只读 staging。
+                $reads = Read-CodexHostSafetyNativeSourceBytesUnderLease -Sources $Sources
+                foreach ($read in $reads) {
+                    $stagedPaths.Add((Write-CodexHostSafetyNativeStagingCopy -Read $read -StagingDirectory $stagingDirectory))
+                }
+                foreach ($read in $reads) { $read.Stream.Dispose() }
+                $reads = $null
 
-        # 全链 no-reparse 验证（root→variant→generation）后 no-replace 发布。
-        Assert-CodexHostSafetyNativeNormalDirectory -Path $ProductionRoot -Scope 'native production root'
-        Assert-CodexHostSafetyNativeNormalDirectory -Path $variantRoot -Scope 'native variant root'
-        Publish-CodexHostSafetyNativeGeneration `
-            -GenerationDirectory $generationDirectory `
-            -DllPath $outputDll `
-            -ManifestPath $manifestPath
-        Assert-CodexHostSafetyNativeNormalDirectory -Path $generationDirectory -Scope 'native generation'
-        Assert-CodexHostSafetyNativeNormalFile -Path (Join-Path $generationDirectory 'CodexHostSafetyNative.dll') -Scope 'native generation dll'
-        Assert-CodexHostSafetyNativeNormalFile -Path (Join-Path $generationDirectory 'generation-manifest.json') -Scope 'native generation manifest'
-        if (-not (Test-CodexHostSafetyNativeGenerationValid `
-                -GenerationDirectory $generationDirectory `
-                -ExpectedCompositeSha256 $compositeSha `
-                -ExpectedVariant $Variant)) {
-            throw 'native generation 发布后校验失败（并发 winner 不匹配）。'
-        }
-        return [pscustomobject]@{
-            GenerationDirectory = $generationDirectory
-            CompileCompositeSha256 = $compositeSha
-            CompiledHere = $true
+                $outputDll = Join-Path $stagingDirectory 'output.dll'
+                Add-Type -Path ([string[]]$stagedPaths.ToArray()) `
+                    -OutputAssembly $outputDll `
+                    -OutputType Library `
+                    -ErrorAction Stop
+                $manifest = [pscustomobject][ordered]@{
+                    schemaVersion = 1
+                    variant = $Variant
+                    compileCompositeSha256 = $compositeSha
+                    contractVersion = $global:CodexHostSafetyNativeLoaderContractVersion
+                    identity = [pscustomobject][ordered]@{}
+                    dllSha256 = (Get-CodexHostSafetyNativeFileSha256Hex -Path $outputDll)
+                    sources = @()
+                }
+                $identityTable = [ordered]@{}
+                foreach ($identityPart in (Get-CodexHostSafetyNativeCompileIdentityParts)) {
+                    $key, $value = $identityPart -split '=', 2
+                    $identityTable[$key] = $value
+                }
+                $manifest.identity = $identityTable
+                $sourceRows = [Collections.Generic.List[object]]::new()
+                foreach ($source in $Sources) {
+                    $sourceRows.Add([pscustomobject][ordered]@{
+                        fileName = [IO.Path]::GetFileName($source)
+                        sha256 = (Get-CodexHostSafetyNativeFileSha256Hex -Path $source)
+                    })
+                }
+                $manifest.sources = @($sourceRows)
+                [IO.File]::WriteAllText(
+                    (Join-Path $stagingDirectory 'generation-manifest.json'),
+                    ($manifest | ConvertTo-Json -Depth 8),
+                    [Text.UTF8Encoding]::new($false))
+
+                # 整形成最终发布布局：移除 source 副本、DLL 改发布名，staging 即完整 generation。
+                foreach ($stagedPath in $stagedPaths) { [void][IO.File]::Delete($stagedPath) }
+                [IO.File]::Move($outputDll, (Join-Path $stagingDirectory 'CodexHostSafetyNative.dll'))
+                $compiledHere = $true
+            }
+
+            # 全链 no-reparse 验证（root→variant）后原子发布；并发输家回到循环头部复验赢家。
+            Assert-CodexHostSafetyNativeNormalDirectory -Path $ProductionRoot -Scope 'native production root'
+            Assert-CodexHostSafetyNativeNormalDirectory -Path $variantRoot -Scope 'native variant root'
+            $won = Publish-CodexHostSafetyNativeGeneration `
+                -StagingDirectory $stagingDirectory `
+                -GenerationDirectory $generationDirectory
+            if ($won) {
+                $stagingDirectory = $null
+                Assert-CodexHostSafetyNativeNormalDirectory -Path $generationDirectory -Scope 'native generation'
+                Assert-CodexHostSafetyNativeNormalFile -Path (Join-Path $generationDirectory 'CodexHostSafetyNative.dll') -Scope 'native generation dll'
+                Assert-CodexHostSafetyNativeNormalFile -Path (Join-Path $generationDirectory 'generation-manifest.json') -Scope 'native generation manifest'
+            }
         }
     } finally {
         if ($null -ne $reads) {
             foreach ($read in $reads) { $read.Stream.Dispose() }
         }
-        if ([IO.Directory]::Exists($stagingDirectory)) {
+        if ($null -ne $stagingDirectory -and [IO.Directory]::Exists($stagingDirectory)) {
             [void][IO.Directory]::Delete($stagingDirectory, $true)
         }
     }
