@@ -81,9 +81,9 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 ### v2rayN 定时维护（2026-10-19 起）
 
 - 脚本在 `D:\Codex\.codex\tools\office-v2rayn\`：`V2rayNOps.ps1`（公共函数）、`v2rayn_db.py`（SQLite 与配置读写，不输出订阅链接）、`Update-V2rayN.ps1`、`Update-V2rayNSubscription.ps1`、`Enable-OpenAIGroup.ps1`（一次性启用 OpenAI 组，可重跑）和 `openai-filter.txt`。三个任务都是 Administrator、Interactive、Highest：只在管理员已登录时运行，与 v2rayN 同会话。
-- `Codex Office v2rayN Daily Update` 每天 02:00 运行。它查询 GitHub 最新稳定版，按发布摘要校验 `v2rayN-windows-64.zip` 的 SHA-256。和 AmazTool 一样，已存在的 `bin` 文件保持不动；例外是安装包自带的 xray 或 sing-box 比现有版本新时，整个对应核心目录会被替换。安装后检查 10808 代理，失败则回滚程序文件和配置。首次运行在 2026-10-19 23:09–23:10，从 7.24.9 升到 7.25.6，停机约 11 秒。
-- `Codex Office v2rayN Subscription Refresh` 每天 03:00 运行。它把新界订阅的 `UpdateTime` 置 0，由 v2rayN 自己的每分钟调度执行更新；成功后 v2rayN 会重载核心。代理检查不通过时，恢复更新前的数据库与配置。2026-10-19 23:15 试跑成功：仍为 120 条、72 个成员，`LastTaskResult=0`。
-- 维护期间会暂停 `Codex Office Proxy FailSafe`，避免它在 10808 短暂断开时清掉系统代理；结束后再恢复。三个脚本共用 `D:\Codex\.codex\cache\office-v2rayn-update\maint.lock` 互斥。
+- `Codex Office v2rayN Daily Update` 每天 02:00 运行。它查询 GitHub 最新稳定版，按发布摘要校验 `v2rayN-windows-64.zip` 的 SHA-256。和 AmazTool 一样，已存在的 `bin` 文件保持不动；例外是安装包自带的 xray 或 sing-box 比现有版本新时，整个对应核心目录会被替换。安装后检查 10808 代理，失败则回滚程序文件和配置。首次运行在 2026-10-19 23:09–23:10，从 7.24.9 升到 7.25.6，停机约 11 秒。2026-10-20 02:00 第一次无人值守运行：已是最新版，没有安装，约 2 秒结束，`LastTaskResult=0`。
+- `Codex Office v2rayN Subscription Refresh` 每天 03:00 运行。它把新界订阅的 `UpdateTime` 置 0，由 v2rayN 自己的每分钟调度执行更新；成功后 v2rayN 会重载核心。代理检查不通过时，恢复更新前的数据库与配置。2026-10-19 23:15 试跑成功：仍为 120 条、72 个成员，`LastTaskResult=0`。2026-10-20 03:00 第一次无人值守运行成功：仍为 120 条，核心配置重写并重载，前后代理检查都通过。OpenAI 组随订阅变为 71 个成员，少掉的 `Japan D01` 被订阅标成“将在 10-25 恢复”，按正则排除。
+- 维护期间会暂停 `Codex Office Proxy FailSafe`，避免它在 10808 短暂断开时清掉系统代理；结束后再恢复。三个脚本共用 `D:\Codex\.codex\cache\office-v2rayn-update\maint.lock` 互斥。加锁靠持有文件句柄，文件会一直留着，文件存在不代表锁被占用。
 - 日志与每类任务的最新摘要（`*-last.json`）在 `D:\agents\run-evidence\office-v2rayn-maint\`，超过 90 天的日志会被删除。下载包和回滚备份在 `D:\Codex\.codex\cache\office-v2rayn-update\`，程序备份保留 2 份，订阅更新前的数据库备份保留 7 份。
 
 ### 2026-10-19 断线根因
@@ -129,4 +129,5 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - Windows 版本、更新扫描、许可证、磁盘、Codex 记忆、CC Switch、v2rayN `AutoHideStartup`、UU 的 HKCU Run：2026-07-28 现场，本次未复核。
 - sshd / Tailscale / GameViewerService、v2rayN / xray / 10808、DNS、Tailscale 服务代理环境变量、计划任务、当前中转节点与 socks 验收：2026-08-22 01:23 从家里经正式 SSH 只读复核。
 - v2rayN 版本与核心、新界订阅、OpenAI 组成员与探测、02:00/03:00 任务、系统代理（`ProxyEnable=1`，`127.0.0.1:10808`）、Machine 级 `HTTP(S)_PROXY`、Tailscale `Running online=True`：2026-10-19 23:17 从家里经正式 SSH 回读。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261019\`。
+- 02:00/03:00 两个任务的第一次无人值守运行、管理员控制台会话（10-14 起在线）、程序版本与 10808：2026-10-20 09:38 从家里经正式 SSH 回读。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261019\followup-20261020\`。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
