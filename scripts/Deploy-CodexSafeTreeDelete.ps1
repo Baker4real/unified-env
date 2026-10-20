@@ -11,8 +11,8 @@ param(
     [int]$StopAfterPhaseForTest = 0,
     # #93：等锁时长测试覆盖。只在上述测试 seam 生效时可用；缺省保持生产默认
     # （部署工具 5 分钟、安装的 gate shim 2 分钟）。
-    [int]$GateWaitSecondsForTest = 0,
-    [int]$InstalledShimGateWaitSecondsForTest = 0
+    [ValidateRange(0, [int]::MaxValue)][int]$GateWaitSecondsForTest = 0,
+    [ValidateRange(0, [int]::MaxValue)][int]$InstalledShimGateWaitSecondsForTest = 0
 )
 
 Set-StrictMode -Version Latest

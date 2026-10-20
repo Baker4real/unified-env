@@ -178,6 +178,9 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# 子进程的 Console.Out/Error 默认按系统 ANSI 代码页写；父进程按 UTF-8 解码重定向流。
+# 固定为 UTF-8，否则仓库路径含非 ASCII 字符时错误文本中的路径会被误读（评审 finding）。
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 . $LoaderPath
 if (-not [string]::IsNullOrEmpty($BarrierPath)) {
     $deadline = [DateTime]::UtcNow.AddMinutes(5)
