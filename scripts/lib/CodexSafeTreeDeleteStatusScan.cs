@@ -997,6 +997,15 @@ namespace CodexSafeTreeDelete
                 {
                     throw new StatusScanFallbackException("plan-shape-non-canonical");
                 }
+                // issue #90: the reference path materializes the document through
+                // ConvertFrom-Json before any approval decision, so inputs it rejects
+                // (empty property names, case-only duplicate names, reserved PSObject
+                // member names, out-of-range integers) must fall back instead of being
+                // decided here.
+                if (!IsConvertFromJsonCompatible(plan))
+                {
+                    throw new StatusScanFallbackException("plan-convertfromjson-incompatible");
+                }
                 long planSchemaVersion;
                 if (!TryGetInt64(plan, "schemaVersion", out planSchemaVersion))
                 {
@@ -1120,6 +1129,13 @@ namespace CodexSafeTreeDelete
                 {
                     JsonElement transaction = transactionDocument.RootElement;
                     if (transaction.ValueKind != JsonValueKind.Object)
+                    {
+                        return false;
+                    }
+                    // issue #90: same ConvertFrom-Json compatibility gate as the rejected
+                    // flow; a terminal decision must never skip a failure the reference
+                    // transaction read would raise on nested content.
+                    if (!IsConvertFromJsonCompatible(transaction))
                     {
                         return false;
                     }
@@ -1396,6 +1412,13 @@ namespace CodexSafeTreeDelete
                 if (transaction.ValueKind != JsonValueKind.Object)
                 {
                     throw new StatusScanFallbackException("transaction-not-object");
+                }
+                // issue #90: same ConvertFrom-Json compatibility gate as the approved
+                // terminal flow; the reference observed-transaction read would fail here,
+                // so the rejected-plan outcome must not be decided on this document.
+                if (!IsConvertFromJsonCompatible(transaction))
+                {
+                    throw new StatusScanFallbackException("transaction-convertfromjson-incompatible");
                 }
                 long parsedTransactionSchemaVersion;
                 if (!TryGetInt64(transaction, "schemaVersion", out parsedTransactionSchemaVersion))
