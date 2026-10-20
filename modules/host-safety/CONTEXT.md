@@ -62,6 +62,7 @@ node .\scripts\Run-PowerShellTests.cjs --module host-safety --list
 - Phase3 leftover 根是 `D:\agents\run-evidence\safe-tree-delete`：目录存在则 `leftoverGuardMode=production-host` 并执行三断言；不存在则记名 skip `absent-environment`。
 - #75 真实历史档位 `Measure-CodexSafeTreeDeleteHistory.ps1 -RealHistory` 默认只读生产 evidence，并经生产 gate shim 跑 Status，只在与用户确认的安静窗口手动运行。`GITHUB_ACTIONS`/`CI` 为 `true` 时记名 skip `ci-environment`，evidence 根不存在时记名 skip `evidence-root-absent`；产物只写 `.scratch/safe-tree-delete-tests-real-history-*`。fixture 套件显式传入 fixture evidence 和替身 shim；新增测量项追加到脚本的 `$items` 列表。`library-load-cold-start`（#86）在新进程里用 `-ColdStartProbe -LibraryRoot` 加载 shim 委托的仓库 lib（按 shim 的 `$codexSafeTreeDeleteRepositoryEntry` 推出，所以替身 shim 也要给出这个变量），不持 gate、不读 evidence；它分三段计时（native generation、`CodexHostSafety.ps1`、`CodexSafeTreeDelete.ps1`），并把每个 C# 组件程序集归到加载它的那一段。#86 之前 Status fast scan 是 `CodexSafeTreeDelete.ps1` 段里单独加载的程序集，没有自己的加载耗时，前后只能按段比较。
 - 2026-10-13：host diagnostics（`tests/Test-HostDiagnostics.ps1`）不在 `fixture`，由 `diagnostics` profile 与独立 CI job `host-safety diagnostics` 运行，几分钟内出结果；本地回归 host-safety 时另跑 `--profile diagnostics`。
+- 2026-10-20（#93）：部署工具测试 seam 增加 `-GateWaitSecondsForTest` 与 `-InstalledShimGateWaitSecondsForTest`（等锁上限覆盖；生产默认 5/2 分钟与超时输出不变，缺其余测试 seam 时带它们直接拒绝），且测试 seam 生效时 legacy drain 只计命令行含本次 state root 的进程（生产仍全机枚举）。`Test-CodexSafeTreeDeleteDeployment.ps1` 的 S10 用秒级超时覆盖同一超时/holder 合同（不再真等 5 分钟与 2 分钟），S11 覆盖 drain 范围（外部带入口标记的进程不阻塞 fixture 部署、带 state root 标记的仍阻塞）。合同见 capability spec「部署门与维护窗口」。
 
 ## 依赖方向
 
