@@ -122,7 +122,7 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 
 - 正式远端操作使用严格 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。办公室 Tailscale 控制面依赖本机 v2rayN 的 10808，见上一节。
 - 不从本文推断当前 IP、密钥、host-key 或账号；这些均从调用端受控配置现场读取。
-- 设备级运行证据位于 `D:\Codex\.codex\run-evidence\office-win11-upgrade-20260728\`。关键终态包括 `updates\scan-final-01.json`、`cleanup\final-current-audit.json`、`cleanup\startup-memory-final-current.json`、`cleanup\backup-removal-verification.json` 与 `cleanup\volume-labels-unified.json`。
+- 设备级运行证据位于 `D:\agents\run-evidence\office-win11-upgrade-20260728\`。关键终态包括 `updates\scan-final-01.json`、`cleanup\final-current-audit.json`、`cleanup\startup-memory-final-current.json`、`cleanup\backup-removal-verification.json` 与 `cleanup\volume-labels-unified.json`。
 
 ## 事实审计
 

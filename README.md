@@ -117,9 +117,10 @@ node .\tests\Test-GitHubDefaultBranchSkillOverlay.cjs
 - 不跨项目复用项目本地依赖目录。
 - 不在 dirty repo 中更新依赖、锁文件或环境目录。
 - 输出和证据必须留在 D 盘允许路径。
+- 本仓库在 GitHub 上公开：`.githooks/pre-commit` 在提交前扫描暂存改动里的 Tailscale/RFC 1918 地址和个人邮箱，命中即拒绝提交（规则与 `managed/claude-hooks/claude-public-push-guard.mjs` 同源）；新克隆先运行 `git config core.hooksPath .githooks`。
 
 ## Git 分支策略
 
-- 本项目是独立私有治理仓库，不是第三方上游的本地补丁栈仓库。
+- 本项目是独立治理仓库，不是第三方上游的本地补丁栈仓库。
 - 不维护 `patch-stack/*` 远端分支；回滚和审计以 `main` 的普通 Git 历史、报告和证据目录为准。
 - 仓库名称不授予 `patch-stack/*` 发布权限；历史 refs 仅作审计，例外操作须按现行 Git 发布政策取得针对具体仓库和 ref 的明确授权。

@@ -1,0 +1,9 @@
+#!/bin/sh
+# 统一环境在 GitHub 上公开：提交前用 push guard 的 --staged 模式扫描暂存改动里的 Tailscale/RFC 1918 地址和个人邮箱，
+# 命中即拒绝提交。新克隆先运行 git config core.hooksPath .githooks。
+node "$(dirname "$0")/../managed/claude-hooks/claude-public-push-guard.mjs" --staged || exit
+
+# 只提醒、不拦：本仓库 AGENTS.md 是项目入口，不是全局规则的副本。
+if git diff --cached --name-only --diff-filter=ACMR | grep -qxF AGENTS.md; then
+  echo '检测到本仓库 AGENTS.md 变更。D:\Codex\.codex\AGENTS.md 是生成的加载文件，不由本仓库项目入口覆盖：共同规则编辑 D:\Codex\.codex\AGENTS.shared.md，宿主差异编辑对应 AGENTS.<host>.md 或 agents-sync/config.json；已授权的全局规则源改完后运行 D:\Codex\.codex\scripts\Manual-Sync-AgentsMd.ps1 -Mode Apply，再用 -Mode Check 核验。'
+fi
