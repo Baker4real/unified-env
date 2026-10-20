@@ -154,8 +154,9 @@ function hkcuDecision(command, cwd, io) {
 }
 
 // A double-dash flag followed by a bare token containing a comma: PowerShell turns a,b into two argv items.
-// Quoted values, variables ($x), subexpressions and splats are skipped.
-const UNQUOTED_COMMA_LIST = /(?:^|\s)(--[a-z][\w-]*)\s+(?!['"$@({])([^\s'"`]*,[^\s'"`]*)/i
+// Quoted values, variables ($x), subexpressions and splats are skipped. The value stops at a paren, so the array
+// comma between subexpressions, as in `-f (git ... --short HEAD), (...)`, is not part of it.
+const UNQUOTED_COMMA_LIST = /(?:^|\s)(--[a-z][\w-]*)\s+(?!['"$@({])([^\s'"`()]*,[^\s'"`]*)/i
 
 // git clone options that take a separate value, so the value is not mistaken for the source repository.
 const CLONE_VALUE_OPTIONS = new Set([
@@ -586,6 +587,7 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "gh issue list --json 'number,title'", false],
     ['PowerShell', 'gh issue list --json $fields', false],
     ['PowerShell', 'Select-Object Name,Length', false],
+    ['PowerShell', '"{0} {1}" -f (git -C a rev-parse --short HEAD), (git -C b rev-parse --short HEAD)', false],
     ['Bash', 'gh issue list --json number,title', false],
     ['Read', 'Remove-Item -Recurse x', false],
     ['Bash', 'git clone /d/agents/knowledge-base /d/Codex/temp/kb', true],
