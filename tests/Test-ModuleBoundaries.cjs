@@ -71,6 +71,21 @@ assert.match(
   'unowned files must fail closed',
 );
 
+const orphanTestManifest = structuredClone(manifest);
+const orphanTestHostSafety = orphanTestManifest.modules.find((entry) => entry.id === 'host-safety');
+const orphanTestPath = 'tests/Test-CodexSafeTreeDeleteNativeLoading.ps1';
+assert.ok(orphanTestHostSafety.ownership.files.includes(orphanTestPath));
+for (const profile of Object.values(orphanTestHostSafety.tests)) {
+  for (const kind of Object.keys(profile)) {
+    profile[kind] = profile[kind].filter((entry) => entry !== orphanTestPath);
+  }
+}
+assert.match(
+  validateManifest(orphanTestManifest, tree).join('\n'),
+  /owned test file is not in any test profile: tests\/Test-CodexSafeTreeDeleteNativeLoading\.ps1/i,
+  'an owned test file missing from every profile must fail closed',
+);
+
 function listPowerShellTests(...args) {
   const result = spawnSync(process.execPath, [POWERSHELL_RUNNER_PATH, ...args, '--list'], {
     cwd: PROJECT_ROOT,

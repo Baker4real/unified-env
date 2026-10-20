@@ -7,6 +7,7 @@ const { spawnSync } = require('node:child_process');
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const TEST_KINDS = Object.freeze(['powershell', 'python', 'node']);
 const CODE_FILE_PATTERN = /\.(?:cjs|cmd|cs|js|mjs|ps1|py)$/i;
+const OWNED_TEST_FILE_PATTERN = /(?:^|\/)tests\/Test-[^/]+\.(?:ps1|cjs|py)$/i;
 
 function normalizeRepositoryPath(value, label = 'path') {
   const normalized = String(value).replace(/\\/g, '/').replace(/^\.\//, '');
@@ -212,6 +213,24 @@ function validateOwnedPath(tree, owner, repositoryPath, role, errors) {
   }
 }
 
+// An owned `tests/Test-*` file that no profile lists never runs in standard
+// regression or CI: registration in ownership alone is invisible to runners.
+function validateOwnedTestsInProfiles(owner, errors) {
+  const profileTests = new Set(testPaths(owner));
+  for (const ownedPath of owner.ownership?.files || []) {
+    let normalized;
+    try {
+      normalized = normalizeRepositoryPath(ownedPath, `${owner.id} owned file`);
+    } catch {
+      continue;
+    }
+    if (!OWNED_TEST_FILE_PATTERN.test(normalized)) continue;
+    if (!profileTests.has(normalized)) {
+      errors.push(`${owner.id} owned test file is not in any test profile: ${normalized}`);
+    }
+  }
+}
+
 function validateDependencyGraph(modules, errors) {
   const ids = new Set(modules.map((entry) => entry.id));
   const graph = new Map();
@@ -303,6 +322,7 @@ function validateManifest(manifest, tree) {
     for (const ownedPath of owner.ownership?.files || []) {
       validateOwnedPath(tree, owner, ownedPath, 'owned file', errors);
     }
+    validateOwnedTestsInProfiles(owner, errors);
     for (const ownedPrefix of owner.ownership?.prefixes || []) {
       const normalized = normalizeRepositoryPath(
         String(ownedPrefix).replace(/\/$/, ''),
@@ -378,6 +398,7 @@ module.exports = {
   ownersForPath,
   validateCrossModuleCodeReferences,
   validateManifest,
+  validateOwnedTestsInProfiles,
   validateOwnership,
   validateRepository,
   workTree,
