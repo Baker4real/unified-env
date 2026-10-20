@@ -15,6 +15,10 @@
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
 // Private, internal and non-GitHub remotes, dry runs, deletions, pushes with nothing new and any internal error
 // allow the push (registration onFailure=continue, timeout 30 s).
+// With --staged it is instead the pre-commit scan of this public repository (.githooks/pre-commit): it scans the
+// added lines of the staged diff with the same rules, prints each value masked with its fingerprint and file:line,
+// and refuses the commit (exit 1) unless the COMMIT_PRIVACY_ACK environment variable lists every fingerprint or is
+// `all`; a `git diff --cached` that fails also refuses (exit 2).
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -30,6 +34,7 @@ const CHANGES_DIRECTORY = /^(?:cd|chdir|pushd|sl|set-location|push-location)$/i
 const PUSH_VALUE_OPTIONS = new Set(['-o', '--push-option', '--repo', '--receive-pack', '--exec'])
 const LOG_ARGS = ['-c', 'core.quotePath=false', 'log', '--no-merges', '-p', '-U0', '--no-color', '--no-ext-diff', '--no-textconv',
   '--format=%x00%H%n%ae%n%ce%n%B%x00']
+const STAGED_ARGS = ['-c', 'core.quotePath=false', 'diff', '--cached', '-p', '-U0', '--no-color', '--no-ext-diff', '--no-textconv']
 const BUDGET_MS = 22000 // leaves room for gh within the 30 s registration timeout
 const MAX_SHOWN = 10
 const EMAIL_KIND = '邮箱'
@@ -405,6 +410,49 @@ async function main() {
   }
 }
 
+// Pre-commit refusal text for the hits of a staged diff, or null when COMMIT_PRIVACY_ACK (fingerprints, or all)
+// acknowledges every value.
+export function stagedReport(hits, ackValue) {
+  const acknowledged = new Set(String(ackValue || '').toLowerCase().split(',').map(item => item.trim()).filter(Boolean))
+  if (acknowledged.has('all')) return null
+  const findings = summarize(hits, acknowledged)
+  if (!findings.length) return null
+  const lines = ['暂存的改动会把以下私密信息提交进公开仓库，提交已拒绝：']
+  for (const f of findings.slice(0, MAX_SHOWN)) {
+    lines.push(`- ${f.kind} ${mask(f.kind, f.value)}（fp=${fingerprint(f.value)}）：${f.where}` + (f.count > 1 ? `，共 ${f.count} 处` : ''))
+  }
+  if (findings.length > MAX_SHOWN) lines.push(`- 另有 ${findings.length - MAX_SHOWN} 个值未列出`)
+  lines.push('把它们换成带引号的占位符（如 <tailscale-ip>）或文档保留地址（192.0.2.x），重新 git add 后再提交。' +
+    '确实需要公开某个值时，先在对话里请用户确认，再只给这一次提交设环境变量 COMMIT_PRIVACY_ACK=<fp>[,<fp>...]。')
+  return lines.join('\n')
+}
+
+// Streams `git diff --cached` of the current directory through the log scanner; rejects when git fails.
+function stagedHits() {
+  return new Promise((resolve, reject) => {
+    const scanner = createLogScanner()
+    const child = spawn('git', STAGED_ARGS, { windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] })
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', chunk => scanner.push(chunk))
+    child.on('error', reject)
+    child.on('close', code => code === 0 ? resolve(scanner.end()) : reject(new Error(`git diff --cached 退出码 ${code}`)))
+  })
+}
+
+async function preCommit() {
+  let hits
+  try {
+    hits = await stagedHits()
+  } catch (error) {
+    console.error(`提交前隐私扫描读不到暂存改动，提交已拒绝：${error.message}`)
+    return 2
+  }
+  const report = stagedReport(hits, process.env.COMMIT_PRIVACY_ACK)
+  if (!report) return 0
+  console.error(report)
+  return 1
+}
+
 async function selfTest() {
   let failed = 0
   let total = 0
@@ -450,6 +498,12 @@ async function selfTest() {
   const expected = '提交信息|docs/hosts.md:4|docs/hosts.md:5|x:1'
   check(where(scan(log, log.length)) === expected, `scanner locations ${where(scan(log, log.length))}`)
   check([1, 2, 3, 7].every(size => where(scan(log, size)) === expected), 'chunk boundaries do not change hits')
+  const staged = `diff --git a/docs/hosts.md b/docs/hosts.md\n--- a/docs/hosts.md\n+++ b/docs/hosts.md\n@@ -3,0 +4,2 @@\n+- node: ${tailscale}\n+- ok\n`
+  const refusal = stagedReport(scan(staged, 5))
+  check(refusal?.includes(`fp=${fingerprint(tailscale)}）：docs/hosts.md:4`) === true && !refusal.includes(tailscale), `staged refusal ${refusal}`)
+  check(stagedReport(scan(staged, 64), ` ${fingerprint(tailscale).toUpperCase()} `) === null, 'staged fingerprint acknowledged')
+  check(stagedReport(scan(staged, 64), 'all') === null && stagedReport(scan('+++ b/x\n@@ -0,0 +1 @@\n+clean\n', 64)) === null,
+    'staged all acknowledged, clean diff')
   const identityHits = scan(header('clean', personal), 5)
   check(identityHits.length === 1 && identityHits[0].identity && identityHits[0].where === '作者邮箱', `identity e-mail ${JSON.stringify(identityHits)}`)
   check(scan(header('Co-authored-by: Cursor Agent <cursoragent@cursor.com>', 'codex@local'), 64).length === 0, 'agent placeholder identity and co-author')
@@ -541,6 +595,8 @@ async function selfTest() {
 
 if (process.argv.includes('--self-test')) {
   await selfTest()
+} else if (process.argv.includes('--staged')) {
+  process.exitCode = await preCommit()
 } else {
   try {
     await main()

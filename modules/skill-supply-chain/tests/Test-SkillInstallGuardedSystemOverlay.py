@@ -23,11 +23,15 @@ from guarded_install_system_fixtures import SystemRepairTestCase
 
 
 class SkillInstallGuardedSystemOverlayTests(SystemRepairTestCase):
-    def prepare_skill_creator_compatibility_overlay(self, *, localized: bool = False) -> dict[str, object]:
-        state = (
-            self.prepare_system_display_reconcile(include_creator_scripts=True)
-            if localized else self.prepare_system_provenance_repair(include_creator_scripts=True)
-        )
+    def prepare_skill_creator_compatibility_overlay(
+        self, *, localized: bool = False, display_bootstrap: bool = False
+    ) -> dict[str, object]:
+        if display_bootstrap:
+            state = self.prepare_system_display_bootstrap(include_creator_scripts=True)
+        elif localized:
+            state = self.prepare_system_display_reconcile(include_creator_scripts=True)
+        else:
+            state = self.prepare_system_provenance_repair(include_creator_scripts=True)
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(
                 WRAPPER.main(self.system_provenance_repair_args(state)),
@@ -127,6 +131,17 @@ class SkillInstallGuardedSystemOverlayTests(SystemRepairTestCase):
         self.assertIn("display-only", source_bytes.decode("utf-8").split("# Current Source Record")[-1])
         self.assertIn(before["official_integrity"]["tree_sha256"], source_bytes.decode("utf-8").split("# Current Source Record")[-1])
         self.assertFalse(current.conflicts)
+
+    def test_skill_creator_compatibility_follows_a_display_bootstrap(self) -> None:
+        state = self.prepare_skill_creator_compatibility_overlay(display_bootstrap=True)
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(state["args"])
+        self.assertEqual(code, 0, stderr.getvalue())
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        record = next(item for item in ledger["sources"][0]["system_provenance"]["skills"] if item["name"] == "skill-creator")
+        self.assertEqual(record["official_integrity"], state["state"]["official_trees"]["skill-creator"])
+        self.assertEqual(record["overlay"]["base_overlay"], state["record_before"]["overlay"])
 
     def test_skill_creator_display_baseline_drift_fails_before_activation(self) -> None:
         state = self.prepare_skill_creator_compatibility_overlay(localized=True)

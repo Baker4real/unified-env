@@ -138,7 +138,7 @@ try {
     }
 
     # 2. 已确认但缺必需参数时，各 mode 抛出固定的校验错误，同样早于任何 policy / evidence 访问。
-    $batchPurgeMessage = 'BatchPurge 模式要求 TargetPaths 与 CapabilityRoot。'
+    $batchPurgeMessage = 'BatchPurge 模式要求 TargetPaths。'
     $statusScopeMessage = 'Status 范围查询要求 TargetPaths 至少一个目标且均不为空。'
     $validationCases = @(
         @{ arguments = @{ Mode = 'Plan' }; message = 'Plan 模式要求 TargetPath 与 CapabilityRoot。' },
@@ -147,7 +147,7 @@ try {
         @{ arguments = @{ Mode = 'Purge'; ConfirmPurge = $true }; message = 'Purge 模式要求 TransactionPath 与 ApprovedTransactionSha256。' },
         @{ arguments = @{ Mode = 'Restore'; ConfirmRestore = $true; TransactionPath = 'unused-transaction.json' }; message = 'Restore 模式要求 TransactionPath 与 ApprovedTransactionSha256。' },
         @{ arguments = @{ Mode = 'Archive'; ConfirmArchive = $true; ApprovedTransactionSha256 = ('0' * 64) }; message = 'Archive 模式要求 TransactionPath 与 ApprovedTransactionSha256。' },
-        @{ arguments = @{ Mode = 'BatchPurge'; ConfirmApply = $true; ConfirmPurge = $true; TargetPaths = @($scratchRoot) }; message = $batchPurgeMessage },
+        # 省略 CapabilityRoot 的 BatchPurge 要读 policy 自动解析 root，不属于本套件；由 Test-CodexSafeTreeDelete.ps1 覆盖。
         # 宿主 .cmd 链只能传单个字符串，多个目标以 '::' 连接后在分发里拆开；拆完为空同样算缺 TargetPaths。
         @{ arguments = @{ Mode = 'BatchPurge'; ConfirmApply = $true; ConfirmPurge = $true; TargetPaths = @('::'); CapabilityRoot = $scratchRoot }; message = $batchPurgeMessage },
         # Status 范围查询（#80）：TargetPaths 同样接受 '::' 连接；拆完为空或含空白目标时在分发层拒绝。

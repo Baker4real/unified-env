@@ -152,7 +152,7 @@ intent: 记录家里设备的受控环境事实与差异
 ## Codex 主机 Hook 当前边界（2026-07-24）
 
 - 2026-07-23 早些时候的 live Repair、SessionStart wrapper 与重启后监视器曾全部通过；同日稍后的只读 Check 曾返回 `ok=false`、`driftCount=1`，漂移类别为 `config`。这些都是历史验证快照，不代表当前配置持续保持一致。
-- 2026-07-24 22:07 的当前验收先发现 `config` 单项 drift，随后通过 reconciler Repair 恢复；首轮 Repair 为 `ok=true`、`changed=true`、`driftCount=0`，证据位于 `D:\Codex\.codex\run-evidence\host-hook-remediation\20260724T140626.793Z-c015fdca`。第二轮 Repair 为 `changed=false`，最终只读 Check 为 `ok=true`、`changed=false`、`driftCount=0`，8 项检查全部通过。后续操作前仍须重新运行 Check，不能把本条快照当作永久状态。
+- 2026-07-24 22:07 的当前验收先发现 `config` 单项 drift，随后通过 reconciler Repair 恢复；首轮 Repair 为 `ok=true`、`changed=true`、`driftCount=0`，证据位于 `D:\agents\run-evidence\host-hook-remediation\20260724T140626.793Z-c015fdca`。第二轮 Repair 为 `changed=false`，最终只读 Check 为 `ok=true`、`changed=false`、`driftCount=0`，8 项检查全部通过。后续操作前仍须重新运行 Check，不能把本条快照当作永久状态。
 - 只有 reconciler 可以修复受管 Serena section 与 hook registration；不得依据历史 evidence 或本文手工重建它们，也不得手工写入 `approval_policy` 或 `sandbox_mode`。若 Repair 结果的 `registrationProjection` 出现 `restartRequired=true`，完整退出并重启 Codex 应用后再做运行时验收。
 
 ## 每日 Codex 生态组件更新（2026-10-11）

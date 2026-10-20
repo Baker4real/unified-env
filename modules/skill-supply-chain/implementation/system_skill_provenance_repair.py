@@ -100,6 +100,12 @@ SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 DISPLAY_RECONCILE_MODE = "atomic-six-skill-display-reconcile"
 DISPLAY_OVERLAY_KIND = "display-only"
 DISPLAY_FILES = {"SKILL.md", "agents/openai.yaml"}
+REVIEW_PARITY_OVERLAY = {
+    "kind": "review-agent-invocation-parity",
+    "disable_model_invocation": True,
+    "allow_implicit_invocation": False,
+    "parity_file": "agents/openai.yaml",
+}
 SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 SKILL_CREATOR_OVERLAY_KIND = "skill-creator-quick-validate-compatibility"
 SKILL_CREATOR_OVERLAY_SKILL = ".system/skill-creator"
@@ -838,6 +844,20 @@ def _verify_display_baseline(root: Path, spec: dict[str, Any], prior: dict[str, 
         raise SystemProvenanceRepairError(f"display baseline tree does not match ledger: {root.name}")
 
 
+def _verify_official_display_baseline(root: Path, spec: dict[str, Any]) -> None:
+    """Bootstrap after a refresh whose display fields were already translated: the plan supplies the official text."""
+    baseline = {k: v.encode("utf-8") for k, v in spec["overlay"]["baseline_files"].items()}
+    # A display file left out of the baseline would enter the official tree in its translated form.
+    if set(baseline) != {relative for relative in DISPLAY_FILES if (root / relative).is_file()}:
+        raise SystemProvenanceRepairError(f"display baseline must bind every display file present: {root.name}")
+    for relative, official in baseline.items():
+        path = _require_file(root / relative, label="display payload")
+        if _display_contract(relative, official) != _display_contract(relative, path.read_bytes()):
+            raise SystemProvenanceRepairError(f"non-display content changed: {root.name}/{relative}")
+    if _tree_integrity(root, overrides=baseline) != spec["official_integrity"]:
+        raise SystemProvenanceRepairError(f"display baseline does not reproduce the official tree: {root.name}")
+
+
 def _display_overlay_projection(overlay: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": DISPLAY_OVERLAY_KIND,
@@ -851,7 +871,7 @@ def _display_overlay_projection(overlay: dict[str, Any]) -> dict[str, Any]:
 
 def _validate_plan(path: Path) -> dict[str, Any]:
     data = _read_json(path, label="system provenance repair plan")
-    if not isinstance(data, dict) or set(data) != PLAN_FIELDS:
+    if not isinstance(data, dict) or set(data) - {"official_baseline_source"} != PLAN_FIELDS:
         raise SystemProvenanceRepairError("system provenance repair plan 字段不符合 schema")
     if (
         data.get("artifact_type") != "codex.system-skill-provenance-repair"
@@ -924,23 +944,41 @@ def _validate_plan(path: Path) -> dict[str, Any]:
         overlay = item.get("overlay")
         if data["mode"] == DISPLAY_RECONCILE_MODE:
             _validate_display_overlay(overlay)
-        elif item["name"] == "review-agent":
-            if overlay != {
-                "kind": "review-agent-invocation-parity",
-                "disable_model_invocation": True,
-                "allow_implicit_invocation": False,
-                "parity_file": "agents/openai.yaml",
-            }:
+            continue
+        # Bootstrap: a display-only overlay over the official baseline wraps the payload overlay.
+        display = isinstance(overlay, dict) and overlay.get("kind") == DISPLAY_OVERLAY_KIND
+        if display:
+            _validate_display_overlay(overlay)
+        payload_overlay = overlay["base_overlay"] if display else overlay
+        if item["name"] == "review-agent":
+            if payload_overlay != REVIEW_PARITY_OVERLAY:
                 raise SystemProvenanceRepairError("review-agent overlay 不是授权的最小 parity overlay")
             if set(critical) != {"agents/openai.yaml"}:
                 raise SystemProvenanceRepairError("review-agent 必须绑定 agents/openai.yaml")
             if official == effective:
                 raise SystemProvenanceRepairError("review-agent effective integrity 未绑定 overlay")
         else:
-            if overlay != {"kind": "none"} or critical:
+            if payload_overlay != {"kind": "none"} or critical:
                 raise SystemProvenanceRepairError(f"{item['name']} 不允许 payload overlay")
-            if official != effective:
+            if display and official == effective:
+                raise SystemProvenanceRepairError(f"{item['name']} display overlay 未改变展示字段")
+            if not display and official != effective:
                 raise SystemProvenanceRepairError(f"{item['name']} official/effective integrity 不一致")
+    # Only a display bootstrap takes official display text from the plan, so only it names where that text came from.
+    display_bootstrap = data["mode"] != DISPLAY_RECONCILE_MODE and any(
+        item["overlay"].get("kind") == DISPLAY_OVERLAY_KIND for item in raw_skills
+    )
+    if display_bootstrap != ("official_baseline_source" in data):
+        raise SystemProvenanceRepairError("official_baseline_source 只出现在 display bootstrap，且在那里必填")
+    baseline_source = data.get("official_baseline_source")
+    # The value lands inside one SOURCE.md line; isprintable() also refuses the separators str.splitlines() breaks on.
+    if display_bootstrap and (
+        not isinstance(baseline_source, str)
+        or not baseline_source.strip()
+        or not baseline_source.isprintable()
+        or len(baseline_source) > 500
+    ):
+        raise SystemProvenanceRepairError("official_baseline_source 必须是不超过 500 字符的非空单行可打印文本")
     return data
 
 
@@ -951,22 +989,33 @@ def _source_record(
     package: dict[str, Any],
     marker_sha256: str,
     spec: dict[str, Any],
+    official_baseline_source: str | None = None,
 ) -> bytes:
     name = spec["name"]
     official = spec["official_integrity"]
     effective = spec["effective_integrity"]
     overlay = spec["overlay"]
-    if overlay.get("kind") == DISPLAY_OVERLAY_KIND:
+    review_parity = (
+        "disable-model-invocation: true; "
+        "agents/openai.yaml allow_implicit_invocation: false"
+    )
+    if overlay.get("kind") == DISPLAY_OVERLAY_KIND and official_baseline_source is not None:
+        # The official display text is not observed on disk; name the plan as its source.
+        base = overlay["base_overlay"]
+        overlay_value = (
+            f"display-only over a plan-supplied official baseline ({official_baseline_source}): "
+            "SKILL.md description; agents/openai.yaml interface.short_description/default_prompt; "
+            "base overlay: "
+            + (f"{base['kind']} ({review_parity})" if base == REVIEW_PARITY_OVERLAY else base["kind"])
+        )
+    elif overlay.get("kind") == DISPLAY_OVERLAY_KIND:
         overlay_value = (
             "display-only: SKILL.md description; agents/openai.yaml "
             "interface.short_description/default_prompt; preserved base overlay: "
             + overlay["base_overlay"]["kind"]
         )
     elif name == "review-agent":
-        overlay_value = (
-            "disable-model-invocation: true; "
-            "agents/openai.yaml allow_implicit_invocation: false"
-        )
+        overlay_value = review_parity
     elif overlay.get("kind") == SKILL_CREATOR_OVERLAY_KIND:
         payload = overlay.get("payload_files")
         if not isinstance(payload, dict) or set(payload) != set(
@@ -1066,6 +1115,13 @@ def _validate_ledger(
     return copy.deepcopy(data), index
 
 
+def _ledger_overlay(overlay: dict[str, Any]) -> dict[str, Any]:
+    # Display overlays keep only baseline hashes; the skill-creator overlay update reads this exact shape.
+    if overlay.get("kind") == DISPLAY_OVERLAY_KIND:
+        return _display_overlay_projection(overlay)
+    return copy.deepcopy(overlay)
+
+
 def _updated_ledger(
     *,
     data: dict[str, Any],
@@ -1086,11 +1142,7 @@ def _updated_ledger(
                 "official_integrity": copy.deepcopy(spec["official_integrity"]),
                 "effective_integrity": copy.deepcopy(spec["effective_integrity"]),
                 "critical_files": copy.deepcopy(spec["critical_files"]),
-                "overlay": (
-                    _display_overlay_projection(spec["overlay"])
-                    if plan["mode"] == DISPLAY_RECONCILE_MODE
-                    else copy.deepcopy(spec["overlay"])
-                ),
+                "overlay": _ledger_overlay(spec["overlay"]),
                 "source_md_sha256": source_hashes[spec["name"]],
             }
             for spec in plan["skills"]
@@ -1100,14 +1152,22 @@ def _updated_ledger(
     changes = entry.setdefault("local_changes", [])
     if not isinstance(changes, list):
         raise SystemProvenanceRepairError("system source group local_changes 必须是数组")
-    summary = (
-        "guarded system provenance repair: atomically bound five bundled skills to the "
-        "signed Store package and restored review-agent disable-model-invocation parity."
-    )
     if plan["mode"] == DISPLAY_RECONCILE_MODE:
         summary = (
             "guarded display-only provenance reconciliation: preserved all five official "
             "baselines and payload bytes; verified display fields against prior effective trees."
+        )
+    elif "official_baseline_source" in plan:
+        summary = (
+            "guarded system provenance repair: atomically bound five bundled skills to the "
+            "signed Store package, recorded display-only overlays over plan-supplied official "
+            f"display text ({plan['official_baseline_source']}; all other official bytes observed), "
+            "and restored review-agent disable-model-invocation parity."
+        )
+    else:
+        summary = (
+            "guarded system provenance repair: atomically bound five bundled skills to the "
+            "signed Store package and restored review-agent disable-model-invocation parity."
         )
     if not any(
         isinstance(item, dict)
@@ -1407,11 +1467,19 @@ def execute(args: Any) -> dict[str, Any]:
     source_written: dict[str, bytes] = {}
     review_before: bytes | None = None
     review_written: bytes | None = None
+    input_trees: dict[str, dict[str, Any]] = {}
     for spec in plan["skills"]:
         name = spec["name"]
         root = _require_directory(system_root / name, label=f"system skill {name}")
         baseline_identities[name] = _identity(root)
-        if _tree_integrity(root) != spec[input_integrity]:
+        input_trees[name] = _tree_integrity(root)
+        if not display_only and spec["overlay"].get("kind") == DISPLAY_OVERLAY_KIND:
+            # A translated tree matches the official one only through its display baseline;
+            # review-agent reaches its effective tree after the parity line, checked below.
+            _verify_official_display_baseline(root, spec)
+            if name != "review-agent" and input_trees[name] != spec["effective_integrity"]:
+                raise SystemProvenanceRepairError(f"{name} input tree/hash 与 plan 不一致")
+        elif input_trees[name] != spec[input_integrity]:
             raise SystemProvenanceRepairError(f"{name} input tree/hash 与 plan 不一致")
         if display_only:
             _verify_display_baseline(root, spec, prior_specs[name])
@@ -1453,6 +1521,7 @@ def execute(args: Any) -> dict[str, Any]:
             package=package,
             marker_sha256=plan["marker"]["sha256"],
             spec=spec,
+            official_baseline_source=plan.get("official_baseline_source"),
         )
     if review_before is None or review_written is None:
         raise SystemProvenanceRepairError("repair plan 未建立 review-agent overlay")
@@ -1592,7 +1661,7 @@ def execute(args: Any) -> dict[str, Any]:
         for spec in plan["skills"]:
             name = spec["name"]
             root = system_root / name
-            if _identity(root) != baseline_identities[name] or _tree_integrity(root) != spec[input_integrity]:
+            if _identity(root) != baseline_identities[name] or _tree_integrity(root) != input_trees[name]:
                 raise SystemProvenanceRepairError(f"{name} 在写前 CAS 复验中漂移")
             if _optional_bytes(root / "SOURCE.md") != source_before[name]:
                 raise SystemProvenanceRepairError(f"{name} SOURCE.md 在写前 CAS 复验中漂移")

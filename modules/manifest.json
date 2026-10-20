@@ -652,7 +652,9 @@
         "fixture": {
           "powershell": [],
           "python": [],
-          "node": []
+          "node": [
+            "tests/Test-DeviceDocRetiredPaths.cjs"
+          ]
         }
       }
     }
@@ -663,6 +665,7 @@
         ".github/workflows/ci.yml",
         ".codegraph/.gitignore",
         ".gitattributes",
+        ".githooks/pre-commit",
         ".gitignore",
         ".node-version",
         ".okf-frontmatter.json",
@@ -682,6 +685,7 @@
     "tests": {
       "fixture": {
         "powershell": [
+          "tests/Test-PreCommitPrivacyHook.ps1",
           "tests/Test-RunPowerShellTests.ps1"
         ],
         "python": [],

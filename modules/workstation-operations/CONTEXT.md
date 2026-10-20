@@ -24,7 +24,7 @@ intent: 定义设备事实、跨设备验收和宿主集成政策的文档边界
 - `docs/environments/ban-gong-shi.md`
 - `docs/env-governance/sub2api-update-policy.md`
 
-设备页是时间点快照；变更其他设备的记录必须有该设备的直接证据。
+设备页是时间点快照；变更其他设备的记录必须有该设备的直接证据。证据指针写 `D:\agents\run-evidence\` 下的路径；`tests/Test-DeviceDocRetiredPaths.cjs` 拒绝指向已退役存储根（`D:\Codex\.codex\run-evidence\`、`D:\Codex\.gsd\`）下具体路径的写法。
 
 ## 每日更新自动化
 
