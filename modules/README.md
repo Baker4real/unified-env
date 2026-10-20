@@ -42,3 +42,5 @@ node .\scripts\Validate-ModuleBoundaries.cjs --json
 node .\tests\Test-ModuleBoundaries.cjs
 node .\scripts\Run-PowerShellTests.cjs --module dev-environment --list
 ```
+
+边界校验经 `git ls-files --others` 纳入未跟踪文件：不得与正在写 `reports/`、`.scratch/` 的测试套件并行跑，否则测试运行产物会被判 no owner 而误报（fail-closed 方向，有意保留）；manifest 门与 fixture 门串行执行。
