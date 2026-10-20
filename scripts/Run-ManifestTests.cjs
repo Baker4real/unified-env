@@ -25,6 +25,8 @@ const HOST_BOUND_TESTS = Object.freeze({
   'modules/skill-supply-chain/tests/Test-SkillInstallGuardedSourceRecord.py': SKILL_RESOURCE_CLOSURE,
   'modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemOverlay.py': SKILL_RESOURCE_CLOSURE,
   'modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemRepair.py': SKILL_RESOURCE_CLOSURE,
+  'tests/Test-RetiredSkillMenuSurface.cjs': 'anchors fixture gates and handle-bound deletion to the canonical checkout '
+    + 'D:\\agents\\projects\\统一环境 and the fixed host PowerShell runtime',
 });
 
 function getOwners(manifest, moduleId) {

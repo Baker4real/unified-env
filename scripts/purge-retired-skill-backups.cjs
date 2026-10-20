@@ -11,7 +11,11 @@ const PRODUCTION_CODEX_ROOT = path.resolve('D:\\Codex\\.codex');
 // The retirement ledger lives in the unified physical skills root; the
 // Codex-side skills junction is never traversed.
 const PRODUCTION_ACTIVE_SKILLS_ROOT = path.resolve('D:\\agents\\skills-manager\\skills');
-const FIXTURE_PARENT = path.resolve('D:\\agents\\projects\\统一环境');
+// The fixture parent gate defaults to the canonical checkout and can be
+// redirected only for the TEST_MODE=1 fixture branch below (worktrees and CI
+// runners check out elsewhere). Production never reads this value.
+const FIXTURE_PARENT = path.resolve(
+  process.env.RETIRED_SKILL_PURGE_TEST_FIXTURE_PARENT || 'D:\\agents\\projects\\统一环境');
 const FIXTURE_PREFIX = '.tmp-retired-skill-backup-fixture-';
 const FIXTURE_MARKER_NAME = '.retired-skill-backup-fixture.json';
 const FIXTURE_MARKER = Object.freeze({

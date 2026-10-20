@@ -18,6 +18,9 @@ function runRaw(fixtureRoot, args = [], { testMode = true } = {}) {
     // legacy environment variables. The fixture argument is the only test seam.
     CODEX_ROOT: path.join(fixtureRoot, 'forged-codex-root'),
     CODEX_PARENT: path.join(fixtureRoot, 'forged-codex-parent'),
+    // The fixture parent gate follows this checkout so the suite runs in
+    // worktrees and on CI, not only in the canonical project root.
+    RETIRED_SKILL_PURGE_TEST_FIXTURE_PARENT: projectRoot,
   };
   if (testMode) env.TEST_MODE = '1';
   else delete env.TEST_MODE;
