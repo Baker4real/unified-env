@@ -680,6 +680,7 @@
         "codegraph.json",
         "modules/README.md",
         "modules/manifest.json",
+        "scripts/Invoke-PowerShellParameterCaseLint.ps1",
         "scripts/Publish-GitHubIssueComment.ps1",
         "scripts/Run-ManifestTests.cjs",
         "scripts/Run-PowerShellTests.cjs",
@@ -692,6 +693,7 @@
     "tests": {
       "fixture": {
         "powershell": [
+          "tests/Test-PowerShellParameterCaseLint.ps1",
           "tests/Test-PreCommitPrivacyHook.ps1",
           "tests/Test-PublishGitHubIssueComment.ps1",
           "tests/Test-RunPowerShellTests.ps1"

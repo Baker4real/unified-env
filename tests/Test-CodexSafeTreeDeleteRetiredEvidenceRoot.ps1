@@ -134,7 +134,7 @@ function Assert-RetiredEvidenceRootPlanBindings {
     Assert-True ($topLevel -notcontains 'rootDeletionPurpose') 'purpose 不得写入 plan'
     Assert-True ($topLevel -notcontains 'purpose') 'purpose 不得写入 plan'
 
-    $expectedPolicyPath = [IO.Path]::GetFullPath($ExpectedPolicyPath)
+    $ExpectedPolicyPath = [IO.Path]::GetFullPath($ExpectedPolicyPath)
     Assert-True ([string]$plan.policyPath -ceq $expectedPolicyPath) (
         'plan.policyPath 必须绑定当时 policy 路径')
     $policyBytes = [IO.File]::ReadAllBytes($expectedPolicyPath)

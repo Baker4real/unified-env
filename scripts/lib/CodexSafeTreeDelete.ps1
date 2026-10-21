@@ -1756,8 +1756,8 @@ function Get-CodexSafeTreeDeleteTrustedElapsedTimeSample {
     if ($RestartAmbiguous) {
         throw 'safe-delete grace manual-review: restart ambiguity.'
     }
-    $wallClockUtc = $WallClockUtc.ToUniversalTime()
-    $elapsedMilliseconds = if ($null -eq $ElapsedMilliseconds) {
+    $WallClockUtc = $WallClockUtc.ToUniversalTime()
+    $ElapsedMilliseconds = if ($null -eq $ElapsedMilliseconds) {
         [Environment]::TickCount64
     } else {
         [long]$ElapsedMilliseconds

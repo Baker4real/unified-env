@@ -59,21 +59,21 @@ function Read-Registry([string]$Path) {
         if ($entry -isnot [System.Collections.IDictionary] -or -not (Test-Text $entry['path']) -or -not (Test-Text $entry['owner'])) {
             throw 'Every registry entry needs a path and an owner.'
         }
-        $path = [string]$entry['path']
-        if (-not (Test-RelativePath $path)) { throw "Registry path must be relative with forward slashes: $path" }
-        if (-not $seen.Add($path)) { throw "Registry path is listed twice: $path" }
+        $entryPath = [string]$entry['path']
+        if (-not (Test-RelativePath $entryPath)) { throw "Registry path must be relative with forward slashes: $entryPath" }
+        if (-not $seen.Add($entryPath)) { throw "Registry path is listed twice: $entryPath" }
         if ($entry.Contains('source')) {
-            if ($path.EndsWith('/')) { throw "A directory entry cannot name a source: $path" }
+            if ($entryPath.EndsWith('/')) { throw "A directory entry cannot name a source: $entryPath" }
             if (-not (Test-Text $entry['source']) -or -not (Test-RelativePath ([string]$entry['source']))) {
-                throw "Registry source must be a repository-relative path: $path"
+                throw "Registry source must be a repository-relative path: $entryPath"
             }
         }
     }
     foreach ($directory in @($entries | Where-Object { ([string]$_['path']).EndsWith('/') })) {
         foreach ($entry in $entries) {
-            $path = [string]$entry['path']
-            if ($path -ne $directory['path'] -and $path.StartsWith([string]$directory['path'], [System.StringComparison]::OrdinalIgnoreCase)) {
-                throw "Registry entry $path is already covered by $($directory['path'])"
+            $entryPath = [string]$entry['path']
+            if ($entryPath -ne $directory['path'] -and $entryPath.StartsWith([string]$directory['path'], [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Registry entry $entryPath is already covered by $($directory['path'])"
             }
         }
     }
