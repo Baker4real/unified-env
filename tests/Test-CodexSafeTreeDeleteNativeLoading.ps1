@@ -6,7 +6,8 @@ $ErrorActionPreference = 'Stop'
 
 # #86：safe-tree-delete lib 编译的全部 C# 组件（Status fast scan、Plan walker 与其余 native
 # 组件）只经 CodexHostSafetyNativeLoader.ps1 的内容寻址 generation 加载。任一 source 变化只发布
-# 新 generation，不改写已发布文件，因此工作树与生产互不干扰；旧的固定路径 StatusScan DLL 与
+# 新 generation，不改写已发布文件，因此已加载的进程与其他 checkout 编出的 generation 互不覆盖
+# （主工作树本身就是 live 源，见 host-safety CONTEXT 的「接口」段）；旧的固定路径 StatusScan DLL 与
 # .sha256 sidecar 不再被加载或写入。native 类型是进程级的，所以每个场景都在独立 pwsh 子进程中
 # 按入口顺序 dot-source lib（或只用 loader 的 fixture seam）并回报 JSON。
 
