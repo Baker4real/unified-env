@@ -3,7 +3,8 @@ param(
     [string]$SourceRoot = '',
     [string]$CodexRoot = 'D:\Codex\.codex',
     [string]$EvidenceRoot = 'D:\agents\run-evidence\skill-install-guarded-deployment',
-    [string]$PythonPath = 'D:\Codex\tools\python315-official\python.exe'
+    [string]$PythonPath = 'D:\Codex\tools\python315-official\python.exe',
+    [switch]$AllowUncommittedSource
 )
 
 Set-StrictMode -Version Latest
@@ -43,6 +44,33 @@ function Get-FileIdentity {
         lastWriteTimeUtcTicks = [int64]$item.LastWriteTimeUtc.Ticks
         attributes = [int]$item.Attributes
     }
+}
+
+function Get-SourceCommitState {
+    # Sources inside a git work tree must match its HEAD, compared through git's clean filter like git status.
+    param([Parameter(Mandatory = $true)][string[]]$PathValues)
+    $inWorkTree = $false
+    $uncommitted = @()
+    foreach ($group in @($PathValues | Group-Object { Split-Path -Parent $_ })) {
+        $directory = [string]$group.Name
+        $inside = @(& git -C $directory rev-parse --is-inside-work-tree 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $inside -notcontains 'true') { continue }
+        $inWorkTree = $true
+        $names = @($group.Group | ForEach-Object { Split-Path -Leaf $_ })
+        $treeLines = @(& git -C $directory ls-tree HEAD -- @names)
+        if ($LASTEXITCODE -ne 0) { throw "无法读取部署源所在仓库的 HEAD：$directory" }
+        $committed = @{}
+        foreach ($line in $treeLines) {
+            $entry, $name = $line -split "`t", 2
+            $committed[$name] = ($entry -split ' ')[2]
+        }
+        $current = @(& git -C $directory hash-object -- @names)
+        if ($LASTEXITCODE -ne 0 -or $current.Count -ne $names.Count) { throw "无法计算部署源的 git blob：$directory" }
+        for ($index = 0; $index -lt $names.Count; $index++) {
+            if ($committed[$names[$index]] -cne $current[$index]) { $uncommitted += [string]$group.Group[$index] }
+        }
+    }
+    return [pscustomobject]@{ inWorkTree = $inWorkTree; uncommitted = $uncommitted }
 }
 
 function Write-JsonAtomic {
@@ -105,12 +133,34 @@ $manifest = [ordered]@{
     evidenceDirectory = $evidenceDirectory
     pythonPath = $pythonPathResolved
     yamlDependency = 'pending'
+    sourceCommitCheck = 'pending'
     files = @()
 }
 
 try {
     if (-not (Test-Path -LiteralPath $sourceRootResolved -PathType Container)) { throw "SourceRoot 不存在：$sourceRootResolved" }
     if (Test-ReparsePoint $sourceRootResolved) { throw "SourceRoot 不能是 reparse point：$sourceRootResolved" }
+    $sources = [ordered]@{}
+    foreach ($relative in $sourceFiles) {
+        $source = Join-Path $sourceRootResolved $relative
+        if ($sourceRootResolved -ieq $repositoryScriptsRootResolved -and $relative -ne 'install-skill-guarded.cmd') {
+            $source = Join-Path $moduleImplementationRootResolved $relative
+        }
+        if ($relative -eq 'install-skill-guarded.cmd' -and $sourceRootResolved -ieq $moduleImplementationRootResolved -and -not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            $source = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\install-skill-guarded.cmd'
+        }
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "缺少部署源文件：$source" }
+        if (Test-ReparsePoint $source) { throw "部署源文件不能是 reparse point：$source" }
+        $sources[$relative] = $source
+    }
+    if ($AllowUncommittedSource) { $manifest.sourceCommitCheck = 'skipped' }
+    else {
+        $commitState = Get-SourceCommitState @($sources.Values)
+        if ($commitState.uncommitted.Count) {
+            throw "部署源有未提交的改动（与所在工作树的 HEAD 不一致）：$($commitState.uncommitted -join '、')。共享工作树里可能是别的会话的改动；从工作树外的 git archive 快照部署，或确认这些改动该上线后加 -AllowUncommittedSource。"
+        }
+        $manifest.sourceCommitCheck = if ($commitState.inWorkTree) { 'matches-head' } else { 'outside-work-tree' }
+    }
     if (Test-ReparsePoint $codexRootResolved) { throw "CodexRoot 不能是 reparse point：$codexRootResolved" }
     if (-not (Test-Path -LiteralPath $pythonPathResolved -PathType Leaf)) { throw "受管 Python 不存在：$pythonPathResolved" }
     if (Test-ReparsePoint $pythonPathResolved) { throw "受管 Python 不能是 reparse point：$pythonPathResolved" }
@@ -126,15 +176,7 @@ try {
     New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
 
     foreach ($relative in $sourceFiles) {
-        $source = Join-Path $sourceRootResolved $relative
-        if ($sourceRootResolved -ieq $repositoryScriptsRootResolved -and $relative -ne 'install-skill-guarded.cmd') {
-            $source = Join-Path $moduleImplementationRootResolved $relative
-        }
-        if ($relative -eq 'install-skill-guarded.cmd' -and $sourceRootResolved -ieq $moduleImplementationRootResolved -and -not (Test-Path -LiteralPath $source -PathType Leaf)) {
-            $source = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\install-skill-guarded.cmd'
-        }
-        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "缺少部署源文件：$source" }
-        if (Test-ReparsePoint $source) { throw "部署源文件不能是 reparse point：$source" }
+        $source = $sources[$relative]
         $target = Join-Path $targetRoot $relative
         if (Test-ReparsePoint $target) { throw "部署目标文件不能是 reparse point：$target" }
         $record = [ordered]@{
@@ -201,6 +243,7 @@ try {
         evidence = $evidenceDirectory
         pythonPath = $pythonPathResolved
         yamlDependency = $manifest.yamlDependency
+        sourceCommitCheck = $manifest.sourceCommitCheck
         files = $manifest.files
     }
 }
