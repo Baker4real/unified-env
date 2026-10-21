@@ -3,9 +3,11 @@
 .SYNOPSIS
 Exercise Invoke-ManagedRecycle through its public process interface on D: fixtures.
 .DESCRIPTION
-Check, refusal and plan cases never touch the Recycle Bin. The live case recycles one fixture tree into the D: bin,
-then restores it the way Explorer does, without deleting anything: the $R content moves back to its path and
-the $I index record moves into this run's evidence. -SkipLiveRecycle reports that case as skipped.
+Check, refusal and plan cases never touch the Recycle Bin. The live case recycles two fixture trees into the D: bin,
+the second while the first one's $I index record is held open the way Explorer or a scanner briefly holds a new
+record and a decoy $I record for another path sits in the bin, then restores both the way Explorer does, without
+deleting anything: each $R content moves back to its path and each $I record, the decoy included, moves into this
+run's evidence. -SkipLiveRecycle reports that case as skipped.
 #>
 [CmdletBinding()]
 param(
@@ -28,7 +30,7 @@ $entry = Join-Path $PSScriptRoot 'Invoke-ManagedRecycle.ps1'
 $cases = [Collections.Generic.List[object]]::new()
 $junctions = [Collections.Generic.List[string]]::new()
 $expectedManifest = @("D`tempty", "D`tsub", "F`ta.txt`t5", "F`tsub\b.bin`t1024")
-$liveCase = 'live recycle moves the exact tree to the bin and the test restores it'
+$liveCase = 'live recycle finds each tree''s own bin record past a locked record and a newer decoy, and the test restores them'
 # Whether the fixture volume has bin settings; a fresh profile (a CI runner) has none until the volume's bin is first used.
 $fixtureVolume = try { [string](Get-CimInstance Win32_Volume -Filter "DriveLetter='$([IO.Path]::GetPathRoot($fullEvidenceRoot).TrimEnd('\'))'").DeviceID } catch { '' }
 $binSettingsKey = if ($fixtureVolume) {
@@ -109,6 +111,29 @@ function New-Tree([string]$Name) {
 function New-Junction([string]$Path, [string]$Target) {
     $null = New-Item -ItemType Junction -Path $Path -Target $Target
     $junctions.Add($Path)
+}
+
+# A version 2 $I record for a path that was never recycled, dated a day ahead so that it is the newest in the bin.
+function New-BinDecoy([string]$BinDirectory, [string]$Original) {
+    $path = Join-Path $BinDirectory ('$I' + [guid]::NewGuid().ToString('N').Substring(0, 6).ToUpperInvariant())
+    $name = [Text.Encoding]::Unicode.GetBytes($Original + [char]0)
+    $bytes = [byte[]]([BitConverter]::GetBytes([long]2) + [BitConverter]::GetBytes([long]1029) +
+        [BitConverter]::GetBytes([DateTime]::UtcNow.AddDays(1).ToFileTimeUtc()) + [BitConverter]::GetBytes([int]($name.Length / 2)) + $name)
+    $stream = [IO.File]::Open($path, 'CreateNew', 'Write', 'None')
+    try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+    $path
+}
+
+# Explorer and scanners briefly open new $I records; retry a step on one for up to 10 seconds.
+function Invoke-BinStep([scriptblock]$Step) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ($true) {
+        try { return & $Step }
+        catch [IO.IOException] {
+            if ([DateTime]::UtcNow -ge $deadline) { throw }
+            Start-Sleep -Milliseconds 200
+        }
+    }
 }
 
 $realTarget = Join-Path $fixtures 'junction-target'
@@ -272,10 +297,33 @@ try {
                 -not $record.indexPath.StartsWith($binDir, [StringComparison]::OrdinalIgnoreCase)) { throw 'The bin record does not match the recycled tree.' }
             $saved = [IO.File]::ReadAllText($applied.json.resultPath) | ConvertFrom-Json -AsHashtable
             if ($saved.status -ne 'recycled' -or $saved.binManifestSha256 -ne $planned.json.manifestSha256) { throw 'result.json does not prove the bin copy.' }
+            # The second tree's readback walks every $I record: the first tree's, held here without sharing, and a decoy
+            # for another path dated after every real record, which only the original-path match rules out.
+            $second = New-Tree 'tree-live-second'
+            $secondPlanned = Invoke-Plan $second
+            if ($secondPlanned.exitCode -ne 0) { throw "Plan failed: $($secondPlanned.stdout)" }
+            $lock = Invoke-BinStep { [IO.File]::Open($record.indexPath, 'Open', 'Read', 'None') }
+            $decoy = $null
+            try {
+                $decoy = New-BinDecoy $binDir (Join-Path $fixtures 'decoy')
+                $secondApplied = Invoke-Entry @('-Mode', 'Apply', '-PlanPath', $secondPlanned.json.planPath, '-ApprovedPlanSha256', $secondPlanned.json.planSha256, '-ConfirmRecycle')
+            }
+            finally {
+                $lock.Dispose()
+                if ($decoy) { Invoke-BinStep { [IO.File]::Move($decoy, (Join-Path $runRoot 'restored-bin-decoy.bin')) } }
+            }
             [IO.Directory]::Move($record.contentPath, $tree)
-            [IO.File]::Move($record.indexPath, (Join-Path $runRoot 'restored-bin-index.bin'))
+            Invoke-BinStep { [IO.File]::Move($record.indexPath, (Join-Path $runRoot 'restored-bin-index.bin')) }
+            if ($secondApplied.exitCode -ne 0 -or $secondApplied.json.status -ne 'recycled' -or $secondApplied.stderr) { throw "Recycle past a locked record failed: $($secondApplied.stdout)" }
+            if (@($secondApplied.json.unreadableBinRecords) -notcontains $record.indexPath) { throw 'The locked record was not reported as skipped.' }
+            $secondRecord = $secondApplied.json.binRecord
+            if ($secondRecord.indexPath -eq $decoy) { throw 'The readback took the decoy record for another path.' }
+            [IO.Directory]::Move($secondRecord.contentPath, $second)
+            Invoke-BinStep { [IO.File]::Move($secondRecord.indexPath, (Join-Path $runRoot 'restored-bin-index-second.bin')) }
             $replanned = Invoke-Plan $tree
             if ($replanned.exitCode -ne 0 -or $replanned.json.manifestSha256 -ne $planned.json.manifestSha256) { throw 'The restored tree differs from the plan.' }
+            $replanned = Invoke-Plan $second
+            if ($replanned.exitCode -ne 0 -or $replanned.json.manifestSha256 -ne $secondPlanned.json.manifestSha256) { throw 'The restored second tree differs from its plan.' }
         }
     }
 }

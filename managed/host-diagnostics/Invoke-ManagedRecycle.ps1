@@ -8,8 +8,11 @@ agent can tell whether a target is recyclable before asking the user. Plan scans
 <EvidenceRoot>/<run>/plan.json with the relative path and size of every entry, the bin facts, the purpose
 and the user's authorization. Apply consumes that plan by SHA-256 within 30 minutes, reruns every preflight
 check, rescans the target, recycles it with SHFileOperationW (FOF_ALLOWUNDO | FOF_WANTNUKEWARNING, no UI)
-and compares the bin copy with the plan, recording the outcome once in result.json next to the plan. Output
-is one JSON object; exit 0 only for checked, planned or recycled.
+and compares the bin copy with the plan, recording the outcome once in result.json next to the plan. To find
+the bin copy it reads every $I record in the user's bin; a record another process holds open is retried until
+3 seconds into that walk, then skipped and listed in unreadableBinRecords, and the reason becomes
+bin-record-unreadable instead of bin-record-missing when the target's record is not among the readable ones.
+Output is one JSON object; exit 0 only for checked, planned or recycled.
 
 Preflight fails closed on: paths that are not drive paths on a fixed NTFS volume, volume roots, protected
 roots and their ancestors, system subtrees, reparse points on the path or inside the tree, hard links,
@@ -43,6 +46,7 @@ $planTtlMinutes = 30
 $maxEntries = 200000
 $headroomRatio = 0.9
 $maxShellPath = 259
+$binReadSeconds = 3
 $result = [ordered]@{ mode = $Mode; status = 'refused' }
 
 function Save-Result([string]$Path) {
@@ -217,23 +221,36 @@ function Invoke-Preflight([string]$Path, [string]$EvidenceFull) {
 }
 
 # The newest $I record in this user's bin on the volume whose original path is the target, with its $R twin.
+# Explorer and scanners briefly hold new records open: a locked record is retried until $binReadSeconds into the
+# walk, then skipped and listed in $result.unreadableBinRecords. A record that vanished was restored or emptied.
 function Find-BinRecord([string]$Root, [string]$Original, [datetime]$NotBeforeUtc) {
     $bin = Get-UserBinDirectory $Root
     if (-not [IO.Directory]::Exists($bin)) { return $null }
     $best = $null
+    $unreadable = [Collections.Generic.List[string]]::new()
+    $deadline = [DateTime]::UtcNow.AddSeconds($binReadSeconds)
     foreach ($index in [IO.Directory]::EnumerateFiles($bin, '$I*')) {
-        $bytes = [IO.File]::ReadAllBytes($index)
-        if ($bytes.Length -lt 28) { continue }
+        $bytes = $null
+        while ($null -eq $bytes) {
+            try { $bytes = [IO.File]::ReadAllBytes($index) }
+            catch [IO.IOException] {
+                if (-not [IO.File]::Exists($index)) { break }
+                if ([DateTime]::UtcNow -ge $deadline) { $unreadable.Add($index); break }
+                Start-Sleep -Milliseconds 200
+            }
+        }
+        if ($null -eq $bytes -or $bytes.Length -lt 28) { continue }
         $version = [BitConverter]::ToInt64($bytes, 0)
-        $original = $null
+        # Not $original: PowerShell names are case-insensitive, so that would overwrite the $Original parameter.
+        $recorded = $null
         if ($version -eq 2) {
             $chars = [BitConverter]::ToInt32($bytes, 24)
-            if ($chars -ge 1 -and 28 + $chars * 2 -le $bytes.Length) { $original = [Text.Encoding]::Unicode.GetString($bytes, 28, ($chars - 1) * 2) }
+            if ($chars -ge 1 -and 28 + $chars * 2 -le $bytes.Length) { $recorded = [Text.Encoding]::Unicode.GetString($bytes, 28, ($chars - 1) * 2) }
         }
         elseif ($version -eq 1 -and $bytes.Length -ge 544) {
-            $original = [Text.Encoding]::Unicode.GetString($bytes, 24, 520).Split([char]0)[0]
+            $recorded = [Text.Encoding]::Unicode.GetString($bytes, 24, 520).Split([char]0)[0]
         }
-        if (-not $original -or -not $original.Equals($Original, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if (-not $recorded -or -not $recorded.Equals($Original, [StringComparison]::OrdinalIgnoreCase)) { continue }
         $deleted = [DateTime]::FromFileTimeUtc([BitConverter]::ToInt64($bytes, 16))
         if ($deleted -lt $NotBeforeUtc -or ($null -ne $best -and $deleted -le $best.deletedUtc)) { continue }
         $name = [IO.Path]::GetFileName($index)
@@ -244,6 +261,7 @@ function Find-BinRecord([string]$Root, [string]$Original, [datetime]$NotBeforeUt
             indexBytes = [BitConverter]::ToInt64($bytes, 8)
         }
     }
+    if ($unreadable.Count) { $result.unreadableBinRecords = @($unreadable) }
     $best
 }
 
@@ -564,7 +582,7 @@ namespace ManagedRecycle
         }
     }
     if ($call[0] -ne 0 -or $result.aborted -or $result.targetStillExists) { $result.reason = 'recycle-call-failed' }
-    elseif (-not $record) { $result.reason = 'bin-record-missing' }
+    elseif (-not $record) { $result.reason = if ($result.Contains('unreadableBinRecords')) { 'bin-record-unreadable' } else { 'bin-record-missing' } }
     else {
         $binScan = try { [ManagedRecycle.Native]::Scan($record.contentPath, $false, $maxEntries) } catch { $null }
         $result.binManifestSha256 = if ($binScan -and -not $binScan.Truncated) { Get-ManifestSha256 $binScan } else { $null }
