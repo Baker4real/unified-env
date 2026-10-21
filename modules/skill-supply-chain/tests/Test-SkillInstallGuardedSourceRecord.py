@@ -455,6 +455,138 @@ class SkillInstallGuardedSourceRecordTests(GuardedInstallTestCase):
         )
         self.assertEqual(decision_snapshot.read_bytes(), manifest.read_bytes())
 
+    def write_active_skill(self, name: str, source_text: str) -> Path:
+        active_skill = self.active / name
+        active_skill.mkdir()
+        (active_skill / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: 基线夹具技能描述\n---\n\n# baseline\n",
+            encoding="utf-8",
+        )
+        (active_skill / "SOURCE.md").write_text(source_text, encoding="utf-8")
+        self.ledger.write_text(
+            json.dumps(
+                {
+                    "updated_at": "2026-07-14",
+                    "notes": [],
+                    "sources": [
+                        {"id": "local-test", "type": "local-candidate", "skills": [name]}
+                    ],
+                    "unresolved": [],
+                    "deleted": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return active_skill / "SOURCE.md"
+
+    def test_update_candidate_source_carrying_its_own_record_fails_closed(self) -> None:
+        name = "test-skill-wrapper"
+        history = f"# Source Provenance\n\nSkill: `{name}`\nStatus: source-review\n"
+        active_source = self.write_active_skill(name, history)
+        candidate = self.write_candidate(name, "替换后的夹具描述")
+        (candidate / "SOURCE.md").write_text(
+            history
+            + "\n---\n\n# Source Provenance\n\n"
+            + f"Skill: `{name}`\nStatus: source-review\nLocal overlay: extended (hand-written)\n",
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "update")
+        args = self.wrapper_args(candidate, manifest)
+        args.insert(2, "--update")
+        source_before = active_source.read_bytes()
+        ledger_before = self.ledger.read_bytes()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(args)
+
+        self.assertEqual(code, 2)
+        self.assertEqual(active_source.read_bytes(), source_before)
+        self.assertEqual(self.ledger.read_bytes(), ledger_before)
+        self.assertIn("候选 SOURCE.md 比 active 副本多出 1 条记录", stderr.getvalue())
+
+    def test_update_candidate_source_repairing_an_active_record_succeeds(self) -> None:
+        name = "test-skill-wrapper"
+        record = "# Source Provenance\n\nSkill: `{name}`\nStatus: source-review\nLocal overlay: {overlay}\n"
+        active_source = self.write_active_skill(
+            name,
+            record.format(name=name, overlay="first")
+            + "\n---\n\n"
+            + record.format(name=name, overlay="secnod"),
+        )
+        candidate = self.write_candidate(name, "替换后的夹具描述")
+        (candidate / "SOURCE.md").write_text(
+            record.format(name=name, overlay="first")
+            + "\n---\n\n"
+            + record.format(name=name, overlay="second"),
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "update")
+        args = self.wrapper_args(candidate, manifest)
+        args.insert(2, "--update")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(args)
+
+        self.assertEqual(code, 0)
+        landed = active_source.read_text(encoding="utf-8")
+        self.assertIn("Local overlay: second", landed)
+        self.assertNotIn("secnod", landed)
+        self.assertEqual(landed.count("# Source Provenance"), 3)
+
+    def test_update_repeating_an_evidence_less_active_overlay_succeeds(self) -> None:
+        # Records older than the wrapper carry no evidence; an unchanged overlay may repeat their summary.
+        name = "test-skill-wrapper"
+        history = (
+            f"# Source Provenance\n\nSkill: `{name}`\nStatus: source-review\n"
+            "Local overlay: extended (description localized)\n"
+        )
+        active_source = self.write_active_skill(name, history)
+        candidate = self.write_candidate(name, "替换后的夹具描述")
+        (candidate / "SOURCE.md").write_text(history, encoding="utf-8")
+        manifest = self.write_manifest(name, "update")
+        decision = json.loads(manifest.read_text(encoding="utf-8"))
+        decision["local_overlay"] = {"status": "extended", "summary": "description localized"}
+        manifest.write_text(json.dumps(decision, ensure_ascii=False), encoding="utf-8")
+        args = self.wrapper_args(candidate, manifest)
+        args.insert(2, "--update")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(args)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(active_source.read_text(encoding="utf-8").count("# Source Provenance"), 2)
+
+    def test_install_candidate_source_with_a_hand_written_record_fails_closed(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.write_candidate(name, "手写本次记录夹具")
+        (candidate / "SOURCE.md").write_text(
+            "\n".join(
+                [
+                    "# Source Provenance",
+                    "",
+                    f"Skill: `{name}`",
+                    "Status: source-review",
+                    "Local overlay: extended (step 4 gains priority labels)",
+                    "Guarded activation: complete only after ledger, closure, catalog, and hash postchecks pass.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "install")
+        decision = json.loads(manifest.read_text(encoding="utf-8"))
+        decision["local_overlay"] = {"status": "extended", "summary": "step 4 gains priority labels"}
+        manifest.write_text(json.dumps(decision, ensure_ascii=False), encoding="utf-8")
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertFalse((self.active / name).exists())
+        self.assertIn("候选 SOURCE.md 末条记录没有 Guarded transaction evidence", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

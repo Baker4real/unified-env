@@ -508,6 +508,29 @@ class SkillInstallGuardedCanonicalRenameTests(GuardedInstallTestCase):
         self.assertIn("canonical rename", source_fields["local_overlay"])
         self.assertIn("decision-manifest.json", source_fields["decision_manifest"])
 
+    def test_canonical_rename_identity_record_may_repeat_the_overlay_line(self) -> None:
+        # The rename contract has the candidate carry its successor identity record without evidence.
+        state = self.prepare_canonical_rename()
+        candidate = Path(state["candidate"])
+        source_path = candidate / "SOURCE.md"
+        source_path.write_text(
+            source_path.read_text(encoding="utf-8")
+            + f"Local overlay: replayed (canonical rename {state['old_name']} -> {state['new_name']})\n",
+            encoding="utf-8",
+        )
+        manifest = Path(state["manifest"])
+        manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+        manifest_payload["candidate_integrity"] = PAYLOAD.candidate_integrity_payload(candidate)
+        manifest.write_text(json.dumps(manifest_payload, ensure_ascii=False), encoding="utf-8")
+        args = self.wrapper_args(candidate, manifest, name=str(state["new_name"]))
+        args.append("--update")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = WRAPPER.main(args)
+
+        self.assertEqual(code, 0)
+        self.assertTrue((self.active / str(state["new_name"]) / "SKILL.md").is_file())
+
     def test_canonical_rename_migrates_direct_source_coverage(self) -> None:
         state = self.prepare_canonical_rename()
         old_name = str(state["old_name"])

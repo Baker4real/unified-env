@@ -173,8 +173,7 @@ def source_record_text(
         [
             f"Retrieval: `{command}`",
             f"writing-for-agents gate: {context['writing_revision']}",
-            f"Local overlay: {context['overlay_status']}"
-            + (f" ({context['overlay_summary']})" if context["overlay_summary"] else ""),
+            f"Local overlay: {local_overlay_value(context)}",
             "Guarded activation: complete only after ledger, closure, catalog, and hash postchecks pass.",
             f"Guarded transaction evidence: `{context['evidence_path']}`",
             f"Decision manifest: `{context['manifest_path']}`",
@@ -182,6 +181,53 @@ def source_record_text(
         ]
     )
     return "\n".join(lines)
+
+
+def local_overlay_value(context: dict[str, Any]) -> str:
+    return context["overlay_status"] + (
+        f" ({context['overlay_summary']})" if context["overlay_summary"] else ""
+    )
+
+
+def reject_candidate_own_record(
+    path: Path,
+    *,
+    active_source: Path,
+    context: dict[str, Any],
+) -> None:
+    """The wrapper appends this transaction's record; a candidate keeps only the active records.
+
+    Repairing those records in place stays allowed; adding one, or copying this
+    transaction's Local overlay into a last record without evidence, fails closed.
+    """
+    # A canonical rename candidate carries its successor identity record by contract.
+    if not path.exists() or isinstance(context.get("canonical_rename"), dict):
+        return
+    record = parse_current_source_record(read_source_text(path))
+    active = (
+        parse_current_source_record(read_source_text(active_source))
+        if active_source.exists()
+        else None
+    )
+    if active is not None and record.section_index > active.section_index:
+        raise InstallError(
+            f"候选 SOURCE.md 比 active 副本多出 {record.section_index - active.section_index} 条记录："
+            "本次记录由 wrapper 按 decision manifest 追加（含 Guarded transaction evidence 与 "
+            "Decision manifest），候选只保留 active 已有的记录"
+        )
+    overlay = local_overlay_value(context)
+    # Only a free-text summary identifies this transaction; default statuses recur in old records,
+    # and an evidence-less active record may carry the same summary when the overlay is unchanged.
+    if (
+        context["overlay_summary"]
+        and not record.values_for("Guarded transaction evidence")
+        and overlay in record.values_for("Local overlay")
+        and (active is None or overlay not in active.values_for("Local overlay"))
+    ):
+        raise InstallError(
+            "候选 SOURCE.md 末条记录没有 Guarded transaction evidence，Local overlay 却与本次 "
+            "decision manifest 相同：这是本次记录的手写副本，wrapper 会自行追加本次记录，候选里删掉它"
+        )
 
 
 def append_source_record(

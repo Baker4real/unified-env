@@ -110,6 +110,12 @@ def stage_candidate(
             if (target / "SOURCE.md").read_bytes() != source_bytes:
                 raise InstallError("skill-creator system provenance SOURCE staging hash mismatch")
         else:
+            if args.candidate:
+                _source_record.reject_candidate_own_record(
+                    target / "SOURCE.md",
+                    active_source=active_root / ledger_names[names.index(name)] / "SOURCE.md",
+                    context=context,
+                )
             _source_record.append_source_record(
                 target / "SOURCE.md",
                 skill_name=(name if target_scope == "active" else f".system/{name}"),
