@@ -672,8 +672,10 @@
         "AGENTS.md",
         "CONTEXT.md",
         "README.md",
+        "codegraph.json",
         "modules/README.md",
         "modules/manifest.json",
+        "scripts/Publish-GitHubIssueComment.ps1",
         "scripts/Run-ManifestTests.cjs",
         "scripts/Run-PowerShellTests.cjs",
         "scripts/Validate-ModuleBoundaries.cjs"
@@ -686,6 +688,7 @@
       "fixture": {
         "powershell": [
           "tests/Test-PreCommitPrivacyHook.ps1",
+          "tests/Test-PublishGitHubIssueComment.ps1",
           "tests/Test-RunPowerShellTests.ps1"
         ],
         "python": [],

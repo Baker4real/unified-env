@@ -14,19 +14,26 @@ intent: 说明统一环境项目使用 GitHub Issues 的 tracker 约定
 - 创建 issue：`gh issue create --title "..." --body "..."`
 - 读取 issue：`gh issue view <number> --comments`
 - 列出 issue：`gh issue list --state open --json 'number,title,body,labels,comments'`
-- 添加评论：`gh issue comment <number> --body "..."`
+- 添加评论：正文写进文件并带一个唯一的隐藏 marker，用 `scripts/Publish-GitHubIssueComment.ps1` 发（见下节）
 - 管理标签：`gh issue edit <number> --add-label "..."` 或 `--remove-label "..."`
 - 完成 issue：先添加必要的结论评论，再执行 `gh issue close <number>`
 
 标签词汇以 `docs/agents/triage-labels.md` 为准。已完成事项通过关闭 GitHub issue 表示。
 
-## GraphQL 报 EOF 时
+## gh 报 EOF 时
 
-`gh issue …` 和 `gh label …` 走 GraphQL，偶尔报 `Post "https://api.github.com/graphql": EOF`。同一操作改用 `gh api` 走 REST。在仓库根目录运行时 gh 会填好 `{owner}` 和 `{repo}`；PowerShell 里整条路径加单引号。
+`gh issue …`、`gh label …`（GraphQL）和 `gh api …`（REST）都会偶发 EOF，例如 `Post "https://api.github.com/graphql": EOF` 或 `Get "https://api.github.com/repos/<owner>/<repo>/issues/89": EOF`。这时退出码非 0、stdout 为空：
+
+- 每次 gh 调用都检查退出码；空输出不能当成"没有数据"或"不存在"。
+- 读取失败就退避重试；重试用完仍失败就停下，不拿不完整的读取结果做判断。
+- 发评论不能直接重试：失败的请求可能已经落地。先重新读取评论，按正文里唯一的隐藏 marker（`<!-- … -->`）判断是否已写入，确认没有才重发。加、删标签是幂等的，可以直接重试。
+
+`scripts/Publish-GitHubIssueComment.ps1` 按这三条发评论并按需改标签（`-Number`、`-BodyPath`、`-Marker`，可选 `-AddLabels`、`-RemoveLabels`）。它全程走 REST，结束时回读核验，输出一行 JSON：带 marker 的评论恰好一条且标签符合要求时退出 0，否则退出 1 并在 `error` 里说明。
+
+其他操作的 REST 写法如下。在仓库根目录运行时 gh 会填好 `{owner}` 和 `{repo}`；PowerShell 里整条路径加单引号。
 
 - 读取 issue：`gh api 'repos/{owner}/{repo}/issues/<number>'`，评论在同一路径后加 `/comments`
 - 列出 open issue：`gh api 'repos/{owner}/{repo}/issues?state=open&per_page=100' --paginate --jq '.[] | select(.pull_request == null) | [.number, .title] | @tsv'`（REST 结果里混着 PR，要滤掉）
-- 添加结论或证据评论：正文先写进文件，再 `gh api 'repos/{owner}/{repo}/issues/<number>/comments' -F body=@<文件>`
 - 关闭 issue：`gh api -X PATCH 'repos/{owner}/{repo}/issues/<number>' -f state=closed -f state_reason=completed`
 - 管理标签：加 `gh api 'repos/{owner}/{repo}/issues/<number>/labels' -f 'labels[]=<标签>'`，删 `gh api -X DELETE 'repos/{owner}/{repo}/issues/<number>/labels/<标签>'`，列出 `gh api 'repos/{owner}/{repo}/labels' --paginate --jq '.[].name'`
 
