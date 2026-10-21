@@ -254,6 +254,24 @@ class SkillInstallGuardedSystemOverlayTests(SystemRepairTestCase):
             REPAIR.SKILL_CREATOR_OVERLAY_KIND,
         )
 
+    def test_skill_creator_compatibility_replay_records_its_own_date(self) -> None:
+        # A Store refresh wipes the overlay; the replay must not hide behind the first apply's entry.
+        state = self.prepare_skill_creator_compatibility_overlay()
+        summary = (
+            "guarded system provenance overlay: bound skill-creator quick_validate "
+            "argument-hint/disable-model-invocation compatibility payload."
+        )
+        earlier = {"skill": ".system/skill-creator", "date": "2026-09-06", "summary": summary}
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        ledger["sources"][0]["local_changes"].append(earlier)
+        self.ledger.write_text(json.dumps(ledger, ensure_ascii=False), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(WRAPPER.main(state["args"]), 0)
+        replay = {"skill": ".system/skill-creator", "date": BASE.today(), "summary": summary}
+        changes = json.loads(self.ledger.read_text(encoding="utf-8"))["sources"][0]["local_changes"]
+        self.assertIn(earlier, changes)
+        self.assertEqual(changes.count(replay), 1)
+
     def test_skill_creator_update_without_managed_overlay_fails_closed(self) -> None:
         state = self.prepare_skill_creator_compatibility_overlay()
         manifest = Path(state["manifest"])

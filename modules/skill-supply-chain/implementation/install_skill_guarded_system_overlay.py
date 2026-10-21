@@ -355,16 +355,14 @@ def apply_system_provenance_overlay_to_ledger(
     changes = entry.setdefault("local_changes", [])
     if not isinstance(changes, list):
         raise InstallError("system source group local_changes must be an array")
-    summary = (
-        "guarded system provenance overlay: bound skill-creator quick_validate "
-        "argument-hint/disable-model-invocation compatibility payload."
-    )
-    if not any(
-        isinstance(item, dict)
-        and item.get("skill") == ".system/skill-creator"
-        and item.get("summary") == summary
-        for item in changes
-    ):
-        changes.append({"skill": ".system/skill-creator", "date": _base.today(), "summary": summary})
+    # Each successful apply is its own event: a replay after a Store refresh keeps its date in the history.
+    changes.append({
+        "skill": ".system/skill-creator",
+        "date": _base.today(),
+        "summary": (
+            "guarded system provenance overlay: bound skill-creator quick_validate "
+            "argument-hint/disable-model-invocation compatibility payload."
+        ),
+    })
     updated["updated_at"] = _base.today()
     return updated
