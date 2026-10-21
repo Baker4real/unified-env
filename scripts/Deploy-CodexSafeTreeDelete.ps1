@@ -326,6 +326,30 @@ if ($mutex.WaitOne([TimeSpan]::FromMinutes(2))) {
     }
 }
 
+# 与 Get-CodexSafeTreeDeleteQuietWindow.ps1 里的同名函数逐字一致（安静窗口测试核对），改时两处同改。
+function Get-ProcessAncestorIds {
+    # 从 StartProcessId 沿 ParentProcessId 上溯，返回它自身及祖先的 PID 集合；到 PID <= 4
+    # （System/Idle）或表里没有的 PID 为止。ParentProcessId 只是快照值：祖先的父进程退出后，
+    # 它的 PID 可能被更晚创建的进程复用（链外的无关进程，或链下方的进程从而让父链成环）。
+    # 真父进程一定早于子进程创建，所以父 PID 上的进程比子进程创建得晚就停；遇到已访问过的
+    # PID 也停，保证上溯必然终止。
+    param(
+        [Parameter(Mandatory)][hashtable]$ProcessesById,
+        [Parameter(Mandatory)][int]$StartProcessId
+    )
+
+    $ancestors = [Collections.Generic.HashSet[int]]::new()
+    $cursor = $StartProcessId
+    while ($ProcessesById.ContainsKey($cursor) -and $ancestors.Add($cursor)) {
+        $child = $ProcessesById[$cursor]
+        $cursor = [int]$child.ParentProcessId
+        if ($cursor -le 4) { break }
+        if ($ProcessesById.ContainsKey($cursor) -and
+            $ProcessesById[$cursor].CreationDate -gt $child.CreationDate) { break }
+    }
+    return , $ancestors
+}
+
 function Get-LegacyInventory {
     # 按 executable+PID+starttime+commandline 枚举可能经旧 wrapper/repo entry 启动的
     # safe-delete/native-compile 进程；command line 不可读即失败闭锁。当前进程及其
@@ -335,13 +359,7 @@ function Get-LegacyInventory {
     $all = @(Get-CimInstance Win32_Process)
     $byId = @{}
     foreach ($process in $all) { $byId[[int]$process.ProcessId] = $process }
-    $excluded = [Collections.Generic.HashSet[int]]::new()
-    $cursor = [int]$PID
-    while ($byId.ContainsKey($cursor)) {
-        [void]$excluded.Add($cursor)
-        $cursor = [int]$byId[$cursor].ParentProcessId
-        if ($cursor -le 4) { break }
-    }
+    $excluded = Get-ProcessAncestorIds -ProcessesById $byId -StartProcessId ([int]$PID)
     $rows = @()
     foreach ($process in $all) {
         if ($excluded.Contains([int]$process.ProcessId)) { continue }

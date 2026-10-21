@@ -334,6 +334,7 @@
         "scripts/Invoke-SafeCleanupJob.ps1",
         "scripts/lib/SafeCleanupJob.ps1",
         "scripts/Measure-CodexSafeTreeDeleteHistory.ps1",
+        "scripts/Get-CodexSafeTreeDeleteQuietWindow.ps1",
         "scripts/lib/CodexHookHandleBoundIO.cs",
         "scripts/lib/CodexHostSafety.ps1",
         "scripts/lib/CodexUserEnvironmentTransaction.cs",
@@ -354,6 +355,8 @@
           "scripts/Invoke-SafeCleanupJob.ps1",
           "scripts/lib/SafeCleanupJob.ps1",
           "scripts/Measure-CodexSafeTreeDeleteHistory.ps1",
+          "scripts/Get-CodexSafeTreeDeleteQuietWindow.ps1",
+          "tests/Test-CodexSafeTreeDeleteQuietWindow.ps1",
           "tests/Test-SafeCleanupJob.ps1",
           "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
           "tests/Test-CodexSafeTreeDeleteRealHistoryBenchmark.ps1",
@@ -515,6 +518,7 @@
           "powershell": [
             "tests/Test-CodexSafeTreeDelete.ps1",
             "tests/Test-CodexSafeTreeDeleteModeDispatch.ps1",
+            "tests/Test-CodexSafeTreeDeleteQuietWindow.ps1",
             "tests/Test-SafeCleanupJob.ps1",
             "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeleteRealHistoryBenchmark.ps1",
@@ -566,6 +570,7 @@
         "fixture-base": {
           "powershell": [
             "tests/Test-HostDiagnostics.ps1",
+            "tests/Test-CodexSafeTreeDeleteQuietWindow.ps1",
             "tests/Test-SafeCleanupJob.ps1",
             "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeleteRealHistoryBenchmark.ps1",

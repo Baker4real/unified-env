@@ -12,6 +12,8 @@ $ErrorActionPreference = 'Stop'
 # #93：等锁时长测试 seam（GateWaitSecondsForTest / InstalledShimGateWaitSecondsForTest，
 # S10 不再真等 5/2 分钟；生产默认不变）与 legacy drain 范围 seam（S11：命令行含入口标记
 # 但不含本次 state root 的外部进程不阻塞 fixture 部署，含 state root 的仍阻塞）。
+# S12：drain 排除自身祖先链时，父 PID 被更晚创建的进程复用（链外无关进程或父链成环）不算祖先，
+#      上溯必须终止（合成进程表、带超时）。
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $deployTool = Join-Path $projectRoot 'scripts\Deploy-CodexSafeTreeDelete.ps1'
@@ -647,6 +649,64 @@ exit 0
     Assert-True ([IO.File]::Exists($drainedPath)) '标记进程退出后 40-legacy-drained 必须落盘'
     [void](Complete-FixturePwsh -Call $marked -TimeoutSeconds 60)
     Write-Output 'S11 drain-scope OK'
+
+    # ---- S12：legacy drain 排除自身祖先链时，被复用的父 PID 不算祖先，父链成环也必须终止 ----
+    # 祖先链上溯是部署工具里的纯函数：取出它的源码，在独立 runspace 里对合成进程表求值并
+    # 设超时，回归成死循环时报错，而不是挂住整个套件。
+    Write-Output 'STEP s12-ancestor-chain'
+    $deployTokens = $null
+    $deployParseErrors = $null
+    $deployAst = [Management.Automation.Language.Parser]::ParseFile($deployTool, [ref]$deployTokens, [ref]$deployParseErrors)
+    Assert-True ($deployParseErrors.Count -eq 0) "部署工具解析失败：$($deployParseErrors -join '; ')"
+    $ancestorFunction = $deployAst.Find({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Get-ProcessAncestorIds'
+    }, $true)
+    Assert-True ($null -ne $ancestorFunction) '部署工具缺少 Get-ProcessAncestorIds'
+    $ancestorProbe = "param(`$Table, `$Start)`n" + $ancestorFunction.Extent.Text + "`n" +
+        '@(Get-ProcessAncestorIds -ProcessesById $Table -StartProcessId $Start | ForEach-Object { $_ }) | Sort-Object'
+
+    function Get-AncestorIdText {
+        param([Parameter(Mandatory)][hashtable]$Table, [Parameter(Mandatory)][int]$Start)
+        $shell = [PowerShell]::Create()
+        try {
+            [void]$shell.AddScript($ancestorProbe).AddArgument($Table).AddArgument($Start)
+            $pending = $shell.BeginInvoke()
+            if (-not $pending.AsyncWaitHandle.WaitOne(10000)) {
+                $shell.Stop()
+                throw "祖先链上溯从 $Start 出发 10s 内没有结束（父链成环时不终止）"
+            }
+            return (@($shell.EndInvoke($pending) | ForEach-Object { [int]$_ }) -join ',')
+        } finally {
+            $shell.Dispose()
+        }
+    }
+
+    function New-ProcessRow {
+        param([Parameter(Mandatory)][int]$ParentProcessId, [Parameter(Mandatory)][int]$CreatedSecond)
+        return [pscustomobject]@{
+            ParentProcessId = $ParentProcessId
+            CreationDate = [datetime]::new(2026, 1, 1).AddSeconds($CreatedSecond)
+        }
+    }
+
+    # 行 = New-ProcessRow <父 PID> <创建时刻（秒）>；真父进程总比子进程早创建。
+    # 无环：上溯到 PID <= 4 即停，System 不计入。
+    $plainChain = @{ 500 = (New-ProcessRow 400 50); 400 = (New-ProcessRow 300 40); 300 = (New-ProcessRow 4 30); 4 = (New-ProcessRow 0 0) }
+    Assert-True ((Get-AncestorIdText -Table $plainChain -Start 500) -ceq '300,400,500') '无环父链的祖先集合不对'
+    # 父进程已退出：在表里找不到的 PID 处结束。
+    $orphanChain = @{ 500 = (New-ProcessRow 400 50); 400 = (New-ProcessRow 9999 40) }
+    Assert-True ((Get-AncestorIdText -Table $orphanChain -Start 500) -ceq '400,500') '父进程已退出时的祖先集合不对'
+    # 300 已退出的父进程 PID 被链外更晚创建的无关进程 700 复用：700 及其父进程 600 都不算祖先。
+    $reusedChain = @{ 500 = (New-ProcessRow 400 50); 400 = (New-ProcessRow 300 40); 300 = (New-ProcessRow 700 30); 700 = (New-ProcessRow 600 60); 600 = (New-ProcessRow 4 5) }
+    Assert-True ((Get-AncestorIdText -Table $reusedChain -Start 500) -ceq '300,400,500') '父 PID 被链外更晚创建的进程复用时的祖先集合不对'
+    # 成环：300 已退出的父进程 PID 被链下方更晚创建的 400 复用，500 -> 400 -> 300 -> 400。
+    $cyclicChain = @{ 500 = (New-ProcessRow 400 50); 400 = (New-ProcessRow 300 40); 300 = (New-ProcessRow 400 30) }
+    Assert-True ((Get-AncestorIdText -Table $cyclicChain -Start 500) -ceq '300,400,500') '父链成环时的祖先集合不对'
+    # 自环：父 PID 等于自身，创建时间区分不了，只能靠已访问判定终止。
+    $selfChain = @{ 500 = (New-ProcessRow 500 50) }
+    Assert-True ((Get-AncestorIdText -Table $selfChain -Start 500) -ceq '500') '父 PID 等于自身时的祖先集合不对'
+    Write-Output 'S12 ancestor-chain OK'
 
     Write-Output 'DEPLOYMENT-TESTS OK'
 } finally {
