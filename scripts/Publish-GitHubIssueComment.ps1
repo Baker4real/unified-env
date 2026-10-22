@@ -30,7 +30,8 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 $projectRoot = Split-Path -Parent $PSScriptRoot
 # 下面会切到仓库根运行 gh，相对路径先按调用方的当前位置解析。
 $BodyPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($BodyPath)
-$ghCommand =$(if ($null -ne $GhCommandForTest -and $GhCommandForTest.Count -gt 0) { $GhCommandForTest } else { @('gh') })
+# 用 @() 让只有 'gh' 一个元素时仍是数组；$() 会把它展开成字符串，下面取 [0] 就只剩 'g'。
+$ghCommand = @(if ($null -ne $GhCommandForTest -and $GhCommandForTest.Count -gt 0) { $GhCommandForTest } else { 'gh' })
 $markerComment = '<!-- {0} -->' -f $Marker
 $issuePath = 'repos/{0}/issues/{1}' -f $Repository, $Number
 $attemptLimit = 4

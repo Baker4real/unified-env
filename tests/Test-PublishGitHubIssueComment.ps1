@@ -222,4 +222,21 @@ $run = Invoke-Publish @{ BodyPath = $bodyWithoutMarkerPath }
 Assert-True ($run.exitCode -eq 1 -and $run.result['ok'] -eq $false) ('正文缺 marker 时应以 1 退出：{0}' -f $run.text)
 Assert-True (@((Get-FakeState)['calls']).Count -eq 0) '正文缺 marker 时不应调用 gh。'
 
+# 生产路径：不带替身 seam 时按 PATH 解析 gh，命令只有 'gh' 一个元素，必须仍按数组取第一个元素。
+# PATH 最前面放一个转发到替身的 gh.cmd，并先确认解析到它，免得真 gh 对 fixture/repo 发请求。
+$pathGhRoot = Join-Path $FixtureRoot 'path-gh'
+[void][IO.Directory]::CreateDirectory($pathGhRoot)
+$pathGhCmd = Join-Path $pathGhRoot 'gh.cmd'
+[IO.File]::WriteAllText($pathGhCmd, ("@echo off`r`n`"{0}`" -NoProfile -NonInteractive -File `"{1}`" %*`r`nexit /b %ERRORLEVEL%`r`n" -f $pwsh, $fakeGhPath), $utf8)
+Set-FakeState
+$previousPath = $env:PATH
+$env:PATH = $pathGhRoot + [IO.Path]::PathSeparator + $env:PATH
+try {
+    $resolvedGh = Get-Command -Name gh | Select-Object -First 1
+    Assert-True ($resolvedGh.Source -eq $pathGhCmd) ('gh 应解析到替身 {0}，实际是 {1}' -f $pathGhCmd, $resolvedGh.Source)
+    $null = Assert-Published (Invoke-Publish @{ GhCommandForTest = $null }) 'posted' '不带 seam、按 PATH 解析 gh'
+} finally {
+    $env:PATH = $previousPath
+}
+
 'publish github issue comment: all checks passed'
