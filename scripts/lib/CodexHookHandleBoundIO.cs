@@ -1103,7 +1103,7 @@ namespace CodexHookGovernance
             try
             {
                 string current = volumeRoot;
-                OpenAndHoldVerifiedDirectory(current, openedHandles);
+                OpenAndHoldVerifiedDirectory(current, rootPath, openedHandles);
 
                 string relative = targetPath.Substring(volumeRoot.Length);
                 string[] segments = relative.Split(
@@ -1116,7 +1116,7 @@ namespace CodexHookGovernance
                     bool isTarget = segmentIndex == segments.Length - 1;
                     SafeFileHandle handle;
                     int error;
-                    if (TryOpenVerifiedDirectory(current, isTarget && targetDeleteAccess, out handle, out error))
+                    if (TryOpenVerifiedDirectory(current, isTarget && targetDeleteAccess, !isTarget, out handle, out error))
                     {
                         if (isTarget && requireTargetCreation)
                         {
@@ -1131,7 +1131,7 @@ namespace CodexHookGovernance
                         if (!createMissing || !belowTrustedRoot ||
                             (error != ErrorFileNotFound && error != ErrorPathNotFound))
                         {
-                            throw new Win32Exception(error, "Unable to open a verified directory in the path chain.");
+                            throw CreateChainOpenException(error, current, rootPath, "Unable to open a verified directory in the path chain");
                         }
 
                         if (!CreateDirectoryW(ToExtendedPath(current), IntPtr.Zero))
@@ -1147,9 +1147,9 @@ namespace CodexHookGovernance
                             }
                         }
 
-                        if (!TryOpenVerifiedDirectory(current, isTarget && targetDeleteAccess, out handle, out error))
+                        if (!TryOpenVerifiedDirectory(current, isTarget && targetDeleteAccess, !isTarget, out handle, out error))
                         {
-                            throw new Win32Exception(error, "Unable to verify a newly created directory in the path chain.");
+                            throw CreateChainOpenException(error, current, rootPath, "Unable to verify a newly created directory in the path chain");
                         }
                     }
                     openedHandles.Add(handle);
@@ -1181,20 +1181,72 @@ namespace CodexHookGovernance
 
         private static void OpenAndHoldVerifiedDirectory(
             string path,
+            string trustedRootPath,
             List<SafeFileHandle> openedHandles)
         {
             SafeFileHandle handle;
             int error;
-            if (!TryOpenVerifiedDirectory(path, false, out handle, out error))
+            if (!TryOpenVerifiedDirectory(path, false, true, out handle, out error))
             {
-                throw new Win32Exception(error, "Unable to open a verified directory in the path chain.");
+                throw CreateChainOpenException(error, path, trustedRootPath, "Unable to open a verified directory in the path chain");
             }
             openedHandles.Add(handle);
+        }
+
+        private static Win32Exception CreateChainOpenException(
+            int error,
+            string failedPath,
+            string trustedRootPath,
+            string operation)
+        {
+            return new Win32Exception(
+                error,
+                operation +
+                " at '" + TrimDirectoryEnding(Path.GetFullPath(failedPath)) +
+                "' (" + DescribeChainFailureLevel(failedPath, trustedRootPath) +
+                ", Win32 error " + error + ").");
+        }
+
+        private static string DescribeChainFailureLevel(string failedPath, string trustedRootPath)
+        {
+            string failed = TrimDirectoryEnding(Path.GetFullPath(failedPath));
+            string root = TrimDirectoryEnding(Path.GetFullPath(trustedRootPath));
+            if (string.Equals(failed, root, StringComparison.OrdinalIgnoreCase))
+            {
+                return "relative path '.' below the trusted root '" + root + "'";
+            }
+
+            string rootPrefix = WithTrailingSeparator(root);
+            if (failed.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return "relative path '" + failed.Substring(rootPrefix.Length) +
+                    "' below the trusted root '" + root + "'";
+            }
+
+            string failedPrefix = WithTrailingSeparator(failed);
+            if (root.StartsWith(failedPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                int levels = root.Substring(failedPrefix.Length).Split(
+                    new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                    StringSplitOptions.RemoveEmptyEntries).Length;
+                return levels + (levels == 1 ? " level above" : " levels above") +
+                    " the trusted root '" + root + "'";
+            }
+
+            return "outside the trusted root '" + root + "'";
+        }
+
+        private static string WithTrailingSeparator(string path)
+        {
+            return path.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? path
+                : path + Path.DirectorySeparatorChar;
         }
 
         private static bool TryOpenVerifiedDirectory(
             string expectedPath,
             bool requireDeleteAccess,
+            bool shareWrite,
             out SafeFileHandle handle,
             out int error)
         {
@@ -1202,7 +1254,7 @@ namespace CodexHookGovernance
             handle = CreateFileW(
                 ToExtendedPath(lexicalPath),
                 GenericRead | (requireDeleteAccess ? ReadControl | WriteDac | DeleteAccess : 0),
-                FileShare.Read,
+                shareWrite ? (FileShare.Read | FileShare.Write) : FileShare.Read,
                 IntPtr.Zero,
                 OpenExisting,
                 FileFlagBackupSemantics | FileFlagOpenReparsePoint,
