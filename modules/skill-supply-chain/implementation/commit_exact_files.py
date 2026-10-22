@@ -7,7 +7,11 @@ expected HEAD, so only the named paths change: each file is read once, checked
 against its reviewed SHA-256, and those same bytes become the blob (through the
 repository's clean filters, as ``git add`` would apply them).  ``git commit``
 runs with its normal hooks.  Afterwards only the committed paths are refreshed
-in the shared index; other sessions' staged and unstaged work stays put.
+in the shared index; other sessions' staged and unstaged work stays put.  The
+refresh waits up to 30 seconds for another git process's ``index.lock``; if it
+still cannot run, the commit stands, and the helper prints it and exits 3,
+naming the ``git reset`` that finishes the refresh.  Until that runs, a commit
+from the shared index would revert the committed paths.
 
 When another session's edits share a file, ``--list-hunks PATH`` prints the
 file's work-tree SHA-256 and numbers its zero-context hunks against HEAD (the
@@ -42,18 +46,30 @@ import argparse
 import hashlib
 import os
 import re
+import shlex
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
 
 REGULAR_FILE_MODES = {"100644", "100755"}
 HUNK_HEADER = re.compile(rb"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
+INDEX_LOCK_WAIT_SECONDS = 30.0
+INDEX_LOCK_POLL_SECONDS = 0.25
 
 
 class CommitError(Exception):
     """A precondition or postcondition failed; the message names it."""
+
+
+class IndexNotRefreshed(CommitError):
+    """The commit exists, but the shared index still holds the committed paths' old entries."""
+
+    def __init__(self, head: str, message: str) -> None:
+        super().__init__(message)
+        self.head = head
 
 
 def git(
@@ -152,6 +168,30 @@ def list_hunks(repo: Path, path: str) -> str:
     return "\n".join(rows)
 
 
+def refresh_shared_index(repo: Path, git_dir: Path, head: str, paths: list[str]) -> None:
+    """Point the shared index entries of ``paths`` at the new commit ``head``.
+
+    Another git process (a status refresh, another session's commit) may hold
+    ``index.lock`` for a moment; wait up to ``INDEX_LOCK_WAIT_SECONDS`` for it.
+    """
+    lock = git_dir / "index.lock"
+    deadline = time.monotonic() + INDEX_LOCK_WAIT_SECONDS
+    while True:
+        try:
+            git(repo, "reset", "-q", "--", *paths)
+            return
+        except CommitError as exc:
+            if ("index.lock" in str(exc) or lock.exists()) and time.monotonic() < deadline:
+                time.sleep(INDEX_LOCK_POLL_SECONDS)
+                continue
+            command = shlex.join(["git", "-C", str(repo), "reset", "-q", "--", *paths])
+            raise IndexNotRefreshed(
+                head,
+                f"提交 {head} 已生成，但共享 index 没有刷新（{exc}）。处理掉原因（通常是别的 git 进程持有 index.lock）"
+                f"后运行 {command}；在此之前用共享 index 提交，会把这次提交的改动回退",
+            ) from exc
+
+
 def commit_exact(
     *,
     repo: Path,
@@ -225,7 +265,7 @@ def commit_exact(
         raise CommitError(f"新提交 {head} 的父提交是 {parent}，不是 {expected}；推送前人工核对")
     if git_text(repo, "rev-parse", "--verify", "HEAD^{tree}") != tree:
         raise CommitError(f"新提交 {head} 的 tree 与私有 index 不一致（hook 改了暂存内容？）；推送前人工核对")
-    git(repo, "reset", "-q", "--", *paths)
+    refresh_shared_index(repo, git_dir, head, paths)
     return head
 
 
@@ -310,6 +350,10 @@ def main(argv: list[str] | None = None) -> int:
             deletes=deletes,
             hunks=hunks,
         )
+    except IndexNotRefreshed as exc:
+        print(git_text(repo, "show", "--stat", "--format=%H%n%an <%ae> | %s", exc.head))
+        print(f"commit_exact_files: {exc}", file=sys.stderr)
+        return 3
     except (CommitError, OSError) as exc:
         print(f"commit_exact_files: {exc}", file=sys.stderr)
         return 1

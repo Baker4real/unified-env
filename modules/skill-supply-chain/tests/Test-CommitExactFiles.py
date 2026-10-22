@@ -9,8 +9,11 @@ import io
 import os
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -161,6 +164,46 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(self.head(), self.base)
         self.assertEqual(self.status(), [" M a.txt"])
         self.assertEqual(list((self.repo / ".git").glob("index.commit-exact-files.*")), [])
+
+    def test_held_index_lock_reports_the_created_commit_and_how_to_refresh(self) -> None:
+        self.write("a.txt", b"a2\n")
+        lock = self.repo / ".git" / "index.lock"
+        lock.write_bytes(b"")
+        with mock.patch.object(HELPER, "INDEX_LOCK_WAIT_SECONDS", 0.5):
+            code, error = self.run_helper("--file", "a.txt", sha256(b"a2\n"))
+        created = self.head()
+        self.assertEqual(code, 3, error)
+        self.assertEqual(self.git("rev-parse", "HEAD^").strip(), self.base)
+        self.assertEqual(self.show("HEAD:a.txt"), b"a2\n")
+        self.assertIn(created, error)
+        self.assertIn("reset -q -- a.txt", error)
+        lock.unlink()
+        self.assertEqual(self.status(), ["MM a.txt"])
+        self.git("reset", "-q", "--", "a.txt")
+        self.assertEqual(self.status(), [])
+
+    def test_waits_out_an_index_lock_taken_right_after_the_commit(self) -> None:
+        hook = self.hooks / "post-commit"
+        hook.write_bytes(b"#!/bin/sh\n: > .git/index.lock\n")
+        os.chmod(hook, 0o755)
+        lock = self.repo / ".git" / "index.lock"
+        released = threading.Event()
+
+        def release_once_taken() -> None:
+            deadline = time.monotonic() + 30
+            while not lock.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            time.sleep(0.5)
+            lock.unlink(missing_ok=True)
+            released.set()
+
+        threading.Thread(target=release_once_taken, daemon=True).start()
+        self.write("a.txt", b"a2\n")
+        code, error = self.run_helper("--file", "a.txt", sha256(b"a2\n"))
+        self.assertTrue(released.wait(5), "post-commit hook never took the index lock")
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.show("HEAD:a.txt"), b"a2\n")
+        self.assertEqual(self.status(), [])
 
     def test_applies_clean_filters_like_git_add(self) -> None:
         self.git("config", "core.autocrlf", "true")
