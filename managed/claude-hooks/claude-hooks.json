@@ -1,4 +1,18 @@
 {
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "D:\\Codex\\tools\\bin\\node.exe",
+          "args": [
+            "D:\\agents\\projects\\统一环境\\managed\\claude-hooks\\claude-session-settings-check.mjs"
+          ],
+          "timeout": 10
+        }
+      ]
+    }
+  ],
   "PreToolUse": [
     {
       "matcher": "PowerShell|Bash",

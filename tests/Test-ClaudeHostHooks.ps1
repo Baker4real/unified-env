@@ -14,6 +14,7 @@ $node = 'D:\Codex\tools\bin\node.exe'
 $guardPath = Join-Path $managedRoot 'claude-pretool-guard.mjs'
 $stopHookPath = Join-Path $managedRoot 'claude-stop-handoff-lint.mjs'
 $pushGuardPath = Join-Path $managedRoot 'claude-public-push-guard.mjs'
+$sessionHookPath = Join-Path $managedRoot 'claude-session-settings-check.mjs'
 $managedHooksPath = Join-Path $managedRoot 'claude-hooks.json'
 $liveSettingsPath = Join-Path $env:USERPROFILE '.claude\settings.json'
 
@@ -25,12 +26,14 @@ function Assert-Equal([object]$Actual, [object]$Expected, [string]$Message) {
     if ($Actual -cne $Expected) { throw "$Message actual=[$Actual] expected=[$Expected]" }
 }
 
-# 不给 -Entrypoint 时从子进程环境里去掉 CLAUDE_CODE_ENTRYPOINT，结果不随运行本测试的宿主变化。
-function Invoke-Guard([AllowEmptyString()][string]$InputText, [string]$ScriptPath = $guardPath, [string]$Entrypoint) {
+# 不给 -Entrypoint、-ConfigDir 时从子进程环境里去掉 CLAUDE_CODE_ENTRYPOINT、CLAUDE_CONFIG_DIR，结果不随运行本测试的宿主变化。
+function Invoke-Guard([AllowEmptyString()][string]$InputText, [string]$ScriptPath = $guardPath, [string]$Entrypoint, [string]$ConfigDir) {
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $node
     if ($Entrypoint) { $startInfo.Environment['CLAUDE_CODE_ENTRYPOINT'] = $Entrypoint }
     else { [void]$startInfo.Environment.Remove('CLAUDE_CODE_ENTRYPOINT') }
+    if ($ConfigDir) { $startInfo.Environment['CLAUDE_CONFIG_DIR'] = $ConfigDir }
+    else { [void]$startInfo.Environment.Remove('CLAUDE_CONFIG_DIR') }
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true
@@ -151,6 +154,35 @@ foreach ($allowStop in @(
 $stopGarbage = Invoke-Guard 'not json' -ScriptPath $stopHookPath
 Assert-Equal $stopGarbage.stdout.Trim() '' 'stop hook 遇到非 JSON 输入必须放行。'
 
+# SessionStart hook：用户设置的 env 缺本机依赖的键时警告，只报键名；用 CLAUDE_CONFIG_DIR 指向夹具设置文件。
+Assert-True (Test-Path -LiteralPath $sessionHookPath -PathType Leaf) '缺少 claude-session-settings-check.mjs。'
+$sessionSelfTest = & $node $sessionHookPath --self-test
+Assert-Equal $LASTEXITCODE 0 "session hook --self-test 必须成功：$sessionSelfTest"
+$sessionDir = Join-Path $FixtureRoot ([guid]::NewGuid().ToString('N'))
+$sessionSettings = Join-Path $sessionDir 'settings.json'
+$sessionInput = @{ hook_event_name = 'SessionStart'; source = 'startup' } | ConvertTo-Json -Compress
+$marker = 'value-' + 'that-must-not-leak'
+[void][IO.Directory]::CreateDirectory($sessionDir)
+try {
+    $missing = @{ permissions = @{ deny = @('Bash') }; env = @{ DISABLE_AUTOUPDATER = '1'; ANTHROPIC_AUTH_TOKEN = $marker } }
+    [IO.File]::WriteAllText($sessionSettings, ($missing | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+    $result = Invoke-Guard $sessionInput -ScriptPath $sessionHookPath -ConfigDir $sessionDir
+    Assert-Equal $result.exitCode 0 'session hook 警告也必须 exit 0。'
+    Assert-True (-not $result.stdout.Contains($marker)) 'session hook 不得输出 env 的值。'
+    $warning = $result.stdout | ConvertFrom-Json
+    Assert-True ($warning.systemMessage -match 'CLAUDE_CODE_USE_POWERSHELL_TOOL') '缺 PowerShell 工具开关时警告必须点名这个键。'
+    Assert-Equal $warning.hookSpecificOutput.hookEventName 'SessionStart' '警告必须同时作为 SessionStart 上下文给 agent。'
+    Assert-Equal $warning.hookSpecificOutput.additionalContext $warning.systemMessage '给 agent 的上下文与界面警告一致。'
+    $complete = @{ permissions = @{ deny = @('Bash') }; env = @{ CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'; DISABLE_AUTOUPDATER = '1' } }
+    [IO.File]::WriteAllText($sessionSettings, ($complete | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+    $result = Invoke-Guard $sessionInput -ScriptPath $sessionHookPath -ConfigDir $sessionDir
+    Assert-Equal $result.stdout.Trim() '' '两个键都在时 session hook 不得输出。'
+}
+finally {
+    if (Test-Path -LiteralPath $sessionSettings) { Remove-Item -LiteralPath $sessionSettings }
+    if (Test-Path -LiteralPath $sessionDir) { [IO.Directory]::Delete($sessionDir) }
+}
+
 # 公开仓库推送 guard：夹具仓库建一次后保留复用（不递归删除），提交里埋一个 Tailscale 地址（拼接写，本文件推到公开仓库
 # 时不被自己拦下），远端指向不存在的 GitHub 仓库。gh 读不到可见性按公开处理，所以联网与否都应拦下；--dry-run 和确认标记放行。
 Assert-True (Test-Path -LiteralPath $pushGuardPath -PathType Leaf) '缺少 claude-public-push-guard.mjs。'
@@ -198,6 +230,11 @@ Assert-Equal $stopRegistration.Count 1 '受管注册只含一条 Stop。'
 $stopHook = @($stopRegistration[0].hooks)[0]
 Assert-Equal $stopHook.command $node 'Stop hook 必须用受管 node 的 exec 形式。'
 Assert-Equal @($stopHook.args)[0] (Join-Path $registeredRoot 'claude-stop-handoff-lint.mjs') 'Stop hook 参数必须指向受管 lint。'
+$sessionRegistration = @($managed.SessionStart)
+Assert-Equal $sessionRegistration.Count 1 '受管注册只含一条 SessionStart。'
+$sessionHook = @($sessionRegistration[0].hooks)[0]
+Assert-Equal $sessionHook.command $node 'SessionStart hook 必须用受管 node 的 exec 形式。'
+Assert-Equal @($sessionHook.args)[0] (Join-Path $registeredRoot 'claude-session-settings-check.mjs') 'SessionStart hook 参数必须指向受管设置检查。'
 
 if (-not $projectRoot.Equals($productionProjectRoot, [StringComparison]::OrdinalIgnoreCase)) {
     Write-Output "Test-ClaudeHostHooks: 本次从 $projectRoot 运行，不是正式检出，跳过 live settings.json 比对。"
