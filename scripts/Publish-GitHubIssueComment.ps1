@@ -21,6 +21,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $utf8 = [Text.UTF8Encoding]::new($false)
 # 按 UTF-8 解码 gh 的输出（评论正文含中文）。
 [Console]::OutputEncoding = $utf8
+. (Join-Path $PSScriptRoot 'lib\GitHubCli.ps1')
 
 # 幂等地给 issue 发一条带隐藏 marker 的评论，并按需加、删标签；规则见
 # docs/agents/issue-tracker.md「gh 报 EOF 时」。全部走 REST。发评论失败时请求可能已经落地，
@@ -40,35 +41,12 @@ function Wait-BeforeRetry([int]$Seconds) {
     if (-not $NoRetryDelayForTest) { Start-Sleep -Seconds $Seconds }
 }
 
-function Invoke-Gh([string[]]$Arguments) {
-    $prefix = @($ghCommand | Select-Object -Skip 1)
-    $output = @(& $ghCommand[0] @prefix @Arguments 2>&1)
-    $exitCode = $LASTEXITCODE
-    return [pscustomobject]@{
-        exitCode = $exitCode
-        stdout = @($output | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] } | ForEach-Object { [string]$_ })
-        stderr = (@($output | Where-Object { $_ -is [Management.Automation.ErrorRecord] } | ForEach-Object { $_.ToString() }) -join ' ')
-    }
-}
-
-function Invoke-GhWithRetry([string[]]$Arguments) {
-    # 只用于读取和幂等写入（加标签）。重试用完仍失败就抛出，不拿空结果做判断。
-    for ($attempt = 1; ; $attempt++) {
-        $result = Invoke-Gh -Arguments $Arguments
-        if ($result.exitCode -eq 0) { return $result.stdout }
-        if ($attempt -ge $attemptLimit) {
-            throw ('gh {0} failed after {1} attempts (exit {2}): {3}' -f ($Arguments -join ' '), $attempt, $result.exitCode, $result.stderr)
-        }
-        Wait-BeforeRetry (2 * $attempt)
-    }
-}
-
 function Get-IssueSnapshot {
-    $issue = (Invoke-GhWithRetry -Arguments @('api', $issuePath)) -join "`n" | ConvertFrom-Json -AsHashtable
+    $issue = (Invoke-GhWithRetry -GhCommand $ghCommand -Arguments @('api', $issuePath) -NoRetryDelay:$NoRetryDelayForTest) -join "`n" | ConvertFrom-Json -AsHashtable
     if ($null -eq $issue -or $issue['number'] -ne $Number) {
         throw ('issue read returned no data for #{0}' -f $Number)
     }
-    $lines = @(Invoke-GhWithRetry -Arguments @('api', '--paginate', ($issuePath + '/comments?per_page=100'), '--jq', '.[] | {html_url, body}'))
+    $lines = @(Invoke-GhWithRetry -GhCommand $ghCommand -Arguments @('api', '--paginate', ($issuePath + '/comments?per_page=100'), '--jq', '.[] | {html_url, body}') -NoRetryDelay:$NoRetryDelayForTest)
     $markerComments = @($lines | Where-Object { $_.Length -gt 0 } | ForEach-Object { $_ | ConvertFrom-Json -AsHashtable } |
         Where-Object { ([string]$_['body']).Contains($markerComment) })
     return [pscustomobject]@{
@@ -81,7 +59,7 @@ function Get-IssueSnapshot {
 function Remove-IssueLabel([string]$Label) {
     $labelPath = '{0}/labels/{1}' -f $issuePath, [Uri]::EscapeDataString($Label)
     for ($attempt = 1; ; $attempt++) {
-        $result = Invoke-Gh -Arguments @('api', '-X', 'DELETE', $labelPath)
+        $result = Invoke-Gh -GhCommand $ghCommand -Arguments @('api', '-X', 'DELETE', $labelPath)
         if ($result.exitCode -eq 0) { return }
         # 失败时回读：标签已经不在就算完成（含请求其实已生效的情况）。
         if ((Get-IssueSnapshot).labels -notcontains $Label) { return }
@@ -126,7 +104,7 @@ try {
     } else {
         $summary.commentVia = 'posted'
         for ($attempt = 1; ; $attempt++) {
-            $post = Invoke-Gh -Arguments @('api', ($issuePath + '/comments'), '-F', ('body=@' + $BodyPath))
+            $post = Invoke-Gh -GhCommand $ghCommand -Arguments @('api', ($issuePath + '/comments'), '-F', ('body=@' + $BodyPath))
             if ($post.exitCode -eq 0) { break }
             # 失败的请求可能已经落地：先回读，再决定是否重发。
             Wait-BeforeRetry 3
@@ -144,7 +122,7 @@ try {
     # 加标签是幂等的，可以直接重试。
     foreach ($label in $AddLabels) {
         if ($before.labels -notcontains $label) {
-            [void](Invoke-GhWithRetry -Arguments @('api', ($issuePath + '/labels'), '-f', ('labels[]=' + $label)))
+            [void](Invoke-GhWithRetry -GhCommand $ghCommand -Arguments @('api', ($issuePath + '/labels'), '-f', ('labels[]=' + $label)) -NoRetryDelay:$NoRetryDelayForTest)
         }
     }
     foreach ($label in $RemoveLabels) {

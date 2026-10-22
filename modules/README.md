@@ -39,8 +39,13 @@ workstation-operations (documentation/integration only)
 
 ```powershell
 node .\scripts\Validate-ModuleBoundaries.cjs --json
+node .\scripts\Validate-ModuleBoundaries.cjs --owners scripts\Publish-GitHubIssueComment.ps1
 node .\tests\Test-ModuleBoundaries.cjs
 node .\scripts\Run-PowerShellTests.cjs --module dev-environment --list
 ```
 
 边界校验经 `git ls-files --others` 纳入未跟踪文件：不得与正在写 `reports/`、`.scratch/` 的测试套件并行跑，否则测试运行产物会被判 no owner 而误报（fail-closed 方向，有意保留）；manifest 门与 fixture 门串行执行。
+
+`--owners` 给出每个路径的归属模块和该模块的测试 profile，不必翻 manifest。提交说明的 scope 用归属模块：`.githooks/commit-msg` 在 scope 是模块 id（含 `shared`）而暂存改动里没有文件归它时拒绝提交，scope 不是模块 id 时不查。
+
+CI 按模块和 profile 跑上面的 runner。某次 run 失败时，先跑 `scripts/Get-CiFailureSummary.ps1 -RunId <id>`：它只列每个失败 job 的失败测试、报错行和失败标记。需要完整日志时再看 `gh run view <id> --log-failed`。

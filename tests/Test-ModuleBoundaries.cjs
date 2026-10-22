@@ -15,6 +15,7 @@ const MANIFEST_RUNNER_PATH = path.join(PROJECT_ROOT, 'scripts', 'Run-ManifestTes
 assert.equal(fs.existsSync(VALIDATOR_PATH), true, 'module boundary validator must exist');
 
 const {
+  checkCommitScope,
   validateCrossModuleCodeReferences,
   validateManifest,
   validateOwnership,
@@ -314,18 +315,70 @@ assert.equal(fs.existsSync(hostEvidenceModulePath), true, 'codex-host evidence l
 assert.match(hostReconcilerSource, /CodexHostHookEvidence\.ps1/);
 assert.match(hostReconcilerSource, /New-CodexHostHookEvidenceSnapshot/);
 
+// A commit scope that names a module or shared must own one of the staged files; any other scope is free text.
+const publisherFiles = ['scripts/Publish-GitHubIssueComment.ps1', 'tests/Test-PublishGitHubIssueComment.ps1'];
+assert.match(
+  checkCommitScope(manifest, "fix(workstation-operations): 评论发布脚本的 gh 命令始终按数组取，修掉生产路径只剩 'g'", publisherFiles).join('\n'),
+  /^commit scope "workstation-operations" names a module that owns none of the staged files \(their owners: shared\)/,
+  '272fd4c named a module that owns neither of its files',
+);
+assert.match(
+  checkCommitScope(manifest, '# git comment\n\nfeat(host-safety, shared)!: x\n', publisherFiles).join('\n'),
+  /^commit scope "host-safety" names a module/,
+  'each module in a scope list is checked, after comment and blank lines',
+);
+for (const [message, files] of [
+  ['fix(shared): x', publisherFiles],
+  ['feat(shared)!: x', publisherFiles],
+  ['docs(zi-xi-shi): x', ['docs/environments/zi-xi-shi.md']],
+  ['feat(claude-hooks): x', ['managed/claude-hooks/claude-public-push-guard.mjs']],
+  ['fix: x', publisherFiles],
+  ["Merge branch 'topic'", publisherFiles],
+  ['fix(workstation-operations): x', []],
+]) {
+  assert.deepEqual(checkCommitScope(manifest, message, files), [], `${message} must pass`);
+}
+
+// --owners names each path's module and test profiles; a path with no single owner fails.
+const runValidator = (...args) => spawnSync(process.execPath, [VALIDATOR_PATH, ...args], {
+  cwd: PROJECT_ROOT,
+  encoding: 'utf8',
+  windowsHide: true,
+});
+let owners = runValidator('--owners', 'scripts/Publish-GitHubIssueComment.ps1', path.join(PROJECT_ROOT, 'docs', 'environments', 'zi-xi-shi.md'));
+assert.equal(owners.status, 0, owners.stderr);
+assert.match(owners.stdout, /^scripts\/Publish-GitHubIssueComment\.ps1: shared \(test profiles: fixture\)$/m);
+assert.match(owners.stdout, /^docs\/environments\/zi-xi-shi\.md: workstation-operations \(test profiles: fixture\)$/m);
+owners = runValidator('--owners', 'no/such/file.txt', '--json');
+assert.equal(owners.status, 1);
+assert.deepEqual(JSON.parse(owners.stdout), [{ argument: 'no/such/file.txt', path: 'no/such/file.txt', owners: [] }]);
+owners = runValidator('--owners', path.join(path.parse(PROJECT_ROOT).root, 'outside.txt'));
+assert.equal(owners.status, 1);
+assert.match(owners.stdout, /outside\.txt: outside the repository$/m);
+for (const [args, message] of [
+  [['--owners'], /--owners requires at least one path/],
+  [['--commit-msg'], /--commit-msg requires the message file/],
+  [['--owners', 'README.md', '--rev', 'HEAD'], /--rev only applies to the boundary check/],
+]) {
+  const rejected = runValidator(...args);
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, message);
+}
+
 // --rev checks the files, code text and manifest of a commit, not the work tree around it.
 const revisionRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'module-boundaries-rev-'));
 try {
+  const runFixtureGit = (...args) => spawnSync('git', [
+    '-c', 'core.autocrlf=false',
+    '-c', 'user.name=Test',
+    '-c', 'user.email=test@example.invalid',
+    '-c', 'commit.gpgsign=false',
+    ...args,
+  ], { cwd: revisionRoot, encoding: 'utf8', windowsHide: true });
   const fixtureGit = (...args) => {
-    const result = spawnSync('git', [
-      '-c', 'core.autocrlf=false',
-      '-c', 'user.name=Test',
-      '-c', 'user.email=test@example.invalid',
-      '-c', 'commit.gpgsign=false',
-      ...args,
-    ], { cwd: revisionRoot, encoding: 'utf8', windowsHide: true });
+    const result = runFixtureGit(...args);
     assert.equal(result.status, 0, String(result.stderr || result.stdout));
+    return String(result.stdout).trim();
   };
   const write = (repositoryPath, text) => {
     const fullPath = path.join(revisionRoot, ...repositoryPath.split('/'));
@@ -375,6 +428,56 @@ try {
       'modules/beta/beta_api.py references alpha_api.py without dependency beta -> alpha',
     ],
   });
+
+  // --commit-msg takes the manifest and the staged files from the index being committed.
+  const messagePath = path.join(revisionRoot, '.git', 'TEST_COMMIT_MSG');
+  const checkMessage = (message) => {
+    fs.writeFileSync(messagePath, message);
+    return spawnSync(process.execPath, [VALIDATOR_PATH, '--commit-msg', messagePath], {
+      cwd: revisionRoot,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+  };
+  fixtureGit('add', 'modules/beta/beta_api.py');
+  let checked = checkMessage('fix(alpha): change beta\n');
+  assert.equal(checked.status, 1);
+  assert.match(checked.stderr, /commit scope "alpha" names a module that owns none of the staged files \(their owners: beta\)/);
+  assert.equal(checkMessage('fix(beta): change beta\n').status, 0);
+  assert.equal(checkMessage('docs(device): note\n').status, 0);
+  fixtureGit('reset', '-q');
+  // untracked.txt is shared only in the work-tree manifest until that manifest is staged too.
+  fixtureGit('add', 'untracked.txt');
+  checked = checkMessage('feat(shared): own untracked.txt\n');
+  assert.equal(checked.status, 1, 'ownership comes from the staged manifest');
+  assert.match(checked.stderr, /\(their owners: no module\)/);
+  fixtureGit('add', 'modules/manifest.json');
+  checked = checkMessage('feat(shared): own untracked.txt\n');
+  assert.equal(checked.status, 0, checked.stderr);
+  fixtureGit('reset', '-q');
+  // An index without the manifest has no modules to check, and a subject without a scope needs no repository.
+  fixtureGit('rm', '-q', '--cached', 'modules/manifest.json');
+  checked = checkMessage('fix(alpha): drop the manifest\n');
+  assert.equal(checked.status, 0, checked.stderr);
+  fixtureGit('reset', '-q');
+  fs.writeFileSync(messagePath, 'probe\n');
+  checked = spawnSync(process.execPath, [VALIDATOR_PATH, '--commit-msg', messagePath], {
+    cwd: path.parse(PROJECT_ROOT).root,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  assert.equal(checked.status, 0, checked.stderr);
+
+  // The commit-msg hook runs the check on a real commit.
+  fixtureGit('config', 'core.hooksPath', path.join(PROJECT_ROOT, '.githooks'));
+  fixtureGit('add', 'modules/beta/beta_api.py');
+  const headBefore = fixtureGit('rev-parse', 'HEAD');
+  const rejectedCommit = runFixtureGit('commit', '-q', '-m', 'fix(alpha): change beta');
+  assert.notEqual(rejectedCommit.status, 0, 'the hook must reject a scope that owns no staged file');
+  assert.match(rejectedCommit.stderr, /commit scope "alpha"/);
+  assert.equal(fixtureGit('rev-parse', 'HEAD'), headBefore);
+  fixtureGit('commit', '-q', '-m', 'fix(beta): change beta');
+  assert.notEqual(fixtureGit('rev-parse', 'HEAD'), headBefore);
 } finally {
   fs.rmSync(revisionRoot, { recursive: true, force: true, maxRetries: 3 });
 }
