@@ -141,6 +141,73 @@ function ownersForPath(manifest, repositoryPath) {
     .map((owner) => owner.id);
 }
 
+// A path argument as a repository path, or null when it lies outside the repository.
+function toRepositoryPath(argument, projectRoot = PROJECT_ROOT) {
+  const relative = path.relative(projectRoot, path.resolve(argument));
+  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  return normalizeRepositoryPath(relative);
+}
+
+// Each path's owners with the test profiles they define, as --owners reports them.
+function describeOwners(manifest, entries) {
+  const ownersById = new Map([
+    ...(Array.isArray(manifest.modules) ? manifest.modules : []).map((module) => [module.id, module]),
+    ['shared', { id: 'shared', ...manifest.shared }],
+  ]);
+  return entries.map(({ argument, repositoryPath }) => ({
+    argument,
+    path: repositoryPath,
+    owners: repositoryPath === null ? [] : ownersForPath(manifest, repositoryPath).map((id) => ({
+      id,
+      profiles: Object.keys(ownersById.get(id).tests || {}),
+    })),
+  }));
+}
+
+function formatOwners(entry) {
+  if (entry.path === null) return `${entry.argument}: outside the repository`;
+  if (entry.owners.length === 0) return `${entry.path}: no owner`;
+  if (entry.owners.length > 1) return `${entry.path}: multiple owners (${entry.owners.map((owner) => owner.id).join(', ')})`;
+  const [owner] = entry.owners;
+  return `${entry.path}: ${owner.id} (test profiles: ${owner.profiles.join(', ') || 'none'})`;
+}
+
+const COMMIT_SCOPE_PATTERN = /^[A-Za-z]+\(([^)]*)\)!?:/;
+
+// The subject is the first line that is neither blank nor a git comment.
+function commitSubject(message) {
+  return String(message).split(/\r?\n/).find((line) => line.trim() !== '' && !line.startsWith('#')) || '';
+}
+
+// A conventional-commit scope that names a module or shared must own one of the staged files. A scope that is
+// not a module id, a subject without a scope and a commit with nothing staged pass.
+function checkCommitScope(manifest, message, stagedFiles) {
+  const match = COMMIT_SCOPE_PATTERN.exec(commitSubject(message));
+  if (!match || stagedFiles.length === 0) return [];
+  const moduleIds = new Set([...manifest.modules.map((module) => module.id), 'shared']);
+  const stagedOwners = [...new Set(stagedFiles.flatMap((file) => ownersForPath(manifest, file)))].sort();
+  return match[1].split(',')
+    .map((scope) => scope.trim())
+    .filter((scope) => moduleIds.has(scope) && !stagedOwners.includes(scope))
+    .map((scope) => `commit scope "${scope}" names a module that owns none of the staged files (their owners: ${
+      stagedOwners.join(', ') || 'no module'}); use an owning module or a scope that is not a module id`);
+}
+
+// The commit-msg hook: the manifest and the staged files come from the index being committed, which a tool may
+// have pointed elsewhere with GIT_INDEX_FILE. A subject without a scope needs neither, and a repository whose
+// index has no manifest (a test fixture that borrows these hooks) has no modules to check.
+function checkCommitMessageFile(messagePath) {
+  const message = fs.readFileSync(path.resolve(messagePath), 'utf8');
+  if (!COMMIT_SCOPE_PATTERN.test(commitSubject(message))) return [];
+  const repositoryRoot = String(runGit(process.cwd(), ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })).trim();
+  if (String(runGit(repositoryRoot, ['ls-files', '-z', '--', 'modules/manifest.json'], { encoding: 'utf8' })) === '') return [];
+  const manifest = JSON.parse(String(runGit(repositoryRoot, ['show', ':modules/manifest.json'], { encoding: 'utf8' })));
+  const stagedFiles = String(runGit(repositoryRoot, ['diff', '--cached', '--name-only', '--no-renames', '-z'], { encoding: 'utf8' }))
+    .split('\0')
+    .filter(Boolean);
+  return checkCommitScope(manifest, message, stagedFiles);
+}
+
 function validateOwnership(manifest, repositoryFiles) {
   const errors = [];
   for (const repositoryPath of repositoryFiles) {
@@ -361,6 +428,8 @@ function parseArguments(args) {
   let json = false;
   let manifestPath;
   let revision;
+  let ownerPaths;
+  let commitMessagePath;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--json') {
@@ -373,15 +442,46 @@ function parseArguments(args) {
       index += 1;
       if (index >= args.length || args[index].startsWith('-')) throw new Error('--rev requires a commit or tree');
       revision = args[index];
+    } else if (argument === '--owners') {
+      ownerPaths = [];
+      while (index + 1 < args.length && !args[index + 1].startsWith('--')) {
+        index += 1;
+        ownerPaths.push(args[index]);
+      }
+      if (ownerPaths.length === 0) throw new Error('--owners requires at least one path');
+    } else if (argument === '--commit-msg') {
+      index += 1;
+      if (index >= args.length || args[index].startsWith('--')) throw new Error('--commit-msg requires the message file');
+      commitMessagePath = args[index];
     } else {
-      throw new Error('Usage: node scripts/Validate-ModuleBoundaries.cjs [--json] [--manifest <path>] [--rev <commit-or-tree>]');
+      throw new Error('Usage: node scripts/Validate-ModuleBoundaries.cjs [--json] [--manifest <path>] [--rev <commit-or-tree>]'
+        + ' | --owners <path>... [--json] [--manifest <path>] | --commit-msg <message-file>');
     }
   }
-  return { json, manifestPath, revision };
+  if ((ownerPaths || commitMessagePath) && revision) throw new Error('--rev only applies to the boundary check');
+  if (ownerPaths && commitMessagePath) throw new Error('--owners and --commit-msg are separate modes');
+  return { json, manifestPath, revision, ownerPaths, commitMessagePath };
 }
 
 function main(args) {
   const options = parseArguments(args);
+  if (options.commitMessagePath) {
+    const errors = checkCommitMessageFile(options.commitMessagePath);
+    for (const error of errors) console.error(error);
+    if (errors.length > 0) process.exitCode = 1;
+    return;
+  }
+  if (options.ownerPaths) {
+    const manifest = JSON.parse(fs.readFileSync(options.manifestPath || path.join(PROJECT_ROOT, 'modules', 'manifest.json'), 'utf8'));
+    const report = describeOwners(manifest, options.ownerPaths.map((argument) => ({ argument, repositoryPath: toRepositoryPath(argument) })));
+    if (options.json) {
+      console.log(JSON.stringify(report));
+    } else {
+      for (const entry of report) console.log(formatOwners(entry));
+    }
+    if (report.some((entry) => entry.owners.length !== 1)) process.exitCode = 1;
+    return;
+  }
   const result = validateRepository(PROJECT_ROOT, options);
 
   if (options.json) {
@@ -395,6 +495,8 @@ function main(args) {
 }
 
 module.exports = {
+  checkCommitScope,
+  describeOwners,
   ownersForPath,
   validateCrossModuleCodeReferences,
   validateManifest,

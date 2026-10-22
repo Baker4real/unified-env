@@ -677,21 +677,27 @@
         ".github/workflows/ci.yml",
         ".codegraph/.gitignore",
         ".gitattributes",
+        ".githooks/commit-msg",
         ".githooks/pre-commit",
         ".gitignore",
         ".node-version",
         ".okf-frontmatter.json",
         "AGENTS.md",
+        "CODING_STANDARDS.md",
         "CONTEXT.md",
         "README.md",
         "codegraph.json",
         "modules/README.md",
         "modules/manifest.json",
+        "scripts/Get-CiFailureSummary.ps1",
+        "scripts/Invoke-GhRead.ps1",
+        "scripts/Invoke-PowerShellArrayUnwrapLint.ps1",
         "scripts/Invoke-PowerShellParameterCaseLint.ps1",
         "scripts/Publish-GitHubIssueComment.ps1",
         "scripts/Run-ManifestTests.cjs",
         "scripts/Run-PowerShellTests.cjs",
-        "scripts/Validate-ModuleBoundaries.cjs"
+        "scripts/Validate-ModuleBoundaries.cjs",
+        "scripts/lib/GitHubCli.ps1"
       ],
       "prefixes": [
         ".out-of-scope/",
@@ -701,6 +707,9 @@
     "tests": {
       "fixture": {
         "powershell": [
+          "tests/Test-GetCiFailureSummary.ps1",
+          "tests/Test-InvokeGhRead.ps1",
+          "tests/Test-PowerShellArrayUnwrapLint.ps1",
           "tests/Test-PowerShellParameterCaseLint.ps1",
           "tests/Test-PreCommitPrivacyHook.ps1",
           "tests/Test-PublishGitHubIssueComment.ps1",

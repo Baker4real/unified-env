@@ -1,0 +1,4 @@
+#!/bin/sh
+# 提交说明的 scope 是模块 id（含 shared）时，暂存改动里至少要有一个文件归这个模块，否则拒绝提交；scope 不是模块 id 时不查。
+# 归属按暂存区里的 modules/manifest.json 判断。新克隆先运行 git config core.hooksPath .githooks。
+node "$(dirname "$0")/../scripts/Validate-ModuleBoundaries.cjs" --commit-msg "$1" || exit

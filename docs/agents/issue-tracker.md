@@ -28,6 +28,8 @@ intent: 说明统一环境项目使用 GitHub Issues 的 tracker 约定
 - 读取失败就退避重试；重试用完仍失败就停下，不拿不完整的读取结果做判断。
 - 发评论不能直接重试：失败的请求可能已经落地。先重新读取评论，按正文里唯一的隐藏 marker（`<!-- … -->`）判断是否已写入，确认没有才重发。加、删标签是幂等的，可以直接重试。
 
+只读的 gh 调用交给 `scripts/Invoke-GhRead.ps1`，gh 参数放在 `--` 之后，例如 `& scripts/Invoke-GhRead.ps1 -- api 'repos/{owner}/{repo}/issues/<number>'`。它按第二条退避重试，成功时原样输出 gh 的 stdout；重试用完仍失败就不输出 stdout、退出 1。不要用它发评论或做其他写入。
+
 `scripts/Publish-GitHubIssueComment.ps1` 按这三条发评论并按需改标签（`-Number`、`-BodyPath`、`-Marker`，可选 `-AddLabels`、`-RemoveLabels`）。它全程走 REST，结束时回读核验，输出一行 JSON：带 marker 的评论恰好一条且标签符合要求时退出 0，否则退出 1 并在 `error` 里说明。
 
 其他操作的 REST 写法如下。在仓库根目录运行时 gh 会填好 `{owner}` 和 `{repo}`；PowerShell 里整条路径加单引号。
