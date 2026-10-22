@@ -47,7 +47,8 @@ function Get-FileIdentity {
 }
 
 function Get-SourceCommitState {
-    # Sources inside a git work tree must match its HEAD, compared through git's clean filter like git status.
+    # Sources inside a git work tree must match its HEAD as git status sees them: through git's clean filter or byte for
+    # byte, since status leaves CRLF already committed alone while hash-object still normalizes it under core.autocrlf.
     param([Parameter(Mandatory = $true)][string[]]$PathValues)
     $inWorkTree = $false
     $uncommitted = @()
@@ -64,10 +65,13 @@ function Get-SourceCommitState {
             $entry, $name = $line -split "`t", 2
             $committed[$name] = ($entry -split ' ')[2]
         }
-        $current = @(& git -C $directory hash-object -- @names)
-        if ($LASTEXITCODE -ne 0 -or $current.Count -ne $names.Count) { throw "无法计算部署源的 git blob：$directory" }
+        $filtered = @(& git -C $directory hash-object -- @names)
+        if ($LASTEXITCODE -ne 0 -or $filtered.Count -ne $names.Count) { throw "无法计算部署源的 git blob：$directory" }
+        $unfiltered = @(& git -C $directory hash-object --no-filters -- @names)
+        if ($LASTEXITCODE -ne 0 -or $unfiltered.Count -ne $names.Count) { throw "无法计算部署源的 git blob：$directory" }
         for ($index = 0; $index -lt $names.Count; $index++) {
-            if ($committed[$names[$index]] -cne $current[$index]) { $uncommitted += [string]$group.Group[$index] }
+            $blob = $committed[$names[$index]]
+            if ($blob -cne $filtered[$index] -and $blob -cne $unfiltered[$index]) { $uncommitted += [string]$group.Group[$index] }
         }
     }
     return [pscustomobject]@{ inWorkTree = $inWorkTree; uncommitted = $uncommitted }

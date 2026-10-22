@@ -5,6 +5,10 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
+function Set-LineEnding([string]$Path, [string]$NewLine) {
+    [IO.File]::WriteAllText($Path, ([IO.File]::ReadAllText($Path) -replace "`r?`n", $NewLine), [Text.UTF8Encoding]::new($false))
+}
+
 function Remove-FixtureRunRoot {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -223,16 +227,24 @@ try {
         -EvidenceRoot (Join-Path $runRoot 'snapshot-evidence') `
         -WhatIf
     Assert-True ($snapshotResult.sourceCommitCheck -ceq 'outside-work-tree') 'a snapshot outside any work tree must deploy without the commit check'
+    # Under core.autocrlf=true, the Windows default, git status leaves CRLF already committed alone (the .cmd)
+    # and normalizes CRLF that a checkout wrote over an LF blob (the .py); neither is an uncommitted change.
+    $crlfCommittedPath = Join-Path $sourceRepoScripts 'install-skill-guarded.cmd'
+    $crlfCheckoutPath = Join-Path $sourceRepoImplementation 'skill_source_record.py'
+    Set-LineEnding $crlfCommittedPath "`r`n"
+    Set-LineEnding $crlfCheckoutPath "`n"
     & git -C $sourceRepo -c init.defaultBranch=main init -q
+    & git -C $sourceRepo config core.autocrlf true
     & git -C $sourceRepo -c core.autocrlf=false add --all
     & git -C $sourceRepo -c user.name=fixture -c user.email=fixture@invalid commit -q -m fixture
     Assert-True ($LASTEXITCODE -eq 0) 'fixture source repository must commit the deployment sources'
+    Set-LineEnding $crlfCheckoutPath "`r`n"
     $sourceRepoDeployPath = Join-Path $sourceRepoScripts 'Deploy-SkillInstallGuarded.ps1'
     $committedResult = & $sourceRepoDeployPath `
         -CodexRoot (Join-Path $runRoot 'committed-codex') `
         -EvidenceRoot (Join-Path $runRoot 'committed-evidence') `
         -WhatIf
-    Assert-True ($committedResult.sourceCommitCheck -ceq 'matches-head') 'a work-tree source that matches HEAD must pass the commit check'
+    Assert-True ($committedResult.sourceCommitCheck -ceq 'matches-head') 'a work-tree source that matches HEAD, CRLF included, must pass the commit check'
     [IO.File]::AppendAllText((Join-Path $sourceRepoImplementation 'install_skill_guarded_system_overlay.py'), "# another session, not committed`n")
     [IO.File]::AppendAllText((Join-Path $sourceRepoScripts 'install-skill-guarded.cmd'), "rem another session, not committed`n")
     $uncommittedCodexRoot = Join-Path $runRoot 'uncommitted-codex'
