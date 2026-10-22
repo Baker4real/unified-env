@@ -414,6 +414,7 @@
           "tests/Test-CodexSafeTreeDeleteBenchmark.ps1",
           "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
           "tests/Test-CodexSafeTreeDeleteBatchHistoryScan.ps1",
+          "tests/Test-CodexSafeTreeDeleteCanonicalLayoutEquivalence.ps1",
           "tests/Test-CodexSafeTreeDeleteDeployment.ps1",
           "tests/Test-CodexSafeTreeDeletePolicyMaintenance.ps1",
           "tests/Test-CodexSafeTreeDeletePolicyStructure.ps1",
@@ -526,6 +527,7 @@
             "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
             "tests/Test-CodexSafeTreeDeleteBatchHistoryScan.ps1",
             "tests/Test-CodexSafeTreeDeleteLint.ps1",
+            "tests/Test-CodexSafeTreeDeleteCanonicalLayoutEquivalence.ps1",
             "tests/Test-CodexSafeTreeDeleteDeployment.ps1",
             "tests/Test-CodexSafeTreeDeletePolicyMaintenance.ps1",
             "tests/Test-CodexSafeTreeDeletePolicyStructure.ps1",
@@ -693,6 +695,7 @@
         "scripts/lib/GitHubCli.ps1"
       ],
       "prefixes": [
+        ".out-of-scope/",
         "docs/agents/"
       ]
     },
