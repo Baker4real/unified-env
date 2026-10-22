@@ -73,4 +73,21 @@ intent: 记录自习室设备的受控环境事实与差异
 
 - 安装树：`D:\UniGetUI\UniGetUI.exe`（2026.2.7.0，从家里同路径拷入）。桌面快捷方式：`D:\桌面\UniGetUI.lnk`，目标即上述 exe。该机当时没有 tailcat 二进制，传输走 tar+scp 回退。
 
-本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核，2026-09-24 增补代理环境变量根因与 v2rayN 自启防复发。数量、进程和任务状态属易变事实，操作前必须实时复核。
+## 开机/唤醒黑框（2026-10-22）
+
+- 现象：早上开盖弹出三四个黑框。该机夜里多为新型待机，早上是唤醒而不是开机；冷启动时登录项更多。根因是 Codex 自有的守护任务以 Interactive 方式直接起 `pwsh.exe`：默认终端为「让 Windows 决定」，实际由 Windows Terminal 承接，`-WindowStyle Hidden` 藏不住 WT 窗口；`StartWhenAvailable` 又让夜里错过的每日触发在唤醒时集中补跑。10-22 09:25–09:26 唤醒时 `CodexStoreUpdateHealthGuard`、`CodexPwshRouterDriftCheck`、`RemoteInputLockOsdGuard` 三个任务的结果都是 `0xC000013A`：窗口被手动关掉，脚本被中途终止。
+- 处置（可回滚）：
+  - `CodexStoreUpdateHealthGuard`、`CodexPwshRouterDriftCheck`、`CodexSwitchDedicatedProxy` 三个任务和启动文件夹的 `Codex pwsh router drift check.lnk`，改为 `D:\Codex\tools\python314-official\pythonw.exe -I -S -B -X utf8 "D:\Codex\.codex\hooks\lib\hidden-console-launcher.py" "<原 pwsh>" <原参数>`，与家里同一套隐藏启动方式，退出码照常回传。启动器是本次新部署的，与本仓 `managed/codex-hooks/hooks/lib/hidden-console-launcher.py`（c4a5007）字节一致。
+  - `RemoteInputLockOsdGuard` 改为 `C:\Windows\System32\conhost.exe --headless "<受保护 engine 的 pwsh>" <原参数>`。python 目录对 Authenticated Users 可写，换成 pythonw 会破坏它描述里的受保护执行链；代价是 conhost 不回传退出码，任务结果恒为 `0x0`，失败要看脚本自己的 `state\latest.json` 和通知。
+  - HKCU Run 的 `Codex Provider Stability Guard` 指向的 `D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1` 已不存在（provider-stability wrapper 已退役），每次登录只会白弹一个窗。已按任务管理器方式写 StartupApproved `03` 禁用，Run 值保留。
+  - 4 个任务改后的 XML 除 Command/Arguments 外与改前逐字相同。
+- 验收（09:57–09:59，在用户会话里跑隐藏的窗口监视器）：对照组（普通 pwsh 任务）弹出 WT 窗口并被捕获；改后的 4 个任务和快捷方式依次触发，没有出现新窗口，也没有新的 WindowsTerminal/OpenConsole 进程，4 个任务结果为 `0x0`，Defender 无检出。快捷方式拉起的漂移检查等满 300 秒，10:02:49 写入 `ok=True`。Run 项禁用和快捷方式在真实登录时的表现，还没有跨重启复验。
+- 回滚：该机 `D:\Codex\.codex\tmp\console-popups-20261022\rollback.ps1 -Stage D:\Codex\.codex\tmp\console-popups-20261022`，不带 `-Apply` 只演练；改前 XML、快捷方式与回执在同目录 `backup\`。
+- 同日按用户要求禁用（未删除）计划任务 `Hermes双向同步`。它每小时一次，用裸 `pwsh.exe` 启动，不带隐藏参数；之前每次都以 `0x80070002` 起不来，一旦能解析到 pwsh 就会每小时弹一次窗。禁用后导出的 XML 只多了 `Settings/Enabled=false`。家里的 Hermes 已于 2026-09-02 退役删除，该机 `D:\hermes-data` 仍在，未处理。恢复用 `Enable-ScheduledTask -TaskPath '\' -TaskName 'Hermes双向同步'`，改前 XML 在该机 `D:\Codex\.codex\tmp\hermes-task-disable-20261022\before.xml`。
+- 未处置，待用户决定：
+  - IFEO 路由器会拦截第三方的 `powershell.exe` 调用（UniGetUI、O+Connect、GameViewerServer、RadeonSoftware 等），`powershell-ifeo-router.log` 已有 153 MB。这些调用会不会闪窗，没有验证。
+  - `D:\Codex\tools` 整棵树和 `D:\Codex\.codex\scripts` 对 Authenticated Users 可写，这是原有问题，本次未改。以最高权限运行的 `CodexStoreUpdateHealthGuard` 原本就从这两处加载 pwsh 7.6.5 和它的脚本；改后会先经过同一棵树下的 pythonw，可被改写的位置仍不超出这两处。
+- 在该机操作的注意点：SSH 会话里 `USERDOMAIN` 是 `WORKGROUP`，注册计划任务的 UserId 要用令牌名 `BAKER\14224`。pwsh 里的 `Get-MpThreatDetection` 要经 WinCompat 拉起 Windows PowerShell 5.1，会被路由器拦下，改用 CIM 命名空间 `root/Microsoft/Windows/Defender`。TaskScheduler/Operational 日志未启用，只能看 `LastTaskResult`。
+- 证据：家里 `D:\agents\run-evidence\study-console-popups-20261022\`。
+
+本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核，2026-09-24 增补代理环境变量根因与 v2rayN 自启防复发；开机/唤醒黑框处置于 2026-10-22。数量、进程和任务状态属易变事实，操作前必须实时复核。
