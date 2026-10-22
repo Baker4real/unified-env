@@ -27,6 +27,7 @@ $allowlist = @(
     'Get-TaskbarSnapshot.ps1','Restart-ExplorerShell.ps1',
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',
     'Invoke-ManagedRecycle.ps1','Test-ManagedRecycle.ps1',
+    'Get-ConsoleLaunchAudit.ps1','Test-ConsoleLaunchAudit.ps1','Watch-ConsoleWindows.ps1',
     'Test-HostDiagnostics.ps1'
 )
 
