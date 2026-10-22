@@ -687,6 +687,7 @@
         "scripts/Validate-ModuleBoundaries.cjs"
       ],
       "prefixes": [
+        ".out-of-scope/",
         "docs/agents/"
       ]
     },
