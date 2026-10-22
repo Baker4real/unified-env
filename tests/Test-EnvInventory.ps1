@@ -69,13 +69,13 @@ $fullOutput = Join-Path $testRoot "full"
 $pathReparseOutput = Join-Path $testRoot "path-reparse"
 $deviceNamespaceOutput = Join-Path $testRoot "device-namespace"
 $unsafeEnvBaseOutput = Join-Path $testRoot "unsafe-env-base"
-$managedPythonCmd = "D:\Codex\tools\bin\python.cmd"
+$managedPythonLauncher = "D:\Codex\tools\bin\python.exe"
 $managedPythonRuntime = "D:\Codex\tools\python315-official\python.exe"
 $managedPythonAliases = @(
-    $managedPythonCmd,
-    "D:\Codex\tools\bin\python3.cmd",
-    "D:\Codex\tools\bin\python3.15.cmd",
-    "D:\Codex\tools\bin\python315.cmd"
+    $managedPythonLauncher,
+    "D:\Codex\tools\bin\python3.exe",
+    "D:\Codex\tools\bin\python3.15.exe",
+    "D:\Codex\tools\bin\python315.exe"
 )
 
 $testSource = Get-Content -Raw -LiteralPath $PSCommandPath
@@ -85,16 +85,18 @@ Assert-True -Condition ($helperStart -ge 0 -and $helperEnd -gt $helperStart) -Me
 $helperSource = $testSource.Substring($helperStart, $helperEnd - $helperStart)
 Assert-True -Condition ($helperSource -cmatch 'UseShellExecute\s*=\s*\$false' -and $helperSource -cmatch 'CreateNoWindow\s*=\s*\$true') -Message 'Python probe process must be hidden'
 $directAliasPattern = '&\s*\$' + 'managedPythonAlias\b'
-Assert-True -Condition ($testSource -cnotmatch $directAliasPattern) -Message '受控 Python alias 不得通过可见 cmd 入口执行'
+Assert-True -Condition ($testSource -cnotmatch $directAliasPattern) -Message '受控 Python alias 只能经隐藏进程执行'
 
 Assert-True -Condition (Test-Path -Path $scriptPath -PathType Leaf) -Message "Inventory script not found: $scriptPath"
 Assert-True -Condition (Test-Path -LiteralPath $publisherPath -PathType Leaf) -Message "Report publisher not found: $publisherPath"
 Assert-True -Condition (Test-Path -LiteralPath $managedPythonRuntime -PathType Leaf) -Message "受控 Python runtime 缺失：$managedPythonRuntime"
 foreach ($managedPythonAlias in $managedPythonAliases) {
     Assert-True -Condition (Test-Path -LiteralPath $managedPythonAlias -PathType Leaf) -Message "受控 Python alias 缺失：$managedPythonAlias"
-    $aliasSource = Get-Content -Raw -LiteralPath $managedPythonAlias
-    $aliasPattern = '\A@echo off\r?\n"' + [regex]::Escape($managedPythonRuntime) + '" %\*\r?\nexit /b %ERRORLEVEL%\r?\n?\z'
-    Assert-True -Condition ($aliasSource -cmatch $aliasPattern) -Message "受控 Python alias 内容漂移：$managedPythonAlias"
+    $aliasShim = [IO.Path]::ChangeExtension($managedPythonAlias, ".shim")
+    Assert-True -Condition (Test-Path -LiteralPath $aliasShim -PathType Leaf) -Message "受控 Python alias 缺少 .shim：$aliasShim"
+    $aliasSource = Get-Content -Raw -LiteralPath $aliasShim
+    $aliasPattern = '\Apath = "' + [regex]::Escape($managedPythonRuntime) + '"\r?\n?\z'
+    Assert-True -Condition ($aliasSource -cmatch $aliasPattern) -Message "受控 Python alias 内容漂移：$aliasShim"
 }
 . $publisherPath
 
@@ -319,16 +321,22 @@ if (Test-Path -LiteralPath $repairBackupPath -PathType Container) {
 
 $previousFullPath = $env:Path
 try {
-    $env:Path = (Split-Path -Parent $managedPythonCmd) + [IO.Path]::PathSeparator + $previousFullPath
+    $env:Path = (Split-Path -Parent $managedPythonLauncher) + [IO.Path]::PathSeparator + $previousFullPath
     foreach ($managedPythonAlias in $managedPythonAliases) {
         $commandName = [IO.Path]::GetFileNameWithoutExtension($managedPythonAlias)
         $resolvedAlias = Get-Command $commandName -CommandType Application -ErrorAction Stop | Select-Object -First 1
         Assert-True -Condition ($resolvedAlias.Source -ieq $managedPythonAlias) -Message "受控 Python alias 解析错误：$commandName => $($resolvedAlias.Source)"
-        $aliasRun = Invoke-HiddenProcess -FilePath $managedPythonRuntime -Arguments @('--version')
-        Assert-True -Condition ($aliasRun.ExitCode -eq 0) -Message "受控 Python runtime 版本探测失败：$managedPythonAlias => $($aliasRun.Text)"
+        $aliasRun = Invoke-HiddenProcess -FilePath $managedPythonAlias -Arguments @('--version')
+        Assert-True -Condition ($aliasRun.ExitCode -eq 0) -Message "受控 Python alias 版本探测失败：$managedPythonAlias => $($aliasRun.Text)"
         $aliasVersion = $aliasRun.Text.Trim()
         Assert-True -Condition ([string]$aliasVersion -like 'Python 3.15.*') -Message "受控 Python alias 版本探测失败：$managedPythonAlias => $aliasVersion"
     }
+    # cmd 语法字符必须原样到达 runtime；经 .cmd 包装时 | 和 & 会拆命令，^ 会被吃掉。
+    $cmdSyntaxArguments = @('a|b', '[^/]', 'x&y', '^z', '%PATH%')
+    $argvRun = Invoke-HiddenProcess -FilePath $managedPythonLauncher -Arguments (@('-I', '-S', '-c', 'import json,sys; print(json.dumps(sys.argv[1:]))') + $cmdSyntaxArguments)
+    Assert-True -Condition ($argvRun.ExitCode -eq 0) -Message "受控 python 参数转发探测失败：$($argvRun.Text)"
+    $receivedArguments = @($argvRun.StdOut | ConvertFrom-Json)
+    Assert-True -Condition (($receivedArguments -join "`n") -ceq ($cmdSyntaxArguments -join "`n")) -Message "受控 python 必须原样转发参数：$($argvRun.StdOut.Trim())"
     $fullResult = & $scriptPath -OutputDir $fullOutput
 } finally {
     $env:Path = $previousFullPath
@@ -387,12 +395,12 @@ if ($pythonProbe -and $pythonProbe.found) {
     foreach ($property in @("launcher", "runtime", "originClass", "originEvidence", "resolutionScope", "requiresManualReview")) {
         Assert-Property -Object $pythonProbe -Name $property
     }
-    Assert-True -Condition ($pythonProbe.path -ieq $managedPythonCmd) -Message "受控 python.cmd 必须作为 Python launcher 被盘点"
-    Assert-True -Condition ($null -ne $pythonProbe.runtime) -Message "python.cmd launcher 必须保留 runtime probe 结果"
-    Assert-True -Condition ($pythonProbe.runtime.matchedRule -ne "runtime-probe-failed") -Message "python.cmd runtime probe 不得失败"
-    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($pythonProbe.runtime.path)) -Message "python.cmd runtime path 不得为空"
-    Assert-True -Condition ([string]::IsNullOrWhiteSpace($pythonProbe.runtime.probeError)) -Message "python.cmd runtime probe 不得记录错误"
-    Assert-True -Condition ($pythonProbe.runtime.originClass -eq "shared-tool") -Message "受控 python.cmd runtime 必须分类为 shared-tool"
+    Assert-True -Condition ($pythonProbe.path -ieq $managedPythonLauncher) -Message "受控 python.exe 转发必须作为 Python launcher 被盘点"
+    Assert-True -Condition ($null -ne $pythonProbe.runtime) -Message "python launcher 必须保留 runtime probe 结果"
+    Assert-True -Condition ($pythonProbe.runtime.matchedRule -ne "runtime-probe-failed") -Message "python runtime probe 不得失败"
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($pythonProbe.runtime.path)) -Message "python runtime path 不得为空"
+    Assert-True -Condition ([string]::IsNullOrWhiteSpace($pythonProbe.runtime.probeError)) -Message "python runtime probe 不得记录错误"
+    Assert-True -Condition ($pythonProbe.runtime.originClass -eq "shared-tool") -Message "受控 python runtime 必须分类为 shared-tool"
     $pythonRolesTrustedShared = $pythonProbe.launcher.originClass -eq "shared-tool" -and
         $null -ne $pythonProbe.runtime -and
         $pythonProbe.runtime.originClass -eq "shared-tool" -and
