@@ -34,6 +34,13 @@ function Get-CodexSafeTreeDeleteGateShimInstallBytes {
         (Get-CodexSafeTreeDeleteGateShimInstallContent -ProjectRoot $ProjectRoot))
 }
 
+function Get-CodexSafeTreeDeleteGateShimInstallSha256Hex {
+    # 文件内私有 helper：本 lib 的 SHA-256 小写十六进制只在此处计算一份。
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+}
+
 function Get-CodexSafeTreeDeleteGateShimDrift {
     # 只读漂移判定：live wrapper 字节 vs 从 ProjectRoot 按生产规则生成的安装字节。
     # 返回双方的 SHA-256、期望值来源（生成规则与实际使用的源文件 SHA）与明确的漂移信息；
@@ -46,10 +53,9 @@ function Get-CodexSafeTreeDeleteGateShimDrift {
     if (-not [IO.File]::Exists($LiveShimPath)) {
         throw "live PowerShell wrapper 不存在：$LiveShimPath"
     }
-    $expectedSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
-        (Get-CodexSafeTreeDeleteGateShimInstallBytes -ProjectRoot $ProjectRoot))).ToLowerInvariant()
-    $liveSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
-        [IO.File]::ReadAllBytes($LiveShimPath))).ToLowerInvariant()
+    $expectedSha256 = Get-CodexSafeTreeDeleteGateShimInstallSha256Hex -Bytes (
+        Get-CodexSafeTreeDeleteGateShimInstallBytes -ProjectRoot $ProjectRoot)
+    $liveSha256 = Get-CodexSafeTreeDeleteGateShimInstallSha256Hex -Bytes ([IO.File]::ReadAllBytes($LiveShimPath))
     $shimSource = Join-Path $ProjectRoot 'scripts\invoke-codex-safe-tree-delete-gate-shim.ps1'
     $holderLibSource = Join-Path $ProjectRoot 'scripts\lib\CodexSafeTreeDeleteGateHolder.ps1'
     $equal = ([string]$liveSha256 -ceq [string]$expectedSha256)
@@ -66,11 +72,9 @@ function Get-CodexSafeTreeDeleteGateShimDrift {
         expectedSource = [pscustomobject][ordered]@{
             rule = '部署工具 Get-GateShimContent 生产规则：gate shim 源内联 GateHolder lib，此外不做改写'
             shimSourcePath = 'scripts/invoke-codex-safe-tree-delete-gate-shim.ps1'
-            shimSourceSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
-                [IO.File]::ReadAllBytes($shimSource))).ToLowerInvariant()
+            shimSourceSha256 = Get-CodexSafeTreeDeleteGateShimInstallSha256Hex -Bytes ([IO.File]::ReadAllBytes($shimSource))
             gateHolderLibPath = 'scripts/lib/CodexSafeTreeDeleteGateHolder.ps1'
-            gateHolderLibSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
-                [IO.File]::ReadAllBytes($holderLibSource))).ToLowerInvariant()
+            gateHolderLibSha256 = Get-CodexSafeTreeDeleteGateShimInstallSha256Hex -Bytes ([IO.File]::ReadAllBytes($holderLibSource))
         }
         equal = $equal
         driftMessage = $driftMessage

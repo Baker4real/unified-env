@@ -1257,12 +1257,14 @@ try {
     $issue21MutexName = 'Local\CodexSafeTreeDeleteSmokeIssue21-{0}' -f [guid]::NewGuid().ToString('N')
     [void][IO.Directory]::CreateDirectory($issue21StateRoot)
     # BootstrapGate 的 shim cutover 要求 shim 已存在（备份后原子替换）：先放占位 shim。
-    [IO.File]::WriteAllText($issue21ShimPath, @'
+    # 占位 shim 从不执行、随即被 cutover 替换；委托入口按本套件 checkout 的 projectRoot 构造，
+    # 不写死任何具体 checkout 位置。
+    [IO.File]::WriteAllText($issue21ShimPath, (@'
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-& 'D:\agents\projects\统一环境\scripts\Invoke-CodexSafeTreeDelete.ps1' @args
+& '__SAFE_DELETE_ENTRY__' @args
 exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
-'@, $utf8)
+'@).Replace('__SAFE_DELETE_ENTRY__', (Join-Path $projectRoot 'scripts\Invoke-CodexSafeTreeDelete.ps1')), $utf8)
     & (Join-Path $projectRoot 'scripts\Deploy-CodexSafeTreeDelete.ps1') `
         -Mode BootstrapGate `
         -DeploymentId ('smoke-issue21-{0}' -f [guid]::NewGuid().ToString('N').Substring(0, 8)) `

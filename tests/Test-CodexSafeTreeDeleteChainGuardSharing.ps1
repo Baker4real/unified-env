@@ -243,6 +243,17 @@ try {
                 "guard 持有期间链上目录改名必须以 Win32 32 失败：$chainDirectory，实际 moved=$($chainMoved.Moved) error=$($chainMoved.Win32Error)")
         }
 
+        foreach ($ancestorDirectory in @($candidatePath, $subtreePath, $workspaceRoot, $scratchRoot)) {
+            $ancestorDeleteError = $null
+            try {
+                [IO.Directory]::Delete($ancestorDirectory)
+            } catch [IO.IOException] {
+                $ancestorDeleteError = $_.Exception.HResult -band 0xffff
+            }
+            Assert-True ($ancestorDeleteError -eq 32) (
+                "guard 持有期间删除上级目录必须以 Win32 32 失败：$ancestorDirectory，实际：$ancestorDeleteError")
+        }
+
         $deleteError = $null
         try {
             [IO.Directory]::Delete($innerPath)
@@ -320,4 +331,5 @@ if ($null -ne $cleanupError) { throw $cleanupError }
     suite = 'CodexSafeTreeDeleteChainGuardSharing'
     heldAncestorPlans = 2
     chainDirectoriesPinned = 5
+    chainAncestorDeletesPinned = 4
 }

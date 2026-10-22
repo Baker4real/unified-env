@@ -1116,7 +1116,7 @@ namespace CodexHookGovernance
                     bool isTarget = segmentIndex == segments.Length - 1;
                     SafeFileHandle handle;
                     int error;
-                    if (TryOpenVerifiedDirectory(current, isTarget && targetDeleteAccess, !isTarget, out handle, out error))
+                    if (TryOpenVerifiedDirectory(current, requireDeleteAccess: isTarget && targetDeleteAccess, shareWrite: !isTarget, out handle, out error))
                     {
                         if (isTarget && requireTargetCreation)
                         {
@@ -1147,7 +1147,7 @@ namespace CodexHookGovernance
                             }
                         }
 
-                        if (!TryOpenVerifiedDirectory(current, isTarget && targetDeleteAccess, !isTarget, out handle, out error))
+                        if (!TryOpenVerifiedDirectory(current, requireDeleteAccess: isTarget && targetDeleteAccess, shareWrite: !isTarget, out handle, out error))
                         {
                             throw CreateChainOpenException(error, current, rootPath, "Unable to verify a newly created directory in the path chain");
                         }
@@ -1186,7 +1186,7 @@ namespace CodexHookGovernance
         {
             SafeFileHandle handle;
             int error;
-            if (!TryOpenVerifiedDirectory(path, false, true, out handle, out error))
+            if (!TryOpenVerifiedDirectory(path, requireDeleteAccess: false, shareWrite: true, out handle, out error))
             {
                 throw CreateChainOpenException(error, path, trustedRootPath, "Unable to open a verified directory in the path chain");
             }
