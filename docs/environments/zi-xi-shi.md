@@ -30,6 +30,7 @@ intent: 记录自习室设备的受控环境事实与差异
 - 统一环境仓库位于旧布局 `D:\Codex\projects\统一环境`（审计时工作区干净，HEAD
   落后 jia-li main）；`D:\agents` 树在该机不存在。仓库布局迁移属另立任务。
 - `D:\Codex\.codex\docs\agent-guidance\` 已同步在机（14 条目）。
+- 2026-10-22 再核：OpenSSH 没有设置 DefaultShell（`HKLM\SOFTWARE\OpenSSH` 下无该值），远端命令由 cmd 执行，单条命令最多 8191 字符；PATH 上的 `pwsh` 先解析到 7.6.5，另有 WindowsApps 别名。从家里执行脚本用 `D:\Codex\.codex\scripts\Invoke-OfficeRemote.ps1 -Target study`，它固定用 7.6.3；脚本超过约 2900 字符时先传到该机，再用 `pwsh -File` 执行（见 `ssh-mesh.md`）。
 - run-evidence 迁移（旧根 101 个顶层条目）的执行契约见
   `docs/plans/2026-08-26-run-evidence-migration-plan-zi-xi-shi-ban-gong-shi.md` §4。
 
@@ -78,16 +79,33 @@ intent: 记录自习室设备的受控环境事实与差异
 - 现象：早上开盖弹出三四个黑框。该机夜里多为新型待机，早上是唤醒而不是开机；冷启动时登录项更多。根因是 Codex 自有的守护任务以 Interactive 方式直接起 `pwsh.exe`：默认终端为「让 Windows 决定」，实际由 Windows Terminal 承接，`-WindowStyle Hidden` 藏不住 WT 窗口；`StartWhenAvailable` 又让夜里错过的每日触发在唤醒时集中补跑。10-22 09:25–09:26 唤醒时 `CodexStoreUpdateHealthGuard`、`CodexPwshRouterDriftCheck`、`RemoteInputLockOsdGuard` 三个任务的结果都是 `0xC000013A`：窗口被手动关掉，脚本被中途终止。
 - 处置（可回滚）：
   - `CodexStoreUpdateHealthGuard`、`CodexPwshRouterDriftCheck`、`CodexSwitchDedicatedProxy` 三个任务和启动文件夹的 `Codex pwsh router drift check.lnk`，改为 `D:\Codex\tools\python314-official\pythonw.exe -I -S -B -X utf8 "D:\Codex\.codex\hooks\lib\hidden-console-launcher.py" "<原 pwsh>" <原参数>`，与家里同一套隐藏启动方式，退出码照常回传。启动器是本次新部署的，与本仓 `managed/codex-hooks/hooks/lib/hidden-console-launcher.py`（c4a5007）字节一致。
-  - `RemoteInputLockOsdGuard` 改为 `C:\Windows\System32\conhost.exe --headless "<受保护 engine 的 pwsh>" <原参数>`。python 目录对 Authenticated Users 可写，换成 pythonw 会破坏它描述里的受保护执行链；代价是 conhost 不回传退出码，任务结果恒为 `0x0`，失败要看脚本自己的 `state\latest.json` 和通知。
+  - `RemoteInputLockOsdGuard` 改为 `C:\Windows\System32\conhost.exe --headless "<受保护 engine 的 pwsh>" <原参数>`。python 目录对 Authenticated Users 可写，换成 pythonw 会破坏它描述里的受保护执行链；代价是 conhost 不回传退出码，任务结果恒为 `0x0`，失败要看脚本自己的 `state\latest.json` 和通知（见下文「远程输入锁定键提示守卫」）。
   - HKCU Run 的 `Codex Provider Stability Guard` 指向的 `D:\Codex\.codex\hooks\codex-provider-stability-guard.ps1` 已不存在（provider-stability wrapper 已退役），每次登录只会白弹一个窗。已按任务管理器方式写 StartupApproved `03` 禁用，Run 值保留。
   - 4 个任务改后的 XML 除 Command/Arguments 外与改前逐字相同。
 - 验收（09:57–09:59，在用户会话里跑隐藏的窗口监视器）：对照组（普通 pwsh 任务）弹出 WT 窗口并被捕获；改后的 4 个任务和快捷方式依次触发，没有出现新窗口，也没有新的 WindowsTerminal/OpenConsole 进程，4 个任务结果为 `0x0`，Defender 无检出。快捷方式拉起的漂移检查等满 300 秒，10:02:49 写入 `ok=True`。Run 项禁用和快捷方式在真实登录时的表现，还没有跨重启复验。
+- 16:13–16:14 用受管的 `Get-ConsoleLaunchAudit.ps1` 和 `Watch-ConsoleWindows.ps1` 复核（脚本源在本仓 `managed/host-diagnostics/`，该机只放了副本 `D:\Codex\.codex\tmp\console-launch-audit-20261022\`，没有部署到 scripts）：审计为 clean，上面 4 个任务和快捷方式都判为 hidden；复验为 quiet，对照窗口被看到，4 个任务依次启动、快捷方式经 shell 打开，都没有出现新窗口。
 - 回滚：该机 `D:\Codex\.codex\tmp\console-popups-20261022\rollback.ps1 -Stage D:\Codex\.codex\tmp\console-popups-20261022`，不带 `-Apply` 只演练；改前 XML、快捷方式与回执在同目录 `backup\`。
 - 同日按用户要求禁用（未删除）计划任务 `Hermes双向同步`。它每小时一次，用裸 `pwsh.exe` 启动，不带隐藏参数；之前每次都以 `0x80070002` 起不来，一旦能解析到 pwsh 就会每小时弹一次窗。禁用后导出的 XML 只多了 `Settings/Enabled=false`。家里的 Hermes 已于 2026-09-02 退役删除，该机 `D:\hermes-data` 仍在，未处理。恢复用 `Enable-ScheduledTask -TaskPath '\' -TaskName 'Hermes双向同步'`，改前 XML 在该机 `D:\Codex\.codex\tmp\hermes-task-disable-20261022\before.xml`。
 - 未处置，待用户决定：
   - IFEO 路由器会拦截第三方的 `powershell.exe` 调用（UniGetUI、O+Connect、GameViewerServer、RadeonSoftware 等），`powershell-ifeo-router.log` 已有 153 MB。这些调用会不会闪窗，没有验证。
   - `D:\Codex\tools` 整棵树和 `D:\Codex\.codex\scripts` 对 Authenticated Users 可写，这是原有问题，本次未改。以最高权限运行的 `CodexStoreUpdateHealthGuard` 原本就从这两处加载 pwsh 7.6.5 和它的脚本；改后会先经过同一棵树下的 pythonw，可被改写的位置仍不超出这两处。
 - 在该机操作的注意点：SSH 会话里 `USERDOMAIN` 是 `WORKGROUP`，注册计划任务的 UserId 要用令牌名 `BAKER\14224`。pwsh 里的 `Get-MpThreatDetection` 要经 WinCompat 拉起 Windows PowerShell 5.1，会被路由器拦下，改用 CIM 命名空间 `root/Microsoft/Windows/Defender`。TaskScheduler/Operational 日志未启用，只能看 `LastTaskResult`。
-- 证据：家里 `D:\agents\run-evidence\study-console-popups-20261022\`。
+- 证据：家里 `D:\agents\run-evidence\study-console-popups-20261022\`；16:13 的复核在 `D:\agents\run-evidence\console-launch-audit-20261022\`。
 
-本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核，2026-09-24 增补代理环境变量根因与 v2rayN 自启防复发；开机/唤醒黑框处置于 2026-10-22。数量、进程和任务状态属易变事实，操作前必须实时复核。
+## 远程输入锁定键提示守卫（RemoteInputLockOsdGuard）
+
+- 用途：远控（UU 手机键盘）输入会触发本机 Lenovo 热键驱动和 Logi Options+ 的大小写锁定提示，根因见宿主 `host-runbook\remote-control.md` 的 Remote Control Input OSD 节。该任务属 Codex 自有（脚本时间戳和每日触发的起点都是 2026-07-10），在登录、解锁、远程连接时和每天 04:35 运行，检查并修回：
+  - Lenovo 服务 `LenovoFnAndFunctionKeys`：大写提示关、数字锁定提示保留（`VantageToast` 下 `ShowCapslkOSD=0`、`ShowNumlkOSD=1`，经服务控制码 141、147 下发）；只接受驱动版本 `2.1.2602.8`，版本不符算健康检查失败。
+  - 用户的 `HKCU\Software\Lenovo\LenovoUtility\SendCaplkFlag=0`，`LenovoUtilityID` 启动任务保持禁用（State=1）。
+  - Logi Options+ 的 `settings.db`：`lock_notifications_enabled=false`，`notifications_enabled` 保持 true；先备份，再在一次 SQLite 事务里改写。
+- 文件都在 `D:\Codex\.codex\protected\remote-input-lock-osd\`：
+  - `Repair-RemoteInputLockOsd.ps1`：任务带 `-Repair -Json -NotifyOnFailure` 运行；不带 `-Repair` 时只检查。
+  - `Rollback-RemoteInputLockOsd.ps1`：开头先禁用该任务，正在运行时停止它；其余步骤运行前先读脚本确认。
+  - `engine\`：受保护的 PowerShell 7.6.3 副本。
+  - `state\latest.json`：每次运行原子写入的结果。
+  - `temp\`：脚本把 TEMP、TMP 指到这里。
+- ACL（2026-10-22 读回）：根目录关闭继承，SYSTEM、Administrators 和 `Baker\14224` 完全控制，Users 只读与执行；`engine\` 继承根目录；`state\` 关闭继承，只有 SYSTEM、Administrators 和 `Baker\14224`。Authenticated Users 对这棵树没有写权限，所以隐藏启动选了 `conhost --headless`，没有改走 Authenticated Users 可写的 python 目录。
+- 怎么看结果：任务结果恒为 `0x0`，以 `state\latest.json` 为准。`ok` 是总结论，`actions` 列出本次做了什么，`before`、`after` 下各有布尔检查项 `checks` 和实际值 `values`（含 `driverVersion`），失败时 `error` 非空。脚本失败时退出 1，并用 `msg.exe` 给当前用户发一条显示 90 秒的消息，内容含状态文件路径；没有交互会话、收不到消息时，状态文件仍是唯一依据。
+- 2026-10-22 16:14 那次运行：`ok=true`，before 和 after 的检查项全部通过，驱动版本 `2.1.2602.8`。
+
+本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核，2026-09-24 增补代理环境变量根因与 v2rayN 自启防复发；开机/唤醒黑框处置、远程输入锁定键提示守卫说明与 SSH 执行事实于 2026-10-22。数量、进程和任务状态属易变事实，操作前必须实时复核。
