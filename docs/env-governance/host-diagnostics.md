@@ -20,6 +20,8 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 | `Get-TaskbarSnapshot.ps1` | 当前 shell 身份、窗口响应、固定项聚合哈希；不返回窗口标题或快捷方式目标。窗口就绪不能证明图标视觉正常。 |
 | `Restart-ExplorerShell.ps1` | Core 7.5+；默认 Plan，Apply 必须消费 120 秒内计划，核对 PID/启动时间/路径/会话、固定项和窗口。会话互斥覆盖停止至验收；停止前保存路径，先观察自动恢复，再有限创建。计划预算为 5–60 秒。工具层成功要求 ready、桌面/任务栏就绪和固定项一致，视觉验收单独完成。 |
 | `Invoke-ManagedRecycle.ps1` | Core 7.4+；把单个文件或目录树移入所在卷的回收站。Check 只读运行同一套预检，不需要用途和授权，也不写 evidence；Plan 把逐项相对路径清单、回收站状态、用途和用户授权原话写入 D 盘 evidence 的 `plan.json`；Apply 须在 30 分钟内凭 plan SHA-256 与 `-ConfirmRecycle` 执行，重跑预检并比对清单后调用 `SHFileOperationW`，再按原路径读回 `$I`/`$R` 记录、比对回收站副本；被别的进程占用的 `$I` 记录重试到读回开始后 3 秒，仍读不了就跳过并列入 `unreadableBinRecords`，目标记录不在可读记录里时报 `bin-record-unreadable`。结果只写一次 `result.json`，同一 plan 不能重放；只有 `checked`/`planned`/`recycled` 退出 0。卷根、受保护根及其祖先、系统子树、链接、超长路径（拒绝时分列原位与回收站内长度并点名超长条目）、NoRecycleFiles/NukeOnDelete 和回收站余量不足一律拒绝；不做永久删除，也不清空回收站。Agent 使用边界见宿主 `host-runbook/safe-tree-delete.md` 的受管回收节。 |
+| `Get-ConsoleLaunchAudit.ps1` | 只读。枚举在用户会话里运行的计划任务（登录类型 Interactive、InteractiveOrPassword、Group）、HKCU 与 HKLM 的 Run/RunOnce（含 WOW6432Node）和两个启动文件夹；已禁用的任务和被任务管理器禁用的登录项（StartupApproved 首字节为奇数）只计数。按启动的程序分类：hidden 是 pythonw 跑的脚本以 `CREATE_NO_WINDOW` 启动紧跟在它后面的程序（按脚本文本判断，受管的 `hidden-console-launcher.py` 就是这种形式），或 `conhost.exe --headless`，且被启动的程序存在；gui 是 GUI 子系统程序、Windows Script Host 脚本或 pythonw 跑的其他脚本（这类脚本之后再打开的控制台静态审计看不到，要靠复验）；visible-console 是控制台子系统、`.cmd`/`.bat`、不带 `--headless` 的 conhost 或 Windows Terminal，`-WindowStyle Hidden` 不改变结论（Windows Terminal 承接控制台时窗口照样弹出）；missing 是程序、pythonw 要跑的脚本或被包装的程序不存在；unknown 是读不出 PE。名字某一段以 Codex 开头，或程序、参数指向 `D:\Codex\`、`D:\agents\` 的算 Codex 自有，全部列出且发现项在前；其他入口只在会开控制台时列出，仅供参考。不输出参数；Codex 自有入口有 visible-console、missing 或 unknown 时退出 1。经 SSH 运行时，HKCU 和个人启动文件夹是 SSH 账户的。 |
+| `Watch-ConsoleWindows.ps1` | 在真实会话复验改动。为当前账户注册两个没有触发器的临时 Interactive 任务：经 `conhost --headless` 启动的监视器，和不加包装直接跑 pwsh 的对照任务。对照会在用户桌面闪一个约 2.5 秒的窗口，证明监视器看得见这个桌面。随后每隔 5 秒启动一个 `-StartTasks` 任务，最后由监视器经 shell 打开 `-LaunchPath`（如启动文件夹快捷方式）。新窗口归到它之前最近的触发：`quiet` 退出 0；`windows-seen`、`control-missed`、`trigger-failed`、`monitor-not-started`（该账户没有交互登录）退出 1。临时任务在写报告前删除，被中断的运行会留下 `zz-CodexConsoleWatch-*`。不记录窗口标题和命令行；`-EvidenceDirectory` 必须是新的 D 盘目录。 |
 
 参数与返回结构以各脚本帮助/源码为准。活动日志不是原子快照；命名模式脱敏不保证发现任意秘密，仍要缩小敏感来源与字段范围。需要复核某条失败时保留来源、行窗口和退出码，不输出完整日志。
 
@@ -90,10 +92,11 @@ node ./tests/Test-ModuleBoundaries.cjs
 git diff --check
 ```
 
-仓库 fixture 运行合成日志、语法/JSON 合同、NVIDIA 状态、浏览器 CLI/HTTP 合成报告、带所有权握手的隔离恢复用例与 D 盘 fixture 上的回收入口拒绝/计划用例，显式跳过真实桌面快照和真实回收站移入（`-SkipLiveRecycle`）。宿主完整入口会把两个 D 盘 fixture 树移入 D 盘回收站：回收第二个时，第一个的 `$I` 记录被测试独占打开，回收站里另有测试写入的一条日期更晚、指向别的路径的诱饵 `$I` 记录。随后像资源管理器还原那样移回两个树，`$I` 记录（含诱饵）归入本轮 evidence，不永久删除任何内容。浏览器 suite 不启动或附着真实浏览器，不能代替真实页面验收。CI 为 host-safety 配置 Python；本机测试从 PATH 解析 `python.exe`。部署后使用完整入口检查实际宿主只读面：
+仓库 fixture 运行合成日志、语法/JSON 合同、NVIDIA 状态、浏览器 CLI/HTTP 合成报告、带所有权握手的隔离恢复用例、D 盘 fixture 上的回收入口拒绝/计划用例，以及控制台入口审计的合成 PE 与快捷方式夹具，显式跳过真实桌面快照和真实回收站移入（`-SkipLiveRecycle`）。审计 suite 还会注册一个没有触发器、跑完即删的临时 Interactive 任务，确认真实收集路径能读到它。`Watch-ConsoleWindows.ps1` 每次运行都会闪出对照窗口，不进自动回归，只做语法检查；它的每次结果由对照组自证。宿主完整入口会把两个 D 盘 fixture 树移入 D 盘回收站：回收第二个时，第一个的 `$I` 记录被测试独占打开，回收站里另有测试写入的一条日期更晚、指向别的路径的诱饵 `$I` 记录。随后像资源管理器还原那样移回两个树，`$I` 记录（含诱饵）归入本轮 evidence，不永久删除任何内容。浏览器 suite 不启动或附着真实浏览器，不能代替真实页面验收。CI 为 host-safety 配置 Python；本机测试从 PATH 解析 `python.exe`。部署后使用完整入口检查实际宿主只读面：
 
 ```powershell
 & 'D:/Codex/.codex/scripts/Test-HostDiagnostics.ps1'
+& 'D:/Codex/.codex/scripts/Get-ConsoleLaunchAudit.ps1'
 & 'D:/Codex/.codex/scripts/Get-NvidiaDownloadStatus.ps1'
 & 'D:/Codex/.codex/scripts/Get-TaskbarSnapshot.ps1'
 & 'D:/Codex/.codex/scripts/Restart-ExplorerShell.ps1' -Mode Plan

@@ -98,7 +98,8 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 
 ### 提权看门狗
 
-- 计划任务 `Codex Office Proxy FailSafe`：HighestAvailable，脚本 `D:\Codex\.codex\tools\office-v2rayn\Ensure-ProxyFailSafe.ps1`。UU 远程会话是中完整性，杀不掉提权的 v2rayN，也写不了 HKLM；一次性提权修复要借用该任务写入自解除块，跑完还原原件。
+- 计划任务 `Codex Office Proxy FailSafe`：脚本 `D:\Codex\.codex\tools\office-v2rayn\Ensure-ProxyFailSafe.ps1`。UU 远程会话是中完整性，杀不掉提权的 v2rayN，也写不了 HKLM；一次性提权修复要借用该任务写入自解除块，跑完还原原件。
+- 2026-10-22 回读该任务 XML：主体没有 `RunLevel`（即 LeastPrivilege），与此前记的 HighestAvailable 不符。本机 `EnableLUA=1`、`FilterAdministratorToken=1`，内置 Administrator 也受 UAC 过滤，按此推断该任务拿到的是过滤后的令牌。借它提权之前先复核 RunLevel。
 - 2026-08-22 01:19 该任务 `LastTaskResult=0`、状态 `Ready`。
 - 2026-10-19 读过脚本正文：每 5 分钟检查一次。10808 在听时写 Machine 级 `HTTP_PROXY`/`HTTPS_PROXY`；不在听时清掉指向 10808 的 HKCU 系统代理和环境变量。它不会拉起 v2rayN 或核心。
 
@@ -118,6 +119,21 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 | 10808 在听但代理不通 | 看 Clash API `127.0.0.1:10813` 中 `proxy-auto` 的当前选择与成员延迟，以及 `office-v2rayn-maint\*-last.json` | 中转入口会轮换；全面超时先等几分钟再改配置 |
 | 02:00/03:00 任务后不通 | 读 `app-update-last.json` / `sub-update-last.json` 的 `result` 与日志；脚本失败时会自动回滚 | 用上一节的回滚材料手工恢复 |
 
+## 计划任务隐藏启动（2026-10-22）
+
+- 起因：控制台入口审计（本仓 `managed/host-diagnostics/Get-ConsoleLaunchAudit.ps1`）报出 4 个 Codex 任务以 Interactive 方式直接启动 `C:\Program Files\PowerShell\7\pwsh.exe`，只靠 `-WindowStyle Hidden` 隐藏：`Codex Office Proxy FailSafe`（每 5 分钟）、`Codex Office v2rayN Daily Update`（02:00）、`Codex Office v2rayN Subscription Refresh`（03:00）、`Codex Office Win11 Upgrade Stage`（没有触发器）。管理员 10-14 起一直登录在控制台会话。
+- 处置：4 个任务的 Command/Arguments 改为 `D:\Codex\tools\python314-official\pythonw.exe -I -S -B -X utf8 "D:\Codex\.codex\hooks\lib\hidden-console-launcher.py" "C:\Program Files\PowerShell\7\pwsh.exe" <原参数>`，与家里、自习室同一套隐藏启动方式，退出码照常回传。工作目录、触发器、主体和其余 XML 与改前逐字相同。启动器是本次新部署的，与本仓 `managed/codex-hooks/hooks/lib/hidden-console-launcher.py`（c4a5007）字节一致。维护脚本暂停 FailSafe 用的是 `Disable-ScheduledTask`/`Enable-ScheduledTask`，不会改回启动方式。
+- 权限：`D:\Codex` 整棵树（含 `tools\python314-official`、`.codex\tools\office-v2rayn` 和新建的 `.codex\hooks\lib`）继承 Authenticated Users 的修改权限，本机除 Administrator 外还有两个启用的 Codex 沙箱普通账户。这是原有状况：以最高权限运行的 02:00/03:00 任务本来就从这棵树加载脚本，加上 pythonw 后，可被改写的位置没有超出这棵树。本次未改 ACL。
+- 验收（17:25–17:36，窗口监视器经 `conhost --headless` 在控制台会话 1 里隐藏运行）：
+  - 17:34:24 FailSafe 按新启动方式到点运行，结果 `0x0`。
+  - 临时探针任务与 02:00/03:00 任务同形（Highest、带工作目录），经启动器启动 pwsh：任务结果 `0x7`，即脚本的 `exit 7` 原样回传；子进程已提权、在会话 1、工作目录正确，`GetConsoleWindow()` 为 0，根本没有控制台窗口。
+  - 审计复跑为 clean，4 个任务都判为 hidden。临时任务已删除。
+  - 监视器全程没有记到新的控制台窗口，也没有新的 WindowsTerminal/OpenConsole 进程，改前 17:29:24 那次 FailSafe 运行也一样，所以没有观察到改前的窗口。该机当时没有运行 WindowsTerminal，推断控制台由 conhost 承接，`-WindowStyle Hidden` 至多留下短于一次轮询（120 ms）的闪烁。带对照的 `Watch-ConsoleWindows.ps1` 复验没有跑，它的对照任务会在桌面上闪约 2.5 秒。
+  - 02:00/03:00 两个任务在新启动方式下还没有真实运行过；`Win11 Upgrade Stage` 没有触发器，本次未运行。
+- 回滚：该机 `D:\Codex\.codex\tmp\console-hidden-20261022\rollback.ps1 -Stage D:\Codex\.codex\tmp\console-hidden-20261022`，不带 `-Apply` 只演练（已演练，退出码 0）；改前 XML 与回执在同目录 `backup\`。回滚后启动器文件保留。
+- 非 Codex 的 `Minmin Countdown` 同样直接启动 pwsh，只报告，未改。
+- 证据：家里 `D:\agents\run-evidence\office-console-hidden-20261022\`。
+
 ## 远端操作边界
 
 - 正式远端操作使用严格 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。办公室 Tailscale 控制面依赖本机 v2rayN 的 10808，见上一节。
@@ -130,4 +146,5 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - sshd / Tailscale / GameViewerService、v2rayN / xray / 10808、DNS、Tailscale 服务代理环境变量、计划任务、当前中转节点与 socks 验收：2026-08-22 01:23 从家里经正式 SSH 只读复核。
 - v2rayN 版本与核心、新界订阅、OpenAI 组成员与探测、02:00/03:00 任务、系统代理（`ProxyEnable=1`，`127.0.0.1:10808`）、Machine 级 `HTTP(S)_PROXY`、Tailscale `Running online=True`：2026-10-19 23:17 从家里经正式 SSH 回读。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261019\`。
 - 02:00/03:00 两个任务的第一次无人值守运行、管理员控制台会话（10-14 起在线）、程序版本与 10808：2026-10-20 09:38 从家里经正式 SSH 回读。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261019\followup-20261020\`。
+- 4 个 Codex 计划任务的启动方式、FailSafe 的 RunLevel、UAC 配置、本地账户与 `D:\Codex` 的 ACL：2026-10-22 17:17–17:38 从家里经正式 SSH 回读并处置。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\`。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。

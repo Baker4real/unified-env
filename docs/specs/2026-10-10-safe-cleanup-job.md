@@ -1,5 +1,5 @@
 ---
-type: spec
+type: reference
 title: 批量安全清理任务合同
 tags: [safe-delete, recovery, status]
 intent: 定义批量清理的进程身份、原子账本、策略证据和目录身份验收
