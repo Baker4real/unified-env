@@ -7,7 +7,8 @@ Check, refusal and plan cases never touch the Recycle Bin. The live case recycle
 the second while the first one's $I index record is held open the way Explorer or a scanner briefly holds a new
 record and a decoy $I record for another path sits in the bin, then restores both the way Explorer does, without
 deleting anything: each $R content moves back to its path and each $I record, the decoy included, moves into this
-run's evidence. -SkipLiveRecycle reports that case as skipped.
+run's evidence. The same case then recycles a third tree whose hard links all stay inside it, planned with
+-AllowInternalHardLinks, and restores it the same way. -SkipLiveRecycle reports that case as skipped.
 #>
 [CmdletBinding()]
 param(
@@ -30,7 +31,7 @@ $entry = Join-Path $PSScriptRoot 'Invoke-ManagedRecycle.ps1'
 $cases = [Collections.Generic.List[object]]::new()
 $junctions = [Collections.Generic.List[string]]::new()
 $expectedManifest = @("D`tempty", "D`tsub", "F`ta.txt`t5", "F`tsub\b.bin`t1024")
-$liveCase = 'live recycle finds each tree''s own bin record past a locked record and a newer decoy, and the test restores them'
+$liveCase = 'live recycle finds each tree''s own bin record past a locked record and a newer decoy, moves a tree with internal hard links whole, and the test restores them'
 # Whether the fixture volume has bin settings; a fresh profile (a CI runner) has none until the volume's bin is first used.
 $fixtureVolume = try { [string](Get-CimInstance Win32_Volume -Filter "DriveLetter='$([IO.Path]::GetPathRoot($fullEvidenceRoot).TrimEnd('\'))'").DeviceID } catch { '' }
 $binSettingsKey = if ($fixtureVolume) {
@@ -188,6 +189,29 @@ try {
         if (@($response.json.problems) -notcontains 'hard-link: a.txt (2 links)') { throw 'The hard link was not reported.' }
     }
 
+    Assert-Case 'check accepts hard links that stay inside the tree only with -AllowInternalHardLinks' {
+        $tree = New-Tree 'tree-internal-hardlink'
+        $null = New-Item -ItemType HardLink -Path (Join-Path $tree 'sub\a-twin.txt') -Target (Join-Path $tree 'a.txt')
+        $refused = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree)
+        Assert-Refused $refused 'tree-not-recyclable'
+        if (@($refused.json.problems) -notcontains 'hard-link: a.txt (2 links)') { throw 'Without the switch the hard link was not reported.' }
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree, '-AllowInternalHardLinks')
+        if ($response.exitCode -ne 0 -or $response.json.status -ne 'checked' -or $response.stderr) { throw "Check failed: $($response.stdout)" }
+        if ($response.json.internalHardLinkFiles -ne 2 -or $response.json.fileCount -ne 3 -or $response.json.totalBytes -ne 1034) { throw 'Check did not count the internal hard links.' }
+    }
+
+    Assert-Case '-AllowInternalHardLinks still refuses a hard link with a name outside the tree' {
+        $tree = New-Tree 'tree-external-hardlink'
+        # A sibling whose path starts with the tree's path is still outside the tree.
+        $sibling = $tree + '-sibling'
+        [void][IO.Directory]::CreateDirectory($sibling)
+        $null = New-Item -ItemType HardLink -Path (Join-Path $sibling 'a-twin.txt') -Target (Join-Path $tree 'a.txt')
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree, '-AllowInternalHardLinks')
+        Assert-Refused $response 'tree-not-recyclable'
+        if (@($response.json.problems) -notcontains 'hard-link-outside-target: a.txt (2 links)') { throw 'The name outside the tree was not reported.' }
+        Assert-Refused (Invoke-Entry @('-Mode', 'Check', '-TargetPath', (Join-Path $tree 'a.txt'), '-AllowInternalHardLinks')) 'tree-not-recyclable'
+    }
+
     Assert-Case 'plan refuses paths the shell cannot move' {
         [void][IO.Directory]::CreateDirectory($longTree)
         $name = 'x' * (262 - $longTree.Length - 1)
@@ -243,6 +267,7 @@ try {
         if ([string]::Join('|', $plan.manifest) -cne [string]::Join('|', $expectedManifest)) { throw 'The manifest is not exact.' }
         if ($plan.target -ne $tree -or $plan.fileCount -ne 2 -or $plan.directoryCount -ne 2 -or $plan.totalBytes -ne 1029) { throw 'Plan totals changed.' }
         if ($plan.authorization -cne 'test fixture created by this run' -or $plan.purpose -cne 'managed recycle test') { throw 'Plan lost its authorization.' }
+        if ($plan.allowInternalHardLinks -ne $false) { throw 'A plan without the switch did not record it as off.' }
         $single = Invoke-Plan (Join-Path $tree 'a.txt')
         $singlePlan = [IO.File]::ReadAllText($single.json.planPath) | ConvertFrom-Json -AsHashtable
         if ($single.json.kind -ne 'file' -or [string]::Join('|', $singlePlan.manifest) -cne "F`t`t5") { throw 'A single-file plan is not exact.' }
@@ -281,6 +306,18 @@ try {
         $recorded = [IO.File]::ReadAllText((Join-Path (Split-Path -Parent $planned.json.planPath) 'result.json')) | ConvertFrom-Json -AsHashtable
         if ($recorded.reason -ne 'manifest-changed' -or -not [IO.File]::Exists((Join-Path $tree 'extra.txt'))) { throw 'The drift refusal was not recorded or touched the tree.' }
         Assert-Refused (Invoke-Entry $apply) 'plan-already-applied'
+    }
+
+    Assert-Case 'plan records -AllowInternalHardLinks and apply rechecks the tree with it' {
+        $tree = New-Tree 'tree-internal-plan'
+        $null = New-Item -ItemType HardLink -Path (Join-Path $tree 'sub\a-twin.txt') -Target (Join-Path $tree 'a.txt')
+        $planned = Invoke-Entry @('-Mode', 'Plan', '-TargetPath', $tree, '-Purpose', 'managed recycle test', '-Authorization', 'test fixture created by this run', '-AllowInternalHardLinks')
+        if ($planned.exitCode -ne 0 -or $planned.json.status -ne 'planned' -or $planned.stderr) { throw "Plan failed: $($planned.stdout)" }
+        $plan = [IO.File]::ReadAllText($planned.json.planPath) | ConvertFrom-Json -AsHashtable
+        if ($plan.allowInternalHardLinks -ne $true -or $plan.internalHardLinkFiles -ne 2) { throw 'The plan did not record the internal hard links.' }
+        # Drift after the plan: refusing for the drift rather than for the hard links proves Apply reran the preflight with the plan's setting.
+        [IO.File]::WriteAllText((Join-Path $tree 'extra.txt'), 'drift', $utf8)
+        Assert-Refused (Invoke-Entry @('-Mode', 'Apply', '-PlanPath', $planned.json.planPath, '-ApprovedPlanSha256', $planned.json.planSha256, '-ConfirmRecycle')) 'manifest-changed'
     }
 
     if ($SkipLiveRecycle) { $cases.Add([pscustomobject]@{ name = $liveCase; status = 'skipped'; reason = 'SkipLiveRecycle' }) }
@@ -324,6 +361,18 @@ try {
             if ($replanned.exitCode -ne 0 -or $replanned.json.manifestSha256 -ne $planned.json.manifestSha256) { throw 'The restored tree differs from the plan.' }
             $replanned = Invoke-Plan $second
             if ($replanned.exitCode -ne 0 -or $replanned.json.manifestSha256 -ne $secondPlanned.json.manifestSha256) { throw 'The restored second tree differs from its plan.' }
+            # Both names of an internal hard link move into the bin with the tree and come back still linked.
+            $linked = New-Tree 'tree-live-internal-hardlink'
+            $null = New-Item -ItemType HardLink -Path (Join-Path $linked 'sub\a-twin.txt') -Target (Join-Path $linked 'a.txt')
+            $linkedPlanned = Invoke-Entry @('-Mode', 'Plan', '-TargetPath', $linked, '-Purpose', 'managed recycle test', '-Authorization', 'test fixture created by this run', '-AllowInternalHardLinks')
+            if ($linkedPlanned.exitCode -ne 0) { throw "Plan failed: $($linkedPlanned.stdout)" }
+            $linkedApplied = Invoke-Entry @('-Mode', 'Apply', '-PlanPath', $linkedPlanned.json.planPath, '-ApprovedPlanSha256', $linkedPlanned.json.planSha256, '-ConfirmRecycle')
+            if ($linkedApplied.exitCode -ne 0 -or $linkedApplied.json.status -ne 'recycled' -or $linkedApplied.stderr) { throw "Recycle with internal hard links failed: $($linkedApplied.stdout)" }
+            $linkedRecord = $linkedApplied.json.binRecord
+            [IO.Directory]::Move($linkedRecord.contentPath, $linked)
+            Invoke-BinStep { [IO.File]::Move($linkedRecord.indexPath, (Join-Path $runRoot 'restored-bin-index-internal-hardlink.bin')) }
+            $rechecked = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $linked, '-AllowInternalHardLinks')
+            if ($rechecked.exitCode -ne 0 -or $rechecked.json.internalHardLinkFiles -ne 2) { throw 'The restored tree lost its internal hard links.' }
         }
     }
 }

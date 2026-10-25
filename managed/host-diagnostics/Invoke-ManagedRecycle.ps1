@@ -15,8 +15,9 @@ bin-record-unreadable instead of bin-record-missing when the target's record is 
 Output is one JSON object; exit 0 only for checked, planned or recycled.
 
 Preflight fails closed on: paths that are not drive paths on a fixed NTFS volume, volume roots, protected
-roots and their ancestors, system subtrees, reparse points on the path or inside the tree, hard links,
-paths the shell cannot move (260 characters or more, in place or in the bin), the NoRecycleFiles policy,
+roots and their ancestors, system subtrees, reparse points on the path or inside the tree, hard links
+(with -AllowInternalHardLinks only those with a name outside the target; Plan records the switch and Apply
+rechecks with it), paths the shell cannot move (260 characters or more, in place or in the bin), the NoRecycleFiles policy,
 NukeOnDelete, missing per-volume bin settings, and bin headroom (bin + target above 90% of MaxCapacity
 would make Windows evict older bin items). Nothing is deleted permanently and the bin is never emptied;
 both stay with the user. Agents use this entry only for targets the user explicitly authorized in the
@@ -35,6 +36,7 @@ param(
     [string]$PlanPath,
     [string]$ApprovedPlanSha256,
     [switch]$ConfirmRecycle,
+    [switch]$AllowInternalHardLinks,
     [string]$EvidenceRoot = 'D:/agents/run-evidence/managed-recycle'
 )
 
@@ -167,7 +169,7 @@ function Get-UserBinDirectory([string]$Root) {
 }
 
 # Every check Plan and Apply share. Fills $result and returns the scan, or refuses.
-function Invoke-Preflight([string]$Path, [string]$EvidenceFull) {
+function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInternalLinks) {
     if ([string]::IsNullOrWhiteSpace($Path)) { Stop-Refused 'target-required' }
     if (-not [IO.Path]::IsPathFullyQualified($Path) -or $Path.IndexOfAny([char[]]'*?') -ge 0) { Stop-Refused 'target-not-fully-qualified' }
     $full = [IO.Path]::GetFullPath($Path)
@@ -183,7 +185,7 @@ function Invoke-Preflight([string]$Path, [string]$EvidenceFull) {
     if ($drive.DriveType -ne [IO.DriveType]::Fixed -or $format -ne 'NTFS') { Stop-Refused 'volume-not-fixed-ntfs' }
     $reparse = Get-ReparseOnPath $full
     if ($reparse) { $result.reparsePoint = $reparse; Stop-Refused 'reparse-point-on-path' }
-    $scan = try { [ManagedRecycle.Native]::Scan($full, $true, $maxEntries) }
+    $scan = try { [ManagedRecycle.Native]::Scan($full, $true, $AllowInternalLinks, $maxEntries) }
     catch {
         $inner = $_.Exception.InnerException
         $result.scanError = if ($inner) { $inner.Message } else { $_.Exception.Message }
@@ -194,6 +196,7 @@ function Invoke-Preflight([string]$Path, [string]$EvidenceFull) {
     $result.fileCount = $scan.Files
     $result.directoryCount = $scan.Directories
     $result.totalBytes = $scan.Bytes
+    if ($AllowInternalLinks) { $result.internalHardLinkFiles = $scan.InternalLinkFiles }
     $binName = (Get-UserBinDirectory $root).Length + 9 + [IO.Path]::GetExtension($full).Length
     $tail = if ($scan.MaxRelativeLength -gt 0) { 1 + $scan.MaxRelativeLength } else { 0 }
     $result.longestPath = [math]::Max($full.Length, $binName) + $tail
@@ -289,6 +292,7 @@ namespace ManagedRecycle
         public long Bytes;
         public int MaxRelativeLength;
         public bool Truncated;
+        public long InternalLinkFiles;
         public Dictionary<string, long[]> Top = new Dictionary<string, long[]>(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -336,6 +340,15 @@ namespace ManagedRecycle
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool GetVolumeNameForVolumeMountPointW(string mountPoint, StringBuilder name, int size);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr FindFirstFileNameW(string fileName, uint flags, ref uint length, StringBuilder linkName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool FindNextFileNameW(IntPtr find, ref uint length, StringBuilder linkName);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool FindClose(IntPtr find);
 
         // FO_DELETE with FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI | FOF_NO_CONNECTED_ELEMENTS
         // | FOF_WANTNUKEWARNING on a dedicated STA thread: recycle without UI, but ask instead of silently deleting
@@ -395,11 +408,37 @@ namespace ManagedRecycle
             }
         }
 
+        // Every name of a file as a full path, or null when they cannot all be read. A name is at most 32767
+        // characters, so the buffer never has to grow.
+        public static List<string> LinkNames(string path)
+        {
+            const int capacity = 32768;
+            var name = new StringBuilder(capacity);
+            uint length = capacity;
+            IntPtr find = FindFirstFileNameW(path, 0, ref length, name);
+            if (find == new IntPtr(-1)) return null;
+            string volume = Path.GetPathRoot(path).TrimEnd('\\');
+            var names = new List<string>();
+            try
+            {
+                do
+                {
+                    names.Add(volume + name.ToString());
+                    length = capacity;
+                }
+                while (FindNextFileNameW(find, ref length, name));
+                return Marshal.GetLastWin32Error() == 38 ? names : null;
+            }
+            finally { FindClose(find); }
+        }
+
         // Exact manifest of a file or a directory tree: "D<tab>relative" and "F<tab>relative<tab>bytes" lines in
-        // ordinal order. Reparse points are reported, never followed; with checkLinks every file needs one link.
-        public static TreeScan Scan(string root, bool checkLinks, int maxEntries)
+        // ordinal order. Reparse points are reported, never followed. With checkLinks every file needs one link;
+        // with allowInternalLinks as well, a file may have more when every one of its names is inside root.
+        public static TreeScan Scan(string root, bool checkLinks, bool allowInternalLinks, int maxEntries)
         {
             var scan = new TreeScan();
+            string internalRoot = allowInternalLinks ? root : null;
             if ((File.GetAttributes(root) & FileAttributes.Directory) == 0)
             {
                 scan.Kind = "file";
@@ -407,7 +446,7 @@ namespace ManagedRecycle
                 scan.Files = 1;
                 scan.Bytes = size;
                 scan.Lines.Add("F\t\t" + size);
-                if (checkLinks) CheckLinks(scan, root, "");
+                if (checkLinks) CheckLinks(scan, root, "", internalRoot);
                 return scan;
             }
             scan.Kind = "directory";
@@ -447,18 +486,34 @@ namespace ManagedRecycle
                     scan.Bytes += length;
                     scan.Lines.Add("F\t" + relative + "\t" + length);
                     Tally(scan, top, length, 1);
-                    if (checkLinks) CheckLinks(scan, item.FullName, relative);
+                    if (checkLinks) CheckLinks(scan, item.FullName, relative, internalRoot);
                 }
             }
             scan.Lines.Sort(StringComparer.Ordinal);
             return scan;
         }
 
-        private static void CheckLinks(TreeScan scan, string path, string relative)
+        // internalRoot is null unless hard links whose names all stay inside it are allowed.
+        private static void CheckLinks(TreeScan scan, string path, string relative, string internalRoot)
         {
             long links = Links(path);
-            if (links < 0) AddProblem(scan, "link-count-unreadable: " + relative);
-            else if (links != 1) AddProblem(scan, "hard-link: " + relative + " (" + links + " links)");
+            if (links < 0) { AddProblem(scan, "link-count-unreadable: " + relative); return; }
+            if (links == 1) return;
+            string count = " (" + links + " links)";
+            if (internalRoot == null) { AddProblem(scan, "hard-link: " + relative + count); return; }
+            List<string> names = LinkNames(path);
+            if (names == null || names.Count != links) { AddProblem(scan, "hard-link-names-unreadable: " + relative + count); return; }
+            foreach (string name in names)
+            {
+                if (!Within(name, internalRoot)) { AddProblem(scan, "hard-link-outside-target: " + relative + count); return; }
+            }
+            scan.InternalLinkFiles++;
+        }
+
+        private static bool Within(string path, string parent)
+        {
+            return path.Equals(parent, StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith(parent + "\\", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void AddProblem(TreeScan scan, string problem)
@@ -490,7 +545,7 @@ namespace ManagedRecycle
     }
 
     if ($Mode -eq 'Check') {
-        $checked = Invoke-Preflight $TargetPath $evidenceFull
+        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent
         $result.status = 'checked'
         $result.topLevel = @(Get-TopLevel $checked.scan)
         Complete
@@ -500,7 +555,7 @@ namespace ManagedRecycle
         if ([string]::IsNullOrWhiteSpace($Purpose) -or [string]::IsNullOrWhiteSpace($Authorization)) {
             Stop-Refused 'purpose-and-authorization-required'
         }
-        $checked = Invoke-Preflight $TargetPath $evidenceFull
+        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent
         $runDir = Join-Path $evidenceFull ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         [void][IO.Directory]::CreateDirectory($runDir)
         if (Get-ReparseOnPath $runDir) { Stop-Refused 'evidence-path-has-reparse-point' }
@@ -518,6 +573,8 @@ namespace ManagedRecycle
             fileCount = $checked.scan.Files
             directoryCount = $checked.scan.Directories
             totalBytes = $checked.scan.Bytes
+            allowInternalHardLinks = $AllowInternalHardLinks.IsPresent
+            internalHardLinkFiles = $checked.scan.InternalLinkFiles
             manifestSha256 = $manifestSha256
             topLevel = $topLevel
             bin = $result.bin
@@ -560,7 +617,8 @@ namespace ManagedRecycle
     $result.resultPath = $resultPath
     $result.purpose = $plan.purpose
     $result.authorization = $plan.authorization
-    $checked = Invoke-Preflight $plan.target $evidenceFull
+    # The plan's setting, not this call's switch: the user authorized what the plan recorded.
+    $checked = Invoke-Preflight $plan.target $evidenceFull ($plan['allowInternalHardLinks'] -eq $true)
     $result.manifestSha256 = Get-ManifestSha256 $checked.scan
     if ($result.manifestSha256 -ne $plan.manifestSha256) {
         $result.plannedManifestSha256 = $plan.manifestSha256
@@ -584,7 +642,7 @@ namespace ManagedRecycle
     if ($call[0] -ne 0 -or $result.aborted -or $result.targetStillExists) { $result.reason = 'recycle-call-failed' }
     elseif (-not $record) { $result.reason = if ($result.Contains('unreadableBinRecords')) { 'bin-record-unreadable' } else { 'bin-record-missing' } }
     else {
-        $binScan = try { [ManagedRecycle.Native]::Scan($record.contentPath, $false, $maxEntries) } catch { $null }
+        $binScan = try { [ManagedRecycle.Native]::Scan($record.contentPath, $false, $false, $maxEntries) } catch { $null }
         $result.binManifestSha256 = if ($binScan -and -not $binScan.Truncated) { Get-ManifestSha256 $binScan } else { $null }
         if ($result.binManifestSha256 -ne $plan.manifestSha256) { $result.reason = 'bin-copy-differs' }
         else { $result.status = 'recycled' }
