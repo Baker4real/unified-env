@@ -359,6 +359,7 @@
           "scripts/Measure-CodexSafeTreeDeleteHistory.ps1",
           "scripts/Get-CodexSafeTreeDeleteQuietWindow.ps1",
           "tests/Test-CodexSafeTreeDeleteQuietWindow.ps1",
+          "tests/Test-CodexSafeTreeDeleteShimDrift.ps1",
           "tests/Test-SafeCleanupJob.ps1",
           "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
           "tests/Test-CodexSafeTreeDeleteRealHistoryBenchmark.ps1",
@@ -401,6 +402,7 @@
           "scripts/lib/CodexHostSafetyNativeLoader.ps1",
           "scripts/lib/CodexSafeTreeDeleteClosure.ps1",
           "scripts/lib/CodexSafeTreeDeleteGateHolder.ps1",
+          "scripts/lib/CodexSafeTreeDeleteGateShimInstall.ps1",
           "scripts/lib/CodexSafeTreeDeleteStatusScan.cs",
           "scripts/lib/CodexUserEnvironmentTransaction.cs",
           "scripts/lib/EnvPathSafety.ps1",
@@ -416,6 +418,7 @@
           "tests/Test-CodexSafeTreeDeleteBenchmark.ps1",
           "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
           "tests/Test-CodexSafeTreeDeleteBatchHistoryScan.ps1",
+          "tests/Test-CodexSafeTreeDeleteCanonicalLayoutEquivalence.ps1",
           "tests/Test-CodexSafeTreeDeleteDeployment.ps1",
           "tests/Test-CodexSafeTreeDeletePolicyMaintenance.ps1",
           "tests/Test-CodexSafeTreeDeletePolicyStructure.ps1",
@@ -429,6 +432,7 @@
           "tests/Test-CodexSafeTreeDeleteMetricsEvidence.ps1",
           "tests/Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
           "tests/Test-CodexSafeTreeDeletePlanWalkerEquivalence.ps1",
+          "tests/Test-CodexSafeTreeDeleteChainGuardSharing.ps1",
           "tests/Test-CodexSafeTreeDeleteNativeLoading.ps1",
           "tests/Test-CodexSafeTreeDeleteNativePublishRace.ps1",
           "tests/Test-CodexSafeTreeDeleteRestore.ps1",
@@ -521,6 +525,7 @@
             "tests/Test-CodexSafeTreeDelete.ps1",
             "tests/Test-CodexSafeTreeDeleteModeDispatch.ps1",
             "tests/Test-CodexSafeTreeDeleteQuietWindow.ps1",
+            "tests/Test-CodexSafeTreeDeleteShimDrift.ps1",
             "tests/Test-SafeCleanupJob.ps1",
             "tests/Test-CodexSafeTreeDeleteHistoryBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeleteRealHistoryBenchmark.ps1",
@@ -528,6 +533,7 @@
             "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
             "tests/Test-CodexSafeTreeDeleteBatchHistoryScan.ps1",
             "tests/Test-CodexSafeTreeDeleteLint.ps1",
+            "tests/Test-CodexSafeTreeDeleteCanonicalLayoutEquivalence.ps1",
             "tests/Test-CodexSafeTreeDeleteDeployment.ps1",
             "tests/Test-CodexSafeTreeDeletePolicyMaintenance.ps1",
             "tests/Test-CodexSafeTreeDeletePolicyStructure.ps1",
@@ -542,6 +548,7 @@
             "tests/Test-CodexSafeTreeDeletePlanIdentityV2.ps1",
             "tests/Test-CodexSafeTreeDeleteCheck.ps1",
             "tests/Test-CodexSafeTreeDeletePlanDirectoryAccess.ps1",
+            "tests/Test-CodexSafeTreeDeleteChainGuardSharing.ps1",
             "tests/Test-CodexSafeTreeDeletePlanWalkerEquivalence.ps1",
             "tests/Test-CodexSafeTreeDeleteNativeLoading.ps1",
             "tests/Test-CodexSafeTreeDeleteNativePublishRace.ps1",
@@ -695,6 +702,7 @@
         "scripts/lib/GitHubCli.ps1"
       ],
       "prefixes": [
+        ".out-of-scope/",
         "docs/agents/"
       ]
     },
