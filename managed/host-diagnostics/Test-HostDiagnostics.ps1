@@ -20,13 +20,14 @@ $files = @(
     'Invoke-CheckedPowerShell.ps1','Test-CheckedPowerShell.ps1',
     'BrowserPrivacyProbe.py','Test-BrowserPrivacyProbe.py',
     'Get-NvidiaDownloadStatus.ps1','Test-NvidiaDownloadStatus.ps1',
+    'Get-VcpkgHealth.ps1','Test-VcpkgHealth.ps1',
     'Get-TaskbarSnapshot.ps1','Restart-ExplorerShell.ps1',
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',
     'Invoke-ManagedRecycle.ps1','Test-ManagedRecycle.ps1',
     'Get-ConsoleLaunchAudit.ps1','Test-ConsoleLaunchAudit.ps1','Watch-ConsoleWindows.ps1',
     'Test-HostDiagnostics.ps1'
 )
-$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$python =(Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $syntax = foreach ($file in $files) {
     $path = Join-Path $PSScriptRoot $file
     $tokens = $null; $parseErrors = $null
@@ -49,14 +50,15 @@ $suiteDefinitions = @(
     @{name='projection';file='Test-BoundedProjection.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'projection'))},
     @{name='powershell';file='Test-CheckedPowerShell.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'powershell'))},
     @{name='nvidia';file='Test-NvidiaDownloadStatus.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'nvidia'))},
+    @{name='vcpkg';file='Test-VcpkgHealth.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'vcpkg'))},
     @{name='explorer';file='Test-ExplorerShellRecovery.ps1';args=@('-EvidenceDirectory',(Join-Path $runRoot 'explorer'))},
     @{name='browser';file='Test-BrowserPrivacyProbe.py';args=@()},
     @{name='recycle';file='Test-ManagedRecycle.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'recycle'))},
     @{name='console';file='Test-ConsoleLaunchAudit.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'console'))}
 )
 if ($SkipLiveSnapshot) {
-    $suiteDefinitions[3].args += '-SkipLiveSnapshot'
-    $suiteDefinitions[5].args += '-SkipLiveRecycle'
+    $suiteDefinitions[4].args += '-SkipLiveSnapshot'
+    $suiteDefinitions[6].args += '-SkipLiveRecycle'
 }
 $suites = [Collections.Generic.List[object]]::new()
 if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
@@ -101,7 +103,7 @@ if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
                     $contractPassed = $parsed.status -eq 'passed' -and $parsed.failures -eq 0 -and
                         $passedChecks -gt 0 -and $passedChecks -eq $parsed.cases
                 }
-                { $_ -in 'nvidia', 'console' } {
+                { $_ -in 'nvidia', 'console', 'vcpkg' } {
                     $passedChecks = @($parsed.cases | Where-Object passed -EQ $true).Count
                     $contractPassed = $parsed.passed -eq $true -and $passedChecks -gt 0 -and $passedChecks -eq @($parsed.cases).Count
                 }

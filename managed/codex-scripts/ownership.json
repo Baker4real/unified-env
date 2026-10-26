@@ -16,6 +16,7 @@
     { "path": "Get-NvidiaDownloadStatus.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-NvidiaDownloadStatus.ps1" },
     { "path": "Get-RepositoryAudit.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
     { "path": "Get-TaskbarSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-TaskbarSnapshot.ps1" },
+    { "path": "Get-VcpkgHealth.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-VcpkgHealth.ps1" },
     { "path": "github-default-branch-skill-overlay-catalog.json", "owner": "scripts/Deploy-GitHubDefaultBranchSkillOverlay.ps1", "source": "scripts/github-default-branch-skill-overlay-catalog.json" },
     { "path": "install_skill_guarded_activation.py", "owner": "scripts/Deploy-SkillInstallGuarded.ps1", "source": "modules/skill-supply-chain/implementation/install_skill_guarded_activation.py" },
     { "path": "install_skill_guarded_base.py", "owner": "scripts/Deploy-SkillInstallGuarded.ps1", "source": "modules/skill-supply-chain/implementation/install_skill_guarded_base.py" },
@@ -76,6 +77,7 @@
     { "path": "Test-NativeUtf8ConsoleEncoding.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
     { "path": "Test-NvidiaDownloadStatus.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-NvidiaDownloadStatus.ps1" },
     { "path": "Test-RepositoryAudit.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
+    { "path": "Test-VcpkgHealth.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-VcpkgHealth.ps1" },
     { "path": "uu-bak-align/", "owner": "docs/environments/zi-xi-shi.md" },
     { "path": "uu-heartbeat/", "owner": "docs/environments/jia-li.md" },
     { "path": "Wait-DockerWslIntegration.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" }

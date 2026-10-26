@@ -25,6 +25,24 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 
 参数与返回结构以各脚本帮助/源码为准。活动日志不是原子快照；命名模式脱敏不保证发现任意秘密，仍要缩小敏感来源与字段范围。需要复核某条失败时保留来源、行窗口和退出码，不输出完整日志。
 
+## vcpkg 健康检查
+
+`Get-VcpkgHealth.ps1` 默认从 PATH 解析 `uniget`，找不到时使用 `D:/UniGetUI/uniget.exe`；也可用 `-UniGetCliPath` 指定 CLI。它只读取 manager 和日志状态，不执行 reload、install、repair 或 bootstrap。stdout 只有一份 UTF-8 JSON，固定包含 `status/mode/manager/ready/executablePath/executableExists/bootstrap/packageSearch`。
+
+- `-Mode Fast`（默认）读取 `manager list` 和 `log manager --manager vcpkg --verbose`。健康要求恰好一个 vcpkg manager、JSON Boolean `ready=true`、非空 `executablePath` 独立通过 `Test-Path -PathType Leaf`，以及最近一条命令行明确调用 `bootstrap-vcpkg.bat` 的 RefreshIndexes 记录含 `Return code: SUCCESS (0)`。没有该记录时是 `bootstrap_not_recorded`，不是健康。
+- `-Mode Live` 只在上述 Fast 条件全部通过后执行 `package search --manager vcpkg --query zlib --max-results 3`，要求 `status=success` 且至少一项结果，并再次检查 exe。Fast 失败时 `packageSearch.status=not_run`，不得执行查询；任一后续成功都不能覆盖前面的失败。
+- 退出 0：`healthy`。退出 1：明确不健康，包括 `manager_missing`、`ready_false`、`executable_path_missing`、`executable_missing`、`bootstrap_failed`、`package_search_failed`、`package_search_empty`、`executable_missing_after_search`。退出 3：CLI 缺失、IPC/JSON 不可判定或必要证据缺失，包括 `cli_missing`、`manager_duplicate`、`manager_ready_invalid`、`manager_list_invalid`、`manager_log_invalid`、`bootstrap_not_recorded`、`package_search_invalid`。
+- 三个 `*JsonPathForTest` 参数只用于合成夹具；Fast 不读取 package 夹具。负面 Live 用例只删除测试目录内的假 exe，不得删除或改名真实 vcpkg exe。
+
+仓库套件和部署后验收：
+
+```powershell
+& ./managed/host-diagnostics/Test-VcpkgHealth.ps1
+& ./scripts/Deploy-HostDiagnostics.ps1 -Mode Check
+& 'D:/Codex/.codex/scripts/Get-VcpkgHealth.ps1' -Mode Fast
+& 'D:/Codex/.codex/scripts/Get-VcpkgHealth.ps1' -Mode Live
+```
+
 ## 按章节读取
 
 已知标题时直接选 ATX 章节，保留原文件行号、子标题内容、脱敏与总预算：

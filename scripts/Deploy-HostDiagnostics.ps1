@@ -24,6 +24,7 @@ $allowlist = @(
     'Invoke-CheckedPowerShell.ps1','Test-CheckedPowerShell.ps1',
     'BrowserPrivacyProbe.py','Test-BrowserPrivacyProbe.py',
     'Get-NvidiaDownloadStatus.ps1','Test-NvidiaDownloadStatus.ps1',
+    'Get-VcpkgHealth.ps1','Test-VcpkgHealth.ps1',
     'Get-TaskbarSnapshot.ps1','Restart-ExplorerShell.ps1',
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',
     'Invoke-ManagedRecycle.ps1','Test-ManagedRecycle.ps1',
