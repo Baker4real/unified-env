@@ -15,7 +15,7 @@ intent: 说明单仓模块边界、接口、依赖与迁移顺序
 | `codex-host` | Hooks、state preflight、Serena/CodeGraph 运行时、remote catalog guard | `Invoke-CodexHostHookReconciliation.ps1` 与 `Invoke-CodexRemotePluginCatalogGuard.ps1` |
 | `skill-supply-chain` | Skill 来源、安装事务、catalog、ledger 与 Git overlay | `install-skill-guarded.cmd`、catalog 生成器与部署入口 |
 | `host-safety` | 句柄绑定 I/O、路径安全、原子发布、安全诊断与恢复、safe delete | manifest 登记的 `scripts/lib/` seam、主机诊断入口与 `invoke-codex-safe-tree-delete.cmd` |
-| `workstation-operations` | 设备事实、跨设备验收与工作站集成政策 | 设备文档与 Sub2API 更新政策 |
+| `workstation-operations` | 设备事实、跨设备验收与工作站集成政策 | 设备文档、Sub2API 更新政策、日更证据读取入口 |
 
 ## 依赖方向
 
@@ -23,12 +23,14 @@ intent: 说明单仓模块边界、接口、依赖与迁移顺序
 dev-environment -----> host-safety <----- codex-host
                            ^
 skill-supply-chain --------+
-workstation-operations (documentation/integration only)
+codex-host ----------> workstation-operations -----> host-safety
 ```
 
 `CodexHostSafety.ps1` 是通用 capability I/O、路径校验和原子发布的唯一实现。`codex-host`、safe-delete 与 `skill-supply-chain` 的退休菜单清理都依赖该 seam；safe-delete 不再加载 hook 专用 policy，现役入口路径保持不变。Grok/Cursor/Claude Code 用户级 hook 源落在 `managed/grok-hooks/`、`managed/cursor-hooks/` 与 `managed/claude-hooks/`，不是 reconciler 接口；现役注册以 `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 的 Grok Host Hooks、Cursor Host Hooks 与 Claude Code Host Hooks 为准。
 
 ## 迁移规则
+
+日更证据读取入口调用 host-safety 的有界投影器；codex-host 只识别这个固定入口的只读参数以豁免语义导航提醒，不负责执行日更或更新组件。模块 fixture 由现有 manifest runner 纳入 CI。
 
 - 当前处于 `expand` 阶段：先建立 ownership、接口和测试 seam，不移动部署路径。
 - 新增仓库文件必须在 manifest 中有且仅有一个 owner；根治理文件只能进入显式 `shared` 列表。

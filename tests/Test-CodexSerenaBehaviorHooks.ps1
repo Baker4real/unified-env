@@ -299,6 +299,30 @@ finally {
     # 文档/结构化数据/日志的实际查询目标不适合符号导航，不消耗 reminder 计数。
     # 描述、查询 pattern 或源码查询中夹带数据文件名不能触发豁免。
     foreach ($case in @(
+        @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/daily-codex-ecosystem-update/run1'' -MaxTotalBytes 6000'; expected = $true },
+        @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/run2'' -PreviousRunDirectory ''D:/agents/run-evidence/run1'''; expected = $true },
+        @{ command = '& ''D:/other/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/run1'''; expected = $false },
+        @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory $run'; expected = $false },
+        @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/../source'''; expected = $false },
+        @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/run1'' -Unknown value'; expected = $false },
+        @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/run1'' -MaxTotalBytes 511'; expected = $false },
+        @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/run1'' -MaxTotalBytes 6001'; expected = $false },
+        @{ command = '. ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/run1'''; expected = $false },
+        @{ command = '$h = Get-Content -LiteralPath ''D:/evidence/host-reconciler-final.stdout.txt'' -Raw | ConvertFrom-Json; $h | Select-Object ok,changed,driftCount | ConvertTo-Json -Compress'; expected = $true },
+        @{ command = 'Get-Content -LiteralPath ledger.json -Raw | ConvertFrom-Json -AsHashtable | Select-Object -Property status,count | ConvertTo-Json -Depth 5 -Compress'; expected = $true },
+        @{ command = '$h = Get-Content first.json -Raw | ConvertFrom-Json; $p = Get-Content second.json -Raw | ConvertFrom-Json; $h | Select-Object status; $p | Select-Object -First 2 | ConvertTo-Json'; expected = $true },
+        @{ command = '$h | Select-Object status | ConvertTo-Json'; expected = $false },
+        @{ command = '$h = Get-Content source.ps1 -Raw | ConvertFrom-Json; $h | Select-Object status'; expected = $false },
+        @{ command = '$h = Get-Content ledger.json -Raw | ConvertFrom-Json; $h.Delete()'; expected = $false },
+        @{ command = '$h = Get-Content ledger.json -Raw | ConvertFrom-Json; $h | Select-Object { Set-Content changed.txt bad }'; expected = $false },
+        @{ command = '$h = Get-Content ledger.json -Raw | ConvertFrom-Json; $h | Select-Object status | Set-Content changed.txt'; expected = $false },
+        @{ command = '$h = Get-Content ledger.json -Raw | ConvertFrom-Json; $h | Select-Object status > changed.txt'; expected = $false },
+        @{ command = '$h = Get-Content ledger.json -Raw | ConvertFrom-Json; $h | Select-Object -ExpandProperty status'; expected = $false },
+        @{ command = '$h = Get-Content ledger.json -Raw | ConvertFrom-Json; $h | ConvertTo-Json -Depth $depth'; expected = $false },
+        @{ command = '$global:h = Get-Content ledger.json -Raw | ConvertFrom-Json; $global:h | Select-Object status'; expected = $false },
+        @{ command = '$h += Get-Content ledger.json -Raw | ConvertFrom-Json; $h | Select-Object status'; expected = $false },
+        @{ command = '$h = Get-Content ledger.json -Raw | ConvertFrom-Json; $h = Get-Process; $h | Select-Object status'; expected = $false },
+        @{ command = 'Get-Content ledger.json | ConvertFrom-Json -InputObject ''{}'''; expected = $false },
         @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Select-Object FullName | Format-Table -AutoSize'; expected = $true },
         @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Select-Object -First 5 | Select-Object FullName'; expected = $true },
         @{ command = 'Get-ChildItem -LiteralPath D:/repo/src -File | Get-Content'; expected = $false },
@@ -352,7 +376,7 @@ finally {
         Assert-Equal (Test-CodexSerenaDataQuery -InputText $queryPayload) $case.expected "数据查询分类错误：$($case.command)"
     }
     $dataSession = 'session-data-query-exempt-redacted'
-    foreach ($dataCommand in @('rg -n status ledger.json', 'rg -n failed driver.log', 'rg -n error events.jsonl', 'rg -n owner CONTEXT.md', 'Get-Content ledger.json -TotalCount 50 | Select-Object -Last 10; Test-Path -LiteralPath D:/repo/.codegraph; Get-Content CONTEXT.md | Select-Object -Skip 2 -First 8', 'rg --files D:/evidence | rg session | Select-Object -First 5')) {
+    foreach ($dataCommand in @('rg -n status ledger.json', 'rg -n failed driver.log', 'rg -n error events.jsonl', 'rg -n owner CONTEXT.md', 'Get-Content ledger.json -TotalCount 50 | Select-Object -Last 10; Test-Path -LiteralPath D:/repo/.codegraph; Get-Content CONTEXT.md | Select-Object -Skip 2 -First 8', 'rg --files D:/evidence | rg session | Select-Object -First 5', '$h = Get-Content -LiteralPath ''D:/evidence/host-reconciler-final.stdout.txt'' -Raw | ConvertFrom-Json; $h | Select-Object ok,changed,driftCount | ConvertTo-Json -Compress')) {
         $dataPayload = @{ session_id = $dataSession; tool_name = 'Bash'; tool_input = @{ command = $dataCommand } } | ConvertTo-Json -Compress -Depth 5
         $dataResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText $dataPayload -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
         Assert-True ($dataResult.ok -and $dataResult.stdout.Length -eq 0) '连续数据读取及文件定位不得触发源码导航拒绝。'

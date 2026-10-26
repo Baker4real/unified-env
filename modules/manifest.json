@@ -130,7 +130,8 @@
         "scripts/Restore-CodexHookDeployment.ps1"
       ],
       "dependsOn": [
-        "host-safety"
+        "host-safety",
+        "workstation-operations"
       ],
       "transitionalDependencies": [],
       "ownership": {
@@ -272,6 +273,7 @@
           ".scratch/subagent-orchestration-update-20260818/",
           ".scratch/upstream-stable-skill-sync-20260713/",
           "modules/skill-supply-chain/implementation/",
+          "modules/skill-supply-chain/overlays/retro/",
           "modules/skill-supply-chain/tests/"
         ]
       },
@@ -296,6 +298,7 @@
           "modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemOverlay.py",
           "modules/skill-supply-chain/tests/Test-SkillInstallGuardedSystemRepair.py",
           "tests/Test-SkillOpenAIYamlParity.py",
+          "tests/Test-RetroTranscriptAudit.py",
           "modules/skill-supply-chain/tests/Test-SkillSourceRecordMigration.py",
           "modules/skill-supply-chain/tests/Test-SkillsRepoPreCommit.py"
           ],
@@ -652,9 +655,10 @@
         "docs/environments/jia-li.md",
         "docs/environments/zi-xi-shi.md",
         "docs/automation/daily-update-prompt.md",
-        "scripts/daily-update/README.md"
+        "scripts/daily-update/README.md",
+        "scripts/daily-update/Read-DailyUpdateEvidence.ps1"
       ],
-      "dependsOn": [],
+      "dependsOn": ["host-safety"],
       "transitionalDependencies": [],
       "ownership": {
         "files": [],
@@ -666,7 +670,12 @@
       "tests": {
         "fixture": {
           "powershell": [],
-          "python": [],
+          "python": [
+            "tests/Test-DailyUpdateRuntime.py",
+            "tests/Test-PythonUpdateGate.py",
+            "tests/Test-CCSwitchMigration.py",
+            "tests/Test-DailyUpdateEvidence.py"
+          ],
           "node": [
             "tests/Test-DeviceDocRetiredPaths.cjs"
           ]

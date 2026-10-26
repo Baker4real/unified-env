@@ -13,7 +13,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 function smoke(name, cmd, args, env, timeoutMs) {
   return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(cmd, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let buf = '';
     const timer = setTimeout(() => { try { proc.kill(); } catch {} resolve({ name, ok: false, error: 'timeout' }); }, timeoutMs);
     const send = (obj) => proc.stdin.write(JSON.stringify(obj) + '\n');

@@ -347,19 +347,44 @@ function Test-CodexSerenaDataQuery {
         $null -ne $ast.CleanBlock -or $ast.UsingStatements.Count -gt 0 -or $null -eq $ast.EndBlock -or
         ($null -ne $ast.EndBlock.Traps -and $ast.EndBlock.Traps.Count -gt 0)) { return $false }
     $queryCount = 0
-    foreach ($pipeline in $ast.EndBlock.Statements) {
+    $jsonVariables = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($statement in $ast.EndBlock.Statements) {
+        $pipeline = $statement
+        $assignedVariable = $null
+        if ($statement -is [Management.Automation.Language.AssignmentStatementAst]) {
+            if ($statement.Operator -ne 'Equals' -or $statement.Left -isnot [Management.Automation.Language.VariableExpressionAst] -or
+                -not $statement.Left.VariablePath.IsUnqualified) { return $false }
+            $assignedVariable = $statement.Left.VariablePath.UserPath
+            if ($assignedVariable -notmatch '^[A-Za-z_][A-Za-z0-9_]*$' -or
+                $assignedVariable -match '^(PS|_|HOME$|PID$|PWD$|Error$|args$|input$|null$|true$|false$|OutputEncoding$)' -or
+                $assignedVariable -match 'Preference$') { return $false }
+            $pipeline = $statement.Right
+        }
         if ($pipeline -isnot [Management.Automation.Language.PipelineAst] -or $pipeline.Background) { return $false }
         $hasInput = $false
         $hasFileMetadata = $false
+        $hasDataText = $false
+        $hasJsonInput = $false
         foreach ($query in $pipeline.PipelineElements) {
+            if ($query -is [Management.Automation.Language.CommandExpressionAst]) {
+                if ($hasInput -or $query.Redirections.Count -gt 0 -or
+                    $query.Expression -isnot [Management.Automation.Language.VariableExpressionAst] -or
+                    -not $query.Expression.VariablePath.IsUnqualified -or
+                    -not $jsonVariables.Contains($query.Expression.VariablePath.UserPath)) { return $false }
+                $hasInput = $true
+                $hasJsonInput = $true
+                continue
+            }
             if ($query -isnot [Management.Automation.Language.CommandAst]) { return $false }
             $name = $query.GetCommandName()
-            if ($name -notin @('rg', 'grep', 'Get-Content', 'Select-String', 'Select-Object', 'Test-Path', 'Get-ChildItem', 'Format-Table')) { return $false }
-            if ($query.Redirections.Count -gt 0 -or $query.InvocationOperator -ne 'Unknown') { return $false }
+            $isDailyEvidence = $null -ne $name -and $name.Replace('\', '/') -ieq 'D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'
+            if (-not $isDailyEvidence -and $name -notin @('rg', 'grep', 'Get-Content', 'Select-String', 'Select-Object', 'Test-Path', 'Get-ChildItem', 'Format-Table', 'ConvertFrom-Json', 'ConvertTo-Json')) { return $false }
+            if ($query.Redirections.Count -gt 0 -or ($query.InvocationOperator -ne 'Unknown' -and
+                (-not $isDailyEvidence -or $query.InvocationOperator -ne 'Ampersand'))) { return $false }
             $operands = [Collections.Generic.List[string]]::new()
             foreach ($element in @($query.CommandElements | Select-Object -Skip 1)) {
                 if ($element -is [Management.Automation.Language.StringConstantExpressionAst]) { $operands.Add($element.Value) }
-                elseif ($name -eq 'Get-ChildItem' -and $element -is [Management.Automation.Language.ArrayLiteralAst]) {
+                elseif ($name -in @('Get-ChildItem', 'Select-Object') -and $element -is [Management.Automation.Language.ArrayLiteralAst]) {
                     foreach ($item in $element.Elements) {
                         if ($item -isnot [Management.Automation.Language.StringConstantExpressionAst]) { return $false }
                         $operands.Add($item.Value)
@@ -369,15 +394,65 @@ function Test-CodexSerenaDataQuery {
                 elseif ($element -is [Management.Automation.Language.CommandParameterAst] -and $null -eq $element.Argument) { $operands.Add($element.Extent.Text) }
                 else { return $false }
             }
+            if ($isDailyEvidence) {
+                if ($hasInput -or $operands.Count -lt 2 -or $operands.Count % 2 -ne 0) { return $false }
+                $parameters = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                for ($i = 0; $i -lt $operands.Count; $i += 2) {
+                    $parameter = $operands[$i]
+                    $value = $operands[$i + 1].Replace('\', '/')
+                    if (-not $parameters.Add($parameter)) { return $false }
+                    if ($parameter -in @('-RunDirectory', '-PreviousRunDirectory')) {
+                        if ($value -notmatch '(?i)^D:/agents/run-evidence/[^:*?"<>|]+$' -or
+                            @($value.Split('/') | Where-Object { $_ -in @('.', '..') -or $_.EndsWith('.') -or $_.EndsWith(' ') }).Count -gt 0) { return $false }
+                    }
+                    elseif ($parameter -eq '-MaxTotalBytes') {
+                        if ($value -notmatch '^\d{1,4}$' -or [int]$value -lt 512 -or [int]$value -gt 6000) { return $false }
+                    }
+                    else { return $false }
+                }
+                if (-not $parameters.Contains('-RunDirectory')) { return $false }
+                $queryCount++
+                $hasInput = $true
+                $hasDataText = $true
+                continue
+            }
             if ($name -eq 'Select-Object') {
                 if (-not $hasInput -or $operands.Count -eq 0) { return $false }
                 if ($hasFileMetadata -and $operands.Count -eq 1 -and $operands[0] -eq 'FullName') { continue }
+                if ($hasJsonInput -and ($operands[0] -eq '-Property' -or $operands[0] -notlike '-*')) {
+                    $fieldStart = if ($operands[0] -eq '-Property') { 1 } else { 0 }
+                    if ($fieldStart -eq $operands.Count) { return $false }
+                    for ($i = $fieldStart; $i -lt $operands.Count; $i++) {
+                        if ($operands[$i] -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { return $false }
+                    }
+                    continue
+                }
                 for ($i = 0; $i -lt $operands.Count; $i += 2) {
                     if ($operands[$i] -notin @('-First', '-Last', '-Skip', '-SkipLast', '-Index') -or
                         $i + 1 -ge $operands.Count -or $operands[$i + 1] -notmatch '^\d+$') { return $false }
                 }
                 continue
             }
+            if ($name -eq 'ConvertFrom-Json') {
+                if (-not $hasDataText -or $hasJsonInput) { return $false }
+                foreach ($operand in $operands) { if ($operand -notin @('-AsHashtable', '-NoEnumerate')) { return $false } }
+                $hasDataText = $false
+                $hasJsonInput = $true
+                continue
+            }
+            if ($name -eq 'ConvertTo-Json') {
+                if (-not $hasJsonInput) { return $false }
+                for ($i = 0; $i -lt $operands.Count; $i++) {
+                    if ($operands[$i] -in @('-Compress', '-AsArray')) { continue }
+                    if ($operands[$i] -ne '-Depth' -or $i + 1 -ge $operands.Count -or
+                        $operands[$i + 1] -notmatch '^\d{1,3}$' -or [int]$operands[$i + 1] -gt 100) { return $false }
+                    $i++
+                }
+                $hasJsonInput = $false
+                continue
+            }
+            $hasJsonInput = $false
+            $hasDataText = $false
             if ($name -eq 'Format-Table') {
                 if (-not $hasFileMetadata -or $operands.Count -ne 1 -or $operands[0] -ne '-AutoSize') { return $false }
                 $hasFileMetadata = $false
@@ -472,6 +547,12 @@ function Test-CodexSerenaDataQuery {
             foreach ($path in $paths) { if ($path -notmatch $dataPath) { return $false } }
             $queryCount++
             $hasInput = $true
+            $hasDataText = $name -eq 'Get-Content'
+        }
+        if ($null -ne $assignedVariable) {
+            # Only JSON read in this command can flow into later field projections.
+            if (-not $hasJsonInput) { return $false }
+            [void]$jsonVariables.Add($assignedVariable)
         }
     }
     return $queryCount -gt 0

@@ -4,7 +4,7 @@
 先读该目录 AGENTS.md，以及 D:\Codex\.codex\docs\agent-guidance\host-runbook.md 和 skill-operations.md。
 
 执行前硬门槛：
-- 已退役执行面必须保持停用：D:\Codex\.codex\automations\codex\automation.toml 须为 status = PAUSED，Windows 计划任务 `Cursor Daily Codex Ecosystem Update` 须为 State=Disabled。任一处于 ACTIVE / Ready / Enabled 时立即停止，分别记录 blocked/codex-automation-still-active 或 blocked/cursor-task-still-active，不更新任何组件；不得重新启用 Codex Desktop 同名日更或该计划任务，也不得改动它们的状态。
+- 本机日更由 Codex Desktop 自动化 `codex` 独立执行。执行前只读核验 ZCode live store D:\zcode\.zcode\v2\tasks-index.sqlite 中 automation_id `automation-9928c708-a9cf-40ae-8424-3bb403285586` 已删除，且不存在其他启用的同工作目录同类日更；Windows 计划任务 `Cursor Daily Codex Ecosystem Update` 必须保持 State=Disabled。发现重复执行面时立即停止并记录 blocked/duplicate-daily-update，不更新任何组件，不重新创建或启用旧执行面。
 - PATH 上的 agent 是 Grok CLI（C:\Users\WINDOWS\.grok\bin\agent.exe），禁止调用。
 - 不要弹出本机 GUI 窗口做自动化。必须 GUI / Microsoft Store 人工核对的项只报告，不改 WinHTTP、InstallService 或 Windows Update 配置。
 - 不得输出凭据、令牌、.env、provider URL 或其他敏感配置值。
@@ -16,6 +16,7 @@
 - LATEST.md 由「当日首次成功完成的运行」用其 RESULT.md 覆盖；同日后续补跑只写自己的当次目录，不覆盖 LATEST.md。不要手改历史 LATEST.md 的内容伪造收据。
 - RESULT.md 顶部设「需要用户裁决」区。悬置/阻塞项只逐条列出与上次运行相比有变化的；未变项折叠为一行「未变 N 项（列名称）」。每个悬置项记录首次出现日期；满 3 天仍未变的，在「需要用户裁决」区写成一个单选问题。
 - 环境指纹（全根 closure findings 集合、wrapper/脚本哈希、候选 upstream SHA）与上次相同的已阻塞项不重新 stage，只写一行"未变"。
+- skills-manager 根 Git 脏树失败门禁：每次运行开始时检查 skills 根 `D:\agents\skills-manager\skills` 的 Git 工作树和最近一次提交时间（以本次运行开始时间为基准）。若根目录存在未提交改动，且最近一次提交早于本次运行开始时间 24 小时，则必须在当次 `RESULT.md` 将该项标红并标记为「失败」，不得归类为「观察项」或仅作提示；同时写明工作树摘要、最近一次提交时间和 24 小时比较结果。无论是否触发失败门禁，每次都要在 `RESULT.md` 写明 SM 进程是否运行（进程名、PID/状态）以及 `D:\agents\skills-manager\.skills-manager.lock` 的 `operation`、`start_time`（锁文件缺失或字段无法读取也要明确记录）。
 
 目标：只检查并更新本机已经安装、启用或被 Codex 实际引用的内容，包括 active local skills、已安装插件及其随附 skills、已配置 MCP 服务/运行时（包括但不限于 Serena、CodeGraph）、Codex CLI/工具链以及其他可从权威配置或清单证明正在使用的 Codex 依赖。不要发现或安装与现有环境无关的新组件。
 
@@ -66,4 +67,16 @@
    - 通过后重指全部引用面（先按第 6 条写好回滚脚本并记录旧值）：User PATH 的版本目录条目、删除并重建 C:\Program Files\PowerShell\7 junction 指向新版本树；复扫全部计划任务，重指所有 action 中写死旧 pwsh 版本路径的任务，并再次复扫确认无残留。旧版本目录保留为回滚候选。占用 pwsh 的现役进程按总授权可停止后完成升级；先识别自身宿主 shell；若宿主是 pwsh，则替换后由全新 CMD/pwsh 子进程做验收。
    - 验收：从全新 pwsh、CMD、Git Bash 各解析 pwsh 并确认为新版本；复核 D:\Codex\tools\bin 内 python/node wrapper 解析不受影响；任一失败立即执行回滚脚本并复验。升级成功后把 shell-and-runtime.md 中的版本路径事实同步为新版本。结果同样纳入第 8 条汇报与 RESULT.md/LATEST.md：旧→新版本、junction/PATH/计划任务重指证据、回滚候选路径。
 
+13. impeccable 引擎是 active skill `impeccable` 的随附运行时，与上文组件相互独立，无论本次 skill 是否更新都要核对：运行 `pwsh -NoProfile -File D:/Codex/.codex/scripts/Invoke-ImpeccableEnginePrefetch.ps1 -Json`。status=ok 表示 D 盘已有与该 skill `scripts/VERSION` 一致的引擎；缓存缺失时脚本经 skill 启动器从官方 release 下载并按 .sha256 sidecar 校验，属于末段「现有组件升级到官方最新稳定版」的持续授权。status 非 ok 时记录 blocked 并保留输出原文；不要用 `IMPECCABLE_BIN` 指向旧版本绕过。变量语义与事实见 host-runbook\tooling.md「impeccable 引擎」。结果纳入第 8 条汇报与 RESULT.md/LATEST.md。
+
+14. C 盘工具缓存探针（只读，无论本次是否有更新都要跑）：运行 `pwsh -NoProfile -File D:/Codex/.codex/scripts/Test-CDriveToolCacheDrift.ps1 -Json`，把 watched 汇总与 new/changed/removed 写进 RESULT.md 的「C 盘工具缓存」一节。new 或 changed 非空说明有工具在 C 盘新增或改写了内容，违反 D 盘存储策略：只报告路径与可能来源，不删除、不移动。
+
 本自动任务已获得用户对“现有组件升级到官方最新稳定版”的持续授权，并永久授权：在存在官方稳定更新时停止占用进程以完成更新；对可安全合并的本地 overlay 经受管 wrapper 重放；按第 7 条运行菜单中文化闭包（审计、重放 overlay、合并新译文）。该授权不包括安装无关新组件、预发布版、破坏性迁移、丢弃无法安全合并的 overlay、修改账号权限/凭据或使用 GUI 自动化；第 8 条「仅报告」项不授权更新。
+
+15. 环境验收与证据读取使用受管入口（调用细节以 scripts/daily-update/README.md 为准）：
+   - 开始、恢复或交接时先用 Read-DailyUpdateEvidence.ps1 读取当次与上次 scope 收据，只展开变化项和裁决区。只读 JSON 字段投影可直接用 ConvertFrom-Json/Select-Object；源码语义查询仍遵守 Serena/CodeGraph 路由。不为规避查询门禁把源码伪装成 JSON。旧收据无法验证时明确报告，不以空输出当通过；按具体文件/章节窄读补齐。
+   - PowerShell、Python、Git、Node 事务前先用 runtime-health.py shells 在当前版本验证三 shell 验收器；激活后按目标版本重跑。Node 与 npm/npx 版本独立，分开传 --expected-version，不省略已有 npm/npx 入口。使用当前注册表 PATH 的全新隐藏子进程，不能把旧宿主 PATH 或命令退出 0 当最终版本证据。
+   - Python 仅在当前用户授权更新时执行：先核实官方索引与 Python Install Manager 实体，运行 python-update-gate.py prepare，激活前 verify；必须唯一选中精确稳定版并通过官方 manager dry-run。WindowsApps 别名不可哈希时，从现役 PythonSoftwareFoundation.PythonManager 包定位实体 py.exe 并显式传 --manager。索引、manager 或选择漂移、fallback、未知 schema 均停止该项；不可仅凭 exit0 更新。只在已有备份/回滚和授权事务中执行已验证 install_argv，不改变其他组件授权范围。
+   - MCP initialize/tools-list 通过 runtime-health.py mcp --out-dir <全新子目录> 调用同目录 mcp-smoke.cjs；验收同时检查新进程退出码、新结果文件、两服务 identity、完整 initialize 与非空 tools/list。query 或等价真实可用性检查仍保留。无结果文件、旧文件、pending、timeout 或 unknown 均不能记成功。
+   - CC Switch 有官方稳定更新且满足现有授权与回滚条件时，升级前后制作受保护的一致 SQLite 快照，使用 compare-cc-switch-migration.py 与升级前已审查 policy 做逐记录和 schema 检查（合同见 docs/automation/cc-switch-migration-check.md）。原记录、已审查新增记录、新字段分别验收，禁止从 after 反推允许规则，也不因合法新增导致集合 hash 变化就误判旧模板损坏。
+   - 复盘会话使用现役 retro/scripts/transcripts.py audit；嵌套结果非零与外层失败分别记录，预期非零仅在命令语义已证实时用 --expected-exit 结果行:退出码 标注。pending/unknown 必须追踪最终结果，不可按成功计数。
