@@ -1275,7 +1275,7 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
         -MutexNameForTest $issue21MutexName | Out-Null
     [IO.File]::WriteAllText($issue21CmdPath, (
         "@echo off`n" +
-        ('"{0}" -NoLogo -NoProfile -NonInteractive -File "{1}" %*' -f $pwshExe, $issue21ShimPath) + "`n" +
+        ('"{0}" -NoLogo -NoProfile -NonInteractive -File "%~dp0invoke-safe-tree-delete.ps1" %*' -f $pwshExe) + "`n" +
         "exit /b %ERRORLEVEL%`n"), $utf8)
 
     $failPlan = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-plan' -WrapperPath $issue21CmdPath -Arguments @(

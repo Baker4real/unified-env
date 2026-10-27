@@ -9225,33 +9225,55 @@ function Invoke-CodexSafeTreeDeletePurge {
             snapshotKind = 'powershell'
         }
         $snapshotWatch = [Diagnostics.Stopwatch]::StartNew()
-        $currentTree = if (-not $DisablePurgeHashReuseForTest) {
-            $purgeTimings.snapshotKind = 'csharp-apply-walker'
-            $purgeSnapshotCoordinator = [CodexSafeTreeDelete.ApplySessionHashCoordinator]::new(
-                $purgeFileIdentities,
-                $sessionHashCache,
-                $true)
-            Get-CodexSafeTreeDeleteApplyTreeSnapshot `
-                -Path $quarantinePath `
-                -CapabilityRoot $quarantineCapabilityRoot `
-                -AllowedExactPaths @($quarantinePath) `
-                -AllowHardLinks:([bool]$target.allowHardLinks) `
-                -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
-                -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
-                -MetricsObserver $metricsObserver `
-                -Coordinator $purgeSnapshotCoordinator `
-                -Name 'safe-delete purge locked preflight'
-        } else {
-            Get-CodexHookCapabilityDirectoryTreeSnapshot `
-                -Path $quarantinePath `
-                -CapabilityRoot $quarantineCapabilityRoot `
-                -AllowedExactPaths @($quarantinePath) `
-                -AllowHardLinks:([bool]$target.allowHardLinks) `
-                -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
-                -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
-                -MetricsObserver $metricsObserver `
-                -FileContentHashProvider $purgeFileHashProvider `
-                -Name 'safe-delete purge locked preflight'
+        try {
+            $currentTree = if (-not $DisablePurgeHashReuseForTest) {
+                $purgeTimings.snapshotKind = 'csharp-apply-walker'
+                $purgeSnapshotCoordinator = [CodexSafeTreeDelete.ApplySessionHashCoordinator]::new(
+                    $purgeFileIdentities,
+                    $sessionHashCache,
+                    $true)
+                Get-CodexSafeTreeDeleteApplyTreeSnapshot `
+                    -Path $quarantinePath `
+                    -CapabilityRoot $quarantineCapabilityRoot `
+                    -AllowedExactPaths @($quarantinePath) `
+                    -AllowHardLinks:([bool]$target.allowHardLinks) `
+                    -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                    -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                    -MetricsObserver $metricsObserver `
+                    -Coordinator $purgeSnapshotCoordinator `
+                    -Name 'safe-delete purge locked preflight'
+            } else {
+                Get-CodexHookCapabilityDirectoryTreeSnapshot `
+                    -Path $quarantinePath `
+                    -CapabilityRoot $quarantineCapabilityRoot `
+                    -AllowedExactPaths @($quarantinePath) `
+                    -AllowHardLinks:([bool]$target.allowHardLinks) `
+                    -AllowInternalDirectoryJunctions:([bool]$target.allowInternalDirectoryJunctions) `
+                    -InternalDirectoryJunctionTargetRoot ([string]$target.targetPath) `
+                    -MetricsObserver $metricsObserver `
+                    -FileContentHashProvider $purgeFileHashProvider `
+                    -Name 'safe-delete purge locked preflight'
+            }
+        } catch {
+            $preflightException = $_.Exception
+            while ($null -ne $preflightException -and $preflightException -isnot [ComponentModel.Win32Exception]) {
+                $preflightException = $preflightException.InnerException
+            }
+            if ($null -eq $preflightException -or
+                [int]$preflightException.NativeErrorCode -notin @(32, 33) -or
+                -not $ReturnFailureMetrics) {
+                throw
+            }
+            $metricsState.retryResult = 'failed-without-retry'
+            $failureMetrics = Complete-CodexSafeTreeDeleteMetrics -State $metricsState
+            return [pscustomobject][ordered]@{
+                purged = $false
+                refusalReason = 'leaf-delete-failed'
+                transactionPath = $approved.path
+                recoverable = [string]$transaction.status -ceq 'quarantined'
+                purgeResumable = [string]$transaction.status -ceq 'purging'
+                metrics = $failureMetrics
+            }
         }
         $snapshotWatch.Stop()
         $purgeTimings.snapshotMs = [long]$snapshotWatch.ElapsedMilliseconds
