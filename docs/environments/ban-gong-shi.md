@@ -129,7 +129,8 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
   - 临时探针任务与 02:00/03:00 任务同形（Highest、带工作目录），经启动器启动 pwsh：任务结果 `0x7`，即脚本的 `exit 7` 原样回传；子进程已提权、在会话 1、工作目录正确，`GetConsoleWindow()` 为 0，根本没有控制台窗口。
   - 审计复跑为 clean，4 个任务都判为 hidden。临时任务已删除。
   - 监视器全程没有记到新的控制台窗口，也没有新的 WindowsTerminal/OpenConsole 进程，改前 17:29:24 那次 FailSafe 运行也一样，所以没有观察到改前的窗口。该机当时没有运行 WindowsTerminal，推断控制台由 conhost 承接，`-WindowStyle Hidden` 至多留下短于一次轮询（120 ms）的闪烁。带对照的 `Watch-ConsoleWindows.ps1` 复验没有跑，它的对照任务会在桌面上闪约 2.5 秒。
-  - 02:00/03:00 两个任务在新启动方式下还没有真实运行过；`Win11 Upgrade Stage` 没有触发器，本次未运行。
+  - `Win11 Upgrade Stage` 没有触发器，本次未运行。
+- 首次定时运行（2026-10-23）：两个维护任务都按新启动方式到点运行。`Codex Office v2rayN Daily Update` 02:00:01 运行，`LastTaskResult=0`；`app-update-last.json` 02:00:03 写入，结果 `up-to-date`（已是 7.25.6，没有安装）。`Codex Office v2rayN Subscription Refresh` 03:00:01 运行，`LastTaskResult=0`；`sub-update-last.json` 03:00:45 写入，结果 `updated`，前后代理检查都通过。这次只核对了任务结果和摘要，是否闪窗未观察。
 - 回滚：该机 `D:\Codex\.codex\tmp\console-hidden-20261022\rollback.ps1 -Stage D:\Codex\.codex\tmp\console-hidden-20261022`，不带 `-Apply` 只演练（已演练，退出码 0）；改前 XML 与回执在同目录 `backup\`。回滚后启动器文件保留。
 - 非 Codex 的 `Minmin Countdown` 同样直接启动 pwsh，只报告，未改。
 - 证据：家里 `D:\agents\run-evidence\office-console-hidden-20261022\`。
@@ -147,4 +148,5 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - v2rayN 版本与核心、新界订阅、OpenAI 组成员与探测、02:00/03:00 任务、系统代理（`ProxyEnable=1`，`127.0.0.1:10808`）、Machine 级 `HTTP(S)_PROXY`、Tailscale `Running online=True`：2026-10-19 23:17 从家里经正式 SSH 回读。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261019\`。
 - 02:00/03:00 两个任务的第一次无人值守运行、管理员控制台会话（10-14 起在线）、程序版本与 10808：2026-10-20 09:38 从家里经正式 SSH 回读。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261019\followup-20261020\`。
 - 4 个 Codex 计划任务的启动方式、FailSafe 的 RunLevel、UAC 配置、本地账户与 `D:\Codex` 的 ACL：2026-10-22 17:17–17:38 从家里经正式 SSH 回读并处置。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\`。
+- 02:00/03:00 两个维护任务在新启动方式下的首次定时运行（任务动作、LastRunTime、LastTaskResult 与两个 `*-last.json`）：2026-10-23 09:41 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\first-run-check-20261023.md`。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
