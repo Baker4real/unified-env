@@ -513,8 +513,13 @@ sharing violation、lock violation 与 busy 做有界重试；生产合同最多
 漂移和 policy 扩张不得进入 retry；JSON `leaf-delete-failed` 以非零退出码返回结构化 metrics。
 受管中间层（宿主 PowerShell wrapper）必须以 `$LASTEXITCODE` 转发内层退出码；变量不存在时按
 0 处理。缺少确认的结构化 refusal 仍是 exit 0，只修传递、不改取值。`leaf-delete-failed` 的
-非零退出码以生产脚本在发出该 JSON 后 `exit 1` 为准。持锁或 lease 失败若在发出该 JSON 前抛
-错，不属于已证明的生产 Purge 失败观测，不得用未打出该 JSON 的路径声称合同已 live 验收。
+非零退出码以生产脚本在发出该 JSON 后 `exit 1` 为准。2026-10-27 起，Purge 预检树快照自身遇到的
+Win32 32/33（sharing/lock violation，例如续跑时隔离 payload 仍被其他进程以不共享 Delete 的方式持锁）
+在 `-Json` 下同样返回结构化 `purged=false` + `leaf-delete-failed` + metrics，`recoverable`/`purgeResumable`
+按 transaction 当前状态给出且不改写 transaction；预检的其他异常（capability 违规、identity/内容漂移等）
+仍原样抛出，不映射为该 refusal。fixture 回归 `tests\Test-CodexSafeTreeDeletePurgePreflightLockRefusal.ps1`
+钉住持锁连续两次 Purge 的结构化拒绝与释锁后成功；live 验收仍是 ProductionSmoke 的 issue21 序列。
+持锁或 lease 失败若在发出该 JSON 前抛错，不属于已证明的生产 Purge 失败观测，不得用未打出该 JSON 的路径声称合同已 live 验收。
 
 `Lint` 不返回 metrics schema v1，结果为 `errorCount`、`warningCount`、`policy`（path、sha256、
 schemaVersion、entryCount、evaluatedEntryCount、loadable）、`evidence`（root、exists、runDirectories、

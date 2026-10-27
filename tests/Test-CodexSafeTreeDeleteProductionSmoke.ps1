@@ -21,8 +21,10 @@ param()
 # LASTEXITCODE 转发）只作用于这对副本。撤转发后 .cmd→.ps1 链对 leaf-delete-failed
 # 返回 0 且 JSON 仍为该 refusal；从 backup 字节恢复后返回非零。宿主 live .ps1/.cmd
 # 全程不被打开改写，套件首尾各校验一次 SHA-256 并写进 evidence。
-# 不要在 Purge 开始前对 quarantine 持 FileShare.Read：那会卡在 locked
-# preflight。正确窗口是 transaction 进入 purging 后再争用。
+# 不要在 Purge 开始前对 quarantine 持 FileShare.Read：预检快照会在那时即遭
+# Win32 32 并以结构化 leaf-delete-failed 拒绝（该路径由 fixture 套件
+# Test-CodexSafeTreeDeletePurgePreflightLockRefusal.ps1 覆盖）；本套件要覆盖的是
+# 删除阶段冲突，正确窗口是 transaction 进入 purging 后再争用。
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
