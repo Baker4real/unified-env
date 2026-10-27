@@ -11,9 +11,9 @@ intent: 记录办公室设备的受控环境事实与差异
 
 - 设备标识：`ban-gong-shi`
 - Windows 主机名：`PC-20250421IVIW`
-- 统一环境仓库：登记为 `D:\agents\projects\统一环境`，但 2026-08-26 经 SSH 现场审计该机
-  `D:\agents\projects` 不存在（仓库未部署到该机；SSH 会话中 git 不在 PATH）。同步该机仓库
-  属另立任务；审计同期确认 `D:\Codex\.codex\docs\agent-guidance\` 已同步在机。
+- 统一环境仓库：登记为 `D:\agents\projects\统一环境`。该机没有 git（SSH 会话中不在 PATH，
+  2026-10-27 复核），这个目录不是 checkout，只放删除工具需要的子树快照（见「远端操作边界」）；
+  同步完整仓库属另立任务。2026-08-26 审计确认 `D:\Codex\.codex\docs\agent-guidance\` 已同步在机。
 - Codex 受管根：`D:\Codex\.codex`
 
 网络地址、SSH 用户、密钥路径、登录态和凭据属于调用端本地事实，不写入仓库；连接前必须从当前设备的本地配置重新确认。
@@ -149,10 +149,15 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 
 ## 远端操作边界
 
-- 正式远端操作使用严格 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。办公室 Tailscale 控制面依赖本机 v2rayN 的 10808，见上一节。
+- 正式远端操作使用严格 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。办公室 Tailscale 控制面依赖本机 v2rayN 的 10808，见上一节。该机没装 tailcat（2026-10-27 查 PATH 与常见目录均无），文件传输按 `ssh-mesh.md` 走 SCP 回退。
 - 不从本文推断当前 IP、密钥、host-key 或账号；这些均从调用端受控配置现场读取。
 - 设备级运行证据位于 `D:\agents\run-evidence\office-win11-upgrade-20260728\`。关键终态包括 `updates\scan-final-01.json`、`cleanup\final-current-audit.json`、`cleanup\startup-memory-final-current.json`、`cleanup\backup-removal-verification.json` 与 `cleanup\volume-labels-unified.json`。
-- 受管删除工具落后于家里：没有部署受管回收 `Invoke-ManagedRecycle.ps1`；`D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1` 转发到旧布局 `D:\Codex\projects\统一环境` 里的 `Invoke-CodexSafeTreeDelete.ps1`，`-Mode` 只有 Plan、Apply、Purge、BatchPurge，没有 Check。在办公室回收或删除文件前先补齐这两样，不绕开入口自己删。旧证据根 `D:\Codex\.codex\run-evidence\` 下还有 38 个目录没迁走；其中 10-26 扫描修复留下的两份小文件，原件已拷回家里 `D:\agents\run-evidence\office-printer-diag\20261026\office-side\`（两端 SHA-256 一致）。
+- 受管删除工具与家里同版，2026-10-27 从家里部署：
+  - 快照：`D:\agents\projects\统一环境` 里是提交 `a362cf7` 的 `scripts`、`tests`、`managed/safe-tree-delete`、`managed/host-diagnostics` 与 `modules/manifest.json`，来源记在根目录 `OFFICE-SNAPSHOT.json`。文件是提交里的 LF 字节；家里工作树有 48 个闭包文件是旧的 CRLF 检出，所以两边的 safe-tree-delete closure SHA 不同，内容只差换行。
+  - 受管回收 `D:\Codex\.codex\scripts\Invoke-ManagedRecycle.ps1` 连同同组共 20 个主机诊断脚本，由 `Deploy-HostDiagnostics.ps1` 部署。
+  - `D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1` 已换成 gate shim，转发到快照里的入口，有 Check；`.cmd` 启动器经它走。部署 run 在 `D:\Codex\.codex\state\safe-tree-delete-deployment\deployments\office-20261027\`。旧布局 `D:\Codex\projects\统一环境` 不再被入口引用，留在原处没删。
+  - 更新时在家里按新提交重新打包，整体替换快照，再跑 `Deploy-HostDiagnostics.ps1` 与 `Deploy-CodexSafeTreeDelete.ps1`（用新的 DeploymentId）。
+- 旧证据根 `D:\Codex\.codex\run-evidence\` 下还有 37 个目录没迁走。10-26 扫描修复留在那里的两份小文件已于 10-27 受管回收进办公室 D 盘回收站，原件在家里 `D:\agents\run-evidence\office-printer-diag\20261026\office-side\`（两端 SHA-256 一致）。
 
 ## 事实审计
 
@@ -163,5 +168,5 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 4 个 Codex 计划任务的启动方式、FailSafe 的 RunLevel、UAC 配置、本地账户与 `D:\Codex` 的 ACL：2026-10-22 17:17–17:38 从家里经正式 SSH 回读并处置。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\`。
 - 02:00/03:00 两个维护任务在新启动方式下的首次定时运行（任务动作、LastRunTime、LastTaskResult 与两个 `*-last.json`）：2026-10-23 09:41 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\first-run-check-20261023.md`。
 - 复印机扫描接收（FTP Utility 安装与接收目录、启动项、监听、FTP 读写、回收站与「最近使用」记录）、桌面迁移位置：2026-10-26 17:59 处置，10-27 00:19、09:32 与 11:42 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-printer-diag\20261026\`、`20261027\` 与 `D:\agents\run-evidence\retro-office-printer-20261027\probe-closeout.out.txt`。
-- 受管删除工具（无受管回收、safe-tree-delete 旧版无 Check）与旧证据根目录数：2026-10-27 11:42–12:10 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\retro-office-printer-20261027\` 的 `probe-closeout.out.txt`、`capture-retired-evidence.out.txt` 与 `probe-office-delete-entries.err.txt`。
+- 受管删除工具部署（快照、受管回收与主机诊断脚本、safe-tree-delete gate shim 与 Check）、两份小文件的受管回收与旧证据根目录数：2026-10-27 12:42–12:53 从家里经正式 SSH 部署并回读。证据在家里 `D:\agents\run-evidence\office-delete-tooling-20261027\`；办公室侧回执是上面的部署 run 里的 `final-receipt.json`、`D:\agents\run-evidence\host-diagnostics-deployment\deploy-20261027T044843Z-e98cbf6f84cc4609a7f5d32ec251aca3\` 与 `D:\agents\run-evidence\managed-recycle\20261027T045128Z-ea2854f3\result.json`。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
