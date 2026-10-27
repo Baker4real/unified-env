@@ -13,6 +13,7 @@
 //   8. under Claude Desktop (CLAUDE_CODE_ENTRYPOINT starts with claude-desktop), HKCU writes and deletes, inline or
 //      inside a .ps1/.psm1 the command runs: MSIX copy-on-write sends them to the package's private layer, so the
 //      command succeeds and the same shell reads the change back while the real registry stays unchanged.
+//      The -ScriptPath script of Invoke-OfficeRemote.ps1 runs on the remote PC over SSH and is not checked.
 //   9. PowerShell `rg` path arguments containing * or ?: PowerShell passes wildcards to native commands verbatim,
 //      so rg gets a literal path and fails (os error 123 on Windows);
 //  10. PowerShell -like / -notlike patterns starting with ??: ? is a one-character wildcard, so '??*' matches every
@@ -142,11 +143,23 @@ function hkcuReason(where) {
     `要用户本人执行的，请用户在 Claude Desktop 的 Terminal 面板里跑。说明见 ${MSIX_HKCU_PAGE}。${TEXT_ONLY_HINT}`
 }
 
-// Returns a deny reason when, under Claude Desktop, the command or a script it references writes HKCU.
+// Invoke-OfficeRemote.ps1 sends its -ScriptPath script to the office or study PC over SSH; HKCU there is the real hive.
+const REMOTE_RUNNER = /\binvoke-officeremote\.ps1\b/i
+const REMOTE_SCRIPT_ARG = /-ScriptPath\s+(?:'([^'\r\n]+)'|"([^"\r\n]+)"|([^\s'"`;|&(){}<>]+))/gi
+
+function remoteScripts(command, cwd) {
+  if (!REMOTE_RUNNER.test(command)) return []
+  return [...command.matchAll(REMOTE_SCRIPT_ARG)].map(match =>
+    win32.resolve(cwd || '.', (match[1] || match[2] || match[3]).replace(/^\/([a-z])(?=\/)/i, (_, drive) => `${drive}:`)).toLowerCase())
+}
+
+// Returns a deny reason when, under Claude Desktop, the command or a script it runs locally writes HKCU.
 function hkcuDecision(command, cwd, io) {
   if (!/^claude-desktop/i.test(String(io.env?.CLAUDE_CODE_ENTRYPOINT || ''))) return null
   if (writesHkcu(command)) return hkcuReason('')
+  const remote = remoteScripts(command, cwd)
   for (const script of referencedScripts(command, cwd)) {
+    if (remote.includes(script.toLowerCase())) continue
     const text = io.read(script)
     if (text && writesHkcu(text)) return hkcuReason(`脚本 ${script} 里：`)
   }
@@ -700,6 +713,12 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "[Environment]::SetEnvironmentVariable('CI', $Ci)", false, desktop],
     ['Bash', "grep -nE 'Set-ItemProperty|New-ItemProperty|HKCU|HKLM' tools/x.ps1", false, desktop],
     ['PowerShell', "pwsh -File 'D:\\repo\\tools\\harmless.ps1'", false, desktop],
+    // Invoke-OfficeRemote.ps1 runs its -ScriptPath script on the remote PC; scripts run locally are still checked,
+    // and the Recycle Bin rule still applies to the remote script.
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\docker_off.ps1'", false, desktop],
+    ['PowerShell', "& 'D:/Codex/.codex/scripts/Invoke-OfficeRemote.ps1' -Target study -ScriptPath D:/repo/tools/docker_off.ps1 -TimeoutSeconds 120", false, desktop],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\harmless.ps1'; pwsh -File 'D:\\repo\\tools\\docker_off.ps1'", true, desktop],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\recycle.ps1'", true],
     ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false, { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
     ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false]
   ]

@@ -38,6 +38,7 @@ intent: 记录办公室设备的受控环境事实与差异
 - `C:`、`D:`、`E:` 的卷标已分别统一为 `C`、`D`、`E`；三卷均为 NTFS、4096 字节分配单元、GPT Basic 分区且状态为 Healthy。
 - `C:` 与 `D:` 位于系统磁盘 0；`E:` 位于磁盘 1，型号 `WDC WD10EZEX-00BBHA0`，序列号 `WD-WCC6Y8HCHV9S`，容量约 1 TB，非启动盘、非系统盘。
 - `E:\WindowsImageBackup` 仍有 16,200 字节的 Windows Backup catalog/log 元数据，但没有备份版本或可恢复镜像。不能因为目录存在就把它报告为备份，也不得绕过受管删除入口递归清理。
+- 2026-07-09 的 C 盘迁移把 Administrator 的桌面挪到 `D:\Users\Administrator\Desktop`（User Shell Folders 的 `Desktop` 指向它）；C 盘旧桌面里迁走的文件已删除，清空的子目录（如 `扫描文件`）也一并删了，目录本身还在。程序配置里写死旧桌面路径的会静默失效，FTP Utility 的接收目录就是一例（见「复印机扫描到电脑」）。迁移证据在家里 `D:\agents\run-evidence\office-c-migration\office-c-migration-20260709T020901\`。
 
 ## Codex 记忆与静默自启动
 
@@ -135,6 +136,17 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 非 Codex 的 `Minmin Countdown` 同样直接启动 pwsh，只报告，未改。
 - 证据：家里 `D:\agents\run-evidence\office-console-hidden-20261022\`。
 
+## 复印机扫描到电脑（FTP Utility）
+
+2026-10-26 至 27 从家里经正式 SSH 排查并修复，证据在家里 `D:\agents\run-evidence\office-printer-diag\20261026\` 与 `20261027\`。
+
+- 复印机是柯尼卡美能达 bizhub C226，本机打印队列 `KONICA MINOLTA C266SeriesPCL` 走 LPR（队列名 `print`），复印机地址从该队列的打印机端口现场读。打印一直正常，坏的是扫描到电脑。
+- 扫描到电脑靠 FTP Utility（`C:\Program Files (x86)\KONICA MINOLTA\FTP Utility\`）：`KMFtp.exe` 是匿名 FTP 接收端，监听 21 端口，被动端口 1098；`KMFTPUI.exe` 是设置窗口。它不支持 DELE，测试上传的文件只能在本机挪走。
+- 接收目录是 `HKEY_USERS\<Administrator SID>\Software\KONICA MINOLTA\KMFTP` 的 `RootFolder`，现为 `D:\Users\Administrator\Desktop\扫描文件`。7-09 迁移删掉了 C 盘的 `扫描文件` 目录，它却一直指着那里，直到 10-26 才改正。改值的写法见 `ssh-mesh.md`「远端脚本的写法」；改前的值和回滚方法见家里 `D:\agents\run-evidence\office-printer-diag\20261026\fix-kmftp.out.txt` 的 `rollback` 字段。
+- `KMFtp.exe` 必须跑在 Administrator 的交互会话里。公共启动文件夹的 `FTP Utility.lnk` 负责登录自启（StartupApproved 为启用），桌面另有同名快捷方式供现场手动启动。本机没配自动登录，重启后要有人登录才会接收：10-26 23:04 重启、10-27 00:14 登录后，它 00:15:43 自启并监听 21。从家里远程启动用 `ssh-mesh.md` 的临时计划任务做法。
+- 核对扫描是否到达：除了列接收目录，还要看 `D:\$Recycle.Bin\<SID>\` 的 `$I` 记录（原路径与删除时间）和 Administrator「最近使用」里的 `SKM_*.pdf.lnk`。10-27 的测试件 08:36:58 收到，现场 08:37:08 打开，08:37:24 连同两个三月的旧 PDF 一起删进了回收站；只看目录会误报“没收到”。
+- 本机以太网地址由 DHCP 分配。复印机若按 IP 记着这台电脑，地址一变扫描就送不到；路由器上的 DHCP 保留尚未做（as of 2026-10-27）。
+
 ## 远端操作边界
 
 - 正式远端操作使用严格 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。办公室 Tailscale 控制面依赖本机 v2rayN 的 10808，见上一节。
@@ -149,4 +161,5 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 02:00/03:00 两个任务的第一次无人值守运行、管理员控制台会话（10-14 起在线）、程序版本与 10808：2026-10-20 09:38 从家里经正式 SSH 回读。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261019\followup-20261020\`。
 - 4 个 Codex 计划任务的启动方式、FailSafe 的 RunLevel、UAC 配置、本地账户与 `D:\Codex` 的 ACL：2026-10-22 17:17–17:38 从家里经正式 SSH 回读并处置。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\`。
 - 02:00/03:00 两个维护任务在新启动方式下的首次定时运行（任务动作、LastRunTime、LastTaskResult 与两个 `*-last.json`）：2026-10-23 09:41 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\first-run-check-20261023.md`。
+- 复印机扫描接收（FTP Utility 安装与接收目录、启动项、监听、FTP 读写、回收站与「最近使用」记录）、桌面迁移位置：2026-10-26 17:59 处置，10-27 00:19 与 09:32 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-printer-diag\20261026\` 与 `20261027\`。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
