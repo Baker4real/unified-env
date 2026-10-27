@@ -180,6 +180,8 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
 
 检查通过只说明这一刻满足条件，不阻止之后的新调用。要求"与用户确认的安静窗口"的场合（例如 #75 真实历史档位）仍需用户确认；计时类验收还要求机器负载安静，脚本不判断这一点。测试 seam `-StateRootForTest` 与 `-MutexNameForTest` 必须同时给出（只给一个退出 2），生效时进程条件只计命令行同时含该 state root 的进程，与部署工具 #93 的 drain 范围一致。回归套件是 `tests\Test-CodexSafeTreeDeleteQuietWindow.ps1`。
 
+等待窗口的升级约定（2026-10-27）：轮询不是默认的长等待策略。以约 10 分钟间隔轮询 2–3 次（约 30 分钟）仍不满足时，停止轮询并向用户报告：当时不满足的条件、第 4 项不满足时的主工作树脏文件清单，以及可选处置（继续等、用户收尾后重试、或经用户明确授权后代为提交/处理遗留改动）。未获用户明确裁决前不改变上述四项条件，也不以"脏文件与本次测试无关"为由自行放宽。
+
 ## policy 维护工具（#82，spec #73）
 
 `scripts\Update-CodexSafeTreeDeletePolicy.ps1` 维护同 schema 的 policy 条目与 deny：独立脚本，不经 gate shim，不是生产入口的 Mode，也不属于 source closure，从仓库工作树运行。它与 shim、部署工具共用同名 deployment mutex（current-user 命名空间，等锁上限 5 分钟）与同一 maintenance marker，持锁期间写 `mode=policy-maintenance` 面包屑。等锁超时的 JSON 与 shim 同形：`ok=false`、`refusalReason=deployment-mutex-acquire-timeout`、exit 1，并附 `holder`。

@@ -66,6 +66,7 @@ node .\scripts\Run-PowerShellTests.cjs --module host-safety --list
 - 2026-10-13：host diagnostics（`tests/Test-HostDiagnostics.ps1`）不在 `fixture`，由 `diagnostics` profile 与独立 CI job `host-safety diagnostics` 运行，几分钟内出结果；本地回归 host-safety 时另跑 `--profile diagnostics`。
 - 2026-10-20（#93）：部署工具测试 seam 增加 `-GateWaitSecondsForTest` 与 `-InstalledShimGateWaitSecondsForTest`（等锁上限覆盖；生产默认 5/2 分钟与超时输出不变，缺其余测试 seam 时带它们直接拒绝），且测试 seam 生效时 legacy drain 只计命令行含本次 state root 的进程（生产仍全机枚举）。`Test-CodexSafeTreeDeleteDeployment.ps1` 的 S10 用秒级超时覆盖同一超时/holder 合同（不再真等 5 分钟与 2 分钟），S11 覆盖 drain 范围（外部带入口标记的进程不阻塞 fixture 部署、带 state root 标记的仍阻塞）。合同见 capability spec「部署门与维护窗口」。
 - 2026-10-21：「安静窗口」的四个可检查条件定义在 capability spec「部署门与维护窗口」的「安静窗口」小节。需要安静窗口时（如 host-live 档位、真实历史档位），从主工作树运行只读检查 `scripts/Get-CodexSafeTreeDeleteQuietWindow.ps1`，退出码 0 才算安静。
+- 2026-10-27：profile 实测时长（本机，供设置运行超时参考）：`fixture` 全档约 100 分钟（含 Phase3/PurgeBatch 万文件规模段），`host-live` 约 3–6 分钟。runner 支持 `--only <labelRegex>` 与 `--skip <labelRegex>` 按套件标签过滤（`--list` 同样生效，空选择与非法正则报错），超时中断后先用 `--list --skip <已完成套件>` 对齐剩余集再补跑，不要从头整档重跑。等待安静窗口的升级约定见 capability spec 同节。
 
 ## 依赖方向
 

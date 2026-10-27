@@ -90,7 +90,7 @@ function getModuleTestNames(moduleId, profileName) {
   }));
 }
 
-function buildCommands(moduleId = null, profileName = 'fixture') {
+function buildCommands(moduleId = null, profileName = 'fixture', onlyPattern = null, skipPattern = null) {
   const selectedNames = moduleId ? getModuleTestNames(moduleId, profileName) : null;
   const parameterizedTestNames = new Set(PARAMETERIZED_TESTS.map((test) => test.name.toLowerCase()));
   const standardTests = fs.readdirSync(TEST_DIRECTORY, { withFileTypes: true })
@@ -111,7 +111,7 @@ function buildCommands(moduleId = null, profileName = 'fixture') {
     }
   }
 
-  return [
+  const commands = [
     ...standardTests.map((name) => ({
       arguments: ['-NoProfile', '-NonInteractive', '-File', path.join(TEST_DIRECTORY, name)],
       label: name,
@@ -123,6 +123,13 @@ function buildCommands(moduleId = null, profileName = 'fixture') {
       label: `${name} -Case ${testCase}`,
       }))),
   ];
+  const only = onlyPattern ? new RegExp(onlyPattern, 'i') : null;
+  const skip = skipPattern ? new RegExp(skipPattern, 'i') : null;
+  return commands.filter(({ label }) => {
+    if (only && !only.test(label)) return false;
+    if (skip && skip.test(label)) return false;
+    return true;
+  });
 }
 
 function run(command, powershellExecutable) {
@@ -140,7 +147,7 @@ function run(command, powershellExecutable) {
 }
 
 function parseArguments(args) {
-  const options = { list: false, module: null, profile: 'fixture' };
+  const options = { list: false, module: null, profile: 'fixture', only: null, skip: null };
   let profileWasSet = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -162,8 +169,21 @@ function parseArguments(args) {
       if (profileWasSet) throw new Error('--profile may only be specified once');
       options.profile = args[index];
       profileWasSet = true;
+    } else if (argument === '--only' || argument === '--skip') {
+      index += 1;
+      if (index >= args.length || args[index].startsWith('--')) {
+        throw new Error(`${argument} requires a label regex`);
+      }
+      const key = argument === '--only' ? 'only' : 'skip';
+      if (options[key]) throw new Error(`${argument} may only be specified once`);
+      try {
+        new RegExp(args[index], 'i');
+      } catch {
+        throw new Error(`${argument} received an invalid regex: ${args[index]}`);
+      }
+      options[key] = args[index];
     } else {
-      throw new Error('Usage: node scripts/Run-PowerShellTests.cjs [--list] [--module <id> [--profile <name>]]');
+      throw new Error('Usage: node scripts/Run-PowerShellTests.cjs [--list] [--module <id> [--profile <name>]] [--only <labelRegex>] [--skip <labelRegex>]');
     }
   }
   if (profileWasSet && !options.module) {
@@ -174,7 +194,10 @@ function parseArguments(args) {
 
 function main(args) {
   const options = parseArguments(args);
-  const commands = buildCommands(options.module, options.profile);
+  const commands = buildCommands(options.module, options.profile, options.only, options.skip);
+  if ((options.only || options.skip) && commands.length === 0) {
+    throw new Error('No tests selected by the given --only/--skip filters');
+  }
   const powershellExecutable = getPowerShellExecutable();
   if (options.list) {
     for (const command of commands) console.log(command.label);

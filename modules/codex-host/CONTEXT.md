@@ -42,6 +42,8 @@ node .\scripts\Run-PowerShellTests.cjs --module codex-host --list
 
 Vendor-abort stress 测试会写入受管 D 盘 evidence，只在明确的宿主验收中执行，不作为轻量 module smoke test。
 
+2026-10-27 实测：`handle-consumers` 档约 7 分钟；该档打 live gate，须在安静窗口内从主工作树运行（窗口定义见 capability spec「安静窗口」节）。runner 的 `--only`/`--skip` 标签过滤同样适用于本模块。
+
 ## 依赖
 
 本模块依赖 `host-safety` 的 handle-bound I/O 与受管发布能力。

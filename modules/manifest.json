@@ -423,6 +423,8 @@
           "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
           "tests/Test-CodexSafeTreeDeleteBatchHistoryScan.ps1",
           "tests/Test-CodexSafeTreeDeleteCanonicalLayoutEquivalence.ps1",
+          "tests/Test-CodexSafeTreeDeleteFixtureCmdLauncher.ps1",
+          "tests/Test-CodexSafeTreeDeletePurgePreflightLockRefusal.ps1",
           "tests/Test-CodexSafeTreeDeleteDeployment.ps1",
           "tests/Test-CodexSafeTreeDeletePolicyMaintenance.ps1",
           "tests/Test-CodexSafeTreeDeletePolicyStructure.ps1",
@@ -575,7 +577,9 @@
             "tests/Test-CodexSafeTreeDeleteJournalPerformance.ps1",
             "tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1",
-            "tests/Test-CodexSafeTreeDeleteScratchResidue.ps1"
+            "tests/Test-CodexSafeTreeDeleteScratchResidue.ps1",
+            "tests/Test-CodexSafeTreeDeleteFixtureCmdLauncher.ps1",
+            "tests/Test-CodexSafeTreeDeletePurgePreflightLockRefusal.ps1"
           ],
           "python": [],
           "node": []
