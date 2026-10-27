@@ -152,6 +152,7 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 正式远端操作使用严格 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。办公室 Tailscale 控制面依赖本机 v2rayN 的 10808，见上一节。
 - 不从本文推断当前 IP、密钥、host-key 或账号；这些均从调用端受控配置现场读取。
 - 设备级运行证据位于 `D:\agents\run-evidence\office-win11-upgrade-20260728\`。关键终态包括 `updates\scan-final-01.json`、`cleanup\final-current-audit.json`、`cleanup\startup-memory-final-current.json`、`cleanup\backup-removal-verification.json` 与 `cleanup\volume-labels-unified.json`。
+- 受管删除工具落后于家里：没有部署受管回收 `Invoke-ManagedRecycle.ps1`；`D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1` 转发到旧布局 `D:\Codex\projects\统一环境` 里的 `Invoke-CodexSafeTreeDelete.ps1`，`-Mode` 只有 Plan、Apply、Purge、BatchPurge，没有 Check。在办公室回收或删除文件前先补齐这两样，不绕开入口自己删。旧证据根 `D:\Codex\.codex\run-evidence\` 下还有 38 个目录没迁走；其中 10-26 扫描修复留下的两份小文件，原件已拷回家里 `D:\agents\run-evidence\office-printer-diag\20261026\office-side\`（两端 SHA-256 一致）。
 
 ## 事实审计
 
@@ -161,5 +162,6 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 02:00/03:00 两个任务的第一次无人值守运行、管理员控制台会话（10-14 起在线）、程序版本与 10808：2026-10-20 09:38 从家里经正式 SSH 回读。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261019\followup-20261020\`。
 - 4 个 Codex 计划任务的启动方式、FailSafe 的 RunLevel、UAC 配置、本地账户与 `D:\Codex` 的 ACL：2026-10-22 17:17–17:38 从家里经正式 SSH 回读并处置。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\`。
 - 02:00/03:00 两个维护任务在新启动方式下的首次定时运行（任务动作、LastRunTime、LastTaskResult 与两个 `*-last.json`）：2026-10-23 09:41 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\first-run-check-20261023.md`。
-- 复印机扫描接收（FTP Utility 安装与接收目录、启动项、监听、FTP 读写、回收站与「最近使用」记录）、桌面迁移位置：2026-10-26 17:59 处置，10-27 00:19 与 09:32 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-printer-diag\20261026\` 与 `20261027\`。
+- 复印机扫描接收（FTP Utility 安装与接收目录、启动项、监听、FTP 读写、回收站与「最近使用」记录）、桌面迁移位置：2026-10-26 17:59 处置，10-27 00:19、09:32 与 11:42 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-printer-diag\20261026\`、`20261027\` 与 `D:\agents\run-evidence\retro-office-printer-20261027\probe-closeout.out.txt`。
+- 受管删除工具（无受管回收、safe-tree-delete 旧版无 Check）与旧证据根目录数：2026-10-27 11:42–12:10 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\retro-office-printer-20261027\` 的 `probe-closeout.out.txt`、`capture-retired-evidence.out.txt` 与 `probe-office-delete-entries.err.txt`。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
