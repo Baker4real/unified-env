@@ -18,6 +18,8 @@
 //      so rg gets a literal path and fails (os error 123 on Windows);
 //  10. PowerShell -like / -notlike patterns starting with ??: ? is a one-character wildcard, so '??*' matches every
 //      string of two or more characters instead of the literal ?? that git status --porcelain prints.
+// Each rule's scope, workarounds and live checks are documented in
+// D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
 // Any internal error allows the command: the registration keeps onFailure=continue, so a broken guard
 // never locks the shell.
