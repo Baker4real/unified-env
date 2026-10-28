@@ -20,12 +20,13 @@ intent: 记录家里设备的受控环境事实与差异
 
 网络地址、SSH 用户、密钥路径、登录态和凭据属于调用端本地事实，不写入仓库；连接前必须从当前设备的本地配置重新确认。
 
-## UU 远程（2026-08-31 现场）
+## UU 远程
 
-- 安装根：`D:\Program Files\Netease\GameViewer`。2026-08-31 现场核验：`bin\GameViewer.exe` 与 `bin\Upgrade.exe` 均为 `4.38.3.9325`，`GameViewerService` 为 Running，主进程已拉起。
+- 安装根：`D:\Program Files\Netease\GameViewer`，服务、`uuremote` 协议和卸载项都应指向这里。2026-10-28 现场核验：`bin` 下 GameViewer、Server、Healthd、Service、Upgrade 均为 `4.44.1.3978`，`GameViewerService` 为 Running，客户端、Server、Healthd 进程都在。
+- 2026-10-27 UniGetUI 开着 `WinGetForceLocationOnUpdate`，把 4.44.1.3978 另装进 `D:\Apps\NetEase.UURemote`：服务留在原目录，协议和卸载项指向新目录，客户端启动即退出。10-28 已装回原目录并回收副本，经过与证据见 `D:\agents\run-evidence\unigetui-relocated-updates-20261028\`；该开关须保持关闭，约束见 host-runbook `shell-and-runtime.md` 的 UniGetUI 段。
 - UU 远程设备名：`家里`；设备 ID：`aeawutisfya4t4ev`。
 - 正式命令与文件传输走 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。
-- 本机 `bak\` 下没有 `Upgrade.exe` / `aria2c.exe`（2026-08-31）。应用内更新从 `bin` 启动下载器。自习室的 `bak` 回退约束见 `docs/environments/zi-xi-shi.md`，不要套到本机。
+- 2026-08-31 本机 `bak\` 下没有 `Upgrade.exe` / `aria2c.exe`，2026-10-28 安装根下已没有 `bak\`。应用内更新从 `bin` 启动下载器。自习室的 `bak` 回退约束见 `docs/environments/zi-xi-shi.md`，不要套到本机。
 
 ## Windows Terminal、PowerShell 与 WSL
 

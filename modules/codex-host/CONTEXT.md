@@ -46,4 +46,4 @@ Vendor-abort stress 测试会写入受管 D 盘 evidence，只在明确的宿主
 
 ## 依赖
 
-本模块依赖 `host-safety` 的 handle-bound I/O 与受管发布能力。
+依赖与接口以 `modules/manifest.json` 为准，依赖方向图与说明见 `modules/README.md`。本模块依赖 `host-safety` 的 handle-bound I/O 与受管发布能力、`workstation-operations` 的日更证据读取入口（`serena-behavior-guard.ps1` 对它的只读调用不发语义导航提醒），以及 `skill-supply-chain` 的 retro `transcripts.py`（Claude Code SessionStart 检查 hook 的压缩后指针）。
