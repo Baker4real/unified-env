@@ -70,6 +70,14 @@ intent: 记录自习室设备的受控环境事实与差异
 - 证据：`D:\agents\run-evidence\uu-remote-update\20260924T065633Z\`（诊断 JSON、aria2 对照实验、任务注册回读）。
 - 版本、进程、任务状态属易变事实；操作前复核 `bin`/`bak` 文件版本、SHA-256 与 Users 是否仍有 `Modify`。
 
+## Kryptex 与 v2rayN 专属分流（2026-10-28）
+
+- 现役 v2rayN 7.24.8 使用 sing-box 1.13.21。`ProfileItem.IndexId=study-kryptex-auto`（`Kryptex 自动低延迟`）是 `ConfigType=101`、`CoreType=24` 的原生策略组，动态引用 `import_sub` 订阅并过滤套餐信息、故障和等待恢复条目。其 Selector 保持自动模式，由 `urltest` 选择低延迟可用节点；节点数和当前选择以运行态为准。
+- 活动路由的 `study-kryptex-process` 将 `Kryptex.exe`、`KryptexService.exe` 指向该组，`study-kryptex-domain` 将 `domain:kryptex.com` 指向该组。后者覆盖 API、WebSocket 和下载镜像，前者覆盖 GitHub 发布资产等 Kryptex 服务下载链。普通流量仍走原手选节点；手选条目本身未换，只把它的 CoreType 固定为 sing-box（24），使独立策略组与主出口共存。
+- 2026-10-28 验收：109 个候选逐一主动探测均取得终态，61 个可用、48 个不可用、0 漏测；当时自动选中 `China Taiwan D01`（143 ms，为该轮最低）。真实 `api.kryptex.com`、`wss.kryptex.com`、`release-assets.githubusercontent.com` 连接均经过 KryptexService 与专属组。矿工下载已恢复增长，但完整安装和矿池运行未验证。
+- 失败节点的历史延迟可能为空，不能用空历史直接判定“未测”或“可用”；全量验收使用每个成员的 Clash API delay 探测记录终态。证据与完成 checkpoint 位于 `D:\agents\run-evidence\study-kryptex-proxy\20261028\`（入口 `result.json`、`checkpoint.json`，全量账本 `s12-probe-all.out.txt`）；其中脚本是一次性事务记录，不是日常维护入口。
+- 改前数据库与配置只备份在该机受控目录 `D:\Codex\.codex\cache\study-kryptex-proxy\20261028-115300\`；服务进程补充前的备份在同目录 `service-20261028-120427\`。备份含节点凭据，未复制到家里 evidence 或项目文档。两次事务的 sing-box 校验与 Kryptex 镜像探测均通过，10809 的独立 Xray 未改动；成功路径未触发恢复，回滚分支未做真实恢复演练。
+
 ## UniGetUI（2026-09-07）
 
 - 安装树：`D:\UniGetUI\UniGetUI.exe`（2026.2.7.0，从家里同路径拷入）。桌面快捷方式：`D:\桌面\UniGetUI.lnk`，目标即上述 exe。该机当时没有 tailcat 二进制，传输走 tar+scp 回退。
@@ -108,4 +116,4 @@ intent: 记录自习室设备的受控环境事实与差异
 - 怎么看结果：任务结果恒为 `0x0`，以 `state\latest.json` 为准。`ok` 是总结论，`actions` 列出本次做了什么，`before`、`after` 下各有布尔检查项 `checks` 和实际值 `values`（含 `driverVersion`），失败时 `error` 非空。脚本失败时退出 1，并用 `msg.exe` 给当前用户发一条显示 90 秒的消息，内容含状态文件路径；没有交互会话、收不到消息时，状态文件仍是唯一依据。
 - 2026-10-22 16:14 那次运行：`ok=true`，before 和 after 的检查项全部通过，驱动版本 `2.1.2602.8`。
 
-本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核，2026-09-24 增补代理环境变量根因与 v2rayN 自启防复发；开机/唤醒黑框处置、远程输入锁定键提示守卫说明与 SSH 执行事实于 2026-10-22。数量、进程和任务状态属易变事实，操作前必须实时复核。
+本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核，2026-09-24 增补代理环境变量根因与 v2rayN 自启防复发；开机/唤醒黑框处置、远程输入锁定键提示守卫说明与 SSH 执行事实于 2026-10-22；Kryptex 专属分流与验收于 2026-10-28。数量、进程和任务状态属易变事实，操作前必须实时复核。
