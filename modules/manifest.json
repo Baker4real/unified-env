@@ -131,6 +131,7 @@
       ],
       "dependsOn": [
         "host-safety",
+        "skill-supply-chain",
         "workstation-operations"
       ],
       "transitionalDependencies": [],
@@ -251,7 +252,8 @@
         "scripts/retired-skill-menu-surface.cjs",
         "scripts/verify_skill_openai_yaml_parity.py",
         "modules/skill-supply-chain/implementation/system_skill_provenance_repair.py",
-        "modules/skill-supply-chain/implementation/system_package_identity.py"
+        "modules/skill-supply-chain/implementation/system_package_identity.py",
+        "modules/skill-supply-chain/overlays/retro/scripts/transcripts.py"
       ],
       "dependsOn": [
         "host-safety"

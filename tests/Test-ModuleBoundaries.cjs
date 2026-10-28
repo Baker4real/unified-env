@@ -182,7 +182,7 @@ for (const [args, message] of [
 const hostSafetyModule = manifest.modules.find((entry) => entry.id === 'host-safety');
 const codexHostModule = manifest.modules.find((entry) => entry.id === 'codex-host');
 assert.deepEqual(hostSafetyModule.transitionalDependencies, []);
-assert.deepEqual(codexHostModule.dependsOn, ['host-safety', 'workstation-operations']);
+assert.deepEqual(codexHostModule.dependsOn, ['host-safety', 'skill-supply-chain', 'workstation-operations']);
 const workstationModule = manifest.modules.find((entry) => entry.id === 'workstation-operations');
 assert.deepEqual(workstationModule.dependsOn, ['host-safety']);
 assert.ok(workstationModule.interfaces.includes('scripts/daily-update/Read-DailyUpdateEvidence.ps1'));

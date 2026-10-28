@@ -24,9 +24,12 @@ dev-environment -----> host-safety <----- codex-host
                            ^
 skill-supply-chain --------+
 codex-host ----------> workstation-operations -----> host-safety
+codex-host ----------> skill-supply-chain
 ```
 
 `CodexHostSafety.ps1` 是通用 capability I/O、路径校验和原子发布的唯一实现。`codex-host`、safe-delete 与 `skill-supply-chain` 的退休菜单清理都依赖该 seam；safe-delete 不再加载 hook 专用 policy，现役入口路径保持不变。Grok/Cursor/Claude Code 用户级 hook 源落在 `managed/grok-hooks/`、`managed/cursor-hooks/` 与 `managed/claude-hooks/`，不是 reconciler 接口；现役注册以 `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 的 Grok Host Hooks、Cursor Host Hooks 与 Claude Code Host Hooks 为准。
+
+Claude Code 的 SessionStart 检查 hook（`managed/claude-hooks/claude-session-settings-check.mjs`）在上下文压缩后给 agent 一条指针，指向 active retro skill 的 `transcripts.py`（`find`、`show --grep`）；它的源码是 skill-supply-chain 的 retro overlay，所以 codex-host 依赖这个接口。改这两个子命令或参数时，同步改那条指针。
 
 ## 迁移规则
 
