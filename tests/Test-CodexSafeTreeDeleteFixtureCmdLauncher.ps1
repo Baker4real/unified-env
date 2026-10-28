@@ -18,13 +18,7 @@ function Assert-True {
 function Get-CaptureText {
     param([Parameter(Mandatory)][string]$Path)
     if (-not [IO.File]::Exists($Path)) { return '' }
-    $bytes = [IO.File]::ReadAllBytes($Path)
-    if ($bytes.Length -eq 0) { return '' }
-    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-        return [Text.UTF8Encoding]::new($false).GetString($bytes, 3, $bytes.Length - 3)
-    }
-    $oemCodePage = [int][Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage
-    return [Text.Encoding]::GetEncoding($oemCodePage).GetString($bytes)
+    return [IO.File]::ReadAllText($Path, [Text.UTF8Encoding]::new($false))
 }
 
 function Remove-TestTree {
@@ -75,10 +69,18 @@ try {
     [void][IO.Directory]::CreateDirectory($targetPath)
     [IO.File]::WriteAllText((Join-Path $targetPath 'payload.txt'), 'fixture-cmd-launcher', $utf8)
 
+    # 子进程默认按控制台代码页写 stdout：CI 的 en-US runner 是 437，JSON 里的中文路径会变成 ?。
+    # shim 临时改按 UTF-8 写出（Get-CaptureText 按 UTF-8 读回），结束后还原共享控制台的代码页。
     [IO.File]::WriteAllText($shimPath, (@'
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-& '__SAFE_DELETE_ENTRY__' @args
+$consoleEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+try {
+    & '__SAFE_DELETE_ENTRY__' @args
+} finally {
+    [Console]::OutputEncoding = $consoleEncoding
+}
 exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
 '@).Replace('__SAFE_DELETE_ENTRY__', $entryPath), $utf8)
     # 与 ProductionSmoke 的 fixture .cmd 同一模式：%~dp0 相对引用同目录 shim，
