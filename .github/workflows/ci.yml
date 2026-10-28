@@ -13,7 +13,8 @@ permissions:
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   # On main a run in progress always finishes; GitHub keeps one pending run per group, so a newer push replaces
-  # only the pending one. Cancelling in-progress main runs left most pushes without a result behind the ~90-minute job.
+  # only the pending one. Cancelling in-progress main runs left most pushes without a result when the safe-delete
+  # fixtures were a single ~90-minute job.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
@@ -62,7 +63,8 @@ jobs:
   fixtures:
     name: ${{ matrix.name || format('{0} fixtures', matrix.module) }}
     runs-on: windows-latest
-    timeout-minutes: 90
+    # Per-suite timings put the slowest shard near 18 minutes on the slowest runners seen; 30 stops a hung suite early.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -73,9 +75,31 @@ jobs:
             profile: ci
           - module: skill-supply-chain
             profile: fixture
+          # The 10k-file scale suites take most of the host-safety fixture time, so each runs in a heavy shard
+          # (Phase1 and Phase3 share one) and the rest shard skips exactly those suites. Edit a heavy shard's only
+          # pattern and the rest shard's skip pattern together. A heavy pattern that matches no suite fails its job,
+          # so renaming a scale suite cannot drop it silently.
           - module: host-safety
             profile: fixture
-          # Host diagnostics finish in minutes; a separate job keeps their feedback off the ~90-minute safe-delete run.
+            name: host-safety fixtures (PurgeBatch)
+            only: '^Test-CodexSafeTreeDeletePurgeBatch\.ps1$'
+          - module: host-safety
+            profile: fixture
+            name: host-safety fixtures (PurgeHashReuse)
+            only: '^Test-CodexSafeTreeDeletePurgeHashReuse\.ps1$'
+          - module: host-safety
+            profile: fixture
+            name: host-safety fixtures (HashReuse)
+            only: '^Test-CodexSafeTreeDeleteHashReuse\.ps1$'
+          - module: host-safety
+            profile: fixture
+            name: host-safety fixtures (Phase1+Phase3)
+            only: '^Test-CodexSafeTreeDeletePhase[13]Integration\.ps1$'
+          - module: host-safety
+            profile: fixture
+            name: host-safety fixtures (rest)
+            skip: '^Test-CodexSafeTreeDelete(PurgeBatch|PurgeHashReuse|HashReuse|Phase1Integration|Phase3Integration)\.ps1$'
+          # Host diagnostics finish in minutes; a separate job keeps their feedback off the long safe-delete shards.
           - module: host-safety
             profile: diagnostics
             name: host-safety diagnostics
@@ -123,9 +147,15 @@ jobs:
 
       - name: Run module fixture tests
         shell: pwsh
+        env:
+          FIXTURE_ONLY: ${{ matrix.only }}
+          FIXTURE_SKIP: ${{ matrix.skip }}
         run: |
           Set-Location -LiteralPath $env:CI_PROJECT_ROOT
-          node .\scripts\Run-PowerShellTests.cjs --module '${{ matrix.module }}' --profile '${{ matrix.profile }}'
+          $selection = @()
+          if ($env:FIXTURE_ONLY) { $selection += '--only', $env:FIXTURE_ONLY }
+          if ($env:FIXTURE_SKIP) { $selection += '--skip', $env:FIXTURE_SKIP }
+          node .\scripts\Run-PowerShellTests.cjs --module '${{ matrix.module }}' --profile '${{ matrix.profile }}' @selection
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) { exit $testExit }
 

@@ -57,7 +57,7 @@ node .\scripts\Run-PowerShellTests.cjs --module host-safety --list
 
 约定（2026-08-24 CI 首次全绿后固化）：
 
-- CI 按字母序执行套件且 fail-fast：字母序后段的套件问题只会在前段修复后显形，新增套件的宿主耦合（绝对本机路径、生产 evidence 依赖）要在本地非宿主视角自检。
+- CI 的 `fixture` 档分 5 个并行 job（5 个万文件规模套件分进 4 个重型片，其余进 rest 片，划分见 `.github/workflows/ci.yml`），片内按字母序执行且 fail-fast：同一片里字母序后段的套件问题只会在前段修复后显形，新增套件的宿主耦合（绝对本机路径、生产 evidence 依赖）要在本地非宿主视角自检。
 - 绝对性能阈值在 fixture profile 一律 record-only（`metTarget*=False` 不影响 `ok`，先例 Phase3Integration/PurgeBatch/JournalPerformance）；硬断言只留给确定性/一致性判据，且按环境（如 `GITHUB_ACTIONS`）分支。
 - `Test-CodexSafeTreeDeleteFileSystem.ps1` 实卷段提权感知：非提权且无原生 FAT32/exFAT 卷自动记名 skip（`liveFsLeg=skipped-non-elevated`），提权/有原生卷走真实实卷断言。
 - 2026-09-01（#57）：safe-tree-delete issue/scale 套件的 ephemeral fixture、journal、work、livefail 与默认 benchmark live JSON 写到 gitignored `.scratch/safe-tree-delete-tests-*`。`reports/safe-tree-delete-issue*` 与冻结 benchmark 目录只作只读输入。
