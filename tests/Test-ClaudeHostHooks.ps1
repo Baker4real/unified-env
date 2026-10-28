@@ -27,13 +27,15 @@ function Assert-Equal([object]$Actual, [object]$Expected, [string]$Message) {
 }
 
 # 不给 -Entrypoint、-ConfigDir 时从子进程环境里去掉 CLAUDE_CODE_ENTRYPOINT、CLAUDE_CONFIG_DIR，结果不随运行本测试的宿主变化。
-function Invoke-Guard([AllowEmptyString()][string]$InputText, [string]$ScriptPath = $guardPath, [string]$Entrypoint, [string]$ConfigDir) {
+# -LocalAppData 把 session hook 查的 UniGetUI 开关文件指到夹具目录。
+function Invoke-Guard([AllowEmptyString()][string]$InputText, [string]$ScriptPath = $guardPath, [string]$Entrypoint, [string]$ConfigDir, [string]$LocalAppData) {
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $node
     if ($Entrypoint) { $startInfo.Environment['CLAUDE_CODE_ENTRYPOINT'] = $Entrypoint }
     else { [void]$startInfo.Environment.Remove('CLAUDE_CODE_ENTRYPOINT') }
     if ($ConfigDir) { $startInfo.Environment['CLAUDE_CONFIG_DIR'] = $ConfigDir }
     else { [void]$startInfo.Environment.Remove('CLAUDE_CONFIG_DIR') }
+    if ($LocalAppData) { $startInfo.Environment['LOCALAPPDATA'] = $LocalAppData }
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true
@@ -127,6 +129,28 @@ Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDe
 $result = Invoke-Guard $hkcuCase
 Assert-Equal $result.stdout.Trim() '' '没有 Claude Desktop 入口变量时 HKCU 写入放行。'
 
+# Claude Desktop 下工具 shell 直接启动的安装器同样只在入口变量以 claude-desktop 开头时拦截；经 WMI 在包外启动的放行。
+# 静默安装开关拆开拼接，理由同上。
+$installerCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = ("& 'D:\x\Foo_Setup.exe' " + '/' + 'S ' + '/' + 'D=D:\y') } } | ConvertTo-Json -Compress
+$result = Invoke-Guard $installerCase -Entrypoint 'claude-desktop'
+Assert-Equal $result.exitCode 0 '安装器 deny 也必须 exit 0。'
+Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' 'Claude Desktop 下直接启动的安装器必须拦截。'
+$result = Invoke-Guard $installerCase
+Assert-Equal $result.stdout.Trim() '' '没有 Claude Desktop 入口变量时安装器放行。'
+$wmiCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = ("Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '""D:\x\Foo_Setup.exe"" " + '/' + "S' }") } } | ConvertTo-Json -Compress
+$result = Invoke-Guard $wmiCase -Entrypoint 'claude-desktop'
+Assert-Equal $result.stdout.Trim() '' '经 WMI Win32_Process.Create 在包外启动的安装器放行。'
+
+# rg 整棵扫大根目录要几分钟：拦截；更窄的路径和 --max-depth 放行。
+$rootCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -l foo D:\agents\run-evidence' } } | ConvertTo-Json -Compress
+$result = Invoke-Guard $rootCase
+Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' 'rg 扫整个 run-evidence 必须拦截。'
+Assert-True (($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecisionReason -match 'document-retrieval\.md') '拦截理由必须指向路径引用检索脚本。'
+foreach ($narrow in @('rg -l foo D:\agents\run-evidence\sn580', 'rg --max-depth 1 -l foo D:\agents')) {
+    $result = Invoke-Guard (@{ tool_name = 'PowerShell'; tool_input = @{ command = $narrow } } | ConvertTo-Json -Compress)
+    Assert-Equal $result.stdout.Trim() '' "必须放行：$narrow"
+}
+
 $garbage = Invoke-Guard 'not json'
 Assert-Equal $garbage.exitCode 0 '非 JSON 输入必须放行。'
 Assert-Equal $garbage.stdout.Trim() '' '非 JSON 输入不得输出决定。'
@@ -166,7 +190,7 @@ $marker = 'value-' + 'that-must-not-leak'
 try {
     $missing = @{ permissions = @{ deny = @('Bash') }; env = @{ DISABLE_AUTOUPDATER = '1'; ANTHROPIC_AUTH_TOKEN = $marker } }
     [IO.File]::WriteAllText($sessionSettings, ($missing | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
-    $result = Invoke-Guard $sessionInput -ScriptPath $sessionHookPath -ConfigDir $sessionDir
+    $result = Invoke-Guard $sessionInput -ScriptPath $sessionHookPath -ConfigDir $sessionDir -LocalAppData $sessionDir
     Assert-Equal $result.exitCode 0 'session hook 警告也必须 exit 0。'
     Assert-True (-not $result.stdout.Contains($marker)) 'session hook 不得输出 env 的值。'
     $warning = $result.stdout | ConvertFrom-Json
@@ -175,12 +199,34 @@ try {
     Assert-Equal $warning.hookSpecificOutput.additionalContext $warning.systemMessage '给 agent 的上下文与界面警告一致。'
     $complete = @{ permissions = @{ deny = @('Bash') }; env = @{ CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'; DISABLE_AUTOUPDATER = '1' } }
     [IO.File]::WriteAllText($sessionSettings, ($complete | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
-    $result = Invoke-Guard $sessionInput -ScriptPath $sessionHookPath -ConfigDir $sessionDir
+    $result = Invoke-Guard $sessionInput -ScriptPath $sessionHookPath -ConfigDir $sessionDir -LocalAppData $sessionDir
     Assert-Equal $result.stdout.Trim() '' '两个键都在时 session hook 不得输出。'
+
+    # 压缩后只给 agent 一条找回原文的指针，带上本会话记录路径；不在界面上警告。
+    $compactInput = @{ hook_event_name = 'SessionStart'; source = 'compact'; transcript_path = 'D:\t\session.jsonl' } | ConvertTo-Json -Compress
+    $result = Invoke-Guard $compactInput -ScriptPath $sessionHookPath -ConfigDir $sessionDir -LocalAppData $sessionDir
+    $compact = $result.stdout | ConvertFrom-Json
+    Assert-True ($null -eq $compact.PSObject.Properties['systemMessage']) '压缩指针不得作为界面警告。'
+    Assert-True ($compact.hookSpecificOutput.additionalContext.Contains('transcripts.py') -and $compact.hookSpecificOutput.additionalContext.Contains('D:\t\session.jsonl')) '压缩指针必须点名 transcripts.py 和本会话记录。'
+
+    # UniGetUI 的 WinGetForceLocationOnUpdate 开关文件存在时警告。
+    $flagDir = Join-Path $sessionDir 'UniGetUI\Configuration'
+    $flag = Join-Path $flagDir 'WinGetForceLocationOnUpdate'
+    [void][IO.Directory]::CreateDirectory($flagDir)
+    [IO.File]::WriteAllText($flag, '')
+    $result = Invoke-Guard $sessionInput -ScriptPath $sessionHookPath -ConfigDir $sessionDir -LocalAppData $sessionDir
+    Assert-True (($result.stdout | ConvertFrom-Json).systemMessage -match 'WinGetForceLocationOnUpdate') 'UniGetUI 更新强制安装位置开着时必须警告。'
 }
 finally {
     if (Test-Path -LiteralPath $sessionSettings) { Remove-Item -LiteralPath $sessionSettings }
-    if (Test-Path -LiteralPath $sessionDir) { [IO.Directory]::Delete($sessionDir) }
+    foreach ($leaf in @('UniGetUI\Configuration\WinGetForceLocationOnUpdate')) {
+        $path = Join-Path $sessionDir $leaf
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path }
+    }
+    foreach ($dir in @('UniGetUI\Configuration', 'UniGetUI', '')) {
+        $path = Join-Path $sessionDir $dir
+        if (Test-Path -LiteralPath $path) { [IO.Directory]::Delete($path) }
+    }
 }
 
 # 公开仓库推送 guard：夹具仓库建一次后保留复用（不递归删除），提交里埋一个 Tailscale 地址（拼接写，本文件推到公开仓库

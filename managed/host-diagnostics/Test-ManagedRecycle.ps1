@@ -227,6 +227,39 @@ try {
         if ($response.json.tooLongCount -ne 1 -or [string]::Join('|', $response.json.tooLong) -cne $name) { throw 'The entry over the limit was not named.' }
     }
 
+    Assert-Case 'check refuses entries this process cannot open for delete and names them' {
+        # The way an installer leaves Users with read and execute only: no DELETE on sub and no FILE_DELETE_CHILD on its
+        # parent, so neither route grants the delete the shell needs; the shell would fail the recycle with 0x78.
+        $tree = New-Tree 'tree-delete-denied'
+        $sub = Join-Path $tree 'sub'
+        $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $denyDelete = [Security.AccessControl.FileSystemAccessRule]::new($user, 'Delete', 'Deny')
+        $denyChild = [Security.AccessControl.FileSystemAccessRule]::new($user, 'DeleteSubdirectoriesAndFiles', 'Deny')
+        $subAcl = Get-Acl -LiteralPath $sub
+        $subAcl.AddAccessRule($denyDelete)
+        Set-Acl -LiteralPath $sub -AclObject $subAcl
+        $treeAcl = Get-Acl -LiteralPath $tree
+        $treeAcl.AddAccessRule($denyChild)
+        Set-Acl -LiteralPath $tree -AclObject $treeAcl
+        try {
+            $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree)
+            Assert-Refused $response 'delete-access-denied'
+            if ($response.json.deleteDeniedCount -ne 1 -or @($response.json.deleteDenied) -cne @('sub') -or $null -eq $response.json.elevated) {
+                throw "The refusal does not name exactly sub or omits elevated: $($response.stdout)"
+            }
+        }
+        finally {
+            $subAcl = Get-Acl -LiteralPath $sub
+            [void]$subAcl.RemoveAccessRule($denyDelete)
+            Set-Acl -LiteralPath $sub -AclObject $subAcl
+            $treeAcl = Get-Acl -LiteralPath $tree
+            [void]$treeAcl.RemoveAccessRule($denyChild)
+            Set-Acl -LiteralPath $tree -AclObject $treeAcl
+        }
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree)
+        if ($response.exitCode -ne 0 -or $response.json.status -ne 'checked') { throw "Check failed after the ACL was restored: $($response.stdout)" }
+    }
+
     Assert-Case 'plan requires purpose and authorization' {
         $tree = New-Tree 'tree-unauthorized'
         Assert-Refused (Invoke-Entry @('-Mode', 'Plan', '-TargetPath', $tree, '-Purpose', 'managed recycle test')) 'purpose-and-authorization-required'

@@ -17,7 +17,12 @@
 //   9. PowerShell `rg` path arguments containing * or ?: PowerShell passes wildcards to native commands verbatim,
 //      so rg gets a literal path and fails (os error 123 on Windows);
 //  10. PowerShell -like / -notlike patterns starting with ??: ? is a one-character wildcard, so '??*' matches every
-//      string of two or more characters instead of the literal ?? that git status --porcelain prints.
+//      string of two or more characters instead of the literal ?? that git status --porcelain prints;
+//  11. under Claude Desktop, installers started from the tool shell, inline or inside a .ps1/.psm1 the command runs:
+//      they stay inside the MSIX package even with -Verb RunAs, so their HKCU writes land in the private layer.
+//      A launch through WMI Win32_Process.Create runs outside the package and passes;
+//  12. rg walks of whole roots (D:\, D:\agents, D:\agents\run-evidence, D:\Codex, D:\Codex\.codex) without
+//      --max-depth: each takes minutes or times out.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
@@ -155,17 +160,55 @@ function remoteScripts(command, cwd) {
     win32.resolve(cwd || '.', (match[1] || match[2] || match[3]).replace(/^\/([a-z])(?=\/)/i, (_, drive) => `${drive}:`)).toLowerCase())
 }
 
-// Returns a deny reason when, under Claude Desktop, the command or a script it runs locally writes HKCU.
-function hkcuDecision(command, cwd, io) {
-  if (!/^claude-desktop/i.test(String(io.env?.CLAUDE_CODE_ENTRYPOINT || ''))) return null
-  if (writesHkcu(command)) return hkcuReason('')
+function isDesktop(io) {
+  return /^claude-desktop/i.test(String(io.env?.CLAUDE_CODE_ENTRYPOINT || ''))
+}
+
+// Returns a reason from reasonFor when the command, or a script it runs locally, matches the test; the -ScriptPath
+// script of Invoke-OfficeRemote.ps1 runs on the remote PC and is skipped.
+function localTextDecision(command, cwd, io, test, reasonFor) {
+  if (test(command)) return reasonFor('')
   const remote = remoteScripts(command, cwd)
   for (const script of referencedScripts(command, cwd)) {
     if (remote.includes(script.toLowerCase())) continue
     const text = io.read(script)
-    if (text && writesHkcu(text)) return hkcuReason(`脚本 ${script} 里：`)
+    if (text && test(text)) return reasonFor(`脚本 ${script} 里：`)
   }
   return null
+}
+
+// Returns a deny reason when, under Claude Desktop, the command or a script it runs locally writes HKCU.
+function hkcuDecision(command, cwd, io) {
+  return isDesktop(io) ? localTextDecision(command, cwd, io, writesHkcu, hkcuReason) : null
+}
+
+// Rule 11. NSIS /D=, Inno /SILENT and /VERYSILENT, and msiexec with an install verb name an installer on their own.
+// A bare uppercase /S only counts next to an installer-looking file name, because robocopy, findstr and dir take /S
+// too; winget names downloads <id>_<version>_<scope>_<arch>_<type>_<locale>.exe. Uninstallers match as well: they
+// rewrite the same HKCU keys. A text with Win32_Process and Create on one line launches through WMI and passes.
+const INSTALLER_SIGNALS = [
+  /(?:^|[\s'"(,])\/D=/,
+  /(?:^|[\s'"(,])\/(?:VERY)?SILENT(?=$|[\s'",)])/i,
+  /\bmsiexec(?:\.exe)?\b[^\n;|]*?[\s'"(,]\/(?:i|x|a|package|uninstall|update)(?=$|[\s'",)])/i
+]
+const NSIS_SILENT = /(?:^|[\s'"(,])\/S(?=$|[\s'",)])/
+const INSTALLER_NAME = /(?:setup|install|_nullsoft_|_inno_|_burn_|_wix_|_exe_)[^\\/'"\s]*\.exe\b|\.msi\b/i
+const WMI_CREATE = /\bWin32_Process\b[^\n]*\bCreate\b|\bCreate\b[^\n]*\bWin32_Process\b/i
+
+function launchesInstaller(text) {
+  if (WMI_CREATE.test(text)) return false
+  return INSTALLER_SIGNALS.some(pattern => pattern.test(text)) || (NSIS_SILENT.test(text) && INSTALLER_NAME.test(text))
+}
+
+function installerReason(where) {
+  return `${where}Claude Desktop 里工具 shell 启动的安装器（-Verb RunAs 提权的也一样）仍在 MSIX 包里：它写的 HKCU（卸载项、协议、安装目录）只进包私有层，退出码 0、shell 读回也对，真实注册表看不到。` +
+    "改用 WMI 在包外启动：Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '\"<安装包>\" /S /D=<目录>' }，" +
+    `要管理员权限就在提权的 pwsh 里调用；装完用 StdRegProv 从包外读回 HKCU 核对。说明见 ${MSIX_HKCU_PAGE}。${TEXT_ONLY_HINT}`
+}
+
+// Returns a deny reason when, under Claude Desktop, the command or a script it runs locally starts an installer.
+function installerDecision(command, cwd, io) {
+  return isDesktop(io) ? localTextDecision(command, cwd, io, launchesInstaller, installerReason) : null
 }
 
 // A double-dash flag followed by a bare token containing a comma: PowerShell turns a,b into two argv items.
@@ -256,32 +299,41 @@ const RG_VALUE_LONG = new Set([
   '--regex-size-limit', '--engine', '--ignore-file', '--hostname-bin', '--hyperlink-format', '--generate'
 ])
 
-// Returns the first rg path argument containing * or ?, or null. The first positional word is the pattern unless
-// -e/--regexp or -f/--file supplies the patterns, or --files needs none.
+// The path words of an rg simple command and whether --max-depth bounds the walk, or null when the command is not
+// rg. The first positional word is the pattern unless -e/--regexp or -f/--file supplies the patterns, or --files
+// needs none.
+function rgArgs(words) {
+  if ((words[0] || '').split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase() !== 'rg') return null
+  const positional = []
+  let patternGiven = false
+  let bounded = false
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i]
+    if (word === '--') { positional.push(...words.slice(i + 1)); break }
+    if (word.includes('>')) continue // redirections such as *>$null and 2>$null
+    if (word.startsWith('--')) {
+      const name = word.split('=')[0]
+      if (name === '--regexp' || name === '--file' || name === '--files') patternGiven = true
+      if (name === '--max-depth') bounded = true
+      if (!word.includes('=') && RG_VALUE_LONG.has(name)) i++
+    } else if (word.length > 1 && word.startsWith('-')) {
+      // In a short cluster such as -nA3 or -nA 3, the first value-taking letter takes the rest or the next word.
+      for (let k = 1; k < word.length; k++) {
+        if (!RG_VALUE_SHORT.includes(word[k])) continue
+        if (word[k] === 'e' || word[k] === 'f') patternGiven = true
+        if (word[k] === 'd') bounded = true
+        if (k === word.length - 1) i++
+        break
+      }
+    } else positional.push(word)
+  }
+  return { paths: positional.slice(patternGiven ? 0 : 1), bounded }
+}
+
+// Returns the first rg path argument containing * or ?, or null.
 function rgWildcardPath(command) {
   for (const words of simpleCommands(command)) {
-    if ((words[0] || '').split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase() !== 'rg') continue
-    const positional = []
-    let patternGiven = false
-    for (let i = 1; i < words.length; i++) {
-      const word = words[i]
-      if (word === '--') { positional.push(...words.slice(i + 1)); break }
-      if (word.includes('>')) continue // redirections such as *>$null and 2>$null
-      if (word.startsWith('--')) {
-        const name = word.split('=')[0]
-        if (name === '--regexp' || name === '--file' || name === '--files') patternGiven = true
-        if (!word.includes('=') && RG_VALUE_LONG.has(name)) i++
-      } else if (word.length > 1 && word.startsWith('-')) {
-        // In a short cluster such as -nA3 or -nA 3, the first value-taking letter takes the rest or the next word.
-        for (let k = 1; k < word.length; k++) {
-          if (!RG_VALUE_SHORT.includes(word[k])) continue
-          if (word[k] === 'e' || word[k] === 'f') patternGiven = true
-          if (k === word.length - 1) i++
-          break
-        }
-      } else positional.push(word)
-    }
-    const path = positional.slice(patternGiven ? 0 : 1).find(word => /[*?]/.test(word))
+    const path = rgArgs(words)?.paths.find(word => /[*?]/.test(word))
     if (path) return path
   }
   return null
@@ -295,6 +347,33 @@ function rgWildcardReason(path) {
   return `PowerShell 不替原生命令展开通配符：rg 收到的是字面路径 ${path}，在 Windows 上报 os error 123（文件名、目录名或卷标语法不正确）。` +
     `目录作路径参数、通配部分改用 -g：rg <模式> ${dir} -g '${path.slice(sep + 1).replace(/\\/g, '/')}'（只搜这一层再加 --max-depth 1），` +
     `或先用 Get-ChildItem 展开成真实路径（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 6 条）。`
+}
+
+// Rule 12. Roots whose full walk takes minutes: D:\agents\run-evidence alone holds about 570k files, and
+// D:\Codex\.codex keeps backups, session logs and a 1 GB sqlite. Git Bash /d/x becomes D:/x, relative paths use cwd,
+// and words with variables or splats cannot be resolved here, so they pass.
+const BROAD_ROOTS = new Set(['d:', 'd:\\agents', 'd:\\agents\\run-evidence', 'd:\\codex', 'd:\\codex\\.codex'])
+
+function isBroadRoot(word, cwd) {
+  if (/[$@%`]/.test(word)) return false
+  const path = word.replace(/^\/([a-z])(?=\/)/i, (_, drive) => `${drive}:`).replace(/^\/([a-z])$/i, (_, drive) => `${drive}:\\`)
+  return BROAD_ROOTS.has(win32.resolve(cwd || '.', path).replace(/[\\/]+$/, '').toLowerCase())
+}
+
+// Returns the first rg path argument that walks a whole broad root, or null.
+function rgBroadRoot(command, cwd) {
+  for (const words of simpleCommands(command)) {
+    const args = rgArgs(words)
+    const path = args && !args.bounded && args.paths.find(word => isBroadRoot(word, cwd))
+    if (path) return path
+  }
+  return null
+}
+
+function rgBroadRootReason(path) {
+  return `rg 要把 ${path} 整棵树走一遍：D:\\agents\\run-evidence 约 57 万个文件，D:\\Codex\\.codex 还有备份、会话记录和约 1 GB 的 sqlite，一次要几分钟甚至超时。` +
+    `查谁引用某个路径用 ${GUIDANCE}\\document-retrieval.md「路径引用检索」那段脚本（约 4 秒）；查证据只搜 run-evidence 下对应的子目录；` +
+    '确实要从这一层找，加 --max-depth 限深。'
 }
 
 // Rule 10. In -like, ? matches any one character: '??*' matches every string of two or more characters.
@@ -524,6 +603,8 @@ export function evaluate(payload, io = defaultIo) {
   // First, so `Remove-Item HKCU:\x -Recurse` gets the registry reason rather than the safe-tree-delete one.
   const hkcu = hkcuDecision(command, payload?.cwd, io)
   if (hkcu) return hkcu
+  const installer = installerDecision(command, payload?.cwd, io)
+  if (installer) return installer
 
   if (!/invoke-safe-tree-delete/i.test(command) && RECURSIVE_DELETE_PATTERNS.some(pattern => pattern.test(command))) {
     return `递归删除目录只能走受管入口 ${MANAGED_DELETE}（Plan → Apply → Purge，说明见 ${GUIDANCE}\\host-runbook\\safe-tree-delete.md）。` +
@@ -558,6 +639,9 @@ export function evaluate(payload, io = defaultIo) {
         "改用 .StartsWith('??')，或在模式里转义成 '`?`?*'。" + TEXT_ONLY_HINT
     }
   }
+
+  const broad = rgBroadRoot(command, payload?.cwd)
+  if (broad) return rgBroadRootReason(broad)
 
   const source = hardlinkingCloneSource(command)
   if (source) {
@@ -722,7 +806,34 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\harmless.ps1'; pwsh -File 'D:\\repo\\tools\\docker_off.ps1'", true, desktop],
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\recycle.ps1'", true],
     ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false, { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
-    ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false]
+    ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false],
+    // Installers the tool shell starts under Claude Desktop stay in the package, elevated or not; WMI launches pass.
+    ['PowerShell', "Start-Process -FilePath 'D:\\x\\UU_4.44.1.3978_User_X64_nullsoft_en-US.exe' -ArgumentList '/S','/D=D:\\Program Files\\Netease' -Verb RunAs -Wait", true, desktop],
+    ['PowerShell', "& 'D:\\x\\Grok_Bot_0.77.0_Setup.exe' /S", true, desktop],
+    ['PowerShell', 'msiexec /i D:\\x\\a.msi /qn', true, desktop],
+    ['PowerShell', "Start-Process msiexec -ArgumentList '/i', $msi, '/qn' -Wait", true, desktop],
+    ['PowerShell', '& $setup /VERYSILENT /SUPPRESSMSGBOXES', true, desktop],
+    ['PowerShell', "& 'D:\\x\\GameViewer\\Uninstall.exe' /S", true, desktop],
+    ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\install.ps1'", true, desktop],
+    ['PowerShell', "Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '\"D:\\x\\a_Setup.exe\" /S /D=D:\\y' }", false, desktop],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1' -ScriptPath 'D:\\repo\\tools\\install-wmi.ps1'", false, desktop],
+    ['PowerShell', 'robocopy D:\\a D:\\b /S /E', false, desktop],
+    ['PowerShell', 'findstr /S /I setup *.txt', false, desktop],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\install.ps1'", false, desktop],
+    ['PowerShell', "& 'D:\\x\\Grok_Bot_0.77.0_Setup.exe' /S", false, { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
+    // rg walks of whole roots take minutes; narrower paths, --max-depth and unresolvable variables pass.
+    ['PowerShell', "rg -l -i -F 'NetEase.UURemote' D:/agents D:/Codex/.codex/docs", true],
+    ['PowerShell', 'rg -n foo D:\\agents\\run-evidence', true],
+    ['PowerShell', "rg -n foo 'D:\\agents\\'", true],
+    ['PowerShell', 'rg --files D:\\Codex\\.codex', true],
+    ['PowerShell', 'rg -l foo D:\\', true],
+    ['Bash', 'rg -n foo /d/agents', true],
+    ['PowerShell', 'rg -n foo D:\\agents\\projects', false],
+    ['PowerShell', 'rg -n foo D:\\agents\\run-evidence\\sn580', false],
+    ['PowerShell', 'rg --max-depth 2 --files D:\\agents', false],
+    ['PowerShell', 'rg -d 1 -l foo D:\\agents', false],
+    ['PowerShell', 'rg -F -l $name -- @roots', false],
+    ['Bash', 'rg -n foo /d/agents/knowledge-base', false]
   ]
   const scripts = new Map(Object.entries({
     'D:\\repo\\tools\\recycle.ps1': 'Add-Type -TypeDefinition $src\n[Native]::SHFileOperationW([ref]$op)',
@@ -730,6 +841,8 @@ if (process.argv.includes('--self-test')) {
     'D:\\repo\\lib\\shell.ps1': '$shell = New-Object -ComObject Shell.Application\n$shell.Namespace(10).MoveHere($path)',
     'D:\\repo\\tools\\harmless.ps1': 'Get-ChildItem -LiteralPath $PSScriptRoot',
     'D:\\repo\\tools\\docker_off.ps1': "$runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'\nif ($null -ne $runVal) { Remove-ItemProperty -LiteralPath $runKey -Name $name }",
+    'D:\\repo\\tools\\install.ps1': "$exe = Join-Path $PSScriptRoot 'Foo_Setup.exe'\nStart-Process -FilePath $exe -ArgumentList '/S' -Verb RunAs -Wait\nGet-CimInstance Win32_Process | Select-Object -First 1",
+    'D:\\repo\\tools\\install-wmi.ps1': "$cmd = '\"' + $exe + '\" /S /D=D:\\y'\nInvoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }",
     'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1': 'code = SHFileOperationW(ref op);',
     'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1': 'STA (SHFileOperationW) works here.'
   }).map(([path, text]) => [path.toLowerCase(), text]))

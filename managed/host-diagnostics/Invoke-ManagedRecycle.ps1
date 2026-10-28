@@ -17,7 +17,9 @@ Output is one JSON object; exit 0 only for checked, planned or recycled.
 Preflight fails closed on: paths that are not drive paths on a fixed NTFS volume, volume roots, protected
 roots and their ancestors, system subtrees, reparse points on the path or inside the tree, hard links
 (with -AllowInternalHardLinks only those with a name outside the target; Plan records the switch and Apply
-rechecks with it), paths the shell cannot move (260 characters or more, in place or in the bin), the NoRecycleFiles policy,
+rechecks with it), entries this process cannot open for DELETE (installers often leave Users with read and
+execute only and the shell would then fail the move with 0x78; the refusal names them and says whether the
+process was elevated), paths the shell cannot move (260 characters or more, in place or in the bin), the NoRecycleFiles policy,
 NukeOnDelete, missing per-volume bin settings, and bin headroom (bin + target above 90% of MaxCapacity
 would make Windows evict older bin items). Nothing is deleted permanently and the bin is never emptied;
 both stay with the user. Agents use this entry only for targets the user explicitly authorized in the
@@ -217,6 +219,13 @@ function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInte
         $result.problems = @($scan.Problems)
         Stop-Refused 'tree-not-recyclable'
     }
+    if ($scan.DeleteDeniedCount -gt 0) {
+        $result.deleteDeniedCount = $scan.DeleteDeniedCount
+        $result.deleteDenied = @($scan.DeleteDenied)
+        $result.elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
+        Stop-Refused 'delete-access-denied'
+    }
     $bin = Get-BinFacts $root $scan.Bytes
     $result.bin = $bin.facts
     if ($bin.problems.Count -gt 0) { $result.problems = $bin.problems; Stop-Refused 'bin-not-ready' }
@@ -287,6 +296,8 @@ namespace ManagedRecycle
         public List<string> Lines = new List<string>();
         public List<string> Problems = new List<string>();
         public int ProblemCount;
+        public List<string> DeleteDenied = new List<string>();
+        public int DeleteDeniedCount;
         public long Files;
         public long Directories;
         public long Bytes;
@@ -439,6 +450,7 @@ namespace ManagedRecycle
         {
             var scan = new TreeScan();
             string internalRoot = allowInternalLinks ? root : null;
+            ProbeDelete(scan, root, ".");
             if ((File.GetAttributes(root) & FileAttributes.Directory) == 0)
             {
                 scan.Kind = "file";
@@ -473,6 +485,7 @@ namespace ManagedRecycle
                         AddProblem(scan, "reparse-point: " + relative);
                         continue;
                     }
+                    ProbeDelete(scan, item.FullName, relative);
                     if ((item.Attributes & FileAttributes.Directory) != 0)
                     {
                         scan.Directories++;
@@ -491,6 +504,18 @@ namespace ManagedRecycle
             }
             scan.Lines.Sort(StringComparer.Ordinal);
             return scan;
+        }
+
+        // Records an entry this process cannot open for DELETE, directly or through FILE_DELETE_CHILD on its parent;
+        // the shell would fail the recycle with 0x78. Other open failures (in use, gone) are left to the recycle.
+        private static void ProbeDelete(TreeScan scan, string path, string relative)
+        {
+            using (var handle = CreateFileW(path, 0x00010000, 7, IntPtr.Zero, 3, 0x02000000 | 0x00200000, IntPtr.Zero))
+            {
+                if (!handle.IsInvalid || Marshal.GetLastWin32Error() != 5) return;
+            }
+            scan.DeleteDeniedCount++;
+            if (scan.DeleteDenied.Count < 20) scan.DeleteDenied.Add(relative);
         }
 
         // internalRoot is null unless hard links whose names all stay inside it are allowed.
