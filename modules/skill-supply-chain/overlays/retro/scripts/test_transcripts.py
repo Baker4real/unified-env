@@ -167,5 +167,52 @@ class CodexExecTests(unittest.TestCase):
         self.assertIn('slow calls (over 60s): 1', result.stdout)
 
 
+class LineRangeTests(unittest.TestCase):
+    """--from-line/--to-line count only records in range; a result in range still names its earlier call."""
+
+    def audit(self, *options):
+        def call(stamp, call_id, name, data):
+            return {"type": "assistant", "timestamp": stamp, "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": call_id, "name": name, "input": data}]}}
+
+        def result(stamp, call_id, text, failed=False):
+            return {"type": "user", "timestamp": stamp, "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": call_id, "content": text, "is_error": failed}]}}
+
+        records = [
+            call("2026-10-29T08:00:00Z", "a", "Bash", {"command": "early"}),
+            result("2026-10-29T08:00:01Z", "a", "ok"),
+            call("2026-10-29T08:00:02Z", "b", "Read", {"file_path": "D:/docs/a.md"}),
+            result("2026-10-29T08:01:40Z", "b", "denied", failed=True),
+            call("2026-10-29T08:01:41Z", "c", "Grep", {"pattern": "late"}),
+            result("2026-10-29T08:01:42Z", "c", "after range"),
+        ]
+        with tempfile.TemporaryDirectory(dir=TEMP_ROOT) as directory:
+            path = Path(directory) / "session.jsonl"
+            path.write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
+            return run("audit", str(path), *options)
+
+    def test_range_counts_only_its_records_and_names_earlier_calls(self):
+        result = self.audit("--from-line", "4", "--to-line", "5")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("lines: L4..L5\n", result.stdout)
+        self.assertIn("span: 2026-10-29T08:01:40+00:00 .. 2026-10-29T08:01:41+00:00", result.stdout)
+        self.assertIn("blocks: tool_call=1, tool_result=1\n", result.stdout)
+        self.assertIn("tool calls: Grep=1\n", result.stdout)
+        self.assertIn("L4 2026-10-29T08:01:40Z Read [D:/docs/a.md] denied", result.stdout)
+        self.assertIn("L3      98s Read [D:/docs/a.md]", result.stdout)
+
+    def test_open_range_runs_to_the_end(self):
+        result = self.audit("--from-line", "3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("lines: L3..end\n", result.stdout)
+        self.assertIn("tool calls: Read=1, Grep=1\n", result.stdout)
+
+    def test_reversed_range_is_rejected(self):
+        result = self.audit("--from-line", "5", "--to-line", "4")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--to-line 4 is before --from-line 5", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

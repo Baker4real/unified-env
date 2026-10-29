@@ -8,4 +8,6 @@
 
 `audit --expected-exit RESULT_LINE:CODE` 是操作者对特定日志行的显式说明；不自动猜测 grep、winget 等命令的非零含义。stdout 中形如 `name/exit_code/stdout/stderr` 的命令数组只显示为 reported outcome，不能据此证明外层工具失败。pending 是日志时点观察，可能在后续记录完成。
 
+`audit --from-line N [--to-line M]` 只统计这段行号内的记录（如同一会话上次复盘之后的部分）；范围前发出的调用仍用来给范围内的结果命名、计算耗时，范围后才到的结果不计入。
+
 `audit --sizes` 的 exec 路径统计只识别直接 `exec_command` 参数，以及 `functions.exec` 中受支持的静态 `tools.exec_command({cmd:"..."})` 字符串里的 `Get-Content`/`cat` literal 路径。动态命令、其他读法列为未解析；统计表示请求的读取次数，不能证明读取成功，也不把整批输出字节重复归因给每个文件。

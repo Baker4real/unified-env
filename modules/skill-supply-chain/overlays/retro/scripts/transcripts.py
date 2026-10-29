@@ -1,12 +1,14 @@
 """Search and audit agent session transcripts (Claude Code, Codex and Kimi Code JSONL logs). Reads only.
 
   transcripts.py find NEEDLE [PATH ...] [--since DATE] [--kind KIND] [--skip TEXT] [-i]
-  transcripts.py audit FILE [--slow SECONDS] [--sizes] [--expected-exit RESULT_LINE:CODE]
+  transcripts.py audit FILE [--slow SECONDS] [--sizes] [--expected-exit RESULT_LINE:CODE] [--from-line N] [--to-line M]
   transcripts.py show FILE LINE [--grep REGEX]
 
 find   which transcripts mention a fixed string, newest last, with a timestamped snippet per hit
 audit  one transcript's span, block counts, tool-call counts, failed tool results and slow calls;
-       --sizes adds tool-result characters per tool, the largest results and files read more than once
+       --sizes adds tool-result characters per tool, the largest results and files read more than once;
+       --from-line and --to-line count only records on lines N..M, such as the turns since an earlier
+       audit, and a result in range still names its call from before N
 show   the text of one record (a line number printed by find or audit), optionally only lines matching a regex
 
 PATH is a transcript file or a directory walked for *.jsonl. Without PATH, find walks
@@ -524,6 +526,12 @@ def expected_exit(value):
     return int(match.group(1)), int(match.group(2))
 
 
+def line_number(value):
+    if not re.fullmatch(r'[1-9]\d*', value):
+        raise argparse.ArgumentTypeError('expected a line number of 1 or more')
+    return int(value)
+
+
 def static_exec_reads(block):
     """Return literal read operands and whether a read-like exec could not be parsed.
 
@@ -596,6 +604,8 @@ def cmd_audit(args):
     path = Path(args.file)
     if not path.is_file():
         fail(f"not found: {path}")
+    if args.to_line is not None and args.to_line < args.from_line:
+        fail(f"--to-line {args.to_line} is before --from-line {args.from_line}")
     calls, stamps, errors, slow, results = {}, [], [], [], []
     nonzero, reported, pending, unknown, expected = [], [], [], [], []
     expectations = set(args.expected_exit)
@@ -605,22 +615,28 @@ def cmd_audit(args):
     tools, kinds, others = collections.Counter(), collections.Counter(), collections.Counter()
     codex = kimi = False
     for number, record in read_records(path):
+        if args.to_line is not None and number > args.to_line:
+            break
         codex = codex or "payload" in record
         kimi = kimi or record.get("type") in KIMI_TYPES
         stamp = record_when(record)
-        if stamp:
+        before_range = number < args.from_line
+        if stamp and not before_range:
             stamps.append(stamp)
         for block in blocks(record):
-            kinds[block.kind] += 1
-            if block.kind == "other":
-                others[block.name] += 1
-            elif block.kind == "tool_call":
-                tools[block.name] += 1
+            if block.kind == "tool_call":
                 calls[block.call_id] = (block.name, describe_call(block), stamp, number)
                 if block.name == "Read" and isinstance(block.data, dict):
                     read_path = block.data.get("file_path") or block.data.get("path")
                     if isinstance(read_path, str):
                         read_paths[block.call_id] = read_path
+            if before_range:
+                continue
+            kinds[block.kind] += 1
+            if block.kind == "other":
+                others[block.name] += 1
+            elif block.kind == "tool_call":
+                tools[block.name] += 1
                 if args.sizes:
                     paths, uncovered = static_exec_reads(block)
                     for read_path in paths:
@@ -657,6 +673,8 @@ def cmd_audit(args):
                 elif start and stamp and (stamp - start).total_seconds() > args.slow:
                     slow.append(f"L{origin} {(stamp - start).total_seconds():7.0f}s {name} [{about}]")
     session_title = "" if codex or kimi else title(path.read_bytes())
+    if args.from_line > 1 or args.to_line is not None:
+        print(f"lines: L{args.from_line}..{'end' if args.to_line is None else f'L{args.to_line}'}")
     if stamps:
         print(f"span: {min(stamps).isoformat()} .. {max(stamps).isoformat()}"
               + (f"  {session_title!r}" if session_title else ""))
@@ -742,6 +760,8 @@ def main():
                        help="add tool-result characters per tool, the largest results and files read more than once")
     audit.add_argument("--expected-exit", action="append", type=expected_exit, default=[],
                        help="annotate a known expected nonzero at RESULT_LINE:CODE; repeatable, unmatched annotations are shown")
+    audit.add_argument("--from-line", type=line_number, default=1, help="count only records on this line and later")
+    audit.add_argument("--to-line", type=line_number, help="count only records on this line and earlier")
 
     show = commands.add_parser("show", help="text of one record")
     show.add_argument("file")
