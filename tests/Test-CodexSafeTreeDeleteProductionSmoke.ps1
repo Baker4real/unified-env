@@ -36,6 +36,10 @@ if ([int]$PSVersionTable.PSVersion.Major -lt 7) {
     throw '本机 shell 必须是 PowerShell 7+'
 }
 
+# live wrapper 经 Start-Process -NoNewWindow 与本脚本共用控制台，它的 pwsh 按控制台输出代码页写重定向的
+# stdout/stderr，不是按 OEM 代码页。先把代码页设成 UTF-8，Get-WrapperCaptureText 按 UTF-8 读回。
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'New-CodexSafeTreeDeleteTestScratchRoot.ps1')
 . (Join-Path $projectRoot 'scripts\lib\CodexSafeTreeDeleteClosure.ps1')
@@ -116,14 +120,8 @@ function Get-LowerSha256 {
 function Get-WrapperCaptureText {
     param([Parameter(Mandatory)][string]$Path)
     if (-not [IO.File]::Exists($Path)) { return '' }
-    $bytes = [IO.File]::ReadAllBytes($Path)
-    if ($bytes.Length -eq 0) { return '' }
-    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-        return [Text.UTF8Encoding]::new($false).GetString($bytes, 3, $bytes.Length - 3)
-    }
-    $oemCodePage = [int][Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage
-    $oem = [Text.Encoding]::GetEncoding($oemCodePage)
-    return $oem.GetString($bytes)
+    # 严格解码：代码页没对齐时直接报错，不把乱码当输出。
+    return [IO.File]::ReadAllText($Path, [Text.UTF8Encoding]::new($false, $true))
 }
 
 function Write-Issue55Json {
