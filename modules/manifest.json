@@ -286,6 +286,7 @@
           ],
           "python": [
           "modules/skill-supply-chain/tests/Test-CommitExactFiles.py",
+          "modules/skill-supply-chain/tests/Test-ExactSnapshot.py",
           "modules/skill-supply-chain/tests/Test-SkillCatalog.py",
           "modules/skill-supply-chain/tests/Test-SkillInstallGuarded.py",
           "modules/skill-supply-chain/tests/Test-SkillInstallGuardedBundled.py",

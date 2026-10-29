@@ -33,6 +33,19 @@ transaction's ledger can be committed the same way from its
 since; the transaction manifest's ``source_state_after`` records that
 snapshot's path and SHA-256.
 
+``--from-commit SNAPSHOT COMMIT`` replays one commit made in a snapshot of this
+repository (``exact_snapshot.py create`` makes one): its paths, modes and
+blobs, and its message unless ``--message-file`` is given.  Each of those paths
+must be in HEAD exactly as in the commit's parent, so the replay never
+overwrites a change committed since the snapshot was taken; when the parent's
+tree equals HEAD's, the new commit's tree must equal the snapshot commit's.
+
+After a ``--file-from`` or ``--from-commit`` commit, a work-tree copy that
+still matches the parent commit (missing, for a new file) is brought to the
+new version, or removed for a deleted file; a copy holding other edits is left
+alone and named, since committing it as it stands would revert this commit.
+If that update fails, the commit stands and the helper exits 3.
+
 A committed path keeps its mode in HEAD, and a new one is a regular file
 (100644); ``--executable PATH`` commits PATH, which ``--file`` or
 ``--file-from`` must also name, as 100755 instead (a new hook script, say).
@@ -102,14 +115,20 @@ def path_list(output: bytes) -> list[str]:
     return sorted(item.decode("utf-8") for item in output.split(b"\0") if item)
 
 
-def tree_entry_mode(repo: Path, commit: str, path: str) -> str | None:
+def tree_entry(repo: Path, commit: str, path: str) -> tuple[str, str] | None:
+    """``path``'s (mode, blob) in ``commit``, or None when it is absent."""
     output = git(repo, "ls-tree", "-z", commit, "--", path).stdout
     if not output:
         return None
-    mode, kind, _ = output.split(b"\t", 1)[0].decode("ascii").split(" ")
+    mode, kind, blob = output.split(b"\t", 1)[0].decode("ascii").split(" ")
     if kind != "blob":
         raise CommitError(f"{path} 在 {commit} 里是 {kind}，不是文件")
-    return mode
+    return mode, blob
+
+
+def tree_entry_mode(repo: Path, commit: str, path: str) -> str | None:
+    entry = tree_entry(repo, commit, path)
+    return entry[0] if entry else None
 
 
 def lines_of(data: bytes) -> list[bytes]:
@@ -196,17 +215,100 @@ def refresh_shared_index(repo: Path, git_dir: Path, head: str, paths: list[str])
             ) from exc
 
 
+def replay_entries(
+    repo: Path, expected: str, source: Path, commit: str
+) -> tuple[list[tuple[str, str, str]], list[str], bytes, str | None]:
+    """The (mode, blob, path) entries and the deletions that replay ``commit`` of the snapshot ``source`` on ``expected``.
+
+    Also returns the commit's message, and its tree when its parent's tree equals ``expected``'s, for the replayed
+    commit to reproduce.  A path that ``expected`` holds differently from the parent stops the replay, since writing
+    the snapshot's version would overwrite whatever changed it.
+    """
+    snapshot = git_text(source, "rev-parse", "--verify", f"{commit}^{{commit}}")
+    parents = git_text(source, "rev-list", "--parents", "-n", "1", snapshot).split()[1:]
+    if len(parents) != 1:
+        raise CommitError(f"{snapshot} 有 {len(parents)} 个父提交；--from-commit 只重放单个父提交的提交")
+    raw = git(source, "diff-tree", "-r", "-z", "--no-renames", "--no-abbrev", parents[0], snapshot).stdout.split(b"\0")
+    changes: list[tuple[str, str, str]] = []
+    moved: list[str] = []
+    for meta, name in zip(raw[0:-1:2], raw[1::2]):
+        old_mode, new_mode, old_blob, new_blob, _ = meta.decode("ascii").lstrip(":").split(" ")
+        path = name.decode("utf-8")
+        for mode in (old_mode, new_mode):
+            if mode != "000000" and mode not in REGULAR_FILE_MODES:
+                raise CommitError(f"{path}：不支持 mode {mode}")
+        if tree_entry(repo, expected, path) != (None if old_mode == "000000" else (old_mode, old_blob)):
+            moved.append(path)
+        changes.append((new_mode, new_blob, path))
+    if moved:
+        raise CommitError(
+            f"这些路径在 {expected} 里和快照基底 {parents[0]} 不同，重放会覆盖之后的提交：{moved}；"
+            "先用 exact_snapshot.py onto 把快照跟上 HEAD"
+        )
+    if not changes:
+        raise CommitError(f"{snapshot} 没有改动")
+    entries: list[tuple[str, str, str]] = []
+    deletes: list[str] = []
+    for new_mode, new_blob, path in changes:
+        if new_mode == "000000":
+            deletes.append(path)
+            continue
+        data = git(source, "cat-file", "blob", new_blob).stdout
+        if git_text(repo, "hash-object", "-w", "--no-filters", "--stdin", data=data) != new_blob:
+            raise CommitError(f"{path}：写进本仓库的 blob 与快照的 {new_blob} 不同")
+        entries.append((new_mode, new_blob, path))
+    message = git(source, "log", "-1", "--format=%B", snapshot).stdout
+    same_base = git_text(source, "rev-parse", f"{parents[0]}^{{tree}}") == git_text(repo, "rev-parse", f"{expected}^{{tree}}")
+    return entries, deletes, message, git_text(source, "rev-parse", f"{snapshot}^{{tree}}") if same_base else None
+
+
+def sync_work_tree(repo: Path, head: str, paths: list[str]) -> tuple[list[str], list[str]]:
+    """Bring each work-tree copy of ``paths`` that still matches ``head``'s parent to ``head``'s version.
+
+    Returns the paths brought over and the paths left alone because their copy holds other edits.
+    """
+    synced: list[str] = []
+    left: list[str] = []
+    for path in paths:
+        old = tree_entry(repo, f"{head}^", path)
+        new = tree_entry(repo, head, path)
+        target = repo / path
+        if target.is_file() and not target.is_symlink():
+            current = git_text(repo, "hash-object", f"--path={path}", "--stdin", data=target.read_bytes())
+        elif os.path.lexists(target):
+            left.append(path)
+            continue
+        else:
+            current = None
+        if current == (new[1] if new else None):
+            continue
+        if current != (old[1] if old else None):
+            left.append(path)
+        elif new is None:
+            target.unlink()
+            synced.append(path)
+        else:
+            git(repo, "checkout-index", "-f", "--", path)
+            synced.append(path)
+    return synced, left
+
+
 def commit_exact(
     *,
     repo: Path,
     expected_head: str,
-    message_file: Path,
+    message_file: Path | None,
     files: list[tuple[str, Path, str]],
     deletes: list[str],
     hunks: list[tuple[str, str, list[int]]] = (),
     executables: list[str] = (),
+    replay: tuple[Path, str] | None = None,
 ) -> str:
-    """Commit ``files`` (path, content source, reviewed SHA-256), ``hunks`` (path, reviewed work-tree SHA-256, hunk numbers) and ``deletes`` on ``expected_head``; ``executables`` names files to commit as 100755."""
+    """Commit ``files`` (path, content source, reviewed SHA-256), ``hunks`` (path, reviewed work-tree SHA-256, hunk numbers) and ``deletes`` on ``expected_head``; ``executables`` names files to commit as 100755.
+
+    ``replay`` (snapshot repository, commit) commits that commit's changes instead, with its message unless
+    ``message_file`` is given.
+    """
 
     paths = [path for path, _, _ in files] + [path for path, _, _ in hunks] + deletes
     duplicates = sorted({path for path in paths if paths.count(path) > 1})
@@ -218,9 +320,15 @@ def commit_exact(
     expected = git_text(repo, "rev-parse", "--verify", f"{expected_head}^{{commit}}")
     if git_text(repo, "rev-parse", "--verify", "HEAD") != expected:
         raise CommitError(f"HEAD 已不是 {expected}，重新核对后再提交")
+    entries: list[tuple[str, str, str]] = []
+    message, snapshot_tree = b"", None
+    if replay:
+        entries, deletes, message, snapshot_tree = replay_entries(repo, expected, *replay)
+        paths = [path for _, _, path in entries] + deletes
+    if message_file:
+        message = message_file.read_bytes()
     if git(repo, "diff", "--cached", "--quiet", expected, "--", *paths, allowed=(0, 1)).returncode:
         raise CommitError("共享 index 里这些路径已有暂存改动；先确认它们属于哪个会话")
-    entries: list[tuple[str, str, str]] = []
     for path, source, reviewed in files:
         data = source.read_bytes()
         actual = hashlib.sha256(data).hexdigest()
@@ -245,7 +353,7 @@ def commit_exact(
         content = splice_hunks(old, found, keep, path)
         blob = git_text(repo, "hash-object", "-w", "--no-filters", "--stdin", data=content)
         entries.append((mode, blob, path))
-    for path in deletes:
+    for path in () if replay else deletes:
         if tree_entry_mode(repo, expected, path) is None:
             raise CommitError(f"{path} 不在 {expected} 里，无从删除")
         if os.path.lexists(repo / path):
@@ -264,9 +372,11 @@ def commit_exact(
         if changed != sorted(paths):
             raise CommitError(f"私有 index 的改动是 {changed}，不是请求的 {sorted(paths)}（内容与 HEAD 相同的路径不能提交）")
         tree = git_text(repo, "write-tree", index=index)
+        if snapshot_tree and tree != snapshot_tree:
+            raise CommitError(f"重放得到的 tree {tree} 不等于快照提交的 tree {snapshot_tree}，没有提交")
         if git_text(repo, "rev-parse", "--verify", "HEAD") != expected:
             raise CommitError(f"HEAD 在准备期间离开了 {expected}，没有提交")
-        git(repo, "commit", "-q", "-F", str(message_file.resolve()), index=index)
+        git(repo, "commit", "-q", "-F", "-", data=message, index=index)
     finally:
         index.unlink(missing_ok=True)
     head = git_text(repo, "rev-parse", "--verify", "HEAD")
@@ -315,6 +425,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="commit PATH, which --file or --file-from also names, as an executable file (mode 100755)",
     )
     parser.add_argument(
+        "--from-commit",
+        nargs=2,
+        metavar=("SNAPSHOT", "COMMIT"),
+        help="replay COMMIT of the snapshot repository SNAPSHOT: its paths, modes and blobs, and its message "
+        "unless --message-file is given",
+    )
+    parser.add_argument(
         "--hunks",
         action="append",
         nargs="+",
@@ -331,8 +448,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     args = parser.parse_args(argv)
     if args.list_hunks:
-        if args.file or args.file_from or args.delete or args.hunks or args.executable:
+        if args.file or args.file_from or args.delete or args.hunks or args.executable or args.from_commit:
             parser.error("--list-hunks 只能单独使用")
+        return args
+    if args.from_commit:
+        if args.file or args.file_from or args.delete or args.hunks or args.executable:
+            parser.error("--from-commit 不和 --file、--file-from、--hunks、--delete、--executable 同用")
+        if not args.expected_head:
+            parser.error("提交需要 --expected-head")
         return args
     if not (args.expected_head and args.message_file):
         parser.error("提交需要 --expected-head 和 --message-file")
@@ -358,6 +481,7 @@ def main(argv: list[str] | None = None) -> int:
     files += [(Path(path).as_posix(), Path(source), sha) for path, source, sha in args.file_from]
     hunks = [(Path(values[0]).as_posix(), values[1], [int(index) for index in values[2:]]) for values in args.hunks]
     deletes = [Path(path).as_posix() for path in args.delete]
+    replay = (Path(args.from_commit[0]).resolve(), args.from_commit[1]) if args.from_commit else None
     try:
         head = commit_exact(
             repo=repo,
@@ -367,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
             deletes=deletes,
             hunks=hunks,
             executables=[Path(path).as_posix() for path in args.executable],
+            replay=replay,
         )
     except IndexNotRefreshed as exc:
         print(git_text(repo, "show", "--stat", "--format=%H%n%an <%ae> | %s", exc.head))
@@ -375,9 +500,18 @@ def main(argv: list[str] | None = None) -> int:
     except (CommitError, OSError) as exc:
         print(f"commit_exact_files: {exc}", file=sys.stderr)
         return 1
-    paths = [path for path, _, _ in files] + [path for path, _, _ in hunks] + deletes
+    committed = path_list(git(repo, "diff-tree", "-r", "-z", "--name-only", "--no-renames", "--no-commit-id", head).stdout)
     print(git_text(repo, "show", "--stat", "--format=%H%n%an <%ae> | %s", head))
-    status = git(repo, "status", "--porcelain=v1", "--", *paths).stdout.decode("utf-8").rstrip()
+    try:
+        synced, left = sync_work_tree(repo, head, committed if replay else [Path(path).as_posix() for path, _, _ in args.file_from])
+    except (CommitError, OSError) as exc:
+        print(f"commit_exact_files: 提交 {head} 已生成，但同步工作树失败：{exc}", file=sys.stderr)
+        return 3
+    for path in synced:
+        print(f"工作树已换成新提交的版本：{path}")
+    for path in left:
+        print(f"工作树里的 {path} 带着别的改动，没有动它；按它现在的样子提交会回退本次提交，先把本次改动补进去")
+    status = git(repo, "status", "--porcelain=v1", "--", *committed).stdout.decode("utf-8").rstrip()
     print("committed paths status:", status or "clean")
     return 0
 

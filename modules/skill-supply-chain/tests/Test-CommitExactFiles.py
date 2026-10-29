@@ -72,20 +72,20 @@ class CommitExactFilesTests(unittest.TestCase):
     def write(self, name: str, data: bytes) -> None:
         (self.repo / name).write_bytes(data)
 
-    def run_helper(self, *args: str) -> tuple[int, str]:
-        stderr = io.StringIO()
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+    def run_helper(self, *args: str, message: bool = True) -> tuple[int, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             code = HELPER.main(
                 [
                     "--repo",
                     str(self.repo),
                     "--expected-head",
                     self.base,
-                    "--message-file",
-                    str(self.message),
+                    *(["--message-file", str(self.message)] if message else []),
                     *args,
                 ]
             )
+        self.stdout = stdout.getvalue()
         return code, stderr.getvalue()
 
     def test_commits_only_named_path_and_keeps_other_sessions_work(self) -> None:
@@ -142,6 +142,99 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(code, 0, error)
         self.assertEqual(self.show("HEAD:a.txt"), b"a-transaction\n")
         self.assertEqual(self.status(), [" M a.txt"])
+        self.assertIn("工作树里的 a.txt 带着别的改动", self.stdout)
+
+    def test_file_from_brings_untouched_work_tree_copies_to_the_commit(self) -> None:
+        prepared = self.temp / "prepared"
+        prepared.mkdir()
+        (prepared / "a.txt").write_bytes(b"a2\n")
+        (prepared / "new.txt").write_bytes(b"n1\n")
+        code, error = self.run_helper(
+            "--file-from", "a.txt", str(prepared / "a.txt"), sha256(b"a2\n"),
+            "--file-from", "new.txt", str(prepared / "new.txt"), sha256(b"n1\n"),
+        )
+        self.assertEqual(code, 0, error)
+        self.assertEqual((self.repo / "a.txt").read_bytes(), b"a2\n")
+        self.assertEqual((self.repo / "new.txt").read_bytes(), b"n1\n")
+        self.assertEqual(self.status(), [])
+        self.assertIn("工作树已换成新提交的版本：a.txt", self.stdout)
+
+    def clone_snapshot(self) -> Path:
+        self.snapshot = self.temp / "snapshot"
+        config = {
+            "core.autocrlf": "false",
+            "core.hooksPath": self.hooks.as_posix(),
+            "user.name": "Test",
+            "user.email": "test@example.invalid",
+            "commit.gpgsign": "false",
+        }
+        options = [arg for key, value in config.items() for arg in ("-c", f"{key}={value}")]
+        subprocess.run(["git", "clone", "-q", "--shared", *options, str(self.repo), str(self.snapshot)], check=True)
+        return self.snapshot
+
+    def snapshot_git(self, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(self.snapshot), *args], capture_output=True, check=True).stdout.decode("utf-8")
+
+    def snapshot_commit(
+        self,
+        changes: dict[str, bytes | None],
+        *,
+        message: tuple[str, ...] = ("snapshot change",),
+        executable: tuple[str, ...] = (),
+    ) -> str:
+        for name, data in changes.items():
+            target = self.snapshot / name
+            if data is None:
+                target.unlink()
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+        self.snapshot_git("add", "-A")
+        for name in executable:
+            self.snapshot_git("update-index", "--chmod=+x", "--", name)
+        self.snapshot_git("commit", "-q", *[arg for paragraph in message for arg in ("-m", paragraph)])
+        return self.snapshot_git("rev-parse", "HEAD").strip()
+
+    def test_from_commit_replays_snapshot_commit_and_its_message(self) -> None:
+        snapshot = self.clone_snapshot()
+        replayed = self.snapshot_commit(
+            {"a.txt": b"a2\n", "b.txt": None, "dir/new.txt": b"n1\n", "tool.sh": b"#!/bin/sh\n"},
+            message=("snapshot change", "body line"),
+            executable=("tool.sh",),
+        )
+        self.write("a.txt", b"a1\nother session\n")
+        self.write("c.txt", b"c2\n")
+        code, error = self.run_helper("--from-commit", str(snapshot), replayed, message=False)
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.git("rev-parse", "HEAD^").strip(), self.base)
+        self.assertEqual(self.git("rev-parse", "HEAD^{tree}"), self.snapshot_git("rev-parse", f"{replayed}^{{tree}}"))
+        self.assertEqual(self.git("log", "-1", "--format=%B").strip(), "snapshot change\n\nbody line")
+        self.assertEqual(self.git("ls-tree", "HEAD", "tool.sh").split()[0], "100755")
+        self.assertFalse((self.repo / "b.txt").exists())
+        self.assertEqual((self.repo / "dir" / "new.txt").read_bytes(), b"n1\n")
+        self.assertEqual(self.status(), [" M a.txt", " M c.txt"])
+        self.assertIn("工作树里的 a.txt 带着别的改动", self.stdout)
+
+    def test_from_commit_refuses_a_path_committed_since_the_snapshot(self) -> None:
+        snapshot = self.clone_snapshot()
+        replayed = self.snapshot_commit({"a.txt": b"a-snapshot\n", "b.txt": b"b-snapshot\n"})
+        self.commit_base("a.txt", b"a-other\n")
+        code, error = self.run_helper("--from-commit", str(snapshot), replayed)
+        self.assertEqual(code, 1)
+        self.assertIn("重放会覆盖之后的提交：['a.txt']", error)
+        self.assertEqual(self.head(), self.base)
+        self.assertEqual(self.status(), [])
+
+    def test_from_commit_replays_disjoint_paths_onto_a_moved_head(self) -> None:
+        snapshot = self.clone_snapshot()
+        replayed = self.snapshot_commit({"a.txt": b"a2\n"})
+        self.commit_base("b.txt", b"b2\n")
+        code, error = self.run_helper("--from-commit", str(snapshot), replayed)
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.git("rev-parse", "HEAD^").strip(), self.base)
+        self.assertEqual((self.show("HEAD:a.txt"), self.show("HEAD:b.txt")), (b"a2\n", b"b2\n"))
+        self.assertEqual(self.git("log", "-1", "--format=%B").strip(), "exact commit")
+        self.assertEqual(self.status(), [])
 
     def test_executable_commits_only_named_new_file_as_100755(self) -> None:
         self.write("hook", b"#!/bin/sh\n")
