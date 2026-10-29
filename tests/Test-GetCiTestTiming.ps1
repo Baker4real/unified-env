@@ -4,7 +4,7 @@ param([string]$FixtureRoot = 'D:/agents/run-evidence/ci-test-timing-fixtures')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# scripts\Get-CiTestTiming.ps1 对替身 gh 运行。替身只实现 run view <id> --json … 与
+# scripts\Get-CiTestTiming.ps1 对替身 gh 运行。替身只实现 run view <id> --json …（像 gh 一样只输出要的字段）与
 # api --allow-escape-sequences repos/{owner}/{repo}/actions/jobs/<id>/logs，前 failuresLeft 次调用报 EOF，
 # 并记下每次调用的路由。夹具目录复用，各场景只覆盖写单个文件，不递归删除。
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -25,7 +25,7 @@ function Assert-True([bool]$Condition, [string]$Message) {
 
 [IO.File]::WriteAllText($fakeGhPath, @'
 $ErrorActionPreference = 'Stop'
-# 替身 gh：run view 9001 --json … 输出 runJson；api --allow-escape-sequences repos/{owner}/{repo}/actions/jobs/<id>/logs
+# 替身 gh：run view 9001 --json <字段> 输出 runJson 里这些字段；api --allow-escape-sequences repos/{owner}/{repo}/actions/jobs/<id>/logs
 # 原样输出 logs 里该 job 的日志文件字节。
 $utf8 = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
@@ -45,7 +45,10 @@ if ($failing) {
     exit 1
 }
 if ($route -ceq 'jobs') {
-    [Console]::Out.WriteLine($state['runJson'])
+    $run = $state['runJson'] | ConvertFrom-Json -AsHashtable -DateKind String
+    $selected = [ordered]@{}
+    foreach ($field in ([string]$args[4]).Split(',')) { if ($run.ContainsKey($field)) { $selected[$field] = $run[$field] } }
+    [Console]::Out.WriteLine(($selected | ConvertTo-Json -Depth 6 -Compress))
     exit 0
 }
 $jobId = if ($route.StartsWith('log:')) { $route.Substring(4) } else { '' }
@@ -71,10 +74,10 @@ function Write-JobLog([long]$JobId, [string[]]$Lines) {
     return $path
 }
 
-function New-Job([long]$Id, [string]$Name, [string]$Conclusion, [string]$Completed) {
+function New-Job([long]$Id, [string]$Name, [string]$Conclusion, [string]$Completed, [string]$Started = '00:00') {
     return [ordered]@{
         databaseId = $Id; name = $Name; status = 'completed'; conclusion = $Conclusion
-        startedAt = '2026-10-21T15:00:00Z'; completedAt = "2026-10-21T15:$($Completed)Z"; url = "$runUrl/job/$Id"
+        startedAt = "2026-10-21T15:$($Started)Z"; completedAt = "2026-10-21T15:$($Completed)Z"; url = "$runUrl/job/$Id"
     }
 }
 
@@ -134,21 +137,35 @@ $logs = [ordered]@{
         (New-LogLine '01:35.5000000' 'zeta: still writing')
     )
 }
-$skippedJob = New-Job 106 'host-safety diagnostics' 'skipped' '00:00'
+# run 在 14:59:30 开始，Python and Node fixtures 最晚起跑。被跳过的 job 时间晚于其余 job，算进去的话墙钟和起跑延迟都会变。
+$skippedJob = New-Job 106 'host-safety diagnostics' 'skipped' '20:00' '20:00'
 $runJson = ([ordered]@{
-    databaseId = 9001; name = 'CI'; displayTitle = 'fix: demo'; status = 'completed'; conclusion = 'failure'; url = $runUrl
+    databaseId = 9001; name = 'CI'; displayTitle = 'fix: demo'; status = 'completed'; conclusion = 'failure'
+    startedAt = '2026-10-21T14:59:30Z'; url = $runUrl
     jobs = @(
         (New-Job 101 'lint' 'success' '01:05')
         (New-Job 102 'host-safety fixtures (Alpha)' 'success' '10:00')
         (New-Job 103 'shared fixtures' 'failure' '01:40')
-        (New-Job 104 'Python and Node fixtures' 'success' '03:00')
+        (New-Job 104 'Python and Node fixtures' 'success' '03:00' '00:12')
         (New-Job 105 'host-safety fixtures (Zeta)' 'cancelled' '02:00')
         $skippedJob
     )
 } | ConvertTo-Json -Depth 6 -Compress)
+# 没结束的 run：gh 给没结束的 job 的 completedAt 是零值时间。
+$inProgressRunJson = ([ordered]@{
+    databaseId = 9001; name = 'CI'; displayTitle = 'fix: demo'; status = 'in_progress'; conclusion = ''
+    startedAt = '2026-10-21T14:59:30Z'; url = $runUrl
+    jobs = @(
+        (New-Job 101 'lint' 'success' '01:05')
+        [ordered]@{
+            databaseId = 102; name = 'host-safety fixtures (Alpha)'; status = 'in_progress'; conclusion = ''
+            startedAt = '2026-10-21T15:00:00Z'; completedAt = '0001-01-01T00:00:00Z'; url = "$runUrl/job/102"
+        }
+    )
+} | ConvertTo-Json -Depth 6 -Compress)
 
-function Set-FakeState([int]$FailuresLeft = 0) {
-    $state = [ordered]@{ runJson = $runJson; logs = $logs; failuresLeft = $FailuresLeft; calls = @() }
+function Set-FakeState([int]$FailuresLeft = 0, [string]$Json = $runJson) {
+    $state = [ordered]@{ runJson = $Json; logs = $logs; failuresLeft = $FailuresLeft; calls = @() }
     [IO.File]::WriteAllText($statePath, ($state | ConvertTo-Json -Depth 4), $utf8)
 }
 
@@ -178,6 +195,7 @@ function Invoke-Timing([string]$Seams) {
 
 $expected = @(
     "run 9001 CI: fix: demo [completed/failure] $runUrl"
+    'wall 10.5 min from run start to last job end, max job start delay 42s (Python and Node fixtures)'
     '== lint (success) job 65s, no Running lines in log'
     '== host-safety fixtures (Alpha) (success) job 600s, tests: 2 in 559.5s'
     '    279.5s  Test-Alpha.ps1'
@@ -189,7 +207,7 @@ $expected = @(
     '    280.0s  Test-Beta.ps1'
     '== shared fixtures (failure) job 100s, tests: 1 in 30.7s'
     '     30.7s  Test-Gamma.ps1'
-    '== Python and Node fixtures (success) job 180s, tests: 2 in 144.0s'
+    '== Python and Node fixtures (success) job 168s, tests: 2 in 144.0s'
     '     45.0s  tests/Test-Delta.cjs'
     '     99.0s  tests/Test-Epsilon.py'
     '== host-safety fixtures (Zeta) (cancelled) job 120s, tests: 1 in 90.5s'
@@ -208,6 +226,17 @@ $result = Invoke-Timing $fakeSeam
 Assert-True ($result.exitCode -eq 0) ('耗时报告应退出 0，实际 {0}：{1}' -f $result.exitCode, $result.stderr)
 Assert-True (($result.stdout -join "`n") -ceq ($expected -join "`n")) ("耗时报告不符合预期：`n" + ($result.stdout -join "`n"))
 Assert-True ((@(Get-FakeCall) -join ',') -ceq $expectedCalls) ('调用顺序应是 {0}：{1}' -f $expectedCalls, (@(Get-FakeCall) -join ','))
+
+# run 没结束：没有墙钟行，没结束的 job 不读日志。
+Set-FakeState -Json $inProgressRunJson
+$result = Invoke-Timing $fakeSeam
+$expectedInProgress = @(
+    "run 9001 CI: fix: demo [in_progress/] $runUrl"
+    '== lint (success) job 65s, no Running lines in log'
+    '== host-safety fixtures (Alpha) (in_progress) log not read'
+)
+Assert-True ($result.exitCode -eq 0 -and ($result.stdout -join "`n") -ceq ($expectedInProgress -join "`n")) ("run 没结束时的报告不符合预期：{0} {1}`n{2}" -f $result.exitCode, $result.stderr, ($result.stdout -join "`n"))
+Assert-True ((@(Get-FakeCall) -join ',') -ceq 'jobs,log:101') ('run 没结束时的调用顺序不对：{0}' -f (@(Get-FakeCall) -join ','))
 
 # gh 一直失败：不输出报告，stderr 说明失败次数，退出 1。
 Set-FakeState -FailuresLeft 99
