@@ -143,6 +143,27 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(self.show("HEAD:a.txt"), b"a-transaction\n")
         self.assertEqual(self.status(), [" M a.txt"])
 
+    def test_executable_commits_only_named_new_file_as_100755(self) -> None:
+        self.write("hook", b"#!/bin/sh\n")
+        self.write("notes.txt", b"n1\n")
+        self.write("a.txt", b"a2\n")
+        code, error = self.run_helper(
+            "--file", "hook", sha256(b"#!/bin/sh\n"),
+            "--file", "notes.txt", sha256(b"n1\n"),
+            "--file", "a.txt", sha256(b"a2\n"),
+            "--executable", "hook",
+        )
+        self.assertEqual(code, 0, error)
+        modes = {line.split()[3]: line.split()[0] for line in self.git("ls-tree", "HEAD").splitlines()}
+        self.assertEqual((modes["hook"], modes["notes.txt"], modes["a.txt"]), ("100755", "100644", "100644"))
+
+    def test_executable_must_name_a_committed_file(self) -> None:
+        self.write("a.txt", b"a2\n")
+        code, error = self.run_helper("--file", "a.txt", sha256(b"a2\n"), "--executable", "b.txt")
+        self.assertEqual(code, 1)
+        self.assertIn("--executable 只能指", error)
+        self.assertEqual(self.head(), self.base)
+
     def test_delete_commits_only_removal_of_absent_file(self) -> None:
         code, error = self.run_helper("--delete", "b.txt")
         self.assertEqual(code, 1)

@@ -33,6 +33,10 @@ transaction's ledger can be committed the same way from its
 since; the transaction manifest's ``source_state_after`` records that
 snapshot's path and SHA-256.
 
+A committed path keeps its mode in HEAD, and a new one is a regular file
+(100644); ``--executable PATH`` commits PATH, which ``--file`` or
+``--file-from`` must also name, as 100755 instead (a new hook script, say).
+
 A pre-commit hook that checks the whole work tree still sees other sessions'
 unstaged edits and untracked files.  The knowledge base's hook runs
 ``scripts/check.py --staged``, which requires the work tree to equal the index,
@@ -200,13 +204,17 @@ def commit_exact(
     files: list[tuple[str, Path, str]],
     deletes: list[str],
     hunks: list[tuple[str, str, list[int]]] = (),
+    executables: list[str] = (),
 ) -> str:
-    """Commit ``files`` (path, content source, reviewed SHA-256), ``hunks`` (path, reviewed work-tree SHA-256, hunk numbers) and ``deletes`` on ``expected_head``."""
+    """Commit ``files`` (path, content source, reviewed SHA-256), ``hunks`` (path, reviewed work-tree SHA-256, hunk numbers) and ``deletes`` on ``expected_head``; ``executables`` names files to commit as 100755."""
 
     paths = [path for path, _, _ in files] + [path for path, _, _ in hunks] + deletes
     duplicates = sorted({path for path in paths if paths.count(path) > 1})
     if duplicates:
         raise CommitError(f"同一路径出现多次：{duplicates}")
+    stray_executables = sorted(set(executables) - {path for path, _, _ in files})
+    if stray_executables:
+        raise CommitError(f"--executable 只能指 --file 或 --file-from 提交的路径：{stray_executables}")
     expected = git_text(repo, "rev-parse", "--verify", f"{expected_head}^{{commit}}")
     if git_text(repo, "rev-parse", "--verify", "HEAD") != expected:
         raise CommitError(f"HEAD 已不是 {expected}，重新核对后再提交")
@@ -221,6 +229,8 @@ def commit_exact(
         mode = tree_entry_mode(repo, expected, path) or "100644"
         if mode not in REGULAR_FILE_MODES:
             raise CommitError(f"{path}：不支持 mode {mode}")
+        if path in executables:
+            mode = "100755"
         blob = git_text(repo, "hash-object", "-w", f"--path={path}", "--stdin", data=data)
         entries.append((mode, blob, path))
     for path, reviewed, keep in hunks:
@@ -298,6 +308,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="commit PATH's removal; PATH must be in HEAD and absent from the work tree",
     )
     parser.add_argument(
+        "--executable",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="commit PATH, which --file or --file-from also names, as an executable file (mode 100755)",
+    )
+    parser.add_argument(
         "--hunks",
         action="append",
         nargs="+",
@@ -314,7 +331,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     args = parser.parse_args(argv)
     if args.list_hunks:
-        if args.file or args.file_from or args.delete or args.hunks:
+        if args.file or args.file_from or args.delete or args.hunks or args.executable:
             parser.error("--list-hunks 只能单独使用")
         return args
     if not (args.expected_head and args.message_file):
@@ -349,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
             files=files,
             deletes=deletes,
             hunks=hunks,
+            executables=[Path(path).as_posix() for path in args.executable],
         )
     except IndexNotRefreshed as exc:
         print(git_text(repo, "show", "--stat", "--format=%H%n%an <%ae> | %s", exc.head))
