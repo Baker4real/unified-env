@@ -741,7 +741,9 @@
           "tests/Test-RunPowerShellTests.ps1",
           "tests/Test-WaitCiRun.ps1"
         ],
-        "python": [],
+        "python": [
+          "tests/Test-CiFixtureShards.py"
+        ],
         "node": [
           "tests/Test-ModuleBoundaries.cjs",
           "tests/Test-WarnRedMainCi.cjs"
