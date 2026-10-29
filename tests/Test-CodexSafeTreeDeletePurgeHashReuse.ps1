@@ -523,15 +523,13 @@ try {
         -PlanPath ([string]$reusePlan.planPath) `
         -ApprovedPlanSha256 ([string]$reusePlan.planSha256) `
         -PolicyPath $scale10000PolicyPath `
-        -EvidenceRoot $scale10000EvidenceRoot `
-        -DisableApplyHashReuseForTest
+        -EvidenceRoot $scale10000EvidenceRoot
     Write-Stage -Name 'scale-apply-baseline'
     $baselineApply = Invoke-CodexSafeTreeDeleteQuarantine `
         -PlanPath ([string]$baselinePlan.planPath) `
         -ApprovedPlanSha256 ([string]$baselinePlan.planSha256) `
         -PolicyPath $scale10000PolicyPath `
-        -EvidenceRoot $scale10000EvidenceRoot `
-        -DisableApplyHashReuseForTest
+        -EvidenceRoot $scale10000EvidenceRoot
     Assert-True ($reuseApply.quarantined -eq $true) '10k 文件 Apply（reuse 树）必须成功'
     Assert-True ($baselineApply.quarantined -eq $true) '10k 文件 Apply（baseline 树）必须成功'
     Write-Stage -Name 'scale-purge-reuse'
@@ -557,7 +555,7 @@ try {
         artifactType = 'env-governance.codex-safe-tree-delete-issue33-scale-10000'
         fileCount = 10000
         bytesPerFile = 4096
-        method = 'two sibling 10k trees; Purge with SessionHashCache vs -DisablePurgeHashReuseForTest; Apply setup used -DisableApplyHashReuseForTest'
+        method = 'two sibling 10k trees; Purge with SessionHashCache vs -DisablePurgeHashReuseForTest; Apply setup used the default hash-reuse path'
         reuseElapsedMs = [long]$reusePurge.metrics.elapsedMs
         baselineElapsedMs = [long]$baselinePurge.metrics.elapsedMs
         reuseBytesHashed = [long]$reusePurge.metrics.bytesHashed

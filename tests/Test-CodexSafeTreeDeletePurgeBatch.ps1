@@ -371,22 +371,19 @@ try {
         -PlanPath ([string]$batchPlan.planPath) `
         -ApprovedPlanSha256 ([string]$batchPlan.planSha256) `
         -PolicyPath $scalePolicyPath `
-        -EvidenceRoot $scaleEvidenceRoot `
-        -DisableApplyHashReuseForTest
+        -EvidenceRoot $scaleEvidenceRoot
     Write-Stage -Name 'scale-apply-phase1'
     $scalePhase1Apply = Invoke-CodexSafeTreeDeleteQuarantine `
         -PlanPath ([string]$phase1ScalePlan.planPath) `
         -ApprovedPlanSha256 ([string]$phase1ScalePlan.planSha256) `
         -PolicyPath $scalePolicyPath `
-        -EvidenceRoot $scaleEvidenceRoot `
-        -DisableApplyHashReuseForTest
+        -EvidenceRoot $scaleEvidenceRoot
     Write-Stage -Name 'scale-apply-baseline'
     $scaleBaselineApply = Invoke-CodexSafeTreeDeleteQuarantine `
         -PlanPath ([string]$baselinePlan.planPath) `
         -ApprovedPlanSha256 ([string]$baselinePlan.planSha256) `
         -PolicyPath $scalePolicyPath `
-        -EvidenceRoot $scaleEvidenceRoot `
-        -DisableApplyHashReuseForTest
+        -EvidenceRoot $scaleEvidenceRoot
     Assert-True ($scaleBatchApply.quarantined -eq $true) '10k 批量树 Apply 必须成功'
     Assert-True ($scalePhase1Apply.quarantined -eq $true) '10k Phase1 树 Apply 必须成功'
     Assert-True ($scaleBaselineApply.quarantined -eq $true) '10k baseline 树 Apply 必须成功'
@@ -426,7 +423,7 @@ try {
         artifactType = 'env-governance.codex-safe-tree-delete-issue37-scale-10000'
         fileCount = 10000
         bytesPerFile = 4096
-        method = 'three sibling 10k trees x 4KB; Apply used -DisableApplyHashReuseForTest; Purge batch (default) vs Phase1 (-DisablePurgeBatchForTest) vs baseline (-DisablePurgeHashReuseForTest -DisablePurgeBatchForTest). Not the #36 1.526 GiB pipeline.'
+        method = 'three sibling 10k trees x 4KB; Apply setup used the default hash-reuse path; Purge batch (default) vs Phase1 (-DisablePurgeBatchForTest) vs baseline (-DisablePurgeHashReuseForTest -DisablePurgeBatchForTest). Not the #36 1.526 GiB pipeline.'
         batchElapsedMs = [long]$scaleBatchPurge.metrics.elapsedMs
         phase1ElapsedMs = [long]$scalePhase1Purge.metrics.elapsedMs
         baselineElapsedMs = [long]$scaleBaselinePurge.metrics.elapsedMs
