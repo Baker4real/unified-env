@@ -134,6 +134,7 @@ function buildCommands(moduleId = null, profileName = 'fixture', onlyPattern = n
 
 function run(command, powershellExecutable) {
   console.log(`Running ${command.label}`);
+  const startedAt = process.hrtime.bigint();
   const result = spawnSync(powershellExecutable, command.arguments, {
     cwd: PROJECT_ROOT,
     stdio: 'inherit',
@@ -141,9 +142,11 @@ function run(command, powershellExecutable) {
   });
 
   if (result.error) throw result.error;
+  const seconds = (Number(process.hrtime.bigint() - startedAt) / 1e9).toFixed(1);
   if (result.status !== 0) {
-    throw new Error(`${command.label} failed with exit code ${result.status ?? 'unknown'}`);
+    throw new Error(`${command.label} failed with exit code ${result.status ?? 'unknown'} after ${seconds}s`);
   }
+  console.log(`Passed ${command.label} in ${seconds}s`);
 }
 
 function parseArguments(args) {
