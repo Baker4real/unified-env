@@ -63,7 +63,7 @@ jobs:
   fixtures:
     name: ${{ matrix.name || format('{0} fixtures', matrix.module) }}
     runs-on: windows-latest
-    # Per-suite timings put the slowest shard near 18 minutes on the slowest runners seen; 30 stops a hung suite early.
+    # Per-suite timings put the slowest shard near 9 minutes on the slowest runners seen; 30 stops a hung suite early.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -75,10 +75,11 @@ jobs:
             profile: ci
           - module: skill-supply-chain
             profile: fixture
-          # The 10k-file scale suites take most of the host-safety fixture time, so each runs in a heavy shard
-          # (Phase1 and Phase3 share one) and the rest shard skips exactly those suites. Edit a heavy shard's only
-          # pattern and the rest shard's skip pattern together. A heavy pattern that matches no suite fails its job,
-          # so renaming a scale suite cannot drop it silently.
+          # The 10k-file scale suites take most of the host-safety fixture time, so each runs in its own heavy shard.
+          # The other suites split by name into two rest shards: rest A-M takes Test-CodexSafeTreeDelete.ps1 and
+          # Test-CodexSafeTreeDelete[A-M]*.ps1 except HashReuse, and rest skips the heavy suites and those names, so a
+          # new suite lands in exactly one shard. Edit a heavy shard's only pattern and both rest patterns together.
+          # A heavy pattern that matches no suite fails its job, so renaming a scale suite cannot drop it silently.
           - module: host-safety
             profile: fixture
             name: host-safety fixtures (PurgeBatch)
@@ -93,12 +94,21 @@ jobs:
             only: '^Test-CodexSafeTreeDeleteHashReuse\.ps1$'
           - module: host-safety
             profile: fixture
-            name: host-safety fixtures (Phase1+Phase3)
-            only: '^Test-CodexSafeTreeDeletePhase[13]Integration\.ps1$'
+            name: host-safety fixtures (Phase1)
+            only: '^Test-CodexSafeTreeDeletePhase1Integration\.ps1$'
+          - module: host-safety
+            profile: fixture
+            name: host-safety fixtures (Phase3)
+            only: '^Test-CodexSafeTreeDeletePhase3Integration\.ps1$'
+          - module: host-safety
+            profile: fixture
+            name: host-safety fixtures (rest A-M)
+            only: '^Test-CodexSafeTreeDelete([A-M]\w*)?\.ps1$'
+            skip: '^Test-CodexSafeTreeDeleteHashReuse\.ps1$'
           - module: host-safety
             profile: fixture
             name: host-safety fixtures (rest)
-            skip: '^Test-CodexSafeTreeDelete(PurgeBatch|PurgeHashReuse|HashReuse|Phase1Integration|Phase3Integration)\.ps1$'
+            skip: '^Test-CodexSafeTreeDelete(PurgeBatch|PurgeHashReuse|Phase1Integration|Phase3Integration|[A-M]\w*)?\.ps1$'
           # Host diagnostics finish in minutes; a separate job keeps their feedback off the long safe-delete shards.
           - module: host-safety
             profile: diagnostics
