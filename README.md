@@ -118,6 +118,7 @@ node .\tests\Test-GitHubDefaultBranchSkillOverlay.cjs
 - 不在 dirty repo 中更新依赖、锁文件或环境目录。
 - 输出和证据必须留在 D 盘允许路径。
 - 本仓库在 GitHub 上公开：`.githooks/pre-commit` 在提交前扫描暂存改动里的 Tailscale/RFC 1918 地址和个人邮箱，命中即拒绝提交（规则与 `managed/claude-hooks/claude-public-push-guard.mjs` 同源）；新克隆先运行 `git config core.hooksPath .githooks`。
+- 推送更新 main 时，`.githooks/pre-push` 用 gh 查 main 上最近一次跑完的 CI，没通过就在推送输出里提醒并给出 run 链接；只提醒、不拦推送，gh 不可用、未登录或 10 秒内没返回时说明没查到。
 
 ## Git 分支策略
 

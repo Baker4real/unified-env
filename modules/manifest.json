@@ -697,6 +697,7 @@
         ".gitattributes",
         ".githooks/commit-msg",
         ".githooks/pre-commit",
+        ".githooks/pre-push",
         ".gitignore",
         ".node-version",
         ".okf-frontmatter.json",
@@ -715,6 +716,7 @@
         "scripts/Run-ManifestTests.cjs",
         "scripts/Run-PowerShellTests.cjs",
         "scripts/Validate-ModuleBoundaries.cjs",
+        "scripts/Warn-RedMainCi.cjs",
         "scripts/lib/GitHubCli.ps1"
       ],
       "prefixes": [
@@ -735,7 +737,8 @@
         ],
         "python": [],
         "node": [
-          "tests/Test-ModuleBoundaries.cjs"
+          "tests/Test-ModuleBoundaries.cjs",
+          "tests/Test-WarnRedMainCi.cjs"
         ]
       }
     }

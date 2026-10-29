@@ -1,0 +1,5 @@
+#!/bin/sh
+# 推送更新 main 时查 main 上最近一次跑完的 CI，没通过就在推送输出里提醒并给出 run 链接；只提醒，不拦推送。
+# 新克隆先运行 git config core.hooksPath .githooks。
+node "$(dirname "$0")/../scripts/Warn-RedMainCi.cjs" "$@"
+exit 0
