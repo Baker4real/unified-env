@@ -1,5 +1,5 @@
-# gh 调用的共用实现，供 scripts\Publish-GitHubIssueComment.ps1、scripts\Invoke-GhRead.ps1 和
-# scripts\Get-CiFailureSummary.ps1 点源。gh 偶发 EOF 时的处理规则见 docs/agents/issue-tracker.md「gh 报 EOF 时」。
+# gh 调用的共用实现，供 scripts\Publish-GitHubIssueComment.ps1、scripts\Invoke-GhRead.ps1、
+# scripts\Get-CiFailureSummary.ps1 和 scripts\Get-CiTestTiming.ps1 点源。gh 偶发 EOF 时的处理规则见 docs/agents/issue-tracker.md「gh 报 EOF 时」。
 # 调用方先把 [Console]::OutputEncoding 设成 UTF-8，gh 输出里的中文才能正确解码。
 
 # 运行一次 gh，不重试。$GhCommand 是可执行文件加前置参数，生产调用是 @('gh')。

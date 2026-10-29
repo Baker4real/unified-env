@@ -709,6 +709,7 @@
         "modules/README.md",
         "modules/manifest.json",
         "scripts/Get-CiFailureSummary.ps1",
+        "scripts/Get-CiTestTiming.ps1",
         "scripts/Invoke-GhRead.ps1",
         "scripts/Invoke-PowerShellArrayUnwrapLint.ps1",
         "scripts/Invoke-PowerShellParameterCaseLint.ps1",
@@ -728,6 +729,7 @@
       "fixture": {
         "powershell": [
           "tests/Test-GetCiFailureSummary.ps1",
+          "tests/Test-GetCiTestTiming.ps1",
           "tests/Test-InvokeGhRead.ps1",
           "tests/Test-PowerShellArrayUnwrapLint.ps1",
           "tests/Test-PowerShellParameterCaseLint.ps1",
