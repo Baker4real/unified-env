@@ -35,6 +35,13 @@ $scale1000Target = Join-Path $scale1000Root 'candidate'
 $scale10000ReuseTarget = Join-Path $scale10000Root 'candidate-reuse'
 $scale10000BaselineTarget = Join-Path $scale10000Root 'candidate-baseline'
 
+# 每段万文件操作（建树、Plan、Apply、清理，含 -DisableApplyHashReuseForTest 对照组）前打一行 STAGE，
+# scripts/Get-CiTestTiming.ps1 按这些行把 CI 日志里本测试的耗时切成段。
+function Write-Stage {
+    param([Parameter(Mandatory)][string]$Name)
+    Write-Output ("STAGE {0} utc={1}" -f $Name, [datetimeoffset]::UtcNow.ToString('o'))
+}
+
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
     if (-not $Condition) { throw $Message }
@@ -168,6 +175,7 @@ function New-ScaleTree {
     }
 }
 
+Write-Stage -Name 'runtime-check'
 $runtimeEdition = [string]$PSVersionTable.PSEdition
 $runtimeMajor = [int]$PSVersionTable.PSVersion.Major
 $runtimeMinor = [int]$PSVersionTable.PSVersion.Minor
@@ -202,6 +210,7 @@ $scale1000Apply = $null
 $reuseApply = $null
 $baselineApply = $null
 try {
+    Write-Stage -Name 'fixture-cases'
     [void][IO.Directory]::CreateDirectory($nestedPath)
     [void][IO.Directory]::CreateDirectory($evidenceRoot)
     [IO.File]::WriteAllBytes($payloadPath, $payloadBytes)
@@ -454,6 +463,7 @@ try {
         return
     }
 
+    Write-Stage -Name 'scale-1000'
     [void][IO.Directory]::CreateDirectory($scale1000Root)
     $scale1000PolicyPath = Join-Path $scale1000Root 'policy.json'
     $scale1000EvidenceRoot = Join-Path $scale1000Root 'evidence'
@@ -491,6 +501,7 @@ try {
         [Text.UTF8Encoding]::new($false))
     Remove-TestTree -Path ([string]$scale1000Apply.quarantinePath)
 
+    Write-Stage -Name 'scale-create-reuse'
     [void][IO.Directory]::CreateDirectory($scale10000Root)
     $scale10000PolicyPath = Join-Path $scale10000Root 'policy.json'
     $scale10000EvidenceRoot = Join-Path $scale10000Root 'evidence'
@@ -501,22 +512,27 @@ try {
         -DeniedPath $scale10000EvidenceRoot `
         -Id 'apply-hash-reuse-scale-10000'
     $scale10000 = New-ScaleTree -Path $scale10000ReuseTarget -FileCount 10000 -BytesPerFile 4096
+    Write-Stage -Name 'scale-create-baseline'
     [void](New-ScaleTree -Path $scale10000BaselineTarget -FileCount 10000 -BytesPerFile 4096)
+    Write-Stage -Name 'scale-plan-reuse'
     $reusePlan = New-CodexSafeTreeDeletePlan `
         -TargetPath $scale10000ReuseTarget `
         -CapabilityRoot $scale10000Root `
         -PolicyPath $scale10000PolicyPath `
         -EvidenceRoot $scale10000EvidenceRoot
+    Write-Stage -Name 'scale-plan-baseline'
     $baselinePlan = New-CodexSafeTreeDeletePlan `
         -TargetPath $scale10000BaselineTarget `
         -CapabilityRoot $scale10000Root `
         -PolicyPath $scale10000PolicyPath `
         -EvidenceRoot $scale10000EvidenceRoot
+    Write-Stage -Name 'scale-apply-reuse'
     $reuseApply = Invoke-CodexSafeTreeDeleteQuarantine `
         -PlanPath ([string]$reusePlan.planPath) `
         -ApprovedPlanSha256 ([string]$reusePlan.planSha256) `
         -PolicyPath $scale10000PolicyPath `
         -EvidenceRoot $scale10000EvidenceRoot
+    Write-Stage -Name 'scale-apply-baseline'
     $baselineApply = Invoke-CodexSafeTreeDeleteQuarantine `
         -PlanPath ([string]$baselinePlan.planPath) `
         -ApprovedPlanSha256 ([string]$baselinePlan.planSha256) `
@@ -525,6 +541,7 @@ try {
         -DisableApplyHashReuseForTest
     Assert-True ($reuseApply.quarantined -eq $true) '10k 文件 Apply（复用）必须成功'
     Assert-True ($baselineApply.quarantined -eq $true) '10k 文件 Apply（无复用 baseline）必须成功'
+    Write-Stage -Name 'scale-record'
     $reuseMs = [double]$reuseApply.metrics.elapsedMs
     $baselineMs = [double]$baselineApply.metrics.elapsedMs
     $speedup = if ($reuseMs -gt 0) { $baselineMs / $reuseMs } else { 0 }
@@ -545,9 +562,12 @@ try {
         (Join-Path $evidenceHome 'scale-10000.json'),
         ($scale10000Record | ConvertTo-Json -Depth 6),
         [Text.UTF8Encoding]::new($false))
+    Write-Stage -Name 'scale-cleanup-reuse'
     Remove-TestTree -Path ([string]$reuseApply.quarantinePath)
+    Write-Stage -Name 'scale-cleanup-baseline'
     Remove-TestTree -Path ([string]$baselineApply.quarantinePath)
 
+    Write-Stage -Name 'done'
     [pscustomobject][ordered]@{
         ok = $true
         suite = 'CodexSafeTreeDeleteHashReuse'

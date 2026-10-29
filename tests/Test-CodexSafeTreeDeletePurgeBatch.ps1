@@ -29,6 +29,13 @@ $scaleBatchTarget = Join-Path $scaleRoot 'candidate-batch'
 $scalePhase1Target = Join-Path $scaleRoot 'candidate-phase1'
 $scaleBaselineTarget = Join-Path $scaleRoot 'candidate-baseline'
 
+# 每段万文件操作（建树、Plan、Apply、Purge，含 -Disable*ForTest 对照组）前打一行 STAGE，
+# scripts/Get-CiTestTiming.ps1 按这些行把 CI 日志里本测试的耗时切成段。
+function Write-Stage {
+    param([Parameter(Mandatory)][string]$Name)
+    Write-Output ("STAGE {0} utc={1}" -f $Name, [datetimeoffset]::UtcNow.ToString('o'))
+}
+
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
     if (-not $Condition) { throw $Message }
@@ -133,6 +140,7 @@ function New-ScaleTree {
     }
 }
 
+Write-Stage -Name 'runtime-check'
 $runtimeEdition = [string]$PSVersionTable.PSEdition
 $runtimeMajor = [int]$PSVersionTable.PSVersion.Major
 $runtimeMinor = [int]$PSVersionTable.PSVersion.Minor
@@ -167,6 +175,7 @@ $scaleBatchApply = $null
 $scalePhase1Apply = $null
 $scaleBaselineApply = $null
 try {
+    Write-Stage -Name 'fixture-cases'
     [void][IO.Directory]::CreateDirectory($nestedPath)
     [void][IO.Directory]::CreateDirectory($evidenceRoot)
     [IO.File]::WriteAllBytes($payloadPath, $payloadBytes)
@@ -324,6 +333,7 @@ try {
         'IdentityMismatch 拒绝不得删除 quarantine'
     Remove-TestTree -Path ([string]$securityApply.quarantinePath)
 
+    Write-Stage -Name 'scale-create-batch'
     [void][IO.Directory]::CreateDirectory($scaleRoot)
     $scalePolicyPath = Join-Path $scaleRoot 'policy.json'
     $scaleEvidenceRoot = Join-Path $scaleRoot 'evidence'
@@ -334,35 +344,43 @@ try {
         -DeniedPath $scaleEvidenceRoot `
         -Id 'purge-batch-scale-10000'
     [void](New-ScaleTree -Path $scaleBatchTarget -FileCount 10000 -BytesPerFile 4096)
+    Write-Stage -Name 'scale-create-phase1'
     [void](New-ScaleTree -Path $scalePhase1Target -FileCount 10000 -BytesPerFile 4096)
+    Write-Stage -Name 'scale-create-baseline'
     [void](New-ScaleTree -Path $scaleBaselineTarget -FileCount 10000 -BytesPerFile 4096)
+    Write-Stage -Name 'scale-plan-batch'
     $batchPlan = New-CodexSafeTreeDeletePlan `
         -TargetPath $scaleBatchTarget `
         -CapabilityRoot $scaleRoot `
         -PolicyPath $scalePolicyPath `
         -EvidenceRoot $scaleEvidenceRoot
+    Write-Stage -Name 'scale-plan-phase1'
     $phase1ScalePlan = New-CodexSafeTreeDeletePlan `
         -TargetPath $scalePhase1Target `
         -CapabilityRoot $scaleRoot `
         -PolicyPath $scalePolicyPath `
         -EvidenceRoot $scaleEvidenceRoot
+    Write-Stage -Name 'scale-plan-baseline'
     $baselinePlan = New-CodexSafeTreeDeletePlan `
         -TargetPath $scaleBaselineTarget `
         -CapabilityRoot $scaleRoot `
         -PolicyPath $scalePolicyPath `
         -EvidenceRoot $scaleEvidenceRoot
+    Write-Stage -Name 'scale-apply-batch'
     $scaleBatchApply = Invoke-CodexSafeTreeDeleteQuarantine `
         -PlanPath ([string]$batchPlan.planPath) `
         -ApprovedPlanSha256 ([string]$batchPlan.planSha256) `
         -PolicyPath $scalePolicyPath `
         -EvidenceRoot $scaleEvidenceRoot `
         -DisableApplyHashReuseForTest
+    Write-Stage -Name 'scale-apply-phase1'
     $scalePhase1Apply = Invoke-CodexSafeTreeDeleteQuarantine `
         -PlanPath ([string]$phase1ScalePlan.planPath) `
         -ApprovedPlanSha256 ([string]$phase1ScalePlan.planSha256) `
         -PolicyPath $scalePolicyPath `
         -EvidenceRoot $scaleEvidenceRoot `
         -DisableApplyHashReuseForTest
+    Write-Stage -Name 'scale-apply-baseline'
     $scaleBaselineApply = Invoke-CodexSafeTreeDeleteQuarantine `
         -PlanPath ([string]$baselinePlan.planPath) `
         -ApprovedPlanSha256 ([string]$baselinePlan.planSha256) `
@@ -373,17 +391,20 @@ try {
     Assert-True ($scalePhase1Apply.quarantined -eq $true) '10k Phase1 树 Apply 必须成功'
     Assert-True ($scaleBaselineApply.quarantined -eq $true) '10k baseline 树 Apply 必须成功'
 
+    Write-Stage -Name 'scale-purge-batch'
     $scaleBatchPurge = Invoke-CodexSafeTreeDeletePurge `
         -TransactionPath ([string]$scaleBatchApply.transactionPath) `
         -ApprovedTransactionSha256 ([string]$scaleBatchApply.transactionSha256) `
         -PolicyPath $scalePolicyPath `
         -EvidenceRoot $scaleEvidenceRoot
+    Write-Stage -Name 'scale-purge-phase1'
     $scalePhase1Purge = Invoke-CodexSafeTreeDeletePurge `
         -TransactionPath ([string]$scalePhase1Apply.transactionPath) `
         -ApprovedTransactionSha256 ([string]$scalePhase1Apply.transactionSha256) `
         -PolicyPath $scalePolicyPath `
         -EvidenceRoot $scaleEvidenceRoot `
         -DisablePurgeBatchForTest
+    Write-Stage -Name 'scale-purge-baseline'
     $scaleBaselinePurge = Invoke-CodexSafeTreeDeletePurge `
         -TransactionPath ([string]$scaleBaselineApply.transactionPath) `
         -ApprovedTransactionSha256 ([string]$scaleBaselineApply.transactionSha256) `
@@ -395,6 +416,7 @@ try {
     Assert-True ($scalePhase1Purge.purged -eq $true) '10k Phase1 Purge 必须成功'
     Assert-True ($scaleBaselinePurge.purged -eq $true) '10k baseline Purge 必须成功'
 
+    Write-Stage -Name 'scale-record'
     $batchMs = [double]$scaleBatchPurge.metrics.elapsedMs
     $phase1Ms = [double]$scalePhase1Purge.metrics.elapsedMs
     $baselineMs = [double]$scaleBaselinePurge.metrics.elapsedMs
@@ -426,6 +448,7 @@ try {
         ($scaleRecord | ConvertTo-Json -Depth 6),
         [Text.UTF8Encoding]::new($false))
 
+    Write-Stage -Name 'done'
     [pscustomobject][ordered]@{
         ok = $true
         suite = 'CodexSafeTreeDeletePurgeBatch'
