@@ -11,6 +11,9 @@ param()
 # 本票 fixture 事后受管 resume Purge；禁止 Purge/Restore leftover 0ab1e1b6；
 # 不读写 #22 的 Status/Archive 候选。
 #
+# 耗时随 live 状态增长：2026-08 时 live Status 约 2350 个 operation，整套约 60 秒；
+# 2026-10-29 时 9961 个，整套 661 秒。放后台跑并等进程退出，别按一分钟量级判定卡住。
+#
 # #55：真实 .cmd → 宿主 .ps1 → 生产脚本 的 smoke seam。成功 / 超时 / 失败
 # 都要收口进程树；leaf-delete-failed 必须打到生产 JSON；Status 用 pre/post
 # manifest+USN 证明只读零写入，代际绑定用 operations[].operationId（Status
