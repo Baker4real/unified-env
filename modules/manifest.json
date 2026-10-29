@@ -717,6 +717,7 @@
         "scripts/Run-ManifestTests.cjs",
         "scripts/Run-PowerShellTests.cjs",
         "scripts/Validate-ModuleBoundaries.cjs",
+        "scripts/Wait-CiRun.ps1",
         "scripts/Warn-RedMainCi.cjs",
         "scripts/lib/GitHubCli.ps1"
       ],
@@ -736,7 +737,8 @@
           "tests/Test-PowerShellParameterCaseLint.ps1",
           "tests/Test-PreCommitPrivacyHook.ps1",
           "tests/Test-PublishGitHubIssueComment.ps1",
-          "tests/Test-RunPowerShellTests.ps1"
+          "tests/Test-RunPowerShellTests.ps1",
+          "tests/Test-WaitCiRun.ps1"
         ],
         "python": [],
         "node": [

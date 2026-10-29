@@ -53,4 +53,4 @@ node .\scripts\Run-PowerShellTests.cjs --module dev-environment --list
 
 `--owners` 给出每个路径的归属模块和该模块的测试 profile，不必翻 manifest。提交说明的 scope 用归属模块：`.githooks/commit-msg` 在 scope 是模块 id（含 `shared`）而暂存改动里没有文件归它时拒绝提交，scope 不是模块 id 时不查；它还对要提交的整棵树跑一遍边界校验（同 `--rev`），CI 的 Module boundaries 会拦的违规在提交时就被拒绝。
 
-CI 按模块和 profile 跑上面的 runner。某次 run 失败时，先跑 `scripts/Get-CiFailureSummary.ps1 -RunId <id>`：它只列每个失败 job 的失败测试、报错行和失败标记。需要完整日志时再看 `gh run view <id> --log-failed`。要看耗时（重新平衡分片、估算对照组占比）时跑 `scripts/Get-CiTestTiming.ps1 -RunId <id>`：它列每个 job 的逐测试秒数，测试用 `Write-Stage` 打了 `STAGE` 行时再列分段秒数。
+CI 按模块和 profile 跑上面的 runner。推送后等结果用 `scripts/Wait-CiRun.ps1 -Sha <完整 SHA>`：它等这个提交的 run 跑完，列出每个 job 的结论和耗时，没通过时接着给出下面的失败摘要。某次 run 失败时，先跑 `scripts/Get-CiFailureSummary.ps1 -RunId <id>`：它只列每个失败 job 的失败测试、报错行和失败标记。需要完整日志时再看 `gh run view <id> --log-failed`。要看耗时（重新平衡分片、估算对照组占比）时跑 `scripts/Get-CiTestTiming.ps1 -RunId <id>`：它列每个 job 的逐测试秒数，测试用 `Write-Stage` 打了 `STAGE` 行时再列分段秒数。
