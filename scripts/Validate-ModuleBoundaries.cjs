@@ -193,19 +193,21 @@ function checkCommitScope(manifest, message, stagedFiles) {
       stagedOwners.join(', ') || 'no module'}); use an owning module or a scope that is not a module id`);
 }
 
-// The commit-msg hook: the manifest and the staged files come from the index being committed, which a tool may
-// have pointed elsewhere with GIT_INDEX_FILE. A subject without a scope needs neither, and a repository whose
-// index has no manifest (a test fixture that borrows these hooks) has no modules to check.
+// The commit-msg hook checks the index being committed, which a tool may have pointed elsewhere with
+// GIT_INDEX_FILE: its whole tree, as --rev checks a commit, and the subject's scope against the staged files.
+// A repository whose index has no manifest (a test fixture that borrows these hooks) has no modules to check.
 function checkCommitMessageFile(messagePath) {
   const message = fs.readFileSync(path.resolve(messagePath), 'utf8');
-  if (!COMMIT_SCOPE_PATTERN.test(commitSubject(message))) return [];
   const repositoryRoot = String(runGit(process.cwd(), ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })).trim();
   if (String(runGit(repositoryRoot, ['ls-files', '-z', '--', 'modules/manifest.json'], { encoding: 'utf8' })) === '') return [];
+  const tree = String(runGit(repositoryRoot, ['write-tree'], { encoding: 'utf8' })).trim();
+  const { errors } = validateRepository(repositoryRoot, { revision: tree });
+  if (!COMMIT_SCOPE_PATTERN.test(commitSubject(message))) return errors;
   const manifest = JSON.parse(String(runGit(repositoryRoot, ['show', ':modules/manifest.json'], { encoding: 'utf8' })));
   const stagedFiles = String(runGit(repositoryRoot, ['diff', '--cached', '--name-only', '--no-renames', '-z'], { encoding: 'utf8' }))
     .split('\0')
     .filter(Boolean);
-  return checkCommitScope(manifest, message, stagedFiles);
+  return [...errors, ...checkCommitScope(manifest, message, stagedFiles)];
 }
 
 function validateOwnership(manifest, repositoryFiles) {

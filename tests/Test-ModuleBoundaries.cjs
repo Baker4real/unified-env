@@ -432,7 +432,8 @@ try {
     ],
   });
 
-  // --commit-msg takes the manifest and the staged files from the index being committed.
+  // --commit-msg checks the index being committed: its whole tree, as --rev checks a commit, and the subject's
+  // scope against the staged files. Both come from the index, not the work tree.
   const messagePath = path.join(revisionRoot, '.git', 'TEST_COMMIT_MSG');
   const checkMessage = (message) => {
     fs.writeFileSync(messagePath, message);
@@ -442,8 +443,18 @@ try {
       windowsHide: true,
     });
   };
+  // A staged fix still leaves the unowned stray.txt in the tree, whatever the subject says.
   fixtureGit('add', 'modules/beta/beta_api.py');
-  let checked = checkMessage('fix(alpha): change beta\n');
+  let checked = checkMessage('fix(beta): change beta\n');
+  assert.equal(checked.status, 1, 'the tree being committed still has an unowned file');
+  assert.equal(checked.stderr, 'stray.txt: no owner\n');
+  assert.equal(checkMessage('docs: note\n').stderr, 'stray.txt: no owner\n', 'a subject without a scope gets the tree check');
+  // Commit both fixes without hooks, so the checks below start from a tree that passes.
+  fixtureGit('add', 'stray.txt');
+  fixtureGit('commit', '-q', '-m', 'fix: own every file');
+  write('modules/beta/beta_api.py', 'VALUE = 3\n');
+  fixtureGit('add', 'modules/beta/beta_api.py');
+  checked = checkMessage('fix(alpha): change beta\n');
   assert.equal(checked.status, 1);
   assert.match(checked.stderr, /commit scope "alpha" names a module that owns none of the staged files \(their owners: beta\)/);
   assert.equal(checkMessage('fix(beta): change beta\n').status, 0);
@@ -451,31 +462,31 @@ try {
   fixtureGit('reset', '-q');
   // untracked.txt is shared only in the work-tree manifest until that manifest is staged too.
   fixtureGit('add', 'untracked.txt');
-  checked = checkMessage('feat(shared): own untracked.txt\n');
+  checked = checkMessage('docs: add untracked.txt\n');
   assert.equal(checked.status, 1, 'ownership comes from the staged manifest');
+  assert.equal(checked.stderr, 'untracked.txt: no owner\n');
+  checked = checkMessage('feat(shared): own untracked.txt\n');
   assert.match(checked.stderr, /\(their owners: no module\)/);
   fixtureGit('add', 'modules/manifest.json');
   checked = checkMessage('feat(shared): own untracked.txt\n');
   assert.equal(checked.status, 0, checked.stderr);
   fixtureGit('reset', '-q');
-  // An index without the manifest has no modules to check, and a subject without a scope needs no repository.
+  // An index without the manifest has no modules to check.
   fixtureGit('rm', '-q', '--cached', 'modules/manifest.json');
   checked = checkMessage('fix(alpha): drop the manifest\n');
   assert.equal(checked.status, 0, checked.stderr);
   fixtureGit('reset', '-q');
-  fs.writeFileSync(messagePath, 'probe\n');
-  checked = spawnSync(process.execPath, [VALIDATOR_PATH, '--commit-msg', messagePath], {
-    cwd: path.parse(PROJECT_ROOT).root,
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-  assert.equal(checked.status, 0, checked.stderr);
 
-  // The commit-msg hook runs the check on a real commit.
+  // The commit-msg hook runs both checks on a real commit.
   fixtureGit('config', 'core.hooksPath', path.join(PROJECT_ROOT, '.githooks'));
-  fixtureGit('add', 'modules/beta/beta_api.py');
   const headBefore = fixtureGit('rev-parse', 'HEAD');
-  const rejectedCommit = runFixtureGit('commit', '-q', '-m', 'fix(alpha): change beta');
+  fixtureGit('add', 'untracked.txt');
+  let rejectedCommit = runFixtureGit('commit', '-q', '-m', 'docs: add untracked.txt');
+  assert.notEqual(rejectedCommit.status, 0, 'the hook must reject a tree with an unowned file');
+  assert.match(rejectedCommit.stderr, /^untracked\.txt: no owner$/m);
+  fixtureGit('reset', '-q');
+  fixtureGit('add', 'modules/beta/beta_api.py');
+  rejectedCommit = runFixtureGit('commit', '-q', '-m', 'fix(alpha): change beta');
   assert.notEqual(rejectedCommit.status, 0, 'the hook must reject a scope that owns no staged file');
   assert.match(rejectedCommit.stderr, /commit scope "alpha"/);
   assert.equal(fixtureGit('rev-parse', 'HEAD'), headBefore);
