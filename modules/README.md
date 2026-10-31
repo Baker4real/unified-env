@@ -55,4 +55,4 @@ node .\scripts\Run-PowerShellTests.cjs --module dev-environment --list
 
 CI 按模块和 profile 跑上面的 runner。推送后等结果用 `scripts/Wait-CiRun.ps1 -Sha <完整 SHA>`：它等这个提交的 run 跑完，列出每个 job 的结论和耗时，没通过时接着给出下面的失败摘要。某次 run 失败时，先跑 `scripts/Get-CiFailureSummary.ps1 -RunId <id>`：它只列每个失败 job 的失败测试、报错行和失败标记。需要完整日志时再看 `gh run view <id> --log-failed`。
 
-要看耗时（重新平衡分片、估算对照组占比）时跑 `scripts/Get-CiTestTiming.ps1 -RunId <id>`：它给出 run 的墙钟和最大起跑延迟，列每个 job 的逐测试秒数，测试用 `Write-Stage` 打了 `STAGE` 行时再列分段秒数。跨 run 比较某一段之前先校准：每个分片各自分到 runner，同一段在不同 run 里能差到约 1.5 倍，所以先看同一测试里没改动的段（`scale-create*`、`scale-plan*`）差了多少，再看改动段。本机单跑对比时，别的会话的负载也能让同一段慢 20%–30%，要在机器空闲时复跑确认。
+要看耗时（重新平衡分片、估算对照组占比）时跑 `scripts/Get-CiTestTiming.ps1 -RunId <id>`：它给出 run 的墙钟和最大起跑延迟，列每个 job 的逐测试秒数，测试用 `Write-Stage` 打了 `STAGE` 行时再列分段秒数。main 上的 run 要等同一 concurrency 组里正在跑的 run 结束（见 `ci.yml`），这段排队也算进墙钟和起跑延迟：`gh run list --workflow ci.yml --branch main --json 'databaseId,startedAt,updatedAt'` 里上一个 run 的 `updatedAt` 比这次的 `startedAt` 晚多少，就是排了多久，比较墙钟前先扣掉。跨 run 比较某一段之前先校准：每个分片各自分到 runner，同一段在不同 run 里能差到约 1.5 倍，所以先看同一测试里没改动的段（`scale-create*`、`scale-plan*`）差了多少，再看改动段。本机单跑对比时，别的会话的负载也能让同一段慢 20%–30%，要在机器空闲时复跑确认。
