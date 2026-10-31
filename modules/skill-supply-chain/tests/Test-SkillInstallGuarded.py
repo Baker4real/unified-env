@@ -11,11 +11,13 @@ import contextlib
 import hashlib
 import io
 import json
+import msvcrt
 import os
 import stat
 import shutil
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -806,6 +808,55 @@ class SkillInstallGuardedTests(GuardedInstallTestCase):
         self.assertEqual(code, 2)
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "outside-preserved\n")
         self.assertEqual(list((target / "active").iterdir()), [])
+
+
+    def test_summary_payload_excludes_full_manifest(self) -> None:
+        result = {
+            "status": "succeeded",
+            "targets": ["example"],
+            "evidence": "D:/agents/run-evidence/example",
+            "autoBackup": {"after": {"active": False}},
+            "staged": {"large": "manifest"},
+            "directory_records": [{"large": "records"}],
+        }
+        summary = WRAPPER.summary_payload(result)
+        self.assertEqual("succeeded", summary["status"])
+        self.assertFalse(summary["autoBackup"]["after"]["active"])
+        self.assertNotIn("staged", summary)
+        self.assertNotIn("directory_records", summary)
+
+    def test_auto_backup_state_treats_an_unlocked_file_as_idle_whatever_it_names(self) -> None:
+        lock = self.temp / ".skills-manager.lock"
+        for operation in ("auto backup", "auto backup on exit"):
+            with self.subTest(operation=operation):
+                lock.write_text(f"pid={os.getpid()}\nhostname=fixture\noperation={operation}\nstart_time=fixture\n", encoding="utf-8")
+                state = WRAPPER.auto_backup_state(self.active)
+                self.assertFalse(state["active"])
+                self.assertEqual(operation, state["operation"])
+                self.assertEqual(os.getpid(), state["pid"])
+
+    def test_wait_for_auto_backup_waits_while_the_lock_is_held_then_times_out(self) -> None:
+        lock = self.temp / ".skills-manager.lock"
+        lock.write_text(f"pid={os.getpid()}\nhostname=fixture\noperation=auto backup\nstart_time=fixture\n", encoding="utf-8")
+        # Skills Manager holds a byte-range lock on the file while a round runs; a second handle in
+        # this process is shut out of the locked bytes the same way another process is.
+        with lock.open("r+b") as holder:
+            msvcrt.locking(holder.fileno(), msvcrt.LK_NBLCK, 1 << 20)
+            try:
+                self.assertTrue(WRAPPER.auto_backup_state(self.active)["active"])
+                started = time.monotonic()
+                with self.assertRaisesRegex(BASE.InstallError, "auto backup remains active"):
+                    WRAPPER.wait_for_auto_backup(self.active, timeout_seconds=0.6)
+                self.assertGreaterEqual(time.monotonic() - started, 0.6)
+            finally:
+                holder.seek(0)
+                msvcrt.locking(holder.fileno(), msvcrt.LK_UNLCK, 1 << 20)
+        self.assertFalse(WRAPPER.wait_for_auto_backup(self.active, timeout_seconds=0.6)["active"])
+
+    def test_active_backup_times_out_instead_of_claiming_success(self) -> None:
+        with mock.patch.object(WRAPPER, "auto_backup_state", return_value={"active": True, "path": "fixture-lock"}):
+            with self.assertRaisesRegex(WRAPPER.InstallError if hasattr(WRAPPER, "InstallError") else BASE.InstallError, "auto backup remains active"):
+                WRAPPER.wait_for_auto_backup(self.active, timeout_seconds=0)
 
 
 if __name__ == "__main__":

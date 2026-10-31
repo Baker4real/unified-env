@@ -26,6 +26,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Iterator
@@ -110,6 +111,58 @@ def installation_lock(lock_path: Path) -> Iterator[None]:
         lock_path.unlink(missing_ok=True)
 
 
+def auto_backup_state(active_root: Path) -> dict[str, Any]:
+    path = active_root.parent / ".skills-manager.lock"
+    state: dict[str, Any] = {"path": str(path), "exists": True, "active": False, "operation": None, "pid": None, "startTime": None}
+    try:
+        handle = path.open("rb")
+    except FileNotFoundError:
+        state["exists"] = False
+        return state
+    # Skills Manager leaves this file behind after each round and on exit, still naming the last
+    # operation and a live pid. Only a round in progress holds a byte-range lock on it, and that
+    # lock fails the read (not the open) with PermissionError.
+    with handle:
+        try:
+            content = handle.read().decode("utf-8")
+        except PermissionError:
+            state["active"] = True
+            return state
+    fields = {}
+    for line in content.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            fields[key] = value
+    state["operation"] = fields.get("operation")
+    state["startTime"] = fields.get("start_time")
+    try:
+        state["pid"] = int(fields.get("pid", "0"))
+    except ValueError:
+        state["pid"] = 0
+    return state
+
+
+def wait_for_auto_backup(active_root: Path, timeout_seconds: float = 60.0) -> dict[str, Any]:
+    started = time.monotonic()
+    while True:
+        state = auto_backup_state(active_root)
+        if not state["active"]:
+            state["waitedSeconds"] = round(time.monotonic() - started, 3)
+            return state
+        if time.monotonic() - started >= timeout_seconds:
+            raise InstallError(f"auto backup remains active: {state['path']}")
+        time.sleep(min(0.5, max(0.0, timeout_seconds)))
+
+
+def summary_payload(result: dict[str, Any]) -> dict[str, Any]:
+    keys = ("schema_version", "transaction_id", "status", "targets", "active_root", "evidence", "autoBackup", "error", "candidate_integrity", "excluded_files")
+    return {key: result[key] for key in keys if key in result}
+
+
+def print_result(result: dict[str, Any], summary: bool = False) -> None:
+    print(json.dumps(summary_payload(result) if summary else result, ensure_ascii=False, indent=2))
+
+
 def write_transaction_manifest(path: Path, payload: dict[str, Any]) -> None:
     _base.atomic_write_json(path, payload)
 
@@ -137,6 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--update", action="store_true", help="兼容旧调用；实际更新权限仍由 manifest decision=update 决定")
     parser.add_argument("--dry-run", action="store_true", help="只暂存和验证，不改变 active root、ledger 或 catalog")
+    parser.add_argument("--summary", action="store_true", help="只输出状态、目标、备份状态和证据路径；完整 manifest 仍写入 evidence")
     parser.add_argument("--active-root", type=Path, default=DEFAULT_ACTIVE_ROOT)
     parser.add_argument("--plugin-cache-root", type=Path, default=DEFAULT_PLUGIN_CACHE_ROOT)
     parser.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
@@ -370,6 +424,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             write_transaction_manifest(manifest_path, result)
             return result
 
+        auto_backup_before = wait_for_auto_backup(active_root)
         active_state = _base.load_json(ledger_path, label="source ledger")
         system_overlay_context = context.get("system_provenance_overlay")
         if isinstance(system_overlay_context, dict):
@@ -589,9 +644,11 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         # Other sessions may edit the shared live ledger later; keep the bytes this transaction wrote.
         source_state_after_path = backup_root / "source-state-after.json"
         _base.atomic_write_bytes(source_state_after_path, ledger_after_bytes)
+        auto_backup_after = wait_for_auto_backup(active_root)
         result = {
             **plan,
             "status": "succeeded",
+            "autoBackup": {"before": auto_backup_before, "after": auto_backup_after},
             "completed_at": _base.utc_now(),
             "targets": names,
             "staged": _staging.staged_result_projection(staged),
@@ -701,7 +758,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise InstallError(str(exc)) from exc
             except Exception as exc:
                 raise InstallError(f"system provenance repair 输入或运行态无效：{exc}") from exc
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print_result(result, args.summary)
             return 0
         if args.candidate is None and args.repo is None and args.url is None:
             raise InstallError(
@@ -718,13 +775,13 @@ def main(argv: list[str] | None = None) -> int:
             if not candidate.is_dir():
                 raise InstallError(f"candidate 必须是目录：{candidate}")
             result = _payload.inspect_candidate_integrity(candidate)
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print_result(result, args.summary)
             return 0
         if args.decision_manifest is None:
             raise InstallError("安装事务必须提供 --decision-manifest")
         with installation_lock(_base.d_path(args.lock_root, label="skill install lock root") / "install.lock"):
             result = execute(args)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print_result(result, args.summary)
         return 0
     except InstallError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2), file=sys.stderr)
