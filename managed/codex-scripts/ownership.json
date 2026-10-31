@@ -3,6 +3,7 @@
   "schemaVersion": 1,
   "entries": [
     { "path": "__pycache__/", "owner": "Python bytecode cache of the .py files deployed here" },
+    { "path": "agents-md-adaptation-exceptions.json", "owner": "D:/Codex/.codex/docs/agent-guidance/agents-md-sync.md" },
     { "path": "agents-sync-manifest.json", "owner": "D:/Codex/.codex/docs/agent-guidance/agents-md-sync.md" },
     { "path": "AgentsSync.Core.psm1", "owner": "D:/Codex/.codex/docs/agent-guidance/agents-md-sync.md" },
     { "path": "Apply-GitHubDefaultBranchSkillOverlay.cjs", "owner": "scripts/Deploy-GitHubDefaultBranchSkillOverlay.ps1", "source": "scripts/Apply-GitHubDefaultBranchSkillOverlay.cjs" },
@@ -14,6 +15,7 @@
     { "path": "codex-provider-proxy.py", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
     { "path": "Find-PathReferences.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/document-retrieval.md" },
     { "path": "generate_skill_catalog.py", "owner": "scripts/Deploy-SkillInstallGuarded.ps1", "source": "modules/skill-supply-chain/implementation/generate_skill_catalog.py" },
+    { "path": "Get-ConsoleLaunchAudit.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-ConsoleLaunchAudit.ps1" },
     { "path": "Get-NvidiaDownloadStatus.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-NvidiaDownloadStatus.ps1" },
     { "path": "Get-RepositoryAudit.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
     { "path": "Get-TaskbarSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-TaskbarSnapshot.ps1" },
@@ -69,6 +71,7 @@
     { "path": "Test-CDriveToolCacheDrift.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" },
     { "path": "Test-CheckedPowerShell.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-CheckedPowerShell.ps1" },
     { "path": "Test-CheckedPython.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
+    { "path": "Test-ConsoleLaunchAudit.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-ConsoleLaunchAudit.ps1" },
     { "path": "test-docker-wsl-integration.sh", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" },
     { "path": "Test-DockerWslIntegration.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" },
     { "path": "Test-ExplorerShellRecovery.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-ExplorerShellRecovery.ps1" },
@@ -81,6 +84,7 @@
     { "path": "Test-VcpkgHealth.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-VcpkgHealth.ps1" },
     { "path": "uu-bak-align/", "owner": "docs/environments/zi-xi-shi.md" },
     { "path": "uu-heartbeat/", "owner": "docs/environments/jia-li.md" },
-    { "path": "Wait-DockerWslIntegration.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" }
+    { "path": "Wait-DockerWslIntegration.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" },
+    { "path": "Watch-ConsoleWindows.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Watch-ConsoleWindows.ps1" }
   ]
 }
