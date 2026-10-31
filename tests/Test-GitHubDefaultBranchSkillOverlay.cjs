@@ -553,7 +553,7 @@ const pairChange = postWritePlan.changes[0];
 const pairRole = pairChange.role === 'yeet' ? 'github' : 'yeet';
 const pairPath = path.join(pairChange.surfaceDirectory, 'skills', pairRole, 'SKILL.md');
 const pairOriginal = fs.readFileSync(pairPath);
-const pairOriginalMtimeMs = pairChange.originalMtimeMs;
+const pairOriginalMtimeMs = postWritePlan.changes.find((change) => change.path === pairPath).originalMtimeMs;
 fs.writeFileSync(pairPath, 'unknown pair fingerprint\n', 'utf8');
 const pairFingerprintResult = overlay.applyChangePlan(
   { changes: [pairChange], skipped: [], errors: [], catalogRef: postWritePlan.catalogRef, inventory: postWritePlan.inventory },
