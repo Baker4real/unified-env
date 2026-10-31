@@ -12,6 +12,7 @@
     { "path": "BrowserPrivacyProbe.py", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/BrowserPrivacyProbe.py" },
     { "path": "checked_python_guard.py", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
     { "path": "codex-provider-proxy.py", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
+    { "path": "Find-PathReferences.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/document-retrieval.md" },
     { "path": "generate_skill_catalog.py", "owner": "scripts/Deploy-SkillInstallGuarded.ps1", "source": "modules/skill-supply-chain/implementation/generate_skill_catalog.py" },
     { "path": "Get-NvidiaDownloadStatus.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-NvidiaDownloadStatus.ps1" },
     { "path": "Get-RepositoryAudit.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
