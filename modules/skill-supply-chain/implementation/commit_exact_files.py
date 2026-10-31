@@ -42,9 +42,21 @@ tree equals HEAD's, the new commit's tree must equal the snapshot commit's.
 
 After a ``--file-from`` or ``--from-commit`` commit, a work-tree copy that
 still matches the parent commit (missing, for a new file) is brought to the
-new version, or removed for a deleted file; a copy holding other edits is left
-alone and named, since committing it as it stands would revert this commit.
-If that update fails, the commit stands and the helper exits 3.
+new version, or removed for a deleted file.  A copy holding other edits is left
+alone and named.  It already holds this commit's change when its edits on top
+of the new version delete none of the lines the commit added and put none of
+the lines it removed back in their place; otherwise, or when that cannot be
+told (binary content, a file the commit deletes), the helper says the copy may
+lack the change, and committing the copy as it stands would revert this commit
+wherever it does.  If that update fails, the commit stands and the helper exits 3.
+
+A named path that already holds a staged change in the shared index stops
+the commit, since that change belongs to whichever session staged it; the
+refusal names each such path and when its staged version was written, for
+finding the owner in session transcripts and closeout records.  Once the owner
+is confirmed and the commit authorized, ``--from-index PATH BLOB`` commits that
+staged entry as it is: its blob must be BLOB (``git ls-files -s PATH`` prints
+it) and its mode is kept.
 
 A committed path keeps its mode in HEAD, and a new one is a regular file
 (100644); ``--executable PATH`` commits PATH, which ``--file`` or
@@ -68,13 +80,15 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 
 REGULAR_FILE_MODES = {"100644", "100755"}
-HUNK_HEADER = re.compile(rb"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
+HUNK_HEADER = re.compile(rb"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 INDEX_LOCK_WAIT_SECONDS = 30.0
 INDEX_LOCK_POLL_SECONDS = 0.25
+TRANSCRIPTS = Path(__file__).resolve().parents[1] / "overlays" / "retro" / "scripts" / "transcripts.py"
 
 
 class CommitError(Exception):
@@ -137,6 +151,31 @@ def lines_of(data: bytes) -> list[bytes]:
     return [part + b"\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
 
 
+def blob_hunks(repo: Path, old_blob: str, new_blob: str) -> list[tuple[int, int, int, int, list[bytes], list[bytes], str]]:
+    """The zero-context hunks turning ``old_blob`` into ``new_blob``; binary content has none.
+
+    Each hunk is (old start, old length, new start, new length, removed lines, added lines, header); a side of
+    length 0 sits after its start line.
+    """
+    diff = git(repo, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", old_blob, new_blob).stdout
+    hunks: list[tuple[int, int, int, int, list[bytes], list[bytes], str]] = []
+    last: list[bytes] | None = None
+    for line in lines_of(diff):
+        match = HUNK_HEADER.match(line)
+        if match:
+            header = line.decode("utf-8", errors="replace").rstrip("\n")
+            old_length = 1 if match[2] is None else int(match[2])
+            new_length = 1 if match[4] is None else int(match[4])
+            hunks.append((int(match[1]), old_length, int(match[3]), new_length, [], [], header))
+            last = None
+        elif hunks and line[:1] in (b"-", b"+"):
+            last = hunks[-1][4] if line[:1] == b"-" else hunks[-1][5]
+            last.append(line[1:])
+        elif hunks and line.startswith(b"\\") and last:
+            last[-1] = last[-1].removesuffix(b"\n")
+    return hunks
+
+
 def hunks_against(repo: Path, commit: str, path: str, data: bytes) -> tuple[bytes, list[tuple[int, int, list[bytes], list[bytes], str]]]:
     """HEAD's blob of ``path`` and the zero-context hunks turning it into ``data`` after clean filters.
 
@@ -146,21 +185,36 @@ def hunks_against(repo: Path, commit: str, path: str, data: bytes) -> tuple[byte
         raise CommitError(f"{path} 不在 {commit} 里；新文件用 --file")
     old_blob = git_text(repo, "rev-parse", "--verify", f"{commit}:{path}")
     new_blob = git_text(repo, "hash-object", "-w", f"--path={path}", "--stdin", data=data)
-    diff = git(repo, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", old_blob, new_blob).stdout
-    hunks: list[tuple[int, int, list[bytes], list[bytes], str]] = []
-    last: list[bytes] | None = None
-    for line in lines_of(diff):
-        match = HUNK_HEADER.match(line)
-        if match:
-            header = line.decode("utf-8", errors="replace").rstrip("\n")
-            hunks.append((int(match[1]), 1 if match[2] is None else int(match[2]), [], [], header))
-            last = None
-        elif hunks and line[:1] in (b"-", b"+"):
-            last = hunks[-1][2] if line[:1] == b"-" else hunks[-1][3]
-            last.append(line[1:])
-        elif hunks and line.startswith(b"\\") and last:
-            last[-1] = last[-1].removesuffix(b"\n")
+    hunks = [
+        (start, length, removed, added, header)
+        for start, length, _, _, removed, added, header in blob_hunks(repo, old_blob, new_blob)
+    ]
     return git(repo, "cat-file", "blob", old_blob).stdout, hunks
+
+
+def gap_span(start: int, length: int) -> tuple[int, int]:
+    """The first and last line gaps a hunk side touches, gap g lying after line g."""
+    return (start - 1, start + length - 1) if length else (start, start)
+
+
+def holds_change(repo: Path, current: str, old: str, new: str) -> bool:
+    """Whether blob ``current`` keeps the change from blob ``old`` to blob ``new`` beside other edits.
+
+    It does when the edits turning ``new`` into ``current`` delete none of the lines the change added and put none
+    of the lines it removed back where it removed them.  Binary content never counts as holding it.
+    """
+    change, edits = blob_hunks(repo, old, new), blob_hunks(repo, new, current)
+    if not change or not edits:
+        return False
+    for _, _, start, length, removed, _, _ in change:
+        first, last = gap_span(start, length)
+        for edit_start, edit_length, _, _, _, inserted, _ in edits:
+            if length and edit_length and edit_start < start + length and start < edit_start + edit_length:
+                return False
+            edit_first, edit_last = gap_span(edit_start, edit_length)
+            if set(removed) & set(inserted) and edit_first <= last and first <= edit_last:
+                return False
+    return True
 
 
 def splice_hunks(old: bytes, hunks: list[tuple[int, int, list[bytes], list[bytes], str]], keep: list[int], path: str) -> bytes:
@@ -262,19 +316,21 @@ def replay_entries(
     return entries, deletes, message, git_text(source, "rev-parse", f"{snapshot}^{{tree}}") if same_base else None
 
 
-def sync_work_tree(repo: Path, head: str, paths: list[str]) -> tuple[list[str], list[str]]:
+def sync_work_tree(repo: Path, head: str, paths: list[str]) -> tuple[list[str], list[str], list[str]]:
     """Bring each work-tree copy of ``paths`` that still matches ``head``'s parent to ``head``'s version.
 
-    Returns the paths brought over and the paths left alone because their copy holds other edits.
+    Returns the paths brought over, the paths whose copy holds other edits beside ``head``'s change, and the paths
+    left alone because their copy holds other edits and may lack that change.
     """
     synced: list[str] = []
+    held: list[str] = []
     left: list[str] = []
     for path in paths:
         old = tree_entry(repo, f"{head}^", path)
         new = tree_entry(repo, head, path)
         target = repo / path
         if target.is_file() and not target.is_symlink():
-            current = git_text(repo, "hash-object", f"--path={path}", "--stdin", data=target.read_bytes())
+            current = git_text(repo, "hash-object", "-w", f"--path={path}", "--stdin", data=target.read_bytes())
         elif os.path.lexists(target):
             left.append(path)
             continue
@@ -283,14 +339,36 @@ def sync_work_tree(repo: Path, head: str, paths: list[str]) -> tuple[list[str], 
         if current == (new[1] if new else None):
             continue
         if current != (old[1] if old else None):
-            left.append(path)
+            base = old[1] if old else git_text(repo, "hash-object", "-w", "--stdin", data=b"")
+            (held if current and new and holds_change(repo, current, base, new[1]) else left).append(path)
         elif new is None:
             target.unlink()
             synced.append(path)
         else:
             git(repo, "checkout-index", "-f", "--", path)
             synced.append(path)
-    return synced, left
+    return synced, held, left
+
+
+def staged_refusal(repo: Path, paths: list[str]) -> str:
+    """The guard's refusal: ``paths`` hold staged changes; name them, when each staged version was written, and how to find the owner."""
+    rows = []
+    for path in paths:
+        entry = git(repo, "ls-files", "--debug", "--", path).stdout
+        match = re.search(rb"^\s*mtime: (\d+):", entry, re.MULTILINE)
+        if not entry:
+            rows.append(f"{path}（暂存的是删除）")
+        elif match and int(match[1]):
+            written = datetime.fromtimestamp(int(match[1])).astimezone().isoformat(timespec="minutes")
+            rows.append(f"{path}（暂存版本写于 {written}）")
+        else:
+            rows.append(f"{path}（暂存版本的写入时间不明）")
+    return (
+        f"共享 index 里这些路径已有暂存改动：{'、'.join(rows)}。先确认它们属于哪个会话："
+        f"python {TRANSCRIPTS} find <路径> --since <日期> 找提到过它们的会话，再看那段时间 run-evidence 里的收尾记录；"
+        "归属确认、那个会话的用户也授权提交后，核对 git diff --cached -- PATH，"
+        "再用 --from-index PATH BLOB 提交暂存的版本（BLOB 见 git ls-files -s PATH）"
+    )
 
 
 def commit_exact(
@@ -303,14 +381,15 @@ def commit_exact(
     hunks: list[tuple[str, str, list[int]]] = (),
     executables: list[str] = (),
     replay: tuple[Path, str] | None = None,
+    staged: list[tuple[str, str]] = (),
 ) -> str:
-    """Commit ``files`` (path, content source, reviewed SHA-256), ``hunks`` (path, reviewed work-tree SHA-256, hunk numbers) and ``deletes`` on ``expected_head``; ``executables`` names files to commit as 100755.
+    """Commit ``files`` (path, content source, reviewed SHA-256), ``hunks`` (path, reviewed work-tree SHA-256, hunk numbers), ``staged`` (path, reviewed blob of its shared index entry) and ``deletes`` on ``expected_head``; ``executables`` names files to commit as 100755.
 
     ``replay`` (snapshot repository, commit) commits that commit's changes instead, with its message unless
     ``message_file`` is given.
     """
 
-    paths = [path for path, _, _ in files] + [path for path, _, _ in hunks] + deletes
+    paths = [path for path, _, _ in files] + [path for path, _, _ in hunks] + [path for path, _ in staged] + deletes
     duplicates = sorted({path for path in paths if paths.count(path) > 1})
     if duplicates:
         raise CommitError(f"同一路径出现多次：{duplicates}")
@@ -327,8 +406,23 @@ def commit_exact(
         paths = [path for _, _, path in entries] + deletes
     if message_file:
         message = message_file.read_bytes()
-    if git(repo, "diff", "--cached", "--quiet", expected, "--", *paths, allowed=(0, 1)).returncode:
-        raise CommitError("共享 index 里这些路径已有暂存改动；先确认它们属于哪个会话")
+    confirmed = {path for path, _ in staged}
+    unconfirmed = [path for path in paths if path not in confirmed]
+    already_staged = unconfirmed and path_list(
+        git(repo, "diff", "--cached", "--name-only", "-z", "--no-renames", expected, "--", *unconfirmed).stdout
+    )
+    if already_staged:
+        raise CommitError(staged_refusal(repo, already_staged))
+    for path, reviewed in staged:
+        rows = git(repo, "ls-files", "-s", "-z", "--", path).stdout.split(b"\0")[:-1]
+        if len(rows) != 1:
+            raise CommitError(f"{path}：共享 index 里有 {len(rows)} 个条目，--from-index 要正好一个暂存的文件")
+        mode, blob, stage = rows[0].split(b"\t", 1)[0].decode("ascii").split(" ")
+        if stage != "0" or mode not in REGULAR_FILE_MODES:
+            raise CommitError(f"{path}：共享 index 里的条目是 stage {stage}、mode {mode}，不是暂存的普通文件")
+        if blob != reviewed.lower():
+            raise CommitError(f"{path}：共享 index 里暂存的 blob 是 {blob}，不是评审过的 {reviewed}")
+        entries.append((mode, blob, path))
     for path, source, reviewed in files:
         data = source.read_bytes()
         actual = hashlib.sha256(data).hexdigest()
@@ -411,6 +505,15 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="commit SOURCE's bytes as PATH; they must hash to SHA256",
     )
     parser.add_argument(
+        "--from-index",
+        action="append",
+        nargs=2,
+        default=[],
+        metavar=("PATH", "BLOB"),
+        help="commit the entry another session staged for PATH in the shared index, once its owner is confirmed; "
+        "its blob must be BLOB (git ls-files -s PATH prints it), and its mode is kept",
+    )
+    parser.add_argument(
         "--delete",
         action="append",
         default=[],
@@ -448,19 +551,19 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     args = parser.parse_args(argv)
     if args.list_hunks:
-        if args.file or args.file_from or args.delete or args.hunks or args.executable or args.from_commit:
+        if args.file or args.file_from or args.from_index or args.delete or args.hunks or args.executable or args.from_commit:
             parser.error("--list-hunks 只能单独使用")
         return args
     if args.from_commit:
-        if args.file or args.file_from or args.delete or args.hunks or args.executable:
-            parser.error("--from-commit 不和 --file、--file-from、--hunks、--delete、--executable 同用")
+        if args.file or args.file_from or args.from_index or args.delete or args.hunks or args.executable:
+            parser.error("--from-commit 不和 --file、--file-from、--from-index、--hunks、--delete、--executable 同用")
         if not args.expected_head:
             parser.error("提交需要 --expected-head")
         return args
     if not (args.expected_head and args.message_file):
         parser.error("提交需要 --expected-head 和 --message-file")
-    if not (args.file or args.file_from or args.delete or args.hunks):
-        parser.error("至少给一个 --file、--file-from、--hunks 或 --delete")
+    if not (args.file or args.file_from or args.from_index or args.delete or args.hunks):
+        parser.error("至少给一个 --file、--file-from、--from-index、--hunks 或 --delete")
     for values in args.hunks:
         if len(values) < 3 or not all(value.isdigit() for value in values[2:]):
             parser.error("--hunks 的格式是 PATH SHA256 INDEX [INDEX ...]")
@@ -492,6 +595,7 @@ def main(argv: list[str] | None = None) -> int:
             hunks=hunks,
             executables=[Path(path).as_posix() for path in args.executable],
             replay=replay,
+            staged=[(Path(path).as_posix(), blob) for path, blob in args.from_index],
         )
     except IndexNotRefreshed as exc:
         print(git_text(repo, "show", "--stat", "--format=%H%n%an <%ae> | %s", exc.head))
@@ -503,14 +607,19 @@ def main(argv: list[str] | None = None) -> int:
     committed = path_list(git(repo, "diff-tree", "-r", "-z", "--name-only", "--no-renames", "--no-commit-id", head).stdout)
     print(git_text(repo, "show", "--stat", "--format=%H%n%an <%ae> | %s", head))
     try:
-        synced, left = sync_work_tree(repo, head, committed if replay else [Path(path).as_posix() for path, _, _ in args.file_from])
+        synced, held, left = sync_work_tree(repo, head, committed if replay else [Path(path).as_posix() for path, _, _ in args.file_from])
     except (CommitError, OSError) as exc:
         print(f"commit_exact_files: 提交 {head} 已生成，但同步工作树失败：{exc}", file=sys.stderr)
         return 3
     for path in synced:
         print(f"工作树已换成新提交的版本：{path}")
+    for path in held:
+        print(f"工作树里的 {path} 已含本次提交的改动，另带别的改动，没有动它，不用补")
     for path in left:
-        print(f"工作树里的 {path} 带着别的改动，没有动它；按它现在的样子提交会回退本次提交，先把本次改动补进去")
+        print(
+            f"工作树里的 {path} 带着别的改动，没有动它，也可能缺本次提交的改动：用 git diff {head[:12]} -- {path} 核对，"
+            "缺的先补进去，否则按它现在的样子提交会回退本次提交"
+        )
     status = git(repo, "status", "--porcelain=v1", "--", *committed).stdout.decode("utf-8").rstrip()
     print("committed paths status:", status or "clean")
     return 0

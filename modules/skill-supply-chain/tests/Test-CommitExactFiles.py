@@ -124,9 +124,25 @@ class CommitExactFilesTests(unittest.TestCase):
         self.write("a.txt", b"a3\n")
         code, error = self.run_helper("--file", "a.txt", sha256(b"a3\n"))
         self.assertEqual(code, 1)
-        self.assertIn("已有暂存改动", error)
+        self.assertIn("已有暂存改动：a.txt（暂存版本写于 ", error)
+        self.assertIn("--from-index PATH BLOB", error)
         self.assertEqual(self.head(), self.base)
         self.assertEqual(self.status(), ["MM a.txt"])
+
+    def test_from_index_commits_the_reviewed_staged_entry_only(self) -> None:
+        self.write("a.txt", b"a2\n")
+        self.write("b.txt", b"b2\n")
+        self.git("add", "a.txt", "b.txt")
+        self.write("a.txt", b"a3\n")
+        staged = self.git("rev-parse", ":a.txt").strip()
+        code, error = self.run_helper("--from-index", "a.txt", "0" * 40)
+        self.assertEqual(code, 1)
+        self.assertIn(f"暂存的 blob 是 {staged}，不是评审过的", error)
+        code, error = self.run_helper("--from-index", "a.txt", staged)
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split(), ["a.txt"])
+        self.assertEqual(self.show("HEAD:a.txt"), b"a2\n")
+        self.assertEqual(self.status(), [" M a.txt", "M  b.txt"])
 
     def test_refuses_path_without_changes(self) -> None:
         code, error = self.run_helper("--file", "a.txt", sha256(b"a1\n"))
@@ -142,7 +158,7 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(code, 0, error)
         self.assertEqual(self.show("HEAD:a.txt"), b"a-transaction\n")
         self.assertEqual(self.status(), [" M a.txt"])
-        self.assertIn("工作树里的 a.txt 带着别的改动", self.stdout)
+        self.assertIn("工作树里的 a.txt 已含本次提交的改动", self.stdout)
 
     def test_file_from_brings_untouched_work_tree_copies_to_the_commit(self) -> None:
         prepared = self.temp / "prepared"
@@ -214,6 +230,21 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual((self.repo / "dir" / "new.txt").read_bytes(), b"n1\n")
         self.assertEqual(self.status(), [" M a.txt", " M c.txt"])
         self.assertIn("工作树里的 a.txt 带着别的改动", self.stdout)
+
+    def test_from_commit_tells_copies_holding_the_change_from_copies_lacking_it(self) -> None:
+        self.commit_base("a.txt", b"x\ny\nz\n")
+        snapshot = self.clone_snapshot()
+        replayed = self.snapshot_commit({"a.txt": b"x\nz\n", "b.txt": b"b2\n", "new.txt": b"n1\n"})
+        self.write("a.txt", b"x\ny\nz\nmore\n")
+        self.write("b.txt", b"b2\nmore\n")
+        self.write("new.txt", b"n1\nn2\n")
+        code, error = self.run_helper("--from-commit", str(snapshot), replayed)
+        self.assertEqual(code, 0, error)
+        self.assertIn("工作树里的 b.txt 已含本次提交的改动", self.stdout)
+        self.assertIn("工作树里的 new.txt 已含本次提交的改动", self.stdout)
+        self.assertIn("工作树里的 a.txt 带着别的改动，没有动它，也可能缺本次提交的改动", self.stdout)
+        self.assertEqual((self.repo / "a.txt").read_bytes(), b"x\ny\nz\nmore\n")
+        self.assertEqual(self.status(), [" M a.txt", " M b.txt", " M new.txt"])
 
     def test_from_commit_refuses_a_path_committed_since_the_snapshot(self) -> None:
         snapshot = self.clone_snapshot()
