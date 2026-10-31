@@ -117,6 +117,7 @@ try {
     Assert-True ($relativeFiles -contains 'generate_skill_catalog.py') 'deployment bundle is missing the catalog generator'
     Assert-True ($relativeFiles -contains 'system_skill_provenance_repair.py') 'deployment bundle is missing the system provenance repair module'
     Assert-True ($relativeFiles -contains 'system_package_identity.py') 'deployment bundle is missing the Store package identity provider'
+    Assert-True (@($result.changed).Count -eq $relativeFiles.Count) 'a WhatIf into an empty target must list every file as changed'
 
     $realCodexRoot = Join-Path $runRoot 'real-codex'
     $realEvidenceRoot = Join-Path $runRoot 'real-evidence'
@@ -153,6 +154,34 @@ try {
     Assert-True `
         (-not (Test-Path -LiteralPath (Join-Path $realCodexRoot 'scripts\__pycache__'))) `
         'deployed installer must not write bytecode beside itself'
+
+    # A target that already holds its source's bytes is left alone; only a drifted one is rewritten.
+    $repeatResult = & $deployPath `
+        -SourceRoot $sourceRoot `
+        -AllowUncommittedSource `
+        -CodexRoot $realCodexRoot `
+        -EvidenceRoot $realEvidenceRoot
+    Assert-True ($repeatResult.status -ceq 'succeeded') 'repeat deployment must succeed'
+    Assert-True (@($repeatResult.changed).Count -eq 0) "repeat deployment must leave identical targets alone: $(@($repeatResult.changed) -join ', ')"
+    Assert-True (@($repeatResult.files | Where-Object { [string]$_.status -cne 'unchanged' }).Count -eq 0) 'identical targets must be recorded as unchanged'
+    $driftedTarget = Join-Path $realCodexRoot 'scripts\skill_source_record.py'
+    [IO.File]::AppendAllText($driftedTarget, "# drifted`n")
+    $driftWhatIf = & $deployPath `
+        -SourceRoot $sourceRoot `
+        -AllowUncommittedSource `
+        -CodexRoot $realCodexRoot `
+        -EvidenceRoot $realEvidenceRoot `
+        -WhatIf
+    Assert-True ((@($driftWhatIf.changed) -join ',') -ceq 'skill_source_record.py') "WhatIf must list only the drifted target as changed: $(@($driftWhatIf.changed) -join ', ')"
+    $driftResult = & $deployPath `
+        -SourceRoot $sourceRoot `
+        -AllowUncommittedSource `
+        -CodexRoot $realCodexRoot `
+        -EvidenceRoot $realEvidenceRoot
+    Assert-True ((@($driftResult.changed) -join ',') -ceq 'skill_source_record.py') "deployment must rewrite only the drifted target: $(@($driftResult.changed) -join ', ')"
+    $driftRecord = @($driftResult.files | Where-Object { [string]$_.relative -ceq 'skill_source_record.py' })[0]
+    Assert-True ([string]$driftRecord.status -ceq 'deployed') 'the drifted target must be deployed'
+    Assert-True ((Get-FileHash -LiteralPath $driftedTarget -Algorithm SHA256).Hash.ToUpperInvariant() -ceq [string]$driftRecord.sourceSha256) 'the drifted target must hold its source bytes again'
 
     $rollbackCodexRoot = Join-Path $runRoot 'rollback-codex'
     $rollbackEvidenceRoot = Join-Path $runRoot 'rollback-evidence'

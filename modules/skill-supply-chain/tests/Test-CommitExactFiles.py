@@ -389,6 +389,22 @@ class CommitExactFilesTests(unittest.TestCase):
         ]
         self.assertEqual(left, ["+other session"] * 5)
 
+    def test_list_hunks_warns_when_the_shared_index_stages_the_path(self) -> None:
+        self.write("a.txt", b"a1\nmine\n")
+        code, listing, error = self.list_hunks("a.txt")
+        self.assertEqual(code, 0, error)
+        self.assertNotIn("已有暂存改动", listing)
+        self.git("add", "a.txt")
+        self.write("a.txt", b"a1\nmine\nmore\n")
+        code, listing, error = self.list_hunks("a.txt")
+        self.assertEqual(code, 0, error)
+        self.assertIn("hunks=1", listing)
+        self.assertIn("现在提交这个路径会被拒绝。共享 index 里这些路径已有暂存改动：a.txt（暂存版本写于 ", listing)
+        code, error = self.run_helper("--hunks", "a.txt", sha256(b"a1\nmine\nmore\n"), "0")
+        self.assertEqual(code, 1)
+        self.assertIn("已有暂存改动", error)
+        self.assertEqual(self.head(), self.base)
+
     def test_hunks_refuse_changed_work_tree_and_unknown_hunk(self) -> None:
         self.write("a.txt", b"a1\nmine\n")
         code, error = self.run_helper("--hunks", "a.txt", sha256(b"a1\nreviewed\n"), "0")

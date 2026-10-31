@@ -139,6 +139,7 @@ $manifest = [ordered]@{
     yamlDependency = 'pending'
     sourceCommitCheck = 'pending'
     files = @()
+    changed = @()
 }
 
 try {
@@ -196,11 +197,15 @@ try {
             writtenIdentity = $null
             status = 'prepared'
         }
+        if ($record.beforeSha256 -ceq $record.sourceSha256) { $record.status = 'unchanged' }
         $manifest.files += $record
     }
+    $manifest.changed = @($manifest.files | Where-Object { [string]$_.status -cne 'unchanged' } | ForEach-Object { [string]$_.relative })
     Write-JsonAtomic -PathValue $manifestPath -Value $manifest
 
     foreach ($record in $manifest.files) {
+        # A target that already holds its source's bytes is neither backed up nor rewritten.
+        if ([string]$record.status -ceq 'unchanged') { continue }
         if (-not $PSCmdlet.ShouldProcess([string]$record.target, 'deploy guarded skill wrapper')) { continue }
         if ([bool]$record.beforeExists) {
             if ((Get-FileIdentity ([string]$record.target) | ConvertTo-Json -Compress) -ne ([string]($record.beforeIdentity | ConvertTo-Json -Compress))) {
@@ -248,6 +253,7 @@ try {
         pythonPath = $pythonPathResolved
         yamlDependency = $manifest.yamlDependency
         sourceCommitCheck = $manifest.sourceCommitCheck
+        changed = $manifest.changed
         files = $manifest.files
     }
 }

@@ -17,8 +17,10 @@ When another session's edits share a file, ``--list-hunks PATH`` prints the
 file's work-tree SHA-256 and numbers its zero-context hunks against HEAD (the
 same hunks, in the same order, as ``git diff -U0 HEAD -- PATH``); ``--hunks
 PATH SHA256 INDEX...`` commits HEAD's content plus only those hunks, each placed
-by its HEAD line numbers, and the other hunks stay as unstaged edits.  ``git
-apply --cached --unidiff-zero`` with a subset of hunks is no substitute: it
+by its HEAD line numbers, and the other hunks stay as unstaged edits.  When the
+shared index already stages PATH, the listing ends with the refusal that such a
+commit would meet (see the staged-change paragraph below).  ``git apply
+--cached --unidiff-zero`` with a subset of hunks is no substitute: it
 starts each zero-context hunk's search at its new-side line number, so after a
 skipped hunk every pure insertion lands shifted and a replacement edits the
 nearest copy of its old lines, the wrong one when that text repeats, while the
@@ -242,6 +244,8 @@ def list_hunks(repo: Path, path: str) -> str:
     for index, (_, _, removed, added, header) in enumerate(hunks):
         first = (added or removed or [b""])[0].decode("utf-8", errors="replace").rstrip("\r\n")[:80]
         rows.append(f"{index:3} {header} -{len(removed)} +{len(added)} | {first}")
+    if git(repo, "diff", "--cached", "--quiet", head, "--", path, allowed=(0, 1)).returncode:
+        rows.append(f"注意：现在提交这个路径会被拒绝。{staged_refusal(repo, [path])}")
     return "\n".join(rows)
 
 
@@ -547,7 +551,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--list-hunks",
         metavar="PATH",
-        help="print PATH's work-tree SHA-256 and its numbered hunks against HEAD, then exit",
+        help="print PATH's work-tree SHA-256 and its numbered hunks against HEAD, warning when the shared "
+        "index already stages PATH, then exit",
     )
     args = parser.parse_args(argv)
     if args.list_hunks:
