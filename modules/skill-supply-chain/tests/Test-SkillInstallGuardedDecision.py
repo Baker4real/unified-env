@@ -17,7 +17,7 @@ TESTS_ROOT = Path(__file__).resolve().parent
 if str(TESTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TESTS_ROOT))
 
-from guarded_install_fixtures import BASE, DECISION, WRAPPER, GuardedInstallTestCase
+from guarded_install_fixtures import BASE, DECISION, PAYLOAD, WRAPPER, GuardedInstallTestCase
 
 
 class SkillInstallGuardedDecisionTests(GuardedInstallTestCase):
@@ -66,6 +66,32 @@ class SkillInstallGuardedDecisionTests(GuardedInstallTestCase):
         )
         with self.assertRaisesRegex(BASE.InstallError, "已退役"):
             DECISION.validate_decision_manifest(path)
+
+    def test_help_example_is_an_accepted_update_manifest(self) -> None:
+        candidate = self.write_candidate("test-skill-wrapper", "帮助样例夹具")
+        integrity_output = io.StringIO()
+        with contextlib.redirect_stdout(integrity_output):
+            code = WRAPPER.main(["--candidate", str(candidate), "--candidate-integrity-only"])
+        self.assertEqual(code, 0)
+        manifest = json.loads(json.dumps(DECISION.DECISION_MANIFEST_EXAMPLE))
+        manifest["skills"] = ["test-skill-wrapper"]
+        manifest["candidate_integrity"] = json.loads(integrity_output.getvalue())["candidate_integrity"]
+        path = self.temp / "decision-help-example.json"
+        path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+        args = WRAPPER.build_parser().parse_args(self.wrapper_args(candidate, path))
+        specs = DECISION.target_specs(args)
+        decision = DECISION.load_and_validate_manifest(path, names=[name for name, _ in specs])
+        specs = DECISION.apply_candidate_upstream_path(args, decision, specs)
+        context = DECISION.source_context(args, decision, specs)
+        PAYLOAD.validate_candidate_integrity(candidate, decision)
+
+        self.assertEqual(context["decision"], "update")
+        self.assertEqual(context["source_type"], "github")
+        self.assertIn(
+            json.dumps(DECISION.DECISION_MANIFEST_EXAMPLE, ensure_ascii=False, indent=2),
+            WRAPPER.build_parser().format_help(),
+        )
 
     def test_manifest_disappearing_after_validation_returns_governed_error(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "决策清单竞态夹具")

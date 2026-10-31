@@ -168,7 +168,14 @@ def write_transaction_manifest(path: Path, payload: dict[str, Any]) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="通过事务 wrapper 安装并校验 Codex skill")
+    parser = argparse.ArgumentParser(
+        description="通过事务 wrapper 安装并校验 Codex skill",
+        epilog="--decision-manifest 的最小 update 样例（UTF-8 JSON）：\n"
+        + json.dumps(_decision.DECISION_MANIFEST_EXAMPLE, ensure_ascii=False, indent=2)
+        + "\n"
+        + _decision.DECISION_MANIFEST_NOTES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--candidate", type=Path, help="已通过候选审查的本地 skill 目录")
     source.add_argument("--repo", help="GitHub owner/repo")

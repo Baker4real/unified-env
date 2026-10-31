@@ -353,3 +353,36 @@ def load_and_validate_manifest(path: Path, *, names: list[str]) -> dict[str, Any
         if not isinstance(declared, list) or sorted(str(item) for item in declared) != sorted(names):
             raise InstallError("guard decision manifest 的 skills 与本次安装目标不一致")
     return data
+
+
+# The update manifest that the wrapper's --help prints; a test fills in skills and
+# candidate_integrity and runs it through these validators.
+DECISION_MANIFEST_EXAMPLE = {
+    "decision": "update",
+    "source_status": "source-pass",
+    "writing_for_agents": {
+        "status": "pass",
+        "revision": "<writing-for-agents 审查改了什么；写进新追加的 SOURCE.md 记录>",
+    },
+    "local_overlay": {
+        "status": "replayed",
+        "summary": "<这次保留和新增的本机改动；写进新追加的 SOURCE.md 记录>",
+    },
+    "skills": ["<skill-name>"],
+    "candidate_integrity": "<--candidate-integrity-only 输出里的 candidate_integrity 对象>",
+    "source": {
+        "id": "<--ledger 台账里这个 skill 所在 sources 条目的 id>",
+        "repo": "https://github.com/<owner>/<repo>",
+        "ref": "main",
+        "upstream_path": "<skill 在上游仓库里的目录，仓库根写 .>",
+    },
+}
+DECISION_MANIFEST_NOTES = r"""
+尖括号是占位值；首次安装把 decision 改成 install，没有本机改动就删掉 local_overlay。
+candidate_integrity：跑 --candidate <候选目录> --candidate-integrity-only，把输出里的 candidate_integrity 对象原样贴进来。
+source.id 和 repo 都对不上台账里现有的 sources 条目时，wrapper 新建来源组并把 skill 移过去；
+  upstream_path 照抄这个 skill 的 SOURCE.md 最近一条 Upstream path。
+只改本机 overlay 时 source 不写 commit。commit、advance_group_checkpoint、ledger_updates、bundled_skills、
+  target_scope 等其他字段的规则见 D:/agents/projects/统一环境/docs/specs/2026-07-14-skill-install-guarded-wrapper.md
+  的「Decision manifest 最小格式」及其后各段。
+"""
