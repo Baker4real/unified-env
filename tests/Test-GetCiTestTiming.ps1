@@ -137,7 +137,8 @@ $logs = [ordered]@{
         (New-LogLine '01:35.5000000' 'zeta: still writing')
     )
 }
-# run 在 14:59:30 开始，Python and Node fixtures 最晚起跑。被跳过的 job 时间晚于其余 job，算进去的话墙钟和起跑延迟都会变。
+# run 在 14:59:30 开始，其余 job 15:00:00 起跑，Python and Node fixtures 最晚起跑。被跳过的 job 时间晚于其余 job，算进去的话
+# 两个墙钟和最大起跑延迟都会变。
 $skippedJob = New-Job 106 'host-safety diagnostics' 'skipped' '20:00' '20:00'
 $runJson = ([ordered]@{
     databaseId = 9001; name = 'CI'; displayTitle = 'fix: demo'; status = 'completed'; conclusion = 'failure'
@@ -195,7 +196,7 @@ function Invoke-Timing([string]$Seams) {
 
 $expected = @(
     "run 9001 CI: fix: demo [completed/failure] $runUrl"
-    'wall 10.5 min from run start to last job end, max job start delay 42s (Python and Node fixtures)'
+    'wall 10.5 min from run start to last job end (10.0 min from first job start), first job start delay 30s, max job start delay 42s (Python and Node fixtures)'
     '== lint (success) job 65s, no Running lines in log'
     '== host-safety fixtures (Alpha) (success) job 600s, tests: 2 in 559.5s'
     '    279.5s  Test-Alpha.ps1'

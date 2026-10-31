@@ -11,9 +11,11 @@ gh 2.103.2 退出 1 且什么也不输出。gh 按当前目录的仓库（或 GH
   Running 行或之后第一条 ##[group]、##[error]、Post job cleanup 行为止；都没有时到日志最后一行。
 - 测试输出里的 STAGE <名称> utc=... 行（tests 里的 Write-Stage）把这个测试再切成段，第一条 STAGE 之前记为 (start)。
 - 时间都取 GitHub 给日志行加的时间戳，所以各段之和等于测试耗时；tests 耗时是各测试之和。
-输出纯文本，第一行是 run 的名称、标题、状态和链接。run 已结束时第二行给出墙钟和最大起跑延迟，都从 run 的 startedAt
-（重跑时重置）起算：墙钟到最后一个 job 的 completedAt，分钟保留一位小数；起跑延迟是 job 的 startedAt 与它之差，取最大的
-一个，整秒，带 job 名。被跳过的 job 不占 runner，两项都不算它。之后每个 job 一段，以 == <job> (<结论>) 开头，给出 job 耗时
+输出纯文本，第一行是 run 的名称、标题、状态和链接。run 已结束时第二行给出墙钟和起跑延迟，都从 run 的 startedAt
+（重跑时重置）起算：墙钟到最后一个 job 的 completedAt，分钟保留一位小数，括号里另给从最早起跑的 job 算起的墙钟；起跑延迟
+是 job 的 startedAt 与它之差，整秒，给出最早的一个和最大的一个，后者带 job 名。main 上的 run 要等同一 concurrency 组里正在跑
+的 run 结束，第一次运行的 startedAt 就是创建时间，所以这段排队落在最早起跑延迟里（外加几秒等 runner），跨 run 比较墙钟用
+括号里的数。被跳过的 job 不占 runner，这几项都不算它。之后每个 job 一段，以 == <job> (<结论>) 开头，给出 job 耗时
 （gh 给的 startedAt 到 completedAt，整秒）、测试个数和 tests 耗时；下面每个测试一行，每段一行（以 - 开头），
 秒数保留一位小数。没结束或被跳过的 job 不读日志。gh 重试用完仍失败时不输出，错误写到 stderr，退出 1。
 
@@ -41,6 +43,10 @@ $stagePattern = '^STAGE (\S+) utc='
 
 function Format-Second([double]$Seconds) {
     return $Seconds.ToString('0.0', $invariant)
+}
+
+function Format-Minute([double]$Seconds) {
+    return ($Seconds / 60).ToString('0.0', $invariant)
 }
 
 # 日志每行是「时间戳 文本」。返回时间戳和去掉行尾空白的文本；开头不是时间戳的行返回 $null。
@@ -102,9 +108,10 @@ try {
                 end = ([datetimeoffset]::Parse($job.completedAt, $invariant) - $runStart).TotalSeconds
             }
         })
-        $wallMinutes = ($offsets | Measure-Object -Property end -Maximum).Maximum / 60
+        $lastEnd = ($offsets | Measure-Object -Property end -Maximum).Maximum
+        $firstStart = ($offsets | Measure-Object -Property startDelay -Minimum).Minimum
         $latestStart = $offsets | Sort-Object -Property startDelay -Descending | Select-Object -First 1
-        $report.Add(('wall {0} min from run start to last job end, max job start delay {1}s ({2})' -f $wallMinutes.ToString('0.0', $invariant), [long][Math]::Round($latestStart.startDelay), $latestStart.name))
+        $report.Add(('wall {0} min from run start to last job end ({1} min from first job start), first job start delay {2}s, max job start delay {3}s ({4})' -f (Format-Minute $lastEnd), (Format-Minute ($lastEnd - $firstStart)), [long][Math]::Round($firstStart), [long][Math]::Round($latestStart.startDelay), $latestStart.name))
     }
     foreach ($job in @($run.jobs)) {
         $state = if ($job.conclusion) { $job.conclusion } else { $job.status }
