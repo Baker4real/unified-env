@@ -3,7 +3,6 @@
   "schemaVersion": 1,
   "entries": [
     { "path": "__pycache__/", "owner": "Python bytecode cache of the .py files deployed here" },
-    { "path": "agents-md-adaptation-exceptions.json", "owner": "D:/Codex/.codex/docs/agent-guidance/agents-md-sync.md" },
     { "path": "agents-sync-manifest.json", "owner": "D:/Codex/.codex/docs/agent-guidance/agents-md-sync.md" },
     { "path": "AgentsSync.Core.psm1", "owner": "D:/Codex/.codex/docs/agent-guidance/agents-md-sync.md" },
     { "path": "Apply-GitHubDefaultBranchSkillOverlay.cjs", "owner": "scripts/Deploy-GitHubDefaultBranchSkillOverlay.ps1", "source": "scripts/Apply-GitHubDefaultBranchSkillOverlay.cjs" },
