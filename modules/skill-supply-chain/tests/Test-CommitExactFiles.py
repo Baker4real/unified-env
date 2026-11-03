@@ -364,6 +364,28 @@ class CommitExactFilesTests(unittest.TestCase):
             code = HELPER.main(["--repo", str(self.repo), "--list-hunks", path])
         return code, stdout.getvalue(), stderr.getvalue()
 
+    def test_repo_defaults_to_the_work_tree_holding_the_current_directory(self) -> None:
+        edited = b"a2\n"
+        self.write("a.txt", edited)
+        (self.repo / "sub").mkdir()
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.chdir(self.repo / "sub"), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = HELPER.main(["--list-hunks", "a.txt"])
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertIn(f"a.txt sha256={sha256(edited)} hunks=1", stdout.getvalue())
+
+    def test_without_repo_outside_a_work_tree_reports_the_git_error(self) -> None:
+        stderr = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(TEMP_PARENT)}),
+            contextlib.chdir(self.temp),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            code = HELPER.main(["--list-hunks", "a.txt"])
+        self.assertEqual(code, 1)
+        self.assertIn("rev-parse --show-toplevel", stderr.getvalue())
+
     def commit_base(self, name: str, data: bytes) -> None:
         self.write(name, data)
         self.git("commit", "-q", "-am", f"base {name}")

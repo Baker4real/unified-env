@@ -489,7 +489,7 @@ def commit_exact(
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--repo", required=True, type=Path, help="work tree root")
+    parser.add_argument("--repo", type=Path, help="work tree root; defaults to the one holding the current directory")
     parser.add_argument("--expected-head", help="commit HEAD points to now; it becomes the parent")
     parser.add_argument("--message-file", type=Path)
     parser.add_argument(
@@ -577,7 +577,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    repo = args.repo.resolve()
+    try:
+        repo = (args.repo or Path(git_text(Path.cwd(), "rev-parse", "--show-toplevel"))).resolve()
+    except CommitError as exc:
+        print(f"commit_exact_files: {exc}", file=sys.stderr)
+        return 1
     if args.list_hunks:
         try:
             print(list_hunks(repo, Path(args.list_hunks).as_posix()))
