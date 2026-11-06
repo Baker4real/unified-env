@@ -709,6 +709,124 @@ class SkillInstallGuardedTests(GuardedInstallTestCase):
         self.assertEqual(ledger["sources"][0]["skills"], [name])
         self.assertEqual(list((self.temp / "evidence").glob("install-*/backups/source-state-after.json")), [])
 
+    def write_skill_with_invocation_conflict(self, skill_dir: Path, name: str) -> None:
+        # SKILL.md leaves disable-model-invocation unset (model-invoked) while agents/openai.yaml
+        # says allow_implicit_invocation: false, which the catalog generator reports as a conflict.
+        (skill_dir / "agents").mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: 调用策略冲突的夹具\n---\n\n# {name}\n",
+            encoding="utf-8",
+        )
+        (skill_dir / "agents" / "openai.yaml").write_text(
+            "policy:\n  allow_implicit_invocation: false\n",
+            encoding="utf-8",
+        )
+
+    def dry_run_transaction(self, args: list[str]) -> tuple[int, dict[str, object], Path]:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = WRAPPER.main([*args, "--dry-run"])
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        return code, json.loads(transaction.read_text(encoding="utf-8")), transaction.parent
+
+    def test_dry_run_rejects_preexisting_catalog_conflict_in_another_skill(self) -> None:
+        # The 2026-11-06 official .system refresh dropped review-agent's disable-model-invocation
+        # while its agents/openai.yaml kept allow_implicit_invocation: false; dry-run passed and
+        # apply then failed in catalog-generation for an unrelated candidate.
+        self.write_skill_with_invocation_conflict(self.active / ".system" / "review-agent", "review-agent")
+        candidate = self.write_candidate("test-skill-wrapper", "与冲突无关的干净候选")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+
+        code, result, evidence = self.dry_run_transaction(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertNotEqual(result["status"], "dry-run-pass")
+        stderr = (evidence / "dry-run-catalog-check.stderr.txt").read_text(encoding="utf-8")
+        self.assertIn("review-agent", stderr)
+        self.assertIn("allow_implicit_invocation 语义冲突", stderr)
+        self.assertFalse((self.active / "test-skill-wrapper").exists())
+
+    def test_dry_run_passes_when_candidate_fixes_its_own_live_catalog_conflict(self) -> None:
+        name = "test-skill-wrapper"
+        active_skill = self.active / name
+        self.write_skill_with_invocation_conflict(active_skill, name)
+        (active_skill / "SOURCE.md").write_text(
+            f"# Source Provenance\n\nSkill: `{name}`\nStatus: source-review\n",
+            encoding="utf-8",
+        )
+        self.ledger.write_text(
+            json.dumps(
+                {
+                    "updated_at": "2026-07-14",
+                    "notes": [],
+                    "sources": [{"id": "local-test", "type": "local-candidate", "skills": [name]}],
+                    "unresolved": [],
+                    "deleted": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        live_skill_md = (active_skill / "SKILL.md").read_bytes()
+        candidate = self.temp / f"candidate-{name}"
+        self.write_skill_with_invocation_conflict(candidate, name)
+        (candidate / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: 补上调用策略的候选\ndisable-model-invocation: true\n---\n\n# {name}\n",
+            encoding="utf-8",
+        )
+        manifest = self.write_manifest(name, "update")
+        args = self.wrapper_args(candidate, manifest)
+        args.insert(2, "--update")
+
+        code, result, _ = self.dry_run_transaction(args)
+
+        self.assertEqual(code, 0, result.get("error"))
+        self.assertEqual(result["status"], "dry-run-pass")
+        self.assertEqual((active_skill / "SKILL.md").read_bytes(), live_skill_md)
+
+    def test_dry_run_rejects_candidate_that_introduces_catalog_conflict(self) -> None:
+        name = "test-skill-wrapper"
+        candidate = self.temp / f"candidate-{name}"
+        self.write_skill_with_invocation_conflict(candidate, name)
+        manifest = self.write_manifest(name, "install")
+
+        code, result, evidence = self.dry_run_transaction(self.wrapper_args(candidate, manifest))
+
+        self.assertEqual(code, 2)
+        self.assertNotEqual(result["status"], "dry-run-pass")
+        stderr = (evidence / "dry-run-catalog-check.stderr.txt").read_text(encoding="utf-8")
+        self.assertIn(name, stderr)
+        self.assertIn("allow_implicit_invocation 语义冲突", stderr)
+        self.assertFalse((self.active / name).exists())
+
+    def test_dry_run_agrees_with_apply_when_reinstalling_a_skill_the_ledger_lists_as_deleted(self) -> None:
+        # Apply drops this transaction's names from the ledger's deleted list before
+        # catalog-generation, so the dry-run check must not flag that entry as a conflict.
+        name = "test-skill-wrapper"
+        self.ledger.write_text(
+            json.dumps(
+                {
+                    "updated_at": "2026-07-14",
+                    "notes": [],
+                    "sources": [],
+                    "unresolved": [],
+                    "deleted": [{"name": name, "status": "deleted-by-user"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        live_ledger = self.ledger.read_bytes()
+        candidate = self.write_candidate(name, "重装曾被删除的 skill")
+        manifest = self.write_manifest(name, "install")
+        args = self.wrapper_args(candidate, manifest)
+
+        code, result, _ = self.dry_run_transaction(args)
+
+        self.assertEqual(code, 0, result.get("error"))
+        self.assertEqual(result["status"], "dry-run-pass")
+        self.assertEqual(self.ledger.read_bytes(), live_ledger)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(WRAPPER.main(args), 0)
+        self.assertEqual(json.loads(self.ledger.read_text(encoding="utf-8"))["deleted"], [])
+
     def test_activation_readability_failure_restores_content_acl_and_ledger(self) -> None:
         name = "test-skill-wrapper"
         active_skill = self.active / name

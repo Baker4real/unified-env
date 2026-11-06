@@ -35,6 +35,8 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 7. wrapper 调用 `generate_skill_catalog.py --write`，再运行闭包、catalog 条目、ledger coverage 和 `SKILL.md` SHA-256 复核。
 8. 事务身份建立后的任一步失败都恢复 active 目录和状态文件，并把失败/回滚结果写入 `D:\agents\run-evidence\skill-install-guarded\`。事务 manifest 记录 decision 快照的持久路径和 SHA-256，成功、dry-run 与事务内失败结果使用同一证据身份。decision 输入在事务身份建立前消失、不可读或变化时返回受管错误，但不声称已生成事务 evidence。
 
+`--dry-run` 在第 3 步之后、任何 active/state 备份之前返回。返回 `dry-run-pass` 前，wrapper 用同一个生成器只读跑一次 `generate_skill_catalog.py --dry-run`，让第 7 步会拒绝的 ledger 冲突在 dry-run 就失败：不论冲突在本事务没碰的 skill 里（2026-11-06 官方 `.system` 刷新后 review-agent 的调用策略冲突即如此），还是由候选引入。输入按 apply 后的状态投影：`--overlay-root <staging>` 加每个闭包 target 的 `--overlay-target`，把 target 子树换成 staging 里的同一相对路径（staging 里没有的 target 按删除投影，对应 rename 旧名和 merge 退役名），其余照读 active root；`--ledger` 是第 6 步 `update_ledger` 会写出的 ledger，存为 evidence 的 `dry-run-ledger.json`，live ledger 不动。所以候选修掉 target 自身既有冲突、或重装 ledger 标为 deleted 的 skill 时照常通过。闭包仍对 live root 计算，因此只带本事务的 `--closure-baseline`、不带 `--closure-target`：live 里旧 target 的 finding 不阻塞，staging payload 的闭包已由第 3 步检查。生成器的冲突报错列出冲突 artifact，输出在 evidence 的 `dry-run-catalog-check.stdout.txt` 与 `.stderr.txt`；`--overlay-root` 不能与 `--write` 同用，catalog 只从真实 active root 写入。
+
 `activation_readability` 只证明安装后的文件系统权限、枚举和读取健康；Skill Catalog 的 `runtime_verification=unverified` 仍表示尚未验证 skill 行为本身，两者不能互相替代。
 
 ## Decision manifest 最小格式

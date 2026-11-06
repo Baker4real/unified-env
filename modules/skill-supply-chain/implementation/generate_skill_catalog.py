@@ -582,6 +582,37 @@ def _scan_skill_files(
     )
 
 
+def _projected_active_paths(
+    active: Path,
+    active_paths: list[Path],
+    overlay: dict[str, Any] | None,
+) -> list[tuple[Path, Path]]:
+    """Pair each SKILL.md with the root its relative path is taken from.
+
+    With an overlay, every target subtree of the active root is replaced by the same
+    relative subtree of the overlay root; a target missing there is projected as removed.
+    """
+
+    if overlay is None:
+        return [(path, active) for path in active_paths]
+    overlay_root: Path = overlay["root"]
+    targets = [target.casefold() for target in overlay["targets"]]
+
+    def projected(path: Path, root: Path) -> bool:
+        skill = path.parent.relative_to(root).as_posix().casefold()
+        return any(skill == target or skill.startswith(target + "/") for target in targets)
+
+    overlay_paths, overlay_reparse, _ = _scan_skill_files(overlay_root, scope="overlay")
+    if overlay_reparse:
+        raise CatalogError(
+            "overlay root 内存在未扫描的 reparse point，拒绝投影：" + ", ".join(overlay_reparse)
+        )
+    return [
+        *((path, active) for path in active_paths if not projected(path, active)),
+        *((path, overlay_root) for path in overlay_paths if projected(path, overlay_root)),
+    ]
+
+
 def _stat_identity(stat_result: os.stat_result) -> tuple[Any, ...]:
     return (
         getattr(stat_result, "st_dev", None),
@@ -870,8 +901,11 @@ def _validate_closure(
     }
 
 
-def _run_resource_closure(active_root: Path) -> dict[str, Any]:
-    script = _normalize_file(DEFAULT_CLOSURE_SCRIPT, label="资源闭包脚本")
+def _run_resource_closure(
+    active_root: Path,
+    closure_script: Path = DEFAULT_CLOSURE_SCRIPT,
+) -> dict[str, Any]:
+    script = _normalize_file(closure_script, label="资源闭包脚本")
     interpreter = Path(sys.executable).resolve()
     if not interpreter.is_file():
         raise CatalogError(f"当前 Python 解释器不是普通文件：{interpreter}")
@@ -1100,8 +1134,14 @@ def build_catalog(
     resource_closure: dict[str, Any] | None = None,
     generated_at: str | None = None,
     closure_gate: dict[str, Any] | None = None,
+    overlay: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a catalog without writing any file or contacting a remote service."""
+    """Build a catalog without writing any file or contacting a remote service.
+
+    ``overlay`` ({"root": Path, "targets": [...]}, from ``_load_overlay``) projects a
+    transaction's staged targets over the active root for a dry-run check; resource
+    closure is still computed on the live active root.
+    """
 
     active = _normalize_root(active_root, required=True, label="active root")
     cache = _normalize_root(plugin_cache_root, required=True, label="plugin cache root")
@@ -1153,12 +1193,12 @@ def build_catalog(
     )
 
     artifacts: list[dict[str, Any]] = []
-    for path in active_paths:
-        scope = "system" if ".system" in path.relative_to(active).parts else "active"
+    for path, root in _projected_active_paths(active, active_paths, overlay):
+        scope = "system" if ".system" in path.relative_to(root).parts else "active"
         artifacts.append(
             _artifact(
                 skill_path=path,
-                root=active,
+                root=root,
                 scope=scope,
                 read_only=False,
                 ledger_states=ledger_states,
@@ -1346,6 +1386,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
+        "--closure-script",
+        type=Path,
+        default=DEFAULT_CLOSURE_SCRIPT,
+        help="strict resource closure 脚本的真实路径",
+    )
+    parser.add_argument(
         "--closure-baseline",
         type=Path,
         help="事务写入前的 strict closure JSON；提供后按基线差分 + target 作用域判定",
@@ -1355,6 +1401,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="本事务 target skill（相对 active root，如 .system/imagegen），可重复",
+    )
+    parser.add_argument(
+        "--overlay-root",
+        type=Path,
+        help="只用于 --dry-run：每个 --overlay-target 子树改读本目录下的同一相对路径（布局与 active root 相同），其余照读 active root",
+    )
+    parser.add_argument(
+        "--overlay-target",
+        action="append",
+        default=[],
+        help="被投影的 target（相对 active root，如 .system/imagegen），可重复；overlay root 里没有的按删除投影",
     )
     return parser
 
@@ -1375,6 +1432,21 @@ def _load_closure_gate(baseline_path: Path | None, targets: list[str]) -> dict[s
     return {"baseline_findings": findings, "targets": list(targets)}
 
 
+def _load_overlay(root: Path | None, targets: list[str], *, mode: str) -> dict[str, Any] | None:
+    if root is None:
+        if targets:
+            raise CatalogError("--overlay-target 必须与 --overlay-root 一起使用")
+        return None
+    if mode == "write":
+        raise CatalogError("--overlay-root 只用于 --dry-run：catalog 不能按投影写入")
+    if not targets:
+        raise CatalogError("--overlay-root 至少需要一个 --overlay-target")
+    for target in targets:
+        if "\\" in target or any(part in {"", ".", ".."} for part in target.split("/")):
+            raise CatalogError(f"--overlay-target 必须是 active root 下的相对路径：{target!r}")
+    return {"root": _normalize_root(root, required=True, label="overlay root"), "targets": list(targets)}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -1383,18 +1455,23 @@ def main(argv: list[str] | None = None) -> int:
         active = _normalize_root(args.active_root, required=True, label="active root")
         cache = _normalize_root(args.plugin_cache_root, required=True, label="plugin cache root")
         ledger = _normalize_file(args.ledger, label="source-state ledger")
+        overlay = _load_overlay(args.overlay_root, args.overlay_target, mode=mode)
         output = _safe_output_path(args.output, active_root=active, cache_root=cache)
         closure_gate = _load_closure_gate(args.closure_baseline, args.closure_target)
-        closure = _run_resource_closure(active)
+        closure = _run_resource_closure(active, closure_script=args.closure_script)
         catalog = build_catalog(
             active_root=active,
             plugin_cache_root=cache,
             ledger_path=ledger,
             resource_closure=closure,
             closure_gate=closure_gate,
+            overlay=overlay,
         )
         if catalog["checks"]["ledger"]["status"] == "conflict":
-            raise CatalogError("ledger 与 SOURCE.md 存在冲突，拒绝写入")
+            raise CatalogError(
+                "ledger 与 SOURCE.md 存在冲突，拒绝写入："
+                + json.dumps(catalog["checks"]["ledger"]["conflicts"], ensure_ascii=False)
+            )
         if mode == "write":
             write_catalog(catalog, output)
         print(json.dumps(_summary(catalog, mode=mode, output=output), ensure_ascii=False, indent=2))

@@ -1111,13 +1111,14 @@ else:
                 ledger = base / "ledger.json"
                 ledger.write_text(json.dumps({"sources": []}), encoding="utf-8")
                 output = base / "reports" / "catalog.json"
+                closure_script = base / "custom-closure.py"
                 stdout = io.StringIO()
 
                 with mock.patch.object(
                     catalog_module,
                     "_run_resource_closure",
                     return_value=_closure_result(active, 1),
-                ):
+                ) as closure_mock:
                     with contextlib.redirect_stdout(stdout):
                         exit_code = catalog_module.main(
                             [
@@ -1130,16 +1131,45 @@ else:
                                 str(ledger),
                                 "--output",
                                 str(output),
+                                "--closure-script",
+                                str(closure_script),
                             ]
                         )
 
                 self.assertEqual(exit_code, 0)
+                closure_mock.assert_called_once_with(active, closure_script=closure_script)
                 self.assertFalse(output.exists())
                 self.assertFalse(output.parent.exists())
                 summary = json.loads(stdout.getvalue())
                 self.assertFalse(summary["write"])
                 self.assertNotIn("artifacts", summary)
                 self.assertEqual(summary["artifact_count"], 1)
+
+        def test_resource_closure_uses_explicit_script(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active = base / "active"
+                active.mkdir()
+                closure_script = base / "custom-closure.py"
+                closure_script.write_text("# test double\n", encoding="utf-8")
+                completed = subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stdout=json.dumps(_closure_result(active, 1)),
+                    stderr="",
+                )
+                with mock.patch.object(
+                    catalog_module.subprocess,
+                    "run",
+                    return_value=completed,
+                ) as run_mock:
+                    catalog_module._run_resource_closure(
+                        active,
+                        closure_script=closure_script,
+                    )
+
+                command = run_mock.call_args.args[0]
+                self.assertEqual(command[1], str(closure_script))
 
         def test_missing_plugin_cache_fails_closed(self) -> None:
             with tempfile.TemporaryDirectory() as temp:
@@ -1389,6 +1419,39 @@ else:
 
             self.assertEqual(exit_code, 2)
             self.assertIn("--closure-target 必须与 --closure-baseline 一起使用", stderr.getvalue())
+
+        def test_cli_overlay_is_rejected_for_write(self) -> None:
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                active, cache, ledger = _scoped_closure_fixture(base)
+                overlay = base / "stage"
+                overlay.mkdir()
+                output = base / "reports" / "catalog.json"
+                stderr = io.StringIO()
+                with mock.patch.object(catalog_module, "_run_resource_closure") as closure_mock:
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+                        exit_code = catalog_module.main(
+                            [
+                                "--write",
+                                "--active-root",
+                                str(active),
+                                "--plugin-cache-root",
+                                str(cache),
+                                "--ledger",
+                                str(ledger),
+                                "--output",
+                                str(output),
+                                "--overlay-root",
+                                str(overlay),
+                                "--overlay-target",
+                                "animate",
+                            ]
+                        )
+
+                self.assertFalse(output.exists())
+            self.assertEqual(exit_code, 2)
+            self.assertIn("--overlay-root 只用于 --dry-run", stderr.getvalue())
+            closure_mock.assert_not_called()
 
         def test_dry_run_does_not_use_network(self) -> None:
             with tempfile.TemporaryDirectory() as temp:

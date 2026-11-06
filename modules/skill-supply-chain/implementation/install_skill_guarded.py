@@ -420,6 +420,51 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             decision=decision,
         )
         if args.dry_run:
+            # Apply's catalog-generation refuses any ledger conflict in the active root, including
+            # pre-existing ones in skills this transaction does not touch; run the same generator
+            # read-only here so a dry-run cannot pass where apply would fail. The staged targets
+            # are projected over the live root and the ledger is the one apply would write, so a
+            # candidate that fixes its target's own conflict (or reinstalls a deleted name)
+            # passes and one that introduces a conflict fails. The baseline carries no targets
+            # because the generator's closure sees the live (old) targets; the staged payload's
+            # closure was already checked by stage_candidate.
+            projected_ledger_path = evidence_dir / "dry-run-ledger.json"
+            _base.atomic_write_json(
+                projected_ledger_path,
+                _ledger.update_ledger(
+                    _base.load_json(ledger_path, label="source ledger"),
+                    names=ledger_names,
+                    context=context,
+                ),
+            )
+            _base.run_process(
+                [
+                    str(interpreter),
+                    str(generator),
+                    "--dry-run",
+                    "--active-root",
+                    str(active_root),
+                    "--plugin-cache-root",
+                    str(plugin_cache_root),
+                    "--ledger",
+                    str(projected_ledger_path),
+                    "--output",
+                    str(evidence_dir / "dry-run-catalog.json"),
+                    "--closure-script",
+                    str(closure_script),
+                    "--closure-baseline",
+                    str(baseline_closure_path),
+                    "--overlay-root",
+                    str(stage_dir),
+                    *[
+                        argument
+                        for target in closure_targets
+                        for argument in ("--overlay-target", target)
+                    ],
+                ],
+                evidence_dir=evidence_dir,
+                label="dry-run-catalog-check",
+            )
             result = {
                 **plan,
                 "status": "dry-run-pass",
@@ -572,6 +617,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 str(ledger_path),
                 "--output",
                 str(catalog_generation_output),
+                "--closure-script",
+                str(closure_script),
                 "--closure-baseline",
                 str(baseline_closure_path),
                 *[
