@@ -27,7 +27,9 @@
 //      --max-depth: each takes minutes or times out;
 //  13. stopping Explorer by name (Stop-Process or taskkill naming explorer, Get-Process explorer | Stop-Process,
 //      .Kill() or WMI Terminate on it), inline or inside a .ps1/.psm1 the command runs, remote ones included: it
-//      skips the folder-window and file-operation checks of Restart-ExplorerShell.ps1, which is exempt.
+//      skips the folder-window and file-operation checks of Restart-ExplorerShell.ps1, which is exempt;
+//  14. PowerShell commands starting with a bare `bash` or `bash.exe`: it resolves to C:\WINDOWS\system32\bash.exe, the
+//      WSL launcher, where the script's D:/ paths do not exist. Full paths and `wsl bash` pass.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
@@ -413,6 +415,21 @@ function rgBroadRootReason(path) {
     '确实要从这一层找，加 --max-depth 限深。'
 }
 
+// Rule 14. A simple command whose first word is a bare bash or bash.exe; a full path and `wsl bash` are deliberate.
+function bareBash(command) {
+  for (const words of simpleCommands(command)) {
+    if (/^bash(?:\.exe)?$/i.test(words[0] || '')) return words[0]
+  }
+  return null
+}
+
+function bareBashReason(word) {
+  return `PowerShell 里裸写的 ${word} 解析到 C:\\WINDOWS\\system32\\bash.exe（WSL），脚本里的 D:/ 路径在 WSL 里不存在，askpass 这类入口直接报 No such file or directory。` +
+    "改用 Git Bash 全路径：& 'C:/Program Files/Git/bin/bash.exe' scripts/x.sh '参数'；PowerShell 没有 < 重定向，要喂文件给 stdin 就交给 bash：" +
+    "& 'C:/Program Files/Git/bin/bash.exe' -c 'scripts/x.sh sh -s < 本地脚本'。确实要进 WSL 就写 wsl。" +
+    `（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 17 条）`
+}
+
 // Rule 10. In -like, ? matches any one character: '??*' matches every string of two or more characters.
 const LIKE_DOUBLE_QUESTION = /-[ic]?(?:not)?like\s+['"]\?\?/i
 
@@ -681,6 +698,8 @@ export function evaluate(payload, io = defaultIo) {
       return "-like 里的 ? 是单字符通配符：'??*' 匹配任何至少两个字符的字符串，筛不出 git status --porcelain 的未跟踪行（字面 ??）。" +
         "改用 .StartsWith('??')，或在模式里转义成 '`?`?*'。" + TEXT_ONLY_HINT
     }
+    const bash = bareBash(command)
+    if (bash) return bareBashReason(bash)
   }
 
   const broad = rgBroadRoot(command, payload?.cwd)
@@ -893,6 +912,19 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', 'Get-Process explorer | Select-Object Id, StartTime', false],
     ['PowerShell', 'Stop-Process -Id $child.Id; Start-Process explorer.exe', false],
     ['PowerShell', 'Stop-Process -Name ExplorerPatcher', false],
+    // A bare bash in PowerShell starts WSL; full paths, wsl and text pass, and the Bash tool's bash is Git Bash.
+    ['PowerShell', "bash scripts/rssh.sh 'uptime'", true],
+    ['PowerShell', 'bash.exe -n scripts/bessh.sh', true],
+    ['PowerShell', "Get-Date; bash -c 'ls'", true],
+    ['PowerShell', '& bash scripts/x.sh', true],
+    ['PowerShell', 'Get-Content x.sh | bash', true],
+    ['PowerShell', "& 'C:/Program Files/Git/bin/bash.exe' scripts/rssh.sh 'uptime'", false],
+    ['PowerShell', "& 'C:/Program Files/Git/bin/bash.exe' -c 'scripts/rssh.sh sh -s < D:/x/r1.sh'", false],
+    ['PowerShell', '(Get-Command bash).Source', false],
+    ['PowerShell', "rg -n 'bash ' AGENTS.md", false],
+    ['PowerShell', "Write-Output 'bash scripts/x.sh'", false],
+    ['PowerShell', 'wsl bash -c ls', false],
+    ['Bash', 'bash scripts/x.sh', false],
     // The Terminal panel: shared and PowerShell-only rules apply; MSIX-only and Bash-only rules do not.
     [TERMINAL_TOOL, 'Remove-Item -Recurse -Force D:\\x', true],
     [TERMINAL_TOOL, 'Stop-Process -Name explorer -Force', true],
@@ -900,6 +932,7 @@ if (process.argv.includes('--self-test')) {
     [TERMINAL_TOOL, "pwsh -NoProfile -File 'D:\\repo\\tools\\recycle.ps1'", true],
     [TERMINAL_TOOL, 'gh issue list --json number,title', true],
     [TERMINAL_TOOL, 'rg -l foo D:\\', true],
+    [TERMINAL_TOOL, 'bash scripts/be_wan_redial.sh', true],
     [TERMINAL_TOOL, "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false, desktop],
     [TERMINAL_TOOL, "pwsh -NoProfile -File 'D:\\repo\\tools\\docker_off.ps1'", false, desktop],
     [TERMINAL_TOOL, "& 'D:\\x\\Grok_Bot_0.77.0_Setup.exe' /S", false, desktop],

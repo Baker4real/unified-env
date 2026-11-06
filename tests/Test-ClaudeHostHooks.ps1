@@ -77,7 +77,9 @@ $denyCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git status --porcelain | Where-Object { $_ -like ''??*'' }' } },
     # 结束进程的写法同样拆开拼接；Terminal 面板的命令走同一个 guard。
     @{ tool_name = 'PowerShell'; tool_input = @{ command = ('Stop-' + 'Process -Name explorer -Force') } },
-    @{ tool_name = 'mcp__terminal__run_in_terminal'; tool_input = @{ command = 'Remove-Item -Recurse -Force D:\tmp\x' } }
+    @{ tool_name = 'mcp__terminal__run_in_terminal'; tool_input = @{ command = 'Remove-Item -Recurse -Force D:\tmp\x' } },
+    # PowerShell 里裸写的 bash 是 WSL。
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'bash scripts/rssh.sh uptime' } }
 )
 foreach ($case in $denyCases) {
     $result = Invoke-Guard ($case | ConvertTo-Json -Compress)
@@ -96,7 +98,8 @@ $allowCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Get-ChildItem -Force -LiteralPath ''D:\$Recycle.Bin''' } },
     @{ tool_name = 'Bash'; tool_input = @{ command = 'pwsh -NoProfile -File ./x.ps1 "$HOME"' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -n foo D:\agents\x -g ''*.ps1''' } },
-    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git status --porcelain | Where-Object { $_.StartsWith(''??'') }' } }
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git status --porcelain | Where-Object { $_.StartsWith(''??'') }' } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'C:/Program Files/Git/bin/bash.exe' scripts/rssh.sh uptime" } }
 )
 foreach ($case in $allowCases) {
     $result = Invoke-Guard ($case | ConvertTo-Json -Compress)
