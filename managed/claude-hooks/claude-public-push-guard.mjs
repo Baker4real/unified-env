@@ -1,5 +1,5 @@
-// Claude Code PreToolUse guard (matcher PowerShell|Bash): keeps private network addresses and personal e-mail
-// addresses out of public GitHub repositories.
+// Claude Code PreToolUse guard (matcher PowerShell|Bash|mcp__terminal__run_in_terminal): keeps private network
+// addresses and personal e-mail addresses out of public GitHub repositories, pushes typed into the Terminal panel too.
 // For a `git push` whose remote is a github.com repository that is public, or whose visibility gh cannot read,
 // it scans what the push makes public for the first time: the non-merge commits that neither the destination's
 // remote-tracking refs nor those of another public GitHub remote (an upstream) reach. It streams their added lines,
@@ -357,7 +357,8 @@ export async function evaluate(payload, io = defaultIo, budgetMs = BUDGET_MS) {
   const deadline = Date.now() + budgetMs
   const tool = String(payload?.tool_name || '')
   const command = String(payload?.tool_input?.command || '')
-  if (!command || (tool !== 'PowerShell' && tool !== 'Bash') || !/\bgit\b/.test(command) || !/\bpush\b/.test(command)) return null
+  if (!command || !['PowerShell', 'Bash', 'mcp__terminal__run_in_terminal'].includes(tool) ||
+    !/\bgit\b/.test(command) || !/\bpush\b/.test(command)) return null
   const acknowledged = new Set([...command.matchAll(ACK)].flatMap(m => m[1].toLowerCase().split(',')).filter(Boolean))
   if (acknowledged.has('all')) return null
   const visibilities = new Map()
@@ -563,6 +564,7 @@ async function selfTest() {
   check((await run('git push origin main', fakeIo({ logText: header('clean', personal) })))?.includes('--reset-author') === true,
     'identity e-mail denies with the re-author hint')
   check(await run('git push https://github.com/o/r.git main', fakeIo()) !== null, 'URL destination')
+  check(await run("git -C 'D:/repo' push origin main", fakeIo(), 'mcp__terminal__run_in_terminal') !== null, 'Terminal panel push')
 
   const upstream = fakeIo({
     remotes: { origin: 'https://github.com/up/r.git', private: 'https://github.com/o/r.git', backup: 'https://github.com/o/old.git' },

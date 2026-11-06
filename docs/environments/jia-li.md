@@ -28,6 +28,13 @@ intent: 记录家里设备的受控环境事实与差异
 - 正式命令与文件传输走 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。
 - 2026-08-31 本机 `bak\` 下没有 `Upgrade.exe` / `aria2c.exe`，2026-10-28 安装根下已没有 `bak\`。应用内更新从 `bin` 启动下载器。自习室的 `bak` 回退约束见 `docs/environments/zi-xi-shi.md`，不要套到本机。
 
+## 网易爆米花
+
+- 安装根：`D:\Netease\BaoMiHua`，与 UU 远程的 `D:\Program Files\Netease` 是两个目录。2026-11-06 重装后为 `1.2.2`。
+- 2026-11-04 22:43 它的自动更新（1.2.1 → 1.2.2）先跑旧版卸载器删掉程序文件，新版没装上；11-06 重装 1.2.1 后当场自更新到 1.2.2，这次成功。时间线、排除项和未验证项见 `D:\agents\run-evidence\baomihua-vanished-20261104\README.md`。
+- 再被删时直接运行 1.2.2 完整安装包 `C:\Users\WINDOWS\AppData\Local\BaoMiHua\other\BH_1469788759\BaoMiHua_Install_1220.exe`（2026-11-06 还在，md5 见上述 README）。
+- 重装后任务栏、开始菜单图标空白是资源管理器的内存缓存：用 `D:/Codex/.codex/scripts/Restart-ExplorerShell.ps1` 的 Plan → Apply 重启资源管理器。
+
 ## Windows Terminal、PowerShell 与 WSL
 
 - 2026-07-20 实测 Windows Terminal `1.24.11911.0` 已设为系统默认终端；其

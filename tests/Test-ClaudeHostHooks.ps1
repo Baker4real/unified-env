@@ -74,7 +74,10 @@ $denyCases = @(
     @{ tool_name = 'Bash'; tool_input = @{ command = "ls 'D:\\agents'" } },
     @{ tool_name = 'Bash'; tool_input = @{ command = 'pwsh -NoProfile -Command "Get-Item $env:TEMP"' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -n foo D:\agents\x\*.ps1' } },
-    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git status --porcelain | Where-Object { $_ -like ''??*'' }' } }
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git status --porcelain | Where-Object { $_ -like ''??*'' }' } },
+    # 结束进程的写法同样拆开拼接；Terminal 面板的命令走同一个 guard。
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = ('Stop-' + 'Process -Name explorer -Force') } },
+    @{ tool_name = 'mcp__terminal__run_in_terminal'; tool_input = @{ command = 'Remove-Item -Recurse -Force D:\tmp\x' } }
 )
 foreach ($case in $denyCases) {
     $result = Invoke-Guard ($case | ConvertTo-Json -Compress)
@@ -111,6 +114,9 @@ try {
     $result = Invoke-Guard $scriptCase
     Assert-Equal $result.exitCode 0 '引用脚本 deny 也必须 exit 0。'
     Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' '引用脚本里的回收站调用必须拦截。'
+    [IO.File]::WriteAllText($fixture, ('Stop-' + 'Process -Name explorer -Force'), [Text.UTF8Encoding]::new($false))
+    $result = Invoke-Guard $scriptCase
+    Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' '引用脚本里按名结束 Explorer 必须拦截。'
     [IO.File]::WriteAllText($fixture, 'Get-ChildItem -LiteralPath $PSScriptRoot', [Text.UTF8Encoding]::new($false))
     $result = Invoke-Guard $scriptCase
     Assert-Equal $result.stdout.Trim() '' '无害的引用脚本必须放行。'
@@ -128,6 +134,9 @@ Assert-Equal $result.exitCode 0 'HKCU 写入 deny 也必须 exit 0。'
 Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' 'Claude Desktop 下的 HKCU 写入必须拦截。'
 $result = Invoke-Guard $hkcuCase
 Assert-Equal $result.stdout.Trim() '' '没有 Claude Desktop 入口变量时 HKCU 写入放行。'
+$terminalHkcuCase = @{ tool_name = 'mcp__terminal__run_in_terminal'; tool_input = @{ command = ('Set-Item' + 'Property -LiteralPath ''HK' + 'CU:\Software\X'' -Name a -Value 1') } } | ConvertTo-Json -Compress
+$result = Invoke-Guard $terminalHkcuCase -Entrypoint 'claude-desktop'
+Assert-Equal $result.stdout.Trim() '' 'Terminal 面板的 shell 在 MSIX 包外运行，HKCU 写入放行。'
 
 # Claude Desktop 下工具 shell 直接启动的安装器同样只在入口变量以 claude-desktop 开头时拦截；经 WMI 在包外启动的放行。
 # 静默安装开关拆开拼接，理由同上。
@@ -260,7 +269,7 @@ Assert-Equal $pushGarbage.stdout.Trim() '' 'push guard 遇到非 JSON 输入必�
 $managed = Get-Content -LiteralPath $managedHooksPath -Raw | ConvertFrom-Json
 $registration = @($managed.PreToolUse)
 Assert-Equal $registration.Count 1 '受管注册只含一条 PreToolUse。'
-Assert-Equal $registration[0].matcher 'PowerShell|Bash' 'matcher 必须覆盖 PowerShell 与 Bash。'
+Assert-Equal $registration[0].matcher 'PowerShell|Bash|mcp__terminal__run_in_terminal' 'matcher 必须覆盖 PowerShell、Bash 与 Terminal 面板的 run_in_terminal。'
 $hook = @($registration[0].hooks)[0]
 Assert-Equal $hook.command $node 'hook 必须用受管 node 的 exec 形式。'
 Assert-Equal @($hook.args)[0] (Join-Path $registeredRoot 'claude-pretool-guard.mjs') 'hook 参数必须指向受管 guard。'

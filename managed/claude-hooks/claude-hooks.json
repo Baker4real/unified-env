@@ -15,7 +15,7 @@
   ],
   "PreToolUse": [
     {
-      "matcher": "PowerShell|Bash",
+      "matcher": "PowerShell|Bash|mcp__terminal__run_in_terminal",
       "hooks": [
         {
           "type": "command",

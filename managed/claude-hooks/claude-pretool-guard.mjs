@@ -1,4 +1,6 @@
-// Claude Code PreToolUse guard (matcher PowerShell|Bash).
+// Claude Code PreToolUse guard (matcher PowerShell|Bash|mcp__terminal__run_in_terminal).
+// The Terminal panel tool types one line into the user's own PowerShell outside the MSIX package, so rules 8 and 11
+// skip it, the PowerShell-only rules apply to it and the Bash-only rules do not.
 // Denies mechanical mistakes before the command runs:
 //   1. recursive directory deletes that bypass the managed safe-tree-delete entry;
 //   2. Recycle Bin moves outside the managed recycle entry, inline or inside a .ps1/.psm1 the command runs;
@@ -22,7 +24,10 @@
 //      they stay inside the MSIX package even with -Verb RunAs, so their HKCU writes land in the private layer.
 //      A launch through WMI Win32_Process.Create runs outside the package and passes;
 //  12. rg walks of whole roots (D:\, D:\agents, D:\agents\run-evidence, D:\Codex, D:\Codex\.codex) without
-//      --max-depth: each takes minutes or times out.
+//      --max-depth: each takes minutes or times out;
+//  13. stopping Explorer by name (Stop-Process or taskkill naming explorer, Get-Process explorer | Stop-Process,
+//      .Kill() or WMI Terminate on it), inline or inside a .ps1/.psm1 the command runs, remote ones included: it
+//      skips the folder-window and file-operation checks of Restart-ExplorerShell.ps1, which is exempt.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
@@ -36,6 +41,8 @@ const MANAGED_RECYCLE = 'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1'
 const GUIDANCE = 'D:\\Codex\\.codex\\docs\\agent-guidance'
 const TEXT_ONLY_HINT = '如果命令里的写法只是文本（搜索模式、提交信息），改用 Grep 工具，或把关键词拆开写。'
 const MSIX_HKCU_PAGE = 'D:\\agents\\knowledge-base\\wiki\\concepts\\Claude Desktop 里 Claude Code 的 HKCU 与 AppData 写入被 MSIX 虚拟化.md'
+const RESTART_EXPLORER = 'D:\\Codex\\.codex\\scripts\\Restart-ExplorerShell.ps1'
+const TERMINAL_TOOL = 'mcp__terminal__run_in_terminal'
 
 const RECURSIVE_DELETE_PATTERNS = [
   // PowerShell Remove-Item and its aliases with -Recurse (or an unambiguous prefix such as -r / -rec).
@@ -209,6 +216,36 @@ function installerReason(where) {
 // Returns a deny reason when, under Claude Desktop, the command or a script it runs locally starts an installer.
 function installerDecision(command, cwd, io) {
   return isDesktop(io) ? localTextDecision(command, cwd, io, launchesInstaller, installerReason) : null
+}
+
+// Rule 13. One statement must name both a kill verb and the explorer process, so `Start-Process explorer.exe` and
+// `Stop-Process -Id $id; Start-Process explorer.exe` pass. Statements split on newlines and ;, after joining lines
+// that a pipe or backtick continues; ExplorerShell and ExplorerPatcher are other words.
+const PROCESS_KILL = /\b(?:Stop-Process|spps|kill|taskkill|tskill|pskill)\b|\.Kill\s*\(|\bTerminate\b/i
+const EXPLORER_PROCESS = /\bexplorer(?:\.exe)?\b/i
+const EXPLORER_EXEMPT = new Set(['restart-explorershell.ps1'])
+
+function killsExplorer(text) {
+  return text.replace(/[|`][ \t]*\r?\n|\r?\n[ \t]*\|/g, ' | ').split(/[\r\n;]+/)
+    .some(statement => PROCESS_KILL.test(statement) && EXPLORER_PROCESS.test(statement))
+}
+
+function explorerReason(where) {
+  return `${where}按名结束 explorer.exe 会连同文件夹窗口和进行中的复制、移动一起结束，壳没自动起来时任务栏就没了。` +
+    `改用受管入口：& '${RESTART_EXPLORER}' -Mode Plan -PlanPath '<plan.json>'，120 秒内用同一 -PlanPath 跑 -Mode Apply` +
+    `（要 PowerShell 7.5+，Apply 先核对身份、窗口和固定项）；只看现状用 Get-TaskbarSnapshot.ps1。说明见 ${GUIDANCE}\\host-runbook\\host-diagnostics.md。${TEXT_ONLY_HINT}`
+}
+
+// Returns a deny reason when the command, or a script it runs (Invoke-OfficeRemote.ps1 -ScriptPath included: Explorer
+// on the remote PC is just as live), stops Explorer by name.
+function explorerDecision(command, cwd, io) {
+  if (killsExplorer(command)) return explorerReason('')
+  for (const script of referencedScripts(command, cwd)) {
+    if (EXPLORER_EXEMPT.has(win32.basename(script).toLowerCase())) continue
+    const text = io.read(script)
+    if (text && killsExplorer(text)) return explorerReason(`脚本 ${script} 里：`)
+  }
+  return null
 }
 
 // A double-dash flag followed by a bare token containing a comma: PowerShell turns a,b into two argv items.
@@ -598,13 +635,17 @@ function deny(reason) {
 export function evaluate(payload, io = defaultIo) {
   const tool = String(payload?.tool_name || '')
   const command = String(payload?.tool_input?.command || '')
-  if (!command || (tool !== 'PowerShell' && tool !== 'Bash')) return null
+  const terminal = tool === TERMINAL_TOOL
+  if (!command || (tool !== 'PowerShell' && tool !== 'Bash' && !terminal)) return null
 
   // First, so `Remove-Item HKCU:\x -Recurse` gets the registry reason rather than the safe-tree-delete one.
-  const hkcu = hkcuDecision(command, payload?.cwd, io)
-  if (hkcu) return hkcu
-  const installer = installerDecision(command, payload?.cwd, io)
-  if (installer) return installer
+  // The Terminal panel's shell runs outside the MSIX package, where HKCU writes and installers are real.
+  if (!terminal) {
+    const hkcu = hkcuDecision(command, payload?.cwd, io)
+    if (hkcu) return hkcu
+    const installer = installerDecision(command, payload?.cwd, io)
+    if (installer) return installer
+  }
 
   if (!/invoke-safe-tree-delete/i.test(command) && RECURSIVE_DELETE_PATTERNS.some(pattern => pattern.test(command))) {
     return `递归删除目录只能走受管入口 ${MANAGED_DELETE}（Plan → Apply → Purge，说明见 ${GUIDANCE}\\host-runbook\\safe-tree-delete.md）。` +
@@ -613,6 +654,8 @@ export function evaluate(payload, io = defaultIo) {
 
   const recycle = recycleDecision(command, payload?.cwd, io)
   if (recycle) return recycle
+  const explorer = explorerDecision(command, payload?.cwd, io)
+  if (explorer) return explorer
 
   if (tool === 'Bash' && command.includes('\\\\')) {
     return 'Bash 工具在命令进 bash 之前会把两个连续反斜杠吞成一个（单引号、双引号、带引号的 heredoc 都一样），实际执行的命令和写的不一样。' +
@@ -627,7 +670,7 @@ export function evaluate(payload, io = defaultIo) {
     }
   }
 
-  if (tool === 'PowerShell') {
+  if (tool === 'PowerShell' || terminal) {
     const match = command.match(UNQUOTED_COMMA_LIST)
     if (match) {
       return `PowerShell 会把未加引号的逗号列表拆成多个参数：${match[1]} ${match[2]} 要写成 ${match[1]} '${match[2]}'，或先放进变量再传入（D:\\Codex\\.codex\\docs\\agent-guidance\\windows-pwsh-command-guidelines.md 第 9 条）。`
@@ -833,7 +876,35 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', 'rg --max-depth 2 --files D:\\agents', false],
     ['PowerShell', 'rg -d 1 -l foo D:\\agents', false],
     ['PowerShell', 'rg -F -l $name -- @roots', false],
-    ['Bash', 'rg -n foo /d/agents/knowledge-base', false]
+    ['Bash', 'rg -n foo /d/agents/knowledge-base', false],
+    // Stopping Explorer by name, inline and in referenced scripts; the managed restart entry and other words pass.
+    ['PowerShell', 'Stop-Process -Name explorer -Force', true],
+    ['PowerShell', 'Get-Process explorer | Stop-Process', true],
+    ['PowerShell', 'Get-Process -Name explorer |\n    Stop-Process -Force', true],
+    ['PowerShell', '(Get-Process explorer).Kill()', true],
+    ['PowerShell', 'spps -n explorer', true],
+    ['PowerShell', 'taskkill /f /im explorer.exe', true],
+    ['Bash', 'taskkill //F //IM explorer.exe', true],
+    ['PowerShell', "Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | Invoke-CimMethod -MethodName Terminate", true],
+    ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\restart-explorer.ps1'", true],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\restart-explorer.ps1'", true],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Restart-ExplorerShell.ps1' -Mode Apply -PlanPath 'D:\\agents\\run-evidence\\taskbar-plan.json'", false],
+    ['PowerShell', "Start-Process explorer.exe 'D:\\x'", false],
+    ['PowerShell', 'Get-Process explorer | Select-Object Id, StartTime', false],
+    ['PowerShell', 'Stop-Process -Id $child.Id; Start-Process explorer.exe', false],
+    ['PowerShell', 'Stop-Process -Name ExplorerPatcher', false],
+    // The Terminal panel: shared and PowerShell-only rules apply; MSIX-only and Bash-only rules do not.
+    [TERMINAL_TOOL, 'Remove-Item -Recurse -Force D:\\x', true],
+    [TERMINAL_TOOL, 'Stop-Process -Name explorer -Force', true],
+    [TERMINAL_TOOL, "& 'D:\\repo\\tools\\restart-explorer.ps1'", true],
+    [TERMINAL_TOOL, "pwsh -NoProfile -File 'D:\\repo\\tools\\recycle.ps1'", true],
+    [TERMINAL_TOOL, 'gh issue list --json number,title', true],
+    [TERMINAL_TOOL, 'rg -l foo D:\\', true],
+    [TERMINAL_TOOL, "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false, desktop],
+    [TERMINAL_TOOL, "pwsh -NoProfile -File 'D:\\repo\\tools\\docker_off.ps1'", false, desktop],
+    [TERMINAL_TOOL, "& 'D:\\x\\Grok_Bot_0.77.0_Setup.exe' /S", false, desktop],
+    [TERMINAL_TOOL, String.raw`Get-ChildItem 'D:\\agents'`, false],
+    [TERMINAL_TOOL, 'Get-ChildItem D:\\x', false]
   ]
   const scripts = new Map(Object.entries({
     'D:\\repo\\tools\\recycle.ps1': 'Add-Type -TypeDefinition $src\n[Native]::SHFileOperationW([ref]$op)',
@@ -843,6 +914,8 @@ if (process.argv.includes('--self-test')) {
     'D:\\repo\\tools\\docker_off.ps1': "$runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'\nif ($null -ne $runVal) { Remove-ItemProperty -LiteralPath $runKey -Name $name }",
     'D:\\repo\\tools\\install.ps1': "$exe = Join-Path $PSScriptRoot 'Foo_Setup.exe'\nStart-Process -FilePath $exe -ArgumentList '/S' -Verb RunAs -Wait\nGet-CimInstance Win32_Process | Select-Object -First 1",
     'D:\\repo\\tools\\install-wmi.ps1': "$cmd = '\"' + $exe + '\" /S /D=D:\\y'\nInvoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }",
+    'D:\\repo\\tools\\restart-explorer.ps1': "$old = @(Get-Process -Name explorer)\nStop-Process -Name explorer -Force",
+    'D:\\Codex\\.codex\\scripts\\Restart-ExplorerShell.ps1': 'Stop-Process -Name explorer -Force',
     'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1': 'code = SHFileOperationW(ref op);',
     'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1': 'STA (SHFileOperationW) works here.'
   }).map(([path, text]) => [path.toLowerCase(), text]))
