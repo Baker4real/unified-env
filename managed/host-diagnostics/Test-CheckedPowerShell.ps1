@@ -137,6 +137,21 @@ Assert-Case 'PowerShell execution errors report type and location without except
     if ($result.stderr.Contains('synthetic-exception-do-not-echo')) { throw 'Runtime failure exposed its exception payload.' }
 }
 
+Assert-Case 'inner exception diagnostics expose only types and numeric codes' {
+    $command = '[IO.File]::ReadAllText(''D:/missing-synthetic-payload-do-not-echo/file.txt'')'
+    $result = Invoke-PublicCli @('-CommandText', $command)
+    if ($result.exitCode -ne 1 -or $result.stderr -notmatch 'innerType=System\.IO\.DirectoryNotFoundException hresult=-2147024893 nativeErrorCode=-') {
+        throw 'The underlying filesystem error type and numeric HResult were not reported.'
+    }
+    if (($result.stderr + $result.stdout).Contains('synthetic-payload-do-not-echo')) { throw 'Filesystem error exposed its path payload.' }
+    $command = 'throw [Reflection.TargetInvocationException]::new(''outer-synthetic-do-not-echo'', [ComponentModel.Win32Exception]::new(5, ''inner-synthetic-do-not-echo''))'
+    $result = Invoke-PublicCli @('-CommandText', $command)
+    if ($result.exitCode -ne 1 -or $result.stderr -notmatch 'innerType=System\.ComponentModel\.Win32Exception hresult=-?\d+ nativeErrorCode=5') {
+        throw 'The underlying Win32 error code was not reported.'
+    }
+    if (($result.stderr + $result.stdout) -match 'synthetic-do-not-echo') { throw 'Nested exception messages were exposed.' }
+}
+
 Assert-Case 'required JSON fields reject missing null and the ordered dictionary projection failure' {
     $commands = @(
         '''{"other":"synthetic-payload-do-not-echo"}''',
@@ -208,6 +223,95 @@ Assert-Case 'CheckOnly validates file and text without executing either' {
     $invalid = Invoke-PublicCli @('-CommandText', $invalidSource, '-CheckOnly')
     if ($invalid.exitCode -ne 2 -or $invalid.stderr -notmatch 'EmptyPipeElement') { throw 'CheckOnly accepted invalid command text.' }
     if ($invalid.stderr.Contains('synthetic-source-do-not-echo') -or (Test-Path -LiteralPath $marker)) { throw 'Invalid text leaked or executed.' }
+}
+
+Assert-Case 'constant regex validation prevents execution and preserves simple match' {
+    $regexMarker = Join-Path $fixture 'CheckedPowerShell-regex.executed'
+    $invalidSource = @'
+[IO.File]::WriteAllText('__MARKER__', 'ran')
+'abc' -match 'miners\xmrig'
+'@.Replace('__MARKER__', $regexMarker.Replace("'", "''"))
+    $invalidPath = Join-Path $fixture 'CheckedPowerShell-invalid-regex.ps1'
+    [IO.File]::WriteAllText($invalidPath, $invalidSource, $utf8)
+    foreach ($inputArguments in @(@('-ScriptPath', $invalidPath), @('-CommandText', $invalidSource))) {
+        $result = Invoke-PublicCli ($inputArguments + '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'regex-error' -or $result.stderr.Contains('miners')) {
+            throw "CheckOnly did not safely reject the constant regex: exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+    }
+    $result = Invoke-PublicCli @('-ScriptPath', $invalidPath)
+    if ($result.exitCode -ne 2 -or (Test-Path -LiteralPath $regexMarker) -or $result.stderr -notmatch 'regex-error') {
+        throw 'Invalid regex ran a side effect or was not rejected before execution.'
+    }
+    $result = Invoke-PublicCli @('-CommandText', "Select-String -InputObject 'abc' -Pattern 'miners\xmrig'", '-CheckOnly')
+    if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'regex-error') { throw 'Select-String constant regex was accepted.' }
+    $result = Invoke-PublicCli @('-CommandText', "'abc' -match '^a'", '-CheckOnly')
+    if ($result.exitCode -ne 0) { throw "Valid regex was rejected: $($result.stderr)" }
+    $result = Invoke-PublicCli @('-CommandText', "Select-String -InputObject 'abc' -Pattern 'miners\xmrig' -SimpleMatch", '-CheckOnly')
+    if ($result.exitCode -ne 0) { throw "SimpleMatch was incorrectly validated as regex: $($result.stderr)" }
+}
+
+Assert-Case 'built-in cmdlet parameter preflight rejects unresolvable sets and unknown names before execution' {
+    $parameterMarker = Join-Path $fixture 'CheckedPowerShell-parameter.executed'
+    $ambiguousPath = Join-Path $fixture 'CheckedPowerShell-ambiguous-set.ps1'
+    $ambiguousSource = @'
+[IO.File]::WriteAllText('__MARKER__', 'ran')
+Split-Path -LiteralPath $synthetic_path_do_not_echo -Parent
+'@.Replace('__MARKER__', $parameterMarker.Replace("'", "''"))
+    [IO.File]::WriteAllText($ambiguousPath, $ambiguousSource, $utf8)
+    $result = Invoke-PublicCli @('-ScriptPath', $ambiguousPath)
+    if ($result.exitCode -ne 2 -or (Test-Path -LiteralPath $parameterMarker) -or
+        $result.stderr -notmatch 'parameter-error id=AmbiguousParameterSet command=Split-Path line=2 column=1') {
+        throw "Ambiguous parameter set was not rejected before execution: exit=$($result.exitCode) stderr=$($result.stderr)"
+    }
+    if ($result.stdout -or $result.stderr.Contains('synthetic_path_do_not_echo')) { throw 'Parameter rejection exposed source.' }
+    foreach ($typo in @('Get-ChildItem -Recurce', 'gci -Recurce')) {
+        $result = Invoke-PublicCli @('-CommandText', $typo, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'parameter-error id=NamedParameterNotFound command=Get-ChildItem') {
+            throw "Unknown parameter was accepted: $typo exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+    }
+}
+
+Assert-Case 'parameter preflight passes provider dynamic parameters splats local functions and other commands' {
+    # The registry verb is split: the pretool guard scans this file when pwsh -File runs it.
+    $valid = @(
+        'Get-Content -LiteralPath $f -Raw -Encoding utf8',
+        'Get-ChildItem -LiteralPath $d -File -Attributes !ReparsePoint',
+        'Set-Content -LiteralPath $f -Value 1 -NoNewline',
+        ('New-Item' + 'Property -LiteralPath $k -Name a -Value 1 -PropertyType DWord'),
+        '$p = @{ Parent = $true }; Split-Path @p -LiteralPath $f',
+        'Split-Path -Path $f -Leaf; git status --short; Get-WinEvent -LogName System -MaxEvents 1'
+    ) -join "`n"
+    foreach ($source in @($valid, 'function Split-Path { param($LiteralPath, [switch]$Parent) }; Split-Path -LiteralPath x -Parent')) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 0) { throw "Valid calls were rejected: exit=$($result.exitCode) stderr=$($result.stderr)" }
+    }
+}
+
+Assert-Case 'oversized output shows head and tail and spills the whole stream' {
+    $spill = Join-Path $fixture 'spill'
+    $generator = '-join (0..17999 | ForEach-Object { [char](65 + ($_ % 26)) })'
+    $expected = Invoke-Expression $generator
+    $result = Invoke-PublicCli @('-CommandText', "[Console]::Out.Write($generator)", '-MaxOutputChars', '3000', '-SpillDirectory', $spill)
+    $note = [regex]::Match($result.stderr, 'CheckedPowerShell output-truncated stream=stdout shown=3000 total=18000 path=(?<path>.+?)\r?$', 'Multiline')
+    if ($result.exitCode -ne 0 -or -not $note.Success) { throw "Truncation note missing: exit=$($result.exitCode) stderr=$($result.stderr)" }
+    if (-not $result.stdout.StartsWith($expected.Substring(0, 2000)) -or -not $result.stdout.EndsWith($expected.Substring(17000)) -or
+        -not $result.stdout.Contains('[CheckedPowerShell output-truncated: 15000 chars omitted]')) {
+        throw 'Truncated stdout lost its head, its tail or the omission marker.'
+    }
+    if ([IO.File]::ReadAllText($note.Groups['path'].Value, $utf8) -cne $expected) { throw 'Spill file does not hold the whole stdout.' }
+    $result = Invoke-PublicCli @('-CommandText', "[Console]::Out.Write($generator)", '-MaxOutputChars', '0', '-SpillDirectory', $spill)
+    if ($result.stdout -cne $expected -or $result.stderr) { throw 'MaxOutputChars 0 did not pass the output through whole.' }
+    $result = Invoke-PublicCli @('-CommandText', "[Console]::Error.Write('e' * 5000)", '-MaxOutputChars', '1000', '-SpillDirectory', $spill)
+    if ($result.stderr -notmatch 'output-truncated stream=stderr shown=1000 total=5000 path=') { throw 'Oversized stderr was not truncated.' }
+    $result = Invoke-PublicCli @('-CommandText', '[pscustomobject]@{ data = (''x'' * 5000) } | ConvertTo-Json -Compress', '-RequiredJsonFields', 'data', '-MaxOutputChars', '1000', '-SpillDirectory', $spill)
+    if ($result.exitCode -ne 0 -or (ConvertFrom-Json -InputObject $result.stdout).data.Length -ne 5000 -or $result.stderr) {
+        throw 'Validated JSON stdout was truncated.'
+    }
+    $quiet = Join-Path $fixture 'spill-unused'
+    $result = Invoke-PublicCli @('-CommandText', 'Write-Output ok', '-MaxOutputChars', '1000', '-SpillDirectory', $quiet)
+    if ($result.stdout.Trim() -cne 'ok' -or $result.stderr -or (Test-Path -LiteralPath $quiet)) { throw 'Small output was altered or spilled.' }
 }
 
 Assert-Case 'script and command input are mutually exclusive' {
