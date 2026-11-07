@@ -80,10 +80,96 @@ const EMPTY_BIN_PATTERNS = [/\bClear-RecycleBin\b/i, /\bSHEmptyRecycleBin[AW]?\s
 const RECYCLE_BIN_PATH = /\$Recycle\.Bin/i
 const DELETE_VERB = /\b(?:remove-item|ri|rm|del|erase|rd|rmdir|unlink)\b|\bdelete\s*\(/i
 
-// .ps1/.psm1 files the command runs or dot-sources: single-quoted, double-quoted or bare.
+// .ps1/.psm1 files the command names: single-quoted, double-quoted or bare. Rules 2, 8, 11 and 13 read the ones it runs.
 const SCRIPT_REFERENCE = /'([^'\r\n]+?\.psm?1)'|"([^"\r\n]+?\.psm?1)"|([^\s'"`;|&(){}<>]+?\.psm?1)(?![\w.])/gi
 const MAX_SCRIPT_BYTES = 1024 * 1024
 const MAX_SCRIPTS = 5
+
+// A command that evaluates text, pipes text into pwsh, or runs a variable or an expression may run any script it
+// names, so then every reference counts.
+const RUNS_UNKNOWN = [
+  /\b(?:Invoke-Expression|iex)\b|\[scriptblock\]::Create\b|\.(?:AddScript|AddCommand|InvokeScript)\s*\(/i,
+  /\|\s*(?:&\s*)?['"]?(?:[^\s|;'"]*[\\/])?(?:pwsh|powershell)(?:\.exe)?\b/i,
+  /(?:^|[\s;|{(])[&.]\s*[$(]/,
+  /(?:^|\s)-(?:f|fi|fil|file|filepath|scriptpath)['"]?\s*[,:]?\s*['"]?\$/i,
+  /\b(?:Import-Module|ipmo|pwsh|powershell)(?:\.exe)?['"]?(?:\s+-\w+)*\s+['"]?\$/i
+]
+// Commands that read, hash, search, list, copy, move, write or delete a file without running it.
+const NON_RUNNING_COMMANDS = new Set([
+  'get-content', 'gc', 'cat', 'type', 'get-filehash', 'get-item', 'gi', 'get-childitem', 'gci', 'ls', 'dir',
+  'test-path', 'select-string', 'sls', 'get-authenticodesignature', 'format-hex', 'fhx', 'get-command', 'gcm',
+  'resolve-path', 'rvpa', 'split-path', 'join-path', 'compare-object', 'where-object', 'select-object',
+  'write-output', 'write-host', 'echo', 'copy-item', 'cp', 'copy', 'cpi', 'move-item', 'mv', 'move', 'mi',
+  'rename-item', 'ren', 'rni', 'set-content', 'add-content', 'ac', 'out-file', 'new-item', 'ni', 'remove-item', 'ri',
+  'rm', 'del', 'erase', 'git', 'rg', 'grep', 'findstr', 'diff', 'head', 'tail', 'wc', 'sha256sum', 'md5sum',
+  'certutil', 'code', 'notepad'
+])
+const SCRIPT_FLAG = /^-(?:f|fi|fil|file|filepath|scriptpath)[,:]?$/i
+const COMMAND_FLAG = /^-(?:c|co|com|comm|comma|comman|command|cwa|commandwithargs|e|ec|en|enc|encodedcommand)$/i
+const METHOD_ARGUMENT = /(?:::|\.)\w+\s*\([^()]*$/
+const ASSIGNMENT = /^\s*(?:\$[\w:]+|[A-Za-z_]\w*)\s*\+?=\s*$/
+
+// The words of the last simple command in a text, without VAR=value prefixes, and a command word's lower-case name.
+function commandWords(text) {
+  const words = simpleCommands(text).at(-1) || []
+  const first = words.findIndex(word => !/^[A-Za-z_]\w*=/.test(word))
+  return first < 0 ? [] : words.slice(first)
+}
+
+function commandName(word) {
+  return (word || '').split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase()
+}
+
+// True when the reference right after `text` (its simple command so far) is what runs: it opens the command, follows
+// & or ., follows -File (or a prefix), -FilePath or -ScriptPath, follows Import-Module, or is pwsh/powershell's script.
+function runsHere(text) {
+  if (!text.trim() || /(?:^|[\s;|{(])[&.]\s*$/.test(text)) return true
+  const words = commandWords(text)
+  if (SCRIPT_FLAG.test(words.at(-1) || '')) return true
+  const name = commandName(words[0])
+  if (name === 'import-module' || name === 'ipmo') return true
+  return (name === 'pwsh' || name === 'powershell') && !words.slice(1).some(word => COMMAND_FLAG.test(word))
+}
+
+function readsOnly(text) {
+  return NON_RUNNING_COMMANDS.has(commandName(commandWords(text)[0]))
+}
+
+// Splits the text before `index` at ; | newlines { } && and grouping parens outside quotes; a paren right after a
+// name or ] opens a method call and does not split. Returns the simple command up to the reference and, when the
+// reference sits inside a longer quoted string, that string's own text up to it.
+function referenceContext(command, index) {
+  let start = 0
+  let quote = ''
+  let quoteStart = -1
+  let innerStart = -1
+  for (let i = 0; i < index; i++) {
+    const ch = command[i]
+    if (quote && ch === quote) { quote = ''; continue }
+    if (!quote && (ch === '"' || ch === "'")) { quote = ch; quoteStart = i; innerStart = i + 1; continue }
+    const doubled = ch === '&' && command[i + 1] === '&'
+    if (/[;|\r\n{}]/.test(ch) || doubled || (ch === '(' && !/[\w\]]/.test(command[i - 1] || ''))) {
+      if (doubled) i++
+      if (quote) innerStart = i + 1
+      else start = i + 1
+    }
+  }
+  return quote ? { outer: command.slice(start, quoteStart), inner: command.slice(innerStart, index) }
+    : { outer: command.slice(start, index), inner: null }
+}
+
+// A reference counts unless it only names the file: an argument of a command that reads, copies, writes or searches
+// it (Get-FileHash x.ps1, git diff -- x.ps1), a value being assigned, or a .NET method argument such as
+// [Parser]::ParseFile('x.ps1', ...). Inside a longer quoted string, a string that opens the statement or belongs to
+// such a reading command is text (git commit -m "..."); any other string is a payload (pwsh -Command "...",
+// bash -c '...', CommandLine = '...') and the reference is judged inside it.
+function runsScriptAt(command, index) {
+  const { outer, inner } = referenceContext(command, index)
+  const runs = text => runsHere(text) || !(METHOD_ARGUMENT.test(text) || ASSIGNMENT.test(text) || readsOnly(text))
+  if (inner === null) return runs(outer)
+  if (!outer.trim() || (!runsHere(outer) && readsOnly(outer))) return false
+  return runs(inner)
+}
 
 const defaultIo = {
   env: process.env,
@@ -97,16 +183,21 @@ const defaultIo = {
   }
 }
 
-// Absolute paths of up to MAX_SCRIPTS referenced scripts; Git Bash /d/x becomes D:/x, relative paths use cwd.
-function referencedScripts(command, cwd) {
-  const paths = []
+// Absolute paths of up to MAX_SCRIPTS scripts the command runs; Git Bash /d/x becomes D:/x, relative paths use cwd.
+// A run script that cannot be read may be a copy the command makes first, so then every named script counts.
+function referencedScripts(command, cwd, io) {
+  const every = RUNS_UNKNOWN.some(pattern => pattern.test(command))
+  const named = []
   for (const match of command.matchAll(SCRIPT_REFERENCE)) {
     const raw = (match[1] || match[2] || match[3]).replace(/^\/([a-z])(?=\/)/i, (_, drive) => `${drive}:`)
     const path = win32.resolve(cwd || '.', raw)
-    if (!paths.some(seen => seen.toLowerCase() === path.toLowerCase())) paths.push(path)
-    if (paths.length === MAX_SCRIPTS) break
+    const runs = every || runsScriptAt(command, match.index)
+    const seen = named.find(script => script.path.toLowerCase() === path.toLowerCase())
+    if (seen) seen.runs ||= runs
+    else named.push({ path, runs })
   }
-  return paths
+  const run = named.filter(script => script.runs)
+  return (run.some(script => io.read(script.path) === null) ? named : run).slice(0, MAX_SCRIPTS).map(script => script.path)
 }
 
 function recycleReason(where) {
@@ -123,7 +214,7 @@ function recycleDecision(command, cwd, io) {
   if (EMPTY_BIN_PATTERNS.some(pattern => pattern.test(command)) ||
     (RECYCLE_BIN_PATH.test(command) && DELETE_VERB.test(command))) return emptyBinReason('')
   if (RECYCLE_PATTERNS.some(pattern => pattern.test(command))) return recycleReason('')
-  for (const script of referencedScripts(command, cwd)) {
+  for (const script of referencedScripts(command, cwd, io)) {
     if (win32.basename(script).toLowerCase() === 'invoke-managedrecycle.ps1') continue
     const text = io.read(script)
     if (!text) continue
@@ -180,7 +271,7 @@ function isDesktop(io) {
 function localTextDecision(command, cwd, io, test, reasonFor) {
   if (test(command)) return reasonFor('')
   const remote = remoteScripts(command, cwd)
-  for (const script of referencedScripts(command, cwd)) {
+  for (const script of referencedScripts(command, cwd, io)) {
     if (remote.includes(script.toLowerCase())) continue
     const text = io.read(script)
     if (text && test(text)) return reasonFor(`脚本 ${script} 里：`)
@@ -244,7 +335,7 @@ function explorerReason(where) {
 // on the remote PC is just as live), stops Explorer by name.
 function explorerDecision(command, cwd, io) {
   if (killsExplorer(command)) return explorerReason('')
-  for (const script of referencedScripts(command, cwd)) {
+  for (const script of referencedScripts(command, cwd, io)) {
     if (EXPLORER_EXEMPT.has(win32.basename(script).toLowerCase())) continue
     const text = io.read(script)
     if (text && killsExplorer(text)) return explorerReason(`脚本 ${script} 里：`)
@@ -888,6 +979,31 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\recycle.ps1'", true],
     ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false, { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
     ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false],
+    // Only scripts the command runs are read; naming one to hash, copy, search, parse, assign or quote it is text.
+    ['PowerShell', "Get-FileHash -LiteralPath 'D:\\repo\\tools\\docker_off.ps1'", false, desktop],
+    ['PowerShell', "Copy-Item -LiteralPath 'D:\\repo\\tools\\docker_off.ps1' -Destination 'D:\\x\\copy.ps1'", false, desktop],
+    ['PowerShell', "$p = 'D:\\repo\\tools\\docker_off.ps1'; (Get-Item -LiteralPath $p).Length", false, desktop],
+    ['PowerShell', "[System.Management.Automation.Language.Parser]::ParseFile('D:\\repo\\tools\\docker_off.ps1', [ref]$null, [ref]$e)", false, desktop],
+    ['PowerShell', "git diff -- tools/docker_off.ps1; rg -n 'HKCU' tools\\docker_off.ps1", false, desktop],
+    ['PowerShell', 'pwsh -NoProfile -Command "Get-FileHash \'D:\\repo\\tools\\docker_off.ps1\'"', false, desktop],
+    ['PowerShell', 'git commit -m "fix: tools/docker_off.ps1 keeps the flag"', false, desktop],
+    ['PowerShell', "Get-Content 'D:\\repo\\tools\\recycle.ps1'; Get-FileHash D:\\repo\\tools\\restart-explorer.ps1", false],
+    ['Bash', 'sha256sum /d/repo/tools/recycle.ps1 && cp /d/repo/tools/recycle.ps1 /d/x/', false],
+    ['PowerShell', "& 'D:\\repo\\tools\\docker_off.ps1'", true, desktop],
+    ['PowerShell', 'D:\\repo\\tools\\docker_off.ps1 -Apply', true, desktop],
+    ['PowerShell', 'cd D:\\repo && .\\tools\\docker_off.ps1', true, desktop],
+    ['PowerShell', "$r = & 'D:\\repo\\tools\\docker_off.ps1'", true, desktop],
+    ['PowerShell', 'pwsh -NoProfile -Command "& \'D:\\repo\\tools\\docker_off.ps1\'"', true, desktop],
+    ['PowerShell', 'pwsh -NoProfile D:\\repo\\tools\\docker_off.ps1', true, desktop],
+    ['PowerShell', "Start-Process pwsh -ArgumentList '-NoProfile', '-File', 'D:\\repo\\tools\\docker_off.ps1' -Wait", true, desktop],
+    ['PowerShell', 'Invoke-Command -FilePath D:\\repo\\tools\\docker_off.ps1', true, desktop],
+    ['PowerShell', "Import-Module -Force 'D:\\repo\\tools\\docker_off.ps1'", true, desktop],
+    ['PowerShell', "Invoke-Expression (Get-Content -Raw 'D:\\repo\\tools\\docker_off.ps1')", true, desktop],
+    ['PowerShell', "Get-Content 'D:\\repo\\tools\\docker_off.ps1' -Raw | pwsh -Command -", true, desktop],
+    ['PowerShell', "$s = 'D:\\repo\\tools\\docker_off.ps1'; & $s", true, desktop],
+    ['PowerShell', "Get-FileHash 'D:\\repo\\tools\\harmless.ps1'; pwsh -File 'D:\\repo\\tools\\docker_off.ps1'", true, desktop],
+    ['PowerShell', "Copy-Item 'D:\\repo\\tools\\docker_off.ps1' 'D:\\t\\off.ps1'; & 'D:\\t\\off.ps1'", true, desktop],
+    ['Bash', "pwsh -NoProfile -c \"& '/d/repo/tools/recycle.ps1'\"", true],
     // Installers the tool shell starts under Claude Desktop stay in the package, elevated or not; WMI launches pass.
     ['PowerShell', "Start-Process -FilePath 'D:\\x\\UU_4.44.1.3978_User_X64_nullsoft_en-US.exe' -ArgumentList '/S','/D=D:\\Program Files\\Netease' -Verb RunAs -Wait", true, desktop],
     ['PowerShell', "& 'D:\\x\\Grok_Bot_0.77.0_Setup.exe' /S", true, desktop],
@@ -949,6 +1065,7 @@ if (process.argv.includes('--self-test')) {
     [TERMINAL_TOOL, 'Stop-Process -Name explorer -Force', true],
     [TERMINAL_TOOL, "& 'D:\\repo\\tools\\restart-explorer.ps1'", true],
     [TERMINAL_TOOL, "pwsh -NoProfile -File 'D:\\repo\\tools\\recycle.ps1'", true],
+    [TERMINAL_TOOL, "Get-FileHash -LiteralPath 'D:\\repo\\tools\\restart-explorer.ps1'", false],
     [TERMINAL_TOOL, 'gh issue list --json number,title', true],
     [TERMINAL_TOOL, 'rg -l foo D:\\', true],
     [TERMINAL_TOOL, 'bash scripts/be_wan_redial.sh', true],

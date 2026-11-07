@@ -114,7 +114,7 @@ foreach ($case in $allowCases) {
     Assert-Equal $result.stdout.Trim() '' "放行时不得输出决定：$label"
 }
 
-# 引用脚本扫描走真实文件读取：含回收站调用的 .ps1 被拦，无害内容放行。
+# 引用脚本扫描走真实文件读取：运行含回收站调用的 .ps1 被拦，只读取它或运行无害内容放行。
 $fixtureDir = Join-Path $FixtureRoot ([guid]::NewGuid().ToString('N'))
 $fixture = Join-Path $fixtureDir 'recycle.ps1'
 $scriptCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = "pwsh -NoProfile -File '$fixture'" } } | ConvertTo-Json -Compress
@@ -124,6 +124,9 @@ try {
     $result = Invoke-Guard $scriptCase
     Assert-Equal $result.exitCode 0 '引用脚本 deny 也必须 exit 0。'
     Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' '引用脚本里的回收站调用必须拦截。'
+    $readCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = "Get-FileHash -LiteralPath '$fixture'" } } | ConvertTo-Json -Compress
+    $result = Invoke-Guard $readCase
+    Assert-Equal $result.stdout.Trim() '' '只读取含回收站调用的引用脚本（Get-FileHash）必须放行。'
     [IO.File]::WriteAllText($fixture, ('Stop-' + 'Process -Name explorer -Force'), [Text.UTF8Encoding]::new($false))
     $result = Invoke-Guard $scriptCase
     Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' '引用脚本里按名结束 Explorer 必须拦截。'
