@@ -168,6 +168,60 @@ foreach ($candidate in $regexCandidates) {
     }
 }
 
+# Backslash-escaped quotes survive PowerShell parsing inside an expandable string, but the native
+# argument parser consumes the backslash and turns the quote into an argv boundary. After rg -e,
+# that can reinterpret an intended XAML attribute fragment as a search path instead of a pattern.
+foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+    $elements = @($command.CommandElements)
+    if (-not $elements.Count) { continue }
+    $executable = $elements[0]
+    if ($executable -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or
+        $executable.StringConstantType -eq 'DoubleQuoted' -or $executable.StringConstantType -eq 'DoubleQuotedHereString' -or
+        ([IO.Path]::GetFileNameWithoutExtension($executable.Value) -ine 'rg')) { continue }
+    $explicitPattern = @($elements | Where-Object {
+        $_ -is [System.Management.Automation.Language.CommandParameterAst] -and
+            $_.Extent.Text -in @('-e', '--regexp')
+    }).Count -gt 0
+    if (-not $explicitPattern) { continue }
+    $invalidQuote = $command.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+            $node.StringConstantType -eq 'DoubleQuoted' -and
+            $node.Extent.Text.Contains('\"')
+    }, $true) | Select-Object -First 1
+    if ($null -ne $invalidQuote) {
+        [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=rg reason=escaped-quote-native-argv line={0} column={1}' -f
+            $invalidQuote.Extent.StartLineNumber, $invalidQuote.Extent.StartColumnNumber))
+        exit 2
+    }
+}
+
+# A bare comma becomes an ArrayLiteralAst. Native argv binding then splits a gh --json field list into separate arguments.
+foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+    $elements = @($command.CommandElements)
+    if (-not $elements.Count) { continue }
+    $executable = $elements[0]
+    if ($executable -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or
+        $executable.StringConstantType -eq 'DoubleQuoted' -or $executable.StringConstantType -eq 'DoubleQuotedHereString' -or
+        ([IO.Path]::GetFileNameWithoutExtension($executable.Value) -ine 'gh')) { continue }
+    $commandParts = @($elements | ForEach-Object { $_.Extent.Text })
+    if ($commandParts.Count -ge 4 -and $commandParts[1] -eq 'issue' -and $commandParts[2] -eq 'view' -and
+        $commandParts -contains '--comments' -and $commandParts -contains '--json') {
+        [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=gh reason=comments-json-mutually-exclusive line={0} column={1}' -f
+            $command.Extent.StartLineNumber, $command.Extent.StartColumnNumber))
+        exit 2
+    }
+    for ($index = 1; $index -lt $elements.Count - 1; $index++) {
+        if ($elements[$index].Extent.Text -ine '--json') { continue }
+        $value = $elements[$index + 1]
+        if ($value -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+            [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=gh parameter=--json reason=bare-comma-array line={0} column={1}' -f
+                $value.Extent.StartLineNumber, $value.Extent.StartColumnNumber))
+            exit 2
+        }
+    }
+}
+
 # A cmdlet call whose parameter set cannot be resolved, or that names a missing parameter, fails only when it is
 # reached, after earlier statements already ran. Only cmdlets of the modules that ship with pwsh are bound.
 $builtinModules = @('Microsoft.PowerShell.Core', 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security')

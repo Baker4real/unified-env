@@ -289,6 +289,91 @@ Assert-Case 'parameter preflight passes provider dynamic parameters splats local
     }
 }
 
+Assert-Case 'gh json preflight rejects a bare field array before execution without exposing source' {
+    $nativeMarker = Join-Path $fixture 'CheckedPowerShell-gh-json.executed'
+    $nativeSource = @'
+[IO.File]::WriteAllText('__MARKER__', 'ran')
+gh issue view 161 --json number,title,body
+'@.Replace('__MARKER__', $nativeMarker.Replace("'", "''"))
+    $nativePath = Join-Path $fixture 'CheckedPowerShell-gh-json.ps1'
+    [IO.File]::WriteAllText($nativePath, $nativeSource, $utf8)
+    foreach ($inputArguments in @(@('-CommandText', $nativeSource, '-CheckOnly'), @('-ScriptPath', $nativePath))) {
+        $result = Invoke-PublicCli $inputArguments
+        if ($result.exitCode -ne 2 -or (Test-Path -LiteralPath $nativeMarker) -or
+            $result.stderr -notmatch 'native-argument-error command=gh parameter=--json reason=bare-comma-array line=2 column=26') {
+            throw "Bare gh JSON fields were not rejected: exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('number,title,body')) { throw 'Native argument rejection exposed source.' }
+    }
+}
+
+Assert-Case 'gh json preflight accepts single string fields and leaves other native commands alone' {
+    $valid = @(
+        "gh issue view 161 --json 'number,title,body'",
+        'gh issue view 161 --json $issueFields',
+        'gh issue view 161 --json number',
+        '& gh issue view 161 --json ''number,title''',
+        'custom-cli --json number,title,body'
+    )
+    foreach ($source in $valid) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 0) { throw "Valid native command was rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)" }
+    }
+}
+
+Assert-Case 'rg -e preflight rejects argv-changing escaped quotes before execution' {
+    $nativeMarker = Join-Path $fixture 'CheckedPowerShell-rg-quotes.executed'
+    $invalidSource = @'
+[IO.File]::WriteAllText('__MARKER__', 'ran')
+rg -n -e "Grid.SetRowSpan(actions, 3)|VerticalAlignment=\"Center\"" src/MinminCountdown
+'@.Replace('__MARKER__', $nativeMarker.Replace("'", "''"))
+    $nativePath = Join-Path $fixture 'CheckedPowerShell-rg-quotes.ps1'
+    [IO.File]::WriteAllText($nativePath, $invalidSource, $utf8)
+    foreach ($inputArguments in @(@('-CommandText', $invalidSource, '-CheckOnly'), @('-ScriptPath', $nativePath))) {
+        $result = Invoke-PublicCli $inputArguments
+        if ($result.exitCode -ne 2 -or (Test-Path -LiteralPath $nativeMarker) -or
+            $result.stderr -notmatch 'native-argument-error command=rg reason=escaped-quote-native-argv') {
+            throw "Argv-changing rg quotes were not rejected: exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('Grid.SetRowSpan')) { throw 'Native argument rejection exposed source.' }
+    }
+}
+
+Assert-Case 'rg -e preflight accepts single quoted patterns and commands without -e' {
+    $valid = @(@'
+rg -n -e 'Grid.SetRowSpan\(actions, 3\)|VerticalAlignment=\"Center\"' src/MinminCountdown
+'@, @'
+rg -e 'MinHeight = 39' src/MinminCountdown
+'@, 'rg -n "Grid.SetRowSpan(actions, 3)" src/MinminCountdown', 'custom-cli -e "VerticalAlignment=\"Center\"" src')
+    foreach ($source in $valid) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 0) { throw "Valid native command was rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)" }
+    }
+}
+
+Assert-Case 'gh issue view rejects mutually exclusive comments and json before execution' {
+    $nativeMarker = Join-Path $fixture 'CheckedPowerShell-gh-comments-json.executed'
+    $nativeSource = @'
+[IO.File]::WriteAllText('__MARKER__', 'ran')
+gh issue view 252 --comments --json number,title,comments
+'@.Replace('__MARKER__', $nativeMarker.Replace("'", "''"))
+    $result = Invoke-PublicCli @('-CommandText', $nativeSource, '-CheckOnly')
+    if ($result.exitCode -ne 2 -or (Test-Path -LiteralPath $nativeMarker) -or
+        $result.stderr -notmatch 'native-argument-error command=gh reason=comments-json-mutually-exclusive') {
+        throw "Mutually exclusive gh arguments were not rejected: exit=$($result.exitCode) stderr=$($result.stderr)"
+    }
+    $valid = @(
+        "gh issue view 252 --json 'number,title,comments'",
+        'gh issue view 252 --comments',
+        'gh pr view 252 --comments --json comments',
+        'gh issue list --json comments'
+    )
+    foreach ($source in $valid) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 0) { throw "Valid gh command was rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)" }
+    }
+}
+
 Assert-Case 'oversized output shows head and tail and spills the whole stream' {
     $spill = Join-Path $fixture 'spill'
     $generator = '-join (0..17999 | ForEach-Object { [char](65 + ($_ % 26)) })'
