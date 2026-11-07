@@ -745,6 +745,20 @@ class SkillInstallGuardedTests(GuardedInstallTestCase):
         self.assertIn("allow_implicit_invocation 语义冲突", stderr)
         self.assertFalse((self.active / "test-skill-wrapper").exists())
 
+    def test_system_catalog_conflict_error_names_the_system_repair_entry(self) -> None:
+        self.write_skill_with_invocation_conflict(self.active / ".system" / "review-agent", "review-agent")
+        candidate = self.write_candidate("test-skill-wrapper", "与冲突无关的干净候选")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main([*self.wrapper_args(candidate, manifest), "--dry-run"])
+
+        self.assertEqual(code, 2)
+        error = json.loads(stderr.getvalue())["error"]
+        self.assertIn("allow_implicit_invocation 语义冲突", error)
+        self.assertIn("prepare_system_provenance_repair.py\" status", error)
+
     def test_dry_run_passes_when_candidate_fixes_its_own_live_catalog_conflict(self) -> None:
         name = "test-skill-wrapper"
         active_skill = self.active / name

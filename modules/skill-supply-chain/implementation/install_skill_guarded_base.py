@@ -203,8 +203,14 @@ def run_process(
         result.stderr.encode("utf-8", errors="replace"),
     )
     if check and result.returncode != 0:
+        # The last stderr line carries the tool's own reason (an ERROR line, a traceback's exception, git's fatal).
+        reason = next((line.strip() for line in reversed(result.stderr.splitlines()) if line.strip()), "")
+        if len(reason) > 2000:
+            reason = reason[:2000] + "…"
         raise InstallError(
-            f"{label} 失败，退出码 {result.returncode}；详见 {evidence_dir}"
+            f"{label} 失败，退出码 {result.returncode}"
+            + (f"：{reason}" if reason else "")
+            + f"；详见 {evidence_dir}"
         )
     return result
 

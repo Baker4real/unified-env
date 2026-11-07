@@ -40,6 +40,11 @@ DEFAULT_CLOSURE_SCRIPT = Path(
     r"D:\agents\skills-manager\skills\skill-install-guard\scripts\skill_resource_closure.py"
 )
 DEFAULT_OUTPUT = Path(r"D:\Codex\.codex\skill-catalog\catalog.json")
+# The repair entry runs from the module source path; it is not deployed with this script.
+SYSTEM_REPAIR_STATUS_COMMAND = (
+    'python -X utf8 "D:\\agents\\projects\\统一环境\\modules\\skill-supply-chain\\implementation\\'
+    'prepare_system_provenance_repair.py" status'
+)
 
 _FRONTMATTER_END = {"---", "..."}
 _KEY_VALUE = re.compile(r"^(?P<key>[^:#\s][^:]*?)\s*:\s*(?P<value>.*)$")
@@ -1468,9 +1473,13 @@ def main(argv: list[str] | None = None) -> int:
             overlay=overlay,
         )
         if catalog["checks"]["ledger"]["status"] == "conflict":
+            conflicts = catalog["checks"]["ledger"]["conflicts"]
+            hint = ""
+            if any(item["scope"] == "system" for item in conflicts):
+                hint = f"（.system 冲突先跑 {SYSTEM_REPAIR_STATUS_COMMAND}，按它给出的步骤修复）"
             raise CatalogError(
-                "ledger 与 SOURCE.md 存在冲突，拒绝写入："
-                + json.dumps(catalog["checks"]["ledger"]["conflicts"], ensure_ascii=False)
+                f"ledger 与 SOURCE.md 存在冲突，拒绝写入{hint}："
+                + json.dumps(conflicts, ensure_ascii=False)
             )
         if mode == "write":
             write_catalog(catalog, output)

@@ -127,7 +127,7 @@ projection，不保存候选临时路径或 payload 字节。每次成功换入�
 `local_changes` 追加一条 UTC 当日记录。这条摘要由 wrapper 固定生成，所以不按上文
 `(skill, summary)` 去重：官方刷新后的重放单独记录，不与此前同摘要的条目合并。
 
-受管发布顺序是：源码定向/模块测试通过；`Deploy-SkillInstallGuarded.ps1 -WhatIf` 证明完整部署闭包；独立 review 通过后才实际部署该闭包并核验 deployment manifest/hash；再从当时 live facts 生成新的 repair plan，先 dry-run 后 apply；最后复核稳定性、strict closure、catalog、ledger、五个 SOURCE 与 review parity。源码存在、WhatIf 或 fixture green 都不等于已部署或已修复。官方刷新会同时冲掉上面的 skill-creator 兼容 overlay：来源修复通过后再按上段重放它，`subagent-orchestration` 等带 `argument-hint` / `disable-model-invocation` 的 skill 才能重新通过现役 `quick_validate.py`；这些 skill 本身一直在役，不随来源修复重新激活。
+受管发布顺序是：源码定向/模块测试通过；`Deploy-SkillInstallGuarded.ps1 -WhatIf` 证明完整部署闭包；独立 review 通过后才实际部署该闭包并核验 deployment manifest/hash；再从当时 live facts 生成新的 repair plan（源路径工具 `modules/skill-supply-chain/implementation/prepare_system_provenance_repair.py`：`status` 只读判断阶段并列出下一步；`preserve-official` 在菜单中文化前保存官方展示原文，已中文化时用 `--from-git <刷新后、中文化前的 skills 根提交>`；`plan` 写出 bootstrap plan，带 display-only overlay 时附 `official_baseline_source`），先 dry-run 后 apply；最后复核稳定性、strict closure、catalog、ledger、五个 SOURCE 与 review parity。源码存在、WhatIf 或 fixture green 都不等于已部署或已修复。官方刷新会同时冲掉上面的 skill-creator 兼容 overlay：来源修复通过后再按上段重放它（同一工具的 `skill-creator-overlay` 从现役树生成候选与 decision manifest），`subagent-orchestration` 等带 `argument-hint` / `disable-model-invocation` 的 skill 才能重新通过现役 `quick_validate.py`；这些 skill 本身一直在役，不随来源修复重新激活。
 
 ## Canonical rename
 

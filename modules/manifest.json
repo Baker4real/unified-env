@@ -252,6 +252,7 @@
         "scripts/retired-skill-menu-surface.cjs",
         "scripts/verify_skill_openai_yaml_parity.py",
         "modules/skill-supply-chain/implementation/system_skill_provenance_repair.py",
+        "modules/skill-supply-chain/implementation/prepare_system_provenance_repair.py",
         "modules/skill-supply-chain/implementation/system_package_identity.py",
         "modules/skill-supply-chain/overlays/retro/scripts/transcripts.py"
       ],
@@ -275,6 +276,7 @@
           ".scratch/subagent-orchestration-update-20260818/",
           ".scratch/upstream-stable-skill-sync-20260713/",
           "modules/skill-supply-chain/implementation/",
+          "modules/skill-supply-chain/overlays/skill-creator-quick-validate/",
           "modules/skill-supply-chain/overlays/retro/",
           "modules/skill-supply-chain/tests/"
         ]
@@ -303,6 +305,7 @@
           "tests/Test-SkillOpenAIYamlParity.py",
           "tests/Test-RetroTranscriptAudit.py",
           "modules/skill-supply-chain/tests/Test-SkillSourceRecordMigration.py",
+          "modules/skill-supply-chain/tests/Test-SystemProvenanceRepairPrepare.py",
           "modules/skill-supply-chain/tests/Test-SkillsRepoPreCommit.py"
           ],
           "node": [
