@@ -400,6 +400,8 @@ def cmd_find(args):
     missing = [str(p) for p in paths if not p.exists()]
     if missing:
         fail("not found: " + ", ".join(missing))
+    if args.to_line is not None and args.to_line < args.from_line:
+        fail(f"--to-line {args.to_line} is before --from-line {args.from_line}")
     fold = (lambda s: s.translate(ASCII_LOWER)) if args.ignore_case else (lambda s: s)
     # A block's decoded text holds the needle as typed, or JSON-escaped inside code; a raw JSON line holds
     # either of those escaped once more, with or without \u escapes for non-ASCII.
@@ -427,7 +429,9 @@ def cmd_find(args):
         probes = probe.split(b"\n") if args.ignore_case else lines
         hits = []
         for number, (raw, low) in enumerate(zip(lines, probes), 1):
-            if not any(form in low for form in byte_forms):
+            if args.to_line is not None and number > args.to_line:
+                break
+            if number < args.from_line or not any(form in low for form in byte_forms):
                 continue
             try:
                 record = json.loads(raw)
@@ -750,6 +754,9 @@ def main():
     find.add_argument("--width", type=int, default=240, help="snippet characters")
     find.add_argument("--max-per-file", type=int, default=6, help="hits shown per file, split between first and last")
     find.add_argument("--max-files", type=int, default=20, help="matching transcripts shown, newest kept")
+    find.add_argument("--from-line", type=line_number, default=1,
+                      help="only hits on this line and later of each transcript, such as after the last retro")
+    find.add_argument("--to-line", type=line_number, help="only hits on this line and earlier of each transcript")
 
     audit = commands.add_parser("audit", help="span, block counts, tool calls, failed results and slow calls of one transcript")
     audit.add_argument("file")

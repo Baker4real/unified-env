@@ -213,6 +213,28 @@ class LineRangeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("--to-line 4 is before --from-line 5", result.stderr)
 
+    def test_find_reports_only_hits_inside_the_range(self):
+        records = [
+            {"type": "user", "timestamp": f"2026-10-29T08:00:0{index}Z",
+             "message": {"role": "user", "content": f"needle {word}"}}
+            for index, word in enumerate(("early", "middle", "late"))
+        ]
+        with tempfile.TemporaryDirectory(dir=TEMP_ROOT) as directory:
+            path = Path(directory) / "session.jsonl"
+            path.write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
+            middle = run("find", "needle", str(path), "--from-line", "2", "--to-line", "2")
+            tail = run("find", "needle", str(path), "--from-line", "3")
+            reversed_range = run("find", "needle", str(path), "--from-line", "3", "--to-line", "2")
+        self.assertEqual(middle.returncode, 0, middle.stderr)
+        self.assertIn("1 hits", middle.stdout)
+        self.assertIn("needle middle", middle.stdout)
+        self.assertNotIn("needle early", middle.stdout)
+        self.assertNotIn("needle late", middle.stdout)
+        self.assertIn("needle late", tail.stdout)
+        self.assertNotIn("needle middle", tail.stdout)
+        self.assertEqual(reversed_range.returncode, 2)
+        self.assertIn("--to-line 2 is before --from-line 3", reversed_range.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
