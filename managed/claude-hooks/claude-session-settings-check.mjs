@@ -11,19 +11,22 @@
 // Desktop the hook sees the package's merged view of AppData, which matches the real file unless something inside
 // the package deleted it.
 // After a compaction (source "compact") the agent also gets a pointer to transcripts.py, the bounded way to read back
-// pre-compaction text from the transcript.
+// pre-compaction text from the transcript. When the transcript holds a Read of the PowerShell command guide, the
+// pointer adds that the global rule's read-once-per-session step is already met, so the agent skips a 9K reread.
 // OK = print nothing and exit 0. Problem = print {"systemMessage":...,"hookSpecificOutput":{...}} and exit 0: the
 // user sees the warning and the agent gets the same text as context; the compaction pointer goes to the agent only.
 // SessionStart cannot block; an internal error prints nothing.
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 
 const TRUTHY = /^(?:1|true|yes|on)$/i
 const BASH_RULE = /^Bash(?:\(|$)/
 const DOC = 'D:\\Codex\\.codex\\docs\\agent-guidance\\host-runbook\\claude-code-host-hooks.md'
 const UNIGETUI_DOC = 'D:\\Codex\\.codex\\docs\\agent-guidance\\host-runbook\\shell-and-runtime.md'
 const TRANSCRIPTS = 'C:\\Users\\WINDOWS\\.claude\\skills\\retro\\scripts\\transcripts.py'
+const PWSH_GUIDE = 'D:\\Codex\\.codex\\docs\\agent-guidance\\windows-pwsh-command-guidelines.md'
+const PWSH_GUIDE_NAME = 'windows-pwsh-command-guidelines.md'
 
 const PROBLEMS = {
   unparseable: '无法按 JSON 解析，没做下面两项检查；文件真坏了的话，Claude Code 会忽略其中全部设置（权限、hooks、env）。',
@@ -72,10 +75,32 @@ export function forceLocationMessage(flagPath) {
     `关掉用 D:\\UniGetUI\\uniget.exe settings clear --key WinGetForceLocationOnUpdate（经 IPC 由运行中的 UniGetUI 自己改）。说明见 ${UNIGETUI_DOC} 的 UniGetUI 段落。`
 }
 
-export function compactContext(transcriptPath) {
+// True when a transcript line records a Read tool call on the PowerShell command guide. Only lines that name the
+// guide are parsed, so a long transcript costs one string scan.
+export function readPwshGuide(text) {
+  for (let at = text.indexOf(PWSH_GUIDE_NAME); at !== -1;) {
+    const start = text.lastIndexOf('\n', at) + 1
+    const newline = text.indexOf('\n', at)
+    const end = newline === -1 ? text.length : newline
+    let record = null
+    try {
+      record = JSON.parse(text.slice(start, end))
+    } catch {
+      // A partial or non-JSON line.
+    }
+    const content = record?.message?.content
+    if (Array.isArray(content) && content.some(block => block?.type === 'tool_use' && block.name === 'Read' &&
+      win32.normalize(String(block.input?.file_path || '')).toLowerCase() === PWSH_GUIDE.toLowerCase())) return true
+    at = text.indexOf(PWSH_GUIDE_NAME, end)
+  }
+  return false
+}
+
+export function compactContext(transcriptPath, guideRead = false) {
   const transcript = transcriptPath || '<会话记录.jsonl>'
   return `上下文刚压缩过。要找回压缩前的原文（命令、报错、生成内容），先用 python ${TRANSCRIPTS} find <关键词> ${transcript} 拿行号，` +
-    `再用 show ${transcript} <行号> --grep <正则> 只取那一条；Grep 直接扫 .jsonl 时一行就是整条消息，一次能带出上万字符。`
+    `再用 show ${transcript} <行号> --grep <正则> 只取那一条；Grep 直接扫 .jsonl 时一行就是整条消息，一次能带出上万字符。` +
+    (guideRead ? `\n本会话压缩前已用 Read 读过 ${PWSH_GUIDE}：全局规则只要求每个会话读一次，不必重读；要查某一条时用 rg -n 定位后只读那一段。` : '')
 }
 
 // The hook output for the warnings (user and agent) and the agent-only context, or null when there is neither.
@@ -106,7 +131,16 @@ function main() {
   if (settings) warnings.push(settings)
   const flag = forceLocationFlagPath()
   if (existsSync(flag)) warnings.push(forceLocationMessage(flag))
-  const context = input?.source === 'compact' ? [compactContext(input?.transcript_path)] : []
+  let context = []
+  if (input?.source === 'compact') {
+    let guideRead = false
+    try {
+      guideRead = Boolean(input?.transcript_path) && readPwshGuide(readFileSync(input.transcript_path, 'utf8'))
+    } catch {
+      // An unreadable transcript only drops the read note.
+    }
+    context = [compactContext(input?.transcript_path, guideRead)]
+  }
   const output = compose(warnings, context)
   if (output) process.stdout.write(JSON.stringify(output))
 }
@@ -140,7 +174,13 @@ if (process.argv.includes('--self-test')) {
   // Values never reach the message, not even from a file that does not parse.
   const marker = 'value-' + 'that-must-not-leak'
   const leaky = json({ permissions: { deny: ['Bash'] }, env: { ANTHROPIC_AUTH_TOKEN: marker } })
+  const toolLine = (filePath, name = 'Read') => json({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input: { file_path: filePath } }] } })
+  const mention = json({ type: 'user', message: { content: [{ type: 'tool_result', content: `see ${PWSH_GUIDE}` }] } })
   const checks = [
+    [readPwshGuide([mention, toolLine(PWSH_GUIDE), mention].join('\n')), 'a Read of the guide counts'],
+    [readPwshGuide(toolLine('D:/Codex/.codex/docs/agent-guidance/windows-pwsh-command-guidelines.md')), 'forward slashes count'],
+    [!readPwshGuide([mention, toolLine('D:\\x\\windows-pwsh-command-guidelines.md'), toolLine(PWSH_GUIDE, 'Grep'), '{"broken": ' + PWSH_GUIDE_NAME].join('\n')), 'mentions, other copies, other tools and broken lines do not count'],
+    [compactContext('t', true).includes('不必重读') && !compactContext('t').includes('不必重读'), 'the read note appears only after a Read of the guide'],
     [evaluate(json({ permissions: { deny: ['Bash'] }, env: both }), 'x') === null, 'all keys set gives no message'],
     [/CLAUDE_CODE_USE_POWERSHELL_TOOL/.test(evaluate(leaky, 'x')), 'the message names the missing key'],
     [!evaluate(leaky, 'x').includes(marker), 'the message carries no env value'],

@@ -1,4 +1,4 @@
-// Claude Code PreToolUse guard (matcher PowerShell|Bash|mcp__terminal__run_in_terminal).
+// Claude Code PreToolUse guard (matchers PowerShell|Bash|mcp__terminal__run_in_terminal and Grep|Glob).
 // The Terminal panel tool types one line into the user's own PowerShell outside the MSIX package, so rules 8 and 11
 // skip it, the PowerShell-only rules apply to it and the Bash-only rules do not.
 // Denies mechanical mistakes before the command runs:
@@ -30,6 +30,8 @@
 //      skips the folder-window and file-operation checks of Restart-ExplorerShell.ps1, which is exempt;
 //  14. PowerShell commands starting with a bare `bash` or `bash.exe`: it resolves to C:\WINDOWS\system32\bash.exe, the
 //      WSL launcher, where the script's D:/ paths do not exist. Full paths and `wsl bash` pass.
+//  15. Grep and Glob tool searches rooted at D:\agents\projects or a rule 12 root (tool_input.path, else the session
+//      cwd): the tools stop ripgrep after 20 seconds and report a timeout or nothing found.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
@@ -393,10 +395,10 @@ function rgWildcardReason(path) {
 // and words with variables or splats cannot be resolved here, so they pass.
 const BROAD_ROOTS = new Set(['d:', 'd:\\agents', 'd:\\agents\\run-evidence', 'd:\\codex', 'd:\\codex\\.codex'])
 
-function isBroadRoot(word, cwd) {
+function isBroadRoot(word, cwd, roots = BROAD_ROOTS) {
   if (/[$@%`]/.test(word)) return false
   const path = word.replace(/^\/([a-z])(?=\/)/i, (_, drive) => `${drive}:`).replace(/^\/([a-z])$/i, (_, drive) => `${drive}:\\`)
-  return BROAD_ROOTS.has(win32.resolve(cwd || '.', path).replace(/[\\/]+$/, '').toLowerCase())
+  return roots.has(win32.resolve(cwd || '.', path).replace(/[\\/]+$/, '').toLowerCase())
 }
 
 // Returns the first rg path argument that walks a whole broad root, or null.
@@ -428,6 +430,22 @@ function bareBashReason(word) {
     "改用 Git Bash 全路径：& 'C:/Program Files/Git/bin/bash.exe' scripts/x.sh '参数'；PowerShell 没有 < 重定向，要喂文件给 stdin 就交给 bash：" +
     "& 'C:/Program Files/Git/bin/bash.exe' -c 'scripts/x.sh sh -s < 本地脚本'。确实要进 WSL 就写 wsl。" +
     `（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 17 条）`
+}
+
+// Rule 15. The Grep and Glob tools stop ripgrep after 20 seconds and then report a timeout or "No files found", so a
+// walk of D:\agents\projects (every project's node_modules, .venv and build output) fails as the rule 12 roots do.
+// PowerShell rg has no such limit, which is why rule 12 lets it walk D:\agents\projects. The search root is
+// tool_input.path, else the session cwd.
+const SEARCH_TOOL_ROOTS = new Set([...BROAD_ROOTS, 'd:\\agents\\projects'])
+
+function searchToolReason(tool, payload) {
+  const path = String(payload?.tool_input?.path || '')
+  const root = path || String(payload?.cwd || '')
+  if (!root || !isBroadRoot(root, payload?.cwd, SEARCH_TOOL_ROOTS)) return null
+  return `${tool} 工具要把 ${root}${path ? ' ' : '（没给 path，默认搜会话目录）'}整棵树走一遍，内置 ripgrep 20 秒就停，只回超时或 No files found。` +
+    "按名字找项目先列目录名：Get-ChildItem -LiteralPath 'D:/agents/projects' -Directory -Name（约 2 秒）；" +
+    '知道在哪个项目就把 path 指到那个项目目录；确实要跨项目搜内容，改用 PowerShell 里的 rg，它没有 20 秒上限' +
+    '（整个 D:\\agents\\projects 约 45 秒；D:\\agents 及更上层的根要加 --max-depth，否则同样被拦）。'
 }
 
 // Rule 10. In -like, ? matches any one character: '??*' matches every string of two or more characters.
@@ -651,6 +669,7 @@ function deny(reason) {
 
 export function evaluate(payload, io = defaultIo) {
   const tool = String(payload?.tool_name || '')
+  if (tool === 'Grep' || tool === 'Glob') return searchToolReason(tool, payload)
   const command = String(payload?.tool_input?.command || '')
   const terminal = tool === TERMINAL_TOOL
   if (!command || (tool !== 'PowerShell' && tool !== 'Bash' && !terminal)) return null
@@ -937,7 +956,16 @@ if (process.argv.includes('--self-test')) {
     [TERMINAL_TOOL, "pwsh -NoProfile -File 'D:\\repo\\tools\\docker_off.ps1'", false, desktop],
     [TERMINAL_TOOL, "& 'D:\\x\\Grok_Bot_0.77.0_Setup.exe' /S", false, desktop],
     [TERMINAL_TOOL, String.raw`Get-ChildItem 'D:\\agents'`, false],
-    [TERMINAL_TOOL, 'Get-ChildItem D:\\x', false]
+    [TERMINAL_TOOL, 'Get-ChildItem D:\\x', false],
+    // Grep and Glob stop ripgrep after 20 seconds; the root is path, else the session cwd (D:\repo unless given).
+    ['Grep', { pattern: 'magpie-codex-model-filter', path: 'D:\\agents\\projects' }, true],
+    ['Glob', { pattern: '*magpie*', path: 'D:\\agents\\projects\\' }, true],
+    ['Glob', { pattern: '**/*.md', path: 'D:/agents' }, true],
+    ['Grep', { pattern: 'foo', path: '..', cwd: 'D:\\agents\\projects\\misc' }, true],
+    ['Grep', { pattern: 'foo', cwd: 'D:\\agents\\projects' }, true],
+    ['Grep', { pattern: 'foo', path: 'D:\\agents\\projects\\misc' }, false],
+    ['Glob', { pattern: '*magpie*', path: 'D:\\agents\\run-evidence\\sn580' }, false],
+    ['Glob', { pattern: '*magpie*' }, false]
   ]
   const scripts = new Map(Object.entries({
     'D:\\repo\\tools\\recycle.ps1': 'Add-Type -TypeDefinition $src\n[Native]::SHFileOperationW([ref]$op)',
@@ -954,11 +982,14 @@ if (process.argv.includes('--self-test')) {
   }).map(([path, text]) => [path.toLowerCase(), text]))
   const io = { read: path => scripts.get(win32.normalize(path).toLowerCase()) ?? null }
   let failed = 0
-  for (const [tool, command, shouldDeny, env] of cases) {
-    const denied = evaluate({ tool_name: tool, tool_input: { command }, cwd: 'D:\\repo' }, env ? { ...io, env } : io) !== null
+  // A case's second element is the shell command, or for Grep and Glob the tool input plus an optional cwd.
+  for (const [tool, input, shouldDeny, env] of cases) {
+    const { cwd = 'D:\\repo', ...toolInput } = typeof input === 'string' ? { command: input } : input
+    const denied = evaluate({ tool_name: tool, tool_input: toolInput, cwd }, env ? { ...io, env } : io) !== null
     if (denied !== shouldDeny) {
       failed++
-      console.error(`FAIL ${tool}${env ? ` [${env.CLAUDE_CODE_ENTRYPOINT}]` : ''}: ${command} -> ${denied ? 'deny' : 'allow'}`)
+      const shown = typeof input === 'string' ? input : JSON.stringify(input)
+      console.error(`FAIL ${tool}${env ? ` [${env.CLAUDE_CODE_ENTRYPOINT}]` : ''}: ${shown} -> ${denied ? 'deny' : 'allow'}`)
     }
   }
   console.log(`self-test: ${cases.length - failed}/${cases.length} passed`)

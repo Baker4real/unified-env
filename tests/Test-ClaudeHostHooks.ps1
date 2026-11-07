@@ -79,14 +79,18 @@ $denyCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = ('Stop-' + 'Process -Name explorer -Force') } },
     @{ tool_name = 'mcp__terminal__run_in_terminal'; tool_input = @{ command = 'Remove-Item -Recurse -Force D:\tmp\x' } },
     # PowerShell 里裸写的 bash 是 WSL。
-    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'bash scripts/rssh.sh uptime' } }
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'bash scripts/rssh.sh uptime' } },
+    # Grep/Glob 工具 20 秒就停；没给 path 时搜会话 cwd。
+    @{ tool_name = 'Grep'; tool_input = @{ pattern = 'x'; path = 'D:\agents\projects' } },
+    @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents' }
 )
 foreach ($case in $denyCases) {
+    $label = $case.tool_input['command'] ?? ($case | ConvertTo-Json -Compress)
     $result = Invoke-Guard ($case | ConvertTo-Json -Compress)
-    Assert-Equal $result.exitCode 0 "deny 路径也必须 exit 0：$($case.tool_input.command)"
+    Assert-Equal $result.exitCode 0 "deny 路径也必须 exit 0：$label"
     $decision = ($result.stdout | ConvertFrom-Json).hookSpecificOutput
     Assert-Equal $decision.hookEventName 'PreToolUse' 'deny 输出必须是 PreToolUse 决定。'
-    Assert-Equal $decision.permissionDecision 'deny' "必须拦截：$($case.tool_input.command)"
+    Assert-Equal $decision.permissionDecision 'deny' "必须拦截：$label"
 }
 
 $allowCases = @(
@@ -99,12 +103,15 @@ $allowCases = @(
     @{ tool_name = 'Bash'; tool_input = @{ command = 'pwsh -NoProfile -File ./x.ps1 "$HOME"' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -n foo D:\agents\x -g ''*.ps1''' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git status --porcelain | Where-Object { $_.StartsWith(''??'') }' } },
-    @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'C:/Program Files/Git/bin/bash.exe' scripts/rssh.sh uptime" } }
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'C:/Program Files/Git/bin/bash.exe' scripts/rssh.sh uptime" } },
+    @{ tool_name = 'Grep'; tool_input = @{ pattern = 'x'; path = 'D:\agents\projects\misc' } },
+    @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents\projects\misc' }
 )
 foreach ($case in $allowCases) {
+    $label = $case.tool_input['command'] ?? ($case | ConvertTo-Json -Compress)
     $result = Invoke-Guard ($case | ConvertTo-Json -Compress)
-    Assert-Equal $result.exitCode 0 "放行路径必须 exit 0：$($case.tool_input.command)"
-    Assert-Equal $result.stdout.Trim() '' "放行时不得输出决定：$($case.tool_input.command)"
+    Assert-Equal $result.exitCode 0 "放行路径必须 exit 0：$label"
+    Assert-Equal $result.stdout.Trim() '' "放行时不得输出决定：$label"
 }
 
 # 引用脚本扫描走真实文件读取：含回收站调用的 .ps1 被拦，无害内容放行。
@@ -220,6 +227,14 @@ try {
     $compact = $result.stdout | ConvertFrom-Json
     Assert-True ($null -eq $compact.PSObject.Properties['systemMessage']) '压缩指针不得作为界面警告。'
     Assert-True ($compact.hookSpecificOutput.additionalContext.Contains('transcripts.py') -and $compact.hookSpecificOutput.additionalContext.Contains('D:\t\session.jsonl')) '压缩指针必须点名 transcripts.py 和本会话记录。'
+    Assert-True (-not $compact.hookSpecificOutput.additionalContext.Contains('不必重读')) '读不到会话记录时不得说命令约束已读过。'
+    # 会话记录里压缩前有对命令约束的 Read 调用时，指针补一句已读过。
+    $transcript = Join-Path $sessionDir 'session.jsonl'
+    $guideRead = @{ type = 'assistant'; message = @{ content = @(@{ type = 'tool_use'; name = 'Read'; input = @{ file_path = 'D:\Codex\.codex\docs\agent-guidance\windows-pwsh-command-guidelines.md' } }) } } | ConvertTo-Json -Depth 6 -Compress
+    [IO.File]::WriteAllText($transcript, "{`"type`":`"user`"}`n$guideRead`n", [Text.UTF8Encoding]::new($false))
+    $compactRead = @{ hook_event_name = 'SessionStart'; source = 'compact'; transcript_path = $transcript } | ConvertTo-Json -Compress
+    $result = Invoke-Guard $compactRead -ScriptPath $sessionHookPath -ConfigDir $sessionDir -LocalAppData $sessionDir
+    Assert-True (($result.stdout | ConvertFrom-Json).hookSpecificOutput.additionalContext.Contains('不必重读')) '压缩前读过命令约束时，指针必须说明不必重读。'
 
     # UniGetUI 的 WinGetForceLocationOnUpdate 开关文件存在时警告。
     $flagDir = Join-Path $sessionDir 'UniGetUI\Configuration'
@@ -231,7 +246,7 @@ try {
 }
 finally {
     if (Test-Path -LiteralPath $sessionSettings) { Remove-Item -LiteralPath $sessionSettings }
-    foreach ($leaf in @('UniGetUI\Configuration\WinGetForceLocationOnUpdate')) {
+    foreach ($leaf in @('session.jsonl', 'UniGetUI\Configuration\WinGetForceLocationOnUpdate')) {
         $path = Join-Path $sessionDir $leaf
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path }
     }
@@ -271,7 +286,13 @@ Assert-Equal $pushGarbage.stdout.Trim() '' 'push guard 遇到非 JSON 输入必�
 
 $managed = Get-Content -LiteralPath $managedHooksPath -Raw | ConvertFrom-Json
 $registration = @($managed.PreToolUse)
-Assert-Equal $registration.Count 1 '受管注册只含一条 PreToolUse。'
+Assert-Equal $registration.Count 2 '受管注册含两条 PreToolUse：shell 命令一条，Grep/Glob 一条。'
+Assert-Equal $registration[1].matcher 'Grep|Glob' '第二条 PreToolUse 的 matcher 必须是 Grep|Glob。'
+$searchHooks = @($registration[1].hooks)
+Assert-Equal $searchHooks.Count 1 'Grep|Glob 只挂 guard 一个 hook。'
+Assert-Equal $searchHooks[0].command $node 'Grep|Glob 的 guard 必须用受管 node 的 exec 形式。'
+Assert-Equal @($searchHooks[0].args)[0] (Join-Path $registeredRoot 'claude-pretool-guard.mjs') 'Grep|Glob 的 hook 参数必须指向受管 guard。'
+Assert-Equal $searchHooks[0].onFailure 'continue' 'Grep|Glob 的 guard 自身故障也必须放行（onFailure=continue）。'
 Assert-Equal $registration[0].matcher 'PowerShell|Bash|mcp__terminal__run_in_terminal' 'matcher 必须覆盖 PowerShell、Bash 与 Terminal 面板的 run_in_terminal。'
 $hook = @($registration[0].hooks)[0]
 Assert-Equal $hook.command $node 'hook 必须用受管 node 的 exec 形式。'
