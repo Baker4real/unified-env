@@ -314,7 +314,9 @@
         },
         "host-live": {
           "powershell": [],
-          "python": [],
+          "python": [
+            "modules/skill-supply-chain/tests/Test-CommitExactFilesTransactionRegression.py"
+          ],
           "node": [
             "tests/Test-GitDefaultBranchSkillPolicy.cjs",
             "tests/Test-SuperpowersSkillRetirement.cjs"

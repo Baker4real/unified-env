@@ -35,6 +35,17 @@ transaction's ledger can be committed the same way from its
 since; the transaction manifest's ``source_state_after`` records that
 snapshot's path and SHA-256.
 
+``--transaction EVIDENCE`` commits what one succeeded guarded install transaction
+changed, read from its evidence directory: each skill directory as the work tree
+holds it, once the tree matches the transaction's ``activated_payload_seal`` and
+HEAD holds the version the transaction backed up, plus only that transaction's
+ledger change.  That change is the transaction's ``backups/source-state-before.json``
+to ``source-state-after.json`` delta applied to HEAD's ledger: source groups match by
+``id``, appended ``local_changes`` stay appended, ``updated_at`` and
+``last_guarded_install`` keep the later time, and anything else that both HEAD and
+the transaction changed stops the commit.  Another session's uncommitted
+transaction in the live ledger stays out of the commit and in the work tree.
+
 ``--from-commit SNAPSHOT COMMIT`` replays one commit made in a snapshot of this
 repository (``exact_snapshot.py create`` makes one): its paths, modes and
 blobs, and its message unless ``--message-file`` is given.  Each of those paths
@@ -75,6 +86,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import shlex
@@ -85,8 +97,14 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from install_skill_guarded_base import tree_manifest_sha256  # noqa: E402  (the wrapper's tree seal)
+
 
 REGULAR_FILE_MODES = {"100644", "100755"}
+LEDGER_TIMESTAMP_KEYS = frozenset({"updated_at", "last_guarded_install"})
+_MISSING = object()
 HUNK_HEADER = re.compile(rb"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 INDEX_LOCK_WAIT_SECONDS = 30.0
 INDEX_LOCK_POLL_SECONDS = 0.25
@@ -354,6 +372,143 @@ def sync_work_tree(repo: Path, head: str, paths: list[str]) -> tuple[list[str], 
     return synced, held, left
 
 
+def _keyed_by_id(items: list[object]) -> bool:
+    ids = [item.get("id") for item in items if isinstance(item, dict)]
+    return len(ids) == len(items) and all(isinstance(value, str) for value in ids) and len(set(ids)) == len(ids)
+
+
+def merge_ledger_value(base: object, theirs: object, ours: object, path: str) -> object:
+    """Apply the transaction's change from ``base`` to ``theirs`` onto ``ours``; refuse what both changed."""
+    if theirs == base:
+        return ours
+    if ours == base or ours == theirs:
+        return theirs
+    if isinstance(base, dict) and isinstance(theirs, dict) and isinstance(ours, dict):
+        merged = {}
+        for key in [*ours, *(key for key in theirs if key not in ours)]:
+            value = merge_ledger_value(
+                base.get(key, _MISSING), theirs.get(key, _MISSING), ours.get(key, _MISSING), f"{path}.{key}"
+            )
+            if value is not _MISSING:
+                merged[key] = value
+        return merged
+    if path.rsplit(".", 1)[-1] in LEDGER_TIMESTAMP_KEYS and isinstance(theirs, str) and isinstance(ours, str):
+        return max(ours, theirs)
+    if isinstance(base, list) and isinstance(theirs, list) and isinstance(ours, list):
+        if _keyed_by_id(base) and _keyed_by_id(theirs) and _keyed_by_id(ours):
+            before = {item["id"]: item for item in base}
+            after = {item["id"]: item for item in theirs}
+            present = {item["id"] for item in ours}
+            pairs = [(item["id"], item) for item in ours]
+            pairs += [(item["id"], _MISSING) for item in theirs if item["id"] not in present]
+            items = (
+                merge_ledger_value(before.get(key, _MISSING), after.get(key, _MISSING), item, f"{path}[id={key}]")
+                for key, item in pairs
+            )
+            return [item for item in items if item is not _MISSING]
+        if theirs[: len(base)] == base:
+            return [*ours, *(item for item in theirs[len(base):] if item not in ours)]
+    raise CommitError(
+        f"账本 {path} 在这次事务里和 HEAD 之后都改了，不能自动合并；手工合并后用 --file-from 提交"
+    )
+
+
+def merge_ledger(base: dict[str, object], theirs: dict[str, object], ours: dict[str, object]) -> dict[str, object]:
+    merged = merge_ledger_value(base, theirs, ours, "$")
+    if isinstance(merged.get("updated_at"), str) and isinstance(theirs.get("updated_at"), str):
+        # The commit carries this transaction's change, so the ledger is at least as new as the transaction left it.
+        merged["updated_at"] = max(merged["updated_at"], theirs["updated_at"])
+    return merged
+
+
+def _load_json(path: Path, label: str) -> object:
+    try:
+        return json.loads(path.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CommitError(f"读不到{label}：{path}（{exc}）") from exc
+
+
+def _tree_files(root: Path, *, skip_bytecode: bool) -> tuple[dict[str, str], list[str]]:
+    """Every file's SHA-256 and every directory under ``root``, as the wrapper's tree seal counts them."""
+    files: dict[str, str] = {}
+    directories: list[str] = []
+    for current, names, filenames in os.walk(root):
+        current_path = Path(current)
+        if skip_bytecode:
+            names[:] = [name for name in names if name.casefold() != "__pycache__"]
+        directories += [(current_path / name).relative_to(root).as_posix() for name in names]
+        for filename in filenames:
+            if not (skip_bytecode and filename.casefold().endswith(".pyc")):
+                path = current_path / filename
+                files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return files, directories
+
+
+def _seal(files: dict[str, str], directories: list[str]) -> dict[str, object]:
+    return {
+        "directory_count": len(directories),
+        "file_count": len(files),
+        "tree_sha256": tree_manifest_sha256(files, directories),
+    }
+
+
+def transaction_changes(repo: Path, expected: str, evidence: Path) -> tuple[list[tuple[str, bytes, str]], list[str]]:
+    """The files and deletions of one succeeded guarded install transaction, with its ledger change merged onto ``expected``."""
+    manifest = _load_json(evidence / "manifest.json", "事务 manifest")
+    records = manifest.get("directory_records") if isinstance(manifest, dict) else None
+    if manifest.get("status") != "succeeded" or not isinstance(records, list) or not records:
+        raise CommitError("--transaction 只提交 status=succeeded、带 directory_records 的安装/更新事务")
+    if manifest.get("merge_retirement"):
+        raise CommitError("--transaction 不处理 merge retirement 事务")
+    if os.path.normcase(Path(str(manifest.get("active_root"))).resolve()) != os.path.normcase(repo):
+        raise CommitError(f"事务的 active root 是 {manifest.get('active_root')}，不是 {repo}")
+    blob_id = lambda path, data: git_text(repo, "hash-object", f"--path={path}", "--stdin", data=data)
+    files: list[tuple[str, bytes, str]] = []
+    deletes: list[str] = []
+    for record in records:
+        if not record.get("activated"):
+            raise CommitError(f"事务没有激活 {record.get('name')}")
+        active = Path(record["active"])
+        relative = active.resolve().relative_to(repo).as_posix()
+        listing = git(repo, "ls-tree", "-r", "-z", expected, "--", relative).stdout.split(b"\0")
+        head = {
+            name.decode("utf-8").removeprefix(relative + "/"): meta.decode("ascii").split(" ")[2]
+            for meta, name in (row.split(b"\t", 1) for row in listing if row)
+        }
+        before: dict[str, str] = {}
+        if record.get("had_existing"):
+            backup = Path(record["backup"])
+            if _seal(*_tree_files(backup, skip_bytecode=False)) != record.get("backup_seal"):
+                raise CommitError(f"事务备份 {backup} 与它的 backup_seal 不一致")
+            before = {
+                name: blob_id(f"{relative}/{name}", (backup / name).read_bytes())
+                for name in _tree_files(backup, skip_bytecode=True)[0]
+            }
+        if head != before:
+            raise CommitError(f"HEAD 里的 {relative} 不是这次事务之前的版本：先提交更早改过它的事务")
+        live, live_directories = _tree_files(active, skip_bytecode=True)
+        if _seal(live, live_directories) != record.get("activated_payload_seal"):
+            raise CommitError(f"{relative} 在这次事务之后又被改过，工作树已不是事务写下的版本")
+        for name in sorted(live):
+            data = (active / name).read_bytes()
+            if blob_id(f"{relative}/{name}", data) != head.get(name):
+                files.append((f"{relative}/{name}", data, live[name]))
+        deletes += [f"{relative}/{name}" for name in sorted(head) if name not in live]
+    after = manifest.get("source_state_after") or {}
+    after_bytes = Path(str(after.get("path"))).read_bytes()
+    if hashlib.sha256(after_bytes).hexdigest() != after.get("sha256"):
+        raise CommitError("source-state-after.json 与事务 manifest 记录的 SHA-256 不一致")
+    ledger = Path(str(manifest.get("ledger"))).resolve().relative_to(repo).as_posix()
+    merged = merge_ledger(
+        _load_json(evidence / "backups" / "source-state-before.json", "事务前的账本"),
+        json.loads(after_bytes.decode("utf-8")),
+        json.loads(git(repo, "cat-file", "blob", f"{expected}:{ledger}").stdout.decode("utf-8")),
+    )
+    data = (json.dumps(merged, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    files.append((ledger, data, hashlib.sha256(data).hexdigest()))
+    return files, deletes
+
+
 def staged_refusal(repo: Path, paths: list[str]) -> str:
     """The guard's refusal: ``paths`` hold staged changes; name them, when each staged version was written, and how to find the owner."""
     rows = []
@@ -380,7 +535,7 @@ def commit_exact(
     repo: Path,
     expected_head: str,
     message_file: Path | None,
-    files: list[tuple[str, Path, str]],
+    files: list[tuple[str, Path | bytes, str]],
     deletes: list[str],
     hunks: list[tuple[str, str, list[int]]] = (),
     executables: list[str] = (),
@@ -428,7 +583,7 @@ def commit_exact(
             raise CommitError(f"{path}：共享 index 里暂存的 blob 是 {blob}，不是评审过的 {reviewed}")
         entries.append((mode, blob, path))
     for path, source, reviewed in files:
-        data = source.read_bytes()
+        data = source if isinstance(source, bytes) else source.read_bytes()
         actual = hashlib.sha256(data).hexdigest()
         if actual != reviewed.lower():
             raise CommitError(f"{path}：内容 sha256 是 {actual}，不是评审过的 {reviewed}")
@@ -539,6 +694,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "unless --message-file is given",
     )
     parser.add_argument(
+        "--transaction",
+        type=Path,
+        metavar="EVIDENCE",
+        help="commit what the succeeded guarded install transaction in evidence directory EVIDENCE changed: its "
+        "skill directories as the work tree holds them, and only its own ledger change merged onto HEAD's ledger",
+    )
+    parser.add_argument(
         "--hunks",
         action="append",
         nargs="+",
@@ -556,8 +718,17 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     args = parser.parse_args(argv)
     if args.list_hunks:
-        if args.file or args.file_from or args.from_index or args.delete or args.hunks or args.executable or args.from_commit:
+        if (
+            args.file or args.file_from or args.from_index or args.delete or args.hunks or args.executable
+            or args.from_commit or args.transaction
+        ):
             parser.error("--list-hunks 只能单独使用")
+        return args
+    if args.transaction:
+        if args.file or args.file_from or args.from_index or args.delete or args.hunks or args.executable or args.from_commit:
+            parser.error("--transaction 不和 --file、--file-from、--from-index、--hunks、--delete、--executable、--from-commit 同用")
+        if not (args.expected_head and args.message_file):
+            parser.error("提交需要 --expected-head 和 --message-file")
         return args
     if args.from_commit:
         if args.file or args.file_from or args.from_index or args.delete or args.hunks or args.executable:
@@ -595,6 +766,9 @@ def main(argv: list[str] | None = None) -> int:
     deletes = [Path(path).as_posix() for path in args.delete]
     replay = (Path(args.from_commit[0]).resolve(), args.from_commit[1]) if args.from_commit else None
     try:
+        if args.transaction:
+            expected = git_text(repo, "rev-parse", "--verify", f"{args.expected_head}^{{commit}}")
+            files, deletes = transaction_changes(repo, expected, args.transaction.resolve())
         head = commit_exact(
             repo=repo,
             expected_head=args.expected_head,
@@ -616,7 +790,11 @@ def main(argv: list[str] | None = None) -> int:
     committed = path_list(git(repo, "diff-tree", "-r", "-z", "--name-only", "--no-renames", "--no-commit-id", head).stdout)
     print(git_text(repo, "show", "--stat", "--format=%H%n%an <%ae> | %s", head))
     try:
-        synced, held, left = sync_work_tree(repo, head, committed if replay else [Path(path).as_posix() for path, _, _ in args.file_from])
+        synced, held, left = sync_work_tree(
+            repo,
+            head,
+            committed if replay or args.transaction else [Path(path).as_posix() for path, _, _ in args.file_from],
+        )
     except (CommitError, OSError) as exc:
         print(f"commit_exact_files: 提交 {head} 已生成，但同步工作树失败：{exc}", file=sys.stderr)
         return 3

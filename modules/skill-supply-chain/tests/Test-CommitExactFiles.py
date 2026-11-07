@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import importlib.util
 import io
+import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -17,17 +21,26 @@ from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-HELPER_PATH = PROJECT_ROOT / "modules" / "skill-supply-chain" / "implementation" / "commit_exact_files.py"
+IMPLEMENTATION_ROOT = PROJECT_ROOT / "modules" / "skill-supply-chain" / "implementation"
+HELPER_PATH = IMPLEMENTATION_ROOT / "commit_exact_files.py"
 SPEC = importlib.util.spec_from_file_location("commit_exact_files", HELPER_PATH)
 if SPEC is None or SPEC.loader is None:  # pragma: no cover
     raise RuntimeError(f"无法加载 helper：{HELPER_PATH}")
 HELPER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(HELPER)
+if str(IMPLEMENTATION_ROOT) not in sys.path:
+    sys.path.insert(0, str(IMPLEMENTATION_ROOT))
+from install_skill_guarded_tree import tree_content_seal  # noqa: E402  (the wrapper's own seal)
 TEMP_PARENT = Path(r"D:\Codex\tmp")
+LEDGER = ".downloaded-skills-source-state.json"
 
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def ledger_bytes(data: dict) -> bytes:
+    return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
 class CommitExactFilesTests(unittest.TestCase):
@@ -446,6 +459,124 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(code, 0, error)
         self.assertEqual(self.show("HEAD:b.txt"), b"x\ny\nz")
         self.assertEqual(self.status(), [" M b.txt"])
+
+    def guarded_transaction(self, *, other_status: str | None = None, our_status: str | None = None) -> Path:
+        """A succeeded guarded update of skill-x, run after another session's still uncommitted transaction."""
+        committed = {
+            "updated_at": "2026-11-05",
+            "notes": [],
+            "sources": [
+                {
+                    "id": "group-a",
+                    "status": "tracked",
+                    "skills": ["skill-x", "skill-y"],
+                    "local_changes": [{"skill": "skill-x", "date": "2026-11-01", "summary": "first"}],
+                    "last_guarded_install": "2026-11-01T00:00:00Z",
+                },
+                {"id": "group-b", "skills": ["skill-z"], "local_changes": [], "last_guarded_install": "2026-11-01T00:00:00Z"},
+            ],
+            "unresolved": [],
+            "deleted": [],
+        }
+        skill = self.repo / "skill-x"
+        skill.mkdir()
+        (skill / "SKILL.md").write_bytes(b"---\nname: skill-x\n---\nv1\n")
+        (skill / "SOURCE.md").write_bytes(b"# Source\n")
+        self.write(LEDGER, ledger_bytes(committed))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base skill-x")
+        self.base = self.head()
+
+        before = copy.deepcopy(committed)
+        group_a, group_b = before["sources"]
+        group_a["local_changes"].append({"skill": "skill-y", "date": "2026-11-06", "summary": "other session"})
+        group_a["last_guarded_install"] = "2026-11-06T00:00:00Z"
+        group_b["last_guarded_install"] = "2026-11-06T00:00:00Z"
+        before["updated_at"] = "2026-11-06"
+        if other_status:
+            group_a["status"] = other_status
+        after = copy.deepcopy(before)
+        group_a = after["sources"][0]
+        group_a["local_changes"].append({"skill": "skill-x", "date": "2026-11-07", "summary": "this transaction"})
+        group_a["last_guarded_install"] = "2026-11-07T00:00:00Z"
+        group_a["skills"] = ["skill-y", "skill-x"]
+        after["updated_at"] = "2026-11-07"
+        if our_status:
+            group_a["status"] = our_status
+
+        evidence = self.temp / "install-20261107T000000-tx"
+        backups = evidence / "backups"
+        backup = backups / "active-skills" / "skill-x"
+        shutil.copytree(skill, backup)
+        (skill / "SKILL.md").write_bytes(b"---\nname: skill-x\n---\nv2\n")
+        (skill / "SOURCE.md").write_bytes(b"# Source\n\n---\n\n# Source Provenance\n\nSkill: `skill-x`\n")
+        (backups / "source-state-before.json").write_bytes(ledger_bytes(before))
+        (backups / "source-state-after.json").write_bytes(ledger_bytes(after))
+        self.write(LEDGER, ledger_bytes(after))
+        manifest = {
+            "status": "succeeded",
+            "target_scope": "active",
+            "active_root": str(self.repo),
+            "ledger": str(self.repo / LEDGER),
+            "merge_retirement": None,
+            "directory_records": [
+                {
+                    "name": "skill-x",
+                    "active": str(skill),
+                    "backup": str(backup),
+                    "had_existing": True,
+                    "activated": True,
+                    "backup_seal": tree_content_seal(backup),
+                    "activated_payload_seal": tree_content_seal(skill),
+                }
+            ],
+            "source_state_after": {
+                "path": str(backups / "source-state-after.json"),
+                "sha256": sha256(ledger_bytes(after)),
+            },
+        }
+        (evidence / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        return evidence
+
+    def test_transaction_commits_its_own_ledger_delta_beside_another_sessions_uncommitted_one(self) -> None:
+        evidence = self.guarded_transaction()
+
+        code, error = self.run_helper("--transaction", str(evidence))
+
+        self.assertEqual(code, 0, error)
+        changed = self.git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split()
+        self.assertEqual(changed, [LEDGER, "skill-x/SKILL.md", "skill-x/SOURCE.md"])
+        self.assertEqual(self.show("HEAD:skill-x/SKILL.md"), b"---\nname: skill-x\n---\nv2\n")
+        expected = {
+            "updated_at": "2026-11-07",
+            "notes": [],
+            "sources": [
+                {
+                    "id": "group-a",
+                    "status": "tracked",
+                    "skills": ["skill-y", "skill-x"],
+                    "local_changes": [
+                        {"skill": "skill-x", "date": "2026-11-01", "summary": "first"},
+                        {"skill": "skill-x", "date": "2026-11-07", "summary": "this transaction"},
+                    ],
+                    "last_guarded_install": "2026-11-07T00:00:00Z",
+                },
+                {"id": "group-b", "skills": ["skill-z"], "local_changes": [], "last_guarded_install": "2026-11-01T00:00:00Z"},
+            ],
+            "unresolved": [],
+            "deleted": [],
+        }
+        self.assertEqual(self.show(f"HEAD:{LEDGER}"), ledger_bytes(expected))
+        self.assertEqual(self.status(), [f" M {LEDGER}"])
+
+    def test_transaction_refuses_a_field_both_transactions_changed(self) -> None:
+        evidence = self.guarded_transaction(other_status="retained-local", our_status="updated")
+
+        code, error = self.run_helper("--transaction", str(evidence))
+
+        self.assertEqual(code, 1)
+        self.assertIn("$.sources[id=group-a].status", error)
+        self.assertEqual(self.head(), self.base)
 
 
 if __name__ == "__main__":
