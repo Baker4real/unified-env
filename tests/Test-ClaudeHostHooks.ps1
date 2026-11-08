@@ -200,6 +200,32 @@ foreach ($allowStop in @(
 $stopGarbage = Invoke-Guard 'not json' -ScriptPath $stopHookPath
 Assert-Equal $stopGarbage.stdout.Trim() '' 'stop hook 遇到非 JSON 输入必须放行。'
 
+# 回复为空或只有 </reasoning_effort> 这类标记、本轮又没调用工具时拦一次；本轮调用过工具或读不到会话记录时放行。
+$stopDir = Join-Path $FixtureRoot ([guid]::NewGuid().ToString('N'))
+$stopTranscript = Join-Path $stopDir 'session.jsonl'
+$promptEntry = @{ type = 'user'; message = @{ role = 'user'; content = '继续' } } | ConvertTo-Json -Depth 6 -Compress
+$strayEntry = @{ type = 'assistant'; message = @{ role = 'assistant'; content = @(@{ type = 'text'; text = '</reasoning_effort>' }) } } | ConvertTo-Json -Depth 6 -Compress
+$toolEntry = @{ type = 'assistant'; message = @{ role = 'assistant'; content = @(@{ type = 'tool_use'; id = 't1'; name = 'Read'; input = @{} }) } } | ConvertTo-Json -Depth 6 -Compress
+$emptyInput = @{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = '</reasoning_effort>'; transcript_path = $stopTranscript } | ConvertTo-Json -Compress
+[void][IO.Directory]::CreateDirectory($stopDir)
+try {
+    [IO.File]::WriteAllText($stopTranscript, "$toolEntry`n$promptEntry`n$strayEntry`n", [Text.UTF8Encoding]::new($false))
+    $result = Invoke-Guard $emptyInput -ScriptPath $stopHookPath
+    Assert-Equal $result.exitCode 0 '空回复拦截也必须 exit 0。'
+    $decision = $result.stdout | ConvertFrom-Json
+    Assert-Equal $decision.decision 'block' '本轮没调用工具、回复只有标记时必须拦下。'
+    Assert-True ($decision.reason.Contains('</reasoning_effort>')) '拦截原因必须带出回复里的标记。'
+    [IO.File]::WriteAllText($stopTranscript, "$promptEntry`n$toolEntry`n$strayEntry`n", [Text.UTF8Encoding]::new($false))
+    $result = Invoke-Guard $emptyInput -ScriptPath $stopHookPath
+    Assert-Equal $result.stdout.Trim() '' '本轮调用过工具时，空回复必须放行。'
+}
+finally {
+    if (Test-Path -LiteralPath $stopTranscript) { Remove-Item -LiteralPath $stopTranscript }
+    if (Test-Path -LiteralPath $stopDir) { [IO.Directory]::Delete($stopDir) }
+}
+$noTranscript = @{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = ''; transcript_path = (Join-Path $stopDir 'session.jsonl') } | ConvertTo-Json -Compress
+Assert-Equal (Invoke-Guard $noTranscript -ScriptPath $stopHookPath).stdout.Trim() '' '读不到会话记录时，空回复必须放行。'
+
 # SessionStart hook：用户设置的 env 缺本机依赖的键时警告，只报键名；用 CLAUDE_CONFIG_DIR 指向夹具设置文件。
 Assert-True (Test-Path -LiteralPath $sessionHookPath -PathType Leaf) '缺少 claude-session-settings-check.mjs。'
 $sessionSelfTest = & $node $sessionHookPath --self-test

@@ -11,7 +11,11 @@
 //      the Terminal panel opens in whatever directory it last used, so the command can hit another repository;
 //   6. an unquoted <placeholder>: bash reads it as a redirect, PowerShell fails with ParserError.
 // Rules 4-6 apply to bash and PowerShell blocks alike and report at most once per block.
-// Allow = print nothing and exit 0. Block = print {"decision":"block","reason":...} and exit 0.
+// The hook also blocks once when the reply is empty or holds only tags such as a stray `</reasoning_effort>` and the
+// turn called no tool, so the user got no answer at all (2026-11-08). Whether the turn called a tool comes from the
+// transcript (transcript_path), read back to the user prompt that started the turn; a transcript that cannot be read
+// or holds no such prompt allows the stop.
+// Allow =print nothing and exit 0. Block = print {"decision":"block","reason":...} and exit 0.
 // stop_hook_active (the turn already continues because of a stop hook) and any internal error allow the stop,
 // so the hook blocks at most once per turn and a broken hook never holds a session.
 import { readFileSync } from 'node:fs'
@@ -40,6 +44,8 @@ const GIT_WRITE_ARGS = {
   fetch: /^(?:-p|--prune|--prune-tags)$/
 }
 const MAX_FINDINGS = 5
+// A reply that shows the user nothing: empty, or nothing but tags like </reasoning_effort>.
+const MARKUP_ONLY = /^(?:<\/?[A-Za-z_][\w-]*>\s*)*$/
 const SPACE_PATH_FIX = '路径含空格时写成 pwsh -NoProfile -Command "& \'<路径>\' <参数>"'
 
 const RULES = {
@@ -133,9 +139,50 @@ export function lint(text) {
   return findings
 }
 
-export function evaluate(payload) {
+export function emptyReply(message) {
+  return typeof message === 'string' && MARKUP_ONLY.test(message.trim())
+}
+
+// Whether the turn that just ended called a tool, from the transcript (one JSON entry per line) read back to the user
+// prompt that started the turn. Tool results and isMeta entries are user entries too; they do not start a turn.
+// null when no such prompt is found.
+export function turnCalledTool(transcript) {
+  const lines = transcript.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry
+    try {
+      entry = JSON.parse(lines[i])
+    } catch {
+      continue
+    }
+    if (!entry || entry.isSidechain) continue
+    const content = Array.isArray(entry.message?.content) ? entry.message.content : []
+    if (entry.type === 'assistant' && content.some(block => /tool_use$/.test(block?.type || ''))) return true
+    if (entry.type !== 'user' || entry.isMeta) continue
+    return entry.toolUseResult !== undefined || content.some(block => block?.type === 'tool_result')
+  }
+  return null
+}
+
+function emptyReplyReason(message) {
+  const shown = message.trim()
+  const what = shown ? `只有标记 ${shown.length > 120 ? `${shown.slice(0, 117)}...` : shown}` : '是空的'
+  return `刚才的回复${what}，本轮也没有调用工具，用户什么都没看到。现在按用户最后一条消息作答或开始执行。`
+}
+
+export function evaluate(payload, readTranscript = path => readFileSync(path, 'utf8')) {
   if (payload?.stop_hook_active) return null
-  const findings = lint(String(payload?.last_assistant_message || ''))
+  const message = payload?.last_assistant_message
+  if (emptyReply(message)) {
+    let calledTool = null
+    try {
+      if (payload?.transcript_path) calledTool = turnCalledTool(readTranscript(payload.transcript_path))
+    } catch {
+      // A transcript that cannot be read allows the stop.
+    }
+    return calledTool === false ? emptyReplyReason(message) : null
+  }
+  const findings = lint(String(message || ''))
   if (!findings.length) return null
   const items = findings.slice(0, MAX_FINDINGS).map(({ rule, line }) => {
     const shown = line.length > 120 ? `${line.slice(0, 117)}...` : line
@@ -212,10 +259,40 @@ if (process.argv.includes('--self-test')) {
     }
   }
   const bad = fence('bash', "'D:/x/run.cmd' --dry-run")
+  const entry = (type, content, extra = {}) => JSON.stringify({ type, message: { role: type, content }, ...extra })
+  const prompt = entry('user', '继续')
+  const toolUse = entry('assistant', [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }])
+  const toolResult = entry('user', [{ type: 'tool_result', tool_use_id: 't1', content: 'x' }], { toolUseResult: {} })
+  const stray = entry('assistant', [{ type: 'text', text: '</reasoning_effort>' }])
+  const thinking = entry('assistant', [{ type: 'thinking', thinking: '' }])
+  const meta = entry('user', [{ type: 'text', text: '[Image: source: x]' }], { isMeta: true })
+  const imagePrompt = entry('user', [{ type: 'image' }, { type: 'text', text: '看图' }])
+  const summary = JSON.stringify({ type: 'system', subtype: 'stop_hook_summary' })
+  const jsonl = (...lines) => lines.join('\n') + '\n'
+  const noToolTurn = jsonl(toolUse, toolResult, prompt, meta, stray, thinking, summary)
+  const toolTurn = jsonl(prompt, toolUse, toolResult, stray)
+  let reads = 0
+  const counting = () => { reads++; return noToolTurn }
+  const fails = () => { throw new Error('unreadable') }
+  const of = text => () => text
   const checks = [
     [evaluate({ last_assistant_message: bad }) !== null, 'a finding blocks the stop'],
     [evaluate({ last_assistant_message: bad, stop_hook_active: true }) === null, 'stop_hook_active allows the stop'],
-    [evaluate({}) === null, 'a missing message allows the stop']
+    [evaluate({}) === null, 'a missing message allows the stop'],
+    [['', ' \n', '</reasoning_effort>', '</reasoning_effort>\n<thinking>'].every(emptyReply), 'empty and tag-only replies count as empty'],
+    [!['好的', '<b>注意</b>', undefined].some(emptyReply), 'text, tags around text and a missing message do not'],
+    [turnCalledTool(noToolTurn) === false, 'a turn with only a reply called no tool'],
+    [turnCalledTool(toolTurn) === true, 'a tool call in the turn counts'],
+    [turnCalledTool(jsonl(prompt, toolUse, stray)) === true, 'a tool call without its result counts'],
+    [turnCalledTool(jsonl(toolUse, toolResult, imagePrompt, stray)) === false, 'a prompt with an image starts the turn'],
+    [turnCalledTool(jsonl(stray, 'not json', summary)) === null, 'no prompt gives no answer'],
+    [/<\/reasoning_effort>/.test(evaluate({ last_assistant_message: '</reasoning_effort>', transcript_path: 't' }, of(noToolTurn)) || ''), 'a tag-only reply in a turn without tools blocks and shows the tag'],
+    [evaluate({ last_assistant_message: '', transcript_path: 't' }, of(noToolTurn)) !== null, 'an empty reply in a turn without tools blocks'],
+    [evaluate({ last_assistant_message: '</reasoning_effort>', transcript_path: 't' }, of(toolTurn)) === null, 'an empty reply after a tool call allows the stop'],
+    [evaluate({ last_assistant_message: '', transcript_path: 't', stop_hook_active: true }, of(noToolTurn)) === null, 'stop_hook_active allows an empty reply'],
+    [evaluate({ last_assistant_message: '', transcript_path: 't' }, fails) === null, 'an unreadable transcript allows the stop'],
+    [evaluate({ last_assistant_message: '' }, counting) === null && reads === 0, 'no transcript path allows the stop'],
+    [evaluate({ last_assistant_message: '好的', transcript_path: 't' }, counting) === null && reads === 0, 'a reply with text does not read the transcript']
   ]
   for (const [ok, label] of checks) {
     if (!ok) {
