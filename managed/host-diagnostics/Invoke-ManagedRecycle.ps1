@@ -15,7 +15,9 @@ bin-record-unreadable instead of bin-record-missing when the target's record is 
 Output is one JSON object; exit 0 only for checked, planned or recycled.
 
 Preflight fails closed on: paths that are not drive paths on a fixed NTFS volume, volume roots, protected
-roots and their ancestors, system subtrees, reparse points on the path or inside the tree, hard links
+roots and their ancestors, system subtrees, reparse points on the path, targets that a knowledge-base page
+lists as a source (the target itself or anything inside it; recycling one breaks the knowledge base's lint and
+blocks every session's commit there until the pages are repointed), reparse points inside the tree, hard links
 (with -AllowInternalHardLinks only those with a name outside the target; Plan records the switch and Apply
 rechecks with it), entries this process cannot open for DELETE (installers often leave Users with read and
 execute only and the shell would then fail the move with 0x78; the refusal names them and says whether the
@@ -39,7 +41,8 @@ param(
     [string]$ApprovedPlanSha256,
     [switch]$ConfirmRecycle,
     [switch]$AllowInternalHardLinks,
-    [string]$EvidenceRoot = 'D:/agents/run-evidence/managed-recycle'
+    [string]$EvidenceRoot = 'D:/agents/run-evidence/managed-recycle',
+    [string]$KnowledgeBaseRoot = 'D:/agents/knowledge-base'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -129,6 +132,45 @@ function Get-Protection([string]$Full, [string]$Root, [string]$EvidenceFull) {
     $null
 }
 
+# Knowledge-base pages whose frontmatter sources resolve to the target or into it, the way the knowledge base's
+# lint resolves them (scripts/lint_verify.py resolve_source): rooted as written, otherwise relative to the page.
+# Its lint fails on a source that is no longer a file, and its pre-commit runs that lint, so recycling a cited
+# path blocks every knowledge-base commit until the pages are repointed. Web sources are skipped; a missing
+# knowledge base (a CI runner) cites nothing.
+function Get-KnowledgeBaseCitations([string]$Full) {
+    $wiki = Join-Path $KnowledgeBaseRoot 'wiki'
+    if (-not [IO.Directory]::Exists($wiki)) { return @() }
+    $kbFull = [IO.Path]::GetFullPath($KnowledgeBaseRoot).TrimEnd('\')
+    foreach ($page in [IO.Directory]::EnumerateFiles($wiki, '*.md', [IO.SearchOption]::AllDirectories)) {
+        $sources = [Collections.Generic.List[string]]::new()
+        $reader = [IO.StreamReader]::new($page, $utf8)
+        try {
+            if ($reader.ReadLine() -ne '---') { continue }
+            $inBlock = $false
+            while ($null -ne ($line = $reader.ReadLine()) -and $line -ne '---') {
+                if ($inBlock -and $line -match '^\s+-\s+(.+?)\s*$') { $sources.Add($Matches[1].Trim('"', "'")); continue }
+                $inBlock = $false
+                if ($line -match '^sources:\s*$') { $inBlock = $true }
+                elseif ($line -match '^sources:\s*\[(.*)\]\s*$') {
+                    $items = try { @("[$($Matches[1])]" | ConvertFrom-Json) } catch { @($Matches[1] -split ',') }
+                    foreach ($item in $items) { if ("$item".Trim()) { $sources.Add("$item".Trim().Trim('"', "'")) } }
+                }
+            }
+        }
+        finally { $reader.Dispose() }
+        foreach ($source in $sources) {
+            if ($source -match '^[a-z][a-z0-9+.-]*://') { continue }
+            $resolved = try {
+                if ([IO.Path]::IsPathRooted($source)) { [IO.Path]::GetFullPath($source) }
+                else { [IO.Path]::GetFullPath([IO.Path]::Combine([IO.Path]::GetDirectoryName($page), $source)) }
+            } catch { continue }
+            if (Test-Within $resolved.TrimEnd('\') $Full) {
+                [ordered]@{ page = [IO.Path]::GetRelativePath($kbFull, $page).Replace('\', '/'); source = $source }
+            }
+        }
+    }
+}
+
 function Get-BinFacts([string]$Root, [long]$TargetBytes) {
     $facts = [ordered]@{
         volumeGuid = [ManagedRecycle.Native]::VolumeGuid($Root)
@@ -187,6 +229,13 @@ function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInte
     if ($drive.DriveType -ne [IO.DriveType]::Fixed -or $format -ne 'NTFS') { Stop-Refused 'volume-not-fixed-ntfs' }
     $reparse = Get-ReparseOnPath $full
     if ($reparse) { $result.reparsePoint = $reparse; Stop-Refused 'reparse-point-on-path' }
+    $citations = @(Get-KnowledgeBaseCitations $full)
+    if ($citations.Count -gt 0) {
+        $result.knowledgeBaseRoot = $KnowledgeBaseRoot
+        $result.kbCitationCount = $citations.Count
+        $result.kbCitations = @($citations | Select-Object -First 20)
+        Stop-Refused 'kb-cited'
+    }
     $scan = try { [ManagedRecycle.Native]::Scan($full, $true, $AllowInternalLinks, $maxEntries) }
     catch {
         $inner = $_.Exception.InnerException

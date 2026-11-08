@@ -8,7 +8,8 @@ the second while the first one's $I index record is held open the way Explorer o
 record and a decoy $I record for another path sits in the bin, then restores both the way Explorer does, without
 deleting anything: each $R content moves back to its path and each $I record, the decoy included, moves into this
 run's evidence. The same case then recycles a third tree whose hard links all stay inside it, planned with
--AllowInternalHardLinks, and restores it the same way. -SkipLiveRecycle reports that case as skipped.
+-AllowInternalHardLinks, and restores it the same way. -SkipLiveRecycle reports that case as skipped. Every call
+passes a fixture knowledge base under the run directory, so the live knowledge base never decides a case.
 #>
 [CmdletBinding()]
 param(
@@ -25,8 +26,10 @@ if (-not $fullEvidenceRoot.StartsWith('D:\', [StringComparison]::OrdinalIgnoreCa
 $runRoot = Join-Path $fullEvidenceRoot ('ManagedRecycle-' + [guid]::NewGuid().ToString('N'))
 $fixtures = Join-Path $runRoot 'fixtures'
 $entryEvidence = Join-Path $runRoot 'entry'
+$knowledgeBase = Join-Path $runRoot 'knowledge-base'
 [void][IO.Directory]::CreateDirectory($fixtures)
 [void][IO.Directory]::CreateDirectory($entryEvidence)
+[void][IO.Directory]::CreateDirectory((Join-Path $knowledgeBase 'wiki\topics'))
 $entry = Join-Path $PSScriptRoot 'Invoke-ManagedRecycle.ps1'
 $cases = [Collections.Generic.List[object]]::new()
 $junctions = [Collections.Generic.List[string]]::new()
@@ -57,7 +60,7 @@ function Invoke-Entry {
     $psi.RedirectStandardError = $true
     $psi.StandardOutputEncoding = $utf8
     $psi.StandardErrorEncoding = $utf8
-    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $entry) + $EntryArguments + @('-EvidenceRoot', $entryEvidence)) {
+    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $entry) + $EntryArguments + @('-EvidenceRoot', $entryEvidence, '-KnowledgeBaseRoot', $knowledgeBase)) {
         $psi.ArgumentList.Add([string]$argument)
     }
     $process = [Diagnostics.Process]::Start($psi)
@@ -269,6 +272,29 @@ try {
     Assert-Case 'check shares the preflight without purpose or authorization' {
         Assert-Refused (Invoke-Entry @('-Mode', 'Check', '-TargetPath', (Join-Path $fixtures 'missing'))) 'target-missing'
         Assert-Refused (Invoke-Entry @('-Mode', 'Check', '-TargetPath', 'D:\agents\projects')) 'protected-location'
+    }
+
+    Assert-Case 'check and plan refuse a target that a knowledge-base page lists as a source, and name the page' {
+        $tree = New-Tree 'tree-kb-cited'
+        $pages = Join-Path $knowledgeBase 'wiki\topics'
+        $inline = Join-Path $pages 'cites-a-file-inside.md'
+        $block = Join-Path $pages 'cites-the-tree.md'
+        # Inline JSON list with a page-relative file inside the target and a web source; block list with the target
+        # itself as an absolute path and a sibling whose name only starts with the target's name; a page elsewhere.
+        [IO.File]::WriteAllText($inline, "---`ntype: topic`nsources: [""../../../fixtures/tree-kb-cited/sub/b.bin"", ""https://example.com/x""]`n---`nbody`n", $utf8)
+        [IO.File]::WriteAllText($block, "---`ntype: topic`nsources:`n  - $tree`n  - ../../../fixtures/tree-kb-cited-sibling/a.txt`n---`n", $utf8)
+        [IO.File]::WriteAllText((Join-Path $pages 'cites-elsewhere.md'), "---`ntype: topic`nsources: [""../../../fixtures/never-a-target/a.txt""]`n---`n", $utf8)
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree)
+        Assert-Refused $response 'kb-cited'
+        $named = @($response.json.kbCitations | ForEach-Object { "$($_.page) <- $($_.source)" } | Sort-Object)
+        $expected = @("wiki/topics/cites-a-file-inside.md <- ../../../fixtures/tree-kb-cited/sub/b.bin", "wiki/topics/cites-the-tree.md <- $tree" | Sort-Object)
+        if ($response.json.kbCitationCount -ne 2 -or ($named -join '|') -ne ($expected -join '|')) { throw "Citations named wrongly: $($named -join '; ')" }
+        Assert-Refused (Invoke-Plan $tree) 'kb-cited'
+        # Repointing the pages, which the knowledge base requires before a source goes away, clears the refusal.
+        [IO.File]::WriteAllText($inline, "---`ntype: topic`nsources: [""https://example.com/x""]`n---`nbody`n", $utf8)
+        [IO.File]::WriteAllText($block, "---`ntype: topic`nsources:`n  - ../../../fixtures/tree-kb-cited-sibling/a.txt`n---`n", $utf8)
+        $cleared = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree)
+        if ($cleared.exitCode -ne 0 -or $cleared.json.status -ne 'checked') { throw "Check still refused after the pages were repointed: $($cleared.stdout)" }
     }
 
     Assert-Case 'check reports a recyclable tree and writes no evidence' {
