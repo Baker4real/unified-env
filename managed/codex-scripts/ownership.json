@@ -71,8 +71,6 @@
     { "path": "Test-CheckedPowerShell.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-CheckedPowerShell.ps1" },
     { "path": "Test-CheckedPython.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
     { "path": "Test-ConsoleLaunchAudit.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-ConsoleLaunchAudit.ps1" },
-    { "path": "test-docker-wsl-integration.sh", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" },
-    { "path": "Test-DockerWslIntegration.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" },
     { "path": "Test-ExplorerShellRecovery.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-ExplorerShellRecovery.ps1" },
     { "path": "Test-GlobalAgentsSync.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/agents-md-sync.md" },
     { "path": "Test-HostDiagnostics.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-HostDiagnostics.ps1" },
@@ -83,7 +81,6 @@
     { "path": "Test-VcpkgHealth.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-VcpkgHealth.ps1" },
     { "path": "uu-bak-align/", "owner": "docs/environments/zi-xi-shi.md" },
     { "path": "uu-heartbeat/", "owner": "docs/environments/jia-li.md" },
-    { "path": "Wait-DockerWslIntegration.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" },
     { "path": "Watch-ConsoleWindows.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Watch-ConsoleWindows.ps1" }
   ]
 }

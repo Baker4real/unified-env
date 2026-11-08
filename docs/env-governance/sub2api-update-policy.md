@@ -7,6 +7,8 @@ intent: 约束 Sub2API 稳定版升级、短暂中断授权和联合回滚
 
 # Sub2API 受管更新策略
 
+> 2026-11-07 起停用：Sub2API 本机部署已按用户要求卸载并回收，本策略留作历史记录。记录见 `D:\agents\run-evidence\wsl-docker-retire\20261107\RESULT.md`。
+
 ## 适用范围
 
 本策略约束本机受管 Sub2API Docker 部署的自动和人工稳定版升级。运行时事实源、官方 upstream、版本比较、敏感信息处理和证据要求继续以现有自动任务及宿主治理规则为准。

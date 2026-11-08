@@ -83,10 +83,10 @@ intent: 记录家里设备的受控环境事实与差异
   拿掉 `serena-dashboard`；Grok live 也没有 `codex-state-preflight`。
   `managed/grok-hooks/host-lifecycle.json` 与 live 一致，命令路径为
   `D:\agents\projects\统一环境`。权威是 live 文件与 host-runbook。
-- 同日 `wsl.exe --list --verbose` 返回 `Ubuntu` 与 `docker-desktop`，两者均为
-  WSL2；这已经推翻旧 README 中“WSL 未安装、未启用、未初始化”的历史判断。运行时
-  `Running` / `Stopped` 状态属于易变事实，使用前现场复核；D-Radar 的 WSL/Docker
-  配置与验收步骤以 `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 为准。
+- 2026-11-07 按用户要求卸载了 WSL（连同 `Ubuntu`、`docker-desktop` 两个发行版）和
+  Docker Desktop，`D:\WSL` 已删除，D-Radar 随之退役。`Microsoft-Windows-Subsystem-Linux`
+  与 `VirtualMachinePlatform` 两个功能已关闭，重启后生效。记录与重启后的验收项见
+  `D:\agents\run-evidence\wsl-docker-retire\20261107\RESULT.md`。
 
 ## .NET 默认入口
 

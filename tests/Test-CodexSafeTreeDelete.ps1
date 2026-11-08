@@ -564,11 +564,6 @@ try {
             junctions = $true
         },
         [pscustomobject]@{
-            id = 'sub2api-frontend-node-modules'
-            root = 'D:\agents\projects\开源分发 api\sub2api\frontend\node_modules'
-            junctions = $true
-        },
-        [pscustomobject]@{
             id = 'serena-python-venv'
             root = 'D:\agents\projects\serena\.venv'
             junctions = $false
