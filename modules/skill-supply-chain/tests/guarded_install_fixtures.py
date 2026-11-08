@@ -1,8 +1,8 @@
 """Shared fixtures for the Test-SkillInstallGuarded*.py files.
 
 Loads the installer entry and the system provenance repair module by path, names one handle per
-installer family module, and provides ``GuardedInstallTestCase``: a temporary active root and
-ledger plus candidate, manifest and argument builders.
+installer family module, and provides ``GuardedInstallTestCase``: a temporary active root,
+ledger and Magpie Library path plus candidate, manifest and argument builders.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -56,6 +57,11 @@ class GuardedInstallTestCase(unittest.TestCase):
         self.temp_parent = Path(r"D:\Codex\tmp")
         self.temp_parent.mkdir(parents=True, exist_ok=True)
         self.temp = Path(tempfile.mkdtemp(prefix="skill-install-guarded-test-", dir=self.temp_parent))
+        # Transactions never read the live Magpie Library; a test of that report writes this file.
+        self.magpie_library = self.temp / "magpie-library.json"
+        magpie_library_patch = mock.patch.object(ACTIVATION, "MAGPIE_LIBRARY", self.magpie_library)
+        magpie_library_patch.start()
+        self.addCleanup(magpie_library_patch.stop)
         self.active = self.temp / "active"
         self.plugin_cache = self.temp / "plugin-cache"
         self.active.mkdir()

@@ -41,6 +41,34 @@ from guarded_install_fixtures import (
 )
 
 
+# Stands in for the credentials the live library.json keeps in its mcp section; it must never
+# leave the fixture library.
+MAGPIE_SECRET = "fixture-mcp-credential-7c41e2"
+
+
+def magpie_library_bytes(*skill_names: str) -> bytes:
+    """A library.json listing these skills, with MAGPIE_SECRET everywhere but their names."""
+    return json.dumps(
+        {
+            "mcp": {
+                "exa": {
+                    "url": f"https://mcp.example.invalid/?exaApiKey={MAGPIE_SECRET}",
+                    "headers": {"Authorization": f"Bearer {MAGPIE_SECRET}"},
+                }
+            },
+            "skills": [
+                {
+                    "name": name,
+                    "source": {"kind": "folder", "dir": f"D:\\{MAGPIE_SECRET}\\{name}"},
+                    "agents": ["claude", "codex"],
+                    "from": MAGPIE_SECRET,
+                }
+                for name in skill_names
+            ],
+        }
+    ).encode("utf-8")
+
+
 class SkillInstallGuardedTests(GuardedInstallTestCase):
     def protect_private_candidate_tree(self, path: Path) -> None:
         for arguments in (
@@ -989,6 +1017,151 @@ class SkillInstallGuardedTests(GuardedInstallTestCase):
         with mock.patch.object(WRAPPER, "auto_backup_state", return_value={"active": True, "path": "fixture-lock"}):
             with self.assertRaisesRegex(WRAPPER.InstallError if hasattr(WRAPPER, "InstallError") else BASE.InstallError, "auto backup remains active"):
                 WRAPPER.wait_for_auto_backup(self.active, timeout_seconds=0)
+
+    def install_reporting_magpie_library(self, *extra_args: str) -> tuple[int, str, str, dict[str, object]]:
+        candidate = self.write_candidate("test-skill-wrapper", "可见性报告的安装测试夹具")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main([*self.wrapper_args(candidate, manifest), *extra_args])
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        return code, stdout.getvalue(), stderr.getvalue(), json.loads(transaction.read_text(encoding="utf-8"))
+
+    def assert_magpie_secret_stays_in_the_library(self, *outputs: str) -> None:
+        for output in outputs:
+            self.assertNotIn(MAGPIE_SECRET, output)
+        for path in self.temp.rglob("*"):
+            if path.is_file() and path != self.magpie_library:
+                self.assertNotIn(MAGPIE_SECRET.encode("utf-8"), path.read_bytes(), str(path))
+
+    @staticmethod
+    def magpie_warnings(stderr: str) -> list[str]:
+        return [line for line in stderr.splitlines() if line.startswith("[magpie-library]")]
+
+    def test_magpie_library_listing_the_installed_skill_reports_present(self) -> None:
+        self.magpie_library.write_bytes(magpie_library_bytes("other-skill", "test-skill-wrapper"))
+        code, stdout, stderr, manifest = self.install_reporting_magpie_library()
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["status"], "succeeded")
+        self.assertEqual(manifest["magpie_library"], {"status": "present"})
+        self.assertEqual(json.loads(stdout)["magpie_library"], {"status": "present"})
+        self.assertEqual(self.magpie_warnings(stderr), [])
+        self.assert_magpie_secret_stays_in_the_library(stdout, stderr)
+
+    def test_magpie_library_missing_the_installed_skill_warns_once_and_the_install_stands(self) -> None:
+        self.magpie_library.write_bytes(magpie_library_bytes("other-skill"))
+        code, stdout, stderr, manifest = self.install_reporting_magpie_library("--summary")
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["status"], "succeeded")
+        self.assertTrue((self.active / "test-skill-wrapper" / "SKILL.md").is_file())
+        report = manifest["magpie_library"]
+        self.assertEqual(report["status"], "missing")
+        self.assertEqual(report["missing"], ["test-skill-wrapper"])
+        self.assertIn(f"folder source {self.active / 'test-skill-wrapper'}", report["hint"])
+        self.assertIn("magpie library sync", report["hint"])
+        # --summary carries the report too.
+        self.assertEqual(json.loads(stdout)["magpie_library"], report)
+        warnings = self.magpie_warnings(stderr)
+        self.assertEqual(len(warnings), 1, stderr)
+        self.assertIn(report["hint"], warnings[0])
+        self.assert_magpie_secret_stays_in_the_library(stdout, stderr)
+
+    def test_magpie_library_absent_reports_unknown_and_the_install_stands(self) -> None:
+        code, stdout, stderr, manifest = self.install_reporting_magpie_library()
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["status"], "succeeded")
+        self.assertEqual(manifest["magpie_library"], {"status": "unknown", "reason": "library-not-found"})
+        self.assertEqual(self.magpie_warnings(stderr), [])
+
+    def test_magpie_library_invalid_json_reports_unknown_and_the_install_stands(self) -> None:
+        self.magpie_library.write_bytes(magpie_library_bytes("test-skill-wrapper")[:-2])
+        code, stdout, stderr, manifest = self.install_reporting_magpie_library()
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["status"], "succeeded")
+        self.assertEqual(manifest["magpie_library"], {"status": "unknown", "reason": "library-invalid-json"})
+        self.assertEqual(self.magpie_warnings(stderr), [])
+        self.assert_magpie_secret_stays_in_the_library(stdout, stderr)
+
+    def test_magpie_library_check_failure_never_undoes_the_install(self) -> None:
+        with mock.patch.object(
+            ACTIVATION, "_magpie_library_visibility", side_effect=RuntimeError(MAGPIE_SECRET)
+        ):
+            code, stdout, stderr, manifest = self.install_reporting_magpie_library()
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["status"], "succeeded")
+        self.assertTrue((self.active / "test-skill-wrapper" / "SKILL.md").is_file())
+        self.assertEqual(manifest["magpie_library"], {"status": "unknown", "reason": "check-failed"})
+        self.assert_magpie_secret_stays_in_the_library(stdout, stderr)
+
+    def test_magpie_library_check_skips_system_scope(self) -> None:
+        self.magpie_library.write_bytes(magpie_library_bytes("other-skill"))
+        name = "test-system-skill"
+        (self.active / ".system").mkdir()
+        candidate = self.write_candidate(name, "系统作用域不查 Magpie Library")
+        manifest = self.write_manifest(name, "install", source_id="codex-bundled-system-skills")
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["target_scope"] = "system"
+        payload["local_overlay"] = {"status": "replayed", "summary": "writing-for-agents system overlay"}
+        manifest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest, name=name))
+        self.assertEqual(code, 0)
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        result = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "succeeded")
+        self.assertIsNone(result["magpie_library"])
+        self.assertEqual(self.magpie_warnings(stderr.getvalue()), [])
+
+    def test_magpie_library_unreadable_or_malformed_reports_unknown(self) -> None:
+        cases = [
+            ("a directory", None, "library-unreadable"),
+            ("undecodable", b"\xff" + MAGPIE_SECRET.encode("utf-8"), "library-invalid-json"),
+            ("no skills list", json.dumps({"mcp": {"token": MAGPIE_SECRET}}).encode("utf-8"), "library-has-no-skills-list"),
+            (
+                "skills not a list",
+                json.dumps({"mcp": MAGPIE_SECRET, "skills": {"name": "test-skill-wrapper"}}).encode("utf-8"),
+                "library-has-no-skills-list",
+            ),
+            ("not an object", json.dumps([{"name": "test-skill-wrapper"}]).encode("utf-8"), "library-has-no-skills-list"),
+        ]
+        for index, (label, content, reason) in enumerate(cases):
+            with self.subTest(label):
+                library = self.temp / f"magpie-library-{index}.json"
+                if content is None:
+                    library.mkdir()
+                else:
+                    library.write_bytes(content)
+                stderr = io.StringIO()
+                with mock.patch.object(ACTIVATION, "MAGPIE_LIBRARY", library), contextlib.redirect_stderr(stderr):
+                    report = ACTIVATION.magpie_library_visibility(names=["test-skill-wrapper"], skill_root=self.active)
+                self.assertEqual(report, {"status": "unknown", "reason": reason})
+                self.assertEqual(stderr.getvalue(), "")
+
+    def test_magpie_library_skips_entries_without_a_string_name(self) -> None:
+        self.magpie_library.write_text(
+            json.dumps(
+                {
+                    "mcp": MAGPIE_SECRET,
+                    "skills": [
+                        {"name": {"nested": MAGPIE_SECRET}},
+                        {"name": 7},
+                        MAGPIE_SECRET,
+                        {"name": "test-skill-wrapper"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            report = ACTIVATION.magpie_library_visibility(
+                names=["test-skill-wrapper", "absent-skill"], skill_root=self.active
+            )
+        self.assertEqual(report["status"], "missing")
+        self.assertEqual(report["missing"], ["absent-skill"])
+        self.assertEqual(len(self.magpie_warnings(stderr.getvalue())), 1, stderr.getvalue())
+        self.assertNotIn(MAGPIE_SECRET, json.dumps(report, ensure_ascii=False) + stderr.getvalue())
 
 
 if __name__ == "__main__":

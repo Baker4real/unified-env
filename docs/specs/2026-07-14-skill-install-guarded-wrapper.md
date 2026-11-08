@@ -39,6 +39,8 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 
 `activation_readability` 只证明安装后的文件系统权限、枚举和读取健康；Skill Catalog 的 `runtime_verification=unverified` 仍表示尚未验证 skill 行为本身，两者不能互相替代。
 
+`magpie_library` 只说明 Magpie Library 是否按名称列出了本事务换入的 active skill（2026-11-08 起）：Skills Manager 当天卸载后，各 agent 的 skill 链接由 Magpie 按 Library 部署，Library 没列出的新 skill 到不了经 Magpie 部署的 agent；Codex 经 `D:\Codex\.codex\skills` junction 直读统一根，不受影响。全部后置校验通过后，wrapper 只读 `D:\Codex\.config\magpie\library.json` 的 `skills[].name`；其余内容（`mcp` 段含凭据）不进入结果、stderr、evidence 或错误信息。结果为 `present`（全部 target 已列出）、`missing`（列出缺少的 target 并给提示：在 Magpie 的 Library 页以该 skill 目录为 folder source 添加，再运行 `magpie library sync`；同时向 stderr 打一行 `[magpie-library]` 警告）或 `unknown`（读不到、非法 JSON 或没有 `skills` 数组，带固定原因码 `reason`）。检查 fail-open，任何结果都不改变事务结局；dry-run 和失败事务不做此检查，`.system` scope 记为 `null`。
+
 ## Decision manifest 最小格式
 
 ```json

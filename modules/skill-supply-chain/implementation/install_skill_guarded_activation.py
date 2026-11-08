@@ -1,4 +1,4 @@
-"""Backup moves, activation, retirement and rollback of active skill directories.
+"""Backup moves, activation, retirement, rollback and post-activation checks of skill directories.
 
 Part of the guarded skill installer; ``install_skill_guarded.py`` is the entry point.
 """
@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import stat
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,12 @@ from system_skill_provenance_repair import (
 import install_skill_guarded_base as _base
 import install_skill_guarded_tree as _tree
 from install_skill_guarded_base import InstallError, RecoveryRequiredError
+
+
+# Magpie deploys skills to agents from its Library since Skills Manager was uninstalled on
+# 2026-11-08: an activated skill reaches the agents Magpie serves only once the Library lists
+# it.  Tests point this at a fixture file.
+MAGPIE_LIBRARY = Path(r"D:\Codex\.config\magpie\library.json")
 
 
 def read_only_relative_paths(root: Path) -> list[str]:
@@ -224,6 +231,51 @@ foreach ($root in $roots) {
         "file_count": int(runtime_payload["file_count"]),
         "acl_item_count": int(acl_payload["item_count"]),
     }
+
+
+def magpie_library_visibility(*, names: list[str], skill_root: Path) -> dict[str, Any]:
+    """Report whether Magpie's Library lists every activated skill; read-only and fail-open.
+
+    Only ``skills[].name`` is read.  Nothing else from library.json, whose ``mcp`` section holds
+    credentials, reaches the result, stderr or an exception message.  An absent, unreadable or
+    malformed library reports ``unknown``, and no outcome here fails the transaction.
+    """
+    try:
+        return _magpie_library_visibility(names=names, skill_root=skill_root)
+    except Exception:  # the transaction has already succeeded; a report must not roll it back
+        return {"status": "unknown", "reason": "check-failed"}
+
+
+def _magpie_library_visibility(*, names: list[str], skill_root: Path) -> dict[str, Any]:
+    try:
+        data = MAGPIE_LIBRARY.read_bytes()
+    except FileNotFoundError:
+        return {"status": "unknown", "reason": "library-not-found"}
+    except OSError:
+        return {"status": "unknown", "reason": "library-unreadable"}
+    try:
+        library = json.loads(data.decode("utf-8-sig"))
+    except (ValueError, RecursionError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
+        return {"status": "unknown", "reason": "library-invalid-json"}
+    entries = library.get("skills") if isinstance(library, dict) else None
+    if not isinstance(entries, list):
+        return {"status": "unknown", "reason": "library-has-no-skills-list"}
+    listed = {
+        entry["name"]
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    }
+    missing = [name for name in names if name not in listed]
+    if not missing:
+        return {"status": "present"}
+    folders = "、".join(str(skill_root / name) for name in missing)
+    hint = f"在 Magpie 的 Library 页添加 folder source {folders}，再运行 magpie library sync"
+    print(
+        f"[magpie-library] 安装已完成，但 Magpie Library 未列出 {'、'.join(missing)}，"
+        f"经 Magpie 部署的 agent 看不到：{hint}",
+        file=sys.stderr,
+    )
+    return {"status": "missing", "missing": missing, "hint": hint}
 
 
 def backup_file(path: Path, backup_root: Path, label: str) -> Path | None:

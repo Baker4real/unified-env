@@ -155,7 +155,7 @@ def wait_for_auto_backup(active_root: Path, timeout_seconds: float = 60.0) -> di
 
 
 def summary_payload(result: dict[str, Any]) -> dict[str, Any]:
-    keys = ("schema_version", "transaction_id", "status", "targets", "active_root", "evidence", "autoBackup", "error", "candidate_integrity", "excluded_files")
+    keys = ("schema_version", "transaction_id", "status", "targets", "active_root", "evidence", "autoBackup", "magpie_library", "error", "candidate_integrity", "excluded_files")
     return {key: result[key] for key in keys if key in result}
 
 
@@ -699,6 +699,13 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         source_state_after_path = backup_root / "source-state-after.json"
         _base.atomic_write_bytes(source_state_after_path, ledger_after_bytes)
         auto_backup_after = wait_for_auto_backup(active_root)
+        # Read-only and fail-open.  Magpie's Library carries active skills; .system ones are
+        # Codex's bundled skills and never go through it.
+        magpie_library = (
+            _activation.magpie_library_visibility(names=names, skill_root=target_root)
+            if target_scope == "active"
+            else None
+        )
         result = {
             **plan,
             "status": "succeeded",
@@ -715,6 +722,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "catalog_verification": catalog_verification,
             "system_provenance_overlay_postcondition": system_overlay_postcondition,
             "merge_retirement_verification": merge_retirement_verification,
+            "magpie_library": magpie_library,
             "source_state_after": {
                 "path": str(source_state_after_path),
                 "sha256": hashlib.sha256(ledger_after_bytes).hexdigest(),
