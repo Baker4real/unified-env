@@ -8,6 +8,12 @@ guarded installer writes: ``json.dumps(value, ensure_ascii=False, indent=2)``
 plus a trailing newline, UTF-8 without BOM.  Blobs git would treat as binary
 (a NUL in the first 8000 bytes) are skipped.
 
+It also blocks a commit whose author is not the unified identity named in
+``D:/Codex/.codex/docs/agent-guidance/git-publishing-policy.md``.  ``git commit``
+hands the hook the author it will record, ``--author`` included, and ``git var
+GIT_AUTHOR_IDENT`` reads it back.  On 2026-11-08 three commits still carried the
+device identity Skills Manager had left in the repository config.
+
 ``install --repo PATH`` copies this file next to a ``pre-commit`` shim in that
 repository's hooks directory.  Edit the source in
 ``D:/agents/projects/统一环境/modules/skill-supply-chain/implementation`` and
@@ -31,6 +37,10 @@ LEDGER = ".downloaded-skills-source-state.json"
 FORBIDDEN_CONTROL = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 BINARY_SNIFF_BYTES = 8000
 MAX_REPORTED = 20
+# The unified commit identity of D:/Codex/.codex/docs/agent-guidance/git-publishing-policy.md.
+AUTHOR_NAME = "Baker4real"
+AUTHOR_EMAIL = "283837851+Baker4real@users.noreply.github.com"
+IDENT = re.compile(r"(?P<name>.*) <(?P<email>[^<>]*)> \d+ [+-]\d{4}")
 SHIM_MARKER = "# skills_repo_pre_commit.py shim"
 SHIM = f"""#!/bin/sh
 {SHIM_MARKER}: reinstall with `skills_repo_pre_commit.py install` instead of editing.
@@ -97,16 +107,30 @@ def ledger_findings(data: bytes) -> list[str]:
     return []
 
 
+def author_findings() -> list[str]:
+    ident = git("var", "GIT_AUTHOR_IDENT").decode("utf-8", errors="replace").strip()
+    match = IDENT.fullmatch(ident)
+    if match is None:
+        return [f"读不出提交作者：{ident}"]
+    if (match["name"], match["email"]) == (AUTHOR_NAME, AUTHOR_EMAIL):
+        return []
+    return [
+        f"提交作者是 {match['name']} <{match['email']}>，不是统一身份 {AUTHOR_NAME} <{AUTHOR_EMAIL}>；"
+        f"运行 git config user.name {AUTHOR_NAME} 和 git config user.email {AUTHOR_EMAIL} 后重新提交"
+        "（用了 --author 或 GIT_AUTHOR_* 环境变量时改那里）"
+    ]
+
+
 def check() -> int:
+    findings = author_findings()
     blobs = staged_blobs()
-    findings: list[str] = []
     for (path, _), data in zip(blobs, read_blobs([oid for _, oid in blobs])):
         findings += control_findings(path, data)
         if path == LEDGER:
             findings += ledger_findings(data)
     if not findings:
         return 0
-    print("skills pre-commit: 拒绝提交，暂存内容有以下问题：", file=sys.stderr)
+    print("skills pre-commit: 拒绝提交，有以下问题：", file=sys.stderr)
     for finding in findings[:MAX_REPORTED]:
         print(f"  {finding}", file=sys.stderr)
     if len(findings) > MAX_REPORTED:

@@ -50,10 +50,12 @@ class SkillsRepoPreCommitTests(unittest.TestCase):
         )
         environment.start()
         self.addCleanup(environment.stop)
+        # The commit identity comes from the repository config alone, as in the skills root.
+        for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+            os.environ.pop(key, None)
         self.repo = self.temp / "repo"
         subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True)
-        self.git("config", "user.name", "Test")
-        self.git("config", "user.email", "test@example.invalid")
+        self.set_identity(GUARD.AUTHOR_NAME, GUARD.AUTHOR_EMAIL)
         self.write("legacy.txt", b"form\x0cfeed predates the guard\n")
         self.write(GUARD.LEDGER, canonical({"sources": []}))
         self.git("add", "-A")
@@ -65,6 +67,10 @@ class SkillsRepoPreCommitTests(unittest.TestCase):
     def git(self, *args: str) -> str:
         result = subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True, check=True)
         return result.stdout.decode("utf-8")
+
+    def set_identity(self, name: str, email: str) -> None:
+        self.git("config", "user.name", name)
+        self.git("config", "user.email", email)
 
     def head(self) -> str:
         return self.git("rev-parse", "HEAD").strip()
@@ -104,6 +110,30 @@ class SkillsRepoPreCommitTests(unittest.TestCase):
         self.write(GUARD.LEDGER, canonical(value))
         result = self.commit(GUARD.LEDGER)
         self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+
+    def test_blocks_commit_by_another_author_and_names_the_fix(self) -> None:
+        self.set_identity("Other", "other@example.invalid")
+        self.write("notes.md", b"clean\n")
+        result = self.commit("notes.md")
+        self.assertNotEqual(result.returncode, 0)
+        error = result.stderr.decode("utf-8")
+        self.assertIn("提交作者是 Other <other@example.invalid>", error)
+        self.assertIn(f"git config user.email {GUARD.AUTHOR_EMAIL}", error)
+        self.assertEqual(self.head(), self.base)
+        self.set_identity(GUARD.AUTHOR_NAME, GUARD.AUTHOR_EMAIL)
+        result = self.commit("notes.md")
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+
+    def test_checks_the_author_given_with_dash_dash_author(self) -> None:
+        self.write("notes.md", b"clean\n")
+        self.git("add", "notes.md")
+        result = subprocess.run(
+            ["git", "-C", str(self.repo), "commit", "-q", "-m", "change", "--author", "Other <other@example.invalid>"],
+            capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("提交作者是 Other <other@example.invalid>", result.stderr.decode("utf-8"))
+        self.assertEqual(self.head(), self.base)
 
     def test_checks_the_exact_commit_helpers_private_index(self) -> None:
         self.write("other-session.md", b"bell \x07 staged elsewhere\n")
