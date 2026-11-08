@@ -189,6 +189,11 @@ Assert-Equal $blocked.exitCode 0 'stop hook 拦截也必须 exit 0。'
 $decision = $blocked.stdout | ConvertFrom-Json
 Assert-Equal $decision.decision 'block' '引号路径开头又跟参数的命令必须拦下。'
 Assert-True ($decision.reason -match 'ParserError') '拦截原因必须说明 PowerShell 报 ParserError。'
+# Git Bash 会把 /v 这类开关改写成路径（/v 变 V:/），加引号也一样；拦下并给出改用 -v 的改法。
+$switchReply = $fence + "bash`nreg query 'HKCU\Environment' /v MAGPIE_MIRRORS`n" + $fence
+$switchDecision = (Invoke-Guard (@{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = $switchReply } | ConvertTo-Json -Compress) -ScriptPath $stopHookPath).stdout | ConvertFrom-Json
+Assert-Equal $switchDecision.decision 'block' 'bash 代码块里的 /v 开关必须拦下。'
+Assert-True ($switchDecision.reason.Contains('V:/') -and $switchDecision.reason.Contains('-v')) '拦截原因必须说明 /v 被改写成 V:/，并给出改用 -v 的改法。'
 foreach ($allowStop in @(
         @{ hook_event_name = 'Stop'; stop_hook_active = $true; last_assistant_message = $badReply },
         @{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = $goodReply }
