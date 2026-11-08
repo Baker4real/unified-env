@@ -32,6 +32,10 @@
 //      WSL launcher, where the script's D:/ paths do not exist. Full paths and `wsl bash` pass.
 //  15. Grep and Glob tool searches rooted at D:\agents\projects or a rule 12 root (tool_input.path, else the session
 //      cwd): the tools stop ripgrep after 20 seconds and report a timeout or nothing found.
+//  16. single-file deletes typed as a command (Remove-Item and its aliases, cmd del/erase, POSIX rm, [IO.File]::Delete)
+//      outside the managed recycle entry: deleting files is permanent, cleanup goes through Invoke-ManagedRecycle.ps1.
+//      Only command positions count, so text that names the cmdlet passes; non-file provider paths (Env:, Function:,
+//      Variable:, Alias:, registry, Cert:, WSMan:) and -WhatIf pass. Scripts the command runs are not scanned.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
@@ -76,6 +80,12 @@ const RECYCLE_PATTERNS = [
   /\b(?:from|import)\s+send2trash\b|\bsend2trash\s*\(/i
 ]
 const EMPTY_BIN_PATTERNS = [/\bClear-RecycleBin\b/i, /\bSHEmptyRecycleBin[AW]?\s*\(/i]
+
+// Rule 16: a delete verb in command position (start, after ; | & { ( or a line break, or right after cmd /c),
+// with the rest of its statement captured for the provider and -WhatIf checks.
+const FILE_DELETE_COMMAND = /(?:^|[;|&{(\n]|\bcmd(?:\.exe)?\s+\/[ck]\s+["']?)\s*(?:remove-item|ri|rm|del|erase)\b([^\n;|&}]*)/gi
+const FILE_DELETE_CALL = /\[(?:system\.)?io\.file\]::delete\s*\(/i
+const NON_FILE_PROVIDER = /(?:^|[\s'"])(?:env|function|variable|alias|hkcu|hklm|registry|cert|wsman):/i
 // Deleting inside $Recycle.Bin is emptying it by hand.
 const RECYCLE_BIN_PATH = /\$Recycle\.Bin/i
 const DELETE_VERB = /\b(?:remove-item|ri|rm|del|erase|rd|rmdir|unlink)\b|\bdelete\s*\(/i
@@ -748,6 +758,16 @@ function expandingPayload(command) {
   return null
 }
 
+function fileDeleteDecision(command) {
+  if (/invoke-managedrecycle|invoke-safe-tree-delete/i.test(command)) return null
+  const typed = FILE_DELETE_CALL.test(command) ||
+    [...command.matchAll(FILE_DELETE_COMMAND)].some(([, rest]) => !/\s-whatif\b/i.test(rest) && !NON_FILE_PROVIDER.test(rest))
+  if (!typed) return null
+  return `删除文件是永久删除，只走受管回收 ${MANAGED_RECYCLE}（Plan → Apply，说明见 ${GUIDANCE}\\host-runbook\\managed-recycle.md）。` +
+    '临时文件放会话 scratchpad，用完不必删；要清理的散文件先移进一个子目录，再整目录回收。Env:、Function:、Variable: 等非文件路径和 -WhatIf 放行。' +
+    TEXT_ONLY_HINT
+}
+
 function deny(reason) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
@@ -776,13 +796,15 @@ export function evaluate(payload, io = defaultIo) {
 
   if (!/invoke-safe-tree-delete/i.test(command) && RECURSIVE_DELETE_PATTERNS.some(pattern => pattern.test(command))) {
     return `递归删除目录只能走受管入口 ${MANAGED_DELETE}（Plan → Apply → Purge，说明见 ${GUIDANCE}\\host-runbook\\safe-tree-delete.md）。` +
-      '删除单个文件不受影响。如果命令里的删除写法只是文本（搜索模式、提交信息），改用 Grep 工具，或把关键词拆开写。'
+      '如果命令里的删除写法只是文本（搜索模式、提交信息），改用 Grep 工具，或把关键词拆开写。'
   }
 
   const recycle = recycleDecision(command, payload?.cwd, io)
   if (recycle) return recycle
   const explorer = explorerDecision(command, payload?.cwd, io)
   if (explorer) return explorer
+  const fileDelete = fileDeleteDecision(command)
+  if (fileDelete) return fileDelete
 
   if (tool === 'Bash' && command.includes('\\\\')) {
     return 'Bash 工具在命令进 bash 之前会把两个连续反斜杠吞成一个（单引号、双引号、带引号的 heredoc 都一样），实际执行的命令和写的不一样。' +
@@ -847,9 +869,24 @@ if (process.argv.includes('--self-test')) {
     ['Bash', 'rm -rf node_modules', true],
     ['Bash', 'rm -fr dist', true],
     ['Bash', 'python -c "import shutil; shutil.rmtree(p)"', true],
-    ['PowerShell', 'Remove-Item -LiteralPath D:\\x\\a.txt', false],
+    ['PowerShell', 'Remove-Item -LiteralPath D:\\x\\a.txt', true],
+    ['PowerShell', "foreach ($ref in 'a', 'b') { $tmp = New-TemporaryFile; Remove-Item -LiteralPath $tmp.FullName -Confirm:$false }", true],
+    ['PowerShell', 'Get-ChildItem D:\\x -Filter *.tmp | Remove-Item', true],
+    ['PowerShell', 'cmd /c del D:\\x\\a.txt', true],
+    ['PowerShell', 'cmd.exe /c "del D:\\x\\a.txt"', true],
+    ['Bash', 'test -f a.txt && rm a.txt', true],
+    ['Bash', 'git rm --cached a.txt', false],
+    ['PowerShell', "git log --oneline --grep 'rm stale'", false],
+    ['PowerShell', '[System.IO.File]::Delete($p)', true],
+    ['mcp__terminal__run_in_terminal', 'Remove-Item D:\\x\\a.txt', true],
+    ['PowerShell', 'Remove-Item Env:IMPECCABLE_BIN', false],
+    ['PowerShell', "Remove-Item -LiteralPath 'Function:\\Get-Foo'", false],
+    ['PowerShell', 'Remove-Item D:\\x\\a.txt -WhatIf', false],
+    ['PowerShell', "Write-Output 'Remove-Item D:\\x\\a.txt'", false],
+    ['PowerShell', 'Remove-ItemProperty -LiteralPath HKLM:\\Software\\X -Name y', false],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1' -Mode Plan -TargetPath D:\\x\\a.txt", false],
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1' -Mode Plan -TargetPaths D:\\x", false],
-    ['Bash', 'rm file.txt', false],
+    ['Bash', 'rm file.txt', true],
     ['Bash', 'git rm --cached a.txt', false],
     ['PowerShell', 'git rm -r --cached .scratch/out', false],
     ['Bash', 'git rm -r --cached dist', false],
@@ -967,7 +1004,7 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'", false, desktop],
     ['PowerShell', "Invoke-CimMethod -Namespace root/default -ClassName StdRegProv -MethodName SetStringValue -Arguments @{ hDefKey = [uint32]2147483649; sSubKeyName = 'Software\\X'; sValueName = 'a'; sValue = '1' }", false, desktop],
     ['PowerShell', 'reg query HKCU\\Software\\X', false, desktop],
-    ['PowerShell', "Remove-Item -LiteralPath D:\\x\\a.txt; Get-ItemProperty -LiteralPath 'HKCU:\\Console'", false, desktop],
+    ['PowerShell', "Remove-Item -LiteralPath D:\\x\\a.txt -WhatIf; Get-ItemProperty -LiteralPath 'HKCU:\\Console'", false, desktop],
     ['PowerShell', "[Environment]::SetEnvironmentVariable('CI', $Ci)", false, desktop],
     ['Bash', "grep -nE 'Set-ItemProperty|New-ItemProperty|HKCU|HKLM' tools/x.ps1", false, desktop],
     ['PowerShell', "pwsh -File 'D:\\repo\\tools\\harmless.ps1'", false, desktop],
