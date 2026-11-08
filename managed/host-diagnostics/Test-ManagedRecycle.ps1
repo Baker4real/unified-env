@@ -112,6 +112,12 @@ function New-Tree([string]$Name) {
     $root
 }
 
+function Invoke-FixtureGit([string]$WorkTree, [string[]]$Arguments) {
+    $PSNativeCommandUseErrorActionPreference = $false
+    $output = & git -C $WorkTree -c user.name=fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false -c core.autocrlf=false @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "git $($Arguments -join ' ') exited $LASTEXITCODE`: $($output -join ' ')" }
+}
+
 function New-Junction([string]$Path, [string]$Target) {
     $null = New-Item -ItemType Junction -Path $Path -Target $Target
     $junctions.Add($Path)
@@ -295,6 +301,335 @@ try {
         [IO.File]::WriteAllText($block, "---`ntype: topic`nsources:`n  - ../../../fixtures/tree-kb-cited-sibling/a.txt`n---`n", $utf8)
         $cleared = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree)
         if ($cleared.exitCode -ne 0 -or $cleared.json.status -ne 'checked') { throw "Check still refused after the pages were repointed: $($cleared.stdout)" }
+    }
+
+    Assert-Case 'check and plan refuse git work the recycle would lose, and apply rechecks with the authorization the plan recorded' {
+        $remote = Join-Path $fixtures 'git-remote.git'
+        $repo = New-Tree 'tree-git'
+        Invoke-FixtureGit $fixtures @('init', '-q', '--bare', '-b', 'main', $remote)
+        Invoke-FixtureGit $repo @('init', '-q', '-b', 'main')
+        [IO.File]::WriteAllText((Join-Path $repo '.gitignore'), "ignored/`n", $utf8)
+        Invoke-FixtureGit $repo @('add', '-A')
+        Invoke-FixtureGit $repo @('commit', '-q', '-m', 'fixture')
+        Invoke-FixtureGit $repo @('remote', 'add', 'origin', ([Uri]$remote).AbsoluteUri)
+        Invoke-FixtureGit $repo @('push', '-q', 'origin', 'main')
+        # Clean and pushed, with gitignored content and a clean nested clone: nothing to lose.
+        [void][IO.Directory]::CreateDirectory((Join-Path $repo 'ignored'))
+        [IO.File]::WriteAllText((Join-Path $repo 'ignored\cache.bin'), 'x', $utf8)
+        Invoke-FixtureGit $repo @('clone', '-q', ([Uri]$remote).AbsoluteUri, 'vendor/lib')
+        $clean = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $repo)
+        if ($clean.exitCode -ne 0 -or $clean.json.status -ne 'checked' -or $clean.stderr) { throw "Check refused a clean, pushed repository: $($clean.stdout)" }
+        # A commit no remote has, a stash and an untracked file.
+        [IO.File]::WriteAllText((Join-Path $repo 'a.txt'), 'changed', $utf8)
+        Invoke-FixtureGit $repo @('commit', '-q', '-am', 'local only')
+        [IO.File]::WriteAllText((Join-Path $repo 'a.txt'), 'stashed', $utf8)
+        Invoke-FixtureGit $repo @('stash', '-q')
+        [IO.File]::WriteAllText((Join-Path $repo 'notes.txt'), 'draft', $utf8)
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $repo)
+        Assert-Refused $response 'git-unsaved-work'
+        $work = @($response.json.gitUnsavedWork)
+        if ($work.Count -ne 2 -or $work[0].workTree -ne $repo -or $work[0].uncommitted -ne 1 -or (@($work[0].uncommittedPaths) -join '|') -ne 'notes.txt' -or
+            $work[1].gitDir -ne (Join-Path $repo '.git') -or $work[1].unpushedCommits -ne 1 -or $work[1].stashes -ne 1) { throw "Unsaved work named wrongly: $($response.stdout)" }
+        # Inside the work tree only the target's own files count; the repository and its commits stay.
+        $subTarget = Join-Path $repo 'sub'
+        $sub = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $subTarget)
+        if ($sub.exitCode -ne 0 -or $sub.json.status -ne 'checked') { throw "Check refused a clean subdirectory: $($sub.stdout)" }
+        [IO.File]::WriteAllText((Join-Path $subTarget 'new.txt'), 'draft', $utf8)
+        $subDirty = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $subTarget)
+        Assert-Refused $subDirty 'git-unsaved-work'
+        $subWork = @($subDirty.json.gitUnsavedWork)
+        if ($subWork.Count -ne 1 -or $subWork[0].workTree -ne $repo -or $subWork[0].uncommitted -ne 1 -or $subWork[0].Contains('gitDir')) {
+            throw "A subdirectory counted the repository's commits: $($subDirty.stdout)"
+        }
+        Assert-Refused (Invoke-Plan $repo) 'git-unsaved-work'
+        $words = 'fixture: lose the local commit, the stash and the drafts'
+        $planned = Invoke-Entry @('-Mode', 'Plan', '-TargetPath', $repo, '-Purpose', 'managed recycle test', '-Authorization', 'test fixture created by this run', '-GitLossAuthorization', $words)
+        if ($planned.exitCode -ne 0 -or $planned.json.status -ne 'planned' -or $planned.stderr) { throw "Plan with the git loss authorization failed: $($planned.stdout)" }
+        $plan = [IO.File]::ReadAllText($planned.json.planPath) | ConvertFrom-Json -AsHashtable
+        if ($plan.gitLossAuthorization -cne $words -or @($plan.gitUnsavedWork).Count -ne 2 -or $plan.gitUnsavedWork[0].uncommitted -ne 2) {
+            throw 'The plan did not record the git work and the authorization to lose it.'
+        }
+        # A same-size edit to a clean tracked file leaves the manifest as planned but adds git work the user did not agree to
+        # lose. Refusing for that rather than for the git work as such proves Apply reran the preflight with the plan's authorization.
+        $ones = [byte[]]::new(1024)
+        [Array]::Fill($ones, [byte]1)
+        [IO.File]::WriteAllBytes((Join-Path $repo 'sub\b.bin'), $ones)
+        Assert-Refused (Invoke-Entry @('-Mode', 'Apply', '-PlanPath', $planned.json.planPath, '-ApprovedPlanSha256', $planned.json.planSha256, '-ConfirmRecycle')) 'git-unsaved-work-changed'
+    }
+
+    Assert-Case 'check counts commits that only a tag or a detached HEAD holds, bare repositories, a target inside a git directory, and remotes inside the target' {
+        $remote = Join-Path $fixtures 'git-remote-refs.git'
+        Invoke-FixtureGit $fixtures @('init', '-q', '--bare', '-b', 'main', $remote)
+        $repo = New-Tree 'tree-git-refs'
+        Invoke-FixtureGit $repo @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $repo @('add', '-A')
+        Invoke-FixtureGit $repo @('commit', '-q', '-m', 'fixture')
+        Invoke-FixtureGit $repo @('remote', 'add', 'origin', ([Uri]$remote).AbsoluteUri)
+        Invoke-FixtureGit $repo @('push', '-q', 'origin', 'main')
+        # No branch holds either commit: one is only on a tag, the other only on the detached HEAD.
+        Invoke-FixtureGit $repo @('checkout', '-q', '--detach')
+        [IO.File]::WriteAllText((Join-Path $repo 'a.txt'), 'tagged', $utf8)
+        Invoke-FixtureGit $repo @('commit', '-q', '-am', 'tagged')
+        Invoke-FixtureGit $repo @('tag', 'kept-by-tag')
+        Invoke-FixtureGit $repo @('checkout', '-q', 'main')
+        Invoke-FixtureGit $repo @('checkout', '-q', '--detach')
+        [IO.File]::WriteAllText((Join-Path $repo 'a.txt'), 'detached', $utf8)
+        Invoke-FixtureGit $repo @('commit', '-q', '-am', 'detached')
+        foreach ($target in @($repo, (Join-Path $repo '.git\objects'))) {
+            $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $target)
+            Assert-Refused $response 'git-unsaved-work'
+            $work = @($response.json.gitUnsavedWork)
+            if ($work.Count -ne 1 -or $work[0].gitDir -ne (Join-Path $repo '.git') -or $work[0].unpushedCommits -ne 2 -or $work[0].stashes -ne 0) {
+                throw "Commits off every branch were not counted for $target`: $($response.stdout)"
+            }
+        }
+        # A bare repository and a clone that pushed to it go together: the bare one has no remote-tracking branches, and the
+        # clone's remote lies inside the target, so neither copy survives the recycle.
+        $holder = Join-Path $fixtures 'tree-git-bare'
+        [void][IO.Directory]::CreateDirectory($holder)
+        $central = Join-Path $holder 'central.git'
+        Invoke-FixtureGit $holder @('init', '-q', '--bare', '-b', 'main', $central)
+        Invoke-FixtureGit $holder @('clone', '-q', ([Uri]$central).AbsoluteUri, 'clone')
+        $clone = Join-Path $holder 'clone'
+        [IO.File]::WriteAllText((Join-Path $clone 'shared.txt'), 'shared', $utf8)
+        Invoke-FixtureGit $clone @('add', '-A')
+        Invoke-FixtureGit $clone @('commit', '-q', '-m', 'shared')
+        Invoke-FixtureGit $clone @('push', '-q', 'origin', 'main')
+        $bare = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $holder)
+        Assert-Refused $bare 'git-unsaved-work'
+        $bareWork = @($bare.json.gitUnsavedWork)
+        if ($bareWork.Count -ne 2 -or $bareWork[0].gitDir -ne $central -or $bareWork[0].unpushedCommits -ne 1 -or
+            $bareWork[1].gitDir -ne (Join-Path $clone '.git') -or $bareWork[1].unpushedCommits -ne 1) {
+            throw "The bare repository and the clone that pushed to it were not both counted: $($bare.stdout)"
+        }
+    }
+
+    Assert-Case 'check fails closed on a nested repository git cannot read instead of reading the outer one' {
+        $outer = New-Tree 'tree-git-broken'
+        [IO.File]::WriteAllText((Join-Path $outer '.gitignore'), "vendor/`n", $utf8)
+        Invoke-FixtureGit $outer @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $outer @('add', '-A')
+        Invoke-FixtureGit $outer @('commit', '-q', '-m', 'outer')
+        $inner = Join-Path $outer 'vendor\inner'
+        [void][IO.Directory]::CreateDirectory($inner)
+        Invoke-FixtureGit $inner @('init', '-q', '-b', 'main')
+        [IO.File]::WriteAllText((Join-Path $inner 'work.txt'), 'only here', $utf8)
+        Invoke-FixtureGit $inner @('add', '-A')
+        Invoke-FixtureGit $inner @('commit', '-q', '-m', 'inner')
+        [IO.File]::WriteAllText((Join-Path $inner '.git\HEAD'), '', $utf8)
+        $broken = Invoke-Entry @('-Mode', 'Check', '-TargetPath', (Join-Path $outer 'vendor'))
+        Assert-Refused $broken 'git-unsaved-work'
+        $errors = @($broken.json.gitUnsavedWork | Where-Object { $_.Contains('error') })
+        if ($errors.Count -eq 0 -or @($errors | Where-Object { -not "$($_['workTree'])$($_['gitDir'])".StartsWith($inner) }).Count) {
+            throw "The unreadable nested repository was not reported as an error: $($broken.stdout)"
+        }
+    }
+
+    Assert-Case 'check reads a target typed in another letter case and a nested repository whose name has a space' {
+        $remote = Join-Path $fixtures 'git-remote-space.git'
+        Invoke-FixtureGit $fixtures @('init', '-q', '--bare', '-b', 'main', $remote)
+        $repo = New-Tree 'tree-git-case'
+        $mixed = Join-Path $repo 'Mixed'
+        [void][IO.Directory]::CreateDirectory($mixed)
+        [IO.File]::WriteAllText((Join-Path $mixed 'c.txt'), 'tracked', $utf8)
+        Invoke-FixtureGit $repo @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $repo @('add', '-A')
+        Invoke-FixtureGit $repo @('commit', '-q', '-m', 'outer')
+        $nested = Join-Path $mixed 'vendor lib'
+        [void][IO.Directory]::CreateDirectory($nested)
+        [IO.File]::WriteAllText((Join-Path $nested 'lib.txt'), 'lib', $utf8)
+        Invoke-FixtureGit $nested @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $nested @('add', '-A')
+        Invoke-FixtureGit $nested @('commit', '-q', '-m', 'lib')
+        Invoke-FixtureGit $nested @('remote', 'add', 'origin', ([Uri]$remote).AbsoluteUri)
+        Invoke-FixtureGit $nested @('push', '-q', 'origin', 'main')
+        $clean = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $mixed)
+        if ($clean.exitCode -ne 0 -or $clean.json.status -ne 'checked') { throw "Check refused a clean directory holding a clean, pushed repository whose name has a space: $($clean.stdout)" }
+        [IO.File]::WriteAllText((Join-Path $mixed 'c.txt'), 'edited', $utf8)
+        $lower = Invoke-Entry @('-Mode', 'Check', '-TargetPath', (Join-Path $repo 'mixed'))
+        Assert-Refused $lower 'git-unsaved-work'
+        $work = @($lower.json.gitUnsavedWork)
+        if ($work.Count -ne 1 -or $work[0].workTree -ne $repo -or (@($work[0].uncommittedPaths) -join '|') -ne 'Mixed/c.txt') {
+            throw "A target typed in lower case missed the tracked edit: $($lower.stdout)"
+        }
+    }
+
+    Assert-Case 'check runs nothing the repository config names and counts edits that git status is told to skip' {
+        $repo = New-Tree 'tree-git-config'
+        [IO.File]::WriteAllText((Join-Path $repo '.gitattributes'), "*.dat filter=probe`n", $utf8)
+        [IO.File]::WriteAllText((Join-Path $repo 'x.dat'), 'one', $utf8)
+        Invoke-FixtureGit $repo @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $repo @('add', '-A')
+        Invoke-FixtureGit $repo @('commit', '-q', '-m', 'fixture')
+        # a.txt is edited after being marked assume-unchanged, so git status does not report it; x.dat is edited, so
+        # status would run the clean filter to compare it.
+        Invoke-FixtureGit $repo @('update-index', '--assume-unchanged', 'a.txt')
+        [IO.File]::WriteAllText((Join-Path $repo 'a.txt'), 'edited', $utf8)
+        [IO.File]::WriteAllText((Join-Path $repo 'x.dat'), 'two', $utf8)
+        # Set last, so no fixture git call runs them: an fsmonitor hook and a clean filter that each leave a marker.
+        $marker = (Join-Path $runRoot 'git-config-marker.txt').Replace('\', '/')
+        $hook = Join-Path $runRoot 'git-fsmonitor-hook.sh'
+        [IO.File]::WriteAllText($hook, "#!/bin/sh`necho fsmonitor >> $marker`nexit 1`n", $utf8)
+        Invoke-FixtureGit $repo @('config', 'core.fsmonitor', $hook.Replace('\', '/'))
+        Invoke-FixtureGit $repo @('config', 'filter.probe.clean', "sh -c 'echo filter >> $marker; cat'")
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $repo)
+        if ([IO.File]::Exists($marker)) { throw "Check ran a command from the repository config: $([IO.File]::ReadAllText($marker).Trim())" }
+        Assert-Refused $response 'git-unsaved-work'
+        $tree = @($response.json.gitUnsavedWork | Where-Object { $_['workTree'] -eq $repo })
+        if ($tree.Count -ne 1 -or $tree[0].hiddenFromStatus -ne 1 -or (@($tree[0].hiddenFromStatusPaths) -join '|') -ne 'a.txt' -or
+            (@($tree[0].uncommittedPaths) -join '|') -ne 'x.dat') { throw "Edits hidden from git status were not counted: $($response.stdout)" }
+    }
+
+    Assert-Case 'check reads submodules whose gitfile is relative and counts files in a submodule folder that is not checked out' {
+        $libRemote = Join-Path $fixtures 'git-remote-sublib.git'
+        $superRemote = Join-Path $fixtures 'git-remote-super.git'
+        Invoke-FixtureGit $fixtures @('init', '-q', '--bare', '-b', 'main', $libRemote)
+        Invoke-FixtureGit $fixtures @('init', '-q', '--bare', '-b', 'main', $superRemote)
+        $lib = New-Tree 'git-sublib-source'
+        Invoke-FixtureGit $lib @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $lib @('add', '-A')
+        Invoke-FixtureGit $lib @('commit', '-q', '-m', 'lib')
+        Invoke-FixtureGit $lib @('remote', 'add', 'origin', ([Uri]$libRemote).AbsoluteUri)
+        Invoke-FixtureGit $lib @('push', '-q', 'origin', 'main')
+        $super = New-Tree 'tree-git-super'
+        Invoke-FixtureGit $super @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $super @('add', '-A')
+        Invoke-FixtureGit $super @('commit', '-q', '-m', 'super')
+        # git submodule add writes lib\.git as "gitdir: ../.git/modules/lib", relative to that file.
+        Invoke-FixtureGit $super @('-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', ([Uri]$libRemote).AbsoluteUri, 'lib')
+        Invoke-FixtureGit $super @('commit', '-q', '-m', 'add lib')
+        Invoke-FixtureGit $super @('remote', 'add', 'origin', ([Uri]$superRemote).AbsoluteUri)
+        Invoke-FixtureGit $super @('push', '-q', 'origin', 'main')
+        $clean = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $super)
+        if ($clean.exitCode -ne 0 -or $clean.json.status -ne 'checked' -or $clean.stderr) { throw "Check refused a clean, pushed superproject with a submodule: $($clean.stdout)" }
+        # Cloned without its submodule, lib is a folder git status does not look into.
+        Invoke-FixtureGit $fixtures @('clone', '-q', ([Uri]$superRemote).AbsoluteUri, 'tree-git-superclone')
+        $clone = Join-Path $fixtures 'tree-git-superclone'
+        [void][IO.Directory]::CreateDirectory((Join-Path $clone 'lib\deep'))
+        [IO.File]::WriteAllText((Join-Path $clone 'lib\notes.txt'), 'only here', $utf8)
+        [IO.File]::WriteAllText((Join-Path $clone 'lib\deep\more.txt'), 'only here', $utf8)
+        $expected = [ordered]@{ $clone = 'lib/deep/more.txt|lib/notes.txt'; (Join-Path $clone 'lib') = 'lib/deep/more.txt|lib/notes.txt'; (Join-Path $clone 'lib\deep') = 'lib/deep/more.txt' }
+        foreach ($target in $expected.Keys) {
+            $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $target)
+            Assert-Refused $response 'git-unsaved-work'
+            $work = @($response.json.gitUnsavedWork)
+            if ($work.Count -ne 1 -or $work[0].workTree -ne $clone -or (@($work[0].uncommittedPaths | Sort-Object) -join '|') -ne $expected[$target]) {
+                throw "Files in a submodule folder that is not checked out were missed for $target`: $($response.stdout)"
+            }
+        }
+    }
+
+    Assert-Case 'check matches index paths whose letter case differs from the disk' {
+        $repo = New-Tree 'tree-git-index-case'
+        $docs = Join-Path $repo 'Docs'
+        [void][IO.Directory]::CreateDirectory($docs)
+        [IO.File]::WriteAllText((Join-Path $docs 'x.txt'), 'x', $utf8)
+        [IO.File]::WriteAllText((Join-Path $docs 'y.txt'), 'y', $utf8)
+        Invoke-FixtureGit $repo @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $repo @('add', 'a.txt', 'sub', 'Docs/x.txt')
+        # A commit made on a case-sensitive system can hold docs/y.txt beside Docs/x.txt; this disk keeps one Docs folder.
+        $blob = "$(& git -C $repo hash-object -w -- Docs/y.txt)".Trim()
+        Invoke-FixtureGit $repo @('update-index', '--add', '--cacheinfo', "100644,$blob,docs/y.txt")
+        Invoke-FixtureGit $repo @('commit', '-q', '-m', 'two spellings of one folder')
+        [IO.File]::WriteAllText((Join-Path $docs 'y.txt'), 'edited', $utf8)
+        # The second call inherits GIT_LITERAL_PATHSPECS=1, which would make git read the pathspec magic as a file name.
+        foreach ($literal in @($false, $true)) {
+            if ($literal) { $env:GIT_LITERAL_PATHSPECS = '1' }
+            try { $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $docs) }
+            finally { Remove-Item -LiteralPath Env:GIT_LITERAL_PATHSPECS -ErrorAction Ignore }
+            Assert-Refused $response 'git-unsaved-work'
+            $work = @($response.json.gitUnsavedWork)
+            if ($work.Count -ne 1 -or $work[0].workTree -ne $repo -or (@($work[0].uncommittedPaths) -join '|') -ne 'docs/y.txt') {
+                throw "An edit to a file the index spells in another case was missed (GIT_LITERAL_PATHSPECS set: $literal): $($response.stdout)"
+            }
+        }
+    }
+
+    Assert-Case 'check reads a blobless partial clone without fetching from its remote' {
+        $remote = Join-Path $fixtures 'git-remote-partial.git'
+        Invoke-FixtureGit $fixtures @('init', '-q', '--bare', '-b', 'main', $remote)
+        Invoke-FixtureGit $remote @('config', 'uploadpack.allowFilter', 'true')
+        Invoke-FixtureGit $remote @('config', 'uploadpack.allowAnySHA1InWant', 'true')
+        $seed = New-Tree 'git-partial-seed'
+        $text = (1..40 | ForEach-Object { "line $_ of a file renamed later" }) -join "`n"
+        [IO.File]::WriteAllText((Join-Path $seed 'a.txt'), "$text`n", $utf8)
+        Invoke-FixtureGit $seed @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $seed @('add', '-A')
+        Invoke-FixtureGit $seed @('commit', '-q', '-m', 'seed')
+        Invoke-FixtureGit $seed @('remote', 'add', 'origin', ([Uri]$remote).AbsoluteUri)
+        Invoke-FixtureGit $seed @('push', '-q', 'origin', 'main')
+        Invoke-FixtureGit $seed @('mv', 'a.txt', 'r.txt')
+        [IO.File]::WriteAllText((Join-Path $seed 'r.txt'), "$text`none more line`n", $utf8)
+        Invoke-FixtureGit $seed @('commit', '-q', '-am', 'rename and edit')
+        Invoke-FixtureGit $seed @('push', '-q', 'origin', 'main')
+        Invoke-FixtureGit $fixtures @('clone', '-q', '--filter=blob:none', ([Uri]$remote).AbsoluteUri, 'tree-git-partial')
+        $clone = Join-Path $fixtures 'tree-git-partial'
+        # The index keeps the renamed file while HEAD goes back one commit, so rename detection would need the old blob,
+        # which this clone never downloaded.
+        Invoke-FixtureGit $clone @('reset', '-q', '--soft', 'HEAD~1')
+        # Set last: an upload-pack that leaves a marker before it serves, so any fetch shows.
+        $marker = (Join-Path $runRoot 'git-upload-pack-marker.txt').Replace('\', '/')
+        $uploadPack = Join-Path $runRoot 'git-upload-pack-marker.sh'
+        [IO.File]::WriteAllText($uploadPack, "#!/bin/sh`necho upload-pack >> $marker`nexec git-upload-pack ""`$@""`n", $utf8)
+        Invoke-FixtureGit $clone @('config', 'remote.origin.uploadpack', $uploadPack.Replace('\', '/'))
+        $packDirectory = Join-Path $clone '.git\objects\pack'
+        $packs = @([IO.Directory]::GetFiles($packDirectory, '*.pack')).Count
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $clone)
+        if ([IO.File]::Exists($marker) -or @([IO.Directory]::GetFiles($packDirectory, '*.pack')).Count -ne $packs) {
+            throw "Check fetched from the partial clone's remote: $($response.stdout)"
+        }
+        Assert-Refused $response 'git-unsaved-work'
+        $work = @($response.json.gitUnsavedWork)
+        if ($work.Count -ne 1 -or $work[0].workTree -ne $clone -or (@($work[0].uncommittedPaths) -join '|') -ne 'a.txt|r.txt') {
+            throw "The staged rename was not counted: $($response.stdout)"
+        }
+    }
+
+    Assert-Case 'check reads work trees whose git directory lives elsewhere: one that core.worktree names and a linked worktree' {
+        $remote = Join-Path $fixtures 'git-remote-worktrees.git'
+        Invoke-FixtureGit $fixtures @('init', '-q', '--bare', '-b', 'main', $remote)
+        # A git directory and the work tree its core.worktree names, side by side in the target.
+        $holder = Join-Path $fixtures 'tree-git-coreworktree'
+        $store = Join-Path $holder 'store'
+        $src = Join-Path $holder 'src'
+        [void][IO.Directory]::CreateDirectory($src)
+        [IO.File]::WriteAllText((Join-Path $src 'a.txt'), 'a', $utf8)
+        Invoke-FixtureGit $holder @("--git-dir=$store", "--work-tree=$src", 'init', '-q', '-b', 'main')
+        Invoke-FixtureGit $src @("--git-dir=$store", 'add', '-A')
+        Invoke-FixtureGit $src @("--git-dir=$store", 'commit', '-q', '-m', 'fixture')
+        Invoke-FixtureGit $src @("--git-dir=$store", 'remote', 'add', 'origin', ([Uri]$remote).AbsoluteUri)
+        Invoke-FixtureGit $src @("--git-dir=$store", 'push', '-q', 'origin', 'main')
+        $clean = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $holder)
+        if ($clean.exitCode -ne 0 -or $clean.json.status -ne 'checked') { throw "Check refused a clean work tree that core.worktree names: $($clean.stdout)" }
+        [IO.File]::WriteAllText((Join-Path $src 'a.txt'), 'edited', $utf8)
+        $dirty = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $holder)
+        Assert-Refused $dirty 'git-unsaved-work'
+        $work = @($dirty.json.gitUnsavedWork)
+        if ($work.Count -ne 1 -or $work[0].workTree -ne $src -or (@($work[0].uncommittedPaths) -join '|') -ne 'a.txt') {
+            throw "The work tree that core.worktree names was not read: $($dirty.stdout)"
+        }
+        # A linked worktree keeps its HEAD in the main repository, which stays; once the worktree folder is gone, git
+        # worktree prune drops that HEAD and with it a commit nothing else holds.
+        $mainRemote = Join-Path $fixtures 'git-remote-linked.git'
+        Invoke-FixtureGit $fixtures @('init', '-q', '--bare', '-b', 'main', $mainRemote)
+        $main = New-Tree 'git-linked-main'
+        Invoke-FixtureGit $main @('init', '-q', '-b', 'main')
+        Invoke-FixtureGit $main @('add', '-A')
+        Invoke-FixtureGit $main @('commit', '-q', '-m', 'fixture')
+        Invoke-FixtureGit $main @('remote', 'add', 'origin', ([Uri]$mainRemote).AbsoluteUri)
+        Invoke-FixtureGit $main @('push', '-q', 'origin', 'main')
+        $linked = Join-Path $fixtures 'tree-git-linked'
+        Invoke-FixtureGit $main @('worktree', 'add', '-q', '--detach', $linked)
+        $linkedClean = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $linked)
+        if ($linkedClean.exitCode -ne 0 -or $linkedClean.json.status -ne 'checked') { throw "Check refused a clean linked worktree: $($linkedClean.stdout)" }
+        [IO.File]::WriteAllText((Join-Path $linked 'a.txt'), 'only here', $utf8)
+        Invoke-FixtureGit $linked @('commit', '-q', '-am', 'detached in the linked worktree')
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $linked)
+        Assert-Refused $response 'git-unsaved-work'
+        $linkedWork = @($response.json.gitUnsavedWork)
+        if ($linkedWork.Count -ne 1 -or $linkedWork[0].workTree -ne $linked -or $linkedWork[0].headOnlyCommits -ne 1 -or $linkedWork[0].uncommitted -ne 0) {
+            throw "The commit only the linked worktree's HEAD holds was not counted: $($response.stdout)"
+        }
     }
 
     Assert-Case 'check reports a recyclable tree and writes no evidence' {

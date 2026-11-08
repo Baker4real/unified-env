@@ -28,7 +28,7 @@ function Invoke-PublicScript([string]$Path, [string[]]$Arguments) {
     try {
         $stdout = $child.StandardOutput.ReadToEndAsync()
         $stderr = $child.StandardError.ReadToEndAsync()
-        if (-not $child.WaitForExit(180000)) {
+        if (-not $child.WaitForExit(600000)) {
             $child.Kill($true)
             [void]$child.WaitForExit(5000)
             throw 'Host diagnostics public entry exceeded its test timeout.'

@@ -21,7 +21,15 @@ blocks every session's commit there until the pages are repointed), reparse poin
 (with -AllowInternalHardLinks only those with a name outside the target; Plan records the switch and Apply
 rechecks with it), entries this process cannot open for DELETE (installers often leave Users with read and
 execute only and the shell would then fail the move with 0x78; the refusal names them and says whether the
-process was elevated), paths the shell cannot move (260 characters or more, in place or in the bin), the NoRecycleFiles policy,
+process was elevated), git work the recycle would lose (in each work tree it holds, sits in or holds through a
+core.worktree, uncommitted and untracked files under the target, files in a submodule folder that is not checked
+out, files marked assume-unchanged or skip-worktree, and a linked worktree's commits that only its HEAD holds; in each
+repository that goes with it, a .git, a bare one, one under .git\modules or the git directory the target lies in,
+commits that no remote-tracking branch of a remote outside the target reaches from any branch, tag or HEAD, and
+stashes; anything git cannot read counts too; git runs nothing the repository's config names and fetches nothing)
+unless -GitLossAuthorization quotes the user agreeing to lose it (Plan
+records it with the work it covers; Apply rechecks with it and refuses git-unsaved-work-changed when the work
+differs), paths the shell cannot move (260 characters or more, in place or in the bin), the NoRecycleFiles policy,
 NukeOnDelete, missing per-volume bin settings, and bin headroom (bin + target above 90% of MaxCapacity
 would make Windows evict older bin items). Nothing is deleted permanently and the bin is never emptied;
 both stay with the user. Agents use this entry only for targets the user explicitly authorized in the
@@ -42,7 +50,8 @@ param(
     [switch]$ConfirmRecycle,
     [switch]$AllowInternalHardLinks,
     [string]$EvidenceRoot = 'D:/agents/run-evidence/managed-recycle',
-    [string]$KnowledgeBaseRoot = 'D:/agents/knowledge-base'
+    [string]$KnowledgeBaseRoot = 'D:/agents/knowledge-base',
+    [string]$GitLossAuthorization
 )
 
 $ErrorActionPreference = 'Stop'
@@ -171,6 +180,229 @@ function Get-KnowledgeBaseCitations([string]$Full) {
     }
 }
 
+# One git command, read-only, in a repository named explicitly, so git never searches upward into an outer one, and
+# without running anything the repository's own config names or reaching a remote: no optional locks (status would
+# refresh the index), no lazy fetch of objects a partial clone lacks, no fsmonitor hook, and the filter drivers passed
+# in blanked. Paths go with forward slashes: given backslashes, git resolves a relative gitfile (a submodule's
+# "gitdir: ../.git/modules/lib") against the working directory instead of the gitfile's own folder. Returns stdout with
+# its lines joined by a newline, which keeps -z output whole; an exit code outside $Allow throws with git's own message.
+function Invoke-Git([string]$GitDir, [string]$WorkTree, [string[]]$Arguments, [string[]]$Filters = @(), [int[]]$Allow = @(0)) {
+    $PSNativeCommandUseErrorActionPreference = $false
+    $options = [Collections.Generic.List[string]]@('--no-optional-locks', '--no-lazy-fetch', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false')
+    foreach ($name in $Filters) {
+        foreach ($key in 'clean', 'smudge', 'process') { $options.AddRange([string[]]@('-c', "filter.$name.$key=")) }
+        $options.AddRange([string[]]@('-c', "filter.$name.required=false"))
+    }
+    if ($WorkTree) {
+        $tree = $WorkTree.Replace('\', '/')
+        $options.AddRange([string[]]@('-C', $tree, "--work-tree=$tree"))
+    }
+    $options.Add('--git-dir=' + $GitDir.Replace('\', '/'))
+    $prefix = $options.ToArray()
+    $all = @(& git @prefix @Arguments 2>&1)
+    $errors = @($all | Where-Object { $_ -is [Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+    if ($LASTEXITCODE -notin $Allow) { throw "git $($Arguments[0]) exited $LASTEXITCODE`: $($errors -join ' ')" }
+    [string]::Join("`n", [string[]]@($all | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] } | ForEach-Object { "$_" }))
+}
+
+# Names of the filter drivers git's config defines for a repository, for Invoke-Git to blank, so that status compares
+# file content as it is instead of running a configured command on it.
+function Get-GitFilterNames([string]$GitDir) {
+    $raw = Invoke-Git $GitDir $null @('config', '-z', '--get-regexp', '^filter\..+\.(clean|smudge|process)$') -Allow 0, 1
+    $names = @($raw.Split([char]0, [StringSplitOptions]::RemoveEmptyEntries) | ForEach-Object {
+        if ($_.Split("`n", 2)[0] -match '^filter\.(?<name>.+)\.(?:clean|smudge|process)$') { $Matches['name'] }
+    } | Sort-Object -Unique)
+    if (@($names | Where-Object { $_.Contains('=') }).Count) { throw 'a filter driver name holds "=", so -c cannot switch it off' }
+    $names
+}
+
+# Index entries under the pathspec as ls-files -v -s prints them, "<tag> <mode> <object> <stage><TAB><path>": mode
+# 160000 is a submodule, and a lower-case tag (assume-unchanged) or S (skip-worktree) marks a file whose edits git
+# status does not report.
+function Read-GitIndex([string]$GitDir, [string]$WorkTree, [string[]]$Pathspec) {
+    (Invoke-Git $GitDir $WorkTree (@('ls-files', '-v', '-s', '-z') + $Pathspec)).Split([char]0, [StringSplitOptions]::RemoveEmptyEntries)
+}
+
+# The target's files under $Directory (all of them when the target lies in it), as paths relative to the work tree.
+function Get-TargetFilesUnder([string]$Directory, [string]$WorkTree, [string]$Full, $Files) {
+    $prefix = if (Test-Within $Full $Directory) { '' } else { [IO.Path]::GetRelativePath($Full, $Directory) + '\' }
+    foreach ($file in $Files) {
+        if ($file.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            [IO.Path]::GetRelativePath($WorkTree, [IO.Path]::Combine($Full, $file)).Replace('\', '/')
+        }
+    }
+}
+
+# Names of the remotes whose remote-tracking branches vouch for a copy that outlives the recycle: every fetch and push
+# URL (insteadOf applied) is a network URL or a local path outside the target. A remote inside the target goes with it,
+# and a URL that cannot be read counts as inside. Relative paths resolve against $Base, where git runs for the repository.
+function Get-GitTrustedRemotes([string]$Repository, [string]$Base, [string]$Full) {
+    $names = [Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
+    $inside = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($line in (Invoke-Git $Repository $null @('remote', '-v')).Split("`n", [StringSplitOptions]::RemoveEmptyEntries)) {
+        $name, $rest = $line.Split("`t", 2)
+        [void]$names.Add($name)
+        $url = "$rest" -replace ' \((?:fetch|push)\)$'
+        try {
+            $local = if ($url -match '^file:') { [Uri]::new($url).LocalPath }
+                elseif ($url -match '^[A-Za-z]:[\\/]') { $url }
+                elseif ($url -notmatch '^(?:[A-Za-z][A-Za-z0-9+.-]*://|[^\\/]*:|[\\/]{2})') { [IO.Path]::Combine($Base, $url) }
+            if ($local -and (Test-Within ([IO.Path]::GetFullPath($local).TrimEnd('\')) $Full)) { [void]$inside.Add($name) }
+        }
+        catch { [void]$inside.Add($name) }
+    }
+    @($names | Where-Object { -not $inside.Contains($_) })
+}
+
+# A git directory the way git itself recognizes one: HEAD, objects and refs side by side.
+function Test-GitDirectory([string]$Path) {
+    [IO.File]::Exists([IO.Path]::Combine($Path, 'HEAD')) -and [IO.Directory]::Exists([IO.Path]::Combine($Path, 'objects')) -and
+        [IO.Directory]::Exists([IO.Path]::Combine($Path, 'refs'))
+}
+
+# Git work that recycling the target would lose, as entries that each have something to lose:
+# - A work tree the target holds (a .git entry in the scan), sits in (the nearest .git above it, unless the target lies
+#   inside a git directory) or holds through a git directory in it whose core.worktree names it loses its uncommitted
+#   and untracked files under the target (gitignored ones excluded, nested work trees counted on their own), the files
+#   under a submodule folder that is not checked out, which git status does not look into, and the files marked
+#   assume-unchanged or skip-worktree that are still on disk, whose edits git status does not report. A linked
+#   worktree's HEAD lives in its repository, outside the target, until git worktree prune drops it, so the commits only
+#   that HEAD holds count too.
+# - A repository that goes with the target (every git directory in the tree, which covers a work tree's .git, a bare
+#   repository and a submodule's repository under .git\modules, and the git directory the target lies in) loses the
+#   commits that no remote-tracking branch of a remote outside the target reaches, from any branch, tag or HEAD of any
+#   of its work trees, and its stashes. A bare repository others push to has no remote-tracking branches, so all its
+#   commits count, as it may hold the only copy.
+# An entry git cannot read reports the error instead, because its work cannot be ruled out.
+function Get-GitUnsavedWork([string]$Full, $Scan) {
+    # Environment that would point git at another index or object store, or change how pathspecs parse. Removed, not
+    # set to $null: PowerShell passes $null to SetEnvironmentVariable as an empty string, and git takes an empty
+    # GIT_OBJECT_DIRECTORY as set.
+    foreach ($name in 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR',
+        'GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS') {
+        Remove-Item -LiteralPath "Env:$name" -ErrorAction Ignore
+    }
+    $directories = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $files = [Collections.Generic.List[string]]::new()
+    $heads = [Collections.Generic.List[string]]::new()
+    $dotGits = [Collections.Generic.List[string]]::new()
+    foreach ($line in $Scan.Lines) {
+        $fields = $line.Split("`t")
+        $relative = $fields[1]
+        $cut = $relative.LastIndexOf('\')
+        $name = $relative.Substring($cut + 1)
+        $parent = if ($cut -ge 0) { $relative.Substring(0, $cut) } else { '' }
+        if ($fields[0] -eq 'D') { [void]$directories.Add($relative) } else { $files.Add($relative) }
+        if ($name -eq '.git') { $dotGits.Add($parent) }
+        elseif ($fields[0] -eq 'F' -and $name -eq 'HEAD') { $heads.Add($parent) }
+    }
+    $repositories = [Collections.Generic.SortedSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($parent in $heads) {
+        $prefix = if ($parent) { $parent + '\' } else { '' }
+        if ($directories.Contains($prefix + 'objects') -and $directories.Contains($prefix + 'refs')) {
+            [void]$repositories.Add($(if ($parent) { [IO.Path]::Combine($Full, $parent) } else { $Full }))
+        }
+    }
+    # Each work tree, with the git directory git reads it through.
+    $workTrees = [Collections.Generic.SortedDictionary[string, string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($parent in $dotGits) {
+        $workTree = if ($parent) { [IO.Path]::Combine($Full, $parent) } else { $Full }
+        # A .git name inside a git directory is git's own bookkeeping, not a work tree.
+        if (-not @($repositories | Where-Object { Test-Within $workTree $_ }).Count) { $workTrees[$workTree] = [IO.Path]::Combine($workTree, '.git') }
+    }
+    # The target's own .git is in the scan already; the walk looks for the git directory or work tree it lies in.
+    $above = $Full
+    while ($above) {
+        if (Test-GitDirectory $above) { [void]$repositories.Add($above); break }
+        $dotGit = [IO.Path]::Combine($above, '.git')
+        if ($above -ne $Full -and ([IO.Directory]::Exists($dotGit) -or [IO.File]::Exists($dotGit))) { $workTrees[$above] = $dotGit; break }
+        $above = [IO.Path]::GetDirectoryName($above)
+    }
+    # Repositories first: core.worktree can name a work tree in the target that has no .git of its own.
+    $repositoryEntries = @(foreach ($repository in $repositories) {
+        $entry = [ordered]@{ gitDir = $repository; unpushedCommits = 0; stashes = 0 }
+        try {
+            $configured = (Invoke-Git $repository $null @('config', '--get', 'core.worktree') -Allow 0, 1).Trim()
+            $base = if ($configured) { [IO.Path]::GetFullPath([IO.Path]::Combine($repository, $configured)).TrimEnd('\') }
+                elseif ([IO.Path]::GetFileName($repository) -eq '.git') { [IO.Path]::GetDirectoryName($repository) }
+                else { $repository }
+            if ($configured -and (Test-Within $base $Full) -and -not $workTrees.ContainsKey($base)) { $workTrees[$base] = $repository }
+            $trusted = @(Get-GitTrustedRemotes $repository $base $Full | ForEach-Object { "--remotes=$_" })
+            $entry.unpushedCommits = [int](Invoke-Git $repository $null (@('rev-list', '--count', '--exclude=refs/stash', '--all', '--not') + $trusted)).Trim()
+            if ((Invoke-Git $repository $null @('for-each-ref', '--format=%(refname)', 'refs/stash')).Trim()) {
+                $entry.stashes = [math]::Max(1, [int](Invoke-Git $repository $null @('rev-list', '--walk-reflogs', '--count', 'refs/stash')).Trim())
+            }
+        }
+        catch { $entry.error = $_.Exception.Message }
+        if ($entry.Contains('error') -or $entry.unpushedCommits -gt 0 -or $entry.stashes -gt 0) { $entry }
+    })
+    foreach ($workTree in @($workTrees.Keys)) {
+        $gitDir = $workTrees[$workTree]
+        $entry = [ordered]@{
+            workTree = $workTree; uncommitted = 0; uncommittedPaths = @(); hiddenFromStatus = 0; hiddenFromStatusPaths = @(); headOnlyCommits = 0
+        }
+        try {
+            $filters = @(Get-GitFilterNames $gitDir)
+            $scope = if (Test-Within $workTree $Full) { $null } else { [IO.Path]::GetRelativePath($workTree, $Full).Replace('\', '/') }
+            # icase: an index written on a case-sensitive system can spell a folder otherwise than the disk does.
+            $pathspec = if ($scope) { @('--', ":(literal,icase)$scope") } else { @() }
+            $paths = [Collections.Generic.List[string]]::new()
+            # --no-renames keeps one path per record and spares the blob reads a partial clone would have to fetch.
+            $status = Invoke-Git $gitDir $workTree (@('status', '--porcelain=v1', '-z', '--no-renames', '--untracked-files=all', '--ignore-submodules=dirty') + $pathspec) $filters
+            foreach ($record in $status.Split([char]0, [StringSplitOptions]::RemoveEmptyEntries)) {
+                $path = $record.Substring(3)
+                if ($record.StartsWith('??') -and $path.EndsWith('/') -and
+                    $workTrees.ContainsKey([IO.Path]::GetFullPath([IO.Path]::Combine($workTree, $path)).TrimEnd('\'))) { continue }
+                $paths.Add($path)
+            }
+            $hidden = [Collections.Generic.List[string]]::new()
+            $submodules = [Collections.Generic.List[string]]::new()
+            $index = @(Read-GitIndex $gitDir $workTree $pathspec)
+            foreach ($record in $index) {
+                $isSubmodule = $record.Substring(2, 6) -eq '160000'
+                if (-not ($isSubmodule -or $record[0] -ceq 'S' -or [char]::IsLower($record[0]))) { continue }
+                $path = $record.Substring($record.IndexOf("`t") + 1)
+                $onDisk = [IO.Path]::GetFullPath([IO.Path]::Combine($workTree, $path))
+                if ($isSubmodule) { $submodules.Add($onDisk) }
+                elseif ([IO.File]::Exists($onDisk) -or [IO.Directory]::Exists($onDisk)) { $hidden.Add($path) }
+            }
+            # Nothing tracked under the target: it may lie in a submodule folder, which has no index entries of its own.
+            $above = [IO.Path]::GetDirectoryName($Full)
+            while ($scope -and -not $index.Count -and $above.Length -gt $workTree.Length) {
+                $relative = [IO.Path]::GetRelativePath($workTree, $above).Replace('\', '/')
+                $listed = @(Read-GitIndex $gitDir $workTree @('--', ":(literal,icase)$relative"))
+                if ($listed.Count -eq 1 -and $listed[0].Substring(2, 6) -eq '160000' -and $listed[0].Substring($listed[0].IndexOf("`t") + 1) -eq $relative) {
+                    $submodules.Add($above)
+                }
+                if ($listed.Count) { break }
+                $above = [IO.Path]::GetDirectoryName($above)
+            }
+            foreach ($submodule in $submodules) {
+                $dotGit = [IO.Path]::Combine($submodule, '.git')
+                if (-not ([IO.Directory]::Exists($dotGit) -or [IO.File]::Exists($dotGit))) {
+                    foreach ($path in Get-TargetFilesUnder $submodule $workTree $Full $files) { $paths.Add($path) }
+                }
+            }
+            $entry.uncommitted = $paths.Count
+            $entry.uncommittedPaths = @($paths | Select-Object -First 10)
+            $entry.hiddenFromStatus = $hidden.Count
+            $entry.hiddenFromStatusPaths = @($hidden | Select-Object -First 10)
+            # A gitfile belongs to a submodule or to a linked worktree; only a linked worktree has a git directory of its
+            # own apart from the repository's common one.
+            if ([IO.File]::Exists($gitDir)) {
+                $own, $common = (Invoke-Git $gitDir $null @('rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir')).Split("`n") |
+                    ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\') }
+                if ($own -ne $common -and -not (Test-Within $own $Full)) {
+                    $entry.headOnlyCommits = [int](Invoke-Git $gitDir $null @('rev-list', '--count', 'HEAD', '--not', '--branches', '--tags', '--remotes', '--')).Trim()
+                }
+            }
+        }
+        catch { $entry.error = $_.Exception.Message }
+        if ($entry.Contains('error') -or $entry.uncommitted -gt 0 -or $entry.hiddenFromStatus -gt 0 -or $entry.headOnlyCommits -gt 0) { $entry }
+    }
+    $repositoryEntries
+}
+
 function Get-BinFacts([string]$Root, [long]$TargetBytes) {
     $facts = [ordered]@{
         volumeGuid = [ManagedRecycle.Native]::VolumeGuid($Root)
@@ -213,7 +445,7 @@ function Get-UserBinDirectory([string]$Root) {
 }
 
 # Every check Plan and Apply share. Fills $result and returns the scan, or refuses.
-function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInternalLinks) {
+function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInternalLinks, [string]$GitLoss) {
     if ([string]::IsNullOrWhiteSpace($Path)) { Stop-Refused 'target-required' }
     if (-not [IO.Path]::IsPathFullyQualified($Path) -or $Path.IndexOfAny([char[]]'*?') -ge 0) { Stop-Refused 'target-not-fully-qualified' }
     $full = [IO.Path]::GetFullPath($Path)
@@ -274,6 +506,12 @@ function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInte
         $result.elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
             [Security.Principal.WindowsBuiltInRole]::Administrator)
         Stop-Refused 'delete-access-denied'
+    }
+    $unsaved = @(Get-GitUnsavedWork $full $scan)
+    if ($unsaved.Count -gt 0) {
+        $result.gitUnsavedWork = $unsaved
+        if ([string]::IsNullOrWhiteSpace($GitLoss)) { Stop-Refused 'git-unsaved-work' }
+        $result.gitLossAuthorization = $GitLoss
     }
     $bin = Get-BinFacts $root $scan.Bytes
     $result.bin = $bin.facts
@@ -619,7 +857,7 @@ namespace ManagedRecycle
     }
 
     if ($Mode -eq 'Check') {
-        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent
+        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent $GitLossAuthorization
         $result.status = 'checked'
         $result.topLevel = @(Get-TopLevel $checked.scan)
         Complete
@@ -629,7 +867,7 @@ namespace ManagedRecycle
         if ([string]::IsNullOrWhiteSpace($Purpose) -or [string]::IsNullOrWhiteSpace($Authorization)) {
             Stop-Refused 'purpose-and-authorization-required'
         }
-        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent
+        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent $GitLossAuthorization
         $runDir = Join-Path $evidenceFull ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         [void][IO.Directory]::CreateDirectory($runDir)
         if (Get-ReparseOnPath $runDir) { Stop-Refused 'evidence-path-has-reparse-point' }
@@ -649,6 +887,8 @@ namespace ManagedRecycle
             totalBytes = $checked.scan.Bytes
             allowInternalHardLinks = $AllowInternalHardLinks.IsPresent
             internalHardLinkFiles = $checked.scan.InternalLinkFiles
+            gitLossAuthorization = $result['gitLossAuthorization']
+            gitUnsavedWork = @($result['gitUnsavedWork'] | Where-Object { $_ })
             manifestSha256 = $manifestSha256
             topLevel = $topLevel
             bin = $result.bin
@@ -692,7 +932,14 @@ namespace ManagedRecycle
     $result.purpose = $plan.purpose
     $result.authorization = $plan.authorization
     # The plan's setting, not this call's switch: the user authorized what the plan recorded.
-    $checked = Invoke-Preflight $plan.target $evidenceFull ($plan['allowInternalHardLinks'] -eq $true)
+    $checked = Invoke-Preflight $plan.target $evidenceFull ($plan['allowInternalHardLinks'] -eq $true) ([string]$plan['gitLossAuthorization'])
+    # The user agreed to lose the git work the plan recorded and no more; any other git work found now needs a new plan.
+    $plannedWork = ConvertTo-Json -InputObject @($plan['gitUnsavedWork'] | Where-Object { $_ }) -Depth 5 -Compress
+    $foundWork = ConvertTo-Json -InputObject @($result['gitUnsavedWork'] | Where-Object { $_ }) -Depth 5 -Compress
+    if ($plannedWork -cne $foundWork) {
+        $result.plannedGitUnsavedWork = $plan['gitUnsavedWork']
+        Stop-Refused 'git-unsaved-work-changed'
+    }
     $result.manifestSha256 = Get-ManifestSha256 $checked.scan
     if ($result.manifestSha256 -ne $plan.manifestSha256) {
         $result.plannedManifestSha256 = $plan.manifestSha256
