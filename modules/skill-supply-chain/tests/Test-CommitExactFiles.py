@@ -596,6 +596,69 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertIn("$.sources[id=group-a].status", error)
         self.assertEqual(self.head(), self.base)
 
+    def bulk_transaction(self, skill: str, changed: int) -> Path:
+        """A succeeded guarded update of ``skill`` that modifies, deletes and adds ``changed`` files in all."""
+        modified, deleted = changed // 2, changed // 4
+        added = changed - modified - deleted
+        ledger = {"updated_at": "2026-11-05", "sources": [{"id": skill, "skills": [skill], "local_changes": []}]}
+        folder = self.repo / skill
+        (folder / "refs").mkdir(parents=True)
+        for index in range(modified + deleted):
+            (folder / "refs" / f"{index:03d}.md").write_bytes(f"old {index}\n".encode())
+        self.write(LEDGER, ledger_bytes(ledger))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", f"base {skill}")
+        self.base = self.head()
+
+        evidence = self.temp / f"install-{skill}"
+        backups = evidence / "backups"
+        backup = backups / "active-skills" / skill
+        shutil.copytree(folder, backup)
+        for index in range(modified):
+            (folder / "refs" / f"{index:03d}.md").write_bytes(f"new {index}\n".encode())
+        for index in range(modified, modified + deleted):
+            (folder / "refs" / f"{index:03d}.md").unlink()
+        for index in range(added):
+            (folder / f"added-{index:03d}.md").write_bytes(f"added {index}\n".encode())
+        after = {**ledger, "updated_at": "2026-11-07"}
+        (backups / "source-state-before.json").write_bytes(ledger_bytes(ledger))
+        (backups / "source-state-after.json").write_bytes(ledger_bytes(after))
+        self.write(LEDGER, ledger_bytes(after))
+        manifest = {
+            "status": "succeeded",
+            "active_root": str(self.repo),
+            "ledger": str(self.repo / LEDGER),
+            "directory_records": [
+                {
+                    "name": skill,
+                    "active": str(folder),
+                    "backup": str(backup),
+                    "had_existing": True,
+                    "activated": True,
+                    "backup_seal": tree_content_seal(backup),
+                    "activated_payload_seal": tree_content_seal(folder),
+                }
+            ],
+            "source_state_after": {"path": str(backups / "source-state-after.json"), "sha256": sha256(ledger_bytes(after))},
+        }
+        (evidence / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return evidence
+
+    def test_transaction_runs_as_many_git_processes_for_forty_files_as_for_four(self) -> None:
+        # A git process costs about 0.1 s on Windows.  Started per file, they kept a 1,633-file update
+        # committing for 771 s, so the count must not grow with the files a transaction changes.
+        processes = []
+        for skill, changed in (("skill-small", 4), ("skill-large", 40)):
+            evidence = self.bulk_transaction(skill, changed)
+            trace = self.temp / f"{skill}.trace"
+            with mock.patch.dict(os.environ, {"GIT_TRACE": str(trace)}):
+                code, error = self.run_helper("--transaction", str(evidence))
+            self.assertEqual(code, 0, error)
+            self.assertEqual(len(self.git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split()), changed + 1)
+            self.assertEqual(self.status(), [])
+            processes.append(trace.read_text(encoding="utf-8", errors="replace").count("trace: built-in: git "))
+        self.assertEqual(processes[0], processes[1], f"git 进程数随文件数增长：{processes}")
+
 
 if __name__ == "__main__":
     unittest.main()

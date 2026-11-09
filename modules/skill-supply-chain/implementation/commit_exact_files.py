@@ -167,15 +167,86 @@ def path_batches(paths: list[str]) -> list[list[str]]:
     return batches
 
 
-def tree_entry(repo: Path, commit: str, path: str) -> tuple[str, str] | None:
-    """``path``'s (mode, blob) in ``commit``, or None when it is absent."""
-    output = git(repo, "ls-tree", "-z", commit, "--", path).stdout
-    if not output:
+# A git process costs about 0.1 s on Windows; started several times per file, they kept that 1,633-file update
+# committing for 771 s.  So work over many files reaches git as path batches or one stdin list per step; a file
+# gets a process of its own only when it needs a look of its own (a work-tree copy about to be overwritten, or bytes
+# its clean filters change).
+
+
+def tree_entries(repo: Path, commit: str, paths: list[str]) -> dict[str, tuple[str, str, str]]:
+    """The (mode, type, object) ``commit`` holds at each of ``paths`` it has.
+
+    ``-r -t`` lists a requested directory as a tree even when another requested path lies inside it; without them
+    ls-tree descends into it silently, and the directory would read as absent.
+    """
+    entries: dict[str, tuple[str, str, str]] = {}
+    for batch in path_batches(paths):
+        for row in git(repo, "ls-tree", "-r", "-t", "-z", commit, "--", *batch).stdout.split(b"\0"):
+            if row:
+                meta, name = row.split(b"\t", 1)
+                mode, kind, blob = meta.decode("ascii").split(" ")
+                entries[name.decode("utf-8")] = (mode, kind, blob)
+    return entries
+
+
+def blob_entry(entries: dict[str, tuple[str, str, str]], commit: str, path: str) -> tuple[str, str] | None:
+    """``path``'s (mode, blob) among ``commit``'s ``entries``, or None when it is absent."""
+    if path not in entries:
         return None
-    mode, kind, blob = output.split(b"\t", 1)[0].decode("ascii").split(" ")
+    mode, kind, blob = entries[path]
     if kind != "blob":
         raise CommitError(f"{path} 在 {commit} 里是 {kind}，不是文件")
     return mode, blob
+
+
+def tree_entry(repo: Path, commit: str, path: str) -> tuple[str, str] | None:
+    """``path``'s (mode, blob) in ``commit``, or None when it is absent."""
+    return blob_entry(tree_entries(repo, commit, [path]), commit, path)
+
+
+def work_tree_blobs(repo: Path, paths: list[str], *, write: bool) -> list[str]:
+    """Each work-tree file's blob through its clean filters, as ``git add`` stores it, from one git process.
+
+    git opens these files itself, and without ``core.longpaths`` it cannot open a path of 260 characters or more.
+    """
+    if not paths:
+        return []
+    listing = "".join(f"{path}\n" for path in paths).encode("utf-8")
+    flags = ["-w"] if write else []
+    return git(repo, "-c", "core.longpaths=true", "hash-object", *flags, "--stdin-paths", data=listing).stdout.decode("ascii").split()
+
+
+def copy_blobs(repo: Path, paths: list[str]) -> dict[str, str | None]:
+    """Each path's work-tree copy: its blob (written), "" for something other than a regular file, None when absent."""
+    files = [path for path in paths if (repo / path).is_file() and not (repo / path).is_symlink()]
+    blobs = dict(zip(files, work_tree_blobs(repo, files, write=True), strict=True))
+    return {path: blobs.get(path, "" if os.path.lexists(repo / path) else None) for path in paths}
+
+
+def raw_blob_id(data: bytes, like: str) -> str:
+    """The id of ``data`` stored unfiltered as a blob, in the object format of the id ``like``."""
+    return hashlib.new("sha1" if len(like) == 40 else "sha256", b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def is_blob_of(repo: Path, path: str, data: bytes, blob: str) -> bool:
+    """Whether ``data`` through ``path``'s clean filters is ``blob``; bytes that already are its content skip git."""
+    return raw_blob_id(data, blob) == blob or git_text(repo, "hash-object", f"--path={path}", "--stdin", data=data) == blob
+
+
+def file_blobs(repo: Path, rows: list[tuple[str, Path | bytes, bytes]], like: str) -> list[str]:
+    """Write and return the blob each (path, source, bytes) row commits: the bytes through ``path``'s clean filters.
+
+    Rows read from their own work-tree file go to git together; where git's blob of the file is those bytes
+    unfiltered, the filters leave them alone and that blob is the row's.  Every other row gets its own hash-object.
+    """
+    own = [index for index, (path, source, _) in enumerate(rows) if source == repo / path]
+    found = dict(zip(own, work_tree_blobs(repo, [rows[index][0] for index in own], write=True), strict=True))
+    return [
+        found[index]
+        if found.get(index) == raw_blob_id(data, like)
+        else git_text(repo, "hash-object", "-w", f"--path={path}", "--stdin", data=data)
+        for index, (path, _, data) in enumerate(rows)
+    ]
 
 
 def tree_entry_mode(repo: Path, commit: str, path: str) -> str | None:
@@ -366,24 +437,27 @@ def sync_work_tree(repo: Path, head: str, paths: list[str]) -> tuple[list[str], 
     synced: list[str] = []
     held: list[str] = []
     left: list[str] = []
+    parent_entries, head_entries = tree_entries(repo, f"{head}^", paths), tree_entries(repo, head, paths)
+    copies = copy_blobs(repo, paths)
     for path in paths:
-        old = tree_entry(repo, f"{head}^", path)
-        new = tree_entry(repo, head, path)
-        target = repo / path
-        if target.is_file() and not target.is_symlink():
-            current = git_text(repo, "hash-object", "-w", f"--path={path}", "--stdin", data=target.read_bytes())
-        elif os.path.lexists(target):
+        old = blob_entry(parent_entries, f"{head}^", path)
+        new = blob_entry(head_entries, head, path)
+        old_blob, new_blob = (old[1] if old else None), (new[1] if new else None)
+        current = copies[path]
+        if current == old_blob != new_blob:
+            # This copy is about to be replaced or removed.  Look at it again right before, as when each path was
+            # hashed in turn, so an edit another session made since the batched hash above still keeps it.
+            current = copy_blobs(repo, [path])[path]
+        if current == "":
             left.append(path)
             continue
-        else:
-            current = None
-        if current == (new[1] if new else None):
+        if current == new_blob:
             continue
-        if current != (old[1] if old else None):
-            base = old[1] if old else git_text(repo, "hash-object", "-w", "--stdin", data=b"")
-            (held if current and new and holds_change(repo, current, base, new[1]) else left).append(path)
-        elif new is None:
-            target.unlink()
+        if current != old_blob:
+            base = old_blob or git_text(repo, "hash-object", "-w", "--stdin", data=b"")
+            (held if current and new_blob and holds_change(repo, current, base, new_blob) else left).append(path)
+        elif new_blob is None:
+            (repo / path).unlink()
             synced.append(path)
         else:
             git(repo, "checkout-index", "-f", "--", path)
@@ -471,7 +545,7 @@ def _seal(files: dict[str, str], directories: list[str]) -> dict[str, object]:
     }
 
 
-def transaction_changes(repo: Path, expected: str, evidence: Path) -> tuple[list[tuple[str, bytes, str]], list[str]]:
+def transaction_changes(repo: Path, expected: str, evidence: Path) -> tuple[list[tuple[str, Path | bytes, str]], list[str]]:
     """The files and deletions of one succeeded guarded install transaction, with its ledger change merged onto ``expected``."""
     manifest = _load_json(evidence / "manifest.json", "事务 manifest")
     records = manifest.get("directory_records") if isinstance(manifest, dict) else None
@@ -481,8 +555,7 @@ def transaction_changes(repo: Path, expected: str, evidence: Path) -> tuple[list
         raise CommitError("--transaction 不处理 merge retirement 事务")
     if os.path.normcase(Path(str(manifest.get("active_root"))).resolve()) != os.path.normcase(repo):
         raise CommitError(f"事务的 active root 是 {manifest.get('active_root')}，不是 {repo}")
-    blob_id = lambda path, data: git_text(repo, "hash-object", f"--path={path}", "--stdin", data=data)
-    files: list[tuple[str, bytes, str]] = []
+    files: list[tuple[str, Path | bytes, str]] = []
     deletes: list[str] = []
     for record in records:
         if not record.get("activated"):
@@ -494,24 +567,24 @@ def transaction_changes(repo: Path, expected: str, evidence: Path) -> tuple[list
             name.decode("utf-8").removeprefix(relative + "/"): meta.decode("ascii").split(" ")[2]
             for meta, name in (row.split(b"\t", 1) for row in listing if row)
         }
-        before: dict[str, str] = {}
+        before: dict[str, Path] = {}
         if record.get("had_existing"):
             backup = Path(record["backup"])
             if _seal(*_tree_files(backup, skip_bytecode=False)) != record.get("backup_seal"):
                 raise CommitError(f"事务备份 {backup} 与它的 backup_seal 不一致")
-            before = {
-                name: blob_id(f"{relative}/{name}", (backup / name).read_bytes())
-                for name in _tree_files(backup, skip_bytecode=True)[0]
-            }
-        if head != before:
+            before = {name: backup / name for name in _tree_files(backup, skip_bytecode=True)[0]}
+        if set(head) != set(before) or not all(
+            is_blob_of(repo, f"{relative}/{name}", source.read_bytes(), head[name]) for name, source in before.items()
+        ):
             raise CommitError(f"HEAD 里的 {relative} 不是这次事务之前的版本：先提交更早改过它的事务")
         live, live_directories = _tree_files(active, skip_bytecode=True)
         if _seal(live, live_directories) != record.get("activated_payload_seal"):
             raise CommitError(f"{relative} 在这次事务之后又被改过，工作树已不是事务写下的版本")
-        for name in sorted(live):
-            data = (active / name).read_bytes()
-            if blob_id(f"{relative}/{name}", data) != head.get(name):
-                files.append((f"{relative}/{name}", data, live[name]))
+        names = sorted(live)
+        paths = [f"{relative}/{name}" for name in names]
+        for name, path, blob in zip(names, paths, work_tree_blobs(repo, paths, write=False), strict=True):
+            if blob != head.get(name):
+                files.append((path, repo / path, live[name]))
         deletes += [f"{relative}/{name}" for name in sorted(head) if name not in live]
     after = manifest.get("source_state_after") or {}
     after_bytes = Path(str(after.get("path"))).read_bytes()
@@ -605,18 +678,23 @@ def commit_exact(
         if blob != reviewed.lower():
             raise CommitError(f"{path}：共享 index 里暂存的 blob 是 {blob}，不是评审过的 {reviewed}")
         entries.append((mode, blob, path))
+    removed = [] if replay else deletes
+    in_head = tree_entries(repo, expected, [path for path, _, _ in files] + removed)
+    rows: list[tuple[str, Path | bytes, bytes]] = []
+    modes: list[str] = []
     for path, source, reviewed in files:
         data = source if isinstance(source, bytes) else source.read_bytes()
         actual = hashlib.sha256(data).hexdigest()
         if actual != reviewed.lower():
             raise CommitError(f"{path}：内容 sha256 是 {actual}，不是评审过的 {reviewed}")
-        mode = tree_entry_mode(repo, expected, path) or "100644"
+        entry = blob_entry(in_head, expected, path)
+        mode = entry[0] if entry else "100644"
         if mode not in REGULAR_FILE_MODES:
             raise CommitError(f"{path}：不支持 mode {mode}")
-        if path in executables:
-            mode = "100755"
-        blob = git_text(repo, "hash-object", "-w", f"--path={path}", "--stdin", data=data)
-        entries.append((mode, blob, path))
+        rows.append((path, source, data))
+        modes.append("100755" if path in executables else mode)
+    blobs = file_blobs(repo, rows, expected)
+    entries += [(mode, blob, path) for mode, blob, (path, _, _) in zip(modes, blobs, rows, strict=True)]
     for path, reviewed, keep in hunks:
         data = (repo / path).read_bytes()
         actual = hashlib.sha256(data).hexdigest()
@@ -629,8 +707,8 @@ def commit_exact(
         content = splice_hunks(old, found, keep, path)
         blob = git_text(repo, "hash-object", "-w", "--no-filters", "--stdin", data=content)
         entries.append((mode, blob, path))
-    for path in () if replay else deletes:
-        if tree_entry_mode(repo, expected, path) is None:
+    for path in removed:
+        if blob_entry(in_head, expected, path) is None:
             raise CommitError(f"{path} 不在 {expected} 里，无从删除")
         if os.path.lexists(repo / path):
             raise CommitError(f"{path} 仍在工作树里；--delete 只提交已经不在的文件")
@@ -638,10 +716,13 @@ def commit_exact(
     index = git_dir / f"index.commit-exact-files.{uuid.uuid4().hex}"
     try:
         git(repo, "read-tree", expected, index=index)
-        for mode, blob, path in entries:
-            git(repo, "update-index", "--add", "--cacheinfo", mode, blob, path, index=index)
-        for path in deletes:
-            git(repo, "update-index", "--force-remove", "--", path, index=index)
+        # --index-info would take every entry in one process, but it implies --replace: it quietly turns a file into
+        # a directory or back, where --cacheinfo refuses.  So --cacheinfo it stays, many to a process; each item's
+        # flag adds 12 characters, well inside the margin path_batches leaves under the command-line cap.
+        for batch in path_batches([f"{mode},{blob},{path}" for mode, blob, path in entries]):
+            git(repo, "update-index", "--add", *(arg for item in batch for arg in ("--cacheinfo", item)), index=index)
+        for batch in path_batches(deletes):
+            git(repo, "update-index", "--force-remove", "--", *batch, index=index)
         changed = path_list(
             git(repo, "diff", "--cached", "--name-only", "-z", "--no-renames", expected, index=index).stdout
         )
