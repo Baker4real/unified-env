@@ -298,6 +298,76 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(self.git("log", "-1", "--format=%B").strip(), "exact commit")
         self.assertEqual(self.status(), [])
 
+    # A path turning from file to directory or back is refused.  update-index --index-info (it implies --replace)
+    # would commit the swap quietly, and checkout-index would then wipe a work-tree file standing in its way.
+
+    def test_file_refuses_a_path_head_holds_as_a_directory(self) -> None:
+        self.commit_new("d/inner.txt", b"inner\n")
+        (self.repo / "d" / "inner.txt").unlink()
+        (self.repo / "d").rmdir()
+        self.write("d", b"now a file\n")
+        code, error = self.run_helper("--file", "d", sha256(b"now a file\n"), "--delete", "d/inner.txt")
+        self.assertEqual(code, 1)
+        self.assertIn("是 tree，不是文件", error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_file_from_refuses_a_path_inside_a_file_head_holds(self) -> None:
+        self.commit_new("x", b"was a file\n")
+        (self.repo / "x").unlink()
+        source = self.temp / "inner.txt"
+        source.write_bytes(b"inner\n")
+        code, error = self.run_helper("--file-from", "x/inner.txt", str(source), sha256(b"inner\n"), "--delete", "x")
+        self.assertEqual(code, 1)
+        self.assertIn("update-index", error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_from_commit_refuses_a_file_turned_directory_and_keeps_the_edited_copy(self) -> None:
+        self.commit_new("x", b"was a file\n")
+        snapshot = self.clone_snapshot()
+        replayed = self.snapshot_commit({"x": None, "x/inner.txt": b"inner\n"})
+        edited = b"was a file\nanother session's edit\n"
+        self.write("x", edited)
+        code, error = self.run_helper("--from-commit", str(snapshot), replayed)
+        self.assertEqual(code, 1)
+        self.assertIn("update-index", error)
+        self.assertEqual(self.head(), self.base)
+        self.assertEqual((self.repo / "x").read_bytes(), edited)
+
+    def test_from_commit_leaves_a_copy_edited_after_the_batched_hash(self) -> None:
+        # The work-tree copies are hashed in one batch, then handled in path order.  c.txt still matched HEAD's
+        # parent at that hash; an edit another session makes to it while a.txt is examined must survive.
+        snapshot = self.clone_snapshot()
+        replayed = self.snapshot_commit({"a.txt": b"a2\n", "c.txt": b"c2\n"})
+        self.write("a.txt", b"a1\nother session\n")
+        late = b"c1\nlate edit by another session\n"
+        examine = HELPER.holds_change
+
+        def edit_c_while_examining(*args: object) -> bool:
+            self.write("c.txt", late)
+            return examine(*args)
+
+        with mock.patch.object(HELPER, "holds_change", edit_c_while_examining):
+            code, error = self.run_helper("--from-commit", str(snapshot), replayed)
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.show("HEAD:c.txt"), b"c2\n")
+        self.assertEqual((self.repo / "c.txt").read_bytes(), late)
+        self.assertIn("工作树里的 c.txt 带着别的改动", self.stdout)
+
+    def test_commits_a_path_past_max_path_without_core_longpaths(self) -> None:
+        # hash-object --stdin-paths has git open the file itself, which past 260 characters takes core.longpaths.
+        self.git("config", "core.longpaths", "false")
+        name = "/".join(["segment-" + "s" * 52] * 4) + "/long-file.txt"
+        self.assertGreater(len(str(self.repo / name)), 260)
+        try:
+            (self.repo / name).parent.mkdir(parents=True)
+            self.write(name, b"deep\n")
+        except OSError as exc:
+            self.skipTest(f"本机建不了超过 260 字符的路径：{exc}")
+        code, error = self.run_helper("--file", name, sha256(b"deep\n"))
+        self.assertEqual(code, 0, error)
+        # cat-file, not show: show stats its argument as a file name first, which fails past 260 characters.
+        self.assertEqual(self.git("cat-file", "blob", f"HEAD:{name}"), "deep\n")
+
     def test_executable_commits_only_named_new_file_as_100755(self) -> None:
         self.write("hook", b"#!/bin/sh\n")
         self.write("notes.txt", b"n1\n")
@@ -420,6 +490,13 @@ class CommitExactFilesTests(unittest.TestCase):
     def commit_base(self, name: str, data: bytes) -> None:
         self.write(name, data)
         self.git("commit", "-q", "-am", f"base {name}")
+        self.base = self.head()
+
+    def commit_new(self, name: str, data: bytes) -> None:
+        (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+        self.write(name, data)
+        self.git("add", "--", name)
+        self.git("commit", "-q", "-m", f"base {name}")
         self.base = self.head()
 
     def test_hunks_commit_selected_hunks_at_their_head_lines(self) -> None:
