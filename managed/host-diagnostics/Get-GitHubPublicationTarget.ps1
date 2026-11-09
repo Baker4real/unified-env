@@ -37,8 +37,9 @@ $result = [ordered]@{
     checkedAt = [DateTimeOffset]::UtcNow.ToString('o')
 }
 
+# 走输出流而不是 [Console]::Out：同一会话里 $r = & <本脚本> 才接得住 JSON，pwsh -File 调用照样打到 stdout。
 function Complete-TargetCheck([int]$ExitCode) {
-    [Console]::Out.WriteLine(($result | ConvertTo-Json -Depth 5 -Compress))
+    Write-Output ($result | ConvertTo-Json -Depth 5 -Compress)
     exit $ExitCode
 }
 

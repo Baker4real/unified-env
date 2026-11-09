@@ -40,6 +40,12 @@ $parameters = @{ Repository = 'Baker4real/kimi-switch-private'; ExpectedOwner = 
 if (-not $state.ContainsKey('pathRoot')) { $parameters.GhCommand = @($state.pwsh, '-NoProfile', '-NonInteractive', '-File', $state.fakeGh) }
 if ($state.ContainsKey('visibility')) { $parameters.ExpectedVisibility = $state.visibility }
 foreach ($key in $state.parameterOverrides.Keys) { $parameters[$key] = $state.parameterOverrides[$key] }
+if ($state.ContainsKey('capture')) {
+    # 代理在自己会话里卡门禁的写法：接住结果，再读 $LASTEXITCODE。
+    $captured = @(& $state.entry @parameters)
+    [Console]::Out.WriteLine((@{ captured = $captured; exitCode = $LASTEXITCODE } | ConvertTo-Json -Compress))
+    exit 0
+}
 & $state.entry @parameters
 exit $LASTEXITCODE
 '@, $utf8)
@@ -186,6 +192,19 @@ Assert-Case 'array-response-is-error' {
 Assert-Case 'invalid-input-not-echoed' {
     $run = Invoke-Case 'invalid-input-not-echoed' @{ parameterOverrides = @{ Repository = 'https://fixture-sensitive-payload@example.invalid/Baker4real/repo' } }
     Assert-True ($run.exitCode -eq 1 -and $run.result.errorCode -eq 'invalid_arguments' -and -not (Test-Path -LiteralPath $run.callsPath)) '无效仓库参数应在网络调用之前被拒绝。'
+}
+
+Assert-Case 'in-process-capture' {
+    foreach ($sample in @(
+        @{ visibility = 'public'; status = 'ready'; exitCode = 0 }
+        @{ visibility = 'private'; status = 'mismatch'; exitCode = 2 }
+    )) {
+        $run = Invoke-Case ('in-process-capture-' + $sample.status) @{ capture = $true; visibility = $sample.visibility }
+        $captured = @($run.result.captured)
+        Assert-True ($captured.Count -eq 1) "$($sample.status): 同一会话里调用应接住一行 JSON，实际接住 $($captured.Count) 行。"
+        $result = $captured[0] | ConvertFrom-Json -AsHashtable
+        Assert-True ($result.status -eq $sample.status -and $run.result.exitCode -eq $sample.exitCode) "$($sample.status): 同一会话里应拿到状态和退出码。"
+    }
 }
 
 # 生产路径：不传 GhCommand，按 PATH 解析 gh。PATH 最前面放转发到替身的 gh.ps1（jq 表达式含引号和管道，
