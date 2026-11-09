@@ -299,6 +299,36 @@ finally {
     # 文档/结构化数据/日志的实际查询目标不适合符号导航，不消耗 reminder 计数。
     # 描述、查询 pattern 或源码查询中夹带数据文件名不能触发豁免。
     foreach ($case in @(
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/daily-codex-ecosystem-update/run1 -PreviousRunDirectory D:/agents/run-evidence/daily-codex-ecosystem-update/run0 -MaxTotalBytes 6000'; expected = $true },
+        @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1'' -IndexPath ''D:/agents/run-evidence/daily-codex-ecosystem-update/resume-index.json'' -MaxTotalBytes 6000'; expected = $true },
+        @{ command = 'PWSH.EXE -noprofile -file ''D:\agents\projects\统一环境\scripts\daily-update\Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:\agents\run-evidence\run1'' -MaxTotalBytes 512 | ConvertFrom-Json | Select-Object ok,changed_count | ConvertTo-Json -Compress'; expected = $true },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1 -IndexPath D:/agents/run-evidence/resume.json'; expected = $true },
+        @{ command = '$receipt = pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1 | ConvertFrom-Json; $receipt | Select-Object ok'; expected = $true },
+        @{ command = 'pwsh -NoProfile -File D:/other/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/../Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1'; expected = $false },
+        @{ command = 'pwsh -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1'; expected = $false },
+        @{ command = 'pwsh -NoProfile -Command "& D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1"'; expected = $false },
+        @{ command = 'pwsh -NoProfile -EncodedCommand ZQBjAGgAbwAgAGgAaQA='; expected = $false },
+        @{ command = 'pwsh -NoProfile -ExecutionPolicy Bypass -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1'; expected = $false },
+        @{ command = 'python D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File $reader -RunDirectory D:/agents/run-evidence/run1'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory "$env:RUN_PATH"'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory $(Set-Content D:/agents/run-evidence/write.txt bad)'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 @parameters'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1 -RunDirectory D:/agents/run-evidence/run2'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1 -MaxTotalBytes 6001'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1; Get-Content source.ps1'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1; Set-Content changed.json bad'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1 > changed.json'; expected = $false },
+        @{ command = 'Get-Content source.ps1 | pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1 | ForEach-Object { $_.Delete() }'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1 -IndexPath D:/agents/run-evidence/../source.json'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1 -IndexPath D:/other/index.json'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1 -IndexPath D:/agents/run-evidence/index.ps1'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1 -IndexPath $index'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1 -RunDirectory D:/agents/run-evidence/run1'; expected = $false },
+        @{ command = 'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -IndexPath D:/agents/run-evidence/index.json'; expected = $false },
+        @{ command = '. ''D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1'' -IndexPath D:/agents/run-evidence/index.json'; expected = $false },
         @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/daily-codex-ecosystem-update/run1'' -MaxTotalBytes 6000'; expected = $true },
         @{ command = '& ''D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/run2'' -PreviousRunDirectory ''D:/agents/run-evidence/run1'''; expected = $true },
         @{ command = '& ''D:/other/Read-DailyUpdateEvidence.ps1'' -RunDirectory ''D:/agents/run-evidence/run1'''; expected = $false },
@@ -374,7 +404,20 @@ finally {
     )) {
         $queryPayload = @{ session_id = 'session-README.md'; tool_name = 'Bash'; tool_input = @{ command = $case.command; description = 'read README.md' } } | ConvertTo-Json -Compress -Depth 5
         Assert-Equal (Test-CodexSerenaDataQuery -InputText $queryPayload) $case.expected "数据查询分类错误：$($case.command)"
+        $execPayload = @{ session_id = 'session-README.md'; tool_name = 'exec_command'; tool_input = @{ cmd = $case.command } } | ConvertTo-Json -Compress -Depth 5
+        Assert-Equal (Test-CodexSerenaDataQuery -InputText $execPayload) $case.expected "exec_command 数据查询分类错误：$($case.command)"
     }
+    $managedReaderCommands = @(
+        'pwsh -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1 -RunDirectory D:/agents/run-evidence/run1 -MaxTotalBytes 6000',
+        '& ''D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1'' -IndexPath D:/agents/run-evidence/resume.json',
+        'pwsh.exe -NoProfile -File D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1 -IndexPath D:/agents/run-evidence/resume.json'
+    )
+    $readerSession = 'session-managed-reader-exempt-redacted'
+    foreach ($readerCommand in $managedReaderCommands) {
+        $readerResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $readerSession 'Bash' $readerCommand) -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
+        Assert-True ($readerResult.ok -and $readerResult.stdout.Length -eq 0) '连续受管 reader 调用必须静默，不能累积源码计数。'
+    }
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $guardFixtureHome "hook_data/$readerSession"))) '受管 reader 不得创建 vendor 计数状态。'
     $dataSession = 'session-data-query-exempt-redacted'
     foreach ($dataCommand in @('rg -n status ledger.json', 'rg -n failed driver.log', 'rg -n error events.jsonl', 'rg -n owner CONTEXT.md', 'Get-Content ledger.json -TotalCount 50 | Select-Object -Last 10; Test-Path -LiteralPath D:/repo/.codegraph; Get-Content CONTEXT.md | Select-Object -Skip 2 -First 8', 'rg --files D:/evidence | rg session | Select-Object -First 5', '$h = Get-Content -LiteralPath ''D:/evidence/host-reconciler-final.stdout.txt'' -Raw | ConvertFrom-Json; $h | Select-Object ok,changed,driftCount | ConvertTo-Json -Compress')) {
         $dataPayload = @{ session_id = $dataSession; tool_name = 'Bash'; tool_input = @{ command = $dataCommand } } | ConvertTo-Json -Compress -Depth 5
@@ -388,7 +431,7 @@ finally {
         $mixedResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $mixedSession 'Bash' $command) -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
         Assert-True ($mixedResult.ok -and $mixedResult.stdout.Length -eq 0) '源码混合及未知命令必须保留原 reminder 计数。'
     }
-    foreach ($command in @('Get-Content ledger.json; Test-Path -LiteralPath D:/repo/.codegraph', 'rg --files D:/repo | rg source', 'Get-Content events.jsonl | Select-Object -Last 8', $metadataReadCommand)) {
+    foreach ($command in (@('Get-Content ledger.json; Test-Path -LiteralPath D:/repo/.codegraph', 'rg --files D:/repo | rg source', 'Get-Content events.jsonl | Select-Object -Last 8', $metadataReadCommand) + $managedReaderCommands)) {
         $exemptResult = Invoke-CodexSerenaBehaviorGuardCore -Behavior Reminder -InputText (New-ReminderPayload $mixedSession 'Bash' $command) -VendorPath $vendorPath -SerenaHome $guardFixtureHome -RuntimePath $runtimePath -HealthRoot $guardHealthRoot -AllowFixture
         Assert-True ($exemptResult.ok -and $exemptResult.stdout.Length -eq 0) '已经积累源码计数时，文档及文件定位查询仍必须静默。'
     }

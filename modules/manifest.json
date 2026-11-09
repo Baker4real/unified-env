@@ -690,7 +690,9 @@
         "docs/environments/zi-xi-shi.md",
         "docs/automation/daily-update-prompt.md",
         "scripts/daily-update/README.md",
-        "scripts/daily-update/Read-DailyUpdateEvidence.ps1"
+        "scripts/daily-update/Read-DailyUpdateEvidence.ps1",
+        "scripts/daily-update/Resume-DailyUpdate.ps1",
+        "scripts/daily-update/daily-update-step.py"
       ],
       "dependsOn": ["host-safety"],
       "transitionalDependencies": [],
@@ -708,7 +710,9 @@
             "tests/Test-DailyUpdateRuntime.py",
             "tests/Test-PythonUpdateGate.py",
             "tests/Test-CCSwitchMigration.py",
-            "tests/Test-DailyUpdateEvidence.py"
+            "tests/Test-DailyUpdateEvidence.py",
+            "tests/Test-DailyUpdateStep.py",
+            "tests/Test-DailyUpdateResume.py"
           ],
           "node": [
             "tests/Test-DeviceDocRetiredPaths.cjs"

@@ -378,9 +378,11 @@ function Test-CodexSerenaDataQuery {
             if ($query -isnot [Management.Automation.Language.CommandAst]) { return $false }
             $name = $query.GetCommandName()
             $isDailyEvidence = $null -ne $name -and $name.Replace('\', '/') -ieq 'D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'
-            if (-not $isDailyEvidence -and $name -notin @('rg', 'grep', 'Get-Content', 'Select-String', 'Select-Object', 'Test-Path', 'Get-ChildItem', 'Format-Table', 'ConvertFrom-Json', 'ConvertTo-Json')) { return $false }
+            $isResumeEvidence = $null -ne $name -and $name.Replace('\', '/') -ieq 'D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1'
+            $isReaderHost = $name -in @('pwsh', 'pwsh.exe')
+            if (-not $isDailyEvidence -and -not $isResumeEvidence -and -not $isReaderHost -and $name -notin @('rg', 'grep', 'Get-Content', 'Select-String', 'Select-Object', 'Test-Path', 'Get-ChildItem', 'Format-Table', 'ConvertFrom-Json', 'ConvertTo-Json')) { return $false }
             if ($query.Redirections.Count -gt 0 -or ($query.InvocationOperator -ne 'Unknown' -and
-                (-not $isDailyEvidence -or $query.InvocationOperator -ne 'Ampersand'))) { return $false }
+                ((-not $isDailyEvidence -and -not $isResumeEvidence -and -not $isReaderHost) -or $query.InvocationOperator -ne 'Ampersand'))) { return $false }
             $operands = [Collections.Generic.List[string]]::new()
             foreach ($element in @($query.CommandElements | Select-Object -Skip 1)) {
                 if ($element -is [Management.Automation.Language.StringConstantExpressionAst]) { $operands.Add($element.Value) }
@@ -394,23 +396,35 @@ function Test-CodexSerenaDataQuery {
                 elseif ($element -is [Management.Automation.Language.CommandParameterAst] -and $null -eq $element.Argument) { $operands.Add($element.Extent.Text) }
                 else { return $false }
             }
-            if ($isDailyEvidence) {
+            if ($isReaderHost) {
+                # Accept only this static no-profile File envelope. Never unwrap
+                # Command/EncodedCommand, arbitrary scripts or additional host flags.
+                if ($operands.Count -lt 5 -or $operands[0] -ine '-NoProfile' -or $operands[1] -ine '-File') { return $false }
+                $isDailyEvidence = $operands[2].Replace('\', '/') -ieq 'D:/agents/projects/统一环境/scripts/daily-update/Read-DailyUpdateEvidence.ps1'
+                $isResumeEvidence = $operands[2].Replace('\', '/') -ieq 'D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1'
+                if (-not $isDailyEvidence -and -not $isResumeEvidence) { return $false }
+                $operands.RemoveRange(0, 3)
+            }
+            if ($isDailyEvidence -or $isResumeEvidence) {
                 if ($hasInput -or $operands.Count -lt 2 -or $operands.Count % 2 -ne 0) { return $false }
                 $parameters = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
                 for ($i = 0; $i -lt $operands.Count; $i += 2) {
                     $parameter = $operands[$i]
                     $value = $operands[$i + 1].Replace('\', '/')
                     if (-not $parameters.Add($parameter)) { return $false }
-                    if ($parameter -in @('-RunDirectory', '-PreviousRunDirectory')) {
+                    if (($isDailyEvidence -and $parameter -in @('-RunDirectory', '-PreviousRunDirectory')) -or
+                        ($isResumeEvidence -and $parameter -eq '-IndexPath')) {
                         if ($value -notmatch '(?i)^D:/agents/run-evidence/[^:*?"<>|]+$' -or
                             @($value.Split('/') | Where-Object { $_ -in @('.', '..') -or $_.EndsWith('.') -or $_.EndsWith(' ') }).Count -gt 0) { return $false }
+                        if ($isResumeEvidence -and $value -notmatch '(?i)\.json$') { return $false }
                     }
                     elseif ($parameter -eq '-MaxTotalBytes') {
                         if ($value -notmatch '^\d{1,4}$' -or [int]$value -lt 512 -or [int]$value -gt 6000) { return $false }
                     }
                     else { return $false }
                 }
-                if (-not $parameters.Contains('-RunDirectory')) { return $false }
+                $requiredParameter = if ($isDailyEvidence) { '-RunDirectory' } else { '-IndexPath' }
+                if (-not $parameters.Contains($requiredParameter)) { return $false }
                 $queryCount++
                 $hasInput = $true
                 $hasDataText = $true

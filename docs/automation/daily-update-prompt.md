@@ -67,7 +67,8 @@
 本自动任务已获得用户对“现有组件升级到官方最新稳定版”的持续授权，并永久授权：在存在官方稳定更新时停止占用进程以完成更新；对可安全合并的本地 overlay 经受管 wrapper 重放；按第 7 条运行菜单中文化闭包（审计、重放 overlay、合并新译文）。该授权不包括安装无关新组件、预发布版、破坏性迁移、丢弃无法安全合并的 overlay、修改账号权限/凭据或使用 GUI 自动化；第 8 条「仅报告」项不授权更新。
 
 15. 环境验收与证据读取使用受管入口（调用细节以 scripts/daily-update/README.md 为准）：
-   - 开始、恢复或交接时先用 Read-DailyUpdateEvidence.ps1 读取当次与上次 scope 收据，只展开变化项和裁决区。只读 JSON 字段投影可直接用 ConvertFrom-Json/Select-Object；源码语义查询仍遵守 Serena/CodeGraph 路由。不为规避查询门禁把源码伪装成 JSON。旧收据无法验证时明确报告，不以空输出当通过；按具体文件/章节窄读补齐。
+   - 开始时用 Read-DailyUpdateEvidence.ps1 验证当次与上次 scope 收据并创建 resume-index.json；恢复或交接时先用 Resume-DailyUpdate.ps1 -IndexPath 直达已登记目录，只展开变化项、未完成单位和裁决区，总预算不超过6000字节。scope、证据或文档状态变化后核对并显式刷新索引；复用 Read-SessionDocument 的 StatePath，不全文重复输出未变文档。调用方式以受管 README 第8、11节为准。只读 JSON 字段投影可直接用 ConvertFrom-Json/Select-Object；源码语义查询仍遵守 Serena/CodeGraph 路由。不为规避查询门禁把源码伪装成 JSON。旧收据或索引无法验证时明确报告，不以空输出当通过；按具体文件/章节窄读补齐。
+   - 常见 JSON 探测与验收通过 daily-update-step.py 一步一份新收据，显式声明 required_fields 与业务 equals 谓词；不得用后续成功覆盖先前非零、空输出或业务失败。PowerShell 单次脚本调用复用 Invoke-CheckedPowerShell。SM 状态用 Get-SkillsManagerState.ps1 解析文本锁，缺文件/缺字段必须明记；receipt 的 ok 不代表锁存在或进程正在运行。接口见 README 第10节。
    - PowerShell、Python、Git、Node 事务前先用 runtime-health.py shells 在当前版本验证三 shell 验收器；激活后按目标版本重跑。Node 与 npm/npx 版本独立，分开传 --expected-version，不省略已有 npm/npx 入口。使用当前注册表 PATH 的全新隐藏子进程，不能把旧宿主 PATH 或命令退出 0 当最终版本证据。
    - Python 仅在当前用户授权更新时执行：先核实官方索引与 Python Install Manager 实体，运行 python-update-gate.py prepare，激活前 verify；必须唯一选中精确稳定版并通过官方 manager dry-run。WindowsApps 别名不可哈希时，从现役 PythonSoftwareFoundation.PythonManager 包定位实体 py.exe 并显式传 --manager。索引、manager 或选择漂移、fallback、未知 schema 均停止该项；不可仅凭 exit0 更新。只在已有备份/回滚和授权事务中执行已验证 install_argv，不改变其他组件授权范围。
    - MCP initialize/tools-list 通过 runtime-health.py mcp --out-dir <全新子目录> 调用同目录 mcp-smoke.cjs；验收同时检查新进程退出码、新结果文件、两服务 identity、完整 initialize 与非空 tools/list。query 或等价真实可用性检查仍保留。无结果文件、旧文件、pending、timeout 或 unknown 均不能记成功。

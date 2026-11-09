@@ -29,5 +29,5 @@ intent: 定义设备事实、跨设备验收和宿主集成政策的文档边界
 ## 每日更新自动化
 
 - `docs/automation/daily-update-prompt.md` 是 Codex Desktop 自动化 `codex` 提示词的可审阅源文本；运行时以 `D:/Codex/.codex/automations/codex/automation.toml` 为准。更新使用 Codex 官方自动化工具，保留现有名称、频率、项目、模型和状态，读回核验 prompt 与源文本一致。旧 ZCode 日更及 Cursor 计划任务保持退役。
-- `scripts/daily-update/` 是该自动化的受管集成入口（ledger TSV、上游差分、MCP smoke、三 shell 验收、Python 选择门、CC Switch 快照比较和有界证据读取）。调用方式见同目录 `README.md`；自动化不得在证据目录重写这些脚本。底层运行时/PATH 事务仍由 `dev-environment` 负责，本模块仅编排验收。
+- `scripts/daily-update/` 是该自动化的受管集成入口；ledger/上游差分、MCP/三 shell 验收、单步收据、恢复索引与 SM 文本锁的路由统一见同目录 `README.md`。恢复先用已登记索引进入有界 reader，自动化不得在证据目录重写这些脚本。底层运行时/PATH 事务仍由 `dev-environment` 负责，本模块仅编排验收。
 - 新入口的 Python 回归登记在 `modules/manifest.json`，由现有 `python-node-fixtures` CI 执行；本机验收使用同一 manifest runner。
