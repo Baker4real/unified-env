@@ -113,6 +113,24 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(self.show("HEAD:a.txt"), b"a2\n")
         self.assertEqual(self.status(), [" M b.txt", "M  c.txt"])
 
+    def test_commits_more_paths_than_one_windows_command_line_holds(self) -> None:
+        # Windows caps a whole command line at 32,767 characters, and one skill update can name thousands of paths
+        # (design-taste-frontend v2.5.1 named 1,633, about 91K characters). 220 paths of 180 characters overrun a
+        # single command line by a fifth, so this commit only goes through when git gets its path lists in batches.
+        folder = "d" * 50
+        (self.repo / folder).mkdir()
+        args: list[str] = []
+        for index in range(220):
+            name = f"{folder}/{index:04d}-{'f' * 120}.txt"
+            data = f"{index}\n".encode()
+            self.write(name, data)
+            args += ["--file", name, sha256(data)]
+        code, error = self.run_helper(*args)
+        self.assertEqual(code, 0, error)
+        self.assertEqual(len(self.git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split()), 220)
+        self.assertEqual(self.status(), [])
+        self.assertIn("committed paths status: clean", self.stdout)
+
     def test_rejects_bytes_that_differ_from_review(self) -> None:
         self.write("a.txt", b"a2\n")
         code, error = self.run_helper("--file", "a.txt", sha256(b"reviewed\n"))

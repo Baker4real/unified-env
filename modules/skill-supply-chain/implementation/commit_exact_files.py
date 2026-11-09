@@ -149,6 +149,24 @@ def path_list(output: bytes) -> list[str]:
     return sorted(item.decode("utf-8") for item in output.split(b"\0") if item)
 
 
+# Windows caps a whole command line at 32,767 characters, and one skill update can name thousands of paths
+# (design-taste-frontend v2.5.1: 1,633, about 91K characters), so path lists reach git in batches.
+PATH_BATCH_CHARS = 16_000
+
+
+def path_batches(paths: list[str]) -> list[list[str]]:
+    """``paths`` in order, split so no batch's command line nears the Windows cap; an oversized path rides alone."""
+    batches: list[list[str]] = []
+    size = PATH_BATCH_CHARS
+    for path in paths:
+        if size + len(path) + 3 > PATH_BATCH_CHARS:
+            batches.append([])
+            size = 0
+        batches[-1].append(path)
+        size += len(path) + 3  # the separating space, and quotes around a path with a space in it
+    return batches
+
+
 def tree_entry(repo: Path, commit: str, path: str) -> tuple[str, str] | None:
     """``path``'s (mode, blob) in ``commit``, or None when it is absent."""
     output = git(repo, "ls-tree", "-z", commit, "--", path).stdout
@@ -277,7 +295,8 @@ def refresh_shared_index(repo: Path, git_dir: Path, head: str, paths: list[str])
     deadline = time.monotonic() + INDEX_LOCK_WAIT_SECONDS
     while True:
         try:
-            git(repo, "reset", "-q", "--", *paths)
+            for batch in path_batches(paths):
+                git(repo, "reset", "-q", "--", *batch)
             return
         except CommitError as exc:
             if ("index.lock" in str(exc) or lock.exists()) and time.monotonic() < deadline:
@@ -567,8 +586,12 @@ def commit_exact(
         message = message_file.read_bytes()
     confirmed = {path for path, _ in staged}
     unconfirmed = [path for path in paths if path not in confirmed]
-    already_staged = unconfirmed and path_list(
-        git(repo, "diff", "--cached", "--name-only", "-z", "--no-renames", expected, "--", *unconfirmed).stdout
+    already_staged = sorted(
+        path
+        for batch in path_batches(unconfirmed)
+        for path in path_list(
+            git(repo, "diff", "--cached", "--name-only", "-z", "--no-renames", expected, "--", *batch).stdout
+        )
     )
     if already_staged:
         raise CommitError(staged_refusal(repo, already_staged))
@@ -807,7 +830,11 @@ def main(argv: list[str] | None = None) -> int:
             f"工作树里的 {path} 带着别的改动，没有动它，也可能缺本次提交的改动：用 git diff {head[:12]} -- {path} 核对，"
             "缺的先补进去，否则按它现在的样子提交会回退本次提交"
         )
-    status = git(repo, "status", "--porcelain=v1", "--", *committed).stdout.decode("utf-8").rstrip()
+    status = "\n".join(
+        line
+        for batch in path_batches(committed)
+        for line in git(repo, "status", "--porcelain=v1", "--", *batch).stdout.decode("utf-8").splitlines()
+    )
     print("committed paths status:", status or "clean")
     return 0
 
