@@ -17,6 +17,9 @@ $runRoot = Join-Path $fullRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') 
 [void][IO.Directory]::CreateDirectory($runRoot)
 $files = @(
     'Read-BoundedProjection.ps1','Test-BoundedProjection.ps1',
+    'Read-SessionDocument.ps1','Test-SessionDocument.ps1',
+    'Get-GitHubPublicationTarget.ps1','Test-GitHubPublicationTarget.ps1',
+    'screenshot-geometry.mjs','screenshot-geometry.test.mjs','Test-ScreenshotGeometry.ps1',
     'Invoke-CheckedPowerShell.ps1','Test-CheckedPowerShell.ps1',
     'BrowserPrivacyProbe.py','Test-BrowserPrivacyProbe.py',
     'Get-NvidiaDownloadStatus.ps1','Test-NvidiaDownloadStatus.ps1',
@@ -25,9 +28,15 @@ $files = @(
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',
     'Invoke-ManagedRecycle.ps1','Test-ManagedRecycle.ps1',
     'Get-ConsoleLaunchAudit.ps1','Test-ConsoleLaunchAudit.ps1','Watch-ConsoleWindows.ps1',
+    'Protect-SensitiveLog.ps1','Test-ProtectSensitiveLog.ps1',
+    'Request-KryptexBenchmarkReset.py','Test-RequestKryptexBenchmarkReset.py',
+    'Invoke-RemoteStep.ps1','Invoke-RemotePython.ps1','Invoke-UuTerminalCommand.ps1',
+    'RemoteOperations.psm1','Get-SafeTreeDeleteCapability.ps1','Test-StudyLink.ps1',
+    'Get-GitHubReleaseAsset.ps1','Read-StudyUuMarker.ps1',
     'Test-HostDiagnostics.ps1'
 )
 $python =(Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$node = (Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $syntax = foreach ($file in $files) {
     $path = Join-Path $PSScriptRoot $file
     $tokens = $null; $parseErrors = $null
@@ -37,6 +46,10 @@ $syntax = foreach ($file in $files) {
     if ([IO.Path]::GetExtension($file) -eq '.py') {
         & $python -B -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' $path
         $parseErrors = if ($LASTEXITCODE -eq 0) { @() } else { @([pscustomobject]@{ErrorId='PythonSyntax';Extent=@{StartLineNumber=0}}) }
+    }
+    elseif ([IO.Path]::GetExtension($file) -eq '.mjs') {
+        & $node --check $path
+        $parseErrors = if ($LASTEXITCODE -eq 0) { @() } else { @([pscustomobject]@{ErrorId='NodeSyntax';Extent=@{StartLineNumber=0}}) }
     }
     else { [void][Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$parseErrors) }
     [pscustomobject]@{
@@ -48,17 +61,22 @@ $syntax = foreach ($file in $files) {
 }
 $suiteDefinitions = @(
     @{name='projection';file='Test-BoundedProjection.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'projection'))},
+    @{name='session-document';file='Test-SessionDocument.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'session-document'))},
+    @{name='github-target';file='Test-GitHubPublicationTarget.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'github-target'))},
+    @{name='screenshot-geometry';file='Test-ScreenshotGeometry.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'screenshot-geometry'))},
     @{name='powershell';file='Test-CheckedPowerShell.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'powershell'))},
     @{name='nvidia';file='Test-NvidiaDownloadStatus.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'nvidia'))},
     @{name='vcpkg';file='Test-VcpkgHealth.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'vcpkg'))},
     @{name='explorer';file='Test-ExplorerShellRecovery.ps1';args=@('-EvidenceDirectory',(Join-Path $runRoot 'explorer'))},
     @{name='browser';file='Test-BrowserPrivacyProbe.py';args=@()},
     @{name='recycle';file='Test-ManagedRecycle.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'recycle'))},
-    @{name='console';file='Test-ConsoleLaunchAudit.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'console'))}
+    @{name='console';file='Test-ConsoleLaunchAudit.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'console'))},
+    @{name='sensitive-log';file='Test-ProtectSensitiveLog.ps1';args=@()},
+    @{name='benchmark-reset';file='Test-RequestKryptexBenchmarkReset.py';args=@()}
 )
 if ($SkipLiveSnapshot) {
-    $suiteDefinitions[4].args += '-SkipLiveSnapshot'
-    $suiteDefinitions[6].args += '-SkipLiveRecycle'
+    ($suiteDefinitions | Where-Object name -eq 'explorer').args += '-SkipLiveSnapshot'
+    ($suiteDefinitions | Where-Object name -eq 'recycle').args += '-SkipLiveRecycle'
 }
 $suites = [Collections.Generic.List[object]]::new()
 if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
@@ -102,6 +120,11 @@ if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
                     $passedChecks = @($parsed.results | Where-Object status -EQ 'passed').Count
                     $contractPassed = $parsed.status -eq 'passed' -and $parsed.failures -eq 0 -and
                         $passedChecks -gt 0 -and $passedChecks -eq $parsed.cases
+                }
+                { $_ -in 'sensitive-log', 'benchmark-reset', 'session-document', 'github-target', 'screenshot-geometry' } {
+                    $passedChecks = @($parsed.results | Where-Object passed -EQ $true).Count
+                    $contractPassed = $parsed.status -eq 'passed' -and $passedChecks -gt 0 -and
+                        $passedChecks -eq @($parsed.results).Count -and $passedChecks -eq $parsed.cases
                 }
                 { $_ -in 'nvidia', 'console', 'vcpkg' } {
                     $passedChecks = @($parsed.cases | Where-Object passed -EQ $true).Count

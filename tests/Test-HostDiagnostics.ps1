@@ -81,21 +81,33 @@ $sourceRoot = Split-Path -Parent $entry
 $check = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-EvidenceRoot',$deployEvidence)
 $checkReport = $check.stdout | ConvertFrom-Json -ErrorAction Stop
 Assert-True ($check.exitCode -eq 1 -and $checkReport.mode -eq 'Check' -and $checkReport.status -eq 'drift') 'Default Check must expose drift without applying it.'
-Assert-True ($checkReport.files.Count -eq 20 -and $checkReport.changedFiles -eq 20) 'Check must compare every allowlisted file.'
+Assert-True ($checkReport.files.Count -eq 39 -and $checkReport.changedFiles -eq 39) 'Check must compare every allowlisted file.'
 Assert-True (-not (Test-Path -LiteralPath $deployEvidence)) 'Check must not create an evidence directory.'
 Assert-True ((Get-FileHash -LiteralPath $previousFile -Algorithm SHA256).Hash -eq $previousHash -and (Get-ChildItem -LiteralPath $targetRoot -Recurse -File).Count -eq 2) 'Check must leave the target tree unchanged.'
 
 $apply = Invoke-PublicScript $deployEntry @('-Mode','Apply','-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-EvidenceRoot',$deployEvidence)
 $applyReport = $apply.stdout | ConvertFrom-Json -ErrorAction Stop
-Assert-True ($apply.exitCode -eq 0 -and $applyReport.status -eq 'deployed' -and $applyReport.writtenFiles -eq 20) 'Apply must publish the complete allowlist.'
+Assert-True ($apply.exitCode -eq 0 -and $applyReport.status -eq 'deployed' -and $applyReport.writtenFiles -eq 39) 'Apply must publish the complete allowlist.'
 $replaced = @($applyReport.files | Where-Object relative -eq 'Read-BoundedProjection.ps1')[0]
 Assert-True ((Get-FileHash -LiteralPath $replaced.backupPath -Algorithm SHA256).Hash -eq $previousHash) 'Apply must retain the original file as a verified backup.'
 Assert-True ((Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash -eq $sentinelHash) 'Apply must not modify files outside the allowlist.'
-Assert-True ((Get-ChildItem -LiteralPath $targetRoot -Recurse -File).Count -eq 21) 'Apply must not publish undeclared files.'
+Assert-True ((Get-ChildItem -LiteralPath $targetRoot -Recurse -File).Count -eq 40) 'Apply must not publish undeclared files.'
 Assert-True (Test-Path -LiteralPath (Join-Path $applyReport.evidenceDirectory 'manifest.json') -PathType Leaf) 'Apply must save its deployment evidence.'
 $after = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot)
 $afterReport = $after.stdout | ConvertFrom-Json -ErrorAction Stop
 Assert-True ($after.exitCode -eq 0 -and $afterReport.status -eq 'in-sync' -and $afterReport.changedFiles -eq 0) 'An independent Check must confirm every deployed source hash.'
+$summary = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-Summary')
+$summaryReport = $summary.stdout | ConvertFrom-Json -ErrorAction Stop
+Assert-True ($summaryReport.status -eq 'in-sync' -and $summaryReport.changedFiles -eq 0 -and -not $summaryReport.PSObject.Properties.Name.Contains('files')) 'Summary must omit the full manifest while preserving status.'
+$only = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-Only','Read-BoundedProjection.ps1,Test-BoundedProjection.ps1')
+$onlyReport = $only.stdout | ConvertFrom-Json -ErrorAction Stop
+Assert-True ($only.exitCode -eq 0 -and $onlyReport.status -eq 'in-sync' -and $onlyReport.files.Count -eq 2) 'Only must restrict the deployment readback to the selected files.'
+$unknownOnly = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-Only','not-allowlisted.ps1')
+$unknownOnlyReport = $unknownOnly.stdout | ConvertFrom-Json -ErrorAction Stop
+Assert-True ($unknownOnly.exitCode -eq 1 -and $unknownOnlyReport.status -eq 'failed' -and $unknownOnlyReport.error.Contains('Only')) 'Only must reject a name outside the allowlist.'
+$failedSummary = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-Only','not-allowlisted.ps1','-Summary')
+$failedSummaryReport = $failedSummary.stdout | ConvertFrom-Json -ErrorAction Stop
+Assert-True ($failedSummary.exitCode -eq 1 -and $failedSummaryReport.status -eq 'failed' -and "$($failedSummaryReport.error)".Contains('Only')) 'Summary must carry the failure message.'
 
 $incompleteSource = Join-Path $deployRoot 'incomplete-source'
 [void][IO.Directory]::CreateDirectory($incompleteSource)
@@ -132,8 +144,8 @@ if ($result.exitCode -ne 0) { throw (Format-DiagnosticsFailure $result) }
 Assert-True ([string]::IsNullOrWhiteSpace($result.stderr)) 'Managed host diagnostics wrote unexpected stderr.'
 $report = $result.stdout | ConvertFrom-Json -ErrorAction Stop
 Assert-True ($report.status -eq 'passed-with-skips') 'CI must report its live snapshot omission explicitly.'
-Assert-True ($report.syntaxChecks -eq 20) 'The complete 20-file bundle must pass syntax checks.'
-Assert-True ($report.suites.Count -eq 8) 'All eight managed diagnostic suites must run.'
+Assert-True ($report.syntaxChecks -eq 39) 'The complete 39-file bundle must pass syntax checks.'
+Assert-True ($report.suites.Count -eq 13) 'All thirteen managed diagnostic suites must run.'
 Assert-True (@($report.suites | Where-Object { $_.status -notin @('passed','passed-with-skips') }).Count -eq 0) 'A diagnostic suite failed.'
 $explorerSuite = @($report.suites | Where-Object name -eq 'explorer')[0]
 $explorer = Get-Content -LiteralPath $explorerSuite.evidence -Raw | ConvertFrom-Json -ErrorAction Stop

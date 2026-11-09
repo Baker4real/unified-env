@@ -336,6 +336,9 @@
       "interfaces": [
         "scripts/Deploy-HostDiagnostics.ps1",
         "managed/host-diagnostics/Read-BoundedProjection.ps1",
+        "managed/host-diagnostics/Read-SessionDocument.ps1",
+        "managed/host-diagnostics/Get-GitHubPublicationTarget.ps1",
+        "managed/host-diagnostics/screenshot-geometry.mjs",
         "managed/host-diagnostics/Invoke-CheckedPowerShell.ps1",
         "managed/host-diagnostics/BrowserPrivacyProbe.py",
         "managed/host-diagnostics/Get-NvidiaDownloadStatus.ps1",
@@ -345,6 +348,16 @@
         "managed/host-diagnostics/Invoke-ManagedRecycle.ps1",
         "managed/host-diagnostics/Get-ConsoleLaunchAudit.ps1",
         "managed/host-diagnostics/Watch-ConsoleWindows.ps1",
+        "managed/host-diagnostics/Protect-SensitiveLog.ps1",
+        "managed/host-diagnostics/Request-KryptexBenchmarkReset.py",
+        "managed/host-diagnostics/Invoke-RemoteStep.ps1",
+        "managed/host-diagnostics/Invoke-RemotePython.ps1",
+        "managed/host-diagnostics/Invoke-UuTerminalCommand.ps1",
+        "managed/host-diagnostics/RemoteOperations.psm1",
+        "managed/host-diagnostics/Get-SafeTreeDeleteCapability.ps1",
+        "managed/host-diagnostics/Test-StudyLink.ps1",
+        "managed/host-diagnostics/Get-GitHubReleaseAsset.ps1",
+        "managed/host-diagnostics/Read-StudyUuMarker.ps1",
         "scripts/Invoke-SafeCleanupJob.ps1",
         "scripts/lib/SafeCleanupJob.ps1",
         "scripts/Measure-CodexSafeTreeDeleteHistory.ps1",
@@ -529,7 +542,15 @@
       "tests": {
         "diagnostics": {
           "powershell": [
-            "tests/Test-HostDiagnostics.ps1"
+            "tests/Test-HostDiagnostics.ps1",
+            "tests/Test-RemoteStep.ps1",
+            "tests/Test-RemoteEncoding.ps1",
+            "tests/Test-UuTerminalCommand.ps1",
+            "tests/Test-SafeTreeDeleteCapability.ps1",
+            "tests/Test-RemoteProcesses.ps1",
+            "tests/Test-StudyLink.ps1",
+            "tests/Test-GitHubReleaseAsset.ps1",
+            "tests/Test-UuMarkerReader.ps1"
           ],
           "python": [],
           "node": []
@@ -648,7 +669,8 @@
         "host-live": {
           "powershell": [
             "tests/Test-CodexSafeTreeDeleteProductionSmoke.ps1",
-            "tests/Test-CodexSafeTreeDeletePhase3Production.ps1"
+            "tests/Test-CodexSafeTreeDeletePhase3Production.ps1",
+            "tests/Test-OfficeRemoteContract.ps1"
           ],
           "python": [],
           "node": []

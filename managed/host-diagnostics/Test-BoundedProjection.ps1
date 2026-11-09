@@ -216,6 +216,26 @@ $complex = Invoke-Case 'complex-jsonl-field' @(@{ path = $validJsonlPath; format
 if ($complex.exitCode -ne 0 -or $complex.json.Contains('DO_NOT_RETURN_NESTED_OBJECT') -or -not $complex.json.Contains('[complex value omitted]')) { throw 'Complex field exposed raw object.' }
 $checks.Add(@{ name = 'single-and-complex-jsonl-fields'; status = 'pass' })
 
+$jsonPath = Join-Path $runRoot 'plan.json'
+@{
+    status = 'planned'
+    package = @{ version = '26.1013.4894.0' }
+    baseline = 'DO_NOT_RETURN_LARGE_BASELINE'
+} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding utf8
+$jsonCase = Invoke-Case 'json-field-projection' @(@{
+    path = $jsonPath; format = 'json'; fields = @('status', 'package.version')
+}) 1500
+if ($jsonCase.exitCode -ne 0 -or $jsonCase.result.sources[0].rows[0].fields.status -ne 'planned' -or
+    $jsonCase.result.sources[0].rows[0].fields.'package.version' -ne '26.1013.4894.0' -or
+    $jsonCase.json.Contains('DO_NOT_RETURN_LARGE_BASELINE')) { throw 'JSON field projection failed.' }
+$checks.Add(@{ name = 'json-field-projection'; status = 'pass' })
+
+$largeJsonPath = Join-Path $runRoot 'large.json'
+[IO.File]::WriteAllText($largeJsonPath, '{"status":"planned","pad":"' + ('a' * (4MB + 1)) + '"}', [Text.UTF8Encoding]::new($false))
+$largeJson = Invoke-Case 'json-too-large' @(@{ path = $largeJsonPath; format = 'json'; fields = @('status') }) 1500
+if ($largeJson.exitCode -ne 1 -or $largeJson.result.sources[0].status -ne 'json-too-large' -or @($largeJson.result.sources[0].rows).Count -ne 0) { throw 'Oversized JSON was parsed.' }
+$checks.Add(@{ name = 'json-size-limit'; status = 'pass' })
+
 $unicodePath = Join-Path $runRoot 'unicode.txt'
 $unicodeValue = ([string][char]0x4E2D + [char]::ConvertFromUtf32(0x1F680)) * 100
 1..10 | ForEach-Object { $unicodeValue } | Set-Content -LiteralPath $unicodePath -Encoding utf8

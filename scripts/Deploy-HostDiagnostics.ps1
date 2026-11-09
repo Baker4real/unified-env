@@ -12,7 +12,9 @@ param(
     [ValidateSet('Check','Apply')][string]$Mode = 'Check',
     [string]$SourceRoot = (Join-Path (Split-Path -Parent $PSScriptRoot) 'managed/host-diagnostics'),
     [string]$TargetRoot = 'D:/Codex/.codex/scripts',
-    [string]$EvidenceRoot = 'D:/agents/run-evidence/host-diagnostics-deployment'
+    [string]$EvidenceRoot = 'D:/agents/run-evidence/host-diagnostics-deployment',
+    [string[]]$Only = @(),
+    [switch]$Summary
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,6 +23,9 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $allowlist = @(
     'Read-BoundedProjection.ps1','Test-BoundedProjection.ps1',
+    'Read-SessionDocument.ps1','Test-SessionDocument.ps1',
+    'Get-GitHubPublicationTarget.ps1','Test-GitHubPublicationTarget.ps1',
+    'screenshot-geometry.mjs','screenshot-geometry.test.mjs','Test-ScreenshotGeometry.ps1',
     'Invoke-CheckedPowerShell.ps1','Test-CheckedPowerShell.ps1',
     'BrowserPrivacyProbe.py','Test-BrowserPrivacyProbe.py',
     'Get-NvidiaDownloadStatus.ps1','Test-NvidiaDownloadStatus.ps1',
@@ -29,6 +34,11 @@ $allowlist = @(
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',
     'Invoke-ManagedRecycle.ps1','Test-ManagedRecycle.ps1',
     'Get-ConsoleLaunchAudit.ps1','Test-ConsoleLaunchAudit.ps1','Watch-ConsoleWindows.ps1',
+    'Protect-SensitiveLog.ps1','Test-ProtectSensitiveLog.ps1',
+    'Request-KryptexBenchmarkReset.py','Test-RequestKryptexBenchmarkReset.py',
+    'Invoke-RemoteStep.ps1','Invoke-RemotePython.ps1','Invoke-UuTerminalCommand.ps1',
+    'RemoteOperations.psm1','Get-SafeTreeDeleteCapability.ps1','Test-StudyLink.ps1',
+    'Get-GitHubReleaseAsset.ps1','Read-StudyUuMarker.ps1',
     'Test-HostDiagnostics.ps1'
 )
 
@@ -95,6 +105,13 @@ $report = [ordered]@{
     evidenceDirectory = $null
 }
 try {
+    $selectedAllowlist = $allowlist
+    if ($Only.Count -gt 0) {
+        $requestedOnly = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() })
+        $unknown = @($requestedOnly | Where-Object { $_ -notin $allowlist })
+        if ($unknown.Count -gt 0) { throw "Only contains a name outside the allowlist: $($unknown -join ', ')" }
+        $selectedAllowlist = @($allowlist | Where-Object { $_ -in $requestedOnly })
+    }
     $sourceFull = Resolve-DiagnosticPath $SourceRoot 'SourceRoot'
     $targetFull = Resolve-DiagnosticPath $TargetRoot 'TargetRoot'
     if (Test-PathOverlap $sourceFull $targetFull) { throw 'SourceRoot and TargetRoot must not be the same path or overlap.' }
@@ -104,7 +121,7 @@ try {
     }
     $report.sourceRoot = $sourceFull
     $report.targetRoot = $targetFull
-    $report.files = @(foreach ($relative in $allowlist) {
+    $report.files = @(foreach ($relative in $selectedAllowlist) {
         $source = Join-Path $sourceFull $relative
         $target = Join-Path $targetFull $relative
         Assert-NoReparseAncestor $source
@@ -217,5 +234,11 @@ catch {
     }
 }
 
-$report | ConvertTo-Json -Depth 7 -Compress
+if ($Summary) {
+    # $report 是有序字典，PSObject.Properties 里没有它的键。
+    $errorMessage = if ($report.Contains('error')) { $report.error } else { $null }
+    [pscustomobject]@{ schemaVersion = $report.schemaVersion; mode = $report.mode; status = $report.status; changedFiles = $report.changedFiles; writtenFiles = $report.writtenFiles; evidenceDirectory = $report.evidenceDirectory; error = $errorMessage } | ConvertTo-Json -Depth 4 -Compress
+} else {
+    $report | ConvertTo-Json -Depth 7 -Compress
+}
 if ($report.status -notin @('in-sync','deployed')) { exit 1 }

@@ -123,12 +123,12 @@ try {
             -not $inputSource.ContainsKey('path') -or -not $inputSource.ContainsKey('format')) { throw 'Invalid source.' }
         $path = [string]$inputSource.path
         $format = [string]$inputSource.format
-        if (-not [IO.Path]::IsPathFullyQualified($path) -or $path.Length -gt 512 -or $format -notin @('text', 'jsonl', 'http-log', 'markdown')) { throw 'Invalid source.' }
+        if (-not [IO.Path]::IsPathFullyQualified($path) -or $path.Length -gt 512 -or $format -notin @('text', 'json', 'jsonl', 'http-log', 'markdown')) { throw 'Invalid source.' }
         $section = if ($inputSource.ContainsKey('section')) { $inputSource.section } else { $null }
         if ($format -ne 'markdown' -and $inputSource.ContainsKey('section')) { throw 'Section selection requires Markdown format.' }
         if ($format -eq 'markdown' -and ($section -isnot [string] -or [string]::IsNullOrWhiteSpace($section) -or $section.Length -gt 2000)) { throw 'Markdown requires an exact section title.' }
         $fields = @(if ($inputSource.ContainsKey('fields')) { $inputSource.fields })
-        if ($format -eq 'jsonl' -and ($fields.Count -lt 1 -or $fields.Count -gt 32)) { throw 'JSONL requires fields.' }
+        if ($format -in @('json', 'jsonl') -and ($fields.Count -lt 1 -or $fields.Count -gt 32)) { throw 'JSON requires fields.' }
         foreach ($field in $fields) {
             if ($field -isnot [string] -or $field.Length -lt 1 -or $field.Length -gt 128) { throw 'Invalid field.' }
         }
@@ -164,6 +164,29 @@ try {
             # Only HTTP logs may replace invalid UTF-8; their damaged lines are
             # withheld below. Do not guess alternate encodings for this mode.
             $reader = [IO.StreamReader]::new($stream, [Text.UTF8Encoding]::new($false, ($format -ne 'http-log')), ($format -ne 'http-log'), 1024, $true)
+            if ($format -eq 'json' -and $stream.Length -gt 4MB) {
+                # 整份解析要把文档读进内存；超过上限不读，改用 jsonl 或缩小来源。
+                $source.status = 'json-too-large'
+            }
+            elseif ($format -eq 'json') {
+                $document = $reader.ReadToEnd()
+                $source.lineCount = if ($document.Length -eq 0) { 0 } else { [regex]::Matches($document, "\n").Count + 1 }
+                $record = $null
+                try { $record = ConvertFrom-Json -InputObject $document -AsHashtable -ErrorAction Stop }
+                catch { $source.invalidJsonLines++ }
+                if ($null -ne $record) {
+                    if ($record -isnot [System.Collections.IDictionary]) {
+                        $source.invalidJsonLines++
+                    }
+                    else {
+                        $source.matchedRows = 1
+                        $row = [ordered]@{ line = 1; fields = [ordered]@{} }
+                        foreach ($field in $fields) { $row.fields[$field] = Limit-Value (Get-Field $record $field) $maxValueChars $field }
+                        $candidates.Add($row)
+                    }
+                }
+            }
+            else {
             while ($null -ne ($line = $reader.ReadLine())) {
                 $source.lineCount++
                 if ($format -eq 'markdown') {
@@ -247,6 +270,7 @@ try {
                     $row.fields = $values
                 }
                 $candidates.Add($row)
+            }
             }
             if ($format -eq 'http-log' -and $source.replacementCharacterRows -gt 0) {
                 $source.status = 'read-with-encoding-omissions'
