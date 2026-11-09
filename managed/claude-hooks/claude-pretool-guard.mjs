@@ -36,6 +36,10 @@
 //      outside the managed recycle entry: deleting files is permanent, cleanup goes through Invoke-ManagedRecycle.ps1.
 //      Only command positions count, so text that names the cmdlet passes; non-file provider paths (Env:, Function:,
 //      Variable:, Alias:, registry, Cert:, WSMan:) and -WhatIf pass. Scripts the command runs are not scanned.
+//  17. PowerShell tool commands whose last statement is `exit` (`exit 0`, `exit $LASTEXITCODE`): the tool captures
+//      the output, and exit drops object output not rendered yet together with everything printed after it, with no
+//      error, although every statement ran. A closing $global:LASTEXITCODE = 0 clears the failure flag without that
+//      loss. A quoted -Command payload, an exit inside braces and the Terminal panel pass.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
@@ -530,7 +534,19 @@ function bareBashReason(word) {
   return `PowerShell 里裸写的 ${word} 解析到 C:\\WINDOWS\\system32\\bash.exe（WSL），脚本里的 D:/ 路径在 WSL 里不存在，askpass 这类入口直接报 No such file or directory。` +
     "改用 Git Bash 全路径：& 'C:/Program Files/Git/bin/bash.exe' scripts/x.sh '参数'；PowerShell 没有 < 重定向，要喂文件给 stdin 就交给 bash：" +
     "& 'C:/Program Files/Git/bin/bash.exe' -c 'scripts/x.sh sh -s < 本地脚本'。确实要进 WSL 就写 wsl。" +
-    `（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 17 条）`
+    `（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 18 条）`
+}
+
+// Rule 17. The PowerShell tool captures the command's output; an exit as the last statement drops object output not
+// rendered yet and everything after it, silently (2026-11-09, pwsh 7.6.9). Only a top-level exit counts: one inside a
+// quoted -Command payload or inside braces leaves the command ending in a quote or a brace.
+const TRAILING_EXIT = /(?:^|[;\r\n]|&&|\|\|)\s*exit(?:\s+(?:-?\d+|\$[\w:]+))?\s*;?\s*$/i
+
+function trailingExitReason() {
+  return 'PowerShell 工具捕获输出时，命令末尾的 exit 会让还没渲染的对象输出连同它之后的全部输出消失，不报错，命令里的语句其实都执行了' +
+    "（2026-11-09 pwsh 7.6.9 实测：[pscustomobject]@{k='v'}; 'x'; exit 0 什么都不显示）。" +
+    '改成以 $global:LASTEXITCODE = 0 收尾：工具只在结束时 $LASTEXITCODE 非零才把命令标成失败；要区分命中与否就把 $LASTEXITCODE 写进输出。' +
+    `（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 21 条）`
 }
 
 // Rule 15. The Grep and Glob tools stop ripgrep after 20 seconds and then report a timeout or "No files found", so a
@@ -832,6 +848,7 @@ export function evaluate(payload, io = defaultIo) {
     }
     const bash = bareBash(command)
     if (bash) return bareBashReason(bash)
+    if (!terminal && TRAILING_EXIT.test(command)) return trailingExitReason()
   }
 
   const broad = rgBroadRoot(command, payload?.cwd)
@@ -1097,6 +1114,18 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "Write-Output 'bash scripts/x.sh'", false],
     ['PowerShell', 'wsl bash -c ls', false],
     ['Bash', 'bash scripts/x.sh', false],
+    // A PowerShell tool command ending in exit loses output; quoted payloads, braces and the Terminal panel pass.
+    ['PowerShell', 'Get-Item x | Select-Object Name; exit 0', true],
+    ['PowerShell', 'rg -n foo D:\\x\nexit 0', true],
+    ['PowerShell', "& 'D:\\x\\run.ps1'; exit $LASTEXITCODE", true],
+    ['PowerShell', 'Get-Date && exit', true],
+    ['PowerShell', 'exit 1;', true],
+    ['PowerShell', 'rg -n foo D:\\x; $global:LASTEXITCODE = 0', false],
+    ['PowerShell', "pwsh -NoProfile -Command \"& 'D:\\x\\run.ps1'; exit $LASTEXITCODE\"", false],
+    ['PowerShell', 'if ($bad) { exit 1 }', false],
+    ['PowerShell', "Write-Output 'exit 0'", false],
+    ['PowerShell', '$exitCode = 0', false],
+    [TERMINAL_TOOL, 'Get-ChildItem; exit 0', false],
     // The Terminal panel: shared and PowerShell-only rules apply; MSIX-only and Bash-only rules do not.
     [TERMINAL_TOOL, 'Remove-Item -Recurse -Force D:\\x', true],
     [TERMINAL_TOOL, 'Stop-Process -Name explorer -Force', true],

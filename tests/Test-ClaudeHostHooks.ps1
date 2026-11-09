@@ -80,6 +80,8 @@ $denyCases = @(
     @{ tool_name = 'mcp__terminal__run_in_terminal'; tool_input = @{ command = 'Remove-Item -Recurse -Force D:\tmp\x' } },
     # PowerShell 里裸写的 bash 是 WSL。
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'bash scripts/rssh.sh uptime' } },
+    # PowerShell 工具命令以 exit 结尾会丢掉还没渲染的输出。
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Get-Item x | Select-Object Name; exit 0' } },
     # Grep/Glob 工具 20 秒就停；没给 path 时搜会话 cwd。
     @{ tool_name = 'Grep'; tool_input = @{ pattern = 'x'; path = 'D:\agents\projects' } },
     @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents' }
@@ -104,6 +106,7 @@ $allowCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -n foo D:\agents\x -g ''*.ps1''' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'git status --porcelain | Where-Object { $_.StartsWith(''??'') }' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'C:/Program Files/Git/bin/bash.exe' scripts/rssh.sh uptime" } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -n foo D:\x; $global:LASTEXITCODE = 0' } },
     @{ tool_name = 'Grep'; tool_input = @{ pattern = 'x'; path = 'D:\agents\projects\misc' } },
     @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents\projects\misc' }
 )
