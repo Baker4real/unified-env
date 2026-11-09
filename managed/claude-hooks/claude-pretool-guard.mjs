@@ -774,10 +774,21 @@ function expandingPayload(command) {
   return null
 }
 
+// Inside a quoted string a delete verb is text when the string opens its statement or belongs to a command that only
+// reads or prints it (rg -n '...|rm)', git commit -m '...; rm x'), and a payload in any other string (bash -c '...',
+// cmd /c "..."); $( runs its contents even inside double quotes.
+function deletesAt(command, match) {
+  const [whole, rest] = match
+  if (/\s-whatif\b/i.test(rest) || NON_FILE_PROVIDER.test(rest)) return false
+  if (command[match.index] === '(' && command[match.index - 1] === '$') return true
+  const { outer, inner } = referenceContext(command, match.index + whole.length - rest.length)
+  const text = inner !== null && (!outer.trim() || (!runsHere(outer) && readsOnly(outer)))
+  return !text
+}
+
 function fileDeleteDecision(command) {
   if (/invoke-managedrecycle|invoke-safe-tree-delete/i.test(command)) return null
-  const typed = FILE_DELETE_CALL.test(command) ||
-    [...command.matchAll(FILE_DELETE_COMMAND)].some(([, rest]) => !/\s-whatif\b/i.test(rest) && !NON_FILE_PROVIDER.test(rest))
+  const typed = FILE_DELETE_CALL.test(command) || [...command.matchAll(FILE_DELETE_COMMAND)].some(match => deletesAt(command, match))
   if (!typed) return null
   return `删除文件是永久删除，只走受管回收 ${MANAGED_RECYCLE}（Plan → Apply，说明见 ${GUIDANCE}\\host-runbook\\managed-recycle.md）。` +
     '临时文件放会话 scratchpad，用完不必删；要清理的散文件先移进一个子目录，再整目录回收。Env:、Function:、Variable: 等非文件路径和 -WhatIf 放行。' +
@@ -900,6 +911,14 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "Remove-Item -LiteralPath 'Function:\\Get-Foo'", false],
     ['PowerShell', 'Remove-Item D:\\x\\a.txt -WhatIf', false],
     ['PowerShell', "Write-Output 'Remove-Item D:\\x\\a.txt'", false],
+    ['PowerShell', `rg -n 'git(_text)?\\(repo, "(ls-tree|update-index|add|rm)"' 'D:\\x\\helper.py'`, false],
+    ['Bash', "rg -n '(rm|del)' notes.txt", false],
+    ['PowerShell', "git commit -m 'drop the scratch copy; rm is no longer needed'", false],
+    ['PowerShell', '(Get-ChildItem D:\\x -Filter *.tmp | rm)', true],
+    ['PowerShell', 'Get-ChildItem D:\\x | Remove-Item; Write-Output done', true],
+    ['Bash', "bash -c 'cd /d/x; rm a.txt'", true],
+    ['PowerShell', 'pwsh -NoProfile -Command "Get-ChildItem D:\\x | Remove-Item"', true],
+    ['PowerShell', 'Write-Output "$(Remove-Item D:\\x\\a.txt)"', true],
     ['PowerShell', 'Remove-ItemProperty -LiteralPath HKLM:\\Software\\X -Name y', false],
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1' -Mode Plan -TargetPath D:\\x\\a.txt", false],
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1' -Mode Plan -TargetPaths D:\\x", false],
