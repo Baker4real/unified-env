@@ -236,24 +236,6 @@
       "deniedExactPaths": []
     },
     {
-      "id": "cc-switch-rust-target",
-      "capabilityRoot": "D:\\agents\\projects\\cc-switch\\src-tauri\\target",
-      "minimumDescendantDepth": 0,
-      "rootDeletionPurpose": "rebuildable-build-output",
-      "allowHardLinks": true,
-      "allowInternalDirectoryJunctions": false,
-      "deniedExactPaths": []
-    },
-    {
-      "id": "cc-switch-node-modules",
-      "capabilityRoot": "D:\\agents\\projects\\cc-switch\\node_modules",
-      "minimumDescendantDepth": 0,
-      "rootDeletionPurpose": "rebuildable-build-output",
-      "allowHardLinks": true,
-      "allowInternalDirectoryJunctions": true,
-      "deniedExactPaths": []
-    },
-    {
       "id": "serena-python-venv",
       "capabilityRoot": "D:\\agents\\projects\\serena\\.venv",
       "minimumDescendantDepth": 0,

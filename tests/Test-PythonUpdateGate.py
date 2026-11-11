@@ -104,7 +104,7 @@ class PythonUpdateLifecycleTests(unittest.TestCase):
     def run_manager(self, argv, **kwargs):
         # The only executable boundary is simulated. An apply command is a failure.
         self.assertEqual(argv, [str(self.manager), 'install', '--source',
-                               str(self.selected_path), '--dry-run', '3.15.1'])
+                               str(self.selected_path), '--dry-run', '--yes', '3.15.1'])
         self.calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, self.output, '')
 

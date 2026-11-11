@@ -17,6 +17,7 @@
     { "path": "Get-ConsoleLaunchAudit.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-ConsoleLaunchAudit.ps1" },
     { "path": "Get-NvidiaDownloadStatus.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-NvidiaDownloadStatus.ps1" },
     { "path": "Get-RepositoryAudit.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
+    { "path": "Test-LoopbackProxy.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-LoopbackProxy.ps1" },
     { "path": "Get-TaskbarSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-TaskbarSnapshot.ps1" },
     { "path": "Get-VcpkgHealth.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-VcpkgHealth.ps1" },
     { "path": "github-default-branch-skill-overlay-catalog.json", "owner": "scripts/Deploy-GitHubDefaultBranchSkillOverlay.ps1", "source": "scripts/github-default-branch-skill-overlay-catalog.json" },

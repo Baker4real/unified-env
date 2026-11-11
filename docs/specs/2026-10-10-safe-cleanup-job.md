@@ -20,6 +20,12 @@ intent: 定义批量清理的进程身份、原子账本、策略证据和目录
 scope 定义唯一目标和 baseline；ledger 的目标集合与每项 baseline 必须一致。
 执行 baseline 必须含 `rootIdentity`（volume serial、file index）与 `treeManifestSha256`；旧 scope 缺少身份时仅可作历史回执复核，不允许补身份后继续删除。
 
+## 准备任务集合
+
+`scripts/New-SafeCleanupJob.ps1 -TargetPaths <以::连接的明确绝对目标> -JobDirectory <新建空D盘目录>` 仅准备，不删除。目标逐项经过现役 gate Check，按 `policyEntryId` 分组；审核 Plan 绑定目录身份、tree manifest SHA 和原始 policy snapshot 字节，生成每组 scope、原子 ledger、state、job.json 与 prepared-plans.json，顶层 job-set.json 列出全部 job。任何 Plan 失败先汇总 needsElevation，所有组发布前停止；不自动提权或改 policy。现有 Worker 仅支持 capability root 的后代，精确 root 输入在发布前明确拒绝，即使 gate 另有该 root 的授权。
+
+审核 Plan 不占用 execution intent：它可能在队列等待时过期。首次 Worker 执行仍按原合同对 immutable baseline 生成新 Plan 并持久化 intent，已开始事务继续复用其精确 intent；不以原路径是否存在筛掉待处理目标，不豁免 gate 的 Plan TTL。准备失败后的独立 gate Plan 只是证据，不是删除授权；任务集合不覆盖既有目录。零字节统计伴随 `byteCountStatus=not-measured`，不据此推断空间释放。
+
 ## 状态与生命周期
 
 Status 读取任务账本与当前进程观察，核对 PID、进程启动时间、可执行路径及 owner token。已失效 running 返回 interrupted；taskFailure 与 failedCount 分开。

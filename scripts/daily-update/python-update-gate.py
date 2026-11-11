@@ -58,7 +58,7 @@ def manager_selected(exit_code, text, version):
 
 def dry_run(manager, index, version):
     before = (sha(manager), sha(index))
-    child = runtime.run_hidden([str(manager), 'install', '--source', str(index), '--dry-run', version], timeout=60)
+    child = runtime.run_hidden([str(manager), 'install', '--source', str(index), '--dry-run', '--yes', version], timeout=60)
     ok = before == (sha(manager), sha(index)) and manager_selected(
         child['exit_code'], child['stdout'] + '\n' + child['stderr'], version)
     return {'ok': ok, 'exit_code': child['exit_code'], 'process_status': child['status'],

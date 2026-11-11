@@ -163,11 +163,11 @@ intent: 记录家里设备的受控环境事实与差异
 - 2026-07-24 22:07 的当前验收先发现 `config` 单项 drift，随后通过 reconciler Repair 恢复；首轮 Repair 为 `ok=true`、`changed=true`、`driftCount=0`，证据位于 `D:\agents\run-evidence\host-hook-remediation\20260724T140626.793Z-c015fdca`。第二轮 Repair 为 `changed=false`，最终只读 Check 为 `ok=true`、`changed=false`、`driftCount=0`，8 项检查全部通过。后续操作前仍须重新运行 Check，不能把本条快照当作永久状态。
 - 只有 reconciler 可以修复受管 Serena section 与 hook registration；不得依据历史 evidence 或本文手工重建它们，也不得手工写入 `approval_policy` 或 `sandbox_mode`。若 Repair 结果的 `registrationProjection` 出现 `restartRequired=true`，完整退出并重启 Codex 应用后再做运行时验收。
 
-## 每日 Codex 生态组件更新（2026-10-11）
+## Codex 生态组件更新（2026-11-09）
 
-- 用户要求本机日更由 Codex Desktop 自动化 `codex` 完全接手，状态 `ACTIVE`，每天本地时间 02:00（Asia/Taipei）；ZCode 的 `每日更新` 已从实时数据库删除，历史执行记录保留。
-- Codex 使用当前注册的 `misc` 项目调度；完整提示词要求在 `D:\agents\projects\统一环境` 执行更新并加载该项目规则。Windows 任务 `Cursor Daily Codex Ecosystem Update` 继续保持 Disabled。
-- 调度配置与数据库删除已独立回读；迁移后的实际定时首跑尚未验证。迁移证据：`D:\agents\run-evidence\daily-update-scheduler-migration\20261011-codex-takeover\verification.json`。
+- 用户裁决本机日更由 DeepSeek Harness 计划任务「每周更新」（`schedule-2a8292b0-5876-4d7c-a20a-080f98e18eab`）作为唯一执行面，状态 `active`，每周三、周日本地时间 02:00；Codex Desktop 自动化 `codex` 已由用户手动暂停，live 数据库与 `automation.toml` 均回读为 `PAUSED`。
+- DSH 新会话目标的登记 cwd 为 `D:\agents\projects\misc`；完整提示词要求在 `D:\agents\projects\统一环境` 执行更新并加载该项目规则。ZCode 的 `每日更新` 已从实时数据库删除，Windows 任务 `Cursor Daily Codex Ecosystem Update` 继续保持 Disabled。
+- 2026-11-09 执行面裁决前的阻塞证据：`D:\agents\run-evidence\daily-codex-ecosystem-update\20261109-211825\RESULT.md`；旧 Codex 接管迁移证据：`D:\agents\run-evidence\daily-update-scheduler-migration\20261011-codex-takeover\verification.json`。
 - 调度、证据入口和授权边界以 `D:\Codex\.codex\docs\agent-guidance\host-runbook.md` 的「Daily Codex Ecosystem Update」为准。
 - 结果固定入口：`D:\agents\run-evidence\daily-codex-ecosystem-update\LATEST.md`。
 - PATH 上的 `agent` 是 Grok CLI，禁止当执行器调用。

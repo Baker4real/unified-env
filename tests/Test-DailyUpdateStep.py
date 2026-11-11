@@ -17,7 +17,8 @@ class StepTests(unittest.TestCase):
         pathlib.Path('D:/agents/run-evidence').mkdir(parents=True, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(dir='D:/agents/run-evidence', prefix='step-fixture-')
         self.addCleanup(self.tmp.cleanup)
-        self.root = pathlib.Path(self.tmp.name)
+        self.root = pathlib.Path(self.tmp.name) / '20261110-120000'
+        self.root.mkdir()
 
     def invoke(self, source, **contract):
         spec = dict(command_id='fixture', kind='native', argv=[sys.executable, '-c', source],
@@ -76,6 +77,20 @@ class StepTests(unittest.TestCase):
                                  '--receipt', str(path)], capture_output=True)
         self.assertEqual(result.returncode, 2)
         self.assertEqual(before, path.read_bytes())
+
+    def test_receipt_cannot_target_another_run(self):
+        other = pathlib.Path(self.tmp.name) / '20261109-213128'
+        other.mkdir()
+        marker = other / 'executed.txt'
+        spec = self.root / 'cross-run.json'
+        spec.write_text(json.dumps({'command_id': 'cross-run', 'kind': 'native',
+            'argv': [sys.executable, '-c', f'import pathlib;pathlib.Path({str(marker)!r}).write_text("bad")']}), encoding='utf-8')
+        receipt = other / 'receipt.json'
+        result = subprocess.run([sys.executable, '-B', str(SCRIPT), 'run', '--spec', str(spec),
+                                 '--receipt', str(receipt)], capture_output=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(marker.exists())
+        self.assertFalse(receipt.exists())
 
     def test_timeout_and_type_mismatch_fail_closed(self):
         process, value = self.invoke('import time; time.sleep(3); print(\'{"ok":true}\')', timeout_seconds=1)

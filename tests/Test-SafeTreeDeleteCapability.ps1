@@ -50,6 +50,7 @@ if ($allowed.exitCode -ne 0 -or $allowed.report.status -ne 'ok' -or $allowed.rep
 if ([IO.File]::ReadAllText((Join-Path $current 'check-target.txt')) -ne 'Check|D:\Codex\tmp\retired') { throw 'Check did not receive the normalized target' }
 if ($allowed.report.supportedModes -notcontains 'Check' -or $allowed.report.capabilityRootRequiredByPlan -or $allowed.report.resultFormat -ne 'json') { throw 'Current delete capability was not identified' }
 $cases++
+if ($allowed.report.batchGroupingKey -ne 'policyEntryId' -or $allowed.report.hashText -ne 'lowercase-hex-sha256' -or @($allowed.report.modeContracts.BatchPurge.requiredParameters) -notcontains 'TargetPaths') { throw 'Callable mode contracts and grouping/hash recipe are missing.' }
 $deniedDescendant = Invoke-Capability $currentEntry 'D:/Codex/tmp/denied/child'
 if ($deniedDescendant.exitCode -eq 0 -or $deniedDescendant.report.status -ne 'refused' -or $deniedDescendant.report.allowedByPolicy -ne $false -or $deniedDescendant.report.refusalReason -ne 'denied-path') { throw 'A Check refusal was not passed through' }
 $cases++
@@ -72,6 +73,12 @@ $delegate = Join-Path $fixtureRepo 'scripts/Invoke-CodexSafeTreeDelete.ps1'
 @{ schemaVersion = 4; entries = @(@{ id = 'temp'; capabilityRoot = 'D:/Codex/tmp'; minimumDescendantDepth = 1; rootDeletionPurpose = 'none'; deniedExactPaths = @() }) } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $fixtureRepo 'managed/safe-tree-delete/policy.json') -Encoding utf8
 $delegated = Invoke-Capability (Join-Path (New-Fixture 'shim' "& '$delegate' @args") 'Get-SafeTreeDeleteCapability.ps1') 'D:/Codex/tmp/retired'
 if ($delegated.report.supportedModes -notcontains 'Plan' -or -not $delegated.report.capabilityRootRequiredByPlan -or @($delegated.report.capabilityRootCandidates) -notcontains 'D:\Codex\tmp') { throw 'Shim did not resolve the delegated capability contract' }
+$cases++
+
+# The real entry delegates mode validation to its adjacent library, unlike the legacy fixture.
+$realDelegate=Join-Path $repo 'scripts/Invoke-CodexSafeTreeDelete.ps1'
+$real=Invoke-Capability (Join-Path (New-Fixture 'real-dispatch' "& '$realDelegate' @args") 'Get-SafeTreeDeleteCapability.ps1') 'D:/Codex/tmp/retired'
+if(-not $real.report.capabilityRootRequiredByPlan -or @($real.report.modeContracts.Plan.requiredParameters) -notcontains 'CapabilityRoot'){throw 'Real dispatcher Plan contract must include CapabilityRoot.'}
 $cases++
 
 # 仓库源码目录里没有受管删除：报缺失，不落到别处的线上入口。

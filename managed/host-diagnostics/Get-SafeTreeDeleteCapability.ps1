@@ -54,8 +54,35 @@ if ($modeParameter.Count -eq 1) {
         })
     }
 }
-$report.capabilityRootRequiredByPlan = [regex]::IsMatch($capabilityText, 'Plan[^\r\n]*TargetPath[^\r\n]*CapabilityRoot')
+$contractText=$capabilityText
+# The production entry delegates validation to the shared dispatcher; inspect that
+# adjacent source instead of assuming its parameter declarations are the contract.
+$dispatchSource=Join-Path (Split-Path -Parent $capabilityFull) 'lib/CodexSafeTreeDelete.ps1'
+if($capabilityText -match '\bInvoke-CodexSafeTreeDeleteMode\b' -and (Test-Path -LiteralPath $dispatchSource -PathType Leaf)){
+ $contractText=[IO.File]::ReadAllText($dispatchSource)
+}
+$report.capabilityRootRequiredByPlan = [regex]::IsMatch($contractText, 'Plan[^\r\n]*TargetPath[^\r\n]*CapabilityRoot')
 $report.resultFormat = if ($text -match 'ConvertTo-Json') { 'json' } else { 'powershell-object' }
+# These are caller recipes for the discovered supported modes. They grant no deletion authority;
+# policy/root decisions still come exclusively from the gate's Check.
+$contracts=[ordered]@{}
+$knownContracts=@{
+ Check=@{requiredParameters=@('TargetPath');confirms=@();writesPayload=$false}
+ Plan=@{requiredParameters=@('TargetPath');confirms=@();writesPayload=$false}
+ BatchPurge=@{requiredParameters=@('TargetPaths');confirms=@('ConfirmApply','ConfirmPurge');writesPayload=$true}
+ Apply=@{requiredParameters=@('PlanPath','ApprovedPlanSha256');confirms=@('ConfirmApply');writesPayload=$true}
+ Purge=@{requiredParameters=@('TransactionPath','ApprovedTransactionSha256');confirms=@('ConfirmPurge');writesPayload=$true}
+ Archive=@{requiredParameters=@('TransactionPath','ApprovedTransactionSha256');confirms=@('ConfirmArchive');writesPayload=$false}
+ Restore=@{requiredParameters=@('TransactionPath','ApprovedTransactionSha256');confirms=@('ConfirmRestore');writesPayload=$true}
+ Status=@{requiredParameters=@();confirms=@();writesPayload=$false}
+ Lint=@{requiredParameters=@();confirms=@();writesPayload=$false}
+}
+if($report.capabilityRootRequiredByPlan){$knownContracts.Plan.requiredParameters+=@('CapabilityRoot')}
+foreach($mode in $report.supportedModes){if($knownContracts.ContainsKey($mode)){$contracts[$mode]=$knownContracts[$mode]}}
+$report.modeContracts=$contracts
+$report.batchGroupingKey='policyEntryId'
+$report.listArgumentSeparator='::'
+$report.hashText='lowercase-hex-sha256'
 
 if ($report.supportedModes -contains 'Check') {
     # 子进程没有控制台时按系统代码页输出；先切到 UTF-8 再调用。路径经环境变量传入，不拼进命令。

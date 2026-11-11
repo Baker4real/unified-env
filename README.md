@@ -100,7 +100,7 @@ node .\scripts\Run-ManifestTests.cjs --module skill-supply-chain --list
 node .\scripts\Run-ManifestTests.cjs --module codex-host --profile host-live
 ```
 
-断言真实宿主状态的测试（如 `D:\Documents\Codex` 目录、`D:\Codex\.codex` 已部署的 skills）登记在 `host-live` profile，只在显式选择时运行。CI 的 Python and Node fixtures job 加 `--exclude-host-bound`：用临时 fixture、但要启动本仓库之外宿主脚本的 fixture 测试登记在 `scripts/Run-ManifestTests.cjs` 的 `HOST_BOUND_TESTS` 中并附原因，CI 只报告、不运行；本机不加该参数即全量执行。
+断言真实宿主状态的测试（如 `D:\Documents\Codex` 目录、`D:\Codex\.codex` 已部署的 skills）登记在 `host-live` profile，只在显式选择时运行。CI 的 Python and Node fixtures job 加 `--exclude-host-bound`：整套依赖仓库外宿主脚本的 fixture 测试登记在 `scripts/Run-ManifestTests.cjs` 的 `HOST_BOUND_TESTS` 中并附原因，CI 只报告、不运行；本机不加该参数即全量执行。日更单步收据是混合套件，其中三个独立宿主用例在缺少安装入口时逐项显式 skip，其余用例继续执行；具体边界见 `scripts/daily-update/README.md`。
 
 其余专项入口：
 

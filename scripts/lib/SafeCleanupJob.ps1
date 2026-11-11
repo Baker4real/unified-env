@@ -271,6 +271,77 @@ function Invoke-SafeCleanupJobReconcile {
     } finally { if ($acquired) { $mutex.ReleaseMutex() };$mutex.Dispose() }
 }
 
+function New-SafeCleanupJobSet {
+    # Prepare only. All deletion remains in the existing Run/Worker/gate lifecycle.
+    param([string[]]$TargetPaths, [string]$JobDirectory, [string]$PolicyPath,
+          [string]$TransactionEvidenceRoot, [scriptblock]$GateInvoker)
+    $jobRoot=Assert-CodexHookDPath -Value $JobDirectory -Name 'cleanup job directory'
+    [void](Assert-CodexHookCapabilityPath -Path $jobRoot -CapabilityRoot $jobRoot -AllowedExactPaths @($jobRoot) -Name 'cleanup job root')
+    if (-not [IO.Directory]::Exists($jobRoot) -or @(Get-ChildItem -LiteralPath $jobRoot -Force -ErrorAction Stop).Count -ne 0) { throw 'Preparation requires an empty physical job directory.' }
+    $targets=@(Split-CodexSafeTreeDeleteListArgument -Values $TargetPaths | ForEach-Object {[IO.Path]::GetFullPath($_)} | Sort-Object -Unique)
+    if ($targets.Count -eq 0) { throw 'Explicit nonempty cleanup targets required.' }
+    foreach($target in $targets){
+        if ((Test-CodexHookPathWithin -Path $jobRoot -ParentPath $target) -or (Test-CodexHookPathWithin -Path $target -ParentPath $jobRoot)) { throw 'Job evidence and targets must not overlap.' }
+    }
+    if ($null -eq $GateInvoker) { $GateInvoker={param($arguments) Invoke-SafeCleanupJobGate $arguments} }
+    $check=& $GateInvoker @{Mode='Check';TargetPaths=($targets -join '::')}
+    if (-not $check.allowed -or @($check.results).Count -ne $targets.Count) { throw 'Gate Check did not approve every exact target.' }
+    # Worker scopes support descendants only. Refuse every unsupported exact-root
+    # input before publishing any group, even when the gate permits that root.
+    $unsupported=@($check.results | Where-Object {Test-SafeCleanupJobPathEqual $_.targetPath $_.capabilityRoot})
+    if($unsupported.Count -gt 0){return @{schemaVersion=1;status='preflight-failed';jobs=@();deletionPerformed=$false;needsElevation=$false;failures=@($unsupported | ForEach-Object {@{targetPath=$_.targetPath;reason='worker-requires-descendant'}})}}
+    $plans=@();$failures=@();$seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $policySnapshot=$null
+    $policy=Read-SafeCleanupJobJson $PolicyPath -SnapshotResult ([ref]$policySnapshot)
+    foreach($row in $check.results){
+        if (-not $row.allowed -or [string]::IsNullOrWhiteSpace($row.policyEntryId) -or -not $seen.Add($row.targetPath) -or $row.targetPath -notin $targets) { throw 'Gate Check identity/coverage mismatch.' }
+        try {
+            $planResult=& $GateInvoker @{Mode='Plan';TargetPath=$row.targetPath;CapabilityRoot=$row.capabilityRoot}
+            if (-not $planResult.planned) { throw 'Gate did not publish an approved baseline Plan.' }
+        } catch {
+            $needsElevation=($_.CategoryInfo.Category -eq 'PermissionDenied' -or $_.Exception -is [UnauthorizedAccessException] -or $_.Exception.Data['NeedsElevation'] -eq $true)
+            $failures+=@{targetPath=$row.targetPath;policyEntryId=$row.policyEntryId;needsElevation=$needsElevation;reason=$(if($needsElevation){'access-denied'}else{'plan-unavailable'})}
+            continue
+        }
+        $plan=Read-SafeCleanupJobJson $planResult.planPath $planResult.planSha256
+        if ($plan.policyEntryId -cne $row.policyEntryId -or $plan.policySha256 -cne $policySnapshot.sha256 -or -not (Test-SafeCleanupJobPathEqual $plan.targetPath $row.targetPath)) { throw 'Plan differs from Check or policy snapshot.' }
+        $plans+=@{decision=$row;plan=$plan;planPath=$planResult.planPath;planSha256=$planResult.planSha256}
+    }
+    if($failures.Count -gt 0){return @{schemaVersion=1;status='preflight-failed';jobs=@();deletionPerformed=$false;needsElevation=@($failures | Where-Object needsElevation).Count -gt 0;failures=$failures}}
+    $jobs=@()
+    foreach($group in @($plans | Group-Object {$_.decision.policyEntryId})){
+        $directory=Join-Path $jobRoot (Get-CodexHookBytesSha256 ([Text.Encoding]::UTF8.GetBytes($group.Name)))
+        [void](New-CodexHookCapabilityDirectory -Path $directory -CapabilityRoot $jobRoot -Name 'cleanup prepared group' -RequireMissing)
+        $intentRoot=Join-Path $directory 'intents'
+        [void](New-CodexHookCapabilityDirectory -Path $intentRoot -CapabilityRoot $jobRoot -Name 'cleanup intents' -RequireMissing)
+        $units=@()
+        foreach($record in $group.Group){
+            $planObject=($record.plan | ConvertTo-Json -Depth 100) | ConvertFrom-Json -Depth 100 -DateKind String
+            $units+=@{path=$record.plan.targetPath;status='pending';baseline=@{rootIdentity=$record.plan.treeManifest.rootIdentity;treeManifestSha256=(Get-CodexSafeTreeDeleteManifestSha256 $planObject.treeManifest);bytes=0;byteCountStatus='not-measured'}}
+        }
+        $scopePath=Join-Path $directory 'scope.json';$ledgerPath=Join-Path $directory 'ledger.json'
+        $statePath=Join-Path $directory 'state.json';$jobPath=Join-Path $directory 'job.json'
+        $snapshotPath=Join-Path $directory 'policy-snapshot.json'
+        # Preserve original bytes: historical Plan policy hashes bind this exact snapshot.
+        Set-CodexHookAtomicFileBytesWithCapability -Path $snapshotPath -Bytes $policySnapshot.bytes -ExpectedExists $false -ExpectedSha256 $null -ExpectedIdentity $null -AfterSha256 $policySnapshot.sha256 -CapabilityRoot $directory -AllowedExactPaths @($snapshotPath) -Scope 'cleanup policy snapshot'
+        $snapshotHash=$policySnapshot.sha256
+        Write-SafeCleanupJobJson $scopePath @{capabilityRoot=$group.Group[0].decision.capabilityRoot;units=$units}
+        $scopeHash=(Get-FileHash -LiteralPath $scopePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        Write-SafeCleanupJobJson $ledgerPath @{scopeSha256=$scopeHash;units=$units}
+        Write-SafeCleanupJobJson $statePath @{processState='prepared';pid=0;processStartUtc=[datetimeoffset]::UtcNow.ToString('o');executable=(Get-Process -Id $PID).Path;ownerTokenHash='';updatedAtUtc=[datetimeoffset]::UtcNow.ToString('o');error=''}
+        Write-SafeCleanupJobJson $jobPath @{scopePath=$scopePath;scopeSha256=$scopeHash;ledgerPath=$ledgerPath;statePath=$statePath;intentRoot=$intentRoot;policyPath=$PolicyPath;policySnapshotPath=$snapshotPath;policySnapshotSha256=$snapshotHash;transactionEvidenceRoot=$TransactionEvidenceRoot}
+        # Audit Plans may expire while a queue waits. Execution creates its own fresh
+        # Plan+intent against this immutable baseline; only started transactions resume it.
+        $preparedPlans=@($group.Group | ForEach-Object {@{targetPath=$_.plan.targetPath;planPath=$_.planPath;planSha256=$_.planSha256;expiresAtUtc=$_.plan.expiresAtUtc}})
+        Write-SafeCleanupJobJson (Join-Path $directory 'prepared-plans.json') @{scopeSha256=$scopeHash;plans=$preparedPlans}
+        [void](Read-SafeCleanupJob $jobPath)
+        $jobs+=@{policyEntryId=$group.Name;jobPath=$jobPath;scopeSha256=$scopeHash;targetCount=$units.Count}
+    }
+    $result=@{schemaVersion=1;status='prepared';targetCount=$targets.Count;jobs=$jobs;deletionPerformed=$false;logicalBytesStatus='not-measured'}
+    Write-SafeCleanupJobJson (Join-Path $jobRoot 'job-set.json') $result
+    return $result
+}
+
 function Invoke-SafeCleanupJobGate {
     param([Collections.IDictionary]$Arguments)
     $processInfo=[Diagnostics.ProcessStartInfo]::new('D:/Codex/tools/PowerShell/7.6.5/pwsh.exe')
@@ -288,7 +359,11 @@ function Invoke-SafeCleanupJobGate {
         $stdout=$process.StandardOutput.ReadToEndAsync(); $stderr=$process.StandardError.ReadToEndAsync()
         $process.WaitForExit()
         $output=$stdout.GetAwaiter().GetResult(); $errorText=$stderr.GetAwaiter().GetResult()
-        if ($process.ExitCode -ne 0) { throw "Gate exit $($process.ExitCode): $errorText" }
+        if ($process.ExitCode -ne 0) {
+            $failure=[InvalidOperationException]::new("Gate exit $($process.ExitCode): $errorText")
+            $failure.Data['NeedsElevation']=($errorText -match 'ERROR_ACCESS_DENIED|UnauthorizedAccessException|PermissionDenied')
+            throw $failure
+        }
         return $output | ConvertFrom-Json -AsHashtable -Depth 100 -DateKind String -ErrorAction Stop
     } finally { $process.Dispose() }
 }

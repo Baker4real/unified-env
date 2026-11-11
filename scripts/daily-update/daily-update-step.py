@@ -13,6 +13,9 @@ BASE = pathlib.Path(__file__).resolve().parent
 _loader = importlib.util.spec_from_file_location('daily_runtime', BASE / 'runtime-health.py')
 runtime = importlib.util.module_from_spec(_loader)
 _loader.loader.exec_module(runtime)
+_evidence_loader = importlib.util.spec_from_file_location('daily_evidence_io', BASE / 'evidence_io.py')
+evidence_io = importlib.util.module_from_spec(_evidence_loader)
+_evidence_loader.loader.exec_module(evidence_io)
 EVIDENCE = pathlib.Path('D:/agents/run-evidence')
 CHECKED = 'D:/Codex/.codex/scripts/Invoke-CheckedPowerShell.ps1'
 MISSING = object()
@@ -118,14 +121,30 @@ def execute(spec):
             'stderr_sha256': digest(child['stderr'].encode('utf-8'))}
 
 
+def receipt_run(spec, explicit):
+    if explicit is not None:
+        root = pathlib.Path(explicit)
+    else:
+        resolved = spec.resolve()
+        root = next((parent for parent in resolved.parents if evidence_io.RUN_NAME.fullmatch(parent.name)), None)
+        if root is None:
+            raise ValueError('invalid-run-directory')
+    if not root.is_absolute() or not root.is_relative_to(EVIDENCE):
+        raise ValueError('invalid-run-directory')
+    return evidence_io.RunEvidence(root)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=['run'])
     parser.add_argument('--spec', required=True, type=pathlib.Path)
     parser.add_argument('--receipt', required=True)
+    parser.add_argument('--run-directory', type=pathlib.Path,
+                        help='Current run root; normally inferred from the spec path')
     args = parser.parse_args()
     try:
-        receipt = evidence_path(args.receipt)
+        writer = receipt_run(args.spec, args.run_directory)
+        receipt = writer.output_path(args.receipt)
         # Reserve before execution: a retry cannot overwrite a failed receipt or run twice accidentally.
         with receipt.open('x', encoding='utf-8') as handle:
             started = datetime.datetime.now().astimezone().isoformat()

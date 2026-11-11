@@ -39,6 +39,7 @@ $allowlist = @(
     'Invoke-RemoteStep.ps1','Invoke-RemotePython.ps1','Invoke-UuTerminalCommand.ps1',
     'codex_diagnostics.py','Test-CodexDiagnostics.py',
     'Invoke-RemoteMagpiePortable.ps1','MagpiePortablePayload.ps1','Test-RemoteMagpiePortable.ps1',
+    'Test-LoopbackProxy.ps1',
     'RemoteOperations.psm1','Get-SafeTreeDeleteCapability.ps1','Test-StudyLink.ps1',
     'Get-GitHubReleaseAsset.ps1','Read-StudyUuMarker.ps1',
     'Test-HostDiagnostics.ps1'
