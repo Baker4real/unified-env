@@ -20,6 +20,7 @@ gate shim 把每次调用转发给主工作树的 `scripts/Invoke-CodexSafeTreeD
 ## 权威合同
 
 - 浏览器语言/隐私复测、日志与 Markdown 章节安全投影、PowerShell 预检与 Explorer 恢复：`docs/env-governance/host-diagnostics.md`。源码在 `managed/host-diagnostics/`，部署入口 `scripts/Deploy-HostDiagnostics.ps1` 默认只读核对；设备修复状态留在设备文档或运行证据。
+- 远端 Magpie 便携安装、重复执行与进程验收：`managed/host-diagnostics/RemoteMagpiePortable.md`。
 - 删除语义与生产 policy：`docs/specs/2026-07-24-safe-tree-delete-capability.md`
 - 批量清理状态、崩溃恢复、策略快照与目录身份验收：`docs/specs/2026-10-10-safe-cleanup-job.md`。入口 `scripts/Invoke-SafeCleanupJob.ps1`；状态不扫描全部历史交易。
 - `retired-evidence-root` 独立合同：`docs/specs/2026-09-15-safe-tree-delete-retired-evidence-root.md`。本用途条目只作一次性许可；生产 policy 不得残留（测试钉死）。live tracker 以 GitHub Issues 为准，不在本文缓存。

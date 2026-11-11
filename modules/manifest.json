@@ -351,6 +351,7 @@
         "managed/host-diagnostics/Protect-SensitiveLog.ps1",
         "managed/host-diagnostics/Request-KryptexBenchmarkReset.py",
         "managed/host-diagnostics/Invoke-RemoteStep.ps1",
+        "managed/host-diagnostics/Invoke-RemoteMagpiePortable.ps1",
         "managed/host-diagnostics/Invoke-RemotePython.ps1",
         "managed/host-diagnostics/Invoke-UuTerminalCommand.ps1",
         "managed/host-diagnostics/RemoteOperations.psm1",
@@ -378,6 +379,7 @@
         "files": [
           "docs/handoffs/20260902T164751Z-safe-tree-delete-status-slow-path.md",
           "docs/env-governance/host-diagnostics.md",
+          "tests/Test-RemoteMagpiePortable.ps1",
           "docs/specs/2026-10-10-safe-cleanup-job.md",
           "scripts/Invoke-SafeCleanupJob.ps1",
           "scripts/lib/SafeCleanupJob.ps1",
@@ -544,6 +546,7 @@
           "powershell": [
             "tests/Test-HostDiagnostics.ps1",
             "tests/Test-RemoteStep.ps1",
+            "tests/Test-RemoteMagpiePortable.ps1",
             "tests/Test-RemoteEncoding.ps1",
             "tests/Test-UuTerminalCommand.ps1",
             "tests/Test-SafeTreeDeleteCapability.ps1",
