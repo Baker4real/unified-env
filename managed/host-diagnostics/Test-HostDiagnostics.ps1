@@ -31,6 +31,7 @@ $files = @(
     'Protect-SensitiveLog.ps1','Test-ProtectSensitiveLog.ps1',
     'Request-KryptexBenchmarkReset.py','Test-RequestKryptexBenchmarkReset.py',
     'Invoke-RemoteStep.ps1','Invoke-RemotePython.ps1','Invoke-UuTerminalCommand.ps1',
+    'codex_diagnostics.py','Test-CodexDiagnostics.py',
     'Invoke-RemoteMagpiePortable.ps1','MagpiePortablePayload.ps1','Test-RemoteMagpiePortable.ps1',
     'RemoteOperations.psm1','Get-SafeTreeDeleteCapability.ps1','Test-StudyLink.ps1',
     'Get-GitHubReleaseAsset.ps1','Read-StudyUuMarker.ps1',
@@ -73,7 +74,8 @@ $suiteDefinitions = @(
     @{name='recycle';file='Test-ManagedRecycle.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'recycle'))},
     @{name='console';file='Test-ConsoleLaunchAudit.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'console'))},
     @{name='sensitive-log';file='Test-ProtectSensitiveLog.ps1';args=@()},
-    @{name='benchmark-reset';file='Test-RequestKryptexBenchmarkReset.py';args=@()}
+    @{name='benchmark-reset';file='Test-RequestKryptexBenchmarkReset.py';args=@()},
+    @{name='codex-diagnostics';file='Test-CodexDiagnostics.py';args=@()}
 )
 if ($SkipLiveSnapshot) {
     ($suiteDefinitions | Where-Object name -eq 'explorer').args += '-SkipLiveSnapshot'
@@ -147,6 +149,11 @@ if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
                     )
                     $contractPassed = $parsed.status -eq $expectedStatus -and $parsed.failures -eq 0 -and $livePassed -and
                         $passedChecks -gt 0 -and $passedChecks + $skippedChecks -eq $parsed.cases
+                }
+                'codex-diagnostics' {
+                    $passedChecks = if ($parsed.status -eq 'passed') { $parsed.cases } else { 0 }
+                    $contractPassed = $parsed.status -eq 'passed' -and $parsed.cases -gt 0 -and
+                        $parsed.failures -eq 0 -and $parsed.errors -eq 0 -and $parsed.live_model_touched -eq $false
                 }
                 'explorer' {
                     $passedChecks = @($parsed.Results | Where-Object Status -EQ 'passed').Count

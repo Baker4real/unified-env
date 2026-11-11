@@ -28,7 +28,8 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 | `Protect-SensitiveLog.ps1` | 有界日志投影。剔除启动命令、已知凭据形态和疑似未知高熵秘密（24 位以上的长串）；提到 sha256/diff/height 的行只免于长串这一条，已知凭据形态照样剔除。丢弃行时返回 `read-with-omissions` 和退出 1，原始敏感行不回显。支持 Tail、行数和 UTF-8 字节预算。 |
 | `Request-KryptexBenchmarkReset.py` | `plan` 默认只读校验 schema、设备、算法和矿工；`request` 需 `--approve`，单算法，每次另存一份带时间戳的备份并 integrity_check，再写入回读；`wait` 只接受 `--since-ms` 之后非零 hashrate 的真实读数，同时回报 accepted 计数，不用请求或估算值冒充完成。 |
 | `Invoke-RemoteStep.ps1` | 经同目录的 `Invoke-OfficeRemote.ps1` 执行，以 helper 打印的那行运行摘要（与 `.run.json` 同内容，连接前拒绝时也打印）为业务门禁，不按文件名推算 `.run.json`；`result` 不是 `ok`、目标错配、helper/远端非零退出均失败，拒绝时摘要带 `reason`。业务失败即使进程退出 0 也不能通过，关键序列不得只依赖 shell 的 `&&`。`-WriteOperation` 要求 payload 首条语句断言目标标记，防止在本机误执行远端写操作；`-IncludeOutput` 把远端 stdout 至多 `-MaxOutputChars`（默认 65536）个字符放进摘要，超出时 `outputTruncated=true`。 |
-| `Invoke-RemotePython.ps1` | 统一远端 Python stdin 执行，固定 `-X utf8`，远端 PowerShell 输入/输出均用 UTF-8，复用同目录 RemoteStep 的业务门禁。远端 Python 一律按写操作处理：生成的脚本首条语句断言 `CODEX_REMOTE_EXECUTION_TARGET` 并带 `-WriteOperation`。Python 参数与源文件路径以 Base64 嵌入，不拼进引号。 |
+| `Invoke-RemotePython.ps1` | 统一远端 Python stdin 执行，固定 `-X utf8` 并透传真实 Python 退出码；`-IncludeOutput` 按 `-MaxOutputChars`（默认 6000）回显 stdout。默认解释器为 `D:/Codex/tools/python314-official/python.exe`，现场不同可传 `-PythonExecutable`。生成的脚本首条语句断言目标并经 RemoteStep 的写门禁；源路径、解释器和参数以 Base64 编码，参数不拼进 shell。异常、非零退出与中文 stdout/stderr 的完整链路由 `Test-RemoteEncoding.ps1` 验证。 |
+| `codex_diagnostics.py` | Python 3.11+ 标准库；`snapshot` 只读配置、已注册桌面父子进程、真实后端版本和哈希；`desktop-check` 验收配置加载与当前任务记录；`tool-roundtrip` 发出一次 ephemeral 模型轮次，必须完成附件→工具→随机回执。输出只含白名单字段，失败理由为固定代码，非零退出。 |
 | `Invoke-UuTerminalCommand.ps1`、`Read-StudyUuMarker.ps1` | UU 新建唯一会话；每条命令以退出码 0 结束才写唯一 marker，核对通过才允许下一条。缺少 reader、marker 超时（含命令失败）、传输失败或清理不完整均闭锁；marker 只证明命令成功退出，不证明业务效果。reader 经同目录 RemoteStep 走 SSH 回读，路径、哈希和 runId 以 Base64 嵌入；SSH 不可用时回读失败、序列闭锁。 |
 | `RemoteOperations.psm1` | 提供 UU marker 序列、路径规范化进程停止和链路预检的公共函数；停止前先核对全部同名进程的路径，任何一个不符都不停止。进程已消失可忽略停止竞态，仍存活则失败。 |
 | `Get-SafeTreeDeleteCapability.ps1` | 只读解析同目录 safe-delete 的 Mode AST（shim 委托时读被委托的实现）、CapabilityRoot 需求、结果格式与回收工具可用性。支持 `Check` 时放行与否、CapabilityRoot 和拒绝原因原样取自 `Check`；没有 `Check` 的旧版只列出 root 包含目标的 policy 条目作为 `capabilityRootCandidates`，报 `check-unavailable`。不执行 Plan/Apply/Purge。 |
@@ -36,6 +37,24 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 | `Get-GitHubReleaseAsset.ps1` | 用 `gh api --jq` 只投影指定 release 资产的名称、大小、digest 和 URL，避免整份 release JSON 进入上下文。 |
 
 参数与返回结构以各脚本帮助/源码为准。活动日志不是原子快照；命名模式脱敏不保证发现任意秘密，仍要缩小敏感来源与字段范围。需要复核某条失败时保留来源、行窗口和退出码，不输出完整日志。
+
+## Codex 配置、工具往返与重启验收
+
+```powershell
+python -B D:/Codex/.codex/scripts/codex_diagnostics.py snapshot
+python -B D:/Codex/.codex/scripts/codex_diagnostics.py tool-roundtrip --expected-config-sha256 <本次快照哈希>
+python -B D:/Codex/.codex/scripts/codex_diagnostics.py desktop-check --previous-pid <重启前后端PID> --expected-config-sha256 <本次快照哈希>
+```
+
+`--codex-home` 默认取 `CODEX_HOME` 或当前用户的 `.codex`，`--profile` 可指定 profile。快照绑定当前 provider、模型、配置哈希和后端身份；端点移除认证、query、fragment，不读取认证文件、header 或附加页面正文。自定义供应商的 `login_mode` 默认 `unknown`；Magpie 可显式加 `--magpie-executable D:/Apps/Magpie/magpie.exe`，只读查询 `codex login` 并仅返回 `api` / `companion` / `chatgpt` 枚举，不从 `requires_openai_auth` 猜登录方式。桌面后端只接受当前注册的 `OpenAI.Codex` 应用在交互会话中的子进程，包含内置路径与官方本地缓存路径；没有唯一可核验后端时失败，不猜旧路径。
+
+`tool-roundtrip` 使用快照中的真实程序、provider 和模型启动独立 app-server；不重写 live 配置，也不把旧供应商的临时覆盖带到新路由。只有轮次 completed、恰好一次有效工具调用（含 call ID）、附件参数正确、返回工具生成的随机回执、没有协议错误且前后配置哈希一致时退出 0。未调用工具、错参数、RPC 错误、提前 EOF、超时或配置漂移都退出 1。只创建 ephemeral 线程，诊断工具仅回传内存中的回执。进程启动和 thread/start 都使用临时覆盖关闭 shell、代码执行、多代理、apps、plugins、图像、artifact、hooks、网页搜索及当前配置中各 MCP 入口，不改变供应商或持久配置；其他执行 item 一经出现即失败。该命令会产生模型用量，不进入默认离线回归。
+
+`desktop-check` 不重启、不停止任何桌面进程。它核对旧 PID 已更换、后端启动晚于配置写入、期望配置哈希一致，并只读查询当前后端启动后的 `inProgress` 记录；旧记录另计，不因数周前的陈旧行否定重启。无当前记录不证明恢复中的旧任务空闲，不能据此自动终止进程。未知活动状态和不可信路径保持失败；有明确重启授权时，仍先核对当前实际工作。
+
+`accept --result <结果JSON>` 只判定已记录的业务观察，不等于新做了 live 验收。CLI 退出码与 `ok` 一致；错误对象或结果字段未满足条件不能因“打印成功”而通过。
+
+离线检查为相邻的 `Test-CodexDiagnostics.py`，仓库 adapter `tests/Test-CodexDiagnostics.py` 登记在 host-safety 的 `diagnostics`，也由完整主机诊断入口运行；它使用本地协议 peer，不连接供应商，不操作真实桌面。远端执行优先用 `Invoke-RemotePython.ps1 -PythonScriptPath <本机 codex_diagnostics.py> -PythonArgument @('snapshot') -IncludeOutput`，无需把 Python 嵌进临时 PowerShell here-string。旧 run-evidence 中的一次性探针保留为历史证据，复测统一使用此受管入口。
 
 ## vcpkg 健康检查
 
@@ -152,6 +171,7 @@ Apply 只更新这份闭包，先完成全部备份和源文件暂存，再逐�
 
 ```powershell
 node ./scripts/Run-PowerShellTests.cjs --module host-safety --profile diagnostics
+node ./scripts/Run-ManifestTests.cjs --module host-safety --profile diagnostics --kind python
 node ./tests/Test-ModuleBoundaries.cjs
 git diff --check
 ```

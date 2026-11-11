@@ -14,6 +14,9 @@ param(
     [string[]]$PythonArgument = @(),
     [string]$OutputPath,
     [int]$TimeoutSeconds = 300,
+    [string]$PythonExecutable = 'D:/Codex/tools/python314-official/python.exe',
+    [switch]$IncludeOutput,
+    [ValidateRange(1, 1048576)][int]$MaxOutputChars = 6000,
     [string]$EvidenceRoot = 'D:/agents/run-evidence/remote-python'
 )
 $ErrorActionPreference = 'Stop'
@@ -28,6 +31,7 @@ $remoteScript = Join-Path $runDirectory 'Remote-Python.ps1'
 $stdinScript = Join-Path $runDirectory 'Emit-Python.ps1'
 if (-not $OutputPath) { $OutputPath = Join-Path $runDirectory 'result.out.txt' }
 $argumentBase64 = [Convert]::ToBase64String($utf8.GetBytes((ConvertTo-Json -InputObject @($PythonArgument) -AsArray -Compress)))
+$pythonBase64 = [Convert]::ToBase64String($utf8.GetBytes($PythonExecutable))
 $remoteBody = @'
 if ($env:CODEX_REMOTE_EXECUTION_TARGET -ne '__TARGET__') { throw 'Remote execution context required: __TARGET__' }
 $ErrorActionPreference = 'Stop'
@@ -37,7 +41,8 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $source = [Console]::In.ReadToEnd()
 $additionalArguments = ConvertFrom-Json -InputObject ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ARGUMENTS_BASE64__')))
-$psi = [Diagnostics.ProcessStartInfo]::new('D:/Codex/tools/python314-official/python.exe')
+$pythonExecutable = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PYTHON_BASE64__'))
+$psi = [Diagnostics.ProcessStartInfo]::new($pythonExecutable)
 foreach ($argument in @('-B', '-I', '-X', 'utf8', '-') + @($additionalArguments)) { $psi.ArgumentList.Add([string]$argument) }
 $psi.UseShellExecute = $false
 $psi.CreateNoWindow = $true
@@ -56,7 +61,7 @@ $process.WaitForExit()
 [Console]::Out.Write($stdoutTask.GetAwaiter().GetResult())
 [Console]::Error.Write($stderrTask.GetAwaiter().GetResult())
 exit $process.ExitCode
-'@.Replace('__TARGET__', $Target).Replace('__ARGUMENTS_BASE64__', $argumentBase64)
+'@.Replace('__TARGET__', $Target).Replace('__ARGUMENTS_BASE64__', $argumentBase64).Replace('__PYTHON_BASE64__', $pythonBase64)
 [IO.File]::WriteAllText($remoteScript, $remoteBody, $utf8)
 # 发射脚本在本机由 helper 运行，把 Python 源码写进远端 stdin。
 $sourceBase64 = [Convert]::ToBase64String($utf8.GetBytes($sourcePath))
@@ -69,6 +74,8 @@ $stepArguments = @{
     OutputPath = $OutputPath
     TimeoutSeconds = $TimeoutSeconds
     WriteOperation = $true
+    IncludeOutput = $IncludeOutput
+    MaxOutputChars = $MaxOutputChars
 }
 $global:LASTEXITCODE = 0
 & $stepEntry @stepArguments

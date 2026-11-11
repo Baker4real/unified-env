@@ -353,6 +353,7 @@
         "managed/host-diagnostics/Invoke-RemoteStep.ps1",
         "managed/host-diagnostics/Invoke-RemoteMagpiePortable.ps1",
         "managed/host-diagnostics/Invoke-RemotePython.ps1",
+        "managed/host-diagnostics/codex_diagnostics.py",
         "managed/host-diagnostics/Invoke-UuTerminalCommand.ps1",
         "managed/host-diagnostics/RemoteOperations.psm1",
         "managed/host-diagnostics/Get-SafeTreeDeleteCapability.ps1",
@@ -555,7 +556,7 @@
             "tests/Test-GitHubReleaseAsset.ps1",
             "tests/Test-UuMarkerReader.ps1"
           ],
-          "python": [],
+          "python": ["tests/Test-CodexDiagnostics.py"],
           "node": []
         },
         "fixture": {

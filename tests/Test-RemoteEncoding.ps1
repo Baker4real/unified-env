@@ -86,4 +86,54 @@ $localStderr = $process.StandardError.ReadToEndAsync()
 if (-not $process.WaitForExit(15000)) { $process.Kill($true); throw 'Local remote-script run timed out' }
 if ($process.ExitCode -eq 0 -or $localStderr.GetAwaiter().GetResult() -notmatch 'Remote execution context required: study') { throw 'Generated remote script ran locally without the target marker' }
 $cases++
+# 真正执行生成的 Python wrapper；不把 helper 的固定成功摘要当作退出码证明。
+@'
+param([string]$Target, [string]$ScriptPath, [string]$OutputPath, [string]$StdinScript, [int]$TimeoutSeconds, [switch]$RequireRemoteContext)
+$utf8 = [Text.UTF8Encoding]::new($false)
+$psi = [Diagnostics.ProcessStartInfo]::new((Join-Path $PSHOME 'pwsh.exe'))
+foreach ($arg in @('-NoProfile','-NonInteractive','-File',$ScriptPath)) { $psi.ArgumentList.Add($arg) }
+$psi.UseShellExecute = $false
+$psi.RedirectStandardInput = $true
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
+$psi.StandardInputEncoding = $utf8
+$psi.StandardOutputEncoding = $utf8
+$psi.StandardErrorEncoding = $utf8
+$psi.Environment['CODEX_REMOTE_EXECUTION_TARGET'] = $Target
+$proc = [Diagnostics.Process]::Start($psi)
+$outTask = $proc.StandardOutput.ReadToEndAsync()
+$errTask = $proc.StandardError.ReadToEndAsync()
+$proc.StandardInput.Write((& $StdinScript | Out-String))
+$proc.StandardInput.Close()
+if (-not $proc.WaitForExit(15000)) { $proc.Kill($true); throw 'Python fixture timed out' }
+[IO.File]::WriteAllText($OutputPath, $outTask.GetAwaiter().GetResult(), $utf8)
+[IO.File]::WriteAllText("$OutputPath.err", $errTask.GetAwaiter().GetResult(), $utf8)
+[ordered]@{result=$(if ($proc.ExitCode -eq 0) {'ok'} else {'failed'});target=$Target;exitCode=$proc.ExitCode;stdout=$OutputPath;stderr="$OutputPath.err"} | ConvertTo-Json -Compress
+exit $proc.ExitCode
+'@ | Set-Content -LiteralPath (Join-Path $fixture 'Invoke-OfficeRemote.ps1') -Encoding utf8
+$pythonExe = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+foreach ($failure in @('success','exit7','exception')) {
+    $source = "import sys`nprint('中文 🧪')`n"
+    if ($failure -eq 'exit7') { $source += "print('错误信号', file=sys.stderr)`nsys.exit(7)`n" }
+    if ($failure -eq 'exception') { $source += "raise RuntimeError('fixture failure')`n" }
+    [IO.File]::WriteAllText($pythonScript, $source, $utf8)
+    $outer = [Diagnostics.ProcessStartInfo]::new((Join-Path $PSHOME 'pwsh.exe'))
+    foreach ($arg in @('-NoProfile','-NonInteractive','-File',(Join-Path $fixture 'Invoke-RemotePython.ps1'),'-Target','study','-PythonScriptPath',$pythonScript,'-PythonExecutable',$pythonExe,'-EvidenceRoot',$evidence,'-IncludeOutput')) { $outer.ArgumentList.Add($arg) }
+    $outer.UseShellExecute = $false; $outer.RedirectStandardOutput = $true; $outer.RedirectStandardError = $true
+    $outer.StandardOutputEncoding = $utf8; $outer.StandardErrorEncoding = $utf8
+    $proc = [Diagnostics.Process]::Start($outer)
+    $outTask = $proc.StandardOutput.ReadToEndAsync(); $errTask = $proc.StandardError.ReadToEndAsync()
+    if (-not $proc.WaitForExit(20000)) { $proc.Kill($true); throw 'Remote Python caller timed out' }
+    $text = $outTask.GetAwaiter().GetResult(); $errorText = $errTask.GetAwaiter().GetResult()
+    if (-not $text.Trim()) { throw "No business summary for $failure : $errorText" }
+    $result = $text | ConvertFrom-Json
+    $expectedCode = switch ($failure) { 'success' {0} 'exit7' {7} 'exception' {1} }
+    if ($result.exitCode -ne $expectedCode -or (($proc.ExitCode -eq 0) -ne ($expectedCode -eq 0))) { throw "Python exit was swallowed for $failure" }
+    if (($result.status -eq 'ok') -ne ($failure -eq 'success')) { throw "Wrong summary status for $failure" }
+    if ($result.output.Replace("`r`n", "`n") -cne "中文 🧪`n") { throw "UTF-8 stdout damaged for $failure" }
+    $nativeError = [IO.File]::ReadAllText("$($result.outputPath).err", $utf8)
+    if ($failure -eq 'exit7' -and $nativeError -notmatch '错误信号') { throw 'UTF-8 stderr damaged' }
+    if ($failure -eq 'exception' -and $nativeError -notmatch 'RuntimeError: fixture failure') { throw 'Python exception was lost' }
+    $cases++
+}
 [ordered]@{ status = 'passed'; evidence = $evidence; cases = $cases } | ConvertTo-Json -Compress

@@ -81,17 +81,21 @@ $sourceRoot = Split-Path -Parent $entry
 $check = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-EvidenceRoot',$deployEvidence)
 $checkReport = $check.stdout | ConvertFrom-Json -ErrorAction Stop
 Assert-True ($check.exitCode -eq 1 -and $checkReport.mode -eq 'Check' -and $checkReport.status -eq 'drift') 'Default Check must expose drift without applying it.'
-Assert-True ($checkReport.files.Count -eq 42 -and $checkReport.changedFiles -eq 42) 'Check must compare every allowlisted file.'
+$bundleCount = $checkReport.files.Count
+Assert-True ($bundleCount -ge 44 -and $checkReport.changedFiles -eq $bundleCount) 'Check must compare every allowlisted file.'
+foreach ($required in @('Invoke-RemotePython.ps1','codex_diagnostics.py','Test-CodexDiagnostics.py','Test-HostDiagnostics.ps1')) {
+    Assert-True (@($checkReport.files | Where-Object relative -eq $required).Count -eq 1) "Missing or duplicate diagnostic closure member: $required"
+}
 Assert-True (-not (Test-Path -LiteralPath $deployEvidence)) 'Check must not create an evidence directory.'
 Assert-True ((Get-FileHash -LiteralPath $previousFile -Algorithm SHA256).Hash -eq $previousHash -and (Get-ChildItem -LiteralPath $targetRoot -Recurse -File).Count -eq 2) 'Check must leave the target tree unchanged.'
 
 $apply = Invoke-PublicScript $deployEntry @('-Mode','Apply','-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-EvidenceRoot',$deployEvidence)
 $applyReport = $apply.stdout | ConvertFrom-Json -ErrorAction Stop
-Assert-True ($apply.exitCode -eq 0 -and $applyReport.status -eq 'deployed' -and $applyReport.writtenFiles -eq 42) 'Apply must publish the complete allowlist.'
+Assert-True ($apply.exitCode -eq 0 -and $applyReport.status -eq 'deployed' -and $applyReport.writtenFiles -eq $bundleCount) 'Apply must publish the complete allowlist.'
 $replaced = @($applyReport.files | Where-Object relative -eq 'Read-BoundedProjection.ps1')[0]
 Assert-True ((Get-FileHash -LiteralPath $replaced.backupPath -Algorithm SHA256).Hash -eq $previousHash) 'Apply must retain the original file as a verified backup.'
 Assert-True ((Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash -eq $sentinelHash) 'Apply must not modify files outside the allowlist.'
-Assert-True ((Get-ChildItem -LiteralPath $targetRoot -Recurse -File).Count -eq 43) 'Apply must not publish undeclared files.'
+Assert-True ((Get-ChildItem -LiteralPath $targetRoot -Recurse -File).Count -eq ($bundleCount + 1)) 'Apply must not publish undeclared files.'
 Assert-True (Test-Path -LiteralPath (Join-Path $applyReport.evidenceDirectory 'manifest.json') -PathType Leaf) 'Apply must save its deployment evidence.'
 $after = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot)
 $afterReport = $after.stdout | ConvertFrom-Json -ErrorAction Stop
@@ -144,8 +148,8 @@ if ($result.exitCode -ne 0) { throw (Format-DiagnosticsFailure $result) }
 Assert-True ([string]::IsNullOrWhiteSpace($result.stderr)) 'Managed host diagnostics wrote unexpected stderr.'
 $report = $result.stdout | ConvertFrom-Json -ErrorAction Stop
 Assert-True ($report.status -eq 'passed-with-skips') 'CI must report its live snapshot omission explicitly.'
-Assert-True ($report.syntaxChecks -eq 42) 'The complete 42-file bundle must pass syntax checks.'
-Assert-True ($report.suites.Count -eq 13) 'All thirteen managed diagnostic suites must run.'
+Assert-True ($report.syntaxChecks -eq $bundleCount) 'The complete deployed bundle must pass syntax checks.'
+Assert-True ($report.suites.Count -ge 14 -and @($report.suites | Where-Object name -eq 'codex-diagnostics').Count -eq 1) 'All managed diagnostic suites, including Codex, must run.'
 Assert-True (@($report.suites | Where-Object { $_.status -notin @('passed','passed-with-skips') }).Count -eq 0) 'A diagnostic suite failed.'
 $explorerSuite = @($report.suites | Where-Object name -eq 'explorer')[0]
 $explorer = Get-Content -LiteralPath $explorerSuite.evidence -Raw | ConvertFrom-Json -ErrorAction Stop
