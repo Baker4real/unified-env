@@ -547,21 +547,17 @@ try {
     Assert-True `
         ($productionRetiredEvidenceEntries.Count -eq 0) `
         '完成退役证据删除后，生产策略不得残留 retired-evidence-root 授权'
+    $retiredCCSwitchEntries = @($productionPolicy.entries | Where-Object {
+        $_.id -in @('cc-switch-rust-target', 'cc-switch-node-modules')
+    })
+    Assert-True `
+        ($retiredCCSwitchEntries.Count -eq 0) `
+        'CC Switch 已退役，生产策略不得保留其专用构建输出授权'
     $linkAwareProductionExpectations = @(
         [pscustomobject]@{
             id = 'codex-account-switch-rust-target'
             root = 'D:\Codex\projects\codex-account-switch\src-tauri\target'
             junctions = $false
-        },
-        [pscustomobject]@{
-            id = 'cc-switch-rust-target'
-            root = 'D:\agents\projects\cc-switch\src-tauri\target'
-            junctions = $false
-        },
-        [pscustomobject]@{
-            id = 'cc-switch-node-modules'
-            root = 'D:\agents\projects\cc-switch\node_modules'
-            junctions = $true
         },
         [pscustomobject]@{
             id = 'serena-python-venv'
