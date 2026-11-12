@@ -40,6 +40,8 @@ intent: 说明 Agent 探索统一环境项目时的领域文档读取顺序
 
 如果需要的概念还没有进入 `CONTEXT.md`，说明可能存在词汇缺口；可以在后续领域建模时补充。
 
+本仓库没有可被 `glossary_hits.py` 解析的术语表：根和各模块的 `CONTEXT.md` 写的是 scope 与接口，没有 `**术语**:` 词条，传给 `--glossary` 会以 exit 2 报 `no glossary entry found`（2026-11-11 六份全部如此）。`to-spec`、`to-tickets` 的术语核对在本仓库跳过，并在汇报里写明。补了符合格式的 `GLOSSARY.md` 后删掉本段。
+
 ## 标出文档冲突
 
 本项目当前没有独立 ADR 目录。如果输出内容与 `CONTEXT.md` 或现有项目规则冲突，需要明确说明冲突点，而不是静默覆盖已有决策。
