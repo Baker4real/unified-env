@@ -76,10 +76,10 @@ A committed path keeps its mode in HEAD, and a new one is a regular file
 ``--file-from`` must also name, as 100755 instead (a new hook script, say).
 
 A pre-commit hook that checks the whole work tree still sees other sessions'
-unstaged edits and untracked files.  The knowledge base's hook runs
-``scripts/check.py --staged``, which requires the work tree to equal the index,
-so there a partial commit fails until those edits are committed or included;
-that repository has one owner commit every finished ingest together.
+unstaged edits and untracked files.  The knowledge base's hook instead checks
+only the staged content.  Use its ``scripts/kb_stage.py`` with selected record
+files to stage those records, their owned changes and the derived index;
+unrelated work-tree changes stay uncommitted and do not block that commit.
 """
 
 from __future__ import annotations
