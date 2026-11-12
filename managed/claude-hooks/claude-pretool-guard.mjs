@@ -40,12 +40,14 @@
 //      the output, and exit drops object output not rendered yet together with everything printed after it, with no
 //      error, although every statement ran. A closing $global:LASTEXITCODE = 0 clears the failure flag without that
 //      loss. A quoted -Command payload, an exit inside braces and the Terminal panel pass.
+//  18. Write and Edit tool calls whose file_path resolves into the active skills root; relative paths use the
+//      session cwd and realpath follows skills-root junctions. Guarded installs run through the shell instead.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
 // Any internal error allows the command: the registration keeps onFailure=continue, so a broken guard
 // never locks the shell.
-import { readFileSync, statSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { win32 } from 'node:path'
 
 const MANAGED_DELETE = 'D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1'
@@ -549,6 +551,25 @@ function trailingExitReason() {
     `（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 21 条）`
 }
 
+// Rule 18. Write and Edit tool calls that target the active skills root must go through the guarded install entry.
+const SKILLS_ROOT = 'D:\\agents\\skills-manager\\skills'
+
+function skillsRootWriteReason(tool, payload) {
+  const filePath = String(payload?.tool_input?.file_path || '')
+  if (!filePath) return null
+  const absolute = win32.resolve(String(payload?.cwd || ''), filePath)
+  let resolved = absolute
+  try { resolved = realpathSync(absolute) } catch {
+    // A new write target does not exist yet; its parent still resolves a skills-root junction.
+    try { resolved = win32.join(realpathSync(win32.dirname(absolute)), win32.basename(absolute)) } catch {}
+  }
+  const normalized = resolved.replace(/\//g, '\\')
+  if (!normalized.toLowerCase().startsWith(SKILLS_ROOT.toLowerCase() + '\\')) return null
+  return `${tool} 要直接改现役 skills 根（${SKILLS_ROOT}）。skill 的安装、更新和重写只能走受管入口 ` +
+    'D:\\Codex\\.codex\\scripts\\install-skill-guarded.cmd（先 --dry-run 再 apply）。' +
+    '请先在候选目录里改好，再用受管入口安装。'
+}
+
 // Rule 15. The Grep and Glob tools stop ripgrep after 20 seconds and then report a timeout or "No files found", so a
 // walk of D:\agents\projects (every project's node_modules, .venv and build output) fails as the rule 12 roots do.
 // PowerShell rg has no such limit, which is why rule 12 lets it walk D:\agents\projects. The search root is
@@ -808,6 +829,8 @@ function deny(reason) {
 export function evaluate(payload, io = defaultIo) {
   const tool = String(payload?.tool_name || '')
   if (tool === 'Grep' || tool === 'Glob') return searchToolReason(tool, payload)
+  // Rule 18: direct writes to the active skills root must go through the guarded install entry.
+  if (tool === 'Write' || tool === 'Edit') return skillsRootWriteReason(tool, payload)
   const command = String(payload?.tool_input?.command || '')
   const terminal = tool === TERMINAL_TOOL
   if (!command || (tool !== 'PowerShell' && tool !== 'Bash' && !terminal)) return null
@@ -1167,7 +1190,14 @@ if (process.argv.includes('--self-test')) {
     ['Grep', { pattern: 'foo', cwd: 'D:\\agents\\projects' }, true],
     ['Grep', { pattern: 'foo', path: 'D:\\agents\\projects\\misc' }, false],
     ['Glob', { pattern: '*magpie*', path: 'D:\\agents\\run-evidence\\sn580' }, false],
-    ['Glob', { pattern: '*magpie*' }, false]
+    ['Glob', { pattern: '*magpie*' }, false],
+    // Write and Edit must use the guarded install entry for the active skills root, including junction aliases.
+    ['Write', { file_path: 'D:\\agents\\skills-manager\\skills\\retro\\SKILL.md' }, true],
+    ['Edit', { file_path: 'D:/agents/skills-manager/skills/retro/SKILL.md' }, true],
+    ['Write', { file_path: 'D:\\Codex\\.codex\\skills\\retro\\new-file.tmp' }, true],
+    ['Edit', { file_path: 'skills\\retro\\SKILL.md', cwd: 'D:\\agents\\skills-manager' }, true],
+    ['Write', { file_path: 'D:\\agents\\skills-manager\\skills-backup\\SKILL.md' }, false],
+    ['Edit', { file_path: 'D:\\agents\\run-evidence\\outside.md' }, false]
   ]
   const scripts = new Map(Object.entries({
     'D:\\repo\\tools\\recycle.ps1': 'Add-Type -TypeDefinition $src\n[Native]::SHFileOperationW([ref]$op)',

@@ -65,6 +65,8 @@ Assert-Equal $LASTEXITCODE 0 "guard --self-test 必须成功：$selfTest"
 
 # 回收站 API 名拆开拼接：本文件经 pwsh -File 运行时，guard 会扫描它的内容。
 $denyCases = @(
+    @{ tool_name = 'Write'; tool_input = @{ file_path = 'D:\agents\skills-manager\skills\retro\SKILL.md' } },
+    @{ tool_name = 'Edit'; tool_input = @{ file_path = 'D:\Codex\.codex\skills\retro\SKILL.md' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Remove-Item -Recurse -Force D:\tmp\x' } },
     @{ tool_name = 'Bash'; tool_input = @{ command = 'rm -rf node_modules' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'gh issue view 1 --json number,title' } },
@@ -323,9 +325,15 @@ Assert-Equal $pushGarbage.stdout.Trim() '' 'push guard 遇到非 JSON 输入必�
 
 $managed = Get-Content -LiteralPath $managedHooksPath -Raw | ConvertFrom-Json
 $registration = @($managed.PreToolUse)
-Assert-Equal $registration.Count 2 '受管注册含两条 PreToolUse：shell 命令一条，Grep/Glob 一条。'
-Assert-Equal $registration[1].matcher 'Grep|Glob' '第二条 PreToolUse 的 matcher 必须是 Grep|Glob。'
-$searchHooks = @($registration[1].hooks)
+Assert-Equal $registration.Count 3 '受管注册含三条 PreToolUse：shell、Write/Edit、Grep/Glob 各一条。'
+Assert-Equal $registration[1].matcher 'Write|Edit' '第二条 PreToolUse 的 matcher 必须是 Write|Edit。'
+$writeHooks = @($registration[1].hooks)
+Assert-Equal $writeHooks.Count 1 'Write|Edit 只挂 guard 一个 hook。'
+Assert-Equal $writeHooks[0].command $node 'Write|Edit 的 guard 必须用受管 node 的 exec 形式。'
+Assert-Equal @($writeHooks[0].args)[0] (Join-Path $registeredRoot 'claude-pretool-guard.mjs') 'Write|Edit 的 hook 参数必须指向受管 guard。'
+Assert-Equal $writeHooks[0].onFailure 'continue' 'Write|Edit 的 guard 自身故障也必须放行（onFailure=continue）。'
+Assert-Equal $registration[2].matcher 'Grep|Glob' '第三条 PreToolUse 的 matcher 必须是 Grep|Glob。'
+$searchHooks = @($registration[2].hooks)
 Assert-Equal $searchHooks.Count 1 'Grep|Glob 只挂 guard 一个 hook。'
 Assert-Equal $searchHooks[0].command $node 'Grep|Glob 的 guard 必须用受管 node 的 exec 形式。'
 Assert-Equal @($searchHooks[0].args)[0] (Join-Path $registeredRoot 'claude-pretool-guard.mjs') 'Grep|Glob 的 hook 参数必须指向受管 guard。'

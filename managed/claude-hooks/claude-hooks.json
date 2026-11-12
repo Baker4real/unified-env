@@ -38,6 +38,20 @@
       ]
     },
     {
+      "matcher": "Write|Edit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "D:\\Codex\\tools\\bin\\node.exe",
+          "args": [
+            "D:\\agents\\projects\\统一环境\\managed\\claude-hooks\\claude-pretool-guard.mjs"
+          ],
+          "timeout": 10,
+          "onFailure": "continue"
+        }
+      ]
+    },
+    {
       "matcher": "Grep|Glob",
       "hooks": [
         {
