@@ -147,6 +147,15 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 核对扫描是否到达：除了列接收目录，还要看 `D:\$Recycle.Bin\<SID>\` 的 `$I` 记录（原路径与删除时间）和 Administrator「最近使用」里的 `SKM_*.pdf.lnk`。10-27 的测试件 08:36:58 收到，现场 08:37:08 打开，08:37:24 连同两个三月的旧 PDF 一起删进了回收站；只看目录会误报“没收到”。
 - 本机以太网地址由 DHCP 分配。复印机若按 IP 记着这台电脑，地址一变扫描就送不到；路由器上的 DHCP 保留尚未做（as of 2026-10-27）。
 
+## Magpie 与 DeepSeek Harness
+
+2026-11-13 从家里经正式 SSH 安装并验收，证据在家里 `D:\agents\run-evidence\office-dsh-magpie-image-20261113\`。
+
+- Magpie 是便携版，在 `D:\Apps\Magpie`，网关 `http://127.0.0.1:3425`。远端安装与更新走受管入口，说明见 [RemoteMagpiePortable.md](../../managed/host-diagnostics/RemoteMagpiePortable.md)，历次运行证据在家里 `D:\agents\run-evidence\remote-magpie-portable\`。
+- DeepSeek Harness 0.2.2-rc.2 静默装在 `D:\Apps\DeepSeek Harness`（`/S /D=`），卸载项、桌面与开始菜单快捷方式都指向这里。desktop profile 的 pnpm `storeDir` 是 `D:/Codex/.codex/cache/pnpm-store`。默认模型经 `magpie dsh` 设为 `magpie/ai/gpt-6-astra`。
+- DSH 插件是 `dsh-gpt-image-playground@0.2.8` 和本地 bundle `dsh-gpt-image-playground-magpie`。后者在 `D:\agents\projects\dsh-plugins\` 下，是 zip 快照而不是 Git 检出，来源记在同目录的 `OFFICE-SNAPSHOT.json`；源码改了怎样重新部署见该项目 `AGENTS.md`。
+- DSH 的 GUI 要跑在 Administrator 的交互会话里，从家里拉起见 `ssh-mesh.md`「远端脚本的写法」里的受管入口。
+
 ## 远端操作边界
 
 - 正式远端操作使用严格 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。办公室 Tailscale 控制面依赖本机 v2rayN 的 10808，见上一节。该机没装 tailcat（2026-10-27 查 PATH 与常见目录均无），文件传输按 `ssh-mesh.md` 走 SCP 回退。
@@ -169,4 +178,5 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 02:00/03:00 两个维护任务在新启动方式下的首次定时运行（任务动作、LastRunTime、LastTaskResult 与两个 `*-last.json`）：2026-10-23 09:41 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-console-hidden-20261022\first-run-check-20261023.md`。
 - 复印机扫描接收（FTP Utility 安装与接收目录、启动项、监听、FTP 读写、回收站与「最近使用」记录）、桌面迁移位置：2026-10-26 17:59 处置，10-27 00:19、09:32 与 11:42 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-printer-diag\20261026\`、`20261027\` 与 `D:\agents\run-evidence\retro-office-printer-20261027\probe-closeout.out.txt`。
 - 受管删除工具部署（快照、受管回收与主机诊断脚本、safe-tree-delete gate shim 与 Check）、两份小文件的受管回收与旧证据根目录数：2026-10-27 12:42–12:53 从家里经正式 SSH 部署并回读。证据在家里 `D:\agents\run-evidence\office-delete-tooling-20261027\`；办公室侧回执是上面的部署 run 里的 `final-receipt.json`、`D:\agents\run-evidence\host-diagnostics-deployment\deploy-20261027T044843Z-e98cbf6f84cc4609a7f5d32ec251aca3\` 与 `D:\agents\run-evidence\managed-recycle\20261027T045128Z-ea2854f3\result.json`。
+- Magpie 位置与网关、DeepSeek Harness 的安装目录与版本、profile storeDir、默认模型和两个插件：2026-11-13 08:35–09:01 从家里经正式 SSH 安装并回读。证据在家里 `D:\agents\run-evidence\office-dsh-magpie-image-20261113\`（`step2-install`、`step4-magpie-connect`、`step5b-plugins`、`probe-3-final` 等的 `.out.txt`）。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
