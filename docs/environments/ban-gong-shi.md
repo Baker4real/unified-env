@@ -78,6 +78,7 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 计划任务 `Codex Office v2rayN Autostart`：Highest + Interactive，启动 `D:\v2rayN-windows-64\v2rayN.exe`。进程不退出时 `LastTaskResult=267009`（`SCHED_S_TASK_RUNNING`）表示任务仍在跑，不是失败。维护脚本都经它重启 v2rayN。
 - 2026-10-19 23:17 经 socks `10808`：google HTTP 204；`api.openai.com/v1/models` 未带 key 时返回 401，说明可达，且没有出现地区拒绝。
 - v2rayN 日志里成组出现的 `open connection to <本机以太网 IP>:443 using outbound/direct ... actively refused` 是无害噪声。2026-10-20 抓到的来源是腾讯视频的 `hardwarecheck.exe`：它经 10808 的 SOCKS 去连本机自己的以太网 IP（DHCP 分配，会变）的 443 端口，本机没有监听，所以被拒。它自己走 SOCKS，不受系统代理的局域网例外约束。不用为此改路由；嫌吵就关掉腾讯视频的后台服务。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261020-local-ip-443-refused\`。
+- 2026-11-13 只读回读，激活条目已不是上面的 OpenAI 组：20:35 的 IndexId 是 `office-auto-lowest-latency`（即上面的 `办公室 - 自动最低延迟`）。18:21 在跑的核心是 xray（`bin\xray\xray.exe run -c config.json`，16:05:22 启动），没有 sing-box 进程；入站只有 `127.0.0.1:10808`（mixed），10813 的 Clash API 不在，下面排障表里看 10813 的做法只适用于 sing-box 核心。不直连的流量走 `proxy-balancer`：leastPing，58 个 `proxy-*` 出站，每 3 分钟用 `www.google.com/generate_204` 测速。内核日志没开（`LogEnabled=False`，loglevel warning，不写文件），事后查不到某条连接走了哪个节点。证据在家里 `D:\agents\run-evidence\office-dsh-image-eof-20261113\`（`probe-2`、`probe-3`、`probe-4` 的 `.out.txt`）。
 
 ### v2rayN 定时维护（2026-10-19 起）
 
@@ -157,6 +158,7 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - DSH 的 GUI 要跑在 Administrator 的交互会话里，从家里拉起见 `ssh-mesh.md`「远端脚本的写法」里的受管入口。
 - Magpie 登录自启：2026-11-13 16:26 用 `magpie autostart on` 开启，写在 Administrator 的 HKCU Run：`magpie = "D:\Apps\Magpie\magpie.exe" tray`，登录时只开托盘。此前没配任何自启（Run 键、启动文件夹和计划任务里都没有）：当天 11:49–11:57 Windows 更新关机又重启后 Magpie 没起来，16:00 生图工作台的任务一提交就失败，路由回 502 `connect ECONNREFUSED 127.0.0.1:3425`。16:25 从家里拉起后，网关和生图路由的 `/v1/models` 都回 200（没有真实出图）。下次登录能否自启尚未实测。排查方法见知识库「DeepSeek Harness 生图工作台接入 Magpie」的「现象：任务卡 00:00 就显示失败」。
 - Magpie 自更新原地替换 `D:\Apps\Magpie\magpie.exe`，旧版留作 `magpie.exe.old`。11-13 10:46 换成 0.1.3967 后，旧进程 0.1.3610 没有重启进新版，一直跑到 11:49 关机（原因没查）。所以 `magpie --version` 报的是磁盘上 exe 的版本，正在跑的版本看 `D:\Apps\Magpie\data\logs\app.log` 最后一条 `started` 行。
+- 机器级 `HTTP(S)_PROXY` 指向 10808（FailSafe 任务写入，见上文），Magpie 访问幻灵应当按它走 v2rayN（推断：家里 Magpie 的同类报错里直接出现本地代理端口；办公室没抓到在用的连接）。2026-11-13 18:06 生图工作台一次改图请求等了 57 秒后连接断开，卡片显示 `Post "https://ai.huanling.icu/images/edits": unexpected EOF`，18:08 重试成功。断在代理还是幻灵一侧没定下来，排查方法见知识库「DeepSeek Harness 生图工作台接入 Magpie」的「现象：等了几十秒后报 unexpected EOF」。
 
 ## 远端操作边界
 
@@ -182,4 +184,5 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 受管删除工具部署（快照、受管回收与主机诊断脚本、safe-tree-delete gate shim 与 Check）、两份小文件的受管回收与旧证据根目录数：2026-10-27 12:42–12:53 从家里经正式 SSH 部署并回读。证据在家里 `D:\agents\run-evidence\office-delete-tooling-20261027\`；办公室侧回执是上面的部署 run 里的 `final-receipt.json`、`D:\agents\run-evidence\host-diagnostics-deployment\deploy-20261027T044843Z-e98cbf6f84cc4609a7f5d32ec251aca3\` 与 `D:\agents\run-evidence\managed-recycle\20261027T045128Z-ea2854f3\result.json`。
 - Magpie 位置与网关、DeepSeek Harness 的安装目录与版本、profile storeDir、默认模型和两个插件：2026-11-13 08:35–09:01 从家里经正式 SSH 安装并回读。证据在家里 `D:\agents\run-evidence\office-dsh-magpie-image-20261113\`（`step2-install`、`step4-magpie-connect`、`step5b-plugins`、`probe-3-final` 等的 `.out.txt`）。
 - Magpie 没自启的排查与处置（`magpie.exe` 进程与 3425 监听、`magpie usage`、`app.log`、11:49–11:57 的关机与重启事件、`magpie autostart` 与 HKCU Run、16:25 拉起后网关与路由的 `/v1/models`）：2026-11-13 16:08–16:27 从家里经正式 SSH 回读并处置。证据在家里 `D:\agents\run-evidence\office-dsh-image-fail-20261113\`。
+- 生图 `unexpected EOF` 那次的 Magpie 日志与用量、机器级 `HTTP(S)_PROXY`、v2rayN 激活条目与在跑的核心、均衡器与内核日志开关：2026-11-13 18:14–18:24 与 20:35 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-dsh-image-eof-20261113\`（`probe-1` 到 `probe-4`、`usage-stats` 的 `.out.txt`）。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
