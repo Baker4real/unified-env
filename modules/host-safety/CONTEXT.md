@@ -20,6 +20,7 @@ gate shim 把每次调用转发给主工作树的 `scripts/Invoke-CodexSafeTreeD
 ## 权威合同
 
 - 浏览器语言/隐私复测、日志与 Markdown 章节安全投影、PowerShell 预检与 Explorer 恢复：`docs/env-governance/host-diagnostics.md`。源码在 `managed/host-diagnostics/`，部署入口 `scripts/Deploy-HostDiagnostics.ps1` 默认只读核对；设备修复状态留在设备文档或运行证据。
+- 窗口观察令牌、Windows 原生输入失效停止与 ASAR 有界检索：`docs/env-governance/gui-session.md`；该入口从本仓库导入，源码和测试由本模块拥有。
 - 远端 Magpie 便携安装、重复执行与进程验收：`managed/host-diagnostics/RemoteMagpiePortable.md`。
 - 删除语义与生产 policy：`docs/specs/2026-07-24-safe-tree-delete-capability.md`
 - 批量清理状态、崩溃恢复、策略快照与目录身份验收：`docs/specs/2026-10-10-safe-cleanup-job.md`。新任务先经 `scripts/New-SafeCleanupJob.ps1` 按 gate Check 分组并保存基线，再用 `scripts/Invoke-SafeCleanupJob.ps1` 执行/恢复；状态不扫描全部历史交易。

@@ -342,6 +342,10 @@
         "managed/host-diagnostics/Read-SessionDocument.ps1",
         "managed/host-diagnostics/Get-GitHubPublicationTarget.ps1",
         "managed/host-diagnostics/screenshot-geometry.mjs",
+        "managed/host-diagnostics/gui-session.mjs",
+        "managed/host-diagnostics/native-gui.mjs",
+        "managed/host-diagnostics/asar_extract.py",
+        "managed/host-diagnostics/wechat-console-filter.mjs",
         "managed/host-diagnostics/Invoke-CheckedPowerShell.ps1",
         "managed/host-diagnostics/BrowserPrivacyProbe.py",
         "managed/host-diagnostics/Get-NvidiaDownloadStatus.ps1",
@@ -388,6 +392,7 @@
         "files": [
           "docs/handoffs/20260902T164751Z-safe-tree-delete-status-slow-path.md",
           "docs/env-governance/host-diagnostics.md",
+          "docs/env-governance/gui-session.md",
           "tests/Test-RemoteMagpiePortable.ps1",
           "docs/specs/2026-10-10-safe-cleanup-job.md",
           "scripts/Invoke-SafeCleanupJob.ps1",
@@ -569,8 +574,8 @@
             "tests/Test-GitHubReleaseAsset.ps1",
             "tests/Test-UuMarkerReader.ps1"
           ],
-          "python": ["tests/Test-CodexDiagnostics.py"],
-          "node": []
+          "python": ["tests/Test-CodexDiagnostics.py", "managed/host-diagnostics/native-gui.test.py", "managed/host-diagnostics/test_asar_extract.py"],
+          "node": ["managed/host-diagnostics/gui-session.test.mjs"]
         },
         "fixture": {
           "powershell": [
@@ -629,8 +634,8 @@
             "tests/Test-CodexSafeTreeDeleteFixtureCmdLauncher.ps1",
             "tests/Test-CodexSafeTreeDeletePurgePreflightLockRefusal.ps1"
           ],
-          "python": [],
-          "node": []
+          "python": ["managed/host-diagnostics/native-gui.test.py", "managed/host-diagnostics/test_asar_extract.py"],
+          "node": ["managed/host-diagnostics/gui-session.test.mjs"]
         },
         "fixture-base": {
           "powershell": [
