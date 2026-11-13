@@ -155,6 +155,8 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - DeepSeek Harness 0.2.2-rc.2 静默装在 `D:\Apps\DeepSeek Harness`（`/S /D=`），卸载项、桌面与开始菜单快捷方式都指向这里。desktop profile 的 pnpm `storeDir` 是 `D:/Codex/.codex/cache/pnpm-store`。默认模型经 `magpie dsh` 设为 `magpie/ai/gpt-6-astra`。
 - DSH 插件是 `dsh-gpt-image-playground@0.2.8` 和本地 bundle `dsh-gpt-image-playground-magpie`。后者在 `D:\agents\projects\dsh-plugins\` 下，是 zip 快照而不是 Git 检出，来源记在同目录的 `OFFICE-SNAPSHOT.json`；源码改了怎样重新部署见该项目 `AGENTS.md`。
 - DSH 的 GUI 要跑在 Administrator 的交互会话里，从家里拉起见 `ssh-mesh.md`「远端脚本的写法」里的受管入口。
+- Magpie 登录自启：2026-11-13 16:26 用 `magpie autostart on` 开启，写在 Administrator 的 HKCU Run：`magpie = "D:\Apps\Magpie\magpie.exe" tray`，登录时只开托盘。此前没配任何自启（Run 键、启动文件夹和计划任务里都没有）：当天 11:49–11:57 Windows 更新关机又重启后 Magpie 没起来，16:00 生图工作台的任务一提交就失败，路由回 502 `connect ECONNREFUSED 127.0.0.1:3425`。16:25 从家里拉起后，网关和生图路由的 `/v1/models` 都回 200（没有真实出图）。下次登录能否自启尚未实测。排查方法见知识库「DeepSeek Harness 生图工作台接入 Magpie」的「现象：任务卡 00:00 就显示失败」。
+- Magpie 自更新原地替换 `D:\Apps\Magpie\magpie.exe`，旧版留作 `magpie.exe.old`。11-13 10:46 换成 0.1.3967 后，旧进程 0.1.3610 没有重启进新版，一直跑到 11:49 关机（原因没查）。所以 `magpie --version` 报的是磁盘上 exe 的版本，正在跑的版本看 `D:\Apps\Magpie\data\logs\app.log` 最后一条 `started` 行。
 
 ## 远端操作边界
 
@@ -179,4 +181,5 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 - 复印机扫描接收（FTP Utility 安装与接收目录、启动项、监听、FTP 读写、回收站与「最近使用」记录）、桌面迁移位置：2026-10-26 17:59 处置，10-27 00:19、09:32 与 11:42 从家里经正式 SSH 只读回读。证据在家里 `D:\agents\run-evidence\office-printer-diag\20261026\`、`20261027\` 与 `D:\agents\run-evidence\retro-office-printer-20261027\probe-closeout.out.txt`。
 - 受管删除工具部署（快照、受管回收与主机诊断脚本、safe-tree-delete gate shim 与 Check）、两份小文件的受管回收与旧证据根目录数：2026-10-27 12:42–12:53 从家里经正式 SSH 部署并回读。证据在家里 `D:\agents\run-evidence\office-delete-tooling-20261027\`；办公室侧回执是上面的部署 run 里的 `final-receipt.json`、`D:\agents\run-evidence\host-diagnostics-deployment\deploy-20261027T044843Z-e98cbf6f84cc4609a7f5d32ec251aca3\` 与 `D:\agents\run-evidence\managed-recycle\20261027T045128Z-ea2854f3\result.json`。
 - Magpie 位置与网关、DeepSeek Harness 的安装目录与版本、profile storeDir、默认模型和两个插件：2026-11-13 08:35–09:01 从家里经正式 SSH 安装并回读。证据在家里 `D:\agents\run-evidence\office-dsh-magpie-image-20261113\`（`step2-install`、`step4-magpie-connect`、`step5b-plugins`、`probe-3-final` 等的 `.out.txt`）。
+- Magpie 没自启的排查与处置（`magpie.exe` 进程与 3425 监听、`magpie usage`、`app.log`、11:49–11:57 的关机与重启事件、`magpie autostart` 与 HKCU Run、16:25 拉起后网关与路由的 `/v1/models`）：2026-11-13 16:08–16:27 从家里经正式 SSH 回读并处置。证据在家里 `D:\agents\run-evidence\office-dsh-image-fail-20261113\`。
 - 设备页是快照。服务、进程、监听和激活节点操作前仍须实时复核。
