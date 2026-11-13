@@ -11,6 +11,7 @@ The ForTest parameters replace only their corresponding collectors with explicit
 param(
     [string]$AppxPackagesForTest,
     [string]$LxssEntriesForTest,
+    [string]$FeatureStatesForTest,
     [switch]$ForceFeatureFallbackForTest
 )
 $ErrorActionPreference = 'Stop'
@@ -54,6 +55,7 @@ $result['wslAppx'] = @(
         Select-Object Name, Version, PackageFullName, InstallLocation, Status
 )
 
+$featureStates = if ($FeatureStatesForTest) { @(Read-JsonArray $FeatureStatesForTest) } else { $null }
 $featureNames = @(
     'Microsoft-Windows-Subsystem-Linux',
     'VirtualMachinePlatform',
@@ -80,7 +82,12 @@ $result['windowsFeatures'] = @(
         }
         if ($null -eq $featureResult) {
             try {
-                $feature = Get-CimInstance Win32_OptionalFeature -Filter "Name='$featureName'" -ErrorAction Stop
+                $feature = if ($null -ne $featureStates) {
+                    @($featureStates | Where-Object Name -EQ $featureName)[0]
+                }
+                else {
+                    Get-CimInstance Win32_OptionalFeature -Filter "Name='$featureName'" -ErrorAction Stop
+                }
                 if ($null -eq $feature) { throw "Feature is absent from Win32_OptionalFeature: $featureName" }
                 $state = switch ([int]$feature.InstallState) {
                     1 { 'Enabled' }

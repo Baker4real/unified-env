@@ -55,6 +55,13 @@ $lxssPath = Join-Path $runRoot 'lxss.json'
     [pscustomobject]@{DistributionName='Ubuntu';BasePath='D:/WSL/Ubuntu';Version=2;State=1;Flags=15}
 )), $utf8)
 $fixtureArguments = @('-AppxPackagesForTest',$appxPath,'-LxssEntriesForTest',$lxssPath)
+$featurePath = Join-Path $runRoot 'features.json'
+[IO.File]::WriteAllText($featurePath, (ConvertTo-Json -Depth 5 -InputObject @(
+    [pscustomobject]@{Name='Microsoft-Windows-Subsystem-Linux';InstallState=2},
+    [pscustomobject]@{Name='VirtualMachinePlatform';InstallState=2},
+    [pscustomobject]@{Name='Microsoft-Hyper-V-All';InstallState=1},
+    [pscustomobject]@{Name='Containers-DisposableClientVM';InstallState=2}
+)), $utf8)
 
 Check 'metadata-key-is-not-a-distribution-and-wsl-package-is-related' {
     $report = Get-Report (Invoke-State $fixtureArguments)
@@ -68,7 +75,7 @@ Check 'metadata-key-is-not-a-distribution-and-wsl-package-is-related' {
 }
 
 Check 'feature-fallback-uses-cim-without-elevation' {
-    $report = Get-Report (Invoke-State ($fixtureArguments + @('-ForceFeatureFallbackForTest')))
+    $report = Get-Report (Invoke-State ($fixtureArguments + @('-FeatureStatesForTest',$featurePath,'-ForceFeatureFallbackForTest')))
     $features = @($report.windowsFeatures)
     Assert ($features.Count -eq 4) ('feature-count-' + $features.Count)
     Assert (@($features | Where-Object Source -NE 'Win32_OptionalFeature').Count -eq 0) 'feature-fallback-source-missing'
