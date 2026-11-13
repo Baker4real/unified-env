@@ -9,6 +9,9 @@ param(
     [Parameter(ParameterSetName = 'Paths')][switch]$HttpLog,
     # Exact, case-sensitive ATX heading title; includes descendants and excludes fenced headings.
     [Parameter(ParameterSetName = 'Paths')][ValidateNotNullOrEmpty()][string]$MarkdownSection,
+    [Parameter(Mandatory, ParameterSetName = 'GitStatus')][string]$GitRepository,
+    [Parameter(Mandatory, ParameterSetName = 'GitStatus')][string]$GitStatusEvidencePath,
+    [Parameter(ParameterSetName = 'GitStatus')][string[]]$GitStatusPath = @(),
     [ValidateRange(512, 30000)][int]$MaxTotalBytes = 6000
 )
 
@@ -98,7 +101,79 @@ function Get-HttpDiagnostic([string]$Line, [int]$Limit) {
     return $null
 }
 
+function Write-GitStatusProjection {
+    param([string]$Repository, [string]$EvidencePath, [string[]]$ScopePaths, [int]$Budget)
+    $repositoryPath = (Get-Item -LiteralPath $Repository -ErrorAction Stop).FullName
+    $evidenceFullPath = [IO.Path]::GetFullPath($EvidencePath)
+    if (-not $evidenceFullPath.StartsWith('D:\agents\run-evidence\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Git status evidence must be under D:/agents/run-evidence.'
+    }
+    $evidenceParent = [IO.Path]::GetDirectoryName($evidenceFullPath)
+    $null = New-Item -ItemType Directory -Path $evidenceParent -Force
+
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
+    $start.FileName = 'git'
+    foreach ($argument in @('-c', 'core.quotePath=false', '-C', $repositoryPath, 'status', '--porcelain=v1', '-uall', '--branch')) {
+        $start.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::Start($start)
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+    if ($exitCode -ne 0) { throw "Git status failed with exit $exitCode and $($stderr.Length) stderr bytes." }
+
+    [IO.File]::WriteAllText($evidenceFullPath, $stdout, [Text.UTF8Encoding]::new($false))
+    $lines = @($stdout -split '\r?\n' | Where-Object { $_.Length -gt 0 })
+    $branchLine = [string]($lines | Where-Object { $_.StartsWith('## ') } | Select-Object -First 1)
+    $changes = @($lines | Where-Object { -not $_.StartsWith('## ') -and $_.Length -ge 3 })
+    $staged = @($changes | Where-Object { ($_[0]) -ne ' ' -and ($_[0]) -ne '?' }).Count
+    $unstaged = @($changes | Where-Object { ($_[1]) -ne ' ' -and ($_[1]) -ne '?' }).Count
+    $untracked = @($changes | Where-Object { $_.StartsWith('?? ') }).Count
+    $normalizedScopes = @($ScopePaths | ForEach-Object { $_.Replace('\', '/').TrimEnd('/') } | Where-Object { $_.Length -gt 0 })
+    $matched = [System.Collections.Generic.List[object]]::new()
+    foreach ($line in $changes) {
+        $pathText = $line.Substring(3)
+        $isMatched = $false
+        foreach ($scope in $normalizedScopes) {
+            foreach ($candidate in $pathText.Split(@(' -> '), [StringSplitOptions]::None)) {
+                if ($candidate.Equals($scope, [StringComparison]::OrdinalIgnoreCase) -or
+                    $candidate.StartsWith($scope + '/', [StringComparison]::OrdinalIgnoreCase)) { $isMatched = $true }
+            }
+        }
+        if ($isMatched) { $matched.Add([ordered]@{ text = (Limit-Value $line 300) }) }
+    }
+
+    $result = [ordered]@{
+        schemaVersion = 1; mode = 'git-status'; repository = $repositoryPath; branch = $branchLine
+        changeCount = $changes.Count; stagedCount = $staged; unstagedCount = $unstaged; untrackedCount = $untracked
+        evidencePath = $evidenceFullPath; evidenceSha256 = (Get-FileHash -LiteralPath $evidenceFullPath).Hash
+        scopePaths = $normalizedScopes; matchedRows = $matched.Count; emittedRows = 0; omittedRows = $matched.Count
+        rows = [System.Collections.Generic.List[object]]::new()
+    }
+    $json = ConvertTo-Json -InputObject $result -Depth 8 -Compress
+    if ([Text.Encoding]::UTF8.GetByteCount($json) + 2 -gt $Budget) { throw 'Git status metadata exceeds output budget.' }
+    foreach ($row in $matched) {
+        $result.rows.Add($row); $result.emittedRows++; $result.omittedRows--
+        $candidateJson = ConvertTo-Json -InputObject $result -Depth 8 -Compress
+        if ([Text.Encoding]::UTF8.GetByteCount($candidateJson) + 2 -le $Budget) { $json = $candidateJson }
+        else { $result.rows.RemoveAt($result.rows.Count - 1); $result.emittedRows--; $result.omittedRows++ }
+    }
+    Write-Output $json
+}
+
 try {
+    if ($PSCmdlet.ParameterSetName -eq 'GitStatus') {
+        Write-GitStatusProjection $GitRepository $GitStatusEvidencePath $GitStatusPath $MaxTotalBytes
+        exit 0
+    }
     if ($PSCmdlet.ParameterSetName -eq 'Paths') {
         if ($HttpLog -and $PSBoundParameters.ContainsKey('MarkdownSection')) { throw 'Incompatible projection formats.' }
         $spec = @{ sources = @(foreach ($sourcePath in $LiteralPath) {

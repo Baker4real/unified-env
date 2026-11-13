@@ -423,6 +423,42 @@ foreach ($strictFormat in @('text', 'jsonl')) {
 }
 $checks.Add(@{ name = 'http-log-partial-encoding-with-strict-text-jsonl'; status = 'pass'; outputBytes = [Text.Encoding]::UTF8.GetByteCount($encoding.json) + 2; budget = 1600 })
 
+# Git status keeps the complete porcelain stream in evidence and returns only a bounded scope projection.
+$gitRoot = Join-Path $runRoot 'git-status-repo'
+$null = New-Item -ItemType Directory -Path $gitRoot
+& git init -q -b main $gitRoot
+& git -C $gitRoot config user.name Test
+& git -C $gitRoot config user.email test@example.invalid
+@('target.txt', 'other.txt') | ForEach-Object { 'base' | Set-Content -LiteralPath (Join-Path $gitRoot $_) -Encoding utf8 }
+& git -C $gitRoot add -- target.txt other.txt
+& git -C $gitRoot commit -q -m base
+'changed' | Set-Content -LiteralPath (Join-Path $gitRoot 'target.txt') -Encoding utf8
+'staged' | Set-Content -LiteralPath (Join-Path $gitRoot 'staged.txt') -Encoding utf8
+& git -C $gitRoot add -- staged.txt
+$manyRoot = Join-Path $gitRoot 'many'
+$null = New-Item -ItemType Directory -Path $manyRoot
+1..80 | ForEach-Object { 'untracked' | Set-Content -LiteralPath (Join-Path $manyRoot ('file-' + $_ + '.txt')) -Encoding utf8 }
+$gitStatusDriver = Join-Path $runRoot 'git-status.ps1'
+@'
+param($Tool, $Repository, $Evidence)
+$ErrorActionPreference = 'Stop'
+& $Tool -GitRepository $Repository -GitStatusEvidencePath $Evidence -GitStatusPath @('target.txt', 'many') -MaxTotalBytes 1800
+exit $LASTEXITCODE
+'@ | Set-Content -LiteralPath $gitStatusDriver -Encoding utf8
+$gitStatusEvidence = Join-Path $runRoot 'git-status-full.txt'
+$gitStatusOutput = @(& $pwsh -NoProfile -NonInteractive -File $gitStatusDriver $script $gitRoot $gitStatusEvidence)
+$gitStatusCode = $LASTEXITCODE
+$gitStatusJson = $gitStatusOutput -join [Environment]::NewLine
+$gitStatusJson | Set-Content -LiteralPath (Join-Path $runRoot 'git-status.result.json') -Encoding utf8
+$gitStatus = $gitStatusJson | ConvertFrom-Json -AsHashtable
+$gitStatusFull = Get-Content -LiteralPath $gitStatusEvidence -Encoding utf8
+if ($gitStatusCode -ne 0 -or [Text.Encoding]::UTF8.GetByteCount($gitStatusJson) + 2 -gt 1800 -or
+    $gitStatus.changeCount -ne 82 -or $gitStatus.stagedCount -ne 1 -or $gitStatus.unstagedCount -ne 1 -or
+    $gitStatus.untrackedCount -ne 80 -or $gitStatus.matchedRows -ne 81 -or $gitStatus.omittedRows -lt 1 -or
+    $gitStatus.rows[0].text -notmatch 'target\.txt' -or $gitStatus.evidenceSha256 -ne (Get-FileHash -LiteralPath $gitStatusEvidence).Hash -or
+    $gitStatusFull.Count -ne 83 -or -not ($gitStatusFull -match 'many/file-80\.txt')) { throw 'Git status evidence or bounded scope projection failed.' }
+$checks.Add(@{ name = 'git-status-full-evidence-bounded-scope'; status = 'pass'; outputBytes = [Text.Encoding]::UTF8.GetByteCount($gitStatusJson) + 2; budget = 1800 })
+
 $afterHashes = @((Get-FileHash -LiteralPath $textPath).Hash, (Get-FileHash -LiteralPath $jsonlPath).Hash)
 if (Compare-Object $beforeHashes $afterHashes) { throw 'Source changed during projection.' }
 foreach ($sourcePath in $sourceHashes.Keys) {

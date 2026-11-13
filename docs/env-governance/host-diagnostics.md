@@ -41,6 +41,16 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 
 参数与返回结构以各脚本帮助/源码为准。活动日志不是原子快照；命名模式脱敏不保证发现任意秘密，仍要缩小敏感来源与字段范围。需要复核某条失败时保留来源、行窗口和退出码，不输出完整日志。
 
+## Git 状态有界投影
+
+共享工作树不要直接把完整 `git status` 回显进上下文。用同一投影器的 `GitStatus` 参数集，把完整 porcelain 写入 `D:/agents/run-evidence/`，只读回分支、计数和本次目标路径：
+
+```powershell
+& 'D:/Codex/.codex/scripts/Read-BoundedProjection.ps1' -GitRepository 'D:/agents/skills-manager/skills' -GitStatusEvidencePath 'D:/agents/run-evidence/<本次运行>/skills-status.txt' -GitStatusPath @('handoff', 'neat-freak') -MaxTotalBytes 6000
+```
+
+`matchedRows = emittedRows + omittedRows`；超出整份 UTF-8 字节预算的行只计入 `omittedRows`，需要时缩小 `GitStatusPath` 后重查。证据文件路径和 SHA-256 随结果返回。该快照不证明工作树干净，也不替代目标 diff 与测试。
+
 ## Codex 配置、工具往返与重启验收
 
 ```powershell
