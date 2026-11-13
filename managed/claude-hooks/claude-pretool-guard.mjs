@@ -15,7 +15,8 @@
 //   8. under Claude Desktop (CLAUDE_CODE_ENTRYPOINT starts with claude-desktop), HKCU writes and deletes, inline or
 //      inside a .ps1/.psm1 the command runs: MSIX copy-on-write sends them to the package's private layer, so the
 //      command succeeds and the same shell reads the change back while the real registry stays unchanged.
-//      The -ScriptPath script of Invoke-OfficeRemote.ps1 runs on the remote PC over SSH and is not checked.
+//      The -ScriptPath script of Invoke-OfficeRemote.ps1 or Invoke-RemoteStep.ps1 runs on the remote PC over SSH and
+//      is not checked.
 //   9. PowerShell `rg` path arguments containing * or ?: PowerShell passes wildcards to native commands verbatim,
 //      so rg gets a literal path and fails (os error 123 on Windows);
 //  10. PowerShell -like / -notlike patterns starting with ??: ? is a one-character wildcard, so '??*' matches every
@@ -269,7 +270,8 @@ function hkcuReason(where) {
 }
 
 // Invoke-OfficeRemote.ps1 sends its -ScriptPath script to the office or study PC over SSH; HKCU there is the real hive.
-const REMOTE_RUNNER = /\binvoke-officeremote\.ps1\b/i
+// Invoke-RemoteStep.ps1 only accepts -Target office|study and hands its -ScriptPath script to Invoke-OfficeRemote.ps1.
+const REMOTE_RUNNER = /\binvoke-(?:officeremote|remotestep)\.ps1\b/i
 const REMOTE_SCRIPT_ARG = /-ScriptPath\s+(?:'([^'\r\n]+)'|"([^"\r\n]+)"|([^\s'"`;|&(){}<>]+))/gi
 
 function remoteScripts(command, cwd) {
@@ -283,7 +285,7 @@ function isDesktop(io) {
 }
 
 // Returns a reason from reasonFor when the command, or a script it runs locally, matches the test; the -ScriptPath
-// script of Invoke-OfficeRemote.ps1 runs on the remote PC and is skipped.
+// script of a REMOTE_RUNNER runs on the remote PC and is skipped.
 function localTextDecision(command, cwd, io, test, reasonFor) {
   if (test(command)) return reasonFor('')
   const remote = remoteScripts(command, cwd)
@@ -347,8 +349,8 @@ function explorerReason(where) {
     `（要 PowerShell 7.5+，Apply 先核对身份、窗口和固定项）；只看现状用 Get-TaskbarSnapshot.ps1。说明见 ${GUIDANCE}\\host-runbook\\host-diagnostics.md。${TEXT_ONLY_HINT}`
 }
 
-// Returns a deny reason when the command, or a script it runs (Invoke-OfficeRemote.ps1 -ScriptPath included: Explorer
-// on the remote PC is just as live), stops Explorer by name.
+// Returns a deny reason when the command, or a script it runs (a REMOTE_RUNNER -ScriptPath included: Explorer on the
+// remote PC is just as live), stops Explorer by name.
 function explorerDecision(command, cwd, io) {
   if (killsExplorer(command)) return explorerReason('')
   for (const script of referencedScripts(command, cwd, io)) {
@@ -1073,6 +1075,9 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "& 'D:/Codex/.codex/scripts/Invoke-OfficeRemote.ps1' -Target study -ScriptPath D:/repo/tools/docker_off.ps1 -TimeoutSeconds 120", false, desktop],
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\harmless.ps1'; pwsh -File 'D:\\repo\\tools\\docker_off.ps1'", true, desktop],
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\recycle.ps1'", true],
+    // Invoke-RemoteStep.ps1 hands -ScriptPath to Invoke-OfficeRemote.ps1, so the same split applies.
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-RemoteStep.ps1' -Target office -ScriptPath 'D:\\repo\\tools\\docker_off.ps1' -WriteOperation -IncludeOutput", false, desktop],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-RemoteStep.ps1' -Target study -ScriptPath 'D:\\repo\\tools\\recycle.ps1' -WriteOperation", true],
     ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false, { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
     ['PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", false],
     // Only scripts the command runs are read; naming one to hash, copy, search, parse, assign or quote it is text.
@@ -1113,6 +1118,7 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', 'robocopy D:\\a D:\\b /S /E', false, desktop],
     ['PowerShell', 'findstr /S /I setup *.txt', false, desktop],
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\install.ps1'", false, desktop],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-RemoteStep.ps1' -Target office -ScriptPath 'D:\\repo\\tools\\install.ps1' -WriteOperation -IncludeOutput", false, desktop],
     ['PowerShell', "& 'D:\\x\\Grok_Bot_0.77.0_Setup.exe' /S", false, { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
     // rg walks of whole roots take minutes; narrower paths, --max-depth and unresolvable variables pass.
     ['PowerShell', "rg -l -i -F 'NetEase.UURemote' D:/agents D:/Codex/.codex/docs", true],
@@ -1138,6 +1144,7 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | Invoke-CimMethod -MethodName Terminate", true],
     ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\restart-explorer.ps1'", true],
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -ScriptPath 'D:\\repo\\tools\\restart-explorer.ps1'", true],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-RemoteStep.ps1' -Target office -ScriptPath 'D:\\repo\\tools\\restart-explorer.ps1' -WriteOperation", true],
     ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Restart-ExplorerShell.ps1' -Mode Apply -PlanPath 'D:\\agents\\run-evidence\\taskbar-plan.json'", false],
     ['PowerShell', "Start-Process explorer.exe 'D:\\x'", false],
     ['PowerShell', 'Get-Process explorer | Select-Object Id, StartTime', false],
