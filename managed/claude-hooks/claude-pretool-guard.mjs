@@ -43,6 +43,9 @@
 //      loss. A quoted -Command payload, an exit inside braces and the Terminal panel pass.
 //  18. Write and Edit tool calls whose file_path resolves into the active skills root; relative paths use the
 //      session cwd and realpath follows skills-root junctions. Guarded installs run through the shell instead.
+//  19. PowerShell -and, -or and -xor mixed inside one statement at one bracket depth: they share one precedence and
+//      bind left to right, so `A -and B -or C -and D` runs as `((A -and B) -or C) -and D` and returns a wrong result
+//      without an error. Quoted strings, here-strings and comments are text; a bracket starts a new depth.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
@@ -553,6 +556,111 @@ function trailingExitReason() {
     `（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 21 条）`
 }
 
+// Rule 19. PowerShell's -and, -or and -xor share one precedence and bind left to right (2026-11-13: a Where-Object
+// filter for two CI watchers written as `A -and B -or C -and D` matched only one, and the wait reported both done).
+// Two different ones inside one statement at one bracket depth need parentheses. Strings, here-strings, "$(...)"
+// and comments are skipped as text; ; | && || and line breaks end a statement, so a condition broken across lines
+// inside parentheses is not checked.
+const LOGICAL_WORD = /^-(and|or|xor)(?![\w-])/i
+const SINGLE_QUOTES = new Set(["'", '‘', '’', '‚', '‛'])
+const DOUBLE_QUOTES = new Set(['"', '“', '”', '„'])
+const CLOSER_OF = { '(': ')', '{': '}', '[': ']' }
+
+// Index just past the `)` that closes the `$(` at s[i], strings inside skipped.
+function skipSubexpressionText(s, i) {
+  let depth = 0
+  for (let j = i + 1; j < s.length; j++) {
+    const end = skipQuotedText(s, j)
+    if (end !== j) { j = end - 1; continue }
+    if (s[j] === '`') { j++; continue }
+    if (s[j] === '(') depth++
+    else if (s[j] === ')' && --depth === 0) return j + 1
+  }
+  return s.length
+}
+
+// Index just past the string or here-string that starts at s[i]; the end of a comment's line; i when neither starts.
+function skipQuotedText(s, i) {
+  const c = s[i]
+  if (c === '@' && (SINGLE_QUOTES.has(s[i + 1]) || DOUBLE_QUOTES.has(s[i + 1]))) {
+    const open = /^[ \t]*\r?\n/.exec(s.slice(i + 2))
+    if (open) {
+      const body = i + 2 + open[0].length
+      const close = (SINGLE_QUOTES.has(s[i + 1]) ? /\n['‘’‚‛]@/ : /\n["“”„]@/).exec(s.slice(body))
+      return close ? body + close.index + close[0].length : s.length
+    }
+  }
+  if (SINGLE_QUOTES.has(c)) {
+    for (let j = i + 1; j < s.length; j++) {
+      if (!SINGLE_QUOTES.has(s[j])) continue
+      if (SINGLE_QUOTES.has(s[j + 1])) { j++; continue }
+      return j + 1
+    }
+    return s.length
+  }
+  if (DOUBLE_QUOTES.has(c)) {
+    for (let j = i + 1; j < s.length; j++) {
+      if (s[j] === '`') { j++; continue }
+      if (s[j] === '$' && s[j + 1] === '(') { j = skipSubexpressionText(s, j) - 1; continue }
+      if (!DOUBLE_QUOTES.has(s[j])) continue
+      if (DOUBLE_QUOTES.has(s[j + 1])) { j++; continue }
+      return j + 1
+    }
+    return s.length
+  }
+  if (c === '<' && s[i + 1] === '#') {
+    const end = s.indexOf('#>', i + 2)
+    return end < 0 ? s.length : end + 2
+  }
+  if (c === '#' && (i === 0 || /[\s;|&(){}]/.test(s[i - 1]))) {
+    const end = s.indexOf('\n', i)
+    return end < 0 ? s.length : end
+  }
+  return i
+}
+
+// The statement in which two different logical operators meet at one depth, shortened; null when there is none.
+export function mixedLogicalOperators(command) {
+  const s = String(command)
+  const frames = [{ closer: null, seen: null, start: 0 }]
+  for (let i = 0; i < s.length;) {
+    const end = skipQuotedText(s, i)
+    if (end !== i) { i = end; continue }
+    const c = s[i]
+    const frame = frames[frames.length - 1]
+    if (c === '`') { i += 2; continue }
+    if (CLOSER_OF[c]) { frames.push({ closer: CLOSER_OF[c], seen: null, start: i + 1 }); i++; continue }
+    if (c === frame.closer) { frames.pop(); i++; continue }
+    const pair = s.slice(i, i + 2)
+    if (c === ';' || c === '\n' || c === '|' || pair === '&&') {
+      const width = pair === '&&' || pair === '||' ? 2 : 1
+      frame.seen = null
+      frame.start = i + width
+      i += width
+      continue
+    }
+    const word = c === '-' && (i === 0 || /[\s(){}[\];|,]/.test(s[i - 1])) ? LOGICAL_WORD.exec(s.slice(i, i + 6)) : null
+    if (word) {
+      const operator = word[1].toLowerCase()
+      if (frame.seen && frame.seen !== operator) {
+        const text = s.slice(frame.start, i + word[0].length + 40).replace(/\s+/g, ' ').trim()
+        return text.length > 160 ? `${text.slice(0, 160)}…` : text
+      }
+      frame.seen = operator
+      i += word[0].length
+      continue
+    }
+    i++
+  }
+  return null
+}
+
+function mixedLogicalReason(statement) {
+  return 'PowerShell 的 -and、-or、-xor 优先级相同、从左到右结合：A -and B -or C -and D 实际按 ((A -and B) -or C) -and D 求值，' +
+    '不报错，只给错结果（2026-11-13 一条按命令行找两个 CI watcher PID 的 Where-Object 这样写，只匹配到一个，等待却报告两个都结束了）。' +
+    `同一条语句、同一层括号里混用时给每组加括号，如 (A -and B) -or (C -and D)。命中的语句：${statement}。` + TEXT_ONLY_HINT
+}
+
 // Rule 18. Write and Edit tool calls that target the active skills root must go through the guarded install entry.
 const SKILLS_ROOT = 'D:\\agents\\skills-manager\\skills'
 
@@ -884,6 +992,8 @@ export function evaluate(payload, io = defaultIo) {
     }
     const bash = bareBash(command)
     if (bash) return bareBashReason(bash)
+    const mixed = mixedLogicalOperators(command)
+    if (mixed) return mixedLogicalReason(mixed)
     if (!terminal && TRAILING_EXIT.test(command)) return trailingExitReason()
   }
 
@@ -1189,6 +1299,22 @@ if (process.argv.includes('--self-test')) {
     [TERMINAL_TOOL, "& 'D:\\x\\Grok_Bot_0.77.0_Setup.exe' /S", false, desktop],
     [TERMINAL_TOOL, String.raw`Get-ChildItem 'D:\\agents'`, false],
     [TERMINAL_TOOL, 'Get-ChildItem D:\\x', false],
+    // Rule 19: -and, -or and -xor share one precedence, so a mix inside one statement at one depth needs parentheses.
+    ['PowerShell', "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'Wait-CiRun' -and $_.Name -eq 'pwsh.exe' -or $_.CommandLine -match 'run watch' -and $_.Name -eq 'gh.exe' }", true],
+    ['PowerShell', 'if ($a -or $b -and $c) { 1 }', true],
+    ['PowerShell', '$ok = $x -AND $y -Xor $z', true],
+    ['PowerShell', 'if ($a -and\n  $b) { 1 }; $c -or $d -and $e', true],
+    [TERMINAL_TOOL, 'if ($a -and $b -or $c) { 1 }', true],
+    ['PowerShell', 'Where-Object { ($_.A -and $_.B) -or ($_.C -and $_.D) }', false],
+    ['PowerShell', 'for ($i = 0; $i -lt 5 -and $n -lt 2; $i++) { if ($done -or $failed) { break } }', false],
+    ['PowerShell', 'if ($a -and $b) { 1 }; if ($c -or $d) { 2 }', false],
+    ['PowerShell', '$a -and $b | ForEach-Object { $_ -or $c }', false],
+    ['PowerShell', 'rg -n "x -and y -or z" D:\\x', false],
+    ['PowerShell', "Write-Output 'x -and y -or z'", false],
+    ['PowerShell', "Write-Output \"$(Get-Date -Format 'x -and y -or z')\"", false],
+    ['PowerShell', "git commit -m @'\nfix: x -and y -or z\n'@", false],
+    ['PowerShell', '# x -and y -or z\nGet-Date', false],
+    ['Bash', 'find . -name a -and -name b -or -name c', false],
     // Grep and Glob stop ripgrep after 20 seconds; the root is path, else the session cwd (D:\repo unless given).
     ['Grep', { pattern: 'magpie-codex-model-filter', path: 'D:\\agents\\projects' }, true],
     ['Glob', { pattern: '*magpie*', path: 'D:\\agents\\projects\\' }, true],
