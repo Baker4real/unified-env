@@ -68,17 +68,17 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 
 - 安装根是 `D:\v2rayN-windows-64\`：`v2rayN.exe` 在该根下，配置在 `guiConfigs\`，核心在 `bin\xray\` 与 `bin\sing_box\`。不要按嵌套路径 `v2rayN-windows-64\v2rayN-windows-64` 查找。
 - 2026-10-19 23:17：v2rayN `7.25.6`（同晚由 `7.24.9` 升级），Xray `26.10.10`，sing-box `1.14.3`。`7.25.6` 生成的 sing-box DNS 规则要求 sing-box ≥ 1.14；反过来 `7.24.9` 配 1.14 不保证可用。
-- 激活条目是策略组 `OpenAI`（IndexId `office-openai`，sing-box urltest，`MultipleLoad=0` 最低延迟）。`127.0.0.1:10808` 与 Clash API `127.0.0.1:10813` 由 sing-box 监听，v2rayN 与 sing-box 在交互会话 1。
+- 2026-10-19 时激活条目是策略组 `OpenAI`（IndexId `office-openai`，sing-box urltest，`MultipleLoad=0` 最低延迟），`127.0.0.1:10808` 与 Clash API `127.0.0.1:10813` 由 sing-box 监听，v2rayN 与 sing-box 在交互会话 1。2026-11-13 激活的已是 xray 的 `办公室 - 自动最低延迟`，见本节末条。
 - OpenAI 组按备注正则从新界订阅选成员，正则在 `D:\Codex\.codex\tools\office-v2rayn\openai-filter.txt`：排除香港（保留“香港中转”到其他地区的线路）、澳门、中国大陆、俄罗斯、白俄、伊朗、朝鲜、叙利亚、古巴、委内瑞拉，以及 IPv6、剩余/到期/订阅更新、故障、“将在…恢复”条目。2026-10-19 结果：120 条中 72 条入组（AnyTLS 19、Trojan 11、VLESS 42），选中 `China Taiwan B02`，`chatgpt.com/cdn-cgi/trace` 为 `loc=TW`。
 - 探测间隔由 v2rayN 写死：sing-box urltest 用默认 3 分钟、50 ms 容差、`www.gstatic.com/generate_204`（Xray leastPing 同为 3 分钟）。改成 5 分钟只能改 v2rayN 本身。
 - 2026-10-19 23:17 的一轮探测：72 个成员中 64 个有成功延迟，最快约 148 ms，8 个没有成功记录。其中包括非 `*.nwncd.com` 的直连节点，所以“激活节点必须是香港/台湾中转”已不是当前事实。出口封锁会变，改由分组自动择优，不再手工固定节点。
 - 这台 Wi-Fi 没有 IPv6，IPv6-only 节点会让“通过代理更新”秒死；OpenAI 组已按正则排除这些节点。
 - 订阅 `新界`（SubItem Id `5419959239927671091`，原名 `import_sub`）指向 `6691fe61.neworld.digital`，完整链接只存 v2rayN 数据库。原 `blogzone.me` 链接约自 10-10 起返回 404，此后节点列表一直没刷新。`AutoUpdateInterval=1440`，另由 03:00 任务强制刷新；订阅更新不会删除 `IsSub=0` 的策略组。
-- 策略组 `办公室 - 自动最低延迟`（`office-auto-lowest-latency`，Xray，2026-10-12 建）仍在，未激活，本次未改。
+- 策略组 `办公室 - 自动最低延迟`（`office-auto-lowest-latency`，Xray，2026-10-12 建）：2026-10-19 改造时未激活、未改；2026-11-13 回读时它是激活条目，见本节末条。
 - 计划任务 `Codex Office v2rayN Autostart`：Highest + Interactive，启动 `D:\v2rayN-windows-64\v2rayN.exe`。进程不退出时 `LastTaskResult=267009`（`SCHED_S_TASK_RUNNING`）表示任务仍在跑，不是失败。维护脚本都经它重启 v2rayN。
 - 2026-10-19 23:17 经 socks `10808`：google HTTP 204；`api.openai.com/v1/models` 未带 key 时返回 401，说明可达，且没有出现地区拒绝。
 - v2rayN 日志里成组出现的 `open connection to <本机以太网 IP>:443 using outbound/direct ... actively refused` 是无害噪声。2026-10-20 抓到的来源是腾讯视频的 `hardwarecheck.exe`：它经 10808 的 SOCKS 去连本机自己的以太网 IP（DHCP 分配，会变）的 443 端口，本机没有监听，所以被拒。它自己走 SOCKS，不受系统代理的局域网例外约束。不用为此改路由；嫌吵就关掉腾讯视频的后台服务。证据在家里 `D:\agents\run-evidence\office-v2rayn-openai\20261020-local-ip-443-refused\`。
-- 2026-11-13 只读回读，激活条目已不是上面的 OpenAI 组：20:35 的 IndexId 是 `office-auto-lowest-latency`（即上面的 `办公室 - 自动最低延迟`）。18:21 在跑的核心是 xray（`bin\xray\xray.exe run -c config.json`，16:05:22 启动），没有 sing-box 进程；入站只有 `127.0.0.1:10808`（mixed），10813 的 Clash API 不在，下面排障表里看 10813 的做法只适用于 sing-box 核心。不直连的流量走 `proxy-balancer`：leastPing，58 个 `proxy-*` 出站，每 3 分钟用 `www.google.com/generate_204` 测速。内核日志没开（`LogEnabled=False`，loglevel warning，不写文件），事后查不到某条连接走了哪个节点。证据在家里 `D:\agents\run-evidence\office-dsh-image-eof-20261113\`（`probe-2`、`probe-3`、`probe-4` 的 `.out.txt`）。
+- 2026-11-13 只读回读，激活条目已不是上面的 OpenAI 组：20:35 的 IndexId 是 `office-auto-lowest-latency`（即上面的 `办公室 - 自动最低延迟`）。18:21 在跑的核心是 xray（`bin\xray\xray.exe run -c config.json`，16:05:22 启动），没有 sing-box 进程；入站只有 `127.0.0.1:10808`（mixed），没有 10813 的 Clash API。不直连的流量走 `proxy-balancer`：leastPing，58 个 `proxy-*` 出站，每 3 分钟用 `www.google.com/generate_204` 测速。内核日志没开（`LogEnabled=False`，loglevel warning，不写文件），事后查不到某条连接走了哪个节点。证据在家里 `D:\agents\run-evidence\office-dsh-image-eof-20261113\`（`probe-2`、`probe-3`、`probe-4` 的 `.out.txt`）。
 
 ### v2rayN 定时维护（2026-10-19 起）
 
@@ -118,7 +118,7 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 |---|---|---|
 | 10808 未监听，或 v2rayN/核心（sing-box 或 xray）不在 | 看 Autostart 与 FailSafe 任务状态；需要提权则走 FailSafe 脚本通道 | 按 ssh-mesh 用 UU 做 bootstrap/救援，不改正式 SSH 密钥 |
 | Tailscale 在线但 SSH 失败 | 复核 sshd 与 TCP 22 | 同上 |
-| 10808 在听但代理不通 | 看 Clash API `127.0.0.1:10813` 中 `proxy-auto` 的当前选择与成员延迟，以及 `office-v2rayn-maint\*-last.json` | 中转入口会轮换；全面超时先等几分钟再改配置 |
+| 10808 在听但代理不通 | sing-box 核心时看 Clash API `127.0.0.1:10813` 中 `proxy-auto` 的当前选择与成员延迟（2026-11-13 在跑的 xray 没开这个端口，见「v2rayN」末条）；再看 `office-v2rayn-maint\*-last.json` | 中转入口会轮换；全面超时先等几分钟再改配置 |
 | 02:00/03:00 任务后不通 | 读 `app-update-last.json` / `sub-update-last.json` 的 `result` 与日志；脚本失败时会自动回滚 | 用上一节的回滚材料手工恢复 |
 
 ## 计划任务隐藏启动（2026-10-22）
