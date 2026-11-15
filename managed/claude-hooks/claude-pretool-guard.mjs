@@ -1,4 +1,4 @@
-// Claude Code PreToolUse guard (matchers PowerShell|Bash|mcp__terminal__run_in_terminal and Grep|Glob).
+// Claude Code PreToolUse guard (matchers PowerShell|Bash|mcp__terminal__run_in_terminal, Write|Edit and Grep|Glob).
 // The Terminal panel tool types one line into the user's own PowerShell outside the MSIX package, so rules 8 and 11
 // skip it, the PowerShell-only rules apply to it and the Bash-only rules do not.
 // Denies mechanical mistakes before the command runs:
@@ -46,6 +46,13 @@
 //  19. PowerShell -and, -or and -xor mixed inside one statement at one bracket depth: they share one precedence and
 //      bind left to right, so `A -and B -or C -and D` runs as `((A -and B) -or C) -and D` and returns a wrong result
 //      without an error. Quoted strings, here-strings and comments are text; a bracket starts a new depth.
+//  20. under Set-StrictMode -Version 2 or later, `$x = <command, function or statement output>` and then $x.Count, inline
+//      in a PowerShell or Terminal panel command, inside a .ps1/.psm1 the command runs, or in a .ps1/.psm1 that a Write
+//      or Edit would leave behind (only traps the file did not have before): $x is $null for no output and that object
+//      for one, and .Count on $null or a single string, number, file or process object throws. [array] and other
+//      collection constraints or casts do not help. @(...), literals, member access, method calls, .Where()/.ForEach(),
+//      Measure-Object, New-Object, hyphenated commands defined in other files and same-file functions that return one
+//      dictionary, [pscustomobject] or comma-wrapped list pass; strings and comments are text.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
@@ -661,6 +668,468 @@ function mixedLogicalReason(statement) {
     `同一条语句、同一层括号里混用时给每组加括号，如 (A -and B) -or (C -and D)。命中的语句：${statement}。` + TEXT_ONLY_HINT
 }
 
+// Rule 20. Under Set-StrictMode -Version 2 or later, .Count on $null, and on a single string, number, file or process
+// object, throws "The property 'Count' cannot be found on this object"; a [pscustomobject] or CIM instance gives 1
+// (2026-11-14, pwsh 7.6.9). A variable that takes a command's output directly is $null when the command writes
+// nothing and that object when it writes one, and [array] or other collection constraints and casts leave $null as
+// $null (2026-11-13: an installer died in its backup step on `$keys = Get-SecretLikeKeys $src` then `$keys.Count`).
+// Only code counts: string bodies and comments are blanked, while the $( ) inside double-quoted strings stays code.
+const CONTINUES = '\x01'
+
+// The text with string bodies and comments blanked to spaces, line breaks kept. Quotes stay, so a string still reads
+// as an expression; a backtick escape becomes spaces and a backtick that continues the line becomes CONTINUES.
+function powerShellCode(s) {
+  const out = s.split('')
+  const blank = (from, to) => { for (let k = from; k < to; k++) if (out[k] !== '\n' && out[k] !== '\r') out[k] = ' ' }
+  const expandable = (from, to) => {
+    for (let j = from; j < to;) {
+      if (s[j] === '`') { blank(j, Math.min(j + 2, to)); j += 2 }
+      else if (s[j] === '$' && s[j + 1] === '(') {
+        const end = Math.min(skipSubexpressionText(s, j), to)
+        code(j + 2, end - 1)
+        j = end
+      } else { blank(j, j + 1); j++ }
+    }
+  }
+  const code = (from, to) => {
+    for (let i = from; i < to;) {
+      const c = s[i]
+      if (c === '`') {
+        if (s[i + 1] === '\n' || (s[i + 1] === '\r' && s[i + 2] === '\n')) { out[i] = CONTINUES; i++ }
+        else { blank(i, Math.min(i + 2, to)); i += 2 }
+        continue
+      }
+      const end = Math.min(skipQuotedText(s, i), to)
+      if (end === i) { i++; continue }
+      if (c === '@') {
+        let body = i + 2
+        while (s[body] === ' ' || s[body] === '\t') body++
+        body += s[body] === '\r' ? 2 : 1
+        const bodyEnd = Math.max(body, s[end - 1] === '@' && s[end - 3] === '\n' ? end - 2 : end)
+        if (DOUBLE_QUOTES.has(s[i + 1])) expandable(body, bodyEnd)
+        else blank(body, bodyEnd)
+      } else if (SINGLE_QUOTES.has(c) || DOUBLE_QUOTES.has(c)) {
+        const quotes = SINGLE_QUOTES.has(c) ? SINGLE_QUOTES : DOUBLE_QUOTES
+        const bodyEnd = end - 1 > i && quotes.has(s[end - 1]) ? end - 1 : end
+        if (quotes === DOUBLE_QUOTES) expandable(i + 1, bodyEnd)
+        else blank(i + 1, bodyEnd)
+      } else blank(i, end)
+      i = end
+    }
+  }
+  code(0, s.length)
+  return out.join('')
+}
+
+const STRICT_MODE_CALL = /\bSet-StrictMode\b/gi
+const STRICT_MODE_VERSION = /^[^\n;|}]*?[ \t]-v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?(?:[ \t]*:[ \t]*|[ \t]+)['"]?(latest|\d+(?:\.\d+)*)\b/i
+
+// The -Version of the first Set-StrictMode in code that turns on property checks: 2 or later, or Latest. 1 and -Off
+// leave .Count working on $null and single objects.
+function strictModeVersion(s, code) {
+  for (const match of s.matchAll(STRICT_MODE_CALL)) {
+    if (code[match.index] !== s[match.index]) continue
+    const version = STRICT_MODE_VERSION.exec(s.slice(match.index + match[0].length, match.index + 200))
+    if (version && (/^latest$/i.test(version[1]) || parseFloat(version[1]) >= 2)) return version[1]
+  }
+  return null
+}
+
+// $name, $script:name or ${name}: groups 1 and 3 hold the scope, 2 and 4 the name.
+const VARIABLE = String.raw`\$(?:\{(?:(script|global|local|private):)?([^{}:\r\n]+)\}|(?:(script|global|local|private):)?((?:[A-Za-z_]|[^\x00-\x7F])(?:\w|[^\x00-\x7F])*))`
+const ASSIGNMENT_TARGET = new RegExp(VARIABLE + String.raw`[ \t]*=(?!=)`, 'gi')
+const COUNT_READ = new RegExp(VARIABLE + String.raw`\.count(?![\w-])`, 'gi')
+const LOOP_VARIABLE = new RegExp(String.raw`\bforeach[ \t]*\([ \t]*` + VARIABLE + String.raw`[ \t]+in\b`, 'gi')
+const PARAMETER_LIST = /\bparam[ \t]*\(|\b(?:function|filter)[ \t]+[\w:.-]+[ \t]*\(/gi
+const PARAMETER = /\$(?:(?:script|global|local|private):)?(\w+)/g
+const variableName = match => (match[2] ?? match[4]).toLowerCase()
+const variableScope = match => (match[1] ?? match[3] ?? '').toLowerCase()
+
+// Words before `{` that open a block sharing the enclosing scope. Function bodies and other scriptblocks get their
+// own: ForEach-Object, Where-Object, .ForEach(), .Where() and . { } assign the caller's variables, & { } and functions
+// do not (2026-11-14, pwsh 7.6.9).
+const SAME_SCOPE_BEFORE_BLOCK = new Set(['else', 'try', 'finally', 'do', 'begin', 'process', 'end', 'dynamicparam',
+  'clean', 'catch', 'trap', 'default', 'foreach', 'foreach-object', 'where', 'where-object', '-process', '-begin',
+  '-end', '-filterscript'])
+const STATEMENT_BEFORE_PAREN = new Set(['if', 'elseif', 'foreach', 'for', 'while', 'switch', 'until'])
+const DEFINITION = new Set(['function', 'filter', 'workflow', 'configuration'])
+
+function skipBack(code, j, newlines) {
+  while (j >= 0 && (code[j] === ' ' || code[j] === '\t' || code[j] === '\r' ||
+    (newlines && (code[j] === '\n' || code[j] === CONTINUES)))) j--
+  return j
+}
+
+function wordEndingAt(code, j) {
+  let k = j
+  while (k >= 0 && /[\w-]/.test(code[k])) k--
+  return [code.slice(k + 1, j + 1), k + 1]
+}
+
+function openerBefore(code, j, open, close) {
+  let depth = 0
+  for (let k = j; k >= 0; k--) {
+    if (code[k] === close) depth++
+    else if (code[k] === open && --depth === 0) return k
+  }
+  return -1
+}
+
+function closerAfter(text, i, open, close) {
+  let depth = 0
+  for (let k = i; k < text.length; k++) {
+    if (text[k] === open) depth++
+    else if (text[k] === close && --depth === 0) return k
+  }
+  return -1
+}
+
+// 'hash' for @{, 'block' for a block that shares the enclosing scope, 'scope' for a function or scriptblock body;
+// a `function Name` body also carries the lower-case name.
+function blockKind(code, i) {
+  const j = skipBack(code, i - 1, true)
+  const c = code[j] || ''
+  if (c === '@') return { kind: 'hash' }
+  if (/[\].(%?}'"‘’‚‛“”„]/.test(c)) return { kind: 'block' }
+  let word = ''
+  let start = j + 1
+  if (c === ')') {
+    ;[word, start] = wordEndingAt(code, skipBack(code, openerBefore(code, j, '(', ')') - 1, false))
+    while (word.startsWith('-')) [word, start] = wordEndingAt(code, skipBack(code, start - 1, false))
+    if (STATEMENT_BEFORE_PAREN.has(word.toLowerCase())) return { kind: 'block' }
+  } else if (/[\w-]/.test(c)) {
+    ;[word, start] = wordEndingAt(code, j)
+    if (SAME_SCOPE_BEFORE_BLOCK.has(word.toLowerCase())) return { kind: 'block' }
+  }
+  const [before] = wordEndingAt(code, skipBack(code, start - 1, false))
+  return word && DEFINITION.has(before.toLowerCase()) ? { kind: 'scope', name: word.toLowerCase() } : { kind: 'scope' }
+}
+
+// Index where the target at `index` starts, [type] constraints included, when it opens a statement; -1 otherwise.
+function statementTarget(code, index) {
+  let start = index
+  let j = skipBack(code, index - 1, false)
+  while (code[j] === ']') {
+    start = openerBefore(code, j, '[', ']')
+    if (start < 0) return -1
+    j = skipBack(code, start - 1, false)
+  }
+  if (j < 0) return start
+  const c = code[j]
+  if (c === ';' || c === '{' || c === '(') return start
+  if (c === '&' || c === '|') return code[j - 1] === c ? start : -1
+  if (c !== '\n') return -1
+  const previous = code[skipBack(code, j - 1, false)]
+  return previous !== CONTINUES && previous !== '|' ? start : -1
+}
+
+// Index where the statement starting at `from` ends: ; or a line break outside brackets, or the bracket that closes
+// an enclosing group. A trailing or leading pipe, a backtick and a value on the next line continue it.
+function statementEnd(code, from) {
+  let depth = 0
+  let i = from
+  for (; i < code.length; i++) {
+    const c = code[i]
+    if (c === '(' || c === '{' || c === '[') depth++
+    else if (c === ')' || c === '}' || c === ']') { if (depth === 0) break; depth-- }
+    else if (depth === 0 && c === ';') break
+    else if (depth === 0 && c === '\n') {
+      const before = code.slice(from, i).replace(/[\s\x01]+$/, tail => tail.includes(CONTINUES) ? CONTINUES : '')
+      if (!before.trim() || before.endsWith('|') || before.endsWith(CONTINUES)) continue
+      if (/^[ \t\r\n]*\|(?!\|)/.test(code.slice(i + 1, i + 400))) continue
+      break
+    }
+  }
+  return i
+}
+
+function pipelineElements(text) {
+  const parts = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (c === '(' || c === '{' || c === '[') depth++
+    else if (c === ')' || c === '}' || c === ']') depth--
+    else if (depth === 0 && c === '|') {
+      parts.push(text.slice(start, i))
+      if (text[i + 1] === '|') i++
+      start = i + 1
+    }
+  }
+  parts.push(text.slice(start))
+  return parts
+}
+
+// Statements at depth 0 of a function body, each cut at its line end.
+function topLevelStatements(body) {
+  const statements = []
+  let depth = 0
+  let atStart = true
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i]
+    if (atStart && !/\s/.test(c)) {
+      const end = body.indexOf('\n', i)
+      statements.push(body.slice(i, end < 0 ? body.length : end).trim())
+      atStart = false
+    }
+    if (c === '(' || c === '{' || c === '[') depth++
+    else if (c === ')' || c === '}' || c === ']') depth--
+    else if (depth === 0 && (c === ';' || c === '\n')) atStart = true
+  }
+  return statements
+}
+
+const OUTPUT_STATEMENT = /^(?:if|switch|foreach|for|while|do|try)(?![\w-])/i
+const NO_OUTPUT_KEYWORD = /^(?:function|filter|param|return|throw|exit|break|continue|class|enum|using|data|begin|process|end|trap)$/
+// Commands that write one object whatever their input, so .Count reads that object's own Count.
+const SINGLE_OBJECT_COMMAND = /^(?:new-object|measure-object|measure|convertfrom-stringdata|import-powershelldatafile)$/
+// Built-in and inbox cmdlets that write what they find one object at a time. A hyphenated name that is neither in
+// this list nor defined in the same text may be a function from another file that returns one dictionary or a
+// comma-wrapped list, so it passes; a name without a hyphen is a native program or an alias.
+const WRITES_ITEMS = new Set([
+  'get-childitem', 'get-item', 'get-itemproperty', 'get-itempropertyvalue', 'get-content', 'get-process',
+  'get-service', 'get-ciminstance', 'get-cimassociatedinstance', 'invoke-cimmethod', 'get-wmiobject', 'get-psdrive',
+  'get-clipboard', 'get-hotfix', 'resolve-path', 'convert-path', 'select-object', 'where-object', 'foreach-object',
+  'sort-object', 'group-object', 'compare-object', 'select-string', 'select-xml', 'get-unique', 'get-member',
+  'get-random', 'get-variable', 'get-alias', 'get-filehash', 'get-pscallstack', 'get-event', 'get-error',
+  'import-csv', 'convertfrom-csv', 'convertto-csv', 'convertfrom-json', 'import-clixml', 'invoke-restmethod',
+  'invoke-expression', 'invoke-command', 'tee-object', 'write-output', 'get-command', 'get-module', 'get-job',
+  'receive-job', 'wait-job', 'get-history', 'get-acl', 'get-authenticodesignature', 'get-winevent', 'get-counter',
+  'get-scheduledtask', 'get-netadapter', 'get-netipaddress', 'get-netipconfiguration', 'get-nettcpconnection',
+  'get-netudpendpoint', 'get-netroute', 'get-netfirewallrule', 'get-dnsclientserveraddress', 'get-disk',
+  'get-partition', 'get-volume', 'get-physicaldisk', 'get-appxpackage', 'get-appxprovisionedpackage',
+  'get-windowsoptionalfeature', 'get-pnpdevice', 'get-pnpdeviceproperty', 'get-smbshare', 'get-smbmapping',
+  'get-localuser', 'get-localgroup', 'get-localgroupmember', 'get-printer', 'get-package', 'get-installedmodule',
+  'find-module', 'get-pssession'
+])
+
+// True when one pipeline element writes its results one at a time; `functions` maps each function of the text to
+// whether it does.
+function writesItems(element, functions) {
+  const text = element.trim()
+  if (/^[&.](?=[\s'"‘’‚‛“”„$({])/.test(text)) return true
+  if (/(?:^|\s)-NoEnumerate\b/i.test(text)) return false
+  const name = (/^[^\s(){}[\];|,]+/.exec(text)?.[0] || '').split('\\').pop().toLowerCase()
+  if (!/^[a-z_]/.test(name) || NO_OUTPUT_KEYWORD.test(name) || SINGLE_OBJECT_COMMAND.test(name)) return false
+  if (functions.has(name)) return functions.get(name)
+  if (name === 'convertfrom-json' && /\s-AsHashtable\b/i.test(text)) return false
+  return WRITES_ITEMS.has(name) || !name.includes('-')
+}
+
+// True when an assignment's right side (code text) passes on what a command, script, function or statement writes.
+// @(...), literals, hashtables, member access, method calls, [Type]::new() and .Where()/.ForEach() keep their own
+// shape; a cast such as [array](cmd) does not.
+function outputTrap(rhs, functions) {
+  const text = rhs.replace(/\x01/g, ' ').trim()
+  if (!text) return false
+  const elements = pipelineElements(text)
+  if (elements.length > 1) return writesItems(elements.at(-1), functions)
+  if (/^@[({'"‘’‚‛“”„]/.test(text)) return false
+  if (OUTPUT_STATEMENT.test(text)) return true
+  let rest = text
+  while (rest[0] === '[') {
+    const close = closerAfter(rest, 0, '[', ']')
+    if (close < 0) return false
+    rest = rest.slice(close + 1).trimStart()
+    if (!/^(?:\[|\$?\()/.test(rest)) return false
+  }
+  if (/^\$?\(/.test(rest)) {
+    const open = rest.indexOf('(')
+    const close = closerAfter(rest, open, '(', ')')
+    if (close < 0 || rest.slice(close + 1).trim()) return false
+    return outputTrap(rest.slice(open + 1, close), functions)
+  }
+  return writesItems(rest, functions)
+}
+
+const ONE_OBJECT_RETURN = /\breturn[ \t]*(?:,|(?:\[[^\]\n]*\][ \t]*)*(?:@\{|New-Object\b))|-NoEnumerate\b|\bWrite-Output[ \t]+,/i
+const ONE_OBJECT_STATEMENT = /^(?:,|(?:\[[^\]\n]*\][ \t]*)*@\{|New-Object\b)/i
+const DICTIONARY_VALUE = /^(?:(?:\[[^\]\n]*\][ \t]*)*@\{|\[[^\n]*?(?:Dictionary|Hashtable)[^\n]*?\]::new\(|New-Object[ \t]+(?:-TypeName[ \t]+)?[\w.]*(?:Dictionary|Hashtable|PSObject)\b)/i
+
+// True when a function body writes one object that keeps its Count: return ,$x, -NoEnumerate, a hashtable or
+// [pscustomobject] literal, New-Object, or a variable holding a dictionary, returned or written at its top level.
+function returnsOneObject(body) {
+  if (ONE_OBJECT_RETURN.test(body)) return true
+  const dictionaries = new Set()
+  for (const match of body.matchAll(/\$(?:(?:script|global|local|private):)?(\w+)[ \t]*=(?!=)[ \t]*([^\n;]*)/gi)) {
+    if (DICTIONARY_VALUE.test(match[2])) dictionaries.add(match[1].toLowerCase())
+  }
+  const holdsDictionary = text => {
+    const variable = /^\$(?:(?:script|global|local|private):)?(\w+)[ \t]*$/i.exec(text.trim())
+    return Boolean(variable && dictionaries.has(variable[1].toLowerCase()))
+  }
+  for (const match of body.matchAll(/\breturn\b([^\n;}]*)/gi)) if (holdsDictionary(match[1])) return true
+  return topLevelStatements(body).some(statement => ONE_OBJECT_STATEMENT.test(statement) || holdsDictionary(statement))
+}
+
+const lineOf = (s, index) => s.slice(0, index).split('\n').length
+
+// Every `$x.Count` read of a strict-mode text whose value may come straight from command output. A read sees the
+// assignments to its name that end before it, except those inside another function or scriptblock body (unless
+// written as $script: or $global:); parameters and foreach variables count as neutral assignments. The last of them
+// in a block that encloses the read always runs; it and every later one (in a branch, loop or catch) may supply the
+// value, and the read counts when any of these is command output.
+export function strictCountTraps(text) {
+  const s = String(text)
+  if (!/set-strictmode/i.test(s) || !/\.count\b/i.test(s)) return []
+  const code = powerShellCode(s)
+  const version = strictModeVersion(s, code)
+  if (!version) return []
+  const reads = [...code.matchAll(COUNT_READ)]
+  if (!reads.length) return []
+  const targets = [...code.matchAll(ASSIGNMENT_TARGET)]
+  const loops = [...code.matchAll(LOOP_VARIABLE)]
+  const parameters = []
+  for (const match of code.matchAll(PARAMETER_LIST)) {
+    const open = match.index + match[0].length - 1
+    const close = closerAfter(code, open, '(', ')')
+    if (close < 0) continue
+    let at = open
+    if (!/^param/i.test(match[0])) {
+      let k = close + 1
+      while (/[\s\x01]/.test(code[k] || '')) k++
+      if (code[k] !== '{') continue
+      at = k + 1
+    }
+    for (const parameter of code.slice(open, close).matchAll(PARAMETER)) parameters.push({ name: parameter[1].toLowerCase(), at })
+  }
+  const wanted = new Set([...reads, ...targets, ...loops].map(match => match.index).concat(parameters.map(p => p.at)))
+  const snapshots = new Map()
+  const definitions = []
+  const stack = []
+  for (let i = 0; i < code.length; i++) {
+    if (wanted.has(i)) snapshots.set(i, stack.slice())
+    const c = code[i]
+    if (c === '{') {
+      const entry = { ch: c, ...blockKind(code, i), start: i, end: code.length }
+      if (entry.name) definitions.push(entry)
+      stack.push(entry)
+    } else if (c === '(' || c === '[') stack.push({ ch: c })
+    else if (c === '}' || c === ')' || c === ']') {
+      const open = c === '}' ? '{' : c === ')' ? '(' : '['
+      for (let k = stack.length - 1; k >= 0; k--) {
+        if (stack[k].ch !== open) continue
+        stack[k].end = i
+        stack.length = k
+        break
+      }
+    }
+  }
+  const view = index => {
+    const open = snapshots.get(index) || []
+    const chain = open.filter(entry => entry.ch === '{' && entry.kind !== 'hash')
+    return {
+      chain,
+      block: chain.at(-1) || null,
+      scope: chain.findLast(entry => entry.kind === 'scope') || null,
+      inHash: open.at(-1)?.kind === 'hash'
+    }
+  }
+  const functions = new Map()
+  for (const definition of definitions) {
+    functions.set(definition.name, !returnsOneObject(code.slice(definition.start + 1, definition.end)))
+  }
+  const assignments = new Map()
+  const add = (name, entry) => {
+    if (!assignments.has(name)) assignments.set(name, [])
+    assignments.get(name).push(entry)
+  }
+  for (const match of targets) {
+    const where = view(match.index)
+    const targetStart = where.inHash ? -1 : statementTarget(code, match.index)
+    if (targetStart < 0) continue
+    const rhsStart = match.index + match[0].length
+    const end = statementEnd(code, rhsStart)
+    const outer = variableScope(match) === 'script' || variableScope(match) === 'global'
+    add(variableName(match), {
+      end, block: where.block, scope: outer ? null : where.scope, index: match.index, targetStart, rhsStart,
+      trap: outputTrap(code.slice(rhsStart, end), functions), variable: match[0].replace(/[ \t]*=$/, '')
+    })
+  }
+  for (const match of loops) {
+    const where = view(match.index)
+    add(variableName(match), { end: match.index + match[0].length, block: where.block, scope: where.scope, trap: false })
+  }
+  for (const parameter of parameters) {
+    const where = view(parameter.at)
+    add(parameter.name, { end: parameter.at, block: where.block, scope: where.scope, trap: false })
+  }
+  for (const list of assignments.values()) list.sort((a, b) => a.end - b.end)
+  const hits = []
+  for (const read of reads) {
+    const where = view(read.index)
+    const relevant = (assignments.get(variableName(read)) || [])
+      .filter(a => a.end <= read.index && (a.scope === null || where.chain.includes(a.scope)))
+    const first = relevant.findLastIndex(a => a.block === null || where.chain.includes(a.block))
+    const trap = relevant.slice(Math.max(first, 0)).findLast(a => a.trap)
+    if (!trap) continue
+    const value = s.slice(trap.rhsStart, trap.rhsStart + code.slice(trap.rhsStart, trap.end).trimEnd().length)
+      .replace(/\s+/g, ' ').trim()
+    const rhs = value.length > 80 ? `${value.slice(0, 80)}…` : value
+    const readLine = lineOf(s, read.index)
+    hits.push({
+      version,
+      variable: trap.variable,
+      assignment: `${s.slice(trap.targetStart, trap.rhsStart).trim()} ${rhs}`,
+      rhs,
+      assignLine: lineOf(s, trap.index),
+      readLine,
+      signature: [variableName(read), value, s.split('\n')[readLine - 1].trim()].join('\n')
+    })
+  }
+  return hits
+}
+
+function strictCountReason(where, hit) {
+  return `${where}开了 Set-StrictMode -Version ${hit.version}，第 ${hit.assignLine} 行 ${hit.assignment} 让变量直接接住命令输出，` +
+    `第 ${hit.readLine} 行又取 ${hit.variable}.Count。命令没有输出时变量是 $null，只输出一项时就是那一项；` +
+    "严格模式下对 $null 和单个字符串、数字、文件或进程对象取 .Count 都抛 The property 'Count' cannot be found on this object，" +
+    '[array]、[string[]] 这类类型约束或转换也挡不住空输出（2026-11-14 pwsh 7.6.9 实测）。' +
+    `在赋值处包 @(...)：${hit.variable} = @(${hit.rhs})。只给接住命令或函数输出的变量这样包，成员访问不要包：` +
+    '$x.Prop 为 $null 时 @($x.Prop).Count 是 1。' +
+    `（${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 5 条「集合、空值与解析的常见陷阱」第一项，第 56 行；成员访问的反例在第 62 行）`
+}
+
+// Returns a deny reason when a PowerShell command, or a script the command runs (a remote -ScriptPath one included:
+// the trap is the same there), reads .Count of a variable that took command output under strict mode.
+function strictCountDecision(command, tool, cwd, io) {
+  if (tool === 'PowerShell' || tool === TERMINAL_TOOL) {
+    const hit = strictCountTraps(command)[0]
+    if (hit) return strictCountReason('', hit)
+  }
+  for (const script of referencedScripts(command, cwd, io)) {
+    const text = io.read(script)
+    const hit = text ? strictCountTraps(text)[0] : null
+    if (hit) return strictCountReason(`脚本 ${script} 里：`, hit)
+  }
+  return null
+}
+
+// Write and Edit of a .ps1/.psm1: the file as it would be after the call, denied for traps the file did not already
+// have, so an unrelated edit to a script with an old trap passes and the run-time check above still covers it.
+function strictCountWriteReason(tool, payload, io) {
+  const input = payload?.tool_input || {}
+  const filePath = String(input.file_path || '')
+  if (!/\.psm?1$/i.test(filePath)) return null
+  const path = win32.resolve(String(payload?.cwd || ''), filePath)
+  const lf = text => String(text ?? '').replace(/\r\n/g, '\n')
+  const before = io.read(path)
+  let after
+  if (tool === 'Write') after = lf(input.content)
+  else {
+    const current = lf(before)
+    const oldText = lf(input.old_string)
+    if (before === null || !oldText || !current.includes(oldText)) return null
+    const newText = lf(input.new_string)
+    after = input.replace_all ? current.split(oldText).join(newText) : current.replace(oldText, () => newText)
+  }
+  if (after.length > MAX_SCRIPT_BYTES) return null
+  const known = new Set(before === null ? [] : strictCountTraps(lf(before)).map(hit => hit.signature))
+  const hit = strictCountTraps(after).find(trap => !known.has(trap.signature))
+  return hit ? strictCountReason(`${tool} 要写入的 ${path} 里：`, hit) : null
+}
+
 // Rule 18. Write and Edit tool calls that target the active skills root must go through the guarded install entry.
 const SKILLS_ROOT = 'D:\\agents\\skills-manager\\skills'
 
@@ -939,8 +1408,8 @@ function deny(reason) {
 export function evaluate(payload, io = defaultIo) {
   const tool = String(payload?.tool_name || '')
   if (tool === 'Grep' || tool === 'Glob') return searchToolReason(tool, payload)
-  // Rule 18: direct writes to the active skills root must go through the guarded install entry.
-  if (tool === 'Write' || tool === 'Edit') return skillsRootWriteReason(tool, payload)
+  // Rule 18: direct writes to the active skills root must go through the guarded install entry; rule 20 for scripts.
+  if (tool === 'Write' || tool === 'Edit') return skillsRootWriteReason(tool, payload) || strictCountWriteReason(tool, payload, io)
   const command = String(payload?.tool_input?.command || '')
   const terminal = tool === TERMINAL_TOOL
   if (!command || (tool !== 'PowerShell' && tool !== 'Bash' && !terminal)) return null
@@ -1005,7 +1474,7 @@ export function evaluate(payload, io = defaultIo) {
     return `git clone 的源 ${source} 是本地路径：同盘本地克隆默认把源库 .git/objects 硬链进克隆，受管 safe-tree-delete 拒绝硬链文件，克隆建成后就删不掉了。` +
       '加 --no-hardlinks 后重试（--no-local 或 file:// 源也行）。如果这只是文本（提交信息、搜索模式），改用 Grep 工具，或把关键词拆开写。'
   }
-  return null
+  return strictCountDecision(command, tool, payload?.cwd, io)
 }
 
 function main() {
@@ -1330,7 +1799,38 @@ if (process.argv.includes('--self-test')) {
     ['Write', { file_path: 'D:\\Codex\\.codex\\skills\\retro\\new-file.tmp' }, true],
     ['Edit', { file_path: 'skills\\retro\\SKILL.md', cwd: 'D:\\agents\\skills-manager' }, true],
     ['Write', { file_path: 'D:\\agents\\skills-manager\\skills-backup\\SKILL.md' }, false],
-    ['Edit', { file_path: 'D:\\agents\\run-evidence\\outside.md' }, false]
+    ['Edit', { file_path: 'D:\\agents\\run-evidence\\outside.md' }, false],
+    // Rule 20: under strict mode a variable takes command output directly, then its .Count is read; inline, in a
+    // script the command runs (stubbed below), or in the .ps1 a Write or Edit would leave behind.
+    ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\install-dsh.ps1' -CheckOnly", true],
+    [TERMINAL_TOOL, 'pwsh -NoProfile -File D:\\repo\\tools\\install-dsh.ps1 && Write-Output done', true],
+    ['Bash', 'pwsh -NoProfile -File /d/repo/tools/install-dsh.ps1', true],
+    ['PowerShell', "& 'D:\\repo\\tools\\restart-app.ps1'", true],
+    ['PowerShell', "pwsh -File 'D:\\repo\\tools\\count-typed.ps1'", true],
+    ['PowerShell', 'Set-StrictMode -Version Latest; $files = Get-ChildItem D:\\x; $files.Count', true],
+    ['PowerShell', 'Set-StrictMode -Version Latest; $x = if ($a) { @(Get-ChildItem D:\\x) } else { @() }; "n=$($x.Count)"', true],
+    ['PowerShell', 'Set-StrictMode -Version Latest; try { $rows = Import-Csv D:\\x\\a.csv } catch { $rows = @() }; $rows.Count', true],
+    ['PowerShell', "pwsh -File 'D:\\repo\\tools\\install-dsh-fixed.ps1'", false],
+    ['PowerShell', "pwsh -File 'D:\\repo\\tools\\count-ok.ps1'", false],
+    ['PowerShell', "pwsh -File 'D:\\repo\\tools\\no-strict.ps1'", false],
+    ['PowerShell', "Get-FileHash -LiteralPath 'D:\\repo\\tools\\install-dsh.ps1'", false],
+    ['PowerShell', 'Set-StrictMode -Version Latest; $files = @(Get-ChildItem D:\\x); $files.Count', false],
+    ['PowerShell', 'Set-StrictMode -Version 1; $files = Get-ChildItem D:\\x; $files.Count', false],
+    ['PowerShell', '$files = Get-ChildItem D:\\x; $files.Count', false],
+    ['PowerShell', "rg -n 'Set-StrictMode -Version Latest|$keys = Get-Foo|$keys.Count' D:\\x", false],
+    ['PowerShell', 'Set-StrictMode -Version Latest\n$lines = git status --porcelain\n$lines.Count', true],
+    ['PowerShell', 'Set-StrictMode -Version Latest\n$ok = $rows | Where-Object { $_.ok }\n$ok.Count', true],
+    ['PowerShell', 'Set-StrictMode -Version Latest\nfunction Get-Map { $m = [System.Collections.Generic.Dictionary[string, int]]::new(); return $m }\n$m = Get-Map\n$m.Count', false],
+    ['PowerShell', 'Set-StrictMode -Version Latest\nfunction Get-Info { [pscustomobject]@{ count = 1 } }\n$info = Get-Info\n$info.Count', false],
+    ['PowerShell', 'Set-StrictMode -Version Latest\n$items = Get-ChildItem\nfunction Show([object[]]$items) { $items.Count }', false],
+    ['PowerShell', 'Set-StrictMode -Version Latest\n$map = ConvertTo-CrossFileMap -Plan $plan\n$map.Count', false],
+    ['Write', { file_path: 'D:\\repo\\tools\\new.ps1', content: 'Set-StrictMode -Version Latest\n$rows = Import-Csv $path\nif ($rows.Count -eq 0) { return }' }, true],
+    ['Write', { file_path: 'D:\\repo\\tools\\new.ps1', content: 'Set-StrictMode -Version Latest\n$rows = @(Import-Csv $path)\nif ($rows.Count -eq 0) { return }' }, false],
+    ['Write', { file_path: 'D:\\repo\\notes.md', content: 'Set-StrictMode -Version Latest\n$rows = Import-Csv $path\n$rows.Count' }, false],
+    ['Edit', { file_path: 'D:\\repo\\tools\\existing-clean.ps1', old_string: '$files = @(Get-ChildItem $root)', new_string: '$files = Get-ChildItem $root' }, true],
+    ['Edit', { file_path: 'D:\\repo\\tools\\no-strict.ps1', old_string: "$ErrorActionPreference = 'Stop'", new_string: "Set-StrictMode -Version Latest\n$ErrorActionPreference = 'Stop'" }, true],
+    ['Edit', { file_path: 'D:\\repo\\tools\\existing-trap.ps1', old_string: "Write-Output 'start'", new_string: "Write-Output 'begin'" }, false],
+    ['Edit', { file_path: 'D:\\repo\\tools\\existing-trap.ps1', old_string: '$files = Get-ChildItem $root', new_string: '$files = @(Get-ChildItem $root)' }, false]
   ]
   const scripts = new Map(Object.entries({
     'D:\\repo\\tools\\recycle.ps1': 'Add-Type -TypeDefinition $src\n[Native]::SHFileOperationW([ref]$op)',
@@ -1343,7 +1843,50 @@ if (process.argv.includes('--self-test')) {
     'D:\\repo\\tools\\restart-explorer.ps1': "$old = @(Get-Process -Name explorer)\nStop-Process -Name explorer -Force",
     'D:\\Codex\\.codex\\scripts\\Restart-ExplorerShell.ps1': 'Stop-Process -Name explorer -Force',
     'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1': 'code = SHFileOperationW(ref op);',
-    'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1': 'STA (SHFileOperationW) works here.'
+    'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1': 'STA (SHFileOperationW) works here.',
+    // Rule 20: the 2026-11-13 installer before and after its fix (a function-local $keys from a pipeline, then the
+    // script's own $keys), a restart script of the same shape, and the shapes that keep their Count.
+    'D:\\repo\\tools\\install-dsh.ps1': [
+      'param([switch]$CheckOnly)', 'Set-StrictMode -Version 3.0',
+      'function Get-SecretLikeKeys([string]$Path) {',
+      "    $keys = [regex]::Matches((Get-Content -LiteralPath $Path -Raw), 'key') | ForEach-Object { $_.Value }",
+      '    return @($keys | Sort-Object -Unique)', '}',
+      "foreach ($name in 'settings.yaml', 'AGENTS.md') {",
+      '    $src = Join-Path $dshHome $name', '    $keys = Get-SecretLikeKeys $src',
+      '    if ($keys.Count -gt 0) { continue }', '}'
+    ].join('\n'),
+    'D:\\repo\\tools\\install-dsh-fixed.ps1': [
+      'Set-StrictMode -Version 3.0',
+      'function Get-Holders { $rows = [Collections.Generic.List[object]]::new(); [pscustomobject]@{ holders = $rows } }',
+      'function Get-SecretLikeKeys([string]$Path) {',
+      "    $keys = [regex]::Matches((Get-Content -LiteralPath $Path -Raw), 'key') | ForEach-Object { $_.Value }",
+      '    return @($keys | Sort-Object -Unique)', '}',
+      '$gate = Get-Holders', 'if ($gate.holders.Count -gt 0) { exit 2 }',
+      "foreach ($name in 'settings.yaml', 'AGENTS.md') {",
+      '    # was: $keys = Get-SecretLikeKeys $src, then $keys.Count',
+      '    $keys = @(Get-SecretLikeKeys (Join-Path $dshHome $name))',
+      '    if ($keys.Count -gt 0) { continue }', '}'
+    ].join('\n'),
+    'D:\\repo\\tools\\restart-app.ps1': [
+      'Set-StrictMode -Version Latest', "$ErrorActionPreference = 'Stop'",
+      'function Get-AppProcess { Get-Process -Name app -ErrorAction SilentlyContinue }',
+      '$before = Get-AppProcess', '$before | Stop-Process -Force', "Start-Process 'D:\\x\\app.exe'",
+      '$after = Get-AppProcess', "if ($after.Count -ne 1) { throw 'app did not restart' }"
+    ].join('\n'),
+    'D:\\repo\\tools\\count-typed.ps1': "Set-StrictMode -Version Latest\n[array]$logs = Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.log'\nWrite-Output \"logs: $($logs.Count)\"",
+    'D:\\repo\\tools\\count-ok.ps1': [
+      'Set-StrictMode -Version Latest',
+      '$files = @(Get-ChildItem -LiteralPath $PSScriptRoot)', '[array]$more = @(Get-ChildItem -LiteralPath $PSScriptRoot)',
+      '$map = @{ a = 1 }', '$pair = 1, 2', '$list = [System.Collections.Generic.List[string]]::new()',
+      '$big = (Get-ChildItem -LiteralPath $PSScriptRoot).Where({ $_.Length -gt 0 })',
+      '$stats = Get-ChildItem -LiteralPath $PSScriptRoot | Measure-Object',
+      '$late = Get-ChildItem -LiteralPath $PSScriptRoot', '$late = @($late)',
+      "Write-Output 'no $late.Count here' # nor $files.Count here", 'Write-Output "files $files.Count"',
+      'Write-Output ($files.Count + $more.Count + $map.Count + $pair.Count + $list.Count + $big.Count + $stats.Count + $late.Count)'
+    ].join('\n'),
+    'D:\\repo\\tools\\no-strict.ps1': "$ErrorActionPreference = 'Stop'\n$files = Get-ChildItem -LiteralPath $PSScriptRoot\nWrite-Output $files.Count",
+    'D:\\repo\\tools\\existing-trap.ps1': "Set-StrictMode -Version Latest\nWrite-Output 'start'\n$files = Get-ChildItem $root\nWrite-Output $files.Count",
+    'D:\\repo\\tools\\existing-clean.ps1': 'Set-StrictMode -Version Latest\n$files = @(Get-ChildItem $root)\nWrite-Output $files.Count'
   }).map(([path, text]) => [path.toLowerCase(), text]))
   const io = { read: path => scripts.get(win32.normalize(path).toLowerCase()) ?? null }
   let failed = 0
