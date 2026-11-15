@@ -92,6 +92,21 @@ DEFAULT_TEMP_ROOT = Path(r"D:\Codex\tmp\skill-install-guarded")
 DEFAULT_LOCK_ROOT = Path(r"D:\Codex\.codex\skill-install")
 DEFAULT_EVIDENCE_ROOT = Path(r"D:\agents\run-evidence\skill-install-guarded")
 
+# The session ids an agent host exports to the processes it starts, by host.  A transaction records
+# them so a session that meets its uncommitted work in the active root can tell whose it is.
+INVOKER_SESSION_VARIABLES = {
+    "claude-code": {"session_id": "CLAUDE_CODE_SESSION_ID", "host_session_id": "CLAUDE_CODE_HOST_SESSION_ID"},
+}
+
+
+def transaction_invoker() -> dict[str, str]:
+    """The agent session running this transaction; ``host`` is ``unknown`` when it exports no known session id."""
+    for host, variables in INVOKER_SESSION_VARIABLES.items():
+        found = {key: value for key, name in variables.items() if (value := os.environ.get(name, "").strip())}
+        if found:
+            return {"host": host, **found}
+    return {"host": "unknown"}
+
 
 @contextlib.contextmanager
 def installation_lock(lock_path: Path) -> Iterator[None]:
@@ -376,6 +391,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         "ledger": str(ledger_path),
         "catalog": str(catalog_path),
         "wrapper": "D:/Codex/.codex/scripts/install-skill-guarded.cmd",
+        "invoker": transaction_invoker(),
     }
     write_transaction_manifest(manifest_path, plan)
 

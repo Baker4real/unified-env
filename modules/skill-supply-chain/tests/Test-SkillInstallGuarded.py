@@ -125,6 +125,48 @@ class SkillInstallGuardedTests(GuardedInstallTestCase):
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         return json.loads(result.stdout)
 
+    def transaction_invoker(self, environment: dict[str, str]) -> object:
+        """The ``invoker`` a transaction records when the host exports exactly ``environment`` of the session ids."""
+        candidate = self.write_candidate("test-skill-wrapper", "受管包装器的安装测试夹具")
+        manifest = self.write_manifest("test-skill-wrapper", "install")
+        with mock.patch.dict(os.environ, environment), contextlib.redirect_stdout(io.StringIO()):
+            for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID"):
+                if name not in environment:
+                    os.environ.pop(name, None)
+            code = WRAPPER.main(self.wrapper_args(candidate, manifest))
+        self.assertEqual(code, 0)
+        transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
+        return json.loads(transaction.read_text(encoding="utf-8")).get("invoker")
+
+    def test_transaction_manifest_names_the_claude_code_session_that_ran_it(self) -> None:
+        invoker = self.transaction_invoker(
+            {
+                "CLAUDE_CODE_SESSION_ID": "11111111-2222-4333-8444-555555555555",
+                "CLAUDE_CODE_HOST_SESSION_ID": "local_66666666-7777-4888-9999-000000000000",
+            }
+        )
+
+        self.assertEqual(
+            invoker,
+            {
+                "host": "claude-code",
+                "session_id": "11111111-2222-4333-8444-555555555555",
+                "host_session_id": "local_66666666-7777-4888-9999-000000000000",
+            },
+        )
+
+    def test_transaction_manifest_says_unknown_when_the_host_exports_no_session_id(self) -> None:
+        self.assertEqual(self.transaction_invoker({}), {"host": "unknown"})
+
+    def test_transaction_manifest_leaves_out_a_session_id_that_is_blank(self) -> None:
+        invoker = self.transaction_invoker(
+            {"CLAUDE_CODE_SESSION_ID": "  ", "CLAUDE_CODE_HOST_SESSION_ID": "local_66666666-7777-4888-9999-000000000000"}
+        )
+
+        self.assertEqual(
+            invoker, {"host": "claude-code", "host_session_id": "local_66666666-7777-4888-9999-000000000000"}
+        )
+
     def test_install_updates_source_ledger_and_catalog(self) -> None:
         candidate = self.write_candidate("test-skill-wrapper", "受管包装器的安装测试夹具")
         manifest = self.write_manifest(
