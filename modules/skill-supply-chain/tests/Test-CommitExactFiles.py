@@ -555,8 +555,22 @@ class CommitExactFilesTests(unittest.TestCase):
         self.assertEqual(self.show("HEAD:b.txt"), b"x\ny\nz")
         self.assertEqual(self.status(), [" M b.txt"])
 
-    def guarded_transaction(self, *, other_status: str | None = None, our_status: str | None = None) -> Path:
-        """A succeeded guarded update of skill-x, run after another session's still uncommitted transaction."""
+    def guarded_transaction(
+        self,
+        *,
+        other_status: str | None = None,
+        our_status: str | None = None,
+        group_skills: tuple[str, ...] = ("skill-x", "skill-y"),
+        other_moved: str | None = None,
+        our_skills: list[str] | None = None,
+        resource_paths: tuple[list[str], list[str], list[str]] | None = None,
+    ) -> Path:
+        """A succeeded guarded update of skill-x, run after another session's still uncommitted transaction.
+
+        The wrapper moves an updated skill to the end of its group; ``other_moved`` names the skill the other
+        session's transaction moved there, and ``our_skills`` replaces what this transaction leaves in the
+        group.  ``resource_paths`` gives group-a that list as committed, before and after this transaction.
+        """
         committed = {
             "updated_at": "2026-11-05",
             "notes": [],
@@ -564,7 +578,7 @@ class CommitExactFilesTests(unittest.TestCase):
                 {
                     "id": "group-a",
                     "status": "tracked",
-                    "skills": ["skill-x", "skill-y"],
+                    "skills": list(group_skills),
                     "local_changes": [{"skill": "skill-x", "date": "2026-11-01", "summary": "first"}],
                     "last_guarded_install": "2026-11-01T00:00:00Z",
                 },
@@ -573,6 +587,8 @@ class CommitExactFilesTests(unittest.TestCase):
             "unresolved": [],
             "deleted": [],
         }
+        if resource_paths:
+            committed["sources"][0]["resource_paths"] = resource_paths[0]
         skill = self.repo / "skill-x"
         skill.mkdir()
         (skill / "SKILL.md").write_bytes(b"---\nname: skill-x\n---\nv1\n")
@@ -590,11 +606,17 @@ class CommitExactFilesTests(unittest.TestCase):
         before["updated_at"] = "2026-11-06"
         if other_status:
             group_a["status"] = other_status
+        if other_moved:
+            group_a["skills"] = [name for name in group_a["skills"] if name != other_moved] + [other_moved]
+        if resource_paths:
+            group_a["resource_paths"] = resource_paths[1]
         after = copy.deepcopy(before)
         group_a = after["sources"][0]
         group_a["local_changes"].append({"skill": "skill-x", "date": "2026-11-07", "summary": "this transaction"})
         group_a["last_guarded_install"] = "2026-11-07T00:00:00Z"
-        group_a["skills"] = ["skill-y", "skill-x"]
+        group_a["skills"] = our_skills or [name for name in group_a["skills"] if name != "skill-x"] + ["skill-x"]
+        if resource_paths:
+            group_a["resource_paths"] = resource_paths[2]
         after["updated_at"] = "2026-11-07"
         if our_status:
             group_a["status"] = our_status
@@ -663,6 +685,189 @@ class CommitExactFilesTests(unittest.TestCase):
         }
         self.assertEqual(self.show(f"HEAD:{LEDGER}"), ledger_bytes(expected))
         self.assertEqual(self.status(), [f" M {LEDGER}"])
+
+    def test_transaction_replays_its_move_to_the_end_onto_a_group_another_session_reordered(self) -> None:
+        # Another session's uncommitted update had already moved skill-y to the end of the group, so HEAD's
+        # order (x, y, w) is not the order this transaction started from (x, w, y).
+        evidence = self.guarded_transaction(group_skills=("skill-x", "skill-y", "skill-w"), other_moved="skill-y")
+
+        code, error = self.run_helper("--transaction", str(evidence))
+
+        self.assertEqual(code, 0, error)
+        committed = json.loads(self.show(f"HEAD:{LEDGER}"))
+        self.assertEqual(committed["sources"][0]["skills"], ["skill-y", "skill-w", "skill-x"])
+        self.assertEqual(self.status(), [f" M {LEDGER}"])
+
+    def follow_up_transaction(self, previous: Path, version: str, *, bytecode: bool = False) -> Path:
+        """Another succeeded guarded update of skill-x, run on top of the still uncommitted ``previous`` one.
+
+        With ``bytecode``, running the skill's scripts left a ``__pycache__`` behind before this update (so the
+        backup holds it) and again after it; the activated payload itself never carries bytecode.
+        """
+        skill = self.repo / "skill-x"
+        cache = skill / "__pycache__"
+        if bytecode:
+            cache.mkdir()
+            (cache / "tool.cpython-314.pyc").write_bytes(b"\0before the update")
+        before = json.loads((previous / "backups" / "source-state-after.json").read_bytes())
+        after = copy.deepcopy(before)
+        group_a = after["sources"][0]
+        group_a["local_changes"].append({"skill": "skill-x", "date": "2026-11-08", "summary": f"update to {version}"})
+        group_a["last_guarded_install"] = f"2026-11-08T00:00:0{version[-1]}Z"
+        after["updated_at"] = "2026-11-08"
+
+        evidence = self.temp / f"install-20261108T000000-{version}"
+        backups = evidence / "backups"
+        backup = backups / "active-skills" / "skill-x"
+        shutil.copytree(skill, backup)
+        if bytecode:
+            shutil.rmtree(cache)
+        (skill / "SKILL.md").write_bytes(f"---\nname: skill-x\n---\n{version}\n".encode())
+        (backups / "source-state-before.json").write_bytes(ledger_bytes(before))
+        (backups / "source-state-after.json").write_bytes(ledger_bytes(after))
+        self.write(LEDGER, ledger_bytes(after))
+        manifest = json.loads((previous / "manifest.json").read_text(encoding="utf-8"))
+        manifest["directory_records"][0].update(
+            backup=str(backup), backup_seal=tree_content_seal(backup), activated_payload_seal=tree_content_seal(skill)
+        )
+        manifest["source_state_after"] = {
+            "path": str(backups / "source-state-after.json"),
+            "sha256": sha256(ledger_bytes(after)),
+        }
+        (evidence / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        if bytecode:
+            cache.mkdir()
+            (cache / "tool.cpython-314.pyc").write_bytes(b"\0after the update")
+        return evidence
+
+    def test_transactions_stacked_on_one_skill_commit_together_oldest_first(self) -> None:
+        first = self.guarded_transaction()
+        second = self.follow_up_transaction(first, "v3")
+
+        code, error = self.run_helper("--transaction", str(first), "--transaction", str(second))
+
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.show("HEAD:skill-x/SKILL.md"), b"---\nname: skill-x\n---\nv3\n")
+        group_a = json.loads(self.show(f"HEAD:{LEDGER}"))["sources"][0]
+        self.assertEqual(
+            [change["summary"] for change in group_a["local_changes"]], ["first", "this transaction", "update to v3"]
+        )
+        self.assertEqual(group_a["last_guarded_install"], "2026-11-08T00:00:03Z")
+        self.assertEqual(self.status(), [f" M {LEDGER}"])
+
+    def test_stacked_transactions_refuse_a_missing_link(self) -> None:
+        first = self.guarded_transaction()
+        second = self.follow_up_transaction(first, "v3")
+        third = self.follow_up_transaction(second, "v4")
+
+        code, error = self.run_helper("--transaction", str(first), "--transaction", str(third))
+
+        self.assertEqual(code, 1)
+        self.assertIn(first.name, error)
+        self.assertIn(third.name, error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_stacked_transactions_refuse_the_same_one_twice(self) -> None:
+        first = self.guarded_transaction()
+
+        code, error = self.run_helper("--transaction", str(first), "--transaction", str(first))
+
+        self.assertEqual(code, 1)
+        self.assertIn("给了两次", error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_stacked_transactions_ignore_bytecode_left_between_them(self) -> None:
+        first = self.guarded_transaction()
+        second = self.follow_up_transaction(first, "v3", bytecode=True)
+
+        code, error = self.run_helper("--transaction", str(first), "--transaction", str(second))
+
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.show("HEAD:skill-x/SKILL.md"), b"---\nname: skill-x\n---\nv3\n")
+        self.assertNotIn("__pycache__", self.git("ls-tree", "-r", "--name-only", "HEAD"))
+
+    def test_stacked_transactions_refuse_a_later_one_that_backed_up_nothing(self) -> None:
+        first = self.guarded_transaction()
+        second = self.follow_up_transaction(first, "v3")
+        manifest = json.loads((second / "manifest.json").read_text(encoding="utf-8"))
+        manifest["directory_records"][0]["had_existing"] = False
+        (second / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+        code, error = self.run_helper("--transaction", str(first), "--transaction", str(second))
+
+        self.assertEqual(code, 1)
+        self.assertIn(second.name, error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_transaction_refuses_when_head_is_not_the_version_it_backed_up(self) -> None:
+        first = self.guarded_transaction()
+        second = self.follow_up_transaction(first, "v3")
+
+        code, error = self.run_helper("--transaction", str(second))
+
+        self.assertEqual(code, 1)
+        self.assertIn(f"事务 {second.name} 之前的版本", error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_transaction_refuses_a_skill_edited_since_it_ran(self) -> None:
+        evidence = self.guarded_transaction()
+        (self.repo / "skill-x" / "SKILL.md").write_bytes(b"---\nname: skill-x\n---\nedited later\n")
+
+        code, error = self.run_helper("--transaction", str(evidence))
+
+        self.assertEqual(code, 1)
+        self.assertIn("又被改过", error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_transaction_refuses_a_backup_that_no_longer_matches_its_seal(self) -> None:
+        evidence = self.guarded_transaction()
+        (evidence / "backups" / "active-skills" / "skill-x" / "SKILL.md").write_bytes(b"tampered\n")
+
+        code, error = self.run_helper("--transaction", str(evidence))
+
+        self.assertEqual(code, 1)
+        self.assertIn("backup_seal", error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_transaction_refuses_to_put_back_a_skill_head_took_out_of_the_group(self) -> None:
+        # After the transaction ran, a ledger-only commit moved skill-x from group-a to group-b.  Replaying the
+        # transaction's move onto group-a would list skill-x in both groups.
+        evidence = self.guarded_transaction(group_skills=("skill-x", "skill-y", "skill-w"), other_moved="skill-y")
+        live = (self.repo / LEDGER).read_bytes()
+        moved = json.loads(self.show(f"HEAD:{LEDGER}"))
+        moved["sources"][0]["skills"] = ["skill-y", "skill-w"]
+        moved["sources"][1]["skills"] = ["skill-z", "skill-x"]
+        self.write(LEDGER, ledger_bytes(moved))
+        self.git("commit", "-q", "-m", "move skill-x to group-b", "--", LEDGER)
+        self.write(LEDGER, live)
+        self.base = self.head()
+
+        code, error = self.run_helper("--transaction", str(evidence))
+
+        self.assertEqual(code, 1)
+        self.assertIn("$.sources[id=group-a].skills", error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_transaction_refuses_a_reordered_list_that_is_not_a_groups_skills(self) -> None:
+        # Only ``skills`` is reordered by the wrapper itself; any other list a transaction rewrites is a value.
+        evidence = self.guarded_transaction(resource_paths=(["a", "b", "c"], ["a", "b"], ["b", "a"]))
+
+        code, error = self.run_helper("--transaction", str(evidence))
+
+        self.assertEqual(code, 1)
+        self.assertIn("$.sources[id=group-a].resource_paths", error)
+        self.assertEqual(self.head(), self.base)
+
+    def test_transaction_refuses_a_skills_change_that_drops_a_member(self) -> None:
+        evidence = self.guarded_transaction(
+            group_skills=("skill-x", "skill-y", "skill-w"), other_moved="skill-y", our_skills=["skill-w", "skill-x"]
+        )
+
+        code, error = self.run_helper("--transaction", str(evidence))
+
+        self.assertEqual(code, 1)
+        self.assertIn("$.sources[id=group-a].skills", error)
+        self.assertEqual(self.head(), self.base)
 
     def test_transaction_refuses_a_field_both_transactions_changed(self) -> None:
         evidence = self.guarded_transaction(other_status="retained-local", our_status="updated")
