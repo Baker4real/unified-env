@@ -53,11 +53,26 @@
 //      collection constraints or casts do not help. @(...), literals, member access, method calls, .Where()/.ForEach(),
 //      Measure-Object, New-Object, hyphenated commands defined in other files and same-file functions that return one
 //      dictionary, [pscustomobject] or comma-wrapped list pass; strings and comments are text.
+//  21. a .ps1 the command runs (remote -ScriptPath ones included) in which a built-in cmdlet call fails parameter
+//      binding: an AmbiguousParameterSet such as Split-Path -LiteralPath $p -Parent, or a NamedParameterNotFound. Each
+//      script gets the -CheckOnly pre-check of Invoke-CheckedPowerShell.ps1 (StaticParameterBinder), and only its
+//      parameter-error lines deny. The checks share one time budget and allow when they cannot finish; a .psm1, the
+//      checked entry itself and the -ScriptPath scripts handed to it (it runs the same check first) are not checked,
+//      and neither is the command text.
+//  22. DeepSeek Harness.exe invoked from the PowerShell or Bash tool, inline or inside a .ps1/.psm1 the command runs
+//      locally, while neither that command nor that script sets ELECTRON_RUN_AS_NODE to 1: the Electron binary then
+//      starts the desktop GUI whatever the arguments (--version included), and a GUI started from the tool shell lands in
+//      Claude's MSIX private layer. Invocations are the call operator or a bare path as the command, Start-Process with
+//      the exe as -FilePath or first positional argument, a variable assigned text naming the exe and then invoked, a
+//      pwsh -Command payload, and in Bash a command word ending in the exe name. Text that only names the exe passes,
+//      as do a -ScriptPath script that Invoke-CheckedPowerShell.ps1 -CheckOnly only checks and the Terminal panel,
+//      whose shell runs outside the package.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
 // Any internal error allows the command: the registration keeps onFailure=continue, so a broken guard
 // never locks the shell.
+import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { win32 } from 'node:path'
 
@@ -207,6 +222,14 @@ const defaultIo = {
     } catch {
       return null
     }
+  },
+  // Rule 21: the parameter-error line that the checked entry's -CheckOnly prints for a script; null when the script
+  // passes, fails another check first, or the entry cannot start or finish within `timeout` ms.
+  parameterError(path, timeout) {
+    const result = spawnSync(PWSH, ['-NoProfile', '-NonInteractive', '-File', CHECKED_POWERSHELL, '-ScriptPath', path, '-CheckOnly'],
+      { encoding: 'utf8', windowsHide: true, timeout, stdio: ['ignore', 'ignore', 'pipe'] })
+    if (result.status !== 2) return null
+    return String(result.stderr || '').split(/\r?\n/).find(line => line.startsWith('CheckedPowerShell parameter-error ')) || null
   }
 }
 
@@ -1395,6 +1418,238 @@ function fileDeleteDecision(command) {
     TEXT_ONLY_HINT
 }
 
+// Rule 21. A built-in cmdlet call whose parameter set cannot be resolved (Split-Path -LiteralPath $p -Parent) or that
+// names a missing parameter fails only when the script reaches it, after the statements before it ran (2026-11-15: a
+// cleanup script run with pwsh -File died on Split-Path -LiteralPath $link.FullName -Parent). Each .ps1 the command runs
+// gets the checked entry's -CheckOnly, which binds the cmdlets of the modules that ship with pwsh through
+// StaticParameterBinder. The entry stops at its first failing check, so a syntax, regex or native-argument error earlier
+// in the same script hides a parameter error; only parameter-error lines deny here. The entry reads .ps1 files only, and
+// the command text itself is not checked because one pwsh start costs about half a second.
+const PWSH = 'D:\\Codex\\tools\\PowerShell\\7.6.9\\pwsh.exe'
+const CHECKED_POWERSHELL = 'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1'
+const PARAMETER_CHECK_BUDGET_MS = 6000
+const PARAMETER_CHECK_MIN_MS = 1000
+// Invoke-CheckedPowerShell.ps1 as a word of a simple command, run directly or as pwsh's -File.
+const CHECKED_ENTRY = /(?:^|[\\/])invoke-checkedpowershell\.ps1$/i
+
+// Lower-case resolved paths of the -ScriptPath scripts that commands hand to Invoke-CheckedPowerShell.ps1; with
+// checkOnly, only those of calls that pass -CheckOnly. The entry runs rule 21's check on such a script before it runs
+// it, and with -CheckOnly does not run it at all. A path held in a variable or an expression is not matched.
+function checkedEntryScripts(command, cwd, checkOnly) {
+  if (!/invoke-checkedpowershell\.ps1/i.test(command)) return []
+  const scripts = []
+  for (const words of powerShellWords(command)) {
+    const entry = words.findIndex(word => CHECKED_ENTRY.test(word.value.trim()))
+    if (entry < 0) continue
+    const rest = words.slice(entry + 1)
+    if (checkOnly && !rest.some(word => /^-CheckOnly(?::\$true)?$/i.test(word.raw))) continue
+    const flag = rest.findIndex(word => /^-ScriptPath(?::|$)/i.test(word.raw))
+    if (flag < 0) continue
+    const value = /^-ScriptPath:/i.test(rest[flag].raw) ? rest[flag].value.slice('-ScriptPath:'.length) : rest[flag + 1]?.value
+    if (!value || /[$`(]/.test(value)) continue
+    scripts.push(win32.resolve(cwd || '.', value.replace(/^\/([a-z])(?=\/)/i, (_, drive) => `${drive}:`)).toLowerCase())
+  }
+  return scripts
+}
+
+function parameterReason(script, diagnostic) {
+  return `脚本 ${script} 没过参数预检：${diagnostic}（行列指这个脚本）。这类错误要运行到那一行才报，前面的语句已经执行了。` +
+    '参数集定不下来（AmbiguousParameterSet）常见于 Split-Path -LiteralPath $p -Parent 或 -Leaf：-LiteralPath 只能单用，' +
+    '取父目录、文件名改用 [IO.Path]::GetDirectoryName($p)、[IO.Path]::GetFileName($p) 或 -Path；参数名不存在（NamedParameterNotFound）就改成该 cmdlet 真有的参数。' +
+    `改完用 & '${CHECKED_POWERSHELL}' -ScriptPath '${script}' -CheckOnly 复查（${GUIDANCE}\\windows-pwsh-command-guidelines.md「受检执行入口」的参数预检段）。`
+}
+
+// Returns a deny reason when a .ps1 the command runs fails the parameter pre-check. The checks of one command share a
+// time budget; a script the budget no longer covers, and one whose check cannot finish, is allowed. Scripts handed to
+// the checked entry's -ScriptPath are left to the entry.
+function parameterDecision(command, cwd, io) {
+  const deadline = Date.now() + PARAMETER_CHECK_BUDGET_MS
+  const checked = checkedEntryScripts(command, cwd, false)
+  for (const script of referencedScripts(command, cwd, io)) {
+    if (!/\.ps1$/i.test(script) || win32.basename(script).toLowerCase() === 'invoke-checkedpowershell.ps1') continue
+    if (checked.includes(script.toLowerCase()) || io.read(script) === null) continue
+    const remaining = deadline - Date.now()
+    if (remaining < PARAMETER_CHECK_MIN_MS) break
+    const diagnostic = io.parameterError?.(script, remaining)
+    if (diagnostic) return parameterReason(script, diagnostic)
+  }
+  return null
+}
+
+// Rule 22. DeepSeek Harness.exe is an Electron binary: unless ELECTRON_RUN_AS_NODE is 1 it starts the desktop GUI
+// whatever the arguments (2026-11-14: a `& '<install>\DeepSeek Harness.exe' --version` preflight opened it), and a GUI
+// started from the tool shell lands in Claude's MSIX private layer. Only invocations count, so filters, Test-Path, rg
+// patterns and strings that name the exe pass. Setting ELECTRON_RUN_AS_NODE to 1 anywhere in the same command or
+// script passes as well; a command's setting also reaches the scripts it runs.
+const DSH_EXE = /deepseek harness\.exe$/i
+const DSH_EXE_NAMED = /deepseek harness\.exe/i
+const DSH_PAGE = 'D:\\agents\\knowledge-base\\wiki\\entities\\DeepSeek Harness.md'
+// $env:X = '1', ${env:X} = 1, @{ X = '1' }, $psi.Environment['X'] = '1', SetEnvironmentVariable('X', '1'),
+// Set-Item Env:X 1 or -Value 1, and X=1 in front of a bash command, export X=1 or cmd's set X=1.
+const ELECTRON_NODE_MODE = /\bELECTRON_RUN_AS_NODE\b['"\]}]*(?:[ \t]*[=,:][ \t]*|[ \t]+(?:-Value[ \t]+)?)['"]?1(?![\w.])/i
+const DSH_VARIABLE = /\$(?:(?:script|global|local|private):)?(\w+)[ \t]*=(?!=)([^\n;]*)/gi
+const ASSIGNED_VARIABLE = /^(?:\[[^\]]*\])*\$[\w:]+$/
+const EXPRESSION_START = /^['"‘’‚‛“”„$(@[]/
+const START_PROCESS = new Set(['start-process', 'saps', 'start'])
+const START_PROCESS_FILE = /^(?:f(?:i(?:l(?:e(?:p(?:a(?:t(?:h)?)?)?)?)?)?)?|pspath|path)$/i
+const START_PROCESS_SWITCHES = ['loaduserprofile', 'lup', 'nonewwindow', 'nnw', 'passthru', 'wait', 'usenewenvironment',
+  'verbose', 'vb', 'debug', 'db', 'whatif', 'wi', 'confirm', 'cf']
+
+// The body of a string or here-string token without its quotes.
+function unquote(raw) {
+  if (raw[0] === '@') return raw.slice(2).replace(/^[ \t]*\r?\n/, '').replace(/\r?\n.@$/, '')
+  const quotes = SINGLE_QUOTES.has(raw[0]) ? SINGLE_QUOTES : DOUBLE_QUOTES
+  return raw.slice(1, raw.length > 1 && quotes.has(raw.at(-1)) ? -1 : raw.length)
+}
+
+// Index of the bracket that closes the ( or { at s[i] before `to`, strings, comments and escapes skipped; -1 if none.
+function groupCloser(s, i, to) {
+  let depth = 0
+  for (let j = i; j < to; j++) {
+    const end = skipQuotedText(s, j)
+    if (end !== j) { j = end - 1; continue }
+    if (s[j] === '`') { j++; continue }
+    if (s[j] === '(' || s[j] === '{') depth++
+    else if ((s[j] === ')' || s[j] === '}') && --depth === 0) return j
+  }
+  return -1
+}
+
+// The words of each simple command in PowerShell text, as { raw, value } with value's quotes taken off. Commands end at
+// ; | && || ) } and line breaks outside strings; a ( ) or { } group stays inside its word, and its inside is read as
+// commands too. Comments are dropped, a backtick escapes the next character, and one at a line end joins the lines.
+function powerShellWords(s, from = 0, to = s.length, commands = []) {
+  let words = []
+  let word = null
+  const add = (raw, value) => { word = word ? { raw: word.raw + raw, value: word.value + value } : { raw, value } }
+  const endWord = () => { if (word) words.push(word); word = null }
+  const endCommand = () => { endWord(); if (words.length) commands.push(words); words = [] }
+  for (let i = from; i < to;) {
+    const c = s[i]
+    if (c === '`') {
+      const continued = /^`\r?\n/.exec(s.slice(i, i + 3))
+      if (continued) endWord()
+      else add(s.slice(i, i + 2), s[i + 1] || '')
+      i += continued ? continued[0].length : 2
+      continue
+    }
+    const end = Math.min(skipQuotedText(s, i), to)
+    if (end !== i) {
+      if (c !== '#' && c !== '<') add(s.slice(i, end), unquote(s.slice(i, end)))
+      i = end
+      continue
+    }
+    const open = c === '(' || c === '{' ? i : (c === '$' || c === '@') && (s[i + 1] === '(' || s[i + 1] === '{') ? i + 1 : -1
+    if (open >= 0) {
+      const close = groupCloser(s, open, to)
+      const stop = close < 0 ? to : close + 1
+      add(s.slice(i, stop), s.slice(i, stop))
+      powerShellWords(s, open + 1, close < 0 ? to : close, commands)
+      i = stop
+      continue
+    }
+    if (c === '&' && s[i + 1] === '&') { endCommand(); i += 2; continue }
+    if (c === '&' && !word?.raw.endsWith('>')) { endWord(); words.push({ raw: '&', value: '&' }); i++; continue }
+    if (/[;|\n)}]/.test(c)) endCommand()
+    else if (/\s/.test(c)) endWord()
+    else add(c, c)
+    i++
+  }
+  endCommand()
+  return commands
+}
+
+// The word Start-Process takes as -FilePath: the value of -FilePath (a prefix, -PSPath or -Path), else the first
+// positional argument. Other parameters take the next word unless they are switches.
+function startProcessFile(words) {
+  for (let i = 1; i < words.length; i++) {
+    const parameter = /^-([A-Za-z]+)(:?)/.exec(words[i].raw)
+    if (!parameter) return words[i]
+    const name = parameter[1].toLowerCase()
+    const inline = parameter[2]
+      ? { raw: words[i].raw.slice(parameter[0].length), value: words[i].value.slice(parameter[0].length) } : null
+    if (START_PROCESS_FILE.test(name)) return inline || words[i + 1] || null
+    if (!inline && !START_PROCESS_SWITCHES.some(full => full.startsWith(name))) i++
+  }
+  return null
+}
+
+// The words of PowerShell text that invoke DeepSeek Harness.exe: the call operator or a bare path as the command (a
+// quoted path that opens a statement is an expression), Start-Process with the exe as -FilePath or first positional
+// argument, a variable assigned text that names the exe and then invoked, and invocations in a pwsh -Command payload.
+function dshInvocations(text) {
+  if (!DSH_EXE_NAMED.test(text)) return []
+  const named = new Set([...text.matchAll(DSH_VARIABLE)].filter(match => DSH_EXE_NAMED.test(match[2]))
+    .map(match => match[1].toLowerCase()))
+  const variable = word => /^\$(?:(?:script|global|local|private):)?(\w+)$/i.exec(word.raw)?.[1].toLowerCase()
+  const invokes = word => Boolean(word) && (DSH_EXE.test(word.value.trim()) || named.has(variable(word)) ||
+    (/^\$?\(/.test(word.raw) && DSH_EXE_NAMED.test(word.raw)))
+  const hits = []
+  for (let words of powerShellWords(text)) {
+    // The right side of an assignment is a pipeline of its own: $v = & '<exe>' --version.
+    if (ASSIGNED_VARIABLE.test(words[0].raw) && /^[+*\/%-]?=$/.test(words[1]?.raw || '')) words = words.slice(2)
+    const called = words[0]?.raw === '&' || words[0]?.raw === '.'
+    if (called) words = words.slice(1)
+    const first = words[0]
+    if (!first || (!called && EXPRESSION_START.test(first.raw))) continue
+    const name = commandName(first.value)
+    if (called ? invokes(first) : DSH_EXE.test(first.value)) hits.push(first)
+    else if (START_PROCESS.has(name)) {
+      const file = startProcessFile(words)
+      if (invokes(file)) hits.push(file)
+    } else if (name === 'pwsh' || name === 'powershell') {
+      const payload = payloadWords(name, words.slice(1).map(word => ({ text: word.value })))
+      hits.push(...dshInvocations(payload.map(word => word.text).join(' ')))
+    }
+  }
+  return hits
+}
+
+// The text of a Bash command word that runs DeepSeek Harness.exe: a command word ending in the exe name after VAR=value
+// prefixes and env or exec, or an invocation inside a pwsh -Command payload.
+function bashDshInvocation(command) {
+  if (!DSH_EXE_NAMED.test(command)) return null
+  for (const { words } of bashCommands(command)) {
+    let i = 0
+    while (i < words.length && (/^[A-Za-z_]\w*=/.test(words[i].text) || /^(?:env|exec|command|time|nohup)$/.test(words[i].text))) i++
+    if (!words[i]) continue
+    if (DSH_EXE.test(words[i].text)) return words[i].text
+    const name = commandName(words[i].text)
+    if (name !== 'pwsh' && name !== 'powershell') continue
+    const hit = dshInvocations(payloadWords(name, words.slice(i + 1)).map(word => word.text).join(' '))[0]
+    if (hit) return hit.value
+  }
+  return null
+}
+
+function dshGuiReason(where, invoked) {
+  const path = invoked.trim().replace(/^\/([a-z])(?=\/)/i, (_, drive) => `${drive}:`)
+  const install = /^[a-z]:[\\/]/i.test(path) && !/[$`(]/.test(path) ? win32.dirname(win32.normalize(path)) : '<安装目录>'
+  return `${where}${invoked} 没设 ELECTRON_RUN_AS_NODE=1：DeepSeek Harness.exe 是 Electron 程序，不设它时带什么参数都会启动桌面 GUI（--version 也一样），` +
+    `从 Claude 的工具 shell 拉起的 GUI 还会落进 Claude 的 MSIX 包私有层（见 ${DSH_PAGE}）。` +
+    `要跑 Node 脚本或查 Node 版本，用安装目录自带的 Node：& '${install}\\resources\\runtime\\primary-runtime\\dependencies\\node\\bin\\node.exe' <脚本>；` +
+    `查 DSH 或包的版本用 node D:/agents/projects/dsh-plugins/dsh-compaction-256k/scripts/dsh-desktop.mjs manifest --resources '${install.replace(/\\/g, '/')}/resources' --package <包名>，` +
+    "输出 JSON 的 dshVersion 就是 DSH 版本。确实要用它的 Node 模式，就在同一条命令或脚本里先设 $env:ELECTRON_RUN_AS_NODE = '1'" +
+    '（Bash 写 ELECTRON_RUN_AS_NODE=1 前缀）；要开 GUI 就从开始菜单启动。' + TEXT_ONLY_HINT
+}
+
+// Returns a deny reason when the command, or a .ps1/.psm1 it runs locally, invokes DeepSeek Harness.exe while neither
+// that command nor that script sets ELECTRON_RUN_AS_NODE to 1. Invoke-CheckedPowerShell.ps1 -CheckOnly does not run
+// its -ScriptPath script.
+function dshGuiDecision(command, tool, cwd, io) {
+  if (ELECTRON_NODE_MODE.test(command)) return null
+  const inline = tool === 'Bash' ? bashDshInvocation(command) : dshInvocations(command)[0]?.value
+  if (inline) return dshGuiReason('', inline)
+  const skipped = [...remoteScripts(command, cwd), ...checkedEntryScripts(command, cwd, true)]
+  for (const script of referencedScripts(command, cwd, io)) {
+    if (skipped.includes(script.toLowerCase())) continue
+    const text = io.read(script)
+    const hit = text && !ELECTRON_NODE_MODE.test(text) ? dshInvocations(text)[0] : null
+    if (hit) return dshGuiReason(`脚本 ${script} 里：`, hit.value)
+  }
+  return null
+}
+
 function deny(reason) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
@@ -1432,6 +1687,9 @@ export function evaluate(payload, io = defaultIo) {
   if (recycle) return recycle
   const explorer = explorerDecision(command, payload?.cwd, io)
   if (explorer) return explorer
+  // Rule 22. The Terminal panel's shell runs outside the MSIX package, where a GUI it starts is a normal launch.
+  const dshGui = terminal ? null : dshGuiDecision(command, tool, payload?.cwd, io)
+  if (dshGui) return dshGui
   const fileDelete = fileDeleteDecision(command)
   if (fileDelete) return fileDelete
 
@@ -1474,7 +1732,8 @@ export function evaluate(payload, io = defaultIo) {
     return `git clone 的源 ${source} 是本地路径：同盘本地克隆默认把源库 .git/objects 硬链进克隆，受管 safe-tree-delete 拒绝硬链文件，克隆建成后就删不掉了。` +
       '加 --no-hardlinks 后重试（--no-local 或 file:// 源也行）。如果这只是文本（提交信息、搜索模式），改用 Grep 工具，或把关键词拆开写。'
   }
-  return strictCountDecision(command, tool, payload?.cwd, io)
+  // Rule 21 goes last: it starts pwsh, so every cheaper rule answers first.
+  return strictCountDecision(command, tool, payload?.cwd, io) || parameterDecision(command, payload?.cwd, io)
 }
 
 function main() {
@@ -1830,7 +2089,53 @@ if (process.argv.includes('--self-test')) {
     ['Edit', { file_path: 'D:\\repo\\tools\\existing-clean.ps1', old_string: '$files = @(Get-ChildItem $root)', new_string: '$files = Get-ChildItem $root' }, true],
     ['Edit', { file_path: 'D:\\repo\\tools\\no-strict.ps1', old_string: "$ErrorActionPreference = 'Stop'", new_string: "Set-StrictMode -Version Latest\n$ErrorActionPreference = 'Stop'" }, true],
     ['Edit', { file_path: 'D:\\repo\\tools\\existing-trap.ps1', old_string: "Write-Output 'start'", new_string: "Write-Output 'begin'" }, false],
-    ['Edit', { file_path: 'D:\\repo\\tools\\existing-trap.ps1', old_string: '$files = Get-ChildItem $root', new_string: '$files = @(Get-ChildItem $root)' }, false]
+    ['Edit', { file_path: 'D:\\repo\\tools\\existing-trap.ps1', old_string: '$files = Get-ChildItem $root', new_string: '$files = @(Get-ChildItem $root)' }, false],
+    // Rule 21: a .ps1 the command runs gets the checked entry's parameter pre-check (stubbed below); a script that is
+    // only read, a .psm1 and the command text itself are not checked.
+    ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\split-parent.ps1'", true],
+    ['PowerShell', "& 'D:\\repo\\tools\\split-parent.ps1'", true],
+    [TERMINAL_TOOL, 'pwsh -File D:\\repo\\tools\\split-parent.ps1', true],
+    ['Bash', 'pwsh -NoProfile -File /d/repo/tools/split-parent.ps1', true],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-OfficeRemote.ps1' -Target office -ScriptPath 'D:\\repo\\tools\\split-parent.ps1'", true],
+    ['PowerShell', "Get-FileHash -LiteralPath 'D:\\repo\\tools\\split-parent.ps1'; pwsh -File 'D:\\repo\\tools\\harmless.ps1'", false],
+    ['PowerShell', "Import-Module 'D:\\repo\\tools\\split-parent.psm1'", false],
+    ['PowerShell', '$p = Get-Item .; Split-Path -LiteralPath $p.FullName -Parent', false],
+    // The checked entry runs the same check on its -ScriptPath script before running it.
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1' -ScriptPath 'D:\\repo\\tools\\split-parent.ps1' -CheckOnly", false],
+    ['PowerShell', 'pwsh -NoProfile -File D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1 -ScriptPath:D:\\repo\\tools\\split-parent.ps1', false],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1' -ScriptPath D:\\repo\\tools\\harmless.ps1; pwsh -File D:\\repo\\tools\\split-parent.ps1", true],
+    // Rule 22: DeepSeek Harness.exe without ELECTRON_RUN_AS_NODE=1 starts its GUI; node mode, text that names the exe
+    // and the Terminal panel pass.
+    ['PowerShell', "& 'D:/x/DeepSeek Harness/DeepSeek Harness.exe' --version", true],
+    ['PowerShell', "Start-Process -FilePath 'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe'", true],
+    ['PowerShell', "Start-Process -Wait 'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe' -ArgumentList '--version'", true],
+    ['PowerShell', "saps -FilePath:'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe'", true],
+    ['PowerShell', "D:\\x\\'DeepSeek Harness'\\'DeepSeek Harness.exe' --version", true],
+    ['PowerShell', '$v = & "$env:LOCALAPPDATA\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe" --version', true],
+    ['PowerShell', "$exe = Join-Path $install 'DeepSeek Harness.exe'\nif (Test-Path -LiteralPath $exe) { & $exe --version }", true],
+    ['PowerShell', "Start-Process -FilePath (Join-Path $install 'DeepSeek Harness.exe')", true],
+    ['PowerShell', "pwsh -NoProfile -Command \"& 'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe' --version\"", true],
+    ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\dsh-version.ps1'", true],
+    ['PowerShell', "& 'D:\\repo\\tools\\dsh-launch.ps1'", true],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1' -ScriptPath 'D:\\repo\\tools\\dsh-version.ps1'", true],
+    ['PowerShell', "& 'D:\\Codex\\.codex\\scripts\\Invoke-CheckedPowerShell.ps1' -ScriptPath 'D:\\repo\\tools\\dsh-version.ps1' -CheckOnly", false],
+    ['Bash', "'/d/x/DeepSeek Harness/DeepSeek Harness.exe' --version", true],
+    ['Bash', "pwsh -c \"& 'D:/x/DeepSeek Harness/DeepSeek Harness.exe' --version\"", true],
+    ['PowerShell', "$env:ELECTRON_RUN_AS_NODE = '1'; & 'D:/x/DeepSeek Harness/DeepSeek Harness.exe' D:\\x\\probe.mjs", false],
+    ['PowerShell', "Start-Process -FilePath 'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe' -ArgumentList 'D:\\x\\probe.mjs' -Environment @{ ELECTRON_RUN_AS_NODE = '1' } -Wait -NoNewWindow", false],
+    ['PowerShell', "$env:ELECTRON_RUN_AS_NODE = '1'; pwsh -NoProfile -File 'D:\\repo\\tools\\dsh-version.ps1'", false],
+    ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\dsh-node.ps1'", false],
+    ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\dsh-restart.ps1' -ResultPath D:\\x\\r.json", false],
+    ['PowerShell', "Get-CimInstance Win32_Process -Filter \"Name = 'DeepSeek Harness.exe'\"", false],
+    ['PowerShell', "Get-Process -Name 'DeepSeek Harness' -ErrorAction Ignore | Select-Object Id, Path", false],
+    ['PowerShell', "Test-Path -LiteralPath 'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe'", false],
+    ['PowerShell', "$exe = 'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe'; (Get-Item -LiteralPath $exe).VersionInfo.FileVersion", false],
+    ['PowerShell', "rg -n 'DeepSeek Harness.exe' D:\\x; Write-Output \"& 'DeepSeek Harness.exe'\"", false],
+    ['PowerShell', "'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe'", false],
+    ['PowerShell', "git commit -m \"fix: & 'DeepSeek Harness.exe' --version opened the GUI\"", false],
+    ['Bash', "ELECTRON_RUN_AS_NODE=1 '/d/x/DeepSeek Harness/DeepSeek Harness.exe' /d/x/probe.mjs", false],
+    ['Bash', "grep -n 'DeepSeek Harness.exe' notes.txt; echo \"DeepSeek Harness.exe\"", false],
+    [TERMINAL_TOOL, "& 'D:/x/DeepSeek Harness/DeepSeek Harness.exe'", false]
   ]
   const scripts = new Map(Object.entries({
     'D:\\repo\\tools\\recycle.ps1': 'Add-Type -TypeDefinition $src\n[Native]::SHFileOperationW([ref]$op)',
@@ -1886,9 +2191,32 @@ if (process.argv.includes('--self-test')) {
     ].join('\n'),
     'D:\\repo\\tools\\no-strict.ps1': "$ErrorActionPreference = 'Stop'\n$files = Get-ChildItem -LiteralPath $PSScriptRoot\nWrite-Output $files.Count",
     'D:\\repo\\tools\\existing-trap.ps1': "Set-StrictMode -Version Latest\nWrite-Output 'start'\n$files = Get-ChildItem $root\nWrite-Output $files.Count",
-    'D:\\repo\\tools\\existing-clean.ps1': 'Set-StrictMode -Version Latest\n$files = @(Get-ChildItem $root)\nWrite-Output $files.Count'
+    'D:\\repo\\tools\\existing-clean.ps1': 'Set-StrictMode -Version Latest\n$files = @(Get-ChildItem $root)\nWrite-Output $files.Count',
+    // Rule 21: the 2026-11-15 cleanup script's call, and a module with the same call.
+    'D:\\repo\\tools\\split-parent.ps1': '$link = Get-Item -LiteralPath $PSScriptRoot\nSplit-Path -LiteralPath $link.FullName -Parent',
+    'D:\\repo\\tools\\split-parent.psm1': 'function Get-Parent($p) { Split-Path -LiteralPath $p -Parent }',
+    // Rule 22: a version probe, a launch through a variable, node mode, and Restart-Dsh.ps1's shape (explorer opens
+    // the Start menu shortcut; the exe path is only read).
+    'D:\\repo\\tools\\dsh-version.ps1': "& 'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe' --version",
+    'D:\\repo\\tools\\dsh-launch.ps1': "$exe = Join-Path $install 'DeepSeek Harness.exe'\nStart-Process -FilePath $exe",
+    'D:\\repo\\tools\\dsh-node.ps1': "$env:ELECTRON_RUN_AS_NODE = '1'\n& 'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe' D:\\x\\probe.mjs",
+    'D:\\repo\\tools\\dsh-restart.ps1': [
+      "param([string]$ResultPath, [string]$Exe = 'D:\\x\\DeepSeek Harness\\DeepSeek Harness.exe')",
+      "function Get-Dsh { Get-CimInstance Win32_Process -Filter \"Name='DeepSeek Harness.exe'\" }",
+      'Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction Ignore',
+      "Start-Process -FilePath (Join-Path $env:WINDIR 'explorer.exe') -ArgumentList \"`\"$Shortcut`\"\"",
+      '$version = (Get-Item -LiteralPath $Exe).VersionInfo.FileVersion'
+    ].join('\n')
   }).map(([path, text]) => [path.toLowerCase(), text]))
-  const io = { read: path => scripts.get(win32.normalize(path).toLowerCase()) ?? null }
+  // Rule 21: what Invoke-CheckedPowerShell.ps1 -CheckOnly reports for a script; the .psm1 must never be asked.
+  const parameterErrors = new Map(Object.entries({
+    'D:\\repo\\tools\\split-parent.ps1': 'CheckedPowerShell parameter-error id=AmbiguousParameterSet command=Split-Path line=2 column=1',
+    'D:\\repo\\tools\\split-parent.psm1': 'CheckedPowerShell parameter-error id=AmbiguousParameterSet command=Split-Path line=1 column=27'
+  }).map(([path, line]) => [path.toLowerCase(), line]))
+  const io = {
+    read: path => scripts.get(win32.normalize(path).toLowerCase()) ?? null,
+    parameterError: path => parameterErrors.get(win32.normalize(path).toLowerCase()) ?? null
+  }
   let failed = 0
   // A case's second element is the shell command, or for Grep and Glob the tool input plus an optional cwd.
   for (const [tool, input, shouldDeny, env] of cases) {

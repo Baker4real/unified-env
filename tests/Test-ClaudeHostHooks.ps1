@@ -86,7 +86,10 @@ $denyCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Get-Item x | Select-Object Name; exit 0' } },
     # Grep/Glob 工具 20 秒就停；没给 path 时搜会话 cwd。
     @{ tool_name = 'Grep'; tool_input = @{ pattern = 'x'; path = 'D:\agents\projects' } },
-    @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents' }
+    @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents' },
+    # 不设 ELECTRON_RUN_AS_NODE=1 运行 DeepSeek Harness.exe 会启动 GUI：调用运算符和 Start-Process -FilePath 都拦。
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'D:\x\DeepSeek Harness\DeepSeek Harness.exe' --version" } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = "Start-Process -FilePath 'D:\x\DeepSeek Harness\DeepSeek Harness.exe'" } }
 )
 foreach ($case in $denyCases) {
     $label = $case.tool_input['command'] ?? ($case | ConvertTo-Json -Compress)
@@ -110,7 +113,10 @@ $allowCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'C:/Program Files/Git/bin/bash.exe' scripts/rssh.sh uptime" } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -n foo D:\x; $global:LASTEXITCODE = 0' } },
     @{ tool_name = 'Grep'; tool_input = @{ pattern = 'x'; path = 'D:\agents\projects\misc' } },
-    @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents\projects\misc' }
+    @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents\projects\misc' },
+    # 同一条命令先设 ELECTRON_RUN_AS_NODE=1 就是 Node 模式；Get-CimInstance 的过滤串只是提到这个 exe。
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = '$env:ELECTRON_RUN_AS_NODE = ''1''; & ''D:\x\DeepSeek Harness\DeepSeek Harness.exe'' D:\x\probe.mjs' } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Get-CimInstance Win32_Process -Filter "Name = ''DeepSeek Harness.exe''"' } }
 )
 foreach ($case in $allowCases) {
     $label = $case.tool_input['command'] ?? ($case | ConvertTo-Json -Compress)
@@ -138,6 +144,16 @@ try {
     [IO.File]::WriteAllText($fixture, 'Get-ChildItem -LiteralPath $PSScriptRoot', [Text.UTF8Encoding]::new($false))
     $result = Invoke-Guard $scriptCase
     Assert-Equal $result.stdout.Trim() '' '无害的引用脚本必须放行。'
+    # 参数预检走真实的 Invoke-CheckedPowerShell.ps1 -CheckOnly：-LiteralPath 配 -Parent 定不下参数集，拦截；改成 -Path 放行。
+    [IO.File]::WriteAllText($fixture, "`$p = 'D:\x\a.txt'`nSplit-Path -LiteralPath `$p -Parent`n", [Text.UTF8Encoding]::new($false))
+    $result = Invoke-Guard $scriptCase
+    Assert-Equal $result.exitCode 0 '参数预检 deny 也必须 exit 0。'
+    $decision = ($result.stdout | ConvertFrom-Json).hookSpecificOutput
+    Assert-Equal $decision.permissionDecision 'deny' '运行的脚本没过参数预检（AmbiguousParameterSet）必须拦截。'
+    Assert-True ($decision.permissionDecisionReason.Contains('AmbiguousParameterSet')) '拦截理由必须带出参数预检的诊断。'
+    [IO.File]::WriteAllText($fixture, "`$p = 'D:\x\a.txt'`nSplit-Path -Path `$p -Parent`n", [Text.UTF8Encoding]::new($false))
+    $result = Invoke-Guard $scriptCase
+    Assert-Equal $result.stdout.Trim() '' '参数预检通过的脚本必须放行。'
 }
 finally {
     if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture }
