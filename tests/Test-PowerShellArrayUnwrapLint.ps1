@@ -63,7 +63,7 @@ exit $(if ($CommandForTest) { 1 } else { 0 })
 # 'g' instead of 'gh' before 272fd4c.
 $result = Invoke-Lint @($unwraps, $clean)
 Assert-True ($result.exitCode -eq 1 -and $result.report.status -eq 'error') "Unwrapping values must exit 1 with status error, got $($result.exitCode)"
-$expected = @(
+$expected = @(@(
     '2 $command = $(...) unwraps the array it outputs; use @(...)'
     '3 $labels = $(...) unwraps the array it outputs; use @(...)'
     '4 $mode = $(...) unwraps the array it outputs; use @(...)'
@@ -71,7 +71,7 @@ $expected = @(
     '6 items = $(...) unwraps the array it outputs; use @(...)'
     '7 $all = $(...) unwraps the array it outputs; use @(...)'
     '8 $pair = $(...) unwraps the array it outputs; use @(...)'
-) | ForEach-Object { '{0}:{1}' -f $unwraps, $_ }
+) | ForEach-Object { '{0}:{1}' -f $unwraps, $_ })
 $actual = Get-Listing $result.report
 Assert-True (($actual -join "`n") -ceq ($expected -join "`n")) ("Unexpected findings:`n" + ($actual -join "`n"))
 Assert-True ($result.report.files -eq 2 -and $result.report.errors -eq $expected.Count) "Counts: files $($result.report.files), errors $($result.report.errors)"

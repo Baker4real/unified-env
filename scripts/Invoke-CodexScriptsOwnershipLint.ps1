@@ -80,7 +80,7 @@ function Read-Registry([string]$Path) {
     @($entries)
 }
 
-$entries = Read-Registry $RegistryPath
+$entries = @(Read-Registry $RegistryPath)
 $findings = [System.Collections.Generic.List[object]]::new()
 $fileCount = 0
 $rootItem = Get-Item -LiteralPath $Root -Force -ErrorAction SilentlyContinue

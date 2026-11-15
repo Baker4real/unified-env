@@ -720,7 +720,7 @@ function Get-TomlSanitization {
 
     $lineRecords = @(Get-TomlLineRecords -Content $source.content)
     $lines = @($lineRecords | ForEach-Object { [string]$_.text })
-    $headers = Get-TomlHeaders -Lines $lines
+    $headers = @(Get-TomlHeaders -Lines $lines)
     $remove = [bool[]]::new($lineRecords.Count)
     $removedBlocks = [Collections.Generic.HashSet[int]]::new()
     $headersToRemove = [Collections.Generic.HashSet[int]]::new()
@@ -786,7 +786,7 @@ function Get-TomlSanitization {
         throw 'TOML 清理后仍存在退休 project marker，拒绝部分应用。'
     }
     $remainingRecords = @(Get-TomlLineRecords -Content $content)
-    $remainingHeaders = Get-TomlHeaders -Lines @($remainingRecords | ForEach-Object { [string]$_.text })
+    $remainingHeaders = @(Get-TomlHeaders -Lines @($remainingRecords | ForEach-Object { [string]$_.text }))
     if (@($remainingHeaders | Where-Object { Test-IsRetiredProjectTomlHeader -Header $_ -RetiredProjectPaths $RetiredProjectPaths }).Count -gt 0) {
         throw 'TOML 清理后仍存在退休 project table，拒绝部分应用。'
     }

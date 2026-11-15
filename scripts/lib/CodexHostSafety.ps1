@@ -1220,7 +1220,7 @@ function Remove-CodexHookCapabilityTreeFileWithDirectoryGuard {
             }
             $retryAllowed = $null -ne $RetryPolicy -and
                 $nativeError -in @($RetryPolicy.allowedWindowsErrors)
-            $retryDelays = if ($null -eq $RetryPolicy) { @() } else { @($RetryPolicy.delayMilliseconds) }
+            $retryDelays = @(if ($null -eq $RetryPolicy) { @() } else { @($RetryPolicy.delayMilliseconds) })
             $delayIndex = [Math]::Min($attempt - 1, $retryDelays.Count - 1)
             $delayMs = if ($retryAllowed -and $delayIndex -ge 0) {
                 [long]$retryDelays[$delayIndex]
@@ -1349,7 +1349,7 @@ function Remove-CodexHookCapabilityTreeJunctionWithDirectoryGuard {
             }
             $retryAllowed = $null -ne $RetryPolicy -and
                 $nativeError -in @($RetryPolicy.allowedWindowsErrors)
-            $retryDelays = if ($null -eq $RetryPolicy) { @() } else { @($RetryPolicy.delayMilliseconds) }
+            $retryDelays = @(if ($null -eq $RetryPolicy) { @() } else { @($RetryPolicy.delayMilliseconds) })
             $delayIndex = [Math]::Min($attempt - 1, $retryDelays.Count - 1)
             $delayMs = if ($retryAllowed -and $delayIndex -ge 0) {
                 [long]$retryDelays[$delayIndex]

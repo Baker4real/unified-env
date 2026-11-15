@@ -77,7 +77,7 @@ function Get-Nothing {
     # the shape that made managed recycle read back the wrong bin record before 5ac0f50.
     $result = Invoke-Lint @($overwrites, $clean)
     Assert-True ($result.exitCode -eq 1 -and $result.report.status -eq 'error') "Overwrites must exit 1 with status error, got $($result.exitCode)"
-    $expected = @(
+    $expected = @(@(
         '3 Find-Record assigns $original, which is the parameter $Original'
         '4 Find-Record assigns $original, which is the parameter $Original'
         '10 Get-Total assigns $value, which is the parameter $Value'
@@ -88,7 +88,7 @@ function Get-Nothing {
         '13 Get-Total assigns $count, which is the parameter $Count'
         '16 Get-Inner assigns $name, which is the parameter $Name'
         '19 Add assigns $step, which is the parameter $Step'
-    ) | ForEach-Object { '{0}:{1}' -f $overwrites, $_ }
+    ) | ForEach-Object { '{0}:{1}' -f $overwrites, $_ })
     $actual = Get-Listing $result.report
     Assert-True ((($actual | Sort-Object) -join "`n") -ceq (($expected | Sort-Object) -join "`n")) ("Unexpected findings:`n" + ($actual -join "`n"))
     Assert-True ($result.report.files -eq 2 -and $result.report.errors -eq $expected.Count) "Counts: files $($result.report.files), errors $($result.report.errors)"

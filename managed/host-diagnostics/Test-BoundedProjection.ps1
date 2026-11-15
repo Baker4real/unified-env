@@ -451,7 +451,7 @@ $gitStatusCode = $LASTEXITCODE
 $gitStatusJson = $gitStatusOutput -join [Environment]::NewLine
 $gitStatusJson | Set-Content -LiteralPath (Join-Path $runRoot 'git-status.result.json') -Encoding utf8
 $gitStatus = $gitStatusJson | ConvertFrom-Json -AsHashtable
-$gitStatusFull = Get-Content -LiteralPath $gitStatusEvidence -Encoding utf8
+$gitStatusFull = @(Get-Content -LiteralPath $gitStatusEvidence -Encoding utf8)
 if ($gitStatusCode -ne 0 -or [Text.Encoding]::UTF8.GetByteCount($gitStatusJson) + 2 -gt 1800 -or
     $gitStatus.changeCount -ne 82 -or $gitStatus.stagedCount -ne 1 -or $gitStatus.unstagedCount -ne 1 -or
     $gitStatus.untrackedCount -ne 80 -or $gitStatus.matchedRows -ne 81 -or $gitStatus.omittedRows -lt 1 -or
