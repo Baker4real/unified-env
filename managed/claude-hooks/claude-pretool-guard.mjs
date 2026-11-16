@@ -1,4 +1,5 @@
-// Claude Code PreToolUse guard (matchers PowerShell|Bash|mcp__terminal__run_in_terminal, Write|Edit and Grep|Glob).
+// Claude Code PreToolUse guard (matchers PowerShell|Bash|mcp__terminal__run_in_terminal, Write|Edit and Grep|Glob;
+// the handoff-status mod pipes its hand_off calls here itself, see rule 24).
 // The Terminal panel tool types one line into the user's own PowerShell outside the MSIX package, so rules 8 and 11
 // skip it, the PowerShell-only rules apply to it and the Bash-only rules do not.
 // Denies mechanical mistakes before the command runs:
@@ -67,6 +68,19 @@
 //      pwsh -Command payload, and in Bash a command word ending in the exe name. Text that only names the exe passes,
 //      as do a -ScriptPath script that Invoke-CheckedPowerShell.ps1 -CheckOnly only checks and the Terminal panel,
 //      whose shell runs outside the package.
+//  23. `reg delete` with a -f switch in a PowerShell, Bash or Terminal panel command: reg delete only takes /f, in Git
+//      Bash //f. The rule and its fix are the Stop hook's rule 8 (claude-stop-handoff-lint.mjs).
+//  24. hand_off (kind "run") commands that the shell running them cannot run: the Stop hook's rules for commands handed
+//      to the user. A command starting with ! runs in Git Bash from the input box; otherwise `shell` decides, and a
+//      missing one means the Terminal panel's PowerShell 7. Bash rules apply for ! or a shell naming bash, PowerShell
+//      rules for a shell naming PowerShell or none, and only the rules that fail in every shell for any other shell.
+//      No settings registration can reach it: the engine runs settings PreToolUse hooks in its core, beneath the
+//      mods' tool.call hooks, and the handoff-status mod answers hand_off without calling next (2026-11-16). The mod
+//      (0.5.1 on) pipes { tool_name, tool_input } to this script before it adds an item and refuses it on a deny.
+//  25. rg with a literal .asar archive as a search path: rg reads the archive as one file, so a match is a line of
+//      minified JS that names no packed file; asar_extract.py grep names the file of each match.
+// The Stop hook file is imported for rules 23 and 24 after stdin is read; if it fails to load or lacks the exports,
+// those two allow and the rest still run.
 // Each rule's scope, workarounds and live checks are documented in
 // D:\Codex\.codex\docs\agent-guidance\host-runbook\claude-code-host-hooks.md; change that page along with the rule.
 // Allow = print nothing and exit 0. Deny = print a PreToolUse permissionDecision JSON and exit 0.
@@ -76,6 +90,25 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { win32 } from 'node:path'
 
+// The hook's payload is read before the Stop hook file is imported: a copy of that file from before 2026-11-16 runs its
+// own main() on import and would read stdin first, leaving this guard an empty payload that allows everything.
+const STDIN = process.argv.includes('--self-test') ? '' : readStdin()
+
+// Rules 23 and 24 reuse the Stop hook's rules for commands handed to the user. A Stop hook file that fails to load or
+// lacks one of these exports costs only those two rules here.
+const lintModule = await import('./claude-stop-handoff-lint.mjs').catch(() => null)
+const handoffLint = ['lintCommand', 'formatFindings', 'regDeleteForce'].every(name => typeof lintModule?.[name] === 'function')
+  ? lintModule
+  : null
+
+function readStdin() {
+  try {
+    return readFileSync(0, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
 const MANAGED_DELETE = 'D:\\Codex\\.codex\\scripts\\invoke-safe-tree-delete.ps1'
 const MANAGED_RECYCLE = 'D:\\Codex\\.codex\\scripts\\Invoke-ManagedRecycle.ps1'
 const GUIDANCE = 'D:\\Codex\\.codex\\docs\\agent-guidance'
@@ -83,6 +116,7 @@ const TEXT_ONLY_HINT = '如果命令里的写法只是文本（搜索模式、�
 const MSIX_HKCU_PAGE = 'D:\\agents\\knowledge-base\\wiki\\concepts\\Claude Desktop 里 Claude Code 的 HKCU 与 AppData 写入被 MSIX 虚拟化.md'
 const RESTART_EXPLORER = 'D:\\Codex\\.codex\\scripts\\Restart-ExplorerShell.ps1'
 const TERMINAL_TOOL = 'mcp__terminal__run_in_terminal'
+const HAND_OFF_TOOL = 'mcp__handoff-status__hand_off'
 
 const RECURSIVE_DELETE_PATTERNS = [
   // PowerShell Remove-Item and its aliases with -Recurse (or an unambiguous prefix such as -r / -rec).
@@ -299,7 +333,9 @@ function writesHkcu(text) {
 function hkcuReason(where) {
   return `${where}Claude Desktop 里工具 shell 对 HKCU 的写入和删除只进 MSIX 包私有层：命令照样成功，同一个 shell 读回也对，真实注册表和资源管理器看不到。` +
     '改用 WMI StdRegProv 写（Invoke-CimMethod -Namespace root/default -ClassName StdRegProv，HKCU 的 hDefKey 是 [uint32]2147483649），写完也用 StdRegProv 读回；' +
-    `要用户本人执行的，请用户在 Claude Desktop 的 Terminal 面板里跑。说明见 ${MSIX_HKCU_PAGE}。${TEXT_ONLY_HINT}`
+    `要用户本人执行的，请用户在 Claude Desktop 的 Terminal 面板里跑。说明见 ${MSIX_HKCU_PAGE}。` +
+    '要改的条目只在私有层时（StdRegProv 读回说它不存在，Claude Desktop 却还读得到），StdRegProv 和 Terminal 面板都只碰真实 hive，改不到它，按这一页「只在私有层的条目」一节处理。' +
+    TEXT_ONLY_HINT
 }
 
 // Invoke-OfficeRemote.ps1 sends its -ScriptPath script to the office or study PC over SSH; HKCU there is the real hive.
@@ -557,6 +593,60 @@ function rgBroadRootReason(path) {
   return `rg 要把 ${path} 整棵树走一遍：D:\\agents\\run-evidence 约 57 万个文件，D:\\Codex\\.codex 还有备份、会话记录和约 1 GB 的 sqlite，一次要几分钟甚至超时。` +
     `查谁引用某个路径用 ${GUIDANCE}\\document-retrieval.md「路径引用检索」那段脚本（约 4 秒）；查证据只搜 run-evidence 下对应的子目录；` +
     '确实要从这一层找，加 --max-depth 限深。'
+}
+
+// Rule 25. An rg path argument naming an Electron .asar archive (2026-11-15: `rg -a -o -i '.{0,260}wsl\.exe.{0,260}'` on
+// app.asar returned 12,792 characters; asar_extract.py grep gave the needed part in 4,252). A directory searched with
+// -g '*.asar' and app.asar.unpacked pass.
+function rgAsarPath(command) {
+  for (const words of simpleCommands(command)) {
+    const path = rgArgs(words)?.paths.find(word => /\.asar$/i.test(word))
+    if (path) return path
+  }
+  return null
+}
+
+function rgAsarReason(path) {
+  return `rg 把 ${path} 当成一个文件整个搜：命中是一整行压缩 JS，看不出在包里哪个文件，带上下文时输出动辄上万字符。` +
+    '改用 python -B -I D:\\Codex\\tools\\asar-extract\\asar_extract.py grep <asar> <正则>，每条命中带包内文件名和偏移；' +
+    "--paths <正则> 只搜部分文件（如 '^out/' 跳过 node_modules），--context N 改两侧字符数。" +
+    '要读整段代码时，用同一脚本的 list <asar> --grep <正则> 找文件，extract <asar> <包内路径> --out <空目录> 解到 scratchpad，再对解出的文件用 rg' +
+    `（${GUIDANCE}\\windows-pwsh-command-guidelines\\rg-and-grep-tool.md）。`
+}
+
+// Rule 23. reg delete with -f fails in every shell. The Stop hook's rule 8 test runs on this guard's quote-aware split,
+// so a commit message or here-string that only mentions it passes; <# #> comments are dropped, and a second pass joins
+// lines continued with ` or \ (a PowerShell line can also end in a path's backslash, so the first pass keeps lines).
+function regDeleteForceWords(command) {
+  if (!handoffLint) return null
+  const text = command.replace(/<#[\s\S]*?#>/g, ' ')
+  for (const variant of new Set([text, text.replace(/[`\\]\r?\n/g, ' ')])) {
+    const words = simpleCommands(variant).find(handoffLint.regDeleteForce)
+    if (words) return words
+  }
+  return null
+}
+
+function regDeleteReason(command) {
+  const words = regDeleteForceWords(command)
+  return words ? `这条命令跑不通：\n${handoffLint.formatFindings([{ rule: 'regDeleteForce', line: words.join(' ') }])}\n${TEXT_ONLY_HINT}` : null
+}
+
+// Rule 24. A hand_off (kind "run") command gets the Stop hook's rules for the shell that will run it: `!` is the input
+// box's Git Bash, otherwise `shell` names it, and none means the Terminal panel's PowerShell 7. A shell naming neither
+// bash nor PowerShell gets only the rules that fail in every shell.
+function handoffReason(input) {
+  if (!handoffLint || input?.kind !== 'run' || typeof input.command !== 'string') return null
+  const shell = typeof input.shell === 'string' ? input.shell.trim() : ''
+  const bang = /^\s*!/.test(input.command)
+  const shells = { bash: bang || /bash/i.test(shell), powershell: !bang && (!shell || /powershell|pwsh/i.test(shell)) }
+  const findings = handoffLint.lintCommand(bang ? input.command.replace(/^\s*!/, '') : input.command, shells)
+  if (!findings.length) return null
+  const checked = bang ? '以 ! 开头，按输入框的 Git Bash 检查' : !shell ? '没写 shell，按 Terminal 面板的 PowerShell 7 检查'
+    : shells.bash || shells.powershell ? `按 shell「${shell}」检查` : `shell「${shell}」不是 bash 或 PowerShell，只查哪种 shell 都跑不通的写法`
+  return `hand_off 交给用户的命令（${checked}）有 ${findings.length} 处跑不通：\n${handoffLint.formatFindings(findings)}\n` +
+    '改好后重新调用 hand_off；回复里给出的同一条命令也一并改掉。确属误判（比如 bash 里的 /tmp 被当成开关）时不用 hand_off，' +
+    '直接在回复里给出这条命令并说明。'
 }
 
 // Rule 14. A simple command whose first word is a bare bash or bash.exe; a full path and `wsl bash` are deliberate.
@@ -1665,6 +1755,7 @@ export function evaluate(payload, io = defaultIo) {
   if (tool === 'Grep' || tool === 'Glob') return searchToolReason(tool, payload)
   // Rule 18: direct writes to the active skills root must go through the guarded install entry; rule 20 for scripts.
   if (tool === 'Write' || tool === 'Edit') return skillsRootWriteReason(tool, payload) || strictCountWriteReason(tool, payload, io)
+  if (tool === HAND_OFF_TOOL) return handoffReason(payload?.tool_input)
   const command = String(payload?.tool_input?.command || '')
   const terminal = tool === TERMINAL_TOOL
   if (!command || (tool !== 'PowerShell' && tool !== 'Bash' && !terminal)) return null
@@ -1724,8 +1815,12 @@ export function evaluate(payload, io = defaultIo) {
     if (!terminal && TRAILING_EXIT.test(command)) return trailingExitReason()
   }
 
+  const regDelete = regDeleteReason(command)
+  if (regDelete) return regDelete
   const broad = rgBroadRoot(command, payload?.cwd)
   if (broad) return rgBroadRootReason(broad)
+  const asar = rgAsarPath(command)
+  if (asar) return rgAsarReason(asar)
 
   const source = hardlinkingCloneSource(command)
   if (source) {
@@ -1739,7 +1834,7 @@ export function evaluate(payload, io = defaultIo) {
 function main() {
   let payload
   try {
-    payload = JSON.parse(readFileSync(0, 'utf8') || '{}')
+    payload = JSON.parse(STDIN || '{}')
   } catch {
     return
   }
@@ -2135,7 +2230,53 @@ if (process.argv.includes('--self-test')) {
     ['PowerShell', "git commit -m \"fix: & 'DeepSeek Harness.exe' --version opened the GUI\"", false],
     ['Bash', "ELECTRON_RUN_AS_NODE=1 '/d/x/DeepSeek Harness/DeepSeek Harness.exe' /d/x/probe.mjs", false],
     ['Bash', "grep -n 'DeepSeek Harness.exe' notes.txt; echo \"DeepSeek Harness.exe\"", false],
-    [TERMINAL_TOOL, "& 'D:/x/DeepSeek Harness/DeepSeek Harness.exe'", false]
+    [TERMINAL_TOOL, "& 'D:/x/DeepSeek Harness/DeepSeek Harness.exe'", false],
+    // Rule 23: reg delete takes /f only (//f in Git Bash), from every shell tool; the Stop hook supplies the rule.
+    ['PowerShell', "if ($false) { reg delete 'HKLM\\SOFTWARE\\X' -f }", true],
+    [TERMINAL_TOOL, "reg delete 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss' -f", true],
+    [TERMINAL_TOOL, "reg delete 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss' -f", true, desktop],
+    ['PowerShell', "& 'C:\\Windows\\System32\\reg.exe' delete 'HKLM\\SOFTWARE\\X' -v a -f", true],
+    ['Bash', "reg delete 'HKLM\\SOFTWARE\\X' -f", true],
+    ['PowerShell', "if ($false) { reg delete 'HKLM\\SOFTWARE\\X' /f }", false],
+    [TERMINAL_TOOL, "reg delete 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss' /f", false, desktop],
+    ['Bash', "reg delete 'HKLM\\SOFTWARE\\X' //f", false],
+    ['PowerShell', "reg query 'HKCU\\Environment' -v MAGPIE_MIRRORS", false],
+    ['PowerShell', "Write-Output 'reg delete HKLM\\SOFTWARE\\X -f'", false],
+    ['PowerShell', "'{0}' -f (reg query 'HKLM\\SOFTWARE\\X')", false],
+    // Text that only mentions it (2026-11-16 review): a here-string or multi-line commit message, a <# #> comment.
+    ['PowerShell', "git -C 'D:/x' commit -m @'\nclaude hooks: rule 23 (reg delete with -f), rule 25 (rg on .asar)\n'@", false],
+    ['PowerShell', 'git commit -m "fix:\nreg delete -f fails in PowerShell 7"', false],
+    ['PowerShell', "<#\nreg delete 'HKLM\\SOFTWARE\\X' -f\n#>\nGet-Date", false],
+    ['PowerShell', "reg delete 'HKLM\\SOFTWARE\\X' /f # -f fails", false],
+    // A continued line, and a line after one that ends in a path's backslash.
+    ['PowerShell', "reg delete 'HKLM\\SOFTWARE\\X' -va `\n  -f", true],
+    ['PowerShell', "Set-Location D:\\\nreg delete 'HKLM\\SOFTWARE\\X' -f", true],
+    // Rule 24: a hand_off (kind "run") command gets the Stop hook's rules for the shell that runs it.
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "reg delete 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss' -f", shell: 'PowerShell 7（Terminal 面板）' }, true],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "reg delete 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss' /f", shell: 'PowerShell 7（Terminal 面板）' }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "! reg delete 'HKCU\\Software\\X' /f" }, true],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "!reg delete 'HKCU\\Software\\X' //f" }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "reg query 'HKCU\\Environment' /v X", shell: 'Git Bash' }, true],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "reg query 'HKCU\\Environment' /v X", shell: 'pwsh' }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "'D:/x/run.cmd' --dry-run" }, true],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "'D:/x/run.cmd' --dry-run", shell: 'bash' }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: 'for f in a b; do echo $f; done', shell: 'PowerShell 7' }, true],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: '! for f in a b; do echo $f; done', shell: 'PowerShell 7' }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: 'git push origin main', shell: 'PowerShell 7' }, true],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "git -C 'D:/agents/projects/x' push origin main", shell: 'PowerShell 7' }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "reg delete 'HKLM\\SOFTWARE\\X' -f", shell: 'cmd（管理员）' }, true],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "'D:/x/run.cmd' --dry-run", shell: 'cmd（管理员）' }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "D:/Codex/.codex/scripts/install-skill-guarded.cmd --candidate 'D:/x' --update", shell: 'PowerShell 7（Terminal 面板）' }, false],
+    [HAND_OFF_TOOL, { kind: 'authorize', title: 'x', target: "reg delete 'HKCU\\Software\\X' -f" }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x' }, false],
+    // Rule 25: rg on a literal .asar archive; asar_extract.py grep names the packed file of each match.
+    ['PowerShell', "rg -a -o -i '.{0,260}wsl\\.exe.{0,260}' 'D:\\x\\resources\\app.asar'", true],
+    [TERMINAL_TOOL, 'rg -a -c Lxss "$env:LOCALAPPDATA\\AnthropicClaude\\app-1.0.0\\resources\\app.asar"', true],
+    ['Bash', "rg -a -o 'wsl.exe' /c/x/resources/app.asar", true],
+    ['PowerShell', 'rg -n wsl D:\\x\\resources\\app.asar.unpacked', false],
+    ['PowerShell', "rg --files D:\\x\\resources -g '*.asar'", false],
+    ['PowerShell', "python -B -I D:\\Codex\\tools\\asar-extract\\asar_extract.py grep 'D:\\x\\resources\\app.asar' 'wsl\\.exe' --paths '^out/' --context 120", false],
+    ['PowerShell', "rg -n 'app\\.asar' D:\\x\\notes.md", false]
   ]
   const scripts = new Map(Object.entries({
     'D:\\repo\\tools\\recycle.ps1': 'Add-Type -TypeDefinition $src\n[Native]::SHFileOperationW([ref]$op)',
@@ -2228,7 +2369,22 @@ if (process.argv.includes('--self-test')) {
       console.error(`FAIL ${tool}${env ? ` [${env.CLAUDE_CODE_ENTRYPOINT}]` : ''}: ${shown} -> ${denied ? 'deny' : 'allow'}`)
     }
   }
-  console.log(`self-test: ${cases.length - failed}/${cases.length} passed`)
+  const reason = (tool, command, env) => evaluate({ tool_name: tool, tool_input: { command }, cwd: 'D:\\repo' }, env ? { ...io, env } : io) || ''
+  const checks = [
+    [handoffLint !== null, 'claude-stop-handoff-lint.mjs loads, so rules 23 and 24 run'],
+    [reason('PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", desktop).includes('「只在私有层的条目」'),
+      'the HKCU reason points to the private-layer section'],
+    [reason(TERMINAL_TOOL, "reg delete 'HKLM\\SOFTWARE\\X' -f").includes('//f'), 'the reg delete reason carries the Stop hook fix'],
+    [reason('PowerShell', "rg -a x 'D:\\x\\app.asar'").includes('asar_extract.py grep <asar> <正则>'), 'the asar reason names asar_extract.py grep']
+  ]
+  for (const [ok, label] of checks) {
+    if (!ok) {
+      failed++
+      console.error(`FAIL ${label}`)
+    }
+  }
+  const total = cases.length + checks.length
+  console.log(`self-test: ${total - failed}/${total} passed`)
   process.exit(failed ? 1 : 0)
 } else {
   try {

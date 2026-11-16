@@ -12,8 +12,14 @@
 //   6. an unquoted <placeholder>: bash reads it as a redirect, PowerShell fails with ParserError;
 //   7. a `/x` switch in a bash/sh block (`/v`, `/query`, `/T:5`): Git Bash's MSYS runtime rewrites it into a Windows
 //      path before a native program sees it, quoted or not (`/v` -> `V:/`, `/query` -> `C:/Program Files/Git/query`),
-//      so `reg query ... /v` fails with "Invalid syntax" under `!` (2026-11-08).
-// Rules 4-6 apply to bash and PowerShell blocks alike and report at most once per block.
+//      so `reg query ... /v` fails with "Invalid syntax" under `!` (2026-11-08);
+//   8. `reg delete` (or reg.exe) with a `-f` switch, in either block: reg delete only takes /f ("ERROR: Invalid syntax."
+//      in PowerShell 7, 2026-11-15) although reg query takes -v, so a - switch working depends on the subcommand.
+//      Bash needs //f, which Git Bash passes on as /f.
+// Rules 4-6 and 8 apply to bash and PowerShell blocks alike; 4-6 report at most once per block.
+// FAILS_IN names the shell each rule is about. lintCommand also serves the PreToolUse guard (claude-pretool-guard.mjs):
+// it imports this file to check hand_off commands with the rules of the shell that runs them, and shell tool commands
+// with rule 8. The hook entry at the bottom runs only when node started this file, so importing it reads no stdin.
 // The hook also blocks once when the reply is empty or holds only tags such as a stray `</reasoning_effort>` and the
 // turn called no tool, so the user got no answer at all (2026-11-08). Whether the turn called a tool comes from the
 // transcript (transcript_path), read back to the user prompt that started the turn; a transcript that cannot be read
@@ -22,6 +28,8 @@
 // stop_hook_active (the turn already continues because of a stop hook) and any internal error allow the stop,
 // so the hook blocks at most once per turn and a broken hook never holds a session.
 import { readFileSync } from 'node:fs'
+import { win32 } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const BASH_TAGS = new Set(['bash', 'sh', 'shell', 'zsh'])
 const POWERSHELL_TAGS = new Set(['powershell', 'pwsh', 'ps1', 'ps'])
@@ -58,10 +66,23 @@ const RULES = {
   quotedPath: `以带引号的路径开头又跟着参数，PowerShell 会把引号路径当成字符串值，报 ParserError（Unexpected token）。程序路径改用正斜杠且不加引号；${SPACE_PATH_FIX}。`,
   callOperator: `以 & 开头，bash 报语法错误。去掉 &，程序路径用正斜杠且不加引号；${SPACE_PATH_FIX}。`,
   backslashPath: '有未加引号的反斜杠路径，bash 会把反斜杠当转义吞掉。给这个参数加单引号，或改用正斜杠（注册表键名不行：reg 不认正斜杠）。',
-  slashSwitch: '有 /v 这类开关：Git Bash 会先把它改写成路径再交给程序（/v 变成 V:/，/query 变成 C:/Program Files/Git/query），加引号也一样，用 ! 跑会失败。程序认 -v 写法就改用 -v（reg 已验证两种 shell 都能跑）；不认的（如 cmd /c），PowerShell 和 bash 各给一个代码块，bash 里写成 //c。',
+  slashSwitch: '有 /v 这类开关：Git Bash 会先把它改写成路径再交给程序（/v 变成 V:/，/query 变成 C:/Program Files/Git/query），加引号也一样，用 ! 跑会失败。bash 里写成双斜杠（//v、//c），Git Bash 把它当 /v、/c 交给程序；PowerShell 照写 /v，两种 shell 各给一个代码块。改用 - 写法只限实测认的子命令：reg query 认 -v，两种 shell 都能跑；reg delete 不认 -f，bash 里写 //f。',
   bashOnly: '用了 bash 独有的复合语法（do/done、then/fi、[[ ]]），Terminal 面板的 PowerShell 解析不了。改成逐条单独的命令，或用 ; 串起两种 shell 都能跑的单行。',
   gitTarget: "改仓库状态的 git 命令没有锁定仓库：Terminal 面板停在哪个目录，命令就作用在哪个仓库。加 -C '<仓库绝对路径>'；只该在别的机器上跑的命令，写明是哪台机器，路径用带引号的占位符。",
-  placeholder: '有没加引号的 <占位符>：bash 把它当重定向，PowerShell 报 ParserError。给占位符加单引号，或换成真实值。'
+  placeholder: '有没加引号的 <占位符>：bash 把它当重定向，PowerShell 报 ParserError。给占位符加单引号，或换成真实值。',
+  regDeleteForce: 'reg delete 不认 -f，报 ERROR: Invalid syntax.（2026-11-15 PowerShell 7 实测）；reg query 认 -v 不代表其他子命令也认 - 写法。PowerShell 里写 /f；bash 里（包括输入框 ! 前缀的命令）写 //f：Git Bash 会把 /f 改写成 F:/，//f 才以 /f 交给 reg。'
+}
+// The shell in which a rule's command fails: 'bash' (the `!` prefix runs Git Bash), 'powershell' (the Terminal
+// panel's PowerShell 7) or 'any' (every shell; for gitTarget, wherever the terminal happens to stand).
+const FAILS_IN = {
+  quotedPath: 'powershell',
+  callOperator: 'bash',
+  backslashPath: 'bash',
+  slashSwitch: 'bash',
+  bashOnly: 'powershell',
+  gitTarget: 'any',
+  placeholder: 'any',
+  regDeleteForce: 'any'
 }
 
 // Words of each simple command on a line, quotes removed; splits on ; & | ( ) { } outside quotes.
@@ -110,44 +131,102 @@ function unlockedGitWrite(words) {
   return Boolean(pattern) && args.some(arg => pattern.test(arg))
 }
 
-// Findings { rule, line } for the shell code blocks of a reply.
+// Rule 8: reg delete (reg.exe, any path) with a -f switch before a # comment. The PreToolUse guard runs it on its own
+// quote-aware split of tool commands.
+export function regDeleteForce(words) {
+  let i = 0
+  while (i < words.length && /^[A-Za-z_]\w*=/.test(words[i])) i++ // VAR=value prefixes
+  if (!/^reg(?:\.exe)?$/i.test((words[i] || '').split(/[\\/]/).pop()) || !/^delete$/i.test(words[i + 1] || '')) return false
+  const comment = words.findIndex((word, k) => k > i + 1 && word.startsWith('#'))
+  return words.slice(i + 2, comment < 0 ? words.length : comment).some(word => /^-f$/i.test(word))
+}
+
+// The trimmed lines of a body grouped by command: a line ending in \ or ` continues on the next one.
+function lineGroups(body) {
+  const groups = []
+  let group = []
+  for (const rawLine of body.split('\n')) {
+    const line = rawLine.replace(/\r$/, '').trim()
+    group.push(line)
+    if (!/[\\`]$/.test(line)) {
+      groups.push(group)
+      group = []
+    }
+  }
+  if (group.length) groups.push(group)
+  return groups
+}
+
+// The line of a command group that breaks rule 8, or the whole continued command when only its lines together do.
+// Each line counts on its own as well, since a PowerShell line can end in a backslash (cd D:\) without continuing.
+function regDeleteForceLine(lines) {
+  const breaks = line => !line.startsWith('#') && commandsOf(line).some(regDeleteForce)
+  const whole = lines.map(line => line.replace(/[\\`]$/, '')).join(' ')
+  return lines.find(breaks) ?? (lines.length > 1 && breaks(whole) ? whole : null)
+}
+
+// Findings { rule, line } for command text the user runs in the given shells: { bash, powershell }, both for a block
+// that may be pasted into either shell; with neither, only the rules that fail in every shell.
+export function lintCommand(body, { bash = false, powershell = false } = {}) {
+  const applies = rule => FAILS_IN[rule] === 'any' || (FAILS_IN[rule] === 'bash' ? bash : powershell)
+  const findings = []
+  let continued = false
+  let located = false
+  const reported = new Set()
+  const reportOnce = (rule, line) => {
+    if (!reported.has(rule)) findings.push({ rule, line })
+    reported.add(rule)
+  }
+  for (const rawLine of body.split('\n')) {
+    const line = rawLine.replace(/\r$/, '').trim()
+    const continuation = continued
+    continued = /[\\`]$/.test(line)
+    if (!line || line.startsWith('#')) continue
+    const unquoted = line.replace(QUOTED, "''")
+    let rule = null
+    if (applies('quotedPath') && !continuation && QUOTED_PATH_COMMAND.test(line)) rule = 'quotedPath'
+    else if (applies('callOperator') && !continuation && CALL_OPERATOR.test(line)) rule = 'callOperator'
+    else if (applies('backslashPath') && BACKSLASH_PATH.test(unquoted)) rule = 'backslashPath'
+    if (rule) findings.push({ rule, line })
+    const commands = commandsOf(line)
+    // a continued line starts with arguments; every other command starts with its program
+    const switched = commands.some((words, i) => words.slice(continuation && i === 0 ? 0 : 1).some(word => SLASH_SWITCH.test(word)))
+    if (applies('slashSwitch') && switched) findings.push({ rule: 'slashSwitch', line })
+    if (applies('bashOnly') && BASH_ONLY.test(unquoted)) reportOnce('bashOnly', line)
+    if (applies('placeholder') && PLACEHOLDER.test(unquoted)) reportOnce('placeholder', line)
+    for (const words of commands) {
+      if (CHANGES_DIRECTORY.test(words[0]) && words.length > 1) located = true
+      else if (applies('gitTarget') && !located && unlockedGitWrite(words)) reportOnce('gitTarget', line)
+    }
+  }
+  if (applies('regDeleteForce')) {
+    for (const lines of lineGroups(body)) {
+      const line = regDeleteForceLine(lines)
+      if (line) findings.push({ rule: 'regDeleteForce', line })
+    }
+  }
+  return findings
+}
+
+// Findings { rule, line } for the shell code blocks of a reply. A bash block may be pasted into either shell, so it
+// gets the rules of both; a PowerShell block gets the PowerShell ones.
 export function lint(text) {
   const findings = []
   for (const [, info, body] of text.matchAll(FENCE)) {
     const tag = info.trim().split(/\s+/)[0].toLowerCase()
     const bash = BASH_TAGS.has(tag)
     if (!bash && !POWERSHELL_TAGS.has(tag)) continue
-    let continued = false
-    let located = false
-    const reported = new Set()
-    const reportOnce = (rule, line) => {
-      if (!reported.has(rule)) findings.push({ rule, line })
-      reported.add(rule)
-    }
-    for (const rawLine of body.split('\n')) {
-      const line = rawLine.replace(/\r$/, '').trim()
-      const continuation = continued
-      continued = /[\\`]$/.test(line)
-      if (!line || line.startsWith('#')) continue
-      const unquoted = line.replace(QUOTED, "''")
-      let rule = null
-      if (!continuation && QUOTED_PATH_COMMAND.test(line)) rule = 'quotedPath'
-      else if (bash && !continuation && CALL_OPERATOR.test(line)) rule = 'callOperator'
-      else if (bash && BACKSLASH_PATH.test(unquoted)) rule = 'backslashPath'
-      if (rule) findings.push({ rule, line })
-      const commands = commandsOf(line)
-      // a continued line starts with arguments; every other command starts with its program
-      const switched = commands.some((words, i) => words.slice(continuation && i === 0 ? 0 : 1).some(word => SLASH_SWITCH.test(word)))
-      if (bash && switched) findings.push({ rule: 'slashSwitch', line })
-      if (BASH_ONLY.test(unquoted)) reportOnce('bashOnly', line)
-      if (PLACEHOLDER.test(unquoted)) reportOnce('placeholder', line)
-      for (const words of commands) {
-        if (CHANGES_DIRECTORY.test(words[0]) && words.length > 1) located = true
-        else if (!located && unlockedGitWrite(words)) reportOnce('gitTarget', line)
-      }
-    }
+    findings.push(...lintCommand(body, { bash, powershell: true }))
   }
   return findings
+}
+
+// The findings as "- <line>" items, each followed by its fix, at most MAX_FINDINGS of them.
+export function formatFindings(findings) {
+  return findings.slice(0, MAX_FINDINGS).map(({ rule, line }) => {
+    const shown = line.length > 120 ? `${line.slice(0, 117)}...` : line
+    return `- ${shown}\n  ${RULES[rule]}`
+  }).join('\n')
 }
 
 export function emptyReply(message) {
@@ -195,12 +274,8 @@ export function evaluate(payload, readTranscript = path => readFileSync(path, 'u
   }
   const findings = lint(String(message || ''))
   if (!findings.length) return null
-  const items = findings.slice(0, MAX_FINDINGS).map(({ rule, line }) => {
-    const shown = line.length > 120 ? `${line.slice(0, 117)}...` : line
-    return `- ${shown}\n  ${RULES[rule]}`
-  })
   return `交给用户的命令要在 bash（! 前缀）和 PowerShell 7（Terminal 面板）里都能解析，并且不依赖终端当前所在的目录，刚才回复的 shell 代码块里有 ${findings.length} 处不行：\n` +
-    `${items.join('\n')}\n` +
+    `${formatFindings(findings)}\n` +
     '改好后重新给出这些命令。如果这是故意展示的错误示例，把它放进 text 代码块。'
 }
 
@@ -215,7 +290,10 @@ function main() {
   if (reason) process.stdout.write(JSON.stringify({ decision: 'block', reason }))
 }
 
-if (process.argv.includes('--self-test')) {
+// node started this file (as the Stop hook or for its self-test) rather than the guard importing it.
+const started = win32.basename(process.argv[1] || '').toLowerCase() === win32.basename(fileURLToPath(import.meta.url)).toLowerCase()
+
+if (started && process.argv.includes('--self-test')) {
   const fence = (tag, body) => '```' + tag + '\n' + body + '\n```'
   const cases = [
     [fence('bash', "'D:/tools/x/run.cmd' --candidate 'D:/x' --update"), 'quotedPath'],
@@ -268,7 +346,22 @@ if (process.argv.includes('--self-test')) {
     [fence('bash', 'cmd //c echo hi'), null],
     [fence('bash', "icacls 'D:/x' /grant:r 'u:(R)'"), null],
     [fence('bash', 'some-tool --flag /? > /dev/null'), null],
-    [fence('powershell', 'cmd /c echo hi'), null]
+    [fence('powershell', 'cmd /c echo hi'), null],
+    // Rule 8: reg delete takes /f only (PowerShell) or //f (Git Bash); reg query takes -v.
+    [fence('bash', "reg delete 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss' -f"), 'regDeleteForce'],
+    [fence('powershell', "reg delete 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss' -f"), 'regDeleteForce'],
+    [fence('powershell', "& 'C:/Windows/System32/reg.exe' delete 'HKCU\\Software\\X' -v a -f"), 'regDeleteForce'],
+    [fence('bash', "MSYS_NO_PATHCONV=1 REG.EXE DELETE 'HKCU\\Software\\X' -F"), 'regDeleteForce'],
+    [fence('powershell', "reg delete 'HKCU\\Software\\X' -va `\n  -f"), 'regDeleteForce'],
+    [fence('powershell', "Set-Location D:\\\nreg delete 'HKCU\\Software\\X' -f"), 'regDeleteForce'],
+    [fence('powershell', "reg delete 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss' /f"), null],
+    [fence('bash', "reg delete 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss' //f"), null],
+    [fence('bash', "reg delete 'HKCU\\Software\\X' /f"), 'slashSwitch'],
+    [fence('powershell', "reg query 'HKCU\\Environment' -v MAGPIE_MIRRORS"), null],
+    [fence('powershell', "reg delete 'HKCU\\Software\\X' /f # -f fails"), null],
+    [fence('powershell', "Write-Output 'reg delete HKCU\\Software\\X -f'"), null],
+    [fence('powershell', "'{0}' -f (reg query 'HKCU\\Software\\X')"), null],
+    [fence('text', "reg delete 'HKCU\\Software\\X' -f"), null]
   ]
   let failed = 0
   for (const [text, expected] of cases) {
@@ -315,7 +408,16 @@ if (process.argv.includes('--self-test')) {
     [evaluate({ last_assistant_message: '', transcript_path: 't', stop_hook_active: true }, of(noToolTurn)) === null, 'stop_hook_active allows an empty reply'],
     [evaluate({ last_assistant_message: '', transcript_path: 't' }, fails) === null, 'an unreadable transcript allows the stop'],
     [evaluate({ last_assistant_message: '' }, counting) === null && reads === 0, 'no transcript path allows the stop'],
-    [evaluate({ last_assistant_message: '好的', transcript_path: 't' }, counting) === null && reads === 0, 'a reply with text does not read the transcript']
+    [evaluate({ last_assistant_message: '好的', transcript_path: 't' }, counting) === null && reads === 0, 'a reply with text does not read the transcript'],
+    // lintCommand for one shell, as the PreToolUse guard calls it for hand_off and shell tool commands.
+    [lintCommand("reg delete 'HKCU\\Software\\X' -f")[0]?.rule === 'regDeleteForce', 'with no shell named, rule 8 still applies'],
+    [lintCommand("'D:/x/run.cmd' --dry-run").length === 0 && lintCommand("reg query 'HKCU\\Environment' /v X").length === 0,
+      'with no shell named, the rules of one shell do not'],
+    [lintCommand('for f in a b; do echo $f; done', { bash: true }).length === 0, 'bash alone takes bash syntax'],
+    [lintCommand('for f in a b; do echo $f; done', { powershell: true })[0]?.rule === 'bashOnly', 'PowerShell alone does not'],
+    [lintCommand("reg query 'HKCU\\Environment' /v X", { powershell: true }).length === 0 &&
+      lintCommand("reg query 'HKCU\\Environment' /v X", { bash: true })[0]?.rule === 'slashSwitch', '/v is right in PowerShell and wrong in Git Bash'],
+    [formatFindings(lint(fence('bash', "reg delete 'HKCU\\Software\\X' -f"))).includes('//f'), 'the rule 8 fix names //f for bash']
   ]
   for (const [ok, label] of checks) {
     if (!ok) {
@@ -326,7 +428,7 @@ if (process.argv.includes('--self-test')) {
   const total = cases.length + checks.length
   console.log(`self-test: ${total - failed}/${total} passed`)
   process.exit(failed ? 1 : 0)
-} else {
+} else if (started) {
   try {
     main()
   } catch {

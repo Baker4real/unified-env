@@ -89,7 +89,14 @@ $denyCases = @(
     @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents' },
     # 不设 ELECTRON_RUN_AS_NODE=1 运行 DeepSeek Harness.exe 会启动 GUI：调用运算符和 Start-Process -FilePath 都拦。
     @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'D:\x\DeepSeek Harness\DeepSeek Harness.exe' --version" } },
-    @{ tool_name = 'PowerShell'; tool_input = @{ command = "Start-Process -FilePath 'D:\x\DeepSeek Harness\DeepSeek Harness.exe'" } }
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = "Start-Process -FilePath 'D:\x\DeepSeek Harness\DeepSeek Harness.exe'" } },
+    # reg delete 不认 -f，哪种 shell 都一样；hand_off 交给用户的命令按跑它的 shell 套 Stop hook 的规则。
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'if ($false) { reg delete ''HKLM\SOFTWARE\X'' -f }' } },
+    @{ tool_name = 'mcp__terminal__run_in_terminal'; tool_input = @{ command = 'reg delete ''HKLM\SOFTWARE\X'' -f' } },
+    @{ tool_name = 'mcp__handoff-status__hand_off'; tool_input = @{ kind = 'run'; title = 'x'; command = 'reg delete ''HKLM\SOFTWARE\X'' -f'; shell = 'PowerShell 7（Terminal 面板）' } },
+    @{ tool_name = 'mcp__handoff-status__hand_off'; tool_input = @{ kind = 'run'; title = 'x'; command = '! reg query ''HKLM\SOFTWARE\X'' /v a' } },
+    # rg 直接搜 .asar 包：改用 asar_extract.py grep。
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -a -o wsl D:\x\resources\app.asar' } }
 )
 foreach ($case in $denyCases) {
     $label = $case.tool_input['command'] ?? ($case | ConvertTo-Json -Compress)
@@ -116,7 +123,14 @@ $allowCases = @(
     @{ tool_name = 'Glob'; tool_input = @{ pattern = '*x*' }; cwd = 'D:\agents\projects\misc' },
     # 同一条命令先设 ELECTRON_RUN_AS_NODE=1 就是 Node 模式；Get-CimInstance 的过滤串只是提到这个 exe。
     @{ tool_name = 'PowerShell'; tool_input = @{ command = '$env:ELECTRON_RUN_AS_NODE = ''1''; & ''D:\x\DeepSeek Harness\DeepSeek Harness.exe'' D:\x\probe.mjs' } },
-    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Get-CimInstance Win32_Process -Filter "Name = ''DeepSeek Harness.exe''"' } }
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Get-CimInstance Win32_Process -Filter "Name = ''DeepSeek Harness.exe''"' } },
+    # reg delete 在 PowerShell 里写 /f、在 Git Bash（! 前缀）里写 //f；kind authorize 的 hand_off 不查。
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'if ($false) { reg delete ''HKLM\SOFTWARE\X'' /f }' } },
+    # 只是在提交信息（here-string）里提到 reg delete -f，放行。
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = "git -C 'D:/x' commit -m @'`nclaude hooks: rule 23 (reg delete with -f)`n'@" } },
+    @{ tool_name = 'mcp__handoff-status__hand_off'; tool_input = @{ kind = 'run'; title = 'x'; command = '!reg delete ''HKLM\SOFTWARE\X'' //f' } },
+    @{ tool_name = 'mcp__handoff-status__hand_off'; tool_input = @{ kind = 'authorize'; title = 'x'; target = 'reg delete ''HKLM\SOFTWARE\X'' -f' } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -n wsl D:\x\resources\app.asar.unpacked' } }
 )
 foreach ($case in $allowCases) {
     $label = $case.tool_input['command'] ?? ($case | ConvertTo-Json -Compress)
@@ -124,6 +138,14 @@ foreach ($case in $allowCases) {
     Assert-Equal $result.exitCode 0 "放行路径必须 exit 0：$label"
     Assert-Equal $result.stdout.Trim() '' "放行时不得输出决定：$label"
 }
+
+# 拦截理由要带上改法：reg delete 给出 bash 的 //f，asar 指向 asar_extract.py grep。
+$handoffCase = @{ tool_name = 'mcp__handoff-status__hand_off'; tool_input = @{ kind = 'run'; title = 'x'; command = 'reg delete ''HKLM\SOFTWARE\X'' -f'; shell = 'PowerShell 7' } } | ConvertTo-Json -Compress
+$handoffReason = ((Invoke-Guard $handoffCase).stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecisionReason
+Assert-True ($handoffReason.Contains('hand_off') -and $handoffReason.Contains('//f')) 'hand_off 拦截理由必须带 Stop hook 规则的改法（PowerShell 写 /f、bash 写 //f）。'
+$asarCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -a -o wsl D:\x\resources\app.asar' } } | ConvertTo-Json -Compress
+$asarReason = ((Invoke-Guard $asarCase).stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecisionReason
+Assert-True ($asarReason.Contains('asar_extract.py grep') -and $asarReason.Contains('rg-and-grep-tool.md')) 'asar 拦截理由必须给出 asar_extract.py grep 和说明文档。'
 
 # 引用脚本扫描走真实文件读取：运行含回收站调用的 .ps1 被拦，只读取它或运行无害内容放行。
 $fixtureDir = Join-Path $FixtureRoot ([guid]::NewGuid().ToString('N'))
@@ -160,12 +182,31 @@ finally {
     if (Test-Path -LiteralPath $fixtureDir) { [IO.Directory]::Delete($fixtureDir) }
 }
 
+# guard 先读自己的 stdin 再导入 Stop hook：旁边的 Stop hook 是导入时就读 stdin 的旧写法（2026-11-16 之前）时，
+# guard 照样拿到输入、照常拦截，不会因为输入被抢走而全部放行。
+$skewDir = Join-Path $FixtureRoot ([guid]::NewGuid().ToString('N'))
+$skewGuard = Join-Path $skewDir 'claude-pretool-guard.mjs'
+$skewStop = Join-Path $skewDir 'claude-stop-handoff-lint.mjs'
+[void][IO.Directory]::CreateDirectory($skewDir)
+try {
+    Copy-Item -LiteralPath $guardPath -Destination $skewGuard
+    [IO.File]::WriteAllText($skewStop, "import { readFileSync } from 'node:fs'`ntry { readFileSync(0, 'utf8') } catch {}`n", [Text.UTF8Encoding]::new($false))
+    $skewCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = 'Remove-Item -Recurse -Force D:\tmp\x' } } | ConvertTo-Json -Compress
+    $result = Invoke-Guard $skewCase -ScriptPath $skewGuard
+    Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' '旁边的 Stop hook 导入时自己读 stdin，guard 也必须先拿到输入、照常拦截递归删除。'
+}
+finally {
+    foreach ($path in @($skewGuard, $skewStop)) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path } }
+    if (Test-Path -LiteralPath $skewDir) { [IO.Directory]::Delete($skewDir) }
+}
+
 # Claude Desktop 下的 HKCU 写入只在入口变量以 claude-desktop 开头时拦截。写法拆开拼接：
 # 本文件经 pwsh -File 运行时，guard 会扫描它的内容。
 $hkcuCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = ('Set-Item' + 'Property -LiteralPath ''HK' + 'CU:\Software\X'' -Name a -Value 1') } } | ConvertTo-Json -Compress
 $result = Invoke-Guard $hkcuCase -Entrypoint 'claude-desktop'
 Assert-Equal $result.exitCode 0 'HKCU 写入 deny 也必须 exit 0。'
 Assert-Equal ($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision 'deny' 'Claude Desktop 下的 HKCU 写入必须拦截。'
+Assert-True (($result.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecisionReason.Contains('「只在私有层的条目」')) '目标只在私有层时 StdRegProv 和 Terminal 面板都改不到，拦截理由必须指向知识库「只在私有层的条目」一节。'
 $result = Invoke-Guard $hkcuCase
 Assert-Equal $result.stdout.Trim() '' '没有 Claude Desktop 入口变量时 HKCU 写入放行。'
 $terminalHkcuCase = @{ tool_name = 'mcp__terminal__run_in_terminal'; tool_input = @{ command = ('Set-Item' + 'Property -LiteralPath ''HK' + 'CU:\Software\X'' -Name a -Value 1') } } | ConvertTo-Json -Compress
@@ -210,14 +251,20 @@ Assert-Equal $blocked.exitCode 0 'stop hook 拦截也必须 exit 0。'
 $decision = $blocked.stdout | ConvertFrom-Json
 Assert-Equal $decision.decision 'block' '引号路径开头又跟参数的命令必须拦下。'
 Assert-True ($decision.reason -match 'ParserError') '拦截原因必须说明 PowerShell 报 ParserError。'
-# Git Bash 会把 /v 这类开关改写成路径（/v 变 V:/），加引号也一样；拦下并给出改用 -v 的改法。
+# Git Bash 会把 /v 这类开关改写成路径（/v 变 V:/），加引号也一样；拦下并给出 bash 里写 //v 的改法，- 写法只说实测过的。
 $switchReply = $fence + "bash`nreg query 'HKCU\Environment' /v MAGPIE_MIRRORS`n" + $fence
 $switchDecision = (Invoke-Guard (@{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = $switchReply } | ConvertTo-Json -Compress) -ScriptPath $stopHookPath).stdout | ConvertFrom-Json
 Assert-Equal $switchDecision.decision 'block' 'bash 代码块里的 /v 开关必须拦下。'
-Assert-True ($switchDecision.reason.Contains('V:/') -and $switchDecision.reason.Contains('-v')) '拦截原因必须说明 /v 被改写成 V:/，并给出改用 -v 的改法。'
+Assert-True ($switchDecision.reason.Contains('V:/') -and $switchDecision.reason.Contains('//v') -and $switchDecision.reason.Contains('reg delete 不认 -f')) '拦截原因必须说明 /v 被改写成 V:/、bash 里写 //v，并点明 reg delete 不认 -f。'
+# reg delete 不认 -f：两种代码块都拦，改法是 PowerShell 写 /f、bash 写 //f。
+$regReply = $fence + "powershell`nreg delete 'HKLM\SOFTWARE\X' -f`n" + $fence
+$regDecision = (Invoke-Guard (@{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = $regReply } | ConvertTo-Json -Compress) -ScriptPath $stopHookPath).stdout | ConvertFrom-Json
+Assert-Equal $regDecision.decision 'block' 'reg delete 带 -f 必须拦下。'
+Assert-True ($regDecision.reason.Contains('PowerShell 里写 /f') -and $regDecision.reason.Contains('//f')) '拦截原因必须给出 PowerShell 写 /f、bash 写 //f 的改法。'
 foreach ($allowStop in @(
         @{ hook_event_name = 'Stop'; stop_hook_active = $true; last_assistant_message = $badReply },
-        @{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = $goodReply }
+        @{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = $goodReply },
+        @{ hook_event_name = 'Stop'; stop_hook_active = $false; last_assistant_message = ($fence + "powershell`nreg delete 'HKLM\SOFTWARE\X' /f`n" + $fence) }
     )) {
     $result = Invoke-Guard ($allowStop | ConvertTo-Json -Compress) -ScriptPath $stopHookPath
     Assert-Equal $result.exitCode 0 'stop hook 放行必须 exit 0。'
