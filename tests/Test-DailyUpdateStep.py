@@ -42,6 +42,50 @@ class StepTests(unittest.TestCase):
         self.assertEqual(passed.returncode, 0)
         self.assertTrue(second['ok'])
 
+    def test_phase_contract_rejects_missing_mode_before_child_runs(self):
+        marker = self.root / 'should-not-run.txt'
+        script = self.root / 'phase.ps1'
+        script.write_text("param([string]$Mode='Prepare')\nSet-Content -LiteralPath '" + str(marker) + "' -Value bad\n", encoding='utf-8')
+        process, receipt = self.invoke('', kind='powershell', script=str(script), parameters={},
+                                       phase='Apply', equals={'phase': 'Apply', 'ok': True})
+        self.assertNotEqual(process.returncode, 0)
+        self.assertFalse(marker.exists())
+        self.assertEqual(receipt.get('error_code'), 'phase-mode-mismatch')
+
+    def test_prepare_result_cannot_satisfy_apply_phase(self):
+        process, receipt = self.invoke('print(\'{"ok":true,"phase":"Prepare"}\')', phase='Apply')
+        self.assertNotEqual(process.returncode, 0)
+        self.assertEqual(receipt.get('error_code'), 'phase-requires-powershell')
+
+    @unittest.skipUnless(HOST_CHECKED.is_file(), 'host-installed Invoke-CheckedPowerShell is unavailable on CI')
+    def test_apply_phase_requires_same_business_phase(self):
+        script = self.root / 'phase-output.ps1'
+        script.write_text('param([string]$Mode)\n@{ok=$true;phase="Prepare"}|ConvertTo-Json -Compress', encoding='utf-8')
+        process, receipt = self.invoke('', kind='powershell', script=str(script),
+                                       parameters={'Mode': 'Apply'}, phase='Apply')
+        self.assertNotEqual(process.returncode, 0)
+        self.assertFalse(receipt['phase_ok'])
+        script.write_text('param([string]$Mode)\n@{ok=$true;phase=$Mode;version="7.7.0"}|ConvertTo-Json -Compress', encoding='utf-8')
+        process, receipt = self.invoke('', kind='powershell', script=str(script),
+                                       parameters={'Mode': 'Apply'}, phase='Apply',
+                                       equals={'ok': True, 'version': '7.7.0'})
+        self.assertEqual(process.returncode, 0, receipt)
+        self.assertTrue(receipt['phase_ok'])
+
+    def test_changed_script_is_rejected_before_execution(self):
+        marker = self.root / 'script-executed.txt'
+        script = self.root / 'changing.ps1'
+        script.write_text("param([string]$Mode)\nSet-Content -LiteralPath '"+str(marker)+"' -Value bad", encoding='utf-8')
+        spec = self.root / 'bound.json'
+        spec.write_text(json.dumps({'command_id': 'bound', 'kind': 'powershell', 'script': str(script),
+                                   'parameters': {'Mode': 'Apply'}, 'phase': 'Apply', 'equals': {'ok': True}}), encoding='utf-8')
+        receipt = self.root / 'bound.receipt.json'
+        child = subprocess.run([sys.executable, '-B', str(SCRIPT), 'run', '--spec', str(spec), '--receipt', str(receipt),
+                                '--expected-script-sha256', '0'*64], capture_output=True)
+        self.assertNotEqual(child.returncode, 0)
+        self.assertFalse(marker.exists())
+        self.assertFalse(json.loads(receipt.read_text())['ok'])
+
     def test_empty_and_business_false_are_failures(self):
         for source in ('pass', 'print(\'{"ok":false}\')'):
             with self.subTest(source=source):

@@ -3,6 +3,72 @@
 每日更新用的受管辅助脚本。`<outDir>` 为当次证据目录
 (如 `D:\agents\run-evidence\daily-codex-ecosystem-update\<ts>`),脚本不写死时间戳目录。
 
+## 更新入口与收尾（默认路径）
+
+更新按现役包 identity 选入口：Store 产品使用下方 `store-update-gate.py`；需要管理员权限的已有 PowerShell 事务通过 `Invoke-ElevatedUpdate.ps1` 绑定显式阶段。官方客户端、运行时或随附插件刷新后执行 `post-update-closeout.py`，健康状态只读；检测到缺口且已有修复授权时才用 repair。审计结果统一由 `report-summary.py collect` 保存完整证据、返回有界摘要。各入口不创建新的更新授权、不启动 GUI，不卸载现役组件。
+
+### Microsoft Store 身份预检
+
+`store-update-gate.py prepare --config <当次.json>` 通过微软官方 Store manifest 验证精确 product ID、x64/user/msstore 与 PFN；同一产品的任一候选身份矛盾都会拒绝，不能用旧匹配版本掩盖新错误身份。prepare 不执行安装，apply 重新核对配置、目标与已注册包后才调用官方 winget。只提供 upgrade/install，没有 uninstall 或强制替换分支；主应用缺失时必须已获恢复授权并显式选择 install。
+
+配置：
+~~~json
+{"run_directory":"D:/agents/run-evidence/daily-codex-ecosystem-update/<yyyyMMdd-HHmmss>","product_id":"9PLM9XGG6VKS","source":"msstore","package_family":"OpenAI.Codex_2p2nqsd0c76g0","operation":"upgrade"}
+~~~
+
+~~~powershell
+python scripts/daily-update/store-update-gate.py prepare --config <当次.json>
+python scripts/daily-update/store-update-gate.py apply --config <同一当次.json>
+~~~
+
+apply 只写新 intent/result，重复执行拒绝；旧注册仍在必须由后置观察证明，查询失败记 unknown，不把“未发 uninstall”说成已回滚。Codex Store 更新成功后自动进入下方受管修复收尾；installation_ok 与 closeout_ok 都通过才算成功。版本由已注册包读回，不信 Store 展示名称或安装退出码。
+
+### 提权前阶段合同
+
+在现有单步 spec 增加 `"phase":"Apply"`，`parameters.Mode` 必须显式同值。Prepare/Apply/Rollback 是执行阶段，不接受缺省模式；业务 JSON 也必须返回同一 phase。提权 Apply/Rollback 还必须在 equals 固定 `ok=true`、目标 `version` 与成功 `status`，例如：
+~~~json
+{"command_id":"runtime-apply","kind":"powershell","script":"D:/authorized/update.ps1","parameters":{"Mode":"Apply"},"phase":"Apply","equals":{"ok":true,"status":"activated","version":"<精确目标版本>"},"timeout_seconds":180}
+~~~
+
+~~~powershell
+pwsh -NoProfile -File scripts/daily-update/Invoke-ElevatedUpdate.ps1 -Mode Validate -Spec <当次spec绝对路径> -Receipt <当次新收据绝对路径>
+pwsh -NoProfile -File scripts/daily-update/Invoke-ElevatedUpdate.ps1 -Mode Launch -Spec <同一spec> -Receipt <同一新收据> -ConfirmApply
+~~~
+
+Validate 不运行更新、不弹 UAC：校验阶段、参数名/必填参数/静态参数集/ValidateSet/标量类型、业务谓词、物理当次收据路径及所有生命周期 sidecar 均未使用。动态参数无法静态验证时拒绝。Launch 仅在明确提权授权后调用，先预留 intent/结果文件，再启动单个隐藏 Worker；Worker 复核管理员身份及 spec/脚本 SHA-256，实际执行前再核验，拒绝等待 UAC 期间的修改。`launched-not-yet-verified` 仅证明已启动；结束须收据 ok、目标 phase/version/status 和对应 PID 退出都可证明。启动后记录异常仍返回 PID 和已启动状态，不能说 rejected。这里只编排已存在事务，不替代其备份、验证和回滚。
+
+### 官方刷新后的受管修复
+
+~~~powershell
+python scripts/daily-update/post-update-closeout.py check --run-directory <当次目录>
+python scripts/daily-update/post-update-closeout.py repair --run-directory <全新修复目录>
+~~~
+
+check 仅调用现有 system provenance status、菜单/closure/catalog 审计；证据以 create-only 写入 post-refresh，健康状态不改 active。repair 使用已有授权，按已证实状态依次 preserve-official → system-only 菜单 dry-run/apply → 来源计划 → guarded dry-run/apply → skill-creator 兼容 overlay → 最终菜单、closure、catalog、来源状态。所有 active/SOURCE/ledger 写入由原 wrapper 执行，不执行工具返回的可读 next 命令串。已有中文化但无官方原文、部分缺来源、未知状态或身份警告一律 manual-review，保留证据；新英文缺 exact 译文时走既有补译流程后在新 run 重试。最终同时要求退出码与业务状态通过，不能用先前 healthy 快照代替最后一次写后的验收。
+
+### 审计摘要默认出口
+
+~~~powershell
+python scripts/daily-update/report-summary.py collect --kind menu --run-directory <当次目录> --output menu.json
+python scripts/daily-update/report-summary.py collect --kind closure --run-directory <当次目录> --output closure.json
+python scripts/daily-update/report-summary.py collect --kind catalog --run-directory <当次目录> --output catalog.json
+python scripts/daily-update/report-summary.py read --kind menu --input <完整menu.json> --max-bytes 1600
+~~~
+
+完整 JSON 留在新证据文件，stdout 默认只含状态/计数、最多八个唯一文件路径、omitted_count、来源字节数与 SHA-256，总预算最多 6000 UTF-8 字节。描述正文不回显；异常 schema 或未知状态拒绝，不把任意上游字符串当状态输出。发现问题仍非零退出。不可覆盖旧报告；缩小来源后再读需要人工判断的条目，不全文注入长报告。
+
+### 包签名与桌面快捷方式
+
+~~~powershell
+pwsh -NoProfile -File scripts/Test-OfficialPackageSignature.ps1 -Channel StoreMain -AsJson
+pwsh -NoProfile -File scripts/Test-OfficialPackageSignature.ps1 -Channel PrimaryRuntime -AsJson
+pwsh -NoProfile -File scripts/New-MsixDesktopShortcut.ps1 -PackageName OpenAI.Codex -PackageFamilyName OpenAI.Codex_2p2nqsd0c76g0 -ApplicationId App -ShortcutPath D:/Desktop/Codex.lnk -IconPath D:/Codex/.codex/host-assets/shortcuts/Codex.ico
+~~~
+
+StoreMain 保持主包 Store identity；PrimaryRuntime 要求对应 Developer 分发 identity、OpenAI signer、有效 CMS、绑定的 RFC3161 时间戳以及签名时两条可信链。只读/离线验签不检查撤销或重算包载荷 digest，输出明确标注范围；当前证书过期但可信签名时有效不误判。测试专用 supplied-evidence 的根证书与时钟覆盖不能从 live 参数集进入。
+
+快捷方式默认 Plan，只读已注册健康 Store 包 manifest 与官方 targetsize PNG；Apply 显式写入 D 盘 .lnk/.ico 并保存精确备份，要求包含 256 像素素材，以原尺寸 DIB 帧生成，不放大 EXE 默认小图标。已存在链接必须是同一 AppsFolder identity，且只改 IconLocation；未知目标拒绝，失败按原始字节回滚。仅通知该项 Shell 刷新，不启动应用、不重启 Explorer、不清缓存。CLI 无 fixture/provider 绕过。回归验证真正的 Windows Shell 渲染。无需将这些规则复制到全局 AGENTS.md。
+
 ## 1. gen-ledger-tsv.cjs(只读账本)
 
 ```

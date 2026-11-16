@@ -14,6 +14,8 @@
       "summary": "环境事实盘点、dry-run 迁移、PATH、备份保留与报告合同。",
       "interfaces": [
         "scripts/Invoke-CodexScriptsOwnershipLint.ps1",
+        "scripts/Test-OfficialPackageSignature.ps1",
+        "scripts/New-MsixDesktopShortcut.ps1",
         "scripts/Invoke-EnvInventory.ps1",
         "scripts/Invoke-PipCacheMigration.ps1",
         "scripts/Invoke-StagingManifestLint.ps1",
@@ -40,6 +42,8 @@
           "docs/plans/2026-08-24-run-evidence-migration-plan.md",
           "docs/plans/2026-08-26-run-evidence-migration-plan-zi-xi-shi-ban-gong-shi.md",
           "managed/codex-scripts/ownership.json",
+          "scripts/lib/OfficialPackageSignature.psm1",
+          "scripts/lib/MsixShortcutIcon.psm1",
           "scripts/lib/BackupRetentionPolicy.ps1",
           "scripts/lib/BackupRetentionValidation.ps1",
           "scripts/lib/EnvInventoryTrust.ps1",
@@ -66,6 +70,8 @@
       "tests": {
         "fixture": {
           "powershell": [
+          "tests/Test-OfficialPackageSignature.ps1",
+          "tests/Test-MsixDesktopShortcut.ps1",
           "tests/Test-BackupRetentionApplyManifest.ps1",
           "tests/Test-BackupRetentionDryRun.ps1",
           "tests/Test-BackupRetentionPolicy.ps1",
@@ -90,6 +96,8 @@
         },
         "ci": {
           "powershell": [
+            "tests/Test-OfficialPackageSignature.ps1",
+            "tests/Test-MsixDesktopShortcut.ps1",
             "tests/Test-BackupRetentionApplyManifest.ps1",
             "tests/Test-BackupRetentionDryRun.ps1",
             "tests/Test-BackupRetentionPolicy.ps1",
@@ -722,9 +730,14 @@
         "scripts/daily-update/evidence_io.py",
         "scripts/daily-update/python-runtime-transaction.py",
         "scripts/daily-update/kimi-runtime-transaction.py",
-        "scripts/daily-update/preflight-summary.py"
+        "scripts/daily-update/preflight-summary.py",
+        "scripts/daily-update/store-update-gate.py",
+        "scripts/daily-update/Invoke-ElevatedUpdate.ps1",
+        "scripts/daily-update/Test-UpdateScriptParameters.ps1",
+        "scripts/daily-update/post-update-closeout.py",
+        "scripts/daily-update/report-summary.py"
       ],
-      "dependsOn": ["host-safety"],
+      "dependsOn": ["host-safety", "skill-supply-chain"],
       "transitionalDependencies": [],
       "ownership": {
         "files": [],
@@ -745,7 +758,11 @@
             "tests/Test-DailyPreflightSummary.py",
             "tests/Test-DailyUpdateEvidence.py",
             "tests/Test-DailyUpdateStep.py",
-            "tests/Test-DailyUpdateResume.py"
+            "tests/Test-DailyUpdateResume.py",
+            "tests/Test-StoreUpdateGate.py",
+            "tests/Test-ElevatedUpdateContract.py",
+            "tests/Test-PostUpdateCloseout.py",
+            "tests/Test-DailyReportSummary.py"
           ],
           "node": [
             "tests/Test-DeviceDocRetiredPaths.cjs"

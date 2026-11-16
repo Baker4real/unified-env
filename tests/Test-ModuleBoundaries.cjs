@@ -184,7 +184,7 @@ const codexHostModule = manifest.modules.find((entry) => entry.id === 'codex-hos
 assert.deepEqual(hostSafetyModule.transitionalDependencies, []);
 assert.deepEqual(codexHostModule.dependsOn, ['host-safety', 'skill-supply-chain', 'workstation-operations']);
 const workstationModule = manifest.modules.find((entry) => entry.id === 'workstation-operations');
-assert.deepEqual(workstationModule.dependsOn, ['host-safety']);
+assert.deepEqual(workstationModule.dependsOn, ['host-safety', 'skill-supply-chain']);
 assert.ok(workstationModule.interfaces.includes('scripts/daily-update/Read-DailyUpdateEvidence.ps1'));
 
 const missingInterfaceManifest = structuredClone(manifest);

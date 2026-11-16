@@ -84,8 +84,24 @@ def argv_for(spec, env):
             '-MaxOutputChars', '0']
 
 
-def execute(spec):
-    allowed = {'command_id', 'kind', 'argv', 'script', 'parameters', 'required_fields', 'equals', 'timeout_seconds'}
+def validate_phase(spec, require=False):
+    phase = spec.get('phase')
+    if phase is None:
+        if require:
+            raise ValueError('explicit-phase-required')
+        return None
+    if phase not in ('Prepare', 'Apply', 'Rollback'):
+        raise ValueError('invalid-execution-phase')
+    if spec.get('kind') != 'powershell':
+        raise ValueError('phase-requires-powershell')
+    parameters = spec.get('parameters', {})
+    if not isinstance(parameters, dict) or parameters.get('Mode') != phase:
+        raise ValueError('phase-mode-mismatch')
+    return phase
+
+
+def compile_spec(spec, require_phase=False):
+    allowed = {'command_id', 'kind', 'argv', 'script', 'parameters', 'required_fields', 'equals', 'timeout_seconds', 'phase'}
     if not isinstance(spec, dict) or set(spec) - allowed:
         raise ValueError('unknown-spec-fields')
     if not re.fullmatch('[a-zA-Z0-9._-]{1,100}', spec.get('command_id', '')):
@@ -97,8 +113,18 @@ def execute(spec):
     timeout = spec.get('timeout_seconds', 60)
     if type(timeout) is not int or not 1 <= timeout <= 1800:
         raise ValueError('invalid-timeout')
+    phase = validate_phase(spec, require=require_phase)
+    if require_phase and phase in ('Apply', 'Rollback'):
+        if (equals.get('ok') is not True or not isinstance(equals.get('status'), str) or not equals['status']
+                or not isinstance(equals.get('version'), str) or not equals['version']):
+            raise ValueError('activation-status-and-target-version-required')
     env = runtime.fresh_environment()
-    child = runtime.run_hidden(argv_for(spec, env), timeout=timeout + (7 if spec['kind'] == 'powershell' else 0), env=env)
+    return argv_for(spec, env), timeout, phase, required, equals, env
+
+
+def execute(spec):
+    argv, timeout, phase, required, equals, env = compile_spec(spec)
+    child = runtime.run_hidden(argv, timeout=timeout + (7 if spec['kind'] == 'powershell' else 0), env=env)
     output = child['stdout']
     parsed = False
     value = None
@@ -110,8 +136,10 @@ def execute(spec):
     fields_ok = parsed and all(json_field(value, key) is not None and json_field(value, key) is not MISSING for key in required)
     predicates_ok = parsed and all(type(json_field(value, key)) is type(wanted) and
                                    json_field(value, key) == wanted for key, wanted in equals.items())
+    phase_ok = phase is None or (parsed and json_field(value, 'phase') == phase)
     return {'schema_version': 1, 'command_id': spec['command_id'],
-            'ok': child['exit_code'] == 0 and bool(output.strip()) and fields_ok and predicates_ok,
+            'ok': child['exit_code'] == 0 and bool(output.strip()) and fields_ok and predicates_ok and phase_ok,
+            'phase': phase, 'phase_ok': phase_ok,
             'process_status': child['status'], 'exit_code': child['exit_code'],
             'timeout': child['status'] == 'timeout' or child['exit_code'] == 124,
             'output_present': bool(output.strip()), 'json_object': parsed,
@@ -136,14 +164,37 @@ def receipt_run(spec, explicit):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['run'])
+    parser.add_argument('mode', choices=['run', 'validate'])
     parser.add_argument('--spec', required=True, type=pathlib.Path)
-    parser.add_argument('--receipt', required=True)
+    parser.add_argument('--receipt')
+    parser.add_argument('--require-phase', action='store_true', help='Pre-elevation check: reject a missing explicit Mode/phase binding')
+    parser.add_argument('--expected-spec-sha256', help='Elevated worker binding; recheck exact spec bytes immediately before execution')
+    parser.add_argument('--expected-script-sha256', help='Reject a target script changed while waiting for UAC')
     parser.add_argument('--run-directory', type=pathlib.Path,
                         help='Current run root; normally inferred from the spec path')
     args = parser.parse_args()
     try:
         writer = receipt_run(args.spec, args.run_directory)
+        if args.mode == 'validate':
+            raw = args.spec.read_bytes()
+            if len(raw) > 65536:
+                raise ValueError('spec-too-large')
+            spec = json.loads(raw.decode('utf-8-sig'))
+            argv, _, phase, _, _, env = compile_spec(spec, require_phase=args.require_phase)
+            if args.require_phase:
+                probe = runtime.run_hidden([argv[0], '-NoProfile', '-NonInteractive', '-File',
+                    str(BASE / 'Test-UpdateScriptParameters.ps1'), '-Spec', str(args.spec)], timeout=30, env=env)
+                if probe['status'] != 'exited' or probe['exit_code'] != 0:
+                    raise ValueError('script-parameter-contract-rejected')
+                if json.loads(probe['stdout']).get('ok') is not True:
+                    raise ValueError('script-parameter-contract-rejected')
+            result = {'ok': True, 'status': 'validated-not-executed', 'phase': phase, 'spec_sha256': digest(raw)}
+            if spec.get('kind') == 'powershell':
+                result['script_sha256'] = digest(pathlib.Path(spec['script']).read_bytes())
+            print(json.dumps(result))
+            return 0
+        if not args.receipt or args.require_phase:
+            raise ValueError('receipt-required-use-validate-for-preflight')
         receipt = writer.output_path(args.receipt)
         # Reserve before execution: a retry cannot overwrite a failed receipt or run twice accidentally.
         with receipt.open('x', encoding='utf-8') as handle:
@@ -152,10 +203,18 @@ def main():
                 raw = args.spec.read_bytes()
                 if len(raw) > 65536:
                     raise ValueError('spec-too-large')
-                result = execute(json.loads(raw.decode('utf-8-sig')))
+                if args.expected_spec_sha256 is not None and digest(raw) != args.expected_spec_sha256:
+                    raise ValueError('spec-changed-before-execution')
+                spec = json.loads(raw.decode('utf-8-sig'))
+                if args.expected_script_sha256 is not None:
+                    if spec.get('kind') != 'powershell' or digest(pathlib.Path(spec['script']).read_bytes()) != args.expected_script_sha256:
+                        raise ValueError('script-changed-before-execution')
+                result = execute(spec)
                 result['spec_sha256'] = digest(raw)
             except (ValueError, OSError, KeyError, TypeError) as error:
                 result = {'schema_version': 1, 'ok': False, 'status': 'invalid-input', 'error_type': type(error).__name__}
+                if str(error) in {'explicit-phase-required', 'invalid-execution-phase', 'phase-requires-powershell', 'phase-mode-mismatch'}:
+                    result['error_code'] = str(error)
             result['started_at'] = started
             result['finished_at'] = datetime.datetime.now().astimezone().isoformat()
             handle.write(json.dumps(result, ensure_ascii=False, indent=2) + '\n')

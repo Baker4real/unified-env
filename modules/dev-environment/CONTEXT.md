@@ -32,6 +32,8 @@ node .\scripts\Run-PowerShellTests.cjs --module dev-environment --list
 
 `D:\Codex\.codex\scripts` 里每个文件的 owner 登记在 `managed/codex-scripts/ownership.json`，`scripts/Invoke-CodexScriptsOwnershipLint.ps1` 只读核对：未登记的文件、`source` 不在仓库里、部署脚本没点名该文件都是 error，本机缺登记条目、部署副本与源不一致是 warning。往这个目录部署、手工放入或清理文件时，同时改登记表并跑一次 lint。部署时会改写内容的条目不登记 `source`（`invoke-safe-tree-delete.ps1`：部署工具把 gate holder 库内联进 shim），由部署工具自己的回执核对。
 
+`scripts/Test-OfficialPackageSignature.ps1` 只读验证 Store 主包与客户端分发 PrimaryRuntime 的独立身份、CMS 与可信时间戳；不替代包载荷或撤销检查。`scripts/New-MsixDesktopShortcut.ps1` 默认 Plan，从已注册官方包生成最高 256 像素的原尺寸图标，显式 Apply 才创建/更新 D 盘快捷方式；已有未知目标拒绝，同身份只更新图标并备份回滚。用法与日更接线见 `scripts/daily-update/README.md`「包签名与桌面快捷方式」。两项 Windows fixture 已登记在本模块 fixture/ci profile。
+
 ## 依赖
 
 本模块依赖 `host-safety` 提供的路径安全、可信输入和原子报告发布实现。
