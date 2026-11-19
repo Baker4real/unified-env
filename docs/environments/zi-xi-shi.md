@@ -52,6 +52,12 @@ intent: 记录自习室设备的受控环境事实与差异
 - 2026-09-09 已关自启动：`Explorer\StartupApproved\Run` 写入同名 12 字节禁用标志（`03` + 11 字节 0），Run 值保留，任务管理器同款可逆。当场经 7.6.3 显式路径回读确认；跨重启复验未做（当时设备使用中，未重启）。
 - 证据：`D:\agents\run-evidence\feishu-autostart-off-study-20260909T013741Z\`。
 
+## 夸克浏览器与网盘桌面挂件（2026-11-19）
+
+- 夸克浏览器 `quark` 和网盘桌面挂件 `CloudDriveDesktopWidgetIndependent` 的登录启动项均已禁用。交互用户的 `Run` 值保留，`Explorer\StartupApproved\Run` 的同名标志为禁用，可在任务管理器恢复。
+- 15:15 回读时，夸克浏览器和网盘各有一项已启用的更新任务，两个登录触发器均启用。四项更新服务的启动类型均为自动。
+- 本次验收做到注册表、计划任务与服务回读。实际登录的启动行为留待下一次登录观察。 [回读证据](<D:/agents/run-evidence/replicator/study-quark-retro-20261119/startup-readback.out.txt>)
+
 ## UU 远程
 
 - 安装根：`D:\Program Files\Netease\GameViewer`。正式命令与文件传输走 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。

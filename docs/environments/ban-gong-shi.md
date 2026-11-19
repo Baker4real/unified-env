@@ -153,12 +153,24 @@ CC Switch、v2rayN 和 UU 的托盘进程依赖管理员交互登录；服务在
 2026-11-13 从家里经正式 SSH 安装并验收，证据在家里 `D:\agents\run-evidence\office-dsh-magpie-image-20261113\`。
 
 - Magpie 是便携版，在 `D:\Apps\Magpie`，网关 `http://127.0.0.1:3425`。远端安装与更新走受管入口，说明见 [RemoteMagpiePortable.md](../../managed/host-diagnostics/RemoteMagpiePortable.md)，历次运行证据在家里 `D:\agents\run-evidence\remote-magpie-portable\`。
-- DeepSeek Harness 0.2.2-rc.2 静默装在 `D:\Apps\DeepSeek Harness`（`/S /D=`），卸载项、桌面与开始菜单快捷方式都指向这里。desktop profile 的 pnpm `storeDir` 是 `D:/Codex/.codex/cache/pnpm-store`。默认模型经 `magpie dsh` 设为 `magpie/ai/gpt-6-astra`。
+- DeepSeek Harness 0.2.2-rc.2 静默装在 `D:\Apps\DeepSeek Harness`（`/S /D=`），卸载项、桌面与开始菜单快捷方式都指向这里。desktop profile 的 pnpm `storeDir` 是 `D:/Codex/.codex/cache/pnpm-store`。初装默认模型经 `magpie dsh` 设为 `magpie/ai/gpt-6-astra`。
 - DSH 插件是 `dsh-gpt-image-playground@0.2.8` 和本地 bundle `dsh-gpt-image-playground-magpie`。后者在 `D:\agents\projects\dsh-plugins\` 下，是 zip 快照而不是 Git 检出，来源记在同目录的 `OFFICE-SNAPSHOT.json`；源码改了怎样重新部署见该项目 `AGENTS.md`。
 - DSH 的 GUI 要跑在 Administrator 的交互会话里，从家里拉起见 `ssh-mesh.md`「远端脚本的写法」里的受管入口。
 - Magpie 登录自启：2026-11-13 16:26 用 `magpie autostart on` 开启，写在 Administrator 的 HKCU Run：`magpie = "D:\Apps\Magpie\magpie.exe" tray`，登录时只开托盘。此前没配任何自启（Run 键、启动文件夹和计划任务里都没有）：当天 11:49–11:57 Windows 更新关机又重启后 Magpie 没起来，16:00 生图工作台的任务一提交就失败，路由回 502 `connect ECONNREFUSED 127.0.0.1:3425`。16:25 从家里拉起后，网关和生图路由的 `/v1/models` 都回 200（没有真实出图）。下次登录能否自启尚未实测。排查方法见知识库「DeepSeek Harness 生图工作台接入 Magpie」的「现象：任务卡 00:00 就显示失败」。
 - Magpie 自更新原地替换 `D:\Apps\Magpie\magpie.exe`，旧版留作 `magpie.exe.old`。11-13 10:46 换成 0.1.3967 后，旧进程 0.1.3610 没有重启进新版，一直跑到 11:49 关机（原因没查）。所以 `magpie --version` 报的是磁盘上 exe 的版本，正在跑的版本看 `D:\Apps\Magpie\data\logs\app.log` 最后一条 `started` 行。
 - 机器级 `HTTP(S)_PROXY` 指向 10808（FailSafe 任务写入，见上文），Magpie 访问幻灵应当按它走 v2rayN（推断：家里 Magpie 的同类报错里直接出现本地代理端口；办公室没抓到在用的连接）。2026-11-13 18:06 生图工作台一次改图请求等了 57 秒后连接断开，卡片显示 `Post "https://ai.huanling.icu/images/edits": unexpected EOF`，18:08 重试成功。断在代理还是幻灵一侧没定下来，排查方法见知识库「DeepSeek Harness 生图工作台接入 Magpie」的「现象：等了几十秒后报 unexpected EOF」。
+
+### 模型勾选与验收
+
+1. 在办公室设备运行 `& 'D:/Apps/Magpie/magpie.exe' provider models ai | Out-String`，直接读取幻灵AI的已勾选项和 `not shown` 项。需要确认网关已刷新时，只核对 `127.0.0.1:3425/v1/models` 中目标模型的 ID。
+2. 在办公室 DSH 打开 **设置 → 模型**，编辑 **Magpie · Responses**（`magpie-responses`）。在 **自定义设置 → 模型目录 → 获取可用模型** 勾选所需模型，点 **更新列表**后保存。探测列表未返回的旧条目会保留，需要替换掉的旧条目在同一目录逐项移除。两项已在目录中时可直接验收。
+3. 在同一个运行中的 DSH 实例打开空白会话，核对输入框旁模型选择器里的两个条目。验收新会话默认值时，确认 DSH 分配了新的会话 ID，再读取模型和推理档位。点击「新建会话」可能复用现有空白会话，遇到这种情况在回执中注明。只完成配置回读或 Magpie 网关检查时，记录实际核验范围。
+
+需要查 DSH 文档时，先读办公室安装包里 `@deepseek-ai/dsh/package.json` 的版本，再用 ASAR 只读检索列出该包的 `docs/user/guide`，从实际条目读取供应商章节。参见 [ASAR 只读检索](../env-governance/gui-session.md#asar-只读检索)。
+
+2026-11-19 在办公室核对，幻灵AI的已勾选项和 Magpie 网关均为 GPT-6.2 Astra、GPT-6.2 Sol。 [Magpie 回读](<D:/agents/run-evidence/replicator/office-magpie-models-20261119T112211+0800/retro-provider-readback.out.txt>)
+
+同日通过办公室正在运行的 DSH 实测，点击新建会话后复用空白会话，显示默认 GPT-6.2 Astra、推理档位 High。模型选择器的 **Magpie · Responses** 分组显示 GPT-6.2 Astra 和 GPT-6.2 Sol，两项均可选。 [DSH 窗口回读](<D:/agents/run-evidence/replicator/office-dsh-live-20261119/uia-verify-final.out.txt>)
 
 ## 远端操作边界
 

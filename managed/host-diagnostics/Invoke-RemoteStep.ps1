@@ -48,7 +48,10 @@ $summary = [ordered]@{
     helperExitCode = $helperExitCode
     outputPath = [string]$run.stdout
 }
-if ($status -eq 'refused') { $summary.reason = [string]$run.reason }
+if ($status -eq 'refused') {
+    $summary.reason = [string]$run.reason
+    if ($summary.reason -eq 'command-too-long') { $summary.detail = [string]$run.detail }
+}
 if ($IncludeOutput) {
     $hasOutput = $summary.outputPath -and (Test-Path -LiteralPath $summary.outputPath -PathType Leaf)
     if (-not $hasOutput -and $status -eq 'ok') { throw "Remote output is missing: $($summary.outputPath)" }
