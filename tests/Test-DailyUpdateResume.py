@@ -51,6 +51,22 @@ class ResumeTests(unittest.TestCase):
         self.assertIn('兼容映射', result.stdout)
         self.assertLessEqual(len(result.stdout.encode()), 6000)
 
+    def test_empty_unfinished_list_does_not_hide_historical_failure(self):
+        run = self.root / 'current'
+        raw = json.dumps({'units': [{'id': 'check', 'status': 'processed', 'evidence': []}]}).encode()
+        (run / 'scope-manifest.json').write_bytes(raw)
+        (run / 'scope-checkpoint.json').write_text(json.dumps({'scope_manifest': 'scope-manifest.json',
+            'scope_manifest_sha256': hashlib.sha256(raw).hexdigest(), 'status': 'failed',
+            'counts': {'processed': 0, 'failed': 1}}), encoding='utf-8')
+        self.assertEqual(self.create().returncode, 0)
+        result = self.resume(budget=2400)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        value = json.loads(result.stdout)
+        self.assertTrue(value['ok'])
+        self.assertEqual(value['resume']['unfinished_count'], 0)
+        self.assertTrue(value['checkpoint_conflict'])
+        self.assertEqual(value['run_status'], 'failed')
+
     def test_scope_hash_drift_is_not_silent_empty_success(self):
         self.assertEqual(self.create().returncode, 0)
         with (self.root / 'current/scope-manifest.json').open('a') as handle:

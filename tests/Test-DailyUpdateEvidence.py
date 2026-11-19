@@ -62,6 +62,25 @@ class EvidenceReaderTests(unittest.TestCase):
         self.assertEqual(value['changes'][0]['status'], 'blocked')
         self.assertEqual(hashes, {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in hashes})
 
+    def test_failed_checkpoint_with_all_units_processed_remains_readable_but_failed(self):
+        units = [{'id': f'unit-{i}', 'status': 'processed', 'evidence': 'result.json'} for i in range(9)]
+        path = self.receipt('conflict', units)
+        checkpoint_path = path / 'scope-checkpoint.json'
+        checkpoint = json.loads(checkpoint_path.read_text(encoding='utf-8'))
+        checkpoint.update(status='failed', counts={'processed': 8, 'failed': 1,
+            'pending': 0, 'skipped': 0, 'running': 0}, scope_total=9)
+        checkpoint_path.write_text(json.dumps(checkpoint), encoding='utf-8')
+
+        result = self.invoke(path)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        value = json.loads(result.stdout)
+        self.assertTrue(value['ok'])
+        self.assertEqual(value['counts'], {'processed': 9})
+        self.assertEqual(value['scope_status'], 'completed')
+        self.assertEqual(value['checkpoint_status'], 'failed')
+        self.assertTrue(value['checkpoint_conflict'])
+        self.assertEqual(value['run_status'], 'failed')
+
     def test_hash_drift_is_rejected(self):
         path = self.receipt('drift', [])
         (path / 'scope-manifest.json').write_text('{"units":[] }', encoding='utf-8')

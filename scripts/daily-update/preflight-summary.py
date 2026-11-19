@@ -1,11 +1,15 @@
-"""Bounded daily-update navigation, live proxy facts and fixed runtime recipes."""
+"""Bounded daily-update navigation, worktree evidence, proxy facts and runtime recipes."""
 import argparse
+import collections
+import datetime
+import hashlib
 import importlib.util
 import ipaddress
 import json
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import urllib.parse
 
@@ -99,13 +103,66 @@ def runtime_recipe(component, expected):
     return [str(BASE / 'runtime-health.py'), 'shells', '--runtime', owner, '--expected-version', expected, '--aliases', *aliases]
 
 
+def worktree_summary(repo, run_directory, started_at):
+    evidence_spec = importlib.util.spec_from_file_location('daily_evidence', BASE / 'evidence_io.py')
+    evidence_module = importlib.util.module_from_spec(evidence_spec)
+    evidence_spec.loader.exec_module(evidence_module)
+    evidence = evidence_module.RunEvidence(run_directory)
+    started = datetime.datetime.fromisoformat(started_at)
+    if started.tzinfo is None:
+        raise ValueError('need-time-offset')
+
+    def git(*args):
+        return subprocess.check_output(['git', '--no-optional-locks', '-C', str(repo), *args],
+                                       stderr=subprocess.PIPE, timeout=30)
+
+    reported_root = git('rev-parse', '--show-toplevel').decode('utf-8').rstrip('\r\n')
+    if not pathlib.Path(repo).is_absolute() or pathlib.Path(reported_root).resolve() != pathlib.Path(repo).resolve():
+        raise ValueError('expected-repository-root')
+    head, timestamp = git('log', '-1', '--format=%H%n%cI').decode('ascii').splitlines()
+    age = started - datetime.datetime.fromisoformat(timestamp)
+    if git('rev-parse', 'HEAD').decode('ascii').strip() != head:
+        raise ValueError('head-drift')
+    raw = git('status', '--porcelain=v1', '-z', '--untracked-files=all')
+    if git('rev-parse', 'HEAD').decode('ascii').strip() != head:
+        raise ValueError('head-drift')
+    records = raw.decode('utf-8').split('\0')
+    if records.pop() != '':
+        raise ValueError('truncated-porcelain')
+    counts = collections.Counter()
+    sample = []
+    paths = iter(records)
+    for record in paths:
+        status, path = record[:2], record[3:]
+        if record[2:3] != ' ' or not path or not re.fullmatch(r'[ MADRCUT?]{2}', status):
+            raise ValueError('invalid-porcelain')
+        row = dict(status=status, path=path)
+        if 'R' in status or 'C' in status:
+            original = next(paths, '')
+            if not original:
+                raise ValueError('truncated-rename')
+            row['from'] = original
+        counts[status] += 1
+        if len(sample) < 8:
+            sample.append(row)
+    total = sum(counts.values())
+    target = evidence.output_path('skills-worktree.porcelain.z')
+    with target.open('xb') as stream:
+        stream.write(raw)
+    return dict(ok=True, head=head, last_commit_at=timestamp, started_at=started_at,
+                latest_commit_age_seconds=int(age.total_seconds()), dirty=bool(total),
+                dirty_age_gate_failed=bool(total and age > datetime.timedelta(days=1)),
+                counts=dict(counts), total=total, sample=sample, omitted_count=total - len(sample),
+                status_evidence=target.name, status_sha256=hashlib.sha256(raw).hexdigest())
+
+
 def bounded_json(result, budget):
     if not 512 <= budget <= 6000:
         raise ValueError('budget-outside-512-6000')
     def encode():
         return json.dumps(result, ensure_ascii=False, separators=(',', ':'))
     text = encode()
-    for key in ('listeners', 'interfaces'):
+    for key in ('listeners', 'interfaces', 'sample'):
         while len(text.encode('utf-8')) + 1 > budget and result.get(key):
             result[key].pop()
             result['omitted_count'] = result.get('omitted_count', 0) + 1
@@ -120,6 +177,10 @@ def main():
     parser.add_argument('--max-bytes', type=int, default=6000)
     modes = parser.add_subparsers(dest='mode', required=True)
     modes.add_parser('proxy')
+    worktree = modes.add_parser('worktree')
+    worktree.add_argument('--repo', required=True, type=pathlib.Path)
+    worktree.add_argument('--run-directory', required=True, type=pathlib.Path)
+    worktree.add_argument('--started-at', required=True)
     module = modes.add_parser('module')
     module.add_argument('--id', required=True)
     recipe = modes.add_parser('runtime-command')
@@ -131,12 +192,14 @@ def main():
             result = live_proxy()
         elif args.mode == 'module':
             result = module_summary(args.id)
+        elif args.mode == 'worktree':
+            result = worktree_summary(args.repo, args.run_directory, args.started_at)
         else:
             result = dict(ok=True, argv=runtime_recipe(args.component, args.expected_version))
         output = bounded_json(result, args.max_bytes)
         sys.stdout.buffer.write(output.encode('utf-8') + b'\n')
         return 0 if json.loads(output)['ok'] else 1
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
         sys.stdout.buffer.write(b'{"ok":false,"status":"unknown","reason":"summary-unavailable"}\n')
         return 1
 

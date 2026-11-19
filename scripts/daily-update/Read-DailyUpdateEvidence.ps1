@@ -10,8 +10,10 @@ $ErrorActionPreference = 'Stop'
 $utf8 = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $allowedRoot = [IO.Path]::GetFullPath('D:/agents/run-evidence').TrimEnd('\') + '\'
-$knownStatuses = @('complete','completed','processed','updated','updated-verified','pass','passed','ok',
-    'blocked','deferred','failed','pending','skipped','unchanged','latest','in_progress','running','manual-review')
+$processedStatuses = @('complete','completed','processed','updated','updated-verified','pass','passed','ok','unchanged','latest')
+$unfinishedStatuses = @('pending','in_progress','running')
+$blockedStatuses = @('blocked','deferred','manual-review')
+$knownStatuses = $processedStatuses + $unfinishedStatuses + $blockedStatuses + @('failed','skipped')
 
 function ConvertTo-SortedValue($Value) {
     if ($Value -is [Collections.IDictionary]) {
@@ -128,7 +130,63 @@ function Read-Receipt([string]$Directory) {
     }
     if ((Get-FileHash -LiteralPath $manifestFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifestHash) { throw 'Receipt changed during read.' }
     if ((Get-FileHash -LiteralPath $checkpointFile -Algorithm SHA256).Hash -ne $checkpointHash) { throw 'Checkpoint changed during read.' }
-    return @{ root=$root; manifest_hash=$manifestHash; units=$units; contract=$contract }
+    return @{ root=$root; manifest_hash=$manifestHash; units=$units; contract=$contract;
+        checkpoint=$checkpoint; optional_ids=$manifest['optional_units'] }
+}
+
+function Get-RunOutcome($Receipt, $Counts) {
+    # Keep the raw per-unit counts for history. Checkpoint counters normally use
+    # the consolidated names below, including zeroes for unobserved outcomes.
+    $totals = @{ processed=0; failed=0; pending=0; skipped=0; running=0 }
+    $unresolved = 0
+    foreach ($unit in $Receipt.units.Values) {
+        $state = $unit.status
+        if ($state -in $processedStatuses) { $totals.processed++ }
+        elseif ($state -eq 'failed') { $totals.failed++ }
+        elseif ($state -eq 'pending') { $totals.pending++ }
+        elseif ($state -in $unfinishedStatuses) { $totals.running++ }
+        elseif ($state -eq 'skipped') {
+            $totals.skipped++
+            if ($unit.id -notin @($Receipt.optional_ids)) { $unresolved++ }
+        }
+        else { $unresolved++ }
+    }
+    $scopeStatus = if ($totals.failed -gt 0) { 'failed' }
+        elseif ($totals.pending + $totals.running + $unresolved -gt 0) { 'incomplete' }
+        elseif ($totals.processed -gt 0) { 'completed' }
+        else { 'unknown' }
+    $checkpoint = $Receipt.checkpoint
+    $declared = $checkpoint['status']
+    $declared = if ($declared -is [string] -and $declared -in $knownStatuses) { $declared.ToLowerInvariant() } else { 'unknown' }
+    $declaredOutcome = if ($declared -in $processedStatuses) { 'completed' }
+        elseif ($declared -eq 'failed') { 'failed' }
+        elseif ($declared -eq 'unknown') { 'unknown' }
+        else { 'incomplete' }
+    $conflict = $scopeStatus -ne 'unknown' -and $declaredOutcome -ne 'unknown' -and $scopeStatus -ne $declaredOutcome
+    $checkpointFailed = $declaredOutcome -eq 'failed'
+    if ($checkpoint.Contains('counts')) {
+        $declaredCounts = $checkpoint['counts']
+        if ($declaredCounts -isnot [Collections.IDictionary]) { $conflict = $true }
+        else {
+            foreach ($key in $declaredCounts.Keys) {
+                $actual = if ($totals.ContainsKey($key)) { $totals[$key] } elseif ($Counts.Contains($key)) { $Counts[$key] } else { 0 }
+                $count = $declaredCounts[$key]
+                if ($count -isnot [int] -and $count -isnot [long]) { $conflict = $true; continue }
+                if ($count -ne $actual) { $conflict = $true }
+                if ($key -eq 'failed' -and $count -gt 0) { $checkpointFailed = $true }
+            }
+        }
+    }
+    if ($checkpoint.Contains('scope_total')) {
+        $total = $checkpoint['scope_total']
+        if (($total -isnot [int] -and $total -isnot [long]) -or $total -ne $Receipt.units.Count) { $conflict = $true }
+    }
+    $runStatus = if ($checkpointFailed -or $scopeStatus -eq 'failed') { 'failed' }
+        elseif ($conflict) { 'unknown' }
+        elseif ($scopeStatus -eq 'incomplete' -or $declaredOutcome -eq 'incomplete') { 'incomplete' }
+        elseif ($scopeStatus -eq 'completed' -and $declaredOutcome -eq 'completed') { 'completed' }
+        else { 'unknown' }
+    return @{ scope=$scopeStatus; checkpoint=$declared; conflict=$conflict; overall=$runStatus }
 }
 
 function Read-DecisionSection([string]$Root) {
@@ -177,9 +235,11 @@ try {
         $allChanges.Add([ordered]@{ id=$unit.id; status=$unit.status; evidence=$unit.evidence })
     }
     $removed = if ($null -ne $previous) { @($previous.units.Keys | Where-Object { -not $current.units.Contains($_) }).Count } else { 0 }
+    $outcome = Get-RunOutcome $current $counts
     $result = [ordered]@{
         schema_version=1; ok=$true; read_only=$true; run_directory=$current.root; receipt_contract=$current.contract
         manifest_sha256=$current.manifest_hash; unit_count=$current.units.Count
+        run_status=$outcome.overall; scope_status=$outcome.scope; checkpoint_status=$outcome.checkpoint; checkpoint_conflict=$outcome.conflict
         counts=$counts; unchanged_count=$unchanged; removed_count=$removed
         changed_count=$allChanges.Count; emitted_count=0; omitted_count=$allChanges.Count
         changes=[Collections.Generic.List[object]]::new(); decisions=$null

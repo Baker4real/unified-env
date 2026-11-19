@@ -1,10 +1,10 @@
 你是本机「每日更新 Codex 生态组件」的执行 agent。
 
 工作目录必须是 D:\agents\projects\统一环境。
-先读该目录 AGENTS.md，以及 D:\Codex\.codex\docs\agent-guidance\host-runbook.md 和 skill-operations.md。
+读取该目录 AGENTS.md。创建当次证据目录后，用 `Read-SessionDocument.ps1` 按需读取 D:\Codex\.codex\docs\agent-guidance 下 `host-runbook.md` 和 `skill-operations.md` 的相关范围。从第一次读取起使用同一个 `<当次目录>/document-reads.json`，并登记到恢复索引。参数见 `scripts/daily-update/README.md` 的「恢复索引」节。
 
 执行前硬门槛：
-- 本机日更由 DeepSeek Harness 计划任务「每周更新」（schedule_id `schedule-2a8292b0-5876-4d7c-a20a-080f98e18eab`）独立执行。执行前只读核验该 DSH 任务为 active，Codex Desktop 自动化 `codex` 在 live 数据库与 `automation.toml` 均为 PAUSED，ZCode live store D:\zcode\.zcode\v2\tasks-index.sqlite 中 automation_id `automation-9928c708-a9cf-40ae-8424-3bb403285586` 已删除，且不存在其他启用的同工作目录同类日更；Windows 计划任务 `Cursor Daily Codex Ecosystem Update` 必须保持 State=Disabled。发现其他重复执行面时立即停止并记录 blocked/duplicate-daily-update，不更新任何组件，不重新创建或启用旧执行面。
+- 本机日更由 DeepSeek Harness 计划任务「隔天更新」（schedule_id `schedule-2a8292b0-5876-4d7c-a20a-080f98e18eab`）独立执行。执行前只读核验该 DSH 任务为 active，Codex Desktop 自动化 `codex` 在 live 数据库与 `automation.toml` 均为 PAUSED，ZCode live store D:\zcode\.zcode\v2\tasks-index.sqlite 中 automation_id `automation-9928c708-a9cf-40ae-8424-3bb403285586` 已删除，且不存在其他启用的同工作目录同类日更；Windows 计划任务 `Cursor Daily Codex Ecosystem Update` 必须保持 State=Disabled。发现其他重复执行面时立即停止并记录 blocked/duplicate-daily-update，不更新任何组件，不重新创建或启用旧执行面。
 - PATH 上的 agent 是 Grok CLI（C:\Users\WINDOWS\.grok\bin\agent.exe），禁止调用。
 - 不要弹出本机 GUI 窗口做自动化。必须 GUI / Microsoft Store 人工核对的项只报告，不改 WinHTTP、InstallService 或 Windows Update 配置。
 - 不得输出凭据、令牌、.env、provider URL 或其他敏感配置值。
@@ -13,12 +13,12 @@
 证据与报告：
 - 本次清单、命令结果、回滚状态和验证证据写入 D:\agents\run-evidence\daily-codex-ecosystem-update\<yyyyMMdd-HHmmss>\
 - 所有运行（定时首跑、授权修复、人工补跑）都必须写当次目录的 RESULT.md。
-- LATEST.md 由「当日首次成功完成的运行」用其 RESULT.md 覆盖；同日后续补跑只写自己的当次目录，不覆盖 LATEST.md。不要手改历史 LATEST.md 的内容伪造收据。
+- 用 `scripts/daily-update/finalize-run.py` 核验最终检查点、逐项业务证据和恢复索引，再发布 Asia/Taipei 当日首次成功的 RESULT.md。范围与检查点使用受管 README「当日成功结果发布」的合同。发布命令返回 `published` 或 `already-published` 才能记录收尾成功；遇到冲突按返回原因保留失败证据。首次接管旧格式 LATEST.md 时，指定经核验的原发布运行目录。
 - RESULT.md 顶部设「需要用户裁决」区。悬置/阻塞项只逐条列出与上次运行相比有变化的；未变项折叠为一行「未变 N 项（列名称）」。每个悬置项记录首次出现日期；满 3 天仍未变的，在「需要用户裁决」区写成一个单选问题。
 - 环境指纹（全根 closure findings 集合、wrapper/脚本哈希、候选 upstream SHA）与上次相同的已阻塞项不重新 stage，只写一行"未变"。
-- skills-manager 根 Git 脏树失败门禁：每次运行开始时检查 skills 根 `D:\agents\skills-manager\skills` 的 Git 工作树和最近一次提交时间（以本次运行开始时间为基准）。若根目录存在未提交改动，且最近一次提交早于本次运行开始时间 24 小时，则必须在当次 `RESULT.md` 将该项标红并标记为「失败」，不得归类为「观察项」或仅作提示；同时写明工作树摘要、最近一次提交时间和 24 小时比较结果。无论是否触发失败门禁，每次都要在 `RESULT.md` 写明 SM 进程是否运行（进程名、PID/状态）以及 `D:\agents\skills-manager\.skills-manager.lock` 的 `operation`、`start_time`（锁文件缺失或字段无法读取也要明确记录）。
+- 开工用 `preflight-summary.py worktree` 检查 `D:\agents\skills-manager\skills`。传准确的带时区运行开始时间，保存摘要为当次 JSON，完整 Git 清单由命令写入证据目录。`dirty_age_gate_failed: true` 时，将范围中的对应单位和检查点标记失败，并在 RESULT.md 记录变更计数、最近提交时间与 24 小时比较。每轮都记录 SM 进程和锁文件的 `operation`、`start_time`，缺失或无法读出时保留探测状态。
 
-目标：只检查并更新本机已经安装、启用或被 Codex 实际引用的内容，包括 active local skills、已安装插件及其随附 skills、已配置 MCP 服务/运行时（包括但不限于 Serena、CodeGraph）、Codex CLI/工具链以及其他可从权威配置或清单证明正在使用的 Codex 依赖。不要发现或安装与现有环境无关的新组件。
+目标是维护本机已经安装、启用或被 Codex 实际引用的组件，包括 active local skills、已安装插件及其随附 skills、已配置 MCP 服务/运行时（含 Serena、CodeGraph）、Codex CLI/工具链以及其他可从权威配置或清单证明正在使用的 Codex 依赖。新增组件的安装范围限于第 4 条定义的、既有 skill 上游来源新增的正式稳定 skills。
 
 执行要求：
 1. 盘点 live 配置、版本、来源和本地 overlay；以 D:\Codex\.codex\config.toml、active plugin manifests/cache metadata、MCP 配置、skill SOURCE.md 与统一 ledger、官方包管理器状态为准，不以旧日志或旧报告代替当前事实。上游 sweep、ledger TSV、MCP smoke 一律使用 `D:\agents\projects\统一环境\scripts\daily-update\` 下的受管脚本（调用方式见同目录 README.md），不在证据目录重写脚本；sweep 传入上次 `lsremote-results.tsv` 做差分，只汇报移动项；排除清单为同目录 sweep-exclude.txt。命令：
@@ -27,10 +27,12 @@
    - `node D:\agents\projects\统一环境\scripts\daily-update\mcp-smoke.cjs <outDir>`
 2. 对每个组件查询其官方或已记录 upstream 的最新稳定版；排除 alpha、beta、rc、preview、canary、nightly 和来源不明版本。只有能够证明“当前版本 < 官方最新稳定版”时才更新；版本相同则保持不变。（唯一显式例外见第 10 条 Claude Code。）
 3. 只使用该组件官方支持的更新入口或本机现有受管 wrapper。插件 cache 视为只读，不手改缓存文件；插件只能走 Codex 官方插件管理/刷新机制。Codex Desktop 只能走 Microsoft Store 官方渠道，且不得用自建包替代。必须 GUI 交互、只能走 Microsoft Store 人工核对、或无法安全非交互完成的更新，只报告待更新和所需动作。当已证明存在官方稳定更新时，占用该组件安装树或运行时的现役进程（含 MCP、dashboard、tool/shim 进程）不再构成 deferred/blocked；停止这些占用进程、完成官方入口更新、再以新进程验收。不要因此中止本自动任务自身。
-4. Skills 必须逐个作为 candidate 处理，遵守 skill-install-guard 与 writing-for-agents；从已记录 provenance 获取 stable upstream（候选来自第 1 条受管 sweep 的移动项），Git 候选用 `git -c core.autocrlf=false clone` 取得原始字节，暂存并重放本地 overlay，通过 D:\Codex\.codex\scripts\install-skill-guarded.cmd 执行 update，保持 SOURCE.md、统一 ledger 和资源闭包一致。插件随附 skills 随插件官方更新，不复制进 active local skill root。本地 overlay 重放已获用户永久授权：凡 overlay 可安全合并或适配，必须经受管 wrapper 实际执行 update，不得停在 overlay-replay-required 等人审门。来源无法确认或 overlay 无法安全合并时保持原状并记录 blocked/source-unresolved，不猜测来源、不覆盖本地修改。
-   - Skills 更新优先级：对 Matt Pocock skills 必须先核验其最新官方稳定上游（上游版本/提交、non-prerelease 状态与当前本地 ledger 对照），再决定是否执行更新。
-   - 状态为 `in progress` 的 skill 无论上游是否有更新都不得更新，保持 active/candidate 和本地 overlay 原状，并在结果中明确标记 skipped/in-progress。
-   - 除 `in progress` 外，凡已确认存在官方稳定更新且通过 provenance、overlay 合并、资源闭包、SOURCE/ledger/catalog/hash 等现有硬门槛的 skill，都必须实际更新到本地 active root，不能只报告 candidate；硬门槛失败时才按 blocked/source-unresolved 原规则闭锁并记录证据。
+4. Skills 必须逐个作为候选处理，遵守 skill-install-guard 与 writing-for-agents。已安装 skill 的更新候选来自第 1 条受管 sweep 的移动项。按已记录的 provenance 取得官方稳定上游，用 `git -c core.autocrlf=false clone` 取得原始字节。Git 来源按「逐项暂存技能候选」使用 `stage-skill-candidates.py`，保留每个技能的暂存收据。续跑先复用校验通过的候选，变更 overlay 使用独立审阅副本。插件随附 skills 随插件官方更新，不复制进 active local skill root。
+   - Matt Pocock skills 优先核验最新官方稳定上游，将版本或提交及 non-prerelease 状态与当前统一 ledger 对照后决定是否更新。
+   - 每轮对照已采用来源的官方稳定发布清单或官方滚动稳定目录、本机 active root 和统一 ledger。把上游正式新增或转稳且本机尚未安装的 skills 纳入候选，并回看上轮差分与 RESULT.md 中已发现的待安装项。即使本轮 sweep 没有移动或现役 skill 子树没有变化，也要做这项检查。逐项核实正式稳定版本或对应提交、来源、重叠及调用模式。
+   - `in progress` 的 skill 标记为 skipped/in-progress，保持 active、candidate 和本地 overlay 原状。按 ledger 中的退役与明确排除记录过滤候选。
+   - 通过 provenance、overlay、资源闭包及 SOURCE/ledger/catalog/hash 等现有硬门槛的候选，必须通过 `D:\Codex\.codex\scripts\install-skill-guarded.cmd` 实际激活并验收。新增正式稳定 skill 执行 `install`，已安装 skill 执行 `update`。来源无法确认或 overlay 无法安全合并时保持原状并记录 blocked/source-unresolved，其他硬门槛失败也按受管流程闭锁并保留证据。将新安装项的版本或提交与验收证据写入 RESULT.md。
+   - 新装共享 skill 以 DeepSeek Harness 为首要宿主。用受管 `shared-skill-delivery.py register` 首轮将 guarded 安装载荷登记给 Magpie 的 `dsh`，完成正文加载和调用策略验收。用 `deliver` 分发给其余已启用且兼容的宿主，并逐个回读。按 README「共享技能分发」传入实际预设、工作区、调用策略和原 guarded 事务。保留每个阶段的收据。每轮先回查待验收和待分发的条目，从未完成阶段继续，再更新同名技能。
    - closure 门禁：skill 受管事务的 closure 门禁采用"基线差分 + target 作用域"（细则以 D:\Codex\.codex\docs\agent-guidance\skill-operations.md「刷新和闭包」节为准）：只有新增 finding 或落在本事务 target 上的 finding 才阻塞；既有非 target finding 不阻塞但必须在 RESULT.md 列出。全根 strict closure 仍需每日运行，有 finding 即在报告中标红。
 5. MCP/工具更新必须保留 D 盘 wrapper、参数、环境变量和配置的一致性。更新 Serena、CodeGraph 或其他 MCP 后，检查依赖完整性并做真实 initialize/tools-list/query 或等价 smoke test（initialize/tools-list 用第 1 条的 mcp-smoke.cjs）。需要停止占用进程才能写入安装树时，先停止占用进程再更新；更新后用新进程验收。当前 GUI/会话若仍附着旧进程，报告需要重连或重启客户端以采用，但不得把进程占用本身当作跳过更新的理由。
 6. 每个组件更新前记录版本和回滚点；更新失败时优先修复环境，仍失败则回滚该组件，不把失败扩散到其他互相独立的组件，并继续完成其余检查。不得禁用检查、绕过治理、恢复已退役 GSD 内容、删除自定义组件或静默降级。凡改动 `C:\Program Files\PowerShell\7` junction、User PATH 或计划任务 action 的机器级操作，执行前必须先在证据目录写好可执行的回滚脚本并记录旧值；任一验收失败立即执行回滚脚本并复验，回滚成功才可记 failed/rolled-back。
@@ -64,10 +66,10 @@
 
 14. C 盘工具缓存探针（只读，无论本次是否有更新都要跑）：运行 `pwsh -NoProfile -File D:/Codex/.codex/scripts/Test-CDriveToolCacheDrift.ps1 -Json`，把 watched 汇总与 new/changed/removed 写进 RESULT.md 的「C 盘工具缓存」一节。new 或 changed 非空说明有工具在 C 盘新增或改写了内容，违反 D 盘存储策略：只报告路径与可能来源，不删除、不移动。
 
-本自动任务已获得用户对“现有组件升级到官方最新稳定版”的持续授权，并永久授权：在存在官方稳定更新时停止占用进程以完成更新；对可安全合并的本地 overlay 经受管 wrapper 重放；按第 7 条运行菜单中文化闭包（审计、重放 overlay、合并新译文）。该授权不包括安装无关新组件、预发布版、破坏性迁移、丢弃无法安全合并的 overlay、修改账号权限/凭据或使用 GUI 自动化；第 8 条明确「仅报告」的 Git for Windows 不授权更新。
+本自动任务已获得用户对“现有组件升级到官方最新稳定版”及按第 4 条安装既有来源新增正式稳定 skills 的持续授权。永久授权还涵盖在存在官方稳定更新时停止占用进程、经受管 wrapper 重放可安全合并的本地 overlay，以及按第 7 条运行菜单中文化闭包（审计、重放 overlay、合并新译文）。该授权不包括安装无关新组件、预发布版、破坏性迁移、丢弃无法安全合并的 overlay、修改账号权限/凭据或使用 GUI 自动化；第 8 条明确「仅报告」的 Git for Windows 不授权更新。
 
 15. 环境验收与证据读取使用受管入口（调用细节以 scripts/daily-update/README.md 为准）：
-   - 默认先用 preflight-summary.py module --id workstation-operations 获取目标模块导航，不全文输出 manifest；代理用该入口的 proxy 模式，只投影现场 loopback LISTENING、owner 与 Git/User HTTPS_PROXY 三面一致性，解析后仍用 Test-LoopbackProxy.ps1 验收 HTTP 204。摘要总预算最多6000 UTF-8字节，omitted_count 明示省略。npm/npx 的命令配方用 runtime-command --component npm，固定映射到 node aliases，不猜 runtime 枚举。详见 README「有界默认导航与代理摘要」。
+   - 默认先用 preflight-summary.py module --id workstation-operations 获取目标模块导航，不全文输出 manifest；代理用该入口的 proxy 模式，只投影现场 loopback LISTENING、owner 与 Git/User HTTPS_PROXY 三面一致性，解析后仍用 Test-LoopbackProxy.ps1 验收 HTTP 204。摘要总预算最多6000 UTF-8字节，omitted_count 明示省略。npm/npx 的命令配方用 runtime-command --component npm，固定映射到 node aliases，不猜 runtime 枚举。详见 README「有界导航、工作树与代理摘要」。
    - 开始时用 Read-DailyUpdateEvidence.ps1 验证当次与上次 scope 收据并创建 resume-index.json；恢复或交接时先用 Resume-DailyUpdate.ps1 -IndexPath 直达已登记目录，只展开变化项、未完成单位和裁决区，总预算不超过6000字节。scope、证据或文档状态变化后核对并显式刷新索引；复用 Read-SessionDocument 的 StatePath，不全文重复输出未变文档。调用方式以受管 README 的「Read-DailyUpdateEvidence.ps1（有界差分）」与「恢复索引（定位后复用现有 reader）」小节为准。只读 JSON 字段投影可直接用 ConvertFrom-Json/Select-Object；源码语义查询仍遵守 Serena/CodeGraph 路由。不为规避查询门禁把源码伪装成 JSON。旧收据或索引无法验证时明确报告，不以空输出当通过；按具体文件/章节窄读补齐。
    - 常见 JSON 探测与验收通过 daily-update-step.py 一步一份新收据，显式声明 required_fields 与业务 equals 谓词；不得用后续成功覆盖先前非零、空输出或业务失败。PowerShell 单次脚本调用复用 Invoke-CheckedPowerShell。SM 状态用 Get-SkillsManagerState.ps1 解析文本锁，缺文件/缺字段必须明记；receipt 的 ok 不代表锁存在或进程正在运行。接口见 README 的「daily-update-step.py（一步一份新收据）」小节。
    - PowerShell、Python、Git、Node 事务前先用 runtime-health.py shells 在当前版本验证三 shell 验收器；激活后按目标版本重跑。Node 按 2026-11-10 用户规则，当前 v24 LTS 线发现更高官方稳定版即更新；官方 zip+SHA-256 和签名验证通过后才激活，保留旧版本目录、原入口与可执行回滚点，保留全局 npm prefix，不重指无关 PATH，仅切换受管 node hardlink 和 npm/npx wrapper，并验证 crypto/子进程行为。Node 与 npm/npx 版本独立，分开传 --expected-version，不省略已有 npm/npx 入口。使用当前注册表 PATH 的全新隐藏子进程，不能把旧宿主 PATH 或命令退出 0 当最终版本证据。

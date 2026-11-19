@@ -735,7 +735,10 @@
         "scripts/daily-update/Invoke-ElevatedUpdate.ps1",
         "scripts/daily-update/Test-UpdateScriptParameters.ps1",
         "scripts/daily-update/post-update-closeout.py",
-        "scripts/daily-update/report-summary.py"
+        "scripts/daily-update/report-summary.py",
+        "scripts/daily-update/finalize-run.py",
+        "scripts/daily-update/stage-skill-candidates.py",
+        "scripts/daily-update/shared-skill-delivery.py"
       ],
       "dependsOn": ["host-safety", "skill-supply-chain"],
       "transitionalDependencies": [],
@@ -759,6 +762,9 @@
             "tests/Test-DailyUpdateEvidence.py",
             "tests/Test-DailyUpdateStep.py",
             "tests/Test-DailyUpdateResume.py",
+            "tests/Test-DailyUpdateFinalize.py",
+            "tests/Test-SkillCandidateStaging.py",
+            "tests/Test-SharedSkillDelivery.py",
             "tests/Test-StoreUpdateGate.py",
             "tests/Test-ElevatedUpdateContract.py",
             "tests/Test-PostUpdateCloseout.py",

@@ -97,14 +97,20 @@ def create_index(args):
     return {'ok': True, 'index_path': str(target), 'unfinished_count': len(unfinished), 'scope_sha256': value['manifest_sha256']}
 
 
-def resume(args):
-    path = step.evidence_path(args.index_path)
-    raw = path.read_bytes()
+def verify_index(path, budget):
+    """Verify the complete index and reader result before applying a caller's own policy."""
+    path = step.evidence_path(path)
+    with path.open('rb') as stream:
+        raw = stream.read(262145)
     if len(raw) > 262144:
         raise ValueError('index-too-large')
     index = json.loads(raw.decode('utf-8-sig'))
     expected = {'schema_version','run_directory','previous_run_directory','scope_sha256','unfinished_units','document_state','bindings'}
-    if not isinstance(index, dict) or set(index) != expected or index['schema_version'] != 1:
+    if (not isinstance(index, dict) or set(index) != expected
+            or type(index['schema_version']) is not int or index['schema_version'] != 1
+            or not isinstance(index['run_directory'], str)
+            or any(index[key] is not None and not isinstance(index[key], str)
+                   for key in ('previous_run_directory', 'document_state'))):
         raise ValueError('unknown-index-schema')
     current = step.evidence_path(index['run_directory'])
     previous = step.evidence_path(index['previous_run_directory']) if index['previous_run_directory'] else None
@@ -117,10 +123,18 @@ def resume(args):
         bindings[str(state)] = step.digest(state.read_bytes())
     if bindings != index['bindings'] or unfinished != index['unfinished_units']:
         raise ValueError('index-content-drift')
-    value = read_receipts(current, previous, max(512, args.max_total_bytes - 1400))
+    value = read_receipts(current, previous, budget)
     verify_bindings(bindings)
     if path.read_bytes() != raw or value['manifest_sha256'] != index['scope_sha256']:
         raise ValueError('index-scope-drift')
+    return index, raw, value
+
+
+def resume(args):
+    path = step.evidence_path(args.index_path)
+    index, _, value = verify_index(path, max(512, args.max_total_bytes - 1400))
+    unfinished = list(index['unfinished_units'])
+    state = index['document_state']
     value['resume'] = {'index_path': str(path), 'unfinished_units': unfinished,
                        'unfinished_count': len(unfinished), 'unfinished_omitted': 0,
                        'document_state': str(state) if state else None,

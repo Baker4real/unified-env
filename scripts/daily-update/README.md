@@ -188,19 +188,74 @@ python scripts/daily-update/daily-update-resume.py index --run-directory <当次
 & 'D:/agents/projects/统一环境/scripts/daily-update/Resume-DailyUpdate.ps1' -IndexPath <当次目录>/resume-index.json -MaxTotalBytes 6000
 ~~~
 
-没有已记录文档状态时省略 document-state。索引绑定 scope/checkpoint/RESULT/引用证据及文档状态哈希，拒绝越界、重解析点、未知 schema 和漂移；漂移时核对具体变化再显式刷新，不能自动吸收。恢复输出复用 Read-DailyUpdateEvidence 的裁决与计数，优先压缩变化项和未完成清单，省略数量明确；预算不足以保留裁决/计数时失败。文档只返回 Read-SessionDocument 状态指针，继续用其同一 StatePath 获得未变文档指针，不再次全文输出。入口不改 LATEST、不重跑组件。
+没有已记录文档状态时省略 `--document-state`。索引绑定 scope、checkpoint、RESULT、证据引用和文档状态哈希。核对证据漂移后显式刷新索引。恢复输出含 `run_status` 和 `checkpoint_conflict`，以及变化项、未完成清单和裁决。按 `run_status` 判断整体结果，按 `checkpoint_conflict` 定位范围与检查点的冲突。
 
-## 有界默认导航与代理摘要
+从第一次查询总手册或技能指引开始，给 `Read-SessionDocument.ps1` 传同一个 `<当次目录>/document-reads.json` 和任务需要的范围。
+
+~~~powershell
+& 'D:/Codex/.codex/scripts/Read-SessionDocument.ps1' -LiteralPath 'D:/Codex/.codex/docs/agent-guidance/skill-operations.md' -StatePath '<当次目录>/document-reads.json' -MarkdownSection '新装共享 skill'
+~~~
+
+恢复时沿用索引返回的 StatePath 和章节选择。确实缺少正文时传 `-Refresh` 读取所需范围。
+
+## 有界导航、工作树与代理摘要
 
 开始日更时只投影目标模块，不全文读取 manifest。代理端口从现场 loopback LISTENING 与配置取证；监听不明确时返回 unknown/ambiguous，不猜端口。此入口不改代理配置；连通性仍用现役 `Test-LoopbackProxy.ps1` 验证真实 HTTP 204。
 
 ~~~powershell
 python scripts/daily-update/preflight-summary.py module --id workstation-operations
 python scripts/daily-update/preflight-summary.py proxy
+python scripts/daily-update/preflight-summary.py worktree --repo D:/agents/skills-manager/skills --run-directory <当次目录> --started-at <带时区的实际开始时间>
 python scripts/daily-update/preflight-summary.py runtime-command --component npm --expected-version <npm版本>
 ~~~
 
 返回最多 6000 UTF-8 字节，裁剪明示 `omitted_count`。proxy 只显示 loopback 监听、PID/进程名和脱敏配置一致性，不枚举连接；`ok` 表示端口可唯一确定，`three_faces_consistent` 单独表示 Git、User HTTPS_PROXY 与监听是否一致。runtime-command 返回 argv 数组；npm/npx 固定映射到 `--runtime node --aliases npm npx`，与 Node 分开传 expected version。执行仍使用上文 runtime-health 的三 shell 验收，不用该 recipe 声称已完成验收。
+
+`worktree` 输出变更分类计数、代表路径及 `dirty_age_gate_failed`。保存摘要作为当次前置验收 JSON。`skills-worktree.porcelain.z` 保留 Git 的原始 NUL 分隔清单，摘要记录文件 SHA-256。恢复时读取已登记的摘要。同一运行目录的原始清单采用首次写入。
+
+## 当日成功结果发布
+
+完成最后一项验收及 `RESULT.md` 后，登记 `scope-manifest.json`、`scope-checkpoint.json` 和最新的恢复索引。每个 `processed` 单位在 `evidence` 中列出本次相对路径，在 `checks` 中列出该单位适用的业务谓词。两种检查可按单位组合。
+
+~~~json
+{"status":"processed","evidence":["git-before.json","health-step.json","health-spec.json"],"checks":[{"path":"git-before.json","equals":{"ok":true,"dirty_age_gate_failed":false}},{"path":"health-step.json","spec":"health-spec.json"}]}
+~~~
+
+单步 spec 的 `equals` 包含 `ok: true` 和该事务所需的版本、状态等谓词。涉及新装共享技能时，登记该技能 `deliver` 收据，并核验 `ok: true` 和 `status: "distributed"`。检查点使用 `finalize_schema_version: 1`，记录时区明确的实际 `completed_at`、`scope_manifest_sha256`、`scope_total`、`status` 和全部五项计数（`processed`、`failed`、`pending`、`skipped`、`running`）。只有稳定位于已核验 scope 内的可跳过项记录 `skipped`。出现失败的硬门槛时，在对应单位和检查点保持 `failed`。
+
+~~~powershell
+python -B scripts/daily-update/finalize-run.py --run-directory <当次目录> --index-path <当次目录>/resume-index.json
+~~~
+
+发布命令复核索引绑定、各单位证据和检查点状态。Asia/Taipei 当天第一份通过验收的 `RESULT.md` 原子发布为 `LATEST.md`。同日后续成功返回 `already-published`。旧格式的 `LATEST.md` 首次接管时用 `--legacy-latest-run-directory <原发布运行目录>` 指定内容匹配的成功收据。收到 `same-day-publication-pending` 时，用已登记的当次目录恢复发布。保留待发布的 RESULT 原件，恢复索引可在核对证据后刷新。
+
+## 逐项暂存技能候选
+
+使用已有本地克隆和精确 Git 提交。为一个技能在当次证据目录保存配置。
+
+~~~json
+{"run_directory":"D:/agents/run-evidence/daily-codex-ecosystem-update/<ts>","repository":"D:/path/to/upstream-clone","active_root":"D:/agents/skills-manager/skills","name":"<skill>","mode":"update","upstream_path":"skills/<skill>","old_commit":"<精确旧提交>","new_commit":"<精确新提交>"}
+~~~
+
+~~~powershell
+python -B scripts/daily-update/stage-skill-candidates.py stage --config <当次单技能配置>
+python -B scripts/daily-update/stage-skill-candidates.py verify --config <同一配置>
+~~~
+
+新安装用 `mode: "install"` 和 `old_commit: null`。从仓库根提取时用 `upstream_path: "."`。每项写 `skills/staging/<skill>/receipt.json`，记录上游提交、当前 active 载荷和候选哈希。`stage` 可复用校验通过的候选，`verify` 只读。无完成收据时从新 attempt 暂存该项。遇到合并冲突或哈希漂移时记录对应阻塞。使用返回的 `candidate_path` 做审阅，需调整 overlay 时在单独的待审副本中编辑，再交给 guarded wrapper 的候选校验和安装事务，显式指定 `--name <skill>`。
+
+## 共享技能分发
+
+对 guarded wrapper 新安装成功的单个技能使用 `shared-skill-delivery.py`。每次动作都指定同一事务、目标预设和调用策略，写一份新的当次收据。
+
+~~~powershell
+python -B scripts/daily-update/shared-skill-delivery.py register --run-directory <当次目录> --receipt delivery/<skill>-dsh.json --transaction-manifest <成功事务manifest绝对路径> --name <skill> --preset cordis --cwd <使用工作区> --model-invocable no --user-invocable yes --like <已采用的同源技能>
+python -B scripts/daily-update/shared-skill-delivery.py deliver --run-directory <当次目录> --receipt delivery/<skill>-hosts.json --transaction-manifest <同一manifest> --name <skill> --preset cordis --cwd <使用工作区> --model-invocable no --user-invocable yes --like <同一技能>
+~~~
+
+示例采用手动调用。按该候选的已审阅策略填写两项调用标志。用户指定宿主时，用 `--agents dsh,<宿主列表>` 代替 `--like`。本机受管入口支持 `dsh`、`claude`、`claude-desktop`、`codex` 和 `kimi`。`register` 首轮登记 `dsh`，`deliver` 在分发前再实测正文加载和调用策略，`verify` 只读核验已经分发的同一载荷。在失败收据中查看阶段和原因，用新收据重试对应阶段。
+
+验收探针用已安装的 Harness SDK 合成实际 Desktop 预设的文件技能配置，在隔离作用域执行技能发现与正文加载。Magpie 分发读取实际勾选和应用记录，并核验各宿主链接或受管副本。命令只输出目标技能的验收字段。[Magpie Library API](https://github.com/yetone/magpie/blob/6a46bad3441151f91ab188cc378fd444f5564138/internal/gui/library.go)
 
 ## Kimi 独立回滚事务
 
