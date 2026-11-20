@@ -94,6 +94,8 @@
     { "path": "screenshot-geometry.test.mjs", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/screenshot-geometry.test.mjs" },
     { "path": "Test-ScreenshotGeometry.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-ScreenshotGeometry.ps1" },
     { "path": "Test-HostDiagnostics.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-HostDiagnostics.ps1" },
+    { "path": "Open-DesktopShortcut.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Open-DesktopShortcut.ps1" },
+    { "path": "lib/ProcessProxyReader.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/lib/ProcessProxyReader.ps1" },
     { "path": "Test-ManagedRecycle.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-ManagedRecycle.ps1" },
     { "path": "Test-NativeUtf8ConsoleEncoding.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },
     { "path": "Test-NvidiaDownloadStatus.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-NvidiaDownloadStatus.ps1" },

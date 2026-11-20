@@ -360,6 +360,9 @@
         "managed/host-diagnostics/Get-VcpkgHealth.ps1",
         "managed/host-diagnostics/Get-TaskbarSnapshot.ps1",
         "managed/host-diagnostics/Restart-ExplorerShell.ps1",
+        "managed/host-diagnostics/Open-DesktopShortcut.ps1",
+        "managed/host-diagnostics/antigravity/Test-AntigravityDesktop.ps1",
+        "managed/host-diagnostics/antigravity/patch_wsl.py",
         "managed/host-diagnostics/Invoke-ManagedRecycle.ps1",
         "managed/host-diagnostics/Get-ConsoleLaunchAudit.ps1",
         "managed/host-diagnostics/Watch-ConsoleWindows.ps1",
@@ -399,6 +402,7 @@
       "ownership": {
         "files": [
           "docs/handoffs/20260902T164751Z-safe-tree-delete-status-slow-path.md",
+          "tests/Test-AntigravityDesktopContracts.ps1",
           "docs/env-governance/host-diagnostics.md",
           "docs/env-governance/gui-session.md",
           "tests/Test-RemoteMagpiePortable.ps1",
@@ -571,6 +575,7 @@
         "diagnostics": {
           "powershell": [
             "tests/Test-HostDiagnostics.ps1",
+            "tests/Test-AntigravityDesktopContracts.ps1",
             "tests/Test-RemoteStep.ps1",
             "tests/Test-RemoteMagpiePortable.ps1",
             "tests/Test-RemoteEncoding.ps1",

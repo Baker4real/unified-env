@@ -76,8 +76,13 @@ Check 'new-process-records-target-command-line-and-parent-identity' {
 
         $targetStart = [Diagnostics.ProcessStartInfo]::new((Join-Path $env:SystemRoot 'System32/ping.exe'))
         $targetStart.UseShellExecute = $false; $targetStart.CreateNoWindow = $true
+        # Keep the fixture's JSON stdout independent of the native probe output.
+        $targetStart.RedirectStandardOutput = $true
+        $targetStart.RedirectStandardError = $true
         foreach ($argument in @('-n','5','127.0.0.1')) { $targetStart.ArgumentList.Add($argument) }
         $target = [Diagnostics.Process]::Start($targetStart)
+        $target.BeginOutputReadLine()
+        $target.BeginErrorReadLine()
         $completed = Complete-Entry $monitor 15000
         Assert ($completed.exitCode -eq 0 -and $completed.report.status -eq 'complete') 'wsl-launch-capture-failed'
         Assert ($completed.report.processSeen -eq $true -and $completed.report.stopReason -eq 'first-process') 'wsl-launch-stop-contract'
