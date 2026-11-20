@@ -308,7 +308,9 @@ class SystemRepairTestCase(GuardedInstallTestCase):
             if spec["name"] == "review-agent":
                 spec["critical_files"]["agents/openai.yaml"] = BASE.sha256_file(agent_file)
                 spec["effective_integrity"] = REPAIR._tree_integrity(root, overrides={
-                    "SKILL.md": REPAIR._review_overlay_bytes(root / "SKILL.md", (root / "SKILL.md").read_bytes()),
+                    "SKILL.md": REPAIR._invocation_parity_bytes(
+                        root / "SKILL.md", (root / "SKILL.md").read_bytes(), name="review-agent"
+                    ),
                 })
         Path(state["plan"]).write_text(json.dumps(bootstrap), encoding="utf-8")
         with contextlib.redirect_stdout(io.StringIO()):

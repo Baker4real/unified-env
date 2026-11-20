@@ -11,6 +11,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 TESTS_ROOT = Path(__file__).resolve().parent
@@ -168,6 +169,125 @@ class PrepareSystemProvenanceRepairTests(SystemRepairTestCase):
         code, stdout, stderr = self.run_wrapper(self.system_provenance_repair_args({**state, "plan": reconcile}))
         self.assertEqual(code, 0, stderr)
         self.assertEqual(json.loads(stdout)["status"], "succeeded")
+
+    def add_statusline(self, state: dict[str, object]) -> tuple[str, bytes]:
+        root = Path(state["system_root"]) / "create-statusline"
+        (root / "agents").mkdir(parents=True)
+        (root / "agents" / "openai.yaml").write_bytes(b"policy:\n  allow_implicit_invocation: false\n")
+        source = "---\nname: create-statusline\ndescription: Build a custom statusline for the Codex CLI.\n---\n\n# Statusline\n"
+        (root / "SKILL.md").write_bytes(source.encode("utf-8"))
+        translated = source.replace("Build a custom statusline for the Codex CLI.", "为 Codex CLI 创建自定义状态栏。")
+        return "create-statusline", translated.encode("utf-8")
+
+    def test_bootstrap_repairs_statusline_and_migrates_old_ledger(self) -> None:
+        state = self.prepare_system_display_bootstrap()
+        self.give_skill_creator_the_official_validator(state)
+        translated = self.restore_official_display(state)
+        name, translated_skill = self.add_statusline(state)
+        translated[name] = {"SKILL.md": translated_skill}
+        root = Path(state["system_root"])
+        trees = {n: REPAIR.system_skill_integrity(root / n)["tree_sha256"] for n in (name, *state["names"])}
+        self.enterContext(mock.patch.object(PREPARE.REPAIR, "REVIEWED_DAEMON_TREES", trees))
+        self.enterContext(mock.patch.object(PREPARE.REPAIR, "REVIEWED_DAEMON_MARKER", BASE.sha256_file(Path(state["marker"]))))
+        code, status = self.run_status(state)
+        self.assertEqual(code, 1, status)
+        self.assertEqual(status["display"].get(name), "official")
+        evidence = self.temp / "six-skills"
+        code, stdout, stderr = self.run_prepare(state, "preserve-official", "--evidence", str(evidence))
+        self.assertEqual(code, 0, stderr)
+        self.assertIn(name, json.loads(stdout)["preserved"])
+        self.write_display(state, translated)
+        plan_path = self.temp / "prepared-display-plan.json"
+        code, _, stderr = self.run_prepare(
+            state, "plan", "--evidence", str(evidence), "--out", str(plan_path), "--stability-interval", "0"
+        )
+        self.assertEqual(code, 0, stderr)
+        args = self.system_provenance_repair_args({**state, "plan": plan_path})
+        original_plan = plan_path.read_bytes()
+        plan = json.loads(original_plan)
+        plan["payload_release"]["asset_sha256"] = "0" * 64
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        code, _, stderr = self.run_wrapper([*args, "--dry-run"])
+        self.assertEqual(code, 2)
+        self.assertIn("payload_release", stderr)
+        plan_path.write_bytes(original_plan)
+
+        before = {path: path.read_bytes() for path in (
+            self.ledger, Path(state["catalog"]), root / name / "SKILL.md", root / "review-agent" / "SKILL.md"
+        )}
+        broken_generator = self.temp / "fail-catalog.py"
+        broken_generator.write_text("raise SystemExit(23)\n", encoding="utf-8")
+        code, _, stderr = self.run_wrapper(self.system_provenance_repair_args({**state, "plan": plan_path}, generator=broken_generator))
+        self.assertEqual(code, 2)
+        self.assertIn("rolled-back", stderr)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+        self.assertTrue(all(not (root / n / "SOURCE.md").exists() for n in trees))
+
+        statusline = root / name / "SKILL.md"
+        external = before[statusline] + b"\nthird-party write\n"
+        optional_bytes = PREPARE.REPAIR._optional_bytes
+        injected = False
+
+        def interleave(path):
+            nonlocal injected
+            if not injected and path == statusline and any(path.parent.glob(".SKILL.md.*.tmp")):
+                injected = True
+                path.write_bytes(external)
+            return optional_bytes(path)
+
+        with mock.patch.object(PREPARE.REPAIR, "_optional_bytes", side_effect=interleave):
+            code, _, stderr = self.run_wrapper(args)
+        self.assertTrue(injected)
+        self.assertEqual(code, 2)
+        self.assertIn("rollback-failed", stderr)
+        self.assertEqual(statusline.read_bytes(), external)
+        self.assertEqual(self.ledger.read_bytes(), before[self.ledger])
+        self.assertTrue(all(not (root / n / "SOURCE.md").exists() for n in trees))
+        statusline.write_bytes(before[statusline])
+
+        code, stdout, stderr = self.run_wrapper([*args, "--dry-run"])
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["targets"], list(trees))
+        code, stdout, stderr = self.run_wrapper(args)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(len(json.loads(stdout)["backups"]), 10)
+        group = json.loads(self.ledger.read_text(encoding="utf-8"))["sources"][0]
+        self.assertEqual(group["skills"], [f".system/{n}" for n in trees])
+        specs = group["system_provenance"]["skills"]
+        self.assertEqual(specs[0]["overlay"]["base_overlay"]["kind"], "create-statusline-invocation-parity")
+        root = Path(state["system_root"])
+        for skill_name in (name, "review-agent"):
+            self.assertIn(b"disable-model-invocation: true", (root / skill_name / "SKILL.md").read_bytes())
+        self.assertEqual(group["system_provenance"]["payload_release"], REPAIR.REVIEWED_DAEMON_RELEASE)
+        self.assertEqual(self.run_status(state)[1]["state"], "needs-skill-creator-overlay")
+        self.bind_skill_creator_overlay(state, evidence / "creator")
+        release_name = REPAIR.REVIEWED_DAEMON_RELEASE["tag"].encode("utf-8")
+        creator_source = root / "skill-creator" / "SOURCE.md"
+        creator_history = creator_source.read_bytes()
+        self.assertIn(release_name, creator_history.rsplit(b"---\n", 1)[1])
+        self.reconcile_a_later_menu_replay(state, plan_path)
+        self.assertTrue(creator_source.read_bytes().startswith(creator_history))
+        self.assertEqual(self.run_status(state)[1]["state"], "healthy")
+        after = json.loads(self.ledger.read_text(encoding="utf-8"))["sources"][0]["system_provenance"]
+        self.assertEqual(after["payload_release"], REPAIR.REVIEWED_DAEMON_RELEASE)
+        self.assertIn(release_name, creator_source.read_bytes().rsplit(b"---\n", 1)[1])
+
+    def test_legacy_plan_rejects_partial_coverage_of_active_system(self) -> None:
+        state = self.prepare_system_provenance_repair()
+        self.add_statusline(state)
+        code, _, stderr = self.run_wrapper([*self.system_provenance_repair_args(state), "--dry-run"])
+        self.assertNotEqual(code, 0)
+        self.assertIn("system skill inventory", stderr)
+
+    def test_closure_rule_import_is_registered_during_module_execution(self) -> None:
+        closure = self.temp / "closure-with-dataclass.py"
+        closure.write_text(
+            "from __future__ import annotations\nfrom dataclasses import dataclass\nimport sys\n"
+            "assert __name__ in sys.modules\n@dataclass\nclass Value:\n    text: str\n"
+            "def chinese_dominant(text):\n    return Value(text).text == '中文'\n",
+            encoding="utf-8",
+        )
+        self.assertTrue(PREPARE._load_chinese_dominant(closure)("中文"))
 
     def test_display_bootstrap_binds_the_official_text_preserved_before_the_menu_replay(self) -> None:
         state = self.prepare_system_display_bootstrap()

@@ -313,6 +313,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             source_group_id="codex-bundled-system-skills",
             package=system_overlay_context["package"],
             marker_sha256=initial_ledger["sources"][system_overlay_context["source_index"]]["system_provenance"]["marker"]["sha256"],
+            payload_release=system_overlay_context["payload_release"],
             spec={
                 "name": "skill-creator",
                 "official_integrity": overlay["official_integrity"],

@@ -24,7 +24,6 @@ PREPARE = str(ROOT / 'modules/skill-supply-chain/implementation/prepare_system_p
 MENU = 'D:/Codex/.codex/scripts/apply-skill-menu-i18n-overlay.cjs'
 GUARD = 'D:/Codex/.codex/scripts/install-skill-guarded.cmd'
 NODE = 'D:/Codex/tools/bin/node.exe'
-EXPECTED_SYSTEM = {'imagegen', 'openai-docs', 'review-agent', 'skill-creator', 'skill-installer'}
 
 
 class StepFailure(Exception):
@@ -94,7 +93,8 @@ def closeout(run_directory, repair=False, runner=runtime.run_hidden):
             return finish(False, 'repair-required', system_state=current['state'])
         if current['state'] == 'needs-bootstrap':
             display = current.get('display', {})
-            if set(display) != EXPECTED_SYSTEM or any(v != 'official' for v in display.values()):
+            # The prepare tool validates the supported inventory before returning needs-bootstrap.
+            if not isinstance(display, dict) or not display or any(v != 'official' for v in display.values()):
                 return finish(False, 'manual-review', reason='official-display-baseline-required')
             system = str(writer.output_path('post-refresh/system'))
             call('preserve-official', [sys.executable, '-B', PREPARE, 'preserve-official', '--evidence', system])

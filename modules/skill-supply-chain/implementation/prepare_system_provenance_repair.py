@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Prepare the bundled ``.system`` provenance repair for the guarded wrapper.
 
-A Codex app refresh rewrites ``.system`` in the unified skills root: the five ``SOURCE.md``
-files disappear, the review-agent invocation parity line and the skill-creator quick_validate
-compatibility overlay are gone, and every guarded install then fails closed until the five
-skills are bound again. This tool reads the active root and writes only to the evidence
+A Codex refresh replaces ``.system`` in the unified skills root. Provenance records,
+manual invocation parity and the skill-creator quick_validate overlay need replay.
+This tool reads the active root and writes only to the evidence
 directory and plan path it is given; the guarded wrapper stays the only writer of the active
 root. It runs from the module source path and is not part of the deployment closure.
 """
@@ -113,7 +112,15 @@ def _load_chinese_dominant(closure_script: Path) -> Callable[[str], bool]:
     if spec is None or spec.loader is None:
         raise PrepareError(f"无法加载 closure 脚本：{closure_script}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    previous_module = sys.modules.get(spec.name)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if previous_module is None:
+            del sys.modules[spec.name]
+        else:
+            sys.modules[spec.name] = previous_module
     return module.chinese_dominant
 
 
@@ -203,7 +210,8 @@ def _command_preserve_official(args: argparse.Namespace, closure_script: Path) -
             raise PrepareError(f"提交 {commit} 的 .system marker 与当前不同：它不是这次刷新之后的快照")
         origin = f"skills root commit {commit}"
     captured: dict[str, dict[str, bytes]] = {}
-    for name in REPAIR.EXPECTED_SKILLS:
+    names = REPAIR.system_skill_names(system_root)
+    for name in names:
         root = system_root / name
         if commit is None:
             files = _live_display(root)
@@ -219,6 +227,10 @@ def _command_preserve_official(args: argparse.Namespace, closure_script: Path) -
                 "改用 --from-git <刷新后、中文化前的 skills 根提交> 从快照取官方原文"
             )
         captured[name] = files
+    REPAIR.reviewed_payload_release(marker_sha256, {
+        name: REPAIR._tree_integrity(system_root / name, overrides=files)["tree_sha256"]
+        for name, files in captured.items()
+    })
     manifest = {
         "artifact_type": PRESERVED_ARTIFACT,
         "schema_version": 1,
@@ -247,13 +259,17 @@ def _load_preserved(evidence: Path, system_root: Path) -> tuple[dict[str, dict[s
         manifest = json.loads((evidence / PRESERVED_MANIFEST).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise PrepareError(f"读不到官方原文保存清单：{evidence / PRESERVED_MANIFEST}（{exc}）") from exc
-    if manifest.get("artifact_type") != PRESERVED_ARTIFACT or manifest.get("schema_version") != 1:
+    if not isinstance(manifest, dict) or manifest.get("artifact_type") != PRESERVED_ARTIFACT or manifest.get("schema_version") != 1:
         raise PrepareError("官方原文保存清单的 artifact_type 或 schema_version 不符")
+    names = REPAIR.system_skill_names(system_root)
+    recorded_files = manifest.get("files")
+    if not isinstance(recorded_files, dict) or set(recorded_files) != set(names):
+        raise PrepareError("官方原文清单与当前 system skill inventory 不一致")
     preserved: dict[str, dict[str, bytes]] = {}
-    for name in REPAIR.EXPECTED_SKILLS:
-        recorded = manifest.get("files", {}).get(name)
-        if not isinstance(recorded, dict) or "SKILL.md" not in recorded:
-            raise PrepareError(f"官方原文保存清单缺少 .system/{name}")
+    for name in names:
+        recorded = recorded_files[name]
+        if not isinstance(recorded, dict) or sorted(recorded) != _display_files(system_root / name):
+            raise PrepareError(f"官方原文保存清单没有精确绑定 .system/{name} 的展示文件")
         preserved[name] = {}
         for relative, digest in recorded.items():
             data = (evidence / PRESERVED_DIR / name / Path(*relative.split("/"))).read_bytes()
@@ -272,7 +288,7 @@ def _load_preserved(evidence: Path, system_root: Path) -> tuple[dict[str, dict[s
 def _bootstrap_skill(root: Path, name: str, preserved: dict[str, bytes]) -> dict[str, Any]:
     if (root / "SOURCE.md").exists():
         raise PrepareError(
-            f".system/{name} 已有 SOURCE.md：bootstrap 计划只用于官方刷新后五个 SOURCE.md 都缺失的状态，先跑 status"
+            f".system/{name} 已有 SOURCE.md。bootstrap 要求官方刷新后的所有来源记录均缺失，请先运行 status"
         )
     if sorted(preserved) != _display_files(root):
         raise PrepareError(f".system/{name} 现有的展示文件与保存的官方原文不是同一组：{_display_files(root)}")
@@ -281,13 +297,12 @@ def _bootstrap_skill(root: Path, name: str, preserved: dict[str, bytes]) -> dict
     effective = REPAIR.system_skill_integrity(root)
     critical: dict[str, str] = {}
     base_overlay: dict[str, Any] = {"kind": "none"}
-    if name == "review-agent":
+    if name in REPAIR.INVOCATION_PARITY_OVERLAYS:
         skill = root / "SKILL.md"
         critical = {"agents/openai.yaml": _sha256_file(root / "agents" / "openai.yaml")}
-        effective = REPAIR._tree_integrity(
-            root, overrides={"SKILL.md": REPAIR._review_overlay_bytes(skill, skill.read_bytes())}
-        )
-        base_overlay = dict(REPAIR.REVIEW_PARITY_OVERLAY)
+        patched = REPAIR._invocation_parity_bytes(skill, skill.read_bytes(), name=name)
+        effective = REPAIR._tree_integrity(root, overrides={"SKILL.md": patched})
+        base_overlay = dict(REPAIR.INVOCATION_PARITY_OVERLAYS[name])
     overlay = base_overlay
     if overrides:
         overlay = {
@@ -319,7 +334,7 @@ def build_bootstrap_plan(
     """The bootstrap plan; a menu changed since the preserved official text becomes a display-only overlay."""
     system_root = active_root / ".system"
     preserved, baseline_source = _load_preserved(evidence, system_root)
-    skills = [_bootstrap_skill(system_root / name, name, preserved[name]) for name in REPAIR.EXPECTED_SKILLS]
+    skills = [_bootstrap_skill(system_root / name, name, contents) for name, contents in preserved.items()]
     plan: dict[str, Any] = {
         "artifact_type": "codex.system-skill-provenance-repair",
         "schema_version": 1,
@@ -342,6 +357,12 @@ def build_bootstrap_plan(
             "skills": skills,
         }
     )
+    release = REPAIR.reviewed_payload_release(
+        plan["marker"]["sha256"],
+        {spec["name"]: spec["official_integrity"]["tree_sha256"] for spec in skills},
+    )
+    if release is not None:
+        plan["payload_release"] = release
     return plan
 
 
@@ -364,8 +385,8 @@ def _command_plan(args: argparse.Namespace, ledger: Path) -> dict[str, Any]:
     return {"plan": str(args.out), "mode": plan["mode"], "display_only": display}
 
 
-def _system_findings(interpreter: Path, closure_script: Path, active_root: Path) -> list[dict[str, Any]]:
-    """Strict closure findings on the five .system targets: the ones the install gate always blocks on."""
+def _system_findings(interpreter: Path, closure_script: Path, active_root: Path, names: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Strict closure findings on the observed bundled system skills."""
     completed = subprocess.run(
         [str(interpreter), "-X", "utf8", "-I", str(closure_script), "--root", str(active_root), "--strict", "--format", "json"],
         capture_output=True,
@@ -376,7 +397,7 @@ def _system_findings(interpreter: Path, closure_script: Path, active_root: Path)
         creationflags=REPAIR.SUBPROCESS_CREATION_FLAGS,
     )
     payload = GEN.parse_closure_output(completed.stdout, completed.returncode, label="strict closure")
-    targets = REPAIR.system_closure_targets()
+    targets = REPAIR.system_closure_targets(names)
     return [finding for finding in payload["findings"] if GEN.finding_hits_targets(finding, targets)]
 
 
@@ -396,14 +417,25 @@ def _binding_drift(system_root: Path, provenance: dict[str, Any] | None) -> list
     if provenance is None:
         return ["账本的 system source group 没有 system_provenance"]
     drift: list[str] = []
-    if (provenance.get("marker") or {}).get("sha256") != _sha256_file(system_root / ".codex-system-skills.marker"):
-        drift.append(".system marker 与账本不一致：Codex 刷新过 .system")
-    records = {item.get("name"): item for item in provenance.get("skills", []) if isinstance(item, dict)}
-    for name in REPAIR.EXPECTED_SKILLS:
-        record, root = records.get(name), system_root / name
-        if record is None:
-            drift.append(f".system/{name} 在账本里没有记录")
-            continue
+    marker = provenance.get("marker")
+    if not isinstance(marker, dict) or marker.get("sha256") != _sha256_file(system_root / ".codex-system-skills.marker"):
+        return [".system marker 与账本不一致"]
+    records = provenance.get("skills")
+    names = REPAIR.system_skill_names(system_root)
+    if not isinstance(records, list) or tuple(item.get("name") if isinstance(item, dict) else None for item in records) != names:
+        return drift + ["system provenance 与当前技能清单不一致"]
+    if any(not isinstance(item.get("official_integrity"), dict) for item in records):
+        return ["system provenance 缺少 official_integrity"]
+    trees = {item["name"]: item["official_integrity"].get("tree_sha256") for item in records}
+    try:
+        release = REPAIR.reviewed_payload_release(marker["sha256"], trees)
+    except REPAIR.SystemProvenanceRepairError as exc:
+        return [str(exc)]
+    if provenance.get("payload_release") != release:
+        drift.append("system provenance payload_release 与官方清单不一致")
+    for record in records:
+        name = record["name"]
+        root = system_root / name
         if REPAIR.system_skill_integrity(root) != record.get("effective_integrity"):
             drift.append(f".system/{name} 的文件树与账本 effective_integrity 不一致")
         if _sha256_file(root / "SOURCE.md") != record.get("source_md_sha256"):
@@ -422,15 +454,30 @@ def _binds_creator_overlay(overlay: Any) -> bool:
 
 def _command_status(args: argparse.Namespace, ledger: Path, closure_script: Path) -> dict[str, Any]:
     system_root = args.active_root / ".system"
-    roots = {name: system_root / name for name in REPAIR.EXPECTED_SKILLS}
+    try:
+        names = REPAIR.system_skill_names(system_root)
+    except REPAIR.SystemProvenanceRepairError as exc:
+        return {"state": "needs-review", "reasons": [str(exc)], "next": []}
+    roots = {name: system_root / name for name in names}
     missing_source = [name for name, root in roots.items() if not (root / "SOURCE.md").is_file()]
-    findings = _system_findings(args.python, closure_script, args.active_root)
+    findings = _system_findings(args.python, closure_script, args.active_root, names)
     evidence = rf"D:\agents\run-evidence\system-provenance-repair-{dt.datetime.now():%Y%m%d-%H%M}"
     plan = rf"{evidence}\plan.json"
     if len(missing_source) == len(roots):
+        marker_sha256 = _sha256_file(system_root / ".codex-system-skills.marker")
+        if (names == REPAIR.CURRENT_SYSTEM_SKILLS) != (marker_sha256 == REPAIR.REVIEWED_DAEMON_MARKER):
+            return {"state": "needs-review", "reasons": ["system marker 与已审查的技能清单不匹配"], "next": []}
         chinese_dominant = _load_chinese_dominant(closure_script)
         display = {name: _display_language(_live_display(root), chinese_dominant) for name, root in roots.items()}
         if all(language == "official" for language in display.values()):
+            if names == REPAIR.CURRENT_SYSTEM_SKILLS:
+                try:
+                    REPAIR.reviewed_payload_release(
+                        marker_sha256,
+                        {name: REPAIR.system_skill_integrity(root)["tree_sha256"] for name, root in roots.items()},
+                    )
+                except REPAIR.SystemProvenanceRepairError as exc:
+                    return {"state": "needs-review", "reasons": [str(exc)], "next": []}
             steps = [
                 f"{TOOL_COMMAND} preserve-official --evidence {evidence}",
                 f"{MENU_COMMAND} --dry-run，确认只改 .system 后换成 --apply",
@@ -446,7 +493,7 @@ def _command_status(args: argparse.Namespace, ledger: Path, closure_script: Path
         ]
         return {
             "state": "needs-bootstrap",
-            "reasons": ["五个 .system skill 都没有 SOURCE.md：Codex 刷新过 .system"],
+            "reasons": [f"{len(names)} 个 .system skill 都缺少 SOURCE.md"],
             "display": display,
             "system_finding_count": len(findings),
             "next": steps,

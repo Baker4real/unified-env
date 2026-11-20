@@ -295,6 +295,7 @@ class ScopedClosureGateTests(unittest.TestCase):
             catalog_path=catalog_path,
             active_root=self.temp,
             plan={"skills": []},
+            closure_targets=REPAIR.system_closure_targets(),
             baseline_findings=[other],
         )
         self.assertEqual(verified["resource_closure"]["preexisting_findings"], [other])
@@ -315,6 +316,7 @@ class ScopedClosureGateTests(unittest.TestCase):
                 catalog_path=catalog_path,
                 active_root=self.temp,
                 plan={"skills": []},
+                closure_targets=REPAIR.system_closure_targets(),
             )
 
 

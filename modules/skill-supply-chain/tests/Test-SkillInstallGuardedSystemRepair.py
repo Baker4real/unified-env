@@ -581,7 +581,7 @@ class SkillInstallGuardedSystemRepairTests(SystemRepairTestCase):
         path = Path(state["system_root"]) / "review-agent" / "SKILL.md"
         baseline = "\ufeff---\nname: review-agent\ndescription: \u57fa\u7ebf\u5939\u5177\u6280\u80fd\u63cf\u8ff0\n---\n\n# review-agent\n".encode("utf-8")
         path.write_bytes(baseline)
-        patched = REPAIR._review_overlay_bytes(path, baseline)
+        patched = REPAIR._invocation_parity_bytes(path, baseline, name="review-agent")
         self.assertTrue(patched.startswith(b"\xef\xbb\xbf"))
         self.assertIn(b"disable-model-invocation: true", patched)
 

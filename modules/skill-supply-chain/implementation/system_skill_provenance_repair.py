@@ -14,6 +14,7 @@ import tempfile
 import time
 import sys
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ if str(_SCRIPT_DIRECTORY) not in sys.path:
 
 from generate_skill_catalog import (  # noqa: E402
     CatalogError,
+    _ledger_state,
     classify_closure_findings,
     parse_closure_output,
     verify_catalog_closure_check,
@@ -38,6 +40,26 @@ EXPECTED_SKILLS = (
     "skill-creator",
     "skill-installer",
 )
+CURRENT_SYSTEM_SKILLS = ("create-statusline", *EXPECTED_SKILLS)
+SUPPORTED_SYSTEM_ROSTERS = (EXPECTED_SKILLS, CURRENT_SYSTEM_SKILLS)
+# The signed CLI daemon, rather than the Store shell, shipped this six-skill payload.
+REVIEWED_DAEMON_RELEASE = {
+    "repository": "https://github.com/openai/codex",
+    "tag": "rust-v0.171.0",
+    "commit": "ccf9be8cc458bd6b8336fe84d68d8893f2691a5e",
+    "asset": "codex-x86_64-pc-windows-msvc.exe",
+    "asset_sha256": "cefea4ffee1fff04983a99c0dda99944d8b380e891e740a28b32f4b815a6e0b7",
+    "asset_size": 407421232,
+}
+REVIEWED_DAEMON_MARKER = "b38d14e935261743f625c9b8c35a15d2774a002eed017cf4e9d53c8e42196088"
+REVIEWED_DAEMON_TREES = {
+    "create-statusline": "1ba204f196cb5b0a5787c9eeee1ce88f0f59be2086402993abc4f291dd6c85c5",
+    "imagegen": "17d58be8261a5a23c22bf563de7efb9464a72b6ff5d64f0f2cff13c2f5e5bfce",
+    "openai-docs": "53678de3b63e59f2625d8a37e8d435c16e82bed98873d4d98181632362a8ce39",
+    "review-agent": "f6e6679c5999ccc4bea5df0d04d604aaf12aba0a8fb2e41a590a17b81e733103",
+    "skill-creator": "d45c02d0e342d7e4836701de3ac8ede6fa20d180e6a5dbd728af7ad980fffb44",
+    "skill-installer": "4b4b62b4253df3e23b1a7eb16797c1c8888e2ffc2b8f0dc2b1cdd07bdcdfc686",
+}
 PLAN_FIELDS = {
     "artifact_type",
     "schema_version",
@@ -100,11 +122,14 @@ SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 DISPLAY_RECONCILE_MODE = "atomic-six-skill-display-reconcile"
 DISPLAY_OVERLAY_KIND = "display-only"
 DISPLAY_FILES = {"SKILL.md", "agents/openai.yaml"}
-REVIEW_PARITY_OVERLAY = {
-    "kind": "review-agent-invocation-parity",
-    "disable_model_invocation": True,
-    "allow_implicit_invocation": False,
-    "parity_file": "agents/openai.yaml",
+INVOCATION_PARITY_OVERLAYS = {
+    name: {
+        "kind": f"{name}-invocation-parity",
+        "disable_model_invocation": True,
+        "allow_implicit_invocation": False,
+        "parity_file": "agents/openai.yaml",
+    }
+    for name in ("create-statusline", "review-agent")
 }
 SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 SKILL_CREATOR_OVERLAY_KIND = "skill-creator-quick-validate-compatibility"
@@ -228,15 +253,32 @@ def _read_json(path: Path, *, label: str) -> Any:
         raise SystemProvenanceRepairError(f"{label}不是合法 UTF-8 JSON：{path}：{exc}") from exc
 
 
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    _ensure_directory(path.parent, label="原子写入父目录")
+def _atomic_write_bytes(
+    path: Path,
+    data: bytes,
+    *,
+    create_only: bool = False,
+    before_publish: Callable[[], None] | None = None,
+) -> dict[str, int]:
+    if before_publish is None:
+        _ensure_directory(path.parent, label="原子写入父目录")
+    else:
+        _require_directory(path.parent, label="事务目标父目录")
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         with temporary.open("xb") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        identity = _identity(temporary)
+        if before_publish is not None:
+            before_publish()
+        if create_only:
+            # Link creation fails if an external writer has already created the target.
+            os.link(temporary, path)
+        else:
+            os.replace(temporary, path)
+        return identity
     finally:
         if temporary.exists():
             temporary.unlink()
@@ -502,13 +544,13 @@ def _frontmatter(path: Path, data: bytes) -> dict[str, Any]:
     return value
 
 
-def _review_overlay_bytes(path: Path, baseline: bytes) -> bytes:
+def _invocation_parity_bytes(path: Path, baseline: bytes, *, name: str) -> bytes:
     frontmatter = _frontmatter(path, baseline)
-    if frontmatter.get("name") != "review-agent":
-        raise SystemProvenanceRepairError("review-agent frontmatter name 漂移")
+    if frontmatter.get("name") != name:
+        raise SystemProvenanceRepairError(f"{name} frontmatter name 漂移")
     if "disable-model-invocation" in frontmatter:
         raise SystemProvenanceRepairError(
-            "review-agent official baseline 已包含 disable-model-invocation"
+            f"{name} official baseline 已包含 disable-model-invocation"
         )
     encoding = "utf-8-sig" if baseline.startswith(b"\xef\xbb\xbf") else "utf-8"
     text = baseline.decode(encoding)
@@ -523,13 +565,13 @@ def _review_overlay_bytes(path: Path, baseline: bytes) -> bytes:
         None,
     )
     if end is None:
-        raise SystemProvenanceRepairError("review-agent frontmatter 未闭合")
+        raise SystemProvenanceRepairError(f"{name} frontmatter 未闭合")
     lines.insert(end, f"disable-model-invocation: true{newline}")
     encoded = "".join(lines).encode("utf-8")
     patched = (b"\xef\xbb\xbf" if baseline.startswith(b"\xef\xbb\xbf") else b"") + encoded
     patched_frontmatter = _frontmatter(path, patched)
     if patched_frontmatter.get("disable-model-invocation") is not True:
-        raise SystemProvenanceRepairError("review-agent invocation overlay 未生效")
+        raise SystemProvenanceRepairError(f"{name} invocation overlay 未生效")
     return patched
 
 
@@ -570,8 +612,30 @@ def _run_process_raw(
     return completed
 
 
-def system_closure_targets() -> list[str]:
-    return [f".system/{name}" for name in EXPECTED_SKILLS]
+def system_skill_names(system_root: Path) -> tuple[str, ...]:
+    root = _require_directory(system_root, label="system skill root")
+    children = {
+        child.name: child for child in root.iterdir()
+        if child.name != ".codex-system-skills.marker"
+    }
+    names = tuple(sorted(children))
+    if names not in SUPPORTED_SYSTEM_ROSTERS:
+        raise SystemProvenanceRepairError(f"unsupported system skill inventory: {', '.join(names)}")
+    for child in children.values():
+        _require_directory(child, label="bundled system skill")
+    return names
+
+
+def system_closure_targets(names: tuple[str, ...] = EXPECTED_SKILLS) -> list[str]:
+    return [f".system/{name}" for name in names]
+
+
+def reviewed_payload_release(marker_sha256: str, official_trees: dict[str, str]) -> dict[str, Any] | None:
+    if tuple(sorted(official_trees)) == EXPECTED_SKILLS and marker_sha256 != REVIEWED_DAEMON_MARKER:
+        return None
+    if marker_sha256 != REVIEWED_DAEMON_MARKER or official_trees != REVIEWED_DAEMON_TREES:
+        raise SystemProvenanceRepairError("system skill inventory does not match the reviewed Codex daemon release")
+    return dict(REVIEWED_DAEMON_RELEASE)
 
 
 def _run_strict_closure(
@@ -828,12 +892,10 @@ def _verify_display_baseline(root: Path, spec: dict[str, Any], prior: dict[str, 
         if previous_overlay.get("kind") == DISPLAY_OVERLAY_KIND
         else previous_overlay
     )
-    if (
-        spec["overlay"]["base_overlay"] != base_overlay
-        or base_overlay.get("kind") not in {
-            "none", "review-agent-invocation-parity", SKILL_CREATOR_OVERLAY_KIND,
-        }
-    ):
+    allowed_kinds = {"none", SKILL_CREATOR_OVERLAY_KIND}
+    if spec["name"] in INVOCATION_PARITY_OVERLAYS:
+        allowed_kinds.add(INVOCATION_PARITY_OVERLAYS[spec["name"]]["kind"])
+    if spec["overlay"]["base_overlay"] != base_overlay or base_overlay.get("kind") not in allowed_kinds:
         raise SystemProvenanceRepairError("display reconciliation changed the underlying overlay")
     baseline = {k: v.encode("utf-8") for k, v in spec["overlay"]["baseline_files"].items()}
     for relative, before in baseline.items():
@@ -871,7 +933,7 @@ def _display_overlay_projection(overlay: dict[str, Any]) -> dict[str, Any]:
 
 def _validate_plan(path: Path) -> dict[str, Any]:
     data = _read_json(path, label="system provenance repair plan")
-    if not isinstance(data, dict) or set(data) - {"official_baseline_source"} != PLAN_FIELDS:
+    if not isinstance(data, dict) or set(data) - {"official_baseline_source", "payload_release"} != PLAN_FIELDS:
         raise SystemProvenanceRepairError("system provenance repair plan 字段不符合 schema")
     if (
         data.get("artifact_type") != "codex.system-skill-provenance-repair"
@@ -911,8 +973,9 @@ def _validate_plan(path: Path) -> dict[str, Any]:
     ):
         raise SystemProvenanceRepairError("stability_check 至少需要两次非负间隔观测")
     raw_skills = data.get("skills")
-    if not isinstance(raw_skills, list) or [item.get("name") if isinstance(item, dict) else None for item in raw_skills] != list(EXPECTED_SKILLS):
-        raise SystemProvenanceRepairError("repair plan 必须精确绑定五项 system skill")
+    names = tuple(item.get("name") if isinstance(item, dict) else None for item in raw_skills) if isinstance(raw_skills, list) else ()
+    if names not in SUPPORTED_SYSTEM_ROSTERS:
+        raise SystemProvenanceRepairError("repair plan must bind a supported system skill inventory in full")
     for index, item in enumerate(raw_skills):
         if not isinstance(item, dict) or set(item) != SKILL_FIELDS:
             raise SystemProvenanceRepairError(f"skills[{index}] 字段不符合 schema")
@@ -950,13 +1013,14 @@ def _validate_plan(path: Path) -> dict[str, Any]:
         if display:
             _validate_display_overlay(overlay)
         payload_overlay = overlay["base_overlay"] if display else overlay
-        if item["name"] == "review-agent":
-            if payload_overlay != REVIEW_PARITY_OVERLAY:
-                raise SystemProvenanceRepairError("review-agent overlay 不是授权的最小 parity overlay")
+        name = item["name"]
+        if name in INVOCATION_PARITY_OVERLAYS:
+            if payload_overlay != INVOCATION_PARITY_OVERLAYS[name]:
+                raise SystemProvenanceRepairError(f"{name} overlay 不是授权的最小 parity overlay")
             if set(critical) != {"agents/openai.yaml"}:
-                raise SystemProvenanceRepairError("review-agent 必须绑定 agents/openai.yaml")
+                raise SystemProvenanceRepairError(f"{name} 必须绑定 agents/openai.yaml")
             if official == effective:
-                raise SystemProvenanceRepairError("review-agent effective integrity 未绑定 overlay")
+                raise SystemProvenanceRepairError(f"{name} effective integrity 未绑定 overlay")
         else:
             if payload_overlay != {"kind": "none"} or critical:
                 raise SystemProvenanceRepairError(f"{item['name']} 不允许 payload overlay")
@@ -964,6 +1028,12 @@ def _validate_plan(path: Path) -> dict[str, Any]:
                 raise SystemProvenanceRepairError(f"{item['name']} display overlay 未改变展示字段")
             if not display and official != effective:
                 raise SystemProvenanceRepairError(f"{item['name']} official/effective integrity 不一致")
+    release = reviewed_payload_release(
+        marker["sha256"],
+        {item["name"]: item["official_integrity"]["tree_sha256"] for item in raw_skills},
+    )
+    if (release is None and "payload_release" in data) or data.get("payload_release") != release:
+        raise SystemProvenanceRepairError("repair plan payload_release does not match the official baselines")
     # Only a display bootstrap takes official display text from the plan, so only it names where that text came from.
     display_bootstrap = data["mode"] != DISPLAY_RECONCILE_MODE and any(
         item["overlay"].get("kind") == DISPLAY_OVERLAY_KIND for item in raw_skills
@@ -990,15 +1060,22 @@ def _source_record(
     marker_sha256: str,
     spec: dict[str, Any],
     official_baseline_source: str | None = None,
+    payload_release: dict[str, Any] | None = None,
 ) -> bytes:
     name = spec["name"]
     official = spec["official_integrity"]
     effective = spec["effective_integrity"]
     overlay = spec["overlay"]
-    review_parity = (
-        "disable-model-invocation: true; "
-        "agents/openai.yaml allow_implicit_invocation: false"
-    )
+    invocation_parity = "disable-model-invocation: true. agents/openai.yaml allow_implicit_invocation: false."
+    parity_overlay = INVOCATION_PARITY_OVERLAYS.get(name)
+    payload_provenance = []
+    if payload_release is not None:
+        payload_provenance = [
+            f"Official payload release: {payload_release['repository']}/releases/tag/{payload_release['tag']}",
+            f"Official payload commit: {payload_release['commit']}",
+            f"Official payload asset: {payload_release['asset']}",
+            f"Official payload asset SHA-256: {payload_release['asset_sha256']}",
+        ]
     if overlay.get("kind") == DISPLAY_OVERLAY_KIND and official_baseline_source is not None:
         # The official display text is not observed on disk; name the plan as its source.
         base = overlay["base_overlay"]
@@ -1006,7 +1083,7 @@ def _source_record(
             f"display-only over a plan-supplied official baseline ({official_baseline_source}): "
             "SKILL.md description; agents/openai.yaml interface.short_description/default_prompt; "
             "base overlay: "
-            + (f"{base['kind']} ({review_parity})" if base == REVIEW_PARITY_OVERLAY else base["kind"])
+            + (f"{base['kind']} ({invocation_parity})" if base == parity_overlay else base["kind"])
         )
     elif overlay.get("kind") == DISPLAY_OVERLAY_KIND:
         overlay_value = (
@@ -1014,8 +1091,8 @@ def _source_record(
             "interface.short_description/default_prompt; preserved base overlay: "
             + overlay["base_overlay"]["kind"]
         )
-    elif name == "review-agent":
-        overlay_value = review_parity
+    elif name in INVOCATION_PARITY_OVERLAYS:
+        overlay_value = invocation_parity
     elif overlay.get("kind") == SKILL_CREATOR_OVERLAY_KIND:
         payload = overlay.get("payload_files")
         if not isinstance(payload, dict) or set(payload) != set(
@@ -1045,8 +1122,9 @@ def _source_record(
         [
             "# Source Provenance",
             "",
-            "This record binds the active system skill to the observed signed Codex Store package.",
-            "It does not claim a public upstream repository or commit.",
+            "This record binds the active system skill to the reviewed Codex payload and the installed Store host."
+            if payload_release is not None
+            else "This record binds the active system skill to the observed signed Codex Store package.",
             "",
             "---",
             "# Current Source Record",
@@ -1066,6 +1144,7 @@ def _source_record(
             f"AppxManifest SHA-256: {package['appx_manifest_sha256']}",
             f"AppxSignature SHA-256: {package['appx_signature_sha256']}",
             f"System marker SHA-256: {marker_sha256}",
+            *payload_provenance,
             f"Official tree SHA-256: {official['tree_sha256']}",
             f"Official SKILL.md SHA-256: {official['skill_md_sha256']}",
             f"Effective tree SHA-256: {effective['tree_sha256']}",
@@ -1084,6 +1163,8 @@ def _validate_ledger(
     data: Any,
     active_root: Path,
     source_group_id: str,
+    names: tuple[str, ...],
+    bootstrap: bool,
 ) -> tuple[dict[str, Any], int]:
     if not isinstance(data, dict):
         raise SystemProvenanceRepairError("source ledger 顶层必须是 JSON 对象")
@@ -1098,16 +1179,24 @@ def _validate_ledger(
     if len(matches) != 1:
         raise SystemProvenanceRepairError("codex-bundled-system-skills source group 不唯一")
     index, entry = matches[0]
-    expected_skills = {f".system/{name}" for name in EXPECTED_SKILLS}
+    expected_skills = system_closure_targets(names)
+    allowed = [tuple(expected_skills)]
+    if bootstrap and names == CURRENT_SYSTEM_SKILLS:
+        allowed.append(tuple(system_closure_targets(EXPECTED_SKILLS)))
     skills = entry.get("skills")
     if (
         entry.get("type") != "codex-bundled-system"
         or not isinstance(skills, list)
         or any(not isinstance(item, str) for item in skills)
-        or set(skills) != expected_skills
-        or len(skills) != len(expected_skills)
+        or tuple(sorted(skills)) not in allowed
     ):
         raise SystemProvenanceRepairError("system source group type/skill set 漂移")
+    for name, records in _ledger_state(data).items():
+        if name.casefold() not in expected_skills:
+            continue
+        expected = [{"state": "source", "source": source_group_id}] if name in skills else []
+        if records != expected:
+            raise SystemProvenanceRepairError(f"conflicting ledger coverage for bundled skill {name}")
     expected_root = str(active_root / ".system").replace("\\", "/").casefold()
     actual_root = str(entry.get("source_root", "")).replace("\\", "/").casefold()
     if actual_root != expected_root:
@@ -1131,6 +1220,7 @@ def _updated_ledger(
 ) -> dict[str, Any]:
     updated = copy.deepcopy(data)
     entry = updated["sources"][source_index]
+    entry["skills"] = [f".system/{spec['name']}" for spec in plan["skills"]]
     entry["system_provenance"] = {
         "schema_version": 1,
         "package_identity": copy.deepcopy(plan["package_identity"]),
@@ -1148,27 +1238,19 @@ def _updated_ledger(
             for spec in plan["skills"]
         ],
     }
+    if "payload_release" in plan:
+        entry["system_provenance"]["payload_release"] = copy.deepcopy(plan["payload_release"])
     entry["last_guarded_install"] = _utc_now()
     changes = entry.setdefault("local_changes", [])
     if not isinstance(changes, list):
         raise SystemProvenanceRepairError("system source group local_changes 必须是数组")
     if plan["mode"] == DISPLAY_RECONCILE_MODE:
-        summary = (
-            "guarded display-only provenance reconciliation: preserved all five official "
-            "baselines and payload bytes; verified display fields against prior effective trees."
-        )
-    elif "official_baseline_source" in plan:
-        summary = (
-            "guarded system provenance repair: atomically bound five bundled skills to the "
-            "signed Store package, recorded display-only overlays over plan-supplied official "
-            f"display text ({plan['official_baseline_source']}; all other official bytes observed), "
-            "and restored review-agent disable-model-invocation parity."
-        )
+        summary = "Guarded display reconciliation preserved the official baselines and checked display fields against prior effective trees."
     else:
-        summary = (
-            "guarded system provenance repair: atomically bound five bundled skills to the "
-            "signed Store package and restored review-agent disable-model-invocation parity."
-        )
+        source = plan.get("payload_release", {}).get("tag", "the signed Store package")
+        summary = f"Guarded repair bound {len(plan['skills'])} bundled skills to {source} and restored manual invocation parity."
+        if "official_baseline_source" in plan:
+            summary += f" Display overlays were bound to {plan['official_baseline_source']}."
     if not any(
         isinstance(item, dict)
         and item.get("skill") == ".system/review-agent"
@@ -1191,6 +1273,7 @@ def _verify_catalog(
     catalog_path: Path,
     active_root: Path,
     plan: dict[str, Any],
+    closure_targets: list[str],
     baseline_findings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     catalog = _read_json(catalog_path, label="skill catalog")
@@ -1200,7 +1283,7 @@ def _verify_catalog(
     try:
         closure_check = verify_catalog_closure_check(
             catalog.get("checks", {}).get("resource_closure"),
-            targets=system_closure_targets(),
+            targets=closure_targets,
             baseline_findings=baseline_findings,
         )
     except CatalogError as exc:
@@ -1230,7 +1313,7 @@ def _verify_catalog(
             or source.get("conflicts")
         ):
             raise SystemProvenanceRepairError(f"catalog 对 {name} 的 SOURCE.md 无效")
-        if name == "review-agent":
+        if name in INVOCATION_PARITY_OVERLAYS:
             invocation = artifact.get("invocation")
             if (
                 not isinstance(invocation, dict)
@@ -1238,7 +1321,7 @@ def _verify_catalog(
                 or invocation.get("disable_model_invocation") is not True
                 or invocation.get("allow_implicit_invocation") is not False
             ):
-                raise SystemProvenanceRepairError("review-agent invocation parity 未闭合")
+                raise SystemProvenanceRepairError(f"{name} invocation parity 未闭合")
         verified.append(
             {
                 "name": name,
@@ -1316,10 +1399,13 @@ def _observe_state(
         raise SystemProvenanceRepairError("system marker 在事务期间漂移")
     if _identity(marker_path) != expected_directory_identities["marker"]:
         raise SystemProvenanceRepairError("system marker identity 在事务期间漂移")
+    system_root = active_root / ".system"
+    if system_skill_names(system_root) != tuple(spec["name"] for spec in plan["skills"]):
+        raise SystemProvenanceRepairError("system skill inventory drifted during repair")
     skills: list[dict[str, Any]] = []
     for spec in plan["skills"]:
         name = spec["name"]
-        root = active_root / ".system" / name
+        root = system_root / name
         if _identity(root) != expected_directory_identities[name]:
             raise SystemProvenanceRepairError(f"{name} directory identity 在事务期间漂移")
         integrity = _tree_integrity(root)
@@ -1371,14 +1457,17 @@ def _restore_cas(
     current_identity = _optional_identity(path)
     if current == before and current_identity == before_identity:
         return
-    if current != written or current_identity != written_identity:
-        raise SystemProvenanceRepairError(
-            f"rollback CAS 失败，目标 identity/bytes 不是事务写入值或原始值：{path}"
-        )
+    def check_written() -> None:
+        if _optional_identity(path) != written_identity or _optional_bytes(path) != written:
+            raise SystemProvenanceRepairError(
+                f"rollback CAS 失败，目标 identity/bytes 不是事务写入值或原始值：{path}"
+            )
+
+    check_written()
     if before is None:
         path.unlink()
     else:
-        _atomic_write_bytes(path, before)
+        _atomic_write_bytes(path, before, before_publish=check_written)
     if _optional_bytes(path) != before:
         raise SystemProvenanceRepairError(f"rollback 无法验证原始字节：{path}")
 
@@ -1426,7 +1515,10 @@ def execute(args: Any) -> dict[str, Any]:
     ):
         raise SystemProvenanceRepairError("live repair stability interval 不能小于 10 秒")
 
-    system_root = _require_directory(active_root / ".system", label="system skill root")
+    system_root = active_root / ".system"
+    names = tuple(spec["name"] for spec in plan["skills"])
+    if system_skill_names(system_root) != names:
+        raise SystemProvenanceRepairError("repair plan does not cover the active system skill inventory")
     marker_path = _require_file(
         active_root / Path(*plan["marker"]["relative_path"].split("/")),
         label="system skill marker",
@@ -1445,6 +1537,8 @@ def execute(args: Any) -> dict[str, Any]:
         data=_read_json(ledger_path, label="source ledger"),
         active_root=active_root,
         source_group_id=plan["source_group_id"],
+        names=names,
+        bootstrap=plan["mode"] != DISPLAY_RECONCILE_MODE,
     )
     display_only = plan["mode"] == DISPLAY_RECONCILE_MODE
     input_integrity = "effective_integrity" if display_only else "official_integrity"
@@ -1455,9 +1549,9 @@ def execute(args: Any) -> dict[str, Any]:
             not isinstance(provenance, dict)
             or provenance.get("package_identity") != plan["package_identity"]
             or provenance.get("marker") != plan["marker"]
+            or provenance.get("payload_release") != plan.get("payload_release")
             or not isinstance(provenance.get("skills"), list)
-            or [p.get("name") if isinstance(p, dict) else None for p in provenance["skills"]]
-            != list(EXPECTED_SKILLS)
+            or [p.get("name") if isinstance(p, dict) else None for p in provenance["skills"]] != list(names)
         ):
             raise SystemProvenanceRepairError("display reconciliation lacks a matching prior provenance")
         prior_specs = {p["name"]: p for p in provenance["skills"]}
@@ -1465,8 +1559,8 @@ def execute(args: Any) -> dict[str, Any]:
     baseline_identities: dict[str, dict[str, int]] = {"marker": _identity(marker_path)}
     source_before: dict[str, bytes | None] = {}
     source_written: dict[str, bytes] = {}
-    review_before: bytes | None = None
-    review_written: bytes | None = None
+    parity_before: dict[str, bytes] = {}
+    parity_written: dict[str, bytes] = {}
     input_trees: dict[str, dict[str, Any]] = {}
     for spec in plan["skills"]:
         name = spec["name"]
@@ -1475,9 +1569,9 @@ def execute(args: Any) -> dict[str, Any]:
         input_trees[name] = _tree_integrity(root)
         if not display_only and spec["overlay"].get("kind") == DISPLAY_OVERLAY_KIND:
             # A translated tree matches the official one only through its display baseline;
-            # review-agent reaches its effective tree after the parity line, checked below.
+            # Manual-only skills reach their effective tree after the parity line, checked below.
             _verify_official_display_baseline(root, spec)
-            if name != "review-agent" and input_trees[name] != spec["effective_integrity"]:
+            if name not in INVOCATION_PARITY_OVERLAYS and input_trees[name] != spec["effective_integrity"]:
                 raise SystemProvenanceRepairError(f"{name} input tree/hash 与 plan 不一致")
         elif input_trees[name] != spec[input_integrity]:
             raise SystemProvenanceRepairError(f"{name} input tree/hash 与 plan 不一致")
@@ -1497,34 +1591,38 @@ def execute(args: Any) -> dict[str, Any]:
         )
         if actual_before != expected_before:
             raise SystemProvenanceRepairError(f"{name} SOURCE.md baseline 与 plan 不一致")
-        if name == "review-agent":
-            review_path = _require_file(root / "SKILL.md", label="review-agent SKILL.md")
-            review_before = review_path.read_bytes()
+        if not display_only and names == CURRENT_SYSTEM_SKILLS and actual_before is not None:
+            raise SystemProvenanceRepairError(f"{name} has existing provenance; the six-skill bootstrap requires an official refresh")
+        if name in INVOCATION_PARITY_OVERLAYS:
+            skill_path = _require_file(root / "SKILL.md", label=f"{name} SKILL.md")
+            baseline = skill_path.read_bytes()
             try:
-                parity = yaml.safe_load((root / "agents" / "openai.yaml").read_text(encoding="utf-8-sig"))
+                agent = yaml.safe_load((root / "agents" / "openai.yaml").read_text(encoding="utf-8-sig"))
             except (OSError, UnicodeError, yaml.YAMLError) as exc:
-                raise SystemProvenanceRepairError("review-agent openai.yaml 不是合法 YAML") from exc
-            policy = parity.get("policy") if isinstance(parity, dict) else None
+                raise SystemProvenanceRepairError(f"{name} openai.yaml 不是合法 YAML") from exc
+            policy = agent.get("policy") if isinstance(agent, dict) else None
             if not isinstance(policy, dict) or policy.get("allow_implicit_invocation") is not False:
-                raise SystemProvenanceRepairError("review-agent allow_implicit_invocation 不是 false")
+                raise SystemProvenanceRepairError(f"{name} allow_implicit_invocation 不是 false")
             if display_only:
-                if _frontmatter(review_path, review_before).get("disable-model-invocation") is not True:
-                    raise SystemProvenanceRepairError("review-agent invocation parity drifted")
-                review_written = review_before
+                if _frontmatter(skill_path, baseline).get("disable-model-invocation") is not True:
+                    raise SystemProvenanceRepairError(f"{name} invocation parity drifted")
             else:
-                review_written = _review_overlay_bytes(review_path, review_before)
-            if _tree_integrity(root, overrides={"SKILL.md": review_written}) != spec["effective_integrity"]:
-                raise SystemProvenanceRepairError("review-agent overlay effective hash 与 plan 不一致")
-        source_written[name] = _source_record(
+                patched = _invocation_parity_bytes(skill_path, baseline, name=name)
+                if _tree_integrity(root, overrides={"SKILL.md": patched}) != spec["effective_integrity"]:
+                    raise SystemProvenanceRepairError(f"{name} overlay effective hash 与 plan 不一致")
+                parity_before[name] = baseline
+                parity_written[name] = patched
+        record = _source_record(
             active_root=active_root,
             source_group_id=plan["source_group_id"],
             package=package,
             marker_sha256=plan["marker"]["sha256"],
             spec=spec,
             official_baseline_source=plan.get("official_baseline_source"),
+            payload_release=plan.get("payload_release"),
         )
-    if review_before is None or review_written is None:
-        raise SystemProvenanceRepairError("repair plan 未建立 review-agent overlay")
+        previous = source_before[name]
+        source_written[name] = record if previous is None else previous + b"\n\n---\n" + record.split(b"\n---\n", 1)[1]
 
     source_hashes = {name: _sha256_bytes(data) for name, data in source_written.items()}
     updated_ledger = _updated_ledger(
@@ -1538,7 +1636,7 @@ def execute(args: Any) -> dict[str, Any]:
         return {
             "schema_version": 1,
             "status": "dry-run-pass",
-            "targets": list(EXPECTED_SKILLS),
+            "targets": list(names),
             "source_md_sha256": source_hashes,
             "projected_ledger_sha256": _sha256_bytes(projected_ledger_bytes),
         }
@@ -1558,7 +1656,7 @@ def execute(args: Any) -> dict[str, Any]:
         "started_at": _utc_now(),
         "plan_path": str(plan_path),
         "plan_sha256": _sha256_file(plan_path),
-        "targets": list(EXPECTED_SKILLS),
+        "targets": list(names),
         "active_root": str(active_root),
         "ledger": str(ledger_path),
         "catalog": str(catalog_path),
@@ -1589,18 +1687,16 @@ def execute(args: Any) -> dict[str, Any]:
             record["backup"] = str(backup_path)
         transaction["backups"].append(record)
 
-    for name in EXPECTED_SKILLS:
-        register_backup(
-            f"source-{name}", system_root / name / "SOURCE.md", source_before[name]
-        )
-    if not display_only:
-        register_backup("review-agent-skill", system_root / "review-agent" / "SKILL.md", review_before)
+    for name in names:
+        register_backup(f"source-{name}", system_root / name / "SOURCE.md", source_before[name])
+    for name, baseline in parity_before.items():
+        register_backup(f"{name}-skill", system_root / name / "SKILL.md", baseline)
     register_backup("ledger", ledger_path, ledger_path.read_bytes())
     register_backup("catalog", catalog_path, catalog_path.read_bytes())
     _atomic_write_json(manifest_path, transaction)
 
     stage_dir = Path(tempfile.mkdtemp(prefix="system-provenance-", dir=temp_root))
-    closure_targets = system_closure_targets()
+    closure_targets = system_closure_targets(names)
     try:
         baseline_closure = _run_strict_closure(
             interpreter=interpreter,
@@ -1612,6 +1708,8 @@ def execute(args: Any) -> dict[str, Any]:
         baseline_closure_path = evidence_dir / "baseline-resource-closure.json"
         _atomic_write_json(baseline_closure_path, baseline_closure)
         closure_gate_arguments = [
+            "--closure-script",
+            str(closure_script),
             "--closure-baseline",
             str(baseline_closure_path),
             *[
@@ -1626,10 +1724,11 @@ def execute(args: Any) -> dict[str, Any]:
             staged.write_bytes(data)
             if staged.read_bytes() != data:
                 raise SystemProvenanceRepairError(f"{name} SOURCE.md staging hash 不一致")
-        if not display_only:
-            staged_review = stage_dir / "review-agent" / "SKILL.md"
-            staged_review.parent.mkdir(parents=True, exist_ok=True)
-            staged_review.write_bytes(review_written)
+        for name, data in parity_written.items():
+            staged = stage_dir / name / "SKILL.md"
+            staged.write_bytes(data)
+            if staged.read_bytes() != data:
+                raise SystemProvenanceRepairError(f"{name} SKILL.md staging hash 不一致")
 
         pre_write_package = _query_package_identity(
             interpreter=interpreter,
@@ -1656,6 +1755,8 @@ def execute(args: Any) -> dict[str, Any]:
             )
         if _sha256_file(marker_path) != plan["marker"]["sha256"] or _identity(marker_path) != baseline_identities["marker"]:
             raise SystemProvenanceRepairError("system marker 在写前 CAS 复验中漂移")
+        if system_skill_names(system_root) != names:
+            raise SystemProvenanceRepairError("system skill inventory drifted before publish")
         if _sha256_file(ledger_path) != plan["ledger_before_sha256"] or _sha256_file(catalog_path) != plan["catalog_before_sha256"]:
             raise SystemProvenanceRepairError("ledger/catalog 在写前 CAS 复验中漂移")
         for spec in plan["skills"]:
@@ -1666,19 +1767,25 @@ def execute(args: Any) -> dict[str, Any]:
             if _optional_bytes(root / "SOURCE.md") != source_before[name]:
                 raise SystemProvenanceRepairError(f"{name} SOURCE.md 在写前 CAS 复验中漂移")
 
+        def publish(label: str, data: bytes, *, skill_name: str | None = None) -> None:
+            path, before = before_values[label]
+
+            def check_before_publish() -> None:
+                if skill_name is not None and _identity(path.parent) != baseline_identities[skill_name]:
+                    raise SystemProvenanceRepairError(f"{skill_name} directory identity 在写前 CAS 复验中漂移")
+                if _optional_identity(path) != before_identities[label] or _optional_bytes(path) != before:
+                    raise SystemProvenanceRepairError(f"{label} identity/bytes 在写前 CAS 复验中漂移")
+
+            written_identities[label] = _atomic_write_bytes(
+                path, data, create_only=before is None, before_publish=check_before_publish
+            )
+            written_values[label] = data
+
         for name, data in source_written.items():
-            path = system_root / name / "SOURCE.md"
-            _atomic_write_bytes(path, data)
-            written_values[f"source-{name}"] = data
-            written_identities[f"source-{name}"] = _identity(path)
-        review_path = system_root / "review-agent" / "SKILL.md"
-        if not display_only:
-            _atomic_write_bytes(review_path, review_written)
-            written_values["review-agent-skill"] = review_written
-            written_identities["review-agent-skill"] = _identity(review_path)
-        _atomic_write_bytes(ledger_path, projected_ledger_bytes)
-        written_values["ledger"] = projected_ledger_bytes
-        written_identities["ledger"] = _identity(ledger_path)
+            publish(f"source-{name}", data, skill_name=name)
+        for name, data in parity_written.items():
+            publish(f"{name}-skill", data, skill_name=name)
+        publish("ledger", projected_ledger_bytes)
 
         generated_catalog_path = stage_dir / "generated-catalog.json"
         _run_process(
@@ -1710,15 +1817,7 @@ def execute(args: Any) -> dict[str, Any]:
             expected_bytes=projected_ledger_bytes,
             label="source ledger after catalog generation",
         )
-        _assert_file_cas(
-            catalog_path,
-            expected_identity=before_identities["catalog"],
-            expected_bytes=before_values["catalog"][1] or b"",
-            label="skill catalog baseline before write",
-        )
-        _atomic_write_bytes(catalog_path, projected_catalog_bytes)
-        written_values["catalog"] = projected_catalog_bytes
-        written_identities["catalog"] = _identity(catalog_path)
+        publish("catalog", projected_catalog_bytes)
         closure = _run_strict_closure(
             interpreter=interpreter,
             closure_script=closure_script,
@@ -1771,6 +1870,7 @@ def execute(args: Any) -> dict[str, Any]:
             catalog_path=catalog_path,
             active_root=active_root,
             plan=plan,
+            closure_targets=closure_targets,
             baseline_findings=baseline_closure["findings"],
         )
         observations: list[dict[str, Any]] = []

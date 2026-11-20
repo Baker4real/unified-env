@@ -20,6 +20,8 @@ from system_skill_provenance_repair import (
     skill_creator_overlay_ledger_projection,
     system_skill_payload_inventory,
     system_skill_integrity,
+    system_skill_names,
+    reviewed_payload_release,
     validate_skill_creator_compatibility_overlay,
 )
 import install_skill_guarded_base as _base
@@ -52,7 +54,7 @@ def _system_source_entry(
     ledger: dict[str, Any],
     active_root: Path,
 ) -> tuple[dict[str, Any], int]:
-    """Validate the existing five-skill system provenance source before an update."""
+    """Validate bundled system provenance and the active inventory before an update."""
     matches = [
         (index, entry)
         for index, entry in enumerate(ledger.get("sources", []))
@@ -61,7 +63,11 @@ def _system_source_entry(
     if len(matches) != 1:
         raise InstallError("codex-bundled-system-skills source group must be unique")
     index, entry = matches[0]
-    expected = {f".system/{name}" for name in ("imagegen", "openai-docs", "review-agent", "skill-creator", "skill-installer")}
+    try:
+        names = system_skill_names(active_root / ".system")
+    except SystemProvenanceRepairError as exc:
+        raise InstallError(str(exc)) from exc
+    expected = {f".system/{name}" for name in names}
     skills = entry.get("skills")
     source_root = str(entry.get("source_root", "")).replace("\\", "/").casefold()
     if (
@@ -84,7 +90,7 @@ def _system_source_entry(
         or marker.get("relative_path") != ".system/.codex-system-skills.marker"
         or not isinstance(records, list)
         or [item.get("name") if isinstance(item, dict) else None for item in records]
-        != ["imagegen", "openai-docs", "review-agent", "skill-creator", "skill-installer"]
+        != list(names)
     ):
         raise InstallError("system provenance skill/package/marker schema drifted")
     for item in records:
@@ -92,6 +98,15 @@ def _system_source_entry(
             raise InstallError("system provenance skill path binding drifted")
         if not isinstance(item.get("official_integrity"), dict) or not isinstance(item.get("effective_integrity"), dict):
             raise InstallError("system provenance integrity records are incomplete")
+    try:
+        release = reviewed_payload_release(
+            marker.get("sha256"),
+            {item["name"]: item["official_integrity"].get("tree_sha256") for item in records},
+        )
+    except SystemProvenanceRepairError as exc:
+        raise InstallError(str(exc)) from exc
+    if provenance.get("payload_release") != release:
+        raise InstallError("system provenance payload release does not match official trees")
     return entry, index
 
 
@@ -175,6 +190,7 @@ def prepare_system_provenance_overlay(
         "source_index": source_index,
         "source_entry_id": entry.get("id"),
         "package": observed_package,
+        "payload_release": provenance.get("payload_release"),
         "provider": provider,
         "provider_bytes": provider_bytes,
         "provider_identity": system_path_identity(provider),

@@ -77,6 +77,21 @@ class CloseoutTests(unittest.TestCase):
         self.assertEqual(self.state, 'healthy')
         self.assertEqual(sum('install-skill-guarded.cmd' in c for c in commands), 4)
 
+    def test_closeout_recovers_current_official_system_inventory(self):
+        self.state = 'needs-bootstrap'
+
+        def current_release(argv, **kwargs):
+            result = self.runner(argv, **kwargs)
+            if 'status' in argv:
+                status = json.loads(result['stdout'])
+                status['display']['create-statusline'] = 'official'
+                result['stdout'] = json.dumps(status)
+            return result
+
+        result = self.module.closeout(self.run, repair=True, runner=current_release)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(self.state, 'healthy')
+
     def test_check_only_does_not_repair_provenance(self):
         self.state = 'needs-bootstrap'
         result = self.module.closeout(self.run, repair=False, runner=self.runner)
