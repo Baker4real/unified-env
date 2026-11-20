@@ -56,7 +56,8 @@ class PatchTest(unittest.TestCase):
         module = importlib.util.spec_from_file_location('antigravity_patch_wsl', CLI)
         patch = importlib.util.module_from_spec(module)
         module.loader.exec_module(patch)
-        upstream = (ROOT / 'wsl-fixture.cjs').read_bytes()
+        # Model the LF bytes in the official ASAR even on CRLF checkouts.
+        upstream = (ROOT / 'wsl-fixture.cjs').read_text(encoding='utf-8').encode('utf-8')
         original = pack_fixture(('before.txt', b'before'), ('wsl.js', upstream), ('after.txt', b'after'))
         candidate, unchanged = patch.build_candidate(original)
         self.assertEqual(unchanged, 2)
