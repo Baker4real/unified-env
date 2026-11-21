@@ -125,6 +125,12 @@ def _vendor_auto_approve_payload(payload: dict[str, object]) -> dict[str, object
     return rendered
 
 
+def _serena_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if base is None else base)
+    env["SERENA_HOME"] = SERENA_HOME
+    return env
+
+
 def _invoke_guard(mode: str, raw: bytes) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         [
@@ -142,6 +148,7 @@ def _invoke_guard(mode: str, raw: bytes) -> subprocess.CompletedProcess[bytes]:
         capture_output=True,
         check=False,
         creationflags=CREATE_NO_WINDOW,
+        env=_serena_env(),
     )
 
 
@@ -245,15 +252,13 @@ def run_auto_approve(raw: bytes) -> int:
     vendor = _vendor_auto_approve_payload(payload)
     if vendor is None:
         return 0
-    env = os.environ.copy()
-    env["SERENA_HOME"] = SERENA_HOME
     completed = subprocess.run(
         [str(SERENA_HOOKS), "auto-approve", "--client=claude-code"],
         input=_encode(vendor),
         capture_output=True,
         check=False,
         creationflags=CREATE_NO_WINDOW,
-        env=env,
+        env=_serena_env(),
     )
     if completed.stderr:
         sys.stderr.buffer.write(completed.stderr)
@@ -377,6 +382,9 @@ def _self_test() -> int:
         raise SystemExit("non-Serena auto-approve must stay silent")
     if "initial_instructions first" in GROK_ACTIVATION_CONTEXT:
         raise SystemExit("activation must not require initial_instructions")
+    isolated = _serena_env({"SERENA_HOME": r"D:\polluted\serena", "KEEP_ME": "1"})
+    if isolated.get("SERENA_HOME") != SERENA_HOME or isolated.get("KEEP_ME") != "1":
+        raise SystemExit("SERENA_HOME isolation failed")
     return 0
 
 

@@ -3,32 +3,32 @@
   "hooks": {
     "workspaceOpen": [
       {
-        "command": "cmd.exe /c D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-github-cli.cmd",
+        "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe -I -S -B -X utf8 D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py D:\\Codex\\tools\\python315-official\\python.exe -I -S -B -X utf8 D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-host-hook.py GitHubCli",
         "timeout": 10
       }
     ],
     "sessionStart": [
       {
-        "command": "cmd.exe /c D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-activation.cmd",
+        "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe -I -S -B -X utf8 D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py D:\\Codex\\tools\\python315-official\\python.exe -I -S -B -X utf8 D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-host-hook.py Activation",
         "timeout": 10
       }
     ],
     "sessionEnd": [
       {
-        "command": "cmd.exe /c D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-cleanup.cmd",
+        "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe -I -S -B -X utf8 D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py D:\\Codex\\tools\\python315-official\\python.exe -I -S -B -X utf8 D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-host-hook.py Cleanup",
         "timeout": 10
       }
     ],
     "preToolUse": [
       {
-        "command": "cmd.exe /c D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-reminder.cmd",
+        "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe -I -S -B -X utf8 D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py D:\\Codex\\tools\\python315-official\\python.exe -I -S -B -X utf8 D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-host-hook.py Reminder",
         "matcher": "Shell|Grep|Read",
         "timeout": 10
       }
     ],
     "beforeMCPExecution": [
       {
-        "command": "cmd.exe /c D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-serena-auto-approve.cmd",
+        "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe -I -S -B -X utf8 D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py D:\\Codex\\tools\\python315-official\\python.exe -I -S -B -X utf8 D:\\agents\\projects\\统一环境\\managed\\cursor-hooks\\cursor-host-hook.py AutoApprove",
         "timeout": 10
       }
     ]

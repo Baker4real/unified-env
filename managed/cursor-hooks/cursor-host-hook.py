@@ -222,6 +222,12 @@ def _encode(payload: dict[str, Any]) -> bytes:
     return (json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
 
 
+def _serena_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if base is None else base)
+    env["SERENA_HOME"] = SERENA_HOME
+    return env
+
+
 def _invoke_guard(mode: str, raw: bytes) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         [
@@ -239,6 +245,7 @@ def _invoke_guard(mode: str, raw: bytes) -> subprocess.CompletedProcess[bytes]:
         capture_output=True,
         check=False,
         creationflags=CREATE_NO_WINDOW,
+        env=_serena_env(),
     )
 
 
@@ -304,15 +311,13 @@ def run_auto_approve(raw: bytes) -> int:
     if vendor is None:
         _emit_empty()
         return 0
-    env = os.environ.copy()
-    env["SERENA_HOME"] = SERENA_HOME
     completed = subprocess.run(
         [str(SERENA_HOOKS), "auto-approve", "--client=claude-code"],
         input=_encode(vendor),
         capture_output=True,
         check=False,
         creationflags=CREATE_NO_WINDOW,
-        env=env,
+        env=_serena_env(),
     )
     if completed.stderr:
         sys.stderr.buffer.write(completed.stderr)
@@ -411,6 +416,9 @@ def _self_test() -> int:
         "user_message": "Auto-approved: Serena tool call while client is in auto mode.",
     }:
         raise SystemExit("allow translation failed")
+    isolated = _serena_env({"SERENA_HOME": r"D:\polluted\serena", "KEEP_ME": "1"})
+    if isolated.get("SERENA_HOME") != SERENA_HOME or isolated.get("KEEP_ME") != "1":
+        raise SystemExit("SERENA_HOME isolation failed")
     return 0
 
 
