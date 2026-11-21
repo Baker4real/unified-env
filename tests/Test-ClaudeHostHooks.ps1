@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param([string]$FixtureRoot = 'D:/agents/run-evidence/claude-host-hooks-fixtures')
 
 Set-StrictMode -Version Latest

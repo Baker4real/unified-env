@@ -10,6 +10,7 @@ $managedRoot = Join-Path $projectRoot 'managed\cursor-hooks'
 $registeredRoot = Join-Path $productionProjectRoot 'managed\cursor-hooks'
 $python = 'D:\Codex\tools\python315-official\python.exe'
 $pythonw = 'D:\Codex\tools\python315-official\pythonw.exe'
+$pwsh = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
 $hiddenLauncher = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
 $liveHooksPath = Join-Path $env:USERPROFILE '.cursor\hooks.json'
 $managedHooksPath = Join-Path $managedRoot 'hooks.json'
@@ -27,7 +28,8 @@ function Assert-Equal([object]$Actual, [object]$Expected, [string]$Message) {
 function Invoke-ChildProcess {
     param(
         [Parameter(Mandatory)][string]$FilePath,
-        [Parameter(Mandatory)][string[]]$Arguments,
+        [string[]]$Arguments = @(),
+        [AllowEmptyString()][string]$RawArguments,
         [AllowEmptyString()][string]$InputText = '',
         [hashtable]$Environment = @{}
     )
@@ -42,7 +44,11 @@ function Invoke-ChildProcess {
     $startInfo.StandardInputEncoding = $utf8
     $startInfo.StandardOutputEncoding = $utf8
     $startInfo.StandardErrorEncoding = $utf8
-    foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
+    if ($PSBoundParameters.ContainsKey('RawArguments')) {
+        $startInfo.Arguments = $RawArguments
+    } else {
+        foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
+    }
     foreach ($name in $Environment.Keys) { $startInfo.Environment[[string]$name] = [string]$Environment[$name] }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
@@ -60,6 +66,20 @@ function Invoke-ChildProcess {
         }
     }
     finally { $process.Dispose() }
+}
+
+function Invoke-CmdRawCursorCommand {
+    param(
+        [Parameter(Mandatory)][string]$CommandText,
+        [AllowEmptyString()][string]$InputText = '',
+        [hashtable]$Environment = @{}
+    )
+    $remapped = $CommandText.Replace($registeredAdapterPath, $adapterPath)
+    Invoke-ChildProcess `
+        -FilePath 'C:\Windows\System32\cmd.exe' `
+        -RawArguments ('/d /c ' + $remapped) `
+        -InputText $InputText `
+        -Environment $Environment
 }
 
 function Invoke-RegisteredCursorCommand {
@@ -155,6 +175,52 @@ $invalidMode = Invoke-ChildProcess `
     -Arguments @('-I', '-S', '-B', '-X', 'utf8', $hiddenLauncher, $python, '-I', '-S', '-B', '-X', 'utf8', $adapterPath, 'InvalidMode')
 Assert-Equal $invalidMode.exitCode 1 "adapter 非法 mode 的非零退出码必须透传。 stderr=$($invalidMode.stderr)"
 Assert-True ($invalidMode.stderr.Contains('cursor host hook mode required')) "adapter 非法 mode 必须保留 stderr 诊断：$($invalidMode.stderr)"
+
+# 贴合本机 cursor-agent P1：经 cmd.exe /d /c 执行原始 command 字符串验证退出码与 JSON 协议流
+$cmdActivation = Invoke-CmdRawCursorCommand `
+    -CommandText ([string]$registry.hooks.sessionStart[0].command) `
+    -InputText '{"session_id":"cursor-cmd-raw-probe","workspace_roots":["D:\\Codex\\projects\\demo"]}' `
+    -Environment @{ SERENA_HOME = 'D:\Codex\temp\polluted-serena-home-must-not-be-used' }
+Assert-Equal $cmdActivation.exitCode 0 "cmd.exe /d /c 执行原始 sessionStart 命令必须成功。 stderr=$($cmdActivation.stderr)"
+$cmdActivationJson = $cmdActivation.stdout | ConvertFrom-Json
+Assert-True ([string]$cmdActivationJson.additional_context).Contains('activate_project') 'cmd.exe /d /c 原始 sessionStart 命令必须返回完整 JSON 协议。'
+Assert-Equal ([string]$cmdActivationJson.env.SERENA_HOME) 'D:\Codex\.serena' 'cmd.exe /d /c 原始 sessionStart 命令必须注入 SERENA_HOME。'
+
+$cmdInvalidModeCommand = ([string]$registry.hooks.sessionStart[0].command) -replace ' Activation$', ' InvalidMode'
+$cmdInvalidMode = Invoke-CmdRawCursorCommand -CommandText $cmdInvalidModeCommand
+Assert-Equal $cmdInvalidMode.exitCode 1 "cmd.exe /d /c 执行原始 command 字符串必须透传非零退出码 1。 stderr=$($cmdInvalidMode.stderr)"
+Assert-True ($cmdInvalidMode.stderr.Contains('cursor host hook mode required')) "cmd.exe /d /c 非法 mode 必须保留 stderr 诊断：$($cmdInvalidMode.stderr)"
+
+# 验证 pwsh 子进程经同一 hidden-console-launcher 启动时的 GetConsoleWindow() == 0、协议流与非零退出码
+$pwshProbeScript = @'
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class CursorPwshConsoleWindowProbe {
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+}
+"@
+$raw = [Console]::In.ReadToEnd()
+$payload = $raw | ConvertFrom-Json
+$out = [ordered]@{
+    session_id = [string]$payload.session_id
+    windowHandle = [CursorPwshConsoleWindowProbe]::GetConsoleWindow().ToInt64()
+}
+[Console]::Out.Write(($out | ConvertTo-Json -Compress))
+[Console]::Error.Write('cursor-pwsh-probe-stderr')
+exit 29
+'@
+$pwshProbeEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($pwshProbeScript))
+$pwshProbe = Invoke-ChildProcess `
+    -FilePath $pythonw `
+    -Arguments @('-I', '-S', '-B', '-X', 'utf8', $hiddenLauncher, $pwsh, '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $pwshProbeEncoded) `
+    -InputText '{"session_id":"cursor-pwsh-probe"}'
+Assert-Equal $pwshProbe.exitCode 29 "Cursor hidden-console-launcher 启动 pwsh 的非零退出码未透传。 stderr=$($pwshProbe.stderr)"
+Assert-True ($pwshProbe.stderr.Contains('cursor-pwsh-probe-stderr')) "Cursor pwsh 探针 stderr 未透传：$($pwshProbe.stderr)"
+$pwshProbeJson = $pwshProbe.stdout | ConvertFrom-Json
+Assert-Equal ([int64]$pwshProbeJson.windowHandle) ([int64]0) "Cursor pwsh 最终子进程 GetConsoleWindow 必须为 0：$($pwshProbe.stdout)"
+Assert-Equal ([string]$pwshProbeJson.session_id) 'cursor-pwsh-probe' 'Cursor pwsh 探针 stdin/stdout JSON 协议不完整。'
 
 $pollutedEnv = @{ SERENA_HOME = 'D:\Codex\temp\polluted-serena-home-must-not-be-used' }
 

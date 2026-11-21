@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param()
 
 Set-StrictMode -Version Latest
@@ -22,7 +22,7 @@ function Assert-True {
     }
 }
 
-Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) '受管源码树必须零 .cmd 文件且全部 10 个已退役/历史 .cmd 均已移除'
 
 function Assert-Sequence {
     param(
@@ -508,6 +508,139 @@ $directManagedUnclosedError = Assert-Throws -Message '指向受管 launcher/impl
     Merge-CodexHookRegistry -Manifest $directManagedManifest -LiveRegistry $directManagedUnclosedRegistry -Mode full | Out-Null
 }
 Assert-True ($directManagedUnclosedError -notmatch 'direct-secret') 'direct-managed-launcher 不可解析错误不得回显 secret'
+
+# Major #1 + Major #2: 针对生产 host-preflight manifest 的 3 类原始命令篡改与 5 类解释器/引号漂移绕过回归
+$productionDirectManifest = Read-CodexHookHostPreflightManifest
+$productionPreflightHook = @($productionDirectManifest.hooks | Where-Object id -ceq 'codex-state-preflight')[0]
+$productionPreflightCanonical = (@([string]$productionPreflightHook.commandPath) + @($productionPreflightHook.arguments)) -join ' '
+
+$tamperedDirectCases = @(
+    @{
+        name = 'quoted-python-executable'
+        event = 'SessionStart'
+        matcher = $null
+        command = ($productionPreflightCanonical -replace '^D:\\Codex\\tools\\python315-official\\python\.exe', '"D:\Codex\tools\python315-official\python.exe"')
+    }
+    @{
+        name = 'quoted-semicolon-exit-loss'
+        event = 'SessionStart'
+        matcher = $null
+        command = ($productionPreflightCanonical -replace ' ; exit \$LASTEXITCODE$', ' ";" exit $LASTEXITCODE')
+    }
+    @{
+        name = 'embedded-newline-split'
+        event = 'SessionStart'
+        matcher = $null
+        command = ($productionPreflightCanonical -replace ' -X utf8 ', " -X utf8`n")
+    }
+    @{
+        name = 'bypass-powershell-call-operator-space'
+        event = 'SessionStart'
+        matcher = $null
+        command = '& ' + $productionPreflightCanonical
+    }
+    @{
+        name = 'bypass-powershell-call-operator-attached'
+        event = 'SessionStart'
+        matcher = $null
+        command = '&"' + [string]$productionPreflightHook.commandPath + '" ' + (@($productionPreflightHook.arguments) -join ' ')
+    }
+    @{
+        name = 'bypass-older-python-version'
+        event = 'SessionStart'
+        matcher = $null
+        command = 'D:\Codex\tools\python314-official\python.exe -I -S -B -X utf8 D:\Codex\.codex\hooks\lib\hidden-console-launcher.py D:\Codex\tools\python314-official\python.exe -I -S -B -X utf8 D:\Codex\.codex\hooks\codex-state-preflight.py ; exit $LASTEXITCODE'
+    }
+    @{
+        name = 'bypass-bare-python'
+        event = 'SessionStart'
+        matcher = $null
+        command = 'python -I -S -B -X utf8 D:\Codex\.codex\hooks\lib\hidden-console-launcher.py D:\Codex\tools\python315-official\python.exe -I -S -B -X utf8 D:\Codex\.codex\hooks\codex-state-preflight.py ; exit $LASTEXITCODE'
+    }
+    @{
+        name = 'bypass-bare-pwsh'
+        event = 'SessionStart'
+        matcher = 'startup|resume'
+        command = 'pwsh -NoProfile -File D:\Codex\.codex\hooks\serena-behavior-guard.ps1 -Mode Activation'
+    }
+    @{
+        name = 'bypass-windows-powershell'
+        event = 'SessionStart'
+        matcher = 'startup|resume'
+        command = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -File D:\Codex\.codex\hooks\serena-behavior-guard.ps1 -Mode Activation'
+    }
+    @{
+        name = 'bypass-single-quoted-managed-path'
+        event = 'SessionStart'
+        matcher = $null
+        command = "D:\Codex\tools\python315-official\python.exe -I -S -B -X utf8 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py' D:\Codex\tools\python315-official\python.exe -I -S -B -X utf8 'D:\Codex\.codex\hooks\codex-state-preflight.py' ; exit `$LASTEXITCODE"
+    }
+)
+foreach ($case in $tamperedDirectCases) {
+    $caseGroup = [pscustomobject][ordered]@{
+        hooks = @([pscustomobject][ordered]@{
+            type = 'command'
+            command = [string]$case.command
+            timeout = 10
+        })
+    }
+    if ($null -ne $case.matcher) {
+        $caseGroup | Add-Member -NotePropertyName matcher -NotePropertyValue ([string]$case.matcher)
+    }
+    $caseRegistry = [pscustomobject][ordered]@{
+        hooks = [pscustomobject][ordered]@{
+            ($case.event) = @($caseGroup)
+        }
+    }
+    [void](Assert-Throws -Message "篡改或漂移绕过变体必须 fail closed 而不得匹配或静默双注册：$($case.name)" -Action {
+        Merge-CodexHookRegistry -Manifest $productionDirectManifest -LiveRegistry $caseRegistry -Mode full | Out-Null
+    })
+}
+
+$thirdPartyNegativeControlRegistry = [pscustomobject][ordered]@{
+    hooks = [pscustomobject][ordered]@{
+        SessionStart = @(
+            [pscustomobject][ordered]@{
+                customOpaqueUnknown = 'preserve'
+                hooks = @([pscustomobject][ordered]@{
+                    type = 'command'
+                    command = 'D:\Fixture\unknown-target.cmd --opaque "D:\Codex\.codex\hooks\codex-state-preflight.py"'
+                    timeout = 5
+                })
+            }
+            [pscustomobject][ordered]@{
+                customPythonThirdParty = 'preserve'
+                hooks = @([pscustomobject][ordered]@{
+                    type = 'command'
+                    command = 'D:\Codex\tools\python315-official\python.exe D:\ThirdParty\foo.py'
+                    timeout = 5
+                })
+            }
+            [pscustomobject][ordered]@{
+                customHerdrBare = 'preserve'
+                hooks = @([pscustomobject][ordered]@{
+                    type = 'command'
+                    command = 'powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\herdr-agent-state.ps1" session'
+                    timeout = 10
+                })
+            }
+            [pscustomobject][ordered]@{
+                customHerdrFullPath = 'preserve'
+                hooks = @([pscustomobject][ordered]@{
+                    type = 'command'
+                    command = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -File "D:\Codex\.codex\herdr-agent-state.ps1" session'
+                    timeout = 10
+                })
+            }
+        )
+    }
+}
+$thirdPartyMerged = Merge-CodexHookRegistry -Manifest $productionDirectManifest -LiveRegistry $thirdPartyNegativeControlRegistry -Mode full
+Assert-True (@($thirdPartyMerged.hooks.SessionStart).Count -eq 7) '第三方负控变体（unknown-target.cmd / python foo.py / herdr-agent-state.ps1）必须全部保留且追加 3 项受管 SessionStart'
+Assert-True ($thirdPartyMerged.hooks.SessionStart[0].customOpaqueUnknown -ceq 'preserve') '非解释器 unknown-target.cmd 携带受管路径参数不得误报漂移'
+Assert-True ($thirdPartyMerged.hooks.SessionStart[1].customPythonThirdParty -ceq 'preserve') 'python.exe D:\ThirdParty\foo.py 不得误报漂移'
+Assert-True ($thirdPartyMerged.hooks.SessionStart[2].customHerdrBare -ceq 'preserve') '裸 powershell herdr-agent-state.ps1 不得误报漂移'
+Assert-True ($thirdPartyMerged.hooks.SessionStart[3].customHerdrFullPath -ceq 'preserve') '完整路径 powershell.exe herdr-agent-state.ps1 不得误报漂移'
 
 $fixtureRoot = Join-Path $ProjectRoot 'reports\codex-hook-deployment-test'
 Assert-True (Test-CodexHookPathWithin -Path $fixtureRoot -ParentPath (Join-Path $ProjectRoot 'reports')) 'fixture root 必须位于项目 reports'

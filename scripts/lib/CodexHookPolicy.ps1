@@ -1,4 +1,4 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'CodexHostSafety.ps1')
 
@@ -1255,6 +1255,10 @@ function Get-CodexHookManifestSourceSha256 {
 function Split-CodexHookCommandLine {
     param([Parameter(Mandatory)][string]$Command)
 
+    if ($Command -match '[\r\n]') {
+        return [pscustomobject]@{ parsed = $false; tokens = @() }
+    }
+
     $tokens = [Collections.Generic.List[string]]::new()
     $index = 0
     while ($index -lt $Command.Length) {
@@ -1330,7 +1334,8 @@ function Get-CodexHookManifestMatches {
         [Parameter(Mandatory)][string]$Event,
         [AllowNull()][object]$Matcher,
         [Parameter(Mandatory)][string[]]$Tokens,
-        [Parameter(Mandatory)][bool]$IsCommandEntry
+        [Parameter(Mandatory)][bool]$IsCommandEntry,
+        [AllowNull()][string]$RawCommand = $null
     )
 
     if (-not $IsCommandEntry -or $Tokens.Count -eq 0 -or $Tokens[0] -notmatch '^[dD]:[\\/]') {
@@ -1363,9 +1368,152 @@ function Get-CodexHookManifestMatches {
                     break
                 }
             }
-            if ($argumentsMatch) { $hook }
+            if (-not $argumentsMatch) { continue }
+            $isDirectManagedLauncher = (
+                $hook.PSObject.Properties.Name -ccontains 'sourceState' -and
+                [string]$hook.sourceState -ceq 'managed' -and
+                $hook.PSObject.Properties.Name -ccontains 'wrapperPath' -and
+                $null -eq $hook.wrapperPath
+            )
+            if ($isDirectManagedLauncher) {
+                $canonicalCommand = (@([string]$hook.commandPath) + @($hook.arguments)) -join ' '
+                if ($null -eq $RawCommand -or -not [string]::Equals($RawCommand, $canonicalCommand, [StringComparison]::Ordinal)) {
+                    continue
+                }
+            }
+            $hook
         }
     )
+}
+
+function Get-CodexHookManagedTargetSets {
+    param([Parameter(Mandatory)][object]$Manifest)
+
+    $dedicatedManagedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $directManagedScriptPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $directManagedRuntimePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($hook in @($Manifest.hooks)) {
+        if ($null -ne $hook.wrapperPath -or $hook.sourceState -ceq 'vendor') {
+            foreach ($propertyName in @('wrapperPath', 'commandPath')) {
+                $managedPath = $hook.$propertyName
+                if ($null -eq $managedPath -or $managedPath -isnot [string]) { continue }
+                try {
+                    [void]$dedicatedManagedPaths.Add([IO.Path]::GetFullPath(([string]$managedPath).Replace('/', '\')))
+                } catch {
+                    continue
+                }
+            }
+        } elseif ($hook.sourceState -ceq 'managed') {
+            foreach ($propertyName in @('implementationPath', 'launcherImplementationPath')) {
+                $scriptPath = $hook.$propertyName
+                if ($null -eq $scriptPath -or $scriptPath -isnot [string]) { continue }
+                try {
+                    [void]$directManagedScriptPaths.Add([IO.Path]::GetFullPath(([string]$scriptPath).Replace('/', '\')))
+                } catch {
+                    continue
+                }
+            }
+            if ($hook.commandPath -is [string]) {
+                try {
+                    [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$hook.commandPath).Replace('/', '\')))
+                } catch {}
+            }
+        }
+    }
+    if ($null -ne $Manifest.runtimes) {
+        foreach ($runtimeName in @('python', 'pythonw', 'pwsh')) {
+            if ($Manifest.runtimes.PSObject.Properties.Name -ccontains $runtimeName) {
+                try {
+                    [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$Manifest.runtimes.$runtimeName).Replace('/', '\')))
+                } catch {}
+            }
+        }
+    }
+    return [pscustomobject]@{
+        dedicatedManagedPaths = $dedicatedManagedPaths
+        directManagedScriptPaths = $directManagedScriptPaths
+        directManagedRuntimePaths = $directManagedRuntimePaths
+    }
+}
+
+function Test-CodexHookIsKnownInterpreterToken {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Token,
+        [Parameter(Mandatory)][Collections.Generic.HashSet[string]]$DirectManagedRuntimePaths
+    )
+
+    $trimmed = $Token.Trim('"', "'")
+    if ([string]::IsNullOrEmpty($trimmed)) { return $false }
+    $normalized = $trimmed.Replace('/', '\')
+    if ($normalized -match '^[dD]:\\') {
+        try {
+            if ($DirectManagedRuntimePaths.Contains([IO.Path]::GetFullPath($normalized))) {
+                return $true
+            }
+        } catch {}
+    }
+    $leaf = $normalized
+    $lastSeparator = $normalized.LastIndexOf('\')
+    if ($lastSeparator -ge 0) {
+        $leaf = $normalized.Substring($lastSeparator + 1)
+    }
+    return ($leaf -match '^(?i:pythonw?|pwsh|powershell)(?:\.exe)?$')
+}
+
+function Test-CodexHookTokensTargetDirectManagedScript {
+    param(
+        [Parameter(Mandatory)][object]$Manifest,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Tokens,
+        [AllowNull()][object]$TargetSets = $null
+    )
+
+    $sets = if ($null -ne $TargetSets) { $TargetSets } else { Get-CodexHookManagedTargetSets -Manifest $Manifest }
+    if ($sets.directManagedScriptPaths.Count -eq 0 -or $Tokens.Count -eq 0) {
+        return $false
+    }
+
+    $startIndex = 0
+    if ($Tokens[0] -ceq '&') {
+        if ($Tokens.Count -lt 2) { return $false }
+        $startIndex = 1
+    }
+    $execToken = [string]$Tokens[$startIndex]
+    if ($execToken.StartsWith('&', [StringComparison]::Ordinal)) {
+        $execToken = $execToken.Substring(1)
+    }
+    $execCandidate = $execToken.Trim('"', "'").Replace('/', '\')
+    if ($execCandidate -match '^[dD]:\\') {
+        try {
+            if ($sets.directManagedScriptPaths.Contains([IO.Path]::GetFullPath($execCandidate))) {
+                return $true
+            }
+        } catch {}
+    }
+
+    if (-not (Test-CodexHookIsKnownInterpreterToken -Token $execToken -DirectManagedRuntimePaths $sets.directManagedRuntimePaths)) {
+        return $false
+    }
+
+    for ($tokenIndex = $startIndex + 1; $tokenIndex -lt $Tokens.Count; $tokenIndex++) {
+        $rawArg = [string]$Tokens[$tokenIndex]
+        [string[]]$candidates = @($rawArg)
+        $equalsIndex = $rawArg.IndexOf('=')
+        if ($equalsIndex -ge 0 -and $equalsIndex -lt ($rawArg.Length - 1)) {
+            $candidates = @($rawArg, $rawArg.Substring($equalsIndex + 1))
+        }
+        foreach ($candidate in $candidates) {
+            $cleaned = $candidate.Trim('"', "'").Replace('/', '\')
+            if ($cleaned -notmatch '^[dD]:\\') { continue }
+            try {
+                if ($sets.directManagedScriptPaths.Contains([IO.Path]::GetFullPath($cleaned))) {
+                    return $true
+                }
+            } catch {
+                continue
+            }
+        }
+    }
+    return $false
 }
 
 function Get-CodexHookOpaqueCommandTargetPath {
@@ -1401,69 +1549,13 @@ function Test-CodexHookOpaqueCommandTargetsManagedPath {
         [Parameter(Mandatory)][string]$Command
     )
 
+    $targetSets = Get-CodexHookManagedTargetSets -Manifest $Manifest
     $targetPath = Get-CodexHookOpaqueCommandTargetPath -Command $Command
-    if ($null -eq $targetPath) { return $false }
-
-    $dedicatedManagedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $directManagedScriptPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $directManagedRuntimePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($hook in @($Manifest.hooks)) {
-        if ($null -ne $hook.wrapperPath -or $hook.sourceState -ceq 'vendor') {
-            foreach ($propertyName in @('wrapperPath', 'commandPath')) {
-                $managedPath = $hook.$propertyName
-                if ($null -eq $managedPath -or $managedPath -isnot [string]) { continue }
-                try {
-                    [void]$dedicatedManagedPaths.Add([IO.Path]::GetFullPath(([string]$managedPath).Replace('/', '\')))
-                } catch {
-                    continue
-                }
-            }
-        } elseif ($hook.sourceState -ceq 'managed') {
-            foreach ($propertyName in @('implementationPath', 'launcherImplementationPath')) {
-                $scriptPath = $hook.$propertyName
-                if ($null -eq $scriptPath -or $scriptPath -isnot [string]) { continue }
-                try {
-                    [void]$directManagedScriptPaths.Add([IO.Path]::GetFullPath(([string]$scriptPath).Replace('/', '\')))
-                } catch {
-                    continue
-                }
-            }
-            if ($hook.commandPath -is [string]) {
-                try {
-                    [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$hook.commandPath).Replace('/', '\')))
-                } catch {}
-            }
-        }
-    }
-    if ($dedicatedManagedPaths.Contains([string]$targetPath) -or $directManagedScriptPaths.Contains([string]$targetPath)) {
+    if ($null -ne $targetPath -and ($targetSets.dedicatedManagedPaths.Contains([string]$targetPath) -or $targetSets.directManagedScriptPaths.Contains([string]$targetPath))) {
         return $true
     }
-    if ($directManagedScriptPaths.Count -eq 0) {
-        return $false
-    }
-    foreach ($runtimeName in @('python', 'pythonw', 'pwsh')) {
-        if ($Manifest.runtimes.PSObject.Properties.Name -ccontains $runtimeName) {
-            try {
-                [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$Manifest.runtimes.$runtimeName).Replace('/', '\')))
-            } catch {}
-        }
-    }
-    if (-not $directManagedRuntimePaths.Contains([string]$targetPath)) {
-        return $false
-    }
-    foreach ($rawPart in @($Command -split '\s+' | Select-Object -Skip 1)) {
-        $candidate = $rawPart.Replace('"', '').Replace('/', '\')
-        if ($candidate -notmatch '^[dD]:\\') { continue }
-        try {
-            $normalizedCandidate = [IO.Path]::GetFullPath($candidate)
-            if ($directManagedScriptPaths.Contains($normalizedCandidate)) {
-                return $true
-            }
-        } catch {
-            continue
-        }
-    }
-    return $false
+    $rawTokens = [string[]]@($Command -split '\s+' | Where-Object { -not [string]::IsNullOrEmpty($_) })
+    return (Test-CodexHookTokensTargetDirectManagedScript -Manifest $Manifest -Tokens $rawTokens -TargetSets $targetSets)
 }
 
 function Copy-CodexHookJsonValue {
@@ -1500,7 +1592,8 @@ function Get-CodexHookRegistryEntryAnalysis {
                 -Event $Event `
                 -Matcher $Matcher `
                 -Tokens ([string[]]$parsed.tokens) `
-                -IsCommandEntry $true |
+                -IsCommandEntry $true `
+                -RawCommand ([string]$command) |
                 Where-Object { $null -ne $_ }
         )
     }
@@ -1509,7 +1602,6 @@ function Get-CodexHookRegistryEntryAnalysis {
     }
 
     $customPathMatches = @()
-    $directManagedDriftDetected = $false
     if ($parsed.parsed -and $parsed.tokens.Count -gt 0 -and [string]$parsed.tokens[0] -match '^[dD]:[\\/]') {
         try {
             $targetPath = [IO.Path]::GetFullPath(([string]$parsed.tokens[0]).Replace('/', '\'))
@@ -1519,50 +1611,16 @@ function Get-CodexHookRegistryEntryAnalysis {
                     $targetPath.Equals([IO.Path]::GetFullPath([string]$_.commandPath), [StringComparison]::OrdinalIgnoreCase)
                 }
             )
-            if ($exactMatches.Count -eq 0 -and $customPathMatches.Count -eq 0) {
-                $directManagedHooks = @($Manifest.hooks | Where-Object { $null -eq $_.wrapperPath -and $_.sourceState -ceq 'managed' })
-                if ($directManagedHooks.Count -gt 0) {
-                    $directManagedScriptPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-                    $directManagedRuntimePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-                    foreach ($directHook in $directManagedHooks) {
-                        foreach ($propertyName in @('implementationPath', 'launcherImplementationPath')) {
-                            $scriptPath = $directHook.$propertyName
-                            if ($scriptPath -is [string]) {
-                                [void]$directManagedScriptPaths.Add([IO.Path]::GetFullPath(([string]$scriptPath).Replace('/', '\')))
-                            }
-                        }
-                        if ($directHook.commandPath -is [string]) {
-                            [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$directHook.commandPath).Replace('/', '\')))
-                        }
-                    }
-                    foreach ($runtimeName in @('python', 'pythonw', 'pwsh')) {
-                        if ($Manifest.runtimes.PSObject.Properties.Name -ccontains $runtimeName) {
-                            [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$Manifest.runtimes.$runtimeName).Replace('/', '\')))
-                        }
-                    }
-                    if ($directManagedScriptPaths.Contains($targetPath)) {
-                        $directManagedDriftDetected = $true
-                    } elseif ($directManagedRuntimePaths.Contains($targetPath)) {
-                        for ($tokenIndex = 1; $tokenIndex -lt $parsed.tokens.Count; $tokenIndex++) {
-                            $argToken = [string]$parsed.tokens[$tokenIndex]
-                            if ($argToken -notmatch '^[dD]:[\\/]') { continue }
-                            try {
-                                $normalizedArgPath = [IO.Path]::GetFullPath($argToken.Replace('/', '\'))
-                                if ($directManagedScriptPaths.Contains($normalizedArgPath)) {
-                                    $directManagedDriftDetected = $true
-                                    break
-                                }
-                            } catch {
-                                continue
-                            }
-                        }
-                    }
-                }
-            }
         } catch {
             $customPathMatches = @()
         }
     }
+    $directManagedDriftDetected = (
+        $parsed.parsed -and
+        $exactMatches.Count -eq 0 -and
+        $customPathMatches.Count -eq 0 -and
+        (Test-CodexHookTokensTargetDirectManagedScript -Manifest $Manifest -Tokens ([string[]]$parsed.tokens))
+    )
     if ($customPathMatches.Count -gt 0 -and $exactMatches.Count -eq 0) {
         throw "受管 custom wrapper identity 漂移：event=$Event"
     }
@@ -2183,7 +2241,7 @@ function Get-CodexHookRegistryFacts {
 
                 [object[]]$manifestMatches = @()
                 if ($parsed.parsed -and $entryType -ceq 'command') {
-                    $manifestMatches = [object[]]@(Get-CodexHookManifestMatches -Manifest $Manifest -Event $eventName -Matcher $matcher -Tokens $parsed.tokens -IsCommandEntry $true | Where-Object { $null -ne $_ })
+                    $manifestMatches = [object[]]@(Get-CodexHookManifestMatches -Manifest $Manifest -Event $eventName -Matcher $matcher -Tokens $parsed.tokens -IsCommandEntry $true -RawCommand ([string]$command) | Where-Object { $null -ne $_ })
                 }
                 $matchedHook = if ($manifestMatches.Count -eq 1) { $manifestMatches[0] } else { $null }
                 if ($null -eq $matchedHook -and $parsed.parsed -and $entryType -ceq 'command') {

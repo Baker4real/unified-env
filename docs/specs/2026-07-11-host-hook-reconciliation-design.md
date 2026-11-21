@@ -78,7 +78,7 @@ reconciler 只维护以下状态：
 - 历史 config evidence 与退役 trust 的清洗合同随 config reconciliation 一并退役；`scripts\Invoke-RetiredProjectSnapshotSanitizer.ps1` 仍是历史快照的受控清理入口（`-Mode Audit -Json` 后按 `-ConfirmRetiredProject` 显式确认才 `-Mode Apply -Json`），但不再由 reconciler 的 evidence/Restore 流程触发。
 - 并发替换或文件提交、ACL 加固、legacy 退役中的不安全部分提交不会用旧 snapshot 覆盖较新 active state；可定位 backup 和 manifest 会被保留，状态按 `unsafe-partial` 报告。
 - 只有固定 allowlist 内的旧实现可以退役；未知路径与文件内容必须保持不变，其 ACL 可随稳定 hook surface 收紧。
-- 退役资源是单向删除项：Restore 不会重建任何已退役的实现、目录或注册。退役删除后的失败保留证据并按 `unsafe-partial` 报告，而不是回写旧 snapshot。
+- 退役资源是单向删除项：`Restore` 不会重建任何已退役的实现、目录或 `.cmd` 包装器（与 `Test-CodexFunctionalHookRegistration.ps1 -OnlyRestoreRetirementIrreversibility` 合同一致）；跨代 5-`.cmd` 单向退役升级后执行 `Restore`，仅恢复升级前的 `hooks.json` 与非退役受管文件快照，不会重建已删除的 5 个 `.cmd` 文件（若确需回退历史 `.cmd` 形态，须从 Git 历史显式检出或重新执行 `Repair` 收敛至新形态）。退役删除后的失败保留证据并按 `unsafe-partial` 报告，而不是回写旧 snapshot。
 - `Repair` 按 Codex home 获取互斥锁；健康状态再次执行必须返回 `changed = false`。
 - 生产 direct-managed-launcher 的最终 PowerShell/Python 子进程必须满足 `GetConsoleWindow() == 0`，同时在 `pwsh.exe -NoProfile -Command` 宿主调用链下保持 stdin/stdout、精确退出码（含 `exit 2`）和 stderr 可观察；只检查外层 runner 不构成无窗口或退出码验收。
 
