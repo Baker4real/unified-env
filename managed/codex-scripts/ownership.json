@@ -36,6 +36,7 @@
     { "path": "install_skill_guarded_tree.py", "owner": "scripts/Deploy-SkillInstallGuarded.ps1", "source": "modules/skill-supply-chain/implementation/install_skill_guarded_tree.py" },
     { "path": "install_skill_guarded.py", "owner": "scripts/Deploy-SkillInstallGuarded.ps1", "source": "modules/skill-supply-chain/implementation/install_skill_guarded.py" },
     { "path": "install-skill-guarded.cmd", "owner": "scripts/Deploy-SkillInstallGuarded.ps1", "source": "scripts/install-skill-guarded.cmd" },
+    { "path": "install-skill-guarded.ps1", "owner": "scripts/Deploy-SkillInstallGuarded.ps1", "source": "scripts/install-skill-guarded.ps1" },
     { "path": "Install-StudyToHomeSshAuthorization.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/ssh-mesh.md" },
     { "path": "Invoke-CheckedPowerShell.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Invoke-CheckedPowerShell.ps1" },
     { "path": "Invoke-CheckedPython.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/shell-and-runtime.md" },

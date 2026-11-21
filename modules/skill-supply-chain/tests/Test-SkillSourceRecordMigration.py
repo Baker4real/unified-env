@@ -47,6 +47,7 @@ class SkillSourceRecordMigrationTests(unittest.TestCase):
                 "install_skill_guarded_system_overlay.py",
                 "install_skill_guarded_staging.py",
                 "install_skill_guarded.py",
+                "install-skill-guarded.ps1",
                 "install-skill-guarded.cmd",
             },
         )
