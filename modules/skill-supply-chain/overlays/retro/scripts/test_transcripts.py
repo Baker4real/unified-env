@@ -1504,6 +1504,79 @@ class AntigravityTranscriptTests(unittest.TestCase):
         self.assertEqual(invalid.returncode, 2)
         self.assertIn("invalid --regex", invalid.stderr)
 
+    def test_dsh_find_and_show_read_attempt_and_turn_end_errors_while_audit_stays_redacted(self):
+        records = [
+            {"type": "turn/start", "time": 1794188611000, "data": {"turn": 1}},
+            {"type": "user/message", "time": 1794188611100,
+             "data": {"role": "user", "content": [{"type": "text", "text": "check status"}], "source": {"kind": "user"}}},
+            {"type": "assistant/attempt", "time": 1794188611200, "data": {
+                "turn": 1, "step": 1, "stream": [
+                    {"type": "chunk", "chunk": {"type": "usage", "usage": {"inputTokens": 0, "outputTokens": 0, "totalTokens": 0}}},
+                    {"type": "chunk", "chunk": {"type": "finish", "reason": {
+                        "kind": "error", "failure": {"code": "PI_AI_ERROR", "message": "Error reading response: malformed server-sent event JSON."}}}}]}},
+            {"type": "turn/end", "time": 1794188611300, "data": {
+                "turn": 1, "reason": {"kind": "error", "error": {
+                    "code": "PI_AI_ERROR", "message": "Error reading response: malformed server-sent event JSON."}}}},
+        ]
+        with tempfile.TemporaryDirectory(dir=TEMP_ROOT) as directory:
+            path = Path(directory) / "session.v4.jsonl"
+            path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+            found = run("find", "malformed server-sent event", str(path))
+            shown_attempt = run("show", str(path), "3", "--max", "8", "--max-chars", "1600")
+            shown_end = run("show", str(path), "4", "--max", "8", "--max-chars", "1600")
+            audited = run("audit", str(path))
+        self.assertEqual(found.returncode, 0, found.stderr)
+        self.assertIn("L3 ", found.stdout)
+        self.assertIn("L4 ", found.stdout)
+        self.assertEqual(shown_attempt.returncode, 0, shown_attempt.stderr)
+        self.assertIn("other assistant/attempt", shown_attempt.stdout)
+        self.assertIn("code: PI_AI_ERROR", shown_attempt.stdout)
+        self.assertIn("malformed server-sent event JSON.", shown_attempt.stdout)
+        self.assertNotIn("no conversation blocks", shown_attempt.stdout)
+        self.assertEqual(shown_end.returncode, 0, shown_end.stderr)
+        self.assertIn("other turn/end", shown_end.stdout)
+        self.assertIn("code: PI_AI_ERROR", shown_end.stdout)
+        self.assertIn("malformed server-sent event JSON.", shown_end.stdout)
+        self.assertEqual(audited.returncode, 0, audited.stderr)
+        self.assertIn("message=<57 chars>", audited.stdout)
+        self.assertNotIn("malformed server-sent event JSON.", audited.stdout)
+
+    def test_find_without_paths_skips_env_current_session_unless_included(self):
+        with tempfile.TemporaryDirectory(dir=TEMP_ROOT) as directory:
+            root = Path(directory)
+            ag_root = root / "ag" / "brain"
+            cur = ag_root / "conv-current-id" / ".system_generated" / "logs" / "transcript.jsonl"
+            other = ag_root / "conv-other-id" / ".system_generated" / "logs" / "transcript.jsonl"
+            cur.parent.mkdir(parents=True)
+            other.parent.mkdir(parents=True)
+            payload = json.dumps({"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE",
+                                  "created_at": "2026-11-21T01:00:00Z", "content": "needle-token"}) + "\n"
+            cur.write_text(payload, encoding="utf-8")
+            other.write_text(payload, encoding="utf-8")
+            env = {
+                **os.environ,
+                "CLAUDE_CONFIG_DIR": str(root / "empty-claude"),
+                "CODEX_HOME": str(root / "empty-codex"),
+                "DSH_HOME": str(root / "empty-dsh"),
+                "ANTIGRAVITY_HOME": str(root / "ag"),
+                "ANTIGRAVITY_CONVERSATION_ID": "conv-current-id",
+            }
+            skipped = subprocess.run([sys.executable, "-X", "utf8", str(SCRIPT), "find", "needle-token"],
+                                     capture_output=True, text=True, encoding="utf-8", env=env)
+            included = subprocess.run([sys.executable, "-X", "utf8", str(SCRIPT), "find", "needle-token", "--include-current"],
+                                      capture_output=True, text=True, encoding="utf-8", env=env)
+            explicit = subprocess.run([sys.executable, "-X", "utf8", str(SCRIPT), "find", "needle-token", str(ag_root)],
+                                      capture_output=True, text=True, encoding="utf-8", env=env)
+        self.assertEqual(skipped.returncode, 0, skipped.stderr)
+        self.assertIn("conv-other-id", skipped.stdout)
+        self.assertNotIn("conv-current-id", skipped.stdout)
+        self.assertIn("1 current session skipped", skipped.stdout)
+        self.assertEqual(included.returncode, 0, included.stderr)
+        self.assertIn("conv-current-id", included.stdout)
+        self.assertIn("conv-other-id", included.stdout)
+        self.assertEqual(explicit.returncode, 0, explicit.stderr)
+        self.assertIn("conv-current-id", explicit.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

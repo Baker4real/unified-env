@@ -699,6 +699,61 @@ def dsh_blocks(record):
             text, failed, call_id = render(message), False, data.get("callId")
         yield Block("tool_result", "", text, call_id, failed)
         return
+    if sort == "turn/end":
+        yield Block("other", "turn/end", dsh_turn_end_text(data))
+        return
+    if sort == "assistant/attempt":
+        yield Block("other", "assistant/attempt", dsh_attempt_text(data))
+        return
+
+
+def dsh_reason_lines(reason):
+    """Structured detail lines for a DSH turn/end or assistant/attempt finish reason."""
+    if not isinstance(reason, dict):
+        return ["reason: missing"]
+    kind = str(reason.get("kind", "missing"))
+    nested = reason.get("reason")
+    if isinstance(nested, dict):
+        kind += f"({nested.get('kind', 'missing')})"
+    lines = [f"reason: {kind}"]
+    failure = reason.get("failure", reason.get("error"))
+    if isinstance(failure, dict):
+        if failure.get("code") is not None:
+            lines.append(f"code: {failure['code']}")
+        if failure.get("statusCode") is not None:
+            lines.append(f"statusCode: {failure['statusCode']}")
+        if failure.get("message") is not None:
+            lines.append(f"message: {failure['message']}")
+        extra = {k: v for k, v in failure.items() if k not in ("code", "statusCode", "message")}
+        if extra:
+            lines.append(f"details: {json.dumps(extra, ensure_ascii=False)}")
+    elif failure is not None:
+        lines.append(f"error: {render(failure)}")
+    return lines
+
+
+def dsh_turn_end_text(data):
+    lines = []
+    if data.get("turn") is not None:
+        lines.append(f"turn: {data['turn']}")
+    lines.extend(dsh_reason_lines(data.get("reason")))
+    return "\n".join(lines)
+
+
+def dsh_attempt_text(data):
+    prefix = " ".join(f"{k}={data[k]}" for k in ("turn", "step") if data.get(k) is not None)
+    status = dsh_attempt_status(data)
+    lines = [f"{prefix} {status}".strip()]
+    stream = data.get("stream")
+    if isinstance(stream, list):
+        for item in stream:
+            chunk = item.get("chunk") if isinstance(item, dict) else None
+            if isinstance(chunk, dict) and chunk.get("type") == "finish":
+                lines.extend(dsh_reason_lines(chunk.get("reason")))
+    for key in ("failure", "error"):
+        if data.get(key) is not None:
+            lines.append(f"{key}: {render(data[key])}")
+    return "\n".join(lines)
 
 
 def dsh_has_reply_text(data):
@@ -996,7 +1051,27 @@ def link_tool_search_result(block, pending):
     return block
 
 
+CURRENT_SESSION_ENV_VARS = (
+    "DSH_SESSION_ID",
+    "CLAUDE_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "ANTIGRAVITY_CONVERSATION_ID",
+    "CONVERSATION_ID",
+)
+
+
+def current_session_ids():
+    seen, result = set(), []
+    for var in CURRENT_SESSION_ENV_VARS:
+        value = (os.environ.get(var) or "").strip()
+        if value and value.lower() not in seen:
+            seen.add(value.lower())
+            result.append(value.lower())
+    return result
+
+
 def cmd_find(args):
+    explicit_paths = bool(args.paths)
     paths = [Path(p) for p in args.paths] or default_roots()
     missing = [str(p) for p in paths if not p.exists()]
     if missing:
@@ -1020,6 +1095,18 @@ def cmd_find(args):
     since = args.since.timestamp() if args.since else 0
     files = sorted((modified, file) for modified, file in transcript_files(paths, since)
                    if not any(skip in str(file).lower() for skip in skips))
+    skipped_current = 0
+    if not explicit_paths and not args.include_current:
+        current_ids = current_session_ids()
+        if current_ids:
+            kept = []
+            for modified, file in files:
+                low_path = str(file).lower()
+                if any(cid in low_path for cid in current_ids):
+                    skipped_current += 1
+                else:
+                    kept.append((modified, file))
+            files = kept
     bridged = 0
     if not args.bridge and not any(is_bridge(path) for path in paths):
         bridged = sum(1 for _modified, file in files if is_bridge(file))
@@ -1093,7 +1180,8 @@ def cmd_find(args):
     hidden = max(0, len(reports) - args.max_files)
     print(f"{len(reports)} of {len(files)} transcripts matched"
           + (f"; the {hidden} oldest are not shown (raise --max-files)" if hidden else "")
-          + (f"; {bridged} Magpie bridge backend copies not searched (add --bridge)" if bridged else ""))
+          + (f"; {bridged} Magpie bridge backend copies not searched (add --bridge)" if bridged else "")
+          + (f"; {skipped_current} current session skipped (pass a path or --include-current)" if skipped_current else ""))
     return 0 if reports else 1
 
 
@@ -1639,6 +1727,8 @@ def main():
     find.add_argument("--kind", action="append", choices=KINDS, help="only blocks of this kind; repeatable")
     find.add_argument("--skip", action="append", default=[],
                       help="skip files whose path contains this text, such as the current session id; repeatable")
+    find.add_argument("--include-current", action="store_true",
+                      help="also search env-identified current sessions when paths are omitted")
     find.add_argument("--bridge", action="store_true",
                       help="also search Magpie bridge backend copies in walked *magpie-claude-work directories")
     find.add_argument("-i", "--ignore-case", action="store_true", help="fold ASCII letter case")
