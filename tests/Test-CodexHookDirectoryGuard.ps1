@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 Set-StrictMode -Version Latest
@@ -204,6 +204,7 @@ foreach ($path in @($testRoot, $externalRoot)) {
     if ([IO.Directory]::Exists($path)) { Remove-Item -LiteralPath $path -Recurse -Force }
     [void][IO.Directory]::CreateDirectory($path)
 }
+try {
 $guardedParent = Join-Path $testRoot 'existing-parent'
 [void][IO.Directory]::CreateDirectory($guardedParent)
 $parkedParent = Join-Path $testRoot 'parked-parent'
@@ -580,4 +581,14 @@ foreach ($rawMutation in $rawMutationPattern.Matches($policyText)) {
 [pscustomobject]@{
     ok = $true
     suite = 'CodexHookDirectoryGuard'
+}
+} finally {
+    foreach ($path in @($testRoot, $externalRoot)) {
+        if ([IO.Directory]::Exists($path)) {
+            Remove-Item -LiteralPath $path -Recurse -Force
+        }
+    }
+    if ([IO.Directory]::Exists($fixtureRoot) -and @(Get-ChildItem -LiteralPath $fixtureRoot -Force).Count -eq 0) {
+        Remove-Item -LiteralPath $fixtureRoot -Force
+    }
 }
