@@ -12,7 +12,6 @@ function Get-CodexSafeTreeDeleteClosureFixedPaths {
         'scripts/Run-PowerShellTests.cjs',
         'scripts/Invoke-CodexSafeTreeDelete.ps1',
         'scripts/invoke-codex-safe-tree-delete-host.ps1',
-        'scripts/invoke-codex-safe-tree-delete.cmd',
         'scripts/lib/CodexHostSafety.ps1',
         'scripts/lib/CodexSafeTreeDelete.ps1',
         'scripts/lib/CodexHostSafetyNativeLoader.ps1',

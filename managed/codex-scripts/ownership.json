@@ -44,7 +44,6 @@
     { "path": "Invoke-ImpeccableEnginePrefetch.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" },
     { "path": "Invoke-ManagedRecycle.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Invoke-ManagedRecycle.ps1" },
     { "path": "Invoke-OfficeRemote.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/ssh-mesh.md" },
-    { "path": "invoke-safe-tree-delete.cmd", "owner": "docs/specs/2026-07-24-safe-tree-delete-capability.md", "source": "scripts/invoke-codex-safe-tree-delete.cmd" },
     { "path": "invoke-safe-tree-delete.ps1", "owner": "scripts/Deploy-CodexSafeTreeDelete.ps1" },
     { "path": "lib/ExplorerShellRecovery.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/lib/ExplorerShellRecovery.ps1" },
     { "path": "local_secret.py", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook.md" },

@@ -395,7 +395,6 @@
         "scripts/lib/ReportArtifactPublisher.ps1",
         "scripts/lib/TrustedReportInput.ps1",
         "scripts/invoke-codex-safe-tree-delete-host.ps1",
-        "scripts/invoke-codex-safe-tree-delete.cmd",
         "scripts/Invoke-CodexSafeTreeDelete.ps1"
       ],
       "dependsOn": [],
@@ -477,7 +476,6 @@
           "tests/Test-CodexSafeTreeDeleteControlPlane.ps1",
           "tests/Test-CodexSafeTreeDeleteBatchHistoryScan.ps1",
           "tests/Test-CodexSafeTreeDeleteCanonicalLayoutEquivalence.ps1",
-          "tests/Test-CodexSafeTreeDeleteFixtureCmdLauncher.ps1",
           "tests/Test-CodexSafeTreeDeletePurgePreflightLockRefusal.ps1",
           "tests/Test-CodexSafeTreeDeleteDeployment.ps1",
           "tests/Test-CodexSafeTreeDeletePolicyMaintenance.ps1",
@@ -645,7 +643,6 @@
             "tests/Test-CodexSafeTreeDeleteParallelismBenchmark.ps1",
             "tests/Test-CodexSafeTreeDeletePhase3Integration.ps1",
             "tests/Test-CodexSafeTreeDeleteScratchResidue.ps1",
-            "tests/Test-CodexSafeTreeDeleteFixtureCmdLauncher.ps1",
             "tests/Test-CodexSafeTreeDeletePurgePreflightLockRefusal.ps1"
           ],
           "python": ["managed/host-diagnostics/native-gui.test.py", "managed/host-diagnostics/test_asar_extract.py"],
