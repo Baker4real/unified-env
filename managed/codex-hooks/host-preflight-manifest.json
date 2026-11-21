@@ -28,12 +28,29 @@
       "order": 0,
       "matcher": null,
       "timeoutSeconds": 10,
-      "commandPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
-      "arguments": [],
-      "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
+      "commandPath": "D:\\Codex\\tools\\python315-official\\python.exe",
+      "arguments": [
+        "-I",
+        "-S",
+        "-B",
+        "-X",
+        "utf8",
+        "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+        "D:\\Codex\\tools\\python315-official\\python.exe",
+        "-I",
+        "-S",
+        "-B",
+        "-X",
+        "utf8",
+        "D:\\Codex\\.codex\\hooks\\codex-state-preflight.py",
+        ";",
+        "exit",
+        "$LASTEXITCODE"
+      ],
+      "wrapperPath": null,
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.py",
       "runtimeId": "python",
-      "launcherRuntimeId": "pythonw",
+      "launcherRuntimeId": "python",
       "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
@@ -80,15 +97,27 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
+        "commandPath": "D:\\Codex\\tools\\python315-official\\python.exe",
         "arguments": [
+          "-I",
+          "-S",
+          "-B",
+          "-X",
+          "utf8",
+          "D:\\Codex\\.codex\\hooks\\codex-state-preflight.py",
           "--check-only",
           "--json"
         ]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-state-preflight.cmd",
+        "commandPath": "D:\\Codex\\tools\\python315-official\\python.exe",
         "arguments": [
+          "-I",
+          "-S",
+          "-B",
+          "-X",
+          "utf8",
+          "D:\\Codex\\.codex\\hooks\\codex-state-preflight.py",
           "--check-only",
           "--json"
         ]
@@ -100,12 +129,31 @@
       "order": 2,
       "matcher": "startup|resume",
       "timeoutSeconds": 10,
-      "commandPath": "D:\\Codex\\.codex\\hooks\\serena-activation-reminder.cmd",
-      "arguments": [],
-      "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-activation-reminder.cmd",
+      "commandPath": "D:\\Codex\\tools\\python315-official\\python.exe",
+      "arguments": [
+        "-I",
+        "-S",
+        "-B",
+        "-X",
+        "utf8",
+        "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+        "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
+        "-Mode",
+        "Activation",
+        ";",
+        "exit",
+        "$LASTEXITCODE"
+      ],
+      "wrapperPath": null,
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
       "runtimeId": "pwsh",
-      "launcherRuntimeId": "pythonw",
+      "launcherRuntimeId": "python",
       "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
@@ -136,7 +184,7 @@
         "arguments": [
           "-NoProfile",
           "-Command",
-          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-activation-reminder.cmd'"
+          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1'"
         ]
       },
       "fullAcceptanceCommand": {
@@ -156,13 +204,30 @@
       "order": 4,
       "matcher": null,
       "timeoutSeconds": 10,
-      "commandPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
-      "arguments": [],
-      "wrapperPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
+      "commandPath": "D:\\Codex\\tools\\python315-official\\python.exe",
+      "arguments": [
+        "-I",
+        "-S",
+        "-B",
+        "-X",
+        "utf8",
+        "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+        "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1",
+        ";",
+        "exit",
+        "$LASTEXITCODE"
+      ],
+      "wrapperPath": null,
       "implementationPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1",
       "runtimeId": "pwsh",
-      "launcherRuntimeId": null,
-      "launcherImplementationPath": null,
+      "launcherRuntimeId": "python",
+      "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
         {
@@ -220,15 +285,21 @@
       "lifecycle": "active",
       "lifecycleReason": null,
       "quickHealthCheck": {
-        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
+          "-NoProfile",
+          "-File",
+          "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1",
           "-CheckOnly",
           "-Json"
         ]
       },
       "fullAcceptanceCommand": {
-        "commandPath": "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.cmd",
+        "commandPath": "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
         "arguments": [
+          "-NoProfile",
+          "-File",
+          "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1",
           "-Json",
           "-CheckAuth",
           "-Strict"
@@ -241,12 +312,31 @@
       "order": 0,
       "matcher": null,
       "timeoutSeconds": 10,
-      "commandPath": "D:\\Codex\\.codex\\hooks\\serena-cleanup-guarded.cmd",
-      "arguments": [],
-      "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-cleanup-guarded.cmd",
+      "commandPath": "D:\\Codex\\tools\\python315-official\\python.exe",
+      "arguments": [
+        "-I",
+        "-S",
+        "-B",
+        "-X",
+        "utf8",
+        "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+        "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
+        "-Mode",
+        "Cleanup",
+        ";",
+        "exit",
+        "$LASTEXITCODE"
+      ],
+      "wrapperPath": null,
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
       "runtimeId": "pwsh",
-      "launcherRuntimeId": "pythonw",
+      "launcherRuntimeId": "python",
       "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
@@ -289,7 +379,7 @@
         "arguments": [
           "-NoProfile",
           "-Command",
-          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-cleanup-guarded.cmd'"
+          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1'"
         ]
       },
       "fullAcceptanceCommand": {
@@ -309,12 +399,31 @@
       "order": 0,
       "matcher": "Bash",
       "timeoutSeconds": 10,
-      "commandPath": "D:\\Codex\\.codex\\hooks\\serena-reminder-guarded.cmd",
-      "arguments": [],
-      "wrapperPath": "D:\\Codex\\.codex\\hooks\\serena-reminder-guarded.cmd",
+      "commandPath": "D:\\Codex\\tools\\python315-official\\python.exe",
+      "arguments": [
+        "-I",
+        "-S",
+        "-B",
+        "-X",
+        "utf8",
+        "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+        "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
+        "-Mode",
+        "Reminder",
+        ";",
+        "exit",
+        "$LASTEXITCODE"
+      ],
+      "wrapperPath": null,
       "implementationPath": "D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1",
       "runtimeId": "pwsh",
-      "launcherRuntimeId": "pythonw",
+      "launcherRuntimeId": "python",
       "launcherImplementationPath": "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
       "sourceState": "managed",
       "readResources": [
@@ -357,7 +466,7 @@
         "arguments": [
           "-NoProfile",
           "-Command",
-          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-reminder-guarded.cmd'"
+          "Test-Path -LiteralPath 'D:\\Codex\\.codex\\hooks\\serena-behavior-guard.ps1'"
         ]
       },
       "fullAcceptanceCommand": {
@@ -392,33 +501,6 @@
       ]
     },
     {
-      "relativePath": "hooks/codex-state-preflight.cmd",
-      "liveRelativePath": "codex-state-preflight.cmd",
-      "sha256": "db79142562e8bb7aa0cbd5bd6a8155ec93c06f092621e96839fc63c2dcfb3f2f",
-      "lifecycle": "active",
-      "ownerHookIds": [
-        "codex-state-preflight"
-      ]
-    },
-    {
-      "relativePath": "hooks/serena-reminder-guarded.cmd",
-      "liveRelativePath": "serena-reminder-guarded.cmd",
-      "sha256": "0beb898476ab063b1f8d06509618e8a636ebca1f86180f11b3e986a67cf2a21e",
-      "lifecycle": "active",
-      "ownerHookIds": [
-        "serena-reminder"
-      ]
-    },
-    {
-      "relativePath": "hooks/serena-cleanup-guarded.cmd",
-      "liveRelativePath": "serena-cleanup-guarded.cmd",
-      "sha256": "7cfe6d9d4da2a851e104bed3fc457caa4302fb46cbd3fee001c77f4da36cba84",
-      "lifecycle": "active",
-      "ownerHookIds": [
-        "serena-cleanup"
-      ]
-    },
-    {
       "relativePath": "hooks/serena-behavior-guard.ps1",
       "liveRelativePath": "serena-behavior-guard.ps1",
       "sha256": "1fb5e8eeaf41c6895206bf695d1954ff3a5e3bea6525b8adf2f42890ed82daaf",
@@ -427,24 +509,6 @@
         "serena-reminder",
         "serena-cleanup",
         "serena-activate"
-      ]
-    },
-    {
-      "relativePath": "hooks/serena-activation-reminder.cmd",
-      "liveRelativePath": "serena-activation-reminder.cmd",
-      "sha256": "ff052774ff1b6dbfc628b83ed9625b9d78ef9f58a0ab854de21bbe0123e55487",
-      "lifecycle": "active",
-      "ownerHookIds": [
-        "serena-activate"
-      ]
-    },
-    {
-      "relativePath": "hooks/codex-github-cli-guard.cmd",
-      "liveRelativePath": "codex-github-cli-guard.cmd",
-      "sha256": "0ac0f5526f517ace8a3a23a48a32df32284f3bd8459bb4eeadcc2eca682193d9",
-      "lifecycle": "active",
-      "ownerHookIds": [
-        "github-cli"
       ]
     },
     {
@@ -473,6 +537,7 @@
       "ownerHookIds": [
         "codex-state-preflight",
         "serena-activate",
+        "github-cli",
         "serena-cleanup",
         "serena-reminder"
       ]

@@ -56,6 +56,11 @@ $script:LegacyHookNames = @(
     "serena-activate-guarded.ps1",
     "serena-dashboard-guard.cmd",
     "serena-dashboard-guard.ps1",
+    "codex-state-preflight.cmd",
+    "codex-github-cli-guard.cmd",
+    "serena-activation-reminder.cmd",
+    "serena-cleanup-guarded.cmd",
+    "serena-reminder-guarded.cmd",
     "__pycache__\codex-mobile-permission-guard.cpython-313.pyc"
 )
 $script:LegacyHookDirectoryNames = @("__pycache__")
@@ -888,9 +893,16 @@ function Test-ManagedHookFileIsWrapper {
     $normalized = $LiveRelativePath.Replace('/', '\')
     $liveHooksRoot = [IO.Path]::GetFullPath('D:\Codex\.codex\hooks').TrimEnd('\')
     foreach ($hook in @($script:HostPreflightManifest.hooks)) {
-        $wrapperPath = [IO.Path]::GetFullPath([string]$hook.wrapperPath)
-        $relativeWrapperPath = [IO.Path]::GetRelativePath($liveHooksRoot, $wrapperPath).Replace('/', '\')
-        if ($relativeWrapperPath -ceq $normalized) { return $true }
+        $entrypointPath = if (-not [string]::IsNullOrWhiteSpace([string]$hook.wrapperPath)) {
+            [string]$hook.wrapperPath
+        } elseif (-not [string]::IsNullOrWhiteSpace([string]$hook.launcherImplementationPath)) {
+            [string]$hook.launcherImplementationPath
+        } else {
+            continue
+        }
+        $resolvedEntrypointPath = [IO.Path]::GetFullPath($entrypointPath)
+        $relativeEntrypointPath = [IO.Path]::GetRelativePath($liveHooksRoot, $resolvedEntrypointPath).Replace('/', '\')
+        if ($relativeEntrypointPath -ceq $normalized) { return $true }
     }
     return $false
 }
@@ -917,8 +929,8 @@ function Get-HostRuntimeDependencyStates {
 
     $requestedMissingRuntimeId = $env:CODEX_HOST_HOOK_TEST_MISSING_RUNTIME_ID
     if (-not [string]::IsNullOrWhiteSpace($requestedMissingRuntimeId)) {
-        if ($requestedMissingRuntimeId -cne 'pythonw') {
-            throw 'fixture-only missing runtime id 只允许 pythonw'
+        if ($requestedMissingRuntimeId -cnotin @('python', 'pythonw')) {
+            throw 'fixture-only missing runtime id 只允许 python 或 pythonw'
         }
         if (Test-IsLiveCodexHome -ResolvedCodexHome $ResolvedCodexHome) {
             throw 'fixture-only missing runtime seam 不得用于 live CodexHome'
@@ -1506,12 +1518,26 @@ function New-Result {
     $requiresActivation = $Changed -or [bool]$State.desiredHooks.changed
     $registrationProjection = foreach ($hook in @($script:HostPreflightManifest.hooks)) {
         $ownedFiles = @($script:HostPreflightManifest.files | Where-Object { @($_.ownerHookIds) -ccontains [string]$hook.id })
-        $wrapperLeaf = [IO.Path]::GetFileName([string]$hook.wrapperPath)
-        $implementationLeaf = [IO.Path]::GetFileName([string]$hook.implementationPath)
-        $wrapperFile = @($ownedFiles | Where-Object { [string]$_.liveRelativePath -ceq $wrapperLeaf })
-        $implementationFile = @($ownedFiles | Where-Object { [string]$_.liveRelativePath -ceq $implementationLeaf })
-        if ($wrapperFile.Count -ne 1 -or $implementationFile.Count -ne 1) {
-            throw "registration projection 文件闭包非法：$($hook.id)"
+        $liveHooksRoot = [IO.Path]::GetFullPath('D:\Codex\.codex\hooks')
+        $wrapperSha256 = $null
+        if (-not [string]::IsNullOrWhiteSpace([string]$hook.wrapperPath)) {
+            $wrapperRelativePath = [IO.Path]::GetRelativePath(
+                $liveHooksRoot,
+                [IO.Path]::GetFullPath([string]$hook.wrapperPath)
+            ).Replace('\', '/')
+            $wrapperFile = @($ownedFiles | Where-Object { [string]$_.liveRelativePath -ceq $wrapperRelativePath })
+            if ($wrapperFile.Count -ne 1) {
+                throw "registration projection wrapper 文件闭包非法：$($hook.id)"
+            }
+            $wrapperSha256 = ([string]$wrapperFile[0].sha256).ToLowerInvariant()
+        }
+        $implementationRelativePath = [IO.Path]::GetRelativePath(
+            $liveHooksRoot,
+            [IO.Path]::GetFullPath([string]$hook.implementationPath)
+        ).Replace('\', '/')
+        $implementationFile = @($ownedFiles | Where-Object { [string]$_.liveRelativePath -ceq $implementationRelativePath })
+        if ($implementationFile.Count -ne 1) {
+            throw "registration projection implementation 文件闭包非法：$($hook.id)"
         }
         $sourceClosure = @($ownedFiles | Sort-Object -Property relativePath | ForEach-Object {
             ([string]$_.relativePath) + '=' + ([string]$_.sha256).ToLowerInvariant()
@@ -1525,7 +1551,7 @@ function New-Result {
             if ($launcherRuntimeState.Count -ne 1) { throw "registration projection launcher runtime closure 非法：$($hook.id)" }
             $launcherRuntimeSha256 = $launcherRuntimeState[0].sha256
             $launcherRelativePath = [IO.Path]::GetRelativePath(
-                [IO.Path]::GetFullPath('D:\Codex\.codex\hooks'),
+                $liveHooksRoot,
                 [IO.Path]::GetFullPath([string]$hook.launcherImplementationPath)
             ).Replace('\', '/')
             $launcherImplementationFile = @($ownedFiles | Where-Object { [string]$_.liveRelativePath -ceq $launcherRelativePath })
@@ -1540,7 +1566,7 @@ function New-Result {
             matcher = $hook.matcher
             timeoutSeconds = [int]$hook.timeoutSeconds
             sourceSha256 = (Get-TextSha256 -Content $sourceClosure).ToLowerInvariant()
-            wrapperSha256 = ([string]$wrapperFile[0].sha256).ToLowerInvariant()
+            wrapperSha256 = $wrapperSha256
             implementationSha256 = ([string]$implementationFile[0].sha256).ToLowerInvariant()
             runtimeSha256 = $runtimeState[0].sha256
             launcherImplementationSha256 = $launcherImplementationSha256
@@ -1704,7 +1730,7 @@ function New-HostHookRestoreContract {
     $sourceFiles = @($script:HostPreflightManifest.files | ForEach-Object {
         [ordered]@{ relativePath=[string]$_.relativePath; liveRelativePath=[string]$_.liveRelativePath; sha256=([string]$_.sha256).ToLowerInvariant() }
     })
-    if ($sourceFiles.Count -ne 12) { throw 'restore contract 必须绑定固定12个 source 文件' }
+    if ($sourceFiles.Count -ne 7) { throw 'restore contract 必须绑定固定7个 source 文件' }
     $actionOrder = [Collections.Generic.List[string]]::new()
     if (@($Manifest.committedResources) -ccontains 'hooks.json') { $actionOrder.Add('hooks.json') }
     if (@($Manifest.committedResources) -ccontains 'environment:SERENA_HOME') { $actionOrder.Add('environment:SERENA_HOME') }
@@ -1781,8 +1807,8 @@ function Read-HostHookRestoreContract {
     if ($claim.artifactType -cne 'env-governance.codex-host-hook-restore-claim' -or [int]$claim.schemaVersion -ne 1 -or $claim.runId -cne $runId -or $claim.evidencePath -cne [string]$Evidence.path -or $claim.restoreContractSha256 -cne $contractSha) { throw 'host hook restore claim binding 非法' }
     $hostManifestSnapshot = Get-RequiredCapabilitySnapshot -Path $script:HostPreflightManifestPath -CapabilityRoot $script:ProjectRoot -Name 'restore current host manifest snapshot'
     if ($payload.hostManifestSha256 -cne ([string]$hostManifestSnapshot.sha256).ToLowerInvariant()) { throw 'host hook restore contract host manifest 漂移' }
-    if (@($payload.sourceFiles).Count -ne 12) { throw 'host hook restore contract source closure 非法' }
-    for ($i=0; $i -lt 12; $i++) {
+    if (@($payload.sourceFiles).Count -ne 7) { throw 'host hook restore contract source closure 非法' }
+    for ($i=0; $i -lt 7; $i++) {
         $expected = $script:HostPreflightManifest.files[$i]
         $actual = $payload.sourceFiles[$i]
         Assert-CodexHookExactProperties $actual @('relativePath','liveRelativePath','sha256') "host hook restore source[$i]"
@@ -1828,8 +1854,8 @@ function Invoke-Repair {
     $managedTargetPaths = @($InitialState.managedFileStates | ForEach-Object { [string]$_.targetPath })
     $managedTargetSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($managedTargetPath in $managedTargetPaths) { [void]$managedTargetSet.Add([IO.Path]::GetFullPath($managedTargetPath)) }
-    if ($managedTargetPaths.Count -ne 12 -or $managedTargetSet.Count -ne 12) {
-        throw '受管 hook 发布 capability 必须精确包含12个唯一目标。'
+    if ($managedTargetPaths.Count -ne 7 -or $managedTargetSet.Count -ne 7) {
+        throw '受管 hook 发布 capability 必须精确包含7个唯一目标。'
     }
     $createdManagedDirectories = @{}
 

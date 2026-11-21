@@ -65,40 +65,34 @@ finally {
     $stdinBlocker.Dispose()
 }
 
-Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot $managedRoot) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot $managedRoot) '受管源码树必须零 .cmd 文件且全部 10 个已退役/历史 .cmd 均已移除'
 $forbiddenWrapperTokens=@('C:\Program Files\nodejs','python313-official','D:\hermes-data\.npm-global\python.exe')
 $activeWrappers=@($hostManifest.files|Where-Object{$_.lifecycle -ceq 'active' -and $_.relativePath -like 'hooks/*.cmd'})
-Assert-True ($activeWrappers.Count -eq 5) '必须验证全部 5 个现役 active cmd wrapper'
-foreach($file in $activeWrappers){
-    $wrapperPath=Join-Path $managedRoot ($file.relativePath.Replace('/','\'))
-    $text=Get-Content -Raw -LiteralPath $wrapperPath
-    $owners=@($file.ownerHookIds|ForEach-Object{$id=$_;@($hostManifest.hooks|Where-Object{$_.id -ceq $id -and $_.lifecycle -ceq 'active'})})
-    Assert-True ($owners.Count -eq 1) "active wrapper 必须有唯一 active owner：$($file.relativePath)"
-    $owner=$owners[0];$expectedRuntime=[string]$hostManifest.runtimes.($owner.runtimeId)
-    Assert-True ($text.Contains('"'+$expectedRuntime+'"')) "wrapper 必须只调用 host-preflight manifest runtime：$($file.relativePath)"
-    if ($file.relativePath -in @('hooks/serena-reminder-guarded.cmd','hooks/serena-cleanup-guarded.cmd','hooks/serena-activation-reminder.cmd')) {
-        Assert-True ($text -notmatch '%\*') "Serena behavior wrapper 不得接受外部参数：$($file.relativePath)"
-    }
-    else {
-        Assert-True ($text -match '(?m)%\*\s*$') "wrapper 必须保留 %*：$($file.relativePath)"
-    }
-    if ($file.relativePath -in @('hooks/codex-state-preflight.cmd','hooks/serena-reminder-guarded.cmd','hooks/serena-cleanup-guarded.cmd','hooks/serena-activation-reminder.cmd')) {
-        $expectedLauncherRuntime=[string]$hostManifest.runtimes.($owner.launcherRuntimeId)
-        Assert-True ($owner.launcherRuntimeId -ceq 'pythonw' -and $owner.launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py') "console lifecycle hook 必须声明 launcher dependency：$($file.relativePath)"
-        Assert-True ($text.Contains('"'+$expectedLauncherRuntime+'" -I -S -B -X utf8') -and $text.Contains('lib\hidden-console-launcher.py')) "console lifecycle wrapper 必须通过隔离 hidden launcher 启动：$($file.relativePath)"
-    }
-    Assert-True ($text -match '(?m)^exit /b %ERRORLEVEL%\s*$') "wrapper 必须透传退出码：$($file.relativePath)"
-    foreach($token in $forbiddenWrapperTokens){Assert-True (-not $text.Contains($token)) "wrapper 禁止旧 runtime：$token"}
-    Assert-True ($text -notmatch '(?im)(^|[\s\"])(python)(?:\.exe)?([\s\"]|$)') "wrapper 禁止裸 python：$($file.relativePath)"
+Assert-True ($activeWrappers.Count -eq 0) 'host-preflight manifest 不得再保留任何现役 .cmd wrapper'
+Assert-True (@($hostManifest.hooks | Where-Object { $_.lifecycle -ceq 'active' }).Count -eq 5) '必须验证全部 5 个现役 direct-managed-launcher hook'
+foreach($owner in @($hostManifest.hooks | Where-Object { $_.lifecycle -ceq 'active' })){
+    $expectedRuntime=[string]$hostManifest.runtimes.($owner.runtimeId)
+    $expectedLauncherRuntime=[string]$hostManifest.runtimes.($owner.launcherRuntimeId)
+    Assert-True ($null -eq $owner.wrapperPath) "现役 hook 不得再声明 .cmd wrapperPath：$($owner.id)"
+    Assert-True ($owner.launcherRuntimeId -ceq 'python' -and $owner.commandPath -ceq $expectedLauncherRuntime -and $owner.launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py') "现役 hook 必须通过受管 python.exe + hidden-console-launcher.py 启动：$($owner.id)"
+    $renderedCommand = (@([string]$owner.commandPath) + @($owner.arguments)) -join ' '
+    Assert-True ($renderedCommand.Contains($expectedLauncherRuntime + ' -I -S -B -X utf8 ' + [string]$owner.launcherImplementationPath + ' ' + $expectedRuntime)) "现役 hook 渲染命令必须锁定受管 python/launcher/runtime 链路：$($owner.id)"
+    Assert-True ($renderedCommand.EndsWith(' ; exit $LASTEXITCODE', [StringComparison]::Ordinal)) "现役 hook 渲染命令必须末尾显式透传退出码：$($owner.id)"
+    foreach($token in $forbiddenWrapperTokens){Assert-True (-not $renderedCommand.Contains($token)) "现役 hook 禁止旧 runtime：$token"}
 }
 $legacyWrapperTempRoot=Join-Path ([IO.Path]::GetTempPath()) ("codex-hook-runtime-legacy-" + [Guid]::NewGuid().ToString('N'))
 try {
     [void][IO.Directory]::CreateDirectory($legacyWrapperTempRoot)
     $legacyRuntimeExpectations = [ordered]@{
-        'hooks/codex-projectless-root-d.cmd' = [string]$manifest.runtimes.python
-        'hooks/codex-provider-stability-guard.cmd' = [string]$manifest.runtimes.pwsh
-        'hooks/serena-activate-guarded.cmd' = [string]$manifest.runtimes.pwsh
-        'hooks/serena-dashboard-guard.cmd' = [string]$manifest.runtimes.pwsh
+        'hooks/codex-projectless-root-d.cmd' = @{ runtime = [string]$manifest.runtimes.python; hasPassThroughArgs = $true; hiddenLauncher = $false }
+        'hooks/codex-provider-stability-guard.cmd' = @{ runtime = [string]$manifest.runtimes.pwsh; hasPassThroughArgs = $true; hiddenLauncher = $false }
+        'hooks/serena-activate-guarded.cmd' = @{ runtime = [string]$manifest.runtimes.pwsh; hasPassThroughArgs = $true; hiddenLauncher = $false }
+        'hooks/serena-dashboard-guard.cmd' = @{ runtime = [string]$manifest.runtimes.pwsh; hasPassThroughArgs = $true; hiddenLauncher = $false }
+        'hooks/codex-state-preflight.cmd' = @{ runtime = [string]$hostManifest.runtimes.python; hasPassThroughArgs = $true; hiddenLauncher = $true }
+        'hooks/codex-github-cli-guard.cmd' = @{ runtime = [string]$hostManifest.runtimes.pwsh; hasPassThroughArgs = $true; hiddenLauncher = $false }
+        'hooks/serena-activation-reminder.cmd' = @{ runtime = [string]$hostManifest.runtimes.pwsh; hasPassThroughArgs = $false; hiddenLauncher = $true }
+        'hooks/serena-cleanup-guarded.cmd' = @{ runtime = [string]$hostManifest.runtimes.pwsh; hasPassThroughArgs = $false; hiddenLauncher = $true }
+        'hooks/serena-reminder-guarded.cmd' = @{ runtime = [string]$hostManifest.runtimes.pwsh; hasPassThroughArgs = $false; hiddenLauncher = $true }
     }
     foreach ($removedRelativePath in (Get-CodexHookRemovedLegacyCmdRelativePaths)) {
         $tempCmdPath = Join-Path $legacyWrapperTempRoot ($removedRelativePath.Replace('/', '\'))
@@ -107,9 +101,16 @@ try {
         if ($removedRelativePath -ceq 'retired/codex-mobile-permission-guard.cmd') {
             Assert-True ($legacyText.Contains('python313-official') -and $legacyText.Contains('D:\hermes-data\.npm-global\python.exe')) '动态生成的 retired mobile guard 必须保留被禁止的历史 runtime 特征'
         } else {
-            $expectedLegacyRuntime = [string]$legacyRuntimeExpectations[$removedRelativePath]
-            Assert-True ($legacyText.Contains('"' + $expectedLegacyRuntime + '"')) "隔离临时目录动态生成的历史 wrapper 必须调用历史 runtime：$removedRelativePath"
-            Assert-True ($legacyText -match '(?m)%\*\s*$') "历史 wrapper 样本必须保留 %*：$removedRelativePath"
+            $spec = $legacyRuntimeExpectations[$removedRelativePath]
+            Assert-True ($legacyText.Contains('"' + [string]$spec.runtime + '"')) "隔离临时目录动态生成的历史 wrapper 必须调用历史 runtime：$removedRelativePath"
+            if ($spec.hasPassThroughArgs) {
+                Assert-True ($legacyText -match '(?m)%\*\s*$') "历史 wrapper 样本必须保留 %*：$removedRelativePath"
+            } else {
+                Assert-True ($legacyText -notmatch '%\*') "历史 Serena behavior wrapper 样本不得接受外部参数：$removedRelativePath"
+            }
+            if ($spec.hiddenLauncher) {
+                Assert-True ($legacyText.Contains('"' + [string]$hostManifest.runtimes.pythonw + '" -I -S -B -X utf8') -and $legacyText.Contains('lib\hidden-console-launcher.py')) "历史 hidden wrapper 样本必须保留 pythonw + hidden-console-launcher 特征：$removedRelativePath"
+            }
             Assert-True ($legacyText -match '(?m)^exit /b %ERRORLEVEL%\s*$') "历史 wrapper 样本必须透传退出码：$removedRelativePath"
             foreach ($token in $forbiddenWrapperTokens) { Assert-True (-not $legacyText.Contains($token)) "历史 active wrapper 样本禁止退役 runtime：$token" }
         }

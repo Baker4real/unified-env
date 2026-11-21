@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 Set-StrictMode -Version Latest
@@ -89,26 +89,16 @@ function New-ReminderPayload([string]$SessionId, [string]$ToolName, [string]$Com
     } | ConvertTo-Json -Compress -Depth 5
 }
 
-Assert-True (Test-Path -LiteralPath $reminderPath -PathType Leaf) '缺少 Serena reminder 受控 wrapper。'
-Assert-True (Test-Path -LiteralPath $cleanupPath -PathType Leaf) '缺少 Serena cleanup 受控 wrapper。'
-Assert-True (Test-Path -LiteralPath $activationPath -PathType Leaf) '缺少 Serena activation reminder 静态 wrapper。'
+$launcherPath = Join-Path $hooksRoot 'lib\hidden-console-launcher.py'
+Assert-True (-not (Test-Path -LiteralPath $reminderPath)) 'Serena reminder 已退役 .cmd 包装器不得继续存在于受管源码树。'
+Assert-True (-not (Test-Path -LiteralPath $cleanupPath)) 'Serena cleanup 已退役 .cmd 包装器不得继续存在于受管源码树。'
+Assert-True (-not (Test-Path -LiteralPath $activationPath)) 'Serena activation reminder 已退役 .cmd 包装器不得继续存在于受管源码树。'
 Assert-True (Test-Path -LiteralPath $behaviorGuardPath -PathType Leaf) '缺少 Serena behavior 共享安全 guard。'
+Assert-True (Test-Path -LiteralPath $launcherPath -PathType Leaf) '缺少 hidden-console-launcher.py 受管入口。'
 
-$combinedSource = (Get-Content -LiteralPath @($reminderPath, $cleanupPath, $activationPath) -Raw) -join "`n"
-Assert-True (-not $combinedSource.Contains('auto-approve')) '行为 hook 不得恢复 Serena auto-approve。'
-
-$reminderSource = Get-Content -LiteralPath $reminderPath -Raw
-$cleanupSource = Get-Content -LiteralPath $cleanupPath -Raw
-$activationSource = Get-Content -LiteralPath $activationPath -Raw
 $behaviorGuardSource = Get-Content -LiteralPath $behaviorGuardPath -Raw
-foreach ($source in @($reminderSource, $cleanupSource, $activationSource)) {
-    Assert-True $source.Contains('set "SERENA_HOME=D:\Codex\.serena"') 'wrapper 必须覆盖外部 SERENA_HOME。'
-    Assert-True ($source.Contains('D:\Codex\tools\python315-official\pythonw.exe') -and $source.Contains('lib\hidden-console-launcher.py')) 'wrapper 必须通过 hidden launcher 启动。'
-    Assert-True (-not $source.Contains('%*')) 'wrapper 不得接受外部参数覆盖固定命令。'
-}
-Assert-True $reminderSource.Contains('"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Reminder') 'reminder 必须固定 sibling 受控 guard 和 Mode。'
-Assert-True $cleanupSource.Contains('"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Cleanup') 'cleanup 必须固定 sibling 受控 guard 和 Mode。'
-Assert-True $activationSource.Contains('"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Activation') 'activation reminder 必须固定 sibling 受控 guard 和 Mode。'
+Assert-True (-not $behaviorGuardSource.Contains('auto-approve')) '行为 hook 不得恢复 Serena auto-approve。'
+Assert-True ($behaviorGuardSource.Contains("`$startInfo.Environment['SERENA_HOME'] = `$SerenaHome") -and $behaviorGuardSource.Contains("serenaHome = 'D:\Codex\.serena'")) 'behavior guard 自身必须隔离覆盖外部 SERENA_HOME。'
 Assert-True $behaviorGuardSource.Contains("'D:\Codex\tools\uv\bin\serena-hooks.exe'") 'behavior guard 必须固定官方 vendor。'
 Assert-True $behaviorGuardSource.Contains("'--client=codex'") 'behavior guard 必须固定 Codex client。'
 Assert-True $behaviorGuardSource.Contains('Complete-CodexHookProcessWithBoundedDrain') 'behavior guard 必须复用 bounded native drain。'
@@ -921,38 +911,55 @@ $manifestPath = Join-Path $projectRoot 'managed\codex-hooks\host-preflight-manif
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 100
 $hooksById = @{}
 foreach ($hook in @($manifest.hooks)) { $hooksById[[string]$hook.id] = $hook }
-$expectedWrapperFacts = @{
-    'serena-reminder' = 'D:\Codex\.codex\hooks\serena-reminder-guarded.cmd'
-    'serena-cleanup' = 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd'
+$expectedBehaviorModes = @{
+    'serena-reminder' = 'Reminder'
+    'serena-cleanup' = 'Cleanup'
+    'serena-activate' = 'Activation'
 }
-foreach ($hookId in $expectedWrapperFacts.Keys) {
+foreach ($hookId in $expectedBehaviorModes.Keys) {
     $hook = $hooksById[$hookId]
-    Assert-Equal ([string]$hook.commandPath) $expectedWrapperFacts[$hookId] "$hookId 必须通过受管 wrapper 注册。"
-    Assert-Equal ([string]$hook.wrapperPath) $expectedWrapperFacts[$hookId] "$hookId wrapperPath 必须固定。"
+    $expectedMode = $expectedBehaviorModes[$hookId]
+    $expectedArguments = @(
+        '-I', '-S', '-B', '-X', 'utf8',
+        'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py',
+        'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe',
+        '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1',
+        '-Mode', $expectedMode,
+        ';', 'exit', '$LASTEXITCODE'
+    )
+    Assert-Equal ([string]$hook.commandPath) 'D:\Codex\tools\python315-official\python.exe' "$hookId 必须通过受管 python.exe 直接调用 hidden-console-launcher.py。"
+    Assert-True ($null -eq $hook.wrapperPath) "$hookId wrapperPath 必须为 null（脱离 .cmd 包装器）。"
+    Assert-Equal ([string]$hook.launcherRuntimeId) 'python' "$hookId launcherRuntimeId 必须固定为 python。"
+    Assert-Equal ([string]$hook.launcherImplementationPath) 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py' "$hookId launcherImplementationPath 必须固定。"
     Assert-Equal ([string]$hook.implementationPath) 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1' "$hookId 必须共用安全 behavior guard。"
     Assert-Equal ([string]$hook.runtimeId) 'pwsh' "$hookId runtime 必须固定受管 PowerShell。"
-    Assert-Equal ([string]$hook.sourceState) 'managed' "$hookId wrapper 必须声明为受管源。"
+    Assert-Equal ([string]$hook.sourceState) 'managed' "$hookId 必须声明为受管源。"
+    Assert-Equal ((@($hook.arguments) -join "`0")) (($expectedArguments -join "`0")) "$hookId arguments 必须精确锁定受控 guard、Mode 与退出码透传。"
 }
 Assert-Equal ([string]$hooksById['serena-reminder'].matcher) 'Bash' 'reminder 只能绑定 Bash matcher。'
 Assert-Equal ([string]$hooksById['serena-cleanup'].event) 'Stop' 'cleanup 只能绑定 Stop。'
-Assert-Equal ([string]$hooksById['serena-activate'].commandPath) 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd' 'SessionStart 必须切换为静态 activation reminder。'
-Assert-Equal ([string]$hooksById['serena-activate'].wrapperPath) 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd' 'activation reminder wrapperPath 必须固定。'
-Assert-Equal ([string]$hooksById['serena-activate'].implementationPath) 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1' 'activation reminder 必须复用安全 guard。'
+Assert-Equal ([string]$hooksById['serena-activate'].matcher) 'startup|resume' 'activation reminder 必须绑定 startup|resume matcher。'
 Assert-True (-not $hooksById.ContainsKey('serena-auto-approve')) 'production manifest 必须完全排除 auto-approve。'
 
 $filesByRelativePath = @{}
 foreach ($file in @($manifest.files)) { $filesByRelativePath[[string]$file.relativePath] = $file }
-foreach ($wrapper in @(
-    @{ relative = 'hooks/serena-reminder-guarded.cmd'; live = 'serena-reminder-guarded.cmd'; owner = 'serena-reminder'; path = $reminderPath },
-    @{ relative = 'hooks/serena-cleanup-guarded.cmd'; live = 'serena-cleanup-guarded.cmd'; owner = 'serena-cleanup'; path = $cleanupPath },
-    @{ relative = 'hooks/serena-activation-reminder.cmd'; live = 'serena-activation-reminder.cmd'; owner = 'serena-activate'; path = $activationPath },
-    @{ relative = 'hooks/serena-behavior-guard.ps1'; live = 'serena-behavior-guard.ps1'; owner = 'serena-reminder,serena-cleanup,serena-activate'; path = $behaviorGuardPath }
+foreach ($retiredRelativePath in @(
+    'hooks/serena-reminder-guarded.cmd',
+    'hooks/serena-cleanup-guarded.cmd',
+    'hooks/serena-activation-reminder.cmd'
 )) {
-    Assert-True $filesByRelativePath.ContainsKey($wrapper.relative) "manifest 缺少 $($wrapper.relative)。"
-    $record = $filesByRelativePath[$wrapper.relative]
-    Assert-Equal ([string]$record.liveRelativePath) $wrapper.live "$($wrapper.relative) live path 非法。"
-    Assert-Equal (@($record.ownerHookIds) -join ',') $wrapper.owner "$($wrapper.relative) owner 非法。"
-    Assert-Equal ([string]$record.sha256) (Get-CodexHookManifestSourceSha256 -Path $wrapper.path -AllowedExactPaths @($wrapper.path)) "$($wrapper.relative) manifest hash 漂移。"
+    Assert-True (-not $filesByRelativePath.ContainsKey($retiredRelativePath)) "production manifest 不得再声明已退役 .cmd：$retiredRelativePath"
+}
+foreach ($entry in @(
+    @{ relative = 'hooks/serena-behavior-guard.ps1'; live = 'serena-behavior-guard.ps1'; owner = 'serena-reminder,serena-cleanup,serena-activate'; path = $behaviorGuardPath },
+    @{ relative = 'hooks/lib/hidden-console-launcher.py'; live = 'lib/hidden-console-launcher.py'; owner = 'codex-state-preflight,serena-activate,github-cli,serena-cleanup,serena-reminder'; path = $launcherPath }
+)) {
+    Assert-True $filesByRelativePath.ContainsKey($entry.relative) "manifest 缺少 $($entry.relative)。"
+    $record = $filesByRelativePath[$entry.relative]
+    Assert-Equal ([string]$record.liveRelativePath) $entry.live "$($entry.relative) live path 非法。"
+    Assert-Equal (@($record.ownerHookIds) -join ',') $entry.owner "$($entry.relative) owner 非法。"
+    Assert-Equal ([string]$record.sha256) (Get-CodexHookManifestSourceSha256 -Path $entry.path -AllowedExactPaths @($entry.path)) "$($entry.relative) manifest hash 漂移。"
 }
 
 Write-Output 'Codex Serena behavior hook tests passed.'

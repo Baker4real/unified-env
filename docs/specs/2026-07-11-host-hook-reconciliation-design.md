@@ -13,10 +13,10 @@ intent: 说明 Codex 主机钩子 reconciler 的目标状态和安全边界
 
 ## 目标状态
 
-- 受管 `hooks.json` 的用户级 lifecycle hook 注册严格收敛为 manifest 声明的四项：`codex-state-preflight`、`serena-activate`、`serena-cleanup` 和 `serena-reminder`。active config layer 中合法的 inline `[hooks]` 也是有效来源；reconciler 只维护 manifest 定义的受管注册和退役项，不删除合法 inline hooks。`features.hooks` 等开关属于 `config.toml` 归属域：自 2026-09-06 config reconciliation 退役后，reconciler 不再读取或改写 `config.toml`，hook feature 开关完全由官方 runtime 语义决定。
-- 四个生产 `.cmd` wrapper 统一通过官方 `pythonw.exe` 和受管 `managed/codex-hooks/hooks/lib/hidden-console-launcher.py` 启动最终 `pwsh.exe` / `python.exe`。launcher 对最终 console 程序显式使用 `CREATE_NO_WINDOW`；外层 Node 的 `windowsHide` 或父进程的 `CreateNoWindow` 只约束直接子进程，不能穿过 `.cmd` 自动约束孙进程。
-- hidden launcher 复制当前进程有效的 Windows stdin/stdout/stderr 句柄，缺失流才定向到 `DEVNULL`，并原样返回最终子进程退出码。窗口隐藏不得破坏 hook JSON 协议流、错误流或失败状态。
-- wrapper 依赖校验将 `%~dp0<relative>` 只相对该 wrapper 的实际目录安全展开；其他 `%` 变量、绝对替代、父目录逃逸或无法证明位于 wrapper 目录内的 token 均不得匹配。三个 Serena wrapper 的最终 `-Mode` 分别固定为 `Activation`、`Cleanup`、`Reminder`，不能因共用同一 PowerShell implementation 而互相冒充。
+- 受管 `hooks.json` 的用户级 lifecycle hook 注册严格收敛为 manifest 声明的五项：`codex-state-preflight`、`serena-activate`、`github-cli`、`serena-cleanup` 和 `serena-reminder`。active config layer 中合法的 inline `[hooks]` 也是有效来源；reconciler 只维护 manifest 定义的受管注册和退役项，不删除合法 inline hooks，也不改动未知第三方 hook（例如 `herdr-agent-state.ps1`）。`features.hooks` 等开关属于 `config.toml` 归属域：自 2026-09-06 config reconciliation 退役后，reconciler 不再读取或改写 `config.toml`，hook feature 开关完全由官方 runtime 语义决定。
+- 五个现役受管 hook 全部脱离 `.cmd` 批处理包装器（`wrapperPath: null`，`managed/codex-hooks/` 下零 `.cmd` 文件），统一经由控制台子系统 `D:\Codex\tools\python315-official\python.exe -I -S -B -X utf8` 直接调用 `D:\Codex\.codex\hooks\lib\hidden-console-launcher.py`，再由 launcher 以 `CREATE_NO_WINDOW` 启动目标 `python.exe` / `pwsh.exe` 与实现脚本，并在 `hooks.json` 命令末尾显式附加 ` ; exit $LASTEXITCODE`（因为 `codex-cli 0.171.0` 在 Windows 上固定通过 `pwsh.exe -NoProfile -Command` 执行每条钩子命令：`pythonw.exe` 不会被 `pwsh -Command` 等待退出码，而缺少 `; exit $LASTEXITCODE` 会将非零 native exit code 如 `2` 压扁为 `1`）。
+- hidden launcher 复制当前进程有效的 Windows stdin/stdout/stderr 句柄，缺失流才定向到 `DEVNULL`，并原样返回最终子进程退出码。窗口隐藏不得破坏 hook JSON 协议流、错误流或精确退出码（含 `exit 2` 阻断语义）。
+- direct-managed-launcher 依赖校验严格验证 `commandPath`、`launcherRuntimeId`（`python`）、`launcherImplementationPath`、目标 `runtimeId` / `implementationPath`、隔离参数序列（`-I -S -B -X utf8`）与末尾 `; exit $LASTEXITCODE`；三个 Serena 行为 hook 的 `-Mode` 分别固定为 `Activation`、`Cleanup`、`Reminder`，不能因共用同一 PowerShell implementation 而互相冒充。历史 `.cmd` wrapper 的 `%~dp0<relative>` 校验仅保留用于兼容/历史夹具测试；旧 5 个现役 `.cmd` 文件与注册纳入退役清单，升级 `Repair` 时自动清理。
 - Serena 不固定项目，也不根据 MCP 进程 cwd 推断项目。任务需要语义工具时，按当前 `environment_context` 的绝对 workspace root 显式激活。
 - Serena activation 提示仅面向需要 symbol/LSP 导航的任务；检查配置后只汇报活动项目与 readiness，配置漂移排障时才展开详情。Reminder 对静态、显式数据文件路径的只读查询保持静默：识别 Markdown、文本、日志、JSON/JSONL、CSV/TSV 等后缀，以及受限的 `rg`、`grep`、`Get-Content`、`Select-String` 和数字裁剪 `Select-Object` 管线。JSON 数据可经 `Get-Content | ConvertFrom-Json` 绑定到本条命令内的普通变量，再按静态字段名 `Select-Object` 并 `ConvertTo-Json`；未绑定变量、作用域/特殊变量、属性或方法调用、计算属性及任意写入不在豁免内。分类检查实际操作数，不采信 description、查询模式或 session ID；目录搜索、源码路径、动态表达式、重定向及未知选项继续走原 reminder。该豁免只控制语义导航提醒，不授予 shell 权限，也不覆盖更高优先级指令。
 - `approval_policy`、`sandbox_mode`、`features.hooks` 与 `unified_exec` 属于用户或受管策略边界，reconciler 不推断缺失值也不强写它们。官方默认 `hooks=true`；Windows 上省略 `unified_exec` 时默认关闭。
@@ -56,7 +56,7 @@ reconciler 只维护以下状态：
 
 - `hooks.json` 中的用户级 lifecycle hook 注册；
 - 明确 allowlist 内的旧 hook implementation；
-- 稳定 hook surface，包括四个生产 wrapper 与 `hooks/lib/hidden-console-launcher.py`；生产 manifest 必须把 launcher 纳入固定文件闭包、hash 检查和部署。目标 `codex-file-tools.yml` 的写权限及其唯一根级 prompt 同样受管。协调器完整拥有该 prompt block：健康状态必须逐行精确等于唯一 canonical block（mandatory marker、Codex/Serena shell ownership、按当前绝对 workspace 执行 `activate_project` 并以 `get_current_config` 复验）；不健康时只按原始字符偏移替换 prompt body。description、tool lists、其他顶层字段、prompt 外原始字节、混合换行和 sibling context 保持不变；重复/外部 marker、引号或转义 scalar、错误缩进、folded/重复/歧义 prompt 继续 fail closed。
+- 稳定 hook surface，包含 7 个受管非 `.cmd` 文件闭包（`hooks/lib/hidden-console-launcher.py`、共享 runtime/entry helper 与四个实现脚本）；生产 manifest 必须把 launcher 与全部实现/helper 纳入固定文件闭包、hash 检查和部署，且严禁在受管源码树保留 `.cmd` 包装器。目标 `codex-file-tools.yml` 的写权限及其唯一根级 prompt 同样受管。协调器完整拥有该 prompt block：健康状态必须逐行精确等于唯一 canonical block（mandatory marker、Codex/Serena shell ownership、按当前绝对 workspace 执行 `activate_project` 并以 `get_current_config` 复验）；不健康时只按原始字符偏移替换 prompt body。description、tool lists、其他顶层字段、prompt 外原始字节、混合换行和 sibling context 保持不变；重复/外部 marker、引号或转义 scalar、错误缩进、folded/重复/歧义 prompt 继续 fail closed。
 
 `config.toml` 是 Codex Desktop 可原子替换的 vendor-owned 文件。
 
@@ -80,7 +80,7 @@ reconciler 只维护以下状态：
 - 只有固定 allowlist 内的旧实现可以退役；未知路径与文件内容必须保持不变，其 ACL 可随稳定 hook surface 收紧。
 - 退役资源是单向删除项：Restore 不会重建任何已退役的实现、目录或注册。退役删除后的失败保留证据并按 `unsafe-partial` 报告，而不是回写旧 snapshot。
 - `Repair` 按 Codex home 获取互斥锁；健康状态再次执行必须返回 `changed = false`。
-- 生产 wrapper 的最终 PowerShell/Python 子进程必须满足 `GetConsoleWindow() == 0`，同时保持 stdin/stdout、真实退出码和 stderr 可观察；只检查外层 runner 或 `pythonw.exe` 不构成无窗口验收。
+- 生产 direct-managed-launcher 的最终 PowerShell/Python 子进程必须满足 `GetConsoleWindow() == 0`，同时在 `pwsh.exe -NoProfile -Command` 宿主调用链下保持 stdin/stdout、精确退出码（含 `exit 2`）和 stderr 可观察；只检查外层 runner 不构成无窗口或退出码验收。
 
 ## 验证
 

@@ -29,7 +29,7 @@ function Get-Sha256([string]$Path) {
 
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
 . (Join-Path $ProjectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
-Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) '受管源码树必须零 .cmd 文件且全部 10 个已退役/历史 .cmd 均已移除'
 
 function Invoke-HiddenChildProcess {
     [CmdletBinding(DefaultParameterSetName = 'ArgumentList')]
@@ -155,11 +155,28 @@ function Invoke-Reconciler([string]$ScriptPath, [string]$Mode, [string]$CodexHom
     (($raw | Out-String).Trim() | ConvertFrom-Json)
 }
 
-function Invoke-PublicWrapper([string]$Path, [string]$InputText, [string[]]$ArgumentList = @(), [hashtable]$Environment = @{}) {
-    $quotedArguments = @($ArgumentList | ForEach-Object { '"' + ([string]$_).Replace('"', '""') + '"' }) -join ' '
+function Invoke-PublicHookCommand([string]$RenderedCommand, [string]$CodexHome, [string]$InputText, [string[]]$ArgumentList = @(), [hashtable]$Environment = @{}) {
+    $livePrefix = 'D:\Codex\.codex\hooks\'
+    $fixtureHooksRoot = Join-Path $CodexHome 'hooks'
+    $remapped = [regex]::Replace(
+        $RenderedCommand,
+        ([regex]::Escape($livePrefix) + '[^\s;]+'),
+        {
+            param($Match)
+            $relative = $Match.Value.Substring($livePrefix.Length)
+            $target = Join-Path $fixtureHooksRoot $relative
+            "'" + $target.Replace("'", "''") + "'"
+        }
+    )
+    if ($ArgumentList.Count -gt 0) {
+        $suffix = ' ; exit $LASTEXITCODE'
+        Assert-True ($remapped.EndsWith($suffix, [StringComparison]::Ordinal)) "已发布 hook 命令必须以 '$suffix' 结尾：$remapped"
+        $quotedExtra = @($ArgumentList | ForEach-Object { "'" + ([string]$_).Replace("'", "''") + "'" }) -join ' '
+        $remapped = $remapped.Substring(0, $remapped.Length - $suffix.Length) + ' ' + $quotedExtra + $suffix
+    }
     Invoke-HiddenChildProcess `
-        -FilePath 'C:\Windows\System32\cmd.exe' `
-        -RawArguments ('/d /s /c ""' + $Path + '" ' + $quotedArguments + '"') `
+        -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
+        -ArgumentList @('-NoProfile', '-Command', $remapped) `
         -InputText $InputText `
         -Environment $Environment
 }
@@ -167,7 +184,7 @@ function Invoke-PublicWrapper([string]$Path, [string]$InputText, [string[]]$Argu
 $manifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 Assert-True (@($manifest.hooks).Count -eq 5) 'production manifest 必须精确包含5个功能 hook'
-Assert-True (@($manifest.files).Count -eq 12) 'production manifest 必须精确包含12个 active 文件'
+Assert-True (@($manifest.files).Count -eq 7) 'production manifest 必须精确包含7个 active 文件'
 Assert-True (@($manifest.environment).Count -eq 1 -and $manifest.environment[0].name -ceq 'SERENA_HOME') 'production manifest 必须精确包含 User SERENA_HOME action'
 $hookIds = @($manifest.hooks | ForEach-Object id)
 foreach ($retiredId in @('serena-auto-approve','provider-stability','codex-state-policy','serena-dashboard')) {
@@ -255,8 +272,8 @@ try {
         Assert-True ((@($projection.PSObject.Properties.Name) -join ',') -ceq ($expectedProjectionFields -join ',')) "registration projection schema 非法：$($projection.id)"
         foreach ($hashName in @('identity','sourceSha256','wrapperSha256','implementationSha256','runtimeSha256','launcherImplementationSha256','launcherRuntimeSha256')) {
             $hashValue = $projection.$hashName
-            if ($hashName -cin @('launcherImplementationSha256', 'launcherRuntimeSha256') -and $null -eq $hashValue) {
-                Assert-True ($projection.id -ceq 'github-cli') "无 launcher 的 production hook 只能是 github-cli：$($projection.id)"
+            if ($hashName -ceq 'wrapperSha256') {
+                Assert-True ($null -eq $hashValue) "无 .cmd 包装器的 direct-managed-launcher 的 wrapperSha256 必须为 null：$($projection.id)"
                 continue
             }
             Assert-True ([string]$hashValue -cmatch '^[0-9a-f]{64}$') "registration projection $hashName 必须为脱敏 SHA-256：$($projection.id)"
@@ -496,21 +513,25 @@ try {
     $session = @($registry.hooks.SessionStart)
     Assert-True ($session.Count -eq 4) 'SessionStart 必须保留未知组并注册三个受管组'
     Assert-True ($session[0].customGroup -ceq 'unknown-group-must-survive') '未知 SessionStart 组顺序和扩展字段必须保留'
-    Assert-True ($session[1].hooks[0].command -ceq 'D:\Codex\.codex\hooks\codex-state-preflight.cmd') 'state preflight identity/order 错误'
-    Assert-True ($session[2].matcher -ceq 'startup|resume' -and $session[2].hooks[0].command -ceq 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd') 'activation reminder identity/matcher 错误'
-    Assert-True ($session[3].hooks[0].command -ceq 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd') 'github-cli identity/order 错误'
+    $expectedCommandsById = @{}
+    foreach ($hook in @($manifest.hooks)) {
+        $expectedCommandsById[[string]$hook.id] = [string]((New-CodexHookCanonicalRegistryGroup -Hook $hook).hooks[0].command)
+    }
+    Assert-True ($session[1].hooks[0].command -ceq $expectedCommandsById['codex-state-preflight']) 'state preflight identity/order 错误'
+    Assert-True ($session[2].matcher -ceq 'startup|resume' -and $session[2].hooks[0].command -ceq $expectedCommandsById['serena-activate']) 'activation reminder identity/matcher 错误'
+    Assert-True ($session[3].hooks[0].command -ceq $expectedCommandsById['github-cli']) 'github-cli identity/order 错误'
     Assert-True ($registry.hooks.PreToolUse -is [System.Array]) 'PreToolUse 必须序列化为 matcher group 数组'
     Assert-True ($registry.hooks.Stop -is [System.Array]) 'Stop 必须序列化为 matcher group 数组'
-    Assert-True ($registry.hooks.PreToolUse.matcher -ceq 'Bash' -and $registry.hooks.PreToolUse.hooks[0].command -ceq 'D:\Codex\.codex\hooks\serena-reminder-guarded.cmd') 'reminder identity/matcher 错误'
-    Assert-True ($registry.hooks.Stop.hooks[0].command -ceq 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd') 'cleanup identity 错误'
+    Assert-True ($registry.hooks.PreToolUse.matcher -ceq 'Bash' -and $registry.hooks.PreToolUse.hooks[0].command -ceq $expectedCommandsById['serena-reminder']) 'reminder identity/matcher 错误'
+    Assert-True ($registry.hooks.Stop.hooks[0].command -ceq $expectedCommandsById['serena-cleanup']) 'cleanup identity 错误'
     Assert-True ([int]$session[1].hooks[0].timeout -eq 10) 'state preflight timeout 必须精确为10秒'
     Assert-True ([int]$session[2].hooks[0].timeout -eq 10) 'activation reminder timeout 必须精确为10秒'
     Assert-True ([int]$session[3].hooks[0].timeout -eq 10) 'github-cli timeout 必须精确为10秒'
     Assert-True ([int]$registry.hooks.PreToolUse.hooks[0].timeout -eq 10) 'Serena reminder timeout 必须精确为10秒'
     Assert-True ([int]$registry.hooks.Stop.hooks[0].timeout -eq 10) 'Serena cleanup timeout 必须精确为10秒'
     $registryText = $registry | ConvertTo-Json -Depth 30 -Compress
-    foreach ($retired in @('auto-approve','provider-stability','projectless-root','mobile-permission','serena-dashboard')) {
-        Assert-True (-not $registryText.Contains($retired, [System.StringComparison]::OrdinalIgnoreCase)) "退役 identity 不得出现：$retired"
+    foreach ($retired in @('auto-approve','provider-stability','projectless-root','mobile-permission','serena-dashboard','codex-state-preflight.cmd','codex-github-cli-guard.cmd','serena-activation-reminder.cmd','serena-cleanup-guarded.cmd','serena-reminder-guarded.cmd')) {
+        Assert-True (-not $registryText.Contains($retired, [System.StringComparison]::OrdinalIgnoreCase)) "退役 identity/包装器不得出现：$retired"
     }
 
     foreach ($file in @($manifest.files)) {
@@ -522,16 +543,14 @@ try {
         Assert-True ($sourceCanonicalSha256 -ceq [string]$file.sha256) "host manifest canonical hash 错误：$($file.relativePath)"
         Assert-True ((Get-Sha256 $livePath) -ceq $sourceRawSha256) "发布文件原始字节 hash 错误：$($file.liveRelativePath)"
     }
-    foreach ($wrapperName in @('serena-reminder-guarded.cmd','serena-cleanup-guarded.cmd','serena-activation-reminder.cmd')) {
-        $wrapper = Get-Content -LiteralPath (Join-Path $codexHome "hooks\$wrapperName") -Raw
-        Assert-True ($wrapper.Contains('SERENA_HOME=D:\Codex\.serena', [System.StringComparison]::OrdinalIgnoreCase)) "Serena wrapper 未 pin SERENA_HOME：$wrapperName"
-        Assert-True ($wrapper.Contains('pythonw.exe', [System.StringComparison]::OrdinalIgnoreCase) -and $wrapper.Contains('lib\hidden-console-launcher.py', [System.StringComparison]::OrdinalIgnoreCase)) "Serena wrapper 未通过 hidden launcher 启动：$wrapperName"
-        Assert-True ($wrapper -notmatch '(?i)https?://|curl|check[-_]?network|check[-_]?auth') "生命周期 wrapper 含网络/认证能力：$wrapperName"
+    Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $codexHome 'hooks') -Filter '*.cmd' -Recurse -File -Force).Count -eq 0) '发布后的 hooks 目录不得包含任何 .cmd 包装器'
+    $deployedBehaviorGuard = Get-Content -LiteralPath (Join-Path $codexHome 'hooks\serena-behavior-guard.ps1') -Raw
+    Assert-True ($deployedBehaviorGuard.Contains("serenaHome = 'D:\Codex\.serena'", [System.StringComparison]::Ordinal)) '已发布的 serena-behavior-guard.ps1 必须锁定 SERENA_HOME'
+    foreach ($hookId in @('codex-state-preflight','serena-activate','github-cli','serena-cleanup','serena-reminder')) {
+        $renderedCommand = $expectedCommandsById[$hookId]
+        Assert-True ($renderedCommand.Contains([string]$manifest.runtimes.python, [System.StringComparison]::Ordinal) -and $renderedCommand.Contains('lib\hidden-console-launcher.py', [System.StringComparison]::Ordinal)) "受管直接入口必须通过受管 python.exe + hidden-console-launcher.py 启动：$hookId"
+        Assert-True ($renderedCommand -notmatch '(?i)https?://|curl|check[-_]?network|check[-_]?auth') "受管直接入口含网络/认证能力：$hookId"
     }
-    $stateWrapper = Get-Content -LiteralPath (Join-Path $codexHome 'hooks\codex-state-preflight.cmd') -Raw
-    Assert-True ($stateWrapper.Contains([string]$manifest.runtimes.python, [System.StringComparison]::OrdinalIgnoreCase)) 'state wrapper 未固定 manifest 登记的官方 Python'
-    Assert-True ($stateWrapper.Contains('pythonw.exe', [System.StringComparison]::OrdinalIgnoreCase) -and $stateWrapper.Contains('lib\hidden-console-launcher.py', [System.StringComparison]::OrdinalIgnoreCase)) 'state wrapper 未通过 hidden launcher 启动'
-    Assert-True ($stateWrapper -notmatch '(?i)https?://|curl|check[-_]?network|check[-_]?auth') 'state lifecycle wrapper 含网络/认证能力'
 
     $stateFixtureParent = Join-Path $canonicalFixtureProjectRoot 'reports\codex-state-preflight-test'
     $stateFixtureRoot = Join-Path $stateFixtureParent ([guid]::NewGuid().ToString('N'))
@@ -555,47 +574,51 @@ try {
             Get-Sha256 $sqlitePath
             Get-Sha256 (Join-Path $stateFixtureHome 'policy.json')
         ) -join '|'
-        $stateResult = Invoke-PublicWrapper `
-            -Path (Join-Path $codexHome 'hooks\codex-state-preflight.cmd') `
+        $stateResult = Invoke-PublicHookCommand `
+            -RenderedCommand ([string]$session[1].hooks[0].command) `
+            -CodexHome $codexHome `
             -InputText '{"session_id":"state-wrapper-fixture"}' `
             -ArgumentList @('--check-only','--json','--fixture-root',$stateFixtureRoot) `
             -Environment @{ HTTP_PROXY = 'http://127.0.0.1:1/no-network'; HTTPS_PROXY = 'http://127.0.0.1:1/no-network'; ALL_PROXY = 'socks5://127.0.0.1:1/no-network' }
-        Assert-True ($stateResult.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($stateResult.stderr)) "deployed state wrapper fixture 必须成功且 stderr 为空：exit=$($stateResult.exitCode), stderr=$($stateResult.stderr)"
+        Assert-True ($stateResult.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($stateResult.stderr)) "deployed state direct launcher fixture 必须成功且 stderr 为空：exit=$($stateResult.exitCode), stderr=$($stateResult.stderr)"
         $stateProtocol = $stateResult.stdout | ConvertFrom-Json
-        Assert-True ([bool]$stateProtocol.ok -and [bool]$stateProtocol.converged -and [int]$stateProtocol.driftCount -eq 0) 'deployed state wrapper fixture 必须返回已收敛 check-only JSON'
+        Assert-True ([bool]$stateProtocol.ok -and [bool]$stateProtocol.converged -and [int]$stateProtocol.driftCount -eq 0) 'deployed state direct launcher fixture 必须返回已收敛 check-only JSON'
         $stateAfter = @(
             Get-Sha256 (Join-Path $stateFixtureHome '.codex-global-state.json')
             Get-Sha256 $sqlitePath
             Get-Sha256 (Join-Path $stateFixtureHome 'policy.json')
         ) -join '|'
-        Assert-True ($stateAfter -ceq $stateBefore) 'deployed state wrapper check-only 不得改写 fixture state/hash'
-        Assert-True (-not (Test-Path -LiteralPath (Join-Path $stateFixtureRoot 'health') -PathType Container)) 'deployed state wrapper check-only 不得写 health'
+        Assert-True ($stateAfter -ceq $stateBefore) 'deployed state direct launcher check-only 不得改写 fixture state/hash'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $stateFixtureRoot 'health') -PathType Container)) 'deployed state direct launcher check-only 不得写 health'
     }
     finally {
         if (Test-Path -LiteralPath $stateFixtureRoot) { Remove-Item -LiteralPath $stateFixtureRoot -Recurse -Force }
         if ((Test-Path -LiteralPath $stateFixtureParent -PathType Container) -and @(Get-ChildItem -LiteralPath $stateFixtureParent -Force).Count -eq 0) { Remove-Item -LiteralPath $stateFixtureParent -Force }
     }
 
-    $activationResult = Invoke-PublicWrapper -Path (Join-Path $codexHome 'hooks\serena-activation-reminder.cmd') -InputText '{"session_id":"public-activation"}'
-    Assert-True ($activationResult.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($activationResult.stderr)) "activation public wrapper 必须成功且 stderr 为空：exit=$($activationResult.exitCode), stderr=$($activationResult.stderr)"
+    $activationCommand = [string]$session[2].hooks[0].command
+    $reminderCommand = [string]$registry.hooks.PreToolUse[0].hooks[0].command
+    $cleanupCommand = [string]$registry.hooks.Stop[0].hooks[0].command
+    $activationResult = Invoke-PublicHookCommand -RenderedCommand $activationCommand -CodexHome $codexHome -InputText '{"session_id":"public-activation"}'
+    Assert-True ($activationResult.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($activationResult.stderr)) "activation public direct launcher 必须成功且 stderr 为空：exit=$($activationResult.exitCode), stderr=$($activationResult.stderr)"
     $activationProtocol = $activationResult.stdout | ConvertFrom-Json
-    Assert-True ($activationProtocol.hookSpecificOutput.hookEventName -ceq 'SessionStart') 'activation public wrapper 协议错误'
+    Assert-True ($activationProtocol.hookSpecificOutput.hookEventName -ceq 'SessionStart') 'activation public direct launcher 协议错误'
     $sessionA = '{"session_id":"public-session-a","tool_name":"Bash","tool_input":{"command":"rg -n hook file.ps1"}}'
     $sessionB = '{"session_id":"public-session-b","tool_name":"Bash","tool_input":{"command":"rg -n hook file.ps1"}}'
     foreach ($attempt in 1..2) {
-        $reminderSilent = Invoke-PublicWrapper -Path (Join-Path $codexHome 'hooks\serena-reminder-guarded.cmd') -InputText $sessionA
-        Assert-True ($reminderSilent.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($reminderSilent.stdout) -and [string]::IsNullOrWhiteSpace($reminderSilent.stderr)) "reminder public wrapper 第${attempt}次必须静默成功"
+        $reminderSilent = Invoke-PublicHookCommand -RenderedCommand $reminderCommand -CodexHome $codexHome -InputText $sessionA
+        Assert-True ($reminderSilent.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($reminderSilent.stdout) -and [string]::IsNullOrWhiteSpace($reminderSilent.stderr)) "reminder public direct launcher 第${attempt}次必须静默成功"
     }
-    $otherSession = Invoke-PublicWrapper -Path (Join-Path $codexHome 'hooks\serena-reminder-guarded.cmd') -InputText $sessionB
+    $otherSession = Invoke-PublicHookCommand -RenderedCommand $reminderCommand -CodexHome $codexHome -InputText $sessionB
     Assert-True ($otherSession.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($otherSession.stdout)) 'reminder session 隔离失败'
-    $reminderThird = Invoke-PublicWrapper -Path (Join-Path $codexHome 'hooks\serena-reminder-guarded.cmd') -InputText $sessionA
-    Assert-True ($reminderThird.exitCode -eq 0 -and ($reminderThird.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision -ceq 'deny') 'reminder public wrapper 第三次必须输出 deny 协议'
-    $cleanupResult = Invoke-PublicWrapper -Path (Join-Path $codexHome 'hooks\serena-cleanup-guarded.cmd') -InputText '{"session_id":"public-session-a"}'
-    Assert-True ($cleanupResult.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($cleanupResult.stdout) -and [string]::IsNullOrWhiteSpace($cleanupResult.stderr)) 'cleanup public wrapper 必须静默成功'
-    $sessionAAfterCleanup = Invoke-PublicWrapper -Path (Join-Path $codexHome 'hooks\serena-reminder-guarded.cmd') -InputText $sessionA
+    $reminderThird = Invoke-PublicHookCommand -RenderedCommand $reminderCommand -CodexHome $codexHome -InputText $sessionA
+    Assert-True ($reminderThird.exitCode -eq 0 -and ($reminderThird.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision -ceq 'deny') 'reminder public direct launcher 第三次必须输出 deny 协议'
+    $cleanupResult = Invoke-PublicHookCommand -RenderedCommand $cleanupCommand -CodexHome $codexHome -InputText '{"session_id":"public-session-a"}'
+    Assert-True ($cleanupResult.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($cleanupResult.stdout) -and [string]::IsNullOrWhiteSpace($cleanupResult.stderr)) 'cleanup public direct launcher 必须静默成功'
+    $sessionAAfterCleanup = Invoke-PublicHookCommand -RenderedCommand $reminderCommand -CodexHome $codexHome -InputText $sessionA
     Assert-True ($sessionAAfterCleanup.exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($sessionAAfterCleanup.stdout)) 'cleanup 后 session A 必须从首次静默计数重新开始'
-    $sessionBSecond = Invoke-PublicWrapper -Path (Join-Path $codexHome 'hooks\serena-reminder-guarded.cmd') -InputText $sessionB
-    $sessionBThird = Invoke-PublicWrapper -Path (Join-Path $codexHome 'hooks\serena-reminder-guarded.cmd') -InputText $sessionB
+    $sessionBSecond = Invoke-PublicHookCommand -RenderedCommand $reminderCommand -CodexHome $codexHome -InputText $sessionB
+    $sessionBThird = Invoke-PublicHookCommand -RenderedCommand $reminderCommand -CodexHome $codexHome -InputText $sessionB
     Assert-True ([string]::IsNullOrWhiteSpace($sessionBSecond.stdout) -and ($sessionBThird.stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecision -ceq 'deny') 'cleanup session A 不得重置 session B 计数'
     Assert-True ((Get-Content -LiteralPath (Join-Path $codexHome 'hooks\unknown-preserve.txt') -Raw) -ceq 'unknown-live-file-must-survive') '未知 live 文件必须逐字节保留'
     $fixtureEnv = Get-Content -LiteralPath (Join-Path $codexHome '.fixture-user-environment.json') -Raw | ConvertFrom-Json

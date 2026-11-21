@@ -66,7 +66,7 @@ function Assert-SafeTestRoot {
 
 . (Join-Path $ProjectRoot 'modules\codex-host\CodexHostHookEvidence.ps1')
 . (Join-Path $ProjectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
-Assert-True -Condition (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) -Message '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
+Assert-True -Condition (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) -Message '受管源码树必须零 .cmd 文件且全部 10 个已退役/历史 .cmd 均已移除'
 $liveScope = Resolve-CodexHostHookEvidenceScope -ResolvedCodexHome 'D:\Codex\.codex'
 Assert-True -Condition ($liveScope.isLive -eq $true -and $liveScope.isFixture -eq $false) -Message 'live CodexHome 必须解析为 production scope'
 Assert-True -Condition ($liveScope.runEvidenceRoot -eq ([IO.Path]::GetFullPath('D:\agents\run-evidence'))) -Message 'live runEvidenceRoot 必须锚定新根'
@@ -298,6 +298,11 @@ $legacyNames = @(
     "serena-activate-guarded.ps1",
     "serena-dashboard-guard.cmd",
     "serena-dashboard-guard.ps1",
+    "codex-state-preflight.cmd",
+    "codex-github-cli-guard.cmd",
+    "serena-activation-reminder.cmd",
+    "serena-cleanup-guarded.cmd",
+    "serena-reminder-guarded.cmd",
     "__pycache__\codex-mobile-permission-guard.cpython-313.pyc"
 )
 $hostPreflightManifest = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json') | ConvertFrom-Json
@@ -766,7 +771,11 @@ try {
     }
     Assert-True -Condition ((Get-Sha256 -Path (Join-Path $repair.evidencePath "hooks.json")) -eq $originalHooksHash) -Message "hooks evidence 不是修复前快照"
     $manifest = Get-Content -LiteralPath (Join-Path $repair.evidencePath "manifest.json") -Raw | ConvertFrom-Json
-    $wrapperManagedNames = @($hostPreflightManifest.hooks | ForEach-Object { "managed:$([IO.Path]::GetFileName([string]$_.wrapperPath))" })
+    $liveHooksRootForOrder = [IO.Path]::GetFullPath('D:\Codex\.codex\hooks')
+    $wrapperManagedNames = @($hostPreflightManifest.hooks | ForEach-Object {
+        $entrypointPath = if (-not [string]::IsNullOrWhiteSpace([string]$_.wrapperPath)) { [string]$_.wrapperPath } else { [string]$_.launcherImplementationPath }
+        "managed:$([IO.Path]::GetRelativePath($liveHooksRootForOrder, [IO.Path]::GetFullPath($entrypointPath)).Replace('\', '/'))"
+    } | Select-Object -Unique)
     $dependencyManagedNames = @($hostPreflightManifest.files | Where-Object { "managed:$($_.liveRelativePath)" -cnotin $wrapperManagedNames } | ForEach-Object { "managed:$($_.liveRelativePath)" })
     $repairManagedOrder = [string[]]@($manifest.committedResources | Where-Object { [string]$_ -clike 'managed:*' })
     $repairWrapperPositions = @($wrapperManagedNames | ForEach-Object { [Array]::IndexOf($repairManagedOrder, [string]$_) })
@@ -776,7 +785,7 @@ try {
         @($repairWrapperPositions | Where-Object { $_ -lt 0 }).Count -eq 0 -and
         @($repairDependencyPositions | Where-Object { $_ -lt 0 }).Count -eq 0 -and
         ($repairDependencyPositions | Measure-Object -Maximum).Maximum -lt ($repairWrapperPositions | Measure-Object -Minimum).Minimum
-    ) -Message 'Repair 必须先发布 launcher/implementation dependencies，最后发布 wrappers'
+    ) -Message 'Repair 必须先发布 implementation/helper dependencies，最后发布受管 launcher 入口'
     Assert-True -Condition ($manifest.originalHashes.PSObject.Properties.Name -cnotcontains 'legacyHooks') -Message 'evidence 不得记录可用于恢复的 legacy Hook 备份'
     $unknownFileEvidence = @($manifest.preservedHookTree | Where-Object { $_.path -eq 'keep-me.txt' })
     $unknownNestedEvidence = @($manifest.preservedHookTree | Where-Object { $_.path -eq 'unknown-nested\keep.bin' })
@@ -958,14 +967,14 @@ try {
     $runtimeFailureEvidenceCount = @(Get-ChildItem -LiteralPath $evidenceRoot -Directory -Force).Count
     $runtimeRepairThrew = $false
     try {
-        $env:CODEX_HOST_HOOK_TEST_MISSING_RUNTIME_ID = 'pythonw'
+        $env:CODEX_HOST_HOOK_TEST_MISSING_RUNTIME_ID = 'python'
         $missingRuntimeCheck = Invoke-Reconciler -ScriptPath $scriptPath -Mode Check -CodexHome $healthyHome
         $runtimeDependencyCheck = Get-CheckResult -Result $missingRuntimeCheck -Name 'runtimeDependencies'
         Assert-True -Condition (
             -not [bool]$missingRuntimeCheck.ok -and
             [int]$missingRuntimeCheck.driftCount -eq 1 -and
             -not [bool]$runtimeDependencyCheck.ok -and
-            (@($runtimeDependencyCheck.unavailableRuntimeIds) -join ',') -ceq 'pythonw'
+            (@($runtimeDependencyCheck.unavailableRuntimeIds) -join ',') -ceq 'python'
         ) -Message 'launcher runtime 缺失时 Check 必须只让 runtimeDependencies 变红'
         foreach ($name in @('serenaContext','registrations','managedFiles','environment','legacyImplementations','acl')) {
             Assert-True -Condition ([bool](Get-CheckResult -Result $missingRuntimeCheck -Name $name).ok) -Message "launcher runtime 缺失误伤检查项：$name"
@@ -1002,18 +1011,18 @@ try {
 
     $rawManagedRestoreHome = Join-Path $testRoot 'raw-managed-restore\.codex'
     New-FixtureCodexHome -Root $rawManagedRestoreHome
-    $rawManagedRelativePath = 'codex-state-preflight.cmd'
-    $rawManagedSourcePath = Join-Path $ProjectRoot 'managed\codex-hooks\hooks\codex-state-preflight.cmd'
+    $rawManagedRelativePath = 'codex-state-preflight.py'
+    $rawManagedSourcePath = Join-Path $ProjectRoot 'managed\codex-hooks\hooks\codex-state-preflight.py'
     $rawManagedTargetPath = Join-Path $rawManagedRestoreHome "hooks\$rawManagedRelativePath"
     $rawManagedManifestHash = [string](@($hostPreflightManifest.files | Where-Object liveRelativePath -ceq $rawManagedRelativePath)[0].sha256)
     $rawManagedSourceHash = (Get-Sha256 -Path $rawManagedSourcePath).ToLowerInvariant()
-    Assert-True -Condition ($rawManagedSourceHash -cne $rawManagedManifestHash) -Message '本 Windows fixture 必须以 CRLF raw bytes 覆盖 LF manifest identity'
+    Assert-True -Condition ($rawManagedSourceHash -ceq $rawManagedManifestHash) -Message 'LF 受管源文件 raw hash 必须与 manifest canonical LF hash 一致'
     $rawManagedRepair = Invoke-Reconciler -ScriptPath $scriptPath -Mode Repair -CodexHome $rawManagedRestoreHome
-    Assert-True -Condition ([bool]$rawManagedRepair.ok -and (Test-Path -LiteralPath $rawManagedTargetPath -PathType Leaf)) -Message 'raw managed Restore fixture 未部署受管 wrapper'
+    Assert-True -Condition ([bool]$rawManagedRepair.ok -and (Test-Path -LiteralPath $rawManagedTargetPath -PathType Leaf)) -Message 'raw managed Restore fixture 未部署受管脚本'
     $rawManagedEvidence = Get-Content -Raw -LiteralPath (Join-Path $rawManagedRepair.evidencePath 'manifest.json') | ConvertFrom-Json
     Assert-True -Condition ([string]$rawManagedEvidence.intendedResources.managedHooks.$rawManagedRelativePath -ceq $rawManagedSourceHash) -Message 'evidence 必须记录本次发布的 raw managed bytes hash'
     $rawManagedRestore = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Restore -CodexHome $rawManagedRestoreHome -EvidencePath ([string]$rawManagedRepair.evidencePath)
-    Assert-True -Condition ([bool]$rawManagedRestore.ok -and [bool]$rawManagedRestore.changed -and -not (Test-Path -LiteralPath $rawManagedTargetPath -PathType Leaf)) -Message 'Restore 必须用 evidence 中的 raw deployed hash 回滚 CRLF 受管 wrapper'
+    Assert-True -Condition ([bool]$rawManagedRestore.ok -and [bool]$rawManagedRestore.changed -and -not (Test-Path -LiteralPath $rawManagedTargetPath -PathType Leaf)) -Message 'Restore 必须用 evidence 中的 raw deployed hash 回滚受管文件'
     $rawManagedRestoredEvidence = Get-Content -Raw -LiteralPath (Join-Path $rawManagedRepair.evidencePath 'manifest.json') | ConvertFrom-Json
     $restoreProgress = [string[]]@($rawManagedRestoredEvidence.restoreProgress)
     $restoreManagedOrder = [string[]]@($restoreProgress | Where-Object { [string]$_ -clike 'managed:*' })
@@ -1025,7 +1034,7 @@ try {
         @($restoreWrapperPositions | Where-Object { $_ -lt 0 }).Count -eq 0 -and
         @($restoreDependencyPositions | Where-Object { $_ -lt 0 }).Count -eq 0 -and
         ($restoreWrapperPositions | Measure-Object -Maximum).Maximum -lt ($restoreDependencyPositions | Measure-Object -Minimum).Minimum
-    ) -Message 'Restore 必须先撤销 hooks.json 和 wrappers，最后撤销 launcher/implementation dependencies'
+    ) -Message 'Restore 必须先撤销 hooks.json 和受管 launcher 入口，最后撤销 implementation/helper dependencies'
 
     $nestedManagedRestoreHome = Join-Path $testRoot 'nested-managed-restore\.codex'
     New-FixtureCodexHome -Root $nestedManagedRestoreHome
@@ -1045,8 +1054,8 @@ try {
 
     $managedAclRollbackHome = Join-Path $testRoot 'managed-file-rollback-acl\.codex'
     New-FixtureCodexHome -Root $managedAclRollbackHome
-    $managedAclRollbackPath = Join-Path $managedAclRollbackHome 'hooks\codex-state-preflight.cmd'
-    [IO.File]::WriteAllText($managedAclRollbackPath, "@echo off`r`nrem fixture before`r`n", [Text.UTF8Encoding]::new($false))
+    $managedAclRollbackPath = Join-Path $managedAclRollbackHome 'hooks\codex-state-preflight.py'
+    [IO.File]::WriteAllText($managedAclRollbackPath, "# fixture before`n", [Text.UTF8Encoding]::new($false))
     Set-TestProtectedFileAcl -Path $managedAclRollbackPath
     $managedAclRollbackHash = Get-Sha256 -Path $managedAclRollbackPath
     $managedAclRollbackSddl = (Get-Acl -LiteralPath $managedAclRollbackPath).Sddl
@@ -1392,6 +1401,114 @@ try {
     Assert-RepairWasRejectedWithoutMutation -ScriptPath $scriptPath -CodexHome $hardLinkHome -CaseName "hard-link"
     Assert-True -Condition ((Get-Sha256 -Path $externalSentinelPath) -eq $externalSentinelHashBefore) -Message "hard-link 拒绝路径改写了外部 sentinel 内容"
     Assert-True -Condition ((Get-Acl -LiteralPath $externalSentinelPath).Sddl -ceq $externalSentinelAclBefore) -Message "hard-link 拒绝路径改写了外部 sentinel ACL"
+
+    # 端到端 5 个旧 .cmd 包装器升级回归：模拟现役宿主机（含 5 个旧 .cmd + 第三方 herdr-agent-state.ps1）完成 Check -> Repair -> Check -> Repair -> Restore -> Restore
+    $upgradeHome = Join-Path $testRoot 'upgrade-five-cmd\.codex'
+    New-FixtureCodexHome -Root $upgradeHome
+    $upgradeHooksDir = Join-Path $upgradeHome 'hooks'
+    foreach ($oldName in $legacyNames) {
+        $oldPath = Join-Path $upgradeHooksDir $oldName
+        if (Test-Path -LiteralPath $oldPath -PathType Leaf) { Remove-Item -LiteralPath $oldPath -Force }
+    }
+    $upgradePycache = Join-Path $upgradeHooksDir '__pycache__'
+    if (Test-Path -LiteralPath $upgradePycache -PathType Container) { Remove-Item -LiteralPath $upgradePycache -Recurse -Force }
+    $fiveRetiredCmds = @(
+        'codex-state-preflight.cmd',
+        'codex-github-cli-guard.cmd',
+        'serena-activation-reminder.cmd',
+        'serena-cleanup-guarded.cmd',
+        'serena-reminder-guarded.cmd'
+    )
+    foreach ($retiredCmd in $fiveRetiredCmds) {
+        $cmdBody = Get-CodexHookRemovedLegacyCmdTextByLiveName -LiveName $retiredCmd
+        Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($cmdBody)) -Message "无法生成旧现役 .cmd 升级夹具：$retiredCmd"
+        [IO.File]::WriteAllText((Join-Path $upgradeHooksDir $retiredCmd), $cmdBody, [Text.UTF8Encoding]::new($false))
+    }
+    foreach ($file in @($hostPreflightManifest.files)) {
+        $src = Join-Path $ProjectRoot ("managed\codex-hooks\" + ([string]$file.relativePath).Replace('/', '\'))
+        $dst = Join-Path $upgradeHooksDir ([string]$file.liveRelativePath).Replace('/', '\')
+        New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($dst)) | Out-Null
+        Copy-Item -LiteralPath $src -Destination $dst -Force
+    }
+    $stalePreflightPath = Join-Path $upgradeHooksDir 'codex-state-preflight.py'
+    [IO.File]::WriteAllText($stalePreflightPath, "# stale-before-upgrade`n", [Text.UTF8Encoding]::new($false))
+    Set-TestProtectedFileAcl -Path $stalePreflightPath
+    $thirdPartyHerdrPath = Join-Path $upgradeHome 'herdr-agent-state.ps1'
+    $thirdPartyHookLeafPath = Join-Path $upgradeHooksDir 'herdr-third-party-keep.ps1'
+    [IO.File]::WriteAllText($thirdPartyHerdrPath, "# herdr-agent-state sentinel`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($thirdPartyHookLeafPath, "# third-party hook file sentinel`n", [Text.UTF8Encoding]::new($false))
+    $thirdPartyHerdrHashBefore = Get-Sha256 -Path $thirdPartyHerdrPath
+    $thirdPartyHookLeafHashBefore = Get-Sha256 -Path $thirdPartyHookLeafPath
+    $herdrCommand = 'powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\herdr-agent-state.ps1" session'
+    $upgradeBeforeHooksJson = ([ordered]@{
+        hooks = [ordered]@{
+            PreToolUse = @(
+                [ordered]@{ matcher = 'Bash'; hooks = @([ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\serena-reminder-guarded.cmd'; timeout = 10 }) }
+            )
+            SessionStart = @(
+                [ordered]@{ hooks = @([ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\codex-state-preflight.cmd'; timeout = 10 }) }
+                [ordered]@{ matcher = 'startup|resume'; hooks = @([ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd'; timeout = 10 }) }
+                [ordered]@{ hooks = @([ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd'; timeout = 10 }) }
+                [ordered]@{ hooks = @([ordered]@{ type = 'command'; command = $herdrCommand; timeout = 10 }) }
+            )
+            Stop = @(
+                [ordered]@{ hooks = @([ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd'; timeout = 10 }) }
+            )
+        }
+    } | ConvertTo-Json -Depth 12) + "`n"
+    $upgradeHooksJsonPath = Join-Path $upgradeHome 'hooks.json'
+    [IO.File]::WriteAllText($upgradeHooksJsonPath, $upgradeBeforeHooksJson, [Text.UTF8Encoding]::new($false))
+    $upgradeBeforeHooksHash = Get-Sha256 -Path $upgradeHooksJsonPath
+
+    $upgradeCheck1 = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Check -CodexHome $upgradeHome
+    Assert-True -Condition (-not [bool]$upgradeCheck1.ok) -Message '5-.cmd 升级前 Check 必须识别漂移'
+    Assert-True -Condition (-not [bool](Get-CheckResult -Result $upgradeCheck1 -Name 'registrations').ok) -Message '5-.cmd 升级前 registrations 必须变红'
+    Assert-True -Condition (-not [bool](Get-CheckResult -Result $upgradeCheck1 -Name 'managedFiles').ok) -Message '5-.cmd 升级前陈旧受管文件必须使 managedFiles 变红'
+    $upgradeLegacyCheck1 = Get-CheckResult -Result $upgradeCheck1 -Name 'legacyImplementations'
+    Assert-True -Condition (-not [bool]$upgradeLegacyCheck1.ok -and [int]$upgradeLegacyCheck1.presentCount -eq 5) -Message "5-.cmd 升级前 legacyImplementations 必须精确报告 5 个旧 .cmd：actual=$($upgradeLegacyCheck1.presentCount)"
+
+    $upgradeRepair1 = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Repair -CodexHome $upgradeHome
+    Assert-True -Condition ([bool]$upgradeRepair1.ok -and [bool]$upgradeRepair1.changed -and -not [string]::IsNullOrWhiteSpace([string]$upgradeRepair1.evidencePath)) -Message '5-.cmd 首次 Repair 必须成功收敛'
+    foreach ($retiredCmd in $fiveRetiredCmds) {
+        Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $upgradeHooksDir $retiredCmd))) -Message "5-.cmd Repair 后旧包装器仍残留：$retiredCmd"
+    }
+    Assert-True -Condition (@(Get-ChildItem -LiteralPath $upgradeHooksDir -Filter '*.cmd' -Recurse -File -Force).Count -eq 0) -Message '5-.cmd Repair 后 hooks 目录必须零 .cmd 文件'
+    foreach ($file in @($hostPreflightManifest.files)) {
+        $src = Join-Path $ProjectRoot ("managed\codex-hooks\" + ([string]$file.relativePath).Replace('/', '\'))
+        $dst = Join-Path $upgradeHooksDir ([string]$file.liveRelativePath).Replace('/', '\')
+        Assert-True -Condition ((Test-Path -LiteralPath $dst -PathType Leaf) -and (Get-Sha256 -Path $dst) -ceq (Get-Sha256 -Path $src)) -Message "5-.cmd Repair 后 7 个受管文件未精确对齐：$($file.liveRelativePath)"
+    }
+    Assert-True -Condition ((Get-Sha256 -Path $thirdPartyHerdrPath) -ceq $thirdPartyHerdrHashBefore) -Message '5-.cmd Repair 不得改动第三方 herdr-agent-state.ps1'
+    Assert-True -Condition ((Get-Sha256 -Path $thirdPartyHookLeafPath) -ceq $thirdPartyHookLeafHashBefore) -Message '5-.cmd Repair 不得改动第三方 hooks 目录未知文件'
+    $upgradeAfterHooksRaw = Get-Content -LiteralPath $upgradeHooksJsonPath -Raw
+    foreach ($retiredCmd in $fiveRetiredCmds) {
+        Assert-True -Condition (-not $upgradeAfterHooksRaw.Contains($retiredCmd, [StringComparison]::OrdinalIgnoreCase)) -Message "5-.cmd Repair 后 hooks.json 仍残留旧 .cmd：$retiredCmd"
+    }
+    $upgradeAfterHooks = $upgradeAfterHooksRaw | ConvertFrom-Json
+    Assert-True -Condition (@($upgradeAfterHooks.hooks.SessionStart).Count -eq 4) -Message '5-.cmd Repair 后 SessionStart 必须精确包含 3 个受管 direct-launcher + 1 个第三方 herdr'
+    Assert-True -Condition (@($upgradeAfterHooks.hooks.SessionStart | Where-Object { $_.hooks[0].command -ceq $herdrCommand }).Count -eq 1) -Message '5-.cmd Repair 必须逐字符保留第三方 herdr-agent-state.ps1 注册'
+    foreach ($hook in @($hostPreflightManifest.hooks)) {
+        $expectedDirectCommand = (@([string]$hook.commandPath) + @($hook.arguments)) -join ' '
+        $eventGroups = @($upgradeAfterHooks.hooks.([string]$hook.event))
+        Assert-True -Condition (@($eventGroups | Where-Object { $_.hooks[0].command -ceq $expectedDirectCommand }).Count -eq 1) -Message "5-.cmd Repair 后 hooks.json 缺少新 direct-launcher 注册：$($hook.id)"
+    }
+
+    $upgradeCheck2 = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Check -CodexHome $upgradeHome
+    Assert-True -Condition ([bool]$upgradeCheck2.ok -and [int]$upgradeCheck2.driftCount -eq 0) -Message "5-.cmd Repair 后二次 Check 必须 ok=true, driftCount=0：actual=$($upgradeCheck2.driftCount)"
+    $upgradeRepair2 = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Repair -CodexHome $upgradeHome
+    Assert-True -Condition ([bool]$upgradeRepair2.ok -and -not [bool]$upgradeRepair2.changed -and $null -eq $upgradeRepair2.evidencePath) -Message '5-.cmd 二次 Repair 必须严格幂等（changed=false, evidencePath=null）'
+
+    $upgradeRestore1 = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Restore -CodexHome $upgradeHome -EvidencePath ([string]$upgradeRepair1.evidencePath)
+    Assert-True -Condition ([bool]$upgradeRestore1.ok -and [bool]$upgradeRestore1.changed) -Message '5-.cmd Restore 必须成功恢复 hooks.json 与受管文件'
+    Assert-True -Condition ((Get-Sha256 -Path $upgradeHooksJsonPath) -ceq $upgradeBeforeHooksHash) -Message '5-.cmd Restore 必须逐字节恢复升级前 hooks.json（含 herdr-agent-state.ps1）'
+    Assert-True -Condition ((Get-Content -LiteralPath (Join-Path $upgradeHooksDir 'codex-state-preflight.py') -Raw) -ceq "# stale-before-upgrade`n") -Message '5-.cmd Restore 必须恢复升级前受管文件内容'
+    foreach ($retiredCmd in $fiveRetiredCmds) {
+        Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $upgradeHooksDir $retiredCmd))) -Message "5-.cmd Restore 不得复活已退役 .cmd 文件：$retiredCmd"
+    }
+    Assert-True -Condition ((Get-Sha256 -Path $thirdPartyHerdrPath) -ceq $thirdPartyHerdrHashBefore) -Message '5-.cmd Restore 不得改动第三方 herdr-agent-state.ps1'
+    Assert-True -Condition ((Get-Sha256 -Path $thirdPartyHookLeafPath) -ceq $thirdPartyHookLeafHashBefore) -Message '5-.cmd Restore 不得改动第三方 hooks 文件'
+    $upgradeRestore2 = Invoke-ReconcilerJson -ScriptPath $scriptPath -Mode Restore -CodexHome $upgradeHome -EvidencePath ([string]$upgradeRepair1.evidencePath)
+    Assert-True -Condition ([bool]$upgradeRestore2.ok -and -not [bool]$upgradeRestore2.changed) -Message '5-.cmd 二次 Restore 必须严格幂等（changed=false）'
 
     Write-Host "PASS: Codex host hook reconciliation"
 } finally {

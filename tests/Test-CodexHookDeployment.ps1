@@ -381,6 +381,134 @@ Assert-True (@($identityPreservingMerged.hooks.PreToolUse | Where-Object { $_.PS
 $identityPreservingCommands = @($identityPreservingMerged.hooks.PreToolUse | ForEach-Object { @($_.hooks) } | ForEach-Object command)
 Assert-True (@($identityPreservingCommands | Where-Object { $_ -like '* auto-approve --client=codex' }).Count -eq 0) 'full 必须只排除 retired auto-approve exact identity'
 
+$directManagedManifest = [pscustomobject][ordered]@{
+    artifactType = 'env-governance.codex-hook-manifest'
+    schemaVersion = 1
+    codexHome = 'D:\Codex\.codex'
+    managedRoot = 'D:\agents\projects\统一环境\managed\codex-hooks'
+    runtimes = [pscustomobject][ordered]@{
+        pwsh = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
+        python = 'D:\Codex\tools\python315-official\python.exe'
+        pythonw = 'D:\Codex\tools\python315-official\pythonw.exe'
+        serenaPython = 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
+        serenaHooks = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
+    }
+    hooks = @(
+        [pscustomobject][ordered]@{
+            id = 'codex-state-preflight'
+            event = 'SessionStart'
+            order = 0
+            matcher = $null
+            timeoutSeconds = 10
+            commandPath = 'D:\Codex\tools\python315-official\python.exe'
+            arguments = @(
+                '-I', '-S', '-B', '-X', 'utf8',
+                'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py',
+                'D:\Codex\tools\python315-official\python.exe',
+                '-I', '-S', '-B', '-X', 'utf8',
+                'D:\Codex\.codex\hooks\codex-state-preflight.py',
+                ';', 'exit', '$LASTEXITCODE'
+            )
+            wrapperPath = $null
+            implementationPath = 'D:\Codex\.codex\hooks\codex-state-preflight.py'
+            runtimeId = 'python'
+            launcherRuntimeId = 'python'
+            launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+            sourceState = 'managed'
+            readResources = @([pscustomobject][ordered]@{ kind = 'abstract'; value = 'hook-stdin' })
+            writeResources = @([pscustomobject][ordered]@{ kind = 'abstract'; value = 'codex-thread-state' })
+            criticality = 'critical'
+            lifecycle = 'active'
+            lifecycleReason = $null
+            quickHealthCheck = [pscustomobject][ordered]@{
+                commandPath = 'D:\Codex\tools\python315-official\python.exe'
+                arguments = @('-I', '-S', '-B', '-X', 'utf8', 'D:\Codex\.codex\hooks\codex-state-preflight.py', '--check-only', '--json')
+            }
+            fullAcceptanceCommand = [pscustomobject][ordered]@{
+                commandPath = 'D:\Codex\tools\python315-official\python.exe'
+                arguments = @('-I', '-S', '-B', '-X', 'utf8', 'D:\Codex\.codex\hooks\codex-state-preflight.py', '--check-only', '--json')
+            }
+        }
+    )
+    files = @(
+        [pscustomobject][ordered]@{
+            relativePath = 'hooks/codex-state-preflight.py'
+            liveRelativePath = 'codex-state-preflight.py'
+            sha256 = ('0' * 64)
+            lifecycle = 'active'
+            ownerHookIds = @('codex-state-preflight')
+        }
+        [pscustomobject][ordered]@{
+            relativePath = 'hooks/lib/hidden-console-launcher.py'
+            liveRelativePath = 'lib/hidden-console-launcher.py'
+            sha256 = ('0' * 64)
+            lifecycle = 'active'
+            ownerHookIds = @('codex-state-preflight')
+        }
+    )
+    environment = @()
+}
+[void](Assert-CodexHookManifest -Manifest $directManagedManifest)
+$directManagedUnknownPythonRegistry = [pscustomobject][ordered]@{
+    hooks = [pscustomobject][ordered]@{
+        SessionStart = @(
+            [pscustomobject][ordered]@{
+                customUnknownPython = 'preserve'
+                hooks = @([pscustomobject][ordered]@{
+                    type = 'command'
+                    command = 'D:\Codex\tools\python315-official\python.exe D:\ThirdParty\herdr-agent-state.py'
+                    timeout = 5
+                })
+            }
+            [pscustomobject][ordered]@{
+                customUnknownUnclosedPython = 'preserve'
+                hooks = @([pscustomobject][ordered]@{
+                    type = 'command'
+                    command = '"D:\Codex\tools\python315-official\python.exe D:\ThirdParty\herdr-unclosed.py --opaque'
+                    timeout = 5
+                })
+            }
+        )
+    }
+}
+$directManagedMerged = Merge-CodexHookRegistry -Manifest $directManagedManifest -LiveRegistry $directManagedUnknownPythonRegistry -Mode full
+Assert-True (@($directManagedMerged.hooks.SessionStart).Count -eq 3) 'direct-managed-launcher merge 必须保留共用 python.exe 的第三方 hook 并追加受管入口'
+Assert-True ($directManagedMerged.hooks.SessionStart[0].customUnknownPython -ceq 'preserve') '共用 python.exe 的未知第三方 hook 不得误判为受管漂移'
+Assert-True ($directManagedMerged.hooks.SessionStart[1].customUnknownUnclosedPython -ceq 'preserve') '不含受管脚本路径的未闭合 python.exe 第三方 hook 不得误判为受管漂移'
+
+$directManagedDriftRegistry = [pscustomobject][ordered]@{
+    hooks = [pscustomobject][ordered]@{
+        SessionStart = @(
+            [pscustomobject][ordered]@{
+                hooks = @([pscustomobject][ordered]@{
+                    type = 'command'
+                    command = 'D:\Codex\tools\python315-official\python.exe -I -S -B -X utf8 D:\Codex\.codex\hooks\lib\hidden-console-launcher.py D:\Codex\tools\python315-official\python.exe -I -S -B -X utf8 D:\Codex\.codex\hooks\codex-state-preflight.py'
+                    timeout = 10
+                })
+            }
+        )
+    }
+}
+[void](Assert-Throws { Merge-CodexHookRegistry -Manifest $directManagedManifest -LiveRegistry $directManagedDriftRegistry -Mode full | Out-Null } '缺少 ; exit $LASTEXITCODE 的 direct-managed-launcher 漂移必须 fail closed')
+
+$directManagedUnclosedRegistry = [pscustomobject][ordered]@{
+    hooks = [pscustomobject][ordered]@{
+        SessionStart = @(
+            [pscustomobject][ordered]@{
+                hooks = @([pscustomobject][ordered]@{
+                    type = 'command'
+                    command = '"D:\Codex\tools\python315-official\python.exe -I -S -B -X utf8 D:\Codex\.codex\hooks\lib\hidden-console-launcher.py --token direct-secret'
+                    timeout = 10
+                })
+            }
+        )
+    }
+}
+$directManagedUnclosedError = Assert-Throws -Message '指向受管 launcher/implementation 的不可解析 direct-managed-launcher command 必须 fail closed' -Action {
+    Merge-CodexHookRegistry -Manifest $directManagedManifest -LiveRegistry $directManagedUnclosedRegistry -Mode full | Out-Null
+}
+Assert-True ($directManagedUnclosedError -notmatch 'direct-secret') 'direct-managed-launcher 不可解析错误不得回显 secret'
+
 $fixtureRoot = Join-Path $ProjectRoot 'reports\codex-hook-deployment-test'
 Assert-True (Test-CodexHookPathWithin -Path $fixtureRoot -ParentPath (Join-Path $ProjectRoot 'reports')) 'fixture root 必须位于项目 reports'
 if ([IO.Directory]::Exists($fixtureRoot)) {
@@ -516,7 +644,7 @@ foreach ($file in @($fixtureManifest.files)) {
         $expectedRetiredFileBytes[[IO.Path]::GetFullPath($targetPath)] = $targetBytes
     }
 }
-Assert-True ($generatedLegacyCmdCount -eq 5) '部署测试夹具必须在隔离临时目录动态构造全部 5 个已移除历史 .cmd 样本'
+Assert-True ($generatedLegacyCmdCount -eq 6) '部署测试夹具必须在隔离临时目录动态构造 legacy fixture manifest 全部 6 个已移除历史 .cmd 样本'
 [void](Assert-CodexHookManifest -Manifest $fixtureManifest)
 $fixtureManifestPath = Join-Path $fixtureRoot 'fixture-manifest.json'
 Write-Utf8NoBom -Path $fixtureManifestPath -Text ($fixtureManifest | ConvertTo-Json -Depth 100)
