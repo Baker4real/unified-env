@@ -123,8 +123,7 @@ $sourceFiles = @(
     'install_skill_guarded_system_overlay.py',
     'install_skill_guarded_staging.py',
     'install_skill_guarded.py',
-    'install-skill-guarded.ps1',
-    'install-skill-guarded.cmd'
+    'install-skill-guarded.ps1'
 )
 $evidenceDirectory = Join-Path $evidenceRootResolved ('deploy-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N'))
 $manifestPath = Join-Path $evidenceDirectory 'manifest.json'
@@ -146,11 +145,11 @@ $manifest = [ordered]@{
 try {
     if (-not (Test-Path -LiteralPath $sourceRootResolved -PathType Container)) { throw "SourceRoot 不存在：$sourceRootResolved" }
     if (Test-ReparsePoint $sourceRootResolved) { throw "SourceRoot 不能是 reparse point：$sourceRootResolved" }
-    $commandAdapterFiles = @('install-skill-guarded.ps1', 'install-skill-guarded.cmd')
+    $commandAdapterFile = 'install-skill-guarded.ps1'
     $sources = [ordered]@{}
     foreach ($relative in $sourceFiles) {
         $source = Join-Path $sourceRootResolved $relative
-        $isCommandAdapter = $commandAdapterFiles -contains $relative
+        $isCommandAdapter = $relative -ceq $commandAdapterFile
         if ($sourceRootResolved -ieq $repositoryScriptsRootResolved -and -not $isCommandAdapter) {
             $source = Join-Path $moduleImplementationRootResolved $relative
         }

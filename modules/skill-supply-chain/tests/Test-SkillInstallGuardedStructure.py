@@ -153,6 +153,19 @@ class InstallerStructureTests(unittest.TestCase):
             and any(isinstance(target, ast.Name) and target.id == "RUNTIME_FILES" for target in node.targets)
         )
         self.assertEqual(list(runtime_files), deployed, "RUNTIME_FILES must match the deployed files")
+        self.assertIn("install-skill-guarded.ps1", deployed, "canonical PowerShell command wrapper must be deployed")
+        self.assertFalse(
+            any(name.lower().endswith(".cmd") for name in deployed),
+            f"retired .cmd wrapper must not appear in deployment closure: {deployed!r}",
+        )
+        self.assertTrue(
+            (PROJECT_ROOT / "scripts" / "install-skill-guarded.ps1").is_file(),
+            "canonical PowerShell command wrapper must exist in scripts/",
+        )
+        self.assertFalse(
+            (PROJECT_ROOT / "scripts" / "install-skill-guarded.cmd").exists(),
+            "retired scripts/install-skill-guarded.cmd must be removed from repository source",
+        )
         entry_index = deployed.index(f"{ENTRY}.py")
         for name in installer_modules():
             self.assertIn(f"{name}.py", deployed, f"{name}.py is not deployed")
