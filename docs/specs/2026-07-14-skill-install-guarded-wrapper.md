@@ -18,7 +18,7 @@ intent: 说明 Skill 安装事务 Wrapper 的目标和一致性保证
 | 层 | 唯一职责 | 入口 |
 | --- | --- | --- |
 | 候选治理 | 来源、采用度、重叠、`writing-for-agents` 和 install/update 决策 | `D:\agents\skills-manager\skills\skill-install-guard\SKILL.md` |
-| 事务执行 | 暂存、备份、激活、台账写入、回滚和后置校验 | `D:\Codex\.codex\scripts\install-skill-guarded.cmd` |
+| 事务执行 | 暂存、备份、激活、台账写入、回滚和后置校验 | `D:\Codex\.codex\scripts\install-skill-guarded.ps1` |
 | 派生目录 | 从 active root、`SOURCE.md` 和 ledger 重新扫描生成 catalog | `modules\skill-supply-chain\implementation\generate_skill_catalog.py`（根 adapter：`scripts\generate_skill_catalog.py`） |
 | 上游下载 | 只提供候选下载/复制能力 | `.system\skill-installer` |
 
@@ -216,9 +216,9 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
 
 ## 可维护性
 
-部署入口必须以隔离模式验证目标受管 Python 可以导入 PyYAML，并确认 `yaml.safe_load` 可调用；真实 `install-skill-guarded.cmd` 也必须用 `python -X utf8 -I` 启动 wrapper，使部署探针与运行态保持相同的导入隔离，并避免非 UTF-8 Windows runner 在输出中文帮助时触发编码失败。缺失、同名模块劫持或 API 不兼容时不得报告部署成功。
+部署入口必须以隔离模式验证目标受管 Python 可以导入 PyYAML，并确认 `yaml.safe_load` 可调用；真实 `install-skill-guarded.ps1` 也必须用 `python -X utf8 -I` 启动 wrapper，使部署探针与运行态保持相同的导入隔离，并避免非 UTF-8 Windows runner 在输出中文帮助时触发编码失败。缺失、同名模块劫持或 API 不兼容时不得报告部署成功。
 
-项目源部署闭包的 Python 实现位于 `modules\skill-supply-chain\implementation\`，由 `skill_source_record.py`、`generate_skill_catalog.py`、`system_skill_provenance_repair.py`、`system_package_identity.py`、installer 入口 `install_skill_guarded.py` 及其 `install_skill_guarded_*.py` 模块组成（完整清单以部署脚本的 `$sourceFiles` 为准，`reconcile_skill_source_records.py` 的 `RUNTIME_FILES` 与之一致，由 `Test-SkillInstallGuardedStructure.py` 校验），command adapter 仍位于根 `scripts\install-skill-guarded.cmd`；根目录 `scripts\` 同时保留稳定 Python adapters，部署脚本从 module implementation 复制 Python runtime 并绑定 command adapter。部署后 installer、catalog 与 system repair 从同目录加载各自受管依赖，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁 module implementation、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。
+项目源部署闭包的 Python 实现位于 `modules\skill-supply-chain\implementation\`，由 `skill_source_record.py`、`generate_skill_catalog.py`、`system_skill_provenance_repair.py`、`system_package_identity.py`、installer 入口 `install_skill_guarded.py` 及其 `install_skill_guarded_*.py` 模块组成（完整清单以部署脚本的 `$sourceFiles` 为准，`reconcile_skill_source_records.py` 的 `RUNTIME_FILES` 与之一致，由 `Test-SkillInstallGuardedStructure.py` 校验），规范 command adapter 位于根 `scripts\install-skill-guarded.ps1`；根目录 `scripts\` 同时保留稳定 Python adapters，部署脚本从 module implementation 复制 Python runtime 并绑定 command adapter。部署后 installer、catalog 与 system repair 从同目录加载各自受管依赖，不依赖项目源仓库路径。通过 `scripts\Deploy-SkillInstallGuarded.ps1` 部署到本机 D 盘入口。`D:\Codex\.codex\scripts\` 中的同名文件是部署产物，不可单独热修；紧急修复必须先回迁 module implementation、通过相关测试，再由部署脚本替换并留下 deployment manifest。catalog 仍是派生快照，ledger 与各 skill 的 `SOURCE.md` 仍是来源事实。
 
 部署脚本只上线已提交的字节。部署源位于 git 工作树里时（默认的 module implementation 与 command adapter 都是），每个源文件经 git clean filter 得到的 blob 或原样字节的 blob 必须有一个等于该工作树 HEAD 里同一路径的 blob，口径与 `git status` 相同（`core.autocrlf` 下 status 保留已提交的 CRLF，只看 clean filter 会把它归一成 LF 而误判），HEAD 里没有的文件也算未提交；否则在创建目标目录和 deployment evidence 之前列出这些文件并失败闭锁，`-WhatIf` 同样拒绝。共享工作树里的未提交改动可能来自别的会话，标准做法是从所提交的 `git archive` 快照运行快照自带的部署脚本：快照不在任何工作树里，不做这项比对。`-AllowUncommittedSource` 跳过比对，只用于 fixture 测试和已确认要上线的本地改动。deployment manifest 与返回结果的 `sourceCommitCheck` 记录 `matches-head`、`outside-work-tree` 或 `skipped`。
 

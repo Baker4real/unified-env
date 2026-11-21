@@ -31,7 +31,7 @@
    - Matt Pocock skills 优先核验最新官方稳定上游，将版本或提交及 non-prerelease 状态与当前统一 ledger 对照后决定是否更新。
    - 每轮对照已采用来源的官方稳定发布清单或官方滚动稳定目录、本机 active root 和统一 ledger。把上游正式新增或转稳且本机尚未安装的 skills 纳入候选，并回看上轮差分与 RESULT.md 中已发现的待安装项。即使本轮 sweep 没有移动或现役 skill 子树没有变化，也要做这项检查。逐项核实正式稳定版本或对应提交、来源、重叠及调用模式。
    - `in progress` 的 skill 标记为 skipped/in-progress，保持 active、candidate 和本地 overlay 原状。按 ledger 中的退役与明确排除记录过滤候选。
-   - 通过 provenance、overlay、资源闭包及 SOURCE/ledger/catalog/hash 等现有硬门槛的候选，必须通过 `D:\Codex\.codex\scripts\install-skill-guarded.cmd` 实际激活并验收。新增正式稳定 skill 执行 `install`，已安装 skill 执行 `update`。来源无法确认或 overlay 无法安全合并时保持原状并记录 blocked/source-unresolved，其他硬门槛失败也按受管流程闭锁并保留证据。将新安装项的版本或提交与验收证据写入 RESULT.md。
+   - 通过 provenance、overlay、资源闭包及 SOURCE/ledger/catalog/hash 等现有硬门槛的候选，必须通过 `D:\Codex\.codex\scripts\install-skill-guarded.ps1` 实际激活并验收。新增正式稳定 skill 执行 `install`，已安装 skill 执行 `update`。来源无法确认或 overlay 无法安全合并时保持原状并记录 blocked/source-unresolved，其他硬门槛失败也按受管流程闭锁并保留证据。将新安装项的版本或提交与验收证据写入 RESULT.md。
    - 新装共享 skill 以 DeepSeek Harness 为首要宿主。用受管 `shared-skill-delivery.py register` 首轮将 guarded 安装载荷登记给 Magpie 的 `dsh`，完成正文加载和调用策略验收。用 `deliver` 分发给其余已启用且兼容的宿主，并逐个回读。按 README「共享技能分发」传入实际预设、工作区、调用策略和原 guarded 事务。保留每个阶段的收据。每轮先回查待验收和待分发的条目，从未完成阶段继续，再更新同名技能。
    - closure 门禁：skill 受管事务的 closure 门禁采用"基线差分 + target 作用域"（细则以 D:\Codex\.codex\docs\agent-guidance\skill-operations.md「刷新和闭包」节为准）：只有新增 finding 或落在本事务 target 上的 finding 才阻塞；既有非 target finding 不阻塞但必须在 RESULT.md 列出。全根 strict closure 仍需每日运行，有 finding 即在报告中标红。
 5. MCP/工具更新必须保留 D 盘 wrapper、参数、环境变量和配置的一致性。更新 Serena、CodeGraph 或其他 MCP 后，检查依赖完整性并做真实 initialize/tools-list/query 或等价 smoke test（initialize/tools-list 用第 1 条的 mcp-smoke.cjs）。需要停止占用进程才能写入安装树时，先停止占用进程再更新；更新后用新进程验收。当前 GUI/会话若仍附着旧进程，报告需要重连或重启客户端以采用，但不得把进程占用本身当作跳过更新的理由。

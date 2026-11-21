@@ -391,7 +391,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         "target_root": str(target_root),
         "ledger": str(ledger_path),
         "catalog": str(catalog_path),
-        "wrapper": "D:/Codex/.codex/scripts/install-skill-guarded.cmd",
+        "wrapper": "D:/Codex/.codex/scripts/install-skill-guarded.ps1",
         "invoker": transaction_invoker(),
     }
     write_transaction_manifest(manifest_path, plan)
