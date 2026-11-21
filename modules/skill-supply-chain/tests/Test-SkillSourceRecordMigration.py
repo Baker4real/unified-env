@@ -48,9 +48,38 @@ class SkillSourceRecordMigrationTests(unittest.TestCase):
                 "install_skill_guarded_staging.py",
                 "install_skill_guarded.py",
                 "install-skill-guarded.ps1",
-                "install-skill-guarded.cmd",
             },
         )
+        self.assertNotIn("install-skill-guarded.cmd", module.RUNTIME_FILES)
+
+    def test_historical_source_record_referencing_retired_cmd_wrapper_remains_readable_and_preserved(
+        self,
+    ) -> None:
+        before = (
+            "# Source\n\n"
+            "Skill: `legacy-cmd-skill`\n"
+            "Repository: https://example.test/owner/repo\n"
+            "Ref: `main`\n"
+            "Guarded wrapper: `D:\\Codex\\.codex\\scripts\\install-skill-guarded.cmd`\n\n"
+            "Local overlay:\n"
+            "- Installed via D:\\Codex\\.codex\\scripts\\install-skill-guarded.cmd.\n"
+        )
+        after, section, fields, narrative = module._canonical_record(
+            before, expected_name="legacy-cmd-skill", scope="active"
+        )
+
+        self.assertTrue(after.startswith(before))
+        self.assertEqual(section, 0)
+        self.assertIn("guarded_wrapper", fields)
+        self.assertEqual(narrative, ("local_overlay",))
+        current = module.parse_current_source_record(after)
+        self.assertEqual(current.conflicts, {})
+        self.assertEqual(current.fields["skill"], "legacy-cmd-skill")
+        self.assertEqual(
+            current.fields["guarded_wrapper"],
+            r"D:\Codex\.codex\scripts\install-skill-guarded.cmd",
+        )
+        self.assertIn("install-skill-guarded.cmd", current.fields["local_overlay"])
 
     def write_complete_manifest(self, root: Path) -> tuple[Path, dict[str, object]]:
         active = root / "active"

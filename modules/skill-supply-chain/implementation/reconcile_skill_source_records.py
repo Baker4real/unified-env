@@ -61,7 +61,6 @@ RUNTIME_FILES = (
     "install_skill_guarded_staging.py",
     "install_skill_guarded.py",
     "install-skill-guarded.ps1",
-    "install-skill-guarded.cmd",
 )
 _SEPARATOR = re.compile(r"\s*---\s*")
 _PLAIN_FIELD = re.compile(
