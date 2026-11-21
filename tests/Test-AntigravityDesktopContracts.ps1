@@ -8,3 +8,5 @@ $diagnostics = Join-Path (Split-Path -Parent $PSScriptRoot) 'managed/host-diagno
 & (Join-Path $diagnostics 'antigravity/Test-AntigravityLauncher.ps1')
 & python -B -I (Join-Path $diagnostics 'antigravity/test_wsl_patch.py')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& node (Join-Path $diagnostics 'antigravity/test_quota_health.cjs')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -3,7 +3,8 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('\A[0-9a-fA-F]{64}\z')][string]$ExpectedArchiveSha256,
     [string]$EvidenceRoot = 'D:/agents/run-evidence/antigravity-desktop',
-    [switch]$Restart
+    [switch]$Restart,
+    [switch]$CheckContextViewer
 )
 
 $ErrorActionPreference = 'Stop'
@@ -139,11 +140,33 @@ try {
         $appProcess.MainWindowHandle -eq 0 -or -not $appProcess.Responding -or $backendProcess.HasExited) {
         throw 'Antigravity lost its window or backend, or its archive changed during verification.'
     }
+    $quotaHealth = $null
+    if ($CheckContextViewer) {
+        $quotaProbe = Join-Path $PSScriptRoot 'Get-AntigravityQuotaHealth.cjs'
+        $quotaDeadline = [datetime]::UtcNow.AddSeconds(15)
+        do {
+            $probeRaw = & node $quotaProbe 2>&1
+            $probeExit = $LASTEXITCODE
+            $probeText = ($probeRaw | Out-String).Trim()
+            if ($probeText) {
+                try { $quotaHealth = $probeText | ConvertFrom-Json } catch { $quotaHealth = $null }
+            }
+            if ($probeExit -eq 0 -and $null -ne $quotaHealth -and $quotaHealth.ok) { break }
+            Start-Sleep -Milliseconds 500
+        } while ([datetime]::UtcNow -lt $quotaDeadline)
+        if ($null -eq $quotaHealth -or -not $quotaHealth.ok) {
+            $errDetail = if ($quotaHealth -and $quotaHealth.accounts -and $quotaHealth.accounts.lastQuotaError) {
+                $quotaHealth.accounts.lastQuotaError
+            } else { 'backend-or-accounts-unhealthy' }
+            throw "Context Viewer quota health check failed: $errDetail"
+        }
+    }
     $report = [pscustomobject]@{
         status='passed'; version=$version; archiveSha256=$archiveHash; shortcut=$shortcut
         appPid=$appProcess.Id; backendPid=$backendProcess.Id; launchUtc=$created.ToString('o')
         proxyPort=$(if ($proxy) { $proxy.Port } else { $null }); oauth=$oauth
         wslStartsObserved=0; wslStartupErrors=0; monitorStartedUtc=$monitor.startedAt; monitorEndedUtc=$monitor.endedAt
+        contextViewerQuota=$quotaHealth
         processState='running_handed_off'; evidenceDirectory=$run
     }
     $json = $report | ConvertTo-Json -Depth 4

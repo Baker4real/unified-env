@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import http from 'node:http';
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -8,6 +10,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   applyWslLayer,
+  patchContextLocalApi,
+  patchContextMeterCollector,
+  patchContextMeterRenderer,
   detectAddonMarkers,
   detectHubLoadAnchor,
   packAsarWithOverlay,
@@ -62,6 +67,181 @@ function buildSyntheticAsar(filesObj) {
   prefix.writeUInt32LE(headerBytes.length, 12);
   headerBytes.copy(prefix, 16);
   return Buffer.concat([prefix, ...chunks]);
+}
+
+function startMockLsServer({ htmlCsrfToken, acceptedTokens, onRpc }) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      if (req.method === 'GET' && req.url === '/') {
+        const cfg = JSON.stringify({
+          productName: 'antigravity',
+          csrfToken: htmlCsrfToken,
+          appVersion: '2.34.0',
+          releaseChannel: 'stable',
+          devMode: false,
+        });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`<!doctype html><html><head><script>window.__APP_CONFIG__ = ${cfg};</script></head><body></body></html>`);
+        return;
+      }
+      if (req.method === 'POST' && req.url.startsWith('/exa.language_server_pb.LanguageServerService/')) {
+        const method = req.url.slice('/exa.language_server_pb.LanguageServerService/'.length);
+        const token = req.headers['x-codeium-csrf-token'] || '';
+        const allowed = typeof acceptedTokens === 'function' ? acceptedTokens(method) : acceptedTokens;
+        if (!token || !allowed.includes(token)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ code: 'unauthenticated', message: 'unauthenticated: missing CSRF token' }));
+          return;
+        }
+        let body = '';
+        req.on('data', (c) => { body += c; });
+        req.on('end', () => {
+          const payload = onRpc ? onRpc(method, body ? JSON.parse(body) : {}, token) : {};
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(payload));
+        });
+        return;
+      }
+      res.writeHead(404);
+      res.end('not found');
+    });
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      resolve({
+        port,
+        origin: `http://127.0.0.1:${port}`,
+        close: () => new Promise((r) => server.close(() => r())),
+      });
+    });
+    server.on('error', reject);
+  });
+}
+
+function makeMockQuotaRpcs() {
+  return (method) => {
+    if (method === 'GetUserStatus') {
+      return {
+        userStatus: {
+          email: 'fixture@example.invalid',
+          planStatus: { planInfo: { planName: 'Google AI Pro' } },
+          cascadeModelConfigData: {
+            clientModelConfigs: [
+              {
+                label: 'Gemini 4 Neon (XHigh)',
+                modelOrAlias: { model: 'MODEL_PLACEHOLDER_M417' },
+                quotaInfo: {
+                  remainingFraction: 0.85,
+                  resetTime: new Date(Date.now() + 3600000).toISOString(),
+                },
+              },
+            ],
+          },
+        },
+      };
+    }
+    if (method === 'RetrieveUserQuotaSummary') return { response: {} };
+    if (method === 'GetAvailableModels') return { models: {} };
+    if (method === 'GetCascadeTrajectory') {
+      return {
+        numTotalSteps: 1,
+        trajectory: {
+          steps: [{ type: 'CORTEX_STEP_TYPE_USER_INPUT', userInput: { items: [{ text: 'hello' }] } }],
+        },
+      };
+    }
+    return {};
+  };
+}
+
+async function verifyPatchedContextDistBehavior(distDir, tmpRoot) {
+  const cjsRequire = createRequire(import.meta.url);
+  const localApiPath = path.join(distDir, 'local-api.js');
+  const collectorPath = path.join(distDir, 'meter-collector.js');
+  delete cjsRequire.cache[cjsRequire.resolve(localApiPath)];
+  delete cjsRequire.cache[cjsRequire.resolve(collectorPath)];
+  const localApi = cjsRequire(localApiPath);
+  const collector = cjsRequire(collectorPath);
+
+  // 1. 2.34.0 empty HTML csrfToken + in-process authBootstrap match
+  const srv1 = await startMockLsServer({ htmlCsrfToken: '', acceptedTokens: ['boot-tok-1'], onRpc: makeMockQuotaRpcs() });
+  try {
+    const api = await localApi.connect({
+      origin: srv1.origin,
+      authBootstrap: { getActiveLsBaseUrl: () => srv1.origin, getActiveLsCsrfToken: () => 'boot-tok-1' },
+    });
+    const res = await api.call('GetUserStatus', {});
+    assert.equal(res.userStatus.email, 'fixture@example.invalid');
+  } finally {
+    await srv1.close();
+  }
+
+  // 2. authBootstrap origin mismatch fails closed when no daemon match
+  const srv2 = await startMockLsServer({ htmlCsrfToken: '', acceptedTokens: ['wrong-tok'], onRpc: makeMockQuotaRpcs() });
+  const emptyDaemon = await fsp.mkdtemp(path.join(tmpRoot, 'daemon-empty-'));
+  try {
+    await assert.rejects(
+      () => localApi.connect({
+        origin: srv2.origin,
+        daemonDir: emptyDaemon,
+        authBootstrap: { getActiveLsBaseUrl: () => `http://127.0.0.1:${srv2.port + 1}`, getActiveLsCsrfToken: () => 'wrong-tok' },
+      }),
+      /本地鉴权信息尚未就绪/,
+    );
+  } finally {
+    await srv2.close();
+  }
+
+  // 3. daemon/hub_*.json live PID + exact port match (skips dead PID & wrong port) + fetchQuotaSnapshotFromHost
+  const srv3 = await startMockLsServer({ htmlCsrfToken: '', acceptedTokens: ['daemon-tok-3'], onRpc: makeMockQuotaRpcs() });
+  const matchDaemon = await fsp.mkdtemp(path.join(tmpRoot, 'daemon-match-'));
+  try {
+    await fsp.writeFile(path.join(matchDaemon, 'hub_dead.json'), JSON.stringify({ pid: 999999, httpPort: srv3.port, httpsPort: srv3.port - 1, csrfToken: 'dead-tok' }));
+    await fsp.writeFile(path.join(matchDaemon, 'hub_other.json'), JSON.stringify({ pid: process.pid, httpPort: srv3.port + 10, httpsPort: srv3.port + 9, csrfToken: 'other-tok' }));
+    await fsp.writeFile(path.join(matchDaemon, `hub_${srv3.port}.json`), JSON.stringify({ pid: process.pid, httpPort: srv3.port, httpsPort: srv3.port - 1, csrfToken: 'daemon-tok-3' }));
+    collector.resetQuotaHostCacheForTest();
+    const snap = await collector.fetchQuotaSnapshotFromHost({
+      force: true,
+      origin: srv3.origin,
+      backendSource: 'electron-ipc',
+      authBootstrap: null,
+      daemonDir: matchDaemon,
+      isPidAlive: (pid) => pid === process.pid,
+    });
+    assert.equal(snap.error, null, `unexpected quota error: ${snap.error}`);
+    assert.equal(snap.errorKind, null);
+    assert.ok(Array.isArray(snap.snapshot?.pools) && snap.snapshot.pools.length > 0, 'expected non-empty pools');
+  } finally {
+    await srv3.close();
+  }
+
+  // 4. Legacy 2.33.0 HTML csrfToken still works
+  const srv4 = await startMockLsServer({ htmlCsrfToken: 'legacy-tok-4', acceptedTokens: ['legacy-tok-4'], onRpc: makeMockQuotaRpcs() });
+  try {
+    const api = await localApi.connect({ origin: srv4.origin, authBootstrap: null, daemonDir: emptyDaemon });
+    const res = await api.call('GetUserStatus', {});
+    assert.equal(res.userStatus.email, 'fixture@example.invalid');
+  } finally {
+    await srv4.close();
+  }
+
+  // 5. meter-collector.collect on 2.34.0 + 401 token rotation recovery
+  let activeToken = 'scan-tok-v1';
+  const srv5 = await startMockLsServer({ htmlCsrfToken: '', acceptedTokens: () => [activeToken], onRpc: makeMockQuotaRpcs() });
+  try {
+    const authBootstrap = { getActiveLsBaseUrl: () => srv5.origin, getActiveLsCsrfToken: () => activeToken };
+    const first = await collector.collect(srv5.origin, '00000000-0000-0000-0000-000000000001', { force: true, authBootstrap });
+    assert.equal(first.conversation, '00000000-0000-0000-0000-000000000001');
+    activeToken = 'scan-tok-v2';
+    const second = await collector.collect(srv5.origin, '00000000-0000-0000-0000-000000000002', { force: false, authBootstrap });
+    assert.equal(second.conversation, '00000000-0000-0000-0000-000000000002');
+  } finally {
+    await srv5.close();
+  }
+
+  // 6. meter-renderer.js localStorage fallback present at both fetch sites
+  const rendererSrc = await fsp.readFile(path.join(distDir, 'meter-renderer.js'), 'utf8');
+  const fallbackHits = rendererSrc.match(/agy_session_csrf_token/g) || [];
+  assert.ok(fallbackHits.length >= 2, `expected >= 2 agy_session_csrf_token fallbacks, got ${fallbackHits.length}`);
 }
 
 function getTempBase() {
@@ -181,7 +361,181 @@ async function runUnitTests() {
     assert.equal(parsed.appDir, 'D:/tmp/app');
     assert.throws(() => parseArgs(['status', '--bogus']), /Unknown argument/);
     console.log('UNIT PASS 5: parseArgs flag handling');
-    console.log('ALL 5 UNIT TESTS PASSED');
+
+    // Unit 6: 2.34+ context-viewer CSRF patchers fail closed on missing anchors and resolve authBootstrap / daemon_hub / legacy HTML
+    assert.throws(() => patchContextLocalApi('module.exports = {};'), /Anchor local-api:/);
+    assert.throws(() => patchContextMeterCollector('module.exports = {};'), /Anchor meter-collector:/);
+    assert.throws(() => patchContextMeterRenderer('console.log(1);'), /Anchor meter-renderer:/);
+
+    const syntheticLocalApi = `'use strict';
+const fs = require('fs');
+const path = require('path');
+const http = require('http');
+const https = require('https');
+const getAppDataDir = () => '';
+const isIsolatedTestPath = () => false;
+const HANS_CANDIDATE_PORTS = [];
+const LOOPBACK_ORIGIN_RE = /^https?:\\/\\/127\\.0\\.0\\.1:(\\d+)$/;
+function normalizeLoopbackOrigin(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  try { const o = new URL(raw.trim()).origin; return LOOPBACK_ORIGIN_RE.test(o) ? o : null; } catch { return null; }
+}
+function parseExplicitPort(raw) { const n = Number(raw); return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null; }
+function request(url, body, token) {
+  return new Promise((resolve, reject) => {
+    const req = (url.startsWith('https:') ? https : http).request(url, {
+      agent: false, rejectUnauthorized: false, method: body ? 'POST' : 'GET',
+      headers: body ? { 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1', 'x-codeium-csrf-token': token } : {},
+    }, (res) => {
+      let text = ''; res.on('data', (c) => { text += c; });
+      res.on('end', () => (res.statusCode === 200 ? resolve(text) : reject(new Error(\`HTTP \${res.statusCode}: \${text}\`))));
+    });
+    req.on('error', reject);
+    req.end(body ? JSON.stringify(body) : undefined);
+  });
+}
+function getDevToolsActivePort() { return null; }
+function getCandidateCdpPorts() { return []; }
+async function discoverAntigravityCdp() { throw new Error('no cdp'); }
+function connectCdpWebSocket() {}
+function createCdpClient() {}
+async function extractAppConfigViaCdp() {
+  const cfg = {
+        expression:
+          '(() => { try { if (!window.__APP_CONFIG__) return null; return { hasConfig: true, csrfToken: window.__APP_CONFIG__.csrfToken || "" }; } catch (e) { return null; } })()',
+  };
+  return cfg ? null : null;
+}
+
+/**
+ * 解析并缓存或实时提取指定本地页面原点的 CSRF Token 并构造 RPC 客户端。
+ */
+async function connectOrigin(rawOrigin, page = null, origins = null, extraMeta = {}) {
+  const origin = normalizeLoopbackOrigin(rawOrigin);
+  if (!origin) {
+    throw new Error('非法的本机回环页面地址');
+  }
+  let hasConfig = false;
+  let token = null;
+  try {
+    const html = await request(origin + '/');
+    const config = html.match(/window\\.__APP_CONFIG__\\s*=\\s*(\\{.*?\\})\\s*;/s);
+    if (config) {
+      hasConfig = true;
+      token = JSON.parse(config[1]).csrfToken;
+    }
+  } catch (err) {
+    if (!page || !page.webSocketDebuggerUrl) throw err;
+  }
+
+  if (!hasConfig && page && page.webSocketDebuggerUrl) {
+    const cdpCfg = await extractAppConfigViaCdp(page);
+    if (cdpCfg && cdpCfg.hasConfig) {
+      hasConfig = true;
+      token = cdpCfg.csrfToken;
+    }
+  }
+
+  if (!hasConfig) {
+    throw new Error('Antigravity 本地连接信息尚未就绪，请稍后重试');
+  }
+  if (!token) {
+    throw new Error('Antigravity 本地鉴权信息尚未就绪，请稍后重试');
+  }
+
+  return {
+    origin,
+    page,
+    ...(extraMeta.port ? { port: extraMeta.port } : {}),
+    ...(Array.isArray(extraMeta.pages) ? { pages: extraMeta.pages } : {}),
+    origins: Array.isArray(origins) && origins.length ? origins : [origin],
+    call: async (method, body) =>
+      JSON.parse(
+        await request(\`\${origin}/exa.language_server_pb.LanguageServerService/\${method}\`, body, token)
+      )
+  };
+}
+
+/**
+ * 连接到本地 Antigravity LanguageServerService。
+ * 支持直接传入已知 \`options.origin\` 免 CDP/DevToolsActivePort 直连，亦可通过 CDP 发现所有运行窗口原点。
+ */
+async function connect(options = {}) {
+  if (
+    options &&
+    options.origin !== undefined &&
+    options.origin !== null &&
+    String(options.origin).trim() !== ''
+  ) {
+    const explicitOrigin = normalizeLoopbackOrigin(options.origin);
+    if (!explicitOrigin) {
+      throw new Error('非法的本机回环页面地址');
+    }
+    return connectOrigin(explicitOrigin, null, [explicitOrigin]);
+  }
+  const { port, page, pages } = await discoverAntigravityCdp(options);
+  const origins = Array.from(
+    new Set((Array.isArray(pages) ? pages : [page]).map(item => normalizeLoopbackOrigin(item?.url)).filter(Boolean))
+  );
+  const targetOrigin = normalizeLoopbackOrigin(page.url);
+  return connectOrigin(targetOrigin, page, origins, { port, pages });
+}
+
+module.exports = {
+  connect,
+  connectOrigin,
+  normalizeLoopbackOrigin,
+  parseExplicitPort,
+  getAppDataDir,
+  getDevToolsActivePort,
+  getCandidateCdpPorts,
+  discoverAntigravityCdp,
+  connectCdpWebSocket,
+  createCdpClient,
+  HANS_CANDIDATE_PORTS
+};`;
+
+    const synthDir = path.join(tmpRoot, 'synth-csrf');
+    await fsp.mkdir(synthDir, { recursive: true });
+    const patchedLocalApiBuf = patchContextLocalApi(syntheticLocalApi);
+    await fsp.writeFile(path.join(synthDir, 'local-api.js'), patchedLocalApiBuf);
+    const cjsRequire = createRequire(import.meta.url);
+    const synthApi = cjsRequire(path.join(synthDir, 'local-api.js'));
+
+    const uSrv = await startMockLsServer({ htmlCsrfToken: '', acceptedTokens: ['u-boot-tok', 'u-daemon-tok'], onRpc: makeMockQuotaRpcs() });
+    const uDaemon = await fsp.mkdtemp(path.join(tmpRoot, 'u-daemon-'));
+    try {
+      // authBootstrap match
+      const c1 = await synthApi.connect({
+        origin: uSrv.origin,
+        authBootstrap: { getActiveLsBaseUrl: () => uSrv.origin, getActiveLsCsrfToken: () => 'u-boot-tok' },
+      });
+      assert.equal((await c1.call('GetUserStatus', {})).userStatus.email, 'fixture@example.invalid');
+      // authBootstrap mismatch + empty daemon fails closed
+      await assert.rejects(
+        () => synthApi.connect({
+          origin: uSrv.origin,
+          daemonDir: uDaemon,
+          authBootstrap: { getActiveLsBaseUrl: () => `http://127.0.0.1:${uSrv.port + 1}`, getActiveLsCsrfToken: () => 'u-boot-tok' },
+        }),
+        /本地鉴权信息尚未就绪/,
+      );
+      // daemon_hub live match (ignoring dead PID & wrong port)
+      await fsp.writeFile(path.join(uDaemon, 'hub_dead.json'), JSON.stringify({ pid: 999999, httpPort: uSrv.port, csrfToken: 'dead' }));
+      await fsp.writeFile(path.join(uDaemon, `hub_${uSrv.port}.json`), JSON.stringify({ pid: process.pid, httpPort: uSrv.port, csrfToken: 'u-daemon-tok' }));
+      const c2 = await synthApi.connect({ origin: uSrv.origin, authBootstrap: null, daemonDir: uDaemon, isPidAlive: (p) => p === process.pid });
+      assert.equal((await c2.call('GetUserStatus', {})).userStatus.email, 'fixture@example.invalid');
+    } finally {
+      await uSrv.close();
+    }
+
+    const patchedRenderer = patchContextMeterRenderer(
+      "      const csrf = window.__APP_CONFIG__?.csrfToken; if (!csrf) throw new Error('后台尚未就绪');\n" +
+      "    const csrf = typeof window !== 'undefined' ? window.__APP_CONFIG__?.csrfToken : null;\n",
+    ).toString('utf8');
+    assert.equal((patchedRenderer.match(/agy_session_csrf_token/g) || []).length, 2);
+    console.log('UNIT PASS 6: 2.34+ context-viewer CSRF patchers & authBootstrap/daemon_hub behavior');
+    console.log('ALL 6 UNIT TESTS PASSED');
   } finally {
     await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
   }
@@ -278,7 +632,27 @@ async function runE2eTests() {
     assert.ok(!customSchemeSrc.includes('agy_zhcn_autofollow_hook.json'), 'Old userData hook path still present');
     assert.ok(!fs.existsSync(path.join(r1.stageDir, '.work')), '.work staging dir was not cleaned up');
     assert.ok(fs.existsSync(path.join(r1.stageDir, 'result.json')), 'Audit receipt missing');
-    console.log('E2E PASS 1: full 4-layer reconcile on official 2.34.0');
+    // Extract dist/* from the reconciled 2.34.0 ASAR and verify 2.34+ CSRF auth behavior end-to-end
+    const extractedDist = path.join(tmpRoot, 'case1-extracted-dist');
+    const reconciledBuf = await fsp.readFile(patchedAsarPath);
+    const { header: recHeader, body: recBody } = unpackAsar(reconciledBuf);
+    for (const [rel, entry] of walkAsar(recHeader)) {
+      if (rel.startsWith('dist/') && !entry.unpacked && entry.offset !== undefined) {
+        const dest = path.join(extractedDist, rel.slice('dist/'.length));
+        await fsp.mkdir(path.dirname(dest), { recursive: true });
+        await fsp.writeFile(dest, recBody.subarray(Number(entry.offset), Number(entry.offset) + entry.size));
+      }
+    }
+    // The collector has a secondary status read that omits fixture options.
+    const previousMeterTestMode = process.env.AG_METER_TEST_MODE;
+    process.env.AG_METER_TEST_MODE = '1';
+    try {
+      await verifyPatchedContextDistBehavior(extractedDist, tmpRoot);
+    } finally {
+      if (previousMeterTestMode === undefined) delete process.env.AG_METER_TEST_MODE;
+      else process.env.AG_METER_TEST_MODE = previousMeterTestMode;
+    }
+    console.log('E2E PASS 1: full 4-layer reconcile + 2.34+ CSRF auth gate on official 2.34.0');
 
     // Test 2: Idempotency fast-path
     const mtimeBefore = fs.statSync(patchedAsarPath).mtimeMs;

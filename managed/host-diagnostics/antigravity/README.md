@@ -11,10 +11,16 @@
 ## 复测更新后的应用
 
 1. 从官方渠道更新。核对新版本的可执行文件与安装包来源，然后记录这次从官方包取得的 `resources/app.asar` SHA-256。保留能恢复本次更新的原包和对应程序版本。
-2. 运行以下检查。已有窗口时添加 `-Restart`，它会正常关闭 Antigravity，再通过原桌面快捷方式开一个新实例。检查记录应用版本和归档哈希、两个进程的代理设置、匿名 Google OAuth 响应及 WSL 启动观察。匿名请求以 `HTTP 400` 和 `invalid_request` 验证连通性。Google 账户授权在应用中完成。
+2. 运行以下检查。已有窗口时添加 `-Restart`，它会正常关闭 Antigravity，再通过原桌面快捷方式开一个新实例；叠加了 `context-viewer` 时加 `-CheckContextViewer` 同步验收本地鉴权与额度状态。检查记录应用版本和归档哈希、两个进程的代理设置、匿名 Google OAuth 响应及 WSL 启动观察。匿名请求以 `HTTP 400` 和 `invalid_request` 验证连通性。Google 账户授权在应用中完成。
 
 ```powershell
-& './managed/host-diagnostics/antigravity/Test-AntigravityDesktop.ps1' -ExpectedArchiveSha256 '<已核实的官方包或本地已批准补丁哈希>' -Restart
+& './managed/host-diagnostics/antigravity/Test-AntigravityDesktop.ps1' -ExpectedArchiveSha256 '<已核实的官方包或本地已批准补丁哈希>' -Restart -CheckContextViewer
+```
+
+只读诊断当前运行中的 Antigravity 本地鉴权与额度状态（单命令脱敏输出 `daemon/hub_*.json`、`GET /` `__APP_CONFIG__`、带/不带 CSRF 的 RPC 状态码、以及精简版 `accounts_v1.json` 摘要，不输出 token 或历史 `quotaIntervals`）：
+
+```powershell
+node ./managed/host-diagnostics/antigravity/Get-AntigravityQuotaHealth.cjs
 ```
 
 3. 无 WSL 运行时或发行版的机器用于复测安装提示。检查同时使用有界进程采样和新启动的应用日志，采样可能漏过极短命进程。发现安装提示、`wsl.exe` 启动记录或 WSL 探测错误时，检查新包的 WSL 探测逻辑，再决定是否适配补丁。结果目录中的 `result.json` 记录验证通过的组合。
