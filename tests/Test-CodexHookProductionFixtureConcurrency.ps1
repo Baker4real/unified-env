@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 Set-StrictMode -Version Latest
@@ -11,7 +11,7 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
-$fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test\production-registration-repair'
+$fixtureRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'reports\codex-hook-deployment-test\production-registration-repair'
 $mutexName = Get-CodexHookProductionFixtureLifecycleMutexName
 $readyName = "Local\CodexHookProductionFixtureReady-$([guid]::NewGuid().ToString('N'))"
 $ready = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $readyName)

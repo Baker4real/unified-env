@@ -1,5 +1,5 @@
-param(
-    [string]$ProjectRoot = 'D:\agents\projects\统一环境',
+﻿param(
+    [string]$ProjectRoot = (Split-Path -Path $PSScriptRoot -Parent),
     [switch]$KeepOutputs
 )
 

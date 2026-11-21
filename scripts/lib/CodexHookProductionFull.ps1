@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 
 function Get-CodexHookProductionFullProfile {
     [pscustomobject][ordered]@{
@@ -17,7 +17,7 @@ function Get-CodexHookProductionFullProfile {
 }
 
 function Get-CodexHookProductionFullFixtureProfile {
-    $root = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test\production-full'
+    $root = Join-Path (Get-CodexHookFixtureRoot) 'production-full'
     [pscustomobject][ordered]@{
         profileId = 'codex-hook-production-full-v1'
         isFixtureAdapter = $true
@@ -53,7 +53,7 @@ function Assert-CodexHookProductionFullProfile {
             if ($Profile.$name -cne $expected.$name) { throw "production full fixed profile 漂移：$name" }
         }
     } else {
-        $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test\production-full'
+        $fixtureRoot = Join-Path (Get-CodexHookFixtureRoot) 'production-full'
         foreach ($name in @('manifestPath','sourceRoot','codexHome','hooksRoot','registryPath','planOutputDir','planPath','evidenceRoot')) {
             if (-not (Test-CodexHookPathWithin -Path ([string]$Profile.$name) -ParentPath $fixtureRoot)) { throw "production full fixture path 越界：$name" }
         }

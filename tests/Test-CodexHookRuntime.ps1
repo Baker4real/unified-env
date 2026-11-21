@@ -1,8 +1,10 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$canonicalProjectRoot = 'D:\agents\projects\统一环境'
 $runtimePath=Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
 . $runtimePath
+. (Join-Path $projectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
 $manifestPath=Join-Path $projectRoot 'managed\codex-hooks\manifest.json'
 $managedRoot=Split-Path -Parent $manifestPath
 $manifest=Get-Content -Raw -LiteralPath $manifestPath|ConvertFrom-Json -Depth 100
@@ -63,16 +65,17 @@ finally {
     $stdinBlocker.Dispose()
 }
 
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot $managedRoot) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
 $forbiddenWrapperTokens=@('C:\Program Files\nodejs','python313-official','D:\hermes-data\.npm-global\python.exe')
-$activeWrappers=@($manifest.files|Where-Object{$_.lifecycle -ceq 'active' -and $_.relativePath -like 'hooks/*.cmd'})
-Assert-True ($activeWrappers.Count -eq 9) '必须验证全部 9 个 active cmd wrapper（含过渡闭包中的历史入口）'
+$activeWrappers=@($hostManifest.files|Where-Object{$_.lifecycle -ceq 'active' -and $_.relativePath -like 'hooks/*.cmd'})
+Assert-True ($activeWrappers.Count -eq 5) '必须验证全部 5 个现役 active cmd wrapper'
 foreach($file in $activeWrappers){
-    $wrapperPath=Join-Path $managedRoot $file.relativePath
+    $wrapperPath=Join-Path $managedRoot ($file.relativePath.Replace('/','\'))
     $text=Get-Content -Raw -LiteralPath $wrapperPath
-    $owners=@($file.ownerHookIds|ForEach-Object{$id=$_;@($manifest.hooks|Where-Object{$_.id -ceq $id -and $_.lifecycle -ceq 'active'})})
+    $owners=@($file.ownerHookIds|ForEach-Object{$id=$_;@($hostManifest.hooks|Where-Object{$_.id -ceq $id -and $_.lifecycle -ceq 'active'})})
     Assert-True ($owners.Count -eq 1) "active wrapper 必须有唯一 active owner：$($file.relativePath)"
-    $owner=$owners[0];$expectedRuntime=[string]$manifest.runtimes.($owner.runtimeId)
-    Assert-True ($text.Contains('"'+$expectedRuntime+'"')) "wrapper 必须只调用 manifest runtime：$($file.relativePath)"
+    $owner=$owners[0];$expectedRuntime=[string]$hostManifest.runtimes.($owner.runtimeId)
+    Assert-True ($text.Contains('"'+$expectedRuntime+'"')) "wrapper 必须只调用 host-preflight manifest runtime：$($file.relativePath)"
     if ($file.relativePath -in @('hooks/serena-reminder-guarded.cmd','hooks/serena-cleanup-guarded.cmd','hooks/serena-activation-reminder.cmd')) {
         Assert-True ($text -notmatch '%\*') "Serena behavior wrapper 不得接受外部参数：$($file.relativePath)"
     }
@@ -80,13 +83,41 @@ foreach($file in $activeWrappers){
         Assert-True ($text -match '(?m)%\*\s*$') "wrapper 必须保留 %*：$($file.relativePath)"
     }
     if ($file.relativePath -in @('hooks/codex-state-preflight.cmd','hooks/serena-reminder-guarded.cmd','hooks/serena-cleanup-guarded.cmd','hooks/serena-activation-reminder.cmd')) {
-        $productionOwner=@($hostManifest.hooks|Where-Object { [IO.Path]::GetFileName([string]$_.wrapperPath) -ceq [IO.Path]::GetFileName([string]$file.liveRelativePath) })
-        Assert-True ($productionOwner.Count -eq 1 -and $productionOwner[0].launcherRuntimeId -ceq 'pythonw' -and $productionOwner[0].launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py') "console lifecycle hook 必须声明 launcher dependency：$($file.relativePath)"
-        Assert-True ($text.Contains('"D:\Codex\tools\python314-official\pythonw.exe" -I -S -B -X utf8') -and $text.Contains('lib\hidden-console-launcher.py')) "console lifecycle wrapper 必须通过隔离 hidden launcher 启动：$($file.relativePath)"
+        $expectedLauncherRuntime=[string]$hostManifest.runtimes.($owner.launcherRuntimeId)
+        Assert-True ($owner.launcherRuntimeId -ceq 'pythonw' -and $owner.launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py') "console lifecycle hook 必须声明 launcher dependency：$($file.relativePath)"
+        Assert-True ($text.Contains('"'+$expectedLauncherRuntime+'" -I -S -B -X utf8') -and $text.Contains('lib\hidden-console-launcher.py')) "console lifecycle wrapper 必须通过隔离 hidden launcher 启动：$($file.relativePath)"
     }
     Assert-True ($text -match '(?m)^exit /b %ERRORLEVEL%\s*$') "wrapper 必须透传退出码：$($file.relativePath)"
     foreach($token in $forbiddenWrapperTokens){Assert-True (-not $text.Contains($token)) "wrapper 禁止旧 runtime：$token"}
     Assert-True ($text -notmatch '(?im)(^|[\s\"])(python)(?:\.exe)?([\s\"]|$)') "wrapper 禁止裸 python：$($file.relativePath)"
+}
+$legacyWrapperTempRoot=Join-Path ([IO.Path]::GetTempPath()) ("codex-hook-runtime-legacy-" + [Guid]::NewGuid().ToString('N'))
+try {
+    [void][IO.Directory]::CreateDirectory($legacyWrapperTempRoot)
+    $legacyRuntimeExpectations = [ordered]@{
+        'hooks/codex-projectless-root-d.cmd' = [string]$manifest.runtimes.python
+        'hooks/codex-provider-stability-guard.cmd' = [string]$manifest.runtimes.pwsh
+        'hooks/serena-activate-guarded.cmd' = [string]$manifest.runtimes.pwsh
+        'hooks/serena-dashboard-guard.cmd' = [string]$manifest.runtimes.pwsh
+    }
+    foreach ($removedRelativePath in (Get-CodexHookRemovedLegacyCmdRelativePaths)) {
+        $tempCmdPath = Join-Path $legacyWrapperTempRoot ($removedRelativePath.Replace('/', '\'))
+        [void](Write-CodexHookLegacyCmdFixtureFile -Path $tempCmdPath -RelativePath $removedRelativePath)
+        $legacyText = Get-Content -Raw -LiteralPath $tempCmdPath
+        if ($removedRelativePath -ceq 'retired/codex-mobile-permission-guard.cmd') {
+            Assert-True ($legacyText.Contains('python313-official') -and $legacyText.Contains('D:\hermes-data\.npm-global\python.exe')) '动态生成的 retired mobile guard 必须保留被禁止的历史 runtime 特征'
+        } else {
+            $expectedLegacyRuntime = [string]$legacyRuntimeExpectations[$removedRelativePath]
+            Assert-True ($legacyText.Contains('"' + $expectedLegacyRuntime + '"')) "隔离临时目录动态生成的历史 wrapper 必须调用历史 runtime：$removedRelativePath"
+            Assert-True ($legacyText -match '(?m)%\*\s*$') "历史 wrapper 样本必须保留 %*：$removedRelativePath"
+            Assert-True ($legacyText -match '(?m)^exit /b %ERRORLEVEL%\s*$') "历史 wrapper 样本必须透传退出码：$removedRelativePath"
+            foreach ($token in $forbiddenWrapperTokens) { Assert-True (-not $legacyText.Contains($token)) "历史 active wrapper 样本禁止退役 runtime：$token" }
+        }
+    }
+} finally {
+    if ([IO.Directory]::Exists($legacyWrapperTempRoot)) {
+        Remove-Item -LiteralPath $legacyWrapperTempRoot -Recurse -Force
+    }
 }
 
 $githubSource=Get-Content -Raw -LiteralPath (Join-Path $managedRoot 'hooks\codex-github-cli-guard.ps1')
@@ -157,9 +188,13 @@ Assert-True ((ConvertTo-CodexHookRedactedUri 'http://user:secret@example.com:808
 Assert-CodexSerenaSessionStartOutputBytes -Bytes $reorderedSerenaOutput
 Assert-True ($runtimeSource.Contains('function Receive-CodexHookBoundedProcessStream')) 'shared runtime 必须在 timeout/kill 后使用有界 stdout/stderr drain helper'
 
-$fixtureRoot='D:\agents\projects\统一环境\reports\codex-hook-runtime-test'
+$fixtureRoot=Join-Path $projectRoot 'reports\codex-hook-runtime-test'
+$serenaFixtureRoot=Join-Path $projectRoot 'reports\codex-hook-serena-fixture'
+$syntheticRoot=Join-Path $projectRoot 'reports\codex-hook-serena-synthetic'
+$serenaHealthRoot=Join-Path $canonicalProjectRoot 'reports\codex-hook-health-test'
 if(Test-Path -LiteralPath $fixtureRoot){Remove-Item -LiteralPath $fixtureRoot -Recurse -Force}
 [IO.Directory]::CreateDirectory($fixtureRoot)|Out-Null
+try{
 $target=Join-Path $fixtureRoot 'config.toml';$backups=Join-Path $fixtureRoot 'backups';[IO.Directory]::CreateDirectory($backups)|Out-Null
 [IO.File]::WriteAllText($target,"old=true`n",[Text.UTF8Encoding]::new($false));$old=[IO.File]::ReadAllBytes($target);$oldHash=Get-CodexHookSha256 $target
 Assert-Throws { Write-CodexHookAtomicText -Path $target -Text 'bad' -Validator {throw 'invalid'} -BackupRoot $backups -ExpectedBeforeSha256 $oldHash } 'invalid'
@@ -247,7 +282,7 @@ try{for($i=0;$i -lt 40 -and -not(Test-Path $abandonedMarker);$i++){Start-Sleep -
 $process=Invoke-CodexHookProcess -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' -ArgumentList @('-NoProfile','-Command','[Console]::Out.Write("ok")')
 Assert-True ($process.exitCode -eq 0 -and $process.stdout -ceq 'ok') 'process helper 必须捕获输出与退出码'
 
-$serenaFixtureRoot='D:\agents\projects\统一环境\reports\codex-hook-serena-fixture'
+$serenaFixtureRoot=Join-Path $projectRoot 'reports\codex-hook-serena-fixture'
 if(Test-Path -LiteralPath $serenaFixtureRoot){Remove-Item -LiteralPath $serenaFixtureRoot -Recurse -Force}
 [IO.Directory]::CreateDirectory($serenaFixtureRoot)|Out-Null
 $serenaFixtureScript=Join-Path $serenaFixtureRoot 'serena-hooks-fixture.ps1'
@@ -312,7 +347,7 @@ Assert-True (-not $serenaSource.Contains('$stdoutTask.GetAwaiter().GetResult()')
 Assert-True (-not $serenaSource.Contains('$stderrTask.GetAwaiter().GetResult()')) 'Serena activate 不得在 WaitForExit 后无界等待 stderr task'
 Remove-Item -LiteralPath $serenaFixtureRoot -Recurse -Force
 
-$syntheticRoot='D:\agents\projects\统一环境\reports\codex-hook-serena-synthetic'
+$syntheticRoot=Join-Path $projectRoot 'reports\codex-hook-serena-synthetic'
 if(Test-Path -LiteralPath $syntheticRoot){Remove-Item -LiteralPath $syntheticRoot -Recurse -Force}
 [IO.Directory]::CreateDirectory($syntheticRoot)|Out-Null
 $syntheticHome=Join-Path $syntheticRoot '.serena'
@@ -347,8 +382,8 @@ $cleanup=@(Invoke-SerenaVendor @('cleanup','--client=codex') ("{`"session_id`":`
 Assert-True ($cleanup.exitCode -eq 0 -and -not(Test-Path -LiteralPath (Join-Path $syntheticHome "hook_data\$syntheticSession"))) 'Serena vendor cleanup 必须清除 fixture session state'
 Remove-Item -LiteralPath $syntheticRoot -Recurse -Force
 
-$healthRoot=[IO.Path]::GetFullPath('D:\agents\projects\统一环境\reports\codex-hook-health-test')
-$reportsRoot=[IO.Path]::GetFullPath((Join-Path $projectRoot 'reports') + '\')
+$healthRoot=[IO.Path]::GetFullPath((Join-Path $canonicalProjectRoot 'reports\codex-hook-health-test'))
+$reportsRoot=[IO.Path]::GetFullPath((Join-Path $canonicalProjectRoot 'reports') + '\')
 Assert-True ($healthRoot.StartsWith($reportsRoot,[StringComparison]::OrdinalIgnoreCase) -and $healthRoot -ieq (Join-Path $reportsRoot 'codex-hook-health-test')) 'health fixture 必须严格位于项目 reports 固定目录'
 try{
     if(Test-Path $healthRoot){Remove-Item $healthRoot -Recurse -Force}
@@ -403,7 +438,7 @@ Write-CodexHookLatestHealthCore -HookId $HookId -Payload $payload -HealthRoot $R
     foreach($id in @('provider-stability','serena-activate','serena-dashboard','github-cli')){$path=Join-Path $healthRoot "$id.json";Assert-True (Test-Path $path) "health writer 必须隔离写入 $id.json";$doc=Get-Content -Raw $path|ConvertFrom-Json;Assert-True ($doc.hookId -ceq $id) 'health 文件不得交叉覆盖'}
     $single=New-Health 'provider-stability';$single.errors=[string[]]@('one');$healthOutput=@(Write-CodexHookLatestHealthCore -HookId 'provider-stability' -Payload $single -HealthRoot $healthRoot -AllowFixtureRoot);Assert-True ($healthOutput.Count -eq 0) 'single-error health 写入不得污染 stdout'
     foreach($id in @('provider-stability','serena-activate','serena-dashboard','github-cli')){$raw=Get-Content -Raw (Join-Path $healthRoot "$id.json");$json=[Text.Json.JsonDocument]::Parse($raw);try{Assert-True ($json.RootElement.GetProperty('errors').ValueKind -eq [Text.Json.JsonValueKind]::Array) 'health errors JSON token 必须稳定为 array'}finally{$json.Dispose()}}
-    $reconcilerFixtureRoot=Join-Path $projectRoot ('.scratch\host-hook-reconciliation-tests-'+[guid]::NewGuid().ToString('N'))
+    $reconcilerFixtureRoot=Join-Path $canonicalProjectRoot ('.scratch\host-hook-reconciliation-tests-'+[guid]::NewGuid().ToString('N'))
     $reconcilerCodexHome=Join-Path $reconcilerFixtureRoot 'runtime canary & path\.codex'
     $reconcilerHealth=Join-Path $reconcilerCodexHome 'run-evidence\codex-hook-health'
     [IO.Directory]::CreateDirectory($reconcilerCodexHome)|Out-Null
@@ -428,7 +463,13 @@ Write-CodexHookLatestHealthCore -HookId $HookId -Payload $payload -HealthRoot $R
     }finally{if(Test-Path -LiteralPath $reconcilerFixtureRoot){Remove-Item -LiteralPath $reconcilerFixtureRoot -Recurse -Force}}
     $astErrors=$null;$tokens=$null;[void][Management.Automation.Language.Parser]::ParseFile((Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'),[ref]$tokens,[ref]$astErrors);Assert-True ($astErrors.Count -eq 0) 'runtime AST 必须合法'
 }finally{
-    if(Test-Path $healthRoot){Remove-Item $healthRoot -Recurse -Force}
+    if(Test-Path -LiteralPath $healthRoot){Remove-Item -LiteralPath $healthRoot -Recurse -Force}
+}
+}finally{
+    if(Test-Path -LiteralPath $serenaHealthRoot){Remove-Item -LiteralPath $serenaHealthRoot -Recurse -Force}
+    if(Test-Path -LiteralPath $fixtureRoot){Remove-Item -LiteralPath $fixtureRoot -Recurse -Force}
+    if(Test-Path -LiteralPath $serenaFixtureRoot){Remove-Item -LiteralPath $serenaFixtureRoot -Recurse -Force}
+    if(Test-Path -LiteralPath $syntheticRoot){Remove-Item -LiteralPath $syntheticRoot -Recurse -Force}
 }
 Assert-True (-not(Test-Path $healthRoot)) 'health fixture 必须在测试结束时清理'
 $startJobViolations = [Collections.Generic.List[string]]::new()

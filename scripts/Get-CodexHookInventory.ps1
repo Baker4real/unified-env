@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$ManifestPath,
     [switch]$LegacyFixtureManifest,
@@ -120,7 +120,7 @@ if ($codexHomePath -ine $manifestCodexHome) {
     throw "CodexHome 与 manifest.codexHome 不一致：$codexHomePath"
 }
 
-$projectReportsRoot = 'D:\agents\projects\统一环境\reports'
+$projectReportsRoot = Join-Path (Get-CodexHookCheckoutRoot) 'reports'
 $allowedOutputRoots = @(
     Join-Path $projectReportsRoot 'codex-hook-inventory'
     Join-Path $projectReportsRoot 'codex-hook-inventory-test'

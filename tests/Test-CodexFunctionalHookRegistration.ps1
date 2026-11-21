@@ -1,5 +1,5 @@
-param(
-    [string]$ProjectRoot = 'D:\agents\projects\统一环境',
+﻿param(
+    [string]$ProjectRoot = (Split-Path -Path $PSScriptRoot -Parent),
     [ValidateSet('acl','legacy','final')][string]$OnlyPostPhase,
     [switch]$OnlyRestoreContract,
     [switch]$OnlyRestoreThirdVersion,
@@ -28,6 +28,8 @@ function Get-Sha256([string]$Path) {
 }
 
 . (Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1')
+. (Join-Path $ProjectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
 
 function Invoke-HiddenChildProcess {
     [CmdletBinding(DefaultParameterSetName = 'ArgumentList')]
@@ -177,7 +179,8 @@ foreach ($file in @($manifest.files)) {
     $sourceHashesBefore[$file.relativePath] = Get-Sha256 (Join-Path $ProjectRoot "managed\codex-hooks\$($file.relativePath)")
 }
 
-$testRoot = Join-Path $ProjectRoot ('.scratch\host-hook-reconciliation-tests-' + [guid]::NewGuid().ToString('N'))
+$canonicalFixtureProjectRoot = 'D:\agents\projects\统一环境'
+$testRoot = Join-Path $canonicalFixtureProjectRoot ('.scratch\host-hook-reconciliation-tests-' + [guid]::NewGuid().ToString('N'))
 $codexHome = Join-Path $testRoot 'functional hooks & canary\.codex'
 $scriptPath = Join-Path $ProjectRoot 'scripts\Invoke-CodexHostHookReconciliation.ps1'
 $realSerenaHomeBefore = [Environment]::GetEnvironmentVariable('SERENA_HOME', 'User')
@@ -530,7 +533,7 @@ try {
     Assert-True ($stateWrapper.Contains('pythonw.exe', [System.StringComparison]::OrdinalIgnoreCase) -and $stateWrapper.Contains('lib\hidden-console-launcher.py', [System.StringComparison]::OrdinalIgnoreCase)) 'state wrapper 未通过 hidden launcher 启动'
     Assert-True ($stateWrapper -notmatch '(?i)https?://|curl|check[-_]?network|check[-_]?auth') 'state lifecycle wrapper 含网络/认证能力'
 
-    $stateFixtureParent = Join-Path $ProjectRoot 'reports\codex-state-preflight-test'
+    $stateFixtureParent = Join-Path $canonicalFixtureProjectRoot 'reports\codex-state-preflight-test'
     $stateFixtureRoot = Join-Path $stateFixtureParent ([guid]::NewGuid().ToString('N'))
     $stateFixtureHome = Join-Path $stateFixtureRoot 'codex-home'
     $fixtureUtf8 = [System.Text.UTF8Encoding]::new($false)
@@ -693,7 +696,9 @@ try {
     $legacyHome = Join-Path $testRoot 'legacy-delete\.codex'
     $legacyPath = Join-Path $legacyHome 'hooks\codex-mobile-permission-guard.cmd'
     New-FunctionalHookFixture -CodexHome $legacyHome
-    [IO.File]::WriteAllText($legacyPath, 'approved-legacy-bytes', $fixtureUtf8)
+    $dynamicLegacyMobileCmd = Get-CodexHookRemovedLegacyCmdTextByLiveName -LiveName 'codex-mobile-permission-guard.cmd'
+    Assert-True (-not [string]::IsNullOrWhiteSpace($dynamicLegacyMobileCmd)) '必须动态生成 codex-mobile-permission-guard.cmd 历史夹具样本'
+    [IO.File]::WriteAllText($legacyPath, $dynamicLegacyMobileCmd, $fixtureUtf8)
     $replacementContent = 'third-party-replacement-must-survive'
     $env:CODEX_HOST_HOOK_TEST_LEGACY_DELETE_REPLACE = ([ordered]@{
         targetPath = $legacyPath
@@ -758,7 +763,7 @@ try {
         $postHome = Join-Path $testRoot "post-$postPhase\.codex"
         New-FunctionalHookFixture -CodexHome $postHome
         $postLegacyPath = Join-Path $postHome 'hooks\codex-mobile-permission-guard.cmd'
-        [IO.File]::WriteAllText($postLegacyPath, "legacy-before-$postPhase", $fixtureUtf8)
+        [IO.File]::WriteAllText($postLegacyPath, $dynamicLegacyMobileCmd, $fixtureUtf8)
         $postNestedLegacyPath = Join-Path $postHome 'hooks\__pycache__\codex-mobile-permission-guard.cpython-313.pyc'
         New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($postNestedLegacyPath)) | Out-Null
         [IO.File]::WriteAllText($postNestedLegacyPath, "nested-legacy-before-$postPhase", $fixtureUtf8)

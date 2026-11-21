@@ -1,5 +1,5 @@
-param(
-    [string]$ProjectRoot = "D:\agents\projects\统一环境",
+﻿param(
+    [string]$ProjectRoot = (Split-Path -Path $PSScriptRoot -Parent),
     [switch]$KeepOutputs,
     [switch]$OnlyEnvironmentPostCommitRollback,
     [string]$CleanupFixturePath
@@ -65,6 +65,8 @@ function Assert-SafeTestRoot {
 }
 
 . (Join-Path $ProjectRoot 'modules\codex-host\CodexHostHookEvidence.ps1')
+. (Join-Path $ProjectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
+Assert-True -Condition (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) -Message '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
 $liveScope = Resolve-CodexHostHookEvidenceScope -ResolvedCodexHome 'D:\Codex\.codex'
 Assert-True -Condition ($liveScope.isLive -eq $true -and $liveScope.isFixture -eq $false) -Message 'live CodexHome 必须解析为 production scope'
 Assert-True -Condition ($liveScope.runEvidenceRoot -eq ([IO.Path]::GetFullPath('D:\agents\run-evidence'))) -Message 'live runEvidenceRoot 必须锚定新根'
@@ -484,7 +486,12 @@ prompt: |
     foreach ($name in $legacyNames) {
         $legacyPath = Join-Path $hookDirectory $name
         New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($legacyPath)) | Out-Null
-        Set-Content -LiteralPath $legacyPath -Value "fixture:$name" -Encoding UTF8
+        $legacyCmdText = Get-CodexHookRemovedLegacyCmdTextByLiveName -LiveName $name
+        if ($null -ne $legacyCmdText) {
+            [System.IO.File]::WriteAllText($legacyPath, $legacyCmdText, [System.Text.UTF8Encoding]::new($false))
+        } else {
+            Set-Content -LiteralPath $legacyPath -Value "fixture:$name" -Encoding UTF8
+        }
     }
     Set-Content -LiteralPath (Join-Path $hookDirectory "keep-me.txt") -Value "unknown-file-must-survive" -Encoding UTF8
     New-Item -ItemType Directory -Force -Path (Join-Path $hookDirectory "unknown-nested") | Out-Null

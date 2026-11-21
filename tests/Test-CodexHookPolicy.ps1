@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -6,6 +6,7 @@ $PolicyPath = Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1'
 if (Test-Path -LiteralPath $PolicyPath) {
     . $PolicyPath
 }
+. (Join-Path $ProjectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
 
 function Assert-True {
     param(
@@ -419,9 +420,58 @@ foreach ($forbiddenLivePath in @(
     'codex-projectless-root-d.js',
     'codex-mobile-permission-guard.cmd',
     'codex-mobile-permission-guard.py',
+    'codex-provider-stability-guard.cmd',
+    'serena-activate-guarded.cmd',
+    'serena-dashboard-guard.cmd',
     'serena-auto-approve.cmd'
 )) {
     Assert-True (@($hostPreflightManifest.files | Where-Object liveRelativePath -ceq $forbiddenLivePath).Count -eq 0) "production manifest 不得包含退役双写/auto-approve 文件：$forbiddenLivePath"
+}
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
+Assert-Throws { Read-CodexHookManifest -Path 'D:\arbitrary\manifest.json' | Out-Null } '任意路径不得绕过 manifest 固定读取 allowlist'
+foreach ($removedRelativePath in (Get-CodexHookRemovedLegacyCmdRelativePaths)) {
+    $removedLeaf = [IO.Path]::GetFileName($removedRelativePath)
+    $injectedHostManifest = Copy-TestDocument $hostPreflightManifest
+    $injectedHostManifest.files = @($injectedHostManifest.files) + @([pscustomobject][ordered]@{
+        relativePath = $removedRelativePath
+        liveRelativePath = $removedLeaf
+        sha256 = Get-CodexHookBytesSha256 -Bytes (Get-CodexHookRemovedLegacyCmdBytes -RelativePath $removedRelativePath)
+        lifecycle = if ($removedRelativePath.StartsWith('retired/', [StringComparison]::Ordinal)) { 'retired' } else { 'active' }
+        ownerHookIds = @('codex-state-preflight')
+    })
+    if ($removedRelativePath.StartsWith('retired/', [StringComparison]::Ordinal)) {
+        $injectedHostManifest.files[-1] | Add-Member -NotePropertyName deleteLive -NotePropertyValue $false
+    }
+    Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $injectedHostManifest | Out-Null } "host-preflight manifest 必须继续拒绝已移除历史 .cmd：$removedRelativePath"
+}
+$legacyPolicyFixtureDir = Join-Path ([IO.Path]::GetTempPath()) ("codex-hook-policy-legacy-" + [Guid]::NewGuid().ToString('N'))
+try {
+    [void][IO.Directory]::CreateDirectory($legacyPolicyFixtureDir)
+    foreach ($removedRelativePath in (Get-CodexHookRemovedLegacyCmdRelativePaths)) {
+        $fixtureCmdPath = Join-Path $legacyPolicyFixtureDir ($removedRelativePath.Replace('/', '\'))
+        [byte[]]$generatedBytes = Write-CodexHookLegacyCmdFixtureFile -Path $fixtureCmdPath -RelativePath $removedRelativePath
+        $manifestEntry = @($legacyFixtureManifest.files | Where-Object relativePath -ceq $removedRelativePath)
+        Assert-True ($manifestEntry.Count -eq 1) "legacy fixture manifest 必须保留历史夹具元数据：$removedRelativePath"
+        Assert-True ((Get-CodexHookBytesSha256 -Bytes $generatedBytes) -ceq [string]$manifestEntry[0].sha256) "隔离临时目录动态生成的历史 .cmd 必须匹配 legacy fixture manifest SHA-256：$removedRelativePath"
+        $generatedText = [IO.File]::ReadAllText($fixtureCmdPath)
+        if ($removedRelativePath -ceq 'retired/codex-mobile-permission-guard.cmd') {
+            Assert-True ($generatedText.Contains('python313-official') -and $generatedText.Contains('codex-mobile-permission-guard.py')) '动态生成的 retired mobile guard 样本必须保留退役特征'
+        } else {
+            $ownerId = [string]@($manifestEntry[0].ownerHookIds)[0]
+            $legacyOwnerHook = @($legacyFixtureManifest.hooks | Where-Object id -ceq $ownerId)[0]
+            $refFacts = Get-CodexHookWrapperReferenceFacts `
+                -WrapperText $generatedText `
+                -RuntimePath ([string]$legacyFixtureManifest.runtimes.($legacyOwnerHook.runtimeId)) `
+                -ImplementationPath ([string]$legacyOwnerHook.implementationPath) `
+                -RuntimeId ([string]$legacyOwnerHook.runtimeId) `
+                -WrapperPath ([string]$legacyOwnerHook.wrapperPath)
+            Assert-True ($refFacts.parseState -ceq 'matched' -and $refFacts.referencesRuntime -and $refFacts.referencesImplementation) "隔离临时目录动态生成的历史包装器必须满足 legacy wrapper 解析契约：$removedRelativePath"
+        }
+    }
+} finally {
+    if ([IO.Directory]::Exists($legacyPolicyFixtureDir)) {
+        Remove-Item -LiteralPath $legacyPolicyFixtureDir -Recurse -Force
+    }
 }
 Assert-True (@($legacyFixtureManifest.hooks).Count -gt @($hostPreflightManifest.hooks).Count) 'legacy fixture manifest 必须保留历史测试闭包，而非伪装 production manifest'
 $stateGuardSource = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'managed\codex-hooks\hooks\codex-state-policy-guard.py')
@@ -430,7 +480,10 @@ Assert-True ($stateGuardSource.Contains('path_mode: str = "inventory"')) 'state 
 Assert-True ($stateGuardSource.Contains('approved_map: object = None')) 'state guard 必须要求显式 approved map 才能修复路径'
 Assert-True ($stateGuardSource.Contains('permission policy sources conflict')) '策略来源冲突必须 fail closed'
 Assert-True (@($managedManifest.hooks).Count -eq 8) '兼容 manifest 必须继续覆盖 Task 1-5 的当前 hook 模型'
-Assert-True (@($managedManifest.files).Count -eq 24) '兼容 manifest 必须纳入 state preflight、hidden launcher、Serena behavior wrapper 与 provider core 的完整文件闭包'
+Assert-True (@($managedManifest.files).Count -eq 22) '兼容 manifest 移除 2 个孤立历史 .cmd 后必须保留 22 个过渡文件闭包'
+foreach ($orphanedRelativePath in @('retired/codex-mobile-permission-guard.cmd', 'hooks/serena-activate-guarded.cmd')) {
+    Assert-True (@($managedManifest.files | Where-Object relativePath -ceq $orphanedRelativePath).Count -eq 0) "兼容 manifest 不得保留已移除的孤立历史 .cmd：$orphanedRelativePath"
+}
 Assert-True (@($legacyFixtureManifest.files).Count -eq 16) 'legacy fixture manifest 必须冻结 13 active + 3 retired 历史事务闭包'
 Assert-True (
     @($hostPreflightManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.py').Count -eq 1 -and
