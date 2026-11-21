@@ -295,7 +295,7 @@ function Invoke-PolicyTool {
         $arguments.ApprovedCandidatePolicySha256 = $ApprovedCandidatePolicySha256
     }
     if ($ConfirmManualReviewOperationIds.Count -gt 0) {
-        # 宿主 .cmd 链只能传单个字符串：多个 operation id 以 '::' 连接。
+        # pwsh -File 调用链只能传单个字符串：多个 operation id 以 '::' 连接。
         $arguments.ConfirmManualReviewOperationIds = ($ConfirmManualReviewOperationIds -join '::')
     }
     if ($StopAfterPhase -gt 0) {

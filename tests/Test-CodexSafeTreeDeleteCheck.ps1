@@ -501,7 +501,7 @@ try {
         })
 
     # 4. 多目标：TargetPaths 按输入顺序逐个返回，每行与该目标单独 Check 的结果相同；顶层 allowed 只在全部放行时
-    #    为 true。宿主 .cmd 链只能传单个字符串，'::' 连接的形式与数组形式结果逐字节相同。
+    #    为 true。pwsh -File 调用链只能传单个字符串，'::' 连接的形式与数组形式结果逐字节相同。
     $multiCases = @(
         @{
             label = '多目标（显式 root）'; arguments = @{ TargetPaths = @($candidatePath, $strayPath, $deepPath); CapabilityRoot = $workspaceRoot }

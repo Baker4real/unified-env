@@ -141,7 +141,7 @@ function Invoke-ArchiveBatch {
 function Invoke-FixtureEntryProcess {
     param([Parameter(Mandatory)][string[]]$Arguments)
 
-    # 宿主 .cmd → gate shim 链以 pwsh -File 传参，每个参数都是单个字符串。stdout 按 Latin1 逐字节
+    # 宿主 gate shim 链以 pwsh -File 传参，每个参数都是单个字符串。stdout 按 Latin1 逐字节
     # 解码，不依赖子进程控制台代码页；调用方只断言 ASCII 内容。
     $start = [Diagnostics.ProcessStartInfo]::new([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName)
     $start.UseShellExecute = $false
