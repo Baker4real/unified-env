@@ -259,7 +259,17 @@ $gateHolderRawMutex = $null
 $gateHolderRawMutexOwned = $false
 $gateHolderDeniedStateRoot = $null
 
-$currentClosure = (Get-CodexSafeTreeDeleteClosure -ProjectRoot $projectRoot).closureSha256
+$closureFixedPaths = @(Get-CodexSafeTreeDeleteClosureFixedPaths)
+Assert-True ($closureFixedPaths.Count -gt 0) 'source closure 固定清单不得为空'
+foreach ($fixedPath in $closureFixedPaths) {
+    Assert-True (-not $fixedPath.EndsWith('.cmd', [StringComparison]::OrdinalIgnoreCase)) "source closure 不得包含已退役 .cmd 启动器：$fixedPath"
+    $fixedFullPath = Join-Path $projectRoot ($fixedPath -replace '/', '\')
+    Assert-True ([IO.File]::Exists($fixedFullPath)) "source closure 固定清单路径在仓库中不存在：$fixedPath"
+}
+Assert-True (@([IO.Directory]::GetFiles((Join-Path $projectRoot 'scripts'), '*safe-tree-delete*.cmd')).Count -eq 0) 'scripts 目录下不得残留已退役的 safe-tree-delete .cmd 启动器'
+$currentClosureObject = Get-CodexSafeTreeDeleteClosure -ProjectRoot $projectRoot
+Assert-True (@($currentClosureObject.files | Where-Object { ([string]$_.repoRelativePath).EndsWith('.cmd', [StringComparison]::OrdinalIgnoreCase) }).Count -eq 0) 'source closure 产物不得包含已退役 .cmd 启动器'
+$currentClosure = $currentClosureObject.closureSha256
 
 # 密封化：部署 validation 子进程默认走 default variant（csharp walker）；清除套件级
 # CODEX_SAFE_TREE_DELETE_PLAN_CSHARP_WALKER 预设（如 fixture-base env=0 轮），结束时恢复。
