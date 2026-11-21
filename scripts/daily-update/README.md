@@ -9,11 +9,11 @@
 
 ### Microsoft Store 身份预检
 
-`store-update-gate.py prepare --config <当次.json>` 通过微软官方 Store manifest 验证精确 product ID、x64/user/msstore 与 PFN；同一产品的任一候选身份矛盾都会拒绝，不能用旧匹配版本掩盖新错误身份。prepare 不执行安装，apply 重新核对配置、目标与已注册包后才调用官方 winget。只提供 upgrade/install，没有 uninstall 或强制替换分支；主应用缺失时必须已获恢复授权并显式选择 install。
+`store-update-gate.py prepare --config <当次.json>` 核对微软官方 Store manifest 的产品 ID、包系列、x64、user 和 msstore。Codex 另读 Store 产品事件、AppX 暂存事件及 Windows 的实际暂存路径和 Store 来源。记录新版的 `stage_record` 后才能走精确注册分支。`occupied_record` 存在时记录此前的 `0x80073D02`。暂无可注册暂存时走原有 WinGet `msstore` 入口，发现已知新版仍待注册时保持人工核查。主应用缺失时，已获恢复授权后显式选择 `install`。
 
 配置：
 ~~~json
-{"run_directory":"D:/agents/run-evidence/daily-codex-ecosystem-update/<yyyyMMdd-HHmmss>","product_id":"9PLM9XGG6VKS","source":"msstore","package_family":"OpenAI.Codex_2p2nqsd0c76g0","operation":"upgrade"}
+{"run_directory":"D:/agents/run-evidence/daily-codex-ecosystem-update/<yyyyMMdd-HHmmss>","product_id":"9PLM9XGG6VKS","source":"msstore","package_family":"OpenAI.Codex_2p2nqsd0c76g0","operation":"upgrade","rollback_archive":"store-rollback/ChatGPT-x64-<旧版本>.msix"}
 ~~~
 
 ~~~powershell
@@ -21,7 +21,20 @@ python scripts/daily-update/store-update-gate.py prepare --config <当次.json>
 python scripts/daily-update/store-update-gate.py apply --config <同一当次.json>
 ~~~
 
-apply 只写新 intent/result，重复执行拒绝；旧注册仍在必须由后置观察证明，查询失败记 unknown，不把“未发 uninstall”说成已回滚。Codex Store 更新成功后自动进入下方受管修复收尾；installation_ok 与 closeout_ok 都通过才算成功。版本由已注册包读回，不信 Store 展示名称或安装退出码。
+Codex 升级前将独立取得的旧版官方 x64 MSIX 保存在当次目录。`prepare` 比对归档签名、包身份及已安装旧版的 manifest、块映射、包签名、主程序。`apply_ready: true` 才可应用。`apply` 重验当次计划和归档 SHA-256，使用 `Add-AppxPackage -MainPackage <精确包名> -Register` 注册已证实的暂存包。精确服务和已知扩展宿主会暂时退出。发现其他应用进程时保留人工核查。
+
+`installation_ok` 记录部署和注册观察。Codex 还须通过装载签名、沙箱服务镜像、实际插件采用及受管菜单和闭包验收。`official-client-refresh-pending` 退出 `2`，保留本次 Apply 收据，等待用户启动官方客户端。用新的回执名续验，避免重放安装。
+
+~~~powershell
+python -B scripts/daily-update/store-update-gate.py verify --config <同一当次.json> --receipt store-update/verify-after-client.json
+python -B scripts/daily-update/codex-store-plugins.py --expected-appx-version <已注册版本>
+~~~
+
+独立插件探针为只读。`codex-plugins` 发布单位绑定已检验的 `verified` 版本明细和健康 `post-refresh` 收据。新流程可绑定同时包含这两项的 Store Apply 或 Verify 回执。修复失败并获准回退时，用 `store-update-gate.py rollback --config <同一当次.json>` 恢复旧注册包。保留 Apply 和 Rollback 的各自收据。另行核对应用配置中的版本化路径，以及回退后的客户端和插件行为。
+
+### HTTP 发布包元数据
+
+检查发布包长度、时间或摘要型 ETag 时使用 `python -B scripts/daily-update/http-metadata.py <公开无参数URL>`。默认遵循本机代理，显式直连加 `--direct`。输出只含 HTTP 状态码和通过格式检查的长度、UTC 时间、32 或 64 位十六进制 ETag。发生重定向或 HTTP 错误时只记录状态码，其他网络失败只记录固定错误码。包身份由请求前确定的官方产品和版本绑定，归档仍须独立验签。
 
 ### 提权前阶段合同
 
@@ -76,7 +89,7 @@ node D:\agents\projects\统一环境\scripts\daily-update\gen-ledger-tsv.cjs <ou
 ```
 
 默认账本 `D:/Codex/.codex/skills/.downloaded-skills-source-state.json`。
-输出 `<outDir>\ledger-github-sources.tsv`,并打印行数与状态计数。
+从 `sources` 导出现役来源，排除已标为 `deleted-by-user` 的来源和没有现役技能的显式空组。`deleted` 历史只用于统计。输出 `<outDir>\ledger-github-sources.tsv`，并打印行数与状态计数。每次执行网络扫描前在本次目录重新生成 TSV。
 
 ## 2. sweep-lsremote.sh(网络只读,约 90 秒)
 
@@ -87,8 +100,8 @@ $env:HTTPS_PROXY=$PROXY
 
 前置:`<outDir>` 已有 `ledger-github-sources.tsv`。输出 `lsremote-results.tsv`、
 `lsremote-errors.log`、`tags-check.tmp`;传入上次结果时另输出 `sweep-diff-output.txt`。
-`sweep-exclude.txt` 列出的 repo 键不请求网络,结果行为 `EXCLUDED`。只放非 GitHub
-必败源,真实上游失败须查清原因,不得排除。代理由环境变量传入。
+`sweep-exclude.txt` 列出的 repo 键不请求网络，结果行为 `EXCLUDED`。只放非 GitHub
+必败源，真实上游失败须查清原因，不得排除。扫描器在联网前拒绝列数错误或含退役状态的 TSV。收到 `regenerate ledger-github-sources.tsv` 时重新生成当次输入。代理由环境变量传入。
 
 ## 3. sweep-diff.cjs(纯本地,sweep 传入 prev 时已自动调用)
 ```
@@ -221,7 +234,7 @@ python scripts/daily-update/preflight-summary.py runtime-command --component npm
 {"status":"processed","evidence":["git-before.json","health-step.json","health-spec.json"],"checks":[{"path":"git-before.json","equals":{"ok":true,"dirty_age_gate_failed":false}},{"path":"health-step.json","spec":"health-spec.json"}]}
 ~~~
 
-单步 spec 的 `equals` 包含 `ok: true` 和该事务所需的版本、状态等谓词。涉及新装共享技能时，登记该技能 `deliver` 收据，并核验 `ok: true` 和 `status: "distributed"`。检查点使用 `finalize_schema_version: 1`，记录时区明确的实际 `completed_at`、`scope_manifest_sha256`、`scope_total`、`status` 和全部五项计数（`processed`、`failed`、`pending`、`skipped`、`running`）。只有稳定位于已核验 scope 内的可跳过项记录 `skipped`。出现失败的硬门槛时，在对应单位和检查点保持 `failed`。
+单步 spec 的 `equals` 包含 `ok: true` 和该事务所需的版本、状态等谓词。新装共享技能保留各阶段收据，并核验 `deliver` 的 `ok: true` 和 `status: "distributed"`。已分发技能的同名 guarded 更新核验 `verify` 的 `ok: true`、`status: "verified"` 和 `guarded_operation: "update"`。待核查的 Magpie 写入仍阻塞发布。检查点使用 `finalize_schema_version: 1`，记录时区明确的实际 `completed_at`、`scope_manifest_sha256`、`scope_total`、`status` 和全部五项计数（`processed`、`failed`、`pending`、`skipped`、`running`）。只有稳定位于已核验 scope 内的可跳过项记录 `skipped`。出现失败的硬门槛时，在对应单位和检查点保持 `failed`。
 
 ~~~powershell
 python -B scripts/daily-update/finalize-run.py --run-directory <当次目录> --index-path <当次目录>/resume-index.json
@@ -242,7 +255,9 @@ python -B scripts/daily-update/stage-skill-candidates.py stage --config <当次�
 python -B scripts/daily-update/stage-skill-candidates.py verify --config <同一配置>
 ~~~
 
-新安装用 `mode: "install"` 和 `old_commit: null`。从仓库根提取时用 `upstream_path: "."`。每项写 `skills/staging/<skill>/receipt.json`，记录上游提交、当前 active 载荷和候选哈希。`stage` 可复用校验通过的候选，`verify` 只读。无完成收据时从新 attempt 暂存该项。遇到合并冲突或哈希漂移时记录对应阻塞。使用返回的 `candidate_path` 做审阅，需调整 overlay 时在单独的待审副本中编辑，再交给 guarded wrapper 的候选校验和安装事务，显式指定 `--name <skill>`。
+新安装用 `mode: "install"` 和 `old_commit: null`。从仓库根提取时用 `upstream_path: "."`。每项写 `skills/staging/<skill>/receipt.json`，记录上游提交、当前 active 载荷和候选哈希。`stage` 可复用校验通过的候选，`verify` 只读。无完成收据时从新 attempt 暂存该项。遇到合并冲突或哈希漂移时记录对应阻塞。
+
+调整 overlay 时在当次证据目录内创建独立审阅副本。生成 guarded decision 后、激活前，使用 `verify --config <原配置> --reviewed-candidate <审阅副本绝对路径>`。比对返回的 `candidate_tree_sha256` 和 `skill_md_sha256` 与 decision 的 `candidate_integrity`。二者对应同一副本后，让 guarded wrapper 以该份 decision 复验并激活，显式指定 `--name <skill>`。`candidate-line-ending-crlf` 指向相对于已绑定上游新增 CRLF 的文本。修复审阅副本后重新生成指纹，保留上游原有 CRLF。原暂存和收据均作为审阅基线。
 
 ## 共享技能分发
 

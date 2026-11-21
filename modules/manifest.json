@@ -737,6 +737,8 @@
         "scripts/daily-update/kimi-runtime-transaction.py",
         "scripts/daily-update/preflight-summary.py",
         "scripts/daily-update/store-update-gate.py",
+        "scripts/daily-update/codex-store-plugins.py",
+        "scripts/daily-update/http-metadata.py",
         "scripts/daily-update/Invoke-ElevatedUpdate.ps1",
         "scripts/daily-update/Test-UpdateScriptParameters.ps1",
         "scripts/daily-update/post-update-closeout.py",
@@ -745,7 +747,7 @@
         "scripts/daily-update/stage-skill-candidates.py",
         "scripts/daily-update/shared-skill-delivery.py"
       ],
-      "dependsOn": ["host-safety", "skill-supply-chain"],
+      "dependsOn": ["host-safety", "skill-supply-chain", "dev-environment"],
       "transitionalDependencies": [],
       "ownership": {
         "files": [],
@@ -771,6 +773,8 @@
             "tests/Test-SkillCandidateStaging.py",
             "tests/Test-SharedSkillDelivery.py",
             "tests/Test-StoreUpdateGate.py",
+            "tests/Test-CodexStorePlugins.py",
+            "tests/Test-DailyUpdateHttpMetadata.py",
             "tests/Test-ElevatedUpdateContract.py",
             "tests/Test-PostUpdateCloseout.py",
             "tests/Test-DailyReportSummary.py"

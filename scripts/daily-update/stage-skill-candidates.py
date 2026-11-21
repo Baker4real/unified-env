@@ -465,8 +465,35 @@ def candidate_result(status, binding, receipt, candidate, active, payload, candi
                 changed_paths=samples, omitted_path_count=len(changed) - len(samples))
 
 
-def stage_or_verify(action, config_path):
+def validate_line_endings(payload, incoming, staged=None):
+    for path, data in sorted(payload.items()):
+        if path == SOURCE or not isinstance(data, bytes) or b'\r\n' not in data:
+            continue
+        try:
+            data.decode('utf-8')
+        except UnicodeDecodeError:
+            continue
+        if re.search(rb'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', data):
+            continue
+        baseline = incoming.get(path, (staged or {}).get(path))
+        if isinstance(baseline, bytes):
+            crlf = baseline.count(b'\r\n')
+            if crlf and baseline.count(b'\n') == crlf:
+                continue  # The authoritative file already uses CRLF throughout.
+            if crlf and data.count(b'\r\n') <= crlf:
+                continue  # Preserve pre-existing mixed endings without increasing CRLF.
+        raise StageError('candidate-line-ending-crlf', path=sample_path(path))
+
+
+def stage_or_verify(action, config_path, reviewed_path=None):
     config, writer, repo, active_path = config_context(config_path)
+    reviewed = None
+    if reviewed_path is not None:
+        reviewed = absolute_d(reviewed_path)
+        if (action != 'verify' or not reviewed.is_relative_to(writer.root)
+                or overlaps(reviewed, writer.root / 'skills' / 'staging')
+                or any(overlaps(reviewed, root) for root in (repo, active_path.parent))):
+            raise StageError('invalid-reviewed-candidate-path')
     git = Git(repo)
     old_tree = git.subtree(config['old_commit'], config['upstream_path']) if config['mode'] == 'update' else None
     new_tree = git.subtree(config['new_commit'], config['upstream_path'])
@@ -501,7 +528,18 @@ def stage_or_verify(action, config_path):
         expected_record = receipt_record(binding, number, active_seal, candidate_seal)
         if json.dumps(record, sort_keys=True) != json.dumps(expected_record, sort_keys=True):
             raise StageError('invalid-receipt')
-        return candidate_result(status, binding, receipt, candidate, active, payload, candidate_seal)
+        incoming = git.read_tree(new_tree)
+        validate_line_endings(payload, incoming, active)
+        if reviewed is None:
+            return candidate_result(status, binding, receipt, candidate, active, payload, candidate_seal)
+        review_payload = read_disk_tree(reviewed)
+        require_file(review_payload, SKILL, 'invalid-reviewed-candidate')
+        if review_payload.get(SOURCE) != payload.get(SOURCE):
+            raise StageError('candidate-provenance-drift')
+        validate_line_endings(review_payload, incoming, payload)
+        result = candidate_result('reviewed', binding, receipt, reviewed, active, review_payload, seal(review_payload))
+        result['skill_md_sha256'] = hashlib.sha256(review_payload[SKILL]).hexdigest()
+        return result
 
     if receipt_exists:
         return verify('reused' if action == 'stage' else 'verified')
@@ -522,6 +560,7 @@ def stage_or_verify(action, config_path):
     candidate = evidence_path(writer, attempt.relative_to(writer.root) / 'candidate')
     payload = replay_overlay(git, attempt, before, active, incoming) if old_tree is not None else incoming
     require_file(payload, SKILL, 'candidate-skill-missing')
+    validate_line_endings(payload, incoming, active)
     candidate_seal = seal(payload)
     materialize(candidate, payload)
     if seal(read_disk_tree(candidate)) != candidate_seal:
@@ -558,9 +597,10 @@ def main():
     parser = Parser(description=__doc__)
     parser.add_argument('action', choices=('stage', 'verify'))
     parser.add_argument('--config', required=True, help='Absolute path to a same-run one-skill JSON config')
+    parser.add_argument('--reviewed-candidate', help='Check a separate same-run review copy against the pinned upstream tree')
     try:
         args = parser.parse_args()
-        result = stage_or_verify(args.action, args.config)
+        result = stage_or_verify(args.action, args.config, args.reviewed_candidate)
         code = 0
     except StageError as exc:
         result, code = dict(ok=False, status=str(exc), **exc.details), 2

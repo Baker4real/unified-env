@@ -146,7 +146,8 @@ def check_step_receipt(receipt, spec_bytes, completed):
 def validate_shared_skill_delivery(json_evidence, checked_paths, processed):
     successful_status = {'register': 'dsh-verified', 'deliver': 'distributed', 'verify': 'verified'}
     identities = {}
-    delivered = set()
+    operations = {}
+    completed = set()
     for path, value in json_evidence.items():
         if not isinstance(value, dict) or value.get('receipt_kind') != 'shared-skill-delivery':
             continue
@@ -160,16 +161,51 @@ def validate_shared_skill_delivery(json_evidence, checked_paths, processed):
                 and 'dsh' in agents and len(agents) == len(set(agents)), 'invalid-shared-skill-delivery-identity')
         phase = value.get('phase')
         ok = value.get('ok')
+        operation = value.get('guarded_operation', 'install')
         require(int_equals(value.get('schema_version'), 1) and isinstance(phase, str) and phase in successful_status
-                and type(ok) is bool and value.get('status') == (successful_status[phase] if ok else 'pending'),
-                'invalid-shared-skill-delivery-stage')
+                and type(ok) is bool and value.get('status') == (successful_status[phase] if ok else 'pending')
+                and (operation == 'install' or (operation == 'update' and phase == 'verify'
+                     and sha256(value.get('transaction_manifest_sha256')))), 'invalid-shared-skill-delivery-stage')
         identity = (name, transaction)
         intended = frozenset(agents)
         require(identities.setdefault(identity, intended) == intended, 'shared-skill-delivery-target-conflict')
-        if ok and phase == 'deliver' and path in checked_paths:
-            delivered.add(identity)
+        require(operations.setdefault(identity, operation) == operation, 'shared-skill-operation-conflict')
+        required_phase = 'verify' if operation == 'update' else 'deliver'
+        if ok and phase == required_phase and path in checked_paths:
+            completed.add(identity)
     if processed:
-        require(identities.keys() == delivered, 'shared-skill-delivery-incomplete')
+        require(identities.keys() == completed, 'shared-skill-delivery-incomplete')
+
+
+def validate_codex_plugin_adoption(json_evidence, checked_paths):
+    spec = importlib.util.spec_from_file_location('codex_store_plugins', BASE / 'codex-store-plugins.py')
+    plugins = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(plugins)
+    values = [json_evidence[path] for path in checked_paths if isinstance(json_evidence[path], dict)]
+    closeout_checks = {'menu', 'closure', 'catalog', 'system_provenance'}
+    closeout_ok = any(value.get('ok') is True and value.get('status') == 'healthy'
+                      and value.get('phase') in ('Check', 'Apply') and isinstance(value.get('checks'), dict)
+                      and all(value['checks'].get(key) is True for key in closeout_checks) for value in values)
+    for value in values:
+        if value.get('ok') is not True:
+            continue
+        expected_version = None
+        if 'plugin_adoption' in value:
+            if value.get('phase') not in ('Apply', 'Verify') or value.get('closeout_ok') is not True:
+                continue
+            expected_version = value.get('observed_version')
+            if not isinstance(expected_version, str):
+                continue
+            value = value['plugin_adoption']
+        elif not closeout_ok:
+            continue
+        try:
+            receipt = plugins.validate_result(value, expected_appx_version=expected_version)
+        except plugins.Rejected:
+            continue
+        if receipt['ok'] is True and receipt['status'] == 'verified':
+            return
+    raise Refusal('codex-plugin-adoption-unverified')
 
 
 def validate_units(run, manifest, read_bound, completed):
@@ -216,6 +252,8 @@ def validate_units(run, manifest, read_bound, completed):
             checked_paths.add(path)
         require(not unchecked_steps, 'unchecked-step-receipt')
         validate_shared_skill_delivery(json_evidence, checked_paths, outcome == 'processed')
+        if name == 'codex-plugins' and outcome == 'processed':
+            validate_codex_plugin_adoption(json_evidence, checked_paths)
         counts[outcome] += 1
     require(seen == set(names), 'invalid-unit-scope')
     return counts

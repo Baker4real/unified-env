@@ -56,6 +56,39 @@ class FinalizeTests(unittest.TestCase):
             'counts': counts or {'processed': 1, 'failed': 0, 'pending': 0, 'skipped': 1, 'running': 0},
             'scope_total': 2, 'completed_at': (completed_at or self.now).isoformat()})
 
+    def test_codex_plugin_scope_requires_enabled_versions_not_just_green_exit(self):
+        unit = {'id': 'codex-plugins', 'status': 'processed', 'evidence': ['health.json', 'post-refresh.json'],
+                'checks': [{'path': 'health.json', 'equals': {'ok': True, 'status': 'verified'}},
+                           {'path': 'post-refresh.json', 'equals': {'ok': True, 'status': 'healthy'}}]}
+        optional = {'id': 'optional', 'status': 'skipped', 'evidence': []}
+        def plugin_run(label):
+            run = self.receipt(label, units=[unit, optional])
+            manifest = {'required_units': ['codex-plugins'], 'optional_units': ['optional'], 'units': [unit, optional]}
+            self.checkpoint(run, put(run / 'scope-manifest.json', manifest))
+            put(run / 'post-refresh.json', {'ok': True, 'status': 'healthy', 'schema_version': 1,
+                'phase': 'Check', 'checks': {key: True for key in ('menu', 'closure', 'catalog', 'system_provenance')}})
+            return run
+
+        run = plugin_run('plugins')
+        self.index(run)
+        proc, result = self.finalize(run)
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn('codex-plugin-adoption-unverified', json.dumps(result))
+        self.assertFalse(self.latest.exists())
+
+        row = {'plugin_id': 'chrome@openai-bundled', 'source_version': '1.2.3',
+               'marketplace_version': '1.2.3', 'enabled_version': '1.2.3', 'cache_version': '1.2.3'}
+        observed = {'schema_version': 1, 'ok': True, 'status': 'verified',
+                    'registered_package': 'OpenAI.Codex_26.1117.3838.0_x64__2p2nqsd0c76g0',
+                    'appx_version': '26.1117.3838.0', 'enabled_count': 1, 'adopted_count': 1,
+                    'pending_count': 0, 'primary_runtime_checked': False, 'bundled': [row], 'primary_runtime': []}
+        good = plugin_run('plugins-proof')
+        put(good / 'health.json', observed)
+        self.index(good)
+        proc, result = self.finalize(good)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertTrue(result['ok'])
+
     def index(self, run, previous=None, replace=False, document_state=None):
         args = ['--previous-run-directory', previous] if previous else []
         if document_state:
@@ -284,6 +317,27 @@ class FinalizeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(value['status'], 'published')
         self.assertEqual(self.latest.read_bytes(), (run / 'RESULT.md').read_bytes())
+
+    def test_checked_verify_closes_an_existing_skill_update(self):
+        verify = {'phase': 'verify', 'guarded_operation': 'update', 'transaction_manifest_sha256': 'b' * 64}
+        run = self.shared_delivery('update-verified', [verify], checked=[0])
+        result, value = self.finalize(run)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(value['status'], 'published')
+
+    def test_verify_cannot_replace_a_new_skill_distribution(self):
+        for label, receipts, reason in (
+            ('verify-install', [{'phase': 'verify', 'guarded_operation': 'install'}],
+             'shared-skill-delivery-incomplete'),
+            ('verify-mismatched', [{'phase': 'register'}, {'phase': 'verify', 'guarded_operation': 'update',
+              'transaction_manifest_sha256': 'b' * 64}], 'shared-skill-operation-conflict'),
+            ('verify-unbound-update', [{'phase': 'verify', 'guarded_operation': 'update'}],
+             'invalid-shared-skill-delivery-stage'),
+        ):
+            with self.subTest(label=label):
+                run = self.shared_delivery(label, receipts, checked=[len(receipts) - 1])
+                self.assertEqual(self.assert_refused(run)['reason'], reason)
+                self.assertFalse(self.latest.exists())
 
     def test_delivery_checks_bind_each_transaction_and_target_set(self):
         for label, retry, checked, reason in (

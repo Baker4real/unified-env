@@ -53,9 +53,14 @@ def proxy_summary(rows, git_proxy, user_proxy):
             continue
     configured = git.get('port') if git == user and git.get('status') == 'valid' else None
     candidate_ports = {row['port'] for row in listeners if re.fullmatch(r'(?:verge-)?mihomo|clash(?:-meta)?', row['process'], re.I)}
-    if not candidate_ports and configured is not None and any(row['port'] == configured for row in listeners):
-        candidate_ports = {configured}
-    selected = next(iter(candidate_ports)) if len(candidate_ports) == 1 else None
+    if configured in candidate_ports:
+        selected = configured
+    elif len(candidate_ports) == 1:
+        selected = next(iter(candidate_ports))
+    elif not candidate_ports and configured is not None and any(row['port'] == configured for row in listeners):
+        selected = configured
+    else:
+        selected = None
     consistent = selected is not None and git == user and git.get('port') == selected
     scheme = git.get('scheme') if git.get('port') == selected else user.get('scheme') if user.get('port') == selected else 'http'
     return dict(ok=selected is not None, status='resolved' if selected is not None else 'ambiguous-or-unavailable',

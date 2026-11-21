@@ -62,7 +62,11 @@ class GuardedSkill:
         require(record['name'] == name and Path(record['active']) == self.source
                 and record['activated'] is True, 'activation-does-not-bind-skill')
         self.seal = record['activated_payload_seal']
-        self.new_install = receipt['decision']['decision'] == 'install' and record['had_existing'] is False
+        operation = receipt['decision']['decision']
+        require((operation == 'install' and record['had_existing'] is False)
+                or (operation == 'update' and record['had_existing'] is True), 'invalid-guarded-operation')
+        self.new_install = operation == 'install'
+        self.operation = operation
         row, = receipt['catalog_verification']['skills']
         require(row['name'] == name and row['path'] == name, 'catalog-does-not-bind-skill')
         self.sha256 = row['skill_md_sha256']
@@ -405,7 +409,7 @@ def main():
                 output.update(name=skill.name, intended_agents=list(agents), preset=skill.preset, cwd=str(skill.cwd),
                               expected_model_invocable=skill.model_invocable, expected_user_invocable=skill.user_invocable,
                               transaction_id=skill.transaction, transaction_manifest=str(skill.manifest),
-                              transaction_manifest_sha256=skill.manifest_sha256)
+                              transaction_manifest_sha256=skill.manifest_sha256, guarded_operation=skill.operation)
                 output.update(advance(args.mode, skill, agents, magpie, probe_dsh))
             except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError,
                     http.client.HTTPException) as error:

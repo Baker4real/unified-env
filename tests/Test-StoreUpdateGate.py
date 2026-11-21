@@ -5,6 +5,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('store_gate', ROOT / 'scripts/daily-update/store-update-gate.py')
@@ -22,6 +23,40 @@ class StoreGateTests(unittest.TestCase):
         SPEC.loader.exec_module(self.gate)
         self.calls = []
         self.packages = [{'family': self.config['package_family'], 'version': '26.1106.6628.0', 'status': 'Ok'}]
+        self.stage = []
+        self.archive = self.run / 'old.msix'
+        self.archive.write_bytes(b'exact signed Store rollback fixture')
+        self.config['rollback_archive'] = self.archive.name
+        self.probe_calls = []
+        self.pending = False
+        def plugins(_version):
+            return {'ok': not self.pending, 'status': 'official-client-refresh-pending' if self.pending else 'verified'}
+        for target, name, replacement in ((self.gate.runtime, 'run_hidden', self.observe_worker),
+                                          (self.gate, 'verify_plugins', plugins)):
+            stub = patch.object(target, name, replacement)
+            stub.start()
+            self.addCleanup(stub.stop)
+
+    def observe_worker(self, argv, **kwargs):
+        self.probe_calls.append(argv)
+        if '-CurrentVersion' in argv and '-Mode' not in argv:
+            result = {'ok': True, 'offers': self.stage}
+        else:
+            mode, version = (argv[argv.index(flag) + 1] for flag in ('-Mode', '-Version'))
+            name = f'OpenAI.Codex_{version}_x64__2p2nqsd0c76g0'
+            result = dict(ok=True, phase=mode, version=version, full_name=name)
+            if mode == 'Proof':
+                result['archive'] = dict(signature='Valid', full_name=name, bytes=7, sha256='a' * 64)
+            elif mode == 'Verify':
+                result['signature_verified'] = True
+            else:
+                raise AssertionError(argv)
+        return {'status': 'exited', 'exit_code': 0, 'stdout': json.dumps(result), 'stderr': ''}
+
+    def staged_offer(self):
+        self.stage = [{'version': '26.1111.2228.0', 'full_name': 'OpenAI.Codex_26.1111.2228.0_x64__2p2nqsd0c76g0',
+                       'store_record': 201, 'stage_record': 400, 'occupied_record': 404}]
+        return self.stage[0]
 
     def metadata(self):
         return {'Data': {'PackageIdentifier': '9PLM9XGG6VKS', 'Versions': [{'Installers': [{
@@ -71,9 +106,79 @@ class StoreGateTests(unittest.TestCase):
         self.assertNotIn('uninstall', argv)
         self.assertEqual(result['observed_version'], '26.1111.2228.0')
 
+    def test_staged_exact_update_refuses_apply_without_verified_rollback(self):
+        observation = self.staged_offer()
+        self.config.pop('rollback_archive')
+        plan = self.prepare()
+        self.assertEqual(plan.get('staged'), observation)
+        with self.assertRaisesRegex(ValueError, 'store-rollback-unverified'):
+            self.apply()
+        self.assertFalse((self.run / 'store-update/apply-intent.json').exists())
+        self.assertEqual(self.calls, [])
+
+    def test_staged_occupied_offer_routes_to_exact_registration_and_pending_plugins(self):
+        observation = self.staged_offer()
+        self.pending = True
+        self.prepare()
+        result = self.apply()
+        self.assertTrue(result['installation_ok'])
+        self.assertEqual(result['mechanism'], 'register-staged')
+        self.assertEqual(result['registration']['full_name'], observation['full_name'])
+        self.assertEqual(self.calls[0][-6:], ['-Mode', 'Register', '-Version', observation['version'],
+                                            '-CurrentVersion', '26.1106.6628.0'])
+        self.assertIn('-ArchiveSha256', self.probe_calls[-2])
+        self.assertFalse(result['ok'])
+        self.assertIsNone(result['closeout_ok'])
+        self.assertEqual(result['status'], 'official-client-refresh-pending')
+
+        receipt = 'store-update/verify-after-client.json'
+        recheck = self.gate.verify(self.config, receipt, observer=self.observe)
+        self.assertEqual(recheck['status'], 'official-client-refresh-pending')
+        self.assertFalse(recheck['ok'])
+        self.assertTrue((self.run / receipt).exists())
+        self.assertEqual(len(self.calls), 1)
+
+    def test_winget_no_upgrade_does_not_clear_a_known_offer_without_registration(self):
+        self.staged_offer()['stage_record'] = None
+        self.stage[0]['occupied_record'] = None
+        self.prepare()
+        def no_offer(argv, **kwargs):
+            self.calls.append(argv)
+            return {'status': 'exited', 'exit_code': 0x8A15002B, 'stdout': '', 'stderr': ''}
+        result = self.gate.apply(self.config, fetcher=lambda _: self.metadata(), observer=self.observe,
+                                 runner=no_offer, winget='winget.exe')
+        self.assertEqual(result['mechanism'], 'winget')
+        self.assertEqual(result['status'], 'manual-review')
+        self.assertFalse(result['ok'])
+        self.assertTrue(result['previous_package_retained'])
+
+    def test_staged_plan_cannot_register_a_different_offer(self):
+        self.staged_offer()
+        self.prepare()
+        self.stage[0]['stage_record'] += 1
+        with self.assertRaisesRegex(ValueError, 'store-stage-drift'):
+            self.apply()
+        self.assertEqual(self.calls, [])
+
+    def test_independent_rollback_binds_target_current_version_and_archive_sha(self):
+        self.staged_offer()
+        self.prepare()
+        self.apply()
+        def restore(argv, **kwargs):
+            self.calls.append(argv)
+            self.packages[0]['version'] = '26.1106.6628.0'
+            return {'status': 'exited', 'exit_code': 0,
+                    'stdout': '{"ok":true,"signature_verified":true}', 'stderr': ''}
+        result = self.gate.rollback(self.config, observer=self.observe, runner=restore)
+        self.assertTrue(result['ok'])
+        self.assertEqual(self.calls[-1][-10:], ['-Mode', 'Rollback', '-Version', '26.1106.6628.0',
+            '-CurrentVersion', '26.1111.2228.0', '-Archive', str(self.archive), '-ArchiveSha256', 'a' * 64])
+        self.assertEqual(result['status'], 'restored')
+
     def test_source_drift_after_prepare_blocks_apply_before_execution(self):
         self.prepare()
-        self.config['package_family'] = 'Other.Package_123456789abcd'
+        self.config['operation'] = 'install'
+        self.config.pop('rollback_archive')
         with self.assertRaisesRegex(ValueError, 'plan-config-drift'):
             self.apply()
         self.assertEqual(self.calls, [])
@@ -99,6 +204,7 @@ class StoreGateTests(unittest.TestCase):
 
     def test_install_is_only_for_absent_main_package(self):
         self.config['operation'] = 'install'
+        self.config.pop('rollback_archive')
         with self.assertRaisesRegex(ValueError, 'install-requires-absent-package'):
             self.prepare()
         self.packages = []

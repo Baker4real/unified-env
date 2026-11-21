@@ -16,14 +16,15 @@ const j = JSON.parse(fs.readFileSync(LEDGER, 'utf8'));
 const rows = new Map();
 const allKeys = new Set();
 
-function addEntry(s, fallbackStatus) {
-  if (!s || !s.repo) return;
+function addEntry(s) {
+  if (!s || !s.repo || s.status === 'deleted-by-user') return;
+  if (Array.isArray(s.skills) && s.skills.length === 0) return;
   Object.keys(s).forEach((k) => allKeys.add(k));
   const repo = String(s.repo).replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
   if (!repo || repo.includes('/_/') || (!repo.includes('/'))) return;
   const key = repo + '|' + (s.ref || '');
   const skills = Array.isArray(s.skills) ? s.skills.join(',') : (s.skills || s.id || '');
-  const status = s.status || fallbackStatus || '';
+  const status = s.status || '';
   if (!rows.has(key)) {
     rows.set(key, { repo, ref: s.ref || '', commit: s.last_checked_commit || s.commit || '', status, skills });
   } else {
@@ -33,8 +34,7 @@ function addEntry(s, fallbackStatus) {
   }
 }
 
-for (const s of (j.sources || [])) addEntry(s, '');
-for (const d of (j.deleted || [])) addEntry(d, 'deleted-by-user');
+for (const s of (j.sources || [])) addEntry(s);
 
 const lines = [...rows.values()].map((r) => [r.repo, r.ref, r.commit, r.status, r.skills].join('\t'));
 fs.writeFileSync(OUT, lines.join('\n') + '\n', 'utf8');

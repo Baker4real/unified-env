@@ -56,8 +56,8 @@ class SkillCandidateStagingTests(unittest.TestCase):
         path.write_text(json.dumps(value), encoding='utf-8')
         return path
 
-    def invoke(self, config, action='stage'):
-        return subprocess.run([sys.executable, '-B', str(SCRIPT), action, '--config', str(config)],
+    def invoke(self, config, action='stage', *extra):
+        return subprocess.run([sys.executable, '-B', str(SCRIPT), action, '--config', str(config), *extra],
                               capture_output=True, timeout=40)
 
     def simple_update(self):
@@ -149,6 +149,35 @@ class SkillCandidateStagingTests(unittest.TestCase):
         self.assertNotEqual(Path(second['candidate_path']), abandoned)
         self.assertEqual((abandoned / 'sentinel').read_bytes(), b'untrusted interrupted attempt')
         self.assertEqual(first_receipt.read_bytes(), original_bytes)
+
+    def test_reviewed_copy_rejects_crlf_drift_and_preserves_official_crlf(self):
+        self.put(self.upstream, 'SKILL.md', BASE_SKILL)
+        official = b'official one\r\nofficial two\r\n'
+        self.put(self.upstream, 'reference.md', official)
+        cfg = self.config(None, self.commit(), mode='install')
+        staged = self.ready(cfg)
+        review = self.run / 'review' / 'sample'
+        original = Path(staged['candidate_path'])
+        receipt = Path(staged['receipt_path'])
+        original_receipt = receipt.read_bytes()
+        self.put(review, 'reference.md', official)
+        self.put(review, 'SKILL.md', BASE_SKILL.replace(b'local: old', b'local: reviewed').replace(b'\n', b'\r\n'))
+        result = self.invoke(cfg, 'verify', '--reviewed-candidate', str(review))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['status'], 'candidate-line-ending-crlf')
+        self.assertEqual(json.loads(result.stdout)['path'], 'SKILL.md')
+        self.assertEqual(receipt.read_bytes(), original_receipt)
+        self.assertEqual((original / 'SKILL.md').read_bytes(), BASE_SKILL)
+        self.assertFalse(self.local.exists())
+
+        self.put(review, 'SKILL.md', BASE_SKILL.replace(b'local: old', b'local: reviewed'))
+        result = self.invoke(cfg, 'verify', '--reviewed-candidate', str(review))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        checked = json.loads(result.stdout)
+        self.assertEqual(checked['status'], 'reviewed')
+        self.assertEqual(Path(checked['candidate_path']), review)
+        self.assertNotEqual(checked['candidate_tree_sha256'], staged['candidate_tree_sha256'])
+        self.assertEqual((review / 'reference.md').read_bytes(), official)
 
     def test_replay_refuses_config_active_and_candidate_drift_without_overwriting(self):
         old, new = self.simple_update()
