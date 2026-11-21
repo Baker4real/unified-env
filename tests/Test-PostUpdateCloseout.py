@@ -4,6 +4,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'scripts/daily-update/post-update-closeout.py'
@@ -38,7 +39,12 @@ class CloseoutTests(unittest.TestCase):
             result = {'candidate': str(candidate), 'decision_manifest': str(manifest)}
         elif ' plan ' in text:
             result = {'plan': str(self.run/'post-refresh/system/plan.json'), 'mode': 'atomic-six-skill-bootstrap'}
-        elif 'install-skill-guarded.cmd' in text:
+        elif 'install-skill-guarded.ps1' in text:
+            self.assertEqual(pathlib.Path(argv[0]).stem.lower(), 'pwsh', argv)
+            self.assertEqual(
+                argv[1:6],
+                ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', 'D:/Codex/.codex/scripts/install-skill-guarded.ps1'],
+            )
             result = {'status': 'validated' if '--dry-run' in argv else 'succeeded'}
             if '--dry-run' not in argv:
                 self.state = 'needs-skill-creator-overlay' if '--system-provenance-repair-plan' in argv else 'healthy'
@@ -62,7 +68,7 @@ class CloseoutTests(unittest.TestCase):
         result = self.module.closeout(self.run, repair=True, runner=self.runner)
         self.assertTrue(result['ok'])
         self.assertFalse(result['active_changes'])
-        self.assertFalse(any('install-skill-guarded.cmd' in ' '.join(c) or '--apply' in c for c in self.calls))
+        self.assertFalse(any('install-skill-guarded.ps1' in ' '.join(c) or 'install-skill-guarded.cmd' in ' '.join(c) or '--apply' in c for c in self.calls))
 
     def test_detected_refresh_runs_preserve_menu_guarded_repair_then_final_checks(self):
         self.state = 'needs-bootstrap'
@@ -71,11 +77,12 @@ class CloseoutTests(unittest.TestCase):
         commands = [' '.join(c) for c in self.calls]
         preserve = next(i for i,c in enumerate(commands) if 'preserve-official' in c)
         menu = next(i for i,c in enumerate(commands) if 'apply-skill-menu-i18n-overlay' in c and '--apply' in c)
-        guard = next(i for i,c in enumerate(commands) if 'install-skill-guarded.cmd' in c and '--dry-run' not in c)
+        guard = next(i for i,c in enumerate(commands) if 'install-skill-guarded.ps1' in c and '--dry-run' not in c)
         self.assertLess(preserve, menu)
         self.assertLess(menu, guard)
         self.assertEqual(self.state, 'healthy')
-        self.assertEqual(sum('install-skill-guarded.cmd' in c for c in commands), 4)
+        self.assertEqual(sum('install-skill-guarded.ps1' in c for c in commands), 4)
+        self.assertFalse(any('install-skill-guarded.cmd' in c or 'cmd.exe' in c.lower() for c in commands))
 
     def test_closeout_recovers_current_official_system_inventory(self):
         self.state = 'needs-bootstrap'
@@ -97,7 +104,16 @@ class CloseoutTests(unittest.TestCase):
         result = self.module.closeout(self.run, repair=False, runner=self.runner)
         self.assertFalse(result['ok'])
         self.assertEqual(result['status'], 'repair-required')
-        self.assertFalse(any('--apply' in c or 'install-skill-guarded.cmd' in ' '.join(c) for c in self.calls))
+        self.assertFalse(any('--apply' in c or 'install-skill-guarded.ps1' in ' '.join(c) or 'install-skill-guarded.cmd' in ' '.join(c) for c in self.calls))
+
+    def test_missing_pwsh_fails_closed_without_running_guard(self):
+        self.state = 'needs-bootstrap'
+        with mock.patch('shutil.which', return_value=None):
+            result = self.module.closeout(self.run, repair=True, runner=self.runner)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['status'], 'manual-review')
+        self.assertEqual(result['failed_step'], 'system-guard-pwsh-unavailable')
+        self.assertFalse(any('install-skill-guarded' in ' '.join(c) for c in self.calls))
 
     def test_unknown_or_partial_system_state_stops_without_mutation(self):
         self.state = 'needs-review'

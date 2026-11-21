@@ -150,7 +150,7 @@ intent: 记录家里设备的受控环境事实与差异
 ## Skill 安装入口
 
 - 活动 skill 根：`D:\Codex\.codex\skills`
-- 受守卫安装入口：`D:\Codex\.codex\scripts\install-skill-guarded.cmd`
+- 受守卫安装入口：`D:\Codex\.codex\scripts\install-skill-guarded.ps1`
 - 项目部署入口：`scripts\Deploy-SkillInstallGuarded.ps1`
 - 本机 catalog：`D:\Codex\.codex\skill-catalog\catalog.json`
 - 运行证据：`D:\agents\run-evidence\skill-install-guarded\`（2026-08-26 起从旧根 `D:\Codex\.codex\run-evidence\` 迁移至此）

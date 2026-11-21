@@ -36,7 +36,7 @@ import system_skill_provenance_repair as REPAIR  # noqa: E402
 DEFAULT_ACTIVE_ROOT = Path(r"D:\agents\skills-manager\skills")
 DEFAULT_CATALOG = Path(r"D:\Codex\.codex\skill-catalog\catalog.json")
 DEFAULT_PROVIDER = Path(r"D:\Codex\.codex\scripts\system_package_identity.py")
-WRAPPER_COMMAND = r"D:\Codex\.codex\scripts\install-skill-guarded.cmd"
+WRAPPER_COMMAND = r"pwsh -NoProfile -File D:\Codex\.codex\scripts\install-skill-guarded.ps1"
 MENU_COMMAND = r"node D:\Codex\.codex\scripts\apply-skill-menu-i18n-overlay.cjs --system-only"
 RUNBOOK = r"D:\Codex\.codex\docs\agent-guidance\skill-operations.md"
 TOOL_COMMAND = f'python -X utf8 "{Path(__file__).resolve()}"'
@@ -641,7 +641,7 @@ def _parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="prepare_system_provenance_repair.py",
-        description="为 install-skill-guarded.cmd 准备 .system 来源修复的输入；只读 active root。",
+        description="为 install-skill-guarded.ps1 准备 .system 来源修复的输入；只读 active root。",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser(

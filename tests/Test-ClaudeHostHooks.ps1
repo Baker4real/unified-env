@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string]$FixtureRoot = 'D:/agents/run-evidence/claude-host-hooks-fixtures')
 
 Set-StrictMode -Version Latest
@@ -109,6 +109,9 @@ foreach ($case in $denyCases) {
 
 $allowCases = @(
     @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1' -Mode Plan" } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = "& 'D:\Codex\.codex\scripts\install-skill-guarded.ps1' --help" } },
+    @{ tool_name = 'PowerShell'; tool_input = @{ command = "pwsh -NoProfile -File 'D:\Codex\.codex\scripts\install-skill-guarded.ps1' --help" } },
+    @{ tool_name = 'mcp__handoff-status__hand_off'; tool_input = @{ kind = 'run'; title = 'x'; command = "D:/Codex/.codex/scripts/install-skill-guarded.ps1 --candidate 'D:/x' --update"; shell = 'PowerShell 7（Terminal 面板）' } },
     @{ tool_name = 'PowerShell'; tool_input = @{ command = "gh issue view 1 --json 'number,title'" } },
     @{ tool_name = 'Bash'; tool_input = @{ command = 'git status' } },
     @{ tool_name = 'Bash'; tool_input = @{ command = 'git clone --no-hardlinks /d/agents/knowledge-base /d/agents/tmp/kb' } },
@@ -146,6 +149,9 @@ Assert-True ($handoffReason.Contains('hand_off') -and $handoffReason.Contains('/
 $asarCase = @{ tool_name = 'PowerShell'; tool_input = @{ command = 'rg -a -o wsl D:\x\resources\app.asar' } } | ConvertTo-Json -Compress
 $asarReason = ((Invoke-Guard $asarCase).stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecisionReason
 Assert-True ($asarReason.Contains('asar_extract.py grep') -and $asarReason.Contains('rg-and-grep-tool.md')) 'asar 拦截理由必须给出 asar_extract.py grep 和说明文档。'
+$skillsWriteCase = @{ tool_name = 'Write'; tool_input = @{ file_path = 'D:\agents\skills-manager\skills\retro\SKILL.md' } } | ConvertTo-Json -Compress
+$skillsWriteReason = ((Invoke-Guard $skillsWriteCase).stdout | ConvertFrom-Json).hookSpecificOutput.permissionDecisionReason
+Assert-True ($skillsWriteReason.Contains('D:\Codex\.codex\scripts\install-skill-guarded.ps1') -and -not $skillsWriteReason.Contains('install-skill-guarded.cmd')) 'skills 根写入拦截理由必须指向规范入口 install-skill-guarded.ps1。'
 
 # 引用脚本扫描走真实文件读取：运行含回收站调用的 .ps1 被拦，只读取它或运行无害内容放行。
 $fixtureDir = Join-Path $FixtureRoot ([guid]::NewGuid().ToString('N'))
