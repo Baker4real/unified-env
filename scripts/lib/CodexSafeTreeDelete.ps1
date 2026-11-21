@@ -1991,7 +1991,7 @@ function Assert-CodexSafeTreeDeleteDeletionAllowed {
 function Split-CodexSafeTreeDeleteListArgument {
     param([string[]]$Values)
 
-    # 宿主 .cmd 链只能传单个字符串：BatchPurge、Status 范围查询与 Check 的多个目标，多组 Archive 的
+    # pwsh -File 调用链每个参数只能传单个字符串：BatchPurge、Status 范围查询与 Check 的多个目标，多组 Archive 的
     # transaction path 与 approved SHA-256，都以 '::' 连接，在这里拆回数组。只拆分，不解析路径。
     $items = @($Values)
     if ($items.Count -eq 1 -and [string]$items[0] -match '::') {

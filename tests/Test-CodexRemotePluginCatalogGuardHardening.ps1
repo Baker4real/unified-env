@@ -10,7 +10,7 @@ $entryPath = Join-Path $projectRoot 'scripts\Invoke-CodexRemotePluginCatalogGuar
 $policyPath = Join-Path $projectRoot 'managed\remote-plugin-catalog-guard\policy.json'
 $handleIoPath = Join-Path $projectRoot 'scripts\lib\CodexHookHandleBoundIO.cs'
 $pwshPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
-$safeDeleteWrapper = 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd'
+$safeDeleteWrapper = 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1'
 $reportsRoot = Join-Path $projectRoot 'reports'
 $fixtureParent = Join-Path $reportsRoot ("catalog-guard-tests-{0}" -f ([guid]::NewGuid().ToString('N')))
 $fixtureRoot = Join-Path $fixtureParent '.codex'
@@ -818,15 +818,15 @@ function New-WatchStateFixture {
 
 function Remove-FixtureWithManagedDelete {
     if (-not [IO.Directory]::Exists($fixtureParent)) { return }
-    $planText = & $safeDeleteWrapper -Mode Plan -TargetPath $fixtureParent -CapabilityRoot $reportsRoot -Json
+    $planText = & $pwshPath -NoLogo -NoProfile -NonInteractive -File $safeDeleteWrapper -Mode Plan -TargetPath $fixtureParent -CapabilityRoot $reportsRoot -Json
     $planExit = $LASTEXITCODE
     Assert-True ($planExit -eq 0) "safe delete Plan 失败，exit=$planExit"
     $plan = $planText | ConvertFrom-Json -Depth 16
-    $applyText = & $safeDeleteWrapper -Mode Apply -PlanPath $plan.planPath -ApprovedPlanSha256 $plan.planSha256 -ConfirmApply -Json
+    $applyText = & $pwshPath -NoLogo -NoProfile -NonInteractive -File $safeDeleteWrapper -Mode Apply -PlanPath $plan.planPath -ApprovedPlanSha256 $plan.planSha256 -ConfirmApply -Json
     $applyExit = $LASTEXITCODE
     Assert-True ($applyExit -eq 0) "safe delete Apply 失败，exit=$applyExit"
     $apply = $applyText | ConvertFrom-Json -Depth 16
-    $purgeText = & $safeDeleteWrapper -Mode Purge -TransactionPath $apply.transactionPath -ApprovedTransactionSha256 $apply.transactionSha256 -ConfirmPurge -Json
+    $purgeText = & $pwshPath -NoLogo -NoProfile -NonInteractive -File $safeDeleteWrapper -Mode Purge -TransactionPath $apply.transactionPath -ApprovedTransactionSha256 $apply.transactionSha256 -ConfirmPurge -Json
     $purgeExit = $LASTEXITCODE
     Assert-True ($purgeExit -eq 0) "safe delete Purge 失败，exit=$purgeExit"
     $purge = $purgeText | ConvertFrom-Json -Depth 16

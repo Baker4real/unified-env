@@ -13,7 +13,7 @@ $guardPath = Join-Path $projectRoot 'managed\remote-plugin-catalog-guard\CodexRe
 $policyPath = Join-Path $projectRoot 'managed\remote-plugin-catalog-guard\policy.json'
 $handleIoPath = Join-Path $projectRoot 'scripts\lib\CodexHookHandleBoundIO.cs'
 $pwshPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
-$safeDeleteWrapper = 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd'
+$safeDeleteWrapper = 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1'
 $runId = '{0}-vendor-abort-after-clear-stress-{1}' -f [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'), [guid]::NewGuid().ToString('N')
 $evidenceDirectory = Join-Path $EvidenceRoot $runId
 $eventsPath = Join-Path $evidenceDirectory 'stress-events.jsonl'
@@ -250,15 +250,15 @@ function Remove-StressFixture {
     if (-not [IO.Directory]::Exists($fixtureParent)) {
         return [pscustomobject][ordered]@{ ok = $true; planExit = 0; applyExit = 0; purgeExit = 0 }
     }
-    $planText = & $safeDeleteWrapper -Mode Plan -TargetPath $fixtureParent -CapabilityRoot $reportsRoot -Json
+    $planText = & $pwshPath -NoLogo -NoProfile -NonInteractive -File $safeDeleteWrapper -Mode Plan -TargetPath $fixtureParent -CapabilityRoot $reportsRoot -Json
     $planExit = $LASTEXITCODE
     if ($planExit -ne 0) { throw "safe delete Plan failed: exit=$planExit" }
     $plan = $planText | ConvertFrom-Json -Depth 16
-    $applyText = & $safeDeleteWrapper -Mode Apply -PlanPath $plan.planPath -ApprovedPlanSha256 $plan.planSha256 -ConfirmApply -Json
+    $applyText = & $pwshPath -NoLogo -NoProfile -NonInteractive -File $safeDeleteWrapper -Mode Apply -PlanPath $plan.planPath -ApprovedPlanSha256 $plan.planSha256 -ConfirmApply -Json
     $applyExit = $LASTEXITCODE
     if ($applyExit -ne 0) { throw "safe delete Apply failed: exit=$applyExit" }
     $apply = $applyText | ConvertFrom-Json -Depth 16
-    $purgeText = & $safeDeleteWrapper -Mode Purge -TransactionPath $apply.transactionPath -ApprovedTransactionSha256 $apply.transactionSha256 -ConfirmPurge -Json
+    $purgeText = & $pwshPath -NoLogo -NoProfile -NonInteractive -File $safeDeleteWrapper -Mode Purge -TransactionPath $apply.transactionPath -ApprovedTransactionSha256 $apply.transactionSha256 -ConfirmPurge -Json
     $purgeExit = $LASTEXITCODE
     if ($purgeExit -ne 0) { throw "safe delete Purge failed: exit=$purgeExit" }
     $purge = $purgeText | ConvertFrom-Json -Depth 16

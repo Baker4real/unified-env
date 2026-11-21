@@ -16,8 +16,7 @@ fixture/staging 清理仍有既有调用，迁移状态为 `pending`，不得据
 
 ## 固定入口
 
-- 宿主入口（2026-09-03 入口契约，canonical）：gate shim `D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1`，POSIX shell 经托管 pwsh `-File` 直调，不经 cmd.exe；门禁失败契约与调用注意见 `D:\Codex\.codex\docs\agent-guidance\host-runbook\safe-tree-delete.md` 首节
-- 宿主 cmd 语境兼容启动器：`D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd`（只 pin pwsh 再调 shim；仓库源 `scripts\invoke-codex-safe-tree-delete.cmd`）
+- 宿主唯一现役入口（canonical）：gate shim `D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1`（仓库源 `scripts\invoke-codex-safe-tree-delete-gate-shim.ps1`，由 `scripts\Deploy-CodexSafeTreeDelete.ps1` 内联 gate holder 库后原子安装）；PowerShell 与 POSIX shell 统一直接调用该入口（跨进程或 POSIX shell 经托管 `D:\Codex\tools\PowerShell\7.6.5\pwsh.exe -NoLogo -NoProfile -NonInteractive -File` 直调，不经 cmd.exe 或批处理包装层）；门禁失败契约与调用注意见 `D:\Codex\.codex\docs\agent-guidance\host-runbook\safe-tree-delete.md` 首节
 - 生产脚本：`scripts\Invoke-CodexSafeTreeDelete.ps1`
 - 实现：`scripts\lib\CodexSafeTreeDelete.ps1`
 - allowlist：`managed\safe-tree-delete\policy.json`
@@ -186,7 +185,7 @@ ValidateSet 须在加载库之前生效）：新增 mode 或参数时两边同�
 
 `scripts\Update-CodexSafeTreeDeletePolicy.ps1` 维护同 schema 的 policy 条目与 deny：独立脚本，不经 gate shim，不是生产入口的 Mode，也不属于 source closure，从仓库工作树运行。它与 shim、部署工具共用同名 deployment mutex（current-user 命名空间，等锁上限 5 分钟）与同一 maintenance marker，持锁期间写 `mode=policy-maintenance` 面包屑。等锁超时的 JSON 与 shim 同形：`ok=false`、`refusalReason=deployment-mutex-acquire-timeout`、exit 1，并附 `holder`。
 
-参数：`-Mode DryRun|Apply`、`-ChangeSetPath`、Apply 必需的 `-ApprovedCandidatePolicySha256`（DryRun 输出的 `candidatePolicySha256`），以及可选的 `-ConfirmManualReviewOperationIds`。宿主 `.cmd` 链只能传单个字符串，所以单个值含 `::` 时按 `::` 拆成多个 operation id。变更集是 `{artifactType:"env-governance.codex-safe-tree-delete-policy-change-set", schemaVersion:1, changes:[...]}`，按声明顺序作用到现役 policy 原文：
+参数：`-Mode DryRun|Apply`、`-ChangeSetPath`、Apply 必需的 `-ApprovedCandidatePolicySha256`（DryRun 输出的 `candidatePolicySha256`），以及可选的 `-ConfirmManualReviewOperationIds`。经 `pwsh -File` 调用时每个参数只能传单个字符串，所以单个值含 `::` 时按 `::` 拆成多个 operation id。变更集是 `{artifactType:"env-governance.codex-safe-tree-delete-policy-change-set", schemaVersion:1, changes:[...]}`，按声明顺序作用到现役 policy 原文：
 
 | op | 字段 | 规则 |
 |---|---|---|
@@ -255,7 +254,7 @@ preflight 看不到的两处只列出、不阻止：
    v1 缺少 `directoryCommitAnchors`，不可由受管写入路径恢复或清理，也绝不通过补写空 anchors
    冒充 v2。
 
-   范围查询（#80）：`Status` 可带 `TargetPaths`（经 `.cmd` wrapper 调用时同样以单个 `::` 分隔字符串
+   范围查询（#80）：`Status` 可带 `TargetPaths`（经 `pwsh -File` 调用时同样以单个 `::` 分隔字符串
    传入），只回答这些目标。目标先于任何 policy / evidence 访问规范化为 D 盘全路径；拆分后为空或含
    空白、路径非法、规范化后重复（`OrdinalIgnoreCase`）都是普通 throw 的用法错误。记录完整认证后的
    `targetPath` 与任一目标按 `OrdinalIgnoreCase` 相等才算命中，不做 Unicode 规范化，与 `BatchPurge`
@@ -307,7 +306,7 @@ preflight 看不到的两处只列出、不阻止：
    可执行性校验，且其严格 transaction reader 仍只接受 schema v2/v3。
 
    多组 Archive（#85）用 `TransactionPaths` 与 `ApprovedTransactionSha256s` 按位置一一配对，一次归档
-   多条 terminal 记录；经 `.cmd` wrapper 调用时，两者与 `TargetPaths` 一样各以单个 `::` 分隔字符串
+   多条 terminal 记录；经 `pwsh -File` 调用时，两者与 `TargetPaths` 一样各以单个 `::` 分隔字符串
    传入。多组参数不得与单组 `TransactionPath`/`ApprovedTransactionSha256` 混用；只给一半、拆分后组数
    不等、含空白组或拆分后为空时，在处理任何一组之前整体抛错且不写 evidence；缺少 `ConfirmArchive`
    时返回与单组相同的 `confirm-archive-required`。各组按输入顺序原样执行单组 Archive：独立认证
@@ -424,8 +423,8 @@ preflight 看不到的两处只列出、不阻止：
 则先按该 transaction 完成 `Purge`，再继续后续目标。这样批量调用中断后可以从受控 evidence 恢复，不需要
 调用方手写循环、重新计算 transaction hash 或手工删除 quarantine。恢复匹配使用
 `OrdinalIgnoreCase` 实现 Windows 路径大小写不敏感语义，但不做 Unicode 规范化；路径大小写变化不得
-绕过或遗漏既有 transaction，NFC/NFD 等不同 UTF-16 路径也不得误配。通过 `.cmd` wrapper 调用时，
-`TargetPaths` 使用单个 `::` 分隔字符串传入，避免 `cmd.exe` 把分隔符解释成管道或命令控制符。
+绕过或遗漏既有 transaction，NFC/NFD 等不同 UTF-16 路径也不得误配。经 `pwsh -File` 调用时，
+`TargetPaths` 使用单个 `::` 分隔字符串传入，与 PowerShell 进程内数组传参等价。
 policy v5 下，`BatchPurge` 还要求 capability 的 `producerFenceMode=os-handle-required`；
 `manual-only` 条目必须逐笔处理。
 

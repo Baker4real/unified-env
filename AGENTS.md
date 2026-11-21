@@ -7,7 +7,7 @@
 1. 跨模块、治理、文件归属或测试 profile 任务读取 `CONTEXT.md`、`modules/README.md` 和当前模块上下文；单模块任务直接读取 `modules/manifest.json`、目标模块上下文和将修改的文件，不为无关模块加载整套根上下文。
 2. 只加载当前分支需要的政策：
    - **迁移、PATH、全局运行时或包管理器更新**：真实迁移前读 `docs/env-governance/d-drive-layout-and-migration-policy.md`，重新生成现场 inventory 与 dry-run。
-   - **宿主递归目录删除或 terminal evidence 归档**：执行前读 `docs/specs/2026-07-24-safe-tree-delete-capability.md`；只通过受管控制面处理（canonical 入口为 gate shim `D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1`，POSIX shell 经托管 pwsh 直调；cmd 语境用同名 `.cmd` 兼容启动器），具体 mode 与确认合同以该 spec 为准。
+   - **宿主递归目录删除或 terminal evidence 归档**：执行前读 `docs/specs/2026-07-24-safe-tree-delete-capability.md`；只通过受管控制面唯一现役入口 gate shim `D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1` 处理（跨进程或 POSIX shell 经托管 pwsh `-File` 直调，不走批处理包装层），具体 mode 与确认合同以该 spec 为准。
    - **领域建模或架构边界**：读 `docs/agents/domain.md`，再按其中顺序加载相关模块上下文和现役合同。
    - **Issue、PRD 或 triage**：读 `docs/agents/issue-tracker.md` 与 `docs/agents/triage-labels.md`。
    - **知识整理或提交收尾**：读 `docs/agents/knowledge-scope.md`，把项目知识、模块知识、设备事实、本机状态和一次性证据放到各自真源。
