@@ -350,6 +350,16 @@ class FinalizeTests(unittest.TestCase):
                 self.assertEqual(self.assert_refused(run)['reason'], reason)
                 self.assertFalse(self.latest.exists())
 
+    def test_idempotent_retry_does_not_close_an_unreviewed_magpie_write(self):
+        pending = {'phase': 'deliver', 'ok': False, 'status': 'pending',
+                   'magpie_write_audit_status': 'review-required',
+                   'magpie_write_audits': [{'status': 'review-required', 'ok': False,
+                                           'unexpected_changed_hosts': ['claude-desktop']}]}
+        retry = {'phase': 'deliver', 'magpie_write_audit_status': 'not-observed', 'magpie_write_audits': []}
+        run = self.shared_delivery('delivery-scope-violation', [pending, retry], checked=[1])
+        self.assertEqual(self.assert_refused(run)['reason'], 'shared-skill-magpie-write-review-required')
+        self.assertFalse(self.latest.exists())
+
     def test_unidentified_pending_receipt_is_refused_even_with_a_successful_retry(self):
         pending = {'phase': 'deliver', 'ok': False, 'status': 'pending', 'transaction_id': None}
         run = self.shared_delivery('unidentified-delivery', [pending, {'phase': 'deliver'}], checked=[1])

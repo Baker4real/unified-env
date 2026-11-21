@@ -1,0 +1,665 @@
+diff --git a/internal/cli/main.go b/internal/cli/main.go
+index d4221fc..1839dda 100644
+--- a/internal/cli/main.go
++++ b/internal/cli/main.go
+@@ -26,6 +26,7 @@ import (
+ 	"github.com/yetone/magpie/internal/codexrelay"
+ 	"github.com/yetone/magpie/internal/davsync"
+ 	"github.com/yetone/magpie/internal/gateway"
++	"github.com/yetone/magpie/internal/gui"
+ 	"github.com/yetone/magpie/internal/imagemcp"
+ 	"github.com/yetone/magpie/internal/library"
+ 	"github.com/yetone/magpie/internal/netproxy"
+@@ -253,6 +254,18 @@ func Main(v string) {
+ 	for _, v := range ignored {
+ 		fmt.Fprintf(os.Stderr, "magpie: ignoring %s: not an absolute path (the programs magpie starts still get it)\n", v)
+ 	}
++	// The scoped writer runs before startup migrations or gateway services.
++	if len(os.Args) >= 3 && os.Args[1] == "web" && os.Args[2] == "--library-scoped" {
++		if len(os.Args) != 5 || os.Args[3] != "--addr" {
++			fmt.Fprintln(os.Stderr, "usage: magpie web --library-scoped --addr 127.0.0.1:<port>")
++			os.Exit(1)
++		}
++		if err := gui.ServeScopedLibrary(os.Args[4]); err != nil {
++			fmt.Fprintln(os.Stderr, "magpie scoped library:", err)
++			os.Exit(1)
++		}
++		return
++	}
+ 	if provider.TookOpenedURL(os.Args[1:]) {
+ 		// Claude Code, signing in for magpie, handed over the page to open
+ 		return
+diff --git a/internal/cli/settings_parity_test.go b/internal/cli/settings_parity_test.go
+index 35e4019..950879c 100644
+--- a/internal/cli/settings_parity_test.go
++++ b/internal/cli/settings_parity_test.go
+@@ -404,6 +404,8 @@ var notYet = map[string]string{
+ 	"GET /api/library/pi":                        L,  // library.go
+ 	"GET /api/library/rtk":                       L,  // library.go
+ 	"GET /api/library/skill":                     L,  // library.go
++	"GET /api/library/scoped":                    W,  // capability of magpie web --library-scoped
++	"POST /api/library/scoped/{kind}/{action}":   W,  // authenticated scoped writer requests
+ 	"POST /api/library/bili":                     L,  // library.go
+ 	"POST /api/library/bili/install":             L,  // library.go
+ 	"POST /api/library/bili/settings":            L,  // library.go
+diff --git a/internal/gui/library_scoped.go b/internal/gui/library_scoped.go
+new file mode 100644
+index 0000000..27ca1e2
+--- /dev/null
++++ b/internal/gui/library_scoped.go
+@@ -0,0 +1,97 @@
++package gui
++
++import (
++	"encoding/json"
++	"errors"
++	"io"
++	"net"
++	"net/http"
++	"os"
++	"path/filepath"
++	"time"
++
++	"github.com/yetone/magpie/internal/library"
++	"github.com/yetone/magpie/internal/settings"
++)
++
++// ServeScopedLibrary exposes the opt-in writer on loopback only. It runs
++// without the Web UI's gateway, updater, startup and view reconciliation.
++func ServeScopedLibrary(addr string) error {
++	host, port, err := net.SplitHostPort(addr)
++	if err != nil || host != "127.0.0.1" || port == "" || port == "0" {
++		return errors.New("scoped Library needs 127.0.0.1 and a fixed port")
++	}
++	key := os.Getenv("MAGPIE_WEB_KEY")
++	if err := CheckWebKey(key); err != nil {
++		return err
++	}
++	srv := &http.Server{
++		Addr:              addr,
++		Handler:           webHandler(port, key, 0, nil, scopedLibraryHandler()),
++		ReadHeaderTimeout: 10 * time.Second,
++	}
++	return srv.ListenAndServe()
++}
++
++func scopedLibraryHandler() http.Handler {
++	mux := http.NewServeMux()
++	mux.HandleFunc("GET /api/library/scoped", func(rw http.ResponseWriter, r *http.Request) {
++		writeJSON(rw, struct {
++			Version int    `json:"scopeVersion"`
++			State   string `json:"statePath"`
++		}{1, filepath.Join(settings.Dir(), "library.json")})
++	})
++	mux.HandleFunc("POST /api/library/scoped/{kind}/{action}", func(rw http.ResponseWriter, r *http.Request) {
++		var in struct {
++			Name, Source         string
++			Names, Paths, Agents []string
++			On                   *bool
++		}
++		dec := json.NewDecoder(http.MaxBytesReader(rw, r.Body, 64*1024))
++		dec.DisallowUnknownFields()
++		if err := dec.Decode(&in); err != nil || dec.Decode(new(any)) != io.EOF {
++			http.Error(rw, "invalid scoped Library request", http.StatusBadRequest)
++			return
++		}
++		var res *library.Result
++		var err error
++		switch r.PathValue("kind") + "/" + r.PathValue("action") {
++		case "skills/probe":
++			if !filepath.IsAbs(in.Source) {
++				http.Error(rw, "scoped probe needs an absolute folder", http.StatusBadRequest)
++				return
++			}
++			p, err := library.ProbeSkills(in.Source)
++			if err != nil {
++				fail(rw, err)
++				return
++			}
++			writeJSON(rw, p)
++			return
++		case "skills/install":
++			res, err = library.InstallFolderSkillsScoped(in.Source, in.Paths, in.Agents)
++		case "skills/agents":
++			res, err = library.SetSkillAgentsScoped(in.Name, in.Agents)
++		case "servers/agents-all", "servers/agents-some":
++			if in.On == nil || (r.PathValue("action") == "agents-some") != (len(in.Names) > 0) {
++				http.Error(rw, "select servers explicitly or use agents-all, and specify on", http.StatusBadRequest)
++				return
++			}
++			if r.PathValue("action") == "agents-all" {
++				in.Names = nil
++			}
++			res, err = library.SetServersAgentsScoped(in.Names, in.Agents, *in.On)
++		default:
++			http.NotFound(rw, r)
++			return
++		}
++		if err != nil {
++			fail(rw, err)
++			return
++		}
++		writeJSON(rw, struct {
++			Result *library.Result `json:"result"`
++		}{res})
++	})
++	return mux
++}
+diff --git a/internal/gui/library_scoped_test.go b/internal/gui/library_scoped_test.go
+new file mode 100644
+index 0000000..7cf1891
+--- /dev/null
++++ b/internal/gui/library_scoped_test.go
+@@ -0,0 +1,184 @@
++package gui
++
++import (
++	"bytes"
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"path/filepath"
++	"runtime"
++	"strings"
++	"testing"
++
++	"github.com/yetone/magpie/internal/library"
++	"github.com/yetone/magpie/internal/settings"
++)
++
++func scopedWrite(t *testing.T, path, data string) {
++	t.Helper()
++	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func scopedRead(t *testing.T, path string) []byte {
++	t.Helper()
++	b, err := os.ReadFile(path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return b
++}
++
++func scopedFixture(t *testing.T) (home, agy, desktop, state string) {
++	t.Helper()
++	home = sandboxHome(t)
++	local, roaming := filepath.Join(home, "AppData", "Local"), filepath.Join(home, "AppData", "Roaming")
++	t.Setenv("LOCALAPPDATA", local)
++	t.Setenv("APPDATA", roaming)
++	var desktopDir string
++	switch runtime.GOOS {
++	case "windows":
++		scopedWrite(t, filepath.Join(local, "AnthropicClaude", "claude.exe"), "detection marker, never executed")
++		desktopDir = filepath.Join(local, "Claude-3p")
++	case "darwin":
++		desktopDir = filepath.Join(home, "Library", "Application Support", "Claude-3p")
++	default:
++		desktopDir = filepath.Join(home, ".config", "Claude-3p")
++	}
++	scopedWrite(t, filepath.Join(home, ".gemini", "antigravity", "agyhub_summaries_proto.pb"), "fixture")
++	agy = filepath.Join(home, ".gemini", "config", "mcp_config.json")
++	desktop = filepath.Join(desktopDir, "claude_desktop_config.json")
++	scopedWrite(t, agy, "{ \"mcpServers\" : {} }\r\n")
++	scopedWrite(t, desktop, "{\r\n  \"mcpServers\": {}, \"existingPreference\": true\r\n}\r\n")
++	return home, agy, desktop, filepath.Join(settings.Dir(), "library.json")
++}
++
++func scopedPost(h http.Handler, path, body string) *httptest.ResponseRecorder {
++	rec := httptest.NewRecorder()
++	h.ServeHTTP(rec, httptest.NewRequest("POST", path, strings.NewReader(body)))
++	return rec
++}
++
++func TestLibraryScopedMCPBytes(t *testing.T) {
++	_, agy, desktop, state := scopedFixture(t)
++	scopedWrite(t, state, `{"mcp":[{"name":"fixture-server","transport":"stdio","command":"fixture-stdio","agents":["antigravity","claude-desktop"]}]}`)
++	beforeAgy, beforeDesktop := scopedRead(t, agy), scopedRead(t, desktop)
++	rec := scopedPost(scopedLibraryHandler(), "/api/library/scoped/servers/agents-some",
++		`{"names":["fixture-server"],"agents":["antigravity"],"on":true}`)
++	if rec.Code != http.StatusOK {
++		t.Fatalf("write status %d, body %s", rec.Code, rec.Body)
++	}
++	if got := scopedRead(t, agy); bytes.Equal(beforeAgy, got) || !bytes.Contains(got, []byte("fixture-stdio")) {
++		t.Fatalf("authorized Antigravity configuration did not receive pending MCP entry: %q", got)
++	}
++	if got := scopedRead(t, desktop); !bytes.Equal(beforeDesktop, got) {
++		t.Fatalf("unselected Claude Desktop configuration changed bytes: %q -> %q", beforeDesktop, got)
++	}
++	var out struct{ Result library.Result }
++	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
++		t.Fatal(err)
++	}
++	if len(out.Result.Changed) != 1 || out.Result.Changed[0] != "antigravity" || len(out.Result.Problems) != 0 {
++		t.Fatalf("MCP writer result: %+v", out.Result)
++	}
++	// Prove the untouched file actually had work pending: explicitly
++	// authorizing Desktop now puts the same server in its config.
++	afterAgy := scopedRead(t, agy)
++	rec = scopedPost(scopedLibraryHandler(), "/api/library/scoped/servers/agents-all",
++		`{"agents":["claude-desktop"],"on":true}`)
++	if got := scopedRead(t, desktop); rec.Code != http.StatusOK || bytes.Equal(beforeDesktop, got) || !bytes.Contains(got, []byte("fixture-stdio")) {
++		t.Fatalf("Desktop had no provable pending write: status %d, config %q, body %s", rec.Code, got, rec.Body)
++	}
++	if !bytes.Equal(afterAgy, scopedRead(t, agy)) {
++		t.Fatal("Desktop authorization changed Antigravity bytes")
++	}
++}
++
++func TestLibraryScopedSkillBytes(t *testing.T) {
++	for _, action := range []string{"install", "agents"} {
++		t.Run(action, func(t *testing.T) {
++			home, agy, desktop, state := scopedFixture(t)
++			const payload = "---\nname: fixture-skill\ndescription: Fixture\n---\nFixture skill content.\n"
++			const pending = "---\nname: desktop-pending\ndescription: Fixture\n---\nPending desktop copy.\n"
++			skillDir := filepath.Join(filepath.Dir(state), "library", "skills")
++			scopedWrite(t, filepath.Join(skillDir, "desktop-pending", "SKILL.md"), pending)
++			manifest := filepath.Join(filepath.Dir(desktop), "local-agent-mode-sessions", "skills-plugin", "org", "account", "manifest.json")
++			scopedWrite(t, manifest, "{\r\n  \"skills\": []\r\n}\r\n")
++			beforeManifest, beforeAgy, beforeDesktop := scopedRead(t, manifest), scopedRead(t, agy), scopedRead(t, desktop)
++			const other = `{"name":"desktop-pending","agents":["claude-desktop"]}`
++			in := map[string]any{"agents": []string{"antigravity"}}
++			if action == "install" {
++				source := filepath.Join(home, "fixture-source")
++				scopedWrite(t, filepath.Join(source, "SKILL.md"), payload)
++				scopedWrite(t, state, `{"skills":[`+other+`]}`)
++				in["source"], in["paths"] = source, []string{""}
++			} else {
++				scopedWrite(t, filepath.Join(skillDir, "fixture-skill", "SKILL.md"), payload)
++				scopedWrite(t, state, `{"skills":[`+other+`,{"name":"fixture-skill","agents":[]}]}`)
++				in["name"] = "fixture-skill"
++			}
++			b, err := json.Marshal(in)
++			if err != nil {
++				t.Fatal(err)
++			}
++			rec := scopedPost(scopedLibraryHandler(), "/api/library/scoped/skills/"+action, string(b))
++			if rec.Code != http.StatusOK {
++				t.Fatalf("skill write: %d %s", rec.Code, rec.Body)
++			}
++			p := filepath.Join(filepath.Dir(agy), "skills", "fixture-skill", "SKILL.md")
++			if got := scopedRead(t, p); !bytes.Equal(got, []byte(payload)) {
++				t.Fatalf("wrong authorized skill bytes: %q", got)
++			}
++			if !bytes.Equal(beforeManifest, scopedRead(t, manifest)) || !bytes.Equal(beforeDesktop, scopedRead(t, desktop)) || !bytes.Equal(beforeAgy, scopedRead(t, agy)) {
++				t.Fatal("scoped skill action changed Desktop's manifest or either MCP config")
++			}
++			rec = scopedPost(scopedLibraryHandler(), "/api/library/scoped/skills/agents",
++				`{"name":"desktop-pending","agents":["claude-desktop"]}`)
++			if rec.Code != http.StatusOK || bytes.Equal(beforeManifest, scopedRead(t, manifest)) {
++				t.Fatalf("Desktop had no provable pending skill write: %d %s", rec.Code, rec.Body)
++			}
++		})
++	}
++}
++
++func TestLibraryScopedRejectsAliasedOrRoutedWrites(t *testing.T) {
++	for _, scenario := range []string{"shared-antigravity", "mcp-router", "skill-router"} {
++		t.Run(scenario, func(t *testing.T) {
++			home, agy, desktop, state := scopedFixture(t)
++			source := filepath.Join(home, "fixture-source")
++			scopedWrite(t, filepath.Join(source, "SKILL.md"), "---\nname: fixture-skill\n---\nFixture\n")
++			kind := "servers/agents-all"
++			in := map[string]any{"agents": []string{"antigravity"}, "on": true}
++			wantReason := "requires direct per-agent delivery"
++			switch scenario {
++			case "shared-antigravity":
++				scopedWrite(t, filepath.Join(home, ".gemini", "antigravity-cli", "settings.json"), "{}")
++				scopedWrite(t, state, `{"mcp":[{"name":"fixture-server","transport":"stdio","command":"fixture-stdio","agents":["agy","antigravity"]}]}`)
++				wantReason = "shares its mcp destination"
++			case "mcp-router":
++				scopedWrite(t, state, `{"mcpHub":true}`)
++			case "skill-router":
++				scopedWrite(t, state, `{"skillRouter":true}`)
++				kind = "skills/install"
++				in = map[string]any{"agents": []string{"antigravity"}, "source": source, "paths": []string{""}}
++			}
++			beforeState, beforeAgy, beforeDesktop := scopedRead(t, state), scopedRead(t, agy), scopedRead(t, desktop)
++			b, err := json.Marshal(in)
++			if err != nil {
++				t.Fatal(err)
++			}
++			rec := scopedPost(scopedLibraryHandler(), "/api/library/scoped/"+kind, string(b))
++			if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), wantReason) || !bytes.Equal(beforeState, scopedRead(t, state)) || !bytes.Equal(beforeAgy, scopedRead(t, agy)) || !bytes.Equal(beforeDesktop, scopedRead(t, desktop)) {
++				t.Fatalf("scope preflight failed to refuse before any write: %d %s", rec.Code, rec.Body)
++			}
++			if _, err := os.Stat(filepath.Join(filepath.Dir(state), "library", "skills", "fixture-skill")); !os.IsNotExist(err) {
++				t.Fatalf("rejected action created a skill: %v", err)
++			}
++		})
++	}
++}
+diff --git a/internal/library/desktop_skills.go b/internal/library/desktop_skills.go
+index fdeb14d..5d2c43e 100644
+--- a/internal/library/desktop_skills.go
++++ b/internal/library/desktop_skills.go
+@@ -247,7 +247,7 @@ func writeManifest(root string, put map[string]bool, drop []string) error {
+ // syncDesktopSkills gives Claude Desktop the library's skills it is to
+ // have, in every account's skills-plugin, and takes out the ones magpie
+ // put there that it no longer is to.
+-func (l *Library) syncDesktopSkills(t *Target, res *Result) {
++func (l *Library) syncDesktopSkills(t *Target, res *Result, names ...string) {
+ 	id := t.Agent.ID
+ 	a := l.applied(id)
+ 	prior := a.Skills
+@@ -263,6 +263,10 @@ func (l *Library) syncDesktopSkills(t *Target, res *Result) {
+ 		put := map[string]bool{}
+ 		var drop []string
+ 		for _, name := range prior {
++			if len(names) > 0 && !slices.Contains(names, name) {
++				keep(name)
++				continue
++			}
+ 			if s := l.skill(name); s.gives(id) {
+ 				continue
+ 			}
+@@ -286,7 +290,7 @@ func (l *Library) syncDesktopSkills(t *Target, res *Result) {
+ 			res.changed(id)
+ 		}
+ 		for _, s := range l.Skills {
+-			if !s.gives(id) {
++			if !s.gives(id) || len(names) > 0 && !slices.Contains(names, s.Name) {
+ 				continue
+ 			}
+ 			p := filepath.Join(dir, s.Name)
+diff --git a/internal/library/scoped.go b/internal/library/scoped.go
+new file mode 100644
+index 0000000..2c0e25e
+--- /dev/null
++++ b/internal/library/scoped.go
+@@ -0,0 +1,196 @@
++package library
++
++import (
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++	"slices"
++)
++
++// InstallFolderSkillsScoped adds local folder skills and applies those skills
++// only to the explicitly named targets. Remote installs can adopt existing
++// skills' sources and are served by the ordinary Library API.
++func InstallFolderSkillsScoped(source string, paths, agents []string) (*Result, error) {
++	if !filepath.IsAbs(source) || len(paths) == 0 {
++		return nil, errors.New("scoped install needs an absolute folder and skill paths")
++	}
++	p, err := ProbeSkills(source)
++	if err != nil {
++		return nil, err
++	}
++	in := &installed{}
++	res, err := changeScoped("skills", agents, func(l *Library) ([]string, error) {
++		if err := installFrom(l, p, paths, agents, true, in); err != nil {
++			return nil, err
++		}
++		if len(in.added)+len(in.had) == 0 && len(in.skipped) > 0 {
++			return nil, errors.New(in.skipped[0].Error)
++		}
++		return append(slices.Clone(in.added), in.had...), nil
++	})
++	if res != nil {
++		res.Installed, res.Had, res.Skipped = in.added, in.had, in.skipped
++	}
++	return res, err
++}
++
++// SetSkillAgentsScoped applies one skill only to the named agents. Taking
++// it away from an unlisted agent would change its desired state, so refuse
++// that request before saving.
++func SetSkillAgentsScoped(name string, agents []string) (*Result, error) {
++	if err := checkName("skill", name); err != nil {
++		return nil, err
++	}
++	return changeScoped("skills", agents, func(l *Library) ([]string, error) {
++		s := l.skill(name)
++		if s == nil {
++			return nil, fmt.Errorf("no skill called %s", name)
++		}
++		for _, id := range s.Agents {
++			if !slices.Contains(agents, id) {
++				return nil, fmt.Errorf("scoped skill assignment would remove unlisted agent %s", id)
++			}
++		}
++		s.Agents = slices.Clone(agents)
++		return []string{name}, nil
++	})
++}
++
++// SetServersAgentsScoped gives or takes the named servers for the selected
++// agents. Like the ordinary bulk operation, nil names means every server.
++func SetServersAgentsScoped(names, agents []string, on bool) (*Result, error) {
++	return changeScoped("mcp", agents, func(l *Library) ([]string, error) {
++		return nil, serverAgentChange(names, agents, on)(l)
++	})
++}
++
++// changeScoped runs one Library edit without the full reconciliation steps.
++// The complete target inventory is for detecting physical aliases and for
++// the skill writer's read-side decisions. Only the approved targets run
++// the writer for this kind. Applied entries for other targets are kept.
++func changeScoped(kind string, agents []string, edit func(*Library) ([]string, error)) (*Result, error) {
++	mu.Lock()
++	defer mu.Unlock()
++	l, err := load()
++	if err != nil {
++		return nil, err
++	}
++	if kind == "skills" && (l.SharedSkills || l.SkillRouter) || kind == "mcp" && l.MCPHub {
++		return nil, fmt.Errorf("scoped %s requires direct per-agent delivery", kind)
++	}
++	all := Targets()
++	known := append(slices.Clone(all), l.held(all)...)
++	selected, err := scopeTargets(kind, agents, known)
++	if err != nil {
++		return nil, err
++	}
++	names, err := edit(l)
++	if err != nil {
++		return nil, err
++	}
++	if err := l.save(); err != nil {
++		return nil, err
++	}
++	res := &Result{Changed: []string{}, Problems: []Problem{}}
++	b := newBackups()
++	for _, t := range selected {
++		switch {
++		case kind == "mcp":
++			l.syncMCP(t, b, res)
++		case len(names) == 0:
++			continue
++		case t.Desktop != nil:
++			l.syncDesktopSkills(t, res, names...)
++		default:
++			// A full sync can adopt user edits into the library and thereby
++			// change every linked reader's payload. Defer those to full sync.
++			var ready []string
++			for _, name := range names {
++				p := filepath.Join(t.Skills, name)
++				if made, ok := copiedAt(p); ok && !linked(p) {
++					at, err := changedAt(p)
++					if err == nil && at.After(made) && !sameTree(p, skillDir(name)) {
++						err = errors.New("skill copy was edited; reconcile it separately")
++					}
++					if err != nil {
++						res.fail(t.Agent.ID, "skill:"+name, err)
++						continue
++					}
++				}
++				ready = append(ready, name)
++			}
++			if len(ready) > 0 {
++				l.syncSkills(t, res, all, ready...)
++			}
++		}
++	}
++	res.Backup = b.dir
++	return res, l.save()
++}
++
++func scopeTargets(kind string, agents []string, known []*Target) ([]*Target, error) {
++	if len(agents) == 0 {
++		return nil, errors.New("scoped write needs at least one agent")
++	}
++	var selected []*Target
++	for i, id := range agents {
++		if slices.Contains(agents[:i], id) {
++			return nil, fmt.Errorf("duplicate scoped agent %q", id)
++		}
++		j := slices.IndexFunc(known, func(t *Target) bool { return t.Agent.ID == id && !t.Gone && t.Unreached == nil })
++		if j < 0 || len(scopePaths(known[j], kind)) == 0 || known[j].Agent.WSL != "" || known[j].Agent.ID == "liveagent" && kind == "skills" {
++			return nil, fmt.Errorf("no local %s target for scoped agent %q", kind, id)
++		}
++		selected = append(selected, known[j])
++	}
++	for _, target := range selected {
++		for _, path := range scopePaths(target, kind) {
++			// The shared skill root has readers even if none is registered
++			// in this Library. It has no private writer scope.
++			if kind == "skills" && sameScopePath(path, sharedSkillsDir()) {
++				return nil, fmt.Errorf("scoped agent %q writes the shared skills directory", target.Agent.ID)
++			}
++			for _, other := range known {
++				if slices.Contains(selected, other) {
++					continue
++				}
++				if slices.ContainsFunc(scopePaths(other, kind), func(p string) bool { return sameScopePath(path, p) }) ||
++					kind == "skills" && slices.Contains(other.SkillsAlso, target.Agent.ID) {
++					return nil, fmt.Errorf("scoped agent %q shares its %s destination with %q", target.Agent.ID, kind, other.Agent.ID)
++				}
++			}
++		}
++	}
++	return selected, nil
++}
++
++func scopePaths(t *Target, kind string) []string {
++	if kind == "mcp" {
++		if t.MCP != nil {
++			return t.MCP.files()
++		}
++		return nil
++	}
++	if t.Desktop != nil {
++		var paths []string
++		for _, root := range t.Desktop {
++			paths = append(paths, filepath.Join(root, "skills"), filepath.Join(root, desktopManifest))
++		}
++		return paths
++	}
++	if t.Skills != "" {
++		return []string{t.Skills}
++	}
++	return nil
++}
++
++func sameScopePath(a, b string) bool {
++	a, b = realBelow(a), realBelow(b)
++	if rel, err := filepath.Rel(a, b); err == nil && rel == "." {
++		return true
++	}
++	ai, ae := os.Stat(a)
++	bi, be := os.Stat(b)
++	return ae == nil && be == nil && os.SameFile(ai, bi)
++}
+diff --git a/internal/library/skills.go b/internal/library/skills.go
+index 65ba6b6..cb1d56f 100644
+--- a/internal/library/skills.go
++++ b/internal/library/skills.go
+@@ -715,7 +715,8 @@ func within(p, dir string) bool {
+ 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+ }
+ 
+-func (l *Library) syncSkills(t *Target, res *Result, all []*Target) {
++// With names, an explicit assignment leaves other skills and router stubs alone.
++func (l *Library) syncSkills(t *Target, res *Result, all []*Target, names ...string) {
+ 	if res.unreached(t) {
+ 		return
+ 	}
+@@ -723,8 +724,10 @@ func (l *Library) syncSkills(t *Target, res *Result, all []*Target) {
+ 		return
+ 	}
+ 	id := t.Agent.ID
+-	// LiveAgent uses a skill in its folder only once it is picked there
+-	defer l.syncLiveAgentPicks(t, res)
++	if len(names) == 0 {
++		// LiveAgent uses a skill in its folder only once it is picked there
++		defer l.syncLiveAgentPicks(t, res)
++	}
+ 	a := l.applied(id)
+ 	// another agent may read the very same folder (one linked to the other):
+ 	// what that agent is to have stays
+@@ -792,17 +795,22 @@ func (l *Library) syncSkills(t *Target, res *Result, all []*Target) {
+ 		q, _ := rivals().rival(s.Name)
+ 		return q != ""
+ 	}
+-	// the skills the router lists here (skill_router.go): no link of
+-	// their own
+-	routed := l.routedFor(t, sharers, cp, inShared)
+-	// and the ones the user types still, each by a stub of its own
+-	slash := slashFor(t, all, sharers, routed)
+-	dropStubs(t, slash, res)
+-	if !t.Gone {
+-		defer l.placeRouter(t, routed, slash, a, res)
++	var routed map[string]bool
++	if len(names) == 0 {
++		// the skills the router lists here, and their slash-command stubs
++		routed = l.routedFor(t, sharers, cp, inShared)
++		slash := slashFor(t, all, sharers, routed)
++		dropStubs(t, slash, res)
++		if !t.Gone {
++			defer l.placeRouter(t, routed, slash, a, res)
++		}
+ 	}
+ 	var mine []string
+ 	for _, name := range a.Skills {
++		if len(names) > 0 && !slices.Contains(names, name) {
++			mine = append(mine, name)
++			continue
++		}
+ 		s := l.skill(name)
+ 		p := filepath.Join(t.Skills, name)
+ 		if l.blockedSkills[realDir(p)] {
+@@ -821,7 +829,7 @@ func (l *Library) syncSkills(t *Target, res *Result, all []*Target) {
+ 		res.changed(id)
+ 	}
+ 	for _, s := range l.Skills {
+-		if !s.gives(id) {
++		if !s.gives(id) || len(names) > 0 && !slices.Contains(names, s.Name) {
+ 			continue
+ 		}
+ 		// an agent gone from here is given nothing: what it has still
+diff --git a/internal/library/sync.go b/internal/library/sync.go
+index 5760be7..fa9e25b 100644
+--- a/internal/library/sync.go
++++ b/internal/library/sync.go
+@@ -999,7 +999,11 @@ func SomeServersAgents(names, agents []string, on bool) (*Result, error) {
+ // serversAgents gives the servers named, or every one when none are, to
+ // the agents, or takes them from them.
+ func serversAgents(names, agents []string, on bool) (*Result, error) {
+-	return change(func(l *Library) error {
++	return change(serverAgentChange(names, agents, on))
++}
++
++func serverAgentChange(names, agents []string, on bool) func(*Library) error {
++	return func(l *Library) error {
+ 		for _, name := range names {
+ 			if l.server(name) == nil {
+ 				return fmt.Errorf("no server called %s", name)
+@@ -1029,7 +1033,7 @@ func serversAgents(names, agents []string, on bool) (*Result, error) {
+ 			s.Agents = slices.Sorted(slices.Values(kept))
+ 		}
+ 		return nil
+-	})
++	}
+ }
+ 
+ // reach is which agents a server can be given: those whose MCP file

@@ -166,6 +166,10 @@ def validate_shared_skill_delivery(json_evidence, checked_paths, processed):
                 and type(ok) is bool and value.get('status') == (successful_status[phase] if ok else 'pending')
                 and (operation == 'install' or (operation == 'update' and phase == 'verify'
                      and sha256(value.get('transaction_manifest_sha256')))), 'invalid-shared-skill-delivery-stage')
+        # A later readback can confirm delivery, not account for a prior operation's side effects.
+        require(value.get('magpie_write_audit_status') != 'review-required'
+                or (not ok and value.get('reason') == 'magpie-write-audit-preflight-incomplete'),
+                'shared-skill-magpie-write-review-required')
         identity = (name, transaction)
         intended = frozenset(agents)
         require(identities.setdefault(identity, intended) == intended, 'shared-skill-delivery-target-conflict')

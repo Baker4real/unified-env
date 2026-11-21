@@ -3,7 +3,7 @@
 Searching a whole app.asar (often hundreds of MB) with `rg -a` is slow and hits minified
 third-party code. List the archive once, extract only the bundles you need, then search those.
 
-  python -B -I asar_extract.py list <app.asar> [--grep REGEX] [--min-size BYTES]
+  python -B -I asar_extract.py list <app.asar> [--grep REGEX] [--min-size BYTES] [--max-files N] [--json]
   python -B -I asar_extract.py grep <app.asar> <regex> [--paths REGEX] [--context CHARS] [--max-per-file N]
   python -B -I asar_extract.py extract <app.asar> <path-in-asar>... --out <empty dir>
 
@@ -70,14 +70,35 @@ def safe_target(out_dir, inner):
 
 
 def cmd_list(args):
+    budget = args.max_output_bytes
+    if not (800 <= budget <= 16000 and 1 <= args.max_files <= 100):
+        raise ValueError('Invalid bounded list options')
     header, _ = read_header(args.asar)
     pattern = re.compile(args.grep) if args.grep else None
+    rows, total, used = [], 0, 0
     for path, entry in walk(header):
         size = int(entry.get('size', 0))
         if size < args.min_size or (pattern and not pattern.search(path)):
             continue
-        flag = ' (unpacked)' if entry.get('unpacked') else ''
-        print(f'{size:>12}  {path}{flag}')
+        total += 1
+        if len(rows) >= args.max_files:
+            continue
+        row = {'path': path, 'size': size, 'unpacked': bool(entry.get('unpacked'))}
+        row_bytes = len(json.dumps(row, ensure_ascii=False).encode('utf-8')) + 2
+        # Leave room for the counts and enclosing object. Text rows are smaller than JSON rows.
+        if used + row_bytes <= budget - 256:
+            rows.append(row)
+            used += row_bytes
+    omitted = total - len(rows)
+    if args.json:
+        print(json.dumps({'totalFiles': total, 'files': rows, 'omittedFiles': omitted,
+                          'outputBudgetBytes': budget}, ensure_ascii=False))
+    else:
+        for row in rows:
+            path = json.dumps(row['path'], ensure_ascii=False)[1:-1]
+            flag = ' (unpacked)' if row['unpacked'] else ''
+            print(f"{row['size']:>12}  {path}{flag}")
+        print(f'files={total} shown={len(rows)} omitted={omitted}')
 
 
 def read_entry(f, asar, base, inner, entry):
@@ -167,10 +188,13 @@ def cmd_extract(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
-    p_list = sub.add_parser('list', help='print size and path of each file')
+    p_list = sub.add_parser('list', help='list matching archive paths with bounded output')
     p_list.add_argument('asar')
     p_list.add_argument('--grep', help='only paths matching this regex')
     p_list.add_argument('--min-size', type=int, default=0, help='only files of at least this many bytes')
+    p_list.add_argument('--max-files', type=int, default=40, help='maximum number of paths to display, 1..100')
+    p_list.add_argument('--max-output-bytes', type=int, default=6000, help='total UTF-8 output byte budget, 800..16000')
+    p_list.add_argument('--json', action='store_true', help='bounded paths and exact counts')
     p_grep = sub.add_parser('grep', help='print matches of a regex with the file each one is in')
     p_grep.add_argument('asar')
     p_grep.add_argument('regex')

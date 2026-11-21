@@ -95,7 +95,13 @@ filterTx.verify({ filter: readbackFilter, visibleMessages, revision: observation
 
 ## ASAR 只读检索
 
-`managed/host-diagnostics/asar_extract.py` 是 host-safety 拥有的源码；本机旧入口 `D:/Codex/tools/asar-extract/asar_extract.py` 只转发此源，不保留第二份实现。先 list 固定包内模块，再 grep 固定方法；默认整批 6000 UTF-8 字节，可用 `--json --max-output-bytes 1200 --max-files 1 --max-per-file 2 --context 100` 收窄。JSON 同时返回总命中、文件数、展示片段和遗漏条数；未命中退出 1。grep 不修改安装包，查到字符串也不代表运行实例已加载该模块。
+`managed/host-diagnostics/asar_extract.py` 是源码；本机入口 `D:/Codex/tools/asar-extract/asar_extract.py` 直接转发。已知包内文件时，按路径 `grep --paths` 取一个方法，不先解包或枚举。只知道文件名或目录时，先用 `list --grep`：
+
+```powershell
+python -B -I D:/Codex/tools/asar-extract/asar_extract.py list <app.asar> --grep '^dist/(wsl|preload)[.]js$' --json --max-files 4 --max-output-bytes 1200
+```
+
+`list` 默认最多展示 40 条路径，报告匹配数和省略数。`list`、`grep` 都默认限制为每批 6000 UTF-8 字节；搜索方法时再用 `--max-files 1 --max-per-file 2 --context 100`。结果有省略时收紧路径或方法名。`grep` 未命中退出 1。两个子命令都只读；归档里有该模块不代表正在运行的客户端已加载它。
 
 ## 验证边界
 

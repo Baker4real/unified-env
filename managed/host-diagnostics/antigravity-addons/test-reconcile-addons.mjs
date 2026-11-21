@@ -1,32 +1,37 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import http from 'node:http';
-import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import http from 'node:http';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   applyWslLayer,
-  patchContextLocalApi,
-  patchContextMeterCollector,
-  patchContextMeterRenderer,
   detectAddonMarkers,
   detectHubLoadAnchor,
   packAsarWithOverlay,
   parseArgs,
+  patchContextLocalApi,
+  patchContextMeterCollector,
+  patchContextMeterRenderer,
   unpackAsar,
   walkAsar,
 } from './reconcile-addons.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const RECONCILER = path.join(SCRIPT_DIR, 'reconcile-addons.mjs');
-const OFFICIAL_DIR = 'D:/agents/run-evidence/antigravity-addons/20261121-desktop-2.34.0/official/resources';
-const OFFICIAL_ASAR = path.join(OFFICIAL_DIR, 'app.asar');
-const OFFICIAL_LS = path.join(OFFICIAL_DIR, 'bin/language_server.exe');
+const OFFICIAL_DIR = 'D:/agents/run-evidence/antigravity-addons/20261121-desktop-2.34.0';
+const OFFICIAL_ASAR = path.join(OFFICIAL_DIR, 'd-runtime-stage/rollback/app.asar');
+const OFFICIAL_LS = path.join(OFFICIAL_DIR, 'd-runtime-stage/program/resources/bin/language_server.exe');
 const EXPECTED_OFFICIAL_SHA = '8934adef0622c9271c92eea950a71848764a66f7b10023ccbd82e54b959adb0e';
+const EXPECTED_LS_SHA = 'cc94d648c39a67c293d0fdc8befc51e953d1a8f55617bf49fff69885ba475db9';
+const LAUNCHER_TEST = path.join(SCRIPT_DIR, '../antigravity/Test-AntigravityLauncher.ps1');
+const VENDOR_ROOT = 'D:/Codex/tools/antigravity-addons';
+const ALL_LAYERS = ['contextViewer', 'language', 'pulse', 'wsl'];
+const ALL_MARKERS = ['context-viewer-preload', 'context-viewer-utils', 'desktop-zhcn', 'pulse', 'wsl'];
 
 function sha256(buf) {
   return createHash('sha256').update(buf).digest('hex');
@@ -244,15 +249,24 @@ async function verifyPatchedContextDistBehavior(distDir, tmpRoot) {
   assert.ok(fallbackHits.length >= 2, `expected >= 2 agy_session_csrf_token fallbacks, got ${fallbackHits.length}`);
 }
 
-function getTempBase() {
-  if (fs.existsSync('D:/agents/tmp')) return 'D:/agents/tmp';
-  if (process.env.TEMP && fs.existsSync(process.env.TEMP)) return process.env.TEMP;
-  return os.tmpdir();
+async function createTestRoot(mode) {
+  let base = os.tmpdir();
+  if (process.platform === 'win32') {
+    base = ['D:/agents/tmp', 'D:/Codex/temp'].find((dir) => fs.existsSync(dir));
+    assert.ok(base, 'Antigravity fixtures require the managed D: temp directory');
+    base = path.resolve(base);
+    const parents = [base];
+    while (path.dirname(parents[0]) !== parents[0]) parents.unshift(path.dirname(parents[0]));
+    for (const dir of parents) {
+      assert.ok(fs.lstatSync(dir).isDirectory(), `Expected an ordinary fixture directory: ${dir}`);
+      assert.equal(fs.realpathSync(dir).toLowerCase(), dir.toLowerCase(), `Redirected fixture directory: ${dir}`);
+    }
+  }
+  return fsp.mkdtemp(path.join(base, `antigravity-addons-${mode}-`));
 }
 
 async function runUnitTests() {
-  const tmpRoot = path.join(getTempBase(), `reconcile-unit-${Date.now()}-${process.pid}`);
-  await fsp.mkdir(tmpRoot, { recursive: true });
+  const tmpRoot = await createTestRoot('unit');
   try {
     // Unit 1: packAsarWithOverlay preserves untouched bytes & updates offsets cleanly
     const baseAsar = buildSyntheticAsar({
@@ -535,14 +549,40 @@ module.exports = {
     ).toString('utf8');
     assert.equal((patchedRenderer.match(/agy_session_csrf_token/g) || []).length, 2);
     console.log('UNIT PASS 6: 2.34+ context-viewer CSRF patchers & authBootstrap/daemon_hub behavior');
+
+    if (process.platform === 'win32') {
+      const fixture = await setupFixture(tmpRoot, 'synthetic-upgrade', false);
+      const oldVersion = '2.98.0';
+      const newVersion = '2.99.0';
+      const archive = (version) => buildSyntheticAsar({
+        'package.json': JSON.stringify({ name: 'antigravity', version }),
+        'dist/wsl.js': syntheticWslJs,
+      });
+      const originalAsar = archive(oldVersion);
+      await fsp.writeFile(fixture.asarPath, originalAsar);
+      await fsp.writeFile(fixture.lsPath, 'synthetic old language server');
+      const old = runCli(['reconcile', '--apply', ...fixture.commonArgs]);
+      assert.equal(old.status, 'applied');
+      assert.equal(sha256File(path.join(fixture.backupDir, `app.asar.${oldVersion}.original`)), sha256(originalAsar));
+
+      // Surrogate for the NSIS overwrite. The fixture below holds the new ASAR open before Apply.
+      const updatedAsar = archive(newVersion);
+      const updatedLs = Buffer.from('synthetic new language server');
+      await fsp.writeFile(fixture.asarPath, updatedAsar);
+      await fsp.writeFile(fixture.lsPath, updatedLs);
+      await verifyLockedUpdate(fixture, RECONCILER, newVersion, sha256(updatedAsar), sha256(updatedLs), ['wsl'], ['wsl']);
+      assert.equal(sha256File(path.join(fixture.backupDir, `app.asar.${oldVersion}.original`)), sha256(originalAsar));
+      await verifyReparseRefusal(tmpRoot, fixture);
+      console.log('FIXTURE PASS: synthetic cross-version overwrite, real launcher probe, promotion, backups and reparse refusal');
+    }
     console.log('ALL 6 UNIT TESTS PASSED');
   } finally {
     await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-function runCli(args) {
-  const res = spawnSync(process.execPath, [RECONCILER, ...args], {
+function runCli(args, reconciler = RECONCILER) {
+  const res = spawnSync(process.execPath, [reconciler, ...args], {
     encoding: 'utf8',
     timeout: 120000,
   });
@@ -570,43 +610,152 @@ function replaceMemberInAsar(asarBuf, relPath, transformFn) {
   return packAsarWithOverlay(asarBuf, new Map([[relPath, next]]), new Map()).buffer;
 }
 
-async function setupFixture(rootDir, name) {
+async function setupFixture(rootDir, name, installOfficial = true) {
   const base = path.join(rootDir, name);
   const appDir = path.join(base, 'app');
   const backupDir = path.join(base, 'backup');
   const stateRoot = path.join(base, 'state');
   const evidenceRoot = path.join(base, 'evidence');
-  await fsp.mkdir(path.join(appDir, 'resources/bin'), { recursive: true });
-  await fsp.copyFile(OFFICIAL_ASAR, path.join(appDir, 'resources/app.asar'));
-  try {
-    await fsp.link(OFFICIAL_LS, path.join(appDir, 'resources/bin/language_server.exe'));
-  } catch {
-    await fsp.copyFile(OFFICIAL_LS, path.join(appDir, 'resources/bin/language_server.exe'));
-  }
-  return {
-    appDir,
-    backupDir,
-    stateRoot,
-    evidenceRoot,
+  const asarPath = path.join(appDir, 'resources/app.asar');
+  const lsPath = path.join(appDir, 'resources/bin/language_server.exe');
+  await fsp.mkdir(path.dirname(lsPath), { recursive: true });
+  const fixture = {
+    base, appDir, backupDir, stateRoot, asarPath, lsPath,
     commonArgs: ['--app-dir', appDir, '--backup-dir', backupDir, '--state-root', stateRoot, '--evidence-root', evidenceRoot],
   };
+  if (installOfficial) await installOfficialPayload(fixture);
+  return fixture;
+}
+
+async function installOfficialPayload({ asarPath, lsPath }) {
+  await fsp.copyFile(OFFICIAL_ASAR, asarPath);
+  await fsp.copyFile(OFFICIAL_LS, lsPath);
+}
+
+function runUpgradeLauncher(root, reconciler) {
+  return spawnSync('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', LAUNCHER_TEST,
+    '-UpgradeFixtureRoot', root, '-ReconcilerPath', reconciler, '-NodeExe', process.execPath],
+  { encoding: 'utf8', timeout: 120000 });
+}
+
+async function verifyReparseRefusal(tmpRoot, fixture) {
+  const outside = await fsp.mkdtemp(path.join(tmpRoot, 'junction-sentinel-'));
+  const sentinel = path.join(outside, 'sentinel.txt');
+  const redirect = path.join(fixture.stateRoot, 'redirect');
+  await fsp.writeFile(sentinel, 'outside fixture state');
+  await fsp.symlink(outside, redirect, 'junction');
+  try {
+    const outer = runUpgradeLauncher(fixture.base, RECONCILER);
+    assert.notEqual(outer.status, 0);
+    assert.match(outer.stderr, /Launcher fixture contains a reparse point/);
+    const inner = spawnSync(path.join(fixture.base, 'TestLauncher.exe'), ['--reconcile-fixture'], {
+      encoding: 'utf8', timeout: 10000,
+    });
+    assert.notEqual(inner.status, 0);
+    assert.match(inner.stderr, /Launcher fixture contains a reparse point/);
+    assert.deepEqual(await fsp.readdir(outside), ['sentinel.txt']);
+    assert.equal(await fsp.readFile(sentinel, 'utf8'), 'outside fixture state');
+  } finally {
+    await fsp.unlink(redirect);
+  }
+}
+
+async function verifyLockedUpdate(fixture, reconciler, version, officialSha, lsSha, layers, markers) {
+  const activePath = path.join(fixture.stateRoot, 'active-build.json');
+  const previousActiveSha = sha256File(activePath);
+  const backupPath = path.join(fixture.backupDir, `app.asar.${version}.original`);
+  const backupBefore = fs.existsSync(backupPath) ? fs.statSync(backupPath) : null;
+  const before = runCli(['status', ...fixture.commonArgs], reconciler);
+  assert.equal(before.status, 'needs-reconcile');
+  assert.equal(before.version, version);
+  assert.equal(before.currentAsarSha, officialSha);
+  assert.equal(before.languageServerSha256, lsSha);
+  assert.deepEqual(before.markers, []);
+
+  const res = runUpgradeLauncher(fixture.base, reconciler);
+  assert.equal(res.status, 0, `Locked update fixture failed (${res.error || res.status}): ${res.stderr}\n${res.stdout}`);
+  const { staged, pendingStatus, retry, launcherWhileReopened, launcherWhileLocked, asarWhileLocked,
+    pendingWhileLocked, activeWhileLocked, promotion, subsequentLaunch } = JSON.parse(res.stdout);
+  assert.equal(staged.status, 'staged-pending-locked');
+  assert.equal(pendingStatus.status, 'pending-ready');
+  assert.equal(pendingStatus.currentAsarSha, officialSha);
+  assert.deepEqual(pendingStatus.markers, []);
+  assert.equal(staged.version, version);
+  assert.equal(staged.officialSha256, officialSha);
+  assert.equal(staged.replaceTargetSha256, officialSha);
+  assert.equal(staged.languageServerSha256, lsSha);
+  assert.deepEqual([...staged.appliedLayers].sort(), layers);
+  assert.equal(retry.status, 'pending-still-locked');
+  assert.equal(retry.combinedSha256, staged.combinedSha256);
+  assert.equal(launcherWhileReopened, 'SkippedDesktopRunning');
+  assert.equal(launcherWhileLocked, 'FailedOpen');
+  assert.equal(asarWhileLocked, officialSha);
+  assert.equal(pendingWhileLocked, staged.combinedSha256);
+  assert.equal(activeWhileLocked, previousActiveSha);
+
+  assert.equal(promotion, 'AppliedPending');
+  assert.equal(subsequentLaunch, 'FastPathUpToDate');
+  for (const name of ['pending-app.asar', 'pending-apply.json']) {
+    assert.ok(!fs.existsSync(path.join(fixture.stateRoot, name)), `Launcher left ${name} behind`);
+  }
+  const active = JSON.parse(await fsp.readFile(activePath, 'utf8'));
+  assert.equal(active.version, version);
+  assert.equal(active.officialSha256, officialSha);
+  assert.equal(active.languageServerSha256, lsSha);
+  assert.equal(active.combinedSha256, staged.combinedSha256);
+  assert.deepEqual([...active.appliedLayers].sort(), layers);
+  const after = runCli(['status', ...fixture.commonArgs], reconciler);
+  assert.equal(after.status, 'up-to-date');
+  assert.equal(after.currentAsarSha, active.combinedSha256);
+  assert.deepEqual([...after.markers].sort(), markers);
+  assert.equal(sha256File(fixture.lsPath), lsSha);
+  assert.equal(sha256File(backupPath), officialSha);
+  if (backupBefore) {
+    const backupAfter = fs.statSync(backupPath);
+    assert.equal(backupAfter.ino, backupBefore.ino, 'Same-version backup was replaced');
+    assert.equal(backupAfter.mtimeMs, backupBefore.mtimeMs, 'Same-version backup was rewritten');
+  }
+}
+
+async function prepareE2eReconciler(root) {
+  // The same source file runs beside the real vendor assets. Its state and payloads stay in the fixture.
+  const tools = path.join(root, 'tools');
+  await fsp.mkdir(tools);
+  const reconciler = path.join(tools, 'reconcile-addons.mjs');
+  await fsp.copyFile(RECONCILER, reconciler);
+  for (const dir of ['desktop-zhcn-v3.0.8', 'pulse-v1.3.2', 'context-viewer-v0.8.8']) {
+    const source = path.join(VENDOR_ROOT, dir);
+    assert.ok((await fsp.lstat(source)).isDirectory(), `Expected local vendor directory: ${source}`);
+    await fsp.symlink(source, path.join(tools, dir), 'junction');
+  }
+  return reconciler;
 }
 
 async function runE2eTests() {
-  assert.equal(sha256File(OFFICIAL_ASAR), EXPECTED_OFFICIAL_SHA, 'Official 2.34.0 fixture hash mismatch');
+  assert.equal(process.platform, 'win32', 'The offline update rehearsal uses a Windows file share lock');
+  const baseline = JSON.parse(await fsp.readFile(path.join(OFFICIAL_DIR, 'official-baseline.json'), 'utf8'));
+  assert.equal(baseline.status, 'verified');
+  assert.equal(baseline.installerVersion, '2.34.0');
+  assert.equal(baseline.signedBy, 'Google LLC');
+  const manifest = new Map(baseline.members.map(({ relative, sha256: sha }) => [relative, sha]));
+  assert.equal(manifest.get('resources/app.asar'), EXPECTED_OFFICIAL_SHA);
+  assert.equal(manifest.get('resources/bin/language_server.exe'), EXPECTED_LS_SHA);
+  assert.equal(sha256File(OFFICIAL_ASAR), EXPECTED_OFFICIAL_SHA, 'Official 2.34.0 ASAR fixture hash mismatch');
+  assert.equal(sha256File(OFFICIAL_LS), EXPECTED_LS_SHA, 'Official 2.34.0 language server fixture hash mismatch');
 
-  const tmpRoot = path.join(getTempBase(), `reconcile-e2e-${Date.now()}-${process.pid}`);
-  await fsp.mkdir(tmpRoot, { recursive: true });
+  const tmpRoot = await createTestRoot('e2e');
   try {
+    const reconciler = await prepareE2eReconciler(tmpRoot);
+    const cli = (args) => runCli(args, reconciler);
     // Test 1: Full 4-layer reconcile on official 2.34.0
     const f1 = await setupFixture(tmpRoot, 'case1-full');
-    const st0 = runCli(['status', ...f1.commonArgs]);
+    const st0 = cli(['status', ...f1.commonArgs]);
     assert.equal(st0.status, 'needs-reconcile');
     assert.equal(st0.version, '2.34.0');
 
-    const r1 = runCli(['reconcile', '--apply', ...f1.commonArgs]);
+    const r1 = cli(['reconcile', '--apply', ...f1.commonArgs]);
     assert.equal(r1.status, 'applied');
-    assert.deepEqual([...r1.appliedLayers].sort(), ['contextViewer', 'language', 'pulse', 'wsl']);
+    assert.deepEqual([...r1.appliedLayers].sort(), ALL_LAYERS);
     assert.equal(r1.skippedLayers.length, 0);
     assert.equal(r1.unchangedPackedMembers, 785, 'Expected exact unchanged packed members count for 2.34.0');
 
@@ -632,6 +781,7 @@ async function runE2eTests() {
     assert.ok(!customSchemeSrc.includes('agy_zhcn_autofollow_hook.json'), 'Old userData hook path still present');
     assert.ok(!fs.existsSync(path.join(r1.stageDir, '.work')), '.work staging dir was not cleaned up');
     assert.ok(fs.existsSync(path.join(r1.stageDir, 'result.json')), 'Audit receipt missing');
+
     // Extract dist/* from the reconciled 2.34.0 ASAR and verify 2.34+ CSRF auth behavior end-to-end
     const extractedDist = path.join(tmpRoot, 'case1-extracted-dist');
     const reconciledBuf = await fsp.readFile(patchedAsarPath);
@@ -656,45 +806,45 @@ async function runE2eTests() {
 
     // Test 2: Idempotency fast-path
     const mtimeBefore = fs.statSync(patchedAsarPath).mtimeMs;
-    const st1 = runCli(['status', ...f1.commonArgs]);
+    const st1 = cli(['status', ...f1.commonArgs]);
     assert.equal(st1.status, 'up-to-date');
-    assert.deepEqual([...st1.markers].sort(), ['context-viewer-preload', 'context-viewer-utils', 'desktop-zhcn', 'pulse', 'wsl']);
-    const r2 = runCli(['reconcile', '--apply', ...f1.commonArgs]);
+    assert.deepEqual([...st1.markers].sort(), ALL_MARKERS);
+    const r2 = cli(['reconcile', '--apply', ...f1.commonArgs]);
     assert.equal(r2.status, 'up-to-date');
     assert.equal(fs.statSync(patchedAsarPath).mtimeMs, mtimeBefore, 'Up-to-date fast-path mutated app.asar');
     console.log('E2E PASS 2: idempotency fast-path');
 
     // Test 3: Double-patch refusal when active-build.json is missing
     await fsp.rm(path.join(f1.stateRoot, 'active-build.json'));
-    const r3 = runCli(['reconcile', '--apply', ...f1.commonArgs]);
+    const r3 = cli(['reconcile', '--apply', ...f1.commonArgs]);
     assert.equal(r3.status, 'refused-already-patched');
     assert.equal(sha256File(patchedAsarPath), r1.combinedSha256, 'Refused run mutated app.asar');
     console.log('E2E PASS 3: double-patch refusal');
 
     // Test 4: Clean rebuild from immutable backup
-    const r4 = runCli(['reconcile', '--from-backup', '--apply', ...f1.commonArgs]);
+    const r4 = cli(['reconcile', '--from-backup', '--apply', ...f1.commonArgs]);
     assert.equal(r4.status, 'applied');
     assert.equal(r4.officialSha256, EXPECTED_OFFICIAL_SHA);
     assert.equal(r4.replaceTargetSha256, r1.combinedSha256);
-    assert.deepEqual([...r4.appliedLayers].sort(), ['contextViewer', 'language', 'pulse', 'wsl']);
-    assert.equal(runCli(['status', ...f1.commonArgs]).status, 'up-to-date');
+    assert.deepEqual([...r4.appliedLayers].sort(), ALL_LAYERS);
+    assert.equal(cli(['status', ...f1.commonArgs]).status, 'up-to-date');
     console.log('E2E PASS 4: clean rebuild from immutable backup');
 
     // Test 5: Stage-only + instant pending promotion
     const f2 = await setupFixture(tmpRoot, 'case2-pending');
-    const r5 = runCli(['reconcile', '--stage-only', ...f2.commonArgs]);
+    const r5 = cli(['reconcile', '--stage-only', ...f2.commonArgs]);
     assert.equal(r5.status, 'staged-pending');
-    assert.equal(sha256File(path.join(f2.appDir, 'resources/app.asar')), EXPECTED_OFFICIAL_SHA, 'stage-only touched live app.asar');
+    assert.equal(sha256File(f2.asarPath), EXPECTED_OFFICIAL_SHA, 'stage-only touched live app.asar');
     assert.ok(fs.existsSync(path.join(f2.stateRoot, 'pending-app.asar')));
     assert.ok(fs.existsSync(path.join(f2.stateRoot, 'pending-apply.json')));
-    assert.equal(runCli(['status', ...f2.commonArgs]).status, 'pending-ready');
+    assert.equal(cli(['status', ...f2.commonArgs]).status, 'pending-ready');
 
-    const r5b = runCli(['reconcile', '--apply', ...f2.commonArgs]);
+    const r5b = cli(['reconcile', '--apply', ...f2.commonArgs]);
     assert.equal(r5b.status, 'applied-from-pending');
-    assert.equal(sha256File(path.join(f2.appDir, 'resources/app.asar')), r5.combinedSha256);
+    assert.equal(sha256File(f2.asarPath), r5.combinedSha256);
     assert.ok(!fs.existsSync(path.join(f2.stateRoot, 'pending-app.asar')));
     assert.ok(!fs.existsSync(path.join(f2.stateRoot, 'pending-apply.json')));
-    assert.equal(runCli(['status', ...f2.commonArgs]).status, 'up-to-date');
+    assert.equal(cli(['status', ...f2.commonArgs]).status, 'up-to-date');
     console.log('E2E PASS 5: stage-only and instant pending promotion');
 
     // Test 6: Fail-closed per-layer degradation when an upstream anchor breaks
@@ -707,14 +857,19 @@ async function runE2eTests() {
     });
     await fsp.writeFile(brokenAsarPath, mutatedBuf);
 
-    const r6 = runCli(['reconcile', '--apply', ...f3.commonArgs]);
+    const r6 = cli(['reconcile', '--apply', ...f3.commonArgs]);
     assert.equal(r6.status, 'applied');
     assert.deepEqual([...r6.appliedLayers].sort(), ['language', 'pulse', 'wsl']);
     assert.equal(r6.skippedLayers.length, 1);
     assert.equal(r6.skippedLayers[0].layer, 'contextViewer');
     console.log('E2E PASS 6: fail-closed per-layer degradation');
 
-    console.log('ALL 6 E2E RECONCILER TESTS PASSED');
+    // Reinstall the verified official bytes over the patched 2.34.0 fixture, then simulate the NSIS relaunch lock.
+    await installOfficialPayload(f1);
+    await verifyLockedUpdate(f1, reconciler, '2.34.0', EXPECTED_OFFICIAL_SHA, EXPECTED_LS_SHA, ALL_LAYERS, ALL_MARKERS);
+    console.log('E2E PASS 7: signed 2.34.0 payload overwrite, lock, all four layers promoted, original backup preserved');
+
+    console.log('ALL 7 E2E RECONCILER TESTS PASSED');
   } finally {
     await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
   }

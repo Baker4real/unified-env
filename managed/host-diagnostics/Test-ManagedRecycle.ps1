@@ -52,7 +52,7 @@ $resetBinSettings = $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT 
 $binSettingsCheck = [ordered]@{ reset = $false; removed = $null; beforeCheck = $null; afterCheck = $null }
 
 function Invoke-Entry {
-    param([string[]]$EntryArguments)
+    param([string[]]$EntryArguments, [switch]$UseOnlyEntryArguments)
     $psi = [Diagnostics.ProcessStartInfo]::new((Join-Path $PSHOME 'pwsh.exe'))
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
@@ -60,7 +60,8 @@ function Invoke-Entry {
     $psi.RedirectStandardError = $true
     $psi.StandardOutputEncoding = $utf8
     $psi.StandardErrorEncoding = $utf8
-    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $entry) + $EntryArguments + @('-EvidenceRoot', $entryEvidence, '-KnowledgeBaseRoot', $knowledgeBase)) {
+    if (-not $UseOnlyEntryArguments) { $EntryArguments += @('-EvidenceRoot', $entryEvidence, '-KnowledgeBaseRoot', $knowledgeBase) }
+    foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $entry) + $EntryArguments) {
         $psi.ArgumentList.Add([string]$argument)
     }
     $process = [Diagnostics.Process]::Start($psi)
@@ -690,16 +691,20 @@ try {
         Assert-Refused (Invoke-Entry @('-Mode', 'Apply', '-PlanPath', (Join-Path $runDir 'plan.json'), '-ApprovedPlanSha256', $hash, '-ConfirmRecycle')) 'plan-expired'
     }
 
-    Assert-Case 'apply records a changed tree once and refuses to replay the plan' {
+    Assert-Case 'returned apply arguments preserve both custom roots and prevent replay' {
         $tree = New-Tree 'tree-drift'
         $planned = Invoke-Plan $tree
         if ($planned.exitCode -ne 0) { throw "Plan failed: $($planned.stdout)" }
+        $apply = $planned.json.applyArguments
+        if ($planned.json.evidenceRoot -ne $entryEvidence -or $apply -isnot [array] -or
+            $apply -notcontains $entryEvidence -or $apply -notcontains $knowledgeBase) {
+            throw 'Plan did not return a complete Apply argument list with both roots.'
+        }
         [IO.File]::WriteAllText((Join-Path $tree 'extra.txt'), 'drift', $utf8)
-        $apply = @('-Mode', 'Apply', '-PlanPath', $planned.json.planPath, '-ApprovedPlanSha256', $planned.json.planSha256, '-ConfirmRecycle')
-        Assert-Refused (Invoke-Entry $apply) 'manifest-changed'
+        Assert-Refused (Invoke-Entry -EntryArguments $apply -UseOnlyEntryArguments) 'manifest-changed'
         $recorded = [IO.File]::ReadAllText((Join-Path (Split-Path -Parent $planned.json.planPath) 'result.json')) | ConvertFrom-Json -AsHashtable
         if ($recorded.reason -ne 'manifest-changed' -or -not [IO.File]::Exists((Join-Path $tree 'extra.txt'))) { throw 'The drift refusal was not recorded or touched the tree.' }
-        Assert-Refused (Invoke-Entry $apply) 'plan-already-applied'
+        Assert-Refused (Invoke-Entry -EntryArguments $apply -UseOnlyEntryArguments) 'plan-already-applied'
     }
 
     Assert-Case 'plan records -AllowInternalHardLinks and apply rechecks the tree with it' {

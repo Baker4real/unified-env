@@ -26,7 +26,7 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 | `Invoke-ManagedRecycle.ps1` | Core 7.4+；把单个文件或目录树移入所在卷的回收站。Check 只读运行同一套预检，不需要用途和授权，也不写 evidence；Plan 把逐项相对路径清单、回收站状态、用途和用户授权原话写入 D 盘 evidence 的 `plan.json`；Apply 须在 30 分钟内凭 plan SHA-256 与 `-ConfirmRecycle` 执行，重跑预检并比对清单后调用 `SHFileOperationW`，再按原路径读回 `$I`/`$R` 记录、比对回收站副本；被别的进程占用的 `$I` 记录重试到读回开始后 3 秒，仍读不了就跳过并列入 `unreadableBinRecords`，目标记录不在可读记录里时报 `bin-record-unreadable`。结果只写一次 `result.json`，同一 plan 不能重放；只有 `checked`/`planned`/`recycled` 退出 0。卷根、受保护根及其祖先、系统子树、链接（加 `-AllowInternalHardLinks` 时放行每个名字都在目标内的 hardlink，计数报在 `internalHardLinkFiles`；Plan 记下开关，Apply 按 plan 的设置重检）、当前进程拿不到 DELETE 的条目（`delete-access-denied`，点名前 20 个并报是否提权；安装器收紧过的目录以前到 Apply 才报 `0x78`）、超长路径（拒绝时分列原位与回收站内长度并点名超长条目）、NoRecycleFiles/NukeOnDelete 和回收站余量不足一律拒绝；知识库页面 frontmatter `sources` 指向的目标或其内部路径报 `kb-cited`，点名前 20 处引用（2026-11-07 起，知识库根可用 `-KnowledgeBaseRoot` 改，不存在时不检查）；回收会丢掉的 git 内容报 `git-unsaved-work`（2026-11-08 起），逐条列在 `gitUnsavedWork`：目标里、目标所在和 `core.worktree` 指到目标里的工作树的未提交、未跟踪文件（含没检出的子模块目录里的文件，路径不分大小写匹配）、标了 assume-unchanged/skip-worktree 的文件，链接工作树只有其 HEAD 持有的提交，以及随目标一起回收的 git 目录（`.git`、裸仓库、`.git\modules` 下的仓库、目标所在的 git 目录）里目标外远端的远端跟踪分支到不了的提交（含 tag 与游离 HEAD）和 stash；git 以显式 `--git-dir` 只读运行，不联网、不执行仓库配置里的命令，读不了也拒绝。用户同意丢掉时 Check 与 Plan 加 `-GitLossAuthorization <用户原话>`，Plan 连同 `gitUnsavedWork` 记下，Apply 按 plan 重检，内容与 plan 不一致报 `git-unsaved-work-changed`。不做永久删除，也不清空回收站。Agent 使用边界见宿主 `host-runbook/safe-tree-delete.md` 的受管回收节。 |
 | `Get-ConsoleLaunchAudit.ps1` | 只读。枚举在用户会话里运行的计划任务（登录类型 Interactive、InteractiveOrPassword、Group）、HKCU 与 HKLM 的 Run/RunOnce（含 WOW6432Node）和两个启动文件夹；已禁用的任务和被任务管理器禁用的登录项（StartupApproved 首字节为奇数）只计数。按启动的程序分类：hidden 是 pythonw 跑的脚本以 `CREATE_NO_WINDOW` 启动紧跟在它后面的程序（按脚本文本判断，受管的 `hidden-console-launcher.py` 就是这种形式），或 `conhost.exe --headless`，且被启动的程序存在；gui 是 GUI 子系统程序、Windows Script Host 脚本或 pythonw 跑的其他脚本（这类脚本之后再打开的控制台静态审计看不到，要靠复验）；visible-console 是控制台子系统、`.cmd`/`.bat`、不带 `--headless` 的 conhost 或 Windows Terminal，`-WindowStyle Hidden` 不改变结论（Windows Terminal 承接控制台时窗口照样弹出）；missing 是程序、pythonw 要跑的脚本或被包装的程序不存在；unknown 是读不出 PE。名字某一段以 Codex 开头，或程序、参数指向 `D:\Codex\`、`D:\agents\` 的算 Codex 自有，全部列出且发现项在前；其他入口只在会开控制台时列出，仅供参考。不输出参数；Codex 自有入口有 visible-console、missing 或 unknown 时退出 1。经 SSH 运行时，HKCU 和个人启动文件夹是 SSH 账户的。 |
 | `Watch-ConsoleWindows.ps1` | 在真实会话复验改动。为当前账户注册两个没有触发器的临时 Interactive 任务：经 `conhost --headless` 启动的监视器，和不加包装直接跑 pwsh 的对照任务。对照会在用户桌面闪一个约 2.5 秒的窗口，证明监视器看得见这个桌面。随后每隔 5 秒启动一个 `-StartTasks` 任务，最后由监视器经 shell 打开 `-LaunchPath`（如启动文件夹快捷方式）。新窗口归到它之前最近的触发：`quiet` 退出 0；`windows-seen`、`control-missed`、`trigger-failed`、`monitor-not-started`（该账户没有交互登录）退出 1。临时任务在写报告前删除，被中断的运行会留下 `zz-CodexConsoleWatch-*`。不记录窗口标题和命令行；`-EvidenceDirectory` 必须是新的 D 盘目录。 |
-| `Open-DesktopShortcut.ps1` | `Plan` 回读指定快捷方式的目标和参数。`Open` 可复用现有响应窗口。`Restart` 正常关闭同一会话中的唯一匹配窗口，等待旧进程退出，经 Explorer 打开原快捷方式，再核对新进程及窗口。超时后先查看应用当前实例。 |
+| `Open-DesktopShortcut.ps1` | `Plan` 回读快捷方式目标和参数。`Open` 可复用现有响应窗口。`Restart` 只请求同一会话里身份已核实的窗口正常退出，再经 Explorer 打开原快捷方式。Antigravity 同时核对桌面进程角色和唯一的原生应用窗体，保持进程句柄直至操作结束，并在发送关闭消息前重查同一个 HWND。 |
 | `Get-WslState.ps1` | 只读输出单份 JSON，不执行 `wsl.exe`；Lxss 只保留具有非空 `DistributionName` 的条目，`InstallStatus` 不计发行版；包名匹配同时覆盖 `WindowsSubsystemForLinux`。功能状态优先 `Get-WindowsOptionalFeature`，未提权时回退 `Win32_OptionalFeature`；ForTest 夹具只替换对应采集器。 |
 | `Watch-WslLaunch.ps1` | 按需、有限时长（5–3600 秒，默认 600）监视新 `wsl.exe`；写入新 D 盘 `EvidenceDirectory` 的 `events.jsonl` 与 `result.json`。记录目标命令行、创建时间、路径和父/祖父进程身份，不记录父/祖父命令行；`StopAfterFirst` 首次捕获后结束。任务监视可经 `DSH_WSL_WATCH_OWNER_TOKEN` 传入随机 token，证据只记录其 SHA-256。轮询可能漏掉两次采样间退出的短命进程；不启动、停止或修改被监视进程，不替代持久审计。 |
 | `Protect-SensitiveLog.ps1` | 有界日志投影。剔除启动命令、已知凭据形态和疑似未知高熵秘密（24 位以上的长串）；提到 sha256/diff/height 的行只免于长串这一条，已知凭据形态照样剔除。丢弃行时返回 `read-with-omissions` 和退出 1，原始敏感行不回显。支持 Tail、行数和 UTF-8 字节预算。 |
@@ -100,9 +100,19 @@ python -B D:/Codex/.codex/scripts/codex_diagnostics.py desktop-check --previous-
 
 spec 对应 `{"path":"D:/path/reference.md","format":"markdown","section":"标题"}`。标题精确区分大小写，忽略代码围栏中的伪标题；只支持 ATX，不解释 Setext。缺失或重复标题分别返回 `section-not-found`、`section-ambiguous` 和退出 1，来源内容不输出。命中总预算或单行裁剪时按返回的行号续读，不把省略部分当作已读。
 
+## 按 PowerShell 函数读取
+
+给定实际 `.ps1` 或 `.psm1` 路径和完整函数名时，用 AST 定位行段，直接返回预算内的函数正文。
+
+```powershell
+& 'D:/Codex/.codex/scripts/Read-BoundedProjection.ps1' -LiteralPath 'D:/agents/projects/统一环境/managed/host-diagnostics/Open-DesktopShortcut.ps1' -PowerShellFunction 'Get-AppWindows' -MaxRows 25 -MaxTotalBytes 3500
+```
+
+spec 对应 `{"path":"D:/path/script.ps1","format":"powershell","functionName":"Get-AppWindows"}`。函数名精确匹配且忽略大小写。输出带原文件行号和函数起止行，可用 `-StartLine` 续读。文件超过 4 MiB、无法解析、没有匹配或定义不唯一时，返回原因和退出 1，正文留空。查询渲染器等其他源码时，给已有 `-LiteralPath`、`-Contains` 和 `-MaxTotalBytes` 传已知文件、独特的文字标记和整批预算。
+
 ## 桌面启动与代理验收
 
-读取用户实际使用的 `.lnk`，用 `Open-DesktopShortcut.ps1 -Mode Plan` 校验预期目标、参数和待观察的窗口程序路径。获得重开授权后用 `Restart` 复测。新进程继承交互式用户的环境。需要换代理的应用应从实际快捷方式启动后，核对前台和后端进程拿到的代理设置，再请求业务端点。单独部署 NVIDIA 下载诊断时，`-Only` 同时选 `Get-NvidiaDownloadStatus.ps1,lib/ProcessProxyReader.ps1`。Antigravity 的代理回归、WSL 候选构建及升级复测见 [桌面启动维护](../../managed/host-diagnostics/antigravity/README.md)。
+读取用户实际使用的 `.lnk`，用 `Open-DesktopShortcut.ps1 -Mode Plan` 校验预期目标、参数和待观察的窗口程序路径。获得重开授权后用 `Restart` 复测。新进程继承交互式用户的环境。需要换代理的应用应从实际快捷方式启动后，核对前台和后端进程拿到的代理设置，再请求业务端点。单独部署 NVIDIA 下载诊断时，`-Only` 同时选 `Get-NvidiaDownloadStatus.ps1,lib/ProcessProxyReader.ps1`。单独部署快捷方式入口时，`-Only` 同时选 `lib/AntigravityProcessIdentity.ps1,Open-DesktopShortcut.ps1`。Antigravity 的进程与插件检查、代理回归、WSL 候选构建及升级复测见 [桌面启动维护](../../managed/host-diagnostics/antigravity/README.md)。
 
 ## 会话文档读取
 

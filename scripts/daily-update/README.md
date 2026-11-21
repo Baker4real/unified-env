@@ -268,9 +268,44 @@ python -B scripts/daily-update/shared-skill-delivery.py register --run-directory
 python -B scripts/daily-update/shared-skill-delivery.py deliver --run-directory <当次目录> --receipt delivery/<skill>-hosts.json --transaction-manifest <同一manifest> --name <skill> --preset cordis --cwd <使用工作区> --model-invocable no --user-invocable yes --like <同一技能>
 ~~~
 
-示例采用手动调用。按该候选的已审阅策略填写两项调用标志。用户指定宿主时，用 `--agents dsh,<宿主列表>` 代替 `--like`。本机受管入口支持 `dsh`、`claude`、`claude-desktop`、`codex` 和 `kimi`。`register` 首轮登记 `dsh`，`deliver` 在分发前再实测正文加载和调用策略，`verify` 只读核验已经分发的同一载荷。在失败收据中查看阶段和原因，用新收据重试对应阶段。
+示例采用手动调用。按该候选的已审阅策略填写两项调用标志。用户指定宿主时，用 `--agents dsh,<宿主列表>` 代替 `--like`。本机受管入口支持 `dsh`、`claude`、`claude-desktop`、`codex`、`kimi` 和 `antigravity`。`register` 首轮登记 `dsh`，`deliver` 在分发前再实测正文加载和调用策略，`verify` 只读核验已经分发的同一载荷。在失败收据中查看阶段和原因；只有排除需人工核查的写入后再重试。
 
-验收探针用已安装的 Harness SDK 合成实际 Desktop 预设的文件技能配置，在隔离作用域执行技能发现与正文加载。Magpie 分发读取实际勾选和应用记录，并核验各宿主链接或受管副本。命令只输出目标技能的验收字段。[Magpie Library API](https://github.com/yetone/magpie/blob/6a46bad3441151f91ab188cc378fd444f5564138/internal/gui/library.go)
+验收探针用已安装的 Harness SDK，在隔离作用域核验 Desktop 预设的技能发现与正文加载。Magpie 分发同时核对勾选、应用记录、宿主链接或副本，以及实际写入收据 `magpie_write_audits`。
+
+### Magpie 限定宿主的写入入口
+
+[Magpie 写入补丁](magpie-v0.1.4652-library-scope.patch) 基于官方 [v0.1.4652](https://github.com/yetone/magpie/tree/b704e4f9d835e410af35737b137cb6891c4f8391)。在独立 D 盘源码树中执行 `git -c core.autocrlf=false apply --check --whitespace=error <补丁绝对路径>`，再去掉 `--check` 应用补丁。验证和构建都在该树运行，Go 缓存和测试临时路径放在 D 盘。
+
+~~~powershell
+go test -mod=readonly -tags nogui -count=1 -run 'TestLibraryScoped|TestEveryRouteIsNamedForTheCLI|TestEveryRouteHasACommandOrIsNamed' ./internal/gui ./internal/cli
+go build -mod=readonly -tags nogui -trimpath -ldflags '-s -w -X main.version=v0.1.4652+libraryscope.1' -o <D盘候选产物路径> .
+~~~
+
+`register`、`deliver` 和 `scoped-mcp` 使用独立的 [Magpie 限定写入器](D:/Codex/tools/magpie-scoped-library/magpie-scoped-library.exe)。在候选验收和批准后部署。分发前核对 `--version` 的 `+libraryscope.1` 能力标识、`GET /api/library/scoped` 的 `scopeVersion` 和后端实际 `statePath`。任一不匹配则停止分发。`verify` 只读。
+
+受管写入按同一 Library 状态文件加跨进程锁，撞到正在进行的写入时返回 `magpie-scoped-write-busy`。在锁持有期间暂缓普通 Magpie 的 Library 页面、CLI 写入及云同步。普通 Magpie 使用自己的进程内锁，Library 读取、应用启动和全库 `sync` 也可能触发独立调和。
+
+API 调用方启动 `magpie-scoped-library.exe web --library-scoped --addr 127.0.0.1:<port>`，为该进程单独生成 `MAGPIE_WEB_KEY`，请求用 `magpie_web_<port>` cookie。通过能力核对后，将授权的 Magpie 宿主 ID 逐项传入 `agents`。本地技能支持 `POST /api/library/scoped/skills/{probe,install,agents}`。MCP 批量操作用 `POST /api/library/scoped/servers/agents-some`，传入 `names`、`agents`、`on`，同一批全部服务器用 `agents-all` 并省略 `names`。启动与应答都只走专用后端，不请求普通 Library 页。MCP 路由或技能共享目录、技能路由启用时，对应操作需要另行确认范围。若已配置的 `agy` 和 `antigravity` 共用目的地，只授权其中一个会在写入前被拒绝。
+
+MCP 操作指定已登记服务器名称与宿主 ID，并选择 `--enable` 或 `--disable`。以下命令使用已有的当次证据目录，回执名称须为新文件。
+
+~~~powershell
+python -B scripts/daily-update/shared-skill-delivery.py scoped-mcp --run-directory <当次目录> --receipt delivery/mcp-antigravity.json --agents antigravity --servers <服务器名称> --enable
+~~~
+
+`--servers` 限定要修改勾选的服务器。Magpie 应用所选宿主的 MCP 配置时也会调和该宿主已有的待同步条目。
+
+### 核对 Magpie 实际写入
+
+`register`、`deliver` 和 `scoped-mcp` 比较动作回执和前后文件指纹。`magpie_write_audit_status=not-observed` 只说明这次没有观测到写入，旧收据继续适用。若 `review-required` 且不是写入前预检拒绝，保留原收据，核对 `unexpected_changed_hosts`、`changed_artifacts`、`unavailable_artifacts`，确认恢复或继续的范围。finalizer 按原收据保留人工核查闸门。
+
+手工调用限定范围的批量分发也用同一审计，例如 MCP 动作的目标 ID 为 `antigravity`。
+
+1. 操作前执行 `python -B scripts/daily-update/shared-skill-delivery.py audit-before --kind mcp --agents antigravity`，确认 `preflight-ready`，将 JSON 保存在当次 D 盘证据目录。审计单个技能时改用 `--kind skill --name <技能名>`。
+2. 仅执行已经授权的分发。将上一步 JSON 放入 `before`，把本次动作回执投影到 `result`：`changed` 只保留已登记宿主 ID（未映射用 `null`），`problems` 每项只保留 `{ "agent": "<ID>" }`（未知用空字符串），可另附 `backup_reported` 布尔。不保存原始配置、问题消息、备份路径或认证头。没有动作回执时填 `result: null`。
+3. 将 `{ "before": …, "result": … }` 从 stdin 传入 `python -B scripts/daily-update/shared-skill-delivery.py audit-after`。`observed-within-scope` 表示回执与已覆盖文件的指纹相符；`review-required` 或非零退出表示不能确认。两个审计入口只读本机文件，不执行 Magpie 同步。
+
+审计覆盖六个受管 Windows 宿主的已登记 MCP 配置、Claude Desktop 已发现的 Cowork manifest、Library 状态及指定技能的部署位置。`antigravity` 的 MCP 和技能路径也供 `agy` CLI 使用；仅勾选桌面版不构成配置隔离。比较基于文件身份和内容哈希，不归因到具体 JSON 字段，也不覆盖其他项目、未登记宿主、其他技能、备份、异步后续同步、并发或改后恢复的写入。
 
 ## Kimi 独立回滚事务
 

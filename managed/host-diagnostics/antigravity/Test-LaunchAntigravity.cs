@@ -1,12 +1,53 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Windows.Forms;
 
 internal static class TestLauncher
 {
-    private static void Main()
+    [STAThread]
+    private static void Main(string[] args)
     {
+        if (args.Length > 0)
+        {
+            if (args.Length != 1)
+                throw new ArgumentException("Expected a single launcher fixture action.");
+            var assemblyDirectory = Path.GetDirectoryName(typeof(TestLauncher).Assembly.Location);
+            if (args[0] == "--fixture-desktop")
+            {
+                ValidateUpgradeRoot(Path.GetDirectoryName(assemblyDirectory));
+                using (var window = new Form { Text = "Antigravity launcher fixture", WindowState = FormWindowState.Minimized })
+                using (var lifetime = new System.Windows.Forms.Timer { Interval = 20000 })
+                {
+                    lifetime.Tick += (sender, e) => window.Close();
+                    lifetime.Start();
+                    Application.Run(window);
+                }
+                return;
+            }
+            if (args[0] != "--reconcile-fixture" && args[0] != "--reconcile-reopened-fixture")
+                throw new ArgumentException("Unknown launcher fixture action.");
+            try { ValidateUpgradeRoot(assemblyDirectory); }
+            catch (InvalidOperationException error)
+            {
+                Console.Error.WriteLine(error.Message);
+                Environment.ExitCode = 1;
+                return;
+            }
+            var appPath = Path.Combine(assemblyDirectory, "app", "Antigravity.exe");
+            var stateDir = Path.Combine(assemblyDirectory, "state");
+            Func<LaunchAntigravity.ReconcileOutcome> prepare = () => LaunchAntigravity.PrepareAddonsForLaunch(
+                appPath, stateDir, null, null);
+            var outcome = args[0] == "--reconcile-reopened-fixture" ? WithDesktopFixture(appPath, prepare) : prepare();
+            Console.WriteLine(outcome);
+            return;
+        }
+
         var environment = new StringDictionary();
         environment["HTTPS_PROXY"] = "http://127.0.0.1:17897";
         environment["NO_PROXY"] = "localhost";
@@ -33,9 +74,84 @@ internal static class TestLauncher
         Console.WriteLine("Antigravity launcher fixture passed.");
     }
 
+    private static void ValidateUpgradeRoot(string directory)
+    {
+        if (!Regex.IsMatch(directory, @"\AD:\\(?:agents\\tmp|Codex\\temp)\\antigravity-addons-(?:unit|e2e)-[a-z0-9]{6}\\[a-z0-9-]+\z",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            throw new InvalidOperationException("Launcher upgrade requires a generated Antigravity fixture root.");
+        AssertOrdinaryAncestry(directory);
+        var pending = new Stack<string>();
+        pending.Push(directory);
+        while (pending.Count > 0)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(pending.Pop()))
+            {
+                var attrs = File.GetAttributes(entry);
+                if ((attrs & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException("Launcher fixture contains a reparse point: " + entry);
+                if ((attrs & FileAttributes.Directory) != 0)
+                    pending.Push(entry);
+            }
+        }
+    }
+
+    private static void AssertOrdinaryAncestry(string directory)
+    {
+        var parents = new Stack<string>();
+        for (var dir = directory; dir != null; dir = Path.GetDirectoryName(dir))
+            parents.Push(dir);
+        foreach (var dir in parents)
+        {
+            var attrs = File.GetAttributes(dir);
+            if ((attrs & FileAttributes.Directory) == 0 || (attrs & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("Launcher fixture requires ordinary directories: " + dir);
+        }
+    }
+
+    private static LaunchAntigravity.ReconcileOutcome WithDesktopFixture(string appPath, Func<LaunchAntigravity.ReconcileOutcome> prepare)
+    {
+        File.Copy(typeof(TestLauncher).Assembly.Location, appPath);
+        var start = new ProcessStartInfo(appPath, "--fixture-desktop")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(appPath),
+        };
+        using (var fixture = Process.Start(start))
+        {
+            if (fixture == null)
+                throw new InvalidOperationException("The fixture desktop did not start.");
+            try
+            {
+                var timer = Stopwatch.StartNew();
+                while (!fixture.HasExited && timer.ElapsedMilliseconds < 8000)
+                {
+                    fixture.Refresh();
+                    if (fixture.MainWindowHandle != IntPtr.Zero)
+                        return prepare();
+                    Thread.Sleep(25);
+                }
+                throw new InvalidOperationException("The fixture desktop did not become visible.");
+            }
+            finally
+            {
+                if (!fixture.HasExited && (!fixture.CloseMainWindow() || !fixture.WaitForExit(3000)))
+                {
+                    fixture.Kill();
+                    fixture.WaitForExit(3000);
+                }
+            }
+        }
+    }
+
     private static void TestPreLaunchReconcile()
     {
-        var tmpRoot = Path.Combine(@"D:\agents\tmp", "launcher-reconcile-test-" + Guid.NewGuid().ToString("N"));
+        var evidence = Path.GetDirectoryName(typeof(TestLauncher).Assembly.Location);
+        if (!Regex.IsMatch(evidence, @"\AD:\\agents\\run-evidence\\antigravity-launcher-tests\\[a-f0-9]{32}\z",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            throw new InvalidOperationException("Launcher fixture requires a generated evidence directory.");
+        AssertOrdinaryAncestry(evidence);
+        var tmpRoot = Path.Combine(evidence, "launcher-reconcile-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmpRoot);
         try
         {

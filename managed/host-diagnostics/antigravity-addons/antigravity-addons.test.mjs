@@ -7,4 +7,11 @@ const res = spawnSync(process.execPath, [path.join(dir, 'test-reconcile-addons.m
   stdio: 'inherit',
   timeout: 30000,
 });
-process.exit(res.status ?? 1);
+if (res.status !== 0) process.exit(res.status ?? 1);
+if (process.platform === 'win32') {
+  const registry = spawnSync('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(dir, 'Test-AntigravityUpdateTarget.ps1')], {
+    stdio: 'inherit',
+    timeout: 30000,
+  });
+  process.exit(registry.status ?? 1);
+}

@@ -147,6 +147,52 @@ if ([Text.Encoding]::UTF8.GetByteCount($directSectionJson) + 2 -gt 1000 -or $dir
     $directSection.sources[0].omittedRows -ne 2 -or $directSection.sources[0].rows[0].line -ne 4) { throw 'Direct Markdown selection lost original line window, filter or omission counts.' }
 $checks.Add(@{ name = 'direct-markdown-section-composes-with-existing-window-filter-and-row-cap'; status = 'pass' })
 
+$psSourcePath = Join-Path $runRoot 'functions with spaces.ps1'
+@'
+# function Get-Target { "decoy comment" }
+$fake = 'function Get-Target { "decoy string" }'
+function Get-TargetMore { 'OUTSIDE_FUNCTION' }
+function Get-Target {
+    '中文正文一'
+    $Token = 'SYNTH_POWERSHELL_SECRET_002'
+    $script:Token = @"
+SYNTH_POWERSHELL_MULTILINE_SECRET_003
+"@
+    '中文正文二'
+}; 'ON_SAME_LINE_OUTSIDE_FUNCTION'
+'AFTER_FUNCTION'
+'@ | Set-Content -LiteralPath $psSourcePath -Encoding utf8
+$psSource = @{ path = $psSourcePath; format = 'powershell'; functionName = 'get-target'; maxRows = 20; maxValueChars = 120 }
+$psCase = Invoke-Case 'powershell-exact-function' @($psSource) 1000
+$psSelection = $psCase.result.sources[0]
+if ($psCase.exitCode -ne 0 -or $psSelection.functionMatches -ne 1 -or $psSelection.functionStartLine -ne 4 -or
+    $psSelection.functionEndLine -ne 11 -or $psSelection.rows[0].line -ne 4 -or $psSelection.matchedRows -ne 8 -or
+    $psCase.json -match 'decoy|OUTSIDE_FUNCTION|AFTER_FUNCTION|SYNTH_POWERSHELL_(?:MULTILINE_)?SECRET_') {
+    throw 'PowerShell lookup did not project only the exact AST function with original lines and redaction.'
+}
+$directPsJson = @(& $pwsh -NoProfile -NonInteractive -File $script -LiteralPath $psSourcePath -PowerShellFunction 'Get-Target' -Contains '中文正文' -MaxRows 1 -MaxTotalBytes 800) -join "`n"
+$directPsCode = $LASTEXITCODE
+$directPs = $directPsJson | ConvertFrom-Json -AsHashtable
+if ($directPsCode -ne 0 -or [Text.Encoding]::UTF8.GetByteCount($directPsJson) + 2 -gt 800 -or
+    $directPs.sources[0].rows[0].line -ne 5 -or $directPs.sources[0].omittedRows -ne 1) {
+    throw 'Direct PowerShell source lookup lost the selector, row accounting or byte budget.'
+}
+$duplicatePs = Join-Path $runRoot 'duplicate-functions.psm1'
+@('function Get-Target { "AMBIGUOUS_BODY" }', 'function get-target { "AMBIGUOUS_BODY" }') |
+    Set-Content -LiteralPath $duplicatePs -Encoding utf8
+$invalidPs = Join-Path $runRoot 'invalid-functions.ps1'
+'function Get-Target { "INVALID_BODY"' | Set-Content -LiteralPath $invalidPs -Encoding utf8
+$psFailure = Invoke-Case 'powershell-invalid-and-ambiguous' @(
+    @{ path = $duplicatePs; format = 'powershell'; functionName = 'Get-Target' },
+    @{ path = $invalidPs; format = 'powershell'; functionName = 'Get-Target' },
+    @{ path = $psSourcePath; format = 'powershell'; functionName = 'Get-Absent' }
+) 2000
+if ($psFailure.exitCode -ne 1 -or ($psFailure.result.sources.status -join ',') -ne 'function-ambiguous,powershell-parse-failed,function-not-found' -or
+    ($psFailure.result.sources.emittedRows -join ',') -ne '0,0,0' -or $psFailure.json -match 'AMBIGUOUS_BODY|INVALID_BODY|AFTER_FUNCTION') {
+    throw 'Unproven PowerShell source selection fell back to printing content.'
+}
+$checks.Add(@{ name = 'powershell-ast-function-selection-redacted-bounded-and-fails-closed'; status = 'pass' })
+
 $largeMarkdownPath = Join-Path $runRoot 'large-sections.md'
 @(
     '# Guide',

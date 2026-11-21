@@ -15,3 +15,5 @@ scripts/*.ps1 text eol=lf
 scripts/**/*.ps1 text eol=lf
 tests/*.ps1 text eol=lf
 tests/**/*.ps1 text eol=lf
+# The unified patch prefixes blank and tab-indented Go context lines with a space.
+scripts/daily-update/magpie-v0.1.4652-library-scope.patch text eol=lf whitespace=-blank-at-eol,-space-before-tab

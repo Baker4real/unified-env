@@ -9,6 +9,7 @@ param(
     [Parameter(ParameterSetName = 'Paths')][switch]$HttpLog,
     # Exact, case-sensitive ATX heading title; includes descendants and excludes fenced headings.
     [Parameter(ParameterSetName = 'Paths')][ValidateNotNullOrEmpty()][string]$MarkdownSection,
+    [Parameter(ParameterSetName = 'Paths')][ValidateNotNullOrEmpty()][string]$PowerShellFunction,
     [Parameter(Mandatory, ParameterSetName = 'GitStatus')][string]$GitRepository,
     [Parameter(Mandatory, ParameterSetName = 'GitStatus')][string]$GitStatusEvidencePath,
     [Parameter(ParameterSetName = 'GitStatus')][string[]]$GitStatusPath = @(),
@@ -175,11 +176,15 @@ try {
         exit 0
     }
     if ($PSCmdlet.ParameterSetName -eq 'Paths') {
-        if ($HttpLog -and $PSBoundParameters.ContainsKey('MarkdownSection')) { throw 'Incompatible projection formats.' }
+        if (($HttpLog -and ($MarkdownSection -or $PowerShellFunction)) -or ($MarkdownSection -and $PowerShellFunction)) {
+            throw 'Incompatible projection formats.'
+        }
         $spec = @{ sources = @(foreach ($sourcePath in $LiteralPath) {
-            $entry = @{ path = $sourcePath; format = $(if ($HttpLog) { 'http-log' } elseif ($PSBoundParameters.ContainsKey('MarkdownSection')) { 'markdown' } else { 'text' })
+            $entry = @{ path = $sourcePath; format = 'text'
                contains = $Contains; startLine = $StartLine; maxRows = $MaxRows; maxValueChars = $MaxValueChars }
-            if ($PSBoundParameters.ContainsKey('MarkdownSection')) { $entry.section = $MarkdownSection }
+            if ($HttpLog) { $entry.format = 'http-log' }
+            if ($MarkdownSection) { $entry.format = 'markdown'; $entry.section = $MarkdownSection }
+            if ($PowerShellFunction) { $entry.format = 'powershell'; $entry.functionName = $PowerShellFunction }
             $entry
         }) }
     }
@@ -198,7 +203,12 @@ try {
             -not $inputSource.ContainsKey('path') -or -not $inputSource.ContainsKey('format')) { throw 'Invalid source.' }
         $path = [string]$inputSource.path
         $format = [string]$inputSource.format
-        if (-not [IO.Path]::IsPathFullyQualified($path) -or $path.Length -gt 512 -or $format -notin @('text', 'json', 'jsonl', 'http-log', 'markdown')) { throw 'Invalid source.' }
+        if (-not [IO.Path]::IsPathFullyQualified($path) -or $path.Length -gt 512 -or
+            $format -notin @('text', 'json', 'jsonl', 'http-log', 'markdown', 'powershell')) { throw 'Invalid source.' }
+        $functionName = if ($inputSource.ContainsKey('functionName')) { $inputSource.functionName } else { $null }
+        if ($format -ne 'powershell' -and $inputSource.ContainsKey('functionName')) { throw 'Function selection requires PowerShell format.' }
+        if ($format -eq 'powershell' -and ($functionName -isnot [string] -or $functionName -notmatch '\A[^\s*?\[\]]{1,256}\z' -or
+                [IO.Path]::GetExtension($path) -notin '.ps1', '.psm1')) { throw 'PowerShell requires an exact function name and source path.' }
         $section = if ($inputSource.ContainsKey('section')) { $inputSource.section } else { $null }
         if ($format -ne 'markdown' -and $inputSource.ContainsKey('section')) { throw 'Section selection requires Markdown format.' }
         if ($format -eq 'markdown' -and ($section -isnot [string] -or [string]::IsNullOrWhiteSpace($section) -or $section.Length -gt 2000)) { throw 'Markdown requires an exact section title.' }
@@ -223,6 +233,9 @@ try {
         if ($format -eq 'markdown') {
             $source.sectionMatches = 0; $source.sectionStartLine = 0; $source.sectionEndLine = 0
         }
+        if ($format -eq 'powershell') {
+            $source.functionMatches = 0; $source.functionStartLine = 0; $source.functionEndLine = 0
+        }
         $candidates = [System.Collections.Generic.List[object]]::new()
         $reader = $null
         $stream = $null
@@ -235,7 +248,8 @@ try {
         try {
             # Active log writers and rotation may retain write/delete access.
             # This handle remains read-only and is owned by the outer finally.
-            $stream = [IO.FileStream]::new($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+            $share = if ($format -eq 'powershell') { [IO.FileShare]::Read } else { [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete }
+            $stream = [IO.FileStream]::new($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
             # Only HTTP logs may replace invalid UTF-8; their damaged lines are
             # withheld below. Do not guess alternate encodings for this mode.
             $reader = [IO.StreamReader]::new($stream, [Text.UTF8Encoding]::new($false, ($format -ne 'http-log')), ($format -ne 'http-log'), 1024, $true)
@@ -262,7 +276,55 @@ try {
                 }
             }
             else {
-            while ($null -ne ($line = $reader.ReadLine())) {
+            $fullLineCount = $null
+            $sensitiveFunctionLines = $null
+            if ($format -eq 'powershell') {
+                if ($stream.Length -gt 4MB) {
+                    $source.status = 'powershell-too-large'
+                } else {
+                    $document = $reader.ReadToEnd()
+                    $fullLineCount = [regex]::Count($document, '\r\n|\n|\r')
+                    if ($document.Length -gt 0 -and $document[-1] -notin "`r", "`n") { $fullLineCount++ }
+                    $tokens = $null; $parseErrors = $null
+                    $ast = [Management.Automation.Language.Parser]::ParseInput($document, [ref]$tokens, [ref]$parseErrors)
+                    if ($parseErrors.Count -gt 0) {
+                        $source.status = 'powershell-parse-failed'
+                    } else {
+                        $functions = @($ast.FindAll({ param($node)
+                            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ieq $functionName
+                        }, $true))
+                        $source.functionMatches = $functions.Count
+                        if ($functions.Count -eq 1) {
+                            $extent = $functions[0].Extent
+                            $source.functionStartLine = $extent.StartLineNumber
+                            $source.functionEndLine = $extent.EndLineNumber
+                            $source.lineCount = $extent.StartLineNumber - 1
+                            $sensitiveFunctionLines = [Collections.Generic.HashSet[int]]::new()
+                            $assignments = $functions[0].FindAll({ param($node)
+                                $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+                                    $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+                                    $node.Right.Extent.EndLineNumber -gt $node.Extent.StartLineNumber
+                            }, $true)
+                            foreach ($assignment in $assignments) {
+                                $variable = $assignment.Left.VariablePath.UserPath.Split(':')[-1]
+                                if (Test-SensitiveField $variable) {
+                                    for ($n = $assignment.Extent.StartLineNumber; $n -le $assignment.Right.Extent.EndLineNumber; $n++) {
+                                        [void]$sensitiveFunctionLines.Add($n)
+                                    }
+                                }
+                            }
+                            $reader.Dispose()
+                            # The extent also excludes other commands on the same line.
+                            $reader = [IO.StringReader]::new($extent.Text)
+                        } elseif ($functions.Count -eq 0) {
+                            $source.status = 'function-not-found'
+                        } else {
+                            $source.status = 'function-ambiguous'
+                        }
+                    }
+                }
+            }
+            while ($source.status -eq 'read' -and $null -ne ($line = $reader.ReadLine())) {
                 $source.lineCount++
                 if ($format -eq 'markdown') {
                     $heading = $null
@@ -312,12 +374,15 @@ try {
                 }
                 $record = $null
                 $projectedText = $line
-                if ($format -in @('text', 'http-log', 'markdown')) {
+                if ($format -in @('text', 'http-log', 'markdown', 'powershell')) {
                     # Track preceding headers even outside the requested window.
                     $startsSensitive = [regex]::IsMatch($line, $sensitiveAssignment)
                     $continuedSensitive = $pendingSensitiveValue -or
                         ($sensitiveContinuation -and $line -match '^(?:[ \t]+|(?:\[[^\]\r\n]+\][ \t]*)+[ \t]{2,})')
                     if ($continuedSensitive) { $projectedText = '[redacted continuation]' }
+                    if ($null -ne $sensitiveFunctionLines -and $sensitiveFunctionLines.Contains($source.lineCount)) {
+                        $projectedText = '[redacted multiline PowerShell assignment]'
+                    }
                     $sensitiveContinuation = $startsSensitive -or $continuedSensitive
                     $pendingSensitiveValue = $startsSensitive -and [regex]::IsMatch($line, $sensitiveAssignment + '$')
                 }
@@ -335,7 +400,7 @@ try {
                 }
                 if ($candidates.Count -ge $maxRows) { continue }
                 $row = [ordered]@{ line = $source.lineCount }
-                if ($format -in @('text', 'markdown')) { $row.text = Limit-Value $projectedText $maxValueChars }
+                if ($format -in @('text', 'markdown', 'powershell')) { $row.text = Limit-Value $projectedText $maxValueChars }
                 elseif ($format -eq 'http-log') {
                     foreach ($key in $httpEvent.Keys) { $row[$key] = $httpEvent[$key] }
                 }
@@ -346,6 +411,7 @@ try {
                 }
                 $candidates.Add($row)
             }
+            if ($null -ne $fullLineCount) { $source.lineCount = $fullLineCount }
             }
             if ($format -eq 'http-log' -and $source.replacementCharacterRows -gt 0) {
                 $source.status = 'read-with-encoding-omissions'

@@ -362,6 +362,7 @@
         "managed/host-diagnostics/Restart-ExplorerShell.ps1",
         "managed/host-diagnostics/Open-DesktopShortcut.ps1",
         "managed/host-diagnostics/antigravity/Test-AntigravityDesktop.ps1",
+        "managed/host-diagnostics/antigravity/Get-AntigravityCustomizationStatus.ps1",
         "managed/host-diagnostics/antigravity/patch_wsl.py",
         "managed/host-diagnostics/Invoke-ManagedRecycle.ps1",
         "managed/host-diagnostics/Get-ConsoleLaunchAudit.ps1",

@@ -1,17 +1,24 @@
 #Requires -Version 7.5
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName='Smoke')]
 param(
-    [Parameter(Mandatory)][ValidatePattern('\A[0-9a-fA-F]{64}\z')][string]$ExpectedArchiveSha256,
-    [string]$EvidenceRoot = 'D:/agents/run-evidence/antigravity-desktop',
-    [switch]$Restart,
-    [switch]$CheckContextViewer
+    [Parameter(Mandatory, ParameterSetName='Smoke')][ValidatePattern('\A[0-9a-fA-F]{64}\z')][string]$ExpectedArchiveSha256,
+    [Parameter(ParameterSetName='Smoke')][string]$EvidenceRoot = 'D:/agents/run-evidence/antigravity-desktop',
+    [Parameter(ParameterSetName='Smoke')][switch]$Restart,
+    [Parameter(ParameterSetName='Smoke')][switch]$CheckContextViewer,
+    [Parameter(Mandatory, ParameterSetName='ProcessSnapshot')][switch]$ProcessSnapshot
 )
 
 $ErrorActionPreference = 'Stop'
 $diagnostics = Split-Path -Parent $PSScriptRoot
-. "$diagnostics/lib/ProcessProxyReader.ps1"
+. "$diagnostics/lib/AntigravityProcessIdentity.ps1"
 $appRoot = 'D:\Apps\Google.Antigravity'
 $app = Join-Path $appRoot 'Antigravity.exe'
+if ($PSCmdlet.ParameterSetName -eq 'ProcessSnapshot') {
+    $snapshot = @(Get-AntigravityProcessSnapshot -ExecutablePath $app)
+    return ConvertTo-Json -InputObject $snapshot -Compress
+}
+
+. "$diagnostics/lib/ProcessProxyReader.ps1"
 $backend = Join-Path $appRoot 'resources/bin/language_server.exe'
 $archive = Join-Path $appRoot 'resources/app.asar'
 $archiveHash = (Get-FileHash -LiteralPath $archive).Hash
@@ -108,7 +115,8 @@ try {
     if ($appProcess.Path -ine $app -or $created -ne ([datetimeoffset]$window.startedAt).UtcDateTime) {
         throw 'The Antigravity process identity changed after launch.'
     }
-    $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($appProcess.Id) AND Name = 'language_server.exe'" |
+    $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($appProcess.Id) AND Name = 'language_server.exe'" `
+        -Property ProcessId, SessionId, ExecutablePath, CreationDate |
         Where-Object { $_.SessionId -eq $appProcess.SessionId -and $_.ExecutablePath -ieq $backend -and $_.CreationDate.ToUniversalTime() -ge $created })
     if ($children.Count -ne 1) { throw 'The fresh application did not start its Windows login backend.' }
     $backendProcess = Get-Process -Id $children[0].ProcessId
