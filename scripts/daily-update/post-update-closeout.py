@@ -3,9 +3,9 @@ import argparse
 import hashlib
 import importlib.util
 import json
-import os
 import pathlib
 import re
+import shutil
 import sys
 
 BASE = pathlib.Path(__file__).resolve().parent
@@ -22,7 +22,7 @@ evidence = sibling('closeout_evidence', 'evidence_io.py')
 reports = sibling('closeout_reports', 'report-summary.py')
 PREPARE = str(ROOT / 'modules/skill-supply-chain/implementation/prepare_system_provenance_repair.py')
 MENU = 'D:/Codex/.codex/scripts/apply-skill-menu-i18n-overlay.cjs'
-GUARD = 'D:/Codex/.codex/scripts/install-skill-guarded.cmd'
+GUARD = 'D:/Codex/.codex/scripts/install-skill-guarded.ps1'
 NODE = 'D:/Codex/tools/bin/node.exe'
 
 
@@ -75,7 +75,10 @@ def closeout(run_directory, repair=False, runner=runtime.run_hidden):
     def guard(label, arguments):
         # Wrapper remains the sole active skill/ledger/catalog writer. Do not execute
         # human-readable `next` strings or infer commands from returned prose.
-        cmd = [os.environ.get('COMSPEC', r'C:\Windows\System32\cmd.exe'), '/d', '/c', GUARD, *arguments]
+        pwsh = shutil.which('pwsh', path=runtime.fresh_environment()['PATH'])
+        if not pwsh:
+            raise StepFailure(label + '-pwsh-unavailable')
+        cmd = [pwsh, '-NoLogo', '-NoProfile', '-NonInteractive', '-File', GUARD, *arguments]
         call(label+'-dry', cmd+['--dry-run'])
         value = call(label+'-apply', cmd)
         if value.get('status') != 'succeeded':

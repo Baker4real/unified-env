@@ -130,6 +130,9 @@ class PrepareSystemProvenanceRepairTests(SystemRepairTestCase):
         code, stdout, stderr = self.run_prepare(state, "skill-creator-overlay", "--evidence", str(evidence))
         self.assertEqual(code, 0, stderr)
         prepared = json.loads(stdout)
+        next_steps = "\n".join(prepared["next"])
+        self.assertIn(r"pwsh -NoProfile -File D:\Codex\.codex\scripts\install-skill-guarded.ps1", next_steps)
+        self.assertNotIn("install-skill-guarded.cmd", next_steps)
         args = self.wrapper_args(Path(prepared["candidate"]), Path(prepared["decision_manifest"]), name="skill-creator")
         code, _, stderr = self.run_wrapper([*args, "--update", "--system-package-provider", str(state["provider"])])
         self.assertEqual(code, 0, stderr)
@@ -343,6 +346,8 @@ class PrepareSystemProvenanceRepairTests(SystemRepairTestCase):
         steps = "\n".join(report["next"])
         self.assertIn("preserve-official --evidence", steps)
         self.assertIn("--system-only", steps)
+        self.assertIn(r"pwsh -NoProfile -File D:\Codex\.codex\scripts\install-skill-guarded.ps1", steps)
+        self.assertNotIn("install-skill-guarded.cmd", steps)
 
         evidence = self.temp / "repair-evidence"
         code, _, stderr = self.run_prepare(state, "preserve-official", "--evidence", str(evidence))
@@ -390,6 +395,15 @@ class PrepareSystemProvenanceRepairTests(SystemRepairTestCase):
         code, _, stderr = self.run_prepare(state, "skill-creator-overlay", "--evidence", str(self.temp / "again"))
         self.assertEqual(code, 2)
         self.assertIn("已绑定兼容 overlay", stderr)
+
+    def test_cli_help_names_canonical_ps1_wrapper(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as exited:
+            PREPARE.main(["--help"])
+        self.assertEqual(exited.exception.code, 0)
+        help_text = stdout.getvalue()
+        self.assertIn("install-skill-guarded.ps1", help_text)
+        self.assertNotIn("install-skill-guarded.cmd", help_text)
 
 
 if __name__ == "__main__":

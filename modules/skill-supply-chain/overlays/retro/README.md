@@ -4,7 +4,7 @@
 
 行为回归：在统一环境仓库根运行 `py -3.14 -B tests/Test-RetroTranscriptAudit.py`。测试运行 `scripts/transcripts.py` 的公开 CLI，覆盖 Claude 重复请求过滤、Codex transport/报告分层、pending/unknown、预期非零标注、静态 exec 读取统计，以及 DSH JSONL/Zstd 和 tool_search 配对；DSH 压缩 fixture 需要 Python 3.14+ 的 `compression.zstd`。
 
-部署时先从当前 active `retro` 完整暂存候选，把本目录 scripts 的源码和测试覆盖到候选 scripts，保留已有 SOURCE.md。完成来源、overlay、writing-for-agents 和 candidate integrity 审查，再通过 `D:/Codex/.codex/scripts/install-skill-guarded.cmd --candidate <candidate> --name retro --decision-manifest <manifest> --update` 先附加 `--dry-run` 检查后实际更新；显式 `--name retro` 避免将暂存目录名误作 skill 名。最后复核 closure、ledger/catalog、菜单和 active 脚本哈希。此入口不授权直接复制到 active root。
+部署时先从当前 active `retro` 完整暂存候选，把本目录 scripts 的源码和测试覆盖到候选 scripts，保留已有 SOURCE.md。完成来源、overlay、writing-for-agents 和 candidate integrity 审查，再通过 `pwsh -NoProfile -File D:/Codex/.codex/scripts/install-skill-guarded.ps1 --candidate <candidate> --name retro --decision-manifest <manifest> --update` 先附加 `--dry-run` 检查后实际更新；显式 `--name retro` 避免将暂存目录名误作 skill 名。最后复核 closure、ledger/catalog、菜单和 active 脚本哈希。此入口不授权直接复制到 active root。
 
 `audit --expected-exit RESULT_LINE:CODE` 是操作者对特定日志行的显式说明；不自动猜测 grep、winget 等命令的非零含义。stdout 中形如 `name/exit_code/stdout/stderr` 的命令数组只显示为 reported outcome，不能据此证明外层工具失败。pending 是日志时点观察，可能在后续记录完成。
 

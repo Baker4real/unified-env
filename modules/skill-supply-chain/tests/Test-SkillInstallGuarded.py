@@ -205,7 +205,9 @@ class SkillInstallGuardedTests(GuardedInstallTestCase):
         self.assertEqual(artifact["ledger_coverage"], "pass")
         self.assertEqual(catalog["checks"]["resource_closure"]["status"], "pass")
         transaction = max((self.temp / "evidence").glob("install-*/manifest.json"))
-        snapshot = json.loads(transaction.read_text(encoding="utf-8"))["source_state_after"]
+        manifest_data = json.loads(transaction.read_text(encoding="utf-8"))
+        self.assertEqual(manifest_data["wrapper"], "D:/Codex/.codex/scripts/install-skill-guarded.ps1")
+        snapshot = manifest_data["source_state_after"]
         ledger_bytes = self.ledger.read_bytes()
         self.assertEqual(Path(snapshot["path"]), transaction.parent / "backups" / "source-state-after.json")
         self.assertEqual(Path(snapshot["path"]).read_bytes(), ledger_bytes)

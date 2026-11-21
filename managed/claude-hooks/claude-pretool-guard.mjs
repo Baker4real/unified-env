@@ -1258,7 +1258,7 @@ function skillsRootWriteReason(tool, payload) {
   const normalized = resolved.replace(/\//g, '\\')
   if (!normalized.toLowerCase().startsWith(SKILLS_ROOT.toLowerCase() + '\\')) return null
   return `${tool} 要直接改现役 skills 根（${SKILLS_ROOT}）。skill 的安装、更新和重写只能走受管入口 ` +
-    'D:\\Codex\\.codex\\scripts\\install-skill-guarded.cmd（先 --dry-run 再 apply）。' +
+    'D:\\Codex\\.codex\\scripts\\install-skill-guarded.ps1（先 --dry-run 再 apply）。' +
     '请先在候选目录里改好，再用受管入口安装。'
 }
 
@@ -2266,7 +2266,8 @@ if (process.argv.includes('--self-test')) {
     [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "git -C 'D:/agents/projects/x' push origin main", shell: 'PowerShell 7' }, false],
     [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "reg delete 'HKLM\\SOFTWARE\\X' -f", shell: 'cmd（管理员）' }, true],
     [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "'D:/x/run.cmd' --dry-run", shell: 'cmd（管理员）' }, false],
-    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "D:/Codex/.codex/scripts/install-skill-guarded.cmd --candidate 'D:/x' --update", shell: 'PowerShell 7（Terminal 面板）' }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "D:/Codex/.codex/scripts/install-skill-guarded.ps1 --candidate 'D:/x' --update", shell: 'PowerShell 7（Terminal 面板）' }, false],
+    [HAND_OFF_TOOL, { kind: 'run', title: 'x', command: "pwsh -NoProfile -File D:/Codex/.codex/scripts/install-skill-guarded.ps1 --candidate 'D:/x' --update", shell: 'PowerShell 7（Terminal 面板）' }, false],
     [HAND_OFF_TOOL, { kind: 'authorize', title: 'x', target: "reg delete 'HKCU\\Software\\X' -f" }, false],
     [HAND_OFF_TOOL, { kind: 'run', title: 'x' }, false],
     // Rule 25: rg on a literal .asar archive; asar_extract.py grep names the packed file of each match.
@@ -2375,7 +2376,9 @@ if (process.argv.includes('--self-test')) {
     [reason('PowerShell', "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\X' -Name a -Value 1", desktop).includes('「只在私有层的条目」'),
       'the HKCU reason points to the private-layer section'],
     [reason(TERMINAL_TOOL, "reg delete 'HKLM\\SOFTWARE\\X' -f").includes('//f'), 'the reg delete reason carries the Stop hook fix'],
-    [reason('PowerShell', "rg -a x 'D:\\x\\app.asar'").includes('asar_extract.py grep <asar> <正则>'), 'the asar reason names asar_extract.py grep']
+    [reason('PowerShell', "rg -a x 'D:\\x\\app.asar'").includes('asar_extract.py grep <asar> <正则>'), 'the asar reason names asar_extract.py grep'],
+    [(evaluate({ tool_name: 'Write', tool_input: { file_path: 'D:\\agents\\skills-manager\\skills\\retro\\SKILL.md' }, cwd: 'D:\\repo' }, io) || '').includes('D:\\Codex\\.codex\\scripts\\install-skill-guarded.ps1'),
+      'the skills-root write reason names install-skill-guarded.ps1']
   ]
   for (const [ok, label] of checks) {
     if (!ok) {
