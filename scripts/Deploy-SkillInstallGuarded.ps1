@@ -123,6 +123,7 @@ $sourceFiles = @(
     'install_skill_guarded_system_overlay.py',
     'install_skill_guarded_staging.py',
     'install_skill_guarded.py',
+    'install-skill-guarded.ps1',
     'install-skill-guarded.cmd'
 )
 $evidenceDirectory = Join-Path $evidenceRootResolved ('deploy-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N'))
@@ -145,14 +146,16 @@ $manifest = [ordered]@{
 try {
     if (-not (Test-Path -LiteralPath $sourceRootResolved -PathType Container)) { throw "SourceRoot 不存在：$sourceRootResolved" }
     if (Test-ReparsePoint $sourceRootResolved) { throw "SourceRoot 不能是 reparse point：$sourceRootResolved" }
+    $commandAdapterFiles = @('install-skill-guarded.ps1', 'install-skill-guarded.cmd')
     $sources = [ordered]@{}
     foreach ($relative in $sourceFiles) {
         $source = Join-Path $sourceRootResolved $relative
-        if ($sourceRootResolved -ieq $repositoryScriptsRootResolved -and $relative -ne 'install-skill-guarded.cmd') {
+        $isCommandAdapter = $commandAdapterFiles -contains $relative
+        if ($sourceRootResolved -ieq $repositoryScriptsRootResolved -and -not $isCommandAdapter) {
             $source = Join-Path $moduleImplementationRootResolved $relative
         }
-        if ($relative -eq 'install-skill-guarded.cmd' -and $sourceRootResolved -ieq $moduleImplementationRootResolved -and -not (Test-Path -LiteralPath $source -PathType Leaf)) {
-            $source = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\install-skill-guarded.cmd'
+        if ($isCommandAdapter -and $sourceRootResolved -ieq $moduleImplementationRootResolved -and -not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            $source = Join-Path $repositoryScriptsRootResolved $relative
         }
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "缺少部署源文件：$source" }
         if (Test-ReparsePoint $source) { throw "部署源文件不能是 reparse point：$source" }
