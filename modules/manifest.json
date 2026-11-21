@@ -254,6 +254,7 @@
         "scripts/Deploy-SkillInstallGuarded.ps1",
         "scripts/generate_skill_catalog.py",
         "scripts/install-skill-guarded.cmd",
+        "scripts/install-skill-guarded.ps1",
         "scripts/install_skill_guarded.py",
         "scripts/purge-retired-skill-backups.cjs",
         "scripts/reconcile_skill_source_records.py",
