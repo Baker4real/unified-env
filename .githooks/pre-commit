@@ -7,3 +7,17 @@ node "$(dirname "$0")/../managed/claude-hooks/claude-public-push-guard.mjs" --st
 if git diff --cached --name-only --diff-filter=ACMR | grep -qxF AGENTS.md; then
   echo '检测到本仓库 AGENTS.md 变更。D:\Codex\.codex\AGENTS.md 是生成的加载文件，不由本仓库项目入口覆盖：共同规则编辑 D:\Codex\.codex\AGENTS.shared.md，宿主差异编辑对应 AGENTS.<host>.md 或 agents-sync/config.json；已授权的全局规则源改完后运行 D:\Codex\.codex\scripts\Manual-Sync-AgentsMd.ps1 -Mode Apply，再用 -Mode Check 核验。'
 fi
+
+# Antigravity 启动器/扩展对账改动在提交前本地快检（< 15s），把远端 CI 反馈前移到提交前。
+REPO_TOP="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+STAGED_FILES="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [ -n "$REPO_TOP" ] && [ -f "$REPO_TOP/managed/host-diagnostics/antigravity-addons/antigravity-addons.test.mjs" ]; then
+  if printf '%s\n' "$STAGED_FILES" | grep -qE '^managed/host-diagnostics/antigravity-addons/'; then
+    node "$REPO_TOP/managed/host-diagnostics/antigravity-addons/antigravity-addons.test.mjs" || exit
+  fi
+fi
+if [ -n "$REPO_TOP" ] && [ -f "$REPO_TOP/tests/Test-AntigravityDesktopContracts.ps1" ]; then
+  if printf '%s\n' "$STAGED_FILES" | grep -qE '^(managed/host-diagnostics/antigravity/|tests/Test-AntigravityDesktopContracts\.ps1$)'; then
+    pwsh -NoProfile -NonInteractive -File "$REPO_TOP/tests/Test-AntigravityDesktopContracts.ps1" || exit
+  fi
+fi

@@ -11,6 +11,7 @@
    - **领域建模或架构边界**：读 `docs/agents/domain.md`，再按其中顺序加载相关模块上下文和现役合同。
    - **Issue、PRD 或 triage**：读 `docs/agents/issue-tracker.md` 与 `docs/agents/triage-labels.md`。
    - **知识整理或提交收尾**：读 `docs/agents/knowledge-scope.md`，把项目知识、模块知识、设备事实、本机状态和一次性证据放到各自真源。
+   - **改动脚本/启动器或新增测试 seam（`*ForTest` / 注入委托）**：读 `CODING_STANDARDS.md`，为每个新增或改动的 seam 补一条不绕开生产默认路径的测试。
    - **读 PowerShell 源码的结构或调用流**：用 `rg -n 'function 函数名'` 定位后按行号读；CodeGraph 索引不含 `.ps1`/`.psm1`（2026-10-20 实测只有 Python、C#、JavaScript）。
 3. 在所属模块内做最小改动；从 `modules/manifest.json` 和现有脚本接口选择相关验证，不在本文件缓存命令清单或易变版本。
 

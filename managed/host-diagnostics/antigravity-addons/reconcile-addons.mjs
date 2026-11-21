@@ -1,0 +1,1116 @@
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import vm from 'node:vm';
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_APP_DIR = 'D:/Apps/Google.Antigravity';
+const DEFAULT_BACKUP_DIR = 'D:/Apps/Google.Antigravity.Local';
+const DEFAULT_TOOLS_DIR = SCRIPT_DIR;
+const DEFAULT_STATE_ROOT = path.join(DEFAULT_TOOLS_DIR, 'state');
+const DEFAULT_EVIDENCE_ROOT = 'D:/agents/run-evidence/antigravity-addons';
+const ZHCN_PACK_DIR = path.join(DEFAULT_TOOLS_DIR, 'desktop-zhcn-v3.0.8/antigravity汉化包/语言包');
+const ZHCN_LIB_DIR = path.join(ZHCN_PACK_DIR, '核心程序/src/lib');
+const PULSE_DIR = path.join(DEFAULT_TOOLS_DIR, 'pulse-v1.3.2');
+const CONTEXT_DIR = path.join(DEFAULT_TOOLS_DIR, 'context-viewer-v0.8.8');
+
+const CONTEXT_VENDOR_FILES = [
+  'asar-engine.js', 'modules-config.js', 'modular-installer.js', 'install.js', 'restore.js',
+  'meter-main.js', 'meter-core.js', 'meter-renderer.js', 'meter-collector.js', 'meter-storage.js',
+  'meter-proxy.js', 'meter-cli-launcher.js', 'meter-context-unlock.js', 'meter-enhance.js',
+  'meter-accounts.js', 'macos-binary-utils.js', 'local-api.js', 'attachment_scan.py',
+  'i18n/zh-CN.json', 'i18n/i18n-runtime.js',
+];
+
+const DEFAULT_CONTEXT_MODULES = {
+  schemaVersion: '0.8.8',
+  modules: {
+    meter: { enabled: true },
+    chinese: { enabled: false, language: 'en', brandTitle: 'english' },
+    proxy: { enabled: false },
+  },
+};
+
+const require = createRequire(import.meta.url);
+
+function sha256(buf) {
+  return createHash('sha256').update(buf).digest('hex');
+}
+
+async function sha256File(filePath) {
+  return sha256(await fsp.readFile(filePath));
+}
+
+function toPosix(p) {
+  return p.replaceAll('\\', '/');
+}
+
+function countOccurrences(text, needle) {
+  if (!needle) return 0;
+  return text.split(needle).length - 1;
+}
+
+// ---------------------------------------------------------------------------
+// Pure in-memory ASAR reader & writer
+// ---------------------------------------------------------------------------
+
+function unpackAsar(buffer) {
+  if (buffer.length < 16) throw new Error('ASAR buffer too small');
+  const marker = buffer.readUInt32LE(0);
+  const headerSize = buffer.readUInt32LE(4);
+  const payloadSize = buffer.readUInt32LE(8);
+  const jsonSize = buffer.readUInt32LE(12);
+  if (marker !== 4 || headerSize !== payloadSize + 4 || payloadSize - 4 - jsonSize < 0 || payloadSize - 4 - jsonSize > 3) {
+    throw new Error('Unexpected ASAR header framing');
+  }
+  const header = JSON.parse(buffer.toString('utf8', 16, 16 + jsonSize));
+  const body = buffer.subarray(8 + headerSize);
+  return { header, body };
+}
+
+function walkAsar(node, prefix = '', out = new Map()) {
+  for (const [name, entry] of Object.entries(node.files || {})) {
+    const rel = prefix + name;
+    if (entry.files) {
+      walkAsar(entry, rel + '/', out);
+    } else {
+      out.set(rel, entry);
+    }
+  }
+  return out;
+}
+
+function getAsarMember(body, entry) {
+  if (!entry || entry.offset === undefined) throw new Error('Entry has no packed offset');
+  const start = Number(entry.offset);
+  return body.subarray(start, start + entry.size);
+}
+
+function buildIntegrity(data, blockSize = 4194304) {
+  const hash = sha256(data);
+  const blocks = [];
+  if (data.length === 0) {
+    blocks.push(hash);
+  } else {
+    for (let i = 0; i < data.length; i += blockSize) {
+      blocks.push(sha256(data.subarray(i, Math.min(data.length, i + blockSize))));
+    }
+  }
+  return { algorithm: 'SHA256', hash, blockSize, blocks };
+}
+
+function packAsarWithOverlay(officialBuffer, replacements, additions) {
+  const { header, body } = unpackAsar(officialBuffer);
+  const entries = walkAsar(header);
+  const origMeta = new Map();
+  for (const [rel, e] of entries.entries()) {
+    origMeta.set(rel, {
+      offset: e.offset,
+      size: e.size,
+      unpacked: Boolean(e.unpacked),
+      link: e.link,
+      executable: Boolean(e.executable),
+    });
+  }
+
+  // Verify packed contiguous layout and rebuild packed stream in original offset order
+  const packedEntries = [...entries.entries()]
+    .filter(([, entry]) => entry.offset !== undefined && !entry.unpacked)
+    .sort((a, b) => Number(a[1].offset) - Number(b[1].offset) || (a[1].size === 0 ? -1 : 1));
+
+  const chunks = [];
+  let sourceCursor = 0;
+  let currentOffset = 0;
+
+  for (const [rel, entry] of packedEntries) {
+    const origStart = Number(entry.offset);
+    const origSize = entry.size;
+    if (origStart !== sourceCursor) {
+      throw new Error(`Non-contiguous ASAR layout at ${rel}: expected ${sourceCursor}, got ${origStart}`);
+    }
+    const data = replacements.has(rel) ? replacements.get(rel) : body.subarray(origStart, origStart + origSize);
+    entry.offset = String(currentOffset);
+    entry.size = data.length;
+    if (replacements.has(rel)) {
+      const blockSize = entry.integrity?.blockSize || 4194304;
+      entry.integrity = buildIntegrity(data, blockSize);
+    }
+    chunks.push(data);
+    sourceCursor += origSize;
+    currentOffset += data.length;
+  }
+  if (sourceCursor !== body.length) {
+    throw new Error(`ASAR body tail mismatch: cursor=${sourceCursor}, len=${body.length}`);
+  }
+
+  for (const rel of [...additions.keys()].sort()) {
+    if (entries.has(rel)) {
+      throw new Error(`Addition collides with existing ASAR member: ${rel}`);
+    }
+    const data = additions.get(rel);
+    const parts = rel.split('/');
+    const leaf = parts.pop();
+    let dirNode = header.files;
+    for (const part of parts) {
+      if (!dirNode[part]) dirNode[part] = { files: {} };
+      dirNode = dirNode[part].files;
+    }
+    dirNode[leaf] = {
+      size: data.length,
+      offset: String(currentOffset),
+      integrity: buildIntegrity(data, 4194304),
+    };
+    chunks.push(data);
+    currentOffset += data.length;
+  }
+
+  const headerBytes = Buffer.from(JSON.stringify(header), 'utf8');
+  const padded = (headerBytes.length + 3) & ~3;
+  const prefix = Buffer.alloc(16 + padded, 0);
+  prefix.writeUInt32LE(4, 0);
+  prefix.writeUInt32LE(8 + padded, 4);
+  prefix.writeUInt32LE(4 + padded, 8);
+  prefix.writeUInt32LE(headerBytes.length, 12);
+  headerBytes.copy(prefix, 16);
+
+  const assembled = Buffer.concat([prefix, ...chunks]);
+
+  // Independent structural & byte-for-byte readback check
+  const { header: newHeader, body: newBody } = unpackAsar(assembled);
+  const newEntries = walkAsar(newHeader);
+  const expectedKeys = new Set([...entries.keys(), ...additions.keys()]);
+  if (newEntries.size !== expectedKeys.size) {
+    throw new Error(`ASAR entry count mismatch: expected ${expectedKeys.size}, got ${newEntries.size}`);
+  }
+  let unchangedCount = 0;
+  for (const [rel, oldEntry] of origMeta.entries()) {
+    const newEntry = newEntries.get(rel);
+    if (!newEntry) throw new Error(`Missing member after repack: ${rel}`);
+    if (oldEntry.unpacked !== Boolean(newEntry.unpacked) || oldEntry.link !== newEntry.link || oldEntry.executable !== Boolean(newEntry.executable)) {
+      throw new Error(`Metadata flag drift for ${rel}`);
+    }
+    if (oldEntry.unpacked || oldEntry.link) {
+      if (oldEntry.size !== newEntry.size) throw new Error(`Unpacked/link size drift for ${rel}`);
+      continue;
+    }
+    const actual = getAsarMember(newBody, newEntry);
+    if (replacements.has(rel)) {
+      const expected = replacements.get(rel);
+      if (!actual.equals(expected)) throw new Error(`Modified member mismatch: ${rel}`);
+      if (newEntry.integrity?.hash !== sha256(actual)) throw new Error(`Modified member integrity hash mismatch: ${rel}`);
+    } else {
+      const orig = getAsarMember(body, oldEntry);
+      if (!actual.equals(orig)) throw new Error(`Untouched member drifted: ${rel}`);
+      unchangedCount++;
+    }
+  }
+  for (const [rel, expected] of additions.entries()) {
+    const newEntry = newEntries.get(rel);
+    if (!newEntry) throw new Error(`Added member missing: ${rel}`);
+    const actual = getAsarMember(newBody, newEntry);
+    if (!actual.equals(expected)) throw new Error(`Added member mismatch: ${rel}`);
+    if (newEntry.integrity?.hash !== sha256(actual)) throw new Error(`Added member integrity hash mismatch: ${rel}`);
+  }
+
+  return { buffer: assembled, unchangedCount };
+}
+
+function verifyNodeSyntax(code, stageDir, label) {
+  new vm.Script(code, { filename: label });
+  const checkFile = path.join(stageDir, 'syntax-' + label.replace(/[^a-zA-Z0-9._-]/g, '_'));
+  fs.writeFileSync(checkFile, code, 'utf8');
+  const res = spawnSync(process.execPath, ['--check', checkFile], { encoding: 'utf8', timeout: 15000 });
+  if (res.status !== 0) {
+    throw new Error(`node --check failed for ${label}: ${(res.stderr || '').trim()}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Layer 1: WSL guard (dist/wsl.js)
+// ---------------------------------------------------------------------------
+
+function applyWslLayer(origSource, stageDir) {
+  const hideOld = '            timeout: 30000,\n        });\n        return decodeWslOutput(stdout);';
+  const hideNew = '            timeout: 30000,\n            windowsHide: true,\n        });\n        return decodeWslOutput(stdout);';
+  const listOld = "async function listWslDistros() {\n    const output = await execWsl(['--list', '--verbose']);";
+  const listNew = [
+    'async function listWslDistros() {',
+    '    // Windows keeps the wsl.exe launcher even when WSL has been uninstalled.',
+    '    // A distribution must be registered before querying that launcher.',
+    '    if (!isWslAvailable()) {',
+    '        return [];',
+    '    }',
+    '    try {',
+    "        const { stdout } = await execFileAsync(path.join(path.dirname(exports.WSL_EXE), 'reg.exe'), [",
+    "            'query', 'HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Lxss', '/s', '/v', 'DistributionName',",
+    "        ], { encoding: 'buffer', timeout: 2000, windowsHide: true });",
+    '        if (!/\\bDistributionName[ \\t]+REG_SZ[ \\t]+\\S/.test(decodeWslOutput(stdout))) {',
+    '            return [];',
+    '        }',
+    '    }',
+    '    catch {',
+    '        return [];',
+    '    }',
+    "    const output = await execWsl(['--list', '--verbose']);",
+  ].join('\n');
+
+  if (countOccurrences(origSource, hideOld) !== 1 || countOccurrences(origSource, listOld) !== 1) {
+    return { status: 'skipped', reason: 'Upstream dist/wsl.js anchor changed or already guarded (IFEO host guard still active)' };
+  }
+  const patched = origSource.replace(hideOld, () => hideNew).replace(listOld, () => listNew);
+  verifyNodeSyntax(patched, stageDir, 'dist/wsl.js');
+
+  // Offline behavioral fixture
+  const runCase = async ({ registry = null, platform = 'win32', launcherExists = true } = {}) => {
+    const calls = [];
+    const exp = {};
+    const deps = {
+      child_process: {
+        execFile(exe, args, opts, cb) {
+          const name = path.win32.basename(exe);
+          calls.push([name, [...args], opts.windowsHide]);
+          if (registry === null) return cb(new Error('absent'));
+          if (name === 'reg.exe') return cb(null, { stdout: Buffer.from(registry) });
+          cb(null, { stdout: Buffer.from('\uFEFF  NAME STATE VERSION\r\n* Ubuntu Running 2\r\n  Debian Stopped 1\r\n  docker-desktop Running 2\r\n', 'utf16le') });
+        },
+      },
+      fs: { existsSync: () => launcherExists },
+      crypto: {},
+      path: path.win32,
+      util: { promisify },
+      'js-yaml': {},
+    };
+    vm.runInNewContext(patched, {
+      exports: exp,
+      Buffer,
+      process: { platform, env: { SystemRoot: 'C:\\Windows' } },
+      require: (name) => {
+        if (!Object.hasOwn(deps, name)) throw new Error(`Unexpected WSL require: ${name}`);
+        return deps[name];
+      },
+    }, { filename: 'dist/wsl.js' });
+    const distros = await exp.listWslDistros();
+    return { calls, distros };
+  };
+
+  return {
+    status: 'ready',
+    source: patched,
+    verifyAsync: async () => {
+      const noDistro = await runCase({ registry: null });
+      if (noDistro.distros.length !== 0 || noDistro.calls.length !== 1 || noDistro.calls[0][0] !== 'reg.exe' || noDistro.calls[0][2] !== true) {
+        throw new Error('WSL noDistro behavioral gate failed');
+      }
+      const wsl2 = await runCase({ registry: '    DistributionName    REG_SZ    Ubuntu\r\n' });
+      if (wsl2.distros.length !== 1 || wsl2.distros[0].name !== 'Ubuntu' || wsl2.calls.length !== 2 || wsl2.calls[1][0] !== 'wsl.exe' || wsl2.calls[1][2] !== true) {
+        throw new Error('WSL registeredWsl2 behavioral gate failed');
+      }
+      const nonWin = await runCase({ platform: 'linux' });
+      if (nonWin.distros.length !== 0 || nonWin.calls.length !== 0) {
+        throw new Error('WSL nonWindows behavioral gate failed');
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Layer 2: desktop-zhcn (3.0.8)
+// ---------------------------------------------------------------------------
+
+async function applyLanguageLayer({ appAsarPath, hostVersion, origCustomScheme, origLoadingOverlay, stateRoot, postQuitHookPath, stageDir }) {
+  const fromLib = (name) => import(pathToFileURL(path.join(ZHCN_LIB_DIR, name)).href);
+  const prevPack = process.env.AGY_LANGUAGE_PACK;
+  const prevState = process.env.AGY_ZHCN_STATE_DIR;
+  process.env.AGY_LANGUAGE_PACK = ZHCN_PACK_DIR;
+  process.env.AGY_ZHCN_STATE_DIR = stageDir;
+  try {
+    const { readEmbeddedWindowsUi } = await fromLib('runtime-bundle.mjs');
+    const { loadDomTranslations } = await fromLib('translator.mjs');
+    const { createLocalizedBundleWithProgress } = await fromLib('localize-progress.mjs');
+    const { patchCustomSchemeSource, patchLoadingOverlaySource } = await fromLib('patcher-d-hosted.mjs');
+
+    const embedded = await readEmbeddedWindowsUi({ appAsarPath });
+    if (!embedded || embedded.source !== 'embedded' || !embedded.buffer || embedded.buffer.length < 500_000) {
+      return { status: 'skipped', reason: 'Embedded UI bundle could not be extracted from language_server.exe' };
+    }
+    const dictionary = await loadDomTranslations();
+    const localized = await createLocalizedBundleWithProgress(embedded.buffer, dictionary, { skipCoverage: true, log: () => {} });
+    if (!localized || !localized.buffer || localized.buffer.equals(embedded.buffer)) {
+      return { status: 'skipped', reason: 'Localization produced no changes against embedded UI bundle' };
+    }
+    const uiStagePath = path.join(stageDir, 'agy_zhcn_ui_main.js');
+    await fsp.writeFile(uiStagePath, localized.buffer);
+    const uiCheck = spawnSync(process.execPath, ['--check', uiStagePath], { encoding: 'utf8', timeout: 30000 });
+    if (uiCheck.status !== 0) {
+      throw new Error(`Localized UI bundle syntax check failed: ${(uiCheck.stderr || '').trim()}`);
+    }
+
+    const versionStateDir = toPosix(path.join(stateRoot, `language-${hostVersion}`));
+    let patchedScheme = patchCustomSchemeSource(origCustomScheme);
+
+    const defaultStateLiteral = '"D:/Codex/tools/antigravity-addons/state/language"';
+    if (countOccurrences(patchedScheme, defaultStateLiteral) !== 1) {
+      throw new Error('Unexpected state directory literal count in patched customScheme.js');
+    }
+    patchedScheme = patchedScheme.replace(defaultStateLiteral, () => JSON.stringify(versionStateDir));
+
+    const oldHookExpr = "path.join(electron_1.app.getPath('userData'), 'agy_zhcn_autofollow_hook.json')";
+    if (countOccurrences(patchedScheme, oldHookExpr) === 1 && postQuitHookPath) {
+      patchedScheme = patchedScheme.replace(oldHookExpr, () => JSON.stringify(toPosix(postQuitHookPath)));
+    }
+
+    if (!patchedScheme.includes('agy-zhcn://bundle/main.js') || !patchedScheme.includes('onlineTranslate: false, titleWriteBack: false')) {
+      throw new Error('Patched customScheme.js missing expected loader or offline defaults');
+    }
+    verifyNodeSyntax(patchedScheme, stageDir, 'dist/customScheme.js');
+
+    let patchedOverlay = null;
+    if (origLoadingOverlay !== null) {
+      const candidateOverlay = patchLoadingOverlaySource(origLoadingOverlay);
+      if (candidateOverlay !== origLoadingOverlay) {
+        verifyNodeSyntax(candidateOverlay, stageDir, 'dist/loadingOverlay.js');
+        patchedOverlay = candidateOverlay;
+      }
+    }
+
+    return {
+      status: 'applied',
+      version: '3.0.8',
+      customScheme: patchedScheme,
+      loadingOverlay: patchedOverlay,
+      uiBuffer: localized.buffer,
+      uiSha256: sha256(localized.buffer),
+      embeddedUiSha256: sha256(embedded.buffer),
+      stateDir: versionStateDir,
+    };
+  } finally {
+    if (prevPack === undefined) delete process.env.AGY_LANGUAGE_PACK; else process.env.AGY_LANGUAGE_PACK = prevPack;
+    if (prevState === undefined) delete process.env.AGY_ZHCN_STATE_DIR; else process.env.AGY_ZHCN_STATE_DIR = prevState;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Layer 3: pulse (1.3.2, embed-only)
+// ---------------------------------------------------------------------------
+
+function applyPulseLayer(officialBuffer, origPreload, stageDir) {
+  const pulse = require(path.join(PULSE_DIR, 'install-context-capsule.js'));
+  const payload = fs.readFileSync(path.join(PULSE_DIR, 'context-capsule-payload.js'), 'utf8');
+  new vm.Script(payload, { filename: 'context-capsule-payload.js' });
+
+  if (!origPreload.includes('const electron_1 = require("electron");') || !origPreload.includes('electron_1.webFrame.executeJavaScript')) {
+    return { status: 'skipped', reason: 'Upstream dist/preload.js missing electron_1/webFrame anchors' };
+  }
+
+  const patchedBuf = pulse.patchAsarBufferInMemory(officialBuffer, payload, { embedOnly: true });
+  const { header, body } = unpackAsar(patchedBuf);
+  const preloadEntry = walkAsar(header).get('dist/preload.js');
+  const pulsePreload = getAsarMember(body, preloadEntry).toString('utf8');
+  if (!pulsePreload.startsWith(origPreload)) {
+    throw new Error('Pulse preload transform did not append cleanly to official preload.js');
+  }
+  const snippet = pulsePreload.slice(origPreload.length);
+  if (!snippet.includes(pulse.CAPSULE_START) || !snippet.includes(pulse.CAPSULE_END) || snippet.includes(pulse.HOT_LOADER_TAG)) {
+    throw new Error('Pulse snippet failed embed-only marker checks');
+  }
+
+  // Offline behavioral fixture
+  const script = new vm.Script(snippet, { filename: 'pulse-loader.js' });
+  const expectedPayloadSha = sha256(Buffer.from(payload, 'utf8'));
+  for (const readyState of ['loading', 'complete']) {
+    const observed = [];
+    const events = {};
+    const timers = {};
+    script.runInNewContext({
+      electron_1: { webFrame: { executeJavaScript: (val) => { observed.push(sha256(Buffer.from(String(val), 'utf8'))); } } },
+      document: { readyState, addEventListener: (n, cb) => { events[n] = cb; } },
+      window: { addEventListener: (n, cb) => { events[n] = cb; } },
+      setTimeout: (cb, delay) => { timers[delay] = cb; },
+    });
+    if (observed.length !== (readyState === 'loading' ? 0 : 1)) throw new Error(`Pulse immediate count mismatch (${readyState})`);
+    if (readyState === 'loading') events.DOMContentLoaded();
+    events.load();
+    timers[600]();
+    timers[2000]();
+    if (observed.length !== 4 || !observed.every((h) => h === expectedPayloadSha)) {
+      throw new Error(`Pulse delivery fixture mismatch (${readyState})`);
+    }
+  }
+  verifyNodeSyntax(origPreload + snippet, stageDir, 'dist/preload-pulse.js');
+  return {
+    status: 'applied',
+    version: pulse.INSTALLER_VERSION || '1.3.2',
+    payloadSha256: expectedPayloadSha,
+    snippet,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Layer 4: context-viewer (0.8.8, meter-only, resilient anchor)
+// ---------------------------------------------------------------------------
+
+function detectHubLoadAnchor(utilsSource) {
+  const explicitCandidates = [
+    '    void loadHubWindowUrl(win, url, { skipBootstrapMint });',
+    '    void win.loadURL(url);',
+  ];
+  for (const cand of explicitCandidates) {
+    if (countOccurrences(utilsSource, cand) === 1) return cand;
+  }
+  const regex = /^    void (?:loadHubWindowUrl\(win,\s*url[^;\r\n]*\)|win\.loadURL\(url\));$/gm;
+  const matches = utilsSource.match(regex) || [];
+  if (matches.length === 1) return matches[0];
+  return null;
+}
+
+async function applyContextViewerLayer({ hostVersion, origUtils, origPreload, stateRoot, stageDir }) {
+  const installer = require(path.join(CONTEXT_DIR, 'modular-installer.js'));
+  const currentAnchor = detectHubLoadAnchor(origUtils);
+  if (!currentAnchor) {
+    return { status: 'skipped', reason: 'Unable to find a unique hub window navigation anchor in dist/utils.js' };
+  }
+
+  const meter = installer.generateMeterUtilsCode();
+  const edits = [
+    ['"use strict";', '"use strict";\n' + meter.headerProxyHook],
+    ['function setupNodeWrapper(env) {', 'function setupNodeWrapper(env) {' + meter.nodeWrapperHook],
+    ["titleBarStyle: 'hidden',", "titleBarStyle: 'hidden'," + meter.menuBarOption],
+    [currentAnchor, meter.windowLoadHook + currentAnchor],
+    ['function createWindow(url, storageManager, options) {', 'function createWindow(url, storageManager, options) {' + meter.storageFallback],
+    ['wins[0].focus();', 'wins[0].focus();' + meter.focusHook],
+    ['createWindow(`${constants_1.WINDOW_ORIGIN}:${port}/`);', 'const _mWin = createWindow(`${constants_1.WINDOW_ORIGIN}:${port}/`);' + meter.createHook],
+  ];
+
+  let patchedUtils = origUtils;
+  for (const [anchor, replacement] of edits) {
+    if (countOccurrences(patchedUtils, anchor) !== 1) {
+      return { status: 'skipped', reason: `Anchor not unique in dist/utils.js: ${anchor}` };
+    }
+    patchedUtils = patchedUtils.replace(anchor, () => replacement);
+  }
+  if (patchedUtils.includes(installer.TAGS.PROXY_START)) {
+    throw new Error('Unexpected ProxyNoTun injection present in meter-only utils.js');
+  }
+  verifyNodeSyntax(patchedUtils, stageDir, 'dist/utils.js');
+
+  const preloadSnippet = installer.generateMeterPreloadCode();
+  if (preloadSnippet.includes(installer.TAGS.CHINESE_START)) {
+    throw new Error('Unexpected Chinese injection in meter-only preload snippet');
+  }
+  verifyNodeSyntax(origPreload + preloadSnippet, stageDir, 'dist/preload-context.js');
+
+  // Offline preload fixture
+  const exposed = new Map();
+  const invoked = [];
+  const decorator = [];
+  vm.runInNewContext(preloadSnippet, {
+    electron_1: {
+      contextBridge: { exposeInMainWorld: (n, api) => exposed.set(n, api) },
+      ipcRenderer: { invoke: (...a) => invoked.push(a) },
+      webFrame: { executeJavaScript: (c) => { decorator.push(c); return Promise.resolve(); } },
+    },
+  });
+  const api = exposed.get('contextMeterAPI');
+  if (!api || typeof api.scan !== 'function') throw new Error('contextMeterAPI.scan missing in preload fixture');
+  api.scan('fixture-conv', true);
+  if (invoked.length !== 1 || invoked[0][0] !== 'context-meter:scan') throw new Error('contextMeterAPI.scan IPC mismatch');
+  if (decorator.length !== 1 || !decorator[0].includes('__JETSKI_LS_CLIENT_DECORATOR__')) {
+    throw new Error('Main-world decorator bootstrap missing');
+  }
+
+  // Build 21 overlay files purely from D:\Codex\tools\antigravity-addons\context-viewer-v0.8.8
+  const contextStateWin = path.win32.normalize(path.join(stateRoot, 'context'));
+  const oldStateLine = "  const dir = path.join(base, 'AntigravityContextMeter');";
+  const newStateLine = `  const dir = process.platform === 'win32' ? ${JSON.stringify(contextStateWin)} : path.join(base, 'AntigravityContextMeter');`;
+  const oldVendorAnchor = '    void win.loadURL(url);';
+
+  const additions = new Map();
+  for (const rel of CONTEXT_VENDOR_FILES) {
+    let raw = await fsp.readFile(path.join(CONTEXT_DIR, rel));
+    if (rel === 'asar-engine.js') {
+      const txt = raw.toString('utf8');
+      if (countOccurrences(txt, oldStateLine) !== 1) throw new Error('Unexpected asar-engine.js state line');
+      raw = Buffer.from(txt.replace(oldStateLine, () => newStateLine), 'utf8');
+    } else if (rel === 'modular-installer.js') {
+      const txt = raw.toString('utf8');
+      if (countOccurrences(txt, oldVendorAnchor) === 1) {
+        raw = Buffer.from(txt.replace(oldVendorAnchor, () => currentAnchor), 'utf8');
+      }
+    } else if (rel === 'install.js') {
+      const txt = raw.toString('utf8');
+      if (countOccurrences(txt, oldVendorAnchor) === 2) {
+        raw = Buffer.from(txt.replaceAll(oldVendorAnchor, () => currentAnchor), 'utf8');
+      }
+    }
+    additions.set(`dist/${rel}`, raw);
+  }
+  const manifestJson = JSON.stringify({
+    version: '0.8.8',
+    hostVersion,
+    updatedAt: new Date().toISOString(),
+  }, null, 2);
+  additions.set('dist/meter-manifest.json', Buffer.from(manifestJson, 'utf8'));
+
+  // Offline mount behavioral fixture (BrowserWindow + BaseWindow)
+  const meterMain = additions.get('dist/meter-main.js').toString('utf8');
+  const sliceBetween = (src, a, b) => {
+    const i = src.indexOf(a);
+    const j = src.indexOf(b, i + a.length);
+    if (i < 0 || j <= i) throw new Error(`Fixture slice missing: ${a}`);
+    return src.slice(i, j);
+  };
+  const mountStart = '    (0, previewViewers_1.registerPreviewViewer)(hubContents);';
+  if (countOccurrences(patchedUtils, mountStart) === 1) {
+    const mount = sliceBetween(patchedUtils, mountStart, '\n    return win;');
+    const fn1 = sliceBetween(meterMain, 'function getWindowWebContents(win) {', '\n/**');
+    const fn2 = sliceBetween(meterMain, 'async function ensureMeterInjected(win, options = {}) {', '\nexports.ensureMeterInjected');
+    const fn3 = sliceBetween(meterMain, 'exports.installContextMeter = function (win) {', '\n\ntry {');
+    for (const baseWindow of [true, false]) {
+      const events = [];
+      const handlers = {};
+      const winHandlers = {};
+      const hubContents = {
+        on: (n, fn) => { handlers[n] = fn; },
+        getURL: () => 'https://127.0.0.1:19999/',
+        executeJavaScript: async (v) => { events.push(['inject', v]); },
+      };
+      const win = {
+        on: (n, fn) => { winHandlers[n] = fn; },
+        loadURL: (u) => { events.push(['navigate', u]); },
+      };
+      if (baseWindow) Object.defineProperty(win, 'webContents', { get: () => hubContents });
+      else win.webContents = hubContents;
+      const sandbox = {
+        exports: {}, process: { platform: 'win32' }, win, hubContents, options: {}, url: 'https://127.0.0.1:19999/',
+        boundWindows: new WeakSet(), boundWebContents: new WeakSet(),
+        registerIpcOnce: () => { events.push(['register-ipc']); },
+        syncWindowOverlayHeight: () => {}, getMeterSource: () => 'fixture-meter-source',
+        previewViewers_1: { registerPreviewViewer: () => { events.push(['preview']); } },
+        loadHubWindowUrl: (_w, u) => { events.push(['navigate', u]); },
+        require: (n) => { if (n !== './meter-main') throw new Error(n); return sandbox.exports; },
+      };
+      vm.runInNewContext([fn1, fn2, fn3, mount].join('\n'), sandbox);
+      handlers['did-finish-load']();
+      await Promise.resolve();
+      if (!events.some((e) => e[0] === 'register-ipc') || !events.some((e) => e[0] === 'inject' && e[1] === 'fixture-meter-source')) {
+        throw new Error(`Context mount fixture failed (baseWindow=${baseWindow})`);
+      }
+    }
+  }
+
+  return {
+    status: 'applied',
+    version: '0.8.8',
+    anchor: currentAnchor.trim(),
+    utils: patchedUtils,
+    preloadSnippet,
+    additions,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// File helpers & atomic swap
+// ---------------------------------------------------------------------------
+
+async function writeFileAtomic(targetPath, content) {
+  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+  const tmp = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  await fsp.writeFile(tmp, content);
+  try {
+    await fsp.rename(tmp, targetPath);
+  } catch (err) {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+async function swapAsarAtomically(targetAsar, candidateBuffer, expectedOriginalSha, expectedCandidateSha) {
+  const currentSha = await sha256File(targetAsar);
+  if (currentSha !== expectedOriginalSha) {
+    throw new Error(`Target app.asar changed during build: expected ${expectedOriginalSha}, found ${currentSha}`);
+  }
+  const dir = path.dirname(targetAsar);
+  const token = `${process.pid}-${Date.now()}`;
+  const staged = path.join(dir, `.app.asar.reconcile-new-${token}.tmp`);
+  const displaced = path.join(dir, `.app.asar.reconcile-old-${token}.tmp`);
+
+  await fsp.writeFile(staged, candidateBuffer);
+  if (await sha256File(staged) !== expectedCandidateSha) {
+    await fsp.rm(staged, { force: true }).catch(() => {});
+    throw new Error('Staged app.asar SHA-256 mismatch before swap');
+  }
+
+  try {
+    await fsp.rename(targetAsar, displaced);
+  } catch (err) {
+    await fsp.rm(staged, { force: true }).catch(() => {});
+    err.isLockError = ['EBUSY', 'EPERM', 'EACCES'].includes(err.code);
+    throw err;
+  }
+
+  try {
+    await fsp.rename(staged, targetAsar);
+    if (await sha256File(targetAsar) !== expectedCandidateSha) {
+      throw new Error('Installed app.asar SHA-256 verification failed');
+    }
+  } catch (err) {
+    await fsp.rm(targetAsar, { force: true }).catch(() => {});
+    await fsp.rename(displaced, targetAsar).catch(() => {});
+    await fsp.rm(staged, { force: true }).catch(() => {});
+    throw err;
+  }
+
+  await fsp.rm(displaced, { force: true }).catch(() => {});
+}
+
+function detectAddonMarkers(entries, body) {
+  const markers = [];
+  const check = (rel, needle, tag) => {
+    const e = entries.get(rel);
+    if (e && !e.unpacked && e.offset !== undefined) {
+      if (getAsarMember(body, e).includes(Buffer.from(needle, 'utf8'))) markers.push(tag);
+    }
+  };
+  check('dist/customScheme.js', 'agy-zhcn://bundle/main.js', 'desktop-zhcn');
+  check('dist/preload.js', 'AGY_CONTEXT_CAPSULE_START', 'pulse');
+  check('dist/preload.js', 'Antigravity Context Meter preload Injection Start', 'context-viewer-preload');
+  check('dist/utils.js', 'Antigravity Context Meter utils Injection Start', 'context-viewer-utils');
+  check('dist/wsl.js', 'HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Lxss', 'wsl');
+  return markers;
+}
+
+async function readJsonSafe(filePath) {
+  try {
+    return JSON.parse(await fsp.readFile(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function parseArgs(argv) {
+  const opts = {
+    command: argv[0] || 'status',
+    appDir: DEFAULT_APP_DIR,
+    backupDir: DEFAULT_BACKUP_DIR,
+    stateRoot: DEFAULT_STATE_ROOT,
+    evidenceRoot: DEFAULT_EVIDENCE_ROOT,
+    apply: false,
+    stageOnly: false,
+    dryRun: false,
+    fromBackup: false,
+    officialSha256: null,
+  };
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--app-dir') opts.appDir = argv[++i];
+    else if (a === '--backup-dir') opts.backupDir = argv[++i];
+    else if (a === '--state-root') opts.stateRoot = argv[++i];
+    else if (a === '--evidence-root') opts.evidenceRoot = argv[++i];
+    else if (a === '--apply') opts.apply = true;
+    else if (a === '--stage-only') opts.stageOnly = true;
+    else if (a === '--dry-run') opts.dryRun = true;
+    else if (a === '--from-backup') opts.fromBackup = true;
+    else if (a === '--official-sha256') opts.officialSha256 = argv[++i];
+    else throw new Error(`Unknown argument: ${a}`);
+  }
+  return opts;
+}
+
+// ---------------------------------------------------------------------------
+// Main commands
+// ---------------------------------------------------------------------------
+
+async function inspectLive(opts) {
+  const appAsarPath = path.join(opts.appDir, 'resources/app.asar');
+  const lsPath = path.join(opts.appDir, 'resources/bin/language_server.exe');
+  const asarBuf = await fsp.readFile(appAsarPath);
+  const currentAsarSha = sha256(asarBuf);
+  const lsSha = fs.existsSync(lsPath) ? await sha256File(lsPath) : null;
+  const { header, body } = unpackAsar(asarBuf);
+  const entries = walkAsar(header);
+  const pkg = JSON.parse(getAsarMember(body, entries.get('package.json')).toString('utf8'));
+  const markers = detectAddonMarkers(entries, body);
+  const active = await readJsonSafe(path.join(opts.stateRoot, 'active-build.json'));
+  const pending = await readJsonSafe(path.join(opts.stateRoot, 'pending-apply.json'));
+  const pendingAsarExists = fs.existsSync(path.join(opts.stateRoot, 'pending-app.asar'));
+
+  const langUiPath = path.join(opts.stateRoot, `language-${pkg.version}`, 'agy_zhcn_ui_main.js');
+  const langUiExists = fs.existsSync(langUiPath);
+
+  let state = 'needs-reconcile';
+  const pendingTargetSha = pending ? (pending.replaceTargetSha256 || pending.officialSha256) : null;
+  if (pending && pendingAsarExists && pendingTargetSha === currentAsarSha && pending.languageServerSha256 === lsSha) {
+    state = 'pending-ready';
+  } else if (active && active.combinedSha256 === currentAsarSha && active.languageServerSha256 === lsSha && (!markers.includes('desktop-zhcn') || langUiExists)) {
+    state = 'up-to-date';
+  } else if (markers.length > 0) {
+    state = 'already-patched-untracked';
+  }
+
+  return {
+    state,
+    version: pkg.version,
+    appAsarPath,
+    currentAsarSha,
+    languageServerSha256: lsSha,
+    markers,
+    langUiExists,
+    activeBuild: active,
+    pendingApply: pending && pendingAsarExists ? pending : null,
+    asarBuf,
+    header,
+    body,
+    entries,
+  };
+}
+
+async function cmdAdopt(opts) {
+  const info = await inspectLive(opts);
+  const record = {
+    schemaVersion: 1,
+    version: info.version,
+    officialSha256: opts.officialSha256 || null,
+    combinedSha256: info.currentAsarSha,
+    languageServerSha256: info.languageServerSha256,
+    appliedLayers: info.markers,
+    skippedLayers: [],
+    adoptedAt: new Date().toISOString(),
+  };
+  await writeFileAtomic(path.join(opts.stateRoot, 'active-build.json'), JSON.stringify(record, null, 2) + '\n');
+  return { status: 'adopted', activeBuild: record };
+}
+
+async function cmdReconcile(opts) {
+  const info = await inspectLive(opts);
+  if (!opts.fromBackup) {
+    if (info.state === 'up-to-date') {
+      return { status: 'up-to-date', version: info.version, combinedSha256: info.currentAsarSha, markers: info.markers };
+    }
+    if (info.state === 'pending-ready' && opts.apply && !opts.stageOnly && !opts.dryRun) {
+      const pendingPath = path.join(opts.stateRoot, 'pending-app.asar');
+      const pendingMeta = info.pendingApply;
+      try {
+        const pendingBuf = await fsp.readFile(pendingPath);
+        if (sha256(pendingBuf) === pendingMeta.combinedSha256) {
+          await swapAsarAtomically(info.appAsarPath, pendingBuf, info.currentAsarSha, pendingMeta.combinedSha256);
+          const promoted = { ...pendingMeta, promotedAt: new Date().toISOString() };
+          await writeFileAtomic(path.join(opts.stateRoot, 'active-build.json'), JSON.stringify(promoted, null, 2) + '\n');
+          await fsp.rm(pendingPath, { force: true }).catch(() => {});
+          await fsp.rm(path.join(opts.stateRoot, 'pending-apply.json'), { force: true }).catch(() => {});
+          return { status: 'applied-from-pending', ...promoted };
+        }
+      } catch (err) {
+        if (err.isLockError) {
+          return { status: 'pending-still-locked', version: info.version, combinedSha256: pendingMeta.combinedSha256 };
+        }
+        // Corrupt/mismatched pending artifact falls through to fresh rebuild
+      }
+    }
+    if (info.state === 'already-patched-untracked') {
+      return { status: 'refused-already-patched', version: info.version, currentAsarSha: info.currentAsarSha, markers: info.markers };
+    }
+  }
+
+  let sourceBuf = info.asarBuf;
+  let sourceHeader = info.header;
+  let sourceBody = info.body;
+  let sourceEntries = info.entries;
+  let officialSha = info.currentAsarSha;
+  let backupPath = path.join(opts.backupDir, `app.asar.${info.version}.original`);
+
+  if (opts.fromBackup) {
+    if (!fs.existsSync(backupPath)) {
+      throw new Error(`Official backup not found for --from-backup: ${backupPath}`);
+    }
+    sourceBuf = await fsp.readFile(backupPath);
+    officialSha = sha256(sourceBuf);
+    const unpacked = unpackAsar(sourceBuf);
+    sourceHeader = unpacked.header;
+    sourceBody = unpacked.body;
+    sourceEntries = walkAsar(sourceHeader);
+    const backupMarkers = detectAddonMarkers(sourceEntries, sourceBody);
+    if (backupMarkers.length > 0) {
+      throw new Error(`Backup archive already contains addon markers: ${backupMarkers.join(', ')}`);
+    }
+  }
+
+  const runStamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const stageDir = path.join(opts.evidenceRoot, `sync-${runStamp}-v${info.version}`);
+  const workDir = path.join(stageDir, '.work');
+  await fsp.mkdir(workDir, { recursive: true });
+  try {
+    return await executeReconcile({ opts, info, sourceBuf, sourceBody, sourceEntries, officialSha, backupPath, stageDir, workDir });
+  } finally {
+    await fsp.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function executeReconcile({ opts, info, sourceBuf, sourceBody, sourceEntries, officialSha, backupPath, stageDir, workDir }) {
+
+  // Immutable official backup (never overwrite existing version backup)
+  if (!opts.dryRun && !opts.fromBackup) {
+    await fsp.mkdir(opts.backupDir, { recursive: true });
+    if (!fs.existsSync(backupPath)) {
+      await fsp.writeFile(backupPath, sourceBuf, { flag: 'wx' });
+    }
+  } else if (opts.dryRun && !opts.fromBackup) {
+    backupPath = null;
+  }
+
+  const readTextMember = (rel) => {
+    const e = sourceEntries.get(rel);
+    return e && !e.unpacked ? getAsarMember(sourceBody, e).toString('utf8') : null;
+  };
+
+  const replacements = new Map();
+  const additions = new Map();
+  const layers = {};
+
+  // Layer 1: WSL guard
+  try {
+    const origWsl = readTextMember('dist/wsl.js');
+    if (!origWsl) {
+      layers.wsl = { status: 'skipped', reason: 'dist/wsl.js absent' };
+    } else {
+      const res = applyWslLayer(origWsl, workDir);
+      if (res.status === 'ready') {
+        await res.verifyAsync();
+        replacements.set('dist/wsl.js', Buffer.from(res.source, 'utf8'));
+        layers.wsl = { status: 'applied', sha256: sha256(Buffer.from(res.source, 'utf8')) };
+      } else {
+        layers.wsl = res;
+      }
+    }
+  } catch (err) {
+    layers.wsl = { status: 'skipped', reason: `WSL gate error: ${err.message}` };
+  }
+
+  // Layer 2: desktop-zhcn
+  let langResult = null;
+  const postQuitHookPath = path.join(opts.stateRoot, 'post-quit-hook.json');
+  try {
+    const origScheme = readTextMember('dist/customScheme.js');
+    const origOverlay = readTextMember('dist/loadingOverlay.js');
+    if (!origScheme) {
+      layers.language = { status: 'skipped', reason: 'dist/customScheme.js absent' };
+    } else {
+      langResult = await applyLanguageLayer({
+        appAsarPath: info.appAsarPath,
+        hostVersion: info.version,
+        origCustomScheme: origScheme,
+        origLoadingOverlay: origOverlay,
+        stateRoot: opts.stateRoot,
+        postQuitHookPath,
+        stageDir: workDir,
+      });
+      if (langResult.status === 'applied') {
+        replacements.set('dist/customScheme.js', Buffer.from(langResult.customScheme, 'utf8'));
+        if (langResult.loadingOverlay !== null) {
+          replacements.set('dist/loadingOverlay.js', Buffer.from(langResult.loadingOverlay, 'utf8'));
+        }
+        layers.language = {
+          status: 'applied',
+          version: langResult.version,
+          stateDir: langResult.stateDir,
+          uiSha256: langResult.uiSha256,
+          embeddedUiSha256: langResult.embeddedUiSha256,
+        };
+      } else {
+        layers.language = langResult;
+      }
+    }
+  } catch (err) {
+    layers.language = { status: 'skipped', reason: `Language gate error: ${err.message}` };
+  }
+
+  // Layer 3: pulse
+  const origPreload = readTextMember('dist/preload.js');
+  let pulseSnippet = '';
+  try {
+    if (!origPreload) {
+      layers.pulse = { status: 'skipped', reason: 'dist/preload.js absent' };
+    } else {
+      const res = applyPulseLayer(sourceBuf, origPreload, workDir);
+      if (res.status === 'applied') {
+        pulseSnippet = res.snippet;
+        layers.pulse = { status: 'applied', version: res.version, payloadSha256: res.payloadSha256 };
+      } else {
+        layers.pulse = res;
+      }
+    }
+  } catch (err) {
+    layers.pulse = { status: 'skipped', reason: `Pulse gate error: ${err.message}` };
+  }
+
+  // Layer 4: context-viewer (meter-only)
+  let contextPreloadSnippet = '';
+  try {
+    const origUtils = readTextMember('dist/utils.js');
+    if (!origUtils || !origPreload) {
+      layers.contextViewer = { status: 'skipped', reason: 'dist/utils.js or dist/preload.js absent' };
+    } else {
+      const res = await applyContextViewerLayer({
+        hostVersion: info.version,
+        origUtils,
+        origPreload,
+        stateRoot: opts.stateRoot,
+        stageDir: workDir,
+      });
+      if (res.status === 'applied') {
+        replacements.set('dist/utils.js', Buffer.from(res.utils, 'utf8'));
+        contextPreloadSnippet = res.preloadSnippet;
+        for (const [k, v] of res.additions.entries()) additions.set(k, v);
+        layers.contextViewer = {
+          status: 'applied',
+          version: res.version,
+          anchor: res.anchor,
+          addedFiles: res.additions.size,
+        };
+      } else {
+        layers.contextViewer = res;
+      }
+    }
+  } catch (err) {
+    layers.contextViewer = { status: 'skipped', reason: `ContextViewer gate error: ${err.message}` };
+  }
+
+  // Combine dist/preload.js in canonical order: official + context + pulse
+  if (origPreload && (contextPreloadSnippet || pulseSnippet)) {
+    const combinedPreload = origPreload + contextPreloadSnippet + pulseSnippet;
+    verifyNodeSyntax(combinedPreload, workDir, 'dist/preload.js');
+    replacements.set('dist/preload.js', Buffer.from(combinedPreload, 'utf8'));
+  }
+
+  const appliedLayers = Object.entries(layers).filter(([, v]) => v.status === 'applied').map(([k]) => k);
+  const skippedLayers = Object.entries(layers).filter(([, v]) => v.status !== 'applied').map(([k, v]) => ({ layer: k, reason: v.reason }));
+
+  if (appliedLayers.length === 0) {
+    const abortReceipt = {
+      status: 'aborted-no-layers',
+      version: info.version,
+      officialSha256: officialSha,
+      layers,
+      stageDir,
+    };
+    await writeFileAtomic(path.join(stageDir, 'result.json'), JSON.stringify(abortReceipt, null, 2) + '\n');
+    return abortReceipt;
+  }
+
+  const { buffer: combinedBuffer, unchangedCount } = packAsarWithOverlay(sourceBuf, replacements, additions);
+  const combinedSha = sha256(combinedBuffer);
+
+  // Persist runtime state files (only when not dry-run)
+  if (!opts.dryRun) {
+    if (langResult && langResult.status === 'applied') {
+      const langDir = path.join(opts.stateRoot, `language-${info.version}`);
+      await writeFileAtomic(path.join(langDir, 'agy_zhcn_ui_main.js'), langResult.uiBuffer);
+      const langSettingsPath = path.join(langDir, 'settings.json');
+      if (!fs.existsSync(langSettingsPath)) {
+        await writeFileAtomic(langSettingsPath, JSON.stringify({
+          schemaVersion: 1,
+          autoFollow: 'off',
+          onlineTranslate: false,
+          titleWriteBack: false,
+        }) + '\n');
+      }
+    }
+    if (layers.contextViewer?.status === 'applied') {
+      const ctxSettingsPath = path.join(opts.stateRoot, 'context/modules.json');
+      if (!fs.existsSync(ctxSettingsPath)) {
+        await writeFileAtomic(ctxSettingsPath, JSON.stringify(DEFAULT_CONTEXT_MODULES, null, 2) + '\n');
+      }
+    }
+  }
+
+  const buildRecord = {
+    schemaVersion: 1,
+    version: info.version,
+    officialSha256: officialSha,
+    replaceTargetSha256: info.currentAsarSha,
+    combinedSha256: combinedSha,
+    languageServerSha256: info.languageServerSha256,
+    appliedLayers,
+    skippedLayers,
+    layers,
+    unchangedPackedMembers: unchangedCount,
+    backupPath,
+    stageDir,
+    builtAt: new Date().toISOString(),
+  };
+
+  let finalStatus = 'dry-run-verified';
+  if (!opts.dryRun) {
+    if (opts.stageOnly) {
+      await writeFileAtomic(path.join(opts.stateRoot, 'pending-app.asar'), combinedBuffer);
+      await writeFileAtomic(path.join(opts.stateRoot, 'pending-apply.json'), JSON.stringify(buildRecord, null, 2) + '\n');
+      finalStatus = 'staged-pending';
+    } else if (opts.apply) {
+      try {
+        await swapAsarAtomically(info.appAsarPath, combinedBuffer, info.currentAsarSha, combinedSha);
+        await writeFileAtomic(path.join(opts.stateRoot, 'active-build.json'), JSON.stringify(buildRecord, null, 2) + '\n');
+        await fsp.rm(path.join(opts.stateRoot, 'pending-app.asar'), { force: true }).catch(() => {});
+        await fsp.rm(path.join(opts.stateRoot, 'pending-apply.json'), { force: true }).catch(() => {});
+        finalStatus = 'applied';
+      } catch (err) {
+        if (err.isLockError) {
+          await writeFileAtomic(path.join(opts.stateRoot, 'pending-app.asar'), combinedBuffer);
+          await writeFileAtomic(path.join(opts.stateRoot, 'pending-apply.json'), JSON.stringify(buildRecord, null, 2) + '\n');
+          finalStatus = 'staged-pending-locked';
+        } else {
+          throw err;
+        }
+      }
+    }
+  }
+
+  const receipt = { status: finalStatus, ...buildRecord };
+  await writeFileAtomic(path.join(stageDir, 'result.json'), JSON.stringify(receipt, null, 2) + '\n');
+  return receipt;
+}
+
+async function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  let result;
+  if (opts.command === 'status') {
+    const info = await inspectLive(opts);
+    result = {
+      status: info.state,
+      version: info.version,
+      currentAsarSha: info.currentAsarSha,
+      languageServerSha256: info.languageServerSha256,
+      markers: info.markers,
+      langUiExists: info.langUiExists,
+      hasPending: Boolean(info.pendingApply),
+    };
+  } else if (opts.command === 'adopt') {
+    result = await cmdAdopt(opts);
+  } else if (opts.command === 'reconcile') {
+    result = await cmdReconcile(opts);
+  } else {
+    throw new Error(`Unknown command: ${opts.command}`);
+  }
+  console.log(JSON.stringify(result));
+}
+
+export {
+  applyWslLayer,
+  detectAddonMarkers,
+  detectHubLoadAnchor,
+  packAsarWithOverlay,
+  parseArgs,
+  unpackAsar,
+  walkAsar,
+};
+
+const isMainModule = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMainModule) {
+  main().catch((err) => {
+    console.error(err.stack || err.message || String(err));
+    process.exitCode = 1;
+  });
+}

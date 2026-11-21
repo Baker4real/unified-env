@@ -588,7 +588,7 @@
             "tests/Test-UuMarkerReader.ps1"
           ],
           "python": ["tests/Test-CodexDiagnostics.py", "managed/host-diagnostics/native-gui.test.py", "managed/host-diagnostics/test_asar_extract.py"],
-          "node": ["managed/host-diagnostics/gui-session.test.mjs"]
+          "node": ["managed/host-diagnostics/gui-session.test.mjs", "managed/host-diagnostics/antigravity-addons/antigravity-addons.test.mjs"]
         },
         "fixture": {
           "powershell": [
@@ -648,7 +648,7 @@
             "tests/Test-CodexSafeTreeDeletePurgePreflightLockRefusal.ps1"
           ],
           "python": ["managed/host-diagnostics/native-gui.test.py", "managed/host-diagnostics/test_asar_extract.py"],
-          "node": ["managed/host-diagnostics/gui-session.test.mjs"]
+          "node": ["managed/host-diagnostics/gui-session.test.mjs", "managed/host-diagnostics/antigravity-addons/antigravity-addons.test.mjs"]
         },
         "fixture-base": {
           "powershell": [

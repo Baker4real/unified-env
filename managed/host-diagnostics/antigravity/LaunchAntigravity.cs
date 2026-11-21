@@ -2,19 +2,45 @@ using System;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
 internal static class LaunchAntigravity
 {
     private const string AppPath = @"D:\Apps\Google.Antigravity\Antigravity.exe";
+    private const string AppAsarPath = @"D:\Apps\Google.Antigravity\resources\app.asar";
+    private const string AddonsStateDir = @"D:\Codex\tools\antigravity-addons\state";
+    private const string AddonsSyncScript = @"D:\Codex\tools\antigravity-addons\Sync-AntigravityAddons.ps1";
+    private const string PwshPath = @"D:\Codex\tools\PowerShell\7.7.0\pwsh.exe";
     private const string InternetSettings = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+    internal enum ReconcileOutcome
+    {
+        SkippedMissingAsar,
+        FastPathUpToDate,
+        SkippedDesktopRunning,
+        AppliedPending,
+        InvokedColdReconciler,
+        SkippedNoReconciler,
+        FailedOpen
+    }
 
     [STAThread]
     private static int Main()
     {
         try
         {
+            ReconcileAddonsBeforeLaunch(
+                AppAsarPath,
+                AddonsStateDir,
+                AddonsSyncScript,
+                PwshPath,
+                IsDesktopMainRunning,
+                RunHiddenReconciler);
+
             var start = new ProcessStartInfo(AppPath);
             start.WorkingDirectory = Path.GetDirectoryName(AppPath);
             start.UseShellExecute = false;
@@ -90,5 +116,217 @@ internal static class LaunchAntigravity
             proxy.AbsolutePath != "/" || proxy.Query.Length != 0 || proxy.Fragment.Length != 0)
             return null;
         return proxy.GetLeftPart(UriPartial.Authority);
+    }
+
+    internal static ReconcileOutcome ReconcileAddonsBeforeLaunch(
+        string appAsarPath,
+        string stateDir,
+        string syncScriptPath,
+        string pwshPath,
+        Func<bool> isDesktopRunning,
+        Func<string, string, int> runHiddenPwsh)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(appAsarPath) || !File.Exists(appAsarPath))
+                return ReconcileOutcome.SkippedMissingAsar;
+
+            var currentSha = ComputeSha256Hex(appAsarPath);
+            var resourcesDir = Path.GetDirectoryName(appAsarPath);
+            var lsPath = resourcesDir != null ? Path.Combine(resourcesDir, "bin", "language_server.exe") : null;
+            var pendingMetaPath = Path.Combine(stateDir, "pending-apply.json");
+            var pendingAsarPath = Path.Combine(stateDir, "pending-app.asar");
+            var activeMetaPath = Path.Combine(stateDir, "active-build.json");
+
+            if (File.Exists(pendingMetaPath) && File.Exists(pendingAsarPath))
+            {
+                if (isDesktopRunning())
+                    return ReconcileOutcome.SkippedDesktopRunning;
+
+                var pendingJson = File.ReadAllText(pendingMetaPath, Encoding.UTF8);
+                var expectedTarget = ReadJsonSha256Field(pendingJson, "replaceTargetSha256")
+                    ?? ReadJsonSha256Field(pendingJson, "officialSha256");
+                var expectedCombined = ReadJsonSha256Field(pendingJson, "combinedSha256");
+                var expectedLsSha = ReadJsonSha256Field(pendingJson, "languageServerSha256");
+                var lsMatches = expectedLsSha == null ||
+                    (lsPath != null && File.Exists(lsPath) && string.Equals(ComputeSha256Hex(lsPath), expectedLsSha, StringComparison.OrdinalIgnoreCase));
+
+                if (expectedTarget != null &&
+                    expectedCombined != null &&
+                    lsMatches &&
+                    string.Equals(expectedTarget, currentSha, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(ComputeSha256Hex(pendingAsarPath), expectedCombined, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (TrySwapAsarAtomically(appAsarPath, pendingAsarPath, expectedCombined))
+                    {
+                        try
+                        {
+                            Directory.CreateDirectory(stateDir);
+                            var activeTmp = activeMetaPath + "." + Process.GetCurrentProcess().Id + ".tmp";
+                            File.Copy(pendingMetaPath, activeTmp, true);
+                            if (File.Exists(activeMetaPath))
+                                File.Delete(activeMetaPath);
+                            File.Move(activeTmp, activeMetaPath);
+                            File.Delete(pendingMetaPath);
+                            File.Delete(pendingAsarPath);
+                        }
+                        catch
+                        {
+                            // Best-effort metadata promotion; app.asar is already swapped.
+                        }
+                        return ReconcileOutcome.AppliedPending;
+                    }
+                    return ReconcileOutcome.FailedOpen;
+                }
+            }
+
+            if (File.Exists(activeMetaPath))
+            {
+                var activeJson = File.ReadAllText(activeMetaPath, Encoding.UTF8);
+                var activeCombined = ReadJsonSha256Field(activeJson, "combinedSha256");
+                var activeLsSha = ReadJsonSha256Field(activeJson, "languageServerSha256");
+                var lsMatches = activeLsSha == null ||
+                    (lsPath != null && File.Exists(lsPath) && string.Equals(ComputeSha256Hex(lsPath), activeLsSha, StringComparison.OrdinalIgnoreCase));
+                if (activeCombined != null &&
+                    lsMatches &&
+                    string.Equals(activeCombined, currentSha, StringComparison.OrdinalIgnoreCase))
+                {
+                    return ReconcileOutcome.FastPathUpToDate;
+                }
+            }
+
+            if (isDesktopRunning())
+                return ReconcileOutcome.SkippedDesktopRunning;
+
+            if (string.IsNullOrWhiteSpace(syncScriptPath) || string.IsNullOrWhiteSpace(pwshPath) ||
+                !File.Exists(syncScriptPath) || !File.Exists(pwshPath))
+            {
+                return ReconcileOutcome.SkippedNoReconciler;
+            }
+
+            runHiddenPwsh(pwshPath, syncScriptPath);
+            return ReconcileOutcome.InvokedColdReconciler;
+        }
+        catch
+        {
+            return ReconcileOutcome.FailedOpen;
+        }
+    }
+
+    internal static string ComputeSha256Hex(string filePath)
+    {
+        using (var sha = SHA256.Create())
+        using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        {
+            var hash = sha.ComputeHash(stream);
+            var sb = new StringBuilder(hash.Length * 2);
+            for (int i = 0; i < hash.Length; i++)
+                sb.Append(hash[i].ToString("x2"));
+            return sb.ToString();
+        }
+    }
+
+    internal static string ReadJsonSha256Field(string json, string fieldName)
+    {
+        if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(fieldName))
+            return null;
+        var matches = Regex.Matches(json, "\"" + Regex.Escape(fieldName) + "\"\\s*:\\s*\"([0-9a-fA-F]{64})\"");
+        if (matches.Count != 1)
+            return null;
+        return matches[0].Groups[1].Value.ToLowerInvariant();
+    }
+
+    private static bool TrySwapAsarAtomically(string targetAsar, string sourceAsar, string expectedCombinedSha)
+    {
+        var dir = Path.GetDirectoryName(targetAsar);
+        if (string.IsNullOrEmpty(dir))
+            return false;
+        var token = Process.GetCurrentProcess().Id + "-" + DateTime.UtcNow.Ticks;
+        var staged = Path.Combine(dir, ".app.asar.launch-new-" + token + ".tmp");
+        var displaced = Path.Combine(dir, ".app.asar.launch-old-" + token + ".tmp");
+        try
+        {
+            File.Copy(sourceAsar, staged, true);
+            if (!string.Equals(ComputeSha256Hex(staged), expectedCombinedSha, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            File.Move(targetAsar, displaced);
+            try
+            {
+                File.Move(staged, targetAsar);
+                if (!string.Equals(ComputeSha256Hex(targetAsar), expectedCombinedSha, StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Swapped app.asar SHA-256 verification failed.");
+            }
+            catch
+            {
+                try { if (File.Exists(targetAsar)) File.Delete(targetAsar); } catch { }
+                try { if (File.Exists(displaced)) File.Move(displaced, targetAsar); } catch { }
+                return false;
+            }
+
+            try { if (File.Exists(displaced)) File.Delete(displaced); } catch { }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try { if (File.Exists(staged)) File.Delete(staged); } catch { }
+        }
+    }
+
+    private static bool IsDesktopMainRunning()
+    {
+        try
+        {
+            foreach (var proc in Process.GetProcessesByName("Antigravity"))
+            {
+                try
+                {
+                    if (proc.MainWindowHandle != IntPtr.Zero &&
+                        proc.MainModule != null &&
+                        string.Equals(proc.MainModule.FileName, AppPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // Ignore processes that exit or deny module inspection.
+                }
+                finally
+                {
+                    proc.Dispose();
+                }
+            }
+        }
+        catch
+        {
+            // Ignore process enumeration errors.
+        }
+        return false;
+    }
+
+    internal static int RunHiddenReconciler(string pwshPath, string syncScriptPath)
+    {
+        var psi = new ProcessStartInfo(pwshPath);
+        psi.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -File \"" + syncScriptPath + "\" -Mode Apply -Quiet";
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+        psi.WindowStyle = ProcessWindowStyle.Hidden;
+        psi.WorkingDirectory = Path.GetDirectoryName(syncScriptPath) ?? "";
+        using (var proc = Process.Start(psi))
+        {
+            if (proc == null)
+                return -1;
+            if (!proc.WaitForExit(90000))
+            {
+                try { proc.Kill(); } catch { }
+                return -2;
+            }
+            return proc.ExitCode;
+        }
     }
 }
