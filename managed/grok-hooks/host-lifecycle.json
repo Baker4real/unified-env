@@ -5,7 +5,22 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-github-cli.cmd",
+            "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe",
+            "args": [
+              "-I",
+              "-S",
+              "-B",
+              "-X",
+              "utf8",
+              "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+              "D:\\Codex\\tools\\PowerShell\\7.6.5\\pwsh.exe",
+              "-NoLogo",
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "D:\\Codex\\.codex\\hooks\\codex-github-cli-guard.ps1"
+            ],
             "timeout": 10
           }
         ]
@@ -15,7 +30,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-activation.cmd",
+            "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe",
+            "args": [
+              "-I",
+              "-S",
+              "-B",
+              "-X",
+              "utf8",
+              "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+              "D:\\Codex\\tools\\python315-official\\python.exe",
+              "-I",
+              "-S",
+              "-B",
+              "-X",
+              "utf8",
+              "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-host-hook.py",
+              "Activation"
+            ],
             "timeout": 10
           }
         ]
@@ -26,7 +57,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-cleanup.cmd",
+            "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe",
+            "args": [
+              "-I",
+              "-S",
+              "-B",
+              "-X",
+              "utf8",
+              "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+              "D:\\Codex\\tools\\python315-official\\python.exe",
+              "-I",
+              "-S",
+              "-B",
+              "-X",
+              "utf8",
+              "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-host-hook.py",
+              "Cleanup"
+            ],
             "timeout": 10
           }
         ]
@@ -38,7 +85,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-reminder.cmd",
+            "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe",
+            "args": [
+              "-I",
+              "-S",
+              "-B",
+              "-X",
+              "utf8",
+              "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+              "D:\\Codex\\tools\\python315-official\\python.exe",
+              "-I",
+              "-S",
+              "-B",
+              "-X",
+              "utf8",
+              "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-host-hook.py",
+              "Reminder"
+            ],
             "timeout": 10
           }
         ]
@@ -48,7 +111,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-serena-auto-approve.cmd",
+            "command": "D:\\Codex\\tools\\python315-official\\pythonw.exe",
+            "args": [
+              "-I",
+              "-S",
+              "-B",
+              "-X",
+              "utf8",
+              "D:\\Codex\\.codex\\hooks\\lib\\hidden-console-launcher.py",
+              "D:\\Codex\\tools\\python315-official\\python.exe",
+              "-I",
+              "-S",
+              "-B",
+              "-X",
+              "utf8",
+              "D:\\agents\\projects\\统一环境\\managed\\grok-hooks\\grok-host-hook.py",
+              "AutoApprove"
+            ],
             "timeout": 10
           }
         ]
