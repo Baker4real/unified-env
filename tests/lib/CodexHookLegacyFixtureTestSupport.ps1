@@ -9,7 +9,12 @@ function Get-CodexHookRemovedLegacyCmdRelativePaths {
         'hooks/codex-projectless-root-d.cmd',
         'hooks/codex-provider-stability-guard.cmd',
         'hooks/serena-activate-guarded.cmd',
-        'hooks/serena-dashboard-guard.cmd'
+        'hooks/serena-dashboard-guard.cmd',
+        'hooks/codex-state-preflight.cmd',
+        'hooks/codex-github-cli-guard.cmd',
+        'hooks/serena-activation-reminder.cmd',
+        'hooks/serena-cleanup-guarded.cmd',
+        'hooks/serena-reminder-guarded.cmd'
     )
 }
 
@@ -17,13 +22,7 @@ function Get-CodexHookActiveCmdRelativePaths {
     [CmdletBinding()]
     param()
 
-    return [string[]]@(
-        'hooks/codex-state-preflight.cmd',
-        'hooks/codex-github-cli-guard.cmd',
-        'hooks/serena-activation-reminder.cmd',
-        'hooks/serena-cleanup-guarded.cmd',
-        'hooks/serena-reminder-guarded.cmd'
-    )
+    return [string[]]@()
 }
 
 function Get-CodexHookRemovedLegacyCmdSamples {
@@ -76,6 +75,52 @@ function Get-CodexHookRemovedLegacyCmdSamples {
                 ''
             ) -join "`r`n"
         )
+        'hooks/codex-state-preflight.cmd' = (
+            @(
+                '@echo off'
+                '"D:\Codex\tools\python315-official\pythonw.exe" -I -S -B -X utf8 "%~dp0lib\hidden-console-launcher.py" "D:\Codex\tools\python315-official\python.exe" -I -S -B -X utf8 "%~dp0codex-state-preflight.py" %*'
+                'exit /b %ERRORLEVEL%'
+                ''
+            ) -join "`r`n"
+        )
+        'hooks/codex-github-cli-guard.cmd' = (
+            @(
+                '@echo off'
+                '"D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\hooks\codex-github-cli-guard.ps1" %*'
+                'exit /b %ERRORLEVEL%'
+                ''
+            ) -join "`r`n"
+        )
+        'hooks/serena-activation-reminder.cmd' = (
+            @(
+                '@echo off'
+                'setlocal'
+                'set "SERENA_HOME=D:\Codex\.serena"'
+                '"D:\Codex\tools\python315-official\pythonw.exe" -I -S -B -X utf8 "%~dp0lib\hidden-console-launcher.py" "D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Activation'
+                'exit /b %ERRORLEVEL%'
+                ''
+            ) -join "`r`n"
+        )
+        'hooks/serena-cleanup-guarded.cmd' = (
+            @(
+                '@echo off'
+                'setlocal'
+                'set "SERENA_HOME=D:\Codex\.serena"'
+                '"D:\Codex\tools\python315-official\pythonw.exe" -I -S -B -X utf8 "%~dp0lib\hidden-console-launcher.py" "D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Cleanup'
+                'exit /b %ERRORLEVEL%'
+                ''
+            ) -join "`r`n"
+        )
+        'hooks/serena-reminder-guarded.cmd' = (
+            @(
+                '@echo off'
+                'setlocal'
+                'set "SERENA_HOME=D:\Codex\.serena"'
+                '"D:\Codex\tools\python315-official\pythonw.exe" -I -S -B -X utf8 "%~dp0lib\hidden-console-launcher.py" "D:\Codex\tools\PowerShell\7.6.5\pwsh.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0serena-behavior-guard.ps1" -Mode Reminder'
+                'exit /b %ERRORLEVEL%'
+                ''
+            ) -join "`r`n"
+        )
     }
 }
 
@@ -118,14 +163,13 @@ function Assert-CodexHookRetiredCmdSourcesRemoved {
     foreach ($removedRelativePath in (Get-CodexHookRemovedLegacyCmdRelativePaths)) {
         $fullPath = Join-Path $ManagedRoot ($removedRelativePath.Replace('/', '\'))
         if (Test-Path -LiteralPath $fullPath) {
-            throw "退役或已被协调器取代的历史 .cmd 不得继续留在受管源码树：$removedRelativePath"
+            throw "退役或已脱离批处理包装器的 .cmd 不得继续留在受管源码树：$removedRelativePath"
         }
     }
-    foreach ($activeRelativePath in (Get-CodexHookActiveCmdRelativePaths)) {
-        $fullPath = Join-Path $ManagedRoot ($activeRelativePath.Replace('/', '\'))
-        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
-            throw "现役 .cmd 包装器必须保持完好：$activeRelativePath"
-        }
+    $remainingCmdFiles = @(Get-ChildItem -LiteralPath $ManagedRoot -Recurse -File -Filter '*.cmd' -ErrorAction Stop)
+    if ($remainingCmdFiles.Count -ne 0) {
+        $remainingPaths = @($remainingCmdFiles | ForEach-Object { [IO.Path]::GetRelativePath($ManagedRoot, $_.FullName).Replace('\', '/') }) -join ','
+        throw "受管源码树不得残留任何 .cmd 文件：$remainingPaths"
     }
     return $true
 }

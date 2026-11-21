@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Assert-True([bool]$Condition, [string]$Message) {
@@ -66,21 +66,46 @@ function Invoke-LauncherProbe {
         -Environment $Environment
 }
 
-function Invoke-WrapperProbe {
+function Invoke-CodexHostCommandProbe {
     param(
-        [Parameter(Mandatory)][string]$WrapperPath,
-        [string[]]$ArgumentList = @(),
+        [Parameter(Mandatory)][string]$CommandText,
         [AllowEmptyString()][string]$InputText = '',
         [hashtable]$Environment = @{}
     )
 
-    $quotedArguments = @($ArgumentList | ForEach-Object { '"' + ([string]$_).Replace('"', '""') + '"' }) -join ' '
-    $rawArguments = '/d /s /c ""' + $WrapperPath + '" ' + $quotedArguments + '"'
     Invoke-HiddenProcess `
-        -FilePath 'C:\Windows\System32\cmd.exe' `
-        -RawArguments $rawArguments `
+        -FilePath 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe' `
+        -ArgumentList @('-NoProfile', '-Command', $CommandText) `
         -InputText $InputText `
         -Environment $Environment
+}
+
+function ConvertTo-FixtureRemappedHookCommand {
+    param(
+        [Parameter(Mandatory)][string]$RenderedCommand,
+        [Parameter(Mandatory)][string]$FixtureHooksRoot,
+        [string[]]$ExtraArguments = @()
+    )
+
+    $livePrefix = 'D:\Codex\.codex\hooks\'
+    $escapedLivePrefix = [regex]::Escape($livePrefix)
+    $remapped = [regex]::Replace(
+        $RenderedCommand,
+        $escapedLivePrefix + '[^\s;]+',
+        {
+            param($Match)
+            $relative = $Match.Value.Substring($livePrefix.Length)
+            $target = Join-Path $FixtureHooksRoot $relative
+            "'" + $target.Replace("'", "''") + "'"
+        }
+    )
+    if ($ExtraArguments.Count -gt 0) {
+        $suffix = ' ; exit $LASTEXITCODE'
+        Assert-True ($remapped.EndsWith($suffix, [StringComparison]::Ordinal)) "渲染命令必须以 '$suffix' 结尾：$remapped"
+        $quotedExtra = @($ExtraArguments | ForEach-Object { "'" + ([string]$_).Replace("'", "''") + "'" }) -join ' '
+        $remapped = $remapped.Substring(0, $remapped.Length - $suffix.Length) + ' ' + $quotedExtra + $suffix
+    }
+    return $remapped
 }
 
 function Assert-ProtocolProbe {
@@ -106,6 +131,9 @@ function Assert-ProtocolProbe {
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1')
+. (Join-Path $projectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $projectRoot 'managed\codex-hooks')) '受管源码树必须零 .cmd 文件且全部 10 个已退役/历史 .cmd 均已移除。'
 $launcherPath = Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\hidden-console-launcher.py'
 Assert-True (Test-Path -LiteralPath $launcherPath -PathType Leaf) '缺少 hidden console launcher。'
 
@@ -232,11 +260,15 @@ if Path(sys.executable).name.lower() in {"pythonw.exe", "python.exe"}:
         CODEX_SITE_SENTINEL = $siteSentinel
     }
 
-    $powerShellWrapper = Join-Path $fixtureHooks 'serena-activation-reminder.cmd'
+    $hostManifest = Read-CodexHookHostPreflightManifest
+    $activateHook = @($hostManifest.hooks | Where-Object { $_.id -ceq 'serena-activate' })[0]
+    $activateRendered = [string]((New-CodexHookCanonicalRegistryGroup -Hook $activateHook).hooks[0].command)
+    Assert-True (
+        $activateRendered -cmatch '^D:\\Codex\\tools\\python315-official\\python\.exe -I -S -B -X utf8 D:\\Codex\\\.codex\\hooks\\lib\\hidden-console-launcher\.py D:\\Codex\\tools\\PowerShell\\7\.6\.5\\pwsh\.exe ' -and
+        $activateRendered.EndsWith(' ; exit $LASTEXITCODE', [StringComparison]::Ordinal)
+    ) 'PowerShell direct-managed-launcher 必须按固定顺序使用 python.exe + 隔离 launcher flags + ; exit $LASTEXITCODE。'
+
     $powerShellImplementation = Join-Path $fixtureHooks 'serena-behavior-guard.ps1'
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'managed\codex-hooks\hooks\serena-activation-reminder.cmd') -Destination $powerShellWrapper
-    $powerShellWrapperText = Get-Content -LiteralPath $powerShellWrapper -Raw
-    Assert-True ($powerShellWrapperText -cmatch 'pythonw\.exe" -I -S -B -X utf8 "%~dp0lib\\hidden-console-launcher\.py"') 'PowerShell wrapper 必须按固定顺序使用隔离 launcher flags。'
     $powerShellImplementationText = @'
 param([string]$Mode)
 Add-Type -TypeDefinition @"
@@ -253,30 +285,33 @@ $result = [ordered]@{
     mode = $Mode
 }
 [Console]::Out.Write(($result | ConvertTo-Json -Compress))
-[Console]::Error.Write('wrapper-powershell-stderr')
+[Console]::Error.Write('direct-powershell-stderr')
 exit 31
 '@
     [IO.File]::WriteAllText($powerShellImplementation, $powerShellImplementationText, $utf8)
-    $powerShellWrapperResult = Invoke-WrapperProbe `
-        -WrapperPath $powerShellWrapper `
+    $remappedActivateCommand = ConvertTo-FixtureRemappedHookCommand -RenderedCommand $activateRendered -FixtureHooksRoot $fixtureHooks
+    $powerShellDirectResult = Invoke-CodexHostCommandProbe `
+        -CommandText $remappedActivateCommand `
         -InputText "probe-input`n" `
         -Environment $probeEnvironment
     Assert-ProtocolProbe `
-        -Result $powerShellWrapperResult `
+        -Result $powerShellDirectResult `
         -ExpectedExitCode 31 `
-        -ExpectedStderr 'wrapper-powershell-stderr' `
+        -ExpectedStderr 'direct-powershell-stderr' `
         -ExpectedMode 'Activation'
-    Assert-True (-not (Test-Path -LiteralPath $siteSentinel)) 'PowerShell wrapper 的 pythonw launcher 加载了 PYTHONPATH/sitecustomize，-I/-S 隔离未生效。'
+    Assert-True (-not (Test-Path -LiteralPath $siteSentinel)) 'PowerShell direct-managed-launcher 的 python.exe launcher 加载了 PYTHONPATH/sitecustomize，-I/-S 隔离未生效。'
 
-    $pythonWrapper = Join-Path $fixtureHooks 'codex-state-preflight.cmd'
+    $preflightHook = @($hostManifest.hooks | Where-Object { $_.id -ceq 'codex-state-preflight' })[0]
+    $preflightRendered = [string]((New-CodexHookCanonicalRegistryGroup -Hook $preflightHook).hooks[0].command)
+    Assert-True (
+        $preflightRendered -cmatch '^D:\\Codex\\tools\\python315-official\\python\.exe -I -S -B -X utf8 D:\\Codex\\\.codex\\hooks\\lib\\hidden-console-launcher\.py D:\\Codex\\tools\\python315-official\\python\.exe -I -S -B -X utf8 D:\\Codex\\\.codex\\hooks\\codex-state-preflight\.py ; exit \$LASTEXITCODE$'
+    ) 'Python direct-managed-launcher 必须按固定顺序使用两层隔离 flags + ; exit $LASTEXITCODE。'
+
     $pythonImplementation = Join-Path $fixtureHooks 'codex-state-preflight.py'
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'managed\codex-hooks\hooks\codex-state-preflight.cmd') -Destination $pythonWrapper
-    $pythonWrapperText = Get-Content -LiteralPath $pythonWrapper -Raw
-    Assert-True ($pythonWrapperText -cmatch 'pythonw\.exe" -I -S -B -X utf8 "%~dp0lib\\hidden-console-launcher\.py"') 'Python wrapper 必须按固定顺序使用隔离 launcher flags。'
-    Assert-True ($pythonWrapperText -cmatch 'python\.exe" -I -S -B -X utf8 "%~dp0codex-state-preflight\.py"') 'Python wrapper 的最终 runtime 必须按固定顺序使用隔离 flags。'
     $pythonImplementationText = @'
 import ctypes
 import json
+import os
 import sys
 
 sys.stdout.write(json.dumps({
@@ -284,22 +319,44 @@ sys.stdout.write(json.dumps({
     "windowHandle": ctypes.windll.kernel32.GetConsoleWindow(),
     "arguments": sys.argv[1:],
 }))
-sys.stderr.write("wrapper-python-stderr")
-raise SystemExit(32)
+sys.stderr.write("direct-python-stderr")
+raise SystemExit(int(os.environ.get("CODEX_PROBE_EXIT_CODE", "32")))
 '@
     [IO.File]::WriteAllText($pythonImplementation, $pythonImplementationText, $utf8)
     $expectedArguments = @('fixture argument with spaces', '--second')
-    $pythonWrapperResult = Invoke-WrapperProbe `
-        -WrapperPath $pythonWrapper `
-        -ArgumentList $expectedArguments `
+    $remappedPreflightCommand = ConvertTo-FixtureRemappedHookCommand `
+        -RenderedCommand $preflightRendered `
+        -FixtureHooksRoot $fixtureHooks `
+        -ExtraArguments $expectedArguments
+    $pythonDirectResult = Invoke-CodexHostCommandProbe `
+        -CommandText $remappedPreflightCommand `
         -InputText "probe-input`n" `
         -Environment $probeEnvironment
     Assert-ProtocolProbe `
-        -Result $pythonWrapperResult `
+        -Result $pythonDirectResult `
         -ExpectedExitCode 32 `
-        -ExpectedStderr 'wrapper-python-stderr' `
+        -ExpectedStderr 'direct-python-stderr' `
         -ExpectedArguments $expectedArguments
-    Assert-True (-not (Test-Path -LiteralPath $siteSentinel)) 'Python wrapper 的 pythonw launcher 加载了 PYTHONPATH/sitecustomize，-I/-S 隔离未生效。'
+    Assert-True (-not (Test-Path -LiteralPath $siteSentinel)) 'Python direct-managed-launcher 的 python.exe 加载了 PYTHONPATH/sitecustomize，-I/-S 隔离未生效。'
+
+    $blockingEnv = $probeEnvironment.Clone()
+    $blockingEnv['CODEX_PROBE_EXIT_CODE'] = '2'
+    $blockingDirectResult = Invoke-CodexHostCommandProbe `
+        -CommandText $remappedPreflightCommand `
+        -InputText "probe-input`n" `
+        -Environment $blockingEnv
+    Assert-ProtocolProbe `
+        -Result $blockingDirectResult `
+        -ExpectedExitCode 2 `
+        -ExpectedStderr 'direct-python-stderr' `
+        -ExpectedArguments $expectedArguments
+
+    $withoutExitSuffix = $remappedPreflightCommand.Substring(0, $remappedPreflightCommand.Length - ' ; exit $LASTEXITCODE'.Length)
+    $flattenedResult = Invoke-CodexHostCommandProbe `
+        -CommandText $withoutExitSuffix `
+        -InputText "probe-input`n" `
+        -Environment $blockingEnv
+    Assert-True ($flattenedResult.exitCode -eq 1) "负向对照：缺少 ; exit `$LASTEXITCODE 时 pwsh -Command 应将退出码 2 压扁为 1（actual=$($flattenedResult.exitCode)）。"
 }
 finally {
     if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }

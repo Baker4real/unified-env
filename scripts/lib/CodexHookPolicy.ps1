@@ -256,6 +256,192 @@ function Assert-CodexHookDeclaredCommand {
     Assert-CodexHookSafeArguments -Arguments @($Command.arguments) -Name "$Name.arguments"
 }
 
+function Get-CodexHookExpectedBehaviorMode {
+    param(
+        [Parameter(Mandatory)][string]$HookId
+    )
+
+    switch ($HookId) {
+        'serena-activate' { return 'Activation' }
+        'serena-cleanup' { return 'Cleanup' }
+        'serena-reminder' { return 'Reminder' }
+        default { return $null }
+    }
+}
+
+function Get-CodexHookDirectManagedLauncherReferenceFacts {
+    param(
+        [Parameter(Mandatory)][string]$CommandPath,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Arguments,
+        [Parameter(Mandatory)][string]$LauncherRuntimePath,
+        [Parameter(Mandatory)][string]$LauncherImplementationPath,
+        [Parameter(Mandatory)][string]$RuntimePath,
+        [Parameter(Mandatory)][string]$ImplementationPath,
+        [Parameter(Mandatory)][string]$RuntimeId,
+        [ValidateSet('Activation', 'Cleanup', 'Reminder')][AllowNull()][string]$ExpectedMode = $null
+    )
+
+    try {
+        $observedCommand = Assert-CodexHookDPath -Value $CommandPath -Name 'direct launcher commandPath'
+    } catch {
+        return [pscustomobject][ordered]@{
+            parseState = 'unparseable-launcher-path'
+            referencesLauncherRuntime = $null
+            referencesLauncherImplementation = $null
+            referencesRuntime = $null
+            referencesImplementation = $null
+        }
+    }
+
+    if (-not $observedCommand.Equals([IO.Path]::GetFullPath($LauncherRuntimePath), [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject][ordered]@{
+            parseState = 'launcher-runtime-mismatch'
+            referencesLauncherRuntime = $false
+            referencesLauncherImplementation = $false
+            referencesRuntime = $false
+            referencesImplementation = $false
+        }
+    }
+
+    $tokens = [string[]]@($Arguments | ForEach-Object { [string]$_ })
+    if ($tokens.Count -lt 16) {
+        return [pscustomobject][ordered]@{
+            parseState = 'launcher-chain-incomplete'
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $null
+            referencesRuntime = $null
+            referencesImplementation = $null
+        }
+    }
+
+    if (-not (Test-CodexHookExactStringSequence -Actual @($tokens[0..4]) -Expected @('-I', '-S', '-B', '-X', 'utf8'))) {
+        return [pscustomobject][ordered]@{
+            parseState = 'launcher-startup-arguments-mismatch'
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $null
+            referencesRuntime = $null
+            referencesImplementation = $null
+        }
+    }
+
+    try {
+        $observedLauncherImplementation = Assert-CodexHookDPath -Value $tokens[5] -Name 'direct launcher implementation'
+    } catch {
+        return [pscustomobject][ordered]@{
+            parseState = 'unparseable-launcher-path'
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $null
+            referencesRuntime = $null
+            referencesImplementation = $null
+        }
+    }
+    if (-not $observedLauncherImplementation.Equals([IO.Path]::GetFullPath($LauncherImplementationPath), [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject][ordered]@{
+            parseState = 'launcher-implementation-mismatch'
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $false
+            referencesRuntime = $false
+            referencesImplementation = $false
+        }
+    }
+
+    $suffixStart = $tokens.Count - 3
+    if (-not (Test-CodexHookExactStringSequence -Actual @($tokens[$suffixStart..($tokens.Count - 1)]) -Expected @(';', 'exit', '$LASTEXITCODE'))) {
+        return [pscustomobject][ordered]@{
+            parseState = 'exit-code-suffix-mismatch'
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $true
+            referencesRuntime = $null
+            referencesImplementation = $null
+        }
+    }
+
+    $finalTokens = [string[]]@($tokens[6..($suffixStart - 1)])
+    try {
+        $observedRuntime = Assert-CodexHookDPath -Value $finalTokens[0] -Name 'direct launcher final runtime'
+    } catch {
+        return [pscustomobject][ordered]@{
+            parseState = 'unparseable-runtime-path'
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $true
+            referencesRuntime = $null
+            referencesImplementation = $null
+        }
+    }
+    if (-not $observedRuntime.Equals([IO.Path]::GetFullPath($RuntimePath), [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject][ordered]@{
+            parseState = 'runtime-mismatch'
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $true
+            referencesRuntime = $false
+            referencesImplementation = $false
+        }
+    }
+
+    $implementationToken = if ($RuntimeId -ceq 'pwsh') {
+        $requiresExpectedMode = -not [string]::IsNullOrWhiteSpace($ExpectedMode)
+        $expectedFinalCount = if ($requiresExpectedMode) { 9 } else { 7 }
+        if (
+            $finalTokens.Count -ne $expectedFinalCount -or
+            -not (Test-CodexHookExactStringSequence -Actual @($finalTokens[1..5]) -Expected @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File')) -or
+            ($requiresExpectedMode -and ($finalTokens[7] -cne '-Mode' -or $finalTokens[8] -cne $ExpectedMode))
+        ) {
+            return [pscustomobject][ordered]@{
+                parseState = 'final-runtime-arguments-mismatch'
+                referencesLauncherRuntime = $true
+                referencesLauncherImplementation = $true
+                referencesRuntime = $true
+                referencesImplementation = $null
+            }
+        }
+        $finalTokens[6]
+    } elseif ($RuntimeId -ceq 'python') {
+        if (
+            -not [string]::IsNullOrWhiteSpace($ExpectedMode) -or
+            $finalTokens.Count -ne 7 -or
+            -not (Test-CodexHookExactStringSequence -Actual @($finalTokens[1..5]) -Expected @('-I', '-S', '-B', '-X', 'utf8'))
+        ) {
+            return [pscustomobject][ordered]@{
+                parseState = 'final-runtime-arguments-mismatch'
+                referencesLauncherRuntime = $true
+                referencesLauncherImplementation = $true
+                referencesRuntime = $true
+                referencesImplementation = $null
+            }
+        }
+        $finalTokens[6]
+    } else {
+        return [pscustomobject][ordered]@{
+            parseState = 'unsupported-direct-launcher-runtime'
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $true
+            referencesRuntime = $true
+            referencesImplementation = $null
+        }
+    }
+
+    try {
+        $observedImplementation = Assert-CodexHookDPath -Value $implementationToken -Name 'direct launcher implementation target'
+    } catch {
+        return [pscustomobject][ordered]@{
+            parseState = 'unparseable-implementation-path'
+            referencesLauncherRuntime = $true
+            referencesLauncherImplementation = $true
+            referencesRuntime = $true
+            referencesImplementation = $null
+        }
+    }
+
+    $implementationMatches = $observedImplementation.Equals([IO.Path]::GetFullPath($ImplementationPath), [StringComparison]::OrdinalIgnoreCase)
+    return [pscustomobject][ordered]@{
+        parseState = if ($implementationMatches) { 'matched' } else { 'implementation-mismatch' }
+        referencesLauncherRuntime = $true
+        referencesLauncherImplementation = $true
+        referencesRuntime = $true
+        referencesImplementation = $implementationMatches
+    }
+}
+
 function Assert-CodexHookManifest {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Manifest)
@@ -371,43 +557,102 @@ function Assert-CodexHookManifest {
         if ($hook.runtimeId -cnotin $runtimeNames) {
             throw "hooks[$($hook.id)].runtimeId 非法：$($hook.runtimeId)"
         }
+        Assert-CodexHookString -Value $hook.sourceState -Name "hooks[$($hook.id)].sourceState"
+        if ($hook.sourceState -cnotin @('managed', 'planned', 'vendor')) {
+            throw "hooks[$($hook.id)].sourceState 非法：$($hook.sourceState)"
+        }
         $hasLauncherRuntime = $null -ne $hook.launcherRuntimeId
         $hasLauncherImplementation = $null -ne $hook.launcherImplementationPath
         if ($hasLauncherRuntime -ne $hasLauncherImplementation) {
             throw "hooks[$($hook.id)] launcherRuntimeId/launcherImplementationPath 必须成对声明。"
         }
-        if ($hasLauncherRuntime) {
-            Assert-CodexHookString -Value $hook.launcherRuntimeId -Name "hooks[$($hook.id)].launcherRuntimeId"
-            if ($hook.launcherRuntimeId -cne 'pythonw') {
-                throw "hooks[$($hook.id)].launcherRuntimeId 必须严格等于 pythonw。"
-            }
-            $launcherImplementationPath = Assert-CodexHookDPath -Value $hook.launcherImplementationPath -Name "hooks[$($hook.id)].launcherImplementationPath"
-            if (-not (Test-CodexHookPathWithin -Path $launcherImplementationPath -ParentPath (Join-Path $codexHome 'hooks'))) {
-                throw "hooks[$($hook.id)].launcherImplementationPath 必须位于固定 live hooks 根。"
-            }
-            if ([IO.Path]::GetExtension($launcherImplementationPath) -ine '.py') {
-                throw "hooks[$($hook.id)].launcherImplementationPath 必须是 Python 文件。"
-            }
-        }
-        Assert-CodexHookString -Value $hook.sourceState -Name "hooks[$($hook.id)].sourceState"
-        if ($hook.sourceState -cnotin @('managed', 'planned', 'vendor')) {
-            throw "hooks[$($hook.id)].sourceState 非法：$($hook.sourceState)"
-        }
+        $launcherImplementationPath = $null
 
         $runtimePath = [IO.Path]::GetFullPath([string]$Manifest.runtimes.PSObject.Properties[$hook.runtimeId].Value)
         if ($null -eq $wrapperPath) {
-            if ($hook.sourceState -cne 'vendor') {
-                throw "hooks[$($hook.id)] direct vendor entry 必须声明 sourceState=vendor。"
-            }
-            if (
-                -not $commandPath.Equals($implementationPath, [StringComparison]::OrdinalIgnoreCase) -or
-                -not $commandPath.Equals($runtimePath, [StringComparison]::OrdinalIgnoreCase)
-            ) {
-                throw "hooks[$($hook.id)] direct vendor entry 必须令 commandPath=implementationPath=runtime。"
+            if ($hook.sourceState -ceq 'vendor') {
+                if ($hasLauncherRuntime) {
+                    throw "hooks[$($hook.id)] direct vendor entry 不得声明 launcherRuntimeId/launcherImplementationPath。"
+                }
+                if (
+                    -not $commandPath.Equals($implementationPath, [StringComparison]::OrdinalIgnoreCase) -or
+                    -not $commandPath.Equals($runtimePath, [StringComparison]::OrdinalIgnoreCase)
+                ) {
+                    throw "hooks[$($hook.id)] direct vendor entry 必须令 commandPath=implementationPath=runtime。"
+                }
+            } elseif ($hook.sourceState -ceq 'managed') {
+                if (-not $hasLauncherRuntime) {
+                    throw "hooks[$($hook.id)] direct-managed-launcher entry 必须声明 launcherRuntimeId 与 launcherImplementationPath。"
+                }
+                Assert-CodexHookString -Value $hook.launcherRuntimeId -Name "hooks[$($hook.id)].launcherRuntimeId"
+                if ($hook.launcherRuntimeId -cne 'python') {
+                    throw "hooks[$($hook.id)] direct-managed-launcher.launcherRuntimeId 必须严格等于 python。"
+                }
+                $launcherImplementationPath = Assert-CodexHookDPath -Value $hook.launcherImplementationPath -Name "hooks[$($hook.id)].launcherImplementationPath"
+                if (-not (Test-CodexHookPathWithin -Path $launcherImplementationPath -ParentPath (Join-Path $codexHome 'hooks'))) {
+                    throw "hooks[$($hook.id)].launcherImplementationPath 必须位于固定 live hooks 根。"
+                }
+                if ([IO.Path]::GetExtension($launcherImplementationPath) -ine '.py') {
+                    throw "hooks[$($hook.id)].launcherImplementationPath 必须是 Python 文件。"
+                }
+                $expectedExtension = switch ($hook.runtimeId) {
+                    'pwsh' { '.ps1' }
+                    'python' { '.py' }
+                    'serenaPython' { '.py' }
+                    default { $null }
+                }
+                if ($null -eq $expectedExtension -or [IO.Path]::GetExtension($implementationPath) -ine $expectedExtension) {
+                    throw "hooks[$($hook.id)] implementation 与 runtimeId 类型不匹配。"
+                }
+                if (-not (Test-CodexHookPathWithin -Path $implementationPath -ParentPath (Join-Path $codexHome 'hooks'))) {
+                    throw "hooks[$($hook.id)].implementationPath 必须位于固定 live hooks 根。"
+                }
+                $launcherRuntimePath = [IO.Path]::GetFullPath([string]$Manifest.runtimes.PSObject.Properties[$hook.launcherRuntimeId].Value)
+                if (-not $commandPath.Equals($launcherRuntimePath, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "hooks[$($hook.id)] direct-managed-launcher commandPath 必须等于 launcherRuntimeId 对应 runtime。"
+                }
+                $expectedBehaviorMode = Get-CodexHookExpectedBehaviorMode -HookId ([string]$hook.id)
+                if (
+                    [IO.Path]::GetFileName($implementationPath) -ieq 'serena-behavior-guard.ps1' -and
+                    [string]::IsNullOrWhiteSpace($expectedBehaviorMode)
+                ) {
+                    throw "hooks[$($hook.id)] serena-behavior-guard direct-managed-launcher 缺少固定 Mode 契约。"
+                }
+                $directReferenceArguments = @{
+                    CommandPath = $commandPath
+                    Arguments = @($hook.arguments)
+                    LauncherRuntimePath = $launcherRuntimePath
+                    LauncherImplementationPath = $launcherImplementationPath
+                    RuntimePath = $runtimePath
+                    ImplementationPath = $implementationPath
+                    RuntimeId = [string]$hook.runtimeId
+                }
+                if (-not [string]::IsNullOrWhiteSpace($expectedBehaviorMode)) {
+                    $directReferenceArguments.ExpectedMode = $expectedBehaviorMode
+                }
+                $directReferenceFacts = Get-CodexHookDirectManagedLauncherReferenceFacts @directReferenceArguments
+                if ($directReferenceFacts.parseState -cne 'matched') {
+                    throw "hooks[$($hook.id)] direct-managed-launcher arguments 合同非法：$($directReferenceFacts.parseState)"
+                }
+            } else {
+                throw "hooks[$($hook.id)] direct entry 只允许 sourceState=vendor 或带 hidden launcher 的 sourceState=managed。"
             }
         } else {
             if ($hook.sourceState -ceq 'vendor') {
                 throw "hooks[$($hook.id)] custom entry 不得声明 sourceState=vendor。"
+            }
+            if ($hasLauncherRuntime) {
+                Assert-CodexHookString -Value $hook.launcherRuntimeId -Name "hooks[$($hook.id)].launcherRuntimeId"
+                if ($hook.launcherRuntimeId -cne 'pythonw') {
+                    throw "hooks[$($hook.id)].launcherRuntimeId 必须严格等于 pythonw。"
+                }
+                $launcherImplementationPath = Assert-CodexHookDPath -Value $hook.launcherImplementationPath -Name "hooks[$($hook.id)].launcherImplementationPath"
+                if (-not (Test-CodexHookPathWithin -Path $launcherImplementationPath -ParentPath (Join-Path $codexHome 'hooks'))) {
+                    throw "hooks[$($hook.id)].launcherImplementationPath 必须位于固定 live hooks 根。"
+                }
+                if ([IO.Path]::GetExtension($launcherImplementationPath) -ine '.py') {
+                    throw "hooks[$($hook.id)].launcherImplementationPath 必须是 Python 文件。"
+                }
             }
             $expectedExtension = switch ($hook.runtimeId) {
                 'pwsh' { '.ps1' }
@@ -490,6 +735,16 @@ function Assert-CodexHookManifest {
                 if ($behaviorAcceptanceArguments.ContainsKey([string]$hook.id) -and (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected $behaviorAcceptanceArguments[[string]$hook.id])) {
                     continue
                 }
+                if ($hook.id -ceq 'github-cli') {
+                    $githubQuickArguments = @('-NoProfile', '-File', 'D:\Codex\.codex\hooks\codex-github-cli-guard.ps1', '-CheckOnly', '-Json')
+                    $githubFullArguments = @('-NoProfile', '-File', 'D:\Codex\.codex\hooks\codex-github-cli-guard.ps1', '-Json', '-CheckAuth', '-Strict')
+                    if (
+                        (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected $githubQuickArguments) -or
+                        (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected $githubFullArguments)
+                    ) {
+                        continue
+                    }
+                }
                 if ($declaredArguments.Count -ne 3 -or $declaredArguments[0] -cne '-NoProfile' -or $declaredArguments[1] -cne '-Command') {
                     throw "hooks[$($hook.id)] pwsh health/acceptance arguments 不在受控 allowlist。"
                 }
@@ -498,7 +753,7 @@ function Assert-CodexHookManifest {
                 $testPathMatch = [regex]::Match($scriptText, "^Test-Path -LiteralPath '(?<path>[^']+)'$")
                 if ($testPathMatch.Success) {
                     $testedPath = Assert-CodexHookDPath -Value $testPathMatch.Groups['path'].Value -Name "hooks[$($hook.id)] health Test-Path"
-                    $allowedTestPaths = @($wrapperPath, $implementationPath, $runtimePath) | Where-Object { $null -ne $_ }
+                    $allowedTestPaths = @($wrapperPath, $implementationPath, $launcherImplementationPath, $runtimePath) | Where-Object { $null -ne $_ }
                     if (-not @($allowedTestPaths | Where-Object { $testedPath.Equals($_, [StringComparison]::OrdinalIgnoreCase) }).Count) {
                         throw "hooks[$($hook.id)] health Test-Path target 不在 dependency allowlist。"
                     }
@@ -525,8 +780,18 @@ function Assert-CodexHookManifest {
             }
 
             if ($declaredPath.Equals($commandPath, [StringComparison]::OrdinalIgnoreCase)) {
-                if ($null -eq $wrapperPath -and -not (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected @($hook.arguments))) {
-                    throw "hooks[$($hook.id)] direct vendor acceptance arguments 必须等于注册 arguments。"
+                if ($null -eq $wrapperPath) {
+                    if ($hook.sourceState -ceq 'vendor') {
+                        if (-not (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected @($hook.arguments))) {
+                            throw "hooks[$($hook.id)] direct vendor acceptance arguments 必须等于注册 arguments。"
+                        }
+                        continue
+                    }
+                    $statePreflightHealthArguments = @('-I', '-S', '-B', '-X', 'utf8', 'D:\Codex\.codex\hooks\codex-state-preflight.py', '--check-only', '--json')
+                    if ($hook.id -ceq 'codex-state-preflight' -and (Test-CodexHookExactStringSequence -Actual $declaredArguments -Expected $statePreflightHealthArguments)) {
+                        continue
+                    }
+                    throw "hooks[$($hook.id)] direct-managed-launcher health/acceptance arguments 不在受控 allowlist。"
                 }
                 continue
             }
@@ -608,7 +873,7 @@ function Assert-CodexHookManifest {
             if (-not $ids.Contains($ownerId) -or -not $owners.Add($ownerId)) {
                 throw "file ownerHookId 未声明或重复：$ownerId"
             }
-            if ($null -eq $hooksById[$ownerId].wrapperPath) {
+            if ($hooksById[$ownerId].sourceState -ceq 'vendor') {
                 throw "direct vendor hook 不得声称受管 file 所有权：$ownerId"
             }
         }
@@ -617,14 +882,18 @@ function Assert-CodexHookManifest {
         $filesByLivePath[$livePath] = $file
     }
 
-    foreach ($hook in @($Manifest.hooks | Where-Object { $null -ne $_.wrapperPath })) {
+    foreach ($hook in @($Manifest.hooks | Where-Object { $_.sourceState -cne 'vendor' })) {
         $implementationRolePath = [IO.Path]::GetFullPath([string]$hook.implementationPath)
         if ($hook.sourceState -ceq 'planned' -and $filesByLivePath.ContainsKey($implementationRolePath)) {
             throw "hooks[$($hook.id)] sourceState=planned 时不得为未实现 implementation 伪造 files[] SHA-256。"
         }
-        $requiredRoles = if ($hook.sourceState -ceq 'planned') { @('wrapperPath') } else { @('wrapperPath', 'implementationPath') }
+        [string[]]$requiredRoles = if ($null -ne $hook.wrapperPath) {
+            if ($hook.sourceState -ceq 'planned') { @('wrapperPath') } else { @('wrapperPath', 'implementationPath') }
+        } else {
+            @('implementationPath')
+        }
         if ($hook.sourceState -cne 'planned' -and $null -ne $hook.launcherImplementationPath) {
-            $requiredRoles += 'launcherImplementationPath'
+            $requiredRoles = @($requiredRoles) + @('launcherImplementationPath')
         }
         foreach ($role in $requiredRoles) {
             $rolePath = [IO.Path]::GetFullPath([string]$hook.$role)
@@ -652,7 +921,6 @@ function Assert-CodexHookManifest {
                     }
                     if (
                         $null -eq $ownerHook -or
-                        $null -eq $ownerHook.wrapperPath -or
                         $ownerHook.sourceState -cne 'managed' -or
                         $null -eq $ownerRolePath -or
                         -not ([IO.Path]::GetFullPath([string]$ownerRolePath)).Equals($rolePath, [StringComparison]::OrdinalIgnoreCase)
@@ -810,11 +1078,11 @@ function Assert-CodexHookHostPreflightManifest {
     }
 
     $expectedHookIdentityHashes = @{
-        'codex-state-preflight' = '3e27adf34b6eb0ad3fd2cdfd14b4a7bedd20bc196c04c3dadf7d9d98456b5028'
-        'serena-activate' = '79f82bbd3a0cb8b42edce5511cc648361ef639f9003e3c84c148cce322f717cf'
-        'github-cli' = '1cc78184c6c8c43d93afaf7f3cfb75bde205d29890907ca17c56a25a7585786c'
-        'serena-cleanup' = '4cba2cbb038ba2428a0a50ef2957fcc4c735676d923e9a705897c5449dd1b93b'
-        'serena-reminder' = '9bb36c582936f9d7f477b73cbf7f342c661995c59faef3ef45470f2f7649cd20'
+        'codex-state-preflight' = '26f28000249cc7b2d42a2e3ebae7f2db4e62fb9ba163151db2f143e9bb41c6b4'
+        'serena-activate' = 'b7ad9f5d553889243bc20fcc419fc82b9a25695a6fe04cb542c2e1979ad714c9'
+        'github-cli' = '063b86801eeea7b445b02a863bf315a9066ac997ff377817682081b715218eac'
+        'serena-cleanup' = 'fb17fe9486c94ac9552e342944d7b9bee17b6993abcb8b4ceb135f2aad131285'
+        'serena-reminder' = '08e009b0a47ee5537ce617ce3c2e2bbb6affbcea52d373d5693476bd4c8129df'
     }
     foreach ($hook in @($Manifest.hooks)) {
         $identity = [ordered]@{
@@ -843,20 +1111,23 @@ function Assert-CodexHookHostPreflightManifest {
         if (-not $expectedHookIdentityHashes.ContainsKey([string]$hook.id) -or $identityHash -cne $expectedHookIdentityHashes[[string]$hook.id]) {
             throw "host-preflight manifest identity 漂移：$($hook.id)"
         }
+        if (
+            $null -ne $hook.wrapperPath -or
+            [string]$hook.launcherRuntimeId -cne 'python' -or
+            [string]$hook.commandPath -cne 'D:\Codex\tools\python315-official\python.exe' -or
+            [string]$hook.launcherImplementationPath -cne 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+        ) {
+            throw "host-preflight manifest 必须统一使用无 .cmd 包装器的 direct-managed-launcher：$($hook.id)"
+        }
     }
 
     $expectedFiles = @{
         'codex-state-policy-guard.py' = @('hooks/codex-state-policy-guard.py', '51076559bcaa7ca573b4c81b8af5856d83db654aebce8932bc05bf06cff521e9', 'codex-state-preflight')
         'codex-state-preflight.py' = @('hooks/codex-state-preflight.py', 'daa401d467867a2cf1201c2db95198bb6c3d5b96d19406bfa9a61b9766222a0e', 'codex-state-preflight')
-        'codex-state-preflight.cmd' = @('hooks/codex-state-preflight.cmd', 'db79142562e8bb7aa0cbd5bd6a8155ec93c06f092621e96839fc63c2dcfb3f2f', 'codex-state-preflight')
-        'serena-reminder-guarded.cmd' = @('hooks/serena-reminder-guarded.cmd', '0beb898476ab063b1f8d06509618e8a636ebca1f86180f11b3e986a67cf2a21e', 'serena-reminder')
-        'serena-cleanup-guarded.cmd' = @('hooks/serena-cleanup-guarded.cmd', '7cfe6d9d4da2a851e104bed3fc457caa4302fb46cbd3fee001c77f4da36cba84', 'serena-cleanup')
         'serena-behavior-guard.ps1' = @('hooks/serena-behavior-guard.ps1', '1fb5e8eeaf41c6895206bf695d1954ff3a5e3bea6525b8adf2f42890ed82daaf', 'serena-reminder', 'serena-cleanup', 'serena-activate')
-        'serena-activation-reminder.cmd' = @('hooks/serena-activation-reminder.cmd', 'ff052774ff1b6dbfc628b83ed9625b9d78ef9f58a0ab854de21bbe0123e55487', 'serena-activate')
-        'codex-github-cli-guard.cmd' = @('hooks/codex-github-cli-guard.cmd', '0ac0f5526f517ace8a3a23a48a32df32284f3bd8459bb4eeadcc2eca682193d9', 'github-cli')
         'codex-github-cli-guard.ps1' = @('hooks/codex-github-cli-guard.ps1', '0a41c9d42e8c80ab1793d0c4554da8772c32e8fdd4b7dbd61065a02b8670212e', 'github-cli')
         'lib/CodexGitHubCliGuardEntry.ps1' = @('hooks/lib/CodexGitHubCliGuardEntry.ps1', 'bf7239c8e24ca33d410e6f1c36855f187703f90a35e212a86386d9723740bad2', 'github-cli')
-        'lib/hidden-console-launcher.py' = @('hooks/lib/hidden-console-launcher.py', 'c0a95d83b106dbba904af187b1a9f88102894317f163afb6c284114cf358973e', 'codex-state-preflight', 'serena-activate', 'serena-cleanup', 'serena-reminder')
+        'lib/hidden-console-launcher.py' = @('hooks/lib/hidden-console-launcher.py', 'c0a95d83b106dbba904af187b1a9f88102894317f163afb6c284114cf358973e', 'codex-state-preflight', 'serena-activate', 'github-cli', 'serena-cleanup', 'serena-reminder')
         'lib/CodexHookRuntime.ps1' = @('hooks/lib/CodexHookRuntime.ps1', 'c1a540c3768c491a863028ee8861d094346e300c73ce992e8b1b19d44a04c12a', 'serena-activate', 'serena-cleanup', 'serena-reminder', 'github-cli')
     }
     if (@($Manifest.files).Count -ne $expectedFiles.Count) {
@@ -881,8 +1152,10 @@ function Assert-CodexHookHostPreflightManifest {
     $stateHook = @($Manifest.hooks | Where-Object id -ceq 'codex-state-preflight')
     if (
         $stateHook.Count -ne 1 -or
-        $stateHook[0].commandPath -cne 'D:\Codex\.codex\hooks\codex-state-preflight.cmd' -or
-        $stateHook[0].wrapperPath -cne 'D:\Codex\.codex\hooks\codex-state-preflight.cmd' -or
+        $stateHook[0].commandPath -cne 'D:\Codex\tools\python315-official\python.exe' -or
+        $null -ne $stateHook[0].wrapperPath -or
+        $stateHook[0].launcherRuntimeId -cne 'python' -or
+        $stateHook[0].launcherImplementationPath -cne 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py' -or
         $stateHook[0].implementationPath -cne 'D:\Codex\.codex\hooks\codex-state-preflight.py'
     ) {
         throw 'host-preflight manifest state identity 必须固定为 local-only preflight。'
@@ -898,10 +1171,15 @@ function Assert-CodexHookHostPreflightManifest {
         'serena-dashboard-guard.cmd',
         'serena-dashboard-guard.ps1',
         'serena-activate-guarded.cmd',
-        'serena-activate-guarded.ps1'
+        'serena-activate-guarded.ps1',
+        'codex-state-preflight.cmd',
+        'codex-github-cli-guard.cmd',
+        'serena-activation-reminder.cmd',
+        'serena-cleanup-guarded.cmd',
+        'serena-reminder-guarded.cmd'
     )
     foreach ($file in @($Manifest.files)) {
-        if ([string]$file.liveRelativePath -cin $forbiddenLivePaths -or $file.lifecycle -cne 'active') {
+        if ([string]$file.liveRelativePath -cin $forbiddenLivePaths -or [string]$file.liveRelativePath -like '*.cmd' -or $file.lifecycle -cne 'active') {
             throw "host-preflight manifest 包含退役或冷路径外实现：$($file.liveRelativePath)"
         }
     }
@@ -1126,19 +1404,66 @@ function Test-CodexHookOpaqueCommandTargetsManagedPath {
     $targetPath = Get-CodexHookOpaqueCommandTargetPath -Command $Command
     if ($null -eq $targetPath) { return $false }
 
-    $managedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $dedicatedManagedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $directManagedScriptPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $directManagedRuntimePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($hook in @($Manifest.hooks)) {
-        foreach ($propertyName in @('wrapperPath', 'commandPath')) {
-            $managedPath = $hook.$propertyName
-            if ($null -eq $managedPath -or $managedPath -isnot [string]) { continue }
-            try {
-                [void]$managedPaths.Add([IO.Path]::GetFullPath(([string]$managedPath).Replace('/', '\')))
-            } catch {
-                continue
+        if ($null -ne $hook.wrapperPath -or $hook.sourceState -ceq 'vendor') {
+            foreach ($propertyName in @('wrapperPath', 'commandPath')) {
+                $managedPath = $hook.$propertyName
+                if ($null -eq $managedPath -or $managedPath -isnot [string]) { continue }
+                try {
+                    [void]$dedicatedManagedPaths.Add([IO.Path]::GetFullPath(([string]$managedPath).Replace('/', '\')))
+                } catch {
+                    continue
+                }
+            }
+        } elseif ($hook.sourceState -ceq 'managed') {
+            foreach ($propertyName in @('implementationPath', 'launcherImplementationPath')) {
+                $scriptPath = $hook.$propertyName
+                if ($null -eq $scriptPath -or $scriptPath -isnot [string]) { continue }
+                try {
+                    [void]$directManagedScriptPaths.Add([IO.Path]::GetFullPath(([string]$scriptPath).Replace('/', '\')))
+                } catch {
+                    continue
+                }
+            }
+            if ($hook.commandPath -is [string]) {
+                try {
+                    [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$hook.commandPath).Replace('/', '\')))
+                } catch {}
             }
         }
     }
-    return $managedPaths.Contains([string]$targetPath)
+    if ($dedicatedManagedPaths.Contains([string]$targetPath) -or $directManagedScriptPaths.Contains([string]$targetPath)) {
+        return $true
+    }
+    if ($directManagedScriptPaths.Count -eq 0) {
+        return $false
+    }
+    foreach ($runtimeName in @('python', 'pythonw', 'pwsh')) {
+        if ($Manifest.runtimes.PSObject.Properties.Name -ccontains $runtimeName) {
+            try {
+                [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$Manifest.runtimes.$runtimeName).Replace('/', '\')))
+            } catch {}
+        }
+    }
+    if (-not $directManagedRuntimePaths.Contains([string]$targetPath)) {
+        return $false
+    }
+    foreach ($rawPart in @($Command -split '\s+' | Select-Object -Skip 1)) {
+        $candidate = $rawPart.Replace('"', '').Replace('/', '\')
+        if ($candidate -notmatch '^[dD]:\\') { continue }
+        try {
+            $normalizedCandidate = [IO.Path]::GetFullPath($candidate)
+            if ($directManagedScriptPaths.Contains($normalizedCandidate)) {
+                return $true
+            }
+        } catch {
+            continue
+        }
+    }
+    return $false
 }
 
 function Copy-CodexHookJsonValue {
@@ -1184,6 +1509,7 @@ function Get-CodexHookRegistryEntryAnalysis {
     }
 
     $customPathMatches = @()
+    $directManagedDriftDetected = $false
     if ($parsed.parsed -and $parsed.tokens.Count -gt 0 -and [string]$parsed.tokens[0] -match '^[dD]:[\\/]') {
         try {
             $targetPath = [IO.Path]::GetFullPath(([string]$parsed.tokens[0]).Replace('/', '\'))
@@ -1193,12 +1519,55 @@ function Get-CodexHookRegistryEntryAnalysis {
                     $targetPath.Equals([IO.Path]::GetFullPath([string]$_.commandPath), [StringComparison]::OrdinalIgnoreCase)
                 }
             )
+            if ($exactMatches.Count -eq 0 -and $customPathMatches.Count -eq 0) {
+                $directManagedHooks = @($Manifest.hooks | Where-Object { $null -eq $_.wrapperPath -and $_.sourceState -ceq 'managed' })
+                if ($directManagedHooks.Count -gt 0) {
+                    $directManagedScriptPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                    $directManagedRuntimePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                    foreach ($directHook in $directManagedHooks) {
+                        foreach ($propertyName in @('implementationPath', 'launcherImplementationPath')) {
+                            $scriptPath = $directHook.$propertyName
+                            if ($scriptPath -is [string]) {
+                                [void]$directManagedScriptPaths.Add([IO.Path]::GetFullPath(([string]$scriptPath).Replace('/', '\')))
+                            }
+                        }
+                        if ($directHook.commandPath -is [string]) {
+                            [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$directHook.commandPath).Replace('/', '\')))
+                        }
+                    }
+                    foreach ($runtimeName in @('python', 'pythonw', 'pwsh')) {
+                        if ($Manifest.runtimes.PSObject.Properties.Name -ccontains $runtimeName) {
+                            [void]$directManagedRuntimePaths.Add([IO.Path]::GetFullPath(([string]$Manifest.runtimes.$runtimeName).Replace('/', '\')))
+                        }
+                    }
+                    if ($directManagedScriptPaths.Contains($targetPath)) {
+                        $directManagedDriftDetected = $true
+                    } elseif ($directManagedRuntimePaths.Contains($targetPath)) {
+                        for ($tokenIndex = 1; $tokenIndex -lt $parsed.tokens.Count; $tokenIndex++) {
+                            $argToken = [string]$parsed.tokens[$tokenIndex]
+                            if ($argToken -notmatch '^[dD]:[\\/]') { continue }
+                            try {
+                                $normalizedArgPath = [IO.Path]::GetFullPath($argToken.Replace('/', '\'))
+                                if ($directManagedScriptPaths.Contains($normalizedArgPath)) {
+                                    $directManagedDriftDetected = $true
+                                    break
+                                }
+                            } catch {
+                                continue
+                            }
+                        }
+                    }
+                }
+            }
         } catch {
             $customPathMatches = @()
         }
     }
     if ($customPathMatches.Count -gt 0 -and $exactMatches.Count -eq 0) {
         throw "受管 custom wrapper identity 漂移：event=$Event"
+    }
+    if ($directManagedDriftDetected) {
+        throw "受管 direct launcher identity 漂移：event=$Event"
     }
     if (
         -not $parsed.parsed -and
@@ -1753,6 +2122,11 @@ function Get-CodexHookKnownRetiredRegistrationManifest {
             [pscustomobject]@{ id = 'codex-state-policy'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\codex-projectless-root-d.cmd'; arguments = @(); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-activate-legacy'; event = 'SessionStart'; matcher = 'startup|resume'; commandPath = 'D:\Codex\.codex\hooks\serena-activate-guarded.cmd'; arguments = @(); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-dashboard'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\serena-dashboard-guard.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'codex-state-preflight-cmd-legacy'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\codex-state-preflight.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'serena-activate-cmd-legacy'; event = 'SessionStart'; matcher = 'startup|resume'; commandPath = 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'github-cli-cmd-legacy'; event = 'SessionStart'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'serena-cleanup-cmd-legacy'; event = 'Stop'; matcher = $null; commandPath = 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd'; arguments = @(); lifecycle = 'retired' }
+            [pscustomobject]@{ id = 'serena-reminder-cmd-legacy'; event = 'PreToolUse'; matcher = 'Bash'; commandPath = 'D:\Codex\.codex\hooks\serena-reminder-guarded.cmd'; arguments = @(); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-auto-approve'; event = 'PreToolUse'; matcher = 'mcp__serena__.*|mcp__serena\..*'; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('auto-approve', '--client=codex'); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-reminder-direct'; event = 'PreToolUse'; matcher = 'Bash'; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('remind', '--client=codex'); lifecycle = 'retired' }
             [pscustomobject]@{ id = 'serena-cleanup-direct'; event = 'Stop'; matcher = $null; commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'; arguments = @('cleanup', '--client=codex'); lifecycle = 'retired' }
@@ -1956,10 +2330,29 @@ function Get-CodexHookDependencyFacts {
             Get-CodexHookWrapperReferenceFacts @referenceArguments
         }
 
+        $directLauncherReferences = if ($null -eq $wrapperPath -and $hook.sourceState -ceq 'managed') {
+            $directArgs = @{
+                CommandPath = [string]$hook.commandPath
+                Arguments = @($hook.arguments)
+                LauncherRuntimePath = $launcherRuntimePath
+                LauncherImplementationPath = $launcherImplementationPath
+                RuntimePath = $runtimePath
+                ImplementationPath = $implementationPath
+                RuntimeId = [string]$hook.runtimeId
+            }
+            $expectedDirectMode = Get-CodexHookExpectedBehaviorMode -HookId ([string]$hook.id)
+            if (-not [string]::IsNullOrWhiteSpace($expectedDirectMode)) {
+                $directArgs.ExpectedMode = $expectedDirectMode
+            }
+            Get-CodexHookDirectManagedLauncherReferenceFacts @directArgs
+        } else {
+            $null
+        }
+
         [pscustomobject][ordered]@{
             id = $hook.id
             sourceState = $hook.sourceState
-            entrypointKind = if ($null -eq $wrapperPath) { 'direct-vendor' } else { 'wrapper' }
+            entrypointKind = if ($null -ne $wrapperPath) { 'wrapper' } elseif ($hook.sourceState -ceq 'vendor') { 'direct-vendor' } else { 'direct-managed-launcher' }
             wrapperPath = $wrapperPath
             wrapperExists = if ($null -eq $wrapperObservation) { $null } else { $wrapperObservation.probe.exists }
             wrapperProbeState = if ($null -eq $wrapperObservation) { 'not-applicable' } else { $wrapperObservation.probe.state }
@@ -1989,8 +2382,20 @@ function Get-CodexHookDependencyFacts {
             wrapperReferencesLauncherRuntime = if ($null -eq $launcherRuntimePath -or $null -eq $wrapperReferences -or $wrapperReferences.parseState -cne 'matched') { $null } else { $wrapperReferences.referencesLauncherRuntime }
             readResourceCount = @($hook.readResources).Count
             writeResourceCount = @($hook.writeResources).Count
-            dependencyState = if ($null -eq $wrapperPath) {
+            dependencyState = if ($null -eq $wrapperPath -and $hook.sourceState -ceq 'vendor') {
                 if ($implementationObservation.probe.safeToRead -and $runtimeObservation.probe.safeToRead) { 'ready' } else { 'pending' }
+            } elseif ($null -eq $wrapperPath -and $hook.sourceState -ceq 'managed') {
+                if (
+                    $implementationObservation.probe.safeToRead -and
+                    $runtimeObservation.probe.safeToRead -and
+                    $null -ne $launcherRuntimeObservation -and $launcherRuntimeObservation.probe.safeToRead -and
+                    $null -ne $launcherImplementationObservation -and $launcherImplementationObservation.probe.safeToRead -and
+                    $null -ne $directLauncherReferences -and $directLauncherReferences.parseState -ceq 'matched'
+                ) {
+                    'ready'
+                } else {
+                    'pending-or-mismatched'
+                }
             } elseif ($wrapperObservation.probe.safeToRead -and $implementationObservation.probe.safeToRead -and $runtimeObservation.probe.safeToRead -and
                 ($null -eq $launcherRuntimeObservation -or $launcherRuntimeObservation.probe.safeToRead) -and
                 ($null -eq $launcherImplementationObservation -or $launcherImplementationObservation.probe.safeToRead) -and

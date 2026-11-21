@@ -208,6 +208,214 @@ $case.hooks[0].launcherRuntimeId = 'pythonw'
 $case.hooks[0].launcherImplementationPath = 'D:\Codex\.codex\outside\hidden-console-launcher.py'
 Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'launcher implementation 必须位于 live hooks 根'
 
+function New-ValidDirectManagedLauncherManifest {
+    return [pscustomobject][ordered]@{
+        artifactType = 'env-governance.codex-hook-manifest'
+        schemaVersion = 1
+        codexHome = 'D:\Codex\.codex'
+        managedRoot = 'D:\agents\projects\统一环境\managed\codex-hooks'
+        runtimes = [pscustomobject][ordered]@{
+            pwsh = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
+            python = 'D:\Codex\tools\python315-official\python.exe'
+            pythonw = 'D:\Codex\tools\python315-official\pythonw.exe'
+            serenaPython = 'D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
+            serenaHooks = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
+        }
+        hooks = @(
+            [pscustomobject][ordered]@{
+                id = 'codex-state-preflight'
+                event = 'SessionStart'
+                order = 0
+                matcher = $null
+                timeoutSeconds = 10
+                commandPath = 'D:\Codex\tools\python315-official\python.exe'
+                arguments = @(
+                    '-I', '-S', '-B', '-X', 'utf8',
+                    'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py',
+                    'D:\Codex\tools\python315-official\python.exe',
+                    '-I', '-S', '-B', '-X', 'utf8',
+                    'D:\Codex\.codex\hooks\codex-state-preflight.py',
+                    ';', 'exit', '$LASTEXITCODE'
+                )
+                wrapperPath = $null
+                implementationPath = 'D:\Codex\.codex\hooks\codex-state-preflight.py'
+                runtimeId = 'python'
+                launcherRuntimeId = 'python'
+                launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+                sourceState = 'managed'
+                readResources = @([pscustomobject][ordered]@{ kind = 'abstract'; value = 'hook-stdin' })
+                writeResources = @([pscustomobject][ordered]@{ kind = 'abstract'; value = 'codex-thread-state' })
+                criticality = 'critical'
+                lifecycle = 'active'
+                lifecycleReason = $null
+                quickHealthCheck = [pscustomobject][ordered]@{
+                    commandPath = 'D:\Codex\tools\python315-official\python.exe'
+                    arguments = @('-I', '-S', '-B', '-X', 'utf8', 'D:\Codex\.codex\hooks\codex-state-preflight.py', '--check-only', '--json')
+                }
+                fullAcceptanceCommand = [pscustomobject][ordered]@{
+                    commandPath = 'D:\Codex\tools\python315-official\python.exe'
+                    arguments = @('-I', '-S', '-B', '-X', 'utf8', 'D:\Codex\.codex\hooks\codex-state-preflight.py', '--check-only', '--json')
+                }
+            }
+            [pscustomobject][ordered]@{
+                id = 'serena-activate'
+                event = 'SessionStart'
+                order = 2
+                matcher = 'startup|resume'
+                timeoutSeconds = 10
+                commandPath = 'D:\Codex\tools\python315-official\python.exe'
+                arguments = @(
+                    '-I', '-S', '-B', '-X', 'utf8',
+                    'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py',
+                    'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe',
+                    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                    'D:\Codex\.codex\hooks\serena-behavior-guard.ps1',
+                    '-Mode', 'Activation',
+                    ';', 'exit', '$LASTEXITCODE'
+                )
+                wrapperPath = $null
+                implementationPath = 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1'
+                runtimeId = 'pwsh'
+                launcherRuntimeId = 'python'
+                launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+                sourceState = 'managed'
+                readResources = @([pscustomobject][ordered]@{ kind = 'abstract'; value = 'hook-stdin' })
+                writeResources = @([pscustomobject][ordered]@{ kind = 'abstract'; value = 'hook-stdout' })
+                criticality = 'degraded'
+                lifecycle = 'active'
+                lifecycleReason = $null
+                quickHealthCheck = [pscustomobject][ordered]@{
+                    commandPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
+                    arguments = @('-NoProfile', '-Command', "Test-Path -LiteralPath 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1'")
+                }
+                fullAcceptanceCommand = [pscustomobject][ordered]@{
+                    commandPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
+                    arguments = @('-NoProfile', '-File', 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1', '-Mode', 'ActivationAcceptance')
+                }
+            }
+            [pscustomobject][ordered]@{
+                id = 'github-cli'
+                event = 'SessionStart'
+                order = 4
+                matcher = $null
+                timeoutSeconds = 10
+                commandPath = 'D:\Codex\tools\python315-official\python.exe'
+                arguments = @(
+                    '-I', '-S', '-B', '-X', 'utf8',
+                    'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py',
+                    'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe',
+                    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                    'D:\Codex\.codex\hooks\codex-github-cli-guard.ps1',
+                    ';', 'exit', '$LASTEXITCODE'
+                )
+                wrapperPath = $null
+                implementationPath = 'D:\Codex\.codex\hooks\codex-github-cli-guard.ps1'
+                runtimeId = 'pwsh'
+                launcherRuntimeId = 'python'
+                launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+                sourceState = 'managed'
+                readResources = @([pscustomobject][ordered]@{ kind = 'abstract'; value = 'process-environment' })
+                writeResources = @([pscustomobject][ordered]@{ kind = 'abstract'; value = 'process-environment' })
+                criticality = 'optional'
+                lifecycle = 'active'
+                lifecycleReason = $null
+                quickHealthCheck = [pscustomobject][ordered]@{
+                    commandPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
+                    arguments = @('-NoProfile', '-File', 'D:\Codex\.codex\hooks\codex-github-cli-guard.ps1', '-CheckOnly', '-Json')
+                }
+                fullAcceptanceCommand = [pscustomobject][ordered]@{
+                    commandPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
+                    arguments = @('-NoProfile', '-File', 'D:\Codex\.codex\hooks\codex-github-cli-guard.ps1', '-Json', '-CheckAuth', '-Strict')
+                }
+            }
+        )
+        files = @(
+            [pscustomobject][ordered]@{
+                relativePath = 'hooks/codex-state-preflight.py'
+                liveRelativePath = 'codex-state-preflight.py'
+                sha256 = ('0' * 64)
+                lifecycle = 'active'
+                ownerHookIds = @('codex-state-preflight')
+            }
+            [pscustomobject][ordered]@{
+                relativePath = 'hooks/serena-behavior-guard.ps1'
+                liveRelativePath = 'serena-behavior-guard.ps1'
+                sha256 = ('0' * 64)
+                lifecycle = 'active'
+                ownerHookIds = @('serena-activate')
+            }
+            [pscustomobject][ordered]@{
+                relativePath = 'hooks/codex-github-cli-guard.ps1'
+                liveRelativePath = 'codex-github-cli-guard.ps1'
+                sha256 = ('0' * 64)
+                lifecycle = 'active'
+                ownerHookIds = @('github-cli')
+            }
+            [pscustomobject][ordered]@{
+                relativePath = 'hooks/lib/hidden-console-launcher.py'
+                liveRelativePath = 'lib/hidden-console-launcher.py'
+                sha256 = ('0' * 64)
+                lifecycle = 'active'
+                ownerHookIds = @('codex-state-preflight', 'serena-activate', 'github-cli')
+            }
+        )
+        environment = @()
+    }
+}
+
+$validDirectManaged = New-ValidDirectManagedLauncherManifest
+Assert-True (Assert-CodexHookManifest -Manifest $validDirectManaged) '合法 direct-managed-launcher manifest 必须通过'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.hooks[0].launcherRuntimeId = 'pythonw'
+$case.hooks[0].commandPath = 'D:\Codex\tools\python315-official\pythonw.exe'
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'direct-managed-launcher 不得使用 pythonw（会丢失非零退出码）'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.hooks[0].arguments = @($case.hooks[0].arguments | Select-Object -First ($case.hooks[0].arguments.Count - 3))
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'direct-managed-launcher 缺少 ; exit $LASTEXITCODE 必须被拒绝'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.hooks[0].arguments[0] = '-S'
+$case.hooks[0].arguments[1] = '-I'
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'direct-managed-launcher launcher flags 乱序必须被拒绝'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.hooks[0].commandPath = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'direct-managed-launcher commandPath 必须等于 launcherRuntimeId 对应路径'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.hooks[1].arguments[13] = 'Cleanup'
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'serena-activate direct-managed-launcher 不得混用其他 Mode'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.hooks[2].arguments = @(
+    '-I', '-S', '-B', '-X', 'utf8',
+    'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py',
+    'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe',
+    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    'D:\Codex\.codex\hooks\codex-github-cli-guard.ps1',
+    '-Repair',
+    ';', 'exit', '$LASTEXITCODE'
+)
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'github-cli direct-managed-launcher 不得接受额外参数'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.hooks[0].quickHealthCheck.arguments = @('-I', '-S', '-B', '-X', 'utf8', '-c', 'print(1)')
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'direct-managed-launcher python quickHealthCheck 不得绕过固定 allowlist'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.files = @($case.files | Where-Object liveRelativePath -cne 'lib/hidden-console-launcher.py')
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'direct-managed-launcher 缺少 launcherImplementationPath 对应 files[] 必须被拒绝'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.files = @($case.files | Where-Object liveRelativePath -cne 'codex-state-preflight.py')
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'direct-managed-launcher 缺少 implementationPath 对应 files[] 必须被拒绝'
+
+$case = Copy-TestDocument $validDirectManaged
+$case.hooks[0].sourceState = 'planned'
+Assert-Throws { Assert-CodexHookManifest -Manifest $case } 'direct entry 不得声明 sourceState=planned'
+
 $case = Copy-TestDocument $valid
 $case.hooks[0].readResources[0].value = 'D:\Codex\.codex\config.toml:secret'
 Assert-Throws { Assert-CodexHookManifest -Manifest $case } '绝对资源路径不得使用 ADS'
@@ -399,8 +607,8 @@ $mutatedHostHookIdentity = Copy-TestDocument $hostPreflightManifest
 @($mutatedHostHookIdentity.hooks | Where-Object id -ceq 'serena-reminder')[0].order = 9
 Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $mutatedHostHookIdentity | Out-Null } 'host manifest 必须冻结 Serena reminder 的完整 identity'
 $mutatedHostFileClosure = Copy-TestDocument $hostPreflightManifest
-@($mutatedHostFileClosure.files | Where-Object liveRelativePath -ceq 'serena-reminder-guarded.cmd')[0].sha256 = ('0' * 64)
-Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $mutatedHostFileClosure | Out-Null } 'host manifest 必须冻结 8-file closure 的精确 hash map'
+@($mutatedHostFileClosure.files | Where-Object liveRelativePath -ceq 'serena-behavior-guard.ps1')[0].sha256 = ('0' * 64)
+Assert-Throws { Assert-CodexHookHostPreflightManifest -Manifest $mutatedHostFileClosure | Out-Null } 'host manifest 必须冻结 7-file closure 的精确 hash map'
 $expectedProductionHookIds = @('codex-state-preflight', 'serena-activate', 'github-cli', 'serena-cleanup', 'serena-reminder')
 Assert-True (
     (@($hostPreflightManifest.hooks | ForEach-Object id | Sort-Object) -join ',') -ceq
@@ -409,12 +617,22 @@ Assert-True (
 foreach ($forbiddenHookId in @('provider-stability', 'serena-dashboard', 'serena-auto-approve')) {
     Assert-True (@($hostPreflightManifest.hooks | Where-Object id -ceq $forbiddenHookId).Count -eq 0) "production manifest 不得包含旧/显式维护 identity：$forbiddenHookId"
 }
+foreach ($productionHook in @($hostPreflightManifest.hooks)) {
+    Assert-True (
+        $null -eq $productionHook.wrapperPath -and
+        $productionHook.commandPath -ceq 'D:\Codex\tools\python315-official\python.exe' -and
+        $productionHook.launcherRuntimeId -ceq 'python' -and
+        $productionHook.launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+    ) "production hook 必须统一走无 .cmd 包装器的 direct-managed-launcher：$($productionHook.id)"
+}
 $productionStateHook = @($hostPreflightManifest.hooks | Where-Object id -ceq 'codex-state-preflight')[0]
 Assert-True (
-    $productionStateHook.commandPath -ceq 'D:\Codex\.codex\hooks\codex-state-preflight.cmd' -and
-    $productionStateHook.wrapperPath -ceq 'D:\Codex\.codex\hooks\codex-state-preflight.cmd' -and
+    $productionStateHook.commandPath -ceq 'D:\Codex\tools\python315-official\python.exe' -and
+    $null -eq $productionStateHook.wrapperPath -and
+    $productionStateHook.launcherRuntimeId -ceq 'python' -and
+    $productionStateHook.launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py' -and
     $productionStateHook.implementationPath -ceq 'D:\Codex\.codex\hooks\codex-state-preflight.py'
-) 'production state identity 必须指向 local-only state preflight，不得恢复旧 projectless wrapper'
+) 'production state identity 必须指向 local-only state preflight 的 direct-managed-launcher，不得恢复旧 wrapper'
 foreach ($forbiddenLivePath in @(
     'codex-projectless-root-d.cmd',
     'codex-projectless-root-d.js',
@@ -423,11 +641,16 @@ foreach ($forbiddenLivePath in @(
     'codex-provider-stability-guard.cmd',
     'serena-activate-guarded.cmd',
     'serena-dashboard-guard.cmd',
-    'serena-auto-approve.cmd'
+    'serena-auto-approve.cmd',
+    'codex-state-preflight.cmd',
+    'codex-github-cli-guard.cmd',
+    'serena-activation-reminder.cmd',
+    'serena-cleanup-guarded.cmd',
+    'serena-reminder-guarded.cmd'
 )) {
-    Assert-True (@($hostPreflightManifest.files | Where-Object liveRelativePath -ceq $forbiddenLivePath).Count -eq 0) "production manifest 不得包含退役双写/auto-approve 文件：$forbiddenLivePath"
+    Assert-True (@($hostPreflightManifest.files | Where-Object liveRelativePath -ceq $forbiddenLivePath).Count -eq 0) "production manifest 不得包含退役双写/旧 .cmd 包装器文件：$forbiddenLivePath"
 }
-Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) '受管源码树必须零 .cmd 文件且全部 10 个已退役/历史 .cmd 均已移除'
 Assert-Throws { Read-CodexHookManifest -Path 'D:\arbitrary\manifest.json' | Out-Null } '任意路径不得绕过 manifest 固定读取 allowlist'
 foreach ($removedRelativePath in (Get-CodexHookRemovedLegacyCmdRelativePaths)) {
     $removedLeaf = [IO.Path]::GetFileName($removedRelativePath)
@@ -447,17 +670,84 @@ foreach ($removedRelativePath in (Get-CodexHookRemovedLegacyCmdRelativePaths)) {
 $legacyPolicyFixtureDir = Join-Path ([IO.Path]::GetTempPath()) ("codex-hook-policy-legacy-" + [Guid]::NewGuid().ToString('N'))
 try {
     [void][IO.Directory]::CreateDirectory($legacyPolicyFixtureDir)
+    $removedHiddenWrapperSpecs = @{
+        'hooks/codex-state-preflight.cmd' = @{
+            wrapperPath = 'D:\Codex\.codex\hooks\codex-state-preflight.cmd'
+            runtimeId = 'python'
+            runtimePath = [string]$hostPreflightManifest.runtimes.python
+            implementationPath = 'D:\Codex\.codex\hooks\codex-state-preflight.py'
+            launcherRuntimePath = [string]$hostPreflightManifest.runtimes.pythonw
+            launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+            expectedMode = $null
+        }
+        'hooks/serena-activation-reminder.cmd' = @{
+            wrapperPath = 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd'
+            runtimeId = 'pwsh'
+            runtimePath = [string]$hostPreflightManifest.runtimes.pwsh
+            implementationPath = 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1'
+            launcherRuntimePath = [string]$hostPreflightManifest.runtimes.pythonw
+            launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+            expectedMode = 'Activation'
+        }
+        'hooks/serena-cleanup-guarded.cmd' = @{
+            wrapperPath = 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd'
+            runtimeId = 'pwsh'
+            runtimePath = [string]$hostPreflightManifest.runtimes.pwsh
+            implementationPath = 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1'
+            launcherRuntimePath = [string]$hostPreflightManifest.runtimes.pythonw
+            launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+            expectedMode = 'Cleanup'
+        }
+        'hooks/serena-reminder-guarded.cmd' = @{
+            wrapperPath = 'D:\Codex\.codex\hooks\serena-reminder-guarded.cmd'
+            runtimeId = 'pwsh'
+            runtimePath = [string]$hostPreflightManifest.runtimes.pwsh
+            implementationPath = 'D:\Codex\.codex\hooks\serena-behavior-guard.ps1'
+            launcherRuntimePath = [string]$hostPreflightManifest.runtimes.pythonw
+            launcherImplementationPath = 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py'
+            expectedMode = 'Reminder'
+        }
+    }
     foreach ($removedRelativePath in (Get-CodexHookRemovedLegacyCmdRelativePaths)) {
         $fixtureCmdPath = Join-Path $legacyPolicyFixtureDir ($removedRelativePath.Replace('/', '\'))
         [byte[]]$generatedBytes = Write-CodexHookLegacyCmdFixtureFile -Path $fixtureCmdPath -RelativePath $removedRelativePath
-        $manifestEntry = @($legacyFixtureManifest.files | Where-Object relativePath -ceq $removedRelativePath)
-        Assert-True ($manifestEntry.Count -eq 1) "legacy fixture manifest 必须保留历史夹具元数据：$removedRelativePath"
-        Assert-True ((Get-CodexHookBytesSha256 -Bytes $generatedBytes) -ceq [string]$manifestEntry[0].sha256) "隔离临时目录动态生成的历史 .cmd 必须匹配 legacy fixture manifest SHA-256：$removedRelativePath"
+        $generatedSha256 = Get-CodexHookBytesSha256 -Bytes $generatedBytes
+        $legacyManifestEntry = @($legacyFixtureManifest.files | Where-Object relativePath -ceq $removedRelativePath)
+        $compatManifestEntry = @($managedManifest.files | Where-Object relativePath -ceq $removedRelativePath)
+        Assert-True (($legacyManifestEntry.Count + $compatManifestEntry.Count) -ge 1) "历史 .cmd 样本必须对应 legacy 或 compat manifest 元数据：$removedRelativePath"
+        if ($legacyManifestEntry.Count -eq 1) {
+            Assert-True ($generatedSha256 -ceq [string]$legacyManifestEntry[0].sha256) "隔离临时目录动态生成的历史 .cmd 必须匹配 legacy fixture manifest SHA-256：$removedRelativePath"
+        }
+        if ($compatManifestEntry.Count -eq 1) {
+            Assert-True ($generatedSha256 -ceq [string]$compatManifestEntry[0].sha256) "隔离临时目录动态生成的历史 .cmd 必须匹配 compat manifest SHA-256：$removedRelativePath"
+        }
         $generatedText = [IO.File]::ReadAllText($fixtureCmdPath)
         if ($removedRelativePath -ceq 'retired/codex-mobile-permission-guard.cmd') {
             Assert-True ($generatedText.Contains('python313-official') -and $generatedText.Contains('codex-mobile-permission-guard.py')) '动态生成的 retired mobile guard 样本必须保留退役特征'
+        } elseif ($removedHiddenWrapperSpecs.ContainsKey($removedRelativePath)) {
+            $spec = $removedHiddenWrapperSpecs[$removedRelativePath]
+            $refArgs = @{
+                WrapperText = $generatedText
+                RuntimePath = [string]$spec.runtimePath
+                ImplementationPath = [string]$spec.implementationPath
+                RuntimeId = [string]$spec.runtimeId
+                WrapperPath = [string]$spec.wrapperPath
+                LauncherRuntimePath = [string]$spec.launcherRuntimePath
+                LauncherImplementationPath = [string]$spec.launcherImplementationPath
+            }
+            if ($null -ne $spec.expectedMode) {
+                $refArgs.ExpectedMode = [string]$spec.expectedMode
+            }
+            $refFacts = Get-CodexHookWrapperReferenceFacts @refArgs
+            Assert-True (
+                $refFacts.parseState -ceq 'matched' -and
+                $refFacts.referencesLauncherRuntime -and
+                $refFacts.referencesLauncherImplementation -and
+                $refFacts.referencesRuntime -and
+                $refFacts.referencesImplementation
+            ) "隔离临时目录动态生成的已退役 hidden wrapper 必须满足 legacy wrapper 解析契约：$removedRelativePath"
         } else {
-            $ownerId = [string]@($manifestEntry[0].ownerHookIds)[0]
+            $ownerId = [string]@($legacyManifestEntry[0].ownerHookIds)[0]
             $legacyOwnerHook = @($legacyFixtureManifest.hooks | Where-Object id -ceq $ownerId)[0]
             $refFacts = Get-CodexHookWrapperReferenceFacts `
                 -WrapperText $generatedText `
@@ -486,9 +776,11 @@ foreach ($orphanedRelativePath in @('retired/codex-mobile-permission-guard.cmd',
 }
 Assert-True (@($legacyFixtureManifest.files).Count -eq 16) 'legacy fixture manifest 必须冻结 13 active + 3 retired 历史事务闭包'
 Assert-True (
+    @($hostPreflightManifest.files).Count -eq 7 -and
     @($hostPreflightManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.py').Count -eq 1 -and
-    @($hostPreflightManifest.files | Where-Object liveRelativePath -ceq 'codex-state-preflight.cmd').Count -eq 1
-) 'host-preflight manifest 必须唯一声明 state preflight 实现与固定 wrapper'
+    @($hostPreflightManifest.files | Where-Object liveRelativePath -ceq 'lib/hidden-console-launcher.py').Count -eq 1 -and
+    @($hostPreflightManifest.files | Where-Object { [string]$_.liveRelativePath -like '*.cmd' }).Count -eq 0
+) 'host-preflight manifest 必须声明 7 文件无 .cmd 闭包并包含 state preflight 实现与 hidden-console-launcher'
 Assert-True (
     @($managedManifest.environment).Count -eq 1 -and
     $managedManifest.environment[0].name -ceq 'SERENA_HOME' -and
@@ -558,6 +850,8 @@ $retiredReplacement.commandPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
 $retiredReplacement.wrapperPath = $null
 $retiredReplacement.implementationPath = 'D:\Codex\tools\uv\bin\serena-hooks.exe'
 $retiredReplacement.runtimeId = 'serenaHooks'
+$retiredReplacement.launcherRuntimeId = $null
+$retiredReplacement.launcherImplementationPath = $null
 $retiredReplacement.sourceState = 'vendor'
 $retiredReplacement.arguments = @('cleanup-retired', '--client=codex')
 $retiredReplacement.quickHealthCheck.arguments = @('-NoProfile', '-Command', "Test-Path -LiteralPath 'D:\Codex\tools\uv\bin\serena-hooks.exe'")

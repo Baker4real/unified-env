@@ -90,7 +90,7 @@ $manifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
 $legacyManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json'
 $productionManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json'
 $realManagedRoot = Join-Path $ProjectRoot 'managed\codex-hooks'
-Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot $realManagedRoot) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot $realManagedRoot) '受管源码树必须零 .cmd 文件且全部 10 个已退役/历史 .cmd 均已移除'
 $manifest = Read-CodexHookManifest -Path $manifestPath
 $legacyManifest = Read-CodexHookLegacyFixtureManifest -Path $legacyManifestPath
 $legacyIsolatedSourceRoot = Join-Path $FixtureRoot 'isolated-legacy-managed'
@@ -98,7 +98,7 @@ $legacyMaterialized = New-CodexHookIsolatedLegacyManagedSourceTree `
     -SourceManagedRoot $realManagedRoot `
     -DestinationRoot $legacyIsolatedSourceRoot `
     -Manifest $legacyManifest
-Assert-True (@($legacyMaterialized.generatedRelativePaths).Count -eq 5) 'legacy fixture 隔离临时目录必须动态构造全部 5 个已移除历史 .cmd 样本'
+Assert-True (@($legacyMaterialized.generatedRelativePaths).Count -eq 6) 'legacy fixture 隔离临时目录必须动态构造全部 6 个已移除历史 .cmd 样本'
 $legacySourceFacts = @(Get-CodexHookFileFacts `
     -Manifest $legacyManifest `
     -ManagedRoot $legacyIsolatedSourceRoot `
@@ -243,6 +243,61 @@ Assert-True (
         $_.idMatch -ceq 'serena-activate-legacy' -and $_.registrationState -ceq 'retired-but-registered'
     }).Count -eq 1
 ) 'production inventory 必须继续识别已移除的 serena-activate-guarded.cmd 历史注册'
+
+$retiredFiveCmdRegistryPath = Join-Path $FixtureRoot 'hooks-retired-five-cmd.json'
+Write-TestText -Path $retiredFiveCmdRegistryPath -Value (([pscustomobject][ordered]@{
+    hooks = [pscustomobject][ordered]@{
+        SessionStart = @(
+            [pscustomobject][ordered]@{ hooks = @([pscustomobject][ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\codex-state-preflight.cmd'; timeout = 10 }) }
+            [pscustomobject][ordered]@{ matcher = 'startup|resume'; hooks = @([pscustomobject][ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\serena-activation-reminder.cmd'; timeout = 10 }) }
+            [pscustomobject][ordered]@{ hooks = @([pscustomobject][ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\codex-github-cli-guard.cmd'; timeout = 10 }) }
+            [pscustomobject][ordered]@{ hooks = @([pscustomobject][ordered]@{ type = 'command'; command = 'powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\herdr-agent-state.ps1" session'; timeout = 10 }) }
+        )
+        Stop = @(
+            [pscustomobject][ordered]@{ hooks = @([pscustomobject][ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd'; timeout = 10 }) }
+        )
+        PreToolUse = @(
+            [pscustomobject][ordered]@{ matcher = 'Bash'; hooks = @([pscustomobject][ordered]@{ type = 'command'; command = 'D:\Codex\.codex\hooks\serena-reminder-guarded.cmd'; timeout = 10 }) }
+        )
+    }
+}) | ConvertTo-Json -Depth 20)
+$retiredFiveCmdFacts = Get-CodexHookRegistryFacts -RegistryPath $retiredFiveCmdRegistryPath -Manifest $hostPreflightManifest
+$retiredFiveCmdEntries = @($retiredFiveCmdFacts.events.SessionStart) + @($retiredFiveCmdFacts.events.Stop) + @($retiredFiveCmdFacts.events.PreToolUse)
+foreach ($retiredCmdId in @('codex-state-preflight-cmd-legacy', 'serena-activate-cmd-legacy', 'github-cli-cmd-legacy', 'serena-cleanup-cmd-legacy', 'serena-reminder-cmd-legacy')) {
+    Assert-True (
+        @($retiredFiveCmdEntries | Where-Object { $_.idMatch -ceq $retiredCmdId -and $_.registrationState -ceq 'retired-but-registered' }).Count -eq 1
+    ) "production inventory 必须将已退役现役 .cmd 包装器注册识别为 retired-but-registered：$retiredCmdId"
+}
+$retiredFiveCmdDocument = New-CodexHookInventoryDocument -Manifest $hostPreflightManifest -Registry $retiredFiveCmdFacts -FileFacts @() -DependencyFacts @() -TrustObservation @()
+Assert-True ($retiredFiveCmdDocument.summary.retiredButRegisteredCount -eq 5) '旧 5 个 .cmd 包装器注册必须精确计入 retiredButRegisteredCount=5'
+
+$directCanonicalRegistryPath = Join-Path $FixtureRoot 'hooks-direct-canonical.json'
+$directCanonicalRegistry = [pscustomobject][ordered]@{
+    hooks = [pscustomobject][ordered]@{
+        SessionStart = @(
+            (New-CodexHookCanonicalRegistryGroup -Hook (@($hostPreflightManifest.hooks | Where-Object id -ceq 'codex-state-preflight')[0]))
+            (New-CodexHookCanonicalRegistryGroup -Hook (@($hostPreflightManifest.hooks | Where-Object id -ceq 'serena-activate')[0]))
+            (New-CodexHookCanonicalRegistryGroup -Hook (@($hostPreflightManifest.hooks | Where-Object id -ceq 'github-cli')[0]))
+            [pscustomobject][ordered]@{ hooks = @([pscustomobject][ordered]@{ type = 'command'; command = 'powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Codex\.codex\herdr-agent-state.ps1" session'; timeout = 10 }) }
+        )
+        Stop = @(
+            (New-CodexHookCanonicalRegistryGroup -Hook (@($hostPreflightManifest.hooks | Where-Object id -ceq 'serena-cleanup')[0]))
+        )
+        PreToolUse = @(
+            (New-CodexHookCanonicalRegistryGroup -Hook (@($hostPreflightManifest.hooks | Where-Object id -ceq 'serena-reminder')[0]))
+        )
+    }
+}
+Write-TestText -Path $directCanonicalRegistryPath -Value ($directCanonicalRegistry | ConvertTo-Json -Depth 20)
+$directCanonicalFacts = Get-CodexHookRegistryFacts -RegistryPath $directCanonicalRegistryPath -Manifest $hostPreflightManifest
+$directCanonicalEntries = @($directCanonicalFacts.events.SessionStart) + @($directCanonicalFacts.events.Stop) + @($directCanonicalFacts.events.PreToolUse)
+foreach ($activeHook in @($hostPreflightManifest.hooks)) {
+    Assert-True (
+        @($directCanonicalEntries | Where-Object { $_.idMatch -ceq [string]$activeHook.id -and $_.registrationState -ceq 'declared' -and $_.lifecycleMatch -ceq 'active' }).Count -eq 1
+    ) "production inventory 必须精确匹配新 direct-managed-launcher 注册：$($activeHook.id)"
+}
+$directCanonicalDocument = New-CodexHookInventoryDocument -Manifest $hostPreflightManifest -Registry $directCanonicalFacts -FileFacts @() -DependencyFacts @() -TrustObservation @()
+Assert-True ($directCanonicalDocument.summary.retiredButRegisteredCount -eq 0) '新 direct-managed-launcher 注册终态必须通过 retiredButRegisteredCount=0'
 $retiredIdentityDocument = New-CodexHookInventoryDocument `
     -Manifest $hostPreflightManifest `
     -Registry $retiredIdentityFacts `
@@ -473,22 +528,21 @@ foreach ($invalidHiddenCommand in @(
 }
 
 $productionManifest = Read-CodexHookManifest -Path $productionManifestPath
-$ManagedHookRoot = Join-Path $ProjectRoot 'managed\codex-hooks'
 $canonicalHiddenWrapperContracts = @(
-    [pscustomobject]@{ id = 'codex-state-preflight'; sourceRelativePath = 'hooks\codex-state-preflight.cmd'; expectedMode = $null },
-    [pscustomobject]@{ id = 'serena-activate'; sourceRelativePath = 'hooks\serena-activation-reminder.cmd'; expectedMode = 'Activation' },
-    [pscustomobject]@{ id = 'serena-cleanup'; sourceRelativePath = 'hooks\serena-cleanup-guarded.cmd'; expectedMode = 'Cleanup' },
-    [pscustomobject]@{ id = 'serena-reminder'; sourceRelativePath = 'hooks\serena-reminder-guarded.cmd'; expectedMode = 'Reminder' }
+    [pscustomobject]@{ id = 'codex-state-preflight'; liveName = 'codex-state-preflight.cmd'; expectedMode = $null },
+    [pscustomobject]@{ id = 'serena-activate'; liveName = 'serena-activation-reminder.cmd'; expectedMode = 'Activation' },
+    [pscustomobject]@{ id = 'serena-cleanup'; liveName = 'serena-cleanup-guarded.cmd'; expectedMode = 'Cleanup' },
+    [pscustomobject]@{ id = 'serena-reminder'; liveName = 'serena-reminder-guarded.cmd'; expectedMode = 'Reminder' }
 )
 foreach ($contract in $canonicalHiddenWrapperContracts) {
     $hook = @($productionManifest.hooks | Where-Object { $_.id -ceq $contract.id })[0]
     $referenceArguments = @{
-        WrapperText = Get-Content -Raw -LiteralPath (Join-Path $ManagedHookRoot $contract.sourceRelativePath)
-        WrapperPath = [string]$hook.wrapperPath
+        WrapperText = Get-CodexHookRemovedLegacyCmdTextByLiveName -LiveName $contract.liveName
+        WrapperPath = "D:\Codex\.codex\hooks\$($contract.liveName)"
         RuntimePath = [string]$productionManifest.runtimes.PSObject.Properties[$hook.runtimeId].Value
         ImplementationPath = [string]$hook.implementationPath
         RuntimeId = [string]$hook.runtimeId
-        LauncherRuntimePath = [string]$productionManifest.runtimes.PSObject.Properties[$hook.launcherRuntimeId].Value
+        LauncherRuntimePath = [string]$productionManifest.runtimes.pythonw
         LauncherImplementationPath = [string]$hook.launcherImplementationPath
     }
     if ($null -ne $contract.expectedMode) {
@@ -501,17 +555,17 @@ foreach ($contract in $canonicalHiddenWrapperContracts) {
         $canonicalHiddenReference.referencesLauncherImplementation -and
         $canonicalHiddenReference.referencesRuntime -and
         $canonicalHiddenReference.referencesImplementation
-    ) "canonical hidden wrapper 必须按自身 %~dp0 目录解析并匹配：$($contract.id)"
+    ) "历史动态生成的 hidden wrapper 必须按自身 %~dp0 目录解析并匹配：$($contract.id)"
 }
 
 $cleanupHook = @($productionManifest.hooks | Where-Object { $_.id -ceq 'serena-cleanup' })[0]
 $cleanupReferenceArguments = @{
-    WrapperText = Get-Content -Raw -LiteralPath (Join-Path $ManagedHookRoot 'hooks\serena-cleanup-guarded.cmd')
-    WrapperPath = [string]$cleanupHook.wrapperPath
+    WrapperText = Get-CodexHookRemovedLegacyCmdTextByLiveName -LiveName 'serena-cleanup-guarded.cmd'
+    WrapperPath = 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd'
     RuntimePath = [string]$productionManifest.runtimes.PSObject.Properties[$cleanupHook.runtimeId].Value
     ImplementationPath = [string]$cleanupHook.implementationPath
     RuntimeId = [string]$cleanupHook.runtimeId
-    LauncherRuntimePath = [string]$productionManifest.runtimes.PSObject.Properties[$cleanupHook.launcherRuntimeId].Value
+    LauncherRuntimePath = [string]$productionManifest.runtimes.pythonw
     LauncherImplementationPath = [string]$cleanupHook.launcherImplementationPath
 }
 $crossModeReferenceArguments = $cleanupReferenceArguments.Clone()
@@ -527,21 +581,25 @@ $escapedReference = Get-CodexHookWrapperReferenceFacts @escapedReferenceArgument
 Assert-True ($escapedReference.parseState -cne 'matched' -and $escapedReference.referencesImplementation -ne $true) '%~dp0 wrapper token 不得逃逸 wrapper 目录'
 
 $productionDependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $productionManifest)
-$directFact = @($productionDependencyFacts | Where-Object id -ceq 'serena-cleanup')[0]
+Assert-True ($productionDependencyFacts.Count -eq 5) 'production manifest 必须输出全部 5 个 hook 的 dependency facts'
+foreach ($prodFact in $productionDependencyFacts) {
+    Assert-True (
+        $prodFact.entrypointKind -ceq 'direct-managed-launcher' -and
+        $null -eq $prodFact.wrapperPath -and
+        $prodFact.wrapperParseState -ceq 'not-applicable' -and
+        $prodFact.dependencyState -ceq 'ready' -and
+        $prodFact.launcherRuntimeId -ceq 'python' -and
+        $prodFact.launcherRuntimePath -ceq 'D:\Codex\tools\python315-official\python.exe' -and
+        $prodFact.launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py' -and
+        $prodFact.launcherRuntimeExists -and
+        $prodFact.launcherImplementationExists -and
+        $prodFact.runtimeExists -and
+        $prodFact.implementationExists
+    ) "production hook 必须声明就绪的 direct-managed-launcher 依赖闭包：$($prodFact.id)"
+}
 $dependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $manifest)
 $stateFact = @($dependencyFacts | Where-Object id -ceq 'codex-state-policy')[0]
 $providerFact = @($dependencyFacts | Where-Object id -ceq 'provider-stability')[0]
-Assert-True (
-    $directFact.entrypointKind -ceq 'wrapper' -and
-    $directFact.wrapperPath -ceq 'D:\Codex\.codex\hooks\serena-cleanup-guarded.cmd' -and
-    $directFact.wrapperParseState -ceq 'matched' -and
-    $directFact.dependencyState -ceq 'ready' -and
-    $directFact.launcherRuntimeId -ceq 'pythonw' -and
-    $directFact.launcherRuntimePath -ceq 'D:\Codex\tools\python315-official\pythonw.exe' -and
-    $directFact.launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py' -and
-    $directFact.launcherRuntimeExists -and
-    $directFact.launcherImplementationExists
-) 'Serena cleanup 必须声明受控 wrapper，不得回退 direct vendor'
 Assert-True (
     $stateFact.dependencyState -ceq 'pending-or-mismatched' -and
     $stateFact.wrapperExists -eq $false -and
@@ -598,14 +656,6 @@ Assert-True ($publishedJson -notmatch '"command"\s*:') '入口不得输出 raw c
 Assert-True (-not (Test-Path -LiteralPath $probeMarker)) 'inventory 入口不得执行 hook'
 Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'REPORT.md'))) '入口必须发布 Markdown 配对报告'
 Assert-True ($published.jsonPath -ceq (Join-Path $OutputDir 'inventory.json')) '入口返回值必须指向已发布 JSON'
-$accepted = & $InventoryScript `
-    -ManifestPath $productionManifestPath `
-    -CodexHome $CodexHome `
-    -OutputDir $OutputDir `
-    -RequireNoRetiredRegistrations
-$acceptedDocument = [IO.File]::ReadAllText([string]$accepted.jsonPath) | ConvertFrom-Json -Depth 100
-Assert-True ($acceptedDocument.summary.retiredButRegisteredCount -eq 0) '当前终态必须通过 retired registration 硬门槛'
-Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'inventory.json'))) 'full acceptance 通过后必须保留已发布 inventory artifact'
 $legacyPublished = & $InventoryScript `
     -LegacyFixtureManifest `
     -ManifestPath $legacyManifestPath `
@@ -624,6 +674,20 @@ foreach ($requiredIgnore in @(
     'reports/codex-state-policy-test/'
 )) {
     Assert-True ($gitIgnoreLines -ccontains $requiredIgnore) ".gitignore 缺少精确条目：$requiredIgnore"
+}
+
+$productionProjectRoot = [IO.Path]::GetFullPath('D:\agents\projects\统一环境')
+if (-not ([IO.Path]::GetFullPath($ProjectRoot)).Equals($productionProjectRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    Write-Output "Test-CodexHookInventory: 本次从 $ProjectRoot 运行，不是正式检出，跳过 live D:\Codex\.codex -RequireNoRetiredRegistrations 比对（fixture 已覆盖 5 旧 .cmd 退役识别与 5 direct-managed-launcher 零退役终态）。"
+} else {
+    $accepted = & $InventoryScript `
+        -ManifestPath $productionManifestPath `
+        -CodexHome $CodexHome `
+        -OutputDir $OutputDir `
+        -RequireNoRetiredRegistrations
+    $acceptedDocument = [IO.File]::ReadAllText([string]$accepted.jsonPath) | ConvertFrom-Json -Depth 100
+    Assert-True ($acceptedDocument.summary.retiredButRegisteredCount -eq 0) '当前终态必须通过 retired registration 硬门槛'
+    Assert-True ([IO.File]::Exists((Join-Path $OutputDir 'inventory.json'))) 'full acceptance 通过后必须保留已发布 inventory artifact'
 }
 
 [pscustomobject]@{

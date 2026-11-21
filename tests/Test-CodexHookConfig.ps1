@@ -72,11 +72,11 @@ Assert-True (-not $providerText.Contains('$Watch') -and -not $providerText.Conta
 Assert-True ($providerText.Contains("Local\CodexConfigTomlGuard") -and $dashboardText.Contains("Local\CodexConfigTomlGuard")) '两者必须共享固定 TOML mutex'
 Assert-True ($providerText.Contains('Update-CodexTomlPolicyText') -and $dashboardText.Contains('Update-CodexTomlPolicyText') -and $dashboardText.Contains('Update-SerenaYamlPolicyText')) 'hook 必须只声明 desired 并复用纯变换'
 $realManagedRoot=Join-Path $projectRoot 'managed\codex-hooks'
-Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot $realManagedRoot) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot $realManagedRoot) '受管源码树必须零 .cmd 文件且全部 10 个已退役/历史 .cmd 均已移除'
 $manifest=Get-Content -Raw (Join-Path $realManagedRoot 'manifest.json')|ConvertFrom-Json
 $isolatedManagedSourceRoot=Join-Path $fixture 'isolated-manifest-source'
 $materializedManifestTree=New-CodexHookIsolatedLegacyManagedSourceTree -SourceManagedRoot $realManagedRoot -DestinationRoot $isolatedManagedSourceRoot -Manifest $manifest
-Assert-True (@($materializedManifestTree.generatedRelativePaths).Count -eq 3) '兼容 manifest 中 3 个已移除历史 .cmd 必须改为在隔离临时目录动态构造'
+Assert-True (@($materializedManifestTree.generatedRelativePaths).Count -eq 8) '兼容 manifest 中 8 个已移除历史 .cmd 必须改为在隔离临时目录动态构造'
 $removedLegacyRelativePaths=Get-CodexHookRemovedLegacyCmdRelativePaths
 foreach($file in @($manifest.files)){
     $relativePath=[string]$file.relativePath

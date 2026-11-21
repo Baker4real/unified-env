@@ -15,12 +15,16 @@ import uuid
 from unittest import mock
 
 
-PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
-HOOK_ROOT = PROJECT_ROOT / "managed" / "codex-hooks" / "hooks"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CANONICAL_FIXTURE_PROJECT_ROOT = Path(r"D:\agents\projects\统一环境")
+MANAGED_ROOT = PROJECT_ROOT / "managed" / "codex-hooks"
+HOOK_ROOT = MANAGED_ROOT / "hooks"
+HOST_MANIFEST = MANAGED_ROOT / "host-preflight-manifest.json"
 PREFLIGHT = HOOK_ROOT / "codex-state-preflight.py"
-WRAPPER = HOOK_ROOT / "codex-state-preflight.cmd"
+LAUNCHER = HOOK_ROOT / "lib" / "hidden-console-launcher.py"
+RETIRED_WRAPPER = HOOK_ROOT / "codex-state-preflight.cmd"
 PYTHON = Path(r"D:\Codex\tools\python315-official\python.exe")
-FIXTURE_ROOT = PROJECT_ROOT / "reports" / "codex-state-preflight-test"
+FIXTURE_ROOT = CANONICAL_FIXTURE_PROJECT_ROOT / "reports" / "codex-state-preflight-test"
 SUBPROCESS_CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
@@ -67,20 +71,50 @@ class CodexStatePreflightTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
-    def test_wrapper_pins_official_python_and_managed_preflight(self) -> None:
-        text = WRAPPER.read_text(encoding="utf-8")
-
-        self.assertIn(
-            r'"D:\Codex\tools\python315-official\python.exe"',
-            text,
-        )
-        self.assertIn(
-            r'"%~dp0codex-state-preflight.py"',
-            text,
-        )
-        self.assertIn("%*", text)
-        self.assertNotIn("%CD%", text.upper())
+    def test_manifest_pins_direct_managed_launcher_and_removes_cmd_wrapper(self) -> None:
+        self.assertFalse(RETIRED_WRAPPER.exists())
         self.assertTrue(PREFLIGHT.is_file())
+        self.assertTrue(LAUNCHER.is_file())
+
+        manifest = json.loads(HOST_MANIFEST.read_text(encoding="utf-8"))
+        matches = [
+            hook for hook in manifest["hooks"] if hook.get("id") == "codex-state-preflight"
+        ]
+        self.assertEqual(len(matches), 1)
+        hook = matches[0]
+        self.assertEqual(hook["commandPath"], str(PYTHON))
+        self.assertIsNone(hook["wrapperPath"])
+        self.assertEqual(hook["runtimeId"], "python")
+        self.assertEqual(hook["launcherRuntimeId"], "python")
+        self.assertEqual(
+            hook["launcherImplementationPath"],
+            r"D:\Codex\.codex\hooks\lib\hidden-console-launcher.py",
+        )
+        self.assertEqual(
+            hook["implementationPath"],
+            r"D:\Codex\.codex\hooks\codex-state-preflight.py",
+        )
+        self.assertEqual(
+            hook["arguments"],
+            [
+                "-I",
+                "-S",
+                "-B",
+                "-X",
+                "utf8",
+                r"D:\Codex\.codex\hooks\lib\hidden-console-launcher.py",
+                str(PYTHON),
+                "-I",
+                "-S",
+                "-B",
+                "-X",
+                "utf8",
+                r"D:\Codex\.codex\hooks\codex-state-preflight.py",
+                ";",
+                "exit",
+                "$LASTEXITCODE",
+            ],
+        )
 
     def test_check_only_json_uses_authorized_fixture_and_stable_schema(self) -> None:
         environment = os.environ.copy()
