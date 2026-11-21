@@ -212,7 +212,7 @@ canonical rename 是单候选 `decision=update` 的原子 identity 迁移，不�
 - catalog 不再包含退役 active artifact；
 - 每个 survivor 的 active `SKILL.md`、catalog hash 和 ledger coverage 与 manifest 一致。
 
-任一 activation、ledger、catalog、closure 或 postcondition 失败都恢复退役 skill、update 目标、ledger 和 catalog。成功事务保留一次可恢复 backup，并在结果中标记 `backup_cleanup=required-after-transaction-success`；调用方完成独立 active/hash/ledger/catalog/closure 验收后，必须只用 `D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd` 的 Plan/Apply/Purge 删除该精确 backup。最终退役证据只保留旧内容 seal、哈希、ledger 动作与安全删除 transaction，不保留 payload 副本。
+任一 activation、ledger、catalog、closure 或 postcondition 失败都恢复退役 skill、update 目标、ledger 和 catalog。成功事务保留一次可恢复 backup，并在结果中标记 `backup_cleanup=required-after-transaction-success`；调用方完成独立 active/hash/ledger/catalog/closure 验收后，必须只用 `D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1` 的 Plan/Apply/Purge 删除该精确 backup。最终退役证据只保留旧内容 seal、哈希、ledger 动作与安全删除 transaction，不保留 payload 副本。
 
 ## 可维护性
 

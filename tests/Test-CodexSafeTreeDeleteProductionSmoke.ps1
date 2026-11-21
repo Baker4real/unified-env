@@ -2,7 +2,7 @@
 param()
 
 # 完整 ProductionSmoke 会在 .scratch/safe-tree-delete-tests-productionsmoke-* 下
-# 创建一次性 fixture，并经 live invoke-safe-tree-delete.cmd 在
+# 创建一次性 fixture，并经 live invoke-safe-tree-delete.ps1 在
 # D:\agents\run-evidence\safe-tree-delete\ 留下新 operation。这是 live 链的固有
 # 依赖，不是对 leftover 或 #22 候选的写入。隔离：capability 目标只在项目
 # .scratch 专用前缀；harness 证据写到 SAFE_TREE_DELETE_SMOKE_EVIDENCE_ROOT 或
@@ -14,16 +14,16 @@ param()
 # 耗时随 live 状态增长：2026-08 时 live Status 约 2350 个 operation，整套约 60 秒；
 # 2026-10-29 时 9961 个，整套 661 秒。放后台跑并等进程退出，别按一分钟量级判定卡住。
 #
-# #55：真实 .cmd → 宿主 .ps1 → 生产脚本 的 smoke seam。成功 / 超时 / 失败
+# #55：受管 pwsh -File → 宿主 live .ps1 gate shim → 生产脚本 的 smoke seam。成功 / 超时 / 失败
 # 都要收口进程树；leaf-delete-failed 必须打到生产 JSON；Status 用 pre/post
 # manifest+USN 证明只读零写入，代际绑定用 operations[].operationId（Status
 # 合同无 generationId）。超时是 harness taskkill 合同，不是 wrapper 参数。
 # #21（#89 起改在 fixture 副本上证明）：用部署工具测试 seam（-ShimPathForTest/
 # -StateRootForTest/-ProjectRootForTest/-MutexNameForTest）把当前源码生成的 gate shim
-# 装到 scratch，配指向它的 fixture .cmd（生产 .cmd 写死 live .ps1 路径）；变异（撤
-# LASTEXITCODE 转发）只作用于这对副本。撤转发后 .cmd→.ps1 链对 leaf-delete-failed
-# 返回 0 且 JSON 仍为该 refusal；从 backup 字节恢复后返回非零。宿主 live .ps1/.cmd
-# 全程不被打开改写，套件首尾各校验一次 SHA-256 并写进 evidence。
+# 装到 scratch；变异（撤 LASTEXITCODE 转发）只作用于该 fixture shim 副本。撤转发后
+# 经 pwsh -File 调用 fixture .ps1 对 leaf-delete-failed 返回 0 且 JSON 仍为该 refusal；
+# 从 backup 字节恢复后返回非零。宿主 live .ps1 全程不被打开改写，套件首尾各校验一次
+# SHA-256 并写进 evidence。
 # 不要在 Purge 开始前对 quarantine 持 FileShare.Read：预检快照会在那时即遭
 # Win32 32 并以结构化 leaf-delete-failed 拒绝（该路径由 fixture 套件
 # Test-CodexSafeTreeDeletePurgePreflightLockRefusal.ps1 覆盖）；本套件要覆盖的是
@@ -73,8 +73,6 @@ $failFixtureRoot = Join-Path $scratchRoot 'issue55-livefail'
 $failPayloadPath = Join-Path $failFixtureRoot 'issue55-locked-payload.txt'
 $issue21FailFixtureRoot = Join-Path $scratchRoot 'issue21-livefail'
 $issue21FailPayloadPath = Join-Path $issue21FailFixtureRoot 'issue21-locked-payload.txt'
-$liveWrapper = 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.cmd'
-$sourceWrapper = Join-Path $projectRoot 'scripts\invoke-codex-safe-tree-delete.cmd'
 $livePowerShellWrapper = 'D:\Codex\.codex\scripts\invoke-safe-tree-delete.ps1'
 $sourcePowerShellWrapper = Join-Path $projectRoot 'scripts\invoke-codex-safe-tree-delete-host.ps1'
 $pwshExe = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
@@ -102,7 +100,6 @@ $leafDeleteFailedObtained = $false
 $revertForwardingProved = $false
 $fixtureShimRestoreFailed = $false
 $livePs1Sha256Final = $null
-$liveCmdSha256Final = $null
 $liveWrappersUntouched = $false
 $newInflightQuarantine = $null
 $leftoverUntouched = $false
@@ -631,8 +628,8 @@ function Invoke-LiveSafeDeleteTracked {
         [Parameter(Mandatory)][string[]]$Arguments,
         [Parameter(Mandatory)][int]$TimeoutMs,
         [Parameter(Mandatory)][int]$ExpectedExitCode,
-        # #89：issue21 场景经 fixture .cmd 调用；缺省仍是宿主 live .cmd。
-        [string]$WrapperPath = $liveWrapper,
+        # #89：issue21 场景经 fixture .ps1 gate shim 调用；缺省仍是宿主 live .ps1 gate shim。
+        [string]$WrapperPath = $livePowerShellWrapper,
         [switch]$AllowTimeout,
         [switch]$RequireJson
     )
@@ -653,8 +650,9 @@ function Invoke-LiveSafeDeleteTracked {
     if ([IO.File]::Exists($stderrPath)) { [IO.File]::Delete($stderrPath) }
 
     $startedAtUtc = [datetimeoffset]::UtcNow
-    $proc = Start-Process -FilePath $WrapperPath `
-        -ArgumentList @($Arguments) `
+    $pwshArguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $WrapperPath) + @($Arguments)
+    $proc = Start-Process -FilePath $pwshExe `
+        -ArgumentList $pwshArguments `
         -WorkingDirectory $projectRoot `
         -RedirectStandardOutput $stdoutPath `
         -RedirectStandardError $stderrPath `
@@ -793,8 +791,6 @@ $frozenLeafDeleteFailedSha256AtStart = Get-LowerSha256 -Path $frozenLeafDeleteFa
 [void][IO.Directory]::CreateDirectory($issue55Dir)
 [void][IO.Directory]::CreateDirectory($issue21Dir)
 
-Assert-True ([IO.File]::Exists($liveWrapper)) 'live safe-delete wrapper 必须存在'
-Assert-True ([IO.File]::Exists($sourceWrapper)) 'source safe-delete wrapper 必须存在'
 Assert-True ([IO.File]::Exists($livePowerShellWrapper)) 'live PowerShell safe-delete wrapper 必须存在'
 Assert-True ([IO.File]::Exists($sourcePowerShellWrapper)) 'source PowerShell safe-delete wrapper 必须存在'
 Assert-True ([IO.File]::Exists($pwshExe)) '受管 pwsh 必须存在'
@@ -811,10 +807,6 @@ $identity = [ordered]@{
         pwshExe = $pwshExe
     }
     wrappers = [ordered]@{
-        liveCmd = $liveWrapper
-        sourceCmd = $sourceWrapper
-        liveCmdSha256 = Get-LowerSha256 -Path $liveWrapper
-        sourceCmdSha256 = Get-LowerSha256 -Path $sourceWrapper
         livePs1 = $livePowerShellWrapper
         livePs1Sha256 = [string]$gateShimDrift.liveSha256
         expectedPs1Sha256 = [string]$gateShimDrift.expectedSha256
@@ -844,13 +836,10 @@ $identity = [ordered]@{
         note = '历史 issue55/issue21 快照只读。本票 harness 证据只写 harnessEvidenceRoot。'
     }
 }
-$identity.wrappers.cmdEqual = (
-    [string]$identity.wrappers.liveCmdSha256 -ceq [string]$identity.wrappers.sourceCmdSha256)
 # #89：ps1Equal = live .ps1 等于部署工具按生产规则从当前仓库生成的 gate shim 安装字节
 # （不是转发包装）；期望值来源记录在 expectedPs1Source。
 $identity.wrappers.ps1Equal = [bool]$gateShimDrift.equal
 Write-Issue55Json -Path (Join-Path $issue55Dir 'identity.json') -Document $identity
-Assert-True ([bool]$identity.wrappers.cmdEqual) 'live/source wrapper SHA-256 必须一致'
 Assert-True ([bool]$identity.wrappers.ps1Equal) (
     'live PowerShell wrapper 身份断言失败（在任何 live 操作之前闭锁）：' + [string]$gateShimDrift.driftMessage)
 
@@ -1026,8 +1015,8 @@ try {
     if ([IO.File]::Exists($timeoutProcStdout)) { [IO.File]::Delete($timeoutProcStdout) }
     if ([IO.File]::Exists($timeoutProcStderr)) { [IO.File]::Delete($timeoutProcStderr) }
     $timeoutStartedAtUtc = [datetimeoffset]::UtcNow
-    $timeoutProc = Start-Process -FilePath $liveWrapper `
-        -ArgumentList @('-Mode', 'Status', '-Json') `
+    $timeoutProc = Start-Process -FilePath $pwshExe `
+        -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $livePowerShellWrapper, '-Mode', 'Status', '-Json') `
         -WorkingDirectory $projectRoot `
         -RedirectStandardOutput $timeoutProcStdout `
         -RedirectStandardError $timeoutProcStderr `
@@ -1039,7 +1028,7 @@ try {
     $childDeadline = [datetime]::UtcNow.AddSeconds(30)
     while ([datetime]::UtcNow -lt $childDeadline -and -not $timeoutProc.HasExited) {
         $tree = @(Get-ProcessTree -RootId ([int]$timeoutProc.Id) -EarliestDescendantUtc $timeoutStartedAtUtc)
-        $pwshNodes = @($tree | Where-Object { [string]$_.name -match 'pwsh' -and -not $_.isRoot })
+        $pwshNodes = @($tree | Where-Object { [string]$_.name -match 'pwsh' })
         if ($pwshNodes.Count -gt 0) {
             $sawPwsh = $true
             $treeAtKill = $tree
@@ -1047,7 +1036,7 @@ try {
         }
         Start-Sleep -Milliseconds 20
     }
-    Assert-True ($sawPwsh) '超时路径必须先观察到 wrapper 子 pwsh，再强制收口'
+    Assert-True ($sawPwsh) '超时路径必须先观察到运行中的 live wrapper pwsh 进程，再强制收口'
     Assert-True (-not $timeoutProc.HasExited) '超时路径必须在 Status 仍运行时触发'
     Start-Sleep -Milliseconds 250
     Assert-True (-not $timeoutProc.HasExited) '250ms 后 Status 仍应运行，才能证明超时收口'
@@ -1070,7 +1059,7 @@ try {
     $timeoutDrill = [ordered]@{
         artifactType = 'unified-environment.safe-tree-delete.issue55.timeout-process-tree'
         schemaVersion = 1
-        invokedVia = $liveWrapper
+        invokedVia = $livePowerShellWrapper
         arguments = @('-Mode', 'Status', '-Json')
         startedAtUtc = $timeoutStartedAtUtc.ToString('o')
         endedAtUtc = $timeoutEndedAtUtc.ToString('o')
@@ -1132,8 +1121,8 @@ try {
         wrapperTimeoutParameterNames = @($timeoutParamNames)
         productionEntryParamNames = @($entryParamNames)
         liveWrapperParamNames = @($liveWrapperParamNames)
-        liveWrapper = $liveWrapper
-        liveWrapperSha256 = [string]$identity.wrappers.liveCmdSha256
+        liveWrapper = $livePowerShellWrapper
+        liveWrapperSha256 = [string]$identity.wrappers.livePs1Sha256
         livePs1Sha256 = [string]$identity.wrappers.livePs1Sha256
         unexpectedTimeoutFailsSmoke = $true
         unexpectedTimeoutPreservesStdoutStderrMeta = $true
@@ -1250,13 +1239,11 @@ try {
     [IO.File]::WriteAllText($issue21FailPayloadPath, 'issue21-revert-forwarding-leaf-delete-failed', $utf8)
 
     # #89：issue21 变异只作用于 fixture 副本。部署工具测试 seam 把当前源码生成的
-    # gate shim 装到 scratch（state/mutex/入口委托全部 fixture 化），fixture .cmd 镜像
-    # 生产 .cmd（LF、无 BOM、exit /b 转发）但指向 fixture shim；宿主 live .ps1/.cmd
-    # 全程不被打开改写，首尾 SHA-256 校验见 identity 与 summary。
+    # gate shim 装到 scratch（state/mutex/入口委托全部 fixture 化），经 pwsh -File 直接调用
+    # 该 fixture shim；宿主 live .ps1 全程不被打开改写，首尾 SHA-256 校验见 identity 与 summary。
     $issue21DeployRoot = Join-Path $scratchRoot 'issue21-deploy'
     $issue21StateRoot = Join-Path $issue21DeployRoot 'state'
     $issue21ShimPath = Join-Path $issue21DeployRoot 'invoke-safe-tree-delete.ps1'
-    $issue21CmdPath = Join-Path $issue21DeployRoot 'invoke-safe-tree-delete.cmd'
     $issue21MutexName = 'Local\CodexSafeTreeDeleteSmokeIssue21-{0}' -f [guid]::NewGuid().ToString('N')
     [void][IO.Directory]::CreateDirectory($issue21StateRoot)
     # BootstrapGate 的 shim cutover 要求 shim 已存在（备份后原子替换）：先放占位 shim。
@@ -1276,12 +1263,8 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
         -ShimPathForTest $issue21ShimPath `
         -ProjectRootForTest $projectRoot `
         -MutexNameForTest $issue21MutexName | Out-Null
-    [IO.File]::WriteAllText($issue21CmdPath, (
-        "@echo off`n" +
-        ('"{0}" -NoLogo -NoProfile -NonInteractive -File "%~dp0invoke-safe-tree-delete.ps1" %*' -f $pwshExe) + "`n" +
-        "exit /b %ERRORLEVEL%`n"), $utf8)
 
-    $failPlan = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-plan' -WrapperPath $issue21CmdPath -Arguments @(
+    $failPlan = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-plan' -WrapperPath $issue21ShimPath -Arguments @(
         '-Mode', 'Plan'
         '-TargetPath', $issue21FailFixtureRoot
         '-CapabilityRoot', $scratchCapabilityRoot
@@ -1289,7 +1272,7 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
     ) -TimeoutMs 180000 -ExpectedExitCode 0 -RequireJson
     Assert-True ($failPlan.document.planned -eq $true) 'issue21 负向路径 Plan 必须成功'
 
-    $failApply = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-apply' -WrapperPath $issue21CmdPath -Arguments @(
+    $failApply = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-apply' -WrapperPath $issue21ShimPath -Arguments @(
         '-Mode', 'Apply'
         '-PlanPath', [string]$failPlan.document.planPath
         '-ApprovedPlanSha256', [string]$failPlan.document.planSha256
@@ -1352,7 +1335,7 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
         $revertedSha = Get-LowerSha256 -Path $issue21ShimPath
         Assert-True ($revertedSha -cne $fixtureShimShaBeforeMutate) '撤转发后 fixture shim SHA 必须变化'
 
-        $issue21FailPurge = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-purge-revert-forwarding' -WrapperPath $issue21CmdPath -Arguments @(
+        $issue21FailPurge = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-purge-revert-forwarding' -WrapperPath $issue21ShimPath -Arguments @(
             '-Mode', 'Purge'
             '-TransactionPath', [string]$failApply.document.transactionPath
             '-ApprovedTransactionSha256', [string]$failApply.document.transactionSha256
@@ -1368,20 +1351,18 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
         $revertEvidence = [ordered]@{
             artifactType = 'unified-environment.safe-tree-delete.issue21.revert-forwarding'
             schemaVersion = 2
-            invokedVia = $issue21CmdPath
+            invokedVia = $issue21ShimPath
             mutatedFile = $issue21ShimPath
             mutationScope = 'fixture-copy-only'
             installSeam = 'Deploy-CodexSafeTreeDelete -Mode BootstrapGate 测试 seam（StateRootForTest/ShimPathForTest/ProjectRootForTest/MutexNameForTest）'
             fixtureStateRoot = $issue21StateRoot
             fixtureMutexName = $issue21MutexName
             fixtureShimPath = $issue21ShimPath
-            fixtureCmdPath = $issue21CmdPath
             backupPath = $fixtureShimBackupPath
             backupSha256 = $fixtureBackupSha
             fixtureShimSha256BeforeMutate = $fixtureShimShaBeforeMutate
             revertedPs1Sha256 = $revertedSha
             livePs1Sha256 = [string]$identity.wrappers.livePs1Sha256
-            liveCmdSha256 = [string]$identity.wrappers.liveCmdSha256
             liveWrappersTouched = $false
             lockStrategy = 'watch-transaction-status-purging-then-FileShare.Read'
             lockAcquiredMarkerExists = [IO.File]::Exists($issue21LockAcquiredPath)
@@ -1411,7 +1392,7 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
         Assert-True ([bool]$revertEvidence.productionJsonObtained) `
             '撤转发后生产 JSON 仍须是 purged=false + leaf-delete-failed + metrics'
         Assert-True ([int]$revertEvidence.exitCode -eq 0) `
-            '撤转发后经 fixture .cmd 的 wrapper 必须对 leaf-delete-failed 返回 0（证明断言会红）'
+            '撤转发后经 fixture .ps1 gate shim 的 wrapper 必须对 leaf-delete-failed 返回 0（证明断言会红）'
         Assert-True ($issue21FailPurge.remainingDescendantCount -eq 0) 'issue21 撤转发路径进程树必须收口'
         $revertForwardingProved = $true
     } finally {
@@ -1440,7 +1421,7 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
     # 恢复转发后（锁仍持有、quarantine 仍是 leaf-delete-failed 状态）：同一 refusal
     # 必须返回非零，证明转发恢复生效。
     $forwardedTransactionSha = Get-LowerSha256 -Path ([string]$failApply.document.transactionPath)
-    $issue21ForwardedPurge = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-purge-forwarded' -WrapperPath $issue21CmdPath -Arguments @(
+    $issue21ForwardedPurge = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-purge-forwarded' -WrapperPath $issue21ShimPath -Arguments @(
         '-Mode', 'Purge'
         '-TransactionPath', [string]$failApply.document.transactionPath
         '-ApprovedTransactionSha256', $forwardedTransactionSha
@@ -1463,7 +1444,7 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
         $lockProcess = $null
     }
     $resumeSha = Get-LowerSha256 -Path ([string]$failApply.document.transactionPath)
-    $issue21Resume = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-purge-resume' -WrapperPath $issue21CmdPath -Arguments @(
+    $issue21Resume = Invoke-LiveSafeDeleteTracked -Name 'issue21-fail-purge-resume' -WrapperPath $issue21ShimPath -Arguments @(
         '-Mode', 'Purge'
         '-TransactionPath', [string]$failApply.document.transactionPath
         '-ApprovedTransactionSha256', $resumeSha
@@ -1533,7 +1514,7 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
     $leafEvidence = [ordered]@{
         artifactType = 'unified-environment.safe-tree-delete.issue55.production-purge-leaf-delete-failed'
         schemaVersion = 1
-        invokedVia = $liveWrapper
+        invokedVia = $livePowerShellWrapper
         lockStrategy = 'watch-transaction-status-purging-then-FileShare.Read'
         lockAcquiredMarkerExists = [IO.File]::Exists($lockAcquiredPath)
         exitCode = [int]$failPurge.exitCode
@@ -1630,10 +1611,8 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
         [bool]$identity.forbiddenLeftover.transactionExistsAtStart -eq $leftoverTransactionPresent -and
         [string]$identity.forbiddenLeftover.transactionSha256AtStart -ceq [string]$leftoverTransactionSha)
     $livePs1Sha256Final = Get-LowerSha256 -Path $livePowerShellWrapper
-    $liveCmdSha256Final = Get-LowerSha256 -Path $liveWrapper
     $liveWrappersUntouched = (
-        [string]$livePs1Sha256Final -ceq [string]$identity.wrappers.livePs1Sha256 -and
-        [string]$liveCmdSha256Final -ceq [string]$identity.wrappers.liveCmdSha256)
+        [string]$livePs1Sha256Final -ceq [string]$identity.wrappers.livePs1Sha256)
     $summary = [ordered]@{
         ok = (
             [bool]$leafDeleteFailedObtained -and
@@ -1658,8 +1637,6 @@ exit $(if (Test-Path Variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 })
         liveWrappersUntouched = $liveWrappersUntouched
         livePs1Sha256AtStart = [string]$identity.wrappers.livePs1Sha256
         livePs1Sha256AtEnd = $livePs1Sha256Final
-        liveCmdSha256AtStart = [string]$identity.wrappers.liveCmdSha256
-        liveCmdSha256AtEnd = $liveCmdSha256Final
         expectedLivePs1Sha256 = [string]$identity.wrappers.expectedPs1Sha256
         expectedLivePs1Source = $identity.wrappers.expectedPs1Source
         invocationCount = $invocationRecords.Count
@@ -1705,8 +1682,7 @@ if (-not $revertForwardingProved) {
 }
 if (-not $liveWrappersUntouched) {
     throw ("套件运行期间宿主 live wrapper 字节发生变化：" +
-        "live .ps1 start=$($identity.wrappers.livePs1Sha256) end=$livePs1Sha256Final；" +
-        "live .cmd start=$($identity.wrappers.liveCmdSha256) end=$liveCmdSha256Final")
+        "live .ps1 start=$($identity.wrappers.livePs1Sha256) end=$livePs1Sha256Final")
 }
 if (-not [IO.File]::Exists($frozenLeafDeleteFailedPath)) {
     throw "历史 leaf-delete-failed.json 丢失：$frozenLeafDeleteFailedPath"
@@ -1739,7 +1715,6 @@ if ([string]$frozenLeafDeleteFailedSha256AtEnd -cne [string]$frozenLeafDeleteFai
     revertForwardingExitCode = 0
     revertForwardingForwardedExitCode = 1
     livePs1Sha256Final = $livePs1Sha256Final
-    liveCmdSha256Final = $liveCmdSha256Final
     liveWrappersUntouched = $true
     fixtureShimRestored = $true
     leftover0ab1e1b6Untouched = $leftoverUntouched

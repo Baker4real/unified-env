@@ -532,7 +532,7 @@ try {
     }
     # 只回显通过校验的批准值。
     if ($Mode -ceq 'Apply') { $result.approvedCandidatePolicySha256 = $ApprovedCandidatePolicySha256 }
-    # 宿主 .cmd 链只能传单个字符串：单个含 '::' 的值按 '::' 拆成多个 operation id。
+    # pwsh -File 调用链每个参数只能传单个字符串：单个含 '::' 的值按 '::' 拆成多个 operation id。
     $confirmationValues = @($ConfirmManualReviewOperationIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($confirmationValues.Count -eq 1 -and ([string]$confirmationValues[0]).Contains('::')) {
         $confirmationValues = ([string]$confirmationValues[0]).Split([string[]]@('::'), [StringSplitOptions]::RemoveEmptyEntries)

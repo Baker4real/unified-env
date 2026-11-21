@@ -158,7 +158,7 @@ function Get-StatusErrorMessage {
 function Invoke-FixtureEntryProcess {
     param([Parameter(Mandatory)][string[]]$Arguments)
 
-    # 宿主 .cmd → gate shim 链以 pwsh -File 传参，每个参数都是单个字符串。stdout 按 Latin1 逐字节
+    # 宿主 gate shim 链以 pwsh -File 传参，每个参数都是单个字符串。stdout 按 Latin1 逐字节
     # 解码，不依赖子进程控制台代码页；调用方只断言 ASCII 内容。
     $start = [Diagnostics.ProcessStartInfo]::new([Diagnostics.Process]::GetCurrentProcess().MainModule.FileName)
     $start.UseShellExecute = $false
@@ -384,7 +384,7 @@ try {
     Assert-ScopedMatchesFiltered -Full $full -Scoped $scopedMulti -Targets $multiTargets -Label '多目标范围'
     Assert-True ((@($scopedMulti.scope.targets) -join '|') -ceq ($multiTargets -join '|')) 'scope.targets 必须按传入顺序回显'
 
-    # 5. pwsh -File 子进程：宿主 .cmd 链只能传单个字符串，多个范围目标与 BatchPurge 一样以 '::' 连接，
+    # 5. pwsh -File 子进程：pwsh -File 调用链只能传单个字符串，多个范围目标与 BatchPurge 一样以 '::' 连接，
     #    结果与进程内传数组相同。子进程 stdout 只按 ASCII 内容比较（operationId、lifecycle、计数与目标
     #    路径的 ASCII 尾段），所以放在加入错误消息为中文的坏记录之前。
     $joinedTargets = @($gamma, $alpha, $delta)
