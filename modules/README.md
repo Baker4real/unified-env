@@ -24,6 +24,7 @@ dev-environment -----> host-safety <----- codex-host
                            ^
 skill-supply-chain --------+
 codex-host ----------> workstation-operations -----> host-safety
+workstation-operations -----> dev-environment
 codex-host ----------> skill-supply-chain
 ```
 
