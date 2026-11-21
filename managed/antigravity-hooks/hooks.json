@@ -1,0 +1,30 @@
+{
+  "pwsh-preflight-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -B -X utf8 D:/Codex/.codex/scripts/antigravity_pretool_guard.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  },
+  "pretool-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|write_file|edit_file|write_to_file|replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:\\Codex\\tools\\bin\\node.exe D:\\agents\\projects\\统一环境\\managed\\antigravity-hooks\\antigravity-pretool-guard.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
