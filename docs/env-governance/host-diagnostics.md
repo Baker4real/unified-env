@@ -42,6 +42,8 @@ intent: 定义诊断工具的源码归属、部署闭包、输出边界和验收
 
 参数与返回结构以各脚本帮助/源码为准。活动日志不是原子快照；命名模式脱敏不保证发现任意秘密，仍要缩小敏感来源与字段范围。需要复核某条失败时保留来源、行窗口和退出码，不输出完整日志。
 
+`rg` 的静态参数可分类时，受检入口在执行前做两项拒绝（均退出 2 并给出行列）：① 绝对搜索路径含未展开 `*` 或 `?` 时报 `native-argument-error command=rg reason=unexpanded-wildcard-path`，先用 `Get-ChildItem -Filter` 枚举真实路径再调用 `rg`；② 不在管道右侧（无上游 stdin）且有搜索模式但省略搜索路径时（如 `rg -n 'foo'`）报 `native-argument-error command=rg reason=missing-rg-target-path`，防止非 TTY 子 shell 中 `rg` 阻塞等待 stdin，改显式传入 `.`/目标路径或显式管道输入。正则、`-g` / `--glob` 等选项值不按搜索路径处理；`--files`、信息选项（`--help`/`--version`/`--type-list`）、显式 `-`、动态 argv、未知选项和输入自定义的 `rg` 函数不做这两项判断。该检查覆盖显式调用入口，不替代运行时参数验证。
+
 ## Git 状态有界投影
 
 共享工作树不要直接把完整 `git status` 回显进上下文。用同一投影器的 `GitStatus` 参数集，把完整 porcelain 写入 `D:/agents/run-evidence/`，只读回分支、计数和本次目标路径：

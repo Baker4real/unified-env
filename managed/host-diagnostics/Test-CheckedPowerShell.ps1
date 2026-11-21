@@ -1,4 +1,4 @@
-#requires -Version 7.4
+﻿#requires -Version 7.4
 <#
 .SYNOPSIS
 Exercise Invoke-CheckedPowerShell through its public process interface.
@@ -348,6 +348,127 @@ rg -e 'MinHeight = 39' src/MinminCountdown
     foreach ($source in $valid) {
         $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
         if ($result.exitCode -ne 0) { throw "Valid native command was rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)" }
+    }
+}
+
+Assert-Case 'rg wildcard absolute search paths are rejected before any side effect' {
+    $nativeMarker = Join-Path $fixture 'CheckedPowerShell-rg-path.executed'
+    $invalidSource = @'
+[IO.File]::WriteAllText('__MARKER__', 'ran')
+rg -n -i -e 'viewSchema|failed to project session' D:/synthetic-private-path/DeepSeek*
+'@.Replace('__MARKER__', $nativeMarker.Replace("'", "''"))
+    $nativePath = Join-Path $fixture 'CheckedPowerShell-rg-path.ps1'
+    [IO.File]::WriteAllText($nativePath, $invalidSource, $utf8)
+    foreach ($inputArguments in @(@('-CommandText', $invalidSource, '-CheckOnly'), @('-ScriptPath', $nativePath))) {
+        $result = Invoke-PublicCli $inputArguments
+        if ($result.exitCode -ne 2 -or (Test-Path -LiteralPath $nativeMarker) -or
+            $result.stderr -notmatch 'native-argument-error command=rg reason=unexpanded-wildcard-path line=2 column=') {
+            throw "Wildcard rg path was not rejected before execution: exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('synthetic-private-path') -or $result.stderr.Contains('viewSchema')) {
+            throw 'Wildcard path rejection exposed source.'
+        }
+    }
+}
+
+Assert-Case 'rg path classification handles positional patterns files mode and option values' {
+    $invalid = @(
+        "rg 'pattern' 'D:/synthetic*'",
+        "rg --regexp=pattern 'D:/synthetic?'",
+        "rg --files 'D:/synthetic*'",
+        "rg -nHefoo 'D:/synthetic*'",
+        "rg -C 3 -g '*.md' -n 'pattern' 'D:/synthetic*'",
+        '& "D:/synthetic/rg.exe" -e pattern D:/synthetic*',
+        "rg --files -- '\\server\share\synthetic*'",
+        "rg --file D:/patterns.txt D:/synthetic*",
+        "rg D:/synthetic* -e pattern"
+    )
+    foreach ($source in $invalid) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'reason=unexpanded-wildcard-path') {
+            throw "Wildcard search path was not rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+    }
+}
+
+Assert-Case 'rg glob regexp and unresolved argv are not mistaken for search paths' {
+    $valid = @(
+        "rg -g 'D:/*.md' -e 'D:/regexp*' D:/source",
+        "rg --glob=D:/*.md --regexp=D:/regexp* D:/source",
+        "rg -gD:/*.md -eD:/regexp* D:/source",
+        "rg 'D:/regexp*' D:/source",
+        "rg -- 'D:/regexp*' D:/source",
+        "rg --files -g '*.md' D:/source",
+        "rg -nHC3 'pattern' D:/source",
+        'rg --files ''\\?\D:\source''',
+        'rg -e pattern $paths',
+        'rg $pattern D:/synthetic*',
+        'rg @rgArguments D:/synthetic*',
+        'rg --future-option D:/synthetic*',
+        'rg --help D:/synthetic*',
+        'function rg { param($Pattern, $Path) }; rg pattern D:/synthetic*',
+        'custom-cli -e pattern D:/synthetic*'
+    )
+    foreach ($source in $valid) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 0) {
+            throw "Valid or unresolved argv was rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+    }
+}
+
+Assert-Case 'rg without search path or upstream pipeline is rejected before execution' {
+    $nativeMarker = Join-Path $fixture 'CheckedPowerShell-rg-missing-path.executed'
+    $invalidSource = @'
+[IO.File]::WriteAllText('__MARKER__', 'ran')
+rg -n 'synthetic-pattern-do-not-echo'
+'@.Replace('__MARKER__', $nativeMarker.Replace("'", "''"))
+    $nativePath = Join-Path $fixture 'CheckedPowerShell-rg-missing-path.ps1'
+    [IO.File]::WriteAllText($nativePath, $invalidSource, $utf8)
+    foreach ($inputArguments in @(@('-CommandText', $invalidSource, '-CheckOnly'), @('-ScriptPath', $nativePath))) {
+        $result = Invoke-PublicCli $inputArguments
+        if ($result.exitCode -ne 2 -or (Test-Path -LiteralPath $nativeMarker) -or
+            $result.stderr -notmatch 'native-argument-error command=rg reason=missing-rg-target-path line=2 column=1') {
+            throw "Bare rg without search path was not rejected: exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('synthetic-pattern-do-not-echo')) {
+            throw 'Missing-path rejection exposed source.'
+        }
+    }
+    $invalid = @(
+        "rg 'pattern'",
+        "rg -n -g '*.md' 'pattern'",
+        "rg -e 'pattern'",
+        "rg -f D:/patterns.txt",
+        "rg -n 'pattern' | Select-Object -First 5",
+        "rg -- 'pattern'"
+    )
+    foreach ($source in $invalid) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'reason=missing-rg-target-path') {
+            throw "Bare rg invocation was not rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+    }
+    $valid = @(
+        "rg -n 'pattern' .",
+        "rg -e 'pattern' .",
+        "rg -n 'pattern' -",
+        "'abc' | rg -n 'a'",
+        "Get-Content a.txt | rg -e 'a' | Select-Object -First 1",
+        "rg --files",
+        "rg --version",
+        "rg -V",
+        "rg --help",
+        "rg -h",
+        "rg --type-list",
+        'rg -e pattern $paths',
+        'function rg { param($Pattern) }; rg pattern'
+    )
+    foreach ($source in $valid) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 0) {
+            throw "Valid rg invocation was rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
     }
 }
 

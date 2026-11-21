@@ -1,4 +1,4 @@
-#requires -Version 7.4
+﻿#requires -Version 7.4
 <#
 .SYNOPSIS
 先预检 PowerShell 输入，再执行或只检查语法、常量正则与内置 cmdlet 参数。
@@ -11,6 +11,8 @@
 cmdlet 的调用：参数集无法确定（AmbiguousParameterSet）或参数名不存在（NamedParameterNotFound）即拒绝。
 输入自己定义的同名函数、splat 调用和其他模块的命令不查；内置 provider 的动态参数
 （Get-Content -Raw、注册表 provider 的 -PropertyType 等）放行。
+rg 参数可静态分类时，绝对搜索路径含未展开的 * 或 ?，或未接管道输入却省略搜索路径时
+在执行前拒绝；正则、glob 选项值不按路径检查，--files、信息选项、动态 argv、未知选项或输入自定义的 rg 函数保持运行时验证。
 stdout/stderr 在子进程结束后输出。单个流超过 MaxOutputChars 时只回显开头 2/3 与结尾 1/3，
 全文写进 SpillDirectory 下的 txt，stderr 末尾给出 output-truncated 行和文件路径。
 启用 JSON 字段校验时 stdout 不截断，JSON 不合格不回显输出正文；
@@ -193,6 +195,124 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
         [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=rg reason=escaped-quote-native-argv line={0} column={1}' -f
             $invalidQuote.Extent.StartLineNumber, $invalidQuote.Extent.StartColumnNumber))
         exit 2
+    }
+}
+
+# Native argv does not expand Windows wildcard paths, and in non-TTY subshells rg without a
+# search path or upstream pipeline waits on stdin (or reads empty stdin) instead of searching ".".
+# Classify only a completely static, recognized rg invocation; a glob or regexp option's value
+# is not a search path.
+function Find-RgStaticArgumentIssue([System.Management.Automation.Language.CommandAst]$Command) {
+    $elements = @($Command.CommandElements)
+    $arguments = [Collections.Generic.List[string]]::new()
+    foreach ($element in $elements | Select-Object -Skip 1) {
+        if ($element -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+            $arguments.Add($element.Value)
+        } elseif ($element -is [System.Management.Automation.Language.ConstantExpressionAst] -and $element.Value -is [ValueType]) {
+            $arguments.Add([Convert]::ToString($element.Value, [Globalization.CultureInfo]::InvariantCulture))
+        } elseif ($element -is [System.Management.Automation.Language.CommandParameterAst] -and $null -eq $element.Argument) {
+            $arguments.Add($element.Extent.Text)
+        } else { return $null }
+    }
+    $valueOptions = @(
+        '--regexp', '--file', '--pre', '--pre-glob', '--dfa-size-limit', '--encoding', '--engine',
+        '--max-count', '--regex-size-limit', '--threads', '--glob', '--iglob', '--ignore-file',
+        '--max-depth', '--max-filesize', '--type', '--type-not', '--type-add', '--type-clear',
+        '--after-context', '--before-context', '--color', '--colors', '--context', '--context-separator',
+        '--field-context-separator', '--field-match-separator', '--hostname-bin', '--hyperlink-format',
+        '--max-columns', '--path-separator', '--replace', '--sort', '--sortr', '--generate'
+    )
+    $switchOptions = @(
+        '--search-zip', '--case-sensitive', '--crlf', '--fixed-strings', '--ignore-case', '--invert-match',
+        '--line-regexp', '--mmap', '--multiline', '--multiline-dotall', '--no-unicode', '--null-data',
+        '--pcre2', '--smart-case', '--stop-on-nonmatch', '--text', '--word-regexp', '--auto-hybrid-regex',
+        '--no-pcre2-unicode', '--binary', '--follow', '--glob-case-insensitive', '--hidden',
+        '--ignore-file-case-insensitive', '--no-ignore', '--no-ignore-dot', '--no-ignore-exclude',
+        '--no-ignore-files', '--no-ignore-global', '--no-ignore-parent', '--no-ignore-vcs', '--no-require-git',
+        '--one-file-system', '--unrestricted', '--block-buffered', '--byte-offset', '--column', '--heading',
+        '--include-zero', '--line-buffered', '--line-number', '--no-line-number', '--max-columns-preview',
+        '--null', '--only-matching', '--passthru', '--pretty', '--quiet', '--trim', '--vimgrep',
+        '--with-filename', '--no-filename', '--sort-files', '--count', '--count-matches', '--files-with-matches',
+        '--files-without-match', '--json', '--debug', '--no-ignore-messages', '--no-messages', '--stats',
+        '--trace', '--files', '--no-config'
+    )
+    $positionals = [Collections.Generic.List[int]]::new()
+    $explicitPattern = $false
+    $filesMode = $false
+    $endOptions = $false
+    for ($index = 0; $index -lt $arguments.Count; $index++) {
+        $argument = $arguments[$index]
+        if ($endOptions -or -not $argument.StartsWith('-') -or $argument -eq '-') {
+            $positionals.Add($index)
+            continue
+        }
+        if ($argument -eq '--') { $endOptions = $true; continue }
+        if ($argument.StartsWith('--')) {
+            $option = ($argument -split '=', 2)[0]
+            if ($option -cin @('--help', '--version', '--pcre2-version', '--type-list', '--generate')) { return $null }
+            if ($valueOptions -ccontains $option) {
+                if ($option -cin @('--regexp', '--file')) { $explicitPattern = $true }
+                if (-not $argument.Contains('=')) {
+                    $index++
+                    if ($index -ge $arguments.Count) { return $null }
+                }
+            } elseif (($switchOptions -ccontains $option) -and -not $argument.Contains('=')) {
+                if ($option -ceq '--files') { $filesMode = $true }
+            } else { return $null }
+            continue
+        }
+        # rg permits clusters (-nH) and attached option values (-g*.md, -C3).
+        for ($offset = 1; $offset -lt $argument.Length; $offset++) {
+            $flag = $argument.Substring($offset, 1)
+            if ($flag -cin @('h', 'V')) { return $null }
+            if ('efEmjgdtTABCMr'.Contains($flag)) {
+                if ($flag -cin @('e', 'f')) { $explicitPattern = $true }
+                if ($offset -eq $argument.Length - 1) {
+                    $index++
+                    if ($index -ge $arguments.Count) { return $null }
+                }
+                break
+            }
+            if (-not 'zsFivxUPSawL.ubnN0opqHIcl'.Contains($flag)) { return $null }
+        }
+    }
+    $firstPath = if ($explicitPattern -or $filesMode) { 0 } else { 1 }
+    $receivesPipelineInput = $Command.Parent -is [System.Management.Automation.Language.PipelineAst] -and
+        $Command.Parent.PipelineElements.Count -gt 1 -and
+        $Command.Parent.PipelineElements[0] -ne $Command
+    if (-not $filesMode -and -not $receivesPipelineInput -and ($explicitPattern -or $positionals.Count -ge 1) -and $positionals.Count -le $firstPath) {
+        return [pscustomobject]@{
+            Reason = 'missing-rg-target-path'
+            Node = $Command
+            Hint = 'pass an explicit search path or pipe stdin'
+        }
+    }
+    for ($index = $firstPath; $index -lt $positionals.Count; $index++) {
+        $argumentIndex = $positionals[$index]
+        $path = $arguments[$argumentIndex]
+        # The question mark in a Windows extended-path prefix is not a wildcard.
+        $pathBody = $path -replace '^[\\/]{2}\?[\\/]', ''
+        if ([IO.Path]::IsPathFullyQualified($path) -and ($pathBody.Contains('*') -or $pathBody.Contains('?'))) {
+            return [pscustomobject]@{
+                Reason = 'unexpanded-wildcard-path'
+                Node = $elements[$argumentIndex + 1]
+                Hint = 'expand paths before rg'
+            }
+        }
+    }
+    return $null
+}
+$rgDefinedLocally = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -match '^(?:(?:global|script|local|private):)?rg(?:\.exe)?$' }, $true)).Count -gt 0
+if (-not $rgDefinedLocally) {
+    foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+        $name = $command.GetCommandName()
+        if (-not $name -or [IO.Path]::GetFileNameWithoutExtension($name) -ine 'rg') { continue }
+        $issue = Find-RgStaticArgumentIssue $command
+        if ($null -ne $issue) {
+            [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=rg reason={0} line={1} column={2}; {3}' -f
+                $issue.Reason, $issue.Node.Extent.StartLineNumber, $issue.Node.Extent.StartColumnNumber, $issue.Hint))
+            exit 2
+        }
     }
 }
 
