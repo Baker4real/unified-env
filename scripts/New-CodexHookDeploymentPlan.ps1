@@ -1,4 +1,4 @@
-[CmdletBinding(DefaultParameterSetName = 'Fixture')]
+﻿[CmdletBinding(DefaultParameterSetName = 'Fixture')]
 param(
     [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$ManifestPath,
     [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$FixtureSourceRoot,
@@ -37,9 +37,10 @@ if (
 }
 
 $outputPath = Assert-CodexHookDPath -Value $OutputDir -Name 'OutputDir'
+$projectReportsRoot = Join-Path (Get-CodexHookCheckoutRoot) 'reports'
 $allowedOutputRoots = @(
-    'D:\agents\projects\统一环境\reports\codex-hook-deployment-plan',
-    'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
+    (Join-Path $projectReportsRoot 'codex-hook-deployment-plan'),
+    (Join-Path $projectReportsRoot 'codex-hook-deployment-test')
 )
 if (-not @($allowedOutputRoots | Where-Object { Test-CodexHookPathWithin -Path $outputPath -ParentPath $_ }).Count) {
     throw 'OutputDir 不在固定 deployment plan 报告根。'

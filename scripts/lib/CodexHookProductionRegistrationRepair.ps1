@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 
 function Get-CodexHookProductionRegistrationRepairFrozenFileMappings {
     [CmdletBinding()]
@@ -80,7 +80,7 @@ function Get-CodexHookProductionRegistrationRepairFixtureProfile {
     [CmdletBinding()]
     param()
 
-    $root = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test\production-registration-repair'
+    $root = Join-Path (Get-CodexHookFixtureRoot) 'production-registration-repair'
     return [pscustomobject][ordered]@{
         profileId = 'codex-hook-production-registration-repair-v1'
         mode = 'registration-repair'
@@ -146,7 +146,7 @@ function Assert-CodexHookProductionRegistrationRepairProfile {
         if (-not $AllowFixtureAdapter) {
             throw 'production entrypoint 不接受 fixture adapter。'
         }
-        $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
+        $fixtureRoot = Get-CodexHookFixtureRoot
         foreach ($name in @(
             'manifestPath', 'sourceRoot', 'codexHome', 'hooksRoot', 'registryPath',
             'planOutputDir', 'planPath', 'evidenceRoot'

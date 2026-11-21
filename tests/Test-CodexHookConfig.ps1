@@ -1,8 +1,9 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
 . (Join-Path $projectRoot 'managed\codex-hooks\hooks\lib\CodexConfigFile.ps1')
 . (Join-Path $projectRoot 'scripts\lib\CodexHookPolicy.ps1')
+. (Join-Path $projectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
 function Assert-True([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
 function Assert-Throws([scriptblock]$Action,[string]$Pattern){try{&$Action;throw 'DID_NOT_THROW'}catch{if($_.Exception.Message -eq 'DID_NOT_THROW' -or $_.Exception.Message -notmatch $Pattern){throw "异常不匹配 [$Pattern]：$($_.Exception.Message)"}}}
 function Invoke-HiddenProcess([string]$FilePath,[string[]]$Arguments){
@@ -18,8 +19,8 @@ function Invoke-HiddenProcess([string]$FilePath,[string[]]$Arguments){
 }
 
 $sections=[ordered]@{features=[ordered]@{unified_exec='true'};network=[ordered]@{enabled='true'}}
-$input="[features]`n`nunified_exec = false`n`n[network]`nenabled = true`n"
-$sw=[Diagnostics.Stopwatch]::StartNew();$output=Update-CodexTomlPolicyText -Text $input -Sections $sections;$sw.Stop();Assert-True ($sw.ElapsedMilliseconds -lt 1000) '空行 fixture 必须在1秒内返回';Assert-True ((Update-CodexTomlPolicyText -Text $output -Sections $sections) -ceq $output) 'TOML 必须幂等'
+$tomlInput="[features]`n`nunified_exec = false`n`n[network]`nenabled = true`n"
+$sw=[Diagnostics.Stopwatch]::StartNew();$output=Update-CodexTomlPolicyText -Text $tomlInput -Sections $sections;$sw.Stop();Assert-True ($sw.ElapsedMilliseconds -lt 1000) '空行 fixture 必须在1秒内返回';Assert-True ((Update-CodexTomlPolicyText -Text $output -Sections $sections) -ceq $output) 'TOML 必须幂等'
 $commented="[features] # keep`r`n# comment`r`nunified_exec = false`r`nunknown = 7`r`n`r`n[mcp_servers.serena]`r`nargs = [`r`n  `"a`",`r`n  `"b`",`r`n]`r`n"
 $changed=Set-CodexTomlSectionValue -Text $commented -Section 'mcp_servers.serena' -Key 'args' -Value '[ "x" ]' -ValueKind array
 Assert-True ($changed.Contains("`r`n") -and $changed.Contains('# comment') -and $changed.Contains('unknown = 7')) 'CRLF、注释与未知键必须保留'
@@ -44,7 +45,10 @@ $quotedYamlOut=Update-SerenaYamlPolicyText -Text $quotedYaml -Values $values
 Assert-True ($quotedYamlOut -match '(?m)^web_dashboard: true # old$') 'quoted scalar 必须收敛为 desired 并保留 inline comment'
 Assert-True ($quotedYamlOut -match '(?m)^  web_dashboard: false # nested$') '嵌套同名键与 inline comment 必须保留'
 
-$fixture='D:\agents\projects\统一环境\reports\codex-hook-config-test';if(Test-Path $fixture){Remove-Item $fixture -Recurse -Force};[IO.Directory]::CreateDirectory($fixture)|Out-Null
+$fixture=Join-Path $projectRoot 'reports\codex-hook-config-test'
+if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}
+[IO.Directory]::CreateDirectory($fixture)|Out-Null
+try{
 $toml=Join-Path $fixture 'fixture.toml';[IO.File]::WriteAllText($toml,$output,[Text.UTF8Encoding]::new($false));$python='D:\Codex\tools\python314-official\python.exe'
 $tomlResult=Invoke-HiddenProcess $python @('-c','import pathlib,sys,tomllib; tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))',$toml);if($tomlResult.exitCode -ne 0){throw 'Python tomllib 验证失败'}
 $yamlPath=Join-Path $fixture 'fixture.yml';[IO.File]::WriteAllText($yamlPath,$yamlOut,[Text.UTF8Encoding]::new($false));$serenaPython='D:\Codex\tools\uv\tools\serena-agent\Scripts\python.exe'
@@ -67,11 +71,25 @@ Assert-True ($providerCoreText.Contains("hookId = 'provider-stability'") -and $p
 Assert-True (-not $providerText.Contains('$Watch') -and -not $providerText.Contains('Repair-CodexMobilePermissionDrift')) 'provider 不得保留 watcher 或 state/mobile 职责'
 Assert-True ($providerText.Contains("Local\CodexConfigTomlGuard") -and $dashboardText.Contains("Local\CodexConfigTomlGuard")) '两者必须共享固定 TOML mutex'
 Assert-True ($providerText.Contains('Update-CodexTomlPolicyText') -and $dashboardText.Contains('Update-CodexTomlPolicyText') -and $dashboardText.Contains('Update-SerenaYamlPolicyText')) 'hook 必须只声明 desired 并复用纯变换'
-$manifest=Get-Content -Raw (Join-Path $projectRoot 'managed\codex-hooks\manifest.json')|ConvertFrom-Json
+$realManagedRoot=Join-Path $projectRoot 'managed\codex-hooks'
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot $realManagedRoot) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
+$manifest=Get-Content -Raw (Join-Path $realManagedRoot 'manifest.json')|ConvertFrom-Json
+$isolatedManagedSourceRoot=Join-Path $fixture 'isolated-manifest-source'
+$materializedManifestTree=New-CodexHookIsolatedLegacyManagedSourceTree -SourceManagedRoot $realManagedRoot -DestinationRoot $isolatedManagedSourceRoot -Manifest $manifest
+Assert-True (@($materializedManifestTree.generatedRelativePaths).Count -eq 3) '兼容 manifest 中 3 个已移除历史 .cmd 必须改为在隔离临时目录动态构造'
+$removedLegacyRelativePaths=Get-CodexHookRemovedLegacyCmdRelativePaths
 foreach($file in @($manifest.files)){
-    $sourcePath=Join-Path $projectRoot ('managed\codex-hooks\'+[string]$file.relativePath)
+    $relativePath=[string]$file.relativePath
+    $sourcePath=Join-Path $isolatedManagedSourceRoot ($relativePath.Replace('/','\'))
     $actualSha256=(Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    Assert-True ($actualSha256 -ceq [string]$file.sha256) "manifest source SHA-256 必须匹配：$($file.relativePath)"
+    Assert-True ($actualSha256 -ceq [string]$file.sha256) "manifest source SHA-256 必须匹配：$relativePath"
+    $realSourcePath=Join-Path $realManagedRoot ($relativePath.Replace('/','\'))
+    if($removedLegacyRelativePaths -ccontains $relativePath){
+        Assert-True (-not (Test-Path -LiteralPath $realSourcePath)) "已移除历史 .cmd 不得继续存在于受管源码树：$relativePath"
+    }else{
+        $realSha256=(Get-FileHash -LiteralPath $realSourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        Assert-True ($realSha256 -ceq [string]$file.sha256) "现役/保留受管文件 SHA-256 必须匹配：$relativePath"
+    }
 }
 $providerHook=@($manifest.hooks|Where-Object id -ceq 'provider-stability')[0]
 $stateHook=@($manifest.hooks|Where-Object id -ceq 'codex-state-policy')[0]
@@ -97,3 +115,6 @@ Assert-True ($stateHealthPaths -ccontains 'D:\agents\run-evidence\codex-hook-hea
 foreach($hookFile in @('codex-provider-stability-guard.ps1','serena-dashboard-guard.ps1')){$source=[IO.File]::ReadAllText((Join-Path $projectRoot "managed\codex-hooks\hooks\$hookFile"));$match=[regex]::Match($source,"Write-CodexHookLatestHealth\s+-HookId\s+'([^']+)'");Assert-True $match.Success "$hookFile 必须调用 health writer";$id=$match.Groups[1].Value;$hook=$manifest.hooks|Where-Object id -CEQ $id;Assert-True ($null -ne $hook) "$hookFile health hookId 必须等于 manifest id";$expected="D:\agents\run-evidence\codex-hook-health\$id.json";$healthPaths=@($hook.writeResources|Where-Object kind -CEQ path|ForEach-Object value);Assert-True ($healthPaths -ccontains $expected) "$id writeResources 必须精确包含派生 health path"}
 Assert-True (-not((Get-Content -Raw (Join-Path $projectRoot 'managed\codex-hooks\manifest.json')).Contains('codex-hook-health\\provider.json'))) '兼容 manifest 不得保留旧 provider.json alias'
 'ok=True'
+}finally{
+    if(Test-Path -LiteralPath $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}
+}

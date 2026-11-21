@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -7,6 +7,7 @@ $InventoryScript = Join-Path $ProjectRoot 'scripts\Get-CodexHookInventory.ps1'
 $FixtureRoot = Join-Path $ProjectRoot 'reports\codex-hook-inventory-test'
 
 . $PolicyPath
+. (Join-Path $ProjectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
 
 function Assert-True {
     param(
@@ -53,8 +54,13 @@ function Copy-TestDocument {
     return ($Document | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100)
 }
 
-if (Test-Path -LiteralPath $FixtureRoot) {
-    $resolvedFixture = [IO.Path]::GetFullPath($FixtureRoot)
+function Remove-InventoryFixtureRoot {
+    param([Parameter(Mandatory)][string]$RootPath)
+
+    if (-not (Test-Path -LiteralPath $RootPath)) {
+        return
+    }
+    $resolvedFixture = [IO.Path]::GetFullPath($RootPath)
     $expectedPrefix = [IO.Path]::GetFullPath((Join-Path $ProjectRoot 'reports')) + [IO.Path]::DirectorySeparatorChar
     if (-not $resolvedFixture.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw "拒绝清理 fixture 根以外路径：$resolvedFixture"
@@ -69,6 +75,9 @@ if (Test-Path -LiteralPath $FixtureRoot) {
     Remove-Item -LiteralPath $resolvedFixture -Recurse -Force
 }
 
+Remove-InventoryFixtureRoot -RootPath $FixtureRoot
+
+try {
 $CodexHome = 'D:\Codex\.codex'
 $FixtureLiveHooksRoot = Join-Path $FixtureRoot 'live-hooks'
 $ManagedRoot = Join-Path $FixtureRoot 'managed-codex-hooks'
@@ -80,20 +89,42 @@ $probeMarker = Join-Path $FixtureRoot 'HOOK-EXECUTED.txt'
 $manifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\manifest.json'
 $legacyManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json'
 $productionManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\host-preflight-manifest.json'
+$realManagedRoot = Join-Path $ProjectRoot 'managed\codex-hooks'
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot $realManagedRoot) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
 $manifest = Read-CodexHookManifest -Path $manifestPath
+$legacyManifest = Read-CodexHookLegacyFixtureManifest -Path $legacyManifestPath
+$legacyIsolatedSourceRoot = Join-Path $FixtureRoot 'isolated-legacy-managed'
+$legacyMaterialized = New-CodexHookIsolatedLegacyManagedSourceTree `
+    -SourceManagedRoot $realManagedRoot `
+    -DestinationRoot $legacyIsolatedSourceRoot `
+    -Manifest $legacyManifest
+Assert-True (@($legacyMaterialized.generatedRelativePaths).Count -eq 5) 'legacy fixture 隔离临时目录必须动态构造全部 5 个已移除历史 .cmd 样本'
 $legacySourceFacts = @(Get-CodexHookFileFacts `
-    -Manifest (Read-CodexHookLegacyFixtureManifest -Path $legacyManifestPath) `
-    -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks') `
+    -Manifest $legacyManifest `
+    -ManagedRoot $legacyIsolatedSourceRoot `
     -LiveHooksRoot $FixtureLiveHooksRoot `
     -ManifestHashMode Raw)
-Assert-True (@($legacySourceFacts | Where-Object { -not $_.managedMatchesManifest }).Count -eq 0) 'legacy fixture manifest 必须覆盖当前受管 source 的 raw SHA-256'
-$legacyTampered = Copy-TestDocument (Read-CodexHookLegacyFixtureManifest -Path $legacyManifestPath)
+Assert-True (@($legacySourceFacts | Where-Object { -not $_.managedMatchesManifest }).Count -eq 0) 'legacy fixture manifest 必须与隔离临时目录动态生成的历史源码 raw SHA-256 一致'
+$legacyRealTreeFacts = @(Get-CodexHookFileFacts `
+    -Manifest $legacyManifest `
+    -ManagedRoot $realManagedRoot `
+    -LiveHooksRoot $FixtureLiveHooksRoot `
+    -ManifestHashMode Raw)
+$removedLegacyRelativePaths = Get-CodexHookRemovedLegacyCmdRelativePaths
+foreach ($fact in $legacyRealTreeFacts) {
+    if ($removedLegacyRelativePaths -ccontains [string]$fact.relativePath) {
+        Assert-True (-not $fact.managedExists) "受管源码树中已移除的历史 .cmd 必须缺失：$($fact.relativePath)"
+    } else {
+        Assert-True ($fact.managedExists -and $fact.managedMatchesManifest) "受管源码树中保留的 legacy 非退役文件必须继续匹配 raw SHA-256：$($fact.relativePath)"
+    }
+}
+$legacyTampered = Copy-TestDocument $legacyManifest
 $legacyHashTarget = @($legacyTampered.files | Where-Object relativePath -ceq 'hooks/codex-state-policy-guard.py')[0]
 Assert-True ($null -ne $legacyHashTarget) 'legacy fixture 必须包含 policy-guard source'
 $legacyHashTarget.sha256 = 'e819633dfa0147c3e41a15584c2f3b0da1ec899d71a8d5e7f8c7d0ef3bfa8a9b'
 $legacyTamperedFacts = @(Get-CodexHookFileFacts `
     -Manifest $legacyTampered `
-    -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks') `
+    -ManagedRoot $legacyIsolatedSourceRoot `
     -LiveHooksRoot $FixtureLiveHooksRoot `
     -ManifestHashMode Raw)
 Assert-True (@($legacyTamperedFacts | Where-Object { -not $_.managedMatchesManifest }).Count -gt 0) 'legacy fixture 注入已知旧 raw hash 必须使 inventory 变红'
@@ -188,13 +219,30 @@ $retiredIdentityEntries = @(
     @($retiredIdentityFacts.events.PreToolUse) +
     @($retiredIdentityFacts.events.Stop)
 )
-foreach ($retiredId in @('provider-stability', 'serena-dashboard', 'serena-auto-approve')) {
+foreach ($retiredId in @('provider-stability', 'codex-state-policy', 'serena-dashboard', 'serena-auto-approve')) {
     Assert-True (
         @($retiredIdentityEntries | Where-Object {
             $_.idMatch -ceq $retiredId -and $_.registrationState -ceq 'retired-but-registered'
         }).Count -eq 1
     ) "production inventory 必须独立识别 exact retired identity：$retiredId"
 }
+$legacyActivateRegistryPath = Join-Path $FixtureRoot 'hooks-legacy-activate.json'
+Write-TestText -Path $legacyActivateRegistryPath -Value (([pscustomobject][ordered]@{
+    hooks = [pscustomobject][ordered]@{
+        SessionStart = @(
+            [pscustomobject][ordered]@{
+                matcher = 'startup|resume'
+                hooks = @([pscustomobject][ordered]@{ type = 'command'; command = '"D:/Codex/.codex/hooks/serena-activate-guarded.cmd"'; timeout = 10 })
+            }
+        )
+    }
+}) | ConvertTo-Json -Depth 20)
+$legacyActivateFacts = Get-CodexHookRegistryFacts -RegistryPath $legacyActivateRegistryPath -Manifest $hostPreflightManifest
+Assert-True (
+    @($legacyActivateFacts.events.SessionStart | Where-Object {
+        $_.idMatch -ceq 'serena-activate-legacy' -and $_.registrationState -ceq 'retired-but-registered'
+    }).Count -eq 1
+) 'production inventory 必须继续识别已移除的 serena-activate-guarded.cmd 历史注册'
 $retiredIdentityDocument = New-CodexHookInventoryDocument `
     -Manifest $hostPreflightManifest `
     -Registry $retiredIdentityFacts `
@@ -478,8 +526,9 @@ $escapedReferenceArguments.ExpectedMode = 'Cleanup'
 $escapedReference = Get-CodexHookWrapperReferenceFacts @escapedReferenceArguments
 Assert-True ($escapedReference.parseState -cne 'matched' -and $escapedReference.referencesImplementation -ne $true) '%~dp0 wrapper token 不得逃逸 wrapper 目录'
 
+$productionDependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $productionManifest)
+$directFact = @($productionDependencyFacts | Where-Object id -ceq 'serena-cleanup')[0]
 $dependencyFacts = @(Get-CodexHookDependencyFacts -Manifest $manifest)
-$directFact = @($dependencyFacts | Where-Object id -ceq 'serena-cleanup')[0]
 $stateFact = @($dependencyFacts | Where-Object id -ceq 'codex-state-policy')[0]
 $providerFact = @($dependencyFacts | Where-Object id -ceq 'provider-stability')[0]
 Assert-True (
@@ -488,7 +537,7 @@ Assert-True (
     $directFact.wrapperParseState -ceq 'matched' -and
     $directFact.dependencyState -ceq 'ready' -and
     $directFact.launcherRuntimeId -ceq 'pythonw' -and
-    $directFact.launcherRuntimePath -ceq 'D:\Codex\tools\python314-official\pythonw.exe' -and
+    $directFact.launcherRuntimePath -ceq 'D:\Codex\tools\python315-official\pythonw.exe' -and
     $directFact.launcherImplementationPath -ceq 'D:\Codex\.codex\hooks\lib\hidden-console-launcher.py' -and
     $directFact.launcherRuntimeExists -and
     $directFact.launcherImplementationExists
@@ -580,4 +629,7 @@ foreach ($requiredIgnore in @(
 [pscustomobject]@{
     ok = $true
     suite = 'CodexHookInventory'
+}
+} finally {
+    Remove-InventoryFixtureRoot -RootPath $FixtureRoot
 }

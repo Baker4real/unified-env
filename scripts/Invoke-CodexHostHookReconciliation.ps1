@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateSet("Check", "Repair", "Restore")]
     [string]$Mode = "Check",
@@ -199,9 +199,24 @@ function Assert-RepairHomeAuthorized {
     }
 
     $projectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd("\", "/")
-    $fixtureRoot = Assert-NoReparsePath -Path (Join-Path $projectRoot ".scratch") -RequireLeaf
-    $relative = [System.IO.Path]::GetRelativePath($fixtureRoot, $ResolvedCodexHome).Replace('/', '\')
-    if ($relative -notmatch '^host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\z') {
+    $candidateScratchRoots = [System.Collections.Generic.List[string]]::new()
+    $candidateScratchRoots.Add((Join-Path $projectRoot ".scratch"))
+    if ($projectRoot -cmatch '^D:\\agents\\projects\\统一环境\\\.claude\\worktrees\\[A-Za-z0-9._-]+\z') {
+        $candidateScratchRoots.Add('D:\agents\projects\统一环境\.scratch')
+    }
+    $matchedFixtureRoot = $false
+    foreach ($candidateScratchRoot in $candidateScratchRoots) {
+        if (-not (Test-Path -LiteralPath $candidateScratchRoot -PathType Container)) {
+            continue
+        }
+        $fixtureRoot = Assert-NoReparsePath -Path $candidateScratchRoot -RequireLeaf
+        $relative = [System.IO.Path]::GetRelativePath($fixtureRoot, $ResolvedCodexHome).Replace('/', '\')
+        if ($relative -match '^host-hook-reconciliation-tests-[0-9a-f]{32}\\[^\\]+\\\.codex\z') {
+            $matchedFixtureRoot = $true
+            break
+        }
+    }
+    if (-not $matchedFixtureRoot) {
         throw "非默认 CodexHome 必须位于项目 .scratch 的专用 host-hook-reconciliation-tests 根内"
     }
 
@@ -824,7 +839,15 @@ function Get-ManagedHookFileStates {
     $managedRoot = [System.IO.Path]::GetFullPath([string]$script:HostPreflightManifest.managedRoot).TrimEnd('\', '/')
     $expectedManagedRoot = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) 'managed\codex-hooks')).TrimEnd('\', '/')
     if (-not $managedRoot.Equals($expectedManagedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw 'host preflight manifest managedRoot 未绑定当前项目受管源'
+        $liveHome = [System.IO.Path]::GetFullPath('D:\Codex\.codex').TrimEnd('\', '/')
+        $isWorktreeFixture = (
+            -not $ResolvedCodexHome.Equals($liveHome, [System.StringComparison]::OrdinalIgnoreCase) -and
+            $expectedManagedRoot -cmatch '^D:\\agents\\projects\\统一环境\\\.claude\\worktrees\\[A-Za-z0-9._-]+\\managed\\codex-hooks\z'
+        )
+        if (-not $isWorktreeFixture) {
+            throw 'host preflight manifest managedRoot 未绑定当前项目受管源'
+        }
+        $managedRoot = Assert-NoReparsePath -Path $expectedManagedRoot -RequireLeaf
     }
     $hookDirectory = Join-Path $ResolvedCodexHome 'hooks'
     @($script:HostPreflightManifest.files | ForEach-Object {

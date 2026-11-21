@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$VendorPath,
     [Parameter(Mandatory)][string]$FixtureVendorScriptPath,
@@ -9,10 +9,20 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$canonicalProjectRoot = 'D:\agents\projects\统一环境'
+$candidateProjectRoot = [IO.Path]::GetFullPath((Split-Path -Parent (Split-Path -Parent $PSScriptRoot))).TrimEnd('\')
+$fixtureProjectRoot = if (
+    $candidateProjectRoot.Equals($canonicalProjectRoot, [StringComparison]::OrdinalIgnoreCase) -or
+    $candidateProjectRoot -match '^D:\\agents\\projects\\统一环境\\\.claude\\worktrees\\[A-Za-z0-9._-]+\z'
+) {
+    $candidateProjectRoot
+} else {
+    $canonicalProjectRoot
+}
 $fixtureVendor = 'D:\Codex\tools\PowerShell\7.6.5\pwsh.exe'
-$fixtureVendorScript = 'D:\agents\projects\统一环境\reports\codex-hook-serena-fixture\serena-hooks-fixture.ps1'
-$fixtureRuntime = 'D:\agents\projects\统一环境\managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
-$fixtureHealth = 'D:\agents\projects\统一环境\reports\codex-hook-health-test'
+$fixtureVendorScript = Join-Path $fixtureProjectRoot 'reports\codex-hook-serena-fixture\serena-hooks-fixture.ps1'
+$fixtureRuntime = Join-Path $fixtureProjectRoot 'managed\codex-hooks\hooks\lib\CodexHookRuntime.ps1'
+$fixtureHealth = Join-Path $canonicalProjectRoot 'reports\codex-hook-health-test'
 if (-not $AllowFixture -or $VendorPath -ine $fixtureVendor -or $FixtureVendorScriptPath -ine $fixtureVendorScript -or $RuntimePath -ine $fixtureRuntime -or $HealthRoot -ine $fixtureHealth) { throw 'Serena activate fixture capability 路径非法。' }
 . $RuntimePath
 

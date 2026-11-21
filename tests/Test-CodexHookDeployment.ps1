@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 Set-StrictMode -Version Latest
@@ -9,6 +9,7 @@ $PolicyPath = Join-Path $ProjectRoot 'scripts\lib\CodexHookPolicy.ps1'
 $ManifestPath = Join-Path $ProjectRoot 'managed\codex-hooks\legacy-fixture-manifest.json'
 
 . $PolicyPath
+. (Join-Path $ProjectRoot 'tests\lib\CodexHookLegacyFixtureTestSupport.ps1')
 
 function Assert-True {
     param(
@@ -20,6 +21,8 @@ function Assert-True {
         throw "断言失败：$Message"
     }
 }
+
+Assert-True (Assert-CodexHookRetiredCmdSourcesRemoved -ManagedRoot (Join-Path $ProjectRoot 'managed\codex-hooks')) '退役/非现役 .cmd 必须已从受管源码树移除且 5 个现役 .cmd 保持完好'
 
 function Assert-Sequence {
     param(
@@ -384,6 +387,7 @@ if ([IO.Directory]::Exists($fixtureRoot)) {
     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
 }
 [void][IO.Directory]::CreateDirectory($fixtureRoot)
+try {
 [IO.File]::WriteAllText(
     (Join-Path $fixtureRoot 'README.md'),
     @(
@@ -487,10 +491,18 @@ $fixtureManifest.environment = @(
 $expectedOldFileBytes = @{}
 $expectedNewFileBytes = @{}
 $expectedRetiredFileBytes = @{}
+$removedLegacyRelativePaths = Get-CodexHookRemovedLegacyCmdRelativePaths
+$generatedLegacyCmdCount = 0
 foreach ($file in @($fixtureManifest.files)) {
-    $sourcePath = Join-Path $fixtureSourceRoot ([string]$file.relativePath)
-    $targetPath = Join-Path $fixtureHooksRoot ([string]$file.liveRelativePath)
-    [byte[]]$sourceBytes = [Text.UTF8Encoding]::new($false).GetBytes("fixture-source:$($file.relativePath)`n")
+    $normalizedRelativePath = ([string]$file.relativePath).Replace('\', '/')
+    $sourcePath = Join-Path $fixtureSourceRoot ($normalizedRelativePath.Replace('/', '\'))
+    $targetPath = Join-Path $fixtureHooksRoot (([string]$file.liveRelativePath).Replace('/', '\'))
+    [byte[]]$sourceBytes = if ($removedLegacyRelativePaths -ccontains $normalizedRelativePath) {
+        $generatedLegacyCmdCount++
+        Get-CodexHookRemovedLegacyCmdBytes -RelativePath $normalizedRelativePath
+    } else {
+        [Text.UTF8Encoding]::new($false).GetBytes("fixture-source:$($file.relativePath)`n")
+    }
     [byte[]]$targetBytes = [Text.UTF8Encoding]::new($false).GetBytes("fixture-live-before:$($file.liveRelativePath)`n")
     [void][IO.Directory]::CreateDirectory((Split-Path -Parent $sourcePath))
     [void][IO.Directory]::CreateDirectory((Split-Path -Parent $targetPath))
@@ -504,6 +516,7 @@ foreach ($file in @($fixtureManifest.files)) {
         $expectedRetiredFileBytes[[IO.Path]::GetFullPath($targetPath)] = $targetBytes
     }
 }
+Assert-True ($generatedLegacyCmdCount -eq 5) '部署测试夹具必须在隔离临时目录动态构造全部 5 个已移除历史 .cmd 样本'
 [void](Assert-CodexHookManifest -Manifest $fixtureManifest)
 $fixtureManifestPath = Join-Path $fixtureRoot 'fixture-manifest.json'
 Write-Utf8NoBom -Path $fixtureManifestPath -Text ($fixtureManifest | ConvertTo-Json -Depth 100)
@@ -1070,4 +1083,9 @@ Assert-True ([string]::Equals([Environment]::GetEnvironmentVariable('SERENA_HOME
 [pscustomobject]@{
     ok = $true
     suite = 'CodexHookDeployment'
+}
+} finally {
+    if ([IO.Directory]::Exists($fixtureRoot)) {
+        Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+    }
 }

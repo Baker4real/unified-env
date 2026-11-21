@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 
 . (Join-Path $PSScriptRoot 'CodexHostSafety.ps1')
 
@@ -670,17 +670,40 @@ function Assert-CodexHookManifest {
     return $true
 }
 
+function Get-CodexHookCheckoutRoot {
+    [CmdletBinding()]
+    param()
+
+    $canonicalRoot = 'D:\agents\projects\统一环境'
+    $candidateRoot = [IO.Path]::GetFullPath((Split-Path -Parent (Split-Path -Parent $PSScriptRoot))).TrimEnd('\', '/')
+    if (
+        $candidateRoot.Equals($canonicalRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $candidateRoot -cmatch '^D:\\agents\\projects\\统一环境\\\.claude\\worktrees\\[A-Za-z0-9._-]+\z'
+    ) {
+        return $candidateRoot
+    }
+    return $canonicalRoot
+}
+
+function Get-CodexHookFixtureRoot {
+    [CmdletBinding()]
+    param()
+
+    return (Join-Path (Get-CodexHookCheckoutRoot) 'reports\codex-hook-deployment-test')
+}
+
 function Read-CodexHookManifest {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
 
+    $checkoutRoot = Get-CodexHookCheckoutRoot
     $fullPath = Assert-CodexHookDPath -Value $Path -Name 'Path'
     $jsonText = Read-CodexHookSafeTextFile `
         -Path $fullPath `
         -Name 'manifest' `
         -AllowedRoots @(
-            'D:\agents\projects\统一环境\managed\codex-hooks',
-            'D:\agents\projects\统一环境\reports'
+            (Join-Path $checkoutRoot 'managed\codex-hooks'),
+            (Join-Path $checkoutRoot 'reports')
         )
     Assert-CodexHookStrictJsonText -JsonText $jsonText
     $manifest = $jsonText | ConvertFrom-Json -Depth 128 -ErrorAction Stop
@@ -689,11 +712,11 @@ function Read-CodexHookManifest {
 }
 
 function Get-CodexHookHostPreflightManifestPath {
-    return 'D:\agents\projects\统一环境\managed\codex-hooks\host-preflight-manifest.json'
+    return (Join-Path (Get-CodexHookCheckoutRoot) 'managed\codex-hooks\host-preflight-manifest.json')
 }
 
 function Get-CodexHookLegacyFixtureManifestPath {
-    return 'D:\agents\projects\统一环境\managed\codex-hooks\legacy-fixture-manifest.json'
+    return (Join-Path (Get-CodexHookCheckoutRoot) 'managed\codex-hooks\legacy-fixture-manifest.json')
 }
 
 function Assert-CodexHookHostPreflightManifest {
@@ -1751,7 +1774,7 @@ function Get-CodexHookRegistryFacts {
         -Path $fullPath `
         -Name 'hook registry' `
         -AllowedExactPaths @((Join-Path ([string]$Manifest.codexHome) 'hooks.json')) `
-        -AllowedRoots @('D:\agents\projects\统一环境\reports')
+        -AllowedRoots @((Join-Path (Get-CodexHookCheckoutRoot) 'reports'))
     $jsonText = $registrySnapshot.text
     Assert-CodexHookStrictJsonText -JsonText $jsonText
     $registry = $jsonText | ConvertFrom-Json -Depth 128 -ErrorAction Stop
@@ -2177,7 +2200,7 @@ function Assert-CodexHookFixturePath {
     )
 
     $fullPath = Assert-CodexHookDPath -Value $Path -Name $Name
-    $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
+    $fixtureRoot = Get-CodexHookFixtureRoot
     if (-not (Test-CodexHookPathWithin -Path $fullPath -ParentPath $fixtureRoot)) {
         throw "$Name 必须位于固定 deployment fixture 根：$fullPath"
     }
@@ -2196,7 +2219,7 @@ function Enter-CodexHookFixtureDirectoryChainGuard {
     )
 
     $fullPath = Assert-CodexHookFixturePath -Path $DirectoryPath -Name 'fixture directory chain guard'
-    $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
+    $fixtureRoot = Get-CodexHookFixtureRoot
     return [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
         $fixtureRoot,
         $fullPath,
@@ -2212,7 +2235,7 @@ function New-CodexHookFixtureDirectory {
     )
 
     $fullPath = Assert-CodexHookFixturePath -Path $Path -Name $Name
-    $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
+    $fixtureRoot = Get-CodexHookFixtureRoot
     $guard = [CodexHookGovernance.VerifiedDirectoryChainGuard]::Acquire(
         $fixtureRoot,
         $fullPath,
@@ -2269,7 +2292,7 @@ function Get-CodexHookFixtureLifecyclePaths {
 
     $identity = Assert-CodexHookMappingIdentity -Value $MappingIdentity
     $generation = Assert-CodexHookGenerationId -Value $GenerationId
-    $fixtureRoot = 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test'
+    $fixtureRoot = Get-CodexHookFixtureRoot
     $lifecycleRoot = Join-Path $fixtureRoot '.deployment-state'
     $mappingRoot = Join-Path (Join-Path $lifecycleRoot 'mappings') $identity
     $claimsRoot = Join-Path $mappingRoot 'claims'
@@ -2745,7 +2768,7 @@ function Set-CodexHookAtomicFileBytes {
         -ExpectedExists $ExpectedExists `
         -ExpectedSha256 $ExpectedSha256 `
         -AfterSha256 $AfterSha256 `
-        -CapabilityRoot 'D:\agents\projects\统一环境\reports\codex-hook-deployment-test' `
+        -CapabilityRoot (Get-CodexHookFixtureRoot) `
         -AllowedExactPaths @($fullPath) `
         -Scope $Scope `
         -BeforeMove $BeforeMove `
