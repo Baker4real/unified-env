@@ -8,7 +8,7 @@
 
 `audit --expected-exit RESULT_LINE:CODE` 是操作者对特定日志行的显式说明；不自动猜测 grep、winget 等命令的非零含义。stdout 中形如 `name/exit_code/stdout/stderr` 的命令数组只显示为 reported outcome，不能据此证明外层工具失败。pending 是日志时点观察，可能在后续记录完成。
 
-`find --from-line N [--to-line M]` 只报告每份转录这段行号内的命中；范围倒置时以退出码 2 失败。
+`find --from-line N [--to-line M]` 只报告每份转录这段行号内的命中；范围倒置时以退出码 2 失败。`find` 默认按字面子串匹配，加 `--regex` 时按 Python 正则匹配（配合 `-i` 忽略大小写，非法正则以退出码 2 失败）。
 
 `audit --from-line N [--to-line M]` 只统计这段行号内的记录（如同一会话上次复盘之后的部分）；范围前发出的调用仍用来给范围内的结果命名、计算耗时，范围后才到的结果不计入。
 

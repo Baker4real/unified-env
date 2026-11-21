@@ -1003,12 +1003,18 @@ def cmd_find(args):
         fail("not found: " + ", ".join(missing))
     if args.to_line is not None and args.to_line < args.from_line:
         fail(f"--to-line {args.to_line} is before --from-line {args.from_line}")
-    fold = (lambda s: s.translate(ASCII_LOWER)) if args.ignore_case else (lambda s: s)
+    regex = None
+    if args.regex:
+        try:
+            regex = re.compile(args.needle, re.IGNORECASE if args.ignore_case else 0)
+        except re.error as error:
+            fail(f"invalid --regex: {error}")
+    fold = (lambda s: s.translate(ASCII_LOWER)) if (args.ignore_case and not args.regex) else (lambda s: s)
     # A block's decoded text holds the needle as typed, or JSON-escaped inside code; a raw JSON line holds
     # either of those escaped once more, with or without \u escapes for non-ASCII.
-    text_forms = list({fold(escaped(args.needle, times)) for times in (0, 1)})
-    byte_forms = {fold(escaped(args.needle, times, ascii_only)).encode("utf-8")
-                  for times in (0, 1, 2) for ascii_only in (False, True)}
+    text_forms = [] if args.regex else list({fold(escaped(args.needle, times)) for times in (0, 1)})
+    byte_forms = set() if args.regex else {fold(escaped(args.needle, times, ascii_only)).encode("utf-8")
+                                           for times in (0, 1, 2) for ascii_only in (False, True)}
     kinds = set(args.kind or KINDS[:-1])
     skips = [skip.lower() for skip in args.skip]
     since = args.since.timestamp() if args.since else 0
@@ -1027,17 +1033,20 @@ def cmd_find(args):
         except OSError as error:
             print(f"skipped {file}: {error}", file=sys.stderr)
             continue
-        probe = data.lower() if args.ignore_case else data
-        if not any(form in probe for form in byte_forms):
-            continue
+        if not args.regex:
+            probe = data.lower() if args.ignore_case else data
+            if not any(form in probe for form in byte_forms):
+                continue
+        else:
+            probe = data
         lines = data.split(b"\n")
-        probes = probe.split(b"\n") if args.ignore_case else lines
+        probes = probe.split(b"\n") if (args.ignore_case and not args.regex) else lines
         hits = []
         pending_tool_search = {"call_id": None}
         for number, (raw, low) in enumerate(zip(lines, probes), 1):
             if args.to_line is not None and number > args.to_line:
                 break
-            if number < args.from_line or not any(form in low for form in byte_forms):
+            if number < args.from_line or (not args.regex and not any(form in low for form in byte_forms)):
                 continue
             try:
                 record = json.loads(raw)
@@ -1049,8 +1058,12 @@ def cmd_find(args):
                 block = link_tool_search_result(block, pending_tool_search)
                 if block.kind not in kinds:
                     continue
-                text = fold(block.text)
-                at = min((i for i in (text.find(form) for form in text_forms) if i >= 0), default=-1)
+                if regex is not None:
+                    match = regex.search(block.text)
+                    at = match.start() if match else -1
+                else:
+                    text = fold(block.text)
+                    at = min((i for i in (text.find(form) for form in text_forms) if i >= 0), default=-1)
                 if at >= 0:
                     hits.append((number, record, block, at))
         if not hits:
@@ -1629,6 +1642,8 @@ def main():
     find.add_argument("--bridge", action="store_true",
                       help="also search Magpie bridge backend copies in walked *magpie-claude-work directories")
     find.add_argument("-i", "--ignore-case", action="store_true", help="fold ASCII letter case")
+    find.add_argument("--regex", action="store_true",
+                      help="treat needle as a Python regular expression instead of a fixed substring")
     find.add_argument("--width", type=int, default=240, help="snippet characters")
     find.add_argument("--max-per-file", type=int, default=6, help="hits shown per file, split between first and last")
     find.add_argument("--max-files", type=int, default=20, help="matching transcripts shown, newest kept")

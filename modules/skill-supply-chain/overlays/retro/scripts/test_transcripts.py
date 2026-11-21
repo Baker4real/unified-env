@@ -1485,6 +1485,25 @@ class AntigravityTranscriptTests(unittest.TestCase):
         self.assertIn("Path: D:/work/app.js", shown.stdout)
         self.assertIn("CommandLine: gh issue list", shown.stdout)
 
+    def test_find_regex_alternation_ignore_case_and_invalid_pattern(self):
+        with tempfile.TemporaryDirectory(dir=TEMP_ROOT) as directory:
+            path = Path(directory) / "transcript.jsonl"
+            path.write_text("\n".join(json.dumps(r) for r in self.sample_records()) + "\n", encoding="utf-8")
+            literal = run("find", "gh issue list|missing.js", str(path))
+            matched = run("find", "gh issue list|missing\\.js", str(path), "--regex", "--kind", "tool_call")
+            folded = run("find", "GH ISSUE|MISSING\\.JS", str(path), "--regex", "-i", "--kind", "tool_call")
+            invalid = run("find", "[unclosed", str(path), "--regex")
+        self.assertEqual(literal.returncode, 1, literal.stderr)
+        self.assertIn("0 of 1 transcripts matched", literal.stdout)
+        self.assertEqual(matched.returncode, 0, matched.stderr)
+        self.assertIn("1 of 1 transcripts matched", matched.stdout)
+        self.assertIn("L2 ", matched.stdout)
+        self.assertIn("L5 ", matched.stdout)
+        self.assertEqual(folded.returncode, 0, folded.stderr)
+        self.assertIn("1 of 1 transcripts matched", folded.stdout)
+        self.assertEqual(invalid.returncode, 2)
+        self.assertIn("invalid --regex", invalid.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
