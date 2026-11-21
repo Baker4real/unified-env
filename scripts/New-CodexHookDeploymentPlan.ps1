@@ -1,4 +1,4 @@
-﻿[CmdletBinding(DefaultParameterSetName = 'Fixture')]
+[CmdletBinding(DefaultParameterSetName = 'Fixture')]
 param(
     [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$ManifestPath,
     [Parameter(Mandatory, ParameterSetName = 'Fixture')][string]$FixtureSourceRoot,

@@ -1,4 +1,4 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -938,6 +938,32 @@ $implementationPlan=Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'docs\
 Assert-True ($implementationPlan.Contains('历史实施计划：已被主机钩子协调器取代')) '旧 Task 7 实施计划必须明确标记为历史不可执行'
 Assert-True ($implementationPlan.Contains('Invoke-CodexHostHookReconciliation.ps1') -and $implementationPlan.Contains('唯一生产权威')) '旧 Task 7 实施计划必须指向唯一生产协调器'
 Assert-True ($implementationPlan -notmatch '(?m)^\s*&.*(?:Invoke|Restore)-CodexHookDeployment\.ps1') '旧 Task 7 实施计划不得保留可复制的 live apply/restore 命令'
+
+# Major #1: Split-CodexHookCommandLine 与 direct-managed-launcher 严格原始命令比对回归
+$canonicalPreflightCommand = (@([string]$productionStateHook.commandPath) + @($productionStateHook.arguments)) -join ' '
+$canonicalPreflightParsed = Split-CodexHookCommandLine -Command $canonicalPreflightCommand
+Assert-True ($canonicalPreflightParsed.parsed) '规范 direct-managed-launcher 命令必须可解析'
+$canonicalPreflightMatches = @(Get-CodexHookManifestMatches -Manifest $hostPreflightManifest -Event 'SessionStart' -Matcher $null -Tokens ([string[]]$canonicalPreflightParsed.tokens) -IsCommandEntry $true -RawCommand $canonicalPreflightCommand | Where-Object { $null -ne $_ })
+Assert-True ($canonicalPreflightMatches.Count -eq 1 -and $canonicalPreflightMatches[0].id -ceq 'codex-state-preflight') '规范 direct-managed-launcher 原始命令串必须精确匹配'
+
+foreach ($newlineTampered in @(
+    ($canonicalPreflightCommand -replace ' -X utf8 ', " -X utf8`n"),
+    ($canonicalPreflightCommand -replace ' -X utf8 ', " -X utf8`r`n")
+)) {
+    $newlineParsed = Split-CodexHookCommandLine -Command $newlineTampered
+    Assert-True (-not $newlineParsed.parsed) '含换行符的 hook command 必须返回 parsed=$false'
+    $newlineMatches = @(Get-CodexHookManifestMatches -Manifest $hostPreflightManifest -Event 'SessionStart' -Matcher $null -Tokens ([string[]]$canonicalPreflightParsed.tokens) -IsCommandEntry $true -RawCommand $newlineTampered | Where-Object { $null -ne $_ })
+    Assert-True ($newlineMatches.Count -eq 0) '含换行符的 direct-managed-launcher 原始命令串不得匹配'
+}
+foreach ($quoteTampered in @(
+    ($canonicalPreflightCommand -replace '^D:\\Codex\\tools\\python315-official\\python\.exe', '"D:\Codex\tools\python315-official\python.exe"'),
+    ($canonicalPreflightCommand -replace ' ; exit \$LASTEXITCODE$', ' ";" exit $LASTEXITCODE')
+)) {
+    $quoteParsed = Split-CodexHookCommandLine -Command $quoteTampered
+    Assert-True ($quoteParsed.parsed) '引号篡改命令在词法切分后需进入严格原始串拒收'
+    $quoteMatches = @(Get-CodexHookManifestMatches -Manifest $hostPreflightManifest -Event 'SessionStart' -Matcher $null -Tokens ([string[]]$quoteParsed.tokens) -IsCommandEntry $true -RawCommand $quoteTampered | Where-Object { $null -ne $_ })
+    Assert-True ($quoteMatches.Count -eq 0) "引号/分号引号篡改的 direct-managed-launcher 必须拒收：$quoteTampered"
+}
 
 [pscustomobject]@{
     ok = $true

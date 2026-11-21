@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$ProjectRoot = (Split-Path -Path $PSScriptRoot -Parent),
     [ValidateSet('acl','legacy','final')][string]$OnlyPostPhase,
     [switch]$OnlyRestoreContract,

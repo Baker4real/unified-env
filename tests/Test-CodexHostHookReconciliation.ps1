@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$ProjectRoot = (Split-Path -Path $PSScriptRoot -Parent),
     [switch]$KeepOutputs,
     [switch]$OnlyEnvironmentPostCommitRollback,
