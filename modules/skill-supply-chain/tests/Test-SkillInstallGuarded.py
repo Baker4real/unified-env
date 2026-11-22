@@ -1207,6 +1207,223 @@ class SkillInstallGuardedTests(GuardedInstallTestCase):
         self.assertEqual(len(self.magpie_warnings(stderr.getvalue())), 1, stderr.getvalue())
         self.assertNotIn(MAGPIE_SECRET, json.dumps(report, ensure_ascii=False) + stderr.getvalue())
 
+    def test_magpie_copy_sync_not_needed_for_symlink_only_agents(self) -> None:
+        self.magpie_library.write_bytes(magpie_library_bytes("other-skill", "test-skill-wrapper"))
+        code, stdout, stderr, manifest = self.install_reporting_magpie_library("--summary")
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["magpie_copy_sync"], {"status": "not-needed"})
+        self.assertEqual(json.loads(stdout)["magpie_copy_sync"], {"status": "not-needed"})
+        self.assert_magpie_secret_stays_in_the_library(stdout, stderr)
+
+    def test_magpie_copy_sync_skips_when_library_missing_or_router_enabled(self) -> None:
+        code, stdout, stderr, manifest = self.install_reporting_magpie_library()
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["magpie_copy_sync"], {"status": "skipped", "reason": "library-not-present"})
+
+        skill_dir = self.active / "test-skill-wrapper"
+        for flag in ("sharedSkills", "skillRouter"):
+            with self.subTest(flag=flag):
+                lib = self.temp / f"lib-{flag}.json"
+                lib.write_text(
+                    json.dumps(
+                        {
+                            "mcp": {"secret": MAGPIE_SECRET},
+                            flag: True,
+                            "skills": [
+                                {
+                                    "name": "test-skill-wrapper",
+                                    "source": {"kind": "folder", "dir": str(skill_dir)},
+                                    "agents": ["antigravity"],
+                                }
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with mock.patch.object(ACTIVATION, "MAGPIE_LIBRARY", lib):
+                    report = ACTIVATION.magpie_sync_copy_hosts(
+                        names=["test-skill-wrapper"],
+                        skill_root=self.active,
+                        magpie_library={"status": "present"},
+                    )
+                self.assertEqual(report, {"status": "skipped", "reason": "direct-delivery-required"})
+
+    def test_magpie_copy_sync_fail_open_on_exception_and_hides_secret(self) -> None:
+        self.magpie_library.write_bytes(magpie_library_bytes("test-skill-wrapper"))
+        with mock.patch.object(
+            ACTIVATION, "_magpie_sync_copy_hosts", side_effect=RuntimeError(MAGPIE_SECRET)
+        ):
+            code, stdout, stderr, manifest = self.install_reporting_magpie_library()
+        self.assertEqual(code, 0)
+        self.assertEqual(manifest["status"], "succeeded")
+        self.assertEqual(manifest["magpie_copy_sync"], {"status": "failed", "reason": "sync-failed"})
+        self.assert_magpie_secret_stays_in_the_library(stdout, stderr)
+
+    def test_magpie_copy_sync_skips_when_writer_missing_or_lock_busy(self) -> None:
+        skill_dir = self.active / "test-skill-wrapper"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        magpie_dir = self.temp / "xdg-busy" / "magpie"
+        magpie_dir.mkdir(parents=True, exist_ok=True)
+        lib = magpie_dir / "library.json"
+        lib.write_text(
+            json.dumps(
+                {
+                    "mcp": {"token": MAGPIE_SECRET},
+                    "skills": [
+                        {
+                            "name": "test-skill-wrapper",
+                            "source": {"kind": "folder", "dir": str(skill_dir)},
+                            "agents": ["antigravity"],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        missing_writer = self.temp / "missing-magpie-scoped-library.exe"
+        with (
+            mock.patch.object(ACTIVATION, "MAGPIE_LIBRARY", lib),
+            mock.patch.object(ACTIVATION, "MAGPIE_SCOPED_WRITER", missing_writer),
+        ):
+            report = ACTIVATION.magpie_sync_copy_hosts(
+                names=["test-skill-wrapper"],
+                skill_root=self.active,
+                magpie_library={"status": "present"},
+            )
+        self.assertEqual(report, {"status": "skipped", "reason": "writer-unavailable"})
+
+        if os.name == "nt":
+            import msvcrt
+
+            fake_writer = self.temp / "fake-writer.exe"
+            fake_writer.write_bytes(b"MZ")
+            lock_path = magpie_dir / "library.scoped.lock"
+            with lock_path.open("a+b") as held:
+                held.seek(0)
+                msvcrt.locking(held.fileno(), msvcrt.LK_NBLCK, 1)
+                stderr = io.StringIO()
+                try:
+                    with (
+                        mock.patch.object(ACTIVATION, "MAGPIE_LIBRARY", lib),
+                        mock.patch.object(ACTIVATION, "MAGPIE_SCOPED_WRITER", fake_writer),
+                        mock.patch.object(
+                            ACTIVATION,
+                            "_magpie_scoped_write_lock",
+                            side_effect=TimeoutError("magpie-scoped-write-busy"),
+                        ),
+                        contextlib.redirect_stderr(stderr),
+                    ):
+                        busy_report = ACTIVATION.magpie_sync_copy_hosts(
+                            names=["test-skill-wrapper"],
+                            skill_root=self.active,
+                            magpie_library={"status": "present"},
+                        )
+                finally:
+                    held.seek(0)
+                    msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, 1)
+            self.assertEqual(busy_report, {"status": "skipped", "reason": "magpie-scoped-write-busy"})
+            self.assertIn("[magpie-copy-sync]", stderr.getvalue())
+
+    def test_magpie_copy_sync_real_scoped_writer_refreshes_antigravity_copy_on_update(self) -> None:
+        if os.name != "nt" or not ACTIVATION.MAGPIE_SCOPED_WRITER.is_file():
+            self.skipTest("requires Windows managed magpie-scoped-library.exe")
+
+        name = "test-antigravity-sync"
+        home = self.temp / "sandbox-home"
+        cfg = self.temp / "sandbox-xdg"
+        (home / ".gemini" / "antigravity").mkdir(parents=True)
+        (home / ".gemini" / "antigravity" / "agyhub_summaries_proto.pb").write_text("x", encoding="utf-8")
+        agy_skills = home / ".gemini" / "config" / "skills"
+        agy_skills.mkdir(parents=True)
+
+        magpie_dir = cfg / "magpie"
+        lib_skills = magpie_dir / "library" / "skills"
+        lib_skills.mkdir(parents=True)
+        lib_json = magpie_dir / "library.json"
+
+        # 1. Install v1 into active root (not yet in Magpie Library).
+        cand_v1 = self.write_candidate(name, "反重力自动同步夹具 v1")
+        manifest_v1 = self.write_manifest(name, "install")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code_v1 = WRAPPER.main(self.wrapper_args(cand_v1, manifest_v1, name=name))
+        self.assertEqual(code_v1, 0)
+
+        active_skill = self.active / name
+        os.symlink(str(active_skill), str(lib_skills / name), target_is_directory=True)
+        lib_json.write_text(
+            json.dumps(
+                {
+                    "mcp": [
+                        {
+                            "name": "exa",
+                            "transport": "http",
+                            "url": f"https://mcp.example.invalid/?exaApiKey={MAGPIE_SECRET}",
+                            "headers": {"Authorization": f"Bearer {MAGPIE_SECRET}"},
+                        }
+                    ],
+                    "skills": [
+                        {
+                            "name": name,
+                            "source": {"kind": "folder", "dir": str(active_skill)},
+                            "agents": ["antigravity"],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        # 2. Seed an outdated v1 copy in Antigravity via the real scoped writer, then update to v2.
+        sandbox_env = {
+            "USERPROFILE": str(home),
+            "HOME": str(home),
+            "LOCALAPPDATA": str(home / "AppData" / "Local"),
+            "APPDATA": str(home / "AppData" / "Roaming"),
+            "XDG_CONFIG_HOME": str(cfg),
+            "CODEX_HOME": str(self.temp / "sandbox-codex"),
+            "CLAUDE_CONFIG_DIR": str(self.temp / "sandbox-claude"),
+            "DSH_HOME": str(self.temp / "sandbox-dsh"),
+            "KIMI_CODE_HOME": str(self.temp / "sandbox-kimi"),
+        }
+        with (
+            mock.patch.dict(os.environ, sandbox_env, clear=False),
+            mock.patch.object(ACTIVATION, "MAGPIE_LIBRARY", lib_json),
+        ):
+            seed = ACTIVATION.magpie_sync_copy_hosts(
+                names=[name], skill_root=self.active, magpie_library={"status": "present"}
+            )
+            self.assertEqual(seed["status"], "synced")
+            agy_skill_md = agy_skills / name / "SKILL.md"
+            self.assertIn("反重力自动同步夹具 v1", agy_skill_md.read_text(encoding="utf-8"))
+            self.assertTrue((agy_skills / name / ".magpie-library").is_file())
+
+            # Now run a real guarded --update to v2; Antigravity copy must update automatically!
+            (cand_v1 / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: 反重力自动同步夹具 v2 已更新\n---\n\n# {name}\n",
+                encoding="utf-8",
+            )
+            manifest_v2 = self.write_manifest(name, "update")
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code_v2 = WRAPPER.main([*self.wrapper_args(cand_v1, manifest_v2, name=name), "--update"])
+            self.assertEqual(code_v2, 0, stderr.getvalue())
+
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["magpie_library"], {"status": "present"})
+        self.assertEqual(result["magpie_copy_sync"]["status"], "synced")
+        self.assertEqual(result["magpie_copy_sync"]["skills"][0]["name"], name)
+        self.assertEqual(result["magpie_copy_sync"]["skills"][0]["copy_agents"], ["antigravity"])
+        self.assertEqual(result["magpie_copy_sync"]["skills"][0]["changed"], ["antigravity"])
+        self.assertEqual(result["magpie_copy_sync"]["skills"][0]["problems"], [])
+        self.assertEqual(
+            agy_skill_md.read_text(encoding="utf-8"),
+            (active_skill / "SKILL.md").read_text(encoding="utf-8"),
+        )
+        self.assertIn("反重力自动同步夹具 v2 已更新", agy_skill_md.read_text(encoding="utf-8"))
+        self.assertTrue((agy_skills / name / ".magpie-library").is_file())
+        self.assertNotIn(MAGPIE_SECRET, stdout.getvalue() + stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

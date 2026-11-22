@@ -5,11 +5,19 @@ Part of the guarded skill installer; ``install_skill_guarded.py`` is the entry p
 
 from __future__ import annotations
 
+import contextlib
+import errno
+import http.client
 import json
 import os
+import re
+import secrets
 import shutil
+import socket
 import stat
+import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -24,8 +32,15 @@ from install_skill_guarded_base import InstallError, RecoveryRequiredError
 
 # Magpie deploys skills to agents from its Library since Skills Manager was uninstalled on
 # 2026-11-08: an activated skill reaches the agents Magpie serves only once the Library lists
-# it.  Tests point this at a fixture file.
+# it.  Tests point these paths at fixtures.
 MAGPIE_LIBRARY = Path(r"D:\Codex\.config\magpie\library.json")
+MAGPIE_SCOPED_WRITER = Path(r"D:\Codex\tools\magpie-scoped-library\magpie-scoped-library.exe")
+# Windows agents that Magpie deploys as static copies rather than symlinks (junctionBlind /
+# sandboxed Desktop plugin copies); updating the active root does not refresh them until Magpie
+# reconciles that skill.
+MAGPIE_COPY_AGENTS = frozenset(("antigravity", "claude-desktop"))
+MAGPIE_SCOPED_VERSION_RE = re.compile(rb"^magpie v\d+\.\d+\.\d+\+libraryscope\.1$")
+MAGPIE_AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 def read_only_relative_paths(root: Path) -> list[str]:
@@ -276,6 +291,333 @@ def _magpie_library_visibility(*, names: list[str], skill_root: Path) -> dict[st
         file=sys.stderr,
     )
     return {"status": "missing", "missing": missing, "hint": hint}
+
+
+def _path_is_reparse(path: Path) -> bool:
+    try:
+        if path.is_symlink():
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        return bool(callable(is_junction) and path.exists() and is_junction())
+    except OSError:
+        return True
+
+
+def _normalized_existing_dir(raw: object) -> Path | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return Path(raw).resolve(strict=True)
+    except OSError:
+        return None
+
+
+def _copy_sync_targets(
+    library: dict[str, Any],
+    *,
+    names: list[str],
+    skill_root: Path,
+) -> tuple[list[dict[str, Any]], str | None]:
+    if library.get("sharedSkills", False) or library.get("skillRouter", False):
+        return [], "direct-delivery-required"
+    entries = library.get("skills")
+    if not isinstance(entries, list):
+        return [], "library-has-no-skills-list"
+    by_name: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+            by_name.setdefault(entry["name"], entry)
+
+    copy_all = bool(library.get("copySkills", False))
+    skill_how = library.get("skillHow") if isinstance(library.get("skillHow"), dict) else {}
+
+    targets: list[dict[str, Any]] = []
+    for name in names:
+        entry = by_name.get(name)
+        if entry is None or entry.get("offHere"):
+            continue
+        source = entry.get("source")
+        if not isinstance(source, dict) or source.get("kind") != "folder":
+            continue
+        expected_dir = _normalized_existing_dir(str(skill_root / name))
+        registered_dir = _normalized_existing_dir(source.get("dir"))
+        if expected_dir is None or registered_dir is None or registered_dir != expected_dir:
+            continue
+        raw_agents = entry.get("agents")
+        if not isinstance(raw_agents, list):
+            continue
+        agents = sorted(
+            {
+                agent
+                for agent in raw_agents
+                if isinstance(agent, str) and MAGPIE_AGENT_ID_RE.fullmatch(agent)
+            }
+        )
+        copy_agents = sorted(
+            agent
+            for agent in agents
+            if agent in MAGPIE_COPY_AGENTS or copy_all or skill_how.get(agent) == "copy"
+        )
+        if copy_agents:
+            targets.append({"name": name, "agents": agents, "copy_agents": copy_agents})
+    return targets, None
+
+
+@contextlib.contextmanager
+def _magpie_scoped_write_lock(library_path: Path, *, timeout_seconds: float = 3.0):
+    if os.name != "nt":
+        raise RuntimeError("windows-required")
+    import msvcrt
+
+    if any(_path_is_reparse(path) for path in (library_path, *library_path.parents)):
+        raise RuntimeError("config-root-mismatch")
+    lock_path = library_path.resolve(strict=True).with_name("library.scoped.lock")
+    if lock_path.exists() and (_path_is_reparse(lock_path) or not lock_path.is_file()):
+        raise RuntimeError("invalid-magpie-scoped-lock")
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    with lock_path.open("a+b") as handle:
+        while True:
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("magpie-scoped-write-busy") from error
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            try:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+
+
+@contextlib.contextmanager
+def _magpie_scoped_endpoint(*, writer_path: Path, library_path: Path):
+    if not writer_path.is_file() or _path_is_reparse(writer_path):
+        raise FileNotFoundError("writer-unavailable")
+    resolved_writer = writer_path.resolve(strict=True)
+    if (resolved_writer.parent / ".portable").exists() or (resolved_writer.parent / "data").is_dir():
+        raise RuntimeError("config-root-mismatch")
+    resolved_library = library_path.resolve(strict=True)
+    if resolved_library.parent.name.casefold() != "magpie":
+        raise RuntimeError("config-root-mismatch")
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MAGPIE_WEB_")}
+    env["XDG_CONFIG_HOME"] = str(resolved_library.parent.parent)
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    version = subprocess.run(
+        [str(resolved_writer), "--version"],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        creationflags=creationflags,
+        timeout=6,
+        check=False,
+    )
+    if version.returncode != 0 or not MAGPIE_SCOPED_VERSION_RE.fullmatch(version.stdout.strip()):
+        raise RuntimeError("writer-unavailable")
+
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    key = secrets.token_hex(32)
+    env["MAGPIE_WEB_KEY"] = key
+    process = subprocess.Popen(
+        [str(resolved_writer), "web", "--library-scoped", "--addr", f"127.0.0.1:{port}"],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creationflags,
+    )
+    try:
+        deadline = time.monotonic() + 12.0
+        while True:
+            if process.poll() is not None:
+                raise RuntimeError("magpie-endpoint-exited")
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+                    break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("magpie-endpoint-timeout")
+                time.sleep(0.10)
+
+        def request(method: str, suffix: str = "", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+            if process.poll() is not None:
+                raise RuntimeError("magpie-endpoint-exited")
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+            try:
+                body = json.dumps(payload) if payload is not None else None
+                connection.request(
+                    method,
+                    f"/api/library/scoped{suffix}",
+                    body,
+                    {"Content-Type": "application/json", "Cookie": f"magpie_web_{port}={key}"},
+                )
+                reply = connection.getresponse()
+                raw = reply.read(2_000_001)
+                if reply.status != 200 or len(raw) > 2_000_000:
+                    raise RuntimeError("magpie-scoped-library-request-failed")
+                parsed = json.loads(raw)
+                if not isinstance(parsed, dict):
+                    raise RuntimeError("magpie-scoped-library-request-failed")
+                return parsed
+            finally:
+                connection.close()
+
+        capability = request("GET")
+        state_path = capability.get("statePath")
+        if (
+            capability.get("scopeVersion") != 1
+            or not isinstance(state_path, str)
+            or _normalized_existing_dir(str(Path(state_path).parent)) != resolved_library.parent
+            or Path(state_path).name.casefold() != resolved_library.name.casefold()
+        ):
+            raise RuntimeError("config-root-mismatch")
+        yield lambda route, payload: request("POST", f"/{route}", payload)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=6)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=6)
+
+
+def _magpie_sync_copy_hosts(
+    *,
+    names: list[str],
+    skill_root: Path,
+    magpie_library: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(magpie_library, dict) or magpie_library.get("status") != "present":
+        return {"status": "skipped", "reason": "library-not-present"}
+    try:
+        data = MAGPIE_LIBRARY.read_bytes()
+    except FileNotFoundError:
+        return {"status": "skipped", "reason": "library-not-found"}
+    except OSError:
+        return {"status": "skipped", "reason": "library-unreadable"}
+    try:
+        library = json.loads(data.decode("utf-8-sig"))
+    except (ValueError, RecursionError):
+        return {"status": "skipped", "reason": "library-invalid-json"}
+    if not isinstance(library, dict):
+        return {"status": "skipped", "reason": "library-has-no-skills-list"}
+
+    targets, skip_reason = _copy_sync_targets(library, names=names, skill_root=skill_root)
+    if skip_reason is not None:
+        return {"status": "skipped", "reason": skip_reason}
+    if not targets:
+        return {"status": "not-needed"}
+    if os.name != "nt":
+        return {"status": "skipped", "reason": "windows-required"}
+    if not MAGPIE_SCOPED_WRITER.is_file():
+        return {"status": "skipped", "reason": "writer-unavailable"}
+
+    skill_results: list[dict[str, Any]] = []
+    any_problem = False
+    try:
+        with _magpie_scoped_write_lock(MAGPIE_LIBRARY):
+            with _magpie_scoped_endpoint(writer_path=MAGPIE_SCOPED_WRITER, library_path=MAGPIE_LIBRARY) as post:
+                for target in targets:
+                    reply = post(
+                        "skills/agents",
+                        {"name": target["name"], "agents": target["agents"]},
+                    )
+                    res = reply.get("result") if isinstance(reply.get("result"), dict) else {}
+                    changed = sorted(
+                        agent
+                        for agent in (res.get("changed") or [])
+                        if isinstance(agent, str) and MAGPIE_AGENT_ID_RE.fullmatch(agent)
+                    )
+                    raw_problems = res.get("problems") if isinstance(res.get("problems"), list) else []
+                    problems = [
+                        {
+                            "agent": p.get("agent", "")
+                            if isinstance(p.get("agent"), str) and MAGPIE_AGENT_ID_RE.fullmatch(p.get("agent", ""))
+                            else "",
+                            "what": p.get("what", "") if isinstance(p.get("what"), str) else "",
+                        }
+                        for p in raw_problems
+                        if isinstance(p, dict)
+                    ]
+                    if problems:
+                        any_problem = True
+                    skill_results.append(
+                        {
+                            "name": target["name"],
+                            "copy_agents": target["copy_agents"],
+                            "changed": changed,
+                            "problems": problems,
+                        }
+                    )
+    except TimeoutError:
+        print(
+            "[magpie-copy-sync] Magpie 限定写入锁正忙，跳过本次副本刷新；可稍后手动执行 magpie library sync。",
+            file=sys.stderr,
+        )
+        return {"status": "skipped", "reason": "magpie-scoped-write-busy"}
+    except FileNotFoundError:
+        return {"status": "skipped", "reason": "writer-unavailable"}
+    except RuntimeError as error:
+        reason = str(error) if str(error) in {
+            "windows-required",
+            "config-root-mismatch",
+            "invalid-magpie-scoped-lock",
+            "writer-unavailable",
+            "magpie-endpoint-exited",
+            "magpie-endpoint-timeout",
+            "magpie-scoped-library-request-failed",
+        } else "sync-failed"
+        print(
+            f"[magpie-copy-sync] 副本宿主自动刷新未完成（{reason}）；统一根已提交，可稍后手动执行 magpie library sync。",
+            file=sys.stderr,
+        )
+        return {"status": "failed", "reason": reason}
+
+    status = "partial" if any_problem else "synced"
+    if any_problem:
+        print(
+            "[magpie-copy-sync] 部分副本宿主刷新返回问题（可能是副本已被手工修改）；统一根已提交，请在 Magpie Library 核对。",
+            file=sys.stderr,
+        )
+    return {"status": status, "skills": skill_results}
+
+
+def magpie_sync_copy_hosts(
+    *,
+    names: list[str],
+    skill_root: Path,
+    magpie_library: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Refresh Magpie copy-delivered hosts (e.g. Antigravity, Claude Desktop) for updated skills.
+
+    Scoped strictly to the activated skill(s) through the managed magpie-scoped-library writer,
+    leaving unrelated skills and MCP configs untouched.  Fail-open: any error is reported and
+    never rolls back an already-succeeded active skill transaction.
+    """
+    try:
+        return _magpie_sync_copy_hosts(
+            names=names,
+            skill_root=skill_root,
+            magpie_library=magpie_library,
+        )
+    except Exception:
+        print(
+            "[magpie-copy-sync] 副本宿主自动刷新失败（sync-failed）；统一根已提交，可稍后手动执行 magpie library sync。",
+            file=sys.stderr,
+        )
+        return {"status": "failed", "reason": "sync-failed"}
 
 
 def backup_file(path: Path, backup_root: Path, label: str) -> Path | None:

@@ -170,7 +170,7 @@ def wait_for_auto_backup(active_root: Path, timeout_seconds: float = 60.0) -> di
 
 
 def summary_payload(result: dict[str, Any]) -> dict[str, Any]:
-    keys = ("schema_version", "transaction_id", "status", "targets", "active_root", "evidence", "autoBackup", "magpie_library", "error", "candidate_integrity", "excluded_files")
+    keys = ("schema_version", "transaction_id", "status", "targets", "active_root", "evidence", "autoBackup", "magpie_library", "magpie_copy_sync", "error", "candidate_integrity", "excluded_files")
     return {key: result[key] for key in keys if key in result}
 
 
@@ -723,6 +723,15 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             if target_scope == "active"
             else None
         )
+        magpie_copy_sync = (
+            _activation.magpie_sync_copy_hosts(
+                names=names,
+                skill_root=target_root,
+                magpie_library=magpie_library,
+            )
+            if target_scope == "active"
+            else None
+        )
         result = {
             **plan,
             "status": "succeeded",
@@ -740,6 +749,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "system_provenance_overlay_postcondition": system_overlay_postcondition,
             "merge_retirement_verification": merge_retirement_verification,
             "magpie_library": magpie_library,
+            "magpie_copy_sync": magpie_copy_sync,
             "source_state_after": {
                 "path": str(source_state_after_path),
                 "sha256": hashlib.sha256(ledger_after_bytes).hexdigest(),
