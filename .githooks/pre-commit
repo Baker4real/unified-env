@@ -3,6 +3,23 @@
 # 命中即拒绝提交。新克隆先运行 git config core.hooksPath .githooks。
 node "$(dirname "$0")/../managed/claude-hooks/claude-public-push-guard.mjs" --staged || exit
 
+# 拒绝暂存文本/源码文件带 UTF-8 BOM（EF BB BF），在提交前拦截机械编码漂移。
+node -e '
+const { execFileSync } = require("node:child_process");
+const re = /\.(?:ps1|psm1|py|json|md|mjs|cjs)$/i;
+const raw = execFileSync("git", ["diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"], { encoding: "utf8" });
+const bad = [];
+for (const p of raw.split("\0").filter(Boolean)) {
+  if (!re.test(p)) continue;
+  const buf = execFileSync("git", ["show", `:${p}`], { maxBuffer: 64 * 1024 * 1024 });
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) bad.push(p);
+}
+if (bad.length > 0) {
+  console.error("UTF-8 BOM rejected in staged file(s): " + bad.join(", "));
+  process.exit(1);
+}
+' || exit
+
 # 只提醒、不拦：本仓库 AGENTS.md 是项目入口，不是全局规则的副本。
 if git diff --cached --name-only --diff-filter=ACMR | grep -qxF AGENTS.md; then
   echo '检测到本仓库 AGENTS.md 变更。D:\Codex\.codex\AGENTS.md 是生成的加载文件，不由本仓库项目入口覆盖：共同规则编辑 D:\Codex\.codex\AGENTS.shared.md，宿主差异编辑对应 AGENTS.<host>.md 或 agents-sync/config.json；已授权的全局规则源改完后运行 D:\Codex\.codex\scripts\Manual-Sync-AgentsMd.ps1 -Mode Apply，再用 -Mode Check 核验。'

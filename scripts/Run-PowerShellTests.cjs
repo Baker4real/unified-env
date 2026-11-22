@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const TEST_DIRECTORY = path.join(PROJECT_ROOT, 'tests');
+const REPORTS_DIRECTORY = path.join(PROJECT_ROOT, 'reports');
 const MODULE_MANIFEST_PATH = path.join(PROJECT_ROOT, 'modules', 'manifest.json');
 const POWERSHELL_EXECUTABLE = process.env.PWSH_PATH || 'pwsh';
 const HARDENING_CASES = Object.freeze([
@@ -132,8 +133,20 @@ function buildCommands(moduleId = null, profileName = 'fixture', onlyPattern = n
   });
 }
 
+function snapshotReportsEntries(reportsDirectory = REPORTS_DIRECTORY) {
+  if (!fs.existsSync(reportsDirectory)) return new Set();
+  return new Set(fs.readdirSync(reportsDirectory));
+}
+
+function findLeakedReportsEntries(beforeEntries, afterEntries) {
+  return [...afterEntries]
+    .filter((name) => !beforeEntries.has(name))
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function run(command, powershellExecutable) {
   console.log(`Running ${command.label}`);
+  const beforeReports = snapshotReportsEntries();
   const startedAt = process.hrtime.bigint();
   const result = spawnSync(powershellExecutable, command.arguments, {
     cwd: PROJECT_ROOT,
@@ -145,6 +158,10 @@ function run(command, powershellExecutable) {
   const seconds = (Number(process.hrtime.bigint() - startedAt) / 1e9).toFixed(1);
   if (result.status !== 0) {
     throw new Error(`${command.label} failed with exit code ${result.status ?? 'unknown'} after ${seconds}s`);
+  }
+  const leakedReports = findLeakedReportsEntries(beforeReports, snapshotReportsEntries());
+  if (leakedReports.length > 0) {
+    throw new Error(`${command.label} leaked untracked artifact(s) under reports/: ${leakedReports.join(', ')}`);
   }
   console.log(`Passed ${command.label} in ${seconds}s`);
 }
@@ -210,9 +227,18 @@ function main(args) {
   for (const command of commands) run(command, powershellExecutable);
 }
 
-try {
-  main(process.argv.slice(2));
-} catch (error) {
-  console.error(error.message);
-  process.exitCode = 1;
+module.exports = {
+  buildCommands,
+  findLeakedReportsEntries,
+  parseArguments,
+  snapshotReportsEntries,
+};
+
+if (require.main === module) {
+  try {
+    main(process.argv.slice(2));
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
 }

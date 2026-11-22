@@ -64,6 +64,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
@@ -96,6 +98,42 @@ jobs:
         run: |
           python -B tests/Test-CodexConfig.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Reject UTF-8 BOM in changed text files
+        shell: pwsh
+        working-directory: ${{ env.CI_PROJECT_ROOT }}
+        env:
+          EVENT: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $range = $null
+          if ($env:EVENT -eq 'push' -and $env:PUSH_BEFORE -and $env:PUSH_BEFORE -ne '0000000000000000000000000000000000000000') {
+            $range = "$($env:PUSH_BEFORE)..$($env:PUSH_AFTER)"
+          } elseif ($env:EVENT -eq 'pull_request' -and $env:PR_BASE -and $env:PR_HEAD) {
+            $range = "$($env:PR_BASE)...$($env:PR_HEAD)"
+          } else {
+            $range = 'HEAD~1..HEAD'
+          }
+          $changed = @(& git -c core.quotePath=false diff --name-only --diff-filter=ACMR $range -- 2>$null | Where-Object { $_ -match '\.(?:ps1|psm1|py|json|md|mjs|cjs)$' })
+          $bad = @()
+          foreach ($rel in $changed) {
+            $full = Join-Path $env:CI_PROJECT_ROOT $rel
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+            $fs = [IO.File]::OpenRead($full)
+            try {
+              $buf = New-Object byte[] 3
+              $n = $fs.Read($buf, 0, 3)
+              if ($n -eq 3 -and $buf[0] -eq 0xEF -and $buf[1] -eq 0xBB -and $buf[2] -eq 0xBF) { $bad += $rel }
+            } finally { $fs.Dispose() }
+          }
+          if ($bad.Count -gt 0) {
+            Write-Error ("UTF-8 BOM rejected in changed file(s): " + ($bad -join ', '))
+            exit 1
+          }
+          Write-Output ("BOM check passed on $($changed.Count) changed text file(s) ($range)")
 
   fixtures:
     name: ${{ matrix.name || format('{0} fixtures', matrix.module) }}

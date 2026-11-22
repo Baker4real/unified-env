@@ -4,7 +4,8 @@ param(
     [switch]$LegacyFixtureManifest,
     [string]$CodexHome = 'D:\Codex\.codex',
     [string]$OutputDir = 'D:\agents\projects\统一环境\reports\codex-hook-inventory',
-    [switch]$RequireNoRetiredRegistrations
+    [switch]$RequireNoRetiredRegistrations,
+    [switch]$Json
 )
 
 Set-StrictMode -Version Latest
@@ -214,4 +215,8 @@ if ($RequireNoRetiredRegistrations -and $document.summary.retiredButRegisteredCo
     throw "retired hook 仍被注册：count=$($document.summary.retiredButRegisteredCount)；inventory artifacts 已保留。"
 }
 
-$published
+if ($Json) {
+    $published | ConvertTo-Json -Depth 6 -Compress
+} else {
+    $published
+}

@@ -54,4 +54,11 @@ Assert-True (($noMatch.lines -join ' ') -match 'No tests selected') 'empty selec
 $badRegex = Invoke-RunnerList -Arguments @('--list', '--module', 'host-safety', '--profile', 'fixture', '--only', '[')
 Assert-True ($badRegex.exitCode -eq 1) 'an invalid --only regex must fail'
 
+Assert-True ($source.Contains('findLeakedReportsEntries(')) 'run() must check for leaked reports/ entries after each test'
+$leakProbe = & node -e "const r = require(process.argv[1]); const a = r.findLeakedReportsEntries(new Set(['keep']), new Set(['keep', 'leaked-dir'])); const b = r.findLeakedReportsEntries(new Set(['keep']), new Set(['keep'])); console.log(JSON.stringify({ a, b }));" $runnerPath 2>&1
+Assert-True ($LASTEXITCODE -eq 0) "reports leak helper probe failed: $($leakProbe -join ' ')"
+$leakObj = ($leakProbe -join "`n") | ConvertFrom-Json
+Assert-True (@($leakObj.a).Count -eq 1 -and $leakObj.a[0] -eq 'leaked-dir') 'findLeakedReportsEntries must return newly created entries under reports/'
+Assert-True (@($leakObj.b).Count -eq 0) 'findLeakedReportsEntries must ignore pre-existing entries under reports/'
+
 'ok=True'

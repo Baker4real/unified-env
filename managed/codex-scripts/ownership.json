@@ -110,6 +110,19 @@
     { "path": "Watch-WslLaunch.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Watch-WslLaunch.ps1" },
     { "path": "Test-WslLaunch.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-WslLaunch.ps1" },
     { "path": "Get-LocalPerfSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-LocalPerfSnapshot.ps1" },
-    { "path": "Test-LocalPerfSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-LocalPerfSnapshot.ps1" }
+    { "path": "Test-LocalPerfSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-LocalPerfSnapshot.ps1" },
+    { "path": "codex_diagnostics.py", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/codex_diagnostics.py" },
+    { "path": "Get-TailscaleMeshDiagnostic.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-TailscaleMeshDiagnostic.ps1" },
+    { "path": "Invoke-RemoteMagpiePortable.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Invoke-RemoteMagpiePortable.ps1" },
+    { "path": "lib/AntigravityProcessIdentity.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/lib/AntigravityProcessIdentity.ps1" },
+    { "path": "MagpiePortablePayload.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/MagpiePortablePayload.ps1" },
+    { "path": "Test-CodexDiagnostics.py", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-CodexDiagnostics.py" },
+    { "path": "Test-RemoteMagpiePortable.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-RemoteMagpiePortable.ps1" },
+    { "path": "uu_terminal_output.py", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/uu_terminal_output.py" },
+    { "path": "Get-DshNpmMetadata.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/dsh-desktop-plugin-install.md" },
+    { "path": "Test-DshDesktopStoreDir.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/dsh-desktop-plugin-install.md" },
+    { "path": "Start-RemoteInteractiveApp.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/ssh-mesh.md" },
+    { "path": "Update-CodexAutomationPrompt.ps1", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/codex-desktop.md" },
+    { "path": "Update-CodexAutomationPrompt.py", "owner": "D:/Codex/.codex/docs/agent-guidance/host-runbook/codex-desktop.md" }
   ]
 }
