@@ -109,6 +109,8 @@
     { "path": "Get-WslState.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-WslState.ps1" },
     { "path": "Test-WslState.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-WslState.ps1" },
     { "path": "Watch-WslLaunch.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Watch-WslLaunch.ps1" },
-    { "path": "Test-WslLaunch.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-WslLaunch.ps1" }
+    { "path": "Test-WslLaunch.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-WslLaunch.ps1" },
+    { "path": "Get-LocalPerfSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-LocalPerfSnapshot.ps1" },
+    { "path": "Test-LocalPerfSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-LocalPerfSnapshot.ps1" }
   ]
 }
