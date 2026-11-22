@@ -321,6 +321,27 @@
       "deniedExactPaths": [
         "D:\\agents\\projects\\misc\\outputs\\clock-countdown-issues-20260915"
       ]
+    },
+    {
+      "id": "clock-countdown-window-verification-build",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\window-verification",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-window-verification-bin",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.WindowVerification\\bin",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
+    },
+    {
+      "id": "clock-countdown-window-verification-obj",
+      "capabilityRoot": "D:\\agents\\projects\\时钟倒计时\\src\\MinminCountdown.WindowVerification\\obj",
+      "minimumDescendantDepth": 0,
+      "rootDeletionPurpose": "rebuildable-build-output",
+      "deniedExactPaths": []
     }
   ]
 }
