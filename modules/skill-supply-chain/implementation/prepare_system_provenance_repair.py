@@ -465,7 +465,11 @@ def _command_status(args: argparse.Namespace, ledger: Path, closure_script: Path
     plan = rf"{evidence}\plan.json"
     if len(missing_source) == len(roots):
         marker_sha256 = _sha256_file(system_root / ".codex-system-skills.marker")
-        if (names == REPAIR.CURRENT_SYSTEM_SKILLS) != (marker_sha256 == REPAIR.REVIEWED_DAEMON_MARKER):
+        six_skill_marker = (
+            marker_sha256 == REPAIR.REVIEWED_DAEMON_MARKER
+            or marker_sha256 in REPAIR.REVIEWED_STORE_SIX_SKILL_MARKERS
+        )
+        if (names == REPAIR.CURRENT_SYSTEM_SKILLS) != six_skill_marker:
             return {"state": "needs-review", "reasons": ["system marker 与已审查的技能清单不匹配"], "next": []}
         chinese_dominant = _load_chinese_dominant(closure_script)
         display = {name: _display_language(_live_display(root), chinese_dominant) for name, root in roots.items()}

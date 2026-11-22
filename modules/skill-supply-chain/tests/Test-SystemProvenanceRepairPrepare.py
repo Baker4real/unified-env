@@ -275,6 +275,49 @@ class PrepareSystemProvenanceRepairTests(SystemRepairTestCase):
         self.assertEqual(after["payload_release"], REPAIR.REVIEWED_DAEMON_RELEASE)
         self.assertIn(release_name, creator_source.read_bytes().rsplit(b"---\n", 1)[1])
 
+    def test_bootstrap_binds_reviewed_store_six_skill_refresh_without_payload_release(self) -> None:
+        state = self.prepare_system_display_bootstrap()
+        self.give_skill_creator_the_official_validator(state)
+        translated = self.restore_official_display(state)
+        name, translated_skill = self.add_statusline(state)
+        translated[name] = {"SKILL.md": translated_skill}
+        root = Path(state["system_root"])
+        marker_sha = BASE.sha256_file(Path(state["marker"]))
+        trees = {n: REPAIR.system_skill_integrity(root / n)["tree_sha256"] for n in (name, *state["names"])}
+        self.enterContext(
+            mock.patch.object(PREPARE.REPAIR, "REVIEWED_STORE_SIX_SKILL_MARKERS", {marker_sha: trees})
+        )
+        code, status = self.run_status(state)
+        self.assertEqual((code, status["state"]), (1, "needs-bootstrap"), status)
+
+        evidence = self.temp / "store-six-skills"
+        code, _, stderr = self.run_prepare(state, "preserve-official", "--evidence", str(evidence))
+        self.assertEqual(code, 0, stderr)
+        self.write_display(state, translated)
+        plan_path = self.temp / "store-six-plan.json"
+        code, _, stderr = self.run_prepare(
+            state, "plan", "--evidence", str(evidence), "--out", str(plan_path), "--stability-interval", "0"
+        )
+        self.assertEqual(code, 0, stderr)
+        plan_doc = json.loads(plan_path.read_text(encoding="utf-8"))
+        self.assertNotIn("payload_release", plan_doc)
+
+        args = self.system_provenance_repair_args({**state, "plan": plan_path})
+        code, _, stderr = self.run_wrapper([*args, "--dry-run"])
+        self.assertEqual(code, 0, stderr)
+        code, _, stderr = self.run_wrapper(args)
+        self.assertEqual(code, 0, stderr)
+        group = json.loads(self.ledger.read_text(encoding="utf-8"))["sources"][0]
+        self.assertNotIn("payload_release", group["system_provenance"])
+        self.assertEqual(self.run_status(state)[1]["state"], "needs-skill-creator-overlay")
+        self.bind_skill_creator_overlay(state, evidence / "creator")
+        self.assertEqual(self.run_status(state)[1]["state"], "healthy")
+
+        # Mutated tree hash against the reviewed Store marker must fail closed.
+        mutated = {**trees, name: "0" * 64}
+        with self.assertRaises(REPAIR.SystemProvenanceRepairError):
+            REPAIR.reviewed_payload_release(marker_sha, mutated)
+
     def test_legacy_plan_rejects_partial_coverage_of_active_system(self) -> None:
         state = self.prepare_system_provenance_repair()
         self.add_statusline(state)

@@ -60,6 +60,14 @@ REVIEWED_DAEMON_TREES = {
     "skill-creator": "d45c02d0e342d7e4836701de3ac8ede6fa20d180e6a5dbd728af7ad980fffb44",
     "skill-installer": "4b4b62b4253df3e23b1a7eb16797c1c8888e2ffc2b8f0dc2b1cdd07bdcdfc686",
 }
+# Store package OpenAI.Codex_26.1117.3838.0 (embedded codex-cli 0.171.0-alpha.13) ships all six skills directly;
+# bind it to the signed Store package_identity (payload_release=None) only when marker and all six trees match.
+REVIEWED_STORE_SIX_SKILL_MARKERS = {
+    "a7b56cfa7e7b0aa2fbc8192b92bb0c63a3d66f33b696cc8d526b5b030aa392e4": {
+        **REVIEWED_DAEMON_TREES,
+        "create-statusline": "c82c6b5c82e7792275cbfcd40fd4841b3109acf26ea07249868edfcb09f1437f",
+    },
+}
 PLAN_FIELDS = {
     "artifact_type",
     "schema_version",
@@ -631,7 +639,11 @@ def system_closure_targets(names: tuple[str, ...] = EXPECTED_SKILLS) -> list[str
 
 
 def reviewed_payload_release(marker_sha256: str, official_trees: dict[str, str]) -> dict[str, Any] | None:
-    if tuple(sorted(official_trees)) == EXPECTED_SKILLS and marker_sha256 != REVIEWED_DAEMON_MARKER:
+    if tuple(sorted(official_trees)) == EXPECTED_SKILLS and marker_sha256 != REVIEWED_DAEMON_MARKER and marker_sha256 not in REVIEWED_STORE_SIX_SKILL_MARKERS:
+        return None
+    if marker_sha256 in REVIEWED_STORE_SIX_SKILL_MARKERS:
+        if official_trees != REVIEWED_STORE_SIX_SKILL_MARKERS[marker_sha256]:
+            raise SystemProvenanceRepairError("system skill inventory does not match the reviewed Codex Store release")
         return None
     if marker_sha256 != REVIEWED_DAEMON_MARKER or official_trees != REVIEWED_DAEMON_TREES:
         raise SystemProvenanceRepairError("system skill inventory does not match the reviewed Codex daemon release")
