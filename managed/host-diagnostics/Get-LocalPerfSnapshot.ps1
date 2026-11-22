@@ -12,6 +12,7 @@ such as bitmask 8 (SMART FAILED) instead of aborting.
 param(
     [ValidateRange(1, 30)][int]$TopProcesses = 10,
     [ValidateRange(1, 30)][int]$EventDays = 7,
+    [ValidateRange(0, 10)][int]$LiveCpuSeconds = 2,
     [switch]$SkipSmart,
     [switch]$SkipEvents,
     [switch]$SkipGpuCounters
@@ -99,12 +100,43 @@ function Parse-SmartOutput([string]$Device, [int]$ExitCode, [string]$Text) {
 }
 
 $now = Get-Date
+$cimProps = @('ProcessId', 'Name', 'SessionId', 'KernelModeTime', 'UserModeTime', 'HandleCount', 'ThreadCount', 'PrivatePageCount')
+$liveSw = [Diagnostics.Stopwatch]::StartNew()
+$cimSnap1 = @{}
+try {
+    foreach ($cp in @(Get-CimInstance -ClassName Win32_Process -Property $cimProps -ErrorAction Stop)) {
+        $procId = [int]$cp.ProcessId
+        $cimSnap1[$procId] = [pscustomobject]@{
+            name = [string]$cp.Name
+            sessionId = [int]$cp.SessionId
+            kernelTime = if ($null -ne $cp.KernelModeTime) { [double]$cp.KernelModeTime } else { $null }
+            userTime = if ($null -ne $cp.UserModeTime) { [double]$cp.UserModeTime } else { $null }
+            handles = if ($null -ne $cp.HandleCount) { [int]$cp.HandleCount } else { 0 }
+            threads = if ($null -ne $cp.ThreadCount) { [int]$cp.ThreadCount } else { 0 }
+            privateBytes = if ($null -ne $cp.PrivatePageCount) { [double]$cp.PrivatePageCount } else { 0.0 }
+        }
+    }
+} catch {}
+
 $os = Get-CimInstance -ClassName Win32_OperatingSystem
 $uptimeDays = [math]::Round(($now - $os.LastBootUpTime).TotalDays, 2)
 $totalPhysGB = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2)
 $freePhysGB = [math]::Round($os.FreePhysicalMemory / 1MB, 2)
 $totalVirtGB = [math]::Round($os.TotalVirtualMemorySize / 1MB, 2)
 $freeVirtGB = [math]::Round($os.FreeVirtualMemory / 1MB, 2)
+
+$poolNonpagedGB = $null
+$poolPagedGB = $null
+try {
+    $poolCounters = Get-Counter -Counter @(
+        '\Memory\Pool Nonpaged Bytes',
+        '\Memory\Pool Paged Bytes'
+    ) -ErrorAction Stop
+    foreach ($ps in $poolCounters.CounterSamples) {
+        if ($ps.Path -like '*pool nonpaged bytes*') { $poolNonpagedGB = [math]::Round([double]$ps.CookedValue / 1GB, 2) }
+        elseif ($ps.Path -like '*pool paged bytes*') { $poolPagedGB = [math]::Round([double]$ps.CookedValue / 1GB, 2) }
+    }
+} catch {}
 
 $memoryInfo = [pscustomobject]@{
     totalPhysicalGB = $totalPhysGB
@@ -113,6 +145,8 @@ $memoryInfo = [pscustomobject]@{
     totalVirtualGB = $totalVirtGB
     freeVirtualGB = $freeVirtGB
     committedGB = [math]::Round($totalVirtGB - $freeVirtGB, 2)
+    poolNonpagedGB = $poolNonpagedGB
+    poolPagedGB = $poolPagedGB
 }
 
 $allProcs = @(Get-Process -ErrorAction SilentlyContinue)
@@ -126,12 +160,38 @@ $topByMem = @(
         Sort-Object -Property PrivateMemorySize64 -Descending |
         Select-Object -First $TopProcesses |
         ForEach-Object {
+            $cpuSec = $null
+            if ($cimSnap1.ContainsKey($_.Id)) {
+                $ci = $cimSnap1[$_.Id]
+                if ($null -ne $ci.kernelTime -and $null -ne $ci.userTime) {
+                    $cpuSec = [math]::Round(($ci.kernelTime + $ci.userTime) / 1e7, 1)
+                }
+            }
+            if ($null -eq $cpuSec -and $null -ne $_.CPU) {
+                $cpuSec = [math]::Round($_.CPU, 1)
+            }
             [pscustomobject]@{
                 id = $_.Id
                 name = $_.ProcessName
                 wsMB = [math]::Round($_.WorkingSet64 / 1MB, 1)
                 pmMB = [math]::Round($_.PrivateMemorySize64 / 1MB, 1)
-                cpuSeconds = if ($null -ne $_.CPU) { [math]::Round($_.CPU, 1) } else { 0.0 }
+                cpuSeconds = $cpuSec
+            }
+        }
+)
+
+$topByHandles = @(
+    $allProcs |
+        Sort-Object -Property HandleCount -Descending |
+        Select-Object -First $TopProcesses |
+        ForEach-Object {
+            [pscustomobject]@{
+                id = $_.Id
+                name = $_.ProcessName
+                sessionId = $_.SessionId
+                handles = $_.HandleCount
+                threads = $_.Threads.Count
+                pmMB = [math]::Round($_.PrivateMemorySize64 / 1MB, 1)
             }
         }
 )
@@ -140,6 +200,7 @@ $gpuResult = [ordered]@{
     status = 'unavailable'
     toolPath = $null
     adapter = $null
+    adapterMemory = @()
     topVramProcesses = @()
 }
 $nvSmiPath = Resolve-ToolPath -Name 'nvidia-smi'
@@ -180,18 +241,20 @@ if (-not $SkipGpuCounters) {
         $gpuCounters = Get-Counter -Counter @(
             '\GPU Process Memory(*)\Dedicated Usage',
             '\GPU Process Memory(*)\Local Usage',
-            '\GPU Process Memory(*)\Shared Usage'
+            '\GPU Process Memory(*)\Shared Usage',
+            '\GPU Process Memory(*)\Total Committed'
         ) -ErrorAction Stop
         $byPid = @{}
         foreach ($sample in $gpuCounters.CounterSamples) {
             if ($sample.InstanceName -match 'pid_(\d+)_') {
                 $pidVal = [int]$Matches[1]
                 if (-not $byPid.ContainsKey($pidVal)) {
-                    $byPid[$pidVal] = [ordered]@{ ded = 0.0; loc = 0.0; shr = 0.0 }
+                    $byPid[$pidVal] = [ordered]@{ ded = 0.0; loc = 0.0; shr = 0.0; com = 0.0 }
                 }
                 if ($sample.Path -like '*dedicated usage*') { $byPid[$pidVal]['ded'] += [double]$sample.CookedValue }
                 elseif ($sample.Path -like '*local usage*') { $byPid[$pidVal]['loc'] += [double]$sample.CookedValue }
                 elseif ($sample.Path -like '*shared usage*') { $byPid[$pidVal]['shr'] += [double]$sample.CookedValue }
+                elseif ($sample.Path -like '*total committed*') { $byPid[$pidVal]['com'] += [double]$sample.CookedValue }
             }
         }
         $vramRows = @(
@@ -204,12 +267,43 @@ if (-not $SkipGpuCounters) {
                     dedMB = [math]::Round($entry.Value['ded'] / 1MB, 1)
                     localMB = [math]::Round($entry.Value['loc'] / 1MB, 1)
                     sharedMB = [math]::Round($entry.Value['shr'] / 1MB, 1)
+                    committedMB = [math]::Round($entry.Value['com'] / 1MB, 1)
                 }
             }
         )
-        $gpuResult['topVramProcesses'] = @($vramRows | Sort-Object -Property localMB, dedMB -Descending | Select-Object -First $TopProcesses)
+        $gpuResult['topVramProcesses'] = @($vramRows | Sort-Object -Property localMB, committedMB, dedMB -Descending | Select-Object -First $TopProcesses)
     } catch {
         $gpuResult['vramCounterStatus'] = 'unavailable'
+    }
+
+    try {
+        $adapterCounters = Get-Counter -Counter @(
+            '\GPU Adapter Memory(*)\Dedicated Usage',
+            '\GPU Adapter Memory(*)\Shared Usage',
+            '\GPU Adapter Memory(*)\Total Committed'
+        ) -ErrorAction Stop
+        $byLuid = @{}
+        foreach ($sample in $adapterCounters.CounterSamples) {
+            $luidKey = [string]$sample.InstanceName
+            if (-not $byLuid.ContainsKey($luidKey)) {
+                $byLuid[$luidKey] = [ordered]@{ ded = 0.0; shr = 0.0; com = 0.0 }
+            }
+            if ($sample.Path -like '*dedicated usage*') { $byLuid[$luidKey]['ded'] = [double]$sample.CookedValue }
+            elseif ($sample.Path -like '*shared usage*') { $byLuid[$luidKey]['shr'] = [double]$sample.CookedValue }
+            elseif ($sample.Path -like '*total committed*') { $byLuid[$luidKey]['com'] = [double]$sample.CookedValue }
+        }
+        $gpuResult['adapterMemory'] = @(
+            foreach ($entry in ($byLuid.GetEnumerator() | Sort-Object -Property Key)) {
+                [pscustomobject]@{
+                    luid = $entry.Key
+                    dedicatedGB = [math]::Round($entry.Value['ded'] / 1GB, 3)
+                    sharedGB = [math]::Round($entry.Value['shr'] / 1GB, 3)
+                    committedGB = [math]::Round($entry.Value['com'] / 1GB, 3)
+                }
+            }
+        )
+    } catch {
+        $gpuResult['adapterMemoryStatus'] = 'unavailable'
     }
 }
 
@@ -320,6 +414,47 @@ if (-not $SkipEvents) {
     )
 }
 
+$liveCpuWindowSec = 0.0
+$topLiveCpu = @()
+if ($LiveCpuSeconds -gt 0 -and $cimSnap1.Count -gt 0) {
+    $remainMs = [int][math]::Ceiling(($LiveCpuSeconds - $liveSw.Elapsed.TotalSeconds) * 1000)
+    if ($remainMs -gt 0) {
+        Start-Sleep -Milliseconds $remainMs
+    }
+    try {
+        $cimSnap2 = @(Get-CimInstance -ClassName Win32_Process -Property $cimProps -ErrorAction Stop)
+        $elapsedSec = $liveSw.Elapsed.TotalSeconds
+        if ($elapsedSec -gt 0.05) {
+            $liveCpuWindowSec = [math]::Round($elapsedSec, 2)
+            $logicalCpus = [math]::Max(1, [Environment]::ProcessorCount)
+            $deltaRows = [Collections.Generic.List[object]]::new()
+            foreach ($cp in $cimSnap2) {
+                $procId = [int]$cp.ProcessId
+                if ($procId -eq 0 -or -not $cimSnap1.ContainsKey($procId)) { continue }
+                $prev = $cimSnap1[$procId]
+                if ($null -eq $prev.kernelTime -or $null -eq $prev.userTime -or $null -eq $cp.KernelModeTime -or $null -eq $cp.UserModeTime) { continue }
+                $dk = ([double]$cp.KernelModeTime - $prev.kernelTime) / 1e7
+                $du = ([double]$cp.UserModeTime - $prev.userTime) / 1e7
+                $dt = $dk + $du
+                if ($dt -gt 0.01) {
+                    $deltaRows.Add([pscustomobject]@{
+                        id = $procId
+                        name = [IO.Path]::GetFileNameWithoutExtension([string]$cp.Name)
+                        sessionId = [int]$cp.SessionId
+                        singleCorePct = [math]::Round(($dt / $elapsedSec) * 100, 1)
+                        totalCpuPct = [math]::Round(($dt / $elapsedSec / $logicalCpus) * 100, 2)
+                        kernelSec = [math]::Round($dk, 3)
+                        userSec = [math]::Round($du, 3)
+                        handles = if ($null -ne $cp.HandleCount) { [int]$cp.HandleCount } else { 0 }
+                        pmMB = if ($null -ne $cp.PrivatePageCount) { [math]::Round([double]$cp.PrivatePageCount / 1MB, 1) } else { 0.0 }
+                    })
+                }
+            }
+            $topLiveCpu = @($deltaRows | Sort-Object -Property singleCorePct -Descending | Select-Object -First $TopProcesses)
+        }
+    } catch {}
+}
+
 $snapshot = [pscustomobject]@{
     schemaVersion = 1
     status = 'complete'
@@ -327,9 +462,12 @@ $snapshot = [pscustomobject]@{
     hostname = $env:COMPUTERNAME
     uptimeDays = $uptimeDays
     lastBootUpTime = $os.LastBootUpTime.ToString('o')
+    liveCpuWindowSeconds = $liveCpuWindowSec
     memory = $memoryInfo
     gpu = [pscustomobject]$gpuResult
+    topLiveCpuProcesses = $topLiveCpu
     topProcessesByMemory = $topByMem
+    topProcessesByHandles = $topByHandles
     storage = [pscustomobject]@{
         disks = $disks
         smart = [pscustomobject]$smartResult

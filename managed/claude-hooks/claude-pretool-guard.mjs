@@ -79,6 +79,11 @@
 //      (0.5.1 on) pipes { tool_name, tool_input } to this script before it adds an item and refuses it on a deny.
 //  25. rg with a literal .asar archive as a search path: rg reads the archive as one file, so a match is a line of
 //      minified JS that names no packed file; asar_extract.py grep names the file of each match.
+//  26. PowerShell writes to AllScope read-only/constant automatic variables ($PID, $HOME, $Host, $true, $false, $PSHOME,
+//      $PSVersionTable, $PSEdition, $ShellId, $ExecutionContext, $IsWindows/$IsLinux/$IsMacOS/$IsCoreCLR, $PSCulture,
+//      $PSUICulture, $EnabledExperimentalFeatures; case-insensitive) via direct assignment or foreach loop variable,
+//      inline, in referenced .ps1/.psm1 scripts, or in Write/Edit on a .ps1/.psm1. Drive-qualified vars ($env:HOME),
+//      member access ($obj.pid = 1), hashtable keys (@{ pid = 1 }), $null discard, strings and comments pass.
 // The Stop hook file is imported for rules 23 and 24 after stdin is read; if it fails to load or lacks the exports,
 // those two allow and the rest still run.
 // Each rule's scope, workarounds and live checks are documented in
@@ -1545,7 +1550,8 @@ function checkedEntryScripts(command, cwd, checkOnly) {
 function parameterReason(script, diagnostic) {
   return `脚本 ${script} 没过参数预检：${diagnostic}（行列指这个脚本）。这类错误要运行到那一行才报，前面的语句已经执行了。` +
     '参数集定不下来（AmbiguousParameterSet）常见于 Split-Path -LiteralPath $p -Parent 或 -Leaf：-LiteralPath 只能单用，' +
-    '取父目录、文件名改用 [IO.Path]::GetDirectoryName($p)、[IO.Path]::GetFileName($p) 或 -Path；参数名不存在（NamedParameterNotFound）就改成该 cmdlet 真有的参数。' +
+    '取父目录、文件名改用 [IO.Path]::GetDirectoryName($p)、[IO.Path]::GetFileName($p) 或 -Path；参数名不存在（NamedParameterNotFound）就改成该 cmdlet 真有的参数；' +
+    '只读自动变量冲突（ReadOnlyAutomaticVariable，如 $pId 撞 $PID）请改变量名；Diagnostic/Analytic 事件日志（AnalyticLogRequiresOldest）需给 Get-WinEvent 加 -Oldest。' +
     `改完用 & '${CHECKED_POWERSHELL}' -ScriptPath '${script}' -CheckOnly 复查（${GUIDANCE}\\windows-pwsh-command-guidelines.md「受检执行入口」的参数预检段）。`
 }
 
@@ -1740,6 +1746,101 @@ function dshGuiDecision(command, tool, cwd, io) {
   return null
 }
 
+// Rule 26. PowerShell variable names are case-insensitive; writing to an AllScope read-only/constant automatic variable
+// (such as $pId = ... colliding with $PID, or foreach ($Home in ...)) always throws SessionStateUnauthorizedAccessException
+// at runtime, even inside functions. Drive-qualified ($env:HOME), member ($a.pid = 1), hashtable (@{ pid = 1 }) and $null pass.
+const READONLY_AUTO_VARS = new Map([
+  ['pid', 'PID'],
+  ['home', 'HOME'],
+  ['host', 'Host'],
+  ['true', 'true'],
+  ['false', 'false'],
+  ['pshome', 'PSHOME'],
+  ['psversiontable', 'PSVersionTable'],
+  ['psedition', 'PSEdition'],
+  ['shellid', 'ShellId'],
+  ['executioncontext', 'ExecutionContext'],
+  ['iswindows', 'IsWindows'],
+  ['islinux', 'IsLinux'],
+  ['ismacos', 'IsMacOS'],
+  ['iscoreclr', 'IsCoreCLR'],
+  ['psculture', 'PSCulture'],
+  ['psuiculture', 'PSUICulture'],
+  ['enabledexperimentalfeatures', 'EnabledExperimentalFeatures']
+])
+const AUTO_VAR_ASSIGN = /(?:^|[;\n|&{,(])[ \t]*(?:\[[^\]\r\n]+\][ \t]*)*\$((?:(?:global|local|script|private):)?([A-Za-z_][A-Za-z0-9_]*))[ \t]*(?:\+=|-=|\*=|\/=|%=|=)(?!=)/gi
+const AUTO_VAR_FOREACH = /\bforeach\b(?:[ \t]+-\w+)*[ \t]*\([ \t]*(?:\[[^\]\r\n]+\][ \t]*)*\$((?:(?:global|local|script|private):)?([A-Za-z_][A-Za-z0-9_]*))[ \t]+in\b/gi
+
+function readOnlyAutoVarTraps(s) {
+  if (!s || !s.includes('$')) return []
+  const code = powerShellCode(s)
+  const hits = []
+  const scan = (re, kind) => {
+    re.lastIndex = 0
+    for (const m of code.matchAll(re)) {
+      const canonical = READONLY_AUTO_VARS.get(m[2].toLowerCase())
+      if (!canonical) continue
+      const dollarOffset = m[0].indexOf('$')
+      const idx = m.index + (dollarOffset >= 0 ? dollarOffset : 0)
+      const line = lineOf(s, idx)
+      const rawVar = '$' + m[1]
+      hits.push({
+        kind,
+        rawVar,
+        canonical: '$' + canonical,
+        line,
+        index: idx,
+        signature: `${kind}\n${canonical}\n${s.split('\n')[line - 1].trim()}`
+      })
+    }
+  }
+  scan(AUTO_VAR_ASSIGN, 'assign')
+  scan(AUTO_VAR_FOREACH, 'foreach')
+  hits.sort((a, b) => a.index - b.index)
+  return hits
+}
+
+function readOnlyAutoVarReason(where, hit) {
+  return `${where}第 ${hit.line} 行向 PowerShell 只读/常量自动变量 ${hit.canonical} 写入（写成了 ${hit.rawVar}）。` +
+    'PowerShell 变量名不区分大小写，AllScope 只读/常量自动变量在顶层、函数和 foreach 里赋值都会抛 SessionStateUnauthorizedAccessException。' +
+    `请改用不冲突的变量名（如 $procId / $homeDir；${GUIDANCE}\\windows-pwsh-command-guidelines.md 第 5 条）。`
+}
+
+function readOnlyAutoVarDecision(command, tool, cwd, io) {
+  if (tool === 'PowerShell' || tool === TERMINAL_TOOL) {
+    const hit = readOnlyAutoVarTraps(command)[0]
+    if (hit) return readOnlyAutoVarReason('', hit)
+  }
+  for (const script of referencedScripts(command, cwd, io)) {
+    const text = io.read(script)
+    const hit = text ? readOnlyAutoVarTraps(text)[0] : null
+    if (hit) return readOnlyAutoVarReason(`脚本 ${script} 里：`, hit)
+  }
+  return null
+}
+
+function readOnlyAutoVarWriteReason(tool, payload, io) {
+  const input = payload?.tool_input || {}
+  const filePath = String(input.file_path || '')
+  if (!/\.psm?1$/i.test(filePath)) return null
+  const path = win32.resolve(String(payload?.cwd || ''), filePath)
+  const lf = text => String(text ?? '').replace(/\r\n/g, '\n')
+  const before = io.read(path)
+  let after
+  if (tool === 'Write') after = lf(input.content)
+  else {
+    const current = lf(before)
+    const oldText = lf(input.old_string)
+    if (before === null || !oldText || !current.includes(oldText)) return null
+    const newText = lf(input.new_string)
+    after = input.replace_all ? current.split(oldText).join(newText) : current.replace(oldText, () => newText)
+  }
+  if (after.length > MAX_SCRIPT_BYTES) return null
+  const known = new Set(before === null ? [] : readOnlyAutoVarTraps(lf(before)).map(hit => hit.signature))
+  const hit = readOnlyAutoVarTraps(after).find(trap => !known.has(trap.signature))
+  return hit ? readOnlyAutoVarReason(`${tool} 要写入的 ${path} 里：`, hit) : null
+}
+
 function deny(reason) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
@@ -1753,8 +1854,10 @@ function deny(reason) {
 export function evaluate(payload, io = defaultIo) {
   const tool = String(payload?.tool_name || '')
   if (tool === 'Grep' || tool === 'Glob') return searchToolReason(tool, payload)
-  // Rule 18: direct writes to the active skills root must go through the guarded install entry; rule 20 for scripts.
-  if (tool === 'Write' || tool === 'Edit') return skillsRootWriteReason(tool, payload) || strictCountWriteReason(tool, payload, io)
+  // Rule 18: direct writes to the active skills root must go through the guarded install entry; rules 20 and 26 for scripts.
+  if (tool === 'Write' || tool === 'Edit') {
+    return skillsRootWriteReason(tool, payload) || strictCountWriteReason(tool, payload, io) || readOnlyAutoVarWriteReason(tool, payload, io)
+  }
   if (tool === HAND_OFF_TOOL) return handoffReason(payload?.tool_input)
   const command = String(payload?.tool_input?.command || '')
   const terminal = tool === TERMINAL_TOOL
@@ -1828,7 +1931,9 @@ export function evaluate(payload, io = defaultIo) {
       '加 --no-hardlinks 后重试（--no-local 或 file:// 源也行）。如果这只是文本（提交信息、搜索模式），改用 Grep 工具，或把关键词拆开写。'
   }
   // Rule 21 goes last: it starts pwsh, so every cheaper rule answers first.
-  return strictCountDecision(command, tool, payload?.cwd, io) || parameterDecision(command, payload?.cwd, io)
+  return strictCountDecision(command, tool, payload?.cwd, io) ||
+    readOnlyAutoVarDecision(command, tool, payload?.cwd, io) ||
+    parameterDecision(command, payload?.cwd, io)
 }
 
 function main() {
@@ -2378,7 +2483,15 @@ if (process.argv.includes('--self-test')) {
     [reason(TERMINAL_TOOL, "reg delete 'HKLM\\SOFTWARE\\X' -f").includes('//f'), 'the reg delete reason carries the Stop hook fix'],
     [reason('PowerShell', "rg -a x 'D:\\x\\app.asar'").includes('asar_extract.py grep <asar> <正则>'), 'the asar reason names asar_extract.py grep'],
     [(evaluate({ tool_name: 'Write', tool_input: { file_path: 'D:\\agents\\skills-manager\\skills\\retro\\SKILL.md' }, cwd: 'D:\\repo' }, io) || '').includes('D:\\Codex\\.codex\\scripts\\install-skill-guarded.ps1'),
-      'the skills-root write reason names install-skill-guarded.ps1']
+      'the skills-root write reason names install-skill-guarded.ps1'],
+    // Rule 26: writes to AllScope read-only/constant automatic variables
+    [reason('PowerShell', '$pId = [int]$Matches[1]').includes('$PID'), 'Rule 26 denies $pId assignment inline'],
+    [reason('PowerShell', '[int]$pid = 42').includes('$PID'), 'Rule 26 denies typed $pid assignment'],
+    [reason('PowerShell', 'foreach ($Home in @("a")) { $Home }').includes('$HOME'), 'Rule 26 denies foreach $Home'],
+    [(evaluate({ tool_name: 'Write', tool_input: { file_path: 'D:\\repo\\tools\\bad-pid.ps1', content: '$pId = 1\n' }, cwd: 'D:\\repo' }, io) || '').includes('$PID'),
+      'Rule 26 denies Write of .ps1 assigning $pId'],
+    [reason('PowerShell', '$env:HOME = "D:/tmp"; $obj = @{ pid = 1 }; $obj.pid = 2; $null = 1; $procId = $PID; "# $pId = 1"') === '',
+      'Rule 26 allows env:, hashtable keys, member access, $null discard, reads and strings']
   ]
   for (const [ok, label] of checks) {
     if (!ok) {

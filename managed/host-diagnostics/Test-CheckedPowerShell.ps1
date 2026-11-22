@@ -731,6 +731,62 @@ gh api 'repos/owner/repo/releases/latest' | python -c 'import sys,json; print(le
     if ($ok.exitCode -ne 0) { throw "Read-only gh api pipe was rejected: exit=$($ok.exitCode) stderr=$($ok.stderr)" }
 }
 
+Assert-Case 'preflight rejects writes to AllScope read-only automatic variables while allowing env, properties and discard' {
+    $invalidCases = @(
+        @{ Source = '$pId = 42; "PRIVATE-AUTO-SENTINEL"'; Canonical = '$PID' },
+        @{ Source = '[int]$pid = 42'; Canonical = '$PID' },
+        @{ Source = 'foreach ($Home in @("a")) { $Home }'; Canonical = '$HOME' },
+        @{ Source = 'function Test-Shadow([string]$host) { $host }'; Canonical = '$Host' },
+        @{ Source = 'param([bool]$isWindows)'; Canonical = '$IsWindows' },
+        @{ Source = '$script:psHome = "x"'; Canonical = '$PSHOME' }
+    )
+    foreach ($case in $invalidCases) {
+        $result = Invoke-PublicCli @('-CommandText', $case.Source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'parameter-error id=ReadOnlyAutomaticVariable' -or -not $result.stderr.Contains("command=$($case.Canonical) ")) {
+            throw "Read-only automatic variable write was not rejected ($($case.Source)): exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('PRIVATE-AUTO-SENTINEL')) {
+            throw 'Automatic variable rejection exposed source.'
+        }
+    }
+    $validCases = @(
+        '$env:HOME = "D:/tmp"',
+        '$obj = @{ pid = 1; home = "x" }; $obj.pid = 2',
+        '$null = "discard"',
+        '$error = "local-ok"',
+        '$procId = $PID'
+    )
+    foreach ($source in $validCases) {
+        $ok = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($ok.exitCode -ne 0) { throw "Valid variable usage was rejected ($source): exit=$($ok.exitCode) stderr=$($ok.stderr)" }
+    }
+}
+
+Assert-Case 'preflight rejects Get-WinEvent on Diagnostic/Analytic logs without -Oldest' {
+    $invalidCases = @(
+        'Get-WinEvent -FilterHashtable @{ LogName = "Microsoft-Windows-Dwm-Core/Diagnostic" }',
+        'Get-WinEvent -LogName "Microsoft-Windows-Kernel-Power/Analytic" -MaxEvents 5',
+        'Get-WinEvent "Microsoft-Windows-Dwm-Core/Diagnostic" -MaxEvents 5',
+        'Get-WinEvent -LogName "Microsoft-Windows-Dwm-Core/Diagnostic" -Oldest:$false'
+    )
+    foreach ($source in $invalidCases) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'parameter-error id=AnalyticLogRequiresOldest command=Get-WinEvent') {
+            throw "Diagnostic/Analytic Get-WinEvent without -Oldest was not rejected ($source): exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+    }
+    $validCases = @(
+        'Get-WinEvent -FilterHashtable @{ LogName = "Microsoft-Windows-Dwm-Core/Diagnostic" } -Oldest -MaxEvents 5',
+        'Get-WinEvent -LogName "Microsoft-Windows-Kernel-Power/Analytic" -Oldest',
+        'Get-WinEvent -FilterHashtable @{ LogName = "Microsoft-Windows-Storage-ClassPnP/Operational" } -MaxEvents 5',
+        'Get-WinEvent -LogName "System" -MaxEvents 5'
+    )
+    foreach ($source in $validCases) {
+        $ok = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($ok.exitCode -ne 0) { throw "Valid Get-WinEvent was rejected ($source): exit=$($ok.exitCode) stderr=$($ok.stderr)" }
+    }
+}
+
 $failed = @($cases | Where-Object status -eq 'failed')
 $report = [ordered]@{
     status = if ($failed.Count) { 'failed' } else { 'passed' }

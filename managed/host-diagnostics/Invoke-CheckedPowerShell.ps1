@@ -413,6 +413,59 @@ foreach ($pipeline in $ast.FindAll({ param($node) $node -is [System.Management.A
     }
 }
 
+# Assigning to PowerShell's AllScope read-only/constant automatic variables (case-insensitive, e.g. $pId = ...)
+# always throws SessionStateUnauthorizedAccessException at runtime, including inside functions and foreach/param.
+$readOnlyAutoVars = @{
+    'pid' = 'PID'
+    'home' = 'HOME'
+    'host' = 'Host'
+    'true' = 'true'
+    'false' = 'false'
+    'pshome' = 'PSHOME'
+    'psversiontable' = 'PSVersionTable'
+    'psedition' = 'PSEdition'
+    'shellid' = 'ShellId'
+    'executioncontext' = 'ExecutionContext'
+    'iswindows' = 'IsWindows'
+    'islinux' = 'IsLinux'
+    'ismacos' = 'IsMacOS'
+    'iscoreclr' = 'IsCoreCLR'
+    'psculture' = 'PSCulture'
+    'psuiculture' = 'PSUICulture'
+    'enabledexperimentalfeatures' = 'EnabledExperimentalFeatures'
+}
+function Test-ReadOnlyAutoVarAst([System.Management.Automation.Language.VariableExpressionAst]$VarAst) {
+    if ($null -eq $VarAst -or $VarAst.VariablePath.IsDriveQualified) { return $null }
+    $raw = $VarAst.VariablePath.UserPath -replace '^(?:global|local|script|private):', ''
+    $lower = $raw.ToLowerInvariant()
+    if ($readOnlyAutoVars.ContainsKey($lower)) { return $readOnlyAutoVars[$lower] }
+    return $null
+}
+$autoVarTargets = [Collections.Generic.List[System.Management.Automation.Language.VariableExpressionAst]]::new()
+foreach ($assign in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+    $lhs = $assign.Left
+    while ($lhs -is [System.Management.Automation.Language.AttributedExpressionAst]) { $lhs = $lhs.Child }
+    if ($lhs -is [System.Management.Automation.Language.VariableExpressionAst]) { $autoVarTargets.Add($lhs) }
+}
+foreach ($fe in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.ForEachStatementAst] }, $true)) {
+    if ($null -ne $fe.Variable) { $autoVarTargets.Add($fe.Variable) }
+}
+foreach ($prm in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.ParameterAst] }, $true)) {
+    if ($null -ne $prm.Name) { $autoVarTargets.Add($prm.Name) }
+}
+$autoVarTargets.Sort([Comparison[System.Management.Automation.Language.VariableExpressionAst]]{
+    param($a, $b)
+    $a.Extent.StartOffset.CompareTo($b.Extent.StartOffset)
+})
+foreach ($targetVar in $autoVarTargets) {
+    $canonical = Test-ReadOnlyAutoVarAst $targetVar
+    if ($null -ne $canonical) {
+        [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=ReadOnlyAutomaticVariable command=${0} line={1} column={2}; PowerShell variable names are case-insensitive and ${0} is read-only/constant; rename it' -f
+            $canonical, $targetVar.Extent.StartLineNumber, $targetVar.Extent.StartColumnNumber))
+        exit 2
+    }
+}
+
 # A cmdlet call whose parameter set cannot be resolved, or that names a missing parameter, fails only when it is
 # reached, after earlier statements already ran. Only cmdlets of the modules that ship with pwsh are bound.
 $builtinModules = @('Microsoft.PowerShell.Core', 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security')
@@ -427,6 +480,53 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
         if ($element -is [System.Management.Automation.Language.VariableExpressionAst] -and $element.Splatted) { $splatted = $true; break }
     }
     if ($splatted) { continue }
+    # Analytic/Diagnostic event logs reject forward-reverse reads without -Oldest.
+    if ($name -ieq 'Get-WinEvent') {
+        $elements = @($command.CommandElements)
+        $hasOldest = $false
+        $logLiterals = [Collections.Generic.List[string]]::new()
+        for ($elIdx = 1; $elIdx -lt $elements.Count; $elIdx++) {
+            $el = $elements[$elIdx]
+            if ($el -is [System.Management.Automation.Language.CommandParameterAst]) {
+                if ('Oldest'.StartsWith($el.ParameterName, [StringComparison]::OrdinalIgnoreCase)) {
+                    $argText = if ($null -ne $el.Argument) { $el.Argument.Extent.Text.Trim() } else { '' }
+                    if ($argText -ine '$false' -and $argText -ne '0') { $hasOldest = $true }
+                    continue
+                }
+                if ('LogName'.StartsWith($el.ParameterName, [StringComparison]::OrdinalIgnoreCase)) {
+                    $valAst = if ($null -ne $el.Argument) { $el.Argument } elseif (($elIdx + 1) -lt $elements.Count) { $elIdx++; $elements[$elIdx] } else { $null }
+                    if ($null -ne $valAst) {
+                        foreach ($strNode in $valAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true)) {
+                            $logLiterals.Add($strNode.Value)
+                        }
+                    }
+                    continue
+                }
+                if ('FilterHashtable'.StartsWith($el.ParameterName, [StringComparison]::OrdinalIgnoreCase)) {
+                    $valAst = if ($null -ne $el.Argument) { $el.Argument } elseif (($elIdx + 1) -lt $elements.Count) { $elIdx++; $elements[$elIdx] } else { $null }
+                    if ($null -ne $valAst) {
+                        foreach ($ht in $valAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true)) {
+                            foreach ($pair in $ht.KeyValuePairs) {
+                                if ($pair.Item1 -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $pair.Item1.Value -ieq 'LogName') {
+                                    foreach ($strNode in $pair.Item2.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true)) {
+                                        $logLiterals.Add($strNode.Value)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    continue
+                }
+            } elseif ($elIdx -eq 1 -and $el -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                $logLiterals.Add($el.Value)
+            }
+        }
+        if (-not $hasOldest -and @($logLiterals | Where-Object { $_ -imatch '/(?:Diagnostic|Analytic)$' }).Count -gt 0) {
+            [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=AnalyticLogRequiresOldest command=Get-WinEvent line={0} column={1}; analytic/diagnostic event logs require -Oldest' -f
+                $command.Extent.StartLineNumber, $command.Extent.StartColumnNumber))
+            exit 2
+        }
+    }
     if (-not $resolvedCmdlets.ContainsKey($name)) {
         # Verb-Noun names are looked up in the built-in modules only, other names in the session alias table by their
         # definition, so native commands and unknown names never start command discovery (hundreds of ms each).

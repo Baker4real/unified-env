@@ -114,11 +114,12 @@ exit /b 0
 [IO.File]::WriteAllText((Join-Path $stubDir 'nvidia-smi.cmd'), $nvStub, [Text.ASCIIEncoding]::new())
 
 Check 'path-resolved-stubs-parse-smart-failed-rc8-and-gpu' {
-    $res = Invoke-Snapshot -Arguments @('-TopProcesses', '5', '-SkipEvents', '-SkipGpuCounters') -PrependPath $stubDir
+    $res = Invoke-Snapshot -Arguments @('-TopProcesses', '5', '-LiveCpuSeconds', '0', '-SkipEvents', '-SkipGpuCounters') -PrependPath $stubDir
     Assert ($res.exitCode -eq 0) ('unexpected-exit-' + $res.exitCode)
     Assert ([string]::IsNullOrWhiteSpace($res.stderr)) ('unexpected-stderr:' + $res.stderr)
     $json = $res.stdout | ConvertFrom-Json -ErrorAction Stop
     Assert ($json.schemaVersion -eq 1 -and $json.status -eq 'complete') 'bad-header'
+    Assert ($json.liveCpuWindowSeconds -eq 0 -and @($json.topLiveCpuProcesses).Count -eq 0) 'live-cpu-not-skipped'
     Assert ($json.gpu.status -eq 'ok') ('gpu-status-' + $json.gpu.status)
     Assert ($json.gpu.toolPath.StartsWith($stubDir, [StringComparison]::OrdinalIgnoreCase)) ('gpu-stub-not-resolved:' + $json.gpu.toolPath)
     Assert ($json.gpu.adapter.name -eq 'NVIDIA Test GPU' -and $json.gpu.adapter.memoryFreeMiB -eq '11904') 'gpu-parse-mismatch'
@@ -130,16 +131,27 @@ Check 'path-resolved-stubs-parse-smart-failed-rc8-and-gpu' {
     Assert ($failDrive.exitCode -eq 8 -and $failDrive.overallHealth -eq 'FAILED!' -and $failDrive.criticalWarning -eq '0x04') 'smart-fail-parse-mismatch'
     Assert ($failDrive.mediaErrors -eq '12' -and $failDrive.unrecoveredReadEntries -eq 2) 'smart-media-errors-mismatch'
     Assert (@($json.topProcessesByMemory).Count -le 5) 'top-processes-not-bounded'
+    Assert (@($json.topProcessesByHandles).Count -ge 1 -and @($json.topProcessesByHandles).Count -le 5) 'top-handles-not-bounded'
+    Assert ($null -ne $json.memory.PSObject.Properties['poolNonpagedGB'] -and $null -ne $json.memory.PSObject.Properties['poolPagedGB']) 'pool-fields-missing'
     Assert (-not $res.stdout.Contains('CommandLine')) 'commandline-leaked'
 }
 
 Check 'live-readonly-snapshot-is-bounded-valid-json' {
-    $res = Invoke-Snapshot -Arguments @('-TopProcesses', '5', '-EventDays', '3')
+    $res = Invoke-Snapshot -Arguments @('-TopProcesses', '5', '-EventDays', '3', '-LiveCpuSeconds', '1')
     Assert ($res.exitCode -eq 0) ('live-exit-' + $res.exitCode)
     Assert ([string]::IsNullOrWhiteSpace($res.stderr)) ('live-stderr:' + $res.stderr)
     Assert ([Text.Encoding]::UTF8.GetByteCount($res.stdout) -lt 32768) 'live-output-too-large'
     $json = $res.stdout | ConvertFrom-Json -ErrorAction Stop
     Assert ($json.status -eq 'complete' -and $json.memory.totalPhysicalGB -gt 0) 'live-memory-missing'
+    Assert ($json.liveCpuWindowSeconds -ge 0.9) ('live-cpu-window-too-short:' + $json.liveCpuWindowSeconds)
+    Assert (@($json.topLiveCpuProcesses).Count -ge 1 -and @($json.topLiveCpuProcesses).Count -le 5) 'live-cpu-processes-missing'
+    $firstLive = @($json.topLiveCpuProcesses)[0]
+    Assert ($null -ne $firstLive.PSObject.Properties['singleCorePct'] -and $null -ne $firstLive.PSObject.Properties['sessionId']) 'live-cpu-schema-missing'
+    Assert (@($json.topProcessesByHandles).Count -ge 1 -and @($json.topProcessesByHandles).Count -le 5) 'live-handles-missing'
+    Assert ($null -ne $json.gpu.PSObject.Properties['adapterMemory']) 'gpu-adapter-memory-missing'
+    if (@($json.gpu.topVramProcesses).Count -gt 0) {
+        Assert ($null -ne @($json.gpu.topVramProcesses)[0].PSObject.Properties['committedMB']) 'gpu-committed-mb-missing'
+    }
     Assert (@($json.storage.disks).Count -ge 1) 'live-disks-missing'
     Assert ($json.recentEvents.status -eq 'ok') 'live-events-failed'
 }
