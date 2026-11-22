@@ -454,6 +454,458 @@ function applyPulseLayer(officialBuffer, origPreload, stageDir) {
 // Layer 4: context-viewer (0.8.8, meter-only, resilient anchor)
 // ---------------------------------------------------------------------------
 
+function replaceUniqueAnchor(text, oldStr, newStr, label) {
+  const count = countOccurrences(text, oldStr);
+  if (count !== 1) {
+    throw new Error(`Anchor ${label} matched ${count} times (expected 1)`);
+  }
+  return text.replace(oldStr, () => newStr);
+}
+
+function patchContextLocalApi(raw) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  let norm = text.replace(/\r\n/g, '\n');
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "const fs = require('fs');\nconst path = require('path');\n",
+    "const fs = require('fs');\nconst os = require('os');\nconst path = require('path');\n",
+    'local-api:require-os',
+  );
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "        expression:\n          '(() => { try { if (!window.__APP_CONFIG__) return null; return { hasConfig: true, csrfToken: window.__APP_CONFIG__.csrfToken || \"\" }; } catch (e) { return null; } })()',\n",
+    "        expression:\n          '(() => { try { const cfg = window.__APP_CONFIG__; const tok = (cfg && cfg.csrfToken) || (window.localStorage && window.localStorage.getItem(\"agy_session_csrf_token\")) || \"\"; if (!cfg && !tok) return null; return { hasConfig: Boolean(cfg || tok), csrfToken: tok }; } catch (e) { return null; } })()',\n",
+    'local-api:cdp-expr',
+  );
+
+  const oldConnectBlock = `/**
+ * 解析并缓存或实时提取指定本地页面原点的 CSRF Token 并构造 RPC 客户端。
+ */
+async function connectOrigin(rawOrigin, page = null, origins = null, extraMeta = {}) {
+  const origin = normalizeLoopbackOrigin(rawOrigin);
+  if (!origin) {
+    throw new Error('非法的本机回环页面地址');
+  }
+  let hasConfig = false;
+  let token = null;
+  try {
+    const html = await request(origin + '/');
+    const config = html.match(/window\\.__APP_CONFIG__\\s*=\\s*(\\{.*?\\})\\s*;/s);
+    if (config) {
+      hasConfig = true;
+      token = JSON.parse(config[1]).csrfToken;
+    }
+  } catch (err) {
+    if (!page || !page.webSocketDebuggerUrl) throw err;
+  }
+
+  if (!hasConfig && page && page.webSocketDebuggerUrl) {
+    const cdpCfg = await extractAppConfigViaCdp(page);
+    if (cdpCfg && cdpCfg.hasConfig) {
+      hasConfig = true;
+      token = cdpCfg.csrfToken;
+    }
+  }
+
+  if (!hasConfig) {
+    throw new Error('Antigravity 本地连接信息尚未就绪，请稍后重试');
+  }
+  if (!token) {
+    throw new Error('Antigravity 本地鉴权信息尚未就绪，请稍后重试');
+  }
+
+  return {
+    origin,
+    page,
+    ...(extraMeta.port ? { port: extraMeta.port } : {}),
+    ...(Array.isArray(extraMeta.pages) ? { pages: extraMeta.pages } : {}),
+    origins: Array.isArray(origins) && origins.length ? origins : [origin],
+    call: async (method, body) =>
+      JSON.parse(
+        await request(\`\${origin}/exa.language_server_pb.LanguageServerService/\${method}\`, body, token)
+      )
+  };
+}
+
+/**
+ * 连接到本地 Antigravity LanguageServerService。
+ * 支持直接传入已知 \`options.origin\` 免 CDP/DevToolsActivePort 直连，亦可通过 CDP 发现所有运行窗口原点。
+ */
+async function connect(options = {}) {
+  if (
+    options &&
+    options.origin !== undefined &&
+    options.origin !== null &&
+    String(options.origin).trim() !== ''
+  ) {
+    const explicitOrigin = normalizeLoopbackOrigin(options.origin);
+    if (!explicitOrigin) {
+      throw new Error('非法的本机回环页面地址');
+    }
+    return connectOrigin(explicitOrigin, null, [explicitOrigin]);
+  }
+  const { port, page, pages } = await discoverAntigravityCdp(options);
+  const origins = Array.from(
+    new Set((Array.isArray(pages) ? pages : [page]).map(item => normalizeLoopbackOrigin(item?.url)).filter(Boolean))
+  );
+  const targetOrigin = normalizeLoopbackOrigin(page.url);
+  return connectOrigin(targetOrigin, page, origins, { port, pages });
+}
+
+module.exports = {
+  connect,
+  connectOrigin,
+  normalizeLoopbackOrigin,
+  parseExplicitPort,
+  getAppDataDir,
+  getDevToolsActivePort,
+  getCandidateCdpPorts,
+  discoverAntigravityCdp,
+  connectCdpWebSocket,
+  createCdpClient,
+  HANS_CANDIDATE_PORTS
+};`;
+
+  const newConnectBlock = `function isPidAlive(pid) {
+  const num = Number(pid);
+  if (!Number.isInteger(num) || num <= 0) return false;
+  try {
+    process.kill(num, 0);
+    return true;
+  } catch (e) {
+    return e?.code === 'EPERM';
+  }
+}
+
+function loadOptionalAuthBootstrap() {
+  try {
+    return require('./authBootstrap');
+  } catch {
+    return null;
+  }
+}
+
+function resolveAuthBootstrapCsrfToken(rawOrigin, options = {}) {
+  const origin = normalizeLoopbackOrigin(rawOrigin);
+  if (!origin) return null;
+  const authMod = options && options.authBootstrap !== undefined
+    ? options.authBootstrap
+    : loadOptionalAuthBootstrap();
+  if (!authMod || typeof authMod !== 'object') return null;
+  try {
+    const token = typeof authMod.getActiveLsCsrfToken === 'function'
+      ? String(authMod.getActiveLsCsrfToken() || '').trim()
+      : '';
+    if (!token) return null;
+    let activeBase = typeof authMod.getActiveLsBaseUrl === 'function'
+      ? normalizeLoopbackOrigin(authMod.getActiveLsBaseUrl())
+      : null;
+    if (!activeBase && typeof authMod.getActiveLsPort === 'function') {
+      const port = parseExplicitPort(authMod.getActiveLsPort());
+      if (port) activeBase = \`https://127.0.0.1:\${port}\`;
+    }
+    if (!activeBase || activeBase !== origin) return null;
+    return token;
+  } catch {
+    return null;
+  }
+}
+
+function resolveDaemonHubCsrfToken(rawOrigin, options = {}) {
+  const origin = normalizeLoopbackOrigin(rawOrigin);
+  if (!origin) return null;
+  const inIsolatedTest =
+    Boolean(options && (options.appDataDir || options.platform)) ||
+    process.env.AG_METER_TEST_MODE === '1' ||
+    isIsolatedTestPath(process.env.APPDATA) ||
+    isIsolatedTestPath(process.env.AG_METER_STATE_DIR);
+  if (inIsolatedTest && !options?.daemonDir && !options?.homeDir) {
+    return null;
+  }
+  const daemonDir = options?.daemonDir || path.join(options?.homeDir || os.homedir(), '.gemini', 'antigravity', 'daemon');
+  const checkAlive = typeof options?.isPidAlive === 'function' ? options.isPidAlive : isPidAlive;
+  const matches = [];
+  try {
+    if (!fs.existsSync(daemonDir)) return null;
+    const files = fs.readdirSync(daemonDir);
+    for (const name of files) {
+      if (!/^hub_.*\\.json$/i.test(name)) continue;
+      const filePath = path.join(daemonDir, name);
+      try {
+        const st = fs.statSync(filePath);
+        const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const csrfToken = typeof raw?.csrfToken === 'string' ? raw.csrfToken.trim() : '';
+        if (!csrfToken) continue;
+        if (!checkAlive(raw?.pid)) continue;
+        const httpsPort = parseExplicitPort(raw?.httpsPort);
+        const httpPort = parseExplicitPort(raw?.httpPort);
+        const originMatches =
+          (httpsPort && origin === \`https://127.0.0.1:\${httpsPort}\`) ||
+          (httpPort && origin === \`http://127.0.0.1:\${httpPort}\`);
+        if (!originMatches) continue;
+        matches.push({ csrfToken, mtimeMs: Number(st.mtimeMs) || 0 });
+      } catch { }
+    }
+  } catch {
+    return null;
+  }
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return matches[0].csrfToken;
+}
+
+function extractCsrfTokenFromHtml(html) {
+  if (typeof html !== 'string' || !html) return { hasConfig: false, token: '' };
+  const config = html.match(/window\\.__APP_CONFIG__\\s*=\\s*(\\{.*?\\})\\s*;/s);
+  if (!config) return { hasConfig: false, token: '' };
+  try {
+    const parsed = JSON.parse(config[1]);
+    const token = typeof parsed?.csrfToken === 'string' ? parsed.csrfToken.trim() : '';
+    return { hasConfig: true, token };
+  } catch {
+    return { hasConfig: false, token: '' };
+  }
+}
+
+/**
+ * 解析指定本地回环页面原点的 CSRF Token：
+ * 1. Antigravity 2.34+ 主进程内存 authBootstrap（与 origin 精确匹配）
+ * 2. GET / 页面 HTML 中的 window.__APP_CONFIG__.csrfToken（兼容 2.33 及以下）
+ * 3. CDP 页面内 window.__APP_CONFIG__.csrfToken / localStorage agy_session_csrf_token
+ * 4. ~/.gemini/antigravity/daemon/hub_*.json 存活语言服务（按 origin 精确匹配端口与存活 PID）
+ */
+async function resolveOriginCsrfToken(rawOrigin, options = {}) {
+  const origin = normalizeLoopbackOrigin(rawOrigin);
+  if (!origin) {
+    throw new Error('非法的本机回环页面地址');
+  }
+  const bootToken = resolveAuthBootstrapCsrfToken(origin, options);
+  if (bootToken) {
+    return { origin, token: bootToken, source: 'auth_bootstrap', hasConfig: true };
+  }
+
+  let hasConfig = false;
+  let token = '';
+  let htmlErr = null;
+  const page = options?.page || null;
+  try {
+    const html = typeof options?.fetchHtml === 'function'
+      ? await options.fetchHtml(origin)
+      : await request(origin + '/');
+    const parsed = extractCsrfTokenFromHtml(html);
+    if (parsed.hasConfig) {
+      hasConfig = true;
+      token = parsed.token;
+    }
+  } catch (err) {
+    htmlErr = err;
+  }
+
+  if (token) {
+    return { origin, token, source: 'html_app_config', hasConfig: true };
+  }
+
+  if (page && page.webSocketDebuggerUrl) {
+    const cdpCfg = await extractAppConfigViaCdp(page);
+    if (cdpCfg && cdpCfg.hasConfig) {
+      hasConfig = true;
+      if (typeof cdpCfg.csrfToken === 'string' && cdpCfg.csrfToken.trim()) {
+        token = cdpCfg.csrfToken.trim();
+        return { origin, token, source: 'cdp_app_config', hasConfig: true };
+      }
+    }
+  }
+
+  const daemonToken = resolveDaemonHubCsrfToken(origin, options);
+  if (daemonToken) {
+    return { origin, token: daemonToken, source: 'daemon_hub', hasConfig: true };
+  }
+
+  if (!hasConfig && htmlErr) {
+    throw htmlErr;
+  }
+  if (!hasConfig) {
+    throw new Error('Antigravity 本地连接信息尚未就绪，请稍后重试');
+  }
+  throw new Error('Antigravity 本地鉴权信息尚未就绪，请稍后重试');
+}
+
+/**
+ * 解析并缓存或实时提取指定本地页面原点的 CSRF Token 并构造 RPC 客户端。
+ */
+async function connectOrigin(rawOrigin, page = null, origins = null, extraMeta = {}, options = {}) {
+  const { origin, token } = await resolveOriginCsrfToken(rawOrigin, {
+    ...(options && typeof options === 'object' ? options : {}),
+    page
+  });
+
+  return {
+    origin,
+    page,
+    ...(extraMeta.port ? { port: extraMeta.port } : {}),
+    ...(Array.isArray(extraMeta.pages) ? { pages: extraMeta.pages } : {}),
+    origins: Array.isArray(origins) && origins.length ? origins : [origin],
+    call: async (method, body) =>
+      JSON.parse(
+        await request(\`\${origin}/exa.language_server_pb.LanguageServerService/\${method}\`, body, token)
+      )
+  };
+}
+
+/**
+ * 连接到本地 Antigravity LanguageServerService。
+ * 支持直接传入已知 \`options.origin\` 免 CDP/DevToolsActivePort 直连，亦可通过 CDP 发现所有运行窗口原点。
+ */
+async function connect(options = {}) {
+  if (
+    options &&
+    options.origin !== undefined &&
+    options.origin !== null &&
+    String(options.origin).trim() !== ''
+  ) {
+    const explicitOrigin = normalizeLoopbackOrigin(options.origin);
+    if (!explicitOrigin) {
+      throw new Error('非法的本机回环页面地址');
+    }
+    return connectOrigin(explicitOrigin, null, [explicitOrigin], {}, options);
+  }
+  const { port, page, pages } = await discoverAntigravityCdp(options);
+  const origins = Array.from(
+    new Set((Array.isArray(pages) ? pages : [page]).map(item => normalizeLoopbackOrigin(item?.url)).filter(Boolean))
+  );
+  const targetOrigin = normalizeLoopbackOrigin(page.url);
+  return connectOrigin(targetOrigin, page, origins, { port, pages }, options);
+}
+
+module.exports = {
+  connect,
+  connectOrigin,
+  resolveOriginCsrfToken,
+  resolveAuthBootstrapCsrfToken,
+  resolveDaemonHubCsrfToken,
+  normalizeLoopbackOrigin,
+  parseExplicitPort,
+  getAppDataDir,
+  getDevToolsActivePort,
+  getCandidateCdpPorts,
+  discoverAntigravityCdp,
+  connectCdpWebSocket,
+  createCdpClient,
+  HANS_CANDIDATE_PORTS
+};`;
+
+  norm = replaceUniqueAnchor(norm, oldConnectBlock, newConnectBlock, 'local-api:connect-block');
+  return Buffer.from(norm.replace(/\n/g, newline), 'utf8');
+}
+
+function patchContextMeterCollector(raw) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  let norm = text.replace(/\r\n/g, '\n');
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "const { normalizeLoopbackOrigin } = require('./local-api');\n",
+    "const { normalizeLoopbackOrigin, resolveOriginCsrfToken } = require('./local-api');\n",
+    'meter-collector:import-resolveOriginCsrfToken',
+  );
+
+  const oldCollectAuth = `      let token = !options.force ? csrfTokenByOrigin.get(origin) : null;
+      if (!token) {
+        const html = await request(origin, null, null, null, signal);
+        if (isSuperseded()) return { version: PROJECT_VERSION, conversation: id, abortedStale: true, scannedAt: Date.now(), errors: [] };
+        token = JSON.parse(html.match(/window.__APP_CONFIG__ = (.*?);/)[1]).csrfToken;
+        csrfTokenByOrigin.set(origin, token);
+      }
+      const call = async (method, body) => {
+        try {
+          return await request(origin, method, body, token, signal);
+        } catch (err) {
+          if (err && /HTTP 40[13]/.test(String(err.message || '')) && !signal?.aborted) {
+            csrfTokenByOrigin.delete(origin);
+            const html = await request(origin, null, null, null, signal);
+            token = JSON.parse(html.match(/window.__APP_CONFIG__ = (.*?);/)[1]).csrfToken;
+            csrfTokenByOrigin.set(origin, token);
+            return await request(origin, method, body, token, signal);
+          }
+          throw err;
+        }
+      };`;
+
+  const newCollectAuth = `      const resolveToken = async () => {
+        const resolved = await resolveOriginCsrfToken(origin, {
+          fetchHtml: () => request(origin, null, null, null, signal),
+          ...(options.authBootstrap !== undefined ? { authBootstrap: options.authBootstrap } : {}),
+          ...(options.daemonDir !== undefined ? { daemonDir: options.daemonDir } : {}),
+          ...(options.homeDir !== undefined ? { homeDir: options.homeDir } : {}),
+          ...(options.isPidAlive !== undefined ? { isPidAlive: options.isPidAlive } : {})
+        });
+        return resolved.token;
+      };
+      let token = !options.force ? csrfTokenByOrigin.get(origin) : null;
+      if (!token) {
+        token = await resolveToken();
+        if (isSuperseded()) return { version: PROJECT_VERSION, conversation: id, abortedStale: true, scannedAt: Date.now(), errors: [] };
+        csrfTokenByOrigin.set(origin, token);
+      }
+      const call = async (method, body) => {
+        try {
+          return await request(origin, method, body, token, signal);
+        } catch (err) {
+          if (err && /HTTP 40[13]/.test(String(err.message || '')) && !signal?.aborted) {
+            csrfTokenByOrigin.delete(origin);
+            token = await resolveToken();
+            csrfTokenByOrigin.set(origin, token);
+            return await request(origin, method, body, token, signal);
+          }
+          throw err;
+        }
+      };`;
+
+  norm = replaceUniqueAnchor(norm, oldCollectAuth, newCollectAuth, 'meter-collector:collect-auth');
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "        const connector = typeof options.connect === 'function' ? options.connect : require('./local-api').connect;\n        const api = await connector(options.origin ? { origin: options.origin } : undefined);\n",
+    "        const connector = typeof options.connect === 'function' ? options.connect : require('./local-api').connect;\n        const connectOpts = {\n          ...(options.origin ? { origin: options.origin } : {}),\n          ...(options.authBootstrap !== undefined ? { authBootstrap: options.authBootstrap } : {}),\n          ...(options.daemonDir !== undefined ? { daemonDir: options.daemonDir } : {}),\n          ...(options.homeDir !== undefined ? { homeDir: options.homeDir } : {}),\n          ...(options.isPidAlive !== undefined ? { isPidAlive: options.isPidAlive } : {})\n        };\n        const api = await connector(Object.keys(connectOpts).length ? connectOpts : undefined);\n",
+    'meter-collector:quota-connect',
+  );
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "    const { connect } = require('./local-api');\n    const api = await connect(options.origin ? { origin: options.origin } : undefined);\n",
+    "    const { connect } = require('./local-api');\n    const connectOpts = {\n      ...(options.origin ? { origin: options.origin } : {}),\n      ...(options.authBootstrap !== undefined ? { authBootstrap: options.authBootstrap } : {}),\n      ...(options.daemonDir !== undefined ? { daemonDir: options.daemonDir } : {}),\n      ...(options.homeDir !== undefined ? { homeDir: options.homeDir } : {}),\n      ...(options.isPidAlive !== undefined ? { isPidAlive: options.isPidAlive } : {})\n    };\n    const api = await connect(Object.keys(connectOpts).length ? connectOpts : undefined);\n",
+    'meter-collector:status-connect',
+  );
+
+  return Buffer.from(norm.replace(/\n/g, newline), 'utf8');
+}
+
+function patchContextMeterRenderer(raw) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  let norm = text.replace(/\r\n/g, '\n');
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "      const csrf = window.__APP_CONFIG__?.csrfToken; if (!csrf) throw new Error('后台尚未就绪');\n",
+    "      let csrf = window.__APP_CONFIG__?.csrfToken || ''; if (!csrf) { try { csrf = window.localStorage?.getItem('agy_session_csrf_token') || ''; } catch {} } if (!csrf) throw new Error('后台尚未就绪');\n",
+    'meter-renderer:requestPoll-csrf',
+  );
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "    const csrf = typeof window !== 'undefined' ? window.__APP_CONFIG__?.csrfToken : null;\n",
+    "    let csrf = typeof window !== 'undefined' ? (window.__APP_CONFIG__?.csrfToken || '') : '';\n    if (!csrf && typeof window !== 'undefined') { try { csrf = window.localStorage?.getItem('agy_session_csrf_token') || ''; } catch {} }\n",
+    'meter-renderer:fetchAvailableModels-csrf',
+  );
+
+  return Buffer.from(norm.replace(/\n/g, newline), 'utf8');
+}
+
 function detectHubLoadAnchor(utilsSource) {
   const explicitCandidates = [
     '    void loadHubWindowUrl(win, url, { skipBootstrapMint });',
@@ -546,6 +998,15 @@ async function applyContextViewerLayer({ hostVersion, origUtils, origPreload, st
       if (countOccurrences(txt, oldVendorAnchor) === 2) {
         raw = Buffer.from(txt.replaceAll(oldVendorAnchor, () => currentAnchor), 'utf8');
       }
+    } else if (rel === 'local-api.js') {
+      raw = patchContextLocalApi(raw);
+      verifyNodeSyntax(raw.toString('utf8'), stageDir, 'dist/local-api.js');
+    } else if (rel === 'meter-collector.js') {
+      raw = patchContextMeterCollector(raw);
+      verifyNodeSyntax(raw.toString('utf8'), stageDir, 'dist/meter-collector.js');
+    } else if (rel === 'meter-renderer.js') {
+      raw = patchContextMeterRenderer(raw);
+      verifyNodeSyntax(raw.toString('utf8'), stageDir, 'dist/meter-renderer.js');
     }
     additions.set(`dist/${rel}`, raw);
   }
@@ -607,6 +1068,7 @@ async function applyContextViewerLayer({ hostVersion, origUtils, origPreload, st
     status: 'applied',
     version: '0.8.8',
     anchor: currentAnchor.trim(),
+    csrfPatched: true,
     utils: patchedUtils,
     preloadSnippet,
     additions,
@@ -1103,6 +1565,9 @@ export {
   detectHubLoadAnchor,
   packAsarWithOverlay,
   parseArgs,
+  patchContextLocalApi,
+  patchContextMeterCollector,
+  patchContextMeterRenderer,
   unpackAsar,
   walkAsar,
 };

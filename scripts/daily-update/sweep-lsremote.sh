@@ -13,6 +13,15 @@ if [ -z "$OUT" ]; then echo "usage: bash sweep-lsremote.sh <outDir> [prevResults
 command -v cygpath >/dev/null 2>&1 && { OUT="$(cygpath -u "$OUT")"; [ -n "$PREV" ] && PREV="$(cygpath -u "$PREV")"; }
 cd "$OUT" || exit 1
 [ -f ledger-github-sources.tsv ] || { echo "missing $OUT/ledger-github-sources.tsv (run gen-ledger-tsv.cjs first)" >&2; exit 1; }
+# Reject stale exports that contain retired history before making any request.
+if ! awk -F '\t' '
+  { sub(/\r$/, "") }
+  NF && NF != 5 { exit 1 }
+  $4 ~ /(^|,)(deleted-by-user|replaced-by-a-stock-data|renamed-and-old-active-removed|moved|removed-upstream|deleted-upstream)(,|$)/ { exit 1 }
+' ledger-github-sources.tsv; then
+  echo 'regenerate ledger-github-sources.tsv before querying the network' >&2
+  exit 1
+fi
 : > lsremote-results.tsv
 : > lsremote-errors.log
 : > tags-check.tmp
@@ -24,7 +33,15 @@ resolve() { # repo pattern -> commit or empty
   git ls-remote "https://github.com/$1" "$2" 2>>lsremote-errors.log | awk '{print $1}' | head -1
 }
 
-while IFS=$'\t' read -r repo ref commit status skills; do
+tab=$'\t'
+while IFS= read -r row || [ -n "$row" ]; do
+  row=${row%$'\r'}
+  [ -z "$row" ] && continue
+  # IFS cannot distinguish successive tabs when a field is empty.
+  repo=${row%%"$tab"*}; row=${row#*"$tab"}
+  ref=${row%%"$tab"*}; row=${row#*"$tab"}
+  commit=${row%%"$tab"*}; row=${row#*"$tab"}
+  status=${row%%"$tab"*}
   [ -z "$repo" ] && continue
   if is_excluded "$repo"; then
     printf '%s\tEXCLUDED\t\t%s\t%s\n' "$repo" "$ref" "$status" >> lsremote-results.tsv

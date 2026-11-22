@@ -9,11 +9,11 @@
 
 ### Microsoft Store 身份预检
 
-`store-update-gate.py prepare --config <当次.json>` 通过微软官方 Store manifest 验证精确 product ID、x64/user/msstore 与 PFN；同一产品的任一候选身份矛盾都会拒绝，不能用旧匹配版本掩盖新错误身份。prepare 不执行安装，apply 重新核对配置、目标与已注册包后才调用官方 winget。只提供 upgrade/install，没有 uninstall 或强制替换分支；主应用缺失时必须已获恢复授权并显式选择 install。
+`store-update-gate.py prepare --config <当次.json>` 核对微软官方 Store manifest 的产品 ID、包系列、x64、user 和 msstore。Codex 另读 Store 产品事件、AppX 暂存事件及 Windows 的实际暂存路径和 Store 来源。记录新版的 `stage_record` 后才能走精确注册分支。`occupied_record` 存在时记录此前的 `0x80073D02`。暂无可注册暂存时走原有 WinGet `msstore` 入口，发现已知新版仍待注册时保持人工核查。主应用缺失时，已获恢复授权后显式选择 `install`。
 
 配置：
 ~~~json
-{"run_directory":"D:/agents/run-evidence/daily-codex-ecosystem-update/<yyyyMMdd-HHmmss>","product_id":"9PLM9XGG6VKS","source":"msstore","package_family":"OpenAI.Codex_2p2nqsd0c76g0","operation":"upgrade"}
+{"run_directory":"D:/agents/run-evidence/daily-codex-ecosystem-update/<yyyyMMdd-HHmmss>","product_id":"9PLM9XGG6VKS","source":"msstore","package_family":"OpenAI.Codex_2p2nqsd0c76g0","operation":"upgrade","rollback_archive":"store-rollback/ChatGPT-x64-<旧版本>.msix"}
 ~~~
 
 ~~~powershell
@@ -21,7 +21,20 @@ python scripts/daily-update/store-update-gate.py prepare --config <当次.json>
 python scripts/daily-update/store-update-gate.py apply --config <同一当次.json>
 ~~~
 
-apply 只写新 intent/result，重复执行拒绝；旧注册仍在必须由后置观察证明，查询失败记 unknown，不把“未发 uninstall”说成已回滚。Codex Store 更新成功后自动进入下方受管修复收尾；installation_ok 与 closeout_ok 都通过才算成功。版本由已注册包读回，不信 Store 展示名称或安装退出码。
+Codex 升级前将独立取得的旧版官方 x64 MSIX 保存在当次目录。`prepare` 比对归档签名、包身份及已安装旧版的 manifest、块映射、包签名、主程序。`apply_ready: true` 才可应用。`apply` 重验当次计划和归档 SHA-256，使用 `Add-AppxPackage -MainPackage <精确包名> -Register` 注册已证实的暂存包。精确服务和已知扩展宿主会暂时退出。发现其他应用进程时保留人工核查。
+
+`installation_ok` 记录部署和注册观察。Codex 还须通过装载签名、沙箱服务镜像、实际插件采用及受管菜单和闭包验收。`official-client-refresh-pending` 退出 `2`，保留本次 Apply 收据，等待用户启动官方客户端。用新的回执名续验，避免重放安装。
+
+~~~powershell
+python -B scripts/daily-update/store-update-gate.py verify --config <同一当次.json> --receipt store-update/verify-after-client.json
+python -B scripts/daily-update/codex-store-plugins.py --expected-appx-version <已注册版本>
+~~~
+
+独立插件探针为只读。`codex-plugins` 发布单位绑定已检验的 `verified` 版本明细和健康 `post-refresh` 收据。新流程可绑定同时包含这两项的 Store Apply 或 Verify 回执。修复失败并获准回退时，用 `store-update-gate.py rollback --config <同一当次.json>` 恢复旧注册包。保留 Apply 和 Rollback 的各自收据。另行核对应用配置中的版本化路径，以及回退后的客户端和插件行为。
+
+### HTTP 发布包元数据
+
+检查发布包长度、时间或摘要型 ETag 时使用 `python -B scripts/daily-update/http-metadata.py <公开无参数URL>`。默认遵循本机代理，显式直连加 `--direct`。输出只含 HTTP 状态码和通过格式检查的长度、UTC 时间、32 或 64 位十六进制 ETag。发生重定向或 HTTP 错误时只记录状态码，其他网络失败只记录固定错误码。包身份由请求前确定的官方产品和版本绑定，归档仍须独立验签。
 
 ### 提权前阶段合同
 
@@ -76,7 +89,7 @@ node D:\agents\projects\统一环境\scripts\daily-update\gen-ledger-tsv.cjs <ou
 ```
 
 默认账本 `D:/Codex/.codex/skills/.downloaded-skills-source-state.json`。
-输出 `<outDir>\ledger-github-sources.tsv`,并打印行数与状态计数。
+从 `sources` 导出现役来源，排除已标为 `deleted-by-user` 的来源和没有现役技能的显式空组。`deleted` 历史只用于统计。输出 `<outDir>\ledger-github-sources.tsv`，并打印行数与状态计数。每次执行网络扫描前在本次目录重新生成 TSV。
 
 ## 2. sweep-lsremote.sh(网络只读,约 90 秒)
 
@@ -87,8 +100,8 @@ $env:HTTPS_PROXY=$PROXY
 
 前置:`<outDir>` 已有 `ledger-github-sources.tsv`。输出 `lsremote-results.tsv`、
 `lsremote-errors.log`、`tags-check.tmp`;传入上次结果时另输出 `sweep-diff-output.txt`。
-`sweep-exclude.txt` 列出的 repo 键不请求网络,结果行为 `EXCLUDED`。只放非 GitHub
-必败源,真实上游失败须查清原因,不得排除。代理由环境变量传入。
+`sweep-exclude.txt` 列出的 repo 键不请求网络，结果行为 `EXCLUDED`。只放非 GitHub
+必败源，真实上游失败须查清原因，不得排除。扫描器在联网前拒绝列数错误或含退役状态的 TSV。收到 `regenerate ledger-github-sources.tsv` 时重新生成当次输入。代理由环境变量传入。
 
 ## 3. sweep-diff.cjs(纯本地,sweep 传入 prev 时已自动调用)
 ```
@@ -221,7 +234,7 @@ python scripts/daily-update/preflight-summary.py runtime-command --component npm
 {"status":"processed","evidence":["git-before.json","health-step.json","health-spec.json"],"checks":[{"path":"git-before.json","equals":{"ok":true,"dirty_age_gate_failed":false}},{"path":"health-step.json","spec":"health-spec.json"}]}
 ~~~
 
-单步 spec 的 `equals` 包含 `ok: true` 和该事务所需的版本、状态等谓词。涉及新装共享技能时，登记该技能 `deliver` 收据，并核验 `ok: true` 和 `status: "distributed"`。检查点使用 `finalize_schema_version: 1`，记录时区明确的实际 `completed_at`、`scope_manifest_sha256`、`scope_total`、`status` 和全部五项计数（`processed`、`failed`、`pending`、`skipped`、`running`）。只有稳定位于已核验 scope 内的可跳过项记录 `skipped`。出现失败的硬门槛时，在对应单位和检查点保持 `failed`。
+单步 spec 的 `equals` 包含 `ok: true` 和该事务所需的版本、状态等谓词。新装共享技能保留各阶段收据，并核验 `deliver` 的 `ok: true` 和 `status: "distributed"`。已分发技能的同名 guarded 更新核验 `verify` 的 `ok: true`、`status: "verified"` 和 `guarded_operation: "update"`。待核查的 Magpie 写入仍阻塞发布。检查点使用 `finalize_schema_version: 1`，记录时区明确的实际 `completed_at`、`scope_manifest_sha256`、`scope_total`、`status` 和全部五项计数（`processed`、`failed`、`pending`、`skipped`、`running`）。只有稳定位于已核验 scope 内的可跳过项记录 `skipped`。出现失败的硬门槛时，在对应单位和检查点保持 `failed`。
 
 ~~~powershell
 python -B scripts/daily-update/finalize-run.py --run-directory <当次目录> --index-path <当次目录>/resume-index.json
@@ -242,7 +255,9 @@ python -B scripts/daily-update/stage-skill-candidates.py stage --config <当次�
 python -B scripts/daily-update/stage-skill-candidates.py verify --config <同一配置>
 ~~~
 
-新安装用 `mode: "install"` 和 `old_commit: null`。从仓库根提取时用 `upstream_path: "."`。每项写 `skills/staging/<skill>/receipt.json`，记录上游提交、当前 active 载荷和候选哈希。`stage` 可复用校验通过的候选，`verify` 只读。无完成收据时从新 attempt 暂存该项。遇到合并冲突或哈希漂移时记录对应阻塞。使用返回的 `candidate_path` 做审阅，需调整 overlay 时在单独的待审副本中编辑，再交给 guarded wrapper 的候选校验和安装事务，显式指定 `--name <skill>`。
+新安装用 `mode: "install"` 和 `old_commit: null`。从仓库根提取时用 `upstream_path: "."`。每项写 `skills/staging/<skill>/receipt.json`，记录上游提交、当前 active 载荷和候选哈希。`stage` 可复用校验通过的候选，`verify` 只读。无完成收据时从新 attempt 暂存该项。遇到合并冲突或哈希漂移时记录对应阻塞。
+
+调整 overlay 时在当次证据目录内创建独立审阅副本。生成 guarded decision 后、激活前，使用 `verify --config <原配置> --reviewed-candidate <审阅副本绝对路径>`。比对返回的 `candidate_tree_sha256` 和 `skill_md_sha256` 与 decision 的 `candidate_integrity`。二者对应同一副本后，让 guarded wrapper 以该份 decision 复验并激活，显式指定 `--name <skill>`。`candidate-line-ending-crlf` 指向相对于已绑定上游新增 CRLF 的文本。修复审阅副本后重新生成指纹，保留上游原有 CRLF。原暂存和收据均作为审阅基线。
 
 ## 共享技能分发
 
@@ -253,9 +268,44 @@ python -B scripts/daily-update/shared-skill-delivery.py register --run-directory
 python -B scripts/daily-update/shared-skill-delivery.py deliver --run-directory <当次目录> --receipt delivery/<skill>-hosts.json --transaction-manifest <同一manifest> --name <skill> --preset cordis --cwd <使用工作区> --model-invocable no --user-invocable yes --like <同一技能>
 ~~~
 
-示例采用手动调用。按该候选的已审阅策略填写两项调用标志。用户指定宿主时，用 `--agents dsh,<宿主列表>` 代替 `--like`。本机受管入口支持 `dsh`、`claude`、`claude-desktop`、`codex` 和 `kimi`。`register` 首轮登记 `dsh`，`deliver` 在分发前再实测正文加载和调用策略，`verify` 只读核验已经分发的同一载荷。在失败收据中查看阶段和原因，用新收据重试对应阶段。
+示例采用手动调用。按该候选的已审阅策略填写两项调用标志。用户指定宿主时，用 `--agents dsh,<宿主列表>` 代替 `--like`。本机受管入口支持 `dsh`、`claude`、`claude-desktop`、`codex`、`kimi` 和 `antigravity`。`register` 首轮登记 `dsh`，`deliver` 在分发前再实测正文加载和调用策略，`verify` 只读核验已经分发的同一载荷。在失败收据中查看阶段和原因；只有排除需人工核查的写入后再重试。
 
-验收探针用已安装的 Harness SDK 合成实际 Desktop 预设的文件技能配置，在隔离作用域执行技能发现与正文加载。Magpie 分发读取实际勾选和应用记录，并核验各宿主链接或受管副本。命令只输出目标技能的验收字段。[Magpie Library API](https://github.com/yetone/magpie/blob/6a46bad3441151f91ab188cc378fd444f5564138/internal/gui/library.go)
+验收探针用已安装的 Harness SDK，在隔离作用域核验 Desktop 预设的技能发现与正文加载。Magpie 分发同时核对勾选、应用记录、宿主链接或副本，以及实际写入收据 `magpie_write_audits`。
+
+### Magpie 限定宿主的写入入口
+
+[Magpie 写入补丁](magpie-v0.1.4652-library-scope.patch) 基于官方 [v0.1.4652](https://github.com/yetone/magpie/tree/b704e4f9d835e410af35737b137cb6891c4f8391)。在独立 D 盘源码树中执行 `git -c core.autocrlf=false apply --check --whitespace=error <补丁绝对路径>`，再去掉 `--check` 应用补丁。验证和构建都在该树运行，Go 缓存和测试临时路径放在 D 盘。
+
+~~~powershell
+go test -mod=readonly -tags nogui -count=1 -run 'TestLibraryScoped|TestEveryRouteIsNamedForTheCLI|TestEveryRouteHasACommandOrIsNamed' ./internal/gui ./internal/cli
+go build -mod=readonly -tags nogui -trimpath -ldflags '-s -w -X main.version=v0.1.4652+libraryscope.1' -o <D盘候选产物路径> .
+~~~
+
+`register`、`deliver` 和 `scoped-mcp` 使用独立的 [Magpie 限定写入器](D:/Codex/tools/magpie-scoped-library/magpie-scoped-library.exe)。在候选验收和批准后部署。分发前核对 `--version` 的 `+libraryscope.1` 能力标识、`GET /api/library/scoped` 的 `scopeVersion` 和后端实际 `statePath`。任一不匹配则停止分发。`verify` 只读。
+
+受管写入按同一 Library 状态文件加跨进程锁，撞到正在进行的写入时返回 `magpie-scoped-write-busy`。在锁持有期间暂缓普通 Magpie 的 Library 页面、CLI 写入及云同步。普通 Magpie 使用自己的进程内锁，Library 读取、应用启动和全库 `sync` 也可能触发独立调和。
+
+API 调用方启动 `magpie-scoped-library.exe web --library-scoped --addr 127.0.0.1:<port>`，为该进程单独生成 `MAGPIE_WEB_KEY`，请求用 `magpie_web_<port>` cookie。通过能力核对后，将授权的 Magpie 宿主 ID 逐项传入 `agents`。本地技能支持 `POST /api/library/scoped/skills/{probe,install,agents}`。MCP 批量操作用 `POST /api/library/scoped/servers/agents-some`，传入 `names`、`agents`、`on`，同一批全部服务器用 `agents-all` 并省略 `names`。启动与应答都只走专用后端，不请求普通 Library 页。MCP 路由或技能共享目录、技能路由启用时，对应操作需要另行确认范围。若已配置的 `agy` 和 `antigravity` 共用目的地，只授权其中一个会在写入前被拒绝。
+
+MCP 操作指定已登记服务器名称与宿主 ID，并选择 `--enable` 或 `--disable`。以下命令使用已有的当次证据目录，回执名称须为新文件。
+
+~~~powershell
+python -B scripts/daily-update/shared-skill-delivery.py scoped-mcp --run-directory <当次目录> --receipt delivery/mcp-antigravity.json --agents antigravity --servers <服务器名称> --enable
+~~~
+
+`--servers` 限定要修改勾选的服务器。Magpie 应用所选宿主的 MCP 配置时也会调和该宿主已有的待同步条目。
+
+### 核对 Magpie 实际写入
+
+`register`、`deliver` 和 `scoped-mcp` 比较动作回执和前后文件指纹。`magpie_write_audit_status=not-observed` 只说明这次没有观测到写入，旧收据继续适用。若 `review-required` 且不是写入前预检拒绝，保留原收据，核对 `unexpected_changed_hosts`、`changed_artifacts`、`unavailable_artifacts`，确认恢复或继续的范围。finalizer 按原收据保留人工核查闸门。
+
+手工调用限定范围的批量分发也用同一审计，例如 MCP 动作的目标 ID 为 `antigravity`。
+
+1. 操作前执行 `python -B scripts/daily-update/shared-skill-delivery.py audit-before --kind mcp --agents antigravity`，确认 `preflight-ready`，将 JSON 保存在当次 D 盘证据目录。审计单个技能时改用 `--kind skill --name <技能名>`。
+2. 仅执行已经授权的分发。将上一步 JSON 放入 `before`，把本次动作回执投影到 `result`：`changed` 只保留已登记宿主 ID（未映射用 `null`），`problems` 每项只保留 `{ "agent": "<ID>" }`（未知用空字符串），可另附 `backup_reported` 布尔。不保存原始配置、问题消息、备份路径或认证头。没有动作回执时填 `result: null`。
+3. 将 `{ "before": …, "result": … }` 从 stdin 传入 `python -B scripts/daily-update/shared-skill-delivery.py audit-after`。`observed-within-scope` 表示回执与已覆盖文件的指纹相符；`review-required` 或非零退出表示不能确认。两个审计入口只读本机文件，不执行 Magpie 同步。
+
+审计覆盖六个受管 Windows 宿主的已登记 MCP 配置、Claude Desktop 已发现的 Cowork manifest、Library 状态及指定技能的部署位置。`antigravity` 的 MCP 和技能路径也供 `agy` CLI 使用；仅勾选桌面版不构成配置隔离。比较基于文件身份和内容哈希，不归因到具体 JSON 字段，也不覆盖其他项目、未登记宿主、其他技能、备份、异步后续同步、并发或改后恢复的写入。
 
 ## Kimi 独立回滚事务
 

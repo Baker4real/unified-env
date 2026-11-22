@@ -342,6 +342,77 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
     }
 }
 
+# PowerShell single-quoted strings do not unescape \", and multiline inline python -c strings repeatedly break on
+# mixed PowerShell/Python quoting. Require here-strings (@' ... '@ | python -) or .py files instead.
+foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+    $elements = @($command.CommandElements)
+    if ($elements.Count -lt 3) { continue }
+    $executable = $elements[0]
+    if ($executable -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or
+        $executable.StringConstantType -in @('DoubleQuoted', 'DoubleQuotedHereString') -or
+        ([IO.Path]::GetFileNameWithoutExtension($executable.Value) -notin @('python', 'python3', 'py'))) { continue }
+    for ($index = 1; $index -lt $elements.Count - 1; $index++) {
+        $flag = $elements[$index]
+        $isDashC = ($flag -is [System.Management.Automation.Language.CommandParameterAst] -and $flag.ParameterName -ceq 'c' -and $null -eq $flag.Argument) -or
+            ($flag -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $flag.Value -ceq '-c')
+        if (-not $isDashC) { continue }
+        $code = $elements[$index + 1]
+        if ($code -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+            if ($code.StringConstantType -eq 'SingleQuoted' -and $code.Value.Contains('\"')) {
+                [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=python parameter=-c reason=single-quoted-backslash-quote line={0} column={1}; use @'' ... ''@ | python - or write a .py file' -f
+                    $code.Extent.StartLineNumber, $code.Extent.StartColumnNumber))
+                exit 2
+            }
+            if ($code.StringConstantType -in @('SingleQuoted', 'DoubleQuoted') -and ($code.Value.Contains("`n") -or $code.Value.Contains("`r"))) {
+                [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=python parameter=-c reason=multiline-inline-python line={0} column={1}; use @'' ... ''@ | python - or write a .py file' -f
+                    $code.Extent.StartLineNumber, $code.Extent.StartColumnNumber))
+                exit 2
+            }
+        } elseif ($code -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and
+                  $code.StringConstantType -eq 'DoubleQuoted' -and ($code.Extent.Text.Contains("`n") -or $code.Extent.Text.Contains("`r"))) {
+            [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=python parameter=-c reason=multiline-inline-python line={0} column={1}; use @'' ... ''@ | python - or write a .py file' -f
+                $code.Extent.StartLineNumber, $code.Extent.StartColumnNumber))
+            exit 2
+        }
+        break
+    }
+}
+
+# Piping gh api directly into a file-writing python -c runs the writer even when gh fails with EOF/404,
+# silently creating empty 0-byte files and printing false success messages.
+foreach ($pipeline in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.PipelineAst] -and $node.PipelineElements.Count -ge 2 }, $true)) {
+    $hasGhApi = $false
+    foreach ($stage in $pipeline.PipelineElements) {
+        if ($stage -isnot [System.Management.Automation.Language.CommandAst]) { continue }
+        $elements = @($stage.CommandElements)
+        if ($elements.Count -lt 2) { continue }
+        $executable = $elements[0]
+        if ($executable -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or
+            $executable.StringConstantType -in @('DoubleQuoted', 'DoubleQuotedHereString')) { continue }
+        $exeBase = [IO.Path]::GetFileNameWithoutExtension($executable.Value)
+        if (-not $hasGhApi) {
+            if ($exeBase -ieq 'gh' -and $elements[1] -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $elements[1].Value -ieq 'api') {
+                $hasGhApi = $true
+            }
+            continue
+        }
+        if ($exeBase -notin @('python', 'python3', 'py')) { continue }
+        for ($index = 1; $index -lt $elements.Count - 1; $index++) {
+            $flag = $elements[$index]
+            $isDashC = ($flag -is [System.Management.Automation.Language.CommandParameterAst] -and $flag.ParameterName -ceq 'c' -and $null -eq $flag.Argument) -or
+                ($flag -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $flag.Value -ceq '-c')
+            if (-not $isDashC) { continue }
+            $codeText = $elements[$index + 1].Extent.Text
+            if ($codeText -cmatch '\bopen\s*\([^)]*[''"][a-zA-Z+]*w|\.(?:write|write_bytes|write_text)\s*\(') {
+                [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=gh reason=unguarded-pipe-write line={0} column={1}; save via gh api -H raw or check $LASTEXITCODE before writing' -f
+                    $stage.Extent.StartLineNumber, $stage.Extent.StartColumnNumber))
+                exit 2
+            }
+            break
+        }
+    }
+}
+
 # A cmdlet call whose parameter set cannot be resolved, or that names a missing parameter, fails only when it is
 # reached, after earlier statements already ran. Only cmdlets of the modules that ship with pwsh are bound.
 $builtinModules = @('Microsoft.PowerShell.Core', 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security')

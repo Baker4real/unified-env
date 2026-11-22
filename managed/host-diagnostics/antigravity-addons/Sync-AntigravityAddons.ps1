@@ -20,6 +20,8 @@ $AppExe = Join-Path $AppDir 'Antigravity.exe'
 $AppAsar = Join-Path $AppDir 'resources\app.asar'
 $BackupDir = 'D:\Apps\Google.Antigravity.Local'
 $LauncherExe = Join-Path $BackupDir 'LaunchAntigravity.exe'
+$ProductRegistryKey = 'Software\121a0be4-63bd-531e-acf8-fc3924c7e984'
+$UninstallRegistryKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\121a0be4-63bd-531e-acf8-fc3924c7e984'
 
 function Invoke-ReconcilerJson {
     param([string[]]$Arguments)
@@ -111,6 +113,199 @@ function Test-AntigravityDesktopRunning {
     return $false
 }
 
+function ConvertTo-AntigravityLocalPath($Value) {
+    # Compare registry paths lexically. Never open an arbitrary path from the registry.
+    if ($Value -isnot [string] -or $Value -notmatch '\A[A-Za-z]:[\\/][^<>:"|?*%\x00-\x1f]+\z' -or
+        $Value -match '[. ](?=[\\/]|\z)') { return $null }
+    try { [IO.Path]::GetFullPath($Value).TrimEnd([char]'\') }
+    catch { $null }
+}
+
+function Get-AntigravityUninstallExecutable($Value) {
+    if ($Value -isnot [string]) { return $null }
+    $command = [regex]::Match($Value, '\A(?:"([^"\r\n]+)"|([^\s"]+\.exe))(?=[ \t]|\z)', 'IgnoreCase')
+    if (-not $command.Success) { return $null }
+    ConvertTo-AntigravityLocalPath ($command.Groups[1].Value + $command.Groups[2].Value)
+}
+
+function Get-AntigravityArtifactIssue([string]$Path) {
+    $ancestry = [Collections.Generic.Stack[string]]::new()
+    for ($item = $Path; $item; $item = [IO.Path]::GetDirectoryName($item)) { $ancestry.Push($item) }
+    foreach ($item in $ancestry) {
+        try { $attributes = [IO.File]::GetAttributes($item) }
+        catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] { return 'missing' }
+        catch { return 'unreadable' }
+        if ($attributes -band [IO.FileAttributes]::ReparsePoint) { return 'reparse-point' }
+        $isDirectory = [bool]($attributes -band [IO.FileAttributes]::Directory)
+        if ($isDirectory -ne ($item -ne $Path)) { return 'wrong-file-type' }
+    }
+    try {
+        $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+        $handle = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+        $handle.Dispose()
+    } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
+        return 'missing'
+    } catch {
+        return 'unreadable'
+    }
+}
+
+function Get-AntigravityDeployment([string]$Directory) {
+    $exe = Join-Path $Directory 'Antigravity.exe'
+    $asar = Join-Path $Directory 'resources/app.asar'
+    $uninstaller = Join-Path $Directory 'Uninstall Antigravity.exe'
+    $exeIssue = Get-AntigravityArtifactIssue $exe
+    $asarIssue = Get-AntigravityArtifactIssue $asar
+    $serverIssue = Get-AntigravityArtifactIssue (Join-Path $Directory 'resources/bin/language_server.exe')
+    $uninstallerIssue = Get-AntigravityArtifactIssue $uninstaller
+    [pscustomobject]@{
+        directory = $Directory
+        executablePath = $exe
+        appAsarPath = $asar
+        uninstallerPath = $uninstaller
+        present = (-not $exeIssue -and -not $asarIssue -and -not $serverIssue)
+        uninstallerPresent = (-not $uninstallerIssue)
+        executableIssue = $exeIssue
+        appAsarIssue = $asarIssue
+        languageServerIssue = $serverIssue
+        uninstallerIssue = $uninstallerIssue
+    }
+}
+
+function Read-AntigravityUpdateRegistration {
+    $valueOptions = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+    foreach ($view in 'Registry32', 'Registry64') {
+        $row = [ordered]@{
+            view = $view
+            readable = $true
+            productKeyPresent = $false
+            productInstallLocation = $null
+            uninstallKeyPresent = $false
+            uninstallInstallLocation = $null
+            uninstallString = $null
+            quietUninstallString = $null
+            machineRegistrationPresent = $false
+        }
+        foreach ($hive in 'CurrentUser', 'LocalMachine') {
+            $baseKey = $product = $uninstall = $null
+            try {
+                $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, $view)
+                $product = $baseKey.OpenSubKey($ProductRegistryKey, $false)
+                $uninstall = $baseKey.OpenSubKey($UninstallRegistryKey, $false)
+                if ($hive -eq 'LocalMachine') {
+                    $row.machineRegistrationPresent = ($null -ne $product -or $null -ne $uninstall)
+                    continue
+                }
+                $row.productKeyPresent = ($null -ne $product)
+                if ($product) { $row.productInstallLocation = $product.GetValue('InstallLocation', $null, $valueOptions) }
+                $row.uninstallKeyPresent = ($null -ne $uninstall)
+                if ($uninstall) {
+                    $row.uninstallInstallLocation = $uninstall.GetValue('InstallLocation', $null, $valueOptions)
+                    $row.uninstallString = $uninstall.GetValue('UninstallString', $null, $valueOptions)
+                    $row.quietUninstallString = $uninstall.GetValue('QuietUninstallString', $null, $valueOptions)
+                }
+            } catch {
+                $row.readable = $false
+            } finally {
+                if ($uninstall) { $uninstall.Dispose() }
+                if ($product) { $product.Dispose() }
+                if ($baseKey) { $baseKey.Dispose() }
+            }
+        }
+        [pscustomobject]$row
+    }
+}
+
+function Read-AntigravityDesktopObservation {
+    $paths = [Collections.Generic.List[string]]::new()
+    $observed = $unverified = $false
+    try {
+        $session = (Get-Process -Id $PID -ErrorAction Stop).SessionId
+        foreach ($process in [Diagnostics.Process]::GetProcessesByName('Antigravity')) {
+            try {
+                if ($process.SessionId -ne $session -or $process.MainWindowHandle -eq [IntPtr]::Zero) { continue }
+                $observed = $true
+                $exe = ConvertTo-AntigravityLocalPath $process.Path
+                if ($exe) { $paths.Add($exe) } else { $unverified = $true }
+            } catch {
+                if (-not $process.HasExited) { $unverified = $true }
+            } finally {
+                $process.Dispose()
+            }
+        }
+    } catch {
+        $unverified = $true
+    }
+    [pscustomobject]@{ desktopRunning = $observed; executablePaths = $paths.ToArray(); pathUnverified = $unverified }
+}
+
+function Get-AntigravityUpdateTarget($Deployment, [object[]]$Registration, $Desktop) {
+    $pathComparer = [StringComparer]::OrdinalIgnoreCase
+    $views = @(foreach ($row in $Registration) {
+        $productLocation = ConvertTo-AntigravityLocalPath $row.productInstallLocation
+        $uninstallLocation = ConvertTo-AntigravityLocalPath $row.uninstallInstallLocation
+        $uninstallExe = Get-AntigravityUninstallExecutable $row.uninstallString
+        $quietUninstallExe = Get-AntigravityUninstallExecutable $row.quietUninstallString
+        $productReason = if (-not $row.readable) { 'registry-unreadable' }
+            elseif (-not $row.productKeyPresent) { 'product-key-missing' }
+            elseif ($null -eq $row.productInstallLocation -or
+                ($row.productInstallLocation -is [string] -and $row.productInstallLocation.Length -eq 0)) { 'product-location-missing' }
+            elseif (-not $productLocation) { 'product-location-invalid' }
+            elseif (-not $pathComparer.Equals($productLocation, $Deployment.directory)) { 'product-location-mismatch' }
+            elseif (-not $Deployment.present) { 'deployment-unverified' }
+        $uninstallReason = if (-not $row.readable) { 'registry-unreadable' }
+            elseif (-not $row.uninstallKeyPresent) { 'uninstall-key-missing' }
+            elseif (-not $uninstallLocation -or -not $uninstallExe -or -not $quietUninstallExe) { 'uninstall-path-missing-or-invalid' }
+            elseif (-not $pathComparer.Equals($uninstallLocation, $Deployment.directory) -or
+                -not $pathComparer.Equals($uninstallExe, $Deployment.uninstallerPath) -or
+                -not $pathComparer.Equals($quietUninstallExe, $Deployment.uninstallerPath)) { 'uninstall-path-mismatch' }
+            elseif (-not $Deployment.uninstallerPresent) { 'uninstaller-unverified' }
+        [pscustomobject]@{
+            view = $row.view
+            productKeyPresent = $row.productKeyPresent
+            productInstallLocation = $productLocation
+            productMatchesDeployment = (-not $productReason)
+            productReason = $productReason
+            uninstallKeyPresent = $row.uninstallKeyPresent
+            uninstallInstallLocation = $uninstallLocation
+            uninstallExecutablePath = $uninstallExe
+            quietUninstallExecutablePath = $quietUninstallExe
+            uninstallMatchesDeployment = (-not $uninstallReason)
+            uninstallReason = $uninstallReason
+            machineRegistrationPresent = $row.machineRegistrationPresent
+        }
+    })
+    $productMatches = $views.Count -eq 2 -and ($views.productMatchesDeployment -notcontains $false)
+    $uninstallMatches = $views.Count -eq 2 -and ($views.uninstallMatchesDeployment -notcontains $false)
+    $paths = @($Desktop.executablePaths | Sort-Object -Unique)
+    $otherInstall = @($Desktop.executablePaths | Where-Object { -not $pathComparer.Equals($_, $Deployment.executablePath) }).Count -gt 0
+    $runningMatches = $Desktop.desktopRunning -and $paths.Count -gt 0 -and -not $otherInstall -and
+        -not $Desktop.pathUnverified -and $Deployment.present
+    $runningReason = if ($otherInstall) { 'other-installation-running' }
+        elseif ($Desktop.pathUnverified) { 'running-path-unverified' }
+        elseif (-not $Desktop.desktopRunning) { 'desktop-not-running' }
+        elseif (-not $runningMatches) { 'deployment-unverified' }
+    $machineRegistration = $views.machineRegistrationPresent -contains $true
+    [pscustomobject]@{
+        ready = ($Deployment.present -and $productMatches -and $uninstallMatches -and -not $machineRegistration -and
+            -not $otherInstall -and -not $Desktop.pathUnverified)
+        productKey = "HKCU\$ProductRegistryKey"
+        uninstallKey = "HKCU\$UninstallRegistryKey"
+        productKeyMatchesDeployment = $productMatches
+        uninstallRegistrationMatchesDeployment = $uninstallMatches
+        machineRegistrationPresent = $machineRegistration
+        deployment = $Deployment
+        registryViews = $views
+        running = [pscustomobject]@{
+            desktopRunning = $Desktop.desktopRunning
+            executablePaths = $paths
+            matchesDeployment = $runningMatches
+            otherInstallationRunning = $otherInstall
+            reason = $runningReason
+        }
+    }
+}
+
 function Save-LastSync {
     param([object]$Payload)
     if (-not (Test-Path -LiteralPath $StateDir -PathType Container)) {
@@ -123,17 +318,26 @@ function Save-LastSync {
     Move-Item -LiteralPath $tmp -Destination $target -Force
 }
 
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 if ($Mode -eq 'Status') {
-    $status = Invoke-ReconcilerJson -Arguments @('status')
-    $backupPath = Join-Path $BackupDir ("app.asar.{0}.original" -f $status.version)
+    $deployment = Get-AntigravityDeployment $AppDir
+    $updateTarget = Get-AntigravityUpdateTarget $deployment @(Read-AntigravityUpdateRegistration) (Read-AntigravityDesktopObservation)
+    $status = if ($deployment.appAsarIssue -or ($deployment.languageServerIssue -and $deployment.languageServerIssue -ne 'missing')) {
+        [pscustomobject]@{ status = 'deployment-unavailable'; version = $null }
+    } else {
+        Invoke-ReconcilerJson -Arguments @('status')
+    }
+    $backupPath = if ($status.version) { Join-Path $BackupDir ("app.asar.{0}.original" -f $status.version) }
     $shortcuts = Get-ShortcutAudit
     $out = [pscustomobject]@{
         mode = 'Status'
         reconciler = $status
-        officialBackupExists = (Test-Path -LiteralPath $backupPath -PathType Leaf)
+        officialBackupExists = ($null -ne $backupPath -and (Test-Path -LiteralPath $backupPath -PathType Leaf))
         officialBackupPath = $backupPath
         shortcuts = $shortcuts
         postQuitHookExists = (Test-Path -LiteralPath (Join-Path $StateDir 'post-quit-hook.json') -PathType Leaf)
+        updateTarget = $updateTarget
     }
     if (-not $Quiet) {
         $out | ConvertTo-Json -Depth 8

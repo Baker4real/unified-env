@@ -37,7 +37,8 @@ current task, quoted in -Authorization.
 .EXAMPLE
 & 'D:/Codex/.codex/scripts/Invoke-ManagedRecycle.ps1' -Mode Check -TargetPath 'C:/Users/me/AppData/Local/pip/cache'
 & 'D:/Codex/.codex/scripts/Invoke-ManagedRecycle.ps1' -Mode Plan -TargetPath 'C:/Users/me/AppData/Local/pip/cache' -Purpose 'pip cache' -Authorization '<user words>'
-& 'D:/Codex/.codex/scripts/Invoke-ManagedRecycle.ps1' -Mode Apply -PlanPath '<planPath>' -ApprovedPlanSha256 '<planSha256>' -ConfirmRecycle
+# After reviewing the authorized plan, pass its applyArguments as individual CLI arguments.
+& 'D:/Codex/.codex/scripts/Invoke-ManagedRecycle.ps1' -Mode Apply -PlanPath '<planPath>' -ApprovedPlanSha256 '<planSha256>' -EvidenceRoot '<evidenceRoot>' -KnowledgeBaseRoot '<knowledgeBaseRoot>' -ConfirmRecycle
 #>
 [CmdletBinding()]
 param(
@@ -902,6 +903,11 @@ namespace ManagedRecycle
         $result.topLevel = $topLevel
         $result.planPath = $planPath
         $result.planSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+        $result.evidenceRoot = $evidenceFull
+        $result.applyArguments = @(
+            '-Mode', 'Apply', '-PlanPath', $planPath, '-ApprovedPlanSha256', $result.planSha256,
+            '-EvidenceRoot', $evidenceFull, '-KnowledgeBaseRoot', [IO.Path]::GetFullPath($KnowledgeBaseRoot), '-ConfirmRecycle'
+        )
         $result.expiresUtc = [DateTime]::UtcNow.AddMinutes($planTtlMinutes).ToString('o')
         Complete
     }

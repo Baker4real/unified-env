@@ -7,7 +7,7 @@ Automated, version-agnostic, fail-closed reconciler that keeps Antigravity's thi
 1. **WSL guard** (`dist/wsl.js`): skips `wsl.exe` calls when no WSL distribution is registered and sets `windowsHide: true` (works alongside the host-level IFEO stub guard in `D:\Codex\tools\wsl-guard\`).
 2. **desktop-zhcn** (`desktop-zhcn-v3.0.8`): extracts the embedded UI bundle from the installed `resources\bin\language_server.exe`, translates it into `state\language-<version>\agy_zhcn_ui_main.js` (offline defaults: `onlineTranslate: false`, `titleWriteBack: false`), patches `dist/customScheme.js` & `dist/loadingOverlay.js`, and redirects the `will-quit` hook to `state\post-quit-hook.json`.
 3. **pulse** (`pulse-v1.3.2`, embed-only): injects the context capsule payload into `dist/preload.js`.
-4. **context-viewer** (`context-viewer-v0.8.8`, meter-only): mounts `contextMeterAPI` and the 21 overlay files with resilient single-match hub-navigation anchor detection (`loadHubWindowUrl` / `win.loadURL`) and D-drive state (`state\context`).
+4. **context-viewer** (`context-viewer-v0.8.8`, meter-only): mounts `contextMeterAPI` and the 21 overlay files with resilient single-match hub-navigation anchor detection (`loadHubWindowUrl` / `win.loadURL`), D-drive state (`state\context`), and the Antigravity 2.34+ authenticated-bootstrap CSRF compatibility patch (`dist/local-api.js` resolves `authBootstrap` -> HTML `__APP_CONFIG__` -> CDP -> live same-origin `daemon/hub_*.json`; `dist/meter-collector.js` reuses it with 401 rotation; `dist/meter-renderer.js` falls back to `localStorage['agy_session_csrf_token']`).
 
 Each layer runs independent syntax (`node --check` + `vm.Script`) and offline behavioral gates. If an upstream update changes an anchor for one layer, that single layer degrades cleanly (`skipped`) while other verified layers still apply and official Antigravity stays bootable.
 
@@ -38,17 +38,23 @@ Each layer runs independent syntax (`node --check` + `vm.Script`) and offline be
 # Roll back to the immutable official app.asar.<version>.original (close Antigravity first)
 & 'D:\Codex\tools\antigravity-addons\Sync-AntigravityAddons.ps1' -Mode Rollback
 
-# Run fast unit tests (< 1s, synthetic ASAR, CI-safe)
-node 'D:\Codex\tools\antigravity-addons\test-reconcile-addons.mjs' --unit
+# 在仓库根目录运行 CI 回归，包括合成跨版本更新与登记诊断
+node managed/host-diagnostics/antigravity-addons/antigravity-addons.test.mjs
 
-# Run full offline E2E test suite against official 2.34.0 fixture (never touches live install)
-node 'D:\Codex\tools\antigravity-addons\test-reconcile-addons.mjs' --e2e
+# 在仓库根目录运行官方 2.34.0 载荷离线演练
+node managed/host-diagnostics/antigravity-addons/test-reconcile-addons.mjs --e2e
 
 # Inspect arbitrary Electron app.asar members (canonical host tool, no ad-hoc unpacker)
 python -B -I 'D:\Codex\tools\asar-extract\asar_extract.py' grep 'D:\Apps\Google.Antigravity\resources\app.asar' 'listWslDistros' --paths '^dist/'
 ```
 
-Canonical source mirror & CI guardrails live in `D:\agents\projects\统一环境\managed\host-diagnostics\antigravity-addons\`.
+## 更新目标与离线验收
+
+`Status` 的 `updateTarget` 按 `Registry32`、`Registry64` 分别读取 HKCU 的 NSIS 产品 `InstallLocation` 和卸载登记。已验证的 2.34.0 每用户安装器在更新器未传入 `/D` 时采用产品键。`product-location-mismatch` 指向需要核对的产品键和实际目录，`uninstall-path-mismatch` 指向卸载目录或卸载程序路径。`machineRegistrationPresent` 提示存在同产品的机器级登记。`deployment` 给出受管磁盘路径和文件缺失、不可读或重解析点原因。
+
+`running` 观察当前 Windows 会话的可见桌面。`desktop-not-running` 可与 `ready: true` 同时出现。`other-installation-running` 附带实际映像路径，`running-path-unverified` 表示读取不完整。`ready` 检查当前部署、两个登记视图和可见桌面的一致性。实际更新行为以对应版本安装器为准。
+
+离线演练使用经签名核验记录绑定的 2.34.0 ASAR 和语言服务器副本，以及本机三个已安装的补丁包。测试在临时目录模拟安装器覆盖文件，用 Windows 文件句柄和夹具桌面进程模拟重开。启动器在发现可见夹具桌面时跳过晋升，关闭该进程后仍受文件锁约束。释放句柄后沿同一启动前入口晋升补丁，核对四层补丁和同版本原件备份。CI 用合成跨版本载荷验证相同状态转换。
 
 ## Paths & State
 

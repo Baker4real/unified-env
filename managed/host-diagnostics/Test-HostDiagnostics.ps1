@@ -26,7 +26,7 @@ $files = @(
     'Get-VcpkgHealth.ps1','Test-VcpkgHealth.ps1',
     'Get-TaskbarSnapshot.ps1','Restart-ExplorerShell.ps1',
     'lib/ExplorerShellRecovery.ps1','Test-ExplorerShellRecovery.ps1',
-    'Open-DesktopShortcut.ps1','lib/ProcessProxyReader.ps1',
+    'lib/AntigravityProcessIdentity.ps1','Open-DesktopShortcut.ps1','lib/ProcessProxyReader.ps1',
     'Invoke-ManagedRecycle.ps1','Test-ManagedRecycle.ps1',
     'Get-ConsoleLaunchAudit.ps1','Test-ConsoleLaunchAudit.ps1','Watch-ConsoleWindows.ps1',
     'Get-WslState.ps1','Test-WslState.ps1','Watch-WslLaunch.ps1','Test-WslLaunch.ps1',

@@ -89,6 +89,12 @@ foreach ($required in @('Invoke-RemotePython.ps1','codex_diagnostics.py','Test-C
 Assert-True (-not (Test-Path -LiteralPath $deployEvidence)) 'Check must not create an evidence directory.'
 Assert-True ((Get-FileHash -LiteralPath $previousFile -Algorithm SHA256).Hash -eq $previousHash -and (Get-ChildItem -LiteralPath $targetRoot -Recurse -File).Count -eq 2) 'Check must leave the target tree unchanged.'
 
+$missingLibrary = Invoke-PublicScript $deployEntry @('-Mode','Apply','-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-EvidenceRoot',$deployEvidence,'-Only','Open-DesktopShortcut.ps1')
+$missingLibraryReport = $missingLibrary.stdout | ConvertFrom-Json -ErrorAction Stop
+Assert-True ($missingLibrary.exitCode -eq 1 -and $missingLibraryReport.status -eq 'failed' -and $missingLibraryReport.writtenFiles -eq 0 -and
+    $missingLibraryReport.error.Contains('requires a matching lib/AntigravityProcessIdentity.ps1') -and
+    -not (Test-Path -LiteralPath $deployEvidence)) 'A partial shortcut deployment without its library must refuse before writing.'
+
 $apply = Invoke-PublicScript $deployEntry @('-Mode','Apply','-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-EvidenceRoot',$deployEvidence)
 $applyReport = $apply.stdout | ConvertFrom-Json -ErrorAction Stop
 Assert-True ($apply.exitCode -eq 0 -and $applyReport.status -eq 'deployed' -and $applyReport.writtenFiles -eq $bundleCount) 'Apply must publish the complete allowlist.'
@@ -106,6 +112,9 @@ Assert-True ($summaryReport.status -eq 'in-sync' -and $summaryReport.changedFile
 $only = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-Only','Read-BoundedProjection.ps1,Test-BoundedProjection.ps1')
 $onlyReport = $only.stdout | ConvertFrom-Json -ErrorAction Stop
 Assert-True ($only.exitCode -eq 0 -and $onlyReport.status -eq 'in-sync' -and $onlyReport.files.Count -eq 2) 'Only must restrict the deployment readback to the selected files.'
+$shortcutOnly = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-Only','Open-DesktopShortcut.ps1,lib/AntigravityProcessIdentity.ps1')
+$shortcutReport = $shortcutOnly.stdout | ConvertFrom-Json -ErrorAction Stop
+Assert-True ($shortcutOnly.exitCode -eq 0 -and $shortcutReport.status -eq 'in-sync' -and ($shortcutReport.files.relative -join ',') -eq 'lib/AntigravityProcessIdentity.ps1,Open-DesktopShortcut.ps1') 'The shortcut pair must deploy the identity library first.'
 $unknownOnly = Invoke-PublicScript $deployEntry @('-SourceRoot',$sourceRoot,'-TargetRoot',$targetRoot,'-Only','not-allowlisted.ps1')
 $unknownOnlyReport = $unknownOnly.stdout | ConvertFrom-Json -ErrorAction Stop
 Assert-True ($unknownOnly.exitCode -eq 1 -and $unknownOnlyReport.status -eq 'failed' -and $unknownOnlyReport.error.Contains('Only')) 'Only must reject a name outside the allowlist.'

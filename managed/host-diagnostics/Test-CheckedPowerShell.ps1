@@ -670,6 +670,67 @@ exit 0
     if ($result.stdout -or $result.stderr.Contains('synthetic-worker-output-do-not-echo')) { throw 'An incomplete output stream was exposed.' }
 }
 
+Assert-Case 'python -c preflight rejects single-quoted escaped quotes and multiline inline code without exposing source' {
+    $invalidCases = @(
+        @{
+            Source = @'
+python -c 'print(\"PRIVATE-PY-SENTINEL\")'
+'@
+            Reason = 'single-quoted-backslash-quote'
+        },
+        @{
+            Source = @'
+python -c 'import sys
+print("PRIVATE-PY-SENTINEL")'
+'@
+            Reason = 'multiline-inline-python'
+        },
+        @{
+            Source = @'
+python3 -c "import os
+print('PRIVATE-PY-SENTINEL')"
+'@
+            Reason = 'multiline-inline-python'
+        }
+    )
+    foreach ($case in $invalidCases) {
+        $result = Invoke-PublicCli @('-CommandText', $case.Source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch ('native-argument-error command=python parameter=-c reason=' + $case.Reason)) {
+            throw "Inline python hazard was not rejected ($($case.Reason)): exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('PRIVATE-PY-SENTINEL')) { throw 'Python preflight rejection exposed source.' }
+    }
+    $validCases = @(
+        @'
+python -c 'print(1 + 1)'
+'@,
+        @'
+python -c "import sys; print(sys.version)"
+'@,
+        ("@'`nimport json`nprint(json.dumps({'ok': True}))`n'@ | python -")
+    )
+    foreach ($source in $validCases) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 0) { throw "Valid python command was rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)" }
+    }
+}
+
+Assert-Case 'gh api piped into file-writing python -c is rejected while read-only pipe passes' {
+    $invalid = @'
+gh api 'repos/owner/repo/contents/a.go' --jq '.content' | python -c "import sys,base64; open('PRIVATE-OUT.go','wb').write(base64.b64decode(sys.stdin.read()))"
+'@
+    $result = Invoke-PublicCli @('-CommandText', $invalid, '-CheckOnly')
+    if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'native-argument-error command=gh reason=unguarded-pipe-write') {
+        throw "Unguarded gh api pipe write was not rejected: exit=$($result.exitCode) stderr=$($result.stderr)"
+    }
+    if ($result.stdout -or $result.stderr.Contains('PRIVATE-OUT.go')) { throw 'gh pipe rejection exposed source.' }
+    $valid = @'
+gh api 'repos/owner/repo/releases/latest' | python -c 'import sys,json; print(len(json.load(sys.stdin)))'
+'@
+    $ok = Invoke-PublicCli @('-CommandText', $valid, '-CheckOnly')
+    if ($ok.exitCode -ne 0) { throw "Read-only gh api pipe was rejected: exit=$($ok.exitCode) stderr=$($ok.stderr)" }
+}
+
 $failed = @($cases | Where-Object status -eq 'failed')
 $report = [ordered]@{
     status = if ($failed.Count) { 'failed' } else { 'passed' }

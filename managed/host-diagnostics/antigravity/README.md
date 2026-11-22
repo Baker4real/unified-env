@@ -10,14 +10,28 @@
 
 ## 复测更新后的应用
 
-1. 从官方渠道更新。核对新版本的可执行文件与安装包来源，然后记录这次从官方包取得的 `resources/app.asar` SHA-256。保留能恢复本次更新的原包和对应程序版本。
-2. 运行以下检查。已有窗口时添加 `-Restart`，它会正常关闭 Antigravity，再通过原桌面快捷方式开一个新实例。检查记录应用版本和归档哈希、两个进程的代理设置、匿名 Google OAuth 响应及 WSL 启动观察。匿名请求以 `HTTP 400` 和 `invalid_request` 验证连通性。Google 账户授权在应用中完成。
+1. 更新前运行 [扩展对账器的 Status](../antigravity-addons/README.md#更新目标与离线验收)，确认 `updateTarget.ready=true`。两个注册表视图的 NSIS 产品键与卸载登记都应指向 D 盘。再从官方渠道更新，核对新版来源和 `resources/app.asar` SHA-256，保留对应版本的官方包用于恢复。
+2. 运行以下检查。已有窗口时添加 `-Restart`，它会正常关闭 Antigravity，再通过原桌面快捷方式开一个新实例；叠加了 `context-viewer` 时加 `-CheckContextViewer` 同步验收本地鉴权与额度状态。检查记录应用版本和归档哈希、两个进程的代理设置、匿名 Google OAuth 响应及 WSL 启动观察。匿名请求以 `HTTP 400` 和 `invalid_request` 验证连通性。Google 账户授权在应用中完成。
 
 ```powershell
-& './managed/host-diagnostics/antigravity/Test-AntigravityDesktop.ps1' -ExpectedArchiveSha256 '<已核实的官方包或本地已批准补丁哈希>' -Restart
+& './managed/host-diagnostics/antigravity/Test-AntigravityDesktop.ps1' -ExpectedArchiveSha256 '<已核实的官方包或本地已批准补丁哈希>' -Restart -CheckContextViewer
+```
+
+只读诊断当前运行中的 Antigravity 本地鉴权与额度状态（单命令脱敏输出 `daemon/hub_*.json`、`GET /` `__APP_CONFIG__`、带/不带 CSRF 的 RPC 状态码、以及精简版 `accounts_v1.json` 摘要，不输出 token 或历史 `quotaIntervals`）：
+
+```powershell
+node ./managed/host-diagnostics/antigravity/Get-AntigravityQuotaHealth.cjs
 ```
 
 3. 无 WSL 运行时或发行版的机器用于复测安装提示。检查同时使用有界进程采样和新启动的应用日志，采样可能漏过极短命进程。发现安装提示、`wsl.exe` 启动记录或 WSL 探测错误时，检查新包的 WSL 探测逻辑，再决定是否适配补丁。结果目录中的 `result.json` 记录验证通过的组合。
+
+## 只读检查进程和插件
+
+`Test-AntigravityDesktop.ps1 -ProcessSnapshot` 用于探测进程身份，不启动、停止或重启应用。它只报告 PID、父 PID 和固定的角色判断，不输出命令行、参数值或环境。重开走正常快捷方式；没有唯一、已核实的桌面主窗口时，不向残留进程发退出请求。
+
+1. 在 Antigravity 打开 **插件 → 已安装**（英文界面为 **Customizations → Installed**）。清空搜索，技能与规则的筛选选 **全部**，展开列表直到没有「查看更多」。向下确认 MCP 区域已展开。
+2. 从仓库根运行 `pwsh -NoProfile -File managed/host-diagnostics/antigravity/Get-AntigravityCustomizationStatus.ps1`。它只读当前窗口和 Magpie 已选的技能名单，检查个人 `AGENTS.md`、全量技能名称与 `magpie` 启用工具数，不操作界面、不调用认证接口。
+3. `status=verified` 表示三项均匹配。未通过时按 `reason` 检查页面、筛选、条目或连接；MCP 区域有多个连接时，只读脚本不归属工具数，请展开 `magpie` 后直接核对该行。技能与规则标题包含内置条目，不能代替按 Magpie 名单核验。
 
 ## 复建 2.33.0 补丁
 

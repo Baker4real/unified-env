@@ -11,7 +11,6 @@ using Microsoft.Win32;
 internal static class LaunchAntigravity
 {
     private const string AppPath = @"D:\Apps\Google.Antigravity\Antigravity.exe";
-    private const string AppAsarPath = @"D:\Apps\Google.Antigravity\resources\app.asar";
     private const string AddonsStateDir = @"D:\Codex\tools\antigravity-addons\state";
     private const string AddonsSyncScript = @"D:\Codex\tools\antigravity-addons\Sync-AntigravityAddons.ps1";
     private const string PwshPath = @"D:\Codex\tools\PowerShell\7.7.0\pwsh.exe";
@@ -33,13 +32,7 @@ internal static class LaunchAntigravity
     {
         try
         {
-            ReconcileAddonsBeforeLaunch(
-                AppAsarPath,
-                AddonsStateDir,
-                AddonsSyncScript,
-                PwshPath,
-                IsDesktopMainRunning,
-                RunHiddenReconciler);
+            PrepareAddonsForLaunch(AppPath, AddonsStateDir, AddonsSyncScript, PwshPath);
 
             var start = new ProcessStartInfo(AppPath);
             start.WorkingDirectory = Path.GetDirectoryName(AppPath);
@@ -116,6 +109,13 @@ internal static class LaunchAntigravity
             proxy.AbsolutePath != "/" || proxy.Query.Length != 0 || proxy.Fragment.Length != 0)
             return null;
         return proxy.GetLeftPart(UriPartial.Authority);
+    }
+
+    internal static ReconcileOutcome PrepareAddonsForLaunch(string appPath, string stateDir, string syncScriptPath, string pwshPath)
+    {
+        var appAsarPath = Path.Combine(Path.GetDirectoryName(appPath), "resources", "app.asar");
+        return ReconcileAddonsBeforeLaunch(appAsarPath, stateDir, syncScriptPath, pwshPath,
+            () => IsDesktopMainRunning(appPath), RunHiddenReconciler);
     }
 
     internal static ReconcileOutcome ReconcileAddonsBeforeLaunch(
@@ -277,17 +277,17 @@ internal static class LaunchAntigravity
         }
     }
 
-    private static bool IsDesktopMainRunning()
+    private static bool IsDesktopMainRunning(string appPath)
     {
         try
         {
-            foreach (var proc in Process.GetProcessesByName("Antigravity"))
+            foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(appPath)))
             {
                 try
                 {
                     if (proc.MainWindowHandle != IntPtr.Zero &&
                         proc.MainModule != null &&
-                        string.Equals(proc.MainModule.FileName, AppPath, StringComparison.OrdinalIgnoreCase))
+                        string.Equals(proc.MainModule.FileName, appPath, StringComparison.OrdinalIgnoreCase))
                     {
                         return true;
                     }

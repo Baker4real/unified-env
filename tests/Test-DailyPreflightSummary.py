@@ -38,6 +38,14 @@ class PreflightSummaryTests(unittest.TestCase):
         self.assertLessEqual(len(output.encode('utf-8'))+1, 600)
         self.assertGreater(result['omitted_count'], 0)
 
+    def test_matching_configured_proxy_wins_among_listener_ports(self):
+        rows = [dict(state='Listen', address='127.0.0.1', port=27605, pid=1, process='mihomo'),
+                dict(state='Listen', address='127.0.0.1', port=17897, pid=2, process='verge-mihomo')]
+        proxy = 'http://127.0.0.1:17897'
+        report = summary.proxy_summary(rows, proxy, proxy)
+        self.assertTrue(report['three_faces_consistent'])
+        self.assertEqual(report['proxy'], proxy)
+
     def test_ambiguous_live_ports_are_not_guessed(self):
         rows = [dict(state='Listen', address='127.0.0.1', port=port, pid=123, process='mihomo') for port in (17897,17898)]
         result = summary.proxy_summary(rows, 'http://127.0.0.1:17897', 'http://127.0.0.1:17898')

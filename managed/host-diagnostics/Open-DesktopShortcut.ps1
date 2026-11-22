@@ -34,34 +34,56 @@ if ($launchLink.TargetPath -ine $target -or [string]$launchLink.Arguments -cne $
 $result = [ordered]@{status='planned'; shortcut=$shortcut; target=$target; executable=$executable; processId=$null; startedAt=$null; previousProcessId=$null}
 if ($Mode -eq 'Plan') { return [pscustomobject]$result }
 
+$antigravity = [IO.Path]::GetFileName($executable) -ieq 'Antigravity.exe'
+if ($antigravity) { . "$PSScriptRoot/lib/AntigravityProcessIdentity.ps1" }
 $sessionId = (Get-Process -Id $PID).SessionId
 $explorer = Join-Path ([Environment]::GetFolderPath('Windows')) 'explorer.exe'
 if ($sessionId -eq 0 -or -not (Get-Process -Name explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId -and $_.Path -ieq $explorer })) {
     throw 'interactive-explorer-session-required'
 }
 
-function Get-AppWindows {
+function Get-AppWindows([switch]$BeforeLaunch) {
     $name = [IO.Path]::GetFileNameWithoutExtension($executable)
-    Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object {
-        $_.SessionId -eq $sessionId -and $_.Path -ieq $executable -and $_.MainWindowHandle -ne 0
+    $processes = @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object {
+        $_.SessionId -eq $sessionId -and $_.Path -ieq $executable
+    })
+    if ($antigravity) {
+        if (-not $BeforeLaunch -and $processes.Count -eq 0) { return }
+        $main = Get-AntigravityDesktopMainProcess $executable $sessionId $processes -BeforeLaunch:$BeforeLaunch
+        if ($main) {
+            $process = Assert-AntigravityDesktopMainProcess $main.Snapshot $executable $sessionId $main.Frame
+            [pscustomobject]@{ Process=$process; Frame=$main.Frame }
+        }
+        return
+    }
+    foreach ($process in $processes) {
+        if ($process.MainWindowHandle -ne 0) { [pscustomobject]@{ Process=$process; Frame=$null } }
     }
 }
 
-$before = @(Get-AppWindows)
-if ($before.Count -gt 1) { throw 'more-than-one-matching-app-window' }
-if ($before.Count -eq 1 -and $Mode -eq 'Open') {
-    if (-not $before[0].Responding) { throw 'existing-window-not-responding' }
-    $result.status = 'already-open'
-    $result.processId = $before[0].Id
-    $result.startedAt = $before[0].StartTime.ToUniversalTime().ToString('o')
-    return [pscustomobject]$result
+function Test-AppWindowResponsive($Window) {
+    if ($Window.Frame) { return $Window.Frame.IsResponsive($Window.Process.Id) }
+    $Window.Process.Responding
 }
+
+$before = @(Get-AppWindows -BeforeLaunch)
+if ($before.Count -gt 1) { throw 'more-than-one-matching-app-window' }
 if ($before.Count -eq 1) {
-    $old = $before[0]
-    $result.previousProcessId = $old.Id
-    if (-not $old.CloseMainWindow() -or -not $old.WaitForExit($TimeoutSeconds * 1000)) {
-        throw 'app-did-not-close-normally'
-    }
+    $old = $before[0].Process
+    try {
+        if ($Mode -eq 'Open') {
+            if (-not (Test-AppWindowResponsive $before[0])) { throw 'existing-window-not-responding' }
+            $result.status = 'already-open'
+            $result.processId = $old.Id
+            $result.startedAt = $old.StartTime.ToUniversalTime().ToString('o')
+            return [pscustomobject]$result
+        }
+        $result.previousProcessId = $old.Id
+        $closeSent = if ($antigravity) { $before[0].Frame.TryClose($old.Id) } else { $old.CloseMainWindow() }
+        if (-not $closeSent -or -not $old.WaitForExit($TimeoutSeconds * 1000)) {
+            throw 'app-did-not-close-normally'
+        }
+    } finally { if ($antigravity) { $old.Dispose() } }
 }
 if ((Get-FileHash -LiteralPath $shortcut).Hash -ne $linkHash -or (Get-FileHash -LiteralPath $target).Hash -ne $targetHash) {
     throw 'shortcut-or-target-changed-before-launch'
@@ -75,13 +97,18 @@ if ($launch.ReturnValue -ne 0) { throw "explorer-launch-refused-$($launch.Return
 
 $deadline = $started.AddSeconds($TimeoutSeconds)
 do {
-    $found = @(Get-AppWindows | Where-Object { $_.StartTime.ToUniversalTime() -ge $started -and $_.Responding })
-    if ($found.Count -gt 1) { throw 'more-than-one-new-app-window' }
-    if ($found.Count -eq 1) {
-        $result.status = 'ready'
-        $result.processId = $found[0].Id
-        $result.startedAt = $found[0].StartTime.ToUniversalTime().ToString('o')
-        return [pscustomobject]$result
+    $windows = @(Get-AppWindows)
+    try {
+        $found = @($windows | Where-Object { $_.Process.StartTime.ToUniversalTime() -ge $started -and (Test-AppWindowResponsive $_) })
+        if ($found.Count -gt 1) { throw 'more-than-one-new-app-window' }
+        if ($found.Count -eq 1) {
+            $result.status = 'ready'
+            $result.processId = $found[0].Process.Id
+            $result.startedAt = $found[0].Process.StartTime.ToUniversalTime().ToString('o')
+            return [pscustomobject]$result
+        }
+    } finally {
+        if ($antigravity) { foreach ($window in $windows) { $window.Process.Dispose() } }
     }
     Start-Sleep -Milliseconds 150
 } while ([datetime]::UtcNow -lt $deadline)
