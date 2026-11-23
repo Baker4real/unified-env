@@ -37,6 +37,7 @@ $allowlist = @(
     'Get-ConsoleLaunchAudit.ps1','Test-ConsoleLaunchAudit.ps1','Watch-ConsoleWindows.ps1',
     'Get-WslState.ps1','Test-WslState.ps1','Watch-WslLaunch.ps1','Test-WslLaunch.ps1',
     'Get-LocalPerfSnapshot.ps1','Test-LocalPerfSnapshot.ps1',
+    'Get-PowerAndCrashSnapshot.ps1','Test-PowerAndCrashSnapshot.ps1',
     'Protect-SensitiveLog.ps1','Test-ProtectSensitiveLog.ps1',
     'Request-KryptexBenchmarkReset.py','Test-RequestKryptexBenchmarkReset.py',
     'Invoke-RemoteStep.ps1','Invoke-RemotePython.ps1','Invoke-UuTerminalCommand.ps1',

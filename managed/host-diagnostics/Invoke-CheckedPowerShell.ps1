@@ -1,4 +1,4 @@
-﻿#requires -Version 7.4
+#requires -Version 7.4
 <#
 .SYNOPSIS
 先预检 PowerShell 输入，再执行或只检查语法、常量正则与内置 cmdlet 参数。
@@ -15,8 +15,9 @@ rg 参数可静态分类时，绝对搜索路径含未展开的 * 或 ?，或未
 在执行前拒绝；正则、glob 选项值不按路径检查，--files、信息选项、动态 argv、未知选项或输入自定义的 rg 函数保持运行时验证。
 stdout/stderr 在子进程结束后输出。单个流超过 MaxOutputChars 时只回显开头 2/3 与结尾 1/3，
 全文写进 SpillDirectory 下的 txt，stderr 末尾给出 output-truncated 行和文件路径。
-启用 JSON 字段校验时 stdout 不截断，JSON 不合格不回显输出正文；
-目标非零退出时不做校验，照常转出它的 stdout/stderr。
+启用 JSON 字段校验时默认 stdout 不截断（供外层程序直接解析）；交互式探测可加
+-TruncateValidatedJson，先按完整 stdout 校验字段，通过后再写 spill 并按 MaxOutputChars 截断回显。
+JSON 不合格不回显输出正文；目标非零退出时不做校验，照常转出它的 stdout/stderr。
 .PARAMETER ScriptPath
 待检查和执行的 .ps1 文件，与 CommandText 互斥。保留目标 PSScriptRoot 与调用目录。
 .PARAMETER CommandText
@@ -35,6 +36,9 @@ stdout 必须是单个 JSON 对象，每个字段必须存在且不为 null。�
 stdout、stderr 各自回显的字符上限，默认 12000；0 不截断。按全文解析输出的程序传 0。
 .PARAMETER SpillDirectory
 截断时写全文的目录，默认 D:/Codex/temp/checked-powershell。文件不自动清理，也不脱敏。
+.PARAMETER TruncateValidatedJson
+与 RequiredJsonFields 同用时，先对完整 stdout 完成 JSON 与必填字段校验，再对超长 stdout 应用
+MaxOutputChars 截断并写入 SpillDirectory（别名 SpillValidatedJson）。默认不开启以兼容管道解析方。
 .EXAMPLE
 & D:/Codex/.codex/scripts/Invoke-CheckedPowerShell.ps1 -CommandText '$rows = foreach ($x in 1,2) { $x }; $rows | ConvertTo-Json' -CheckOnly
 .EXAMPLE
@@ -62,6 +66,8 @@ param(
     [string]$CommandText,
     [switch]$CheckOnly,
     [string[]]$RequiredJsonFields = @(),
+    [Alias('SpillValidatedJson')]
+    [switch]$TruncateValidatedJson,
     [ValidateRange(1, 3600)]
     [int]$TimeoutSeconds = 60,
     [ValidateRange(0, 1000000000)]
@@ -472,6 +478,97 @@ $builtinModules = @('Microsoft.PowerShell.Core', 'Microsoft.PowerShell.Managemen
 $definedFunctions = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object Name)
 $resolvedCmdlets = @{}
 $providerParameters = @{}
+$winEventSingleAssignVars = $null
+function Unwrap-SimpleAst([System.Management.Automation.Language.Ast]$Node) {
+    $cur = $Node
+    while ($null -ne $cur) {
+        if ($cur -is [System.Management.Automation.Language.ParenExpressionAst]) {
+            $cur = $cur.Pipeline
+        } elseif ($cur -is [System.Management.Automation.Language.PipelineAst] -and $cur.PipelineElements.Count -eq 1 -and
+            $cur.PipelineElements[0] -is [System.Management.Automation.Language.CommandExpressionAst]) {
+            $cur = $cur.PipelineElements[0].Expression
+        } elseif ($cur -is [System.Management.Automation.Language.CommandExpressionAst]) {
+            $cur = $cur.Expression
+        } elseif ($cur -is [System.Management.Automation.Language.AttributedExpressionAst]) {
+            $cur = $cur.Child
+        } else {
+            break
+        }
+    }
+    return $cur
+}
+function Try-GetStaticIntValue([System.Management.Automation.Language.Ast]$Node, [ref]$OutVal) {
+    $cur = Unwrap-SimpleAst $Node
+    $sign = 1L
+    if ($cur -is [System.Management.Automation.Language.UnaryExpressionAst]) {
+        if ($cur.TokenKind -eq [System.Management.Automation.Language.TokenKind]::Minus) { $sign = -1L; $cur = Unwrap-SimpleAst $cur.Child }
+        elseif ($cur.TokenKind -eq [System.Management.Automation.Language.TokenKind]::Plus) { $cur = Unwrap-SimpleAst $cur.Child }
+    }
+    if ($cur -is [System.Management.Automation.Language.ConstantExpressionAst] -and $null -ne $cur.Value) {
+        $parsed = 0L
+        if ([long]::TryParse([string]$cur.Value, [ref]$parsed)) {
+            $OutVal.Value = $sign * $parsed
+            return $true
+        }
+    }
+    return $false
+}
+function Measure-StaticFilterIdCount([System.Management.Automation.Language.Ast]$ExprAst, [hashtable]$SingleAssignVars, [int]$Depth = 0) {
+    if ($null -eq $ExprAst -or $Depth -gt 4) { return -1 }
+    $cur = Unwrap-SimpleAst $ExprAst
+    if ($cur -is [System.Management.Automation.Language.ArrayExpressionAst]) {
+        $stmts = @($cur.SubExpression.Statements)
+        if ($stmts.Count -eq 0) { return 0 }
+        $sum = 0
+        foreach ($st in $stmts) {
+            if ($st -isnot [System.Management.Automation.Language.PipelineAst]) { return -1 }
+            $subCount = Measure-StaticFilterIdCount $st $SingleAssignVars ($Depth + 1)
+            if ($subCount -lt 0) { return -1 }
+            $sum += $subCount
+        }
+        return $sum
+    }
+    if ($cur -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+        $sum = 0
+        foreach ($elem in $cur.Elements) {
+            $subCount = Measure-StaticFilterIdCount $elem $SingleAssignVars ($Depth + 1)
+            if ($subCount -lt 0) { return -1 }
+            $sum += $subCount
+        }
+        return $sum
+    }
+    if ($cur -is [System.Management.Automation.Language.BinaryExpressionAst]) {
+        if ($cur.Operator -eq [System.Management.Automation.Language.TokenKind]::DotDot) {
+            $lo = 0L; $hi = 0L
+            if ((Try-GetStaticIntValue $cur.Left ([ref]$lo)) -and (Try-GetStaticIntValue $cur.Right ([ref]$hi))) {
+                $span = [Math]::Abs($hi - $lo) + 1L
+                if ($span -gt [int]::MaxValue) { return [int]::MaxValue }
+                return [int]$span
+            }
+            return -1
+        }
+        if ($cur.Operator -eq [System.Management.Automation.Language.TokenKind]::Plus) {
+            $lc = Measure-StaticFilterIdCount $cur.Left $SingleAssignVars ($Depth + 1)
+            $rc = Measure-StaticFilterIdCount $cur.Right $SingleAssignVars ($Depth + 1)
+            if ($lc -ge 0 -and $rc -ge 0) { return ($lc + $rc) }
+            return -1
+        }
+        return -1
+    }
+    $dummy = 0L
+    if ($cur -is [System.Management.Automation.Language.ConstantExpressionAst] -or
+        $cur -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+        (Try-GetStaticIntValue $cur ([ref]$dummy))) {
+        return 1
+    }
+    if ($cur -is [System.Management.Automation.Language.VariableExpressionAst] -and -not $cur.VariablePath.IsDriveQualified -and $null -ne $SingleAssignVars) {
+        $vName = ($cur.VariablePath.UserPath -replace '^(?:global|local|script|private):', '').ToLowerInvariant()
+        if ($SingleAssignVars.ContainsKey($vName)) {
+            return Measure-StaticFilterIdCount $SingleAssignVars[$vName] $SingleAssignVars ($Depth + 1)
+        }
+    }
+    return -1
+}
 foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
     $name = $command.GetCommandName()
     if (-not $name -or $definedFunctions -contains $name) { continue }
@@ -480,8 +577,43 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
         if ($element -is [System.Management.Automation.Language.VariableExpressionAst] -and $element.Splatted) { $splatted = $true; break }
     }
     if ($splatted) { continue }
-    # Analytic/Diagnostic event logs reject forward-reverse reads without -Oldest.
+    # Analytic/Diagnostic event logs reject forward-reverse reads without -Oldest; FilterHashtable Id accepts <= 22 entries.
     if ($name -ieq 'Get-WinEvent') {
+        if ($null -eq $winEventSingleAssignVars) {
+            $assignCounts = @{}
+            $assignExprs = @{}
+            foreach ($asg in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+                $lhs = $asg.Left
+                while ($lhs -is [System.Management.Automation.Language.AttributedExpressionAst]) { $lhs = $lhs.Child }
+                if ($lhs -is [System.Management.Automation.Language.VariableExpressionAst] -and -not $lhs.VariablePath.IsDriveQualified) {
+                    $k = ($lhs.VariablePath.UserPath -replace '^(?:global|local|script|private):', '').ToLowerInvariant()
+                    $assignCounts[$k] = $(if ($assignCounts.ContainsKey($k)) { $assignCounts[$k] + 1 } else { 1 })
+                    if ($asg.Operator -eq [System.Management.Automation.Language.TokenKind]::Equals) {
+                        $assignExprs[$k] = $asg.Right
+                    } else {
+                        $assignCounts[$k] = 2
+                    }
+                }
+            }
+            foreach ($feNode in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ForEachStatementAst] }, $true)) {
+                if ($null -ne $feNode.Variable) {
+                    $k = ($feNode.Variable.VariablePath.UserPath -replace '^(?:global|local|script|private):', '').ToLowerInvariant()
+                    $assignCounts[$k] = 2
+                }
+            }
+            foreach ($prmNode in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ParameterAst] }, $true)) {
+                if ($null -ne $prmNode.Name) {
+                    $k = ($prmNode.Name.VariablePath.UserPath -replace '^(?:global|local|script|private):', '').ToLowerInvariant()
+                    $assignCounts[$k] = 2
+                }
+            }
+            $winEventSingleAssignVars = @{}
+            foreach ($k in $assignCounts.Keys) {
+                if ($assignCounts[$k] -eq 1 -and $assignExprs.ContainsKey($k)) {
+                    $winEventSingleAssignVars[$k] = $assignExprs[$k]
+                }
+            }
+        }
         $elements = @($command.CommandElements)
         $hasOldest = $false
         $logLiterals = [Collections.Generic.List[string]]::new()
@@ -507,9 +639,18 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
                     if ($null -ne $valAst) {
                         foreach ($ht in $valAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true)) {
                             foreach ($pair in $ht.KeyValuePairs) {
-                                if ($pair.Item1 -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $pair.Item1.Value -ieq 'LogName') {
-                                    foreach ($strNode in $pair.Item2.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true)) {
-                                        $logLiterals.Add($strNode.Value)
+                                if ($pair.Item1 -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                                    if ($pair.Item1.Value -ieq 'LogName') {
+                                        foreach ($strNode in $pair.Item2.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true)) {
+                                            $logLiterals.Add($strNode.Value)
+                                        }
+                                    } elseif ($pair.Item1.Value -ieq 'Id') {
+                                        $idCount = Measure-StaticFilterIdCount $pair.Item2 $winEventSingleAssignVars
+                                        if ($idCount -gt 22) {
+                                            [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=WinEventFilterIdLimitExceeded command=Get-WinEvent line={0} column={1}; FilterHashtable Id accepts at most 22 values (got {2}), split into multiple queries' -f
+                                                $command.Extent.StartLineNumber, $command.Extent.StartColumnNumber, $idCount))
+                                            exit 2
+                                        }
                                     }
                                 }
                             }
@@ -698,10 +839,10 @@ function Limit-TargetStream([string]$Text, [string]$Stream, [System.Collections.
         ("`n[CheckedPowerShell output-truncated: {0} chars omitted]`n" -f ($tailStart - $headLength)) + $Text.Substring($tailStart)
 }
 
-# stdout stays whole when JSON fields are validated: those callers parse it.
+# stdout stays whole when JSON fields are validated unless -TruncateValidatedJson is explicitly requested.
 function Write-TargetOutput([string[]]$Trailer = @()) {
     $notes = [System.Collections.Generic.List[string]]::new()
-    $shownStdout = if ($RequiredJsonFields.Count) { $stdout } else { Limit-TargetStream $stdout 'stdout' $notes }
+    $shownStdout = if ($RequiredJsonFields.Count -and -not $TruncateValidatedJson) { $stdout } else { Limit-TargetStream $stdout 'stdout' $notes }
     $shownStderr = Limit-TargetStream $stderr 'stderr' $notes
     [Console]::Out.Write($shownStdout)
     [Console]::Error.Write($shownStderr)

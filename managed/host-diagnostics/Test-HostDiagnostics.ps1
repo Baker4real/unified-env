@@ -31,6 +31,7 @@ $files = @(
     'Get-ConsoleLaunchAudit.ps1','Test-ConsoleLaunchAudit.ps1','Watch-ConsoleWindows.ps1',
     'Get-WslState.ps1','Test-WslState.ps1','Watch-WslLaunch.ps1','Test-WslLaunch.ps1',
     'Get-LocalPerfSnapshot.ps1','Test-LocalPerfSnapshot.ps1',
+    'Get-PowerAndCrashSnapshot.ps1','Test-PowerAndCrashSnapshot.ps1',
     'Protect-SensitiveLog.ps1','Test-ProtectSensitiveLog.ps1',
     'Request-KryptexBenchmarkReset.py','Test-RequestKryptexBenchmarkReset.py',
     'Invoke-RemoteStep.ps1','Invoke-RemotePython.ps1','Invoke-UuTerminalCommand.ps1',
@@ -80,6 +81,7 @@ $suiteDefinitions = @(
     @{name='wsl-state';file='Test-WslState.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'wsl-state'))},
     @{name='wsl-launch';file='Test-WslLaunch.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'wsl-launch'))},
     @{name='local-perf';file='Test-LocalPerfSnapshot.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'local-perf'))},
+    @{name='power-crash';file='Test-PowerAndCrashSnapshot.ps1';args=@('-EvidenceRoot',(Join-Path $runRoot 'power-crash'))},
     @{name='sensitive-log';file='Test-ProtectSensitiveLog.ps1';args=@()},
     @{name='benchmark-reset';file='Test-RequestKryptexBenchmarkReset.py';args=@()},
     @{name='codex-diagnostics';file='Test-CodexDiagnostics.py';args=@()}
@@ -131,7 +133,7 @@ if (@($syntax | Where-Object status -NE 'passed').Count -eq 0) {
                     $contractPassed = $parsed.status -eq 'passed' -and $parsed.failures -eq 0 -and
                         $passedChecks -gt 0 -and $passedChecks -eq $parsed.cases
                 }
-                { $_ -in 'sensitive-log', 'benchmark-reset', 'session-document', 'github-target', 'screenshot-geometry', 'wsl-state', 'wsl-launch', 'local-perf' } {
+                { $_ -in 'sensitive-log', 'benchmark-reset', 'session-document', 'github-target', 'screenshot-geometry', 'wsl-state', 'wsl-launch', 'local-perf', 'power-crash' } {
                     $passedChecks = @($parsed.results | Where-Object passed -EQ $true).Count
                     $contractPassed = $parsed.status -eq 'passed' -and $passedChecks -gt 0 -and
                         $passedChecks -eq @($parsed.results).Count -and $passedChecks -eq $parsed.cases

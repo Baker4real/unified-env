@@ -370,6 +370,8 @@
         "managed/host-diagnostics/Get-ConsoleLaunchAudit.ps1",
         "managed/host-diagnostics/Watch-ConsoleWindows.ps1",
         "managed/host-diagnostics/Get-WslState.ps1",
+        "managed/host-diagnostics/Get-LocalPerfSnapshot.ps1",
+        "managed/host-diagnostics/Get-PowerAndCrashSnapshot.ps1",
         "managed/host-diagnostics/Watch-WslLaunch.ps1",
         "managed/host-diagnostics/Protect-SensitiveLog.ps1",
         "managed/host-diagnostics/Request-KryptexBenchmarkReset.py",

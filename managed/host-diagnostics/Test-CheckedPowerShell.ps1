@@ -1,4 +1,4 @@
-﻿#requires -Version 7.4
+#requires -Version 7.4
 <#
 .SYNOPSIS
 Exercise Invoke-CheckedPowerShell through its public process interface.
@@ -784,6 +784,64 @@ Assert-Case 'preflight rejects Get-WinEvent on Diagnostic/Analytic logs without 
     foreach ($source in $validCases) {
         $ok = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
         if ($ok.exitCode -ne 0) { throw "Valid Get-WinEvent was rejected ($source): exit=$($ok.exitCode) stderr=$($ok.stderr)" }
+    }
+}
+
+Assert-Case 'preflight rejects Get-WinEvent FilterHashtable Id arrays over 22 entries' {
+    $invalidCases = @(
+        'Get-WinEvent -FilterHashtable @{ LogName = "System"; Id = @(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24) }; "WINEVENT-SECRET-SENTINEL"',
+        'Get-WinEvent -FilterHashtable @{ LogName = "System"; Id = 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23 }',
+        'Get-WinEvent -FilterHashtable @{ LogName = "System"; Id = (1..25) }',
+        '$powerIds = @(12,13,41,42,86,88,107,109,172,187,506,507,1001,1015,1074,1076,6005,6006,6008,6009,6013,46,161,162); Get-WinEvent -FilterHashtable @{ LogName = "System"; Id = $powerIds }'
+    )
+    foreach ($source in $invalidCases) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'parameter-error id=WinEventFilterIdLimitExceeded command=Get-WinEvent') {
+            throw "Oversized FilterHashtable Id was not rejected ($source): exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('WINEVENT-SECRET-SENTINEL')) {
+            throw 'Oversized FilterHashtable Id rejection exposed source.'
+        }
+    }
+    $validCases = @(
+        'Get-WinEvent -FilterHashtable @{ LogName = "System"; Id = 41 }',
+        'Get-WinEvent -FilterHashtable @{ LogName = "System"; Id = @(1..22) }',
+        '$powerIds = @(1..22); Get-WinEvent -FilterHashtable @{ LogName = "System"; Id = $powerIds }',
+        '$ids = @(1..30); $ids = @(1, 2, 3); Get-WinEvent -FilterHashtable @{ LogName = "System"; Id = $ids }'
+    )
+    foreach ($source in $validCases) {
+        $ok = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($ok.exitCode -ne 0) { throw "Valid FilterHashtable Id was rejected ($source): exit=$($ok.exitCode) stderr=$($ok.stderr)" }
+    }
+}
+
+Assert-Case 'TruncateValidatedJson validates full JSON before spilling and truncating stdout' {
+    $spill = Join-Path $fixture 'spill-validated-json'
+    $result = Invoke-PublicCli @(
+        '-CommandText', '[pscustomobject]@{ status = "ok"; data = ("z" * 5000) } | ConvertTo-Json -Compress',
+        '-RequiredJsonFields', 'status,data',
+        '-TruncateValidatedJson',
+        '-MaxOutputChars', '1000',
+        '-SpillDirectory', $spill
+    )
+    $note = [regex]::Match($result.stderr, 'CheckedPowerShell output-truncated stream=stdout shown=1000 total=(?<total>\d+) path=(?<path>.+?)\r?$', 'Multiline')
+    if ($result.exitCode -ne 0 -or -not $note.Success -or -not $result.stdout.Contains('[CheckedPowerShell output-truncated:')) {
+        throw "TruncateValidatedJson did not truncate valid oversized JSON: exit=$($result.exitCode) stderr=$($result.stderr)"
+    }
+    $spilledObj = [IO.File]::ReadAllText($note.Groups['path'].Value, $utf8) | ConvertFrom-Json -ErrorAction Stop
+    if ($spilledObj.status -cne 'ok' -or $spilledObj.data.Length -ne 5000) {
+        throw 'Spilled validated JSON did not retain full valid object.'
+    }
+    $badSpill = Join-Path $fixture 'spill-invalid-json'
+    $bad = Invoke-PublicCli @(
+        '-CommandText', '[pscustomobject]@{ other = ("z" * 5000) } | ConvertTo-Json -Compress',
+        '-RequiredJsonFields', 'status',
+        '-TruncateValidatedJson',
+        '-MaxOutputChars', '1000',
+        '-SpillDirectory', $badSpill
+    )
+    if ($bad.exitCode -ne 3 -or $bad.stdout -or (Test-Path -LiteralPath $badSpill)) {
+        throw "Failed JSON validation under -TruncateValidatedJson leaked stdout or created spill file: exit=$($bad.exitCode)"
     }
 }
 

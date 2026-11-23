@@ -111,6 +111,8 @@
     { "path": "Test-WslLaunch.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-WslLaunch.ps1" },
     { "path": "Get-LocalPerfSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-LocalPerfSnapshot.ps1" },
     { "path": "Test-LocalPerfSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-LocalPerfSnapshot.ps1" },
+    { "path": "Get-PowerAndCrashSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Get-PowerAndCrashSnapshot.ps1" },
+    { "path": "Test-PowerAndCrashSnapshot.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Test-PowerAndCrashSnapshot.ps1" },
     { "path": "codex_diagnostics.py", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/codex_diagnostics.py" },
     { "path": "Invoke-RemoteMagpiePortable.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/Invoke-RemoteMagpiePortable.ps1" },
     { "path": "lib/AntigravityProcessIdentity.ps1", "owner": "scripts/Deploy-HostDiagnostics.ps1", "source": "managed/host-diagnostics/lib/AntigravityProcessIdentity.ps1" },
