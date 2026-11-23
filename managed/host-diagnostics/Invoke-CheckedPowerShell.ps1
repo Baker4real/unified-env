@@ -479,6 +479,7 @@ $definedFunctions = @($ast.FindAll({ param($node) $node -is [System.Management.A
 $resolvedCmdlets = @{}
 $providerParameters = @{}
 $winEventSingleAssignVars = $null
+$hasLocalStartBoundaryAssign = $null
 function Unwrap-SimpleAst([System.Management.Automation.Language.Ast]$Node) {
     $cur = $Node
     while ($null -ne $cur) {
@@ -577,6 +578,69 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
         if ($element -is [System.Management.Automation.Language.VariableExpressionAst] -and $element.Splatted) { $splatted = $true; break }
     }
     if ($splatted) { continue }
+    # New-ScheduledTaskTrigger -Weekly serializes -At as UTC (...Z), shifting local 00:00-07:59 triggers across weekdays unless .StartBoundary is explicitly assigned without trailing Z.
+    if ($name -ieq 'New-ScheduledTaskTrigger') {
+        $elements = @($command.CommandElements)
+        $hasWeekly = $false
+        foreach ($el in $elements) {
+            if ($el -is [System.Management.Automation.Language.CommandParameterAst] -and
+                'Weekly'.StartsWith($el.ParameterName, [StringComparison]::OrdinalIgnoreCase)) {
+                $argText = if ($null -ne $el.Argument) { $el.Argument.Extent.Text.Trim() } else { '' }
+                if ($argText -ine '$false' -and $argText -ne '0') { $hasWeekly = $true }
+            }
+        }
+        if ($hasWeekly) {
+            if ($null -eq $hasLocalStartBoundaryAssign) {
+                $hasLocalStartBoundaryAssign = $false
+                foreach ($asg in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+                    $lhs = Unwrap-SimpleAst $asg.Left
+                    if ($lhs -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                        $lhs.Member -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                        $lhs.Member.Value -ieq 'StartBoundary') {
+                        $rhs = Unwrap-SimpleAst $asg.Right
+                        $isTrailingUtcZ =
+                            ($rhs -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $rhs.Value -imatch 'Z$') -or
+                            ($rhs -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -and $rhs.Value -imatch 'Z$')
+                        if (-not $isTrailingUtcZ) {
+                            $hasLocalStartBoundaryAssign = $true
+                            break
+                        }
+                    }
+                }
+            }
+            if (-not $hasLocalStartBoundaryAssign) {
+                [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=WeeklyTriggerUtcBoundaryShift command=New-ScheduledTaskTrigger line={0} column={1}; -Weekly serializes -At as UTC (...Z) and shifts local 00:00-07:59 triggers across weekdays; assign $trigger.StartBoundary = "yyyy-MM-ddTHH:mm:ss" without trailing Z' -f
+                    $command.Extent.StartLineNumber, $command.Extent.StartColumnNumber))
+                exit 2
+            }
+        }
+    }
+    # Get-ItemPropertyValue throws a terminating PSArgumentException on missing registry values even with -ErrorAction Ignore/SilentlyContinue.
+    if ($name -iin @('Get-ItemPropertyValue', 'gpv')) {
+        $elements = @($command.CommandElements)
+        for ($elIdx = 1; $elIdx -lt $elements.Count; $elIdx++) {
+            $el = $elements[$elIdx]
+            if ($el -is [System.Management.Automation.Language.CommandParameterAst] -and
+                ('ErrorAction'.StartsWith($el.ParameterName, [StringComparison]::OrdinalIgnoreCase) -or $el.ParameterName -ieq 'ea')) {
+                $valAst = if ($null -ne $el.Argument) { $el.Argument } elseif (($elIdx + 1) -lt $elements.Count) { $elIdx++; $elements[$elIdx] } else { $null }
+                $valCur = Unwrap-SimpleAst $valAst
+                $eaTokens = [Collections.Generic.List[string]]::new()
+                if ($valCur -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                    $eaTokens.Add($valCur.Value)
+                } elseif ($valCur -is [System.Management.Automation.Language.ConstantExpressionAst] -and $null -ne $valCur.Value) {
+                    $eaTokens.Add([string]$valCur.Value)
+                } elseif ($valCur -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                    $valCur.Member -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                    $eaTokens.Add($valCur.Member.Value)
+                }
+                if (@($eaTokens | Where-Object { $_ -imatch '^(?:Ignore|SilentlyContinue|0|4)$' }).Count -gt 0) {
+                    [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=GetItemPropertyValueIgnoresErrorAction command=Get-ItemPropertyValue line={0} column={1}; Get-ItemPropertyValue throws a terminating PSArgumentException on missing registry values even with -ErrorAction Ignore/SilentlyContinue; use (Get-ItemProperty -LiteralPath <key> -Name <name> -ErrorAction Ignore).PSObject.Properties["<name>"]?.Value' -f
+                        $command.Extent.StartLineNumber, $command.Extent.StartColumnNumber))
+                    exit 2
+                }
+            }
+        }
+    }
     # Analytic/Diagnostic event logs reject forward-reverse reads without -Oldest; FilterHashtable Id accepts <= 22 entries.
     if ($name -ieq 'Get-WinEvent') {
         if ($null -eq $winEventSingleAssignVars) {

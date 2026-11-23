@@ -845,6 +845,60 @@ Assert-Case 'TruncateValidatedJson validates full JSON before spilling and trunc
     }
 }
 
+Assert-Case 'preflight rejects New-ScheduledTaskTrigger -Weekly without local StartBoundary override' {
+    $invalidCases = @(
+        'New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At "02:00"; "WEEKLY-SECRET-SENTINEL"',
+        '$t = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At "02:00"; Register-ScheduledTask -TaskName "Demo" -Trigger $t',
+        '$t = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At "02:00"; $t.StartBoundary = "2026-11-28T18:00:00Z"'
+    )
+    foreach ($source in $invalidCases) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'parameter-error id=WeeklyTriggerUtcBoundaryShift command=New-ScheduledTaskTrigger') {
+            throw "Unoverridden New-ScheduledTaskTrigger -Weekly was not rejected ($source): exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('WEEKLY-SECRET-SENTINEL')) {
+            throw 'Weekly trigger rejection exposed source.'
+        }
+    }
+    $validCases = @(
+        '$t = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At "02:00"; $t.StartBoundary = "2026-11-28T02:00:00"',
+        '$boundary = "2026-11-28T02:00:00"; $t = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At "02:00"; $t.StartBoundary = $boundary',
+        'New-ScheduledTaskTrigger -Daily -At "02:00"',
+        'New-ScheduledTaskTrigger -AtLogOn'
+    )
+    foreach ($source in $validCases) {
+        $ok = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($ok.exitCode -ne 0) { throw "Valid ScheduledTaskTrigger was rejected ($source): exit=$($ok.exitCode) stderr=$($ok.stderr)" }
+    }
+}
+
+Assert-Case 'preflight rejects Get-ItemPropertyValue with -ErrorAction Ignore or SilentlyContinue' {
+    $invalidCases = @(
+        'Get-ItemPropertyValue -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -ErrorAction Ignore; "GIPV-SECRET-SENTINEL"',
+        'Get-ItemPropertyValue -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -ErrorAction SilentlyContinue',
+        'gpv -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -ea Ignore',
+        'Get-ItemPropertyValue -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -ErrorAction ([System.Management.Automation.ActionPreference]::Ignore)'
+    )
+    foreach ($source in $invalidCases) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'parameter-error id=GetItemPropertyValueIgnoresErrorAction command=Get-ItemPropertyValue') {
+            throw "Get-ItemPropertyValue with non-effective ErrorAction was not rejected ($source): exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('GIPV-SECRET-SENTINEL')) {
+            throw 'Get-ItemPropertyValue rejection exposed source.'
+        }
+    }
+    $validCases = @(
+        'Get-ItemPropertyValue -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "ProgramFilesDir"',
+        'Get-ItemPropertyValue -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "ProgramFilesDir" -ErrorAction Stop',
+        '(Get-ItemProperty -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -ErrorAction Ignore).PSObject.Properties["AutoAdminLogon"]?.Value'
+    )
+    foreach ($source in $validCases) {
+        $ok = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($ok.exitCode -ne 0) { throw "Valid registry property lookup was rejected ($source): exit=$($ok.exitCode) stderr=$($ok.stderr)" }
+    }
+}
+
 $failed = @($cases | Where-Object status -eq 'failed')
 $report = [ordered]@{
     status = if ($failed.Count) { 'failed' } else { 'passed' }
