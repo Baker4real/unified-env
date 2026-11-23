@@ -476,6 +476,78 @@ foreach ($targetVar in $autoVarTargets) {
 # reached, after earlier statements already ran. Only cmdlets of the modules that ship with pwsh are bound.
 $builtinModules = @('Microsoft.PowerShell.Core', 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security')
 $definedFunctions = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object Name)
+function Get-StaticSelectObjectProperties([System.Management.Automation.Language.CommandAst]$CmdAst) {
+    $elements = @($CmdAst.CommandElements)
+    if ($elements.Count -le 1) { return $null }
+    $props = [Collections.Generic.List[string]]::new()
+    $expectValueFor = $null
+    for ($idx = 1; $idx -lt $elements.Count; $idx++) {
+        $el = $elements[$idx]
+        if ($el -is [System.Management.Automation.Language.CommandParameterAst]) {
+            $pName = $el.ParameterName
+            if ($pName -imatch '^(?:Expand|ExpandProperty)$') { return $null }
+            if ($pName -imatch '^(?:Exclude|ExcludeProperty)$') { return $null }
+            if ($pName -imatch '^Prop(?:erty)?$') {
+                if ($null -ne $el.Argument) {
+                    $el = $el.Argument
+                    $expectValueFor = 'Property'
+                } else {
+                    $expectValueFor = 'PropertyNext'
+                    continue
+                }
+            } else {
+                if ($null -eq $el.Argument -and $pName -imatch '^(?:First|Last|Skip|SkipLast|Index|SkipIndex)$') {
+                    $expectValueFor = 'SkipArg'
+                } else {
+                    $expectValueFor = $null
+                }
+                continue
+            }
+        }
+        if ($expectValueFor -eq 'SkipArg') {
+            $expectValueFor = $null
+            continue
+        }
+        $isPropertyArg = ($null -eq $expectValueFor -or $expectValueFor -in @('Property', 'PropertyNext'))
+        if ($expectValueFor -in @('Property', 'PropertyNext')) { $expectValueFor = $null }
+        if (-not $isPropertyArg) { continue }
+        $items = if ($el -is [System.Management.Automation.Language.ArrayLiteralAst]) { @($el.Elements) } else { @($el) }
+        foreach ($item in $items) {
+            if ($item -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) { return $null }
+            $val = $item.Value
+            if ([string]::IsNullOrWhiteSpace($val) -or $val.IndexOfAny([char[]]@('*', '?')) -ge 0) { return $null }
+            $props.Add($val)
+        }
+    }
+    if ($props.Count -eq 0) { return $null }
+    return ,$props.ToArray()
+}
+if ($null -ne $ast.EndBlock) {
+    $firstSelectSet = $null
+    foreach ($topStmt in @($ast.EndBlock.Statements)) {
+        if ($topStmt -isnot [System.Management.Automation.Language.PipelineAst]) { continue }
+        $pipeEls = @($topStmt.PipelineElements)
+        if ($pipeEls.Count -eq 0) { continue }
+        $tailEl = $pipeEls[$pipeEls.Count - 1]
+        if ($tailEl -isnot [System.Management.Automation.Language.CommandAst] -or @($tailEl.Redirections).Count -gt 0) { continue }
+        $tailName = $tailEl.GetCommandName()
+        if (-not $tailName -or $definedFunctions -contains $tailName) { continue }
+        if ($tailName -notin @('Select-Object', 'select')) { continue }
+        $staticProps = Get-StaticSelectObjectProperties $tailEl
+        if ($null -eq $staticProps) { continue }
+        if ($null -eq $firstSelectSet) {
+            $firstSelectSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach ($p in $staticProps) { [void]$firstSelectSet.Add($p) }
+        } else {
+            $missingProps = @($staticProps | Where-Object { -not $firstSelectSet.Contains($_) })
+            if ($missingProps.Count -gt 0) {
+                [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=MixedSelectObjectFormatting command=Select-Object line={0} column={1}; multiple top-level Select-Object pipelines share one console formatter and silently drop properties missing from the first Select-Object ({2}); pipe each to Out-String/Format-List or combine into one [pscustomobject] | ConvertTo-Json' -f
+                    $tailEl.Extent.StartLineNumber, $tailEl.Extent.StartColumnNumber, ($missingProps -join ',')))
+                exit 2
+            }
+        }
+    }
+}
 $resolvedCmdlets = @{}
 $providerParameters = @{}
 $winEventSingleAssignVars = $null

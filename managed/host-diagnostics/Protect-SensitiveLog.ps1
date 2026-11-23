@@ -19,7 +19,12 @@ function Protect-SensitiveLogLine([string]$Line) {
     }
     # 疑似未知高熵秘密：sha256/diff/height 行常带长哈希，只有这一条规则对它们放行。
     if ($Line -match '(?i)\b(?:[A-Za-z0-9_-]{24,})\b' -and $Line -notmatch '(?i)sha256|diff|height') { return $null }
-    $Line
+    $ipv4Pattern = '(?<![0-9A-Za-z.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![0-9A-Za-z.])'
+    [regex]::Replace($Line, $ipv4Pattern, {
+        param($m)
+        if ($m.Value -in @('127.0.0.1', '0.0.0.0')) { return $m.Value }
+        return '<ip>'
+    })
 }
 $utf8 = [Text.UTF8Encoding]::new($false)
 $lines = @()
@@ -45,3 +50,4 @@ foreach ($line in $source) {
 $status = if ($dropped -gt 0) { 'read-with-omissions' } elseif ($truncated) { 'truncated' } else { 'passed' }
 [pscustomobject]@{ status = $status; lines = $lines; returnedRows = $lines.Count; droppedRows = $dropped; truncated = $truncated; utf8Bytes = $bytes } | ConvertTo-Json -Depth 4
 if ($dropped -gt 0) { exit 1 }
+exit 0

@@ -899,6 +899,33 @@ Assert-Case 'preflight rejects Get-ItemPropertyValue with -ErrorAction Ignore or
     }
 }
 
+Assert-Case 'preflight rejects mixed top-level Select-Object pipelines with disjoint columns' {
+    $invalidCases = @(
+        'Get-CimInstance Win32_Processor | Select-Object Name; Get-Process -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path; "SELECT-SECRET-SENTINEL"',
+        'Get-Date | select Year; Get-ChildItem | select Name,Length',
+        'Get-Process | Select-Object -Property Name; $x = 1; Get-Service | Select-Object -Property Status,DisplayName'
+    )
+    foreach ($source in $invalidCases) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'parameter-error id=MixedSelectObjectFormatting command=Select-Object') {
+            throw "Mixed top-level Select-Object was not rejected ($source): exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('SELECT-SECRET-SENTINEL')) {
+            throw 'Mixed Select-Object rejection exposed source.'
+        }
+    }
+    $validCases = @(
+        'Get-CimInstance Win32_Processor | Select-Object Name | Out-String; Get-Process | Select-Object Id,ProcessName | Out-String',
+        '$cpu = Get-CimInstance Win32_Processor | Select-Object Name; $procs = Get-Process | Select-Object Id,ProcessName; [pscustomobject]@{ cpu = $cpu; procs = $procs } | ConvertTo-Json',
+        'Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name; Get-Process | Select-Object Id,ProcessName',
+        'Get-Item a | Select-Object Name,Length; Get-Item b | Select-Object Name,Length'
+    )
+    foreach ($source in $validCases) {
+        $ok = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($ok.exitCode -ne 0) { throw "Valid Select-Object pipeline was rejected ($source): exit=$($ok.exitCode) stderr=$($ok.stderr)" }
+    }
+}
+
 $failed = @($cases | Where-Object status -eq 'failed')
 $report = [ordered]@{
     status = if ($failed.Count) { 'failed' } else { 'passed' }

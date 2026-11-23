@@ -31,6 +31,18 @@ $results += [pscustomobject]@{ case = 'exemption-limited-to-long-token-rule'; pa
 $results += [pscustomobject]@{ case = 'source-unchanged'; passed = ((Get-FileHash -LiteralPath $log -Algorithm SHA256).Hash -eq $before) }
 $limited = & $entry -LiteralPath $log -Tail 100 -MaxLines 1 -MaxBytes 256 | ConvertFrom-Json
 $results += [pscustomobject]@{ case = 'bounded-projection'; passed = ($limited.returnedRows -le 1 -and $limited.utf8Bytes -le 256 -and $limited.truncated) }
+$ipLog = Join-Path $root 'ip-input.txt'
+[IO.File]::WriteAllLines($ipLog, @(
+    ' * HTTP API     127.0.0.1:12000 build 10.0.22631.4317',
+    '[2026-11-23 10:46:27.810] net stratum+tcp://xmr-eu.kryptex.network:7029 198.51.100.42 connect error: "operation canceled"'
+), [Text.UTF8Encoding]::new($false))
+$ipProjected = & $entry -LiteralPath $ipLog -Tail 20 -MaxLines 10 -MaxBytes 2048 | ConvertFrom-Json
+$ipCode = $LASTEXITCODE
+$ipText = @($ipProjected.lines) -join "`n"
+$results += [pscustomobject]@{
+    case = 'ipv4-redacted-inline'
+    passed = ($ipCode -eq 0 -and $ipProjected.returnedRows -eq 2 -and -not $ipText.Contains('198.51.100.42') -and $ipText.Contains('<ip> connect error:') -and $ipText.Contains('127.0.0.1:12000') -and $ipText.Contains('10.0.22631.4317'))
+}
 [pscustomobject]@{ status = $(if (@($results | Where-Object { -not $_.passed }).Count -eq 0) { 'passed' } else { 'failed' }); cases = $results.Count; results = $results; evidenceDirectory = $root } | ConvertTo-Json -Depth 5
 if (@($results | Where-Object { -not $_.passed }).Count -gt 0) { exit 1 }
 exit 0
