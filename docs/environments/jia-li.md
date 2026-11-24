@@ -201,6 +201,13 @@ intent: 记录家里设备的受控环境事实与差异
 - 2026-09-27 21:42 回读：这两项是 Disabled。`asComSvc` 仍是 Disabled。`LightingService` 仍是 Running / Auto。不要为了消弹窗把 `asComSvc` 改回自动启动。
 - 禁用之后尚未重启，下次登录是否不再弹窗还没复核。回读：`D:\agents\run-evidence\aisuite-logon-popup-20260927\state.md`。
 
+## 存储盘健康、自动维护与缓存路径（2026-11-24）
+
+- `F:` 盘（`WD Blue SN580`）仍按故障硬件处理，`D:\agents\projects\misc\docs\handoffs\20261007T030716+0800-sn580-firmware-closeout.md` 的“已修复”结论作废；该盘与本机其他 PCIe 报错现状见 `D:\agents\run-evidence\sn580\` 下最新一次 `*-pcie-error-sweep` 的 `result.json`。
+- `E:` 盘（`WD_BLACK SN770 1TB`）于 2026-11-22 实测 `SMART FAILED!`（`Critical Warning: 0x04`，12 个 `Unrecovered Read Error` 与 `disk 7` / `ClassPnP 502/505`），按故障硬件处理，禁止向 `E:` 盘写入重要数据；完整证据见 `D:\agents\run-evidence\sn770-e-smart\20261122T002500+0800-smart-audit\summary.json`。
+- 每周六凌晨 02:00 自动重启计划任务 `\WeeklySaturdayReboot`（`SYSTEM/Highest` + `shutdown.exe /g` ARSO 自动登录锁屏恢复关灯与常驻项）：管理脚本在 `D:\agents\projects\misc\outputs\weekly-saturday-reboot-20261122\Manage-WeeklySaturdayReboot.ps1`，注册证据见 `D:\agents\run-evidence\weekly-saturday-reboot\20261122-register\evidence.json`。
+- Antigravity `context-viewer` 账本与用量归档由 `reconcile-addons.mjs` 重定向至 `D:\Codex\tools\antigravity-addons\state\context\`（不再写 `C:\Users\WINDOWS\.gemini\antigravity`）；五盘空间清理与腾讯视频（`QQLive`）下载缓存路径纠偏（`HKCU\Software\Tencent\QQLive\Download\path` 从故障 `F:` 盘改至 `D:\QLDownload\下载剧集快捷方式\`）证据见 `D:\agents\run-evidence\antigravity-addons\20261124-ledger-and-qqlive-closeout\summary.json`。
+
 ## 跨设备同步与验收
 
 1. 先同步本仓库的已提交默认分支，不复制调用端的 dirty worktree。

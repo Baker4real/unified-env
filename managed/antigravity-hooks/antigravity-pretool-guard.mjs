@@ -82,15 +82,24 @@ export function translatePayload(input) {
   return null
 }
 
-export function decide(input) {
+export function decide(input, io) {
   const translated = translatePayload(input)
   if (!translated) return { decision: 'allow' }
-  const reason = evaluate(translated)
+  const reason = io ? evaluate(translated, io) : evaluate(translated)
   if (reason) return { decision: 'deny', reason }
   return { decision: 'allow' }
 }
 
 function runSelfTest() {
+  const generatedMap = new Map([
+    ['c:\\users\\windows\\.gemini\\config\\agents.md', '<!-- AGENTS-SYNC:GENERATED v2 -->\n# Google Antigravity 全局规则\n'],
+    ['d:\\codex\\.codex\\agents.shared.md', '# 全局 Agent 默认规则\n']
+  ])
+  const stubIo = {
+    env: process.env,
+    read: p => generatedMap.get(String(p).replace(/\//g, '\\').toLowerCase()) ?? null,
+    parameterError: () => null
+  }
   const cases = [
     [
       'deny rg wildcard path',
@@ -123,6 +132,18 @@ function runSelfTest() {
       'deny'
     ],
     [
+      'deny edit_file into generated global AGENTS.md',
+      { toolCall: { name: 'edit_file', args: { Path: 'C:\\Users\\WINDOWS\\.gemini\\config\\AGENTS.md', Target: 'a', Replacement: 'b' } }, cwd: 'D:\\repo' },
+      'deny',
+      stubIo
+    ],
+    [
+      'allow edit_file on AGENTS.shared.md source',
+      { toolCall: { name: 'edit_file', args: { Path: 'D:\\Codex\\.codex\\AGENTS.shared.md', Target: 'a', Replacement: 'b' } }, cwd: 'D:\\repo' },
+      'allow',
+      stubIo
+    ],
+    [
       'allow edit_file in normal repo',
       { toolCall: { name: 'edit_file', args: { Path: 'D:\\agents\\projects\\home-network\\AGENTS.md', Target: 'a', Replacement: 'b' } }, cwd: 'D:\\repo' },
       'allow'
@@ -134,8 +155,8 @@ function runSelfTest() {
     ]
   ]
   let failed = 0
-  for (const [label, payload, expected] of cases) {
-    const out = decide(payload)
+  for (const [label, payload, expected, customIo] of cases) {
+    const out = decide(payload, customIo)
     const ok = out.decision === expected && (expected !== 'deny' || (typeof out.reason === 'string' && out.reason.length > 0))
     if (!ok) {
       failed++

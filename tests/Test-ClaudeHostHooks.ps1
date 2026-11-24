@@ -182,6 +182,21 @@ try {
     [IO.File]::WriteAllText($fixture, "`$p = 'D:\x\a.txt'`nSplit-Path -Path `$p -Parent`n", [Text.UTF8Encoding]::new($false))
     $result = Invoke-Guard $scriptCase
     Assert-Equal $result.stdout.Trim() '' '参数预检通过的脚本必须放行。'
+    # Rule 27：已有文件首行带 AGENTS-SYNC:GENERATED 时，Write/Edit 都必须拦截并指向 AGENTS.shared.md 与 Manual-Sync-AgentsMd.ps1；普通 AGENTS.md 放行。
+    $generatedAgents = Join-Path $fixtureDir 'AGENTS.md'
+    [IO.File]::WriteAllText($generatedAgents, "<!-- AGENTS-SYNC:GENERATED v2 -->`n# Host Rules`n", [Text.UTF8Encoding]::new($false))
+    foreach ($genTool in @('Edit', 'Write')) {
+        $genInput = if ($genTool -eq 'Edit') { @{ file_path = $generatedAgents; old_string = 'Host'; new_string = 'Changed' } } else { @{ file_path = $generatedAgents; content = '# Overwrite' } }
+        $genRes = Invoke-Guard (@{ tool_name = $genTool; tool_input = $genInput } | ConvertTo-Json -Compress)
+        Assert-Equal $genRes.exitCode 0 "生成物 $genTool deny 也必须 exit 0。"
+        $genDecision = ($genRes.stdout | ConvertFrom-Json).hookSpecificOutput
+        Assert-Equal $genDecision.permissionDecision 'deny' "带 AGENTS-SYNC:GENERATED 头的生成物 $genTool 必须拦截。"
+        Assert-True ($genDecision.permissionDecisionReason.Contains('AGENTS.shared.md') -and $genDecision.permissionDecisionReason.Contains('Manual-Sync-AgentsMd.ps1')) '生成物拦截理由必须指向 AGENTS.shared.md 与 Manual-Sync-AgentsMd.ps1。'
+    }
+    [IO.File]::WriteAllText($generatedAgents, "# Project Rules`n", [Text.UTF8Encoding]::new($false))
+    $plainRes = Invoke-Guard (@{ tool_name = 'Edit'; tool_input = @{ file_path = $generatedAgents; old_string = 'Project'; new_string = 'Repo' } } | ConvertTo-Json -Compress)
+    Assert-Equal $plainRes.stdout.Trim() '' '不带 AGENTS-SYNC:GENERATED 头的普通项目 AGENTS.md 必须放行。'
+    Remove-Item -LiteralPath $generatedAgents
 }
 finally {
     if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture }

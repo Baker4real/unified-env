@@ -84,6 +84,9 @@
 //      $PSUICulture, $EnabledExperimentalFeatures; case-insensitive) via direct assignment or foreach loop variable,
 //      inline, in referenced .ps1/.psm1 scripts, or in Write/Edit on a .ps1/.psm1. Drive-qualified vars ($env:HOME),
 //      member access ($obj.pid = 1), hashtable keys (@{ pid = 1 }), $null discard, strings and comments pass.
+//  27. Write and Edit tool calls whose existing target file starts with `<!-- AGENTS-SYNC:GENERATED`: editing a
+//      generated host loading file causes Target drift (exit 3) on the next sync. Changes go to AGENTS.shared.md or
+//      AGENTS.<host>.md, followed by Manual-Sync-AgentsMd.ps1 -Mode Apply.
 // The Stop hook file is imported for rules 23 and 24 after stdin is read; if it fails to load or lacks the exports,
 // those two allow and the rest still run.
 // Each rule's scope, workarounds and live checks are documented in
@@ -1267,6 +1270,22 @@ function skillsRootWriteReason(tool, payload) {
     '请先在候选目录里改好，再用受管入口安装。'
 }
 
+// Rule 27. Generated global AGENTS.md / CLAUDE.md loading files must be updated through AGENTS.shared.md / AGENTS.<host>.md + sync.
+const AGENTS_SYNC_HEADER = '<!-- AGENTS-SYNC:GENERATED'
+
+function agentsSyncGeneratedWriteReason(tool, payload, io) {
+  const filePath = String(payload?.tool_input?.file_path || '')
+  if (!filePath) return null
+  const absolute = win32.resolve(String(payload?.cwd || ''), filePath)
+  let resolved = absolute
+  try { resolved = realpathSync(absolute) } catch {}
+  const existing = io.read(resolved) ?? (resolved !== absolute ? io.read(absolute) : null)
+  if (!existing || !existing.replace(/^\uFEFF/, '').startsWith(AGENTS_SYNC_HEADER)) return null
+  return `${tool} 要直接改全局规则同步器的生成物（${absolute}，首行含 ${AGENTS_SYNC_HEADER}）：直接编辑加载文件会让下次同步报 Target drift（退出码 3）。` +
+    '共同规则请改 D:\\Codex\\.codex\\AGENTS.shared.md，宿主差异请改同目录对应的 AGENTS.<host>.md 或 agents-sync\\config.json，' +
+    "改完运行 & 'D:/Codex/.codex/scripts/Manual-Sync-AgentsMd.ps1' -Mode Apply（说明见 D:\\Codex\\.codex\\docs\\agent-guidance\\agents-md-sync.md）。"
+}
+
 // Rule 15. The Grep and Glob tools stop ripgrep after 20 seconds and then report a timeout or "No files found", so a
 // walk of D:\agents\projects (every project's node_modules, .venv and build output) fails as the rule 12 roots do.
 // PowerShell rg has no such limit, which is why rule 12 lets it walk D:\agents\projects. The search root is
@@ -1854,9 +1873,12 @@ function deny(reason) {
 export function evaluate(payload, io = defaultIo) {
   const tool = String(payload?.tool_name || '')
   if (tool === 'Grep' || tool === 'Glob') return searchToolReason(tool, payload)
-  // Rule 18: direct writes to the active skills root must go through the guarded install entry; rules 20 and 26 for scripts.
+  // Rules 18 and 27: direct writes to the active skills root or generated AGENTS.md/CLAUDE.md files; rules 20 and 26 for scripts.
   if (tool === 'Write' || tool === 'Edit') {
-    return skillsRootWriteReason(tool, payload) || strictCountWriteReason(tool, payload, io) || readOnlyAutoVarWriteReason(tool, payload, io)
+    return skillsRootWriteReason(tool, payload) ||
+      agentsSyncGeneratedWriteReason(tool, payload, io) ||
+      strictCountWriteReason(tool, payload, io) ||
+      readOnlyAutoVarWriteReason(tool, payload, io)
   }
   if (tool === HAND_OFF_TOOL) return handoffReason(payload?.tool_input)
   const command = String(payload?.tool_input?.command || '')
@@ -2259,6 +2281,11 @@ if (process.argv.includes('--self-test')) {
     ['Edit', { file_path: 'skills\\retro\\SKILL.md', cwd: 'D:\\agents\\skills-manager' }, true],
     ['Write', { file_path: 'D:\\agents\\skills-manager\\skills-backup\\SKILL.md' }, false],
     ['Edit', { file_path: 'D:\\agents\\run-evidence\\outside.md' }, false],
+    // Rule 27: generated global AGENTS.md / CLAUDE.md files must go through AGENTS.shared.md / AGENTS.<host>.md + sync.
+    ['Edit', { file_path: 'D:\\Codex\\.codex\\AGENTS.md', old_string: 'a', new_string: 'b' }, true],
+    ['Write', { file_path: 'C:\\Users\\WINDOWS\\.gemini\\config\\AGENTS.md', content: '# manual overwrite' }, true],
+    ['Edit', { file_path: 'D:\\Codex\\.codex\\AGENTS.shared.md', old_string: 'a', new_string: 'b' }, false],
+    ['Edit', { file_path: 'D:\\repo\\AGENTS.md', old_string: 'a', new_string: 'b' }, false],
     // Rule 20: under strict mode a variable takes command output directly, then its .Count is read; inline, in a
     // script the command runs (stubbed below), or in the .ps1 a Write or Edit would leave behind.
     ['PowerShell', "pwsh -NoProfile -File 'D:\\repo\\tools\\install-dsh.ps1' -CheckOnly", true],
@@ -2439,6 +2466,10 @@ if (process.argv.includes('--self-test')) {
     'D:\\repo\\tools\\no-strict.ps1': "$ErrorActionPreference = 'Stop'\n$files = Get-ChildItem -LiteralPath $PSScriptRoot\nWrite-Output $files.Count",
     'D:\\repo\\tools\\existing-trap.ps1': "Set-StrictMode -Version Latest\nWrite-Output 'start'\n$files = Get-ChildItem $root\nWrite-Output $files.Count",
     'D:\\repo\\tools\\existing-clean.ps1': 'Set-StrictMode -Version Latest\n$files = @(Get-ChildItem $root)\nWrite-Output $files.Count',
+    'D:\\Codex\\.codex\\AGENTS.md': '<!-- AGENTS-SYNC:GENERATED v2 -->\n# Codex 全局规则\n',
+    'C:\\Users\\WINDOWS\\.gemini\\config\\AGENTS.md': '\uFEFF<!-- AGENTS-SYNC:GENERATED v2 -->\n# Google Antigravity 全局规则\n',
+    'D:\\Codex\\.codex\\AGENTS.shared.md': '# 全局 Agent 默认规则\n',
+    'D:\\repo\\AGENTS.md': '# 项目规则\n',
     // Rule 21: the 2026-11-15 cleanup script's call, and a module with the same call.
     'D:\\repo\\tools\\split-parent.ps1': '$link = Get-Item -LiteralPath $PSScriptRoot\nSplit-Path -LiteralPath $link.FullName -Parent',
     'D:\\repo\\tools\\split-parent.psm1': 'function Get-Parent($p) { Split-Path -LiteralPath $p -Parent }',
@@ -2484,6 +2515,8 @@ if (process.argv.includes('--self-test')) {
     [reason('PowerShell', "rg -a x 'D:\\x\\app.asar'").includes('asar_extract.py grep <asar> <正则>'), 'the asar reason names asar_extract.py grep'],
     [(evaluate({ tool_name: 'Write', tool_input: { file_path: 'D:\\agents\\skills-manager\\skills\\retro\\SKILL.md' }, cwd: 'D:\\repo' }, io) || '').includes('D:\\Codex\\.codex\\scripts\\install-skill-guarded.ps1'),
       'the skills-root write reason names install-skill-guarded.ps1'],
+    [(evaluate({ tool_name: 'Edit', tool_input: { file_path: 'D:\\Codex\\.codex\\AGENTS.md', old_string: 'a', new_string: 'b' }, cwd: 'D:\\repo' }, io) || '').includes('Manual-Sync-AgentsMd.ps1'),
+      'Rule 27 generated AGENTS.md edit reason names Manual-Sync-AgentsMd.ps1'],
     // Rule 26: writes to AllScope read-only/constant automatic variables
     [reason('PowerShell', '$pId = [int]$Matches[1]').includes('$PID'), 'Rule 26 denies $pId assignment inline'],
     [reason('PowerShell', '[int]$pid = 42').includes('$PID'), 'Rule 26 denies typed $pid assignment'],

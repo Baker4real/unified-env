@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param()
 
 Set-StrictMode -Version Latest
@@ -109,5 +109,21 @@ foreach ($case in $allowCases) {
 $malformed = Invoke-AntigravityGuard '{not-json' -ViaCmd
 Assert-Equal $malformed.exitCode 0 '畸形 JSON 必须 fail-open 并 exit 0'
 Assert-Equal (($malformed.stdout | ConvertFrom-Json).decision) 'allow' '畸形 JSON 必须返回 allow'
+
+# 验证带 AGENTS-SYNC:GENERATED 头的全局规则生成物经 edit_file / write_file 被拦截，普通文件放行。
+$tempGenDir = Join-Path ([IO.Path]::GetTempPath()) ('agy-guard-gen-' + [guid]::NewGuid().ToString('N'))
+$tempGenFile = Join-Path $tempGenDir 'AGENTS.md'
+[void][IO.Directory]::CreateDirectory($tempGenDir)
+try {
+    [IO.File]::WriteAllText($tempGenFile, "<!-- AGENTS-SYNC:GENERATED v2 -->`n# Antigravity Rules`n", [Text.UTF8Encoding]::new($false))
+    $genEdit = Invoke-AntigravityGuard (@{ toolCall = @{ name = 'edit_file'; args = @{ Path = $tempGenFile; Target = 'Antigravity'; Replacement = 'Edited' } }; cwd = $tempGenDir } | ConvertTo-Json -Depth 6 -Compress) -ViaCmd
+    Assert-Equal $genEdit.exitCode 0 '生成物 edit_file deny 必须 exit 0'
+    $genOut = $genEdit.stdout | ConvertFrom-Json
+    Assert-Equal $genOut.decision 'deny' '带 AGENTS-SYNC:GENERATED 头的 edit_file 必须被拦截'
+    Assert-True ($genOut.reason.Contains('Manual-Sync-AgentsMd.ps1')) '拒绝原因必须指向 Manual-Sync-AgentsMd.ps1'
+} finally {
+    if (Test-Path -LiteralPath $tempGenFile) { Remove-Item -LiteralPath $tempGenFile }
+    if (Test-Path -LiteralPath $tempGenDir) { [IO.Directory]::Delete($tempGenDir) }
+}
 
 Write-Output 'Test-AntigravityHostHooks passed.'
