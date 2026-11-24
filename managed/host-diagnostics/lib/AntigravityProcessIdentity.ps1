@@ -58,7 +58,9 @@ namespace HostDiagnostics {
         }
 
         private delegate bool WindowCallback(IntPtr window, IntPtr state);
-        [DllImport("user32.dll", ExactSpelling = true)]
+        [DllImport("kernel32.dll", ExactSpelling = true)]
+        private static extern void SetLastError(uint error);
+        [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
         private static extern bool EnumWindows(WindowCallback callback, IntPtr state);
         [DllImport("user32.dll", ExactSpelling = true)]
         private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -92,11 +94,13 @@ namespace HostDiagnostics {
 
         public static AntigravityDesktopFrame[] Find(uint processId) {
             var frames = new List<AntigravityDesktopFrame>();
+            SetLastError(0);
             if (!EnumWindows((window, state) => {
                 uint thread = GetDesktopFrameThread(window, processId);
                 if (thread != 0) frames.Add(new AntigravityDesktopFrame(window, thread));
                 return true;
-            }, IntPtr.Zero)) throw new InvalidOperationException("antigravity-window-enumeration-failed");
+            }, IntPtr.Zero) && Marshal.GetLastWin32Error() != 0)
+                throw new InvalidOperationException("antigravity-window-enumeration-failed");
             return frames.ToArray();
         }
 

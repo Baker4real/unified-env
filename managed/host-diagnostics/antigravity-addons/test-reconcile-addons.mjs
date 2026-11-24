@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  applyUpdaterLayer,
   applyWslLayer,
   detectAddonMarkers,
   detectHubLoadAnchor,
@@ -17,6 +18,8 @@ import {
   patchContextLocalApi,
   patchContextMeterCollector,
   patchContextMeterRenderer,
+  patchContextMeterStorage,
+  patchContextModulesConfig,
   unpackAsar,
   walkAsar,
 } from './reconcile-addons.mjs';
@@ -30,8 +33,8 @@ const EXPECTED_OFFICIAL_SHA = '8934adef0622c9271c92eea950a71848764a66f7b10023ccb
 const EXPECTED_LS_SHA = 'cc94d648c39a67c293d0fdc8befc51e953d1a8f55617bf49fff69885ba475db9';
 const LAUNCHER_TEST = path.join(SCRIPT_DIR, '../antigravity/Test-AntigravityLauncher.ps1');
 const VENDOR_ROOT = 'D:/Codex/tools/antigravity-addons';
-const ALL_LAYERS = ['contextViewer', 'language', 'pulse', 'wsl'];
-const ALL_MARKERS = ['context-viewer-preload', 'context-viewer-utils', 'desktop-zhcn', 'pulse', 'wsl'];
+const ALL_LAYERS = ['contextViewer', 'language', 'pulse', 'updater', 'wsl'];
+const ALL_MARKERS = ['context-viewer-preload', 'context-viewer-utils', 'desktop-zhcn', 'pulse', 'updater-relaunch', 'wsl'];
 
 function sha256(buf) {
   return createHash('sha256').update(buf).digest('hex');
@@ -247,6 +250,89 @@ async function verifyPatchedContextDistBehavior(distDir, tmpRoot) {
   const rendererSrc = await fsp.readFile(path.join(distDir, 'meter-renderer.js'), 'utf8');
   const fallbackHits = rendererSrc.match(/agy_session_csrf_token/g) || [];
   assert.ok(fallbackHits.length >= 2, `expected >= 2 agy_session_csrf_token fallbacks, got ${fallbackHits.length}`);
+
+  // 7. Production default state-dir redirection (no override seam) + bounded corrupt quarantine + bounded ELV-89 backup
+  const asarEnginePath = path.join(distDir, 'asar-engine.js');
+  const storagePath = path.join(distDir, 'meter-storage.js');
+  delete cjsRequire.cache[cjsRequire.resolve(asarEnginePath)];
+  delete cjsRequire.cache[cjsRequire.resolve(storagePath)];
+  delete cjsRequire.cache[cjsRequire.resolve(collectorPath)];
+  const asarEngine = cjsRequire(asarEnginePath);
+  const patchedCollector = cjsRequire(collectorPath);
+
+  const prevAgDirEnv = process.env.AG_DIR;
+  delete process.env.AG_DIR;
+  try {
+    const expectedStateDir = asarEngine.getStateDir();
+    assert.ok(!expectedStateDir.toLowerCase().includes('.gemini'), `expected D-drive/fixture stateDir, got ${expectedStateDir}`);
+    const defaultLedgerPath = path.join(expectedStateDir, 'pricing_ledger_v1.json');
+
+    // Corrupt all-zero ledger + corrupt .bak.json polled repeatedly produces at most 1 .corrupt.bak.json and 0 timestamped copies
+    await fsp.mkdir(expectedStateDir, { recursive: true });
+    await fsp.writeFile(defaultLedgerPath, Buffer.alloc(4096, 0));
+    await fsp.writeFile(path.join(expectedStateDir, 'pricing_ledger_v1.bak.json'), Buffer.alloc(4096, 0));
+    for (let i = 0; i < 15; i++) {
+      const guarded = patchedCollector.loadPricingLedger();
+      assert.equal(guarded.__corrupted, true);
+      assert.equal(guarded.__unreadable, true);
+    }
+    const afterCorruptFiles = await fsp.readdir(expectedStateDir);
+    const corruptCopies = afterCorruptFiles.filter((n) => n.includes('.corrupt'));
+    assert.deepEqual(corruptCopies, ['pricing_ledger_v1.corrupt.bak.json']);
+
+    // Replace with valid ledger containing keepalive_bound + explicit email + recent live_confirmed_account records
+    await fsp.rm(path.join(expectedStateDir, 'pricing_ledger_v1.bak.json'), { force: true });
+    const nowMs = Date.now();
+    const validLedger = {
+      version: '1.0.0',
+      updatedAt: new Date(nowMs).toISOString(),
+      calls: {
+        call_keepalive: {
+          timestamp: nowMs - 600000,
+          isKeepalive: true,
+          accountScopeKey: 'acct_0123456789abcdef',
+          accountAttributionConfidence: 'keepalive_bound',
+        },
+        call_email: {
+          timestamp: nowMs - 600000,
+          accountEmail: 'fixture@example.invalid',
+          accountScopeKey: 'acct_fedcba9876543210',
+          accountAttributionConfidence: 'explicit_account_email',
+        },
+        call_recent_live: {
+          timestamp: nowMs - 5000,
+          liveObservedAtMs: nowMs - 5000,
+          accountScopeKey: 'acct_0123456789abcdef',
+          accountAttributionConfidence: 'live_confirmed_account',
+        },
+      },
+    };
+    await fsp.writeFile(defaultLedgerPath, JSON.stringify(validLedger, null, 2) + '\n', 'utf8');
+
+    // First repair persists attributionRepairVersion on keepalive & email calls and writes 1 bounded .bak-pre-elv89.json
+    const rep1 = patchedCollector.repairAndMigrateAccountLedger();
+    assert.equal(rep1.ok, true);
+    assert.ok(rep1.updatedCount >= 2, `expected updatedCount >= 2, got ${rep1.updatedCount}`);
+    assert.equal(rep1.backupPath, `${defaultLedgerPath}.bak-pre-elv89.json`);
+    const bakStat1 = await fsp.stat(rep1.backupPath);
+
+    // Subsequent zero-change repair (even while recent live call has no attributionRepairVersion) writes ZERO new backups
+    const rep2 = patchedCollector.repairAndMigrateAccountLedger();
+    assert.equal(rep2.ok, true);
+    assert.equal(rep2.updatedCount, 0);
+    assert.equal(rep2.backupPath, null);
+    const bakStat2 = await fsp.stat(`${defaultLedgerPath}.bak-pre-elv89.json`);
+    assert.equal(bakStat2.mtimeMs, bakStat1.mtimeMs, 'Zero-change repair unexpectedly rewrote backup');
+
+    // Forced repair still reuses the single bounded backup file without timestamp proliferation
+    const rep3 = patchedCollector.repairAndMigrateAccountLedger({ force: true });
+    assert.equal(rep3.ok, true);
+    const elvBaks = (await fsp.readdir(expectedStateDir)).filter((n) => n.includes('bak-pre-elv89'));
+    assert.deepEqual(elvBaks, ['pricing_ledger_v1.json.bak-pre-elv89.json']);
+  } finally {
+    if (prevAgDirEnv === undefined) delete process.env.AG_DIR;
+    else process.env.AG_DIR = prevAgDirEnv;
+  }
 }
 
 async function createTestRoot(mode) {
@@ -296,7 +382,7 @@ async function runUnitTests() {
     );
     console.log('UNIT PASS 1: packAsarWithOverlay replacement, addition, and untouched readback');
 
-    // Unit 2: detectAddonMarkers detects all 5 markers (including escaped Lxss path) and empty on clean ASAR
+    // Unit 2: detectAddonMarkers detects all 6 markers (including escaped Lxss path & updater relaunch) and empty on clean ASAR
     const cleanUnpacked = unpackAsar(baseAsar);
     assert.deepEqual(detectAddonMarkers(walkAsar(cleanUnpacked.header), cleanUnpacked.body), []);
 
@@ -304,14 +390,15 @@ async function runUnitTests() {
       'dist/customScheme.js': "callback({ redirectURL: 'agy-zhcn://bundle/main.js' });",
       'dist/preload.js': '// AGY_CONTEXT_CAPSULE_START\n// Antigravity Context Meter preload Injection Start\n',
       'dist/utils.js': '// Antigravity Context Meter utils Injection Start\n',
+      'dist/updater.js': 'electron_1.app.__zhcnUpdaterRelaunchHandedOff = true;\n',
       'dist/wsl.js': "const key = 'HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Lxss';\n",
     });
     const patchedUnpacked = unpackAsar(patchedAsar);
     assert.deepEqual(
       detectAddonMarkers(walkAsar(patchedUnpacked.header), patchedUnpacked.body).sort(),
-      ['context-viewer-preload', 'context-viewer-utils', 'desktop-zhcn', 'pulse', 'wsl'],
+      ['context-viewer-preload', 'context-viewer-utils', 'desktop-zhcn', 'pulse', 'updater-relaunch', 'wsl'],
     );
-    console.log('UNIT PASS 2: detectAddonMarkers detects all 5 markers accurately');
+    console.log('UNIT PASS 2: detectAddonMarkers detects all 6 markers accurately');
 
     // Unit 3: detectHubLoadAnchor handles 2.34.0, legacy, future signature, and refuses absent/ambiguous
     assert.equal(
@@ -380,6 +467,8 @@ async function runUnitTests() {
     assert.throws(() => patchContextLocalApi('module.exports = {};'), /Anchor local-api:/);
     assert.throws(() => patchContextMeterCollector('module.exports = {};'), /Anchor meter-collector:/);
     assert.throws(() => patchContextMeterRenderer('console.log(1);'), /Anchor meter-renderer:/);
+    assert.throws(() => patchContextMeterStorage('module.exports = {};'), /Anchor meter-storage:/);
+    assert.throws(() => patchContextModulesConfig('module.exports = {};'), /Anchor modules-config:/);
 
     const syntheticLocalApi = `'use strict';
 const fs = require('fs');
@@ -550,6 +639,77 @@ module.exports = {
     assert.equal((patchedRenderer.match(/agy_session_csrf_token/g) || []).length, 2);
     console.log('UNIT PASS 6: 2.34+ context-viewer CSRF patchers & authBootstrap/daemon_hub behavior');
 
+    // Unit 7: applyUpdaterLayer behavioral fixture and anchor degradation
+    const syntheticUpdaterJs = [
+      '"use strict";',
+      'var __importStar = (m) => m;',
+      'const electron_updater_1 = require("electron-updater");',
+      'const electron_1 = require("electron");',
+      'const child_process_1 = require("child_process");',
+      'let installingUpdate = false;',
+      'async function quitAndInstall(isSilent = false) {',
+      '    if (!electron_1.app.isPackaged) return;',
+      '    if (installingUpdate) return;',
+      '    const updater = electron_updater_1.autoUpdater;',
+      "    if (process.platform === 'win32' && updater.installerPath) {",
+      '        installingUpdate = true;',
+      '        let launched = false;',
+      '        try {',
+      "            const { killLanguageServer } = await Promise.resolve().then(() => __importStar(require('./languageServer')));",
+      '            await killLanguageServer();',
+      '            electron_updater_1.autoUpdater.quitAndInstall(isSilent, true);',
+      '            launched = Boolean(updater.quitAndInstallCalled);',
+      '        }',
+      '        finally {',
+      '            if (!launched) installingUpdate = false;',
+      '        }',
+      '        return;',
+      '    }',
+      '    electron_updater_1.autoUpdater.quitAndInstall(isSilent, true);',
+      '}',
+      'exports.quitAndInstall = quitAndInstall;',
+    ].join('\n');
+    const updRes = applyUpdaterLayer(
+      syntheticUpdaterJs,
+      'D:/fixture/state/post-quit-hook.json',
+      'D:/fixture/backup/LaunchAntigravity.exe',
+      tmpRoot,
+    );
+    assert.equal(updRes.status, 'ready');
+    await updRes.verifyAsync();
+    const updSkipped = applyUpdaterLayer('exports.quitAndInstall = async () => {};', 'D:/h.json', 'D:/l.exe', tmpRoot);
+    assert.equal(updSkipped.status, 'skipped');
+    console.log('UNIT PASS 7: applyUpdaterLayer behavioral fixture and anchor degradation');
+
+    // Unit 8: stale pending-apply.json from an older reconcilerSha256 invalidates pending-ready and rebuilds cleanly
+    const fStale = await setupFixture(tmpRoot, 'unit8-stale-pending', false);
+    const staleBaseAsar = buildSyntheticAsar({
+      'package.json': JSON.stringify({ name: 'antigravity', version: '2.99.1' }),
+      'dist/wsl.js': syntheticWslJs,
+    });
+    await fsp.writeFile(fStale.asarPath, staleBaseAsar);
+    await fsp.writeFile(fStale.lsPath, 'synthetic ls for unit8');
+    const stagedUnit8 = runCli(['reconcile', '--stage-only', ...fStale.commonArgs]);
+    assert.equal(stagedUnit8.status, 'staged-pending');
+    assert.equal(stagedUnit8.reconcilerSha256, sha256File(RECONCILER));
+    assert.equal(runCli(['status', ...fStale.commonArgs]).status, 'pending-ready');
+
+    const pendingJsonPath = path.join(fStale.stateRoot, 'pending-apply.json');
+    const pendingAsarPath = path.join(fStale.stateRoot, 'pending-app.asar');
+    const staleMeta = JSON.parse(await fsp.readFile(pendingJsonPath, 'utf8'));
+    staleMeta.reconcilerSha256 = '0'.repeat(64);
+    await fsp.writeFile(pendingJsonPath, JSON.stringify(staleMeta, null, 2) + '\n', 'utf8');
+    await fsp.writeFile(pendingAsarPath, Buffer.from('stale-corrupt-pending-asar', 'utf8'));
+    assert.equal(runCli(['status', ...fStale.commonArgs]).status, 'needs-reconcile');
+
+    const rebuiltUnit8 = runCli(['reconcile', '--apply', ...fStale.commonArgs]);
+    assert.equal(rebuiltUnit8.status, 'applied');
+    assert.equal(sha256File(fStale.asarPath), stagedUnit8.combinedSha256);
+    assert.ok(!fs.existsSync(pendingAsarPath));
+    assert.ok(!fs.existsSync(pendingJsonPath));
+    assert.equal(runCli(['status', ...fStale.commonArgs]).status, 'up-to-date');
+    console.log('UNIT PASS 8: reconcilerSha256 mismatch invalidates stale pending-app.asar and rebuilds cleanly');
+
     if (process.platform === 'win32') {
       const fixture = await setupFixture(tmpRoot, 'synthetic-upgrade', false);
       const oldVersion = '2.98.0';
@@ -575,7 +735,7 @@ module.exports = {
       await verifyReparseRefusal(tmpRoot, fixture);
       console.log('FIXTURE PASS: synthetic cross-version overwrite, real launcher probe, promotion, backups and reparse refusal');
     }
-    console.log('ALL 6 UNIT TESTS PASSED');
+    console.log('ALL 8 UNIT TESTS PASSED');
   } finally {
     await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
   }
@@ -757,7 +917,7 @@ async function runE2eTests() {
     assert.equal(r1.status, 'applied');
     assert.deepEqual([...r1.appliedLayers].sort(), ALL_LAYERS);
     assert.equal(r1.skippedLayers.length, 0);
-    assert.equal(r1.unchangedPackedMembers, 785, 'Expected exact unchanged packed members count for 2.34.0');
+    assert.equal(r1.unchangedPackedMembers, 784, 'Expected exact unchanged packed members count for 2.34.0');
 
     const backupFile = path.join(f1.backupDir, 'app.asar.2.34.0.original');
     assert.equal(sha256File(backupFile), EXPECTED_OFFICIAL_SHA, 'Immutable backup SHA mismatch');
@@ -778,7 +938,10 @@ async function runE2eTests() {
 
     const customSchemeSrc = unpackAsarMember(fs.readFileSync(patchedAsarPath), 'dist/customScheme.js').toString('utf8');
     assert.ok(customSchemeSrc.includes('post-quit-hook.json'), 'Hook path not redirected to D: stateRoot');
+    assert.ok(customSchemeSrc.includes('__zhcnUpdaterRelaunchHandedOff'), 'will-quit duplicate guard missing');
     assert.ok(!customSchemeSrc.includes('agy_zhcn_autofollow_hook.json'), 'Old userData hook path still present');
+    const updaterSrc = unpackAsarMember(fs.readFileSync(patchedAsarPath), 'dist/updater.js').toString('utf8');
+    assert.ok(updaterSrc.includes('__zhcnUpdaterRelaunchHandedOff'), 'Updater relaunch hand-off missing');
     assert.ok(!fs.existsSync(path.join(r1.stageDir, '.work')), '.work staging dir was not cleaned up');
     assert.ok(fs.existsSync(path.join(r1.stageDir, 'result.json')), 'Audit receipt missing');
 
@@ -859,7 +1022,7 @@ async function runE2eTests() {
 
     const r6 = cli(['reconcile', '--apply', ...f3.commonArgs]);
     assert.equal(r6.status, 'applied');
-    assert.deepEqual([...r6.appliedLayers].sort(), ['language', 'pulse', 'wsl']);
+    assert.deepEqual([...r6.appliedLayers].sort(), ['language', 'pulse', 'updater', 'wsl']);
     assert.equal(r6.skippedLayers.length, 1);
     assert.equal(r6.skippedLayers[0].layer, 'contextViewer');
     console.log('E2E PASS 6: fail-closed per-layer degradation');

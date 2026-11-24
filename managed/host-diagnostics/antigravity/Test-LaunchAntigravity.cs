@@ -242,6 +242,28 @@ internal static class TestLauncher
             if (!File.Exists(receiptPath))
                 throw new InvalidOperationException("production RunHiddenReconciler did not execute the target script.");
             Expect(File.ReadAllText(receiptPath, Encoding.UTF8).Trim(), "Apply|True", "production RunHiddenReconciler passes -Mode Apply -Quiet");
+
+            // 8. ResolvePwshPath picks highest versioned PowerShell directory when preferred version is retired
+            var pwshTree = Path.Combine(tmpRoot, "pwsh-versions");
+            var v769 = Path.Combine(pwshTree, "7.6.9");
+            var v770 = Path.Combine(pwshTree, "7.7.0");
+            var v782 = Path.Combine(pwshTree, "7.8.2");
+            Directory.CreateDirectory(v769);
+            Directory.CreateDirectory(v770);
+            Directory.CreateDirectory(v782);
+            File.WriteAllText(Path.Combine(v769, "pwsh.exe"), "stub", Encoding.UTF8);
+            File.WriteAllText(Path.Combine(v770, "pwsh.exe"), "stub", Encoding.UTF8);
+            var expectedNewest = Path.Combine(v782, "pwsh.exe");
+            File.WriteAllText(expectedNewest, "stub", Encoding.UTF8);
+            var missingPreferred = Path.Combine(pwshTree, "7.5.0", "pwsh.exe");
+            Expect(
+                LaunchAntigravity.ResolvePwshPath(missingPreferred, pwshTree, null),
+                expectedNewest,
+                "ResolvePwshPath selects highest versioned pwsh.exe");
+            Expect(
+                LaunchAntigravity.ResolvePwshPath(null, pwshTree, expectedNewest),
+                null,
+                "ResolvePwshPath preserves null pwshPath");
         }
         finally
         {

@@ -14,6 +14,8 @@ internal static class LaunchAntigravity
     private const string AddonsStateDir = @"D:\Codex\tools\antigravity-addons\state";
     private const string AddonsSyncScript = @"D:\Codex\tools\antigravity-addons\Sync-AntigravityAddons.ps1";
     private const string PwshPath = @"D:\Codex\tools\PowerShell\7.7.0\pwsh.exe";
+    private const string PwshToolsRoot = @"D:\Codex\tools\PowerShell";
+    private const string PwshJunctionFallback = @"C:\Program Files\PowerShell\7\pwsh.exe";
     private const string InternetSettings = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
     internal enum ReconcileOutcome
@@ -114,8 +116,51 @@ internal static class LaunchAntigravity
     internal static ReconcileOutcome PrepareAddonsForLaunch(string appPath, string stateDir, string syncScriptPath, string pwshPath)
     {
         var appAsarPath = Path.Combine(Path.GetDirectoryName(appPath), "resources", "app.asar");
-        return ReconcileAddonsBeforeLaunch(appAsarPath, stateDir, syncScriptPath, pwshPath,
+        var effectivePwsh = string.IsNullOrWhiteSpace(pwshPath) ? pwshPath : ResolvePwshPath(pwshPath, PwshToolsRoot, PwshJunctionFallback);
+        return ReconcileAddonsBeforeLaunch(appAsarPath, stateDir, syncScriptPath, effectivePwsh,
             () => IsDesktopMainRunning(appPath), RunHiddenReconciler);
+    }
+
+    internal static string ResolvePwshPath(string preferredPath, string toolsRoot, string fallbackPath)
+    {
+        if (string.IsNullOrWhiteSpace(preferredPath) || File.Exists(preferredPath))
+            return preferredPath;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(toolsRoot) && Directory.Exists(toolsRoot))
+            {
+                string bestPath = null;
+                Version bestVersion = null;
+                foreach (var dir in Directory.GetDirectories(toolsRoot))
+                {
+                    var candidate = Path.Combine(dir, "pwsh.exe");
+                    if (!File.Exists(candidate))
+                        continue;
+                    Version parsed;
+                    if (Version.TryParse(Path.GetFileName(dir), out parsed))
+                    {
+                        if (bestVersion == null || parsed > bestVersion)
+                        {
+                            bestVersion = parsed;
+                            bestPath = candidate;
+                        }
+                    }
+                    else if (bestPath == null)
+                    {
+                        bestPath = candidate;
+                    }
+                }
+                if (bestPath != null)
+                    return bestPath;
+            }
+        }
+        catch
+        {
+            // Fall through to compatibility path when directory enumeration fails.
+        }
+        if (!string.IsNullOrWhiteSpace(fallbackPath) && File.Exists(fallbackPath))
+            return fallbackPath;
+        return preferredPath;
     }
 
     internal static ReconcileOutcome ReconcileAddonsBeforeLaunch(

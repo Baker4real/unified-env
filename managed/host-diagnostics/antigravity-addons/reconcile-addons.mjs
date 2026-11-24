@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const RECONCILER_FILE = fileURLToPath(import.meta.url);
+const SCRIPT_DIR = path.dirname(RECONCILER_FILE);
 const DEFAULT_APP_DIR = 'D:/Apps/Google.Antigravity';
 const DEFAULT_BACKUP_DIR = 'D:/Apps/Google.Antigravity.Local';
 const DEFAULT_TOOLS_DIR = SCRIPT_DIR;
@@ -362,6 +363,12 @@ async function applyLanguageLayer({ appAsarPath, hostVersion, origCustomScheme, 
     const oldHookExpr = "path.join(electron_1.app.getPath('userData'), 'agy_zhcn_autofollow_hook.json')";
     if (countOccurrences(patchedScheme, oldHookExpr) === 1 && postQuitHookPath) {
       patchedScheme = patchedScheme.replace(oldHookExpr, () => JSON.stringify(toPosix(postQuitHookPath)));
+    }
+
+    const willQuitAnchor = "            electron_1.app.on('will-quit', () => {\n                try {";
+    const willQuitGuarded = "            electron_1.app.on('will-quit', () => {\n                if (electron_1.app.__zhcnUpdaterRelaunchHandedOff) return;\n                try {";
+    if (countOccurrences(patchedScheme, willQuitAnchor) === 1) {
+      patchedScheme = patchedScheme.replace(willQuitAnchor, () => willQuitGuarded);
     }
 
     if (!patchedScheme.includes('agy-zhcn://bundle/main.js') || !patchedScheme.includes('onlineTranslate: false, titleWriteBack: false')) {
@@ -801,6 +808,57 @@ module.exports = {
   return Buffer.from(norm.replace(/\n/g, newline), 'utf8');
 }
 
+function patchContextMeterStorage(raw) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  let norm = text.replace(/\r\n/g, '\n');
+
+  const oldQuarantine = `    let quarantinePath = null;
+    if (options.quarantineCorrupt !== false) {
+      try {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        quarantinePath = resolved.replace(/\\.json$/i, '') + \`.corrupt.\${stamp}.json\`;
+        fsImpl.copyFileSync(resolved, quarantinePath);
+      } catch {}
+    }`;
+
+  const newQuarantine = `    let quarantinePath = null;
+    if (options.quarantineCorrupt !== false) {
+      try {
+        quarantinePath = resolved.replace(/\\.json$/i, '') + '.corrupt.bak.json';
+        let shouldCopy = true;
+        if (typeof fsImpl.statSync === 'function' && fsImpl.existsSync(quarantinePath)) {
+          try {
+            const srcSt = fsImpl.statSync(resolved);
+            const qSt = fsImpl.statSync(quarantinePath);
+            if (srcSt && qSt && srcSt.size === qSt.size && Number(qSt.mtimeMs) >= Number(srcSt.mtimeMs)) {
+              shouldCopy = false;
+            }
+          } catch {}
+        }
+        if (shouldCopy) {
+          fsImpl.copyFileSync(resolved, quarantinePath);
+        }
+      } catch {}
+    }`;
+
+  norm = replaceUniqueAnchor(norm, oldQuarantine, newQuarantine, 'meter-storage:bounded-quarantine');
+  return Buffer.from(norm.replace(/\n/g, newline), 'utf8');
+}
+
+function patchContextModulesConfig(raw) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  let norm = text.replace(/\r\n/g, '\n');
+
+  const oldCorruptBak = 'const bakPath = `${cfgPath}.corrupt.${Date.now()}.bak`;';
+  if (countOccurrences(norm, oldCorruptBak) !== 2) {
+    throw new Error(`Anchor modules-config:corrupt-bak expected 2 matches, found ${countOccurrences(norm, oldCorruptBak)}`);
+  }
+  norm = norm.replaceAll(oldCorruptBak, 'const bakPath = `${cfgPath}.corrupt.bak`;');
+  return Buffer.from(norm.replace(/\n/g, newline), 'utf8');
+}
+
 function patchContextMeterCollector(raw) {
   const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
   const newline = text.includes('\r\n') ? '\r\n' : '\n';
@@ -877,9 +935,233 @@ function patchContextMeterCollector(raw) {
   norm = replaceUniqueAnchor(
     norm,
     "    const { connect } = require('./local-api');\n    const api = await connect(options.origin ? { origin: options.origin } : undefined);\n",
-    "    const { connect } = require('./local-api');\n    const connectOpts = {\n      ...(options.origin ? { origin: options.origin } : {}),\n      ...(options.authBootstrap !== undefined ? { authBootstrap: options.authBootstrap } : {}),\n      ...(options.daemonDir !== undefined ? { daemonDir: options.daemonDir } : {}),\n      ...(options.homeDir !== undefined ? { homeDir: options.homeDir } : {}),\n      ...(options.isPidAlive !== undefined ? { isPidAlive: options.isPidAlive } : {})\n    };\n    const api = await connect(Object.keys(connectOpts).length ? connectOpts : undefined);\n",
+    "    const { connect } = require('./local-api');\n    const connectOpts = {\n      ...(options.origin ? { origin: options.origin } : {}),\n      ...(options.authBootstrap !== undefined ? { authBootstrap: options.authBootstrap } : {}),\n      ...(options.daemonDir !== undefined ? { daemonDir: options.daemonDir } : {}),\n      ...(options.homeDir !== undefined ? { homeDir: options.homeDir } : {}),\n      ...(options.isPidAlive !== undefined ? { isPidAlive: options.isPidAlive } : {})\n    };\n    const api = await connectorOrConnect(connect, connectOpts);\n".replace(
+      'const api = await connectorOrConnect(connect, connectOpts);',
+      'const api = await connect(Object.keys(connectOpts).length ? connectOpts : undefined);',
+    ),
     'meter-collector:status-connect',
   );
+
+  const oldLedgerPathFn = `function getPricingLedgerPath(overridePathOrDir) {
+  if (overridePathOrDir) {
+    if (overridePathOrDir.endsWith('.json')) return overridePathOrDir;
+    return path.join(overridePathOrDir, 'pricing_ledger_v1.json');
+  }
+  if (process.env.AG_DIR) {
+    return path.join(process.env.AG_DIR, 'pricing_ledger_v1.json');
+  }
+  const home = process.env.USERPROFILE || os.homedir();
+  return path.join(home, '.gemini', 'antigravity', 'pricing_ledger_v1.json');
+}`;
+
+  const newLedgerPathFn = `function resolveMeterAddonDataDir(overridePathOrDir) {
+  if (overridePathOrDir && String(overridePathOrDir).endsWith('.json')) {
+    return overridePathOrDir;
+  }
+  const home = process.env.USERPROFILE || os.homedir();
+  const defaultAgDir = path.join(home, '.gemini', 'antigravity');
+  if (overridePathOrDir) {
+    const normOverride = path.resolve(overridePathOrDir);
+    const normDefault = path.resolve(defaultAgDir);
+    const isDefaultHost = process.platform === 'win32'
+      ? normOverride.toLowerCase() === normDefault.toLowerCase()
+      : normOverride === normDefault;
+    if (!isDefaultHost || process.env.AG_DIR) {
+      return overridePathOrDir;
+    }
+  } else if (process.env.AG_DIR) {
+    return process.env.AG_DIR;
+  }
+  if (process.platform === 'win32') {
+    try {
+      const { getStateDir } = require('./asar-engine');
+      if (typeof getStateDir === 'function') {
+        return getStateDir();
+      }
+    } catch {}
+  }
+  return defaultAgDir;
+}
+
+function getPricingLedgerPath(overridePathOrDir) {
+  const target = resolveMeterAddonDataDir(overridePathOrDir);
+  if (String(target).endsWith('.json')) return target;
+  return path.join(target, 'pricing_ledger_v1.json');
+}`;
+
+  norm = replaceUniqueAnchor(norm, oldLedgerPathFn, newLedgerPathFn, 'meter-collector:ledger-state-dir');
+
+  const oldRollingBak = `  // 正常落盘数据建立自动滚动备份，供损坏时恢复
+  if (!readRes.corrupted) {
+    try {
+      if (!fsImpl.existsSync(bakPath) || Math.random() < 0.1) {
+        fsImpl.copyFileSync(p, bakPath);
+      }
+    } catch { }
+  }`;
+
+  const newRollingBak = `  // 正常落盘数据建立自动滚动备份，供损坏时恢复（同目录临时文件 + rename 原子替换）
+  if (!readRes.corrupted) {
+    try {
+      if (!fsImpl.existsSync(bakPath) || Math.random() < 0.1) {
+        if (typeof fsImpl.renameSync === 'function') {
+          const tmpBak = \`\${bakPath}.\${process.pid}.\${Date.now()}.tmp\`;
+          try {
+            fsImpl.copyFileSync(p, tmpBak);
+            fsImpl.renameSync(tmpBak, bakPath);
+          } catch (bakErr) {
+            try { if (fsImpl.existsSync(tmpBak)) fsImpl.unlinkSync(tmpBak); } catch {}
+            throw bakErr;
+          }
+        } else {
+          fsImpl.copyFileSync(p, bakPath);
+        }
+      }
+    } catch { }
+  }`;
+
+  norm = replaceUniqueAnchor(norm, oldRollingBak, newRollingBak, 'meter-collector:atomic-rolling-bak');
+
+  const oldRepairKeepaliveEmail = `      // 显式保留用户/实验硬绑定的账号记录（keepalive / explicit email），其余均依据权威时间戳严格复核
+      if (copy.isKeepalive && curScope && copy.accountAttributionConfidence === 'keepalive_bound') {
+        copy.attributionRepairVersion = CURRENT_ATTRIBUTION_REPAIR_VERSION;
+        nextCalls[k] = copy;
+        continue;
+      }
+      if (copy.accountEmail && typeof copy.accountEmail === 'string' && copy.accountEmail.includes('@')) {
+        copy.accountScopeKey = buildAccountScopeKey(copy.accountEmail);
+        copy.accountAttributionConfidence = 'explicit_account_email';
+        copy.accountAttributionEvidence = copy.accountAttributionEvidence || 'call_account_email';
+        delete copy.unattributedReason;
+        copy.attributionRepairVersion = CURRENT_ATTRIBUTION_REPAIR_VERSION;
+        nextCalls[k] = copy;
+        if (curScope !== copy.accountScopeKey) updatedCount++;
+        continue;
+      }`;
+
+  const newRepairKeepaliveEmail = `      // 显式保留用户/实验硬绑定的账号记录（keepalive / explicit email），其余均依据权威时间戳严格复核
+      if (copy.isKeepalive && curScope && copy.accountAttributionConfidence === 'keepalive_bound') {
+        if (rec.attributionRepairVersion !== CURRENT_ATTRIBUTION_REPAIR_VERSION) updatedCount++;
+        copy.attributionRepairVersion = CURRENT_ATTRIBUTION_REPAIR_VERSION;
+        nextCalls[k] = copy;
+        continue;
+      }
+      if (copy.accountEmail && typeof copy.accountEmail === 'string' && copy.accountEmail.includes('@')) {
+        copy.accountScopeKey = buildAccountScopeKey(copy.accountEmail);
+        copy.accountAttributionConfidence = 'explicit_account_email';
+        copy.accountAttributionEvidence = copy.accountAttributionEvidence || 'call_account_email';
+        delete copy.unattributedReason;
+        if (curScope !== copy.accountScopeKey || rec.attributionRepairVersion !== CURRENT_ATTRIBUTION_REPAIR_VERSION) updatedCount++;
+        copy.attributionRepairVersion = CURRENT_ATTRIBUTION_REPAIR_VERSION;
+        nextCalls[k] = copy;
+        continue;
+      }`;
+
+  norm = replaceUniqueAnchor(norm, oldRepairKeepaliveEmail, newRepairKeepaliveEmail, 'meter-collector:elv89-version-persist');
+
+  const oldElv89Backup = `    const after = summarizeCounts(nextCalls);
+    let backupPath = null;
+    if (!dryRun && fs.existsSync(resolvedLedgerPath)) {
+      const tsTag = backupSuffix || \`\${Date.now()}\`;
+      backupPath = \`\${resolvedLedgerPath}.bak-pre-elv89-\${tsTag}\`;
+      fs.copyFileSync(resolvedLedgerPath, backupPath);
+    }
+
+    if (!dryRun && (updatedCount > 0 || force)) {`;
+
+  const newElv89Backup = `    const after = summarizeCounts(nextCalls);
+    let backupPath = null;
+
+    if (!dryRun && (updatedCount > 0 || force)) {
+      if (fs.existsSync(resolvedLedgerPath)) {
+        backupPath = backupSuffix
+          ? \`\${resolvedLedgerPath}.bak-pre-elv89-\${backupSuffix}\`
+          : \`\${resolvedLedgerPath}.bak-pre-elv89.json\`;
+        const tmpElvBak = \`\${backupPath}.\${process.pid}.\${Date.now()}.tmp\`;
+        try {
+          fs.copyFileSync(resolvedLedgerPath, tmpElvBak);
+          fs.renameSync(tmpElvBak, backupPath);
+        } catch {
+          try { if (fs.existsSync(tmpElvBak)) fs.unlinkSync(tmpElvBak); } catch {}
+          fs.copyFileSync(resolvedLedgerPath, backupPath);
+        }
+      }`;
+
+  norm = replaceUniqueAnchor(norm, oldElv89Backup, newElv89Backup, 'meter-collector:elv89-bounded-backup');
+
+  const oldCustomPlanPath = `function getCustomPlanPath(overridePathOrDir) {
+  if (overridePathOrDir) {
+    if (overridePathOrDir.endsWith('.json')) return overridePathOrDir;
+    return path.join(overridePathOrDir, 'custom_plan_v1.json');
+  }
+  if (process.env.AG_DIR) {
+    return path.join(process.env.AG_DIR, 'custom_plan_v1.json');
+  }
+  const home = process.env.USERPROFILE || os.homedir();
+  return path.join(home, '.gemini', 'antigravity', 'custom_plan_v1.json');
+}`;
+
+  const newCustomPlanPath = `function getCustomPlanPath(overridePathOrDir) {
+  const target = resolveMeterAddonDataDir(overridePathOrDir);
+  if (String(target).endsWith('.json')) return target;
+  return path.join(target, 'custom_plan_v1.json');
+}`;
+
+  norm = replaceUniqueAnchor(norm, oldCustomPlanPath, newCustomPlanPath, 'meter-collector:custom-plan-state-dir');
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "    const home = process.env.USERPROFILE || os.homedir();\n    const agDir = targetDir && !targetDir.endsWith('.json') ? targetDir : (process.env.AG_DIR || path.join(home, '.gemini', 'antigravity'));\n    const archivePathV2 = path.join(agDir, 'token_usage_archive_v2.json');\n",
+    "    const archiveDir = resolveMeterAddonDataDir(targetDir && !targetDir.endsWith('.json') ? targetDir : null);\n    const archivePathV2 = path.join(archiveDir, 'token_usage_archive_v2.json');\n",
+    'meter-collector:custom-plan-archive-dir',
+  );
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "  const archivePathV1 = path.join(agDir, 'token_usage_archive_v1.json');\n  const archivePathV2 = path.join(agDir, 'token_usage_archive_v2.json');\n",
+    "  const archiveDir = options.agDir ? agDir : resolveMeterAddonDataDir(agDir);\n  const archivePathV1 = path.join(archiveDir, 'token_usage_archive_v1.json');\n  const archivePathV2 = path.join(archiveDir, 'token_usage_archive_v2.json');\n",
+    'meter-collector:history-archive-dir',
+  );
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "  const bakPathV1 = path.join(agDir, 'token_usage_archive_v1.bak.json');\n",
+    "  const bakPathV1 = path.join(archiveDir, 'token_usage_archive_v1.bak.json');\n",
+    'meter-collector:history-archive-bak-v1',
+  );
+
+  norm = replaceUniqueAnchor(
+    norm,
+    "  const bakPathV2 = path.join(agDir, 'token_usage_archive_v2.bak.json');\n",
+    "  const bakPathV2 = path.join(archiveDir, 'token_usage_archive_v2.bak.json');\n",
+    'meter-collector:history-archive-bak-v2',
+  );
+
+  const oldNeedsRepair = `      const preRepairCalls = (loadPricingLedger(agDir).calls || {});
+      const needsAttributionRepair = Object.values(preRepairCalls).some(rec =>
+        rec &&
+        typeof rec === 'object' &&
+        rec.attributionRepairVersion !== CURRENT_ATTRIBUTION_REPAIR_VERSION &&
+        isValidAccountScopeKey(rec.accountScopeKey) &&
+        rec.accountAttributionConfidence !== 'unattributed'
+      );`;
+
+  const newNeedsRepair = `      const preRepairCalls = (loadPricingLedger(agDir).calls || {});
+      const nowRepairCheckMs = Date.now();
+      const needsAttributionRepair = Object.values(preRepairCalls).some(rec => {
+        if (!rec || typeof rec !== 'object') return false;
+        if (rec.attributionRepairVersion === CURRENT_ATTRIBUTION_REPAIR_VERSION) return false;
+        if (!isValidAccountScopeKey(rec.accountScopeKey) || rec.accountAttributionConfidence === 'unattributed') return false;
+        if (rec.accountAttributionConfidence === 'live_confirmed_account') {
+          const obsMs = Number(rec.liveObservedAtMs) || (rec.updatedAt ? Date.parse(rec.updatedAt) : NaN) || Number(rec.timestamp);
+          if (Number.isFinite(obsMs) && (nowRepairCheckMs - obsMs) >= 0 && (nowRepairCheckMs - obsMs) < 180000) {
+            return false;
+          }
+        }
+        return true;
+      });`;
+
+  norm = replaceUniqueAnchor(norm, oldNeedsRepair, newNeedsRepair, 'meter-collector:skip-live-window-repair-check');
 
   return Buffer.from(norm.replace(/\n/g, newline), 'utf8');
 }
@@ -1001,6 +1283,12 @@ async function applyContextViewerLayer({ hostVersion, origUtils, origPreload, st
     } else if (rel === 'local-api.js') {
       raw = patchContextLocalApi(raw);
       verifyNodeSyntax(raw.toString('utf8'), stageDir, 'dist/local-api.js');
+    } else if (rel === 'meter-storage.js') {
+      raw = patchContextMeterStorage(raw);
+      verifyNodeSyntax(raw.toString('utf8'), stageDir, 'dist/meter-storage.js');
+    } else if (rel === 'modules-config.js') {
+      raw = patchContextModulesConfig(raw);
+      verifyNodeSyntax(raw.toString('utf8'), stageDir, 'dist/modules-config.js');
     } else if (rel === 'meter-collector.js') {
       raw = patchContextMeterCollector(raw);
       verifyNodeSyntax(raw.toString('utf8'), stageDir, 'dist/meter-collector.js');
@@ -1076,6 +1364,168 @@ async function applyContextViewerLayer({ hostVersion, origUtils, origPreload, st
 }
 
 // ---------------------------------------------------------------------------
+// Layer 5: updater relaunch hand-off (dist/updater.js)
+// ---------------------------------------------------------------------------
+
+function applyUpdaterLayer(origSource, postQuitHookPath, launcherPath, stageDir) {
+  if (!postQuitHookPath || !launcherPath) {
+    return { status: 'skipped', reason: 'postQuitHookPath or launcherPath missing' };
+  }
+  const newline = origSource.includes('\r\n') ? '\r\n' : '\n';
+  const norm = origSource.replace(/\r\n/g, '\n');
+  const anchor = [
+    '            await killLanguageServer();',
+    '            electron_updater_1.autoUpdater.quitAndInstall(isSilent, true);',
+    '            launched = Boolean(updater.quitAndInstallCalled);',
+  ].join('\n');
+
+  if (countOccurrences(norm, anchor) !== 1) {
+    return { status: 'skipped', reason: 'Upstream dist/updater.js quitAndInstall anchor changed' };
+  }
+
+  const hookLiteral = JSON.stringify(toPosix(postQuitHookPath));
+  const launcherLiteral = JSON.stringify(toPosix(launcherPath));
+  const replacement = [
+    '            await killLanguageServer();',
+    '            let __agyDelegatedHookVbs = null;',
+    '            const __agyPrevAutoRun = updater.autoRunAppAfterInstall;',
+    '            try {',
+    "                const fs = require('fs');",
+    `                const hookFile = ${hookLiteral};`,
+    `                const launcherExe = ${launcherLiteral};`,
+    '                if (hookFile && launcherExe && fs.existsSync(hookFile) && fs.existsSync(launcherExe)) {',
+    "                    const hook = JSON.parse(fs.readFileSync(hookFile, 'utf8'));",
+    "                    if (hook && typeof hook.vbsPath === 'string' && hook.vbsPath && fs.existsSync(hook.vbsPath)) {",
+    '                        __agyDelegatedHookVbs = hook.vbsPath;',
+    '                        updater.autoRunAppAfterInstall = false;',
+    '                    }',
+    '                }',
+    '            }',
+    '            catch (_agyHookReadErr) {',
+    '                __agyDelegatedHookVbs = null;',
+    '            }',
+    '            electron_updater_1.autoUpdater.quitAndInstall(isSilent, __agyDelegatedHookVbs === null);',
+    '            launched = Boolean(updater.quitAndInstallCalled);',
+    '            if (launched && __agyDelegatedHookVbs !== null) {',
+    '                try {',
+    "                    const child = (0, child_process_1.spawn)('wscript.exe', ['//B', '//NoLogo', __agyDelegatedHookVbs, '--relaunch'], {",
+    '                        detached: true,',
+    "                        stdio: 'ignore',",
+    '                        windowsHide: true,',
+    '                    });',
+    '                    child.unref();',
+    '                    if (electron_1.app) {',
+    '                        electron_1.app.__zhcnUpdaterRelaunchHandedOff = true;',
+    '                    }',
+    '                }',
+    '                catch (_agyHookSpawnErr) {',
+    '                    updater.autoRunAppAfterInstall = __agyPrevAutoRun;',
+    '                }',
+    '            }',
+    '            else if (!launched && __agyDelegatedHookVbs !== null) {',
+    '                updater.autoRunAppAfterInstall = __agyPrevAutoRun;',
+    '            }',
+  ].join('\n');
+
+  const patched = norm.replace(anchor, () => replacement).replace(/\n/g, newline);
+  verifyNodeSyntax(patched, stageDir, 'dist/updater.js');
+
+  const runFixture = async ({ filesPresent, installSucceeds }) => {
+    const spawns = [];
+    const quitCalls = [];
+    const appObj = { isPackaged: true, getVersion: () => '2.35.0', quit: () => {} };
+    const autoUpdater = {
+      installerPath: 'C:\\updater\\Antigravity-x64.exe',
+      autoRunAppAfterInstall: true,
+      quitAndInstallCalled: false,
+      on: () => {},
+      quitAndInstall(isSilent, isForceRunAfter) {
+        quitCalls.push([isSilent, isForceRunAfter, this.autoRunAppAfterInstall]);
+        this.quitAndInstallCalled = installSucceeds;
+      },
+    };
+    const existing = new Set(
+      filesPresent
+        ? [toPosix(postQuitHookPath), toPosix(launcherPath), 'D:/tools/post-quit-reconcile.vbs']
+        : [],
+    );
+    const exp = {};
+    const deps = {
+      'electron-updater': { autoUpdater },
+      electron: { app: appObj, Menu: { getApplicationMenu: () => null }, dialog: {} },
+      path,
+      './types': { UpdateState: { Idle: 'idle', CheckingForUpdates: 'checking', AvailableForDownload: 'avail', Downloading: 'dl', Ready: 'ready' } },
+      child_process: {
+        spawn(cmd, args, opts) {
+          spawns.push([cmd, args, opts]);
+          return { unref() {} };
+        },
+      },
+      './services/settingsService': { SettingKey: {} },
+      './utils': { getHubWindows: () => [], getHubWebContents: () => null, getFocusedHubWindow: () => null },
+      './languageServer': { killLanguageServer: async () => {} },
+      fs: {
+        existsSync: (p) => existing.has(toPosix(String(p))),
+        readFileSync: () => JSON.stringify({ vbsPath: 'D:/tools/post-quit-reconcile.vbs' }),
+      },
+    };
+    vm.runInNewContext(patched, {
+      exports: exp,
+      require: (name) => {
+        if (!Object.hasOwn(deps, name)) throw new Error(`Unexpected updater require: ${name}`);
+        return deps[name];
+      },
+      process: { platform: 'win32', arch: 'x64', pid: 1234, env: {} },
+      console: { log() {}, warn() {}, error() {} },
+      setTimeout,
+      clearInterval,
+      setInterval,
+    }, { filename: 'dist/updater.js' });
+    await exp.quitAndInstall(false);
+    return { spawns, quitCalls, appObj, autoUpdater };
+  };
+
+  return {
+    status: 'ready',
+    source: patched,
+    verifyAsync: async () => {
+      const delegated = await runFixture({ filesPresent: true, installSucceeds: true });
+      if (
+        delegated.quitCalls.length !== 1 ||
+        delegated.quitCalls[0][1] !== false ||
+        delegated.quitCalls[0][2] !== false ||
+        delegated.spawns.length !== 1 ||
+        delegated.spawns[0][0] !== 'wscript.exe' ||
+        !delegated.spawns[0][1].includes('--relaunch') ||
+        delegated.appObj.__zhcnUpdaterRelaunchHandedOff !== true
+      ) {
+        throw new Error('Updater delegated relaunch behavioral gate failed');
+      }
+
+      const fallback = await runFixture({ filesPresent: false, installSucceeds: true });
+      if (
+        fallback.quitCalls.length !== 1 ||
+        fallback.quitCalls[0][1] !== true ||
+        fallback.quitCalls[0][2] !== true ||
+        fallback.spawns.length !== 0 ||
+        Boolean(fallback.appObj.__zhcnUpdaterRelaunchHandedOff)
+      ) {
+        throw new Error('Updater missing-hook fallback behavioral gate failed');
+      }
+
+      const aborted = await runFixture({ filesPresent: true, installSucceeds: false });
+      if (
+        aborted.spawns.length !== 0 ||
+        aborted.autoUpdater.autoRunAppAfterInstall !== true ||
+        Boolean(aborted.appObj.__zhcnUpdaterRelaunchHandedOff)
+      ) {
+        throw new Error('Updater aborted-install rollback behavioral gate failed');
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // File helpers & atomic swap
 // ---------------------------------------------------------------------------
 
@@ -1142,6 +1592,7 @@ function detectAddonMarkers(entries, body) {
   check('dist/preload.js', 'AGY_CONTEXT_CAPSULE_START', 'pulse');
   check('dist/preload.js', 'Antigravity Context Meter preload Injection Start', 'context-viewer-preload');
   check('dist/utils.js', 'Antigravity Context Meter utils Injection Start', 'context-viewer-utils');
+  check('dist/updater.js', '__zhcnUpdaterRelaunchHandedOff', 'updater-relaunch');
   check('dist/wsl.js', 'HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Lxss', 'wsl');
   return markers;
 }
@@ -1188,6 +1639,7 @@ function parseArgs(argv) {
 // ---------------------------------------------------------------------------
 
 async function inspectLive(opts) {
+  const reconcilerSha256 = await sha256File(RECONCILER_FILE);
   const appAsarPath = path.join(opts.appDir, 'resources/app.asar');
   const lsPath = path.join(opts.appDir, 'resources/bin/language_server.exe');
   const asarBuf = await fsp.readFile(appAsarPath);
@@ -1206,7 +1658,13 @@ async function inspectLive(opts) {
 
   let state = 'needs-reconcile';
   const pendingTargetSha = pending ? (pending.replaceTargetSha256 || pending.officialSha256) : null;
-  if (pending && pendingAsarExists && pendingTargetSha === currentAsarSha && pending.languageServerSha256 === lsSha) {
+  if (
+    pending &&
+    pendingAsarExists &&
+    pendingTargetSha === currentAsarSha &&
+    pending.languageServerSha256 === lsSha &&
+    pending.reconcilerSha256 === reconcilerSha256
+  ) {
     state = 'pending-ready';
   } else if (active && active.combinedSha256 === currentAsarSha && active.languageServerSha256 === lsSha && (!markers.includes('desktop-zhcn') || langUiExists)) {
     state = 'up-to-date';
@@ -1217,6 +1675,7 @@ async function inspectLive(opts) {
   return {
     state,
     version: pkg.version,
+    reconcilerSha256,
     appAsarPath,
     currentAsarSha,
     languageServerSha256: lsSha,
@@ -1236,6 +1695,7 @@ async function cmdAdopt(opts) {
   const record = {
     schemaVersion: 1,
     version: info.version,
+    reconcilerSha256: info.reconcilerSha256,
     officialSha256: opts.officialSha256 || null,
     combinedSha256: info.currentAsarSha,
     languageServerSha256: info.languageServerSha256,
@@ -1448,6 +1908,26 @@ async function executeReconcile({ opts, info, sourceBuf, sourceBody, sourceEntri
     replacements.set('dist/preload.js', Buffer.from(combinedPreload, 'utf8'));
   }
 
+  // Layer 5: updater relaunch hand-off
+  const launcherPath = path.join(opts.backupDir, 'LaunchAntigravity.exe');
+  try {
+    const origUpdater = readTextMember('dist/updater.js');
+    if (!origUpdater) {
+      layers.updater = { status: 'skipped', reason: 'dist/updater.js absent' };
+    } else {
+      const res = applyUpdaterLayer(origUpdater, postQuitHookPath, launcherPath, workDir);
+      if (res.status === 'ready') {
+        await res.verifyAsync();
+        replacements.set('dist/updater.js', Buffer.from(res.source, 'utf8'));
+        layers.updater = { status: 'applied', sha256: sha256(Buffer.from(res.source, 'utf8')) };
+      } else {
+        layers.updater = res;
+      }
+    }
+  } catch (err) {
+    layers.updater = { status: 'skipped', reason: `Updater gate error: ${err.message}` };
+  }
+
   const appliedLayers = Object.entries(layers).filter(([, v]) => v.status === 'applied').map(([k]) => k);
   const skippedLayers = Object.entries(layers).filter(([, v]) => v.status !== 'applied').map(([k, v]) => ({ layer: k, reason: v.reason }));
 
@@ -1492,6 +1972,7 @@ async function executeReconcile({ opts, info, sourceBuf, sourceBody, sourceEntri
   const buildRecord = {
     schemaVersion: 1,
     version: info.version,
+    reconcilerSha256: info.reconcilerSha256,
     officialSha256: officialSha,
     replaceTargetSha256: info.currentAsarSha,
     combinedSha256: combinedSha,
@@ -1560,6 +2041,7 @@ async function main() {
 }
 
 export {
+  applyUpdaterLayer,
   applyWslLayer,
   detectAddonMarkers,
   detectHubLoadAnchor,
@@ -1568,6 +2050,8 @@ export {
   patchContextLocalApi,
   patchContextMeterCollector,
   patchContextMeterRenderer,
+  patchContextMeterStorage,
+  patchContextModulesConfig,
   unpackAsar,
   walkAsar,
 };

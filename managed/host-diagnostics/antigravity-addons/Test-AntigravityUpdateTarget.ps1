@@ -107,4 +107,84 @@ try {
     [IO.File]::Delete($artifact)
 }
 
+$regTestId = 'CodexAntigravityRegFixture-' + [guid]::NewGuid().ToString('N')
+$testProductSubKey = "Software\$regTestId\Product"
+$testUninstallSubKey = "Software\$regTestId\Uninstall"
+$testRootSubKey = "Software\$regTestId"
+try {
+    foreach ($regView in 'Registry32', 'Registry64') {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, $regView)
+        try {
+            $pKey = $baseKey.CreateSubKey($testProductSubKey)
+            $uKey = $baseKey.CreateSubKey($testUninstallSubKey)
+            try {
+                $pKey.SetValue('InstallLocation', $managedDirectory, [Microsoft.Win32.RegistryValueKind]::String)
+                $uKey.SetValue('UninstallString', '"D:\Apps\Google.Antigravity\Uninstall Antigravity.exe" /currentuser', [Microsoft.Win32.RegistryValueKind]::String)
+                $uKey.SetValue('QuietUninstallString', '"D:\Apps\Google.Antigravity\Uninstall Antigravity.exe" /currentuser /S', [Microsoft.Win32.RegistryValueKind]::String)
+            } finally {
+                $uKey.Dispose()
+                $pKey.Dispose()
+            }
+        } finally {
+            $baseKey.Dispose()
+        }
+    }
+
+    $healedRows = @(Repair-AntigravityUninstallRegistration -Deployment $deployment -ProductSubKey $testProductSubKey -UninstallSubKey $testUninstallSubKey)
+    if ($healedRows.Count -ne 2 -or ($healedRows.healed -notcontains $true) -or
+        @($healedRows | Where-Object { $_.reason -notin @('healed', 'already-aligned') }).Count -ne 0) {
+        throw 'Missing HKCU Uninstall InstallLocation must be healed across HKCU views when product and uninstaller match.'
+    }
+    foreach ($regView in 'Registry32', 'Registry64') {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, $regView)
+        try {
+            $uKey = $baseKey.OpenSubKey($testUninstallSubKey, $false)
+            try {
+                if ([string]$uKey.GetValue('InstallLocation') -ine $managedDirectory) {
+                    throw "Healed InstallLocation missing in $regView."
+                }
+            } finally {
+                $uKey.Dispose()
+            }
+        } finally {
+            $baseKey.Dispose()
+        }
+    }
+    $idempotentRows = @(Repair-AntigravityUninstallRegistration -Deployment $deployment -ProductSubKey $testProductSubKey -UninstallSubKey $testUninstallSubKey)
+    if ($idempotentRows.Count -ne 2 -or ($idempotentRows.healed -contains $true) -or
+        @($idempotentRows | Where-Object { $_.reason -cne 'already-aligned' }).Count -ne 0) {
+        throw 'Aligned HKCU Uninstall InstallLocation must not be rewritten.'
+    }
+
+    foreach ($regView in 'Registry32', 'Registry64') {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, $regView)
+        try {
+            $pKey = $baseKey.OpenSubKey($testProductSubKey, $true)
+            $uKey = $baseKey.OpenSubKey($testUninstallSubKey, $true)
+            try {
+                $uKey.DeleteValue('InstallLocation', $false)
+                $pKey.SetValue('InstallLocation', $legacyDirectory, [Microsoft.Win32.RegistryValueKind]::String)
+            } finally {
+                $uKey.Dispose()
+                $pKey.Dispose()
+            }
+        } finally {
+            $baseKey.Dispose()
+        }
+    }
+    $refusedRows = @(Repair-AntigravityUninstallRegistration -Deployment $deployment -ProductSubKey $testProductSubKey -UninstallSubKey $testUninstallSubKey)
+    if (($refusedRows.healed -contains $true) -or ($refusedRows.reason -notcontains 'product-mismatch')) {
+        throw 'Mismatched product InstallLocation must refuse Uninstall registry healing.'
+    }
+} finally {
+    foreach ($regView in 'Registry32', 'Registry64') {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, $regView)
+        try {
+            $baseKey.DeleteSubKeyTree($testRootSubKey, $false)
+        } finally {
+            $baseKey.Dispose()
+        }
+    }
+}
+
 Write-Output 'Antigravity update target fixtures passed.'

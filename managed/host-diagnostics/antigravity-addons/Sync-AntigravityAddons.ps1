@@ -5,6 +5,8 @@ param(
     [string]$Mode = 'Status',
     [switch]$StageOnly,
     [switch]$SkipShortcutHeal,
+    [switch]$SkipRegistrationHeal,
+    [switch]$RelaunchAfterUpdate,
     [switch]$Quiet,
     [int]$UpdaterWaitSeconds = 90
 )
@@ -23,6 +25,33 @@ $LauncherExe = Join-Path $BackupDir 'LaunchAntigravity.exe'
 $ProductRegistryKey = 'Software\121a0be4-63bd-531e-acf8-fc3924c7e984'
 $UninstallRegistryKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\121a0be4-63bd-531e-acf8-fc3924c7e984'
 
+function Initialize-ShortcutShellInterop {
+    if ('AntigravityAddons.ShortcutShellInterop' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace AntigravityAddons {
+    public static class ShortcutShellInterop {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern void SHChangeNotify(int wEventId, uint uFlags, string dwItem1, IntPtr dwItem2);
+
+        public static void NotifyItemUpdated(string itemPath, string parentDir) {
+            const int SHCNE_UPDATEITEM = 0x00002000;
+            const int SHCNE_UPDATEDIR = 0x00001000;
+            const uint SHCNF_PATHW_FLUSHNOWAIT = 0x3005;
+            if (!string.IsNullOrEmpty(itemPath)) {
+                SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW_FLUSHNOWAIT, itemPath, IntPtr.Zero);
+            }
+            if (!string.IsNullOrEmpty(parentDir)) {
+                SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW_FLUSHNOWAIT, parentDir, IntPtr.Zero);
+            }
+        }
+    }
+}
+'@
+}
+
 function Invoke-ReconcilerJson {
     param([string[]]$Arguments)
     $raw = & $NodeExe $Reconciler @Arguments 2>&1
@@ -40,11 +69,14 @@ function Invoke-ReconcilerJson {
 
 function Get-ShortcutAudit {
     param([switch]$Heal)
+    $taskBarDir = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
     $candidates = @(
         (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Google Antigravity.lnk'),
         (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Antigravity.lnk'),
         (Join-Path ([Environment]::GetFolderPath('Programs')) 'Antigravity.lnk'),
-        (Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Antigravity.lnk')
+        (Join-Path ([Environment]::GetFolderPath('Programs')) 'Google Antigravity.lnk'),
+        (Join-Path $taskBarDir 'Antigravity.lnk'),
+        (Join-Path $taskBarDir 'Google Antigravity.lnk')
     )
     $wsh = New-Object -ComObject WScript.Shell
     $results = @()
@@ -66,6 +98,8 @@ function Get-ShortcutAudit {
                 $sc.WorkingDirectory = $AppDir
                 $sc.IconLocation = "$AppExe,0"
                 $sc.Save()
+                Initialize-ShortcutShellInterop
+                [AntigravityAddons.ShortcutShellInterop]::NotifyItemUpdated($lnkPath, [IO.Path]::GetDirectoryName($lnkPath))
                 $healed = $true
                 $needsHeal = $false
             }
@@ -89,7 +123,11 @@ function Test-UpdaterRunning {
         foreach ($p in $procs) {
             $exe = [string]$p.ExecutablePath
             $name = [string]$p.Name
-            if ($exe -match '(?i)antigravity-updater' -or $name -match '(?i)^Antigravity-.*\.exe$') {
+            $cmdLine = [string]$p.CommandLine
+            if ($exe -match '(?i)antigravity-updater' -or
+                $name -match '(?i)^Antigravity-.*\.exe$' -or
+                $name -ieq 'Uninstall Antigravity.exe' -or
+                ($cmdLine -match '(?i)Antigravity-x64\.exe' -and $name -notmatch '(?i)^(?:pwsh|powershell|cmd|node|python)(?:\.exe)?$')) {
                 return $true
             }
         }
@@ -104,6 +142,20 @@ function Test-AntigravityDesktopRunning {
     foreach ($p in $procs) {
         try {
             if ($p.Path -ieq $AppExe -and $p.MainWindowHandle -ne [IntPtr]::Zero) {
+                return $true
+            }
+        } catch {
+            # Ignore transient process inspection failures
+        }
+    }
+    return $false
+}
+
+function Test-AnyAntigravityProcessRunning {
+    $procs = @(Get-Process -Name 'Antigravity' -ErrorAction SilentlyContinue)
+    foreach ($p in $procs) {
+        try {
+            if ($p.Path -ieq $AppExe) {
                 return $true
             }
         } catch {
@@ -306,6 +358,65 @@ function Get-AntigravityUpdateTarget($Deployment, [object[]]$Registration, $Desk
     }
 }
 
+function Repair-AntigravityUninstallRegistration {
+    param(
+        [object]$Deployment = $null,
+        [Microsoft.Win32.RegistryHive]$Hive = [Microsoft.Win32.RegistryHive]::CurrentUser,
+        [string]$ProductSubKey = $ProductRegistryKey,
+        [string]$UninstallSubKey = $UninstallRegistryKey
+    )
+    $effectiveDeployment = if ($null -ne $Deployment) { $Deployment } else { Get-AntigravityDeployment $AppDir }
+    if (-not $effectiveDeployment.present -or -not $effectiveDeployment.uninstallerPresent) {
+        return @()
+    }
+    $pathComparer = [StringComparer]::OrdinalIgnoreCase
+    $valueOptions = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+    foreach ($regView in 'Registry32', 'Registry64') {
+        $baseKey = $product = $uninstall = $null
+        $healed = $false
+        $reason = 'unchanged'
+        try {
+            $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey($Hive, $regView)
+            $product = $baseKey.OpenSubKey($ProductSubKey, $false)
+            $uninstall = $baseKey.OpenSubKey($UninstallSubKey, $true)
+            if ($null -eq $product -or $null -eq $uninstall) {
+                $reason = 'key-missing'
+            } else {
+                $productLoc = ConvertTo-AntigravityLocalPath ($product.GetValue('InstallLocation', $null, $valueOptions))
+                $existingLoc = ConvertTo-AntigravityLocalPath ($uninstall.GetValue('InstallLocation', $null, $valueOptions))
+                $uExe = Get-AntigravityUninstallExecutable ($uninstall.GetValue('UninstallString', $null, $valueOptions))
+                $quExe = Get-AntigravityUninstallExecutable ($uninstall.GetValue('QuietUninstallString', $null, $valueOptions))
+                if (-not $productLoc -or -not $pathComparer.Equals($productLoc, $effectiveDeployment.directory)) {
+                    $reason = 'product-mismatch'
+                } elseif (-not $uExe -or -not $quExe -or
+                    -not $pathComparer.Equals($uExe, $effectiveDeployment.uninstallerPath) -or
+                    -not $pathComparer.Equals($quExe, $effectiveDeployment.uninstallerPath)) {
+                    $reason = 'uninstaller-mismatch'
+                } elseif ($existingLoc -and $pathComparer.Equals($existingLoc, $effectiveDeployment.directory)) {
+                    $reason = 'already-aligned'
+                } elseif ($existingLoc) {
+                    $reason = 'existing-location-mismatch'
+                } else {
+                    $uninstall.SetValue('InstallLocation', $effectiveDeployment.directory, [Microsoft.Win32.RegistryValueKind]::String)
+                    $healed = $true
+                    $reason = 'healed'
+                }
+            }
+        } catch {
+            $reason = 'write-failed'
+        } finally {
+            if ($uninstall) { $uninstall.Dispose() }
+            if ($product) { $product.Dispose() }
+            if ($baseKey) { $baseKey.Dispose() }
+        }
+        [pscustomobject]@{
+            view = $regView
+            healed = $healed
+            reason = $reason
+        }
+    }
+}
+
 function Save-LastSync {
     param([object]$Payload)
     if (-not (Test-Path -LiteralPath $StateDir -PathType Container)) {
@@ -349,7 +460,7 @@ $mutexName = 'Local\AntigravityAddonsReconcileMutex'
 $mutex = [Threading.Mutex]::new($false, $mutexName)
 $acquired = $false
 try {
-    $waitMs = if ($Mode -eq 'PostQuit') { 0 } else { 5000 }
+    $waitMs = if ($RelaunchAfterUpdate) { 120000 } elseif ($Mode -eq 'PostQuit') { 0 } else { 5000 }
     try {
         $acquired = $mutex.WaitOne($waitMs)
     } catch [Threading.AbandonedMutexException] {
@@ -366,32 +477,69 @@ try {
     }
 
     if ($Mode -eq 'PostQuit') {
-        # Allow a brief moment for the updater child process to spawn after will-quit
-        Start-Sleep -Milliseconds 350
-        $updaterSeen = Test-UpdaterRunning
-        $preStatus = Invoke-ReconcilerJson -Arguments @('status')
-        $shortcutCheck = Get-ShortcutAudit
-        $anyShortcutNeedsHeal = @($shortcutCheck | Where-Object { $_.needsHeal }).Count -gt 0
+        $updaterSeen = $false
+        if ($RelaunchAfterUpdate) {
+            $quitDeadline = [datetime]::UtcNow.AddSeconds(15)
+            while ((Test-AnyAntigravityProcessRunning) -and ([datetime]::UtcNow -lt $quitDeadline)) {
+                Start-Sleep -Milliseconds 200
+            }
+            $spawnDeadline = [datetime]::UtcNow.AddSeconds(5)
+            while ([datetime]::UtcNow -lt $spawnDeadline) {
+                if (Test-UpdaterRunning) {
+                    $updaterSeen = $true
+                    break
+                }
+                $probeDeploy = Get-AntigravityDeployment $AppDir
+                if ($probeDeploy.present) {
+                    $probeStatus = Invoke-ReconcilerJson -Arguments @('status')
+                    if ($probeStatus.status -ne 'up-to-date') { break }
+                }
+                Start-Sleep -Milliseconds 250
+            }
+        } else {
+            # Allow a brief moment for the updater child process to spawn after will-quit
+            Start-Sleep -Milliseconds 350
+            $updaterSeen = Test-UpdaterRunning
+            $preStatus = Invoke-ReconcilerJson -Arguments @('status')
+            $shortcutCheck = Get-ShortcutAudit
+            $anyShortcutNeedsHeal = @($shortcutCheck | Where-Object { $_.needsHeal }).Count -gt 0
 
-        if (-not $updaterSeen -and $preStatus.status -eq 'up-to-date' -and -not $anyShortcutNeedsHeal) {
-            return
+            if (-not $updaterSeen -and $preStatus.status -eq 'up-to-date' -and -not $anyShortcutNeedsHeal) {
+                return
+            }
+            if (-not $updaterSeen -and $preStatus.status -ne 'up-to-date') {
+                # Wait for all exiting Antigravity processes to release resources\app.asar
+                # so pending builds promote on disk before the next direct Taskbar launch.
+                $releaseDeadline = [datetime]::UtcNow.AddSeconds(12)
+                while ((Test-AnyAntigravityProcessRunning) -and ([datetime]::UtcNow -lt $releaseDeadline)) {
+                    Start-Sleep -Milliseconds 200
+                }
+            }
         }
 
-        if ($updaterSeen) {
+        if ($updaterSeen -or $RelaunchAfterUpdate) {
             $deadline = [datetime]::UtcNow.AddSeconds($UpdaterWaitSeconds)
             while ((Test-UpdaterRunning) -and ([datetime]::UtcNow -lt $deadline)) {
                 Start-Sleep -Seconds 1
             }
-            Start-Sleep -Seconds 1
+            $settleDeadline = [datetime]::UtcNow.AddSeconds(10)
+            while ([datetime]::UtcNow -lt $settleDeadline) {
+                $settled = Get-AntigravityDeployment $AppDir
+                if ($settled.present) { break }
+                Start-Sleep -Milliseconds 250
+            }
         }
 
         $reconcileResult = Invoke-ReconcilerJson -Arguments @('reconcile', '--apply')
         $shortcuts = if ($SkipShortcutHeal) { @() } else { Get-ShortcutAudit -Heal }
+        $registrationHealed = @(if (-not $SkipRegistrationHeal) { Repair-AntigravityUninstallRegistration })
         $record = [pscustomobject]@{
             mode = 'PostQuit'
+            relaunchAfterUpdate = [bool]$RelaunchAfterUpdate
             updaterObserved = $updaterSeen
             reconcile = $reconcileResult
             shortcuts = $shortcuts
+            registration = $registrationHealed
             timestamp = [datetime]::UtcNow.ToString('o')
         }
         Save-LastSync -Payload $record
@@ -411,11 +559,13 @@ try {
         }
         $reconcileResult = Invoke-ReconcilerJson -Arguments $cliArgs
         $shortcuts = if ($SkipShortcutHeal) { @() } else { Get-ShortcutAudit -Heal }
+        $registrationHealed = @(if (-not $SkipRegistrationHeal) { Repair-AntigravityUninstallRegistration })
         $record = [pscustomobject]@{
             mode = $Mode
             stageOnly = [bool]$StageOnly
             reconcile = $reconcileResult
             shortcuts = $shortcuts
+            registration = $registrationHealed
             timestamp = [datetime]::UtcNow.ToString('o')
         }
         Save-LastSync -Payload $record
@@ -463,4 +613,12 @@ try {
         try { $mutex.ReleaseMutex() } catch {}
     }
     $mutex.Dispose()
+    if ($Mode -eq 'PostQuit' -and $RelaunchAfterUpdate -and -not (Test-AntigravityDesktopRunning)) {
+        try {
+            $relaunchTarget = if (Test-Path -LiteralPath $LauncherExe -PathType Leaf) { $LauncherExe } else { $AppExe }
+            if (Test-Path -LiteralPath $relaunchTarget -PathType Leaf) {
+                [void](Start-Process -FilePath $relaunchTarget -WorkingDirectory $AppDir)
+            }
+        } catch {}
+    }
 }
