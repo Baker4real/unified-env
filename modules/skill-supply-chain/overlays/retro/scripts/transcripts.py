@@ -1223,15 +1223,55 @@ def record_when(record):
     return None
 
 
+def _positive_int(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+
+
+def read_line_span(data):
+    """Inclusive (start_line, end_line) for Read/read/read_file; end_line=None means to EOF."""
+    if not isinstance(data, dict):
+        return (1, None)
+    start = (
+        _positive_int(data.get("StartLine"))
+        or _positive_int(data.get("start_line"))
+        or _positive_int(data.get("offset"))
+        or 1
+    )
+    end = _positive_int(data.get("EndLine")) or _positive_int(data.get("end_line"))
+    limit = _positive_int(data.get("limit"))
+    if end is None and limit is not None:
+        end = start + limit - 1
+    if end is not None and end < start:
+        return (1, None)
+    return (start, end)
+
+
+def spans_overlap(first, second):
+    s1, e1 = first
+    s2, e2 = second
+    return (e1 is None or s2 <= e1) and (e2 is None or s1 <= e2)
+
+
 def size_sections(results, reads):
-    """audit --sizes sections from (characters, line, tool, call) per result and (line, characters) per Read path."""
+    """audit --sizes sections from (characters, line, tool, call) per result and (line, characters[, span]) per Read path."""
     total = sum(size for size, *_ in results)
     chars, counts = collections.Counter(), collections.Counter()
     for size, _number, name, _about in results:
         chars[name] += size
         counts[name] += 1
-    repeated = sorted(((sum(size for _, size in hits), path, hits) for path, hits in reads.items() if len(hits) > 1),
-                      reverse=True)
+    repeated = []
+    for path, hits in reads.items():
+        if len(hits) <= 1:
+            continue
+        normalized = [(h[0], h[1], h[2] if len(h) > 2 else (1, None)) for h in hits]
+        overlapping = [
+            (ln, sz)
+            for idx, (ln, sz, span) in enumerate(normalized)
+            if any(spans_overlap(span, other[2]) for j, other in enumerate(normalized) if j != idx)
+        ]
+        if len(overlapping) > 1:
+            repeated.append((sum(size for _, size in overlapping), path, overlapping))
+    repeated.sort(reverse=True)
     return [
         (f"tool result characters: {total} in {len(results)} results",
          [f"{name}: {size} ({size * 100 // max(total, 1)}%), {counts[name]} results" for name, size in chars.most_common()]),
@@ -1458,7 +1498,7 @@ def cmd_audit(args):
                 if block.name in ("Read", "read", "read_file") and isinstance(block.data, dict):
                     read_path = block.data.get("file_path") or block.data.get("path") or block.data.get("Path")
                     if isinstance(read_path, str):
-                        read_paths[block.call_id] = read_path
+                        read_paths[block.call_id] = (read_path, read_line_span(block.data))
             ag_task_launch = None
             if is_ag and block.kind == "tool_result" and not block.failed:
                 launch_match = AG_TASK_LAUNCH.match(block.text)
@@ -1545,7 +1585,8 @@ def cmd_audit(args):
                 name, about, start, origin = calls.get(block.call_id, ("?", "", None, 0))
                 results.append((len(block.text), number, name, about))
                 if block.call_id in read_paths:
-                    reads[read_paths[block.call_id]].append((number, len(block.text)))
+                    read_path, read_span = read_paths[block.call_id]
+                    reads[read_path].append((number, len(block.text), read_span))
                 # Error-like text is evidence only for tools that execute or install;
                 # document reads and fetched pages may legitimately quote those tokens.
                 failed = block.failed or (is_dsh_record(record) and not job_outcome

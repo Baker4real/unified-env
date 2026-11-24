@@ -1577,6 +1577,45 @@ class AntigravityTranscriptTests(unittest.TestCase):
         self.assertEqual(explicit.returncode, 0, explicit.stderr)
         self.assertIn("conv-current-id", explicit.stdout)
 
+    def test_disjoint_line_range_reads_are_not_counted_as_repeated(self):
+        records = [
+            {"step_index": 0, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE",
+             "created_at": "2026-11-24T00:00:01Z",
+             "tool_calls": [
+                 {"name": "read_file", "args": {"Path": json.dumps("D:/work/sectioned.md"), "StartLine": 1, "EndLine": 25}},
+                 {"name": "read_file", "args": {"Path": json.dumps("D:/work/sectioned.md"), "StartLine": 26, "EndLine": 88}},
+                 {"name": "read_file", "args": {"Path": json.dumps("D:/work/overlapped.md"), "StartLine": 1, "EndLine": 40}},
+                 {"name": "read_file", "args": {"Path": json.dumps("D:/work/overlapped.md"), "StartLine": 30, "EndLine": 70}},
+             ]},
+            {"step_index": 1, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-24T00:00:02Z", "content": "sec1"},
+            {"step_index": 2, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-24T00:00:02Z", "content": "sec2"},
+            {"step_index": 3, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-24T00:00:02Z", "content": "ov1"},
+            {"step_index": 4, "source": "MODEL", "type": "GENERIC", "status": "DONE", "created_at": "2026-11-24T00:00:02Z", "content": "ov2"},
+        ]
+        claude_records = [
+            {"type": "assistant", "timestamp": "2026-11-24T00:00:01Z", "message": {"content": [
+                {"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": "D:/work/claude.md", "offset": 1, "limit": 50}},
+                {"type": "tool_use", "id": "r2", "name": "Read", "input": {"file_path": "D:/work/claude.md", "offset": 51, "limit": 50}},
+            ]}},
+            {"type": "user", "timestamp": "2026-11-24T00:00:02Z", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "r1", "content": "part1"},
+                {"type": "tool_result", "tool_use_id": "r2", "content": "part2"},
+            ]}},
+        ]
+        with tempfile.TemporaryDirectory(dir=TEMP_ROOT) as directory:
+            ag_path = Path(directory) / "transcript.jsonl"
+            ag_path.write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
+            cl_path = Path(directory) / "claude.jsonl"
+            cl_path.write_text("\n".join(json.dumps(r) for r in claude_records), encoding="utf-8")
+            ag_audit = run("audit", str(ag_path), "--sizes")
+            cl_audit = run("audit", str(cl_path), "--sizes")
+        self.assertEqual(ag_audit.returncode, 0, ag_audit.stderr)
+        self.assertIn("files read more than once (Read tool): 1", ag_audit.stdout)
+        self.assertIn("x2 D:/work/overlapped.md", ag_audit.stdout)
+        self.assertNotIn("sectioned.md", ag_audit.stdout.split("files read more than once (Read tool):")[1])
+        self.assertEqual(cl_audit.returncode, 0, cl_audit.stderr)
+        self.assertIn("files read more than once (Read tool): 0", cl_audit.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
