@@ -27,6 +27,14 @@ intent: 记录家里设备的受控环境事实与差异
 - UU 远程设备名：`家里`；设备 ID：`aeawutisfya4t4ev`。
 - 正式命令与文件传输走 OpenSSH/SCP over Tailscale；UU 只用于 bootstrap、诊断和受限救援。
 - 2026-08-31 本机 `bak\` 下没有 `Upgrade.exe` / `aria2c.exe`，2026-10-28 安装根下已没有 `bak\`。应用内更新从 `bin` 启动下载器。自习室的 `bak` 回退约束见 `docs/environments/zi-xi-shi.md`，不要套到本机。
+- 远程开机（WOL）边界（2026-11-24 核验）：网线必须接主板板载 PCIe 2.5G 口（`Realtek Gaming 2.5GbE Family Controller`，`RTL8125`），不能接外接 USB 2.5G 网卡（`RTL8156BG REV_3104` 驱动 `RTL8156Xx64.ndi.NT` 显式移除 `*WakeOnMagicPacket`，UU 远程会假通过「关机网络唤醒」而卡在「魔术封包唤醒」，且 USB 网卡不支持台式机 S5 关机唤醒）。板载网卡已启用 `S5WakeOnLan`、`*WakeOnMagicPacket`、`MSPower_DeviceWakeEnable` 与 `MSNdis_DeviceWakeOnMagicPacketOnly`（`wake_armed` 已在列），且已抓包证实主路由内置 UU 合作接口（`:16363/router`）与红米无线中继 `relayd -B` 可将子网广播魔术包送达物理 `lan2` 口；证据见 `D:\agents\run-evidence\wol-enable-20261124\summary.json`。华硕主板 BIOS `APM Configuration` 的 `Power On By PCI-E = Enabled` / `ErP Ready = Disabled` 及真实 S5 断电唤醒仍待重启后实测。
+
+## Tailscale 与家庭 mesh
+
+- 2026-11-10 修复前，tailscaled 对 `hkg`、`sfo`、`lax` 的 DERP 持续出现 EOF；只重启 Tailscale 服务无效。
+- 当前服务级代理持久配置在 `HKLM\SYSTEM\CurrentControlSet\Services\Tailscale` 的 `Environment`：`HTTP_PROXY=http://127.0.0.1:17897`、`HTTPS_PROXY=http://127.0.0.1:17897`，以及 `NO_PROXY=127.0.0.1,localhost,100.64.0.0/10`。原回滚状态是该 `Environment` 值不存在。
+- 此配置依赖 Clash mixed 端口 `127.0.0.1:17897`；该端口停止会影响家庭 mesh，不能把 Tailscale 服务仍在运行当作链路健康。
+- 写入后已重启 Tailscale 服务并验收：办公室与自习室均恢复真实直连 pong，办公室严格 SSH 成功。最终事务证据为 `D:\agents\run-evidence\home-tailscale-repair-20261110\proxy-20261110-172744\result.json`，不采用此前已 rolled-back 的候选状态。本次只验证了服务重启，未做整机重启，开机后的持久恢复仍未验证。
 
 ## 网易爆米花
 

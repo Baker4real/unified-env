@@ -18,8 +18,9 @@ Preflight fails closed on: paths that are not drive paths on a fixed NTFS volume
 roots and their ancestors, system subtrees, reparse points on the path, targets that a knowledge-base page
 lists as a source (the target itself or anything inside it; recycling one breaks the knowledge base's lint and
 blocks every session's commit there until the pages are repointed), reparse points inside the tree, hard links
-(with -AllowInternalHardLinks only those with a name outside the target; Plan records the switch and Apply
-rechecks with it), entries this process cannot open for DELETE (installers often leave Users with read and
+(with -AllowInternalHardLinks only those with a name outside the target; with -AllowExternalHardLinks only those whose
+names cannot all be read, while external peer paths are counted and sampled; Plan records the switches and Apply
+rechecks with them), entries this process cannot open for DELETE (installers often leave Users with read and
 execute only and the shell would then fail the move with 0x78; the refusal names them and says whether the
 process was elevated), git work the recycle would lose (in each work tree it holds, sits in or holds through a
 core.worktree, uncommitted and untracked files under the target, files in a submodule folder that is not checked
@@ -50,6 +51,7 @@ param(
     [string]$ApprovedPlanSha256,
     [switch]$ConfirmRecycle,
     [switch]$AllowInternalHardLinks,
+    [switch]$AllowExternalHardLinks,
     [string]$EvidenceRoot = 'D:/agents/run-evidence/managed-recycle',
     [string]$KnowledgeBaseRoot = 'D:/agents/knowledge-base',
     [string]$GitLossAuthorization
@@ -446,7 +448,7 @@ function Get-UserBinDirectory([string]$Root) {
 }
 
 # Every check Plan and Apply share. Fills $result and returns the scan, or refuses.
-function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInternalLinks, [string]$GitLoss) {
+function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInternalLinks, [bool]$AllowExternalLinks, [string]$GitLoss) {
     if ([string]::IsNullOrWhiteSpace($Path)) { Stop-Refused 'target-required' }
     if (-not [IO.Path]::IsPathFullyQualified($Path) -or $Path.IndexOfAny([char[]]'*?') -ge 0) { Stop-Refused 'target-not-fully-qualified' }
     $full = [IO.Path]::GetFullPath($Path)
@@ -469,7 +471,7 @@ function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInte
         $result.kbCitations = @($citations | Select-Object -First 20)
         Stop-Refused 'kb-cited'
     }
-    $scan = try { [ManagedRecycle.Native]::Scan($full, $true, $AllowInternalLinks, $maxEntries) }
+    $scan = try { [ManagedRecycle.Native]::Scan($full, $true, $AllowInternalLinks, $AllowExternalLinks, $maxEntries) }
     catch {
         $inner = $_.Exception.InnerException
         $result.scanError = if ($inner) { $inner.Message } else { $_.Exception.Message }
@@ -480,7 +482,11 @@ function Invoke-Preflight([string]$Path, [string]$EvidenceFull, [bool]$AllowInte
     $result.fileCount = $scan.Files
     $result.directoryCount = $scan.Directories
     $result.totalBytes = $scan.Bytes
-    if ($AllowInternalLinks) { $result.internalHardLinkFiles = $scan.InternalLinkFiles }
+    if ($AllowInternalLinks -or $AllowExternalLinks) { $result.internalHardLinkFiles = $scan.InternalLinkFiles }
+    if ($AllowExternalLinks) {
+        $result.externalHardLinkFiles = $scan.ExternalLinkFiles
+        $result.externalHardLinkPeers = @($scan.ExternalLinkPeers)
+    }
     $binName = (Get-UserBinDirectory $root).Length + 9 + [IO.Path]::GetExtension($full).Length
     $tail = if ($scan.MaxRelativeLength -gt 0) { 1 + $scan.MaxRelativeLength } else { 0 }
     $result.longestPath = [math]::Max($full.Length, $binName) + $tail
@@ -592,6 +598,9 @@ namespace ManagedRecycle
         public int MaxRelativeLength;
         public bool Truncated;
         public long InternalLinkFiles;
+        public long ExternalLinkFiles;
+        public List<string> ExternalLinkPeers = new List<string>();
+        public HashSet<string> ExternalLinkPeerSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, long[]> Top = new Dictionary<string, long[]>(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -733,11 +742,11 @@ namespace ManagedRecycle
 
         // Exact manifest of a file or a directory tree: "D<tab>relative" and "F<tab>relative<tab>bytes" lines in
         // ordinal order. Reparse points are reported, never followed. With checkLinks every file needs one link;
-        // with allowInternalLinks as well, a file may have more when every one of its names is inside root.
-        public static TreeScan Scan(string root, bool checkLinks, bool allowInternalLinks, int maxEntries)
+        // with allowInternalLinks a file may have more when every one of its names is inside root; with
+        // allowExternalLinks a file may also share names outside root when every name can be read.
+        public static TreeScan Scan(string root, bool checkLinks, bool allowInternalLinks, bool allowExternalLinks, int maxEntries)
         {
             var scan = new TreeScan();
-            string internalRoot = allowInternalLinks ? root : null;
             ProbeDelete(scan, root, ".");
             if ((File.GetAttributes(root) & FileAttributes.Directory) == 0)
             {
@@ -746,7 +755,7 @@ namespace ManagedRecycle
                 scan.Files = 1;
                 scan.Bytes = size;
                 scan.Lines.Add("F\t\t" + size);
-                if (checkLinks) CheckLinks(scan, root, "", internalRoot);
+                if (checkLinks) CheckLinks(scan, root, "", root, allowInternalLinks, allowExternalLinks);
                 return scan;
             }
             scan.Kind = "directory";
@@ -787,7 +796,7 @@ namespace ManagedRecycle
                     scan.Bytes += length;
                     scan.Lines.Add("F\t" + relative + "\t" + length);
                     Tally(scan, top, length, 1);
-                    if (checkLinks) CheckLinks(scan, item.FullName, relative, internalRoot);
+                    if (checkLinks) CheckLinks(scan, item.FullName, relative, root, allowInternalLinks, allowExternalLinks);
                 }
             }
             scan.Lines.Sort(StringComparer.Ordinal);
@@ -806,21 +815,30 @@ namespace ManagedRecycle
             if (scan.DeleteDenied.Count < 20) scan.DeleteDenied.Add(relative);
         }
 
-        // internalRoot is null unless hard links whose names all stay inside it are allowed.
-        private static void CheckLinks(TreeScan scan, string path, string relative, string internalRoot)
+        private static void CheckLinks(TreeScan scan, string path, string relative, string root, bool allowInternalLinks, bool allowExternalLinks)
         {
             long links = Links(path);
             if (links < 0) { AddProblem(scan, "link-count-unreadable: " + relative); return; }
             if (links == 1) return;
             string count = " (" + links + " links)";
-            if (internalRoot == null) { AddProblem(scan, "hard-link: " + relative + count); return; }
+            if (!allowInternalLinks && !allowExternalLinks) { AddProblem(scan, "hard-link: " + relative + count); return; }
             List<string> names = LinkNames(path);
             if (names == null || names.Count != links) { AddProblem(scan, "hard-link-names-unreadable: " + relative + count); return; }
+            bool hasOutside = false;
             foreach (string name in names)
             {
-                if (!Within(name, internalRoot)) { AddProblem(scan, "hard-link-outside-target: " + relative + count); return; }
+                if (!Within(name, root))
+                {
+                    if (!allowExternalLinks) { AddProblem(scan, "hard-link-outside-target: " + relative + count); return; }
+                    hasOutside = true;
+                    if (scan.ExternalLinkPeers.Count < 20 && scan.ExternalLinkPeerSet.Add(name))
+                    {
+                        scan.ExternalLinkPeers.Add(name);
+                    }
+                }
             }
-            scan.InternalLinkFiles++;
+            if (hasOutside) scan.ExternalLinkFiles++;
+            else scan.InternalLinkFiles++;
         }
 
         private static bool Within(string path, string parent)
@@ -858,7 +876,7 @@ namespace ManagedRecycle
     }
 
     if ($Mode -eq 'Check') {
-        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent $GitLossAuthorization
+        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent $AllowExternalHardLinks.IsPresent $GitLossAuthorization
         $result.status = 'checked'
         $result.topLevel = @(Get-TopLevel $checked.scan)
         Complete
@@ -868,7 +886,7 @@ namespace ManagedRecycle
         if ([string]::IsNullOrWhiteSpace($Purpose) -or [string]::IsNullOrWhiteSpace($Authorization)) {
             Stop-Refused 'purpose-and-authorization-required'
         }
-        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent $GitLossAuthorization
+        $checked = Invoke-Preflight $TargetPath $evidenceFull $AllowInternalHardLinks.IsPresent $AllowExternalHardLinks.IsPresent $GitLossAuthorization
         $runDir = Join-Path $evidenceFull ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         [void][IO.Directory]::CreateDirectory($runDir)
         if (Get-ReparseOnPath $runDir) { Stop-Refused 'evidence-path-has-reparse-point' }
@@ -888,6 +906,9 @@ namespace ManagedRecycle
             totalBytes = $checked.scan.Bytes
             allowInternalHardLinks = $AllowInternalHardLinks.IsPresent
             internalHardLinkFiles = $checked.scan.InternalLinkFiles
+            allowExternalHardLinks = $AllowExternalHardLinks.IsPresent
+            externalHardLinkFiles = $checked.scan.ExternalLinkFiles
+            externalHardLinkPeers = @($checked.scan.ExternalLinkPeers)
             gitLossAuthorization = $result['gitLossAuthorization']
             gitUnsavedWork = @($result['gitUnsavedWork'] | Where-Object { $_ })
             manifestSha256 = $manifestSha256
@@ -938,7 +959,7 @@ namespace ManagedRecycle
     $result.purpose = $plan.purpose
     $result.authorization = $plan.authorization
     # The plan's setting, not this call's switch: the user authorized what the plan recorded.
-    $checked = Invoke-Preflight $plan.target $evidenceFull ($plan['allowInternalHardLinks'] -eq $true) ([string]$plan['gitLossAuthorization'])
+    $checked = Invoke-Preflight $plan.target $evidenceFull ($plan['allowInternalHardLinks'] -eq $true) ($plan['allowExternalHardLinks'] -eq $true) ([string]$plan['gitLossAuthorization'])
     # The user agreed to lose the git work the plan recorded and no more; any other git work found now needs a new plan.
     $plannedWork = ConvertTo-Json -InputObject @($plan['gitUnsavedWork'] | Where-Object { $_ }) -Depth 5 -Compress
     $foundWork = ConvertTo-Json -InputObject @($result['gitUnsavedWork'] | Where-Object { $_ }) -Depth 5 -Compress
@@ -969,7 +990,7 @@ namespace ManagedRecycle
     if ($call[0] -ne 0 -or $result.aborted -or $result.targetStillExists) { $result.reason = 'recycle-call-failed' }
     elseif (-not $record) { $result.reason = if ($result.Contains('unreadableBinRecords')) { 'bin-record-unreadable' } else { 'bin-record-missing' } }
     else {
-        $binScan = try { [ManagedRecycle.Native]::Scan($record.contentPath, $false, $false, $maxEntries) } catch { $null }
+        $binScan = try { [ManagedRecycle.Native]::Scan($record.contentPath, $false, $false, $false, $maxEntries) } catch { $null }
         $result.binManifestSha256 = if ($binScan -and -not $binScan.Truncated) { Get-ManifestSha256 $binScan } else { $null }
         if ($result.binManifestSha256 -ne $plan.manifestSha256) { $result.reason = 'bin-copy-differs' }
         else { $result.status = 'recycled' }

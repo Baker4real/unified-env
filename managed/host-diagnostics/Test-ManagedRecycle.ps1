@@ -222,6 +222,31 @@ try {
         Assert-Refused (Invoke-Entry @('-Mode', 'Check', '-TargetPath', (Join-Path $tree 'a.txt'), '-AllowInternalHardLinks')) 'tree-not-recyclable'
     }
 
+    Assert-Case 'check accepts hard links with a name outside the tree only with -AllowExternalHardLinks and names external peers' {
+        $tree = New-Tree 'tree-external-hardlink-allowed'
+        $sibling = $tree + '-peers'
+        [void][IO.Directory]::CreateDirectory($sibling)
+        $peerPath = Join-Path $sibling 'a-peer.txt'
+        $null = New-Item -ItemType HardLink -Path $peerPath -Target (Join-Path $tree 'a.txt')
+        $null = New-Item -ItemType HardLink -Path (Join-Path $tree 'sub\b-twin.bin') -Target (Join-Path $tree 'sub\b.bin')
+        Assert-Refused (Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree)) 'tree-not-recyclable'
+        Assert-Refused (Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree, '-AllowInternalHardLinks')) 'tree-not-recyclable'
+        $response = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree, '-AllowExternalHardLinks')
+        if ($response.exitCode -ne 0 -or $response.json.status -ne 'checked' -or $response.stderr) { throw "Check with -AllowExternalHardLinks failed: $($response.stdout)" }
+        if ($response.json.externalHardLinkFiles -ne 1 -or $response.json.internalHardLinkFiles -ne 2 -or (@($response.json.externalHardLinkPeers) -join '|') -cne $peerPath) {
+            throw "External and internal hard link counts or peers were not reported accurately: $($response.stdout)"
+        }
+        $singleFile = Invoke-Entry @('-Mode', 'Check', '-TargetPath', (Join-Path $tree 'a.txt'), '-AllowExternalHardLinks')
+        if ($singleFile.exitCode -ne 0 -or $singleFile.json.externalHardLinkFiles -ne 1 -or (@($singleFile.json.externalHardLinkPeers) -join '|') -cne $peerPath) {
+            throw "Single-file external hard link check failed: $($singleFile.stdout)"
+        }
+        # Reparse points inside the tree remain refused even when external hard links are allowed.
+        New-Junction (Join-Path $tree 'inner-junction') $realTarget
+        $withJunction = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $tree, '-AllowExternalHardLinks')
+        Assert-Refused $withJunction 'tree-not-recyclable'
+        if (@($withJunction.json.problems) -notcontains 'reparse-point: inner-junction') { throw 'A junction inside an external-hardlink tree was not refused.' }
+    }
+
     Assert-Case 'plan refuses paths the shell cannot move' {
         [void][IO.Directory]::CreateDirectory($longTree)
         $name = 'x' * (262 - $longTree.Length - 1)
@@ -663,6 +688,7 @@ try {
         if ($plan.target -ne $tree -or $plan.fileCount -ne 2 -or $plan.directoryCount -ne 2 -or $plan.totalBytes -ne 1029) { throw 'Plan totals changed.' }
         if ($plan.authorization -cne 'test fixture created by this run' -or $plan.purpose -cne 'managed recycle test') { throw 'Plan lost its authorization.' }
         if ($plan.allowInternalHardLinks -ne $false) { throw 'A plan without the switch did not record it as off.' }
+        if ($plan.allowExternalHardLinks -ne $false) { throw 'A plan without -AllowExternalHardLinks did not record it as off.' }
         $single = Invoke-Plan (Join-Path $tree 'a.txt')
         $singlePlan = [IO.File]::ReadAllText($single.json.planPath) | ConvertFrom-Json -AsHashtable
         if ($single.json.kind -ne 'file' -or [string]::Join('|', $singlePlan.manifest) -cne "F`t`t5") { throw 'A single-file plan is not exact.' }
@@ -715,6 +741,22 @@ try {
         $plan = [IO.File]::ReadAllText($planned.json.planPath) | ConvertFrom-Json -AsHashtable
         if ($plan.allowInternalHardLinks -ne $true -or $plan.internalHardLinkFiles -ne 2) { throw 'The plan did not record the internal hard links.' }
         # Drift after the plan: refusing for the drift rather than for the hard links proves Apply reran the preflight with the plan's setting.
+        [IO.File]::WriteAllText((Join-Path $tree 'extra.txt'), 'drift', $utf8)
+        Assert-Refused (Invoke-Entry @('-Mode', 'Apply', '-PlanPath', $planned.json.planPath, '-ApprovedPlanSha256', $planned.json.planSha256, '-ConfirmRecycle')) 'manifest-changed'
+    }
+
+    Assert-Case 'plan records -AllowExternalHardLinks and apply rechecks the tree with it' {
+        $tree = New-Tree 'tree-external-plan'
+        $peerDir = $tree + '-peers'
+        [void][IO.Directory]::CreateDirectory($peerDir)
+        $peer = Join-Path $peerDir 'a-peer.txt'
+        $null = New-Item -ItemType HardLink -Path $peer -Target (Join-Path $tree 'a.txt')
+        $planned = Invoke-Entry @('-Mode', 'Plan', '-TargetPath', $tree, '-Purpose', 'managed recycle test', '-Authorization', 'test fixture created by this run', '-AllowExternalHardLinks')
+        if ($planned.exitCode -ne 0 -or $planned.json.status -ne 'planned' -or $planned.stderr) { throw "Plan with -AllowExternalHardLinks failed: $($planned.stdout)" }
+        $plan = [IO.File]::ReadAllText($planned.json.planPath) | ConvertFrom-Json -AsHashtable
+        if ($plan.allowExternalHardLinks -ne $true -or $plan.externalHardLinkFiles -ne 1 -or (@($plan.externalHardLinkPeers) -join '|') -cne $peer) {
+            throw 'The plan did not record the external hard links and peer path.'
+        }
         [IO.File]::WriteAllText((Join-Path $tree 'extra.txt'), 'drift', $utf8)
         Assert-Refused (Invoke-Entry @('-Mode', 'Apply', '-PlanPath', $planned.json.planPath, '-ApprovedPlanSha256', $planned.json.planSha256, '-ConfirmRecycle')) 'manifest-changed'
     }
@@ -772,6 +814,22 @@ try {
             Invoke-BinStep { [IO.File]::Move($linkedRecord.indexPath, (Join-Path $runRoot 'restored-bin-index-internal-hardlink.bin')) }
             $rechecked = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $linked, '-AllowInternalHardLinks')
             if ($rechecked.exitCode -ne 0 -or $rechecked.json.internalHardLinkFiles -ne 2) { throw 'The restored tree lost its internal hard links.' }
+            # Moving an external hard link's target tree into the bin leaves the external peer intact and linked.
+            $extTree = New-Tree 'tree-live-external-hardlink'
+            $extPeer = Join-Path $fixtures 'live-external-peer.txt'
+            $null = New-Item -ItemType HardLink -Path $extPeer -Target (Join-Path $extTree 'a.txt')
+            $extPlanned = Invoke-Entry @('-Mode', 'Plan', '-TargetPath', $extTree, '-Purpose', 'managed recycle test', '-Authorization', 'test fixture created by this run', '-AllowExternalHardLinks')
+            if ($extPlanned.exitCode -ne 0) { throw "Plan with -AllowExternalHardLinks failed: $($extPlanned.stdout)" }
+            $extApplied = Invoke-Entry @('-Mode', 'Apply', '-PlanPath', $extPlanned.json.planPath, '-ApprovedPlanSha256', $extPlanned.json.planSha256, '-ConfirmRecycle')
+            if ($extApplied.exitCode -ne 0 -or $extApplied.json.status -ne 'recycled' -or $extApplied.stderr) { throw "Recycle with external hard links failed: $($extApplied.stdout)" }
+            if ([IO.Directory]::Exists($extTree) -or -not [IO.File]::Exists($extPeer) -or [IO.File]::ReadAllText($extPeer, $utf8) -cne 'hello') {
+                throw 'Recycling a tree with external hard links disturbed the external peer.'
+            }
+            $extRecord = $extApplied.json.binRecord
+            [IO.Directory]::Move($extRecord.contentPath, $extTree)
+            Invoke-BinStep { [IO.File]::Move($extRecord.indexPath, (Join-Path $runRoot 'restored-bin-index-external-hardlink.bin')) }
+            $extRechecked = Invoke-Entry @('-Mode', 'Check', '-TargetPath', $extTree, '-AllowExternalHardLinks')
+            if ($extRechecked.exitCode -ne 0 -or $extRechecked.json.externalHardLinkFiles -ne 1) { throw 'The restored tree lost its external hard link.' }
         }
     }
 }
