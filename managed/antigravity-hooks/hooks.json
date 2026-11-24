@@ -2,7 +2,7 @@
   "pwsh-preflight-guard": {
     "PreToolUse": [
       {
-        "matcher": "run_command",
+        "matcher": "run_command|send_message",
         "hooks": [
           {
             "type": "command",

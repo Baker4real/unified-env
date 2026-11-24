@@ -66,7 +66,7 @@ Assert-Equal $LASTEXITCODE 0 "antigravity guard --self-test 必须成功：$self
 # 验证 Antigravity hooks.json 结构（pwsh-preflight-guard 与 pretool-guard 共存）及与 live 副本一致。
 $managedJson = Get-Content -LiteralPath $managedHooksPath -Raw -Encoding utf8 | ConvertFrom-Json
 $pwshEntry = $managedJson.'pwsh-preflight-guard'.PreToolUse[0]
-Assert-Equal $pwshEntry.matcher 'run_command' 'pwsh-preflight-guard matcher 不符'
+Assert-Equal $pwshEntry.matcher 'run_command|send_message' 'pwsh-preflight-guard matcher 不符'
 Assert-Equal $pwshEntry.hooks[0].command 'python -B -X utf8 D:/Codex/.codex/scripts/antigravity_pretool_guard.py' 'pwsh-preflight-guard command 不符'
 $entry = $managedJson.'pretool-guard'.PreToolUse[0]
 Assert-Equal $entry.matcher 'run_command|write_file|edit_file|write_to_file|replace_file_content' 'matcher 不符'
