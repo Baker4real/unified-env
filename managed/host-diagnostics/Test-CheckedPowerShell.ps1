@@ -949,6 +949,73 @@ Assert-Case 'preflight rejects mixed top-level Select-Object pipelines with disj
     }
 }
 
+Assert-Case 'preflight rejects PowerShell background pipeline operator ampersand' {
+    $invalidCases = @(
+        'tasklist /fi "IMAGENAME eq SystemSettings.exe" & tasklist /fi "IMAGENAME eq ApplicationFrameHost.exe"; "BG-SECRET-SENTINEL"',
+        'Get-Date &',
+        'Write-Output "a" & Write-Output "b"'
+    )
+    foreach ($source in $invalidCases) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'syntax-error id=BackgroundPipelineOperator') {
+            throw "Background '&' pipeline was not rejected ($source): exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+        if ($result.stdout -or $result.stderr.Contains('BG-SECRET-SENTINEL')) {
+            throw 'Background pipeline rejection exposed source.'
+        }
+    }
+    $validCases = @(
+        '& "C:/Windows/System32/cmd.exe" /c "echo ok"',
+        '$x = 1; & (Join-Path $PSHOME "pwsh.exe") -Version',
+        'Write-Output "a & b"'
+    )
+    foreach ($source in $validCases) {
+        $ok = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($ok.exitCode -ne 0) { throw "Valid call operator '&' was rejected ($source): exit=$($ok.exitCode) stderr=$($ok.stderr)" }
+    }
+}
+
+Assert-Case 'preflight rejects uncleaned LASTEXITCODE after PSNativeCommandUseErrorActionPreference probe before JSON output' {
+    $invalidSource = @'
+$PSNativeCommandUseErrorActionPreference = $false
+$hits = @(rg -n 'needle' 'D:/docs/index.md')
+$code = $LASTEXITCODE
+$PSNativeCommandUseErrorActionPreference = $true
+$secret = 'PROBE-EXIT-SECRET-SENTINEL'
+[pscustomobject]@{ status = 'ok'; code = $code } | ConvertTo-Json -Compress
+'@
+    $result = Invoke-PublicCli @('-CommandText', $invalidSource, '-CheckOnly')
+    if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'parameter-error id=UncleanedProbeExitCode command=ConvertTo-Json') {
+        throw "Uncleaned probe LASTEXITCODE was not rejected: exit=$($result.exitCode) stderr=$($result.stderr)"
+    }
+    if ($result.stdout -or $result.stderr.Contains('PROBE-EXIT-SECRET-SENTINEL')) {
+        throw 'UncleanedProbeExitCode rejection exposed source.'
+    }
+    $validResetSource = @'
+$PSNativeCommandUseErrorActionPreference = $false
+$hits = @(rg -n 'needle' 'D:/docs/index.md')
+$code = $LASTEXITCODE
+$PSNativeCommandUseErrorActionPreference = $true
+$global:LASTEXITCODE = 0
+[pscustomobject]@{ status = 'ok'; code = $code } | ConvertTo-Json -Compress
+'@
+    $okReset = Invoke-PublicCli @('-CommandText', $validResetSource, '-CheckOnly')
+    if ($okReset.exitCode -ne 0) {
+        throw "Valid reset $global:LASTEXITCODE = 0 was rejected: exit=$($okReset.exitCode) stderr=$($okReset.stderr)"
+    }
+    $validFuncHelperSource = @'
+function Invoke-ProbeHelper {
+    $PSNativeCommandUseErrorActionPreference = $false
+    $PSNativeCommandUseErrorActionPreference = $true
+}
+[pscustomobject]@{ status = 'ok' } | ConvertTo-Json -Compress
+'@
+    $okHelper = Invoke-PublicCli @('-CommandText', $validFuncHelperSource, '-CheckOnly')
+    if ($okHelper.exitCode -ne 0) {
+        throw "Function-scoped helper preference toggle was rejected: exit=$($okHelper.exitCode) stderr=$($okHelper.stderr)"
+    }
+}
+
 $failed = @($cases | Where-Object status -eq 'failed')
 $report = [ordered]@{
     status = if ($failed.Count) { 'failed' } else { 'passed' }

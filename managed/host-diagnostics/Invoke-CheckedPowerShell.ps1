@@ -128,6 +128,18 @@ if ($parseErrors.Count) {
     exit 2
 }
 
+# In PowerShell 7, a single trailing or infix '&' (e.g. 'cmd1 & cmd2' copied from cmd.exe) sets PipelineBaseAst.Background
+# and silently diverts stdout into an uncollected PSJob while exiting 0.
+$bgPipeline = $ast.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.PipelineBaseAst] -and $node.Background
+}, $true) | Select-Object -First 1
+if ($null -ne $bgPipeline) {
+    [Console]::Error.WriteLine(('CheckedPowerShell syntax-error id=BackgroundPipelineOperator line={0} column={1}; single ''&'' starts an uncollected PowerShell BackgroundJob and swallows stdout; use '';'' or ''&&''' -f
+        $bgPipeline.Extent.StartLineNumber, $bgPipeline.Extent.StartColumnNumber))
+    exit 2
+}
+
 $regexCandidates = @($ast.FindAll({
     param($node)
     $node -is [System.Management.Automation.Language.BinaryExpressionAst] -and
@@ -569,6 +581,52 @@ if ($null -ne $ast.EndBlock) {
                 [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=MixedSelectObjectFormatting command=Select-Object line={0} column={1}; multiple top-level Select-Object pipelines share one console formatter and silently drop properties missing from the first Select-Object ({2}); pipe each to Out-String/Format-List or combine into one [pscustomobject] | ConvertTo-Json' -f
                     $tailEl.Extent.StartLineNumber, $tailEl.Extent.StartColumnNumber, ($missingProps -join ',')))
                 exit 2
+            }
+        }
+    }
+
+    # Toggling $PSNativeCommandUseErrorActionPreference = $false ... $true to probe a native command's exit code
+    # leaves $LASTEXITCODE nonzero on a no-match (e.g. rg exit 1); built-in cmdlets like ConvertTo-Json do not reset
+    # $LASTEXITCODE, causing the wrapper bootstrap (exit $LASTEXITCODE) to fail with target-exit=1 and skip JSON validation.
+    $topStmts = @($ast.EndBlock.Statements)
+    if ($topStmts.Count -gt 0) {
+        $lastTopStmt = $topStmts[$topStmts.Count - 1]
+        $endsWithJsonCmdlet = $false
+        $jsonTailAst = $lastTopStmt
+        if ($lastTopStmt -is [System.Management.Automation.Language.PipelineAst]) {
+            $lastPipeEls = @($lastTopStmt.PipelineElements)
+            if ($lastPipeEls.Count -gt 0 -and $lastPipeEls[$lastPipeEls.Count - 1] -is [System.Management.Automation.Language.CommandAst]) {
+                $tailCmdAst = $lastPipeEls[$lastPipeEls.Count - 1]
+                if ($tailCmdAst.GetCommandName() -ieq 'ConvertTo-Json') {
+                    $endsWithJsonCmdlet = $true
+                    $jsonTailAst = $tailCmdAst
+                }
+            }
+        }
+        if ($endsWithJsonCmdlet -or $RequiredJsonFields.Count -gt 0) {
+            $topAssigns = @($ast.EndBlock.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $false))
+            $nativeFalseOffset = -1
+            $nativeTrueAfterFalse = $false
+            foreach ($asg in $topAssigns) {
+                $lhsText = $asg.Left.Extent.Text
+                $rhsText = $asg.Right.Extent.Text.Trim()
+                if ($lhsText -imatch '^\$(?:global:|script:|local:|private:)?PSNativeCommandUseErrorActionPreference$') {
+                    if ($nativeFalseOffset -lt 0 -and ($rhsText -ieq '$false' -or $rhsText -eq '0')) {
+                        $nativeFalseOffset = $asg.Extent.StartOffset
+                    } elseif ($nativeFalseOffset -ge 0 -and $asg.Extent.StartOffset -gt $nativeFalseOffset -and ($rhsText -ieq '$true' -or $rhsText -eq '1')) {
+                        $nativeTrueAfterFalse = $true
+                    }
+                }
+            }
+            if ($nativeTrueAfterFalse) {
+                $allAssigns = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true))
+                $resetsLastExit = @($allAssigns | Where-Object { $_.Left.Extent.Text -imatch '^\$(?:global:|script:|local:|private:)?LASTEXITCODE$' }).Count -gt 0
+                $hasTopExit = @($ast.EndBlock.FindAll({ param($n) $n -is [System.Management.Automation.Language.ExitStatementAst] }, $false)).Count -gt 0
+                if ((-not $resetsLastExit) -and (-not $hasTopExit)) {
+                    [Console]::Error.WriteLine(('CheckedPowerShell parameter-error id=UncleanedProbeExitCode command=ConvertTo-Json line={0} column={1}; probing native exit codes under $PSNativeCommandUseErrorActionPreference=$false leaves nonzero $LASTEXITCODE at script end and skips JSON validation; reset $global:LASTEXITCODE = 0 before final output' -f
+                        $jsonTailAst.Extent.StartLineNumber, $jsonTailAst.Extent.StartColumnNumber))
+                    exit 2
+                }
             }
         }
     }
