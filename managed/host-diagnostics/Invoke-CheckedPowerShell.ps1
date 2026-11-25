@@ -337,6 +337,20 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
             $command.Extent.StartLineNumber, $command.Extent.StartColumnNumber))
         exit 2
     }
+    $ghSubcommands = [Collections.Generic.List[string]]::new()
+    for ($subIdx = 1; $subIdx -lt $elements.Count -and $ghSubcommands.Count -lt 2; $subIdx++) {
+        $tokText = $elements[$subIdx].Extent.Text
+        if ($tokText -in @('-R', '--repo', '-H', '--hostname')) { $subIdx++; continue }
+        if ($tokText.StartsWith('-')) { continue }
+        $ghSubcommands.Add(($elements[$subIdx].Extent.Text.Trim("'", '"')))
+    }
+    $isGhRepoView = $ghSubcommands.Count -ge 2 -and $ghSubcommands[0] -ieq 'repo' -and $ghSubcommands[1] -ieq 'view'
+    $ghRepoViewSearchFieldMap = @{
+        'stargazersCount' = 'stargazerCount'
+        'forksCount'      = 'forkCount'
+        'license'         = 'licenseInfo'
+        'fullName'        = 'nameWithOwner'
+    }
     for ($index = 1; $index -lt $elements.Count - 1; $index++) {
         if ($elements[$index].Extent.Text -ine '--json') { continue }
         $value = $elements[$index + 1]
@@ -344,6 +358,17 @@ foreach ($command in $ast.FindAll({ param($node) $node -is [System.Management.Au
             [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=gh parameter=--json reason=bare-comma-array line={0} column={1}' -f
                 $value.Extent.StartLineNumber, $value.Extent.StartColumnNumber))
             exit 2
+        }
+        if ($isGhRepoView -and $value -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+            foreach ($jsonField in ($value.Value -split ',')) {
+                $trimmedField = $jsonField.Trim()
+                if ($ghRepoViewSearchFieldMap.ContainsKey($trimmedField)) {
+                    $replacementField = $ghRepoViewSearchFieldMap[$trimmedField]
+                    [Console]::Error.WriteLine(('CheckedPowerShell native-argument-error command=gh parameter=--json reason=gh-repo-view-invalid-json-field line={0} column={1}; gh repo view rejects search field {2} (use {3})' -f
+                        $value.Extent.StartLineNumber, $value.Extent.StartColumnNumber, $trimmedField, $replacementField))
+                    exit 2
+                }
+            }
         }
     }
 }

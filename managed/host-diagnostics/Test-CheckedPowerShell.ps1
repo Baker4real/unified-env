@@ -495,6 +495,29 @@ gh issue view 252 --comments --json number,title,comments
     }
 }
 
+Assert-Case 'gh repo view rejects gh search repos json field names before execution' {
+    $invalid = @(
+        "gh repo view cemu-project/Cemu --json 'nameWithOwner,stargazersCount,licenseInfo'",
+        "gh -R cemu-project/Cemu repo view --json 'forksCount,url'",
+        "gh repo view cemu-project/Cemu --json 'license,pushedAt'",
+        "gh repo view cemu-project/Cemu --json 'fullName,url'"
+    )
+    foreach ($source in $invalid) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 2 -or $result.stderr -notmatch 'native-argument-error command=gh parameter=--json reason=gh-repo-view-invalid-json-field') {
+            throw "Invalid gh repo view --json field was not rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)"
+        }
+    }
+    $valid = @(
+        "gh repo view cemu-project/Cemu --json 'nameWithOwner,stargazerCount,forkCount,licenseInfo,url'",
+        "gh search repos 'cemu' --json 'fullName,stargazersCount,forksCount,license,url'"
+    )
+    foreach ($source in $valid) {
+        $result = Invoke-PublicCli @('-CommandText', $source, '-CheckOnly')
+        if ($result.exitCode -ne 0) { throw "Valid gh repo/search --json command was rejected: $source exit=$($result.exitCode) stderr=$($result.stderr)" }
+    }
+}
+
 Assert-Case 'oversized output shows head and tail and spills the whole stream' {
     $spill = Join-Path $fixture 'spill'
     $generator = '-join (0..17999 | ForEach-Object { [char](65 + ($_ % 26)) })'
