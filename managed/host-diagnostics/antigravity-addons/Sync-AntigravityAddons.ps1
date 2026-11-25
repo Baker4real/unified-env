@@ -8,19 +8,24 @@ param(
     [switch]$SkipRegistrationHeal,
     [switch]$RelaunchAfterUpdate,
     [switch]$Quiet,
-    [int]$UpdaterWaitSeconds = 90
+    [int]$UpdaterWaitSeconds = 90,
+    [string]$AppDir = 'D:\Apps\Google.Antigravity',
+    [string]$BackupDir = 'D:\Apps\Google.Antigravity.Local',
+    [string]$StateDir = '',
+    [string]$EvidenceRoot = '',
+    [string]$MutexName = 'Local\AntigravityAddonsReconcileMutex'
 )
 
 $ErrorActionPreference = 'Stop'
 
 $ToolsDir = $PSScriptRoot
-$NodeExe = 'D:\Codex\tools\bin\node.exe'
+$NodeExe = if (Test-Path -LiteralPath 'D:\Codex\tools\bin\node.exe' -PathType Leaf) { 'D:\Codex\tools\bin\node.exe' } else { 'node' }
 $Reconciler = Join-Path $ToolsDir 'reconcile-addons.mjs'
-$StateDir = Join-Path $ToolsDir 'state'
-$AppDir = 'D:\Apps\Google.Antigravity'
+if ([string]::IsNullOrWhiteSpace($StateDir)) {
+    $StateDir = Join-Path $ToolsDir 'state'
+}
 $AppExe = Join-Path $AppDir 'Antigravity.exe'
 $AppAsar = Join-Path $AppDir 'resources\app.asar'
-$BackupDir = 'D:\Apps\Google.Antigravity.Local'
 $LauncherExe = Join-Path $BackupDir 'LaunchAntigravity.exe'
 $ProductRegistryKey = 'Software\121a0be4-63bd-531e-acf8-fc3924c7e984'
 $UninstallRegistryKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\121a0be4-63bd-531e-acf8-fc3924c7e984'
@@ -54,7 +59,11 @@ namespace AntigravityAddons {
 
 function Invoke-ReconcilerJson {
     param([string[]]$Arguments)
-    $raw = & $NodeExe $Reconciler @Arguments 2>&1
+    $fullArgs = @($Arguments) + @('--app-dir', $AppDir, '--backup-dir', $BackupDir, '--state-root', $StateDir)
+    if (-not [string]::IsNullOrWhiteSpace($EvidenceRoot)) {
+        $fullArgs += @('--evidence-root', $EvidenceRoot)
+    }
+    $raw = & $NodeExe $Reconciler @fullArgs 2>&1
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
         $text = ($raw | Out-String).Trim()
@@ -156,6 +165,25 @@ function Test-AnyAntigravityProcessRunning {
     foreach ($p in $procs) {
         try {
             if ($p.Path -ieq $AppExe) {
+                return $true
+            }
+        } catch {
+            # Ignore transient process inspection failures
+        }
+    }
+    return $false
+}
+
+function Test-LauncherProcessRunning {
+    param([string]$ExpectedLauncherPath = $LauncherExe)
+    if ([string]::IsNullOrWhiteSpace($ExpectedLauncherPath)) {
+        return $false
+    }
+    $launcherName = [IO.Path]::GetFileNameWithoutExtension($ExpectedLauncherPath)
+    $procs = @(Get-Process -Name $launcherName -ErrorAction SilentlyContinue)
+    foreach ($p in $procs) {
+        try {
+            if ($p.Path -ieq $ExpectedLauncherPath) {
                 return $true
             }
         } catch {
@@ -283,6 +311,19 @@ function Read-AntigravityDesktopObservation {
                 if (-not $process.HasExited) { $unverified = $true }
             } finally {
                 $process.Dispose()
+            }
+        }
+        if (-not $observed) {
+            # Inside hidden desktops (e.g. WinSta0\exebox-*), EnumWindows cannot see WinSta0\Default HWNDs.
+            # Fall back to desktop-main command-line classification in the same Windows session.
+            $cimRows = @(Get-CimInstance Win32_Process -Filter "Name = 'Antigravity.exe'" -Property ProcessId, SessionId, ExecutablePath, CommandLine -ErrorAction SilentlyContinue)
+            foreach ($row in $cimRows) {
+                if ($row.SessionId -ne $session) { continue }
+                $cmdLine = [string]$row.CommandLine
+                if ($cmdLine -match '(?:^|\s)--type=' -or $cmdLine -match '(?:^|\s)(?:"--import"|--import)(?:\s|$)') { continue }
+                $observed = $true
+                $exe = ConvertTo-AntigravityLocalPath $row.ExecutablePath
+                if ($exe) { $paths.Add($exe) } else { $unverified = $true }
             }
         }
     } catch {
@@ -456,11 +497,14 @@ if ($Mode -eq 'Status') {
     return
 }
 
-$mutexName = 'Local\AntigravityAddonsReconcileMutex'
-$mutex = [Threading.Mutex]::new($false, $mutexName)
+$mutex = [Threading.Mutex]::new($false, $MutexName)
 $acquired = $false
+$handoffAlreadyActive = $false
 try {
-    $waitMs = if ($RelaunchAfterUpdate) { 120000 } elseif ($Mode -eq 'PostQuit') { 0 } else { 5000 }
+    # Non-silent NSIS updates invoke Start Menu Antigravity.lnk -> LaunchAntigravity.exe (-Mode Apply)
+    # while PostQuit holds the mutex building the new version's ASAR (~15-30s). Apply/Rebuild/Rollback
+    # must wait up to 120s for the mutex rather than timing out at 5s and launching unpatched Antigravity.
+    $waitMs = if ($RelaunchAfterUpdate) { 120000 } elseif ($Mode -eq 'PostQuit') { 0 } else { 120000 }
     try {
         $acquired = $mutex.WaitOne($waitMs)
     } catch [Threading.AbandonedMutexException] {
@@ -479,6 +523,9 @@ try {
     if ($Mode -eq 'PostQuit') {
         $updaterSeen = $false
         if ($RelaunchAfterUpdate) {
+            if (-not $SkipShortcutHeal) {
+                [void](Get-ShortcutAudit -Heal)
+            }
             $quitDeadline = [datetime]::UtcNow.AddSeconds(15)
             while ((Test-AnyAntigravityProcessRunning) -and ([datetime]::UtcNow -lt $quitDeadline)) {
                 Start-Sleep -Milliseconds 200
@@ -610,10 +657,13 @@ try {
     }
 } finally {
     if ($acquired) {
+        if ($Mode -eq 'PostQuit' -and $RelaunchAfterUpdate) {
+            $handoffAlreadyActive = (Test-AntigravityDesktopRunning) -or (Test-AnyAntigravityProcessRunning) -or (Test-LauncherProcessRunning)
+        }
         try { $mutex.ReleaseMutex() } catch {}
     }
     $mutex.Dispose()
-    if ($Mode -eq 'PostQuit' -and $RelaunchAfterUpdate -and -not (Test-AntigravityDesktopRunning)) {
+    if ($Mode -eq 'PostQuit' -and $RelaunchAfterUpdate -and $acquired -and -not $handoffAlreadyActive -and -not (Test-AntigravityDesktopRunning) -and -not (Test-LauncherProcessRunning)) {
         try {
             $relaunchTarget = if (Test-Path -LiteralPath $LauncherExe -PathType Leaf) { $LauncherExe } else { $AppExe }
             if (Test-Path -LiteralPath $relaunchTarget -PathType Leaf) {

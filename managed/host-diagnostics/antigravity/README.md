@@ -2,10 +2,11 @@
 
 桌面入口通过 `LaunchAntigravity.exe` 读取当前用户启用的 Windows 手动 HTTP(S) 代理，并把它交给新进程。切换代理后需要冷启动。代理切换和快捷方式目标回归由主机诊断的 `diagnostics` profile 执行。启动器源码见 [LaunchAntigravity.cs](LaunchAntigravity.cs)。
 
-在本仓库根目录用 Windows 自带的 .NET Framework C# 编译器构建启动器候选。重新部署前先跑 `node ./scripts/Run-PowerShellTests.cjs --module host-safety --profile diagnostics --only AntigravityDesktopContracts`，保留上一份启动器，并通过原快捷方式复测。
+在本仓库根目录用受管部署入口 `managed/host-diagnostics/antigravity-addons/Deploy-AntigravityAddons.ps1` 检查或原子发布启动器与扩展对账器（自动在 D 盘证据目录内用 `.NET Framework csc.exe` 编译 `LaunchAntigravity.exe`、留存备份与哈希回读 `manifest.json`）。重新部署前先跑 `node ./scripts/Run-PowerShellTests.cjs --module host-safety --profile diagnostics --only AntigravityDesktopContracts`，并通过原快捷方式复测。
 
 ```powershell
-& "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /platform:x64 /r:System.Windows.Forms.dll /out:D:\agents\tmp\LaunchAntigravity.candidate.exe .\managed\host-diagnostics\antigravity\LaunchAntigravity.cs
+& './managed/host-diagnostics/antigravity-addons/Deploy-AntigravityAddons.ps1' -Mode Check
+& './managed/host-diagnostics/antigravity-addons/Deploy-AntigravityAddons.ps1' -Mode Apply
 ```
 
 ## 复测更新后的应用

@@ -366,7 +366,7 @@ internal static class LaunchAntigravity
         {
             if (proc == null)
                 return -1;
-            if (!proc.WaitForExit(90000))
+            if (!proc.WaitForExit(150000))
             {
                 try { proc.Kill(); } catch { }
                 return -2;
