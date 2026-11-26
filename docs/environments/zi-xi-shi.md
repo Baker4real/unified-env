@@ -74,6 +74,7 @@ intent: 记录自习室设备的受控环境事实与差异
 - 边缘事实：v2rayN 运行中（vgate0 TUN 网卡存在）时，aria2c 直连分支的 c-ares DNS 会报 "Could not contact DNS servers"（系统 resolver 正常，nslookup 经局域网 DNS 服务器全通）——在该机上做 aria2 直连类实验须避开 TUN 干扰。
 - 仍有效的自救路径：更新失败时手动打开 v2rayN 再点一次「检查更新」（两次实证）。bak 对齐当轮已收敛到 4.42.0.2770。
 - 证据：`D:\agents\run-evidence\uu-remote-update\20260924T065633Z\`（诊断 JSON、aria2 对照实验、任务注册回读）。
+- 2026-11-26 复发与处置：11-03 切换 Clash Verge 时离线改写 `verge.yaml` 并手工写了 `HKCU\...\Run\Clash Verge`（未创建 Clash Verge 原生的 `\Clash Verge` 计划任务），11-09 Clash Verge 静默升级至 `2.5.10` 时 NSIS 安装器清理了该 `Run` 值，导致 11-24 重启后 `127.0.0.1:10808` 无监听，`aria2c` 读用户持久代理环境变量再次下载失败，且传统模式 `Upgrade.exe` 先退出了 `GameViewer`/`GameViewerServer` 后停滞。当场已在交互会话拉起 Clash Verge（`2.5.10`，`D:\Program Files\Clash Verge\clash-verge.exe`）、补建同名计划任务 `\Clash Verge`（`BAKER\14224` 登录触发、`InteractiveToken`、`Limited`、`PT0S`、`IgnoreNew`，`Get-ConsoleLaunchAudit.ps1` 为 `clean`；回滚：`Unregister-ScheduledTask -TaskPath '\' -TaskName 'Clash Verge' -Confirm:$false`，真实重启触发待下次重启观察），经 `aria2c` 走 `10808` 实测下载完成 `4.46.0.4716 -> 4.48.4.6020` 升级、恢复四进程并跑通 `Invoke-UuBakUpgradeAlign.ps1`。证据：`D:\agents\run-evidence\uu-remote-update\20261126-study-diagnose\RECEIPT.md`。
 - 版本、进程、任务状态属易变事实；操作前复核 `bin`/`bak` 文件版本、SHA-256 与 Users 是否仍有 `Modify`。
 
 ## Kryptex 与 v2rayN 专属分流（2026-10-28）
@@ -122,4 +123,4 @@ intent: 记录自习室设备的受控环境事实与差异
 - 怎么看结果：任务结果恒为 `0x0`，以 `state\latest.json` 为准。`ok` 是总结论，`actions` 列出本次做了什么，`before`、`after` 下各有布尔检查项 `checks` 和实际值 `values`（含 `driverVersion`），失败时 `error` 非空。脚本失败时退出 1，并用 `msg.exe` 给当前用户发一条显示 90 秒的消息，内容含状态文件路径；没有交互会话、收不到消息时，状态文件仍是唯一依据。
 - 2026-10-22 16:14 那次运行：`ok=true`，before 和 after 的检查项全部通过，驱动版本 `2.1.2602.8`。
 
-本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核，2026-09-24 增补代理环境变量根因与 v2rayN 自启防复发；开机/唤醒黑框处置、远程输入锁定键提示守卫说明与 SSH 执行事实于 2026-10-22；Kryptex 专属分流与验收于 2026-10-28。数量、进程和任务状态属易变事实，操作前必须实时复核。
+本页身份审计日期为 2026-08-26；PowerShell 受管版本目录于 2026-09-08 再核（7.6.3/7.6.4/7.6.5 均在，此前「7.6.5 不存在」的结论已作废）；Teams 与工作账户处置日期为 2026-09-01，Teams 彻底移除（含 Machine-Wide Installer）于 2026-09-08；UU 更新约束与防复发于 2026-09-07 再核，2026-09-24 增补代理环境变量根因与 v2rayN 自启防复发；开机/唤醒黑框处置、远程输入锁定键提示守卫说明与 SSH 执行事实于 2026-10-22；Kryptex 专属分流与验收于 2026-10-28；Clash Verge `\Clash Verge` 自启任务补齐与 UU 远程 4.48.4.6020 恢复于 2026-11-26。数量、进程和任务状态属易变事实，操作前必须实时复核。
